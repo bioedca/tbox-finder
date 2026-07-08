@@ -100,3 +100,47 @@ zero findings, correct scoping not a missing review).
 precedence carve-out keep every threshold authoritative in its owning ADR and
 blinded-frozen at P0. Cross-ref ADR-0001.
 **Commit.** (this commit — the P0-03 atomic commit on branch `p0-03-adr-0001`).
+
+## Step P0-04 — 2026-07-08: Author ADR-0002 — Environment & ML stack
+
+**Inputs.** PRD §3.1 (CLAUDE.md), §10.1–10.3, §15, §18.3; ADR-0001 (D5 swapped-
+backbone integrity, D6 branch-B3 backbone fallbacks). Every version fact verified
+against authoritative sources on **2026-07-08** (assistant cutoff is Jan 2026;
+context7 §3.3) — a 6-agent research fan-out over PyPI JSON, `download.pytorch.org`,
+GitHub release asset lists, the Caduceus HF config/modeling files, and the RiNALMo
+paper.
+**Process.** Authored `docs/decisions/ADR-0002-environment-and-ml-stack.md`
+pinning D1 the per-env conda-lock policy (five envs, one lock each, **Python 3.12**
+forced by numpy 2.5.1/scipy 1.18; the deprecated `pytorch-cuda` metapackage
+replaced by a pinned `pip:` cu128 block — a mechanism update within PRD §15 intent,
+flagged per precedence); D2 the load-bearing stack with a named version + rationale
+per pin, gated by two ecosystem ceilings — **`transformers` 4.57.5** (Caduceus
+`trust_remote_code` unvalidated on v5) and the sm_86-kernel torch ceiling; D3 the
+**`torch` 2.7.1+cu128 anchor** (Option B — `mamba-ssm` 2.2.6.post3 source-built to
+avoid the Mamba-3 Hopper-dep liability; `causal-conv1d` 1.6.2.post1 + `flash-attn`
+2.8.3.post1 prebuilt), Option A all-prebuilt (torch 2.5) as the pre-registered
+P0-06 fallback, Option C (Mamba-3) rejected, + the confirmed pure-PyTorch
+selective-scan / SDPA fallbacks; D4 the CI Docker image; D5 the RiNALMo parity
+numerics — **N = ±2 pp** (paper reports no per-split SD) with a telomerase carve-out
+and a magnitude rationale, + the `multimolecule` 0.0.9 mirror pin + the env-split
+contingency; D6 the RNA-FM fallback phasing (a–d) + the swapped backbone re-clearing
+the **absolute GATE-1/GATE-2** gates and re-running the P4→P5 go/no-go; D7 the
+Caduceus two-part transfer go/no-go + continued-pretraining/NT-multispecies ladder
+(ADR-0001 B3). D8 never-bump discipline; D9 delegations.
+**Outputs.** `docs/decisions/ADR-0002-environment-and-ml-stack.md` (+ its embedded
+cross-reference impact list). No DVC artifact (prose ADR).
+**Validation.** Every load-bearing pin carries a named version + rationale ✓;
+RiNALMo parity margin **N = 2 pp** numeric ✓; the two-part Caduceus go/no-go + the
+RNA-FM-swap re-clearing conditions written per §10.2/§10.3/§2.3 ✓; **user sign-off
+recorded 2026-07-08** ✓ (CLAUDE.md §7 item 2, Option B as-is). CodeRabbit
+zero-finding prose-diff gate on this PR (prose-only ADR + `.qmd` → expected zero
+findings, correct scoping not a missing review).
+**Decisions.** Anchor chosen for *correctness + reproducibility over recency*: torch
+is set by the kernel ecosystem, not by torch itself; the newest `mamba-ssm` 2.3.x
+(Mamba-3) was rejected because its hard `quack-kernels`/`tilelang`/`apache-tvm-ffi`
+deps are Hopper/Blackwell-oriented and of unverified Ampere-import-safety — a
+load-bearing liability for zero Caduceus (Mamba-2) benefit. N=±2 pp grounded in the
+RiNALMo paper's 0.01 reporting granularity + same-weights seed/reimpl noise, with the
+0.12-F1 telomerase outlier carved out. Cross-ref ADR-0002; parity cite `PMID:40593636
+/ DOI:10.1038/s41467-025-60872-5 / PMC12219582` (accessed 2026-07-08).
+**Commit.** (this commit — the P0-04 atomic commit on branch `p0-04-adr-0002`).
