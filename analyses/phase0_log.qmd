@@ -65,3 +65,38 @@ zero-finding prose-diff gate: **pending the first PR** (Stop, CLAUDE.md §7).
 copyright holder's legal name is unresolved; deferred rather than fabricate a
 legal holder (§10.3 no-fabrication spirit). No ADR.
 **Commit.** (this commit — the repository's first).
+
+## Step P0-03 — 2026-07-08: Author ADR-0001 — Architecture & aims (the contract ADR)
+
+**Inputs.** PRD §1, §2 (esp. §2.3), §5, §6, §18.3.
+**Process.** Authored `docs/decisions/ADR-0001-architecture-and-aims.md` — the
+first ADR and the *contract* ADR, written first so every later seed ADR + gate
+step inherits the locked precedence + terminal-outcome map. It locks D1 the
+two-stage Caduceus-PS→RiNALMo architecture (8-class identifiers, sequence-only
+Stage-2, two Stage-1 checkpoints); D2 primary/secondary aims + G-A…G-E; D3
+claim & gate precedence (GATE-1 central + precondition for GATE-3; GATE-3 split
+method-sub-gate/breadth-floor; calibrated-negative PASS); D4 the precedence
+carve-out reproduced **verbatim** from §2.3; D5 GATE-1-failure parity-segmenter
++ P4→P5 go/no-go; D6 the **three distinct failure branches** (B1 outright→parity;
+B2 underpowered→§7 halt, re-power/resource-paper; B3 GATE-4/GATE-2 method-gate→
+ADR-0002 NT-multispecies/continued-pretraining backbone fallbacks first); D7 the
+project-level rollup + discovery-predominantly-inconclusive terminal outcome
+(rollup function pinned in ADR-0006); D8 intended-use posture; D9 release-license
+gating (code MIT + weights CC-BY-4.0 pinned per PRD header; dataset license
+delegated to the P0 audit); D10 delegations to ADR-0002…0006 (no values pinned
+here). Pins **no threshold values** (all delegated). Adversarial faithfulness
+sweep (5 parallel verifiers over the PRD sections) caught one fabrication — an
+early D9 draft wrongly framed the *code* license as unresolved; corrected to the
+PRD-pinned **code = MIT**, reserving the P0-audit delegation for the *dataset*
+license only.
+**Outputs.** `docs/decisions/ADR-0001-architecture-and-aims.md` (+ its embedded
+cross-reference impact list).
+**Validation.** All three failure branches stated distinctly ✓; precedence
+carve-out verbatim vs PRD §2.3 ✓; adversarial faithfulness sweep clean after the
+license fix ✓; **user sign-off recorded 2026-07-08** ✓ (CLAUDE.md §7 item 2).
+CodeRabbit zero-finding prose-diff gate: on this PR (prose-only ADR → expected
+zero findings, correct scoping not a missing review).
+**Decisions.** ADR-0001 pins no numbers by design — delegation + the §2.3
+precedence carve-out keep every threshold authoritative in its owning ADR and
+blinded-frozen at P0. Cross-ref ADR-0001.
+**Commit.** (this commit — the P0-03 atomic commit on branch `p0-03-adr-0001`).
