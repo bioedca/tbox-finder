@@ -1,0 +1,15 @@
+# infernal env — Stage-0 baseline (cmsearch/cmbuild/cmcalibrate) + RNA folding (ADR-0002 D2).
+# infernal 1.1.5 is load-bearing: the recall-vs-cmsearch GATE-1 metric is measured against
+# this exact suite version — do NOT float it (ADR-0002 D2).
+# viennarna is bioconda-only (SWIG Python bindings; not on conda-forge).
+# numpy 2.5.1 shared with the data/ml envs. Lockfile: envs/infernal.conda-lock.yml.
+name: tbox-infernal
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - python=3.12
+  - infernal=1.1.5
+  - viennarna=2.7.2
+  - biopython=1.87
+  - numpy=2.5.1

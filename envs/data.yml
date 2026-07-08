@@ -1,0 +1,26 @@
+# data env — CPU DAG / ingest / labels / splits / metrics (ADR-0002 D2).
+# Load-bearing pins; never bump silently (CLAUDE.md §3.1, ADR-0002 D8).
+# numpy 2.5.1 is pinned identically to the `ml` env (one numpy-2 ABI, ADR-0002 D2).
+# Lockfile: envs/data.conda-lock.yml (conda-lock -p linux-64, per-env — never aggregate).
+name: tbox-data
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - python=3.12
+  # numerical / dataframe stack (numpy-2 native)
+  - numpy=2.5.1
+  - scipy=1.18.0
+  - pandas=2.3.3   # ADR-0002 P0-05 amendment: 3.0.3->2.3.3 (bioconda snakemake-executor-plugin-slurm 2.7.1 over-caps pandas<3.0, contra upstream <4)
+  - polars=1.42.1
+  - scikit-learn=1.9.0
+  - biopython=1.87
+  # workflow engine + SLURM executor (CPU DAG bookkeeping only; GPU jobs are hand-authored sbatch, PRD §16)
+  - snakemake=9.23.1
+  - snakemake-executor-plugin-slurm=2.7.1
+  # data versioning; dvc + dvc-ssh kept in >=4,<5 lockstep (ADR-0002 D2)
+  - dvc=3.67.1
+  - dvc-ssh=4.3.0
+  # run-config driver; omegaconf<2.4 (ADR-0002 D2 pin-coupling)
+  - hydra-core=1.3.2
+  - omegaconf=2.3.0

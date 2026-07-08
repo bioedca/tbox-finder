@@ -1,0 +1,10 @@
+# app env — Svelte T-box atlas build/serve toolchain (ADR-0002 D2).
+# Non-load-bearing; pins settled at P0-05 build time (ADR-0002 D2 delegation).
+# This env pins only the Node runtime; the atlas JS dependencies are pinned by the
+# app's package-lock.json (npm ships with nodejs) at the atlas-build step, not here.
+# Lockfile: envs/app.conda-lock.yml.
+name: tbox-app
+channels:
+  - conda-forge
+dependencies:
+  - nodejs=26.4.0

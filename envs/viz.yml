@@ -1,0 +1,18 @@
+# viz env — plotting + Quarto dev-log/figure rendering (ADR-0002 D2).
+# Non-load-bearing toolchain; pins settled at P0-05 build time (ADR-0002 D2 delegation).
+# numpy 2.5.1 shared with data/ml/infernal for ABI consistency (ADR-0002 D2).
+# ipykernel is left to the solver (transitive jupyter_client/core); the lock pins the exact build.
+# Lockfile: envs/viz.conda-lock.yml.
+name: tbox-viz
+channels:
+  - conda-forge
+dependencies:
+  - python=3.12
+  - numpy=2.5.1
+  - pandas=2.3.3   # aligned with the data env pandas major (ADR-0002 P0-05 amendment)
+  - polars=1.42.1
+  - matplotlib-base=3.11.0
+  - seaborn=0.13.2
+  - quarto=1.9.38
+  - nbclient=0.11.0
+  - ipykernel
