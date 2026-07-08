@@ -1,0 +1,22 @@
+# ─── tbox-finder .gitattributes ────────────────────────────────────────────
+# Line-ending normalization: the laptop, the amlab cluster, and CI must all see
+# byte-identical LF text, so golden-hash regression (CLAUDE.md §8.2/§8.4) is
+# reproducible across machines.
+* text=auto eol=lf
+
+# Byte-exact test inputs: never normalize (hash-stability for golden fixtures).
+tests/fixtures/** -text
+tests/golden/**   -text
+
+# ─── git-LFS-tracked medium binaries (CLAUDE.md §5.2) ───────────────────────
+# Large FASTAs / genomes live under the gitignored data/raw|external and go to
+# DVC — only small committed benchmark FASTAs, covariance models, figures, and
+# the per-record split-assignment table (git-LFS carve-out, PRD §9.2) are LFS.
+figures/** filter=lfs diff=lfs merge=lfs -text
+*.cm filter=lfs diff=lfs merge=lfs -text
+*.fa filter=lfs diff=lfs merge=lfs -text
+*.fasta filter=lfs diff=lfs merge=lfs -text
+data/processed/splits/split_assignments.parquet filter=lfs diff=lfs merge=lfs -text
+
+# Empty .gitkeep placeholders must stay plain text, never LFS pointers.
+**/.gitkeep -filter -diff -merge text

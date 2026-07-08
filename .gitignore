@@ -1,0 +1,112 @@
+# ─── tbox-finder .gitignore ────────────────────────────────────────────────
+# The repository is PUBLIC from day 1 (CLAUDE.md §4). Never commit secrets,
+# W&B keys, NCBI credentials, or large data blobs — those live in DVC, the HF
+# Hub, or git-LFS (see .gitattributes).
+
+# ── Local-only working docs (CLAUDE.md §1 — laptop-only, never pushed;
+#    ADRs + README.md + MEMORY.md are the cross-machine fallback) ──
+/PRD.md
+/CLAUDE.md
+/imp.md
+/TODO.md
+/dev-manual.md
+
+# ── DVC per-machine config + local caches (CLAUDE.md §5.2 — the remote
+#    differs per machine, so .dvc/config is not committed) ──
+/.dvc/config
+/.dvc/config.local
+/.dvc/tmp/
+/.dvc/cache/
+
+# ── Immutable raw / external data (fetched by checksummed download rules;
+#    not DVC-tracked, never hand-edited — CLAUDE.md §5.2). Keep the empty
+#    directory scaffold, ignore everything else. ──
+/data/raw/**
+!/data/raw/.gitkeep
+/data/external/**
+!/data/external/.gitkeep
+
+# ── Experiment tracking (W&B run dirs) ──
+**/wandb/
+**/.wandb/
+.wandb_api_key
+
+# ── Secrets / credentials (public repo — must never be committed) ──
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+credentials.json
+*_credentials.json
+.netrc
+secrets.y*ml
+.secrets/
+*.token
+
+# ── Data-blob guard: heavy binaries never belong in git (use DVC / HF / LFS).
+#    NB: *.parquet, *.fa, *.fasta and *.cm are deliberately NOT guarded here —
+#    parquet is DVC-managed (or the git-LFS split-assignment table), and small
+#    benchmark FASTAs + covariance models are git-LFS-tracked (.gitattributes). ──
+*.bam
+*.bai
+*.sam
+*.cram
+*.crai
+*.bcf
+*.vcf.gz
+*.h5
+*.hdf5
+*.npy
+*.npz
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+*.pkl
+*.pickle
+*.sqlite
+*.sqlite3
+*.db
+*.tar
+*.tar.gz
+*.tgz
+*.zip
+*.7z
+*.bz2
+*.xz
+*.zst
+
+# ── Python / build / tooling ──
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+.coverage.*
+htmlcov/
+.ipynb_checkpoints/
+.venv/
+venv/
+
+# ── Quarto / LaTeX render intermediates (rendered dev-log PDFs ARE committed) ──
+/.quarto/
+*.aux
+
+# ── Worktrees (CLAUDE.md §5.0 — live under .claude/worktrees/) ──
+/.claude/worktrees/
+
+# ── OS / editor cruft ──
+.DS_Store
+Thumbs.db
+*.swp
+*~
+.idea/
+.vscode/

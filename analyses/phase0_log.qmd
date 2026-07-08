@@ -1,0 +1,67 @@
+---
+title: "tbox-finder — Phase 0 (Foundation) dev-log"
+author: "bioedca"
+format:
+  pdf:
+    toc: true
+    number-sections: true
+---
+
+# Phase 0 — Foundation
+
+Per-step development log (CLAUDE.md §2.4). One stanza is appended after every
+step's commit; this file renders to `docs/dev-log/phase0_<YYYY-MM-DD>.pdf` at
+the phase-exit gate.
+
+## Step P0-01 — 2026-07-07: Scaffold the repository to the PRD §16 layout
+
+**Inputs.** PRD §16 layout spec.
+**Process.** Created the §16 directory tree (`src/tbox_finder/`,
+`workflow/{rules,profiles/slurm}`, `conf/{model,data,optim}`, `envs/`,
+`slurm/`, `data/{raw,external,interim,processed}/`,
+`tests/{unit,golden,ml,fixtures}/`, `analyses/`, `figures/`, `paper/`, `app/`,
+`docker/`, `docs/decisions/`); authored `pyproject.toml` (setuptools src-layout
++ ruff/black/pytest config), a glob-including `workflow/Snakefile` with an empty
+default `rule all`, `src/tbox_finder/__init__.py`, a `README.md` stub, and
+`.gitkeep` markers in every empty leaf dir. `data/{raw,external}` are immutable
+(`.gitkeep` only).
+**Outputs.** Package skeleton importable as `tbox_finder`;
+`tests/unit/test_import.py`, `tests/unit/test_layout.py`.
+**Validation.** `PYTHONPATH=src python -c "import tbox_finder"` ✓; `pytest
+tests/unit` green (2 files); layout-presence test ✓. `snakemake -n` **deferred**
+to P0-05 (pinned env) / CI P0-08 — snakemake is not installable under the §3.1
+env-flow before the first env exists (P0-05).
+**Decisions.** Ran **in place**: P0-01 is pre-git-init — P0-02 performs `git
+init` + the first commit — so no worktree/commit/CodeRabbit at this step
+(drive-one-step: pre-git-init steps run in place; the P0-01 scaffold lands in
+P0-02's first commit). No ADR.
+**Commit.** deferred to P0-02 (first commit).
+
+## Step P0-02 — 2026-07-07: Initialize git, publish the public GitHub repo, wire ignore/attributes/CodeRabbit
+
+**Inputs.** P0-01 scaffold tree (working dir, no prior `.git`).
+**Process.** `git init -b main` + repo-local `git lfs install`; authored
+`.gitignore` (local-only docs `PRD/CLAUDE/imp/TODO/dev-manual.md`, `.dvc/config`,
+`data/raw|external/**` with `.gitkeep` kept via negation, `**/wandb/`, secrets,
+and a data-blob guard that deliberately spares `*.parquet`/`*.fa`/`*.fasta`/`*.cm`
+since those are DVC- or git-LFS-managed), `.gitattributes` (LF normalization for
+golden-hash reproducibility + git-LFS on `figures/**`, `*.cm`, `*.fa`, `*.fasta`,
+`data/processed/splits/split_assignments.parquet`; `**/.gitkeep` kept plain),
+and `.coderabbit.yaml` (review scoped to code-that-runs; `!`-glob `path_filters`
+exclude `*.md`/`*.qmd`/ADRs/data/figures). The bootstrap first commit lands on
+`main` — the "empty repo can't PR into itself" exception (CLAUDE.md §5.0); all
+later code goes via worktree+PR. context7 (plugin server; the claude.ai server
+was monthly-quota-exhausted) confirmed the `.coderabbit.yaml` v2 schema
+(`reviews.path_filters`, `!`-prefixed excludes); git-lfs 3.5.1 installed to
+`~/.local/bin` as a VCS dev tool (outside the `envs/*` lock flow, §3.1).
+**Outputs.** `.gitignore`, `.gitattributes`, `.coderabbit.yaml`; git repo on
+`main`; `origin` = `https://github.com/bioedca/tbox-finder.git` (**public**).
+**Validation.** Local gates ✓ — `git check-ignore` matches all 5 local-only
+docs; `git lfs track` lists 5 LFS patterns (+ `**/.gitkeep` excluded); zero
+binaries staged (largest blob 2.4 KB). Push gates ✓ — `gh api user -q .login`
+= **bioedca**; repo visibility = **public** (verified this session). CodeRabbit
+zero-finding prose-diff gate: **pending the first PR** (Stop, CLAUDE.md §7).
+**Decisions.** No `LICENSE` file authored — README asserts code=MIT but the
+copyright holder's legal name is unresolved; deferred rather than fabricate a
+legal holder (§10.3 no-fabrication spirit). No ADR.
+**Commit.** (this commit — the repository's first).

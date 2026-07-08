@@ -1,0 +1,31 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+#
+# CodeRabbit review scope (CLAUDE.md §5.1). Review is scoped to
+# code-that-runs. Prose-only artifacts — Markdown, Quarto dev-logs, and ADRs —
+# are excluded via path_filters, so a prose-only diff correctly yields a
+# zero-finding review (correct scoping, NOT a missing review). Unmatched files
+# are reviewed by default; `!`-prefixed globs exclude.
+language: "en-US"
+early_access: false
+reviews:
+  profile: "chill"
+  request_changes_workflow: false
+  high_level_summary: true
+  review_status: true
+  auto_review:
+    enabled: true
+    drafts: false
+  path_filters:
+    # Prose / documentation — excluded from code review.
+    - "!**/*.md"
+    - "!**/*.qmd"
+    - "!docs/decisions/**"
+    # Non-code artifacts (figures, data, covariance models, lockfiles).
+    - "!figures/**"
+    - "!data/**"
+    - "!**/*.cm"
+    - "!**/*.lock"
+    - "!conda-lock.yml"
+    - "!**/*.gitkeep"
+chat:
+  auto_reply: true

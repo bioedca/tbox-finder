@@ -1,0 +1,51 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tbox-finder"
+version = "0.0.0"
+description = "Genome-wide discovery of T-box riboswitches and expansion of their known phylogenetic distribution."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "bioedca" }]
+keywords = ["bioinformatics", "riboswitch", "T-box", "RNA", "phylogenetics", "genomics"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "License :: OSI Approved :: MIT License",
+  "Intended Audience :: Science/Research",
+  "Topic :: Scientific/Engineering :: Bio-Informatics",
+]
+# Runtime dependencies are pinned in the conda envs (envs/*.yml + conda-lock),
+# not here (CLAUDE.md §3.1). The package is installed editable into those envs.
+dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/bioedca/tbox-finder"
+Repository = "https://github.com/bioedca/tbox-finder"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests"]
+# Snakefiles/*.smk are Snakemake DSL, not pure Python — linted by `snakemake
+# --lint`, never ruff. force-exclude so an explicit path (pre-commit/CI) skips.
+force-exclude = true
+extend-exclude = ["workflow/Snakefile", "*.smk"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W", "UP", "B", "SIM"]
+
+[tool.black]
+line-length = 100
+target-version = ["py311"]
+
+[tool.pytest.ini_options]
+minversion = "7.0"
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "-ra"

@@ -1,0 +1,22 @@
+"""tbox-finder — local/CPU Snakemake DAG (data -> eval -> validate -> figures).
+
+GPU stages (train, scan) are intentionally NOT part of this DAG: they are
+hand-authored ``sbatch`` jobs submitted via the CLAUDE.md §9.3 SSH submit-ack
+protocol (the Snakemake SLURM executor is not used for GPU — PRD §16).
+
+Phase rule modules live in ``workflow/rules/*.smk`` and are auto-included
+below. None exist yet at the P0 scaffold stage, so the DAG is empty.
+"""
+
+from pathlib import Path
+
+# Default target. Empty at the scaffold stage so `snakemake -n` parses the
+# (currently empty) DAG; later phases populate rules/*.smk and this aggregate.
+rule all:
+    input:
+        [],
+
+# `include:` accepts a single path (no globbing), so iterate over the rule
+# modules. The loop is a no-op until workflow/rules/*.smk exist.
+for _rule_file in sorted((Path(workflow.basedir) / "rules").glob("*.smk")):
+    include: str(_rule_file)
