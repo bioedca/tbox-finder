@@ -123,6 +123,15 @@ class KernelResult:
         }
 
 
+class ProbeError(RuntimeError):
+    """An API/transport error that must NOT be silently read as 'not found'.
+
+    A rate-limit (403/429), outage (5xx), or connection failure (status 0) would otherwise
+    flip a kernel's verdict to source-build-required/unavailable on unobserved data — a wrong
+    result that looks like a real one. The probe fails loud instead (CLAUDE.md §10.3).
+    """
+
+
 def _get(url: str, token: str | None, accept: str = "application/json") -> tuple[int, bytes]:
     req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT, "Accept": accept})
     if token and "api.github.com" in url:
@@ -131,43 +140,63 @@ def _get(url: str, token: str | None, accept: str = "application/json") -> tuple
     try:
         with urllib.request.urlopen(req, timeout=30) as resp:
             return resp.status, resp.read()
-    except urllib.error.HTTPError as exc:
+    except urllib.error.HTTPError as exc:  # an HTTP status reached us (404/403/429/5xx …)
         return exc.code, exc.read()
+    except urllib.error.URLError as exc:  # transport failure (DNS/connection/timeout)
+        return 0, str(exc.reason).encode()
 
 
 def github_release_assets(
     repo: str, version: str, token: str | None
 ) -> tuple[str | None, list[str]]:
-    """Return (matched_tag, [asset_filenames]) for the release matching `version`."""
+    """Return (matched_tag, [asset_filenames]) for the release matching `version`.
+
+    Genuine absence (both tag spellings 404 -> (None, [])) is distinguished from an
+    API/transport error (0/403/429/5xx -> ProbeError), so a rate-limit or outage can never
+    masquerade as "no prebuilt wheel" and silently flip a verdict (§10.3).
+    """
+    rel_id: int | None = None
+    tag_name: str | None = None
     for tag in (f"v{version}", version):
         code, body = _get(f"https://api.github.com/repos/{repo}/releases/tags/{tag}", token)
         if code == 200:
             rel = json.loads(body)
-            rel_id = rel["id"]
-            assets: list[str] = []
-            page = 1
-            while True:
-                c, b = _get(
-                    f"https://api.github.com/repos/{repo}/releases/{rel_id}/assets"
-                    f"?per_page=100&page={page}",
-                    token,
-                )
-                if c != 200:
-                    break
-                batch = json.loads(b)
-                assets.extend(a["name"] for a in batch)
-                if len(batch) < 100:
-                    break
-                page += 1
-            return rel["tag_name"], assets
-    return None, []
+            rel_id, tag_name = rel["id"], rel["tag_name"]
+            break
+        if code == 404:
+            continue  # this tag spelling is absent; try the next form
+        raise ProbeError(f"GitHub {repo} releases/tags/{tag} -> HTTP {code}: {body[:200]!r}")
+    if rel_id is None:
+        return None, []  # genuinely no release for this version (both tag forms 404)
+    assets: list[str] = []
+    page = 1
+    while True:
+        c, b = _get(
+            f"https://api.github.com/repos/{repo}/releases/{rel_id}/assets"
+            f"?per_page=100&page={page}",
+            token,
+        )
+        if c != 200:  # incomplete asset list -> could drop a wheel and misclassify
+            raise ProbeError(f"GitHub {repo} assets page {page} -> HTTP {c}: {b[:200]!r}")
+        batch = json.loads(b)
+        assets.extend(a["name"] for a in batch)
+        if len(batch) < 100:
+            break
+        page += 1
+    return tag_name, assets
 
 
 def pypi_files(pkg: str, version: str) -> tuple[bool, bool]:
-    """Return (version_exists, has_sdist) from the PyPI JSON API."""
+    """Return (version_exists, has_sdist) from the PyPI JSON API.
+
+    404 is genuine absence; any other non-200 (0/5xx/rate-limit) raises ProbeError rather
+    than being misread as "version does not exist" (§10.3).
+    """
     code, body = _get(f"https://pypi.org/pypi/{pkg}/{version}/json", token=None)
-    if code != 200:
+    if code == 404:
         return False, False
+    if code != 200:
+        raise ProbeError(f"PyPI {pkg}=={version} -> HTTP {code}: {body[:200]!r}")
     data = json.loads(body)
     has_sdist = any(u.get("packagetype") == "sdist" for u in data.get("urls", []))
     return True, has_sdist

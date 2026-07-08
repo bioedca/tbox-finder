@@ -12,8 +12,11 @@ records. Stdlib + pytest only.
 """
 
 import importlib.util
+import json
 import sys
 from pathlib import Path
+
+import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 _SCRIPT = REPO_ROOT / "scripts" / "check_sm86_wheels.py"
@@ -131,3 +134,51 @@ def test_p0_06_finding_locked_mamba_torch27_wheel_present():
     status_b = r.anchor_status("2.7")
     assert status_b["status"] == "wheel-present"
     assert "TRUE" in status_b["abis_present"]
+
+
+# --- network error handling: a transient API failure must NOT masquerade as "absent" ------
+
+
+def test_pypi_404_is_genuine_absence(monkeypatch):
+    monkeypatch.setattr(mod, "_get", lambda *a, **k: (404, b"Not Found"))
+    assert mod.pypi_files("no-such-pkg", "0.0.0") == (False, False)
+
+
+def test_pypi_ratelimit_raises_not_silent_absence(monkeypatch):
+    monkeypatch.setattr(mod, "_get", lambda *a, **k: (429, b"rate limited"))
+    with pytest.raises(mod.ProbeError):
+        mod.pypi_files("mamba-ssm", "2.2.6.post3")
+
+
+def test_pypi_transport_failure_raises(monkeypatch):
+    # status 0 = URLError (connection/DNS) surfaced by _get; must not be read as absence.
+    monkeypatch.setattr(mod, "_get", lambda *a, **k: (0, b"connection refused"))
+    with pytest.raises(mod.ProbeError):
+        mod.pypi_files("mamba-ssm", "2.2.6.post3")
+
+
+def test_github_403_raises_not_no_release(monkeypatch):
+    monkeypatch.setattr(mod, "_get", lambda *a, **k: (403, b"API rate limit exceeded"))
+    with pytest.raises(mod.ProbeError):
+        mod.github_release_assets("state-spaces/mamba", "2.2.6.post3", token=None)
+
+
+def test_github_both_tag_forms_404_is_genuine_no_release(monkeypatch):
+    monkeypatch.setattr(mod, "_get", lambda *a, **k: (404, b"Not Found"))
+    assert mod.github_release_assets("org/repo", "9.9.9", token=None) == (None, [])
+
+
+def test_github_assets_page_error_raises(monkeypatch):
+    """A 200 release then a non-200 assets page must raise, not silently truncate the
+    asset list (a dropped page could hide a wheel and flip the verdict)."""
+    calls = {"n": 0}
+
+    def fake_get(url, token, accept="application/json"):
+        calls["n"] += 1
+        if "releases/tags/" in url:
+            return 200, json.dumps({"id": 1, "tag_name": "v9.9.9"}).encode()
+        return 500, b"server error"  # the assets page
+
+    monkeypatch.setattr(mod, "_get", fake_get)
+    with pytest.raises(mod.ProbeError):
+        mod.github_release_assets("org/repo", "9.9.9", token=None)
