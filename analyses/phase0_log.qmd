@@ -144,3 +144,40 @@ RiNALMo paper's 0.01 reporting granularity + same-weights seed/reimpl noise, wit
 0.12-F1 telomerase outlier carved out. Cross-ref ADR-0002; parity cite `PMID:40593636
 / DOI:10.1038/s41467-025-60872-5 / PMC12219582` (accessed 2026-07-08).
 **Commit.** (this commit — the P0-04 atomic commit on branch `p0-04-adr-0002`).
+
+## Step P0-05 — 2026-07-08: Build the five conda-lock environments (per-env lockfiles)
+**Inputs.** ADR-0002 D1 (per-env conda-lock policy) + D2/D3 (the pinned stack).
+`conda-lock` 4.0.2 (installed as an isolated dev env — git-lfs→`~/.local/bin`
+precedent; not a member of any `envs/*.yml`).
+**Process.** Authored the five `envs/*.yml` specs (`conda-lock lock -p linux-64`
+per-env, never aggregate; channels conda-forge[/bioconda][/nvidia]). Every pin
+traces to ADR-0002 D2; the `viz`/`app` toolchains (ADR-delegated pins) were selected
+and conda-forge-version-verified at build time. Locked + installed + import-smoked
+the four CPU envs. The **`ml` lock is deferred to P0-06** (user decision 2026-07-08):
+under the signed-off Option-B anchor `mamba-ssm` 2.2.6.post3 is source-only (no
+torch-2.7 wheel; sdist carries no static metadata) so it needs `nvcc` + `sm_86` —
+absent on the laptop (`sm_89` GPU, no nvcc); P0-06 is its ADR-native home (the sm_86
+wheel/build-availability check). `envs/ml.yml` is authored in full as the spec P0-06
+locks. Added `tests/unit/test_env_manifest.py` (stdlib-only) and excluded the
+machine-generated `*.conda-lock.yml` from CodeRabbit.
+**Outputs.** `envs/{data,infernal,viz,app}.yml` + their `*.conda-lock.yml` (real
+solves — `data` 305 pkgs); `envs/ml.yml` (lock → P0-06);
+`tests/unit/test_env_manifest.py`; ADR-0002 **Amendment A1**; `.coderabbit.yaml`
+(`!**/*.conda-lock.yml`). No DVC artifact (env specs + locks are git-tracked).
+**Validation.** `conda-lock install` reproduced all four CPU envs + import-smoke
+PASS — infernal (INFERNAL 1.1.5, ViennaRNA 2.7.2, Bio 1.87, numpy 2.5.1); data
+(snakemake 9.23.1, dvc 3.67.1, polars 1.42.1, pandas 2.3.3, scikit-learn 1.9.0,
+numpy 2.5.1); viz (matplotlib 3.11.0, seaborn 0.13.2, quarto 1.9.38); app (node
+26.4.0 / npm 11.17.0, confirmed by absolute-path check — the login-shell smoke's
+v22.22.2 was an nvm-PATH artifact, not the env). `pytest tests/unit` 7/7 ✓; ruff
+check + format ✓. The `ml` kernel import/forward smoke is deferred to P1 (cluster
+GPU, ADR-0002 D3). Pins match ADR-0002 (data pandas 2.3.3 per Amendment A1).
+**Decisions.** Two stop-and-asks resolved with user sign-off. (1) **`ml` lock
+deferred to P0-06** rather than front-running P0-07's Docker image or a §9.3 cluster
+job. (2) **`data` pandas 3.0.3 → 2.3.3** — bioconda `snakemake-executor-plugin-slurm`
+2.7.1 over-caps `pandas<3.0` (contradicting the same version's upstream PyPI `<4`);
+the pure-conda downgrade to the max 2.x keeps the load-bearing numpy-2.5.1 ABI and
+forgoes only non-load-bearing pandas-3.0 features (polars 1.42.1 is the dataframe
+workhorse). Recorded as ADR-0002 **Amendment A1** + a D2 pin-coupling bump-trigger;
+`viz` pandas aligned to 2.3.3 for repo consistency. Cross-ref ADR-0002 D1/D2/D3 + A1.
+**Commit.** (this commit — the P0-05 atomic commit on branch `p0-05-envs`).

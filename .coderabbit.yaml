@@ -26,6 +26,7 @@ reviews:
     - "!**/*.cm"
     - "!**/*.lock"
     - "!conda-lock.yml"
+    - "!**/*.conda-lock.yml"
     - "!**/*.gitkeep"
 chat:
   auto_reply: true
