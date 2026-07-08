@@ -210,3 +210,43 @@ assert `import selective_scan_cuda`). RiNALMo SDPA/eager fallback confirmed (**K
 sign-off recorded 2026-07-08. Cross-ref ADR-0002 D3 + **A2**. Verification: artifact-based (probe
 + download-confirm + 3-agent adversarial pass + raw-source read).
 **Commit.** (this commit — the P0-06 atomic commit on branch `p0-06-sm86-wheels`).
+
+## Step P0-06c — 2026-07-08: split the `ml` env into `ml-dna` + `ml-rna`, lock both
+**Inputs.** The P0-06b `ml.yml` (the proven torch 2.7.1+cu128 16-URL closure + three sm_86
+kernels); ADR-0002 D2/D3/D5 + A2; the two P0-06b findings carried over (conda-lock 4.0.2 cannot
+lock the cu128 stack via an index; `multimolecule` 0.0.9 needs transformers 5.x).
+**Process.** Confirmed via PyPI `Requires-Dist` + the conda-forge 5.13.0 recipe run-deps + the
+transformers v5.0.0 release notes (context7 §3.3, plugin server; claude.ai server quota-blocked)
+that transformers **5.13.0** (newest) caps `huggingface_hub<2.0,>=1.5.0` / `tokenizers<=0.23.0,>=0.22.0`
+/ `safetensors>=0.8.0`, and that `multimolecule` 0.0.9 (uploaded 2026-02-02, after transformers
+5.0.0) declares no transformers cap but imports `transformers.initialization` at runtime. Authored
+`envs/ml-dna.yml` (= old `ml.yml` minus `multimolecule`, transformers 4.57.5) and `envs/ml-rna.yml`
+(ml-dna + exactly three forced HF-core changes: transformers→5.13.0, hub→1.22.0, safetensors→0.8.0,
+plus `multimolecule` 0.0.9; tokenizers stays 0.22.2 since 0.23.0 is absent on conda-forge and 0.23.1
+exceeds the cap). Both carry the identical URL-pinned cu128 closure. Locked both (`conda-lock -p
+linux-64`), `conda-lock install`-reproduced both on the laptop (no GPU/nvcc), CPU import-smoked both.
+Deleted `envs/ml.yml`; wrote ADR-0002 **A4** (folding in the retired A3 draft); extended
+`tests/unit/test_env_manifest.py`.
+**Outputs.** `envs/ml-dna.yml` + `envs/ml-dna.conda-lock.yml`; `envs/ml-rna.yml` +
+`envs/ml-rna.conda-lock.yml`; `envs/ml.yml` **deleted**; ADR-0002 **Amendment A4**;
+`tests/unit/test_env_manifest.py` (EXPECTED_ENVS → data/infernal/**ml-dna/ml-rna**/viz/app; both ml
+locks required; torch-URL + no-`--extra-index-url` guard over both ml envs). No DVC artifact
+(env specs + locks git-tracked).
+**Validation.** Gate PASSED. Both `conda-lock` solve (ml-dna 52 s, ml-rna 72 s) + `conda-lock install`
+reproduced locally with no GPU/nvcc; lockfile audit clean for both — torch **2.7.1+cu128**, 14
+`nvidia-*` + `triton` + the 3 kernels all at pinned URLs, **no `--extra-index-url` leak**. ml-dna
+smoke: torch 2.7.1 CPU matmul + transformers **4.57.5** + `CaduceusConfig` via `trust_remote_code`.
+ml-rna smoke: transformers **5.13.0** + `transformers.initialization` importable + **`import
+multimolecule` + `RiNALMoModel` import/instantiate — the P0-06b blocker, now cleared** (attn=eager,
+SDPA-capable). `pytest tests/unit` 23/23; ruff + black clean. GPU kernel forward smoke (incl.
+`import selective_scan_cuda`) + RiNALMo parity stay P1.
+**Decisions.** Realized D5's pre-registered env split; the "multimolecule 0.0.9 era-matched to
+4.57.5" premise (D2/D5) is **disproven** (needs v5). Minimize-divergence: ml-rna differs from ml-dna
+in only three HF-core pins + multimolecule (accelerate 1.12.0 / peft 0.18.1 / datasets 4.5.0 already
+admit hub 1.x + transformers 5). Durable operational finding: both envs bundle `cuda-nvcc` 12.8 for
+DeepSpeed JIT and DeepSpeed probes `CUDA_HOME` at import (on the RNA side via
+multimolecule→danling→deepspeed), so **runtime must export `CUDA_HOME=$CONDA_PREFIX`** (recorded in
+A4; Snakemake/sbatch will set it). A3 draft never committed → folded into A4; no standalone A3.
+User sign-off recorded 2026-07-08. Cross-ref ADR-0002 D5 + **A4**. Verification: artifact-based
+(conda-lock solve/install logs + lockfile pin audit + 16-URL live probe + two CPU smokes).
+**Commit.** (this commit — the P0-06c atomic commit on branch `p0-06c-ml-split`).

@@ -1,0 +1,92 @@
+# ml-dna env — Stage-1 DNA backbone (Caduceus): GPU training / eval / genome-scan.
+# THE load-bearing DNA-side ML stack (ADR-0002 D2 + D3 + D5/A4). Runtime target:
+# cluster RTX A4000 = Ampere sm_86, CUDA 12.x, driver 590.x (PRD §15). NOT the laptop.
+#
+# ==========================================================================================
+# ENV SPLIT (ADR-0002 A4, 2026-07-08, user sign-off; D5 pre-registered resolution).
+# The single `ml` env is non-viable: transformers 4.57.5 (the Caduceus trust_remote_code
+# ceiling, D2 — v5 dropped torch.fx / `is_torch_fx_available`, breaking the remote path,
+# issue #44561) is mutually exclusive with `multimolecule` 0.0.9, which at import time needs
+# transformers 5.x (it imports `transformers.initialization`, a 5.0.0 feature; 0.0.9 was
+# uploaded 2026-02-02, AFTER transformers 5.0.0 2026-01-26 — P0-06b finding). So Stage-1 (DNA,
+# transformers 4.57.5) and Stage-2 (RNA, transformers 5.x) can no longer share one env →
+# split into `ml-dna` (this file) + `ml-rna`. This file is `ml.yml` minus multimolecule.
+#
+# LOCKFILE: envs/ml-dna.conda-lock.yml produced on the laptop at P0-06c (conda-lock 4.0.2,
+# -p linux-64). Installs with NO nvcc and NO GPU: the three sm_86 kernels are prebuilt wheels
+# (ADR-0002 A2 C1) and torch + its full cu128 closure are pinned by exact wheel URL (A4/A3 —
+# conda-lock 4.0.2 cannot lock the cu128 stack via an index: it rejects an inline
+# `--extra-index-url` line (PEP 508 parse error) and its wheel-tag matcher omits
+# `manylinux_2_27`, which torch+cu128's nvidia deps ship as). The GPU kernel import/forward
+# smoke (incl. `import selective_scan_cuda`, A2 C2) stays P1 (cluster A4000).
+# ==========================================================================================
+#
+# Never bump the torch/kernel/transformers pins silently (ADR-0002 D8, CLAUDE.md §3.1).
+name: tbox-ml-dna
+channels:
+  - conda-forge
+  - nvidia
+dependencies:
+  - python=3.12
+  - numpy=2.5.1                    # identical numpy-2 ABI to the data/infernal/viz/ml-rna envs
+  # HuggingFace stack — capped by the Caduceus trust_remote_code ceiling (ADR-0002 D2):
+  - transformers=4.57.5            # ceiling: last 4.x; v5 breaks the Caduceus remote path (issue #44561)
+  - tokenizers=0.22.2              # newest stable <= transformers' <=0.23.0 cap
+  - huggingface_hub=0.35.3         # last 0.x; transformers 4.57.5 pins <1.0,>=0.34.0
+  - safetensors=0.7.0              # era-matched to the 4.57 epoch
+  - accelerate=1.12.0              # FSDP FULL_SHARD + DeepSpeed ZeRO-3 plugins (§10.3 full-FT fallback)
+  - peft=0.18.1                    # LoRA all-linear + grad-checkpointing (§10.3 LoRA default)
+  - deepspeed=0.18.5               # ZeRO-3 full-FT fallback; JIT-builds ops vs in-env CUDA 12.x
+  - datasets=4.5.0
+  - wandb=0.28.0                   # offline mode + login-node `wandb sync`
+  - hydra-core=1.3.2               # run-config driver; keep omegaconf<2.4
+  - omegaconf=2.3.0
+  # Toolchain for DeepSpeed's JIT-built ZeRO ops vs in-env CUDA 12.x (ADR-0002 D2/D4/A2).
+  # NOT for mamba-ssm — its sm_86 wheel is prebuilt (ADR-0002 A2 C1); Option B has no source build.
+  - cuda-nvcc=12.8
+  - ninja
+  - packaging
+  - setuptools>=61
+  - pip
+  - pip:
+    # ── torch + its full cu128 pip closure, pinned by exact wheel URL (ADR-0002 A4/A3, P0-06b) ──
+    # conda-lock 4.0.2 (the latest release) cannot lock this stack via an index, for two reasons:
+    #   (1) it rejects an inline `--extra-index-url` line in a pip: block — it feeds each line to
+    #       the PEP 508 requirement parser ("Expected package name at the start of dependency
+    #       specifier"); and
+    #   (2) its wheel-tag matcher's manylinux set omits `manylinux_2_27` (it matches tag strings
+    #       exactly, not by glibc version), and torch+cu128's transitive nvidia deps ship ONLY as
+    #       manylinux_2_27 on BOTH PyPI and the pytorch index → "Unable to find installation
+    #       candidates for nvidia-cublas-cu12".
+    # Direct-URL pins bypass both (a URL wheel skips version-index + tag matching). So torch AND all
+    # 15 transitive deps (14 nvidia CUDA-runtime libs + triton — exact versions read from torch
+    # 2.7.1+cu128's own METADATA Requires-Dist) are pinned by exact wheel URL; conda-lock then locks
+    # the closed graph. Every URL verified a live asset (HTTP 206) on 2026-07-08. This closure is
+    # frozen with the torch anchor under the ADR-0002 D8 never-bump rule — do not edit piecemeal.
+    - torch @ https://download.pytorch.org/whl/cu128/torch-2.7.1%2Bcu128-cp312-cp312-manylinux_2_28_x86_64.whl
+    # torch 2.7.1+cu128 transitive CUDA runtime (nvidia's canonical index, pypi.nvidia.com):
+    - nvidia-cuda-nvrtc-cu12 @ https://pypi.nvidia.com/nvidia-cuda-nvrtc-cu12/nvidia_cuda_nvrtc_cu12-12.8.61-py3-none-manylinux2010_x86_64.manylinux_2_12_x86_64.whl
+    - nvidia-cuda-runtime-cu12 @ https://pypi.nvidia.com/nvidia-cuda-runtime-cu12/nvidia_cuda_runtime_cu12-12.8.57-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl
+    - nvidia-cuda-cupti-cu12 @ https://pypi.nvidia.com/nvidia-cuda-cupti-cu12/nvidia_cuda_cupti_cu12-12.8.57-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl
+    - nvidia-cudnn-cu12 @ https://pypi.nvidia.com/nvidia-cudnn-cu12/nvidia_cudnn_cu12-9.7.1.26-py3-none-manylinux_2_27_x86_64.whl
+    - nvidia-cublas-cu12 @ https://pypi.nvidia.com/nvidia-cublas-cu12/nvidia_cublas_cu12-12.8.3.14-py3-none-manylinux_2_27_x86_64.whl
+    - nvidia-cufft-cu12 @ https://pypi.nvidia.com/nvidia-cufft-cu12/nvidia_cufft_cu12-11.3.3.41-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl
+    - nvidia-curand-cu12 @ https://pypi.nvidia.com/nvidia-curand-cu12/nvidia_curand_cu12-10.3.9.55-py3-none-manylinux_2_27_x86_64.whl
+    - nvidia-cusolver-cu12 @ https://pypi.nvidia.com/nvidia-cusolver-cu12/nvidia_cusolver_cu12-11.7.2.55-py3-none-manylinux_2_27_x86_64.whl
+    - nvidia-cusparse-cu12 @ https://pypi.nvidia.com/nvidia-cusparse-cu12/nvidia_cusparse_cu12-12.5.7.53-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl
+    - nvidia-cusparselt-cu12 @ https://pypi.nvidia.com/nvidia-cusparselt-cu12/nvidia_cusparselt_cu12-0.6.3-py3-none-manylinux2014_x86_64.whl
+    - nvidia-nccl-cu12 @ https://pypi.nvidia.com/nvidia-nccl-cu12/nvidia_nccl_cu12-2.26.2-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl
+    - nvidia-nvtx-cu12 @ https://pypi.nvidia.com/nvidia-nvtx-cu12/nvidia_nvtx_cu12-12.8.55-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl
+    - nvidia-nvjitlink-cu12 @ https://pypi.nvidia.com/nvidia-nvjitlink-cu12/nvidia_nvjitlink_cu12-12.8.61-py3-none-manylinux2010_x86_64.manylinux_2_12_x86_64.whl
+    - nvidia-cufile-cu12 @ https://pypi.nvidia.com/nvidia-cufile-cu12/nvidia_cufile_cu12-1.13.0.11-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl
+    - triton @ https://download.pytorch.org/whl/triton-3.3.1-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl
+    # Prebuilt Ampere (sm_86) kernel wheels, pinned by exact GitHub release-asset URL
+    # (cu12torch2.7 cxx11abiTRUE cp312 linux_x86_64; these are NOT on PyPI — a bare version pin
+    # would fetch the sdist and invoke nvcc). All three wheel-present at P0-06 (ADR-0002 A2 C1):
+    # flash-attn 2.8.3.post1 (FA2 = the Ampere line):
+    - flash-attn @ https://github.com/Dao-AILab/flash-attention/releases/download/v2.8.3.post1/flash_attn-2.8.3.post1+cu12torch2.7cxx11abiTRUE-cp312-cp312-linux_x86_64.whl
+    # causal-conv1d 1.6.2.post1 (Caduceus depthwise-conv accelerator; degrades to nn.Conv1d):
+    - causal-conv1d @ https://github.com/Dao-AILab/causal-conv1d/releases/download/v1.6.2.post1/causal_conv1d-1.6.2.post1+cu12torch2.7cxx11abiTRUE-cp312-cp312-linux_x86_64.whl
+    # mamba-ssm 2.2.6.post3 (last pre-Mamba-3; selective_scan_cuda is load-bearing — NO pure-torch
+    # module fallback, so the wheel is required, ADR-0002 A2 C2):
+    - mamba-ssm @ https://github.com/state-spaces/mamba/releases/download/v2.2.6.post3/mamba_ssm-2.2.6.post3+cu12torch2.7cxx11abiTRUE-cp312-cp312-linux_x86_64.whl
