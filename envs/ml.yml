@@ -2,14 +2,15 @@
 # Runtime target: cluster RTX A4000 = Ampere sm_86, CUDA 12.x, driver 590.x (PRD §15). NOT the laptop.
 #
 # ==========================================================================================
-# LOCKFILE DEFERRED TO P0-06 (ADR-0002 D3; P0-05 decision recorded 2026-07-08).
-# envs/ml.conda-lock.yml is NOT generated at P0-05: under the signed-off Option-B anchor
-# (torch 2.7.1) `mamba-ssm` 2.2.6.post3 has no prebuilt torch-2.7 wheel and its sdist carries
-# no static metadata, so it MUST be source-built (nvcc + sm_86). The laptop has no nvcc and an
-# sm_89 GPU, so this env cannot be locked/installed here. P0-06 (its ADR-native home: the sm_86
-# wheel/build-availability check + the mamba-ssm source-build capture + the Option-A/B confirm)
-# produces envs/ml.conda-lock.yml on the cluster or in the CI CUDA image. The kernel
-# import/forward smoke is P1 (ADR-0002 D3). This file is the authored, faithful spec P0-06 locks.
+# LOCKFILE: laptop-lockable after the P0-06 finding (ADR-0002 Amendment A2, 2026-07-08).
+# P0-05 deferred envs/ml.conda-lock.yml under the (then-believed) premise that Option-B
+# `mamba-ssm` 2.2.6.post3 had no prebuilt torch-2.7 wheel and had to be source-built (nvcc + sm_86,
+# absent on the sm_89/no-nvcc laptop). P0-06's empirical probe DISPROVED that premise: a prebuilt
+# `mamba_ssm-2.2.6.post3+cu12torch2.7cxx11abiTRUE-cp312-cp312-linux_x86_64.whl` exists (A2 C1).
+# With the three kernels pinned below by their exact GitHub release-asset URLs, Option B needs ZERO
+# source builds and installs with no nvcc and no GPU — so this env is now lockable on the laptop.
+# The actual `conda-lock` run (resolving the pip-URL wheels + the cu128 torch index) is the next
+# focused step; the GPU kernel import/forward smoke stays P1 (ADR-0002 D3/A2). This file is the spec.
 # ==========================================================================================
 #
 # Never bump the torch/kernel/transformers/multimolecule pins silently (ADR-0002 D8, CLAUDE.md §3.1).
@@ -32,7 +33,8 @@ dependencies:
   - wandb=0.28.0                   # offline mode + login-node `wandb sync`
   - hydra-core=1.3.2               # run-config driver; keep omegaconf<2.4
   - omegaconf=2.3.0
-  # Toolchain to source-build mamba-ssm for sm_86 and JIT DeepSpeed ops (ADR-0002 D3/D4):
+  # Toolchain for DeepSpeed's JIT-built ZeRO ops vs in-env CUDA 12.x (ADR-0002 D2/D4/A2).
+  # NOT for mamba-ssm — its sm_86 wheel is prebuilt (ADR-0002 A2 C1); Option B has no source build.
   - cuda-nvcc=12.8
   - ninja
   - packaging
@@ -42,11 +44,15 @@ dependencies:
     # torch anchor set by the kernel ecosystem (ADR-0002 D3, Option B). cu128 wheel index:
     - --extra-index-url https://download.pytorch.org/whl/cu128
     - torch==2.7.1                 # resolves to the +cu128 build from the index above
-    # Prebuilt Ampere (sm_86) kernel wheels — Dao-AILab GitHub release assets;
-    # exact wheel-asset URLs (cu12torch2.7cxx11abiTRUE, cp312, linux_x86_64) confirmed at P0-06:
-    - causal-conv1d==1.6.2.post1   # optional depthwise-conv accelerator (falls back to nn.Conv1d)
-    - flash-attn==2.8.3.post1      # FA2 = the correct line for Ampere
-    # SOURCE build (no torch-2.7 wheel; needs nvcc + sm_86) — built/captured at P0-06/CI, --no-build-isolation:
-    - mamba-ssm==2.2.6.post3       # last pre-Mamba-3 (classic selective_scan; no Hopper deps)
+    # Prebuilt Ampere (sm_86) kernel wheels, pinned by exact GitHub release-asset URL
+    # (cu12torch2.7 cxx11abiTRUE cp312 linux_x86_64; these are NOT on PyPI — a bare version pin
+    # would fetch the sdist and invoke nvcc). All three wheel-present at P0-06 (ADR-0002 A2 C1):
+    # flash-attn 2.8.3.post1 (FA2 = the Ampere line; SDPA/eager fallback via multimolecule, A2 K1):
+    - flash-attn @ https://github.com/Dao-AILab/flash-attention/releases/download/v2.8.3.post1/flash_attn-2.8.3.post1+cu12torch2.7cxx11abiTRUE-cp312-cp312-linux_x86_64.whl
+    # causal-conv1d 1.6.2.post1 (optional depthwise-conv accelerator; degrades to nn.Conv1d):
+    - causal-conv1d @ https://github.com/Dao-AILab/causal-conv1d/releases/download/v1.6.2.post1/causal_conv1d-1.6.2.post1+cu12torch2.7cxx11abiTRUE-cp312-cp312-linux_x86_64.whl
+    # mamba-ssm 2.2.6.post3 (last pre-Mamba-3; selective_scan_cuda is load-bearing — NO pure-torch
+    # module fallback, so the wheel is required, ADR-0002 A2 C2):
+    - mamba-ssm @ https://github.com/state-spaces/mamba/releases/download/v2.2.6.post3/mamba_ssm-2.2.6.post3+cu12torch2.7cxx11abiTRUE-cp312-cp312-linux_x86_64.whl
     # RiNALMo/RNA-FM transformers-native mirror; era-matched to transformers 4.57.5:
     - multimolecule==0.0.9

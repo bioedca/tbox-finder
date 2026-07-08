@@ -181,3 +181,32 @@ forgoes only non-load-bearing pandas-3.0 features (polars 1.42.1 is the datafram
 workhorse). Recorded as ADR-0002 **Amendment A1** + a D2 pin-coupling bump-trigger;
 `viz` pandas aligned to 2.3.3 for repo consistency. Cross-ref ADR-0002 D1/D2/D3 + A1.
 **Commit.** (this commit — the P0-05 atomic commit on branch `p0-05-envs`).
+
+## Step P0-06 — 2026-07-08: sm_86 wheel-availability check + pinned pure-PyTorch fallbacks
+**Inputs.** `envs/ml.yml` (the Option-B kernel pins: torch 2.7.1+cu128, `mamba-ssm` 2.2.6.post3,
+`causal-conv1d` 1.6.2.post1, `flash-attn` 2.8.3.post1, cp312/sm_86); ADR-0002 §D3 (the wheel +
+fallback claims to empirically confirm).
+**Process.** Authored `scripts/check_sm86_wheels.py`, a stdlib PyPI-JSON + GitHub-Releases-REST
+metadata probe (no GPU) that classifies each kernel `wheel-present`/`source-build-required`/
+`unavailable` at the two D3 torch anchors, and ran it (token-forced GitHub). Independently
+confirmed each torch-2.7 wheel is a real downloadable asset via a Range-GET probe, ran a 3-agent
+adversarial verification, and read the raw `mamba-ssm` v2.2.6.post3 source to settle the fallback
+question; context7 confirmed the `mamba` `use_fast_path` knob + the `multimolecule` RiNALMo
+HF-attention path. Amended ADR-0002 (A2) and re-pinned `envs/ml.yml` to the three release-asset
+wheel URLs.
+**Outputs.** `scripts/check_sm86_wheels.py`; `tests/unit/test_check_sm86_wheels.py` (10 cases);
+ADR-0002 **Amendment A2**; `envs/ml.yml` (three kernels pinned by exact release-asset URL, nvcc
+re-scoped to DeepSpeed-JIT, lockfile note reversed → laptop-lockable). No DVC artifact.
+**Validation.** Gate PASSED — all three kernels **wheel-present at Option B** (torch2.7/cu12/cp312/
+linux, abiTRUE): `flash-attn` (256 MB), `causal-conv1d` (194 MB), `mamba-ssm` (533 MB, 8,877
+downloads). `pytest tests/unit` 16/16; ruff + black clean. The GPU import/forward smoke stays P1.
+**Decisions.** The probe **disproved** D3's premise that `mamba-ssm` 2.2.6.post3 must be
+source-built (**C1**: a prebuilt cu12torch2.7 wheel exists → Option B needs zero source builds,
+`ml.yml` pinned by URL, P0-05 ml-lock deferral reversed to laptop-lockable) and **disproved**
+D3's pure-PyTorch selective-scan fallback (**C2**: the packaged `Mamba` bare-imports
+`selective_scan_cuda`; `use_fast_path=False` calls the CUDA kernel, not `selective_scan_ref`, so
+a missing kernel is a capability loss — only `causal_conv1d`→`nn.Conv1d` is speed-only; P1 must
+assert `import selective_scan_cuda`). RiNALMo SDPA/eager fallback confirmed (**K1**). User
+sign-off recorded 2026-07-08. Cross-ref ADR-0002 D3 + **A2**. Verification: artifact-based (probe
++ download-confirm + 3-agent adversarial pass + raw-source read).
+**Commit.** (this commit — the P0-06 atomic commit on branch `p0-06-sm86-wheels`).
