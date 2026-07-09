@@ -395,3 +395,32 @@ the `ml-*` envs). HF push is release-time only (§6.3); this is scaffold only, u
 context7 §3.3 (claude.ai Context7 quota-blocked → plugin server): wandb `sync --sync-all` + `WANDB_MODE=offline`;
 huggingface_hub `HfApi.upload_folder`/`snapshot_download` + `HF_TOKEN` env auth (token not persisted). No DVC
 artifact (all git-tracked). **Commit.** (this commit — the P0-11 atomic commit on branch `p0-11-wandb-hf-scaffold`).
+
+## Step P0-11a — 2026-07-09: Stage the §7.1 reference assets into `data/external/refs/`
+**Inputs.** Immutable sibling laptop checkouts (PRD §7.1 raw inputs, `sources_root=..`): `tboxdb-master/`
+(class-I `RF00230.cm`; the four `master_datasets/MASTER/*_master.fa` — the lowercase `*_master.fa` glob, which
+excludes the uppercase `gecont3_full_MASTER.fa`), `tbox-scan-master/` (class-II `TBDB001.cm`, NAME `seed_ILE`),
+and `tboxevo/data/processed/cms/` (the structural sub-element CMs `idtm_seq_aware.cm` / `idtm_structure_only.cm`
+/ `idtm_structure_only.amendment2.cm` / `stem2_structure_only.cm`, and the 18-record class-II
+`heldout_blind_set.fasta`). **Process.** `src/tbox_finder/refs.py::stage_refs` (stdlib-only; reuses
+`provenance.sha256`/`git_sha`) copies each of the 11 assets, verifies it against a **pinned SHA-256** on both
+source and copy (fail-loud, §10.3), and writes `data/external/refs/provenance.json` carrying per-asset
+source-path/version/accessed-date(2026-07-09)/license/sha256/bytes. Driven by the first `workflow/rules/data.smk`
+rule `stage_reference_assets` (LOCAL, kept out of `rule all`; no `input:` — sources are external; `dest_dir`
+derived from `output.manifest` so `--lint` is clean; `conda: ../../envs/data.yml`). A `.gitignore` carve-out
+`!/data/external/refs/**` commits the assets (git-LFS via `.gitattributes` `*.cm`/`*.fa`/`*.fasta`), while the
+rest of `data/external/` stays ignored; `.snakemake/` + `/logs/` added to `.gitignore`. **Outputs.**
+`data/external/refs/` — 6 CMs + 5 FASTAs (all git-LFS) + `provenance.json`; `src/tbox_finder/refs.py`;
+`workflow/rules/data.smk`; `tests/unit/test_refs_staging.py` (10 guards → 59 unit tests). **Validation.** PASS —
+`git lfs ls-files` lists all 11 CMs/FASTAs with LFS oids equal to their pinned sha256 (132-byte pointer blobs);
+`provenance.json` is plain git (`filter: unspecified`); `git check-attr filter` == `lfs` on every `*.cm`;
+`content_sha256` is LFS-pointer-aware so the checksum test passes in CI (no LFS smudge). `pytest tests/unit`
+**59 passed**; `ruff` + `black 26.3.1 --target-version py312` + `ruff format` clean; `snakemake --lint` "good
+condition" + `-n` clean. **Decisions.** `data/external/refs/` is the canonical committed home for these immutable
+reference assets (§5.2 permits small committed CMs/FASTAs as git-LFS rather than DVC); the `*_master.fa` glob
+stages all four MASTER FASTAs (RFGC3V = the combined RF00230/GC/gecont3/Vitreschak set + its three named
+components) — omission from an immutable dir is the costly error, and the PRD's descriptive "26,639 seqs" matches
+no single file and is not this step's gate. context7 §3.3 (plugin server): git-lfs v1 pointer spec
+(`version`/`oid sha256:`/`size`) + `git check-attr filter` / `git lfs ls-files` verification. Consumed by P0-30
+(masking/mining CMs), P4 (GATE-1 reference CMs), P6 (validation CMs + blind set). **Commit.** (this commit — the
+P0-11a atomic commit on branch `p0-11a-stage-refs`).
