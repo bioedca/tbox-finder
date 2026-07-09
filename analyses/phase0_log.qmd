@@ -279,3 +279,30 @@ Entrypoint uses `set -eo pipefail` **without `-u`**: conda's `cuda-nvcc` activat
 end-to-end `docker run` caught that the build-time `conda run` smoke masked. Cross-ref ADR-0002 D4 /
 A2 C1 / A4. Verification: artifact-based (BuildKit build log + four container import smokes).
 **Commit.** (this commit — the P0-07 atomic commit on branch `p0-07-docker`).
+
+## Step P0-08 — 2026-07-08: GitHub Actions CI workflow (lint / DAG / tests / Docker)
+**Inputs.** Repo scaffold (`pyproject.toml` tool configs, `workflow/Snakefile`, `src/tbox_finder`,
+`tests/unit`), the committed `envs/data.conda-lock.yml` (+ ml-dna/ml-rna locks for the Docker job),
+`docker/Dockerfile` (P0-07), ADR-0002 (env stack), the CLAUDE.md §8.6 CI contract. **Process.**
+Authored `.github/workflows/ci.yml` with four jobs. `lint` and `test` run on GitHub-hosted
+`ubuntu-latest` via `actions/setup-python` 3.12 with pinned dev tools (`ruff==0.15.15`,
+`black==25.11.0`, `pytest==9.0.2`) — these live in no science env (the conda-lock/git-lfs
+isolated-dev-tool precedent). `dag` reproduces the committed `data` env with
+`conda-incubator/setup-miniconda` (Miniforge) + `conda-lock 4.0.2` (the exact lock-generation
+version, mirroring `docker/Dockerfile`) and runs `snakemake --lint` + `snakemake -n` inside it
+(`conda run -n data …`; snakemake 9.23.1, CLAUDE.md §3.2 rule=env). `docker` builds + pushes the ML
+image to GHCR, `if`-gated to `schedule`/`release`/`workflow_dispatch` only (never per-PR).
+Added scaffold placeholder tests so `tests/{golden,ml}` collect ≥1 test — with unique module
+basenames, since pytest's prepend import-mode collides on duplicate names when the dirs lack
+`__init__.py`. **Outputs.** `.github/workflows/ci.yml`; `tests/golden/test_golden_scaffold.py`;
+`tests/ml/test_ml_scaffold.py`. No DVC artifact (all git-tracked). **Validation.** Gate = CI green
+on the PR that adds it. Pre-verified locally with the exact CI versions: `ruff check` exit 0,
+`black --check` exit 0 (black 25.11.0), `pytest tests/{unit,golden,ml}` **25 passed**,
+`snakemake --lint`/`-n` exit 0 in `tbox-finder-data` (snakemake 9.23.1). **Decisions.** ruff/black/
+pytest pinned as isolated dev tools (not added to any science env), matching local practice + the
+conda-lock/git-lfs precedent; snakemake stays science-pipeline tooling, run inside its pinned
+conda-lock env. The `docker` job is schedule/release-only per ADR-0002 D4 / CLAUDE.md §8.6; the
+~34.6 GB image (P0-07) vs. a GitHub runner's disk is a flagged risk validated on the first
+scheduled/dispatched build (a disk-reclaim step buys headroom), not on this per-PR gate. `push`
+scoped to `branches-ignore: main` since `main` only receives squash-merges. Cross-ref ADR-0002 D4,
+CLAUDE.md §8.6 / §3.2. **Commit.** (this commit — the P0-08 atomic commit on branch `p0-08-ci`).
