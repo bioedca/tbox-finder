@@ -351,7 +351,10 @@ def hash_identity(
     # strict=False is deliberate: a length mismatch is reported via `identical`
     # (n == n_canon) rather than raising; positional comparison stops at the shorter.
     n_match = sum(1 for a, b in zip(hashes, canon_hashes, strict=False) if a == b)
-    pct = (100.0 * n_match / n) if n else 0.0
+    # denominator is max(n, n_canon) so BOTH a missing prefix (n < n_canon) and
+    # extra records (n > n_canon) drop pct below 100 — not just the shorter side.
+    denom = max(n, n_canon)
+    pct = (100.0 * n_match / denom) if denom else 100.0
     columns_match = None if our_columns is None else (list(our_columns) == canon_cols)
     return {
         "n_records": n,
@@ -504,7 +507,10 @@ def run_ingest(
 
     from tbox_finder import provenance
 
-    expect_named = EXPECTED_NAMED_COLS if expect_records == EXPECTED_RECORDS else None
+    # Cleaned named-column count is an invariant: exactly one column (the unnamed
+    # index) is dropped, so it is always raw_cols - 1 — asserted for fixture runs
+    # too, not inferred from the observed width (no self-fulfilling schema check).
+    expect_named = expect_raw_cols - 1
 
     raw = read_raw(raw_csv)
     assert_parse_gate(raw, expected_records=expect_records, expected_raw_cols=expect_raw_cols)
@@ -535,7 +541,7 @@ def run_ingest(
         df_clean=df_clean,
         expected_records=expect_records,
         expected_raw_cols=expect_raw_cols,
-        expected_named_cols=(expect_named if expect_named is not None else int(df_clean.shape[1])),
+        expected_named_cols=expect_named,
     )
     _write_json(report, out_report)
 

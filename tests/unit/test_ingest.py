@@ -225,6 +225,17 @@ def test_hash_identity_detects_schema_drift() -> None:
     assert ident_ok["columns_match"] is True and ident_ok["identical"]
 
 
+def test_hash_identity_prefix_is_not_full_identity() -> None:
+    pytest.importorskip("pandas")
+    clean = ingest.clean(_synthetic_raw(), expect_records=None, expect_named_cols=None)
+    hashes = ingest.compute_record_hashes(clean)  # 3 records
+    # our hashes cover only a 2-record prefix: denominator max(2, 3) keeps pct < 100
+    ident = ingest.hash_identity(hashes[:2], clean)
+    assert ident["n_matching"] == 2 and ident["n_canonical_records"] == 3
+    assert ident["pct_identity"] < 100.0
+    assert not ident["identical"]
+
+
 def test_record_hashes_ignore_existing_hash_column() -> None:
     pytest.importorskip("pandas")
     clean = ingest.clean(_synthetic_raw(), expect_records=None, expect_named_cols=None)
