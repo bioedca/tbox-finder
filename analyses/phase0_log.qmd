@@ -576,3 +576,44 @@ pre-staged file on `download=False` (offline/tests). ADR-0004 is **not yet autho
 (urllib/zipfile/hashlib) + in-repo `provenance` helper; pandas/pyarrow lazy for the parquet join only.
 `verification: local (deterministic LOCAL rule)`. **Commit.** (this commit — the P0-15 atomic commit on branch
 `p0-15-taxid-lineage`).
+
+## Step P0-16 — 2026-07-09: Source the independent non-Firmicutes GATE-1 anchor (arm c)
+
+**Inputs.** The **Vitreschak 2008** supplement (DOI:10.1261/rna.819308, PMID:18359782, PMC2271356) — 3 open-access `.doc`
+files (Table S1 abbr→organism crosswalk + Fig S1 T-box-leader alignment + legends), SHA-256-pinned, re-fetched not
+committed (copyright); the training corpus `master_clean_v0.parquet` (P0-12, leakage baseline); the primary NCBI RefSeq
+genomes of the confirmed hosts (via E-utilities). **Process.** `src/tbox_finder/anchors.py::source_anchor` (+
+`workflow/rules/data.smk::source_gate1_anchor`, LOCAL, out of `rule all`, lambda-derived path param; stdlib-only import)
+parses the gap-elided Fig S1 rows in **both** cp1251 + UTF-16LE (`strings -e s`/`-e l`, else the δ-proteo/Deinococcus rows
+silently drop) into contiguous genomic segments split by `(N)` omitted-length placeholders, resolves each host assembly →
+RefSeq+GenBank replicons (`elink`), and **re-derives each leader from its primary genome by seed-and-extend localizing the
+literature segments** (Vitreschak's sequence IS the query — CM-free), requiring the inter-segment gaps to match the elided
+lengths as the specificity guard, then extracting the full contiguous leader (elided middle filled from the genome). Each
+host is GTDB-placed (name projection to the ≥2-source-confirmed phylum; genome-resolution deferred to P6, matching P0-14)
+and leakage-classified vs the corpus (RefSeq+GenBank accession-normalized, min/max-normalized coordinate overlap).
+**Outputs.** `data/external/gate1_anchor/` (`.gitignore` carve-out; `.cache/` supplement+genomes re-fetched) —
+`gate1_anchor.fasta` (**16** re-derived non-Firmicutes leaders, git-LFS; headers carry accession:coords(strand)|organism|
+phylum), `provenance.json`, `gate1_anchor_report.json` (raw counts per clade/host, GTDB placement, independence statement,
+leakage report, withheld + unresolved).
+**Validation.** **PASSED** — **16 loci** across the 3 confirmed phyla (**Desulfobacterota 2, Deinococcota 5,
+Chloroflexota 9**; 8 hosts), **12 exact + 4 approximate** (each with two-segment offset agreement); full provenance;
+independence-from-RF00230 documented + the ascertainment-ceiling bound disclosed (reaches RF00230-cutoff-invisible but not
+all-consensus-invisible); every host non-Firmicutes at **≥2 independent sources**; leakage report **7/16 corpus-overlap**
+(TBDB scanned these hosts via `Vitreschak_master.fa` → held out at P0-24) + **9/16 coordinate-novel**; raw count reported
+(the min-N / arm-(c)-fallback verdict is deferred to P0-26). `pytest tests/unit` **116 passed / 20 skipped** (bare CI sim
+— anchor: 13 pure-logic + import-purity run, 2 pandas-gated `importorskip`) and **15/15** with pandas+pyarrow; ruff
+0.15.15 + black 25.11.0 (`--target-version py312`) clean; `snakemake --lint` "good condition" + `-n source_gate1_anchor`
+valid.
+**Decisions.** **§7 scientific-evidence-gate STOP resolved (user 2026-07-09):** approved **Option A** — independent
+organism-genome re-derivation (an 8-agent literature workflow established the supplement is accessible but carries **no
+accessions/coordinates**, so loci are re-derived per organism+gene from the primary genome, localized by Vitreschak's own
+Fig S1 sequence). **No env amendment** — stdlib `urllib` E-utilities + subprocess `strings` suffice (Biopython, already in
+`envs/data.yml`, not needed). **Dictyoglomus WITHHELD** (single-source — only Vitreschak; MMBR-2009/FEBS-2010/TBDB-2021
+omit — reproduces the signed-off P0-14 decision); it stays has-prior via TBDB corpus loci but is never a certifying anchor
+clade. The existing TBDB-derived `data/external/refs/Vitreschak_master.fa` was **rejected as the anchor** (CM-derived +
+corpus-overlapping → exactly the circularity P0-16 exists to prevent). 2 *Dehalococcoides* `ileS` loci withheld as
+**indel-divergent** (not gapless-localizable within tolerance; withhold-not-force-fit, §10.3). ADR-0005 not yet authored
+(P0-19/25) → builds against PRD §7.1/§9.2(c)/§2.3 directly (`adr` = "PRD §7.1/§9.2(c)/§2.3 (ADR-0005 pending, P0-19/25)").
+context7 §3.3: n/a (stdlib urllib/subprocess/hashlib + in-repo `provenance` helper; pandas lazy for the corpus read only).
+`verification: local (deterministic LOCAL rule; NCBI E-utilities live-fetch)`. **Commit.** (this commit — the P0-16 atomic
+commit on branch `p0-16-gate1-anchor`).

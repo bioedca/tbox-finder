@@ -1,0 +1,34 @@
+{
+  "adr": "PRD \u00a77.1/\u00a79.2(c)/\u00a72.3 (ADR-0005 pending, P0-19/25)",
+  "env_lock_hash": "a4a6715d411d7218432c4c670d35475f6c9aa7dd6397fd5d906ca7e21293dc34",
+  "extra": {
+    "independence": "Selection is CM-independent: loci were detected by Vitreschak 2008's hand-built sequence+structure descriptor + synteny, not the Rfam RF00230 CM at its GA cutoff (the GATE-1 cmsearch baseline), so the anchor can include loci below that cutoff. Sequence is corpus-independent: each leader is re-derived from its primary NCBI RefSeq genome, not the TBDB training table. Ascertainment ceiling (disclosed): both the CM and Vitreschak's descriptor rest on the same conserved T-box consensus, so arm (c) reaches the RF00230-cutoff-invisible-but-consensus-detectable region, not the all-consensus-invisible region (reached only by arm (b) synthetic divergence + the \u00a713 discovery campaign).",
+    "n_anchor_loci": 16,
+    "source": {
+      "citation": "Vitreschak AG, Mironov AA, Lyubetsky VA, Gelfand MS. Comparative genomic analysis of T-box regulatory systems in bacteria. RNA 2008;14(4):717-735.",
+      "doi": "10.1261/rna.819308",
+      "license": "\u00a9 2008 RNA Society / Cold Spring Harbor Laboratory Press (Vitreschak et al.). Supplement re-fetched for re-derivation; not redistributed in-repo. Re-derived leaders come from NCBI RefSeq (public domain).",
+      "pmcid": "PMC2271356",
+      "pmid": "18359782",
+      "supplement_base": "https://rnajournal.cshlp.org/content/suppl/2008/03/21/14.4.717.DC1/",
+      "supplement_sha256": {
+        "Supp_Fig1.doc": "91d3bab6dbf65b66abd2b974eee114fbe19e6672894edb175e80984426a7bacd",
+        "Supp_Legends.doc": "909b2a05d5f8cc1f478047bfe8989e644107ace8c566a7f0b47b982fec26410a",
+        "Supp_Table_1.doc": "d94fdb9c3ff3911ca2f2393aef921c1d69e9590e57bd5f596e8fc65499b39a7f"
+      }
+    }
+  },
+  "generated_at_utc": "2026-07-09T22:44:43.230034+00:00",
+  "git_sha": "3b959afb0991009b29730a6d680dcbbb9f43af3c",
+  "inputs": {
+    "data/processed/master_clean_v0.parquet": "1eb76591d0e481019dd7acf72a439f157fec9f2aeecb8cc5c37ba80a7b062dd2"
+  },
+  "outputs": {
+    "data/external/gate1_anchor/gate1_anchor.fasta": "cff5b03021d60d247876c4f66deda967c0e1501fb362e790497652dcabf5870b",
+    "data/external/gate1_anchor/gate1_anchor_report.json": "04198424e18bc06ae8e6ee7404cee38f6f6e3ac7ad9da98be1ec37bcd7217fda"
+  },
+  "rule": "workflow/rules/data.smk :: source_gate1_anchor",
+  "schema_version": "1.0",
+  "script": "src/tbox_finder/anchors.py",
+  "seed": 42
+}

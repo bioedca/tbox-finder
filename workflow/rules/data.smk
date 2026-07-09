@@ -183,6 +183,7 @@ rule reconcile_union_prior:
 
 _INTERIM_DIR = "data/interim"
 _NCBI_TAX_DIR = "data/external/ncbi_taxonomy"
+_GATE1_DIR = "data/external/gate1_anchor"
 
 
 rule replace_taxid_lineage:
@@ -227,3 +228,44 @@ rule replace_taxid_lineage:
         "--interim-dir {params.interim_dir:q} "
         "--audit-dir {params.audit_dir:q} "
         "--taxdump-dir {params.taxdump_dir:q} >{log} 2>&1"
+
+
+rule source_gate1_anchor:
+    """Source the independent non-Firmicutes GATE-1 anchor (arm c) — P0-16 (PRD §7.1/§9.2(c)/§2.3).
+
+    The headline generalization claim needs a *model-independent, beyond-Firmicutes*
+    positive anchor whose selection is independent of the RF00230 CM (the GATE-1
+    ``cmsearch`` baseline) and whose sequences are independent of the TBDB training
+    corpus. This re-derives each locus from its **primary NCBI genome**, using Vitreschak
+    et al. 2008's supplementary alignment (Fig S1) as the CM-free ground truth: parse the
+    gap-elided alignment rows into contiguous genomic segments, localize them in the
+    host's primary genome (the literature sequence IS the query — no CM), verify the
+    inter-segment gaps match the elided lengths, and extract the full contiguous leader.
+    Emits the re-derived non-Firmicutes leader FASTA, an artifact provenance, and an audit
+    report (raw counts per clade/host, GTDB placement, independence statement, and a
+    preliminary corpus-overlap leakage report for P0-24 to hold out). Dictyoglomi is
+    WITHHELD (single-source; CLAUDE.md §10.1).
+
+    Like the other ``data.smk`` rules it is a **one-time LOCAL** rule kept out of ``rule
+    all`` with no ``input:`` — its inputs are the DVC corpus (read directly) plus on-demand
+    checksummed fetches (the Vitreschak .doc supplement + primary genomes via NCBI
+    E-utilities), which live in a gitignored ``.cache/`` and are re-fetched; only the
+    re-derived FASTA + provenance + report travel with the repo (CLAUDE.md §5.2). Invoke:
+
+        snakemake --cores 1 --use-conda source_gate1_anchor
+    """
+    output:
+        anchor=f"{_GATE1_DIR}/gate1_anchor.fasta",
+        provenance=f"{_GATE1_DIR}/provenance.json",
+        report=f"{_GATE1_DIR}/gate1_anchor_report.json",
+    params:
+        # dir derived from the output (not a hardcoded prefix) so `snakemake --lint`
+        # stays clean; the module writes the FASTA + provenance + report under --anchor-dir.
+        anchor_dir=lambda wildcards, output: os.path.dirname(output.anchor),
+    log:
+        "logs/source_gate1_anchor.log",
+    conda:
+        "../../envs/data.yml"
+    shell:
+        "python -m tbox_finder.anchors source-anchor "
+        "--anchor-dir {params.anchor_dir:q} >{log} 2>&1"

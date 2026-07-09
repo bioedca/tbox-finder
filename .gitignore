@@ -41,6 +41,14 @@
 # workflow/rules/data.smk::replace_taxid_lineage (CLAUDE.md §5.2).
 !/data/external/ncbi_taxonomy/
 !/data/external/ncbi_taxonomy/provenance.json
+# Carve-out: the P0-16 GATE-1 anchor (arm c) deliverables ONLY — the re-derived
+# non-Firmicutes leader FASTA (git-LFS), its provenance, and the audit/leakage report.
+# The .cache/ (copyrighted Vitreschak .doc supplement + fetched genome FASTAs) stays
+# ignored — re-fetched by workflow/rules/data.smk::source_gate1_anchor (CLAUDE.md §5.2).
+!/data/external/gate1_anchor/
+!/data/external/gate1_anchor/gate1_anchor.fasta
+!/data/external/gate1_anchor/provenance.json
+!/data/external/gate1_anchor/gate1_anchor_report.json
 
 # ── Snakemake working dir + rule run-logs (never committed) ──
 .snakemake/
