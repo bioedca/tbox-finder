@@ -1,0 +1,25 @@
+{
+  "adr": "PRD \u00a79.2 (ADR-0004 pending, P0-19)",
+  "env_lock_hash": "a4a6715d411d7218432c4c670d35475f6c9aa7dd6397fd5d906ca7e21293dc34",
+  "extra": {
+    "dropped_from_clade_holdout": 869,
+    "n_records": 23535,
+    "order_recovery_rate": 0.0636,
+    "taxdump_snapshot": "taxdmp_2026-07-01.zip"
+  },
+  "generated_at_utc": "2026-07-09T20:07:21.043215+00:00",
+  "git_sha": "906441f71768be938d67446e49748488b3821777",
+  "inputs": {
+    "data/external/ncbi_taxonomy/provenance.json": "f792694a2f28dd36da57407fd6c610a291b75f3a8aefb1d3f0200923acb6ada7",
+    "data/interim/master_tboxes_ingested.parquet": "e6aaa853e3984827d787e5e73c0557ec4619b4ab556db133edc8a7c69a83cc30",
+    "data/processed/master_clean_v0.parquet": "1eb76591d0e481019dd7acf72a439f157fec9f2aeecb8cc5c37ba80a7b062dd2"
+  },
+  "outputs": {
+    "data/interim/lineage_replaced.parquet": "b72f3535f7cf4bc4b00deed299b5b60fb1d2d52f5e64350d92697a36ab951430",
+    "data/processed/audits/lineage_replacement_report.json": "4c806ca5d61c5647bb7e5aec8b5da06c244aa9db42e5fa01a3dda02436e24b0e"
+  },
+  "rule": "workflow/rules/data.smk :: replace_taxid_lineage",
+  "schema_version": "1.0",
+  "script": "src/tbox_finder/taxonomy.py",
+  "seed": 42
+}

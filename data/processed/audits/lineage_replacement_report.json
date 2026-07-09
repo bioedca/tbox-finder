@@ -1,0 +1,81 @@
+{
+  "accounting_ok": true,
+  "dropped_from_clade_holdout": 869,
+  "dropped_per_rank": {
+    "class": 770,
+    "order": 869,
+    "phylum": 421
+  },
+  "n_records": 23535,
+  "new_taxa_introduced": {
+    "class": {
+      "Candidatus Aquicultoria": 5,
+      "Candidatus Phoenicimicrobiia": 5,
+      "Cyanophyceae": 3
+    },
+    "family": {
+      "Candidatus Aquicultoraceae": 5,
+      "Candidatus Izemoplasmataceae": 24,
+      "Candidatus Phoenicimicrobiaceae": 5,
+      "Candidatus Thermobaculaceae": 10,
+      "Desulfuribacillaceae": 16,
+      "Gemellaceae": 68,
+      "Lawsonellaceae": 2
+    },
+    "genus": {
+      "Agathobacter": 13,
+      "Alkalithermobacter": 30,
+      "Berryella": 3,
+      "Candidatus Aquicultor": 5,
+      "Candidatus Infernicultor": 2,
+      "Candidatus Sediminicultor": 3,
+      "Peptacetobacter": 16,
+      "Salisediminibacterium": 13,
+      "Schnuerera": 28
+    },
+    "order": {
+      "Candidatus Aquicultorales": 5,
+      "Candidatus Chloroheliales": 2,
+      "Candidatus Izemoplasmatales": 24,
+      "Candidatus Pheonicimicrobiales": 5,
+      "Candidatus Thermobaculales": 10
+    }
+  },
+  "per_rank": {
+    "class": {
+      "pre_missing": 841,
+      "present_from_corpus": 22694,
+      "recovered": 71,
+      "recovery_rate": 0.0844,
+      "still_incomplete": 770
+    },
+    "family": {
+      "pre_missing": 1406,
+      "present_from_corpus": 22129,
+      "recovered": 145,
+      "recovery_rate": 0.1031,
+      "still_incomplete": 1261
+    },
+    "genus": {
+      "pre_missing": 1599,
+      "present_from_corpus": 21936,
+      "recovered": 124,
+      "recovery_rate": 0.0775,
+      "still_incomplete": 1475
+    },
+    "order": {
+      "pre_missing": 928,
+      "present_from_corpus": 22607,
+      "recovered": 59,
+      "recovery_rate": 0.0636,
+      "still_incomplete": 869
+    },
+    "phylum": {
+      "pre_missing": 453,
+      "present_from_corpus": 23082,
+      "recovered": 32,
+      "recovery_rate": 0.0706,
+      "still_incomplete": 421
+    }
+  }
+}

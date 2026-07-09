@@ -36,6 +36,11 @@
 # stay ignored — re-fetched by workflow/rules/data.smk::pin_gtdb_release (CLAUDE.md §5.2).
 !/data/external/gtdb/
 !/data/external/gtdb/provenance.json
+# Carve-out: the P0-15 NCBI-taxdump pin manifest ONLY (snapshot id + checksums +
+# license). The ~75 MB dated taxdmp zip stays ignored — re-fetched + MD5-verified by
+# workflow/rules/data.smk::replace_taxid_lineage (CLAUDE.md §5.2).
+!/data/external/ncbi_taxonomy/
+!/data/external/ncbi_taxonomy/provenance.json
 
 # ── Snakemake working dir + rule run-logs (never committed) ──
 .snakemake/
