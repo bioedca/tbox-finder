@@ -384,16 +384,19 @@ def assert_no_false_novelty(
     """Fail-loud (§10.3) unless every known-T-box GTDB phylum is has-prior.
 
     This is the anti-false-novelty gate: a known-T-box lineage present in the corpus must
-    never land on the no-prior list through an NCBI→GTDB renaming/splitting artifact.
+    never land on the no-prior list through an NCBI→GTDB renaming/splitting artifact. The
+    check requires **every** GTDB split-daughter of each known base (e.g. both Bacillota
+    and Bacillota_I) to be has-prior — the projection over-credits all splits, so a missing
+    one signals a regression, not a real absence.
     """
     has_prior = set(has_prior_phyla)
     missing: list[str] = []
     for base in known_bases:
         candidates = {p for p in universe_phyla if p == base or p.startswith(base + "_")}
-        if candidates and not (candidates & has_prior):
-            missing.append(base)
-        elif not candidates:
+        if not candidates:
             missing.append(f"{base} (absent from R232 universe)")
+        else:
+            missing.extend(sorted(candidates - has_prior))
     if missing:
         raise ValueError(
             "no-false-novelty gate FAILED (CLAUDE.md §10.3): known-T-box GTDB phyla "

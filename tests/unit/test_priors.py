@@ -138,6 +138,13 @@ def test_assert_no_false_novelty_raises_when_known_missing() -> None:
         priors.assert_no_false_novelty({"Bacillota"}, universe, known_bases=("Chloroflexota",))
     # …but passes when the known base is credited.
     priors.assert_no_false_novelty({"Chloroflexota"}, universe, known_bases=("Chloroflexota",))
+    # A missing GTDB split-daughter (Bacillota_I) must also fail loud — the gate requires
+    # EVERY split of a known base, not just one (guards against a partial-credit regression).
+    with pytest.raises(ValueError, match="Bacillota_I"):
+        priors.assert_no_false_novelty({"Bacillota"}, universe, known_bases=("Bacillota",))
+    priors.assert_no_false_novelty(
+        {"Bacillota", "Bacillota_I"}, universe, known_bases=("Bacillota",)
+    )
 
 
 def test_conservative_literature_credit_unprojectable_but_known() -> None:
