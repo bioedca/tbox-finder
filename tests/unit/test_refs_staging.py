@@ -11,8 +11,10 @@ returns the right digest either way.
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -77,13 +79,18 @@ def test_staged_content_matches_pinned_checksum(asset: RefAsset):
     assert content_sha256(staged) == asset.sha256
 
 
-def test_cm_assets_are_git_lfs_tracked():
-    """Every ``*.cm`` (and every FASTA) routes through git-LFS per .gitattributes."""
+def test_lfs_assets_are_git_lfs_tracked():
+    """Every LFS asset — all ``*.cm`` AND every FASTA — routes through git-LFS.
+
+    The validation gate requires the ``*.cm`` be LFS-tracked; ``.gitattributes`` also
+    routes ``*.fa`` / ``*.fasta`` to LFS, so the full staged binary set is asserted.
+    """
     if shutil.which("git") is None:  # pragma: no cover - git present in CI + laptop
         pytest.skip("git unavailable")
-    for a in MANIFEST:
-        if not a.dest.endswith(".cm"):
-            continue
+    lfs_assets = [a for a in MANIFEST if a.lfs]
+    # Sanity: the manifest's LFS set is exactly the 6 CMs + 5 FASTAs (no plain-git asset).
+    assert len(lfs_assets) == len(MANIFEST)
+    for a in lfs_assets:
         rel = f"{REFS_DIR.as_posix()}/{a.dest}"
         out = subprocess.run(
             ["git", "check-attr", "filter", "--", rel],
@@ -116,7 +123,27 @@ def test_content_sha256_hashes_real_file(tmp_path: Path):
     assert content_sha256(real) == hashlib.sha256(payload).hexdigest()
 
 
-def test_refs_module_imports_stdlib_only():
-    """refs.py must import in a bare env (no data/ML stack) — CLAUDE.md §3.1 discipline."""
+def test_refs_module_constants():
+    """Module contract: canonical staging dir + pinned accessed date."""
     assert refs.REFS_DIR.as_posix() == "data/external/refs"
     assert refs.ACCESSED_DATE == "2026-07-09"
+
+
+def test_refs_imports_without_data_ml_stack():
+    """refs.py must import in a bare env (no data/ML stack) — CLAUDE.md §3.1 discipline.
+
+    Run in a *fresh* interpreter (the test session has already imported the stack, so an
+    in-process check proves nothing) and assert the heavy deps stay absent after import.
+    """
+    heavy = "{'numpy', 'pandas', 'polars', 'torch', 'transformers', 'snakemake', 'dvc', 'Bio'}"
+    code = (
+        "import sys\n"
+        "import tbox_finder.refs  # noqa: F401\n"
+        f"hit = {heavy} & set(sys.modules)\n"
+        "assert not hit, f'refs.py pulled heavy deps: {hit}'\n"
+        "print('ok')\n"
+    )
+    env = {**os.environ, "PYTHONPATH": str(REPO_ROOT / "src")}
+    out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, env=env)
+    assert out.returncode == 0, out.stderr
+    assert out.stdout.strip() == "ok"
