@@ -25,6 +25,16 @@
 !/data/raw/.gitkeep
 /data/external/**
 !/data/external/.gitkeep
+# Carve-out: the small, immutable §7.1 reference assets (covariance models +
+# reference FASTAs + class-II blind set) ARE committed here — git-LFS-tracked
+# via .gitattributes, staged by workflow/rules/data.smk::stage_reference_assets
+# (P0-11a). Large fetched corpora elsewhere under data/external/ stay ignored.
+!/data/external/refs/
+!/data/external/refs/**
+
+# ── Snakemake working dir + rule run-logs (never committed) ──
+.snakemake/
+/logs/
 
 # ── Experiment tracking (W&B run dirs) ──
 **/wandb/
