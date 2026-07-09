@@ -306,3 +306,36 @@ conda-lock env. The `docker` job is schedule/release-only per ADR-0002 D4 / CLAU
 scheduled/dispatched build (a disk-reclaim step buys headroom), not on this per-PR gate. `push`
 scoped to `branches-ignore: main` since `main` only receives squash-merges. Cross-ref ADR-0002 D4,
 CLAUDE.md §8.6 / §3.2. **Commit.** (this commit — the P0-08 atomic commit on branch `p0-08-ci`).
+
+## Step P0-09 — 2026-07-08: Author ADR-0003 — Cluster & scan ops
+
+**Inputs.** PRD §7.2 (corpora, de-dup, sizing/feasibility lever, minimum-viable scan), §15
+(cluster topology, DVC-capacity rule, compute ceiling + patience budget, training/sweep budget,
+shard-failure + node-outage rules), §18.1–18.3 (P0 deliverable, risks, ADR-0003 delegation line);
+CLAUDE.md §9 (cluster protocol); ADR-0001 (contract/precedence, format template).
+**Process.** Authored `docs/decisions/ADR-0003-cluster-and-scan-ops.md` (D1–D10) pinning the
+cluster/SLURM contract (D1: `gpu`/a4000, no `--account`/QOS/`--nodelist`/`compute`/`zero`,
+artifact-based verification since `sacct` off), Snakemake-executor-CPU-only / GPU-via-hand-authored-
+`sbatch` (D2), the estimate-anchored DVC-capacity rule (D3, concrete path/capacity forwarded to
+P0-10), corpus de-dup `GTDB-rep > RefSeq-complete > MAG` (D4), corpus priority + minimum-viable
+scan = tiers (1)+(2) + breadth-preserving feasibility lever (D5), the compute-ceiling determination
+rule + patience budget (D6, numeric **frozen at the pre-P5 sizing gate**), the training/sweep
+GPU-hour budget rule (D7, numeric frozen at P1 first measurement), and the two P0-numeric ops
+rules. Draft was adversarially checked pre-sign-off by a 4-lens subagent sweep (PRD-faithfulness /
+completeness / internal-consistency / validation-gate); 8 minor/nit cross-reference + rationale
+fixes applied (blinded-freeze re-cited to ADR-0005, scan-plan-execution sub-gate to ADR-0006,
+ADR-0004 added to Related/impact list, D4↔D5 corpus tiers aligned, D8/D9 magnitude rationales
+added). **Outputs.** `docs/decisions/ADR-0003-cluster-and-scan-ops.md`
+(sha256 `0a0bff87…c975d599f`, 125 lines).
+**Validation.** Gate = compute-ceiling **rule** pinned with numeric explicitly deferred to the
+pre-P5 sizing gate (D6) ✓; de-dup priority (D4) + minimum-viable-scan spec (D5) written ✓;
+shard-failure fraction **≤ 2%** (D8) + node-outage hold **72 h** (D9) numeric ✓; **user sign-off
+2026-07-08** ✓ — **PASS**. **Decisions.** Two P0 numbers pinned as pre-registered *ops* thresholds
+(D8 ≤ 2%; D9 72 h) — not scientific-claim gates, so no ADR-0001-D4/ADR-0005 blinded-freeze, but
+change-by-ADR-sign-off only; each threshold's sole failure mode is a CLAUDE.md §7 stop-and-ask, so
+both stay conservative. Compute ceiling + patience-budget days deferred to the sizing gate because
+the binding number needs the P2 scanner's Stage-1 candidate density (PRD §7.2/§15). Snakemake SLURM
+executor deliberately barred for GPU (auto-retry would bypass the §9.3 one-shot ack). Cross-ref
+ADR-0001 (D3 non-circularity), ADR-0005 (recall floor), ADR-0006 (GATE-3 scan-plan-execution +
+rollup); PRD §7.2/§15/§18. No DVC artifact (prose ADR, git-tracked). **Commit.** (this commit — the
+P0-09 atomic commit on branch `p0-09-adr-0003`).
