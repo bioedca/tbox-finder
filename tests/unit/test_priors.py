@@ -171,9 +171,12 @@ def test_parse_fasta_loci() -> None:
         ">CP001814.1:1988355-1988036 extra tokens\n",
         "ACGU\n",
         ">MNIY01000150.1:4366-4812\n",
+        ">\n",  # bare header line — skipped, not an IndexError
+        ">  \n",  # whitespace-only header — skipped
         ">NOCOORDS.1\n",
     ]
     loci = priors.parse_fasta_loci(lines)
+    assert len(loci) == 3  # the two bare/blank headers are skipped
     assert loci[0] == ("CP001814", 1988355, 1988036)  # versionless accession + coords
     assert loci[1] == ("MNIY01000150", 4366, 4812)
     assert loci[2] == ("NOCOORDS", None, None)

@@ -412,7 +412,10 @@ def parse_fasta_loci(fasta_lines: Iterable[str]) -> list[tuple[str, int | None, 
     for line in fasta_lines:
         if not line.startswith(">"):
             continue
-        header = line[1:].strip().split()[0]
+        fields = line[1:].strip().split()
+        if not fields:
+            continue  # bare ">" header line — no accession to parse
+        header = fields[0]
         token, _, coords = header.partition(":")
         accession = token.rsplit(".", 1)[0] if "." in token else token
         start = end = None
