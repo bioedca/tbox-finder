@@ -339,3 +339,34 @@ executor deliberately barred for GPU (auto-retry would bypass the §9.3 one-shot
 ADR-0001 (D3 non-circularity), ADR-0005 (recall floor), ADR-0006 (GATE-3 scan-plan-execution +
 rollup); PRD §7.2/§15/§18. No DVC artifact (prose ADR, git-tracked). **Commit.** (this commit — the
 P0-09 atomic commit on branch `p0-09-adr-0003`).
+
+## Step P0-10 — 2026-07-08: DVC init + dvc-ssh cluster-scratch remote + capacity pin & verify
+
+**Inputs.** ADR-0003 D3 (estimate-anchored DVC-capacity rule); cluster scratch via `ssh two`;
+`tbox-finder-data` env (dvc 3.67.1 + dvc-ssh 4.3.0 + asyncssh 2.23.0); the tboxevo `provenance.json`
+convention (CLAUDE.md §11). **Process.** `dvc init` (committed scaffold `.dvc/.gitignore` +
+`.dvcignore`; `.dvc/config` and `.dvc/config.local` both stay gitignored per §5.2). Added the
+`dvc-ssh` remote `cluster-scratch` → `ssh://ecc1695@two/onedata/mondragonlab/ecc1695/tbox-finder/
+dvc-remote` to per-machine `.dvc/config.local`. Discovered the scratch mount by `ssh two df`:
+`/onedata` (shared beegfs, user-owned dir) was chosen over the 88 %-full HOME (`/scr/exports`, 691 GB
+free) and over `/twodata` (19 TB free) for its shared-FS reachability from the `gpu` nodes + most
+headroom. Wrote `src/tbox_finder/provenance.py` (`write_provenance` / `build_provenance` /
+`sha256_file` / `git_sha` / `env_lock_hash`) + `tests/unit/test_provenance.py` (13 tests), wiring the
+`env_lock_hash` that tboxevo had left a `null` stub. **Outputs.** committed scaffold; committed
+capacity record `docs/dev-log/P0-10-dvc-capacity.md`; `src/tbox_finder/provenance.py` +
+`tests/unit/test_provenance.py`; per-machine `.dvc/config.local` (uncommitted).
+**Validation.** ADR-0003 D3 gate = `ssh two df` free **32.9 TB ≥ 2 TB provisional P5 estimate**
+(≈ 16× headroom) → **PASS**; `dvc remote list` shows the default remote; `dvc status` clean;
+`provenance.json` carries all six §11 stamps (rule / script / git-SHA / env-lock-hash / seed /
+input+output sha256) — asserted on real repo files; `pytest tests/unit` **36 passed** (23 + 13 new);
+ruff + black clean; dvc-ssh **connectivity smoke** (throwaway `dvc push` round-trip through the
+`zero`→`two` ProxyJump, object at `dvc-remote/files/md5/33/7bf06…`, then cleaned up) **PASS**.
+**Decisions.** DVC-tracked artifacts exclude the multi-TB raw genome corpora (streamed to node-local
+`/tmp`, discarded — ADR-0003 D1/D3), so the 2 TB provisional budget covers only checkpoints +
+interim/processed tables + training/eval datasets; the estimate is an *ops* engineering number (no
+ADR-0005 blinded-freeze / no §10.1 gate) and re-verifies when the pre-P5 sizing gate (ADR-0003 D6)
+freezes the real volume. **Durable finding:** the encrypted `id_ed25519` breaks dvc-ssh if `keyfile`
+is set (*"Passphrase must be specified…"*) → omit `keyfile`, rely on the ssh-agent (`allow_agent`
+default), matching interactive `ssh two`. context7 §3.3: dvc-ssh remote-config + ssh-config
+resolution order confirmed (claude.ai Context7 quota-blocked → plugin server). **Commit.** (this
+commit — the P0-10 atomic commit on branch `p0-10-dvc-provenance`).
