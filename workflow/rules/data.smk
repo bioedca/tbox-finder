@@ -134,3 +134,48 @@ rule pin_gtdb_release:
         "../../envs/data.yml"
     shell:
         "python -m tbox_finder.taxonomy --dest-dir {params.dest_dir:q} >{log} 2>&1"
+
+
+_PRIORS_DIR = "data/processed/priors"
+_AUDIT_DIR = "data/processed/audits"
+
+
+rule reconcile_union_prior:
+    """Reconcile the union novelty prior + NCBI→GTDB projection + unprojectable audit (P0-14; PRD §7.2/§4/§13.3).
+
+    Builds ``union_prior.parquet`` — the union of TBDB (``master_clean_v0.parquet``,
+    P0-12), the RF00230-only masking loci (``RF00230_master.fa``, P0-11a), and the curated
+    literature-occurrence-by-clade artifact (Vitreschak 2008 + ≥2-source corroboration;
+    §10.1) — with every record projected into the governing GTDB release (R232, P0-13) at
+    finest-available (phylum) resolution, NCBI names demoted to display labels so a
+    renaming/splitting artifact cannot mis-score a known lineage novel. Emits the
+    unprojectable audit + the re-derived no-prior-record phylum list
+    (``union_prior_report.json``) and a provenance.json. Fetches the R232 taxonomy TSVs on
+    demand (MD5-verified via tbox_finder.taxonomy).
+
+    Like the other ``data.smk`` rules it is a **one-time LOCAL** rule kept out of ``rule
+    all`` with no ``input:`` — its inputs are a DVC artifact (the corpus), a git-LFS asset
+    (the RF00230 FASTA) and an on-demand GTDB fetch, whose lineage DVC + provenance.json
+    track (not the Snakemake DAG). The parquet is DVC-tracked (dvc pull downstream). Invoke:
+
+        snakemake --cores 1 --use-conda reconcile_union_prior
+    """
+    output:
+        union_prior=f"{_PRIORS_DIR}/union_prior.parquet",
+        provenance=f"{_PRIORS_DIR}/union_prior.provenance.json",
+        report=f"{_AUDIT_DIR}/union_prior_report.json",
+    params:
+        # dirs derived from the outputs (not hardcoded prefixes) so `snakemake --lint`
+        # stays clean; the module writes the parquet + provenance under --priors-dir.
+        priors_dir=lambda wildcards, output: os.path.dirname(output.union_prior),
+        audit_dir=lambda wildcards, output: os.path.dirname(output.report),
+        gtdb_dir=_GTDB_DIR,
+    log:
+        "logs/reconcile_union_prior.log",
+    conda:
+        "../../envs/data.yml"
+    shell:
+        "python -m tbox_finder.priors "
+        "--priors-dir {params.priors_dir:q} "
+        "--audit-dir {params.audit_dir:q} "
+        "--gtdb-dir {params.gtdb_dir:q} >{log} 2>&1"

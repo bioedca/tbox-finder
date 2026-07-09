@@ -501,3 +501,40 @@ species-rep crosswalk (row-count == the count gate); the ~120 MB genome→lineag
 (deterministic LOCAL rule; no DVC artifact — data/external is immutable/re-fetched, §5.2)`. context7 §3.3: not required
 — no third-party library API written (stdlib `urllib`/`hashlib` only). **Commit.** (this commit — the P0-13 atomic
 commit on branch `p0-13-pin-gtdb-release`).
+
+## Step P0-14 — 2026-07-09: Union novelty prior reconciliation + NCBI→GTDB projection + unprojectable audit
+**Inputs.** TBDB corpus `master_clean_v0.parquet` (P0-12, 23,535 records; NCBI phylum/class + `TaxId`, no
+genome-assembly accession); `RF00230_master.fa` (P0-11a, 6,301 accessions); GTDB **R232** `bac120`+`ar53` taxonomy
+TSVs (P0-13, fetched on demand + MD5-verified via `taxonomy.ensure_file`); the curated Vitreschak-2008 literature
+occurrences (DOI:10.1261/rna.819308). **Process.** `workflow/rules/data.smk::reconcile_union_prior` →
+`src/tbox_finder/priors.py` name-projects every record's NCBI lineage to its GTDB phyla via a curated
+over-crediting base map (Firmicutes→`Bacillota*`; Proteobacteria routed by class — δ→Desulfobacterota+Myxococcota,
+α/β/γ→Pseudomonadota; CPR→Patescibacteriota; Chloroflexi→Chloroflexota; …), each candidate intersected with the real
+R232 phylum universe (fail-loud on a fully-absent mapping); folds in the 622 RF00230-only masking loci (accession-only,
+no taxonomy) and the 3 confirmed literature clades; re-derives the no-prior phylum list; runs a fail-loud
+no-false-novelty gate (§10.3). Genome-resolution GTDB-Tk placement is deferred to P6 (§13.2) — the corpus carries no
+assembly accession, so P0-14 does the §7.2 "finest-available (phylum) resolution" tier. **Outputs.**
+`data/processed/priors/union_prior.parquet` (**DVC**, 24,160 records = 23,535 TBDB + 622 RF00230-only + 3 literature;
+per-record source/accession/coords/NCBI-display-lineage/`gtdb_phyla_credited`/method) + `union_prior.provenance.json`;
+`data/processed/audits/union_prior_report.json` (unprojectable audit + has-prior/no-prior phyla + the projection map +
+literature evidence); `src/tbox_finder/priors.py` + `tests/unit/test_priors.py` (15 tests) + `tests/fixtures/priors/`.
+**Validation.** **PASSED** — accounting: 23,535 = **23,056 projectable + 479 unprojectable** (2.07% → 453 null-lineage
++ 24 eukaryotic mis-annotation + 2 obscure candidate-division; **map_gaps `{}`**); **23 has-prior / 174 no-prior phyla**
+(R232 = 197); no-false-novelty gate green (8 known-T-box GTDB phyla — Bacillota/Actinomycetota/Chloroflexota/
+Deinococcota/Dictyoglomota/Desulfobacterota/Pseudomonadota/Synergistota — all has-prior, none on no-prior; **no
+`Bacillota*` on no-prior** so Clostridial T-boxes can't be mis-scored novel). `pytest` **96 passed / 16 skipped** (bare
+CI sim — priors imports stdlib-only, parquet tier `importorskip`) and **15/15** with pandas; ruff 0.15.15 + black
+25.11.0 (`--target-version py312`) clean; `snakemake --lint` "good condition" + `-n` clean (rule out of `rule all`).
+**Decisions.** **§10.1 evidence gate (Stops)** — an 8-agent literature verification confirmed **3/4** Vitreschak clades
+at ≥2 mutually-independent sources (δ-proteo→**Desulfobacterota** [Geobacter/Pelobacter], *not* Myxococcota — matches
+the corpus's 38 Deltaproteobacteria rows, all Desulfuromonadales; Deinococcus–Thermus→Deinococcota; Chloroflexi→
+Chloroflexota); **Dictyoglomi is single-source** (only Vitreschak 2008; FEBS-2010 + TBDB/Zhu-2021 omit it) → **WITHHELD**
+from the curated set + flagged in the audit (**user decision 2026-07-09**, CLAUDE.md §10.1) — Dictyoglomota stays
+has-prior via 10 TBDB corpus loci so the no-prior list is unchanged. Over-credit split taxa (safe: over-crediting costs
+recall, under-crediting fabricates novelty — §7.2:163). ADR-0006 is **not yet authored** (P0-29); P0-14 builds against
+the PRD §7.2/§9.1/§13.3 spec directly (provenance `adr` = "PRD §7.2 (ADR-0006 pending, P0-29)"). Two bugs caught +
+fixed pre-commit: R232 CPR phylum is `Patescibacteriota` (not `Patescibacteria`) — stranded 9 known records; and `class`
+is a Python keyword so `itertuples`'s attribute access silently nulled every record's class (disabling the Proteobacteria
+routing) → switched to positional-tuple iteration. `verification: local (deterministic LOCAL rule)`. context7 §3.3: not
+required — no third-party library API written (stdlib + the in-repo `taxonomy`/`provenance` helpers; pandas lazy for the
+parquet read only). **Commit.** (this commit — the P0-14 atomic commit on branch `p0-14-union-prior`).

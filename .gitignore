@@ -110,6 +110,8 @@ htmlcov/
 .ipynb_checkpoints/
 .venv/
 venv/
+# uv is only the isolated bare-CI test runner (deps are pinned via conda-lock, not uv).
+uv.lock
 
 # ── Quarto / LaTeX render intermediates (rendered dev-log PDFs ARE committed) ──
 /.quarto/
