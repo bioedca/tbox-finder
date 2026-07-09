@@ -250,3 +250,32 @@ A4; Snakemake/sbatch will set it). A3 draft never committed → folded into A4; 
 User sign-off recorded 2026-07-08. Cross-ref ADR-0002 D5 + **A4**. Verification: artifact-based
 (conda-lock solve/install logs + lockfile pin audit + 16-URL live probe + two CPU smokes).
 **Commit.** (this commit — the P0-06c atomic commit on branch `p0-06c-ml-split`).
+
+## Step P0-07 — 2026-07-08: Build the CI Docker image (CUDA 12.8 + PyTorch, GHCR)
+**Inputs.** `envs/ml-dna.conda-lock.yml` + `envs/ml-rna.conda-lock.yml` (P0-06c), ADR-0002 D4 (as
+amended by A2 C1 + A4). **Process.** Authored `docker/Dockerfile` (`docker/Dockerfile`) on the
+`nvidia/cuda:12.8.1-cudnn-devel-ubuntu24.04` base (digest `sha256:24c8e358…`; latest 12.8 patch,
+tag existence probed on Docker Hub), installing Miniforge **25.3.1-0** → `conda-lock` **4.0.2** (the
+exact lock-generation version) → **both** locked envs via `conda-lock install --name <env> --mamba
+--copy` (`--copy` avoids cross-layer hardlinks; `--validate-platform` default asserts linux-64). A
+whitelist `.dockerignore` sends ONLY the two lock files into the build context (227 kB; no `.git`,
+data, or secrets). An inline entrypoint activates `${TBOX_ENV:-ml-dna}` and exports
+`CUDA_HOME=$CONDA_PREFIX` (ADR-0002 operational note). Built + smoked locally (BuildKit).
+**Outputs.** `docker/Dockerfile`, `.dockerignore`; local image `tbox-finder:p0-07`
+(`sha256:2c547f8f…`, **34.6 GB**). No DVC artifact (Dockerfile git-tracked; the image is a
+CI/GHCR build artifact). GHCR push is wired to the CI schedule/release trigger in **P0-08** (D4:
+built on schedule/release, not per-push). **Validation.** Gate PASSED. `docker build` exit 0; four
+import smokes green — two build-time (`conda run` per env) + two `docker run` end-to-end through the
+entrypoint: **ml-dna** = torch **2.7.1+cu128** / `torch.version.cuda` **12.8** / transformers
+**4.57.5**; **ml-rna** = same torch + transformers **5.13.0** + `import multimolecule` **0.0.9**
+(the P0-06b blocker, exercised again in-container); the three prebuilt kernel wheels present in both
+(`mamba-ssm` 2.2.6.post3, `causal-conv1d` 1.6.2.post1, `flash-attn` 2.8.3.post1, metadata-read — the
+GPU kernel *forward* smoke incl. `import selective_scan_cuda` stays P1, ADR-0002 A2 C2); entrypoint
+sets `CUDA_HOME` to the active env prefix. **Decisions.** `-devel` base retained ONLY for DeepSpeed
+JIT ZeRO ops (A2 C1 killed the mamba source build → zero source builds; `cuda-nvcc` 12.8 ships in
+both conda envs). Installs BOTH locks per the A4 env split (the retired single `ml` lock is gone).
+Entrypoint uses `set -eo pipefail` **without `-u`**: conda's `cuda-nvcc` activation
+(`~cuda-nvcc_activate.sh`) references unset `NVCC_PREPEND_FLAGS`, which nounset aborts on — a bug the
+end-to-end `docker run` caught that the build-time `conda run` smoke masked. Cross-ref ADR-0002 D4 /
+A2 C1 / A4. Verification: artifact-based (BuildKit build log + four container import smokes).
+**Commit.** (this commit — the P0-07 atomic commit on branch `p0-07-docker`).

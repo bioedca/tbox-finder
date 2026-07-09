@@ -1,0 +1,9 @@
+# Whitelist .dockerignore (CLAUDE.md §4: the repo is PUBLIC — the build context
+# must never carry data blobs, secrets, .git, or the local-only working docs).
+# The CI image (docker/Dockerfile) needs ONLY the two committed conda-lock files.
+# Exclude everything, then re-include just those, so the build context stays tiny.
+*
+!envs
+envs/*
+!envs/ml-dna.conda-lock.yml
+!envs/ml-rna.conda-lock.yml
