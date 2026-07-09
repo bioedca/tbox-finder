@@ -1,0 +1,79 @@
+{
+  "accessed_date": "2026-07-09",
+  "adr": "ADR-0003 (Amendment A1)",
+  "description": "P0-13: pinned governing GTDB release R232 (Release 11-RS232, 2026-04-15). Species-representative crosswalk staged + count-gated; genome→lineage taxonomy + metadata pinned for on-demand fetch. Binds §7.2 novelty, §9.2 clade labels, §13.2 P6 placement DB. CLAUDE.md §5.2/§10.2/§11.",
+  "files": [
+    {
+      "accessed_date": "2026-07-09",
+      "bytes": 51465830,
+      "filename": "sp_clusters_r232.tsv",
+      "license": "CC-BY-SA-4.0 (GTDB data; https://gtdb.ecogenomic.org/downloads)",
+      "md5": "7e4b2fc21135b6173d2b91ce4f290879",
+      "md5_verified": true,
+      "role": "Species-representative crosswalk — one row per GTDB species cluster (representative genome → GTDB taxonomy); row count == species-rep count (the P0-13 gate). Frames all §7.2 novelty determinations.",
+      "sha256": "96414cdc04addaac0280593f3d32a7c8c30cbc2aa498a9fee81886e478ec9fc9",
+      "staged": true,
+      "url": "https://data.gtdb.ecogenomic.org/releases/release232/232.0/auxillary_files/sp_clusters_r232.tsv"
+    },
+    {
+      "accessed_date": "2026-07-09",
+      "filename": "bac120_taxonomy_r232.tsv",
+      "license": "CC-BY-SA-4.0 (GTDB data; https://gtdb.ecogenomic.org/downloads)",
+      "md5": "4d42e137959485d57e8589bdf1b4c347",
+      "role": "Bacterial genome → 7-rank GTDB lineage crosswalk (all genomes). Fetched on demand by P0-14 (NCBI→GTDB projection), P0-15 (TaxId re-placement), P0-22 (clade labels).",
+      "staged": false,
+      "url": "https://data.gtdb.ecogenomic.org/releases/release232/232.0/bac120_taxonomy_r232.tsv"
+    },
+    {
+      "accessed_date": "2026-07-09",
+      "filename": "ar53_taxonomy_r232.tsv",
+      "license": "CC-BY-SA-4.0 (GTDB data; https://gtdb.ecogenomic.org/downloads)",
+      "md5": "c8e9aa537cf9c5e86e3fbf5972fd01d6",
+      "role": "Archaeal genome → 7-rank GTDB lineage crosswalk (§7.2 archaeal stretch).",
+      "staged": false,
+      "url": "https://data.gtdb.ecogenomic.org/releases/release232/232.0/ar53_taxonomy_r232.tsv"
+    },
+    {
+      "accessed_date": "2026-07-09",
+      "filename": "bac120_metadata_r232.tsv.gz",
+      "license": "CC-BY-SA-4.0 (GTDB data; https://gtdb.ecogenomic.org/downloads)",
+      "md5": "0ba4237077b65cfc5556e1d8be797485",
+      "role": "Bacterial full metadata (gtdb_representative flag, GTDB-Tk placement inputs; P6).",
+      "staged": false,
+      "url": "https://data.gtdb.ecogenomic.org/releases/release232/232.0/bac120_metadata_r232.tsv.gz"
+    },
+    {
+      "accessed_date": "2026-07-09",
+      "filename": "ar53_metadata_r232.tsv.gz",
+      "license": "CC-BY-SA-4.0 (GTDB data; https://gtdb.ecogenomic.org/downloads)",
+      "md5": "0f51fe6f01b4ccbf0d9bab6c07df87af",
+      "role": "Archaeal full metadata (P6).",
+      "staged": false,
+      "url": "https://data.gtdb.ecogenomic.org/releases/release232/232.0/ar53_metadata_r232.tsv.gz"
+    }
+  ],
+  "git_sha": "d27882b3fb6ff7f50446d6cb36ecb93e5b445321",
+  "gtdb_base_url": "https://data.gtdb.ecogenomic.org/releases/release232/232.0",
+  "gtdb_license": "CC-BY-SA-4.0 (GTDB data; https://gtdb.ecogenomic.org/downloads)",
+  "gtdb_release": "R232",
+  "gtdb_release_date": "2026-04-15",
+  "gtdb_release_label": "Release 11-RS232",
+  "gtdbtk_min_version": "2.7.0",
+  "gtdbtk_reference_package": "gtdbtk_r232_data.tar.gz",
+  "prd": "§7.2, §13.2",
+  "r220_fallback_invoked": false,
+  "rule": "workflow/rules/data.smk :: pin_gtdb_release",
+  "schema_version": "1.0",
+  "script": "src/tbox_finder/taxonomy.py",
+  "species_reps_counted": {
+    "archaea": 10122,
+    "bacteria": 189801,
+    "other": 0,
+    "total": 199923
+  },
+  "species_reps_published": {
+    "archaea": 10122,
+    "bacteria": 189801,
+    "total": 199923
+  }
+}

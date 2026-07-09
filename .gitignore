@@ -31,6 +31,11 @@
 # (P0-11a). Large fetched corpora elsewhere under data/external/ stay ignored.
 !/data/external/refs/
 !/data/external/refs/**
+# Carve-out: the P0-13 GTDB-release pin manifest ONLY (the release id, checksums,
+# species-rep counts). The ~49 MB sp_clusters crosswalk + on-demand taxonomy/metadata
+# stay ignored — re-fetched by workflow/rules/data.smk::pin_gtdb_release (CLAUDE.md §5.2).
+!/data/external/gtdb/
+!/data/external/gtdb/provenance.json
 
 # ── Snakemake working dir + rule run-logs (never committed) ──
 .snakemake/

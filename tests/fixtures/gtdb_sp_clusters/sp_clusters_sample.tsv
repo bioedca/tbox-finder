@@ -1,0 +1,6 @@
+Representative genome	GTDB species	GTDB taxonomy	ANI circumscription radius	Mean intra-species ANI	Min intra-species ANI	Mean intra-species AF	Min intra-species AF	No. clustered genomes	Clustered genomes
+RS_GCF_003697165.2	s__Escherichia coli	d__Bacteria;p__Pseudomonadota;c__Gammaproteobacteria;o__Enterobacterales;f__Enterobacteriaceae;g__Escherichia	95.000000	97.32	95.21	82.30	65.44	36408	RS_GCF_003697165.2
+RS_GCF_000742135.1	s__Klebsiella pneumoniae	d__Bacteria;p__Pseudomonadota;c__Gammaproteobacteria;o__Enterobacterales;f__Enterobacteriaceae;g__Klebsiella	95.000000	99.01	95.72	87.16	66.85	28487	RS_GCF_000742135.1
+RS_GCF_000006945.2	s__Salmonella enterica	d__Bacteria;p__Pseudomonadota;c__Gammaproteobacteria;o__Enterobacterales;f__Enterobacteriaceae;g__Salmonella	95.000000	98.91	95.01	92.47	77.33	21527	RS_GCF_000006945.2
+RS_GCF_000016525.1	s__Methanocatella smithii	d__Archaea;p__Methanobacteriota;c__Methanobacteria;o__Methanobacteriales;f__Methanobacteriaceae;g__Methanocatella	95.000000	98.54	97.77	90.37	65.34	194	RS_GCF_000016525.1
+GB_GCA_002686525.1	s__MGIIb-O2 sp002686525	d__Archaea;p__Thermoplasmatota;c__Poseidoniia;o__Poseidoniales;f__Thalassarchaeaceae;g__MGIIb-O2	95.000000	96.97	96.50	84.71	76.67	110	GB_GCA_002686525.1
