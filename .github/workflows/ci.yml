@@ -96,6 +96,11 @@ jobs:
 
   docker:
     name: build ML image (GHCR)
+    # Never publish an image from a state that fails the quality gates: only
+    # build/push after lint+dag+test succeed (they run on schedule/release too,
+    # having no event `if`). Composes with the event gate below — on PR/push the
+    # job stays `if`-skipped regardless of these deps.
+    needs: [lint, dag, test]
     # Reproducibility/archival artifact, NOT the cluster runtime (ADR-0002 D4,
     # CLAUDE.md §3.1). Built on schedule/release (or manual dispatch) only —
     # never per-PR (CLAUDE.md §8.6). NOTE (P0-08): the image is ~34.6 GB (P0-07);
