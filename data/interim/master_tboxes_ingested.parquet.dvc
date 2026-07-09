@@ -1,0 +1,5 @@
+outs:
+- md5: 7cbecf4208698e947e1eae44670be5df
+  size: 27176877
+  hash: md5
+  path: master_tboxes_ingested.parquet
