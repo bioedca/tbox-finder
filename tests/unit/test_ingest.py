@@ -256,6 +256,17 @@ def test_phylum_report_counts_and_dominance() -> None:
     assert rep["dominant_phylum"] == "Firmicutes"
 
 
+def test_phylum_report_handles_nullable_na() -> None:
+    pd = pytest.importorskip("pandas")
+    clean = ingest.clean(_synthetic_raw(), expect_records=None, expect_named_cols=None)
+    # nullable string dtype with pd.NA must not crash the pd.isna label path (CodeRabbit)
+    clean["phylum"] = clean["phylum"].astype("string")
+    clean.loc[0, "phylum"] = pd.NA
+    rep = ingest.phylum_report(clean)
+    assert rep["available"]
+    assert rep["counts"].get("NaN", 0) >= 1
+
+
 def test_run_ingest_end_to_end_and_gate(tmp_path) -> None:
     pd = pytest.importorskip("pandas")
     pytest.importorskip("pyarrow")
@@ -285,6 +296,10 @@ def test_run_ingest_end_to_end_and_gate(tmp_path) -> None:
     )
     assert report["hash_identity"]["identical"]
     assert report["parse_gate"]["cleaned_columns"] == 7
+    # report grades against the run's own expected counts, not the 23,535 production
+    # constants, so a fixture-sized run reports passed=True (CodeRabbit)
+    assert report["parse_gate"]["passed"]
+    assert report["parse_gate"]["expected_raw_records"] == 3
     # interim carries the hash column; processed does not
     interim = pd.read_parquet(tmp_path / "interim.parquet")
     processed = pd.read_parquet(tmp_path / "processed.parquet")

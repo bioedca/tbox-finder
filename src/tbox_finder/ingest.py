@@ -93,7 +93,12 @@ COORD_COLS_ZERO_SENTINEL: tuple[str, ...] = (
     "stem2_region_end",
 )
 
-#: ``discrim_end`` carries the literal ``-2`` as an additional "no value" sentinel.
+#: ``discrim_end`` carries the literal ``-2`` as its "no value" sentinel and is
+#: **deliberately NOT in** :data:`COORD_COLS_ZERO_SENTINEL` — the pinned tboxevo
+#: cleaner (``ingest_master_clean.py``) sentinels it on ``-2`` only, and the
+#: canonical parquet has **0** ``discrim_end == 0`` records, so 0-sentinelling it
+#: is a no-op that would encode an unvalidated semantics change vs the reproduced
+#: contract (P0-12 gate is per-record identity with that canonical). Kept separate.
 DISCRIM_END_NEG2_SENTINEL_COL = "discrim_end"
 
 #: Allowed ``Regulation`` labels — asserted as an early-warning if TBDB changes
@@ -366,6 +371,8 @@ def hash_identity(
 # --------------------------------------------------------------------------- #
 def phylum_report(df: pd.DataFrame) -> dict[str, Any]:
     """Per-phylum record counts + fractions (NaN phylum reported explicitly)."""
+    import pandas as pd
+
     if PHYLUM_COL not in df.columns:
         return {"available": False}
     vc = df[PHYLUM_COL].value_counts(dropna=False)
@@ -373,7 +380,7 @@ def phylum_report(df: pd.DataFrame) -> dict[str, Any]:
     counts: dict[str, int] = {}
     fracs: dict[str, float] = {}
     for key, cnt in vc.items():
-        label = "NaN" if (key is None or key != key) else str(key)
+        label = "NaN" if pd.isna(key) else str(key)
         counts[label] = int(cnt)
         fracs[label] = round(100.0 * int(cnt) / n, 4) if n else 0.0
     top = max(counts, key=counts.get) if counts else None
@@ -389,13 +396,15 @@ def phylum_report(df: pd.DataFrame) -> dict[str, Any]:
 
 def class_split_report(df: pd.DataFrame) -> dict[str, Any]:
     """Class I:II split from the ``type`` column (transcriptional:translational)."""
+    import pandas as pd
+
     if CLASS_TYPE_COL not in df.columns:
         return {"available": False}
     vc = df[CLASS_TYPE_COL].value_counts(dropna=False)
     by_type: dict[str, int] = {}
     by_class: dict[str, int] = {"I": 0, "II": 0, "unassigned": 0}
     for key, cnt in vc.items():
-        label = "NaN" if (key is None or key != key) else str(key)
+        label = "NaN" if pd.isna(key) else str(key)
         by_type[label] = int(cnt)
         cls = TYPE_TO_CLASS.get(label)
         if cls is None:
@@ -422,8 +431,16 @@ def build_report(
     cleaned_shape: tuple[int, int],
     identity: dict[str, Any],
     df_clean: pd.DataFrame,
+    expected_records: int = EXPECTED_RECORDS,
+    expected_raw_cols: int = EXPECTED_RAW_COLS,
+    expected_named_cols: int = EXPECTED_NAMED_COLS,
 ) -> dict[str, Any]:
-    """Assemble the count-parse report (PRD §7.1)."""
+    """Assemble the count-parse report (PRD §7.1).
+
+    The ``expected_*`` counts default to the production constants but are threaded
+    from :func:`run_ingest` so a fixture-sized run (e.g. 100 records) reports and
+    grades against its own expected counts, not the 23,535 production values.
+    """
     return {
         "schema_version": "1.0",
         "step": "P0-12",
@@ -431,19 +448,19 @@ def build_report(
         "parse_gate": {
             "raw_records": raw_shape[0],
             "raw_columns": raw_shape[1],
-            "expected_raw_records": EXPECTED_RECORDS,
-            "expected_raw_columns": EXPECTED_RAW_COLS,
+            "expected_raw_records": expected_records,
+            "expected_raw_columns": expected_raw_cols,
             "cleaned_records": cleaned_shape[0],
             "cleaned_columns": cleaned_shape[1],
-            "expected_cleaned_columns": EXPECTED_NAMED_COLS,
+            "expected_cleaned_columns": expected_named_cols,
             "raw_line_count_note": (
                 "39459 raw lines is a newline-inflated count (embedded newlines "
                 "in tRNA 2°-structure fields); the proper parse recovers "
                 f"{EXPECTED_RECORDS} records."
             ),
             "passed": (
-                raw_shape == (EXPECTED_RECORDS, EXPECTED_RAW_COLS)
-                and cleaned_shape == (EXPECTED_RECORDS, EXPECTED_NAMED_COLS)
+                raw_shape == (expected_records, expected_raw_cols)
+                and cleaned_shape == (expected_records, expected_named_cols)
             ),
         },
         "hash_identity": identity,
@@ -516,6 +533,9 @@ def run_ingest(
         cleaned_shape=(int(df_clean.shape[0]), int(df_clean.shape[1])),
         identity=identity,
         df_clean=df_clean,
+        expected_records=expect_records,
+        expected_raw_cols=expect_raw_cols,
+        expected_named_cols=(expect_named if expect_named is not None else int(df_clean.shape[1])),
     )
     _write_json(report, out_report)
 
