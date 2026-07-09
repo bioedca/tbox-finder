@@ -179,3 +179,51 @@ rule reconcile_union_prior:
         "--priors-dir {params.priors_dir:q} "
         "--audit-dir {params.audit_dir:q} "
         "--gtdb-dir {params.gtdb_dir:q} >{log} 2>&1"
+
+
+_INTERIM_DIR = "data/interim"
+_NCBI_TAX_DIR = "data/external/ncbi_taxonomy"
+
+
+rule replace_taxid_lineage:
+    """Re-derive lineage-by-rank for the taxonomy-incomplete positives from TaxId (P0-15; PRD §9.2/§12).
+
+    ~4% of the 23,535-record corpus lacks a clade label (453 no phylum, 841 no class, 928
+    no order), which the leave-one-order-out headline split + the no-leakage test cannot
+    silently absorb. Every such record carries an NCBI ``TaxId``, so this re-derives its
+    lineage from a **frozen, MD5-pinned NCBI taxdump snapshot** and fills only the missing
+    ranks (fill-only — the curated 96% is never overwritten), reconciling recovered labels
+    to the corpus's pre-2021 vintage via the taxdump's own synonym records. Emits
+    ``lineage_replaced.parquet`` (keyed by the row-aligned ``record_sha256``), the per-rank
+    recovery audit (``lineage_replacement_report.json``), an artifact provenance, and the
+    taxdump pin manifest. Residue with no formal NCBI rank is flagged
+    ``dropped_from_clade_holdout`` so a no-clade record can never enter a clade fold.
+
+    Like the other ``data.smk`` rules it is a **one-time LOCAL** rule kept out of ``rule
+    all`` with no ``input:`` — its inputs are two DVC artifacts (the corpus + the ingested
+    parquet, tracked by DVC + provenance) and an on-demand NCBI-taxdump fetch (~75 MB,
+    gitignored + re-fetched; only its ``provenance.json`` travels, CLAUDE.md §5.2). The
+    parquet is DVC-tracked (dvc pull downstream). Invoke:
+
+        snakemake --cores 1 --use-conda replace_taxid_lineage
+    """
+    output:
+        lineage_replaced=f"{_INTERIM_DIR}/lineage_replaced.parquet",
+        provenance=f"{_INTERIM_DIR}/lineage_replaced.provenance.json",
+        report=f"{_AUDIT_DIR}/lineage_replacement_report.json",
+        taxdump_provenance=f"{_NCBI_TAX_DIR}/provenance.json",
+    params:
+        # dirs derived from the outputs (not hardcoded prefixes) so `snakemake --lint`
+        # stays clean; the module writes the parquet + provenance under --interim-dir.
+        interim_dir=lambda wildcards, output: os.path.dirname(output.lineage_replaced),
+        audit_dir=lambda wildcards, output: os.path.dirname(output.report),
+        taxdump_dir=lambda wildcards, output: os.path.dirname(output.taxdump_provenance),
+    log:
+        "logs/replace_taxid_lineage.log",
+    conda:
+        "../../envs/data.yml"
+    shell:
+        "python -m tbox_finder.taxonomy replace-lineage "
+        "--interim-dir {params.interim_dir:q} "
+        "--audit-dir {params.audit_dir:q} "
+        "--taxdump-dir {params.taxdump_dir:q} >{log} 2>&1"

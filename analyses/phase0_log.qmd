@@ -538,3 +538,41 @@ is a Python keyword so `itertuples`'s attribute access silently nulled every rec
 routing) → switched to positional-tuple iteration. `verification: local (deterministic LOCAL rule)`. context7 §3.3: not
 required — no third-party library API written (stdlib + the in-repo `taxonomy`/`provenance` helpers; pandas lazy for the
 parquet read only). **Commit.** (this commit — the P0-14 atomic commit on branch `p0-14-union-prior`).
+
+## Step P0-15 — 2026-07-09: TaxId lineage re-placement for taxonomy-incomplete positives
+
+**Inputs.** `master_clean_v0.parquet` (P0-12; NCBI-named lineage cols + per-record NCBI `TaxId`, 0 nulls) +
+`master_tboxes_ingested.parquet` (row-aligned `record_sha256` hash-link, since master_clean carries no hash); a
+**frozen, MD5-pinned NCBI taxdump snapshot** (`taxdmp_2026-07-01.zip`, NCBI `taxdump_archive`).
+**Process.** `src/tbox_finder/taxonomy.py::replace_lineage` (+ `workflow/rules/data.smk::replace_taxid_lineage`, LOCAL,
+out of `rule all`, lambda-derived path params) walks each incomplete record's TaxId lineage from the pinned taxdump
+(`nodes/names/merged.dmp`, stdlib parse; merged-id redirect + cycle-guard) and **fill-only** recovers only the missing
+ranks — the curated 96% is never overwritten. Recovered labels are reconciled to the corpus's **pre-2021 NCBI vintage**
+(`Firmicutes`, not modern `Bacillota`) using the **taxdump's own synonym / equivalent-name records** (no hand-built
+rename map). **NCBI — not GTDB — is the re-derivation source** (Q-STOP resolved, user 2026-07-09): the TaxId is a native
+NCBI id, the split groups on NCBI order strings, and GTDB is genome-keyed so it cannot resolve the environmental /
+metagenome / CPR TaxIds that dominate the residue; GTDB R232 stays governing for novelty (P0-14) + P6 placement.
+**Outputs.** `data/interim/lineage_replaced.parquet` (23,535 × 16 — `record_sha256`, `TaxId`, `resolved_<rank>` +
+`<rank>_source` ∈ {corpus, taxid_recovered, unresolved} for phylum/class/order/family/genus, per-rank
+`dropped_from_{phylum,class,order}_holdout`, headline `dropped_from_clade_holdout` = order residue; DVC) +
+`data/processed/audits/lineage_replacement_report.json` + `lineage_replaced.provenance.json` +
+`data/external/ncbi_taxonomy/provenance.json` (taxdump pin: url/md5/sha256/license/bytes).
+**Validation.** **PASSED** — total accounting == **23,535** per rank (present + recovered + still_incomplete;
+`accounting_ok`, fail-loud §10.3); recovery per rank **phylum 32/453 (7.06%)**, **class 71/841 (8.44%)**, **order
+59/928 (6.36%)** — modest by design, the residue is genuinely-unplaceable environmental/metagenome + MAG-clade-only /
+CPR taxa with no formal NCBI rank; **869 `dropped_from_clade_holdout`** (order residue → random-split-only) and the
+load-bearing invariant holds: `resolved_order` NULL ⟺ dropped, so **a no-clade record can never silently enter a clade
+fold** (PRD §9.2 / §8.2). `pytest tests/unit` **116 passed / 5 skipped** (bare CI sim — pure parse/lineage/reconcile
+tier runs; parquet tier `importorskip` pyarrow) and **9/9** with pandas+pyarrow; ruff 0.15.15 + black 25.11.0
+(`--target-version py312`) clean; `snakemake --lint` "good condition" + `-n` clean.
+**Decisions.** The **frozen governing-release taxonomy** phrase (PRD §9.2) is realized as the **pinned NCBI taxdump**
+for re-derivation, not GTDB — a deviation from the P0-13-wired GTDB files, surfaced as a **§7 Q-STOP** (corpus is
+NCBI-named at an old vintage + GTDB genome-keyed would corrupt split labels; **user chose Option A** — pinned NCBI
+taxdump + vintage-normalization). The 46 genuinely-**new recovered orders** are all Candidatus orders for organisms that
+had no order before (not vintage-variants of existing corpus orders → no split incoherence), surfaced in
+`new_taxa_introduced` for transparency. `fetch_taxdump` verifies MD5 vs the pin on `download=True` (production), trusts a
+pre-staged file on `download=False` (offline/tests). ADR-0004 is **not yet authored** (P0-19); P0-15 builds against PRD
+§9.2/§12 directly (provenance `adr` = "PRD §9.2 (ADR-0004 pending, P0-19)"). context7 §3.3: not required — stdlib
+(urllib/zipfile/hashlib) + in-repo `provenance` helper; pandas/pyarrow lazy for the parquet join only.
+`verification: local (deterministic LOCAL rule)`. **Commit.** (this commit — the P0-15 atomic commit on branch
+`p0-15-taxid-lineage`).

@@ -1,0 +1,21 @@
+{
+  "accessed_date": "2026-07-09",
+  "adr": "PRD §9.2 (ADR-0004 pending, P0-19)",
+  "bytes": 75118018,
+  "description": "P0-15: pinned NCBI Taxonomy snapshot for TaxId → lineage re-placement of the ~4% clade-incomplete corpus positives (PRD §9.2). NCBI — not GTDB — is the re-derivation source: the TaxId is a native NCBI id and the split labels are NCBI-named at a pre-2021 vintage; GTDB stays governing for novelty (P0-14) + P6 placement. Immutable dated taxdump_archive zip; MD5-verified on fetch.",
+  "files_used": [
+    "nodes.dmp",
+    "names.dmp",
+    "merged.dmp"
+  ],
+  "git_sha": "906441f71768be938d67446e49748488b3821777",
+  "license": "NCBI Taxonomy — public domain (US Gov work; NCBI data-usage policies)",
+  "md5": "f024526caf1d1183de84ab38edd24fbd",
+  "prd": "§9.2, §12",
+  "rule": "workflow/rules/data.smk :: replace_taxid_lineage",
+  "schema_version": "1.0",
+  "script": "src/tbox_finder/taxonomy.py",
+  "sha256": "7afc2d0707abd481baff334bb5c345e9fbd36f4f0d1d912d2660ac18920def05",
+  "snapshot": "taxdmp_2026-07-01.zip",
+  "url": "https://ftp.ncbi.nlm.nih.gov/pub/taxonomy/taxdump_archive/taxdmp_2026-07-01.zip"
+}

@@ -1,10 +1,29 @@
-"""taxonomy.py — pin the governing GTDB release + stage the species-rep crosswalk (P0-13).
+"""taxonomy.py — governing GTDB release pin (P0-13) + TaxId lineage re-placement (P0-15).
 
 One **governing GTDB release** binds every downstream taxonomic determination in the
 project: the union novelty prior and all "novel-lineage" calls (PRD §7.2), the split
 clade labels (§9.2), and the P6 GTDB-Tk host-placement DB (§13.2). Pinning it wrong
 silently shifts every novelty call, so the release is frozen here — once — with full
 provenance and a hard count gate.
+
+**P0-15 (TaxId lineage re-placement).** ~4% of the 23,535-record corpus lacks a clade
+label (453 no phylum, 841 no class, 928 no order — PRD §9.2), which the leave-one-order-out
+headline split and the no-leakage test cannot silently absorb. Every such record carries
+an NCBI ``TaxId``, so :func:`replace_lineage` re-derives its lineage-by-rank from a
+**frozen, checksum-pinned NCBI Taxonomy snapshot** (dated ``taxdump_archive`` zip) and
+fills only the missing ranks (fill-only — the curated 96% is never overwritten). The
+corpus's existing labels are NCBI names at a pre-2021 vintage (``Firmicutes``, not the
+modern ``Bacillota``) and the split groups on those exact strings, so recovered labels are
+reconciled to the corpus vintage using the **taxdump's own synonym / equivalent-name
+records** (no hand-built rename map to go stale). NCBI — not GTDB — is the re-derivation
+source here because the ``TaxId`` is a native NCBI id, the split labels are NCBI-named, and
+GTDB is genome-keyed (it cannot resolve the environmental / metagenome / CPR TaxIds that
+dominate the residue). GTDB R232 remains governing for novelty (P0-14) + P6 placement; NCBI
+is the frozen source for corpus-lineage recovery — complementary, not conflicting. Any
+**still-incomplete residue** (organisms with no formal NCBI rank — metagenomes, uncultured
+MAGs, CPR) is flagged ``dropped_from_clade_holdout`` (kept only in the random split), so a
+no-clade record can never silently enter a clade fold. The recovery rate is reported per
+rank; total accounting sums to 23,535 (fail-loud, §10.3).
 
 **Pinned release: GTDB R232 (Release 11-RS232, 2026-04-15).** This is the release the
 reusable tboxevo taxonomy maps were built against (tboxevo ADR-0001), and its contingency
@@ -33,13 +52,16 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import io
 import json
+import sys
 import urllib.request
-from collections.abc import Iterable, Mapping
+import zipfile
+from collections.abc import Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from tbox_finder.provenance import SCHEMA_VERSION, git_sha
+from tbox_finder.provenance import SCHEMA_VERSION, git_sha, write_provenance
 
 #: Canonical committed home for the GTDB pin provenance (the large crosswalk TSVs
 #: staged alongside stay gitignored + re-fetched; only provenance.json is committed).
@@ -140,6 +162,51 @@ FILES: tuple[GtdbFile, ...] = (
         role="Archaeal full metadata (P6).",
     ),
 )
+
+
+# --- P0-15: pinned NCBI Taxonomy snapshot (TaxId → lineage re-placement) ---------------
+#: Canonical committed home for the taxdump pin provenance (the dated zip staged alongside
+#: stays gitignored + re-fetched; only provenance.json is committed — mirrors GTDB_DIR).
+NCBI_TAXONOMY_DIR = Path("data/external/ncbi_taxonomy")
+
+#: A dated snapshot from NCBI's **immutable** ``taxdump_archive`` (the dated zips never
+#: change, unlike the rolling ``taxdump.tar.gz``), pinned for reproducible re-derivation.
+#: 2026-07-01 is the most recent archived snapshot at/near the project accessed-date, so it
+#: carries the most-complete lineage; being NCBI-native it resolves every corpus TaxId that
+#: has a formal rank. NCBI publishes no ``.md5`` companion for the dated archive files, so
+#: the checksums below are our own — computed on download (2026-07-09) and fail-loud
+#: re-verified on every fetch (CLAUDE.md §10.3).
+TAXDUMP_SNAPSHOT = "taxdmp_2026-07-01.zip"
+TAXDUMP_URL = "https://ftp.ncbi.nlm.nih.gov/pub/taxonomy/taxdump_archive/taxdmp_2026-07-01.zip"
+TAXDUMP_MD5 = "f024526caf1d1183de84ab38edd24fbd"
+TAXDUMP_SHA256 = "7afc2d0707abd481baff334bb5c345e9fbd36f4f0d1d912d2660ac18920def05"
+#: NCBI Taxonomy is a US-Government work in the public domain (NCBI data-usage policies,
+#: https://www.ncbi.nlm.nih.gov/home/about/policies/; accessed 2026-07-09).
+TAXDUMP_LICENSE = "NCBI Taxonomy — public domain (US Gov work; NCBI data-usage policies)"
+
+#: The lineage-by-rank columns re-derived per record (the corpus's own rank vocabulary).
+LINEAGE_RANKS: tuple[str, ...] = ("phylum", "class", "order", "family", "genus")
+#: The split ranks that carry a per-rank ``dropped_from_<rank>_holdout`` flag (PRD §9.2
+#: reports residue "per rank"); the headline leave-one-order-out holdout is the ``order``.
+HOLDOUT_RANKS: tuple[str, ...] = ("phylum", "class", "order")
+HEADLINE_HOLDOUT_RANK = "order"
+
+#: Per-rank provenance of a resolved label (which source filled it).
+SOURCE_CORPUS = "corpus"  # kept from the curated corpus (fill-only never overwrites)
+SOURCE_RECOVERED = "taxid_recovered"  # re-derived from the TaxId via the frozen taxdump
+SOURCE_UNRESOLVED = "unresolved"  # no formal NCBI rank → residue (dropped from clade-holdout)
+
+#: NCBI ``names.dmp`` scientific-name class (the fallback when no vintage synonym matches).
+_SCI_NAME_CLASS = "scientific name"
+#: Default corpus inputs (overridable on the CLI); ``ingested`` supplies the row-aligned
+#: ``record_sha256`` hash-link that master_clean_v0 does not itself carry (PRD §9.2).
+CORPUS_PARQUET = Path("data/processed/master_clean_v0.parquet")
+INGESTED_PARQUET = Path("data/interim/master_tboxes_ingested.parquet")
+INTERIM_DIR = Path("data/interim")
+AUDIT_DIR = Path("data/processed/audits")
+LINEAGE_REPLACED_NAME = "lineage_replaced.parquet"
+LINEAGE_REPLACED_PROVENANCE = "lineage_replaced.provenance.json"
+LINEAGE_AUDIT_NAME = "lineage_replacement_report.json"
 
 
 def _stream_download(url: str, dest: Path) -> tuple[str, str, int]:
@@ -329,10 +396,398 @@ def pin_release(
     return manifest_path
 
 
-def main(argv: list[str] | None = None) -> int:
-    """CLI entry: ``python -m tbox_finder.taxonomy --dest-dir data/external/gtdb``."""
+# ======================================================================================
+# P0-15 — TaxId → lineage re-derivation from the frozen NCBI taxdump
+# ======================================================================================
+
+
+def _iter_dmp(lines: Iterable[str]) -> Iterator[list[str]]:
+    r"""Yield trimmed field-lists from NCBI ``.dmp`` rows (``a\t|\tb\t|\t…\t|``)."""
+    for raw in lines:
+        row = raw.rstrip("\n")
+        if row.endswith("\t|"):
+            row = row[:-2]
+        yield [field.strip() for field in row.split("\t|\t")]
+
+
+def parse_nodes(lines: Iterable[str]) -> tuple[dict[int, int], dict[int, str]]:
+    """Parse ``nodes.dmp`` → ``(parent[taxid], rank[taxid])``."""
+    parent: dict[int, int] = {}
+    rank: dict[int, str] = {}
+    for row in _iter_dmp(lines):
+        taxid = int(row[0])
+        parent[taxid] = int(row[1])
+        rank[taxid] = row[2]
+    return parent, rank
+
+
+def parse_merged(lines: Iterable[str]) -> dict[int, int]:
+    """Parse ``merged.dmp`` → ``{old_taxid: new_taxid}`` (retired-id redirects)."""
+    return {int(row[0]): int(row[1]) for row in _iter_dmp(lines)}
+
+
+def parse_names(
+    lines: Iterable[str], keep: set[int] | None = None
+) -> dict[int, dict[str, list[str]]]:
+    """Parse ``names.dmp`` → ``{taxid: {name_class: [names]}}``.
+
+    ``keep`` restricts to those taxids (only the ancestors reconciliation actually needs)
+    so the ~290 MB file need not be held whole. **All** name classes are retained — the
+    vintage reconciliation searches synonyms + equivalent names, not just the sci name.
+    """
+    out: dict[int, dict[str, list[str]]] = {}
+    for row in _iter_dmp(lines):
+        taxid = int(row[0])
+        if keep is not None and taxid not in keep:
+            continue
+        out.setdefault(taxid, {}).setdefault(row[3], []).append(row[1])
+    return out
+
+
+def resolve_merged(taxid: int, merged: Mapping[int, int]) -> int:
+    """Redirect a retired TaxId through ``merged.dmp`` (identity if not merged)."""
+    return merged.get(int(taxid), int(taxid))
+
+
+def lineage_by_rank(
+    taxid: int,
+    parent: Mapping[int, int],
+    rank: Mapping[int, str],
+    merged: Mapping[int, int],
+    ranks: Sequence[str] = LINEAGE_RANKS,
+) -> dict[str, int]:
+    """Walk parents to root; return ``{rank_name: ancestor_taxid}`` for the target ranks.
+
+    Ranks the lineage does not carry — a common case, since CPR / environmental / MAG
+    taxa lack a formal order or even phylum in NCBI itself — are simply absent from the
+    result (they become the residue). Cycle-guarded and root-terminating.
+    """
+    out: dict[str, int] = {}
+    seen: set[int] = set()
+    want = set(ranks)
+    cur = resolve_merged(taxid, merged)
+    while cur and cur not in seen:
+        seen.add(cur)
+        rk = rank.get(cur)
+        if rk in want and rk not in out:
+            out[rk] = cur
+        nxt = parent.get(cur)
+        if nxt is None or nxt == cur:
+            break
+        cur = nxt
+    return out
+
+
+def reconcile_name(
+    taxid: int,
+    names_by_taxid: Mapping[int, Mapping[str, Sequence[str]]],
+    vocab_at_rank: Iterable[str],
+) -> tuple[str | None, str]:
+    """Pick the taxid's name matching the corpus vintage vocab, else its scientific name.
+
+    Searches every name class (synonym, equivalent name, …) for a string the corpus
+    already uses at this rank — so modern ``Bacillota`` reconciles back to the corpus's
+    ``Firmicutes`` when NCBI records that as a synonym. Returns ``(name, source)`` with
+    ``source ∈ {"vocab-synonym", "scientific"}``; ``name`` is ``None`` only if the taxid
+    has no scientific name (never expected for a real node).
+    """
+    vocab = vocab_at_rank if isinstance(vocab_at_rank, (set, frozenset)) else set(vocab_at_rank)
+    entry = names_by_taxid.get(taxid, {})
+    for names in entry.values():
+        for name in names:
+            if name in vocab:
+                return name, "vocab-synonym"
+    sci = entry.get(_SCI_NAME_CLASS)
+    return (sci[0] if sci else None), "scientific"
+
+
+def resolve_row(
+    existing: Mapping[str, str | None],
+    lineage: Mapping[str, int],
+    names_by_taxid: Mapping[int, Mapping[str, Sequence[str]]],
+    vocab: Mapping[str, Iterable[str]],
+    ranks: Sequence[str] = LINEAGE_RANKS,
+) -> dict[str, object]:
+    """Fill-only lineage resolution for one record.
+
+    For each rank: keep the curated corpus label if present (``source=corpus`` — the 96%
+    is never overwritten); else recover it from the TaxId lineage, reconciled to the
+    corpus vintage (``source=taxid_recovered``); else leave it unresolved
+    (``source=unresolved`` → residue). Returns ``resolved_<rank>`` + ``<rank>_source`` for
+    every rank.
+    """
+    out: dict[str, object] = {}
+    for rk in ranks:
+        cur = existing.get(rk)
+        if cur is not None:
+            out[f"resolved_{rk}"] = cur
+            out[f"{rk}_source"] = SOURCE_CORPUS
+            continue
+        anc = lineage.get(rk)
+        name: str | None = None
+        if anc is not None:
+            name, _how = reconcile_name(anc, names_by_taxid, vocab.get(rk, ()))
+        if name is not None:
+            out[f"resolved_{rk}"] = name
+            out[f"{rk}_source"] = SOURCE_RECOVERED
+        else:
+            out[f"resolved_{rk}"] = None
+            out[f"{rk}_source"] = SOURCE_UNRESOLVED
+    return out
+
+
+def fetch_taxdump(dest_dir: str | Path = NCBI_TAXONOMY_DIR, *, download: bool = True) -> Path:
+    """Ensure the pinned taxdump zip is present + MD5-correct under ``dest_dir``.
+
+    With ``download=True`` (production) the pin is enforced: a checksum-matching staged
+    copy is re-used, otherwise the file is (re-)downloaded and fail-loud MD5-verified
+    against the pin (CLAUDE.md §10.3 — a wrong taxonomy snapshot must never drive the
+    split silently). With ``download=False`` (offline / tests) an already-present file is
+    trusted as-is (no network, no pin check — the caller supplied it deliberately); an
+    absent file errors. Returns the zip path.
+    """
+    dst = Path(dest_dir)
+    dst.mkdir(parents=True, exist_ok=True)
+    zip_path = dst / TAXDUMP_SNAPSHOT
+    if not download:
+        if zip_path.is_file():
+            return zip_path
+        raise FileNotFoundError(f"taxdump {zip_path} absent and download=False")
+    if zip_path.is_file() and _md5_file(zip_path) == TAXDUMP_MD5:
+        return zip_path
+    got_md5, _sha, _n = _stream_download(TAXDUMP_URL, zip_path)
+    if got_md5 != TAXDUMP_MD5:
+        raise ValueError(
+            f"NCBI taxdump checksum mismatch: got MD5 {got_md5} != pinned {TAXDUMP_MD5} "
+            f"(url {TAXDUMP_URL})"
+        )
+    return zip_path
+
+
+def _zip_lines(zf: zipfile.ZipFile, name: str) -> Iterator[str]:
+    """Yield decoded text lines from ``name`` inside an open taxdump zip."""
+    with zf.open(name) as fh:
+        yield from io.TextIOWrapper(fh, encoding="utf-8")
+
+
+def read_taxdump(
+    zip_path: str | Path, incomplete_taxids: Iterable[int], ranks: Sequence[str] = LINEAGE_RANKS
+) -> tuple[dict[int, dict[str, int]], dict[int, dict[str, list[str]]]]:
+    """From the taxdump zip, build ``{taxid: lineage_by_rank}`` for the incomplete TaxIds
+    plus the ``names.dmp`` sub-table for the ancestor taxids those lineages reference."""
+    incomplete = {int(t) for t in incomplete_taxids}
+    with zipfile.ZipFile(zip_path) as zf:
+        merged = parse_merged(_zip_lines(zf, "merged.dmp"))
+        parent, rank = parse_nodes(_zip_lines(zf, "nodes.dmp"))
+        lineages = {t: lineage_by_rank(t, parent, rank, merged, ranks) for t in incomplete}
+        needed = {anc for lin in lineages.values() for anc in lin.values()}
+        names_by_taxid = parse_names(_zip_lines(zf, "names.dmp"), keep=needed)
+    return lineages, names_by_taxid
+
+
+@dataclass(frozen=True)
+class ReplaceLineageOutputs:
+    """Paths + in-memory report returned by :func:`replace_lineage`."""
+
+    parquet: Path
+    audit: Path
+    provenance: Path
+    taxdump_provenance: Path
+    report: dict
+
+
+def build_taxdump_provenance(zip_path: Path) -> dict:
+    """The committed pin manifest for the frozen NCBI taxdump (mirrors the GTDB pin)."""
+    size = zip_path.stat().st_size if Path(zip_path).is_file() else None
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "description": (
+            "P0-15: pinned NCBI Taxonomy snapshot for TaxId → lineage re-placement of the "
+            "~4% clade-incomplete corpus positives (PRD §9.2). NCBI — not GTDB — is the "
+            "re-derivation source: the TaxId is a native NCBI id and the split labels are "
+            "NCBI-named at a pre-2021 vintage; GTDB stays governing for novelty (P0-14) + "
+            "P6 placement. Immutable dated taxdump_archive zip; MD5-verified on fetch."
+        ),
+        "rule": "workflow/rules/data.smk :: replace_taxid_lineage",
+        "script": "src/tbox_finder/taxonomy.py",
+        "prd": "§9.2, §12",
+        "adr": "PRD §9.2 (ADR-0004 pending, P0-19)",
+        "git_sha": git_sha(),
+        "accessed_date": ACCESSED_DATE,
+        "snapshot": TAXDUMP_SNAPSHOT,
+        "url": TAXDUMP_URL,
+        "md5": TAXDUMP_MD5,
+        "sha256": TAXDUMP_SHA256,
+        "bytes": size,
+        "license": TAXDUMP_LICENSE,
+        "files_used": ["nodes.dmp", "names.dmp", "merged.dmp"],
+    }
+
+
+def build_recovery_report(out_df, corpus_missing, vocab, ranks=LINEAGE_RANKS) -> dict:
+    """Assemble + fail-loud-check the per-rank recovery accounting from the resolved frame.
+
+    ``out_df`` is the resolved DataFrame; ``corpus_missing`` maps each rank to its
+    pre-recovery isna count (the independent cross-check). Asserts, for every rank,
+    ``recovered + still_incomplete == pre_missing`` and
+    ``present + recovered + still_incomplete == n`` (CLAUDE.md §10.3). Also lists the
+    genuinely-new taxa a recovery introduced (recovered names absent from the corpus
+    vocab — e.g. new Candidatus orders), for transparency.
+    """
+    n = len(out_df)
+    per_rank: dict[str, dict] = {}
+    new_taxa: dict[str, dict[str, int]] = {}
+    for r in ranks:
+        src = out_df[f"{r}_source"]
+        present = int((src == SOURCE_CORPUS).sum())
+        recovered = int((src == SOURCE_RECOVERED).sum())
+        still = int((src == SOURCE_UNRESOLVED).sum())
+        pre_missing = int(corpus_missing[r])
+        if recovered + still != pre_missing:
+            raise ValueError(
+                f"accounting FAILED (§10.3) at rank {r}: recovered {recovered} + "
+                f"still_incomplete {still} != pre_missing {pre_missing}"
+            )
+        if present + recovered + still != n:
+            raise ValueError(
+                f"accounting FAILED (§10.3) at rank {r}: present {present} + recovered "
+                f"{recovered} + still {still} != n {n}"
+            )
+        per_rank[r] = {
+            "present_from_corpus": present,
+            "pre_missing": pre_missing,
+            "recovered": recovered,
+            "still_incomplete": still,
+            "recovery_rate": round(recovered / pre_missing, 4) if pre_missing else None,
+        }
+        rec_mask = src == SOURCE_RECOVERED
+        rvocab = set(vocab.get(r, ()))
+        counts: dict[str, int] = {}
+        for name in out_df.loc[rec_mask, f"resolved_{r}"]:
+            if name is not None and name not in rvocab:
+                counts[name] = counts.get(name, 0) + 1
+        if counts:
+            new_taxa[r] = dict(sorted(counts.items(), key=lambda kv: -kv[1]))
+    dropped = {r: int((out_df[f"{r}_source"] == SOURCE_UNRESOLVED).sum()) for r in HOLDOUT_RANKS}
+    return {
+        "n_records": n,
+        "per_rank": per_rank,
+        "dropped_from_clade_holdout": dropped[HEADLINE_HOLDOUT_RANK],
+        "dropped_per_rank": dropped,
+        "new_taxa_introduced": new_taxa,
+        "accounting_ok": True,
+    }
+
+
+def replace_lineage(
+    corpus_path: str | Path = CORPUS_PARQUET,
+    ingested_path: str | Path = INGESTED_PARQUET,
+    *,
+    taxdump_dir: str | Path = NCBI_TAXONOMY_DIR,
+    interim_dir: str | Path = INTERIM_DIR,
+    audit_dir: str | Path = AUDIT_DIR,
+    download: bool = True,
+    ranks: Sequence[str] = LINEAGE_RANKS,
+) -> ReplaceLineageOutputs:
+    """Re-derive lineage-by-rank for the taxonomy-incomplete positives (P0-15; PRD §9.2).
+
+    Fill-only: keeps every present corpus label, recovers only missing ranks from the
+    frozen NCBI taxdump (vintage-reconciled), flags the still-incomplete residue
+    ``dropped_from_clade_holdout``. Writes ``lineage_replaced.parquet`` (keyed by the
+    row-aligned ``record_sha256``), a per-rank recovery audit, an artifact provenance, and
+    the taxdump pin provenance. Returns their paths + the report.
+    """
+    import pandas as pd  # lazy — keeps the module import stdlib-only for the unit tests
+
+    corpus_path = Path(corpus_path)
+    interim_dir = Path(interim_dir)
+    audit_dir = Path(audit_dir)
+    corpus = pd.read_parquet(corpus_path)
+    n = len(corpus)
+
+    # Row-aligned record_sha256 hash-link (master_clean_v0 carries no hash itself; PRD §9.2).
+    ingested = pd.read_parquet(ingested_path, columns=["record_sha256", "TaxId"])
+    if len(ingested) != n:
+        raise ValueError(
+            f"ingested ({len(ingested)}) / corpus ({n}) length mismatch — cannot attach "
+            "record_sha256"
+        )
+    if not (
+        ingested["TaxId"].reset_index(drop=True) == corpus["TaxId"].reset_index(drop=True)
+    ).all():
+        raise ValueError(
+            "ingested/clean parquet row-misalignment (TaxId) — cannot attach record_sha256"
+        )
+
+    # Corpus vintage vocab per rank (the reconciliation target) + the incomplete TaxIds.
+    vocab = {r: frozenset(corpus[r].dropna().astype(str)) for r in ranks}
+    corpus_missing = {r: int(corpus[r].isna().sum()) for r in ranks}
+    incomplete_mask = pd.Series(False, index=corpus.index)
+    for r in ranks:
+        incomplete_mask = incomplete_mask | corpus[r].isna()
+    incomplete_taxids = {int(t) for t in corpus.loc[incomplete_mask, "TaxId"].unique()}
+
+    zip_path = fetch_taxdump(taxdump_dir, download=download)
+    lineages, names_by_taxid = read_taxdump(zip_path, incomplete_taxids, ranks)
+
+    existing_records = corpus[list(ranks)].to_dict("records")
+    taxids = corpus["TaxId"].astype(int).tolist()
+    rows = []
+    for existing_row, taxid in zip(existing_records, taxids, strict=True):
+        existing = {r: (v if pd.notna(v) else None) for r, v in existing_row.items()}
+        rows.append(resolve_row(existing, lineages.get(taxid, {}), names_by_taxid, vocab, ranks))
+    out = pd.DataFrame.from_records(rows)
+    out.insert(0, "record_sha256", ingested["record_sha256"].to_numpy())
+    out.insert(1, "TaxId", corpus["TaxId"].to_numpy())
+    for r in HOLDOUT_RANKS:
+        out[f"dropped_from_{r}_holdout"] = out[f"{r}_source"] == SOURCE_UNRESOLVED
+    out["dropped_from_clade_holdout"] = out[f"dropped_from_{HEADLINE_HOLDOUT_RANK}_holdout"]
+
+    report = build_recovery_report(out, corpus_missing, vocab, ranks)
+
+    interim_dir.mkdir(parents=True, exist_ok=True)
+    audit_dir.mkdir(parents=True, exist_ok=True)
+    out_parquet = interim_dir / LINEAGE_REPLACED_NAME
+    out.to_parquet(out_parquet, index=False)
+    out_audit = audit_dir / LINEAGE_AUDIT_NAME
+    out_audit.write_text(json.dumps(report, indent=2, sort_keys=True, ensure_ascii=False) + "\n")
+
+    tax_prov_path = Path(taxdump_dir) / "provenance.json"
+    tax_prov_path.parent.mkdir(parents=True, exist_ok=True)
+    tax_prov_path.write_text(
+        json.dumps(build_taxdump_provenance(zip_path), indent=2, sort_keys=True, ensure_ascii=False)
+        + "\n"
+    )
+
+    out_provenance = interim_dir / LINEAGE_REPLACED_PROVENANCE
+    write_provenance(
+        out_provenance,
+        rule="workflow/rules/data.smk :: replace_taxid_lineage",
+        script="src/tbox_finder/taxonomy.py",
+        inputs=[corpus_path, ingested_path, tax_prov_path],
+        outputs=[out_parquet, out_audit],
+        env_lock="envs/data.conda-lock.yml",
+        adr="PRD §9.2 (ADR-0004 pending, P0-19)",
+        extra={
+            "taxdump_snapshot": TAXDUMP_SNAPSHOT,
+            "n_records": n,
+            "dropped_from_clade_holdout": report["dropped_from_clade_holdout"],
+            "order_recovery_rate": report["per_rank"]["order"]["recovery_rate"],
+        },
+    )
+    return ReplaceLineageOutputs(out_parquet, out_audit, out_provenance, tax_prov_path, report)
+
+
+# ======================================================================================
+# CLI dispatch — ``pin`` (P0-13, default) / ``replace-lineage`` (P0-15)
+# ======================================================================================
+
+
+def _run_pin(argv: list[str] | None) -> int:
+    """P0-13 CLI: ``python -m tbox_finder.taxonomy [pin] --dest-dir data/external/gtdb``."""
     parser = argparse.ArgumentParser(
-        description="Pin the governing GTDB release + stage the species-rep crosswalk (P0-13)."
+        prog="tbox_finder.taxonomy pin",
+        description="Pin the governing GTDB release + stage the species-rep crosswalk (P0-13).",
     )
     parser.add_argument("--dest-dir", default=str(GTDB_DIR), help="staging destination")
     parser.add_argument(
@@ -347,6 +802,48 @@ def main(argv: list[str] | None = None) -> int:
     tail = f" ({counted['total']} species reps)" if counted else " (pins only, no fetch)"
     print(f"pinned GTDB {GTDB_RELEASE} -> {out}{tail}")
     return 0
+
+
+def _run_replace_lineage(argv: list[str] | None) -> int:
+    """P0-15 CLI: ``python -m tbox_finder.taxonomy replace-lineage --interim-dir …``."""
+    parser = argparse.ArgumentParser(
+        prog="tbox_finder.taxonomy replace-lineage",
+        description="Re-derive lineage-by-rank for taxonomy-incomplete positives (P0-15).",
+    )
+    parser.add_argument("--corpus", default=str(CORPUS_PARQUET))
+    parser.add_argument("--ingested", default=str(INGESTED_PARQUET))
+    parser.add_argument("--taxdump-dir", default=str(NCBI_TAXONOMY_DIR))
+    parser.add_argument("--interim-dir", default=str(INTERIM_DIR))
+    parser.add_argument("--audit-dir", default=str(AUDIT_DIR))
+    parser.add_argument(
+        "--no-download", action="store_true", help="require an already-present taxdump zip"
+    )
+    args = parser.parse_args(argv)
+    result = replace_lineage(
+        args.corpus,
+        args.ingested,
+        taxdump_dir=args.taxdump_dir,
+        interim_dir=args.interim_dir,
+        audit_dir=args.audit_dir,
+        download=not args.no_download,
+    )
+    order = result.report["per_rank"]["order"]
+    print(
+        f"re-placed lineage -> {result.parquet} "
+        f"(order recovered {order['recovered']}/{order['pre_missing']}, "
+        f"{result.report['dropped_from_clade_holdout']} dropped_from_clade_holdout)"
+    )
+    return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    """CLI dispatch. ``replace-lineage`` → P0-15; anything else → the P0-13 pin (default)."""
+    args = list(sys.argv[1:] if argv is None else argv)
+    if args and args[0] == "replace-lineage":
+        return _run_replace_lineage(args[1:])
+    if args and args[0] == "pin":
+        return _run_pin(args[1:])
+    return _run_pin(args)
 
 
 if __name__ == "__main__":
