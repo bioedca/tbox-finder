@@ -13,6 +13,7 @@ dependencies:
   - scipy=1.18.0
   - pandas=2.3.3   # ADR-0002 P0-05 amendment: 3.0.3->2.3.3 (bioconda snakemake-executor-plugin-slurm 2.7.1 over-caps pandas<3.0, contra upstream <4)
   - polars=1.42.1
+  - pyarrow=24.0.0   # P0-12: parquet engine for pandas I/O — reproduces the tboxevo pandas+pyarrow canonical cleaner (per-record hash-identity gate). Additive; no ML/stack-pin change (CLAUDE.md §3.1).
   - scikit-learn=1.9.0
   - biopython=1.87
   # workflow engine + SLURM executor (CPU DAG bookkeeping only; GPU jobs are hand-authored sbatch, PRD §16)

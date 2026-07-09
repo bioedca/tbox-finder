@@ -56,3 +56,46 @@ rule stage_reference_assets:
     shell:
         "python -m tbox_finder.refs --sources-root {params.sources_root:q} "
         "--dest-dir {params.dest_dir:q} >{log} 2>&1"
+
+
+rule ingest_master:
+    """Ingest Master_tboxes.csv → count/hash parse-correctness gate (P0-12; PRD §7.1).
+
+    Reproduces the tboxevo canonical cleaner so a fresh ingest of the immutable raw
+    TBDB export proves — at 100% per-record identity — that it reconstructs the
+    canonical cleaned training corpus. Emits the interim ingest artifact (+ a
+    per-record hash column), the processed training corpus P1–P4 consume, a
+    count-parse report, and a provenance.json (CLAUDE.md §11).
+
+    Like ``stage_reference_assets``, this is a **one-time LOCAL** rule kept out of
+    ``rule all`` with no ``input:`` — the raw CSV and the tboxevo canonical parquet
+    live in sibling laptop checkouts (``master_csv`` / ``canonical_clean_parquet``,
+    default under ``..``) that are absent on a fresh clone or the cluster checkout;
+    the DVC-tracked parquet outputs are what travel downstream (dvc pull). Invoke:
+
+        snakemake --cores 1 --use-conda ingest_master
+    """
+    output:
+        interim="data/interim/master_tboxes_ingested.parquet",
+        processed="data/processed/master_clean_v0.parquet",
+        report="data/processed/audits/count_parse_report.json",
+        provenance="data/interim/master_tboxes_ingested.provenance.json",
+    params:
+        raw_csv=config.get("master_csv", "../tboxdb-master/Master_tboxes.csv"),
+        canonical_parquet=config.get(
+            "canonical_clean_parquet", "../tboxevo/data/interim/master_clean_v0.parquet"
+        ),
+        env_lock="envs/data.conda-lock.yml",
+    log:
+        "logs/ingest_master.log",
+    conda:
+        "../../envs/data.yml"
+    shell:
+        "python -m tbox_finder.ingest "
+        "--raw-csv {params.raw_csv:q} "
+        "--canonical-parquet {params.canonical_parquet:q} "
+        "--out-interim {output.interim:q} "
+        "--out-processed {output.processed:q} "
+        "--out-report {output.report:q} "
+        "--out-provenance {output.provenance:q} "
+        "--env-lock {params.env_lock:q} >{log} 2>&1"

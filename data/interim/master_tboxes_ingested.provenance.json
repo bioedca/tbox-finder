@@ -1,0 +1,24 @@
+{
+  "adr": null,
+  "env_lock_hash": "a4a6715d411d7218432c4c670d35475f6c9aa7dd6397fd5d906ca7e21293dc34",
+  "extra": {
+    "named_columns": 106,
+    "pct_identity_vs_canonical": 100.0,
+    "record_count": 23535,
+    "record_hash_column": "record_sha256"
+  },
+  "generated_at_utc": "2026-07-09T06:54:48.323647+00:00",
+  "git_sha": "cb46b57ffd9d2a12986ad3d7d0c12f57e356b7a9",
+  "inputs": {
+    "../tboxdb-master/Master_tboxes.csv": "fbd2cd12349dbe61e07cf3dbde635b8716fa309188c723ed119620a295285aff",
+    "../tboxevo/data/interim/master_clean_v0.parquet": "483322f67cc837043a23337130c0424d0857c2abd8db142a5fac6d8372687570"
+  },
+  "outputs": {
+    "data/interim/master_tboxes_ingested.parquet": "23acdb57bf4b28efb10eed9d9fcab659fb4ad9840c6916e77519e9b0bb83579d",
+    "data/processed/master_clean_v0.parquet": "1eb76591d0e481019dd7acf72a439f157fec9f2aeecb8cc5c37ba80a7b062dd2"
+  },
+  "rule": "workflow/rules/data.smk :: ingest_master",
+  "schema_version": "1.0",
+  "script": "src/tbox_finder/ingest.py",
+  "seed": 42
+}

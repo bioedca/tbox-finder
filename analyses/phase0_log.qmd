@@ -424,3 +424,39 @@ no single file and is not this step's gate. context7 §3.3 (plugin server): git-
 (`version`/`oid sha256:`/`size`) + `git check-attr filter` / `git lfs ls-files` verification. Consumed by P0-30
 (masking/mining CMs), P4 (GATE-1 reference CMs), P6 (validation CMs + blind set). **Commit.** (this commit — the
 P0-11a atomic commit on branch `p0-11a-stage-refs`).
+
+## Step P0-12 — 2026-07-09: Data ingest + count/hash parse-correctness gate (23,535 × 107)
+**Inputs.** `../tboxdb-master/Master_tboxes.csv` (raw, immutable; 92 MB, `wc -l` = 39,459 — newline-inflated by
+embedded newlines in quoted tRNA 2°-structure fields) and `../tboxevo/data/interim/master_clean_v0.parquet`
+(the cleaned canonical corpus). **Process.** `src/tbox_finder/ingest.py::run_ingest` (driven by the new
+`workflow/rules/data.smk::ingest_master`, LOCAL, out of `rule all`, no `input:` — sibling sources external to the
+DAG, like `stage_reference_assets`) does a proper RFC-4180 parse (pandas `read_csv`, no `index_col`) → asserts the
+**parse gate 23,535 records × 107 raw columns** → reproduces the tboxevo cleaning contract *byte-for-byte* (drop
+the leading unnamed pandas-export index column → 106 named cols; coord `0`→NaN sentinel on 15 columns; `discrim_end`
+`-2`→NaN; `Regulation` value-set assertion, `Unknown` preserved) → appends a deterministic controlled-SHA-256
+per-record `record_sha256` column → computes **per-record hash-identity vs the canonical parquet**. Verified once
+that reading-without-`index_col`-then-dropping is value-identical to tboxevo's `read_csv(index_col=0)`
+(`df.equals` True), so a single read serves both the 107-col gate and the 106-col clean. **Outputs.**
+`data/interim/master_tboxes_ingested.parquet` (106 cols + hash, DVC md5 `6a32b467…`); `data/processed/master_clean_v0.parquet`
+(106-col training corpus P1–P4 consume, DVC md5 `8356cf24…`); `data/processed/audits/count_parse_report.json`;
+`data/interim/master_tboxes_ingested.provenance.json` (six §11 fields; input paths normalized to the rule-relative
+sibling refs, content-hashes authoritative); `src/tbox_finder/ingest.py`; `tests/unit/test_ingest.py` (+19: stdlib
+hash-contract tier runs in bare CI, pandas tier `importorskip`); `tests/golden/test_ingest_golden.py` + the
+100-record `tests/fixtures/ingest_sample/` (+ `expected.sha256`); replaced `tests/golden/test_golden_scaffold.py`.
+**Validation.** **PASS** — parse gate 23,535×107 → 23,535×106; **per-record hash-identity 100.0000% (23,535/23,535)**,
+our_digest == canonical_digest `ec086f2c…`; golden fixture digest matches; parquet write is byte-deterministic
+(stable DVC md5). `pytest tests/unit tests/golden` **79 passed** (data stack) / **68 passed + 11 skipped** in a
+bare-pandas CI-test simulation (bare import of `ingest` works; stdlib tier green); `ruff 0.15.15` + `black 25.11.0`
+(py311) + `ruff format` clean; `snakemake --lint` "good condition" + `-n` clean. **§20 open item (reported).**
+class I:II = **22,334 : 1,200** (+1 unassigned) = **18.61 : 1** from the `type` column (Transcriptional=class I /
+Translational=class II; PRD §3, PMID:25583497); per-phylum: **Firmicutes 21,185 = 90.01%** dominant across
+**29 phyla** (Actinobacteria 1,230; 453 NaN-phylum) — feeds §12's order-count claim + P0-26 power budget.
+**Decisions.** Added **`pyarrow=24.0.0`** to `envs/data.yml` + regenerated `data.conda-lock.yml` (user-approved
+env amendment, CLAUDE.md §3.1; additive, no ML/stack-pin change — all existing pins held): pandas+pyarrow is the
+*only* path to a genuine 100% reproduction (an all-polars reimplementation diverged at 70.97% on float-format /
+null-handling, and tuning it to pass would violate §10.3). The per-record hash is a **controlled SHA-256** over a
+canonical row serialisation, not `pandas.util.hash_pandas_object` (pandas-version-dependent), so the hash column +
+golden digest are stable and human-auditable. `verification: local (deterministic LOCAL rule; DVC push deferred to
+phase-exit)`. context7 §3.3: not required — no new third-party library API written (pandas `read_csv`/`to_parquet`
+reproduce the pinned tboxevo contract; pyarrow used only as the parquet engine). **Commit.** (this commit — the
+P0-12 atomic commit on branch `p0-12-ingest`).
