@@ -45,6 +45,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+        with:
+          persist-credentials: false # no job pushes via git; drop the token
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
@@ -65,6 +67,8 @@ jobs:
         shell: bash -el {0} # login shell so conda is on PATH in every step
     steps:
       - uses: actions/checkout@v5
+        with:
+          persist-credentials: false # no job pushes via git; drop the token
       - name: Set up Miniforge (base)
         uses: conda-incubator/setup-miniconda@v4
         with:
@@ -84,6 +88,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+        with:
+          persist-credentials: false # no job pushes via git; drop the token
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
@@ -117,6 +123,8 @@ jobs:
       packages: write
     steps:
       - uses: actions/checkout@v5
+        with:
+          persist-credentials: false # no job pushes via git; drop the token
       - name: Free up runner disk space
         run: |
           sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android \
