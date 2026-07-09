@@ -370,3 +370,28 @@ is set (*"Passphrase must be specified…"*) → omit `keyfile`, rely on the ssh
 default), matching interactive `ssh two`. context7 §3.3: dvc-ssh remote-config + ssh-config
 resolution order confirmed (claude.ai Context7 quota-blocked → plugin server). **Commit.** (this
 commit — the P0-10 atomic commit on branch `p0-10-dvc-provenance`).
+
+## Step P0-11 — 2026-07-08: W&B offline scaffold + login-node `wandb sync` rule + `huggingface_hub` scaffold
+**Inputs.** The locked `ml-dna`/`ml-rna` envs (wandb 0.28.0, huggingface_hub 0.35.3 — ADR-0002); the
+`conf/` Hydra groups; `workflow/Snakefile`'s auto-include of `rules/*.smk`; `src/tbox_finder/provenance.py`
+as the bare-env-import style precedent. **Process.** Added `conf/tracking/wandb.yaml` (a Hydra
+config-group option defaulting `mode: offline` — SLURM `gpu` nodes have no reliable outbound for live
+streaming, CLAUDE.md §9.2/§11 — with `project`/`entity: null`/`dir: wandb`, no secret); the first repo
+`.smk` rule module `workflow/rules/setup.smk::wandb_sync` (login-node `wandb sync --sync-all {offline_dir:q}`,
+`conda: ../../envs/ml-dna.yml`, `log:`, kept out of `rule all`); and `src/tbox_finder/hub.py` — a release-time
+(CLAUDE.md §6.3) HF push/pull helper (`resolve_token`/`push_folder`/`pull_snapshot`/`push_model`/`push_dataset`)
+that **defers** every `huggingface_hub` import into its functions so the module loads in a bare env, and
+authenticates **only** from `HF_TOKEN`/`HUGGINGFACE_HUB_TOKEN` (token never logged/persisted). **Outputs.**
+`conf/tracking/wandb.yaml`; `workflow/rules/setup.smk`; `src/tbox_finder/hub.py`; `tests/unit/test_hub_scaffold.py`
+(5 guards: bare-env import, env-only token precedence, offline default, sync-rule shape, no committed secret).
+**Validation.** All PASS — `wandb sync --help` reachable from `tbox-ml-dna`; `mode: offline` is the compute-node
+default; `test_no_committed_secrets` + secret-free files (no HF/W&B key literal); `import tbox_finder.hub`
+succeeds in the base env with `huggingface_hub` **absent** (`pytest tests/unit` **41 passed**, 36 + 5 new);
+`snakemake --lint` "good condition" + `snakemake -n` clean (first `.smk` rule lint-clean via `conda:` + `log:`);
+`ruff` + `black` 25.11.0 clean. **Decisions.** Offline+login-node-sync (not the Snakemake SLURM executor) per
+PRD §16 / CLAUDE.md §9.3 — the executor auto-retries, bypassing the one-shot submit-ack. `hub.py` mirrors the
+`provenance.py` deferred-import discipline so it imports in the bare CI test env (huggingface_hub lives only in
+the `ml-*` envs). HF push is release-time only (§6.3); this is scaffold only, unwired from the DAG/training loop.
+context7 §3.3 (claude.ai Context7 quota-blocked → plugin server): wandb `sync --sync-all` + `WANDB_MODE=offline`;
+huggingface_hub `HfApi.upload_folder`/`snapshot_download` + `HF_TOKEN` env auth (token not persisted). No DVC
+artifact (all git-tracked). **Commit.** (this commit — the P0-11 atomic commit on branch `p0-11-wandb-hf-scaffold`).
