@@ -463,7 +463,11 @@ sentinel; `pd.NA` now hashes as missing, not `"<NA>"`); coord coercion made **fa
 adding `discrim_end` to the zero-sentinel set — the canonical has **0** `discrim_end==0` records and the tboxevo
 contract deliberately excludes it (its sentinel is `-2`), so the change is a no-op that would deviate from the pinned
 upstream contract; identity re-verified **100%** after the re-encode (only the interim hash column / digests changed,
-processed md5 `8356cf24…` unchanged). `verification: local (deterministic LOCAL rule; DVC push deferred to
+processed md5 `8356cf24…` unchanged). **CodeRabbit re-review (2 further findings, both applied):** added an explicit
+**column-schema gate** (a value-identical record under a renamed/reordered column can no longer pass —
+`columns_match` in the identity report) + **exotic-type hash disambiguation** (a non-str/float/int/bool cell is tagged
+`S<type>:<str>` so it can't alias a string) — both robustness-only, real-corpus digests + interim md5 `7cbecf42…`
+**unchanged** (TBDB cells are str/float/int/bool). `verification: local (deterministic LOCAL rule; DVC push deferred to
 phase-exit)`. context7 §3.3: not required — no new third-party library API written (pandas `read_csv`/`to_parquet`
 reproduce the pinned tboxevo contract; pyarrow used only as the parquet engine). **Commit.** (this commit — the
 P0-12 atomic commit on branch `p0-12-ingest`).

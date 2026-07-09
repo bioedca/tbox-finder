@@ -18,6 +18,8 @@
     "n_canonical_records": 23535,
     "n_matching": 23535,
     "pct_identity": 100.0,
+    "n_canonical_columns": 106,
+    "columns_match": true,
     "identical": true,
     "our_digest": "f471fdf6d6b98caae414a57f9fc7f5281fc1ac0a5c59110335cc443d2cd83eb1",
     "canonical_digest": "f471fdf6d6b98caae414a57f9fc7f5281fc1ac0a5c59110335cc443d2cd83eb1"

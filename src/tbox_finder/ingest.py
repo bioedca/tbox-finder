@@ -136,7 +136,10 @@ def _row_token(value: Any) -> str:
       does not depend on the numpy repr (``np.float64(1.5)`` reprs differently
       across numpy versions; the demoted ``float`` does not).
     - ``float`` → ``F`` + ``repr`` (shortest round-trip form, stable since Python
-      3.1); ``bool`` → ``B0``/``B1``; ``int`` → ``I`` + decimal; else ``S`` + str.
+      3.1); ``bool`` → ``B0``/``B1``; ``int`` → ``I`` + decimal; ``str`` → ``S`` +
+      the string. Any *other* type is tagged ``S<type-name>:<str>`` so two exotic
+      values sharing a ``str()`` cannot collide — this branch is not reached on the
+      TBDB corpus (cells are str/float/int/bool), so committed hashes are unaffected.
 
     Combined with the length framing in :func:`record_hash`, the encoding is
     injective: no cell value can be confused with the framing or another cell.
@@ -160,7 +163,9 @@ def _row_token(value: Any) -> str:
         return _KIND_FLOAT + repr(value)
     if isinstance(value, int):
         return _KIND_INT + str(value)
-    return _KIND_STR + str(value)
+    if isinstance(value, str):
+        return _KIND_STR + value
+    return _KIND_STR + type(value).__name__ + ":" + str(value)
 
 
 def record_hash(values: Iterable[Any]) -> str:
@@ -322,12 +327,19 @@ def add_record_hashes(df: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
-def hash_identity(hashes: Sequence[str], canonical: pd.DataFrame) -> dict[str, Any]:
+def hash_identity(
+    hashes: Sequence[str],
+    canonical: pd.DataFrame,
+    our_columns: Sequence[str] | None = None,
+) -> dict[str, Any]:
     """Compare our per-record hashes against the canonical parquet's, positionally.
 
-    Returns a report block with the counts and the match percentage — the gate
-    requires ``pct == 100.0``.
+    When ``our_columns`` is given, the **column schema** (names + order, excluding
+    the hash column) is compared too, so value-identical records under a renamed or
+    reordered column cannot pass as identical. The gate requires ``pct == 100.0``
+    *and* a matching schema.
     """
+    canon_cols = [c for c in canonical.columns if c != RECORD_HASH_COL]
     canon_hashes = compute_record_hashes(canonical)
     n = len(hashes)
     n_canon = len(canon_hashes)
@@ -335,12 +347,15 @@ def hash_identity(hashes: Sequence[str], canonical: pd.DataFrame) -> dict[str, A
     # (n == n_canon) rather than raising; positional comparison stops at the shorter.
     n_match = sum(1 for a, b in zip(hashes, canon_hashes, strict=False) if a == b)
     pct = (100.0 * n_match / n) if n else 0.0
+    columns_match = None if our_columns is None else (list(our_columns) == canon_cols)
     return {
         "n_records": n,
         "n_canonical_records": n_canon,
         "n_matching": n_match,
         "pct_identity": round(pct, 6),
-        "identical": (n == n_canon and n_match == n),
+        "n_canonical_columns": len(canon_cols),
+        "columns_match": columns_match,
+        "identical": (n == n_canon and n_match == n and columns_match is not False),
         "our_digest": records_digest(list(hashes)),
         "canonical_digest": records_digest(canon_hashes),
     }
@@ -480,14 +495,15 @@ def run_ingest(
 
     hashes = compute_record_hashes(df_clean)
     canonical = pd.read_parquet(canonical_parquet)
-    identity = hash_identity(hashes, canonical)
+    identity = hash_identity(hashes, canonical, our_columns=list(df_clean.columns))
 
     if require_identity and not identity["identical"]:
         raise ValueError(
             "per-record hash-identity gate FAIL: "
             f"{identity['n_matching']}/{identity['n_records']} match "
-            f"({identity['pct_identity']}%); the ingest does not reproduce the "
-            f"canonical cleaned corpus {canonical_parquet} (PRD §7.1; CLAUDE.md §10.3)"
+            f"({identity['pct_identity']}%), columns_match={identity['columns_match']}; "
+            f"the ingest does not reproduce the canonical cleaned corpus "
+            f"{canonical_parquet} (PRD §7.1; CLAUDE.md §10.3)"
         )
 
     df_interim = df_clean.copy()

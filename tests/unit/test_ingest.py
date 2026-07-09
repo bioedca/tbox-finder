@@ -79,6 +79,15 @@ def test_record_hash_framing_is_unambiguous() -> None:
     assert ingest.record_hash(("1.5",)) != ingest.record_hash((1.5,))
 
 
+def test_row_token_exotic_type_is_disambiguated_from_string() -> None:
+    from decimal import Decimal
+
+    # a Decimal("1.5") str()s to "1.5" but must not collide with the string "1.5"
+    assert ingest._row_token("1.5") == "S1.5"  # str path unchanged (golden-stable)
+    assert ingest._row_token(Decimal("1.5")) != ingest._row_token("1.5")
+    assert ingest._row_token(Decimal("1.5")).startswith("SDecimal:")
+
+
 def test_hash_contract_golden_values() -> None:
     # Pinned so a serialisation change is caught in the bare CI env (P0-12).
     recs = [
@@ -198,6 +207,22 @@ def test_hash_identity_matches_and_mismatches() -> None:
     ident2 = ingest.hash_identity(hashes, perturbed)
     assert not ident2["identical"]
     assert ident2["n_matching"] == 2 and ident2["pct_identity"] < 100.0
+
+
+def test_hash_identity_detects_schema_drift() -> None:
+    pytest.importorskip("pandas")
+    clean = ingest.clean(_synthetic_raw(), expect_records=None, expect_named_cols=None)
+    hashes = ingest.compute_record_hashes(clean)
+    # same values + positions, one column renamed → values hash identical but the
+    # schema differs; columns_match must catch it and fail `identical`
+    renamed = clean.rename(columns={"Name": "NAME"})
+    ident = ingest.hash_identity(hashes, renamed, our_columns=list(clean.columns))
+    assert ident["n_matching"] == len(hashes)  # values still match positionally
+    assert ident["columns_match"] is False
+    assert not ident["identical"]
+    # matching schema passes the column gate
+    ident_ok = ingest.hash_identity(hashes, clean, our_columns=list(clean.columns))
+    assert ident_ok["columns_match"] is True and ident_ok["identical"]
 
 
 def test_record_hashes_ignore_existing_hash_column() -> None:
