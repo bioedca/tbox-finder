@@ -99,3 +99,38 @@ rule ingest_master:
         "--out-report {output.report:q} "
         "--out-provenance {output.provenance:q} "
         "--env-lock {params.env_lock:q} >{log} 2>&1"
+
+
+_GTDB_DIR = "data/external/gtdb"
+
+
+rule pin_gtdb_release:
+    """Pin the governing GTDB release (R232) + stage the species-rep crosswalk (P0-13; PRD §7.2/§13.2).
+
+    Fetches + MD5-verifies the R232 species-representative crosswalk
+    (``sp_clusters_r232.tsv``), runs the species-rep **count gate** (counted reps == the
+    release's published value: bac120 189,801 + ar53 10,122 = 199,923), and writes a
+    ``provenance.json`` pinning the release, the available GTDB-Tk reference package
+    (contingency that makes R232 — not the r220 fallback — the governing pin), the GTDB
+    data license, and the on-demand-fetch taxonomy/metadata targets (P0-14/15/22, P6).
+
+    Like the other ``data.smk`` rules it is a **one-time LOCAL** rule kept out of ``rule
+    all`` with no ``input:`` — GTDB is an external fetch target, not a DAG product. The
+    staged crosswalk (~49 MB) is gitignored + re-fetched (CLAUDE.md §5.2); only the small
+    ``provenance.json`` travels with the repo. Invoke:
+
+        snakemake --cores 1 --use-conda pin_gtdb_release
+    """
+    output:
+        crosswalk=f"{_GTDB_DIR}/sp_clusters_r232.tsv",
+        provenance=f"{_GTDB_DIR}/provenance.json",
+    params:
+        # dest_dir derived from the output (not a hardcoded prefix) so `snakemake --lint`
+        # stays clean — dirname of the provenance manifest is the staging dir _GTDB_DIR.
+        dest_dir=lambda wildcards, output: os.path.dirname(output.provenance),
+    log:
+        "logs/pin_gtdb_release.log",
+    conda:
+        "../../envs/data.yml"
+    shell:
+        "python -m tbox_finder.taxonomy --dest-dir {params.dest_dir:q} >{log} 2>&1"

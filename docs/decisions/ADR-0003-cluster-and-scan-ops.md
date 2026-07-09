@@ -123,3 +123,22 @@ Node `one` is often down and `two` is the sole reliable GPU node — an extended
 ## Sign-off
 
 - **User sign-off:** ☑ recorded 2026-07-08 (bioedca), CLAUDE.md §7 item 2.
+
+---
+
+## Amendments
+
+### Amendment A1 — Governing GTDB release pin (P0-13, 2026-07-09)
+
+Fills the D10 delegation *"Governing GTDB release … pinned in the P0 data-foundation steps (§7.2), not here."* The **one governing GTDB release** (PRD §7.2; referenced by the D1/D3/D4/D5 corpus definitions and the §13.2 P6 placement DB) is pinned to:
+
+- **GTDB R232 (Release 11-RS232, released 2026-04-15).** This is the release the reusable tboxevo taxonomy maps were built against (tboxevo ADR-0001) — cross-checked here: GTDB's own `bac120_taxonomy_r232.tsv` MD5 (`4d42e137…`) equals the value tboxevo independently pinned.
+- **Contingency satisfied → r220 fallback NOT invoked.** PRD §7.2 makes the tboxevo-matching release contingent on an available GTDB-Tk reference package; `gtdbtk_r232_data.tar.gz` (56.63 GB, GTDB-Tk ≥ 2.7.0) is published, so R232 — not the pre-registered r220 fallback — governs. Placement (P6) uses the same release, so **no §13.2 release-to-release crosswalk is required**.
+- **Species-representative count (pinned to the release's published value):** bac120 **189,801** + ar53 **10,122** = **199,923** (GTDB `stats/r232`, accessed 2026-07-09; independently re-verified as the `sp_clusters_r232.tsv` row count in the P0-13 count gate — fail-loud on drift, CLAUDE.md §10.3).
+- **License:** GTDB data are CC-BY-SA-4.0 (`gtdb.ecogenomic.org/downloads`, accessed 2026-07-09).
+
+Provenance (release id, base URL, GTDB-Tk package + version floor, license, per-file authoritative MD5s, staged crosswalk SHA-256 + byte count, published + counted species-rep values) is written to `data/external/gtdb/provenance.json` by `workflow/rules/data.smk::pin_gtdb_release` → `src/tbox_finder/taxonomy.py::pin_release`. The ~49 MB species-rep crosswalk + the on-demand genome→lineage taxonomy/metadata tables are `data/external/`-immutable, re-fetched by that checksummed rule (CLAUDE.md §5.2), never DVC-tracked.
+
+**Impact.** Binds all §7.2 novelty determinations + the union prior (P0-14), the frozen governing-release taxonomy for TaxId re-placement (P0-15), the §9.2 split clade labels (P0-22), and the P6 GTDB-Tk placement DB (§13.2). No change to any locked decision (D1–D10); this only supplies the D10-delegated value.
+
+- **User sign-off:** ☑ recorded 2026-07-09 (bioedca), CLAUDE.md §7 items 1/2 (Q-question release choice + ADR amendment approved as drafted).

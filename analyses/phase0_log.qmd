@@ -471,3 +471,33 @@ processed md5 `8356cf24…` unchanged). **CodeRabbit re-review (2 further findin
 phase-exit)`. context7 §3.3: not required — no new third-party library API written (pandas `read_csv`/`to_parquet`
 reproduce the pinned tboxevo contract; pyarrow used only as the parquet engine). **Commit.** (this commit — the
 P0-12 atomic commit on branch `p0-12-ingest`).
+
+## Step P0-13 — 2026-07-09: Pin the governing GTDB release (+ GTDB-Tk ref-data package check, r220 fallback)
+**Inputs.** tboxevo GTDB taxonomy maps (release pin); GTDB `release232/232.0` metadata (`MD5SUM.txt`, `stats/r232`);
+GTDB-Tk reference-package index; `src/tbox_finder/provenance.py`. **Process.** A **Q-question stop** (CLAUDE.md §7
+item 1) resolved the release: two background investigations established that the tboxevo maps pin **GTDB R232**
+(Release 11-RS232, 2026-04-15 — tboxevo ADR-0001, cross-checked: GTDB's `bac120_taxonomy_r232.tsv` MD5 `4d42e137…`
+== tboxevo's independent pin) and that R232 has an **available** GTDB-Tk package (`gtdbtk_r232_data.tar.gz`, ≥ 2.7.0),
+so PRD §7.2's contingency is satisfied and the **r220 fallback is not invoked**; user approved R232 + ADR-0003 A1
+(2026-07-09). `src/tbox_finder/taxonomy.py::pin_release` (stdlib-only, bare-importable) then fetched + MD5-verified the
+species-rep crosswalk `sp_clusters_r232.tsv` via `workflow/rules/data.smk::pin_gtdb_release` and ran the species-rep
+count gate. **Outputs.** `data/external/gtdb/provenance.json` (committed via a `.gitignore` carve-out; release id +
+base URL + GTDB-Tk package/version floor + CC-BY-SA-4.0 license + per-file authoritative MD5s + staged-crosswalk
+SHA-256/bytes + published & counted species-rep values); the 49 MB `sp_clusters_r232.tsv` staged but gitignored
+(re-fetched by the rule, §5.2); genome→lineage taxonomy + metadata **pinned** (URL+MD5) for on-demand P0-14/15/22/P6
+fetch; `src/tbox_finder/taxonomy.py` + `tests/unit/test_release_pin.py` + real `tests/fixtures/gtdb_sp_clusters/`
+fixture.
+**Validation.** **PASSED** — species-rep count gate: counted `{total 199,923, bacteria 189,801, archaea 10,122,
+other 0}` **==** GTDB-published `{199,923 = 189,801 + 10,122}` (fail-loud on drift, §10.3); crosswalk MD5-verified
+(`7e4b2fc2…`) + SHA-256 recorded; GTDB-Tk package available → r220 fallback recorded `false`. `pytest tests/unit`
+**82 passed / 15 skipped** (bare CI-test sim — taxonomy imports bare, ingest pandas tier `importorskip`); ruff 0.15.15
++ black 25.11.0 + ruff-format clean; `snakemake --lint` "good condition" + `-n` clean (rule out of `rule all`).
+**Decisions.** Pinned **R232 over the r220 fallback** because its GTDB-Tk package exists (contingency met) — matches the
+sibling tboxevo release (zero §13.2 cross-project crosswalk) and gives the largest, most complete novelty frame
+(199,923 vs r220's 113,104 reps; a missing reference lineage is what yields a false "novel" call). Staged **only** the
+species-rep crosswalk (row-count == the count gate); the ~120 MB genome→lineage tables are pinned-not-downloaded
+(authoritative MD5 from GTDB `MD5SUM.txt`), fetched on demand — keeps the pin step LOCAL-lean. ADR-0003 **Amendment A1**
+(user sign-off 2026-07-09) fills the D10 release delegation; no locked decision changed. `verification: local
+(deterministic LOCAL rule; no DVC artifact — data/external is immutable/re-fetched, §5.2)`. context7 §3.3: not required
+— no third-party library API written (stdlib `urllib`/`hashlib` only). **Commit.** (this commit — the P0-13 atomic
+commit on branch `p0-13-pin-gtdb-release`).
