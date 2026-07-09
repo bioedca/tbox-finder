@@ -1,0 +1,31 @@
+# tracking/wandb.yaml — Weights & Biases config (PRD §16; ADR-0002 wandb pin).
+#
+# A Hydra config-group option (group `tracking/`). A later training config selects
+# it via `defaults: [tracking: wandb]`; its keys then live under `cfg.tracking`.
+#
+# Why OFFLINE by default: SLURM `gpu` compute nodes have no reliable outbound for
+# live W&B streaming (CLAUDE.md §9.2/§11), so runs log offline to `dir` with no
+# network call, and are uploaded afterwards from the login node by the
+# `wandb_sync` Snakemake rule (workflow/rules/setup.smk).
+#
+# NO secret lives here — the repo is public (CLAUDE.md §4). The API key is read at
+# sync time from the WANDB_API_KEY env var (login node only); it is never committed.
+
+# WANDB_MODE for compute-node runs. Run code passes this to `wandb.init(mode=...)`;
+# the sbatch additionally exports `WANDB_MODE=offline` as a belt-and-braces default.
+# "offline" writes runs to `dir` without any network call.
+mode: offline
+
+# W&B project / entity. `entity: null` -> the API key's default entity; never hardcode
+# an org here. Override on the CLI, e.g. `tracking.entity=<team>`.
+project: tbox-finder
+entity: null
+
+# Local directory for offline run data (relative to the run CWD). `wandb sync` reads
+# offline runs from here; keep it in step with the rule's `wandb_offline_dir` config.
+dir: wandb
+
+# Per-stage run metadata; run code fills these in (kept null/empty here as defaults).
+job_type: null
+group: null
+tags: []
