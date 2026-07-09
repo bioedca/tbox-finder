@@ -19,8 +19,8 @@
     "n_matching": 23535,
     "pct_identity": 100.0,
     "identical": true,
-    "our_digest": "ec086f2cbce6cbc18537798d5928d8045dfecead8dc8cd4723c75eb94641b4e7",
-    "canonical_digest": "ec086f2cbce6cbc18537798d5928d8045dfecead8dc8cd4723c75eb94641b4e7"
+    "our_digest": "f471fdf6d6b98caae414a57f9fc7f5281fc1ac0a5c59110335cc443d2cd83eb1",
+    "canonical_digest": "f471fdf6d6b98caae414a57f9fc7f5281fc1ac0a5c59110335cc443d2cd83eb1"
   },
   "phylum": {
     "available": true,

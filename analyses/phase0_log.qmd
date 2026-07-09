@@ -437,14 +437,14 @@ the leading unnamed pandas-export index column → 106 named cols; coord `0`→N
 per-record `record_sha256` column → computes **per-record hash-identity vs the canonical parquet**. Verified once
 that reading-without-`index_col`-then-dropping is value-identical to tboxevo's `read_csv(index_col=0)`
 (`df.equals` True), so a single read serves both the 107-col gate and the 106-col clean. **Outputs.**
-`data/interim/master_tboxes_ingested.parquet` (106 cols + hash, DVC md5 `6a32b467…`); `data/processed/master_clean_v0.parquet`
+`data/interim/master_tboxes_ingested.parquet` (106 cols + hash, DVC md5 `7cbecf42…`); `data/processed/master_clean_v0.parquet`
 (106-col training corpus P1–P4 consume, DVC md5 `8356cf24…`); `data/processed/audits/count_parse_report.json`;
 `data/interim/master_tboxes_ingested.provenance.json` (six §11 fields; input paths normalized to the rule-relative
 sibling refs, content-hashes authoritative); `src/tbox_finder/ingest.py`; `tests/unit/test_ingest.py` (+19: stdlib
 hash-contract tier runs in bare CI, pandas tier `importorskip`); `tests/golden/test_ingest_golden.py` + the
 100-record `tests/fixtures/ingest_sample/` (+ `expected.sha256`); replaced `tests/golden/test_golden_scaffold.py`.
 **Validation.** **PASS** — parse gate 23,535×107 → 23,535×106; **per-record hash-identity 100.0000% (23,535/23,535)**,
-our_digest == canonical_digest `ec086f2c…`; golden fixture digest matches; parquet write is byte-deterministic
+our_digest == canonical_digest `f471fdf6…`; golden fixture digest matches; parquet write is byte-deterministic
 (stable DVC md5). `pytest tests/unit tests/golden` **79 passed** (data stack) / **68 passed + 11 skipped** in a
 bare-pandas CI-test simulation (bare import of `ingest` works; stdlib tier green); `ruff 0.15.15` + `black 25.11.0`
 (py311) + `ruff format` clean; `snakemake --lint` "good condition" + `-n` clean. **§20 open item (reported).**
@@ -456,7 +456,14 @@ env amendment, CLAUDE.md §3.1; additive, no ML/stack-pin change — all existin
 *only* path to a genuine 100% reproduction (an all-polars reimplementation diverged at 70.97% on float-format /
 null-handling, and tuning it to pass would violate §10.3). The per-record hash is a **controlled SHA-256** over a
 canonical row serialisation, not `pandas.util.hash_pandas_object` (pandas-version-dependent), so the hash column +
-golden digest are stable and human-auditable. `verification: local (deterministic LOCAL rule; DVC push deferred to
+golden digest are stable and human-auditable. **CodeRabbit (5 findings) — 4 applied, 1 rejected:** the row-hash
+encoding hardened to **kind-tagged + length-prefixed** tokens (collision-proof; a real string can't alias the missing
+sentinel; `pd.NA` now hashes as missing, not `"<NA>"`); coord coercion made **fail-loud** on non-numeric junk
+(§10.3; 0 hits on the corpus → output unchanged); report `passed` tightened to full cleaned shape. **Rejected:**
+adding `discrim_end` to the zero-sentinel set — the canonical has **0** `discrim_end==0` records and the tboxevo
+contract deliberately excludes it (its sentinel is `-2`), so the change is a no-op that would deviate from the pinned
+upstream contract; identity re-verified **100%** after the re-encode (only the interim hash column / digests changed,
+processed md5 `8356cf24…` unchanged). `verification: local (deterministic LOCAL rule; DVC push deferred to
 phase-exit)`. context7 §3.3: not required — no new third-party library API written (pandas `read_csv`/`to_parquet`
 reproduce the pinned tboxevo contract; pyarrow used only as the parquet engine). **Commit.** (this commit — the
 P0-12 atomic commit on branch `p0-12-ingest`).

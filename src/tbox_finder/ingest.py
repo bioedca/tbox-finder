@@ -111,52 +111,71 @@ PHYLUM_COL = "phylum"
 #: type → T-box class. Reported (non-gated) side output for the §20 open item.
 TYPE_TO_CLASS: dict[str, str] = {"Transcriptional": "I", "Translational": "II"}
 
-#: Token for a missing cell in the canonical row serialisation (NUL cannot occur
-#: in a parsed CSV field, so it can never collide with real content).
-_NA_TOKEN = "\x00NA"
-#: Field separator for the canonical row serialisation (ASCII unit separator).
-_FIELD_SEP = "\x1f"
+#: Single-char kind tags prefixed to each cell token so a value can never collide
+#: with the missing sentinel across types (a real string ``"N"`` is ``"SN"``, the
+#: missing token is ``"N"``); floats/ints/bools are typed so ``"1.5"`` the string
+#: (``"S1.5"``) differs from ``1.5`` the float (``"F1.5"``).
+_KIND_NA = "N"
+_KIND_FLOAT = "F"
+_KIND_INT = "I"
+_KIND_BOOL = "B"
+_KIND_STR = "S"
 
 
 # --------------------------------------------------------------------------- #
 # Controlled per-record hashing (stdlib only — runs in the bare CI test env)
 # --------------------------------------------------------------------------- #
 def _row_token(value: Any) -> str:
-    """Canonicalise one cell to a stable string token.
+    """Canonicalise one cell to a **kind-tagged** stable string token.
 
-    - ``None`` / NaN (any float that is not equal to itself, incl. numpy floats)
-      → :data:`_NA_TOKEN`.
+    - ``None`` / NaN (numpy) / ``pd.NA`` (pandas nullable) → :data:`_KIND_NA`.
+      ``pd.NA`` is detected via the ``TypeError`` its ambiguous ``__bool__`` raises
+      on the self-inequality test, so a nullable cell never falls through to
+      ``str(pd.NA) == "<NA>"``.
     - numpy scalars are demoted to their Python scalar (``.item()``) so the token
       does not depend on the numpy repr (``np.float64(1.5)`` reprs differently
       across numpy versions; the demoted ``float`` does not).
-    - ``float`` → ``repr`` (shortest round-trip form, stable since Python 3.1);
-      ``bool`` → ``"True"``/``"False"``; ``int`` → decimal string; else ``str``.
+    - ``float`` → ``F`` + ``repr`` (shortest round-trip form, stable since Python
+      3.1); ``bool`` → ``B0``/``B1``; ``int`` → ``I`` + decimal; else ``S`` + str.
+
+    Combined with the length framing in :func:`record_hash`, the encoding is
+    injective: no cell value can be confused with the framing or another cell.
     """
     if value is None:
-        return _NA_TOKEN
-    # NaN / NaT are the only values not equal to themselves.
+        return _KIND_NA
+    # NaN is the only value not equal to itself; pd.NA's `!=` yields NA whose
+    # bool() raises TypeError — both mean "missing".
     try:
-        if value != value:  # noqa: PLR0124 - deliberate NaN test
-            return _NA_TOKEN
-    except (TypeError, ValueError):  # pragma: no cover - non-comparable scalars
-        pass
+        if bool(value != value):  # noqa: PLR0124 - deliberate NaN test
+            return _KIND_NA
+    except (TypeError, ValueError):
+        return _KIND_NA  # pandas.NA (ambiguous truth value) → missing
     item = getattr(value, "item", None)
     if callable(item):
         with contextlib.suppress(ValueError, TypeError):  # pragma: no cover - defensive
             value = item()
     if isinstance(value, bool):
-        return "True" if value else "False"
+        return _KIND_BOOL + ("1" if value else "0")
     if isinstance(value, float):
-        return repr(value)
+        return _KIND_FLOAT + repr(value)
     if isinstance(value, int):
-        return str(value)
-    return str(value)
+        return _KIND_INT + str(value)
+    return _KIND_STR + str(value)
 
 
 def record_hash(values: Iterable[Any]) -> str:
-    """SHA-256 hexdigest of one record's canonically-serialised cell values."""
-    joined = _FIELD_SEP.join(_row_token(v) for v in values)
-    return hashlib.sha256(joined.encode("utf-8")).hexdigest()
+    """SHA-256 hexdigest of one record's cell values, unambiguously framed.
+
+    Each kind-tagged token is length-prefixed (``<byte-len>:<token>``) before it
+    is fed to the digest, so a cell value that contains a separator, a delimiter,
+    or the missing sentinel cannot collide with the framing or with another cell.
+    """
+    h = hashlib.sha256()
+    for value in values:
+        tok = _row_token(value).encode("utf-8")
+        h.update(b"%d:" % len(tok))
+        h.update(tok)
+    return h.hexdigest()
 
 
 def records_digest(hashes: Sequence[str]) -> str:
@@ -220,6 +239,28 @@ def _drop_unnamed_index(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+def _normalise_coord(series: pd.Series, sentinel: int, col: str) -> pd.Series:
+    """Coerce a coordinate column to numeric, ``sentinel`` → NaN, failing loud on junk.
+
+    Only the known sentinel (``0`` for the zero-sentinel columns, ``-2`` for
+    ``discrim_end``) is treated as missing. Any *other* non-numeric, non-empty
+    value — which ``to_numeric(errors="coerce")`` would silently turn into NaN and
+    hide — raises instead (CLAUDE.md §10.3 fail-loud). On the real corpus no such
+    value exists, so this never changes the cleaned output.
+    """
+    import pandas as pd
+
+    numeric = pd.to_numeric(series, errors="coerce")
+    invalid = numeric.isna() & series.notna() & series.astype("string").str.strip().ne("")
+    if bool(invalid.any()):
+        bad = list(series[invalid].unique()[:5])
+        raise ValueError(
+            f"{col}: non-numeric coordinate value(s) {bad} would be silently coerced to "
+            f"NaN (CLAUDE.md §10.3); expected a number or the {sentinel} sentinel"
+        )
+    return numeric.mask(numeric == sentinel)
+
+
 def clean(
     df: pd.DataFrame,
     *,
@@ -232,8 +273,6 @@ def clean(
     assertions (small fixtures). Row order is preserved; the index is reset so
     the frame is positionally comparable to the canonical parquet.
     """
-    import pandas as pd
-
     out = _drop_unnamed_index(df).reset_index(drop=True)
 
     if expect_records is not None and len(out) != expect_records:
@@ -257,11 +296,11 @@ def clean(
 
     for col in COORD_COLS_ZERO_SENTINEL:
         if col in out.columns:
-            s = pd.to_numeric(out[col], errors="coerce")
-            out[col] = s.mask(s == 0)
+            out[col] = _normalise_coord(out[col], 0, col)
     if DISCRIM_END_NEG2_SENTINEL_COL in out.columns:
-        s = pd.to_numeric(out[DISCRIM_END_NEG2_SENTINEL_COL], errors="coerce")
-        out[DISCRIM_END_NEG2_SENTINEL_COL] = s.mask(s == -2)
+        out[DISCRIM_END_NEG2_SENTINEL_COL] = _normalise_coord(
+            out[DISCRIM_END_NEG2_SENTINEL_COL], -2, DISCRIM_END_NEG2_SENTINEL_COL
+        )
 
     return out
 
@@ -389,7 +428,7 @@ def build_report(
             ),
             "passed": (
                 raw_shape == (EXPECTED_RECORDS, EXPECTED_RAW_COLS)
-                and cleaned_shape[1] == EXPECTED_NAMED_COLS
+                and cleaned_shape == (EXPECTED_RECORDS, EXPECTED_NAMED_COLS)
             ),
         },
         "hash_identity": identity,

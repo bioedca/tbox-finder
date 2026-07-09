@@ -25,17 +25,19 @@ from tbox_finder import ingest
 # stdlib tier — hash contract (runs everywhere, incl. the bare CI test env)
 # --------------------------------------------------------------------------- #
 def test_row_token_missing_and_scalars() -> None:
-    assert ingest._row_token(None) == ingest._NA_TOKEN
-    assert ingest._row_token(float("nan")) == ingest._NA_TOKEN
-    assert ingest._row_token(1.5) == "1.5"
-    assert ingest._row_token(-2.0) == "-2.0"
-    assert ingest._row_token(3) == "3"
-    assert ingest._row_token(0) == "0"
-    assert ingest._row_token(True) == "True"
-    assert ingest._row_token(False) == "False"
-    assert ingest._row_token("ACGU") == "ACGU"
+    assert ingest._row_token(None) == ingest._KIND_NA
+    assert ingest._row_token(float("nan")) == ingest._KIND_NA
+    assert ingest._row_token(1.5) == "F1.5"
+    assert ingest._row_token(-2.0) == "F-2.0"
+    assert ingest._row_token(3) == "I3"
+    assert ingest._row_token(0) == "I0"
+    assert ingest._row_token(True) == "B1"
+    assert ingest._row_token(False) == "B0"
+    assert ingest._row_token("ACGU") == "SACGU"
+    # a string equal to the missing tag is disambiguated by the S kind tag
+    assert ingest._row_token(ingest._KIND_NA) == "S" + ingest._KIND_NA
     # embedded comma + newline (why the parse gate exists) survives verbatim
-    assert ingest._row_token("x,y\nz") == "x,y\nz"
+    assert ingest._row_token("x,y\nz") == "Sx,y\nz"
 
 
 def test_row_token_demotes_object_with_item() -> None:
@@ -53,7 +55,7 @@ def test_row_token_demotes_object_with_item() -> None:
 
         __hash__ = None  # type: ignore[assignment]
 
-    assert ingest._row_token(FakeNpFloat()) == "2.5"
+    assert ingest._row_token(FakeNpFloat()) == "F2.5"
 
 
 def test_record_hash_is_deterministic_and_order_sensitive() -> None:
@@ -68,6 +70,15 @@ def test_record_hash_nan_equals_none_token() -> None:
     assert ingest.record_hash((float("nan"),)) == ingest.record_hash((None,))
 
 
+def test_record_hash_framing_is_unambiguous() -> None:
+    # length-prefixed framing: ("ab","") must not collide with ("a","b")
+    assert ingest.record_hash(("ab", "")) != ingest.record_hash(("a", "b"))
+    # a genuine string equal to the missing tag must not collide with a missing cell
+    assert ingest.record_hash((ingest._KIND_NA,)) != ingest.record_hash((None,))
+    # a string "1.5" must not collide with the float 1.5 (kind tags differ)
+    assert ingest.record_hash(("1.5",)) != ingest.record_hash((1.5,))
+
+
 def test_hash_contract_golden_values() -> None:
     # Pinned so a serialisation change is caught in the bare CI env (P0-12).
     recs = [
@@ -76,15 +87,15 @@ def test_hash_contract_golden_values() -> None:
         ("x,y\nz", -2.0, True, 0),
     ]
     expected = [
-        "8feed1fc838a2db23790878dd41efe63690a8b655b8fab4384be310265f3112f",
-        "e3ba42123a959fd7f25d9fe325eff0a7b56fee76dbbf55f40068f62ff91d1e02",
-        "bf87b90dd9b09837f994162cc41527dde505fa69aa1d4f86edc93841e39f55e8",
+        "5d26df4d741f982778a6fb8256c3ac263ad8d697e06172da24bcaf1bdb3601da",
+        "775a712d554c99f1bebabc721bc2ebbe20b6879aa788a9d1fbf44bbaa3bf66af",
+        "deef6c31215b809121e01c4db979e79f2be02529e75b1732b3f1a2c50ac7876b",
     ]
     got = [ingest.record_hash(r) for r in recs]
     assert got == expected
     assert (
         ingest.records_digest(got)
-        == "ec0e30c7a0841a5545cdfd08891e9cb75067c11761ce955bf6bc8b46d46abb42"
+        == "a408eb8b30461c5ce210028d4d900aa9eb03064a07e6664fcee4b21a62943a7d"
     )
 
 
@@ -135,6 +146,21 @@ def test_clean_drops_unnamed_index_and_normalises_sentinels() -> None:
     assert math.isnan(out["discrim_end"].iloc[0])
     assert out["discrim_end"].iloc[1] == 7
     assert out["discrim_end"].iloc[2] == 0
+
+
+def test_row_token_pandas_na_is_missing() -> None:
+    pd = pytest.importorskip("pandas")
+    # pd.NA (nullable dtypes) must hash as missing, not str(pd.NA) == "<NA>"
+    assert ingest._row_token(pd.NA) == ingest._KIND_NA
+
+
+def test_clean_fails_loud_on_nonnumeric_coordinate() -> None:
+    pytest.importorskip("pandas")
+    raw = _synthetic_raw()
+    # non-numeric, non-sentinel coord value → must not silently coerce to NaN
+    raw["Tbox_start"] = [0, "junk", 9]  # object column from the start (no dtype warning)
+    with pytest.raises(ValueError, match="non-numeric coordinate"):
+        ingest.clean(raw, expect_records=None, expect_named_cols=None)
 
 
 def test_clean_rejects_bogus_regulation_label() -> None:
