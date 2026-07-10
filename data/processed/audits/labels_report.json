@@ -1,0 +1,183 @@
+{
+  "adr": "ADR-0004",
+  "class_code": {
+    "Antiterminator_Tbox_seq": "A",
+    "Discriminator": "D",
+    "Specifier": "S",
+    "Stem_I": "1",
+    "Stem_II": "2",
+    "Stem_III": "3",
+    "Terminator": "T",
+    "background": "."
+  },
+  "class_counts": {
+    "I": 22334,
+    "II": 1200,
+    "unknown": 1
+  },
+  "class_ii_cm_naive_withheld_records": 1200,
+  "class_index": {
+    "Antiterminator_Tbox_seq": 5,
+    "Discriminator": 7,
+    "Specifier": 2,
+    "Stem_I": 1,
+    "Stem_II": 3,
+    "Stem_III": 4,
+    "Terminator": 6,
+    "background": 0
+  },
+  "class_nt_totals_naive": {
+    "Antiterminator_Tbox_seq": 608636,
+    "Discriminator": 87985,
+    "Specifier": 65870,
+    "Stem_I": 2042832,
+    "Stem_II": 844466,
+    "Stem_III": 475543,
+    "Terminator": 628002,
+    "background": 2464226
+  },
+  "class_nt_totals_production": {
+    "Antiterminator_Tbox_seq": 659866,
+    "Discriminator": 92967,
+    "Specifier": 69284,
+    "Stem_I": 2076218,
+    "Stem_II": 911067,
+    "Stem_III": 509517,
+    "Terminator": 628002,
+    "background": 2270639
+  },
+  "class_order": [
+    "background",
+    "Stem_I",
+    "Specifier",
+    "Stem_II",
+    "Stem_III",
+    "Antiterminator_Tbox_seq",
+    "Terminator",
+    "Discriminator"
+  ],
+  "coord_clamped_examples": [
+    {
+      "element": "Terminator",
+      "extent": [
+        148,
+        162
+      ],
+      "name": "CP001176.1:1755208-1755355",
+      "window_length": 148
+    },
+    {
+      "element": "Terminator",
+      "extent": [
+        148,
+        162
+      ],
+      "name": "CP001903.1:1754578-1754725",
+      "window_length": 148
+    },
+    {
+      "element": "Terminator",
+      "extent": [
+        142,
+        146
+      ],
+      "name": "ADXJ01000719.1:142-1",
+      "window_length": 142
+    },
+    {
+      "element": "Terminator",
+      "extent": [
+        148,
+        162
+      ],
+      "name": "ACMB01000042.1:28906-29053",
+      "window_length": 148
+    },
+    {
+      "element": "Terminator",
+      "extent": [
+        149,
+        153
+      ],
+      "name": "ADJT01010256.1:1388-1536",
+      "window_length": 149
+    },
+    {
+      "element": "Terminator",
+      "extent": [
+        143,
+        153
+      ],
+      "name": "ADXK01000815.1:143-1",
+      "window_length": 143
+    },
+    {
+      "element": "Terminator",
+      "extent": [
+        148,
+        162
+      ],
+      "name": "ACNI01000037.1:195284-195431",
+      "window_length": 148
+    },
+    {
+      "element": "Terminator",
+      "extent": [
+        257,
+        262
+      ],
+      "name": "CP012024.1:1299474-1299730",
+      "window_length": 257
+    }
+  ],
+  "coord_clamped_note": "class-I intrinsic-terminator 3' arms extending past the extracted leader window (term_start == tbox_length); the out-of-window tail has no window sequence and is left unlabeled (clamped to [start, tbox_length]). Labels still span exactly the window; no record is dropped.",
+  "corpus_sha256": "1eb76591d0e481019dd7acf72a439f157fec9f2aeecb8cc5c37ba80a7b062dd2",
+  "element_presence_counts": {
+    "Antiterminator_Tbox_seq": 23534,
+    "Discriminator": 23208,
+    "Specifier": 23142,
+    "Stem_I": 23475,
+    "Stem_II": 21767,
+    "Stem_III": 23384,
+    "Terminator": 23439
+  },
+  "label_source_counts": {
+    "class_II_cm": 1200,
+    "class_I_cm": 22335
+  },
+  "labels_digest": "63f39f474de23cf8e463dea8599782f5834826d12f1e37a8f041b1e9fa3be142",
+  "low_completeness_fraction": 0.017548,
+  "low_completeness_records": 413,
+  "n_records": 23535,
+  "prd": "\u00a78, \u00a711",
+  "precedence_biology_pmids": {
+    "antiterminator_terminator_exclusive": [
+      "24356646",
+      "25583497"
+    ],
+    "class_ii_no_terminator": [
+      "25583497"
+    ],
+    "discriminator_reads_ncca": [
+      "24356646",
+      "25583497",
+      "32882008"
+    ],
+    "specifier_in_stem_i": [
+      "24356646",
+      "21333656",
+      "32882008"
+    ]
+  },
+  "precedence_high_to_low": [
+    "Discriminator",
+    "Specifier",
+    "Antiterminator_Tbox_seq",
+    "Terminator",
+    "Stem_II",
+    "Stem_III",
+    "Stem_I"
+  ],
+  "records_coord_clamped_to_window": 8,
+  "records_dropped": 0
+}
