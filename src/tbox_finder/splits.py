@@ -402,7 +402,11 @@ def run_cmalign(cm: str | Path, fasta: str | Path, out_sto: str | Path, *, cpu: 
         str(cm),
         str(fasta),
     ]
-    subprocess.run(cmd, check=True, capture_output=True, text=True)
+    proc = subprocess.run(cmd, capture_output=True, text=True)
+    if proc.returncode != 0:
+        # Surface Infernal's own diagnostic (e.g. the >10k-seq afa cap) in the
+        # traceback — CalledProcessError alone hides stderr.
+        raise RuntimeError(f"cmalign failed (rc={proc.returncode}) for {fasta}:\n{proc.stderr}")
 
 
 def align(
