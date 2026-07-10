@@ -919,7 +919,11 @@ def cluster_split(
     # be offset by that cut's count (not the production count) to avoid label
     # collisions in the sweep-stability tallies at tighter cuts.
     sweep_offsets = {c: 0 for c in SWEEP_IDENTITIES}
-    name_to_row = {n: i for i, n in enumerate(manifest["seq_name"])}
+    seq_names = list(manifest["seq_name"])
+    if len(set(seq_names)) != len(seq_names):
+        dups = [n for n, c in Counter(seq_names).items() if c > 1]
+        raise ValueError(f"duplicate seq_name in manifest (would collide): {dups[:5]}")
+    name_to_row = {n: i for i, n in enumerate(seq_names)}
     codes_by_class = {}
     rows_by_class = {}
     for klass in (CLASS_I, CLASS_II):
@@ -960,6 +964,13 @@ def cluster_split(
             nearest_all.append(_nearest_cross_fold_identity(codes, is_train, is_test, COVERAGE_CUT))
     nearest = np.concatenate(nearest_all) if nearest_all else np.zeros(0)
     hist_stats = _histogram_stats(nearest, IDENTITY_CUT)
+    # Hard leakage gate (§8.2/§10.3): whole-cluster holdout must leave no held-out
+    # sequence coverage-adequately ≥ the cut from any nested-train sequence.
+    if hist_stats["n_inside_cut"]:
+        raise ValueError(
+            f"{hist_stats['n_inside_cut']} held-out sequences are within the D2 cut of a "
+            "nested-train sequence (leakage); whole-cluster holdout must yield 0"
+        )
 
     # ADR-0004 D2 adequacy net (b): sensitivity sweep (split-structure stability).
     sweep_stats = _sweep_stability(
