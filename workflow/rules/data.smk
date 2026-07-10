@@ -360,3 +360,133 @@ rule derive_labels:
         "--labels-dir {params.labels_dir:q} "
         "--audit-dir {params.audit_dir:q} "
         "--env-lock {params.env_lock:q} >{log} 2>&1"
+
+
+_SPLITS_INPUTS_DIR = "data/interim/splits/inputs"
+_SPLITS_ALIGNED_DIR = "data/interim/splits/aligned"
+_SPLITS_DIR = "data/interim/splits"
+_FIGURES_DIR = "figures"
+
+
+rule extract_split_sequences:
+    """Extract per-class window FASTAs + a clustering manifest (P0-22 stage 1; PRD §9.2).
+
+    Reads the DVC corpus (``master_clean_v0.parquet``, P0-12) + re-placed lineages
+    (``lineage_replaced.parquet``, P0-15) and the independent literature-anchor (P0-16)
+    / blind (18 Actinobacteria class-II) / P0-17 positives, and writes a per-class FASTA
+    of the full per-record T-box window (``FASTA_sequence``) plus ``manifest.parquet``
+    (identity + lineage + source tag per aligned sequence). One-time LOCAL, no ``input:``
+    (its inputs are DVC/committed, external to the DAG), kept out of ``rule all``.
+    """
+    output:
+        class_i=f"{_SPLITS_INPUTS_DIR}/class_I.fa",
+        class_ii=f"{_SPLITS_INPUTS_DIR}/class_II.fa",
+        manifest=f"{_SPLITS_INPUTS_DIR}/manifest.parquet",
+    params:
+        inputs_dir=lambda wildcards, output: os.path.dirname(output.manifest),
+    log:
+        "logs/extract_split_sequences.log",
+    conda:
+        "../../envs/data.yml"
+    shell:
+        "python -m tbox_finder.splits extract-sequences "
+        "--inputs-dir {params.inputs_dir:q} >{log} 2>&1"
+
+
+rule align_split_positives:
+    """cmalign each per-class window FASTA to its class CM (P0-22 stage 2; ADR-0004 D2).
+
+    Aligns to ``RF00230.cm`` (class I) / ``TBDB001.cm`` (class II) so the downstream
+    distance is over consensus (match-state) columns, not raw identity. A pure ``cmalign``
+    shell op in the infernal env (the flags mirror ``splits.run_cmalign``: ``--notrunc``
+    complete loci, ``--noprob`` no posterior line); an empty per-class FASTA yields an
+    empty afa. LOCAL, out of ``rule all``.
+    """
+    input:
+        class_i=f"{_SPLITS_INPUTS_DIR}/class_I.fa",
+        class_ii=f"{_SPLITS_INPUTS_DIR}/class_II.fa",
+        # CMs declared as inputs so Snakemake tracks them (stage_reference_assets
+        # outputs; committed git-LFS assets) and rebuilds if a CM changes.
+        cm_i=f"{_REFS_DIR}/RF00230.cm",
+        cm_ii=f"{_REFS_DIR}/TBDB001.cm",
+    output:
+        class_i=f"{_SPLITS_ALIGNED_DIR}/class_I.sto",
+        class_ii=f"{_SPLITS_ALIGNED_DIR}/class_II.sto",
+    log:
+        "logs/align_split_positives.log",
+    conda:
+        "../../envs/infernal.yml"
+    shell:
+        "( for pair in 'I {input.class_i} {input.cm_i} {output.class_i}' "
+        "'II {input.class_ii} {input.cm_ii} {output.class_ii}'; do "
+        "set -- $pair; "
+        "if [ -s \"$2\" ]; then "
+        "cmalign --cpu 8 --notrunc --noprob --outformat pfam -o \"$4\" \"$3\" \"$2\"; "
+        "else : > \"$4\"; fi; done ) >{log} 2>&1"
+
+
+rule cluster_and_split:
+    """Structure-aware clustering + nested split ladder + clade-crossing rule (P0-22; ADR-0004 D2/D3/D5).
+
+    Single-linkage clusters positives on consensus-column identity at the pinned D2 cut
+    (id ≥ 0.70 AND coverage ≥ 0.70), assigns whole clusters to a single fold, builds the
+    nested split ladder (random genus-stratified / leave-one-order-out + class/phylum
+    stress / independent anchor), applies the cluster–clade-crossing forced rule + the
+    per-scheme phylogenetic-independence diagnostic (D3) and the D5 nested most-restrictive
+    training fold, and emits the D2 adequacy net (train↔test distance histogram +
+    tighter-cutoff re-cluster sensitivity sweep). Writes the DVC interim split-assignment
+    table (P0-23 commits the compact git/LFS copy), the audit report, and the figures.
+    LOCAL, out of ``rule all``.
+    """
+    input:
+        manifest=f"{_SPLITS_INPUTS_DIR}/manifest.parquet",
+        class_i=f"{_SPLITS_ALIGNED_DIR}/class_I.sto",
+        class_ii=f"{_SPLITS_ALIGNED_DIR}/class_II.sto",
+    output:
+        table=f"{_SPLITS_DIR}/split_assignments.parquet",
+        provenance=f"{_SPLITS_DIR}/split_assignments.provenance.json",
+        report=f"{_AUDIT_DIR}/split_construction_report.json",
+        figure_data=f"{_SPLITS_DIR}/figure_data.json",
+    params:
+        inputs_dir=lambda wildcards, input: os.path.dirname(input.manifest),
+        aligned_dir=lambda wildcards, input: os.path.dirname(input.class_i),
+        splits_dir=lambda wildcards, output: os.path.dirname(output.table),
+        audit_dir=lambda wildcards, output: os.path.dirname(output.report),
+        env_lock="envs/data.conda-lock.yml",
+    log:
+        "logs/cluster_and_split.log",
+    conda:
+        "../../envs/data.yml"
+    shell:
+        "PYTHONHASHSEED=0 python -m tbox_finder.splits cluster-split "
+        "--inputs-dir {params.inputs_dir:q} "
+        "--aligned-dir {params.aligned_dir:q} "
+        "--splits-dir {params.splits_dir:q} "
+        "--audit-dir {params.audit_dir:q} "
+        "--env-lock {params.env_lock:q} >{log} 2>&1"
+
+
+rule plot_split_figures:
+    """Render the D2 adequacy figures from figure_data.json (P0-22; viz env).
+
+    Split from ``cluster_and_split`` so the heavy clustering stays in the data env
+    (pyarrow, no matplotlib) and only this numeric→PNG render needs the viz env
+    (matplotlib, no pyarrow) — CLAUDE.md §3.2 rule = environment. Emits the
+    train↔test structure-distance histogram + the re-cluster sensitivity sweep
+    (git-LFS: ``figures/**``). LOCAL, out of ``rule all``.
+    """
+    input:
+        figure_data=f"{_SPLITS_DIR}/figure_data.json",
+    output:
+        histogram=f"{_FIGURES_DIR}/split_train_test_distance_histogram.png",
+        sweep=f"{_FIGURES_DIR}/split_sensitivity_sweep.png",
+    params:
+        figures_dir=lambda wildcards, output: os.path.dirname(output.histogram),
+    log:
+        "logs/plot_split_figures.log",
+    conda:
+        "../../envs/viz.yml"
+    shell:
+        "python -m tbox_finder.splits plot-figures "
+        "--figure-data {input.figure_data:q} "
+        "--figures-dir {params.figures_dir:q} >{log} 2>&1"
