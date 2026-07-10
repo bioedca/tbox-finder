@@ -19,7 +19,8 @@ guard for every downstream training step (PRD §8; ADR-0004 D1/D6).
 tboxevo records the **real crystal-derived secondary structure** (dot-bracket) plus a
 Stem-I `ss_cons` / apical slice per entry (and a Stem-II slice for 6UFM) — but **no
 file maps crystal residues to the Specifier codon / Antiterminator / Terminator /
-Discriminator extents**, and **6 of the 9 depositions are Stem-I-only fragments**. So:
+Discriminator extents**, and **5 of the 9 depositions resolve only a Stem-I extent**
+(6POM, though full-length, records no functional extent — apical slice only). So:
 
 - the **9 real depositions** pin precedence correctness on the elements they physically
   resolve — Stem_I (5 entries), Stem_II (6UFM) — and validate class-II routing +

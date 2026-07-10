@@ -2,7 +2,7 @@
   "schema_version": "1.0",
   "step": "P0-21",
   "adr": "ADR-0004 D1 (single-label total precedence order)",
-  "purpose": "Hand-checked synthetic fixture (PRD §8: '... the 9 PDB cases AND a hand-checked fixture'). The 9 crystal depositions resolve mostly Stem_I/Stem_II (6/9 are Stem-I-only fragments), so the EXHAUSTIVE precedence-overlap coverage — every material overlap and representative residual precedence pairs — lives here. Coords are 1-based inclusive in a 60-nt local window. Expected strings are authored by hand (simulating the ADR-0004 D1 paint order: paint low->high precedence so the highest-precedence element covering a base wins).",
+  "purpose": "Hand-checked synthetic fixture (PRD §8: '... the 9 PDB cases AND a hand-checked fixture'). The 9 crystal depositions resolve mostly Stem_I/Stem_II (only Stem_I x5 + Stem_II x1 are residue-resolved), so the EXHAUSTIVE precedence-overlap coverage — every material overlap and representative residual precedence pairs — lives here. Coords are 1-based inclusive in a 60-nt local window. Expected strings are authored by hand (simulating the ADR-0004 D1 paint order: paint low->high precedence so the highest-precedence element covering a base wins).",
   "precedence_order_high_to_low": [
     "Discriminator", "Specifier", "Antiterminator_Tbox_seq", "Terminator",
     "Stem_II", "Stem_III", "Stem_I", "background"
