@@ -91,7 +91,13 @@ def test_classII_import_is_stdlib_only():
         "assert 'Bio' not in sys.modules, 'Biopython leaked at import'; "
         "print('ok')"
     )
-    res = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True)
+    res = subprocess.run(
+        [sys.executable, "-c", code],
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=60,
+    )
     assert res.stdout.strip() == "ok"
 
 
