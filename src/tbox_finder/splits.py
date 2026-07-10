@@ -1292,12 +1292,13 @@ def write_table(
     corpus_sha256 = provenance.sha256_file(corpus_parquet)
     table = build_split_table(interim, corpus_sha256=corpus_sha256)
 
+    # Load-bearing §8.2 invariant — assert *before* materializing any output so a
+    # failed leakage check can never leave an invalid committed artifact on disk.
+    _assert_no_cluster_split(table)
+
     out_parquet = Path(out_parquet)
     out_parquet.parent.mkdir(parents=True, exist_ok=True)
     table.to_parquet(out_parquet, index=False)
-
-    # Load-bearing §8.2 invariant carried through to the committed copy.
-    _assert_no_cluster_split(table)
 
     report = json.loads(Path(audit_report).read_text())
     n_corpus = int((table["source"] == "corpus").sum())

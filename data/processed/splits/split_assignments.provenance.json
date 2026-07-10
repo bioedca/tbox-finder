@@ -46,8 +46,8 @@
     "n_external": 34,
     "n_records": 23569
   },
-  "generated_at_utc": "2026-07-10T18:53:47.769814+00:00",
-  "git_sha": "6d0f9ff4f3312613e302cad899dec8f1ff16f268",
+  "generated_at_utc": "2026-07-10T18:59:39.903184+00:00",
+  "git_sha": "fd5b61a1444585fbe6a21ce4f948e3bc7682b382",
   "inputs": {
     "data/interim/splits/split_assignments.parquet": "b365987a3b4aa1087be96e51e8315d5cfd4a7e866bba5a877b1e472d06f921d8",
     "data/processed/audits/split_construction_report.json": "a33bbeaa723eb191ed03e9f87ead1b4edf40e6ee2fa80e7d20c1c7873cd6a0bd",
