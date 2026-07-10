@@ -50,6 +50,14 @@
 !/data/external/gate1_anchor/provenance.json
 !/data/external/gate1_anchor/gate1_anchor_report.json
 
+# Carve-out: the P0-17 additional-non-Actinobacteria-class-II deliverables ONLY — the
+# (verified-empty) positive FASTA, its provenance, and the class-II report (which carries
+# the ≥2-source negative determination + the CM/DB-derived P2 lead catalogue by reference).
+!/data/external/classII_positives/
+!/data/external/classII_positives/classII_positives.fasta
+!/data/external/classII_positives/provenance.json
+!/data/external/classII_positives/classII_report.json
+
 # ── Snakemake working dir + rule run-logs (never committed) ──
 .snakemake/
 /logs/

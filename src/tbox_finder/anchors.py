@@ -42,6 +42,14 @@ Stdlib-only at import (no pandas / no Biopython) so the module bare-imports in t
 test env; pandas is imported lazily inside the orchestrator for the corpus/leakage read,
 mirroring ``priors``/``taxonomy``. NCBI E-utilities are called with stdlib ``urllib``
 (fail-loud, rate-limited, cached), matching ``taxonomy``'s stdlib fetch discipline.
+
+This module also houses **P0-17** (``source_classII``): sourcing additional independent
+*non-Actinobacteria* class-II (translational) positives. Its verified outcome is the
+EMPTY set — the peer-reviewed literature documents class-II T-boxes only in Actinobacteria
+(the reduced ileS system) — so, per CLAUDE.md §10.2/§10.3, it publishes an honest empty
+positive set + the ≥2-source evidence chain, and catalogues the corpus's CM/DB-derived
+non-Actinobacteria ``type=Translational`` records BY REFERENCE as P2 de-novo discovery
+LEADS (explicitly NOT positives). See the P0-17 section note below.
 """
 
 from __future__ import annotations
@@ -1035,9 +1043,335 @@ def _build_audit(
     }
 
 
+# --------------------------------------------------------------------------- #
+# P0-17 — additional independent non-Actinobacteria class-II positives
+# --------------------------------------------------------------------------- #
+#
+# Outcome (workflow wf_4bc70b3f-4b5, verified 2026-07-09; user sign-off 2026-07-10):
+# the peer-reviewed literature documents class-II (translational) T-boxes ONLY in
+# Actinobacteria (the reduced ileS system) — there is NO phylogenetically-independent
+# non-Actinobacteria class-II positive to source. Seven literature-search angles +
+# adversarial ≥2-source verification refuted every candidate. So, per CLAUDE.md
+# §10.2/§10.3 (source-or-withhold; never fabricate), this step publishes an HONEST
+# EMPTY positive set + the verified evidence chain, and catalogues the corpus's
+# CM/DB-derived non-Actinobacteria ``type=Translational`` records BY REFERENCE as P2
+# de-novo discovery LEADS — explicitly NOT positives (ingesting them would be the exact
+# CM/DB circularity P0-16/P0-17 exist to break). The class-II anti-mimicry pillar
+# (PRD §5 mechanism 3) therefore rests on the 18-record Actinobacteria/ILE set + the P2
+# construction-powered synthetic-class-II recovery set, as the PRD already anticipates.
+# The min-N-reachability verdict is rendered at P0-26 (ADR-0005), not here.
+
+CLASSII_DIR = Path("data/external/classII_positives")
+CLASSII_FASTA = "classII_positives.fasta"
+CLASSII_PROVENANCE = "provenance.json"
+CLASSII_REPORT = "classII_report.json"
+
+#: The verified determination — a HIGH-STAKES biological label (§10.1), so it rests on
+#: ≥2 independent peer-reviewed sources that agree class-II is Actinobacteria-restricted.
+CLASSII_SOURCES: list[dict[str, str]] = [
+    {
+        "pmid": "18359782",
+        "doi": "10.1261/rna.819308",
+        "citation": (
+            "Vitreschak AG, Mironov AA, Lyubetsky VA, Gelfand MS. Comparative genomic "
+            "analysis of T-box regulatory systems in bacteria. RNA 2008;14(4):717-735."
+        ),
+        "role": (
+            "Genome-wide comparative survey. Restricts the reduced translation-initiation "
+            "(class-II) T-boxes to Actinobacteria (all Actinomycetales + Bifidobacterium "
+            "longum — both Actinobacteria); the non-Actinobacteria hosts it reports "
+            "(Deltaproteobacteria, Deinococcus-Thermus, Chloroflexi, Dictyoglomi) are "
+            "TRANSCRIPTIONAL antitermination."
+        ),
+    },
+    {
+        "pmid": "19258532",
+        "doi": "10.1128/MMBR.00026-08",
+        "citation": (
+            "Gutierrez-Preciado A, Henkin TM, Grundy FJ, Yanofsky C, Merino E. Biochemical "
+            "features and functional implications of the RNA-based T-box regulatory "
+            "mechanism. Microbiol Mol Biol Rev 2009;73(1):36-61."
+        ),
+        "role": (
+            "Mechanistic review: T-box regulation is 'usually based on a transcription "
+            "attenuation mechanism'; frames the Firmicutes / Chloroflexi / "
+            "Deinococcus-Thermus / Actinobacteria distribution around transcriptional "
+            "antitermination. No non-Actinobacteria translational assignment."
+        ),
+    },
+    {
+        "pmid": "32882008",
+        "doi": "10.1093/nar/gkaa721",
+        "citation": (
+            "Marchand JA, Pierson Smela MD, Jordan THW, Narasimhan K, Church GM. TBDB: a "
+            "database of structurally annotated T-box riboswitch:tRNA pairs. Nucleic Acids "
+            "Res 2021;49(D1):D229-D235."
+        ),
+        "role": (
+            "The field's largest T-box resource. Methodologically decisive: its class-II "
+            "(translational) covariance-model search was run ONLY on Actinobacteria "
+            "reference genomes (NCBI TaxID:1760). By construction it holds no validated "
+            "non-Actinobacteria class-II — and is the (refuted) origin of the corpus's "
+            "non-Actinobacteria type=Translational rows (curated Regulation='Unknown')."
+        ),
+    },
+    {
+        "pmid": "25583497",
+        "doi": "10.1073/pnas.1424175112",
+        "citation": (
+            "Sherwood AV, Grundy FJ, Henkin TM. T box riboswitches in Actinobacteria: "
+            "translational regulation via novel tRNA interactions. Proc Natl Acad Sci USA "
+            "2015;112(4):1113-1118."
+        ),
+        "role": (
+            "Founding biochemical demonstration of the class-II / translational mechanism "
+            "(Shine-Dalgarno sequestration, terminator-less, ileS) — explicitly in "
+            "Actinobacteria. Defines the criterion any genuine class-II positive must meet."
+        ),
+    },
+    {
+        "pmid": "39097611",
+        "doi": "10.1038/s41467-024-50885-x",
+        "citation": (
+            "Translational T-box riboswitch (Mycobacterium tuberculosis ileS). "
+            "Nat Commun 2024;15:6592."
+        ),
+        "role": (
+            "Experimental (single-molecule) anchor for the translational ileS T-box in an "
+            "Actinobacterium; corroborates that all characterized class-II elements are "
+            "Actinobacterial."
+        ),
+    },
+]
+
+CLASSII_DETERMINATION = (
+    "No phylogenetically-independent, non-Actinobacteria class-II (translational) T-box "
+    "positive exists in the peer-reviewed literature (verified 2026-07-09; 7 search angles "
+    "+ adversarial >=2-source verification, all candidates refuted). The well-supported "
+    "high-stakes fact (>=2 independent agreeing sources: Vitreschak 2008 + MMBR 2009 + TBDB "
+    "2021 + Sherwood 2015) is that class-II (translational) T-boxes are documented only in "
+    "Actinobacteria (the reduced ileS system). Per CLAUDE.md §10.2/§10.3 the natural "
+    "non-Actinobacteria class-II positive set is reported as EMPTY (raw count 0) rather than "
+    "fabricated or stretched from a transcriptional / mode-unspecified locus."
+)
+
+CLASSII_LEADS_DISCLAIMER = (
+    "These are the corpus's non-Actinobacteria records that TBDB's class-II covariance "
+    "model flagged type=Translational via a truncated-Stem-I heuristic applied to sequences "
+    "drawn from its class-I FASTA. They are CM/DB-DERIVED and are NOT independent literature "
+    "positives: TBDB's own curated Regulation field is 'Unknown' for every one, none carries "
+    "explicit translational-mode evidence (SD sequestration / functional terminator "
+    "absence), and TBDB in fact annotates a terminator hairpin for them (so the call is not "
+    "terminator-absence-based). They are catalogued BY REFERENCE as de-novo discovery LEADS "
+    "for the project's own P2 orthogonal (non-CM) scan; using them as labeled positives would "
+    "be exactly the CM/DB circularity P0-16/P0-17 exist to break. The absence of any natural "
+    "non-Actinobacteria class-II positive is itself the scientific gap the project proposes "
+    "to close — any such element the project reports must be a NEW de-novo finding "
+    "(terminator absence + SD sequestration), calibrated and leakage-controlled, not a "
+    "literature citation."
+)
+
+
+@dataclass
+class ClassIIResult:
+    positives_fasta: Path
+    provenance: Path
+    report: Path
+    audit: dict
+
+
+def _is_actinobacteria(phylum: str) -> bool:
+    """True for the Actinobacteria phylum under either the NCBI or GTDB spelling."""
+    p = (phylum or "").strip().lower()
+    return p.startswith("actinobacteri") or p.startswith("actinomyceto")
+
+
+def _load_classII_leads(corpus_parquet: str | Path) -> list[dict]:
+    """The corpus's non-Actinobacteria ``type=Translational`` records — CM/DB-derived P2
+    discovery LEADS (NOT positives; see ``CLASSII_LEADS_DISCLAIMER``). A reproducible
+    corpus query; the count is DERIVED, never hardcoded (§10.3). Pandas is imported lazily
+    so the module bare-imports stdlib-only in the CI test env."""
+    import pandas as pd  # lazy — keeps module import stdlib-only for the unit tests
+
+    cols = [
+        "type",
+        "phylum",
+        "genus",
+        "GBSeq_organism",
+        "accession_name",
+        "amino_acid_top",
+        "refine_codon_top",
+        "downstream_protein",
+        "downstream_protein_EC",
+        "Regulation",
+        "term_sequence",
+    ]
+    df = pd.read_parquet(corpus_parquet, columns=cols)
+    df = df[df["type"] == "Translational"]
+
+    def _s(v: object) -> str | None:
+        if v is None or (isinstance(v, float) and pd.isna(v)):
+            return None
+        s = str(v).strip()
+        return s or None
+
+    leads: list[dict] = []
+    for row in df.itertuples(index=False):
+        phylum = _s(row.phylum)
+        if _is_actinobacteria(phylum or ""):
+            continue
+        acc = _s(row.accession_name)
+        term = _s(row.term_sequence)
+        leads.append(
+            {
+                "organism": _s(row.GBSeq_organism),
+                "genus": _s(row.genus),
+                "ncbi_phylum": phylum or "(unresolved)",
+                "accession": _versionless(acc) if acc else None,
+                "amino_acid": _s(row.amino_acid_top),
+                "specifier_codon": _s(row.refine_codon_top),
+                "downstream_protein": _s(row.downstream_protein),
+                "downstream_protein_ec": _s(row.downstream_protein_EC),
+                "tbdb_regulation": _s(row.Regulation),
+                "tbdb_terminator_annotated": term is not None,
+            }
+        )
+    leads.sort(key=lambda d: (d["ncbi_phylum"], d["organism"] or "", d["accession"] or ""))
+    return leads
+
+
+def _build_classII_audit(positives: list, leads: list[dict]) -> dict:
+    by_phylum: dict[str, int] = {}
+    for ld in leads:
+        by_phylum[ld["ncbi_phylum"]] = by_phylum.get(ld["ncbi_phylum"], 0) + 1
+    # Highest-phylogenetic-spread leads (closest architectural parallels to the
+    # Actinobacterial ileS paradigm; best beyond-Firmicutes breadth) flagged for P2.
+    priority_phyla = ("Deinococcus-Thermus", "Chloroflexi")
+    priority = sorted({ld["ncbi_phylum"] for ld in leads if ld["ncbi_phylum"] in priority_phyla})
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "step": "P0-17",
+        "git_sha": git_sha(),
+        "prd": "§7.1, §5 (mechanism 3), §2.3 (anti-mimicry sub-arm), §8",
+        "determination": CLASSII_DETERMINATION,
+        "sources": CLASSII_SOURCES,
+        "raw_positive_count": len(positives),  # 0 — the verified negative
+        "positives": positives,
+        "counts_by_phylum": {},  # no positives
+        "non_actinobacteria_independence": (
+            "By construction any promoted lead is non-Actinobacteria (the Actinobacteria "
+            "phylum is excluded from the lead set), hence phylogenetically independent of "
+            "the single-phylum 18-record Actinobacteria/ILE natural set — but the natural "
+            "positive set is EMPTY (0), so this independence is vacuous today."
+        ),
+        "leads": {
+            "disclaimer": CLASSII_LEADS_DISCLAIMER,
+            "count": len(leads),
+            "counts_by_ncbi_phylum": by_phylum,
+            "highest_spread_priority_phyla": priority,
+            "records": leads,
+        },
+        "leakage_report": {
+            "n_positives": len(positives),
+            "n_added_to_no_leakage_test": len(positives),
+            "note": (
+                "0 positives sourced -> nothing is added to the P0-24 no-leakage test. The "
+                "leads are CM/DB-derived P2 discovery targets, NOT positives, and do not "
+                "enter the split / leakage / oversampling machinery (§8.2/§9.2)."
+            ),
+        },
+        "gtdb_placement": (
+            "n/a — 0 positives to place. Lead phyla are the corpus's NCBI-named lineages; "
+            "genome-resolution GTDB-Tk placement is deferred to P6 (matching P0-14)."
+        ),
+        "min_n_verdict": (
+            "deferred to P0-26 (ADR-0005) — this step sources + reports raw counts only "
+            "(raw non-Actinobacteria class-II positive count = 0)."
+        ),
+        "provenance_workflow": (
+            "wf_4bc70b3f-4b5 (7-angle literature survey + adversarial >=2-source verification)"
+        ),
+    }
+
+
+def source_classII(
+    *,
+    out_dir: str | Path = CLASSII_DIR,
+    corpus_parquet: str | Path = CORPUS_PARQUET,
+) -> ClassIIResult:
+    """Source additional independent non-Actinobacteria class-II positives — P0-17.
+
+    The verified outcome is the EMPTY set (see the P0-17 module-section note): this writes
+    an honest empty positive FASTA + the ≥2-source evidence chain + the CM/DB-derived
+    non-Actinobacteria leads catalogued BY REFERENCE (NOT positives), for P2.
+
+    Args:
+        out_dir: output dir (``data/external/classII_positives``).
+        corpus_parquet: the training corpus — read only to enumerate the P2 leads.
+    """
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    leads = _load_classII_leads(corpus_parquet)
+    positives: list[tuple[str, str]] = []  # the verified negative (§10.2/§10.3 withhold)
+
+    audit = _build_classII_audit(positives, leads)
+
+    fasta_path = out_dir / CLASSII_FASTA
+    with fasta_path.open("w") as fh:
+        for header, seq in positives:  # none — honest empty positive set
+            fh.write(f">{header}\n")
+            for i in range(0, len(seq), 70):
+                fh.write(seq[i : i + 70] + "\n")
+
+    report_path = out_dir / CLASSII_REPORT
+    report_path.write_text(json.dumps(audit, indent=2, sort_keys=True, ensure_ascii=False) + "\n")
+
+    prov_path = write_provenance(
+        out_dir / CLASSII_PROVENANCE,
+        rule="workflow/rules/data.smk :: source_classII_positives",
+        script="src/tbox_finder/anchors.py",
+        inputs=[str(corpus_parquet)],
+        outputs=[str(fasta_path), str(report_path)],
+        env_lock="envs/data.conda-lock.yml",
+        adr="PRD §7.1/§5/§2.3/§8 (ADR-0005 pending, P0-19/25; min-N verdict at P0-26)",
+        extra={
+            "step": "P0-17",
+            "determination": CLASSII_DETERMINATION,
+            "sources": CLASSII_SOURCES,
+            "raw_positive_count": len(positives),
+            "n_p2_leads": len(leads),
+            "leads_disclaimer": CLASSII_LEADS_DISCLAIMER,
+        },
+    )
+    return ClassIIResult(fasta_path, prov_path, report_path, audit)
+
+
+def _main_classII(args: list[str]) -> int:
+    parser = argparse.ArgumentParser(
+        prog="tbox_finder.anchors source-classII",
+        description="Source additional independent non-Actinobacteria class-II positives — P0-17.",
+    )
+    parser.add_argument("--out-dir", default=str(CLASSII_DIR))
+    parser.add_argument("--corpus", default=str(CORPUS_PARQUET))
+    ns = parser.parse_args(args)
+    out = source_classII(out_dir=ns.out_dir, corpus_parquet=ns.corpus)
+    a = out.audit
+    print(
+        "classII positives: raw non-Actinobacteria class-II positive count = "
+        f"{a['raw_positive_count']} (verified-empty; §10.2/§10.3 withhold)\n"
+        f"  P2 leads catalogued (NOT positives): {a['leads']['count']} "
+        f"-> {a['leads']['counts_by_ncbi_phylum']}\n"
+        f"  report -> {out.report}"
+    )
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     """CLI: ``python -m tbox_finder.anchors source-anchor --anchor-dir …``."""
     args = list(sys.argv[1:] if argv is None else argv)
+    if args and args[0] == "source-classII":
+        return _main_classII(args[1:])
     if args and args[0] == "source-anchor":
         args = args[1:]
     parser = argparse.ArgumentParser(

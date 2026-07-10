@@ -184,6 +184,7 @@ rule reconcile_union_prior:
 _INTERIM_DIR = "data/interim"
 _NCBI_TAX_DIR = "data/external/ncbi_taxonomy"
 _GATE1_DIR = "data/external/gate1_anchor"
+_CLASSII_DIR = "data/external/classII_positives"
 
 
 rule replace_taxid_lineage:
@@ -269,3 +270,44 @@ rule source_gate1_anchor:
     shell:
         "python -m tbox_finder.anchors source-anchor "
         "--anchor-dir {params.anchor_dir:q} >{log} 2>&1"
+
+
+rule source_classII_positives:
+    """Source additional independent non-Actinobacteria class-II positives — P0-17
+    (PRD §7.1, §5 mechanism 3, §2.3 anti-mimicry sub-arm, §8).
+
+    The class-II anti-mimicry pillar (PRD §5 mechanism 3) needs held-out class-II
+    (translational) T-boxes BEYOND the single-phylum 18-record Actinobacteria/ILE set.
+    A ≥2-source literature survey (7 angles + adversarial verification, 2026-07-09;
+    user sign-off 2026-07-10) established the VERIFIED NEGATIVE: the peer-reviewed
+    literature documents class-II T-boxes only in Actinobacteria (the reduced ileS
+    system) — no phylogenetically-independent non-Actinobacteria class-II positive
+    exists. Per CLAUDE.md §10.2/§10.3 (source-or-withhold; never fabricate) this rule
+    publishes an HONEST EMPTY positive set (raw count 0) + the ≥2-source evidence chain,
+    and catalogues the corpus's CM/DB-derived non-Actinobacteria ``type=Translational``
+    records BY REFERENCE as P2 de-novo discovery LEADS (explicitly NOT positives —
+    ingesting them would be the CM/DB circularity P0-16/P0-17 exist to break). The
+    min-N-reachability verdict is deferred to P0-26 (ADR-0005).
+
+    Like the other ``data.smk`` rules it is a **one-time LOCAL** rule kept out of ``rule
+    all`` with no ``input:`` — the DVC corpus is read directly (only to enumerate the
+    leads); the empty FASTA + provenance + report travel with the repo (git-LFS /
+    ``.gitignore`` carve-out; CLAUDE.md §5.2). Invoke:
+
+        snakemake --cores 1 --use-conda source_classII_positives
+    """
+    output:
+        fasta=f"{_CLASSII_DIR}/classII_positives.fasta",
+        provenance=f"{_CLASSII_DIR}/provenance.json",
+        report=f"{_CLASSII_DIR}/classII_report.json",
+    params:
+        # dir derived from the output (not a hardcoded prefix) so `snakemake --lint`
+        # stays clean; the module writes the FASTA + provenance + report under --out-dir.
+        out_dir=lambda wildcards, output: os.path.dirname(output.fasta),
+    log:
+        "logs/source_classII_positives.log",
+    conda:
+        "../../envs/data.yml"
+    shell:
+        "python -m tbox_finder.anchors source-classII "
+        "--out-dir {params.out_dir:q} >{log} 2>&1"

@@ -641,3 +641,37 @@ data); **F2 shifts 3 approximate leaders' end coordinate by 1–2 nt** (DR_GLYS2
 overlap classifications unchanged; `genome[start:end] == leader` invariant re-verified). +5 tests (boundary-tracks-shift,
 ambiguous/unambiguous localization, uncoordinated-not-novel, fail-loud-on-empty).
 **Commit.** the P0-16 atomic commit on branch `p0-16-gate1-anchor` (`db4c3fc`) + two review-fix commits (squash-merged).
+
+## Step P0-17 — 2026-07-10: additional independent non-Actinobacteria class-II positives + leakage-test
+**Inputs.** Published non-Actinobacteria class-II (translational) occurrences (peer-reviewed literature); the 18-record
+single-phylum Actinobacteria/ILE natural set (`data/external/refs/heldout_blind_set.fasta`); the training corpus
+`data/processed/master_clean_v0.parquet` (read only to enumerate P2 leads).
+**Process.** A ≥2-source literature survey (workflow `wf_4bc70b3f-4b5`: 7 discovery angles + adversarial verification over
+Consensus/PubMed/Scholar-Gateway/bioRxiv) returned a **verified NEGATIVE**: the peer-reviewed literature documents class-II
+(translational) T-boxes **only in Actinobacteria** (the reduced *ileS* system). Every non-Actinobacteria candidate (10 loci
+surfaced from TBDB's truncated-Stem-I `type=Translational` flag) was **REFUTED** — TBDB's own curated `Regulation` field is
+`Unknown` for all, none has explicit translational-mode evidence, and TBDB annotates a terminator hairpin for them (so the
+call is not terminator-absence-based). Per CLAUDE.md §10.2/§10.3, `src/tbox_finder/anchors.py::source_classII`
+(`workflow/rules/data.smk::source_classII_positives`, LOCAL, out of `rule all`) publishes an **honest empty positive set**
+(raw count 0) + the ≥2-source evidence chain, and catalogues the corpus's **40** CM/DB-derived non-Actinobacteria
+`type=Translational` records **by reference** as P2 de-novo discovery **leads** (explicitly NOT positives — ingesting them
+would be the CM/DB circularity P0-16/P0-17 exist to break). User sign-off (Option "Withhold + catalogue leads"), 2026-07-10.
+**Outputs.** `data/external/classII_positives/{classII_positives.fasta (empty; git-LFS leaves 0-byte files empty),
+provenance.json, classII_report.json}`. Report: `raw_positive_count=0`; leads = 40 (Firmicutes 20, Deinococcus-Thermus 11,
+`(unresolved)` 4, Chloroflexi 2, Ca. Saccharibacteria 1, Ca. Wolfebacteria 1, Synergistetes 1); highest-spread priority for
+P2 = {Chloroflexi, Deinococcus-Thermus}; leakage report **n_positives=0 → nothing added to the P0-24 no-leakage test**.
+Evidence chain (≥2 independent, in-repo-cited): Vitreschak 2008 (PMID:18359782) + MMBR 2009 (PMID:19258532) + TBDB 2021
+(PMID:32882008) + Sherwood 2015 (PMID:25583497) + M. tuberculosis 2024 (PMID:39097611). New `tests/unit/test_classII_provenance.py`
+(2 tiers: 5 bare-stdlib + import-purity, 2 pandas-gated end-to-end incl. the anti-circularity "never emit a lead as positive"
+guard).
+**Validation.** PASSED — full provenance (6 §11 stamps); positives non-Actinobacteria (vacuous, 0); leakage-tested (0 added);
+**raw class-II counts reported** (min-N-reachability verdict deferred to P0-26/ADR-0005). `pytest tests/unit` 125 passed / 24
+skipped (bare CI sim; classII 5 pure-logic + import-purity, 2 pandas-gated `importorskip`) + 7/7 with pandas+pyarrow; ruff
+0.15.15 + black 25.11.0 (`--target-version py312`) clean; `snakemake --lint` "good condition" + `-n source_classII_positives`
+resolves. **Decisions.** The absence of a natural non-Actinobacteria class-II positive is itself the scientific gap the project
+proposes to close (no database ever ran a class-II model outside Actinobacteria TaxID:1760) — any such element the project
+reports must be a NEW de-novo finding (terminator absence + SD sequestration), not a literature citation; the class-II
+anti-mimicry pillar (PRD §5 mechanism 3) rests on the 18-record Actinobacteria set + the P2 construction-powered
+synthetic-class-II recovery set, as the PRD already anticipates. Withhold-not-fabricate, reproducing the signed-off P0-14
+(*Dictyoglomus*) / P0-16 (*Dehalococcoides*) precedents. ADR-0005 (min-N floor) pending (P0-19/25). context7 §3.3: n/a
+(stdlib + in-repo `provenance`/pandas-lazy corpus read). **Commit.** the P0-17 atomic commit on branch `p0-17-classII-positives`.
