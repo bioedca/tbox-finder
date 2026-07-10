@@ -675,3 +675,30 @@ anti-mimicry pillar (PRD §5 mechanism 3) rests on the 18-record Actinobacteria 
 synthetic-class-II recovery set, as the PRD already anticipates. Withhold-not-fabricate, reproducing the signed-off P0-14
 (*Dictyoglomus*) / P0-16 (*Dehalococcoides*) precedents. ADR-0005 (min-N floor) pending (P0-19/25). context7 §3.3: n/a
 (stdlib + in-repo `provenance`/pandas-lazy corpus read). **Commit.** the P0-17 atomic commit on branch `p0-17-classII-positives`.
+
+## Step P0-18 — 2026-07-10: Dataset-license-compatibility audit
+**Inputs.** Every upstream source feeding the training corpus / curated dataset (TBDB `Master_tboxes.csv`, Rfam RF00230,
+tbox-scan `TBDB001.cm`, tboxevo sub-element CMs, 9 PDB crystals, the Vitreschak-2008 supplement, GTDB R232, NCBI RefSeq +
+taxdump, the P0-16 anchor, the P0-17 class-II set); ADR-0001 §D9 (release-license gating); PRD header / §2.1 G-E / §7 / §16–17.
+**Process.** Verified each source's license against the **authoritative upstream on 2026-07-10** — GitHub About/LICENSE for the
+MIT sources (the local `tboxdb-master` / `tbox-scan-master` archives omit the LICENSE, so confirmed against
+`github.com/mpiersonsmela/tbox` + `github.com/jamarchand/tbox-scan`); the wwPDB usage-policy for PDB CC0-1.0; EMBL-EBI for Rfam
+CC0-1.0; the GTDB downloads page for CC-BY-SA-4.0; NCBI policies for RefSeq/taxdump public-domain — and cross-checked the
+source-carried `data/external/**/provenance.json`. Landed `scripts/reconstruct_encumbered.py` (stdlib-only `SOURCES` registry =
+single source of truth + checksummed fetch/reconstruct stubs), `docs/license_audit.md` (per-source verdict table + resolution),
+`tests/unit/test_license_audit.py`. **Outputs.** 11-source audit; verdicts {9 compatible, 2 encumbered}; the two encumbered
+route to reconstruct-from-source — `gtdb` (CC-BY-SA-4.0 share-alike; novelty-prior projection re-applied via
+`src/tbox_finder/priors.py`, **not embedded**) + `vitreschak_supplement` (proprietary; anchor leaders re-derived from
+public-domain RefSeq via `anchors.py::source_anchor`, supplement never shipped).
+**Validation.** PASSED — every upstream source carries a license + compatibility verdict; the release path (own-derived
+CC-BY-4.0 + reconstruct script for encumbered sources) is decided + consistent with ADR-0001 §D9. `pytest tests/unit` **157
+passed / 24 skipped** (bare CI sim; license-audit 32 pure-stdlib, no pandas gate) — was 125/24; ruff 0.15.15 + black 25.11.0
+(`--target-version py312`) clean; no `.smk` touched (DAG lint unaffected). **Decisions.** Q-question RESOLVED — user sign-off
+2026-07-10, **Option A**: curated dataset = own-derived fields (coordinates, labels, predictions, splits, calibration,
+re-derived anchor, hash-links) under **CC-BY-4.0** + `reconstruct_encumbered.py` for the two encumbered sources (Option B,
+embed-everything-under-CC-BY-SA-4.0, declined — share-alike reduces reuse + clashes with the CC-BY-4.0 model weights). GTDB is
+the **only** share-alike source, and the corpus lineage-by-rank columns are NCBI-named (P0-15, public-domain taxdump), **not**
+GTDB — so the split-assignment table (P0-23) carries no GTDB content; GTDB touches only the union novelty prior, which ships as
+own-derived has-prior/no-prior booleans (facts) with the GTDB-name compilation reconstructed. Corrects the P0-11a provenance's
+imprecise "see tboxdb LICENSE" (the local archive has none; MIT confirmed upstream). context7 §3.3: n/a (stdlib urllib/hashlib +
+in-repo provenance reads). **Commit.** the P0-18 atomic commit on branch `p0-18-license-audit`.
