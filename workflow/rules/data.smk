@@ -311,3 +311,52 @@ rule source_classII_positives:
     shell:
         "python -m tbox_finder.anchors source-classII "
         "--out-dir {params.out_dir:q} >{log} 2>&1"
+
+
+_LABELS_DIR = "data/processed/labels"
+
+
+rule derive_labels:
+    """Derive the 8-class per-nucleotide segmentation labels + class-II-CM-naive flag (P0-20; PRD §8/§11).
+
+    Maps each corpus record's element annotations onto its per-record local window
+    (``[1, tbox_length]``, 1-based inclusive) to produce a **single-label** per-nt vector
+    over the 8 classes (``background``/``Stem_I``/``Specifier``/``Stem_II``/``Stem_III``/
+    ``Antiterminator_Tbox_seq``/``Terminator``/``Discriminator``), resolving every overlap
+    by the total precedence order pinned in **ADR-0004 D1** (Discriminator ▸ Specifier ▸
+    Antiterminator ▸ Terminator ▸ Stem_II ▸ Stem_III ▸ Stem_I ▸ background). Terminator is
+    painted only for class-I records (class II has no terminator; PMID:25583497). Also emits
+    a per-record ``label_source`` / ``class_ii_cm_naive`` flag (Translational =
+    ``TBDB001.cm``-derived) and a naive label vector that withholds all ``TBDB001.cm``-derived
+    structure, plus aux labels (codon, cognate aa, tRNA family, regulatory mode) and
+    element-coverage completeness flags (below-threshold flagged, never dropped). Writes
+    ``labels_v0.parquet`` (DVC), the audit report, and a provenance.json.
+
+    Like the other ``data.smk`` rules it is a **one-time LOCAL** rule kept out of ``rule
+    all`` with no ``input:`` — its input is the DVC-tracked corpus (``master_clean_v0.parquet``,
+    P0-12; tracked by DVC + provenance, not the Snakemake DAG). The parquet is DVC-tracked
+    (dvc pull downstream). Invoke:
+
+        snakemake --cores 1 --use-conda derive_labels
+    """
+    output:
+        labels=f"{_LABELS_DIR}/labels_v0.parquet",
+        provenance=f"{_LABELS_DIR}/labels_v0.provenance.json",
+        report=f"{_AUDIT_DIR}/labels_report.json",
+    params:
+        # corpus + dirs derived from the outputs (not hardcoded prefixes) so `snakemake
+        # --lint` stays clean; the module writes the parquet + provenance under --labels-dir.
+        corpus=config.get("labels_corpus", "data/processed/master_clean_v0.parquet"),
+        labels_dir=lambda wildcards, output: os.path.dirname(output.labels),
+        audit_dir=lambda wildcards, output: os.path.dirname(output.report),
+        env_lock="envs/data.conda-lock.yml",
+    log:
+        "logs/derive_labels.log",
+    conda:
+        "../../envs/data.yml"
+    shell:
+        "python -m tbox_finder.labels "
+        "--corpus {params.corpus:q} "
+        "--labels-dir {params.labels_dir:q} "
+        "--audit-dir {params.audit_dir:q} "
+        "--env-lock {params.env_lock:q} >{log} 2>&1"
