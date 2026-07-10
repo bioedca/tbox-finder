@@ -137,3 +137,12 @@ def test_disjoint_pair_reports_zero():
     assert r["n_overlap"] == 0
     assert r["prev_pct"] == 0.0
     assert r["median_bp"] is None
+
+
+def test_empty_corpus_does_not_divide_by_zero():
+    mod = _load_module()
+    empty = _fixture_df().iloc[0:0]  # zero rows, columns intact
+    rep = mod.compute_overlaps(empty)
+    assert rep["n_records"] == 0
+    assert all(v["n"] == 0 and v["pct"] == 0.0 for v in rep["presence"].values())
+    assert all(r["n_both"] == 0 and r["prev_pct"] == 0.0 for r in rep["pairs"])

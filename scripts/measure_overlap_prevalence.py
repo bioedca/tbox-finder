@@ -98,7 +98,7 @@ def compute_overlaps(df) -> dict:
     presence = {
         name: {
             "n": int(mask.sum()),
-            "pct": round(100.0 * int(mask.sum()) / n_records, 2),
+            "pct": (round(100.0 * int(mask.sum()) / n_records, 2) if n_records else 0.0),
         }
         for name, mask in present.items()
     }
@@ -177,6 +177,13 @@ def main(argv: list[str] | None = None) -> int:
         help="destination audit JSON",
     )
     args = p.parse_args(argv)
+
+    # Never let --out alias --corpus: writing the JSON report would overwrite
+    # (and destroy) the input parquet. Guard resolved-path and link identity.
+    if args.out.resolve() == args.corpus.resolve() or (
+        args.out.exists() and args.corpus.exists() and args.out.samefile(args.corpus)
+    ):
+        p.error("--out must not alias --corpus (would overwrite the input artifact)")
 
     report = measure(args.corpus)
     args.out.parent.mkdir(parents=True, exist_ok=True)
