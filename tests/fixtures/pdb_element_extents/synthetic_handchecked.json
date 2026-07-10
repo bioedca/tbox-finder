@@ -1,0 +1,67 @@
+{
+  "schema_version": "1.0",
+  "step": "P0-21",
+  "adr": "ADR-0004 D1 (single-label total precedence order)",
+  "purpose": "Hand-checked synthetic fixture (PRD §8: '... the 9 PDB cases AND a hand-checked fixture'). The 9 crystal depositions resolve mostly Stem_I/Stem_II (only Stem_I x5 + Stem_II x1 are residue-resolved), so the EXHAUSTIVE precedence-overlap coverage — every material overlap and representative residual precedence pairs — lives here. Coords are 1-based inclusive in a 60-nt local window. Expected strings are authored by hand (simulating the ADR-0004 D1 paint order: paint low->high precedence so the highest-precedence element covering a base wins).",
+  "precedence_order_high_to_low": [
+    "Discriminator", "Specifier", "Antiterminator_Tbox_seq", "Terminator",
+    "Stem_II", "Stem_III", "Stem_I", "background"
+  ],
+  "overlaps_exercised": {
+    "Specifier_over_Stem_I": "codon 8-10 nested in Stem_I 1-20",
+    "Stem_II_over_Stem_I": "Stem_II 16-25 overlaps Stem_I 1-20 at 16-20",
+    "Stem_II_over_Stem_III": "Stem_II 16-25 overlaps Stem_III 24-30 at 24-25",
+    "Antiterminator_over_Terminator": "Antiterm 31-45 overlaps Terminator 40-55 at 40-45",
+    "Discriminator_over_Antiterminator": "Discrim 43-46 overlaps Antiterm 31-45 at 43-45",
+    "Discriminator_over_Terminator": "Discrim 43-46 overlaps Terminator 40-55 at 46",
+    "Stem_III_standalone": "26-30 (not overlapped after Stem_II resolves 24-25)",
+    "Terminator_standalone": "47-55 (beyond the antiterminator)",
+    "background": "56-60"
+  },
+  "entries": [
+    {
+      "name": "synthetic_class_I_all_elements",
+      "regulatory_mode": "Transcriptional",
+      "class": "I",
+      "window_length": 60,
+      "extents": {
+        "Stem_I": [1, 20],
+        "Specifier": [8, 10],
+        "Stem_II": [16, 25],
+        "Stem_III": [24, 30],
+        "Antiterminator_Tbox_seq": [31, 45],
+        "Terminator": [40, 55],
+        "Discriminator": [43, 46]
+      },
+      "expected_runs": [
+        ["1", 7], ["S", 3], ["1", 5], ["2", 10], ["3", 5],
+        ["A", 12], ["D", 4], ["T", 9], [".", 5]
+      ],
+      "expected_naive_runs": [
+        ["1", 7], ["S", 3], ["1", 5], ["2", 10], ["3", 5],
+        ["A", 12], ["D", 4], ["T", 9], [".", 5]
+      ]
+    },
+    {
+      "name": "synthetic_class_II_all_elements",
+      "regulatory_mode": "Translational",
+      "class": "II",
+      "window_length": 60,
+      "extents": {
+        "Stem_I": [1, 20],
+        "Specifier": [8, 10],
+        "Stem_II": [16, 25],
+        "Stem_III": [24, 30],
+        "Antiterminator_Tbox_seq": [31, 45],
+        "Terminator": [40, 55],
+        "Discriminator": [43, 46]
+      },
+      "note": "Same extents, class II. Terminator is class-I-only (PMID:25583497), so the standalone terminator tail (47-55) becomes background; the antiterminator (31-45) and the discriminator (43-46, which reads the tRNA NCCA regardless of class) are unaffected. Production paints the shared elements; the class-II-CM-naive run withholds ALL structure (all background).",
+      "expected_runs": [
+        ["1", 7], ["S", 3], ["1", 5], ["2", 10], ["3", 5],
+        ["A", 12], ["D", 4], [".", 14]
+      ],
+      "expected_naive_runs": [[".", 60]]
+    }
+  ]
+}

@@ -1,0 +1,187 @@
+{
+  "schema_version": "1.0",
+  "step": "P0-21",
+  "adr": "ADR-0004 (D1 precedence, D6 9-PDB cross-source ceiling)",
+  "prd": "§8 (label derivation), §7.1 (crystal structures)",
+  "provenance": {
+    "derivation": "Option B (P0-21, user sign-off 2026-07-10): per-element extents are transcribed VERBATIM from tboxevo crystal-derived files. No functional-element boundary is invented (CLAUDE.md §10.3). Where a deposition does not resolve an element to a residue extent, that element is ABSENT (omitted), not guessed.",
+    "source_repo": "tboxevo (sibling checkout /home/bioedca/tbox-phylogeny/tboxevo)",
+    "source_dirs": [
+      "data/external/cocrystal_ss_cons/anchor_<ID>.json (Stem-I ss_cons + apical_segment_slice + stem2_anchor_to_aln_col + _curate_note)",
+      "data/external/secondarystructure/<ID>/<ID>-2D.dbn (DSSR crystal-derived dot-bracket of the leader strand)"
+    ],
+    "coordinate_frame": "1-based inclusive, leader-strand local frame (matches src/tbox_finder/labels.py ELEMENT_COORDS). apical_segment_slice values in the source JSON are 0-indexed inclusive; converted here to 1-based inclusive (a,b) -> (a+1,b+1).",
+    "class_assignment": {
+      "note": "T-box class is not invented: it follows the tboxevo _curate_note descriptor ('ultrashort-translational' = class II; 'classical'/'Stem I domain' aminoacyl-tRNA-synthetase leader = class I) corroborated by the in-repo literature already ≥2-source verified (P0-17 leakage-test evidence chain).",
+      "class_II_ileS_ultrashort_translational_Actinobacteria_pmids": ["18359782", "19258532", "32882008", "25583497"],
+      "class_I_classical_transcriptional_aaRS_tbox_pmids": ["24356646", "25583497", "32882008"]
+    }
+  },
+  "entries": [
+    {
+      "name": "4LCK",
+      "organism": "Oceanobacillus iheyensis",
+      "gene": "glyQ",
+      "class": "I",
+      "regulatory_mode": "Transcriptional",
+      "scope": "stem_i_only",
+      "window_length": 102,
+      "extents": {"Stem_I": [1, 102]},
+      "apical_diagnostic": [39, 68],
+      "expected_runs": [["1", 102]],
+      "expected_naive_runs": [["1", 102]],
+      "source_files": [
+        "cocrystal_ss_cons/anchor_4LCK.json (_status=filled; seq_len=102; leader_strand=strand_C; 'Stem I domain'; apical_segment_slice [38,67])",
+        "secondarystructure/4LCK/4LCK-2D.dbn (strand_C, 102 nt)"
+      ]
+    },
+    {
+      "name": "4MGN",
+      "organism": "Geobacillus kaustophilus",
+      "gene": "glyQS",
+      "class": "I",
+      "regulatory_mode": "Transcriptional",
+      "scope": "stem_i_only",
+      "window_length": 86,
+      "extents": {"Stem_I": [1, 86]},
+      "apical_diagnostic": [29, 58],
+      "expected_runs": [["1", 86]],
+      "expected_naive_runs": [["1", 86]],
+      "source_files": [
+        "cocrystal_ss_cons/anchor_4MGN.json (_status=filled; seq_len=86; leader_strand=strand_A; 'Stem I'; apical_segment_slice [28,57])",
+        "secondarystructure/4MGN/4MGN-2D.dbn (strand_A, 86 nt)"
+      ]
+    },
+    {
+      "name": "2KZL",
+      "organism": "Bacillus subtilis",
+      "gene": "tyrS",
+      "class": "I",
+      "regulatory_mode": "Transcriptional",
+      "scope": "stem_i_specifier_domain_fragment",
+      "window_length": 55,
+      "extents": {"Stem_I": [1, 55]},
+      "apical_diagnostic": [22, 37],
+      "expected_runs": [["1", 55]],
+      "expected_naive_runs": [["1", 55]],
+      "source_files": [
+        "cocrystal_ss_cons/anchor_2KZL.json (_status=filled; NMR; seq_len=55; leader_strand=strand_A; 'Specifier domain + GA motif region' of Stem I; apical_segment_slice [21,36])"
+      ]
+    },
+    {
+      "name": "6POM",
+      "organism": "Bacillus subtilis",
+      "gene": "glyQS",
+      "class": "I",
+      "regulatory_mode": "Transcriptional",
+      "scope": "full_length",
+      "window_length": 169,
+      "extents": {},
+      "apical_diagnostic": [38, 67],
+      "expected_runs": [[".", 169]],
+      "expected_naive_runs": [[".", 169]],
+      "note": "Full-length cryo-EM (Zhang 2019). tboxevo records only the Stem-I apical slice; the Stem-I 3' boundary and the downstream Stem-II/antiterminator residue extents are NOT recorded, so NO functional extent is asserted (all-background painting). Contributes only an in-frame apical-diagnostic consistency check.",
+      "source_files": [
+        "cocrystal_ss_cons/anchor_6POM.json (_status=filled; seq_len=169; leader_strand=strand_A; full-length; apical_segment_slice [37,66])",
+        "secondarystructure/6POM/6POM-2D.dbn (strand_A, 169 nt)"
+      ]
+    },
+    {
+      "name": "UCKOPSB",
+      "organism": "Thermoactinomycetaceae sp. (TaxId 1535750)",
+      "gene": "trpS (tryptophanyl-tRNA synthetase leader)",
+      "class": "I",
+      "regulatory_mode": "Transcriptional",
+      "scope": "classical_stem_i_leader",
+      "window_length": 129,
+      "extents": {"Stem_I": [1, 93]},
+      "apical_diagnostic": [8, 91],
+      "expected_runs": [["1", 93], [".", 36]],
+      "expected_naive_runs": [["1", 93], [".", 36]],
+      "source_files": [
+        "cocrystal_ss_cons/anchor_UCKOPSB.json (_status=filled; 'classical Stem-I (stem1_length=93)'; apical_segment_slice [7,90])"
+      ]
+    },
+    {
+      "name": "WCBNVLFN",
+      "organism": "Desulfotomaculum putei DSM 12395 (Peptococcaceae; TaxId 1121429)",
+      "gene": "L-aspartate / phosphoserine aminotransferase leader",
+      "class": "I",
+      "regulatory_mode": "Transcriptional",
+      "scope": "classical_stem_i_leader",
+      "window_length": 241,
+      "extents": {"Stem_I": [1, 95]},
+      "apical_diagnostic": [9, 96],
+      "expected_runs": [["1", 95], [".", 146]],
+      "expected_naive_runs": [["1", 95], [".", 146]],
+      "note": "The recorded apical slice [9,96] overruns the recorded Stem_I extent (1,95) by 1 nt (the apical slice carries a ±5-nt pad convention). Recorded faithfully as an observed cross-source boundary-noise instance; the label assertion uses the Stem_I extent, and the apical consistency check tolerates the pad overhang for this entry.",
+      "source_files": [
+        "cocrystal_ss_cons/anchor_WCBNVLFN.json (_status=filled; 'classical Stem-I (stem1_length=95)'; apical_segment_slice [8,95])"
+      ]
+    },
+    {
+      "name": "6UFG",
+      "organism": "Mycobacterium tuberculosis",
+      "gene": "ileS",
+      "class": "II",
+      "regulatory_mode": "Translational",
+      "scope": "ultrashort_translational_leader",
+      "window_length": 166,
+      "extents": {},
+      "apical_diagnostic": null,
+      "expected_runs": [[".", 166]],
+      "expected_naive_runs": [[".", 166]],
+      "note": "Actinobacteria ileS ultrashort-translational (class II). tboxevo anchor is a scaffold: the _curate_note gives only an APPROXIMATE prose antiterminator-helix position (~78-81), not a residue extent, so NO functional extent is asserted (CLAUDE.md §10.3). Validates the class-II routing + naive-withholding on a real class-II crystal.",
+      "source_files": [
+        "cocrystal_ss_cons/anchor_6UFG.json (scaffold; 'Mycobacterium tuberculosis IleS T-box leader'; ss_cons len 166)"
+      ]
+    },
+    {
+      "name": "6UFH",
+      "organism": "Mycobacterium tuberculosis",
+      "gene": "ileS",
+      "class": "II",
+      "regulatory_mode": "Translational",
+      "scope": "ultrashort_translational_leader",
+      "window_length": 167,
+      "extents": {},
+      "apical_diagnostic": null,
+      "expected_runs": [[".", 167]],
+      "expected_naive_runs": [[".", 167]],
+      "note": "Actinobacteria ileS ultrashort-translational (class II), alternate state. Prose-only T-loop position (~38-50), not a residue extent, so NO functional extent asserted. Validates class-II routing + naive-withholding on a real class-II crystal.",
+      "source_files": [
+        "cocrystal_ss_cons/anchor_6UFH.json (scaffold; 'Mycobacterium tuberculosis IleS T-box leader'; ss_cons len 167)"
+      ]
+    },
+    {
+      "name": "6UFM",
+      "organism": "Nocardia farcinica",
+      "gene": "ileS",
+      "class": "II",
+      "regulatory_mode": "Translational",
+      "scope": "ultrashort_translational_leader",
+      "window_length": 98,
+      "extents": {"Stem_II": [30, 77]},
+      "apical_diagnostic": null,
+      "expected_runs": [[".", 29], ["2", 48], [".", 21]],
+      "expected_naive_runs": [[".", 98]],
+      "note": "Actinobacteria ileS ultrashort-translational (class II). The Stem-II extent (30,77) is transcribed from the mapped span of stem2_anchor_to_aln_col (0-indexed [29,76]). This is the ONLY class-II deposition with a residue-resolved element. It is the load-bearing case for the naive-withholds-TBDB001.cm assertion: the production label paints Stem_II, but the class-II-CM-naive label withholds it (all background).",
+      "source_files": [
+        "cocrystal_ss_cons/anchor_6UFM.json ('Stem II + ultrashort Stem I'; stem2_anchor_to_aln_col mapped span 0-idx [29,76] -> 1-based [30,77]; 48 nt)"
+      ]
+    }
+  ],
+  "label_noise_ceiling": {
+    "adr_ref": "ADR-0004 D6 (the 9-PDB cross-source label-noise ceiling C, reported non-gated; governs delta-recalibration of the 0.80 GATE-4 floor)",
+    "cross_source_resolved_classes": {
+      "Stem_I": ["4LCK", "4MGN", "2KZL", "UCKOPSB", "WCBNVLFN"],
+      "Stem_II": ["6UFM"],
+      "Specifier": [],
+      "Antiterminator_Tbox_seq": [],
+      "Terminator": [],
+      "Discriminator": []
+    },
+    "finding": "5 depositions resolve Stem-I extents; 6POM is a full-length deposition with no asserted functional extent, and the 3 class-II ileS leaders carry no residue-resolved elements beyond 6UFM's Stem-II, so NONE of the 9 depositions resolves Specifier / Antiterminator / Terminator / Discriminator to a residue extent. A numeric per-nucleotide cross-source F1 ceiling over the full 8-class target is therefore NOT estimable from these depositions alone (and a within-fixture agreement would be circular, since the fixture extents ARE the crystal source). One cross-source boundary-noise instance is observed (WCBNVLFN apical/Stem_I ±pad overhang of 1 nt).",
+    "delta_governance_conclusion": "C does not demonstrate that the cross-source annotation caps achievable per-nt F1 below 0.80 (it is not estimable here and shows no sub-floor cap on the resolvable classes), so per ADR-0004 D6 the GATE-4 floor STAYS 0.80 (the N<=9 crystal ceiling must not one-directionally lower the bar). A rigorous numeric C would require the full literature-grounded per-element annotation (the deferred Option-A path) aligned to matched corpus records."
+  }
+}
