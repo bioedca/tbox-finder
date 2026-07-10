@@ -18,14 +18,14 @@
       }
     }
   },
-  "generated_at_utc": "2026-07-09T22:44:43.230034+00:00",
-  "git_sha": "3b959afb0991009b29730a6d680dcbbb9f43af3c",
+  "generated_at_utc": "2026-07-10T00:29:57.622789+00:00",
+  "git_sha": "db4c3fca53b249554c94568b4020c88681910478",
   "inputs": {
     "data/processed/master_clean_v0.parquet": "1eb76591d0e481019dd7acf72a439f157fec9f2aeecb8cc5c37ba80a7b062dd2"
   },
   "outputs": {
-    "data/external/gate1_anchor/gate1_anchor.fasta": "cff5b03021d60d247876c4f66deda967c0e1501fb362e790497652dcabf5870b",
-    "data/external/gate1_anchor/gate1_anchor_report.json": "04198424e18bc06ae8e6ee7404cee38f6f6e3ac7ad9da98be1ec37bcd7217fda"
+    "data/external/gate1_anchor/gate1_anchor.fasta": "ffe5c10096d0e75139502fcaea01166bf252c2d9a804dfc960372986354ea654",
+    "data/external/gate1_anchor/gate1_anchor_report.json": "14ff9961d6f79fb22298f8070f5d6efb1fff82ad26a81fa8ea0b09e73bb1f715"
   },
   "rule": "workflow/rules/data.smk :: source_gate1_anchor",
   "schema_version": "1.0",

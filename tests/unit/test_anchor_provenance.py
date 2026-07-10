@@ -68,16 +68,28 @@ def test_localize_leader_plus_strand_exact():
     assert hit["exact_offsets"] is True
 
 
-def test_localize_leader_minus_strand():
+def test_localize_leader_minus_strand_returns_forward_coords():
     seg1 = "TGAAGAGGAGTAGTAGTCCG"
     seg2 = "AAAAAGGGTGGTACCGCGAGCGC"
     mid = "CGACGCCAGAGAGCCGGTGCTTGG"
     _, leader, _ = _plant("", seg1, mid, seg2, "")
-    genome = "TTTTGGGGCCCC" + anchors.revcomp(leader) + "AAAACCCCGGGG"
+    # ASYMMETRIC flanks (24 vs 6): the reverse-complement-space start (== len(suffix) == 6)
+    # differs from the forward-genome start (== len(prefix) == 24), so this planting can
+    # tell the two frames apart. A symmetric planting hides the bug (both equal len(flank)).
+    prefix = "GATTACAGATTACAGATTACGGGT"  # 24
+    suffix = "CCCGGG"  # 6
+    genome = prefix + anchors.revcomp(leader) + suffix
     hit = anchors.localize_leader(genome, [seg1, seg2], [len(mid)])
     assert hit is not None
     assert hit["strand"] == "-"
     assert hit["leader"] == leader  # returned in sense orientation
+    # coordinates are FORWARD-genome (not reverse-complement-space) for both strands, so
+    # they line up with the forward-coordinate corpus in classify_leakage:
+    assert hit["start"] == len(prefix)
+    assert hit["end"] == len(prefix) + len(leader)
+    assert hit["start"] < hit["end"]  # forward half-open — never start > end
+    # the strong invariant tying the coords to the sense leader:
+    assert anchors.revcomp(genome[hit["start"] : hit["end"]]) == leader
 
 
 def test_localize_leader_tolerates_a_few_mismatches():
@@ -254,6 +266,83 @@ def test_source_anchor_end_to_end(tmp_path, monkeypatch):
         assert field in prov
     assert prov["extra"]["source"]["doi"] == anchors.SOURCE_DOI
     assert "RF00230" in prov["extra"]["independence"]
+
+
+def test_source_anchor_minus_strand_leakage_caught(tmp_path, monkeypatch):
+    """A minus-strand corpus-present locus must be flagged coord-overlap end-to-end.
+
+    Regression for the reverse-complement-vs-forward coordinate-frame bug: minus-strand
+    anchor loci were compared against the (forward-coordinate) corpus in reverse-complement
+    space, so a locus already in the training corpus was mis-scored 'coordinate-novel' and
+    would have escaped the P0-24 holdout (a §8.2 leakage miss). Here the corpus row overlaps
+    only the FORWARD leader interval (beyond the reverse-complement-space interval), so it is
+    caught after the fix but was missed before it.
+    """
+    pd = pytest.importorskip("pandas")
+    pytest.importorskip("pyarrow")
+
+    host = anchors.Host(
+        "TST",
+        "Testella exampla STR",
+        "Deinococcus-Thermus",
+        "Deinococcota",
+        "GCF_TEST",
+        "Complete Genome",
+        ("DOI:10.1261/rna.819308", "DOI:10.1128/MMBR.00026-08"),
+    )
+    monkeypatch.setattr(anchors, "HOSTS", {"TST": host})
+
+    seg1 = "TGAAGAGGAGTAGTAGTCCGAC"
+    seg2 = "AAAAAGGGTGGTACCGCGAGCGCTT"
+    mid = "CGACGCCAGAGAGCCGGTGCTTGGCATG"
+    _, leader, _ = _plant("", seg1, mid, seg2, "")
+    prefix = "GATTACAGATTACAGATTACGGGTACGTGA"  # 30 (asymmetric vs the 6-nt suffix)
+    suffix = "CCCGGG"  # revcomp-palindrome, len 6
+    genome = prefix + anchors.revcomp(leader) + suffix
+    f_start, f_end = len(prefix), len(prefix) + len(leader)  # forward leader interval
+    # Corpus row overlapping ONLY the far end of the forward interval — past the reverse-
+    # complement-space interval [len(suffix), len(suffix)+len(leader)) — so it overlaps the
+    # forward frame but NOT the buggy reverse frame. Encoded minus-strand (start > end) to
+    # also exercise corpus-side normalization.
+    row_hi, row_lo = f_end + 5, f_end - 15
+
+    anchor_dir = tmp_path / "gate1_anchor"
+    cache = anchor_dir / anchors.CACHE_SUBDIR
+    cache.mkdir(parents=True)
+    (cache / "GCF_TEST.acc.json").write_text(
+        json.dumps({"refseq": ["NC_TEST.1"], "genbank": ["XX_TEST.1"]})
+    )
+    (cache / "NC_TEST.1.fasta").write_text(genome + "\n")
+
+    corpus = tmp_path / "corpus.parquet"
+    pd.DataFrame(
+        {
+            "accession_name": ["XX_TEST"],
+            "locus_start": [row_hi],
+            "locus_end": [row_lo],
+            "GBSeq_organism": ["Testella exampla STR"],
+            "phylum": ["Deinococcus-Thermus"],
+            "genus": ["Testella"],
+        }
+    ).to_parquet(corpus)
+
+    figs1_text = f"TST_LEUA    {seg1}-({len(mid)})-{seg2}"
+    out = anchors.source_anchor(
+        anchor_dir=anchor_dir,
+        corpus_parquet=corpus,
+        download=False,
+        figs1_text=figs1_text,
+    )
+    audit = out.audit
+    locus = audit["loci"][0]
+    assert locus["strand"] == "-"
+    # forward coordinates recorded (revcomp invariant); never start > end
+    assert locus["start_0based"] == f_start
+    assert locus["end_0based_excl"] == f_end
+    assert anchors.revcomp(genome[locus["start_0based"] : locus["end_0based_excl"]]) == leader
+    # the corpus-present minus-strand locus is caught as overlap (missed before the fix)
+    assert locus["corpus_coord_overlap"] is True
+    assert audit["leakage_report"]["n_corpus_coord_overlap"] == 1
 
 
 def test_offline_missing_genome_cache_fails_loud(tmp_path, monkeypatch):

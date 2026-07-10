@@ -349,9 +349,10 @@ def localize_leader(genome: str, segments: list[str], elisions: list[int]) -> di
     positional slack) — the multi-segment offset agreement (gap == elided length) is the
     specificity guard that lets tolerant matching localize divergent below-cutoff loci
     without false positives. Searches both strands. Returns ``{strand, start, end, leader,
-    n_segments_matched, exact_offsets, mismatches}`` (0-based half-open ``[start, end)``;
-    for ``strand == '-'`` coordinates are on the reverse strand and ``leader`` is already
-    the sense (reverse-complemented) sequence) — or ``None``.
+    n_segments_matched, exact_offsets, mismatches}`` where ``[start, end)`` are **forward-
+    genome** 0-based half-open coordinates for **both** strands (so leakage classification,
+    audit fields, and FASTA headers share the forward frame the corpus uses) and ``leader``
+    is the sense sequence (already reverse-complemented for ``strand == '-'``) — or ``None``.
     """
     usable = [(i, s) for i, s in enumerate(segments) if len(s) >= _SEG_MIN_LEN]
     if not usable:
@@ -400,11 +401,24 @@ def localize_leader(genome: str, segments: list[str], elisions: list[int]) -> di
                 leader_end = leader_start + offsets[-1] + len(segments[-1])
                 if leader_end > len(g):
                     continue
+                leader = g[leader_start:leader_end]  # sense orientation (revcomp for '-')
+                # Report forward-genome coordinates for BOTH strands so downstream leakage
+                # classification, audit fields, and FASTA headers share the single frame the
+                # (forward-coordinate) corpus uses. For '-', ``g`` is ``revcomp(genome)``, so
+                # map the g-space interval back to the forward genome:
+                #   [leader_start, leader_end) in g  ->  [L - leader_end, L - leader_start)
+                # forward, with L = len(g) = len(genome). Skipping this let minus-strand
+                # anchor loci be compared against the corpus in the wrong frame — a leakage
+                # miss (§8.2): a corpus-present locus was mis-scored coordinate-novel.
+                if strand == "-":
+                    fwd_start, fwd_end = len(g) - leader_end, len(g) - leader_start
+                else:
+                    fwd_start, fwd_end = leader_start, leader_end
                 cand = {
                     "strand": strand,
-                    "start": leader_start,
-                    "end": leader_end,
-                    "leader": g[leader_start:leader_end],
+                    "start": fwd_start,
+                    "end": fwd_end,
+                    "leader": leader,
                     "n_segments_matched": matched,
                     "exact_offsets": exact,
                     "mismatches": mismatches,

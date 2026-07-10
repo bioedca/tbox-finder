@@ -598,10 +598,11 @@ leakage report, withheld + unresolved).
 **Validation.** **PASSED** — **16 loci** across the 3 confirmed phyla (**Desulfobacterota 2, Deinococcota 5,
 Chloroflexota 9**; 8 hosts), **12 exact + 4 approximate** (each with two-segment offset agreement); full provenance;
 independence-from-RF00230 documented + the ascertainment-ceiling bound disclosed (reaches RF00230-cutoff-invisible but not
-all-consensus-invisible); every host non-Firmicutes at **≥2 independent sources**; leakage report **7/16 corpus-overlap**
-(TBDB scanned these hosts via `Vitreschak_master.fa` → held out at P0-24) + **9/16 coordinate-novel**; raw count reported
-(the min-N / arm-(c)-fallback verdict is deferred to P0-26). `pytest tests/unit` **116 passed / 20 skipped** (bare CI sim
-— anchor: 13 pure-logic + import-purity run, 2 pandas-gated `importorskip`) and **15/15** with pandas+pyarrow; ruff
+all-consensus-invisible); every host non-Firmicutes at **≥2 independent sources**; leakage report **11/16 corpus-overlap**
+(TBDB scanned these hosts via `Vitreschak_master.fa` → held out at P0-24) + **5/16 coordinate-novel** (corrected — see
+**Review fix** below) + raw count reported
+(the min-N / arm-(c)-fallback verdict is deferred to P0-26). `pytest tests/unit` **118 passed / 22 skipped** (bare CI sim
+— anchor: 13 pure-logic + import-purity run, 3 pandas-gated `importorskip`) and **16/16** with pandas+pyarrow; ruff
 0.15.15 + black 25.11.0 (`--target-version py312`) clean; `snakemake --lint` "good condition" + `-n source_gate1_anchor`
 valid.
 **Decisions.** **§7 scientific-evidence-gate STOP resolved (user 2026-07-09):** approved **Option A** — independent
@@ -615,5 +616,15 @@ corpus-overlapping → exactly the circularity P0-16 exists to prevent). 2 *Deha
 **indel-divergent** (not gapless-localizable within tolerance; withhold-not-force-fit, §10.3). ADR-0005 not yet authored
 (P0-19/25) → builds against PRD §7.1/§9.2(c)/§2.3 directly (`adr` = "PRD §7.1/§9.2(c)/§2.3 (ADR-0005 pending, P0-19/25)").
 context7 §3.3: n/a (stdlib urllib/subprocess/hashlib + in-repo `provenance` helper; pandas lazy for the corpus read only).
-`verification: local (deterministic LOCAL rule; NCBI E-utilities live-fetch)`. **Commit.** (this commit — the P0-16 atomic
-commit on branch `p0-16-gate1-anchor`).
+`verification: local (deterministic LOCAL rule; NCBI E-utilities live-fetch)`.
+**Review fix (CodeRabbit, pre-merge).** `localize_leader` returned minus-strand coordinates in **reverse-complement space**
+(positions in `revcomp(genome)`), but they flowed unconverted into `classify_leakage` (compared against the corpus's
+**forward-genome** coordinates), the audit `start_0based`/`end_0based_excl`, and the FASTA headers — so the 6 minus-strand
+loci were leakage-classified in the wrong coordinate frame (§8.2). Fixed to convert **both** strands' coordinates to the
+forward genome (`[L−end, L−start)`; the `leader` sequence is unchanged — already sense). This flips **4** minus-strand loci
+(**GSU_LEUA, DAC_LEUA, DG_ILES** [corpus stored under GenBank `CP000359`, invisible to a RefSeq-only lookup], **TR_LEUS**)
+from coordinate-novel → **corpus-overlap**: each is present in the training corpus and must be held out at P0-24 — a leakage
+**miss** the buggy frame had masked. Leakage split corrected **7/16 → 11/16** overlap, **9 → 5** coordinate-novel; FASTA
+leader sequences are byte-identical (only headers/coords change). Added a forward-coordinate unit invariant (asymmetric-flank
+minus-strand planting, which a symmetric planting hid) + a Tier-2 end-to-end minus-strand-leakage-caught regression.
+**Commit.** the P0-16 atomic commit on branch `p0-16-gate1-anchor` (`db4c3fc`) + this review-fix commit (squash-merged).

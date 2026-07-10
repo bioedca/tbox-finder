@@ -14,22 +14,31 @@
     "Geobacter sulfurreducens PCA": 1,
     "Thermomicrobium roseum DSM 5159": 4
   },
-  "git_sha": "3b959afb0991009b29730a6d680dcbbb9f43af3c",
+  "git_sha": "db4c3fca53b249554c94568b4020c88681910478",
   "independence_statement": "Selection is CM-independent: loci were detected by Vitreschak 2008's hand-built sequence+structure descriptor + synteny, not the Rfam RF00230 CM at its GA cutoff (the GATE-1 cmsearch baseline), so the anchor can include loci below that cutoff. Sequence is corpus-independent: each leader is re-derived from its primary NCBI RefSeq genome, not the TBDB training table. Ascertainment ceiling (disclosed): both the CM and Vitreschak's descriptor rest on the same conserved T-box consensus, so arm (c) reaches the RF00230-cutoff-invisible-but-consensus-detectable region, not the all-consensus-invisible region (reached only by arm (b) synthetic divergence + the §13 discovery campaign).",
   "leakage_report": {
     "method": "preliminary corpus-overlap footprint: per-locus same-replicon (RefSeq+GenBank accession) coordinate overlap + host-genus presence. Definitive cluster-level leakage (structure-aware, whole-cluster-to-fold) is enforced at P0-24 over the split table (PRD §9.2/§8.2).",
-    "n_corpus_coord_overlap": 7,
+    "n_corpus_coord_overlap": 11,
     "n_loci": 16,
-    "n_novel_no_overlap": 9,
+    "n_novel_no_overlap": 5,
     "note": "TBDB's own scan covers these hosts (Vitreschak_master.fa fed TBDB), so overlap is expected; overlapping loci must be held out of training at P0-24 — their independent value is CM-free detection + primary-genome provenance, not novelty vs the corpus."
   },
   "loci": [
     {
       "abbr": "GSU",
       "assembly": "GCF_000007985.2",
-      "corpus_coord_overlap": false,
-      "corpus_overlap_records": [],
-      "end_0based_excl": 1728693,
+      "corpus_coord_overlap": true,
+      "corpus_overlap_records": [
+        {
+          "accession": "AE017180",
+          "coord": "overlap",
+          "end": 2085409,
+          "organism": "Geobacter sulfurreducens PCA",
+          "phylum": "Proteobacteria",
+          "start": 2085740
+        }
+      ],
+      "end_0based_excl": 2085726,
       "exact_offsets": true,
       "gene": "LEUA",
       "gtdb_method": "name_projection",
@@ -49,15 +58,24 @@
         "DOI:10.1261/rna.819308",
         "DOI:10.1128/MMBR.00026-08"
       ],
-      "start_0based": 1728402,
+      "start_0based": 2085435,
       "strand": "-"
     },
     {
       "abbr": "DAC",
       "assembly": "GCF_000167355.1",
-      "corpus_coord_overlap": false,
-      "corpus_overlap_records": [],
-      "end_0based_excl": 235919,
+      "corpus_coord_overlap": true,
+      "corpus_overlap_records": [
+        {
+          "accession": "AAEW02000003",
+          "coord": "overlap",
+          "end": 8199,
+          "organism": "Desulfuromonas acetoxidans DSM 684",
+          "phylum": "Proteobacteria",
+          "start": 8470
+        }
+      ],
+      "end_0based_excl": 8460,
       "exact_offsets": true,
       "gene": "LEUA",
       "gtdb_method": "name_projection",
@@ -77,7 +95,7 @@
         "DOI:10.1261/rna.819308",
         "DOI:10.1128/MMBR.00026-08"
       ],
-      "start_0based": 235681,
+      "start_0based": 8222,
       "strand": "-"
     },
     {
@@ -113,7 +131,7 @@
       "assembly": "GCF_000008565.1",
       "corpus_coord_overlap": false,
       "corpus_overlap_records": [],
-      "end_0based_excl": 1306048,
+      "end_0based_excl": 1342865,
       "exact_offsets": true,
       "gene": "ILES",
       "gtdb_method": "name_projection",
@@ -133,7 +151,7 @@
         "DOI:10.1261/rna.819308",
         "DOI:10.1128/MMBR.00026-08"
       ],
-      "start_0based": 1305773,
+      "start_0based": 1342590,
       "strand": "-"
     },
     {
@@ -184,9 +202,18 @@
     {
       "abbr": "DG",
       "assembly": "GCF_000196275.1",
-      "corpus_coord_overlap": false,
-      "corpus_overlap_records": [],
-      "end_0based_excl": 1294772,
+      "corpus_coord_overlap": true,
+      "corpus_overlap_records": [
+        {
+          "accession": "CP000359",
+          "coord": "overlap",
+          "end": 1172360,
+          "organism": "Deinococcus geothermalis DSM 11300",
+          "phylum": "Deinococcus-Thermus",
+          "start": 1172881
+        }
+      ],
+      "end_0based_excl": 1172688,
       "exact_offsets": true,
       "gene": "ILES",
       "gtdb_method": "name_projection",
@@ -206,7 +233,7 @@
         "DOI:10.1261/rna.819308",
         "DOI:10.1128/MMBR.00026-08"
       ],
-      "start_0based": 1294517,
+      "start_0based": 1172433,
       "strand": "-"
     },
     {
@@ -251,7 +278,7 @@
       "assembly": "GCF_000018865.1",
       "corpus_coord_overlap": false,
       "corpus_overlap_records": [],
-      "end_0based_excl": 3299818,
+      "end_0based_excl": 1959002,
       "exact_offsets": true,
       "gene": "TRPB",
       "gtdb_method": "name_projection",
@@ -272,7 +299,7 @@
         "DOI:10.1128/MMBR.00026-08",
         "DOI:10.1016/j.febslet.2009.11.056"
       ],
-      "start_0based": 3299539,
+      "start_0based": 1958723,
       "strand": "-"
     },
     {
@@ -458,9 +485,34 @@
     {
       "abbr": "TR",
       "assembly": "GCF_000021685.1",
-      "corpus_coord_overlap": false,
-      "corpus_overlap_records": [],
-      "end_0based_excl": 775993,
+      "corpus_coord_overlap": true,
+      "corpus_overlap_records": [
+        {
+          "accession": "CP001275",
+          "coord": "overlap",
+          "end": 1226932,
+          "organism": "Thermomicrobium roseum DSM 5159",
+          "phylum": "Chloroflexi",
+          "start": 1227184
+        },
+        {
+          "accession": "CP001275",
+          "coord": "overlap",
+          "end": 1226982,
+          "organism": "Thermomicrobium roseum DSM 5159",
+          "phylum": "Chloroflexi",
+          "start": 1227247
+        },
+        {
+          "accession": "CP001275",
+          "coord": "overlap",
+          "end": 1227014,
+          "organism": "Thermomicrobium roseum DSM 5159",
+          "phylum": "Chloroflexi",
+          "start": 1227237
+        }
+      ],
+      "end_0based_excl": 1227237,
       "exact_offsets": true,
       "gene": "LEUS",
       "gtdb_method": "name_projection",
@@ -481,7 +533,7 @@
         "DOI:10.1128/MMBR.00026-08",
         "DOI:10.1016/j.febslet.2009.11.056"
       ],
-      "start_0based": 775769,
+      "start_0based": 1227013,
       "strand": "-"
     },
     {
