@@ -672,13 +672,17 @@ def _build_ladder(
         o if (corp and o) else None for o, corp in zip(order, is_corpus, strict=True)
     ]
     df["class_holdout_unit"] = [
-        c if corp else None
+        c if (corp and c) else None
         for c, corp in zip(df["resolved_class"].fillna("").to_numpy(), is_corpus, strict=True)
     ]
     df["phylum_holdout_unit"] = [
         p if (corp and p) else None for p, corp in zip(phylum, is_corpus, strict=True)
     ]
-    df["is_designated_loo_holdout"] = [o in heldout_set for o in order]
+    # corpus-only: an external (scheme C) record whose order happens to be a
+    # designated held-out order is not a leave-one-order-out holdout unit.
+    df["is_designated_loo_holdout"] = [
+        (o in heldout_set) and corp for o, corp in zip(order, is_corpus, strict=True)
+    ]
     # Scheme C held-out set is exactly the external anchor/blind positives; corpus
     # records that cluster with one are captured by clade_crossing_cluster (D3).
     df["is_anchor_heldout"] = is_external

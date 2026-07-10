@@ -12,8 +12,8 @@
       "train": 8303
     }
   },
-  "generated_at_utc": "2026-07-10T17:35:14.205083+00:00",
-  "git_sha": "6f2f40690b04d92989c655f801475cdb66778b26",
+  "generated_at_utc": "2026-07-10T17:48:35.612956+00:00",
+  "git_sha": "5a10c100dcc963ee6285ef67bcd9a95c8f39e0e6",
   "inputs": {
     "data/interim/splits/aligned/class_I.sto": "0edb9c5cd78d864b82fcc1da457b7a89654489cd3458f31aa278d277a9e32804",
     "data/interim/splits/aligned/class_II.sto": "0aa0b3eea647371e958cfbc54c3762abc08d0a986bd1ebf54f9638007c2636b4",
@@ -21,7 +21,7 @@
   },
   "outputs": {
     "data/interim/splits/figure_data.json": "3ed66bb3e736541076bd10f85251be083224ebb84bdfed94203a8c0c250bd393",
-    "data/interim/splits/split_assignments.parquet": "2390603a29807c060dc2508a7cadee2824c4b1a48e488893608c0a243826bebb"
+    "data/interim/splits/split_assignments.parquet": "b365987a3b4aa1087be96e51e8315d5cfd4a7e866bba5a877b1e472d06f921d8"
   },
   "rule": "workflow/rules/data.smk :: cluster_and_split",
   "schema_version": "1.0",
