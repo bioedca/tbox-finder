@@ -723,29 +723,33 @@ def _ladder_diagnostics(df, heldout_orders, reserved_orders, order, phylum, is_c
     }
 
 
-def _sweep_stability(manifest, labels_by_cut):
+def _sweep_stability(manifest, labels_by_cut, *, min_positives, train_coverage_floor):
     """Per-cut split-structure stats for the ADR-0004 D2 sensitivity sweep.
 
     At P0 no trained model exists, so the sweep reports **split-structural**
     stability (cluster/holdout structure invariance to a tighter cut); the
     model leave-one-order-out headline-metric stability across the sweep is the
-    P4 GATE-1 acceptance condition (ADR-0004 D2 adequacy net (b)).
+    P4 GATE-1 acceptance condition (ADR-0004 D2 adequacy net (b)). The held-out
+    order designation reuses the same ``min_positives`` / ``train_coverage_floor``
+    as the production build so ``n_nested_train`` is comparable across cuts.
     """
     import numpy as np
 
     is_corpus = (manifest["source"] == "corpus").to_numpy()
     order = manifest["resolved_order"].fillna("").to_numpy()
+    # Held-out order set is cut-independent (order membership), so derive it once.
+    heldout_orders, _ = designate_heldout_orders(
+        dict(Counter(o for o, c in zip(order, is_corpus, strict=True) if c and o)),
+        min_positives=min_positives,
+        train_coverage_floor=train_coverage_floor,
+    )
+    heldout_set = set(heldout_orders)
     out = {}
     for cut, labels in sorted(labels_by_cut.items()):
         labels = np.asarray(labels)
         sizes = Counter(labels.tolist())
         order_spread = cluster_taxon_spread(labels, order)
         crossing = sum(1 for s in order_spread.values() if len(s) > 1)
-        # nested-train size is derived the same way as the production build
-        heldout_orders, _ = designate_heldout_orders(
-            dict(Counter(o for o, c in zip(order, is_corpus, strict=True) if c and o))
-        )
-        heldout_set = set(heldout_orders)
         phy = manifest["resolved_phylum"].fillna("").to_numpy()
         member_heldout = np.array(
             [
@@ -945,7 +949,12 @@ def cluster_split(
     hist_stats = _histogram_stats(nearest, IDENTITY_CUT)
 
     # ADR-0004 D2 adequacy net (b): sensitivity sweep (split-structure stability).
-    sweep_stats = _sweep_stability(manifest, sweep_labels_global)
+    sweep_stats = _sweep_stability(
+        manifest,
+        sweep_labels_global,
+        min_positives=min_positives,
+        train_coverage_floor=train_coverage_floor,
+    )
 
     # Numeric figure data → rendered to PNG by the viz-env ``plot-figures`` step
     # (data env has no matplotlib; the figures are not on the leakage critical path).

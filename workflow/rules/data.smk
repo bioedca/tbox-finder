@@ -405,19 +405,20 @@ rule align_split_positives:
     input:
         class_i=f"{_SPLITS_INPUTS_DIR}/class_I.fa",
         class_ii=f"{_SPLITS_INPUTS_DIR}/class_II.fa",
+        # CMs declared as inputs so Snakemake tracks them (stage_reference_assets
+        # outputs; committed git-LFS assets) and rebuilds if a CM changes.
+        cm_i=f"{_REFS_DIR}/RF00230.cm",
+        cm_ii=f"{_REFS_DIR}/TBDB001.cm",
     output:
         class_i=f"{_SPLITS_ALIGNED_DIR}/class_I.sto",
         class_ii=f"{_SPLITS_ALIGNED_DIR}/class_II.sto",
-    params:
-        cm_i=f"{_REFS_DIR}/RF00230.cm",
-        cm_ii=f"{_REFS_DIR}/TBDB001.cm",
     log:
         "logs/align_split_positives.log",
     conda:
         "../../envs/infernal.yml"
     shell:
-        "( for pair in 'I {input.class_i} {params.cm_i} {output.class_i}' "
-        "'II {input.class_ii} {params.cm_ii} {output.class_ii}'; do "
+        "( for pair in 'I {input.class_i} {input.cm_i} {output.class_i}' "
+        "'II {input.class_ii} {input.cm_ii} {output.class_ii}'; do "
         "set -- $pair; "
         "if [ -s \"$2\" ]; then "
         "cmalign --cpu 8 --notrunc --noprob --outformat pfam -o \"$4\" \"$3\" \"$2\"; "
