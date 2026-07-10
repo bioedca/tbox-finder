@@ -122,6 +122,48 @@ def test_localize_requires_both_segments_at_consistent_offset():
     assert anchors.localize_leader(genome, [seg1, seg2], [24]) is None
 
 
+def test_localize_leader_boundary_tracks_shifted_last_segment():
+    # A +1 indel between the two usable segments: the second segment sits one base past its
+    # nominal offset. The leader boundary must track the ACTUAL matched extremes (F2), so the
+    # start comes from seg1's true position (not the anchor's nominal back-projection).
+    seg1 = "TGAAGAGGAGTAGTAGTCCGACGT"  # 24
+    seg2 = "AAAAAGGGTGGTACCGCGAGCGCTT"  # 25 (longer → the anchor)
+    mid = "CGACGCCAGAGAGCCGGTGCTTGG"  # 24 nominal elision
+    prefix = "GATTACAGAT"  # 10
+    genome = prefix + seg1 + mid + "A" + seg2 + "CCCGGG"  # 'A' = the +1 insertion
+    hit = anchors.localize_leader(genome, [seg1, seg2], [len(mid)])
+    assert hit is not None
+    assert hit["start"] == len(prefix)  # true seg1 start — a nominal frame would report +1
+    assert hit["end"] == len(prefix) + len(seg1) + len(mid) + 1 + len(seg2)  # true seg2 end
+    assert hit["exact_offsets"] is False  # a shifted offset is not exact
+    assert genome[hit["start"] : hit["end"]] == hit["leader"]
+
+
+def test_localize_leader_flags_ambiguous_when_two_locations():
+    # two identical, well-separated copies of the leader → two equally-good (exact) genomic
+    # locations; the tie must be surfaced as ambiguous, not resolved by iteration order (F3).
+    seg1 = "TGAAGAGGAGTAGTAGTCCG"
+    seg2 = "AAAAAGGGTGGTACCGCGAGCGC"
+    mid = "CGACGCCAGAGAGCCGGTGCTTGG"
+    _, leader, _ = _plant("", seg1, mid, seg2, "")
+    genome = "GATTACA" + leader + ("TTTTGGGGCCCCAAAA" * 5) + leader + "AAATTT"
+    hit = anchors.localize_leader(genome, [seg1, seg2], [len(mid)])
+    assert hit is not None
+    assert hit["ambiguous"] is True
+    assert hit["n_tied_locations"] == 2
+
+
+def test_localize_leader_unambiguous_when_single_location():
+    seg1 = "TGAAGAGGAGTAGTAGTCCG"
+    seg2 = "AAAAAGGGTGGTACCGCGAGCGC"
+    mid = "CGACGCCAGAGAGCCGGTGCTTGG"
+    genome, _, _ = _plant("GATTACAGATTACA", seg1, mid, seg2, "CCCGGG")
+    hit = anchors.localize_leader(genome, [seg1, seg2], [len(mid)])
+    assert hit is not None
+    assert hit["ambiguous"] is False
+    assert hit["n_tied_locations"] == 1
+
+
 def test_classify_leakage_overlap_and_novel_and_minus_strand():
     accs = {"NC_TEST", "XX_TEST"}
     corpus = [
@@ -140,6 +182,39 @@ def test_classify_leakage_overlap_and_novel_and_minus_strand():
     # accession not in the anchor's replicon set → ignored
     r4 = anchors.classify_leakage({"OTHER"}, 1100, 1400, corpus)
     assert r4["coord_overlap"] is False
+
+
+def test_build_audit_uncoordinated_not_asserted_novel():
+    # F1: a locus with a same-replicon corpus record that lacks coordinates has overlap that
+    # can be neither confirmed nor ruled out — it must NOT be counted coordinate-novel.
+    loci = [
+        {
+            "gtdb_phylum": "Deinococcota",
+            "organism": "A",
+            "match_quality": "exact",
+            "corpus_coord_overlap": True,
+            "corpus_overlap_records": [{"coord": "overlap"}],
+        },
+        {
+            "gtdb_phylum": "Deinococcota",
+            "organism": "B",
+            "match_quality": "exact",
+            "corpus_coord_overlap": False,
+            "corpus_overlap_records": [{"coord": "no-coords"}],
+        },
+        {
+            "gtdb_phylum": "Deinococcota",
+            "organism": "C",
+            "match_quality": "exact",
+            "corpus_coord_overlap": False,
+            "corpus_overlap_records": [],
+        },
+    ]
+    lr = anchors._build_audit(loci, [], {}, {})["leakage_report"]
+    assert lr["n_corpus_coord_overlap"] == 1
+    assert lr["n_uncoordinated_same_replicon"] == 1  # B — same-replicon record, no coords
+    assert lr["n_coordinate_novel"] == 1  # C — no same-replicon record at all
+    assert lr["n_no_confirmed_coord_overlap"] == 2  # uncoordinated + novel (B not asserted novel)
 
 
 def test_parse_figs1_selects_rows_and_ignores_prose():
@@ -343,6 +418,53 @@ def test_source_anchor_minus_strand_leakage_caught(tmp_path, monkeypatch):
     # the corpus-present minus-strand locus is caught as overlap (missed before the fix)
     assert locus["corpus_coord_overlap"] is True
     assert audit["leakage_report"]["n_corpus_coord_overlap"] == 1
+
+
+def test_source_anchor_raises_when_no_loci_localize(tmp_path, monkeypatch):
+    """F4: publishing empty FASTA/report/provenance is a silent failure — fail loud instead."""
+    pd = pytest.importorskip("pandas")
+    pytest.importorskip("pyarrow")
+
+    host = anchors.Host(
+        "TST",
+        "Testella exampla STR",
+        "Deinococcus-Thermus",
+        "Deinococcota",
+        "GCF_TEST",
+        "Complete Genome",
+        ("DOI:10.1261/rna.819308", "DOI:10.1128/MMBR.00026-08"),
+    )
+    monkeypatch.setattr(anchors, "HOSTS", {"TST": host})
+
+    cache = tmp_path / "gate1_anchor" / anchors.CACHE_SUBDIR
+    cache.mkdir(parents=True)
+    (cache / "GCF_TEST.acc.json").write_text(
+        json.dumps({"refseq": ["NC_TEST.1"], "genbank": ["XX_TEST.1"]})
+    )
+    (cache / "NC_TEST.1.fasta").write_text("ACGT" * 300 + "\n")  # no anchor segments present
+
+    corpus = tmp_path / "corpus.parquet"
+    pd.DataFrame(
+        {
+            "accession_name": ["XX_TEST"],
+            "locus_start": [1],
+            "locus_end": [2],
+            "GBSeq_organism": ["Testella exampla STR"],
+            "phylum": ["Deinococcus-Thermus"],
+            "genus": ["Testella"],
+        }
+    ).to_parquet(corpus)
+
+    seg1 = "TGAAGAGGAGTAGTAGTCCGAC"
+    seg2 = "AAAAAGGGTGGTACCGCGAGCGCTT"
+    figs1_text = f"TST_LEUA    {seg1}-(24)-{seg2}"
+    with pytest.raises(RuntimeError, match="refusing to publish empty"):
+        anchors.source_anchor(
+            anchor_dir=tmp_path / "gate1_anchor",
+            corpus_parquet=corpus,
+            download=False,
+            figs1_text=figs1_text,
+        )
 
 
 def test_offline_missing_genome_cache_fails_loud(tmp_path, monkeypatch):

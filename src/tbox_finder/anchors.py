@@ -340,6 +340,15 @@ def _match_at(seg: str, g: str, pos: int) -> tuple[bool, int]:
     return mm <= max(1, int(len(seg) * _MAX_SEG_MISMATCH_FRAC)), mm
 
 
+def _hit_quality(hit: dict) -> tuple[int, int]:
+    """Localization-quality sort key (lower is better): fewest mismatches, then exact offsets.
+
+    Deliberately excludes ``n_segments_matched`` — it is invariant (== the number of usable
+    segments) for every accepted candidate/replicon, so it cannot rank them.
+    """
+    return (hit["mismatches"], 0 if hit["exact_offsets"] else 1)
+
+
 def localize_leader(genome: str, segments: list[str], elisions: list[int]) -> dict | None:
     """Localize the Fig S1 segments in ``genome`` and extract the full leader.
 
@@ -349,34 +358,48 @@ def localize_leader(genome: str, segments: list[str], elisions: list[int]) -> di
     positional slack) — the multi-segment offset agreement (gap == elided length) is the
     specificity guard that lets tolerant matching localize divergent below-cutoff loci
     without false positives. Searches both strands. Returns ``{strand, start, end, leader,
-    n_segments_matched, exact_offsets, mismatches}`` where ``[start, end)`` are **forward-
-    genome** 0-based half-open coordinates for **both** strands (so leakage classification,
-    audit fields, and FASTA headers share the forward frame the corpus uses) and ``leader``
-    is the sense sequence (already reverse-complemented for ``strand == '-'``) — or ``None``.
+    n_segments_matched, exact_offsets, mismatches, ambiguous, n_tied_locations}`` where
+    ``[start, end)`` are **forward-genome** 0-based half-open coordinates for **both** strands
+    (so leakage classification, audit fields, and FASTA headers share the forward frame the
+    corpus uses); the boundary tracks the **actual matched** extremes (accurate under a
+    shifted/indel offset) and ``leader`` is the sense sequence (already reverse-complemented
+    for ``strand == '-'``); ``ambiguous`` flags a tie between distinct genomic locations at
+    the best quality (the caller withholds it, §10.3) — or ``None`` if nothing localizes.
     """
     usable = [(i, s) for i, s in enumerate(segments) if len(s) >= _SEG_MIN_LEN]
     if not usable:
         return None
     offsets = _segment_offsets(segments, elisions)
-    best: dict | None = None
+    usable_idx = [i for i, _ in usable]
+    j_lo, j_hi = min(usable_idx), max(usable_idx)
+    # Nominal spans of the short (sub-``_SEG_MIN_LEN``, unmatchable) flanks — from the leader
+    # start to the leftmost usable segment, and from the rightmost usable segment's start out
+    # to the leader end. The usable segments' ACTUAL matched positions are observed; the short
+    # flanks' are not, so the flanks are extended by nominal (literature) spacing while the
+    # leader boundary tracks the matched extremes. This keeps the boundary accurate when a
+    # segment matches at a shifted (indel) offset, instead of pinning the whole leader to one
+    # anchor's nominal frame.
+    lead_prefix = offsets[j_lo]
+    lead_suffix = offsets[-1] + len(segments[-1]) - offsets[j_hi]
+    candidates: list[dict] = []
     seen: set[tuple[str, int]] = set()
     for strand, g in (("+", genome), ("-", revcomp(genome))):
         # try longer anchors first (more specific seeds)
         for anchor_i, anchor_seg in sorted(usable, key=lambda t: -len(t[1])):
-            for leader_start in _seed_positions(anchor_seg, g):
-                leader_start -= offsets[anchor_i]
-                if leader_start < 0 or (strand, leader_start) in seen:
+            for nominal_start in _seed_positions(anchor_seg, g):
+                nominal_start -= offsets[anchor_i]
+                if nominal_start < 0 or (strand, nominal_start) in seen:
                     continue
-                seen.add((strand, leader_start))
-                matched = 0
+                seen.add((strand, nominal_start))
+                positions: dict[int, int] = {}
                 mismatches = 0
                 exact = True
                 ok = True
                 for j, seg in usable:
-                    predicted = leader_start + offsets[j]
+                    predicted = nominal_start + offsets[j]
                     hit, mm = _match_at(seg, g, predicted)
                     if hit:
-                        matched += 1
+                        positions[j] = predicted
                         mismatches += mm
                         if mm:
                             exact = False
@@ -386,7 +409,7 @@ def localize_leader(genome: str, segments: list[str], elisions: list[int]) -> di
                         for p in (predicted - d, predicted + d):
                             h2, mm2 = _match_at(seg, g, p)
                             if h2:
-                                matched += 1
+                                positions[j] = p
                                 mismatches += mm2
                                 exact = False
                                 placed = True
@@ -396,10 +419,13 @@ def localize_leader(genome: str, segments: list[str], elisions: list[int]) -> di
                     if not placed:
                         ok = False
                         break
-                if not ok or matched < len(usable):
+                if not ok or len(positions) < len(usable):
                     continue
-                leader_end = leader_start + offsets[-1] + len(segments[-1])
-                if leader_end > len(g):
+                # Boundary from the ACTUAL matched extremes, extended over the short flanks
+                # by nominal spacing (not the whole leader pinned to one nominal frame).
+                leader_start = positions[j_lo] - lead_prefix
+                leader_end = positions[j_hi] + lead_suffix
+                if leader_start < 0 or leader_end > len(g) or leader_start >= leader_end:
                     continue
                 leader = g[leader_start:leader_end]  # sense orientation (revcomp for '-')
                 # Report forward-genome coordinates for BOTH strands so downstream leakage
@@ -414,18 +440,30 @@ def localize_leader(genome: str, segments: list[str], elisions: list[int]) -> di
                     fwd_start, fwd_end = len(g) - leader_end, len(g) - leader_start
                 else:
                     fwd_start, fwd_end = leader_start, leader_end
-                cand = {
-                    "strand": strand,
-                    "start": fwd_start,
-                    "end": fwd_end,
-                    "leader": leader,
-                    "n_segments_matched": matched,
-                    "exact_offsets": exact,
-                    "mismatches": mismatches,
-                }
-                if best is None or mismatches < best["mismatches"]:
-                    best = cand
-    return best
+                candidates.append(
+                    {
+                        "strand": strand,
+                        "start": fwd_start,
+                        "end": fwd_end,
+                        "leader": leader,
+                        "n_segments_matched": len(positions),
+                        "exact_offsets": exact,
+                        "mismatches": mismatches,
+                    }
+                )
+    if not candidates:
+        return None
+    # Rank by localization quality (``_hit_quality``); surface a tie between DISTINCT genomic
+    # locations as ``ambiguous`` instead of silently resolving it by iteration order — the
+    # caller withholds ambiguous loci rather than force-fit one (§10.3). Identical locations
+    # reached via different seeds collapse in ``distinct`` and are not a spurious tie.
+    best_q = min(_hit_quality(c) for c in candidates)
+    best = [c for c in candidates if _hit_quality(c) == best_q]
+    distinct = {(c["strand"], c["start"], c["end"]) for c in best}
+    pick = sorted(best, key=lambda c: (c["strand"], c["start"], c["end"]))[0]
+    pick["ambiguous"] = len(distinct) > 1
+    pick["n_tied_locations"] = len(distinct)
+    return pick
 
 
 def classify_leakage(
@@ -792,15 +830,12 @@ def source_anchor(
         genus = host.organism.split()[0].lower()
         cRows = corpus_rows.get(genus, [])
         for key, locus in sorted(host_loci.items()):
-            hit = None
-            hit_acc = None
-            for acc, seq in gc.seqs.items():
-                found = localize_leader(seq, locus["segments"], locus["elisions"])
-                if found and (
-                    hit is None or found["n_segments_matched"] > hit["n_segments_matched"]
-                ):
-                    hit, hit_acc = found, acc
-            if hit is None:
+            hits = [
+                (acc, found)
+                for acc, seq in gc.seqs.items()
+                if (found := localize_leader(seq, locus["segments"], locus["elisions"]))
+            ]
+            if not hits:
                 unresolved.append(
                     {
                         "locus": key,
@@ -810,6 +845,29 @@ def source_anchor(
                             "segments carry intra-segment indels vs the current RefSeq "
                             "genome, so a rigorous gapless leader boundary cannot be set "
                             "(withheld rather than force-fit; CLAUDE.md §10.3)"
+                        ),
+                    }
+                )
+                continue
+            # Pick the best replicon by localization quality (``_hit_quality``); ``acc`` breaks
+            # exact ties deterministically for reproducibility. A tie between DISTINCT locations
+            # at the best quality — within one genome (``ambiguous``) OR across replicons — is
+            # withheld, not resolved by iteration order (§10.3).
+            hits.sort(key=lambda t: (_hit_quality(t[1]), t[0]))
+            hit_acc, hit = hits[0]
+            best_q = _hit_quality(hit)
+            cross_replicon_tie = any(
+                acc != hit_acc and _hit_quality(h) == best_q for acc, h in hits[1:]
+            )
+            if hit["ambiguous"] or cross_replicon_tie:
+                unresolved.append(
+                    {
+                        "locus": key,
+                        "organism": host.organism,
+                        "reason": (
+                            "ambiguous localization — multiple equally-good genomic locations "
+                            "(within-genome or across replicons); withheld rather than resolved "
+                            "by iteration order (CLAUDE.md §10.3)"
                         ),
                     }
                 )
@@ -849,6 +907,13 @@ def source_anchor(
                 f"|{host.organism}|{placement['phylum']}|Vitreschak2008"
             )
             fasta_records.append((header, hit["leader"]))
+
+    if not loci_out:
+        pending = [u.get("locus") or u.get("abbr") for u in unresolved]
+        raise RuntimeError(
+            "no GATE-1 anchor loci were re-derived; refusing to publish empty artifacts "
+            f"({len(unresolved)} unresolved: {pending})"
+        )
 
     audit = _build_audit(loci_out, unresolved, supplement_sha, corpus_rows)
 
@@ -900,6 +965,14 @@ def _build_audit(
         by_phylum[r["gtdb_phylum"]] = by_phylum.get(r["gtdb_phylum"], 0) + 1
         by_order_proxy[r["organism"]] = by_order_proxy.get(r["organism"], 0) + 1
     n_overlap = sum(1 for r in loci_out if r["corpus_coord_overlap"])
+    # Loci with a same-replicon corpus record that carries NO coordinates: overlap can be
+    # neither confirmed nor ruled out, so they must not be asserted coordinate-novel (F1).
+    n_uncoordinated = sum(
+        1
+        for r in loci_out
+        if not r["corpus_coord_overlap"]
+        and any(o.get("coord") == "no-coords" for o in r["corpus_overlap_records"])
+    )
     return {
         "schema_version": SCHEMA_VERSION,
         "step": "P0-16",
@@ -939,12 +1012,17 @@ def _build_audit(
             ),
             "n_loci": len(loci_out),
             "n_corpus_coord_overlap": n_overlap,
-            "n_novel_no_overlap": len(loci_out) - n_overlap,
+            "n_no_confirmed_coord_overlap": len(loci_out) - n_overlap,
+            "n_uncoordinated_same_replicon": n_uncoordinated,
+            "n_coordinate_novel": len(loci_out) - n_overlap - n_uncoordinated,
             "note": (
-                "TBDB's own scan covers these hosts (Vitreschak_master.fa fed TBDB), so "
-                "overlap is expected; overlapping loci must be held out of training at "
-                "P0-24 — their independent value is CM-free detection + primary-genome "
-                "provenance, not novelty vs the corpus."
+                "n_no_confirmed_coord_overlap = uncoordinated (a same-replicon corpus record "
+                "without coordinates, so overlap is unverifiable — NOT asserted novel) + "
+                "coordinate-novel (no same-replicon corpus record at all). TBDB's own scan "
+                "covers these hosts (Vitreschak_master.fa fed TBDB), so overlap is expected; "
+                "overlapping loci must be held out of training at P0-24 — their independent "
+                "value is CM-free detection + primary-genome provenance, not novelty vs the "
+                "corpus."
             ),
         },
         "withheld": {

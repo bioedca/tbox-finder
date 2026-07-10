@@ -601,8 +601,8 @@ independence-from-RF00230 documented + the ascertainment-ceiling bound disclosed
 all-consensus-invisible); every host non-Firmicutes at **≥2 independent sources**; leakage report **11/16 corpus-overlap**
 (TBDB scanned these hosts via `Vitreschak_master.fa` → held out at P0-24) + **5/16 coordinate-novel** (corrected — see
 **Review fix** below) + raw count reported
-(the min-N / arm-(c)-fallback verdict is deferred to P0-26). `pytest tests/unit` **118 passed / 22 skipped** (bare CI sim
-— anchor: 13 pure-logic + import-purity run, 3 pandas-gated `importorskip`) and **16/16** with pandas+pyarrow; ruff
+(the min-N / arm-(c)-fallback verdict is deferred to P0-26). `pytest tests/unit` **122 passed / 23 skipped** (bare CI sim
+— anchor: 17 pure-logic + import-purity run, 4 pandas-gated `importorskip`) and **21/21** with pandas+pyarrow; ruff
 0.15.15 + black 25.11.0 (`--target-version py312`) clean; `snakemake --lint` "good condition" + `-n source_gate1_anchor`
 valid.
 **Decisions.** **§7 scientific-evidence-gate STOP resolved (user 2026-07-09):** approved **Option A** — independent
@@ -627,4 +627,17 @@ from coordinate-novel → **corpus-overlap**: each is present in the training co
 **miss** the buggy frame had masked. Leakage split corrected **7/16 → 11/16** overlap, **9 → 5** coordinate-novel; FASTA
 leader sequences are byte-identical (only headers/coords change). Added a forward-coordinate unit invariant (asymmetric-flank
 minus-strand planting, which a symmetric planting hid) + a Tier-2 end-to-end minus-strand-leakage-caught regression.
-**Commit.** the P0-16 atomic commit on branch `p0-16-gate1-anchor` (`db4c3fc`) + this review-fix commit (squash-merged).
+**Review fix 2 (CodeRabbit re-review, user-approved "apply all 4").** Four localization/reporting hardening findings on the
+anchor: **F4** `source_anchor` now **fails loud** if zero loci localize (no silent empty artifacts, §10.3); **F3** replicon
+selection is ranked by localization quality (mismatches, then exact offsets — `n_segments_matched` is invariant) and a tie
+between **distinct** genomic locations (within a genome or across replicons) is **withheld**, not resolved by iteration
+order (§10.3); **F1** the leakage report no longer counts a locus with a same-replicon corpus record that lacks coordinates
+as coordinate-novel (`n_novel_no_overlap` → `n_no_confirmed_coord_overlap` + new `n_uncoordinated_same_replicon` /
+`n_coordinate_novel`); **F2** the leader boundary is now derived from each segment's **actual matched position** (extended
+across the short flanks by nominal spacing) instead of pinning the whole leader to one anchor's nominal offset — so a shifted
+(indel) offset no longer mis-sets the boundary. Re-run (offline, cache-only) is **stable at 16 loci / 8 hosts / 12 exact + 4
+approximate**, leakage **unchanged at 11/16 overlap** (no locus withheld as ambiguous; F1 `n_uncoordinated = 0` on this
+data); **F2 shifts 3 approximate leaders' end coordinate by 1–2 nt** (DR_GLYS2 −1, DEH_TRPB +2, DE_TRPB −2; starts and all
+overlap classifications unchanged; `genome[start:end] == leader` invariant re-verified). +5 tests (boundary-tracks-shift,
+ambiguous/unambiguous localization, uncoordinated-not-novel, fail-loud-on-empty).
+**Commit.** the P0-16 atomic commit on branch `p0-16-gate1-anchor` (`db4c3fc`) + two review-fix commits (squash-merged).
