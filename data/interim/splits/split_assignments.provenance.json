@@ -12,15 +12,15 @@
       "train": 8303
     }
   },
-  "generated_at_utc": "2026-07-10T17:12:57.330797+00:00",
-  "git_sha": "8c9cf8e1d76499ab5412ecf1f2c53d5357bff1cb",
+  "generated_at_utc": "2026-07-10T17:35:14.205083+00:00",
+  "git_sha": "6f2f40690b04d92989c655f801475cdb66778b26",
   "inputs": {
     "data/interim/splits/aligned/class_I.sto": "0edb9c5cd78d864b82fcc1da457b7a89654489cd3458f31aa278d277a9e32804",
     "data/interim/splits/aligned/class_II.sto": "0aa0b3eea647371e958cfbc54c3762abc08d0a986bd1ebf54f9638007c2636b4",
     "data/interim/splits/inputs/manifest.parquet": "0d7a04a3d14f12a545ab5119b91ab49520f29aebc05f099dae45c0829861dcf4"
   },
   "outputs": {
-    "data/interim/splits/figure_data.json": "aada25247699c35183b90aec2e87364b138ae23c163fc09cfd5419c11fa22f34",
+    "data/interim/splits/figure_data.json": "3ed66bb3e736541076bd10f85251be083224ebb84bdfed94203a8c0c250bd393",
     "data/interim/splits/split_assignments.parquet": "2390603a29807c060dc2508a7cadee2824c4b1a48e488893608c0a243826bebb"
   },
   "rule": "workflow/rules/data.smk :: cluster_and_split",

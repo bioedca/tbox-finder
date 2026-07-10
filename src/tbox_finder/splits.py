@@ -906,7 +906,11 @@ def cluster_split(
     # concatenate rows in manifest order with a global cluster_id offset.
     global_labels = np.full(len(manifest), -1, dtype=np.int64)
     sweep_labels_global = {c: np.full(len(manifest), -1, dtype=np.int64) for c in SWEEP_IDENTITIES}
-    offset = 0
+    offset = 0  # production (0.70) offset for global_labels
+    # per-cut offsets: each cut has its own class-I cluster count, so class II must
+    # be offset by that cut's count (not the production count) to avoid label
+    # collisions in the sweep-stability tallies at tighter cuts.
+    sweep_offsets = {c: 0 for c in SWEEP_IDENTITIES}
     name_to_row = {n: i for i, n in enumerate(manifest["seq_name"])}
     codes_by_class = {}
     rows_by_class = {}
@@ -919,7 +923,8 @@ def cluster_split(
         rows_by_class[klass] = rows
         labels_by_cut = _cluster_consensus_matrix(codes, SWEEP_IDENTITIES, COVERAGE_CUT)
         for cut, labels in labels_by_cut.items():
-            sweep_labels_global[cut][rows] = labels + offset
+            sweep_labels_global[cut][rows] = labels + sweep_offsets[cut]
+            sweep_offsets[cut] += int(labels.max()) + 1 if labels.size else 0
         prod = labels_by_cut[IDENTITY_CUT]
         global_labels[rows] = prod + offset
         offset += int(prod.max()) + 1 if prod.size else 0

@@ -97,16 +97,16 @@
       "n_nested_train": 8303
     },
     "0.80": {
-      "largest_cluster": 140,
-      "n_clade_crossing_order_clusters": 487,
-      "n_clusters": 14774,
-      "n_nested_train": 13302
+      "largest_cluster": 139,
+      "n_clade_crossing_order_clusters": 95,
+      "n_clusters": 15205,
+      "n_nested_train": 13659
     },
     "0.90": {
       "largest_cluster": 61,
-      "n_clade_crossing_order_clusters": 725,
-      "n_clusters": 17922,
-      "n_nested_train": 13403
+      "n_clade_crossing_order_clusters": 65,
+      "n_clusters": 18631,
+      "n_nested_train": 13863
     }
   },
   "train_coverage_floor": 0.6
