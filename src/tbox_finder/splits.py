@@ -103,6 +103,74 @@ ANCHOR_FASTA = "data/external/gate1_anchor/gate1_anchor.fasta"
 BLIND_FASTA = "data/external/refs/heldout_blind_set.fasta"
 CLASSII_FASTA = "data/external/classII_positives/classII_positives.fasta"
 
+#: P0-23 — the committed (git/LFS) compact copy of the split-assignment table.
+#: A bounded, deliberate carve-out from no-data-in-repo (CLAUDE.md §5.2, PRD §9.2):
+#: sequence-free, hash-linked, so the no-leakage CI (§8.2) reads the *real*
+#: ~23.5k-record partition on every PR without a DVC pull.
+PROCESSED_SPLITS_DIR = "data/processed/splits"
+INTERIM_TABLE = f"{SPLITS_DIR}/split_assignments.parquet"
+COMMITTED_TABLE = f"{PROCESSED_SPLITS_DIR}/split_assignments.parquet"
+SPLIT_CONSTRUCTION_REPORT = f"{AUDIT_DIR}/split_construction_report.json"
+
+# --------------------------------------------------------------------------- #
+# P0-23 committed-table schema (ADR-0004; PRD §9.2/§16).
+# --------------------------------------------------------------------------- #
+#: DVC-interim → committed-table column renames. The interim table's ``seq_name``
+#: is the unique, sequence-free record identifier (corpus rows: the record
+#: SHA-256; externals: an ``anchor:``/``blind:``-prefixed name); ``record_sha256``
+#: is the per-record hash-link to a ``master_clean_v0.parquet`` corpus row (empty
+#: for the independent externals, which are not in the corpus).
+_TABLE_COLUMN_RENAME = {"seq_name": "record_id", "record_sha256": "corpus_record_sha256"}
+
+#: Lineage-by-rank (P0-15) carried so the no-leakage test can check every §9.2
+#: scheme's holdout-unit separation directly off this table.
+LINEAGE_COLUMNS = ("resolved_phylum", "resolved_class", "resolved_order", "resolved_genus")
+#: One fold assignment per §9.2 partition scheme + the D5 nested single-checkpoint
+#: fold (``nested_train``/``nested_role``).
+FOLD_SCHEME_COLUMNS = (
+    "fold_random",
+    "loo_order_unit",
+    "class_holdout_unit",
+    "phylum_holdout_unit",
+    "nested_train",
+    "nested_role",
+)
+#: Closed, ordered allowlist of committed-table columns. Enforced as an *equality*
+#: (not a superset) so the "no sequences" guarantee is structural: a column
+#: carrying raw nucleotides could never be added without failing the schema gate.
+COMMITTED_TABLE_COLUMNS = (
+    "record_id",
+    "parent_record_id",
+    "corpus_record_sha256",
+    "source",
+    "klass",
+    "cluster_id",
+    *LINEAGE_COLUMNS,
+    *FOLD_SCHEME_COLUMNS,
+    "is_designated_loo_holdout",
+    "is_anchor_heldout",
+    "clade_crossing_cluster",
+    "dropped_from_clade_holdout",
+)
+#: Column names that would carry sequence content — never permitted in the
+#: committed carve-out (belt-and-braces alongside the closed allowlist above).
+SEQUENCE_COLUMN_DENYLIST = frozenset(
+    {
+        "sequence",
+        "Sequence",
+        "seq",
+        "FASTA_sequence",
+        "window_seq",
+        "leader",
+        "leader_seq",
+        "aligned",
+        "afa",
+    }
+)
+#: DOME (DOI:10.1093/gigascience/giae094, PMID:39661723) recommends a supervised-ML
+#: report declare inter-partition redundancy and the partition strategy (PRD §16).
+DOME_REFERENCE = "DOI:10.1093/gigascience/giae094 (PMID:39661723)"
+
 
 # ========================================================================== #
 # Stdlib FASTA helpers
@@ -1072,6 +1140,194 @@ def cluster_split(
     return 0
 
 
+# ========================================================================== #
+# P0-23 — commit the compact, sequence-free, hash-linked split table (git/LFS)
+# ========================================================================== #
+def _is_hex64(value) -> bool:
+    """True iff ``value`` is a 64-char lowercase-hex SHA-256 string."""
+    if not isinstance(value, str) or len(value) != 64:
+        return False
+    return all(c in "0123456789abcdef" for c in value)
+
+
+def validate_table_schema(table) -> None:
+    """Fail loud (§10.3) unless ``table`` matches the committed-table schema.
+
+    Guards the git/LFS carve-out contract (ADR-0004; PRD §9.2/§16):
+
+    * columns are **exactly** :data:`COMMITTED_TABLE_COLUMNS` (a closed allowlist —
+      the structural "no sequences" guarantee) and none is sequence-bearing;
+    * ``record_id`` is present, non-null, and unique (the no-leakage join key);
+    * ``parent_record_id`` is non-null and every value resolves to a ``record_id``
+      (variant→parent fold inheritance stays intra-table — P2 appends the variants);
+    * every ``source == "corpus"`` row carries a 64-hex ``corpus_record_sha256``
+      hash-link, so each corpus row is traceable to its ``master_clean_v0`` record.
+    """
+    cols = list(table.columns)
+    if cols != list(COMMITTED_TABLE_COLUMNS):
+        raise ValueError(
+            "split table schema mismatch:\n"
+            f"  expected: {list(COMMITTED_TABLE_COLUMNS)}\n"
+            f"  got:      {cols}"
+        )
+    banned = SEQUENCE_COLUMN_DENYLIST & set(cols)
+    if banned:
+        raise ValueError(
+            f"sequence-bearing column(s) forbidden in committed table: {sorted(banned)}"
+        )
+
+    if table["record_id"].isna().any():
+        raise ValueError("record_id has null values")
+    if not table["record_id"].is_unique:
+        dup = table["record_id"][table["record_id"].duplicated()].head(5).tolist()
+        raise ValueError(f"record_id is not unique (e.g. {dup})")
+
+    if table["parent_record_id"].isna().any():
+        raise ValueError("parent_record_id has null values")
+    ids = set(table["record_id"])
+    orphan = sorted(set(table["parent_record_id"]) - ids)
+    if orphan:
+        raise ValueError(f"parent_record_id not resolvable to a record_id (e.g. {orphan[:5]})")
+
+    corpus = table[table["source"] == "corpus"]
+    bad_hash = corpus[~corpus["corpus_record_sha256"].map(_is_hex64)]
+    if len(bad_hash):
+        raise ValueError(
+            f"{len(bad_hash)} corpus rows lack a 64-hex corpus_record_sha256 hash-link "
+            f"(e.g. {bad_hash['record_id'].head(5).tolist()})"
+        )
+
+
+def build_split_table(interim, *, corpus_sha256: str | None = None):
+    """Project the DVC-interim split table onto the committed-table schema.
+
+    Renames to the canonical ``record_id`` / ``corpus_record_sha256`` columns,
+    sets ``parent_record_id`` to each row's own ``record_id`` (at P0 every record
+    is a base record → its own parent; P2 appends augmented/synthetic variant rows
+    that carry their parent's ``record_id``), normalises the empty external
+    hash-links to NA, reorders to the closed allowlist, and validates. ``pandas``
+    is imported lazily by the caller. ``corpus_sha256`` is accepted for symmetry
+    with the provenance writer and is not stored in the table (it is the whole-file
+    hash-link recorded in the provenance ``inputs``).
+    """
+    import pandas as pd
+
+    del corpus_sha256  # recorded in provenance inputs, not a table column
+    df = interim.rename(columns=_TABLE_COLUMN_RENAME).copy()
+    # Base-record self-reference (the interim table encodes no cross-record parent).
+    df["parent_record_id"] = df["record_id"]
+    # Externals are not in the corpus → their per-record hash-link is empty → NA.
+    df["corpus_record_sha256"] = df["corpus_record_sha256"].replace("", pd.NA)
+    df = df[list(COMMITTED_TABLE_COLUMNS)]
+    validate_table_schema(df)
+    return df
+
+
+def dome_reporting_fields(report: dict) -> dict:
+    """Build the DOME (PRD §16) redundancy + partition-strategy declaration.
+
+    Sources every number verbatim from the P0-22 ``split_construction_report.json``
+    (no fabrication, §10.3): the train↔heldout consensus-identity histogram is the
+    measured inter-partition redundancy (``n_inside_cut == 0`` at the pinned cut ⇒
+    no held-out record shares ≥ cut identity with any training record), and the
+    partition strategy is the §9.2 scheme ladder with whole-cluster fold assignment.
+    """
+    hist = report.get("histogram", {})
+    clade = report.get("diagnostics", {}).get("clade_crossing", {})
+    return {
+        "reference": DOME_REFERENCE,
+        "redundancy_between_partitions": {
+            "method": (
+                "structure-aware single-linkage clustering on RF00230 consensus-column "
+                "identity; whole clusters assigned to a single fold so no homolog pair "
+                "crosses a partition boundary (ADR-0004 D2)"
+            ),
+            "identity_cut": report.get("identity_cut"),
+            "coverage_cut": report.get("coverage_cut"),
+            "max_heldout_to_train_identity": hist.get("max_identity"),
+            "n_heldout_at_or_above_cut": hist.get("n_inside_cut"),
+            "n_heldout_records": hist.get("n_heldout"),
+            "sweep_identities": report.get("sweep_identities"),
+        },
+        "partition_strategy": {
+            "schemes": {
+                "fold_random": "genus-stratified random 80/10/10 (§9.2 scheme A)",
+                "loo_order_unit": "leave-one-order-out headline holdout (§12)",
+                "class_holdout_unit": "class-level holdout stress (§9.2 scheme B)",
+                "phylum_holdout_unit": f"{HOLDOUT_PHYLUM} phylum holdout (§9.2 scheme B)",
+                "nested_role": (
+                    "single-checkpoint nested most-restrictive training fold (ADR-0004 D5)"
+                ),
+            },
+            "whole_cluster_assignment": True,
+            "clade_crossing_rule": (
+                "clusters spanning >1 clade excluded from clade-holdout scoring + "
+                "phylogenetic-independence diagnostic (ADR-0004 D3)"
+            ),
+            "clade_crossing_diagnostic": clade,
+        },
+    }
+
+
+def write_table(
+    *,
+    interim_parquet: str | Path = INTERIM_TABLE,
+    corpus_parquet: str | Path = CORPUS_PARQUET,
+    audit_report: str | Path = SPLIT_CONSTRUCTION_REPORT,
+    out_parquet: str | Path = COMMITTED_TABLE,
+    env_lock: str | Path | None = None,
+    seed: int = DEFAULT_SEED,
+) -> int:
+    """Write the committed (git/LFS) split-assignment table + its provenance (P0-23).
+
+    Reads the DVC-interim full table (P0-22), projects it onto the sequence-free
+    committed schema, hash-links it to ``master_clean_v0.parquet`` (per-record via
+    ``corpus_record_sha256`` + whole-file via the provenance ``inputs``), re-asserts
+    the no-cluster-split leakage invariant (§8.2), and records the DOME reporting
+    fields (§16). LOCAL only — the interim table + corpus are present on the laptop.
+    """
+    import pandas as pd
+
+    interim = pd.read_parquet(interim_parquet)
+    corpus_sha256 = provenance.sha256_file(corpus_parquet)
+    table = build_split_table(interim, corpus_sha256=corpus_sha256)
+
+    out_parquet = Path(out_parquet)
+    out_parquet.parent.mkdir(parents=True, exist_ok=True)
+    table.to_parquet(out_parquet, index=False)
+
+    # Load-bearing §8.2 invariant carried through to the committed copy.
+    _assert_no_cluster_split(table)
+
+    report = json.loads(Path(audit_report).read_text())
+    n_corpus = int((table["source"] == "corpus").sum())
+    prov_path = out_parquet.with_suffix(".provenance.json")
+    provenance.write_provenance(
+        prov_path,
+        rule="workflow/rules/data.smk :: split_assignment_table",
+        script="src/tbox_finder/splits.py",
+        seed=seed,
+        inputs=[interim_parquet, corpus_parquet, audit_report],
+        outputs=[out_parquet],
+        env_lock=env_lock,
+        adr="ADR-0004",
+        extra={
+            "n_records": int(len(table)),
+            "n_corpus": n_corpus,
+            "n_external": int(len(table) - n_corpus),
+            "n_clusters": int(table["cluster_id"].nunique()),
+            "dome": dome_reporting_fields(report),
+        },
+    )
+    print(
+        f"[splits.write-table] {len(table)} records "
+        f"({n_corpus} corpus / {len(table) - n_corpus} external) | "
+        f"clusters={table['cluster_id'].nunique()} | cols={len(table.columns)} | "
+        f"corpus_sha256={corpus_sha256[:12]}… → {out_parquet}"
+    )
+    return 0
+
+
 def _assert_no_cluster_split(table) -> None:
     """Fail loud if a cluster straddles the nested train/heldout boundary."""
     train = set(table.loc[table["nested_role"] == "train", "cluster_id"])
@@ -1099,7 +1355,8 @@ def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     if not argv:
         print(
-            "usage: tbox_finder.splits " "{extract-sequences|align|cluster-split|plot-figures} …",
+            "usage: tbox_finder.splits "
+            "{extract-sequences|align|cluster-split|write-table|plot-figures} …",
             file=sys.stderr,
         )
         return 2
@@ -1150,6 +1407,23 @@ def main(argv: list[str] | None = None) -> int:
             seed=a.seed,
             min_positives=a.min_positives,
             train_coverage_floor=a.train_coverage_floor,
+        )
+    if sub == "write-table":
+        p = argparse.ArgumentParser(prog="tbox_finder.splits write-table")
+        p.add_argument("--interim", default=INTERIM_TABLE)
+        p.add_argument("--corpus", default=CORPUS_PARQUET)
+        p.add_argument("--audit-report", default=SPLIT_CONSTRUCTION_REPORT)
+        p.add_argument("--out", default=COMMITTED_TABLE)
+        p.add_argument("--env-lock", default="envs/data.conda-lock.yml")
+        p.add_argument("--seed", type=int, default=DEFAULT_SEED)
+        a = p.parse_args(rest)
+        return write_table(
+            interim_parquet=a.interim,
+            corpus_parquet=a.corpus,
+            audit_report=a.audit_report,
+            out_parquet=a.out,
+            env_lock=a.env_lock,
+            seed=a.seed,
         )
     if sub == "plot-figures":
         p = argparse.ArgumentParser(prog="tbox_finder.splits plot-figures")

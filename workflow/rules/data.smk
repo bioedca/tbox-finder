@@ -365,6 +365,7 @@ rule derive_labels:
 _SPLITS_INPUTS_DIR = "data/interim/splits/inputs"
 _SPLITS_ALIGNED_DIR = "data/interim/splits/aligned"
 _SPLITS_DIR = "data/interim/splits"
+_PROCESSED_SPLITS_DIR = "data/processed/splits"
 _FIGURES_DIR = "figures"
 
 
@@ -490,3 +491,38 @@ rule plot_split_figures:
         "python -m tbox_finder.splits plot-figures "
         "--figure-data {input.figure_data:q} "
         "--figures-dir {params.figures_dir:q} >{log} 2>&1"
+
+
+rule split_assignment_table:
+    """Commit the compact, sequence-free split-assignment table to git/LFS (P0-23; ADR-0004, PRD §9.2/§16).
+
+    Promotes the DVC-interim split table (``cluster_and_split``, P0-22) to the git/LFS
+    carve-out copy that the no-leakage CI reads on every PR (§8.2) — a trivial table
+    scan over the *real* ~23.5k-record partition, no DVC pull needed. Projects onto the
+    canonical ``record_id``/``parent_record_id`` schema (the variant→parent fold-inheritance
+    column is present now; P2 appends the augmented/synthetic variant rows), hash-links
+    each corpus row to ``master_clean_v0.parquet`` (per-record ``corpus_record_sha256`` +
+    the whole-file hash in the provenance ``inputs``), re-asserts the no-cluster-split
+    leakage invariant, and records the DOME redundancy + partition-strategy fields (§16).
+    LOCAL, out of ``rule all``.
+    """
+    input:
+        interim=f"{_SPLITS_DIR}/split_assignments.parquet",
+        corpus="data/processed/master_clean_v0.parquet",
+        report=f"{_AUDIT_DIR}/split_construction_report.json",
+    output:
+        table=f"{_PROCESSED_SPLITS_DIR}/split_assignments.parquet",
+        provenance=f"{_PROCESSED_SPLITS_DIR}/split_assignments.provenance.json",
+    params:
+        env_lock="envs/data.conda-lock.yml",
+    log:
+        "logs/split_assignment_table.log",
+    conda:
+        "../../envs/data.yml"
+    shell:
+        "python -m tbox_finder.splits write-table "
+        "--interim {input.interim:q} "
+        "--corpus {input.corpus:q} "
+        "--audit-report {input.report:q} "
+        "--out {output.table:q} "
+        "--env-lock {params.env_lock:q} >{log} 2>&1"
