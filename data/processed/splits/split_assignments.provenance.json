@@ -1,0 +1,63 @@
+{
+  "adr": "ADR-0004",
+  "env_lock_hash": "a4a6715d411d7218432c4c670d35475f6c9aa7dd6397fd5d906ca7e21293dc34",
+  "extra": {
+    "dome": {
+      "partition_strategy": {
+        "clade_crossing_diagnostic": {
+          "order": {
+            "max_orders_per_cluster": 11,
+            "n_crossing_clusters": 129,
+            "n_records_in_crossing_clusters": 8453
+          },
+          "phylum": {
+            "max_phyla_per_cluster": 5,
+            "n_crossing_clusters": 51
+          }
+        },
+        "clade_crossing_rule": "clusters spanning >1 clade excluded from clade-holdout scoring + phylogenetic-independence diagnostic (ADR-0004 D3)",
+        "schemes": {
+          "class_holdout_unit": "class-level holdout stress (\u00a79.2 scheme B)",
+          "fold_random": "genus-stratified random 80/10/10 (\u00a79.2 scheme A)",
+          "loo_order_unit": "leave-one-order-out headline holdout (\u00a712)",
+          "nested_role": "single-checkpoint nested most-restrictive training fold (ADR-0004 D5)",
+          "phylum_holdout_unit": "Actinobacteria phylum holdout (\u00a79.2 scheme B)"
+        },
+        "whole_cluster_assignment": true
+      },
+      "redundancy_between_partitions": {
+        "coverage_cut": 0.7,
+        "identity_cut": 0.7,
+        "max_heldout_to_train_identity": 0.6994818449020386,
+        "method": "structure-aware single-linkage clustering on RF00230 consensus-column identity; whole clusters assigned to a single fold so no homolog pair crosses a partition boundary (ADR-0004 D2)",
+        "n_heldout_at_or_above_cut": 0,
+        "n_heldout_records": 8749,
+        "sweep_identities": [
+          0.6,
+          0.7,
+          0.8,
+          0.9
+        ]
+      },
+      "reference": "DOI:10.1093/gigascience/giae094 (PMID:39661723)"
+    },
+    "n_clusters": 9603,
+    "n_corpus": 23535,
+    "n_external": 34,
+    "n_records": 23569
+  },
+  "generated_at_utc": "2026-07-10T18:59:39.903184+00:00",
+  "git_sha": "fd5b61a1444585fbe6a21ce4f948e3bc7682b382",
+  "inputs": {
+    "data/interim/splits/split_assignments.parquet": "b365987a3b4aa1087be96e51e8315d5cfd4a7e866bba5a877b1e472d06f921d8",
+    "data/processed/audits/split_construction_report.json": "a33bbeaa723eb191ed03e9f87ead1b4edf40e6ee2fa80e7d20c1c7873cd6a0bd",
+    "data/processed/master_clean_v0.parquet": "1eb76591d0e481019dd7acf72a439f157fec9f2aeecb8cc5c37ba80a7b062dd2"
+  },
+  "outputs": {
+    "data/processed/splits/split_assignments.parquet": "fb231fe4e66666f8ea2de1ccd4eea4dce282a33e05a46b41c737e3e07dcc5602"
+  },
+  "rule": "workflow/rules/data.smk :: split_assignment_table",
+  "schema_version": "1.0",
+  "script": "src/tbox_finder/splits.py",
+  "seed": 42
+}
