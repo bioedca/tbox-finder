@@ -1,0 +1,678 @@
+{
+  "counts_by_gtdb_phylum": {
+    "Chloroflexota": 9,
+    "Deinococcota": 5,
+    "Desulfobacterota": 2
+  },
+  "counts_by_host": {
+    "Chloroflexus aurantiacus J-10-fl": 1,
+    "Dehalococcoides mccartyi 195": 2,
+    "Dehalococcoides mccartyi CBDB1": 2,
+    "Deinococcus geothermalis DSM 11300": 3,
+    "Deinococcus radiodurans R1": 2,
+    "Desulfuromonas acetoxidans DSM 684": 1,
+    "Geobacter sulfurreducens PCA": 1,
+    "Thermomicrobium roseum DSM 5159": 4
+  },
+  "git_sha": "d7099050d71d1a6ff83a0b93d6f66e265ee06adc",
+  "independence_statement": "Selection is CM-independent: loci were detected by Vitreschak 2008's hand-built sequence+structure descriptor + synteny, not the Rfam RF00230 CM at its GA cutoff (the GATE-1 cmsearch baseline), so the anchor can include loci below that cutoff. Sequence is corpus-independent: each leader is re-derived from its primary NCBI RefSeq genome, not the TBDB training table. Ascertainment ceiling (disclosed): both the CM and Vitreschak's descriptor rest on the same conserved T-box consensus, so arm (c) reaches the RF00230-cutoff-invisible-but-consensus-detectable region, not the all-consensus-invisible region (reached only by arm (b) synthetic divergence + the §13 discovery campaign).",
+  "leakage_report": {
+    "method": "preliminary corpus-overlap footprint: per-locus same-replicon (RefSeq+GenBank accession) coordinate overlap + host-genus presence. Definitive cluster-level leakage (structure-aware, whole-cluster-to-fold) is enforced at P0-24 over the split table (PRD §9.2/§8.2).",
+    "n_coordinate_novel": 5,
+    "n_corpus_coord_overlap": 11,
+    "n_loci": 16,
+    "n_no_confirmed_coord_overlap": 5,
+    "n_uncoordinated_same_replicon": 0,
+    "note": "n_no_confirmed_coord_overlap = uncoordinated (a same-replicon corpus record without coordinates, so overlap is unverifiable — NOT asserted novel) + coordinate-novel (no same-replicon corpus record at all). TBDB's own scan covers these hosts (Vitreschak_master.fa fed TBDB), so overlap is expected; overlapping loci must be held out of training at P0-24 — their independent value is CM-free detection + primary-genome provenance, not novelty vs the corpus."
+  },
+  "loci": [
+    {
+      "abbr": "GSU",
+      "assembly": "GCF_000007985.2",
+      "corpus_coord_overlap": true,
+      "corpus_overlap_records": [
+        {
+          "accession": "AE017180",
+          "coord": "overlap",
+          "end": 2085409,
+          "organism": "Geobacter sulfurreducens PCA",
+          "phylum": "Proteobacteria",
+          "start": 2085740
+        }
+      ],
+      "end_0based_excl": 2085726,
+      "exact_offsets": true,
+      "gene": "LEUA",
+      "gtdb_method": "name_projection",
+      "gtdb_phylum": "Desulfobacterota",
+      "host_in_corpus": true,
+      "leader_length": 291,
+      "locus": "GSU_LEUA",
+      "match_quality": "exact",
+      "n_elisions": 2,
+      "n_segments": 3,
+      "n_segments_matched": 3,
+      "ncbi_phylum": "Deltaproteobacteria",
+      "organism": "Geobacter sulfurreducens PCA",
+      "refseq_accession": "NC_002939.5",
+      "segment_mismatches": 0,
+      "sources": [
+        "DOI:10.1261/rna.819308",
+        "DOI:10.1128/MMBR.00026-08"
+      ],
+      "start_0based": 2085435,
+      "strand": "-"
+    },
+    {
+      "abbr": "DAC",
+      "assembly": "GCF_000167355.1",
+      "corpus_coord_overlap": true,
+      "corpus_overlap_records": [
+        {
+          "accession": "AAEW02000003",
+          "coord": "overlap",
+          "end": 8199,
+          "organism": "Desulfuromonas acetoxidans DSM 684",
+          "phylum": "Proteobacteria",
+          "start": 8470
+        }
+      ],
+      "end_0based_excl": 8460,
+      "exact_offsets": true,
+      "gene": "LEUA",
+      "gtdb_method": "name_projection",
+      "gtdb_phylum": "Desulfobacterota",
+      "host_in_corpus": true,
+      "leader_length": 238,
+      "locus": "DAC_LEUA",
+      "match_quality": "exact",
+      "n_elisions": 1,
+      "n_segments": 2,
+      "n_segments_matched": 2,
+      "ncbi_phylum": "Deltaproteobacteria",
+      "organism": "Desulfuromonas acetoxidans DSM 684",
+      "refseq_accession": "NZ_AAEW02000003.1",
+      "segment_mismatches": 0,
+      "sources": [
+        "DOI:10.1261/rna.819308",
+        "DOI:10.1128/MMBR.00026-08"
+      ],
+      "start_0based": 8222,
+      "strand": "-"
+    },
+    {
+      "abbr": "DR",
+      "assembly": "GCF_000008565.1",
+      "corpus_coord_overlap": false,
+      "corpus_overlap_records": [],
+      "end_0based_excl": 2073437,
+      "exact_offsets": false,
+      "gene": "GLYS2",
+      "gtdb_method": "name_projection",
+      "gtdb_phylum": "Deinococcota",
+      "host_in_corpus": true,
+      "leader_length": 207,
+      "locus": "DR_GLYS2",
+      "match_quality": "approximate",
+      "n_elisions": 1,
+      "n_segments": 2,
+      "n_segments_matched": 2,
+      "ncbi_phylum": "Deinococcus-Thermus",
+      "organism": "Deinococcus radiodurans R1",
+      "refseq_accession": "NC_001263.1",
+      "segment_mismatches": 0,
+      "sources": [
+        "DOI:10.1261/rna.819308",
+        "DOI:10.1128/MMBR.00026-08"
+      ],
+      "start_0based": 2073230,
+      "strand": "+"
+    },
+    {
+      "abbr": "DR",
+      "assembly": "GCF_000008565.1",
+      "corpus_coord_overlap": false,
+      "corpus_overlap_records": [],
+      "end_0based_excl": 1342865,
+      "exact_offsets": true,
+      "gene": "ILES",
+      "gtdb_method": "name_projection",
+      "gtdb_phylum": "Deinococcota",
+      "host_in_corpus": true,
+      "leader_length": 275,
+      "locus": "DR_ILES",
+      "match_quality": "exact",
+      "n_elisions": 1,
+      "n_segments": 2,
+      "n_segments_matched": 2,
+      "ncbi_phylum": "Deinococcus-Thermus",
+      "organism": "Deinococcus radiodurans R1",
+      "refseq_accession": "NC_001263.1",
+      "segment_mismatches": 0,
+      "sources": [
+        "DOI:10.1261/rna.819308",
+        "DOI:10.1128/MMBR.00026-08"
+      ],
+      "start_0based": 1342590,
+      "strand": "-"
+    },
+    {
+      "abbr": "DG",
+      "assembly": "GCF_000196275.1",
+      "corpus_coord_overlap": true,
+      "corpus_overlap_records": [
+        {
+          "accession": "CP000359",
+          "coord": "overlap",
+          "end": 1824026,
+          "organism": "Deinococcus geothermalis DSM 11300",
+          "phylum": "Deinococcus-Thermus",
+          "start": 1823784
+        },
+        {
+          "accession": "CP000359",
+          "coord": "overlap",
+          "end": 1823999,
+          "organism": "Deinococcus geothermalis DSM 11300",
+          "phylum": "Deinococcus-Thermus",
+          "start": 1823796
+        }
+      ],
+      "end_0based_excl": 1823999,
+      "exact_offsets": false,
+      "gene": "GLYS2",
+      "gtdb_method": "name_projection",
+      "gtdb_phylum": "Deinococcota",
+      "host_in_corpus": true,
+      "leader_length": 205,
+      "locus": "DG_GLYS2",
+      "match_quality": "approximate",
+      "n_elisions": 1,
+      "n_segments": 2,
+      "n_segments_matched": 2,
+      "ncbi_phylum": "Deinococcus-Thermus",
+      "organism": "Deinococcus geothermalis DSM 11300",
+      "refseq_accession": "NC_008025.1",
+      "segment_mismatches": 1,
+      "sources": [
+        "DOI:10.1261/rna.819308",
+        "DOI:10.1128/MMBR.00026-08"
+      ],
+      "start_0based": 1823794,
+      "strand": "+"
+    },
+    {
+      "abbr": "DG",
+      "assembly": "GCF_000196275.1",
+      "corpus_coord_overlap": true,
+      "corpus_overlap_records": [
+        {
+          "accession": "CP000359",
+          "coord": "overlap",
+          "end": 1172360,
+          "organism": "Deinococcus geothermalis DSM 11300",
+          "phylum": "Deinococcus-Thermus",
+          "start": 1172881
+        }
+      ],
+      "end_0based_excl": 1172688,
+      "exact_offsets": true,
+      "gene": "ILES",
+      "gtdb_method": "name_projection",
+      "gtdb_phylum": "Deinococcota",
+      "host_in_corpus": true,
+      "leader_length": 255,
+      "locus": "DG_ILES",
+      "match_quality": "exact",
+      "n_elisions": 2,
+      "n_segments": 3,
+      "n_segments_matched": 3,
+      "ncbi_phylum": "Deinococcus-Thermus",
+      "organism": "Deinococcus geothermalis DSM 11300",
+      "refseq_accession": "NC_008025.1",
+      "segment_mismatches": 0,
+      "sources": [
+        "DOI:10.1261/rna.819308",
+        "DOI:10.1128/MMBR.00026-08"
+      ],
+      "start_0based": 1172433,
+      "strand": "-"
+    },
+    {
+      "abbr": "DG",
+      "assembly": "GCF_000196275.1",
+      "corpus_coord_overlap": true,
+      "corpus_overlap_records": [
+        {
+          "accession": "CP000359",
+          "coord": "overlap",
+          "end": 2054231,
+          "organism": "Deinococcus geothermalis DSM 11300",
+          "phylum": "Deinococcus-Thermus",
+          "start": 2053869
+        }
+      ],
+      "end_0based_excl": 2054151,
+      "exact_offsets": true,
+      "gene": "VALS",
+      "gtdb_method": "name_projection",
+      "gtdb_phylum": "Deinococcota",
+      "host_in_corpus": true,
+      "leader_length": 285,
+      "locus": "DG_VALS",
+      "match_quality": "exact",
+      "n_elisions": 2,
+      "n_segments": 3,
+      "n_segments_matched": 3,
+      "ncbi_phylum": "Deinococcus-Thermus",
+      "organism": "Deinococcus geothermalis DSM 11300",
+      "refseq_accession": "NC_008025.1",
+      "segment_mismatches": 0,
+      "sources": [
+        "DOI:10.1261/rna.819308",
+        "DOI:10.1128/MMBR.00026-08"
+      ],
+      "start_0based": 2053866,
+      "strand": "+"
+    },
+    {
+      "abbr": "CAU",
+      "assembly": "GCF_000018865.1",
+      "corpus_coord_overlap": false,
+      "corpus_overlap_records": [],
+      "end_0based_excl": 1959002,
+      "exact_offsets": true,
+      "gene": "TRPB",
+      "gtdb_method": "name_projection",
+      "gtdb_phylum": "Chloroflexota",
+      "host_in_corpus": true,
+      "leader_length": 279,
+      "locus": "CAU_TRPB",
+      "match_quality": "exact",
+      "n_elisions": 1,
+      "n_segments": 2,
+      "n_segments_matched": 2,
+      "ncbi_phylum": "Chloroflexi",
+      "organism": "Chloroflexus aurantiacus J-10-fl",
+      "refseq_accession": "NC_010175.1",
+      "segment_mismatches": 0,
+      "sources": [
+        "DOI:10.1261/rna.819308",
+        "DOI:10.1128/MMBR.00026-08",
+        "DOI:10.1016/j.febslet.2009.11.056"
+      ],
+      "start_0based": 1958723,
+      "strand": "-"
+    },
+    {
+      "abbr": "DEH",
+      "assembly": "GCF_000011905.1",
+      "corpus_coord_overlap": true,
+      "corpus_overlap_records": [
+        {
+          "accession": "CP000027",
+          "coord": "overlap",
+          "end": 938557,
+          "organism": "Dehalococcoides mccartyi 195",
+          "phylum": "Chloroflexi",
+          "start": 938244
+        }
+      ],
+      "end_0based_excl": 938524,
+      "exact_offsets": false,
+      "gene": "TRPB",
+      "gtdb_method": "name_projection",
+      "gtdb_phylum": "Chloroflexota",
+      "host_in_corpus": true,
+      "leader_length": 271,
+      "locus": "DEH_TRPB",
+      "match_quality": "approximate",
+      "n_elisions": 1,
+      "n_segments": 2,
+      "n_segments_matched": 2,
+      "ncbi_phylum": "Chloroflexi",
+      "organism": "Dehalococcoides mccartyi 195",
+      "refseq_accession": "NC_002936.3",
+      "segment_mismatches": 7,
+      "sources": [
+        "DOI:10.1261/rna.819308",
+        "DOI:10.1128/MMBR.00026-08",
+        "DOI:10.1016/j.febslet.2009.11.056"
+      ],
+      "start_0based": 938253,
+      "strand": "+"
+    },
+    {
+      "abbr": "DEH",
+      "assembly": "GCF_000011905.1",
+      "corpus_coord_overlap": true,
+      "corpus_overlap_records": [
+        {
+          "accession": "CP000027",
+          "coord": "overlap",
+          "end": 1339242,
+          "organism": "Dehalococcoides mccartyi 195",
+          "phylum": "Chloroflexi",
+          "start": 1338782
+        }
+      ],
+      "end_0based_excl": 1339170,
+      "exact_offsets": true,
+      "gene": "TRPE",
+      "gtdb_method": "name_projection",
+      "gtdb_phylum": "Chloroflexota",
+      "host_in_corpus": true,
+      "leader_length": 276,
+      "locus": "DEH_TRPE",
+      "match_quality": "exact",
+      "n_elisions": 1,
+      "n_segments": 2,
+      "n_segments_matched": 2,
+      "ncbi_phylum": "Chloroflexi",
+      "organism": "Dehalococcoides mccartyi 195",
+      "refseq_accession": "NC_002936.3",
+      "segment_mismatches": 0,
+      "sources": [
+        "DOI:10.1261/rna.819308",
+        "DOI:10.1128/MMBR.00026-08",
+        "DOI:10.1016/j.febslet.2009.11.056"
+      ],
+      "start_0based": 1338894,
+      "strand": "+"
+    },
+    {
+      "abbr": "DE",
+      "assembly": "GCF_000009025.1",
+      "corpus_coord_overlap": false,
+      "corpus_overlap_records": [],
+      "end_0based_excl": 814443,
+      "exact_offsets": false,
+      "gene": "TRPB",
+      "gtdb_method": "name_projection",
+      "gtdb_phylum": "Chloroflexota",
+      "host_in_corpus": true,
+      "leader_length": 269,
+      "locus": "DE_TRPB",
+      "match_quality": "approximate",
+      "n_elisions": 1,
+      "n_segments": 2,
+      "n_segments_matched": 2,
+      "ncbi_phylum": "Chloroflexi",
+      "organism": "Dehalococcoides mccartyi CBDB1",
+      "refseq_accession": "NC_007356.1",
+      "segment_mismatches": 7,
+      "sources": [
+        "DOI:10.1261/rna.819308",
+        "DOI:10.1128/MMBR.00026-08",
+        "DOI:10.1016/j.febslet.2009.11.056"
+      ],
+      "start_0based": 814174,
+      "strand": "+"
+    },
+    {
+      "abbr": "DE",
+      "assembly": "GCF_000009025.1",
+      "corpus_coord_overlap": false,
+      "corpus_overlap_records": [],
+      "end_0based_excl": 1138127,
+      "exact_offsets": true,
+      "gene": "TRPE",
+      "gtdb_method": "name_projection",
+      "gtdb_phylum": "Chloroflexota",
+      "host_in_corpus": true,
+      "leader_length": 276,
+      "locus": "DE_TRPE",
+      "match_quality": "exact",
+      "n_elisions": 1,
+      "n_segments": 2,
+      "n_segments_matched": 2,
+      "ncbi_phylum": "Chloroflexi",
+      "organism": "Dehalococcoides mccartyi CBDB1",
+      "refseq_accession": "NC_007356.1",
+      "segment_mismatches": 0,
+      "sources": [
+        "DOI:10.1261/rna.819308",
+        "DOI:10.1128/MMBR.00026-08",
+        "DOI:10.1016/j.febslet.2009.11.056"
+      ],
+      "start_0based": 1137851,
+      "strand": "+"
+    },
+    {
+      "abbr": "TR",
+      "assembly": "GCF_000021685.1",
+      "corpus_coord_overlap": true,
+      "corpus_overlap_records": [
+        {
+          "accession": "CP001275",
+          "coord": "overlap",
+          "end": 1692164,
+          "organism": "Thermomicrobium roseum DSM 5159",
+          "phylum": "Chloroflexi",
+          "start": 1691886
+        },
+        {
+          "accession": "CP001275",
+          "coord": "overlap",
+          "end": 1692132,
+          "organism": "Thermomicrobium roseum DSM 5159",
+          "phylum": "Chloroflexi",
+          "start": 1691896
+        }
+      ],
+      "end_0based_excl": 1692132,
+      "exact_offsets": true,
+      "gene": "LEUA",
+      "gtdb_method": "name_projection",
+      "gtdb_phylum": "Chloroflexota",
+      "host_in_corpus": true,
+      "leader_length": 237,
+      "locus": "TR_LEUA",
+      "match_quality": "exact",
+      "n_elisions": 1,
+      "n_segments": 2,
+      "n_segments_matched": 2,
+      "ncbi_phylum": "Chloroflexi",
+      "organism": "Thermomicrobium roseum DSM 5159",
+      "refseq_accession": "NC_011959.1",
+      "segment_mismatches": 0,
+      "sources": [
+        "DOI:10.1261/rna.819308",
+        "DOI:10.1128/MMBR.00026-08",
+        "DOI:10.1016/j.febslet.2009.11.056"
+      ],
+      "start_0based": 1691895,
+      "strand": "+"
+    },
+    {
+      "abbr": "TR",
+      "assembly": "GCF_000021685.1",
+      "corpus_coord_overlap": true,
+      "corpus_overlap_records": [
+        {
+          "accession": "CP001275",
+          "coord": "overlap",
+          "end": 1226932,
+          "organism": "Thermomicrobium roseum DSM 5159",
+          "phylum": "Chloroflexi",
+          "start": 1227184
+        },
+        {
+          "accession": "CP001275",
+          "coord": "overlap",
+          "end": 1226982,
+          "organism": "Thermomicrobium roseum DSM 5159",
+          "phylum": "Chloroflexi",
+          "start": 1227247
+        },
+        {
+          "accession": "CP001275",
+          "coord": "overlap",
+          "end": 1227014,
+          "organism": "Thermomicrobium roseum DSM 5159",
+          "phylum": "Chloroflexi",
+          "start": 1227237
+        }
+      ],
+      "end_0based_excl": 1227237,
+      "exact_offsets": true,
+      "gene": "LEUS",
+      "gtdb_method": "name_projection",
+      "gtdb_phylum": "Chloroflexota",
+      "host_in_corpus": true,
+      "leader_length": 224,
+      "locus": "TR_LEUS",
+      "match_quality": "exact",
+      "n_elisions": 1,
+      "n_segments": 2,
+      "n_segments_matched": 2,
+      "ncbi_phylum": "Chloroflexi",
+      "organism": "Thermomicrobium roseum DSM 5159",
+      "refseq_accession": "NC_011959.1",
+      "segment_mismatches": 0,
+      "sources": [
+        "DOI:10.1261/rna.819308",
+        "DOI:10.1128/MMBR.00026-08",
+        "DOI:10.1016/j.febslet.2009.11.056"
+      ],
+      "start_0based": 1227013,
+      "strand": "-"
+    },
+    {
+      "abbr": "TR",
+      "assembly": "GCF_000021685.1",
+      "corpus_coord_overlap": true,
+      "corpus_overlap_records": [
+        {
+          "accession": "CP001275",
+          "coord": "overlap",
+          "end": 1041098,
+          "organism": "Thermomicrobium roseum DSM 5159",
+          "phylum": "Chloroflexi",
+          "start": 1040621
+        },
+        {
+          "accession": "CP001275",
+          "coord": "overlap",
+          "end": 1041015,
+          "organism": "Thermomicrobium roseum DSM 5159",
+          "phylum": "Chloroflexi",
+          "start": 1040777
+        }
+      ],
+      "end_0based_excl": 1041015,
+      "exact_offsets": true,
+      "gene": "THRZ",
+      "gtdb_method": "name_projection",
+      "gtdb_phylum": "Chloroflexota",
+      "host_in_corpus": true,
+      "leader_length": 239,
+      "locus": "TR_THRZ",
+      "match_quality": "exact",
+      "n_elisions": 1,
+      "n_segments": 2,
+      "n_segments_matched": 2,
+      "ncbi_phylum": "Chloroflexi",
+      "organism": "Thermomicrobium roseum DSM 5159",
+      "refseq_accession": "NC_011959.1",
+      "segment_mismatches": 0,
+      "sources": [
+        "DOI:10.1261/rna.819308",
+        "DOI:10.1128/MMBR.00026-08",
+        "DOI:10.1016/j.febslet.2009.11.056"
+      ],
+      "start_0based": 1040776,
+      "strand": "+"
+    },
+    {
+      "abbr": "TR",
+      "assembly": "GCF_000021685.1",
+      "corpus_coord_overlap": true,
+      "corpus_overlap_records": [
+        {
+          "accession": "CP001275",
+          "coord": "overlap",
+          "end": 110193,
+          "organism": "Thermomicrobium roseum DSM 5159",
+          "phylum": "Chloroflexi",
+          "start": 109921
+        }
+      ],
+      "end_0based_excl": 110193,
+      "exact_offsets": true,
+      "gene": "TRPE",
+      "gtdb_method": "name_projection",
+      "gtdb_phylum": "Chloroflexota",
+      "host_in_corpus": true,
+      "leader_length": 273,
+      "locus": "TR_TRPE",
+      "match_quality": "exact",
+      "n_elisions": 1,
+      "n_segments": 2,
+      "n_segments_matched": 2,
+      "ncbi_phylum": "Chloroflexi",
+      "organism": "Thermomicrobium roseum DSM 5159",
+      "refseq_accession": "NC_011959.1",
+      "segment_mismatches": 0,
+      "sources": [
+        "DOI:10.1261/rna.819308",
+        "DOI:10.1128/MMBR.00026-08",
+        "DOI:10.1016/j.febslet.2009.11.056"
+      ],
+      "start_0based": 109920,
+      "strand": "+"
+    }
+  ],
+  "match_quality": {
+    "approximate": 4,
+    "exact": 12
+  },
+  "n_hosts": 8,
+  "not_re_derivable_no_figs1_row": [
+    "PCA",
+    "TTH",
+    "THE"
+  ],
+  "prd": "§7.1 (arm c), §9.2(c), §5, §2.3 (GATE-1 arm (c))",
+  "raw_record_count": 16,
+  "schema_version": "1.0",
+  "source": {
+    "citation": "Vitreschak AG, Mironov AA, Lyubetsky VA, Gelfand MS. Comparative genomic analysis of T-box regulatory systems in bacteria. RNA 2008;14(4):717-735.",
+    "doi": "10.1261/rna.819308",
+    "pmcid": "PMC2271356",
+    "pmid": "18359782",
+    "supplement_sha256": {
+      "Supp_Fig1.doc": "91d3bab6dbf65b66abd2b974eee114fbe19e6672894edb175e80984426a7bacd",
+      "Supp_Legends.doc": "909b2a05d5f8cc1f478047bfe8989e644107ace8c566a7f0b47b982fec26410a",
+      "Supp_Table_1.doc": "d94fdb9c3ff3911ca2f2393aef921c1d69e9590e57bd5f596e8fc65499b39a7f"
+    }
+  },
+  "step": "P0-16",
+  "targeting": {
+    "figs1_loci_targeted": 18,
+    "not_localized": 2,
+    "note": "targeted = confirmed non-Firmicutes Fig S1 rows for the included hosts; not_localized = indel-divergent loci withheld (see 'unresolved').",
+    "re_derived": 16
+  },
+  "unresolved": [
+    {
+      "locus": "DEH_ILES",
+      "organism": "Dehalococcoides mccartyi 195",
+      "reason": "not gapless-localizable within tolerance — the literature segments carry intra-segment indels vs the current RefSeq genome, so a rigorous gapless leader boundary cannot be set (withheld rather than force-fit; CLAUDE.md §10.3)"
+    },
+    {
+      "locus": "DE_ILES",
+      "organism": "Dehalococcoides mccartyi CBDB1",
+      "reason": "not gapless-localizable within tolerance — the literature segments carry intra-segment indels vs the current RefSeq genome, so a rigorous gapless leader boundary cannot be set (withheld rather than force-fit; CLAUDE.md §10.3)"
+    }
+  ],
+  "withheld": {
+    "DTH": {
+      "gtdb_phylum": "Dictyoglomota",
+      "ncbi_phylum": "Dictyoglomi",
+      "organism": "Dictyoglomus thermophilum",
+      "policy": "excluded from GATE-1 certification (CLAUDE.md §10.1)",
+      "reason": "single-source (only Vitreschak 2008; MMBR-2009, FEBS-2010, TBDB-2021 all omit)"
+    }
+  }
+}
