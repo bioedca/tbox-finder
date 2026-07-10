@@ -1,0 +1,5 @@
+outs:
+- md5: 7bfc3727a1aae68f51b16a4a3927da02
+  size: 4930787
+  hash: md5
+  path: split_assignments.parquet

@@ -1,0 +1,37 @@
+# conf/data/splits.yaml — P0-22 split-construction config (ADR-0004 D2/D3/D5).
+#
+# Seeded, reproducible parameters for src/tbox_finder/splits.py. The two D2 cut
+# values (identity_cut, coverage_cut) are ADR-0004-pinned and blinded-frozen at
+# P0 (CLAUDE.md §2.3 carve-out) — changing either needs ADR-0004 re-sign-off.
+# Every stochastic choice is seeded (CLAUDE.md §8.3); the only randomness is the
+# genus-stratified scheme-A fold shuffle, seeded per-genus off `seed`. Set
+# PYTHONHASHSEED=0 in the rule env for byte-reproducible dict ordering.
+
+seed: 42
+pythonhashseed: 0
+
+# --- ADR-0004 D2 structure-aware clustering cut (pinned; re-sign-off to change) ---
+identity_cut: 0.70          # consensus-column identity ≥ 0.70  (d = 1 − id ≤ 0.30)
+coverage_cut: 0.70          # co-occupied fraction of the RF00230 model consensus (clen)
+                            # ≥ 0.70 (ADR-0004 D2 Amendment A1, sign-off 2026-07-10) —
+                            # NOT the shorter member's span (that let 1-column hubs
+                            # bridge the whole corpus); poorly-aligning seq → singleton.
+sweep_identities: [0.60, 0.70, 0.80, 0.90]   # D2 adequacy net (b): re-cluster sweep
+
+# --- scheme A (random, genus-stratified) fold record-count targets ---
+random_ratios:
+  train: 0.80
+  val: 0.10
+  test: 0.10
+
+# --- D5 nested most-restrictive training fold / leave-one-order-out designation ---
+min_heldout_positives: 20   # PRD §12 well-powered leave-one-order-out unit
+train_coverage_floor: 0.60  # reserve the largest orders for training to this coverage,
+                            # hold out the remaining ≥-min orders (single checkpoint
+                            # stays viable despite the ~90%-Firmicutes corpus)
+holdout_phylum: Actinobacteria   # the one well-powered held-out phylum (D5 ii)
+
+# --- class covariance models (P0-11a staged; distance is over consensus columns) ---
+class_cm:
+  I: data/external/refs/RF00230.cm    # Transcriptional (class I)
+  II: data/external/refs/TBDB001.cm   # Translational  (class II)

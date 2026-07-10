@@ -1,0 +1,113 @@
+{
+  "coverage_cut": 0.7,
+  "diagnostics": {
+    "clade_crossing": {
+      "order": {
+        "max_orders_per_cluster": 11,
+        "n_crossing_clusters": 129,
+        "n_records_in_crossing_clusters": 8453
+      },
+      "phylum": {
+        "max_phyla_per_cluster": 5,
+        "n_crossing_clusters": 51
+      }
+    },
+    "designated_heldout_orders": [
+      "Acholeplasmatales",
+      "Acidaminococcales",
+      "Actinomycetales",
+      "Anaerolineales",
+      "Bifidobacteriales",
+      "Candidatus Izemoplasmatales",
+      "Chloroflexales",
+      "Corynebacteriales",
+      "Dehalococcoidales",
+      "Deinococcales",
+      "Desulfuromonadales",
+      "Entomoplasmatales",
+      "Erysipelotrichales",
+      "Halanaerobiales",
+      "Haloplasmatales",
+      "Ktedonobacterales",
+      "Lactobacillales",
+      "Micrococcales",
+      "Micromonosporales",
+      "Mycoplasmatales",
+      "Natranaerobiales",
+      "Propionibacteriales",
+      "Pseudonocardiales",
+      "Selenomonadales",
+      "Streptomycetales",
+      "Streptosporangiales",
+      "Synergistales",
+      "Thermoanaerobacterales",
+      "Tissierellales",
+      "Veillonellales"
+    ],
+    "fold_random_counts": {
+      "test": 2353,
+      "train": 18828,
+      "val": 2354
+    },
+    "largest_cluster": 1238,
+    "n_clusters": 9603,
+    "n_corpus": 23535,
+    "n_designated_heldout_orders": 30,
+    "n_external": 34,
+    "n_sequences": 23569,
+    "n_train_reserved_orders": 2,
+    "nested_role_counts": {
+      "dropped": 865,
+      "excluded_clade_crossing": 5652,
+      "heldout": 8749,
+      "train": 8303
+    },
+    "train_reserved_orders": [
+      "Bacillales",
+      "Clostridiales"
+    ]
+  },
+  "histogram": {
+    "max_identity": 0.6994818449020386,
+    "n_heldout": 8749,
+    "n_inside_cut": 0
+  },
+  "identity_cut": 0.7,
+  "min_heldout_positives": 20,
+  "n_records": 23569,
+  "no_cluster_split": true,
+  "seed": 42,
+  "sweep_identities": [
+    0.6,
+    0.7,
+    0.8,
+    0.9
+  ],
+  "sweep_stability": {
+    "0.60": {
+      "largest_cluster": 17510,
+      "n_clade_crossing_order_clusters": 3,
+      "n_clusters": 4714,
+      "n_nested_train": 2405
+    },
+    "0.70": {
+      "largest_cluster": 1238,
+      "n_clade_crossing_order_clusters": 129,
+      "n_clusters": 9603,
+      "n_nested_train": 8303
+    },
+    "0.80": {
+      "largest_cluster": 140,
+      "n_clade_crossing_order_clusters": 487,
+      "n_clusters": 14774,
+      "n_nested_train": 13302
+    },
+    "0.90": {
+      "largest_cluster": 61,
+      "n_clade_crossing_order_clusters": 725,
+      "n_clusters": 17922,
+      "n_nested_train": 13403
+    }
+  },
+  "train_coverage_floor": 0.6
+}
