@@ -1,0 +1,32 @@
+# OOD-ECE min-N coverage simulation — seeded config (P0-27).
+# Drives: src/tbox_finder/coverage.py (rule ood_ece_coverage_sim).
+# ADR pins: ADR-0005 D13/D18 (OOD-ECE min-N admissibility floor); ADR-0006 (rollup,
+# consumed downstream at P0-29). PRD §12 / §2.3 / §7.2.
+#
+# Blinded-frozen note (ADR-0005): the OOD-ECE min-N admissibility floor is pinned = 20
+# and is frozen in CODE (src/tbox_finder/coverage.py::OOD_ECE_MIN_N), NOT here, so no
+# committed report can contradict the ADR-pinned threshold (P0-26 precedent). It is
+# recorded below for the human record only; changing it needs ADR-0005 re-sign-off
+# (CLAUDE.md §7 item 2). This file carries the *stochastic* controls (seed, bootstrap)
+# and the reporting sweep, none of which is a gate threshold.
+#
+# Seeding (CLAUDE.md §8.3): every stochastic step passes an explicit seed.
+
+seed: 42
+pythonhashseed: 0
+
+# Seeded block bootstrap over held-out leave-one-order-out units (the ADR-0005 D5
+# resampling block) → CI on the adjudicable fraction + clearing count.
+n_boot: 2000
+ci_level: 0.95
+
+# For the record only — pinned/frozen in code (see note above).
+ood_ece_min_n: 20              # ADR-0005 D13 admissibility floor (== recall MIN_REAL_HOMOLOG_N)
+floor_sweep: [10, 15, 20, 30, 50]   # diagnostic coverage-sensitivity grid (not a threshold)
+
+# Named zero-positive scan superclades (PRD §7.2) — inconclusive-by-rule ex ante.
+named_zero_positive_clades:
+  - Archaea
+  - DPANN
+  - CPR/Patescibacteria
+  - candidate-phyla

@@ -593,3 +593,63 @@ rule plot_power_figures:
         "python -m tbox_finder.power plot-figures "
         "--figure-data {input.figure_data:q} "
         "--out-dir {params.out_dir:q} >{log} 2>&1"
+
+
+rule ood_ece_coverage_sim:
+    """OOD-ECE min-N coverage simulation — pins the ADR-0005 D13 admissibility floor (P0-27).
+
+    Counts, over the leave-clade-out partition (P0-22), how many held-out orders clear the
+    OOD-ECE min-N admissibility floor, so the adjudicable fraction of the §13 scan is known
+    ex ante (PRD §12) and "discovery-predominantly-inconclusive" is a *pre-registered* modal
+    outcome (PRD §2.3), not a surprise. Cross-checks per-order N against the signed P0-26
+    power-budget report (non-fabrication guard, §10.3). Seeded block bootstrap for the
+    adjudicable-fraction CI. LOCAL, out of ``rule all``.
+    """
+    input:
+        table=f"{_SPLITS_DIR}/split_assignments.parquet",
+        power_report=f"{_AUDIT_DIR}/power_budget_report.json",
+        config="conf/data/coverage.yaml",
+    output:
+        report=f"{_AUDIT_DIR}/ood_ece_coverage_report.json",
+        provenance=f"{_AUDIT_DIR}/ood_ece_coverage_report.provenance.json",
+        figure_data=f"{_AUDIT_DIR}/ood_ece_coverage_figure_data.json",
+    params:
+        env_lock="envs/data.conda-lock.yml",
+    log:
+        "logs/ood_ece_coverage_sim.log",
+    conda:
+        "../../envs/data.yml"
+    shell:
+        "PYTHONHASHSEED=0 python -m tbox_finder.coverage simulate "
+        "--table {input.table:q} "
+        "--power-report {input.power_report:q} "
+        "--config {input.config:q} "
+        "--out-report {output.report:q} "
+        "--figure-data {output.figure_data:q} "
+        "--env-lock {params.env_lock:q} >{log} 2>&1"
+
+
+rule plot_coverage_figures:
+    """Render the OOD-ECE coverage figures from the figure-data JSON (P0-27; viz env).
+
+    Split from ``ood_ece_coverage_sim`` so the parquet audit stays in the data env and only
+    this numeric→PNG render needs the viz env (CLAUDE.md §3.2 rule = environment). Emits the
+    per-order coverage, the floor-sweep sensitivity, and the verdict-vector-shape figures
+    (git-LFS: ``figures/**``). LOCAL, out of ``rule all``.
+    """
+    input:
+        figure_data=f"{_AUDIT_DIR}/ood_ece_coverage_figure_data.json",
+    output:
+        per_order=f"{_FIGURES_DIR}/coverage/per_order_coverage.png",
+        sweep=f"{_FIGURES_DIR}/coverage/floor_sweep_coverage.png",
+        shape=f"{_FIGURES_DIR}/coverage/verdict_vector_shape.png",
+    params:
+        out_dir=lambda wildcards, output: os.path.dirname(output.per_order),
+    log:
+        "logs/plot_coverage_figures.log",
+    conda:
+        "../../envs/viz.yml"
+    shell:
+        "python -m tbox_finder.coverage plot-figures "
+        "--figure-data {input.figure_data:q} "
+        "--out-dir {params.out_dir:q} >{log} 2>&1"
