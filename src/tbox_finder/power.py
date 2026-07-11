@@ -203,7 +203,8 @@ def arm_verdict(n: int, *, min_n: int = MIN_REAL_HOMOLOG_N, n_blocks: int | None
 # These back the blinded-frozen defaults with numeric SESOI / power arguments and
 # make them machine-checkable: a unit test asserts each argument is internally
 # consistent (e.g. the +5 pp CI floor equals the per-positive granularity at the
-# pinned min-N) and carries >=1 verified method citation. They never read a P4
+# pinned min-N) and carries its verified method citations where applicable (the
+# two project-internal design/reference defaults carry none). They never read a P4
 # result — the arguments are effect-size / estimability logic authored ex ante.
 
 
@@ -228,6 +229,8 @@ def recall_bar_resolution(min_n: int = MIN_REAL_HOMOLOG_N) -> dict:
     ``1/N >= 5 pp`` argument that pinned ``MIN_REAL_HOMOLOG_N`` (Amendment A1), so
     the recall bar and the min-N floor are one internally-consistent construction.
     """
+    if min_n <= 0:
+        raise ValueError("min_n must be positive")
     granularity_pp = 100.0 / min_n
     return {
         "min_n": int(min_n),
@@ -248,6 +251,8 @@ def min_detectable_effect_pp(baseline_recall: float, n: int, z: float = 1.96) ->
     (CLAUDE.md §10.3). The gated inference is the block-resampled CI + the D5
     small-N exact/permutation test, not this normal approximation.
     """
+    if not math.isfinite(z) or z <= 0.0:
+        raise ValueError("z must be finite and positive")
     return z * binomial_se(baseline_recall, n) * 100.0
 
 
@@ -267,8 +272,10 @@ def calibration_fdr_budget_ratio(ece: float = ECE_GATE, fdr: float = FDR_GATE) -
     budget (0.05 / 0.10), so a GATE-2-passing calibration head cannot by itself
     exhaust the downstream FDR budget it feeds.
     """
-    if fdr <= 0:
-        raise ValueError("fdr must be positive")
+    if not 0.0 <= ece <= 1.0:
+        raise ValueError("ece must be in [0, 1]")
+    if not 0.0 < fdr <= 1.0:
+        raise ValueError("fdr must be in (0, 1]")
     return ece / fdr
 
 
@@ -276,8 +283,10 @@ def _rationale_records() -> dict:
     """The authored magnitude rationale for every delegated blinded-frozen default.
 
     Keyed by a stable slug; each record carries the default, its value, the
-    argument kind, the SESOI / power argument, >=1 verified method citation, and
-    the blinded-freeze flag. The QMD (``analyses/gate_default_rationales.qmd``)
+    argument kind, the SESOI / power argument, its verified method citations
+    (empty for the two project-internal design/reference defaults —
+    ``decoy_prevalence`` and ``gate4_f1_floor``), and the blinded-freeze flag.
+    The QMD (``analyses/gate_default_rationales.qmd``)
     renders this verbatim so the durable doc has no hand-typed numbers.
     """
     return {
@@ -416,9 +425,12 @@ def _rationale_records() -> dict:
                 f"*sustained across the held-out-order distribution* — a consistent "
                 f"transfer deficit, not a single-arm point difference (which the "
                 f"+5 pp CI floor already governs). A persistent "
-                f">{SWAP_RECALL_MARGIN_PP} pp backbone gap would erode over half the "
-                f"D4 GATE-1 headline margin, so it is the smallest sustained deficit "
-                f"worth switching backbones over."
+                f">{SWAP_RECALL_MARGIN_PP} pp backbone gap is a material fraction of "
+                f"the D4 headline margin — {100 * SWAP_RECALL_MARGIN_PP // RECALL_POINT_BAR_PP}% "
+                f"of the +{RECALL_POINT_BAR_PP} pp point bar "
+                f"({100 * SWAP_RECALL_MARGIN_PP // RECALL_CI_FLOOR_PP}% of the "
+                f"+{RECALL_CI_FLOOR_PP} pp CI floor) — so it is the smallest sustained "
+                f"deficit worth switching backbones over."
             ),
             "citations": [CITATIONS["sesoi_primer"], CITATIONS["sesoi_tutorial"]],
             "blinded_frozen": True,

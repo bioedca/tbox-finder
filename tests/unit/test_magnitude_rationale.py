@@ -90,6 +90,18 @@ def test_recall_bar_resolution_bite_at_wrong_min_n():
     assert res["ci_floor_matches_granularity"] is False
 
 
+@pytest.mark.parametrize("bad", [0, -1])
+def test_recall_bar_resolution_rejects_nonpositive_min_n(bad):
+    with pytest.raises(ValueError):
+        power.recall_bar_resolution(min_n=bad)
+
+
+@pytest.mark.parametrize("bad_z", [0.0, -1.0, float("inf"), float("nan")])
+def test_min_detectable_effect_rejects_bad_z(bad_z):
+    with pytest.raises(ValueError):
+        power.min_detectable_effect_pp(0.5, 20, z=bad_z)
+
+
 def test_min_detectable_effect_is_positive_and_scales_with_n():
     mde_small = power.min_detectable_effect_pp(0.5, 20)
     mde_large = power.min_detectable_effect_pp(0.5, 200)
@@ -112,9 +124,21 @@ def test_calibration_fdr_budget_ratio_is_one_half():
     assert power.calibration_fdr_budget_ratio() == pytest.approx(0.5)
 
 
-def test_calibration_fdr_budget_ratio_rejects_nonpositive_fdr():
+@pytest.mark.parametrize(
+    "ece,fdr",
+    [
+        (0.05, 0.0),  # fdr must be > 0
+        (0.05, -0.1),  # fdr negative
+        (0.05, 1.1),  # fdr > 1 (not a rate)
+        (-0.01, 0.10),  # ece negative
+        (1.5, 0.10),  # ece > 1 (not a rate)
+        (float("nan"), 0.10),  # ece nan
+        (0.05, float("nan")),  # fdr nan
+    ],
+)
+def test_calibration_fdr_budget_ratio_rejects_out_of_domain(ece, fdr):
     with pytest.raises(ValueError):
-        power.calibration_fdr_budget_ratio(0.05, 0.0)
+        power.calibration_fdr_budget_ratio(ece, fdr)
 
 
 # --------------------------------------------------------------------------- #
