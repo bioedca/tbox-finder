@@ -454,6 +454,7 @@ def run_sim(
     out_report.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
 
     figure_data = Path(figure_data)
+    figure_data.parent.mkdir(parents=True, exist_ok=True)
     figure_data.write_text(json.dumps(_figure_data(report)) + "\n")
 
     provenance.write_provenance(
