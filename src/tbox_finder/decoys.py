@@ -455,6 +455,11 @@ def fetch_refs(
     cfg = read_config(config)
     out = Path(refs_dir)
     out.mkdir(parents=True, exist_ok=True)
+    # Derive the written paths from refs_dir so a non-default --refs-dir is honored
+    # (the module constants are only the default filenames).
+    structured_path = out / Path(STRUCTURED_REFS_FA).name
+    leader_path = out / Path(LEADER_REFS_FA).name
+    manifest_path = out / Path(REFS_MANIFEST).name
     rng = random.Random(f"{cfg.seed}:rfam_subsample")
     accessed = datetime.now(UTC).isoformat()
     manifest: dict[str, Any] = {
@@ -483,9 +488,9 @@ def fetch_refs(
             "n_sequences_subsampled": len(picked),
         }
     structured_text = write_fasta(structured)
-    Path(STRUCTURED_REFS_FA).write_text(structured_text)
+    structured_path.write_text(structured_text)
     manifest["structured_rna_refs"] = {
-        "path": STRUCTURED_REFS_FA,
+        "path": str(structured_path),
         "sha256": _sha256_bytes(structured_text.encode()),
         "n_sequences": len(structured),
     }
@@ -493,15 +498,15 @@ def fetch_refs(
     neg_text = Path(tboxevo_negatives).read_text()
     leader_recs = parse_fasta(neg_text)
     leader_text = write_fasta(leader_recs)
-    Path(LEADER_REFS_FA).write_text(leader_text)
+    leader_path.write_text(leader_text)
     manifest["leader_decoys"] = {
-        "path": LEADER_REFS_FA,
+        "path": str(leader_path),
         "source_path": str(tboxevo_negatives),
         "source_sha256": _sha256_bytes(neg_text.encode()),
         "sha256": _sha256_bytes(leader_text.encode()),
         "n_sequences": len(leader_recs),
     }
-    Path(REFS_MANIFEST).write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
+    manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
     print(
         f"staged {len(structured)} structured-RNA + {len(leader_recs)} leader refs "
         f"→ {refs_dir}",

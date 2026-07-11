@@ -9,6 +9,7 @@ dinucleotide null if the shuffle is exact).
 
 from __future__ import annotations
 
+import json
 import math
 import random
 from collections import Counter
@@ -186,3 +187,20 @@ def test_fetch_refs_requires_external_tboxevo_source(monkeypatch):
     monkeypatch.delenv(decoys.TBOXEVO_NEGATIVES_ENV, raising=False)
     with pytest.raises(ValueError, match="tboxevo"):
         decoys.fetch_refs(tboxevo_negatives=None)
+
+
+def test_fetch_refs_honors_custom_refs_dir(tmp_path, monkeypatch):
+    # A non-default --refs-dir must be honored (the module constants are only the
+    # default filenames); network is mocked so this stays offline + deterministic.
+    monkeypatch.setattr(
+        decoys, "_stream_fasta_gz", lambda url, timeout=180: iter([("h1", "ACGU"), ("h2", "GGCC")])
+    )
+    neg = tmp_path / "neg.fasta"
+    neg.write_text(">n1\nACGUACGU\n")
+    out = tmp_path / "custom_refs"
+    assert decoys.fetch_refs(refs_dir=out, config=None, tboxevo_negatives=str(neg)) == 0
+    for name in ("structured_rna_refs.fa", "leader_decoys.fa", "decoy_refs.manifest.json"):
+        assert (out / name).is_file()
+    manifest = json.loads((out / "decoy_refs.manifest.json").read_text())
+    assert manifest["structured_rna_refs"]["path"] == str(out / "structured_rna_refs.fa")
+    assert manifest["leader_decoys"]["path"] == str(out / "leader_decoys.fa")
