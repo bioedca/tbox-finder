@@ -526,3 +526,70 @@ rule split_assignment_table:
         "--audit-report {input.report:q} "
         "--out {output.table:q} "
         "--env-lock {params.env_lock:q} >{log} 2>&1"
+
+
+rule power_budget_audit:
+    """GATE-1 power-budget audit — pins the min-real-homolog N (P0-26; ADR-0005 D18 amend).
+
+    Audits, per pre-registered %-identity bin (ADR-0005 D1) and per headline-certifying
+    arm (D6), how many real held-out positives the leave-clade-out partition (P0-22)
+    actually supplies — per leave-one-order-out round AND pooled — plus the count of real
+    low-identity homologs, so which GATE-1 arms are powered vs reported-not-gated is known
+    ex ante (D8). Consumes the P0-16 anchor + P0-17 class-II raw counts to render the
+    min-N-reachability verdict + the arm-(c) sourcing-fallback trigger (D6/D7). Reuses the
+    ADR-0004 D2 consensus-identity metric (no divergent second definition). Never fabricates
+    counts (§10.3). LOCAL, out of ``rule all``.
+    """
+    input:
+        table=f"{_SPLITS_DIR}/split_assignments.parquet",
+        class_i=f"{_SPLITS_ALIGNED_DIR}/class_I.sto",
+        class_ii=f"{_SPLITS_ALIGNED_DIR}/class_II.sto",
+        anchor="data/external/gate1_anchor/gate1_anchor_report.json",
+        classii="data/external/classII_positives/classII_report.json",
+    output:
+        report=f"{_AUDIT_DIR}/power_budget_report.json",
+        provenance=f"{_AUDIT_DIR}/power_budget_report.provenance.json",
+        figure_data=f"{_AUDIT_DIR}/power_figure_data.json",
+    params:
+        aligned_dir=lambda wildcards, input: os.path.dirname(input.class_i),
+        env_lock="envs/data.conda-lock.yml",
+    log:
+        "logs/power_budget_audit.log",
+    conda:
+        "../../envs/data.yml"
+    shell:
+        "PYTHONHASHSEED=0 python -m tbox_finder.power audit "
+        "--table {input.table:q} "
+        "--aligned-dir {params.aligned_dir:q} "
+        "--anchor-report {input.anchor:q} "
+        "--classII-report {input.classii:q} "
+        "--out-report {output.report:q} "
+        "--figure-data {output.figure_data:q} "
+        "--env-lock {params.env_lock:q} >{log} 2>&1"
+
+
+rule plot_power_figures:
+    """Render the power-budget figures from power_figure_data.json (P0-26; viz env).
+
+    Split from ``power_budget_audit`` so the parquet/GEMM audit stays in the data env
+    (pyarrow, no matplotlib) and only this numeric→PNG render needs the viz env
+    (matplotlib, no pyarrow) — CLAUDE.md §3.2 rule = environment. Emits the per-identity-bin
+    held-out N, the per-order N, and the headline-arm reachability figures
+    (git-LFS: ``figures/**``). LOCAL, out of ``rule all``.
+    """
+    input:
+        figure_data=f"{_AUDIT_DIR}/power_figure_data.json",
+    output:
+        bins=f"{_FIGURES_DIR}/power/identity_bin_counts.png",
+        per_order=f"{_FIGURES_DIR}/power/per_order_counts.png",
+        arms=f"{_FIGURES_DIR}/power/arm_reachability.png",
+    params:
+        out_dir=lambda wildcards, output: os.path.dirname(output.bins),
+    log:
+        "logs/plot_power_figures.log",
+    conda:
+        "../../envs/viz.yml"
+    shell:
+        "python -m tbox_finder.power plot-figures "
+        "--figure-data {input.figure_data:q} "
+        "--out-dir {params.out_dir:q} >{log} 2>&1"
