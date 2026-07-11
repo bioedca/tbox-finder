@@ -1,0 +1,189 @@
+# ADR-0005 — Non-circular evaluation design
+
+- **Status:** Accepted (user sign-off 2026-07-11; CLAUDE.md §7 item 2)
+- **Date:** 2026-07-11
+- **Deciders:** bioedca (project owner)
+- **Phase:** P0 (seed ADR)
+- **Delegated from:** PRD §2.3 (formal acceptance gates — GATE-1, GATE-2, and the gate-precedence / blinded-freeze policy), §5 (the circularity problem & the five non-circular mechanisms), §6 (Stage-1↔Stage-2 integration + overlapping-window reconciliation + strand resolver), §9.1 (four negative/decoy classes + mining protection), §11 (recalibration stack order, aux-loss weighting), §12 (evaluation & validation framework — ECE, FDR, OOD-drift rule), §13.1 (scan decision machinery)
+- **Supersedes / superseded by:** none
+- **Related:** ADR-0001 (architecture & aims — the non-circularity principle this ADR operationalizes end-to-end), ADR-0002 (environment & ML stack — the two Stage-1 checkpoints [production + class-II-CM-naive] whose gate attribution D9 fixes; the RiNALMo parity gate whose swap-trigger margins D17 pins), ADR-0003 (cluster & scan ops — the governing GTDB release, minimum-viable scan, and per-corpus GPU/wall ceilings the GATE-1/GATE-3 scan runs against), ADR-0004 (split & leakage policy — the homology-cluster / leave-clade-out / literature-anchor partition and the variant→parent→fold provenance every GATE-1 arm is resampled and blocked on; the GATE-4 0.80 floor, a sibling delegated default), ADR-0006 (validation decision rule & tiering — the §13.3 confirmed-novel rule + the model-independent homolog-search thresholds that make the open-scan precision orthogonal; **pending P0-29**)
+
+This ADR pins the **evaluation contract for the project's central methodological result — the generalization claim (GATE-1, "beat `cmsearch` at matched precision on held-out clades and on synthetic divergence") — and the calibration/FDR gate (GATE-2)** that decides whether the system is sound. It is the document that operationalizes PRD §5, the **#1 design constraint**: both the training labels and the naïve ground truth are CM-derived, so without a pre-registered non-circular design a model can at best re-learn what the CM already sees. Every decision below is a **rule**; the numeric **values** the PRD delegates here are stated as **defaults** under the PRD §2.3 precedence carve-out (the ADR-pinned value is authoritative; a recalibration still requires ADR re-sign-off, CLAUDE.md §7 item 2) and are **blinded-frozen at P0** — they may not change after P4 unblinding. Three numeric values are **deferred by design** and pinned by later P0 steps that amend this ADR: the **per-bin / per-arm minimum-real-homolog N** (P0-26), the **OOD-ECE min-N admissibility floor** (P0-27), and the **authored magnitude-rationale text** for each gate default (P0-28); this step pins the rules those steps fill in.
+
+---
+
+## Context
+
+The headline result is a **generalization claim** and the **precondition for the flagship distribution-expansion result** (GATE-3). Its trustworthiness rests entirely on the evaluation being non-circular (PRD §5): a CM-trained, CM-scored model cannot demonstrate "finds what CMs miss" unless the benchmark is explicitly constructed to reach beyond the CM. PRD §5 defeats the circularity with five pre-registered mechanisms — (1) held-out-clade extrapolation, (2) synthetic-divergence stress, (3) class-II-CM-naive anti-mimicry, (4) PU framing for model-unique open-scan hits, (5) orthogonal model-independent confirmation — and PRD §2.3/§12/§13.1 delegate the operationalizing **thresholds and decision rules** to this ADR. The split that feeds all of this (homology-cluster / leave-one-order-out / literature-anchor, with variant→parent→fold provenance) is pinned in ADR-0004; the discovery-side orthogonality (the CM-free de-novo covariation and model-independent homolog search) is pinned in ADR-0006. This ADR sits between them and owns the **grading**.
+
+Two facts drive the shape of the decisions. **First**, the catalogue is ~90 % Firmicutes across 29 phyla (P0-12), so only **leave-one-order-out** is statistically well-powered (≈31 orders with ≥20 positives; PRD §12) and the gated statistic must be **macro-averaged across held-out orders** (micro-averaging would let Firmicutes dominate) with **block-level** (cluster / held-out-order) resampling carrying the phylogenetic-exchangeability caveat into every CI. **Second**, the leave-clade-out positives are themselves CM-derived and therefore cannot contain T-boxes below `cmsearch`'s gathering cutoff — the **genuinely CM-invisible region is reached only by the synthetic-divergence arm and the §13 discovery campaign**, so those two arms carry an outsized evidential load and need their own power budget and structural-realism controls.
+
+**The low-identity claim region is literature-sourced, not chosen for convenience.** The synthetic-divergence and lowest-identity-bin arms make their claim precisely where sequence-based homology search is documented to fail. According to PubMed, Freyhult, Bollback & Gardner (2007) benchmarked BLAST, FASTA, HMMer and Infernal on curated ncRNA sets and found the most popular (sequence-based) methods are often the least accurate on divergent homologs — the "genomic dark matter" region that motivates structure-aware search [PMID:17151342; DOI:10.1101/gr.5890907 (accessed 2026-07-10)]; Menzel, Gorodkin & Stadler (2009) independently concluded that homology search beyond the reach of BLAST "is not at all a routine task" and depends on curated structural alignments [PMID:19861422; DOI:10.1261/rna.1556009 (accessed 2026-07-10)]. These two agreeing sources ground the **fixed** low-identity bin edges in D1 (the edges isolate the region both papers identify as where sequence homology collapses); they are cited for the qualitative divergence-sensitivity finding — no specific numeric cutoff is transcribed from either paper's tables.
+
+---
+
+## Decision
+
+### D1. Pre-registered identity bins (fixed edges, Freyhult-sourced) + controlled-divergence levels (locked rule; default values)
+
+Held-out positives are binned by **% nucleotide identity to the nearest seed (training-fold) member** into **fixed, pre-registered edges — never quantile bins** (quantile bins would make the claim region data-dependent, PRD §5):
+
+> **default edges: `<50` | `50–70` | `70–85` | `85–100` %** identity.
+
+The **"lowest-identity bins" = the bottom two** (`<50` and `50–70`, i.e. the `<70 %` region). The edges are **fixed for the life of the project** and positioned to isolate the low-identity region where sequence-based homology search is documented to lose sensitivity and where the CM-vs-model gap is expected to open [PMID:17151342 / DOI:10.1101/gr.5890907; corroborated PMID:19861422 / DOI:10.1261/rna.1556009 — accessed 2026-07-10]. A cell with fewer than the **per-bin min-N** (D18, value at P0-26) is **pooled upward per the sub-min-N pooling rule** (adjacent-bin pooling toward higher identity, disclosed) or **reported-not-gated**, never silently passed.
+
+**Controlled-divergence synthetic variants** (mechanism 2) are generated at a **fixed number of target-identity levels** — **default: one level centered in each of the four bins plus one deep `<40 %` stress level (5 levels total: ≈ {40, 55, 65, 78, 92} % identity)** — by structure-preserving mutation along the CM consensus, with **each variant's parent provenance pinned** (so ADR-0004's variant→parent→fold no-leakage guard applies). The level set and count are frozen here; recall-vs-divergence is plotted for the model and for `cmsearch` on identical inputs.
+
+### D2. Canonical `cmsearch` operating point (locked)
+
+The head-to-head baseline operating point is the **Rfam RF00230 GA (gathering) threshold for class I** and the **published `TBDB001.cm` class-II threshold for class II** (PRD §4/§2.3). A **full E-value sweep is reported as a supplementary PR curve** (not the gated point). `cmsearch`'s **build/gathering cutoff is reported next to the matched-precision threshold** on every GATE-1 figure, so the CM-invisible region (below that cutoff, reachable only by mechanism 2 + §13) is explicit. Infernal ≥ 1.1.4; a filter-off (`--max` / `--nohmm`) arm is reported per bin to attribute failures to the HMM pre-filter vs the CYK/structure stage (PRD §5, [PMID:24008419]).
+
+### D3. Scan decision machinery — Stage-1 threshold, locus-construction, Stage-2 operating point (locked rules; values frozen at the phase gate)
+
+Pre-registered as **rules** here; the *values* are frozen at the phase gate (§13.1) and never tuned on the test set:
+
+- **Stage-1 threshold** = the **most-liberal (highest-recall) value that retains a pinned per-locus recall floor** (default **≥ 99 %**, measured on individually-windowed leave-one-order-out positives).
+- **Locus-construction rule** (an explicit spec): the **overlapping-window logit-reconciliation operator** — at window 1024 / stride 512 every interior nucleotide is covered by ≥ 2 windows; the per-position 8-class logits from all covering windows are **averaged in log-sum-exp space then arg-maxed into one per-position prediction** *before* along-sequence element merging (a seam-free operator, so the Stage-1 recall floor holds under overlapping tiling and boundary IoU is not a 512-grid artifact) — then per-class-vs-global threshold scope, minimum span, gap-merge distance, **recall-favoring** required-element co-occurrence (mandating canonical elements would re-impose the §5/§13.3 bias), and flank size. **Training positives are offset-augmented** (random window-phase offsets) for phase robustness; contig ends are zero-flanked and flagged.
+- **Stage-2 operating point** = the **most-liberal calibrated posterior with empirical false-discovery proportion ≤ 10 % (point estimate)** on the consensus null (GATE-2 then certifies this FDR on its bootstrap-CI upper bound, D12).
+
+Reported metrics always distinguish **Stage-1-only**, **two-stage**, and **two-stage+orthogonal**.
+
+### D4. GATE-1 two-part effect-size bar + min-N-conditioned fallback (locked rule; default values; blinded-frozen)
+
+GATE-1 recall (vs `cmsearch` at **matched precision**, D7) passes an arm iff:
+
+> **point estimate ≥ +10 pp recall AND block-resampled bootstrap-CI lower bound > +5 pp** (the pinned positive floor).
+
+The weaker clause **"point ≥ +10 pp AND CI lower bound > 0"** is admissible **only as an explicit, disclosed min-N-conditioned fallback** (invoked when an arm's real-positive N is below the D18 per-arm min-N so the tighter CI cannot be estimated — never as a convenience loosening). Recall is graded on the **two-stage** system with **Stage-1-only reported alongside** (exception: the class-II anti-mimicry sub-arm is Stage-1-only, D9).
+
+The **+10 pp / +5 pp** values are **defaults** under the precedence carve-out and **blinded-frozen at P0**: each carries a **documented magnitude rationale** — a smallest-effect-of-interest / effect-size argument or a power calculation at the D7 pinned decoy prevalence and the D18 per-bin min-N — **authored before any P4 result at P0-28** and frozen; any *pre-P4* change needs ADR re-sign-off (CLAUDE.md §7 item 2); no *post-P4* change is permitted.
+
+### D5. GATE-1 resampling & averaging — block-level + macro-average (locked)
+
+All GATE-1 (and per-order ECE) confidence intervals are **resampled at the homology-cluster / held-out-order (block) level, not the record level**, because the positives are phylogenetically correlated (ADR-0004; PRD §12) — this carries the exchangeability caveat into the gate CI. The gated leave-clade-out statistic is **macro-averaged across held-out orders** (not micro, which the ~90 %-Firmicutes corpus would dominate); the **per-order distribution is reported alongside**. Where N is small, the model-vs-`cmsearch` recall difference is additionally read with **small-N-appropriate inference** (an exact/permutation test or a Bayesian recall-difference posterior) beside the bootstrap CI (PRD §5).
+
+### D6. GATE-1 headline-certifying arms + AND-of-powered-arms combination rule (locked)
+
+The two-part bar (D4) is **required on**:
+
+1. the **lowest-identity bins pooled** (bottom two, D1), **and**
+2. a **pooled non-Firmicutes-order subgroup and/or the independent literature anchor** (arm (c), PRD §7.1) — so *beyond-Firmicutes* generalization is **certified**, and
+
+3. **recovery of held-out class II from the class-II-CM-naive checkpoint** (the anti-mimicry sub-arm, D9).
+
+**Combination rule = logical AND of the powered arms.** GATE-1 passes iff **every arm that is powered** (clears its D18 min-N) passes its bar. An arm below min-N is **"reported-not-gated"** — removed from the AND and **disclosed**, never silently counted as a pass. **Floor:** a GATE-1 pass **requires** arm (1) powered-and-passing **AND** at least one of {non-Firmicutes-order subgroup, arm (c)} powered-and-passing. If the **anti-mimicry sub-arm (3)** falls below the D9 min-graded-evidence floor, GATE-1 is **reported-not-gated for anti-mimicry → CLAUDE.md §7 stop-and-ask** (PRD §2.3 branch 2), not a silent waiver. The **synthetic-divergence arm being powered is a pre-registered precondition for the §1 CM-invisibility claim** (D8); unmet, that claim rests on the §13 campaign, disclosed. *(These GATE-1 arms (a)/(b)/(c) are distinct from the ADR-0004 §9.2 split-ladder (a)/(b)/(c).)*
+
+### D7. GATE-1 closed-benchmark precision — single pinned decoy prevalence + sweep + arm-(c) basis (locked rule; default value; blinded-frozen)
+
+GATE-1 precision is computed on the **closed leave-clade-out + synthetic-divergence benchmark** using the **four §9.1 decoy classes as labeled negatives at a single pinned prevalence** (so precision is well-defined and the §5-mechanism-4 PU framing never enters it, D10):
+
+> **default pinned benchmark decoy prevalence: 100 : 1 (decoy : positive)** — deliberately **distinct from** the ~10 : 1 training seed ratio (§9.1) and from the ~10³–10⁴ : 1 genome-scale prevalence.
+
+The **+10 pp gap is additionally reported as a prevalence-sensitivity sweep** spanning **10 : 1 → 10² : 1 → 10³ : 1 → 10⁴ : 1** (toward genome scale), so the gap's prevalence-robustness is visible. Because the comparison is **matched-precision** (model recall read at the threshold where model precision equals `cmsearch` precision, both scoring the identical negative pool), the pinned prevalence sets the operating point, not the fairness of the comparison. **Arm (c)'s precision** uses the **§9.1 decoy classes over the anchor's host contigs at the same pinned prevalence**, so the beyond-Firmicutes gated arm has a defined precision denominator. **Arm-(c) sourcing fallback:** if the P0-16 literature anchor / P0-17 additional class-II set falls below the D18 min-N, the P0-26 audit invokes the **arm-(c) sourcing-fallback trigger** (source more independent positives, or drop arm (c) from the AND and rest the beyond-Firmicutes certification on the non-Firmicutes-order subgroup) as a **§7 stop-and-ask**. The pinned prevalence is a **blinded-frozen default** (magnitude rationale at P0-28).
+
+### D8. Synthetic-divergence arm — generator validity, structural realism, model-side leakage control, power budget (locked)
+
+Before synthetic bins count toward GATE-1, **all** of the following hold (PRD §5 mechanism 2):
+
+- **Generator-validity (structural-realism, not detectability alone):** synthetic variants at identity *X* must match **real** low-identity homologs at *X* on **both** (i) `cmsearch` detectability **and** (ii) a **structural-realism axis** — compensatory-vs-disruptive mutation distribution, MFE, and base-pair distance to the consensus. The per-bin `cmsearch` failure mode (HMM-filter pre-discard vs CYK) is reported with the D2 filter-off arm.
+- **Model-side leakage control:** each variant's parent provenance is pinned (ADR-0004 variant→parent→fold) and GATE-1 **requires no train-vs-test recall gap at matched divergence** (or a held-out-clade checkpoint matching production recall) as an **acceptance condition** — so consensus-anchored generation cannot smuggle in "easiness" correlated with the CM-derived training signal.
+- **Power budget → gated-vs-reported-not-gated:** P0 audits, **per leave-one-order-out round and pooled**, the per-%-identity-bin N of real held-out positives and the count of real low-identity homologs; **below the D18 minimum-real-homolog N the synthetic arm is reported-not-gated** and GATE-1 rests on the real bins (under their min-N floor) + the §13 campaign. A **powered synthetic arm is the pre-registered precondition for the §1 CM-invisibility claim** (D6).
+
+### D9. Class-II anti-mimicry sub-arm — Stage-1-only, construction-powered, min-graded-evidence floor, within-phylum control (locked)
+
+Anti-mimicry (mechanism 3) tests whether the **class-II-CM-naive Stage-1 checkpoint** (trained with class-I-style / shared-element labels only, withholding `TBDB001.cm` — ADR-0002/§8/§10.1) still recovers held-out translational T-boxes:
+
+- **Scored Stage-1-only** on the naive checkpoint — **never routed through the production Stage-2** (TBDB-class-II-trained), which would rescue class-II hits and confound the test.
+- Graded by a **recovery metric carrying the same block-resampled min-N floor + CI as the recall arm (D4/D5)**, plus a **within-phylum-homology control** that separates anti-mimicry from within-Actinobacteria memorization.
+- The **18-record single-phylum natural set (PRD §7.1) is at chronic risk of sub-min-N**, so the sub-arm is **augmented by a construction-powered synthetic-class-II recovery measure** (above min-N by construction, built in P2) **and** by the **P0-sourced additional independent non-Actinobacteria class-II positives** (P0-17).
+- A GATE-1 pass requires a **pinned minimum of graded anti-mimicry evidence** (the D18 min-graded-evidence floor); below it, **reported-not-gated for anti-mimicry → §7 stop-and-ask** (D6), never a silent waiver.
+
+### D10. §5-mechanism-4 PU-framing scope — open-scan only (locked)
+
+The **Positive-Unlabeled framing applies only to the open §13 discovery scan, never to GATE-1's closed benchmark.** On the discovery scan, CM-negatives are treated as **unlabeled, not true-negative**: a **model-unique hit is not auto-scored a false positive**, and its **precision is established only by orthogonal evidence** (§13 / ADR-0006, P6) — never by "another CM agrees." This framing **never enters GATE-1's closed-benchmark precision denominator** (there the four §9.1 decoys are labeled negatives at the D7 pinned prevalence). This scoping is what keeps GATE-1 precision computable while leaving the open scan free to surface CM-invisible novelty.
+
+### D11. GATE-2 in-distribution ECE — named posterior, binned estimator, recalibration stack (locked rule; default value; gated at P3 exit)
+
+The **recalibration stack order is pinned**: **train → temperature-scale on a disjoint calibration split [arXiv:1706.04599] → prior-shift to the deployment prior via a Saerens/Elkan log-odds correction**. GATE-2's calibration sanity gate is measured on the **named posterior = the temperature-scaled posterior *before* the deployment prior-shift, at the in-distribution split's own prevalence** — a **machinery-failure check**, not a deployment-prevalence check (a prior-shifted posterior is miscalibrated by construction at benchmark prevalence, so the **prior-shifted / deployment-prevalence ECE is reported separately, non-gated**).
+
+> **default gate: in-distribution ECE ≤ 0.05, gated at P3 exit** (catching a calibration-machinery failure before the P5 scan; the FDR half of GATE-2 is graded at P5, D12).
+
+**Binned-ECE estimator (pinned):** **equal-mass (equal-frequency) bins, default 15**, with a **debiasing correction**, on the positive-class posterior. Equal-mass over equal-width because equal-width bins are unstable in the sparse high-confidence region. The 0.05 default is **blinded-frozen** with its P0-28 magnitude rationale.
+
+### D12. GATE-2 genome-scale FDR — FDP CI-upper-bound ≤ 10 % on the consensus null (locked rule; default value; gated at P5)
+
+Genome-scale FDR uses **three nulls** (distinct from §9.1's four training-negative classes): a **structured-RNA-retaining target-decoy run as the PRIMARY estimator** [PMID:17327847]; a **dinucleotide-shuffle null as a validated optimistic lower bound** (must first reproduce `cmsearch` decoy hit-rates); and a **reversed-sequence** null (reverse, **not** reverse-complement — RC is useless against an RC-equivariant scanner) as a composition-exact control.
+
+> **default gate: false-discovery *proportion* with bootstrap-CI upper bound ≤ 10 %** of the **pre-orthogonal candidate table** (denominator = post-Stage-2 candidate count) on the **consensus (most-conservative / highest-of-three) null**.
+
+Gated on the **CI upper bound** because the max-of-three handles between-null but not within-null sampling error. The **primary target-decoy null additionally carries an empirical-calibration check** (held-out known-negatives, or agreement with the reversed control within tolerance) symmetric with the shuffle-null check, **before GATE-2 is graded**. **Expected false hits / Mb / genome is reported as a separate density** (not the gated quantity); retained recall on divergent loci is reported at the operating point. The 10 % default is **blinded-frozen** (P0-28 rationale). **Conformal prediction enters only as a reported held-out-clade empirical-coverage diagnostic** [arXiv:2107.07511] — both operating points are set by the D3 recall-floor and FDP ≤ 10 % rules (not a conformal α), and clade-holdout breaks exchangeability, voiding the nominal guarantee.
+
+### D13. OOD-ECE / drift decision rule + calibrated-negative-PASS conditions (locked rule; min-N floor deferred to P0-27)
+
+A leave-clade-out / OOD ECE ≤ 0.05 is likely infeasible under clade shift, so **OOD ECE is reported, not gated**, and adjudicated by a **decision rule**:
+
+- Estimated with a **small-N-robust OOD estimator** — a proper-scoring-rule decomposition or a smoothed/kernel calibration estimator, with bootstrap CIs — **distinct from the D11 in-distribution binned estimator** — subject to a **pinned min-N admissibility floor (value at P0-27)**.
+- A per-corpus result is a **"calibrated-negative PASS" only if (i)** its nearest-relative leave-clade-out ECE (with CIs) meets a **pinned drift bound**, **(ii)** it clears **min-N**, **and (iii)** it clears a **corpus-specific *detection-power floor*** — an extrapolated recall@matched-precision at the corpus's phylogenetic distance and/or a **synthetic-Tier-2N spike-in recovery** test — so a well-calibrated-but-*blind* model cannot earn a bounded-distribution claim. Otherwise **"sensitivity-bounded / inconclusive negative *by rule*."**
+- A **sub-min-N or zero-positive corpus** (e.g. Archaea/DPANN, where no OOD ECE is computable) is inconclusive **unless** stated **nearest-relative extrapolations** (an ECE-vs-phylogenetic-distance *and* a recall/power-vs-phylogenetic-distance regression, both with **prediction intervals**) clear **both** the drift bound **and** the detection-power floor. Near-zero-prior corpora carry their **own deployment prior + per-corpus FDR null** (PRD §7.2). Per-corpus verdicts roll up to one GATE-3 outcome per the PRD §2.3 project-level rollup (pinned in ADR-0006).
+
+### D14. Hard-negative mining spare-rule + Tier-2N probe (locked; phase-conditioned)
+
+All known T-box loci (**the full union prior + the run's own training positives + flank**) are **masked from every negative/decoy pool** (matching the §13.3 clade-level null's masking reference), and residual contamination against that union denominator is reported. Because a CM-missed **non-canonical (Tier-2N)** T-box is unknown to masking and fails any canonical predicate, the **mining-exclusion rule is a spare rule, not keyed to canonical architecture**: a candidate is excluded from the hard-negative-mining pool if it passes **relaxed-architecture detection OR any-helix R-scape covariation OR downstream-aaRS synteny** (the three *model-independent* disjuncts, sufficient for the **P2 Stage-1 mining loop** where no Stage-2 exists yet) **OR**, at the **P3 re-mining round once Stage-2 exists**, a **high Stage-2 posterior**. The **5′UTR / tRNA-adjacent leader pool is retained** (the hardest, most-useful hard negatives). A **Tier-2N probe set** (non-canonical + synthetic-Tier-2N positives) is evaluated **each mining round**, and a per-round **recall drop on it halts/rolls back** the iteration — so aggressive mining cannot directionally train the production scanner to reject the flagship Tier-2N class; the worst case is directionally-bounded Tier-2N sensitivity, not an invalid generalization claim.
+
+### D15. Strand resolver + strand-robustness diagnostic (locked)
+
+Caduceus-PS is strand-agnostic, so a **strand-resolver** orients each locus from the **predicted element order** (Specifier/Stem I → antiterminator/terminator), populating the §13.1 strand column. The **RC hidden-state combination ablation is constrained to a directionality-preserving (non-averaged) form** (an order-destroying average would defeat the resolver). **Ambiguous loci** (single confident element, or scrambled order) are **flagged low-order-confidence and carried through on both strands**; the resolved strand is corroborated by **strand-specific model-independent signals** (R-scape covariation and R2DT architecture pass only on the correct strand — §13.2/§13.3(c)). A **strand-robustness diagnostic** (fraction of confirmed loci tier-invariant to strand re-resolution) is reported, so a mis-resolution degrades to a **bounded false negative on divergent loci, never a false-novelty claim**. The low-order-confidence / both-strand-carry-through fraction is reported at the sizing gate (concentrated on divergent loci).
+
+### D16. Stage-2 multi-task aux-loss weighting + with/without-aux GATE-2 check (locked rule; default method)
+
+Stage-2 trains a binary T-box head + boundary-refinement + regulatory-mode + auxiliary specifier/amino-acid/tRNA-family heads with a **pinned weighting method**:
+
+> **default: fixed manual task weights** (binary head weighted to dominate), with **uncertainty-weighting (Kendall-style) as the pre-registered alternative** if the fixed weights underperform on the validation ladder.
+
+A **with/without-aux check** confirms the aux heads **do not degrade the calibrated primary head's GATE-2 grade**; the aux-loss weight is a Hydra `--multirun` sweep axis (PRD §11), promoted via the validation ladder (never the test set).
+
+### D17. RiNALMo → RNA-FM swap trigger margins (locked; numeric defaults; blinded-frozen)
+
+The RiNALMo Stage-2 is swapped for RNA-FM only under the PRD §10.2 conditions; the two numeric margins the PRD delegates here are pinned as **defaults for sign-off**:
+
+- **(c) [P3–P4] calibration margin:** swap if RiNALMo's **post-calibration leave-clade-out ECE exceeds RNA-FM's by > 0.02 (absolute ECE)**, sustained across the held-out-order distribution (block-resampled).
+- **(d) [P4] discovery-metric margin:** swap if RiNALMo transfers worse on the primary discovery metric — **leave-clade-out recall@matched-precision by > 3 pp, or AUPRC by > 0.03** — even if ECE matches.
+
+The pre-P3 RiNALMo forward-throughput probe (condition (b)) is **advisory-only**; the binding latency decision is frozen at the P5 sizing gate (ADR-0003), and a crude "clearly-hopeless" pre-P3 reading is a §7 stop-and-ask, not an auto-switch. **On a swap, the substituted RNA-FM Stage-2 must clear the *absolute* GATE-1 (+10 pp point / +5 pp CI-floor, D4) and GATE-2 (in-distribution ECE ≤ 0.05, D11) thresholds and re-pass the P4→P5 go/no-go on its own P3/P4 numbers before entering the GATE-3 scan** (PRD §2.3/§10.2) — the shipped backbone's gates are never inherited from RiNALMo. The 0.02 / 3 pp / 0.03 margins are **blinded-frozen defaults** (recalibration → ADR re-sign-off).
+
+### D18. Delegations — values pinned by later P0 steps / elsewhere (locked map)
+
+- **Per-bin / per-arm minimum-real-homolog N** (D1/D4/D6/D8/D9) — the floor below which an arm is reported-not-gated and the weak-clause fallback is admissible — **pinned by P0-26** (GATE-1 power-budget audit), which **amends this ADR** and renders the min-N-reachability verdict + arm-(c) sourcing-fallback trigger for the P0-16/P0-17 sets.
+- **OOD-ECE min-N admissibility floor** (D13) — **pinned by P0-27** (OOD-ECE min-N coverage simulation), which amends this ADR.
+- **Authored magnitude-rationale text** for each blinded-frozen default (+10 pp / +5 pp — D4; benchmark decoy prevalence — D7; ECE ≤ 0.05 — D11; FDR ≤ 10 % — D12; the RNA-FM margins — D17) — **authored at P0-28** and blinded-frozen; this ADR pins the defaults and the freeze policy, P0-28 pins the *why*.
+- **Governing GTDB release + union novelty prior** (used by every GATE-1/GATE-3 novelty determination) — the release is pinned in **ADR-0003 (Amendment A1)** and the union prior is **frozen at P0** (P0-14); this ADR consumes them, does not re-pin them.
+- **GATE-4 segmentation floor (≥ 0.80)** and the **split/precedence/variant-provenance contract** — pinned in **ADR-0004**; **§13.3 confirmed-novel rule + model-independent homolog-search thresholds + project-level rollup** — pinned in **ADR-0006** (pending P0-29).
+
+---
+
+## Consequences
+
+- **The generalization claim is falsifiable and non-circular by construction.** Every GATE-1 number is block-resampled, macro-averaged, matched-precision, and certified beyond Firmicutes; the CM-invisible region is reached only by the powered synthetic arm and the §13 campaign, both explicitly gated or explicitly disclosed-as-resting-on-§13.
+- **Under-power is a first-class, non-silent outcome.** The AND-of-powered-arms rule + reported-not-gated + the §7 stop-and-ask (D6/D8/D9) mean an arm can never be quietly dropped or loosened to manufacture a pass; a min-N shortfall routes to PRD §2.3 branch 2 (re-power or the resource-paper path), not to a downgraded claim.
+- **Two numeric values and all magnitude rationales are deliberately deferred** (D18) so the min-N floor is measured (P0-26/P0-27) and the rationales are authored blinded (P0-28) — but the *rules* that consume them are locked now, so those steps fill in numbers into a fixed frame.
+- **Calibration is a machinery gate, not a deployment claim** (D11): the named-posterior ECE catches a broken calibration head before the scan, while the honest OOD/deployment miscalibration is reported and adjudicated by the drift rule (D13), so a well-calibrated-but-blind model cannot earn a bounded-distribution claim.
+- **Risk owned:** the fixed bin edges (D1) and the pinned benchmark prevalence (D7) are judgment calls frozen before results; if P0-26 finds the lowest-identity bins are chronically sub-min-N, the synthetic arm carries the CM-invisibility claim and its generator-validity budget (D8) becomes the load-bearing control — a dependency this ADR makes explicit rather than hiding.
+
+## Related documents
+
+- **PRD.md** §2.3, §5, §6, §9.1, §11, §12, §13.1 (delegating sections).
+- **ADR-0001** (aims / non-circularity principle), **ADR-0002** (two Stage-1 checkpoints; RiNALMo parity gate), **ADR-0003** (governing GTDB release; minimum-viable scan; compute ceilings), **ADR-0004** (split & leakage policy; GATE-4; variant→parent→fold), **ADR-0006** (§13.3 rule; model-independent homolog search; rollup — pending P0-29).
+- **Amended by:** P0-26 (min-N), P0-27 (OOD-ECE min-N floor), P0-28 (magnitude-rationale text).
+
+## Cross-reference impact list
+
+- **P0-26** consumes D1/D4/D6/D7/D8/D9/D18 and amends this ADR with the per-bin/per-arm min-N.
+- **P0-27** consumes D13/D18 and amends this ADR with the OOD-ECE min-N admissibility floor.
+- **P0-28** consumes D4/D7/D11/D12/D17/D18 and authors the blinded magnitude rationales.
+- **P0-30** (decoy prevalence + mining spare rule) consumes D7/D14; **P2** (hard-negative mining, class-II augmentation) consumes D8/D9/D14; **P3** (ECE) consumes D11/D13; **P4** (GATE-1) consumes D1–D10/D15–D17; **P5** (FDR) consumes D3/D12; **P6** (orthogonal validation, PU precision) consumes D10.
+
+## Sign-off
+
+**Accepted — user sign-off 2026-07-11 (CLAUDE.md §7 item 2, P0-25), "accept as drafted."** The scientific-evidence gate for the D1 fixed identity-bin edges was cleared with two independent agreeing sources [PMID:17151342 / DOI:10.1101/gr.5890907; PMID:19861422 / DOI:10.1261/rna.1556009, accessed 2026-07-10]. All numeric defaults below are now **blinded-frozen at P0**: they may not change after P4 unblinding, and any pre-P4 recalibration requires ADR-0005 re-sign-off.
+
+**Blinded-frozen numeric defaults:** D1 bin edges `<50|50–70|70–85|85–100 %` + 5 divergence levels; D3 Stage-1 recall floor ≥ 99 %; D4 **+10 pp / +5 pp**; D7 benchmark decoy prevalence **100:1** + sweep 10:1→10⁴:1; D11 **ECE ≤ 0.05**, 15 equal-mass debiased bins; D12 **FDR CI-upper ≤ 10 %**; D16 fixed aux weights; D17 **ECE +0.02 / recall +3 pp / AUPRC +0.03** swap margins. The min-N floor (P0-26), OOD-ECE min-N admissibility floor (P0-27), and authored magnitude rationales (P0-28) are pinned by later P0 steps that amend this ADR (D18).
