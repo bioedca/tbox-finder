@@ -149,7 +149,18 @@ The test is **CI-blocking**; per CLAUDE.md §8.5 (broadened) **any data/label/cl
 
 **Scope of re-validation.** `src/tbox_finder/splits.py` (coverage denominator + a forced-singleton unit test), `conf/data/splits.yaml`, and the D2 threshold bullet above. Single-linkage, the 0.70 identity/coverage numbers, and every other D-decision are **unchanged**. This is an ADR-0004 §2.3 re-sign-off of a delegated pinned value (CLAUDE.md §7 item 2), not a scope change.
 
+### A2 — GATE-4 0.80 magnitude rationale co-authored + blinded-freeze confirmed (P0-28; user sign-off 2026-07-11)
+
+- **Status:** **Accepted (user sign-off 2026-07-11; CLAUDE.md §7 item 2), "accept both as drafted".** Confirms (does not change) the D6 GATE-4 per-nt per-element F1 floor of **≥ 0.80** and records its SESOI + blinded-freeze alongside the ADR-0005 gate defaults, so the whole delegated-default set is documented in one P0-28 pass.
+
+**No value changes.** The D6 floor stays **0.80**; its magnitude rationale was already authored in D6 at P0-19. This amendment (i) co-locates that 0.80 rationale in the P0-28 record (`analyses/gate_default_rationales.qmd`, rendered from `src/tbox_finder/power.py::magnitude_rationale('gate4_f1_floor')`; the code constant `GATE4_F1_FLOOR == 0.80` is asserted equal to this ADR value by `tests/unit/test_magnitude_rationale.py`), and (ii) restates the blinded-freeze.
+
+**Rationale (SESOI).** 0.80 per-nt F1 on the 3 core elements is the smallest segmentation quality that **(i)** demonstrates learned element *extents* (not merely background-vs-foreground), and **(ii)** supports the downstream §13.1 locus construction + §13.3(d) sequence-read specifier the discovery pipeline depends on, while **(iii)** tolerating the ~1–2 nt boundary ambiguity intrinsic to projecting TBDB dot-bracket annotations onto individual nucleotides. It is a **reference** gate on the in-distribution split; the N ≤ 9 PDB cross-source label-noise ceiling `C` (P0-21, reported non-gated, no CI) **must not one-directionally lower** it (D6). This is a project-internal SESOI on a bespoke per-nt F1 (empirically anchored by the P0-21 ceiling), so it carries no external numeric cite.
+
+**Blinded-freeze.** 0.80 is **blinded-frozen at P0** (authored before any P4 result): no post-P4 change; a pre-P4 recalibration needs ADR-0004 re-sign-off, and D6 already scopes the *only* permitted recalibration (a documented function of `C` if the P0-21 ceiling demonstrably caps achievable per-nt F1 below the floor).
+
 ## Sign-off
 
 - **User sign-off:** ☑ recorded 2026-07-10 (bioedca), CLAUDE.md §7 item 2. The D2 structure-aware clustering cut was selected as **`d ≤ 0.30` (consensus-column identity ≥ 0.70) + coverage ≥ 0.70** (single-linkage) over the tighter (0.80/0.80) and looser (0.60/0.70) alternatives, on the rationale that it over-merges slightly (the safe leakage direction) while avoiding the multi-order mega-cluster risk a lower cut invites; the re-cluster sensitivity sweep {0.60–0.90} + train↔test distance histogram (D2 adequacy net) backstop the choice. ADR accepted as drafted.
 - **Amendment A1 sign-off:** ☑ recorded 2026-07-10 (bioedca), CLAUDE.md §7 item 2 / §2.3 re-sign-off. Coverage denominator = RF00230 model consensus `clen` (not shorter-member span); pinned 0.70 unchanged. Selected over a separate min-occupancy eligibility gate (equivalent effect, two knobs) and over revisiting the linkage method (single-linkage retained). Chosen on the P0-22 measured evidence above.
+- **Amendment A2 sign-off:** ☑ recorded 2026-07-11 (bioedca), CLAUDE.md §7 item 2. The GATE-4 0.80 floor is **unchanged**; A2 co-authors its SESOI into the P0-28 record and restates the blinded-freeze alongside the ADR-0005 defaults. "Accept both as drafted."

@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import sys
 from collections import Counter
 from pathlib import Path
@@ -66,6 +67,44 @@ NO_NEIGHBOUR = "no_neighbour"  # -1 sentinel: no coverage-adequate training neig
 LOW_IDENTITY_BINS = ("<50", "50-70")
 
 FIRMICUTES = "Firmicutes"
+
+# --------------------------------------------------------------------------- #
+# Blinded-frozen gate-default magnitude rationales (P0-28; ADR-0005 D18)
+# --------------------------------------------------------------------------- #
+#
+# ADR-0005 D18 delegates the *authored magnitude-rationale text* for each
+# blinded-frozen gate default to this step. The default *values* are pinned as
+# constants here (single source of truth) so the rationale text and the ADR agree
+# byte-for-byte — a unit test asserts the match. Each value is a **default** under
+# the PRD §2.3 precedence carve-out and **blinded-frozen at P0**: it may not change
+# after P4 unblinding, and any pre-P4 recalibration needs ADR re-sign-off
+# (CLAUDE.md §7 item 2). The rationale is a smallest-effect-of-interest (SESOI) /
+# power argument authored *before any P4 result*, grounded in the verified method
+# citations below (CLAUDE.md §10.1) — never fit to a result.
+RECALL_POINT_BAR_PP = 10  # ADR-0005 D4 — GATE-1 recall point-estimate bar
+RECALL_CI_FLOOR_PP = 5  # ADR-0005 D4 — GATE-1 block-resampled CI lower floor
+ECE_GATE = 0.05  # ADR-0005 D11 — in-distribution named-posterior ECE gate
+FDR_GATE = 0.10  # ADR-0005 D12 — genome-scale FDP CI-upper-bound gate
+DECOY_PREVALENCE = 100  # ADR-0005 D7 — benchmark decoy:positive prevalence
+SWAP_ECE_MARGIN = 0.02  # ADR-0005 D17(c) — RiNALMo→RNA-FM OOD-ECE swap margin
+SWAP_RECALL_MARGIN_PP = 3  # ADR-0005 D17(d) — recall@matched-precision swap margin
+SWAP_AUPRC_MARGIN = 0.03  # ADR-0005 D17(d) — AUPRC swap margin
+GATE4_F1_FLOOR = 0.80  # ADR-0004 D6 — GATE-4 per-nt per-element F1 floor
+
+# Machine-traceable method citations (CLAUDE.md §10.1) grounding the SESOI / power
+# arguments. Foundational method papers; every identifier verified (PubMed /
+# publisher of record), not asserted from memory (CLAUDE.md §10.3).
+CITATIONS = {
+    "sesoi_primer": "DOI:10.1177/1948550617697177",  # Lakens 2017, SPPS 8(4):355-362
+    "sesoi_tutorial": "DOI:10.1177/2515245918770963",  # Lakens, Scheel & Isager 2018, AMPPS
+    "calibration_modern": "arXiv:1706.04599",  # Guo, Pleiss, Sun & Weinberger 2017, ICML
+    "calibration_binning": "PMID:25927013",  # Naeini, Cooper & Hauskrecht 2015, AAAI (PMC4410090)
+    "fdr_bh": "DOI:10.1111/j.2517-6161.1995.tb02031.x",  # Benjamini & Hochberg 1995, JRSS-B
+    "fdr_genomewide": "DOI:10.1073/pnas.1530509100",  # Storey & Tibshirani 2003, PNAS
+    "fdr_target_decoy": "PMID:17327847",  # Elias & Gygi 2007, Nat Methods (ADR-0005 D12)
+    "divergence_freyhult": "DOI:10.1101/gr.5890907",  # Freyhult et al 2007 (ADR-0005 D1)
+    "divergence_menzel": "DOI:10.1261/rna.1556009",  # Menzel, Gorodkin & Stadler 2009 (ADR-0005 D1)
+}
 
 # Reused split-construction constants (single source of truth = splits.py).
 COVERAGE_CUT = splits.COVERAGE_CUT
@@ -155,6 +194,288 @@ def arm_verdict(n: int, *, min_n: int = MIN_REAL_HOMOLOG_N, n_blocks: int | None
         v["n_blocks"] = int(n_blocks)
         v["block_resamplable"] = bool(n_blocks >= 2)
     return v
+
+
+# --------------------------------------------------------------------------- #
+# Gate-default magnitude rationales (P0-28; pure, stdlib math — no numpy/pandas)
+# --------------------------------------------------------------------------- #
+#
+# These back the blinded-frozen defaults with numeric SESOI / power arguments and
+# make them machine-checkable: a unit test asserts each argument is internally
+# consistent (e.g. the +5 pp CI floor equals the per-positive granularity at the
+# pinned min-N) and carries >=1 verified method citation. They never read a P4
+# result — the arguments are effect-size / estimability logic authored ex ante.
+
+
+def binomial_se(p: float, n: int) -> float:
+    """Standard error of a binomial proportion estimate: ``sqrt(p(1-p)/n)``."""
+    if n <= 0:
+        raise ValueError("n must be positive")
+    if not 0.0 <= p <= 1.0:
+        raise ValueError("p must be in [0, 1]")
+    return math.sqrt(p * (1.0 - p) / n)
+
+
+def recall_bar_resolution(min_n: int = MIN_REAL_HOMOLOG_N) -> dict:
+    """Estimability backing for the D4 two-part recall bar at the pinned min-N.
+
+    At ``min_n`` real held-out positives the per-positive recall granularity is
+    ``1/min_n`` (in pp): a recall-difference floor finer than this cannot be
+    resolved (the estimator moves in 1/N steps). The D4 CI floor (+5 pp) is set to
+    exactly this granularity at ``min_n = 20``, and the point bar (+10 pp) to two
+    granularities — so a passing arm's point estimate sits a full CI-floor-width
+    above the +5 pp non-trivial-improvement boundary. This is the same
+    ``1/N >= 5 pp`` argument that pinned ``MIN_REAL_HOMOLOG_N`` (Amendment A1), so
+    the recall bar and the min-N floor are one internally-consistent construction.
+    """
+    granularity_pp = 100.0 / min_n
+    return {
+        "min_n": int(min_n),
+        "per_positive_granularity_pp": granularity_pp,
+        "ci_floor_pp": RECALL_CI_FLOOR_PP,
+        "point_bar_pp": RECALL_POINT_BAR_PP,
+        "ci_floor_matches_granularity": abs(RECALL_CI_FLOOR_PP - granularity_pp) < 1e-9,
+        "point_is_two_ci_floors": RECALL_POINT_BAR_PP == 2 * RECALL_CI_FLOOR_PP,
+    }
+
+
+def min_detectable_effect_pp(baseline_recall: float, n: int, z: float = 1.96) -> float:
+    """Illustrative minimum detectable recall gain (pp) at a baseline recall & N.
+
+    A normal-approximation ``z * SE`` scaled to percentage points — used only to
+    show the D4 bar sits in the detectable range for the effects the
+    CM-invisibility hypothesis predicts; **not** a claim about the true effect size
+    (CLAUDE.md §10.3). The gated inference is the block-resampled CI + the D5
+    small-N exact/permutation test, not this normal approximation.
+    """
+    return z * binomial_se(baseline_recall, n) * 100.0
+
+
+def expected_false_at_fdr(fdr: float, n_candidates: int) -> float:
+    """Expected false discoveries in a candidate table of size N at a given FDP."""
+    if not 0.0 <= fdr <= 1.0:
+        raise ValueError("fdr must be in [0, 1]")
+    if n_candidates < 0:
+        raise ValueError("n_candidates must be non-negative")
+    return fdr * n_candidates
+
+
+def calibration_fdr_budget_ratio(ece: float = ECE_GATE, fdr: float = FDR_GATE) -> float:
+    """The ECE budget as a fraction of the FDR budget (ADR-0005 D11 vs D12).
+
+    ECE <= 0.05 keeps the named-posterior calibration error at half the D12 FDR
+    budget (0.05 / 0.10), so a GATE-2-passing calibration head cannot by itself
+    exhaust the downstream FDR budget it feeds.
+    """
+    if fdr <= 0:
+        raise ValueError("fdr must be positive")
+    return ece / fdr
+
+
+def _rationale_records() -> dict:
+    """The authored magnitude rationale for every delegated blinded-frozen default.
+
+    Keyed by a stable slug; each record carries the default, its value, the
+    argument kind, the SESOI / power argument, >=1 verified method citation, and
+    the blinded-freeze flag. The QMD (``analyses/gate_default_rationales.qmd``)
+    renders this verbatim so the durable doc has no hand-typed numbers.
+    """
+    return {
+        "recall_point_bar": {
+            "default": "GATE-1 recall point-estimate bar (ADR-0005 D4)",
+            "value": f"+{RECALL_POINT_BAR_PP} pp",
+            "kind": "SESOI+power",
+            "argument": (
+                f"The smallest recall gain over cmsearch at matched precision "
+                f"that is both scientifically material and robustly separated "
+                f"from sampling noise at the pinned min-N (20): +{RECALL_POINT_BAR_PP} pp "
+                f"is two per-positive granularities (2 x 1/20), so a passing arm's "
+                f"point estimate sits a full CI-floor-width above the "
+                f"+{RECALL_CI_FLOOR_PP} pp non-trivial-improvement boundary. In the "
+                f"bottom-two identity bins where sequence-based homology search is "
+                f"documented to lose sensitivity, +{RECALL_POINT_BAR_PP} pp means "
+                f"recovering >=1-in-10 more divergent T-boxes than the CM — the "
+                f"smallest gain that materially expands the recoverable set. Read "
+                f"as an equivalence-style lower bound (SESOI method)."
+            ),
+            "citations": [
+                CITATIONS["sesoi_primer"],
+                CITATIONS["sesoi_tutorial"],
+                CITATIONS["divergence_freyhult"],
+                CITATIONS["divergence_menzel"],
+            ],
+            "blinded_frozen": True,
+        },
+        "recall_ci_floor": {
+            "default": "GATE-1 recall CI-lower-bound floor (ADR-0005 D4)",
+            "value": f"+{RECALL_CI_FLOOR_PP} pp",
+            "kind": "power",
+            "argument": (
+                f"The finest recall-difference lower bound the block-resampled CI "
+                f"can resolve at the pinned min-N: 1/20 = {100.0 / MIN_REAL_HOMOLOG_N:.0f} pp "
+                f"per held-out positive. A floor below this is below the estimator's "
+                f"granularity, so +{RECALL_CI_FLOOR_PP} pp is the smallest positive "
+                f"floor that is both estimable at the sample size the corpus supplies "
+                f"and a non-trivial improvement (>=1-in-20 additional divergent "
+                f"homologs). This is exactly the 1/N >= 5 pp argument that pinned "
+                f"MIN_REAL_HOMOLOG_N (Amendment A1) — the bar and the min-N floor are "
+                f"one construction. Below min-N the D4 weak clause (CI lower > 0) is "
+                f"the disclosed fallback, never a convenience loosening."
+            ),
+            "citations": [CITATIONS["sesoi_primer"], CITATIONS["sesoi_tutorial"]],
+            "blinded_frozen": True,
+        },
+        "ece_gate": {
+            "default": "GATE-2 in-distribution named-posterior ECE (ADR-0005 D11)",
+            "value": f"<= {ECE_GATE}",
+            "kind": "SESOI+power",
+            "argument": (
+                f"A <= {ECE_GATE} average confidence-accuracy gap on the "
+                f"temperature-scaled named posterior — a machinery-failure budget, "
+                f"not a deployment claim. Two backings: (i) downstream-budget — the "
+                f"calibrated posterior feeds the D12 FDP <= {FDR_GATE} operating "
+                f"point, and {ECE_GATE} keeps calibration error at "
+                f"{calibration_fdr_budget_ratio():.0%} of the FDR budget, so a "
+                f"passing calibration head cannot by itself exhaust it; (ii) "
+                f"estimator-resolution — with 15 equal-mass debiased bins the binned "
+                f"ECE estimator resolves {ECE_GATE} above its own noise floor at "
+                f"realistic calibration-set sizes, yet {ECE_GATE} is tight enough to "
+                f"catch a broken head. Post-hoc temperature scaling routinely brings "
+                f"deep models into this range, so it is achievable-yet-meaningful."
+            ),
+            "citations": [CITATIONS["calibration_modern"], CITATIONS["calibration_binning"]],
+            "blinded_frozen": True,
+        },
+        "fdr_gate": {
+            "default": "GATE-2 genome-scale FDP CI-upper bound (ADR-0005 D12)",
+            "value": f"<= {FDR_GATE}",
+            "kind": "SESOI",
+            "argument": (
+                f"A discovery-stage false-discovery proportion on the "
+                f"pre-orthogonal candidate table — not a terminal error rate. The "
+                f"candidates pass through the ADR-0006 orthogonal Tier-1/2/2N "
+                f"validation (the terminal false-positive control), so the right "
+                f"error rate here is a discovery FDR: tolerate more false positives "
+                f"now, catch them downstream. FDR/q-value is the established error "
+                f"rate for genome-wide discovery, explicitly 'a more liberal "
+                f"criterion' than terminal thresholds; {FDR_GATE:.0%} is the SESOI "
+                f"on the candidate table — tight enough that orthogonal validation "
+                f"is not swamped (E[false] = {FDR_GATE} x table size, reported as a "
+                f"density), loose enough to retain the divergent-loci recall that is "
+                f"the model's whole advantage over the CM. Gated on the CI upper "
+                f"bound so sampling error cannot sneak a >{FDR_GATE:.0%} table through."
+            ),
+            "citations": [
+                CITATIONS["fdr_bh"],
+                CITATIONS["fdr_genomewide"],
+                CITATIONS["fdr_target_decoy"],
+            ],
+            "blinded_frozen": True,
+        },
+        "decoy_prevalence": {
+            "default": "GATE-1 benchmark decoy:positive prevalence (ADR-0005 D7)",
+            "value": f"{DECOY_PREVALENCE}:1",
+            "kind": "design",
+            "argument": (
+                f"{DECOY_PREVALENCE}:1 sits ~1 decade above the ~10:1 training seed "
+                f"ratio (§9.1) and 1-2 decades below the ~10^3-10^4:1 genome-scale "
+                f"prevalence — a benchmark operating point, not a fairness choice. "
+                f"Because the comparison is matched-precision (model recall read "
+                f"where model precision equals cmsearch precision on the identical "
+                f"negative pool), prevalence sets only the operating point; the "
+                f"+10 pp gap is additionally reported as a full 10:1 -> 10^4:1 "
+                f"prevalence-sensitivity sweep so robustness is visible. Not a "
+                f"SESOI/power quantity; documented here per the D18 delegation."
+            ),
+            "citations": [],
+            "blinded_frozen": True,
+        },
+        "swap_ece_margin": {
+            "default": "RiNALMo->RNA-FM OOD-ECE swap margin (ADR-0005 D17c)",
+            "value": f"> {SWAP_ECE_MARGIN} absolute ECE",
+            "kind": "SESOI",
+            "argument": (
+                f"A backbone swap fires only if RiNALMo's post-calibration "
+                f"leave-clade-out ECE exceeds RNA-FM's by > {SWAP_ECE_MARGIN}, "
+                f"sustained across the held-out-order distribution (block-resampled). "
+                f"{SWAP_ECE_MARGIN} is {SWAP_ECE_MARGIN / ECE_GATE:.0%} of the D11 "
+                f"in-distribution ECE gate — a backbone difference that is a "
+                f"meaningful fraction of the calibration budget, not estimator noise, "
+                f"and 'sustained' guards against a single-order fluctuation."
+            ),
+            "citations": [CITATIONS["sesoi_primer"], CITATIONS["calibration_modern"]],
+            "blinded_frozen": True,
+        },
+        "swap_recall_margin": {
+            "default": "RiNALMo->RNA-FM recall@matched-precision swap margin (ADR-0005 D17d)",
+            "value": f"> {SWAP_RECALL_MARGIN_PP} pp",
+            "kind": "SESOI",
+            "argument": (
+                f"Swap if RiNALMo transfers worse on leave-clade-out "
+                f"recall@matched-precision by > {SWAP_RECALL_MARGIN_PP} pp, required "
+                f"*sustained across the held-out-order distribution* — a consistent "
+                f"transfer deficit, not a single-arm point difference (which the "
+                f"+5 pp CI floor already governs). A persistent "
+                f">{SWAP_RECALL_MARGIN_PP} pp backbone gap would erode over half the "
+                f"D4 GATE-1 headline margin, so it is the smallest sustained deficit "
+                f"worth switching backbones over."
+            ),
+            "citations": [CITATIONS["sesoi_primer"], CITATIONS["sesoi_tutorial"]],
+            "blinded_frozen": True,
+        },
+        "swap_auprc_margin": {
+            "default": "RiNALMo->RNA-FM AUPRC swap margin (ADR-0005 D17d)",
+            "value": f"> {SWAP_AUPRC_MARGIN} AUPRC",
+            "kind": "SESOI",
+            "argument": (
+                f"A threshold-free ranking-quality deficit of comparable magnitude "
+                f"to the recall margin: swap if RiNALMo's leave-clade-out AUPRC is "
+                f"worse by > {SWAP_AUPRC_MARGIN} even if ECE matches, so a backbone "
+                f"that ranks divergent positives materially worse is caught "
+                f"independent of any single operating point."
+            ),
+            "citations": [CITATIONS["sesoi_primer"], CITATIONS["sesoi_tutorial"]],
+            "blinded_frozen": True,
+        },
+        "gate4_f1_floor": {
+            "default": "GATE-4 per-nt per-element F1 floor (ADR-0004 D6)",
+            "value": f">= {GATE4_F1_FLOOR}",
+            "kind": "SESOI",
+            "argument": (
+                "The smallest per-nucleotide F1 on the 3 core elements that (i) "
+                "demonstrates the segmenter has learned element *extents* (not "
+                "merely background-vs-foreground), and (ii) supports the downstream "
+                "§13.1 locus construction and §13.3(d) sequence-read specifier the "
+                "discovery pipeline depends on — while (iii) tolerating the ~1-2 nt "
+                "boundary ambiguity intrinsic to projecting TBDB dot-bracket "
+                "annotations onto individual nucleotides. It is a *reference* gate "
+                "on the in-distribution split; the N<=9 PDB cross-source label-noise "
+                "ceiling C (P0-21, reported non-gated, no CI) must not "
+                "one-directionally lower it. Co-authored into ADR-0004 D6."
+            ),
+            "citations": [],
+            "blinded_frozen": True,
+        },
+    }
+
+
+def magnitude_rationale(key: str) -> dict:
+    """Return the authored magnitude rationale for one delegated gate default.
+
+    Keys: ``recall_point_bar``, ``recall_ci_floor``, ``ece_gate``, ``fdr_gate``,
+    ``decoy_prevalence``, ``swap_ece_margin``, ``swap_recall_margin``,
+    ``swap_auprc_margin``, ``gate4_f1_floor``. Raises ``KeyError`` for an unknown
+    default so a caller cannot silently reference a non-existent rationale.
+    """
+    records = _rationale_records()
+    if key not in records:
+        raise KeyError(f"unknown gate default {key!r}; known: {sorted(records)}")
+    return records[key]
+
+
+def all_rationales() -> dict:
+    """Every authored magnitude rationale, keyed by slug (ADR-0005 D18 set)."""
+    return _rationale_records()
 
 
 # --------------------------------------------------------------------------- #
