@@ -1,0 +1,48 @@
+{
+  "corpus_sha256": "1eb76591d0e481019dd7acf72a439f157fec9f2aeecb8cc5c37ba80a7b062dd2",
+  "decoys_digest": "13061e3e5e524ac57c5708fa2496253574b2b05653f5cf19b99dafaa1f64db77",
+  "flank_nt": 50,
+  "n_records": 7008,
+  "notes": "P0 realisation: gc_background is a seeded 0th-order composition null (no genome panel at P0); coordinate-masking is a no-op on these coordinate-free P0 pools and becomes load-bearing at P2 mined windows; residual = un-maskable union records with no coordinates.",
+  "pool_counts": {
+    "dinuc_shuffled": 2000,
+    "gc_background": 2000,
+    "leader_decoy": 8,
+    "structured_rna": 3000
+  },
+  "pool_retained_after_masking": {
+    "dinuc_shuffled": 2000,
+    "gc_background": 2000,
+    "leader_decoy": 8,
+    "structured_rna": 3000
+  },
+  "pools_built": [
+    "gc_background",
+    "structured_rna",
+    "dinuc_shuffled",
+    "leader_decoy"
+  ],
+  "residual_contamination": {
+    "pool_records_masked": {
+      "dinuc_shuffled": 0,
+      "gc_background": 0,
+      "leader_decoy": 0,
+      "structured_rna": 0
+    },
+    "residual_contamination_fraction": 0.00012417218543046358,
+    "total_pool_records_masked": 0,
+    "union_denominator": 24160,
+    "union_maskable_with_coords": 24157,
+    "union_residual_no_coords": 3
+  },
+  "rfam_families": {
+    "FMN": "RF00050",
+    "SAM": "RF00162",
+    "TPP": "RF00059",
+    "glycine": "RF00504",
+    "purine": "RF00167",
+    "tRNA": "RF00005"
+  },
+  "seed": 42,
+  "union_prior_sha256": "9ff1ff944bf36aabde2fa31f6523d41a777d08b18f768f87c9f840e788e232ed"
+}

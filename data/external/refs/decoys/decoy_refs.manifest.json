@@ -1,0 +1,62 @@
+{
+  "accessed_utc": "2026-07-11T20:30:38.289875+00:00",
+  "families": {
+    "FMN": {
+      "n_sequences_scanned": 6377,
+      "n_sequences_subsampled": 500,
+      "rfam_accession": "RF00050",
+      "scan_capped": false,
+      "url": "https://ftp.ebi.ac.uk/pub/databases/Rfam/CURRENT/fasta_files/RF00050.fa.gz"
+    },
+    "SAM": {
+      "n_sequences_scanned": 10084,
+      "n_sequences_subsampled": 500,
+      "rfam_accession": "RF00162",
+      "scan_capped": false,
+      "url": "https://ftp.ebi.ac.uk/pub/databases/Rfam/CURRENT/fasta_files/RF00162.fa.gz"
+    },
+    "TPP": {
+      "n_sequences_scanned": 16245,
+      "n_sequences_subsampled": 500,
+      "rfam_accession": "RF00059",
+      "scan_capped": false,
+      "url": "https://ftp.ebi.ac.uk/pub/databases/Rfam/CURRENT/fasta_files/RF00059.fa.gz"
+    },
+    "glycine": {
+      "n_sequences_scanned": 9474,
+      "n_sequences_subsampled": 500,
+      "rfam_accession": "RF00504",
+      "scan_capped": false,
+      "url": "https://ftp.ebi.ac.uk/pub/databases/Rfam/CURRENT/fasta_files/RF00504.fa.gz"
+    },
+    "purine": {
+      "n_sequences_scanned": 4233,
+      "n_sequences_subsampled": 500,
+      "rfam_accession": "RF00167",
+      "scan_capped": false,
+      "url": "https://ftp.ebi.ac.uk/pub/databases/Rfam/CURRENT/fasta_files/RF00167.fa.gz"
+    },
+    "tRNA": {
+      "n_sequences_scanned": 20000,
+      "n_sequences_subsampled": 500,
+      "rfam_accession": "RF00005",
+      "scan_capped": true,
+      "url": "https://ftp.ebi.ac.uk/pub/databases/Rfam/CURRENT/fasta_files/RF00005.fa.gz"
+    }
+  },
+  "leader_decoys": {
+    "n_sequences": 8,
+    "path": "data/external/refs/decoys/leader_decoys.fa",
+    "sha256": "97a1a3b1c4ec262094e6fb69dadb5e450219445104fd099ebb0579e3e901bbcd",
+    "source_path": "/home/bioedca/tbox-phylogeny/tboxevo/data/processed/cms/idtm_validation_negatives.fasta",
+    "source_sha256": "97a1a3b1c4ec262094e6fb69dadb5e450219445104fd099ebb0579e3e901bbcd"
+  },
+  "rfam_max_scan": 20000,
+  "rfam_per_family_cap": 500,
+  "seed": 42,
+  "structured_rna_refs": {
+    "n_sequences": 3000,
+    "path": "data/external/refs/decoys/structured_rna_refs.fa",
+    "sha256": "ca9d1947eb5a15d6db5c59cd373306532884819f4bf390947e89789022fd2847"
+  }
+}
