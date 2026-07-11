@@ -1,0 +1,866 @@
+{
+  "coverage_cut": 0.7,
+  "determinations": {
+    "arm_c_literature_anchor_below_min_n": true,
+    "arm_c_sourcing_fallback_trigger": true,
+    "beyond_firmicutes_certification_rests_on": "non_firmicutes_order_subgroup",
+    "classII_anti_mimicry_rests_on": "the P2 construction-powered synthetic-class-II recovery set (above min-N by construction, ADR-0005 D9) + the within-phylum-homology control; the natural independent-of-Actinobacteria class-II is below min-N",
+    "classII_independent_natural_below_min_n": true,
+    "lowest_identity_arm": "powered",
+    "min_real_homolog_n_pinned": 20,
+    "non_firmicutes_order_subgroup": "powered",
+    "synthetic_divergence_arm": "pre-registered precondition for the \u00a71 CM-invisibility claim (ADR-0005 D8); the real leave-clade-out bins reach only to 0.699 identity, so the deep-divergence (<40%) cells are supplied only by the P2/P4 synthetic arm"
+  },
+  "headline_arms": {
+    "arm_c_literature_anchor": {
+      "counts_by_phylum": {
+        "Chloroflexota": 9,
+        "Deinococcota": 5,
+        "Desulfobacterota": 2
+      },
+      "min_n": 20,
+      "n": 16,
+      "n_coordinate_novel": 5,
+      "n_corpus_coord_overlap": 11,
+      "powered": false,
+      "source": "P0-16 gate1_anchor (Vitreschak-2008 non-Firmicutes re-derivation)",
+      "status": "reported-not-gated"
+    },
+    "classII_anti_mimicry": {
+      "heldout_classII_by_phylum": {
+        "Actinobacteria": 1178,
+        "Chloroflexi": 2,
+        "Deinococcus-Thermus": 5,
+        "Firmicutes": 4,
+        "Synergistetes": 1
+      },
+      "heldout_classII_total": 1190,
+      "independent_non_actinobacteria": {
+        "min_n": 20,
+        "n": 0,
+        "powered": false,
+        "status": "reported-not-gated"
+      },
+      "independent_sources": {
+        "P0-17_additional_non_actino": 0,
+        "blind_actino_single_phylum": 18,
+        "blind_non_actino": 0
+      },
+      "note": "total held-out class-II is Actinobacteria-dominated (single-phylum \u2192 within-Actinobacteria memorization confound, D9); the independent-of-Actinobacteria natural class-II is the scarce evidence"
+    },
+    "lowest_identity_bins_pooled": {
+      "block_resamplable": true,
+      "min_n": 20,
+      "n": 8749,
+      "n_blocks": 43,
+      "note": "bottom-two D1 bins + no-neighbour sentinels; every leave-clade-out held-out positive falls here (max real identity 0.699 < 0.70 by whole-cluster holdout), so this arm = all held-out positives",
+      "powered": true,
+      "status": "powered"
+    },
+    "non_firmicutes_order_subgroup": {
+      "block_resamplable": true,
+      "min_n": 20,
+      "n": 1635,
+      "n_blocks": 34,
+      "note": "corpus held-out positives with a resolved non-Firmicutes phylum (incl. the Actinobacteria phylum holdout); the beyond-Firmicutes certification the D6 floor requires alongside arm (1)",
+      "phyla": {
+        "Actinobacteria": 1230,
+        "Chloroflexi": 117,
+        "Deinococcus-Thermus": 28,
+        "Proteobacteria": 31,
+        "Synergistetes": 27,
+        "Tenericutes": 202
+      },
+      "powered": true,
+      "status": "powered"
+    },
+    "upper_identity_bins_70_100": {
+      "n": 0,
+      "note": "the 70-85 and 85-100 D1 bins are provably empty for the leave-clade-out arm (the split's homology cut caps held-out\u2194train identity below 0.70); these cells are reachable only by the D8 synthetic-divergence arm (built P2/P4) and the \u00a713 campaign",
+      "powered": false,
+      "status": "structurally-empty"
+    }
+  },
+  "heldout_identity_bins": {
+    "by_class": {
+      "I": {
+        "50-70": 5757,
+        "70-85": 0,
+        "85-100": 0,
+        "<50": 24,
+        "no_neighbour": 1778
+      },
+      "II": {
+        "50-70": 1036,
+        "70-85": 0,
+        "85-100": 0,
+        "<50": 61,
+        "no_neighbour": 93
+      }
+    },
+    "pooled": {
+      "50-70": 6793,
+      "70-85": 0,
+      "85-100": 0,
+      "<50": 85,
+      "no_neighbour": 1871
+    }
+  },
+  "identity_bin_edges_pct": [
+    50,
+    70,
+    85
+  ],
+  "identity_bins": [
+    "<50",
+    "50-70",
+    "70-85",
+    "85-100"
+  ],
+  "low_identity_homolog_count": {
+    "measurable_below_70": 6878,
+    "no_coverage_adequate_neighbour": 1871,
+    "total_low_identity_region": 8749
+  },
+  "min_n_rationale": "20 real held-out positives per cell (identity bin or headline arm). Below this the D4 strong bar's block-resampled CI cannot resolve its +5 pp floor (1/N >= 5 pp at N < 20) so the cell is reported-not-gated and the D4 weak-clause fallback (CI lower > 0) is admissible. Coheres with the repo's well-powered leave-one-order-out unit (conf/data/splits.yaml min_heldout_positives=20) and PRD \u00a712 (31 orders with >=20 positives; the ~20-positive floor is statistically unstable). Blinded-frozen at P0.",
+  "min_real_homolog_n": 20,
+  "n_heldout_total": 8749,
+  "per_leave_one_order_out_round": {
+    "Acholeplasmatales": {
+      "bins": {
+        "50-70": 41,
+        "70-85": 0,
+        "85-100": 0,
+        "<50": 0,
+        "no_neighbour": 11
+      },
+      "n_heldout": 52,
+      "phylum": "Tenericutes",
+      "verdict": {
+        "min_n": 20,
+        "n": 52,
+        "powered": true,
+        "status": "powered"
+      }
+    },
+    "Acidaminococcales": {
+      "bins": {
+        "50-70": 44,
+        "70-85": 0,
+        "85-100": 0,
+        "<50": 0,
+        "no_neighbour": 8
+      },
+      "n_heldout": 52,
+      "phylum": "Firmicutes",
+      "verdict": {
+        "min_n": 20,
+        "n": 52,
+        "powered": true,
+        "status": "powered"
+      }
+    },
+    "Actinomycetales": {
+      "bins": {
+        "50-70": 38,
+        "70-85": 0,
+        "85-100": 0,
+        "<50": 2,
+        "no_neighbour": 2
+      },
+      "n_heldout": 42,
+      "phylum": "Actinobacteria",
+      "verdict": {
+        "min_n": 20,
+        "n": 42,
+        "powered": true,
+        "status": "powered"
+      }
+    },
+    "Actinopolysporales": {
+      "bins": {
+        "50-70": 1,
+        "70-85": 0,
+        "85-100": 0,
+        "<50": 0,
+        "no_neighbour": 0
+      },
+      "n_heldout": 1,
+      "phylum": "Actinobacteria",
+      "verdict": {
+        "min_n": 20,
+        "n": 1,
+        "powered": false,
+        "status": "reported-not-gated"
+      }
+    },
+    "Anaerolineales": {
+      "bins": {
+        "50-70": 35,
+        "70-85": 0,
+        "85-100": 0,
+        "<50": 0,
+        "no_neighbour": 6
+      },
+      "n_heldout": 41,
+      "phylum": "Chloroflexi",
+      "verdict": {
+        "min_n": 20,
+        "n": 41,
+        "powered": true,
+        "status": "powered"
+      }
+    },
+    "Bifidobacteriales": {
+      "bins": {
+        "50-70": 69,
+        "70-85": 0,
+        "85-100": 0,
+        "<50": 0,
+        "no_neighbour": 0
+      },
+      "n_heldout": 69,
+      "phylum": "Actinobacteria",
+      "verdict": {
+        "min_n": 20,
+        "n": 69,
+        "powered": true,
+        "status": "powered"
+      }
+    },
+    "Candidatus Aquicultorales": {
+      "bins": {
+        "50-70": 5,
+        "70-85": 0,
+        "85-100": 0,
+        "<50": 0,
+        "no_neighbour": 0
+      },
+      "n_heldout": 5,
+      "phylum": "Actinobacteria",
+      "verdict": {
+        "min_n": 20,
+        "n": 5,
+        "powered": false,
+        "status": "reported-not-gated"
+      }
+    },
+    "Candidatus Izemoplasmatales": {
+      "bins": {
+        "50-70": 23,
+        "70-85": 0,
+        "85-100": 0,
+        "<50": 0,
+        "no_neighbour": 1
+      },
+      "n_heldout": 24,
+      "phylum": "Tenericutes",
+      "verdict": {
+        "min_n": 20,
+        "n": 24,
+        "powered": true,
+        "status": "powered"
+      }
+    },
+    "Candidatus Nanopelagicales": {
+      "bins": {
+        "50-70": 0,
+        "70-85": 0,
+        "85-100": 0,
+        "<50": 11,
+        "no_neighbour": 1
+      },
+      "n_heldout": 12,
+      "phylum": "Actinobacteria",
+      "verdict": {
+        "min_n": 20,
+        "n": 12,
+        "powered": false,
+        "status": "reported-not-gated"
+      }
+    },
+    "Catenulisporales": {
+      "bins": {
+        "50-70": 2,
+        "70-85": 0,
+        "85-100": 0,
+        "<50": 0,
+        "no_neighbour": 2
+      },
+      "n_heldout": 4,
+      "phylum": "Actinobacteria",
+      "verdict": {
+        "min_n": 20,
+        "n": 4,
+        "powered": false,
+        "status": "reported-not-gated"
+      }
+    },
+    "Chloroflexales": {
+      "bins": {
+        "50-70": 10,
+        "70-85": 0,
+        "85-100": 0,
+        "<50": 0,
+        "no_neighbour": 10
+      },
+      "n_heldout": 20,
+      "phylum": "Chloroflexi",
+      "verdict": {
+        "min_n": 20,
+        "n": 20,
+        "powered": true,
+        "status": "powered"
+      }
+    },
+    "Coriobacteriales": {
+      "bins": {
+        "50-70": 9,
+        "70-85": 0,
+        "85-100": 0,
+        "<50": 0,
+        "no_neighbour": 9
+      },
+      "n_heldout": 18,
+      "phylum": "Actinobacteria",
+      "verdict": {
+        "min_n": 20,
+        "n": 18,
+        "powered": false,
+        "status": "reported-not-gated"
+      }
+    },
+    "Corynebacteriales": {
+      "bins": {
+        "50-70": 329,
+        "70-85": 0,
+        "85-100": 0,
+        "<50": 38,
+        "no_neighbour": 3
+      },
+      "n_heldout": 370,
+      "phylum": "Actinobacteria",
+      "verdict": {
+        "min_n": 20,
+        "n": 370,
+        "powered": true,
+        "status": "powered"
+      }
+    },
+    "Dehalococcoidales": {
+      "bins": {
+        "50-70": 22,
+        "70-85": 0,
+        "85-100": 0,
+        "<50": 0,
+        "no_neighbour": 12
+      },
+      "n_heldout": 34,
+      "phylum": "Chloroflexi",
+      "verdict": {
+        "min_n": 20,
+        "n": 34,
+        "powered": true,
+        "status": "powered"
+      }
+    },
+    "Deinococcales": {
+      "bins": {
+        "50-70": 15,
+        "70-85": 0,
+        "85-100": 0,
+        "<50": 0,
+        "no_neighbour": 13
+      },
+      "n_heldout": 28,
+      "phylum": "Deinococcus-Thermus",
+      "verdict": {
+        "min_n": 20,
+        "n": 28,
+        "powered": true,
+        "status": "powered"
+      }
+    },
+    "Desulfuromonadales": {
+      "bins": {
+        "50-70": 30,
+        "70-85": 0,
+        "85-100": 0,
+        "<50": 0,
+        "no_neighbour": 1
+      },
+      "n_heldout": 31,
+      "phylum": "Proteobacteria",
+      "verdict": {
+        "min_n": 20,
+        "n": 31,
+        "powered": true,
+        "status": "powered"
+      }
+    },
+    "Eggerthellales": {
+      "bins": {
+        "50-70": 3,
+        "70-85": 0,
+        "85-100": 0,
+        "<50": 0,
+        "no_neighbour": 4
+      },
+      "n_heldout": 7,
+      "phylum": "Actinobacteria",
+      "verdict": {
+        "min_n": 20,
+        "n": 7,
+        "powered": false,
+        "status": "reported-not-gated"
+      }
+    },
+    "Entomoplasmatales": {
+      "bins": {
+        "50-70": 44,
+        "70-85": 0,
+        "85-100": 0,
+        "<50": 0,
+        "no_neighbour": 24
+      },
+      "n_heldout": 68,
+      "phylum": "Tenericutes",
+      "verdict": {
+        "min_n": 20,
+        "n": 68,
+        "powered": true,
+        "status": "powered"
+      }
+    },
+    "Erysipelotrichales": {
+      "bins": {
+        "50-70": 404,
+        "70-85": 0,
+        "85-100": 0,
+        "<50": 0,
+        "no_neighbour": 41
+      },
+      "n_heldout": 445,
+      "phylum": "Firmicutes",
+      "verdict": {
+        "min_n": 20,
+        "n": 445,
+        "powered": true,
+        "status": "powered"
+      }
+    },
+    "Frankiales": {
+      "bins": {
+        "50-70": 6,
+        "70-85": 0,
+        "85-100": 0,
+        "<50": 1,
+        "no_neighbour": 2
+      },
+      "n_heldout": 9,
+      "phylum": "Actinobacteria",
+      "verdict": {
+        "min_n": 20,
+        "n": 9,
+        "powered": false,
+        "status": "reported-not-gated"
+      }
+    },
+    "Glycomycetales": {
+      "bins": {
+        "50-70": 3,
+        "70-85": 0,
+        "85-100": 0,
+        "<50": 0,
+        "no_neighbour": 1
+      },
+      "n_heldout": 4,
+      "phylum": "Actinobacteria",
+      "verdict": {
+        "min_n": 20,
+        "n": 4,
+        "powered": false,
+        "status": "reported-not-gated"
+      }
+    },
+    "Halanaerobiales": {
+      "bins": {
+        "50-70": 93,
+        "70-85": 0,
+        "85-100": 0,
+        "<50": 0,
+        "no_neighbour": 6
+      },
+      "n_heldout": 99,
+      "phylum": "Firmicutes",
+      "verdict": {
+        "min_n": 20,
+        "n": 99,
+        "powered": true,
+        "status": "powered"
+      }
+    },
+    "Haloplasmatales": {
+      "bins": {
+        "50-70": 18,
+        "70-85": 0,
+        "85-100": 0,
+        "<50": 0,
+        "no_neighbour": 4
+      },
+      "n_heldout": 22,
+      "phylum": "Tenericutes",
+      "verdict": {
+        "min_n": 20,
+        "n": 22,
+        "powered": true,
+        "status": "powered"
+      }
+    },
+    "Jiangellales": {
+      "bins": {
+        "50-70": 2,
+        "70-85": 0,
+        "85-100": 0,
+        "<50": 0,
+        "no_neighbour": 0
+      },
+      "n_heldout": 2,
+      "phylum": "Actinobacteria",
+      "verdict": {
+        "min_n": 20,
+        "n": 2,
+        "powered": false,
+        "status": "reported-not-gated"
+      }
+    },
+    "Kineosporiales": {
+      "bins": {
+        "50-70": 1,
+        "70-85": 0,
+        "85-100": 0,
+        "<50": 0,
+        "no_neighbour": 0
+      },
+      "n_heldout": 1,
+      "phylum": "Actinobacteria",
+      "verdict": {
+        "min_n": 20,
+        "n": 1,
+        "powered": false,
+        "status": "reported-not-gated"
+      }
+    },
+    "Ktedonobacterales": {
+      "bins": {
+        "50-70": 22,
+        "70-85": 0,
+        "85-100": 0,
+        "<50": 0,
+        "no_neighbour": 0
+      },
+      "n_heldout": 22,
+      "phylum": "Chloroflexi",
+      "verdict": {
+        "min_n": 20,
+        "n": 22,
+        "powered": true,
+        "status": "powered"
+      }
+    },
+    "Lactobacillales": {
+      "bins": {
+        "50-70": 3909,
+        "70-85": 0,
+        "85-100": 0,
+        "<50": 21,
+        "no_neighbour": 1393
+      },
+      "n_heldout": 5323,
+      "phylum": "Firmicutes",
+      "verdict": {
+        "min_n": 20,
+        "n": 5323,
+        "powered": true,
+        "status": "powered"
+      }
+    },
+    "Micrococcales": {
+      "bins": {
+        "50-70": 273,
+        "70-85": 0,
+        "85-100": 0,
+        "<50": 0,
+        "no_neighbour": 2
+      },
+      "n_heldout": 275,
+      "phylum": "Actinobacteria",
+      "verdict": {
+        "min_n": 20,
+        "n": 275,
+        "powered": true,
+        "status": "powered"
+      }
+    },
+    "Micromonosporales": {
+      "bins": {
+        "50-70": 55,
+        "70-85": 0,
+        "85-100": 0,
+        "<50": 0,
+        "no_neighbour": 10
+      },
+      "n_heldout": 65,
+      "phylum": "Actinobacteria",
+      "verdict": {
+        "min_n": 20,
+        "n": 65,
+        "powered": true,
+        "status": "powered"
+      }
+    },
+    "Mycoplasmatales": {
+      "bins": {
+        "50-70": 31,
+        "70-85": 0,
+        "85-100": 0,
+        "<50": 0,
+        "no_neighbour": 5
+      },
+      "n_heldout": 36,
+      "phylum": "Tenericutes",
+      "verdict": {
+        "min_n": 20,
+        "n": 36,
+        "powered": true,
+        "status": "powered"
+      }
+    },
+    "Nakamurellales": {
+      "bins": {
+        "50-70": 4,
+        "70-85": 0,
+        "85-100": 0,
+        "<50": 0,
+        "no_neighbour": 0
+      },
+      "n_heldout": 4,
+      "phylum": "Actinobacteria",
+      "verdict": {
+        "min_n": 20,
+        "n": 4,
+        "powered": false,
+        "status": "reported-not-gated"
+      }
+    },
+    "Natranaerobiales": {
+      "bins": {
+        "50-70": 21,
+        "70-85": 0,
+        "85-100": 0,
+        "<50": 0,
+        "no_neighbour": 2
+      },
+      "n_heldout": 23,
+      "phylum": "Firmicutes",
+      "verdict": {
+        "min_n": 20,
+        "n": 23,
+        "powered": true,
+        "status": "powered"
+      }
+    },
+    "Propionibacteriales": {
+      "bins": {
+        "50-70": 55,
+        "70-85": 0,
+        "85-100": 0,
+        "<50": 6,
+        "no_neighbour": 5
+      },
+      "n_heldout": 66,
+      "phylum": "Actinobacteria",
+      "verdict": {
+        "min_n": 20,
+        "n": 66,
+        "powered": true,
+        "status": "powered"
+      }
+    },
+    "Pseudonocardiales": {
+      "bins": {
+        "50-70": 44,
+        "70-85": 0,
+        "85-100": 0,
+        "<50": 0,
+        "no_neighbour": 4
+      },
+      "n_heldout": 48,
+      "phylum": "Actinobacteria",
+      "verdict": {
+        "min_n": 20,
+        "n": 48,
+        "powered": true,
+        "status": "powered"
+      }
+    },
+    "Rubrobacterales": {
+      "bins": {
+        "50-70": 1,
+        "70-85": 0,
+        "85-100": 0,
+        "<50": 0,
+        "no_neighbour": 1
+      },
+      "n_heldout": 2,
+      "phylum": "Actinobacteria",
+      "verdict": {
+        "min_n": 20,
+        "n": 2,
+        "powered": false,
+        "status": "reported-not-gated"
+      }
+    },
+    "Selenomonadales": {
+      "bins": {
+        "50-70": 192,
+        "70-85": 0,
+        "85-100": 0,
+        "<50": 0,
+        "no_neighbour": 32
+      },
+      "n_heldout": 224,
+      "phylum": "Firmicutes",
+      "verdict": {
+        "min_n": 20,
+        "n": 224,
+        "powered": true,
+        "status": "powered"
+      }
+    },
+    "Sporichthyales": {
+      "bins": {
+        "50-70": 0,
+        "70-85": 0,
+        "85-100": 0,
+        "<50": 1,
+        "no_neighbour": 0
+      },
+      "n_heldout": 1,
+      "phylum": "Actinobacteria",
+      "verdict": {
+        "min_n": 20,
+        "n": 1,
+        "powered": false,
+        "status": "reported-not-gated"
+      }
+    },
+    "Streptomycetales": {
+      "bins": {
+        "50-70": 128,
+        "70-85": 0,
+        "85-100": 0,
+        "<50": 0,
+        "no_neighbour": 69
+      },
+      "n_heldout": 197,
+      "phylum": "Actinobacteria",
+      "verdict": {
+        "min_n": 20,
+        "n": 197,
+        "powered": true,
+        "status": "powered"
+      }
+    },
+    "Streptosporangiales": {
+      "bins": {
+        "50-70": 18,
+        "70-85": 0,
+        "85-100": 0,
+        "<50": 2,
+        "no_neighbour": 4
+      },
+      "n_heldout": 24,
+      "phylum": "Actinobacteria",
+      "verdict": {
+        "min_n": 20,
+        "n": 24,
+        "powered": true,
+        "status": "powered"
+      }
+    },
+    "Synergistales": {
+      "bins": {
+        "50-70": 15,
+        "70-85": 0,
+        "85-100": 0,
+        "<50": 0,
+        "no_neighbour": 12
+      },
+      "n_heldout": 27,
+      "phylum": "Synergistetes",
+      "verdict": {
+        "min_n": 20,
+        "n": 27,
+        "powered": true,
+        "status": "powered"
+      }
+    },
+    "Thermoanaerobacterales": {
+      "bins": {
+        "50-70": 218,
+        "70-85": 0,
+        "85-100": 0,
+        "<50": 0,
+        "no_neighbour": 53
+      },
+      "n_heldout": 271,
+      "phylum": "Firmicutes",
+      "verdict": {
+        "min_n": 20,
+        "n": 271,
+        "powered": true,
+        "status": "powered"
+      }
+    },
+    "Tissierellales": {
+      "bins": {
+        "50-70": 360,
+        "70-85": 0,
+        "85-100": 0,
+        "<50": 3,
+        "no_neighbour": 57
+      },
+      "n_heldout": 420,
+      "phylum": "Firmicutes",
+      "verdict": {
+        "min_n": 20,
+        "n": 420,
+        "powered": true,
+        "status": "powered"
+      }
+    },
+    "Veillonellales": {
+      "bins": {
+        "50-70": 165,
+        "70-85": 0,
+        "85-100": 0,
+        "<50": 0,
+        "no_neighbour": 58
+      },
+      "n_heldout": 223,
+      "phylum": "Firmicutes",
+      "verdict": {
+        "min_n": 20,
+        "n": 223,
+        "powered": true,
+        "status": "powered"
+      }
+    }
+  },
+  "per_order_summary": {
+    "min_n": 20,
+    "n_orders_ge_min_n": 30,
+    "n_orders_with_heldout": 43
+  }
+}

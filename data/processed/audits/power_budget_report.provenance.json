@@ -1,0 +1,29 @@
+{
+  "adr": "ADR-0005",
+  "env_lock_hash": null,
+  "extra": {
+    "identity_bin_edges_pct": [
+      50,
+      70,
+      85
+    ],
+    "min_real_homolog_n": 20
+  },
+  "generated_at_utc": "2026-07-11T09:01:59.666479+00:00",
+  "git_sha": "e72db11d92819a9c8433c0c0f5c3765576f161b7",
+  "inputs": {
+    "data/external/classII_positives/classII_report.json": "ee859fdde6be5216f15db48c81245555f63742e27a43beeac4abad9234196036",
+    "data/external/gate1_anchor/gate1_anchor_report.json": "d1c84ae54177b012f8af39d02df6422904c8ccf94d023195a339c7ddf86d3e18",
+    "data/interim/splits/aligned/class_I.sto": "0edb9c5cd78d864b82fcc1da457b7a89654489cd3458f31aa278d277a9e32804",
+    "data/interim/splits/aligned/class_II.sto": "0aa0b3eea647371e958cfbc54c3762abc08d0a986bd1ebf54f9638007c2636b4",
+    "data/interim/splits/split_assignments.parquet": "b365987a3b4aa1087be96e51e8315d5cfd4a7e866bba5a877b1e472d06f921d8"
+  },
+  "outputs": {
+    "data/processed/audits/power_budget_report.json": "0fcdbdbe3b169f177a7bc203c1f3a8e4df7bd1ba45549fcbf250f31ba78c33ce",
+    "data/processed/audits/power_figure_data.json": "a4abd6b54a94e94946484daadcf7c211ae44ac248cfa0df37a00093c17b778fe"
+  },
+  "rule": "workflow/rules/data.smk :: power_budget_audit",
+  "schema_version": "1.0",
+  "script": "src/tbox_finder/power.py",
+  "seed": 42
+}
