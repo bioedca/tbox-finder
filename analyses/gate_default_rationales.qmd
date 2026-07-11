@@ -1,0 +1,141 @@
+---
+title: "tbox-finder — Gate-default magnitude rationales (blinded-frozen at P0)"
+author: "bioedca"
+date: "2026-07-11"
+format:
+  pdf:
+    toc: true
+    number-sections: true
+---
+
+# Purpose (P0-28)
+
+PRD §2.3 requires that **each delegated gate default carry a documented magnitude
+rationale — a smallest-effect-of-interest (SESOI) / effect-size argument or a
+power calculation at the pinned decoy prevalence and per-bin min-N — authored
+*before any P4 result* and blinded-frozen at P0.** This document is that record.
+It is the anti-p-hacking guard (§2.3): the numbers are argued from effect-size /
+estimability logic *before* seeing benchmark results, so a gate can never be
+retrofitted to a result.
+
+Every default below is a **default** under the PRD §2.3 precedence carve-out (the
+ADR-pinned value is authoritative; a recalibration still needs ADR re-sign-off,
+CLAUDE.md §7 item 2) and is **blinded-frozen at P0**: it may not change after P4
+unblinding, and any pre-P4 recalibration still needs ADR sign-off.
+
+The rationale text and numbers are **rendered from
+`src/tbox_finder/power.py` (`magnitude_rationale`)**, the single source of truth
+that the ADR-0005 constants and `tests/unit/test_magnitude_rationale.py` are
+checked against — so this document has **no hand-typed numbers** to drift.
+
+## Scope — the delegated defaults (ADR-0005 D18 + ADR-0004 D6)
+
+| Default | Value | ADR | Kind |
+|---|---|---|---|
+| GATE-1 recall point bar | +10 pp | ADR-0005 D4 | SESOI + power |
+| GATE-1 recall CI floor | +5 pp | ADR-0005 D4 | power (estimability) |
+| GATE-2 in-distribution ECE | ≤ 0.05 | ADR-0005 D11 | SESOI + power |
+| GATE-2 genome-scale FDP | ≤ 0.10 | ADR-0005 D12 | SESOI |
+| Benchmark decoy prevalence | 100 : 1 | ADR-0005 D7 | design |
+| RiNALMo→RNA-FM OOD-ECE margin | > 0.02 | ADR-0005 D17(c) | SESOI |
+| RiNALMo→RNA-FM recall margin | > 3 pp | ADR-0005 D17(d) | SESOI |
+| RiNALMo→RNA-FM AUPRC margin | > 0.03 | ADR-0005 D17(d) | SESOI |
+| GATE-4 per-nt element F1 | ≥ 0.80 | ADR-0004 D6 | SESOI |
+
+# Method & evidence gate (CLAUDE.md §10.1)
+
+A SESOI is a statistical judgment about *what magnitude matters*, so each argument
+is grounded in a **verified method citation** (identifiers checked against PubMed
+/ the publisher of record, never asserted from memory — §10.3). The high-stakes
+SESOI/power conventions (they ship to reviewers) each rest on **≥2 independent
+agreeing method sources**:
+
+- **SESOI / equivalence-bound method** — Lakens 2017, *Equivalence Tests: A
+  Practical Primer* [DOI:10.1177/1948550617697177]; Lakens, Scheel & Isager 2018,
+  *Equivalence Testing for Psychological Research: A Tutorial*
+  [DOI:10.1177/2515245918770963]. (Both accessed 2026-07-11.)
+- **Binned-ECE / well-calibration** — Guo, Pleiss, Sun & Weinberger 2017, *On
+  Calibration of Modern Neural Networks* [arXiv:1706.04599]; Naeini, Cooper &
+  Hauskrecht 2015, *Obtaining Well Calibrated Probabilities Using Bayesian
+  Binning* [PMID:25927013]. (Accessed 2026-07-11.)
+- **Discovery-stage FDR** — Benjamini & Hochberg 1995
+  [DOI:10.1111/j.2517-6161.1995.tb02031.x]; Storey & Tibshirani 2003, *Statistical
+  significance for genomewide studies* [DOI:10.1073/pnas.1530509100]; Elias & Gygi
+  2007 target-decoy [PMID:17327847] (already ADR-0005 D12). (Accessed 2026-07-11.)
+- **Low-identity divergence region** (field context for the recall SESOI) —
+  Freyhult, Bollback & Gardner 2007 [DOI:10.1101/gr.5890907]; Menzel, Gorodkin &
+  Stadler 2009 [DOI:10.1261/rna.1556009] (both already ADR-0005 D1).
+
+The method papers are cited for the *framework and the concept*; **no numeric
+cutoff is transcribed from any paper** — the values are the project's own SESOI
+judgments, argued from estimability at the pinned min-N and from the downstream
+decision each threshold feeds.
+
+# The rationales (rendered from the helper)
+
+```{python}
+#| echo: false
+#| output: asis
+from tbox_finder import power
+
+order = [
+    "recall_point_bar", "recall_ci_floor", "ece_gate", "fdr_gate",
+    "decoy_prevalence", "swap_ece_margin", "swap_recall_margin",
+    "swap_auprc_margin", "gate4_f1_floor",
+]
+for key in order:
+    r = power.magnitude_rationale(key)
+    cites = ", ".join(r["citations"]) if r["citations"] else "—"
+    print(f"## {r['default']}\n")
+    print(f"**Value:** `{r['value']}`  ·  **Kind:** {r['kind']}  ·  "
+          f"**Blinded-frozen:** {r['blinded_frozen']}\n")
+    print(f"{r['argument']}\n")
+    print(f"*Method citations:* {cites}\n")
+```
+
+# The recall bar and the min-N floor are one construction
+
+The +5 pp CI floor and the pinned min-N are **derived from a single argument**, so
+they cannot drift apart. At the pinned `MIN_REAL_HOMOLOG_N = 20` (Amendment A1),
+the per-positive recall granularity is `1/20 = 5 pp`; a recall-difference lower
+bound finer than 5 pp is below the estimator's granularity. The +5 pp CI floor is
+set to exactly that granularity, and the +10 pp point bar to two granularities.
+
+```{python}
+#| echo: false
+res = power.recall_bar_resolution()
+print("recall_bar_resolution():", res)
+print("normal-approx MDE @ baseline 0.5, N=20 (pp):",
+      round(power.min_detectable_effect_pp(0.5, 20), 1))
+print("ECE budget / FDR budget:", power.calibration_fdr_budget_ratio())
+print("E[false] at 10% FDP on a 2000-candidate table:",
+      power.expected_false_at_fdr(0.10, 2000))
+```
+
+**Honest caveat (min-N is an *estimability* floor, not a *power-to-pass* floor).**
+The naïve normal-approximation minimum detectable effect at a 0.5 baseline and
+N = 20 is ≈ 22 pp — larger than the +10 pp bar. That is expected and by design:
+N = 20 guarantees the +5 pp CI floor is *estimable* (the estimator can resolve
+it), **not** that an arm at exactly min-N is *powered to pass* it under the naïve
+normal CI. GATE-1's gated inference is the **block-resampled bootstrap CI plus the
+D5 small-N exact/permutation test (or a Bayesian recall-difference posterior)**,
+not the normal approximation — and pooling across bins/orders lifts the effective
+N well above 20 in the powered arms (the lowest-identity pool is N = 8,749 over 43
+blocks; the non-Firmicutes-order subgroup N = 1,635 over 34 blocks — P0-26). An
+arm that clears min-N but not the bar is **reported-not-gated / §7 stop-and-ask**,
+never a silent pass (ADR-0005 D6).
+
+# Blinded-freeze declaration
+
+All nine defaults above are **blinded-frozen at P0** (PRD §2.3): the rationales
+were authored on 2026-07-11, **before any P4 benchmark result exists**. Per
+ADR-0005 (and ADR-0004 D6 for the 0.80):
+
+- **No post-P4 change is permitted** — a value may not be adjusted after
+  unblinding to fit a result.
+- **A pre-P4 recalibration is permitted only by ADR re-sign-off** (CLAUDE.md §7
+  item 2), recorded as a new ADR amendment.
+
+This document is committed atomically with **ADR-0005 Amendment A3** (which
+records the rationale set and the freeze) and the **ADR-0004 D6 / Amendment A2**
+cross-reference for the GATE-4 0.80.
