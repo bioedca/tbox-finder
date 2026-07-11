@@ -212,3 +212,32 @@ def test_recall_rationales_reference_the_pinned_values():
     assert power.magnitude_rationale("fdr_gate")["value"] == "<= 0.1"
     assert power.magnitude_rationale("decoy_prevalence")["value"] == "100:1"
     assert power.magnitude_rationale("gate4_f1_floor")["value"] == ">= 0.8"
+
+
+def test_recall_prose_is_derived_from_min_n_not_hardcoded():
+    # The recall arguments must interpolate MIN_REAL_HOMOLOG_N (=20) and its
+    # 1/N granularity, so a future min-N change can't leave stale prose (the
+    # round-3 drift guard). At min-N=20: "1/20", "1-in-20", granularity "5 pp".
+    ci = power.magnitude_rationale("recall_ci_floor")["argument"]
+    pt = power.magnitude_rationale("recall_point_bar")["argument"]
+    assert f"1/{power.MIN_REAL_HOMOLOG_N}" in ci  # 1/20
+    assert f"1-in-{power.MIN_REAL_HOMOLOG_N}" in ci  # 1-in-20
+    assert f"1/{power.MIN_REAL_HOMOLOG_N}" in pt  # 2 x 1/20
+    assert "5 pp per held-out positive" in ci  # granularity 100/20
+
+
+@pytest.mark.parametrize(
+    "call",
+    [
+        lambda: power.binomial_se(True, 20),
+        lambda: power.expected_false_at_fdr(True, 20),
+        lambda: power.calibration_fdr_budget_ratio(ece=True),
+        lambda: power.calibration_fdr_budget_ratio(0.05, True),
+        lambda: power.min_detectable_effect_pp(True, 20),
+        lambda: power.min_detectable_effect_pp(0.5, 20, z=True),
+    ],
+)
+def test_rate_params_reject_booleans(call):
+    # bool is a subclass of int; a probability-like rate is never a boolean.
+    with pytest.raises(ValueError):
+        call()

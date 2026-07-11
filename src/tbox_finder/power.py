@@ -222,9 +222,22 @@ def _require_count(value, name: str, *, allow_zero: bool = False) -> int:
     return value
 
 
+def _require_number(value, name: str) -> float:
+    """Reject a non-numeric / boolean rate argument before any range check.
+
+    ``bool`` is a subclass of ``int``, so ``True`` would silently pass a raw
+    ``0 <= x <= 1`` check as ``1``; a probability-like rate is never a boolean
+    (CodeRabbit P0-28 round-3).
+    """
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f"{name} must be a real number")
+    return value
+
+
 def binomial_se(p: float, n: int) -> float:
     """Standard error of a binomial proportion estimate: ``sqrt(p(1-p)/n)``."""
     _require_count(n, "n")
+    _require_number(p, "p")
     if not 0.0 <= p <= 1.0:
         raise ValueError("p must be in [0, 1]")
     return math.sqrt(p * (1.0 - p) / n)
@@ -263,6 +276,8 @@ def min_detectable_effect_pp(baseline_recall: float, n: int, z: float = 1.96) ->
     (CLAUDE.md §10.3). The gated inference is the block-resampled CI + the D5
     small-N exact/permutation test, not this normal approximation.
     """
+    _require_number(baseline_recall, "baseline_recall")
+    _require_number(z, "z")
     if not 0.0 < baseline_recall < 1.0:
         # The normal approximation is degenerate at the Bernoulli boundaries
         # (SE = 0 -> MDE = 0); reject rather than report a meaningless zero.
@@ -274,6 +289,7 @@ def min_detectable_effect_pp(baseline_recall: float, n: int, z: float = 1.96) ->
 
 def expected_false_at_fdr(fdr: float, n_candidates: int) -> float:
     """Expected false discoveries in a candidate table of size N at a given FDP."""
+    _require_number(fdr, "fdr")
     if not 0.0 <= fdr <= 1.0:
         raise ValueError("fdr must be in [0, 1]")
     _require_count(n_candidates, "n_candidates", allow_zero=True)
@@ -287,6 +303,8 @@ def calibration_fdr_budget_ratio(ece: float = ECE_GATE, fdr: float = FDR_GATE) -
     budget (0.05 / 0.10), so a GATE-2-passing calibration head cannot by itself
     exhaust the downstream FDR budget it feeds.
     """
+    _require_number(ece, "ece")
+    _require_number(fdr, "fdr")
     if not 0.0 <= ece <= 1.0:
         raise ValueError("ece must be in [0, 1]")
     if not 0.0 < fdr <= 1.0:
@@ -304,6 +322,13 @@ def _rationale_records() -> dict:
     The QMD (``analyses/gate_default_rationales.qmd``)
     renders this verbatim so the durable doc has no hand-typed numbers.
     """
+    # Derive the recall prose from the pinned constants so a future min-N /
+    # bar change updates the rationale text and the helper together (no
+    # rationale-vs-ADR drift; CodeRabbit P0-28 round-3).
+    min_n = MIN_REAL_HOMOLOG_N
+    granularity_pp = 100.0 / MIN_REAL_HOMOLOG_N
+    point_one_in = round(100 / RECALL_POINT_BAR_PP)  # +10 pp -> 1-in-10
+    ci_one_in = round(100 / RECALL_CI_FLOOR_PP)  # +5 pp -> 1-in-20
     return {
         "recall_point_bar": {
             "default": "GATE-1 recall point-estimate bar (ADR-0005 D4)",
@@ -312,13 +337,13 @@ def _rationale_records() -> dict:
             "argument": (
                 f"The smallest recall gain over cmsearch at matched precision "
                 f"that is both scientifically material and robustly separated "
-                f"from sampling noise at the pinned min-N (20): +{RECALL_POINT_BAR_PP} pp "
-                f"is two per-positive granularities (2 x 1/20), so a passing arm's "
+                f"from sampling noise at the pinned min-N ({min_n}): +{RECALL_POINT_BAR_PP} pp "
+                f"is two per-positive granularities (2 x 1/{min_n}), so a passing arm's "
                 f"point estimate sits a full CI-floor-width above the "
                 f"+{RECALL_CI_FLOOR_PP} pp non-trivial-improvement boundary. In the "
                 f"bottom-two identity bins where sequence-based homology search is "
                 f"documented to lose sensitivity, +{RECALL_POINT_BAR_PP} pp means "
-                f"recovering >=1-in-10 more divergent T-boxes than the CM — the "
+                f"recovering >=1-in-{point_one_in} more divergent T-boxes than the CM — the "
                 f"smallest gain that materially expands the recoverable set. Read "
                 f"as an equivalence-style lower bound (SESOI method)."
             ),
@@ -336,13 +361,13 @@ def _rationale_records() -> dict:
             "kind": "power",
             "argument": (
                 f"The finest recall-difference lower bound the block-resampled CI "
-                f"can resolve at the pinned min-N: 1/20 = {100.0 / MIN_REAL_HOMOLOG_N:.0f} pp "
+                f"can resolve at the pinned min-N: 1/{min_n} = {granularity_pp:.0f} pp "
                 f"per held-out positive. A floor below this is below the estimator's "
                 f"granularity, so +{RECALL_CI_FLOOR_PP} pp is the smallest positive "
                 f"floor that is both estimable at the sample size the corpus supplies "
-                f"and a non-trivial improvement (>=1-in-20 additional divergent "
-                f"homologs). This is exactly the 1/N >= 5 pp argument that pinned "
-                f"MIN_REAL_HOMOLOG_N (Amendment A1) — the bar and the min-N floor are "
+                f"and a non-trivial improvement (>=1-in-{ci_one_in} additional divergent "
+                f"homologs). This is exactly the 1/N >= {RECALL_CI_FLOOR_PP} pp argument "
+                f"that pinned MIN_REAL_HOMOLOG_N (Amendment A1) — the bar and the min-N floor are "
                 f"one construction. Below min-N the D4 weak clause (CI lower > 0) is "
                 f"the disclosed fallback, never a convenience loosening."
             ),
