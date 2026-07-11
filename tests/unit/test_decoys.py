@@ -178,3 +178,11 @@ def test_read_config_parses_scalars(tmp_path):
 def test_read_config_missing_file_returns_defaults():
     cfg = decoys.read_config("/nonexistent/decoys.yaml")
     assert cfg.seed == decoys.provenance.DEFAULT_SEED
+
+
+def test_fetch_refs_requires_external_tboxevo_source(monkeypatch):
+    # No portable in-repo default for the external leader anchor: fetch-refs must be
+    # told where it is (arg or env) and fail loudly (before any network) otherwise.
+    monkeypatch.delenv(decoys.TBOXEVO_NEGATIVES_ENV, raising=False)
+    with pytest.raises(ValueError, match="tboxevo"):
+        decoys.fetch_refs(tboxevo_negatives=None)

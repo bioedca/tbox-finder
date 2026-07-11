@@ -677,7 +677,8 @@ rule build_decoys:
     decoy refs (tracked by DVC/git-LFS + provenance, not the Snakemake DAG). Seeded
     (``PYTHONHASHSEED=0`` + ``conf/data/decoys.yaml``). Invoke:
 
-        python -m tbox_finder.decoys fetch-refs   # one-time network stage
+        python -m tbox_finder.decoys fetch-refs \
+            --tboxevo-negatives <path>/idtm_validation_negatives.fasta   # one-time network stage
         snakemake --cores 1 --use-conda build_decoys
     """
     output:

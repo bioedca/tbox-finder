@@ -45,6 +45,7 @@ import argparse
 import gzip
 import hashlib
 import json
+import os
 import random
 import sys
 import urllib.request
@@ -92,10 +93,13 @@ RFAM_FAMILIES: dict[str, str] = {
     "glycine": "RF00504",
 }
 RFAM_FASTA_URL = "https://ftp.ebi.ac.uk/pub/databases/Rfam/CURRENT/fasta_files/{acc}.fa.gz"
-# Fixed external leader/tRNA-adjacent anchor (tboxevo validation negatives).
-TBOXEVO_NEGATIVES = (
-    "/home/bioedca/tbox-phylogeny/tboxevo/data/processed/cms/idtm_validation_negatives.fasta"
-)
+# Fixed external leader/tRNA-adjacent anchor: the tboxevo idtm_validation_negatives.fasta.
+# This is an *external* (out-of-repo) source consumed only by the one-time `fetch-refs`
+# stage, which copies it to the committed ``leader_decoys.fa`` + records its provenance in
+# the manifest. It has no portable in-repo default (its path is operator-/machine-specific),
+# so ``fetch-refs`` requires it via ``--tboxevo-negatives``; the ``build`` step never needs
+# it (it reads the staged ``leader_decoys.fa``). Env override for convenience:
+TBOXEVO_NEGATIVES_ENV = "TBOX_TBOXEVO_NEGATIVES"
 
 # Seeded-config defaults (conf/data/decoys.yaml overrides).
 DEFAULT_GC_BACKGROUND_N = 2000
@@ -426,16 +430,28 @@ def fetch_refs(
     *,
     refs_dir: str | Path = _REFS_DIR,
     config: str | Path | None = None,
-    tboxevo_negatives: str | Path = TBOXEVO_NEGATIVES,
+    tboxevo_negatives: str | Path | None = None,
 ) -> int:
     """Stage the structured-RNA (Rfam) + leader (tboxevo) decoy sources (checksummed).
 
     Downloads each :data:`RFAM_FAMILIES` FASTA (EBI FTP), seeded-subsamples to the
-    per-family cap, writes a combined ``structured_rna_refs.fa``; copies the
-    tboxevo validation negatives to ``leader_decoys.fa``; and writes a checksum
-    manifest (per-file sha256, source URL/path, Rfam release, accessed date). The
-    ``build`` step is then network-free.
+    per-family cap, writes a combined ``structured_rna_refs.fa``; copies the tboxevo
+    validation negatives to ``leader_decoys.fa``; and writes a checksum manifest
+    (per-file sha256, source URL/path, Rfam release, accessed date). The ``build``
+    step is then network-free.
+
+    ``tboxevo_negatives`` is the external (out-of-repo) leader anchor source; it has
+    no portable default, so it must be supplied here (``--tboxevo-negatives`` or the
+    :data:`TBOXEVO_NEGATIVES_ENV` env var). Raises ``ValueError`` if unresolved.
     """
+    tboxevo_negatives = tboxevo_negatives or os.environ.get(TBOXEVO_NEGATIVES_ENV)
+    if not tboxevo_negatives:
+        raise ValueError(
+            "fetch-refs needs the external tboxevo leader anchor: pass "
+            "--tboxevo-negatives <path to idtm_validation_negatives.fasta> or set "
+            f"${TBOXEVO_NEGATIVES_ENV}. The staged leader_decoys.fa is the committed "
+            "copy; this source is only needed to (re)stage it."
+        )
     cfg = read_config(config)
     out = Path(refs_dir)
     out.mkdir(parents=True, exist_ok=True)
@@ -628,7 +644,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         p = argparse.ArgumentParser(prog="tbox_finder.decoys fetch-refs")
         p.add_argument("--refs-dir", default=_REFS_DIR)
         p.add_argument("--config", default="conf/data/decoys.yaml")
-        p.add_argument("--tboxevo-negatives", default=TBOXEVO_NEGATIVES)
+        p.add_argument(
+            "--tboxevo-negatives",
+            default=None,
+            help="external tboxevo idtm_validation_negatives.fasta (leader anchor source; "
+            f"required unless ${TBOXEVO_NEGATIVES_ENV} is set)",
+        )
         a = p.parse_args(rest)
         return fetch_refs(
             refs_dir=a.refs_dir, config=a.config, tboxevo_negatives=a.tboxevo_negatives
