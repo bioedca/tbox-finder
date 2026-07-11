@@ -1,0 +1,24 @@
+{
+  "adr": "ADR-0005",
+  "env_lock_hash": "a4a6715d411d7218432c4c670d35475f6c9aa7dd6397fd5d906ca7e21293dc34",
+  "extra": {
+    "ci_level": 0.95,
+    "n_boot": 2000,
+    "ood_ece_min_n": 20
+  },
+  "generated_at_utc": "2026-07-11T10:00:10.420122+00:00",
+  "git_sha": "d29eeba2d32a4e8f2c788f465ce4898be6f725b6",
+  "inputs": {
+    "conf/data/coverage.yaml": "b4396be4cb2cfb3b936834f1fb20b094528b577dd66130f25166aee88ba99dab",
+    "data/interim/splits/split_assignments.parquet": "b365987a3b4aa1087be96e51e8315d5cfd4a7e866bba5a877b1e472d06f921d8",
+    "data/processed/audits/power_budget_report.json": "0fcdbdbe3b169f177a7bc203c1f3a8e4df7bd1ba45549fcbf250f31ba78c33ce"
+  },
+  "outputs": {
+    "data/processed/audits/ood_ece_coverage_figure_data.json": "a8d3a2cb5b7543e9d96d9ead8d18c76a4ae6f066b25a04ad6ccfbdc1c92107cc",
+    "data/processed/audits/ood_ece_coverage_report.json": "d18f076ae79d0457d161d391bf61494df954e9e779295aa7eb9ab8b4ed0989e8"
+  },
+  "rule": "workflow/rules/data.smk :: ood_ece_coverage_sim",
+  "schema_version": "1.0",
+  "script": "src/tbox_finder/coverage.py",
+  "seed": 42
+}

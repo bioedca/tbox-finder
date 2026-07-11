@@ -1,0 +1,341 @@
+{
+  "adjudicable_footprint": {
+    "n_phyla_clearing_floor": 7,
+    "n_phyla_positive_bearing": 7,
+    "per_phylum_heldout_n": {
+      "Actinobacteria": 1230,
+      "Chloroflexi": 117,
+      "Deinococcus-Thermus": 28,
+      "Firmicutes": 7080,
+      "Proteobacteria": 31,
+      "Synergistetes": 27,
+      "Tenericutes": 202
+    },
+    "phyla_clearing_floor": [
+      "Actinobacteria",
+      "Chloroflexi",
+      "Deinococcus-Thermus",
+      "Firmicutes",
+      "Proteobacteria",
+      "Synergistetes",
+      "Tenericutes"
+    ],
+    "phyla_positive_bearing": [
+      "Actinobacteria",
+      "Chloroflexi",
+      "Deinococcus-Thermus",
+      "Firmicutes",
+      "Proteobacteria",
+      "Synergistetes",
+      "Tenericutes"
+    ],
+    "top_order_share_of_heldout": 0.6110664676845368,
+    "top_phylum_share_of_corpus_heldout": 0.8123924268502581
+  },
+  "adjudicable_fraction_among_positive_bearing_orders": 0.6976744186046512,
+  "adjudicable_fraction_ci": {
+    "ci_level": 0.95,
+    "fraction_hi": 0.8372093023255814,
+    "fraction_lo": 0.5581395348837209,
+    "fraction_mean": 0.7012209302325579,
+    "n_boot": 2000,
+    "n_clearing_hi": 36,
+    "n_clearing_lo": 24,
+    "seed": 42
+  },
+  "consistency_check": {
+    "available": true,
+    "mismatched_orders": [],
+    "n_mismatched_orders": 0,
+    "n_orders_matches": true,
+    "per_order_n_matches": true,
+    "power_report": "data/processed/audits/power_budget_report.json"
+  },
+  "floor_sweep": [
+    10,
+    15,
+    20,
+    30,
+    50
+  ],
+  "floor_sweep_coverage": {
+    "10": {
+      "adjudicable_fraction": 0.7441860465116279,
+      "floor": 10,
+      "n_clearing": 32,
+      "n_orders": 43
+    },
+    "15": {
+      "adjudicable_fraction": 0.7209302325581395,
+      "floor": 15,
+      "n_clearing": 31,
+      "n_orders": 43
+    },
+    "20": {
+      "adjudicable_fraction": 0.6976744186046512,
+      "floor": 20,
+      "n_clearing": 30,
+      "n_orders": 43
+    },
+    "30": {
+      "adjudicable_fraction": 0.5116279069767442,
+      "floor": 30,
+      "n_clearing": 22,
+      "n_orders": 43
+    },
+    "50": {
+      "adjudicable_fraction": 0.37209302325581395,
+      "floor": 50,
+      "n_clearing": 16,
+      "n_orders": 43
+    }
+  },
+  "inconclusive_by_rule": {
+    "n_sub_min_n_positive_bearing_orders": 13,
+    "named_zero_positive_clades_present_in_corpus": [],
+    "named_zero_positive_scan_clades": [
+      "Archaea",
+      "DPANN",
+      "CPR/Patescibacteria",
+      "candidate-phyla"
+    ],
+    "note": "The scan-wide inconclusive-by-rule fraction is far larger than the positive-bearing-order fraction: every scanned corpus outside the 7-phylum calibration footprint (all Archaea / DPANN / CPR / candidate phyla + every T-box-free bacterial phylum) carries 0 held-out positives \u2192 inconclusive-by-rule ex ante. A precise scan-wide denominator is not pinnable here (the GTDB corpus enumeration is deferred to ADR-0003); it is bounded above by nearest-relative reach of this footprint.",
+    "sub_min_n_fraction_among_positive_bearing": 0.3023255813953488
+  },
+  "internal_consistency": {
+    "consistent": true,
+    "ood_ece_min_n": 20,
+    "recall_min_real_homolog_n": 20
+  },
+  "min_n_admissibility_rationale": "OOD-ECE min-N admissibility floor (ADR-0005 D13). Below this many real positives in a corpus's leave-clade-out calibration unit the small-N-robust OOD-ECE estimator is inadmissible (the ~20-positive per-order ECE is statistically unstable, PRD \u00a712) \u2192 the corpus is sensitivity-bounded / inconclusive-by-rule, never a silent calibrated-negative PASS. Pinned = 20, internally consistent with the recall floor MIN_REAL_HOMOLOG_N = 20 (P0-26), the split's min_heldout_positives = 20, and PRD \u00a712. Blinded-frozen at P0.",
+  "n_orders_clearing_floor": 30,
+  "n_orders_with_heldout": 43,
+  "ood_ece_min_n": 20,
+  "per_order": {
+    "Acholeplasmatales": {
+      "clears_floor": true,
+      "n_heldout": 52,
+      "phylum": "Tenericutes"
+    },
+    "Acidaminococcales": {
+      "clears_floor": true,
+      "n_heldout": 52,
+      "phylum": "Firmicutes"
+    },
+    "Actinomycetales": {
+      "clears_floor": true,
+      "n_heldout": 42,
+      "phylum": "Actinobacteria"
+    },
+    "Actinopolysporales": {
+      "clears_floor": false,
+      "n_heldout": 1,
+      "phylum": "Actinobacteria"
+    },
+    "Anaerolineales": {
+      "clears_floor": true,
+      "n_heldout": 41,
+      "phylum": "Chloroflexi"
+    },
+    "Bifidobacteriales": {
+      "clears_floor": true,
+      "n_heldout": 69,
+      "phylum": "Actinobacteria"
+    },
+    "Candidatus Aquicultorales": {
+      "clears_floor": false,
+      "n_heldout": 5,
+      "phylum": "Actinobacteria"
+    },
+    "Candidatus Izemoplasmatales": {
+      "clears_floor": true,
+      "n_heldout": 24,
+      "phylum": "Tenericutes"
+    },
+    "Candidatus Nanopelagicales": {
+      "clears_floor": false,
+      "n_heldout": 12,
+      "phylum": "Actinobacteria"
+    },
+    "Catenulisporales": {
+      "clears_floor": false,
+      "n_heldout": 4,
+      "phylum": "Actinobacteria"
+    },
+    "Chloroflexales": {
+      "clears_floor": true,
+      "n_heldout": 20,
+      "phylum": "Chloroflexi"
+    },
+    "Coriobacteriales": {
+      "clears_floor": false,
+      "n_heldout": 18,
+      "phylum": "Actinobacteria"
+    },
+    "Corynebacteriales": {
+      "clears_floor": true,
+      "n_heldout": 370,
+      "phylum": "Actinobacteria"
+    },
+    "Dehalococcoidales": {
+      "clears_floor": true,
+      "n_heldout": 34,
+      "phylum": "Chloroflexi"
+    },
+    "Deinococcales": {
+      "clears_floor": true,
+      "n_heldout": 28,
+      "phylum": "Deinococcus-Thermus"
+    },
+    "Desulfuromonadales": {
+      "clears_floor": true,
+      "n_heldout": 31,
+      "phylum": "Proteobacteria"
+    },
+    "Eggerthellales": {
+      "clears_floor": false,
+      "n_heldout": 7,
+      "phylum": "Actinobacteria"
+    },
+    "Entomoplasmatales": {
+      "clears_floor": true,
+      "n_heldout": 68,
+      "phylum": "Tenericutes"
+    },
+    "Erysipelotrichales": {
+      "clears_floor": true,
+      "n_heldout": 445,
+      "phylum": "Firmicutes"
+    },
+    "Frankiales": {
+      "clears_floor": false,
+      "n_heldout": 9,
+      "phylum": "Actinobacteria"
+    },
+    "Glycomycetales": {
+      "clears_floor": false,
+      "n_heldout": 4,
+      "phylum": "Actinobacteria"
+    },
+    "Halanaerobiales": {
+      "clears_floor": true,
+      "n_heldout": 99,
+      "phylum": "Firmicutes"
+    },
+    "Haloplasmatales": {
+      "clears_floor": true,
+      "n_heldout": 22,
+      "phylum": "Tenericutes"
+    },
+    "Jiangellales": {
+      "clears_floor": false,
+      "n_heldout": 2,
+      "phylum": "Actinobacteria"
+    },
+    "Kineosporiales": {
+      "clears_floor": false,
+      "n_heldout": 1,
+      "phylum": "Actinobacteria"
+    },
+    "Ktedonobacterales": {
+      "clears_floor": true,
+      "n_heldout": 22,
+      "phylum": "Chloroflexi"
+    },
+    "Lactobacillales": {
+      "clears_floor": true,
+      "n_heldout": 5323,
+      "phylum": "Firmicutes"
+    },
+    "Micrococcales": {
+      "clears_floor": true,
+      "n_heldout": 275,
+      "phylum": "Actinobacteria"
+    },
+    "Micromonosporales": {
+      "clears_floor": true,
+      "n_heldout": 65,
+      "phylum": "Actinobacteria"
+    },
+    "Mycoplasmatales": {
+      "clears_floor": true,
+      "n_heldout": 36,
+      "phylum": "Tenericutes"
+    },
+    "Nakamurellales": {
+      "clears_floor": false,
+      "n_heldout": 4,
+      "phylum": "Actinobacteria"
+    },
+    "Natranaerobiales": {
+      "clears_floor": true,
+      "n_heldout": 23,
+      "phylum": "Firmicutes"
+    },
+    "Propionibacteriales": {
+      "clears_floor": true,
+      "n_heldout": 66,
+      "phylum": "Actinobacteria"
+    },
+    "Pseudonocardiales": {
+      "clears_floor": true,
+      "n_heldout": 48,
+      "phylum": "Actinobacteria"
+    },
+    "Rubrobacterales": {
+      "clears_floor": false,
+      "n_heldout": 2,
+      "phylum": "Actinobacteria"
+    },
+    "Selenomonadales": {
+      "clears_floor": true,
+      "n_heldout": 224,
+      "phylum": "Firmicutes"
+    },
+    "Sporichthyales": {
+      "clears_floor": false,
+      "n_heldout": 1,
+      "phylum": "Actinobacteria"
+    },
+    "Streptomycetales": {
+      "clears_floor": true,
+      "n_heldout": 197,
+      "phylum": "Actinobacteria"
+    },
+    "Streptosporangiales": {
+      "clears_floor": true,
+      "n_heldout": 24,
+      "phylum": "Actinobacteria"
+    },
+    "Synergistales": {
+      "clears_floor": true,
+      "n_heldout": 27,
+      "phylum": "Synergistetes"
+    },
+    "Thermoanaerobacterales": {
+      "clears_floor": true,
+      "n_heldout": 271,
+      "phylum": "Firmicutes"
+    },
+    "Tissierellales": {
+      "clears_floor": true,
+      "n_heldout": 420,
+      "phylum": "Firmicutes"
+    },
+    "Veillonellales": {
+      "clears_floor": true,
+      "n_heldout": 223,
+      "phylum": "Firmicutes"
+    }
+  },
+  "predicted_gate3_modal_shape": "discovery-predominantly-inconclusive",
+  "seed": 42,
+  "verdict_vector_shape": {
+    "adjudicable": 30,
+    "inconclusive_by_rule_total": 17,
+    "modal_shape_basis": "calibration footprint confined to 7 bacterial phyla (0 archaeal); the \u00a713 scan (PRD \u00a77.2) targets the whole prokaryotic tree incl. the named zero-positive superclades \u2192 inconclusive-by-rule is modal",
+    "modal_shape_is_inconclusive": true,
+    "sub_min_n_inconclusive": 13,
+    "zero_positive_inconclusive_named_clades": 4
+  }
+}
