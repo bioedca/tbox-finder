@@ -653,3 +653,61 @@ rule plot_coverage_figures:
         "python -m tbox_finder.coverage plot-figures "
         "--figure-data {input.figure_data:q} "
         "--out-dir {params.out_dir:q} >{log} 2>&1"
+
+
+_NEG_DIR = "data/processed/negatives"
+
+
+rule build_decoys:
+    """Build the four §9.1 static decoy/negative pools + union-prior loci-masking (P0-30).
+
+    Assembles the four §9.1 training/benchmark negative classes — (1) a seeded
+    GC+length-matched 0th-order composition background, (2) other structured RNAs
+    (a checksummed Rfam subsample staged under ``data/external/refs/decoys/`` by
+    ``python -m tbox_finder.decoys fetch-refs``), (3) dinucleotide-shuffled positives
+    (Altschul-Erikson), and (4) the tboxevo 5'UTR/tRNA-adjacent leader anchor — then
+    masks the **full union prior + own training positives + a flank** from every pool
+    (``masking.py``; ADR-0006 D11 / ADR-0005 D14) and reports the residual contamination
+    against the union denominator. The ADR-0006 D11 spare-rule masking key lives in
+    ``masking.spare_rule_excludes_from_mining`` (encoded + unit-tested; the P2 mining
+    guard). Writes ``decoys_v0.parquet`` (DVC), the audit report, and a provenance.json.
+
+    A **one-time LOCAL** rule kept out of ``rule all`` with no ``input:`` — its inputs
+    are the DVC-tracked corpus (P0-12) + union prior (P0-14) and the committed/staged
+    decoy refs (tracked by DVC/git-LFS + provenance, not the Snakemake DAG). Seeded
+    (``PYTHONHASHSEED=0`` + ``conf/data/decoys.yaml``). Invoke:
+
+        python -m tbox_finder.decoys fetch-refs \
+            --tboxevo-negatives <path>/idtm_validation_negatives.fasta   # one-time network stage
+        snakemake --cores 1 --use-conda build_decoys
+    """
+    output:
+        decoys=f"{_NEG_DIR}/decoys_v0.parquet",
+        provenance=f"{_NEG_DIR}/decoys_v0.provenance.json",
+        report=f"{_AUDIT_DIR}/decoys_report.json",
+    params:
+        corpus=config.get("decoys_corpus", "data/processed/master_clean_v0.parquet"),
+        union_prior=config.get("decoys_union_prior", "data/processed/priors/union_prior.parquet"),
+        structured_refs=config.get(
+            "decoys_structured_refs", "data/external/refs/decoys/structured_rna_refs.fa"
+        ),
+        leader_refs=config.get(
+            "decoys_leader_refs", "data/external/refs/decoys/leader_decoys.fa"
+        ),
+        conf="conf/data/decoys.yaml",
+        env_lock="envs/data.conda-lock.yml",
+    log:
+        "logs/build_decoys.log",
+    conda:
+        "../../envs/data.yml"
+    shell:
+        "PYTHONHASHSEED=0 python -m tbox_finder.decoys build "
+        "--corpus {params.corpus:q} "
+        "--union-prior {params.union_prior:q} "
+        "--structured-refs {params.structured_refs:q} "
+        "--leader-refs {params.leader_refs:q} "
+        "--out {output.decoys:q} "
+        "--provenance {output.provenance:q} "
+        "--report {output.report:q} "
+        "--config {params.conf:q} "
+        "--env-lock {params.env_lock:q} >{log} 2>&1"

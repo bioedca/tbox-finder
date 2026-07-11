@@ -1,0 +1,31 @@
+{
+  "adr": "ADR-0005",
+  "env_lock_hash": "a4a6715d411d7218432c4c670d35475f6c9aa7dd6397fd5d906ca7e21293dc34",
+  "extra": {
+    "decoys_digest": "13061e3e5e524ac57c5708fa2496253574b2b05653f5cf19b99dafaa1f64db77",
+    "n_records": 7008,
+    "pool_counts": {
+      "dinuc_shuffled": 2000,
+      "gc_background": 2000,
+      "leader_decoy": 8,
+      "structured_rna": 3000
+    },
+    "residual_contamination_fraction": 0.00012417218543046358
+  },
+  "generated_at_utc": "2026-07-11T20:37:17.443853+00:00",
+  "git_sha": "94b23413a3fd3d8f9bb9d0d308ea7891202f2a2a",
+  "inputs": {
+    "data/external/refs/decoys/leader_decoys.fa": "97a1a3b1c4ec262094e6fb69dadb5e450219445104fd099ebb0579e3e901bbcd",
+    "data/external/refs/decoys/structured_rna_refs.fa": "ca9d1947eb5a15d6db5c59cd373306532884819f4bf390947e89789022fd2847",
+    "data/processed/master_clean_v0.parquet": "1eb76591d0e481019dd7acf72a439f157fec9f2aeecb8cc5c37ba80a7b062dd2",
+    "data/processed/priors/union_prior.parquet": "9ff1ff944bf36aabde2fa31f6523d41a777d08b18f768f87c9f840e788e232ed"
+  },
+  "outputs": {
+    "data/processed/audits/decoys_report.json": "b7a44fb555ff2d75d7e143f6a99540dcb8c0690c8aa9853edf61a003df79279b",
+    "data/processed/negatives/decoys_v0.parquet": "b1062bfb80d999de87f3ee9c73c9f8885551e5ec29bbfbab025b7893d34b80d0"
+  },
+  "rule": "workflow/rules/data.smk :: build_decoys",
+  "schema_version": "1.0",
+  "script": "src/tbox_finder/decoys.py",
+  "seed": 42
+}
