@@ -307,9 +307,22 @@ def build_report(
     # Actinobacteria-heavy (single-phylum → within-phylum-memorization confound),
     # so the *independent-of-Actinobacteria* natural class-II is the scarce
     # evidence: P0-17 (0) + the non-Actinobacteria fraction of any blind set.
-    heldout_classII = heldout[heldout["klass"] == CLASS_II]
+    heldout_classII = heldout[heldout["klass"] == CLASS_II].copy()
+    # Normalize the phylum (None / NaN / "" → "(unresolved)") so an unresolved phylum
+    # is never miscounted as independent non-Actinobacteria evidence and the Counter
+    # keys stay JSON-sortable (a NaN float key breaks json.dumps(sort_keys=True)).
+    heldout_classII["phylum_norm"] = [
+        p if isinstance(p, str) and p else "(unresolved)"
+        for p in heldout_classII["resolved_phylum"]
+    ]
     blind_classII = heldout_classII[heldout_classII["source"] == "blind"]
-    blind_non_actino = blind_classII[blind_classII["resolved_phylum"] != HOLDOUT_PHYLUM]
+    # A blind class-II counts as independent non-Actinobacteria evidence only when its
+    # phylum is *resolved* and not Actinobacteria (an unresolved phylum cannot be
+    # asserted non-Actino — conservative, no over-counting of independent evidence).
+    blind_non_actino = blind_classII[
+        (blind_classII["phylum_norm"] != HOLDOUT_PHYLUM)
+        & (blind_classII["phylum_norm"] != "(unresolved)")
+    ]
     independent_non_actino = int(classii["raw_positive_count"]) + int(len(blind_non_actino))
 
     arms = {
@@ -350,7 +363,7 @@ def build_report(
         },
         "classII_anti_mimicry": {
             "heldout_classII_total": int(len(heldout_classII)),
-            "heldout_classII_by_phylum": dict(Counter(heldout_classII["resolved_phylum"])),
+            "heldout_classII_by_phylum": dict(Counter(heldout_classII["phylum_norm"])),
             "independent_non_actinobacteria": arm_verdict(independent_non_actino, min_n=min_n),
             "independent_sources": {
                 "P0-17_additional_non_actino": int(classii["raw_positive_count"]),
@@ -378,7 +391,12 @@ def build_report(
         "beyond_firmicutes_certification_rests_on": (
             "non_firmicutes_order_subgroup"
             if int(len(non_firm)) >= min_n
-            else "UNMET — both arm (c) and the subgroup below min-N (§7 stop-and-ask)"
+            else (
+                "arm_c_literature_anchor"
+                if not arm_c_below
+                else "UNMET — both the non-Firmicutes-order subgroup and arm (c) below "
+                "min-N (§7 stop-and-ask)"
+            )
         ),
         "synthetic_divergence_arm": (
             "pre-registered precondition for the §1 CM-invisibility claim (ADR-0005 D8); "
@@ -389,6 +407,9 @@ def build_report(
             "the P2 construction-powered synthetic-class-II recovery set (above min-N by "
             "construction, ADR-0005 D9) + the within-phylum-homology control; the natural "
             "independent-of-Actinobacteria class-II is below min-N"
+            if classII_indep_below
+            else "the natural independent-of-Actinobacteria class-II evidence (>= min-N) "
+            "+ the D9 within-phylum-homology control"
         ),
     }
 
@@ -432,11 +453,18 @@ def run_audit(
     out_report: str | Path = POWER_REPORT,
     figure_data: str | Path = POWER_FIGURE_DATA,
     env_lock: str | Path | None = None,
-    min_n: int = MIN_REAL_HOMOLOG_N,
 ) -> int:
-    """Read the split partition, compute the audit, write report + figure data + provenance."""
+    """Read the split partition, compute the audit, write report + figure data + provenance.
+
+    The audit artifact is always produced at the **ADR-0005-pinned**
+    ``MIN_REAL_HOMOLOG_N`` — there is no runtime override, so no committed report can
+    contradict the frozen threshold (a recalibration goes through ADR re-sign-off, not
+    a CLI flag). The ``min_n`` parameter is kept only on the pure ``build_report`` /
+    predicate layer for unit testing.
+    """
     import pandas as pd
 
+    min_n = MIN_REAL_HOMOLOG_N
     split_df = pd.read_parquet(table)
     identities = compute_heldout_identities(split_df, aligned_dir)
     anchor = anchor_counts(anchor_report)
@@ -579,7 +607,6 @@ def _build_parser() -> argparse.ArgumentParser:
     a.add_argument("--out-report", default=POWER_REPORT)
     a.add_argument("--figure-data", default=POWER_FIGURE_DATA)
     a.add_argument("--env-lock", default=None)
-    a.add_argument("--min-n", type=int, default=MIN_REAL_HOMOLOG_N)
 
     p = sub.add_parser("plot-figures", help="render the audit figures (viz env)")
     p.add_argument("--figure-data", default=POWER_FIGURE_DATA)
@@ -598,7 +625,6 @@ def main(argv: list[str] | None = None) -> int:
             out_report=args.out_report,
             figure_data=args.figure_data,
             env_lock=args.env_lock,
-            min_n=args.min_n,
         )
     if args.cmd == "plot-figures":
         return plot_figures(figure_data=args.figure_data, out_dir=args.out_dir)

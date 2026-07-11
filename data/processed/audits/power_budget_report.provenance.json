@@ -9,8 +9,8 @@
     ],
     "min_real_homolog_n": 20
   },
-  "generated_at_utc": "2026-07-11T08:27:14.339883+00:00",
-  "git_sha": "57422bd1b7978adc43e4db514e2bbae045b37de0",
+  "generated_at_utc": "2026-07-11T09:01:59.666479+00:00",
+  "git_sha": "e72db11d92819a9c8433c0c0f5c3765576f161b7",
   "inputs": {
     "data/external/classII_positives/classII_report.json": "ee859fdde6be5216f15db48c81245555f63742e27a43beeac4abad9234196036",
     "data/external/gate1_anchor/gate1_anchor_report.json": "d1c84ae54177b012f8af39d02df6422904c8ccf94d023195a339c7ddf86d3e18",

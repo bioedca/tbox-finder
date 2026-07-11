@@ -269,3 +269,38 @@ def test_build_report_counts_blind_non_actino_as_independent(pd):
     rep = power.build_report(df, ident, anchor, classii)
     src = rep["headline_arms"]["classII_anti_mimicry"]["independent_sources"]
     assert src["blind_non_actino"] == 1
+
+
+def test_build_report_unresolved_phylum_not_counted_and_json_safe(pd):
+    """An unresolved-phylum blind class-II is NOT independent non-Actino, and the
+    normalized phylum keeps the report JSON-serializable with sort_keys (a NaN key
+    would break json.dumps(sort_keys=True))."""
+    df = _synthetic_split_df(pd)
+    extra = pd.DataFrame(
+        [
+            dict(
+                seq_name="blind_unk",
+                source="blind",
+                klass="II",
+                nested_role="heldout",
+                resolved_phylum=None,  # unresolved — cannot be asserted non-Actino
+                loo_order_unit=None,
+            ),
+        ]
+    )
+    df = pd.concat([df, extra], ignore_index=True)
+    ident = _identities(df)
+    ident["blind_unk"] = 0.55
+    anchor = {
+        "raw_record_count": 16,
+        "counts_by_gtdb_phylum": {},
+        "n_coordinate_novel": 5,
+        "n_corpus_coord_overlap": 11,
+    }
+    classii = {"raw_positive_count": 0, "leads_count": 40, "n_added_to_no_leakage_test": 0}
+    rep = power.build_report(df, ident, anchor, classii)
+    src = rep["headline_arms"]["classII_anti_mimicry"]["independent_sources"]
+    assert src["blind_non_actino"] == 0  # unresolved is conservatively excluded
+    by_phylum = rep["headline_arms"]["classII_anti_mimicry"]["heldout_classII_by_phylum"]
+    assert "(unresolved)" in by_phylum
+    json.dumps(rep, sort_keys=True)  # must not raise on a normalized key set

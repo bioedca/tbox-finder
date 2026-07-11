@@ -544,8 +544,8 @@ rule power_budget_audit:
         table=f"{_SPLITS_DIR}/split_assignments.parquet",
         class_i=f"{_SPLITS_ALIGNED_DIR}/class_I.sto",
         class_ii=f"{_SPLITS_ALIGNED_DIR}/class_II.sto",
-        anchor="data/external/gate1_anchor/gate1_anchor_report.json",
-        classii="data/external/classII_positives/classII_report.json",
+        anchor=f"{_GATE1_DIR}/gate1_anchor_report.json",
+        classii=f"{_CLASSII_DIR}/classII_report.json",
     output:
         report=f"{_AUDIT_DIR}/power_budget_report.json",
         provenance=f"{_AUDIT_DIR}/power_budget_report.provenance.json",
