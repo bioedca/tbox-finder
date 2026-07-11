@@ -66,6 +66,12 @@ def test_binomial_se_rejects_nonpositive_n(bad):
         power.binomial_se(*bad)
 
 
+@pytest.mark.parametrize("bad_n", [10.5, 10.0, True])
+def test_binomial_se_rejects_non_integer_n(bad_n):
+    with pytest.raises(ValueError):
+        power.binomial_se(0.5, bad_n)
+
+
 @pytest.mark.parametrize("p", [-0.01, 1.01])
 def test_binomial_se_rejects_out_of_range_p(p):
     with pytest.raises(ValueError):
@@ -90,8 +96,8 @@ def test_recall_bar_resolution_bite_at_wrong_min_n():
     assert res["ci_floor_matches_granularity"] is False
 
 
-@pytest.mark.parametrize("bad", [0, -1])
-def test_recall_bar_resolution_rejects_nonpositive_min_n(bad):
+@pytest.mark.parametrize("bad", [0, -1, 20.5, 20.0, True])
+def test_recall_bar_resolution_rejects_bad_min_n(bad):
     with pytest.raises(ValueError):
         power.recall_bar_resolution(min_n=bad)
 
@@ -100,6 +106,13 @@ def test_recall_bar_resolution_rejects_nonpositive_min_n(bad):
 def test_min_detectable_effect_rejects_bad_z(bad_z):
     with pytest.raises(ValueError):
         power.min_detectable_effect_pp(0.5, 20, z=bad_z)
+
+
+@pytest.mark.parametrize("bad_baseline", [0.0, 1.0, -0.1, 1.1])
+def test_min_detectable_effect_rejects_boundary_baseline(bad_baseline):
+    # SE = 0 at the Bernoulli boundaries -> a meaningless zero MDE; reject.
+    with pytest.raises(ValueError):
+        power.min_detectable_effect_pp(bad_baseline, 20)
 
 
 def test_min_detectable_effect_is_positive_and_scales_with_n():
@@ -113,7 +126,7 @@ def test_expected_false_at_fdr():
     assert power.expected_false_at_fdr(0.0, 1000) == 0.0
 
 
-@pytest.mark.parametrize("bad", [(-0.1, 10), (1.1, 10), (0.1, -1)])
+@pytest.mark.parametrize("bad", [(-0.1, 10), (1.1, 10), (0.1, -1), (0.1, 5.5), (0.1, True)])
 def test_expected_false_at_fdr_rejects_bad_input(bad):
     with pytest.raises(ValueError):
         power.expected_false_at_fdr(*bad)

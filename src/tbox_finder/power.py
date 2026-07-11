@@ -208,10 +208,23 @@ def arm_verdict(n: int, *, min_n: int = MIN_REAL_HOMOLOG_N, n_blocks: int | None
 # result — the arguments are effect-size / estimability logic authored ex ante.
 
 
+def _require_count(value, name: str, *, allow_zero: bool = False) -> int:
+    """Reject a non-integer / out-of-range count (``bool`` is not a count either).
+
+    Counts (N of positives, candidates, min-N) must be true integers — a float
+    like ``20.5`` would compute with 20.5 yet report ``int(20.5) == 20``, an
+    inconsistent diagnostic (CodeRabbit P0-28 round-2).
+    """
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError(f"{name} must be an integer")
+    if value < 0 or (value == 0 and not allow_zero):
+        raise ValueError(f"{name} must be {'non-negative' if allow_zero else 'positive'}")
+    return value
+
+
 def binomial_se(p: float, n: int) -> float:
     """Standard error of a binomial proportion estimate: ``sqrt(p(1-p)/n)``."""
-    if n <= 0:
-        raise ValueError("n must be positive")
+    _require_count(n, "n")
     if not 0.0 <= p <= 1.0:
         raise ValueError("p must be in [0, 1]")
     return math.sqrt(p * (1.0 - p) / n)
@@ -229,8 +242,7 @@ def recall_bar_resolution(min_n: int = MIN_REAL_HOMOLOG_N) -> dict:
     ``1/N >= 5 pp`` argument that pinned ``MIN_REAL_HOMOLOG_N`` (Amendment A1), so
     the recall bar and the min-N floor are one internally-consistent construction.
     """
-    if min_n <= 0:
-        raise ValueError("min_n must be positive")
+    _require_count(min_n, "min_n")
     granularity_pp = 100.0 / min_n
     return {
         "min_n": int(min_n),
@@ -251,6 +263,10 @@ def min_detectable_effect_pp(baseline_recall: float, n: int, z: float = 1.96) ->
     (CLAUDE.md §10.3). The gated inference is the block-resampled CI + the D5
     small-N exact/permutation test, not this normal approximation.
     """
+    if not 0.0 < baseline_recall < 1.0:
+        # The normal approximation is degenerate at the Bernoulli boundaries
+        # (SE = 0 -> MDE = 0); reject rather than report a meaningless zero.
+        raise ValueError("baseline_recall must be strictly between 0 and 1")
     if not math.isfinite(z) or z <= 0.0:
         raise ValueError("z must be finite and positive")
     return z * binomial_se(baseline_recall, n) * 100.0
@@ -260,8 +276,7 @@ def expected_false_at_fdr(fdr: float, n_candidates: int) -> float:
     """Expected false discoveries in a candidate table of size N at a given FDP."""
     if not 0.0 <= fdr <= 1.0:
         raise ValueError("fdr must be in [0, 1]")
-    if n_candidates < 0:
-        raise ValueError("n_candidates must be non-negative")
+    _require_count(n_candidates, "n_candidates", allow_zero=True)
     return fdr * n_candidates
 
 
