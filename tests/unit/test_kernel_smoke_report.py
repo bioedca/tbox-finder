@@ -311,6 +311,31 @@ def test_good_measured_report_valid():
     assert validate_report(good_measured_report()) == []
 
 
+def test_fixture_error_report_is_schema_valid():
+    """run_smoke's fault-tolerant path (fixture load failed) must stay schema-valid:
+    the fixture dict keeps its required keys (values null) plus an `error`, the kernel
+    blocks are None, and the gate fails cleanly."""
+    d = good_measured_report()
+    d["fixture"] = {
+        "path": "missing.npy",
+        "shape": None,
+        "dtype": None,
+        "seed": None,
+        "sha256": None,
+        "error": "FileNotFoundError: missing.npy",
+    }
+    d["selective_scan"] = None
+    d["causal_conv1d"] = None
+    d["gate"] = {
+        "import_ok": True,
+        "forward_ok": False,
+        "parity_ok": False,
+        "overall_pass": False,
+    }
+    d["setup_error"] = "RuntimeError: build failed"
+    assert validate_report(d) == []
+
+
 # ---- guard bites: each mutation must produce >=1 error --------------------------------
 def _drop_top(d):
     del d["gate"]

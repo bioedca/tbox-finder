@@ -375,17 +375,38 @@ def run_smoke(args) -> dict[str, Any]:
         },
     }
 
-    tokens, fmeta = load_dna_tokens(args.fixture)
-    report["fixture"] = fmeta
+    # Fixture load is fault-tolerant too: a missing/corrupt fixture must still leave a
+    # schema-valid report (all required fixture keys present, plus an `error`), never crash.
+    try:
+        tokens, fmeta = load_dna_tokens(args.fixture)
+        report["fixture"] = fmeta
+    except Exception as exc:  # noqa: BLE001 - recorded, not raised
+        report["fixture"] = {
+            "path": args.fixture,
+            "shape": None,
+            "dtype": None,
+            "seed": None,
+            "sha256": None,
+            "error": f"{type(exc).__name__}: {exc}",
+        }
+        tokens = None
 
-    # The load-bearing import must succeed to run any kernel forward (A2 C2).
+    # The load-bearing import must succeed to run any kernel forward (A2 C2). SSM-input
+    # construction is wrapped so a build error is recorded (report still written), not raised.
     ss_import_ok = imports["selective_scan_cuda"]["ok"]
-    if ss_import_ok and env["cuda_available"]:
-        inp = build_ssm_inputs(tokens, args.d_model, args.d_state, args.dtype, device, args.seed)
-        report["selective_scan"] = run_selective_scan(
-            inp, atol, args.iters, args.ref_iters, args.warmup
-        )
-        report["causal_conv1d"] = run_causal_conv1d(inp, args.d_conv, atol, args.iters, args.warmup)
+    if tokens is not None and ss_import_ok and env["cuda_available"]:
+        try:
+            inp = build_ssm_inputs(
+                tokens, args.d_model, args.d_state, args.dtype, device, args.seed
+            )
+            report["selective_scan"] = run_selective_scan(
+                inp, atol, args.iters, args.ref_iters, args.warmup
+            )
+            report["causal_conv1d"] = run_causal_conv1d(
+                inp, args.d_conv, atol, args.iters, args.warmup
+            )
+        except Exception as exc:  # noqa: BLE001 - recorded, not raised
+            report["setup_error"] = f"{type(exc).__name__}: {exc}"
 
     ss = report["selective_scan"] or {}
     cc = report["causal_conv1d"] or {}
