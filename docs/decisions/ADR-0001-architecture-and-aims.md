@@ -111,6 +111,7 @@ Per §18.3, this ADR **delegates** and does not restate values: **ADR-0002** (en
 - **imp.md:** P0-03 (this step); referenced by ADR-0002…0006 authoring steps and every downstream gate decision.
 - **CLAUDE.md:** §2.3 precedence carve-out, §7 items 2/4 (ADR sign-off, gate-failure stop-and-ask), §8.5 (step-local gates), §10.3 (no fabricated metrics).
 - **Cards / paper (release-bound):** model card (two-checkpoint split, per-checkpoint GATE attribution, CC-BY-4.0), dataset card (license per P0 audit), `paper/manuscript.qmd` (aims + terminal-outcome map).
+- **Phase-0 exit (2026-07-12):** the two-stage, non-circular aims are consolidated (no decision changed) into `docs/dev-log/phase0_2026-07-12.pdf`, the `README.md` P0 headline, and the `paper/manuscript.qmd` §Non-circular evaluation design paragraph (GATE-1…GATE-4 framing + orthogonal-validation requirement).
 
 ## Sign-off
 

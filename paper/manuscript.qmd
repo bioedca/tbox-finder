@@ -1,0 +1,100 @@
+---
+title: "Genome-wide discovery of T-box riboswitches and expansion of their known phylogenetic distribution"
+author: "bioedca"
+abstract: |
+  *[Abstract — placeholder. Written at the preprint/submission gate once the
+  Phase 4/5 discovery result and its GATE-1/GATE-2 evidence are in hand. No
+  result is stated here at Phase 0.]*
+format:
+  typst:
+    toc: false
+    number-sections: true
+---
+
+<!--
+Living manuscript. One paragraph + figure caption is added at each phase-exit
+gate (CLAUDE.md §6.2/§6.4); an unwritten paragraph is a phase-exit blocker.
+Every biological/statistical fact carries a machine-traceable citation inline
+(PMID/DOI + accessed date, CLAUDE.md §10.1). No metric, discovery count, or
+eval number is asserted before the phase that measures it (§10.3). A formatted
+bibliography is generated from these identifiers at the release gate; rendered
+with Typst (no LaTeX in the toolchain).
+-->
+
+# Introduction
+
+*[Placeholder — authored across Phases 4–6 as the discovery narrative lands.]*
+
+# Methods
+
+## Data provenance and curation {#sec-data}
+
+The training corpus comprises **23,535** curated T-box riboswitch records drawn
+from the T-box database (TBDB) lineage (DOI:10.1093/nar/gkaa721; accessed
+2026-07-11), re-ingested through a proper-CSV parse gate that reconciles the
+record count and per-record hash-identity against the upstream cleaned table
+before any downstream use. Each record's taxonomy is re-placed onto a single
+pinned GTDB release so that the clade boundaries used for splitting are
+internally consistent. Notably, the curated corpus contains **no archaeal
+records**; whether *bona fide* T-boxes exist in Archaea (and in the
+under-sampled DPANN, CPR/Patescibacteria, and candidate phyla) is treated as an
+open question the genome-wide scan is designed to test, not a settled negative
+(PMID:36594112, DOI:10.1002/wrna.1774; PMID:31020937,
+DOI:10.2174/1386207322666190425143301; accessed 2026-07-11). Dataset
+construction, splits, and evaluation are reported following the DOME
+recommendations for machine learning in biology (DOI:10.1093/gigascience/giae094,
+PMID:39661723; accessed 2026-07-10).
+
+## Non-circular evaluation design {#sec-eval}
+
+Because the headline claim is a **generalization** claim — that a learned model
+recovers T-boxes beyond the phylogenetic range of its training data — homology
+leakage across the train/test boundary would inflate exactly the metric that is
+the paper's central result. We therefore partition the corpus by a
+**structure-aware, homology-clustered leave-clade-out** scheme: positives are
+single-linkage clustered on consensus-column identity over the Rfam **RF00230**
+model alignment, whole clusters are assigned to folds, and clade-crossing
+clusters are held out, yielding a partition with maximum held-out-to-training
+consensus identity **< 0.70** (observed maximum 0.699). This design is motivated
+by the documented collapse of sequence-based homology search on divergent
+non-coding RNA (PMID:17151342, DOI:10.1101/gr.5890907; PMID:19861422,
+DOI:10.1261/rna.1556009; accessed 2026-07-10), which is precisely the regime in
+which a generalization claim must be tested. Leakage control is enforced as a
+**CI-blocking test** over the real full-corpus partition on every change.
+
+Detection is evaluated against pre-registered, blinded-frozen gates: **GATE-1**
+(recall at matched precision versus a `cmsearch` baseline, with a two-part
+effect-size-plus-CI-floor bar over block-resampled, macro-averaged arms),
+**GATE-2** (in-distribution calibration error and a bootstrap-CI-bounded
+discovery false-discovery proportion on a conservative empirical null),
+**GATE-3** (a per-corpus verdict rolled up to a project-level outcome), and
+**GATE-4** (per-nucleotide segmentation F1 taken as the **minimum over the three
+core structural elements**, not a mean). Circularity is further controlled by a
+class-II-CM-naive detector checkpoint that is never routed through the covariance
+model it would otherwise memorize, and by requiring **orthogonal** (covariation,
+architecture, synteny) evidence before any novel-clade discovery is confirmed.
+All gate thresholds are pinned across six Architecture Decision Records
+(ADR-0001…0006) and are frozen prior to unblinding.
+
+::: {#fig-splits}
+*[Figure — split-separation diagnostic. Placeholder image inserted at render
+time.]*
+
+**Figure 1. The leave-clade-out split admits no train/test homology leakage.**
+All-versus-all consensus-column identity between held-out and training T-box
+positives, computed over the RF00230 model alignment. The mass of held-out
+records lies below the 0.70 clustering cut (identity ≥ 0.70 links records into a
+single cluster assigned wholly to one fold), so that **no** held-out record
+shares ≥ 0.70 identity with any training record (observed maximum 0.699). The
+tighter-cutoff sensitivity sweep is stable and conservative under tightening.
+:::
+
+# Results
+
+*[Placeholder — GATE-4 (Phase 2), GATE-2 (Phase 3), GATE-1 (Phase 4), the
+genome-scale scan + FDR (Phase 5), and orthogonal validation / GATE-3 (Phase 6)
+paragraphs are added at each phase-exit gate.]*
+
+# Discussion
+
+*[Placeholder — authored at the preprint gate.]*

@@ -256,6 +256,7 @@ gate3_rollup(per_corpus_verdicts: dict[str, verdict], breadth_floor_met: bool,
 - **P6** consumes **D1–D9** (implements the frozen predicates as `tests/unit/test_validation_rule.py`), **D15** (`tests/ml/test_gate3_rollup.py`), and **freezes** the D6/D7/D8 numeric thresholds on the held-out canonical set.
 - **P5** consumes **D12** (the multiplicity statement + clade-level nulls feed the GATE-3 method sub-gate alongside ADR-0005 D12 FDR).
 - **P0-27** (`src/tbox_finder/coverage.py`) is consumed by **D15** (verdict-vector shape / `OOD_ECE_MIN_N` / modal-shape predictor).
+- **Phase-0 exit (2026-07-12):** the GATE-3 per-corpus→project rollup + the GATE-4 min-over-the-three-core-elements convention (D6, not a mean) are described (unchanged, no result asserted) in the `paper/manuscript.qmd` §Non-circular evaluation design paragraph; the D16 archaeal/near-zero-prior posture underpins the manuscript's "no archaeal records; open question" framing; consolidated in `docs/dev-log/phase0_2026-07-12.pdf`.
 
 ## Sign-off
 

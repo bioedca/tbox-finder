@@ -181,6 +181,7 @@ The pre-P3 RiNALMo forward-throughput probe (condition (b)) is **advisory-only**
 - **P0-27** consumes D13/D18 and amends this ADR with the OOD-ECE min-N admissibility floor.
 - **P0-28** consumes D4/D7/D11/D12/D17/D18 and authors the blinded magnitude rationales.
 - **P0-30** (decoy prevalence + mining spare rule) consumes D7/D14; **P2** (hard-negative mining, class-II augmentation) consumes D8/D9/D14; **P3** (ECE) consumes D11/D13; **P4** (GATE-1) consumes D1–D10/D15–D17; **P5** (FDR) consumes D3/D12; **P6** (orthogonal validation, PU precision) consumes D10.
+- **Phase-0 exit (2026-07-12):** the blinded-frozen GATE-1 (recall@matched-precision vs `cmsearch`, +10 pp/+5 pp bar) and GATE-2 (ECE ≤ 0.05, FDR CI-upper ≤ 10 %) design is described (values unchanged, no result asserted) in the `paper/manuscript.qmd` §Non-circular evaluation design paragraph and the `README.md` P0 headline; consolidated in `docs/dev-log/phase0_2026-07-12.pdf`.
 
 ## Sign-off
 

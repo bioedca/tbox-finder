@@ -119,6 +119,7 @@ Node `one` is often down and `two` is the sole reliable GPU node — an extended
 - **imp.md:** P0-09 (this step); P0-10 (DVC path+capacity verify, depends on this D3); P5 (sizing gate freezes D6/D7 numbers; scan array runs under D8/D9).
 - **CLAUDE.md:** §5.2 (DVC at phase gates), §7 items 2/4 (ADR sign-off; gate/stop-and-ask), §9 (cluster protocol — D1/D2 restate its contract), §9.3 (submit-ack, artifact-based verification, no-auto-resubmit — D8/D9 depend on it), §10.3 (a down-scope never fabricates a calibrated-negative).
 - **Cards / paper (release-bound):** dataset card (per-clade scanned-coverage table + de-dup counts), `paper/manuscript.qmd` (scan-plan-execution + any breadth-preserving cap disclosed as-found).
+- **Phase-0 exit (2026-07-12):** the deferred phase-gate `dvc push` of the seven P0 artifacts (run at finalization) is governed by the D6/Amendment-A1 estimate-anchored DVC-capacity rule — capacity was pre-verified in P0-10, so the push cannot surprise-fail; else the retention-pruning fallback / §7 stop-and-ask applies.
 
 ## Sign-off
 
