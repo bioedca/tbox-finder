@@ -141,6 +141,24 @@ def _is_commit_sha(rev: Any) -> bool:
     return isinstance(rev, str) and len(rev) == 40 and all(c in "0123456789abcdef" for c in rev)
 
 
+def _rc_pass(max_abs_diff: float, atol: float, neg_control: float) -> bool:
+    """The RC-equivariance pass rule (single source of truth for build + validate).
+
+    Pass iff the forward RC-invariance holds within a finite, non-negative ``atol``
+    (``max_abs_diff <= atol``) **and** the reverse-only negative control genuinely fails
+    it (``neg_control > atol``) — the second clause makes the gate non-vacuous (a
+    degenerate constant/zero-output model has ``max_abs_diff == neg_control == 0``).
+    """
+    return bool(
+        math.isfinite(max_abs_diff)
+        and math.isfinite(atol)
+        and atol >= 0
+        and max_abs_diff <= atol
+        and math.isfinite(neg_control)
+        and neg_control > atol
+    )
+
+
 def validate_report(report: Mapping[str, Any]) -> list[str]:
     """Return a (possibly empty) list of schema/consistency errors for a P1-02 report.
 
@@ -162,6 +180,11 @@ def validate_report(report: Mapping[str, Any]) -> list[str]:
         errs.append(
             "checkpoint.revision is not a 40-hex commit SHA (must not be a branch like 'main')"
         )
+    elif ckpt.get("revision") != REVISION:
+        # A committed provenance must be for the PINNED checkpoint, not any valid SHA.
+        # main() writes only after validate_report passes, so this also blocks a non-pinned
+        # ``--revision`` from ever producing a committed artifact (the remote-code pin boundary).
+        errs.append("checkpoint.revision != pinned REVISION")
 
     pre = report["pretraining"]
     if pre.get("domain") != PRETRAINING_DOMAIN:
@@ -192,13 +215,16 @@ def validate_report(report: Mapping[str, Any]) -> list[str]:
             errs.append("param_count.actual != expected but param_count_ok cannot be true")
         if gate.get("param_count_ok") != pc.get("param_count_ok"):
             errs.append("gate.param_count_ok contradicts the block")
-        md, at = rc.get("max_abs_diff"), rc.get("atol")
-        if isinstance(md, (int, float)) and isinstance(at, (int, float)):
-            # A non-finite atol (e.g. inf) can never certify equivariance — the gate is
-            # only meaningful for a finite, non-negative tolerance (see the CLI guard).
-            expect_pass = bool(math.isfinite(md) and math.isfinite(at) and at >= 0 and md <= at)
+        md, at, neg = rc.get("max_abs_diff"), rc.get("atol"), rc.get("neg_control_max_abs_diff")
+        if all(isinstance(v, (int, float)) for v in (md, at, neg)):
+            # Pass requires BOTH: (i) f(RC(x)) matches flip(f(x)) within a finite, non-negative
+            # atol, AND (ii) the reverse-only negative control does NOT match (neg > atol) — so a
+            # degenerate constant/zero-output model (md==0 AND neg==0) cannot pass vacuously.
+            expect_pass = _rc_pass(md, at, neg)
             if bool(rc.get("pass")) != expect_pass:
-                errs.append("rc_equivariance.pass inconsistent with max_abs_diff vs atol")
+                errs.append(
+                    "rc_equivariance.pass inconsistent with max_abs_diff/neg_control vs atol"
+                )
         if gate.get("rc_equivariance_ok") != rc.get("pass"):
             errs.append("gate.rc_equivariance_ok contradicts rc_equivariance.pass")
         want_overall = bool(
@@ -342,7 +368,14 @@ def _env_block() -> dict[str, Any]:
 def build_report(*, revision: str, seq_len: int, seed: int, atol: float) -> dict[str, Any]:
     """Load the checkpoint, run the two P1-02 assertions, and return the report dict."""
     env = _env_block()
-    device = "cuda" if env["cuda_available"] else "cpu"
+    if not env["cuda_available"]:
+        # The RC-equivariance measurement needs a real forward, which the packaged Mamba
+        # runs on the CUDA kernel (no CPU path exists; ADR-0002 A2 C2) — fail fast.
+        raise RuntimeError(
+            "CUDA is required for the Caduceus-PS RC-equivariance provenance measurement "
+            "(the packaged Mamba forward needs selective_scan_cuda; ADR-0002 A2 C2)"
+        )
+    device = "cuda"
 
     model = load_caduceus_ps(revision=revision, device=device)
     tokenizer = load_tokenizer(revision=revision)
@@ -353,8 +386,7 @@ def build_report(*, revision: str, seq_len: int, seed: int, atol: float) -> dict
 
     rc = rc_equivariance(model, tokenizer, seq_len=seq_len, seed=seed, device=device)
     rc["atol"] = atol
-    md = rc["max_abs_diff"]
-    rc["pass"] = bool(math.isfinite(md) and math.isfinite(atol) and atol >= 0 and md <= atol)
+    rc["pass"] = _rc_pass(rc["max_abs_diff"], atol, rc["neg_control_max_abs_diff"])
 
     report: dict[str, Any] = {
         "schema_version": SCHEMA_VERSION,

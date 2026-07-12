@@ -58,7 +58,7 @@
     },
     "rc_equivariance": {
       "atol": 0.0001,
-      "hidden_abs_max": 2.0542547702789307,
+      "hidden_abs_max": 2.0542550086975098,
       "hidden_shape": [
         1,
         128,
@@ -74,8 +74,8 @@
     "schema_version": "1",
     "step": "P1-02"
   },
-  "generated_at_utc": "2026-07-12T12:23:09.463161+00:00",
-  "git_sha": "bd64aa69c35746c370eef10e4fffaeaa73026b16",
+  "generated_at_utc": "2026-07-12T12:57:06.938532+00:00",
+  "git_sha": "a6fbc10d06cff2015b6df03659f1e1bcb4718c0c",
   "inputs": {},
   "outputs": {},
   "rule": "src/tbox_finder/models/caduceus_backbone.py :: main (P1-02, LOCAL GPU)",

@@ -127,6 +127,7 @@ def test_good_report_is_valid():
         lambda r: r.pop("gate"),
         lambda r: r["checkpoint"].__setitem__("revision", "main"),
         lambda r: r["checkpoint"].__setitem__("revision", "abc123"),  # not 40-hex
+        lambda r: r["checkpoint"].__setitem__("revision", "0" * 40),  # valid 40-hex but != REVISION
         lambda r: r["checkpoint"].__setitem__("repo_id", "someone/else"),
         lambda r: r["pretraining"].__setitem__("domain", "mouse genome"),
         lambda r: r["pretraining"].__setitem__("citations", []),
@@ -142,12 +143,23 @@ def test_good_report_is_valid():
         lambda r: r["gate"].__setitem__("param_count_ok", False),  # != pc.param_count_ok (True)
         lambda r: r["gate"].__setitem__("overall_pass", False),  # contradicts AND(subgates)
         lambda r: r["rc_equivariance"].pop("neg_control_max_abs_diff"),
+        # vacuous control: neg_control <= atol means the check doesn't discriminate → must not pass
+        lambda r: r["rc_equivariance"].__setitem__("neg_control_max_abs_diff", 0.0),
     ],
 )
 def test_validator_bites(mutate):
     bad = good_report()
     mutate(bad)
     assert len(cb.validate_report(bad)) >= 1
+
+
+def test_rc_pass_rule():
+    # Passes only when the forward matches within atol AND the reverse-only control fails it.
+    assert cb._rc_pass(0.0, 1e-4, 2.4) is True
+    assert cb._rc_pass(1.0, 1e-4, 2.4) is False  # forward diff exceeds atol
+    assert cb._rc_pass(0.0, 1e-4, 0.0) is False  # vacuous: control also within atol
+    assert cb._rc_pass(0.0, float("inf"), 2.4) is False  # non-finite atol
+    assert cb._rc_pass(0.0, -1.0, 2.4) is False  # negative atol
 
 
 def test_honest_param_count_failure_is_schema_valid():
