@@ -1,0 +1,75 @@
+{
+  "schema_version": "1",
+  "step": "P1-01",
+  "measured": false,
+  "generated_by": "src/tbox_finder/kernels/kernel_smoke.py",
+  "_note": "Schema skeleton only — NOT a measurement. Real metric values are produced on a cluster A4000 (reports/p1/kernel_smoke.json) and folded into ADR-0002 Amendment A5. measured=false so no consistency numbers are asserted (§10.3: no fabricated metric).",
+  "env": {
+    "python": null,
+    "torch": null,
+    "cuda_available": null,
+    "torch_cuda_version": null,
+    "device_name": null,
+    "device_capability": null,
+    "is_sm86": null,
+    "hostname": null
+  },
+  "imports": {
+    "selective_scan_cuda": {"ok": null, "version": null, "error": null},
+    "causal_conv1d_cuda": {"ok": null, "version": null, "error": null},
+    "mamba_ssm": {"ok": null, "version": null, "error": null},
+    "causal_conv1d": {"ok": null, "version": null, "error": null},
+    "flash_attn": {"ok": null, "version": null, "error": null}
+  },
+  "fixture": {
+    "path": null,
+    "shape": null,
+    "dtype": null,
+    "seed": null,
+    "sha256": null
+  },
+  "selective_scan": {
+    "dtype": null,
+    "shapes": null,
+    "atol": null,
+    "cuda_forward_ok": null,
+    "ref_forward_ok": null,
+    "max_abs_diff": null,
+    "parity_pass": null,
+    "cuda_tokens_per_s": null,
+    "ref_tokens_per_s": null,
+    "throughput_ratio_cuda_over_ref": null,
+    "iters": null,
+    "ref_iters": null,
+    "warmup": null,
+    "error": null
+  },
+  "causal_conv1d": {
+    "dtype": null,
+    "width": null,
+    "activation": null,
+    "atol": null,
+    "cuda_forward_ok": null,
+    "ref_forward_ok": null,
+    "max_abs_diff": null,
+    "parity_pass": null,
+    "cuda_tokens_per_s": null,
+    "ref_tokens_per_s": null,
+    "throughput_ratio_cuda_over_ref": null,
+    "iters": null,
+    "warmup": null,
+    "error": null
+  },
+  "gate": {
+    "import_ok": null,
+    "forward_ok": null,
+    "parity_ok": null,
+    "overall_pass": null
+  },
+  "provenance": {
+    "git_sha": null,
+    "env_lock": "envs/ml-dna.conda-lock.yml",
+    "slurm_job_id": null,
+    "timestamp_utc": null
+  }
+}

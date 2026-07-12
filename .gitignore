@@ -97,6 +97,9 @@ secrets.y*ml
 *.hdf5
 *.npy
 *.npz
+# Carve-out: the tiny committed P1-01 kernel-smoke DNA token fixture (1 KB, reproducible
+# from manifest.json seed) is a test input, not a data blob.
+!tests/fixtures/kernel_smoke_dna/dna_tokens.npy
 *.pt
 *.pth
 *.ckpt
