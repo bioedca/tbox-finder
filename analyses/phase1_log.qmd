@@ -204,3 +204,37 @@ test under installed torch 2.7.1+cu128 (P1-01/02/03 installed-library-cross-chec
 **Commit.** feature-branch atomic commit on `p1-04-segmenter` (squash-merge SHA on `main` recorded in
 `TODO.md` at P1-04 close); feeds **P1-07** (the binding segmentation smoke fine-tune consumes this
 segmenter) and **P1-05/P1-08** (the frozen-embedding probe uses the backbone-free `logits_from_hidden` path).
+
+## Step P1-05 — 2026-07-12: Transfer go/no-go part (i) — frozen-embedding linear-separability pre-filter (cheap, non-binding)
+**Inputs.** Frozen Caduceus-PS embeddings (7.73M params, pinned revision `d89eeb85…`, human-reference
+pretrained) of **8,715 held-out (leave-clade-out) bacterial T-box windows** (positives — `split_assignments.parquet`
+`nested_role == heldout` & `source == corpus`; window DNA from `class_I/II.fa`) vs **2,000 GC-matched prokaryotic
+background windows** (negatives — `decoys_v0.parquet` pool `gc_background`; §9.1 class 1). **Process.** Two-stage,
+no env change: (A) extract mean-pooled 512-d frozen embeddings on the **laptop GPU** (RTX 4060 sm_89, `tbox-ml-dna`,
+~9 min at ~21 windows/s batch=1) → npz cache; (B) fit a `StandardScaler`+`LogisticRegression(class_weight=balanced,
+C=1)` probe under `tbox-data` on a **homology-safe split** (`GroupShuffleSplit` by `cluster_id` — §8.2: no sequence
+cluster spans the boundary), scored on the held-out probe split with a 2,000-draw seeded AUROC bootstrap CI. Entry
+`src/tbox_finder/probes/frozen_linear_probe.py::run_prefilter` (`--stage extract|probe|all`). **Outputs.**
+`reports/p1/prefilter_separability.json` (git-tracked, `measured=true`): **AUROC 0.9921** (95% CI 0.9887–0.9950),
+**balanced-accuracy 0.9597** on a 2,963-pos / 500-neg held-out probe split; inline provenance (git_sha, both env-lock
+hashes, seed 42, input SHA-256s). The 22 MB embeddings npz is a gitignored **regenerable** intermediate (not
+DVC-tracked; the report hashes it), per the kernel_smoke precedent.
+**Validation.** ADR-0002 D7 part-(i) *above-chance* pre-filter → **PASS** (AUROC-CI-lower 0.989 ≫ chance 0.5);
+**non-binding** (a low pre-filter can coexist with a passing full fine-tune — the *binding* gate is the P1-07
+per-nucleotide segmentation smoke). Leakage: `cluster_spans_boundary=false`, `n_shared_clusters=0`; positives
+held-out-fold only. Tests: **31 passed** (stdlib + sklearn tiers — verdict-bites, validator-bites incl. §8.2
+fail-closed, committed-report validity, homology-safe partition); the torch-tier extraction test **passed under
+`tbox-ml-dna` on the GPU** (skips in CI); **27 pass bare**. ruff 0.15.15 + black 25.11.0 clean.
+**Decisions.** (1) Grouped the probe split by **`cluster_id`, not `resolved_order`**: ~41 clusters span >1 order
+and carry ~20% of the held-out positives, so an order-grouped split leaks clusters while dropping them is too lossy
+— the §8.2 homology unit (sequence cluster) is load-bearing, and order-spanning across *distinct* clusters is not
+homology leakage (reported as informational, `order_spans_boundary=true`). (2) **Two-stage across two envs**
+(`tbox-ml-dna` torch + `tbox-data` sklearn) because no single committed env carries both → avoids an ADR-0002 D8
+env bump/re-lock. (3) The verdict operationalization (PASS iff AUROC bootstrap-CI-lower > 0.5) is an **implementer
+operationalization** of the ADR's qualitative *above-chance* criterion, not a new ADR-pinned number (P0-31 precedent);
+ADR-0002 pins no numeric pre-filter floor. context7 §3.3: `/websites/scikit-learn_stable` consulted for
+`LogisticRegression`/`GroupShuffleSplit`/`StandardScaler` pipeline; the transformers embedding path reuses the
+P1-02-verified `caduceus_backbone` loader (pinned-revision, frozen). Cross-link **ADR-0002 D7**, **PRD §10.1 / §18.2**.
+**Commit.** feature-branch atomic commit on `p1-05-frozen-linear-probe` (squash-merge SHA on `main` recorded in
+`TODO.md` at P1-05 close); feeds **P1-07** (advisory input to the binding go/no-go adjudication) and
+**P1-08** (Stage-1 smoke reproducibility).
