@@ -102,3 +102,51 @@ Cross-link **ADR-0002 D7**.
 **Commit.** feature-branch atomic commit on `p1-02-caduceus` (squash-merge SHA on `main` recorded in
 `TODO.md` at P1-02 close); feeds **P1-03** (seg-head build), **P1-04** (frozen-embedding probe),
 **P1-09** (continued-pretraining).
+
+## Step P1-03 — 2026-07-12: Stage-1 per-position 8-class segmentation head (Linear + optional CRF)
+
+**Inputs.** The 8 normative class identifiers (ADR-0004 D1), single-sourced from
+`tbox_finder.labels.CLASS_ORDER`; a random `L×d_model` hidden-state fixture (`torch.randn`, no backbone
+load needed). No in-repo segmentation head existed — it had to be built (PRD §6/§8/§10.1).
+
+**Process.** Built `SegmentationHead` (`src/tbox_finder/models/seg_head.py::SegmentationHead`): a
+per-position `Linear(input_dim → 8)` projection over the Caduceus-PS hidden states, with an **optional**
+in-repo `LinearChainCRF` transition layer for boundary coherence (`use_crf` knob so P2 can ablate
+Linear-only vs Linear+CRF, ADR-0004). The CRF is a standard **batch-first linear-chain CRF** —
+`torch.logsumexp` forward algorithm for the partition function, Viterbi for decoding — implemented
+in-repo with **no external `torchcrf`/`pytorch-crf` dependency** (the P1-03 note's default, so no env
+amendment). The head is **8-class by construction** (`NUM_CLASSES = len(CLASS_ORDER)`); the input width
+default `CADUCEUS_PS_HIDDEN_DIM = 2*d_model = 512` is single-sourced from `caduceus_backbone.D_MODEL`
+(the RC-concatenated hidden width) so the two cannot drift. `decode()` returns per-sequence best paths
+(CRF Viterbi, else per-position argmax); `loss()` is CRF NLL, else masked cross-entropy
+(`F.cross_entropy` K-dim form + `ignore_index`).
+
+**Outputs.** `src/tbox_finder/models/seg_head.py` (head + CRF; torch imported at module top — the
+submodule *is* a torch model, but the `models` package `__init__` stays lazy so the package still
+imports bare); `tests/unit/test_seg_head.py` (24 cases: 3 bare-tier — the ADR-0004 class-order/index +
+`2*d_model` contract, run in CI — + a 21-test torch tier under `tbox-ml-dna`). **No DVC artifact**
+(library + tests; git-tracked). **No `.smk`/data change** (DAG lint unaffected).
+
+**Validation.** **Gate PASSED** — logits shape `(B,L,8)` (Linear-only and CRF); the CRF `viterbi_decode`
+returns a length-L valid class sequence (every index in `[0,8)`); class-index↔identifier mapping matches
+the ADR-0004 literal. Torch tier **21 passed** under `tbox-ml-dna` (CPU — no GPU needed); bare CI tier
+**3 passed / 18 skipped** (torch tier skips cleanly, no collection error); full unit suite **465 passed /
+25 skipped** bare (no regression); ruff 0.15.15 + black 25.11.0 clean. Behavioral gates that *bite*: the
+CRF reduces to per-position argmax when its transitions vanish, and a stay-in-tag-0 transition bias
+overrides the emission argmax (the transition layer is proven load-bearing); partition ≥ gold-path score
+⇒ NLL ≥ 0 per sequence; masked decode truncates to the mask lengths.
+
+**Decisions.** In-repo CRF chosen over a third-party dep to keep the step self-contained (no
+`envs/ml.yml` amendment / §3.1 approval). Torch lives at the seg_head module top (idiomatic `nn.Module`),
+so the bare-CI test tier guards with `skipif(not torch)` and the load-bearing class-order invariant is
+asserted torch-free from `tbox_finder.labels` — the head never redeclares the vocabulary, so a logit
+index always maps to the ADR-0004 identifier at that position. The RC-combination that feeds this head
+stays directionality-preserving upstream (P1-02/P1-04, §6 strand-resolver); this head is
+combination-agnostic (it consumes an `(B,L,2·d_model)` hidden state). context7 §3.3: `/pytorch/pytorch`
+consulted for `F.cross_entropy` K-dim `(N,C,d)` + `ignore_index` and `nn.Parameter` registration; the
+CRF forward/Viterbi correctness is verified by the executed test under the installed torch 2.7.1
+(P1-01/P1-02 installed-library-cross-check precedent). Cross-link **ADR-0004 D1**.
+
+**Commit.** feature-branch atomic commit on `p1-03-seg-head` (squash-merge SHA on `main` recorded in
+`TODO.md` at P1-03 close); feeds **P1-04** (backbone+head assembly with the directionality-preserving
+RC-combination knob) and **P1-09** (continued-pretraining consumes the same head).
