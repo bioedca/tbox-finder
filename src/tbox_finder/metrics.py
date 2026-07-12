@@ -354,7 +354,14 @@ def gate1_recall_bar(
     ``≥ +RECALL_POINT_BAR_PP`` (=+10 pp) **AND** block-resampled CI lower bound
     ``> +RECALL_CI_FLOOR_PP`` (=+5 pp). The weaker ``point ≥ +10 AND CI lower > 0`` clause
     is admissible **only** as an explicitly disclosed min-N-conditioned fallback
-    (``min_n_fallback=True``)."""
+    (``min_n_fallback=True``).
+
+    Fails **closed** on an undefined (NaN) point estimate or CI bound — as
+    :func:`gate4_pass` / :func:`gate2_ece_pass` do — so an unmeasurable arm can never
+    certify GATE-1 (``NaN < 10`` is False, which would otherwise fall through to the CI
+    clause and pass on a valid ``ci_lower_pp``; §10.3 withhold-don't-emit)."""
+    if math.isnan(point_gap_pp) or math.isnan(ci_lower_pp):
+        return False
     if point_gap_pp < RECALL_POINT_BAR_PP:
         return False
     return ci_lower_pp > (0.0 if min_n_fallback else RECALL_CI_FLOOR_PP)

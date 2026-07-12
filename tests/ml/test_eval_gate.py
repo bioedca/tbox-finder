@@ -147,6 +147,12 @@ def test_gate_predicates_both_directions() -> None:
     assert M.gate1_recall_bar(12.0, 4.0) is False  # ci<=5 (strong)
     assert M.gate1_recall_bar(12.0, 4.0, min_n_fallback=True) is True  # weak: ci>0
     assert M.gate1_recall_bar(12.0, 0.0, min_n_fallback=True) is False  # weak needs ci>0
+    # fails CLOSED on an undefined estimate: a NaN point with a valid CI must NOT pass
+    # (NaN < 10 is False, so an unguarded bar would fall through to the CI clause) — an
+    # unmeasurable arm can never certify GATE-1.
+    assert M.gate1_recall_bar(float("nan"), 6.0) is False
+    assert M.gate1_recall_bar(12.0, float("nan")) is False
+    assert M.gate1_recall_bar(float("nan"), float("nan")) is False
 
 
 def test_pins_are_single_sourced_no_drift() -> None:
