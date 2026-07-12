@@ -338,3 +338,47 @@ sign-off (§7 item 2): **A6 accepted as drafted** (records the GO verdict + fina
 **Commit.** Harness commit `1213883` + the measured result commit (report + `dvc add` checkpoint + ADR-0002 A6 +
 this stanza) on `p1-07-seg-smoke-gonogo`. Feeds **P1-08** (seeded re-run reproducibility, exit-gate deliverable) +
 **P2** (Stage-1 training — transfer confirmed).
+
+## Step P1-08 — 2026-07-12: Verify Stage-1 smoke reproducibility (seeded re-run → deterministic within tolerance) — P1 exit-gate deliverable
+**Inputs.** The committed **P1-07 harness** `src/tbox_finder/train/stage1_smoke.py::main` (**unchanged** — reused as-is)
++ its committed config `conf/train/stage1_smoke.yaml` (seed 42, `PYTHONHASHSEED=0`, TF32/cudnn-off determinism §8.3); the
+P1-06 held-out smoke set `data/interim/p1_seg_smoke/{windows.parquet,labels.npy}` (staged on the cluster checkout from
+P1-07); the **P1-07 reference report** `reports/p1/seg_smoke_gonogo.json` (A6: min-core-F1 **0.99990**, verdict **GO**,
+git-tracked). **Process.** A new **`slurm/p1/seg_smoke_repro.sbatch`** (SLURM `gpu` A4000, `tbox-ml-dna`) re-runs the
+identical harness+config with **only** the two output paths overridden via Hydra (`report_path=reports/p1/seg_smoke_repro.json`,
+`checkpoint_dir=checkpoints/p1/seg_smoke_repro`) so the re-run **cannot clobber** the committed P1-07 report or its DVC
+checkpoint (override-composition verified by a local `hydra.compose` smoke: both paths land, seed/epochs/rc-combine
+unchanged). The sbatch **mirrors the A6 hardening** (flock singleton on a distinct `.seg_smoke_repro.lock`, stale-artifact
+clearing incl. checkpoint/provenance, DONE gate requiring report+checkpoint+provenance). A new pure-stdlib gate module
+**`src/tbox_finder/train/repro.py`** (bare-importable, no numpy/torch) adjudicates the **two-level ADR-0002 A7 gate**:
+**primary** = the go/no-go **verdict reproduces** (GO); **secondary** = **max abs diff over the 14 reported per-nt F1
+metrics ≤ τ = 1e-3**; it fails closed on a config/backbone or metric-shape mismatch or a non-finite metric. **Outputs
+(code, this commit).** `slurm/p1/seg_smoke_repro.sbatch` + `src/tbox_finder/train/{__init__ (adds repro),repro}.py` +
+`tests/ml/test_smoke_reproducible.py` (18) + **ADR-0002 A7** + this stanza. The **measured** `reports/p1/seg_smoke_repro.json`
+is produced by the SLURM re-run (post submit-ack), not this commit — no result is fabricated (§10.3).
+**Validation.** Gate = the re-run reproduces the P1-07 go/no-go **within the ADR-0002 A7 tolerance** (verdict GO + max|Δ|
+≤ 1e-3). **Harness PASS (bare CI, 17 passed + 1 skip):** every `repro.py` guard bites — identical→reproducible
+(max|Δ|=0.0), sub-τ perturbation→reproducible, |Δ| exactly τ→inclusive-pass, |Δ|>τ→**not** reproducible (even with
+GO==GO), verdict-flip→**not** reproducible, config/backbone mismatch→fail-closed (incl. a backbone block absent from
+**both** reports), a re-run-only or symmetrically-dropped metric→fail-closed (the pinned 14-metric floor), non-finite
+metric→fail-closed, and the `REPRO_TOLERANCE == 1e-3` + `EXPECTED_METRIC_KEYS` drift guards; the Tier-2 committed-report assertion **skips** until the re-run report is
+committed (fail-closed under `TBOX_REQUIRE_REPRO_GATE=1`, to be set in CI in the result commit). ruff 0.15.15 + black
+25.11.0 clean; the Hydra override composes. **The measured re-run result is PENDING the SLURM job (submit-ack Stop).**
+**Decisions.** (1) **Harness unchanged** — reproducibility is a re-run of the *same* code, so P1-08 adds only a sbatch +
+a comparison module + a test, never touches `stage1_smoke.py` (the whole point). (2) **Two-level gate (ADR-0002 A7):**
+the verdict-reproduces condition is load-bearing (the P2 transfer decision is robust — min-core-F1 0.99990 clears the
+0.30 GO bar by ~0.70), while τ=1e-3 is a *determinism health-check* — the near-perfect argmax fit means the only metric
+drift is rare boundary argmax flips worth ~O(1e-4) each, so 1e-3 absorbs several with margin yet catches a real
+determinism regression (≥1e-2 or a verdict flip). (3) **τ pinned a priori** (before the re-run) so the gate is
+pre-registered, not fit to the observed diff (§8.3/§10.3); **not weakenable on a fail** — a diff > τ is a §7 stop-and-ask
+(chase the nondeterministic op), never a loosened τ. (4) **Not bit-exact by design** — the Mamba `selective_scan_cuda`
+kernel has no deterministic variant (A2 C2 / `use_deterministic_algorithms(warn_only=True)`), so a metric-level tolerance
+is the correct instrument, not a bitwise diff. context7 §3.3: n/a (the harness reuse is unchanged P1-07 code; `repro.py`
+is pure stdlib; the Hydra override syntax was verified by the executed `hydra.compose` smoke under hydra 1.3.2). Cross-link
+**ADR-0002 A7 / A6 / D7**, **ADR-0005**, **PRD §8.3/§11/§18.1**.
+**Stops (2, this step).** **ADR-0002 A7 sign-off** (§7 item 2): **accepted as drafted — τ = 1e-3** (recorded 2026-07-12).
+**SLURM submit-ack** (§9.3): pending — the sbatch is committed/pushed, cluster-synced, and `sbatch --test-only`-preflighted;
+awaiting the one-shot `submit` ack. A repro-gate failure on the re-run → §7 stop-and-ask (do NOT loosen τ).
+**Commit.** Setup commit (sbatch + `repro.py` + test + ADR-0002 A7 + this stanza) on `p1-08-smoke-repro`; the measured
+result lands in the follow-up commit (repro report + the Tier-2 gate + CI `TBOX_REQUIRE_REPRO_GATE=1`) after the re-run.
+Feeds the **P1 exit gate** ("smoke run reproducible" ✓, PRD §18.1).
