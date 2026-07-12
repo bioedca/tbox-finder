@@ -1,0 +1,84 @@
+{
+  "adr": "ADR-0002 (D2/D7; A2 C2)",
+  "env_lock_hash": "70b66801eeafe1fdec4c19e667de1590e4471143bca36248fe40f16e53bb5003",
+  "extra": {
+    "checkpoint": {
+      "config_transformers_version": "4.38.1",
+      "d_model": 256,
+      "hub_url": "https://huggingface.co/kuleshov-group/caduceus-ps_seqlen-131k_d_model-256_n_layer-16",
+      "n_layer": 16,
+      "rcps": true,
+      "repo_id": "kuleshov-group/caduceus-ps_seqlen-131k_d_model-256_n_layer-16",
+      "revision": "d89eeb853136ea64da7feb3d0c8e909771b17ae6",
+      "torch_device": "cuda"
+    },
+    "env": {
+      "cuda_available": true,
+      "device_capability": [
+        8,
+        9
+      ],
+      "device_name": "NVIDIA GeForce RTX 4060 Laptop GPU",
+      "is_sm86": false,
+      "python": "3.12.13",
+      "torch": "2.7.1+cu128",
+      "transformers": "4.57.5"
+    },
+    "gate": {
+      "load_ok": true,
+      "overall_pass": true,
+      "param_count_ok": true,
+      "rc_equivariance_ok": true
+    },
+    "generated_by": "src/tbox_finder/models/caduceus_backbone.py",
+    "measured": true,
+    "param_count": {
+      "actual": 7725312,
+      "expected": 7725312,
+      "param_count_ok": true
+    },
+    "pretraining": {
+      "citations": [
+        {
+          "accessed": "2026-07-12",
+          "id": "https://huggingface.co/kuleshov-group/caduceus-ps_seqlen-131k_d_model-256_n_layer-16",
+          "quote": "This model was pre-trained on the human reference genome with sequence length 131,072 for 50k steps",
+          "source": "HF model card"
+        },
+        {
+          "accessed": "2026-07-12",
+          "id": "arXiv:2403.03234; PMID:40567809; PMC12189541",
+          "source": "Schiff et al. 2024, Caduceus (Proc Mach Learn Res)"
+        }
+      ],
+      "domain": "human reference genome",
+      "sequence_length": 131072,
+      "transfer_note": "Human-reference pretrained; the tbox-finder scan is prokaryotic/archaeal/MAG \u2192 Stage-1 transfer is a hypothesis validated by the P1 go/no-go (ADR-0002 D7)."
+    },
+    "rc_equivariance": {
+      "atol": 0.0001,
+      "hidden_abs_max": 2.0542547702789307,
+      "hidden_shape": [
+        1,
+        128,
+        512
+      ],
+      "max_abs_diff": 0.0,
+      "mean_abs_diff": 0.0,
+      "neg_control_max_abs_diff": 2.3898637294769287,
+      "pass": true,
+      "seed": 42,
+      "seq_len": 128
+    },
+    "schema_version": "1",
+    "step": "P1-02"
+  },
+  "generated_at_utc": "2026-07-12T13:07:28.691821+00:00",
+  "git_sha": "5b3ef7ac139fb519d6786e628b1ad19e49345729",
+  "inputs": {},
+  "outputs": {},
+  "rule": "src/tbox_finder/models/caduceus_backbone.py :: main (P1-02, LOCAL GPU)",
+  "schema_version": "1.0",
+  "script": "src/tbox_finder/models/caduceus_backbone.py",
+  "seed": 42
+}

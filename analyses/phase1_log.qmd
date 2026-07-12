@@ -57,3 +57,48 @@ pins no kernel-vs-fallback tolerance; the raw diff is always recorded, §10.3). 
 
 **Commit.** `8ba3880` (scaffold `5f18180` + hardening `8ba3880`) + the follow-up carrying this stanza,
 the report, and A5; squash-merge SHA on `main` recorded in `TODO.md` at P1-01 close.
+
+## Step P1-02 — 2026-07-12: Load Caduceus-PS default checkpoint + human-reference pretraining provenance
+
+**Inputs.** The default Stage-1 checkpoint — Caduceus-PS
+`kuleshov-group/caduceus-ps_seqlen-131k_d_model-256_n_layer-16` (7.73 M params, `d_model` 256,
+16 MambaDNA layers, RC-equivariant) — pinned at the **immutable commit** `d89eeb85…` (never `main`);
+the `tbox-ml-dna` env (transformers 4.57.5 `trust_remote_code` ceiling; ADR-0002 D2/A4); a short
+seeded DNA fixture + its reverse-complement built in token space via the config `complement_map`.
+
+**Process.** `src/tbox_finder/models/caduceus_backbone.py::load_caduceus_ps` loads the backbone
+(`AutoModel`, `trust_remote_code=True`) at the pinned revision on the **local GPU** (RTX 4060, `sm_89`),
+counts parameters, and measures RC-equivariance — `f(RC(x))` vs `f(x).flip(dims=(-2,-1))` (the
+model-card hidden-state RC transform) — with a reverse-only negative control. The CLI writes the
+canonical `data/interim/caduceus_ps_131k/provenance.json` sidecar (`provenance.py`; ADR-0002 as the
+pinning ADR). **imp.md↔ADR reconciliation:** imp.md's "pure-PyTorch CPU forward" is superseded by
+ADR-0002 A2 C2 (the packaged `Mamba` hard-imports `selective_scan_cuda`; no CPU forward exists) —
+resolved via the local GPU (still LOCAL, no SLURM). Loader/RC APIs verified against the installed
+transformers 4.57.5 + the HF model card (context7 quota-blocked).
+
+**Outputs.** `src/tbox_finder/models/{__init__,caduceus_backbone}.py`; `conf/model/caduceus_stage1.yaml`;
+`data/interim/caduceus_ps_131k/provenance.json` (git-tracked, `measured=true`, git_sha `bd64aa6`);
+`tests/unit/test_caduceus_backbone.py` (23 cases: 21 bare + 2 GPU). **No DVC artifact** (metadata
+sidecar; weights are pulled from HF by revision, not stored).
+
+**Validation.** **Gate PASSED** (`gate.overall_pass=true`): loads at the pinned revision; **param count
+== 7,725,312** (== `EXPECTED_PARAM_COUNT`, the PRD "7.73 M" to the exact integer); **RC-equivariance
+max-abs-diff 0.0** ≤ `atol` 1e-4 (bit-exact), reverse-only negative control **2.39** (the check
+discriminates); provenance carries `pretraining.domain = "human reference genome"` + ≥2 citations + the
+`ml-dna` env-lock hash. Bare tier **21 passed / 2 skipped** (the CI path); GPU tier green under
+`tbox-ml-dna` (§8.5 manual gate); `TBOX_REQUIRE_CADUCEUS=1` rot-guard fails closed; full unit suite
+**396 passed / 53 skipped** (no regression); ruff 0.15.15 + black 25.11.0 clean.
+
+**Decisions.** The checkpoint is pinned by an **immutable commit SHA** (never `main`, ADR-0002 D2); the
+param count + equivariance are **frozen in code** (no config can weaken them — the coverage.py
+`OOD_ECE_MIN_N` precedent). RC-equivariance is asserted on the **hidden states** (what the P1-03 head
+consumes) via the model-card `flip(dims=(-2,-1))` transform — the §6 strand-resolver precondition.
+**Scientific-evidence gate (§10.1) CLEARED** for the load-bearing human-reference pretraining fact:
+≥2 authoritative agreeing sources — HF model card (verbatim) + Schiff et al. (arXiv:2403.03234;
+PMID:40567809), both already in-repo (ADR-0002). The gate is **hardware-agnostic** (`sm_89` laptop;
+RC-equivariance is an architectural property of RCPS, identical on the cluster A4000 `sm_86`).
+Cross-link **ADR-0002 D7**.
+
+**Commit.** feature-branch atomic commit on `p1-02-caduceus` (squash-merge SHA on `main` recorded in
+`TODO.md` at P1-02 close); feeds **P1-03** (seg-head build), **P1-04** (frozen-embedding probe),
+**P1-09** (continued-pretraining).
