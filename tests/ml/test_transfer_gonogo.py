@@ -133,6 +133,20 @@ def test_perfect_prediction_is_go() -> None:
     assert T.classify_gonogo(m["min_core_f1"]) == "GO"
 
 
+def test_run_smoke_rejects_unwired_and_malformed_knobs() -> None:
+    # The run_smoke input guards fire BEFORE set_determinism / any heavy import (§10.3:
+    # a stray override must not silently no-op or produce a nonsensical verdict), so they
+    # are bare-testable without torch/numpy.
+    with pytest.raises(ValueError, match="use_crf"):
+        T.run_smoke(T.SmokeConfig(use_crf=True))
+    with pytest.raises(ValueError, match="batch_size"):
+        T.run_smoke(T.SmokeConfig(batch_size=4))
+    with pytest.raises(ValueError, match="go_threshold"):
+        T.run_smoke(T.SmokeConfig(go_threshold=0.1, nogo_threshold=0.5))  # go < nogo
+    with pytest.raises(ValueError, match="go_threshold"):
+        T.run_smoke(T.SmokeConfig(go_threshold=1.5))  # out of [0, 1]
+
+
 def _valid_report(min_core_f1: float = 0.55) -> dict:
     return T.build_report(
         metrics_block={

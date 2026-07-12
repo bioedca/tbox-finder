@@ -39,15 +39,29 @@
 set -eo pipefail   # NOT -u: the cuda-nvcc conda activate hook reads unset NVCC_PREPEND_FLAGS.
 export NVCC_PREPEND_FLAGS="${NVCC_PREPEND_FLAGS:-}"
 
+# Repo/output paths, an exclusive singleton lock, and stale-artifact cleanup happen FIRST —
+# before the failure-prone conda activation / input preflight — so (a) a concurrent
+# seg_smoke job can never share the report/DONE/checkpoint paths, and (b) an activation or
+# preflight failure can never leave a stale seg_smoke.DONE / seg_smoke_gonogo.json behind
+# (artifact-based verification depends on their absence-on-failure, §9.3).
+REPO="${SLURM_SUBMIT_DIR:-$HOME/tbox-finder}"
+cd "$REPO"
+DEST="$REPO/reports/p1"
+mkdir -p "$DEST"
+
+exec 9>"$DEST/.seg_smoke.lock"
+if ! flock -n 9; then
+  echo "SMOKE_SKIP: another seg_smoke job holds $DEST/.seg_smoke.lock — refusing to share outputs." >&2
+  exit 1
+fi
+rm -f "$DEST/seg_smoke_gonogo.json" "$DEST/seg_smoke.DONE"
+
 CONDA_SH=/exports/people/mondragonlab/ecc1695/miniconda3/etc/profile.d/conda.sh
 source "$CONDA_SH"
 conda activate tbox-ml-dna
 export CUDA_HOME="$CONDA_PREFIX"      # deepspeed/nvcc probe CUDA_HOME at import.
 export WANDB_MODE=offline             # compute nodes: no live streaming (§9.2); sync later.
 export PYTHONHASHSEED=0               # determinism (§8.3; matches conf/train/stage1_smoke.yaml).
-
-REPO="${SLURM_SUBMIT_DIR:-$HOME/tbox-finder}"
-cd "$REPO"
 
 echo "host=$(hostname) job=${SLURM_JOB_ID:-none} sha=$(git rev-parse --short HEAD 2>/dev/null || echo NA)"
 nvidia-smi --query-gpu=name,driver_version,memory.total --format=csv,noheader || true
@@ -62,11 +76,6 @@ for f in "$WIN" "$LAB"; do
   fi
 done
 
-DEST="$REPO/reports/p1"
-mkdir -p "$DEST"
-# Clear any stale artifacts FIRST so a failed run cannot leave a stale success marker.
-rm -f "$DEST/seg_smoke_gonogo.json" "$DEST/seg_smoke.DONE"
-
 # Hydra entry (no `--` args → the Hydra path, not the argparse CLI). Writes the report to
 # reports/p1/seg_smoke_gonogo.json and the checkpoint to checkpoints/p1/seg_smoke/ (config
 # defaults). run_smoke self-validates the report and raises on any inconsistency.
@@ -75,10 +84,14 @@ PYTHONPATH=src python -m tbox_finder.train.stage1_smoke
 RC=$?
 set -e
 
-if [ "$RC" -eq 0 ] && [ -f "$DEST/seg_smoke_gonogo.json" ]; then
+# Publish DONE only when the run succeeded AND both required outputs are non-empty; a
+# missing report or checkpoint forces a nonzero exit even if python returned 0.
+CHECKPOINT="$REPO/checkpoints/p1/seg_smoke/seg_smoke.pt"
+if [ "$RC" -eq 0 ] && [ -s "$DEST/seg_smoke_gonogo.json" ] && [ -s "$CHECKPOINT" ]; then
   touch "$DEST/seg_smoke.DONE"
   echo "SMOKE_DONE job=${SLURM_JOB_ID:-none}"
 else
   echo "SMOKE_FAIL rc=$RC job=${SLURM_JOB_ID:-none}"
+  [ "$RC" -ne 0 ] || RC=1
 fi
 exit "$RC"

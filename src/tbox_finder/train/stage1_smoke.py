@@ -707,6 +707,12 @@ def run_smoke(cfg: SmokeConfig, *, log=print) -> dict[str, Any]:
             f"batch_size must be 1 (variable-length windows are trained one at a time to "
             f"avoid pad/mask and stay deterministic; got {cfg.batch_size})."
         )
+    if not (0.0 <= cfg.nogo_threshold <= cfg.go_threshold <= 1.0):
+        raise ValueError(
+            f"go_threshold ({cfg.go_threshold}) and nogo_threshold ({cfg.nogo_threshold}) "
+            "must both be in [0, 1] with go_threshold >= nogo_threshold — a malformed "
+            "override must never produce a nonsensical verdict (§10.3)."
+        )
     set_determinism(cfg.seed)
     log(f"[{STEP}] loading smoke set {cfg.windows_parquet} + {cfg.labels_npy}")
     windows = load_smoke_windows(cfg.windows_parquet, cfg.labels_npy)
