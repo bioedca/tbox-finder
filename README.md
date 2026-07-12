@@ -8,9 +8,23 @@ per-nucleotide T-box structural-element annotations with **calibrated**
 confidence. The scientific value is defensible, non-circular discovery, so
 data-leakage control, calibration, and orthogonal validation are first-class.
 
-> **Status:** P0 — Foundation (repository scaffold). Methodology decisions are
-> pinned in `docs/decisions/` (ADRs); the released model/dataset cards will
-> document intended use, splits, calibration, and limitations.
+> **Status:** **Phase 0 — Foundation: complete.** Next: Phase 1 (backbones & heads).
+> Methodology decisions are pinned in `docs/decisions/` (ADRs); the released
+> model/dataset cards will document intended use, splits, calibration, and limitations.
+
+## Phase headlines
+
+- **Phase 0 — Foundation (2026-07-12).** A leakage-controlled corpus of **23,535**
+  curated T-box records is partitioned by structure-aware, RF00230-homology-clustered
+  **leave-clade-out** splits (max held-out↔train consensus identity **< 0.70**),
+  committed as a sequence-free split table and guarded by a **CI-blocking no-leakage
+  test** over the real partition. The **non-circular evaluation contract** (GATE-1
+  recall@matched-precision vs a `cmsearch` baseline; GATE-2 calibration ECE + discovery
+  FDR; GATE-3 per-corpus→project rollup; GATE-4 per-nucleotide segmentation F1) and its
+  blinded-frozen thresholds are pinned across **six seed ADRs** (ADR-0001…0006), with
+  static decoy pools + union-prior masking and an eval-gate regression harness in place.
+  *No detector has been trained yet — Phase 0 ships the foundation, not a discovery
+  result.*
 
 ## Layout (PRD §16)
 

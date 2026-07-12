@@ -17,6 +17,9 @@ figures/** filter=lfs diff=lfs merge=lfs -text
 *.fa filter=lfs diff=lfs merge=lfs -text
 *.fasta filter=lfs diff=lfs merge=lfs -text
 data/processed/splits/split_assignments.parquet filter=lfs diff=lfs merge=lfs -text
+# Rendered per-phase dev-log PDFs (CLAUDE.md §6.2/§11) accumulate one ~1 MB
+# binary per phase — LFS keeps the git packfile lean, like figures above.
+docs/dev-log/*.pdf filter=lfs diff=lfs merge=lfs -text
 
 # Empty .gitkeep placeholders must stay plain text, never LFS pointers.
 **/.gitkeep -filter -diff -merge text

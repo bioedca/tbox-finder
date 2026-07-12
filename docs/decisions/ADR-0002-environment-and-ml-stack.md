@@ -156,6 +156,7 @@ The public Caduceus checkpoints are **human-reference pretrained**, while the di
 - **imp.md:** P0-04 (this step); P0-05 (builds the five envs from these pins); P0-06 (empirical `sm_86` check + fallbacks — amends this ADR); P0-07 (CI Docker image); P1 (kernel smoke, Caduceus go/no-go, RiNALMo parity + throughput probe).
 - **CLAUDE.md:** §3.1 (conda-lock + never-bump), §3.2 (rule=env), §3.3 (context7 before pinning), §7 item 2 (this sign-off) + item 4 (borderline go/no-go stop-and-ask), §8.5 (re-validate on bump), §10.1 (parity citation carried).
 - **Cards / paper (release-bound):** model card (backbone versions, LoRA/FSDP config, parity result, Caduceus transfer outcome); `docker/Dockerfile` + `envs/*.conda-lock.yml` (the reproducibility artifacts); `paper/manuscript.qmd` (methods: pinned stack + `cmsearch` 1.1.5 baseline).
+- **Phase-0 exit (2026-07-12):** the pinned envs remain the reproducibility artifacts; the phase-0 dev-log renders via the **`tbox-viz`** env (`envs/viz.yml` → `name: tbox-viz`; `quarto`+`typst`, no LaTeX in the stack). No ML-stack claim enters the P0 manuscript paragraph (deferred to the P1 backbones/parity paragraph); no pin changed.
 
 ## Amendments
 
