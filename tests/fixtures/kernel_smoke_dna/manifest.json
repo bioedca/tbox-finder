@@ -13,5 +13,5 @@
     "3": "T"
   },
   "sha256": "6252fae8d131f7c6eb65af5233c2737aa1a1c9222efc5efe2c87d61ee56aa119",
-  "generator": "numpy.random.default_rng(42).integers(0,4,(2,512),int8)"
+  "generator": "numpy.random.default_rng(42).integers(0, 4, size=(2, 512), dtype=numpy.int8)"
 }

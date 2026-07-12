@@ -44,6 +44,10 @@ OUT="$WORK/kernel_smoke.json"
 DEST="$REPO/reports/p1"
 mkdir -p "$DEST"
 
+# Clear any stale artifacts from a prior run FIRST, so a failed run can never leave a
+# stale success marker or a stale report behind (artifact-based verification, §9.3).
+rm -f "$DEST/kernel_smoke.json" "$DEST/kernel_smoke.json.tmp" "$DEST/kernel_smoke.DONE"
+
 set +e
 PYTHONPATH=src python -m tbox_finder.kernels.kernel_smoke \
   --fixture tests/fixtures/kernel_smoke_dna/dna_tokens.npy \
@@ -52,13 +56,17 @@ PYTHONPATH=src python -m tbox_finder.kernels.kernel_smoke \
 RC=$?
 set -e
 
-# Always retrieve the report (even on gate failure, to see why); DONE only on success.
-[ -f "$OUT" ] && cp "$OUT" "$DEST/kernel_smoke.json"
+# Always publish the report (even on gate failure, to see why), atomically: write to a
+# temp then mv (same-FS rename is atomic) so a reader never sees a half-copied file.
+# DONE is created only after a successful report is in place.
+if [ -f "$OUT" ]; then
+  cp "$OUT" "$DEST/kernel_smoke.json.tmp"
+  mv -f "$DEST/kernel_smoke.json.tmp" "$DEST/kernel_smoke.json"
+fi
 if [ "$RC" -eq 0 ]; then
   touch "$DEST/kernel_smoke.DONE"
   echo "SMOKE_DONE job=${SLURM_JOB_ID:-none}"
 else
-  rm -f "$DEST/kernel_smoke.DONE"
   echo "SMOKE_FAIL rc=$RC job=${SLURM_JOB_ID:-none}"
 fi
 
