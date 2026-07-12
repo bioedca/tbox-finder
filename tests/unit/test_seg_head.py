@@ -219,6 +219,15 @@ class TestSegHeadTorch:
         with pytest.raises(ValueError, match="left-aligned"):
             crf.viterbi_decode(emissions, mask=bad_mask)
 
+    def test_crf_rejects_interior_gap_mask(self):
+        # A valid token *after* padding would make mask.sum() (a length) disagree
+        # with the actual prefix — the forward / Viterbi algorithms must reject it.
+        crf = LinearChainCRF(8)
+        emissions = _hidden(1, 4, dim=8)
+        gap_mask = torch.tensor([[True, False, True, True]])
+        with pytest.raises(ValueError, match="left-aligned"):
+            crf.viterbi_decode(emissions, mask=gap_mask)
+
     # --- standalone CRF sanity ------------------------------------------- #
     def test_linear_chain_crf_rejects_tiny_tagset(self):
         with pytest.raises(ValueError, match="num_tags"):
@@ -228,3 +237,13 @@ class TestSegHeadTorch:
         head = SegmentationHead(_INPUT_DIM, use_crf=True)
         hidden = _hidden(3, 12)
         assert head.decode(hidden) == head.decode(hidden)
+
+    @pytest.mark.parametrize("use_crf", [False, True])
+    def test_decode_deterministic_under_dropout_in_train_mode(self, use_crf):
+        # With active dropout and the module left in train() mode, decode must
+        # still be deterministic (it forces eval) and must restore train mode.
+        head = SegmentationHead(_INPUT_DIM, use_crf=use_crf, dropout=0.5)
+        head.train()
+        hidden = _hidden(2, 9)
+        assert head.decode(hidden) == head.decode(hidden)
+        assert head.training is True  # previous state restored

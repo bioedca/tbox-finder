@@ -206,6 +206,16 @@ class LinearChainCRF(nn.Module):
                 )
             if not bool(mask[:, 0].all()):
                 raise ValueError("mask must be left-aligned: the first timestep must be valid")
+            if mask.shape[1] > 1:
+                # No valid token may follow a padding token: the forward /
+                # Viterbi algorithms treat mask.sum() as a contiguous prefix
+                # length, so an interior gap (e.g. [True, False, True]) would
+                # silently corrupt the score / decoded path.
+                reopened = (~mask[:, :-1].bool()) & mask[:, 1:].bool()
+                if bool(reopened.any()):
+                    raise ValueError(
+                        "mask must be left-aligned: no valid tokens may follow padding"
+                    )
 
 
 # --------------------------------------------------------------------------- #
@@ -278,7 +288,8 @@ class SegmentationHead(nn.Module):
 
         With the CRF, the per-sequence negative log-likelihood; otherwise masked
         cross-entropy (``ignore_index`` on masked-out positions). ``reduction`` is
-        ``"mean"`` | ``"sum"`` | ``"none"``.
+        ``"mean"`` | ``"sum"`` | ``"none"``. Note ``reduction="none"`` shape differs
+        by mode: per-sequence ``(B,)`` with the CRF, per-token ``(B, L)`` without it.
         """
         logits = self(hidden_states)
         if self.crf is not None:
@@ -290,12 +301,19 @@ class SegmentationHead(nn.Module):
         """Best per-position class path per sequence (length = #valid tokens).
 
         CRF Viterbi when ``use_crf`` else per-position ``argmax``. Every returned
-        index is a valid class in ``[0, 8)``.
+        index is a valid class in ``[0, 8)``. Inference is done in ``eval`` mode
+        (dropout disabled) regardless of the module's current training state, then
+        the previous state is restored, so decoding is deterministic.
         """
-        logits = self(hidden_states)
-        if self.crf is not None:
-            return self.crf.viterbi_decode(logits, mask=mask)
-        return _argmax_decode(logits, mask)
+        was_training = self.training
+        self.eval()
+        try:
+            logits = self(hidden_states)
+            if self.crf is not None:
+                return self.crf.viterbi_decode(logits, mask=mask)
+            return _argmax_decode(logits, mask)
+        finally:
+            self.train(was_training)
 
 
 # --------------------------------------------------------------------------- #
