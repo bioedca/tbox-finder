@@ -1,0 +1,59 @@
+# @package _global_
+# train/stage1_smoke.yaml — P1-07 Stage-1 per-nucleotide 8-class segmentation smoke
+# fine-tune + BINDING transfer go/no-go (PRD §10.1/§11; ADR-0002 D7; ADR-0004 D6; ADR-0005).
+#
+# `@package _global_` lifts this nested (conf/train/) primary config's keys to the root so
+# `cfg.seed`/`cfg.epochs`/… are top-level (a config in a subdirectory is otherwise packaged
+# under `train`); the `/model` `/tracking` `/optim` groups keep their own group packages.
+#
+# Drives: src/tbox_finder/train/stage1_smoke.py::main (Hydra entry) → run_smoke.
+# Composed from the existing config groups (conf/model, conf/tracking, conf/optim) via the
+# absolute (`/group`) defaults so this nested primary config reaches the search-path-root
+# groups. Overridable on the CLI, e.g. `epochs=30 optim.lr=1e-4 go_threshold=0.35`.
+#
+# Seeding (§8.3): every stochastic step passes an explicit seed; the run is deterministic
+# (TF32/cudnn off in code) so the P1-08 seeded re-run reproduces the go/no-go within
+# tolerance. GATE thresholds are NOT here — the 0.80 GATE-4 floor is frozen in
+# power.py/metrics.py; the go/no-go smoke thresholds below are DIRECTIONAL (ADR-0002 D7,
+# set with the fixture, not a blinded-frozen gate) and PROVISIONAL pending the §7 verdict
+# sign-off recorded in the ADR-0002 amendment.
+
+defaults:
+  - _self_
+  - /model: caduceus_stage1
+  - /tracking: wandb
+  - /optim: adamw_smoke
+
+# Determinism (§8.3).
+seed: 42
+pythonhashseed: 0
+
+# Fine-tune knobs (full fine-tune, ADR-0002 D7 fallback 1; PRD §11 focal loss γ≈2).
+epochs: 20
+gamma: 2.0          # focal-loss γ (dense-background regime, PRD §11)
+grad_clip: 1.0
+use_crf: false      # Linear seg head (P1-03 default); CRF is a P2 ablation
+dropout: 0.0        # 0.0 ⇒ deterministic inference (P1-08 repro)
+batch_size: 1       # variable-length windows; batch=1 avoids pad/mask, stays deterministic
+# rc_combine is single-sourced to the /model group (caduceus_stage1.yaml: rc_combine.mode);
+# override it via `model.rc_combine.mode=gate`. "mean" is rejected in code (P1-04).
+
+# Go/no-go operationalization (ADR-0002 D7: "clearly above a background-only baseline";
+# NOT the 0.80 GATE-4 bar — that is P2 on the full split). PROVISIONAL — §7 sign-off.
+go_threshold: 0.30    # min-core-F1 ≥ this ⇒ GO (clear signal above the 0.0 baseline)
+nogo_threshold: 0.10  # min-core-F1 ≤ this ⇒ NO-GO (at/near background); between ⇒ §7 stop-and-ask
+
+# Inputs (P1-06 held-out smoke set; DVC-tracked) + outputs.
+windows_parquet: data/interim/p1_seg_smoke/windows.parquet
+labels_npy: data/interim/p1_seg_smoke/labels.npy
+checkpoint_dir: checkpoints/p1/seg_smoke
+report_path: reports/p1/seg_smoke_gonogo.json
+prefilter_report: reports/p1/prefilter_separability.json   # P1-05 advisory (non-binding)
+save_checkpoint: true
+
+# Hydra: keep the run CWD = the launch dir (repo root) so relative in/out paths resolve;
+# no per-run output subdir (the sbatch manages node-local scratch + artifact publish).
+hydra:
+  run:
+    dir: .
+  output_subdir: null
