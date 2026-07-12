@@ -80,6 +80,10 @@ POSITIVE_SOURCE = "corpus"
 LABELS_ID_COL = "record_sha256"
 LABEL_STRING_COL = "label_string"
 RECORD_INDEX_COL = "record_index"
+#: labels_v0's ``name`` (== master ``Name`` at ``record_index``) — used only to
+#: verify the positional row-order contract, then dropped before output.
+LABELS_NAME_COL = "name"
+_LABELS_NAME_TMP = "_labels_name"
 
 #: master taxonomy passthrough (informational; no domain column exists).
 PHYLUM_COL = "phylum"
@@ -356,7 +360,13 @@ def assert_labels_consistent(records: Sequence[Mapping[str, Any]]) -> None:
     A mismatch means the corpus/labels drifted — never silently emit it (§10.3).
     """
     for r in records:
-        wl = int(round(float(r[WINDOW_LEN_COL])))
+        wl_raw = r.get(WINDOW_LEN_COL)
+        if _is_absent(wl_raw):
+            raise ValueError(
+                f"{r.get(RECORD_ID_COL)}: missing/invalid {WINDOW_LEN_COL} — cannot verify "
+                f"label derivation (CLAUDE.md §10.3)"
+            )
+        wl = int(round(float(wl_raw)))
         rederived = derive_label_codes(r, window_length=wl, naive=False)
         if rederived != r[LABEL_STRING_COL]:
             raise ValueError(
@@ -440,10 +450,10 @@ def build_smoke_records(
         mask, [RECORD_ID_COL, SOURCE_COL, NESTED_ROLE_COL, KLASS_COL, CLUSTER_COL, ORDER_COL]
     ].copy()
 
-    lab = labels_df[[LABELS_ID_COL, RECORD_INDEX_COL, LABEL_STRING_COL]].rename(
-        columns={LABELS_ID_COL: RECORD_ID_COL}
+    lab = labels_df[[LABELS_ID_COL, RECORD_INDEX_COL, LABELS_NAME_COL, LABEL_STRING_COL]].rename(
+        columns={LABELS_ID_COL: RECORD_ID_COL, LABELS_NAME_COL: _LABELS_NAME_TMP}
     )
-    sel = sel.merge(lab, on=RECORD_ID_COL, how="inner")
+    sel = sel.merge(lab, on=RECORD_ID_COL, how="inner").reset_index(drop=True)
 
     master_cols = [
         NAME_COL,
@@ -454,9 +464,27 @@ def build_smoke_records(
         MASTER_ORDER_COL,
         *COORD_COLS,
     ]
+    # ``record_index`` is a *positional* index into master (labels_v0 was built row-for-row
+    # from master, so labels_v0.name == master.Name[record_index]). Validate that contract
+    # explicitly before trusting ``iloc`` — a re-sorted/re-filtered master would silently
+    # mis-join otherwise (CLAUDE.md §10.3, fail loud).
     idx = sel[RECORD_INDEX_COL].to_numpy()
+    n_master = len(master_df)
+    if idx.size and (int(idx.min()) < 0 or int(idx.max()) >= n_master):
+        raise ValueError(
+            f"record_index out of range for master ([{int(idx.min())}, {int(idx.max())}] "
+            f"vs {n_master} rows) — corpus/labels row-order drift (CLAUDE.md §10.3)"
+        )
     msub = master_df.iloc[idx][master_cols].reset_index(drop=True)
-    joined = pd.concat([sel.reset_index(drop=True), msub], axis=1)
+    name_mismatch = msub[NAME_COL].to_numpy() != sel[_LABELS_NAME_TMP].to_numpy()
+    if bool(name_mismatch.any()):
+        bad = sel.loc[name_mismatch, RECORD_ID_COL].tolist()[:5]
+        raise ValueError(
+            f"record_index → master row-order contract violated for "
+            f"{int(name_mismatch.sum())} record(s) (e.g. {bad}) — corpus/labels drift "
+            f"(CLAUDE.md §10.3)"
+        )
+    joined = pd.concat([sel.drop(columns=[_LABELS_NAME_TMP]), msub], axis=1)
 
     records = joined.to_dict(orient="records")
     subset = select_smoke_subset(

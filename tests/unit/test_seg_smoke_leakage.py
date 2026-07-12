@@ -202,6 +202,84 @@ def test_labels_to_matrix_pad_and_values() -> None:
 
 
 # --------------------------------------------------------------------------- #
+# build_smoke_records join + record_index → master row-order contract (pandas)
+# --------------------------------------------------------------------------- #
+def _mini_frames():
+    pd = pytest.importorskip("pandas")
+    recs = [
+        _rec("id_a", window=20, elements={"Stem_I": (1, 20), "Specifier": (8, 10)}),
+        _rec(
+            "id_b",
+            window=16,
+            elements={"Antiterminator_Tbox_seq": (3, 12), "Discriminator": (10, 12)},
+        ),
+    ]
+    split_df = pd.DataFrame(
+        [
+            {
+                ss.RECORD_ID_COL: r[ss.RECORD_ID_COL],
+                ss.SOURCE_COL: "corpus",
+                ss.NESTED_ROLE_COL: "heldout",
+                ss.KLASS_COL: r[ss.KLASS_COL],
+                ss.CLUSTER_COL: i,
+                ss.ORDER_COL: "OrderA",
+            }
+            for i, r in enumerate(recs)
+        ]
+    )
+    labels_df = pd.DataFrame(
+        [
+            {
+                ss.LABELS_ID_COL: r[ss.RECORD_ID_COL],
+                ss.RECORD_INDEX_COL: i,
+                ss.LABELS_NAME_COL: r["Name"],
+                ss.LABEL_STRING_COL: r[ss.LABEL_STRING_COL],
+            }
+            for i, r in enumerate(recs)
+        ]
+    )
+    master_df = pd.DataFrame(
+        [
+            {
+                ss.NAME_COL: r["Name"],
+                ss.WINDOW_SEQ_COL: r[ss.WINDOW_SEQ_COL],
+                ss.WINDOW_LEN_COL: r[ss.WINDOW_LEN_COL],
+                ss.CLASS_TYPE_COL: r[ss.CLASS_TYPE_COL],
+                ss.PHYLUM_COL: "Firmicutes",
+                ss.MASTER_ORDER_COL: "OrderA",
+                **{c: r.get(c) for c in ss.COORD_COLS},
+            }
+            for r in recs
+        ]
+    )
+    return split_df, master_df, labels_df
+
+
+def test_build_smoke_records_join_ok() -> None:
+    pytest.importorskip("pandas")
+    split_df, master_df, labels_df = _mini_frames()
+    out = ss.build_smoke_records(
+        split_df, master_df, labels_df, max_loci=10, min_per_class=1, min_class_ii=0
+    )
+    # returned only via a clean assert_labels_consistent (positional join verified)
+    assert {r[ss.RECORD_ID_COL] for r in out} == {"id_a", "id_b"}
+    by_id = {r[ss.RECORD_ID_COL]: r for r in out}
+    assert by_id["id_a"][ss.NAME_COL] == "id_a"  # master row correctly aligned
+    assert len(by_id["id_a"][ss.WINDOW_SEQ_COL]) == 20
+
+
+def test_build_smoke_records_detects_row_order_drift() -> None:
+    pytest.importorskip("pandas")
+    split_df, master_df, labels_df = _mini_frames()
+    # break the positional contract: reorder master so record_index no longer maps.
+    master_df = master_df.iloc[::-1].reset_index(drop=True)
+    with pytest.raises(ValueError, match="row-order"):
+        ss.build_smoke_records(
+            split_df, master_df, labels_df, max_loci=10, min_per_class=1, min_class_ii=0
+        )
+
+
+# --------------------------------------------------------------------------- #
 # committed-fixture tier — the real held-out slice (pandas)
 # --------------------------------------------------------------------------- #
 def test_fixture_every_record_is_heldout_fold() -> None:
