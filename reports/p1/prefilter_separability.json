@@ -1,0 +1,99 @@
+{
+  "adr": "ADR-0002",
+  "data": {
+    "background": {
+      "gc_mean": 0.4546594121216309,
+      "length_mean": 305.4665,
+      "n": 2000,
+      "pool": "gc_background"
+    },
+    "positives": {
+      "n": 8715,
+      "n_clusters": 4378,
+      "n_orders": 44,
+      "role": "heldout",
+      "source": "corpus"
+    }
+  },
+  "embedding": {
+    "backbone": "kuleshov-group/caduceus-ps_seqlen-131k_d_model-256_n_layer-16",
+    "frozen": true,
+    "hidden_dim": 512,
+    "pooling": "mean-over-positions",
+    "revision": "d89eeb853136ea64da7feb3d0c8e909771b17ae6"
+  },
+  "env": {
+    "hostname": "Xochi",
+    "numpy": "2.5.1",
+    "pandas": "2.3.3",
+    "python": "3.12.13",
+    "sklearn": "1.9.0",
+    "torch": null,
+    "transformers": null
+  },
+  "floor": {
+    "chance_level": 0.5,
+    "criterion": "above-chance linear separability (ADR-0002 D7 part i)",
+    "non_binding": true,
+    "operationalization": "PASS iff AUROC 95% bootstrap CI lower bound > 0.5; borderline iff point estimate > 0.5 but the CI includes 0.5; FAIL iff point <= 0.5 or unmeasurable"
+  },
+  "gate": {
+    "above_chance": true,
+    "binding": false,
+    "chance_level": 0.5,
+    "verdict": "PASS"
+  },
+  "generated_by": "src/tbox_finder/probes/frozen_linear_probe.py",
+  "leakage": {
+    "cluster_spans_boundary": false,
+    "n_shared_clusters": 0,
+    "n_shared_orders": 34,
+    "order_spans_boundary": true,
+    "positives_heldout_only": true
+  },
+  "measured": true,
+  "metrics": {
+    "auroc": 0.9920728990887614,
+    "auroc_ci_lower": 0.988681070536041,
+    "auroc_ci_upper": 0.9949539979033614,
+    "balanced_accuracy": 0.9597252784340196,
+    "n_bootstrap": 2000,
+    "n_bootstrap_valid": 2000,
+    "test_neg": 500,
+    "test_pos": 2963
+  },
+  "probe": {
+    "C": 1.0,
+    "class_weight": "balanced",
+    "max_iter": 1000,
+    "model": "logistic_regression",
+    "n_clusters_test": 1095,
+    "n_clusters_train": 3283,
+    "n_orders_test": 37,
+    "n_orders_train": 41,
+    "n_test": 3463,
+    "n_test_neg": 500,
+    "n_test_pos": 2963,
+    "n_train": 7252,
+    "n_train_neg": 1500,
+    "n_train_pos": 5752,
+    "scaler": "standard",
+    "seed": 42,
+    "split_scheme": "homology-safe (GroupShuffleSplit by cluster_id); positives from the P0 leave-clade-out held-out fold",
+    "test_size": 0.25
+  },
+  "provenance": {
+    "extract_env_lock": "70b66801eeafe1fdec4c19e667de1590e4471143bca36248fe40f16e53bb5003",
+    "git_sha": "58b8f3d14172b436e6494fff1bee2bf89b3464f5",
+    "inputs": {
+      "data/interim/probes/prefilter_embeddings.npz": "82768302f7de58e2f90161cf480598fbf69da58b4b9e2712681125602d7dd011",
+      "data/processed/negatives/decoys_v0.parquet": "b1062bfb80d999de87f3ee9c73c9f8885551e5ec29bbfbab025b7893d34b80d0",
+      "data/processed/splits/split_assignments.parquet": "fb231fe4e66666f8ea2de1ccd4eea4dce282a33e05a46b41c737e3e07dcc5602"
+    },
+    "probe_env_lock": "a4a6715d411d7218432c4c670d35475f6c9aa7dd6397fd5d906ca7e21293dc34",
+    "seed": 42,
+    "timestamp_utc": "2026-07-12T16:20:36Z"
+  },
+  "schema_version": "1",
+  "step": "P1-05"
+}
