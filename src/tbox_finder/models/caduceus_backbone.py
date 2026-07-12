@@ -190,13 +190,17 @@ def validate_report(report: Mapping[str, Any]) -> list[str]:
     if report.get("measured"):
         if pc.get("actual") != pc.get("expected") and pc.get("param_count_ok") is True:
             errs.append("param_count.actual != expected but param_count_ok cannot be true")
-        if pc.get("param_count_ok") is False and gate.get("param_count_ok") is True:
+        if gate.get("param_count_ok") != pc.get("param_count_ok"):
             errs.append("gate.param_count_ok contradicts the block")
         md, at = rc.get("max_abs_diff"), rc.get("atol")
         if isinstance(md, (int, float)) and isinstance(at, (int, float)):
-            expect_pass = bool(math.isfinite(md) and md <= at)
+            # A non-finite atol (e.g. inf) can never certify equivariance — the gate is
+            # only meaningful for a finite, non-negative tolerance (see the CLI guard).
+            expect_pass = bool(math.isfinite(md) and math.isfinite(at) and at >= 0 and md <= at)
             if bool(rc.get("pass")) != expect_pass:
                 errs.append("rc_equivariance.pass inconsistent with max_abs_diff vs atol")
+        if gate.get("rc_equivariance_ok") != rc.get("pass"):
+            errs.append("gate.rc_equivariance_ok contradicts rc_equivariance.pass")
         want_overall = bool(
             gate.get("load_ok") and gate.get("param_count_ok") and gate.get("rc_equivariance_ok")
         )
@@ -350,7 +354,7 @@ def build_report(*, revision: str, seq_len: int, seed: int, atol: float) -> dict
     rc = rc_equivariance(model, tokenizer, seq_len=seq_len, seed=seed, device=device)
     rc["atol"] = atol
     md = rc["max_abs_diff"]
-    rc["pass"] = bool(math.isfinite(md) and md <= atol)
+    rc["pass"] = bool(math.isfinite(md) and math.isfinite(atol) and atol >= 0 and md <= atol)
 
     report: dict[str, Any] = {
         "schema_version": SCHEMA_VERSION,
@@ -412,6 +416,10 @@ def main(argv=None) -> int:
     args = parser.parse_args(argv)
     if args.seq_len < 2:
         parser.error("--seq-len must be >= 2")
+    if not math.isfinite(args.atol) or args.atol < 0:
+        parser.error(
+            "--atol must be finite and >= 0 (an infinite tolerance makes the gate vacuous)"
+        )
 
     report = build_report(
         revision=args.revision, seq_len=args.seq_len, seed=args.seed, atol=args.atol

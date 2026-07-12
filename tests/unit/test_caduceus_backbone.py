@@ -134,6 +134,12 @@ def test_good_report_is_valid():
         lambda r: r["param_count"].__setitem__("actual", 999),  # actual != expected
         lambda r: r["rc_equivariance"].__setitem__("pass", False),  # inconsistent w/ diff<=atol
         lambda r: r["rc_equivariance"].__setitem__("max_abs_diff", 1.0),  # >atol but pass True
+        # gate.rc_equivariance_ok=True while measured pass=False (consistent w/ diff>atol):
+        lambda r: (
+            r["rc_equivariance"].update({"max_abs_diff": 1.0, "pass": False}),
+            r["gate"].__setitem__("rc_equivariance_ok", True),
+        ),
+        lambda r: r["gate"].__setitem__("param_count_ok", False),  # != pc.param_count_ok (True)
         lambda r: r["gate"].__setitem__("overall_pass", False),  # contradicts AND(subgates)
         lambda r: r["rc_equivariance"].pop("neg_control_max_abs_diff"),
     ],
@@ -177,8 +183,11 @@ def test_conf_model_matches_code_pins():
 # ========================================================================== #
 # Committed provenance.json — the real GPU-measured artifact (validated in CI).
 # ========================================================================== #
-@pytest.mark.skipif(not _PROVENANCE.exists(), reason="committed provenance.json absent")
 def test_committed_provenance_valid_and_gate_passes():
+    # The provenance.json is a required, git-tracked artifact of this step (not LFS/DVC),
+    # so it is always present in a normal checkout — its absence is a regression, FAIL
+    # (never skip), so the provenance gate cannot silently rot (§8.7/§10.3).
+    assert _PROVENANCE.exists(), "committed provenance.json is required (P1-02 artifact)"
     prov = json.loads(_PROVENANCE.read_text())
     # Canonical sidecar fields (CLAUDE.md §11).
     assert prov["env_lock_hash"], "env_lock_hash must be recorded (ml-dna lock)"
