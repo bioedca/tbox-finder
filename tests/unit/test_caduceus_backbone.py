@@ -44,6 +44,17 @@ def test_revision_is_immutable_commit_not_branch():
     assert cb.REVISION != "main"
 
 
+def test_loaders_reject_non_pinned_revision_before_import():
+    # trust_remote_code=True EXECUTES the Hub modeling code at load, so the loaders must
+    # reject any non-pinned revision BEFORE the lazy torch/transformers import — this test
+    # runs in a bare (torch-less) env precisely because the guard fires first.
+    for wrong in ("main", "0" * 40, "abc123"):
+        with pytest.raises(ValueError):
+            cb.load_caduceus_ps(revision=wrong)
+        with pytest.raises(ValueError):
+            cb.load_tokenizer(revision=wrong)
+
+
 def test_expected_param_count_frozen():
     # The "7.73 M" of PRD §10.1 to the exact measured integer, frozen in code.
     assert cb.EXPECTED_PARAM_COUNT == 7_725_312
@@ -94,7 +105,14 @@ def good_report() -> dict:
         "step": "P1-02",
         "measured": True,
         "generated_by": "src/tbox_finder/models/caduceus_backbone.py",
-        "checkpoint": {"repo_id": cb.REPO_ID, "revision": cb.REVISION, "hub_url": cb.HUB_URL},
+        "checkpoint": {
+            "repo_id": cb.REPO_ID,
+            "revision": cb.REVISION,
+            "hub_url": cb.HUB_URL,
+            "d_model": cb.D_MODEL,
+            "n_layer": cb.N_LAYER,
+            "rcps": True,
+        },
         "pretraining": {"domain": cb.PRETRAINING_DOMAIN, "citations": cb.PRETRAINING_CITATIONS},
         "env": {"cuda_available": True, "is_sm86": True},
         "param_count": {
@@ -145,6 +163,15 @@ def test_good_report_is_valid():
         lambda r: r["rc_equivariance"].pop("neg_control_max_abs_diff"),
         # vacuous control: neg_control <= atol means the check doesn't discriminate → must not pass
         lambda r: r["rc_equivariance"].__setitem__("neg_control_max_abs_diff", 0.0),
+        # schema/architecture-identity + type-strictness guards:
+        lambda r: r.__setitem__("schema_version", "9"),
+        lambda r: r.__setitem__("step", "P9-99"),
+        lambda r: r.__setitem__("checkpoint", "not a mapping"),  # block-type guard
+        lambda r: r["checkpoint"].__setitem__("d_model", 512),
+        lambda r: r["checkpoint"].__setitem__("n_layer", 4),
+        lambda r: r["checkpoint"].__setitem__("rcps", False),  # not Caduceus-PS
+        lambda r: r["rc_equivariance"].__setitem__("pass", "true"),  # truthy str, not a bool
+        lambda r: r["rc_equivariance"].__setitem__("max_abs_diff", "0.0"),  # str, not a number
     ],
 )
 def test_validator_bites(mutate):

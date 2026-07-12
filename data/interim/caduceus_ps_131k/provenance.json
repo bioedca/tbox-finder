@@ -19,7 +19,6 @@
         9
       ],
       "device_name": "NVIDIA GeForce RTX 4060 Laptop GPU",
-      "hostname": "Xochi",
       "is_sm86": false,
       "python": "3.12.13",
       "torch": "2.7.1+cu128",
@@ -58,7 +57,7 @@
     },
     "rc_equivariance": {
       "atol": 0.0001,
-      "hidden_abs_max": 2.0542550086975098,
+      "hidden_abs_max": 2.0542547702789307,
       "hidden_shape": [
         1,
         128,
@@ -74,8 +73,8 @@
     "schema_version": "1",
     "step": "P1-02"
   },
-  "generated_at_utc": "2026-07-12T12:57:06.938532+00:00",
-  "git_sha": "a6fbc10d06cff2015b6df03659f1e1bcb4718c0c",
+  "generated_at_utc": "2026-07-12T13:07:28.691821+00:00",
+  "git_sha": "5b3ef7ac139fb519d6786e628b1ad19e49345729",
   "inputs": {},
   "outputs": {},
   "rule": "src/tbox_finder/models/caduceus_backbone.py :: main (P1-02, LOCAL GPU)",

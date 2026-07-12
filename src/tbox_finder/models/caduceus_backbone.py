@@ -159,19 +159,38 @@ def _rc_pass(max_abs_diff: float, atol: float, neg_control: float) -> bool:
     )
 
 
+def _finite_number(v: Any) -> bool:
+    """True iff ``v`` is a finite real number — explicitly NOT a bool (bool ⊂ int) or string."""
+    return isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)
+
+
+def _bad_bool(value: Any, expected: bool) -> bool:
+    """True (a violation) iff ``value`` is not a real ``bool`` equal to ``expected`` — so a
+    tampered JSON cannot slip a truthy string/number past a verdict check (§8.7/§10.3)."""
+    return not isinstance(value, bool) or value != expected
+
+
 def validate_report(report: Mapping[str, Any]) -> list[str]:
     """Return a (possibly empty) list of schema/consistency errors for a P1-02 report.
 
     Enforced regardless of whether a GPU produced it, so the committed provenance's
     ``extra`` block can be validated in a bare CI env (mirrors the kernel_smoke report
-    validator). Empty list ⇒ structurally valid.
+    validator). Robust to a malformed/tampered report — it never raises, always returns
+    an error list. Empty list ⇒ structurally valid.
     """
     errs: list[str] = []
     for blk in _REPORT_BLOCKS:
         if blk not in report:
             errs.append(f"missing block: {blk}")
-    if errs:
+        elif not isinstance(report[blk], Mapping):
+            errs.append(f"block is not a mapping: {blk}")
+    if errs:  # a non-mapping block would crash the .get() checks below — stop here
         return errs
+
+    if report.get("schema_version") != SCHEMA_VERSION:
+        errs.append(f"schema_version != {SCHEMA_VERSION!r}")
+    if report.get("step") != "P1-02":
+        errs.append("step != 'P1-02'")
 
     ckpt = report["checkpoint"]
     if ckpt.get("repo_id") != REPO_ID:
@@ -181,10 +200,13 @@ def validate_report(report: Mapping[str, Any]) -> list[str]:
             "checkpoint.revision is not a 40-hex commit SHA (must not be a branch like 'main')"
         )
     elif ckpt.get("revision") != REVISION:
-        # A committed provenance must be for the PINNED checkpoint, not any valid SHA.
-        # main() writes only after validate_report passes, so this also blocks a non-pinned
-        # ``--revision`` from ever producing a committed artifact (the remote-code pin boundary).
         errs.append("checkpoint.revision != pinned REVISION")
+    if ckpt.get("d_model") != D_MODEL:
+        errs.append("checkpoint.d_model != D_MODEL")
+    if ckpt.get("n_layer") != N_LAYER:
+        errs.append("checkpoint.n_layer != N_LAYER")
+    if ckpt.get("rcps") is not True:
+        errs.append("checkpoint.rcps must be True (Caduceus-PS)")
 
     pre = report["pretraining"]
     if pre.get("domain") != PRETRAINING_DOMAIN:
@@ -205,32 +227,40 @@ def validate_report(report: Mapping[str, Any]) -> list[str]:
     for k in ("load_ok", "param_count_ok", "rc_equivariance_ok", "overall_pass"):
         if k not in gate:
             errs.append(f"gate missing key: {k}")
+    if errs:  # missing sub-keys → the consistency checks below can't run meaningfully
+        return errs
 
     # Consistency (only checkable once a GPU has measured the numbers). These flag an
     # internally *inconsistent* report — never an honestly-recorded failure: a measured
     # mismatch (actual != expected) with ``param_count_ok=False`` is a legitimate gate
-    # failure, not a schema error (mirrors the rc_equivariance/gate consistency checks).
+    # failure, not a schema error. Verdicts must be real booleans and metrics finite,
+    # non-bool numbers, so a hand-tampered JSON cannot slip a truthy string past the gate.
     if report.get("measured"):
         if pc.get("actual") != pc.get("expected") and pc.get("param_count_ok") is True:
             errs.append("param_count.actual != expected but param_count_ok cannot be true")
-        if gate.get("param_count_ok") != pc.get("param_count_ok"):
+        if not isinstance(pc.get("param_count_ok"), bool):
+            errs.append("param_count.param_count_ok must be a bool")
+        elif _bad_bool(gate.get("param_count_ok"), pc.get("param_count_ok")):
             errs.append("gate.param_count_ok contradicts the block")
         md, at, neg = rc.get("max_abs_diff"), rc.get("atol"), rc.get("neg_control_max_abs_diff")
-        if all(isinstance(v, (int, float)) for v in (md, at, neg)):
+        if not all(_finite_number(v) for v in (md, at, neg)):
+            errs.append("rc_equivariance metrics must be finite numbers")
+        else:
             # Pass requires BOTH: (i) f(RC(x)) matches flip(f(x)) within a finite, non-negative
             # atol, AND (ii) the reverse-only negative control does NOT match (neg > atol) — so a
             # degenerate constant/zero-output model (md==0 AND neg==0) cannot pass vacuously.
-            expect_pass = _rc_pass(md, at, neg)
-            if bool(rc.get("pass")) != expect_pass:
+            if _bad_bool(rc.get("pass"), _rc_pass(md, at, neg)):
                 errs.append(
                     "rc_equivariance.pass inconsistent with max_abs_diff/neg_control vs atol"
                 )
-        if gate.get("rc_equivariance_ok") != rc.get("pass"):
+        if not isinstance(rc.get("pass"), bool):
+            errs.append("rc_equivariance.pass must be a bool")
+        elif _bad_bool(gate.get("rc_equivariance_ok"), rc.get("pass")):
             errs.append("gate.rc_equivariance_ok contradicts rc_equivariance.pass")
         want_overall = bool(
             gate.get("load_ok") and gate.get("param_count_ok") and gate.get("rc_equivariance_ok")
         )
-        if bool(gate.get("overall_pass")) != want_overall:
+        if _bad_bool(gate.get("overall_pass"), want_overall):
             errs.append("gate.overall_pass != AND(load_ok, param_count_ok, rc_equivariance_ok)")
     return errs
 
@@ -238,12 +268,27 @@ def validate_report(report: Mapping[str, Any]) -> list[str]:
 # ====================================================================================== #
 # Heavy loaders — lazy torch / transformers (inside functions only).
 # ====================================================================================== #
+def _require_pinned_revision(revision: str) -> None:
+    """Reject any revision other than the code-pinned :data:`REVISION`.
+
+    ``trust_remote_code=True`` **executes** the Hub modeling code at ``revision`` on load,
+    so an arbitrary revision is arbitrary remote-code execution. The revision is pinned in
+    code (ADR-0002 D2); re-pinning is a code change to :data:`REVISION` + re-sign-off, never
+    a runtime argument — so the loaders accept only the pinned value.
+    """
+    if revision != REVISION:
+        raise ValueError(
+            f"revision must be the code-pinned REVISION {REVISION!r}; loading remote code "
+            f"(trust_remote_code=True) from another revision is not allowed, got {revision!r}"
+        )
+
+
 def load_caduceus_ps(*, revision: str = REVISION, device: str | None = None, dtype: Any = None):
-    """Load the Caduceus-PS backbone (``AutoModel``) at the pinned ``revision``.
+    """Load the Caduceus-PS backbone (``AutoModel``) at the code-pinned ``revision``.
 
     Args:
-        revision: the immutable commit SHA to pin (defaults to :data:`REVISION`); a
-            branch name (e.g. ``main``) is rejected — the pin must be reproducible.
+        revision: must equal :data:`REVISION` (the only accepted value — see
+            :func:`_require_pinned_revision`); anything else is rejected.
         device: torch device string; defaults to ``"cuda"`` if available else ``"cpu"``
             (note: a forward requires CUDA — ADR-0002 A2 C2).
         dtype: optional torch dtype override.
@@ -251,8 +296,7 @@ def load_caduceus_ps(*, revision: str = REVISION, device: str | None = None, dty
     Returns:
         The Caduceus base model in ``.eval()`` mode on ``device``.
     """
-    if not _is_commit_sha(revision):
-        raise ValueError(f"revision must be a 40-hex commit SHA (never a branch), got {revision!r}")
+    _require_pinned_revision(revision)
     import torch  # lazy
     from transformers import AutoModel  # lazy
 
@@ -265,9 +309,8 @@ def load_caduceus_ps(*, revision: str = REVISION, device: str | None = None, dty
 
 
 def load_tokenizer(*, revision: str = REVISION):
-    """Load the Caduceus char tokenizer at the pinned ``revision`` (remote code)."""
-    if not _is_commit_sha(revision):
-        raise ValueError(f"revision must be a 40-hex commit SHA (never a branch), got {revision!r}")
+    """Load the Caduceus char tokenizer at the code-pinned ``revision`` (remote code)."""
+    _require_pinned_revision(revision)
     from transformers import AutoTokenizer  # lazy
 
     return AutoTokenizer.from_pretrained(REPO_ID, revision=revision, trust_remote_code=True)
@@ -347,6 +390,9 @@ def _env_block() -> dict[str, Any]:
     import torch  # lazy
     import transformers  # lazy
 
+    # No hostname is recorded: the provenance is committed to a PUBLIC repo, and a local
+    # machine name is a needless personal identifier. device_name/capability are kept —
+    # they are scientifically relevant reproducibility facts, not a personal identifier.
     info: dict[str, Any] = {
         "python": platform.python_version(),
         "torch": torch.__version__,
@@ -355,7 +401,6 @@ def _env_block() -> dict[str, Any]:
         "device_name": None,
         "device_capability": None,
         "is_sm86": None,
-        "hostname": platform.node(),
     }
     if info["cuda_available"]:
         cap = torch.cuda.get_device_capability(0)
@@ -365,7 +410,9 @@ def _env_block() -> dict[str, Any]:
     return info
 
 
-def build_report(*, revision: str, seq_len: int, seed: int, atol: float) -> dict[str, Any]:
+def build_report(
+    *, revision: str = REVISION, seq_len: int, seed: int, atol: float
+) -> dict[str, Any]:
     """Load the checkpoint, run the two P1-02 assertions, and return the report dict."""
     env = _env_block()
     if not env["cuda_available"]:
@@ -436,7 +483,8 @@ def build_parser() -> argparse.ArgumentParser:
         description="P1-02 Caduceus-PS backbone load + RC-equivariance gate"
     )
     p.add_argument("--out", default=DEFAULT_OUT)
-    p.add_argument("--revision", default=REVISION)
+    # No --revision flag: the checkpoint revision is code-pinned (REVISION; ADR-0002 D2) and
+    # must not be a runtime argument, since trust_remote_code=True executes it (see loaders).
     p.add_argument("--seq-len", type=int, default=DEFAULT_SEQ_LEN, dest="seq_len")
     p.add_argument("--atol", type=float, default=RC_EQUIVARIANCE_ATOL)
     p.add_argument("--seed", type=int, default=DEFAULT_SEED)
@@ -453,9 +501,7 @@ def main(argv=None) -> int:
             "--atol must be finite and >= 0 (an infinite tolerance makes the gate vacuous)"
         )
 
-    report = build_report(
-        revision=args.revision, seq_len=args.seq_len, seed=args.seed, atol=args.atol
-    )
+    report = build_report(seq_len=args.seq_len, seed=args.seed, atol=args.atol)
 
     errs = validate_report(report)
     if errs:  # a self-inconsistent report must not be written as if valid
