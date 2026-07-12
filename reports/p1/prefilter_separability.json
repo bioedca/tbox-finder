@@ -17,6 +17,7 @@
   },
   "embedding": {
     "backbone": "kuleshov-group/caduceus-ps_seqlen-131k_d_model-256_n_layer-16",
+    "extract_seed": 42,
     "frozen": true,
     "hidden_dim": 512,
     "pooling": "mean-over-positions",
@@ -84,15 +85,22 @@
   },
   "provenance": {
     "extract_env_lock": "70b66801eeafe1fdec4c19e667de1590e4471143bca36248fe40f16e53bb5003",
+    "extract_inputs": {
+      "data/interim/splits/inputs/class_I.fa": "eeb3c8ca420253d7430e7e55d17ddbbfed9c7e452037a738930725985a7e52c1",
+      "data/interim/splits/inputs/class_II.fa": "c5ea7b16c6c427bde884c335261079f41b5265197dc365744a07dd592b643239",
+      "data/processed/negatives/decoys_v0.parquet": "b1062bfb80d999de87f3ee9c73c9f8885551e5ec29bbfbab025b7893d34b80d0",
+      "data/processed/splits/split_assignments.parquet": "fb231fe4e66666f8ea2de1ccd4eea4dce282a33e05a46b41c737e3e07dcc5602"
+    },
+    "extract_seed": 42,
     "git_sha": "58b8f3d14172b436e6494fff1bee2bf89b3464f5",
     "inputs": {
-      "data/interim/probes/prefilter_embeddings.npz": "82768302f7de58e2f90161cf480598fbf69da58b4b9e2712681125602d7dd011",
+      "data/interim/probes/prefilter_embeddings.npz": "5f7a4d0ff95714294c04c69e9516d91a4f99856082b66bd0c58031d450f1cc31",
       "data/processed/negatives/decoys_v0.parquet": "b1062bfb80d999de87f3ee9c73c9f8885551e5ec29bbfbab025b7893d34b80d0",
       "data/processed/splits/split_assignments.parquet": "fb231fe4e66666f8ea2de1ccd4eea4dce282a33e05a46b41c737e3e07dcc5602"
     },
     "probe_env_lock": "a4a6715d411d7218432c4c670d35475f6c9aa7dd6397fd5d906ca7e21293dc34",
-    "seed": 42,
-    "timestamp_utc": "2026-07-12T16:20:36Z"
+    "probe_seed": 42,
+    "timestamp_utc": "2026-07-12T16:40:15Z"
   },
   "schema_version": "1",
   "step": "P1-05"

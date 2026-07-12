@@ -12,10 +12,12 @@ linear probe is fit over frozen (no-fine-tune) Caduceus-PS embeddings of
   - **negatives** — GC-matched prokaryotic background windows (§9.1 class 1;
     ``decoys_v0.parquet`` pool ``gc_background``).
 
-and evaluated on a **leave-clade-out probe split** (grouped by ``resolved_order`` so no
-clade — and no sequence cluster — spans the probe train/test boundary, §8.2/§9.2). The
-metric reported is balanced-accuracy + AUROC (with a seeded bootstrap CI) on the
-held-out probe split.
+and evaluated on a **cluster-grouped, homology-safe probe split** (``GroupShuffleSplit``
+by ``cluster_id``, so no sequence cluster spans the probe train/test boundary — the
+load-bearing §8.2 anti-leakage unit). Positives come from the P0 leave-clade-out
+held-out fold; ``resolved_order`` overlap across the probe boundary is informational
+(distinct clusters of one order are not homology leakage). The metric reported is
+balanced-accuracy + AUROC (with a seeded bootstrap CI) on the held-out probe split.
 
 **This gate is non-binding** (ADR-0002 D7 part i is an *advisory* screen): a low
 pre-filter can coexist with a passing full fine-tune, and the *binding* gate is the
@@ -189,6 +191,9 @@ def validate_report(report: Mapping[str, Any]) -> list[str]:
             val = metrics.get(key)
             if val is not None and not _prob01(val):
                 errors.append(f"metrics.{key} must be null or a finite number in [0, 1]")
+        lo, hi = metrics.get("auroc_ci_lower"), metrics.get("auroc_ci_upper")
+        if _prob01(lo) and _prob01(hi) and float(lo) > float(hi):
+            errors.append("metrics.auroc_ci_lower must be <= metrics.auroc_ci_upper")
 
     leakage = report.get("leakage")
     if not isinstance(leakage, dict):
@@ -211,6 +216,16 @@ def validate_report(report: Mapping[str, Any]) -> list[str]:
             errors.append(f"gate.verdict must be one of {VERDICTS}")
         if _bad_bool(gate.get("binding"), False):
             errors.append("gate.binding must be boolean False (non-binding pre-filter)")
+        if gate.get("chance_level") != CHANCE_LEVEL:
+            errors.append("gate.chance_level must be 0.5")
+        # Internal consistency: the verdict + above_chance must follow from the metrics,
+        # so a hand-edited gate that contradicts the numbers is rejected.
+        if isinstance(metrics, dict) and _prob01(metrics.get("auroc")):
+            expected = classify_separability(metrics.get("auroc"), metrics.get("auroc_ci_lower"))
+            if gate.get("verdict") != expected:
+                errors.append(f"gate.verdict inconsistent with metrics (expected {expected!r})")
+            if _bad_bool(gate.get("above_chance"), expected in ("PASS", "borderline")):
+                errors.append("gate.above_chance inconsistent with the verdict")
     return errors
 
 
@@ -363,18 +378,38 @@ def run_extract(
 
     emb_cache = Path(emb_cache)
     emb_cache.parent.mkdir(parents=True, exist_ok=True)
-    pos_order = pos[ORDER_COL].where(pos[ORDER_COL].notna(), "(unresolved)").to_numpy(dtype=object)
+    # String columns are stored as fixed-width Unicode (dtype=str), NOT object, so the
+    # cache loads with allow_pickle=False (no pickle-deserialization surface).
+    pos_order = pos[ORDER_COL].where(pos[ORDER_COL].notna(), "(unresolved)").to_numpy(dtype=str)
+    # Metadata pinned into the cache so run_probe validates + reports what was ACTUALLY
+    # extracted (revision/seed/emb-dim/source hashes) rather than reconstructing from
+    # current values — a stale/mismatched cache is then detectable.
+    extract_inputs = {}
+    for path in (split_table, decoys, fasta_dir / "class_I.fa", fasta_dir / "class_II.fa"):
+        try:
+            extract_inputs[str(path)] = provenance.sha256_file(path)
+        except Exception:
+            extract_inputs[str(path)] = "unavailable"
+    meta = {
+        "revision": REVISION,
+        "backbone": REPO_ID,
+        "emb_dim": EMB_DIM,
+        "seed": int(seed),
+        "pooling": "mean-over-positions",
+        "extract_inputs": extract_inputs,
+    }
     np.savez(
         emb_cache,
         x_pos=x_pos,
         x_neg=x_neg,
         pos_order=pos_order,
         pos_cluster=pos[CLUSTER_COL].to_numpy(),
-        pos_record_id=pos["record_id"].to_numpy(dtype=object),
-        pos_klass=pos["klass"].to_numpy(dtype=object),
+        pos_record_id=pos["record_id"].to_numpy(dtype=str),
+        pos_klass=pos["klass"].to_numpy(dtype=str),
         neg_gc=bg["gc"].to_numpy(dtype=float),
         neg_length=bg["length"].to_numpy(),
         seed=np.int64(seed),
+        meta_json=np.asarray(json.dumps(meta, sort_keys=True)),
     )
     log(f"wrote embeddings cache: {emb_cache} " f"(pos {x_pos.shape}, neg {x_neg.shape})")
     return emb_cache
@@ -585,9 +620,22 @@ def run_probe(
     import numpy as np  # lazy
 
     emb_cache = Path(emb_cache)
-    data = np.load(emb_cache, allow_pickle=True)
+    # allow_pickle=False: the cache stores only numeric + fixed-width Unicode arrays, so
+    # loading has no pickle-deserialization surface.
+    data = np.load(emb_cache, allow_pickle=False)
     x_pos, x_neg = data["x_pos"], data["x_neg"]
     pos_order, pos_cluster = data["pos_order"], data["pos_cluster"]
+
+    # Cache-recorded extraction metadata is the source of truth for what was ACTUALLY
+    # embedded; reject a stale/mismatched cache rather than silently probing it.
+    meta = json.loads(str(data["meta_json"])) if "meta_json" in data else {}
+    cache_dim = int(meta.get("emb_dim", x_pos.shape[1]))
+    if cache_dim != EMB_DIM or int(x_pos.shape[1]) != EMB_DIM:
+        raise ValueError(
+            f"embedding cache dim mismatch: meta={cache_dim}, array={x_pos.shape[1]}, "
+            f"expected {EMB_DIM} — re-run --stage extract"
+        )
+    extract_seed = int(meta.get("seed", seed))
 
     report = build_probe_report(
         x_pos,
@@ -617,12 +665,14 @@ def run_probe(
             "length_mean": float(np.mean(data["neg_length"])) if "neg_length" in data else None,
         },
     }
+    # Embedding provenance is taken from the cache metadata (what was actually used).
     report["embedding"] = {
-        "backbone": REPO_ID,
-        "revision": REVISION,
+        "backbone": meta.get("backbone", REPO_ID),
+        "revision": meta.get("revision", REVISION),
         "hidden_dim": EMB_DIM,
-        "pooling": "mean-over-positions",
+        "pooling": meta.get("pooling", "mean-over-positions"),
         "frozen": True,
+        "extract_seed": extract_seed,
     }
     report["env"] = _env_block()
 
@@ -634,10 +684,12 @@ def run_probe(
             inputs[str(path)] = "unavailable"
     report["provenance"] = {
         "git_sha": provenance.git_sha(),
-        "seed": int(seed),
+        "probe_seed": int(seed),
+        "extract_seed": extract_seed,
         "extract_env_lock": _safe_env_lock(EXTRACT_ENV_LOCK),
         "probe_env_lock": _safe_env_lock(PROBE_ENV_LOCK),
         "inputs": inputs,
+        "extract_inputs": meta.get("extract_inputs", {}),
         "timestamp_utc": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
     }
 

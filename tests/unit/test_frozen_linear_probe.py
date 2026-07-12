@@ -93,7 +93,13 @@ def _good_report() -> dict:
             "cluster_spans_boundary": False,
             "positives_heldout_only": True,
         },
-        "gate": {"verdict": "PASS", "binding": False},
+        # verdict/above_chance follow from metrics: auroc 0.91, CI-lower 0.88 > 0.5 -> PASS.
+        "gate": {
+            "verdict": "PASS",
+            "binding": False,
+            "chance_level": 0.5,
+            "above_chance": True,
+        },
     }
 
 
@@ -114,8 +120,12 @@ def test_validate_report_good():
         lambda r: r["metrics"].update(auroc=float("nan")),
         lambda r: r["metrics"].update(balanced_accuracy=None),
         lambda r: r["metrics"].update(auroc_ci_lower=1.2),  # present but out of range
+        lambda r: r["metrics"].update(auroc_ci_lower=0.95, auroc_ci_upper=0.90),  # lo > hi
         lambda r: r.__setitem__("metrics", {}),  # missing metrics
         lambda r: r["gate"].update(verdict="MAYBE"),
+        lambda r: r["gate"].update(verdict="FAIL"),  # inconsistent with PASS metrics
+        lambda r: r["gate"].update(above_chance=False),  # inconsistent with the verdict
+        lambda r: r["gate"].update(chance_level=0.6),  # must be 0.5
         lambda r: r["gate"].update(binding=True),  # a binding pre-filter is invalid
         lambda r: r["leakage"].update(cluster_spans_boundary=True),  # §8.2 fail-closed
         lambda r: r["leakage"].update(order_spans_boundary="yes"),  # must be a bool
