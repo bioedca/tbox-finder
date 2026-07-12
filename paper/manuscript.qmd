@@ -52,9 +52,11 @@ recovers T-boxes beyond the phylogenetic range of its training data — homology
 leakage across the train/test boundary would inflate exactly the metric that is
 the paper's central result. We therefore partition the corpus by a
 **structure-aware, homology-clustered leave-clade-out** scheme: positives are
-single-linkage clustered on consensus-column identity over the Rfam **RF00230**
-model alignment, whole clusters are assigned to folds, and clade-crossing
-clusters are held out, yielding a partition with maximum held-out-to-training
+single-linkage clustered on consensus-column identity over per-class covariance-
+model alignments (**RF00230** for class I, **TBDB001** for class II, applied
+within each class and unioned), whole clusters are assigned to folds, and
+clade-crossing clusters are held out, yielding a partition with maximum
+held-out-to-training
 consensus identity **< 0.70** (observed maximum 0.699). This design is motivated
 by the documented collapse of sequence-based homology search on divergent
 non-coding RNA (PMID:17151342, DOI:10.1101/gr.5890907; PMID:19861422,
@@ -82,7 +84,8 @@ time.]*
 
 **Figure 1. The leave-clade-out split admits no train/test homology leakage.**
 All-versus-all consensus-column identity between held-out and training T-box
-positives, computed over the RF00230 model alignment. The mass of held-out
+positives, computed over per-class covariance-model alignments (RF00230 for
+class I, TBDB001 for class II). The mass of held-out
 records lies below the 0.70 clustering cut (identity ≥ 0.70 links records into a
 single cluster assigned wholly to one fold), so that **no** held-out record
 shares ≥ 0.70 identity with any training record (observed maximum 0.699). The
