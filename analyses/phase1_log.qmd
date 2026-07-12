@@ -238,3 +238,43 @@ P1-02-verified `caduceus_backbone` loader (pinned-revision, frozen). Cross-link 
 **Commit.** feature-branch atomic commit on `p1-05-frozen-linear-probe` (squash-merge SHA on `main` recorded in
 `TODO.md` at P1-05 close); feeds **P1-07** (advisory input to the binding go/no-go adjudication) and
 **P1-08** (Stage-1 smoke reproducibility).
+
+## Step P1-06 — 2026-07-12: Held-out prokaryotic per-nt 8-class segmentation smoke set (ADR-0004/0005 labels)
+**Inputs.** The committed **git-tracked** split table (`data/processed/splits/split_assignments.parquet`, PRD §9.2);
+the DVC-tracked corpus (`master_clean_v0.parquet`) + P0 labels (`labels_v0.parquet`); the P0 label-derivation
+function (`tbox_finder.labels.derive_label_codes`, ADR-0004 D1). **Process.** `src/tbox_finder/data/seg_smoke.py::build_smoke_set`
+(rule `workflow/rules/backbones.smk::p1_seg_smoke_set`, LOCAL, `tbox-data`) selects held-out loci with the **verbatim
+P1-05 predicate** `nested_role=="heldout" & source=="corpus"` (no "prokaryotic" predicate — the corpus is all-bacterial,
+no domain column exists), reuses the committed per-nt `label_string` (re-derived via `derive_label_codes` on the same
+coords as a **fail-loud consistency guard**, §10.3 — no biology re-derived), and writes one row per locus + a padded
+per-nt label matrix. A deterministic, `record_id`-sorted, **rarest-class-first coverage-greedy** selection guarantees
+all 8 classes + ≥1 class-II locus (so the class-I-only-Terminator invariant is non-vacuous). **Outputs.**
+`data/interim/p1_seg_smoke/windows.parquet` (300 loci; DVC) + `labels.npy` (**(300, 547) int16, pad = −100** = the
+ADR-0005 seg-head ignore-index, `allow_pickle=False`; DVC) + `windows.provenance.json` (git) +
+`data/processed/audits/seg_smoke_report.json` (git; digest `3d6f77f0…`, per-class coverage, `positives_heldout_only=true`,
+239 clusters / 26 orders); the golden CI slice `tests/fixtures/p1_seg_smoke/heldout_slice.csv` (24 real held-out loci
++ coords, CI-reproducible without the DVC tables) + `expected.sha256` (`3c495c04…`).
+**Validation.** **Golden PASS** — the smoke digest reproduces `expected.sha256` from a **stdlib-only** CSV re-hash
+(bare CI) *and* the pandas rebuild; digests are **PYTHONHASHSEED-independent** (verified seeds 0/1/random/7).
+**Coverage PASS** — all 8 classes present; **0** ADR-0004 violations (`terminator_on_class_ii=0`,
+`specifier_carveout_violations=0`, `antiterm_term_violations=0`). **Leakage PASS (§8.2)** — 100% of loci are
+held-out-fold; the full-corpus `tests/ml/test_no_leakage.py` re-run stays green (P1-06 only *selects* from the
+unchanged split table — it perturbs no cluster/taxon membership). Tests: `test_seg_smoke_leakage.py` (20: predicate,
+deterministic/sorted selection, class coverage, order-independent digest, +6 fail-closed bite tests incl.
+non-held-out / class-II-Terminator / length-mismatch / label-drift, numpy pad tier, committed-fixture 100%-held-out
+tier) + `test_seg_smoke_set.py` (7: stdlib + pandas golden, label-are-P0-derivation, coverage/conventions). **Full
+suite 569 passed / 49 skipped** (no regression); ruff 0.15.15 + black 25.11.0 clean; `snakemake --lint` good + rule
+`-n` resolves.
+**Decisions.** (1) **CSV fixture** (not parquet): pandas reads it without pyarrow, human-diffable, matches the
+`ingest_sample` reuse-a-committed-slice precedent; the split table is git-tracked but master/labels are DVC → the
+golden must be self-contained (a digest-critical column set is force-`str` on reload so dtype inference can't alter a
+hashed token). (2) **Reuse the committed P0 `label_string`, cross-checked against `derive_label_codes`** — the most
+literal "no re-derivation" reading, with drift caught loudly. (3) **Padded 2-D int16 matrix, pad = −100** (not a
+ragged/object array): deterministic, hashable, pickle-free (the P1-05 pickle-surface lesson), and directly the
+seg-head cross-entropy `ignore_index`. (4) **Smoke digest hashes `(record_id, FASTA_sequence, label_string)`**, sorted
+by `record_id` — reuses the `ingest.record_hash`/`records_digest` contract (parquet-byte-independent, the labels_golden
+precedent); the golden is a regression on the committed **fixture** slice, not the full 300-locus artifact (its
+provenance carries the production digest). context7 §3.3: n/a (reuses in-repo `labels`/`ingest`/`provenance`; pandas/
+numpy only for IO). Cross-link **ADR-0004 D1**, **ADR-0005**, **PRD §8/§9.2**.
+**Commit.** atomic commit on `p1-06-seg-smoke`; feeds **P1-07** (the BINDING per-nt segmentation smoke fine-tune
+consumes this set) + **P1-09** (continued-pretraining).

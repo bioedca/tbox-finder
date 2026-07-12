@@ -1,0 +1,52 @@
+{
+  "adr": "ADR-0004/ADR-0005",
+  "coverage": {
+    "all_eight_classes_present": true,
+    "antiterm_term_violations": 0,
+    "n_class_ii": 43,
+    "n_records": 300,
+    "per_class_nt": {
+      "Antiterminator_Tbox_seq": 8335,
+      "Discriminator": 1189,
+      "Specifier": 880,
+      "Stem_I": 23990,
+      "Stem_II": 10431,
+      "Stem_III": 6276,
+      "Terminator": 7297,
+      "background": 35366
+    },
+    "per_class_records": {
+      "Antiterminator_Tbox_seq": 300,
+      "Discriminator": 295,
+      "Specifier": 294,
+      "Stem_I": 299,
+      "Stem_II": 268,
+      "Stem_III": 296,
+      "Terminator": 254,
+      "background": 300
+    },
+    "specifier_carveout_violations": 0,
+    "terminator_on_class_ii": 0,
+    "total_nt": 93764
+  },
+  "digest": "3d6f77f09f5a8b4c75a618656c58553311e0ce5d8e394e1aa1ef6a5023912ebc",
+  "ignore_index": -100,
+  "labels_shape": [
+    300,
+    547
+  ],
+  "leakage": {
+    "n_clusters": 239,
+    "n_heldout_corpus": 300,
+    "n_records": 300,
+    "n_resolved_orders": 26,
+    "positives_heldout_only": true
+  },
+  "n_loci": 300,
+  "selection": {
+    "max_loci": 300,
+    "min_class_ii": 20,
+    "min_per_class": 8,
+    "seed": 42
+  }
+}
