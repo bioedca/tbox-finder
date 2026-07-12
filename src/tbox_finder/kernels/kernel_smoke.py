@@ -149,6 +149,7 @@ def load_dna_tokens(fixture_path: str) -> tuple[Any, dict[str, Any]]:
         "dtype": str(arr.dtype),
         "seed": seed,
         "sha256": hashlib.sha256(p.read_bytes()).hexdigest(),
+        "error": None,  # stable shape: matches the run_smoke fixture-failure fallback
     }
     return arr, meta
 
@@ -391,6 +392,7 @@ def run_smoke(args) -> dict[str, Any]:
         "selective_scan": None,
         "causal_conv1d": None,
         "gate": None,
+        "setup_error": None,  # set only if fixture→SSM-input construction raises
         "provenance": {
             "git_sha": _git_sha(),
             "env_lock": "envs/ml-dna.conda-lock.yml",

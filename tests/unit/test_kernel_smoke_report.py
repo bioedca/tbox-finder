@@ -242,7 +242,9 @@ def good_measured_report():
             "dtype": "int8",
             "seed": 42,
             "sha256": "a" * 64,
+            "error": None,
         },
+        "setup_error": None,
         "selective_scan": {
             "dtype": "float32",
             "shapes": {"u": [2, 512, 512]},

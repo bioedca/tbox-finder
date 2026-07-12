@@ -26,7 +26,8 @@
     "shape": null,
     "dtype": null,
     "seed": null,
-    "sha256": null
+    "sha256": null,
+    "error": null
   },
   "selective_scan": {
     "dtype": null,
@@ -66,6 +67,7 @@
     "parity_ok": null,
     "overall_pass": null
   },
+  "setup_error": null,
   "provenance": {
     "git_sha": null,
     "env_lock": "envs/ml-dna.conda-lock.yml",
