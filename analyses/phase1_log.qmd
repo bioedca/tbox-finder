@@ -279,7 +279,7 @@ numpy only for IO). Cross-link **ADR-0004 D1**, **ADR-0005**, **PRD §8/§9.2**.
 **Commit.** atomic commit on `p1-06-seg-smoke`; feeds **P1-07** (the BINDING per-nt segmentation smoke fine-tune
 consumes this set) + **P1-09** (continued-pretraining).
 
-## Step P1-07 — 2026-07-12: Stage-1 per-nt 8-class segmentation smoke fine-tune + BINDING transfer go/no-go (harness landed; verdict run pending submit-ack)
+## Step P1-07 — 2026-07-12: Stage-1 per-nt 8-class segmentation smoke fine-tune + BINDING transfer go/no-go (MEASURED: GO — Stage-1 Caduceus transfer confirmed for P2)
 **Inputs.** The P1-04 `Stage1Segmenter` (Caduceus-PS backbone → `concat` RC-combine → 8-class seg head); the P1-06
 held-out smoke set `data/interim/p1_seg_smoke/{windows.parquet,labels.npy}` (300 leave-clade-out loci; `FASTA_sequence`
 + per-nt `label_string` self-contained; `labels.npy` (300,547) int16 pad −100); the code-pinned backbone loader
@@ -307,8 +307,13 @@ backbone-free head path yields `(B,L,8)`. **Full CI-exact suite 594 passed / 53 
 runs clean (300 windows / 93,764 valid positions; focal 0.76→0.11), wall **2:27** incl. ~40 s backbone load ⇒
 **~20–25 min for 20 epochs** on the A4000 (VRAM tiny at batch=1 → no gradient checkpointing needed); it previews
 min-core-F1 **≈0.87** (Specifier the min; Stem_I 0.97, Antiterminator 0.98), an unambiguous GO signal far above the
-0.0 baseline and the provisional 0.30 threshold. **The BINDING go/no-go verdict is PENDING the cluster run** (SLURM
-submit-ack Stop) — the laptop numbers are hardware/epoch-limited sizing, never the verdict (§10.3).
+0.0 baseline and the provisional 0.30 threshold. **MEASURED VERDICT: GO** (SLURM job 464, cluster A4000 sm_86, 20
+epochs, seed 42, git_sha `1213883`): **min per-nt F1 over the 3 core elements = 0.99990** (Stem_I the min; Specifier =
+Antiterminator = 1.000; focal loss → 0.0010) vs the **background-only baseline 0.0** → decisively above the 0.30 go
+threshold (non-marginal). Both parts of the D7 two-part go/no-go are positive (part i P1-05 AUROC 0.992) → **Stage-1
+Caduceus prokaryotic transfer confirmed for P2**; the fallback ladder is **not triggered**. Verification: artifact-based
+(job 464, sacct off) — `squeue` empty + `seg_smoke.DONE` + self-validated report; `.err` benign (wandb-offline notices
+only); provenance git_sha `1213883` (no drift), seed 42, inputs/outputs hashed.
 **Decisions.** (1) **Focal CE (γ=2), not the head's plain CE** — the dense-background regime (PRD §11) lets plain CE
 collapse a tiny smoke to all-background and manufacture a spurious NO-GO; focal is computed in the trainer over the
 segmenter logits, leaving the P1-03 head untouched. (2) **Go/no-go = "clearly above the background-only baseline"
@@ -327,8 +332,9 @@ bare Tier-1 in CI, torch Tier-2 under `tbox-ml-dna` (no torch in CI; the P1-03/P
 `/facebookresearch/hydra` (`@hydra.main` version_base/config_path, nested-config packaging + `/group` defaults);
 verified by the executed tests + the compose smoke under torch 2.7.1+cu128 / hydra 1.3.2. Cross-link **ADR-0002 D7**,
 **ADR-0004 D6**, **ADR-0005**, **PRD §10.1/§11**.
-**Stops (3, this step).** SLURM **submit-ack** (§9.3) for the go/no-go run — this session halts here; the **go/no-go
-verdict** (§7 item 4) + the **ADR-0002 verdict amendment** sign-off (§7 item 2) follow the measured cluster run. A
-NO-GO triggers the ADR-0002 fallback ladder (full-FT default → P1-09 GTDB continued-pretraining → P1-10 NT-multispecies).
-**Commit.** atomic commit on `p1-07-seg-smoke-gonogo`; feeds **P1-08** (seeded re-run reproducibility) + **P2** (Stage-1
-training) on a GO, or **P1-09/P1-10** on a NO-GO.
+**Stops (3, this step) — all resolved.** SLURM **submit-ack** (§9.3): user acked → job 464 submitted. **Go/no-go
+verdict** (§7 item 4): **GO** (a decisive pass, not borderline → no fallback stop-and-ask). **ADR-0002 amendment**
+sign-off (§7 item 2): **A6 accepted as drafted** (records the GO verdict + finalizes the go/no-go thresholds).
+**Commit.** Harness commit `1213883` + the measured result commit (report + `dvc add` checkpoint + ADR-0002 A6 +
+this stanza) on `p1-07-seg-smoke-gonogo`. Feeds **P1-08** (seeded re-run reproducibility, exit-gate deliverable) +
+**P2** (Stage-1 training — transfer confirmed).

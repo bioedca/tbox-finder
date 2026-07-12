@@ -1,0 +1,5 @@
+outs:
+- md5: 537167c7a1a5384d951c515cadfbec0f
+  size: 31044555
+  hash: md5
+  path: seg_smoke.pt
