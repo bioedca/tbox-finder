@@ -306,6 +306,13 @@ def test_eval_gate_matches_committed_expectation() -> None:
     def _close(a, b):
         assert a == pytest.approx(b, abs=_TOL), f"{a} != {b}"
 
+    # Full key-set parity first — otherwise a truncated expected.json would silently pass
+    # (a per-key loop only checks the keys that remain). Both directions, so neither a
+    # missing nor an extra key slips through (§8.7 — never let a weakened fixture pass).
+    assert set(got) == set(expected)
+    assert set(got["gate4_per_element_f1"]) == set(expected["gate4_per_element_f1"])
+    assert set(got["boundary_iou_core"]) == set(expected["boundary_iou_core"])
+
     for key in (
         "gate4_core_min_f1",
         "auprc",
@@ -323,6 +330,7 @@ def test_eval_gate_matches_committed_expectation() -> None:
         _close(got["boundary_iou_core"][e], v)
     assert got["n_positives"] == expected["n_positives"]
     assert got["n_decoys"] == expected["n_decoys"]
+    assert got["n_seg_positions"] == expected["n_seg_positions"]
 
 
 def test_stdlib_kernels_match_sklearn_and_numpy() -> None:
