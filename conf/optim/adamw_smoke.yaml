@@ -1,0 +1,12 @@
+# optim/adamw_smoke.yaml — AdamW knobs for the P1-07 Stage-1 segmentation smoke fine-tune.
+#
+# A Hydra config-group option (group `optim/`). The P1-07 train config selects it via
+# `defaults: [optim: adamw_smoke]`; its keys then live under `cfg.optim`.
+#
+# Tiny full fine-tune of the 7.73M Caduceus-PS backbone + seg head (ADR-0002 D7 fallback 1
+# = full fine-tuning, already the Stage-1 default). LoRA/FSDP are for the larger P2/P3
+# runs; the smoke is a plain AdamW full fine-tune at batch=1 (variable-length windows).
+
+name: adamw
+lr: 3.0e-4
+weight_decay: 0.01

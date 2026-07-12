@@ -278,3 +278,63 @@ provenance carries the production digest). context7 §3.3: n/a (reuses in-repo `
 numpy only for IO). Cross-link **ADR-0004 D1**, **ADR-0005**, **PRD §8/§9.2**.
 **Commit.** atomic commit on `p1-06-seg-smoke`; feeds **P1-07** (the BINDING per-nt segmentation smoke fine-tune
 consumes this set) + **P1-09** (continued-pretraining).
+
+## Step P1-07 — 2026-07-12: Stage-1 per-nt 8-class segmentation smoke fine-tune + BINDING transfer go/no-go (MEASURED: GO — Stage-1 Caduceus transfer confirmed for P2)
+**Inputs.** The P1-04 `Stage1Segmenter` (Caduceus-PS backbone → `concat` RC-combine → 8-class seg head); the P1-06
+held-out smoke set `data/interim/p1_seg_smoke/{windows.parquet,labels.npy}` (300 leave-clade-out loci; `FASTA_sequence`
++ per-nt `label_string` self-contained; `labels.npy` (300,547) int16 pad −100); the code-pinned backbone loader
+(`load_caduceus_ps`, immutable revision `d89eeb85…`); the P1-05 advisory pre-filter (`reports/p1/prefilter_separability.json`,
+`verdict=PASS`, non-binding). **Process.** New Hydra entry `src/tbox_finder/train/stage1_smoke.py::main` → `run_smoke`
+(rule `slurm/p1/seg_smoke.sbatch`, SLURM `gpu` A4000, `tbox-ml-dna`): seed + TF32/cudnn-off determinism (§8.3) →
+load the self-contained windows (re-establish the `record_id`-sorted positional labels↔windows contract, fail-loud on
+any length disagreement) → full fine-tune (backbone + head, ADR-0002 D7 fallback 1) with **per-nt focal CE** (γ=2, PRD
+§11; masked to the valid-token mean, pad contributes 0) at **batch=1** over variable-length windows → decode per-nt
+argmax → flatten non-pad positions → grade **per-nt F1 over the 3 core elements** via `metrics.gate4_core_min_f1`
+(min, not mean; ADR-0004 D6) → adjudicate GO/borderline/NO-GO vs the **background-only baseline** (a class-0-only
+predictor scores min-core-F1 = 0.0). **Outputs (code, this commit).** `src/tbox_finder/train/{__init__,stage1_smoke}.py`
++ `conf/train/stage1_smoke.yaml` (seed pinned; `@package _global_`; `defaults: [/model: caduceus_stage1, /tracking: wandb,
+/optim: adamw_smoke]`) + `conf/optim/adamw_smoke.yaml` + `slurm/p1/seg_smoke.sbatch` + `tests/ml/test_transfer_gonogo.py`
+(24). The **measured** `reports/p1/seg_smoke_gonogo.json` + `checkpoints/p1/seg_smoke/` (DVC) are produced by the SLURM
+run (post submit-ack), not this commit.
+**Validation.** **Harness PASS (bare CI, 20 Tier-1 tests):** `classify_gonogo` bites GO/borderline/NO-GO + fail-closed
+on NaN/at-baseline/non-number; the F1-over-3-core harness is **single-sourced from `metrics.gate4_core_min_f1`** and
+matches hand-computed values within 1e-9 (the imp.md "harness computes the gate metric within tolerance", extending the
+eval-gate coverage to the transfer context); `validate_report` rejects an inconsistent verdict / wrong baseline /
+missing `eval_split` / non-binding / wrong core keys / wrong revision. **Torch tier PASS (4, `tbox-ml-dna`,
+`TBOX_REQUIRE_TRANSFER_GATE=1`):** focal recovers plain CE at γ=0, ignores pad, downweights easy examples; the
+backbone-free head path yields `(B,L,8)`. **Full CI-exact suite 594 passed / 53 skipped** (no regression); ruff
+0.15.15 + black 25.11.0 clean. **Laptop sizing smoke (SIZING ONLY — NOT the verdict; sm_89, 2 epochs):** end-to-end
+runs clean (300 windows / 93,764 valid positions; focal 0.76→0.11), wall **2:27** incl. ~40 s backbone load ⇒
+**~20–25 min for 20 epochs** on the A4000 (VRAM tiny at batch=1 → no gradient checkpointing needed); it previews
+min-core-F1 **≈0.87** (Specifier the min; Stem_I 0.97, Antiterminator 0.98), an unambiguous GO signal far above the
+0.0 baseline and the provisional 0.30 threshold. **MEASURED VERDICT: GO** (SLURM job 464, cluster A4000 sm_86, 20
+epochs, seed 42, git_sha `1213883`): **min per-nt F1 over the 3 core elements = 0.99990** (Stem_I the min; Specifier =
+Antiterminator = 1.000; focal loss → 0.0010) vs the **background-only baseline 0.0** → decisively above the 0.30 go
+threshold (non-marginal). Both parts of the D7 two-part go/no-go are positive (part i P1-05 AUROC 0.992) → **Stage-1
+Caduceus prokaryotic transfer confirmed for P2**; the fallback ladder is **not triggered**. Verification: artifact-based
+(job 464, sacct off) — `squeue` empty + `seg_smoke.DONE` + self-validated report; `.err` benign (wandb-offline notices
+only); provenance git_sha `1213883` (no drift), seed 42, inputs/outputs hashed.
+**Decisions.** (1) **Focal CE (γ=2), not the head's plain CE** — the dense-background regime (PRD §11) lets plain CE
+collapse a tiny smoke to all-background and manufacture a spurious NO-GO; focal is computed in the trainer over the
+segmenter logits, leaving the P1-03 head untouched. (2) **Go/no-go = "clearly above the background-only baseline"
+(ADR-0002 D7), NOT the 0.80 GATE-4 floor** (that is P2 on the full split); operationalized as directional thresholds
+**GO ≥ 0.30 / NO-GO ≤ 0.10 / borderline → §7 stop-and-ask**, **provisional pending the §7 verdict sign-off + ADR-0002
+amendment** (D7 pins the exact small-N threshold to be *set with the fixture* — a go/no-go, not a blinded-frozen gate;
+the 0.80 floor stays frozen in `power.py`/`metrics.py`, never weakened here). (3) **eval-on-fine-tune-set = a
+learnability/expressivity transfer probe** (D7's "can the backbone learn prokaryotic T-box boundaries"), disclosed
+honestly in the report (`data.eval_split="fine_tune_set"`, validator-enforced, §10.3) — true generalization is graded
+at P2; a held-out-within-smoke variant is flagged as an option at the verdict Stop. (4) **batch=1 over variable-length
+windows** — avoids pad/mask, stays deterministic for the P1-08 seeded re-run. (5) **Hydra first wired here** — the
+nested `conf/train/` primary uses `@package _global_` + absolute `/group` defaults to reach the search-path-root groups
+(verified by a local compose test: keys land at root, groups + CLI overrides resolve). (6) **Two-env test tiering** —
+bare Tier-1 in CI, torch Tier-2 under `tbox-ml-dna` (no torch in CI; the P1-03/P1-04 precedent). context7 §3.3:
+`/pytorch/pytorch` (focal via `F.cross_entropy` reduction=none + `exp(-ce)` p_t, ignore_index masking) +
+`/facebookresearch/hydra` (`@hydra.main` version_base/config_path, nested-config packaging + `/group` defaults);
+verified by the executed tests + the compose smoke under torch 2.7.1+cu128 / hydra 1.3.2. Cross-link **ADR-0002 D7**,
+**ADR-0004 D6**, **ADR-0005**, **PRD §10.1/§11**.
+**Stops (3, this step) — all resolved.** SLURM **submit-ack** (§9.3): user acked → job 464 submitted. **Go/no-go
+verdict** (§7 item 4): **GO** (a decisive pass, not borderline → no fallback stop-and-ask). **ADR-0002 amendment**
+sign-off (§7 item 2): **A6 accepted as drafted** (records the GO verdict + finalizes the go/no-go thresholds).
+**Commit.** Harness commit `1213883` + the measured result commit (report + `dvc add` checkpoint + ADR-0002 A6 +
+this stanza) on `p1-07-seg-smoke-gonogo`. Feeds **P1-08** (seeded re-run reproducibility, exit-gate deliverable) +
+**P2** (Stage-1 training — transfer confirmed).

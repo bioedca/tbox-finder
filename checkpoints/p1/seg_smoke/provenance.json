@@ -1,0 +1,23 @@
+{
+  "adr": "ADR-0002",
+  "env_lock_hash": "70b66801eeafe1fdec4c19e667de1590e4471143bca36248fe40f16e53bb5003",
+  "extra": {
+    "backbone_revision": "d89eeb853136ea64da7feb3d0c8e909771b17ae6",
+    "min_core_f1": 0.9998957790515893,
+    "step": "P1-07",
+    "verdict": "GO"
+  },
+  "generated_at_utc": "2026-07-12T20:46:12.869194+00:00",
+  "git_sha": "12138834e2da2d93236aecec721c07cee96a696b",
+  "inputs": {
+    "data/interim/p1_seg_smoke/labels.npy": "f1c057e7a847829adefda549cacc70faefdc19fdf3c2d9753342171d05d8b8db",
+    "data/interim/p1_seg_smoke/windows.parquet": "8102a396b2d0ae33739836fb5dbfaa676c1c778846ba02737c11a30215973693"
+  },
+  "outputs": {
+    "checkpoints/p1/seg_smoke/seg_smoke.pt": "d442de1e7037e71f00e2bfd3ccb23eadb362cf63bafa6075040571a68ad499e8"
+  },
+  "rule": "src/tbox_finder/train/stage1_smoke.py::run_smoke",
+  "schema_version": "1.0",
+  "script": "src/tbox_finder/train/stage1_smoke.py",
+  "seed": 42
+}
