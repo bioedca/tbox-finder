@@ -1,0 +1,17 @@
+{
+  "description": "Short random-DNA token fixture for the P1-01 Stage-1 kernel smoke.",
+  "seed": 42,
+  "shape": [
+    2,
+    512
+  ],
+  "dtype": "int8",
+  "alphabet": {
+    "0": "A",
+    "1": "C",
+    "2": "G",
+    "3": "T"
+  },
+  "sha256": "6252fae8d131f7c6eb65af5233c2737aa1a1c9222efc5efe2c87d61ee56aa119",
+  "generator": "numpy.random.default_rng(42).integers(0, 4, size=(2, 512), dtype=numpy.int8)"
+}

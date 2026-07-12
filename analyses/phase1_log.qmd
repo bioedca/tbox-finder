@@ -1,0 +1,59 @@
+---
+title: "tbox-finder — Phase 1 (Backbones & heads) dev-log"
+author: "bioedca"
+format:
+  typst:
+    toc: true
+    number-sections: true
+---
+
+<!-- Rendered with the Typst engine (quarto ≥1.9, `format: typst`): the
+     laptop/CI toolchain ships no LaTeX, and Typst produces the PDF natively.
+     Renders via `conda run -n tbox-viz quarto render analyses/phase1_log.qmd`. -->
+
+
+# Phase 1 — Backbones & heads
+
+Per-step development log (CLAUDE.md §2.4). One stanza is appended after every
+step's commit; this file renders to `docs/dev-log/phase1_<YYYY-MM-DD>.pdf` at
+the phase-exit gate.
+
+## Step P1-01 — 2026-07-12: Stage-1 CUDA-kernel import/forward smoke gate + pure-PyTorch fallback cost
+
+**Inputs.** The pinned GPU env **`tbox-ml-dna`** (`envs/ml-dna.yml` + `ml-dna.conda-lock.yml`:
+torch 2.7.1+cu128, mamba-ssm 2.2.6.post3, causal-conv1d 1.6.2.post1, flash-attn 2.8.3.post1);
+the P0-06 `sm_86` wheel-availability finding (ADR-0002 A2); a seeded random-DNA token fixture
+(`tests/fixtures/kernel_smoke_dna/dna_tokens.npy`, seed 42, `[2,512]` int8).
+
+**Process.** `src/tbox_finder/kernels/kernel_smoke.py` (run via `slurm/p1/kernel_smoke.sbatch` on
+one cluster RTX A4000, Ampere `sm_86`, driver 590.48.01) probes the runtime, asserts
+`import selective_scan_cuda` (ADR-0002 A2 C2), embeds the DNA fixture into selective-scan inputs
+(fp32; D=512, N=16, L=512, B=2), and forwards through both the CUDA kernels
+(`selective_scan_fn`/`causal_conv1d_fn`) and the hand-wired pure-PyTorch references
+(`selective_scan_ref`/`causal_conv1d_ref`), recording kernel-vs-ref max-abs parity and tokens/sec.
+Kernel APIs were verified against the library source at the pinned tags (v2.2.6.post3 / v1.6.2.post1)
+**and** the installed env (context7 quota-blocked). The first run (job 460) exposed a partial
+`causal-conv1d` install in the cluster env (orphan `.so`, no package/dist-info) — repaired by
+reinstalling the exact pinned wheel; the smoke was hardened to record import failures in-report
+rather than crash (the job-460 crash left no report).
+
+**Outputs.** `reports/p1/kernel_smoke.json` (git_sha `8ba3880`, SLURM job 462, `measured=true`);
+`src/tbox_finder/kernels/{__init__,kernel_smoke}.py`; `slurm/p1/kernel_smoke.sbatch`;
+`tests/unit/test_kernel_smoke_report.py` (14 cases, CPU-only); `tests/fixtures/kernel_smoke_{dna,sample}/`;
+**ADR-0002 Amendment A5**.
+
+**Validation.** **Gate PASSED** (`gate.overall_pass=true`): import + forward green on an A4000 `sm_86`
+(`selective_scan_cuda` + `causal_conv1d_cuda` + mamba-ssm/causal-conv1d/flash-attn all import);
+`selective_scan` parity **1.53e-5** and `causal_conv1d` **9.5e-7** (both ≪ `atol` 1e-2); measured
+pure-PyTorch `selective_scan` fallback throughput ratio **≈871×** (CUDA 12.46 M vs ref 14.3 K tok/s);
+`causal_conv1d` **0.56×** (the D3 optional accelerator — small-tensor launch overhead, correctness is
+what the gate needs). Artifact-based verification (`sacct` off): `squeue` empty + `kernel_smoke.DONE`
+present + zero-byte `.err`.
+
+**Decisions.** The "pure-PyTorch fallback" is `selective_scan_ref` invoked directly — the packaged
+`Mamba` block never reaches it (ADR-0002 A2 C2), so the ≈871× slowdown quantitatively confirms the
+prebuilt `sm_86` wheel is **load-bearing**, not a convenience. `atol` is an implementer choice (ADR-0002
+pins no kernel-vs-fallback tolerance; the raw diff is always recorded, §10.3). Cross-link **ADR-0002 A5**.
+
+**Commit.** `8ba3880` (scaffold `5f18180` + hardening `8ba3880`) + the follow-up carrying this stanza,
+the report, and A5; squash-merge SHA on `main` recorded in `TODO.md` at P1-01 close.
