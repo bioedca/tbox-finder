@@ -191,11 +191,6 @@ def _timed(fn, iters, warmup):
 # selective-scan: CUDA kernel vs pure-PyTorch reference
 # --------------------------------------------------------------------------------------
 def run_selective_scan(inp, atol, iters, ref_iters, warmup) -> dict[str, Any]:
-    from mamba_ssm.ops.selective_scan_interface import (  # lazy
-        selective_scan_fn,
-        selective_scan_ref,
-    )
-
     res: dict[str, Any] = {
         "dtype": str(inp["u"].dtype).replace("torch.", ""),
         "shapes": {
@@ -218,33 +213,40 @@ def run_selective_scan(inp, atol, iters, ref_iters, warmup) -> dict[str, Any]:
     }
     tokens = inp["batch"] * inp["seqlen"]
 
-    def call_cuda():
-        return selective_scan_fn(
-            inp["u"],
-            inp["delta"],
-            inp["A"],
-            inp["B"],
-            inp["C"],
-            D=inp["D"],
-            z=None,
-            delta_bias=inp["delta_bias"],
-            delta_softplus=True,
-        )
-
-    def call_ref():
-        return selective_scan_ref(
-            inp["u"],
-            inp["delta"],
-            inp["A"],
-            inp["B"],
-            inp["C"],
-            D=inp["D"],
-            z=None,
-            delta_bias=inp["delta_bias"],
-            delta_softplus=True,
-        )
-
+    # The import is inside the try so a missing/broken kernel is RECORDED in the report
+    # (res["error"]) rather than crashing the smoke with no report written.
     try:
+        from mamba_ssm.ops.selective_scan_interface import (  # lazy
+            selective_scan_fn,
+            selective_scan_ref,
+        )
+
+        def call_cuda():
+            return selective_scan_fn(
+                inp["u"],
+                inp["delta"],
+                inp["A"],
+                inp["B"],
+                inp["C"],
+                D=inp["D"],
+                z=None,
+                delta_bias=inp["delta_bias"],
+                delta_softplus=True,
+            )
+
+        def call_ref():
+            return selective_scan_ref(
+                inp["u"],
+                inp["delta"],
+                inp["A"],
+                inp["B"],
+                inp["C"],
+                D=inp["D"],
+                z=None,
+                delta_bias=inp["delta_bias"],
+                delta_softplus=True,
+            )
+
         out_cuda = call_cuda()
         res["cuda_forward_ok"] = True
         out_ref = call_ref()
@@ -267,16 +269,9 @@ def run_selective_scan(inp, atol, iters, ref_iters, warmup) -> dict[str, Any]:
 # causal-conv1d: CUDA kernel vs pure-PyTorch reference
 # --------------------------------------------------------------------------------------
 def run_causal_conv1d(inp, d_conv, atol, iters, warmup) -> dict[str, Any]:
-    import torch  # lazy
-    from causal_conv1d import causal_conv1d_fn  # lazy
-    from causal_conv1d.causal_conv1d_interface import causal_conv1d_ref  # lazy
-
     x = inp["u"]  # (B, D, L)
     device, tdt = x.device, x.dtype
     d_model = x.shape[1]
-    gen = torch.Generator().manual_seed(1234)
-    weight = torch.randn(d_model, d_conv, generator=gen).to(device=device, dtype=tdt)
-    bias = torch.randn(d_model, generator=gen).to(device=device, dtype=tdt)
 
     res: dict[str, Any] = {
         "dtype": str(tdt).replace("torch.", ""),
@@ -296,13 +291,24 @@ def run_causal_conv1d(inp, d_conv, atol, iters, warmup) -> dict[str, Any]:
     }
     tokens = inp["batch"] * inp["seqlen"]
 
-    def call_cuda():
-        return causal_conv1d_fn(x, weight, bias, activation="silu")
-
-    def call_ref():
-        return causal_conv1d_ref(x, weight, bias, activation="silu")
-
+    # Imports inside the try so a missing/broken kernel is RECORDED, not raised
+    # (causal-conv1d is the optional accelerator, ADR-0002 D3 — its absence must still
+    # leave a report behind, and the gate then fails cleanly with a diagnostic).
     try:
+        import torch  # lazy
+        from causal_conv1d import causal_conv1d_fn  # lazy
+        from causal_conv1d.causal_conv1d_interface import causal_conv1d_ref  # lazy
+
+        gen = torch.Generator().manual_seed(1234)
+        weight = torch.randn(d_model, d_conv, generator=gen).to(device=device, dtype=tdt)
+        bias = torch.randn(d_model, generator=gen).to(device=device, dtype=tdt)
+
+        def call_cuda():
+            return causal_conv1d_fn(x, weight, bias, activation="silu")
+
+        def call_ref():
+            return causal_conv1d_ref(x, weight, bias, activation="silu")
+
         out_cuda = call_cuda()
         res["cuda_forward_ok"] = True
         out_ref = call_ref()
