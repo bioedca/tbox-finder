@@ -279,6 +279,7 @@ def good_measured_report():
         "provenance": {
             "git_sha": "a" * 40,
             "env_lock": "envs/ml-dna.conda-lock.yml",
+            "seed": 42,
             "slurm_job_id": "123",
             "timestamp_utc": "2026-07-12T00:00:00Z",
         },

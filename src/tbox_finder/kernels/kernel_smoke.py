@@ -35,6 +35,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import os
 import platform
 import subprocess
@@ -55,6 +56,22 @@ DEFAULT_D_CONV = 4  # causal-conv width (Mamba d_conv default)
 # fp32 selective-scan vs its reference accumulates over the sequence; a correct kernel
 # agrees to well under 1e-2. A broken kernel differs by O(1), so this still bites.
 DEFAULT_ATOL = {"float32": 1e-2, "bfloat16": 3e-1, "float16": 2e-1}
+
+
+def _finite_pos(x) -> bool:
+    """True iff x is a finite, strictly-positive real number (not a bool)."""
+    return isinstance(x, (int, float)) and not isinstance(x, bool) and math.isfinite(x) and x > 0
+
+
+def _sanitize(obj):
+    """Replace non-finite floats (NaN/Inf) with None so the report is always strict JSON."""
+    if isinstance(obj, float):
+        return obj if math.isfinite(obj) else None
+    if isinstance(obj, dict):
+        return {k: _sanitize(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_sanitize(v) for v in obj]
+    return obj
 
 
 # --------------------------------------------------------------------------------------
@@ -115,6 +132,13 @@ def load_dna_tokens(fixture_path: str) -> tuple[Any, dict[str, Any]]:
 
     p = Path(fixture_path)
     arr = np.load(p)
+    # Reject a malformed fixture early with a clear error (run_smoke records it).
+    if arr.ndim != 2:
+        raise ValueError(f"DNA fixture must be 2-D (B, L), got shape {arr.shape}")
+    if not np.issubdtype(arr.dtype, np.integer):
+        raise ValueError(f"DNA fixture must be integer tokens, got dtype {arr.dtype}")
+    if arr.size == 0 or bool(np.any((arr < 0) | (arr > 3))):
+        raise ValueError("DNA tokens must be non-empty and within 0..3 (A,C,G,T)")
     manifest_path = p.with_name("manifest.json")
     seed = 42
     if manifest_path.exists():
@@ -253,7 +277,7 @@ def run_selective_scan(inp, atol, iters, ref_iters, warmup) -> dict[str, Any]:
         res["ref_forward_ok"] = True
         diff = (out_cuda.float() - out_ref.float()).abs().max().item()
         res["max_abs_diff"] = diff
-        res["parity_pass"] = bool(diff <= atol)
+        res["parity_pass"] = bool(math.isfinite(atol) and math.isfinite(diff) and diff <= atol)
 
         cuda_s, _ = _timed(call_cuda, iters, warmup)
         ref_s, _ = _timed(call_ref, ref_iters, warmup)
@@ -315,7 +339,7 @@ def run_causal_conv1d(inp, d_conv, atol, iters, warmup) -> dict[str, Any]:
         res["ref_forward_ok"] = True
         diff = (out_cuda.float() - out_ref.float()).abs().max().item()
         res["max_abs_diff"] = diff
-        res["parity_pass"] = bool(diff <= atol)
+        res["parity_pass"] = bool(math.isfinite(atol) and math.isfinite(diff) and diff <= atol)
 
         cuda_s, _ = _timed(call_cuda, iters, warmup)
         ref_s, _ = _timed(call_ref, iters, warmup)
@@ -370,6 +394,7 @@ def run_smoke(args) -> dict[str, Any]:
         "provenance": {
             "git_sha": _git_sha(),
             "env_lock": "envs/ml-dna.conda-lock.yml",
+            "seed": args.seed,  # the effective seed used for SSM tensor generation
             "slurm_job_id": os.environ.get("SLURM_JOB_ID"),
             "timestamp_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         },
@@ -408,13 +433,26 @@ def run_smoke(args) -> dict[str, Any]:
         except Exception as exc:  # noqa: BLE001 - recorded, not raised
             report["setup_error"] = f"{type(exc).__name__}: {exc}"
 
-    ss = report["selective_scan"] or {}
-    cc = report["causal_conv1d"] or {}
+    ss = report["selective_scan"]
+    cc = report["causal_conv1d"]
+
+    def _block_forward_ok(b) -> bool:
+        # A block passes forward only with NO recorded error, both forwards run, and a
+        # finite positive throughput ratio — so a block that errored or produced a
+        # non-finite/missing metric can never certify the gate.
+        return bool(
+            b
+            and b.get("error") is None
+            and b.get("cuda_forward_ok")
+            and b.get("ref_forward_ok")
+            and _finite_pos(b.get("throughput_ratio_cuda_over_ref"))
+        )
+
     import_ok = bool(
         ss_import_ok and imports["causal_conv1d_cuda"]["ok"] and env.get("is_sm86") is True
     )
-    parity_ok = bool(ss.get("parity_pass")) and bool(cc.get("parity_pass"))
-    forward_ok = bool(ss.get("cuda_forward_ok")) and bool(cc.get("cuda_forward_ok"))
+    forward_ok = _block_forward_ok(ss) and _block_forward_ok(cc)
+    parity_ok = bool(ss and ss.get("parity_pass")) and bool(cc and cc.get("parity_pass"))
     report["gate"] = {
         "import_ok": import_ok,
         "forward_ok": forward_ok,
@@ -441,12 +479,19 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv=None) -> int:
-    args = build_parser().parse_args(argv)
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    if args.iters < 1 or args.ref_iters < 1:
+        parser.error("--iters and --ref-iters must be >= 1")
+    if args.warmup < 0:
+        parser.error("--warmup must be >= 0")
     report = run_smoke(args)
 
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
+    # allow_nan=False => strict JSON; _sanitize has already mapped any non-finite metric
+    # to None, so this never trips on the happy path but guards a corrupt report.
+    out.write_text(json.dumps(_sanitize(report), indent=2, sort_keys=True, allow_nan=False) + "\n")
 
     g = report["gate"]
     print(json.dumps({"gate": g, "out": str(out)}, indent=2))

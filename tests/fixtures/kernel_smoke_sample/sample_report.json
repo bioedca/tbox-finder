@@ -69,6 +69,7 @@
   "provenance": {
     "git_sha": null,
     "env_lock": "envs/ml-dna.conda-lock.yml",
+    "seed": null,
     "slurm_job_id": null,
     "timestamp_utc": null
   }
