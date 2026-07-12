@@ -1,0 +1,23 @@
+{
+  "auprc": 0.9843952048541359,
+  "baseline_precision": 0.9111111111111111,
+  "baseline_recall": 0.82,
+  "boundary_iou_core": {
+    "Antiterminator_Tbox_seq": 0.8335015136226034,
+    "Specifier": 0.3412256267409471,
+    "Stem_I": 0.7788304808475958
+  },
+  "ece_debiased": 0.10702781774830165,
+  "ece_plugin": 0.18163780627134027,
+  "gate4_core_min_f1": 0.5088265835929388,
+  "gate4_per_element_f1": {
+    "Antiterminator_Tbox_seq": 0.9091909741331866,
+    "Specifier": 0.5088265835929388,
+    "Stem_I": 0.8756657694290132
+  },
+  "n_decoys": 130,
+  "n_positives": 100,
+  "n_seg_positions": 41513,
+  "recall_at_matched_precision": 0.95,
+  "recall_gap_pp": 13.0
+}
