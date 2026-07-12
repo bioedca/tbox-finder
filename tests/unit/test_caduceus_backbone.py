@@ -144,6 +144,16 @@ def test_validator_bites(mutate):
     assert len(cb.validate_report(bad)) >= 1
 
 
+def test_honest_param_count_failure_is_schema_valid():
+    # A report that HONESTLY records a param-count mismatch (actual != expected,
+    # param_count_ok=False, gate fails) is a valid failure report, NOT a schema error —
+    # validate_report must not reject it (the CodeRabbit-caught consistency-vs-success bug).
+    r = good_report()
+    r["param_count"].update({"actual": 999, "param_count_ok": False})
+    r["gate"].update({"param_count_ok": False, "overall_pass": False})
+    assert cb.validate_report(r) == []
+
+
 # ========================================================================== #
 # conf/model spec drift guard — the declarative pin can't diverge from code.
 # ========================================================================== #

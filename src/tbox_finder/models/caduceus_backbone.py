@@ -183,9 +183,12 @@ def validate_report(report: Mapping[str, Any]) -> list[str]:
         if k not in gate:
             errs.append(f"gate missing key: {k}")
 
-    # Consistency (only checkable once a GPU has measured the numbers).
+    # Consistency (only checkable once a GPU has measured the numbers). These flag an
+    # internally *inconsistent* report — never an honestly-recorded failure: a measured
+    # mismatch (actual != expected) with ``param_count_ok=False`` is a legitimate gate
+    # failure, not a schema error (mirrors the rc_equivariance/gate consistency checks).
     if report.get("measured"):
-        if pc.get("actual") != pc.get("expected"):
+        if pc.get("actual") != pc.get("expected") and pc.get("param_count_ok") is True:
             errs.append("param_count.actual != expected but param_count_ok cannot be true")
         if pc.get("param_count_ok") is False and gate.get("param_count_ok") is True:
             errs.append("gate.param_count_ok contradicts the block")
