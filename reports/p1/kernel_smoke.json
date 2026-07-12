@@ -1,0 +1,115 @@
+{
+  "causal_conv1d": {
+    "activation": "silu",
+    "atol": 0.01,
+    "cuda_forward_ok": true,
+    "cuda_tokens_per_s": 9318463.734871957,
+    "dtype": "float32",
+    "error": null,
+    "iters": 50,
+    "max_abs_diff": 9.5367431640625e-07,
+    "parity_pass": true,
+    "ref_forward_ok": true,
+    "ref_tokens_per_s": 16621028.648273427,
+    "throughput_ratio_cuda_over_ref": 0.5606430222861055,
+    "warmup": 10,
+    "width": 4
+  },
+  "env": {
+    "cuda_available": true,
+    "device_capability": [
+      8,
+      6
+    ],
+    "device_name": "NVIDIA RTX A4000",
+    "hostname": "two",
+    "is_sm86": true,
+    "python": "3.12.13",
+    "torch": "2.7.1+cu128",
+    "torch_cuda_version": "12.8"
+  },
+  "fixture": {
+    "dtype": "int8",
+    "path": "tests/fixtures/kernel_smoke_dna/dna_tokens.npy",
+    "seed": 42,
+    "sha256": "6252fae8d131f7c6eb65af5233c2737aa1a1c9222efc5efe2c87d61ee56aa119",
+    "shape": [
+      2,
+      512
+    ]
+  },
+  "gate": {
+    "forward_ok": true,
+    "import_ok": true,
+    "overall_pass": true,
+    "parity_ok": true
+  },
+  "generated_by": "src/tbox_finder/kernels/kernel_smoke.py",
+  "imports": {
+    "causal_conv1d": {
+      "error": null,
+      "ok": true,
+      "version": "1.6.2.post1"
+    },
+    "causal_conv1d_cuda": {
+      "error": null,
+      "ok": true,
+      "version": null
+    },
+    "flash_attn": {
+      "error": null,
+      "ok": true,
+      "version": "2.8.3.post1"
+    },
+    "mamba_ssm": {
+      "error": null,
+      "ok": true,
+      "version": "2.2.6.post3"
+    },
+    "selective_scan_cuda": {
+      "error": null,
+      "ok": true,
+      "version": null
+    }
+  },
+  "measured": true,
+  "provenance": {
+    "env_lock": "envs/ml-dna.conda-lock.yml",
+    "git_sha": "8ba3880efeaf3fe06aaa7f8d4c0222a80279b644",
+    "slurm_job_id": "462",
+    "timestamp_utc": "2026-07-12T10:54:26Z"
+  },
+  "schema_version": "1",
+  "selective_scan": {
+    "atol": 0.01,
+    "cuda_forward_ok": true,
+    "cuda_tokens_per_s": 12457225.859817075,
+    "dtype": "float32",
+    "error": null,
+    "iters": 50,
+    "max_abs_diff": 1.52587890625e-05,
+    "parity_pass": true,
+    "ref_forward_ok": true,
+    "ref_iters": 10,
+    "ref_tokens_per_s": 14300.86796253731,
+    "shapes": {
+      "A": [
+        512,
+        16
+      ],
+      "B": [
+        2,
+        16,
+        512
+      ],
+      "u": [
+        2,
+        512,
+        512
+      ]
+    },
+    "throughput_ratio_cuda_over_ref": 871.0818037373775,
+    "warmup": 10
+  },
+  "step": "P1-01"
+}
