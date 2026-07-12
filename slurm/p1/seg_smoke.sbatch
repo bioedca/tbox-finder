@@ -54,7 +54,11 @@ if ! flock -n 9; then
   echo "SMOKE_SKIP: another seg_smoke job holds $DEST/.seg_smoke.lock — refusing to share outputs." >&2
   exit 1
 fi
-rm -f "$DEST/seg_smoke_gonogo.json" "$DEST/seg_smoke.DONE"
+CHECKPOINT="$REPO/checkpoints/p1/seg_smoke/seg_smoke.pt"
+PROVENANCE="$REPO/checkpoints/p1/seg_smoke/provenance.json"
+# Clear every stale output (report, DONE marker, checkpoint, provenance) so a failed run
+# cannot leave a stale success marker or let the postcondition pass on a prior run's blobs.
+rm -f "$DEST/seg_smoke_gonogo.json" "$DEST/seg_smoke.DONE" "$CHECKPOINT" "$PROVENANCE"
 
 CONDA_SH=/exports/people/mondragonlab/ecc1695/miniconda3/etc/profile.d/conda.sh
 source "$CONDA_SH"
@@ -84,10 +88,13 @@ PYTHONPATH=src python -m tbox_finder.train.stage1_smoke
 RC=$?
 set -e
 
-# Publish DONE only when the run succeeded AND both required outputs are non-empty; a
-# missing report or checkpoint forces a nonzero exit even if python returned 0.
-CHECKPOINT="$REPO/checkpoints/p1/seg_smoke/seg_smoke.pt"
-if [ "$RC" -eq 0 ] && [ -s "$DEST/seg_smoke_gonogo.json" ] && [ -s "$CHECKPOINT" ]; then
+# Publish DONE only when the run succeeded AND all required outputs (report + checkpoint +
+# provenance) are non-empty; a missing artifact forces a nonzero exit even if python
+# returned 0.
+if [ "$RC" -eq 0 ] \
+  && [ -s "$DEST/seg_smoke_gonogo.json" ] \
+  && [ -s "$CHECKPOINT" ] \
+  && [ -s "$PROVENANCE" ]; then
   touch "$DEST/seg_smoke.DONE"
   echo "SMOKE_DONE job=${SLURM_JOB_ID:-none}"
 else

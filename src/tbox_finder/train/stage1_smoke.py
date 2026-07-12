@@ -885,8 +885,11 @@ def _run(argv: list[str] | None = None) -> int:
         save_checkpoint=not args.no_checkpoint,
         wandb_mode=args.wandb_mode,
     )
-    report = run_smoke(cfg)
-    return 0 if report["gate"]["verdict"] in VERDICTS else 1
+    run_smoke(cfg)
+    # A NO-GO / borderline is a valid MEASURED outcome (the CLAUDE.md §7 stop-and-ask +
+    # ADR-0002 fallback ladder own the verdict), not a CLI error; run_smoke already raised
+    # if the report failed self-validation. So a completed run exits 0 regardless of verdict.
+    return 0
 
 
 if __name__ == "__main__":
