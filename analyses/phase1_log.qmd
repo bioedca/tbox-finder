@@ -150,3 +150,57 @@ CRF forward/Viterbi correctness is verified by the executed test under the insta
 **Commit.** feature-branch atomic commit on `p1-03-seg-head` (squash-merge SHA on `main` recorded in
 `TODO.md` at P1-03 close); feeds **P1-04** (backbone+head assembly with the directionality-preserving
 RC-combination knob) and **P1-09** (continued-pretraining consumes the same head).
+
+## Step P1-04 — 2026-07-12: Assemble the Stage-1 segmenter (backbone → RC-combine → seg head) with a directionality-preserving RC-combination knob
+
+**Inputs.** The P1-02 Caduceus-PS backbone (`D_MODEL=256`, `_hidden_states → (B,L,2·d_model)=512`); the
+P1-03 `SegmentationHead` (`input_dim=CADUCEUS_PS_HIDDEN_DIM=512`); the 8-class `tbox_finder.labels.CLASS_ORDER`
+(Specifier=2, Antiterminator_Tbox_seq=5); a synthetic asymmetric hidden-state fixture + its forward↔RC
+channel-half swap (no backbone forward — CPU-testable).
+
+**Process.** Built `src/tbox_finder/models/stage1_segmenter.py::Stage1Segmenter` (an `nn.Module` wiring
+backbone → `RCCombine` → `SegmentationHead`) and `RCCombine` — the `rc_combine` knob restricted to
+**directionality-preserving (non-averaged)** forms (PRD §6/§10.1; ADR-0002): `concat` (**default**;
+identity — feed the full `(fwd‖rc)` 512-d state to the head, injective ⇒ order-preserving) and `gate` (a
+learned directional per-channel gate `g⊙fwd+(1-g)⊙rc → d_model`, `g=sigmoid(logit)` init nonzero so
+`g≠0.5` ⇒ asymmetric by construction). An order-destroying **mean** (`0.5·(fwd+rc)`) is **rejected** at
+construction and is **not the default**. The mode contract (`ALLOWED_RC_COMBINE={concat,gate}`,
+`normalize_rc_combine`, `is_directionality_preserving`) is single-sourced from a **torch-free**
+`src/tbox_finder/models/rc_combine.py` so bare CI locks it; the segmenter re-exports it. Added the
+`rc_combine` group to `conf/model/caduceus_stage1.yaml` (declarative `mode: concat`; the allowed set +
+mean-rejection are frozen in code, not config). The backbone forward (`forward(input_ids=…)`, needs CUDA,
+ADR-0002 A2 C2) is deferred to the P1-07 fine-tune smoke; the CPU surface is `logits_from_hidden` /
+`decode_from_hidden` / `loss_from_hidden`.
+
+**Outputs.** `src/tbox_finder/models/{stage1_segmenter,rc_combine}.py` + `conf/model/caduceus_stage1.yaml`
+(+`rc_combine` group) + `tests/unit/test_rc_combination.py` (5 bare-tier + 20 torch-tier). No DVC artifact
+(library + tests + config; git-tracked). No ADR amendment (implements the ADR-0002 / PRD §6/§10.1 pinned
+constraint; no new decision/threshold).
+
+**Validation.** Unit green. Torch tier **25 passed** under `tbox-ml-dna` (CPU); bare CI tier **5 passed /
+20 skipped** (torch tier skips cleanly — the mode contract is locked torch-free); full bare unit suite **no
+regression** (0 failures; the new file contributes exactly +5 passed / +20 skipped vs `main`); ruff 0.15.15
++ black 25.11.0 clean; `snakemake --lint` good + `-n` resolves (no `.smk` change, DAG unaffected). The
+directionality gate **bites**: the allowed `concat`/`gate` combines are **NOT** invariant under the
+forward↔RC channel-half swap (element order survives), whereas a reference symmetric **mean IS** invariant
+(order collapses); end-to-end, a `concat` segmenter with a controlled head decodes a **strand-dependent**
+element order (`[2,2,0,5,5,0]` = Specifier→Antiterminator for the forward channels vs all-background for the
+swapped input), while a mean-combined reference decodes **identically** for a window and its opposite strand
+— the exact collapse the §6 strand-resolver cannot tolerate.
+
+**Decisions.** The RC-combination is the load-bearing link Stage-1 → the §6 strand-resolver: orientation is
+derived from predicted element order, so an order-averaging combine would defeat it — hence `mean` is not a
+selectable mode (not merely a non-default), and the allowed non-averaged set is frozen in code so no config
+can weaken it. `concat` is the default because Caduceus-PS's `2·d_model` hidden state already carries the
+`(fwd‖rc)` channels and feeding them whole is injective (P1-03's head `input_dim=512` is exactly this path);
+`gate` is the second non-averaged form for the P2 RC-combination ablation (PRD §11 Sweeps). The
+`swap_strand_channels` fwd/RC half-swap is the channel-space action of "read the opposite strand" — the
+minimal symmetry under which an order-destroying average is invariant and a directionality-preserving form
+is not. context7 §3.3: `/pytorch/pytorch` consulted for `torch.chunk`/`torch.split`/`torch.cat` + the GLU
+split-half+`sigmoid` gating idiom + `nn.Parameter`/`torch.sigmoid`; correctness verified by the executed
+test under installed torch 2.7.1+cu128 (P1-01/02/03 installed-library-cross-check precedent). Cross-link
+**ADR-0002** (RC-combination constraint / D7) and **PRD §6/§10.1**.
+
+**Commit.** feature-branch atomic commit on `p1-04-segmenter` (squash-merge SHA on `main` recorded in
+`TODO.md` at P1-04 close); feeds **P1-07** (the binding segmentation smoke fine-tune consumes this
+segmenter) and **P1-05/P1-08** (the frozen-embedding probe uses the backbone-free `logits_from_hidden` path).

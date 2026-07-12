@@ -36,3 +36,17 @@ stride_nt: 512
 rc_equivariance:
   seq_len: 128
   atol: 1.0e-4
+
+# Stage-1 segmenter RC-combination knob (P1-04; PRD §6/§10.1; ADR-0002).
+# The Caduceus-PS hidden state is 2*d_model = 512 channels = (forward-strand || RC-strand).
+# How those two strand-halves feed the seg head is CONSTRAINED to a DIRECTIONALITY-PRESERVING
+# (non-averaged) form: the §6 strand-resolver derives strand + 5'->3' orientation from the
+# predicted element order (Specifier/Stem I -> antiterminator), so an order-destroying average
+# would defeat it. This is a P2 ablation dimension (PRD §11 Sweeps: RC-combination), bounded to
+# non-averaged forms — the allowed set + rejection of "mean" are frozen in code
+# (src/tbox_finder/models/rc_combine.py::{ALLOWED_RC_COMBINE,normalize_rc_combine}), NOT here,
+# so no config can weaken the directionality constraint (the caduceus RC-equivariance precedent).
+rc_combine:
+  mode: concat   # {concat, gate}; both directionality-preserving. DEFAULT concat = feed the full
+                 # (fwd||rc) 2*d_model state (injective, order-preserving). gate = learned
+                 # directional per-channel mix -> d_model. "mean" (symmetric average) is REJECTED.
