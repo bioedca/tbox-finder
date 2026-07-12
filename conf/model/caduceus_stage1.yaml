@@ -1,0 +1,38 @@
+# Caduceus-PS Stage-1 backbone — pinned checkpoint spec (P1-02).
+# Drives: src/tbox_finder/models/caduceus_backbone.py::load_caduceus_ps (+ downstream
+#   P1-03 seg head, P1-04 frozen-embedding probe, P1-09 continued-pretraining).
+# ADR pins: ADR-0002 — D7 (Caduceus backbone + human-reference-transfer hypothesis),
+#   D2 (transformers-4.57.5 trust_remote_code ceiling), A2 C2 (packaged Mamba
+#   hard-requires selective_scan_cuda → GPU forward, no CPU path).
+# PRD §6 (the strand-resolver relies on RC-equivariance), §10.1 (Stage-1 spec),
+#   §7.1 (provenance).
+#
+# The checkpoint is pinned by an IMMUTABLE commit revision (never `main`), so the
+# backbone is byte-reproducible. The parameter count (7,725,312) and the RC-equivariance
+# assertion are FROZEN IN CODE (caduceus_backbone.py), NOT here — no config can weaken the
+# checkpoint-identity / equivariance gate (the coverage.py::OOD_ECE_MIN_N precedent). This
+# file carries the run-time knobs + the config facts the model card reads.
+#
+# Seeding (CLAUDE.md §8.3): every stochastic step passes an explicit seed.
+
+seed: 42
+pythonhashseed: 0
+
+repo_id: kuleshov-group/caduceus-ps_seqlen-131k_d_model-256_n_layer-16
+revision: d89eeb853136ea64da7feb3d0c8e909771b17ae6   # pinned commit — never `main` (ADR-0002 D2)
+trust_remote_code: true      # Caduceus modeling class is Hub remote code (transformers 4.57.5 ceiling)
+
+# Checkpoint config facts (from config.json; asserted in code, echoed here for the record).
+d_model: 256
+n_layer: 16
+rcps: true                   # RC-equivariant (Caduceus-PS); hidden state is 2*d_model = 512
+
+# Scan-time windowing (PRD §6): 1024-nt window / 512-nt stride — NOT the 131k max context.
+window_nt: 1024
+stride_nt: 512
+
+# RC-equivariance smoke (P1-02 validation): f(RC(x)) == flip(f(x), (-2, -1)) within atol.
+# atol is an implementer choice (no ADR pins it); observed max-abs-diff is 0.0 (fp32, sm_86/sm_89).
+rc_equivariance:
+  seq_len: 128
+  atol: 1.0e-4
