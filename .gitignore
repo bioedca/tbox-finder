@@ -41,6 +41,12 @@
 # workflow/rules/data.smk::replace_taxid_lineage (CLAUDE.md §5.2).
 !/data/external/ncbi_taxonomy/
 !/data/external/ncbi_taxonomy/provenance.json
+# Carve-out: the P1-12 ArchiveII LOFO benchmark provenance ONLY (pinned tarball
+# sha256 + per-family/per-fold counts + lofo digest). The ~1.3 MB folds.json +
+# extracted .ct files stay ignored — re-fetched + checksum-verified by
+# workflow/rules/backbones.smk::archiveii_lofo_prep (CLAUDE.md §5.2).
+!/data/external/archiveii_lofo/
+!/data/external/archiveii_lofo/provenance.json
 # Carve-out: the P0-16 GATE-1 anchor (arm c) deliverables ONLY — the re-derived
 # non-Firmicutes leader FASTA (git-LFS), its provenance, and the audit/leakage report.
 # The .cache/ (copyrighted Vitreschak .doc supplement + fetched genome FASTAs) stays

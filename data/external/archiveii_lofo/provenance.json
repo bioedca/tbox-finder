@@ -1,0 +1,95 @@
+{
+  "accessed_date": "2026-07-13",
+  "adr": "ADR-0002 D5",
+  "description": "P1-12: ArchiveII nine-family leave-one-family-out (inter-family) secondary-structure benchmark for the RiNALMo mirror parity gate (PRD §10.2; ADR-0002 D5). data/external/ is immutable + checksummed (CLAUDE.md §5.2); only this provenance.json is committed.",
+  "git_sha": "5a8aba069c73d44b20e54ba014fde10463139710",
+  "lofo": {
+    "counts_note": "counts derived by extraction 2026-07-13, not quoted from the literature (which disagrees on the small families).",
+    "input": "sequence-only (one token/nt; no structure/covariance/MSA channel)",
+    "kind": "inter-family (leave-one-family-out / fam-fold)",
+    "lofo_digest": "69cae9aa01afe9ed37bb12c928b3038e7b2ffeb51b9d72156c7316b8ab728695",
+    "n_families": 9,
+    "n_records": 3865,
+    "per_family_counts": {
+      "16S_rRNA": 67,
+      "23S_rRNA": 15,
+      "5S_rRNA": 1283,
+      "RNaseP_RNA": 454,
+      "SRP_RNA": 918,
+      "group_I_intron": 74,
+      "tRNA": 557,
+      "telomerase_RNA": 35,
+      "tmRNA": 462
+    },
+    "per_fold_counts": {
+      "16S_rRNA": {
+        "test": 67,
+        "train": 3419,
+        "valid": 379
+      },
+      "23S_rRNA": {
+        "test": 15,
+        "train": 3465,
+        "valid": 385
+      },
+      "5S_rRNA": {
+        "test": 1283,
+        "train": 2324,
+        "valid": 258
+      },
+      "RNaseP_RNA": {
+        "test": 454,
+        "train": 3070,
+        "valid": 341
+      },
+      "SRP_RNA": {
+        "test": 918,
+        "train": 2653,
+        "valid": 294
+      },
+      "group_I_intron": {
+        "test": 74,
+        "train": 3412,
+        "valid": 379
+      },
+      "tRNA": {
+        "test": 557,
+        "train": 2978,
+        "valid": 330
+      },
+      "telomerase_RNA": {
+        "test": 35,
+        "train": 3447,
+        "valid": 383
+      },
+      "tmRNA": {
+        "test": 462,
+        "train": 3063,
+        "valid": 340
+      }
+    }
+  },
+  "metric": {
+    "canonical_pairs_only_default": true,
+    "matches": "RiNALMo rinalmo/utils/sec_struct.py",
+    "name": "base-pair F1",
+    "sharp_loop_min_dist": 4,
+    "slippage_tolerance_nt": 1
+  },
+  "prd": "§10.2",
+  "rule": "workflow/rules/backbones.smk :: archiveii_lofo_prep",
+  "schema_version": 1,
+  "script": "src/tbox_finder/eval/archiveii_lofo.py",
+  "source": {
+    "bytes": 33015660,
+    "citations": {
+      "archiveii": "Sloma & Mathews 2016, RNA 22(12):1808-1818; DOI:10.1261/rna.053694.115; PMID:27852924",
+      "interfamily_splits": "Szikszai et al. 2022, Bioinformatics 38(16):3892-3899; DOI:10.1093/bioinformatics/btac415",
+      "rinalmo": "Penic et al. 2025, Nat Commun; DOI:10.1038/s41467-025-60872-5; PMID:40593636; PMC12219582"
+    },
+    "license": "No explicit data license on the Mathews-lab archiveII.tar.gz or the marcellszi/dl-rna release; publicly available for academic/research use. Cite Sloma & Mathews 2016 + Szikszai et al. 2022. (The HF multimolecule/archiveii mirror is a DIFFERENT 10-family AGPL curation and is NOT this 9-family benchmark.)",
+    "note": "RiNALMo's remote_data.json ARCHIVEII_SPLITS points at this exact asset; the mirror is evaluated on these verbatim splits.",
+    "sha256": "0ff7209016ba1775288572794e850d5857937c391d67c9ccacfe9ae77c0188e5",
+    "url": "https://github.com/marcellszi/dl-rna/releases/download/Data/ct-splits.tar.gz"
+  }
+}

@@ -9,6 +9,40 @@ import os
 # Node-local module constants (self-contained; see the include-order note above).
 _SEG_SMOKE_DIR = "data/interim/p1_seg_smoke"
 _SEG_SMOKE_AUDIT = "data/processed/audits/seg_smoke_report.json"
+_ARCHIVEII_LOFO_PROV = "data/external/archiveii_lofo/provenance.json"
+
+
+rule archiveii_lofo_prep:
+    """Stage the ArchiveII nine-family inter-family LOFO benchmark (P1-12; PRD §10.2).
+
+    Downloads RiNALMo's exact ``ARCHIVEII_SPLITS`` asset (Szikszai et al. dl-rna
+    ``ct-splits.tar.gz``), verifies the pinned SHA-256 **fail-loud**, extracts the
+    ``ct/fam-fold/<family>/{train,valid,test}`` tree, parses every .ct into
+    sequence + reference base pairs, and writes a checksummed ``provenance.json``
+    (+ a gitignored ``folds.json``) into the immutable ``data/external/`` staging
+    area (CLAUDE.md §5.2). This is the parity benchmark the **P1-13** RiNALMo-mirror
+    gate is evaluated on; input is sequence-only (no structure channel), matching
+    RiNALMo. ADR-0002 D5 pins the parity numerics; ``reports/p1/rinalmo_published_target.json``
+    records the published target.
+
+    A **one-time LOCAL** fetch rule (network — not run in CI), kept out of
+    ``rule all`` with no ``input:``. Invoke from the main checkout:
+
+        snakemake --cores 1 --use-conda archiveii_lofo_prep
+    """
+    output:
+        provenance=_ARCHIVEII_LOFO_PROV,
+    params:
+        # dest-dir derived from the output (not a hardcoded prefix) so
+        # `snakemake --lint` stays clean (the P1-06 param-prefix precedent).
+        dest_dir=lambda wildcards, output: os.path.dirname(output.provenance),
+    log:
+        "logs/archiveii_lofo_prep.log",
+    conda:
+        "../../envs/data.yml"
+    shell:
+        "PYTHONPATH=src python -m tbox_finder.eval.archiveii_lofo "
+        "--dest-dir {params.dest_dir:q} >{log} 2>&1"
 
 
 rule p1_seg_smoke_set:

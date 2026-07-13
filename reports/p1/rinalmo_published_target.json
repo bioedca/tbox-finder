@@ -1,0 +1,92 @@
+{
+  "schema_version": 1,
+  "description": "P1-12: the PUBLISHED RiNALMo ArchiveII nine-family inter-family (leave-one-family-out) secondary-structure F1 scores — the parity target for the P1-13 mirror parity gate (PRD §10.2; ADR-0002 D5). Values are the NON-WEIGHTED F1 column (per-structure simple mean) from Supplementary Table S2; the length-weighted column differs (SRP 0.628, groupI 0.675, 16S 0.721, mean 0.712) and is NOT the parity target. Sourced from the paper, not fabricated (CLAUDE.md §10.3).",
+  "source": {
+    "paper": "Penic et al., RiNALMo: general-purpose RNA language models can generalize well on structure prediction tasks, Nature Communications 2025",
+    "pmid": "40593636",
+    "doi": "10.1038/s41467-025-60872-5",
+    "pmcid": "PMC12219582",
+    "location": "Supplementary Table S2, RiNALMo F1_non_weighted column ('Inter-family generalization evaluation ... F1 scores for secondary structure prediction')",
+    "metric_column": "F1_non_weighted",
+    "corroboration": [
+      "Supp. Table S2 (F1 non-weighted) — primary numeric source",
+      "Supp. Table S3 (INF, an independent metric) — same per-family pattern incl. telomerase collapse",
+      "Main-text Results + Fig. 4a — qualitative (RiNALMo wins 8/9 families, 'struggles to generalize on telomerase RNAs')",
+      "Independent benchmark arXiv:2410.16212 (preprint, not peer-reviewed) — corroboration only; same pattern (tRNA highest, telomerase lowest)"
+    ],
+    "accessed_date": "2026-07-13",
+    "verification": "scientific-evidence gate (CLAUDE.md §10.1) CLEARED: >=3 corroborating reads incl. an independent pymupdf extraction of the SI PDF; every value reproduced exactly and matches ADR-0002 D5 to 2 dp."
+  },
+  "metric": {
+    "name": "base-pair F1",
+    "aggregation": "per-structure F1 averaged un-weighted within each held-out family (non-weighted column)",
+    "slippage_tolerance_nt": 1,
+    "canonical_pairs_only": true,
+    "sharp_loop_min_dist": 4,
+    "input": "sequence-only (RiNALMo has no structure-input channel)"
+  },
+  "sd_reported": false,
+  "sd_note": "The paper reports NO numeric per-split/per-family F1 standard deviation (Fig. 4b shows box/violin distributions only; the Table S2 'Mean/STD' columns are sequence-LENGTH statistics, not F1 SD). Therefore the PRD §10.2 primary criterion ('within published SD') is not usable and the ADR-0002 D5 +/-N pp fallback governs.",
+  "parity_gate": {
+    "margin_pp": 2.0,
+    "gated_on": ["mean_interfamily_f1", "eight_stable_families"],
+    "stable_families": ["5S_rRNA", "SRP_RNA", "tRNA", "tmRNA", "RNaseP_RNA", "group_I_intron", "16S_rRNA", "23S_rRNA"],
+    "telomerase_carveout": {
+      "family": "telomerase_RNA",
+      "published_f1": 0.12,
+      "reason": "near the failure floor + high variance (acknowledged outlier); excluded from the strict gate or given a widened +/-5-10 pp band (ADR-0002 D5).",
+      "widened_band_pp": [5, 10]
+    },
+    "adr": "ADR-0002 D5",
+    "note": "N=2 pp covers ~1 pp printed-resolution rounding + ~1 pp same-weights fine-tuning/reimplementation noise, without admitting a meaningful accuracy gap. A >2 pp shift on the mean or on multiple stable families is a real reimplementation discrepancy to investigate, not accepted."
+  },
+  "published_f1": {
+    "mean_interfamily": 0.719,
+    "per_family": {
+      "5S_rRNA": 0.884,
+      "SRP_RNA": 0.700,
+      "tRNA": 0.931,
+      "tmRNA": 0.801,
+      "RNaseP_RNA": 0.798,
+      "group_I_intron": 0.657,
+      "16S_rRNA": 0.736,
+      "23S_rRNA": 0.848,
+      "telomerase_RNA": 0.120
+    }
+  },
+  "adr_pinned_f1_2dp": {
+    "mean_interfamily": 0.72,
+    "per_family": {
+      "5S_rRNA": 0.88,
+      "SRP_RNA": 0.70,
+      "tRNA": 0.93,
+      "tmRNA": 0.80,
+      "RNaseP_RNA": 0.80,
+      "group_I_intron": 0.66,
+      "16S_rRNA": 0.74,
+      "23S_rRNA": 0.85,
+      "telomerase_RNA": 0.12
+    },
+    "agreement": "published F1 (Table S2 non-weighted) matches ADR-0002 D5 to 2 dp for all ten values."
+  },
+  "families": {
+    "5S_rRNA": {"dir": "5s", "n_test": 1283},
+    "SRP_RNA": {"dir": "srp", "n_test": 918},
+    "tRNA": {"dir": "tRNA", "n_test": 557},
+    "tmRNA": {"dir": "tmRNA", "n_test": 462},
+    "RNaseP_RNA": {"dir": "RNaseP", "n_test": 454},
+    "group_I_intron": {"dir": "grp1", "n_test": 74},
+    "16S_rRNA": {"dir": "16s", "n_test": 67},
+    "23S_rRNA": {"dir": "23s", "n_test": 15},
+    "telomerase_RNA": {"dir": "telomerase", "n_test": 35}
+  },
+  "dataset": {
+    "n_families": 9,
+    "n_records": 3865,
+    "lofo_digest": "69cae9aa01afe9ed37bb12c928b3038e7b2ffeb51b9d72156c7316b8ab728695",
+    "source_url": "https://github.com/marcellszi/dl-rna/releases/download/Data/ct-splits.tar.gz",
+    "source_sha256": "0ff7209016ba1775288572794e850d5857937c391d67c9ccacfe9ae77c0188e5",
+    "provenance": "data/external/archiveii_lofo/provenance.json",
+    "counts_note": "per-family n_test counts derived by extraction 2026-07-13 (not quoted from the literature, which disagrees on the small families)."
+  }
+}
