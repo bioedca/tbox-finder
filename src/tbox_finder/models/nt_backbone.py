@@ -285,49 +285,65 @@ def validate_report(report: Mapping[str, Any]) -> list[str]:
     if errs:  # missing sub-keys → the consistency checks below can't run meaningfully
         return errs
 
+    # Fail-closed (§10.3): a pass can only be certified by a real measurement, so an
+    # unmeasured report (measured absent/false) must NOT claim any gate pass — otherwise a
+    # tampered JSON could set overall_pass=true and skip every consistency check below.
+    if not report.get("measured"):
+        if any(
+            gate.get(k) is True
+            for k in (
+                "load_ok",
+                "hidden_dim_ok",
+                "seg_head_dropin_ok",
+                "segmenter_dropin_ok",
+                "overall_pass",
+            )
+        ):
+            errs.append("gate claims a pass but report.measured is not True")
+        return errs
+
     # Consistency (only checkable once torch has measured the shapes). These flag an
     # internally *inconsistent* report, never an honestly-recorded failure. Verdicts must
     # be real booleans and shapes well-formed, so a hand-tampered JSON cannot slip a
     # truthy string / mis-sized tensor past the gate (§8.7/§10.3).
-    if report.get("measured"):
-        hidden_ok_shape = _is_shape(ip.get("hidden_shape"), ndim=3, last=HIDDEN_DIM)
-        if _bad_bool(gate.get("hidden_dim_ok"), hidden_ok_shape):
-            errs.append("gate.hidden_dim_ok inconsistent with interface_parity.hidden_shape")
-        if ip.get("num_classes") != NUM_CLASSES:
-            errs.append(f"interface_parity.num_classes != {NUM_CLASSES}")
-        seg_ok = _is_shape(ip.get("seg_head_logits_shape"), ndim=3, last=NUM_CLASSES) and (
-            ip.get("seg_head_logits_finite") is True
+    hidden_ok_shape = _is_shape(ip.get("hidden_shape"), ndim=3, last=HIDDEN_DIM)
+    if _bad_bool(gate.get("hidden_dim_ok"), hidden_ok_shape):
+        errs.append("gate.hidden_dim_ok inconsistent with interface_parity.hidden_shape")
+    if ip.get("num_classes") != NUM_CLASSES:
+        errs.append(f"interface_parity.num_classes != {NUM_CLASSES}")
+    seg_ok = _is_shape(ip.get("seg_head_logits_shape"), ndim=3, last=NUM_CLASSES) and (
+        ip.get("seg_head_logits_finite") is True
+    )
+    if _bad_bool(gate.get("seg_head_dropin_ok"), seg_ok):
+        errs.append("gate.seg_head_dropin_ok inconsistent with seg_head_logits_shape/finite")
+    segr_ok = _is_shape(ip.get("segmenter_logits_shape"), ndim=3, last=NUM_CLASSES) and (
+        ip.get("segmenter_logits_finite") is True
+    )
+    if _bad_bool(gate.get("segmenter_dropin_ok"), segr_ok):
+        errs.append("gate.segmenter_dropin_ok inconsistent with segmenter_logits_shape/finite")
+    # The token axis must agree across the two drop-in paths and the hidden state
+    # (both heads classify the SAME positions the backbone emitted).
+    hs, sh, sm = (
+        ip.get("hidden_shape"),
+        ip.get("seg_head_logits_shape"),
+        ip.get("segmenter_logits_shape"),
+    )
+    if all(_is_shape(s, ndim=3) for s in (hs, sh, sm)) and not (hs[1] == sh[1] == sm[1]):
+        errs.append("interface_parity token axis (L) disagrees across hidden/head/segmenter")
+    for k in ("load_ok", "hidden_dim_ok", "seg_head_dropin_ok", "segmenter_dropin_ok"):
+        if not isinstance(gate.get(k), bool):
+            errs.append(f"gate.{k} must be a bool")
+    want_overall = bool(
+        gate.get("load_ok")
+        and gate.get("hidden_dim_ok")
+        and gate.get("seg_head_dropin_ok")
+        and gate.get("segmenter_dropin_ok")
+    )
+    if _bad_bool(gate.get("overall_pass"), want_overall):
+        errs.append(
+            "gate.overall_pass != AND(load_ok, hidden_dim_ok, seg_head_dropin_ok, "
+            "segmenter_dropin_ok)"
         )
-        if _bad_bool(gate.get("seg_head_dropin_ok"), seg_ok):
-            errs.append("gate.seg_head_dropin_ok inconsistent with seg_head_logits_shape/finite")
-        segr_ok = _is_shape(ip.get("segmenter_logits_shape"), ndim=3, last=NUM_CLASSES) and (
-            ip.get("segmenter_logits_finite") is True
-        )
-        if _bad_bool(gate.get("segmenter_dropin_ok"), segr_ok):
-            errs.append("gate.segmenter_dropin_ok inconsistent with segmenter_logits_shape/finite")
-        # The token axis must agree across the two drop-in paths and the hidden state
-        # (both heads classify the SAME positions the backbone emitted).
-        hs, sh, sm = (
-            ip.get("hidden_shape"),
-            ip.get("seg_head_logits_shape"),
-            ip.get("segmenter_logits_shape"),
-        )
-        if all(_is_shape(s, ndim=3) for s in (hs, sh, sm)) and not (hs[1] == sh[1] == sm[1]):
-            errs.append("interface_parity token axis (L) disagrees across hidden/head/segmenter")
-        for k in ("load_ok", "hidden_dim_ok", "seg_head_dropin_ok", "segmenter_dropin_ok"):
-            if not isinstance(gate.get(k), bool):
-                errs.append(f"gate.{k} must be a bool")
-        want_overall = bool(
-            gate.get("load_ok")
-            and gate.get("hidden_dim_ok")
-            and gate.get("seg_head_dropin_ok")
-            and gate.get("segmenter_dropin_ok")
-        )
-        if _bad_bool(gate.get("overall_pass"), want_overall):
-            errs.append(
-                "gate.overall_pass != AND(load_ok, hidden_dim_ok, seg_head_dropin_ok, "
-                "segmenter_dropin_ok)"
-            )
     return errs
 
 

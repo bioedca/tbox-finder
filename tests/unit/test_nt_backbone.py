@@ -163,6 +163,9 @@ def test_good_report_is_valid():
         lambda r: r["gate"].update(overall_pass=False),  # AND is True -> inconsistent
         lambda r: r["gate"].update(load_ok="yes"),  # not a real bool
         lambda r: (r["gate"].update(seg_head_dropin_ok=False), r["gate"].update(overall_pass=True)),
+        lambda r: r.update(
+            measured=False
+        ),  # unmeasured but gate still claims a pass -> fail-closed
     ],
 )
 def test_validator_bites(mutate):
@@ -178,6 +181,22 @@ def test_honest_dropin_failure_is_schema_valid():
     r["interface_parity"]["seg_head_logits_finite"] = False
     r["gate"]["seg_head_dropin_ok"] = False
     r["gate"]["overall_pass"] = False
+    assert nt.validate_report(r) == []
+
+
+def test_unmeasured_report_without_pass_is_valid():
+    # An unmeasured report is fine as long as it claims NO gate pass (a pass may only be
+    # certified by a real measurement; §10.3). All gate flags False -> valid.
+    r = good_report()
+    r["measured"] = False
+    for k in (
+        "load_ok",
+        "hidden_dim_ok",
+        "seg_head_dropin_ok",
+        "segmenter_dropin_ok",
+        "overall_pass",
+    ):
+        r["gate"][k] = False
     assert nt.validate_report(r) == []
 
 
