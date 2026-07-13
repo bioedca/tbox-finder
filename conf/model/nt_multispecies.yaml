@@ -1,0 +1,48 @@
+# Nucleotide-Transformer-multispecies Stage-1 backbone — pinned checkpoint spec (P1-10).
+# Drives: src/tbox_finder/models/nt_backbone.py::load_nt_multispecies.
+#
+# ROLE: the LAST rung of the ADR-0002 D7 transfer-fallback ladder (full fine-tune ->
+#   GTDB continued-pretraining -> THIS prokaryotic/multispecies DNA backbone). The P1-07
+#   transfer go/no-go returned GO, so this ladder is NOT triggered (ADR-0002 A6): this is a
+#   dormant, stub-free drop-in for a P2 transfer-driven GATE-4 failure. It is NOT wired as
+#   any default — no conf/train/*.yaml selects it (a unit test locks that). To use it, add a
+#   sibling train config whose defaults list has `- /model: nt_multispecies`, or override on
+#   the CLI (`model=nt_multispecies`).
+#
+# ADR pins: ADR-0002 — D7 (fallback ladder rung 3), D2 (transformers 4.57.5 trust_remote_code
+#   ceiling — v2 NT ships repo-local remote modeling code, a bias-free gated-FFN ESM variant),
+#   A4 (Stage-1 DNA runs in the ml-dna env), A6 (ladder not triggered). PRD §10.1 (transfer
+#   fallback #3: prokaryotic/multispecies DNA backbone).
+#
+# The checkpoint is pinned by an IMMUTABLE commit revision (never `main`), so the backbone
+# (weights + the remote code trust_remote_code executes) is byte-reproducible. The hidden_dim
+# / n_layer / model_type are FROZEN IN CODE (nt_backbone.py), NOT here — no config can weaken
+# the checkpoint-identity or the interface-parity gate (the caduceus_stage1.yaml precedent).
+# A drift-guard test asserts these scalars equal the code constants.
+#
+# Seeding (CLAUDE.md §8.3): every stochastic step passes an explicit seed.
+
+seed: 42
+
+repo_id: InstaDeepAI/nucleotide-transformer-v2-250m-multi-species
+revision: c0f0359229f36ff6bc3a021247eefe0a9c344bd1   # pinned commit — never `main` (ADR-0002 D2)
+trust_remote_code: true      # v2 NT auto_map -> repo-local modeling_esm.py (transformers 4.57.5 ceiling)
+
+# Checkpoint config facts (from config.json; asserted in code, echoed here for the record).
+hidden_dim: 768              # config.json hidden_size — the d_model the seg head is sized to
+n_layer: 24                  # config.json num_hidden_layers
+model_type: esm              # ESM architecture (rotary pos-emb, bias-free gated FFN)
+
+# Tokenisation caveat (LOAD-BEARING for a P2 use): NT is a 6-MER tokeniser, NOT single-nt.
+# A length-L_nt window -> ~L_nt/6 tokens, so the seg head is per-6-mer-token, NOT per-nt.
+# The GATE-4 per-nt 8-class label scheme (ADR-0004) does NOT align 1:1 with NT tokens; a
+# token->nucleotide label broadcast (6x/token) is required, realised only if triggered at P2.
+kmer: 6
+max_tokens: 2048             # max_position_embeddings 2050 - 2 specials (~12 kb receptive field)
+
+# Pretraining domain (the §10.1 scientific-evidence gate; asserted in code + provenance):
+# MULTISPECIES + PROKARYOTE-INCLUSIVE (via bacteria: 667 species / 17.1 B nt of 850), verified
+# by >=2 agreeing authoritative sources (Nat Methods PMID:39609566 / DOI:10.1038/s41592-024-02523-z
+# + the HF corpus dataset card InstaDeepAI/multi_species_genomes). Archaea is NOT asserted
+# (unresolved); the per-checkpoint model cards are silent on prokaryotes (paper + corpus card
+# carry the claim). This is the domain-shift-remedy premise for the fallback.
