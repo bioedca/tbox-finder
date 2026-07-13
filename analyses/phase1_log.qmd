@@ -394,3 +394,51 @@ user chose to **scope τ to the decision metrics** after the all-14 gate tripped
 **Commit.** Setup commit `d22a9fb` (sbatch + `repro.py` + test + ADR-0002 A7 + stanza) + the measured result commit
 (repro report + the scoped gate + CI `TBOX_REQUIRE_REPRO_GATE=1` + this stanza update) on `p1-08-smoke-repro`. **Closes the
 PRD §18.1 P1 exit-gate item "smoke run reproducible."** No DVC artifact (report git-tracked; repro checkpoint throwaway).
+
+## Step P1-09 — 2026-07-13: Segmentation-head fallback — frozen-embedding + per-position linear/CRF probe (non-gated baseline; PRD §18.2 exit-gate deliverable)
+**Inputs.** Frozen Caduceus-PS **per-position** hidden states (P1-02, pinned revision `d89eeb85…`) of the P1-06 held-out
+smoke set (`data/interim/p1_seg_smoke/{windows.parquet,labels.npy}` — 300 leave-clade-out loci, **93,764 valid positions**,
+§9.2); the P1-03 `SegmentationHead` (Linear + optional in-repo linear-chain CRF) via the P1-04 `Stage1Segmenter(backbone=None)`
+frozen-embedding entry.
+**Process.** `src/tbox_finder/probes/frozen_seg_probe.py::run_seg_probe` — two-stage **single-env torch** (`tbox-ml-dna`):
+`--stage extract` freezes the backbone (eval, `requires_grad_(False)`) and caches its per-position hidden states **once**
+(GPU forward, batch=1, no pad); `--stage probe` trains **only the seg head** (backbone frozen; the `concat` identity
+RC-combine is parameter-free) with per-nt **focal CE** (γ=2, PRD §11) on the cached embeddings, decodes (argmax; CRF Viterbi
+when `use_crf`), and grades per-nt 8-class F1 via the same `metrics` unit as P1-07. Reuses `stage1_smoke`
+(loader/tokenizer/determinism/focal/metrics) verbatim.
+**Outputs.** `reports/p1/frozen_seg_probe.json` (git; **measured**) + gitignored regenerable
+`data/interim/probes/frozen_seg_embeddings.npz` (192 MB, `*.npz`-ignored). **Every one of 300 windows decodes to a valid
+length-L 8-class segmentation** (`all_windows_valid_8class=true`, min/max predicted class 0/7); per-nt **macro-F1 0.2647**,
+micro-F1 0.4901; per-element **Stem_I 0.555 / Antiterminator 0.351 / Specifier 0.000** → **min-core-F1 0.0**; all 8 per-class
+F1 reported. New `frozen_seg_probe.py` + `tests/unit/test_frozen_seg_probe.py` (**41 tests**: stdlib validator-bite tier
+[incl. +extra-class, +per-element range, +invalid-decode-flag, +reuse drift guard from the pre-commit review] + CPU torch
+probe tier [learns separable / can't fake noise on a held-out split / CRF-valid / only-head-trains] + GPU extract tier) +
+`probes/__init__.py`.
+**Validation.** **PASS** (non-gated deliverable): produces a valid per-position 8-class segmentation for every window **and** a
+**reported** per-nt F1; the report self-validates fail-closed. **No threshold** (PRD §10.1/§18.2). §9.2 held-out-only + §10.3
+`eval_split="fine_tune_set"` honesty flags enforced by `validate_report`. Full unit suite **557 passed / 57 skipped** bare (no
+regression); 41/41 pass under `tbox-ml-dna` (GPU extract included, `TBOX_REQUIRE_CADUCEUS=1`); ruff 0.15.15 + black 25.11.0 clean.
+**Decisions.** (1) **PRD §10.1/§18.2-sourced, non-gated** — a measured baseline, **not** a gate; ADR-0002 D7's go/no-go
+thresholds belong to the *end-to-end* P1-07 smoke, not to this frozen-embedding probe (`gate.gated=false`, `binding=false`).
+The measured frozen baseline (macro-F1 0.265; **Specifier 0.0** — the 3-nt codon, 0.9% of positions, unresolved by a linear
+head) is **materially weaker than the P1-07 end-to-end GO (min-core-F1 ≈ 1.0)** — the honest frozen-feature ceiling for a
+linear/CRF head, quantifying **why end-to-end is the default** and this is a safety net; built now per §18.2, **not triggered**
+(P1-07 = GO). (2) **Single-env torch** (not the provisional two-env/sklearn hedge): the pinned input is the torch P1-03 head
+and sklearn cannot express the CRF variant, so both stages run under `tbox-ml-dna` — [[no-env-has-torch-and-sklearn]]
+resolved. (3) **Overparametrization caveat (disclosed):** a 512-d head over few *same-set* positions can memorize even noise
+(features > samples), so the honesty bite-test evals on a **held-out** window split; production is immune (93,764 positions ≫
+512), so the eval-on-fine-tune-set number reflects genuine frozen-feature fit, not memorization. (4) **Doc-hygiene flag
+(NOT resolved unilaterally, §7 item 2):** ADR-0002 **A6's prose** labels "GTDB continued-pretraining" as "P1-09", but imp.md
++ TODO.md (+ PRD §10.1) agree P1-09 = *this* seg-head fallback build and GTDB-CPT is **P1-11** — an ADR-A6 step-number
+annotation drift needing a sign-off-gated hygiene amendment; flagged, not fixed (TODO.md's lookahead correction already
+adjudicated imp.md-authoritative). (5) **Pre-commit adversarial 4-lens review workflow** (correctness / ADR-PRD faithfulness /
+test-adequacy / reuse-integration → adversarial verify; 10 agents) → **5 confirmed findings, all fixed** before push: the
+runtime backbone-revision guard was a **tautology** (`build_seg_report` hardcoded `revision=REVISION`; now **cache-sourced**
+via `emb_meta.get("revision")` so a revision-less/foreign cache → `None` → validator fires, fail-closed) + 4 test-strengthening
+(per-element range bite, extra-class bite, invalid-decode-flag test, reused-helper drift guard); 1 finding refuted. context7
+§3.3: reuses P1-07-verified torch idioms (AdamW / focal `F.cross_entropy` reduction=none / `no_grad`) + the P1-05 npz-cache
+pattern — no new third-party API surface. Cross-link **PRD §10.1/§18.2/§11**, **ADR-0002 D7/A6**, **ADR-0004 D1/D6**,
+**ADR-0005**.
+**Commit.** `<SHA>` on `p1-09-frozen-seg-probe` (feature branch → squash PR). **Builds the PRD §18.2 P1 exit-gate item
+"Segmentation-head fallback path ready."** No DVC artifact (report git-tracked; the 192 MB embeddings `.npz` is a gitignored
+regenerable intermediate — the P1-05 report-hashes-the-cache precedent).
