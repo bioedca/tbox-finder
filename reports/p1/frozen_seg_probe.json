@@ -1,0 +1,101 @@
+{
+  "adr": "ADR-0002",
+  "backbone": {
+    "pretraining_domain": "human reference genome",
+    "repo_id": "kuleshov-group/caduceus-ps_seqlen-131k_d_model-256_n_layer-16",
+    "revision": "d89eeb853136ea64da7feb3d0c8e909771b17ae6"
+  },
+  "binding": false,
+  "config": {
+    "dropout": 0.0,
+    "epochs": 100,
+    "gamma": 2.0,
+    "grad_clip": 1.0,
+    "lr": 0.001,
+    "rc_combine": "concat",
+    "seed": 42,
+    "use_crf": false,
+    "weight_decay": 0.01
+  },
+  "data": {
+    "eval_split": "fine_tune_set",
+    "held_out_only": true,
+    "labels_npy": "data/interim/p1_seg_smoke/labels.npy",
+    "n_valid_positions": 93764,
+    "n_windows": 300,
+    "windows_parquet": "data/interim/p1_seg_smoke/windows.parquet"
+  },
+  "embedding": {
+    "backbone": "kuleshov-group/caduceus-ps_seqlen-131k_d_model-256_n_layer-16",
+    "extract_seed": 42,
+    "frozen": true,
+    "hidden_dim": 512,
+    "pooling": "per-position (no pooling)",
+    "revision": "d89eeb853136ea64da7feb3d0c8e909771b17ae6"
+  },
+  "env": {
+    "hostname": "Xochi",
+    "numpy": "2.5.1",
+    "python": "3.12.13",
+    "torch": "2.7.1+cu128",
+    "transformers": "4.57.5"
+  },
+  "frozen_backbone": true,
+  "gate": {
+    "binding": false,
+    "gated": false,
+    "kind": "fallback_baseline",
+    "note": "Non-gated frozen-embedding + per-position linear/CRF seg-head fallback (PRD \u00a710.1/\u00a718.2). Per-nt F1 is REPORTED as a fallback baseline; there is no pass/fail threshold. ADR-0002 D7's go/no-go thresholds belong to the end-to-end P1-07 smoke, not to this frozen-embedding probe."
+  },
+  "generated_at_utc": "2026-07-13T14:38:29.250461+00:00",
+  "generated_by": "src/tbox_finder/probes/frozen_seg_probe.py",
+  "measured": true,
+  "metrics": {
+    "macro_f1": 0.2647085881790476,
+    "micro_f1": 0.49013480653555735,
+    "min_core_f1": 0.0,
+    "per_class_f1": {
+      "Antiterminator_Tbox_seq": 0.350618051776413,
+      "Discriminator": 0.132319391634981,
+      "Specifier": 0.0,
+      "Stem_I": 0.5547821603506058,
+      "Stem_II": 0.1861665039743411,
+      "Stem_III": 0.014761306532663316,
+      "Terminator": 0.29197550757331614,
+      "background": 0.5870457835900601
+    },
+    "per_element_f1": {
+      "Antiterminator_Tbox_seq": 0.350618051776413,
+      "Specifier": 0.0,
+      "Stem_I": 0.5547821603506058
+    }
+  },
+  "prd_sections": [
+    "\u00a710.1",
+    "\u00a718.2"
+  ],
+  "provenance": {
+    "env_lock": "70b66801eeafe1fdec4c19e667de1590e4471143bca36248fe40f16e53bb5003",
+    "extract_inputs": {
+      "data/interim/p1_seg_smoke/labels.npy": "f1c057e7a847829adefda549cacc70faefdc19fdf3c2d9753342171d05d8b8db",
+      "data/interim/p1_seg_smoke/windows.parquet": "8102a396b2d0ae33739836fb5dbfaa676c1c778846ba02737c11a30215973693"
+    },
+    "extract_seed": 42,
+    "git_sha": "7ebe10777a72b228dcdc3b1842f98cb4d6738876",
+    "inputs": {
+      "data/interim/p1_seg_smoke/labels.npy": "f1c057e7a847829adefda549cacc70faefdc19fdf3c2d9753342171d05d8b8db",
+      "data/interim/p1_seg_smoke/windows.parquet": "8102a396b2d0ae33739836fb5dbfaa676c1c778846ba02737c11a30215973693",
+      "data/interim/probes/frozen_seg_embeddings.npz": "f0239298c2b3ec84e035dcf0ed136acedacee057b7da13da31bfe3099151e371"
+    },
+    "probe_seed": 42,
+    "timestamp_utc": "2026-07-13T14:38:30Z"
+  },
+  "schema_version": "1",
+  "segmentation_validity": {
+    "all_windows_valid_8class": true,
+    "max_pred_class": 7,
+    "min_pred_class": 0,
+    "n_windows_decoded": 300
+  },
+  "step": "P1-09"
+}
