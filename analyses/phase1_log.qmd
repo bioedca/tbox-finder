@@ -526,3 +526,55 @@ prepare/backward/clip) + `/huggingface/transformers` (MaskedLMOutput.logits `(B,
 against installed accelerate 1.12.0 / transformers 4.57.5. Cross-link **PRD §10.1/§15/§18.1**, **ADR-0002 D7/A6**,
 **ADR-0003 D7**. **Commit.** `<SHA>` on `p1-11-gtdb-cpt` (feature branch → squash PR). No DVC artifact (harness authored;
 the CPT checkpoint is produced only IF triggered).
+
+## Step P1-12 — 2026-07-13: Prepare the ArchiveII nine-family LOFO benchmark + SS base-pair-F1 harness + sourced RiNALMo parity target
+**Inputs.** The ArchiveII nine-family inter-family ("fam-fold") leave-one-family-out splits RiNALMo evaluates on
+(RiNALMo's `remote_data.json` `ARCHIVEII_SPLITS` = Szikszai et al. 2022 `marcellszi/dl-rna` `ct-splits.tar.gz`,
+`.ct` format); RiNALMo's published inter-family LOFO F1 (PMC12219582 / DOI:10.1038/s41467-025-60872-5); the RiNALMo
+SS-prediction protocol (sequence-only). **Process.** Built `src/tbox_finder/eval/archiveii_lofo.py` (pure-stdlib,
+bare-CI-importable): fail-loud `.ct` parser (sequence + reference base pairs, symmetry/contiguity/length checks), the
+`build_lofo` benchmark builder (canonical records = each family's `test/` set; per-fold train/valid/test counts), the
+`base_pair_prf` **base-pair-F1 metric with ±1-nt slippage** matching RiNALMo `rinalmo/utils/sec_struct.py` (+ canonical-
+pair / sharp-loop-min-dist-4 helpers), and `stage_archiveii` (checksummed download → verify pinned SHA-256 fail-loud →
+extract → parse → write `provenance.json`). Reuses `ingest.record_hash`/`records_digest` (golden digest) +
+`provenance.git_sha`/`sha256_file`. Added `workflow/rules/backbones.smk::archiveii_lofo_prep` (LOCAL one-time fetch, out
+of `rule all`, dest derived from output → `--lint`-clean). **Outputs.** `src/tbox_finder/eval/{__init__,archiveii_lofo}.py`;
+committed `data/external/archiveii_lofo/provenance.json` (pinned tarball `sha256=0ff72090…`, **extraction-derived**
+per-family/per-fold counts, `lofo_digest=69cae9aa…`; `.gitignore` un-ignores only this manifest, the ~1.3 MB `folds.json`
++ .ct files stay ignored per §5.2); `reports/p1/rinalmo_published_target.json` (the sourced parity target); golden
+`tests/golden/test_archiveii_lofo.py` (+ `tests/fixtures/archiveii_lofo/{mini/…18 real .ct, expected.sha256=c97dd5d3…}`);
+unit `tests/unit/test_ss_metric.py`. **Validation.** **PASSED** — golden: `build_lofo(fixture)` digest **and** an
+independent stdlib re-parse both == `expected.sha256` (`c97dd5d3…`); SS-F1 hand-checks correct (slippage flips a 1-nt near
+miss 0→1.0, no-slip stays 0; both-defined-zero → F1 0.0 not nan; empty pred/ref → nan); the committed provenance + target
+JSON pass consistency + §10.3 sourced-not-fabricated checks. 24 P1-12 tests green; full bare suite **613 passed / 126
+skipped, no regression**; ruff 0.15.15 + black 25.11.0 clean; `snakemake --lint` good + `-n` resolves. Full extraction
+validated the production shape (`require_full`): **3865 records / 9 families**, per-family {5S 1283, SRP 918, tRNA 557,
+tmRNA 462, RNaseP 454, grp1 74, 16S 67, telomerase 35, 23S 15}, each fold `test==family` & `train+valid==complement`.
+**Decisions.** (1) **Scientific-evidence gate (§10.1) CLEARED autonomously** — the published inter-family LOFO F1 (Supp.
+Table S2 **F1 non-weighted** column) reproduced **exactly** by an independent pymupdf SI-PDF extraction and by ≥3
+corroborating reads (Table S2 + Table S3 INF pattern + main-text Fig. 4a), matching ADR-0002 D5 to 2 dp → agreement ⇒
+proceed (P1-10 precedent). Recorded the published 3 dp values (mean 0.719; tRNA 0.931 highest, telomerase 0.120 lowest)
+**and** the ADR-pinned 2 dp set + N=2 pp parity margin + telomerase carve-out; flagged the **non-weighted** column
+explicitly (the length-weighted column differs and is NOT the target). (2) **No F1 SD is published** (Fig. 4b box/violin
+only) → the PRD §10.2 "within published SD" criterion is unusable and the ADR-0002 D5 ±N pp fallback governs (`sd_reported:
+false`). (3) **Per-family counts derived by extraction, not quoted** — the literature disagrees on the small families and
+an adversarial recon pass mis-mapped {74,67,35,15}; the real mapping (grp1 74, 16S 67, telomerase 35, 23S 15) comes from
+the data (§10.3, no fabrication). (4) **Pair-list golden hash, not dot-bracket** — ArchiveII contains pseudoknots (a 16S
+example), so the digest hashes the lossless sorted pair set. (5) **Metric protocol adversarially corrected** from RiNALMo
+code: ±1 slippage + canonical-only + sharp-loop-min-dist=4 confirmed; pseudoknots are removed on the *prediction* side
+(a P1-13 model-runner concern), so the metric here scores whatever pair sets it is given. (6) **Pre-commit adversarial
+5-lens review workflow** (correctness / ADR-PRD / test-adequacy / reuse / sci-honesty → 3-vote refute-by-default; 29
+agents) → **8 raw / 6 survivors, all fixed before push**: a **major** RiNALMo-parity correction — an adversary fetched
+`lbcb-sci/RiNALMo rinalmo/utils/sec_struct.py` and found it uses sklearn `zero_division=0.0`, so `base_pair_prf` now
+scores an **empty prediction/reference 0.0 (not nan)** to mirror it (else a single empty-prediction record would poison
+the P1-13 per-family mean vs the published 0.72); + a **major** test-coverage gap (the load-bearing `validate_manifest(
+require_full=True)` nine-family/3865/per-fold arithmetic was CI-dark → 6 hand-built-manifest bite-tests); + a
+provenance↔target digest/count cross-check (the two committed full-corpus constants CI can't recompute); + `parse_ct`
+empty-file / malformed-line guards; + a `_safe_extract` tar-path-traversal bite-test; + the arXiv corroboration tagged
+`(preprint, not peer-reviewed)` (§10.1). 2 refuted (a dormant `relax_pairs` `seq_len=None` branch; a `_sha256_file`
+passthrough — inlined anyway). **⚠️ Flagged, NOT resolved (§7 item 2):** ADR-0002 D5's prose cites the
+parity numbers to "Fig. 4a + box-plots 4b", but the exact numeric values live in **Supplementary Table S2 (non-weighted
+column)** — a citation-precision enrichment (values are correct) queued as a sign-off-gated ADR hygiene amendment for the
+P1 exit gate. context7 §3.3: biopython has no `.ct` reader (stdlib parser; numpy not needed — pure-Python sets). Cross-link
+**PRD §10.2**, **ADR-0002 D5**. **Commit.** `<SHA>` on `p1-12-archiveii-lofo` (feature branch → squash PR). Feeds **P1-13**
+(the RiNALMo mirror parity verification consumes these splits + metric + target).
