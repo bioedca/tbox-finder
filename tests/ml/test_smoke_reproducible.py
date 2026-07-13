@@ -160,6 +160,11 @@ def test_config_mismatches_clean_and_biting() -> None:
     del ref_nb["backbone"]
     del rer_nb["backbone"]
     assert "backbone.revision" in R.config_mismatches(ref_nb, rer_nb)
+    # An EXPLICITLY-NULL revision on both sides is also fail-closed (present-but-null == missing).
+    ref_null, rer_null = _base_report(), _base_report()
+    ref_null["backbone"]["revision"] = None
+    rer_null["backbone"]["revision"] = None
+    assert "backbone.revision" in R.config_mismatches(ref_null, rer_null)
 
 
 def test_check_identical_is_reproducible() -> None:
@@ -195,6 +200,19 @@ def test_check_diagnostic_drift_does_not_fail_gate() -> None:
     assert res["gated_max_abs_diff"] == 0.0  # ...but the decision metrics are untouched
     assert res["within_tolerance"] is True  # so the gate is NOT failed
     assert res["reproducible"] is True
+
+
+def test_tolerance_override_cannot_weaken() -> None:
+    # The τ override may only TIGHTEN (≤ REPRO_TOLERANCE), never loosen — a looser or non-finite
+    # tolerance can never force a pass (ADR-0002 A7 not-weakenable, §8.5/§10.3).
+    for bad in (R.REPRO_TOLERANCE + 1e-9, 2e-3, float("inf"), -1e-9, float("nan"), True, "1e-3"):
+        with pytest.raises(ValueError):
+            R.check_reproducibility(_base_report(), _base_report(), tolerance=bad)
+    # A tighter override is honored and bites: a 5e-4 gated drift passes at τ=1e-3, fails at 1e-4.
+    rer = _base_report()
+    rer["metrics"]["min_core_f1"] = 0.9998 - 5.0e-4
+    assert R.check_reproducibility(rer, _base_report(), tolerance=1e-4)["within_tolerance"] is False
+    assert R.check_reproducibility(rer, _base_report())["within_tolerance"] is True
 
 
 def test_check_tolerance_boundary_inclusive() -> None:

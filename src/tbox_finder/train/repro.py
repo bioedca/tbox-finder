@@ -171,16 +171,15 @@ def _config_of(report: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def _backbone_revision_of(report: Mapping[str, Any]) -> Any:
-    """The pinned backbone revision, or :data:`_MISSING` if the block/key is absent.
+    """The pinned backbone revision, or :data:`_MISSING` if the block/key is absent or null.
 
-    Returns the sentinel (not ``None``) for an absent revision so :func:`config_mismatches`
-    treats *both* reports lacking it as a mismatch, not a match — a re-run whose backbone
-    provenance is unknown is not a reproducibility test (fail-closed).
+    Returns the sentinel (not ``None``) for an absent **or explicitly-null** revision so
+    :func:`config_mismatches` treats *both* reports lacking it as a mismatch, not a match — a
+    re-run whose backbone provenance is unknown is not a reproducibility test (fail-closed).
     """
     bb = report.get("backbone")
-    if not isinstance(bb, Mapping) or "revision" not in bb:
-        return _MISSING
-    return bb.get("revision")
+    revision = bb.get("revision") if isinstance(bb, Mapping) else None
+    return _MISSING if revision is None else revision
 
 
 def config_mismatches(ref: Mapping[str, Any], rerun: Mapping[str, Any]) -> list[str]:
@@ -232,7 +231,22 @@ def check_reproducibility(
     mismatched metric key set, differing config) forces ``reproducible = False`` — it never
     certifies reproducibility on missing evidence (§10.3). A large diagnostic drift alone does
     **not** fail the gate (it is disclosed, not gated).
+
+    ``tolerance`` may only **tighten** the pinned :data:`REPRO_TOLERANCE`, never loosen it: it
+    must be a finite number in ``[0, REPRO_TOLERANCE]``. A larger value (or ``inf``/negative/
+    non-number) raises :class:`ValueError` — the ADR-0002 A7 τ is not weakenable on a fail
+    (§8.5/§10.3), so a caller cannot pass a looser tolerance to force a pass.
     """
+    if not (
+        isinstance(tolerance, (int, float))
+        and not isinstance(tolerance, bool)
+        and math.isfinite(tolerance)
+        and 0.0 <= float(tolerance) <= REPRO_TOLERANCE
+    ):
+        raise ValueError(
+            f"tolerance must be a finite number in [0, {REPRO_TOLERANCE}] — the ADR-0002 A7 τ "
+            f"is not weakenable (§8.5/§10.3); got {tolerance!r}"
+        )
     ref_verdict = verdict_of(ref)
     rerun_verdict = verdict_of(rerun)
     verdict_reproduces = ref_verdict is not None and ref_verdict == rerun_verdict

@@ -355,7 +355,7 @@ clearing incl. checkpoint/provenance, DONE gate requiring report+checkpoint+prov
 metrics** {min_core_f1, the 3 core per_element_f1, macro/micro} (the 8 per-class F1s reported as a determinism diagnostic,
 not τ-gated — see the scope decision below); it fails closed on a config/backbone mismatch, a non-finite metric, or any
 drift from the 14-metric structural floor. **Outputs.** `slurm/p1/seg_smoke_repro.sbatch` +
-`src/tbox_finder/train/{__init__ (adds repro),repro}.py` + `tests/ml/test_smoke_reproducible.py` (20) + **ADR-0002 A7**
+`src/tbox_finder/train/{__init__ (adds repro),repro}.py` + `tests/ml/test_smoke_reproducible.py` (21) + **ADR-0002 A7**
 (pinned a-priori + P1-08 scope re-sign-off) + the **measured** `reports/p1/seg_smoke_repro.json` (git-tracked; the repro
 checkpoint is a throwaway DONE-gate signal, left on the cluster, not DVC) + this stanza. No result was fabricated (§10.3).
 **Validation. MEASURED: REPRODUCIBLE** (SLURM job 466, cluster A4000 sm_86, seed 42, git_sha `d22a9fb`). **Primary:**
@@ -363,13 +363,14 @@ verdict **GO→GO**. **Secondary (τ=1e-3 over the decision metrics): PASS — g
 `min_core_f1` 0.999896→0.999820, Δ 7.6e-5; all 3 core `per_element_f1` Δ ≤ 1.8e-4). **Determinism diagnostic (reported,
 not gated): max|Δ| = 1.67e-3 on `per_class_f1.Stem_III`** (Stem_II 5.7e-4; rest ≤ 1.8e-4) — the re-run is within-tolerance,
 **not bit-exact** (the A2 C2 Mamba kernel), confirming the metric-level tolerance is the right instrument. This satisfies
-the PRD §18.1 "smoke run reproducible" exit condition. **Harness PASS (20 tests):** every `repro.py` guard bites —
+the PRD §18.1 "smoke run reproducible" exit condition. **Harness PASS (21 tests):** every `repro.py` guard bites —
 identical→reproducible (max|Δ|=0.0), sub-τ gated perturbation→reproducible, |Δ| exactly τ→inclusive-pass, gated
 |Δ|>τ→**not** reproducible (even with GO==GO), **a diagnostic-only drift > τ → does NOT fail the gate** (the Stem_III case),
-verdict-flip→**not** reproducible, config/backbone mismatch→fail-closed (incl. a backbone block absent from **both**
-reports), a re-run-only / symmetrically-dropped metric→fail-closed (the 14-metric structural floor), non-finite
-metric→fail-closed, and the `REPRO_TOLERANCE`/`EXPECTED_METRIC_KEYS`/gated-vs-diagnostic partition drift guards; **Tier 2
-(committed-report, pure JSON) PASSES** on both committed reports under `TBOX_REQUIRE_REPRO_GATE=1`. Bare suite 545 passed
+verdict-flip→**not** reproducible, config/backbone mismatch→fail-closed (incl. a backbone block **absent** or with an
+**explicitly-null** revision on **both** reports), a re-run-only / symmetrically-dropped metric→fail-closed (the 14-metric
+structural floor), non-finite metric→fail-closed, a **loosened/non-finite tolerance override→`ValueError`** (τ not
+weakenable), and the `REPRO_TOLERANCE`/`EXPECTED_METRIC_KEYS`/gated-vs-diagnostic partition drift guards; **Tier 2
+(committed-report, pure JSON) PASSES** on both committed reports under `TBOX_REQUIRE_REPRO_GATE=1`. Bare suite 546 passed
 / 124 skipped (no regression); ruff 0.15.15 + black 25.11.0 clean. Verification: artifact-based (job 466, `sacct` off) —
 `squeue` empty + `seg_smoke_repro.DONE` + a self-validated report; `.err` benign (wandb-offline notices only, 1041 B, no
 Traceback/CUDA error).
