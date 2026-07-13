@@ -308,6 +308,43 @@ def load_caduceus_ps(*, revision: str = REVISION, device: str | None = None, dty
     return model.to(device).eval()
 
 
+def load_caduceus_ps_for_masked_lm(
+    *, revision: str = REVISION, device: str | None = None, dtype: Any = None
+):
+    """Load Caduceus-PS **with its masked-LM head** (``AutoModelForMaskedLM``) at the pin.
+
+    The checkpoint registers ``CaduceusForMaskedLM`` (a weight-tied RCPS LM head over the
+    char vocab) via its ``auto_map``, so ``AutoModelForMaskedLM.from_pretrained(...,
+    trust_remote_code=True)`` returns the *same* MLM head the backbone was pretrained with —
+    this is what makes the P1-11 GTDB pass a true *continued* pretraining (ADR-0002 D7
+    fallback #2), not a fresh-head fine-tune. Identical revision-pin discipline to
+    :func:`load_caduceus_ps`: the pin is validated **before** the remote-code import
+    (``trust_remote_code=True`` executes the modeling code at ``revision``).
+
+    A forward still requires CUDA (the packaged Mamba needs ``selective_scan_cuda``;
+    ADR-0002 A2 C2). Returned in ``.train()``-able state (**not** forced ``.eval()``, unlike
+    :func:`load_caduceus_ps`) since the caller continues pretraining.
+
+    NOTE: the model's *built-in* MLM loss uses ``ignore_index = config.pad_token_id`` (the
+    ``[PAD]`` id, 4), **not** the HF-standard ``-100`` — so the P1-11 harness computes its
+    own ``-100``-ignored MLM cross-entropy over ``output.logits`` rather than passing
+    ``labels`` (see :func:`tbox_finder.train.continued_pretrain.mlm_cross_entropy`).
+
+    Returns:
+        The ``CaduceusForMaskedLM`` model on ``device`` (training mode).
+    """
+    _require_pinned_revision(revision)
+    import torch  # lazy
+    from transformers import AutoModelForMaskedLM  # lazy
+
+    if device is None:
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+    model = AutoModelForMaskedLM.from_pretrained(REPO_ID, revision=revision, trust_remote_code=True)
+    if dtype is not None:
+        model = model.to(dtype=dtype)
+    return model.to(device)
+
+
 def load_tokenizer(*, revision: str = REVISION):
     """Load the Caduceus char tokenizer at the code-pinned ``revision`` (remote code)."""
     _require_pinned_revision(revision)

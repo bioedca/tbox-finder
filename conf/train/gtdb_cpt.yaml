@@ -1,0 +1,61 @@
+# @package _global_
+# train/gtdb_cpt.yaml — P1-11 probe-triggered GTDB-prokaryotic continued-pretraining (MLM)
+# pass (PRD §10.1 transfer fallback #2; ADR-0002 D7; ADR-0003 D7 budget).
+#
+# `@package _global_` lifts this nested (conf/train/) primary config's keys to the root so
+# `cfg.seed`/`cfg.max_steps`/… are top-level; the `/model` `/tracking` `/optim` groups keep
+# their own group packages (the P1-07 stage1_smoke.yaml precedent + MEMORY note that a
+# conf/<group>/ primary config needs `@package _global_` + leading-slash `/group` defaults or
+# it silently fails to compose).
+#
+# Drives: src/tbox_finder/train/continued_pretrain.py::main (Hydra entry) → run_cpt.
+#
+# PROBE-TRIGGERED, NOT AUTO-RUN: a passing P1-07 (the measured verdict was GO) skips this
+# pass entirely; it is never part of `rule all`. Submitted only after a compute-budget §7
+# sign-off + SLURM submit-ack (CLAUDE.md §7/§9.3).
+
+defaults:
+  - _self_
+  - /model: caduceus_stage1
+  - /tracking: wandb
+  - /optim: adamw_cpt
+
+# Determinism (§8.3).
+seed: 42
+pythonhashseed: 0
+
+# Budget knobs — PROVISIONAL bounds (ADR-0003 D7: the training/sweep GPU-hour budget's
+# NUMERIC value is frozen at P1 FIRST MEASUREMENT). max_steps is finalized at trigger-time by
+# a sizing smoke against the pre-registered aggregate bound; it is NOT a pinned GPU-hour
+# figure (§10.3 — no fabricated compute number).
+max_steps: 5000
+warmup_steps: 100
+log_every: 50
+grad_clip: 1.0
+
+# Masking scheme — BERT-style MLM (implementer choice; PRD/ADR-0002/ADR-0003/imp pin none).
+masking:
+  mlm_probability: 0.15       # fraction of maskable nucleotides selected
+  mask_replace_prob: 0.80     # of selected → [MASK]
+  random_replace_prob: 0.10   # of selected → random base (remainder 0.10 → kept unchanged)
+
+# Data — the GTDB-prokaryotic DNA shard is a REQUIRED external input sourced at trigger-time
+# (a checksummed download, §10.2); it does NOT exist in the repo and is NOT fabricated here.
+# The harness (and the sbatch) fail loud if the shard is absent.
+data:
+  shard_path: data/interim/gtdb_cpt/shard.fasta
+  window_nt: 1024
+  stride_nt: 512
+  min_window_nt: 128
+
+# Outputs.
+checkpoint_dir: checkpoints/p1/caduceus_gtdb_cpt
+report_path: reports/p1/gtdb_cpt.json
+save_checkpoint: true
+
+# Hydra: keep the run CWD = the launch dir (repo root) so relative in/out paths resolve; no
+# per-run output subdir (the sbatch manages node-local scratch + artifact publish).
+hydra:
+  run:
+    dir: .
+  output_subdir: null

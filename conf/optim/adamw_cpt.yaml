@@ -1,0 +1,8 @@
+# optim/adamw_cpt.yaml — AdamW for the P1-11 GTDB continued-pretraining pass.
+# A lower LR than the fine-tune smoke (adamw_smoke: 3e-4): continued pretraining nudges an
+# already-pretrained backbone toward the prokaryotic domain, so a gentler step avoids
+# washing out the human-reference-pretrained representations (implementer choice; ADR-0002
+# pins no CPT LR — see continued_pretrain.py).
+name: adamw
+lr: 1.0e-4
+weight_decay: 0.01
