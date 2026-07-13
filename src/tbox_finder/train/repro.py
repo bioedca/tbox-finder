@@ -18,9 +18,14 @@ reproducibility at **two levels** (ADR-0002 A7):
 1. **Primary (load-bearing):** the **go/no-go verdict reproduces** (re-run == the
    reference verdict, ``GO``). This is the exit-gate's meaning of *reproducible*: the
    transfer decision that gates P2 is stable under a seeded re-run.
-2. **Secondary (determinism health-check):** the **max absolute difference** over every
-   reported per-nt F1 metric (the ``metrics`` block flattened by :func:`flatten_metrics` —
-   14 scalars) is **≤ τ** (:data:`REPRO_TOLERANCE`).
+2. **Secondary (determinism health-check):** the **max absolute difference** over the
+   **go/no-go-decision** metrics (:data:`GATED_METRIC_KEYS` — ``min_core_f1``, the 3 core
+   ``per_element_f1.*``, ``macro_f1``, ``micro_f1``) is **≤ τ** (:data:`REPRO_TOLERANCE`).
+   The remaining per-class F1s (:data:`DIAGNOSTIC_METRIC_KEYS`) are reported as a
+   **determinism diagnostic** (max |Δ| surfaced), **not** τ-gated — the rarer non-core
+   classes have larger per-argmax-flip F1 sensitivity under the irreducibly-nondeterministic
+   Mamba kernel (§8.3). All 14 metrics must still be **present** (a structural fail-closed
+   floor); only the numeric τ comparison is scoped to the decision metrics.
 
 The gate also asserts the two runs share the **same config** (seed / epochs / optimiser /
 loss / rc-combine / … ) and the **same pinned backbone revision** — a re-run under a
@@ -48,14 +53,9 @@ from tbox_finder.labels import CLASS_ORDER, CORE_ELEMENTS
 # Pinned constants (ADR-0002 A7). Single-sourced in code — never re-declared in the test
 # or loosened by config.
 # --------------------------------------------------------------------------------------
-#: ADR-0002 A7 metric-level reproducibility tolerance (absolute F1). max|Δ| over the
-#: reported per-nt F1 metrics must be ≤ this for the secondary determinism health-check to
-#: pass. Not weakenable on a fail (§8.5/§10.3).
-#:
-#: The compared metrics are the report ``metrics`` block flattened to dotted keys
-#: (:func:`flatten_metrics`): ``min_core_f1``, the 3 ``per_element_f1.*`` core elements, the
-#: 8 ``per_class_f1.*`` classes, ``macro_f1``, ``micro_f1`` (14 scalars). The **verdict** is
-#: compared separately (the primary gate), not as a numeric metric.
+#: ADR-0002 A7 metric-level reproducibility tolerance (absolute F1). Applies to the
+#: **go/no-go-decision** metrics (:data:`GATED_METRIC_KEYS`): max|Δ| over them must be ≤ this
+#: for the secondary determinism health-check to pass. Not weakenable on a fail (§8.5/§10.3).
 REPRO_TOLERANCE: float = 1e-3
 
 #: Sentinel for an absent value (a report block/key that isn't there). Distinguished from a
@@ -63,16 +63,27 @@ REPRO_TOLERANCE: float = 1e-3
 #: another missing one (``None == None`` would fail open).
 _MISSING = object()
 
-#: The exact per-nt F1 metrics the gate requires present + reproduced (ADR-0002 A7: "14
-#: scalars"), as flattened dotted keys. Single-sourced from the label vocabulary so a class
-#: rename can't silently drift this floor. A report missing any of these — **even if both
-#: reports omit it symmetrically** — voids the secondary tolerance check (fail-closed): the
-#: reference report alone must not be able to shrink the graded metric set.
-EXPECTED_METRIC_KEYS: tuple[str, ...] = (
-    ("macro_f1", "micro_f1", "min_core_f1")
-    + tuple(f"per_element_f1.{name}" for name in CORE_ELEMENTS)
-    + tuple(f"per_class_f1.{name}" for name in CLASS_ORDER)
+#: The **go/no-go-decision** metrics the secondary τ gate is scoped to (ADR-0002 A7, scoped by
+#: the P1-08 re-sign-off): the ``min_core_f1`` the verdict rests on (the min over the 3 core
+#: elements, ADR-0004 D6), the 3 core ``per_element_f1.*``, and the ``macro_f1``/``micro_f1``
+#: aggregates. Single-sourced from the label vocabulary. These are exactly the quantities the
+#: go/no-go decision depends on, and they must reproduce within τ.
+GATED_METRIC_KEYS: tuple[str, ...] = ("macro_f1", "micro_f1", "min_core_f1") + tuple(
+    f"per_element_f1.{name}" for name in CORE_ELEMENTS
 )
+
+#: The remaining reported per-class F1s — surfaced as a **determinism diagnostic** (their max
+#: |Δ| is reported), **not** τ-gated: the rarer non-core classes (e.g. ``Stem_III``) span far
+#: fewer positions, so a single argmax flip under the irreducibly-nondeterministic Mamba
+#: kernel (§8.3, no deterministic variant) moves their F1 more than the core elements'. Their
+#: drift is disclosed, not gated at the decision τ (P1-08 re-sign-off).
+DIAGNOSTIC_METRIC_KEYS: tuple[str, ...] = tuple(f"per_class_f1.{name}" for name in CLASS_ORDER)
+
+#: The full reported metric set (14 scalars = gated ∪ diagnostic). The gate requires **all**
+#: of these **present + finite** in both reports (a structural fail-closed floor — a truncated
+#: report, even a symmetric reduction, voids the gate); the numeric τ comparison is scoped to
+#: :data:`GATED_METRIC_KEYS`, the rest reported as the diagnostic.
+EXPECTED_METRIC_KEYS: tuple[str, ...] = GATED_METRIC_KEYS + DIAGNOSTIC_METRIC_KEYS
 
 #: Config knobs that must be identical for the re-run to be a reproducibility test (the
 #: :meth:`SmokeConfig.sanitized_knobs` set — paths are intentionally excluded, only the run
@@ -206,17 +217,21 @@ def check_reproducibility(
     - ``config_ok`` / ``config_mismatches`` — the runs share the same config + pinned backbone.
     - ``per_metric_abs_diff`` — ``{key: |Δ| or None}`` over both reports' metrics.
     - ``all_metrics_comparable`` — every metric finite in both (no ``None``).
-    - ``expected_metrics_present`` — every one of :data:`EXPECTED_METRIC_KEYS` is present +
-      comparable (a symmetric metric-set reduction — both reports missing the same metric —
-      is caught here, not silently passed).
-    - ``max_abs_diff`` — max finite ``|Δ|`` (``None`` if nothing comparable).
-    - ``within_tolerance`` — all metrics comparable, the full expected set present, **and**
-      ``max_abs_diff ≤ tolerance`` (**secondary**).
+    - ``expected_metrics_present`` — the flattened metric set is **exactly** the 14
+      :data:`EXPECTED_METRIC_KEYS` and every one finite in both (a structural floor: a
+      truncation, a symmetric reduction, or an extra/renamed key is caught here, not passed).
+    - ``max_abs_diff`` — max finite ``|Δ|`` over **all** metrics (for transparency).
+    - ``gated_max_abs_diff`` — max ``|Δ|`` over :data:`GATED_METRIC_KEYS` (the τ-gated quantity).
+    - ``diagnostic_max_abs_diff`` — max ``|Δ|`` over :data:`DIAGNOSTIC_METRIC_KEYS` (reported,
+      **not** τ-gated: the rarer non-core per-class F1 determinism diagnostic).
+    - ``within_tolerance`` — the full expected set present **and** ``gated_max_abs_diff ≤
+      tolerance`` (**secondary**; scoped to the decision metrics, ADR-0002 A7 P1-08 re-sign-off).
     - ``reproducible`` — ``verdict_reproduces AND config_ok AND within_tolerance``.
 
-    Any gap (absent verdict/metric, non-finite value, a missing expected metric, a mismatched
-    metric key set, differing config) forces ``reproducible = False`` — it never certifies
-    reproducibility on missing evidence (§10.3).
+    Any gap (absent verdict/gated-metric, non-finite value, a missing expected metric, a
+    mismatched metric key set, differing config) forces ``reproducible = False`` — it never
+    certifies reproducibility on missing evidence (§10.3). A large diagnostic drift alone does
+    **not** fail the gate (it is disclosed, not gated).
     """
     ref_verdict = verdict_of(ref)
     rerun_verdict = verdict_of(rerun)
@@ -228,15 +243,22 @@ def check_reproducibility(
     diffs = metric_abs_diffs(ref, rerun)
     finite = [d for d in diffs.values() if d is not None]
     all_comparable = bool(diffs) and all(d is not None for d in diffs.values())
-    # The full ADR-0002 A7 metric set must be present + comparable — a report that drops a
-    # graded metric (even symmetrically) cannot certify reproducibility over the remainder.
-    expected_present = all(diffs.get(k) is not None for k in EXPECTED_METRIC_KEYS)
+    # Structural floor: the flattened metric set must be EXACTLY the 14 expected keys and every
+    # one finite in both reports — a report that drops a metric (even symmetrically) or gains an
+    # extra/renamed one voids the gate. The numeric τ comparison is then scoped to the
+    # go/no-go-decision metrics (GATED_METRIC_KEYS); the per-class remainder is reported as a
+    # determinism diagnostic, not τ-gated (P1-08 re-sign-off).
+    metric_keyset_ok = set(diffs) == set(EXPECTED_METRIC_KEYS)
+    expected_present = metric_keyset_ok and all_comparable
+    gated_finite = [diffs.get(k) for k in GATED_METRIC_KEYS if diffs.get(k) is not None]
+    diagnostic_finite = [diffs.get(k) for k in DIAGNOSTIC_METRIC_KEYS if diffs.get(k) is not None]
     max_abs_diff = max(finite) if finite else None
+    gated_max_abs_diff = max(gated_finite) if gated_finite else None
+    diagnostic_max_abs_diff = max(diagnostic_finite) if diagnostic_finite else None
     within_tolerance = (
-        all_comparable
-        and expected_present
-        and max_abs_diff is not None
-        and max_abs_diff <= float(tolerance)
+        expected_present
+        and gated_max_abs_diff is not None
+        and gated_max_abs_diff <= float(tolerance)
     )
 
     return {
@@ -248,8 +270,11 @@ def check_reproducibility(
         "config_mismatches": mismatches,
         "per_metric_abs_diff": diffs,
         "all_metrics_comparable": bool(all_comparable),
+        "metric_keyset_ok": bool(metric_keyset_ok),
         "expected_metrics_present": bool(expected_present),
         "max_abs_diff": max_abs_diff,
+        "gated_max_abs_diff": gated_max_abs_diff,
+        "diagnostic_max_abs_diff": diagnostic_max_abs_diff,
         "within_tolerance": bool(within_tolerance),
         "reproducible": bool(verdict_reproduces and config_ok and within_tolerance),
     }

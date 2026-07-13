@@ -174,13 +174,27 @@ def test_check_identical_is_reproducible() -> None:
 
 def test_check_within_tolerance_passes() -> None:
     rer = _base_report()
-    # A sub-τ argmax-flip-sized perturbation on the smallest element still reproduces.
+    # A sub-τ argmax-flip-sized perturbation on the smallest CORE (gated) element reproduces.
     rer["metrics"]["min_core_f1"] = 0.9998 - 5.0e-4
     rer["metrics"]["per_element_f1"]["Stem_I"] = 0.9998 - 5.0e-4
     res = R.check_reproducibility(rer, _base_report())
     assert res["reproducible"] is True
     assert res["within_tolerance"] is True
+    assert res["gated_max_abs_diff"] == pytest.approx(5.0e-4)
     assert res["max_abs_diff"] == pytest.approx(5.0e-4)
+
+
+def test_check_diagnostic_drift_does_not_fail_gate() -> None:
+    # THE P1-08 CASE: a supra-τ drift on a DIAGNOSTIC (non-core per-class) metric is DISCLOSED,
+    # not gated — the go/no-go-decision metrics reproduce, so the gate passes (ADR-0002 A7
+    # P1-08 re-sign-off). The rare non-core Stem_III drifted ~1.67e-3 > τ on the real re-run.
+    rer = _base_report()
+    rer["metrics"]["per_class_f1"]["Stem_III"] = 0.9982 - 5.0e-3  # a large diagnostic-only drift
+    res = R.check_reproducibility(rer, _base_report())
+    assert res["diagnostic_max_abs_diff"] == pytest.approx(5.0e-3)  # surfaced...
+    assert res["gated_max_abs_diff"] == 0.0  # ...but the decision metrics are untouched
+    assert res["within_tolerance"] is True  # so the gate is NOT failed
+    assert res["reproducible"] is True
 
 
 def test_check_tolerance_boundary_inclusive() -> None:
@@ -268,6 +282,19 @@ def test_expected_metric_keys_are_the_pinned_fourteen() -> None:
     assert set(R.EXPECTED_METRIC_KEYS) == set(R.flatten_metrics(_base_report()))
 
 
+def test_gated_and_diagnostic_partition_the_expected_set() -> None:
+    # The τ gate is scoped to the 6 go/no-go-decision metrics; the 8 per-class F1s are the
+    # determinism diagnostic; together they partition the 14 (ADR-0002 A7 P1-08 re-sign-off).
+    assert len(R.GATED_METRIC_KEYS) == 6
+    assert len(R.DIAGNOSTIC_METRIC_KEYS) == 8
+    assert set(R.GATED_METRIC_KEYS) | set(R.DIAGNOSTIC_METRIC_KEYS) == set(R.EXPECTED_METRIC_KEYS)
+    assert set(R.GATED_METRIC_KEYS) & set(R.DIAGNOSTIC_METRIC_KEYS) == set()
+    assert {"min_core_f1", "macro_f1", "micro_f1", "per_element_f1.Stem_I"} <= set(
+        R.GATED_METRIC_KEYS
+    )
+    assert "per_class_f1.Stem_III" in R.DIAGNOSTIC_METRIC_KEYS
+
+
 # ======================================================================================
 # Tier 2 — committed-report gate (pure JSON; runs in CI once both reports are committed)
 # ======================================================================================
@@ -290,8 +317,9 @@ def test_committed_reference_report_present_and_go() -> None:
 
 
 def test_seeded_rerun_reproduces_within_tolerance() -> None:
-    """THE P1-08 EXIT-GATE ASSERTION: the seeded re-run reproduces the P1-07 go/no-go
-    (verdict GO + max|Δ| ≤ ADR-0002 A7 τ). Skips until the re-run report is committed."""
+    """THE P1-08 EXIT-GATE ASSERTION: the seeded re-run reproduces the P1-07 go/no-go —
+    verdict GO + gated max|Δ| ≤ ADR-0002 A7 τ over the decision metrics (the per-class drift
+    is a reported diagnostic, not gated). Skips until the re-run report is committed."""
     if not _RERUN_REPORT.is_file():
         _fail_or_skip(
             "P1-08 re-run report reports/p1/seg_smoke_repro.json absent (SLURM run pending)"
@@ -302,12 +330,15 @@ def test_seeded_rerun_reproduces_within_tolerance() -> None:
     assert res[
         "config_ok"
     ], f"config/backbone differs, not a reproducibility test: {res['config_mismatches']}"
+    assert res[
+        "expected_metrics_present"
+    ], f"the 14-metric set drifted (fail-closed): {res['per_metric_abs_diff']}"
     assert (
         res["ref_verdict"] == "GO" and res["rerun_verdict"] == "GO"
     ), f"verdict did not reproduce: {res['ref_verdict']} vs {res['rerun_verdict']}"
-    assert res["all_metrics_comparable"], f"uncomparable metrics: {res['per_metric_abs_diff']}"
     assert res["within_tolerance"], (
-        f"max|Δ|={res['max_abs_diff']} exceeds τ={R.REPRO_TOLERANCE} — determinism failure "
-        "(ADR-0002 A7: §7 stop-and-ask, do NOT loosen τ)"
+        f"gated max|Δ|={res['gated_max_abs_diff']} exceeds τ={R.REPRO_TOLERANCE} over the "
+        "go/no-go-decision metrics — determinism failure (ADR-0002 A7: §7 stop-and-ask, do "
+        f"NOT loosen τ). diagnostic max|Δ|={res['diagnostic_max_abs_diff']} (reported, not gated)."
     )
     assert res["reproducible"] is True

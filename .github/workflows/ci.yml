@@ -116,6 +116,10 @@ jobs:
           # Same anti-rot contract for the §8.4 eval-gate harness: with the science stack
           # installed above, a missing stack/fixture FAILS (not skips). tests/ml/test_eval_gate.py.
           TBOX_REQUIRE_EVAL_GATE: "1"
+          # Same anti-rot contract for the ADR-0002 A7 reproducibility gate: both the P1-07 and
+          # the P1-08 re-run reports are committed, so a missing/malformed one FAILS (not skips).
+          # tests/ml/test_smoke_reproducible.py (a pure-JSON comparison, no torch).
+          TBOX_REQUIRE_REPRO_GATE: "1"
         run: pytest tests/unit tests/golden tests/ml
 
   docker:
