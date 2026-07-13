@@ -484,3 +484,45 @@ pinned `transformers` 4.57.5, confirming the `AutoModelForMaskedLM(...trust_remo
 **Commit.** `<SHA>` on `p1-10-nt-backbone` (feature branch → squash PR). **Builds the PRD §18.1 P1 exit-gate item "Transfer
 fallback ladder executable — NT-multispecies backbone drop-in built" (P1-10).** No DVC artifact (provenance git-tracked; NT
 weights fetched from HF by pinned revision, not stored).
+
+## Step P1-11 — 2026-07-13: Author the probe-triggered GTDB continued-pretraining (MLM) fallback harness
+**Inputs.** Caduceus-PS backbone (P1-02, loaded with its native MLM head at the pinned revision); an *expected*
+GTDB-prokaryotic DNA shard (`data/interim/gtdb_cpt/shard.fasta[.gz]` — does **not** exist in the repo, sourced at
+trigger-time, asserted-not-fabricated §10.2/§10.3); `tbox_finder.train.stage1_smoke` thresholds (re-clear gate reuse).
+**Process.** ADR-0002 D7 fallback #2 (full-FT default → **GTDB continued-pretraining** → NT-multispecies) is
+**probe-triggered and — the P1-07 verdict being GO — NOT run**; the deliverable is the *authored, executable* harness
+(PRD §18.1 fallback-triggered gate, operationalized in imp.md L902 as "authored + probe-triggered only"). Built
+`src/tbox_finder/train/continued_pretrain.py::{run_cpt,main}` — a BERT-style masked-LM continued-pretraining loop
+(15% mask / 80-10-10, *implementer choice*; PRD/ADR-0002/ADR-0003/imp pin no objective/rate) over the Caduceus
+`AutoModelForMaskedLM`, computing its own **`-100`-ignored** MLM cross-entropy (the built-in loss ignores `[PAD]`=4 not
+`-100`), a per-epoch-shuffled DDP-disjoint window schedule (`window_index_stream` reusing `_epoch_order`), a linear
+warmup+decay LR schedule, `accelerate` multi-GPU DDP, and a fail-closed self-validating report; added
+`load_caduceus_ps_for_masked_lm` to `caduceus_backbone.py` (reusing the P1-02 revision-guard-before-remote-import),
+`conf/train/gtdb_cpt.yaml` (`@package _global_`; seed 42) + `conf/optim/adamw_cpt.yaml` (lr 1e-4 < the 3e-4 fine-tune),
+and `slurm/p1/gtdb_continued_pretrain.sbatch` (gpu, gres a4000:4, `accelerate launch`, node-local `/tmp` build → move
+final checkpoint to HOME, `PYTHONPATH=src`, EXIT-trap cleanup, DONE-marker gate). **Outputs.**
+`src/tbox_finder/train/continued_pretrain.py` + `caduceus_backbone.py` (+loader) + `conf/train/gtdb_cpt.yaml` +
+`conf/optim/adamw_cpt.yaml` + `slurm/p1/gtdb_continued_pretrain.sbatch` + `tests/unit/test_continued_pretrain.py`
+(51 tests: bare masking/window/validator/conf-drift/not-auto-run tier + torch CPU MLM-CE/train-loop/scheduler/
+write-outputs-roundtrip/RCE-guard tier). No measured artifact + **no ADR-0002 amendment** (the amendment records an
+OUTCOME, moot when not run; the P1-10 authored-fallback precedent). **Validation.** Authoring gate PASSED — 51 tests
+green (45 bare + 6 torch under `tbox-ml-dna` CPU), full bare unit suite **583 passed** (no regression), ruff 0.15.15 +
+black 25.11.0 clean, Hydra `train/gtdb_cpt` composes + builds a `CPTConfig`, `accelerate launch` flags valid for
+accelerate 1.12.0, sbatch `bash -n` clean. The **runtime** gate (CPT completes; re-run go/no-go min-core-F1 improves vs
+P1-07 & clears ADR-0002 A6 ≥ 0.30) is **moot unless triggered**. **Decisions.** (1) **MLM objective + 15% masking rate +
+budget are implementer choices** — PRD §10.1/ADR-0002 D7/ADR-0003 D7/imp.md pin none; the GPU-hour budget is a **RULE
+with numeric frozen at P1 first measurement** (ADR-0003 D7), so `max_steps` + sbatch `--time` are recorded as
+**provisional** bounds and **no GPU-hour figure is fabricated** (§10.3). (2) Reused the native `CaduceusForMaskedLM` head
+(true *continued* pretraining) rather than a fresh Linear head; compute own `-100`-ignored MLM CE. (3) **Pre-commit
+adversarial 6-lens review workflow** (correctness / ADR-PRD / test-adequacy / reuse / honesty / slurm-safety →
+adversarial refute; 25 agents) → **17 confirmed / 19 raw**; fixed all real defects — a **major** missing `PYTHONPATH=src`
+(accelerate workers would `ModuleNotFoundError`), a warmup dead-knob (→ real LR scheduler + honest `optim.lr_schedule`),
+`_epoch_order` dead code (→ wired into the shuffled DDP schedule), sbatch `$BUILD` EXIT-trap + non-fatal cp + derived
+`--num_processes`, and 8 test bite-gaps (label-is-original, overlapping-stride, schema_version, block-missing/`_prob01`/
+`masked_token_count` mutators, `min_window_nt` pin, `_write_outputs` round-trip). (4) **⚠️ Flagged, NOT resolved (§7 item
+2):** ADR-0002 **A6 mislabels this pass "P1-09"** (canonical = P1-11; imp.md L814); a sign-off-gated ADR hygiene
+amendment (queued for the P1 exit gate, already noted in P1-09). context7 §3.3: `/huggingface/accelerate` (Accelerator
+prepare/backward/clip) + `/huggingface/transformers` (MaskedLMOutput.logits `(B,L,vocab)`) consulted; cross-checked
+against installed accelerate 1.12.0 / transformers 4.57.5. Cross-link **PRD §10.1/§15/§18.1**, **ADR-0002 D7/A6**,
+**ADR-0003 D7**. **Commit.** `<SHA>` on `p1-11-gtdb-cpt` (feature branch → squash PR). No DVC artifact (harness authored;
+the CPT checkpoint is produced only IF triggered).
