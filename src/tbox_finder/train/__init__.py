@@ -7,4 +7,4 @@ path); only the GPU/training tiers pull the ML stack.
 
 from __future__ import annotations
 
-__all__ = ["stage1_smoke"]
+__all__ = ["repro", "stage1_smoke"]

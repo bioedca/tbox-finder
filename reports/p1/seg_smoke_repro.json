@@ -1,0 +1,76 @@
+{
+  "adr": "ADR-0002",
+  "advisory_prefilter": {
+    "auroc": 0.9920728990887614,
+    "binding": false,
+    "path": "reports/p1/prefilter_separability.json",
+    "verdict": "PASS"
+  },
+  "backbone": {
+    "pretraining_domain": "human reference genome",
+    "repo_id": "kuleshov-group/caduceus-ps_seqlen-131k_d_model-256_n_layer-16",
+    "revision": "d89eeb853136ea64da7feb3d0c8e909771b17ae6"
+  },
+  "baseline": {
+    "kind": "background_only",
+    "min_core_f1": 0.0
+  },
+  "binding": true,
+  "config": {
+    "batch_size": 1,
+    "dropout": 0.0,
+    "epochs": 20,
+    "gamma": 2.0,
+    "grad_clip": 1.0,
+    "lr": 0.0003,
+    "rc_combine": "concat",
+    "seed": 42,
+    "use_crf": false,
+    "weight_decay": 0.01
+  },
+  "data": {
+    "eval_split": "fine_tune_set",
+    "held_out_only": true,
+    "labels_npy": "data/interim/p1_seg_smoke/labels.npy",
+    "n_valid_positions": 93764,
+    "n_windows": 300,
+    "windows_parquet": "data/interim/p1_seg_smoke/windows.parquet"
+  },
+  "gate": {
+    "baseline_min_core_f1": 0.0,
+    "binding": true,
+    "criterion": "per-nt F1 over the 3 core elements {Stem_I, Specifier, Antiterminator_Tbox_seq} clearly above the background-only baseline (ADR-0002 D7) \u2014 NOT the 0.80 GATE-4 floor (graded at P2 on the full split)",
+    "gate4_floor_reference": 0.8,
+    "go_threshold": 0.3,
+    "min_core_f1": 0.999820003599928,
+    "nogo_threshold": 0.1,
+    "thresholds_provisional": true,
+    "verdict": "GO"
+  },
+  "generated_at_utc": "2026-07-13T01:55:28.654543+00:00",
+  "generated_by": "src/tbox_finder/train/stage1_smoke.py",
+  "measured": true,
+  "metrics": {
+    "macro_f1": 0.99985105991467,
+    "micro_f1": 0.999808028667719,
+    "min_core_f1": 0.999820003599928,
+    "per_class_f1": {
+      "Antiterminator_Tbox_seq": 0.999820003599928,
+      "Discriminator": 1.0,
+      "Specifier": 1.0,
+      "Stem_I": 0.9999791584168733,
+      "Stem_II": 0.9993293734431884,
+      "Stem_III": 0.9999203250736993,
+      "Terminator": 1.0,
+      "background": 0.999759618783671
+    },
+    "per_element_f1": {
+      "Antiterminator_Tbox_seq": 0.999820003599928,
+      "Specifier": 1.0,
+      "Stem_I": 0.9999791584168733
+    }
+  },
+  "schema_version": "1",
+  "step": "P1-07",
+  "wandb_run_id": "v8kduaep"
+}
