@@ -189,8 +189,11 @@ def parse_ct(text: str, record_id: str = "") -> CtRecord:
         seq_chars.append(base)
         if j > 0:
             pair_map[i] = j
-    # symmetry: every i->j must have j->i (single-structure invariant)
+    # symmetry: every i->j must have j->i (single-structure invariant); a
+    # residue may not pair to itself (would silently vanish under the i<j filter)
     for i, j in pair_map.items():
+        if i == j:
+            raise ValueError(f"{record_id!r}: residue {i} pairs to itself")
         if pair_map.get(j) != i:
             raise ValueError(f"{record_id!r}: asymmetric pairing {i}->{j}")
     pairs = tuple(sorted((min(i, j), max(i, j)) for i, j in pair_map.items() if i < j))

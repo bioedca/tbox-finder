@@ -168,6 +168,14 @@ def test_parse_ct_rejects_noncontiguous_index() -> None:
         al.parse_ct(bad, record_id="jump")
 
 
+def test_parse_ct_rejects_self_pairing() -> None:
+    # a residue that pairs to itself (j == i) must fail loud, not silently vanish
+    # under the i<j pair filter
+    bad = "2\ttoy\n1\tG\t0\t2\t1\t1\n2\tC\t1\t0\t0\t2\n"  # residue 1 pairs to 1
+    with pytest.raises(ValueError, match="pairs to itself"):
+        al.parse_ct(bad, record_id="selfpair")
+
+
 def test_parse_ct_rejects_empty_file() -> None:
     with pytest.raises(ValueError, match="empty .ct file"):
         al.parse_ct("   \n\t\n", record_id="blank")
