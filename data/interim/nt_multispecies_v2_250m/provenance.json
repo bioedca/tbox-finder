@@ -1,0 +1,105 @@
+{
+  "adr": "ADR-0002 (D7 rung 3; D2 trust_remote_code ceiling; A4/A6)",
+  "env_lock_hash": "70b66801eeafe1fdec4c19e667de1590e4471143bca36248fe40f16e53bb5003",
+  "extra": {
+    "checkpoint": {
+      "config_transformers_version": "4.32.0.dev0",
+      "hidden_dim": 768,
+      "hub_url": "https://huggingface.co/InstaDeepAI/nucleotide-transformer-v2-250m-multi-species",
+      "model_type": "esm",
+      "n_layer": 24,
+      "param_count": 235120780,
+      "repo_id": "InstaDeepAI/nucleotide-transformer-v2-250m-multi-species",
+      "revision": "c0f0359229f36ff6bc3a021247eefe0a9c344bd1",
+      "role": "Stage-1 transfer-fallback backbone (ADR-0002 D7 rung 3); NOT wired as default",
+      "torch_device": "cpu",
+      "trust_remote_code": true
+    },
+    "env": {
+      "cuda_available": true,
+      "device_capability": [
+        8,
+        9
+      ],
+      "device_name": "NVIDIA GeForce RTX 4060 Laptop GPU",
+      "python": "3.12.13",
+      "torch": "2.7.1+cu128",
+      "transformers": "4.57.5"
+    },
+    "gate": {
+      "hidden_dim_ok": true,
+      "load_ok": true,
+      "overall_pass": true,
+      "seg_head_dropin_ok": true,
+      "segmenter_dropin_ok": true
+    },
+    "generated_by": "src/tbox_finder/models/nt_backbone.py",
+    "interface_parity": {
+      "dna_len_nt": 300,
+      "hidden_dtype": "torch.float32",
+      "hidden_shape": [
+        1,
+        51,
+        768
+      ],
+      "kmer_collapse_ratio": 5.8824,
+      "n_nucleotides": 300,
+      "n_tokens": 51,
+      "num_classes": 8,
+      "seed": 42,
+      "seg_head_logits_finite": true,
+      "seg_head_logits_shape": [
+        1,
+        51,
+        8
+      ],
+      "segmenter_logits_finite": true,
+      "segmenter_logits_shape": [
+        1,
+        51,
+        8
+      ],
+      "segmenter_rc_combine": "concat"
+    },
+    "measured": true,
+    "pretraining": {
+      "archaea_included": null,
+      "citations": [
+        {
+          "accessed": "2026-07-13",
+          "id": "PMID:39609566; PMCID:PMC11810778; DOI:10.1038/s41592-024-02523-z",
+          "quote": "we randomly selected one genome at the genus level from each of the main groupings available in RefSeq (archaea, fungi, vertebrate_mammalian, vertebrate_other, etc.) ... due to the large number of available bacterial genomes, we opted to include only a random subset of them",
+          "source": "Dalla-Torre et al. 2025, Nucleotide Transformer (Nat Methods)",
+          "supports": "multispecies + prokaryote-inclusive (bacteria)"
+        },
+        {
+          "accessed": "2026-07-13",
+          "id": "https://huggingface.co/datasets/InstaDeepAI/multi_species_genomes",
+          "quote": "Bacteria: 667 species / 17.1 B nucleotides (of 850 species total)",
+          "source": "HF dataset card InstaDeepAI/multi_species_genomes (pretraining corpus)",
+          "supports": "prokaryote-inclusive (bacteria)"
+        }
+      ],
+      "collection": "InstaDeepAI multispecies (850 genomes sampled from RefSeq)",
+      "domain_shift_note": "Multispecies + prokaryote-inclusive (bacteria); the domain-shift remedy premise for a prokaryotic scan where the default Caduceus-PS is human-reference pretrained (ADR-0002 D7). Not triggered \u2014 the P1-07 transfer go/no-go returned GO (ADR-0002 A6).",
+      "model_card_states_prokaryotes": false,
+      "prokaryote_basis": "bacteria (667 species / 17.1 B nt of 850)",
+      "prokaryote_inclusive": true
+    },
+    "schema_version": "1",
+    "step": "P1-10",
+    "tokenization": {
+      "caveat": "6-mer tokeniser: L_token ~= L_nt/6, so the per-nt 8-class label scheme (ADR-0004) does NOT align 1:1 with NT tokens. Consuming this backbone at P2 requires a token->nucleotide label broadcast (6x/token); realised only if this fallback is triggered.",
+      "kmer": 6,
+      "max_tokens": 2048
+    }
+  },
+  "generated_at_utc": "2026-07-13T15:41:35.891806+00:00",
+  "git_sha": "4d4884feb0c9d18b484459a88ad3e6c8f3206de4",
+  "inputs": {},
+  "outputs": {},
+  "rule": "src/tbox_finder/models/nt_backbone.py :: main (P1-10, LOCAL)",
+  "schema_version": "1.0",
+  "script": "src/tbox_finder/models/nt_backbone.py",
+  "seed": 42
+}

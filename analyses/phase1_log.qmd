@@ -442,3 +442,45 @@ pattern — no new third-party API surface. Cross-link **PRD §10.1/§18.2/§11*
 **Commit.** `<SHA>` on `p1-09-frozen-seg-probe` (feature branch → squash PR). **Builds the PRD §18.2 P1 exit-gate item
 "Segmentation-head fallback path ready."** No DVC artifact (report git-tracked; the 192 MB embeddings `.npz` is a gitignored
 regenerable intermediate — the P1-05 report-hashes-the-cache precedent).
+
+## Step P1-10 — 2026-07-13: NT-multispecies backbone as a Stage-1 transfer-fallback drop-in (last ADR-0002 D7 rung; built, NOT triggered)
+**Inputs.** The `InstaDeepAI/nucleotide-transformer-v2-250m-multi-species` checkpoint pinned to immutable revision
+`c0f0359229f36ff6bc3a021247eefe0a9c344bd1` (ESM arch, `hidden_size` 768, 24 layers, 6-mer tokeniser, 2048-token/~12 kb
+context, ~235 M params); the P1-03 `SegmentationHead(input_dim)` + P1-04 `Stage1Segmenter.logits_from_hidden` contracts; a
+seeded 300-nt DNA fixture. **Process.** `src/tbox_finder/models/nt_backbone.py::load_nt_multispecies` loads NT as
+`AutoModelForMaskedLM(trust_remote_code=True, output_hidden_states=True)` **under the ml-dna `transformers` 4.57.5 ceiling**
+(ADR-0002 D2/A4), rejecting any non-pinned revision **before** the remote-code import (RCE guard mirroring
+`caduceus_backbone`); `interface_parity` runs a **real CPU forward** (NT is stock ESM — no `selective_scan_cuda`, no GPU) →
+`(1, 51, 768)` final-layer hidden state → feeds it through **both** the direct `SegmentationHead(768)` **and** the existing
+`Stage1Segmenter(rc_combine="concat", d_model=384).logits_from_hidden` (concat = pure identity pass-through; NT is
+single-strand so the RC interpretation does not apply — `d_model=384` only sizes the head to `2*384==768`) → both emit
+`(1, 51, 8)` finite logits; `main` writes a **MEASURED** `provenance.json`. **Outputs.**
+`src/tbox_finder/models/nt_backbone.py` (loader + `hidden_states`/`interface_parity`/`validate_report`/CLI; lazy heavy
+imports → bare-importable) + `conf/model/nt_multispecies.yaml` (pinned spec; not selected by any train config) +
+`tests/unit/test_nt_backbone.py` (**41 tests**: bare-tier validator-bite/pure/conf-drift/not-wired-as-default + gated
+load-tier) + `data/interim/nt_multispecies_v2_250m/provenance.json` (git-tracked, no DVC — weights pulled from HF by
+revision, not stored; 235,120,780 params; **300 nt → 51 tokens = 5.88× k-mer collapse** quantified).
+**Validation.** Unit green — **41 passed** (bare 37 + the 3 load-tier under `TBOX_REQUIRE_NT=1`, HF cache offline + the
+committed-provenance test); `gate.overall_pass=true` (`hidden_dim_ok` ∧ `seg_head_dropin_ok` ∧ `segmenter_dropin_ok`);
+**not wired as default** (a test scans `conf/train/*.yaml`); ruff 0.15.15 + black 25.11.0 clean; full bare unit suite 536
+passed (no regression). **Decisions.** (1) **Checkpoint = v2-250m is an implementer choice** — ADR-0002 pins no NT
+checkpoint (confirmed); v2 (RoPE, ~12 kb context) materially larger than the 7.73 M Caduceus-PS yet laptop/A4000-sized; a
+one-line `REPO_ID`/`REVISION` swap to the 500 m sibling. (2) **§10.1 scientific-evidence gate CLEARED** with **≥2
+independent agreeing authoritative sources** for the asserted claim *multispecies + prokaryote-inclusive via **bacteria***:
+the peer-reviewed paper (**PMID:39609566; DOI:10.1038/s41592-024-02523-z**, Methods "Multispecies dataset") + the HF
+pretraining-corpus dataset card `InstaDeepAI/multi_species_genomes` (Bacteria 667 species / 17.1 B nt of 850). **Archaea is
+NOT asserted** (unresolved — no corpus-card row; a validator rule forbids `archaea_included=True`) and the per-checkpoint
+**model cards are silent** on prokaryotes (recorded `model_card_states_prokaryotes=False`) — §10.3 no-overclaim; cleared
+autonomously per §10.1 (agreement ⇒ proceed) + the P1-02 precedent. (3) **k-mer caveat documented** (load-bearing for P2):
+the 6-mer tokeniser makes the seg head per-6-mer-token, so the ADR-0004 per-nt 8-class scheme does **not** align 1:1 with NT
+tokens — a token→nt label broadcast is a P2-if-triggered concern, not built here. (4) **Pre-commit adversarial 5-lens review
+workflow** (correctness / ADR-PRD faithfulness / test-adequacy / reuse-integration / scientific-honesty → adversarial
+verify; 6 agents) → **1 confirmed finding (nit), fixed** before push (the conf↔code drift-guard omitted `max_tokens`, the one
+echoed checkpoint scalar left unguarded → added the assert), 4 lenses clean, 0 refuted survivors. context7 §3.3:
+transformers/huggingface_hub quota-blocked → the **installed-library cross-check substitutes** (the NT forward ran under the
+pinned `transformers` 4.57.5, confirming the `AutoModelForMaskedLM(...trust_remote_code=True, output_hidden_states=True)` API
++ `hidden_states[-1]` extraction — the P1-02 precedent). Cross-link **PRD §10.1/§18.1**, **ADR-0002 D7/D2/A4/A6**,
+**ADR-0004 D1** (the 8-class scheme the head consumes).
+**Commit.** `<SHA>` on `p1-10-nt-backbone` (feature branch → squash PR). **Builds the PRD §18.1 P1 exit-gate item "Transfer
+fallback ladder executable — NT-multispecies backbone drop-in built" (P1-10).** No DVC artifact (provenance git-tracked; NT
+weights fetched from HF by pinned revision, not stored).
