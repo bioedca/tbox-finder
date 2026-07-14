@@ -1,5 +1,5 @@
 # ml-rna env — Stage-2 RNA backbone (RiNALMo via multimolecule): GPU training / eval / scan.
-# THE load-bearing RNA-side ML stack (ADR-0002 D2 + D3 + D5/A4). Runtime target:
+# THE load-bearing RNA-side ML stack (ADR-0002 D2 + D3 + D5/A4/A8). Runtime target:
 # cluster RTX A4000 = Ampere sm_86, CUDA 12.x, driver 590.x (PRD §15). NOT the laptop.
 #
 # ==========================================================================================
@@ -92,7 +92,14 @@ dependencies:
     - flash-attn @ https://github.com/Dao-AILab/flash-attention/releases/download/v2.8.3.post1/flash_attn-2.8.3.post1+cu12torch2.7cxx11abiTRUE-cp312-cp312-linux_x86_64.whl
     - causal-conv1d @ https://github.com/Dao-AILab/causal-conv1d/releases/download/v1.6.2.post1/causal_conv1d-1.6.2.post1+cu12torch2.7cxx11abiTRUE-cp312-cp312-linux_x86_64.whl
     - mamba-ssm @ https://github.com/state-spaces/mamba/releases/download/v2.2.6.post3/mamba_ssm-2.2.6.post3+cu12torch2.7cxx11abiTRUE-cp312-cp312-linux_x86_64.whl
-    # RiNALMo / RNA-FM transformers-native mirror (ADR-0002 D5). 0.0.9 needs transformers 5.x
-    # (the reason this env is split off ml-dna). Pulls chanfig>=0.0.105 + danling[torch]>=0.3.11
-    # from PyPI (danling's torch extra is satisfied by the URL-pinned torch above):
-    - multimolecule==0.0.9
+    # RiNALMo / RNA-FM transformers-native mirror (ADR-0002 D5/A8). Pinned 0.1.0, NOT 0.0.9:
+    # 0.0.9's RiNALMo forward calls transformers' create_bidirectional_mask(input_embeds=...), whose
+    # compat alias transformers REMOVED in 5.9.0 (last-working 5.8.1) -> TypeError under 5.13.0 (the
+    # P1-13 forward gate; A4 had cleared only import+instantiate). 0.1.0 is the first release passing
+    # inputs_embeds= (the transformers-v5 masking API 5.13.0 requires); transformers STAYS 5.13.0
+    # (0.1.0 leaves transformers unpinned; RiNALMoConfig/RiNALMoModel/modeling_rinalmo unchanged, so
+    # the multimolecule/rinalmo-giga weights still load). This INVERTS D5's "avoid 0.1.0/0.2.0 (may
+    # assume v5 internals)" note — written under the now-disproven premise that 0.0.9 works on v5;
+    # 0.1.0 "assuming v5 internals" is exactly what 5.13.0 needs. Pulls chanfig + danling[torch] from
+    # PyPI (danling's torch extra is satisfied by the URL-pinned torch above):
+    - multimolecule==0.1.0

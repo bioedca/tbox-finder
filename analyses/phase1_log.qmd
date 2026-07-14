@@ -578,3 +578,25 @@ column)** — a citation-precision enrichment (values are correct) queued as a s
 P1 exit gate. context7 §3.3: biopython has no `.ct` reader (stdlib parser; numpy not needed — pure-Python sets). Cross-link
 **PRD §10.2**, **ADR-0002 D5**. **Commit.** `<SHA>` on `p1-12-archiveii-lofo` (feature branch → squash PR). Feeds **P1-13**
 (the RiNALMo mirror parity verification consumes these splits + metric + target).
+
+## Step P1-13-env (ADR-0002 A8) — 2026-07-13: Fix the RiNALMo mirror forward under the pinned ml-rna env (multimolecule 0.0.9 → 0.1.0)
+**Inputs.** `envs/ml-rna.yml` (`multimolecule==0.0.9`) + `envs/ml-rna.conda-lock.yml`; the pinned `multimolecule/rinalmo-giga`
+@ `2a71f6f9…`; conda-lock 4.0.2. **Process.** An off-roadmap fix-up unblocking **P1-13**: authoring the parity harness surfaced
+that `RiNALMoModel.forward` **raises `TypeError` under the pinned transformers 5.13.0** (ADR-0002 **A4** had cleared only
+`import`+instantiate, deferring the forward to P1). Root cause (sourced across transformers v5.0.0→5.13.0 + `multimolecule`
+v0.0.9/v0.1.0 tags, reproduced on CPU, and shim-isolated as the **sole** incompatibility): `multimolecule` 0.0.9 calls
+`create_bidirectional_mask(input_embeds=…)`, whose compat alias transformers **removed in 5.9.0** (last-working 5.8.1) — the
+param is now `inputs_embeds`. Fix (user-signed-off Option A, ADR-0002 **A8**): bump `multimolecule` **0.0.9 → 0.1.0** (the first
+release passing `inputs_embeds=`); transformers stays 5.13.0 (0.1.0 unpins it; rinalmo-giga config/classes unchanged → weights
+load); inverts D5's "avoid 0.1.0" note. **Lock:** 0.1.0 adds `scipy` + a `typer`/`rich` subtree; conda-lock 4.0.2's poetry
+pip-solver `AssertionError`-crashes on the expanded graph (both `-f` and `--update`) though **pip resolves it fine**, so the
+lock was hand-merged from pip's proven resolution (exact wheel URL + sha256) via conda-lock's own `Lockfile` model, with
+`content_hash` **recomputed from the edited spec** (`compute_content_hashes`, method validated to reproduce the prior
+`b1804d9d…` before trusting `aaaab98c…`). **Outputs.** `envs/ml-rna.yml` (`multimolecule==0.1.0`) + `envs/ml-rna.conda-lock.yml`
+(+8 pip pkgs, updated hash; all load-bearing pins — torch 2.7.1+cu128, three sm_86 kernels, transformers 5.13.0, numpy 2.5.1 —
+unchanged) + `docs/decisions/ADR-0002` A8 + a `test_env_manifest` regression. **Validation.** Forward **GREEN, no shim** (CPU):
+`RiNALMoModel` `last_hidden_state (1,L+2,1280)` → stripped `(1,L,1280)`; shipped SS head `(1,L,L,1)`; 6/6 env-manifest tests
+(incl. the new A8 guard). Cluster fresh-install + the D5 parity gate remain **P1-13** (A5 precedent). **Decisions.** Hand-merge
++ recomputed hash chosen over hand-editing text or a fragile transformers downgrade/shim; cross-link **ADR-0002 A8/D5/D8**,
+**CLAUDE.md §3.1/§7**. **Commit.** `<SHA>` on `p1-13-ml-rna-fix` (feature branch → squash PR). Unblocks **P1-13** (the RiNALMo
+mirror parity harness).

@@ -88,6 +88,31 @@ def test_ml_envs_pin_torch_by_url_not_index():
     assert not problems, "ml torch-URL invariant violated (ADR-0002 A4): " + "; ".join(problems)
 
 
+def test_ml_rna_pins_multimolecule_0_1_0():
+    """Lock the ADR-0002 A8 fix: ml-rna pins `multimolecule==0.1.0`, never 0.0.9.
+
+    multimolecule 0.0.9's RiNALMo forward calls transformers'
+    `create_bidirectional_mask(input_embeds=...)`, whose compat alias transformers
+    removed in 5.9.0 → TypeError under the pinned transformers 5.13.0 (the P1-13
+    forward gate). 0.1.0 is the first release passing `inputs_embeds=` (the v5
+    masking API). This guard fails closed on a regression to the broken 0.0.9 and
+    confirms the lockfile matches the spec.
+    """
+    yml = (ENVS_DIR / "ml-rna.yml").read_text()
+    code = "\n".join(line.split("#", 1)[0] for line in yml.splitlines())
+    assert re.search(
+        r"^\s*-\s*multimolecule==0\.1\.0\s*$", code, re.MULTILINE
+    ), "ml-rna.yml must pin `multimolecule==0.1.0` (ADR-0002 A8 transformers-5 forward fix)"
+    assert not re.search(
+        r"^\s*-\s*multimolecule==0\.0\.9\s*$", code, re.MULTILINE
+    ), "ml-rna.yml must NOT pin the broken multimolecule==0.0.9 (fails on transformers 5.13.0)"
+    # the regenerated lockfile must record 0.1.0 (spec ↔ lock consistency).
+    lock = (ENVS_DIR / "ml-rna.conda-lock.yml").read_text()
+    assert re.search(
+        r"^- name: multimolecule\n\s+version: 0\.1\.0\s*$", lock, re.MULTILINE
+    ), "ml-rna.conda-lock.yml must lock multimolecule 0.1.0 (re-solve after the A8 spec bump)"
+
+
 def test_snakemake_conda_directives_resolve():
     """Every `conda:` path in a rule file resolves to an existing spec."""
     if not RULES_DIR.is_dir():
