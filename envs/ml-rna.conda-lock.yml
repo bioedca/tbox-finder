@@ -13,7 +13,7 @@
 version: 1
 metadata:
   content_hash:
-    linux-64: b1804d9d95a90759228f48e5a3e96c1971b9ae22e42673ba057dcb6415025710
+    linux-64: aaaab98c2e96ba484036599ee294edfcd0a29df6e21f0f28741deb27bf43f96b
   channels:
   - url: conda-forge
     used_env_vars: []
@@ -3390,6 +3390,16 @@ package:
     sha256: 68f0206ca6e98fea941e5717cec780ed2873ffabc0e1ed34428c061e2c6268c7
   category: main
   optional: false
+- name: annotated-doc
+  version: 0.0.4
+  manager: pip
+  platform: linux-64
+  dependencies: {}
+  url: https://files.pythonhosted.org/packages/1e/d3/26bf1008eb3d2daa8ef4cacc7f3bfdc11818d111f7e2d0201bc6e3b49d45/annotated_doc-0.0.4-py3-none-any.whl
+  hash:
+    sha256: 571ac1dc6991c450b25a9c2d84a3705e2ae7a53467b5d111c24fa8baabbed320
+  category: main
+  optional: false
 - name: causal-conv1d
   version: 1.6.2.post1
   manager: pip
@@ -3490,21 +3500,44 @@ package:
     url: https://github.com/state-spaces/mamba/releases/download/v2.2.6.post3/mamba_ssm-2.2.6.post3+cu12torch2.7cxx11abiTRUE-cp312-cp312-linux_x86_64.whl#
   category: main
   optional: false
+- name: markdown-it-py
+  version: 4.2.0
+  manager: pip
+  platform: linux-64
+  dependencies:
+    mdurl: '*'
+  url: https://files.pythonhosted.org/packages/b3/81/4da04ced5a082363ecfa159c010d200ecbd959ae410c10c0264a38cac0f5/markdown_it_py-4.2.0-py3-none-any.whl
+  hash:
+    sha256: 9f7ebbcd14fe59494226453aed97c1070d83f8d24b6fc3a3bcf9a38092641c4a
+  category: main
+  optional: false
+- name: mdurl
+  version: 0.1.2
+  manager: pip
+  platform: linux-64
+  dependencies: {}
+  url: https://files.pythonhosted.org/packages/b3/38/89ba8ad64ae25be8de66a6d463314cf1eb366222074cfda9ee839c56a4b4/mdurl-0.1.2-py3-none-any.whl
+  hash:
+    sha256: 84008a41e51615a49fc9966191ff91509e3c40b939176e643fd50a5c2196b8f8
+  category: main
+  optional: false
 - name: multimolecule
-  version: 0.0.9
+  version: 0.1.0
   manager: pip
   platform: linux-64
   dependencies:
     accelerate: '*'
-    chanfig: '>=0.0.105'
-    danling: '>=0.3.11'
+    chanfig: '*'
+    danling: '*'
     datasets: '*'
     pandas: '*'
+    scipy: '*'
     torch: '*'
+    torchmetrics: '*'
     transformers: '*'
-  url: https://files.pythonhosted.org/packages/0c/6c/2f565c070a365eaa634f0094baf777c8a12a38c6f0cd8e64cd09cc0dc1fc/multimolecule-0.0.9-py3-none-any.whl
+  url: https://files.pythonhosted.org/packages/8f/16/8fdf2f9bffaefd900dc20bd020037611ce4c6b05025b5b8b7b51d960ebb0/multimolecule-0.1.0-py3-none-any.whl
   hash:
-    sha256: 9d343c30d07b8deacb552d4cb182b4edf24d0ff0df94108964081d14e514a0f4
+    sha256: 490f74416b753c0a347ab09cc29be22d3e156aa1d241f280ede8986b53a8b9f4
   category: main
   optional: false
 - name: ninja
@@ -3691,6 +3724,49 @@ package:
     url: https://pypi.nvidia.com/nvidia-nvtx-cu12/nvidia_nvtx_cu12-12.8.55-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl#
   category: main
   optional: false
+- name: pygments
+  version: 2.20.0
+  manager: pip
+  platform: linux-64
+  dependencies: {}
+  url: https://files.pythonhosted.org/packages/f4/7e/a72dd26f3b0f4f2bf1dd8923c85f7ceb43172af56d63c7383eb62b332364/pygments-2.20.0-py3-none-any.whl
+  hash:
+    sha256: 81a9e26dd42fd28a23a2d169d86d7ac03b46e2f8b59ed4698fb4785f946d0176
+  category: main
+  optional: false
+- name: rich
+  version: 15.0.0
+  manager: pip
+  platform: linux-64
+  dependencies:
+    markdown-it-py: '*'
+    pygments: '*'
+  url: https://files.pythonhosted.org/packages/82/3b/64d4899d73f91ba49a8c18a8ff3f0ea8f1c1d75481760df8c68ef5235bf5/rich-15.0.0-py3-none-any.whl
+  hash:
+    sha256: 33bd4ef74232fb73fe9279a257718407f169c09b78a87ad3d296f548e27de0bb
+  category: main
+  optional: false
+- name: scipy
+  version: 1.18.0
+  manager: pip
+  platform: linux-64
+  dependencies:
+    numpy: '*'
+  url: https://files.pythonhosted.org/packages/dd/aa/1b939f6c67ed68635bb538e6752d3dacc02f66535182e939a89581a44e9c/scipy-1.18.0-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl
+  hash:
+    sha256: 1f55797419e16e7f30cf88ffb3113ce0467f00cfe3f70d5c281730b21769bfc2
+  category: main
+  optional: false
+- name: shellingham
+  version: 1.5.4
+  manager: pip
+  platform: linux-64
+  dependencies: {}
+  url: https://files.pythonhosted.org/packages/e0/f9/0595336914c5619e5f28a1fb793285925a8cd4b432c9da0a987836c7f822/shellingham-1.5.4-py2.py3-none-any.whl
+  hash:
+    sha256: 7ecfff8f2fd72616f7481040475a65b2bf8af90a56c89140852d1120324e8686
+  category: main
+  optional: false
 - name: torch
   version: 2.7.1+cu128
   manager: pip
@@ -3763,5 +3839,18 @@ package:
   source:
     type: url
     url: https://download.pytorch.org/whl/triton-3.3.1-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl#
+  category: main
+  optional: false
+- name: typer
+  version: 0.26.8
+  manager: pip
+  platform: linux-64
+  dependencies:
+    annotated-doc: '*'
+    rich: '*'
+    shellingham: '*'
+  url: https://files.pythonhosted.org/packages/80/87/b9fd69c92c6102a066e1b86a35243f53e70bd4c709f2a26d9f4fee4f4dc0/typer-0.26.8-py3-none-any.whl
+  hash:
+    sha256: 3512ca79ac5c11113414b36e80281b872884477722440691c89d1112e321a49c
   category: main
   optional: false
