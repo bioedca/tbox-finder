@@ -689,3 +689,23 @@ not** encoded as a numeric gate (P1 pins no latency budget — pinning one would
 and is **never** an auto-switch to RNA-FM (ADR-0002 D5). Cross-link **PRD §10.2/§18.1**, **ADR-0002**. **Commit.** `<SHA>` on
 `p1-14-rinalmo-throughput` (authoring commit; the measured result is the post-run commit). Feeds the P1 exit-gate
 "forward-throughput probe reported (advisory)" (PRD §18.1) + the pre-P5 sizing gate.
+
+## Step P1-14 (result) — 2026-07-15: RiNALMo forward-throughput probe — measured (advisory), NOT clearly-hopeless
+**Inputs.** The authored harness (`1f129e9`); `multimolecule/rinalmo-giga` @`2a71f6f9…` weights (node-local HF cache).
+**Process.** Ran `slurm/p1/rinalmo_throughput.sbatch` on **one cluster RTX A4000** (Ampere sm_86, 15.6 GiB; **SLURM job 513**,
+~4 min; §9.3 artifact-verified: `squeue` empty + `rinalmo_throughput.DONE` + a validator-clean report; `.err` = only the
+expected fresh-SS-head `MISSING`-param init notes, no traceback). bf16-autocast forward under `inference_mode`, CUDA-event
+timed. Hardened `_software_versions` to resolve versions via `importlib.metadata` (mm 0.1.0 exposes no top-level
+`__version__` → the run-time report recorded `multimolecule:"unknown"`; the committed report predates the tweak, authoritative
+pin is `envs/ml-rna.conda-lock.yml`=0.1.0). **Outputs.** measured `reports/p1/rinalmo_throughput.json` (git-tracked; the 2.5 GB
+weights re-fetchable by pinned revision, not committed) + the `_software_versions` hardening. **Validation.** candidates/sec/GPU
+**REPORTED (measured, advisory — no binding threshold, imp.md P1-14):** headline **encoder batch-1 @300 nt = 28.51
+cand/s/GPU**; length sweep batch-1 150→38.1, 200→37.8, 250→37.8, 300→28.5, 350→29.1; **best batched = 39.67 cand/s/GPU**
+(bs16; sweep 1→32 with **no OOM**, peak VRAM **4.48 GiB** of 15.6 → large batching headroom); encoder+SS-head O(L²) bracket
+batch-1 300→20.8. Report `validate_report` clean; `advisory_only/binding/is_science = True/False/False`. **Decisions.** §7
+"clearly-hopeless" check — **NOT** clearly-hopeless: on 8 A4000 ≈ 230–320 cand/s (~1e6 Stage-2 candidates ≈ <1 h; ~1e8 ≈
+~87 GPU-node-h, within a cluster budget), and the **binding** N (Stage-1 candidate density) is unknown until P2 → **no §7
+stop-and-ask; proceed** (advisory input only; **no** auto-switch to RNA-FM — ADR-0002 D5). The binding latency decision stays
+frozen to the **P5 sizing gate**. Cross-link **PRD §10.2/§18.1**, **ADR-0002**. **Commit.** `<SHA>` on
+`p1-14-rinalmo-throughput` (result commit). Satisfies PRD §18.1 "forward-throughput probe reported (advisory)"; feeds the
+pre-P5 sizing gate + P1-15.

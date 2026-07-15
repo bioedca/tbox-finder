@@ -426,24 +426,29 @@ def measure_throughput(
     }
 
 
+def _pkg_version(dist: str) -> str:
+    """Resolve an installed distribution version via the package metadata.
+
+    ``importlib.metadata.version`` is authoritative even for packages that expose no
+    top-level ``__version__`` (e.g. ``multimolecule`` 0.1.0), which a ``getattr`` probe
+    would miss and record as ``"unknown"``.
+    """
+    from importlib.metadata import PackageNotFoundError, version
+
+    try:
+        return version(dist)
+    except PackageNotFoundError:  # pragma: no cover - defensive
+        return "unknown"
+
+
 def _software_versions() -> dict[str, str]:
     import platform
 
     import torch  # lazy
 
     versions = {"torch": torch.__version__, "python": platform.python_version()}
-    try:
-        import transformers  # lazy
-
-        versions["transformers"] = transformers.__version__
-    except Exception:  # pragma: no cover - defensive
-        versions["transformers"] = "unknown"
-    try:
-        import multimolecule  # lazy
-
-        versions["multimolecule"] = getattr(multimolecule, "__version__", "unknown")
-    except Exception:  # pragma: no cover - defensive
-        versions["multimolecule"] = "unknown"
+    versions["transformers"] = _pkg_version("transformers")
+    versions["multimolecule"] = _pkg_version("multimolecule")
     return versions
 
 
