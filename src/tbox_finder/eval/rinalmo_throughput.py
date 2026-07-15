@@ -219,15 +219,24 @@ def validate_report(report: Mapping[str, Any]) -> list[str]:
     elif not (isinstance(hw.get("gpu_name"), str) and hw["gpu_name"].strip()):
         errors.append("hardware.gpu_name must be a non-empty string on a measured report")
 
-    if not _finite_positive(report.get("headline_candidates_per_sec_per_gpu")):
+    headline = report.get("headline_candidates_per_sec_per_gpu")
+    if not _finite_positive(headline):
         errors.append("headline_candidates_per_sec_per_gpu must be a finite positive number")
 
     enc = report.get("encoder_forward")
     if not isinstance(enc, dict):
         errors.append("encoder_forward block missing")
     else:
-        if not _valid_summary(enc.get("batch1_representative")):
+        rep = enc.get("batch1_representative")
+        if not _valid_summary(rep):
             errors.append("encoder_forward.batch1_representative must be a valid latency summary")
+        elif _finite_positive(headline) and headline != rep["candidates_per_sec_per_gpu"]:
+            # The headline IS the representative encoder batch-1 rate (build_report sets it
+            # so); a mismatch means a hand-edited / inconsistent report (§10.3).
+            errors.append(
+                "headline_candidates_per_sec_per_gpu must equal "
+                "encoder_forward.batch1_representative.candidates_per_sec_per_gpu"
+            )
         per_len = enc.get("batch1_per_length")
         if not isinstance(per_len, dict) or not per_len:
             errors.append("encoder_forward.batch1_per_length must be a non-empty dict")
@@ -351,9 +360,12 @@ def measure_throughput(
             per_length[rep_key] = summarize_batch_latencies(lat, 1)
         batch1_representative = per_length[rep_key]
 
-        # (2) encoder, representative length, batch sweep (stop at first CUDA OOM).
+        # (2) encoder, representative length, batch sweep (stop at first CUDA OOM). VRAM is
+        # tracked as the peak-allocated over the WHOLE sweep (``reset`` once before, read
+        # once after) — i.e. the max VRAM the probe ever needs; ``empty_cache`` does not
+        # reset the peak-allocated stat, so per-iteration cache clears do not perturb it.
         batched: dict[str, Any] = {}
-        peak_vram_gib: float | None = None
+        peak_vram_gib_sweep_max: float | None = None
         oom_at_batch: int | None = None
         best_batched = batch1_representative
         if is_cuda:
@@ -382,9 +394,10 @@ def measure_throughput(
             if summ["candidates_per_sec_per_gpu"] > best_batched["candidates_per_sec_per_gpu"]:
                 best_batched = summ
             if is_cuda:
-                peak_vram_gib = round(torch.cuda.max_memory_allocated(device) / (1024**3), 3)
                 torch.cuda.empty_cache()
             log(f"encoder batched bs={bs}: {summ['candidates_per_sec_per_gpu']} c/s")
+        if is_cuda:
+            peak_vram_gib_sweep_max = round(torch.cuda.max_memory_allocated(device) / (1024**3), 3)
 
         # (3) encoder + SS contact head (batch 1), an upper bracket (O(L^2) head).
         ss_per_length: dict[str, Any] = {}
@@ -411,7 +424,7 @@ def measure_throughput(
             "batch1_representative": batch1_representative,
             "batched_representative": batched,
             "best_batched": best_batched,
-            "peak_vram_gib_best_batch": peak_vram_gib,
+            "peak_vram_gib_sweep_max": peak_vram_gib_sweep_max,
             "oom_at_batch": oom_at_batch,
         },
         "ss_head_forward": {
@@ -456,7 +469,10 @@ def _hardware_block(device: str) -> dict[str, Any]:
     import torch  # lazy
 
     if device.startswith("cuda"):
-        props = torch.cuda.get_device_properties(0)
+        # Honour an explicit ``cuda:N`` selector (default 0 for a bare ``cuda``); the
+        # measurement ran on this same device, so its props must describe that GPU.
+        index = int(device.split(":", 1)[1]) if ":" in device else 0
+        props = torch.cuda.get_device_properties(index)
         return {
             "gpu_name": props.name,
             "gpu_total_memory_gib": round(props.total_memory / (1024**3), 3),
@@ -566,7 +582,10 @@ def run_probe(
         raise ValueError("throughput report failed validation: " + "; ".join(problems))
     out = Path(out_path)
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(json.dumps(report, indent=2, sort_keys=True, ensure_ascii=False) + "\n")
+    # allow_nan=False: fail loud if any non-finite slipped past _sanitize (strict JSON).
+    out.write_text(
+        json.dumps(report, indent=2, sort_keys=True, ensure_ascii=False, allow_nan=False) + "\n"
+    )
     report["_path"] = str(out)
     return report
 

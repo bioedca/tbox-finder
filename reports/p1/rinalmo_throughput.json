@@ -123,7 +123,7 @@
     },
     "description": "RiNALMoModel encoder forward -> last_hidden_state (the backbone cost a Stage-2 T-box head consumes; the headline metric)",
     "oom_at_batch": null,
-    "peak_vram_gib_best_batch": 4.478
+    "peak_vram_gib_sweep_max": 4.478
   },
   "git_sha": "1f129e9ffd90353e87ac1af98d8b8c43b1942159",
   "hardware": {
@@ -213,7 +213,7 @@
   "seed": 42,
   "sequence_source": "synthetic length-stratified RNA (A/C/G/U), deterministic seed 42 — a hardware forward-latency probe; RiNALMo throughput is length-bound, not nucleotide-content-bound. NOT a T-box science result.",
   "software": {
-    "multimolecule": "unknown",
+    "multimolecule": "0.1.0",
     "python": "3.12.13",
     "torch": "2.7.1+cu128",
     "transformers": "5.13.0"

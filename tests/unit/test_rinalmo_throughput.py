@@ -222,6 +222,14 @@ def test_validate_report_headline_nan_sanitized_still_bites():
     assert T.validate_report(rep)
 
 
+def test_validate_report_headline_must_match_representative():
+    # A finite-positive headline that disagrees with the representative encoder rate
+    # is an inconsistent (hand-edited) report -> the validator bites (§10.3).
+    rep = _valid_report()
+    rep["headline_candidates_per_sec_per_gpu"] = 99.0  # != batch1_representative (42.0)
+    assert T.validate_report(rep)
+
+
 # --------------------------------------------------------------------------- #
 # torch tier (CPU-only; no model download) — build_report end-to-end shape
 # --------------------------------------------------------------------------- #
@@ -235,7 +243,7 @@ def test_build_report_is_validator_clean_and_extrapolates():
             "batch1_representative": _summary(42.0),
             "batched_representative": {"1": _summary(42.0), "8": _summary(120.0, 8)},
             "best_batched": _summary(120.0, 8),
-            "peak_vram_gib_best_batch": 6.5,
+            "peak_vram_gib_sweep_max": 6.5,
             "oom_at_batch": 16,
         },
         "ss_head_forward": {
@@ -254,4 +262,4 @@ def test_build_report_is_validator_clean_and_extrapolates():
     s = ex["scenarios"][0]
     assert s["est_wall_hours_encoder_best_batched"] < s["est_wall_hours_encoder_batch1"]
     # strict JSON (no NaN/Inf survived _sanitize).
-    json.dumps(report)
+    json.dumps(report, allow_nan=False)
