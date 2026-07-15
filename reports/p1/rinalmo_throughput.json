@@ -1,0 +1,282 @@
+{
+  "adr": "ADR-0002",
+  "advisory_only": true,
+  "binding": false,
+  "binding_gate": "P5 sizing gate (needs Stage-1 candidate density; PRD §10.2)",
+  "checkpoint": {
+    "hub_url": "https://huggingface.co/multimolecule/rinalmo-giga",
+    "repo_id": "multimolecule/rinalmo-giga",
+    "revision": "2a71f6f98fb41dd2e6542a5e131d3778111d1468"
+  },
+  "encoder_forward": {
+    "batch1_per_length": {
+      "150": {
+        "batch_size": 1,
+        "candidates_per_sec_per_gpu": 38.121,
+        "iters": 30,
+        "latency_ms_mean": 26.2324,
+        "latency_ms_median": 26.2103,
+        "latency_ms_min": 26.1028,
+        "latency_ms_p95": 26.4419
+      },
+      "200": {
+        "batch_size": 1,
+        "candidates_per_sec_per_gpu": 37.822,
+        "iters": 30,
+        "latency_ms_mean": 26.4398,
+        "latency_ms_median": 26.4141,
+        "latency_ms_min": 26.2195,
+        "latency_ms_p95": 26.6999
+      },
+      "250": {
+        "batch_size": 1,
+        "candidates_per_sec_per_gpu": 37.782,
+        "iters": 30,
+        "latency_ms_mean": 26.4673,
+        "latency_ms_median": 26.3562,
+        "latency_ms_min": 26.1837,
+        "latency_ms_p95": 26.9881
+      },
+      "300": {
+        "batch_size": 1,
+        "candidates_per_sec_per_gpu": 28.507,
+        "iters": 30,
+        "latency_ms_mean": 35.079,
+        "latency_ms_median": 34.9967,
+        "latency_ms_min": 34.7802,
+        "latency_ms_p95": 35.6634
+      },
+      "350": {
+        "batch_size": 1,
+        "candidates_per_sec_per_gpu": 29.063,
+        "iters": 30,
+        "latency_ms_mean": 34.4083,
+        "latency_ms_median": 34.3757,
+        "latency_ms_min": 34.1596,
+        "latency_ms_p95": 34.6742
+      }
+    },
+    "batch1_representative": {
+      "batch_size": 1,
+      "candidates_per_sec_per_gpu": 28.507,
+      "iters": 30,
+      "latency_ms_mean": 35.079,
+      "latency_ms_median": 34.9967,
+      "latency_ms_min": 34.7802,
+      "latency_ms_p95": 35.6634
+    },
+    "batched_representative": {
+      "1": {
+        "batch_size": 1,
+        "candidates_per_sec_per_gpu": 28.641,
+        "iters": 30,
+        "latency_ms_mean": 34.9154,
+        "latency_ms_median": 34.9148,
+        "latency_ms_min": 34.6296,
+        "latency_ms_p95": 35.1084
+      },
+      "16": {
+        "batch_size": 16,
+        "candidates_per_sec_per_gpu": 39.672,
+        "iters": 30,
+        "latency_ms_mean": 403.3115,
+        "latency_ms_median": 403.5036,
+        "latency_ms_min": 400.1577,
+        "latency_ms_p95": 405.1361
+      },
+      "32": {
+        "batch_size": 32,
+        "candidates_per_sec_per_gpu": 39.653,
+        "iters": 30,
+        "latency_ms_mean": 807.0048,
+        "latency_ms_median": 807.5295,
+        "latency_ms_min": 801.962,
+        "latency_ms_p95": 810.4906
+      },
+      "4": {
+        "batch_size": 4,
+        "candidates_per_sec_per_gpu": 36.187,
+        "iters": 30,
+        "latency_ms_mean": 110.5384,
+        "latency_ms_median": 110.4922,
+        "latency_ms_min": 110.1199,
+        "latency_ms_p95": 110.8612
+      },
+      "8": {
+        "batch_size": 8,
+        "candidates_per_sec_per_gpu": 39.188,
+        "iters": 30,
+        "latency_ms_mean": 204.1458,
+        "latency_ms_median": 204.1129,
+        "latency_ms_min": 203.4371,
+        "latency_ms_p95": 204.8724
+      }
+    },
+    "best_batched": {
+      "batch_size": 16,
+      "candidates_per_sec_per_gpu": 39.672,
+      "iters": 30,
+      "latency_ms_mean": 403.3115,
+      "latency_ms_median": 403.5036,
+      "latency_ms_min": 400.1577,
+      "latency_ms_p95": 405.1361
+    },
+    "description": "RiNALMoModel encoder forward -> last_hidden_state (the backbone cost a Stage-2 T-box head consumes; the headline metric)",
+    "oom_at_batch": null,
+    "peak_vram_gib_sweep_max": 4.478
+  },
+  "git_sha": "1f129e9ffd90353e87ac1af98d8b8c43b1942159",
+  "hardware": {
+    "cuda_capability": "8.6",
+    "device": "cuda",
+    "gpu_name": "NVIDIA RTX A4000",
+    "gpu_total_memory_gib": 15.602,
+    "n_gpus_measured": 1
+  },
+  "headline_candidates_per_sec_per_gpu": 28.507,
+  "illustrative_extrapolation": {
+    "note": "NON-BINDING & ILLUSTRATIVE. The genome-scale candidate count N is UNKNOWN until Stage-1 (P2) sets candidate density; the binding latency decision is frozen to the P5 sizing gate (PRD §10.2). Rows below are pure arithmetic N/(rate*GPUs*3600) at the measured encoder rates, for illustrative N only.",
+    "rate_encoder_batch1_per_sec_per_gpu": 28.507,
+    "rate_encoder_best_batched_per_sec_per_gpu": 39.672,
+    "scenarios": [
+      {
+        "est_wall_hours_encoder_batch1": 9.744,
+        "est_wall_hours_encoder_best_batched": 7.002,
+        "n_candidates": 1000000,
+        "n_gpus": 1
+      },
+      {
+        "est_wall_hours_encoder_batch1": 1.218,
+        "est_wall_hours_encoder_best_batched": 0.875,
+        "n_candidates": 1000000,
+        "n_gpus": 8
+      },
+      {
+        "est_wall_hours_encoder_batch1": 0.609,
+        "est_wall_hours_encoder_best_batched": 0.438,
+        "n_candidates": 1000000,
+        "n_gpus": 16
+      },
+      {
+        "est_wall_hours_encoder_batch1": 97.442,
+        "est_wall_hours_encoder_best_batched": 70.019,
+        "n_candidates": 10000000,
+        "n_gpus": 1
+      },
+      {
+        "est_wall_hours_encoder_batch1": 12.18,
+        "est_wall_hours_encoder_best_batched": 8.752,
+        "n_candidates": 10000000,
+        "n_gpus": 8
+      },
+      {
+        "est_wall_hours_encoder_batch1": 6.09,
+        "est_wall_hours_encoder_best_batched": 4.376,
+        "n_candidates": 10000000,
+        "n_gpus": 16
+      },
+      {
+        "est_wall_hours_encoder_batch1": 974.42,
+        "est_wall_hours_encoder_best_batched": 700.186,
+        "n_candidates": 100000000,
+        "n_gpus": 1
+      },
+      {
+        "est_wall_hours_encoder_batch1": 121.802,
+        "est_wall_hours_encoder_best_batched": 87.523,
+        "n_candidates": 100000000,
+        "n_gpus": 8
+      },
+      {
+        "est_wall_hours_encoder_batch1": 60.901,
+        "est_wall_hours_encoder_best_batched": 43.762,
+        "n_candidates": 100000000,
+        "n_gpus": 16
+      }
+    ]
+  },
+  "is_science_result": false,
+  "length_sweep_nt": [
+    150,
+    200,
+    250,
+    300,
+    350
+  ],
+  "measure_iters": 30,
+  "measured": true,
+  "prd": "§10.2",
+  "precision": "bfloat16",
+  "precision_mode": "autocast_mixed",
+  "representative_len_nt": 300,
+  "schema_version": 1,
+  "seed": 42,
+  "sequence_source": "synthetic length-stratified RNA (A/C/G/U), deterministic seed 42 — a hardware forward-latency probe; RiNALMo throughput is length-bound, not nucleotide-content-bound. NOT a T-box science result.",
+  "software": {
+    "multimolecule": "0.1.0",
+    "python": "3.12.13",
+    "torch": "2.7.1+cu128",
+    "transformers": "5.13.0"
+  },
+  "ss_head_forward": {
+    "batch1_per_length": {
+      "150": {
+        "batch_size": 1,
+        "candidates_per_sec_per_gpu": 33.218,
+        "iters": 30,
+        "latency_ms_mean": 30.1039,
+        "latency_ms_median": 30.0488,
+        "latency_ms_min": 29.9438,
+        "latency_ms_p95": 30.4196
+      },
+      "200": {
+        "batch_size": 1,
+        "candidates_per_sec_per_gpu": 30.85,
+        "iters": 30,
+        "latency_ms_mean": 32.4151,
+        "latency_ms_median": 32.3768,
+        "latency_ms_min": 32.2427,
+        "latency_ms_p95": 32.6714
+      },
+      "250": {
+        "batch_size": 1,
+        "candidates_per_sec_per_gpu": 28.282,
+        "iters": 30,
+        "latency_ms_mean": 35.3584,
+        "latency_ms_median": 35.2701,
+        "latency_ms_min": 35.0945,
+        "latency_ms_p95": 35.8776
+      },
+      "300": {
+        "batch_size": 1,
+        "candidates_per_sec_per_gpu": 20.832,
+        "iters": 30,
+        "latency_ms_mean": 48.0035,
+        "latency_ms_median": 47.9688,
+        "latency_ms_min": 47.6805,
+        "latency_ms_p95": 48.3634
+      },
+      "350": {
+        "batch_size": 1,
+        "candidates_per_sec_per_gpu": 19.313,
+        "iters": 30,
+        "latency_ms_mean": 51.7792,
+        "latency_ms_median": 51.7565,
+        "latency_ms_min": 51.4171,
+        "latency_ms_p95": 52.0501
+      }
+    },
+    "batch1_representative": {
+      "batch_size": 1,
+      "candidates_per_sec_per_gpu": 20.832,
+      "iters": 30,
+      "latency_ms_mean": 48.0035,
+      "latency_ms_median": 47.9688,
+      "latency_ms_min": 47.6805,
+      "latency_ms_p95": 48.3634
+    },
+    "description": "encoder + the mirror's SS contact head (O(L^2)) — an UPPER bracket; the eventual T-box Stage-2 head is lighter than the SS head"
+  },
+  "step": "P1-14",
+  "warmup_iters": 5
+}

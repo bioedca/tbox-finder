@@ -661,3 +661,51 @@ confirmed." **Decisions.** Commit Stage-2 to `multimolecule/rinalmo-giga` @`2a71
 (the mirror already carries those exact weights). §10.3: the refit proxy stands as failed (reported, not hidden); commit
 rests on stronger direct evidence — cross-link **ADR-0002 A9** (user sign-off 2026-07-15), **PRD §10.2/§18.1**. **Commit.**
 `<SHA>` on `p1-13-rinalmo-parity` (result commit). Feeds P1-14 (throughput probe) + P1-15 (LoRA/FSDP) + the P1 exit gate.
+
+## Step P1-14 (authoring) — 2026-07-15: RiNALMo forward-throughput probe (advisory) — harness + sbatch
+**Inputs.** The parity-confirmed `multimolecule/rinalmo-giga` @`2a71f6f9…` backbone (P1-13), reused via
+`rinalmo_parity.load_rinalmo_ss`/`contact_logits`; synthetic seeded T-box-length RNA windows (~150–350 nt — the probe
+generates them, no external data). **Process.** Authored `src/tbox_finder/eval/rinalmo_throughput.py` — a bare-CI-importable
+(lazy torch/multimolecule) advisory probe: times the **encoder forward** (`RiNALMoModel`→`last_hidden_state`, the headline
+Stage-2 backbone cost) at **batch-1 across a 150→350 nt length sweep** + a **representative-length batch sweep** (1→32, stops
+at the first CUDA OOM, tracks peak VRAM), plus an **encoder+SS-head** upper bracket (`contact_logits`, O(L²)); all **bf16
+autocast** under `inference_mode`, CUDA-event-timed with `synchronize` after warmup (context7 §3.3: `/pytorch/pytorch`
+event-timing + `reset_peak_memory_stats` + `inference_mode`). Reports candidates/sec/GPU + a **NON-BINDING illustrative**
+N/(rate·GPUs·3600) extrapolation (N unknown until Stage-1 — binding latency frozen to the P5 gate). Authored
+`slurm/p1/rinalmo_throughput.sbatch` (gpu, `gres a4000:1`, cpus 8, mem 32G, `--time 30m`; single task, node-local HF cache,
+flock + stale-marker clear, DONE-gate requires a self-validated report). **Outputs.** the module + sbatch +
+`tests/unit/test_rinalmo_throughput.py` (36: constants, synthetic-window determinism/alphabet, latency/percentile/
+candidates-per-sec math + guards, extrapolation arithmetic + guards, `_sanitize`, a validator proven to **bite** on every
+schema/honesty invariant, + a torch-tier `build_report` end-to-end) + this stanza. **No** measured
+`reports/p1/rinalmo_throughput.json` yet (produced by the SLURM run — this is the **authoring** commit; the measured result
+is the post-run commit). **Validation.** authoring gate: 36 new tests green (35 bare + 1 torch-tier under `tbox-ml-rna`); full
+bare unit suite **643 passed** (no regression); ruff 0.15.15 + black 25.11.0 clean; `build_report` assembles + self-validates
+under `tbox-ml-rna` (torch 2.7.1+cu128, transformers 5.13.0); sbatch `bash -n` clean. The **runtime** validation gate
+(candidates/sec/GPU **reported**, measured, advisory — **no binding threshold**, imp.md P1-14) is met by the SLURM run.
+**Decisions.** §10.3 honesty — synthetic random-RNA input is a legitimate *hardware latency* probe (throughput is length-
+bound, not content-bound); the report carries `is_science_result=False`/`advisory_only=True`/`binding=False` and the validator
+fails closed on each. The "clearly-hopeless" §7 stop is a **qualitative human** call from the reported number, **deliberately
+not** encoded as a numeric gate (P1 pins no latency budget — pinning one would violate §10.3); it fires post-run, if at all,
+and is **never** an auto-switch to RNA-FM (ADR-0002 D5). Cross-link **PRD §10.2/§18.1**, **ADR-0002**. **Commit.** `<SHA>` on
+`p1-14-rinalmo-throughput` (authoring commit; the measured result is the post-run commit). Feeds the P1 exit-gate
+"forward-throughput probe reported (advisory)" (PRD §18.1) + the pre-P5 sizing gate.
+
+## Step P1-14 (result) — 2026-07-15: RiNALMo forward-throughput probe — measured (advisory), NOT clearly-hopeless
+**Inputs.** The authored harness (`1f129e9`); `multimolecule/rinalmo-giga` @`2a71f6f9…` weights (node-local HF cache).
+**Process.** Ran `slurm/p1/rinalmo_throughput.sbatch` on **one cluster RTX A4000** (Ampere sm_86, 15.6 GiB; **SLURM job 513**,
+~4 min; §9.3 artifact-verified: `squeue` empty + `rinalmo_throughput.DONE` + a validator-clean report; `.err` = only the
+expected fresh-SS-head `MISSING`-param init notes, no traceback). bf16-autocast forward under `inference_mode`, CUDA-event
+timed. Hardened `_software_versions` to resolve versions via `importlib.metadata` (mm 0.1.0 exposes no top-level
+`__version__` → the run-time report recorded `multimolecule:"unknown"`; the committed report predates the tweak, authoritative
+pin is `envs/ml-rna.conda-lock.yml`=0.1.0). **Outputs.** measured `reports/p1/rinalmo_throughput.json` (git-tracked; the 2.5 GB
+weights re-fetchable by pinned revision, not committed) + the `_software_versions` hardening. **Validation.** candidates/sec/GPU
+**REPORTED (measured, advisory — no binding threshold, imp.md P1-14):** headline **encoder batch-1 @300 nt = 28.51
+cand/s/GPU**; length sweep batch-1 150→38.1, 200→37.8, 250→37.8, 300→28.5, 350→29.1; **best batched = 39.67 cand/s/GPU**
+(bs16; sweep 1→32 with **no OOM**, peak VRAM **4.48 GiB** of 15.6 → large batching headroom); encoder+SS-head O(L²) bracket
+batch-1 300→20.8. Report `validate_report` clean; `advisory_only/binding/is_science = True/False/False`. **Decisions.** §7
+"clearly-hopeless" check — **NOT** clearly-hopeless: on 8 A4000 ≈ 230–320 cand/s (~1e6 Stage-2 candidates ≈ <1 h; ~1e8 ≈
+~87 GPU-node-h, within a cluster budget), and the **binding** N (Stage-1 candidate density) is unknown until P2 → **no §7
+stop-and-ask; proceed** (advisory input only; **no** auto-switch to RNA-FM — ADR-0002 D5). The binding latency decision stays
+frozen to the **P5 sizing gate**. Cross-link **PRD §10.2/§18.1**, **ADR-0002**. **Commit.** `<SHA>` on
+`p1-14-rinalmo-throughput` (result commit). Satisfies PRD §18.1 "forward-throughput probe reported (advisory)"; feeds the
+pre-P5 sizing gate + P1-15.
