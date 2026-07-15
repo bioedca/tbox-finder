@@ -156,6 +156,7 @@ def _write_fold(fold_dir: Path, family: str, f1: float) -> None:
                 "tuned_threshold": 0.1,
                 "precision_mean": f1,
                 "recall_mean": f1,
+                "repo_id": R.REPO_ID,
                 "revision": R.REVISION,
                 "git_sha": "abc123",
                 "seed": R.SEED,
@@ -292,6 +293,7 @@ def test_module_main_dispatches_to_run_parity(tmp_path: Path) -> None:
         env=env,
         capture_output=True,
         text=True,
+        timeout=120,
     )
     assert proc.returncode == 0, f"dispatch failed: {proc.stderr}"
     assert "unrecognized arguments" not in proc.stderr  # would mean it hit staging main()

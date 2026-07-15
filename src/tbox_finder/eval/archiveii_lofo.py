@@ -587,8 +587,14 @@ def load_published_target(path: str | Path = DEFAULT_PUBLISHED_TARGET) -> dict:
         raise ValueError(f"published target families {sorted(pub)} != FAMILY_ORDER")
     if "margin_pp" not in gate or "stable_families" not in gate:
         raise ValueError("published target missing parity_gate.margin_pp/stable_families")
-    if len(gate["stable_families"]) != NUM_FAMILIES - 1:
-        raise ValueError("expected 8 stable families (telomerase carved out)")
+    stable = gate["stable_families"]
+    expected_stable = set(FAMILY_ORDER) - {TELOMERASE_FAMILY}
+    # Exact set AND length (guards duplicates / a telomerase-for-stable swap), not just count.
+    if len(stable) != len(expected_stable) or set(stable) != expected_stable:
+        raise ValueError(
+            f"parity_gate.stable_families must be exactly the 8 stable families "
+            f"(telomerase carved out); got {sorted(stable)}"
+        )
     return target
 
 
@@ -773,6 +779,7 @@ def aggregate_parity(
             "non_weighted_mean_f1": float(f1),
             "precision_mean": fold.get("precision_mean"),
             "recall_mean": fold.get("recall_mean"),
+            "repo_id": fold.get("repo_id"),
             "revision": fold.get("revision"),
             "git_sha": fold.get("git_sha"),
             "seed": fold.get("seed"),
@@ -780,17 +787,22 @@ def aggregate_parity(
     # Integrity (§10.3): every fold must have run on the correct family's held-out set
     # (matched record count vs the sourced target), on ONE pinned revision, from ONE
     # coherent code state — else the nine numbers are not a coherent parity measurement.
+    repo_ids = {folds[f]["repo_id"] for f in FAMILY_ORDER}
     revs = {folds[f]["revision"] for f in FAMILY_ORDER}
     shas = {folds[f]["git_sha"] for f in FAMILY_ORDER}
-    if len(revs) != 1:
-        raise ValueError(f"fold revisions disagree across folds: {sorted(map(str, revs))}")
-    if len(shas) != 1:
-        raise ValueError(f"fold git_sha disagrees across folds: {sorted(map(str, shas))}")
+    if None in repo_ids or len(repo_ids) != 1:
+        raise ValueError(f"fold repo_id missing/disagrees: {sorted(map(str, repo_ids))}")
+    if None in revs or len(revs) != 1:
+        raise ValueError(f"fold revision missing/disagrees: {sorted(map(str, revs))}")
+    if None in shas or len(shas) != 1:
+        raise ValueError(f"fold git_sha missing/disagrees: {sorted(map(str, shas))}")
     expected_counts = target.get("families", {})
     for fam in FAMILY_ORDER:
         want = expected_counts.get(fam, {}).get("n_test")
         got = folds[fam]["n_test"]
-        if want is not None and got is not None and int(want) != int(got):
+        if got is None:
+            raise ValueError(f"fold {fam}: missing n_test")
+        if want is not None and int(want) != int(got):
             raise ValueError(f"fold {fam}: n_test {got} != sourced target {want} (wrong split?)")
     verdict = decide_parity(per_family_mean, target)
     report = {
@@ -800,9 +812,9 @@ def aggregate_parity(
         "prd": "§10.2",
         "adr": "ADR-0002 D5",
         "checkpoint": {
-            "repo_id": folds[FAMILY_ORDER[0]].get("revision") and "multimolecule/rinalmo-giga",
-            "revision": folds[FAMILY_ORDER[0]].get("revision"),
-            "hub_url": "https://huggingface.co/multimolecule/rinalmo-giga",
+            "repo_id": folds[FAMILY_ORDER[0]]["repo_id"],
+            "revision": folds[FAMILY_ORDER[0]]["revision"],
+            "hub_url": f"https://huggingface.co/{folds[FAMILY_ORDER[0]]['repo_id']}",
         },
         "dataset": {
             "lofo_digest": target.get("dataset", {}).get("lofo_digest"),
@@ -892,6 +904,7 @@ def main(argv: list[str] | None = None) -> int:
 if __name__ == "__main__":  # pragma: no cover
     import sys
 
-    # ``--mode`` routes to the P1-13 parity CLI (run_parity, the sbatch entry);
-    # otherwise the P1-12 benchmark-staging CLI (the backbones.smk --dest-dir path).
-    raise SystemExit(run_parity() if "--mode" in sys.argv else main())
+    # ``--mode`` (space or ``--mode=`` form) routes to the P1-13 parity CLI (run_parity,
+    # the sbatch entry); otherwise the P1-12 benchmark-staging CLI (backbones.smk --dest-dir).
+    is_parity = any(a == "--mode" or a.startswith("--mode=") for a in sys.argv[1:])
+    raise SystemExit(run_parity() if is_parity else main())

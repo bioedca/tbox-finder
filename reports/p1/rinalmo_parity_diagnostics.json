@@ -23,20 +23,23 @@
   "test1_encoder_weight_diff": {
     "method": "scripts/rinalmo_weight_diff.py — convert official rinalmo_giga_pretrained.pt via multimolecule 0.1.0 _convert_checkpoint name-map + Wqkv.chunk(3) split; diff every ENCODER tensor vs the mirror (multimolecule/rinalmo-giga @2a71f6f9), excluding vocab-remapped rows",
     "n_encoder_tensors_shared": 497,
+    "n_bit_identical_torch_equal": 497,
     "n_identical_atol_1e-6": 497,
     "encoder_global_max_abs_diff": 0.0,
-    "all_encoder_identical": true,
-    "conclusion": "the mirror encoder is BYTE-IDENTICAL to the official Zenodo pretrained backbone (the conversion is a pure rename + Wqkv split, no value transform on encoder weights)"
+    "shape_or_dtype_mismatches": 0,
+    "keys_only_in_one_side": 0,
+    "all_encoder_bit_identical": true,
+    "conclusion": "the mirror encoder is BYTE-IDENTICAL to the official Zenodo pretrained backbone — measured exactly by torch.equal (same fp32 dtype + values) on all 497 encoder tensors with a complete key-set match, not merely within tolerance; the conversion is a pure rename + Wqkv split with no value transform on encoder weights"
   },
   "test2_released_ft_inference_parity": {
     "method": "scripts/rinalmo_ft_inference.py — overlay the released rinalmo_giga_ss_archiveII-<fam>_ft.pt (fine-tuned encoder + trained SS head) onto the mirror, run INFERENCE-ONLY decode with our forward+decode+metric (base_pair_prf, +/-1 slippage) on the held-out family; NO training. Laptop RTX 4060 GPU.",
-    "scope": "subset (3 biggest-gap families of 9)",
+    "scope": "subset — 3 of 9 families (the biggest-gap ones: tRNA, 5S, 23S); the remaining 6 families' released *_ft.pt were not downloaded",
     "families": {
-      "23S_rRNA": {"n_test": 15, "official_f1_native_thr": 0.847042, "native_threshold": 0.23, "official_f1_our_thr": 0.842426, "published_f1": 0.848, "our_refit_f1": 0.815154, "delta_official_vs_published_pp": -0.1, "delta_refit_vs_published_pp": -3.285},
-      "5S_rRNA": {"n_test": 1283, "official_f1_native_thr": 0.884226, "native_threshold": 0.07, "official_f1_our_thr": 0.884226, "published_f1": 0.884, "our_refit_f1": 0.842408, "delta_official_vs_published_pp": 0.02, "delta_refit_vs_published_pp": -4.159},
-      "tRNA": {"n_test": 557, "official_f1_native_thr": 0.931234, "native_threshold": 0.11, "official_f1_our_thr": 0.93597, "published_f1": 0.931, "our_refit_f1": 0.888564, "delta_official_vs_published_pp": 0.02, "delta_refit_vs_published_pp": -4.244}
+      "23S_rRNA": {"n_test": 15, "official_f1_native_thr": 0.847042, "native_threshold": 0.23, "official_f1_our_tuned_thr": 0.842426, "published_f1": 0.848, "our_refit_f1": 0.815154, "delta_official_native_thr_vs_published_pp": -0.096, "delta_official_tuned_thr_vs_published_pp": -0.557, "delta_refit_vs_published_pp": -3.285},
+      "5S_rRNA": {"n_test": 1283, "official_f1_native_thr": 0.884226, "native_threshold": 0.07, "official_f1_our_tuned_thr": 0.884226, "published_f1": 0.884, "our_refit_f1": 0.842408, "delta_official_native_thr_vs_published_pp": 0.023, "delta_official_tuned_thr_vs_published_pp": 0.023, "delta_refit_vs_published_pp": -4.159},
+      "tRNA": {"n_test": 557, "official_f1_native_thr": 0.931234, "native_threshold": 0.11, "official_f1_our_tuned_thr": 0.93597, "published_f1": 0.931, "our_refit_f1": 0.888564, "delta_official_native_thr_vs_published_pp": 0.023, "delta_official_tuned_thr_vs_published_pp": 0.497, "delta_refit_vs_published_pp": -4.244}
     },
-    "conclusion": "RiNALMo's RELEASED fine-tuned weights reproduce the published F1 to ~0.1 pp through OUR forward+decode+metric+splits -> the pipeline (and the multimolecule forward) is faithful; the ~2-4 pp mirror-run gap is the fresh-head REFIT (single-seed reproduce-by-refit vs RiNALMo's released optimized per-family checkpoints)"
+    "conclusion": "On the 3 tested families, RiNALMo's RELEASED fine-tuned weights reproduce the published F1 to ~0.1 pp (native threshold) / <=0.6 pp (our valid-tuned threshold) through OUR forward+decode+metric+splits -> the pipeline (and the multimolecule forward) is faithful for these families; the ~2-4 pp mirror-run gap is the fresh-head REFIT (single-seed reproduce-by-refit vs RiNALMo's released optimized per-family checkpoints). The mechanism (bit-identical backbone + released-weight reproduction) is family-independent, so the 3-family subset is decisive; a full 9-family Test 2 was not run."
   },
   "resolution": {
     "decision": "COMMIT Stage-2 to multimolecule/rinalmo-giga @2a71f6f98fb41dd2e6542a5e131d3778111d1468",

@@ -94,36 +94,44 @@ def main():
     only_conv = sorted(set(conv_enc) - set(mir_enc))
     only_mir = sorted(set(mir_enc) - set(conv_enc))
 
-    per_key = []
+    per_key = []  # shape mismatches (a name/arch drift, not a value diff)
     worst = []
-    n_identical = 0
+    n_identical = 0  # within atol 1e-6
+    n_bit_identical = 0  # exact: same dtype + shape + values (torch.equal)
     global_max = 0.0
     for k in shared:
-        a = conv_enc[k].float()
-        b = mir_enc[k].float()
-        if a.shape != b.shape:
-            per_key.append({"key": k, "shape_mismatch": [list(a.shape), list(b.shape)]})
+        ao, bo = conv_enc[k], mir_enc[k]  # ORIGINAL dtype (both fp32) for the exact check
+        if ao.shape != bo.shape or ao.dtype != bo.dtype:
+            per_key.append(
+                {
+                    "key": k,
+                    "mismatch": [list(ao.shape), str(ao.dtype), list(bo.shape), str(bo.dtype)],
+                }
+            )
             continue
+        n_bit_identical += int(torch.equal(ao, bo))
+        a, b = ao.float(), bo.float()
         mad = (a - b).abs().max().item()
-        denom = (a.norm() * b.norm()).item()
-        cos = (a.flatten() @ b.flatten()).item() / denom if denom > 0 else float("nan")
-        ident = mad <= 1e-6
-        n_identical += int(ident)
+        n_identical += int(mad <= 1e-6)
         global_max = max(global_max, mad)
-        worst.append((mad, k, cos))
+        worst.append((mad, k))
     worst.sort(reverse=True)
 
+    complete_keyset = len(shared) > 0 and not only_conv and not only_mir and not per_key
     report = {
         "test": "P1-13 Test 1 — official-vs-mirror encoder weight diff",
         "official_pt": OFFICIAL_PT,
         "mirror": f"{MIRROR_REPO}@{MIRROR_REV}",
         "n_encoder_keys_shared": len(shared),
         "n_encoder_keys_identical_atol_1e-6": n_identical,
+        "n_encoder_keys_bit_identical_torch_equal": n_bit_identical,
         "encoder_global_max_abs_diff": global_max,
-        "all_encoder_identical": (n_identical == len(shared) and len(shared) > 0),
-        "worst_10_encoder": [
-            {"key": k, "max_abs_diff": m, "cosine": c} for (m, k, c) in worst[:10]
-        ],
+        # BYTE-identical requires the full key-set to match AND every shared tensor
+        # to be exactly equal (same dtype + values) — not merely within tolerance.
+        "all_encoder_bit_identical": complete_keyset and n_bit_identical == len(shared),
+        "all_encoder_identical_atol_1e-6": complete_keyset and n_identical == len(shared),
+        "shape_or_dtype_mismatches": per_key,
+        "worst_10_encoder_max_abs_diff": [{"key": k, "max_abs_diff": m} for (m, k) in worst[:10]],
         "keys_only_in_converted_official": only_conv[:20],
         "keys_only_in_mirror": only_mir[:20],
         "n_only_conv": len(only_conv),

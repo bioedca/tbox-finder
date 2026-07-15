@@ -129,12 +129,13 @@ def main():
         if (k.startswith("model.encoder.") or k.startswith("ss_head."))
         and "word_embeddings" not in k
     }
-    # Shape-check every kept tensor against the model before loading (fail loud).
-    bad = [
-        (k, tuple(v.shape), tuple(msd[k].shape))
-        for k, v in keep.items()
-        if k not in msd or msd[k].shape != v.shape
-    ]
+    # Shape/name-check every kept tensor against the model before loading (fail loud).
+    # A name mismatch (k absent from msd) must reach this diagnostic, not KeyError.
+    bad = []
+    for k, v in keep.items():
+        expected = tuple(msd[k].shape) if k in msd else None
+        if expected != tuple(v.shape):
+            bad.append((k, tuple(v.shape), expected))
     if bad:
         print("SHAPE/NAME MISMATCH (first 10):", bad[:10], flush=True)
         raise SystemExit("ft->model name/shape map is wrong; inspect ss_native above")
@@ -168,6 +169,14 @@ def main():
         cpu_model = None
         for n, rec in enumerate(records):
             seq = R.normalize_rna(rec.sequence)
+            # Once a CUDA error has moved the model to CPU, stay on CPU for the rest
+            # (retrying CUDA would just device-mismatch every remaining record).
+            if cpu_model is not None:
+                ids = tokenizer(seq, return_tensors="pt")["input_ids"]
+                with torch.no_grad():
+                    logits = R.contact_logits(cpu_model, ids, tile_rows=tile_rows)
+                out.append((seq, torch.sigmoid(logits.float())[0].tolist(), rec.pairs))
+                continue
             try:
                 ids = tokenizer(seq, return_tensors="pt")["input_ids"].to(device)
                 with (
@@ -182,15 +191,14 @@ def main():
                 prob = torch.sigmoid(logits.float())[0].cpu().tolist()
             except RuntimeError as e:
                 torch.cuda.empty_cache()
-                if cpu_model is None:
-                    cpu_model = model.to("cpu")  # move once; big seqs go on CPU
+                cpu_model = model.to("cpu")  # move once; this + all later records go on CPU
                 ids = tokenizer(seq, return_tensors="pt")["input_ids"]
                 with torch.no_grad():
                     logits = R.contact_logits(cpu_model, ids, tile_rows=tile_rows)
                 prob = torch.sigmoid(logits.float())[0].tolist()
                 print(f"  [cpu-fallback] rec {n} len={len(seq)} ({str(e)[:40]})", flush=True)
             out.append((seq, prob, rec.pairs))
-            if device != "cpu" and cpu_model is None:
+            if device != "cpu":
                 torch.cuda.empty_cache()
         if cpu_model is not None:
             model.to(device)

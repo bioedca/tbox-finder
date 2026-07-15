@@ -52,7 +52,11 @@ export NVCC_PREPEND_FLAGS="${NVCC_PREPEND_FLAGS:-}"
 SPLITS_URL="https://github.com/marcellszi/dl-rna/releases/download/Data/ct-splits.tar.gz"
 SPLITS_SHA256="0ff7209016ba1775288572794e850d5857937c391d67c9ccacfe9ae77c0188e5"
 
-TASK="${SLURM_ARRAY_TASK_ID:-0}"
+if [ -z "${SLURM_ARRAY_TASK_ID:-}" ]; then
+  echo "FATAL: SLURM_ARRAY_TASK_ID is required — submit as an array job (--array=0-8), not plain sbatch" >&2
+  exit 2
+fi
+TASK="$SLURM_ARRAY_TASK_ID"
 if [ "$TASK" -lt 0 ] || [ "$TASK" -gt 8 ]; then
   echo "FATAL: SLURM_ARRAY_TASK_ID=$TASK out of range [0,8]" >&2
   exit 2
