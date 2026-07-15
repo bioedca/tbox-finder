@@ -1,0 +1,207 @@
+{
+  "adr": "ADR-0002 D5",
+  "checkpoint": {
+    "hub_url": "https://huggingface.co/multimolecule/rinalmo-giga",
+    "repo_id": "multimolecule/rinalmo-giga",
+    "revision": "2a71f6f98fb41dd2e6542a5e131d3778111d1468"
+  },
+  "commit_decision": "parity FAIL — CLAUDE.md §7 stop-and-ask; fallback: lbcb-sci/RiNALMo official weights (Zenodo 15043668) re-run",
+  "dataset": {
+    "lofo_digest": "69cae9aa01afe9ed37bb12c928b3038e7b2ffeb51b9d72156c7316b8ab728695",
+    "n_records": 3865
+  },
+  "fallback": "lbcb-sci/RiNALMo official weights (Zenodo 15043668) re-run",
+  "folds": {
+    "16S_rRNA": {
+      "git_sha": "9c2bd0209f993a16b3a27b60a4223a9c55bf707a",
+      "n_test": 67,
+      "non_weighted_mean_f1": 0.704994,
+      "precision_mean": 0.816768,
+      "recall_mean": 0.627432,
+      "revision": "2a71f6f98fb41dd2e6542a5e131d3778111d1468",
+      "seed": 42,
+      "tuned_threshold": 0.16
+    },
+    "23S_rRNA": {
+      "git_sha": "9c2bd0209f993a16b3a27b60a4223a9c55bf707a",
+      "n_test": 15,
+      "non_weighted_mean_f1": 0.815154,
+      "precision_mean": 0.926654,
+      "recall_mean": 0.732432,
+      "revision": "2a71f6f98fb41dd2e6542a5e131d3778111d1468",
+      "seed": 42,
+      "tuned_threshold": 0.18
+    },
+    "5S_rRNA": {
+      "git_sha": "9c2bd0209f993a16b3a27b60a4223a9c55bf707a",
+      "n_test": 1283,
+      "non_weighted_mean_f1": 0.842408,
+      "precision_mean": 0.969092,
+      "recall_mean": 0.752314,
+      "revision": "2a71f6f98fb41dd2e6542a5e131d3778111d1468",
+      "seed": 42,
+      "tuned_threshold": 0.23
+    },
+    "RNaseP_RNA": {
+      "git_sha": "9c2bd0209f993a16b3a27b60a4223a9c55bf707a",
+      "n_test": 454,
+      "non_weighted_mean_f1": 0.773337,
+      "precision_mean": 0.846383,
+      "recall_mean": 0.715514,
+      "revision": "2a71f6f98fb41dd2e6542a5e131d3778111d1468",
+      "seed": 42,
+      "tuned_threshold": 0.19
+    },
+    "SRP_RNA": {
+      "git_sha": "9c2bd0209f993a16b3a27b60a4223a9c55bf707a",
+      "n_test": 918,
+      "non_weighted_mean_f1": 0.682393,
+      "precision_mean": 0.793155,
+      "recall_mean": 0.626324,
+      "revision": "2a71f6f98fb41dd2e6542a5e131d3778111d1468",
+      "seed": 42,
+      "tuned_threshold": 0.17
+    },
+    "group_I_intron": {
+      "git_sha": "9c2bd0209f993a16b3a27b60a4223a9c55bf707a",
+      "n_test": 74,
+      "non_weighted_mean_f1": 0.680905,
+      "precision_mean": 0.76178,
+      "recall_mean": 0.622047,
+      "revision": "2a71f6f98fb41dd2e6542a5e131d3778111d1468",
+      "seed": 42,
+      "tuned_threshold": 0.21
+    },
+    "tRNA": {
+      "git_sha": "9c2bd0209f993a16b3a27b60a4223a9c55bf707a",
+      "n_test": 557,
+      "non_weighted_mean_f1": 0.888564,
+      "precision_mean": 0.959545,
+      "recall_mean": 0.837232,
+      "revision": "2a71f6f98fb41dd2e6542a5e131d3778111d1468",
+      "seed": 42,
+      "tuned_threshold": 0.17
+    },
+    "telomerase_RNA": {
+      "git_sha": "9c2bd0209f993a16b3a27b60a4223a9c55bf707a",
+      "n_test": 35,
+      "non_weighted_mean_f1": 0.095082,
+      "precision_mean": 0.166027,
+      "recall_mean": 0.067877,
+      "revision": "2a71f6f98fb41dd2e6542a5e131d3778111d1468",
+      "seed": 42,
+      "tuned_threshold": 0.23
+    },
+    "tmRNA": {
+      "git_sha": "9c2bd0209f993a16b3a27b60a4223a9c55bf707a",
+      "n_test": 462,
+      "non_weighted_mean_f1": 0.781139,
+      "precision_mean": 0.827413,
+      "recall_mean": 0.746648,
+      "revision": "2a71f6f98fb41dd2e6542a5e131d3778111d1468",
+      "seed": 42,
+      "tuned_threshold": 0.17
+    }
+  },
+  "gated_on": [
+    "mean_interfamily_f1",
+    "eight_stable_families"
+  ],
+  "margin_pp": 2.0,
+  "mean_interfamily": {
+    "abs_diff_pp": 2.3003,
+    "measured": 0.695997,
+    "published": 0.719,
+    "within_margin": false
+  },
+  "mean_within_margin": false,
+  "measured": true,
+  "per_family": {
+    "16S_rRNA": {
+      "abs_diff_pp": 3.1006,
+      "gated": true,
+      "measured": 0.704994,
+      "published": 0.736,
+      "stable": true,
+      "within_margin": false
+    },
+    "23S_rRNA": {
+      "abs_diff_pp": 3.2846,
+      "gated": true,
+      "measured": 0.815154,
+      "published": 0.848,
+      "stable": true,
+      "within_margin": false
+    },
+    "5S_rRNA": {
+      "abs_diff_pp": 4.1592,
+      "gated": true,
+      "measured": 0.842408,
+      "published": 0.884,
+      "stable": true,
+      "within_margin": false
+    },
+    "RNaseP_RNA": {
+      "abs_diff_pp": 2.4663,
+      "gated": true,
+      "measured": 0.773337,
+      "published": 0.798,
+      "stable": true,
+      "within_margin": false
+    },
+    "SRP_RNA": {
+      "abs_diff_pp": 1.7607,
+      "gated": true,
+      "measured": 0.682393,
+      "published": 0.7,
+      "stable": true,
+      "within_margin": true
+    },
+    "group_I_intron": {
+      "abs_diff_pp": 2.3905,
+      "gated": true,
+      "measured": 0.680905,
+      "published": 0.657,
+      "stable": true,
+      "within_margin": false
+    },
+    "tRNA": {
+      "abs_diff_pp": 4.2436,
+      "gated": true,
+      "measured": 0.888564,
+      "published": 0.931,
+      "stable": true,
+      "within_margin": false
+    },
+    "telomerase_RNA": {
+      "abs_diff_pp": 2.4918,
+      "gated": false,
+      "measured": 0.095082,
+      "published": 0.12,
+      "stable": false,
+      "within_margin": false
+    },
+    "tmRNA": {
+      "abs_diff_pp": 1.9861,
+      "gated": true,
+      "measured": 0.781139,
+      "published": 0.801,
+      "stable": true,
+      "within_margin": true
+    }
+  },
+  "prd": "§10.2",
+  "schema_version": 1,
+  "stable_families_all_pass": false,
+  "step": "P1-13",
+  "target_source": "Supplementary Table S2, RiNALMo F1_non_weighted column ('Inter-family generalization evaluation ... F1 scores for secondary structure prediction')",
+  "telomerase_carveout": {
+    "abs_diff_pp": 2.4918,
+    "gated": false,
+    "measured": 0.095082,
+    "published": 0.12,
+    "within_widened_band_high_pp": true,
+    "within_widened_band_low_pp": true
+  },
+  "verdict": "FAIL"
+}

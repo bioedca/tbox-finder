@@ -1,0 +1,53 @@
+{
+  "artifact": "official lbcb-sci/RiNALMo giga weights (Zenodo)",
+  "role": "P1-13 D5-parity diagnostics — the ground-truth official RiNALMo-giga checkpoints used to (a) prove the multimolecule/rinalmo-giga mirror encoder is bit-identical to official (Test 1) and (b) confirm the released per-family SS-fine-tuned checkpoints reproduce the published ArchiveII LOFO F1 through our pipeline (Test 2, subset).",
+  "source": {
+    "repository": "Zenodo record 15043668 (\"RiNALMo Model Weights\")",
+    "authors": "Penić RJ, Vlašić T, Huber RG, Wan Y, Šikić M",
+    "paper": "Penić et al., RiNALMo: general-purpose RNA language models can generalize well on structure prediction tasks, Nature Communications 2025",
+    "pmid": "40593636",
+    "doi": "10.1038/s41467-025-60872-5",
+    "pmcid": "PMC12219582",
+    "version_doi": "10.5281/zenodo.15043668",
+    "concept_doi": "10.5281/zenodo.10725748",
+    "license": "CC-BY-4.0",
+    "accessed_date": "2026-07-15",
+    "format": "raw PyTorch state_dict (.pt); native lbcb-sci/RiNALMo naming"
+  },
+  "files": [
+    {
+      "name": "rinalmo_giga_pretrained.pt",
+      "role": "official pretrained giga backbone (mirrored by multimolecule/rinalmo-giga)",
+      "url": "https://zenodo.org/records/15043668/files/rinalmo_giga_pretrained.pt?download=1",
+      "size_bytes": 2603787622,
+      "md5": "ae92ea0ce7ae3c0d54cf5f62c4ec9767",
+      "used_in": "Test 1 (encoder weight-tensor diff vs mirror)"
+    },
+    {
+      "name": "rinalmo_giga_ss_archiveII-tRNA_ft.pt",
+      "role": "official tRNA-held-out LOFO SS-fine-tuned checkpoint (encoder + trained SS head)",
+      "url": "https://zenodo.org/records/15043668/files/rinalmo_giga_ss_archiveII-tRNA_ft.pt?download=1",
+      "size_bytes": 2604816198,
+      "md5": "4cca9200320b6713a3fa646f1816ec39",
+      "used_in": "Test 2 (inference parity, subset)"
+    },
+    {
+      "name": "rinalmo_giga_ss_archiveII-5s_ft.pt",
+      "role": "official 5S-held-out LOFO SS-fine-tuned checkpoint",
+      "url": "https://zenodo.org/records/15043668/files/rinalmo_giga_ss_archiveII-5s_ft.pt?download=1",
+      "size_bytes": 2604815294,
+      "md5": "64dcc3b36f947a256cdca8bef8dc35a7",
+      "used_in": "Test 2 (inference parity, subset)"
+    },
+    {
+      "name": "rinalmo_giga_ss_archiveII-23s_ft.pt",
+      "role": "official 23S-held-out LOFO SS-fine-tuned checkpoint",
+      "url": "https://zenodo.org/records/15043668/files/rinalmo_giga_ss_archiveII-23s_ft.pt?download=1",
+      "size_bytes": 2604815746,
+      "md5": "33dee691d6d157b5cefe813ba5b2631a",
+      "used_in": "Test 2 (inference parity, subset)"
+    }
+  ],
+  "not_committed": "The .pt weight files themselves are NOT stored in the repo (globally .gitignored *.pt; re-fetchable from the pinned Zenodo URLs by the recorded md5). The record additionally holds the 6 other rinalmo_giga_ss_archiveII-*_ft.pt families (16s, grp1, RNaseP, srp, tmRNA, telomerase) + rinalmo_giga_ss_bprna_ft.pt + non-SS heads, not downloaded (subset diagnostics).",
+  "note": "CLAUDE.md §10.2/§10.3: sourced public, checksummed, provenance-complete — not fabricated. Corresponds to the HF mirror multimolecule/rinalmo-giga @2a71f6f98fb41dd2e6542a5e131d3778111d1468 (fp32)."
+}

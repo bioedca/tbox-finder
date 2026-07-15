@@ -1,0 +1,20 @@
+{
+  "device": "cuda",
+  "epochs": 15,
+  "family": "group_I_intron",
+  "git_sha": "9c2bd0209f993a16b3a27b60a4223a9c55bf707a",
+  "lr": 0.0001,
+  "measured": true,
+  "n_test": 74,
+  "n_train": 3412,
+  "n_valid": 379,
+  "non_weighted_mean_f1": 0.680905,
+  "precision_mean": 0.76178,
+  "recall_mean": 0.622047,
+  "repo_id": "multimolecule/rinalmo-giga",
+  "revision": "2a71f6f98fb41dd2e6542a5e131d3778111d1468",
+  "schema_version": 1,
+  "seed": 42,
+  "step": "P1-13",
+  "tuned_threshold": 0.21
+}

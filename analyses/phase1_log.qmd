@@ -639,3 +639,25 @@ fold would exit 2) and the sbatch's SHARD_OK stale-clean ran after the failure-p
 RiNALMoForSecondaryStructurePrediction API. Cross-link **PRD §10.2/§18.1**, **ADR-0002 D5/A8**. **Commit.** `<SHA>` on
 `p1-13-rinalmo-parity` (the **authoring commit**; the measured result + ADR-0002 parity amendment are the post-run commit).
 Feeds the P1 exit-gate "mirror parity confirmed" (decided post-run) + P1-14/P1-15.
+
+## Step P1-13 (result) — 2026-07-15: RiNALMo mirror parity — measured verdict + root-cause + commit-to-mirror
+**Inputs.** The authored harness (`9c2bd02`); ArchiveII nine-family LOFO splits (`ct-splits.tar.gz`, sha256 `0ff72090…`);
+`multimolecule/rinalmo-giga` @`2a71f6f9`; published target (`reports/p1/rinalmo_published_target.json`); official Zenodo
+15043668 weights (`data/external/rinalmo_official/provenance.json`). **Process.** Ran the array-per-fold LOFO fine-tune +
+decode on the cluster (**SLURM job 492**, 9 folds, RTX A4000, §9.3 artifact-verified: 9/9 `SHARD_OK` + `PARITY_FOLD_DONE`,
+no `.err` tracebacks); `archiveii_lofo.py --mode aggregate` → **verdict FAIL** (mean 0.6960 vs published 0.719, Δ 2.30 pp;
+6/8 stable families > ±2 pp; systematic, precision≫recall). Per §7 (gate NOT loosened) the FAIL was root-caused: two
+subagent audits found the training protocol + SS head + encoder config a faithful reproduction of `lbcb-sci/RiNALMo
+@2c2c5c14` (only FlashAttn→SDPA); **Test 1** (`scripts/rinalmo_weight_diff.py`) proved the mirror encoder **byte-identical**
+to the official Zenodo pretrained backbone (497/497 tensors, max-abs-diff 0.0 — the conversion is a pure rename+`Wqkv`-split);
+**Test 2** (`scripts/rinalmo_ft_inference.py`, subset) showed RiNALMo's released `*_ss_archiveII-*_ft.pt` reproduce the
+published F1 to **~0.1 pp** through our exact pipeline (23S 0.847/0.848, 5S 0.884/0.884, tRNA 0.931/0.931 at native
+threshold). **Outputs.** `reports/p1/rinalmo_parity.json` (FAIL, 9 folds) + `reports/p1/rinalmo_parity_folds/<family>.json`
+(×9) + `reports/p1/rinalmo_parity_diagnostics.json` (Test-1/2 evidence + resolution) + the two `scripts/` diagnostics +
+`data/external/rinalmo_official/provenance.json` + ADR-0002 **A9**. **Validation.** D5 gate refit-proxy **FAIL** (Δ 2.30 pp
+> ±2 pp) → **intent CONFIRMED by direct evidence** (encoder bit-identical + released weights reproduce published to ~0.1 pp)
+→ the ~2–4 pp gap is **fresh-head refit variance**, not backbone/pipeline infidelity. Satisfies PRD §18.1 "mirror parity
+confirmed." **Decisions.** Commit Stage-2 to `multimolecule/rinalmo-giga` @`2a71f6f9…`; **no** Zenodo-weights/RNA-FM fallback
+(the mirror already carries those exact weights). §10.3: the refit proxy stands as failed (reported, not hidden); commit
+rests on stronger direct evidence — cross-link **ADR-0002 A9** (user sign-off 2026-07-15), **PRD §10.2/§18.1**. **Commit.**
+`<SHA>` on `p1-13-rinalmo-parity` (result commit). Feeds P1-14 (throughput probe) + P1-15 (LoRA/FSDP) + the P1 exit gate.
