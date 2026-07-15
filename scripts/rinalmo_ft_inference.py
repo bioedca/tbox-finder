@@ -161,20 +161,27 @@ def main():
     print(f"{FAMILY}: valid={len(valid_recs)} test={len(test_recs)}", flush=True)
 
     # 4. Inference: tune threshold on valid (our method), score test; also native threshold.
+    # CPU-fallback state SHARED across both predict() calls: once a genuine CUDA error moves
+    # the model to CPU, every subsequent record (this call AND the next) runs on CPU — never
+    # restored to GPU (retrying would just re-OOM / device-mismatch).
+    fb = {"cpu_model": None}
+
+    def _is_cuda_error(exc):
+        s = str(exc).lower()
+        return "cuda" in s or "out of memory" in s or "device-side" in s
+
     def predict(records, tile_rows=48):
-        """Memory-robust per-structure forward: small tile + empty_cache; on a CUDA
-        error (WSL2 8GB card, long seqs) fall back to a CPU forward for that structure."""
+        """Memory-robust per-structure forward (small tile + empty_cache). A genuine CUDA
+        error (WSL2 8GB card, long seqs) triggers the shared CPU fallback; ANY other
+        RuntimeError (shape/input/model bug) is re-raised, not masked as a fallback."""
         model.eval()
         out = []
-        cpu_model = None
         for n, rec in enumerate(records):
             seq = R.normalize_rna(rec.sequence)
-            # Once a CUDA error has moved the model to CPU, stay on CPU for the rest
-            # (retrying CUDA would just device-mismatch every remaining record).
-            if cpu_model is not None:
+            if fb["cpu_model"] is not None:
                 ids = tokenizer(seq, return_tensors="pt")["input_ids"]
                 with torch.no_grad():
-                    logits = R.contact_logits(cpu_model, ids, tile_rows=tile_rows)
+                    logits = R.contact_logits(fb["cpu_model"], ids, tile_rows=tile_rows)
                 out.append((seq, torch.sigmoid(logits.float())[0].tolist(), rec.pairs))
                 continue
             try:
@@ -190,18 +197,18 @@ def main():
                     logits = R.contact_logits(model, ids, tile_rows=tile_rows)
                 prob = torch.sigmoid(logits.float())[0].cpu().tolist()
             except RuntimeError as e:
+                if not _is_cuda_error(e):
+                    raise  # a real bug (shape/input/model) — do not mask as a CUDA fallback
                 torch.cuda.empty_cache()
-                cpu_model = model.to("cpu")  # move once; this + all later records go on CPU
+                fb["cpu_model"] = model.to("cpu")  # this + all later records go on CPU
                 ids = tokenizer(seq, return_tensors="pt")["input_ids"]
                 with torch.no_grad():
-                    logits = R.contact_logits(cpu_model, ids, tile_rows=tile_rows)
+                    logits = R.contact_logits(fb["cpu_model"], ids, tile_rows=tile_rows)
                 prob = torch.sigmoid(logits.float())[0].tolist()
                 print(f"  [cpu-fallback] rec {n} len={len(seq)} ({str(e)[:40]})", flush=True)
             out.append((seq, prob, rec.pairs))
             if device != "cpu":
                 torch.cuda.empty_cache()
-        if cpu_model is not None:
-            model.to(device)
         return out
 
     val_preds = predict(valid_recs)

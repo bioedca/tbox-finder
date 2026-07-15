@@ -800,9 +800,14 @@ def aggregate_parity(
     for fam in FAMILY_ORDER:
         want = expected_counts.get(fam, {}).get("n_test")
         got = folds[fam]["n_test"]
+        if want is None:
+            raise ValueError(f"target {fam}: missing n_test")
         if got is None:
             raise ValueError(f"fold {fam}: missing n_test")
-        if want is not None and int(want) != int(got):
+        # Require integral counts; no lossy int() cast (which would let 1.9 masquerade as 1).
+        if type(want) is not int or type(got) is not int:
+            raise ValueError(f"fold {fam}: n_test must be an integer (want={want!r} got={got!r})")
+        if want != got:
             raise ValueError(f"fold {fam}: n_test {got} != sourced target {want} (wrong split?)")
     verdict = decide_parity(per_family_mean, target)
     report = {
