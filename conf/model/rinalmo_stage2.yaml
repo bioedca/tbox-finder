@@ -1,0 +1,57 @@
+# RiNALMo-giga Stage-2 backbone — pinned checkpoint + SS-parity protocol (P1-13).
+# Drives: src/tbox_finder/eval/rinalmo_parity.py :: run_single_fold (via
+#         archiveii_lofo.run_parity --mode fold).
+# ROLE: the RNA-side Stage-2 backbone (ADR-0001); this config records the pinned
+#   mirror + the published-parity fine-tuning protocol for the P1-13 gate (PRD
+#   §10.2; ADR-0002 D5). RiNALMo ingests SEQUENCE ONLY (no structure channel).
+# ADR pins: ADR-0002 — D5 (commit-to-RiNALMo, parity numerics), A8 (multimolecule
+#   0.1.0 + transformers 5.13.0 forward-fix), D2 (immutable revision, never `main`).
+#
+# The load-bearing scalars (repo_id / revision / hidden_dim / n_layer + the whole
+# fine-tuning protocol) are FROZEN IN CODE (rinalmo_parity.py), NOT here — no config
+# can weaken the checkpoint identity or the parity protocol. This file echoes them
+# for the record; a drift-guard test (tests/ml/test_parity_harness.py) asserts these
+# scalars equal the code constants. Seeding (CLAUDE.md §8.3): every stochastic step
+# passes an explicit seed.
+
+seed: 42
+
+# --- pinned checkpoint (loaded via multimolecule; transformers-native) ---
+repo_id: multimolecule/rinalmo-giga
+revision: 2a71f6f98fb41dd2e6542a5e131d3778111d1468   # immutable commit — never `main` (ADR-0002 D2/A8)
+trust_remote_code: false                              # multimolecule is transformers-native (ADR-0002 A2 K1)
+hub_url: https://huggingface.co/multimolecule/rinalmo-giga
+
+# --- checkpoint config facts (from config.json; asserted in code, echoed here) ---
+hidden_dim: 1280
+n_layer: 33
+n_heads: 20
+position_embedding: rotary
+max_position_embeddings: 1024
+
+# --- published SS-parity fine-tuning protocol (lbcb-sci/RiNALMo @2c2c5c14 + paper
+#     Methods; frozen in code, echoed for the record) ---
+optimizer: adam            # Adam, NOT AdamW
+lr: 1.0e-4                 # paper "10^-4" (the argparse 5e-4 default + 1e-5 class default are traps)
+weight_decay: 0.0          # no decay for SS fine-tuning
+epochs: 15
+batch_size: 1
+lr_schedule: linear        # LinearLR 1.0x -> 0.1x over 7000 steps, per-step, no warmup
+lr_decay_steps: 7000
+lr_end_factor: 0.1
+precision: 16-mixed        # fp16 autocast + GradScaler
+grad_clip: null            # none (upstream sets no gradient_clip_val)
+# gradual unfreezing: head only for epochs 0-2, then 3 top encoder layers every 3
+# epochs (top-down over the 33 `encoder.layer`), newly-unfrozen params at lr/10.
+unfreeze_start_epoch: 3
+unfreeze_every: 3
+unfreeze_blocks: 3
+unfreeze_denom_lr: 10.0
+
+# --- decode + metric (RiNALMo protocol; reused from eval/archiveii_lofo.py) ---
+threshold_min: 0.01        # validation-F1-tuned over 0.01..0.29
+threshold_max: 0.29
+slippage_tolerance_nt: 1
+canonical_pairs_only: true
+sharp_loop_min_dist: 4
+decode: greedy_one_pair_per_base   # pseudoknots allowed (NO non-crossing constraint)

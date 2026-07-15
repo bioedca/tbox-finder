@@ -64,6 +64,17 @@
 !/data/external/classII_positives/provenance.json
 !/data/external/classII_positives/classII_report.json
 
+# Carve-out: the P1-13 official-RiNALMo (Zenodo 15043668) provenance manifest ONLY
+# (URLs + md5 + license + DOI for the D5-parity diagnostics). The ~2.6 GB *.pt weight
+# files themselves stay ignored (globally *.pt below; re-fetchable by the recorded md5).
+!/data/external/rinalmo_official/
+!/data/external/rinalmo_official/provenance.json
+
+# The P1-13 parity per-shard SUCCESS markers + flock lock files (empty) are run signals,
+# not artifacts; the per-family <family>.json fold results ARE committed alongside the report.
+/reports/p1/rinalmo_parity_folds/SHARD_OK_*
+/reports/p1/rinalmo_parity_folds/.parity_*.lock
+
 # ── Snakemake working dir + rule run-logs (never committed) ──
 .snakemake/
 /logs/

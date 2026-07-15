@@ -555,6 +555,335 @@ def _provenance(manifest: LofoManifest, tarball: Path) -> dict:
 
 
 # --------------------------------------------------------------------------- #
+# RiNALMo mirror parity gate (P1-13): pure-stdlib verdict + orchestration
+# --------------------------------------------------------------------------- #
+# The heavy fine-tune + decode (torch + multimolecule) lives in the lazily-
+# imported sibling ``rinalmo_parity``; everything here is pure stdlib so the
+# verdict logic + report validator run in bare CI (CLAUDE.md §8.4). The parity
+# criterion is pinned by ADR-0002 D5 (delegated-margin carve-out, §2.3): the
+# mirror's inter-family LOFO F1 must land within the published SD — unusable
+# because the paper reports no per-family F1 SD (Fig. 4b shows distributions
+# only) — so the pinned **±N pp fallback governs**, N = 2 pp, applied to the
+# mean inter-family F1 and to each of the eight *stable* held-out families, with
+# telomerase carved out (published F1 0.12, near the failure floor, high-var).
+#: Default parity margin (pp). Authoritative source is the published-target
+#: JSON's ``parity_gate.margin_pp``; this mirrors ADR-0002 D5 for a bare check.
+PARITY_MARGIN_PP = 2.0
+TELOMERASE_FAMILY = "telomerase_RNA"
+#: Pre-registered fallback on a parity FAIL (PRD §10.2; ADR-0002 D5/D6(a)).
+ZENODO_FALLBACK = "lbcb-sci/RiNALMo official weights (Zenodo 15043668) re-run"
+DEFAULT_PUBLISHED_TARGET = "reports/p1/rinalmo_published_target.json"
+DEFAULT_PARITY_REPORT = "reports/p1/rinalmo_parity.json"
+DEFAULT_FOLD_DIR = "reports/p1/rinalmo_parity_folds"
+PARITY_SCHEMA_VERSION = 1
+
+
+def load_published_target(path: str | Path = DEFAULT_PUBLISHED_TARGET) -> dict:
+    """Load + sanity-check the P1-12 published RiNALMo parity target (fail-loud)."""
+    target = json.loads(Path(path).read_text())
+    gate = target.get("parity_gate", {})
+    pub = target.get("published_f1", {}).get("per_family", {})
+    if set(pub) != set(FAMILY_ORDER):
+        raise ValueError(f"published target families {sorted(pub)} != FAMILY_ORDER")
+    if "margin_pp" not in gate or "stable_families" not in gate:
+        raise ValueError("published target missing parity_gate.margin_pp/stable_families")
+    stable = gate["stable_families"]
+    expected_stable = set(FAMILY_ORDER) - {TELOMERASE_FAMILY}
+    # Exact set AND length (guards duplicates / a telomerase-for-stable swap), not just count.
+    if len(stable) != len(expected_stable) or set(stable) != expected_stable:
+        raise ValueError(
+            f"parity_gate.stable_families must be exactly the 8 stable families "
+            f"(telomerase carved out); got {sorted(stable)}"
+        )
+    return target
+
+
+def aggregate_family_f1(per_family_record_f1: dict[str, list[float]]) -> dict[str, float]:
+    """Non-weighted per-structure mean F1 within each family (the non-weighted
+    column RiNALMo reports; an empty family scores 0.0, never nan)."""
+    out: dict[str, float] = {}
+    for fam, vals in per_family_record_f1.items():
+        out[fam] = (sum(vals) / len(vals)) if vals else 0.0
+    return out
+
+
+def decide_parity(measured_family_f1: dict[str, float], target: dict) -> dict:
+    """Decide the RiNALMo mirror parity verdict (ADR-0002 D5; pure arithmetic).
+
+    Gates (target JSON ``parity_gate``): PASS iff the measured **nine-family**
+    mean inter-family F1 is within ``margin_pp`` of the published mean AND each
+    of the **eight stable** families is within ``margin_pp`` of its published
+    F1. Telomerase (published 0.12) is carved OUT of the pass/fail decision
+    (not in ``gated_on``) and reported with an advisory widened band. FAIL sets
+    the pre-registered Zenodo fallback. Never fabricates: measured F1 in only.
+    """
+    gate = target["parity_gate"]
+    margin = gate["margin_pp"] / 100.0
+    stable = list(gate["stable_families"])
+    telo = gate["telomerase_carveout"]
+    telo_band = telo["widened_band_pp"]
+    published = target["published_f1"]["per_family"]
+    published_mean = target["published_f1"]["mean_interfamily"]
+
+    missing = [f for f in FAMILY_ORDER if f not in measured_family_f1]
+    if missing:
+        raise ValueError(f"measured F1 missing families: {missing}")
+    for f, v in measured_family_f1.items():
+        if f not in FAMILY_ORDER:
+            raise ValueError(f"unknown family in measured F1: {f!r}")
+        if not (0.0 <= v <= 1.0):
+            raise ValueError(f"measured F1 for {f} out of [0,1]: {v}")
+
+    measured_mean = sum(measured_family_f1[f] for f in FAMILY_ORDER) / NUM_FAMILIES
+    eps = 1e-12
+
+    per_family: dict[str, dict] = {}
+    for f in FAMILY_ORDER:
+        d = abs(measured_family_f1[f] - published[f])
+        per_family[f] = {
+            "published": published[f],
+            "measured": round(measured_family_f1[f], 6),
+            "abs_diff_pp": round(d * 100.0, 4),
+            "within_margin": d <= margin + eps,
+            "stable": f in stable,
+            "gated": f in stable,
+        }
+
+    stable_all_pass = all(per_family[f]["within_margin"] for f in stable)
+    mean_d = abs(measured_mean - published_mean)
+    mean_within = mean_d <= margin + eps
+
+    td = abs(measured_family_f1[TELOMERASE_FAMILY] - telo["published_f1"])
+    telo_diag = {
+        "published": telo["published_f1"],
+        "measured": round(measured_family_f1[TELOMERASE_FAMILY], 6),
+        "abs_diff_pp": round(td * 100.0, 4),
+        "within_widened_band_low_pp": td <= telo_band[0] / 100.0 + eps,
+        "within_widened_band_high_pp": td <= telo_band[1] / 100.0 + eps,
+        "gated": False,
+    }
+
+    verdict = "PASS" if (mean_within and stable_all_pass) else "FAIL"
+    return {
+        "verdict": verdict,
+        "margin_pp": gate["margin_pp"],
+        "gated_on": list(gate["gated_on"]),
+        "mean_interfamily": {
+            "published": published_mean,
+            "measured": round(measured_mean, 6),
+            "abs_diff_pp": round(mean_d * 100.0, 4),
+            "within_margin": mean_within,
+        },
+        "per_family": per_family,
+        "telomerase_carveout": telo_diag,
+        "stable_families_all_pass": stable_all_pass,
+        "mean_within_margin": mean_within,
+        "fallback": None if verdict == "PASS" else ZENODO_FALLBACK,
+        "commit_decision": (
+            "commit to multimolecule/rinalmo-giga"
+            if verdict == "PASS"
+            else f"parity FAIL — CLAUDE.md §7 stop-and-ask; fallback: {ZENODO_FALLBACK}"
+        ),
+    }
+
+
+def validate_parity_report(report: dict, *, target: dict | None = None) -> None:
+    """Fail-closed report validator (CLAUDE.md §8.4/§10.3): a report cannot claim
+    PASS without a real measurement + internally-consistent gate outcomes."""
+    if report.get("measured") is not True:
+        raise ValueError("parity report must set measured=true (no unmeasured PASS)")
+    if report.get("verdict") not in {"PASS", "FAIL"}:
+        raise ValueError(f"bad verdict {report.get('verdict')!r}")
+    pf = report.get("per_family", {})
+    if set(pf) != set(FAMILY_ORDER):
+        raise ValueError("parity report per_family must cover all nine families")
+    for fam, entry in pf.items():
+        m = entry.get("measured")
+        if not isinstance(m, (int, float)) or not (0.0 <= float(m) <= 1.0):
+            raise ValueError(f"parity report {fam} measured F1 out of [0,1]: {m}")
+    verdict = report["verdict"]
+    mean_ok = report.get("mean_within_margin")
+    stable_ok = report.get("stable_families_all_pass")
+    # Recompute the gate outcome from the report's OWN per-family table (measured vs
+    # published + margin) and assert it equals the stored summary flags — a report may not
+    # claim a gate outcome its per-family entries contradict (catches a hand-edited or
+    # stale-code report the emitting path would never produce; §8.4/§10.3 fail-closed).
+    margin_pp = report.get("margin_pp")
+    if isinstance(margin_pp, (int, float)):
+        m = margin_pp / 100.0 + 1e-9
+        stable_fams = [f for f, e in pf.items() if e.get("stable")]
+        recomputed_stable = all(
+            abs(float(pf[f]["measured"]) - float(pf[f]["published"])) <= m for f in stable_fams
+        )
+        if bool(stable_ok) != recomputed_stable:
+            raise ValueError("stable_families_all_pass contradicts the per-family table")
+        mi = report.get("mean_interfamily")
+        if isinstance(mi, dict) and "measured" in mi and "published" in mi:
+            recomputed_mean = abs(float(mi["measured"]) - float(mi["published"])) <= m
+            if bool(mean_ok) != recomputed_mean:
+                raise ValueError("mean_within_margin contradicts mean_interfamily")
+    if verdict == "PASS":
+        if not (mean_ok and stable_ok):
+            raise ValueError("PASS verdict but mean/stable gate did not pass")
+        if report.get("fallback") is not None:
+            raise ValueError("PASS verdict must not carry a fallback")
+    else:  # FAIL
+        if mean_ok and stable_ok:
+            raise ValueError("FAIL verdict but both gates passed (inconsistent)")
+        if not report.get("fallback"):
+            raise ValueError("FAIL verdict must carry the pre-registered fallback")
+    if target is not None:
+        want = target.get("dataset", {}).get("lofo_digest")
+        got = report.get("dataset", {}).get("lofo_digest")
+        if want and got and want != got:
+            raise ValueError(f"parity report LOFO digest {got} != target {want}")
+
+
+def _fold_family(fold_index: int) -> str:
+    if not (0 <= fold_index < NUM_FAMILIES):
+        raise ValueError(f"fold_index must be in [0,{NUM_FAMILIES}); got {fold_index}")
+    return FAMILY_ORDER[fold_index]
+
+
+def aggregate_parity(
+    fold_dir: str | Path = DEFAULT_FOLD_DIR,
+    *,
+    target_path: str | Path = DEFAULT_PUBLISHED_TARGET,
+    out_path: str | Path = DEFAULT_PARITY_REPORT,
+) -> dict:
+    """Read the nine per-fold JSONs, decide parity, write the final report.
+
+    Pure stdlib: consumes the *measured* per-fold F1 that the (torch) fold jobs
+    produced. Fails loud if any fold is missing or not measured.
+    """
+    fold_dir = Path(fold_dir)
+    target = load_published_target(target_path)
+    per_family_mean: dict[str, float] = {}
+    folds: dict[str, dict] = {}
+    for fam in FAMILY_ORDER:
+        fp = fold_dir / f"{fam}.json"
+        if not fp.is_file():
+            raise FileNotFoundError(f"missing per-fold parity result: {fp}")
+        fold = json.loads(fp.read_text())
+        if fold.get("measured") is not True:
+            raise ValueError(f"fold {fam} is not measured=true")
+        if fold.get("family") != fam:
+            raise ValueError(f"fold file {fp} family mismatch: {fold.get('family')!r}")
+        f1 = fold.get("non_weighted_mean_f1")
+        if not isinstance(f1, (int, float)) or not (0.0 <= float(f1) <= 1.0):
+            raise ValueError(f"fold {fam} non_weighted_mean_f1 out of [0,1]: {f1}")
+        per_family_mean[fam] = float(f1)
+        folds[fam] = {
+            "n_test": fold.get("n_test"),
+            "tuned_threshold": fold.get("tuned_threshold"),
+            "non_weighted_mean_f1": float(f1),
+            "precision_mean": fold.get("precision_mean"),
+            "recall_mean": fold.get("recall_mean"),
+            "repo_id": fold.get("repo_id"),
+            "revision": fold.get("revision"),
+            "git_sha": fold.get("git_sha"),
+            "seed": fold.get("seed"),
+        }
+    # Integrity (§10.3): every fold must have run on the correct family's held-out set
+    # (matched record count vs the sourced target), on ONE pinned revision, from ONE
+    # coherent code state — else the nine numbers are not a coherent parity measurement.
+    repo_ids = {folds[f]["repo_id"] for f in FAMILY_ORDER}
+    revs = {folds[f]["revision"] for f in FAMILY_ORDER}
+    shas = {folds[f]["git_sha"] for f in FAMILY_ORDER}
+    if None in repo_ids or len(repo_ids) != 1:
+        raise ValueError(f"fold repo_id missing/disagrees: {sorted(map(str, repo_ids))}")
+    if None in revs or len(revs) != 1:
+        raise ValueError(f"fold revision missing/disagrees: {sorted(map(str, revs))}")
+    if None in shas or len(shas) != 1:
+        raise ValueError(f"fold git_sha missing/disagrees: {sorted(map(str, shas))}")
+    expected_counts = target.get("families", {})
+    for fam in FAMILY_ORDER:
+        want = expected_counts.get(fam, {}).get("n_test")
+        got = folds[fam]["n_test"]
+        if want is None:
+            raise ValueError(f"target {fam}: missing n_test")
+        if got is None:
+            raise ValueError(f"fold {fam}: missing n_test")
+        # Require integral counts; no lossy int() cast (which would let 1.9 masquerade as 1).
+        if type(want) is not int or type(got) is not int:
+            raise ValueError(f"fold {fam}: n_test must be an integer (want={want!r} got={got!r})")
+        if want != got:
+            raise ValueError(f"fold {fam}: n_test {got} != sourced target {want} (wrong split?)")
+    verdict = decide_parity(per_family_mean, target)
+    report = {
+        "schema_version": PARITY_SCHEMA_VERSION,
+        "step": "P1-13",
+        "measured": True,
+        "prd": "§10.2",
+        "adr": "ADR-0002 D5",
+        "checkpoint": {
+            "repo_id": folds[FAMILY_ORDER[0]]["repo_id"],
+            "revision": folds[FAMILY_ORDER[0]]["revision"],
+            "hub_url": f"https://huggingface.co/{folds[FAMILY_ORDER[0]]['repo_id']}",
+        },
+        "dataset": {
+            "lofo_digest": target.get("dataset", {}).get("lofo_digest"),
+            "n_records": target.get("dataset", {}).get("n_records"),
+        },
+        "target_source": target.get("source", {}).get("location"),
+        "folds": folds,
+        **verdict,
+    }
+    validate_parity_report(report, target=target)
+    Path(out_path).parent.mkdir(parents=True, exist_ok=True)
+    Path(out_path).write_text(
+        json.dumps(report, indent=2, sort_keys=True, ensure_ascii=False) + "\n"
+    )
+    return report
+
+
+def run_parity(argv: list[str] | None = None) -> int:
+    """P1-13 entry (imp.md Rule/Entry). ``--mode fold`` fine-tunes + scores one
+    LOFO fold on the ``multimolecule/rinalmo-giga`` mirror (heavy; delegates to
+    the lazily-imported ``rinalmo_parity``); ``--mode aggregate`` decides parity
+    from the nine per-fold results (pure stdlib)."""
+    parser = argparse.ArgumentParser(
+        prog="archiveii_lofo parity",
+        description="RiNALMo mirror parity gate (P1-13; PRD §10.2, ADR-0002 D5).",
+    )
+    parser.add_argument("--mode", choices=("fold", "aggregate"), required=True)
+    parser.add_argument("--fold-index", type=int, default=None, help="0..8 (fold mode)")
+    parser.add_argument(
+        "--fam-fold-root", default=None, help="extracted ct/fam-fold root (fold mode)"
+    )
+    parser.add_argument("--fold-dir", default=DEFAULT_FOLD_DIR)
+    parser.add_argument("--target", default=DEFAULT_PUBLISHED_TARGET)
+    parser.add_argument("--out", default=DEFAULT_PARITY_REPORT)
+    args = parser.parse_args(argv)
+
+    if args.mode == "aggregate":
+        report = aggregate_parity(args.fold_dir, target_path=args.target, out_path=args.out)
+        print(
+            f"parity {report['verdict']}: mean {report['mean_interfamily']['measured']:.4f} "
+            f"vs {report['mean_interfamily']['published']} "
+            f"(Δ {report['mean_interfamily']['abs_diff_pp']} pp); "
+            f"stable_all_pass={report['stable_families_all_pass']} -> {report['commit_decision']}"
+        )
+        return 0
+
+    # fold mode — heavy torch/multimolecule path (lazy import; bare CI never hits this)
+    if args.fold_index is None:
+        raise SystemExit("--fold-index is required in --mode fold")
+    family = _fold_family(args.fold_index)
+    from tbox_finder.eval import rinalmo_parity  # noqa: PLC0415 (lazy heavy import)
+
+    out = rinalmo_parity.run_single_fold(
+        family,
+        fam_fold_root=args.fam_fold_root,
+        fold_dir=args.fold_dir,
+    )
+    print(
+        f"fold {family}: non_weighted_mean_f1={out['non_weighted_mean_f1']:.4f} -> {out['_path']}"
+    )
+    return 0
+
+
+# --------------------------------------------------------------------------- #
 # CLI
 # --------------------------------------------------------------------------- #
 def main(argv: list[str] | None = None) -> int:
@@ -578,4 +907,9 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":  # pragma: no cover
-    raise SystemExit(main())
+    import sys
+
+    # ``--mode`` (space or ``--mode=`` form) routes to the P1-13 parity CLI (run_parity,
+    # the sbatch entry); otherwise the P1-12 benchmark-staging CLI (backbones.smk --dest-dir).
+    is_parity = any(a == "--mode" or a.startswith("--mode=") for a in sys.argv[1:])
+    raise SystemExit(run_parity() if is_parity else main())

@@ -1,0 +1,20 @@
+{
+  "device": "cuda",
+  "epochs": 15,
+  "family": "SRP_RNA",
+  "git_sha": "9c2bd0209f993a16b3a27b60a4223a9c55bf707a",
+  "lr": 0.0001,
+  "measured": true,
+  "n_test": 918,
+  "n_train": 2653,
+  "n_valid": 294,
+  "non_weighted_mean_f1": 0.682393,
+  "precision_mean": 0.793155,
+  "recall_mean": 0.626324,
+  "repo_id": "multimolecule/rinalmo-giga",
+  "revision": "2a71f6f98fb41dd2e6542a5e131d3778111d1468",
+  "schema_version": 1,
+  "seed": 42,
+  "step": "P1-13",
+  "tuned_threshold": 0.17
+}

@@ -600,3 +600,64 @@ unchanged) + `docs/decisions/ADR-0002` A8 + a `test_env_manifest` regression. **
 + recomputed hash chosen over hand-editing text or a fragile transformers downgrade/shim; cross-link **ADR-0002 A8/D5/D8**,
 **CLAUDE.md §3.1/§7**. **Commit.** `<SHA>` on `p1-13-ml-rna-fix` (feature branch → squash PR). Unblocks **P1-13** (the RiNALMo
 mirror parity harness).
+
+## Step P1-13 — 2026-07-13: RiNALMo mirror parity harness (authored; per-fold LOFO SS fine-tune + verdict core)
+**Inputs.** The P1-12 nine-family LOFO splits (dl-rna `ct/fam-fold`; `ct-splits.tar.gz` sha256 `0ff72090…`) + the SS
+base-pair-F1 metric (`eval/archiveii_lofo.py`) + the sourced published target (`reports/p1/rinalmo_published_target.json`:
+mean 0.719, tRNA 0.931, telomerase 0.120); the pinned mirror `multimolecule/rinalmo-giga` @ `2a71f6f98fb41dd2e6542a5e131d3778111d1468`
+under `tbox-ml-rna` (transformers 5.13.0 + multimolecule 0.1.0; ADR-0002 A8). **Process.** Authored the torch half of the
+parity gate. `src/tbox_finder/eval/rinalmo_parity.py::run_single_fold` fine-tunes the **mirror's OWN** fresh
+`RiNALMoSecondaryStructurePredictionHead` (certifies the mirror, not a re-implementation) on each fold's eight-family
+complement and scores the held-out family; the pure-stdlib verdict core (`decide_parity`/`aggregate_parity`/
+`validate_parity_report`; ±2 pp on the mean + the 8 stable families, telomerase carved out) stays bare-CI-importable and
+consumes the per-fold JSONs. The protocol was sourced verbatim from **lbcb-sci/RiNALMo @2c2c5c14 + the paper Methods** (two
+research subagents) and cross-checked against the installed `multimolecule` port (a CPU introspection of the cached model):
+Adam **lr=1e-4** (the paper "10⁻⁴" — **not** the 5e-4 argparse trap nor the 1e-5 class-default decoy) wd=0, 15 ep, batch=1,
+LinearLR 1.0→0.1×/7000 steps, top-down gradual unfreeze 3-layers/3-ep over the 33 `encoder.layer` + lr/10 for newly-unfrozen,
+BCEWithLogits on the strict upper triangle, val-F1-tuned decode threshold ∈[0.01,0.29] + **greedy one-pair-per-base** canonical
++ sharp-loop decode (pseudoknots allowed — **not** non-crossing), ±1-slippage non-weighted-mean F1 (reuses `base_pair_prf`).
+Three resume-plan corrections were applied from the source: **lr 1e-4** (was 1e-5); **no 500-nt crop** (a direct measurement
+showed every train/valid/test record is **≤512 nt**, so the >500→valid routing already bounds it and row-tiling is a safety
+net, not load-bearing); **greedy one-pair-per-base, not non-crossing**. **Outputs.** `src/tbox_finder/eval/rinalmo_parity.py`
++ the verdict core in `archiveii_lofo.py` (+ a `__main__` dispatch so `-m … --mode` reaches `run_parity`, `--dest-dir` still
+reaches the P1-12 staging `main`) + `conf/model/rinalmo_stage2.yaml` (echoes the pins + a code drift-guard) +
+`slurm/p1/rinalmo_parity.sbatch` (array-per-fold; node-local tarball download+sha256 + HF cache off HOME; per-shard SHARD_OK)
++ `tests/ml/test_parity_harness.py` (3 tiers). The **measured** `reports/p1/rinalmo_parity.json` + verdict + the ADR-0002
+parity amendment are produced by the SLURM run (a post-run commit, next session). **Validation.** No measured F1 yet (authoring
+gate): bare-CI **18 pass** / torch tier **24 pass** (tiny-model tiling-invariance, gradual-unfreeze toggling, head-learns,
+eval-builds-no-graph) / full bare suite **720 passed** (no regression); ruff+black+snakemake-lint clean. Local de-risking
+(not gates): a CPU introspection pinned `encoder.layer` (len 33) + the CLS/EOS strip + `(1,L+2,1280)`; a GPU sizing smoke on
+the laptop 4060 (~80→139 ms/step; overfit-one-structure → self-F1 **1.000**, loss 0.61→0.0004, i.e. the training loop
+optimizes) grounded the est-wall (~2.5–4 h/fold → `--time 6h`, gres a4000:1, array 0-8). **Decisions.** Fine-tune the mirror's
+shipped SS head (not a reimpl) for parity faithfulness. A **pre-commit adversarial 6-lens review** (26 agents:
+correctness/protocol-fidelity/ADR-PRD/test-adequacy/reuse/sbatch-safety → adversarial verify) → **9 confirmed / 20 raw**, all
+fixed before push — two showstoppers: the module `-m` entry dispatched to the P1-12 staging `main()` not `run_parity` (every
+fold would exit 2) and the sbatch's SHARD_OK stale-clean ran after the failure-prone conda; plus eval defeating `no_grad`,
+`validate_parity_report` now recomputes the gate from the per-family table, `aggregate_parity` now cross-checks per-fold
+`n_test`/revision/git_sha, and the missing dispatch/validator-bite/integrity/`_crop` tests. The "long-16S/23S OOM" finding was
+**refuted by measurement** (all records ≤512 nt). context7 §3.3: `multimolecule` RiNALMoModel /
+RiNALMoForSecondaryStructurePrediction API. Cross-link **PRD §10.2/§18.1**, **ADR-0002 D5/A8**. **Commit.** `<SHA>` on
+`p1-13-rinalmo-parity` (the **authoring commit**; the measured result + ADR-0002 parity amendment are the post-run commit).
+Feeds the P1 exit-gate "mirror parity confirmed" (decided post-run) + P1-14/P1-15.
+
+## Step P1-13 (result) — 2026-07-15: RiNALMo mirror parity — measured verdict + root-cause + commit-to-mirror
+**Inputs.** The authored harness (`9c2bd02`); ArchiveII nine-family LOFO splits (`ct-splits.tar.gz`, sha256 `0ff72090…`);
+`multimolecule/rinalmo-giga` @`2a71f6f9`; published target (`reports/p1/rinalmo_published_target.json`); official Zenodo
+15043668 weights (`data/external/rinalmo_official/provenance.json`). **Process.** Ran the array-per-fold LOFO fine-tune +
+decode on the cluster (**SLURM job 492**, 9 folds, RTX A4000, §9.3 artifact-verified: 9/9 `SHARD_OK` + `PARITY_FOLD_DONE`,
+no `.err` tracebacks); `archiveii_lofo.py --mode aggregate` → **verdict FAIL** (mean 0.6960 vs published 0.719, Δ 2.30 pp;
+6/8 stable families > ±2 pp; systematic, precision≫recall). Per §7 (gate NOT loosened) the FAIL was root-caused: two
+subagent audits found the training protocol + SS head + encoder config a faithful reproduction of `lbcb-sci/RiNALMo
+@2c2c5c14` (only FlashAttn→SDPA); **Test 1** (`scripts/rinalmo_weight_diff.py`) proved the mirror encoder **byte-identical**
+to the official Zenodo pretrained backbone (497/497 tensors, max-abs-diff 0.0 — the conversion is a pure rename+`Wqkv`-split);
+**Test 2** (`scripts/rinalmo_ft_inference.py`, subset) showed RiNALMo's released `*_ss_archiveII-*_ft.pt` reproduce the
+published F1 to **~0.1 pp** through our exact pipeline (23S 0.847/0.848, 5S 0.884/0.884, tRNA 0.931/0.931 at native
+threshold). **Outputs.** `reports/p1/rinalmo_parity.json` (FAIL, 9 folds) + `reports/p1/rinalmo_parity_folds/<family>.json`
+(×9) + `reports/p1/rinalmo_parity_diagnostics.json` (Test-1/2 evidence + resolution) + the two `scripts/` diagnostics +
+`data/external/rinalmo_official/provenance.json` + ADR-0002 **A9**. **Validation.** D5 gate refit-proxy **FAIL** (Δ 2.30 pp
+> ±2 pp) → **intent CONFIRMED by direct evidence** (encoder bit-identical + released weights reproduce published to ~0.1 pp)
+→ the ~2–4 pp gap is **fresh-head refit variance**, not backbone/pipeline infidelity. Satisfies PRD §18.1 "mirror parity
+confirmed." **Decisions.** Commit Stage-2 to `multimolecule/rinalmo-giga` @`2a71f6f9…`; **no** Zenodo-weights/RNA-FM fallback
+(the mirror already carries those exact weights). §10.3: the refit proxy stands as failed (reported, not hidden); commit
+rests on stronger direct evidence — cross-link **ADR-0002 A9** (user sign-off 2026-07-15), **PRD §10.2/§18.1**. **Commit.**
+`<SHA>` on `p1-13-rinalmo-parity` (result commit). Feeds P1-14 (throughput probe) + P1-15 (LoRA/FSDP) + the P1 exit gate.

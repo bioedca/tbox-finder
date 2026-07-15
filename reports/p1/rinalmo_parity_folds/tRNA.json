@@ -1,0 +1,20 @@
+{
+  "device": "cuda",
+  "epochs": 15,
+  "family": "tRNA",
+  "git_sha": "9c2bd0209f993a16b3a27b60a4223a9c55bf707a",
+  "lr": 0.0001,
+  "measured": true,
+  "n_test": 557,
+  "n_train": 2978,
+  "n_valid": 330,
+  "non_weighted_mean_f1": 0.888564,
+  "precision_mean": 0.959545,
+  "recall_mean": 0.837232,
+  "repo_id": "multimolecule/rinalmo-giga",
+  "revision": "2a71f6f98fb41dd2e6542a5e131d3778111d1468",
+  "schema_version": 1,
+  "seed": 42,
+  "step": "P1-13",
+  "tuned_threshold": 0.17
+}

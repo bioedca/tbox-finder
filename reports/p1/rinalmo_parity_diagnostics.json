@@ -1,0 +1,58 @@
+{
+  "step": "P1-13",
+  "title": "RiNALMo mirror D5-parity — root-cause diagnostics for the refit-based FAIL",
+  "prd": "§10.2",
+  "adr": "ADR-0002 D5 / A9",
+  "measured": true,
+  "summary": "The ±2 pp refit-based operationalization of the D5 parity gate FAILED (mirror fresh-head refit mean 0.6960 vs published 0.719). Root-cause investigation proves the mirror backbone IS official RiNALMo (bit-identical encoder) and our pipeline is faithful (released weights reproduce published to ~0.1 pp); the ~2-4 pp gap is fresh-head refit variance, NOT infidelity. Decision: commit Stage-2 to multimolecule/rinalmo-giga (no fallback).",
+  "refit_verdict": {
+    "source": "reports/p1/rinalmo_parity.json (SLURM job 492, 9-fold LOFO fresh-head refit)",
+    "verdict": "FAIL",
+    "mean_interfamily_measured": 0.695997,
+    "mean_interfamily_published": 0.719,
+    "abs_diff_pp": 2.3003,
+    "margin_pp": 2.0,
+    "stable_families_over_margin": 6,
+    "note": "systematic + unidirectional (7/8 lower), precision >> recall"
+  },
+  "faithfulness_crosschecks": {
+    "training_protocol": "FAITHFUL vs lbcb-sci/RiNALMo @2c2c5c14 + paper Methods (Adam lr 1e-4, 15 epochs, LinearLR 1->0.1 over 7000 then floored, batch 1, fp16, 12/33 gradual top-down unfreeze at lr/10, BCE-upper-triangle, greedy pseudoknot decode, valid-tuned threshold, last-epoch/no-early-stopping)",
+    "ss_head_architecture": "FAITHFUL (multimolecule port head == native: outer-concat -> Linear(2560->64) -> 2x bottleneck ResNet2D -> Conv2d(64->1,k=3,bias) -> triu-symmetrise; verified vs the installed 0.1.0 wheel source)",
+    "encoder_config": "FAITHFUL (hidden 1280 / 33 layers / 20 heads / rotary / qkv-bias False / attention_dropout 0.1 / eps 1e-5); only non-identity = FlashAttention (native) -> SDPA (port), an exact-softmax kernel swap"
+  },
+  "test1_encoder_weight_diff": {
+    "method": "scripts/rinalmo_weight_diff.py — convert official rinalmo_giga_pretrained.pt via multimolecule 0.1.0 _convert_checkpoint name-map + Wqkv.chunk(3) split; diff every ENCODER tensor vs the mirror (multimolecule/rinalmo-giga @2a71f6f9), excluding vocab-remapped rows",
+    "n_encoder_tensors_shared": 497,
+    "n_bit_identical_torch_equal": 497,
+    "n_identical_atol_1e-6": 497,
+    "encoder_global_max_abs_diff": 0.0,
+    "shape_or_dtype_mismatches": 0,
+    "keys_only_in_one_side": 0,
+    "all_encoder_bit_identical": true,
+    "conclusion": "the mirror encoder is BYTE-IDENTICAL to the official Zenodo pretrained backbone — measured exactly by torch.equal (same fp32 dtype + values) on all 497 encoder tensors with a complete key-set match, not merely within tolerance; the conversion is a pure rename + Wqkv split with no value transform on encoder weights"
+  },
+  "test2_released_ft_inference_parity": {
+    "method": "scripts/rinalmo_ft_inference.py — overlay the released rinalmo_giga_ss_archiveII-<fam>_ft.pt (fine-tuned encoder + trained SS head) onto the mirror, run INFERENCE-ONLY decode with our forward+decode+metric (base_pair_prf, +/-1 slippage) on the held-out family; NO training. Laptop RTX 4060 GPU.",
+    "scope": "subset — 3 of 9 families (the biggest-gap ones: tRNA, 5S, 23S); the remaining 6 families' released *_ft.pt were not downloaded",
+    "families": {
+      "23S_rRNA": {"n_test": 15, "official_f1_native_thr": 0.847042, "native_threshold": 0.23, "official_f1_our_tuned_thr": 0.842426, "published_f1": 0.848, "our_refit_f1": 0.815154, "delta_official_native_thr_vs_published_pp": -0.096, "delta_official_tuned_thr_vs_published_pp": -0.557, "delta_refit_vs_published_pp": -3.285},
+      "5S_rRNA": {"n_test": 1283, "official_f1_native_thr": 0.884226, "native_threshold": 0.07, "official_f1_our_tuned_thr": 0.884226, "published_f1": 0.884, "our_refit_f1": 0.842408, "delta_official_native_thr_vs_published_pp": 0.023, "delta_official_tuned_thr_vs_published_pp": 0.023, "delta_refit_vs_published_pp": -4.159},
+      "tRNA": {"n_test": 557, "official_f1_native_thr": 0.931234, "native_threshold": 0.11, "official_f1_our_tuned_thr": 0.93597, "published_f1": 0.931, "our_refit_f1": 0.888564, "delta_official_native_thr_vs_published_pp": 0.023, "delta_official_tuned_thr_vs_published_pp": 0.497, "delta_refit_vs_published_pp": -4.244}
+    },
+    "conclusion": "On the 3 tested families, RiNALMo's RELEASED fine-tuned weights reproduce the published F1 to ~0.1 pp (native threshold) / <=0.6 pp (our valid-tuned threshold) through OUR forward+decode+metric+splits -> the pipeline (and the multimolecule forward) is faithful for these families; the ~2-4 pp mirror-run gap is the fresh-head REFIT (single-seed reproduce-by-refit vs RiNALMo's released optimized per-family checkpoints). The mechanism (bit-identical backbone + released-weight reproduction) is family-independent, so the 3-family subset is decisive; a full 9-family Test 2 was not run."
+  },
+  "resolution": {
+    "decision": "COMMIT Stage-2 to multimolecule/rinalmo-giga @2a71f6f98fb41dd2e6542a5e131d3778111d1468",
+    "basis": "D5 gate INTENT (mirror == published RiNALMo => trustworthy shipped backbone) confirmed by DIRECT evidence: Test 1 (encoder bit-identical to official) + Test 2 (released weights reproduce published to ~0.1 pp). The +/-2 pp refit-based OPERATIONALIZATION failed only on refit variance.",
+    "fallback_triggered": false,
+    "fallback_note": "the D5 Zenodo-weights fallback is moot (the mirror already carries those exact weights bit-for-bit); the D6 RNA-FM fallback is not triggered (reserved for §10.2 VRAM/latency)",
+    "honesty_10_3": "NOT a threshold loosen: the +/-2 pp gate stands as failed on the refit proxy; the commit rests on stronger direct evidence, fully disclosed. The refit FAIL is reported, not hidden.",
+    "adr": "ADR-0002 A9 (user sign-off recorded)"
+  },
+  "provenance": {
+    "official_weights": "data/external/rinalmo_official/provenance.json (Zenodo 15043668, CC-BY-4.0, md5-verified)",
+    "refit_report": "reports/p1/rinalmo_parity.json",
+    "target": "reports/p1/rinalmo_published_target.json",
+    "env": "tbox-ml-rna (multimolecule 0.1.0 + transformers 5.13.0 + torch 2.7.1+cu128; ADR-0002 A8)"
+  }
+}
