@@ -1,0 +1,15 @@
+case_id,seq_len,window,stride,source,note
+real_00366,366,1024,512,sampled_real_context_length,shortest length in context_sample.csv; seq_len < window -> zero-flanked
+real_00430,430,1024,512,sampled_real_context_length,seq_len < window -> zero-flanked
+real_00478,478,1024,512,sampled_real_context_length,seq_len < window -> zero-flanked
+real_00929,929,1024,512,sampled_real_context_length,seq_len < window -> zero-flanked
+real_01380,1380,1024,512,sampled_real_context_length,tail anchor engages; coverage 1..2
+real_01587,1587,1024,512,sampled_real_context_length,tail anchor engages; coverage 1..3
+real_02265,2265,1024,512,sampled_real_context_length,tail anchor engages; coverage 1..3
+real_02412,2412,1024,512,sampled_real_context_length,modal length within context_sample.csv (2 rows); coverage 1..3
+real_02556,2556,1024,512,sampled_real_context_length,longest length in context_sample.csv; coverage 1..3
+edge_01024,1024,1024,512,edge_case,seq_len == window exactly; single in-bounds window
+edge_01025,1025,1024,512,edge_case,window+1; tail anchor at offset 1
+edge_01536,1536,1024,512,edge_case,window+stride; strided tiling lands on the tail exactly
+edge_02048,2048,1024,512,edge_case,2*window; strided tiling lands on the tail exactly
+edge_small,100,40,16,edge_case,small window/stride; dense coverage without the 1024 cost
