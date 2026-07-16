@@ -276,13 +276,13 @@ def test_rc_windows_are_locked_against_an_independent_projection() -> None:
         lo = 0 if ce else max(0, off + window - clen)
         hi = (window - m) if cs else min(window - m, off)
         lead = min(max((window - m) // 2, lo), hi)
-        start = start_ = off - lead
+        start = off - lead
 
         # Build the forward window from raw characters, then reverse-complement it
         # by hand: walk the window backwards, complementing each base.
         exp_ids, exp_lab, exp_mask = [], [], []
         for k in range(window - 1, -1, -1):
-            p = start_ + k
+            p = start + k
             if 0 <= p < clen:
                 exp_ids.append(base_ids[comp[seq[p]]] if seq[p] in comp else base_ids["N"])
                 exp_lab.append(code_to_index[lstr[p - off]] if off <= p < off + m else 0)
