@@ -539,20 +539,22 @@ def focal_cross_entropy(logits, targets, *, gamma: float, ignore_index: int = IG
 
     ``logits`` is ``(B, L, C)``, ``targets`` is ``(B, L)`` of class indices (``ignore_index``
     marks pad). Reduces to the **mean over non-ignored tokens** (not ``(B*L)``, which would
-    dilute by padding). At ignored positions ``F.cross_entropy(reduction="none")`` returns
-    0 → ``p_t = exp(-0) = 1`` → the focal weight ``(1 - p_t)^γ`` is 0, so pad contributes
-    nothing. γ = 0 recovers plain cross-entropy.
-    """
-    import torch  # lazy
-    import torch.nn.functional as F  # lazy
+    dilute by padding). γ = 0 recovers plain cross-entropy.
 
-    logits_t = logits.transpose(1, 2)  # (B, C, L) for F.cross_entropy
-    ce = F.cross_entropy(logits_t, targets, ignore_index=ignore_index, reduction="none")  # (B, L)
-    pt = torch.exp(-ce)
-    focal = (1.0 - pt).clamp_min(0.0).pow(gamma) * ce
-    valid = targets != ignore_index
-    denom = valid.sum().clamp_min(1)
-    return focal.sum() / denom
+    **Delegates to** :func:`tbox_finder.train.objective.focal_cross_entropy` (P2-02), which
+    generalises this P1-06 function with class weights and selectable reductions —
+    ``weight=None, reduction="mean"`` is exactly this signature's behaviour. Kept as a thin
+    alias so the P1-06 smoke entry point and its committed go/no-go artifact keep their API,
+    while there is only **one** focal implementation to maintain (P2-02 promoted it rather
+    than forking a second copy). The delegation also inherits P2-02's fix for the silent
+    NaN-gradient at 0 < γ < 1; forward values and γ ∈ {0, 1, 2} gradients are bit-identical
+    to the original, so the P1-06 γ=2 gate is unaffected.
+    """
+    from tbox_finder.train.objective import focal_cross_entropy as _focal  # lazy
+
+    return _focal(
+        logits, targets, gamma=gamma, weight=None, ignore_index=ignore_index, reduction="mean"
+    )
 
 
 def build_segmenter(cfg: SmokeConfig):
