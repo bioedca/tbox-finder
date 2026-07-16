@@ -83,6 +83,35 @@ def _module_digest() -> str:
     return wd.windows_digest([ds.window_at(i) for i in range(len(ds))])
 
 
+def _rc_windows() -> list[wd.Window]:
+    """The same eval-mode windows carved on the reverse strand."""
+    windows = []
+    for r in _fixture_records():
+        rng = wd.window_lead_range(
+            locus_offset=r.locus_offset,
+            locus_length=r.locus_length,
+            context_length=len(r.context_seq),
+            clipped_start=r.clipped_start,
+            clipped_end=r.clipped_end,
+        )
+        assert rng is not None
+        lead = wd.deterministic_lead(rng, window=1024, locus_length=r.locus_length)
+        windows.append(
+            wd.carve_window(
+                context_seq=r.context_seq,
+                locus_offset=r.locus_offset,
+                locus_length=r.locus_length,
+                label_string=r.label_string,
+                lead=lead,
+                record_id=r.record_id,
+                clipped_start=r.clipped_start,
+                clipped_end=r.clipped_end,
+                rc=True,
+            )
+        )
+    return windows
+
+
 def _independent_digest() -> str:
     """Path 2 — an inline re-implementation of the carve, sharing no module code.
 
@@ -216,6 +245,37 @@ def test_expected_digest_is_stable_across_repeat_runs() -> None:
     assert _module_digest() == _module_digest()
 
 
+def test_rc_windows_are_locked_against_an_independent_projection() -> None:
+    """Lock the RC transform on real records, independently of the module.
+
+    The forward digest above never exercises `rc=True` (eval mode is
+    forward-strand), so without this the reverse-strand carve — half of the
+    both-strand handling imp.md asks for — would be golden-unlocked. The
+    expectation is re-derived from the fixture, not read off the module: the RC
+    window must be the forward window's sequence reverse-complemented and its
+    labels reversed, with the locus at `window - lead - locus_length`.
+    """
+    fwd = wd.Stage1WindowDataset(_fixture_records(), augment=False)
+    for i, (rec, rev) in enumerate(zip(fwd.records, _rc_windows(), strict=True)):
+        f = fwd.window_at(i)
+        assert np.array_equal(rev.input_ids, wd.reverse_complement_ids(f.input_ids))
+        assert np.array_equal(rev.labels, f.labels[::-1])
+        # `lead` must describe the EMITTED window, not the forward one.
+        expected_lead = 1024 - f.lead - rec.locus_length
+        assert rev.lead == expected_lead
+        expect = np.asarray(labels_mod.label_string_to_indices(rec.label_string), dtype=np.int16)[
+            ::-1
+        ]
+        got = rev.labels[rev.lead : rev.lead + rec.locus_length]
+        assert np.array_equal(got, expect), f"RC label misalignment on {rec.record_id}"
+
+
+def test_rc_digest_is_stable_and_differs_from_the_forward_digest() -> None:
+    """The RC carve is deterministic and is genuinely a different window set."""
+    assert wd.windows_digest(_rc_windows()) == wd.windows_digest(_rc_windows())
+    assert wd.windows_digest(_rc_windows()) != _module_digest()
+
+
 def test_digest_moves_if_a_label_shifts() -> None:
     """Anti-tautology: the golden hash must actually bite on a 1-nt label shift."""
     records = _fixture_records()
@@ -234,8 +294,14 @@ def test_digest_moves_if_a_label_shifts() -> None:
 
 
 def test_sample_csv_is_byte_stable() -> None:
-    """The fixture itself is hash-pinned, so a silent edit to it is visible."""
-    digest = hashlib.sha256(_SAMPLE.read_bytes()).hexdigest()
-    assert len(digest) == 64
-    # Recorded for drift visibility; the window digest is the binding expectation.
-    assert _SAMPLE.stat().st_size > 10_000
+    """The fixture input itself is hash-pinned, so a silent edit to it is visible.
+
+    Distinct from ``expected.sha256`` (which pins the *carved windows*): if the
+    input silently changed, both it and the window digest would move together and
+    a regenerated expectation would hide it. `.gitattributes` marks
+    `tests/fixtures/** -text`, so these bytes are stable across checkouts.
+    """
+    assert (
+        hashlib.sha256(_SAMPLE.read_bytes()).hexdigest()
+        == "8663f3b8cc0c94f92f46d6511691fb0fc88befa87f1ac372a064fa10f57dd95f"
+    )

@@ -376,19 +376,25 @@ def carve_window(
     locus_in_window = lead  # == locus_offset - start
     lab[locus_in_window : locus_in_window + locus_length] = label_indices(label_string)
 
+    emitted_lead = lead
     if rc:
         ids = reverse_complement_ids(ids)
         lab = lab[::-1].copy()
         mask = mask[::-1].copy()
         pad_left, pad_right = pad_right, pad_left
+        # Reversing the array moves position p to (window - 1 - p), so the locus
+        # now begins at `window - lead - locus_length`. `lead` must describe the
+        # EMITTED window (it is the locus's offset within it), or every consumer
+        # slicing `labels[lead : lead + locus_length]` reads the wrong span.
+        emitted_lead = window - lead - locus_length
 
     return Window(
         input_ids=ids,
         labels=lab,
         real_mask=mask,
-        record_id=variant_id(record_id, lead=lead, rc=rc),
+        record_id=variant_id(record_id, lead=emitted_lead, rc=rc),
         parent_record_id=record_id,
-        lead=lead,
+        lead=emitted_lead,
         reverse_complement=rc,
         pad_left=pad_left,
         pad_right=pad_right,
@@ -416,9 +422,10 @@ def inverse_frequency_weights(keys: Sequence[Any], *, alpha: float) -> np.ndarra
     """Per-record weights ``w_i ∝ (1 / n_{stratum(i)}) ** alpha``, mean-normalised.
 
     ``alpha = 0`` reproduces the natural distribution; ``alpha = 1`` fully
-    balances the strata; the default ``0.5`` is square-root inverse-frequency —
-    a partial rebalance that lifts the rare strata without letting a
-    20-record phylum dominate an 8,000-record one.
+    balances the strata; the default ``0.25`` is a partial rebalance that lifts
+    the rare strata without letting a 3-record phylum dominate an 8,182-record
+    one. Note the caller multiplies three such terms — see
+    :data:`DEFAULT_PHYLUM_ALPHA` for why the default is 0.25 and not higher.
 
     ``alpha`` is an **implementer choice** (``WEIGHTS_PINNED is False``): PRD §11
     pins that balanced-phylum and rare-class sampling happen, not their strength.
@@ -470,13 +477,22 @@ def curriculum_weights(
 
 
 class WeightedIndexSampler:
-    """Deterministic with-replacement weighted index sampler.
+    """Deterministic with-replacement weighted sampler over dataset indices.
 
     Torch-free by design (numpy ``Generator``), so the whole curriculum is unit-
     testable in bare CI, and duck-type compatible with ``DataLoader(sampler=...)``
-    — which only requires an iterable of indices plus ``__len__``. Seeding follows
-    the same contract as ``torch.utils.data.WeightedRandomSampler(generator=...)``:
-    a fixed seed reproduces the draw exactly (CLAUDE.md §8.3).
+    — which only requires an iterable of **keys** plus ``__len__``, and passes each
+    key straight through to ``dataset[key]``. Seeding follows the same contract as
+    ``torch.utils.data.WeightedRandomSampler(generator=...)``: a fixed seed
+    reproduces the draw exactly (CLAUDE.md §8.3).
+
+    **Yields ``(index, occurrence)`` keys, not bare indices.** Oversampling draws
+    a rare record many times per epoch; ``occurrence`` is the ordinal of the draw
+    within the epoch, so :class:`Stage1WindowDataset` can give each draw an
+    independent window phase and strand. Without it, ``dataset[index]`` is a pure
+    function of the index and the 9x-oversampled class-II records would arrive as
+    9 **identical** windows — which is exactly the memorisation that pairing
+    oversampling with offset augmentation (PRD §11) exists to prevent.
     """
 
     def __init__(
@@ -513,12 +529,16 @@ class WeightedIndexSampler:
     def __len__(self) -> int:
         return self.num_samples
 
-    def __iter__(self) -> Iterator[int]:
+    def __iter__(self) -> Iterator[tuple[int, int]]:
         rng = np.random.default_rng([self.seed, self._epoch])
         draw = rng.choice(
             self.probabilities.size, size=self.num_samples, replace=True, p=self.probabilities
         )
-        return iter(int(i) for i in draw)
+        return iter((int(i), occ) for occ, i in enumerate(draw))
+
+    def indices(self) -> list[int]:
+        """The drawn indices without their occurrence ordinals (for diagnostics)."""
+        return [i for i, _ in self]
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -778,11 +798,17 @@ class Stage1WindowDataset:
     def __len__(self) -> int:
         return len(self.records)
 
-    def _rng(self, index: int) -> np.random.Generator:
-        return np.random.default_rng([self.config.seed, self._epoch, index])
+    def _rng(self, index: int, occurrence: int) -> np.random.Generator:
+        return np.random.default_rng([self.config.seed, self._epoch, index, occurrence])
 
-    def window_at(self, index: int) -> Window:
-        """Carve the window for ``index`` under the current epoch's augmentation."""
+    def window_at(self, index: int, occurrence: int = 0) -> Window:
+        """Carve the window for ``index`` under the current epoch's augmentation.
+
+        ``occurrence`` distinguishes repeated draws of the same record within an
+        epoch (the sampler supplies it), so an oversampled record is re-phased on
+        every draw instead of yielding identical copies. It is part of the RNG
+        key, so the result stays exactly reproducible.
+        """
         r = self.records[index]
         lead_range = window_lead_range(
             locus_offset=r.locus_offset,
@@ -794,7 +820,7 @@ class Stage1WindowDataset:
         )
         assert lead_range is not None  # guaranteed by __init__
         if self.augment:
-            rng = self._rng(index)
+            rng = self._rng(index, occurrence)
             lead = sample_lead(rng, lead_range)
             rc = bool(rng.integers(2)) if self.config.both_strands else False
         else:
@@ -815,8 +841,19 @@ class Stage1WindowDataset:
             rc=rc,
         )
 
-    def __getitem__(self, index: int) -> dict[str, Any]:
-        w = self.window_at(index)
+    def __getitem__(self, key: int | tuple[int, int]) -> dict[str, Any]:
+        """Fetch one sample.
+
+        ``key`` is either a bare index (occurrence 0 — direct/eval access) or an
+        ``(index, occurrence)`` pair as yielded by :class:`WeightedIndexSampler`.
+        ``DataLoader`` passes sampler keys through verbatim, so both forms arrive
+        here unchanged.
+        """
+        if isinstance(key, tuple):
+            index, occurrence = key
+        else:
+            index, occurrence = key, 0
+        w = self.window_at(index, occurrence)
         return {
             "input_ids": w.input_ids,
             "labels": w.labels,

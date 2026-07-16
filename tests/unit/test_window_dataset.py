@@ -428,6 +428,38 @@ def test_carve_window_rc_reverses_sequence_and_labels_together() -> None:
     assert (rev.labels == labels_mod.CLASS_INDEX["Specifier"]).sum() == 300
 
 
+def test_carve_window_rc_lead_describes_the_emitted_window() -> None:
+    """Regression: `lead` must locate the locus in the RC window, not the forward one.
+
+    Reversing the array moves the locus to `window - lead - locus_length`. Reporting
+    the forward lead makes `labels[lead : lead + locus_length]` read the wrong span
+    for every reverse-strand sample — silently mistraining half the both-strand data.
+    """
+    r = _record(label_string="S" * 300)
+    kw = dict(
+        context_seq=r.context_seq,
+        locus_offset=r.locus_offset,
+        locus_length=r.locus_length,
+        label_string=r.label_string,
+        lead=137,
+        record_id=r.record_id,
+        clipped_start=False,
+        clipped_end=False,
+    )
+    fwd = wd.carve_window(**kw, rc=False)
+    rev = wd.carve_window(**kw, rc=True)
+    specifier = labels_mod.CLASS_INDEX["Specifier"]
+
+    assert fwd.lead == 137
+    assert rev.lead == wd.WINDOW_NT - 137 - 300 == 587
+    # The reported lead must actually locate the locus in each emitted window.
+    for w in (fwd, rev):
+        assert np.all(w.labels[w.lead : w.lead + 300] == specifier)
+        assert int(np.flatnonzero(w.labels == specifier)[0]) == w.lead
+    # ...and the variant id must follow the emitted geometry, not the forward one.
+    assert rev.record_id == wd.variant_id(r.record_id, lead=587, rc=True)
+
+
 def test_carve_window_rc_swaps_the_pad_sides() -> None:
     r = _record(lead=10, locus=300, trail=1024, clipped_start=True)
     kw = dict(
@@ -553,18 +585,29 @@ def test_sampler_is_deterministic_under_a_fixed_seed() -> None:
     assert a == b
 
 
+def test_sampler_yields_index_occurrence_keys_with_unique_occurrences() -> None:
+    """The key carries the draw ordinal so repeated draws can be re-augmented."""
+    keys = list(wd.WeightedIndexSampler(np.ones(3), num_samples=10, seed=42))
+    assert all(isinstance(k, tuple) and len(k) == 2 for k in keys)
+    assert [occ for _, occ in keys] == list(range(10))  # unique, ordered
+    assert all(0 <= i < 3 for i, _ in keys)
+    assert wd.WeightedIndexSampler(np.ones(3), num_samples=10, seed=42).indices() == [
+        i for i, _ in keys
+    ]
+
+
 def test_sampler_differs_across_seeds_and_epochs() -> None:
     w = np.asarray([1.0] * 20)
-    a = list(wd.WeightedIndexSampler(w, num_samples=50, seed=42))
-    b = list(wd.WeightedIndexSampler(w, num_samples=50, seed=43))
+    a = wd.WeightedIndexSampler(w, num_samples=50, seed=42).indices()
+    b = wd.WeightedIndexSampler(w, num_samples=50, seed=43).indices()
     assert a != b
     s = wd.WeightedIndexSampler(w, num_samples=50, seed=42)
-    e0 = list(s)
+    e0 = s.indices()
     s.set_epoch(1)
-    e1 = list(s)
+    e1 = s.indices()
     assert e0 != e1
     s.set_epoch(0)
-    assert list(s) == e0  # epochs are reproducible, not just different
+    assert s.indices() == e0  # epochs are reproducible, not just different
 
 
 def test_sampler_class_balance_is_within_tolerance_of_the_analytic_share() -> None:
@@ -581,7 +624,7 @@ def test_sampler_class_balance_is_within_tolerance_of_the_analytic_share() -> No
     w = wd.curriculum_weights(phyla=phyla, klasses=klasses, amino_acids=aas)
     expected = w[n_major:].sum() / w.sum()
 
-    draws = np.asarray(list(wd.WeightedIndexSampler(w, num_samples=200_000, seed=42)))
+    draws = np.asarray(wd.WeightedIndexSampler(w, num_samples=200_000, seed=42).indices())
     observed = float((draws >= n_major).mean())
     # 200k draws: the sampling s.e. of a ~p share is well under 0.005
     assert abs(observed - expected) < 0.01, f"observed {observed:.4f} vs expected {expected:.4f}"
@@ -591,7 +634,7 @@ def test_sampler_class_balance_is_within_tolerance_of_the_analytic_share() -> No
 def test_sampler_never_draws_a_zero_weight_record() -> None:
     """A zero weight must mean *excluded*, not merely unlikely."""
     w = np.asarray([0.0, 0.0, 1.0, 0.0])
-    assert set(wd.WeightedIndexSampler(w, num_samples=500, seed=1)) == {2}
+    assert set(wd.WeightedIndexSampler(w, num_samples=500, seed=1).indices()) == {2}
 
 
 def test_sampler_length_is_the_requested_epoch_size() -> None:
@@ -650,6 +693,33 @@ def test_offset_augmentation_varies_across_epochs_and_reproduces_on_return() -> 
     assert e0 != e1, "augmentation must actually re-phase across epochs"
     ds.set_epoch(0)
     assert [ds.window_at(i).lead for i in range(len(ds))] == e0
+
+
+def test_repeated_draws_of_one_record_get_independent_augmentation() -> None:
+    """Regression — the bug that made oversampling pointless.
+
+    With replacement sampling, a 9x-oversampled class-II record is drawn 9 times
+    in one epoch. When the augmentation RNG was keyed only on (seed, epoch, index),
+    every one of those draws returned the SAME window — 9 identical copies, so the
+    curriculum's whole reason for pairing oversampling with offset augmentation
+    (PRD §11) was defeated and the model would simply memorise the locus. The draw
+    `occurrence` is now part of the key, so each draw is independently re-phased.
+    """
+    ds = _dataset(n=1)
+    leads = [ds.window_at(0, occurrence=o).lead for o in range(16)]
+    assert len(set(leads)) > 1, "repeated draws of one record returned identical windows"
+    # ...and it is still exactly reproducible.
+    assert leads == [ds.window_at(0, occurrence=o).lead for o in range(16)]
+
+
+def test_occurrence_keys_reach_the_dataset_through_getitem() -> None:
+    """`dataset[(index, occurrence)]` is how the sampler's key arrives via DataLoader."""
+    ds = _dataset(n=1)
+    a = ds[(0, 0)]
+    b = ds[(0, 7)]
+    assert ds[0]["record_id"] == a["record_id"]  # bare int == occurrence 0
+    assert a["parent_record_id"] == b["parent_record_id"] == "r0"
+    assert not np.array_equal(a["input_ids"], b["input_ids"]) or a["record_id"] != b["record_id"]
 
 
 def test_offset_augmentation_varies_across_records_within_an_epoch() -> None:
@@ -984,10 +1054,11 @@ def test_collate_windows_preserves_the_ignore_index() -> None:
     pytest.importorskip("torch")
     r = _record(lead=10, locus=300, trail=1024, clipped_start=True)
     ds = wd.Stage1WindowDataset([r], augment=False)
-    ds.set_epoch(0)
     w = ds.window_at(0)
-    if not w.zero_flanked:  # centred lead may not reach the contig end
-        pytest.skip("this record's eval-mode window is not zero-flanked")
+    # Deterministic by construction: centred lead 362 > lead_flank 10, and the
+    # record is clipped_start, so 352 nt are zero-flanked. Assert rather than
+    # skip — a conditional skip here could only ever hide a broken fixture.
+    assert w.zero_flanked, "fixture must exercise a zero-flanked window"
     batch = wd.collate_windows([ds[0]])
     assert (batch["labels"] == wd.IGNORE_INDEX).any()
 
@@ -1017,3 +1088,27 @@ def test_dataset_drives_a_real_dataloader_with_the_curriculum_sampler() -> None:
     batches = list(loader)
     assert sum(b["input_ids"].shape[0] for b in batches) == 8
     assert batches[0]["input_ids"].shape[1] == 1024
+
+
+def test_dataloader_oversampling_yields_distinct_variants_and_is_reproducible() -> None:
+    """End-to-end proof of the occurrence fix, through the real DataLoader.
+
+    A single-record dataset drawn 12 times is the oversampling limit case: the
+    variants must differ (not 12 identical copies) while the whole sampled
+    sequence stays reproducible under the same seed (CLAUDE.md §8.3).
+    """
+    pytest.importorskip("torch")
+    from torch.utils.data import DataLoader
+
+    def sample() -> list[str]:
+        ds = _dataset(n=1)
+        loader = DataLoader(
+            ds, batch_size=3, sampler=ds.sampler(num_samples=12), collate_fn=wd.collate_windows
+        )
+        return [rid for b in loader for rid in b["record_id"]]
+
+    ids = sample()
+    assert len(ids) == 12
+    assert all(i.startswith("r0#w") for i in ids)
+    assert len(set(ids)) > 1, "12 oversampled draws collapsed to one variant"
+    assert sample() == ids, "the sampled sequence is not reproducible under a fixed seed"
