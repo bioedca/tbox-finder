@@ -56,7 +56,7 @@ prebuilt `sm_86` wheel is **load-bearing**, not a convenience. `atol` is an impl
 pins no kernel-vs-fallback tolerance; the raw diff is always recorded, §10.3). Cross-link **ADR-0002 A5**.
 
 **Commit.** `8ba3880` (scaffold `5f18180` + hardening `8ba3880`) + the follow-up carrying this stanza,
-the report, and A5; squash-merge SHA on `main` recorded in `TODO.md` at P1-01 close.
+the report, and A5; squash **`bd64aa6`** on `main` (PR [#33](https://github.com/bioedca/tbox-finder/pull/33)).
 
 ## Step P1-02 — 2026-07-12: Load Caduceus-PS default checkpoint + human-reference pretraining provenance
 
@@ -99,8 +99,7 @@ PMID:40567809), both already in-repo (ADR-0002). The gate is **hardware-agnostic
 RC-equivariance is an architectural property of RCPS, identical on the cluster A4000 `sm_86`).
 Cross-link **ADR-0002 D7**.
 
-**Commit.** feature-branch atomic commit on `p1-02-caduceus` (squash-merge SHA on `main` recorded in
-`TODO.md` at P1-02 close); feeds **P1-03** (seg-head build), **P1-04** (frozen-embedding probe),
+**Commit.** squash **`7d62626`** on `main` (PR [#34](https://github.com/bioedca/tbox-finder/pull/34)); feature-branch atomic commit on `p1-02-caduceus`; feeds **P1-03** (seg-head build), **P1-04** (frozen-embedding probe),
 **P1-09** (continued-pretraining).
 
 ## Step P1-03 — 2026-07-12: Stage-1 per-position 8-class segmentation head (Linear + optional CRF)
@@ -147,8 +146,7 @@ consulted for `F.cross_entropy` K-dim `(N,C,d)` + `ignore_index` and `nn.Paramet
 CRF forward/Viterbi correctness is verified by the executed test under the installed torch 2.7.1
 (P1-01/P1-02 installed-library-cross-check precedent). Cross-link **ADR-0004 D1**.
 
-**Commit.** feature-branch atomic commit on `p1-03-seg-head` (squash-merge SHA on `main` recorded in
-`TODO.md` at P1-03 close); feeds **P1-04** (backbone+head assembly with the directionality-preserving
+**Commit.** squash **`3106e73`** on `main` (PR [#35](https://github.com/bioedca/tbox-finder/pull/35)); feature-branch atomic commit on `p1-03-seg-head`; feeds **P1-04** (backbone+head assembly with the directionality-preserving
 RC-combination knob) and **P1-09** (continued-pretraining consumes the same head).
 
 ## Step P1-04 — 2026-07-12: Assemble the Stage-1 segmenter (backbone → RC-combine → seg head) with a directionality-preserving RC-combination knob
@@ -201,8 +199,7 @@ split-half+`sigmoid` gating idiom + `nn.Parameter`/`torch.sigmoid`; correctness 
 test under installed torch 2.7.1+cu128 (P1-01/02/03 installed-library-cross-check precedent). Cross-link
 **ADR-0002** (RC-combination constraint / D7) and **PRD §6/§10.1**.
 
-**Commit.** feature-branch atomic commit on `p1-04-segmenter` (squash-merge SHA on `main` recorded in
-`TODO.md` at P1-04 close); feeds **P1-07** (the binding segmentation smoke fine-tune consumes this
+**Commit.** squash **`58b8f3d`** on `main` (PR [#36](https://github.com/bioedca/tbox-finder/pull/36)); feature-branch atomic commit on `p1-04-segmenter`; feeds **P1-07** (the binding segmentation smoke fine-tune consumes this
 segmenter) and **P1-05/P1-08** (the frozen-embedding probe uses the backbone-free `logits_from_hidden` path).
 
 ## Step P1-05 — 2026-07-12: Transfer go/no-go part (i) — frozen-embedding linear-separability pre-filter (cheap, non-binding)
@@ -235,8 +232,7 @@ operationalization** of the ADR's qualitative *above-chance* criterion, not a ne
 ADR-0002 pins no numeric pre-filter floor. context7 §3.3: `/websites/scikit-learn_stable` consulted for
 `LogisticRegression`/`GroupShuffleSplit`/`StandardScaler` pipeline; the transformers embedding path reuses the
 P1-02-verified `caduceus_backbone` loader (pinned-revision, frozen). Cross-link **ADR-0002 D7**, **PRD §10.1 / §18.2**.
-**Commit.** feature-branch atomic commit on `p1-05-frozen-linear-probe` (squash-merge SHA on `main` recorded in
-`TODO.md` at P1-05 close); feeds **P1-07** (advisory input to the binding go/no-go adjudication) and
+**Commit.** squash **`d676caa`** on `main` (PR [#37](https://github.com/bioedca/tbox-finder/pull/37)); feature-branch atomic commit on `p1-05-frozen-linear-probe`; feeds **P1-07** (advisory input to the binding go/no-go adjudication) and
 **P1-08** (Stage-1 smoke reproducibility).
 
 ## Step P1-06 — 2026-07-12: Held-out prokaryotic per-nt 8-class segmentation smoke set (ADR-0004/0005 labels)
@@ -276,7 +272,7 @@ by `record_id` — reuses the `ingest.record_hash`/`records_digest` contract (pa
 precedent); the golden is a regression on the committed **fixture** slice, not the full 300-locus artifact (its
 provenance carries the production digest). context7 §3.3: n/a (reuses in-repo `labels`/`ingest`/`provenance`; pandas/
 numpy only for IO). Cross-link **ADR-0004 D1**, **ADR-0005**, **PRD §8/§9.2**.
-**Commit.** atomic commit on `p1-06-seg-smoke`; feeds **P1-07** (the BINDING per-nt segmentation smoke fine-tune
+**Commit.** squash **`8df3d2e`** on `main` (PR [#38](https://github.com/bioedca/tbox-finder/pull/38)); atomic commit on `p1-06-seg-smoke`; feeds **P1-07** (the BINDING per-nt segmentation smoke fine-tune
 consumes this set) + **P1-09** (continued-pretraining).
 
 ## Step P1-07 — 2026-07-12: Stage-1 per-nt 8-class segmentation smoke fine-tune + BINDING transfer go/no-go (MEASURED: GO — Stage-1 Caduceus transfer confirmed for P2)
@@ -335,7 +331,7 @@ verified by the executed tests + the compose smoke under torch 2.7.1+cu128 / hyd
 **Stops (3, this step) — all resolved.** SLURM **submit-ack** (§9.3): user acked → job 464 submitted. **Go/no-go
 verdict** (§7 item 4): **GO** (a decisive pass, not borderline → no fallback stop-and-ask). **ADR-0002 amendment**
 sign-off (§7 item 2): **A6 accepted as drafted** (records the GO verdict + finalizes the go/no-go thresholds).
-**Commit.** Harness commit `1213883` + the measured result commit (report + `dvc add` checkpoint + ADR-0002 A6 +
+**Commit.** squash **`52a408e`** on `main` (PR [#39](https://github.com/bioedca/tbox-finder/pull/39)); branch: harness commit `1213883` + the measured result commit (report + `dvc add` checkpoint + ADR-0002 A6 +
 this stanza) on `p1-07-seg-smoke-gonogo`. Feeds **P1-08** (seeded re-run reproducibility, exit-gate deliverable) +
 **P2** (Stage-1 training — transfer confirmed).
 
@@ -391,7 +387,7 @@ Cross-link **ADR-0002 A7 / A6 / D7**, **ADR-0004 D6**, **ADR-0005**, **PRD §8.3
 **SLURM submit-ack** (§9.3): user acked → job 466 submitted. **A7 scope re-sign-off** (§7 item 4, validation-gate decision):
 user chose to **scope τ to the decision metrics** after the all-14 gate tripped only on the diagnostic Stem_III (recorded
 2026-07-13).
-**Commit.** Setup commit `d22a9fb` (sbatch + `repro.py` + test + ADR-0002 A7 + stanza) + the measured result commit
+**Commit.** squash **`7ebe107`** on `main` (PR [#40](https://github.com/bioedca/tbox-finder/pull/40)); branch: setup commit `d22a9fb` (sbatch + `repro.py` + test + ADR-0002 A7 + stanza) + the measured result commit
 (repro report + the scoped gate + CI `TBOX_REQUIRE_REPRO_GATE=1` + this stanza update) on `p1-08-smoke-repro`. **Closes the
 PRD §18.1 P1 exit-gate item "smoke run reproducible."** No DVC artifact (report git-tracked; repro checkpoint throwaway).
 
@@ -439,7 +435,7 @@ via `emb_meta.get("revision")` so a revision-less/foreign cache → `None` → v
 §3.3: reuses P1-07-verified torch idioms (AdamW / focal `F.cross_entropy` reduction=none / `no_grad`) + the P1-05 npz-cache
 pattern — no new third-party API surface. Cross-link **PRD §10.1/§18.2/§11**, **ADR-0002 D7/A6**, **ADR-0004 D1/D6**,
 **ADR-0005**.
-**Commit.** `<SHA>` on `p1-09-frozen-seg-probe` (feature branch → squash PR). **Builds the PRD §18.2 P1 exit-gate item
+**Commit.** squash **`4d4884f`** on `main` (PR [#41](https://github.com/bioedca/tbox-finder/pull/41)). **Builds the PRD §18.2 P1 exit-gate item
 "Segmentation-head fallback path ready."** No DVC artifact (report git-tracked; the 192 MB embeddings `.npz` is a gitignored
 regenerable intermediate — the P1-05 report-hashes-the-cache precedent).
 
@@ -481,7 +477,7 @@ transformers/huggingface_hub quota-blocked → the **installed-library cross-che
 pinned `transformers` 4.57.5, confirming the `AutoModelForMaskedLM(...trust_remote_code=True, output_hidden_states=True)` API
 + `hidden_states[-1]` extraction — the P1-02 precedent). Cross-link **PRD §10.1/§18.1**, **ADR-0002 D7/D2/A4/A6**,
 **ADR-0004 D1** (the 8-class scheme the head consumes).
-**Commit.** `<SHA>` on `p1-10-nt-backbone` (feature branch → squash PR). **Builds the PRD §18.1 P1 exit-gate item "Transfer
+**Commit.** squash **`6bd24e7`** on `main` (PR [#42](https://github.com/bioedca/tbox-finder/pull/42)). **Builds the PRD §18.1 P1 exit-gate item "Transfer
 fallback ladder executable — NT-multispecies backbone drop-in built" (P1-10).** No DVC artifact (provenance git-tracked; NT
 weights fetched from HF by pinned revision, not stored).
 
@@ -524,7 +520,7 @@ adversarial refute; 25 agents) → **17 confirmed / 19 raw**; fixed all real def
 amendment (queued for the P1 exit gate, already noted in P1-09). context7 §3.3: `/huggingface/accelerate` (Accelerator
 prepare/backward/clip) + `/huggingface/transformers` (MaskedLMOutput.logits `(B,L,vocab)`) consulted; cross-checked
 against installed accelerate 1.12.0 / transformers 4.57.5. Cross-link **PRD §10.1/§15/§18.1**, **ADR-0002 D7/A6**,
-**ADR-0003 D7**. **Commit.** `<SHA>` on `p1-11-gtdb-cpt` (feature branch → squash PR). No DVC artifact (harness authored;
+**ADR-0003 D7**. **Commit.** squash **`5a8aba0`** on `main` (PR [#43](https://github.com/bioedca/tbox-finder/pull/43)). No DVC artifact (harness authored;
 the CPT checkpoint is produced only IF triggered).
 
 ## Step P1-12 — 2026-07-13: Prepare the ArchiveII nine-family LOFO benchmark + SS base-pair-F1 harness + sourced RiNALMo parity target
@@ -576,7 +572,7 @@ passthrough — inlined anyway). **⚠️ Flagged, NOT resolved (§7 item 2):** 
 parity numbers to "Fig. 4a + box-plots 4b", but the exact numeric values live in **Supplementary Table S2 (non-weighted
 column)** — a citation-precision enrichment (values are correct) queued as a sign-off-gated ADR hygiene amendment for the
 P1 exit gate. context7 §3.3: biopython has no `.ct` reader (stdlib parser; numpy not needed — pure-Python sets). Cross-link
-**PRD §10.2**, **ADR-0002 D5**. **Commit.** `<SHA>` on `p1-12-archiveii-lofo` (feature branch → squash PR). Feeds **P1-13**
+**PRD §10.2**, **ADR-0002 D5**. **Commit.** squash **`3c0e8de`** on `main` (PR [#44](https://github.com/bioedca/tbox-finder/pull/44)). Feeds **P1-13**
 (the RiNALMo mirror parity verification consumes these splits + metric + target).
 
 ## Step P1-13-env (ADR-0002 A8) — 2026-07-13: Fix the RiNALMo mirror forward under the pinned ml-rna env (multimolecule 0.0.9 → 0.1.0)
@@ -598,7 +594,7 @@ unchanged) + `docs/decisions/ADR-0002` A8 + a `test_env_manifest` regression. **
 `RiNALMoModel` `last_hidden_state (1,L+2,1280)` → stripped `(1,L,1280)`; shipped SS head `(1,L,L,1)`; 6/6 env-manifest tests
 (incl. the new A8 guard). Cluster fresh-install + the D5 parity gate remain **P1-13** (A5 precedent). **Decisions.** Hand-merge
 + recomputed hash chosen over hand-editing text or a fragile transformers downgrade/shim; cross-link **ADR-0002 A8/D5/D8**,
-**CLAUDE.md §3.1/§7**. **Commit.** `<SHA>` on `p1-13-ml-rna-fix` (feature branch → squash PR). Unblocks **P1-13** (the RiNALMo
+**CLAUDE.md §3.1/§7**. **Commit.** squash **`8c911ee`** on `main` (PR [#45](https://github.com/bioedca/tbox-finder/pull/45)). Unblocks **P1-13** (the RiNALMo
 mirror parity harness).
 
 ## Step P1-13 — 2026-07-13: RiNALMo mirror parity harness (authored; per-fold LOFO SS fine-tune + verdict core)
@@ -610,7 +606,7 @@ parity gate. `src/tbox_finder/eval/rinalmo_parity.py::run_single_fold` fine-tune
 `RiNALMoSecondaryStructurePredictionHead` (certifies the mirror, not a re-implementation) on each fold's eight-family
 complement and scores the held-out family; the pure-stdlib verdict core (`decide_parity`/`aggregate_parity`/
 `validate_parity_report`; ±2 pp on the mean + the 8 stable families, telomerase carved out) stays bare-CI-importable and
-consumes the per-fold JSONs. The protocol was sourced verbatim from **lbcb-sci/RiNALMo @2c2c5c14 + the paper Methods** (two
+consumes the per-fold JSONs. The protocol was sourced verbatim from **lbcb-sci/RiNALMo \@2c2c5c14 + the paper Methods** (two
 research subagents) and cross-checked against the installed `multimolecule` port (a CPU introspection of the cached model):
 Adam **lr=1e-4** (the paper "10⁻⁴" — **not** the 5e-4 argparse trap nor the 1e-5 class-default decoy) wd=0, 15 ep, batch=1,
 LinearLR 1.0→0.1×/7000 steps, top-down gradual unfreeze 3-layers/3-ep over the 33 `encoder.layer` + lr/10 for newly-unfrozen,
@@ -636,8 +632,7 @@ fold would exit 2) and the sbatch's SHARD_OK stale-clean ran after the failure-p
 `validate_parity_report` now recomputes the gate from the per-family table, `aggregate_parity` now cross-checks per-fold
 `n_test`/revision/git_sha, and the missing dispatch/validator-bite/integrity/`_crop` tests. The "long-16S/23S OOM" finding was
 **refuted by measurement** (all records ≤512 nt). context7 §3.3: `multimolecule` RiNALMoModel /
-RiNALMoForSecondaryStructurePrediction API. Cross-link **PRD §10.2/§18.1**, **ADR-0002 D5/A8**. **Commit.** `<SHA>` on
-`p1-13-rinalmo-parity` (the **authoring commit**; the measured result + ADR-0002 parity amendment are the post-run commit).
+RiNALMoForSecondaryStructurePrediction API. Cross-link **PRD §10.2/§18.1**, **ADR-0002 D5/A8**. **Commit.** squash **`67a55b9`** on `main` (PR [#46](https://github.com/bioedca/tbox-finder/pull/46)) (the **authoring commit**; the measured result + ADR-0002 parity amendment are the post-run commit).
 Feeds the P1 exit-gate "mirror parity confirmed" (decided post-run) + P1-14/P1-15.
 
 ## Step P1-13 (result) — 2026-07-15: RiNALMo mirror parity — measured verdict + root-cause + commit-to-mirror
@@ -660,7 +655,7 @@ threshold). **Outputs.** `reports/p1/rinalmo_parity.json` (FAIL, 9 folds) + `rep
 confirmed." **Decisions.** Commit Stage-2 to `multimolecule/rinalmo-giga` @`2a71f6f9…`; **no** Zenodo-weights/RNA-FM fallback
 (the mirror already carries those exact weights). §10.3: the refit proxy stands as failed (reported, not hidden); commit
 rests on stronger direct evidence — cross-link **ADR-0002 A9** (user sign-off 2026-07-15), **PRD §10.2/§18.1**. **Commit.**
-`<SHA>` on `p1-13-rinalmo-parity` (result commit). Feeds P1-14 (throughput probe) + P1-15 (LoRA/FSDP) + the P1 exit gate.
+squash **`67a55b9`** on `main` (PR [#46](https://github.com/bioedca/tbox-finder/pull/46)). Feeds P1-14 (throughput probe) + P1-15 (LoRA/FSDP) + the P1 exit gate.
 
 ## Step P1-14 (authoring) — 2026-07-15: RiNALMo forward-throughput probe (advisory) — harness + sbatch
 **Inputs.** The parity-confirmed `multimolecule/rinalmo-giga` @`2a71f6f9…` backbone (P1-13), reused via
@@ -686,8 +681,7 @@ under `tbox-ml-rna` (torch 2.7.1+cu128, transformers 5.13.0); sbatch `bash -n` c
 bound, not content-bound); the report carries `is_science_result=False`/`advisory_only=True`/`binding=False` and the validator
 fails closed on each. The "clearly-hopeless" §7 stop is a **qualitative human** call from the reported number, **deliberately
 not** encoded as a numeric gate (P1 pins no latency budget — pinning one would violate §10.3); it fires post-run, if at all,
-and is **never** an auto-switch to RNA-FM (ADR-0002 D5). Cross-link **PRD §10.2/§18.1**, **ADR-0002**. **Commit.** `<SHA>` on
-`p1-14-rinalmo-throughput` (authoring commit; the measured result is the post-run commit). Feeds the P1 exit-gate
+and is **never** an auto-switch to RNA-FM (ADR-0002 D5). Cross-link **PRD §10.2/§18.1**, **ADR-0002**. **Commit.** squash **`e44217d`** on `main` (PR [#47](https://github.com/bioedca/tbox-finder/pull/47)) (authoring commit; the measured result is the post-run commit). Feeds the P1 exit-gate
 "forward-throughput probe reported (advisory)" (PRD §18.1) + the pre-P5 sizing gate.
 
 ## Step P1-14 (result) — 2026-07-15: RiNALMo forward-throughput probe — measured (advisory), NOT clearly-hopeless
@@ -699,15 +693,14 @@ timed. Hardened `_software_versions` to resolve versions via `importlib.metadata
 `__version__` → the run-time report recorded `multimolecule:"unknown"`; the committed report predates the tweak, authoritative
 pin is `envs/ml-rna.conda-lock.yml`=0.1.0). **Outputs.** measured `reports/p1/rinalmo_throughput.json` (git-tracked; the 2.5 GB
 weights re-fetchable by pinned revision, not committed) + the `_software_versions` hardening. **Validation.** candidates/sec/GPU
-**REPORTED (measured, advisory — no binding threshold, imp.md P1-14):** headline **encoder batch-1 @300 nt = 28.51
+**REPORTED (measured, advisory — no binding threshold, imp.md P1-14):** headline **encoder batch-1 \@300 nt = 28.51
 cand/s/GPU**; length sweep batch-1 150→38.1, 200→37.8, 250→37.8, 300→28.5, 350→29.1; **best batched = 39.67 cand/s/GPU**
 (bs16; sweep 1→32 with **no OOM**, peak VRAM **4.48 GiB** of 15.6 → large batching headroom); encoder+SS-head O(L²) bracket
 batch-1 300→20.8. Report `validate_report` clean; `advisory_only/binding/is_science = True/False/False`. **Decisions.** §7
 "clearly-hopeless" check — **NOT** clearly-hopeless: on 8 A4000 ≈ 230–320 cand/s (~1e6 Stage-2 candidates ≈ <1 h; ~1e8 ≈
 ~87 GPU-node-h, within a cluster budget), and the **binding** N (Stage-1 candidate density) is unknown until P2 → **no §7
 stop-and-ask; proceed** (advisory input only; **no** auto-switch to RNA-FM — ADR-0002 D5). The binding latency decision stays
-frozen to the **P5 sizing gate**. Cross-link **PRD §10.2/§18.1**, **ADR-0002**. **Commit.** `<SHA>` on
-`p1-14-rinalmo-throughput` (result commit). Satisfies PRD §18.1 "forward-throughput probe reported (advisory)"; feeds the
+frozen to the **P5 sizing gate**. Cross-link **PRD §10.2/§18.1**, **ADR-0002**. **Commit.** squash **`e44217d`** on `main` (PR [#47](https://github.com/bioedca/tbox-finder/pull/47)) (result commit). Satisfies PRD §18.1 "forward-throughput probe reported (advisory)"; feeds the
 pre-P5 sizing gate + P1-15.
 
 ## Step P1-15 — 2026-07-15: Stage-2 LoRA/FSDP harness + FA-2 sm_86 confirm / SDPA fallback recorded
@@ -755,7 +748,7 @@ suffix-**minimises** `target_modules` once ≥20 modules match, so giga's 231 ad
 that count as "modules adapted" would understate by ~40×, hence `n_modules_adapted` (tree-walked) is authoritative.
 context7 §3.3: `/huggingface/peft` (`LoraConfig` all-linear + `get_peft_model`) + `/huggingface/accelerate`
 (`FullyShardedDataParallelPlugin` FULL_SHARD, DeepSpeed ZeRO-3), cross-checked against the installed pins.
-Cross-link **PRD §10.3/§11**, **ADR-0002 D3/D5/A2 K1/A5/A8/A9**. **Commit.** `2f38f26` on `p1-15-lora-harness`.
+Cross-link **PRD §10.3/§11**, **ADR-0002 D3/D5/A2 K1/A5/A8/A9**. **Commit.** squash **`32ee654`** on `main` (PR [#48](https://github.com/bioedca/tbox-finder/pull/48)); branch `p1-15-lora-harness` = `2f38f26` (feature) + `037b044` (CodeRabbit r1).
 Feeds **P1-16** (LoRA VRAM smoke ≤ 16 GB + the FA-2 forward) + **P3** (Stage-2 T-box fine-tune on this harness).
 
 ## Step P1-16 (authoring) — 2026-07-15: Stage-2 LoRA smoke fine-tune + VRAM smoke on one A4000
@@ -861,8 +854,7 @@ constraint. A local **advisory** de-risk (NOT the §10.3 sm_86 confirmation, and
 artifact): FA-2 forwards cleanly through a tiny RiNALMo on the sm_89 laptop, so the
 `attention_bias`/4D-mask concern the P1-15 handoff flagged is unlikely to sink the cluster run.
 
-**Commit.** `<SHA>` on `p1-16-lora-vram-smoke` (authoring; the measured result is a second commit
-after the §9.3 submit-ack).
+**Commit.** squash **`4e34dee`** on `main` (PR [#49](https://github.com/bioedca/tbox-finder/pull/49)).
 
 ## Step P1-16 (result) — 2026-07-15: LoRA VRAM smoke MEASURED — 1.484 GiB ≤ 16 GB; FA-2 forward CONFIRMED on sm_86
 
@@ -923,5 +915,5 @@ occur at any swept batch. The informative numbers are the *margin* (1.484 of 15.
 *absence of OOM through batch 16*, not the boolean. Stated rather than presented as a
 hard-won pass (§10.3). (4) **Still not science**: random RNA, placeholder loss,
 `config.is_science=false` — this establishes that Stage-2 *can* be fine-tuned on one A4000,
-not that it *learns* anything. P3 owns that. **Commit.** `<SHA>` on `p1-16-lora-vram-smoke`.
+not that it *learns* anything. P3 owns that. **Commit.** squash **`4e34dee`** on `main` (PR [#49](https://github.com/bioedca/tbox-finder/pull/49)).
 Cross-link **PRD §10.2 (b)/§10.3/§11/§15**, **ADR-0002 D3/D5/D6(b)/A2 K1/A5/A9**.

@@ -8,7 +8,7 @@ per-nucleotide T-box structural-element annotations with **calibrated**
 confidence. The scientific value is defensible, non-circular discovery, so
 data-leakage control, calibration, and orthogonal validation are first-class.
 
-> **Status:** **Phase 0 — Foundation: complete.** Next: Phase 1 (backbones & heads).
+> **Status:** **Phase 1 — Backbones & heads: complete.** Next: Phase 2 (Stage-1 training).
 > Methodology decisions are pinned in `docs/decisions/` (ADRs); the released
 > model/dataset cards will document intended use, splits, calibration, and limitations.
 
@@ -25,6 +25,21 @@ data-leakage control, calibration, and orthogonal validation are first-class.
   static decoy pools + union-prior masking and an eval-gate regression harness in place.
   *No detector has been trained yet — Phase 0 ships the foundation, not a discovery
   result.*
+
+- **Phase 1 — Backbones & heads (2026-07-15).** Both backbones are validated and their
+  transfer risk is retired. **Stage 1** (DNA, Caduceus-PS 7.73M): CUDA kernels verified on
+  the `sm_86` A4000, RC-equivariance holds, and a per-nucleotide 8-class segmentation head
+  clears the **binding transfer go/no-go** — per-nt F1 over the three core elements
+  **0.9999** vs a background-only baseline of 0.0 — and **reproduces** on a seeded re-run
+  within the pre-registered tolerance. **Stage 2** (RNA, RiNALMo-giga 650M): the
+  `multimolecule` mirror's encoder is **bit-identical** to the official release (497/497
+  tensors), and a LoRA fine-tune step (`r=16, α=32, dropout=0.05, all-linear`, bf16 +
+  gradient checkpointing; 1.94% of params trainable) runs end-to-end on **one 16 GB A4000
+  at 1.484 GiB peak** with FlashAttention-2 confirmed by forward on `sm_86`. The full
+  transfer-fallback ladder (frozen-embedding probe, GTDB continued-pretraining,
+  NT-multispecies) is **built but untriggered** — the go/no-go passed.
+  *Still no detector and no discovery result: Phase 1 ships validated backbones, and its
+  smoke runs are mechanics/expressivity probes, not generalization claims.*
 
 ## Layout (PRD §16)
 
