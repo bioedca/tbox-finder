@@ -1240,19 +1240,50 @@ def _num(value: Any) -> float | None:
     return float(value)
 
 
+def _pos_int(value: Any) -> int | None:
+    """``value`` as an int iff it is a real, positive, non-``bool`` integer.
+
+    Same ``isinstance(True, int)`` trap as :func:`_num`: without this, a report carrying
+    ``n_timed_steps: true`` or ``n_lora_params: true`` would certify that a step ran / that
+    adapters were adapted, on a value that counts nothing (§8.7).
+    """
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        return None
+    return value
+
+
+#: The GPU PRD §10.2 (b) / §15 name. `measured_on_sm86` is not merely "some sm_86 card": the
+#: budget is the A4000's, and another Ampere part (an A10 has 24 GB) would answer a question
+#: the PRD never asked while looking identical in the capability tuple.
+A4000_NAME_FRAGMENT = "A4000"
+
+
 def _is_sm86(hardware: Mapping[str, Any]) -> bool:
-    """True iff the hardware block records a REAL sm_86 device.
+    """True iff the hardware block records exactly ONE real sm_86 A4000.
 
     Derived from the measured compute capability, never from the ``is_sm86`` flag alone —
     the same self-consistency discipline :func:`read_sm86_flash_attn_evidence` applies to the
     A5 artifact. An artifact flagged ``is_sm86: true`` beside an sm_89 capability describes an
-    architecture it never touched, and PRD §10.2 (b) is a question about an A4000.
+    architecture it never touched.
+
+    Total, never raising: ``cuda_capability`` may be any parsed JSON in a tampered artifact,
+    and ``list(86)`` would raise ``TypeError`` — which would turn :func:`validate_smoke_report`
+    from "returns an error list" into "crashes", breaking the contract its callers rely on.
     """
     if not isinstance(hardware, Mapping):
         return False
+    cap = hardware.get("cuda_capability")
+    if not isinstance(cap, (list, tuple)):  # a scalar/None/str must NOT reach list()
+        return False
+    name = hardware.get("gpu_name")
     return (
-        list(hardware.get("cuda_capability") or []) == list(SM86_CAPABILITY)
+        list(cap) == list(SM86_CAPABILITY)
         and hardware.get("is_sm86") is True
+        # PRD §10.2 (b) asks about ONE A4000; a multi-GPU or other-card measurement is a
+        # different question wearing the same capability tuple.
+        and _pos_int(hardware.get("n_gpus_measured")) == 1
+        and isinstance(name, str)
+        and A4000_NAME_FRAGMENT in name
     )
 
 
@@ -1261,6 +1292,25 @@ def _bf16_and_ckpt(wrap_info: Mapping[str, Any]) -> bool:
     if not isinstance(wrap_info, Mapping):
         return False
     return wrap_info.get("dtype") == TRAIN_DTYPE and wrap_info.get("gradient_checkpointing") is True
+
+
+def _grads_flow(grad_flow: Mapping[str, Any]) -> bool:
+    """True iff EVERY LoRA param measurably received a finite gradient.
+
+    The mechanics claim, derived from counts rather than from the summary booleans: a report
+    could carry ``all_lora_params_received_grad: true`` beside ``0 of 462``, and it is the
+    counts that were actually measured.
+    """
+    if not isinstance(grad_flow, Mapping):
+        return False
+    total = _pos_int(grad_flow.get("n_lora_params"))
+    with_grad = _pos_int(grad_flow.get("n_lora_params_with_grad"))
+    return (
+        total is not None
+        and with_grad == total
+        and grad_flow.get("all_lora_grads_finite") is True
+        and grad_flow.get("all_lora_params_received_grad") is True
+    )
 
 
 def smoke_config() -> dict[str, Any]:
@@ -1711,10 +1761,9 @@ def build_smoke_report(
 
     gate = {
         # imp.md: "one LoRA fine-tune step runs end-to-end on a single A4000"
-        "step_runs_end_to_end": bool(gate_run.get("n_timed_steps")),
+        "step_runs_end_to_end": _pos_int(gate_run.get("n_timed_steps")) is not None,
         # ...and it must actually have trained the adapters, not just executed.
-        "lora_grads_flow": bool(grad_flow.get("all_lora_params_received_grad"))
-        and bool(grad_flow.get("all_lora_grads_finite")),
+        "lora_grads_flow": _grads_flow(grad_flow),
         # The VRAM number is only about §10.3's config if §10.3's config is what ran.
         "lora_config_exact": lora_exact,
         # imp.md: "peak VRAM measured and reported <= 16 GB (bf16 + gradient checkpointing)"
@@ -1941,7 +1990,11 @@ def validate_smoke_report(report: Mapping[str, Any]) -> list[str]:
     hardware = report["hardware"]
     ms_block = report["measured_smoke"]
     run_blk = ms_block.get("gate_run")
-    run_blk = run_blk if isinstance(run_blk, Mapping) else {}
+    if not isinstance(run_blk, Mapping):
+        # Name the missing evidence explicitly rather than letting every clause below fail
+        # with its own downstream symptom — the operator needs the cause.
+        errs.append("measured_smoke.gate_run must be a mapping in a measured report")
+        return errs
 
     # gate.fits_on_device must FOLLOW from the recorded peak vs the recorded card size.
     total_mem = ms_block.get("device_total_memory_gib")
@@ -1974,11 +2027,41 @@ def validate_smoke_report(report: Mapping[str, Any]) -> list[str]:
             f"{wrap.get('gradient_checkpointing')!r} (PRD §10.3 pins bf16 + checkpointing)"
         )
 
+    # The peak is recorded in TWO places (vram_budget + the gate run). Two records of the
+    # same measurement that disagree mean one is wrong and we cannot tell which — so the
+    # budget's number, which the whole §10.2 (b) verdict rests on, must be the run's.
+    run_peak = run_blk.get("peak_vram_gib")
+    if _num(run_peak) is None or _num(peak) is None or float(run_peak) != float(peak):
+        errs.append(
+            f"measured_smoke.gate_run.peak_vram_gib={run_peak!r} != vram_budget.peak_vram_gib="
+            f"{peak!r} — the §10.2 (b) verdict must rest on the peak the gate run measured"
+        )
+
     # The imp.md-named reporting clauses must FOLLOW from the measured run.
-    if _bad_bool(gate.get("step_runs_end_to_end"), bool(run_blk.get("n_timed_steps"))):
+    if _bad_bool(
+        gate.get("step_runs_end_to_end"), _pos_int(run_blk.get("n_timed_steps")) is not None
+    ):
         errs.append(
             f"gate.step_runs_end_to_end does not follow from measured_smoke.gate_run."
-            f"n_timed_steps={run_blk.get('n_timed_steps')!r}"
+            f"n_timed_steps={run_blk.get('n_timed_steps')!r} (must be a positive int)"
+        )
+
+    # The carried P1-15 handoff clause must FOLLOW from the recorded forward verification —
+    # in BOTH directions, so neither a fabricated pass nor a fabricated failure can stand.
+    if _bad_bool(
+        gate.get("attention_forward_verified"), attn.get("forward_verified_on_sm86") is True
+    ):
+        errs.append(
+            "gate.attention_forward_verified does not follow from "
+            f"attention.forward_verified_on_sm86={attn.get('forward_verified_on_sm86')!r}"
+        )
+
+    # The mechanics clause must FOLLOW from the measured grad counts, not from its own
+    # summary booleans: a step that ran while training nothing measures the VRAM of nothing.
+    if _bad_bool(gate.get("lora_grads_flow"), _grads_flow(run_blk.get("grad_flow"))):
+        errs.append(
+            f"gate.lora_grads_flow does not follow from measured_smoke.gate_run.grad_flow="
+            f"{run_blk.get('grad_flow')!r}"
         )
     sps = run_blk.get("steps_per_sec")
     if _bad_bool(gate.get("steps_per_sec_reported"), _num(sps) is not None and sps > 0):
@@ -2031,29 +2114,27 @@ def validate_smoke_report(report: Mapping[str, Any]) -> list[str]:
 
     # A measured pass must carry the grad-flow evidence: a step that ran without training the
     # adapters would satisfy "runs end-to-end" while measuring the VRAM of nothing (§10.3).
-    ms = report["measured_smoke"]
-    gate_run = ms.get("gate_run")
-    if not isinstance(gate_run, Mapping):
-        errs.append("measured_smoke.gate_run must be a mapping in a measured report")
-        return errs
-    gf = gate_run.get("grad_flow")
+    # (The gate CLAUSE is re-derived above via `_grads_flow`; these name the exact field at
+    # fault, which is what an operator reading a failure needs.)
+    gf = run_blk.get("grad_flow")
     if not isinstance(gf, Mapping):
         errs.append(
             "measured_smoke.gate_run.grad_flow missing — the mechanics claim is unevidenced"
         )
     else:
-        n_lora = gf.get("n_lora_params")
-        n_grad = gf.get("n_lora_params_with_grad")
-        if not isinstance(n_lora, int) or n_lora < 1:
-            errs.append("grad_flow.n_lora_params must be a positive int — nothing was adapted")
-        elif not isinstance(n_grad, int) or n_grad != n_lora:
+        n_lora = _pos_int(gf.get("n_lora_params"))
+        n_grad = _pos_int(gf.get("n_lora_params_with_grad"))
+        if n_lora is None:
             errs.append(
-                f"grad_flow: only {n_grad} of {n_lora} LoRA params received a gradient — the "
-                "step ran but did not train the adapters (frozen-base + gradient-checkpointing "
-                "requires enable_input_require_grads)"
+                f"grad_flow.n_lora_params={gf.get('n_lora_params')!r} must be a positive int — "
+                "nothing was adapted (a bool is not a count)"
             )
-        if _bad_bool(gate.get("lora_grads_flow"), True) and gate.get("overall_pass") is True:
-            errs.append("gate.overall_pass is True but gate.lora_grads_flow is not")
+        elif n_grad != n_lora:
+            errs.append(
+                f"grad_flow: only {gf.get('n_lora_params_with_grad')!r} of {n_lora} LoRA params "
+                "received a gradient — the step ran but did not train the adapters (frozen-base "
+                "+ gradient-checkpointing requires enable_input_require_grads)"
+            )
 
     return errs
 

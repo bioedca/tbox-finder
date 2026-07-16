@@ -348,6 +348,63 @@ def test_smoke_validator_never_raises_on_garbage(garbage):
         ),
         (lambda r: r["wrap"].pop("applied_lora"), "wrap.applied_lora is missing"),
         (lambda r: r["gate"].pop("lora_config_exact"), "gate missing key: lora_config_exact"),
+        # --- CodeRabbit r1: the duplicated peak must agree with the budget's ---
+        (
+            lambda r: r["measured_smoke"]["gate_run"].__setitem__("peak_vram_gib", 9.9),
+            "!= vram_budget.peak_vram_gib",
+        ),
+        (
+            lambda r: r["measured_smoke"]["gate_run"].pop("peak_vram_gib"),
+            "!= vram_budget.peak_vram_gib",
+        ),
+        # --- CodeRabbit r1: a bool is not a count / not a step tally ---
+        (
+            lambda r: r["measured_smoke"]["gate_run"].__setitem__("n_timed_steps", True),
+            "gate.step_runs_end_to_end does not follow",
+        ),
+        (
+            lambda r: r["measured_smoke"]["gate_run"]["grad_flow"].__setitem__(
+                "n_lora_params", True
+            ),
+            "must be a positive int",
+        ),
+        # --- CodeRabbit r1: the handoff + mechanics clauses must follow from evidence ---
+        # A fabricated-TRUE handoff clause over a recorded forward FAILURE. The mutation also
+        # sets forward_error, so it clears the earlier "must say why" guard and actually
+        # reaches the re-derivation this case is here to prove.
+        (
+            lambda r: (
+                r["attention"].__setitem__("forward_verified_on_sm86", False),
+                r["attention"].__setitem__("forward_error", "ImportError: flash_attn"),
+            ),
+            "gate.attention_forward_verified does not follow",
+        ),
+        (
+            lambda r: r["measured_smoke"]["gate_run"]["grad_flow"].__setitem__(
+                "all_lora_grads_finite", False
+            ),
+            "gate.lora_grads_flow does not follow",
+        ),
+        (
+            lambda r: r["measured_smoke"]["gate_run"]["grad_flow"].__setitem__(
+                "all_lora_params_received_grad", False
+            ),
+            "gate.lora_grads_flow does not follow",
+        ),
+        # --- CodeRabbit r1: the §10.2 question is about ONE A4000, not any sm_86 card ---
+        (
+            lambda r: r["hardware"].__setitem__("gpu_name", "NVIDIA A10"),
+            "gate.measured_on_sm86 does not follow",
+        ),
+        (
+            lambda r: r["hardware"].__setitem__("n_gpus_measured", 2),
+            "gate.measured_on_sm86 does not follow",
+        ),
+        # A scalar capability must not crash list() — the validator's totality contract.
+        (
+            lambda r: r["hardware"].__setitem__("cuda_capability", 86),
+            "gate.measured_on_sm86 does not follow",
+        ),
     ],
 )
 def test_smoke_validator_bites(mutate, needle):
@@ -377,10 +434,15 @@ def test_a_fabricated_true_gate_clause_cannot_survive_its_evidence():
 
 def test_gate_clauses_are_shared_derivations_not_parallel_copies():
     """build and validate must compute each clause from ONE definition, or they can drift."""
-    assert L._is_sm86({"cuda_capability": [8, 6], "is_sm86": True}) is True
-    assert L._is_sm86({"cuda_capability": [8, 9], "is_sm86": True}) is False
-    assert L._is_sm86({"cuda_capability": [8, 6], "is_sm86": False}) is False
+    assert L._is_sm86(_A4000) is True
+    assert L._is_sm86({**_A4000, "cuda_capability": [8, 9]}) is False
+    assert L._is_sm86({**_A4000, "is_sm86": False}) is False
+    # PRD §10.2 (b) asks about ONE A4000 — not any sm_86 card, not a multi-GPU measurement.
+    assert L._is_sm86({**_A4000, "gpu_name": "NVIDIA A10"}) is False
+    assert L._is_sm86({**_A4000, "n_gpus_measured": 2}) is False
+    assert L._is_sm86({**_A4000, "n_gpus_measured": 0}) is False
     assert L._is_sm86({}) is False
+    assert L._is_sm86(_CPU) is False
     assert L._bf16_and_ckpt({"dtype": "bfloat16", "gradient_checkpointing": True}) is True
     assert L._bf16_and_ckpt({"dtype": "float32", "gradient_checkpointing": True}) is False
     assert L._bf16_and_ckpt({"dtype": "bfloat16", "gradient_checkpointing": False}) is False
@@ -390,6 +452,39 @@ def test_gate_clauses_are_shared_derivations_not_parallel_copies():
     assert L._num("4.2") is None
     assert L._num(4.2) == 4.2
     assert L._num(4) == 4.0
+    assert L._pos_int(True) is None
+    assert L._pos_int(0) is None
+    assert L._pos_int(-1) is None
+    assert L._pos_int(3) == 3
+    # The mechanics derivation reads the COUNTS, not the summary booleans.
+    good = {
+        "n_lora_params": 4,
+        "n_lora_params_with_grad": 4,
+        "all_lora_grads_finite": True,
+        "all_lora_params_received_grad": True,
+    }
+    assert L._grads_flow(good) is True
+    assert L._grads_flow({**good, "n_lora_params_with_grad": 3}) is False
+    assert L._grads_flow({**good, "all_lora_grads_finite": False}) is False
+    assert L._grads_flow({**good, "n_lora_params": True}) is False
+    assert L._grads_flow({}) is False
+
+
+@pytest.mark.parametrize(
+    "cap",
+    [86, "8.6", None, {"major": 8}, [8], [8, 6, 1]],
+    ids=["int", "str", "none", "dict", "short", "long"],
+)
+def test_a_malformed_capability_cannot_crash_the_validator(cap):
+    """`list(86)` raises TypeError — the validator must RETURN errors, never crash (§8.7).
+
+    Its callers (CI, `run_vram_smoke`'s fail-closed publish) rely on an error list; a crash
+    turns a clean gate failure into an opaque traceback.
+    """
+    report = _good_smoke_report()
+    report["hardware"]["cuda_capability"] = cap
+    errs = L.validate_smoke_report(report)  # must not raise
+    assert any("measured_on_sm86 does not follow" in e for e in errs)
 
 
 def test_unmeasured_smoke_report_cannot_claim_a_pass():
