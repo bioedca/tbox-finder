@@ -267,3 +267,33 @@ The pre-P3 RiNALMo forward-throughput probe (condition (b)) is **advisory-only**
 **Blinded-freeze declaration.** All rationales were authored **2026-07-11, before any P4 benchmark result exists**. **No post-P4 change is permitted**; a **pre-P4 recalibration requires ADR re-sign-off** (CLAUDE.md §7 item 2), recorded as a further amendment. This closes the D18 "authored magnitude-rationale text" delegation — the third and final deferred value.
 
 **Cross-reference impact:** P4 (GATE-1) and P5 (FDR) inherit these frozen defaults and may not change them post-unblinding; the ADR-0004 D6 0.80 rationale is co-authored there (Amendment A2). No rule or data artifact changes — this amendment adds the *why* behind numbers already pinned by ADR-0005 / ADR-0004.
+
+---
+
+## Amendment A3 — D3 locus rule: the reconciliation operator normalises per window before averaging (P2-03, 2026-07-16)
+
+- **Status:** **Accepted (user sign-off 2026-07-16; CLAUDE.md §7 item 2), "(A) Normalise per window — amend ADR."** Disambiguates D3's locus-construction rule (it pins no new *value*); consumed by P2-03 (`infer/reconcile.py`), P2-14 (GATE-4), and the P5 scan. Committed atomically with the P2-03 operator + its unit/golden gates.
+
+**The ambiguity.** D3 pins "the per-position 8-class **logits** from all covering windows are **averaged in log-sum-exp space then arg-maxed** into one per-position prediction" (identically in PRD §6). That sentence admits **two coherent operators**:
+
+- **(B) literal** — `argmax_c log( mean_w exp( logits[w,p,c] ) )` — a soft-max pooling over windows, applied to the raw logits.
+- **(A) implemented** — `argmax_c log( mean_w softmax(logits[w,p])_c )` — the arithmetic mean of the per-window **posteriors**, computed in log space.
+
+They are **not notational variants**. Measured at P2-03 on the golden fixture's real pinned-tiling geometries (window 1024 / stride 512 over nine real sampled P2-00 context lengths, 1,380–2,556 nt): **3,418 of 8,931 multi-covered positions — 38.3% — receive a different class** under (A) vs (B). (Synthetic near-uniform logits maximise the disagreement; a trained head's peaked logits agree far more often. The number establishes the choice is **material**, not that it is this large in production.)
+
+**Pinned form.** **(A).** `log_probs[p] = log( mean over covering windows w of softmax(logits[w,p]) )`, computed as a coverage-normalised log-sum-exp of per-window `log_softmax` values, then `argmax`, applied **before** any along-sequence element merging. **Frozen in code** (`src/tbox_finder/infer/reconcile.py`, no config override), with `diagnostics()` reporting `pinned_by = "ADR-0005 D3 + A3"` (the A1/A2 freeze-in-code precedent).
+
+**Rationale.**
+
+1. **(B) weights each window by an unconstrained nuisance quantity — the discriminating argument.** `exp(logit)` is an *unnormalised* score, so averaging it weights window `w` by its partition function `Z_w = Σ_c exp(logits[w,p,c])`. **Nothing in the training objective constrains `Z_w`**: the softmax inside the cross-entropy is invariant to a constant shift of a position's logits, so the model is never trained to control that offset. Under (B), two windows predicting the **identical posterior** contribute unequally whenever their logit offsets differ — for a reason the model never claimed. Under (A) they contribute equally, by construction.
+2. **(A) is the standard ensemble average** of member predictive distributions, and the reconciliation *is* an ensemble over covering contexts.
+3. **The D3 consumer wants a posterior.** The Stage-1 threshold is "the most-liberal value retaining a per-locus recall floor" and the §11 recalibration/ECE stack grades a calibrated posterior; (A) emits one directly (`Σ_c exp(log_probs) = 1`). *Recorded honestly: this argument is **weaker than it looks** and did not decide the matter — (B)'s output can also be softmaxed over `c`, yielding a distribution with the same arg-max. It is a convenience argument; rationale 1 is the discriminating one.*
+
+**What this amendment does NOT change.** The **coverage normalisation** (`− log |W(p)|`) is common to both readings and was never at issue: it is what "**averaged**" means as against "summed", and D3's own stated purpose — seam-freeness, "boundary IoU is not a 512-grid artifact" — *requires* it, since without it an interior nucleotide (coverage 2–3) would outscore a tail nucleotide (coverage 1) on identical evidence. The **arg-max-last** ordering, the **before-merging** placement, the **zero-flank-and-flag** contig-end rule, and the 1024/512 tiling are implemented exactly as D3/PRD §6 pin them. No numeric gate value moves.
+
+**Cross-reference impact:**
+- **P2-03** — `infer/reconcile.py::reconcile_windows` implements (A); golden digest `08f088c9…` is (A)'s. A unit test pins the operator identity against **external literals**, and the three behavioural claims in `diagnostics()` are **re-derived from measured behaviour**, not echoed (the P1-15/P1-16 self-certification lesson).
+- **P2-14 / GATE-4** — per-nucleotide F1 and boundary IoU are graded on (A)'s arg-max.
+- **P5 scan** — the §13.1 candidate table derives from (A); the D3 Stage-1 threshold is set on (A)'s posterior at the phase gate (unchanged **as a rule**).
+- **D12/GATE-2, D4/GATE-1, the strand resolver** — all consume locus calls *downstream* of this operator; unaffected as rules.
+- No data artifact is invalidated: no Stage-1 checkpoint exists yet (P2-04), so nothing was reconciled under the other reading.
