@@ -1,0 +1,116 @@
+{
+  "adr": "ADR-0002",
+  "backbone": {
+    "repo_id": "kuleshov-group/caduceus-ps_seqlen-131k_d_model-256_n_layer-16",
+    "revision": "d89eeb853136ea64da7feb3d0c8e909771b17ae6"
+  },
+  "class_counts": [
+    51410,
+    5900,
+    189,
+    2316,
+    1454,
+    1760,
+    1842,
+    249
+  ],
+  "class_counts_scope": {
+    "full_stream": false,
+    "n_records": 64,
+    "n_training_fold_records": 8303,
+    "occurrence": 0,
+    "training_fold_only": true
+  },
+  "diagnostics": {
+    "class_order": [
+      "background",
+      "Stem_I",
+      "Specifier",
+      "Stem_II",
+      "Stem_III",
+      "Antiterminator_Tbox_seq",
+      "Terminator",
+      "Discriminator"
+    ],
+    "config": {
+      "batch_size": 2,
+      "checkpoint_dir": "checkpoints/p2/stage1",
+      "class_weight_alpha": 0.0,
+      "crf_weight": 1.0,
+      "device": null,
+      "dropout": 0.0,
+      "epochs": 1,
+      "gamma": 2.0,
+      "grad_clip": 1.0,
+      "gradient_checkpointing": true,
+      "lr": 0.0001,
+      "max_records": 64,
+      "num_workers": 0,
+      "pythonhashseed": 0,
+      "rc_combine": "concat",
+      "report_path": "reports/p2/train_stage1_smoke.json",
+      "save_checkpoint": false,
+      "seed": 42,
+      "steps_per_epoch": 4,
+      "use_crf": false,
+      "wandb_dir": "wandb",
+      "wandb_entity": null,
+      "wandb_mode": "offline",
+      "wandb_project": "tbox-finder",
+      "weight_decay": 0.01
+    },
+    "pinned": false,
+    "step": "P2-04",
+    "swept_by": {
+      "class_weight_alpha": "P2-06",
+      "gamma": "P2-06",
+      "lr": "P2-06",
+      "rc_combine": "P2-12",
+      "use_crf": "P2-12"
+    }
+  },
+  "env_lock": "envs/ml-dna.conda-lock.yml",
+  "eval_metrics": null,
+  "gate": {
+    "class_counts_from_stream": true,
+    "gradient_checkpointing_applied": true,
+    "grads_finite": true,
+    "loss_finite": true,
+    "overall_pass": true,
+    "provenance_complete": true,
+    "train_step_ran": true
+  },
+  "gate4_graded": false,
+  "generated_at_utc": "2026-07-16T23:54:05+00:00",
+  "generated_by": "src/tbox_finder/train/train_stage1.py",
+  "gradient_checkpointing": {
+    "hf_flag_supported": false,
+    "mechanism": "manual torch.utils.checkpoint per RCPSMambaBlock (use_reentrant=False)",
+    "n_blocks": 16,
+    "n_blocks_wrapped": 16,
+    "requested": true
+  },
+  "grads_finite": true,
+  "is_science": false,
+  "peak_vram_gib": 0.48192834854125977,
+  "provenance": {
+    "config_path": "conf/train/stage1.yaml",
+    "env_lock_sha256": "70b66801eeafe1fdec4c19e667de1590e4471143bca36248fe40f16e53bb5003",
+    "git_dirty": false,
+    "git_sha": "66f0598d7287325c6bf0ce964dcc177159348b44",
+    "seed": 42,
+    "wandb_run_id": "gvoko451"
+  },
+  "schema_version": "1",
+  "step": "P2-04",
+  "steps": {
+    "losses": [
+      1.6607372760772705,
+      1.6573712825775146,
+      1.6501822471618652,
+      1.6429932117462158
+    ],
+    "n_steps": 4,
+    "world_size": 1
+  }
+}
