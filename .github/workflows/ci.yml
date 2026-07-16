@@ -120,6 +120,12 @@ jobs:
           # the P1-08 re-run reports are committed, so a missing/malformed one FAILS (not skips).
           # tests/ml/test_smoke_reproducible.py (a pure-JSON comparison, no torch).
           TBOX_REQUIRE_REPRO_GATE: "1"
+          # Same anti-rot contract for the PRD §10.2 condition-(b) VRAM gate: the measured
+          # P1-16 report is committed, so a missing/malformed one FAILS (not skips).
+          # tests/ml/test_lora_smoke.py Tier 3 (a pure-JSON check, no torch). NOTE: the torch
+          # tier of that file has its OWN var (TBOX_REQUIRE_LORA_TORCH), deliberately NOT set
+          # here — CI installs no torch, so arming it would fail every run.
+          TBOX_REQUIRE_LORA_SMOKE: "1"
         run: pytest tests/unit tests/golden tests/ml
 
   docker:

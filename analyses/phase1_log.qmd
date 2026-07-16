@@ -863,3 +863,65 @@ artifact): FA-2 forwards cleanly through a tiny RiNALMo on the sm_89 laptop, so 
 
 **Commit.** `<SHA>` on `p1-16-lora-vram-smoke` (authoring; the measured result is a second commit
 after the §9.3 submit-ack).
+
+## Step P1-16 (result) — 2026-07-15: LoRA VRAM smoke MEASURED — 1.484 GiB ≤ 16 GB; FA-2 forward CONFIRMED on sm_86
+
+**Inputs.** The authored harness at `2aba5f5`; SLURM job **521** on a cluster RTX A4000
+(sm_86, cap `[8,6]`, 15.602 GiB usable, driver 590.48.01), env `tbox-ml-rna`; the A9
+parity-confirmed `multimolecule/rinalmo-giga` @`2a71f6f9…`; a seeded synthetic 350-nt RNA
+batch. Elapsed ~135 s.
+
+**Process.** §9.3 protocol complete: authoring commit → push [bioedca] → cluster synced to
+`2aba5f5` → `sbatch --test-only` PASS (job 520, both gpu nodes up) → **user submit-ack** →
+job 521 → artifact-verify (`squeue` empty + `lora_vram_smoke.DONE` + a self-validated
+report; `.err` = only the expected `lm_head.* UNEXPECTED` load notes [we load the bare
+encoder from a checkpoint carrying the pretraining MLM head], the FA-2 fp32→bf16 cast note,
+and transformers' `use_cache=True` → `False` auto-fix under gradient checkpointing — **no
+tracebacks**) → rsync → re-validated locally (`validate_smoke_report` → no errors).
+
+**Outputs.** Measured **`reports/p1/lora_vram_smoke.json`** (git-tracked) +
+`.github/workflows/ci.yml` (`TBOX_REQUIRE_LORA_SMOKE: "1"` — the Tier-3 gate goes live now
+that the report exists). The throwaway LoRA adapter was written to node-local
+`/tmp/ecc1695-521/lora_adapter` and died with the EXIT trap, as designed.
+
+**Validation. GATE PASSED — all 10 clauses, `overall_pass=true`, every clause re-derived
+from its recorded evidence.** **Peak VRAM at the gate config (batch 1, 350 nt, bf16 +
+gradient checkpointing) = 1.484 GiB of 15.602** — **9.5 % of the card**, vs the pinned
+16 GB budget. **PRD §10.2 condition (b)'s VRAM half is answered: Stage-2 LoRA fine-tuning
+fits one A4000 with ~10× headroom; the RNA-FM swap is NOT triggered on VRAM.** Headroom
+sweep (reported, never gated): batch {1: 1.484, 2: 1.558, 4: 1.706, 8: 2.014, 16: 2.647} GiB
+— **no OOM anywhere**, `largest_fitting_batch=16`, `oom_at_batch=null`. steps/sec (reported,
+**not** adjudicated — PRD §10.2 freezes the latency decision to the P5 sizing gate): gate
+run **2.70 steps/s** (step_ms mean 370.4); sweep {1: 3.27, 2: 3.23, 4: 1.91, 8: 1.01,
+16: 0.52} steps/s. Mechanics: **462/462 LoRA params received finite gradients** (231 adapted
+modules × A+B — internally consistent), `base_frozen=true`, **231/231 eligible `nn.Linear`
+adapted** (`all_linear_fully_covered`), applied config read off the model = **r=16 / α=32 /
+dropout=0.05** exactly, **12,840,432 / 662,079,483 trainable (1.9394 %)** — *identical* to
+P1-15's dry-run figures, an independent cross-check that the GPU run wrapped the same model
+the CPU dry-run did. Adapter dtypes measured `torch.float32` over the bf16 base (PEFT's
+`autocast_adapter_dtype` default — recorded, not assumed). Stack: torch 2.7.1+cu128 /
+transformers 5.13.0 / multimolecule 0.1.0 / peft 0.18.1 / accelerate 1.12.0 / deepspeed
+0.18.5.
+
+**Decisions.** (1) **The carried P1-15 handoff is CLOSED, positively.** `flash_attention_2`
+was **loaded and forwarded through RiNALMo on a real sm_86 A4000** — `used == selected ==
+flash_attention_2`, `forward_verified_on_sm86: true`, `forward_error: null`. The
+`attention_bias`/4D-mask failure mode the handoff feared did not materialise; ADR-0002 A2
+K1's ImportError caveat is moot (the wheel is present and works). **No §7 stop, no SDPA
+flip, no ADR amendment** — the P1-15 selection stands and is now forward-verified rather
+than import-inferred. P1-15's own artifact correctly keeps `forward_verified_on_sm86:false`
+(it records what P1-15 knew); P1-16's report carries the verification, which is why the two
+validators are deliberately separate. (2) **PRD §10.3's "frozen base ≈1.3 GB" arithmetic
+estimate is now MEASURED and confirmed**: 650 M × 2 bytes ≈ 1.3 GB, and the measured 1.484
+GiB peak is that base plus fp32 adapter grads (~51 MB), AdamW states (~103 MB) and
+checkpointed activations — the estimate was sound, and it is no longer an estimate (this
+closes the P1-15 note that flagged it as unmeasured). (3) **The 16 GB clause passed by a
+factor of ~10, and the honest reading is that it could hardly have failed**: on a 15.6 GiB
+card an over-16 GiB peak is unreachable (the allocator OOMs first), so the clause is a
+formality on this hardware and the real condition-(b) risk was always an OOM — which did not
+occur at any swept batch. The informative numbers are the *margin* (1.484 of 15.602) and the
+*absence of OOM through batch 16*, not the boolean. Stated rather than presented as a
+hard-won pass (§10.3). (4) **Still not science**: random RNA, placeholder loss,
+`config.is_science=false` — this establishes that Stage-2 *can* be fine-tuned on one A4000,
+not that it *learns* anything. P3 owns that. **Commit.** `<SHA>` on `p1-16-lora-vram-smoke`.
+Cross-link **PRD §10.2 (b)/§10.3/§11/§15**, **ADR-0002 D3/D5/D6(b)/A2 K1/A5/A9**.
