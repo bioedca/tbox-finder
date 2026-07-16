@@ -283,6 +283,7 @@ def test_the_synthetic_logit_stream_is_pinned() -> None:
             -1.9141518598436775,
             3.3213989636444587,
         ],
+        rtol=0,
         atol=1e-12,
     )
 
@@ -402,7 +403,7 @@ def test_every_case_reconciles_to_a_normalised_distribution() -> None:
         starts = wd.tile_windows(seq_len, window=window, stride=int(case["stride"]))
         out = rc.reconcile_windows(_logits_numpy(case), starts, seq_len)
         assert out.log_probs.shape == (seq_len, rc.NUM_CLASSES), case["case_id"]
-        np.testing.assert_allclose(np.exp(out.log_probs).sum(axis=1), 1.0, atol=1e-12)
+        np.testing.assert_allclose(np.exp(out.log_probs).sum(axis=1), 1.0, rtol=0, atol=1e-12)
         assert int(out.coverage.min()) >= 1
         assert np.array_equal(out.prediction, np.argmax(out.log_probs, axis=1).astype(np.int16))
 

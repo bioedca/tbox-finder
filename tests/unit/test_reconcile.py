@@ -192,7 +192,9 @@ def test_diagnostics_claims_match_what_the_operator_actually_does() -> None:
     shifted[1] += 3.0
     ref = rc.reconcile_windows(pair, [0, 8], window + 8)
     got = rc.reconcile_windows(shifted, [0, 8], window + 8)
-    assert d["normalises_per_window"] is bool(np.allclose(ref.log_probs, got.log_probs, atol=1e-12))
+    assert d["normalises_per_window"] is bool(
+        np.allclose(ref.log_probs, got.log_probs, rtol=0, atol=1e-12)
+    )
 
     # ignores_pad_positions: poisoning an out-of-bounds position must not move the score
     poisoned = single.copy()
@@ -271,9 +273,9 @@ def test_log_softmax_normalises_and_is_shift_invariant() -> None:
     x = np.array([[1.0, -3.0, 0.5, 2.0, 0.0, -1.0, 4.0, 0.25]])
     lp = rc.log_softmax(x)
     assert np.exp(lp).sum() == pytest.approx(1.0, abs=1e-12)
-    np.testing.assert_allclose(rc.log_softmax(x + 17.0), lp, atol=1e-12)
+    np.testing.assert_allclose(rc.log_softmax(x + 17.0), lp, rtol=0, atol=1e-12)
     ref = _stdlib_log_softmax(list(x[0]))
-    np.testing.assert_allclose(lp[0], ref, atol=1e-12)
+    np.testing.assert_allclose(lp[0], ref, rtol=0, atol=1e-12)
 
 
 # --------------------------------------------------------------------------------------
@@ -337,7 +339,7 @@ def test_coverage_invariance_bites_a_bare_logsumexp_operator() -> None:
     bare_cov1 = rc.logsumexp(lp[:1], axis=0)  # log-sum-exp WITHOUT / coverage
     bare_cov2 = rc.logsumexp(np.repeat(lp, 2, axis=0), axis=0)
     assert not np.allclose(bare_cov1, bare_cov2)
-    np.testing.assert_allclose(bare_cov2 - bare_cov1, math.log(2.0), atol=1e-12)
+    np.testing.assert_allclose(bare_cov2 - bare_cov1, math.log(2.0), rtol=0, atol=1e-12)
 
 
 def test_agreeing_windows_leave_no_seam_across_a_real_coverage_boundary() -> None:
@@ -399,7 +401,7 @@ def test_a_constant_shift_of_one_window_does_not_move_the_reconciliation() -> No
     shifted = logits.copy()
     shifted[1] += 6.25  # every class of window 1: same predicted distribution
     out = rc.reconcile_windows(shifted, starts, seq_len)
-    np.testing.assert_allclose(out.log_probs, ref.log_probs, atol=1e-12)
+    np.testing.assert_allclose(out.log_probs, ref.log_probs, rtol=0, atol=1e-12)
     assert np.array_equal(out.prediction, ref.prediction)
 
 
@@ -428,7 +430,7 @@ def test_reconciled_log_probs_are_a_normalised_distribution() -> None:
     starts = wd.tile_windows(1800)
     logits = _logits(len(starts), rc.WINDOW_NT, tag="dist")
     out = rc.reconcile_windows(logits, starts, 1800)
-    np.testing.assert_allclose(np.exp(out.log_probs).sum(axis=1), 1.0, atol=1e-12)
+    np.testing.assert_allclose(np.exp(out.log_probs).sum(axis=1), 1.0, rtol=0, atol=1e-12)
     assert (out.log_probs <= 0.0).all()
 
 
@@ -457,7 +459,7 @@ def test_matches_an_independent_stdlib_reimplementation() -> None:
     out = rc.reconcile_windows(logits, starts, seq_len)
 
     ref_lp, ref_pred, ref_cov, ref_flag = _reference_reconcile(logits, starts, seq_len)
-    np.testing.assert_allclose(out.log_probs, np.asarray(ref_lp), atol=1e-12)
+    np.testing.assert_allclose(out.log_probs, np.asarray(ref_lp), rtol=0, atol=1e-12)
     assert out.prediction.tolist() == ref_pred
     assert out.coverage.tolist() == ref_cov
     assert out.zero_flanked.tolist() == ref_flag
@@ -489,7 +491,7 @@ def test_overhanging_windows_reconcile_to_the_independent_values_not_just_the_fl
     out = rc.reconcile_windows(logits, starts, seq_len)
 
     ref_lp, ref_pred, ref_cov, ref_flag = _reference_reconcile(logits, starts, seq_len)
-    np.testing.assert_allclose(out.log_probs, np.asarray(ref_lp), atol=1e-12)
+    np.testing.assert_allclose(out.log_probs, np.asarray(ref_lp), rtol=0, atol=1e-12)
     assert out.prediction.tolist() == ref_pred
     assert out.coverage.tolist() == ref_cov
     assert out.zero_flanked.tolist() == ref_flag
@@ -670,6 +672,12 @@ def test_rejects_a_boolean_start_mixed_with_ints() -> None:
 def test_rejects_a_boolean_dtype_start_array() -> None:
     with pytest.raises(ValueError, match="starts must be an integer, got bool"):
         rc.reconcile_windows(np.zeros((1, 4, rc.NUM_CLASSES)), np.array([False]), 4)
+
+
+def test_rejects_a_multidimensional_starts_array() -> None:
+    """Flattening would silently accept a malformed offset table of the right size."""
+    with pytest.raises(ValueError, match="starts must be one-dimensional"):
+        rc.reconcile_windows(np.zeros((2, 4, rc.NUM_CLASSES)), np.array([[0], [4]]), 8)
 
 
 def test_rejects_a_zero_width_window() -> None:

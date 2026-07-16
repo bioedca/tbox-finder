@@ -231,7 +231,12 @@ def reconcile_windows(
     # the bool at their call site; a bool-dtype ndarray still round-trips to Python bools
     # via `.tolist()` and is rejected.)
     if isinstance(starts, np.ndarray):
-        raw_starts: list[Any] = starts.reshape(-1).tolist()
+        if starts.ndim != 1:
+            raise ValueError(
+                f"starts must be one-dimensional (n_windows,), got shape={starts.shape}; "
+                f"flattening it would silently accept a malformed offset table"
+            )
+        raw_starts: list[Any] = starts.tolist()
     elif hasattr(starts, "__iter__") and not isinstance(starts, (str, bytes)):
         raw_starts = list(starts)
     else:
