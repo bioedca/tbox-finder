@@ -536,11 +536,12 @@ def test_validate_rejects_overclaimed_is_science() -> None:
     assert any("is_science" in p for p in fc.validate_report(report))
 
 
-def test_validate_rejects_a_wrong_source_db() -> None:
-    """source.db is load-bearing provenance — a different value is not this run's."""
+@pytest.mark.parametrize("field", ["db", "base_url", "rettype", "terms_url"])
+def test_validate_rejects_a_wrong_source_constant(field: str) -> None:
+    """The source constants are load-bearing provenance — a different value is not this run's."""
     report = _valid_report()
-    report["source"]["db"] = "not_nuccore"
-    assert any("source.db" in p for p in fc.validate_report(report))
+    report["source"][field] = "wrong-value"
+    assert any(f"source.{field}" in p for p in fc.validate_report(report))
 
 
 @pytest.mark.parametrize("bad_pad", [0, -1])

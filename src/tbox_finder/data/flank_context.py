@@ -544,7 +544,12 @@ def validate_report(report: Mapping[str, Any]) -> list[str]:
         # The source constants are load-bearing provenance — pin them to the
         # module's own values, not merely 'truthy' (a report claiming a different
         # db/URL is not this run's provenance).
-        for key, expected in (("db", NCBI_DB), ("base_url", NCBI_BASE_URL)):
+        for key, expected in (
+            ("db", NCBI_DB),
+            ("base_url", NCBI_BASE_URL),
+            ("rettype", NCBI_RETTYPE),
+            ("terms_url", NCBI_TERMS_URL),
+        ):
             if src.get(key) != expected:
                 problems.append(f"source.{key} != {expected!r} (got {src.get(key)!r})")
         if not (isinstance(src.get("accessed"), str) and src["accessed"].strip()):
@@ -634,6 +639,11 @@ def _entrez(email: str, api_key: str | None):
     Entrez.tool = NCBI_TOOL
     if api_key:
         Entrez.api_key = api_key
+    # Bio.Entrez retries internally (default max_tries=3, sleep_between_tries=15),
+    # and those retries do NOT pass through our RateLimiter — so a single
+    # limiter.acquire() could front up to 3 HTTP requests, blowing the NCBI ceiling
+    # 3x. Make fetch_region the SOLE retry authority so every request is metered.
+    Entrez.max_tries = 1
     return Entrez
 
 
