@@ -100,9 +100,14 @@ PMID:40567809; accessed 2026-07-12), a reverse-complement-*equivariant* state-sp
 model, over ~1 kb windows (stride 512) — far below its 131 kb context, which is
 unnecessary for ~150–350 nt loci and costly at scan throughput. A per-nucleotide
 8-class segmentation head (linear, with an optional CRF transition term) emits the
-element decomposition, and because a parameter-shared RC-equivariant backbone scores a
-locus and its reverse complement identically, strand is resolved downstream from the
-*predicted element order* rather than from the score. **Stage 2** re-ranks candidates
+element decomposition. The backbone is reverse-complement **equivariant**, not invariant:
+for a hidden state $h = f(x)$ it satisfies $f(\mathrm{rc}(x)) = \mathrm{flip}(h)$ along the
+sequence and channel axes, so the two strands' representations are *coupled* rather than
+identical. A strand-agnostic scalar therefore cannot by itself orient a locus, but the
+directional information survives, and the reverse-complement channels are combined by
+concatenation — deliberately not by an order-destroying average, which would collapse the
+element order — so that strand is resolved downstream from the *predicted element order*.
+**Stage 2** re-ranks candidates
 with **RiNALMo-giga** (650 M parameters; 33 layers, hidden 1280; pretrained on ~36 M
 non-coding RNAs and reported to generalise to unseen RNA families for secondary
 structure; PMID:40593636, DOI:10.1038/s41467-025-60872-5; accessed 2026-07-13),
@@ -116,11 +121,16 @@ held-out bacterial T-box windows vs GC-matched prokaryotic background) and a **b
 per-nucleotide segmentation probe on a leave-clade-out held-out smoke set, which reached
 a minimum per-nucleotide F1 over the three core elements (Stem I, Specifier,
 Antiterminator) of **0.9999** against a background-only baseline of 0.0, and reproduced
-on a seeded re-run within a tolerance pinned *a priori*. Both smoke probes are trained
-and graded on the same held-out loci and are therefore measurements of
-**learnability/expressivity, not generalization**; generalization is graded at GATE-4 on
-the full leave-clade-out partition (@sec-eval), and these loci are held out from the
-training corpus so the go/no-go cannot contaminate it. Adopting the RiNALMo mirror was
+on a seeded re-run within a tolerance pinned *a priori*. Neither probe is the paper's
+generalization result, and they are limited in different ways: the pre-filter scores a
+**cluster-grouped, homology-safe** probe split (grouped by homology cluster, so no cluster
+spans its train/test boundary) and therefore measures **cluster-level separability of
+frozen features**, while the binding segmentation probe fine-tunes and grades on the *same*
+held-out loci and is therefore a measurement of **learnability/expressivity only**.
+Generalization is graded at GATE-4 on the full leave-clade-out partition (@sec-eval) —
+a strictly harder split, since taxonomic order still spans the pre-filter's probe boundary
+— and all of these loci are held out from the training corpus, so the go/no-go cannot
+contaminate it. Adopting the RiNALMo mirror was
 gated on reproducing the published ArchiveII nine-family leave-one-family-out
 secondary-structure generalization. That refit-based criterion **failed** by 2.3 pp
 (nine-family mean 0.696 vs 0.719 published) and is reported as failed; the mirror was
@@ -131,10 +141,12 @@ gap in fresh-head refit variance rather than in the backbone. Stage-2 fine-tunin
 LoRA (`r=16, α=32, dropout=0.05, target_modules="all-linear"`; bf16 + gradient
 checkpointing; 12,840,432 of 662,079,483 parameters trainable, 1.94%), which a measured
 smoke confirms fits a single 16 GB RTX A4000 at **1.484 GiB peak**, with
-FlashAttention-2 verified by forward on `sm_86`; a DeepSpeed ZeRO-3 / FSDP `FULL_SHARD`
-full-fine-tune path and a frozen-embedding, GTDB-continued-pretraining, and
-Nucleotide-Transformer-multispecies fallback ladder are implemented but were not
-triggered, the go/no-go having passed.
+FlashAttention-2 verified by forward on `sm_86`. Two contingencies are implemented and
+neither is triggered, for distinct reasons: a DeepSpeed ZeRO-3 / FSDP `FULL_SHARD`
+full-fine-tune path, which the LoRA memory measurement above makes unnecessary; and a
+Stage-1 backbone-fallback ladder (frozen-embedding probe, GTDB continued-pretraining,
+Nucleotide-Transformer-multispecies), which the transfer go/no-go having passed leaves
+unused.
 
 # Results
 

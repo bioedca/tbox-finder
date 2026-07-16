@@ -100,7 +100,7 @@ RC-equivariance is an architectural property of RCPS, identical on the cluster A
 Cross-link **ADR-0002 D7**.
 
 **Commit.** squash **`7d62626`** on `main` (PR [#34](https://github.com/bioedca/tbox-finder/pull/34)); feature-branch atomic commit on `p1-02-caduceus`; feeds **P1-03** (seg-head build), **P1-04** (frozen-embedding probe),
-**P1-09** (continued-pretraining).
+**P1-11** (continued-pretraining).
 
 ## Step P1-03 — 2026-07-12: Stage-1 per-position 8-class segmentation head (Linear + optional CRF)
 
@@ -147,7 +147,7 @@ CRF forward/Viterbi correctness is verified by the executed test under the insta
 (P1-01/P1-02 installed-library-cross-check precedent). Cross-link **ADR-0004 D1**.
 
 **Commit.** squash **`3106e73`** on `main` (PR [#35](https://github.com/bioedca/tbox-finder/pull/35)); feature-branch atomic commit on `p1-03-seg-head`; feeds **P1-04** (backbone+head assembly with the directionality-preserving
-RC-combination knob) and **P1-09** (continued-pretraining consumes the same head).
+RC-combination knob) and **P1-11** (continued-pretraining consumes the same head).
 
 ## Step P1-04 — 2026-07-12: Assemble the Stage-1 segmenter (backbone → RC-combine → seg head) with a directionality-preserving RC-combination knob
 
@@ -273,7 +273,7 @@ precedent); the golden is a regression on the committed **fixture** slice, not t
 provenance carries the production digest). context7 §3.3: n/a (reuses in-repo `labels`/`ingest`/`provenance`; pandas/
 numpy only for IO). Cross-link **ADR-0004 D1**, **ADR-0005**, **PRD §8/§9.2**.
 **Commit.** squash **`8df3d2e`** on `main` (PR [#38](https://github.com/bioedca/tbox-finder/pull/38)); atomic commit on `p1-06-seg-smoke`; feeds **P1-07** (the BINDING per-nt segmentation smoke fine-tune
-consumes this set) + **P1-09** (continued-pretraining).
+consumes this set) + **P1-11** (continued-pretraining).
 
 ## Step P1-07 — 2026-07-12: Stage-1 per-nt 8-class segmentation smoke fine-tune + BINDING transfer go/no-go (MEASURED: GO — Stage-1 Caduceus transfer confirmed for P2)
 **Inputs.** The P1-04 `Stage1Segmenter` (Caduceus-PS backbone → `concat` RC-combine → 8-class seg head); the P1-06
