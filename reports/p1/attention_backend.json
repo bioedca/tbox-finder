@@ -1,0 +1,153 @@
+{
+  "attention": {
+    "fallback": "sdpa",
+    "flash_attn_pinned_version": "2.8.3.post1",
+    "forward_verification_deferred_to": "P1-16 (GPU VRAM/mechanics smoke)",
+    "forward_verified_on_sm86": false,
+    "local_probe_non_authoritative": {
+      "flash_attn_imports_here": true,
+      "note": "the local machine is NOT the sm_86 target; this is not the PRD \u00a710.3 confirmation \u2014 see sm86_evidence"
+    },
+    "model_supports_flash_attn": true,
+    "reason": "FA-2 selected: the flash-attn wheel imports on a MEASURED sm_86 A4000 (ADR-0002 A5), the pinned RiNALMo classes advertise flash-attn, and the pinned dtype bfloat16 is FA-2-eligible. The FA-2 forward through RiNALMo is NOT verified here (LOCAL step, sm_89 laptop) \u2014 deferred to the P1-16 GPU smoke.",
+    "selected": "flash_attention_2",
+    "sm86_evidence": {
+      "device_capability": [
+        8,
+        6
+      ],
+      "device_name": "NVIDIA RTX A4000",
+      "flash_attn_importable": true,
+      "flash_attn_version": "2.8.3.post1",
+      "is_sm86": true,
+      "measured_on_target_arch": true,
+      "source": "reports/p1/kernel_smoke.json",
+      "source_step": "P1-01"
+    }
+  },
+  "backbone": {
+    "hidden_dim": 1280,
+    "n_layer": 33,
+    "parity_confirmed": true,
+    "pooling_layer": false,
+    "repo_id": "multimolecule/rinalmo-giga",
+    "revision": "2a71f6f98fb41dd2e6542a5e131d3778111d1468"
+  },
+  "env": {
+    "platform": "Linux-5.15.153.1-microsoft-standard-WSL2-x86_64-with-glibc2.39",
+    "python": "3.12.13",
+    "versions": {
+      "accelerate": "1.12.0",
+      "deepspeed": "0.18.5",
+      "multimolecule": "0.1.0",
+      "peft": "0.18.1",
+      "torch": "2.7.1+cu128",
+      "transformers": "5.13.0"
+    }
+  },
+  "full_ft_fallback": {
+    "deepspeed_config": {
+      "bf16": {
+        "enabled": true
+      },
+      "gradient_accumulation_steps": 1,
+      "gradient_clipping": 1.0,
+      "steps_per_print": 2000000,
+      "train_batch_size": "auto",
+      "train_micro_batch_size_per_gpu": "auto",
+      "zero_optimization": {
+        "offload_optimizer": {
+          "device": "none"
+        },
+        "offload_param": {
+          "device": "none"
+        },
+        "stage": 3,
+        "stage3_gather_16bit_weights_on_model_save": true
+      }
+    },
+    "fsdp_plugin_kwargs": {
+      "activation_checkpointing": true,
+      "auto_wrap_policy": "transformer_based_wrap",
+      "cpu_offload": false,
+      "fsdp_version": 1,
+      "sharding_strategy": "FULL_SHARD",
+      "transformer_cls_names_to_wrap": [
+        "RiNALMoLayer"
+      ]
+    },
+    "fsdp_sharding_strategy": "FULL_SHARD",
+    "fsdp_version": 1,
+    "n_gpus": 8,
+    "role": "fallback only \u2014 LoRA is the PRD \u00a710.3 default",
+    "validated": true,
+    "zero_stage": 3
+  },
+  "gate": {
+    "attention_backend_recorded": true,
+    "base_frozen": true,
+    "fallback_config_validates": true,
+    "lora_config_exact": true,
+    "overall_pass": true,
+    "wraps_rinalmo": true
+  },
+  "git_sha": "e44217d28f9290eed30b73cbda83ecbda3ffa3ec",
+  "lora": {
+    "bias": "none",
+    "dtype": "bfloat16",
+    "gradient_checkpointing": true,
+    "is_pinned_spec_echo": true,
+    "lora_alpha": 32,
+    "lora_dropout": 0.05,
+    "r": 16,
+    "target_modules": "all-linear"
+  },
+  "measured": true,
+  "qlora": {
+    "dependency": "bitsandbytes",
+    "dependency_pinned_in_env": false,
+    "enabled": false,
+    "enabling_requires": "envs/ml-rna.yml amendment + re-lock + ADR-0002 D8 sign-off",
+    "reason": "PRD \u00a710.3 admits QLoRA only if needed; bf16 LoRA is the default and the NF4 quant-error risk on a structure-sensitive RNA model is unquantified"
+  },
+  "schema_version": "1",
+  "step": "P1-15",
+  "wrap": {
+    "applied_lora": {
+      "lora_alpha": 32,
+      "lora_dropout": 0.05,
+      "n_modules_adapted": 231,
+      "r": 16,
+      "target_modules_after_injection": [
+        "dense",
+        "key",
+        "linear",
+        "linear_gate",
+        "query",
+        "value"
+      ],
+      "target_modules_selector": "all-linear",
+      "target_modules_suffix_minimised": true
+    },
+    "attn_implementation": "sdpa",
+    "attn_implementation_requested": "sdpa",
+    "base_frozen": true,
+    "dtype": "bfloat16",
+    "gradient_checkpointing": true,
+    "n_adapter_sites": 231,
+    "n_base_trainable_params": 0,
+    "targeted_module_leaf_names": [
+      "dense",
+      "key",
+      "linear",
+      "linear_gate",
+      "query",
+      "value"
+    ],
+    "tiny_fixture": false,
+    "total_params": 662079483,
+    "trainable_params": 12840432,
+    "trainable_pct": 1.9394,
+    "wrap_attn_implementation_note": "wrapped under SDPA on CPU (this step is LOCAL); the SELECTED backend is 'flash_attention_2', exercised on an A4000 at P1-16"
+  }
+}
