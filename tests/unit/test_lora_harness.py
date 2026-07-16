@@ -344,6 +344,9 @@ def _good_report() -> dict:
                 "lora_dropout": 0.05,
                 "target_modules_selector": "all-linear",
                 "n_modules_adapted": 231,
+                "n_eligible_linear_modules": 231,
+                "all_linear_fully_covered": True,
+                "uncovered_linear_modules": [],
             },
         },
         "attention": {
@@ -610,6 +613,7 @@ def test_lora_config_exact_gate_reads_the_model_not_the_constants():
             "lora_alpha": 32,
             "lora_dropout": 0.05,
             "n_modules_adapted": 231,
+            "all_linear_fully_covered": True,
         },
     }
     report = L.build_report(
@@ -812,3 +816,84 @@ def test_lora_wraps_the_real_giga_backbone():
     assert info["base_frozen"] is True
     assert info["trainable_pct"] < 5.0
     assert info["n_adapter_sites"] > 200  # 33 encoder layers × ~7 linears
+
+
+# ====================================================================================== #
+# CodeRabbit r1 hardening — each finding gets a bite test.
+# ====================================================================================== #
+def test_evidence_from_a_different_flash_attn_build_is_rejected(tmp_path):
+    """ADR-0002 D3/A2 pin flash-attn 2.8.3.post1 by release-asset URL. An artifact measured
+    against some other build confirms THAT build, not ours — absence of evidence for the
+    pinned wheel, not confirmation of it."""
+    report = json.loads(KERNEL_SMOKE.read_text())
+    report["imports"]["flash_attn"]["version"] = "2.7.0"
+    p = tmp_path / "smoke.json"
+    p.write_text(json.dumps(report))
+    with pytest.raises(ValueError, match="different wheel"):
+        L.read_sm86_flash_attn_evidence(p)
+
+
+def test_tiny_run_cannot_overwrite_the_canonical_artifact():
+    """A fixture-derived report silently replacing the real-backbone record is how a toy
+    number ends up quoted as a result (§10.3)."""
+    with pytest.raises(ValueError, match="refusing to write the canonical artifact"):
+        L.run_harness_dryrun(tiny=True)
+
+
+@pytest.mark.parametrize("bad", ["false", "true", 1, 0, None, "yes"])
+def test_measured_must_be_a_strict_bool(bad):
+    """A truthy string like "false" must not walk into the measured path (§8.7)."""
+    report = _good_report()
+    report["measured"] = bad
+    errs = L.validate_report(report)
+    assert any("report.measured must be a bool" in e for e in errs), errs
+
+
+def test_selected_backend_must_follow_from_the_recorded_evidence():
+    """The converse of the FA-2 fail-closed check: a report may not record SDPA while every
+    input says FA-2 either. The pure decision function is the single source of truth."""
+    report = _good_report()
+    report["attention"]["selected"] = L.ATTN_SDPA  # evidence all says flash_attention_2
+    errs = L.validate_report(report)
+    assert any("does not follow from the recorded evidence" in e for e in errs), errs
+
+
+def test_selected_eager_never_follows_from_evidence():
+    report = _good_report()
+    report["attention"]["selected"] = L.ATTN_EAGER
+    assert any("does not follow from the recorded evidence" in e for e in L.validate_report(report))
+
+
+@pytest.mark.parametrize(
+    "field",
+    ["is_sm86", "flash_attn_importable"],
+)
+def test_non_bool_evidence_flags_are_rejected(field):
+    report = _good_report()
+    report["attention"]["sm86_evidence"][field] = "false"  # truthy!
+    assert any("must be a bool" in e for e in L.validate_report(report))
+
+
+def test_partial_all_linear_coverage_fails_the_gate():
+    """ "all-linear" means ALL of them. A wrap that adapted a proper subset is not the §10.3
+    config, however many adapter sites it reports."""
+    report = _good_report()
+    report["wrap"]["applied_lora"]["all_linear_fully_covered"] = False
+    report["wrap"]["applied_lora"]["uncovered_linear_modules"] = ["encoder.layer.5.dense"]
+    errs = L.validate_report(report)
+    assert any("all_linear_fully_covered" in e for e in errs), errs
+
+
+def test_adapted_count_must_agree_with_adapter_sites():
+    report = _good_report()
+    report["wrap"]["n_adapter_sites"] = 7  # disagrees with n_modules_adapted=231
+    assert any("counts of the same wrap disagree" in e for e in L.validate_report(report))
+
+
+def test_committed_report_proves_all_linear_covered_every_eligible_linear():
+    """The measured coverage on the real giga backbone: every eligible nn.Linear adapted."""
+    report = json.loads(COMMITTED_REPORT.read_text())
+    applied = report["wrap"]["applied_lora"]
+    assert applied["all_linear_fully_covered"] is True
+    assert applied["uncovered_linear_modules"] == []
+    assert applied["n_modules_adapted"] == applied["n_eligible_linear_modules"]

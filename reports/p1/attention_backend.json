@@ -91,7 +91,7 @@
     "overall_pass": true,
     "wraps_rinalmo": true
   },
-  "git_sha": "e44217d28f9290eed30b73cbda83ecbda3ffa3ec",
+  "git_sha": "2ddf6745b0021e2e8e1a56ad01530bc10ce32095",
   "lora": {
     "bias": "none",
     "dtype": "bfloat16",
@@ -114,8 +114,10 @@
   "step": "P1-15",
   "wrap": {
     "applied_lora": {
+      "all_linear_fully_covered": true,
       "lora_alpha": 32,
       "lora_dropout": 0.05,
+      "n_eligible_linear_modules": 231,
       "n_modules_adapted": 231,
       "r": 16,
       "target_modules_after_injection": [
@@ -127,7 +129,8 @@
         "value"
       ],
       "target_modules_selector": "all-linear",
-      "target_modules_suffix_minimised": true
+      "target_modules_suffix_minimised": true,
+      "uncovered_linear_modules": []
     },
     "attn_implementation": "sdpa",
     "attn_implementation_requested": "sdpa",
@@ -148,6 +151,6 @@
     "total_params": 662079483,
     "trainable_params": 12840432,
     "trainable_pct": 1.9394,
-    "wrap_attn_implementation_note": "wrapped under SDPA on CPU (this step is LOCAL); the SELECTED backend is 'flash_attention_2', exercised on an A4000 at P1-16"
+    "wrap_attn_implementation_note": "wrapped under SDPA on CPU (this step is LOCAL); the SELECTED backend is 'flash_attention_2', which is NOT exercised here \u2014 it is TO BE exercised on an A4000 at P1-16 (no forward through the selected backend has been run)"
   }
 }

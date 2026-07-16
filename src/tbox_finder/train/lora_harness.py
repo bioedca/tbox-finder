@@ -308,6 +308,18 @@ def read_sm86_flash_attn_evidence(path: str | Path = KERNEL_SMOKE_REPORT) -> dic
             "on sm_86"
         )
 
+    # The evidence must be about the wheel we actually pin. An artifact measured against a
+    # different flash-attn build confirms *that* build, not ours (ADR-0002 D3/A2 pin
+    # 2.8.3.post1 by release-asset URL) — so a version mismatch is an absence of evidence
+    # for the pinned wheel, not a confirmation of it.
+    fa_version = fa.get("version")
+    if fa_ok and fa_version != FLASH_ATTN_PINNED:
+        raise ValueError(
+            f"{p} recorded flash_attn version {fa_version!r}, but envs/ml-rna.yml pins "
+            f"{FLASH_ATTN_PINNED!r} — evidence from a different wheel cannot confirm the "
+            "pinned FA-2 build"
+        )
+
     return {
         "source": str(path),
         "source_step": report.get("step"),
@@ -544,6 +556,14 @@ def build_peft_model(
             device=device,
         )
 
+    # Record the ELIGIBLE nn.Linear set BEFORE wrapping. "all-linear" is only meaningfully
+    # "all" if the adapted set equals the eligible set — n_modules_adapted > 0 would pass
+    # even if PEFT reached exactly one Linear. This is the pre/post comparison that makes
+    # the §10.3 selector's coverage a measurement rather than a hope.
+    import torch  # lazy
+
+    eligible = {n for n, m in base_model.named_modules() if isinstance(m, torch.nn.Linear)}
+
     peft_model = get_peft_model(base_model, LoraConfig(**lora_config_kwargs()))
 
     if gradient_checkpointing:
@@ -551,6 +571,10 @@ def build_peft_model(
 
     suffix = ".lora_A.default"
     targets = [n[: -len(suffix)] for n, _ in peft_model.named_modules() if n.endswith(suffix)]
+    # PEFT rewrites module paths under `base_model.model.` when it wraps; compare on the
+    # trailing path so the two sets are commensurable.
+    adapted_paths = {t.split("base_model.model.", 1)[-1] for t in targets}
+    uncovered = sorted(eligible - adapted_paths)
     trainable = sum(p.numel() for p in peft_model.parameters() if p.requires_grad)
     total = sum(p.numel() for p in peft_model.parameters())
     # The base MUST be frozen — that is what makes this LoRA rather than a full FT (§10.3).
@@ -605,6 +629,10 @@ def build_peft_model(
                 None if resolved is None else len(resolved) < len(targets)
             ),
             "n_modules_adapted": len(targets),
+            # "all-linear" coverage, MEASURED as a pre/post set comparison.
+            "n_eligible_linear_modules": len(eligible),
+            "all_linear_fully_covered": not uncovered,
+            "uncovered_linear_modules": uncovered,
         },
     }
     return peft_model, info
@@ -679,7 +707,7 @@ def validate_report(report: Mapping[str, Any]) -> list[str]:
     # model. Without it a report could assert §10.3 while the model ran something else.
     wrap_blk = report.get("wrap")
     applied = wrap_blk.get("applied_lora") if isinstance(wrap_blk, Mapping) else None
-    if report.get("measured") and not isinstance(applied, Mapping):
+    if report.get("measured") is True and not isinstance(applied, Mapping):
         errs.append(
             "wrap.applied_lora missing — a measured report must record the APPLIED "
             "LoRA config read back off the model, not just the pinned echo"
@@ -707,6 +735,14 @@ def validate_report(report: Mapping[str, Any]) -> list[str]:
                 "wrap.applied_lora.n_modules_adapted != wrap.n_adapter_sites — the two "
                 "counts of the same wrap disagree"
             )
+        # "all-linear" means ALL of them: a run that adapted a proper subset of the eligible
+        # Linears is not the §10.3 config, however many sites it reports.
+        if _bad_bool(applied.get("all_linear_fully_covered"), True):
+            errs.append(
+                "wrap.applied_lora.all_linear_fully_covered must be True — 'all-linear' did "
+                f"not cover every eligible nn.Linear (uncovered: "
+                f"{applied.get('uncovered_linear_modules')!r})"
+            )
 
     # --- the attention decision must be internally consistent with its own evidence ---
     attn = report["attention"]
@@ -724,11 +760,39 @@ def validate_report(report: Mapping[str, Any]) -> list[str]:
     for k in ("source", "is_sm86", "flash_attn_importable", "device_name"):
         if k not in ev:
             errs.append(f"attention.sm86_evidence missing key: {k}")
+    # Every FA-2 decision input must be a REAL bool before it is trusted or re-derived —
+    # a truthy "false" must not be able to steer the decision (§8.7).
+    for label, value in (
+        ("sm86_evidence.is_sm86", ev.get("is_sm86")),
+        ("sm86_evidence.flash_attn_importable", ev.get("flash_attn_importable")),
+        ("model_supports_flash_attn", attn.get("model_supports_flash_attn")),
+        ("forward_verified_on_sm86", attn.get("forward_verified_on_sm86")),
+    ):
+        if not isinstance(value, bool):
+            errs.append(f"attention.{label} must be a bool, got {type(value).__name__} ({value!r})")
     if errs:
         return errs
 
+    # RE-DERIVE the decision from the recorded evidence and require the report to match.
+    # Checking only "FA-2 implies its evidence is True" would leave the converse open: a
+    # report could record `sdpa` while every input says FA-2, or vice versa. The pure
+    # decision function is the single source of truth, so the artifact must be exactly what
+    # it returns (the P1-05 "verdict follows from classify_separability" precedent).
+    expected_backend, _expected_reason = select_attention_backend(
+        flash_attn_importable=ev["flash_attn_importable"],
+        sm86_confirmed=ev["is_sm86"],
+        model_supports_flash_attn=attn["model_supports_flash_attn"],
+        dtype=lora.get("dtype") if isinstance(lora.get("dtype"), str) else "",
+    )
+    if backend != expected_backend:
+        errs.append(
+            f"attention.selected={backend!r} does not follow from the recorded evidence — "
+            f"select_attention_backend returns {expected_backend!r} for it"
+        )
+
     # Fail-closed (§10.3): FA-2 may ONLY be selected when every measured input backs it.
-    # A tampered report cannot claim flash_attention_2 over false/absent evidence.
+    # (Kept explicit rather than folded into the re-derivation above: these name the exact
+    # input at fault, which is what an operator reading a failure needs.)
     if backend == ATTN_FLASH2:
         if _bad_bool(ev.get("is_sm86"), True):
             errs.append(
@@ -784,8 +848,17 @@ def validate_report(report: Mapping[str, Any]) -> list[str]:
     if errs:
         return errs
 
+    # `measured` must be a REAL bool. A truthy string like "false" would otherwise walk
+    # straight into the measured path and let overall_pass=True stand (§8.7/§10.3).
+    if not isinstance(report.get("measured"), bool):
+        errs.append(
+            f"report.measured must be a bool, got {type(report.get('measured')).__name__} "
+            f"({report.get('measured')!r})"
+        )
+        return errs
+
     # Fail-closed: an unmeasured report must not claim any gate pass.
-    if not report.get("measured"):
+    if not report["measured"]:
         if gate.get("overall_pass") is True:
             errs.append("gate.overall_pass is True but report.measured is not set")
         return errs
@@ -811,7 +884,7 @@ def validate_report(report: Mapping[str, Any]) -> list[str]:
         n_tot = wrap.get("total_params")
         if not isinstance(n_tr, int) or not isinstance(n_tot, int) or not 0 < n_tr < n_tot:
             errs.append("wrap trainable/total params must be ints with 0 < trainable < total")
-    elif report.get("measured"):
+    else:
         errs.append("measured report must carry a `wrap` block")
 
     return errs
@@ -849,10 +922,11 @@ def build_report(
             applied.get("r") == LORA_R
             and applied.get("lora_alpha") == LORA_ALPHA
             and applied.get("lora_dropout") == LORA_DROPOUT
-            # "all-linear" must have actually reached modules. Checked via the count taken
-            # off the module tree — PEFT's own target_modules is suffix-minimised and would
-            # understate it.
+            # "all-linear" must have actually reached modules — and reached ALL the eligible
+            # ones. Checked off the module tree (PEFT's own target_modules is
+            # suffix-minimised and would understate the count).
             and bool(applied.get("n_modules_adapted"))
+            and applied.get("all_linear_fully_covered") is True
         )
     else:
         lora_exact = False
@@ -945,7 +1019,18 @@ def run_harness_dryrun(*, out_path: str | Path = DEFAULT_OUT, tiny: bool = False
     ``tiny=True`` wraps a small same-architecture RiNALMo instead of downloading the 2.5 GB
     giga checkpoint — for CI/smoke use. The committed artifact is produced with
     ``tiny=False`` (the real parity-confirmed backbone), and the report records which.
+
+    A ``tiny`` run **may not write** :data:`DEFAULT_OUT`: that path is the committed
+    evidence artifact, and a fixture-derived report silently overwriting the real-backbone
+    one is exactly how a toy number ends up quoted as a result (§10.3). Tiny runs must name
+    their own output path.
     """
+    if tiny and str(out_path) == str(DEFAULT_OUT):
+        raise ValueError(
+            f"refusing to write the canonical artifact {DEFAULT_OUT} from a tiny fixture "
+            "run — it would overwrite the real-backbone record with a toy one. Pass an "
+            "explicit --out for tiny runs."
+        )
     evidence = read_sm86_flash_attn_evidence()
     supports_fa = model_supports_flash_attn()
     backend, reason = select_attention_backend(
@@ -977,7 +1062,8 @@ def run_harness_dryrun(*, out_path: str | Path = DEFAULT_OUT, tiny: bool = False
     )
     info["wrap_attn_implementation_note"] = (
         "wrapped under SDPA on CPU (this step is LOCAL); the SELECTED backend is "
-        f"{backend!r}, exercised on an A4000 at P1-16"
+        f"{backend!r}, which is NOT exercised here — it is TO BE exercised on an A4000 at "
+        "P1-16 (no forward through the selected backend has been run)"
     )
     info["tiny_fixture"] = bool(tiny)
 
