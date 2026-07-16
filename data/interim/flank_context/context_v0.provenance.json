@@ -8,8 +8,8 @@
     "n_records": 23535,
     "pad_nt": 1024
   },
-  "generated_at_utc": "2026-07-16T13:40:54.232786+00:00",
-  "git_sha": "1306bcf7c1f9238a27f4fd0c0a2d4499db48ff75",
+  "generated_at_utc": "2026-07-16T13:58:14.386484+00:00",
+  "git_sha": "9c2658465545b7a5a67341ba826cff852b0efc54",
   "inputs": {
     "../../../data/processed/master_clean_v0.parquet": "1eb76591d0e481019dd7acf72a439f157fec9f2aeecb8cc5c37ba80a7b062dd2",
     "../../../data/processed/splits/split_assignments.parquet": "fb231fe4e66666f8ea2de1ccd4eea4dce282a33e05a46b41c737e3e07dcc5602"

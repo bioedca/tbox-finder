@@ -54,6 +54,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import re
 import sys
@@ -87,6 +88,12 @@ NCBI_TOOL = "tbox-finder"
 NCBI_BASE_URL = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/"
 #: NCBI GenBank records carry no single blanket licence; usage terms:
 NCBI_TERMS_URL = "https://www.ncbi.nlm.nih.gov/home/about/policies/"
+
+#: HTTP 4xx codes that are NOT an accession-specific rejection — they can succeed
+#: on retry or reflect a systemic (not per-record) problem, so they stay transient
+#: rather than marking a record permanently ``unavailable``: 401/403 auth/config,
+#: 408 request timeout, 429 rate limit.
+_TRANSIENT_4XX: frozenset[int] = frozenset({401, 403, 408, 429})
 
 #: NCBI courtesy rate limits — 3 req/s anonymous, 10 req/s with an API key.
 #: These are an external service's published ceiling, so they are frozen here in
@@ -443,6 +450,12 @@ def validate_report(report: Mapping[str, Any]) -> list[str]:
         if not _is_int(report.get(key)):
             problems.append(f"{key} is not an int (got {report.get(key)!r})")
 
+    for key in ("pad_nt", "window_nt"):
+        if _is_int(report.get(key)) and int(report[key]) <= 0:
+            problems.append(
+                f"{key} must be positive (got {report[key]}) — a zero window has no flank"
+            )
+
     if (
         _is_int(report.get("pad_nt"))
         and _is_int(report.get("window_nt"))
@@ -480,19 +493,23 @@ def validate_report(report: Mapping[str, Any]) -> list[str]:
         )
 
     reported = report.get("anchor_rate")
+    rate_is_finite = (
+        isinstance(reported, (int, float))
+        and not isinstance(reported, bool)
+        and math.isfinite(float(reported))
+    )
     if not isinstance(reported, (int, float)) or isinstance(reported, bool):
         problems.append(f"anchor_rate is not a number (got {reported!r})")
+    elif not rate_is_finite:
+        # A NaN would slip past the derivation check below (NaN > 1e-9 is False).
+        problems.append(f"anchor_rate is not finite (got {reported!r})")
     else:
         expected = derive_anchor_rate({s: int(counts[s]) for s in STATUS_VALUES})
         if abs(float(reported) - expected) > 1e-9:
             problems.append(f"anchor_rate {reported} != re-derived {expected}")
 
     # Operational floors: a broken run must not certify itself (§10.3).
-    if (
-        isinstance(reported, (int, float))
-        and not isinstance(reported, bool)
-        and float(reported) < MIN_ANCHOR_RATE
-    ):
+    if rate_is_finite and float(reported) < MIN_ANCHOR_RATE:
         problems.append(
             f"anchor_rate {float(reported):.4f} < MIN_ANCHOR_RATE {MIN_ANCHOR_RATE} — "
             "a run this degraded is a CLAUDE.md §7 stop-and-ask, not an artifact"
@@ -514,14 +531,24 @@ def validate_report(report: Mapping[str, Any]) -> list[str]:
             "coordinates_trusted must be False — anchoring is by exact sequence match, "
             "the Name span disagrees with the stored sequence on 38.3% of records"
         )
+    if report.get("is_science") is not False:
+        problems.append(
+            "is_science must be False — this step establishes that real flank can be "
+            "sourced + anchored, NOT that training works (§10.3 no-overclaim)"
+        )
 
     src = report.get("source")
     if not isinstance(src, Mapping):
         problems.append("source provenance block missing")
     else:
-        for key in ("db", "base_url", "accessed"):
-            if not src.get(key):
-                problems.append(f"source.{key} missing (§10.2 provenance)")
+        # The source constants are load-bearing provenance — pin them to the
+        # module's own values, not merely 'truthy' (a report claiming a different
+        # db/URL is not this run's provenance).
+        for key, expected in (("db", NCBI_DB), ("base_url", NCBI_BASE_URL)):
+            if src.get(key) != expected:
+                problems.append(f"source.{key} != {expected!r} (got {src.get(key)!r})")
+        if not (isinstance(src.get("accessed"), str) and src["accessed"].strip()):
+            problems.append("source.accessed missing or empty (§10.2 provenance)")
 
     return problems
 
@@ -628,12 +655,15 @@ def fetch_region(
     ``[start, stop]`` range, i.e. the locus read 5'→3' on the minus strand.
     The sequence is ``None`` (never a partial/guessed sequence) on any failure.
 
-    ``permanent_fail`` is True when NCBI **definitively rejects** the accession —
-    an HTTP 4xx that is not rate-limiting (429), or a 200 body carrying NCBI's
-    ``Failed to retrieve sequence`` marker for a suppressed/withdrawn record. Such
-    a failure is **not retried** (here or on a future run): re-fetching only
-    re-hits a dead accession. A transient failure (timeout, connection reset, HTTP
-    5xx, 429) returns ``permanent_fail=False`` and is retried.
+    ``permanent_fail`` is True only for an **accession-specific** HTTP 4xx rejection
+    (a suppressed/withdrawn record or an out-of-range request; the observed
+    CP016400.1 case is a clean 400). It **excludes** the 4xx codes that are *not*
+    accession-specific and can succeed on retry or reflect a systemic problem —
+    401/403 (auth/config), 408 (timeout), 429 (rate limit) — which stay transient.
+    A permanent failure is **not retried** (here or on a future run): re-fetching
+    only re-hits a dead accession. Every other failure (timeout, connection reset,
+    HTTP 5xx, a non-FASTA or empty body) returns ``permanent_fail=False`` and is
+    retried up to ``retries``.
 
     The ``limiter`` is acquired **per request, inside the retry loop** — metering
     only the first attempt would let a retry storm issue up to ``retries`` times
@@ -660,27 +690,28 @@ def fetch_region(
         except Exception as exc:  # noqa: BLE001 - network/HTTP/parse: retry then give up
             last_error = f"{type(exc).__name__}: {exc}"[:200]
             code = getattr(exc, "code", None)
-            if isinstance(code, int) and 400 <= code < 500 and code != 429:
-                # A client rejection (suppressed accession, bad range) will not
-                # change on retry — stop now and never re-hit it.
+            if isinstance(code, int) and 400 <= code < 500 and code not in _TRANSIENT_4XX:
+                # An accession-specific client rejection (suppressed record, bad
+                # range) will not change on retry — stop now and never re-hit it.
                 permanent = True
                 break
             if attempt == retries - 1:
                 break
             time.sleep(backoff * (attempt + 1))
             continue
-        lines = [ln.strip() for ln in text.splitlines()]
-        if not lines or not lines[0].startswith(">"):
-            last_error = "response was not FASTA"
-            # NCBI sometimes answers 200 with an error body for a withdrawn record.
-            if "failed to retrieve" in text.lower():
-                permanent = True
-            break
-        seq = "".join(lines[1:]).upper()
-        if seq:
-            return seq, False
-        last_error = "empty sequence body"
-        break
+        else:
+            lines = [ln.strip() for ln in text.splitlines()]
+            if lines and lines[0].startswith(">"):
+                seq = "".join(lines[1:]).upper()
+                if seq:
+                    return seq, False
+                last_error = "empty sequence body"
+            else:
+                last_error = "response was not FASTA"
+            # A non-FASTA / empty body may be a transient NCBI hiccup — retry.
+            if attempt == retries - 1:
+                break
+            time.sleep(backoff * (attempt + 1))
     if errors is not None and last_error:
         errors.append(last_error)
     return None, permanent
@@ -833,6 +864,16 @@ def build_flank_context(
     env_lock: str | Path | None = None,
 ) -> dict[str, Any]:
     """Fetch + exact-match-anchor real flanking context for every corpus record."""
+    # Fail fast on a misconfigured geometry BEFORE the heavy import or a single NCBI
+    # request (do not burn courtesy quota on a run whose report could never validate).
+    if pad_nt <= 0 or window_nt <= 0:
+        raise ValueError(f"pad_nt and window_nt must be positive (got {pad_nt}, {window_nt})")
+    if pad_nt < window_nt:
+        raise ValueError(
+            f"pad_nt {pad_nt} < window_nt {window_nt} — a locus could not reach every "
+            "window phase (PRD §6 offset augmentation)"
+        )
+
     import pandas as pd  # lazy
 
     email = email or os.environ.get("NCBI_EMAIL") or ""
@@ -903,7 +944,7 @@ def build_flank_context(
         else:
             todo.append((rid, str(row[NAME_COL]), str(row[WINDOW_SEQ_COL]).upper()))
 
-    n_fetched = len(todo)
+    n_records_fetched = len(todo)
     if todo:
         # Results are appended to the resumable cache as they land, so an
         # interrupted run resumes instead of re-fetching (NCBI courtesy).
@@ -986,10 +1027,13 @@ def build_flank_context(
             "terms_url": NCBI_TERMS_URL,
             "accessed": accessed,
             "n_accessions": int(frame["accession"].nunique()),
-            "n_requests": n_fetched,
+            # Records fetched THIS run (0 on a fully-cached re-run). NOT the HTTP
+            # request count — retries can issue more than one request per record.
+            "n_records_fetched": n_records_fetched,
             "note": (
                 "Flank sourced from NCBI nuccore by accession; anchored to the corpus "
-                "by exact sequence match, not by the stored coordinates (§10.3)."
+                "by exact sequence match, not by the stored coordinates (§10.3). A record "
+                "fetched once may have taken >1 HTTP request (transient retries)."
             ),
         },
     )

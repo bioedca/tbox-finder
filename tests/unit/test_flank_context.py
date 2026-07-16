@@ -522,6 +522,65 @@ def test_validate_rejects_an_infrastructure_failure() -> None:
     assert any("MAX_FETCH_FAILED_RATE" in p for p in problems), problems
 
 
+def test_validate_rejects_nan_anchor_rate() -> None:
+    """A NaN would slip past the re-derivation check (NaN > 1e-9 is False)."""
+    report = _valid_report()
+    report["anchor_rate"] = float("nan")
+    assert any("finite" in p for p in fc.validate_report(report))
+
+
+def test_validate_rejects_overclaimed_is_science() -> None:
+    """§10.3 no-overclaim: this step is not science, and may not say it is."""
+    report = _valid_report()
+    report["is_science"] = True
+    assert any("is_science" in p for p in fc.validate_report(report))
+
+
+def test_validate_rejects_a_wrong_source_db() -> None:
+    """source.db is load-bearing provenance — a different value is not this run's."""
+    report = _valid_report()
+    report["source"]["db"] = "not_nuccore"
+    assert any("source.db" in p for p in fc.validate_report(report))
+
+
+@pytest.mark.parametrize("bad_pad", [0, -1])
+def test_validate_rejects_nonpositive_pad(bad_pad: int) -> None:
+    report = _valid_report()
+    report["pad_nt"] = bad_pad
+    report["window_nt"] = bad_pad
+    assert any("positive" in p for p in fc.validate_report(report))
+
+
+def test_transient_4xx_codes_are_not_marked_permanent() -> None:
+    """401/403/408/429 are systemic/retryable, not an accession-specific rejection."""
+    assert frozenset({401, 403, 408, 429}) == fc._TRANSIENT_4XX
+
+
+def test_build_flank_context_rejects_bad_geometry_before_fetching(tmp_path: Path) -> None:
+    """A misconfigured pad must fail BEFORE a single NCBI request (quota-safe)."""
+    with pytest.raises(ValueError, match="positive"):
+        fc.build_flank_context(
+            master_parquet=tmp_path / "m.parquet",
+            split_table=tmp_path / "s.parquet",
+            out_dir=tmp_path,
+            external_dir=tmp_path,
+            report_path=tmp_path / "r.json",
+            pad_nt=0,
+            email="x@y.z",
+        )
+    with pytest.raises(ValueError, match="pad_nt .* < window_nt"):
+        fc.build_flank_context(
+            master_parquet=tmp_path / "m.parquet",
+            split_table=tmp_path / "s.parquet",
+            out_dir=tmp_path,
+            external_dir=tmp_path,
+            report_path=tmp_path / "r.json",
+            pad_nt=256,
+            window_nt=1024,
+            email="x@y.z",
+        )
+
+
 def test_validate_rejects_pad_smaller_than_window() -> None:
     """pad < window ⇒ the locus cannot reach every window phase (PRD §6)."""
     report = _valid_report()
