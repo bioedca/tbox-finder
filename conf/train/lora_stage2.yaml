@@ -1,0 +1,86 @@
+# @package _global_
+# train/lora_stage2.yaml — P1-15 Stage-2 RiNALMo LoRA/FSDP fine-tuning harness
+# (PRD §10.3 LoRA default + full-FT ZeRO-3/FSDP fallback + FA-2/SDPA selection; §11).
+#
+# `@package _global_` lifts this nested (conf/train/) primary config's keys to the root so
+# `cfg.seed`/`cfg.lora`/… are top-level; the `/model` `/tracking` groups keep their own group
+# packages (the P1-07 stage1_smoke.yaml + P1-11 gtdb_cpt.yaml precedent, and the MEMORY note
+# that a conf/<group>/ primary config needs `@package _global_` + leading-slash `/group`
+# defaults or it silently fails to compose).
+#
+# Intended consumer: the P3 Stage-2 fine-tune, via
+# src/tbox_finder/train/lora_harness.py::build_peft_model (the P1-15 entry).
+#
+# HONEST STATUS: **nothing loads this file yet.** The P1-15 dry-run entry
+# (`python -m tbox_finder.train.lora_harness --dry-run`) takes its pins from the module
+# constants, not from Hydra — so today this config is a RECORD (drift-guarded against the
+# code + the committed report by tests/unit/test_lora_harness.py), and it becomes live when
+# P3 wires the Stage-2 run. Saying otherwise would overstate what landed.
+#
+# HARNESS ONLY — no science result here. The actual Stage-2 T-box fine-tune is P3, and the
+# VRAM/mechanics smoke on a real A4000 is P1-16. Nothing in this file trains anything.
+#
+# THE LOAD-BEARING SCALARS ARE FROZEN IN CODE, NOT HERE. The PRD §10.3 LoRA contract
+# (r / alpha / dropout / target_modules) lives in lora_harness.py as module constants, so no
+# config can weaken it; this file ECHOES them for the record and a drift-guard test
+# (tests/unit/test_lora_harness.py) asserts config == code. Same discipline as
+# conf/model/rinalmo_stage2.yaml.
+
+defaults:
+  - _self_
+  - /model: rinalmo_stage2
+  - /tracking: wandb
+
+# Determinism (§8.3).
+seed: 42
+pythonhashseed: 0
+
+# --- PRD §10.3 pinned LoRA contract (ECHO of lora_harness.py constants; drift-guarded) ---
+lora:
+  r: 16                       # LORA_R
+  lora_alpha: 32              # LORA_ALPHA
+  lora_dropout: 0.05          # LORA_DROPOUT
+  target_modules: all-linear  # LORA_TARGET_MODULES — PEFT resolves to every nn.Linear
+  bias: none                  # LORA_BIAS (PEFT default; PRD pins nothing)
+  dtype: bfloat16             # TRAIN_DTYPE — A4000 is Ampere → bf16 native (ADR-0002 D1)
+  gradient_checkpointing: true
+
+# --- Attention backend (PRD §10.3: FA-2 sm_86 confirmed, else SDPA) ---
+# NOT a free knob: the harness SELECTS this from measured evidence
+# (lora_harness.select_attention_backend over the committed reports/p1/kernel_smoke.json —
+# ADR-0002 A5, a real sm_86 A4000) and records the decision + reason in
+# reports/p1/attention_backend.json. Pinning a backend here would be exactly the "silent
+# assumption" the §10.3 gate forbids. These keys MIRROR that recorded outcome; they are not
+# an input, and a drift-guard test asserts they equal the committed report — so this file can
+# never advertise a backend the evidence no longer supports.
+attention:
+  selected: flash_attention_2   # MIRRORS reports/p1/attention_backend.json attention.selected
+  fallback: sdpa                # ADR-0002 D3 — exact-softmax swap, not an approximation
+  # The FA-2 forward through RiNALMo is verified at P1-16 on an A4000, NOT here (§10.3).
+  forward_verified_on_sm86: false
+
+# --- Full fine-tune fallback (PRD §10.3) — BUILT, not selected; LoRA is the default ---
+full_ft_fallback:
+  enabled: false          # flip only if a P3 LoRA run demonstrably underfits
+  zero_stage: 3           # DeepSpeed ZeRO-3 ≡ FSDP FULL_SHARD
+  fsdp_version: 1         # sharding_strategy=FULL_SHARD is the FSDP1 knob §10.3 names
+  fsdp_sharding_strategy: FULL_SHARD
+  n_gpus: 8               # PRD §15 — 8× RTX A4000 per gpu-partition node
+  cpu_offload: false      # sized to fit on-GPU; offload trades VRAM for bandwidth (P3 call)
+
+# --- QLoRA (PRD §10.3 "only if needed") — OFF, and not enableable from config ---
+# bitsandbytes is absent from envs/ml-rna.yml + its lock, so lora_harness.qlora_config(
+# enabled=True) RAISES. Turning this on needs an env amendment + re-lock + ADR-0002 D8
+# sign-off (CLAUDE.md §3.1/§7) — never a runtime flag.
+qlora:
+  enabled: false
+
+# Outputs.
+report_path: reports/p1/attention_backend.json
+
+# Hydra: keep the run CWD = the launch dir (repo root) so relative in/out paths resolve; no
+# per-run output subdir.
+hydra:
+  run:
+    dir: .
+  output_subdir: null

@@ -709,3 +709,51 @@ stop-and-ask; proceed** (advisory input only; **no** auto-switch to RNA-FM — A
 frozen to the **P5 sizing gate**. Cross-link **PRD §10.2/§18.1**, **ADR-0002**. **Commit.** `<SHA>` on
 `p1-14-rinalmo-throughput` (result commit). Satisfies PRD §18.1 "forward-throughput probe reported (advisory)"; feeds the
 pre-P5 sizing gate + P1-15.
+
+## Step P1-15 — 2026-07-15: Stage-2 LoRA/FSDP harness + FA-2 sm_86 confirm / SDPA fallback recorded
+**Inputs.** The parity-confirmed `multimolecule/rinalmo-giga` @`2a71f6f9…` (ADR-0002 A9); the pinned `tbox-ml-rna` stack
+(peft 0.18.1 · accelerate 1.12.0 · deepspeed 0.18.5 · transformers 5.13.0 · multimolecule 0.1.0 · torch 2.7.1+cu128);
+the **measured** `reports/p1/kernel_smoke.json` (ADR-0002 A5, SLURM job 462 — the sm_86 evidence).
+**Process.** LOCAL harness build + CPU dry-run (`python -m tbox_finder.train.lora_harness --dry-run`); no training, no
+T-box data, no GPU. `build_peft_model` wraps the **real giga** backbone (`add_pooling_layer=False` — the checkpoint has no
+pooler, so the default freshly-initialises one and hands LoRA a random module to adapt) in the PRD §10.3 `LoraConfig`, then
+**reads the applied config back off the model** rather than re-stating the request. FA-2 selection is a pure decision over
+four measured inputs; sm_86 is **read from the A5 A4000 artifact, never re-measured** (this laptop is sm_89 — it cannot
+honestly confirm sm_86). **Outputs.** `src/tbox_finder/train/lora_harness.py` + `conf/train/lora_stage2.yaml` +
+`tests/unit/test_lora_harness.py` (93) + measured `reports/p1/attention_backend.json` (git; no DVC — the 2.5 GB weights are
+re-fetchable by pinned revision). **Validation.** **PASSED** (`gate.overall_pass=true`, all 5 sub-gates, on the real
+backbone): the exact §10.3 `LoraConfig(r=16, α=32, dropout=0.05, all-linear)` constructs and wraps RiNALMo — **231 modules
+adapted, 12,840,432 / 662,079,483 params trainable (1.9394%), base fully frozen (0 non-adapter trainable)**;
+the full-FT ZeRO-3/FSDP `FULL_SHARD` fallback **constructs** on accelerate 1.12.0; **FA-2 sm_86 import CONFIRMED** from the
+A5 artifact (`is_sm86=true`, capability `[8,6]`, RTX A4000, `flash_attn` 2.8.3.post1 ok) + the pinned RiNALMo classes
+advertise `_supports_flash_attn=True` (re-introspected under mm 0.1.0 / transformers 5.13.0, not inherited from A2 K1's
+0.0.9 finding) → **selected `flash_attention_2`, SDPA recorded as the live fallback**. Bare CI 87 · stack tier 92 · giga tier
+1 · full bare suite **750 passed** (no regression); ruff 0.15.15 + black 25.11.0 clean; `snakemake --lint` clean.
+**Decisions.** (1) **§10.3 scope, stated not glossed:** what is confirmed is the FA-2 *wheel import on sm_86* + *model
+advertisement*; a FA-2 **forward through RiNALMo is NOT verified here** (LOCAL step, wrong arch) → `forward_verified_on_sm86:
+false`, and `validate_report` **makes an FA-2 report invalid if it claims otherwise**. Deferred to **P1-16** — which must
+exercise FA-2 on an A4000 and flip the recorded selection to SDPA if the forward fails; P1-15's dry-run deliberately wraps
+under SDPA on CPU, so FA-2 must not reach P3 unexercised. (2) **No ADR amendment, no §7 stop:** A2 K1's caveat is
+*conditional* ("passing `flash_attention_2` **without flash-attn** raises ImportError") and its thesis is that flash-attn is
+"a **selectable accelerator, not a hard import**"; A5 measured the wheel importing on sm_86, so the condition is unmet and
+D3's FA2-primary/SDPA-fallback architecture is what is recorded — no pin changes. (3) **QLoRA: a flag with no path
+(disclosed).** imp.md's Outputs says "QLoRA path behind a flag"; `bitsandbytes` is **absent from `envs/ml-rna.yml` + its lock
++ the installed env** (verified, and locked by a test that reads the env files), so `qlora_config(enabled=True)` **raises**
+pointing at the ADR-0002 D8 env-amendment + §7 sign-off. A stub that silently no-opped, or an ad-hoc `pip install`, would
+violate §3.1/§10.3 — this is a literal non-delivery of an imp.md Outputs item, stated plainly rather than glossed.
+(4) **The ≈1.3 GB LoRA footprint is PRD §10.3's arithmetic estimate, NOT a measurement** (the measured one is P1-16's).
+(5) `conf/train/lora_stage2.yaml` **is not yet loaded by anything** — the dry-run reads module constants, not Hydra; it is a
+drift-guarded record that goes live at P3. **Pre-commit adversarial 3-lens review** (correctness / PRD-ADR-faithfulness /
+test-adequacy) → **all findings fixed before push**, the load-bearing one being that `gate.lora_config_exact` was a
+**tautology** (it compared `lora_config_kwargs()` to the constants that produced it — it could never fail, so a wrap that
+applied `r=8` would still certify the §10.3 pin); now computed from the **applied** config read off the model, with an
+explicit anti-tautology test. Also fixed: `validate_report` crashed on a non-mapping report (a truncated `null` artifact →
+opaque TypeError instead of a clean gate failure); the evidence reader accepted a **self-inconsistent** artifact
+(`is_sm86=true` with an sm_89 capability) and hardcoded `measured_on_target_arch: True`; a dead `except` discarded the real
+fallback error; the committed-artifact test could **skip** itself green on a fresh checkout. **PEFT gotcha recorded:** PEFT
+suffix-**minimises** `target_modules` once ≥20 modules match, so giga's 231 adapted Linears collapse to 6 suffixes — reporting
+that count as "modules adapted" would understate by ~40×, hence `n_modules_adapted` (tree-walked) is authoritative.
+context7 §3.3: `/huggingface/peft` (`LoraConfig` all-linear + `get_peft_model`) + `/huggingface/accelerate`
+(`FullyShardedDataParallelPlugin` FULL_SHARD, DeepSpeed ZeRO-3), cross-checked against the installed pins.
+Cross-link **PRD §10.3/§11**, **ADR-0002 D3/D5/A2 K1/A5/A8/A9**. **Commit.** `2f38f26` on `p1-15-lora-harness`.
+Feeds **P1-16** (LoRA VRAM smoke ≤ 16 GB + the FA-2 forward) + **P3** (Stage-2 T-box fine-tune on this harness).
