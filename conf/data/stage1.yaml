@@ -1,0 +1,53 @@
+# Stage-1 window datamodule (P2-01) — PRD §6 (window/stride), §11 (curriculum).
+#
+# A Hydra **group option**, not a primary config: the P2-04 Stage-1 training
+# entrypoint selects it with `- /data: stage1`, so these keys land under
+# `cfg.data`. It therefore carries no package-override header and no `defaults:`
+# list — those belong to the `conf/train/*.yaml` primaries.
+#
+# NOTHING HERE IS AUTHORITATIVE. Every value is frozen in code
+# (`src/tbox_finder/data/window_dataset.py`) and echoed here for the record; the
+# drift guards in `tests/unit/test_window_dataset.py` assert config == code, so
+# an edit to this file alone cannot move the datamodule (the ADR-0002 A5
+# precedent). Not yet loaded by anything — P2-04 wires it.
+
+# Determinism (CLAUDE.md §8.3)
+seed: 42
+pythonhashseed: 0
+
+# Window geometry — PINNED by PRD §6 (1024 nt window, 512 nt stride).
+# Changing either is a PRD deviation, not a sweep knob (P2-06 sweeps window/stride
+# as an explicit, ADR-governed ablation).
+window_nt: 1024
+stride_nt: 512
+
+# Augmentation — PRD §6 pins THAT training positives are window-phase
+# offset-augmented and that contig ends are zero-flanked + flagged.
+offset_augmentation: true
+both_strands: true
+
+# Curriculum sampling strength — IMPLEMENTER CHOICES (`WEIGHTS_PINNED: false`).
+# PRD §11 pins that balanced-phylum + rare-class + rare-specifier-AA sampling
+# happen; it pins no alpha, and no ADR delegates one. Each weight is
+# `(1 / n_stratum) ** alpha`: 0.0 = natural distribution, 1.0 = fully balanced.
+#
+# Measured shape of the ADR-0004 D5 nested training fold at P2-01 (8,303 records):
+#   klass:  I 8,281 / II 22   (class II = 0.27%)
+#   phylum: Firmicutes 8,182 (98.5%) across 16 phyla
+#
+# The three terms MULTIPLY and the axes are correlated here (a class-II record is
+# also phylum-rare and usually AA-rare), so the joint strength is ~the SUM of the
+# alphas. Measured on the real training fold:
+#
+#   alpha (each)   class-II share   enrichment   Firmicutes   top-10-record mass
+#   0.25            2.39%            9.0x         92.1%        1.9%
+#   0.50           22.82%           86.1x         58.5%       22.5%
+#   0.75           71.32%          269.2x         11.0%       72.5%
+#   1.00           91.88%          346.8x          1.2%       93.0%
+#
+# 0.25 lifts class II ~9x and softens the Firmicutes skew while no single locus
+# dominates. Above it the stream collapses onto the 22 unique class-II loci —
+# memorisation, not learning. P2-06 sweeps these as ordinary hyperparameters.
+phylum_alpha: 0.25
+klass_alpha: 0.25
+aa_alpha: 0.25
