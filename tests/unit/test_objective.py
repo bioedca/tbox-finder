@@ -37,14 +37,22 @@ from tbox_finder.train.objective import (
 
 try:
     import torch
+except ModuleNotFoundError as exc:  # pragma: no cover - exercised only in the bare CI env
+    if exc.name != "torch":
+        raise
+    torch = None
+    F = None
+    LinearChainCRF = None
+    _HAS_TORCH = False
+else:
+    # Deliberately OUTSIDE the guard: a broken tbox_finder.models.seg_head must raise here,
+    # not be swallowed into `_HAS_TORCH = False` and silently skip the whole tensor tier
+    # green. That self-skipping-green failure mode already bit P1-15.
     import torch.nn.functional as F
 
     from tbox_finder.models.seg_head import LinearChainCRF
 
     _HAS_TORCH = True
-except ImportError:  # pragma: no cover - exercised only in the bare CI env
-    torch = None
-    _HAS_TORCH = False
 
 requires_torch = pytest.mark.skipif(
     not _HAS_TORCH,
@@ -229,7 +237,7 @@ class TestLossMassShare:
         )
 
     def test_negative_weight_rejected(self):
-        with pytest.raises(ValueError, match="non-negative"):
+        with pytest.raises(ValueError, match=r"weight\[0\] must be >= 0"):
             loss_mass_share(MEASURED_COUNTS, [-1.0] + [1.0] * 7)
 
     def test_wrong_weight_length_rejected(self):
@@ -266,6 +274,22 @@ class TestConstantsAndConfig:
         for kwargs in ({"gamma": -1.0}, {"class_weight_alpha": -0.5}, {"crf_weight": -2.0}):
             with pytest.raises(ValueError):
                 Stage1LossConfig(**kwargs)
+
+    @pytest.mark.parametrize("bad", [float("nan"), float("inf"), float("-inf")])
+    @pytest.mark.parametrize("field", ["gamma", "class_weight_alpha", "crf_weight"])
+    def test_config_rejects_non_finite_values(self, field, bad):
+        """`x < 0` is False for NaN, so a bare range check lets nan through silently."""
+        with pytest.raises(ValueError, match="must be finite"):
+            Stage1LossConfig(**{field: bad})
+
+    @pytest.mark.parametrize("bad", [float("nan"), float("inf")])
+    def test_class_weights_rejects_non_finite_alpha(self, bad):
+        with pytest.raises(ValueError, match="must be finite"):
+            class_weights_from_counts(MEASURED_COUNTS, alpha=bad)
+
+    def test_loss_mass_share_rejects_non_finite_weights(self):
+        with pytest.raises(ValueError, match="must be finite"):
+            loss_mass_share(MEASURED_COUNTS, [float("nan")] + [1.0] * 7)
 
     def test_alpha_without_counts_raises_rather_than_assuming_frequencies(self):
         with pytest.raises(ValueError, match="needs class_counts"):
@@ -451,12 +475,30 @@ class TestFocalCrossEntropy:
         assert focal / ce > 0.99
 
     def test_ignored_positions_contribute_nothing(self):
-        """Flipping a logit under an ignored target must not move the loss."""
+        """Flipping a logit under an ignored target must not move the loss.
+
+        The perturbation must be **non-uniform** across the class dimension: softmax is
+        shift-invariant, so bumping every class logit by the same constant is a no-op and
+        the test would pass even if the ignored position *were* wrongly included. The
+        control below proves the same perturbation does move the loss when the position is
+        not ignored — without it this assertion would be vacuous.
+        """
         logits, targets = _fixture(n_ignored=0)
+        real_target = int(targets[0, 0])
+        perturbed = logits.detach().clone()
+        perturbed[0, 0, 0] += 100.0  # single class -> genuinely changes the softmax
+
+        # Control: while the position is real, the perturbation *does* move the loss.
+        assert not torch.allclose(
+            focal_cross_entropy(logits, targets, gamma=2.0),
+            focal_cross_entropy(perturbed, targets, gamma=2.0),
+            atol=1e-9,
+        ), "perturbation is inert — the ignore assertion below would be vacuous"
+        assert real_target is not None
+
+        # Now ignore it: the same perturbation must become invisible.
         targets[0, 0] = IGNORE_INDEX
         base = focal_cross_entropy(logits, targets, gamma=2.0)
-        perturbed = logits.detach().clone()
-        perturbed[0, 0, :] += 100.0
         got = focal_cross_entropy(perturbed, targets, gamma=2.0)
         assert torch.allclose(base, got, atol=1e-12)
 
@@ -807,6 +849,20 @@ class TestStage1Loss:
         a = loss_fn(logits, targets, crf=crf)
         b = loss_fn(logits, targets, crf=crf, real_mask=(targets != IGNORE_INDEX))
         assert torch.allclose(a, b, atol=1e-12)
+
+    def test_inconsistent_real_mask_is_rejected_not_reinterpreted(self):
+        """A mask calling an ignored position 'real' would train the CRF on a fake label.
+
+        left_align_for_crf clamps the -100 tag to class 0, so without this check the chain
+        would silently learn `background` at a position carrying no DNA.
+        """
+        logits, targets = _fixture(b=1, length=8, n_ignored=0)
+        targets[0, 0] = IGNORE_INDEX
+        crf = LinearChainCRF(NUM_CLASSES).double()
+        loss_fn = Stage1Loss(Stage1LossConfig(use_crf=True))
+        lying_mask = torch.ones_like(targets, dtype=torch.bool)  # claims the pad is real
+        with pytest.raises(ValueError, match="real_mask disagrees"):
+            loss_fn(logits, targets, crf=crf, real_mask=lying_mask)
 
     def test_crf_config_mismatches_fail_loud(self):
         logits, targets = _fixture()

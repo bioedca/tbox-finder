@@ -33,6 +33,7 @@ Design notes
 
 from __future__ import annotations
 
+import math
 import operator
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -63,6 +64,24 @@ DEFAULT_CLASS_WEIGHT_ALPHA = 0.0
 
 #: Weight on the optional CRF transition term, relative to the (per-token) focal CE.
 DEFAULT_CRF_WEIGHT = 1.0
+
+
+def _finite_float(value: Any, name: str, *, minimum: float = 0.0) -> float:
+    """Coerce to float and reject NaN / ±inf as well as out-of-range values.
+
+    A bare ``x < 0`` test **passes** for NaN (every comparison with NaN is False), so a
+    ``gamma=nan`` arriving from a sweep config would sail through validation and turn the
+    whole loss — and then every parameter — silently NaN. Non-finite hyperparameters are
+    never meaningful here, so they are rejected at the boundary (CLAUDE.md §10.3: fail
+    loudly rather than emit a wrong number).
+    """
+    out = float(value)
+    if not math.isfinite(out):
+        raise ValueError(f"{name} must be finite, got {out}")
+    if out < minimum:
+        raise ValueError(f"{name} must be >= {minimum:g}, got {out}")
+    return out
+
 
 __all__ = [
     "DEFAULT_CLASS_WEIGHT_ALPHA",
@@ -146,9 +165,7 @@ def class_weights_from_counts(
             reported rather than silently clamped to a finite stand-in, CLAUDE.md §10.3),
             or if ``alpha`` is negative.
     """
-    alpha = float(alpha)
-    if alpha < 0.0:
-        raise ValueError(f"alpha must be >= 0, got {alpha}")
+    alpha = _finite_float(alpha, "alpha")
     ordered = _counts_in_class_order(counts)
     total = sum(ordered)
     if total <= 0:
@@ -194,11 +211,9 @@ def loss_mass_share(
     if weights is None:
         w = [1.0] * NUM_CLASSES
     else:
-        w = [float(x) for x in weights]
-        if len(w) != NUM_CLASSES:
-            raise ValueError(f"weights must have {NUM_CLASSES} entries, got {len(w)}")
-        if any(x < 0.0 for x in w):
-            raise ValueError("weights must be non-negative")
+        if len(weights) != NUM_CLASSES:
+            raise ValueError(f"weights must have {NUM_CLASSES} entries, got {len(weights)}")
+        w = [_finite_float(x, f"weight[{i}]") for i, x in enumerate(weights)]
     mass = [n * x for n, x in zip(ordered, w, strict=True)]
     total = sum(mass)
     if total <= 0:
@@ -272,9 +287,7 @@ def focal_cross_entropy(
 
     if reduction not in ("mean", "sum", "none"):
         raise ValueError(f"unknown reduction {reduction!r}")
-    gamma = float(gamma)
-    if gamma < 0.0:
-        raise ValueError(f"gamma must be >= 0, got {gamma}")
+    gamma = _finite_float(gamma, "gamma")
     if logits.dim() != 3:
         raise ValueError(f"logits must be (B, L, C), got {tuple(logits.shape)}")
     if targets.shape != logits.shape[:2]:
@@ -309,11 +322,16 @@ def focal_cross_entropy(
                 f"weight must be a 1-D tensor of length C={logits.shape[2]}, "
                 f"got shape {tuple(w.shape)}"
             )
+        if not bool(torch.isfinite(w).all()):
+            raise ValueError("weight entries must be finite")
         if bool((w < 0).any()):
             raise ValueError("weight entries must be non-negative")
-        # clamp_min(0) keeps the gather in range for ignore_index targets; the
-        # multiply by `valid` then zeroes whatever they gathered.
-        w_t = w[targets.clamp_min(0)] * valid
+        # Map every ignored target to class 0 before gathering: clamp_min(0) alone only
+        # rescues *negative* sentinels, and ignore_index is caller-configurable, so a
+        # non-negative sentinel (say 255) would index past the end of `w`. The multiply
+        # by `valid` then zeroes whatever the ignored positions gathered.
+        safe_targets = torch.where(valid, targets, torch.zeros_like(targets))
+        w_t = w[safe_targets] * valid
         per_token = focal * w_t
         denom = w_t.sum()
 
@@ -435,12 +453,9 @@ class Stage1LossConfig:
     ignore_index: int = IGNORE_INDEX
 
     def __post_init__(self) -> None:
-        if float(self.gamma) < 0.0:
-            raise ValueError(f"gamma must be >= 0, got {self.gamma}")
-        if float(self.class_weight_alpha) < 0.0:
-            raise ValueError(f"class_weight_alpha must be >= 0, got {self.class_weight_alpha}")
-        if float(self.crf_weight) < 0.0:
-            raise ValueError(f"crf_weight must be >= 0, got {self.crf_weight}")
+        _finite_float(self.gamma, "gamma")
+        _finite_float(self.class_weight_alpha, "class_weight_alpha")
+        _finite_float(self.crf_weight, "crf_weight")
 
 
 class Stage1Loss:
@@ -517,7 +532,25 @@ class Stage1Loss:
                     "config.use_crf is True but no crf module was supplied; pass the "
                     "SegmentationHead's .crf (the head owns the transition parameters)."
                 )
-            mask = (targets != cfg.ignore_index) if real_mask is None else real_mask.bool()
+            expected_mask = targets != cfg.ignore_index
+            if real_mask is None:
+                mask = expected_mask
+            else:
+                mask = real_mask.bool()
+                # P2-01 emits IGNORE_INDEX at exactly the non-real positions, so the two
+                # must agree. Check rather than trust: a mask marking an ignored target as
+                # real would hand the CRF a -100 tag, which left_align_for_crf clamps to
+                # class 0 — silently training the chain on a fabricated `background` label
+                # at a position that carries no DNA. Cross-checking the datamodule's two
+                # signals against each other costs nothing and turns a silent corruption
+                # into an error (CLAUDE.md §10.3).
+                if mask.shape != expected_mask.shape or not bool(
+                    torch.equal(mask, expected_mask.to(mask.device))
+                ):
+                    raise ValueError(
+                        "real_mask disagrees with (targets != ignore_index); the datamodule "
+                        "must mark exactly the ignored positions as non-real."
+                    )
             aligned_emissions, aligned_tags, aligned_mask = left_align_for_crf(
                 logits, targets, mask, ignore_index=cfg.ignore_index
             )
