@@ -1,0 +1,30 @@
+---
+title: "tbox-finder — Phase 2 (Stage-1 training) dev-log"
+author: "bioedca"
+format:
+  typst:
+    toc: true
+    number-sections: true
+---
+
+<!-- Rendered with the Typst engine (quarto >=1.9, `format: typst`): the
+     laptop/CI toolchain ships no LaTeX, and Typst produces the PDF natively.
+     Renders via `conda run -n tbox-finder-viz quarto render analyses/phase2_log.qmd`.
+     NOTE (P1 exit-gate lesson): a bare `at`-prefixed token (a length like
+     "at-300", a revision like "at-2c2c5c14") is parsed by pandoc as a citation
+     key against a doc with no bibliography and kills the render — escape or
+     rephrase any such token rather than writing it bare. -->
+
+# Phase 2 — Stage-1 training
+
+Per-step development log (CLAUDE.md §2.4). One stanza is appended after every
+step's commit; this file renders to `docs/dev-log/phase2_<YYYY-MM-DD>.pdf` at
+the phase-exit gate.
+
+Phase-2 goal (imp.md): train/calibrate the genomic segmenter (production scanner
+plus the class-II-CM-naive ablation), run the §9.1 hard-negative-mining loop, and
+grade **GATE-4** — the minimum per-element per-nucleotide F1 over the three core
+elements {Stem I, Specifier, Antiterminator}, floor >= 0.80 (ADR-0004 D6). GATE-4
+is the project's **first generalization grade**; every Phase-1 number was a
+learnability/expressivity smoke on held-out loci and must not be quoted as
+generalization (CLAUDE.md §10.3).
