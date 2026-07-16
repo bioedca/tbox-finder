@@ -1,0 +1,24 @@
+{
+  "adr": "ADR-0004",
+  "env_lock_hash": null,
+  "extra": {
+    "accessed": "2026-07-16",
+    "base_url": "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/",
+    "db": "nuccore",
+    "n_accessions": 11633,
+    "n_requests": 1,
+    "note": "Flank sourced from NCBI nuccore by accession; anchored to the corpus by exact sequence match, not by the stored coordinates (\u00a710.3).",
+    "rettype": "fasta",
+    "terms_url": "https://www.ncbi.nlm.nih.gov/home/about/policies/"
+  },
+  "generated_at_utc": "2026-07-16T13:24:11.662585+00:00",
+  "git_sha": "bb03ceb60efd81735a453b333d5ee99cd747d5cb",
+  "inputs": {},
+  "outputs": {
+    "data/interim/flank_context/context_v0.parquet": "415bd09400cbadf5a442236bf657633b529462a4fbbdc3bf9d2928d7c44e7335"
+  },
+  "rule": "workflow/rules/data.smk :: p2_flank_context",
+  "schema_version": "1.0",
+  "script": "src/tbox_finder/data/flank_context.py",
+  "seed": 42
+}

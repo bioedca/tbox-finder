@@ -172,6 +172,10 @@ def test_status_of_all_branches() -> None:
     assert fc.status_of(parsed_ok=False, fetched=False, n_hits=0) == fc.STATUS_BAD_NAME
     assert fc.status_of(parsed_ok=False, fetched=True, n_hits=1) == fc.STATUS_BAD_NAME
     assert fc.status_of(parsed_ok=True, fetched=False, n_hits=0) == fc.STATUS_FETCH_FAILED
+    assert (
+        fc.status_of(parsed_ok=True, fetched=False, n_hits=0, permanent_fail=True)
+        == fc.STATUS_UNAVAILABLE
+    )
     assert fc.status_of(parsed_ok=True, fetched=True, n_hits=0) == fc.STATUS_NOT_FOUND
     assert fc.status_of(parsed_ok=True, fetched=True, n_hits=2) == fc.STATUS_MULTI_HIT
     assert fc.status_of(parsed_ok=True, fetched=True, n_hits=1) == fc.STATUS_OK
@@ -184,6 +188,7 @@ def test_status_values_are_exhaustive() -> None:
         fc.STATUS_FETCH_FAILED,
         fc.STATUS_NOT_FOUND,
         fc.STATUS_MULTI_HIT,
+        fc.STATUS_UNAVAILABLE,
     }
 
 
@@ -253,6 +258,7 @@ def test_build_record_flags_clipping_when_flank_short() -> None:
     [
         ({"parsed_ok": False}, fc.STATUS_BAD_NAME),
         ({"region": None}, fc.STATUS_FETCH_FAILED),
+        ({"region": None, "permanent_fail": True}, fc.STATUS_UNAVAILABLE),
         ({"region": "TTTTTTTT"}, fc.STATUS_NOT_FOUND),
         ({"region": "CGTACGCGTACG"}, fc.STATUS_MULTI_HIT),
     ],
@@ -260,6 +266,14 @@ def test_build_record_flags_clipping_when_flank_short() -> None:
 def test_build_record_non_anchored_statuses(overrides: dict[str, Any], expected: str) -> None:
     row = _ok_record(**overrides)
     assert row["status"] == expected
+
+
+def test_build_record_permanent_fail_is_unavailable_not_fetch_failed() -> None:
+    """A suppressed/withdrawn accession is a data property, not a transient blip."""
+    transient = _ok_record(region=None, permanent_fail=False)
+    permanent = _ok_record(region=None, permanent_fail=True)
+    assert transient["status"] == fc.STATUS_FETCH_FAILED
+    assert permanent["status"] == fc.STATUS_UNAVAILABLE
 
 
 @pytest.mark.parametrize(
@@ -310,7 +324,10 @@ def _rows(**by_status: int) -> list[dict[str, Any]]:
 
 def test_derive_counts_covers_every_status_key() -> None:
     counts = fc.derive_counts(_rows(ok=2, not_found=1))
-    assert counts == {"ok": 2, "bad_name": 0, "fetch_failed": 0, "not_found": 1, "multi_hit": 0}
+    assert counts == {
+        s: (2 if s == "ok" else 1 if s == "not_found" else 0) for s in fc.STATUS_VALUES
+    }
+    assert set(counts) == set(fc.STATUS_VALUES)
 
 
 def test_derive_counts_rejects_unknown_status() -> None:
@@ -539,7 +556,14 @@ def test_only_transient_fetch_failure_is_retried() -> None:
 
 
 @pytest.mark.parametrize(
-    "status", [fc.STATUS_OK, fc.STATUS_NOT_FOUND, fc.STATUS_MULTI_HIT, fc.STATUS_BAD_NAME]
+    "status",
+    [
+        fc.STATUS_OK,
+        fc.STATUS_NOT_FOUND,
+        fc.STATUS_MULTI_HIT,
+        fc.STATUS_BAD_NAME,
+        fc.STATUS_UNAVAILABLE,
+    ],
 )
 def test_deterministic_outcomes_are_never_retried(status: str) -> None:
     """These are properties of the record — re-fetching burns quota for the same answer."""

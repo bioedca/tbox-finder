@@ -123,17 +123,25 @@ STRAND_PLUS = 1
 STRAND_MINUS = 2
 
 #: per-record anchoring outcomes. Only ``STATUS_OK`` rows are trainable substrate.
+#: ``fetch_failed`` (transient network/HTTP-5xx/429) is **retried**; every other
+#: non-``ok`` status is **deterministic** and never retried:
+#: ``bad_name`` (unparseable ``Name``), ``not_found`` / ``multi_hit`` (the locus
+#: is absent from / repeats within the fetched region), and ``unavailable``
+#: (NCBI permanently rejects the accession — a suppressed/withdrawn record, an
+#: HTTP 4xx that is not rate-limiting; re-fetching only re-hits a dead accession).
 STATUS_OK = "ok"
 STATUS_BAD_NAME = "bad_name"
 STATUS_FETCH_FAILED = "fetch_failed"
 STATUS_NOT_FOUND = "not_found"
 STATUS_MULTI_HIT = "multi_hit"
+STATUS_UNAVAILABLE = "unavailable"
 STATUS_VALUES: tuple[str, ...] = (
     STATUS_OK,
     STATUS_BAD_NAME,
     STATUS_FETCH_FAILED,
     STATUS_NOT_FOUND,
     STATUS_MULTI_HIT,
+    STATUS_UNAVAILABLE,
 )
 
 #: split-table columns (the git-LFS committed table is the identity anchor).
@@ -247,18 +255,23 @@ def anchor_offset(region: str, locus: str) -> tuple[int, int]:
     return (first, hits) if hits == 1 else (-1, hits)
 
 
-def status_of(*, parsed_ok: bool, fetched: bool, n_hits: int) -> str:
+def status_of(*, parsed_ok: bool, fetched: bool, n_hits: int, permanent_fail: bool = False) -> str:
     """Derive the per-record anchoring status from evidence.
 
     Shared by the builder and the validator so a status can never be *asserted*
     independently of the evidence that produced it (the P1-15/P1-16 durable
     lesson: ``overall_pass = all(clauses)`` cannot catch a clause fabricated
     TRUE, so every clause is re-derived from its recorded evidence).
+
+    ``permanent_fail`` distinguishes a definitive NCBI rejection (a suppressed /
+    withdrawn accession, an HTTP 4xx that is not rate-limiting) from a transient
+    network failure — the former is :data:`STATUS_UNAVAILABLE` (never retried),
+    the latter :data:`STATUS_FETCH_FAILED` (retried).
     """
     if not parsed_ok:
         return STATUS_BAD_NAME
     if not fetched:
-        return STATUS_FETCH_FAILED
+        return STATUS_UNAVAILABLE if permanent_fail else STATUS_FETCH_FAILED
     if n_hits == 0:
         return STATUS_NOT_FOUND
     if n_hits > 1:
@@ -276,6 +289,7 @@ def build_context_record(
     accession: str,
     strand: int,
     parsed_ok: bool,
+    permanent_fail: bool = False,
     pad_nt: int = DEFAULT_PAD_NT,
 ) -> dict[str, Any]:
     """Assemble one context row from fetch evidence (pure; no I/O).
@@ -285,7 +299,12 @@ def build_context_record(
     carries no offsets to be mistaken for real ones.
     """
     offset, n_hits = anchor_offset(region or "", locus)
-    status = status_of(parsed_ok=parsed_ok, fetched=region is not None, n_hits=n_hits)
+    status = status_of(
+        parsed_ok=parsed_ok,
+        fetched=region is not None,
+        n_hits=n_hits,
+        permanent_fail=permanent_fail,
+    )
     row: dict[str, Any] = {
         "record_id": record_id,
         "accession": accession,
@@ -590,12 +609,19 @@ def fetch_region(
     retries: int = 3,
     backoff: float = 1.5,
     errors: list[str] | None = None,
-) -> str | None:
-    """Fetch one strand-oriented region → uppercase DNA, or ``None`` on failure.
+) -> tuple[str | None, bool]:
+    """Fetch one strand-oriented region → ``(uppercase DNA | None, permanent_fail)``.
 
     ``strand=2`` makes NCBI return the reverse complement of the forward
     ``[start, stop]`` range, i.e. the locus read 5'→3' on the minus strand.
-    Returns ``None`` (never a partial/guessed sequence) after ``retries``.
+    The sequence is ``None`` (never a partial/guessed sequence) on any failure.
+
+    ``permanent_fail`` is True when NCBI **definitively rejects** the accession —
+    an HTTP 4xx that is not rate-limiting (429), or a 200 body carrying NCBI's
+    ``Failed to retrieve sequence`` marker for a suppressed/withdrawn record. Such
+    a failure is **not retried** (here or on a future run): re-fetching only
+    re-hits a dead accession. A transient failure (timeout, connection reset, HTTP
+    5xx, 429) returns ``permanent_fail=False`` and is retried.
 
     The ``limiter`` is acquired **per request, inside the retry loop** — metering
     only the first attempt would let a retry storm issue up to ``retries`` times
@@ -604,6 +630,7 @@ def fetch_region(
     artifact.
     """
     last_error = ""
+    permanent = False
     for attempt in range(retries):
         if limiter is not None:
             limiter.acquire()
@@ -620,6 +647,12 @@ def fetch_region(
                 text = handle.read()
         except Exception as exc:  # noqa: BLE001 - network/HTTP/parse: retry then give up
             last_error = f"{type(exc).__name__}: {exc}"[:200]
+            code = getattr(exc, "code", None)
+            if isinstance(code, int) and 400 <= code < 500 and code != 429:
+                # A client rejection (suppressed accession, bad range) will not
+                # change on retry — stop now and never re-hit it.
+                permanent = True
+                break
             if attempt == retries - 1:
                 break
             time.sleep(backoff * (attempt + 1))
@@ -627,15 +660,18 @@ def fetch_region(
         lines = [ln.strip() for ln in text.splitlines()]
         if not lines or not lines[0].startswith(">"):
             last_error = "response was not FASTA"
+            # NCBI sometimes answers 200 with an error body for a withdrawn record.
+            if "failed to retrieve" in text.lower():
+                permanent = True
             break
         seq = "".join(lines[1:]).upper()
         if seq:
-            return seq
+            return seq, False
         last_error = "empty sequence body"
         break
     if errors is not None and last_error:
         errors.append(last_error)
-    return None
+    return None, permanent
 
 
 def _should_retry(cached: Mapping[str, Any], *, retry_failed: bool, pad_nt: int) -> bool:
@@ -807,7 +843,7 @@ def build_flank_context(
             )
         accession, lo, hi, strand = parsed
         start, stop = plan_region(lo, hi, pad_nt=pad_nt)
-        region = fetch_region(
+        region, permanent = fetch_region(
             entrez, accession, start, stop, strand, limiter=limiter, errors=fetch_errors
         )
         return build_context_record(
@@ -819,6 +855,7 @@ def build_flank_context(
             accession=accession,
             strand=strand,
             parsed_ok=True,
+            permanent_fail=permanent,
             pad_nt=pad_nt,
         )
 
