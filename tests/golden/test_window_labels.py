@@ -250,24 +250,61 @@ def test_rc_windows_are_locked_against_an_independent_projection() -> None:
 
     The forward digest above never exercises `rc=True` (eval mode is
     forward-strand), so without this the reverse-strand carve — half of the
-    both-strand handling imp.md asks for — would be golden-unlocked. The
-    expectation is re-derived from the fixture, not read off the module: the RC
-    window must be the forward window's sequence reverse-complemented and its
-    labels reversed, with the locus at `window - lead - locus_length`.
+    both-strand handling imp.md asks for — would be golden-unlocked.
+
+    Every expectation here is built from the **fixture's raw columns** with a
+    local complement table and a plain per-position loop. It deliberately does
+    NOT call `wd.reverse_complement_ids` or any other RC production helper: an
+    expectation computed with the function under test would pass no matter what
+    that function did.
     """
-    fwd = wd.Stage1WindowDataset(_fixture_records(), augment=False)
-    for i, (rec, rev) in enumerate(zip(fwd.records, _rc_windows(), strict=True)):
-        f = fwd.window_at(i)
-        assert np.array_equal(rev.input_ids, wd.reverse_complement_ids(f.input_ids))
-        assert np.array_equal(rev.labels, f.labels[::-1])
+    window = 1024
+    comp = {"A": "T", "C": "G", "G": "C", "T": "A", "N": "N"}
+    base_ids = {"A": 7, "C": 8, "G": 9, "T": 10, "N": 11}
+    pad_id, ignore = 4, -100
+    code_to_index = {
+        code: labels_mod.CLASS_INDEX[name] for name, code in labels_mod.CLASS_CODE.items()
+    }
+
+    for row, rev in zip(_load_fixture(), _rc_windows(), strict=True):
+        seq = row["context_seq"]
+        off, m = int(row["locus_offset"]), int(row["locus_length"])
+        lstr = row["label_string"]
+        cs, ce = _as_bool(row["clipped_start"]), _as_bool(row["clipped_end"])
+        clen = len(seq)
+
+        lo = 0 if ce else max(0, off + window - clen)
+        hi = (window - m) if cs else min(window - m, off)
+        lead = min(max((window - m) // 2, lo), hi)
+        start = start_ = off - lead
+
+        # Build the forward window from raw characters, then reverse-complement it
+        # by hand: walk the window backwards, complementing each base.
+        exp_ids, exp_lab, exp_mask = [], [], []
+        for k in range(window - 1, -1, -1):
+            p = start_ + k
+            if 0 <= p < clen:
+                exp_ids.append(base_ids[comp[seq[p]]] if seq[p] in comp else base_ids["N"])
+                exp_lab.append(code_to_index[lstr[p - off]] if off <= p < off + m else 0)
+                exp_mask.append(True)
+            else:
+                exp_ids.append(pad_id)
+                exp_lab.append(ignore)
+                exp_mask.append(False)
+
+        assert np.array_equal(rev.input_ids, np.asarray(exp_ids, dtype=np.int16))
+        assert np.array_equal(rev.labels, np.asarray(exp_lab, dtype=np.int16))
+        assert np.array_equal(rev.real_mask, np.asarray(exp_mask, dtype=bool))
         # `lead` must describe the EMITTED window, not the forward one.
-        expected_lead = 1024 - f.lead - rec.locus_length
-        assert rev.lead == expected_lead
-        expect = np.asarray(labels_mod.label_string_to_indices(rec.label_string), dtype=np.int16)[
-            ::-1
-        ]
-        got = rev.labels[rev.lead : rev.lead + rec.locus_length]
-        assert np.array_equal(got, expect), f"RC label misalignment on {rec.record_id}"
+        assert rev.lead == window - lead - m
+        assert rev.pad_left == max(0, (start + window) - clen)  # forward's pad_right
+        assert rev.pad_right == max(0, -start)
+        # The locus, read off the emitted window, is the reversed label string.
+        expect = [code_to_index[c] for c in reversed(lstr)]
+        got = rev.labels[rev.lead : rev.lead + m]
+        assert np.array_equal(
+            got, np.asarray(expect, dtype=np.int16)
+        ), f"RC label misalignment on {row['record_id']}"
 
 
 def test_rc_digest_is_stable_and_differs_from_the_forward_digest() -> None:
