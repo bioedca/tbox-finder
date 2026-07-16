@@ -1,0 +1,104 @@
+{
+  "anchor_rate": 0.9998725302740599,
+  "coordinates_trusted": false,
+  "digest": "a2bad3699c3222f5a03decde780c5dbac32acc296b65509704dc3ff19f1f501a",
+  "fetch_error_sample": [],
+  "flank_nt": {
+    "lead_min": 0,
+    "lead_p50": 1024,
+    "trail_min": 0,
+    "trail_p50": 1024
+  },
+  "is_science": false,
+  "n_anchored": 23532,
+  "n_clipped_end": 704,
+  "n_clipped_start": 841,
+  "n_full_window_capable": 23253,
+  "n_records": 23535,
+  "pad_nt": 1024,
+  "per_source_status": {
+    "Marks_fulltbox.fa": {
+      "bad_name": 0,
+      "fetch_failed": 0,
+      "multi_hit": 0,
+      "not_found": 0,
+      "ok": 6017,
+      "unavailable": 0
+    },
+    "None": {
+      "bad_name": 0,
+      "fetch_failed": 0,
+      "multi_hit": 0,
+      "not_found": 0,
+      "ok": 1,
+      "unavailable": 0
+    },
+    "RF00230_master.fa": {
+      "bad_name": 0,
+      "fetch_failed": 0,
+      "multi_hit": 2,
+      "not_found": 0,
+      "ok": 8989,
+      "unavailable": 0
+    },
+    "RIBEX_dedup.fa": {
+      "bad_name": 0,
+      "fetch_failed": 0,
+      "multi_hit": 0,
+      "not_found": 0,
+      "ok": 1274,
+      "unavailable": 0
+    },
+    "Vitreschak_master.fa": {
+      "bad_name": 0,
+      "fetch_failed": 0,
+      "multi_hit": 0,
+      "not_found": 0,
+      "ok": 693,
+      "unavailable": 0
+    },
+    "actinobacteria_ILE.fa": {
+      "bad_name": 0,
+      "fetch_failed": 0,
+      "multi_hit": 0,
+      "not_found": 0,
+      "ok": 1014,
+      "unavailable": 0
+    },
+    "classI.fa": {
+      "bad_name": 0,
+      "fetch_failed": 0,
+      "multi_hit": 0,
+      "not_found": 0,
+      "ok": 186,
+      "unavailable": 0
+    },
+    "gecont3_full_MASTER.fa": {
+      "bad_name": 0,
+      "fetch_failed": 0,
+      "multi_hit": 0,
+      "not_found": 0,
+      "ok": 5358,
+      "unavailable": 1
+    }
+  },
+  "schema_version": "1.0",
+  "source": {
+    "accessed": "2026-07-16",
+    "base_url": "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/",
+    "db": "nuccore",
+    "rettype": "fasta",
+    "terms_url": "https://www.ncbi.nlm.nih.gov/home/about/policies/"
+  },
+  "status_counts": {
+    "bad_name": 0,
+    "fetch_failed": 0,
+    "multi_hit": 2,
+    "not_found": 0,
+    "ok": 23532,
+    "unavailable": 1
+  },
+  "step": "P2-00",
+  "synthetic_flank": false,
+  "window_nt": 1024
+}

@@ -41,6 +41,12 @@
 # workflow/rules/data.smk::replace_taxid_lineage (CLAUDE.md §5.2).
 !/data/external/ncbi_taxonomy/
 !/data/external/ncbi_taxonomy/provenance.json
+# Carve-out: the P2-00 NCBI flank-sourcing provenance ONLY (source URL + db + terms +
+# accessed date + request/accession counts). The fetched flank itself is DVC-tracked
+# under data/interim/flank_context/, not here — re-fetched + exact-match-anchored by
+# workflow/rules/data.smk::p2_flank_context (CLAUDE.md §5.2/§10.2).
+!/data/external/ncbi_flank/
+!/data/external/ncbi_flank/provenance.json
 # Carve-out: the P1-12 ArchiveII LOFO benchmark provenance ONLY (pinned tarball
 # sha256 + per-family/per-fold counts + lofo digest). The ~1.3 MB folds.json +
 # extracted .ct files stay ignored — re-fetched + checksum-verified by

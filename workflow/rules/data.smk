@@ -711,3 +711,59 @@ rule build_decoys:
         "--report {output.report:q} "
         "--config {params.conf:q} "
         "--env-lock {params.env_lock:q} >{log} 2>&1"
+
+
+rule p2_flank_context:
+    """Source real flanking genomic context for the training corpus (P2-00).
+
+    PRD §6 pins Stage-1 training positives as offset-augmented random window-phase
+    placements in a **1024-nt window**, but the corpus stores each locus as only
+    104-550 nt of dense DNA (median 281) with negligible native flank — so the
+    window cannot be filled from `master_clean_v0.parquet` alone. Rather than
+    synthesise the remainder (a 0th-order background splice would hand the model a
+    trivially separable boundary cue and inflate GATE-4/GATE-1 — PRD §5/§10.3),
+    this rule **sources the real flank** from NCBI `nuccore` (PRD §10.2).
+
+    The stored `Name` coordinates are **not trusted**: their span reconciles with
+    `len(FASTA_sequence)` on only 61.7% of records. A padded region is fetched and
+    the stored sequence is located inside it by **exact string match**; a record is
+    anchored iff it occurs exactly once. Fails closed — zero/multiple hits are
+    recorded with a reason, never guessed. The anchor rate is measured + reported.
+
+    A **one-time LOCAL network** rule kept out of `rule all` with no `input:` — its
+    input is the DVC-tracked corpus (P0-12) + the git-LFS committed split table,
+    and its true source is an external API, not a DAG product. Latency-bound: the
+    fetch is rate-limited to NCBI's courtesy ceiling (3 req/s anonymous, 10 req/s
+    when `NCBI_API_KEY` is set) and is **resumable** via `fetch_cache.jsonl`.
+    Requires `NCBI_EMAIL` (E-utilities etiquette). Invoke:
+
+        NCBI_EMAIL=you@example.org \
+            snakemake --cores 1 --use-conda p2_flank_context
+    """
+    output:
+        context="data/interim/flank_context/context_v0.parquet",
+        provenance="data/interim/flank_context/context_v0.provenance.json",
+        source_provenance="data/external/ncbi_flank/provenance.json",
+        report="reports/p2/flank_context.json",
+    params:
+        master=config.get("flank_master", "data/processed/master_clean_v0.parquet"),
+        split_table=config.get(
+            "flank_split_table", "data/processed/splits/split_assignments.parquet"
+        ),
+        # Derived from `output` (never hardcoded): a literal path param that
+        # prefixes an output trips `snakemake --lint`, which is CI-blocking.
+        out_dir=lambda wildcards, output: os.path.dirname(output.context),
+        external_dir=lambda wildcards, output: os.path.dirname(output.source_provenance),
+        env_lock="envs/data.conda-lock.yml",
+    log:
+        "logs/p2_flank_context.log",
+    conda:
+        "../../envs/data.yml"
+    shell:
+        "PYTHONHASHSEED=0 python -m tbox_finder.data.flank_context "
+        "--master {params.master:q} "
+        "--split-table {params.split_table:q} "
+        "--out-dir {params.out_dir:q} "
+        "--external-dir {params.external_dir:q} "
+        "--report {output.report:q} "
+        "--env-lock {params.env_lock:q} >{log} 2>&1"
