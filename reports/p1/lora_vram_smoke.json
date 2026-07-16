@@ -1,0 +1,223 @@
+{
+  "attention": {
+    "fallback": "sdpa",
+    "forward_error": null,
+    "forward_verification_note": "P1-15 selected this backend on an IMPORT-level sm_86 confirmation (ADR-0002 A5 carries no FA-2 forward) and deferred the forward here; this run exercises it on the measured device.",
+    "forward_verified_on_sm86": true,
+    "model_supports_flash_attn": true,
+    "reason": "FA-2 selected: the flash-attn wheel imports on a MEASURED sm_86 A4000 (ADR-0002 A5), the pinned RiNALMo classes advertise flash-attn, and the pinned dtype bfloat16 is FA-2-eligible. The FA-2 forward through RiNALMo is NOT verified here (LOCAL step, sm_89 laptop) \u2014 deferred to the P1-16 GPU smoke.",
+    "selected": "flash_attention_2",
+    "sm86_evidence": {
+      "device_capability": [
+        8,
+        6
+      ],
+      "device_name": "NVIDIA RTX A4000",
+      "flash_attn_importable": true,
+      "flash_attn_version": "2.8.3.post1",
+      "is_sm86": true,
+      "measured_on_target_arch": true,
+      "source": "reports/p1/kernel_smoke.json",
+      "source_step": "P1-01"
+    },
+    "used": "flash_attention_2"
+  },
+  "backbone": {
+    "hidden_dim": 1280,
+    "n_layer": 33,
+    "parity_confirmed": true,
+    "repo_id": "multimolecule/rinalmo-giga",
+    "revision": "2a71f6f98fb41dd2e6542a5e131d3778111d1468"
+  },
+  "config": {
+    "batch_sweep": [
+      1,
+      2,
+      4,
+      8,
+      16
+    ],
+    "data_is_synthetic": true,
+    "dtype": "bfloat16",
+    "gate_batch_size": 1,
+    "gradient_checkpointing": true,
+    "is_science": false,
+    "loss_is_placeholder": true,
+    "lr": 0.0001,
+    "optimizer": "AdamW",
+    "pinned": false,
+    "pinned_note": "PRD \u00a710.2/\u00a710.3/\u00a711/\u00a715 and ADR-0002 pin NO batch size, sequence length, step count, or LR for this smoke \u2014 only the 16 GB VRAM budget. These are implementer choices, recorded (the ADR-0002 A5 `atol` precedent). seq_len_nt is the upper end of \u00a710.2's ~150-350 nt T-box locus range; gate_batch_size=1 is the feasibility question (larger batches trade against gradient accumulation at P3).",
+    "seed": 42,
+    "seq_len_nt": 350,
+    "timed_steps_per_config": 5,
+    "warmup_steps_per_config": 2
+  },
+  "env": {
+    "platform": "Linux-5.15.0-185-generic-x86_64-with-glibc2.35",
+    "python": "3.12.13",
+    "versions": {
+      "accelerate": "1.12.0",
+      "deepspeed": "0.18.5",
+      "multimolecule": "0.1.0",
+      "peft": "0.18.1",
+      "torch": "2.7.1+cu128",
+      "transformers": "5.13.0"
+    }
+  },
+  "gate": {
+    "attention_forward_verified": true,
+    "bf16_and_gradient_checkpointing": true,
+    "fits_on_device": true,
+    "lora_config_exact": true,
+    "lora_grads_flow": true,
+    "measured_on_sm86": true,
+    "overall_pass": true,
+    "peak_vram_within_budget": true,
+    "step_runs_end_to_end": true,
+    "steps_per_sec_reported": true
+  },
+  "git_sha": "2aba5f5546e7fcc93266e412ee6e885ea223c34c",
+  "hardware": {
+    "cuda_capability": [
+      8,
+      6
+    ],
+    "device": "cuda",
+    "gpu_name": "NVIDIA RTX A4000",
+    "gpu_total_memory_gib": 15.602,
+    "is_sm86": true,
+    "n_gpus_measured": 1
+  },
+  "lora": {
+    "bias": "none",
+    "dtype": "bfloat16",
+    "gradient_checkpointing": true,
+    "is_pinned_spec_echo": true,
+    "lora_alpha": 32,
+    "lora_dropout": 0.05,
+    "r": 16,
+    "target_modules": "all-linear"
+  },
+  "measured": true,
+  "measured_smoke": {
+    "adapter_checkpoint_dir": "/tmp/ecc1695-521/lora_adapter",
+    "adapter_param_dtypes": [
+      "torch.float32"
+    ],
+    "batch_sweep": {
+      "1": {
+        "final_loss": 0.9412308931350708,
+        "n_timed_steps": 2,
+        "peak_vram_gib": 1.484,
+        "step_ms_max": 306.781,
+        "step_ms_mean": 305.389,
+        "step_ms_min": 303.996,
+        "steps_per_sec": 3.2745
+      },
+      "16": {
+        "final_loss": 0.921654224395752,
+        "n_timed_steps": 2,
+        "peak_vram_gib": 2.647,
+        "step_ms_max": 1912.53,
+        "step_ms_mean": 1910.6,
+        "step_ms_min": 1908.67,
+        "steps_per_sec": 0.5234
+      },
+      "2": {
+        "final_loss": 0.9391910433769226,
+        "n_timed_steps": 2,
+        "peak_vram_gib": 1.558,
+        "step_ms_max": 310.856,
+        "step_ms_mean": 309.752,
+        "step_ms_min": 308.647,
+        "steps_per_sec": 3.2284
+      },
+      "4": {
+        "final_loss": 0.9342556595802307,
+        "n_timed_steps": 2,
+        "peak_vram_gib": 1.706,
+        "step_ms_max": 526.128,
+        "step_ms_mean": 523.91,
+        "step_ms_min": 521.692,
+        "steps_per_sec": 1.9087
+      },
+      "8": {
+        "final_loss": 0.9279294013977051,
+        "n_timed_steps": 2,
+        "peak_vram_gib": 2.014,
+        "step_ms_max": 986.272,
+        "step_ms_mean": 985.792,
+        "step_ms_min": 985.313,
+        "steps_per_sec": 1.0144
+      }
+    },
+    "device_total_memory_gib": 15.602,
+    "gate_run": {
+      "batch_size": 1,
+      "final_loss": 0.9445248246192932,
+      "grad_flow": {
+        "all_lora_grads_finite": true,
+        "all_lora_params_received_grad": true,
+        "n_lora_params": 462,
+        "n_lora_params_with_grad": 462
+      },
+      "n_timed_steps": 5,
+      "peak_vram_gib": 1.484,
+      "step_ms_max": 600.945,
+      "step_ms_mean": 370.379,
+      "step_ms_min": 308.854,
+      "steps_per_sec": 2.6999
+    },
+    "largest_fitting_batch": 16,
+    "oom_at_batch": null
+  },
+  "schema_version": "1",
+  "step": "P1-16",
+  "vram_budget": {
+    "budget_gib": 16.0,
+    "device_total_memory_gib": 15.602,
+    "on_miss": "CLAUDE.md \u00a77 stop-and-ask \u2014 escalate to the FSDP FULL_SHARD fallback or the \u00a710.2 RNA-FM swap consideration. The budget is NOT weakenable (A7/A9 precedent).",
+    "peak_vram_gib": 1.484,
+    "source": "PRD \u00a710.2 condition (b) / \u00a710.3 / \u00a715; ADR-0002 D6(b) \u2014 the A4000's 16 GB",
+    "within_budget": true
+  },
+  "wrap": {
+    "applied_lora": {
+      "all_linear_fully_covered": true,
+      "lora_alpha": 32,
+      "lora_dropout": 0.05,
+      "n_eligible_linear_modules": 231,
+      "n_modules_adapted": 231,
+      "r": 16,
+      "target_modules_after_injection": [
+        "dense",
+        "key",
+        "linear",
+        "linear_gate",
+        "query",
+        "value"
+      ],
+      "target_modules_selector": "all-linear",
+      "target_modules_suffix_minimised": true,
+      "uncovered_linear_modules": []
+    },
+    "attn_implementation": "flash_attention_2",
+    "attn_implementation_requested": "flash_attention_2",
+    "base_frozen": true,
+    "dtype": "bfloat16",
+    "gradient_checkpointing": true,
+    "n_adapter_sites": 231,
+    "n_base_trainable_params": 0,
+    "targeted_module_leaf_names": [
+      "dense",
+      "key",
+      "linear",
+      "linear_gate",
+      "query",
+      "value"
+    ],
+    "total_params": 662079483,
+    "trainable_params": 12840432,
+    "trainable_pct": 1.9394
+  }
+}
