@@ -350,9 +350,16 @@ def context_digest(records: Sequence[Mapping[str, Any]]) -> str:
                 str(r["record_id"]),
                 str(r["accession"]),
                 int(r["strand"]),
+                int(r["region_start"]),
+                int(r["region_stop"]),
                 int(r["locus_offset"]),
                 int(r["locus_length"]),
+                int(r["lead_flank"]),
+                int(r["trail_flank"]),
+                str(r["clipped_start"]),
+                str(r["clipped_end"]),
                 str(r["status"]),
+                int(r["pad_nt"]),
                 str(r["context_seq"]),
             ]
         )
@@ -450,9 +457,14 @@ def validate_report(report: Mapping[str, Any]) -> list[str]:
     if not isinstance(counts, Mapping):
         problems.append("status_counts block missing or not a mapping")
         return problems
+    unknown = set(counts) - set(STATUS_VALUES)
+    if unknown:
+        problems.append(f"status_counts has unknown status keys: {sorted(unknown)}")
     for status in STATUS_VALUES:
         if not _is_int(counts.get(status)):
             problems.append(f"status_counts[{status!r}] is not an int (got {counts.get(status)!r})")
+        elif int(counts[status]) < 0:
+            problems.append(f"status_counts[{status!r}] is negative ({counts[status]})")
     if problems:
         return problems
 
@@ -689,7 +701,14 @@ def _should_retry(cached: Mapping[str, Any], *, retry_failed: bool, pad_nt: int)
       ``trail_flank``, ``clipped_*``, ``region_*``) is a function of ``pad_nt``, so a
       row fetched at one pad must never be reused under another. A legacy row with
       no ``pad_nt`` stamp compares unequal and is re-fetched — the safe direction.
+    * **Malformed row.** A cached row missing a required column or carrying an
+      unknown ``status`` (a hand-edited or pre-schema cache line) is re-fetched
+      rather than reused — a partial row must never reach the output.
     """
+    if any(column not in cached for column in CONTEXT_COLS):
+        return True
+    if str(cached.get("status")) not in STATUS_VALUES:
+        return True
     if retry_failed and str(cached.get("status")) == STATUS_FETCH_FAILED:
         return True
     return cached.get("pad_nt") != int(pad_nt)
@@ -773,6 +792,20 @@ def load_corpus(master_parquet: Path, split_table: Path):
         .astype(str)
     )
     ours = set(hashes)
+    # A duplicate identity would collapse two records into one ``by_id`` key and
+    # silently drop a record from the output — reject it explicitly with a clear
+    # message rather than letting the set-inequality check below report it as a
+    # confusing "table-only 1" mismatch (identity is load-bearing, §8.2/§10.3).
+    if len(ours) != len(hashes):
+        raise ValueError(
+            f"master record hashes are not unique ({len(hashes)} rows, {len(ours)} distinct) "
+            "— refusing to key records on a colliding identity (§10.3)"
+        )
+    if len(corpus_sha) != int((splits[SPLIT_SOURCE_COL] == POSITIVE_SOURCE).sum()):
+        raise ValueError(
+            "committed split table has duplicate corpus_record_sha256 values "
+            "— refusing to proceed on a non-unique identity anchor (§10.3)"
+        )
     if ours != corpus_sha:
         raise ValueError(
             "master record hashes do not match the committed split table's "

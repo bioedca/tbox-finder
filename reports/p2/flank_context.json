@@ -1,10 +1,8 @@
 {
   "anchor_rate": 0.9998725302740599,
   "coordinates_trusted": false,
-  "digest": "a25c02dff651a053b6d3febf75f60f67566fe53f21f821dff0e0d501d8267394",
-  "fetch_error_sample": [
-    "HTTPError: HTTP Error 400: Bad Request"
-  ],
+  "digest": "a2bad3699c3222f5a03decde780c5dbac32acc296b65509704dc3ff19f1f501a",
+  "fetch_error_sample": [],
   "flank_nt": {
     "lead_min": 0,
     "lead_p50": 1024,

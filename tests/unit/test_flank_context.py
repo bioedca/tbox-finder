@@ -308,6 +308,8 @@ def _rows(**by_status: int) -> list[dict[str, Any]]:
                     "record_id": f"{status}-{i}",
                     "accession": "X",
                     "strand": 1,
+                    "region_start": 1,
+                    "region_stop": 3,
                     "locus_offset": 0 if status == fc.STATUS_OK else -1,
                     "locus_length": 3,
                     "lead_flank": 0,
@@ -438,6 +440,35 @@ def test_validate_rejects_n_records_not_matching_counts() -> None:
     assert any("n_records" in p for p in fc.validate_report(report))
 
 
+def test_validate_rejects_negative_count() -> None:
+    report = _valid_report()
+    report["status_counts"]["not_found"] = -1
+    assert any("negative" in p for p in fc.validate_report(report))
+
+
+def test_validate_rejects_unknown_status_key() -> None:
+    report = _valid_report()
+    report["status_counts"]["bogus_status"] = 3
+    assert any("unknown status" in p for p in fc.validate_report(report))
+
+
+def test_digest_includes_all_geometry_fields() -> None:
+    """Two rows differing only in a geometry field must hash differently."""
+    for field, other in [
+        ("region_start", 999),
+        ("region_stop", 999),
+        ("lead_flank", 7),
+        ("trail_flank", 7),
+        ("clipped_start", True),
+        ("clipped_end", True),
+        ("pad_nt", 2048),
+    ]:
+        rows = _rows(ok=2)
+        before = fc.context_digest(rows)
+        rows[0][field] = other
+        assert fc.context_digest(rows) != before, f"digest ignores {field}"
+
+
 def test_validate_rejects_bool_as_count() -> None:
     """isinstance(True, int) is True in Python — a bool must not pass as a count."""
     report = _valid_report()
@@ -549,9 +580,14 @@ def test_context_cols_are_stable() -> None:
 # --------------------------------------------------------------------------- #
 
 
+def _cache_row(status: str, *, pad_nt: int = 1024) -> dict[str, Any]:
+    """A complete cache row (all CONTEXT_COLS) with the given status/pad."""
+    return _rows(**{status: 1})[0] | {"pad_nt": pad_nt}
+
+
 def test_only_transient_fetch_failure_is_retried() -> None:
     """A network blip must not be baked into the artifact as an anchor failure."""
-    row = {"status": fc.STATUS_FETCH_FAILED, "pad_nt": 1024}
+    row = _cache_row(fc.STATUS_FETCH_FAILED)
     assert fc._should_retry(row, retry_failed=True, pad_nt=1024) is True
 
 
@@ -567,25 +603,40 @@ def test_only_transient_fetch_failure_is_retried() -> None:
 )
 def test_deterministic_outcomes_are_never_retried(status: str) -> None:
     """These are properties of the record — re-fetching burns quota for the same answer."""
-    row = {"status": status, "pad_nt": 1024}
-    assert fc._should_retry(row, retry_failed=True, pad_nt=1024) is False
+    assert fc._should_retry(_cache_row(status), retry_failed=True, pad_nt=1024) is False
 
 
 def test_retry_can_be_disabled() -> None:
-    row = {"status": fc.STATUS_FETCH_FAILED, "pad_nt": 1024}
-    assert fc._should_retry(row, retry_failed=False, pad_nt=1024) is False
+    assert (
+        fc._should_retry(_cache_row(fc.STATUS_FETCH_FAILED), retry_failed=False, pad_nt=1024)
+        is False
+    )
 
 
 def test_row_fetched_at_a_different_pad_is_always_refetched() -> None:
     """Every geometry field is a function of pad — reuse across pads is a wrong answer."""
-    row = {"status": fc.STATUS_OK, "pad_nt": 1024}
+    row = _cache_row(fc.STATUS_OK)
     assert fc._should_retry(row, retry_failed=False, pad_nt=2048) is True
     assert fc._should_retry(row, retry_failed=True, pad_nt=2048) is True
 
 
 def test_legacy_row_without_a_pad_stamp_is_refetched() -> None:
     """A pre-stamp cache row cannot be trusted at any pad — the safe direction."""
-    assert fc._should_retry({"status": fc.STATUS_OK}, retry_failed=False, pad_nt=1024) is True
+    row = _cache_row(fc.STATUS_OK)
+    del row["pad_nt"]
+    assert fc._should_retry(row, retry_failed=False, pad_nt=1024) is True
+
+
+def test_row_missing_a_required_column_is_refetched() -> None:
+    """A partial (hand-edited / pre-schema) cache row must never reach the output."""
+    row = _cache_row(fc.STATUS_OK)
+    del row["context_seq"]
+    assert fc._should_retry(row, retry_failed=False, pad_nt=1024) is True
+
+
+def test_row_with_an_unknown_status_is_refetched() -> None:
+    row = _cache_row(fc.STATUS_OK) | {"status": "bogus"}
+    assert fc._should_retry(row, retry_failed=False, pad_nt=1024) is True
 
 
 def test_should_retry_tolerates_a_status_less_row() -> None:
