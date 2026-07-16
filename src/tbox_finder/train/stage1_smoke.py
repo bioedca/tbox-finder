@@ -51,7 +51,6 @@ from __future__ import annotations
 import argparse
 import json
 import math
-import os
 import random
 import sys
 from collections.abc import Mapping, Sequence
@@ -461,23 +460,22 @@ def _epoch_order(n: int, seed: int, epoch: int) -> list[int]:
 
 
 def set_determinism(seed: int) -> None:
-    """Seed every RNG + disable nondeterministic fast paths (§8.3; P1-08 repro)."""
-    import numpy as np  # lazy
-    import torch  # lazy
+    """Seed every RNG + disable nondeterministic fast paths (§8.3; P1-08 repro).
 
-    os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")  # deterministic cuBLAS
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed_all(seed)
-        torch.backends.cuda.matmul.allow_tf32 = False
-        torch.backends.cudnn.allow_tf32 = False
-        torch.backends.cudnn.deterministic = True
-        torch.backends.cudnn.benchmark = False
-    # warn_only: the Mamba selective-scan kernel has no deterministic variant registered;
-    # we still pin every seed + disable TF32/cudnn autotune, which is what P1-08 re-runs.
-    torch.use_deterministic_algorithms(True, warn_only=True)
+    **Delegates to** :func:`tbox_finder.train.repro.set_determinism` (P2-04), which promoted
+    this function verbatim so the P1-07 smoke and the P2-04 Stage-1 training entrypoint share
+    **one** determinism recipe. Kept as a thin alias so this entry point and its committed
+    go/no-go artifact keep their API. The behaviour is unchanged — same seeds, same TF32/cudnn
+    flags, same ``use_deterministic_algorithms(True, warn_only=True)`` — so the ADR-0002 A7
+    gate still re-runs exactly the protocol it reproduced.
+
+    Two copies would be worse than a wrong copy: the A7 gate asserts a *re-run* reproduces,
+    and if the trainer's recipe silently drifted from the smoke's, the gate would keep passing
+    while measuring two different protocols (the P2-02 ``focal_cross_entropy`` lesson).
+    """
+    from tbox_finder.train.repro import set_determinism as _set_determinism  # lazy
+
+    _set_determinism(seed)
 
 
 def _make_ids_of(tokenizer):

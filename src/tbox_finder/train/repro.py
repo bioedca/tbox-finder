@@ -8,8 +8,16 @@ The re-run is **not bit-exact** — the Caduceus Mamba ``selective_scan_cuda`` k
 TF32/cudnn autotune off; PRD §8.3/§11), but the fused scan may accumulate floating-point
 differently run-to-run. The tolerance is therefore **metric-level, not bitwise**.
 
-This module is the **pure-stdlib** comparison the P1-08 gate is built on (no numpy / torch
-/ pandas — it imports bare and runs in CI). It compares the committed P1-07 reference
+This module owns **both halves** of the ADR-0002 A7 determinism contract: the recipe that
+makes a run reproducible (:func:`set_determinism`, promoted here at P2-04 so the P1-07 smoke
+and the P2-04 training entrypoint share **one** implementation rather than forking a second —
+the P2-02 ``focal_cross_entropy`` precedent), and the comparison that adjudicates whether a
+re-run did reproduce (everything below it).
+
+The module still **imports bare and runs in CI**: :func:`set_determinism` imports numpy and
+torch lazily *inside* the function body, so the module-level surface stays pure-stdlib (no
+numpy / torch / pandas), which is what the P1-08 gate's CI tier depends on. The comparison
+half below is pure stdlib outright. It compares the committed P1-07 reference
 report (``reports/p1/seg_smoke_gonogo.json``) against the P1-08 re-run report
 (``reports/p1/seg_smoke_repro.json``, produced by the **unchanged** ``stage1_smoke.py``
 harness with only ``report_path=``/``checkpoint_dir=`` overridden) and decides
@@ -43,6 +51,8 @@ from __future__ import annotations
 
 import json
 import math
+import os
+import random
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
@@ -100,6 +110,44 @@ CONFIG_KEYS: tuple[str, ...] = (
     "dropout",
     "batch_size",
 )
+
+
+# --------------------------------------------------------------------------------------
+# The determinism recipe (ADR-0002 A6/A7; §8.3) — the thing a re-run must re-apply
+# --------------------------------------------------------------------------------------
+def set_determinism(seed: int) -> None:
+    """Seed every RNG + disable nondeterministic fast paths (§8.3; ADR-0002 A6/A7).
+
+    The single implementation shared by the P1-07 segmentation smoke
+    (``train/stage1_smoke.py``) and the P2-04 Stage-1 training entrypoint
+    (``train/train_stage1.py``) — promoted here at P2-04 rather than copied, because two
+    determinism recipes that drift apart would silently void the A7 gate: the re-run would
+    no longer be re-running the same protocol, and nothing would say so.
+
+    ``warn_only=True`` is **load-bearing, not laziness**: the Caduceus Mamba
+    ``selective_scan_cuda`` kernel (ADR-0002 A2 C2) registers no deterministic algorithm, so
+    a strict ``use_deterministic_algorithms(True)`` would *raise* on the Stage-1 forward.
+    Every RNG seed is still pinned and TF32/cudnn autotuning disabled — which is exactly what
+    the P1-08 re-run reproduces — but the fused scan may accumulate floating point
+    differently run to run. Reproducibility is therefore **metric-level, not bitwise**
+    (A7: τ = 1e-3 over the go/no-go decision metrics).
+
+    Imports numpy/torch lazily so this module stays bare-importable for the CI tier.
+    """
+    import numpy as np  # lazy
+    import torch  # lazy
+
+    os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")  # deterministic cuBLAS
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+        torch.backends.cuda.matmul.allow_tf32 = False
+        torch.backends.cudnn.allow_tf32 = False
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
+    torch.use_deterministic_algorithms(True, warn_only=True)
 
 
 # --------------------------------------------------------------------------------------

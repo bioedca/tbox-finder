@@ -1,0 +1,31 @@
+# optim/stage1.yaml — AdamW knobs for the P2-04 Stage-1 full fine-tune.
+#
+# A Hydra config-group option (group `optim/`). The P2-04 train config selects it via
+# `defaults: [/optim: stage1]`; its keys then live under `cfg.optim`.
+#
+# Distinct from `optim/adamw_smoke.yaml`, which belongs to the P1-07 go/no-go smoke
+# (a 20-epoch batch-1 fine-tune of 300 leave-clade-out loci at lr 3e-4). This one drives
+# the real P2 training runs over the 8,303-record `nested_train` fold at batch > 1, so it
+# does not inherit that fixture's learning rate.
+#
+# NOTHING HERE IS ADR-PINNED. Verified exhaustively at P2-04 across ADR-0002 (D1–D9,
+# A1–A10) and ADR-0005 (D1–D18, A1–A3): neither ADR fixes a Stage-1 learning rate, weight
+# decay, optimiser, scheduler or warmup. PRD §11 pins only that seeds are explicit and that
+# the sweep runs through Hydra `--multirun`; §10.3 pins the *footprint* (full fine-tune +
+# gradient checkpointing + DDP×8), not the optimiser. So every value below is an
+# **implementer default on a swept axis** — P2-06 sweeps the learning rate through the
+# validation ladder (never the test set) and promotes the winner.
+#
+# ⚠ Do NOT copy ADR-0002 A9's optimiser block here. A9's "Adam lr 1e-4, 15 epochs,
+# LinearLR 1→0.1, batch 1, fp16, gradual unfreeze" is RiNALMo's own published
+# secondary-structure protocol, reproduced for the Stage-2 parity refit (D5). It shares no
+# axis with Stage-1 and is not a precedent for these values.
+
+name: adamw
+
+# lr — an implementer default, swept at P2-06. Lower than the P1-07 smoke's 3e-4 because
+# this is a full fine-tune of a pretrained backbone over a much larger, curriculum-weighted
+# stream rather than a 300-locus fixture; 1e-4 is the conventional full-fine-tune starting
+# point for a pretrained encoder. It is a starting point, not a finding.
+lr: 1.0e-4
+weight_decay: 0.01

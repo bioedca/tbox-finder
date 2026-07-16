@@ -1,0 +1,94 @@
+# @package _global_
+# train/stage1.yaml — P2-04 Stage-1 per-nucleotide 8-class segmentation training entrypoint
+# (PRD §10.1/§10.3/§11/§16; ADR-0002 D7 + A6/A7; ADR-0005 D3/D15).
+#
+# `@package _global_` lifts this nested (conf/train/) primary config's keys to the root so
+# `cfg.seed`/`cfg.epochs`/… are top-level (a config in a subdirectory is otherwise packaged
+# under `train`); the `/data` `/model` `/tracking` `/optim` groups keep their own packages.
+# Both halves are mandatory — without the package directive AND the leading-slash defaults,
+# a conf/<group>/ primary silently fails to compose and you get a config that looks fine and
+# reaches nothing.
+#
+# Drives: src/tbox_finder/train/train_stage1.py::main (Hydra entry) → train_stage1.
+# Overridable on the CLI, e.g. `epochs=10 optim.lr=3e-4 gamma=1.0`, and sweepable with
+# Hydra `--multirun` (PRD §11 — the P2-06 axes: γ, lr, window/stride, RC-combination).
+#
+# Launched by a hand-authored sbatch under slurm/ through the CLAUDE.md §9.3 submit-ack
+# protocol — NOT the Snakemake SLURM executor (PRD §16: it submits programmatically and
+# auto-retries, bypassing the --test-only preflight and the no-auto-resubmit rule). W&B logs
+# offline on the compute node; `setup.smk::wandb_sync` uploads from the login node.
+#
+# NOTHING IN THIS FILE IS AUTHORITATIVE OVER CODE. The pinned quantities are frozen in their
+# own modules and no config can weaken them (the ADR-0002 A5 precedent):
+#   - backbone repo_id + revision  → models/caduceus_backbone.py (rejects any other revision)
+#   - 1024/512 window geometry     → data/window_dataset.py (ADR-0005 D3)
+#   - non-averaged RC-combination  → models/rc_combine.py ("mean" rejected; ADR-0005 D15)
+#   - reconciliation operator      → infer/reconcile.py (ADR-0005 A3; no config override)
+
+defaults:
+  - _self_
+  - /data: stage1        # P2-01's datamodule — this is the step that wires it (was unwired)
+  - /model: caduceus_stage1
+  - /tracking: wandb
+  - /optim: stage1
+
+# Determinism (§8.3; ADR-0002 A6). Metric-level, not bitwise: the Mamba selective_scan
+# kernel registers no deterministic algorithm (A2 C2), so set_determinism runs
+# use_deterministic_algorithms(True, warn_only=True). See train/repro.py.
+seed: 42
+pythonhashseed: 0
+
+# ── Footprint (PRD §10.3) ────────────────────────────────────────────────────────────────
+# PRD §10.3 pins "full fine-tune fits one GPU with gradient checkpointing; DDP×8 for
+# throughput". The pinned checkpoint does NOT support the standard HuggingFace path —
+# measured at P2-04 on revision d89eeb85: supports_gradient_checkpointing is False,
+# gradient_checkpointing_enable() raises, and modeling_caduceus.py carries a literal
+# "# TODO: Add support for gradient checkpointing" above its layer loop. So it is hand-wired
+# per RCPSMambaBlock in train_stage1.py::enable_gradient_checkpointing (the ADR-0002 A2 C2
+# idiom: "a code change, not a flag"), default ON per §10.3 — user sign-off 2026-07-16.
+# MEASURED (batch 8, 1024 nt, laptop RTX 4060): peak VRAM 4.424 → 0.961 GiB, grads finite,
+# loss 1.5939 → 1.5940. Throughput cost is UNMEASURED — P2-05 owns the A4000 footprint and
+# may propose flipping this default with an ADR note.
+gradient_checkpointing: true
+
+# ── Optimisation — implementer defaults, swept at P2-06 (no ADR pins any of them) ─────────
+epochs: 1
+batch_size: 4
+grad_clip: 1.0
+
+# ── Objective (P2-02 Stage1Loss) ─────────────────────────────────────────────────────────
+# γ≈2 is PRD §11's stated starting value for the dense-background regime and is TUNED
+# (P2-06 sweeps it; safe below γ=1 since P2-02 fixed the silent NaN gradient at 0<γ<1).
+gamma: 2.0
+# class_weight_alpha 0 ⇒ unweighted focal CE. When > 0, train_stage1.py supplies
+# class_counts COMPUTED FROM THE CONFIGURED STREAM — never from labels_report.json, whose
+# locus-only totals put background at 31.5% against the real windowed stream's 78.68%
+# (P2-02's measurement) and would misweight every class. Grade α against
+# objective.loss_mass_share, not the exponent: at α=1 every class takes exactly 1/8 of the
+# loss by construction, handing half the loss to the four classes ADR-0004 D6 excludes.
+class_weight_alpha: 0.0
+use_crf: false      # Linear seg head (P1-03 default); linear-vs-CRF is the P2-12 ablation
+crf_weight: 1.0
+dropout: 0.0
+# rc_combine is single-sourced to the /model group (caduceus_stage1.yaml: rc_combine.mode);
+# override via `model.rc_combine.mode=gate`. "mean" is rejected in code (ADR-0005 D15).
+
+# ── Stream shaping ───────────────────────────────────────────────────────────────────────
+# null ⇒ the full 8,303-record nested_train fold. The smoke overrides these to compose in
+# seconds; P2-09's production run leaves them null.
+steps_per_epoch: null
+max_records: null
+num_workers: 0
+
+# ── Outputs ──────────────────────────────────────────────────────────────────────────────
+report_path: reports/p2/train_stage1_smoke.json
+checkpoint_dir: checkpoints/p2/stage1
+save_checkpoint: false
+device: null   # null ⇒ cuda:$LOCAL_RANK when available, else cpu
+
+# Hydra: keep the run CWD = the launch dir (repo root) so relative in/out paths resolve;
+# no per-run output subdir (the sbatch manages node-local scratch + artifact publish).
+hydra:
+  run:
+    dir: .
+  output_subdir: null
