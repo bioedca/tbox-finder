@@ -111,15 +111,25 @@ def test_the_ORIGINAL_selection_filter_would_have_sat_inside_the_loo_holdout():
     """The regression guard for P2-06a's actual defect — pinned by measurement.
 
     ``nested_train = is_corpus & has_order & ~linked`` (splits.py:706), so its **negation
-    means "in the LOO holdout"**, not "held out from training". The first version of this
-    module filtered ``fold_random == "val" & not nested_train`` and emitted a fold that was
-    **778 / 880 = 88.4% designated LOO holdout**, whose top order (Lactobacillales, 510)
-    is itself a designated holdout order — while its own disjointness block read a truthful
-    and useless ``0 shared with train``.
+    means "in the LOO holdout"**, not "held out from training".
 
-    This test reconstructs that filter and asserts it is still a disaster, so that nobody
-    can 'simplify' the carve back to it and find the suite green. If the table ever changes
-    such that this stops being true, that is a finding to re-derive — not a guard to delete.
+    ⚠ Two populations, one numerator — do not conflate them (a maintainer trap). This test
+    reconstructs only the FIRST TWO filters of the original definition
+    (``fold_random == "val" & not nested_train``); against the committed table that is
+    **778 / 909 = 85.6% designated LOO holdout**. The original loader then applied two more
+    filters (cluster-straddle + ``len(context_seq) >= 1024``), which removed 29 *non-LOO*
+    records and so left the fully-filtered **emitted** fold at **778 / 880 = 88.4%** — the
+    figure quoted in the dev-log, ``select_best.py`` and MEMORY.md. Same 778 LOO records in
+    both; different denominators. Whichever slice you take, the top order (Lactobacillales,
+    510) is itself a designated holdout order, and the fold's own disjointness block read a
+    truthful and useless ``0 shared with train``.
+
+    This test reconstructs the 2-filter version (the full one needs the context join) and
+    asserts it is still a disaster, so nobody can 'simplify' the carve back to it and find
+    the suite green. The pins below are the exact measured values; ``778`` is the invariant
+    (the LOO records themselves), the ratio guard is deliberately loose so an ordinary table
+    refresh does not trip it. If either stops holding, that is a finding to re-derive — not
+    a guard to delete.
     """
     pd = _pandas_or_skip()
     from tbox_finder.data.window_dataset import (
@@ -141,6 +151,8 @@ def test_the_ORIGINAL_selection_filter_would_have_sat_inside_the_loo_holdout():
         "the original 'fold_random==val & not nested_train' filter no longer reaches the "
         "LOO holdout — the table changed; re-derive the whole rung before trusting this"
     )
+    # The exact measured values of THIS 2-filter reconstruction (not the 880 emitted fold).
+    assert (n_loo, len(original)) == (778, 909)
     # Not a marginal contamination: the substantial majority of that fold was the holdout.
     assert n_loo / len(original) > 0.5
 
