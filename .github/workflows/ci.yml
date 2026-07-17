@@ -135,6 +135,10 @@ jobs:
           # split is the P1-16 landmine: one var guarding both a pure tier and a heavy tier
           # cannot be armed at all.
           TBOX_REQUIRE_TRAIN_SMOKE: "1"
+          # P2-05: the committed sizing report + its per-point A4000 measurements. Safe to
+          # arm in bare CI because the whole sizing tier is torch-free by construction (a
+          # pure aggregator over recorded JSON) — the P1-16 split does not apply here.
+          TBOX_REQUIRE_SIZING_SMOKE: "1"
         run: pytest tests/unit tests/golden tests/ml
 
   docker:

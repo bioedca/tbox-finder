@@ -22,6 +22,7 @@ None of this grades the model. `is_science=false`: the smoke asserts the entrypo
 from __future__ import annotations
 
 import json
+import math
 import os
 from pathlib import Path
 
@@ -387,6 +388,103 @@ def test_validator_catches_a_clause_fabricated_true() -> None:
     report["gate"]["overall_pass"] = True
     problems = T.validate_report(report)
     assert any("gradient_checkpointing_applied" in p for p in problems), problems
+
+
+def test_p2_04_report_without_timing_stays_valid() -> None:
+    """The P2-05 timing keys are OPTIONAL.
+
+    P2-04's committed artifact predates them and records what P2-04 measured; adding a key
+    to the schema must not retroactively invalidate it — the only alternative would be to
+    regenerate it, which would forge a measurement.
+    """
+    report = _sealed(_valid_report())
+    assert "step_seconds" not in report["steps"]
+    assert T.validate_report(report) == []
+
+
+def test_timing_length_must_match_n_steps() -> None:
+    """These lists are the denominator of every extrapolated GPU-hour.
+
+    A length that disagrees with `n_steps` would mis-scale the budget while the report
+    still looked internally consistent.
+    """
+    report = _sealed(_valid_report())
+    report["steps"]["step_seconds"] = [0.1]  # n_steps is 2
+    problems = T.validate_report(report)
+    assert any("step_seconds" in p and "n_steps" in p for p in problems), problems
+
+
+def test_timing_rejects_bools() -> None:
+    """`isinstance(True, int)` is True and `True + 0.0 == 1.0` — a bool would read as a
+    1-second step and sail through a naive numeric check (the P1-15/P1-16 lesson)."""
+    report = _sealed(_valid_report())
+    report["steps"]["step_seconds"] = [0.1, True]
+    problems = T.validate_report(report)
+    assert any("step_seconds" in p and "non-bool" in p for p in problems), problems
+
+
+@pytest.mark.parametrize("bad", [float("nan"), float("inf"), -0.5])
+def test_timing_rejects_non_finite_or_negative(bad: float) -> None:
+    report = _sealed(_valid_report())
+    report["steps"]["step_seconds"] = [0.1, bad]
+    problems = T.validate_report(report)
+    assert any("step_seconds" in p for p in problems), problems
+
+
+def test_timing_rejects_a_non_list() -> None:
+    report = _sealed(_valid_report())
+    report["steps"]["batch_wait_seconds"] = 0.5
+    assert any("batch_wait_seconds" in p for p in T.validate_report(report))
+
+
+def test_well_formed_timing_passes() -> None:
+    report = _sealed(_valid_report())
+    report["steps"]["step_seconds"] = [0.21, 0.19]
+    report["steps"]["batch_wait_seconds"] = [0.01, 0.02]
+    assert T.validate_report(report) == []
+
+
+def test_build_report_plumbs_the_timing_kwargs_through() -> None:
+    """`build_report(step_seconds=...)` must reach `steps.step_seconds`.
+
+    Torch-free on purpose: the end-to-end emit check needs CUDA, so without this the whole
+    plumbing would be untested wherever CUDA is absent — including CI.
+    """
+    report = T.build_report(
+        cfg=T.Stage1TrainConfig(),
+        class_counts=[10, 2, 1, 1, 1, 1, 1, 1],
+        counts_scope={"n_records": 1, "n_training_fold_records": 1, "full_stream": True},
+        n_blocks=16,
+        n_blocks_wrapped=16,
+        hf_flag_supported=False,
+        losses=[1.6, 1.5],
+        grads_finite=True,
+        world_size=1,
+        wandb_run_id=None,
+        step_seconds=[0.21, 0.19],
+        batch_wait_seconds=[0.01, 0.02],
+    )
+    assert report["steps"]["step_seconds"] == [0.21, 0.19]
+    assert report["steps"]["batch_wait_seconds"] == [0.01, 0.02]
+    assert T.validate_report(report) == []
+
+
+def test_build_report_omits_timing_keys_when_not_instrumented() -> None:
+    """Omitted, not `[]` — "not measured" must stay distinguishable from "zero steps"."""
+    report = T.build_report(
+        cfg=T.Stage1TrainConfig(),
+        class_counts=[10, 2, 1, 1, 1, 1, 1, 1],
+        counts_scope={"n_records": 1, "n_training_fold_records": 1, "full_stream": True},
+        n_blocks=16,
+        n_blocks_wrapped=16,
+        hf_flag_supported=False,
+        losses=[1.6],
+        grads_finite=True,
+        world_size=1,
+        wandb_run_id=None,
+    )
+    assert "step_seconds" not in report["steps"]
+    assert "batch_wait_seconds" not in report["steps"]
 
 
 def test_a_no_op_wrap_does_not_satisfy_the_checkpointing_clause() -> None:
@@ -912,3 +1010,19 @@ def test_one_train_step_composes_end_to_end() -> None:
     assert report["gate"]["overall_pass"] is True
     assert report["gradient_checkpointing"]["n_blocks_wrapped"] == 16
     assert report["steps"]["n_steps"] == 1
+
+    # The P2-05 instrumentation must actually be EMITTED by the real loop. Nothing else
+    # checks this: `validate_report` skips the timing keys when absent (by design — P2-04's
+    # committed artifact predates them), no test called `build_report` with a non-None
+    # timing kwarg, and this test previously asserted nothing about it. So deleting
+    # `step_seconds=step_seconds` from the `build_report(...)` call left every test green
+    # while the entire sizing pipeline lost its input — a guard that could not fire, which
+    # is the exact defect class P2-04 shipped and this step inherited.
+    steps = report["steps"]
+    for key in ("step_seconds", "batch_wait_seconds"):
+        assert key in steps, f"the instrumented loop must emit steps.{key}"
+        assert len(steps[key]) == steps["n_steps"], f"{key}: one entry per step"
+        assert all(isinstance(x, float) and math.isfinite(x) and x >= 0.0 for x in steps[key])
+    # A real CUDA step is not instantaneous; a zero here would mean the clock is measuring
+    # kernel LAUNCH rather than execution (i.e. the synchronize was dropped).
+    assert steps["step_seconds"][0] > 0.0

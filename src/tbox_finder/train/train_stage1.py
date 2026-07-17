@@ -48,8 +48,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 import subprocess
+import time
 from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
@@ -734,6 +736,32 @@ def validate_report(report: Mapping[str, Any]) -> list[str]:
     if not isinstance(counts, list) or len(counts) != NUM_CLASSES:
         problems.append(f"class_counts: must be a list of {NUM_CLASSES} ints")
 
+    # P2-05 timing floors. The keys are OPTIONAL (P2-04's committed artifact predates them),
+    # but present-and-wrong must not pass: these lists are the denominator of every
+    # windows/sec and every extrapolated GPU-hour, so a length that silently disagrees with
+    # `n_steps` would mis-scale the budget while looking self-consistent. Bools are rejected
+    # explicitly — `isinstance(True, int)` is True and `True + 0.0 == 1.0`, so a bool would
+    # sail through a numeric check and read as a 1-second step (the P1-15/P1-16 lesson).
+    steps_block = report.get("steps")
+    if isinstance(steps_block, Mapping):
+        n_steps = steps_block.get("n_steps")
+        for key in ("step_seconds", "batch_wait_seconds"):
+            if key not in steps_block:
+                continue
+            seq = steps_block.get(key)
+            if not isinstance(seq, list):
+                problems.append(f"steps.{key}: present but not a list")
+                continue
+            if any(isinstance(x, bool) or not isinstance(x, (int, float)) for x in seq):
+                problems.append(f"steps.{key}: must contain only non-bool reals")
+            elif any(not math.isfinite(float(x)) or float(x) < 0.0 for x in seq):
+                problems.append(f"steps.{key}: must be finite and non-negative")
+            if isinstance(n_steps, int) and not isinstance(n_steps, bool) and len(seq) != n_steps:
+                problems.append(
+                    f"steps.{key}: length {len(seq)} != n_steps {n_steps} "
+                    "(a per-step timing must have exactly one entry per step)"
+                )
+
     derived = derive_clauses(report)
     stored = report.get("gate")
     if not isinstance(stored, Mapping):
@@ -771,6 +799,8 @@ def build_report(
     wandb_run_id: str | None,
     peak_vram_gib: float | None = None,
     eval_metrics: Mapping[str, Any] | None = None,
+    step_seconds: Sequence[float] | None = None,
+    batch_wait_seconds: Sequence[float] | None = None,
 ) -> dict[str, Any]:
     """Assemble the P2-04 smoke report. Clauses are **re-derived**, never asserted."""
     from tbox_finder.models.caduceus_backbone import REPO_ID, REVISION
@@ -801,6 +831,21 @@ def build_report(
             "n_steps": len(losses),
             "losses": [float(x) for x in losses],
             "world_size": int(world_size),
+            # P2-05 timing. OPTIONAL by construction: `None` when the caller did not
+            # instrument (and omitted entirely rather than written as `[]`, so "not measured"
+            # is distinguishable from "measured zero steps"). P2-04's committed measured
+            # artifact predates these keys and MUST stay valid — it records what P2-04
+            # measured, and regenerating it to add a field would forge a measurement.
+            **(
+                {"step_seconds": [float(x) for x in step_seconds]}
+                if step_seconds is not None
+                else {}
+            ),
+            **(
+                {"batch_wait_seconds": [float(x) for x in batch_wait_seconds]}
+                if batch_wait_seconds is not None
+                else {}
+            ),
         },
         "class_counts": [int(c) for c in class_counts],
         # §10.2 claim accuracy: a smoke run slices the fold (`max_records`), so these counts
@@ -1049,10 +1094,31 @@ def _train_stage1_inner(
 
     losses: list[float] = []
     grads_finite = True
+    # P2-05 instrumentation. Two clocks, deliberately separate — a single "seconds per step"
+    # would conflate GPU compute with the single-threaded CPU window carve, and P2-04 ships
+    # `num_workers` accepted-but-not-applied (there is no DataLoader), so the carve is ON the
+    # critical path in this implementation. Reporting them apart is what lets P2-05 say
+    # whether the full run is GPU-bound or starved, instead of quoting one blended number
+    # that cannot be acted on. CUDA is async: without `synchronize` the `perf_counter` delta
+    # measures kernel LAUNCH, not execution, and would understate the step by orders of
+    # magnitude (eval/rinalmo_throughput.py:261-263 makes the same point).
+    step_seconds: list[float] = []
+    batch_wait_seconds: list[float] = []
+
+    def _sync() -> None:
+        if measuring_vram:
+            torch.cuda.synchronize(device)
+
     for epoch in range(cfg.epochs):
         dataset.set_epoch(epoch)  # both must advance, or augmentation/draws freeze (P2-01)
         sampler.set_epoch(epoch)
+        _sync()
+        t_ready = time.perf_counter()
         for batch in _batches(dataset, sampler, cfg):
+            # Gap between the previous step finishing and this batch arriving = the carve.
+            batch_wait_seconds.append(time.perf_counter() - t_ready)
+            t0 = time.perf_counter()
+
             input_ids = batch["input_ids"].to(device)
             targets = batch["labels"].to(device)
             real_mask = batch["real_mask"].to(device)
@@ -1069,6 +1135,14 @@ def _train_stage1_inner(
             # Measured, not assumed: a frozen-base + checkpointing combination silently
             # trains nothing, and a NaN grad floods every parameter while the forward stays
             # finite (the P2-02 focal-γ lesson). Cheap enough at smoke scale to always check.
+            #
+            # ⚠️ P2-05 reads this loop's cost: `not ...all()` on a CUDA tensor forces a
+            # device sync PER PARAMETER PER STEP, so this scan is inside `step_seconds` and
+            # therefore inside every GPU-hour this step extrapolates. Its own comment scopes
+            # it to "smoke scale"; at full-run scale nobody has decided whether it stays.
+            # Left exactly as shipped — measuring the real loop beats measuring a loop we
+            # invented for the benchmark — and the cost is disclosed in the sizing report
+            # (`grad_finiteness_scan_in_step_seconds`) rather than silently optimised away.
             for p in model.parameters():
                 if p.grad is not None and not torch.isfinite(p.grad).all():
                     grads_finite = False
@@ -1077,6 +1151,9 @@ def _train_stage1_inner(
             optimizer.step()
 
             losses.append(float(loss.detach().item()))
+            _sync()
+            step_seconds.append(time.perf_counter() - t0)
+            t_ready = time.perf_counter()
             if run is not None:
                 run.log({"train/loss": losses[-1], "epoch": epoch})
 
@@ -1110,6 +1187,8 @@ def _train_stage1_inner(
         world_size=world_size,
         wandb_run_id=getattr(run, "id", None),
         peak_vram_gib=peak,
+        step_seconds=step_seconds,
+        batch_wait_seconds=batch_wait_seconds,
     )
     problems = validate_report(report)
     if problems:
