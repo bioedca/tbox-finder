@@ -10,8 +10,12 @@
 # reaches nothing.
 #
 # Drives: src/tbox_finder/train/train_stage1.py::main (Hydra entry) → train_stage1.
-# Overridable on the CLI, e.g. `epochs=10 optim.lr=3e-4 gamma=1.0`, and sweepable with
-# Hydra `--multirun` (PRD §11 — the P2-06 axes: γ, lr, window/stride, RC-combination).
+# Overridable on the CLI, e.g. `epochs=10 optim.lr=3e-4 gamma=1.0`, and swept at P2-06 via a
+# SLURM --array over `slurm/p2/sweep_stage1.sbatch` (one DDP×8 point per task, NOT literal Hydra
+# `--multirun`). The realized P2-06 axes are γ × optim.lr × class_weight_alpha (the code-emitted
+# `swept_by` map below, train_stage1.py::build_report). window/stride is HELD at ADR-0005 D3+A3's
+# 1024/512, and RC-combination + CRF are DEFERRED to P2-12 (line 70; swept_by=P2-12) — so the
+# stale PRD §11 "six-axis"/"window+RC" framing does NOT describe this sweep.
 #
 # Launched by a hand-authored sbatch under slurm/ through the CLAUDE.md §9.3 submit-ack
 # protocol — NOT the Snakemake SLURM executor (PRD §16: it submits programmatically and

@@ -493,11 +493,16 @@ def compute_class_counts(dataset: Any, *, max_records: int | None = None) -> tup
     inverse-frequency weights would be derived from the **unweighted** record distribution
     while the model trains on the **oversampled** one — the two do not describe the same
     population. With ``class_weight_alpha = 0`` (the default, and what P2-04 ships) nothing
-    consumes these counts and the discrepancy is inert; it becomes live at **P2-06**, which
-    owns the α sweep and must decide whether the weights should describe the draw stream
-    (and, if so, which epoch's draws — they reshuffle). Recorded in the report as
-    ``class_counts_scope.weighted_draw_stream = false`` rather than left for someone to
-    discover from the arithmetic. Flagged by CodeRabbit at P2-04 review.
+    consumes these counts and the discrepancy is inert; it becomes live at **P2-06** (the α
+    sweep). **P2-06 DECIDED (2026-07-17): record-scope is RETAINED** —
+    ``class_counts_scope.weighted_draw_stream = false`` stays. At α>0 the inverse-frequency
+    weights therefore describe the RAW ``inner_train`` fold, a fixed and interpretable semantics
+    held constant across all 36 sweep points (α = "how much raw-fold inverse-freq loss-weighting
+    ON TOP of the P2-01 curriculum sampler"), and ``select_best`` ranks on val ``min_f1``, not on
+    ``loss_mass_share``. The draw-stream alternative is declined: it is epoch-dependent (the draws
+    reshuffle) for no selection benefit. See ``slurm/p2/sweep_stage1.sbatch`` + the P2-06 dev-log
+    stanza. (Originally flagged by CodeRabbit at P2-04 review; recorded here rather than left for
+    someone to discover from the arithmetic.)
 
     ``IGNORE_INDEX`` positions (pad-only, carrying no DNA) are excluded — they take no loss.
     The result feeds ``Stage1Loss(class_counts=…)`` directly.
@@ -1326,8 +1331,10 @@ def build_stream(cfg: Stage1TrainConfig) -> tuple[Any, Any, dict[str, Any]]:
         # weighted draw stream the sampler actually emits. With class_weight_alpha == 0 (the
         # default) nothing consumes them, so this is inert; but P2-06 sweeps α, and inverse-
         # frequency weights derived from the *unweighted* record scan would not describe the
-        # *oversampled* distribution the model sees. Recorded rather than silently assumed —
-        # P2-06 owns the resolution. See compute_class_counts.
+        # *oversampled* distribution the model sees. P2-06 DECIDED (2026-07-17): record-scope is
+        # RETAINED (false) — α is a fixed raw-fold inverse-freq weight on top of the sampler, held
+        # constant across all sweep points; select_best ranks on val min_f1, not loss_mass_share.
+        # See compute_class_counts + slurm/p2/sweep_stage1.sbatch.
         "weighted_draw_stream": False,
         "data_config": asdict(data_config),
     }
@@ -1494,10 +1501,15 @@ def _train_stage1_inner(
             # ⚠️ P2-05 reads this loop's cost: `not ...all()` on a CUDA tensor forces a
             # device sync PER PARAMETER PER STEP, so this scan is inside `step_seconds` and
             # therefore inside every GPU-hour this step extrapolates. Its own comment scopes
-            # it to "smoke scale"; at full-run scale nobody has decided whether it stays.
-            # Left exactly as shipped — measuring the real loop beats measuring a loop we
-            # invented for the benchmark — and the cost is disclosed in the sizing report
-            # (`grad_finiteness_scan_in_step_seconds`) rather than silently optimised away.
+            # it to "smoke scale". **P2-06 DECIDED (2026-07-17): it SURVIVES to full-run scale**
+            # for the sweep — γ=0.5 is the exact fractional regime P2-02 found a silent NaN
+            # gradient in (forward finite, grad NaN), so per-step detection is worth its cost;
+            # and keeping it makes the ADR-0003 A2 budget a conservative UPPER bound, the right
+            # direction for a budget. (A cheaper equivalent — deriving grads_finite from the
+            # total_norm `clip_grad_norm_` returns anyway, one sync/step not one-per-parameter —
+            # is noted for P2-09's production retrain, but not taken here: this sweep runs the
+            # exact loop P2-05 measured.) Cost disclosed in the report as
+            # `grad_finiteness_scan_in_step_seconds` rather than silently optimised away.
             for p in model.parameters():
                 if p.grad is not None and not torch.isfinite(p.grad).all():
                     grads_finite = False
