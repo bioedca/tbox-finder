@@ -15,6 +15,8 @@ from __future__ import annotations
 
 import json
 import math
+import os
+from pathlib import Path
 
 import pytest
 
@@ -570,3 +572,100 @@ def test_validator_rejects_n_points_disagreeing_with_points():
 def test_report_is_json_serialisable():
     r = build_report(points=full_points(), windows_per_epoch=288_000, epochs=10)
     assert json.loads(json.dumps(r))["step"] == "P2-05"
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# The COMMITTED measured report (anti-rot tier)
+#
+# Fail-closed on TBOX_REQUIRE_SIZING_SMOKE, armed in CI. P2-04's lesson: an env guard
+# armed NOWHERE makes its own fail-closed branch dead code, and every committed-report
+# test then skips green if the artifact vanishes — the anti-rot contract written and then
+# not connected.
+# ═════════════════════════════════════════════════════════════════════════════
+_REPO = Path(__file__).resolve().parents[2]
+_SIZING_REPORT = _REPO / "reports" / "p2" / "sizing_smoke.json"
+_SIZING_POINTS = _REPO / "reports" / "p2" / "sizing"
+
+
+def _fail_or_skip(var: str, reason: str) -> None:
+    if os.environ.get(var) == "1":
+        pytest.fail(f"{var}=1 but the tier is unrunnable: {reason}")
+    pytest.skip(reason)
+
+
+def _committed():
+    if not _SIZING_REPORT.exists():
+        _fail_or_skip("TBOX_REQUIRE_SIZING_SMOKE", f"no committed report at {_SIZING_REPORT}")
+    return json.loads(_SIZING_REPORT.read_text())
+
+
+def test_committed_report_validates():
+    assert validate_report(_committed()) == []
+
+
+def test_committed_report_clauses_re_derive():
+    """Catches TAMPERING with the committed gate.
+
+    Stated limit, not glossed: `build_report` SEALED that gate with `derive_clauses`, so
+    this cannot catch a wrong derivation — it would seal and re-derive identically. What
+    pins the derivation independently is the hand-built tier above, where each clause is
+    asserted against evidence constructed to violate it. Neither tier suffices alone.
+    """
+    r = _committed()
+    derived = derive_clauses(r)
+    for name, value in derived.items():
+        assert r["gate"][name] is value, name
+    assert r["gate"]["overall_pass"] is all(derived.values())
+
+
+def test_committed_report_was_measured_on_an_a4000_not_the_laptop():
+    """The §10.3 budget is about a 16 GB A4000.
+
+    P2-04 asserted a laptop RTX 4060 number as an A4000 property, and P2-03 shipped sample
+    properties as corpus facts — a VRAM number is unattributable without its card, so pin
+    the attribution rather than trust the filename.
+    """
+    r = _committed()
+    assert "A4000" in (r["device_name"] or ""), r["device_name"]
+    # The real card is ~15.602 GiB usable, which is LESS than the PRD's 16 GB budget —
+    # the two are different claims and the report must not conflate them.
+    assert 15.0 < r["total_vram_gib"] < 16.0
+    assert r["prd_vram_budget_gib"] == PRD_VRAM_BUDGET_GIB
+
+
+def test_committed_report_does_not_freeze_the_budget():
+    """The ADR-0003 D7 invariant, checked on the artifact that actually ships."""
+    r = _committed()
+    assert r["freezes_adr0003_d7_budget"] is False
+    assert r["is_science"] is False and r["gate4_graded"] is False
+    e = r["illustrative_extrapolation"]
+    assert (
+        e["advisory_only"] is True and e["binding"] is False and "ADR-0003 D7" in e["binding_gate"]
+    )
+
+
+def test_committed_extrapolation_is_built_on_the_prd_pinned_config():
+    """ckpt-OFF is faster and IS present in the committed points, so this is not vacuous."""
+    r = _committed()
+    e = r["illustrative_extrapolation"]
+    assert e["gradient_checkpointing"] is True and e["is_prd_pinned_config"] is True
+    alt = e["alternative_gradient_checkpointing_off"]
+    assert alt["is_prd_pinned_config"] is False
+    assert alt["gpu_hours"] < e["gpu_hours"], "the unpinned config is the faster one"
+
+
+def test_committed_points_cover_the_ddp8_claim_and_the_oom_boundary():
+    """The two facts the step exists to establish must actually be in the artifact."""
+    if not _SIZING_POINTS.exists():
+        _fail_or_skip("TBOX_REQUIRE_SIZING_SMOKE", f"no committed points at {_SIZING_POINTS}")
+    keys = {p.stem for p in _SIZING_POINTS.glob("*.json")}
+    assert "ws8_bs8_ckpt1" in keys, "no DDP x8 point — the PRD §10.3 claim is ungraded"
+    # batch 32 WITHOUT checkpointing OOM'd natively on the A4000: absence IS the evidence
+    # (the sbatch writes no report for a failed point), and its presence would mean the
+    # OOM boundary moved.
+    assert (
+        "ws1_bs32_ckpt0" not in keys
+    ), "batch 32 ckpt-off OOM'd on the A4000; a report means it no longer does"
+    assert "ws1_bs32_ckpt1" in keys, "batch 32 WITH checkpointing fits — that is the §10.3 point"
+    r = _committed()
+    assert r["ddp_scaling"]["batch8_ckpt1"]["by_world_size"]["8"]["efficiency_vs_ws1"] > 0.5
