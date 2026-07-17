@@ -1,0 +1,695 @@
+{
+  "adr": "ADR-0003",
+  "ddp_scaling": {
+    "batch8_ckpt0": {
+      "baseline_windows_per_sec_per_gpu": 18.783715933631374,
+      "batch_size": 8,
+      "by_world_size": {
+        "1": {
+          "efficiency_vs_ws1": 1.0,
+          "speedup_vs_ws1": 1.0,
+          "windows_per_sec_aggregate": 18.783715933631374,
+          "windows_per_sec_per_gpu": 18.783715933631374,
+          "world_size": 1
+        },
+        "8": {
+          "efficiency_vs_ws1": 0.9728135421293345,
+          "speedup_vs_ws1": 7.782508337034676,
+          "windows_per_sec_aggregate": 146.18442585397725,
+          "windows_per_sec_per_gpu": 18.273053231747156,
+          "world_size": 8
+        }
+      },
+      "gradient_checkpointing": false
+    },
+    "batch8_ckpt1": {
+      "baseline_windows_per_sec_per_gpu": 14.570018603410725,
+      "batch_size": 8,
+      "by_world_size": {
+        "1": {
+          "efficiency_vs_ws1": 1.0,
+          "speedup_vs_ws1": 1.0,
+          "windows_per_sec_aggregate": 14.570018603410725,
+          "windows_per_sec_per_gpu": 14.570018603410725,
+          "world_size": 1
+        },
+        "2": {
+          "efficiency_vs_ws1": 0.9803114644700249,
+          "speedup_vs_ws1": 1.9606229289400499,
+          "windows_per_sec_aggregate": 28.56631254893015,
+          "windows_per_sec_per_gpu": 14.283156274465075,
+          "world_size": 2
+        },
+        "4": {
+          "efficiency_vs_ws1": 0.974552194594211,
+          "speedup_vs_ws1": 3.898208778376844,
+          "windows_per_sec_aggregate": 56.796974420929615,
+          "windows_per_sec_per_gpu": 14.199243605232404,
+          "world_size": 4
+        },
+        "8": {
+          "efficiency_vs_ws1": 0.9814247501762229,
+          "speedup_vs_ws1": 7.851398001409783,
+          "windows_per_sec_aggregate": 114.39501494332232,
+          "windows_per_sec_per_gpu": 14.29937686791529,
+          "world_size": 8
+        }
+      },
+      "gradient_checkpointing": true
+    }
+  },
+  "device_name": "NVIDIA RTX A4000",
+  "freezes_adr0003_d7_budget": false,
+  "gate": {
+    "all_points_grads_finite": true,
+    "all_points_losses_finite": true,
+    "budget_not_frozen": true,
+    "extrapolation_marked_advisory": true,
+    "not_a_science_result": true,
+    "overall_pass": true,
+    "points_measured": true,
+    "throughput_measured": true,
+    "vram_under_prd_budget": true
+  },
+  "gate4_graded": false,
+  "generated_by": "tbox_finder.train.sizing",
+  "grad_finiteness_scan_in_step_seconds": true,
+  "gradient_checkpointing_cost": {
+    "ws1_batch1": {
+      "batch_size": 1,
+      "peak_vram_gib_off": 0.8600964546203613,
+      "peak_vram_gib_on": 0.4125533103942871,
+      "throughput_cost_factor": 1.3087765380222285,
+      "throughput_retained_frac": 0.7640723767184584,
+      "vram_saving_factor": 2.0848128786031226,
+      "windows_per_sec_per_gpu_off": 4.209203695386494,
+      "windows_per_sec_per_gpu_on": 3.2161362716260764,
+      "world_size": 1
+    },
+    "ws1_batch16": {
+      "batch_size": 16,
+      "peak_vram_gib_off": 8.658107280731201,
+      "peak_vram_gib_on": 1.9778094291687012,
+      "throughput_cost_factor": 1.284233325736331,
+      "throughput_retained_frac": 0.7786747002742961,
+      "vram_saving_factor": 4.377624635135001,
+      "windows_per_sec_per_gpu_off": 19.349407986253162,
+      "windows_per_sec_per_gpu_on": 15.066894464180752,
+      "world_size": 1
+    },
+    "ws1_batch2": {
+      "batch_size": 2,
+      "peak_vram_gib_off": 1.3749289512634277,
+      "peak_vram_gib_on": 0.4819512367248535,
+      "throughput_cost_factor": 1.5693535546426074,
+      "throughput_retained_frac": 0.6372050434662777,
+      "vram_saving_factor": 2.852838309134532,
+      "windows_per_sec_per_gpu_off": 9.07477123954137,
+      "windows_per_sec_per_gpu_on": 5.782490002138485,
+      "world_size": 1
+    },
+    "ws1_batch4": {
+      "batch_size": 4,
+      "peak_vram_gib_off": 2.4045939445495605,
+      "peak_vram_gib_on": 0.6207470893859863,
+      "throughput_cost_factor": 1.4580756605849265,
+      "throughput_retained_frac": 0.6858354659036258,
+      "vram_saving_factor": 3.8737095761948255,
+      "windows_per_sec_per_gpu_off": 16.694652399263173,
+      "windows_per_sec_per_gpu_on": 11.449784706347742,
+      "world_size": 1
+    },
+    "ws1_batch8": {
+      "batch_size": 8,
+      "peak_vram_gib_off": 4.471736431121826,
+      "peak_vram_gib_on": 1.06520414352417,
+      "throughput_cost_factor": 1.289203291012563,
+      "throughput_retained_frac": 0.7756728570050285,
+      "vram_saving_factor": 4.198008858966066,
+      "windows_per_sec_per_gpu_off": 18.783715933631374,
+      "windows_per_sec_per_gpu_on": 14.570018603410725,
+      "world_size": 1
+    },
+    "ws8_batch8": {
+      "batch_size": 8,
+      "peak_vram_gib_off": 4.499080181121826,
+      "peak_vram_gib_on": 1.0948495864868164,
+      "throughput_cost_factor": 1.277891575313882,
+      "throughput_retained_frac": 0.7825390035569919,
+      "vram_saving_factor": 4.109313495343775,
+      "windows_per_sec_per_gpu_off": 18.273053231747156,
+      "windows_per_sec_per_gpu_on": 14.29937686791529,
+      "world_size": 8
+    }
+  },
+  "illustrative_extrapolation": {
+    "advisory_only": true,
+    "assumptions": [
+      "Rate is the steady-state median at the quoted world size \u2014 the DDP all-reduce cost is measured at that world size, not modelled from a smaller one.",
+      "windows_per_epoch is len(Stage1WindowDataset) over the FULL nested_train fold (not the sizing slice), computed from the same data config the points ran.",
+      "`step_seconds` includes the per-step full-parameter grad-finiteness scan (train_stage1.py), which syncs per parameter per step. Its own comment scopes it to 'smoke scale'; nobody has decided whether it stays at full-run scale, so these hours are an UPPER bound on that axis. P2-06 owns the decision.",
+      "fp32: train_stage1 exposes no precision knob and ADR-0002 A7's determinism contract disables TF32/cudnn autotune, so this is NOT the bf16/TF32-native throughput PRD \u00a710.3 names as a property of the sm_86 card."
+    ],
+    "basis_point": "ws8_bs8_ckpt0",
+    "binding": false,
+    "binding_gate": "ADR-0003 D7 training/sweep GPU-hour budget freeze \u2014 needs ADR sign-off (\u00a77 item 2). Not frozen by P2-05; this report is the measurement the freeze would cite.",
+    "epochs": 10,
+    "gpu_hours": 1.2621803590446643,
+    "total_windows": 83030.0,
+    "wall_clock_hours": 0.15777254488058304,
+    "windows_per_epoch": 8303,
+    "windows_per_sec_aggregate": 146.18442585397725,
+    "windows_per_sec_per_gpu": 18.273053231747156,
+    "world_size": 8
+  },
+  "is_science": false,
+  "largest_fitting_batch_ws1": 32,
+  "max_peak_vram_gib": 8.658107280731201,
+  "min_vram_margin_gib_vs_prd_budget": 7.341892719268799,
+  "n_points": 15,
+  "notes": [],
+  "points": [
+    {
+      "batch_size": 16,
+      "batch_wait": {
+        "n_measured": 30,
+        "n_steps_total": 35,
+        "seconds_mean": 0.003489425300237296,
+        "seconds_median": 0.0034733585016510915,
+        "seconds_min": 0.003251717000239296,
+        "seconds_p95": 0.0038922209010706856,
+        "warmup_discarded": 5
+      },
+      "device_name": "NVIDIA RTX A4000",
+      "gradient_checkpointing": false,
+      "grads_finite": true,
+      "key": "ws1_bs16_ckpt0",
+      "losses_finite": true,
+      "peak_vram_gib": 8.658107280731201,
+      "timing": {
+        "n_measured": 30,
+        "n_steps_total": 35,
+        "seconds_mean": 0.8265299687328176,
+        "seconds_median": 0.8268986839993886,
+        "seconds_min": 0.8179723959983676,
+        "seconds_p95": 0.8324202108999088,
+        "warmup_discarded": 5
+      },
+      "total_vram_gib": 15.6016845703125,
+      "vram_headroom_frac_of_card": 0.4450530491299517,
+      "vram_margin_gib_vs_card": 6.943577289581299,
+      "vram_margin_gib_vs_prd_budget": 7.341892719268799,
+      "windows_per_sec_aggregate": 19.349407986253162,
+      "windows_per_sec_per_gpu": 19.349407986253162,
+      "world_size": 1
+    },
+    {
+      "batch_size": 16,
+      "batch_wait": {
+        "n_measured": 30,
+        "n_steps_total": 35,
+        "seconds_mean": 0.003538876866393063,
+        "seconds_median": 0.003519732499626116,
+        "seconds_min": 0.0032798690008348785,
+        "seconds_p95": 0.0038890138010174266,
+        "warmup_discarded": 5
+      },
+      "device_name": "NVIDIA RTX A4000",
+      "gradient_checkpointing": true,
+      "grads_finite": true,
+      "key": "ws1_bs16_ckpt1",
+      "losses_finite": true,
+      "peak_vram_gib": 1.9778094291687012,
+      "timing": {
+        "n_measured": 30,
+        "n_steps_total": 35,
+        "seconds_mean": 1.0614115196000058,
+        "seconds_median": 1.0619308469995303,
+        "seconds_min": 1.04930772300213,
+        "seconds_p95": 1.068049961748511,
+        "warmup_discarded": 5
+      },
+      "total_vram_gib": 15.6016845703125,
+      "vram_headroom_frac_of_card": 0.8732310334659531,
+      "vram_margin_gib_vs_card": 13.623875141143799,
+      "vram_margin_gib_vs_prd_budget": 14.022190570831299,
+      "windows_per_sec_aggregate": 15.066894464180752,
+      "windows_per_sec_per_gpu": 15.066894464180752,
+      "world_size": 1
+    },
+    {
+      "batch_size": 1,
+      "batch_wait": {
+        "n_measured": 30,
+        "n_steps_total": 35,
+        "seconds_mean": 0.0005490204996021931,
+        "seconds_median": 0.0005489709983521607,
+        "seconds_min": 0.0004992469985154457,
+        "seconds_p95": 0.0005917243999647326,
+        "warmup_discarded": 5
+      },
+      "device_name": "NVIDIA RTX A4000",
+      "gradient_checkpointing": false,
+      "grads_finite": true,
+      "key": "ws1_bs1_ckpt0",
+      "losses_finite": true,
+      "peak_vram_gib": 0.8600964546203613,
+      "timing": {
+        "n_measured": 30,
+        "n_steps_total": 35,
+        "seconds_mean": 0.2381684606334602,
+        "seconds_median": 0.23757462749927072,
+        "seconds_min": 0.23021765099838376,
+        "seconds_p95": 0.24479690135030976,
+        "warmup_discarded": 5
+      },
+      "total_vram_gib": 15.6016845703125,
+      "vram_headroom_frac_of_card": 0.9448715649426097,
+      "vram_margin_gib_vs_card": 14.741588115692139,
+      "vram_margin_gib_vs_prd_budget": 15.139903545379639,
+      "windows_per_sec_aggregate": 4.209203695386494,
+      "windows_per_sec_per_gpu": 4.209203695386494,
+      "world_size": 1
+    },
+    {
+      "batch_size": 1,
+      "batch_wait": {
+        "n_measured": 30,
+        "n_steps_total": 35,
+        "seconds_mean": 0.0007151670997700421,
+        "seconds_median": 0.0006778435017622542,
+        "seconds_min": 0.0005465630019898526,
+        "seconds_p95": 0.0009225744988725635,
+        "warmup_discarded": 5
+      },
+      "device_name": "NVIDIA RTX A4000",
+      "gradient_checkpointing": true,
+      "grads_finite": true,
+      "key": "ws1_bs1_ckpt1",
+      "losses_finite": true,
+      "peak_vram_gib": 0.4125533103942871,
+      "timing": {
+        "n_measured": 30,
+        "n_steps_total": 35,
+        "seconds_mean": 0.3181642177004202,
+        "seconds_median": 0.31093209850041603,
+        "seconds_min": 0.3040905760026362,
+        "seconds_p95": 0.3291814231024546,
+        "warmup_discarded": 5
+      },
+      "total_vram_gib": 15.6016845703125,
+      "vram_headroom_frac_of_card": 0.9735571304153072,
+      "vram_margin_gib_vs_card": 15.189131259918213,
+      "vram_margin_gib_vs_prd_budget": 15.587446689605713,
+      "windows_per_sec_aggregate": 3.2161362716260764,
+      "windows_per_sec_per_gpu": 3.2161362716260764,
+      "world_size": 1
+    },
+    {
+      "batch_size": 2,
+      "batch_wait": {
+        "n_measured": 30,
+        "n_steps_total": 35,
+        "seconds_mean": 0.0010450250666811675,
+        "seconds_median": 0.0010331134999432834,
+        "seconds_min": 0.0009216729995387141,
+        "seconds_p95": 0.0011953716499192519,
+        "warmup_discarded": 5
+      },
+      "device_name": "NVIDIA RTX A4000",
+      "gradient_checkpointing": false,
+      "grads_finite": true,
+      "key": "ws1_bs2_ckpt0",
+      "losses_finite": true,
+      "peak_vram_gib": 1.3749289512634277,
+      "timing": {
+        "n_measured": 30,
+        "n_steps_total": 35,
+        "seconds_mean": 0.22035713673382512,
+        "seconds_median": 0.22039123050126364,
+        "seconds_min": 0.20978367699717637,
+        "seconds_p95": 0.22893938834895378,
+        "warmup_discarded": 5
+      },
+      "total_vram_gib": 15.6016845703125,
+      "vram_headroom_frac_of_card": 0.9118730451787432,
+      "vram_margin_gib_vs_card": 14.226755619049072,
+      "vram_margin_gib_vs_prd_budget": 14.625071048736572,
+      "windows_per_sec_aggregate": 9.07477123954137,
+      "windows_per_sec_per_gpu": 9.07477123954137,
+      "world_size": 1
+    },
+    {
+      "batch_size": 2,
+      "batch_wait": {
+        "n_measured": 30,
+        "n_steps_total": 35,
+        "seconds_mean": 0.0007549260006877982,
+        "seconds_median": 0.0007351155018113786,
+        "seconds_min": 0.0006359469989547506,
+        "seconds_p95": 0.0009118834510445594,
+        "warmup_discarded": 5
+      },
+      "device_name": "NVIDIA RTX A4000",
+      "gradient_checkpointing": true,
+      "grads_finite": true,
+      "key": "ws1_bs2_ckpt1",
+      "losses_finite": true,
+      "peak_vram_gib": 0.4819512367248535,
+      "timing": {
+        "n_measured": 30,
+        "n_steps_total": 35,
+        "seconds_mean": 0.352612753566306,
+        "seconds_median": 0.34587176099921635,
+        "seconds_min": 0.3398375520009722,
+        "seconds_p95": 0.3602583573998345,
+        "warmup_discarded": 5
+      },
+      "total_vram_gib": 15.6016845703125,
+      "vram_headroom_frac_of_card": 0.9691090257239318,
+      "vram_margin_gib_vs_card": 15.119733333587646,
+      "vram_margin_gib_vs_prd_budget": 15.518048763275146,
+      "windows_per_sec_aggregate": 5.782490002138485,
+      "windows_per_sec_per_gpu": 5.782490002138485,
+      "world_size": 1
+    },
+    {
+      "batch_size": 32,
+      "batch_wait": {
+        "n_measured": 30,
+        "n_steps_total": 35,
+        "seconds_mean": 0.006508937033140682,
+        "seconds_median": 0.006394764001015574,
+        "seconds_min": 0.005933417000051122,
+        "seconds_p95": 0.007194935649567923,
+        "warmup_discarded": 5
+      },
+      "device_name": "NVIDIA RTX A4000",
+      "gradient_checkpointing": true,
+      "grads_finite": true,
+      "key": "ws1_bs32_ckpt1",
+      "losses_finite": true,
+      "peak_vram_gib": 3.8039965629577637,
+      "timing": {
+        "n_measured": 30,
+        "n_steps_total": 35,
+        "seconds_mean": 2.1336187224665384,
+        "seconds_median": 2.135484993001228,
+        "seconds_min": 2.1122758659985266,
+        "seconds_p95": 2.1446427816976215,
+        "warmup_discarded": 5
+      },
+      "total_vram_gib": 15.6016845703125,
+      "vram_headroom_frac_of_card": 0.7561803954044708,
+      "vram_margin_gib_vs_card": 11.797688007354736,
+      "vram_margin_gib_vs_prd_budget": 12.196003437042236,
+      "windows_per_sec_aggregate": 14.984886386406744,
+      "windows_per_sec_per_gpu": 14.984886386406744,
+      "world_size": 1
+    },
+    {
+      "batch_size": 4,
+      "batch_wait": {
+        "n_measured": 30,
+        "n_steps_total": 35,
+        "seconds_mean": 0.001380501833773451,
+        "seconds_median": 0.0013851040002919035,
+        "seconds_min": 0.0012624890005099587,
+        "seconds_p95": 0.0014410888505153707,
+        "warmup_discarded": 5
+      },
+      "device_name": "NVIDIA RTX A4000",
+      "gradient_checkpointing": false,
+      "grads_finite": true,
+      "key": "ws1_bs4_ckpt0",
+      "losses_finite": true,
+      "peak_vram_gib": 2.4045939445495605,
+      "timing": {
+        "n_measured": 30,
+        "n_steps_total": 35,
+        "seconds_mean": 0.2414426977669791,
+        "seconds_median": 0.23959768100212386,
+        "seconds_min": 0.23750445599944214,
+        "seconds_p95": 0.24974983104912096,
+        "warmup_discarded": 5
+      },
+      "total_vram_gib": 15.6016845703125,
+      "vram_headroom_frac_of_card": 0.8458760056510105,
+      "vram_margin_gib_vs_card": 13.19709062576294,
+      "vram_margin_gib_vs_prd_budget": 13.59540605545044,
+      "windows_per_sec_aggregate": 16.694652399263173,
+      "windows_per_sec_per_gpu": 16.694652399263173,
+      "world_size": 1
+    },
+    {
+      "batch_size": 4,
+      "batch_wait": {
+        "n_measured": 30,
+        "n_steps_total": 35,
+        "seconds_mean": 0.001249373266788704,
+        "seconds_median": 0.0012315285002841847,
+        "seconds_min": 0.001090434001525864,
+        "seconds_p95": 0.0014111240499914855,
+        "warmup_discarded": 5
+      },
+      "device_name": "NVIDIA RTX A4000",
+      "gradient_checkpointing": true,
+      "grads_finite": true,
+      "key": "ws1_bs4_ckpt1",
+      "losses_finite": true,
+      "peak_vram_gib": 0.6207470893859863,
+      "timing": {
+        "n_measured": 30,
+        "n_steps_total": 35,
+        "seconds_mean": 0.35509475556670317,
+        "seconds_median": 0.3493515470017883,
+        "seconds_min": 0.3355745399967418,
+        "seconds_p95": 0.3605673462487175,
+        "warmup_discarded": 5
+      },
+      "total_vram_gib": 15.6016845703125,
+      "vram_headroom_frac_of_card": 0.9602128163411809,
+      "vram_margin_gib_vs_card": 14.980937480926514,
+      "vram_margin_gib_vs_prd_budget": 15.379252910614014,
+      "windows_per_sec_aggregate": 11.449784706347742,
+      "windows_per_sec_per_gpu": 11.449784706347742,
+      "world_size": 1
+    },
+    {
+      "batch_size": 8,
+      "batch_wait": {
+        "n_measured": 30,
+        "n_steps_total": 35,
+        "seconds_mean": 0.0021148278665350517,
+        "seconds_median": 0.0019786075008596526,
+        "seconds_min": 0.0018360009999014437,
+        "seconds_p95": 0.0021719712000049184,
+        "warmup_discarded": 5
+      },
+      "device_name": "NVIDIA RTX A4000",
+      "gradient_checkpointing": false,
+      "grads_finite": true,
+      "key": "ws1_bs8_ckpt0",
+      "losses_finite": true,
+      "peak_vram_gib": 4.471736431121826,
+      "timing": {
+        "n_measured": 30,
+        "n_steps_total": 35,
+        "seconds_mean": 0.42608439790019476,
+        "seconds_median": 0.4259008190001623,
+        "seconds_min": 0.4232197669989546,
+        "seconds_p95": 0.4280940509999709,
+        "warmup_discarded": 5
+      },
+      "total_vram_gib": 15.6016845703125,
+      "vram_headroom_frac_of_card": 0.7133811793868194,
+      "vram_margin_gib_vs_card": 11.129948139190674,
+      "vram_margin_gib_vs_prd_budget": 11.528263568878174,
+      "windows_per_sec_aggregate": 18.783715933631374,
+      "windows_per_sec_per_gpu": 18.783715933631374,
+      "world_size": 1
+    },
+    {
+      "batch_size": 8,
+      "batch_wait": {
+        "n_measured": 30,
+        "n_steps_total": 35,
+        "seconds_mean": 0.002150207199641348,
+        "seconds_median": 0.0021181374995649094,
+        "seconds_min": 0.001977146999706747,
+        "seconds_p95": 0.0024406601001828675,
+        "warmup_discarded": 5
+      },
+      "device_name": "NVIDIA RTX A4000",
+      "gradient_checkpointing": true,
+      "grads_finite": true,
+      "key": "ws1_bs8_ckpt1",
+      "losses_finite": true,
+      "peak_vram_gib": 1.06520414352417,
+      "timing": {
+        "n_measured": 30,
+        "n_steps_total": 35,
+        "seconds_mean": 0.5522293620665247,
+        "seconds_median": 0.5490727374999551,
+        "seconds_min": 0.5438661309999588,
+        "seconds_p95": 0.5520992602998376,
+        "warmup_discarded": 5
+      },
+      "total_vram_gib": 15.6016845703125,
+      "vram_headroom_frac_of_card": 0.931725055796149,
+      "vram_margin_gib_vs_card": 14.53648042678833,
+      "vram_margin_gib_vs_prd_budget": 14.93479585647583,
+      "windows_per_sec_aggregate": 14.570018603410725,
+      "windows_per_sec_per_gpu": 14.570018603410725,
+      "world_size": 1
+    },
+    {
+      "batch_size": 8,
+      "batch_wait": {
+        "n_measured": 30,
+        "n_steps_total": 35,
+        "seconds_mean": 0.0021238007999878996,
+        "seconds_median": 0.002105931500409497,
+        "seconds_min": 0.0019039109974983148,
+        "seconds_p95": 0.0022639286009507485,
+        "warmup_discarded": 5
+      },
+      "device_name": "NVIDIA RTX A4000",
+      "gradient_checkpointing": true,
+      "grads_finite": true,
+      "key": "ws2_bs8_ckpt1",
+      "losses_finite": true,
+      "peak_vram_gib": 1.0948495864868164,
+      "timing": {
+        "n_measured": 30,
+        "n_steps_total": 35,
+        "seconds_mean": 0.5676252762996834,
+        "seconds_median": 0.5601002919993334,
+        "seconds_min": 0.5551479549976648,
+        "seconds_p95": 0.6080598979520798,
+        "warmup_discarded": 5
+      },
+      "total_vram_gib": 15.6016845703125,
+      "vram_headroom_frac_of_card": 0.929824912075832,
+      "vram_margin_gib_vs_card": 14.506834983825684,
+      "vram_margin_gib_vs_prd_budget": 14.905150413513184,
+      "windows_per_sec_aggregate": 28.56631254893015,
+      "windows_per_sec_per_gpu": 14.283156274465075,
+      "world_size": 2
+    },
+    {
+      "batch_size": 8,
+      "batch_wait": {
+        "n_measured": 30,
+        "n_steps_total": 35,
+        "seconds_mean": 0.002378741333571573,
+        "seconds_median": 0.002354161000766908,
+        "seconds_min": 0.0022176929996930994,
+        "seconds_p95": 0.002607255952352716,
+        "warmup_discarded": 5
+      },
+      "device_name": "NVIDIA RTX A4000",
+      "gradient_checkpointing": true,
+      "grads_finite": true,
+      "key": "ws4_bs8_ckpt1",
+      "losses_finite": true,
+      "peak_vram_gib": 1.0948495864868164,
+      "timing": {
+        "n_measured": 30,
+        "n_steps_total": 35,
+        "seconds_mean": 0.5728268809337654,
+        "seconds_median": 0.5634102929998335,
+        "seconds_min": 0.5591745199999423,
+        "seconds_p95": 0.6426676307020894,
+        "warmup_discarded": 5
+      },
+      "total_vram_gib": 15.6016845703125,
+      "vram_headroom_frac_of_card": 0.929824912075832,
+      "vram_margin_gib_vs_card": 14.506834983825684,
+      "vram_margin_gib_vs_prd_budget": 14.905150413513184,
+      "windows_per_sec_aggregate": 56.796974420929615,
+      "windows_per_sec_per_gpu": 14.199243605232404,
+      "world_size": 4
+    },
+    {
+      "batch_size": 8,
+      "batch_wait": {
+        "n_measured": 30,
+        "n_steps_total": 35,
+        "seconds_mean": 0.002081621166750362,
+        "seconds_median": 0.0020851225017395336,
+        "seconds_min": 0.001964294999197591,
+        "seconds_p95": 0.0021922311501839428,
+        "warmup_discarded": 5
+      },
+      "device_name": "NVIDIA RTX A4000",
+      "gradient_checkpointing": false,
+      "grads_finite": true,
+      "key": "ws8_bs8_ckpt0",
+      "losses_finite": true,
+      "peak_vram_gib": 4.499080181121826,
+      "timing": {
+        "n_measured": 30,
+        "n_steps_total": 35,
+        "seconds_mean": 0.4376894849336774,
+        "seconds_median": 0.4378031354990526,
+        "seconds_min": 0.4338842469987867,
+        "seconds_p95": 0.4396600742982628,
+        "warmup_discarded": 5
+      },
+      "total_vram_gib": 15.6016845703125,
+      "vram_headroom_frac_of_card": 0.7116285641562801,
+      "vram_margin_gib_vs_card": 11.102604389190674,
+      "vram_margin_gib_vs_prd_budget": 11.500919818878174,
+      "windows_per_sec_aggregate": 146.18442585397725,
+      "windows_per_sec_per_gpu": 18.273053231747156,
+      "world_size": 8
+    },
+    {
+      "batch_size": 8,
+      "batch_wait": {
+        "n_measured": 30,
+        "n_steps_total": 35,
+        "seconds_mean": 0.0023799662665017723,
+        "seconds_median": 0.002325697998458054,
+        "seconds_min": 0.002033458000369137,
+        "seconds_p95": 0.0029393564986094117,
+        "warmup_discarded": 5
+      },
+      "device_name": "NVIDIA RTX A4000",
+      "gradient_checkpointing": true,
+      "grads_finite": true,
+      "key": "ws8_bs8_ckpt1",
+      "losses_finite": true,
+      "peak_vram_gib": 1.0948495864868164,
+      "timing": {
+        "n_measured": 30,
+        "n_steps_total": 35,
+        "seconds_mean": 0.5707679483668471,
+        "seconds_median": 0.5594649385002413,
+        "seconds_min": 0.5535083239992673,
+        "seconds_p95": 0.6491896995508791,
+        "warmup_discarded": 5
+      },
+      "total_vram_gib": 15.6016845703125,
+      "vram_headroom_frac_of_card": 0.929824912075832,
+      "vram_margin_gib_vs_card": 14.506834983825684,
+      "vram_margin_gib_vs_prd_budget": 14.905150413513184,
+      "windows_per_sec_aggregate": 114.39501494332232,
+      "windows_per_sec_per_gpu": 14.29937686791529,
+      "world_size": 8
+    }
+  ],
+  "prd": "\u00a710.3, \u00a711, \u00a715",
+  "prd_target_world_size": 8,
+  "prd_vram_budget_gib": 16.0,
+  "provenance": {
+    "epochs_assumed": 10,
+    "git_sha": "18d93566614cc8aa0efac06282b6336b6d5b3d0e",
+    "windows_per_epoch_full_fold": 8303
+  },
+  "schema_version": "1",
+  "step": "P2-05",
+  "total_vram_gib": 15.6016845703125,
+  "warmup_steps_discarded": 5
+}

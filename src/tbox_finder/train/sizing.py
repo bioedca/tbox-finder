@@ -67,6 +67,15 @@ PRD_VRAM_BUDGET_GIB = 16.0
 #: PRD §10.3 pins "DDP×8 for throughput" — the world size the footprint claim is about.
 PRD_TARGET_WORLD_SIZE = 8
 
+#: PRD §10.3: "full fine-tune fits one GPU **with gradient checkpointing**" — and P2-04's
+#: hand-wired per-block wrap is ON by default (user sign-off 2026-07-16). The extrapolation
+#: basis must be THIS config, not whichever ws=8 point happens to be fastest: the fastest is
+#: checkpointing-OFF, so selecting on speed would quote a cost for a configuration the PRD
+#: does not pin while labelling it "the" full-run cost. The off variant is reported too, but
+#: as an explicitly-named alternative — that is the number a §10.3 flip would need, and it
+#: must not masquerade as the default (the P2-03/P2-04 §10.2 claim-accuracy lesson).
+PRD_DEFAULT_GRADIENT_CHECKPOINTING = True
+
 #: Steps discarded before timing. P2-04 refused to quote step times precisely because
 #: single-step timings were warmup noise (allocator growth, cuDNN autotune, lazy kernel
 #: load). Discarding a fixed prefix is what makes the remainder steady-state.
@@ -432,7 +441,87 @@ def derive_clauses(report: Mapping[str, Any]) -> dict[str, bool]:
         and bool(extrap.get("binding_gate")),
         "not_a_science_result": report.get("is_science") is False,
         "budget_not_frozen": report.get("freezes_adr0003_d7_budget") is False,
+        # The headline extrapolation must describe the configuration PRD §10.3 actually
+        # pins. The checkpointing-OFF point is faster, so a speed-selected basis would quote
+        # an unpinned config's cost under the field a reader takes as "the" full-run cost —
+        # true numbers, wrong label, which is exactly the §10.2 failure mode P2-03 and P2-04
+        # each shipped once.
+        "extrapolation_basis_is_prd_pinned_config": extrap.get("is_prd_pinned_config") is True
+        and extrap.get("gradient_checkpointing") is PRD_DEFAULT_GRADIENT_CHECKPOINTING,
     }
+
+
+def _extrapolation_block(
+    points: Sequence[Mapping[str, Any]],
+    *,
+    windows_per_epoch: int | None,
+    epochs: int,
+    gradient_checkpointing: bool,
+) -> dict[str, Any]:
+    """One illustrative extrapolation, at the PRD §10.3 world size and a NAMED ckpt setting.
+
+    The basis is selected by **configuration**, not by speed. Selecting the fastest ws=8
+    point would silently quote the checkpointing-OFF cost — measured, real, and **not the
+    configuration PRD §10.3 pins** — under a field a reader reads as "the full-run cost".
+    Among points matching the requested configuration the fastest is taken (they differ only
+    in batch size, all of which are legitimate choices for that config).
+
+    Never scales a smaller world size up: ADR-0003 D6 pins ``Wall-clock = GPU-hours / G``
+    linearity for the SCAN estimator only, and D7 pins no scaling law at all — so a world
+    size with no measured point yields ``basis_point: None`` and a stated reason, not a
+    modelled number.
+    """
+    block: dict[str, Any] = {
+        "advisory_only": True,
+        "binding": False,
+        "binding_gate": BINDING_GATE,
+        "gradient_checkpointing": bool(gradient_checkpointing),
+        "is_prd_pinned_config": bool(gradient_checkpointing) == PRD_DEFAULT_GRADIENT_CHECKPOINTING,
+        "assumptions": [
+            "Rate is the steady-state median at the quoted world size — the DDP all-reduce "
+            "cost is measured at that world size, not modelled from a smaller one.",
+            "windows_per_epoch is len(Stage1WindowDataset) over the FULL nested_train fold "
+            "(not the sizing slice), computed from the same data config the points ran.",
+            "`step_seconds` includes the per-step full-parameter grad-finiteness scan "
+            "(train_stage1.py), which syncs per parameter per step. Its own comment scopes "
+            "it to 'smoke scale'; nobody has decided whether it stays at full-run scale, so "
+            "these hours are an UPPER bound on that axis. P2-06 owns the decision.",
+            "fp32: train_stage1 exposes no precision knob and ADR-0002 A7's determinism "
+            "contract disables TF32/cudnn autotune, so this is NOT the bf16/TF32-native "
+            "throughput PRD §10.3 names as a property of the sm_86 card.",
+            "epochs is an ASSUMPTION, not a pin — no PRD/ADR fixes the Stage-1 epoch count; "
+            "GPU-hours scale linearly in it, so rescale rather than re-measure.",
+        ],
+    }
+    target = [
+        p
+        for p in points
+        if int(p["world_size"]) == PRD_TARGET_WORLD_SIZE
+        and bool(p["gradient_checkpointing"]) is bool(gradient_checkpointing)
+        and p.get("windows_per_sec_per_gpu") is not None
+    ]
+    if target and _is_pos_int(windows_per_epoch):
+        best = max(target, key=lambda p: float(p["windows_per_sec_per_gpu"]))
+        block["basis_point"] = best["key"]
+        block["basis_batch_size"] = int(best["batch_size"])
+        block["basis_peak_vram_gib"] = best.get("peak_vram_gib")
+        block.update(
+            extrapolate(
+                windows_per_sec_per_gpu=float(best["windows_per_sec_per_gpu"]),
+                windows_per_epoch=int(windows_per_epoch),
+                epochs=int(epochs),
+                world_size=PRD_TARGET_WORLD_SIZE,
+            )
+        )
+    else:
+        block["basis_point"] = None
+        block["unavailable_reason"] = (
+            f"no completed point at the PRD §10.3 target world_size={PRD_TARGET_WORLD_SIZE} "
+            f"with gradient_checkpointing={bool(gradient_checkpointing)}"
+            if not target
+            else "windows_per_epoch unavailable"
+        )
+    return block
 
 
 def build_report(
@@ -456,51 +545,23 @@ def build_report(
     ]
     peaks = [p["peak_vram_gib"] for p in pts if _is_real(p.get("peak_vram_gib"))]
 
-    # Extrapolate from the PRD §10.3 target world size when a point exists for it. Never
-    # from a smaller world size scaled up: D7 pins no scaling law, and inventing one is how
-    # a budget acquires a number nobody measured.
-    target = [
-        p
-        for p in pts
-        if int(p["world_size"]) == PRD_TARGET_WORLD_SIZE
-        and p.get("windows_per_sec_per_gpu") is not None
-    ]
-    extrap: dict[str, Any] = {
-        "advisory_only": True,
-        "binding": False,
-        "binding_gate": BINDING_GATE,
-        "assumptions": [
-            "Rate is the steady-state median at the quoted world size — the DDP all-reduce "
-            "cost is measured at that world size, not modelled from a smaller one.",
-            "windows_per_epoch is len(Stage1WindowDataset) over the FULL nested_train fold "
-            "(not the sizing slice), computed from the same data config the points ran.",
-            "`step_seconds` includes the per-step full-parameter grad-finiteness scan "
-            "(train_stage1.py), which syncs per parameter per step. Its own comment scopes "
-            "it to 'smoke scale'; nobody has decided whether it stays at full-run scale, so "
-            "these hours are an UPPER bound on that axis. P2-06 owns the decision.",
-            "fp32: train_stage1 exposes no precision knob and ADR-0002 A7's determinism "
-            "contract disables TF32/cudnn autotune, so this is NOT the bf16/TF32-native "
-            "throughput PRD §10.3 names as a property of the sm_86 card.",
-        ],
-    }
-    if target and _is_pos_int(windows_per_epoch):
-        best = max(target, key=lambda p: float(p["windows_per_sec_per_gpu"]))
-        extrap["basis_point"] = best["key"]
-        extrap.update(
-            extrapolate(
-                windows_per_sec_per_gpu=float(best["windows_per_sec_per_gpu"]),
-                windows_per_epoch=int(windows_per_epoch),
-                epochs=int(epochs),
-                world_size=PRD_TARGET_WORLD_SIZE,
-            )
-        )
-    else:
-        extrap["basis_point"] = None
-        extrap["unavailable_reason"] = (
-            f"no completed point at the PRD §10.3 target world_size={PRD_TARGET_WORLD_SIZE}"
-            if not target
-            else "windows_per_epoch unavailable"
-        )
+    extrap = _extrapolation_block(
+        pts,
+        windows_per_epoch=windows_per_epoch,
+        epochs=epochs,
+        gradient_checkpointing=PRD_DEFAULT_GRADIENT_CHECKPOINTING,
+    )
+    # The §10.3-flip number, explicitly named as an alternative rather than promoted to the
+    # headline. Both configurations are real; only one is pinned, and a reader must be able
+    # to tell which cost belongs to which.
+    alt = _extrapolation_block(
+        pts,
+        windows_per_epoch=windows_per_epoch,
+        epochs=epochs,
+        gradient_checkpointing=not PRD_DEFAULT_GRADIENT_CHECKPOINTING,
+    )
+    alt.pop("assumptions", None)
+    extrap["alternative_gradient_checkpointing_off"] = alt
 
     report: dict[str, Any] = {
         "schema_version": SCHEMA_VERSION,

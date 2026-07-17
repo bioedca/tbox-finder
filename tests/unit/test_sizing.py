@@ -470,6 +470,58 @@ def test_extrapolation_refuses_a_world_size_it_has_no_point_for():
     assert str(PRD_TARGET_WORLD_SIZE) in e["unavailable_reason"]
 
 
+def test_extrapolation_basis_is_the_prd_pinned_config_not_the_fastest_point():
+    """The load-bearing one: checkpointing-OFF is FASTER, so a speed-selected basis quotes a
+    config PRD §10.3 does not pin under the field a reader reads as "the" full-run cost.
+
+    Constructed so the two selection rules disagree: ckpt-off runs at 2x the ckpt-on rate.
+    A basis chosen by speed picks ws8_bs8_ckpt0; the correct rule picks ws8_bs8_ckpt1.
+    """
+    pts = make_points(
+        [
+            {"world_size": 1, "batch_size": 8, "ckpt": True, "step_seconds": _rate_steps(0.40)},
+            {"world_size": 8, "batch_size": 8, "ckpt": True, "step_seconds": _rate_steps(0.40)},
+            {"world_size": 8, "batch_size": 8, "ckpt": False, "step_seconds": _rate_steps(0.20)},
+        ]
+    )
+    r = build_report(points=pts, windows_per_epoch=288_000, epochs=10)
+    e = r["illustrative_extrapolation"]
+    assert e["basis_point"] == "ws8_bs8_ckpt1", "basis must follow the PRD §10.3 pin, not speed"
+    assert e["gradient_checkpointing"] is True
+    assert e["is_prd_pinned_config"] is True
+    assert r["gate"]["extrapolation_basis_is_prd_pinned_config"] is True
+    # The faster, unpinned config is still reported — but named as an alternative.
+    alt = e["alternative_gradient_checkpointing_off"]
+    assert alt["basis_point"] == "ws8_bs8_ckpt0"
+    assert alt["is_prd_pinned_config"] is False
+    assert (
+        alt["gpu_hours"] < e["gpu_hours"]
+    ), "ckpt off is faster; the fixture is meaningless otherwise"
+
+
+def test_gate_rejects_an_extrapolation_built_on_the_unpinned_config():
+    """Anti-tautology: prove the new clause bites."""
+    r = build_report(points=full_points(), windows_per_epoch=288_000, epochs=10)
+    r["illustrative_extrapolation"]["is_prd_pinned_config"] = False
+    problems = validate_report(r)
+    assert any("extrapolation_basis_is_prd_pinned_config" in p for p in problems), problems
+
+
+def test_alternative_block_is_absent_when_no_unpinned_point_ran():
+    """No ckpt-off ws=8 point → the alternative states why, rather than inventing a number."""
+    pts = make_points(
+        [
+            {"world_size": 1, "batch_size": 8, "ckpt": True, "step_seconds": _rate_steps(0.40)},
+            {"world_size": 8, "batch_size": 8, "ckpt": True, "step_seconds": _rate_steps(0.40)},
+        ]
+    )
+    r = build_report(points=pts, windows_per_epoch=288_000, epochs=10)
+    alt = r["illustrative_extrapolation"]["alternative_gradient_checkpointing_off"]
+    assert alt["basis_point"] is None
+    assert "gpu_hours" not in alt
+    assert "gradient_checkpointing=False" in alt["unavailable_reason"]
+
+
 def test_extrapolation_uses_the_target_world_size_point_when_present():
     r = build_report(points=full_points(), windows_per_epoch=288_000, epochs=10)
     e = r["illustrative_extrapolation"]
