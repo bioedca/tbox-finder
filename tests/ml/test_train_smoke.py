@@ -364,11 +364,16 @@ def _valid_report() -> dict:
         "eval_requested": True,
         "eval_scope": {
             "fold_scope": "selection_val",
-            "n_records_scored": 880,
-            "n_blocks": 726,
-            "disjointness": {
-                "shared_record_ids_with_train": 0,
-                "shared_cluster_ids_with_train": 0,
+            "n_records_scored": 830,
+            "n_blocks": 469,
+            "full_fold": True,
+            "eval_max_records": None,
+            "leakage": {
+                "n_designated_loo_holdout": 0,
+                "n_not_nested_train": 0,
+                "shared_record_ids_with_inner_train": 0,
+                "shared_cluster_ids_with_inner_train": 0,
+                "n_inner_train_records": 7472,
             },
         },
         "eval_metrics": {
@@ -429,7 +434,17 @@ def test_a_report_claiming_an_eval_without_evidence_fails_the_gate() -> None:
 def test_a_report_whose_val_set_touched_training_fails_the_gate() -> None:
     """The defect the whole rung exists to prevent, asserted end-to-end."""
     rep = _valid_report()
-    rep["eval_scope"]["disjointness"]["shared_cluster_ids_with_train"] = 7
+    rep["eval_scope"]["leakage"]["shared_cluster_ids_with_inner_train"] = 7
+    sealed = _sealed(rep)
+    assert sealed["gate"]["eval_val_scored_on_disjoint_fold"] is False
+    assert sealed["gate"]["overall_pass"] is False
+
+
+def test_a_report_whose_val_set_was_the_loo_holdout_fails_the_gate() -> None:
+    """P2-06a's actual defect, asserted end-to-end: a fold disjoint from train, fully
+    scored, real metrics — and 778/880 of it the leave-one-order-out headline."""
+    rep = _valid_report()
+    rep["eval_scope"]["leakage"]["n_designated_loo_holdout"] = 778
     sealed = _sealed(rep)
     assert sealed["gate"]["eval_val_scored_on_disjoint_fold"] is False
     assert sealed["gate"]["overall_pass"] is False

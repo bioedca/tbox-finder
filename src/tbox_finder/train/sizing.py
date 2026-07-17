@@ -738,7 +738,15 @@ def full_fold_windows_per_epoch(data_config: Mapping[str, Any]) -> int:
     # must not crash the aggregator on an unexpected keyword.
     known = {f.name for f in dataclass_fields(Stage1DataConfig)}
     cfg = Stage1DataConfig(**{k: v for k, v in data_config.items() if k in known})
-    records, _ = load_corpus_records(training_fold_only=True, window=cfg.window_nt)
+    # `exclude_selection_val=False` — deliberately the FULL 8,303-record D5 fold, and the
+    # function's name is a promise about which one. P2-05's committed GPU-hour figures are
+    # full-fold extrapolations; silently re-basing them on the 7,472-record `inner_train`
+    # fold would shift every published number by 10% with no change to the report that
+    # states them. A sweep point's *actual* epoch is `inner_train` — that is P2-06's
+    # denominator to compute, not this function's to redefine.
+    records, _ = load_corpus_records(
+        training_fold_only=True, exclude_selection_val=False, window=cfg.window_nt
+    )
     return len(Stage1WindowDataset(records, config=cfg))
 
 

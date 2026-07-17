@@ -50,18 +50,45 @@ requires_corpus = pytest.mark.skipif(
 # The selection fold — measured against the committed table
 # ══════════════════════════════════════════════════════════════════════════════
 @requires_corpus
-def test_selection_val_is_disjoint_from_the_training_fold():
-    """The load-bearing invariant: zero shared records AND zero shared clusters.
+def test_selection_val_holds_no_designated_loo_holdout_record():
+    """**THE** invariant, and the one P2-06a's first definition failed at 778 / 880.
 
-    Sharing a *cluster* is the subtle half — scheme A assigns whole clusters, but
-    ``nested_train`` is an independent scheme, so a cluster can straddle the boundary. On
-    the committed table 7 clusters do.
+    Selecting a config on designated-LOO-holdout records optimises the exact population
+    P2-14 reports as the PRD §12:241 leave-one-order-out headline, turning a generalization
+    number into a selection-optimised one. Measured off the emitted records via splits.py's
+    dedicated indicator — not off ``nested_role`` (whose ``"heldout"`` value conflates the
+    LOO arm with the Actinobacteria phylum arm and external anchors), and above all not off
+    the negation of ``nested_train`` (which is what shipped the defect).
+    """
+    _pandas_or_skip()
+    from tbox_finder.data.window_dataset import load_selection_val_records
+
+    val, report = load_selection_val_records()
+
+    leaked = [r.record_id for r in val if r.is_designated_loo_holdout]
+    assert leaked == [], (
+        f"{len(leaked)} selection records are in the designated LOO holdout — a config "
+        "chosen here contaminates the PRD §12:241 headline"
+    )
+    # The report must AGREE with the independent recomputation above, not merely assert 0.
+    assert report["leakage"]["n_designated_loo_holdout"] == 0
+    assert report["leakage"]["n_not_nested_train"] == 0
+
+
+@requires_corpus
+def test_selection_val_is_disjoint_from_what_the_model_actually_trains_on():
+    """Zero shared records AND zero shared clusters against ``inner_train``.
+
+    Against ``inner_train`` — the fold ``load_corpus_records`` returns by default — not
+    against the full D5 fold. The old code proved disjointness from the full fold and was
+    still wrong; the population that matters is the one training actually sees.
     """
     _pandas_or_skip()
     from tbox_finder.data.window_dataset import load_corpus_records, load_selection_val_records
 
     val, report = load_selection_val_records()
-    train, _ = load_corpus_records(training_fold_only=True)
+    train, train_report = load_corpus_records(training_fold_only=True)
+    assert train_report["fold_scope"] == "inner_train"
 
     val_ids = {r.record_id for r in val}
     train_ids = {r.record_id for r in train}
@@ -72,25 +99,34 @@ def test_selection_val_is_disjoint_from_the_training_fold():
     assert (
         val_clusters & train_clusters == set()
     ), "a selection cluster was trained on (homology leak)"
-    # The report must AGREE with the independent recomputation above, not merely assert 0.
-    assert report["disjointness"]["shared_record_ids_with_train"] == 0
-    assert report["disjointness"]["shared_cluster_ids_with_train"] == 0
+    assert report["leakage"]["shared_record_ids_with_inner_train"] == 0
+    assert report["leakage"]["shared_cluster_ids_with_inner_train"] == 0
+    # The two loaders must agree on the size of the population they partition — they run
+    # the carve independently, so a divergence here means the shared rule is not shared.
+    assert report["leakage"]["n_inner_train_records"] == len(train)
 
 
 @requires_corpus
-def test_the_naive_val_filter_would_have_leaked_and_this_is_why_the_test_exists():
-    """Anti-tautology: prove the two extra filters are doing real work.
+def test_the_ORIGINAL_selection_filter_would_have_sat_inside_the_loo_holdout():
+    """The regression guard for P2-06a's actual defect — pinned by measurement.
 
-    ``fold_random == "val"`` alone is 61.4% training records on the committed table. If a
-    future refactor drops filter 2 or 3, the disjointness test above bites — this test
-    documents the magnitude so nobody 'simplifies' the filter back.
+    ``nested_train = is_corpus & has_order & ~linked`` (splits.py:706), so its **negation
+    means "in the LOO holdout"**, not "held out from training". The first version of this
+    module filtered ``fold_random == "val" & not nested_train`` and emitted a fold that was
+    **778 / 880 = 88.4% designated LOO holdout**, whose top order (Lactobacillales, 510)
+    is itself a designated holdout order — while its own disjointness block read a truthful
+    and useless ``0 shared with train``.
+
+    This test reconstructs that filter and asserts it is still a disaster, so that nobody
+    can 'simplify' the carve back to it and find the suite green. If the table ever changes
+    such that this stops being true, that is a finding to re-derive — not a guard to delete.
     """
     pd = _pandas_or_skip()
     from tbox_finder.data.window_dataset import (
-        CLUSTER_COL,
         DEFAULT_SPLIT_TABLE,
         FOLD_RANDOM_COL,
         FOLD_RANDOM_VAL,
+        LOO_HOLDOUT_COL,
         NESTED_TRAIN_COL,
         POSITIVE_SOURCE,
         SOURCE_COL,
@@ -98,43 +134,80 @@ def test_the_naive_val_filter_would_have_leaked_and_this_is_why_the_test_exists(
 
     spl = pd.read_parquet(DEFAULT_SPLIT_TABLE)
     c = spl[spl[SOURCE_COL] == POSITIVE_SOURCE]
-    naive = c[c[FOLD_RANDOM_COL] == FOLD_RANDOM_VAL]
-    n_trained_on = int(naive[NESTED_TRAIN_COL].astype(bool).sum())
+    original = c[(c[FOLD_RANDOM_COL] == FOLD_RANDOM_VAL) & (~c[NESTED_TRAIN_COL].astype(bool))]
+    n_loo = int(original[LOO_HOLDOUT_COL].astype(bool).sum())
 
-    assert n_trained_on > 0, (
-        "the naive fold_random=='val' filter no longer overlaps the training fold — either "
-        "the split table changed or this guard is now vacuous; re-derive before deleting"
+    assert n_loo > 0, (
+        "the original 'fold_random==val & not nested_train' filter no longer reaches the "
+        "LOO holdout — the table changed; re-derive the whole rung before trusting this"
     )
-    # And the cluster-straddle that survives filter 2 is real too.
-    train_clusters = set(c[c[NESTED_TRAIN_COL].astype(bool)][CLUSTER_COL])
-    after_filter2 = naive[~naive[NESTED_TRAIN_COL].astype(bool)]
-    straddling = int(after_filter2[CLUSTER_COL].isin(train_clusters).sum())
-    assert straddling > 0, (
-        "no cluster straddles the val/train boundary any more — filter 3 may be vacuous; "
-        "re-derive rather than assume"
-    )
+    # Not a marginal contamination: the substantial majority of that fold was the holdout.
+    assert n_loo / len(original) > 0.5
 
 
 @requires_corpus
-def test_selection_val_is_powered_and_shaped_as_measured():
-    """Pin the measured shape against the committed table (2026-07-17).
+def test_selection_val_is_shaped_as_measured():
+    """Pin the measured shape against the committed table (2026-07-17, re-taken decision).
 
-    These are counts re-derived from the real artifact, not constants chosen to make the
-    code pass: 880 records / 726 blocks / 35 class-II, after all four filters. A change in
-    either the derivation or the table moves them, which is the point.
+    Counts re-derived from the real artifact, not constants chosen to make the code pass:
+    830 records / 469 blocks carved from the 8,303-record / 4,775-cluster D5 fold at
+    fraction 0.10 / seed 20260717. A change in either the derivation or the table moves
+    them, which is the point.
     """
     _pandas_or_skip()
     from tbox_finder.data.window_dataset import load_selection_val_records, selection_val_problems
 
     records, report = load_selection_val_records()
     assert selection_val_problems(report) == []
-    assert report["n_records"] == 880 == len(records)
-    assert report["n_blocks"] == 726
-    assert report["class_ii_records"] == 35
-    assert report["class_ii_records"] >= report["min_heldout_positives"]
+    assert report["n_records"] == 830 == len(records)
+    assert report["n_blocks"] == 469
     assert report["fold_scope"] == "selection_val"
-    assert report["excluded_by_reason"]["in_training_fold"] == 1445
-    assert report["excluded_by_reason"]["cluster_shared_with_training_fold"] == 12
+    assert report["carve"]["n_fold_records"] == 8303
+    assert report["carve"]["n_fold_clusters"] == 4775
+    assert report["carve"]["n_val_clusters"] == 469
+    assert report["leakage"]["n_inner_train_records"] == 7472
+    # ~10% of the fold's records, by construction. Pinned as a consequence, not an intent.
+    assert 0.09 < report["n_records"] / report["carve"]["n_fold_records"] < 0.11
+
+
+@requires_corpus
+def test_class_ii_is_reported_and_explicitly_NOT_gated():
+    """The disclosed cost of the re-taken decision (user, 2026-07-17).
+
+    The inner rung holds 5 class-II of the D5 fold's 22 — far under
+    ``min_heldout_positives``. That is REPORTED, and deliberately does not fail the fold:
+    the selection statistic is the GATE-4 core min-F1 over {Stem I, Specifier,
+    Antiterminator}, structural elements to which class-I and class-II records both
+    contribute. Gating a *selection* rung on a *generalization* min-N floor was a category
+    error. This test exists so the exemption stays visible and deliberate rather than
+    quietly eroding into 'we never checked'.
+    """
+    _pandas_or_skip()
+    from tbox_finder.data.window_dataset import load_selection_val_records, selection_val_problems
+
+    _, report = load_selection_val_records()
+    assert report["class_ii_records"] == 5
+    assert report["class_ii_below_min_heldout_positives"] is True
+    assert report["class_ii_records"] < report["min_heldout_positives"]
+    # Reported, under the floor, and STILL a usable fold — that is the decision.
+    assert selection_val_problems(report) == []
+
+
+@requires_corpus
+def test_the_carve_costs_exactly_what_was_signed_off():
+    """The training fold loses 10.01% (8,303 -> 7,472) — the price the user accepted."""
+    _pandas_or_skip()
+    from tbox_finder.data.window_dataset import load_corpus_records
+
+    inner, inner_rep = load_corpus_records(training_fold_only=True)
+    full, full_rep = load_corpus_records(training_fold_only=True, exclude_selection_val=False)
+
+    assert full_rep["fold_scope"] == "train"
+    assert inner_rep["fold_scope"] == "inner_train"
+    assert len(full) == 8303
+    assert len(inner) == 7472
+    lost = (len(full) - len(inner)) / len(full)
+    assert 0.09 < lost < 0.11, f"the carve now costs {lost:.1%} of training data"
 
 
 @requires_corpus
@@ -196,13 +269,23 @@ def test_context_labels_paint_the_locus_on_a_background_field():
 # ══════════════════════════════════════════════════════════════════════════════
 def _good_scope() -> dict:
     return {
-        "n_records": 880,
-        "n_blocks": 726,
-        "class_ii_records": 35,
+        "n_records": 830,
+        "n_blocks": 469,
+        "class_ii_records": 5,
         "min_heldout_positives": 20,
-        "disjointness": {
-            "shared_record_ids_with_train": 0,
-            "shared_cluster_ids_with_train": 0,
+        "carve": {
+            "fraction": 0.10,
+            "seed": 20260717,
+            "n_fold_records": 8303,
+            "n_fold_clusters": 4775,
+            "n_val_clusters": 469,
+        },
+        "leakage": {
+            "n_designated_loo_holdout": 0,
+            "n_not_nested_train": 0,
+            "shared_record_ids_with_inner_train": 0,
+            "shared_cluster_ids_with_inner_train": 0,
+            "n_inner_train_records": 7472,
         },
     }
 
@@ -216,19 +299,37 @@ def test_selection_val_problems_accepts_a_clean_scope():
 @pytest.mark.parametrize(
     "mutate, expect",
     [
-        (lambda s: s.pop("disjointness"), "disjointness"),
-        (lambda s: s.__setitem__("disjointness", {}), "disjointness"),
+        (lambda s: s.pop("leakage"), "leakage"),
+        (lambda s: s.__setitem__("leakage", {}), "leakage"),
+        # THE clause: the exact value P2-06a's first definition would have reported.
         (
-            lambda s: s["disjointness"].__setitem__("shared_record_ids_with_train", 1),
+            lambda s: s["leakage"].__setitem__("n_designated_loo_holdout", 778),
+            "leave-one-order-out",
+        ),
+        (
+            lambda s: s["leakage"].__setitem__("n_not_nested_train", 880),
+            "outside the ADR-0004 D5 training fold",
+        ),
+        (
+            lambda s: s["leakage"].__setitem__("shared_record_ids_with_inner_train", 1),
             "train-on-train",
         ),
         (
-            lambda s: s["disjointness"].__setitem__("shared_cluster_ids_with_train", 7),
-            "train-on-train",
+            lambda s: s["leakage"].__setitem__("shared_cluster_ids_with_inner_train", 7),
+            "homology-leaky",
         ),
+        # A 0-overlap claim against an EMPTY training fold is vacuously true.
+        (
+            lambda s: s["leakage"].__setitem__("n_inner_train_records", 0),
+            "vacuously true",
+        ),
+        (lambda s: s.pop("carve"), "carve"),
+        (lambda s: s["carve"].__setitem__("fraction", 1.0), "carve.fraction"),
+        (lambda s: s["carve"].__setitem__("seed", "42"), "carve.seed"),
+        (lambda s: s["carve"].__setitem__("n_val_clusters", 4775), "took the whole fold"),
         (lambda s: s.__setitem__("n_blocks", 1), "block-resamplable"),
-        (lambda s: s.__setitem__("class_ii_records", 3), "min_heldout_positives"),
         (lambda s: s.__setitem__("n_records", 0), "n_records"),
+        (lambda s: s.__setitem__("class_ii_records", -1), "class_ii_records"),
     ],
 )
 def test_selection_val_problems_bites_on_each_violation(mutate, expect):
@@ -247,8 +348,24 @@ def test_selection_val_problems_rejects_bool_as_a_count():
     from tbox_finder.data.window_dataset import selection_val_problems
 
     scope = _good_scope()
-    scope["disjointness"]["shared_record_ids_with_train"] = False
+    scope["leakage"]["n_designated_loo_holdout"] = False
     assert any("must be an int" in p for p in selection_val_problems(scope))
+
+
+def test_the_class_ii_floor_is_NOT_a_clause():
+    """The exemption, asserted rather than assumed.
+
+    5 class-II against a floor of 20 must NOT make the fold unusable — that is the signed-off
+    decision (2026-07-17). Written as a test because "we removed a check" and "the check was
+    never right for this fold" are indistinguishable from the diff alone, and only one of
+    them is allowed (§10.3 forbids weakening a test to hide a gap; this records why it is
+    not one).
+    """
+    from tbox_finder.data.window_dataset import selection_val_problems
+
+    scope = _good_scope()
+    scope["class_ii_records"] = 0
+    assert selection_val_problems(scope) == []
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -374,7 +491,7 @@ def test_is_real_matches_sizing_is_real():
 # ══════════════════════════════════════════════════════════════════════════════
 # select_best — the promotion rule
 # ══════════════════════════════════════════════════════════════════════════════
-def _point(score, *, lr=1e-4, gamma=2.0, alpha=0.0, label="p", ok=True, scope=True):
+def _point(score, *, lr=1e-4, gamma=2.0, alpha=0.0, label="p", ok=True, scope=True, n_blocks=469):
     rep = {
         "report_path": label,
         "gate": {"overall_pass": ok, "loss_finite": True},
@@ -382,15 +499,26 @@ def _point(score, *, lr=1e-4, gamma=2.0, alpha=0.0, label="p", ok=True, scope=Tr
         "eval_metrics": {
             "eval_split": "selection_val",
             "gate4_core_min_f1": {"min_f1": score, "per_element_f1": {}},
-            "block_bootstrap_ci": {"point": score, "lower": score - 0.05, "upper": score + 0.05},
+            "block_bootstrap_ci": {
+                "point": score,
+                "lower": score - 0.05,
+                "upper": score + 0.05,
+                "n_blocks": n_blocks,
+            },
         },
     }
     if scope:
         rep["eval_scope"] = {
             "fold_scope": "selection_val",
-            "disjointness": {
-                "shared_record_ids_with_train": 0,
-                "shared_cluster_ids_with_train": 0,
+            "full_fold": True,
+            "eval_max_records": None,
+            "n_blocks": n_blocks,
+            "leakage": {
+                "n_designated_loo_holdout": 0,
+                "n_not_nested_train": 0,
+                "shared_record_ids_with_inner_train": 0,
+                "shared_cluster_ids_with_inner_train": 0,
+                "n_inner_train_records": 7472,
             },
         }
     return rep
@@ -424,10 +552,69 @@ def test_select_best_rejects_a_point_scored_on_the_wrong_fold():
 
 def test_select_best_rejects_a_point_whose_val_set_overlapped_training():
     bad = _point(0.99, label="leaky")
-    bad["eval_scope"]["disjointness"]["shared_cluster_ids_with_train"] = 3
+    bad["eval_scope"]["leakage"]["shared_cluster_ids_with_inner_train"] = 3
     out = SB.select_best([bad, _point(0.42, label="honest")])
     assert out["winner"]["point"] == "honest"
-    assert any("shared_cluster_ids_with_train" in p for p in out["rejected"][0]["problems"])
+    assert any("shared_cluster_ids_with_inner_train" in p for p in out["rejected"][0]["problems"])
+
+
+def test_select_best_rejects_a_point_scored_on_the_loo_holdout():
+    """P2-06a's own defect, at the promotion rung: a point whose val fold WAS the headline.
+
+    The first version could not have caught this — its only leak check was disjointness
+    from train, which such a point passes truthfully.
+    """
+    bad = _point(0.99, label="contaminated")
+    bad["eval_scope"]["leakage"]["n_designated_loo_holdout"] = 778
+    out = SB.select_best([bad, _point(0.42, label="honest")])
+    assert out["winner"]["point"] == "honest", "a 0.99 scored on the LOO holdout won"
+    assert any("n_designated_loo_holdout" in p for p in out["rejected"][0]["problems"])
+
+
+def test_select_best_rejects_a_capped_point_however_high_it_scores():
+    """The `full_fold` finding: the field was written from day one and read by NOBODY.
+
+    A capped eval scores a slice. An 8-record slice can trivially post a 0.91 min-F1 that a
+    full-fold 0.55 cannot touch — and before this clause the capped point simply won.
+    """
+    capped = _point(0.91, label="capped")
+    capped["eval_scope"]["full_fold"] = False
+    capped["eval_scope"]["eval_max_records"] = 8
+    out = SB.select_best([capped, _point(0.55, label="full")])
+    assert out["winner"]["point"] == "full", "a capped 8-record slice out-ranked a full fold"
+    assert any("full_fold" in p for p in out["rejected"][0]["problems"])
+
+
+def test_select_best_rejects_a_point_whose_ci_resampled_a_different_fold():
+    """The builder raises on this — but a hand-assembled report never runs the builder."""
+    bad = _point(0.99, label="mismatched")
+    bad["eval_metrics"]["block_bootstrap_ci"]["n_blocks"] = 12
+    out = SB.select_best([bad, _point(0.42, label="honest")])
+    assert out["winner"]["point"] == "honest"
+    assert any("did not resample" in p for p in out["rejected"][0]["problems"])
+
+
+def test_selection_hygiene_is_re_derived_and_reports_absence_as_absence():
+    """The `never_selected_on` finding: a hardcoded literal replaced by a measurement.
+
+    The old field asserted ``["test", "loo_order_unit"]`` on every sweep it reduced, was
+    re-derived by nothing, and was demonstrably FALSE for the fold that shipped. The
+    replacement must (a) reflect what the points measured, and (b) distinguish "all clean"
+    from "nothing carried the measurement" — which a bare max/all would render identically.
+    """
+    out = SB.select_best([_point(0.5, label="a"), _point(0.6, label="b")])
+    hyg = out["selection_hygiene"]
+    assert hyg["n_points_measured"] == 2
+    assert hyg["max_designated_loo_holdout_over_points"] == 0
+    assert hyg["all_points_zero_loo_holdout"] is True
+    assert hyg["fold_scopes_seen"] == ["selection_val"]
+
+    # No promotable points ⇒ nothing was measured. Absence must read as absence, never as
+    # a clean bill of health ([[clauses-must-guard-emptiness]]).
+    empty = SB.select_best([])["selection_hygiene"]
+    assert empty["n_points_measured"] == 0
+    assert empty["max_designated_loo_holdout_over_points"] is None
+    assert empty["all_points_zero_loo_holdout"] is False
 
 
 def test_select_best_rejects_a_failed_gate_and_a_missing_scope():

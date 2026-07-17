@@ -13,6 +13,10 @@ a deterministic stratified pick from the P2-00 anchored corpus, taken in
 by ``record_id``. It joins the real ``context_v0.parquet`` geometry (P2-00), the
 real ``labels_v0.parquet`` ``label_string`` (P0-20), and the real
 ``split_assignments.parquet`` strata (P0-23) — no synthetic sequence (§10.3).
+P2-06a appended the real ``is_designated_loo_holdout`` column from the same split
+table (24 of the 56 are True). It is not part of what this golden pins —
+``windows_digest`` hashes ids, tokens, targets and padding only — so the window
+digest is unchanged by its arrival; only the input's own byte-pin moved.
 
 **Two independent paths** (the ``test_archiveii_lofo.py`` precedent): the module
 path (:func:`window_dataset.carve_window` + :func:`window_dataset.windows_digest`)
@@ -71,6 +75,12 @@ def _fixture_records() -> list[wd.CorpusRecord]:
                 cognate_aa=row["cognate_aa"],
                 cluster_id=int(row["cluster_id"]),
                 nested_train=_as_bool(row["nested_train"]),
+                # Real values, joined from the committed split table at P2-06a — NOT a
+                # convenience default. 24 of these 56 records genuinely ARE designated
+                # LOO holdout, so `False` would have written a falsehood into a fixture
+                # that exists to be trusted. The join also re-confirmed the fixture's own
+                # `nested_train` against the table (all 56 agree).
+                is_designated_loo_holdout=_as_bool(row["is_designated_loo_holdout"]),
                 folds=tuple(row[c] for c in wd.FOLD_SCHEME_COLUMNS),
             )
         )
@@ -340,5 +350,5 @@ def test_sample_csv_is_byte_stable() -> None:
     """
     assert (
         hashlib.sha256(_SAMPLE.read_bytes()).hexdigest()
-        == "8663f3b8cc0c94f92f46d6511691fb0fc88befa87f1ac372a064fa10f57dd95f"
+        == "8989ddc55c2c275d46e689198d28471b2db4c8866e78608eeab4e40c5de3cf57"
     )

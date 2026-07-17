@@ -147,18 +147,23 @@ class Stage1TrainConfig:
     aa_alpha: float = 0.25
 
     # ── The P2-06a validation ladder (the rung P2-06 promotes its best config on) ──
-    # `eval_val` runs the leak-free scheme-A val fold (window_dataset.load_selection_val_
-    # records) through the ADR-0005 D3+A3 reconciliation operator and scores it. It is the
-    # ONLY per-run number a sweep may rank on: training loss is a function of `gamma` and
+    # `eval_val` runs the P2-06a inner-rung val fold (window_dataset.load_selection_val_
+    # records — a cluster-grouped seeded carve from INSIDE the ADR-0004 D5 training fold)
+    # through the ADR-0005 D3+A3 reconciliation operator and scores it. It is the ONLY
+    # per-run number a sweep may rank on: training loss is a function of `gamma` and
     # `class_weight_alpha` themselves, so points are not comparable across the two axes the
     # sweep most wants (P2-06's γ/α grid) — ranking on it would compare objectives, not
-    # models. Scheme-A is the ADR-0004 D5 "detection-quality reference ... never the source
-    # of a generalization number", which is exactly what makes it safe to tune on: the
-    # PRD §12:241 leave-one-order-out headline stays genuinely held out.
+    # models. The fold is safe to tune on because it sits inside `nested_train`, whose
+    # complement IS the leave-one-order-out holdout — so the PRD §12:241 headline stays
+    # genuinely held out. (An earlier version filtered `fold_random==val & not nested_train`
+    # and landed 88.4% INSIDE that holdout; the load_selection_val_records docstring records
+    # why, and load-bearing `leakage.n_designated_loo_holdout` measures it, per run.)
     eval_val: bool = True
     eval_batch_size: int = 8
-    #: Cap the val fold for the smoke (None ⇒ all 880). Recorded in the eval scope, so a
-    #: capped run cannot pass itself off as the full fold.
+    #: Cap the val fold for the smoke (None ⇒ all 830, the P2-06a inner-rung carve).
+    #: Recorded in the eval scope AND enforced: a capped run records `full_fold: false`,
+    #: and `select_best` rejects any point that is not a full fold (a slice's min-F1 is not
+    #: comparable to a full fold's).
     eval_max_records: int | None = None
     #: Block-bootstrap replicates (ADR-0005 D5 resamples at the homology-cluster level).
     eval_n_boot: int = 2000
@@ -716,6 +721,14 @@ def _eval_val_ok(report: Mapping[str, Any]) -> bool:
     confirmed present, and the absence branch is asserted *explicitly absent* rather than
     merely unviolated. ``test_gate_is_false_when_eval_requested_but_scope_missing`` grades
     the absence branch's **gate**, not its fields.
+
+    ⚠ **And being total still let the wrong fold through.** This clause originally checked
+    ``disjointness.shared_*_with_train == 0`` — true, and blind: the fold it certified was
+    **88.4% designated leave-one-order-out holdout**, because "disjoint from train" and
+    "not the headline holdout" are not complements (``nested_train``'s complement *is* the
+    holdout, splits.py:706). Guarding on evidence-*presence* protects against a **missing**
+    measurement; it does nothing about a **present measurement of the wrong quantity**.
+    ``leakage.n_designated_loo_holdout`` is the quantity.
     """
     requested = report.get("eval_requested")
     metrics_block = report.get("eval_metrics")
@@ -731,13 +744,24 @@ def _eval_val_ok(report: Mapping[str, Any]) -> bool:
     if not isinstance(metrics_block, Mapping) or not metrics_block:
         return False
 
-    dis = scope.get("disjointness")
-    if not isinstance(dis, Mapping) or not dis:
+    leak = scope.get("leakage")
+    if not isinstance(leak, Mapping) or not leak:
         return False
-    for key in ("shared_record_ids_with_train", "shared_cluster_ids_with_train"):
-        val = dis.get(key)
+    for key in (
+        # THE clause. 778 here is what the first P2-06a definition would have reported,
+        # and no other check in this function would have noticed.
+        "n_designated_loo_holdout",
+        "n_not_nested_train",
+        "shared_record_ids_with_inner_train",
+        "shared_cluster_ids_with_inner_train",
+    ):
+        val = leak.get(key)
         if not isinstance(val, int) or isinstance(val, bool) or val != 0:
             return False
+    # A zero-overlap claim against an EMPTY training fold is vacuously true — require the
+    # population to exist before believing a statement about it ([[clauses-must-guard-emptiness]]).
+    if not _pos_int(leak.get("n_inner_train_records")):
+        return False
 
     if scope.get("fold_scope") != "selection_val":
         return False
@@ -935,10 +959,12 @@ def evaluate_selection_val(
     *,
     cfg: Stage1TrainConfig,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-    """Score the leak-free scheme-A val fold under the **deployed** reconciliation operator.
+    """Score the P2-06a inner-rung val fold under the **deployed** reconciliation operator.
 
-    Returns ``(eval_metrics, eval_scope)``. The scope carries the disjointness evidence
-    ``load_selection_val_records`` measured; the metrics carry the numbers a sweep ranks on.
+    Returns ``(eval_metrics, eval_scope)``. The scope carries the ``leakage`` evidence
+    ``load_selection_val_records`` measured — including ``n_designated_loo_holdout``, the
+    clause that proves the fold is not the PRD §12:241 headline — and the metrics carry the
+    numbers a sweep ranks on.
 
     Each record is tiled over its **full context** with ``tile_windows`` (the deterministic
     scan/eval geometry), every window is forwarded, and the per-window logits are
@@ -984,8 +1010,8 @@ def evaluate_selection_val(
     if cfg.eval_max_records is not None:
         records = records[: cfg.eval_max_records]
     # ⚠ `n_blocks` MUST describe what was SCORED, not the fold that was loaded. The loader's
-    # report counts the whole fold's 726 blocks; a capped smoke that scores 4 records
-    # resamples 4 blocks, and a scope claiming 726 would let the >= 2 block-resamplability
+    # report counts the whole fold's 469 blocks; a capped smoke that scores 4 records
+    # resamples 4 blocks, and a scope claiming 469 would let the >= 2 block-resamplability
     # clause pass on blocks the bootstrap never saw — a field describing the *requested*
     # population instead of the *measured* one, which is this repo's most-repeated defect
     # (P2-05's basis_point, P2-04's swept-but-unreached /data group). The fold-level count
@@ -996,6 +1022,18 @@ def evaluate_selection_val(
         "n_blocks": len({r.cluster_id for r in records}),
         "n_records_fold": scope["n_records"],
         "n_records_scored": len(records),
+        # Re-measured on the SCORED slice, never inherited from the fold. A subset of a
+        # 0-LOO fold is 0-LOO, so these cannot newly fail — but a field describing a
+        # population other than the one it was measured on is the precise shape of the
+        # defect this step exists to fix. Inheriting would re-commit it in the block that
+        # reports it. The cluster-level disjointness carries to any subset and keeps its
+        # fold scope, named as such.
+        "leakage": {
+            **scope["leakage"],
+            "n_designated_loo_holdout": sum(1 for r in records if r.is_designated_loo_holdout),
+            "n_not_nested_train": sum(1 for r in records if not r.nested_train),
+            "measured_on": "scored slice" if cfg.eval_max_records is not None else "full fold",
+        },
         "full_fold": cfg.eval_max_records is None,
         "eval_max_records": cfg.eval_max_records,
         "window_nt": int(cfg.window_nt),
@@ -1245,7 +1283,12 @@ def build_stream(cfg: Stage1TrainConfig) -> tuple[Any, Any, dict[str, Any]]:
         load_corpus_records,
     )
 
-    records, _ = load_corpus_records(training_fold_only=True, window=cfg.window_nt)
+    # `exclude_selection_val` defaults on: this is the `inner_train` fold — the D5 nested
+    # fold MINUS the P2-06a selection-val clusters. Training on the fold a sweep then
+    # selects on is train-on-train, and it is silent; losing 10.01% of records (8,303 ->
+    # 7,472) is neither. The full D5 fold is `exclude_selection_val=False`, which is what
+    # a post-sweep production retrain (P2-09) would want.
+    records, fold_report = load_corpus_records(training_fold_only=True, window=cfg.window_nt)
     n_fold = len(records)
     if cfg.max_records is not None:
         records = records[: cfg.max_records]
@@ -1266,6 +1309,13 @@ def build_stream(cfg: Stage1TrainConfig) -> tuple[Any, Any, dict[str, Any]]:
         "n_training_fold_records": n_fold,
         "full_stream": len(records) == n_fold,
         "training_fold_only": True,
+        # Which fold `n_training_fold_records` counts — `inner_train` (D5 minus the P2-06a
+        # carve) or the full D5 `train`. Named, because "8,303" and "7,472" are both
+        # correct answers to "how big is the training fold" and a reader cannot tell which
+        # one a bare number means.
+        "fold_scope": fold_report["fold_scope"],
+        "selection_val_excluded": fold_report["exclude_selection_val"],
+        "n_selection_val_excluded": fold_report["n_selection_val_excluded"],
         # The occurrence the scan is pinned at. NOT "the deterministic lead": with
         # offset_augmentation on, window_at draws the phase/strand from the seeded
         # augmentation RNG, so this is reproducible-at-epoch-0, not phase-independent.

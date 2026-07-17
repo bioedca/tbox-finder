@@ -11,6 +11,14 @@ of that shape in the repo: an eval that silently no-ops leaves ``eval_scope`` ab
 "no violation found" phrasing would certify that as clean.
 
 So the tests below assert the **gate**, not the fields, on the absence branch.
+
+⚠ **And that was not enough — this file's first version was green while the fold it
+certified was 88.4% designated leave-one-order-out holdout.** Every clause it checked was
+present, measured, and true; they just measured the wrong thing (disjointness *from train*,
+while the fold sat in the *holdout*). The absent-evidence lesson generalises less far than
+it looks: guarding on presence catches a **missing** measurement and says nothing about a
+**present measurement of the wrong quantity**. The `n_designated_loo_holdout` tests below
+are the ones that would have caught the real defect, and they are here because it shipped.
 """
 
 from __future__ import annotations
@@ -23,11 +31,14 @@ from tbox_finder.train.train_stage1 import _eval_val_ok, derive_clauses
 def _scope() -> dict:
     return {
         "fold_scope": "selection_val",
-        "n_records_scored": 880,
-        "n_blocks": 726,
-        "disjointness": {
-            "shared_record_ids_with_train": 0,
-            "shared_cluster_ids_with_train": 0,
+        "n_records_scored": 830,
+        "n_blocks": 469,
+        "leakage": {
+            "n_designated_loo_holdout": 0,
+            "n_not_nested_train": 0,
+            "shared_record_ids_with_inner_train": 0,
+            "shared_cluster_ids_with_inner_train": 0,
+            "n_inner_train_records": 7472,
         },
     }
 
@@ -68,12 +79,39 @@ def test_gate_is_false_when_eval_requested_but_scope_missing():
     assert clauses["eval_val_scored_on_disjoint_fold"] is False
 
 
-def test_gate_is_false_when_the_disjointness_block_is_absent():
+def test_gate_is_false_when_the_leakage_block_is_absent():
     rep = _report()
-    rep["eval_scope"].pop("disjointness")
+    rep["eval_scope"].pop("leakage")
     assert _eval_val_ok(rep) is False
     rep = _report()
-    rep["eval_scope"]["disjointness"] = {}
+    rep["eval_scope"]["leakage"] = {}
+    assert _eval_val_ok(rep) is False
+
+
+# ── The wrong-quantity branch: P2-06a's own defect ───────────────────────────
+def test_gate_is_false_when_the_fold_sits_in_the_loo_holdout():
+    """The clause that did not exist, and the run that would have passed without it.
+
+    This report is exactly what the first P2-06a definition produced: disjoint from train
+    (truthfully), fully scored, real metrics — and 778 of its 880 records were the
+    designated leave-one-order-out holdout. Every other clause in this file passes it.
+    """
+    rep = _report()
+    rep["eval_scope"]["leakage"]["n_designated_loo_holdout"] = 778
+    assert _eval_val_ok(rep) is False
+    assert derive_clauses(rep)["eval_val_scored_on_disjoint_fold"] is False
+
+
+def test_gate_is_false_when_the_fold_reaches_outside_the_training_fold():
+    rep = _report()
+    rep["eval_scope"]["leakage"]["n_not_nested_train"] = 880
+    assert _eval_val_ok(rep) is False
+
+
+def test_gate_is_false_when_disjointness_is_vacuous_against_an_empty_train_fold():
+    """0 shared with a fold of 0 records is true and worthless."""
+    rep = _report()
+    rep["eval_scope"]["leakage"]["n_inner_train_records"] = 0
     assert _eval_val_ok(rep) is False
 
 
@@ -100,14 +138,22 @@ def test_a_missing_eval_requested_key_is_not_a_pass():
 
 
 # ── Each leak condition bites ────────────────────────────────────────────────
-@pytest.mark.parametrize("key", ["shared_record_ids_with_train", "shared_cluster_ids_with_train"])
+@pytest.mark.parametrize(
+    "key",
+    [
+        "n_designated_loo_holdout",
+        "n_not_nested_train",
+        "shared_record_ids_with_inner_train",
+        "shared_cluster_ids_with_inner_train",
+    ],
+)
 @pytest.mark.parametrize("bad", [1, 7, -1, True, False, "0", None, 0.0])
-def test_clause_is_false_on_any_non_zero_or_ill_typed_overlap(key, bad):
+def test_clause_is_false_on_any_non_zero_or_ill_typed_leak_count(key, bad):
     """Includes the bool trap: ``False == 0`` is True in Python, so a bare ``!= 0`` check
     would accept ``False`` as evidence of zero overlap. It is not evidence; it is a type
     error wearing the right value."""
     rep = _report()
-    rep["eval_scope"]["disjointness"][key] = bad
+    rep["eval_scope"]["leakage"][key] = bad
     assert _eval_val_ok(rep) is False
 
 
