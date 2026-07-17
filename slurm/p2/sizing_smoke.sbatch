@@ -29,17 +29,25 @@
 #          ⚠️ 8 GPUs, not imp.md's 2: imp.md's own Outputs ask for "DDP×8 scaling
 #          efficiency" and PRD §10.3 pins "DDP×8 for throughput" — unmeasurable on 2.
 #          ADR-0003 D1 parameterises `--gres=gpu:a4000:<N>` with "N ≤ 8", so 8 is inside it.
-# INPUT:   STAGED, NOT dvc-pulled — the ml envs carry no dvc, and context_v0.parquet has
-#          never been `dvc push`ed (§5.2 defers push to the phase-exit gate), so it is
-#          absent from the cluster remote. Stage from the laptop BEFORE submitting:
+# INPUT:   ALL THREE corpus parquets are STAGED by rsync, NOT dvc-pulled and NOT carried by
+#          the checkout. The ml envs have no dvc (the cluster's only dvc lives in an
+#          unrelated tboxevo-infernal env; using it would be an ADR-0002 D8 ad-hoc-env
+#          violation), and context_v0.parquet has never been `dvc push`ed (§5.2 defers push
+#          to the phase-exit gate) so it is absent from the cluster remote anyway.
+#          ⚠️ split_assignments.parquet is git-LFS (.gitattributes) and THIS CLUSTER HAS NO
+#          git-lfs — a fresh checkout leaves a 132-byte POINTER, which is non-empty and so
+#          passes a naive existence check. It must be rsynced too. Stage before submitting:
 #            rsync -avzP data/interim/flank_context/context_v0.parquet \
 #              two:~/tbox-finder/data/interim/flank_context/
 #            rsync -avzP data/processed/labels/labels_v0.parquet \
 #              two:~/tbox-finder/data/processed/labels/
-#          (split_assignments.parquet is git-tracked and arrives with the checkout.)
-#          Both are .gitignore'd, so `git reset --hard` on re-sync does not delete them.
-#          This body md5-verifies each against its committed .dvc pointer and exits 2 on a
-#          mismatch — a silently different corpus would size the wrong run.
+#            rsync -avzP data/processed/splits/split_assignments.parquet \
+#              two:~/tbox-finder/data/processed/splits/
+#          The DVC pair is .gitignore'd so `git reset --hard` on re-sync keeps them; the LFS
+#          file IS tracked, so a re-checkout can revert it to a pointer — hence the check.
+#          This body verifies each against its committed pointer (md5 for .dvc, sha256 for
+#          LFS) plus PAR1 magic, and exits 2 on any mismatch: a silently different or
+#          pointer-shaped corpus would size the wrong run.
 # SUBMIT:  from the repo root so relative --output/--error resolve:
 #            ssh two 'bash -lc "cd ~/tbox-finder && git fetch origin && \
 #              git checkout p2-05-sizing-smoke && git reset --hard origin/p2-05-sizing-smoke && \
@@ -90,15 +98,40 @@ fi
 rm -f "$DONE" "$REPORT" "$POINT_DIR"/*.json
 
 # ── Staged-input assertions (fail loud, before any GPU time) ─────────────────
-# md5 against the COMMITTED .dvc pointer, not just existence: a stale or truncated parquet
-# would size a different corpus and the numbers would look perfectly reasonable.
-assert_dvc_artifact() {
-  local data_path="$1" dvc_path="$2" want got
+# Existence is NOT enough, twice over:
+#   (1) a stale/truncated parquet would size a different corpus and the numbers would look
+#       perfectly reasonable, so the DVC-tracked files are md5'd against their COMMITTED
+#       .dvc pointer;
+#   (2) split_assignments.parquet is git-LFS (.gitattributes) and THERE IS NO git-lfs ON
+#       THIS CLUSTER, so a fresh checkout leaves a 132-byte POINTER TEXT in its place —
+#       non-empty, so `[ -s ]` passes it happily, and the run then dies reading a pointer
+#       as parquet (or worse, wouldn't). Every parquet is checked for the `PAR1` magic,
+#       which catches the pointer AND truncation in one cheap test.
+stage_hint() {
+  echo "  rsync -avzP $1 two:~/tbox-finder/$(dirname "$1")/" >&2
+}
+
+assert_parquet_magic() {
+  local data_path="$1"
   if [ ! -s "$data_path" ]; then
     echo "FATAL: $data_path missing. Stage it from the laptop (see INPUT in this file's header):" >&2
-    echo "  rsync -avzP $data_path two:~/tbox-finder/$(dirname "$data_path")/" >&2
+    stage_hint "$data_path"
     exit 2
   fi
+  if [ "$(head -c 4 "$data_path")" != "PAR1" ]; then
+    echo "FATAL: $data_path is not a parquet (no PAR1 magic; $(stat -c %s "$data_path") bytes)." >&2
+    if head -c 40 "$data_path" | grep -q 'git-lfs.github.com'; then
+      echo "  It is an UNSMUDGED git-LFS POINTER — this cluster has no git-lfs on PATH." >&2
+      echo "  Stage the real file from the laptop:" >&2
+      stage_hint "$data_path"
+    fi
+    exit 2
+  fi
+}
+
+assert_dvc_artifact() {
+  local data_path="$1" dvc_path="$2" want got
+  assert_parquet_magic "$data_path"
   want="$(awk '/^- md5:/ {print $3; exit}' "$dvc_path")"
   got="$(md5sum "$data_path" | awk '{print $1}')"
   if [ -z "$want" ]; then
@@ -111,14 +144,37 @@ assert_dvc_artifact() {
   fi
   echo "staged-ok $data_path md5=$got"
 }
+
+# The LFS pointer is itself the provenance record: with no git-lfs installed, `git show`
+# hands back the POINTER TEXT rather than smudging it, so its `oid sha256` is a committed
+# checksum for the real file — the exact analogue of the .dvc md5 above. Read it and verify.
+assert_lfs_artifact() {
+  local data_path="$1" ptr want_oid want_size got_oid got_size
+  assert_parquet_magic "$data_path"
+  ptr="$(git show "HEAD:$data_path" 2>/dev/null || true)"
+  want_oid="$(printf '%s\n' "$ptr" | awk -F'sha256:' '/^oid sha256:/ {print $2; exit}')"
+  want_size="$(printf '%s\n' "$ptr" | awk '/^size / {print $2; exit}')"
+  if [ -z "$want_oid" ]; then
+    # git-lfs present and smudging (or the file left LFS): magic check already passed.
+    echo "staged-ok $data_path (no readable LFS pointer to verify against; PAR1 magic ok)"
+    return 0
+  fi
+  got_oid="$(sha256sum "$data_path" | awk '{print $1}')"
+  got_size="$(stat -c %s "$data_path")"
+  if [ "$want_oid" != "$got_oid" ] || [ "$want_size" != "$got_size" ]; then
+    echo "FATAL: $data_path does not match its committed LFS pointer." >&2
+    echo "  want oid=$want_oid size=$want_size" >&2
+    echo "  got  oid=$got_oid size=$got_size" >&2
+    exit 2
+  fi
+  echo "staged-ok $data_path sha256=$got_oid"
+}
+
 assert_dvc_artifact data/interim/flank_context/context_v0.parquet \
                     data/interim/flank_context/context_v0.parquet.dvc
 assert_dvc_artifact data/processed/labels/labels_v0.parquet \
                     data/processed/labels/labels_v0.parquet.dvc
-if [ ! -s data/processed/splits/split_assignments.parquet ]; then
-  echo "FATAL: data/processed/splits/split_assignments.parquet missing (expected git-tracked)." >&2
-  exit 2
-fi
+assert_lfs_artifact data/processed/splits/split_assignments.parquet
 
 CONDA_SH=/exports/people/mondragonlab/ecc1695/miniconda3/etc/profile.d/conda.sh
 source "$CONDA_SH"
