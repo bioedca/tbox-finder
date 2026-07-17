@@ -99,7 +99,7 @@
     "train_step_ran": true
   },
   "gate4_graded": false,
-  "generated_at_utc": "2026-07-17T00:09:04+00:00",
+  "generated_at_utc": "2026-07-17T00:21:56+00:00",
   "generated_by": "src/tbox_finder/train/train_stage1.py",
   "gradient_checkpointing": {
     "hf_flag_supported": false,
@@ -115,9 +115,9 @@
     "config_path": "conf/train/stage1.yaml",
     "env_lock_sha256": "70b66801eeafe1fdec4c19e667de1590e4471143bca36248fe40f16e53bb5003",
     "git_dirty": false,
-    "git_sha": "e3702bf2e86e94b8b11a74fcfc56ada8cb816f6f",
+    "git_sha": "a4d118c509f14be4ff5c1856b210a5a0048fbf60",
     "seed": 42,
-    "wandb_run_id": "dadawu1j"
+    "wandb_run_id": "yyus4f1g"
   },
   "schema_version": "1",
   "step": "P2-04",
