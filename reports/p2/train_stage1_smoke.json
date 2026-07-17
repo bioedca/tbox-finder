@@ -55,6 +55,10 @@
       "device": null,
       "dropout": 0.0,
       "epochs": 1,
+      "eval_batch_size": 8,
+      "eval_max_records": null,
+      "eval_n_boot": 2000,
+      "eval_val": true,
       "gamma": 2.0,
       "grad_clip": 1.0,
       "gradient_checkpointing": true,
@@ -90,9 +94,116 @@
     }
   },
   "env_lock": "envs/ml-dna.conda-lock.yml",
-  "eval_metrics": null,
+  "eval_metrics": {
+    "auprc_by_class": {
+      "Antiterminator_Tbox_seq": 0.009551868672638516,
+      "Discriminator": 0.001288037083782981,
+      "Specifier": 0.0012038801800093673,
+      "Stem_I": 0.030182414988033094,
+      "Stem_II": 0.011571211829688979,
+      "Stem_III": 0.007841982803710647,
+      "Terminator": 0.011348107028014403,
+      "background": 0.9215174103812028
+    },
+    "block_bootstrap_ci": {
+      "ci_level": 0.95,
+      "lower": 0.0,
+      "n_blocks": 726,
+      "n_boot": 2000,
+      "point": 0.0,
+      "upper": 0.0
+    },
+    "boundary_iou_by_element": {
+      "Antiterminator_Tbox_seq": 0.0,
+      "Discriminator": 0.0,
+      "Specifier": 0.0010870787569816696,
+      "Stem_I": 0.0,
+      "Stem_II": 0.0,
+      "Stem_III": 0.007074604489683198,
+      "Terminator": 0.0,
+      "background": 6.935161533676563e-05
+    },
+    "eval_split": "selection_val",
+    "gate4_core_min_f1": {
+      "floor": 0.8,
+      "min_f1": 0.0,
+      "passes": false,
+      "per_element_f1": {
+        "Antiterminator_Tbox_seq": 0.0,
+        "Specifier": 0.002171796600014978,
+        "Stem_I": 0.0
+      }
+    },
+    "macro_f1": 0.002045037790944673,
+    "micro_f1": 0.002997293705683218,
+    "n_positions": 2061860,
+    "n_windows_forwarded": 3510,
+    "per_nt_f1_by_class": {
+      "Antiterminator_Tbox_seq": 0.0,
+      "Discriminator": 0.0,
+      "Specifier": 0.002171796600014978,
+      "Stem_I": 0.0,
+      "Stem_II": 0.0,
+      "Stem_III": 0.014049812115494909,
+      "Terminator": 0.0,
+      "background": 0.00013869361204749885
+    },
+    "selected_on": "gate4_core_min_f1"
+  },
+  "eval_requested": true,
+  "eval_scope": {
+    "class_ii_records": 35,
+    "disjointness": {
+      "n_train_blocks": 4775,
+      "n_train_records": 8303,
+      "shared_cluster_ids_with_train": 0,
+      "shared_record_ids_with_train": 0
+    },
+    "eval_max_records": null,
+    "excluded_by_reason": {
+      "cluster_shared_with_training_fold": 12,
+      "context_shorter_than_window": 17,
+      "in_training_fold": 1445,
+      "not_scheme_a_val": 21181
+    },
+    "fold_scope": "selection_val",
+    "full_fold": true,
+    "klass_counts": {
+      "I": 845,
+      "II": 35
+    },
+    "min_heldout_positives": 20,
+    "n_blocks": 726,
+    "n_blocks_fold": 726,
+    "n_context_records": 23535,
+    "n_excluded": 22655,
+    "n_records": 880,
+    "n_records_fold": 880,
+    "n_records_scored": 880,
+    "phylum_counts": {
+      "Actinobacteria": 47,
+      "Arthropoda": 1,
+      "Candidatus Saccharibacteria": 1,
+      "Chloroflexi": 41,
+      "Deinococcus-Thermus": 16,
+      "Firmicutes": 731,
+      "Nematoda": 1,
+      "Proteobacteria": 1,
+      "Synergistetes": 3,
+      "Tenericutes": 26,
+      "UNKNOWN": 12
+    },
+    "reconciliation": "ADR-0005 D3 + A3 (per-window-normalised LSE -> argmax)",
+    "schema_version": "1.0",
+    "scheme": "A/random (genus-stratified) \u2014 ADR-0004 D5 detection-quality reference",
+    "step": "P2-06a",
+    "stride_nt": 512,
+    "synthetic_flank": false,
+    "window_nt": 1024
+  },
   "gate": {
     "class_counts_from_stream": true,
+    "eval_val_scored_on_disjoint_fold": true,
     "gradient_checkpointing_applied": true,
     "grads_finite": true,
     "loss_finite": true,
@@ -101,7 +212,7 @@
     "train_step_ran": true
   },
   "gate4_graded": false,
-  "generated_at_utc": "2026-07-17T00:46:39+00:00",
+  "generated_at_utc": "2026-07-17T08:48:03+00:00",
   "generated_by": "src/tbox_finder/train/train_stage1.py",
   "gradient_checkpointing": {
     "hf_flag_supported": false,
@@ -127,20 +238,32 @@
     "config_path": "conf/train/stage1.yaml",
     "env_lock_sha256": "70b66801eeafe1fdec4c19e667de1590e4471143bca36248fe40f16e53bb5003",
     "git_dirty": false,
-    "git_sha": "832d1cc901ebaebd795c72c603dedfbb081ebe3a",
+    "git_sha": "a02ed5c65e641c467d0773d6f4521bdc61b6b200",
     "seed": 42,
-    "wandb_run_id": "7wfiz1yj"
+    "wandb_run_id": "fgi73a35"
   },
   "schema_version": "1",
   "step": "P2-04",
   "steps": {
+    "batch_wait_seconds": [
+      0.0008458730007987469,
+      0.001440378007828258,
+      0.001070411002729088,
+      0.000963088998105377
+    ],
     "losses": [
       1.6607372760772705,
       1.6573712825775146,
-      1.6501822471618652,
+      1.6501823663711548,
       1.6429932117462158
     ],
     "n_steps": 4,
+    "step_seconds": [
+      4.022078895999584,
+      0.3613933559972793,
+      0.33461540199641604,
+      0.36993937799707055
+    ],
     "world_size": 1
   }
 }
