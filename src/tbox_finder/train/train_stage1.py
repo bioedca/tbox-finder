@@ -146,6 +146,28 @@ class Stage1TrainConfig:
     klass_alpha: float = 0.25
     aa_alpha: float = 0.25
 
+    # ── The P2-06a validation ladder (the rung P2-06 promotes its best config on) ──
+    # `eval_val` runs the P2-06a inner-rung val fold (window_dataset.load_selection_val_
+    # records — a cluster-grouped seeded carve from INSIDE the ADR-0004 D5 training fold)
+    # through the ADR-0005 D3+A3 reconciliation operator and scores it. It is the ONLY
+    # per-run number a sweep may rank on: training loss is a function of `gamma` and
+    # `class_weight_alpha` themselves, so points are not comparable across the two axes the
+    # sweep most wants (P2-06's γ/α grid) — ranking on it would compare objectives, not
+    # models. The fold is safe to tune on because it sits inside `nested_train`, whose
+    # complement IS the leave-one-order-out holdout — so the PRD §12:241 headline stays
+    # genuinely held out. (An earlier version filtered `fold_random==val & not nested_train`
+    # and landed 88.4% INSIDE that holdout; the load_selection_val_records docstring records
+    # why, and load-bearing `leakage.n_designated_loo_holdout` measures it, per run.)
+    eval_val: bool = True
+    eval_batch_size: int = 8
+    #: Cap the val fold for the smoke (None ⇒ all 830, the P2-06a inner-rung carve).
+    #: Recorded in the eval scope AND enforced: a capped run records `full_fold: false`,
+    #: and `select_best` rejects any point that is not a full fold (a slice's min-F1 is not
+    #: comparable to a full fold's).
+    eval_max_records: int | None = None
+    #: Block-bootstrap replicates (ADR-0005 D5 resamples at the homology-cluster level).
+    eval_n_boot: int = 2000
+
     # Stream shaping. `steps_per_epoch`/`max_records` exist for the smoke: a full epoch is
     # 8,303 records and the smoke must compose in seconds, not hours. None ⇒ the full stream.
     steps_per_epoch: int | None = None
@@ -600,6 +622,19 @@ def _non_neg_int(v: Any) -> bool:
     return isinstance(v, int) and not isinstance(v, bool) and v >= 0
 
 
+def _is_real(v: Any) -> bool:
+    """True for a non-bool **finite** real. Rejects bools, NaN and inf.
+
+    Identical to ``sizing._is_real``. Duplicated rather than imported because ``sizing`` is
+    the *downstream* aggregator over this module's reports — importing it here would invert
+    the dependency — and this module keeps its own predicates private. The repo's
+    drift-guard convention applies (as for ``window_dataset.IGNORE_INDEX``):
+    ``test_is_real_matches_sizing_is_real`` asserts the two agree on the tricky values, so
+    the copies cannot drift apart silently.
+    """
+    return isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(float(v))
+
+
 def derive_clauses(report: Mapping[str, Any]) -> dict[str, bool]:
     """Re-derive every gate clause **from the report's recorded evidence**.
 
@@ -667,8 +702,83 @@ def derive_clauses(report: Mapping[str, Any]) -> dict[str, bool]:
         "loss_finite": bool(losses_ok),
         "class_counts_from_stream": bool(counts_ok),
         "grads_finite": report.get("grads_finite") is True,
+        "eval_val_scored_on_disjoint_fold": _eval_val_ok(report),
         "provenance_complete": _provenance_complete(report),
     }
+
+
+def _eval_val_ok(report: Mapping[str, Any]) -> bool:
+    """The P2-06a clause: either the val fold was scored on a **proven-disjoint** set, or
+    no eval was requested and none is claimed.
+
+    Total by construction, and the shape matters more than the content. P2-05 shipped a
+    green gate resting on **zero** measurements because a clause read its *requested config*
+    instead of the *found evidence*, and so went vacuously TRUE exactly when the evidence
+    was missing ([[clauses-must-guard-emptiness]]). The same trap is live here in its purest
+    form: an eval that silently no-ops leaves `eval_scope` absent, and a clause phrased
+    "no disjointness violation found" would certify that as clean. So the requested branch
+    **requires the artifact** — every check below is reached only after the evidence is
+    confirmed present, and the absence branch is asserted *explicitly absent* rather than
+    merely unviolated. ``test_gate_is_false_when_eval_requested_but_scope_missing`` grades
+    the absence branch's **gate**, not its fields.
+
+    ⚠ **And being total still let the wrong fold through.** This clause originally checked
+    ``disjointness.shared_*_with_train == 0`` — true, and blind: the fold it certified was
+    **88.4% designated leave-one-order-out holdout**, because "disjoint from train" and
+    "not the headline holdout" are not complements (``nested_train``'s complement *is* the
+    holdout, splits.py:706). Guarding on evidence-*presence* protects against a **missing**
+    measurement; it does nothing about a **present measurement of the wrong quantity**.
+    ``leakage.n_designated_loo_holdout`` is the quantity.
+    """
+    requested = report.get("eval_requested")
+    metrics_block = report.get("eval_metrics")
+    scope = report.get("eval_scope")
+
+    if requested is not True:
+        # Not requested ⇒ nothing may be claimed. An `eval_requested: False` report that
+        # nonetheless carries metrics is incoherent, not passing.
+        return requested is False and metrics_block is None and scope is None
+
+    if not isinstance(scope, Mapping) or not scope:
+        return False
+    if not isinstance(metrics_block, Mapping) or not metrics_block:
+        return False
+
+    leak = scope.get("leakage")
+    if not isinstance(leak, Mapping) or not leak:
+        return False
+    for key in (
+        # THE clause. 778 here is what the first P2-06a definition would have reported,
+        # and no other check in this function would have noticed.
+        "n_designated_loo_holdout",
+        "n_not_nested_train",
+        "shared_record_ids_with_inner_train",
+        "shared_cluster_ids_with_inner_train",
+    ):
+        val = leak.get(key)
+        if not isinstance(val, int) or isinstance(val, bool) or val != 0:
+            return False
+    # A zero-overlap claim against an EMPTY training fold is vacuously true — require the
+    # population to exist before believing a statement about it ([[clauses-must-guard-emptiness]]).
+    if not _pos_int(leak.get("n_inner_train_records")):
+        return False
+
+    if scope.get("fold_scope") != "selection_val":
+        return False
+    if not _pos_int(scope.get("n_records_scored")):
+        return False
+    if not _pos_int(scope.get("n_blocks")) or scope["n_blocks"] < 2:
+        return False
+    if not _pos_int(metrics_block.get("n_positions")):
+        return False
+    if metrics_block.get("eval_split") != "selection_val":
+        return False
+    # The gated statistic must be a real number. NaN is how gate4_core_min_f1 reports an
+    # unmeasurable core element — a sweep cannot rank on it, so it is not a scored fold.
+    gate4 = metrics_block.get("gate4_core_min_f1")
+    if not isinstance(gate4, Mapping):
+        return False
+    return _is_real(gate4.get("min_f1"))
 
 
 def _provenance_complete(report: Mapping[str, Any]) -> bool:
@@ -784,6 +894,228 @@ def validate_report(report: Mapping[str, Any]) -> list[str]:
     return problems
 
 
+# ══════════════════════════════════════════════════════════════════════════════════════
+# The P2-06a validation ladder (PRD §9.2 rung (a); ADR-0004 D5; ADR-0005 D3+A3, D5)
+# ══════════════════════════════════════════════════════════════════════════════════════
+def class_confusions(y_true: Any, y_pred: Any, *, n_classes: int = NUM_CLASSES) -> Any:
+    """One-vs-rest ``(n_classes, 3)`` int64 ``[tp, fp, fn]`` counts.
+
+    The bootstrap's sufficient statistic. TP/FP/FN are **additive across blocks**, so a
+    resampled set of blocks can be scored by summing their confusion vectors instead of
+    re-scoring their concatenated nucleotides — which is what makes the ADR-0005 D5 block
+    bootstrap tractable here at all: 2,000 replicates over ~2.1M positions through the
+    pure-stdlib ``metrics`` kernels is hours of work, while 2,000 replicates over 726
+    ``(8, 3)`` vectors is milliseconds. The identity is exact, not an approximation.
+
+    ⚠ This is a **second** implementation of a statistic ``metrics.py`` already owns, which
+    is normally the bug factory ([[promote-dont-duplicate-is-a-correctness-rule]]). It earns
+    its place only because it is a *different shape* (per-block sufficient statistics, not a
+    pooled score) — and it is held to the pinned kernel by
+    ``test_confusions_agree_with_metrics_kernel``, which grades this route against
+    ``metrics.gate4_core_min_f1`` on the pooled data rather than against itself.
+    """
+    import numpy as np
+
+    t = np.asarray(y_true)
+    p = np.asarray(y_pred)
+    if t.shape != p.shape:
+        raise ValueError(f"y_true {t.shape} and y_pred {p.shape} must be the same shape")
+    out = np.zeros((n_classes, 3), dtype=np.int64)
+    for c in range(n_classes):
+        tc, pc = t == c, p == c
+        out[c, 0] = int(np.sum(tc & pc))
+        out[c, 1] = int(np.sum(~tc & pc))
+        out[c, 2] = int(np.sum(tc & ~pc))
+    return out
+
+
+def _f1_from_confusion(tp: int, fp: int, fn: int) -> float:
+    """F1 from one class's counts. NaN when the class is absent from truth AND prediction —
+    matching ``metrics.per_nt_class_f1`` exactly (undefined, never a silent 0.0)."""
+    if tp == 0 and fp == 0 and fn == 0:
+        return float("nan")
+    denom = 2 * tp + fp + fn
+    return (2.0 * tp / denom) if denom else float("nan")
+
+
+def min_core_f1_from_confusions(items: Sequence[Any]) -> float:
+    """GATE-4's gated statistic from summed confusion vectors (ADR-0004 D6: a **min**, not
+    a mean). Any undefined core element ⇒ NaN, so an unmeasurable element cannot silently
+    certify the gate — the ``metrics.gate4_core_min_f1`` contract, preserved."""
+    import numpy as np
+
+    from tbox_finder.labels import CLASS_INDEX, CORE_ELEMENTS
+
+    if not len(items):
+        return float("nan")
+    total = np.sum(np.stack([np.asarray(i) for i in items]), axis=0)
+    vals = [_f1_from_confusion(*(int(x) for x in total[CLASS_INDEX[e]])) for e in CORE_ELEMENTS]
+    return float("nan") if any(math.isnan(v) for v in vals) else float(min(vals))
+
+
+def evaluate_selection_val(
+    model: Any,
+    device: Any,
+    *,
+    cfg: Stage1TrainConfig,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Score the P2-06a inner-rung val fold under the **deployed** reconciliation operator.
+
+    Returns ``(eval_metrics, eval_scope)``. The scope carries the ``leakage`` evidence
+    ``load_selection_val_records`` measured — including ``n_designated_loo_holdout``, the
+    clause that proves the fold is not the PRD §12:241 headline — and the metrics carry the
+    numbers a sweep ranks on.
+
+    Each record is tiled over its **full context** with ``tile_windows`` (the deterministic
+    scan/eval geometry), every window is forwarded, and the per-window logits are
+    reconciled by ``infer.reconcile.reconcile_windows`` — the ADR-0005 D3 + Amendment A3
+    operator, frozen in code with no config override. Evaluating through it rather than
+    through a single locus-centred window is deliberate: it is the operator P5 actually
+    scans with, so a config selected here is selected under the arithmetic it will be
+    deployed under. It also puts the A3 operator on **real** logits for the first time —
+    P2-03's golden could only pin synthetic ones (no Stage-1 checkpoint existed yet).
+
+    ⚠ ``model.eval()`` + ``torch.no_grad()``, then ``model.train()`` restored. context7
+    (``/pytorch/pytorch``, autograd notes) is explicit that ``inference_mode`` does **not**
+    imply ``eval()`` and that tensors it creates **cannot re-enter autograd** — this eval
+    runs inside a training entrypoint, so ``no_grad`` is the conservative choice and the
+    marginal speed-up is irrelevant against a ~3.5k-window forward. ``eval()`` matters here
+    on its own terms: ``dropout`` is a swept axis, and scoring with dropout live would add
+    noise to the very comparison the sweep is making.
+    """
+    import numpy as np
+    import torch
+
+    from tbox_finder import metrics as M
+    from tbox_finder.data.window_dataset import (
+        context_labels,
+        encode_eval_window,
+        load_selection_val_records,
+        selection_val_problems,
+        tile_windows,
+    )
+    from tbox_finder.infer.reconcile import reconcile_windows
+    from tbox_finder.labels import CLASS_ORDER
+
+    records, scope = load_selection_val_records(window=cfg.window_nt)
+    problems = selection_val_problems(scope)
+    if problems:
+        # Fail loud: a selection set that cannot prove itself disjoint from the training
+        # fold is worse than no selection set — it would rank configs on memorised records
+        # and look exactly like a real result (§10.3).
+        raise ValueError(
+            "P2-06a selection-val fold failed its own invariants:\n  " + "\n  ".join(problems)
+        )
+
+    if cfg.eval_max_records is not None:
+        records = records[: cfg.eval_max_records]
+    # ⚠ `n_blocks` MUST describe what was SCORED, not the fold that was loaded. The loader's
+    # report counts the whole fold's 469 blocks; a capped smoke that scores 4 records
+    # resamples 4 blocks, and a scope claiming 469 would let the >= 2 block-resamplability
+    # clause pass on blocks the bootstrap never saw — a field describing the *requested*
+    # population instead of the *measured* one, which is this repo's most-repeated defect
+    # (P2-05's basis_point, P2-04's swept-but-unreached /data group). The fold-level count
+    # is kept under its own name because it is genuinely useful, just not the gated one.
+    scope = {
+        **scope,
+        "n_blocks_fold": scope["n_blocks"],
+        "n_blocks": len({r.cluster_id for r in records}),
+        "n_records_fold": scope["n_records"],
+        "n_records_scored": len(records),
+        # Re-measured on the SCORED slice, never inherited from the fold. A subset of a
+        # 0-LOO fold is 0-LOO, so these cannot newly fail — but a field describing a
+        # population other than the one it was measured on is the precise shape of the
+        # defect this step exists to fix. Inheriting would re-commit it in the block that
+        # reports it. The cluster-level disjointness carries to any subset and keeps its
+        # fold scope, named as such.
+        "leakage": {
+            **scope["leakage"],
+            "n_designated_loo_holdout": sum(1 for r in records if r.is_designated_loo_holdout),
+            "n_not_nested_train": sum(1 for r in records if not r.nested_train),
+            "measured_on": "scored slice" if cfg.eval_max_records is not None else "full fold",
+        },
+        "full_fold": cfg.eval_max_records is None,
+        "eval_max_records": cfg.eval_max_records,
+        "window_nt": int(cfg.window_nt),
+        "stride_nt": int(cfg.stride_nt),
+        "reconciliation": "ADR-0005 D3 + A3 (per-window-normalised LSE -> argmax)",
+    }
+
+    was_training = model.training
+    model.eval()
+    per_block: dict[int, list[Any]] = {}
+    y_true_all: list[int] = []
+    y_pred_all: list[int] = []
+    prob_all: list[Any] = []
+    n_windows = 0
+    try:
+        with torch.no_grad():
+            for rec in records:
+                seq_len = len(rec.context_seq)
+                starts = tile_windows(seq_len, window=cfg.window_nt, stride=cfg.stride_nt)
+                ids = np.stack([encode_eval_window(rec, s, window=cfg.window_nt) for s in starts])
+                chunks = []
+                for i in range(0, len(ids), cfg.eval_batch_size):
+                    batch = torch.from_numpy(ids[i : i + cfg.eval_batch_size].astype(np.int64))
+                    chunks.append(model(input_ids=batch.to(device)).float().cpu())
+                logits = torch.cat(chunks, dim=0)
+                n_windows += int(logits.shape[0])
+
+                rec_out = reconcile_windows(logits, np.asarray(starts), seq_len)
+                y_true = context_labels(rec)
+                y_pred = np.asarray(rec_out.prediction)
+                y_true_all.extend(int(x) for x in y_true)
+                y_pred_all.extend(int(x) for x in y_pred)
+                prob_all.append(np.exp(np.asarray(rec_out.log_probs)))
+                per_block.setdefault(rec.cluster_id, []).append(
+                    class_confusions(y_true, y_pred, n_classes=NUM_CLASSES)
+                )
+    finally:
+        if was_training:
+            model.train()
+
+    # ── Point estimates through the PINNED kernels (metrics.py), not this module's ──
+    gate4 = M.gate4_core_min_f1(y_true_all, y_pred_all)
+    probs = np.concatenate(prob_all, axis=0)
+    auprc = {
+        name: M.average_precision([1 if t == i else 0 for t in y_true_all], probs[:, i].tolist())
+        for i, name in enumerate(CLASS_ORDER)
+    }
+
+    # ── Block-resampled CI at the homology-cluster level (ADR-0005 D5) ──
+    blocks = [v for _, v in sorted(per_block.items())]
+    ci = M.block_bootstrap_ci(
+        blocks,
+        min_core_f1_from_confusions,
+        n_boot=cfg.eval_n_boot,
+        seed=cfg.seed,
+    )
+    # The scope's block count and the bootstrap's must be the same number arrived at two
+    # ways (a set over the scored records vs. the length of the list actually resampled).
+    # P1-15/P1-16 shipped a duplicated `peak_vram_gib` that was never cross-checked and so
+    # could disagree while the report still certified; recording a count twice without
+    # comparing them is strictly worse than recording it once.
+    if ci["n_blocks"] != scope["n_blocks"]:
+        raise ValueError(
+            f"block-count disagreement: eval_scope.n_blocks={scope['n_blocks']} but the "
+            f"bootstrap resampled {ci['n_blocks']} — the scope does not describe the eval"
+        )
+    eval_metrics = {
+        "eval_split": "selection_val",
+        "selected_on": "gate4_core_min_f1",
+        "gate4_core_min_f1": gate4,
+        "per_nt_f1_by_class": M.per_nt_f1_by_class(y_true_all, y_pred_all),
+        "macro_f1": M.macro_f1(y_true_all, y_pred_all),
+        "micro_f1": M.micro_f1(y_true_all, y_pred_all),
+        "auprc_by_class": auprc,
+        "boundary_iou_by_element": M.boundary_iou_by_element(y_true_all, y_pred_all),
+        "block_bootstrap_ci": ci,
+        "n_positions": len(y_true_all),
+        "n_windows_forwarded": n_windows,
+    }
+    return eval_metrics, scope
+
+
 def build_report(
     *,
     cfg: Stage1TrainConfig,
@@ -799,6 +1131,8 @@ def build_report(
     wandb_run_id: str | None,
     peak_vram_gib: float | None = None,
     eval_metrics: Mapping[str, Any] | None = None,
+    eval_scope: Mapping[str, Any] | None = None,
+    eval_requested: bool = False,
     step_seconds: Sequence[float] | None = None,
     batch_wait_seconds: Sequence[float] | None = None,
 ) -> dict[str, Any]:
@@ -859,6 +1193,15 @@ def build_report(
         # and P2-04's laptop RTX 4060 is not the A4000 the PRD §10.3 budget is about.
         "hardware": _sanitize(hardware) if hardware else None,
         "eval_metrics": _sanitize(eval_metrics) if eval_metrics else None,
+        # The population `eval_metrics` was measured on, with the disjointness evidence
+        # load_selection_val_records MEASURED off its own emitted records. A val number
+        # without its scope cannot be told apart from a train-on-train number, which is
+        # precisely the failure this whole rung exists to prevent (ADR-0004 D5).
+        "eval_scope": _sanitize(eval_scope) if eval_scope else None,
+        # What THIS rank actually did — not what cfg asked for. `cfg.eval_val` would be a
+        # requested-config echo, and a clause reading the request rather than the evidence
+        # is the exact P2-05 defect ([[clauses-must-guard-emptiness]]).
+        "eval_requested": bool(eval_requested),
         "provenance": {
             "git_sha": _git_sha(),
             "git_dirty": _git_dirty(),
@@ -940,7 +1283,12 @@ def build_stream(cfg: Stage1TrainConfig) -> tuple[Any, Any, dict[str, Any]]:
         load_corpus_records,
     )
 
-    records, _ = load_corpus_records(training_fold_only=True, window=cfg.window_nt)
+    # `exclude_selection_val` defaults on: this is the `inner_train` fold — the D5 nested
+    # fold MINUS the P2-06a selection-val clusters. Training on the fold a sweep then
+    # selects on is train-on-train, and it is silent; losing 10.01% of records (8,303 ->
+    # 7,472) is neither. The full D5 fold is `exclude_selection_val=False`, which is what
+    # a post-sweep production retrain (P2-09) would want.
+    records, fold_report = load_corpus_records(training_fold_only=True, window=cfg.window_nt)
     n_fold = len(records)
     if cfg.max_records is not None:
         records = records[: cfg.max_records]
@@ -961,6 +1309,13 @@ def build_stream(cfg: Stage1TrainConfig) -> tuple[Any, Any, dict[str, Any]]:
         "n_training_fold_records": n_fold,
         "full_stream": len(records) == n_fold,
         "training_fold_only": True,
+        # Which fold `n_training_fold_records` counts — `inner_train` (D5 minus the P2-06a
+        # carve) or the full D5 `train`. Named, because "8,303" and "7,472" are both
+        # correct answers to "how big is the training fold" and a reader cannot tell which
+        # one a bare number means.
+        "fold_scope": fold_report["fold_scope"],
+        "selection_val_excluded": fold_report["exclude_selection_val"],
+        "n_selection_val_excluded": fold_report["n_selection_val_excluded"],
         # The occurrence the scan is pinned at. NOT "the deterministic lead": with
         # offset_augmentation on, window_at draws the phase/strand from the seeded
         # augmentation RNG, so this is reproducible-at-epoch-0, not phase-independent.
@@ -1158,6 +1513,25 @@ def _train_stage1_inner(
                 run.log({"train/loss": losses[-1], "epoch": epoch})
 
     peak = torch.cuda.max_memory_allocated(device) / 2**30 if measuring_vram else None
+
+    # ── The P2-06a validation ladder ──────────────────────────────────────────────────
+    # Ordered AFTER `peak` is read, deliberately: `max_memory_allocated` is a running
+    # maximum over the process, so an eval forward before this line would fold its own
+    # activations into the number PRD §10.3's VRAM budget and P2-05's whole extrapolation
+    # rest on — silently inflating the *training* footprint with an *eval* cost.
+    #
+    # Primary rank only, on the UNWRAPPED `segmenter`: the eval is pure forward under
+    # no_grad, so there is no gradient all-reduce to join and DDP adds nothing but risk;
+    # and eight ranks each re-scoring the whole fold would be 8x the work for one report
+    # that only the primary writes. `eval_requested` therefore records what THIS rank did
+    # — on a non-primary rank it is False and the clause takes its absence branch, which
+    # is honest (that rank did not eval) rather than a gate failure on ranks 1..7.
+    eval_requested = bool(cfg.eval_val) and is_primary()
+    eval_metrics: dict[str, Any] | None = None
+    eval_scope: dict[str, Any] | None = None
+    if eval_requested:
+        eval_metrics, eval_scope = evaluate_selection_val(segmenter, device, cfg=cfg)
+
     # A VRAM number is meaningless without the card it was measured on — the sibling P1
     # reports (lora_vram_smoke, kernel_smoke, attention_backend) all carry device_name, and
     # this one did not, leaving `peak_vram_gib` unattributable. The laptop and the A4000 are
@@ -1187,6 +1561,9 @@ def _train_stage1_inner(
         world_size=world_size,
         wandb_run_id=getattr(run, "id", None),
         peak_vram_gib=peak,
+        eval_metrics=eval_metrics,
+        eval_scope=eval_scope,
+        eval_requested=eval_requested,
         step_seconds=step_seconds,
         batch_wait_seconds=batch_wait_seconds,
     )

@@ -46,11 +46,18 @@ def _record(
     phylum: str = "Firmicutes",
     aa: str = "ILE",
     nested_train: bool = True,
+    is_designated_loo_holdout: bool = False,
     folds: tuple = ("train", None, None, None, True, "train"),
     label_string: str | None = None,
     seed: int = 0,
 ) -> wd.CorpusRecord:
-    """A synthetic corpus record with exact, hand-checkable geometry."""
+    """A synthetic corpus record with exact, hand-checkable geometry.
+
+    ``is_designated_loo_holdout`` defaults False and is coherent with the ``nested_train``
+    default: measured on the committed table, the D5 training fold contains 0 designated
+    LOO records, so True/True would be a state the real corpus never produces. A test that
+    wants a holdout record passes both explicitly.
+    """
     return wd.CorpusRecord(
         record_id=rid,
         context_seq=_seq(lead + locus + trail, seed=seed),
@@ -64,6 +71,7 @@ def _record(
         cognate_aa=aa,
         cluster_id=0,
         nested_train=nested_train,
+        is_designated_loo_holdout=is_designated_loo_holdout,
         folds=folds,
     )
 

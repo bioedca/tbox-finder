@@ -358,10 +358,47 @@ def _valid_report() -> dict:
         "steps": {"n_steps": 2, "losses": [1.6, 1.5], "world_size": 1},
         "class_counts": [10, 2, 1, 1, 1, 1, 1, 1],
         "grads_finite": True,
+        # P2-06a: the validation ladder. A report claiming an eval must carry the
+        # disjointness evidence for it — see tests/unit/test_eval_val_clause.py for the
+        # clause's own tests (incl. the absence branch this fixture's sibling covers).
+        "eval_requested": True,
+        "eval_scope": {
+            "fold_scope": "selection_val",
+            "n_records_scored": 830,
+            "n_blocks": 469,
+            "full_fold": True,
+            "eval_max_records": None,
+            "leakage": {
+                "n_designated_loo_holdout": 0,
+                "n_not_nested_train": 0,
+                "shared_record_ids_with_inner_train": 0,
+                "shared_cluster_ids_with_inner_train": 0,
+                "n_inner_train_records": 7472,
+            },
+        },
+        "eval_metrics": {
+            "eval_split": "selection_val",
+            "n_positions": 2_100_000,
+            "gate4_core_min_f1": {"min_f1": 0.31, "per_element_f1": {}},
+        },
         "provenance": {"git_sha": "abc", "env_lock_sha256": "def", "seed": 42},
         "diagnostics": {"pinned": False, "config": {"seed": 42}},
         "gate": {},
     }
+
+
+def _valid_report_without_eval() -> dict:
+    """The `eval_val=False` shape: no eval requested, and none claimed.
+
+    P2-06a's clause is total — this is its other branch, and it must PASS. A run that
+    deliberately skips the val fold (a pure footprint/timing run, as P2-05's sizing points
+    are) is legitimate; what is illegitimate is *claiming* an eval without the evidence.
+    """
+    rep = _valid_report()
+    rep["eval_requested"] = False
+    rep["eval_scope"] = None
+    rep["eval_metrics"] = None
+    return rep
 
 
 def _sealed(report: dict) -> dict:
@@ -374,6 +411,43 @@ def test_a_valid_report_passes_and_all_clauses_hold() -> None:
     report = _sealed(_valid_report())
     assert T.validate_report(report) == []
     assert report["gate"]["overall_pass"] is True
+
+
+def test_a_valid_report_without_an_eval_also_passes() -> None:
+    """P2-06a's absence branch, through the real gate — not the predicate."""
+    report = _sealed(_valid_report_without_eval())
+    assert T.validate_report(report) == []
+    assert report["gate"]["overall_pass"] is True
+    assert report["gate"]["eval_val_scored_on_disjoint_fold"] is True
+
+
+def test_a_report_claiming_an_eval_without_evidence_fails_the_gate() -> None:
+    """The P2-05 shape, guarded at the level that ships: an eval that silently no-ops
+    leaves no scope, and the gate must refuse it rather than certify the absence."""
+    rep = _valid_report()
+    rep["eval_scope"] = None
+    sealed = _sealed(rep)
+    assert sealed["gate"]["eval_val_scored_on_disjoint_fold"] is False
+    assert sealed["gate"]["overall_pass"] is False
+
+
+def test_a_report_whose_val_set_touched_training_fails_the_gate() -> None:
+    """The defect the whole rung exists to prevent, asserted end-to-end."""
+    rep = _valid_report()
+    rep["eval_scope"]["leakage"]["shared_cluster_ids_with_inner_train"] = 7
+    sealed = _sealed(rep)
+    assert sealed["gate"]["eval_val_scored_on_disjoint_fold"] is False
+    assert sealed["gate"]["overall_pass"] is False
+
+
+def test_a_report_whose_val_set_was_the_loo_holdout_fails_the_gate() -> None:
+    """P2-06a's actual defect, asserted end-to-end: a fold disjoint from train, fully
+    scored, real metrics — and 778/880 of it the leave-one-order-out headline."""
+    rep = _valid_report()
+    rep["eval_scope"]["leakage"]["n_designated_loo_holdout"] = 778
+    sealed = _sealed(rep)
+    assert sealed["gate"]["eval_val_scored_on_disjoint_fold"] is False
+    assert sealed["gate"]["overall_pass"] is False
 
 
 def test_validator_catches_a_clause_fabricated_true() -> None:
@@ -1026,3 +1100,136 @@ def test_one_train_step_composes_end_to_end() -> None:
     # A real CUDA step is not instantaneous; a zero here would mean the clock is measuring
     # kernel LAUNCH rather than execution (i.e. the synchronize was dropped).
     assert steps["step_seconds"][0] > 0.0
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# P2-06a — the validation ladder's ALIGNMENT, proven with an oracle
+# ═══════════════════════════════════════════════════════════════════════════
+@pytest.mark.skipif(
+    os.environ.get("TBOX_REQUIRE_TRAIN_CUDA") != "1",
+    reason="reads the DVC corpus; local/cluster only",
+)
+def test_the_val_eval_scores_a_perfect_oracle_at_f1_one() -> None:
+    """THE test the P2-06a eval rests on: prove the label alignment, independent of the model.
+
+    The measured smoke reports ``min_f1 = 0.0`` — correctly, because a 4-step model with a
+    randomly-initialised head has learned nothing. But **a broken eval reports 0.0 too**: an
+    off-by-one between the reconciled prediction and ``context_labels``, a wrong tiling
+    origin, or a transposed window would all collapse the score, and an untrained model
+    gives us no way to tell those apart. That is the P2-03 lesson exactly — an operator
+    misaligning every left-overhanging window passed all 48 of its tests, because nothing
+    numeric ever read the slice.
+
+    So: replace the model with an **oracle** that emits one-hot logits of the TRUE labels
+    for each window's own span. If every index in the chain agrees, the reconciled argmax
+    must reproduce ``context_labels`` EXACTLY and every per-element F1 must be 1.0. A
+    one-nucleotide shift anywhere destroys it — which the sibling test below proves.
+    """
+    torch = _require_torch()
+    import numpy as np
+
+    from tbox_finder.data.window_dataset import (
+        context_labels,
+        load_selection_val_records,
+        tile_windows,
+    )
+
+    records, _ = load_selection_val_records()
+    rec = records[0]
+    truth = context_labels(rec)
+    starts = tile_windows(len(rec.context_seq), window=1024, stride=512)
+
+    class _Oracle:
+        """Emits one-hot logits of the true labels for each window, in tiling order."""
+
+        training = False
+
+        def __init__(self, shift: int = 0) -> None:
+            self.i = 0
+            self.shift = shift
+
+        def eval(self):
+            return self
+
+        def train(self):
+            return self
+
+        def __call__(self, *, input_ids):
+            n = int(input_ids.shape[0])
+            out = torch.full((n, 1024, T.NUM_CLASSES), -10.0)
+            for k in range(n):
+                s = starts[self.i + k] + self.shift
+                span = np.asarray(
+                    [truth[p] if 0 <= p < len(truth) else 0 for p in range(s, s + 1024)]
+                )
+                out[k, np.arange(1024), span] = 10.0
+            self.i += n
+            return out
+
+    cfg = T.Stage1TrainConfig(eval_val=True, eval_max_records=1, eval_n_boot=25)
+    metrics_block, scope = T.evaluate_selection_val(_Oracle(), torch.device("cpu"), cfg=cfg)
+
+    assert scope["n_records_scored"] == 1
+    assert metrics_block["n_positions"] == len(truth)
+    for elem, f1 in metrics_block["gate4_core_min_f1"]["per_element_f1"].items():
+        assert f1 == pytest.approx(1.0), f"{elem} scored {f1} on a PERFECT oracle — misaligned"
+    assert metrics_block["gate4_core_min_f1"]["min_f1"] == pytest.approx(1.0)
+    assert metrics_block["gate4_core_min_f1"]["passes"] is True
+    assert metrics_block["micro_f1"] == pytest.approx(1.0)
+
+
+@pytest.mark.skipif(
+    os.environ.get("TBOX_REQUIRE_TRAIN_CUDA") != "1",
+    reason="reads the DVC corpus; local/cluster only",
+)
+def test_a_one_nucleotide_shift_destroys_the_oracle_score() -> None:
+    """Sabotage: prove the oracle test above BITES rather than passing by construction.
+
+    Without this, ``f1 == 1.0`` might hold for a reason unrelated to alignment. Shifting the
+    oracle's span by a single nucleotide must break it — if it does not, the test above is
+    measuring nothing.
+    """
+    torch = _require_torch()
+    import numpy as np
+
+    from tbox_finder.data.window_dataset import (
+        context_labels,
+        load_selection_val_records,
+        tile_windows,
+    )
+
+    records, _ = load_selection_val_records()
+    rec = records[0]
+    truth = context_labels(rec)
+    starts = tile_windows(len(rec.context_seq), window=1024, stride=512)
+
+    class _ShiftedOracle:
+        training = False
+
+        def __init__(self) -> None:
+            self.i = 0
+
+        def eval(self):
+            return self
+
+        def train(self):
+            return self
+
+        def __call__(self, *, input_ids):
+            n = int(input_ids.shape[0])
+            out = torch.full((n, 1024, T.NUM_CLASSES), -10.0)
+            for k in range(n):
+                s = starts[self.i + k] + 1  # <-- the sabotage: one nucleotide off
+                span = np.asarray(
+                    [truth[p] if 0 <= p < len(truth) else 0 for p in range(s, s + 1024)]
+                )
+                out[k, np.arange(1024), span] = 10.0
+            self.i += n
+            return out
+
+    cfg = T.Stage1TrainConfig(eval_val=True, eval_max_records=1, eval_n_boot=25)
+    metrics_block, _ = T.evaluate_selection_val(_ShiftedOracle(), torch.device("cpu"), cfg=cfg)
+    assert metrics_block["gate4_core_min_f1"]["min_f1"] < 1.0, (
+        "a 1-nt shift still scored a perfect 1.0 — the alignment test cannot bite, so it "
+        "proves nothing about the eval"
+    )

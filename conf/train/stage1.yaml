@@ -80,6 +80,29 @@ steps_per_epoch: null
 max_records: null
 num_workers: 0
 
+# ── The validation ladder (P2-06a) ───────────────────────────────────────────────────────
+# The rung P2-06 promotes its best config on: the P2-06a inner-rung val fold — a
+# cluster-grouped seeded carve from INSIDE the ADR-0004 D5 nested_train fold. 830 records /
+# 469 homology-cluster blocks / 5 class-II on the committed table (fraction 0.10, seed
+# 20260717). It is safe to tune on because it sits inside nested_train, whose complement IS
+# the leave-one-order-out holdout — so the PRD §12:241 headline stays genuinely held out
+# (user decision 2026-07-17, RE-TAKEN the same day: the first definition filtered
+# `fold_random==val & not nested_train` and landed 88.4% inside that holdout). A nested
+# design — the inner rung here, the outer rung at P2-14. The carve costs 10.0% of the
+# training fold (8,303 → 7,472); train_stage1 loads `inner_train` by default.
+#
+# ⚠ This is the ONLY per-run number a sweep may rank on. Training loss is a function of
+# `gamma` and `class_weight_alpha` themselves, so ranking P2-06's γ/α grid on loss would
+# compare objectives rather than models.
+eval_val: true
+eval_batch_size: 8
+# null ⇒ all 830 records. The smoke caps it; P2-06/P2-09 leave it null. A capped run
+# records `full_fold: false` in its eval scope, and select_best REJECTS a non-full-fold
+# point (a slice's min-F1 is not comparable to a full fold's).
+eval_max_records: null
+# Block-bootstrap replicates, resampled at the homology-cluster level (ADR-0005 D5).
+eval_n_boot: 2000
+
 # ── Outputs ──────────────────────────────────────────────────────────────────────────────
 report_path: reports/p2/train_stage1_smoke.json
 checkpoint_dir: checkpoints/p2/stage1
