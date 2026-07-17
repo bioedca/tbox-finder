@@ -15,11 +15,22 @@
     249
   ],
   "class_counts_scope": {
+    "data_config": {
+      "aa_alpha": 0.25,
+      "both_strands": true,
+      "klass_alpha": 0.25,
+      "offset_augmentation": true,
+      "phylum_alpha": 0.25,
+      "seed": 42,
+      "stride_nt": 512,
+      "window_nt": 1024
+    },
     "full_stream": false,
     "n_records": 64,
     "n_training_fold_records": 8303,
     "occurrence": 0,
-    "training_fold_only": true
+    "training_fold_only": true,
+    "weighted_draw_stream": false
   },
   "diagnostics": {
     "class_order": [
@@ -33,7 +44,9 @@
       "Discriminator"
     ],
     "config": {
+      "aa_alpha": 0.25,
       "batch_size": 2,
+      "both_strands": true,
       "checkpoint_dir": "checkpoints/p2/stage1",
       "class_weight_alpha": 0.0,
       "crf_weight": 1.0,
@@ -43,21 +56,26 @@
       "gamma": 2.0,
       "grad_clip": 1.0,
       "gradient_checkpointing": true,
+      "klass_alpha": 0.25,
       "lr": 0.0001,
       "max_records": 64,
       "num_workers": 0,
+      "offset_augmentation": true,
+      "phylum_alpha": 0.25,
       "pythonhashseed": 0,
       "rc_combine": "concat",
       "report_path": "reports/p2/train_stage1_smoke.json",
       "save_checkpoint": false,
       "seed": 42,
       "steps_per_epoch": 4,
+      "stride_nt": 512,
       "use_crf": false,
       "wandb_dir": "wandb",
       "wandb_entity": null,
       "wandb_mode": "offline",
       "wandb_project": "tbox-finder",
-      "weight_decay": 0.01
+      "weight_decay": 0.01,
+      "window_nt": 1024
     },
     "pinned": false,
     "step": "P2-04",
@@ -81,7 +99,7 @@
     "train_step_ran": true
   },
   "gate4_graded": false,
-  "generated_at_utc": "2026-07-16T23:54:05+00:00",
+  "generated_at_utc": "2026-07-17T00:09:04+00:00",
   "generated_by": "src/tbox_finder/train/train_stage1.py",
   "gradient_checkpointing": {
     "hf_flag_supported": false,
@@ -97,9 +115,9 @@
     "config_path": "conf/train/stage1.yaml",
     "env_lock_sha256": "70b66801eeafe1fdec4c19e667de1590e4471143bca36248fe40f16e53bb5003",
     "git_dirty": false,
-    "git_sha": "66f0598d7287325c6bf0ce964dcc177159348b44",
+    "git_sha": "e3702bf2e86e94b8b11a74fcfc56ada8cb816f6f",
     "seed": 42,
-    "wandb_run_id": "gvoko451"
+    "wandb_run_id": "dadawu1j"
   },
   "schema_version": "1",
   "step": "P2-04",
