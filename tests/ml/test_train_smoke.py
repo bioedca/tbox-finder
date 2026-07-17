@@ -439,6 +439,22 @@ def test_validator_enforces_the_honesty_invariants() -> None:
         assert any(key in p for p in T.validate_report(report))
 
 
+def test_a_valid_report_can_still_record_a_failed_run() -> None:
+    """`validate_report` checks consistency, NOT success — so it cannot be the exit gate.
+
+    This is why `train_stage1` raises separately on `overall_pass is False`: a run that
+    trained zero steps (e.g. batch_size > the per-rank draw count) produces a perfectly
+    *valid* report saying it failed, and would otherwise exit 0 — leaving the sbatch looking
+    successful and §9.3's artifact-based verification passing it.
+    """
+    report = _valid_report()
+    report["steps"] = {"n_steps": 0, "losses": [], "world_size": 1}
+    report = _sealed(report)
+    assert T.validate_report(report) == [], "a report recording a failure is still VALID"
+    assert report["gate"]["overall_pass"] is False, "...but the gate must not pass"
+    assert report["gate"]["train_step_ran"] is False
+
+
 def test_validator_is_total_and_never_raises() -> None:
     """A malformed report is reported, not crashed on (the P1-16 `list(86)` lesson)."""
     for junk in (None, 42, "a string", [], {}, {"step": "P2-04"}):

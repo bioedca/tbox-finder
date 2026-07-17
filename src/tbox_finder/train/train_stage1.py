@@ -1005,13 +1005,12 @@ def train_stage1(cfg: Stage1TrainConfig, *, log: Any = print) -> dict[str, Any]:
     problems = validate_report(report)
     if problems:
         raise ValueError("P2-04 smoke report failed its own validator:\n  " + "\n  ".join(problems))
-
     if is_primary():
         out = Path(cfg.report_path)
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text(json.dumps(report, indent=2, sort_keys=True, allow_nan=False) + "\n")
         log(f"wrote {out}")
-        if cfg.save_checkpoint:
+        if cfg.save_checkpoint and report["gate"]["overall_pass"]:
             ckpt_dir = Path(cfg.checkpoint_dir)
             ckpt_dir.mkdir(parents=True, exist_ok=True)
             torch.save(segmenter.state_dict(), ckpt_dir / "stage1.pt")
@@ -1021,6 +1020,23 @@ def train_stage1(cfg: Stage1TrainConfig, *, log: Any = print) -> dict[str, Any]:
         import torch.distributed as dist
 
         dist.destroy_process_group()
+
+    # A *valid* report can still record a *failed* run: the validator only checks that the
+    # clauses follow from the evidence, so a run that trained zero steps yields a perfectly
+    # consistent report saying `overall_pass: false`. Without this, that run would exit 0 —
+    # the sbatch would look successful and §9.3's artifact-based verification (a DONE marker
+    # plus a zero-byte `.err`) would pass it, because the failure lives only in a JSON field
+    # nobody re-reads. `batch_size` exceeding the per-rank draw count reaches exactly that in
+    # one step. The report is written first (it is the evidence), then we fail loud: the
+    # process exit code must mean what the gate means (§10.3).
+    if not report["gate"]["overall_pass"]:
+        failed = [k for k, v in report["gate"].items() if k != "overall_pass" and not v]
+        raise RuntimeError(
+            f"P2-04 smoke gate FAILED (clauses: {', '.join(failed) or 'unknown'}). "
+            f"n_steps={report['steps']['n_steps']}, world_size={world_size}, "
+            f"batch_size={cfg.batch_size}. The report was written to {cfg.report_path} for "
+            f"inspection, but the run did not pass its own gate — a failed run must not exit 0."
+        )
     return report
 
 
