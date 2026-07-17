@@ -622,15 +622,42 @@ def derive_clauses(report: Mapping[str, Any]) -> dict[str, bool]:
         "loss_finite": bool(losses_ok),
         "class_counts_from_stream": bool(counts_ok),
         "grads_finite": report.get("grads_finite") is True,
-        # CLAUDE.md §11: a run without its git SHA + env-lock hash + seed is not reproducible,
-        # so the record is incomplete. Parenthesised explicitly — `a and b and c or d` would
-        # bind as `(a and b and c) or d` and pass on seed==0 alone, whatever the SHA said.
-        "provenance_complete": bool(
-            isinstance(prov.get("git_sha"), str)
-            and isinstance(prov.get("env_lock_sha256"), str)
-            and _non_neg_int(prov.get("seed"))
-        ),
+        "provenance_complete": _provenance_complete(report),
     }
+
+
+def _provenance_complete(report: Mapping[str, Any]) -> bool:
+    """CLAUDE.md §11: a run without its git SHA + env-lock hash + seed is not reproducible.
+
+    Three traps this closes, each of which passed an earlier draft:
+
+    - ``a and b and c or d`` binds as ``(a and b and c) or d`` — the first form certified
+      provenance on ``seed == 0`` alone, whatever the SHA said.
+    - ``isinstance("", str)`` is **True**, so an empty ``git_sha`` satisfied a bare type
+      check. A blank SHA is a *missing* SHA wearing the right type.
+    - the seed was recorded twice (``provenance.seed`` and ``diagnostics.config.seed``) and
+      never cross-checked, so the two could disagree and the report would still certify —
+      the P1-15/P1-16 duplicated-``peak_vram_gib`` lesson.
+    """
+    prov = report.get("provenance")
+    prov = prov if isinstance(prov, Mapping) else {}
+    diag = report.get("diagnostics")
+    diag = diag if isinstance(diag, Mapping) else {}
+    config = diag.get("config")
+    config = config if isinstance(config, Mapping) else {}
+
+    def _nonempty_str(v: Any) -> bool:
+        return isinstance(v, str) and bool(v.strip())
+
+    seed = prov.get("seed")
+    # The seed must be present in BOTH places and agree; a missing config seed voids it
+    # (fail-closed) rather than vacuously matching.
+    seed_ok = _non_neg_int(seed) and "seed" in config and config.get("seed") == seed
+    return bool(
+        _nonempty_str(prov.get("git_sha"))
+        and _nonempty_str(prov.get("env_lock_sha256"))
+        and seed_ok
+    )
 
 
 def validate_report(report: Mapping[str, Any]) -> list[str]:

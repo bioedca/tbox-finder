@@ -307,7 +307,7 @@ def _valid_report() -> dict:
         "class_counts": [10, 2, 1, 1, 1, 1, 1, 1],
         "grads_finite": True,
         "provenance": {"git_sha": "abc", "env_lock_sha256": "def", "seed": 42},
-        "diagnostics": {"pinned": False},
+        "diagnostics": {"pinned": False, "config": {"seed": 42}},
         "gate": {},
     }
 
@@ -369,7 +369,47 @@ def test_provenance_clause_needs_every_part(monkeypatch: pytest.MonkeyPatch) -> 
     report["provenance"] = {"git_sha": "a", "env_lock_sha256": None, "seed": 42}
     assert T.derive_clauses(report)["provenance_complete"] is False
     report["provenance"] = {"git_sha": "a", "env_lock_sha256": "d", "seed": 0}
+    report["diagnostics"] = {"pinned": False, "config": {"seed": 0}}  # both copies agree
     assert T.derive_clauses(report)["provenance_complete"] is True, "seed 0 is a legal seed"
+
+
+def test_provenance_clause_rejects_an_empty_sha() -> None:
+    """`isinstance("", str)` is True — a blank SHA is a missing SHA wearing the right type."""
+    report = _valid_report()
+    for blank in ("", "   "):
+        report["provenance"] = {"git_sha": blank, "env_lock_sha256": "d", "seed": 42}
+        assert T.derive_clauses(report)["provenance_complete"] is False
+        report["provenance"] = {"git_sha": "a", "env_lock_sha256": blank, "seed": 42}
+        assert T.derive_clauses(report)["provenance_complete"] is False
+
+
+def test_provenance_clause_cross_checks_the_duplicated_seed() -> None:
+    """The seed is recorded twice; disagreeing copies must not certify (P1-15/P1-16)."""
+    report = _valid_report()
+    report["provenance"] = {"git_sha": "a", "env_lock_sha256": "d", "seed": 42}
+    report["diagnostics"] = {"pinned": False, "config": {"seed": 7}}  # disagrees
+    assert T.derive_clauses(report)["provenance_complete"] is False
+    report["diagnostics"] = {"pinned": False, "config": {"seed": 42}}
+    assert T.derive_clauses(report)["provenance_complete"] is True
+    report["diagnostics"] = {"pinned": False, "config": {}}  # absent ⇒ fail closed
+    assert T.derive_clauses(report)["provenance_complete"] is False
+
+
+def test_cublas_workspace_config_pins_torch_s_own_literals() -> None:
+    """Only the values torch itself accepts for deterministic cuBLAS (§8.3; ADR-0002 A6).
+
+    Pinned to the EXTERNAL published literals read from the installed torch 2.7.1
+    `use_deterministic_algorithms` docstring — not to our own default, which would be a
+    tautology. `:4096:2` is torch's *cuDNN-RNN* value and is NOT accepted here.
+    """
+    from tbox_finder.train import repro
+
+    assert frozenset({":4096:8", ":16:8"}) == repro.CUBLAS_DETERMINISTIC_CONFIGS
+    assert repro.DEFAULT_CUBLAS_WORKSPACE_CONFIG in repro.CUBLAS_DETERMINISTIC_CONFIGS
+    assert (
+        ":0:0" not in repro.CUBLAS_DETERMINISTIC_CONFIGS
+    ), "workspace-disabling is not deterministic"
+    assert ":4096:2" not in repro.CUBLAS_DETERMINISTIC_CONFIGS, "that is the cuDNN-RNN value"
 
 
 def test_non_finite_loss_fails_the_clause() -> None:
@@ -457,9 +497,17 @@ def test_wandb_sync_rule_is_not_duplicated() -> None:
 
     Two rules of one name break the Snakefile's `rules/*.smk` auto-include, and the Snakefile
     states GPU stages are intentionally not in the DAG (PRD §16) — so there is no train.smk.
+
+    Counts *declarations*, not files: a single .smk declaring the rule twice would still
+    yield one filename and pass, while breaking the include just the same.
     """
     rules = _REPO / "workflow" / "rules"
-    declaring = [p.name for p in rules.glob("*.smk") if "rule wandb_sync:" in p.read_text()]
+    declaring = [
+        p.name
+        for p in sorted(rules.glob("*.smk"))
+        for line in p.read_text().splitlines()
+        if line.strip() == "rule wandb_sync:"
+    ]
     assert declaring == ["setup.smk"], f"wandb_sync must be declared exactly once; got {declaring}"
 
 
@@ -711,14 +759,26 @@ def test_checkpointed_block_is_numerically_transparent_and_recomputes() -> None:
     os.environ.get("TBOX_REQUIRE_TRAIN_CUDA") != "1",
     reason="loads the pinned Caduceus-PS backbone + the DVC corpus; local/cluster only",
 )
-def test_one_train_step_composes_end_to_end(monkeypatch: pytest.MonkeyPatch) -> None:
-    """imp.md's gate: one train step composes on the real stream, and writes a valid report."""
-    torch = _require_torch()
+def test_one_train_step_composes_end_to_end() -> None:
+    """imp.md's gate: one train step composes on the real stream, and writes a valid report.
+
+    Fails closed on its own var: `_require_torch` would otherwise *skip* on a missing torch
+    via TBOX_REQUIRE_TRAIN_TORCH, so someone arming the CUDA gate alone would get a green
+    skip — the tier reporting success by not running.
+
+    PYTHONHASHSEED is **verified, not monkeypatched**. An earlier draft set it here so the
+    guard would pass, which asserted a lie: the env var would read "0" while the interpreter's
+    actual hash seed stayed whatever it was launched with, since CPython fixes it at startup.
+    That is the same in-process no-op the guard exists to catch — reproduced inside the test
+    for it. So this tier must be *launched* correctly: `PYTHONHASHSEED=0 pytest ...`.
+    """
+    try:
+        import torch
+    except ImportError as exc:
+        pytest.fail(f"TBOX_REQUIRE_TRAIN_CUDA=1 but torch is not importable: {exc}")
     if not torch.cuda.is_available():
         pytest.fail("TBOX_REQUIRE_TRAIN_CUDA=1 but no CUDA device (Caduceus has no CPU path)")
-    # The launcher owns PYTHONHASHSEED (it cannot be set in-process); pytest is the launcher
-    # here, so satisfy the precondition the same way the sbatch does.
-    monkeypatch.setenv("PYTHONHASHSEED", "0")
+    T.check_pythonhashseed(0)
     cfg = T.Stage1TrainConfig(
         epochs=1,
         batch_size=2,

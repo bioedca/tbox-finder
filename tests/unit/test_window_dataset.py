@@ -1045,10 +1045,17 @@ def test_stage1_config_is_wired_by_the_p2_04_training_entrypoint() -> None:
     # Repo-root anchored, not CWD-relative: a bare Path("conf/train") silently globs nothing
     # when pytest runs from elsewhere, and an empty glob would make this assert vacuously.
     repo = Path(__file__).resolve().parents[2]
+    # Match the ACTIVE defaults entry, not the raw text. A substring search cannot tell a live
+    # `- /data: stage1` from a commented-out one — so commenting the default out (which breaks
+    # the wiring completely) would leave the string present and this guard still green, exactly
+    # when it most needs to fire.
     wiring = {
         cfg.name
         for cfg in (repo / "conf" / "train").glob("*.yaml")
-        if "/data: stage1" in cfg.read_text()
+        if any(
+            line.split("#", 1)[0].strip() == "- /data: stage1"
+            for line in cfg.read_text().splitlines()
+        )
     }
     assert wiring == {
         "stage1.yaml"

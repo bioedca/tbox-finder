@@ -73,6 +73,20 @@ REPRO_TOLERANCE: float = 1e-3
 #: another missing one (``None == None`` would fail open).
 _MISSING = object()
 
+#: The only ``CUBLAS_WORKSPACE_CONFIG`` values under which cuBLAS is deterministic on
+#: CUDA >= 10.2. Pinned to torch's **own published literals**, not to our default: read from
+#: the installed torch 2.7.1 ``torch/__init__.py`` docstring for ``use_deterministic_algorithms``
+#: — *"unless the environment variable ``CUBLAS_WORKSPACE_CONFIG=:4096:8`` or
+#: ``CUBLAS_WORKSPACE_CONFIG=:16:8`` is set"*. An external-literal pin, so a test comparing
+#: the check to the constant that drives it cannot be a tautology
+#: ([[review-agents-mutate-code-under-review]]). Note ``:4096:2`` appears in torch's
+#: *cuDNN-RNN* determinism note — a different subsystem, not applicable here (Caduceus is
+#: Mamba/SSM), and it is **not** accepted by the cuBLAS check.
+CUBLAS_DETERMINISTIC_CONFIGS: frozenset[str] = frozenset({":4096:8", ":16:8"})
+
+#: The value we set when the environment offers nothing usable (ADR-0002 A6 / P1-07 form).
+DEFAULT_CUBLAS_WORKSPACE_CONFIG: str = ":4096:8"
+
 #: The **go/no-go-decision** metrics the secondary τ gate is scoped to (ADR-0002 A7, scoped by
 #: the P1-08 re-sign-off): the ``min_core_f1`` the verdict rests on (the min over the 3 core
 #: elements, ADR-0004 D6), the 3 core ``per_element_f1.*``, and the ``macro_f1``/``micro_f1``
@@ -137,7 +151,15 @@ def set_determinism(seed: int) -> None:
     import numpy as np  # lazy
     import torch  # lazy
 
-    os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")  # deterministic cuBLAS
+    # Deterministic cuBLAS. An inherited value is honoured only if it is one torch actually
+    # accepts; anything else is REPLACED rather than preserved. `setdefault` alone (the P1-07
+    # form) would keep e.g. the workspace-disabling `:0:0`, under which cuBLAS is
+    # nondeterministic — and because `warn_only=True` downgrades torch's complaint to a
+    # warning, the run would carry on and quietly stop being reproducible. Determinism is the
+    # thing this function exists to guarantee, so it does not defer to a launcher that got it
+    # wrong.
+    if os.environ.get("CUBLAS_WORKSPACE_CONFIG") not in CUBLAS_DETERMINISTIC_CONFIGS:
+        os.environ["CUBLAS_WORKSPACE_CONFIG"] = DEFAULT_CUBLAS_WORKSPACE_CONFIG
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
