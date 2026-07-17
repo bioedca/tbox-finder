@@ -1042,8 +1042,13 @@ def test_stage1_config_is_wired_by_the_p2_04_training_entrypoint() -> None:
     """
     from pathlib import Path
 
+    # Repo-root anchored, not CWD-relative: a bare Path("conf/train") silently globs nothing
+    # when pytest runs from elsewhere, and an empty glob would make this assert vacuously.
+    repo = Path(__file__).resolve().parents[2]
     wiring = {
-        cfg.name for cfg in Path("conf/train").glob("*.yaml") if "/data: stage1" in cfg.read_text()
+        cfg.name
+        for cfg in (repo / "conf" / "train").glob("*.yaml")
+        if "/data: stage1" in cfg.read_text()
     }
     assert wiring == {
         "stage1.yaml"

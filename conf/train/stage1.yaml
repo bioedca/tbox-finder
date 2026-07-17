@@ -88,6 +88,14 @@ device: null   # null ⇒ cuda:$LOCAL_RANK when available, else cpu
 
 # Hydra: keep the run CWD = the launch dir (repo root) so relative in/out paths resolve;
 # no per-run output subdir (the sbatch manages node-local scratch + artifact publish).
+#
+# ⚠ P2-06 (the `--multirun` sweep) MUST scope `report_path` per job. Every sweep point
+# inherits the single fixed `report_path` above, so concurrent jobs would clobber one
+# another's report and the surviving file would be whichever job finished last — silently,
+# and indistinguishable from a clean run. Override it per job, e.g.
+#   report_path=reports/p2/sweep/${hydra:job.num}.json
+# (raised at P2-04 review; left to P2-06, which owns the sweep and its output layout —
+# P2-04 runs no multirun, and inventing a layout here would pre-empt that step's design.)
 hydra:
   run:
     dir: .

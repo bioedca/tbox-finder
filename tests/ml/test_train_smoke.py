@@ -137,19 +137,52 @@ class _FakeSampler:
         return iter(self._draws)
 
 
-def test_ddp_shards_are_disjoint_and_cover_the_whole_stream() -> None:
-    """The union over ranks == the single-process stream, with no draw seen twice."""
+def test_ddp_shards_are_equal_length_or_ddp_deadlocks() -> None:
+    """Every rank must yield the SAME number of draws.
+
+    23 draws over 4 ranks is the case that bites: a `rank::world_size` stride alone shards
+    6/6/6/5, the short rank runs one fewer backward, drops out of the gradient all-reduce,
+    and the other three block forever — the job hangs rather than failing. So the stream is
+    truncated to a multiple of world_size before striding.
+    """
     world = 4
-    full = list(iter(_FakeSampler(23)))
     shards = [
         list(iter(T.ShardedSampler(_FakeSampler(23), rank=r, world_size=world)))
         for r in range(world)
     ]
-    union = [d for shard in shards for d in shard]
-    assert sorted(union) == sorted(full), "shards must partition the stream exactly"
-    assert len(union) == len(set(union)) == 23, "no draw may appear on two ranks"
+    assert (
+        len({len(s) for s in shards}) == 1
+    ), f"ragged shards deadlock DDP: {[len(s) for s in shards]}"
+    assert all(len(s) == 5 for s in shards), "23 // 4 == 5 draws per rank; the 3 remainder drop"
+    # __len__ must agree with what __iter__ actually yields, or a DataLoader mis-sizes the epoch.
     for r, shard in enumerate(shards):
         assert len(shard) == len(T.ShardedSampler(_FakeSampler(23), rank=r, world_size=world))
+
+
+def test_ddp_shards_are_disjoint_and_a_subset_of_the_stream() -> None:
+    """No draw may land on two ranks, and none may be invented."""
+    world = 4
+    full = set(iter(_FakeSampler(23)))
+    union = [
+        d
+        for r in range(world)
+        for d in iter(T.ShardedSampler(_FakeSampler(23), rank=r, world_size=world))
+    ]
+    assert len(union) == len(set(union)), "a draw appeared on two ranks"
+    assert set(union) <= full, "a shard yielded a draw that is not in the stream"
+    assert len(union) == 20, "exactly the truncated stream is covered (23 -> 20)"
+
+
+def test_ddp_shards_are_exact_when_the_stream_divides_evenly() -> None:
+    """No draw is dropped when len % world_size == 0 — truncation is not over-eager."""
+    world = 4
+    full = sorted(iter(_FakeSampler(24)))
+    union = sorted(
+        d
+        for r in range(world)
+        for d in iter(T.ShardedSampler(_FakeSampler(24), rank=r, world_size=world))
+    )
+    assert union == full
 
 
 def test_ddp_shard_preserves_the_index_occurrence_tuples() -> None:
@@ -186,6 +219,49 @@ def test_ddp_env_parsing(monkeypatch: pytest.MonkeyPatch) -> None:
         T.ddp_world_size()
 
 
+def test_pythonhashseed_is_verified_not_set(monkeypatch: pytest.MonkeyPatch) -> None:
+    """It must be inherited from the launcher — setting it in-process is a no-op (§8.3).
+
+    CPython fixes hash randomisation at interpreter startup, so an in-process assignment
+    changes nothing and merely *looks* compliant. The entrypoint therefore verifies.
+    """
+    monkeypatch.delenv("PYTHONHASHSEED", raising=False)
+    with pytest.raises(RuntimeError, match="not set"):
+        T.check_pythonhashseed(0)
+    monkeypatch.setenv("PYTHONHASHSEED", "1")
+    with pytest.raises(RuntimeError, match="pins"):
+        T.check_pythonhashseed(0)
+    monkeypatch.setenv("PYTHONHASHSEED", "0")
+    T.check_pythonhashseed(0)  # clean pass — the guard is not a blanket reject
+
+
+def test_class_counts_scope_clause_requires_a_self_consistent_scope() -> None:
+    """§10.2: `full_stream` must FOLLOW from the arithmetic, not be asserted beside it."""
+    report = _valid_report()
+    assert T.derive_clauses(report)["class_counts_from_stream"] is True
+    # A slice claiming to be the whole fold.
+    report["class_counts_scope"] = {
+        "n_records": 64,
+        "n_training_fold_records": 8303,
+        "full_stream": True,
+        "training_fold_only": True,
+        "occurrence": 0,
+    }
+    assert T.derive_clauses(report)["class_counts_from_stream"] is False
+    # A missing scope must not pass.
+    del report["class_counts_scope"]
+    assert T.derive_clauses(report)["class_counts_from_stream"] is False
+    # More records than the fold contains is incoherent.
+    report["class_counts_scope"] = {
+        "n_records": 9000,
+        "n_training_fold_records": 8303,
+        "full_stream": False,
+        "training_fold_only": True,
+        "occurrence": 0,
+    }
+    assert T.derive_clauses(report)["class_counts_from_stream"] is False
+
+
 def test_backbone_blocks_fails_loud_rather_than_reporting_a_no_op() -> None:
     """An empty/absent stack must raise, not return 0 blocks and look successful."""
 
@@ -205,6 +281,14 @@ def test_backbone_blocks_fails_loud_rather_than_reporting_a_no_op() -> None:
 # ── the report contract: every clause re-derived, never echoed ──────────────────────────
 def _valid_report() -> dict:
     return {
+        "class_counts_scope": {
+            "n_records": 64,
+            "n_training_fold_records": 8303,
+            "full_stream": False,
+            "training_fold_only": True,
+            "occurrence": 0,
+            "weighted_draw_stream": False,
+        },
         "schema_version": "1",
         "step": "P2-04",
         "generated_by": T.GENERATED_BY,
@@ -506,6 +590,44 @@ def test_cli_override_reaches_the_dataclass() -> None:
     assert cfg.lr == 3e-4 and cfg.gamma == 0.5
 
 
+def test_the_data_group_reaches_the_datamodule_not_just_the_config() -> None:
+    """PRD §11 sweeps window/stride (P2-06) — the values must reach Stage1DataConfig.
+
+    Asserting `cfg["data"]["window_nt"] == 1024` on the *composed dict* proves only that
+    Hydra read the file; it says nothing about whether the datamodule ever sees it. An
+    earlier draft built `Stage1DataConfig(seed=...)` alone, so the data group's values were
+    silently dropped and the defaults merely happened to agree — a window/stride sweep would
+    have run every point on the same 1024/512 stream while reporting the swept value. So the
+    override is followed all the way to the dataclass the dataset is constructed from.
+    """
+    compose, initialize_config_dir = _require_hydra()
+    from omegaconf import OmegaConf
+
+    with initialize_config_dir(version_base=None, config_dir=str(_REPO / "conf")):
+        raw = OmegaConf.to_container(
+            compose(
+                config_name="train/stage1",
+                overrides=["data.window_nt=512", "data.stride_nt=256", "data.klass_alpha=0.5"],
+            ),
+            resolve=True,
+        )
+    cfg = T._cfg_from_mapping(raw)
+    assert (cfg.window_nt, cfg.stride_nt, cfg.klass_alpha) == (512, 256, 0.5)
+
+
+def test_data_group_defaults_mirror_the_authoritative_module() -> None:
+    """The dataclass defaults must not drift from window_dataset.py, which is authoritative."""
+    from tbox_finder.data import window_dataset as wd
+
+    cfg = T.Stage1TrainConfig()
+    assert (cfg.window_nt, cfg.stride_nt) == (wd.WINDOW_NT, wd.STRIDE_NT)
+    assert (cfg.phylum_alpha, cfg.klass_alpha, cfg.aa_alpha) == (
+        wd.DEFAULT_PHYLUM_ALPHA,
+        wd.DEFAULT_KLASS_ALPHA,
+        wd.DEFAULT_AA_ALPHA,
+    )
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 # Tier 3 — torch (TBOX_REQUIRE_TRAIN_TORCH; CI installs no torch — its OWN var)
 # ═══════════════════════════════════════════════════════════════════════════
@@ -589,11 +711,14 @@ def test_checkpointed_block_is_numerically_transparent_and_recomputes() -> None:
     os.environ.get("TBOX_REQUIRE_TRAIN_CUDA") != "1",
     reason="loads the pinned Caduceus-PS backbone + the DVC corpus; local/cluster only",
 )
-def test_one_train_step_composes_end_to_end() -> None:
+def test_one_train_step_composes_end_to_end(monkeypatch: pytest.MonkeyPatch) -> None:
     """imp.md's gate: one train step composes on the real stream, and writes a valid report."""
     torch = _require_torch()
     if not torch.cuda.is_available():
         pytest.fail("TBOX_REQUIRE_TRAIN_CUDA=1 but no CUDA device (Caduceus has no CPU path)")
+    # The launcher owns PYTHONHASHSEED (it cannot be set in-process); pytest is the launcher
+    # here, so satisfy the precondition the same way the sbatch does.
+    monkeypatch.setenv("PYTHONHASHSEED", "0")
     cfg = T.Stage1TrainConfig(
         epochs=1,
         batch_size=2,

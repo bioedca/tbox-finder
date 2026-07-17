@@ -130,6 +130,20 @@ class Stage1TrainConfig:
     rc_combine: str = "concat"
     dropout: float = 0.0
 
+    # Datamodule (the `/data: stage1` group). These MUST be threaded through to
+    # Stage1DataConfig rather than left to its defaults: PRD §11 makes window/stride a
+    # `--multirun` sweep axis (P2-06), and a sweep whose values never reach the dataset would
+    # run every point on the same 1024/512 stream while faithfully reporting different ones.
+    # Defaults mirror window_dataset.py, which stays authoritative (ADR-0005 D3 pins 1024/512;
+    # the drift guard in test_window_dataset.py asserts config == code).
+    window_nt: int = 1024
+    stride_nt: int = 512
+    offset_augmentation: bool = True
+    both_strands: bool = True
+    phylum_alpha: float = 0.25
+    klass_alpha: float = 0.25
+    aa_alpha: float = 0.25
+
     # Stream shaping. `steps_per_epoch`/`max_records` exist for the smoke: a full epoch is
     # 8,303 records and the smoke must compose in seconds, not hours. None ⇒ the full stream.
     steps_per_epoch: int | None = None
@@ -259,6 +273,43 @@ def enable_gradient_checkpointing(backbone: Any) -> int:
 
 
 # --------------------------------------------------------------------------------------
+# Determinism preconditions (§8.3; PRD §11)
+# --------------------------------------------------------------------------------------
+def check_pythonhashseed(expected: int) -> None:
+    """Verify ``PYTHONHASHSEED`` was set **by the launcher**; raise if it was not.
+
+    PRD §11 pins *"Explicit seeds everywhere (Hydra config), ``PYTHONHASHSEED``, deterministic
+    flags where feasible"*. This function deliberately **verifies rather than sets**, because
+    setting it from inside the process is a **no-op that looks like it works**: CPython fixes
+    string-hash randomisation while initialising the interpreter, long before this module is
+    imported, so ``os.environ["PYTHONHASHSEED"] = "0"`` here changes an env var that nothing
+    will ever read again — the run stays as non-deterministic as it was, and the line sits in
+    the source as evidence that the requirement was handled. That is the same failure shape as
+    a gradient-checkpointing flag that silently no-ops (§10.3): the artifact of compliance
+    without the substance.
+
+    So the launcher owns it — the §9.3 sbatch body and any local invocation must export
+    ``PYTHONHASHSEED`` **before** python starts. This raises rather than warns because a
+    determinism precondition that is merely logged is one nobody reads until a run fails to
+    reproduce and the reason is a year old.
+    """
+    raw = os.environ.get("PYTHONHASHSEED")
+    if raw is None:
+        raise RuntimeError(
+            f"PYTHONHASHSEED is not set. It must be exported BEFORE python starts — CPython "
+            f"fixes hash randomisation at interpreter startup, so this process cannot set it "
+            f"for itself (§8.3; PRD §11). Re-run as: PYTHONHASHSEED={expected} python -m "
+            f"tbox_finder.train.train_stage1 ..."
+        )
+    if raw != str(expected):
+        raise RuntimeError(
+            f"PYTHONHASHSEED={raw!r} but the config pins {expected!r}. The inherited value is "
+            f"the one in force (it cannot be changed in-process), so the run would not match "
+            f"its own recorded config (§8.3)."
+        )
+
+
+# --------------------------------------------------------------------------------------
 # DDP (PRD §10.3 "DDP×8 for throughput")
 # --------------------------------------------------------------------------------------
 def _env_int(name: str, default: int) -> int:
@@ -295,11 +346,24 @@ def is_primary() -> bool:
 
 
 class ShardedSampler:
-    """A rank-disjoint view of a :class:`WeightedIndexSampler` draw stream (DDP).
+    """A rank-disjoint, **equal-length** view of a :class:`WeightedIndexSampler` stream (DDP).
 
     Every rank builds the *same* seeded draw stream and takes the ``rank::world_size`` slice,
-    so the union over ranks is exactly the single-process stream — the curriculum weighting
-    (P2-01) is preserved, not re-derived per rank, and no draw is seen twice per epoch.
+    so the curriculum weighting (P2-01) is preserved rather than re-derived per rank, and no
+    draw is seen twice in an epoch.
+
+    **Every rank must yield exactly the same number of draws, or DDP deadlocks.** The stream
+    is therefore truncated to ``(len // world_size) * world_size`` draws *before* striding.
+    Without that, a 23-draw stream over 4 ranks shards 6/6/6/5: the short rank runs one fewer
+    backward pass, stops joining the gradient all-reduce, and the other three block on a
+    collective that can never complete — the job hangs rather than fails, which is the worst
+    way for it to go wrong. The cost is dropping at most ``world_size - 1`` draws per epoch
+    (standard ``drop_last`` behaviour); which draws are dropped changes every epoch, because
+    ``set_epoch`` reshuffles the underlying stream.
+
+    Note the union over ranks is therefore a *subset* of the single-process stream, not equal
+    to it. An earlier draft asserted equality — which silently **required** the ragged shards
+    that deadlock, i.e. the test encoded the bug as the contract.
 
     **The tuples are load-bearing.** ``WeightedIndexSampler`` yields ``(index, occurrence)``,
     not bare ints, and the occurrence ordinal is part of the dataset's per-draw RNG key: it
@@ -322,11 +386,19 @@ class ShardedSampler:
         """Advance the underlying draw stream (must be called every epoch)."""
         self._sampler.set_epoch(epoch)
 
+    def _usable(self) -> int:
+        """Draws kept before striding: the largest multiple of ``world_size`` that fits."""
+        return (len(self._sampler) // self._world_size) * self._world_size
+
     def __len__(self) -> int:
-        return len(range(self._rank, len(self._sampler), self._world_size))
+        return self._usable() // self._world_size
 
     def __iter__(self) -> Iterator[Any]:
-        return islice(iter(self._sampler), self._rank, None, self._world_size)
+        # Truncate globally FIRST, then stride — so every rank gets exactly _usable() //
+        # world_size draws. Striding first and truncating after would reintroduce the skew.
+        return islice(
+            islice(iter(self._sampler), self._usable()), self._rank, None, self._world_size
+        )
 
 
 # --------------------------------------------------------------------------------------
@@ -347,6 +419,18 @@ def compute_class_counts(dataset: Any, *, max_records: int | None = None) -> tup
     moves when the lead shifts — so this is a faithful estimate of the augmented stream's
     balance, and it is the only choice that keeps the loss weights a deterministic function
     of the config (§8.3).
+
+    **Scope, stated (it is not the weighted draw stream).** This scans each record **once**.
+    It is *not* a tally over the draws :class:`WeightedIndexSampler` actually emits, which
+    oversample rare strata (class II ≈ 9× at α=0.25). So when ``class_weight_alpha > 0``, the
+    inverse-frequency weights would be derived from the **unweighted** record distribution
+    while the model trains on the **oversampled** one — the two do not describe the same
+    population. With ``class_weight_alpha = 0`` (the default, and what P2-04 ships) nothing
+    consumes these counts and the discrepancy is inert; it becomes live at **P2-06**, which
+    owns the α sweep and must decide whether the weights should describe the draw stream
+    (and, if so, which epoch's draws — they reshuffle). Recorded in the report as
+    ``class_counts_scope.weighted_draw_stream = false`` rather than left for someone to
+    discover from the arithmetic. Flagged by CodeRabbit at P2-04 review.
 
     ``IGNORE_INDEX`` positions (pad-only, carrying no DNA) are excluded — they take no loss.
     The result feeds ``Stage1Loss(class_counts=…)`` directly.
@@ -508,11 +592,28 @@ def derive_clauses(report: Mapping[str, Any]) -> dict[str, bool]:
         isinstance(losses, list) and len(losses) > 0 and all(_finite_number(x) for x in losses)
     )
 
+    # The counts must be well-shaped AND carry a self-consistent provenance scope. The scope
+    # is the §10.2 honesty field — it is what tells a reader a 64-record slice from the 8,303
+    # -record fold — so it is re-derived like any other clause rather than trusted: `full_stream`
+    # must FOLLOW from the record arithmetic, not be asserted alongside it.
+    scope = report.get("class_counts_scope")
+    scope = scope if isinstance(scope, Mapping) else {}
+    n_records = scope.get("n_records")
+    n_fold = scope.get("n_training_fold_records")
+    scope_ok = (
+        _pos_int(n_records)
+        and _pos_int(n_fold)
+        and n_records <= n_fold
+        and scope.get("full_stream") is (n_records == n_fold)
+        and scope.get("training_fold_only") is True
+        and _non_neg_int(scope.get("occurrence"))
+    )
     counts_ok = (
         isinstance(counts, list)
         and len(counts) == NUM_CLASSES
         and all(isinstance(c, int) and not isinstance(c, bool) and c >= 0 for c in counts)
         and any(c > 0 for c in counts)
+        and scope_ok
     )
 
     return {
@@ -714,11 +815,21 @@ def build_stream(cfg: Stage1TrainConfig) -> tuple[Any, Any, dict[str, Any]]:
         load_corpus_records,
     )
 
-    records, report = load_corpus_records(training_fold_only=True)
+    records, _ = load_corpus_records(training_fold_only=True, window=cfg.window_nt)
     n_fold = len(records)
     if cfg.max_records is not None:
         records = records[: cfg.max_records]
-    dataset = Stage1WindowDataset(records, config=Stage1DataConfig(seed=cfg.seed))
+    data_config = Stage1DataConfig(
+        window_nt=cfg.window_nt,
+        stride_nt=cfg.stride_nt,
+        seed=cfg.seed,
+        offset_augmentation=cfg.offset_augmentation,
+        both_strands=cfg.both_strands,
+        phylum_alpha=cfg.phylum_alpha,
+        klass_alpha=cfg.klass_alpha,
+        aa_alpha=cfg.aa_alpha,
+    )
+    dataset = Stage1WindowDataset(records, config=data_config)
     sampler = ShardedSampler(dataset.sampler(), rank=ddp_rank(), world_size=ddp_world_size())
     scope = {
         "n_records": len(records),
@@ -726,6 +837,14 @@ def build_stream(cfg: Stage1TrainConfig) -> tuple[Any, Any, dict[str, Any]]:
         "full_stream": len(records) == n_fold,
         "training_fold_only": True,
         "occurrence": 0,
+        # The counts are a per-record scan at the deterministic lead, NOT a tally over the
+        # weighted draw stream the sampler actually emits. With class_weight_alpha == 0 (the
+        # default) nothing consumes them, so this is inert; but P2-06 sweeps α, and inverse-
+        # frequency weights derived from the *unweighted* record scan would not describe the
+        # *oversampled* distribution the model sees. Recorded rather than silently assumed —
+        # P2-06 owns the resolution. See compute_class_counts.
+        "weighted_draw_stream": False,
+        "data_config": asdict(data_config),
     }
     return dataset, sampler, scope
 
@@ -762,7 +881,7 @@ def train_stage1(cfg: Stage1TrainConfig, *, log: Any = print) -> dict[str, Any]:
     from tbox_finder.train.objective import Stage1Loss, Stage1LossConfig
     from tbox_finder.train.repro import set_determinism
 
-    os.environ["PYTHONHASHSEED"] = str(cfg.pythonhashseed)  # §8.3
+    check_pythonhashseed(cfg.pythonhashseed)  # §8.3 — verified, NOT set (see the function)
     set_determinism(cfg.seed)
 
     world_size = ddp_world_size()
@@ -888,6 +1007,7 @@ def _cfg_from_mapping(cfg: Mapping[str, Any]) -> Stage1TrainConfig:
     """
     optim = cfg.get("optim") or {}
     tracking = cfg.get("tracking") or {}
+    data = cfg.get("data") or {}
     model = cfg.get("model") or {}
     rc = (model.get("rc_combine") or {}) if isinstance(model, Mapping) else {}
 
@@ -903,6 +1023,16 @@ def _cfg_from_mapping(cfg: Mapping[str, Any]) -> Stage1TrainConfig:
         (tracking, "entity", "wandb_entity"),
         (tracking, "dir", "wandb_dir"),
         (rc, "mode", "rc_combine"),
+        # The /data group must reach the datamodule, not just the composed config: PRD §11
+        # sweeps window/stride, and a sweep whose values stop at the config object trains
+        # every point on the same stream while reporting different ones.
+        (data, "window_nt", "window_nt"),
+        (data, "stride_nt", "stride_nt"),
+        (data, "offset_augmentation", "offset_augmentation"),
+        (data, "both_strands", "both_strands"),
+        (data, "phylum_alpha", "phylum_alpha"),
+        (data, "klass_alpha", "klass_alpha"),
+        (data, "aa_alpha", "aa_alpha"),
     ):
         if isinstance(src, Mapping) and key in src:
             fields[dst] = src[key]
