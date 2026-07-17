@@ -5,10 +5,23 @@ in bare CI. That is deliberate — the science-honesty invariants (ADR-0003 D7: 
 must not freeze the budget) are the part most worth guarding, and guarding them must not
 depend on a GPU being present.
 
-Every gate clause carries an **anti-tautology test that proves it bites**: a clause is only
-evidence if a report violating it actually fails. `overall_pass = all(clauses)` catches a
-clause flipped FALSE but structurally cannot catch one fabricated TRUE, which is why the
-validator re-derives and why these tests sabotage rather than read.
+`overall_pass = all(clauses)` catches a clause flipped FALSE but structurally cannot catch
+one fabricated TRUE, which is why the validator re-derives and why these tests sabotage
+rather than read.
+
+**Scope of the anti-tautology coverage, stated rather than claimed.** An earlier version of
+this docstring asserted that *every* gate clause carried a test proving it bites. That was
+false — a blanket claim about my own tests that a reviewer checked and disproved, which is
+the §10.2 failure mode one level up from the code. What is actually true: the clauses whose
+falsity is reachable from a report `build_report` can emit are exercised against evidence
+constructed to violate them (`vram_under_prd_budget`, `all_points_grads_finite`,
+`ddp_target_world_size_measured`, `extrapolation_basis_is_prd_pinned_config`). The
+invariant clauses — `not_a_science_result`, `budget_not_frozen`,
+`extrapolation_marked_advisory` — are **structurally constant** for any report the builder
+produces, so their tests necessarily tamper with the report to prove the *validator*
+rejects the lie; that is tamper-detection, not bite-detection, and it is the strongest
+statement available for a field the builder hard-codes. Both kinds are needed; neither is
+sufficient alone.
 """
 
 from __future__ import annotations
@@ -61,8 +74,13 @@ def make_point_report(
     the class of degenerate fixture that let a whole suite compare uniform to uniform.
     """
     if step_seconds is None:
-        # 5 slow warmup steps then 5 steady ones — median steady = 0.20 exactly.
-        step_seconds = [1.0, 0.9, 0.8, 0.7, 0.6] + [0.18, 0.19, 0.20, 0.21, 0.22]
+        # 5 slow warmup steps, then 5 steady ones whose median is 0.20 but whose MEAN is
+        # 0.256 — deliberately ASYMMETRIC (a right tail, as real step times have).
+        # The earlier fixture was [0.18, 0.19, 0.20, 0.21, 0.22]: symmetric, so mean ==
+        # median == 0.20 and swapping `percentile(kept, 50)` for the mean passed all 59
+        # tests. A fixture that cannot distinguish the statistic under test from a wrong
+        # one is the P2-03 degenerate-fixture lesson wearing a new costume.
+        step_seconds = [1.0, 0.9, 0.8, 0.7, 0.6] + [0.18, 0.19, 0.20, 0.21, 0.50]
     if losses is None:
         losses = [1.6 - 0.001 * i for i in range(len(step_seconds))]
     steps = {
@@ -212,8 +230,13 @@ def test_extract_point_unmeasured_point_yields_no_rate_rather_than_zero():
 # scaling_efficiency
 # ═════════════════════════════════════════════════════════════════════════════
 def _rate_steps(seconds):
-    """A point whose steady-state median is exactly `seconds`."""
-    return [9.0] * 5 + [seconds] * 5
+    """A point whose steady-state MEDIAN is exactly `seconds` — and whose mean is not.
+
+    Asymmetric on purpose (see make_point_report): a constant steady block would make
+    mean == median, so every rate assertion would pass against a mean-based implementation
+    and the choice of statistic would be untested.
+    """
+    return [9.0] * 5 + [seconds * 0.9, seconds * 0.95, seconds, seconds * 1.05, seconds * 3.0]
 
 
 def test_scaling_efficiency_against_a_hand_computed_series():
@@ -669,3 +692,44 @@ def test_committed_points_cover_the_ddp8_claim_and_the_oom_boundary():
     assert "ws1_bs32_ckpt1" in keys, "batch 32 WITH checkpointing fits — that is the §10.3 point"
     r = _committed()
     assert r["ddp_scaling"]["batch8_ckpt1"]["by_world_size"]["8"]["efficiency_vs_ws1"] > 0.5
+
+
+def test_the_step_seconds_fixture_can_distinguish_median_from_mean():
+    """Guards the guard: if mean == median on the fixture, every rate test is blind to the
+    statistic it claims to pin. A reviewer proved the old symmetric fixture let
+    `seconds_median = seconds_mean` pass all 59 tests."""
+    s = steady_state(make_point_report()["steps"]["step_seconds"], warmup=5)
+    assert s["seconds_median"] == pytest.approx(0.20, abs=1e-12, rel=0)
+    assert (
+        abs(s["seconds_mean"] - s["seconds_median"]) > 0.02
+    ), "fixture is symmetric — a mean-vs-median swap would be undetectable"
+    r = steady_state(_rate_steps(0.25), warmup=5)
+    assert r["seconds_median"] == pytest.approx(0.25, abs=1e-12, rel=0)
+    assert abs(r["seconds_mean"] - r["seconds_median"]) > 0.02
+
+
+def test_gate_fails_when_no_ddp_target_point_was_measured():
+    """The step exists to grade PRD §10.3's 'DDP×8 for throughput'.
+
+    Reviewer-found, verified by execution: aggregating only ws=1 points previously gave a
+    GREEN nine-clause gate with basis_point=None, no gpu_hours and ddp_scaling={} — a clause
+    fabricated TRUE on absent evidence. One NCCL fault kills all four torchrun points
+    together, so this is a live path, not a hypothetical.
+    """
+    pts = make_points([{"world_size": 1, "batch_size": 8, "ckpt": True}])
+    r = build_report(points=pts, windows_per_epoch=288_000, epochs=10)
+    assert r["illustrative_extrapolation"]["basis_point"] is None
+    assert r["gate"]["ddp_target_world_size_measured"] is False
+    assert (
+        r["gate"]["extrapolation_basis_is_prd_pinned_config"] is False
+    ), "a config label attached to no measurement must not certify the basis"
+    assert r["gate"]["overall_pass"] is False
+    assert validate_report(r) == []  # a FAILING gate is still a VALID report
+
+
+def test_gate_passes_only_once_the_ddp_target_point_exists():
+    """The complement — proves the new clauses are not simply always-False."""
+    r = build_report(points=full_points(), windows_per_epoch=288_000, epochs=10)
+    assert r["gate"]["ddp_target_world_size_measured"] is True
+    assert r["gate"]["extrapolation_basis_is_prd_pinned_config"] is True
+    assert r["gate"]["overall_pass"] is True

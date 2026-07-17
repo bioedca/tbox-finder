@@ -64,6 +64,7 @@
     "all_points_grads_finite": true,
     "all_points_losses_finite": true,
     "budget_not_frozen": true,
+    "ddp_target_world_size_measured": true,
     "extrapolation_basis_is_prd_pinned_config": true,
     "extrapolation_marked_advisory": true,
     "not_a_science_result": true,
@@ -709,7 +710,7 @@
   "prd_vram_budget_gib": 16.0,
   "provenance": {
     "epochs_assumed": 10,
-    "git_sha": "970a286422c0dced7cbd07f61e8c98b7b4b0cceb",
+    "git_sha": "d4600507f175ea8bb6f563ac017b2404394976b1",
     "windows_per_epoch_full_fold": 8303
   },
   "schema_version": "1",

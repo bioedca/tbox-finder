@@ -441,13 +441,37 @@ def derive_clauses(report: Mapping[str, Any]) -> dict[str, bool]:
         and bool(extrap.get("binding_gate")),
         "not_a_science_result": report.get("is_science") is False,
         "budget_not_frozen": report.get("freezes_adr0003_d7_budget") is False,
+        # The step exists to grade PRD §10.3's "DDP×8 for throughput". A report with no
+        # ws=8 point has not done that, and must not certify that it has.
+        #
+        # This clause guards EMPTINESS, and the reason is a bug this very module shipped:
+        # `is_prd_pinned_config` is set from the *requested* config before the basis is
+        # looked up, so on its own it reads True even when `basis_point` is None and there
+        # are no `gpu_hours` at all. One NCCL fault kills all four torchrun points together
+        # (they share a single launch path), the sbatch tolerates per-point failure by
+        # design, and the run would then have touched DONE and printed SIZING_DONE behind a
+        # green nine-clause gate containing ZERO DDP×8 evidence — a clause fabricated TRUE
+        # on absent evidence, which is precisely what this module's shared derive/validate
+        # design claims to prevent, and the "a failed run exited 0" family P2-04 fixed one
+        # step earlier. Every other evidence-shaped clause here already guards emptiness
+        # (`bool(vram_vals) and ...`); this one was the outlier.
+        "ddp_target_world_size_measured": any(
+            int(p.get("world_size", 0)) == PRD_TARGET_WORLD_SIZE
+            and _is_real(p.get("windows_per_sec_per_gpu"))
+            for p in measured
+        ),
         # The headline extrapolation must describe the configuration PRD §10.3 actually
         # pins. The checkpointing-OFF point is faster, so a speed-selected basis would quote
         # an unpinned config's cost under the field a reader takes as "the" full-run cost —
         # true numbers, wrong label, which is exactly the §10.2 failure mode P2-03 and P2-04
-        # each shipped once.
+        # each shipped once. Requires a REAL basis: a config label attached to no
+        # measurement describes nothing.
         "extrapolation_basis_is_prd_pinned_config": extrap.get("is_prd_pinned_config") is True
-        and extrap.get("gradient_checkpointing") is PRD_DEFAULT_GRADIENT_CHECKPOINTING,
+        and extrap.get("gradient_checkpointing") is PRD_DEFAULT_GRADIENT_CHECKPOINTING
+        and isinstance(extrap.get("basis_point"), str)
+        and bool(extrap.get("basis_point"))
+        and _is_real(extrap.get("gpu_hours"))
+        and float(extrap.get("gpu_hours", 0.0)) > 0.0,
     }
 
 
