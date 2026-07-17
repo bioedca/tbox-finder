@@ -85,6 +85,12 @@
 .snakemake/
 /logs/
 
+# ── Hydra job logs ──
+# The train configs pin `hydra.run.dir: .` so relative in/out paths resolve from the repo
+# root; Hydra's job logger then drops `<job_name>.log` (train_stage1.log, stage1_smoke.log)
+# right there. Root-anchored so it never hides a log that matters elsewhere.
+/*.log
+
 # ── Experiment tracking (W&B run dirs) ──
 **/wandb/
 **/.wandb/

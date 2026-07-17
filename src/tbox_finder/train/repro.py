@@ -8,8 +8,16 @@ The re-run is **not bit-exact** — the Caduceus Mamba ``selective_scan_cuda`` k
 TF32/cudnn autotune off; PRD §8.3/§11), but the fused scan may accumulate floating-point
 differently run-to-run. The tolerance is therefore **metric-level, not bitwise**.
 
-This module is the **pure-stdlib** comparison the P1-08 gate is built on (no numpy / torch
-/ pandas — it imports bare and runs in CI). It compares the committed P1-07 reference
+This module owns **both halves** of the ADR-0002 A7 determinism contract: the recipe that
+makes a run reproducible (:func:`set_determinism`, promoted here at P2-04 so the P1-07 smoke
+and the P2-04 training entrypoint share **one** implementation rather than forking a second —
+the P2-02 ``focal_cross_entropy`` precedent), and the comparison that adjudicates whether a
+re-run did reproduce (everything below it).
+
+The module still **imports bare and runs in CI**: :func:`set_determinism` imports numpy and
+torch lazily *inside* the function body, so the module-level surface stays pure-stdlib (no
+numpy / torch / pandas), which is what the P1-08 gate's CI tier depends on. The comparison
+half below is pure stdlib outright. It compares the committed P1-07 reference
 report (``reports/p1/seg_smoke_gonogo.json``) against the P1-08 re-run report
 (``reports/p1/seg_smoke_repro.json``, produced by the **unchanged** ``stage1_smoke.py``
 harness with only ``report_path=``/``checkpoint_dir=`` overridden) and decides
@@ -43,6 +51,8 @@ from __future__ import annotations
 
 import json
 import math
+import os
+import random
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
@@ -62,6 +72,20 @@ REPRO_TOLERANCE: float = 1e-3
 #: present ``None`` so a *missing* backbone/config datum voids the gate rather than matching
 #: another missing one (``None == None`` would fail open).
 _MISSING = object()
+
+#: The only ``CUBLAS_WORKSPACE_CONFIG`` values under which cuBLAS is deterministic on
+#: CUDA >= 10.2. Pinned to torch's **own published literals**, not to our default: read from
+#: the installed torch 2.7.1 ``torch/__init__.py`` docstring for ``use_deterministic_algorithms``
+#: — *"unless the environment variable ``CUBLAS_WORKSPACE_CONFIG=:4096:8`` or
+#: ``CUBLAS_WORKSPACE_CONFIG=:16:8`` is set"*. An external-literal pin, so a test comparing
+#: the check to the constant that drives it cannot be a tautology
+#: ([[review-agents-mutate-code-under-review]]). Note ``:4096:2`` appears in torch's
+#: *cuDNN-RNN* determinism note — a different subsystem, not applicable here (Caduceus is
+#: Mamba/SSM), and it is **not** accepted by the cuBLAS check.
+CUBLAS_DETERMINISTIC_CONFIGS: frozenset[str] = frozenset({":4096:8", ":16:8"})
+
+#: The value we set when the environment offers nothing usable (ADR-0002 A6 / P1-07 form).
+DEFAULT_CUBLAS_WORKSPACE_CONFIG: str = ":4096:8"
 
 #: The **go/no-go-decision** metrics the secondary τ gate is scoped to (ADR-0002 A7, scoped by
 #: the P1-08 re-sign-off): the ``min_core_f1`` the verdict rests on (the min over the 3 core
@@ -100,6 +124,52 @@ CONFIG_KEYS: tuple[str, ...] = (
     "dropout",
     "batch_size",
 )
+
+
+# --------------------------------------------------------------------------------------
+# The determinism recipe (ADR-0002 A6/A7; §8.3) — the thing a re-run must re-apply
+# --------------------------------------------------------------------------------------
+def set_determinism(seed: int) -> None:
+    """Seed every RNG + disable nondeterministic fast paths (§8.3; ADR-0002 A6/A7).
+
+    The single implementation shared by the P1-07 segmentation smoke
+    (``train/stage1_smoke.py``) and the P2-04 Stage-1 training entrypoint
+    (``train/train_stage1.py``) — promoted here at P2-04 rather than copied, because two
+    determinism recipes that drift apart would silently void the A7 gate: the re-run would
+    no longer be re-running the same protocol, and nothing would say so.
+
+    ``warn_only=True`` is **load-bearing, not laziness**: the Caduceus Mamba
+    ``selective_scan_cuda`` kernel (ADR-0002 A2 C2) registers no deterministic algorithm, so
+    a strict ``use_deterministic_algorithms(True)`` would *raise* on the Stage-1 forward.
+    Every RNG seed is still pinned and TF32/cudnn autotuning disabled — which is exactly what
+    the P1-08 re-run reproduces — but the fused scan may accumulate floating point
+    differently run to run. Reproducibility is therefore **metric-level, not bitwise**
+    (A7: τ = 1e-3 over the go/no-go decision metrics).
+
+    Imports numpy/torch lazily so this module stays bare-importable for the CI tier.
+    """
+    import numpy as np  # lazy
+    import torch  # lazy
+
+    # Deterministic cuBLAS. An inherited value is honoured only if it is one torch actually
+    # accepts; anything else is REPLACED rather than preserved. `setdefault` alone (the P1-07
+    # form) would keep e.g. the workspace-disabling `:0:0`, under which cuBLAS is
+    # nondeterministic — and because `warn_only=True` downgrades torch's complaint to a
+    # warning, the run would carry on and quietly stop being reproducible. Determinism is the
+    # thing this function exists to guarantee, so it does not defer to a launcher that got it
+    # wrong.
+    if os.environ.get("CUBLAS_WORKSPACE_CONFIG") not in CUBLAS_DETERMINISTIC_CONFIGS:
+        os.environ["CUBLAS_WORKSPACE_CONFIG"] = DEFAULT_CUBLAS_WORKSPACE_CONFIG
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+        torch.backends.cuda.matmul.allow_tf32 = False
+        torch.backends.cudnn.allow_tf32 = False
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
+    torch.use_deterministic_algorithms(True, warn_only=True)
 
 
 # --------------------------------------------------------------------------------------

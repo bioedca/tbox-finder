@@ -126,6 +126,15 @@ jobs:
           # tier of that file has its OWN var (TBOX_REQUIRE_LORA_TORCH), deliberately NOT set
           # here — CI installs no torch, so arming it would fail every run.
           TBOX_REQUIRE_LORA_SMOKE: "1"
+          # Same anti-rot contract for the P2-04 Stage-1 training-entrypoint smoke: the
+          # measured report is committed, so a missing/malformed one FAILS (not skips).
+          # tests/ml/test_train_smoke.py's committed-report tier (pure JSON, no torch).
+          # NOTE: the torch / Hydra / CUDA tiers of that file have their OWN vars
+          # (TBOX_REQUIRE_TRAIN_TORCH / _HYDRA / _CUDA), deliberately NOT set here — CI
+          # installs neither torch nor hydra, so arming them would fail every run. That
+          # split is the P1-16 landmine: one var guarding both a pure tier and a heavy tier
+          # cannot be armed at all.
+          TBOX_REQUIRE_TRAIN_SMOKE: "1"
         run: pytest tests/unit tests/golden tests/ml
 
   docker:

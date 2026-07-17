@@ -1026,12 +1026,40 @@ def test_stage1_config_echoes_the_code_constants_exactly() -> None:
     assert int(cfg["pythonhashseed"]) == 0
 
 
-def test_stage1_config_is_not_wired_as_a_default_anywhere_yet() -> None:
-    """P2-04 wires it; until then nothing may silently depend on it."""
+def test_stage1_config_is_wired_by_the_p2_04_training_entrypoint() -> None:
+    """P2-04 wires `conf/data/stage1.yaml` — exactly one train config may claim it.
+
+    The P2-01 form of this test asserted the config was *unwired* ("P2-04 wires it; until
+    then nothing may silently depend on it"). P2-04 is that step, so the assertion inverts
+    rather than disappearing: deleting it would leave the wiring unguarded, and a datamodule
+    that silently stops being reached is precisely the failure the P2-01 test existed to
+    catch — a training run composing against Hydra's defaults instead of the real 1024-nt
+    stream would still train, just on the wrong thing.
+
+    `- /data: stage1` must use the leading slash: a `conf/<group>/` primary reaches
+    search-path-root groups only through the absolute form (with `@package _global_`).
+    A bare `- data: stage1` silently fails to compose.
+    """
     from pathlib import Path
 
-    for cfg in Path("conf/train").glob("*.yaml"):
-        assert "/data: stage1" not in cfg.read_text(), f"{cfg} wires stage1 before P2-04"
+    # Repo-root anchored, not CWD-relative: a bare Path("conf/train") silently globs nothing
+    # when pytest runs from elsewhere, and an empty glob would make this assert vacuously.
+    repo = Path(__file__).resolve().parents[2]
+    # Match the ACTIVE defaults entry, not the raw text. A substring search cannot tell a live
+    # `- /data: stage1` from a commented-out one — so commenting the default out (which breaks
+    # the wiring completely) would leave the string present and this guard still green, exactly
+    # when it most needs to fire.
+    wiring = {
+        cfg.name
+        for cfg in (repo / "conf" / "train").glob("*.yaml")
+        if any(
+            line.split("#", 1)[0].strip() == "- /data: stage1"
+            for line in cfg.read_text().splitlines()
+        )
+    }
+    assert wiring == {
+        "stage1.yaml"
+    }, f"expected exactly conf/train/stage1.yaml to wire `- /data: stage1`; got {wiring or '{}'}"
 
 
 # ═══════════════════════════════════════════════════════════════════════════
