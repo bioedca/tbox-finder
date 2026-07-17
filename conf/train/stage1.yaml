@@ -80,6 +80,25 @@ steps_per_epoch: null
 max_records: null
 num_workers: 0
 
+# ── The validation ladder (P2-06a) ───────────────────────────────────────────────────────
+# The rung P2-06 promotes its best config on: the leak-free scheme-A (random,
+# genus-stratified) val fold — 880 records / 726 homology-cluster blocks / 35 class-II on
+# the committed table. ADR-0004 D5 makes scheme-A the "detection-quality reference ...
+# never the source of a generalization number", which is exactly why tuning on it is safe:
+# the PRD §12:241 leave-one-order-out headline stays genuinely held out (user decision,
+# 2026-07-17 — a nested design, the inner rung here and the outer rung at P2-14).
+#
+# ⚠ This is the ONLY per-run number a sweep may rank on. Training loss is a function of
+# `gamma` and `class_weight_alpha` themselves, so ranking P2-06's γ/α grid on loss would
+# compare objectives rather than models.
+eval_val: true
+eval_batch_size: 8
+# null ⇒ all 880 records. The smoke caps it; P2-06/P2-09 leave it null. A capped run
+# records `full_fold: false` in its eval scope and so cannot pass itself off as the fold.
+eval_max_records: null
+# Block-bootstrap replicates, resampled at the homology-cluster level (ADR-0005 D5).
+eval_n_boot: 2000
+
 # ── Outputs ──────────────────────────────────────────────────────────────────────────────
 report_path: reports/p2/train_stage1_smoke.json
 checkpoint_dir: checkpoints/p2/stage1

@@ -60,6 +60,7 @@ import numpy as np
 
 from tbox_finder import ingest
 from tbox_finder import labels as labels_mod
+from tbox_finder import splits as splits_mod
 
 # ── Schema / provenance ──────────────────────────────────────────────────────
 SCHEMA_VERSION = "1.0"
@@ -131,9 +132,25 @@ KLASS_COL = "klass"
 PHYLUM_COL = "resolved_phylum"
 CLUSTER_COL = "cluster_id"
 NESTED_TRAIN_COL = "nested_train"
+FOLD_RANDOM_COL = "fold_random"
 SOURCE_COL = "source"
 STATUS_OK = "ok"
 POSITIVE_SOURCE = "corpus"
+
+# Scheme A's val fold value (splits.RANDOM_RATIOS' key). The P2-06a selection set
+# is a *strict subset* of it — see load_selection_val_records for the two further
+# filters, both of which are load-bearing against homology leakage.
+FOLD_RANDOM_VAL = "val"
+
+#: Fold scopes a loader can return. ``train`` is the ADR-0004 D5 nested training
+#: fold (:func:`load_corpus_records`); ``selection_val`` is the P2-06a leak-free
+#: scheme-A val that P2-06 promotes its best config on
+#: (:func:`load_selection_val_records`).
+FOLD_SCOPE_TRAIN = "train"
+FOLD_SCOPE_SELECTION_VAL = "selection_val"
+
+#: The step that owns the selection-val loader (its report's provenance).
+STEP_SELECTION_VAL = "P2-06a"
 
 # The six fold-per-scheme columns (splits.FOLD_SCHEME_COLUMNS). A variant must
 # inherit every one from its parent (ADR-0004 D7).
@@ -586,28 +603,22 @@ def _exclusion_reason(row: Mapping[str, Any], *, window: int) -> str | None:
     return None
 
 
-def load_corpus_records(
+def _merge_corpus_tables(
     *,
-    context_parquet: str | Path = DEFAULT_CONTEXT,
-    labels_parquet: str | Path = DEFAULT_LABELS,
-    split_table: str | Path = DEFAULT_SPLIT_TABLE,
-    window: int = WINDOW_NT,
-    training_fold_only: bool = True,
-) -> tuple[list[CorpusRecord], dict[str, Any]]:
+    context_parquet: str | Path,
+    labels_parquet: str | Path,
+    split_table: str | Path,
+) -> Any:
     """Join the P2-00 context, the P0-20 labels, and the ADR-0004 split table.
 
     All three key on the same 64-hex corpus record hash (``record_id`` in the
     context table and — for ``source == "corpus"`` rows — in the split table;
     ``record_sha256`` in the labels table).
 
-    With ``training_fold_only`` (the default), only ``nested_train`` records are
-    returned: the ADR-0004 D5 single most-restrictive nested training fold. This
-    is the mechanism behind PRD §11's "class-II augmentation **constrained to
-    training-fold parents**" — a held-out parent is never even loaded, so no
-    sampler can oversample it into training (ADR-0004 D7).
-
-    Returns ``(records, report)``; the report counts every exclusion by reason
-    (CLAUDE.md §10.3 — excluded records are reported, never silently dropped).
+    Factored out so every fold scope reads **one** join implementation:
+    :func:`load_corpus_records` (the ADR-0004 D5 training fold) and
+    :func:`load_selection_val_records` (the P2-06a selection val) must agree on
+    record identity, or a "disjoint" claim compares two different populations.
     """
     import pandas as pd
 
@@ -635,6 +646,57 @@ def load_corpus_records(
         raise ValueError(
             f"context/labels/split join lost rows: {len(ctx)} context -> {len(merged)} joined"
         )
+    return merged
+
+
+def _corpus_record(row: Mapping[str, Any]) -> CorpusRecord:
+    """Build one :class:`CorpusRecord` from a merged table row."""
+    return CorpusRecord(
+        record_id=str(row[RECORD_ID_COL]),
+        context_seq=str(row[CONTEXT_SEQ_COL]),
+        locus_offset=int(row[LOCUS_OFFSET_COL]),
+        locus_length=int(row[LOCUS_LENGTH_COL]),
+        label_string=str(row[LABEL_STRING_COL]),
+        clipped_start=bool(row[CLIPPED_START_COL]),
+        clipped_end=bool(row[CLIPPED_END_COL]),
+        klass=str(row[KLASS_COL]),
+        phylum=_normalise_stratum(row[PHYLUM_COL]),
+        cognate_aa=_normalise_stratum(row[COGNATE_AA_COL]),
+        cluster_id=int(row[CLUSTER_COL]),
+        nested_train=bool(row[NESTED_TRAIN_COL]),
+        folds=tuple(row[c] for c in FOLD_SCHEME_COLUMNS),
+    )
+
+
+def load_corpus_records(
+    *,
+    context_parquet: str | Path = DEFAULT_CONTEXT,
+    labels_parquet: str | Path = DEFAULT_LABELS,
+    split_table: str | Path = DEFAULT_SPLIT_TABLE,
+    window: int = WINDOW_NT,
+    training_fold_only: bool = True,
+) -> tuple[list[CorpusRecord], dict[str, Any]]:
+    """Load the corpus records for the **training** fold.
+
+    With ``training_fold_only`` (the default), only ``nested_train`` records are
+    returned: the ADR-0004 D5 single most-restrictive nested training fold. This
+    is the mechanism behind PRD §11's "class-II augmentation **constrained to
+    training-fold parents**" — a held-out parent is never even loaded, so no
+    sampler can oversample it into training (ADR-0004 D7).
+
+    ⚠ ``training_fold_only=False`` returns train+val+test **pooled**, not a val
+    fold. The P2-06a model-selection val is :func:`load_selection_val_records`,
+    which is a different and **leak-guarded** population — see its docstring for
+    why the obvious ``fold_random == "val"`` filter is wrong.
+
+    Returns ``(records, report)``; the report counts every exclusion by reason
+    (CLAUDE.md §10.3 — excluded records are reported, never silently dropped).
+    """
+    merged = _merge_corpus_tables(
+        context_parquet=context_parquet,
+        labels_parquet=labels_parquet,
+        split_table=split_table,
+    )
 
     n_total = len(merged)
     excluded: Counter[str] = Counter()
@@ -648,23 +710,7 @@ def load_corpus_records(
         if reason is not None:
             excluded[reason] += 1
             continue
-        records.append(
-            CorpusRecord(
-                record_id=str(row[RECORD_ID_COL]),
-                context_seq=str(row[CONTEXT_SEQ_COL]),
-                locus_offset=int(row[LOCUS_OFFSET_COL]),
-                locus_length=int(row[LOCUS_LENGTH_COL]),
-                label_string=str(row[LABEL_STRING_COL]),
-                clipped_start=bool(row[CLIPPED_START_COL]),
-                clipped_end=bool(row[CLIPPED_END_COL]),
-                klass=str(row[KLASS_COL]),
-                phylum=_normalise_stratum(row[PHYLUM_COL]),
-                cognate_aa=_normalise_stratum(row[COGNATE_AA_COL]),
-                cluster_id=int(row[CLUSTER_COL]),
-                nested_train=bool(row[NESTED_TRAIN_COL]),
-                folds=tuple(row[c] for c in FOLD_SCHEME_COLUMNS),
-            )
-        )
+        records.append(_corpus_record(row))
     records.sort(key=lambda r: r.record_id)
 
     report = {
@@ -682,6 +728,186 @@ def load_corpus_records(
         "synthetic_flank": False,
     }
     return records, report
+
+
+def load_selection_val_records(
+    *,
+    context_parquet: str | Path = DEFAULT_CONTEXT,
+    labels_parquet: str | Path = DEFAULT_LABELS,
+    split_table: str | Path = DEFAULT_SPLIT_TABLE,
+    window: int = WINDOW_NT,
+) -> tuple[list[CorpusRecord], dict[str, Any]]:
+    """Load the **P2-06a model-selection val fold**: leak-free scheme-A val.
+
+    This is the population P2-06 promotes its best config on (user decision
+    2026-07-17). It is scheme-A — the ADR-0004 D5 *"detection-quality reference
+    only; never the source of a generalization number"* — precisely **because**
+    tuning on it cannot contaminate the PRD §12:241 leave-one-order-out headline.
+    The LOO-order holdout stays genuinely held out; this is the inner rung of a
+    nested design.
+
+    Three filters, and the last two are the ones a naive read omits:
+
+    1. ``fold_random == "val"`` — scheme A's own 10% val fold.
+    2. ``not nested_train`` — **``fold_random`` and ``nested_train`` are
+       independent schemes on one table**, so scheme A's random split cuts
+       straight across the nested training fold. On the committed table
+       **1,445 of the 2,354 ``fold_random == "val"`` records (61.4%) are
+       ``nested_train``** — i.e. the model trained on them. Selecting there
+       would be train-on-train.
+    3. ``cluster_id`` not in the training fold's clusters — even after (2), a
+       homology cluster can straddle the boundary (some of its records
+       ``nested_train``, others not). On the committed table that drops **12
+       records across 7 clusters**. Without this the selection set is
+       homology-leaky (CLAUDE.md §8.2), which is the same defect the CI
+       no-leakage gate exists to prevent.
+    4. ``len(context_seq) >= window`` — the eval tiles the **full context** with
+       :func:`tile_windows`, which for ``seq_len >= window`` emits only starts in
+       ``[0, seq_len - window]``: every window is then wholly real DNA and no
+       position is padded. Requiring it means the eval never zero-flanks a
+       boundary that is not a real contig end (PRD §6; §10.3) — shorter contexts
+       are **excluded and counted**, never padded into existence.
+
+    Returns ``(records, report)``. The report's ``disjointness`` block is
+    **measured back off the emitted records**, never asserted from the filter
+    that produced them — a filter and its own echo cannot disagree
+    (CLAUDE.md §10.3; the P1-15/P1-16 re-derivation rule).
+    """
+    merged = _merge_corpus_tables(
+        context_parquet=context_parquet,
+        labels_parquet=labels_parquet,
+        split_table=split_table,
+    )
+
+    rows = merged.to_dict("records")
+    train_ids = {str(r[RECORD_ID_COL]) for r in rows if bool(r[NESTED_TRAIN_COL])}
+    train_clusters = {int(r[CLUSTER_COL]) for r in rows if bool(r[NESTED_TRAIN_COL])}
+
+    n_total = len(rows)
+    excluded: Counter[str] = Counter()
+    records: list[CorpusRecord] = []
+    for row in rows:
+        if row[FOLD_RANDOM_COL] != FOLD_RANDOM_VAL:
+            excluded["not_scheme_a_val"] += 1
+            continue
+        if bool(row[NESTED_TRAIN_COL]):
+            excluded["in_training_fold"] += 1
+            continue
+        if int(row[CLUSTER_COL]) in train_clusters:
+            excluded["cluster_shared_with_training_fold"] += 1
+            continue
+        if len(str(row[CONTEXT_SEQ_COL])) < window:
+            excluded["context_shorter_than_window"] += 1
+            continue
+        reason = _exclusion_reason(row, window=window)
+        if reason is not None:
+            excluded[reason] += 1
+            continue
+        records.append(_corpus_record(row))
+    records.sort(key=lambda r: r.record_id)
+
+    # ── Disjointness, MEASURED off the emitted records (never off the filter) ──
+    got_ids = {r.record_id for r in records}
+    got_clusters = {r.cluster_id for r in records}
+    klass_counts = Counter(r.klass for r in records)
+    report = {
+        "schema_version": SCHEMA_VERSION,
+        "step": STEP_SELECTION_VAL,
+        "window_nt": int(window),
+        "fold_scope": FOLD_SCOPE_SELECTION_VAL,
+        "scheme": "A/random (genus-stratified) — ADR-0004 D5 detection-quality reference",
+        "n_context_records": int(n_total),
+        "n_records": len(records),
+        "n_blocks": len(got_clusters),
+        "n_excluded": int(sum(excluded.values())),
+        "excluded_by_reason": dict(sorted(excluded.items())),
+        "klass_counts": dict(sorted(klass_counts.items())),
+        "phylum_counts": dict(sorted(Counter(r.phylum for r in records).items())),
+        "disjointness": {
+            "shared_record_ids_with_train": len(got_ids & train_ids),
+            "shared_cluster_ids_with_train": len(got_clusters & train_clusters),
+            "n_train_records": len(train_ids),
+            "n_train_blocks": len(train_clusters),
+        },
+        "min_heldout_positives": int(splits_mod.MIN_HELDOUT_POSITIVES),
+        "class_ii_records": int(klass_counts.get("II", 0)),
+        "synthetic_flank": False,
+    }
+    return records, report
+
+
+def selection_val_problems(report: Mapping[str, Any]) -> list[str]:
+    """Re-derive the P2-06a selection-val invariants from ``report``; ``[]`` when clean.
+
+    Total by construction: a missing block is a problem, never a pass. The clause
+    an absent-evidence bug would fabricate TRUE is the one that matters, so every
+    check below is guarded on the evidence actually being **present**
+    ([[clauses-must-guard-emptiness]] — a P2-05 finding paid for in a green gate
+    that rested on zero measurements).
+    """
+    problems: list[str] = []
+    dis = report.get("disjointness")
+    if not isinstance(dis, Mapping) or not dis:
+        return ["disjointness: block missing — a selection set with no leak evidence is not usable"]
+    for key in ("shared_record_ids_with_train", "shared_cluster_ids_with_train"):
+        val = dis.get(key)
+        if not isinstance(val, int) or isinstance(val, bool):
+            problems.append(f"disjointness.{key}: must be an int, got {val!r}")
+        elif val != 0:
+            problems.append(
+                f"disjointness.{key} = {val} — the selection set overlaps the training fold; "
+                "selecting a config here is train-on-train (CLAUDE.md §8.2)"
+            )
+    n_records = report.get("n_records")
+    if not isinstance(n_records, int) or isinstance(n_records, bool) or n_records <= 0:
+        problems.append(f"n_records: must be a positive int, got {n_records!r}")
+    n_blocks = report.get("n_blocks")
+    if not isinstance(n_blocks, int) or isinstance(n_blocks, bool) or n_blocks < 2:
+        problems.append(
+            f"n_blocks: must be >= 2, got {n_blocks!r} — fewer than 2 blocks is not "
+            "block-resamplable (ADR-0005 Amendment A1)"
+        )
+    n_ii = report.get("class_ii_records")
+    floor = report.get("min_heldout_positives")
+    if not isinstance(n_ii, int) or isinstance(n_ii, bool):
+        problems.append(f"class_ii_records: must be an int, got {n_ii!r}")
+    elif isinstance(floor, int) and not isinstance(floor, bool) and n_ii < floor:
+        problems.append(
+            f"class_ii_records = {n_ii} < min_heldout_positives = {floor} — the selection "
+            "set cannot rank configs on class-II signal"
+        )
+    return problems
+
+
+def context_labels(record: CorpusRecord) -> np.ndarray:
+    """The per-nt truth over a record's **full context** (P2-01's labelling rule).
+
+    Real flank is ``background``; the locus paints its own classes. No position is
+    ``IGNORE_INDEX``: this is the *eval* truth over real DNA only — the caller
+    guarantees the context is real (:func:`load_selection_val_records` filter 4),
+    so there is nothing padded to ignore.
+    """
+    lab = np.full(len(record.context_seq), BACKGROUND_INDEX, dtype=np.int16)
+    lab[record.locus_offset : record.locus_offset + record.locus_length] = label_indices(
+        record.label_string
+    )
+    return lab
+
+
+def encode_eval_window(record: CorpusRecord, start: int, *, window: int = WINDOW_NT) -> np.ndarray:
+    """Encode the ``[start, start + window)`` slice of a record's context.
+
+    The eval counterpart of :func:`carve_window`'s input half, for the
+    :func:`tile_windows` geometry. Raises rather than padding: a window running
+    off the context would zero-flank a boundary that may not be a contig end, and
+    filter 4 of :func:`load_selection_val_records` exists so this cannot happen.
+    """
+    if start < 0 or start + window > len(record.context_seq):
+        raise ValueError(
+            f"eval window [{start}, {start + window}) runs off record {record.record_id}'s "
+            f"{len(record.context_seq)}-nt context — it would invent a boundary (PRD §6)"
+        )
+    return encode_bases(record.context_seq[start : start + window])
 
 
 def records_digest(records: Sequence[CorpusRecord]) -> str:
