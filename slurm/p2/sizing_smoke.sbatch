@@ -202,7 +202,15 @@ export HF_HOME="$BUILD/hf"      # 2.5 GB of weights stay OFF the 87%-full HOME q
 # `import Mamba` FAILS without the compiled selective_scan_cuda (the "pure-PyTorch
 # fallback" D3 promised does not exist), and A5 measured the fallback at ~871x slower — so a
 # silent fallback would make every throughput number here meaningless. Assert, don't hope.
-python -c 'import selective_scan_cuda; print("selective_scan_cuda OK")'
+#
+# ⚠️ `import torch` FIRST is load-bearing, not tidiness: selective_scan_cuda is a C
+# extension linked against torch's libc10.so, and nothing puts torch/lib on the loader path
+# until `import torch` dlopens it — so a bare `import selective_scan_cuda` dies with
+# "ImportError: libc10.so: cannot open shared object file" EVEN WHEN THE KERNEL IS PRESENT
+# AND FINE. That is not hypothetical: it killed job 567 at this line. mamba_ssm imports
+# torch before the kernel, so this order is also the one the real training path takes —
+# assert the import as it actually happens, not as a bare name.
+python -c 'import torch; import selective_scan_cuda; print(f"selective_scan_cuda OK (torch {torch.__version__})")'
 
 # ── Pre-warm the HF cache ONCE ───────────────────────────────────────────────
 # torchrun's 8 ranks each call from_pretrained with no cache_dir; without a warm cache they
