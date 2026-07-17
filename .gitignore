@@ -81,6 +81,19 @@
 /reports/p1/rinalmo_parity_folds/SHARD_OK_*
 /reports/p1/rinalmo_parity_folds/.parity_*.lock
 
+# The TBOX_REQUIRE_TRAIN_CUDA test writes a throwaway report here (test_train_smoke.py) and
+# does not clean up. Every other file in reports/p2/ is a real measured artifact, so an
+# untracked-and-un-ignored scratch report is a landmine: one `git add -A` and an 8-record,
+# 1-step run is committed where it reads as a measurement. It is a run signal, not an artifact.
+/reports/p2/_smoke_test.json
+
+# P2-05 sizing: the DONE marker + flock lock are run signals (§9.3 keys on absence-on-
+# failure); the per-point ws*_bs*_ckpt*.json ARE committed alongside sizing_smoke.json.
+/reports/p2/sizing_smoke.DONE
+/reports/p2/.sizing_smoke.lock
+/reports/p2/sizing_smoke_*.out
+/reports/p2/sizing_smoke_*.err
+
 # ── Snakemake working dir + rule run-logs (never committed) ──
 .snakemake/
 /logs/

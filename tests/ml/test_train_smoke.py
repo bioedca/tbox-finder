@@ -389,6 +389,60 @@ def test_validator_catches_a_clause_fabricated_true() -> None:
     assert any("gradient_checkpointing_applied" in p for p in problems), problems
 
 
+def test_p2_04_report_without_timing_stays_valid() -> None:
+    """The P2-05 timing keys are OPTIONAL.
+
+    P2-04's committed artifact predates them and records what P2-04 measured; adding a key
+    to the schema must not retroactively invalidate it — the only alternative would be to
+    regenerate it, which would forge a measurement.
+    """
+    report = _sealed(_valid_report())
+    assert "step_seconds" not in report["steps"]
+    assert T.validate_report(report) == []
+
+
+def test_timing_length_must_match_n_steps() -> None:
+    """These lists are the denominator of every extrapolated GPU-hour.
+
+    A length that disagrees with `n_steps` would mis-scale the budget while the report
+    still looked internally consistent.
+    """
+    report = _sealed(_valid_report())
+    report["steps"]["step_seconds"] = [0.1]  # n_steps is 2
+    problems = T.validate_report(report)
+    assert any("step_seconds" in p and "n_steps" in p for p in problems), problems
+
+
+def test_timing_rejects_bools() -> None:
+    """`isinstance(True, int)` is True and `True + 0.0 == 1.0` — a bool would read as a
+    1-second step and sail through a naive numeric check (the P1-15/P1-16 lesson)."""
+    report = _sealed(_valid_report())
+    report["steps"]["step_seconds"] = [0.1, True]
+    problems = T.validate_report(report)
+    assert any("step_seconds" in p and "non-bool" in p for p in problems), problems
+
+
+@pytest.mark.parametrize("bad", [float("nan"), float("inf"), -0.5])
+def test_timing_rejects_non_finite_or_negative(bad: float) -> None:
+    report = _sealed(_valid_report())
+    report["steps"]["step_seconds"] = [0.1, bad]
+    problems = T.validate_report(report)
+    assert any("step_seconds" in p for p in problems), problems
+
+
+def test_timing_rejects_a_non_list() -> None:
+    report = _sealed(_valid_report())
+    report["steps"]["batch_wait_seconds"] = 0.5
+    assert any("batch_wait_seconds" in p for p in T.validate_report(report))
+
+
+def test_well_formed_timing_passes() -> None:
+    report = _sealed(_valid_report())
+    report["steps"]["step_seconds"] = [0.21, 0.19]
+    report["steps"]["batch_wait_seconds"] = [0.01, 0.02]
+    assert T.validate_report(report) == []
+
+
 def test_a_no_op_wrap_does_not_satisfy_the_checkpointing_clause() -> None:
     """0 blocks wrapped while checkpointing was requested is exactly the §10.3 stub."""
     report = _valid_report()
