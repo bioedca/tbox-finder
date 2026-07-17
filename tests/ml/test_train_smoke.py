@@ -84,7 +84,9 @@ def _fake_dataset(label_rows: list[list[int]]) -> object:
             return len(label_rows)
 
         def window_at(self, index: int, occurrence: int = 0) -> _W:
-            assert occurrence == 0, "counts must be taken at the deterministic lead"
+            assert (
+                occurrence == 0
+            ), "counts are pinned at occurrence 0 (not the same as a deterministic lead)"
             return _W(label_rows[index])
 
     return _DS()
@@ -121,20 +123,34 @@ def test_class_counts_fail_closed_on_empty_and_out_of_range() -> None:
 
 
 class _FakeSampler:
-    """Mimics WeightedIndexSampler's contract: yields (index, occurrence) tuples."""
+    """Mimics WeightedIndexSampler's contract.
+
+    Two properties are load-bearing and an earlier draft got both wrong:
+
+    - **The stream must change with the epoch.** The real sampler reshuffles on `set_epoch`;
+      a fake whose `__iter__` ignores its epoch is *structurally incapable* of catching a
+      `set_epoch` that does nothing, which is exactly the regression that matters (every
+      epoch replaying one draw stream = the P2-01 memorisation failure).
+    - **occurrence is the global draw ordinal** (unique, monotone over the epoch), while
+      *indices* repeat — the real sampler draws with replacement. The earlier fake inverted
+      this (`occurrence = i % 3`, unique indices), which let a shard test pass against an
+      operator that invented `occurrence` from the rank.
+    """
 
     def __init__(self, n: int) -> None:
-        self._draws = [(i, i % 3) for i in range(n)]
+        self._n = n
         self.epoch = 0
 
     def set_epoch(self, epoch: int) -> None:
         self.epoch = epoch
 
     def __len__(self) -> int:
-        return len(self._draws)
+        return self._n
 
     def __iter__(self):
-        return iter(self._draws)
+        # Index repeats (draw-with-replacement, epoch-dependent); occurrence is the unique
+        # global ordinal — the real shape, so a rank/occurrence alias cannot survive.
+        return iter([((i * 7 + self.epoch * 3) % 5, i) for i in range(self._n)])
 
 
 def test_ddp_shards_are_equal_length_or_ddp_deadlocks() -> None:
@@ -185,11 +201,46 @@ def test_ddp_shards_are_exact_when_the_stream_divides_evenly() -> None:
     assert union == full
 
 
+def test_ddp_shard_set_epoch_reaches_the_underlying_sampler() -> None:
+    """`set_epoch` must advance the real stream — `def set_epoch(self, e): pass` is a regression.
+
+    Nothing tested this before, so gutting the body to `pass` was green. It matters: the
+    module's own docstring claims "which draws are dropped changes every epoch, because
+    set_epoch reshuffles the underlying stream", and `train_stage1` calls it per epoch with
+    the comment "both must advance, or augmentation/draws freeze (P2-01)". With a stub, every
+    epoch replays one draw stream, the same draws are dropped forever, and the 9× oversampled
+    class-II records repeat identically — the exact memorisation P2-01 was designed against.
+    """
+    inner = _FakeSampler(12)
+    shard = T.ShardedSampler(inner, rank=0, world_size=2)
+
+    shard.set_epoch(0)
+    epoch0 = list(iter(shard))
+    shard.set_epoch(1)
+    epoch1 = list(iter(shard))
+
+    assert inner.epoch == 1, "set_epoch must reach the underlying sampler, not be swallowed"
+    assert epoch0 != epoch1, "the draw stream must change between epochs"
+    assert len(epoch0) == len(epoch1), "but the per-rank count must stay fixed (DDP)"
+
+
 def test_ddp_shard_preserves_the_index_occurrence_tuples() -> None:
-    """The occurrence ordinal is the dataset's per-draw RNG key — dropping it collapses
-    an oversampled record to identical copies (the P2-01 memorisation failure)."""
-    shard = list(iter(T.ShardedSampler(_FakeSampler(9), rank=1, world_size=3)))
-    assert shard == [(1, 1), (4, 1), (7, 1)]
+    """The occurrence ordinal is the dataset's per-draw RNG key — dropping it collapses an
+    oversampled record to identical copies (the P2-01 memorisation failure).
+
+    The occurrences in a shard must be **distinct**, which is what makes this bite. An earlier
+    draft used `world_size=3` against a fixture whose occurrence was `i % 3` — so every
+    occurrence in the shard equalled the rank, and an operator that simply *invented*
+    `occurrence = rank` passed. The fixture now carries the real shape (unique global
+    ordinals) and the stride is coprime to nothing in it.
+    """
+    inner = _FakeSampler(12)
+    shard = list(iter(T.ShardedSampler(inner, rank=1, world_size=4)))
+    expected = [d for i, d in enumerate(iter(_FakeSampler(12))) if i % 4 == 1]
+    assert shard == expected
+    occurrences = [occ for _, occ in shard]
+    assert occurrences == [1, 5, 9], "the global draw ordinal must survive the shard verbatim"
+    assert len(set(occurrences)) == len(occurrences), "occurrences must stay distinct"
     assert all(isinstance(d, tuple) and len(d) == 2 for d in shard)
 
 
@@ -581,7 +632,8 @@ def test_committed_report_scopes_its_class_counts_honestly() -> None:
     report = json.loads(_REPORT.read_text())
     scope = report["class_counts_scope"]
     assert scope["full_stream"] is (scope["n_records"] == scope["n_training_fold_records"])
-    assert scope["occurrence"] == 0, "counts must be taken at the deterministic lead"
+    assert scope["occurrence"] == 0, "the scan must be pinned at a single occurrence"
+    assert scope["counted_at_epoch"] == 0, "counts depend on the epoch — record which"
     assert sum(report["class_counts"]) > 0
 
 
@@ -728,6 +780,51 @@ def test_gradient_checkpointing_wraps_every_block_and_is_idempotent() -> None:
     assert T.is_gradient_checkpointing_enabled(model)
 
 
+def test_set_determinism_replaces_a_nondeterministic_cublas_config(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A launcher's bad CUBLAS_WORKSPACE_CONFIG must be REPLACED, not preserved.
+
+    The r2 fix (setdefault → validate) had no test at all, so reverting it was green — and
+    the failure it prevents is silent: `:0:0` disables the cuBLAS workspace, `warn_only=True`
+    downgrades torch's complaint to a warning, and the run carries on quietly non-reproducible.
+    Runs on CPU; the env manipulation is the whole point.
+    """
+    _require_torch()
+    from tbox_finder.train.repro import set_determinism
+
+    # A value torch rejects must be overwritten...
+    monkeypatch.setenv("CUBLAS_WORKSPACE_CONFIG", ":0:0")
+    set_determinism(42)
+    assert os.environ["CUBLAS_WORKSPACE_CONFIG"] == ":4096:8"
+    # ...as must a missing one...
+    monkeypatch.delenv("CUBLAS_WORKSPACE_CONFIG", raising=False)
+    set_determinism(42)
+    assert os.environ["CUBLAS_WORKSPACE_CONFIG"] == ":4096:8"
+    # ...but a legitimate deterministic choice by the launcher is HONOURED, not clobbered.
+    monkeypatch.setenv("CUBLAS_WORKSPACE_CONFIG", ":16:8")
+    set_determinism(42)
+    assert os.environ["CUBLAS_WORKSPACE_CONFIG"] == ":16:8"
+
+
+def test_set_determinism_actually_seeds_the_rngs() -> None:
+    """`def set_determinism(seed): pass` must not be green — it seeds, or it is a lie."""
+    torch = _require_torch()
+    import random as _random
+
+    set_det = __import__("tbox_finder.train.repro", fromlist=["set_determinism"]).set_determinism
+    set_det(1234)
+    a_torch, a_py = torch.randn(4), _random.random()
+    set_det(1234)
+    b_torch, b_py = torch.randn(4), _random.random()
+    torch.testing.assert_close(a_torch, b_torch, rtol=0, atol=0)
+    assert a_py == b_py
+    # A *different* seed must give a different stream, or "seeding" is a no-op that
+    # reproduces because nothing is random.
+    set_det(4321)
+    assert not torch.equal(a_torch, torch.randn(4))
+
+
 def test_checkpointed_block_is_numerically_transparent_and_recomputes() -> None:
     """Checkpointing must change the memory schedule, not the maths."""
     torch = _require_torch()
@@ -762,13 +859,19 @@ def test_checkpointed_block_is_numerically_transparent_and_recomputes() -> None:
     calls["n"] = 0
     T.enable_gradient_checkpointing(model)
     ckpt_out, _ = model.backbone.layers[0](x, None)
+
+    # Sample the counter BETWEEN forward and backward — this is the assertion that has
+    # content. Checking only the total after backward (`calls == 2`) cannot tell real
+    # recomputation from a wrap that simply calls the block twice eagerly and returns the
+    # plain result: that stub has identical output, identical grads, ZERO memory saving and
+    # 2x compute — the exact inverse of checkpointing — and it passed the earlier form.
+    assert calls["n"] == 1, "the forward must run exactly once before backward"
     ckpt_out.sum().backward()
+    assert calls["n"] == 2, "backward must RECOMPUTE the forward exactly once (that is the wrap)"
 
     torch.testing.assert_close(ckpt_out, plain, rtol=0, atol=0)
     torch.testing.assert_close(x.grad, plain_grad, rtol=0, atol=1e-7)
-    # The forward ran twice under checkpointing (once forward, once recomputed in backward)
-    # and once without — this is what proves the wrap actually engaged rather than no-opped.
-    assert calls["n"] == n_plain + 1 == 2
+    assert n_plain == 1, "the unwrapped baseline runs the forward once and never recomputes"
 
 
 @pytest.mark.skipif(

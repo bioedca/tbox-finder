@@ -148,6 +148,11 @@ class Stage1TrainConfig:
     # 8,303 records and the smoke must compose in seconds, not hours. None ⇒ the full stream.
     steps_per_epoch: int | None = None
     max_records: int | None = None
+    #: ⚠ ACCEPTED BUT NOT APPLIED. `_batches` iterates the sampler directly rather than
+    #: through a `DataLoader` (see its docstring), so there is nowhere for worker processes to
+    #: go. It is kept because P2-05 may add the loader once throughput is the question — but
+    #: until then a `num_workers=8` sweep point would record itself as set while changing
+    #: nothing, so it is named here rather than left to be discovered. Flagged at P2-04 review.
     num_workers: int = 0
 
     # W&B (PRD §16: offline on the node; setup.smk::wandb_sync uploads from the login node).
@@ -206,6 +211,21 @@ def is_gradient_checkpointing_enabled(backbone: Any) -> bool:
     return all(getattr(b, _CKPT_MARKER, False) for b in blocks)
 
 
+def hf_gradient_checkpointing_supported(backbone: Any) -> bool:
+    """Probe whether the backbone supports the **standard HuggingFace** checkpointing path.
+
+    Measured off the model, never asserted. `build_report` previously wrote
+    ``hf_flag_supported: False`` as a hard-coded literal and a test asserted it was False —
+    a clause compared to the constant that produced it, which is this repo's documented
+    tautology class and could never become True however the backbone changed.
+
+    This is the fact that justifies the hand-wiring (PRD §10.3): if a future revision *does*
+    implement it, this flips to True and the committed-report test fails, prompting a
+    revisit — which is exactly the alarm the hard-coded literal could never raise.
+    """
+    return bool(getattr(backbone, "supports_gradient_checkpointing", False))
+
+
 def enable_gradient_checkpointing(backbone: Any) -> int:
     """Hand-wire per-block gradient checkpointing. Returns the number of blocks wrapped.
 
@@ -253,6 +273,22 @@ def enable_gradient_checkpointing(backbone: Any) -> int:
     no input requires grad (e.g. a fully frozen backbone). Stage-1 is a *full* fine-tune
     (ADR-0002 D7 (1) + A6), so the embedding output always requires grad; the frozen-backbone
     probe path (P1-05/P1-09) does not use this function.
+
+    **Two consequences of rebinding ``forward``, latent today but disclosed** (they bite the
+    moment someone adds an obvious feature, which P2-05/P2-09 might):
+
+    - ``copy.deepcopy`` treats a plain function as atomic, so a deep-copied block shares this
+      closure — whose ``_orig`` is still bound to the **original** block. ``deepcopy(model)``
+      would therefore forward through the *original* module's parameters, silently, with
+      correct-looking output, while the copy's own parameters never move. Any EMA/SWA/
+      best-model snapshot hits this.
+    - the wrapped ``forward`` is a local function and therefore **unpicklable**, so a
+      whole-module ``torch.save(model)`` (as opposed to ``state_dict()``) or a spawn-based
+      worker shipping the module raises ``PicklingError``.
+
+    Neither is live here: the checkpoint path saves ``state_dict()`` only, and DDP does not
+    pickle the module. If either becomes needed, wrap via a module subclass rather than by
+    rebinding the attribute.
     """
     from torch.utils.checkpoint import checkpoint  # lazy — keeps this module bare-importable
 
@@ -413,12 +449,19 @@ def compute_class_counts(dataset: Any, *, max_records: int | None = None) -> tup
     locus-only (background 31.5%) whereas the real 1024-nt windowed stream is **78.68%**
     background (P2-02's measurement over the 8,303 ``nested_train`` records).
 
-    Counted at ``occurrence=0`` (the deterministic window lead), so the counts are
-    reproducible for a given corpus + config rather than drifting with the augmentation RNG.
-    Class *frequencies* are essentially phase-invariant — a window's label histogram barely
-    moves when the lead shifts — so this is a faithful estimate of the augmented stream's
-    balance, and it is the only choice that keeps the loss weights a deterministic function
-    of the config (§8.3).
+    Counted at ``occurrence=0`` — **which is not the same as "the deterministic lead"**, and
+    an earlier draft of this docstring said it was. With ``offset_augmentation=True`` (the
+    default, and what ``build_stream`` configures) ``Stage1WindowDataset.window_at`` takes the
+    *sampled* branch: the lead and the strand are drawn from the augmentation RNG keyed on
+    ``(seed, epoch, index, occurrence)``. ``deterministic_lead`` is a different function,
+    reached only when augmentation is off. So what is actually true is narrower: the counts
+    are **reproducible** (the RNG is seeded, and the scan is pinned at ``occurrence=0`` on the
+    dataset's *current* epoch) — not phase-independent. Two consequences worth naming rather
+    than discovering: the counts depend on ``dataset._epoch``, so they are correct today only
+    because :func:`train_stage1` calls this **before** the ``set_epoch`` loop; and they shift
+    with ``offset_augmentation`` / ``both_strands``. Class *frequencies* move very little with
+    phase (a window's label histogram is nearly phase-invariant), so this remains a faithful
+    estimate — the estimate is just not the *deterministic* one the field name suggests.
 
     **Scope, stated (it is not the weighted draw stream).** This scans each record **once**.
     It is *not* a tally over the draws :class:`WeightedIndexSampler` actually emits, which
@@ -718,8 +761,10 @@ def build_report(
     cfg: Stage1TrainConfig,
     class_counts: Sequence[int],
     counts_scope: Mapping[str, Any],
+    hardware: Mapping[str, Any] | None = None,
     n_blocks: int,
     n_blocks_wrapped: int,
+    hf_flag_supported: bool,
     losses: Sequence[float],
     grads_finite: bool,
     world_size: int,
@@ -746,8 +791,10 @@ def build_report(
             "requested": bool(cfg.gradient_checkpointing),
             "n_blocks": int(n_blocks),
             "n_blocks_wrapped": int(n_blocks_wrapped),
-            # Recorded because it is the reason this is hand-wired at all (PRD §10.3).
-            "hf_flag_supported": False,
+            # MEASURED off the model (hf_gradient_checkpointing_supported), not asserted:
+            # this is the fact that justifies the hand-wiring, so a hard-coded False would be
+            # a clause compared to the constant that produced it.
+            "hf_flag_supported": bool(hf_flag_supported),
             "mechanism": "manual torch.utils.checkpoint per RCPSMambaBlock (use_reentrant=False)",
         },
         "steps": {
@@ -763,6 +810,9 @@ def build_report(
         "class_counts_scope": _sanitize(counts_scope),
         "grads_finite": bool(grads_finite),
         "peak_vram_gib": float(peak_vram_gib) if peak_vram_gib is not None else None,
+        # The card `peak_vram_gib` was measured on. Without it the number is unattributable —
+        # and P2-04's laptop RTX 4060 is not the A4000 the PRD §10.3 budget is about.
+        "hardware": _sanitize(hardware) if hardware else None,
         "eval_metrics": _sanitize(eval_metrics) if eval_metrics else None,
         "provenance": {
             "git_sha": _git_sha(),
@@ -782,8 +832,8 @@ def build_report(
 # --------------------------------------------------------------------------------------
 # Build + run
 # --------------------------------------------------------------------------------------
-def build_model(cfg: Stage1TrainConfig, *, device: str) -> tuple[Any, int, int]:
-    """Load the pinned Caduceus-PS backbone + P1-04 segmenter. Returns (segmenter, blocks, wrapped).
+def build_model(cfg: Stage1TrainConfig, *, device: str) -> tuple[Any, int, int, bool]:
+    """Load the pinned backbone + P1-04 segmenter → (segmenter, blocks, wrapped, hf_supported).
 
     ``load_caduceus_ps`` returns the backbone in ``.eval()``; a full fine-tune needs
     ``.train()``, so the segmenter is switched explicitly — otherwise dropout and any other
@@ -802,8 +852,11 @@ def build_model(cfg: Stage1TrainConfig, *, device: str) -> tuple[Any, int, int]:
     segmenter.train()
 
     n_blocks = len(backbone_blocks(backbone))
+    # Probe BEFORE wrapping — the wrap does not touch the HF flag, but reading it first keeps
+    # the measurement about the pristine backbone rather than our mutation of it.
+    hf_supported = hf_gradient_checkpointing_supported(backbone)
     n_wrapped = enable_gradient_checkpointing(backbone) if cfg.gradient_checkpointing else 0
-    return segmenter, n_blocks, n_wrapped
+    return segmenter, n_blocks, n_wrapped, hf_supported
 
 
 def _init_wandb(cfg: Stage1TrainConfig) -> Any:
@@ -863,7 +916,12 @@ def build_stream(cfg: Stage1TrainConfig) -> tuple[Any, Any, dict[str, Any]]:
         "n_training_fold_records": n_fold,
         "full_stream": len(records) == n_fold,
         "training_fold_only": True,
+        # The occurrence the scan is pinned at. NOT "the deterministic lead": with
+        # offset_augmentation on, window_at draws the phase/strand from the seeded
+        # augmentation RNG, so this is reproducible-at-epoch-0, not phase-independent.
         "occurrence": 0,
+        "counted_at_epoch": 0,
+        "offset_augmentation": cfg.offset_augmentation,
         # The counts are a per-record scan at the deterministic lead, NOT a tally over the
         # weighted draw stream the sampler actually emits. With class_weight_alpha == 0 (the
         # default) nothing consumes them, so this is inert; but P2-06 sweeps α, and inverse-
@@ -902,10 +960,12 @@ def train_stage1(cfg: Stage1TrainConfig, *, log: Any = print) -> dict[str, Any]:
     The loop itself is deliberately plain (AdamW, focal CE, grad-clip, DDP): every
     interesting decision already lives in the three composed modules, and P2-05/P2-06 tune
     the knobs. Its job here is to prove the composition runs and to record provenance.
+
+    This wrapper owns only the determinism preconditions and the DDP process-group lifecycle;
+    the body is :func:`_train_stage1_inner`, split out so teardown can live in a ``finally``.
     """
     import torch
 
-    from tbox_finder.train.objective import Stage1Loss, Stage1LossConfig
     from tbox_finder.train.repro import set_determinism
 
     check_pythonhashseed(cfg.pythonhashseed)  # §8.3 — verified, NOT set (see the function)
@@ -920,6 +980,28 @@ def train_stage1(cfg: Stage1TrainConfig, *, log: Any = print) -> dict[str, Any]:
         # RANK/WORLD_SIZE/LOCAL_RANK and the rendezvous env this reads.
         dist.init_process_group(backend="nccl")
         torch.cuda.set_device(ddp_local_rank())
+    try:
+        return _train_stage1_inner(cfg, log=log, world_size=world_size, ddp_active=ddp_active)
+    finally:
+        # Reachable on ANY exit path, including a raise. Without this, a rank that dies (an
+        # OOM, a collate error, a failed gate) unwinds without destroying the process group,
+        # and the surviving ranks block in the next NCCL collective until the watchdog fires
+        # — burning the SLURM wall-clock instead of failing fast. Same shape as the ragged-
+        # shard deadlock, different trigger.
+        if ddp_active:
+            import torch.distributed as dist
+
+            if dist.is_initialized():
+                dist.destroy_process_group()
+
+
+def _train_stage1_inner(
+    cfg: Stage1TrainConfig, *, log: Any, world_size: int, ddp_active: bool
+) -> dict[str, Any]:
+    """The body of :func:`train_stage1`, split out so DDP teardown can be a ``finally``."""
+    import torch
+
+    from tbox_finder.train.objective import Stage1Loss, Stage1LossConfig
 
     device = cfg.device or (f"cuda:{ddp_local_rank()}" if torch.cuda.is_available() else "cpu")
     dataset, sampler, counts_scope = build_stream(cfg)
@@ -932,7 +1014,7 @@ def train_stage1(cfg: Stage1TrainConfig, *, log: Any = print) -> dict[str, Any]:
     by_class = dict(zip(CLASS_ORDER, class_counts, strict=True))
     log(f"class counts over {len(dataset)} records: {by_class}")
 
-    segmenter, n_blocks, n_wrapped = build_model(cfg, device=device)
+    segmenter, n_blocks, n_wrapped, hf_supported = build_model(cfg, device=device)
     log(f"gradient checkpointing: wrapped {n_wrapped}/{n_blocks} RCPSMambaBlocks")
 
     model = segmenter
@@ -953,8 +1035,17 @@ def train_stage1(cfg: Stage1TrainConfig, *, log: Any = print) -> dict[str, Any]:
     optimizer = torch.optim.AdamW(model.parameters(), lr=cfg.lr, weight_decay=cfg.weight_decay)
     run = _init_wandb(cfg)
 
-    if torch.cuda.is_available():
-        torch.cuda.reset_peak_memory_stats()
+    # Device-scoped, not global: `reset_peak_memory_stats()`/`max_memory_allocated()` default
+    # to torch.cuda.current_device(), but `set_device` is only called on the DDP path — so a
+    # single-process run with `device=cuda:1` (an exposed knob; the obvious way to pick a free
+    # GPU) would train on cuda:1 and report cuda:0's peak, i.e. ~0.0 GiB, in the very field
+    # the PRD §10.3 footprint claim rests on. Self-consistently, so the validator would pass
+    # it. `measuring_vram` is False for a CPU run even on a CUDA box, so a CPU run records
+    # None rather than a fabricated 0.0. (lora_harness.py + eval/rinalmo_throughput.py already
+    # pass the device explicitly; this module was the outlier.)
+    measuring_vram = torch.cuda.is_available() and str(device).startswith("cuda")
+    if measuring_vram:
+        torch.cuda.reset_peak_memory_stats(device)
 
     losses: list[float] = []
     grads_finite = True
@@ -989,13 +1080,31 @@ def train_stage1(cfg: Stage1TrainConfig, *, log: Any = print) -> dict[str, Any]:
             if run is not None:
                 run.log({"train/loss": losses[-1], "epoch": epoch})
 
-    peak = torch.cuda.max_memory_allocated() / 2**30 if torch.cuda.is_available() else None
+    peak = torch.cuda.max_memory_allocated(device) / 2**30 if measuring_vram else None
+    # A VRAM number is meaningless without the card it was measured on — the sibling P1
+    # reports (lora_vram_smoke, kernel_smoke, attention_backend) all carry device_name, and
+    # this one did not, leaving `peak_vram_gib` unattributable. The laptop and the A4000 are
+    # different cards with different capacities; a reader comparing two runs must be able to
+    # see whether they are comparable at all.
+    hardware = {
+        "device": str(device),
+        "device_name": torch.cuda.get_device_name(device) if measuring_vram else None,
+        "capability": list(torch.cuda.get_device_capability(device)) if measuring_vram else None,
+        "total_vram_gib": (
+            torch.cuda.get_device_properties(device).total_memory / 2**30
+            if measuring_vram
+            else None
+        ),
+        "torch": torch.__version__,
+    }
     report = build_report(
+        hardware=hardware,
         cfg=cfg,
         class_counts=class_counts,
         counts_scope=counts_scope,
         n_blocks=n_blocks,
         n_blocks_wrapped=n_wrapped,
+        hf_flag_supported=hf_supported,
         losses=losses,
         grads_finite=grads_finite,
         world_size=world_size,
@@ -1016,10 +1125,6 @@ def train_stage1(cfg: Stage1TrainConfig, *, log: Any = print) -> dict[str, Any]:
             torch.save(segmenter.state_dict(), ckpt_dir / "stage1.pt")
     if run is not None:
         run.finish()
-    if ddp_active:
-        import torch.distributed as dist
-
-        dist.destroy_process_group()
 
     # A *valid* report can still record a *failed* run: the validator only checks that the
     # clauses follow from the evidence, so a run that trained zero steps yields a perfectly
