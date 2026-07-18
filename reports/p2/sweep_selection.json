@@ -1,0 +1,932 @@
+{
+  "consistency": {
+    "all_agree": true,
+    "n_points": 36,
+    "per_field": {
+      "env_lock": {
+        "agrees": true,
+        "distinct": [
+          "envs/ml-dna.conda-lock.yml"
+        ],
+        "n_points_carrying": 36
+      },
+      "git_sha": {
+        "agrees": true,
+        "distinct": [
+          "4c723fd7a8bd2a74154d01e45fb8dfafb9f87beb"
+        ],
+        "n_points_carrying": 36
+      },
+      "n_eval_blocks": {
+        "agrees": true,
+        "distinct": [
+          "469"
+        ],
+        "n_points_carrying": 36
+      },
+      "n_eval_records": {
+        "agrees": true,
+        "distinct": [
+          "830"
+        ],
+        "n_points_carrying": 36
+      },
+      "seed": {
+        "agrees": true,
+        "distinct": [
+          "42"
+        ],
+        "n_points_carrying": 36
+      }
+    }
+  },
+  "generated_by": "src/tbox_finder/train/select_best.py::main",
+  "provenance": {
+    "adr": "ADR-0005",
+    "env_lock_hash": "70b66801eeafe1fdec4c19e667de1590e4471143bca36248fe40f16e53bb5003",
+    "generated_at_utc": "2026-07-18T22:23:52.782309+00:00",
+    "git_sha": "4c723fd7a8bd2a74154d01e45fb8dfafb9f87beb",
+    "inputs": {
+      "reports/p2/sweep/g0.5_lr1e-4_a0.0.json": "94df4c25720594ed4f9b031e222c1c0c09e15302d051230ddc7d76894f1f3a89",
+      "reports/p2/sweep/g0.5_lr1e-4_a0.25.json": "bf5df4d7b830b32cd75c090fe4def3ecc2147f3931b006308607c39ea3089e6f",
+      "reports/p2/sweep/g0.5_lr1e-4_a0.5.json": "930ccb826684f3439b9a6e3baccea9e780821cbb22d97cb12fbe1cf70e8ff241",
+      "reports/p2/sweep/g0.5_lr3e-4_a0.0.json": "f8b590bda6b8b2ba7b8640924e5785e7c061a4fb29617c8207e400f3394485d6",
+      "reports/p2/sweep/g0.5_lr3e-4_a0.25.json": "23878770f5da5c5d900aa54fe2679fa880a5b3bb65f51b151d2db642c11ec8f2",
+      "reports/p2/sweep/g0.5_lr3e-4_a0.5.json": "b72caae2f02770a79892dc45fdb4d66b548b470f1e06f9fce1ddf386e5cb84c8",
+      "reports/p2/sweep/g0.5_lr3e-5_a0.0.json": "5419905153a63acdca665d7bbec1ef3901252cdf411e74218094ecfe07b78735",
+      "reports/p2/sweep/g0.5_lr3e-5_a0.25.json": "c9d46ac28f50f007950da126f4e0d54272c270d83b7f9d0e97dd9fa57689884a",
+      "reports/p2/sweep/g0.5_lr3e-5_a0.5.json": "3f8227c0ad1ebd0dae522365f84298b7bdfa512fba31234dd184b58ec98f9e37",
+      "reports/p2/sweep/g1.0_lr1e-4_a0.0.json": "bb7ce0577426c896a794ec2c3acf4b8e61480b21b0eea28f410da5199b82346a",
+      "reports/p2/sweep/g1.0_lr1e-4_a0.25.json": "6eae33b91a61e755cd51ccb6e3506363f18456ce44a5b491f15ae8b196f77563",
+      "reports/p2/sweep/g1.0_lr1e-4_a0.5.json": "6ec25e0d12e1265c91387c36b03293cd7b85ec3f6a25ae1fd6d7c0bb792478ac",
+      "reports/p2/sweep/g1.0_lr3e-4_a0.0.json": "f2e60af2ec13b2e5fa78ca8e3c4db6dbfffad424b25fd64137c14ecc3404e5b5",
+      "reports/p2/sweep/g1.0_lr3e-4_a0.25.json": "df90b3e7e6e8e71a72da33da698179aa3a4b065c5836d0d7adff915cd3df34ed",
+      "reports/p2/sweep/g1.0_lr3e-4_a0.5.json": "3f548db791796db0d3776c80c031dc83921e3a24334cccf8398e1253b8f47f44",
+      "reports/p2/sweep/g1.0_lr3e-5_a0.0.json": "7303d011f8c60d389328d7edea662a7f1572c71cba6a449b87bdd77034496f9b",
+      "reports/p2/sweep/g1.0_lr3e-5_a0.25.json": "788a0a2894addd9810eecc1057b69e722183b0b4e7f7b99a3bfad167426e3ea9",
+      "reports/p2/sweep/g1.0_lr3e-5_a0.5.json": "7173e8ea35983a9633df2e25c145ebf6e044b5cef4ff18c838e8d204c030cb90",
+      "reports/p2/sweep/g2.0_lr1e-4_a0.0.json": "e66d34ef7a5707dc413575031b8c7266237bc16b15015fe8b0ad4931468bf875",
+      "reports/p2/sweep/g2.0_lr1e-4_a0.25.json": "63b803991232e3f018fe3dcda4d27b8f29358e0fa1cf2500b99cfc08461be082",
+      "reports/p2/sweep/g2.0_lr1e-4_a0.5.json": "e79cbf4fb5546e312d92a64d1dae0d57d5414397e85a3d35509c904f4b38cd57",
+      "reports/p2/sweep/g2.0_lr3e-4_a0.0.json": "568260001ceb7cb9e0acc125a7450056840fc68b9ce08535b290cc79f22d5347",
+      "reports/p2/sweep/g2.0_lr3e-4_a0.25.json": "950a527f2a96735f49830b9a2bbf46f94a8b5b6d9810bf9ffe43457b7499f349",
+      "reports/p2/sweep/g2.0_lr3e-4_a0.5.json": "dec90138abbf42f29cc593c78e14e1ef67dbab9078f2b9af425352c0361e9897",
+      "reports/p2/sweep/g2.0_lr3e-5_a0.0.json": "13fdfb26e34997e60203ef055fb8229cc4057b1cbab88f4aff3cf28c5ff72137",
+      "reports/p2/sweep/g2.0_lr3e-5_a0.25.json": "c567ab79c8ba1f17d7a528769e6ec9b9750847fcd4792aebd75b60d6b3f4e6ed",
+      "reports/p2/sweep/g2.0_lr3e-5_a0.5.json": "a2a56efcb928c677242db3b2f8730f16464fa57e7401e38ce838a1e50a44de6b",
+      "reports/p2/sweep/g3.0_lr1e-4_a0.0.json": "7f96c11a042491803512d03a7c78646a11c14fd62496ee6eef1c7485b9bdd8ba",
+      "reports/p2/sweep/g3.0_lr1e-4_a0.25.json": "d52da572d9aaab9c77712af0d14d3f2e7f62734046d0c4790ffaae7d447f46e6",
+      "reports/p2/sweep/g3.0_lr1e-4_a0.5.json": "036b6cf6ba9fdc9559a3c12413ba93c3cc7a4d376205de9999723b51ca691926",
+      "reports/p2/sweep/g3.0_lr3e-4_a0.0.json": "e6eb40d69828a92d939639409fe0d10eabbda142014b57ca4aa56cddd3bfa6d0",
+      "reports/p2/sweep/g3.0_lr3e-4_a0.25.json": "765de64ad4461d3cbf53b65c7c885d8c2041e219a58f7fcdae6be9c2b8ad716a",
+      "reports/p2/sweep/g3.0_lr3e-4_a0.5.json": "507635f4b58d9b391f37d453d41609369e6d9e3ec6d8cb7bf14a78dbd4ac9b8f",
+      "reports/p2/sweep/g3.0_lr3e-5_a0.0.json": "3b60a9e8ee175952dd1dc1f38e8f2690da0b3ddc8db8c009b1d80b04bb00d74f",
+      "reports/p2/sweep/g3.0_lr3e-5_a0.25.json": "13399a0e2c705882cce57fb9a46d247f9a3cc74a5260b223e4324fec6168ff92",
+      "reports/p2/sweep/g3.0_lr3e-5_a0.5.json": "ffeb024bd2c6b781e289df1e1c0affc08a6eee2ea940a85b755a449c63eb7d85"
+    },
+    "outputs": {},
+    "rule": "src/tbox_finder/train/select_best.py :: main",
+    "schema_version": "1.0",
+    "script": "src/tbox_finder/train/select_best.py",
+    "seed": 0
+  },
+  "schema_version": "1",
+  "selection": {
+    "fold_scope": "selection_val",
+    "ladder_rung": "P2-06a inner rung \u2014 a cluster-grouped seeded carve from INSIDE the ADR-0004 D5 nested training fold (not a PRD \u00a79.2 ladder scheme)",
+    "n_points": 36,
+    "n_promotable": 36,
+    "n_rejected": 0,
+    "n_tied_at_winning_score": 1,
+    "ranking": [
+      {
+        "axes": {
+          "class_weight_alpha": 0.5,
+          "gamma": 0.5,
+          "lr": 0.0003
+        },
+        "ci": {
+          "ci_level": 0.95,
+          "lower": 0.9124749305285347,
+          "n_blocks": 469,
+          "n_boot": 2000,
+          "point": 0.9386381631037213,
+          "upper": 0.9549853341770409
+        },
+        "per_element_f1": {
+          "Antiterminator_Tbox_seq": 0.9428845592223288,
+          "Specifier": 0.9386381631037213,
+          "Stem_I": 0.9600162602658807
+        },
+        "point": "reports/p2/sweep/g0.5_lr3e-4_a0.5.json",
+        "score": 0.9386381631037213
+      },
+      {
+        "axes": {
+          "class_weight_alpha": 0.25,
+          "gamma": 0.5,
+          "lr": 0.0003
+        },
+        "ci": {
+          "ci_level": 0.95,
+          "lower": 0.9127206177843896,
+          "n_blocks": 469,
+          "n_boot": 2000,
+          "point": 0.93753765816429,
+          "upper": 0.9553858755219651
+        },
+        "per_element_f1": {
+          "Antiterminator_Tbox_seq": 0.9443965969961139,
+          "Specifier": 0.93753765816429,
+          "Stem_I": 0.9530447774422477
+        },
+        "point": "reports/p2/sweep/g0.5_lr3e-4_a0.25.json",
+        "score": 0.93753765816429
+      },
+      {
+        "axes": {
+          "class_weight_alpha": 0.25,
+          "gamma": 2.0,
+          "lr": 0.0003
+        },
+        "ci": {
+          "ci_level": 0.95,
+          "lower": 0.9070474495323115,
+          "n_blocks": 469,
+          "n_boot": 2000,
+          "point": 0.9352051835853131,
+          "upper": 0.9515979706311642
+        },
+        "per_element_f1": {
+          "Antiterminator_Tbox_seq": 0.9352051835853131,
+          "Specifier": 0.9367850692354004,
+          "Stem_I": 0.955144576921596
+        },
+        "point": "reports/p2/sweep/g2.0_lr3e-4_a0.25.json",
+        "score": 0.9352051835853131
+      },
+      {
+        "axes": {
+          "class_weight_alpha": 0.0,
+          "gamma": 0.5,
+          "lr": 0.0003
+        },
+        "ci": {
+          "ci_level": 0.95,
+          "lower": 0.906553512376614,
+          "n_blocks": 469,
+          "n_boot": 2000,
+          "point": 0.9330900243309003,
+          "upper": 0.9525900921596868
+        },
+        "per_element_f1": {
+          "Antiterminator_Tbox_seq": 0.9421955548043607,
+          "Specifier": 0.9330900243309003,
+          "Stem_I": 0.9493745373094664
+        },
+        "point": "reports/p2/sweep/g0.5_lr3e-4_a0.0.json",
+        "score": 0.9330900243309003
+      },
+      {
+        "axes": {
+          "class_weight_alpha": 0.5,
+          "gamma": 2.0,
+          "lr": 0.0001
+        },
+        "ci": {
+          "ci_level": 0.95,
+          "lower": 0.9020303450900771,
+          "n_blocks": 469,
+          "n_boot": 2000,
+          "point": 0.931129476584022,
+          "upper": 0.9458475625099912
+        },
+        "per_element_f1": {
+          "Antiterminator_Tbox_seq": 0.9326191264063534,
+          "Specifier": 0.931129476584022,
+          "Stem_I": 0.9544167700480326
+        },
+        "point": "reports/p2/sweep/g2.0_lr1e-4_a0.5.json",
+        "score": 0.931129476584022
+      },
+      {
+        "axes": {
+          "class_weight_alpha": 0.0,
+          "gamma": 1.0,
+          "lr": 0.0003
+        },
+        "ci": {
+          "ci_level": 0.95,
+          "lower": 0.9009494482552938,
+          "n_blocks": 469,
+          "n_boot": 2000,
+          "point": 0.9284396145171212,
+          "upper": 0.9503049129820362
+        },
+        "per_element_f1": {
+          "Antiterminator_Tbox_seq": 0.9477667152852643,
+          "Specifier": 0.9284396145171212,
+          "Stem_I": 0.95357315860592
+        },
+        "point": "reports/p2/sweep/g1.0_lr3e-4_a0.0.json",
+        "score": 0.9284396145171212
+      },
+      {
+        "axes": {
+          "class_weight_alpha": 0.25,
+          "gamma": 1.0,
+          "lr": 0.0003
+        },
+        "ci": {
+          "ci_level": 0.95,
+          "lower": 0.8937580825933271,
+          "n_blocks": 469,
+          "n_boot": 2000,
+          "point": 0.9273495673173677,
+          "upper": 0.9523236856259244
+        },
+        "per_element_f1": {
+          "Antiterminator_Tbox_seq": 0.9453949304300306,
+          "Specifier": 0.9273495673173677,
+          "Stem_I": 0.9580312299083982
+        },
+        "point": "reports/p2/sweep/g1.0_lr3e-4_a0.25.json",
+        "score": 0.9273495673173677
+      },
+      {
+        "axes": {
+          "class_weight_alpha": 0.0,
+          "gamma": 3.0,
+          "lr": 0.0003
+        },
+        "ci": {
+          "ci_level": 0.95,
+          "lower": 0.8885685381099981,
+          "n_blocks": 469,
+          "n_boot": 2000,
+          "point": 0.9272907543584236,
+          "upper": 0.9456176380086682
+        },
+        "per_element_f1": {
+          "Antiterminator_Tbox_seq": 0.9272907543584236,
+          "Specifier": 0.9294911097486205,
+          "Stem_I": 0.9433827087562295
+        },
+        "point": "reports/p2/sweep/g3.0_lr3e-4_a0.0.json",
+        "score": 0.9272907543584236
+      },
+      {
+        "axes": {
+          "class_weight_alpha": 0.25,
+          "gamma": 0.5,
+          "lr": 0.0001
+        },
+        "ci": {
+          "ci_level": 0.95,
+          "lower": 0.8984767914539611,
+          "n_blocks": 469,
+          "n_boot": 2000,
+          "point": 0.9272547076313181,
+          "upper": 0.9446897240199649
+        },
+        "per_element_f1": {
+          "Antiterminator_Tbox_seq": 0.9300072456267467,
+          "Specifier": 0.9272547076313181,
+          "Stem_I": 0.9480837184017396
+        },
+        "point": "reports/p2/sweep/g0.5_lr1e-4_a0.25.json",
+        "score": 0.9272547076313181
+      },
+      {
+        "axes": {
+          "class_weight_alpha": 0.5,
+          "gamma": 0.5,
+          "lr": 0.0001
+        },
+        "ci": {
+          "ci_level": 0.95,
+          "lower": 0.8959365963949176,
+          "n_blocks": 469,
+          "n_boot": 2000,
+          "point": 0.9250056240669162,
+          "upper": 0.9435746928605009
+        },
+        "per_element_f1": {
+          "Antiterminator_Tbox_seq": 0.9250056240669162,
+          "Specifier": 0.932701795934478,
+          "Stem_I": 0.9478677154273365
+        },
+        "point": "reports/p2/sweep/g0.5_lr1e-4_a0.5.json",
+        "score": 0.9250056240669162
+      },
+      {
+        "axes": {
+          "class_weight_alpha": 0.5,
+          "gamma": 3.0,
+          "lr": 0.0001
+        },
+        "ci": {
+          "ci_level": 0.95,
+          "lower": 0.8971296343740718,
+          "n_blocks": 469,
+          "n_boot": 2000,
+          "point": 0.9218139171227522,
+          "upper": 0.9415801876409412
+        },
+        "per_element_f1": {
+          "Antiterminator_Tbox_seq": 0.940877039262319,
+          "Specifier": 0.9218139171227522,
+          "Stem_I": 0.9513064508980861
+        },
+        "point": "reports/p2/sweep/g3.0_lr1e-4_a0.5.json",
+        "score": 0.9218139171227522
+      },
+      {
+        "axes": {
+          "class_weight_alpha": 0.0,
+          "gamma": 2.0,
+          "lr": 0.0003
+        },
+        "ci": {
+          "ci_level": 0.95,
+          "lower": 0.8896020766555699,
+          "n_blocks": 469,
+          "n_boot": 2000,
+          "point": 0.921468554494567,
+          "upper": 0.9410472605033339
+        },
+        "per_element_f1": {
+          "Antiterminator_Tbox_seq": 0.921468554494567,
+          "Specifier": 0.9359903381642513,
+          "Stem_I": 0.9300241891691761
+        },
+        "point": "reports/p2/sweep/g2.0_lr3e-4_a0.0.json",
+        "score": 0.921468554494567
+      },
+      {
+        "axes": {
+          "class_weight_alpha": 0.5,
+          "gamma": 1.0,
+          "lr": 0.0001
+        },
+        "ci": {
+          "ci_level": 0.95,
+          "lower": 0.8951677738996742,
+          "n_blocks": 469,
+          "n_boot": 2000,
+          "point": 0.9213372865760148,
+          "upper": 0.939404512147708
+        },
+        "per_element_f1": {
+          "Antiterminator_Tbox_seq": 0.9213372865760148,
+          "Specifier": 0.9295664116146753,
+          "Stem_I": 0.9526710017285374
+        },
+        "point": "reports/p2/sweep/g1.0_lr1e-4_a0.5.json",
+        "score": 0.9213372865760148
+      },
+      {
+        "axes": {
+          "class_weight_alpha": 0.25,
+          "gamma": 3.0,
+          "lr": 0.0001
+        },
+        "ci": {
+          "ci_level": 0.95,
+          "lower": 0.893717818569048,
+          "n_blocks": 469,
+          "n_boot": 2000,
+          "point": 0.921063070210234,
+          "upper": 0.9391669338440088
+        },
+        "per_element_f1": {
+          "Antiterminator_Tbox_seq": 0.9277155643548021,
+          "Specifier": 0.921063070210234,
+          "Stem_I": 0.9493220659645583
+        },
+        "point": "reports/p2/sweep/g3.0_lr1e-4_a0.25.json",
+        "score": 0.921063070210234
+      },
+      {
+        "axes": {
+          "class_weight_alpha": 0.5,
+          "gamma": 1.0,
+          "lr": 0.0003
+        },
+        "ci": {
+          "ci_level": 0.95,
+          "lower": 0.8868770133029046,
+          "n_blocks": 469,
+          "n_boot": 2000,
+          "point": 0.9205918668906746,
+          "upper": 0.9428938111707765
+        },
+        "per_element_f1": {
+          "Antiterminator_Tbox_seq": 0.9205918668906746,
+          "Specifier": 0.9322772277227723,
+          "Stem_I": 0.9567645252581529
+        },
+        "point": "reports/p2/sweep/g1.0_lr3e-4_a0.5.json",
+        "score": 0.9205918668906746
+      },
+      {
+        "axes": {
+          "class_weight_alpha": 0.5,
+          "gamma": 2.0,
+          "lr": 0.0003
+        },
+        "ci": {
+          "ci_level": 0.95,
+          "lower": 0.8839678871777723,
+          "n_blocks": 469,
+          "n_boot": 2000,
+          "point": 0.9198490992354093,
+          "upper": 0.9456791215606124
+        },
+        "per_element_f1": {
+          "Antiterminator_Tbox_seq": 0.9198490992354093,
+          "Specifier": 0.9388811467250647,
+          "Stem_I": 0.9573415275445877
+        },
+        "point": "reports/p2/sweep/g2.0_lr3e-4_a0.5.json",
+        "score": 0.9198490992354093
+      },
+      {
+        "axes": {
+          "class_weight_alpha": 0.0,
+          "gamma": 3.0,
+          "lr": 0.0001
+        },
+        "ci": {
+          "ci_level": 0.95,
+          "lower": 0.8956023735313834,
+          "n_blocks": 469,
+          "n_boot": 2000,
+          "point": 0.9192666584453488,
+          "upper": 0.936925180157571
+        },
+        "per_element_f1": {
+          "Antiterminator_Tbox_seq": 0.9192666584453488,
+          "Specifier": 0.9255124822407145,
+          "Stem_I": 0.9542869529735796
+        },
+        "point": "reports/p2/sweep/g3.0_lr1e-4_a0.0.json",
+        "score": 0.9192666584453488
+      },
+      {
+        "axes": {
+          "class_weight_alpha": 0.5,
+          "gamma": 0.5,
+          "lr": 3e-05
+        },
+        "ci": {
+          "ci_level": 0.95,
+          "lower": 0.8861915540208372,
+          "n_blocks": 469,
+          "n_boot": 2000,
+          "point": 0.9191097839026654,
+          "upper": 0.9333922603532625
+        },
+        "per_element_f1": {
+          "Antiterminator_Tbox_seq": 0.9191097839026654,
+          "Specifier": 0.920558882235529,
+          "Stem_I": 0.9318817616913821
+        },
+        "point": "reports/p2/sweep/g0.5_lr3e-5_a0.5.json",
+        "score": 0.9191097839026654
+      },
+      {
+        "axes": {
+          "class_weight_alpha": 0.5,
+          "gamma": 1.0,
+          "lr": 3e-05
+        },
+        "ci": {
+          "ci_level": 0.95,
+          "lower": 0.8857152243637829,
+          "n_blocks": 469,
+          "n_boot": 2000,
+          "point": 0.9184890656063618,
+          "upper": 0.9312444595815161
+        },
+        "per_element_f1": {
+          "Antiterminator_Tbox_seq": 0.919008331148004,
+          "Specifier": 0.9184890656063618,
+          "Stem_I": 0.9353443991650929
+        },
+        "point": "reports/p2/sweep/g1.0_lr3e-5_a0.5.json",
+        "score": 0.9184890656063618
+      },
+      {
+        "axes": {
+          "class_weight_alpha": 0.5,
+          "gamma": 2.0,
+          "lr": 3e-05
+        },
+        "ci": {
+          "ci_level": 0.95,
+          "lower": 0.8828078890656813,
+          "n_blocks": 469,
+          "n_boot": 2000,
+          "point": 0.9150914970974027,
+          "upper": 0.928826091369522
+        },
+        "per_element_f1": {
+          "Antiterminator_Tbox_seq": 0.9150914970974027,
+          "Specifier": 0.9157811885084612,
+          "Stem_I": 0.9261852984900422
+        },
+        "point": "reports/p2/sweep/g2.0_lr3e-5_a0.5.json",
+        "score": 0.9150914970974027
+      },
+      {
+        "axes": {
+          "class_weight_alpha": 0.5,
+          "gamma": 3.0,
+          "lr": 3e-05
+        },
+        "ci": {
+          "ci_level": 0.95,
+          "lower": 0.8837415027287366,
+          "n_blocks": 469,
+          "n_boot": 2000,
+          "point": 0.9139847864248098,
+          "upper": 0.9312115354717604
+        },
+        "per_element_f1": {
+          "Antiterminator_Tbox_seq": 0.9203847397348852,
+          "Specifier": 0.9139847864248098,
+          "Stem_I": 0.9265663128261551
+        },
+        "point": "reports/p2/sweep/g3.0_lr3e-5_a0.5.json",
+        "score": 0.9139847864248098
+      },
+      {
+        "axes": {
+          "class_weight_alpha": 0.25,
+          "gamma": 2.0,
+          "lr": 0.0001
+        },
+        "ci": {
+          "ci_level": 0.95,
+          "lower": 0.8847574385218951,
+          "n_blocks": 469,
+          "n_boot": 2000,
+          "point": 0.9107671110750901,
+          "upper": 0.9316655727879144
+        },
+        "per_element_f1": {
+          "Antiterminator_Tbox_seq": 0.9107671110750901,
+          "Specifier": 0.9273314493338716,
+          "Stem_I": 0.9537301017848866
+        },
+        "point": "reports/p2/sweep/g2.0_lr1e-4_a0.25.json",
+        "score": 0.9107671110750901
+      },
+      {
+        "axes": {
+          "class_weight_alpha": 0.0,
+          "gamma": 0.5,
+          "lr": 0.0001
+        },
+        "ci": {
+          "ci_level": 0.95,
+          "lower": 0.8776031228519044,
+          "n_blocks": 469,
+          "n_boot": 2000,
+          "point": 0.9035530959255694,
+          "upper": 0.924981812435657
+        },
+        "per_element_f1": {
+          "Antiterminator_Tbox_seq": 0.9035530959255694,
+          "Specifier": 0.9262597296190086,
+          "Stem_I": 0.9512038665997675
+        },
+        "point": "reports/p2/sweep/g0.5_lr1e-4_a0.0.json",
+        "score": 0.9035530959255694
+      },
+      {
+        "axes": {
+          "class_weight_alpha": 0.0,
+          "gamma": 1.0,
+          "lr": 0.0001
+        },
+        "ci": {
+          "ci_level": 0.95,
+          "lower": 0.8750572575455581,
+          "n_blocks": 469,
+          "n_boot": 2000,
+          "point": 0.9026299374207699,
+          "upper": 0.9249355068232148
+        },
+        "per_element_f1": {
+          "Antiterminator_Tbox_seq": 0.9026299374207699,
+          "Specifier": 0.9255254029789839,
+          "Stem_I": 0.9516505840528187
+        },
+        "point": "reports/p2/sweep/g1.0_lr1e-4_a0.0.json",
+        "score": 0.9026299374207699
+      },
+      {
+        "axes": {
+          "class_weight_alpha": 0.0,
+          "gamma": 2.0,
+          "lr": 0.0001
+        },
+        "ci": {
+          "ci_level": 0.95,
+          "lower": 0.8735927252284348,
+          "n_blocks": 469,
+          "n_boot": 2000,
+          "point": 0.9004473151064128,
+          "upper": 0.9231451963301684
+        },
+        "per_element_f1": {
+          "Antiterminator_Tbox_seq": 0.9004473151064128,
+          "Specifier": 0.9291564291564292,
+          "Stem_I": 0.954136058767167
+        },
+        "point": "reports/p2/sweep/g2.0_lr1e-4_a0.0.json",
+        "score": 0.9004473151064128
+      },
+      {
+        "axes": {
+          "class_weight_alpha": 0.25,
+          "gamma": 3.0,
+          "lr": 3e-05
+        },
+        "ci": {
+          "ci_level": 0.95,
+          "lower": 0.8359828797511145,
+          "n_blocks": 469,
+          "n_boot": 2000,
+          "point": 0.8737005087370051,
+          "upper": 0.9031478664005049
+        },
+        "per_element_f1": {
+          "Antiterminator_Tbox_seq": 0.934876380852183,
+          "Specifier": 0.8737005087370051,
+          "Stem_I": 0.9258030444237341
+        },
+        "point": "reports/p2/sweep/g3.0_lr3e-5_a0.25.json",
+        "score": 0.8737005087370051
+      },
+      {
+        "axes": {
+          "class_weight_alpha": 0.5,
+          "gamma": 3.0,
+          "lr": 0.0003
+        },
+        "ci": {
+          "ci_level": 0.95,
+          "lower": 0.8220634005800019,
+          "n_blocks": 469,
+          "n_boot": 2000,
+          "point": 0.8589133227537218,
+          "upper": 0.8920015534813288
+        },
+        "per_element_f1": {
+          "Antiterminator_Tbox_seq": 0.8589133227537218,
+          "Specifier": 0.9331498230436492,
+          "Stem_I": 0.9482124623354821
+        },
+        "point": "reports/p2/sweep/g3.0_lr3e-4_a0.5.json",
+        "score": 0.8589133227537218
+      },
+      {
+        "axes": {
+          "class_weight_alpha": 0.25,
+          "gamma": 1.0,
+          "lr": 0.0001
+        },
+        "ci": {
+          "ci_level": 0.95,
+          "lower": 0.8072258990105976,
+          "n_blocks": 469,
+          "n_boot": 2000,
+          "point": 0.8394343072502706,
+          "upper": 0.8656213962149282
+        },
+        "per_element_f1": {
+          "Antiterminator_Tbox_seq": 0.8394343072502706,
+          "Specifier": 0.9284425736620565,
+          "Stem_I": 0.9500919077006651
+        },
+        "point": "reports/p2/sweep/g1.0_lr1e-4_a0.25.json",
+        "score": 0.8394343072502706
+      },
+      {
+        "axes": {
+          "class_weight_alpha": 0.25,
+          "gamma": 2.0,
+          "lr": 3e-05
+        },
+        "ci": {
+          "ci_level": 0.95,
+          "lower": 0.7266683286457002,
+          "n_blocks": 469,
+          "n_boot": 2000,
+          "point": 0.771232204221895,
+          "upper": 0.8054199805180593
+        },
+        "per_element_f1": {
+          "Antiterminator_Tbox_seq": 0.9342013485235992,
+          "Specifier": 0.771232204221895,
+          "Stem_I": 0.908162204156038
+        },
+        "point": "reports/p2/sweep/g2.0_lr3e-5_a0.25.json",
+        "score": 0.771232204221895
+      },
+      {
+        "axes": {
+          "class_weight_alpha": 0.25,
+          "gamma": 1.0,
+          "lr": 3e-05
+        },
+        "ci": {
+          "ci_level": 0.95,
+          "lower": 0.5470292125475015,
+          "n_blocks": 469,
+          "n_boot": 2000,
+          "point": 0.6087694483734087,
+          "upper": 0.6585263255154702
+        },
+        "per_element_f1": {
+          "Antiterminator_Tbox_seq": 0.9318011918238323,
+          "Specifier": 0.6087694483734087,
+          "Stem_I": 0.9181992539305199
+        },
+        "point": "reports/p2/sweep/g1.0_lr3e-5_a0.25.json",
+        "score": 0.6087694483734087
+      },
+      {
+        "axes": {
+          "class_weight_alpha": 0.25,
+          "gamma": 3.0,
+          "lr": 0.0003
+        },
+        "ci": {
+          "ci_level": 0.95,
+          "lower": 0.503510487239003,
+          "n_blocks": 469,
+          "n_boot": 2000,
+          "point": 0.5327463628231084,
+          "upper": 0.5610892832929459
+        },
+        "per_element_f1": {
+          "Antiterminator_Tbox_seq": 0.5327463628231084,
+          "Specifier": 0.9114420062695925,
+          "Stem_I": 0.9415524483427617
+        },
+        "point": "reports/p2/sweep/g3.0_lr3e-4_a0.25.json",
+        "score": 0.5327463628231084
+      },
+      {
+        "axes": {
+          "class_weight_alpha": 0.25,
+          "gamma": 0.5,
+          "lr": 3e-05
+        },
+        "ci": {
+          "ci_level": 0.95,
+          "lower": 0.408864826498065,
+          "n_blocks": 469,
+          "n_boot": 2000,
+          "point": 0.4731585518102372,
+          "upper": 0.5255891018067986
+        },
+        "per_element_f1": {
+          "Antiterminator_Tbox_seq": 0.9260850054490672,
+          "Specifier": 0.4731585518102372,
+          "Stem_I": 0.9077615160206909
+        },
+        "point": "reports/p2/sweep/g0.5_lr3e-5_a0.25.json",
+        "score": 0.4731585518102372
+      },
+      {
+        "axes": {
+          "class_weight_alpha": 0.0,
+          "gamma": 0.5,
+          "lr": 3e-05
+        },
+        "ci": {
+          "ci_level": 0.95,
+          "lower": 0.0,
+          "n_blocks": 469,
+          "n_boot": 2000,
+          "point": 0.0,
+          "upper": 0.0
+        },
+        "per_element_f1": {
+          "Antiterminator_Tbox_seq": 0.8056710861922379,
+          "Specifier": 0.0,
+          "Stem_I": 0.9025614981748928
+        },
+        "point": "reports/p2/sweep/g0.5_lr3e-5_a0.0.json",
+        "score": 0.0
+      },
+      {
+        "axes": {
+          "class_weight_alpha": 0.0,
+          "gamma": 1.0,
+          "lr": 3e-05
+        },
+        "ci": {
+          "ci_level": 0.95,
+          "lower": 0.0,
+          "n_blocks": 469,
+          "n_boot": 2000,
+          "point": 0.0,
+          "upper": 0.0
+        },
+        "per_element_f1": {
+          "Antiterminator_Tbox_seq": 0.8381110711718188,
+          "Specifier": 0.0,
+          "Stem_I": 0.9131442361097811
+        },
+        "point": "reports/p2/sweep/g1.0_lr3e-5_a0.0.json",
+        "score": 0.0
+      },
+      {
+        "axes": {
+          "class_weight_alpha": 0.0,
+          "gamma": 2.0,
+          "lr": 3e-05
+        },
+        "ci": {
+          "ci_level": 0.95,
+          "lower": 0.0,
+          "n_blocks": 469,
+          "n_boot": 2000,
+          "point": 0.0,
+          "upper": 0.0
+        },
+        "per_element_f1": {
+          "Antiterminator_Tbox_seq": 0.8745492503321314,
+          "Specifier": 0.0,
+          "Stem_I": 0.9151802193539507
+        },
+        "point": "reports/p2/sweep/g2.0_lr3e-5_a0.0.json",
+        "score": 0.0
+      },
+      {
+        "axes": {
+          "class_weight_alpha": 0.0,
+          "gamma": 3.0,
+          "lr": 3e-05
+        },
+        "ci": {
+          "ci_level": 0.95,
+          "lower": 0.0,
+          "n_blocks": 469,
+          "n_boot": 2000,
+          "point": 0.0,
+          "upper": 0.0
+        },
+        "per_element_f1": {
+          "Antiterminator_Tbox_seq": 0.870802784794529,
+          "Specifier": 0.0,
+          "Stem_I": 0.9066730813117949
+        },
+        "point": "reports/p2/sweep/g3.0_lr3e-5_a0.0.json",
+        "score": 0.0
+      }
+    ],
+    "rejected": [],
+    "schema_version": "1",
+    "selected_on": "gate4_core_min_f1.min_f1",
+    "selection_hygiene": {
+      "all_points_zero_loo_holdout": true,
+      "fold_scopes_seen": [
+        "selection_val"
+      ],
+      "max_designated_loo_holdout_over_points": 0,
+      "n_points_measured": 36
+    },
+    "step": "P2-06a",
+    "tie_break": "lower lr, then lower gamma, then point label (deterministic)",
+    "winner": {
+      "axes": {
+        "class_weight_alpha": 0.5,
+        "gamma": 0.5,
+        "lr": 0.0003
+      },
+      "ci": {
+        "ci_level": 0.95,
+        "lower": 0.9124749305285347,
+        "n_blocks": 469,
+        "n_boot": 2000,
+        "point": 0.9386381631037213,
+        "upper": 0.9549853341770409
+      },
+      "per_element_f1": {
+        "Antiterminator_Tbox_seq": 0.9428845592223288,
+        "Specifier": 0.9386381631037213,
+        "Stem_I": 0.9600162602658807
+      },
+      "point": "reports/p2/sweep/g0.5_lr3e-4_a0.5.json",
+      "score": 0.9386381631037213
+    }
+  },
+  "step": "P2-06"
+}

@@ -1,0 +1,85 @@
+# @package _global_
+# train/stage1_best.yaml — the Stage-1 config P2-06's sweep PROMOTED (PRD §11; ADR-0005:
+# best config chosen on the validation ladder, never the test set).
+#
+# ── WHAT THIS FILE IS ────────────────────────────────────────────────────────────────────
+# An OVERLAY, not a copy. It inherits `train/stage1.yaml` wholesale through the defaults
+# list and restates only the three axes P2-06 swept. A forked full config would mean fixing
+# every later Stage-1 change in two places and shipping the bug in whichever copy was
+# missed; every pin, comment and guard in `stage1.yaml` reaches here by inheritance.
+#
+# `@package _global_` + leading-slash defaults are BOTH mandatory for a conf/<group>/
+# primary (see stage1.yaml's header) — without them composition silently no-ops.
+# `override /optim: …` is likewise mandatory: `/train: stage1` has already selected
+# `/optim: stage1`, and re-selecting an option an inherited config chose requires the
+# `override` keyword (Hydra 1.3 defaults-list semantics). `_self_` LAST so the two axes
+# restated below win over everything inherited.
+#
+# Use it in place of `train/stage1`:
+#   PYTHONPATH=src torchrun … -m tbox_finder.train.train_stage1 --config-name train/stage1_best
+#
+# ── WHAT WAS SELECTED, AND ON WHAT ───────────────────────────────────────────────────────
+# 36/36 sweep points completed and were promotable (SLURM jobs 582 + 635; git 4c723fd, seed
+# 42, one env lock, one 830-record / 469-cluster-block eval fold across all 36). Ranked on
+# `eval_metrics.gate4_core_min_f1.min_f1` — the MINIMUM per-nt F1 over the three ADR-0004 D6
+# core elements {Stem I, Specifier, Antiterminator} — measured on the P2-06a inner rung, a
+# cluster-grouped seeded carve from INSIDE the ADR-0004 D5 nested_train fold. Every point
+# measured `n_designated_loo_holdout == 0`, so no config was chosen on any part of the PRD
+# §12:241 leave-one-order-out headline population.
+#
+# WINNER — `g0.5_lr3e-4_a0.5`, val min-F1 0.9386 (95% block-bootstrap CI 0.9125–0.9550 over
+# 469 clusters, 2000 replicates); per-element F1 Stem I 0.9600 / Specifier 0.9386 /
+# Antiterminator 0.9429. Machine-readable record: `reports/p2/sweep_selection.json`.
+#
+# ── THREE CAVEATS THAT TRAVEL WITH THIS FILE ─────────────────────────────────────────────
+# 1. ⚠ THE WIN IS NOT STATISTICALLY DECISIVE. The winner's CI (width ≈ 0.043) contains all
+#    four runners-up, and the margin over second place (`g0.5_lr3e-4_a0.25`, 0.9375) is
+#    0.0011 — roughly a fortieth of the CI width. This config is the TOP-RANKED point under
+#    a pre-registered, deterministic rule; it is NOT a config demonstrated to beat its
+#    neighbours. Read the ranking as "any of the top four would do", not as a finding.
+# 2. ⚠ THE OPTIMUM IS AT THE EDGE OF THE GRID ON ALL THREE AXES — γ=0.5 is the swept
+#    minimum, lr=3e-4 the maximum, α=0.5 the maximum. The sweep therefore did not bracket
+#    the optimum: a better point may lie outside the box (lower γ, higher lr, higher α).
+#    Widening the grid is a NEW ADR-0003 budget determination and a §7 stop, not a silent
+#    extension — recorded here so the next step inherits the question, not the assumption.
+# 3. ⚠ THESE ARE SELECTION-RUNG NUMBERS, NOT GATE-4. GATE-4 is graded at P2-14 on the real
+#    leave-one-order-out split; the 0.80 floor is NOT applied here and 0.9386 is NOT a
+#    GATE-4 pass. A sweep's job is to rank, not to certify (`is_science: false`).
+
+defaults:
+  - /train: stage1              # inherit the P2-04 entrypoint whole — do NOT fork it
+  - override /optim: stage1_best   # lr 3e-4; lr is settable ONLY through the optim group
+  - _self_                      # the swept axes below win over everything inherited
+
+# ── The two axes selected here (the third, lr, is in optim/stage1_best.yaml) ──────────────
+# γ = 0.5 — SELECTED. Below the γ≈2 PRD §11 starting value and inside the fractional-γ
+# regime P2-02 fixed the silent NaN gradient in (`(1-p_t).pow(γ)` backward is inf·0 = nan
+# for 0<γ<1 while the forward stays finite) — that fix is what makes this value usable at
+# all. γ is the WEAKEST of the three axes: its marginal mean min-F1 spans only 0.763–0.801
+# across {0.5, 1, 2, 3}, so this selection carries much less evidence than α's.
+gamma: 0.5
+
+# class_weight_alpha = 0.5 — SELECTED, and the sweep's clearest signal: the α marginal mean
+# min-F1 rises monotonically 0.0 → 0.611, 0.25 → 0.805, 0.5 → 0.917. All four points that
+# scored a flat 0.0 (an entire core element never predicted) were α=0 at lr=3e-5. Weighting
+# the loss toward the minority core classes is what makes the core elements measurable.
+#
+# ⚠ α>0 makes the P2-04 class-counts scope LIVE. Counts are computed from the configured
+# stream (record scope, `weighted_draw_stream: false`) — inert at the α=0 default this
+# overlay leaves behind, load-bearing here. Grade α against `objective.loss_mass_share`,
+# never the exponent (at α=1 every class takes 1/8 of the loss, handing half of it to the
+# four classes ADR-0004 D6 excludes).
+class_weight_alpha: 0.5
+
+# ── Run shape: HELD across the sweep, NOT selected ───────────────────────────────────────
+# Restated so this overlay reproduces the winning point exactly, and flagged so nobody reads
+# them as findings: all 36 points trained under the same epochs=10 / batch_size=8. The
+# sweep provides ZERO evidence about either value — it never varied them.
+epochs: 10
+batch_size: 8
+
+# ── Outputs: the inherited smoke paths would be wrong here ───────────────────────────────
+# `train/stage1.yaml` still points `report_path` at the P2-04 smoke file. Re-point it so a
+# run of this overlay cannot overwrite a committed smoke measurement.
+report_path: reports/p2/train_stage1_best.json
+checkpoint_dir: checkpoints/p2/stage1_best

@@ -139,6 +139,13 @@ jobs:
           # arm in bare CI because the whole sizing tier is torch-free by construction (a
           # pure aggregator over recorded JSON) — the P1-16 split does not apply here.
           TBOX_REQUIRE_SIZING_SMOKE: "1"
+          # P2-06: the 36 committed sweep-point reports + the selection artifact + the
+          # conf/ overlay they promote. Pure JSON/text (the reducer is torch-free and the
+          # overlay assertions read the YAML as text), so the whole tier is arm-able in bare
+          # CI. NOTE: the Hydra composition tier of that file has its OWN var
+          # (TBOX_REQUIRE_SWEEP_HYDRA), deliberately NOT set here — CI installs no hydra, so
+          # arming it would fail every run (the P1-16 split).
+          TBOX_REQUIRE_SWEEP_SELECTION: "1"
         run: pytest tests/unit tests/golden tests/ml
 
   docker:

@@ -1,0 +1,27 @@
+# optim/stage1_best.yaml — the learning rate P2-06's sweep promoted.
+#
+# A Hydra config-group option (group `optim/`), selected by `conf/train/stage1_best.yaml`
+# via `override /optim: stage1_best`. Identical to `optim/stage1.yaml` in every respect
+# except `lr`, which is no longer an implementer default but a MEASURED selection.
+#
+# ⚠ WHY lr LIVES HERE AND NOT IN THE TRAIN PRIMARY. `train_stage1.py::_cfg_from_mapping`
+# fills the top-level dataclass fields FIRST and runs the config-group loop SECOND, so a
+# top-level `lr:` written into a train config is silently overwritten by `cfg.optim.lr` —
+# the run would train at 1e-4 while self-consistently reporting the value you wrote. The
+# learning rate is settable through the `optim` group and nowhere else. This is the same
+# trap `slurm/p2/sweep_stage1.sbatch:32-37` documents for the sweep's own `optim.lr=`
+# override, and it is why this file exists rather than a one-line `lr:` in the overlay.
+
+name: adamw
+
+# lr — SELECTED, not assumed. 3e-4 is the winning point's learning rate on P2-06's 36-point
+# γ × lr × α grid, ranked on val `gate4_core_min_f1.min_f1` over the P2-06a inner rung
+# (reports/p2/sweep_selection.json; winner g0.5_lr3e-4_a0.5, min-F1 0.9386). It is the
+# strongest axis after α: the lr marginal mean min-F1 runs 3e-5 → 0.533, 1e-4 → 0.910,
+# 3e-4 → 0.890, and every one of the top four points trains at 3e-4.
+#
+# ⚠ It is also the TOP of the swept range, so the sweep did not bracket this axis from
+# above — 3e-4 is the best value TESTED, not a demonstrated interior optimum. See the
+# `stage1_best.yaml` header for the full edge-of-grid caveat.
+lr: 3.0e-4
+weight_decay: 0.01
