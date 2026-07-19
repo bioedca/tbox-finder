@@ -84,17 +84,21 @@ DONE="$OUT_DIR/train_stage1_production.DONE"
 CKPT_DIR="data/processed/checkpoints/stage1_production"
 mkdir -p "$OUT_DIR" "$CKPT_DIR"
 
-# ── Singleton + stale-output clearing BEFORE the failure-prone conda activate / HF
-# download, so a crash during import cannot leave a previous run's DONE / checkpoint behind —
-# artifact-based verification keys on absence-on-failure (§9.3).
+# ── Singleton lock ───────────────────────────────────────────────────────────
+# Held before anything else so two jobs cannot share the output paths. The stale-output
+# CLEAR is deliberately deferred until AFTER the staged-input checks below (not here): a
+# re-submit whose staging fails — e.g. `git reset --hard` left split_assignments.parquet an
+# unsmudged 132-byte LFS pointer, the exact trap this file's header warns about — must NOT
+# destroy the last-good production checkpoint before it has a verified input to replace it
+# with. The clear still lands before the failure-prone conda activate / HF download, so a
+# crash mid-import cannot leave a previous run's DONE behind (§9.3 keys on absence-on-failure).
 exec 9>"$OUT_DIR/.train_production.lock"
 if ! flock -n 9; then
   echo "PRODUCTION_SKIP: another job holds the lock — refusing to share outputs." >&2
   exit 1
 fi
-rm -f "$DONE" "$REPORT" "$CKPT_DIR/stage1.pt" "$CKPT_DIR/provenance.json"
 
-# ── Staged-input assertions (fail loud, before any GPU time) ─────────────────
+# ── Staged-input assertions (fail loud, before any GPU time OR any destructive clear) ────
 # Existence is not enough: a stale/truncated parquet trains a different corpus and the loss
 # looks reasonable. DVC-tracked files are md5'd against their committed .dvc pointer;
 # split_assignments.parquet is git-LFS with NO git-lfs here, so a checkout leaves a 132-byte
@@ -167,6 +171,12 @@ assert_dvc_artifact data/interim/flank_context/context_v0.parquet \
 assert_dvc_artifact data/processed/labels/labels_v0.parquet \
                     data/processed/labels/labels_v0.parquet.dvc
 assert_lfs_artifact data/processed/splits/split_assignments.parquet
+
+# ── Stale-output clear — ONLY now that the staged inputs are verified ─────────
+# Deferred to here (not at lock acquisition) so a failed staging check above cannot destroy
+# a previously successful production checkpoint/report/provenance (CodeRabbit P2-09 r1). Still
+# ahead of conda/HF, so a crash in that failure-prone path leaves no stale DONE.
+rm -f "$DONE" "$REPORT" "$CKPT_DIR/stage1.pt" "$CKPT_DIR/provenance.json"
 
 CONDA_SH=/exports/people/mondragonlab/ecc1695/miniconda3/etc/profile.d/conda.sh
 source "$CONDA_SH"
