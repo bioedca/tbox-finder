@@ -297,3 +297,50 @@ They are **not notational variants**. Measured at P2-03 on the golden fixture's 
 - **P5 scan** — the §13.1 candidate table derives from (A); the D3 Stage-1 threshold is set on (A)'s posterior at the phase gate (unchanged **as a rule**).
 - **D12/GATE-2, D4/GATE-1, the strand resolver** — all consume locus calls *downstream* of this operator; unaffected as rules.
 - No data artifact is invalidated: no Stage-1 checkpoint exists yet (P2-04), so nothing was reconciled under the other reading.
+
+---
+
+## Amendment A4 — Tier-2N probe eligibility requires a length-matched excision control (P2-07, 2026-07-19)
+
+- **Status:** **Accepted (user sign-off 2026-07-19; CLAUDE.md §7 item 2), "ADR-0005 Amendment A4 approved."** Amends **D14** (the Tier-2N probe set) with the eligibility rule D14 left open; pins no new *value* (the D18/A1 floor `MIN_REAL_HOMOLOG_N = 20` is untouched). Consumed by P2-09 (round-0 mining), P5 (synthetic-Tier-2N spike-in recovery / §12 detection-power floor), P6. Committed atomically with the P2-07 modules + their unit gates + `reports/p2/tier2n_probe.json`.
+- **Note on numbering:** this file already carries **two** amendments labelled `A3` (P0-28 and P2-03) — a pre-existing collision flagged for reconciliation at the P2 exit gate. This amendment takes `A4` to avoid compounding it.
+
+**What D14 leaves open.** D14 pins that a Tier-2N probe set is evaluated each mining round and that a recall drop halts/rolls back the iteration. It does not say how a synthetic construct **earns** Tier-2N membership. P2-07 built that generator and found the obvious operationalisation — "the covariance model misses it" — is confounded twice over, measured rather than assumed.
+
+**Measured (P2-07, `RF00230.cm --cut_ga`, INFERNAL 1.1.5; `reports/p2/tier2n_probe.json`).**
+
+| quantity | value |
+|---|---|
+| unablated corpus records missed (n=500, seed 42) | **27.6 %** (362/500 detected) |
+| — independently reproduced (n=300, seed 20260719) | 27.0 % (219/300 detected) |
+| real element ablations missed (n=599) | **66.7 %** |
+| **length-matched random excisions missed (n=599)** | **78.8 %** |
+
+1. **Divergence confound.** Better than a quarter of real, architecturally-canonical TBDB T-boxes are already missed at the GA cutoff, because RF00230's `GA` is 93.00 bits and the corpus was built with a different model. Labelling a CM miss as Tier-2N would grade *sequence divergence* — the separate GATE-1 divergence arm (D6/D8) — as *architectural* novelty.
+2. **Excision-length confound, the decisive one.** A covariance model is an alignment, so removing nucleotides degrades it regardless of *which* ones. Excising an equal-length segment from a **random non-element position breaks detection MORE often (78.8 %) than removing the actual Stem II or Terminator (66.7 %)**. Element excision is therefore *less* destructive than the null it must beat: on this evidence a parent/variant discordance carries **no architecture-specific signal at all**, and a probe set built from it would measure excision.
+
+**Pinned rule.** A synthetic construct is **Tier-2N-probe-eligible** only as a measured **triple**:
+
+| leg | required verdict | confound removed |
+|---|---|---|
+| parent | CM-**detected** | divergence |
+| variant (element ablated) | CM-**missed** | — the effect under test |
+| length-matched control (equal-length excision at a non-overlapping position) | CM-**detected** | excision length |
+
+Every emitted variant **carries its own control**, generated with it, so a control cannot be omitted; an absent control arm leaves every variant ineligible rather than degrading to the confounded two-leg filter. An unmeasured leg is **never** read as a miss. Discards are reported per cause and the per-family split is reported alongside the pooled count, so a family resting on the min-N floor stays visible. The D18/A1 floor `MIN_REAL_HOMOLOG_N = 20` applies to the probe set unchanged.
+
+**Effect at P2-07:** 599 emitted → 45 eligible (21 class-II, 24 stem-II; both clear min-N independently) = 161 parent-already-missed + 200 ablation-did-not-break + **193 length-confounded** + 45 + 0 unmeasured. The two-leg filter would have admitted **238**, of which 193 — **81 %** — are length artifacts.
+
+**Scope limits, disclosed rather than buried.**
+- The construct's architecture families are the **two** that cleared the CLAUDE.md §10.1 ≥2-independent-source bar (class-II platform swap; joint Stem II + IIA/B deletion). Its diversity is a **lower bound**, not a sample of the natural non-canonical space.
+- Attribution is to the **excised element via a CM proxy**, *not* to ADR-0006 D9's relaxed-architecture detector **(b)**, which has no in-repo backend until P6-01/P6-11. The in-repo element-level `stem2_structure_only.cm` was tested and is **not** one (1/300 parents detected even at E ≤ 1000). The triple is **pre-registered for re-derivation against the real (b) detector at P6**, and the probe set is provisional until then.
+- The **natural** Tier-2N arm is **N = 0 by construction** — the corpus is 100 % CM-derived and so cannot contain a CM-invisible locus, and no published non-canonical architecture is CM-invisible. Reported at zero, in the D6/D9 reported-not-gated spirit, never dropped from the accounting.
+- **No published RF00230 false-negative rate exists** (§10.1 gate: `NO DIRECT EVIDENCE FOUND`; only the *procedural* fact that TBDB needed a second class-II CM, PMID:32882008). Every Tier-2N recall figure this project reports is therefore **first-party, measured in-repo**.
+
+**Cross-reference impact:**
+- **P2-07** — `src/tbox_finder/synth/tier2n.py` implements the triple and freezes the measured baselines in `MEASURED_CONFOUND_BASELINES`; `src/tbox_finder/eval/tier2n_probe.py` admits only eligible variants; `src/tbox_finder/infernal.py` is the single `cmsearch` caller. Unit tests pin each leg and were verified **by sabotage**.
+- **P2-09** — round-0 mining reads the probe set through `build_probe_set`; a sub-min-N set is `ROUND_INADMISSIBLE`, never a silent pass.
+- **P5** — the synthetic-Tier-2N spike-in recovery (§12 detection-power floor) inherits the triple and the provisional status.
+- **P6** — re-derives eligibility against the real (b) architecture detector; if the two disagree materially, the P6 result supersedes and this amendment is re-signed.
+- **ADR-0006 D9** — unchanged as a rule; this amendment supplies the operational proxy D9's row-5 routing needs before its (b) backend exists.
+- No gate **value** moves; `MIN_REAL_HOMOLOG_N` is untouched.
