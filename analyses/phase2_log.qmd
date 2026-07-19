@@ -358,3 +358,53 @@ the working directory keeps its directory component instead of degrading to a ba
 `validate_report` is total against a non-mapping root and against non-int block counts / `n_parents`;
 and the Snakemake rule now **declares** the two `.sto` alignment inputs, so the D9 control cannot
 silently report "unmeasured" because an undeclared input was never built. Suite **1,764 / 162**.
+
+
+## Step P2-09 — 2026-07-19: the round-0 production Stage-1 scanner (authoring — SLURM submit-ack pending)
+
+**Inputs.** The three corpus parquets (`context_v0`, `labels_v0`, `split_assignments`), the pinned
+Caduceus-PS backbone (`kuleshov-group/caduceus-ps_seqlen-131k_d_model-256_n_layer-16` @ `d89eeb85`),
+and the P2-06-promoted winner config `g0.5_lr3e-4_a0.5` (γ=0.5, `optim.lr`=3e-4, `class_weight_alpha`=0.5).
+**Process.** `slurm/p2/train_production.sbatch` drives the real P2-04 entrypoint
+(`src/tbox_finder/train/train_stage1.py`) once, DDP×8, over the **full ADR-0004 D5 fold** (8,303
+records) with `save_checkpoint=true`. The step lands the sbatch + the code the full-fold retrain
+needs: a new `exclude_selection_val` config field threaded to `load_corpus_records`, its
+`__post_init__` guard, a hardened eval clause, and the tests — the checkpoint itself is produced only
+after the submit-ack. **Outputs (this commit).** `slurm/p2/train_production.sbatch` ·
+`train_stage1.py` (`exclude_selection_val`, the config guard, the `class_counts_scope.selection_val_excluded`
+cross-check in `_eval_val_ok`) · `tests/unit/test_production_fold.py` (9) + extended
+`tests/unit/test_eval_val_clause.py` + the `tests/ml/test_train_smoke.py` fixture. **Outputs (post-run,
+follow-up commit).** `data/processed/checkpoints/stage1_production/stage1.pt` (DVC-added) +
+`provenance.json`; `reports/p2/train_stage1_production.json`; W&B (offline) run id.
+
+**Two decisions (user sign-off 2026-07-19).** (1) **Full 8,303 D5 fold, no val metric reported.** A
+sweep must hold `selection_val` out of its points' gradients; once the config is fixed that reason is
+spent, so the shipped checkpoint trains the whole fold (`exclude_selection_val=false`). There is then
+no free held-out rung — the LOO holdout is P2-14's GATE-4 grading set (using it here would contaminate
+the §12 headline), and `selection_val` is now inside training — so the run reports **no** val number
+(`eval_val=false`) rather than an in-sample one. imp.md's "held-out val F1 reported" gate is therefore
+**met by refusal**, with the reason recorded. (2) **fp32, TF32 off — as ADR-0002 A7 pins, not bf16.**
+imp.md's Outputs line says "bf16/TF32", but no PRD line or ADR pins bf16 for Stage-1: PRD §10.3's
+"bf16/TF32 native" describes the A4000 *card*, and A7 disables TF32 for determinism (a re-enable moves
+metrics ≥1e-2). `train_stage1` exposes no precision knob; adding bf16 would need an ADR-0002 amendment.
+imp.md's wording is descriptive drift, flagged here for correction, not a pin.
+
+**The trap the code closes (the step's real yield).** `exclude_selection_val=false` + `eval_val=true`
+trains on the val fold and then scores it — and the disjointness evidence would **still read zero**,
+because `load_selection_val_records` measures overlap against the `inner_train` fold *definition*
+(window_dataset.py:948-957), which is disjoint from `selection_val` by construction however the
+optimiser was fed. The gate would go green on an in-sample number labelled `eval_split: selection_val`
+under a leakage block asserting disjointness — the P2-06a defect in a new costume: a total,
+evidence-guarded clause measuring the wrong population ([[gate-clauses-need-re-derivation]],
+[[nested-train-complement-is-the-loo-holdout]]). Closed at two levels: `Stage1TrainConfig.__post_init__`
+refuses the combination at construction (unreachable from Hydra), and `_eval_val_ok` now cross-checks
+the training scope's own `selection_val_excluded` flag so a hand-assembled or regenerated report that
+bypasses the config still fails. Both guards **sabotage-verified to bite in their own name**.
+
+**Validation.** Authoring gate: unit suite **1,426 passed / 156 skipped** (bare CI-exact) with **zero
+regressions** (the 2 `test_split_table_schema` failures reproduce identically on clean `main` — a
+pre-existing local NaN-comparison in the data state, not P2-09); ruff 0.15.15 + black 25.11.0 clean;
+the new clause + config guard each proven by sabotage. The **run** gate (DONE marker + self-validated
+report + checkpoint DVC-added) fires only after the SLURM submit-ack. **Compute** SLURM
+(`--gres=gpu:a4000:8`); measured est ≈ **1.8 GPU-h / ~0.23 h wall** (the P2-06 winner ran 1,160 steps
+@ 0.605 s median at this exact shape; scaled by 8303/7472). **Commit.** authoring SHA pending.

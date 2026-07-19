@@ -340,6 +340,11 @@ def _valid_report() -> dict:
             "training_fold_only": True,
             "occurrence": 0,
             "weighted_draw_stream": False,
+            # This report claims a scored selection-val fold, so the run that produced it
+            # must have withheld that fold from training — the P2-09 cross-check the eval
+            # clause reads (see tests/unit/test_eval_val_clause.py::
+            # test_gate_is_false_when_the_run_trained_on_the_eval_fold).
+            "selection_val_excluded": True,
         },
         "schema_version": "1",
         "step": "P2-04",

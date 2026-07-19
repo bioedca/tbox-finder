@@ -159,6 +159,26 @@ class Stage1TrainConfig:
     # and landed 88.4% INSIDE that holdout; the load_selection_val_records docstring records
     # why, and load-bearing `leakage.n_designated_loo_holdout` measures it, per run.)
     eval_val: bool = True
+    #: Which fold to train on. ``True`` (the default) trains the ``inner_train`` fold — the
+    #: ADR-0004 D5 nested fold MINUS the P2-06a selection-val clusters (8,303 → 7,472), so a
+    #: sweep can rank points on a fold its own gradients never touched. ``False`` trains the
+    #: **full D5 fold**, which is what a post-sweep production retrain (P2-09) wants: the
+    #: config has already been selected, so withholding 10.01% of the corpus from the shipped
+    #: checkpoint buys nothing.
+    #:
+    #: ⚠ It is **mutually exclusive with** ``eval_val``, and the two are cross-checked in
+    #: three places (a fail-fast in :func:`train_stage1` before any GPU time, the
+    #: ``eval_val_scored_on_disjoint_fold`` clause, and :func:`validate_report`). Setting
+    #: both puts the eval fold *inside* the training set — and the disjointness evidence
+    #: would **still read zero**, because ``load_selection_val_records`` measures overlap
+    #: against the ``inner_train`` fold *definition* (window_dataset.py:948-957), not against
+    #: the records this run actually trained on. The clause would pass, the gate would go
+    #: green, the checkpoint would save, and the report would carry an in-sample number
+    #: labelled ``eval_split: selection_val`` under a leakage block asserting disjointness.
+    #: That is the P2-06a defect in a new costume: a total, evidence-guarded clause measuring
+    #: the wrong population ([[gate-clauses-need-re-derivation]],
+    #: [[nested-train-complement-is-the-loo-holdout]]).
+    exclude_selection_val: bool = True
     eval_batch_size: int = 8
     #: Cap the val fold for the smoke (None ⇒ all 830, the P2-06a inner-rung carve).
     #: Recorded in the eval scope AND enforced: a capped run records `full_fold: false`,
@@ -204,6 +224,21 @@ class Stage1TrainConfig:
                 raise ValueError(f"{name} must be >= 0; got {value}")
         if self.wandb_mode not in ("offline", "online", "disabled"):
             raise ValueError(f"wandb_mode must be offline/online/disabled; got {self.wandb_mode!r}")
+        # Fail at CONSTRUCTION, not after the model loads: this combination cannot produce an
+        # honest val number, and every downstream check of it reads zero overlap (see the
+        # `exclude_selection_val` field docstring). Refusing it here means the trap is
+        # unreachable from Hydra rather than merely detected afterwards.
+        if self.eval_val and not self.exclude_selection_val:
+            raise ValueError(
+                "eval_val=True with exclude_selection_val=False trains on the selection-val "
+                "fold and then scores it: the 830-record fold is INSIDE the 8,303-record "
+                "training stream, so `eval_metrics` would be an in-sample number reported as "
+                "held-out. The disjointness evidence does not catch it — "
+                "load_selection_val_records measures overlap against the inner_train fold "
+                "DEFINITION, which stays disjoint from selection_val by construction however "
+                "this run was trained. Choose one: train the full D5 fold and report no val "
+                "metric (P2-09), or hold selection_val out and score it (P2-06)."
+            )
 
 
 # --------------------------------------------------------------------------------------
@@ -770,6 +805,36 @@ def _eval_val_ok(report: Mapping[str, Any]) -> bool:
 
     if scope.get("fold_scope") != "selection_val":
         return False
+
+    # ── The eval fold must be disjoint from THIS RUN'S TRAINING STREAM, not merely from
+    # the fold definition that names it (P2-09). ─────────────────────────────────────────
+    # Every check above reads `eval_scope["leakage"]`, whose overlap counts are measured
+    # against `inner_train_ids` — a set load_selection_val_records rebuilds from the split
+    # table in its own pass (window_dataset.py:948-957). That set is the inner_train fold
+    # *definition*. It is disjoint from selection_val BY CONSTRUCTION, in every run, no
+    # matter which records the optimiser actually saw. So a run with
+    # `exclude_selection_val=False` trains on all 8,303 records — selection_val included —
+    # and still reports `shared_record_ids_with_inner_train: 0`. Zero, truthfully measured,
+    # of the wrong quantity.
+    #
+    # This is the P2-06a lesson at one more remove. There, a clause proved disjointness
+    # *from train* while the fold sat inside the *holdout*; the fix was to measure the named
+    # quantity directly. Here the named quantity is measured correctly and the POPULATION is
+    # wrong — "disjoint from the inner_train fold" and "disjoint from what I trained on" are
+    # the same sentence only while `exclude_selection_val` is True, and nothing above checks
+    # that it is. `__post_init__` refuses the combination, but a hand-assembled or
+    # regenerated report never passes through the config; the gate has to hold on its own
+    # ([[gate-clauses-need-re-derivation]]: a clause fabricated TRUE is invisible to
+    # `all(clauses)`).
+    #
+    # Cross-checked against the TRAINING scope's own recorded field, so the two blocks must
+    # agree about one fact each measured independently.
+    counts_scope = report.get("class_counts_scope")
+    if not isinstance(counts_scope, Mapping) or not counts_scope:
+        return False
+    if counts_scope.get("selection_val_excluded") is not True:
+        return False
+
     if not _pos_int(scope.get("n_records_scored")):
         return False
     if not _pos_int(scope.get("n_blocks")) or scope["n_blocks"] < 2:
@@ -1293,7 +1358,11 @@ def build_stream(cfg: Stage1TrainConfig) -> tuple[Any, Any, dict[str, Any]]:
     # selects on is train-on-train, and it is silent; losing 10.01% of records (8,303 ->
     # 7,472) is neither. The full D5 fold is `exclude_selection_val=False`, which is what
     # a post-sweep production retrain (P2-09) would want.
-    records, fold_report = load_corpus_records(training_fold_only=True, window=cfg.window_nt)
+    records, fold_report = load_corpus_records(
+        training_fold_only=True,
+        window=cfg.window_nt,
+        exclude_selection_val=cfg.exclude_selection_val,
+    )
     n_fold = len(records)
     if cfg.max_records is not None:
         records = records[: cfg.max_records]
