@@ -44,17 +44,18 @@
     "n_clusters": 9603,
     "n_corpus": 23535,
     "n_external": 34,
-    "n_records": 23569
+    "n_records": 25913,
+    "n_synthetic_variants": 2344
   },
-  "generated_at_utc": "2026-07-10T18:59:39.903184+00:00",
-  "git_sha": "fd5b61a1444585fbe6a21ce4f948e3bc7682b382",
+  "generated_at_utc": "2026-07-19T18:37:13.227518+00:00",
+  "git_sha": "f8fd1b7df12a37e456177bb89b04a0dbc5a087ea",
   "inputs": {
     "data/interim/splits/split_assignments.parquet": "b365987a3b4aa1087be96e51e8315d5cfd4a7e866bba5a877b1e472d06f921d8",
     "data/processed/audits/split_construction_report.json": "a33bbeaa723eb191ed03e9f87ead1b4edf40e6ee2fa80e7d20c1c7873cd6a0bd",
     "data/processed/master_clean_v0.parquet": "1eb76591d0e481019dd7acf72a439f157fec9f2aeecb8cc5c37ba80a7b062dd2"
   },
   "outputs": {
-    "data/processed/splits/split_assignments.parquet": "fb231fe4e66666f8ea2de1ccd4eea4dce282a33e05a46b41c737e3e07dcc5602"
+    "data/processed/splits/split_assignments.parquet": "6388ba19328811fa81d2d5b84a58643674934b4286581d8eff9df2e2cefba029"
   },
   "rule": "workflow/rules/data.smk :: split_assignment_table",
   "schema_version": "1.0",

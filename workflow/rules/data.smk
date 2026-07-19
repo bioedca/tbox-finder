@@ -493,6 +493,41 @@ rule plot_split_figures:
         "--figures-dir {params.figures_dir:q} >{log} 2>&1"
 
 
+rule classII_recovery_set:
+    """Build the construction-powered synthetic-class-II recovery set (P2-08; ADR-0005 D9 + A5).
+
+    Evaluation-only presentation variants (window-phase offset, reverse complement) of
+    real **held-out** class-II corpus parents, for Stage-1-only anti-mimicry grading at
+    P4 on the class-II-CM-naive checkpoint (P2-11) — never through Stage-2. Parents are
+    held-out rather than training-fold per ADR-0004 A3; the 18-record blind set is
+    excluded as a parent so the natural arm stays independent of the synthetic one.
+    Emits the sequence-free recovery table that ``split_assignment_table`` appends.
+    The CLI exit code is the gate (block-level min-N + a measurable within-phylum
+    control). LOCAL, out of ``rule all``.
+    """
+    input:
+        interim=f"{_SPLITS_DIR}/split_assignments.parquet",
+    output:
+        variants="data/processed/synth/classII_recovery.parquet",
+        report="reports/p2/classII_recovery.json",
+    params:
+        aligned_dir=lambda wildcards, input: os.path.join(
+            os.path.dirname(input.interim), "aligned"
+        ),
+        seed=20260719,
+    log:
+        "logs/classII_recovery_set.log",
+    conda:
+        "../../envs/data.yml"
+    shell:
+        "python -m tbox_finder.synth.classII "
+        "--interim-table {input.interim:q} "
+        "--aligned-dir {params.aligned_dir:q} "
+        "--table {output.variants:q} "
+        "--report {output.report:q} "
+        "--seed {params.seed} >{log} 2>&1"
+
+
 rule split_assignment_table:
     """Commit the compact, sequence-free split-assignment table to git/LFS (P0-23; ADR-0004, PRD §9.2/§16).
 
@@ -500,7 +535,8 @@ rule split_assignment_table:
     carve-out copy that the no-leakage CI reads on every PR (§8.2) — a trivial table
     scan over the *real* ~23.5k-record partition, no DVC pull needed. Projects onto the
     canonical ``record_id``/``parent_record_id`` schema (the variant→parent fold-inheritance
-    column is present now; P2 appends the augmented/synthetic variant rows), hash-links
+    column is present now; **P2-08 appends the synthetic-class-II recovery variants**,
+    each inheriting its parent's fold — ADR-0004 D7 + A3), hash-links
     each corpus row to ``master_clean_v0.parquet`` (per-record ``corpus_record_sha256`` +
     the whole-file hash in the provenance ``inputs``), re-asserts the no-cluster-split
     leakage invariant, and records the DOME redundancy + partition-strategy fields (§16).
@@ -510,6 +546,7 @@ rule split_assignment_table:
         interim=f"{_SPLITS_DIR}/split_assignments.parquet",
         corpus="data/processed/master_clean_v0.parquet",
         report=f"{_AUDIT_DIR}/split_construction_report.json",
+        variants="data/processed/synth/classII_recovery.parquet",
     output:
         table=f"{_PROCESSED_SPLITS_DIR}/split_assignments.parquet",
         provenance=f"{_PROCESSED_SPLITS_DIR}/split_assignments.provenance.json",
@@ -525,6 +562,7 @@ rule split_assignment_table:
         "--corpus {input.corpus:q} "
         "--audit-report {input.report:q} "
         "--out {output.table:q} "
+        "--variants {input.variants:q} "
         "--env-lock {params.env_lock:q} >{log} 2>&1"
 
 

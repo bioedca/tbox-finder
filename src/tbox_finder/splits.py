@@ -125,6 +125,33 @@ _TABLE_COLUMN_RENAME = {"seq_name": "record_id", "record_sha256": "corpus_record
 #: Lineage-by-rank (P0-15) carried so the no-leakage test can check every §9.2
 #: scheme's holdout-unit separation directly off this table.
 LINEAGE_COLUMNS = ("resolved_phylum", "resolved_class", "resolved_order", "resolved_genus")
+
+#: P0 external independent-positive sources: genuine standalone positives that are
+#: not corpus rows and are held out wholesale (PRD §7.1). The no-leakage test's
+#: external-positive predicate is scoped to *these* — see :data:`DERIVED_SOURCES`.
+EXTERNAL_POSITIVE_SOURCES = ("anchor", "blind")
+
+#: P2-08 (ADR-0004 A3): evaluation-only synthetic class-II recovery variants. A
+#: **derived** row, not an independent positive — it inherits its parent's fold
+#: rather than standing outside every scheme, so it must not be judged by the
+#: external-positive predicate (which requires ``fold_random is None``; a
+#: D7-conforming variant inherits a non-null parent fold and would fail by
+#: construction). It carries its own, strictly stronger predicate instead.
+SYNTHETIC_CLASSII_SOURCE = "synthetic_classII"
+
+#: Sources whose rows are *derived from* another row in this table.
+DERIVED_SOURCES = (SYNTHETIC_CLASSII_SOURCE,)
+
+#: Committed-table columns the no-leakage predicates read as booleans. Widening any
+#: of these to ``object`` would make ``bool("False")`` — i.e. True — the value the
+#: gate sees, so :func:`append_variant_rows` asserts their dtype is preserved.
+BOOL_FLAG_COLUMNS = (
+    "nested_train",
+    "is_designated_loo_holdout",
+    "is_anchor_heldout",
+    "clade_crossing_cluster",
+    "dropped_from_clade_holdout",
+)
 #: One fold assignment per §9.2 partition scheme + the D5 nested single-checkpoint
 #: fold (``nested_train``/``nested_role``).
 FOLD_SCHEME_COLUMNS = (
@@ -1223,6 +1250,89 @@ def build_split_table(interim, *, corpus_sha256: str | None = None):
     return df
 
 
+def append_variant_rows(table, variants):
+    """Append derived variant rows to the committed table (P2-08; ADR-0004 D7 + A3).
+
+    ``variants`` is an iterable of mappings carrying at least ``variant_id`` and
+    ``parent_record_id``. Every other field is **inherited from the parent row**
+    rather than supplied by the caller — that is what makes D7's variant→parent→fold
+    guarantee structural instead of conventional. A caller cannot hand a variant a
+    fold that differs from its parent's, because a caller cannot hand it a fold at
+    all.
+
+    The variant rows carry ``source = SYNTHETIC_CLASSII_SOURCE`` and a null
+    ``corpus_record_sha256`` (they are not corpus records and have no
+    ``master_clean_v0`` row to hash-link to; ``validate_table_schema`` requires the
+    hash-link only of ``source == "corpus"`` rows).
+
+    Raises rather than dropping: an unknown or duplicate parent is a construction
+    bug, and silently emitting a shorter table would leave the recovery set's own
+    report describing rows that are not in the partition.
+    """
+    import pandas as pd
+
+    variants = [dict(v) for v in variants]
+    if not variants:
+        return table
+
+    by_id = {rid: i for i, rid in enumerate(table["record_id"])}
+    missing = sorted({v["parent_record_id"] for v in variants} - set(by_id))
+    if missing:
+        raise ValueError(
+            f"{len(missing)} variant parent(s) absent from the split table "
+            f"(e.g. {missing[:5]}) — a variant may only be parented on a row of the "
+            "same table (D7 intra-table inheritance)"
+        )
+
+    variant_ids = [v["variant_id"] for v in variants]
+    if len(set(variant_ids)) != len(variant_ids):
+        raise ValueError("duplicate variant_id in the recovery set")
+    clash = sorted(set(variant_ids) & set(by_id))
+    if clash:
+        raise ValueError(f"variant_id collides with an existing record_id (e.g. {clash[:5]})")
+
+    inherited = [
+        c
+        for c in COMMITTED_TABLE_COLUMNS
+        if c not in ("record_id", "parent_record_id", "source", "corpus_record_sha256")
+    ]
+    rows = []
+    for v in variants:
+        parent = table.iloc[by_id[v["parent_record_id"]]]
+        row = {c: parent[c] for c in inherited}
+        row["record_id"] = v["variant_id"]
+        row["parent_record_id"] = v["parent_record_id"]
+        row["source"] = SYNTHETIC_CLASSII_SOURCE
+        row["corpus_record_sha256"] = pd.NA
+        rows.append(row)
+
+    appended = pd.concat(
+        [table, pd.DataFrame(rows)[list(COMMITTED_TABLE_COLUMNS)]], ignore_index=True
+    )
+    # Assert (do not silently coerce) that the concat preserved the flag dtypes.
+    # An object-dtype bool column reads as a truthy *string* in the no-leakage
+    # predicates — ``nested_role_train_flag_inconsistent`` does ``bool(t)``, and
+    # ``bool("False")`` is True — so a widened column would turn the gate green
+    # while meaning nothing. Measured at P2-08: pandas preserves ``bool``/``int64``
+    # here, so this never fires on the current path; it is a **tripwire for a
+    # future pandas or a future column**, and it fails loud rather than repairing
+    # the symptom and hiding whatever widened the column.
+    for col in BOOL_FLAG_COLUMNS:
+        if appended[col].dtype != bool:
+            raise ValueError(
+                f"{col!r} is {appended[col].dtype}, not bool; the no-leakage "
+                "predicates read this column as a bool and would silently accept "
+                "truthy non-bools (bool('False') is True)"
+            )
+    if appended["cluster_id"].dtype != table["cluster_id"].dtype:
+        raise ValueError(
+            f"append widened 'cluster_id' from {table['cluster_id'].dtype} to "
+            f"{appended['cluster_id'].dtype}"
+        )
+    validate_table_schema(appended)
+    return appended
+
+
 def dome_reporting_fields(report: dict) -> dict:
     """Build the DOME (PRD §16) redundancy + partition-strategy declaration.
 
@@ -1277,6 +1387,7 @@ def write_table(
     out_parquet: str | Path = COMMITTED_TABLE,
     env_lock: str | Path | None = None,
     seed: int = DEFAULT_SEED,
+    variants_parquet: str | Path | None = None,
 ) -> int:
     """Write the committed (git/LFS) split-assignment table + its provenance (P0-23).
 
@@ -1291,6 +1402,17 @@ def write_table(
     interim = pd.read_parquet(interim_parquet)
     corpus_sha256 = provenance.sha256_file(corpus_parquet)
     table = build_split_table(interim, corpus_sha256=corpus_sha256)
+
+    # P2-08 (ADR-0004 A3): append the evaluation-only synthetic-class-II recovery
+    # variants, each inheriting its parent's fold. Appended here — inside the one
+    # writer — so the provenance counts below are re-derived from the *final*
+    # table; a side-channel append would leave the provenance describing a table
+    # that no longer exists.
+    n_variants = 0
+    if variants_parquet is not None:
+        variants = pd.read_parquet(variants_parquet)
+        table = append_variant_rows(table, variants.to_dict("records"))
+        n_variants = len(variants)
 
     # Load-bearing §8.2 invariant — assert *before* materializing any output so a
     # failed leakage check can never leave an invalid committed artifact on disk.
@@ -1315,14 +1437,20 @@ def write_table(
         extra={
             "n_records": int(len(table)),
             "n_corpus": n_corpus,
-            "n_external": int(len(table) - n_corpus),
+            # Independent external positives only (anchor/blind). Derived variant
+            # rows are counted separately: folding them in here would report a
+            # synthetic re-presentation of a corpus record as if it were an
+            # independent positive.
+            "n_external": int(table["source"].isin(EXTERNAL_POSITIVE_SOURCES).sum()),
+            "n_synthetic_variants": int(table["source"].isin(DERIVED_SOURCES).sum()),
             "n_clusters": int(table["cluster_id"].nunique()),
             "dome": dome_reporting_fields(report),
         },
     )
     print(
         f"[splits.write-table] {len(table)} records "
-        f"({n_corpus} corpus / {len(table) - n_corpus} external) | "
+        f"({n_corpus} corpus / {len(table) - n_corpus - n_variants} external "
+        f"/ {n_variants} synthetic variants) | "
         f"clusters={table['cluster_id'].nunique()} | cols={len(table.columns)} | "
         f"corpus_sha256={corpus_sha256[:12]}… → {out_parquet}"
     )
@@ -1417,6 +1545,11 @@ def main(argv: list[str] | None = None) -> int:
         p.add_argument("--out", default=COMMITTED_TABLE)
         p.add_argument("--env-lock", default="envs/data.conda-lock.yml")
         p.add_argument("--seed", type=int, default=DEFAULT_SEED)
+        p.add_argument(
+            "--variants",
+            default=None,
+            help="P2-08 recovery-set parquet (variant_id, parent_record_id) to append",
+        )
         a = p.parse_args(rest)
         return write_table(
             interim_parquet=a.interim,
@@ -1425,6 +1558,7 @@ def main(argv: list[str] | None = None) -> int:
             out_parquet=a.out,
             env_lock=a.env_lock,
             seed=a.seed,
+            variants_parquet=a.variants,
         )
     if sub == "plot-figures":
         p = argparse.ArgumentParser(prog="tbox_finder.splits plot-figures")
