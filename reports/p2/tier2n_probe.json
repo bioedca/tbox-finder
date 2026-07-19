@@ -1,0 +1,74 @@
+{
+  "arms": {
+    "controls": {
+      "arm": "controls",
+      "detected_fraction": 0.21202003338898165,
+      "n_detected": 127,
+      "n_missed": 472,
+      "n_submitted": 599
+    },
+    "parents": {
+      "arm": "parents",
+      "detected_fraction": 0.73,
+      "n_detected": 219,
+      "n_missed": 81,
+      "n_submitted": 300
+    },
+    "variants": {
+      "arm": "variants",
+      "detected_fraction": 0.333889816360601,
+      "n_detected": 200,
+      "n_missed": 399,
+      "n_submitted": 599
+    }
+  },
+  "cm": "/home/bioedca/tbox-phylogeny/tbox-finder/data/external/refs/RF00230.cm",
+  "eligibility_rule": "probe-eligible iff parent CM-detected AND variant CM-missed AND length-matched control CM-detected (the triple). The parent leg controls the divergence confound (27.6% of unablated corpus records are already missed); the control leg controls the excision-length confound (random equal-length excision misses 79.1%, MORE than the 66.7% of real element ablations) \u2014 without it the filter measures excision, not architecture",
+  "families_validated": [
+    "CLASS_II_PLATFORM_SWAP",
+    "STEM_II_PK_DELETION"
+  ],
+  "family_citations": {
+    "CLASS_II_PLATFORM_SWAP": [
+      "PMID:18359782",
+      "PMID:25583497",
+      "PMID:31740853",
+      "PMID:39097611",
+      "PMID:41290600",
+      "PMID:32882008"
+    ],
+    "STEM_II_PK_DELETION": [
+      "PMID:28621923",
+      "PMID:28531275",
+      "PMID:38981655"
+    ]
+  },
+  "limitation": "samples two literature-grounded architecture departures, not the space of natural non-canonical T-boxes; diversity is a lower bound. Attribution is to the excised element via a CM proxy, not to ADR-0006 D9's relaxed-architecture detector (b), which has no in-repo backend until P6 \u2014 pre-registered for re-derivation there",
+  "measured_confound_baselines": {
+    "element_excision_miss_rate": 0.667,
+    "parent_miss_rate": 0.276,
+    "random_excision_miss_rate": 0.791
+  },
+  "n_discarded_ablation_did_not_break_detection": 200,
+  "n_discarded_length_confounded": 193,
+  "n_discarded_parent_already_cm_missed": 161,
+  "n_emitted": 599,
+  "n_parents": 300,
+  "n_probe_eligible": 45,
+  "n_unmeasured": 0,
+  "per_family": {
+    "CLASS_II_PLATFORM_SWAP": {
+      "emitted": 300,
+      "meets_min_n_alone": true,
+      "probe_eligible": 21
+    },
+    "STEM_II_PK_DELETION": {
+      "emitted": 299,
+      "meets_min_n_alone": true,
+      "probe_eligible": 24
+    }
+  },
+  "probe_set_meets_min_n": true,
+  "seed": 20260719,
+  "tier2n_probe_min_n": 20
+}
