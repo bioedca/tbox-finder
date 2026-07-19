@@ -302,7 +302,7 @@ They are **not notational variants**. Measured at P2-03 on the golden fixture's 
 
 ## Amendment A4 — Tier-2N probe eligibility requires a length-matched excision control (P2-07, 2026-07-19)
 
-- **Status:** **PROPOSED — awaiting user sign-off (CLAUDE.md §7 item 2).** Not in force until signed. Amends **D14** (the Tier-2N probe set); consumed by P2-09 (round-0 mining), P5 (synthetic-Tier-2N spike-in recovery / §12 detection-power floor), P6.
+- **Status:** **Accepted (user sign-off 2026-07-19; CLAUDE.md §7 item 2), "ADR-0005 Amendment A4 approved."** Amends **D14** (the Tier-2N probe set) with the eligibility rule D14 left open; pins no new *value* (the D18/A1 floor `MIN_REAL_HOMOLOG_N = 20` is untouched). Consumed by P2-09 (round-0 mining), P5 (synthetic-Tier-2N spike-in recovery / §12 detection-power floor), P6. Committed atomically with the P2-07 modules + their unit gates + `reports/p2/tier2n_probe.json`.
 - **Note on numbering:** this file already carries **two** amendments labelled `A3` (P0-28 and P2-03) — a pre-existing collision flagged for reconciliation at the P2 exit gate. This amendment takes `A4` to avoid compounding it.
 
 **What D14 leaves open.** D14 pins that a Tier-2N probe set is evaluated each mining round and that a recall drop halts/rolls back the iteration. It does not say how a synthetic construct **earns** Tier-2N membership. P2-07 built that generator and found the obvious operationalisation — "the covariance model misses it" — is confounded twice over, measured rather than assumed.
