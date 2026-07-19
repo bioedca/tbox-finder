@@ -244,3 +244,108 @@ def test_committed_table_hash_link_resolves_to_the_live_corpus():
     prov = json.loads(_PROVENANCE.read_text())
     recorded = prov["inputs"]["data/processed/master_clean_v0.parquet"]
     assert recorded == provenance.sha256_file(_CORPUS)
+
+
+# --------------------------------------------------------------------------- #
+# P2-08 — append_variant_rows (ADR-0004 D7 + A3)
+# --------------------------------------------------------------------------- #
+def _base_table():
+    return splits.build_split_table(_interim_frame(), corpus_sha256=_HEX64)
+
+
+def _variant(**over):
+    v = {"variant_id": "b" * 64 + "#c2phase7", "parent_record_id": "b" * 64}
+    v.update(over)
+    return v
+
+
+def test_append_variant_rows_inherits_every_fold_column_from_the_parent():
+    pytest.importorskip("pandas")
+    table = _base_table()
+    out = splits.append_variant_rows(table, [_variant()])
+    assert len(out) == len(table) + 1
+    child = out.iloc[-1]
+    parent = out[out["record_id"] == "b" * 64].iloc[0]
+    for col in (*splits.FOLD_SCHEME_COLUMNS, *splits.LINEAGE_COLUMNS, "cluster_id", "klass"):
+        assert child[col] == parent[col], f"{col} not inherited"
+    assert child["source"] == splits.SYNTHETIC_CLASSII_SOURCE
+    assert child["parent_record_id"] == "b" * 64
+
+
+def test_a_caller_cannot_supply_a_fold_that_differs_from_the_parents():
+    """D7 inheritance is structural, not conventional.
+
+    The caller passes only ``variant_id`` + ``parent_record_id``; every fold value
+    is read off the parent row. A variant dict carrying its own ``nested_train`` /
+    ``fold_random`` must be **ignored**, not honoured — otherwise the one contract
+    the no-leakage gate exists to enforce would be caller-supplied.
+    """
+    pytest.importorskip("pandas")
+    table = _base_table()
+    out = splits.append_variant_rows(
+        table, [_variant(nested_train=True, nested_role="train", fold_random="test")]
+    )
+    child = out.iloc[-1]
+    assert bool(child["nested_train"]) is False
+    assert child["nested_role"] == "heldout"
+    assert child["fold_random"] == "val"
+
+
+def test_append_variant_rows_rejects_an_unknown_parent():
+    pytest.importorskip("pandas")
+    with pytest.raises(ValueError, match="absent from the split table"):
+        splits.append_variant_rows(_base_table(), [_variant(parent_record_id="nope")])
+
+
+def test_append_variant_rows_rejects_a_variant_id_colliding_with_a_record():
+    pytest.importorskip("pandas")
+    with pytest.raises(ValueError, match="collides with an existing record_id"):
+        splits.append_variant_rows(_base_table(), [_variant(variant_id="b" * 64)])
+
+
+def test_append_variant_rows_rejects_duplicate_variant_ids():
+    pytest.importorskip("pandas")
+    with pytest.raises(ValueError, match="duplicate variant_id"):
+        splits.append_variant_rows(_base_table(), [_variant(), _variant()])
+
+
+def test_append_variant_rows_is_a_no_op_on_an_empty_recovery_set():
+    pytest.importorskip("pandas")
+    table = _base_table()
+    assert len(splits.append_variant_rows(table, [])) == len(table)
+
+
+def test_appended_variants_keep_the_bool_dtype_of_the_fold_flags():
+    """An object-dtype bool column reads as a truthy string in the leakage predicates."""
+    pytest.importorskip("pandas")
+    out = splits.append_variant_rows(_base_table(), [_variant()])
+    for col in splits.BOOL_FLAG_COLUMNS:
+        assert out[col].dtype == bool, f"{col} is {out[col].dtype}"
+
+
+def test_a_widened_flag_column_fails_loud_rather_than_being_coerced():
+    """The dtype tripwire fires rather than repairing the symptom.
+
+    Measured at P2-08: pandas preserves these dtypes on the real path, so the
+    tripwire never fires in production. Sabotage showed a silent ``astype(bool)``
+    coercion was untestable *and* would hide whatever widened the column, so it
+    raises instead. This test is what makes the tripwire non-dead code.
+    """
+    pd = pytest.importorskip("pandas")
+    table = _base_table()
+    table["nested_train"] = table["nested_train"].astype(object)
+    with pytest.raises(ValueError, match="'nested_train' is object, not bool"):
+        splits.append_variant_rows(table, [_variant()])
+    assert pd is not None
+
+
+def test_appended_table_still_passes_the_schema_gate():
+    pytest.importorskip("pandas")
+    splits.validate_table_schema(splits.append_variant_rows(_base_table(), [_variant()]))
+
+
+def test_the_derived_source_is_not_an_external_positive_source():
+    """A3: derived rows and independent positives are different categories."""
+    assert splits.SYNTHETIC_CLASSII_SOURCE not in splits.EXTERNAL_POSITIVE_SOURCES
+    assert splits.SYNTHETIC_CLASSII_SOURCE in splits.DERIVED_SOURCES
+    assert not set(splits.EXTERNAL_POSITIVE_SOURCES) & set(splits.DERIVED_SOURCES)

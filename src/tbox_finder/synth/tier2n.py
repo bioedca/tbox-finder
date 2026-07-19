@@ -114,6 +114,7 @@ from typing import Any
 
 from tbox_finder.labels import CLASS_II_TYPE, CORPUS_PARQUET, ELEMENT_COORDS
 from tbox_finder.power import MIN_REAL_HOMOLOG_N
+from tbox_finder.synth import _common
 
 # --------------------------------------------------------------------------- #
 # The canonical architecture (pinned; PMID:31206978, corroborated PMID:32882008)
@@ -290,9 +291,13 @@ class Tier2NVariant:
 
 
 def _stable_key(seed: int, *parts: str) -> int:
-    """Deterministic 64-bit key from ``seed`` + ``parts`` (no global RNG state)."""
-    digest = hashlib.shake_256(("|".join((str(seed), *parts))).encode("utf-8")).digest(8)
-    return int.from_bytes(digest, "big")
+    """Deterministic 64-bit key from ``seed`` + ``parts`` (no global RNG state).
+
+    Promoted to :func:`tbox_finder.synth._common.stable_key` at P2-08 (P2-08 needs
+    the identical primitive); this name **delegates** rather than keeping a second
+    copy — two copies means fixing one and shipping the bug in the other.
+    """
+    return _common.stable_key(seed, *parts)
 
 
 def _element_span(parent: dict[str, Any], element: str) -> tuple[int, int] | None:
@@ -668,17 +673,10 @@ def _sha256_file(path: str | Path) -> str:
 def _repo_relative(path: str | Path) -> str:
     """``path`` relative to the repo root when it is inside it, else its basename.
 
-    Never returns an absolute path: a committed report that embedded one would
-    record the author's home directory as if it were provenance.
+    Promoted to :func:`tbox_finder.synth._common.repo_relative` at P2-08; this name
+    **delegates** rather than keeping a second copy (see :func:`_stable_key`).
     """
-    resolved = Path(path).resolve()
-    for parent in (Path.cwd().resolve(), *Path.cwd().resolve().parents):
-        if (parent / ".git").exists():
-            try:
-                return str(resolved.relative_to(parent))
-            except ValueError:
-                break
-    return resolved.name
+    return _common.repo_relative(path)
 
 
 def build_probe_report(

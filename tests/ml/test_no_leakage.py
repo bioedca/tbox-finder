@@ -59,11 +59,23 @@ _LFS_MAGIC = b"version https://git-lfs.github.com/spec/v1"
 #: D3 forces out of training. ``dropped`` is neither train nor held-out (random-only).
 _HELDOUT_ROLES = frozenset({"heldout", "excluded_clade_crossing"})
 
-#: The committed composition (P0-23): the two independent held-out sets that must be
-#: present and non-leaking. P0-17's additional non-Actinobacteria class-II set is
-#: VERIFIED-EMPTY (0 records) — there is nothing to include, and none is fabricated.
-_EXPECTED_SOURCE_COUNTS = {"corpus": 23535, "anchor": 16, "blind": 18}
-_EXPECTED_N_RECORDS = 23569
+#: The committed composition (P0-23; P2-08 appended the recovery set). The two
+#: independent held-out sets must be present and non-leaking. P0-17's additional
+#: non-Actinobacteria class-II set is VERIFIED-EMPTY (0 records) — there is nothing
+#: to include, and none is fabricated.
+#:
+#: ``synthetic_classII`` = the P2-08 evaluation-only recovery set (ADR-0004 A3):
+#: 2,344 presentation variants of 1,172 held-out class-II corpus parents. These are
+#: **derived** rows — they inherit their parent's fold and are never
+#: training-eligible — so they are judged by :func:`synthetic_variant_leaks`, not by
+#: the external-positive predicate.
+_EXPECTED_SOURCE_COUNTS = {
+    "corpus": 23535,
+    "anchor": 16,
+    "blind": 18,
+    "synthetic_classII": 2344,
+}
+_EXPECTED_N_RECORDS = 25913
 
 #: Every fold-scheme + nested column a variant must inherit from its parent (§9.2).
 _FOLD_COLS = (*splits.FOLD_SCHEME_COLUMNS,)
@@ -171,11 +183,21 @@ def no_clade_records_silently_passing(
 
 def external_positive_leaks(source, is_anchor_heldout, nested_train, nested_role, fold_random):
     """Arm (c): every independent positive (anchor / blind) must be flagged held out, out
-    of the nested training fold, not a nested-``train`` role, and out of the random split."""
+    of the nested training fold, not a nested-``train`` role, and out of the random split.
+
+    Scoped to :data:`splits.EXTERNAL_POSITIVE_SOURCES` rather than to "not corpus"
+    (ADR-0004 A3, P2-08). The old ``src != "corpus"`` form conflated two different
+    kinds of row: an *independent* positive that stands outside every scheme, and a
+    *derived* variant that inherits its parent's fold. The ``fold_random is None``
+    clause is right for the former and unsatisfiable for the latter — a D7-conforming
+    variant inherits its parent's non-null fold, so under the old form every correct
+    variant was a violation. Derived rows are held to
+    :func:`synthetic_variant_leaks`, which is strictly stronger, not weaker.
+    """
     return [
         i
         for i, src in enumerate(source)
-        if src != "corpus"
+        if src in splits.EXTERNAL_POSITIVE_SOURCES
         and (
             not is_anchor_heldout[i]
             or nested_train[i]
@@ -185,10 +207,69 @@ def external_positive_leaks(source, is_anchor_heldout, nested_train, nested_role
     ]
 
 
+def unknown_sources(source):
+    """Any ``source`` value outside the closed vocabulary is a violation.
+
+    Without this, re-scoping :func:`external_positive_leaks` to a named allowlist
+    would silently exempt a typo'd or newly-invented source from *every* predicate
+    — turning a tightening into a hole.
+    """
+    known = {"corpus", *splits.EXTERNAL_POSITIVE_SOURCES, *splits.DERIVED_SOURCES}
+    return sorted(i for i, src in enumerate(source) if src not in known)
+
+
+def synthetic_variant_leaks(cols):
+    """P2-08 derived rows (ADR-0004 A3): evaluation-only, never training-eligible.
+
+    Strictly stronger than the external-positive predicate it replaces for these
+    rows. Each derived row must:
+
+    * be a real variant — ``parent_record_id != record_id`` (a self-parented
+      "variant" would inherit nothing and silently become a base record);
+    * be parented on a **held-out class-II corpus** row, so the eval set can never
+      be built from a training-fold or blind-set parent;
+    * itself be out of training (``not nested_train``, ``nested_role != "train"``).
+
+    Fold-column inheritance is enforced separately by
+    :func:`variant_parent_fold_mismatches`, which already covers every row whose
+    parent differs from itself.
+    """
+    index = {rid: i for i, rid in enumerate(cols["record_id"])}
+    viol = []
+    for i, src in enumerate(cols["source"]):
+        if src not in splits.DERIVED_SOURCES:
+            continue
+        rid, pid = cols["record_id"][i], cols["parent_record_id"][i]
+        if pid is None or pid == rid:
+            viol.append(("self_parented_variant", i))
+            continue
+        j = index.get(pid)
+        if j is None:
+            viol.append(("orphan_parent", i))
+            continue
+        if cols["source"][j] != "corpus":
+            viol.append(("parent_not_corpus", i))
+        elif cols["klass"][j] != "II":
+            viol.append(("parent_not_class_ii", i))
+        elif cols["nested_train"][j] or cols["nested_role"][j] == "train":
+            viol.append(("parent_in_training_fold", i))
+        elif cols["nested_train"][i] or cols["nested_role"][i] == "train":
+            viol.append(("variant_in_training_fold", i))
+    return viol
+
+
 def external_cluster_training_twins(source, cluster_id, nested_train):
     """A corpus record that shares a homology cluster with an external held-out positive
-    must not be in training (else a held-out anchor has a training twin)."""
-    ext_clusters = {c for s, c in zip(source, cluster_id, strict=True) if s != "corpus"}
+    must not be in training (else a held-out anchor has a training twin).
+
+    Scoped to :data:`splits.EXTERNAL_POSITIVE_SOURCES` (ADR-0004 A3): a derived
+    variant shares its parent's cluster *by construction*, so counting derived rows
+    here would re-flag the parent's own cluster as if a new independent positive had
+    landed in it.
+    """
+    ext_clusters = {
+        c for s, c in zip(source, cluster_id, strict=True) if s in splits.EXTERNAL_POSITIVE_SOURCES
+    }
     return sorted(
         i
         for i, src in enumerate(source)
@@ -306,6 +387,8 @@ def _all_violations(c):
             c["source"], c["cluster_id"], c["nested_train"]
         ),
         "variant": variant_parent_fold_mismatches(c),
+        "synthetic": synthetic_variant_leaks(c),
+        "unknown_source": unknown_sources(c["source"]),
     }
 
 
@@ -624,6 +707,162 @@ def test_independent_positive_sets_are_held_out(committed):
         == []
     )
     assert external_cluster_training_twins(c["source"], c["cluster_id"], c["nested_train"]) == []
+
+
+def _with_synthetic_variant(**over):
+    """``_clean_cols()`` plus one P2-08 derived row parented on the held-out r2.
+
+    The real committed table contains **no** violating row, so every
+    :func:`synthetic_variant_leaks` clause is unreachable against it — disabling a
+    clause there changes nothing and the gate stays green. (Established by
+    sabotage at P2-08, not by reading: three clauses were confirmed non-biting on
+    the real table.) These hand-built leaky fixtures are where the clauses are
+    actually exercised.
+    """
+    c = {k: list(v) for k, v in _clean_cols().items()}
+    row = {
+        "record_id": "r2#c2phase7",
+        "parent_record_id": "r2",
+        "corpus_record_sha256": None,
+        "source": splits.SYNTHETIC_CLASSII_SOURCE,
+        "klass": "II",
+        "cluster_id": 1,
+        "resolved_phylum": "Actinobacteria",
+        "resolved_class": "Actinobacteria",
+        "resolved_order": "Frankiales",
+        "resolved_genus": "Frankia",
+        "fold_random": "val",
+        "loo_order_unit": "Frankiales",
+        "class_holdout_unit": "Actinobacteria",
+        "phylum_holdout_unit": "Actinobacteria",
+        "nested_train": False,
+        "nested_role": "heldout",
+        "is_designated_loo_holdout": True,
+        "is_anchor_heldout": False,
+        "clade_crossing_cluster": False,
+        "dropped_from_clade_holdout": False,
+    }
+    row.update(over)
+    for k in c:
+        c[k].append(row[k])
+    # The parent r2 is class II for this fixture's purposes.
+    c["klass"][2] = "II"
+    return c
+
+
+def test_a_wellformed_synthetic_variant_is_clean():
+    """Anchors the leaky cases below — without it they could pass for any reason."""
+    c = _with_synthetic_variant()
+    assert synthetic_variant_leaks(c) == []
+    assert variant_parent_fold_mismatches(c) == []
+    # ...and it is NOT judged by the external-positive predicate (ADR-0004 A3): it
+    # inherits fold_random="val", which that predicate requires to be None.
+    assert (
+        external_positive_leaks(
+            c["source"],
+            c["is_anchor_heldout"],
+            c["nested_train"],
+            c["nested_role"],
+            c["fold_random"],
+        )
+        == []
+    )
+
+
+def test_the_old_predicate_scope_would_have_failed_a_correct_variant():
+    """Why A3's re-scope was necessary, pinned as a test rather than as prose.
+
+    Under the pre-A3 ``src != "corpus"`` form, a D7-conforming variant — which
+    inherits its parent's non-null ``fold_random`` — was a violation by
+    construction. The two pinned contracts were in direct conflict.
+    """
+    c = _with_synthetic_variant()
+    old_form = [
+        i
+        for i, src in enumerate(c["source"])
+        if src != "corpus"
+        and (
+            not c["is_anchor_heldout"][i]
+            or c["nested_train"][i]
+            or c["nested_role"][i] == "train"
+            or c["fold_random"][i] is not None
+        )
+    ]
+    assert old_form == [6], "the correct variant would have been flagged by the old scope"
+
+
+@pytest.mark.parametrize(
+    ("override", "reason"),
+    [
+        ({"nested_train": True}, "variant_in_training_fold"),
+        ({"nested_role": "train"}, "variant_in_training_fold"),
+        ({"parent_record_id": "r2#c2phase7"}, "self_parented_variant"),
+        ({"parent_record_id": "nope"}, "orphan_parent"),
+    ],
+)
+def test_a_leaky_synthetic_variant_is_caught(override, reason):
+    viol = synthetic_variant_leaks(_with_synthetic_variant(**override))
+    assert viol and viol[0][0] == reason
+
+
+def test_a_variant_parented_on_a_training_fold_row_is_caught():
+    """ADR-0004 A3 relaxed *which* held-out parents are allowed, not the training ban.
+
+    The parent is forced to ``klass == "II"`` so this reaches the
+    ``parent_in_training_fold`` clause **in its own name**. Without that, r0 is
+    class I, the earlier ``parent_not_class_ii`` branch of the elif chain fires
+    first, and this test passes while the clause it is named for never executes —
+    confirmed by sabotage (disabling the training-fold clause left it green).
+    """
+    c = _with_synthetic_variant(parent_record_id="r0", cluster_id=0, fold_random="train")
+    c["klass"][0] = "II"
+    viol = synthetic_variant_leaks(c)
+    assert viol == [("parent_in_training_fold", 6)]
+
+
+def test_a_variant_parented_on_a_nested_role_train_row_is_caught():
+    """The second disjunct of the same clause (``nested_role == "train"``)."""
+    c = _with_synthetic_variant(parent_record_id="r0", cluster_id=0, fold_random="train")
+    c["klass"][0] = "II"
+    c["nested_train"][0] = False  # only the role marks it as training
+    viol = synthetic_variant_leaks(c)
+    assert viol == [("parent_in_training_fold", 6)]
+
+
+def test_a_variant_parented_on_the_blind_set_is_caught():
+    """The 18-record natural arm must not become the parent of the synthetic arm."""
+    c = _with_synthetic_variant(parent_record_id="anchor:a5", cluster_id=3, fold_random=None)
+    viol = synthetic_variant_leaks(c)
+    assert viol and viol[0][0] == "parent_not_corpus"
+
+
+def test_a_variant_that_does_not_inherit_its_parents_fold_is_caught():
+    """D7 inheritance, still enforced for derived rows (A3 did not relax it)."""
+    c = _with_synthetic_variant(fold_random="test")
+    assert variant_parent_fold_mismatches(c) == [("fold_random", 6)]
+
+
+def test_no_unknown_source_values(committed):
+    """The ``source`` vocabulary is closed.
+
+    Load-bearing because :func:`external_positive_leaks` and
+    :func:`synthetic_variant_leaks` are both keyed on named source allowlists
+    (ADR-0004 A3): an unrecognised value would fall through *every* predicate and
+    be checked by nothing.
+    """
+    assert unknown_sources(committed["source"]) == []
+
+
+def test_synthetic_recovery_variants_are_evaluation_only(committed):
+    """P2-08 derived rows: held-out class-II parents, never training-eligible."""
+    c = committed
+    assert synthetic_variant_leaks(c) == []
+    # The set is actually present — a regression that dropped it would otherwise
+    # leave this whole predicate vacuously green (the P2-07 lesson: a clause over
+    # absent evidence reads TRUE exactly when the evidence is missing).
+    n_synthetic = sum(1 for s in c["source"] if s in splits.DERIVED_SOURCES)
+    assert n_synthetic == _EXPECTED_SOURCE_COUNTS["synthetic_classII"]
+    assert n_synthetic > 0
 
 
 def test_variant_parent_fold_inheritance(committed):

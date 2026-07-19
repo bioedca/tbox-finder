@@ -1,0 +1,49 @@
+{
+  "adr": [
+    "ADR-0005 D9",
+    "ADR-0005 A1",
+    "ADR-0005 A5",
+    "ADR-0004 D7",
+    "ADR-0004 A3"
+  ],
+  "block_counts": {
+    "cluster_id": 103,
+    "resolved_order": 25
+  },
+  "block_unit_meets_min_n": {
+    "cluster_id": true,
+    "resolved_order": true
+  },
+  "block_units": [
+    "cluster_id",
+    "resolved_order"
+  ],
+  "construction_disclosure": "Presentation transforms (window-phase offset, reverse complement) of real held-out class-II records. No platform-swap chimera is emitted: the modularity premise it would require is contested (DOI:10.1002/wrna.1600; PMID:25583497) and no functional T-box platform-swap construct could be verified in the literature (CLAUDE.md \u00a710.1 gate, P2-08, accessed 2026-07-19).",
+  "control_strata_parent_counts": {
+    "50-70": 1019,
+    "<50": 61,
+    "no_neighbour": 92
+  },
+  "eligibility_rule": "klass == 'II' AND source == 'corpus' AND nested_role == 'heldout' AND NOT nested_train. source=='corpus' excludes the 18-record blind set (PRD \u00a77.1) so the synthetic arm stays independent of the natural one.",
+  "gate": {
+    "blocks_meet_min_n": true,
+    "control_measurable": true,
+    "overall_pass": true
+  },
+  "grading_scope": "Stage-1-only on the class-II-CM-naive checkpoint (P2-11), never through the TBDB-class-II-trained Stage-2 (ADR-0005 D9). Evaluation-only: these rows are never training-eligible (ADR-0004 A3).",
+  "independence_limitation": "ADR-0005 A5: this set supplies min-N and block-level power, NOT phylogenetic independence \u2014 the parent pool is dominated by Actinobacteria. Recovery unaccompanied by a passing within-phylum-homology control is not evidence of anti-mimicry.",
+  "interim_split_table": "data/interim/splits/split_assignments.parquet",
+  "min_n": 20,
+  "n_parents": 1172,
+  "n_parents_with_measured_identity": 1172,
+  "n_variants": 2344,
+  "power_disclosure": "N for this arm is the BLOCK count, not the variant count: D9 resamples at the homology-cluster / held-out-order level (PRD \u00a72.3), so variants of a shared parent add no evidence. n_variants is a presentation multiplier and is not the graded quantity.",
+  "seed": 20260719,
+  "source_label": "synthetic_classII",
+  "step": "P2-08",
+  "transform_counts": {
+    "phase": 826,
+    "phase_rc": 738,
+    "rc": 780
+  }
+}

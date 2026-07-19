@@ -265,3 +265,96 @@ generalization (CLAUDE.md §10.3).
 **Disclosed non-delivery.** The probe set is **provisional**: attribution is to the excised element via a **CM proxy**, not to ADR-0006 D9's relaxed-architecture detector (b), which has no backend until P6 — pre-registered for re-derivation there. The **natural** Tier-2N arm is **N = 0 by construction** (the corpus is 100 % CM-derived and cannot contain a CM-invisible locus) and is reported at zero, not dropped. The generator samples **two** literature-grounded departures; its diversity is a **lower bound**, not the natural non-canonical space. **No published RF00230 false-negative rate exists** — the §10.1 gate returned `NO DIRECT EVIDENCE FOUND`, with only the procedural fact that TBDB needed a second class-II CM (`PMID:32882008`) — so every Tier-2N recall figure here is first-party. No mining round has been run: `hard_negative.py` is infrastructure, and with zero backends available the readiness gate refuses every round by design until P6.
 
 **Commit.** `<SHA — reconcile against `git log main` at the P2 exit gate>`
+
+## Step P2-08 — 2026-07-19: the construction-powered synthetic-class-II recovery set
+
+**Inputs.** `data/interim/splits/split_assignments.parquet` (DVC-interim partition, projected
+through the pinned `splits.build_split_table`) + `data/interim/splits/aligned/class_{I,II}.sto`
+for the D9 within-phylum-homology control. **Process.** `src/tbox_finder/synth/classII.py::build_recovery_set`
+emits evaluation-only presentation variants (window-phase offset, reverse complement) of real
+**held-out** class-II corpus parents; `splits.append_variant_rows` appends them to the committed
+split table, each inheriting every fold, lineage, and cluster value **off its parent row** (the
+caller supplies only `variant_id` + `parent_record_id`, so a caller cannot hand a variant a fold
+at all). `tier2n`'s `_stable_key`/`_repo_relative` were **promoted** to `synth/_common.py` with
+tier2n delegating, per the repo's promote-don't-duplicate correctness rule.
+**Outputs.** `data/processed/synth/classII_recovery.parquet` (2,344 rows, sequence-free) ·
+`reports/p2/classII_recovery.json` · committed split table 23,569 → **25,913** rows + regenerated
+provenance (`n_synthetic_variants` split out from `n_external`) · `workflow/rules/data.smk::classII_recovery_set`.
+**Validation.** PASS — block counts **103 clusters / 25 orders**, both ≥ `MIN_REAL_HOMOLOG_N` 20;
+control strata `50-70`=1,019 / `<50`=61 / `no_neighbour`=92, the two low-homology strata each
+independently powered. Full-corpus `tests/ml/test_no_leakage.py` **37/37** with
+`TBOX_REQUIRE_NO_LEAKAGE=1`. Suite **1,756 passed / 162 skipped** vs a **1,680 / 162** baseline
+re-measured on `main` in an identical artifact state = **+76 new, zero regressions**. ruff 0.15.15 +
+black 25.11.0 + `snakemake --lint`/`-n` clean. Generator re-run byte-identical.
+**Decisions.** Two amendments, both user-signed-off 2026-07-19 ("both approved"): **ADR-0004 A3**
+(evaluation-only variants may be parented on held-out records; the `source` vocabulary is split into
+`EXTERNAL_POSITIVE_SOURCES` / `DERIVED_SOURCES`) and **ADR-0005 A5** (the set supplies power, not
+independence; the within-phylum control is promoted to load-bearing). **Commit.** *(squash SHA
+recorded at merge — reconcile against `git log main`, never from notes.)*
+
+**The step's real yield — the pre-registered construction was refused by the evidence gate.**
+D9's "construction-powered synthetic class-II" most naturally means a class-I→class-II
+**regulatory-platform swap**, which would have drawn on 8,281 class-I training parents across
+16 phyla. The §10.1 gate refused it: platform modularity w.r.t. the sensing core is **contested**,
+contradicted by **two independent labs** (Stem I/IDTM covariation — Suddala & Zhang 2020,
+DOI:10.1002/wrna.1600; "class-II Stem I lacks several highly conserved elements essential for tRNA
+interaction" — Sherwood 2015, PMID:25583497), and **no functional T-box platform-swap chimera could
+be verified** (the one review-level assertion, PMID:31206978, cites a source that does not contain
+the construct). Precedented instead is *specifier*-level re-engineering — a different claim.
+
+**The fallback was a trap that a block-level measurement exposed.** Building from training-fold
+parents satisfies "above min-N by construction" on the **record** count while leaving the graded
+quantity untouched: only **22** class-II records are in `nested_train`, spanning **20 clusters /
+4 orders**, and **zero** are Actinobacteria. D9 resamples at the block level, so 200 variants from
+22 parents still span 20 clusters. The gate therefore keys on block counts, grades at the **weakest**
+unit, and the report labels `n_variants` a presentation multiplier — the [[matched-control-before-certifying]]
+shape, caught before it shipped rather than after.
+
+**A direct conflict between two pinned contracts surfaced.** `external_positive_leaks` required every
+non-`corpus` row to have `fold_random is None`; D7 requires a variant to inherit its parent's fold,
+and eligible parents carry `fold_random` ∈ {train 1108, val 28, test 24}. **Every correct variant was
+a violation by construction.** The predicate conflated "independent positive" with "derived row" and
+had no clause for the latter. A3 re-scopes it and adds `synthetic_variant_leaks` (strictly stronger)
+plus `unknown_sources`, which closes the vocabulary so re-scoping to allowlists cannot exempt an
+unrecognised value from every check.
+
+**Sabotage found three guards that could not fire, and one loose test of mine.** Against the real
+(clean) committed table, disabling the parent-held-out, variant-out-of-training, or parent-not-corpus
+clauses left the gate **green** — the predicates had no adversarial input, the
+[[ci-leakage-gate-blind-to-runtime-augmentation]] shape one level down. Fixed with hand-built leaky
+fixtures. Worse, `test_a_variant_parented_on_a_training_fold_row_is_caught` parented on a class-**I**
+row, so the elif chain fired `parent_not_class_ii` first and the clause the test is *named for* never
+executed — and my `assert viol[0][0] in (...)` disjunction accepted it. This is P2-07's finding
+repeating: a test whose name claims a guard it never reaches. Now pinned to the exact reason, with
+each disjunct separately sabotage-verified. Two further honest non-bites recorded rather than
+papered over: the `bool(...)` emptiness guards in `build_report` are **redundant** (block counts of an
+empty set are 0, which already fails `>= 20`) and the docstring claiming otherwise was corrected; and
+a silent `astype(bool)` dtype coercion was untestable *and* would have hidden whatever widened the
+column, so it is now a fail-loud tripwire with a test that fires it.
+
+**Disclosed non-delivery.** No platform-swap chimera (refused, above). **Phylogenetic independence is
+NOT supplied** — 1,160 of 1,172 parents are Actinobacteria, so ADR-0005 A1's premise that this set
+closes the independence gap does not hold, and A5 records that. Nothing is graded here: the set is
+scored Stage-1-only at **P4** on the P2-11 naive checkpoint. `nested_train` membership is unchanged,
+so the 8,303/7,472 folds and the P2-06 selection-val carve are untouched. **Also recorded:** TBDB's
+class-II model was only ever run inside Actinobacteria (TaxID:1760, DOI:10.1093/nar/gkaa1060), so the
+observed class-II phylum restriction is an **ascertainment artifact** and can never be cited as a
+distribution baseline — a live confound for the §1/§13 expansion claim.
+
+**CodeRabbit round 1 — 7 findings, all legitimate, all applied.** Two were substantive.
+(1) **`block_counts` counted a null `resolved_order` as a block**, inflating the graded quantity:
+the reported 26 orders were 25 real ones plus the one eligible parent that lacks an order
+assignment. Corrected to **25** here, in both ADRs, and in the report — a number that had already
+been written into a commit message and a PR body. (2) **The test named for the block-vs-variant-count
+distinction did not discriminate**: it emitted 9 variants, so a gate wrongly keyed on
+`n_variants >= 20` would have failed it too, and the sabotage run I credited to it was actually
+being caught by `test_the_gate_grades_at_the_weakest_block_unit`. Now 45 variants inside one block,
+and re-sabotage confirms it fails **in its own name**. That is the second time this step that a guard
+passed while a *different* guard did the work — my sabotage attribution, not just my tests, needs to
+name which assertion fired. Also applied: `stable_key` now rejects the `|` delimiter rather than
+letting `("a|b",)` and `("a","b")` key identically (no committed artifact changes — no record id
+contains `|`); `repo_relative` searches the path's own ancestry before cwd's, so an artifact outside
+the working directory keeps its directory component instead of degrading to a basename;
+`validate_report` is total against a non-mapping root and against non-int block counts / `n_parents`;
+and the Snakemake rule now **declares** the two `.sto` alignment inputs, so the D9 control cannot
+silently report "unmeasured" because an undeclared input was never built. Suite **1,764 / 162**.
