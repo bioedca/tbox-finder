@@ -143,16 +143,30 @@ CANONICAL_ELEMENT_ORDER: tuple[str, ...] = (
 OBLIGATE_ELEMENTS: tuple[str, ...] = ("Stem_I", "Stem_III", "Antiterminator_Tbox_seq")
 
 #: The joint ablation no known natural T-box exhibits (PMID:31206978), recorded
-#: as the documented boundary of the construct space.
+#: in the **literature's** finer-grained vocabulary as the documented boundary of
+#: the construct space.
 #:
-#: There is deliberately **no bypass flag** to emit it. An earlier revision carried
-#: an ``allow_forbidden`` escape hatch on :func:`ablate`; it was unreachable from
-#: :func:`generate`, and it disabled the obligate-element guard for *any* target
+#: **How it is enforced.** This vocabulary is deliberately *not* the repo's:
+#: :data:`tbox_finder.labels.ELEMENT_COORDS` annotates Stem I as one extent (no
+#: separate distal T-loop module) and models Stem II together with its IIA/B
+#: pseudoknot as the single ``stem2_region``. Translated into the vocabulary the
+#: code actually ablates, "lacks all three avidity modules" requires removing both
+#: ``Stem_I`` and ``Stem_II`` — and ``Stem_I`` is in :data:`OBLIGATE_ELEMENTS`, so
+#: :func:`ablate` already refuses it. The constraint is therefore enforced by the
+#: obligate-element guard rather than by a separate check, and
+#: ``test_the_forbidden_joint_ablation_is_unreachable`` pins that reduction so the
+#: relationship cannot rot silently. A literal set-equality guard was considered
+#: and declined: with no ``Stem_I_DTM`` / ``Stem_IIA_B`` in ``ELEMENT_COORDS`` it
+#: could never fire, and unreachable safety code invites the belief that something
+#: is being checked when nothing is.
+#:
+#: There is also deliberately **no bypass flag**. An earlier revision carried an
+#: ``allow_forbidden`` escape hatch on :func:`ablate`; it was unreachable from
+#: :func:`generate` and disabled the obligate-element guard for *any* target
 #: rather than only this combination — an unused escape hatch around a safety
 #: guard is worse than no escape hatch, so it was removed rather than narrowed.
-#: Should a negative control ever be wanted, it belongs in an explicitly-named
-#: function that labels its output as a control, not in a keyword on the positive
-#: path.
+#: Should a negative control ever be wanted it belongs in an explicitly-named
+#: function that labels its output as a control, not a keyword on the positive path.
 FORBIDDEN_JOINT_ABLATION: frozenset[str] = frozenset({"Stem_I_DTM", "Stem_II", "Stem_IIA_B"})
 
 # --------------------------------------------------------------------------- #

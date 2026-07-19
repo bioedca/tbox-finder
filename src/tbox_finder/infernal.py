@@ -51,6 +51,13 @@ TBLOUT_EVALUE_COL = 15
 #: Default CM used for the T-box detection verdict.
 RF00230_CM = Path("data/external/refs/RF00230.cm")
 
+#: Wall-clock ceiling for one ``cmsearch`` invocation. Generous relative to the
+#: measured cost of the sets this module searches (500 corpus records against
+#: RF00230 takes ~4 min on 4 threads), so it bounds a hang without truncating
+#: legitimate work. Callers searching larger sets should raise it explicitly
+#: rather than relying on the default.
+DEFAULT_CMSEARCH_TIMEOUT_S = 3600.0
+
 
 class InfernalNotAvailableError(RuntimeError):
     """Raised when ``cmsearch`` is not on PATH.
@@ -115,16 +122,21 @@ def write_fasta(records: dict[str, str], path: str | Path) -> Path:
     into several. Either would silently manufacture Tier-2N probe positives, so
     both raise here instead.
     """
+    # Validate everything BEFORE truncating the destination, so a rejected record
+    # leaves any previous FASTA intact rather than replacing it with a partial
+    # file that a later cmsearch would happily search.
+    cleaned_records: list[tuple[str, str]] = []
+    for name, sequence in records.items():
+        if not name or any(char.isspace() for char in name):
+            raise ValueError(f"FASTA record name must be a non-empty single token: {name!r}")
+        cleaned = sequence.replace("-", "").upper()
+        if not cleaned or any(char.isspace() for char in cleaned):
+            raise ValueError(f"FASTA sequence for {name!r} must be non-empty and whitespace-free")
+        cleaned_records.append((name, cleaned))
+
     out = Path(path)
     with out.open("w", encoding="utf-8") as handle:
-        for name, sequence in records.items():
-            if not name or any(char.isspace() for char in name):
-                raise ValueError(f"FASTA record name must be a non-empty single token: {name!r}")
-            cleaned = sequence.replace("-", "").upper()
-            if not cleaned or any(char.isspace() for char in cleaned):
-                raise ValueError(
-                    f"FASTA sequence for {name!r} must be non-empty and whitespace-free"
-                )
+        for name, cleaned in cleaned_records:
             handle.write(f">{name}\n{cleaned}\n")
     return out
 
@@ -136,6 +148,7 @@ def run_cmsearch(
     *,
     cut_ga: bool = True,
     cpu: int = 4,
+    timeout_s: float = DEFAULT_CMSEARCH_TIMEOUT_S,
 ) -> list[CmsearchHit]:
     """Run ``cmsearch`` and return its parsed hits.
 
@@ -159,7 +172,12 @@ def run_cmsearch(
         cmd.append("--cut_ga")
     cmd += [str(cm_path), str(fasta_path)]
 
-    proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, check=False, timeout=timeout_s)
+    except subprocess.TimeoutExpired as exc:
+        # Routed into the same failure path as a non-zero exit: a hung search must
+        # never surface as "no hits", which downstream reads as "the CM missed it".
+        raise RuntimeError(f"cmsearch timed out after {timeout_s}s: {' '.join(cmd)}") from exc
     if proc.returncode != 0:
         raise RuntimeError(f"cmsearch failed (rc={proc.returncode}): {proc.stderr.strip()}")
     return parse_tblout(tbl_path.read_text(encoding="utf-8"))

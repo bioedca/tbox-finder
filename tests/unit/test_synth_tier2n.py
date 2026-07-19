@@ -29,6 +29,7 @@ from tbox_finder.synth.tier2n import (
     FAMILY_CITATIONS,
     FAMILY_CLASS_II,
     FAMILY_STEM_II_PK,
+    FORBIDDEN_JOINT_ABLATION,
     OBLIGATE_ELEMENTS,
     TIER2N_PROBE_MIN_N,
     VALIDATED_FAMILIES,
@@ -419,3 +420,33 @@ def test_every_generated_variant_carries_a_control() -> None:
 def test_control_rejects_an_impossible_excision_length(bad: int) -> None:
     with pytest.raises(Tier2NGeneratorError):
         length_matched_control(_parent("rec000"), FAMILY_STEM_II_PK, n_removed=bad, seed=1)
+
+
+def test_the_forbidden_joint_ablation_is_unreachable(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Pin the reduction that makes FORBIDDEN_JOINT_ABLATION enforced, not decorative.
+
+    The literature constraint (no natural T-box lacks all three of Stem I DTM,
+    Stem II, Stem IIA/B — PMID:31206978) is written in a finer vocabulary than
+    ELEMENT_COORDS carries: Stem I is one extent here, and Stem II is annotated
+    together with its IIA/B pseudoknot as ``stem2_region``. Translated, the
+    forbidden combination requires ablating ``Stem_I`` — which is obligate, so
+    ``ablate`` refuses it. This test fails if that reduction ever stops holding,
+    which is when a real guard would become necessary.
+    """
+    # Ablating ONE avidity module is allowed and is exactly what the glyQS family
+    # does; only the full set of three is forbidden. So no validated family may
+    # cover it, and the residue must include Stem I — which is obligate.
+    for family in VALIDATED_FAMILIES:
+        assert not FORBIDDEN_JOINT_ABLATION.issubset(FAMILY_ABLATED_ELEMENTS[family])
+    assert "Stem_I" in OBLIGATE_ELEMENTS
+
+    monkeypatch.setitem(tier2n.FAMILY_ABLATED_ELEMENTS, "FAKE_ALL_AVIDITY", ("Stem_I", "Stem_II"))
+    with pytest.raises(Tier2NGeneratorError, match="obligate element"):
+        ablate(_parent("rec000"), "FAKE_ALL_AVIDITY")
+
+
+def test_forbidden_joint_ablation_names_are_not_element_keys() -> None:
+    """If these ever become real ELEMENT_COORDS keys, the guard above must change."""
+    from tbox_finder.labels import ELEMENT_COORDS
+
+    assert FORBIDDEN_JOINT_ABLATION - set(ELEMENT_COORDS) == {"Stem_I_DTM", "Stem_IIA_B"}

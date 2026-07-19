@@ -178,8 +178,14 @@ def test_inadmissible_outranks_a_healthy_recall() -> None:
 
 
 def test_halt_threshold_is_one_probe_positive_at_the_pinned_floor() -> None:
-    """Pin the derivation, not the literal — the 1/N granularity argument."""
-    assert pytest.approx(1.0 / MIN_REAL_HOMOLOG_N) == TIER2N_RECALL_DROP_HALT
+    """Pin the derivation, not the literal — the 1/N granularity argument.
+
+    Exact equality, not ``approx``: both sides evaluate the identical float
+    expression, so any difference means the threshold stopped being *derived* from
+    the pinned floor — precisely what this test exists to catch. ``approx`` would
+    tolerate a hand-edited literal that happened to land nearby.
+    """
+    assert TIER2N_RECALL_DROP_HALT == 1.0 / MIN_REAL_HOMOLOG_N
 
 
 @pytest.mark.parametrize("bad", [-0.01, 1.01])
@@ -261,3 +267,14 @@ def test_caller_metadata_cannot_shadow_a_derived_count() -> None:
     report = cm_build_report({"r1": "ACGU"}, [], n_detected=999, arm="spoof")
     assert report["n_detected"] == 0
     assert report["arm"] == "spoof"
+
+
+def test_write_fasta_leaves_a_prior_file_intact_when_a_record_is_invalid(tmp_path) -> None:
+    """Validation runs before truncation, so a rejected batch cannot leave a
+    partial FASTA that a later cmsearch would happily search."""
+    path = tmp_path / "x.fa"
+    write_fasta({"good": "ACGU"}, path)
+    before = path.read_text(encoding="utf-8")
+    with pytest.raises(ValueError):
+        write_fasta({"good": "ACGU", "bad name": "ACGU"}, path)
+    assert path.read_text(encoding="utf-8") == before
