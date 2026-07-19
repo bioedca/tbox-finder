@@ -185,12 +185,21 @@ assert_dvc_artifact() {
 assert_lfs_artifact() {
   local data_path="$1" ptr want_oid want_size got_oid got_size
   assert_parquet_magic "$data_path"
-  ptr="$(git show "HEAD:$data_path" 2>/dev/null || true)"
+  # ⚠ FAIL CLOSED on an unreadable / non-pointer object. An earlier version returned "staged-ok"
+  # here whenever the pointer could not be read, leaving PAR1 magic as the only check — and
+  # PAR1 magic passes ANY parquet, including a stale or wrong-fold one. A staged-input guard
+  # that degrades to "it's a parquet" is precisely the shape that burns a submit-ack: the job
+  # starts, trains on the wrong table, and reports a self-consistent result.
+  if ! ptr="$(git show "HEAD:$data_path" 2>/dev/null)"; then
+    echo "FATAL: could not read the committed object for $data_path (git show failed)." >&2
+    exit 2
+  fi
   want_oid="$(printf '%s\n' "$ptr" | awk -F'sha256:' '/^oid sha256:/ {print $2; exit}')"
   want_size="$(printf '%s\n' "$ptr" | awk '/^size / {print $2; exit}')"
-  if [ -z "$want_oid" ]; then
-    echo "staged-ok $data_path (no readable LFS pointer to verify against; PAR1 magic ok)"
-    return 0
+  if [ -z "$want_oid" ] || [ -z "$want_size" ]; then
+    echo "FATAL: the committed object for $data_path is not a readable git-LFS pointer," >&2
+    echo "  so there is no committed checksum to verify the staged file against." >&2
+    exit 2
   fi
   got_oid="$(sha256sum "$data_path" | awk '{print $1}')"
   got_size="$(stat -c %s "$data_path")"

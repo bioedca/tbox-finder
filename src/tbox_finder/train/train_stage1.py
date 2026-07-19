@@ -1327,7 +1327,8 @@ def build_stream(cfg: Stage1TrainConfig) -> tuple[Any, Any, dict[str, Any]]:
         "occurrence": 0,
         "counted_at_epoch": 0,
         "offset_augmentation": cfg.offset_augmentation,
-        # The counts are a per-record scan at the deterministic lead, NOT a tally over the
+        # The counts are a per-record scan at occurrence 0 — reproducible at epoch 0 under the
+        # seeded augmentation RNG, not phase-independent — and NOT a tally over the
         # weighted draw stream the sampler actually emits. With class_weight_alpha == 0 (the
         # default) nothing consumes them, so this is inert; but P2-06 sweeps α, and inverse-
         # frequency weights derived from the *unweighted* record scan would not describe the
