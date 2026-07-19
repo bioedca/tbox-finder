@@ -212,6 +212,48 @@ def test_variant_id_rejects_an_unknown_transform():
 # --------------------------------------------------------------------------- #
 
 
+def test_a_parent_without_an_order_contributes_no_order_block():
+    """``None`` is not a block — counting it inflates the graded quantity.
+
+    Measured on the real pool: exactly one eligible parent lacks
+    ``resolved_order``, and the naive count reported 26 orders where 25 exist.
+    """
+    variants = _set(4, per_parent=1)
+    import dataclasses
+
+    variants = [
+        dataclasses.replace(v, parent_resolved_order=None) if i < 2 else v
+        for i, v in enumerate(variants)
+    ]
+    assert classII.block_counts(variants)["resolved_order"] == 2
+
+
+def test_a_nan_order_also_contributes_no_order_block():
+    """pandas hands back NaN, not None, for a missing string column."""
+    import dataclasses
+
+    variants = [
+        dataclasses.replace(v, parent_resolved_order=float("nan")) for v in _set(3, per_parent=1)
+    ]
+    assert classII.block_counts(variants)["resolved_order"] == 0
+
+
+def test_stable_key_rejects_the_delimiter_rather_than_colliding():
+    """``('a|b',)`` and ``('a','b')`` would otherwise key identically."""
+    with pytest.raises(ValueError, match="must not contain the '|' delimiter"):
+        _common.stable_key(1, "a|b")
+
+
+def test_repo_relative_keeps_the_directory_for_a_path_outside_cwd(tmp_path):
+    """A path outside cwd's repo used to degrade to its bare basename."""
+    repo = tmp_path / "repo"
+    (repo / ".git").mkdir(parents=True)
+    (repo / "data").mkdir()
+    target = repo / "data" / "x.parquet"
+    target.write_text("")
+    assert _common.repo_relative(target) == "data/x.parquet"
+
+
 def test_block_counts_count_parents_not_variants():
     """Two variants of one parent span one block, not two."""
     variants = _set(5, per_parent=2, distinct_blocks=True)
@@ -220,15 +262,22 @@ def test_block_counts_count_parents_not_variants():
 
 
 def test_the_gate_grades_blocks_not_variant_count():
-    """500 variants from 3 parents must FAIL — this is the whole point of the arm.
+    """Many variants inside ONE block must FAIL — this is the whole point of the arm.
 
     D9 resamples at the homology-cluster / held-out-order level (PRD §2.3), so
-    variants of a shared parent add records without adding evidence. A gate keyed
-    on ``n_variants`` would read a comfortable pass here.
+    variants of a shared parent add records without adding evidence.
+
+    The variant count must **exceed min-N** for this to discriminate. An earlier
+    draft emitted 9 variants, which a gate wrongly keyed on ``n_variants >= 20``
+    would *also* have failed — so the test could not tell the two implementations
+    apart, and the sabotage run that appeared to confirm it was in fact being
+    caught by ``test_the_gate_grades_at_the_weakest_block_unit``. Caught by
+    CodeRabbit, not by my own sabotage attribution.
     """
-    variants = _set(3, per_parent=3, distinct_blocks=False)
+    variants = _set(15, per_parent=3, distinct_blocks=False)  # 45 variants, 1 block
     report = classII.build_report(variants, seed=1)
-    assert report["n_variants"] >= MIN_REAL_HOMOLOG_N // 3
+    assert report["n_variants"] > MIN_REAL_HOMOLOG_N, "must exceed min-N to discriminate"
+    assert report["block_counts"] == {"cluster_id": 1, "resolved_order": 1}
     assert report["gate"]["blocks_meet_min_n"] is False
     assert report["gate"]["overall_pass"] is False
     assert validate_clean(report)
@@ -365,6 +414,10 @@ def test_validate_report_rejects_a_bool_where_a_count_belongs():
 @pytest.mark.parametrize(
     "report",
     [
+        None,
+        [],
+        "bad report",
+        42,
         {},
         {"gate": {}},
         {"n_variants": 1, "n_parents": 1, "min_n": 20, "block_counts": {}, "gate": {}},

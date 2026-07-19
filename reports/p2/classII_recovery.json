@@ -8,7 +8,7 @@
   ],
   "block_counts": {
     "cluster_id": 103,
-    "resolved_order": 26
+    "resolved_order": 25
   },
   "block_unit_meets_min_n": {
     "cluster_id": true,

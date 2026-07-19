@@ -507,13 +507,16 @@ rule classII_recovery_set:
     """
     input:
         interim=f"{_SPLITS_DIR}/split_assignments.parquet",
+        aligned_i=f"{_SPLITS_ALIGNED_DIR}/class_I.sto",
+        aligned_ii=f"{_SPLITS_ALIGNED_DIR}/class_II.sto",
     output:
         variants="data/processed/synth/classII_recovery.parquet",
         report="reports/p2/classII_recovery.json",
     params:
-        aligned_dir=lambda wildcards, input: os.path.join(
-            os.path.dirname(input.interim), "aligned"
-        ),
+        # Derived from a DECLARED input, so the alignment is a real DAG dependency:
+        # the D9 control silently reports "unmeasured" if the .sto files are absent,
+        # which an undeclared read would have let happen without rebuilding them.
+        aligned_dir=lambda wildcards, input: os.path.dirname(input.aligned_ii),
         seed=20260719,
     log:
         "logs/classII_recovery_set.log",

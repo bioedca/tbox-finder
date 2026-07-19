@@ -280,7 +280,7 @@ tier2n delegating, per the repo's promote-don't-duplicate correctness rule.
 **Outputs.** `data/processed/synth/classII_recovery.parquet` (2,344 rows, sequence-free) ·
 `reports/p2/classII_recovery.json` · committed split table 23,569 → **25,913** rows + regenerated
 provenance (`n_synthetic_variants` split out from `n_external`) · `workflow/rules/data.smk::classII_recovery_set`.
-**Validation.** PASS — block counts **103 clusters / 26 orders**, both ≥ `MIN_REAL_HOMOLOG_N` 20;
+**Validation.** PASS — block counts **103 clusters / 25 orders**, both ≥ `MIN_REAL_HOMOLOG_N` 20;
 control strata `50-70`=1,019 / `<50`=61 / `no_neighbour`=92, the two low-homology strata each
 independently powered. Full-corpus `tests/ml/test_no_leakage.py` **37/37** with
 `TBOX_REQUIRE_NO_LEAKAGE=1`. Suite **1,756 passed / 162 skipped** vs a **1,680 / 162** baseline
@@ -340,3 +340,21 @@ so the 8,303/7,472 folds and the P2-06 selection-val carve are untouched. **Also
 class-II model was only ever run inside Actinobacteria (TaxID:1760, DOI:10.1093/nar/gkaa1060), so the
 observed class-II phylum restriction is an **ascertainment artifact** and can never be cited as a
 distribution baseline — a live confound for the §1/§13 expansion claim.
+
+**CodeRabbit round 1 — 7 findings, all legitimate, all applied.** Two were substantive.
+(1) **`block_counts` counted a null `resolved_order` as a block**, inflating the graded quantity:
+the reported 26 orders were 25 real ones plus the one eligible parent that lacks an order
+assignment. Corrected to **25** here, in both ADRs, and in the report — a number that had already
+been written into a commit message and a PR body. (2) **The test named for the block-vs-variant-count
+distinction did not discriminate**: it emitted 9 variants, so a gate wrongly keyed on
+`n_variants >= 20` would have failed it too, and the sabotage run I credited to it was actually
+being caught by `test_the_gate_grades_at_the_weakest_block_unit`. Now 45 variants inside one block,
+and re-sabotage confirms it fails **in its own name**. That is the second time this step that a guard
+passed while a *different* guard did the work — my sabotage attribution, not just my tests, needs to
+name which assertion fired. Also applied: `stable_key` now rejects the `|` delimiter rather than
+letting `("a|b",)` and `("a","b")` key identically (no committed artifact changes — no record id
+contains `|`); `repo_relative` searches the path's own ancestry before cwd's, so an artifact outside
+the working directory keeps its directory component instead of degrading to a basename;
+`validate_report` is total against a non-mapping root and against non-int block counts / `n_parents`;
+and the Snakemake rule now **declares** the two `.sto` alignment inputs, so the D9 control cannot
+silently report "unmeasured" because an undeclared input was never built. Suite **1,764 / 162**.

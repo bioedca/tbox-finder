@@ -277,11 +277,22 @@ def build_recovery_set(
 
 
 def block_counts(variants: Sequence[RecoveryVariant]) -> dict[str, int]:
-    """Distinct block count per D9 resampling unit — the arm's real N."""
+    """Distinct block count per D9 resampling unit — the arm's real N.
+
+    A parent with **no order assignment contributes no order block**. Counting
+    ``None`` as a distinct order would inflate the very number the gate grades:
+    measured on the real pool at P2-08, exactly one eligible parent lacks
+    ``resolved_order``, and the naive count reported 26 orders where there are 25
+    real ones plus a null. Cluster ids are always assigned, so only the order unit
+    needs the filter — but it is applied by rule, not by trusting that.
+    """
     parents = {v.parent_record_id: v for v in variants}.values()
+    orders = {p.parent_resolved_order for p in parents}
     return {
-        "cluster_id": len({p.parent_cluster_id for p in parents}),
-        "resolved_order": len({p.parent_resolved_order for p in parents}),
+        "cluster_id": len(
+            {p.parent_cluster_id for p in parents if p.parent_cluster_id is not None}
+        ),
+        "resolved_order": len({o for o in orders if o is not None and o == o}),
     }
 
 
@@ -394,6 +405,9 @@ def validate_report(report: Mapping[str, Any]) -> list[str]:
     """
     problems: list[str] = []
 
+    if not isinstance(report, Mapping):
+        return [f"report must be a mapping, got {type(report).__name__}"]
+
     for key in ("n_variants", "n_parents", "min_n", "block_counts", "gate"):
         if key not in report:
             problems.append(f"missing required report block: {key!r}")
@@ -423,8 +437,18 @@ def validate_report(report: Mapping[str, Any]) -> list[str]:
     if problems:
         return problems
 
+    bad_units = [
+        u for u in BLOCK_UNITS if isinstance(blocks[u], bool) or not isinstance(blocks[u], int)
+    ]
+    if bad_units:
+        problems.append(
+            f"block_counts carries a non-int value for {bad_units} — a block count "
+            "that is not an integer cannot be compared against min-N"
+        )
+        return problems
+
     expected_blocks = bool(n_variants) and all(
-        int(blocks[unit]) >= MIN_REAL_HOMOLOG_N for unit in BLOCK_UNITS
+        blocks[unit] >= MIN_REAL_HOMOLOG_N for unit in BLOCK_UNITS
     )
     if _common.bad_bool(gate.get("blocks_meet_min_n"), expected_blocks):
         problems.append(
@@ -453,9 +477,12 @@ def validate_report(report: Mapping[str, Any]) -> list[str]:
             f"{ {k: gate.get(k) for k in clause_keys} } give {expected_overall}"
         )
 
-    if report["n_parents"] > n_variants:
+    n_parents = report["n_parents"]
+    if isinstance(n_parents, bool) or not isinstance(n_parents, int) or n_parents < 0:
+        problems.append(f"n_parents must be a non-negative int, got {n_parents!r}")
+    elif n_parents > n_variants:
         problems.append(
-            f"n_parents ({report['n_parents']}) exceeds n_variants ({n_variants}) — "
+            f"n_parents ({n_parents}) exceeds n_variants ({n_variants}) — "
             "every parent must contribute at least one variant"
         )
 

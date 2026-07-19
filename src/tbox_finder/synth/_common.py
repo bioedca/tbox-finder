@@ -26,6 +26,13 @@ def stable_key(seed: int, *parts: str) -> int:
     varying term came last produced 8 logits within 1.3e-08 of each other, and
     the resulting fixture could not express what its assertions measured.
     """
+    bad = [p for p in parts if "|" in p]
+    if bad:
+        raise ValueError(
+            f"stable_key parts must not contain the '|' delimiter (got {bad!r}): "
+            "the join is not injective across it, so ('a|b',) and ('a','b') would "
+            "key identically"
+        )
     digest = hashlib.shake_256(("|".join((str(seed), *parts))).encode("utf-8")).digest(8)
     return int.from_bytes(digest, "big")
 
@@ -37,12 +44,17 @@ def repo_relative(path: str | Path) -> str:
     record the author's home directory as if it were provenance.
     """
     resolved = Path(path).resolve()
-    for parent in (Path.cwd().resolve(), *Path.cwd().resolve().parents):
+    # Search from the path's own ancestry first, then from cwd's. A path outside
+    # the current working directory's repo (a symlinked or absolute artifact
+    # path) otherwise degraded straight to its basename, silently dropping the
+    # directory component from a committed provenance field.
+    candidates = (*resolved.parents, Path.cwd().resolve(), *Path.cwd().resolve().parents)
+    for parent in candidates:
         if (parent / ".git").exists():
             try:
                 return str(resolved.relative_to(parent))
             except ValueError:
-                break
+                continue
     return resolved.name
 
 
