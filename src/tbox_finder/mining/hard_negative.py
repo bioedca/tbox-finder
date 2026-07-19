@@ -33,6 +33,8 @@ from typing import Any
 
 from tbox_finder.masking import DEFAULT_FLANK_NT, LocusIndex
 from tbox_finder.mining.spare_rule import (
+    MODEL_INDEPENDENT_DISJUNCTS,
+    STATUS_UNAVAILABLE,
     SpareRuleEvidence,
     is_mining_excluded,
     mining_round_readiness,
@@ -70,6 +72,15 @@ class MiningCandidate:
     score: float
     evidence: SpareRuleEvidence = SpareRuleEvidence()
 
+    def __post_init__(self) -> None:
+        # PRD §9.1 names the pools that may be mined. An unrecognised pool would
+        # otherwise flow through classification and appear in ``per_pool`` as if
+        # it were sanctioned — including pools deliberately excluded from mining.
+        if self.pool not in MINEABLE_POOLS:
+            raise HardNegativeMiningError(
+                f"unknown mining pool {self.pool!r}; expected one of {MINEABLE_POOLS}"
+            )
+
     def has_coordinates(self) -> bool:
         return (
             self.accession is not None
@@ -80,7 +91,7 @@ class MiningCandidate:
 
 def classify_candidate(
     candidate: MiningCandidate,
-    mask: LocusIndex | None,
+    mask: LocusIndex,
     *,
     stage2_threshold: float | None = None,
     flank: int = DEFAULT_FLANK_NT,
@@ -91,13 +102,26 @@ def classify_candidate(
     runs, so a candidate that masking could not evaluate never reaches the pool on
     the strength of spare-rule evidence alone.
 
-    ``flank`` defaults to :data:`tbox_finder.masking.DEFAULT_FLANK_NT`, matching the
-    PRD §9.1 "known loci **+ a flank**" rule; passing ``0`` would silently shrink
-    the mask to bare-overlap and let a locus edge through.
+    The mask is **required**, and ``flank`` must be positive. Both were previously
+    optional, which made the two ways of disabling masking indistinguishable from
+    running it: ``mask=None`` skipped the union-prior check entirely and ``flank=0``
+    shrank it to bare overlap, each letting a known T-box locus into the negative
+    pool while the round reported a clean pass. This is the P0 failure the mask was
+    written for (``total_pool_records_masked = 0``), so it is now unrepresentable —
+    a caller that genuinely wants no masking passes an empty
+    :class:`~tbox_finder.masking.LocusIndex` and says so.
     """
+    if mask is None:
+        raise HardNegativeMiningError(
+            "a union-prior LocusIndex is required; pass an empty LocusIndex to mask nothing"
+        )
+    if flank <= 0:
+        raise HardNegativeMiningError(
+            f"flank must be positive (PRD §9.1 masks known loci + a flank); got {flank}"
+        )
     if not candidate.has_coordinates():
         return OUTCOME_UNMASKABLE, "candidate carries no accession/locus coordinates"
-    if mask is not None and mask.is_masked(
+    if mask.is_masked(
         str(candidate.accession),
         int(candidate.locus_start),
         int(candidate.locus_end),
@@ -111,7 +135,7 @@ def classify_candidate(
 
 def mine_round(
     candidates: list[MiningCandidate],
-    mask: LocusIndex | None,
+    mask: LocusIndex,
     backend_availability: dict[str, bool],
     *,
     stage2_threshold: float | None = None,
@@ -122,10 +146,30 @@ def mine_round(
     The readiness gate is checked **first** and raises: a round with no protective
     disjunct available would spare every candidate and emit a report full of
     zeroes that reads exactly like "there was nothing to mine".
+
+    Candidate evidence is then cross-checked against the round's declared backend
+    availability. A candidate claiming a ``passed``/``failed`` verdict for a
+    disjunct whose backend is unavailable this round is a contradiction, and the
+    ``failed`` direction is actively dangerous — it is precisely what turns the
+    fail-closed rule back into a fail-open one, since three ``failed`` verdicts
+    make a candidate minable no matter what ran. Raising here keeps the round's
+    own availability declaration and its per-candidate evidence from disagreeing
+    silently.
     """
     readiness = mining_round_readiness(backend_availability)
     if not readiness["ready"]:
         raise HardNegativeMiningError(f"mining round refused — {readiness['refusal_reason']}")
+
+    for candidate in candidates:
+        for disjunct in MODEL_INDEPENDENT_DISJUNCTS:
+            if backend_availability[disjunct]:
+                continue
+            status = candidate.evidence.status_of(disjunct)
+            if status != STATUS_UNAVAILABLE:
+                raise HardNegativeMiningError(
+                    f"candidate {candidate.candidate_id!r} carries {status!r} evidence for "
+                    f"{disjunct!r}, but that backend is unavailable this round"
+                )
 
     outcomes: dict[str, list[str]] = {
         OUTCOME_MINED: [],

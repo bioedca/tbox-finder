@@ -142,8 +142,17 @@ CANONICAL_ELEMENT_ORDER: tuple[str, ...] = (
 #: plausible" constructs, which is a false-positive sink rather than a probe.
 OBLIGATE_ELEMENTS: tuple[str, ...] = ("Stem_I", "Stem_III", "Antiterminator_Tbox_seq")
 
-#: The joint ablation no known natural T-box exhibits (PMID:31206978). Emitted
-#: only as a labelled negative control via ``allow_forbidden=True``.
+#: The joint ablation no known natural T-box exhibits (PMID:31206978), recorded
+#: as the documented boundary of the construct space.
+#:
+#: There is deliberately **no bypass flag** to emit it. An earlier revision carried
+#: an ``allow_forbidden`` escape hatch on :func:`ablate`; it was unreachable from
+#: :func:`generate`, and it disabled the obligate-element guard for *any* target
+#: rather than only this combination — an unused escape hatch around a safety
+#: guard is worse than no escape hatch, so it was removed rather than narrowed.
+#: Should a negative control ever be wanted, it belongs in an explicitly-named
+#: function that labels its output as a control, not in a keyword on the positive
+#: path.
 FORBIDDEN_JOINT_ABLATION: frozenset[str] = frozenset({"Stem_I_DTM", "Stem_II", "Stem_IIA_B"})
 
 # --------------------------------------------------------------------------- #
@@ -193,10 +202,16 @@ CONTROL_ID_PREFIX = "ctl:"
 #: --cut_ga). ``parent_miss_rate`` is the divergence confound; the two excision
 #: rates are the length confound — note the **random** excision is the more
 #: destructive of the two, which is what invalidated the pair-only construction.
+#:
+#: These are **reference measurements from their own runs**, not the per-run rates
+#: of any later invocation: a report's own arms live under its ``arms`` key and
+#: will differ slightly (different sample, different seed). Kept as fixed
+#: provenance rather than recomputed, so the rule's motivating evidence stays
+#: legible even when a run's own numbers move.
 MEASURED_CONFOUND_BASELINES: dict[str, float] = {
     "parent_miss_rate": 0.276,  # 362/500 detected, n=500, seed 42
     "element_excision_miss_rate": 0.667,  # 200/600 detected, n=600, seed 20260719
-    "random_excision_miss_rate": 0.791,  # 125/599 detected, n=599, seed 20260719
+    "random_excision_miss_rate": 0.788,  # 127/599 detected, n=599, seed 20260719
 }
 
 
@@ -292,7 +307,6 @@ def ablate(
     family: str,
     *,
     sequence_key: str = "FASTA_sequence",
-    allow_forbidden: bool = False,
 ) -> str:
     """Excise ``family``'s elements from the parent sequence by annotated extent.
 
@@ -310,7 +324,7 @@ def ablate(
 
     targets = FAMILY_ABLATED_ELEMENTS[family]
     for element in targets:
-        if element in OBLIGATE_ELEMENTS and not allow_forbidden:
+        if element in OBLIGATE_ELEMENTS:
             raise Tier2NGeneratorError(
                 f"family {family!r} would ablate the obligate element {element!r}"
             )
@@ -371,16 +385,26 @@ def length_matched_control(
             f"n_removed must be in (0, len(sequence)); got {n_removed} for a "
             f"{len(sequence)}-nt parent"
         )
-    element = FAMILY_ABLATED_ELEMENTS[family][0]
-    span = _element_span(parent, element)
-    if span is None:
-        raise Tier2NGeneratorError(f"parent lacks an annotated {element!r} extent")
-    lo, hi = span
+    # Every element the family ablates is excluded, not just the first. Both
+    # current families target exactly one element, so indexing [0] happens to be
+    # correct today — but a multi-element family added later would silently get a
+    # control overlapping the very element it controls for, which reads as a
+    # passing control and admits the variant.
+    spans: list[tuple[int, int]] = []
+    for element in FAMILY_ABLATED_ELEMENTS[family]:
+        span = _element_span(parent, element)
+        if span is None:
+            raise Tier2NGeneratorError(f"parent lacks an annotated {element!r} extent")
+        spans.append(span)
 
-    starts = [s for s in range(0, len(sequence) - n_removed + 1) if s + n_removed <= lo or s >= hi]
+    def _clear(start: int) -> bool:
+        end = start + n_removed
+        return all(end <= lo or start >= hi for lo, hi in spans)
+
+    starts = [s for s in range(0, len(sequence) - n_removed + 1) if _clear(s)]
     if not starts:
         raise Tier2NGeneratorError(
-            f"no {n_removed}-nt window avoids the {element!r} extent in this parent"
+            f"no {n_removed}-nt window avoids every {family!r} target extent in this parent"
         )
     key = _stable_key(seed, "control", family, str(parent.get("record_id", "")))
     start = starts[key % len(starts)]
@@ -569,14 +593,27 @@ def build_report(variants: list[Tier2NVariant], *, seed: int) -> dict[str, Any]:
         "family_citations": {k: list(v) for k, v in FAMILY_CITATIONS.items()},
         "tier2n_probe_min_n": TIER2N_PROBE_MIN_N,
         "probe_set_meets_min_n": meets_min_n,
+        # The natural arm is empty by construction. Carried in the committed
+        # artifact itself, not only in the round decision, so a reader of the JSON
+        # alone cannot mistake a wholly-synthetic probe set for a mixed one.
+        "n_natural": 0,
+        "n_synthetic": n_probe,
+        "probe_set_size": n_probe,
+        "natural_arm_disclosure": (
+            "the natural Tier-2N arm is empty by construction: the corpus is 100% "
+            "CM-derived and so cannot contain a CM-invisible locus; reported at "
+            "N=0 rather than dropped from the accounting"
+        ),
         "eligibility_rule": (
             "probe-eligible iff parent CM-detected AND variant CM-missed AND "
             "length-matched control CM-detected (the triple). The parent leg "
-            "controls the divergence confound (27.6% of unablated corpus records "
-            "are already missed); the control leg controls the excision-length "
-            "confound (random equal-length excision misses 79.1%, MORE than the "
-            "66.7% of real element ablations) — without it the filter measures "
-            "excision, not architecture"
+            "controls the divergence confound (a substantial fraction of unablated "
+            "corpus records are already CM-missed); the control leg controls the "
+            "excision-length confound (random equal-length excision breaks "
+            "detection MORE often than real element ablation) — without it the "
+            "filter measures excision, not architecture. Rates for THIS run are in "
+            "'arms'; 'measured_confound_baselines' are the separate reference "
+            "measurements that motivated the rule and are NOT recomputed here"
         ),
         "measured_confound_baselines": dict(MEASURED_CONFOUND_BASELINES),
         "limitation": (
@@ -603,6 +640,31 @@ REQUIRED_PARENT_COLUMNS: tuple[str, ...] = (
     "term_start",
     "term_end",
 )
+
+
+def _sha256_file(path: str | Path) -> str:
+    """Content digest of a file, streamed."""
+    digest = hashlib.sha256()
+    with Path(path).open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1 << 20), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _repo_relative(path: str | Path) -> str:
+    """``path`` relative to the repo root when it is inside it, else its basename.
+
+    Never returns an absolute path: a committed report that embedded one would
+    record the author's home directory as if it were provenance.
+    """
+    resolved = Path(path).resolve()
+    for parent in (Path.cwd().resolve(), *Path.cwd().resolve().parents):
+        if (parent / ".git").exists():
+            try:
+                return str(resolved.relative_to(parent))
+            except ValueError:
+                break
+    return resolved.name
 
 
 def build_probe_report(
@@ -670,7 +732,11 @@ def build_probe_report(
     report = build_report(classified, seed=seed)
     report["arms"] = arms
     report["n_parents"] = len(parents)
-    report["cm"] = str(cm_path)
+    # Recorded as a repo-relative path plus a content digest, never the absolute
+    # local path: an absolute path leaks the checkout layout and does not identify
+    # the model, whereas the digest pins exactly which CM produced these verdicts.
+    report["cm"] = _repo_relative(cm_path)
+    report["cm_sha256"] = _sha256_file(cm_path)
     return report
 
 

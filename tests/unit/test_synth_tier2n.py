@@ -9,7 +9,7 @@ Guards three failure modes:
   (parent CM-detected, variant CM-missed, length-matched control CM-detected),
   never a count the generator picks; an unmeasured leg must not count as a CM
   miss, and omitting the control arm must not degrade to the confounded pair
-  filter (random equal-length excision misses 79.1 %, MORE than the 66.7 % of real
+  filter (random equal-length excision misses 78.8 %, MORE than the 66.7 % of real
   element ablations — so without the control leg the filter measures excision, not
   architecture);
 * a **degenerate emission** — an "ablated" variant that is actually an unchanged
@@ -23,6 +23,7 @@ from __future__ import annotations
 import pytest
 
 from tbox_finder.power import MIN_REAL_HOMOLOG_N
+from tbox_finder.synth import tier2n
 from tbox_finder.synth.tier2n import (
     FAMILY_ABLATED_ELEMENTS,
     FAMILY_CITATIONS,
@@ -101,10 +102,30 @@ def test_no_family_ablates_an_obligate_element(element: str) -> None:
         assert element not in FAMILY_ABLATED_ELEMENTS[family]
 
 
-def test_ablating_an_obligate_element_is_refused() -> None:
-    parent = _parent("rec000")
-    with pytest.raises(Tier2NGeneratorError):
-        ablate(parent, "STEM_I_DELETION")
+def test_an_unknown_family_is_refused_by_ablate() -> None:
+    with pytest.raises(Tier2NGeneratorError, match="unknown family"):
+        ablate(_parent("rec000"), "STEM_I_DELETION")
+
+
+def test_ablating_an_obligate_element_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Exercise the obligate-element guard itself, not the unknown-family branch.
+
+    An earlier version of this test passed a family name that was simply not
+    registered, so it raised on ``unknown family`` and the obligate-element guard
+    below it was never executed — the test passed while asserting nothing about
+    the invariant in its own name. Registering a fake family that targets Stem I
+    is what actually reaches the guard.
+    """
+    monkeypatch.setitem(tier2n.FAMILY_ABLATED_ELEMENTS, "FAKE_STEM_I_DELETION", ("Stem_I",))
+    with pytest.raises(Tier2NGeneratorError, match="obligate element"):
+        ablate(_parent("rec000"), "FAKE_STEM_I_DELETION")
+
+
+def test_ablate_has_no_bypass_for_the_obligate_guard() -> None:
+    """The removed ``allow_forbidden`` escape hatch must not come back silently."""
+    import inspect
+
+    assert "allow_forbidden" not in inspect.signature(ablate).parameters
 
 
 # --------------------------------------------------------------------------- #

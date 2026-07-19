@@ -31,6 +31,8 @@ from tbox_finder.eval.tier2n_probe import (
     probe_recall,
     round_decision,
 )
+from tbox_finder.infernal import CmsearchHit, detection_map, write_fasta
+from tbox_finder.infernal import build_report as cm_build_report
 from tbox_finder.power import MIN_REAL_HOMOLOG_N
 from tbox_finder.synth.tier2n import FAMILY_STEM_II_PK, Tier2NVariant
 
@@ -189,3 +191,73 @@ def test_out_of_range_recall_is_rejected(bad: float) -> None:
 def test_out_of_range_history_is_rejected() -> None:
     with pytest.raises(Tier2NProbeError):
         round_decision(_probe_set(MIN_REAL_HOMOLOG_N), 0.5, [0.5, 2.0])
+
+
+# --------------------------------------------------------------------------- #
+# Probe-set integrity (CodeRabbit round 1)
+# --------------------------------------------------------------------------- #
+def test_duplicate_ids_across_arms_are_rejected() -> None:
+    """Otherwise ``size`` counts a member that ``probe_recall`` de-duplicates away,
+    so a set could clear min-N on members recall does not recognise."""
+    with pytest.raises(Tier2NProbeError, match="unique"):
+        ProbeSet(natural=("shared",), synthetic=("shared",))
+
+
+def test_duplicate_ids_within_one_arm_are_rejected() -> None:
+    with pytest.raises(Tier2NProbeError, match="unique"):
+        ProbeSet(natural=(), synthetic=("dup", "dup"))
+
+
+def test_an_exact_one_positive_regression_halts_despite_float_error() -> None:
+    """0.95 - 0.90 == 0.04999999999999993 in IEEE754 — a bare ``>=`` misses it.
+
+    This is the exact-threshold regression the halt rule exists to catch, so it
+    must not be decided by float representation.
+    """
+    assert TIER2N_RECALL_DROP_HALT > 0.95 - 0.90  # the trap, pinned explicitly
+    decision = round_decision(_probe_set(MIN_REAL_HOMOLOG_N), 0.90, [0.95])
+    assert decision["decision"] == ROUND_HALT_ROLLBACK
+
+
+# --------------------------------------------------------------------------- #
+# FASTA / tblout round-trip integrity — the fail-open path into the probe set
+# --------------------------------------------------------------------------- #
+def test_a_whitespace_bearing_name_is_refused(tmp_path) -> None:
+    """cmsearch's tblout target column keeps only the first whitespace token.
+
+    A header with a space would therefore never match its own key in
+    ``detection_map``, read as "CM missed it", and manufacture a probe positive.
+    """
+    with pytest.raises(ValueError, match="single token"):
+        write_fasta({"bad name": "ACGU"}, tmp_path / "x.fa")
+
+
+def test_a_whitespace_bearing_sequence_is_refused(tmp_path) -> None:
+    """Embedded whitespace would split one record into several."""
+    with pytest.raises(ValueError, match="whitespace-free"):
+        write_fasta({"ok": "ACGU\nACGU"}, tmp_path / "x.fa")
+
+
+def test_an_empty_name_or_sequence_is_refused(tmp_path) -> None:
+    with pytest.raises(ValueError):
+        write_fasta({"": "ACGU"}, tmp_path / "x.fa")
+    with pytest.raises(ValueError):
+        write_fasta({"ok": "---"}, tmp_path / "x.fa")
+
+
+def test_write_fasta_ungaps_and_uppercases(tmp_path) -> None:
+    path = write_fasta({"r1": "ac-gu"}, tmp_path / "x.fa")
+    assert path.read_text(encoding="utf-8") == ">r1\nACGU\n"
+
+
+def test_detection_map_keys_off_submitted_records_not_the_hit_table() -> None:
+    """A record drawing no hit must be an explicit False, never an absent key."""
+    hits = [CmsearchHit(target="r1", score=100.0, evalue=1e-20)]
+    assert detection_map({"r1": "ACGU", "r2": "ACGU"}, hits) == {"r1": True, "r2": False}
+
+
+def test_caller_metadata_cannot_shadow_a_derived_count() -> None:
+    """Otherwise a report's n_detected could come from the caller, not the hits."""
+    report = cm_build_report({"r1": "ACGU"}, [], n_detected=999, arm="spoof")
+    assert report["n_detected"] == 0
+    assert report["arm"] == "spoof"

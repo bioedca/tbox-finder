@@ -15,8 +15,17 @@ from __future__ import annotations
 
 import pytest
 
-from tbox_finder.masking import spare_rule_excludes_from_mining
-from tbox_finder.mining.hard_negative import MINEABLE_POOLS, RETAINED_LEADER_POOL
+from tbox_finder.masking import LocusIndex, spare_rule_excludes_from_mining
+from tbox_finder.mining.hard_negative import (
+    MINEABLE_POOLS,
+    OUTCOME_MASKED,
+    OUTCOME_MINED,
+    RETAINED_LEADER_POOL,
+    HardNegativeMiningError,
+    MiningCandidate,
+    classify_candidate,
+    mine_round,
+)
 from tbox_finder.mining.spare_rule import (
     MIN_PROTECTIVE_DISJUNCTS_AVAILABLE,
     MODEL_INDEPENDENT_DISJUNCTS,
@@ -181,3 +190,78 @@ def test_the_spare_rule_does_not_exclude_a_leader_decoy_wholesale() -> None:
     spare rule must not blanket-spare the pool.
     """
     assert is_mining_excluded(_evidence()) is False
+
+
+# --------------------------------------------------------------------------- #
+# Mining-round guards (CodeRabbit round 1) — every one is a fail-open direction
+# --------------------------------------------------------------------------- #
+def _candidate(**kw: object) -> MiningCandidate:
+    base: dict = {
+        "candidate_id": "c1",
+        "pool": "structured_rna",
+        "accession": "NC_000001.1",
+        "locus_start": 1_000,
+        "locus_end": 1_200,
+        "score": 0.9,
+        "evidence": _evidence(),
+    }
+    base.update(kw)
+    return MiningCandidate(**base)
+
+
+def test_an_unrecognised_pool_is_refused_at_construction() -> None:
+    with pytest.raises(HardNegativeMiningError, match="unknown mining pool"):
+        _candidate(pool="gc_background")
+
+
+def test_classify_requires_a_mask_rather_than_silently_skipping_it() -> None:
+    """``mask=None`` previously skipped the union-prior check entirely."""
+    with pytest.raises(HardNegativeMiningError, match="LocusIndex is required"):
+        classify_candidate(_candidate(), None)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("bad", [0, -1])
+def test_a_non_positive_flank_is_refused(bad: int) -> None:
+    """PRD §9.1 masks known loci **+ a flank**; flank=0 shrinks it to bare overlap."""
+    with pytest.raises(HardNegativeMiningError, match="flank must be positive"):
+        classify_candidate(_candidate(), LocusIndex({}), flank=bad)
+
+
+def test_an_empty_mask_is_the_explicit_way_to_mask_nothing() -> None:
+    outcome, _ = classify_candidate(_candidate(), LocusIndex({}))
+    assert outcome == OUTCOME_MINED
+
+
+def test_a_masked_candidate_is_not_mined() -> None:
+    mask = LocusIndex.from_records([("NC_000001.1", 1_000, 1_200)])
+    outcome, _ = classify_candidate(_candidate(), mask)
+    assert outcome == OUTCOME_MASKED
+
+
+def test_the_flank_actually_widens_the_mask() -> None:
+    """A candidate just outside the locus must still be masked by the flank."""
+    mask = LocusIndex.from_records([("NC_000001.1", 1_000, 1_200)])
+    near = _candidate(locus_start=1_210, locus_end=1_230)
+    assert classify_candidate(near, mask, flank=50)[0] == OUTCOME_MASKED
+    assert classify_candidate(near, mask, flank=1)[0] == OUTCOME_MINED
+
+
+def test_evidence_contradicting_round_availability_is_refused() -> None:
+    """A 'failed' verdict from a backend that never ran re-opens the fail-closed rule.
+
+    Three ``failed`` verdicts make a candidate minable regardless of what actually
+    executed, so the round's availability declaration and the per-candidate
+    evidence must not be allowed to disagree silently.
+    """
+    availability = dict.fromkeys(MODEL_INDEPENDENT_DISJUNCTS, True)
+    availability["any_helix_rscape"] = False
+    with pytest.raises(HardNegativeMiningError, match="unavailable this round"):
+        mine_round([_candidate()], LocusIndex({}), availability)
+
+
+def test_a_consistent_round_runs_and_mines() -> None:
+    availability = dict.fromkeys(MODEL_INDEPENDENT_DISJUNCTS, True)
+    report = mine_round([_candidate()], LocusIndex({}), availability)
+    assert report["n_mined"] == 1
+    assert report["readiness"]["ready"] is True
+    assert report["leader_pool_retained"] is True

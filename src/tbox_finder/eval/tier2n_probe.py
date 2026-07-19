@@ -59,6 +59,14 @@ TIER2N_PROBE_MIN_N = MIN_REAL_HOMOLOG_N
 #: Frozen: no CLI/config override.
 TIER2N_RECALL_DROP_HALT = 1.0 / MIN_REAL_HOMOLOG_N
 
+#: Tolerance for the halt comparison. Recall values are float ratios ``k/N``, so
+#: a drop that is *exactly* one probe-positive can differ from
+#: :data:`TIER2N_RECALL_DROP_HALT` by a few ulps in either direction. Far smaller
+#: than any real recall difference the probe set can resolve (the finest is
+#: ``1/N``), so it cannot mask a genuine regression — it only stops float
+#: representation from deciding whether the rule fires.
+HALT_COMPARISON_TOL = 1e-9
+
 ROUND_CONTINUE = "continue"
 ROUND_HALT_ROLLBACK = "halt_rollback"
 ROUND_INADMISSIBLE = "inadmissible"
@@ -70,10 +78,24 @@ class Tier2NProbeError(ValueError):
 
 @dataclass(frozen=True)
 class ProbeSet:
-    """The evaluated Tier-2N probe set for a mining round."""
+    """The evaluated Tier-2N probe set for a mining round.
+
+    IDs must be unique **across both arms**. Otherwise :attr:`size` (which counts
+    members) and :func:`probe_recall` (which de-duplicates into a set) would
+    disagree, so a probe set could clear min-N on a count that recall does not
+    recognise — a min-N pass on members that are not there.
+    """
 
     natural: tuple[str, ...]
     synthetic: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        members = list(self.natural) + list(self.synthetic)
+        if len(set(members)) != len(members):
+            duplicates = sorted({m for m in members if members.count(m) > 1})
+            raise Tier2NProbeError(
+                f"probe-set IDs must be unique across both arms; duplicated: {duplicates}"
+            )
 
     @property
     def size(self) -> int:
@@ -134,7 +156,11 @@ def round_decision(
     admissible = probe_set.meets_min_n()
     best_prior = max(recall_history) if recall_history else None
     drop = None if best_prior is None else best_prior - recall_this_round
-    breached = bool(drop is not None and drop >= TIER2N_RECALL_DROP_HALT)
+    # Compared with a tolerance because both operands are float subtractions of
+    # k/N ratios: an exact one-probe-positive regression can land a few ulps
+    # BELOW the threshold (0.95 - 0.90 == 0.04999999999999993 < 0.05) and a bare
+    # ``>=`` would let the very regression this rule exists to catch continue.
+    breached = bool(drop is not None and drop >= TIER2N_RECALL_DROP_HALT - HALT_COMPARISON_TOL)
 
     if not admissible:
         decision = ROUND_INADMISSIBLE

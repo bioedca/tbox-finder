@@ -104,11 +104,28 @@ def parse_tblout(text: str) -> list[CmsearchHit]:
 
 
 def write_fasta(records: dict[str, str], path: str | Path) -> Path:
-    """Write ``{name: sequence}`` to a FASTA file, uppercased and ungapped."""
+    """Write ``{name: sequence}`` to a FASTA file, uppercased and ungapped.
+
+    Names and sequences are validated rather than escaped, because both failure
+    modes are **fail-open toward a larger probe set**. ``cmsearch``'s tblout
+    ``target name`` column holds only the first whitespace-delimited token of a
+    header, so a name containing a space would be looked up in
+    :func:`detection_map` under its full form, never match, and read as
+    "CM missed it". Whitespace inside a sequence would likewise split one record
+    into several. Either would silently manufacture Tier-2N probe positives, so
+    both raise here instead.
+    """
     out = Path(path)
     with out.open("w", encoding="utf-8") as handle:
         for name, sequence in records.items():
-            handle.write(f">{name}\n{sequence.replace('-', '').upper()}\n")
+            if not name or any(char.isspace() for char in name):
+                raise ValueError(f"FASTA record name must be a non-empty single token: {name!r}")
+            cleaned = sequence.replace("-", "").upper()
+            if not cleaned or any(char.isspace() for char in cleaned):
+                raise ValueError(
+                    f"FASTA sequence for {name!r} must be non-empty and whitespace-free"
+                )
+            handle.write(f">{name}\n{cleaned}\n")
     return out
 
 
@@ -164,10 +181,13 @@ def build_report(records: dict[str, str], hits: list[CmsearchHit], **extra: Any)
     detection = detection_map(records, hits)
     n_detected = sum(1 for v in detection.values() if v)
     n_total = len(detection)
+    # ``extra`` is spread FIRST so caller metadata can never shadow a derived
+    # count — a report whose n_detected came from the caller rather than from the
+    # hit table would be a fabricated metric wearing a measured field's name.
     return {
+        **extra,
         "n_submitted": n_total,
         "n_detected": n_detected,
         "n_missed": n_total - n_detected,
         "detected_fraction": (n_detected / n_total) if n_total else None,
-        **extra,
     }

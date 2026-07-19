@@ -22,8 +22,9 @@
       "n_submitted": 599
     }
   },
-  "cm": "/home/bioedca/tbox-phylogeny/tbox-finder/data/external/refs/RF00230.cm",
-  "eligibility_rule": "probe-eligible iff parent CM-detected AND variant CM-missed AND length-matched control CM-detected (the triple). The parent leg controls the divergence confound (27.6% of unablated corpus records are already missed); the control leg controls the excision-length confound (random equal-length excision misses 79.1%, MORE than the 66.7% of real element ablations) \u2014 without it the filter measures excision, not architecture",
+  "cm": "RF00230.cm",
+  "cm_sha256": "082616efe0616479dc9b9f565b5bcab7648d7ea1d629430940319f247af52cea",
+  "eligibility_rule": "probe-eligible iff parent CM-detected AND variant CM-missed AND length-matched control CM-detected (the triple). The parent leg controls the divergence confound (a substantial fraction of unablated corpus records are already CM-missed); the control leg controls the excision-length confound (random equal-length excision breaks detection MORE often than real element ablation) \u2014 without it the filter measures excision, not architecture. Rates for THIS run are in 'arms'; 'measured_confound_baselines' are the separate reference measurements that motivated the rule and are NOT recomputed here",
   "families_validated": [
     "CLASS_II_PLATFORM_SWAP",
     "STEM_II_PK_DELETION"
@@ -47,15 +48,18 @@
   "measured_confound_baselines": {
     "element_excision_miss_rate": 0.667,
     "parent_miss_rate": 0.276,
-    "random_excision_miss_rate": 0.791
+    "random_excision_miss_rate": 0.788
   },
   "n_discarded_ablation_did_not_break_detection": 200,
   "n_discarded_length_confounded": 193,
   "n_discarded_parent_already_cm_missed": 161,
   "n_emitted": 599,
+  "n_natural": 0,
   "n_parents": 300,
   "n_probe_eligible": 45,
+  "n_synthetic": 45,
   "n_unmeasured": 0,
+  "natural_arm_disclosure": "the natural Tier-2N arm is empty by construction: the corpus is 100% CM-derived and so cannot contain a CM-invisible locus; reported at N=0 rather than dropped from the accounting",
   "per_family": {
     "CLASS_II_PLATFORM_SWAP": {
       "emitted": 300,
@@ -69,6 +73,7 @@
     }
   },
   "probe_set_meets_min_n": true,
+  "probe_set_size": 45,
   "seed": 20260719,
   "tier2n_probe_min_n": 20
 }
