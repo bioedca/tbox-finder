@@ -94,6 +94,23 @@
 /reports/p2/sizing_smoke_*.out
 /reports/p2/sizing_smoke_*.err
 
+# P2-06 sweep: the per-point <KEY>.OK success markers and the SLURM array logs are run
+# signals (§9.3 keys on the marker's ABSENCE for a failed point, and the .err files are
+# expected non-empty — trust_remote_code / torchrun / wandb chatter). The 36 per-point
+# <KEY>.json reports ARE committed alongside reports/p2/sweep_selection.json: they are the
+# evidence the promoted config was selected on, and tests/ml/test_sweep_selection.py
+# re-derives the winner from them in CI.
+/reports/p2/sweep/*.OK
+/reports/p2/sweep/slurm_*.out
+/reports/p2/sweep/slurm_*.err
+
+# P2-06 sweep: the per-point <KEY>.OK markers + per-array-task slurm logs are run signals
+# (§9.3 keys on absence-on-failure); the per-point reports/p2/sweep/<KEY>.json ARE the
+# committed sweep deliverable (like the sizing per-point reports).
+/reports/p2/sweep/*.OK
+/reports/p2/sweep/slurm_*.out
+/reports/p2/sweep/slurm_*.err
+
 # ── Snakemake working dir + rule run-logs (never committed) ──
 .snakemake/
 /logs/

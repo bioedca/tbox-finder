@@ -308,3 +308,211 @@ def load_reports(paths: Sequence[str | Path]) -> list[dict[str, Any]]:
         else:
             out.append({"report_path": str(p)})
     return out
+
+
+# ─────────────────────────────────────────────────────────────────────────────────────────
+# P2-06 — the sweep-selection artifact (CLI)
+#
+# `select_best` returns a dict; something has to persist it, and that something must not be
+# a human pasting numbers into a dev-log stanza. The phase-1 exit gate already wrote down
+# what happens when it is: a stanza whose suite counts were "written before they were
+# measured", every one of them wrong. The CLI below is the only sanctioned producer of the
+# numbers P2-06 reports.
+# ─────────────────────────────────────────────────────────────────────────────────────────
+
+#: Where the sweep's per-point reports live, and where the selection artifact is written.
+DEFAULT_SWEEP_DIR = "reports/p2/sweep"
+DEFAULT_OUT = "reports/p2/sweep_selection.json"
+
+#: The env the sweep trained under; hashed into the artifact's provenance.
+ENV_LOCK = "envs/ml-dna.conda-lock.yml"
+
+#: Fields every point must agree on for its score to be comparable to the others'.
+CONSISTENCY_FIELDS = ("git_sha", "env_lock", "seed", "n_eval_records", "n_eval_blocks")
+
+
+def _point_identity(report: Mapping[str, Any]) -> dict[str, Any]:
+    """The run-identity fields of one point — what makes its score comparable to another's."""
+    prov = report.get("provenance")
+    prov = prov if isinstance(prov, Mapping) else {}
+    scope = report.get("eval_scope")
+    scope = scope if isinstance(scope, Mapping) else {}
+    return {
+        "git_sha": prov.get("git_sha"),
+        "env_lock": report.get("env_lock"),
+        "seed": prov.get("seed"),
+        "n_eval_records": scope.get("n_records"),
+        "n_eval_blocks": scope.get("n_blocks"),
+    }
+
+
+def cross_point_consistency(reports: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    """Do these points differ *only* in the axes the sweep swept?
+
+    A ranking is a comparison, and a comparison across points built by **different code**,
+    a **different env**, a **different seed**, or scored on a **different fold** is not one.
+    Nothing else in the pipeline checks this: every point self-validates in isolation, and
+    36 individually-valid reports can still be mutually incomparable.
+
+    Every clause is guarded on the evidence being *present* — an absent field reports as
+    absent (``None``/``False``), never as agreement. A sweep of zero points is **not**
+    consistent ([[clauses-must-guard-emptiness]]: a clause derived from the requested shape
+    rather than the found evidence is vacuously true exactly when the evidence is missing).
+    """
+    observed: dict[str, list[Any]] = {f: [] for f in CONSISTENCY_FIELDS}
+    for r in reports:
+        ident = _point_identity(r)
+        for f in CONSISTENCY_FIELDS:
+            if ident[f] is not None:
+                observed[f].append(ident[f])
+    n = len(list(reports))
+    per_field = {
+        f: {
+            "n_points_carrying": len(vals),
+            "distinct": sorted({str(v) for v in vals}),
+            # Agreement requires: every point carried it, AND they all agree.
+            "agrees": bool(vals) and len(vals) == n and len({str(v) for v in vals}) == 1,
+        }
+        for f, vals in observed.items()
+    }
+    return {
+        "n_points": n,
+        "per_field": per_field,
+        "all_agree": bool(n) and all(v["agrees"] for v in per_field.values()),
+    }
+
+
+def artifact_problems(artifact: Mapping[str, Any], *, expect_points: int) -> list[str]:
+    """Why this selection artifact must not be written. ``[]`` when it may be.
+
+    Fail-closed, and the ``expect_points`` clause is the load-bearing one: a glob that
+    matched 4 of 36 reports produces a summary that is *internally* flawless — clean
+    hygiene, a real winner, zero rejections — and names a winner chosen from a ninth of the
+    evidence. Nothing inside the summary can detect that; only a caller-stated expectation
+    can. So the count is passed in, not defaulted.
+    """
+    problems: list[str] = []
+    sel = artifact.get("selection")
+    if not isinstance(sel, Mapping) or not sel:
+        return ["selection: block missing"]
+
+    n_points = sel.get("n_points")
+    if not isinstance(n_points, int) or isinstance(n_points, bool):
+        problems.append(f"selection.n_points = {n_points!r} is not an int")
+    elif n_points != expect_points:
+        problems.append(
+            f"selection.n_points = {n_points} but {expect_points} were expected — the "
+            "sweep is incomplete, or the glob missed points. A winner chosen from a "
+            "partial grid is not the sweep's winner."
+        )
+    if sel.get("winner") is None:
+        problems.append("selection.winner is None — no promotable point, so nothing to promote")
+    if not _pos_int(sel.get("n_promotable")):
+        problems.append(f"selection.n_promotable = {sel.get('n_promotable')!r}, must be > 0")
+
+    hyg = sel.get("selection_hygiene")
+    if not isinstance(hyg, Mapping) or not hyg:
+        problems.append("selection.selection_hygiene: block missing")
+    else:
+        if not _pos_int(hyg.get("n_points_measured")):
+            problems.append(
+                "selection.selection_hygiene.n_points_measured = "
+                f"{hyg.get('n_points_measured')!r} — no point carried the LOO-holdout "
+                "measurement, so 'no leakage' would be an absence, not a finding"
+            )
+        if hyg.get("all_points_zero_loo_holdout") is not True:
+            problems.append(
+                "selection.selection_hygiene.all_points_zero_loo_holdout is not True — a "
+                "config would be promoted on part of the PRD §12:241 headline population"
+            )
+
+    cons = artifact.get("consistency")
+    if not isinstance(cons, Mapping) or not cons:
+        problems.append("consistency: block missing")
+    elif cons.get("all_agree") is not True:
+        disagreeing = sorted(
+            f
+            for f, v in (cons.get("per_field") or {}).items()
+            if isinstance(v, Mapping) and v.get("agrees") is not True
+        )
+        problems.append(
+            f"consistency.all_agree is not True (fields: {disagreeing or 'unknown'}) — the "
+            "points are not mutually comparable, so ranking them compares runs, not configs"
+        )
+    return problems
+
+
+def build_selection_artifact(
+    report_paths: Sequence[str | Path],
+    *,
+    expect_points: int,
+    repo_root: str | Path | None = None,
+    env_lock: str | Path | None = ENV_LOCK,
+) -> dict[str, Any]:
+    """Select over ``report_paths`` and wrap the result with provenance + consistency.
+
+    Raises ``ValueError`` if the result fails :func:`artifact_problems` — the artifact is
+    validated **before** it is written, never after (the house validate-then-write pattern).
+    """
+    from tbox_finder.provenance import build_provenance
+
+    reports = load_reports(report_paths)
+    selection = select_best(reports)
+    artifact = {
+        "schema_version": "1",
+        "step": "P2-06",
+        "generated_by": "src/tbox_finder/train/select_best.py::main",
+        "selection": selection,
+        "consistency": cross_point_consistency(
+            [r for r in reports if not point_problems(r)],
+        ),
+        "provenance": build_provenance(
+            rule="src/tbox_finder/train/select_best.py :: main",
+            script="src/tbox_finder/train/select_best.py",
+            seed=0,  # the reducer is deterministic; the trained points carry their own seed
+            inputs=sorted(str(p) for p in report_paths),
+            outputs=[],
+            env_lock=env_lock,
+            adr="ADR-0005",
+            repo_root=repo_root,
+        ),
+    }
+    problems = artifact_problems(artifact, expect_points=expect_points)
+    if problems:
+        raise ValueError("sweep selection failed its own validator:\n  " + "\n  ".join(problems))
+    return artifact
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    """``python -m tbox_finder.train.select_best --expect-points 36`` → the artifact."""
+    import argparse
+
+    ap = argparse.ArgumentParser(description="Promote the best P2-06 sweep point.")
+    ap.add_argument("--sweep-dir", default=DEFAULT_SWEEP_DIR)
+    ap.add_argument("--out", default=DEFAULT_OUT)
+    ap.add_argument(
+        "--expect-points",
+        type=int,
+        required=True,
+        help="the grid cardinality this sweep must have produced (no default: a partial "
+        "glob yields an internally-clean summary of the wrong evidence)",
+    )
+    ap.add_argument("--env-lock", default=ENV_LOCK)
+    args = ap.parse_args(argv)
+
+    paths = sorted(Path(args.sweep_dir).glob("*.json"))
+    artifact = build_selection_artifact(
+        paths, expect_points=args.expect_points, env_lock=args.env_lock
+    )
+    out = Path(args.out)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(artifact, indent=2, sort_keys=True, allow_nan=False) + "\n")
+    winner = artifact["selection"]["winner"]
+    print(f"wrote {out}")
+    print(f"winner: {winner['point']}  {SELECTION_STATISTIC}={winner['score']:.4f}")
+    print(f"axes: {winner['axes']}")
+    return 0
+
+
+if __name__ == "__main__":  # pragma: no cover
+    raise SystemExit(main())
