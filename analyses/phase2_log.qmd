@@ -588,3 +588,122 @@ survived my own sabotage discipline because I sabotaged the *implementation* and
 was never wired to it. Sabotaging the code proves a test bites; it does not prove the test is
 connected to the code. **Validation.** CI-exact, all gates armed: **1,788 passed / 162 skipped**,
 zero regressions; ruff + black clean.
+
+## Step P2-10a — 2026-07-20: the Stage-1 scanner — checkpoint loader + pad-aware scan, and the P2-10 split that preceded it
+
+**Inputs.** `data/processed/checkpoints/stage1_production/stage1.pt` (P2-09, sha256 `5e9939c3…`, a bare
+`state_dict` with **no architecture metadata**) · `infer/reconcile.py::reconcile_windows` (the pinned
+ADR-0005 D3 + A3 operator) · `window_dataset::{encode_bases,tile_windows,carve_window,PAD_TOKEN_ID}` ·
+`conf/model/caduceus_stage1.yaml` (`rc_combine=concat`).
+
+**Process.** P2-10 as written was **unexecutable**, and this step opened by measuring that rather than
+working around it. `mining_round_readiness` was executed directly: it returns `ready=false` for an
+all-`False` backend set (*"no model-independent disjunct backend is available; every candidate would be
+spared"*) **and** for a `(b)`-only set (*"relaxed_architecture is False on every Tier-2N locus (ADR-0006
+D9 row 5)"*). P2-07's own stanza had already recorded that the gate "refuses every round **by design
+until P6**" — so P2-10 was sequenced ahead of the P6-01 step supplying its critical-path backend. Five
+further gaps were measured, not inferred: **zero** `torch.load`/`load_state_dict` in `src/` (no scanner
+existed at all); `decoys_v0.parquet`'s `accession`/`locus_start`/`locus_end` are Arrow type `null`, **0
+non-null of 7,008**; `rscape` absent from every `envs/*.yml` and lockfile; no negative-injection or
+warm-start hook in `train_stage1`; and **N, the round count, pinned nowhere** — imp.md's *"round budget
+frozen at the phase gate"* had imported **D3's** phrasing, D14 pins no number, and `"mining"` appears
+**0×** in ADR-0003, so A2's ≤ 90 GPU-h bound never covered mining retrains. User decision (2026-07-20):
+**split and build in place** → P2-10a…e. This stanza is P2-10a.
+
+`src/tbox_finder/infer/scan.py` lands `encode_scan_window` (pad-aware, `PAD_TOKEN_ID`), `scan_window_ids`,
+`scan_encoded_windows`, `scan_sequence`, `load_stage1_checkpoint`, `checkpoint_key_report`.
+
+**Outputs.** `infer/scan.py` · `train_stage1::evaluate_selection_val` delegating · `tests/unit/test_infer_scan.py`
+(18) · `tests/ml/test_scan_checkpoint.py` (14).
+
+**Validation.** **PASS, all four gates.** (1) The committed checkpoint fits the rebuilt segmenter:
+**309 keys, 0 missing / 0 unexpected / 0 shape-mismatch**, `fits=true` — and *both* negative controls
+bite with concrete evidence (`rc_combine=gate` → `head.classifier.weight: checkpoint(8, 512) vs
+model(8, 256)`; `use_crf=True` → 3 missing CRF params). (2) The analytic closed form matches at every
+probed position. (3) Zero-flank geometry holds at both ends of the range. (4) The delegation is
+behaviour-preserving: **69 passed** with `TBOX_REQUIRE_TRAIN_CUDA=1` on real CUDA + the real corpus.
+Like-for-like suite (clean worktree at `082f8c7`, no DVC data, same CI-exact command): **1,773 → 1,791
+passed, 168 → 182 skipped** = **+18 / +14, exactly the additions, zero regressions**. ruff + black clean.
+
+**Decisions.**
+
+**The seam is the loop, not the encoder.** The trainer's tile→forward→reconcile loop was the *only* one
+in the repo, and its own docstring is why it must not be forked: evaluating through the deployed
+operator is what makes "a config selected here is selected under the arithmetic it will be deployed
+under" true, so a second copy in the scanner would let the config *selected* drift from the arithmetic
+*deployed* — precisely the failure that docstring exists to prevent. But the two callers must **not**
+share an encoder: `encode_eval_window` *raises* on an overrun, and that guard is real (a boundary
+invented mid-context is a falsehood, not a contig end), whereas a scanner is handed Rfam decoys of
+~100–200 nt against a 1024-nt window whose ends genuinely *are* ends. Collapsing them into one
+permissive encoder would have deleted a live guard under cover of de-duplication. So: one loop, two
+encoding policies. Mode handling restores the **observed** state rather than a hardcoded one, which is
+what makes the per-record call safe to nest inside the trainer's outer `eval()`.
+
+**Shapes are compared, not just key names — and my first justification for that was false.** I wrote
+that `concat` and `gate` "produce the same key names, so only the head's input width differs", making a
+key-set check vacuously green for the wrong mode. That is **not true**: `RCCombine` registers
+`gate_logit` only in `gate` mode, so the key *sets* differ — and my own negative-control run had already
+printed `missing: rc_combine.gate_logit` on screen while I was writing the opposite. Caught by the
+adversarial review (three independent lenses, same defect). The shape comparison is still right, for a
+different and true reason: the mismatches key names **cannot** catch are the ones that keep the same
+parameter set and change only its extent — a different-`d_model` backbone, or a different class count.
+Those differ solely in shape and would otherwise load as a clean 0/0 fit. The test now pins the
+**measured** counts (`gate` → `head_missing == ['rc_combine.gate_logit']` *and* `n_shape_mismatch == 1`;
+`use_crf=True` → 3 missing `head.crf.*`, 0 reshaped) rather than an assumed story. The loader runs at
+`strict=False` plus an
+explicit non-empty check: per context7 (`/pytorch/pytorch`, serialization notes) `strict=False` **still
+raises on shape mismatch**, so this is the same hard failure as `strict=True` *plus* the key lists that
+make a mismatch diagnosable. `weights_only=True` is the torch ≥ 2.6 default and correct for a pure
+`state_dict`.
+
+**My own test docstring over-claimed, and sabotage is what caught it.** The closed-form test claimed to
+bite on "a pad leak". Sabotage S1 (pad with the `N` id instead of `PAD_TOKEN_ID`) failed three *other*
+tests and left **every parametrisation of the closed form green** — because `scan_window_ids` only ever
+pads out-of-bounds positions and `reconcile_windows` slices those away before any arithmetic. The claim
+was false. It also exposed a real gap: the unit tier has no torch, so it calls `reconcile_windows`
+*directly* and never exercises `scan_sequence`'s own wiring — above all the `seq_len` it passes, the one
+place a pad genuinely could enter. The docstring was corrected to state what is measured, and
+`tests/ml/test_scan_checkpoint.py` was added to drive `scan_sequence` end-to-end with a CPU stub. This is
+the P2-05 lesson recurring one level up: a false blanket claim in one's own test docstring.
+
+**Sabotage log — five on the implementation, one on the delegation, each attributed by name.**
+S1 pad-with-`N` → 3 fail; S2 left-overrun padded on the wrong side → `test_negative_start_pads_on_the_left_not_the_right`;
+S3 all-pad-window refusal removed → `test_window_covering_no_real_position_is_refused`;
+S4 overlap removed from the tiling → `test_window_ids_match_tile_windows_offsets`;
+S5 `starts` off by one → 9 fail incl. 3 of 4 closed-form parametrisations. Separately, reversing the
+`starts` order *inside the promoted loop* turned the **trainer's** `test_the_val_eval_scores_a_perfect_oracle_at_f1_one`
+and `test_a_one_nucleotide_shift_destroys_the_oracle_score` red — which is the evidence that the
+delegation is genuinely live in the trainer's path and not merely importable. Tree restored and verified
+by sha256 after every mutation (the stale-`__pycache__` precedent: `__pycache__` cleared and
+`-p no:cacheprovider` on every run).
+
+**The adversarial review found two defects my own sabotage discipline did not.** Five read-only lenses ×
+independent refutation verifiers: 32 candidate findings, **26 refuted, 6 confirmed** — which collapse to
+**two** distinct defects, each caught by three lenses independently. (1) The `rc_combine` justification
+above. (2) `test_load_refuses_a_checkpoint_that_does_not_fit` was **over-determined**: passing
+`backbone=object()` leaves the rebuilt model with no `backbone.*` parameters, so all **307** backbone
+keys in the real checkpoint land in `unexpected_keys` and the loader raises *regardless* of head
+geometry — making the `use_crf=True` argument inert and leaving the `missing` half of the guard, plus
+the loader's entire **positive** path, untested. Both are the same shape of error as S8 in P2-07: a test
+that passes for a reason other than the one it is named for. Fixed by stripping the `backbone.*` keys
+into a head-only temp checkpoint so each branch fails on its own merits, and by adding the missing
+positive-path test (loads cleanly, comes back in `eval()`, and the *trained* weights are asserted equal
+to the file's — not a freshly initialised head). Verified: dropping the `missing` term from the guard
+now fails `test_load_refuses_each_wrong_geometry_on_its_own_merits[kwargs0-missing]`, the exact
+regression the old test would have shipped green. Tree audited after the review (`git diff` empty) — the
+lenses were read-only, per the standing hazard that review agents can mutate the code under review.
+
+**Disclosed non-delivery.** This is the transport only. Along-sequence locus construction (threshold,
+minimum span, gap-merge — the rest of ADR-0005 D3) is **not** here; `scan_sequence` stops at the
+per-position distribution. No mining round is closer to runnable than it was: P2-10b/c/d/e remain, and
+**P2-10c carries an env-amendment stop and P2-10e an ADR stop for the still-unpinned N**. The tier-2
+checkpoint gate is armed by the artifact's *presence*, so it skips in CI — it was run locally against the
+real `stage1.pt` (sha256 verified against the P2-09 provenance) and its values are recorded above.
+
+**Commit.** `<SHA — reconcile against `git log main` at the P2 exit gate>`
+
+**CodeRabbit r1 — 1 finding, applied.** `scan_encoded_windows` left an empty `window_ids` to
+`torch.cat([])`, which raises "expected a non-empty list of Tensors" — an error naming neither the
+caller's mistake nor this module. Unreachable through `scan_sequence` (`tile_windows` always emits ≥ 1
+window) but the function is public and the trainer calls it directly, so it is now a named refusal with
+a test that bites under sabotage.
