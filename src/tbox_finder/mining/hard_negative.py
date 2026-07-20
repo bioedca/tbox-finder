@@ -1,9 +1,10 @@
 """Collect Stage-1 false positives from the §9.1 pools as hard negatives (P2-07).
 
 PRD §9.1's mined curriculum: sample windows at a moderate ~10:1 seed ratio, then
-**iteratively mine Stage-1 false positives** — from the Rfam structured-RNA pool,
-the 5′UTR/tRNA-adjacent leader pool, and the dinucleotide-shuffle survivors — as
-hard negatives for the next round.
+**iteratively mine Stage-1 false positives** as hard negatives for the next round.
+The pools that can supply such a candidate are :data:`MINEABLE_POOLS` — mining
+needs genomic coordinates the mask can evaluate, which is a stronger requirement
+than being a §9.1 negative (see that constant for what it excludes and why).
 
 Two guards stand between a Stage-1 false positive and the mined pool, in order:
 
@@ -31,6 +32,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from tbox_finder import masking
 from tbox_finder.masking import DEFAULT_FLANK_NT, LocusIndex
 from tbox_finder.mining.spare_rule import (
     MODEL_INDEPENDENT_DISJUNCTS,
@@ -42,7 +44,21 @@ from tbox_finder.mining.spare_rule import (
 )
 
 #: Pools that PRD §9.1 mines Stage-1 false positives from.
-MINEABLE_POOLS: tuple[str, ...] = ("structured_rna", "leader_decoy", "dinuc_shuffled")
+#:
+#: ``dinuc_shuffled`` was removed at P2-10b (ADR-0005 **A6**). Mining a candidate
+#: requires coordinates that are *independent* of the training positives, and a
+#: dinucleotide shuffle's only possible coordinates are the positive it permutes:
+#: carrying them masks 100 % of the pool against its own parents, which turns the
+#: mask-non-vacuity measurement into a tautology, while leaving them null makes
+#: ``refused_no_coordinates`` — the signal that something is *wrong* — the pool's
+#: permanent steady state. It remains a §9.1 training negative; only its
+#: *mineability* is withdrawn, and its parent link is now recorded explicitly as
+#: ``source_record_id``.
+#:
+#: ``genomic_window`` (:mod:`tbox_finder.mining.pool`) replaces it as the
+#: coordinate-bearing substrate. ``gc_background`` is absent for the same reason
+#: it always was: it is emitted i.i.d. at a matched GC and exists in no genome.
+MINEABLE_POOLS: tuple[str, ...] = ("structured_rna", "leader_decoy", "genomic_window")
 
 #: The 5′UTR / tRNA-adjacent leader pool, retained by ADR-0005 D14. Named here so
 #: a test can assert it is *in* :data:`MINEABLE_POOLS` — a regression that dropped
@@ -82,10 +98,20 @@ class MiningCandidate:
             )
 
     def has_coordinates(self) -> bool:
-        return (
-            self.accession is not None
-            and self.locus_start is not None
-            and self.locus_end is not None
+        """True iff all three coordinate fields are present **and not NaN/NA**.
+
+        The ``is not None`` test this replaced was fail-open: a pandas round-trip
+        through a nullable column yields ``NaN``/``pd.NA``, which passes an
+        identity check, reaches :meth:`~tbox_finder.masking.LocusIndex.is_masked`,
+        matches nothing (that method treats a missing accession as unmaskable),
+        and so classifies the candidate ``mined`` rather than
+        ``refused_no_coordinates``. Sharing the mask's own missing test is what
+        keeps the guard and the mask from disagreeing (P2-10b).
+        """
+        return not (
+            masking.is_missing(self.accession)
+            or masking.is_missing(self.locus_start)
+            or masking.is_missing(self.locus_end)
         )
 
 

@@ -1,9 +1,77 @@
 {
+  "accession_namespace": {
+    "dinuc_shuffled": {
+      "n_distinct_accessions": 0,
+      "n_index_accessions": 12041,
+      "n_intersect_as_is": 0,
+      "n_intersect_normalized": 0,
+      "n_with_accession": 0,
+      "namespace_compatible": false,
+      "normalization_recovered": 0
+    },
+    "gc_background": {
+      "n_distinct_accessions": 0,
+      "n_index_accessions": 12041,
+      "n_intersect_as_is": 0,
+      "n_intersect_normalized": 0,
+      "n_with_accession": 0,
+      "namespace_compatible": false,
+      "normalization_recovered": 0
+    },
+    "leader_decoy": {
+      "n_distinct_accessions": 0,
+      "n_index_accessions": 12041,
+      "n_intersect_as_is": 0,
+      "n_intersect_normalized": 0,
+      "n_with_accession": 0,
+      "namespace_compatible": false,
+      "normalization_recovered": 0
+    },
+    "structured_rna": {
+      "n_distinct_accessions": 2750,
+      "n_index_accessions": 12041,
+      "n_intersect_as_is": 0,
+      "n_intersect_normalized": 269,
+      "n_with_accession": 2999,
+      "namespace_compatible": true,
+      "normalization_recovered": 269
+    }
+  },
+  "coordinate_coverage": {
+    "dinuc_shuffled": {
+      "n_masked_at_flank": 0,
+      "n_overlapping_at_flank_0": 0,
+      "n_records": 2000,
+      "n_with_coordinates": 0,
+      "n_without_coordinates": 2000
+    },
+    "gc_background": {
+      "n_masked_at_flank": 0,
+      "n_overlapping_at_flank_0": 0,
+      "n_records": 2000,
+      "n_with_coordinates": 0,
+      "n_without_coordinates": 2000
+    },
+    "leader_decoy": {
+      "n_masked_at_flank": 0,
+      "n_overlapping_at_flank_0": 0,
+      "n_records": 8,
+      "n_with_coordinates": 0,
+      "n_without_coordinates": 8
+    },
+    "structured_rna": {
+      "n_masked_at_flank": 1,
+      "n_overlapping_at_flank_0": 0,
+      "n_records": 3000,
+      "n_with_coordinates": 2999,
+      "n_without_coordinates": 1
+    }
+  },
   "corpus_sha256": "1eb76591d0e481019dd7acf72a439f157fec9f2aeecb8cc5c37ba80a7b062dd2",
   "decoys_digest": "13061e3e5e524ac57c5708fa2496253574b2b05653f5cf19b99dafaa1f64db77",
   "flank_nt": 50,
   "n_records": 7008,
-  "notes": "P0 realisation: gc_background is a seeded 0th-order composition null (no genome panel at P0); coordinate-masking is a no-op on these coordinate-free P0 pools and becomes load-bearing at P2 mined windows; residual = un-maskable union records with no coordinates.",
+  "notes": "gc_background is a seeded 0th-order composition null (no genome panel at P0), so it has no genomic coordinates in principle and is not mineable. dinuc_shuffled's only possible coordinates are its source positives' \u2014 carrying them would mask 100% of the pool against its own parents, so P2-10b removed it from MINEABLE_POOLS (ADR-0005 A6) and records the parent link as source_record_id instead. leader_decoy carries opaque surrogate ids with no recoverable accession (re-sourcing deferred to P2-10b\u2032). structured_rna coordinates are parsed from the Rfam headers as of P2-10b; note n_overlapping_at_flank_0 is reported separately from n_masked_at_flank because masking at a flank measures proximity, not overlap. residual_contamination is the UNION-side denominator (un-maskable union records with no coordinates) and is insensitive to pool maskability \u2014 coordinate_coverage and accession_namespace are the pool-side numbers that can fail.",
   "pool_counts": {
     "dinuc_shuffled": 2000,
     "gc_background": 2000,
@@ -14,7 +82,7 @@
     "dinuc_shuffled": 2000,
     "gc_background": 2000,
     "leader_decoy": 8,
-    "structured_rna": 3000
+    "structured_rna": 2999
   },
   "pools_built": [
     "gc_background",
@@ -27,10 +95,10 @@
       "dinuc_shuffled": 0,
       "gc_background": 0,
       "leader_decoy": 0,
-      "structured_rna": 0
+      "structured_rna": 1
     },
     "residual_contamination_fraction": 0.00012417218543046358,
-    "total_pool_records_masked": 0,
+    "total_pool_records_masked": 1,
     "union_denominator": 24160,
     "union_maskable_with_coords": 24157,
     "union_residual_no_coords": 3

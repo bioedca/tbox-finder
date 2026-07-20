@@ -754,6 +754,67 @@ rule build_decoys:
         "--env-lock {params.env_lock:q} >{log} 2>&1"
 
 
+rule build_mining_pool:
+    """Carve the P2-10b coordinate-bearing mining substrate (ADR-0005 D14 / A6).
+
+    The ADR-0005 D14 mining loop's first guard is the union-prior locus mask, and
+    ``classify_candidate`` refuses any candidate it cannot evaluate. At P0 that was
+    **100%** of every mineable pool: ``gc_background`` is emitted i.i.d. and exists
+    in no genome, ``dinuc_shuffled``'s only coordinates are its source positives'
+    (so carrying them would mask the pool against its own parents — ADR-0005 A6
+    withdraws its mineability), ``leader_decoy``'s ids are opaque surrogates with no
+    recoverable accession, and ``structured_rna`` — whose coordinates P2-10b does
+    recover from the Rfam headers — contains **zero** true overlaps with the union
+    prior, so it cannot demonstrate the mask fires.
+
+    This rule supplies what none of them can: real genomic windows carved from the
+    P2-00 ``flank_context`` regions, each with an exact
+    ``(accession, locus_start, locus_end, strand)`` on a replicon that hosts a known
+    T-box. It also emits **locus-centred designed controls**, which overlap a known
+    locus by construction and must therefore mask at **100%** — the gate that proves
+    the coordinate frame is right rather than merely plausible (the minus-strand
+    frame is reverse-complemented server-side and ``region_stop`` is the *requested*
+    stop, so the naive arithmetic scores 98.35%).
+
+    NOT a fifth PRD §9.1 negative class and NOT annotation-verified 5'UTRs — it is
+    written to its own artifact so the §9.1 pool sizes, the ~10:1 seed ratio, and the
+    committed decoy golden digest are untouched. The true 5'UTR/tRNA-adjacent leader
+    pool needs CDS/tRNA annotation the repo does not have (deferred: P2-10b').
+
+    A **one-time LOCAL** rule kept out of ``rule all`` with no ``input:`` — its inputs
+    are DVC-tracked (P2-00 context, P0-14 union prior, P0-12 corpus). Seeded from
+    ``conf/data/decoys.yaml``. Invoke:
+
+        snakemake --cores 1 --use-conda build_mining_pool
+    """
+    output:
+        pool=f"{_NEG_DIR}/mining_pool_v0.parquet",
+        provenance=f"{_NEG_DIR}/mining_pool_v0.provenance.json",
+        report=f"{_AUDIT_DIR}/mining_pool_report.json",
+    params:
+        context=config.get(
+            "mining_pool_context", "data/interim/flank_context/context_v0.parquet"
+        ),
+        union_prior=config.get("decoys_union_prior", "data/processed/priors/union_prior.parquet"),
+        corpus=config.get("decoys_corpus", "data/processed/master_clean_v0.parquet"),
+        conf="conf/data/decoys.yaml",
+        env_lock="envs/data.conda-lock.yml",
+    log:
+        "logs/build_mining_pool.log",
+    conda:
+        "../../envs/data.yml"
+    shell:
+        "PYTHONHASHSEED=0 python -m tbox_finder.mining.pool "
+        "--context {params.context:q} "
+        "--union-prior {params.union_prior:q} "
+        "--corpus {params.corpus:q} "
+        "--out {output.pool:q} "
+        "--provenance {output.provenance:q} "
+        "--report {output.report:q} "
+        "--config {params.conf:q} "
+        "--env-lock {params.env_lock:q} >{log} 2>&1"
+
+
 rule p2_flank_context:
     """Source real flanking genomic context for the training corpus (P2-00).
 
