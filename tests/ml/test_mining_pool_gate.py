@@ -50,10 +50,19 @@ def _need(*paths: Path) -> None:
     missing = [p for p in paths if not p.is_file()]
     if not missing:
         return
+    tracked_missing = [p for p in missing if p in _TRACKED]
+    if tracked_missing:
+        # Committed files: absence is a broken checkout, never a skip — and this
+        # has to fire even when DVC paths are missing alongside them. With an
+        # ``all(...)`` test a mixed set fell through to the skip branch, so
+        # ``_need(_POOL, _POOL_REPORT)`` would silently skip a checkout that had
+        # lost its committed report (CodeRabbit r1) — the same fail-open shape
+        # this whole change exists to remove.
+        raise AssertionError(
+            "git-tracked audit reports missing: "
+            f"{[str(p.relative_to(_REPO)) for p in tracked_missing]}"
+        )
     names = [str(p.relative_to(_REPO)) for p in missing]
-    if all(p in _TRACKED for p in missing):
-        # Committed files: absence is a broken checkout, never a skip.
-        raise AssertionError(f"git-tracked audit reports missing: {names}")
     message = f"DVC-tracked inputs absent: {names} (dvc pull to run this tier)"
     if _REQUIRE:
         pytest.fail(f"TBOX_REQUIRE_MINING_POOL=1 but {message}")

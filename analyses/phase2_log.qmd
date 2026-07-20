@@ -899,4 +899,11 @@ clauses — kept with a test rather than deleted. The dev-log's earlier `+56` sh
 meaningful. The union-prior liveness check asserts the prior *contributes*, not that any specific
 masking outcome depends on it — measured, no shipped number does.
 
+**CodeRabbit r1 (CLI rung — the GitHub route was rate-limited) — 1 Major, applied.** The new
+committed-file guard used `all(p in _TRACKED for p in missing)`, so a **mixed** missing set fell
+through to the skip branch: `_need(_POOL, _POOL_REPORT)` passes exactly such a set, so a checkout that
+had lost its committed report *and* its DVC parquet would have skipped green rather than raising —
+the same fail-open shape this change exists to remove, reintroduced by the fix for it. Now any missing
+tracked file raises regardless of what else is absent; verified to raise on a mixed set.
+
 **Commit.** `<SHA — reconcile against `git log main` at the P2 exit gate>`
