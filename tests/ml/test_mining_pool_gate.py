@@ -6,10 +6,21 @@ off ``mining_pool_report.json`` alone would only check that the builder wrote th
 numbers it computed; these tests **re-derive** the load-bearing clauses from the
 real artifacts so a report that disagrees with the data cannot pass.
 
-Skips (green) when the DVC-tracked inputs are absent — but not silently: the
-availability check is a single fixture, and ``TBOX_REQUIRE_MINING_POOL=1`` turns
-a skip into a failure so a CI/cluster checkout that quietly lost the data cannot
-report this tier as covered.
+Two arming vars, because the clauses have two different input tiers:
+
+* the clauses reading only the **git-tracked** audit JSONs need no arming var at
+  all: a missing committed file is a broken checkout, so they raise rather than
+  skip. That is strictly stronger than a var, and it cannot rot into an unarmed
+  ``TBOX_REQUIRE_*`` that silently skips green.
+* ``TBOX_REQUIRE_MINING_POOL`` — the clauses re-deriving from the **DVC-tracked**
+  parquets. CI has no ``dvc pull``, so this is the CLAUDE.md §8.5 step-local gate
+  and is deliberately **not** armed in ``ci.yml``; run it locally after any change
+  to the decoy/masking/context pipeline.
+
+Splitting them is the point: a single var covering both meant the whole file
+skipped green whenever the parquets were absent, which is the default state in
+CI, on a fresh cluster checkout, and on any un-``dvc pull``-ed laptop — 6 of the
+9 gate clauses never executed and nothing said so (P2-10b review finding).
 """
 
 from __future__ import annotations
@@ -30,16 +41,23 @@ _POOL_REPORT = _REPO / "data/processed/audits/mining_pool_report.json"
 _DECOY_REPORT = _REPO / "data/processed/audits/decoys_report.json"
 
 _REQUIRE = os.environ.get("TBOX_REQUIRE_MINING_POOL") == "1"
+#: The audit JSONs are committed to git, so they are present in any checkout.
+_TRACKED = {_POOL_REPORT, _DECOY_REPORT}
 
 
 def _need(*paths: Path) -> None:
     pytest.importorskip("pandas")
-    missing = [str(p.relative_to(_REPO)) for p in paths if not p.is_file()]
-    if missing:
-        message = f"DVC-tracked inputs absent: {missing} (dvc pull to run this tier)"
-        if _REQUIRE:
-            pytest.fail(f"TBOX_REQUIRE_MINING_POOL=1 but {message}")
-        pytest.skip(message)
+    missing = [p for p in paths if not p.is_file()]
+    if not missing:
+        return
+    names = [str(p.relative_to(_REPO)) for p in missing]
+    if all(p in _TRACKED for p in missing):
+        # Committed files: absence is a broken checkout, never a skip.
+        raise AssertionError(f"git-tracked audit reports missing: {names}")
+    message = f"DVC-tracked inputs absent: {names} (dvc pull to run this tier)"
+    if _REQUIRE:
+        pytest.fail(f"TBOX_REQUIRE_MINING_POOL=1 but {message}")
+    pytest.skip(message)
 
 
 @pytest.fixture(scope="module")
@@ -108,9 +126,12 @@ def test_the_wrong_coordinate_frame_would_fail_this_gate(index) -> None:
         lo = row.region_start + row.locus_offset
         if not index.is_masked(row.accession, lo, lo + row.locus_length - 1, flank=50):
             wrong += 1
-    assert wrong > 0, (
-        "the naive forward-only frame masks everything too — this control cannot "
-        "discriminate the frame and must not be relied on"
+    # A threshold of 1 would accept a state in which the control has essentially
+    # no power: only 386 of 23,532 rows (1.64 %) distinguish the naive frame, so a
+    # 500-row sample contains ~5 of them. Pin the measured margin instead.
+    assert wrong >= 300, (
+        f"only {wrong}/{len(ok)} rows discriminate the naive forward-only frame "
+        "(was 386) — the flank-window control has lost its power"
     )
 
 
@@ -259,3 +280,152 @@ def test_every_mining_pool_record_is_classifiable_rather_than_refused(index) -> 
         if classify_candidate(candidate, index)[0] == OUTCOME_UNMASKABLE:
             refused += 1
     assert refused == 0, f"{refused}/{len(df)} substrate records still refused for lack of coords"
+
+
+# --------------------------------------------------------------------------- #
+# The union prior must actually contribute — the step's headline guard
+# --------------------------------------------------------------------------- #
+def test_the_union_prior_contributes_loci_beyond_the_corpus_positives() -> None:
+    """Every designed control masks against ``own_loci`` alone, so it cannot see this.
+
+    Measured: masking from union-only, own-only, and both gives bit-identical
+    counts (control 500/500, natural 85/46,091). A dead union prior would leave
+    every gate clause green and the report still printing a 24,160 denominator,
+    silently degrading ADR-0005 D14's first guard to own-positives-only. The
+    union prior's *distinct contribution* therefore has to be asserted directly.
+    """
+    _need(_UNION, _CORPUS)
+    from tbox_finder import masking
+
+    union_loci, n_total, n_maskable = masking.load_union_loci(_UNION)
+    own_loci = masking.load_own_positive_loci(_CORPUS)
+    assert union_loci, "union prior yielded 0 loci — the mask would be a no-op"
+    assert own_loci, "corpus yielded 0 own-positive loci"
+    # The denominator the report publishes must equal the loci actually loaded,
+    # or a partial load reads as a healthy full one.
+    assert len(union_loci) == n_maskable
+    assert n_maskable <= n_total
+
+    union_keys = {masking.normalize_accession(a) for a, _, _ in union_loci}
+    own_keys = {masking.normalize_accession(a) for a, _, _ in own_loci}
+    union_only = union_keys - own_keys
+    assert len(union_only) >= 400, (
+        f"only {len(union_only)} accessions are contributed by the union prior alone "
+        "(was 414) — it has stopped adding reach beyond the training corpus"
+    )
+    # Those accessions must be addressable in an index built from the union prior.
+    union_index = masking.LocusIndex.from_records(union_loci)
+    assert union_only <= union_index.accession_keys
+
+
+def test_the_report_records_the_loci_actually_loaded_not_only_the_denominator() -> None:
+    """``union_denominator`` comes from a row count and stays healthy on a dead load."""
+    _need(_POOL_REPORT)
+    report = json.loads(_POOL_REPORT.read_text())
+    assert report["n_union_loci_loaded"] > 0
+    assert report["n_own_positive_loci_loaded"] > 0
+    assert report["n_union_loci_loaded"] == report["union_maskable_with_coords"]
+
+
+# --------------------------------------------------------------------------- #
+# Exact frame identity + the control contract
+# --------------------------------------------------------------------------- #
+def test_every_control_window_reproduces_its_known_interval_exactly(index) -> None:
+    """Zero-tolerance frame check — overlap alone tolerates ±165 nt.
+
+    23,532/23,532 holds on the real data, and a ±1 nt shift takes it to 0, so
+    every control discriminates instead of only the ~1.6 % a shift pushes clear.
+    """
+    _need(_CONTEXT)
+    import pandas as pd
+
+    from tbox_finder.mining import pool as mining_pool
+
+    rows = pd.read_parquet(_CONTEXT).to_dict("records")
+    controls = [
+        w
+        for w in (
+            mining_pool.carve_window(r, mining_pool.SIDE_LOCUS_CONTROL, window_nt=300, margin_nt=50)
+            for r in rows
+        )
+        if w is not None
+    ]
+    inexact = [
+        c
+        for c in controls
+        if not index.matches_interval_exactly(c["accession"], c["locus_start"], c["locus_end"])
+    ]
+    assert not inexact, f"{len(inexact)}/{len(controls)} controls did not reproduce their interval"
+    # The check has teeth: a one-nucleotide shift must break all of them.
+    still = sum(
+        1
+        for c in controls
+        if index.matches_interval_exactly(c["accession"], c["locus_start"] + 1, c["locus_end"] + 1)
+    )
+    assert still == 0, f"{still} controls survive a +1 nt shift — exact match is not exact"
+
+
+def test_the_shipped_gate_carved_every_control_it_requested() -> None:
+    _need(_POOL_REPORT)
+    gate = json.loads(_POOL_REPORT.read_text())["control_gate"]
+    assert gate["n_controls_requested"] is not None
+    assert gate["n_control_windows"] == gate["n_controls_requested"]
+    assert gate["n_control_exact_interval_match"] == gate["n_control_windows"]
+    assert gate["clauses"]["all_controls_exact"] is True
+    assert gate["clauses"]["all_requested_controls_carved"] is True
+
+
+# --------------------------------------------------------------------------- #
+# Strand frames: the sequence and the coordinates are deliberately different
+# --------------------------------------------------------------------------- #
+def test_a_control_window_carries_its_locus_sequence_in_element_orientation() -> None:
+    """``sequence`` is element-oriented; ``locus_start``/``end`` are forward-genome.
+
+    Both frames are intentional but they differ on the minus strand, and nothing
+    checked it: reverse-complementing every minus-strand slice left the whole
+    suite green. A control window is the locus, so its sequence must equal the
+    corpus record verbatim on both strands.
+    """
+    _need(_CONTEXT, _CORPUS)
+    import pandas as pd
+
+    from tbox_finder import ingest
+    from tbox_finder.mining import pool as mining_pool
+
+    corpus = pd.read_parquet(_CORPUS)
+    by_id = dict(zip(ingest.compute_record_hashes(corpus), corpus["FASTA_sequence"], strict=True))
+    rows = pd.read_parquet(_CONTEXT).to_dict("records")
+    checked = {1: 0, 2: 0}
+    for row in rows:
+        window = mining_pool.carve_window(
+            row, mining_pool.SIDE_LOCUS_CONTROL, window_nt=300, margin_nt=50
+        )
+        if window is None or window["source_record_id"] not in by_id:
+            continue
+        assert (
+            window["sequence"] == str(by_id[window["source_record_id"]]).upper()
+        ), f"{window['candidate_id']} (strand {window['strand']}) does not match its corpus record"
+        checked[window["strand"]] += 1
+    assert checked[1] > 1_000 and checked[2] > 1_000, f"strand coverage too thin: {checked}"
+
+
+def test_every_source_record_id_resolves_to_a_real_corpus_record() -> None:
+    """The dinuc parent link is content-addressed; a narrowed corpus read breaks it silently.
+
+    Reading only the 3 columns the generators need changes the record hash, which
+    re-points all 2,000 links while leaving them non-null and the golden digest
+    untouched.
+    """
+    _need(_DECOYS, _CORPUS)
+    import pandas as pd
+
+    from tbox_finder import ingest
+
+    corpus = pd.read_parquet(_CORPUS)
+    valid = set(ingest.compute_record_hashes(corpus))
+    decoys = pd.read_parquet(_DECOYS, columns=["pool", "source_record_id"])
+    linked = decoys[decoys["source_record_id"].notna()]
+    assert len(linked) > 0, "no decoy carries a parent link — P2-10b regressed"
+    assert set(linked["pool"]) == {"dinuc_shuffled"}
+    unknown = set(linked["source_record_id"]) - valid
+    assert not unknown, f"{len(unknown)} source_record_ids resolve to no corpus record"

@@ -104,7 +104,7 @@ def test_an_unparseable_header_returns_none_never_a_guess(header: str) -> None:
 # Accession-namespace normalisation — the measured silent-no-op
 # --------------------------------------------------------------------------- #
 def test_a_versioned_query_masks_against_an_unversioned_index() -> None:
-    """The measured P2-10b defect: 0 of 2,751 Rfam accessions intersected as-is.
+    """The measured P2-10b defect: 0 of 2,750 coordinate-bearing Rfam accessions intersected as-is.
 
     The union prior stores accessions unversioned and every external coordinate
     source stores them versioned, so without normalisation this mask never fires
@@ -263,15 +263,49 @@ def test_a_flank_shorter_than_window_plus_margin_yields_no_window() -> None:
     )
 
 
-def test_an_unanchored_row_yields_no_window() -> None:
-    """Non-``ok`` rows carry sentinel offsets, not coordinates."""
-    for status in ("multi_hit", "unavailable", "bad_name", "not_found"):
-        assert (
-            mining_pool.carve_window(
-                _context_row(status=status, locus_offset=-1), "lead", window_nt=300, margin_nt=50
-            )
-            is None
-        )
+@pytest.mark.parametrize("status", ["multi_hit", "unavailable", "bad_name", "not_found"])
+def test_an_unanchored_row_yields_no_window(status: str) -> None:
+    """Non-``ok`` rows carry sentinel offsets, not coordinates.
+
+    The geometry is deliberately **valid** here so the status check is the sole
+    discriminator. An earlier form also passed ``locus_offset=-1``, tripping the
+    status guard and the sentinel guard at once — it stayed green under removal of
+    either guard alone and only reddened when both were removed, i.e. it passed
+    under the wrong implementation. The ml tier cannot cover this either: every
+    real non-``ok`` row has an empty ``context_seq``, so ``region_len <= 0``
+    refuses it whatever the status guard does.
+    """
+    assert (
+        mining_pool.carve_window(_context_row(status=status), "lead", window_nt=300, margin_nt=50)
+        is None
+    )
+
+
+def test_a_sentinel_locus_offset_yields_no_window() -> None:
+    """The other guard, on its own: an anchored-looking row with a sentinel offset."""
+    assert (
+        mining_pool.carve_window(_context_row(locus_offset=-1), "lead", window_nt=300, margin_nt=50)
+        is None
+    )
+
+
+def test_the_fixture_itself_carves_a_window_so_the_guards_are_the_discriminator() -> None:
+    """Without this, both tests above could pass because the fixture never carves."""
+    assert mining_pool.carve_window(_context_row(), "lead", window_nt=300, margin_nt=50) is not None
+
+
+@pytest.mark.parametrize("bad", [None, float("nan"), "", "   "])
+def test_a_missing_or_blank_accession_yields_no_window(bad: object) -> None:
+    """``str(None)`` is ``"None"`` — a non-missing string that every guard accepts.
+
+    Laundering a null this way would put a window carrying a coordinate that
+    addresses no replicon into a MINEABLE pool, where it classifies as *minable*
+    rather than refused.
+    """
+    assert (
+        mining_pool.carve_window(_context_row(accession=bad), "lead", window_nt=300, margin_nt=50)
+        is None
+    )
 
 
 def test_carve_pool_tags_controls_separately_from_the_natural_windows() -> None:
@@ -293,6 +327,32 @@ def test_carve_pool_is_deterministic_under_a_fixed_seed() -> None:
     ]
 
 
+def test_the_control_draw_actually_depends_on_the_seed() -> None:
+    """Determinism alone is satisfied by ignoring the seed entirely.
+
+    Comparing two same-seed calls passes under ``anchored[:n]`` — and under a
+    hardcoded RNG key — so the ``seed`` stamped into the provenance would be
+    backed by no assertion at all (CLAUDE.md §8.3).
+    """
+    rows = [_context_row(record_id=f"rec{i}") for i in range(10)]
+    kw = dict(window_nt=300, margin_nt=50, n_controls=4)
+    ids = lambda recs: [r["candidate_id"] for r in recs if r["is_designed_control"]]  # noqa: E731
+    assert ids(mining_pool.carve_pool(rows, seed=42, **kw)) != ids(
+        mining_pool.carve_pool(rows, seed=43, **kw)
+    )
+
+
+def test_the_control_draw_is_not_a_head_slice() -> None:
+    """A seeded sample must not coincide with taking the first N rows."""
+    rows = [_context_row(record_id=f"rec{i}") for i in range(10)]
+    picked = [
+        r["candidate_id"]
+        for r in mining_pool.carve_pool(rows, seed=42, window_nt=300, margin_nt=50, n_controls=4)
+        if r["is_designed_control"]
+    ]
+    assert picked != [f"rec{i}:locus_control" for i in range(4)]
+
+
 # --------------------------------------------------------------------------- #
 # The non-vacuity gate
 # --------------------------------------------------------------------------- #
@@ -302,12 +362,17 @@ def _summary(**kw: object) -> dict:
             "n_records": 10,
             "n_masked_at_flank": 10,
             "n_overlapping_at_flank_0": 10,
+            "n_exact_interval_match": 10,
         },
         "natural": {"n_records": 100, "n_masked_at_flank": 1},
         "accession_namespace": {"namespace_compatible": True},
     }
     base.update(kw)
     return base
+
+
+def _gate(**kw: object) -> dict:
+    return mining_pool.control_gate(_summary(**kw), n_controls_requested=10)
 
 
 # --------------------------------------------------------------------------- #
@@ -362,23 +427,22 @@ def test_mask_pool_on_an_empty_pool_reports_zero_not_a_passing_fraction() -> Non
     summary = mining_pool.mask_pool([], index, flank=50)
     assert summary["designed_control"]["n_records"] == 0
     assert summary["natural"]["n_records"] == 0
-    assert mining_pool.control_gate(summary)["overall_pass"] is False
+    assert mining_pool.control_gate(summary, n_controls_requested=0)["overall_pass"] is False
 
 
 def test_the_gate_passes_when_every_control_masks() -> None:
-    assert mining_pool.control_gate(_summary())["overall_pass"] is True
+    assert _gate()["overall_pass"] is True
 
 
 def test_one_unmasked_control_fails_the_gate() -> None:
     """Controls overlap a known locus by construction: 9/10 is a frame defect."""
-    gate = mining_pool.control_gate(
-        _summary(
-            designed_control={
-                "n_records": 10,
-                "n_masked_at_flank": 9,
-                "n_overlapping_at_flank_0": 9,
-            }
-        )
+    gate = _gate(
+        designed_control={
+            "n_records": 10,
+            "n_masked_at_flank": 9,
+            "n_overlapping_at_flank_0": 9,
+            "n_exact_interval_match": 9,
+        }
     )
     assert gate["overall_pass"] is False
     assert gate["clauses"]["all_controls_masked"] is False
@@ -391,14 +455,13 @@ def test_a_control_that_only_masks_within_the_flank_fails_the_gate() -> None:
     flank and so scores a perfect ``n_masked_at_flank``. Gating on the flank count
     alone would pass it, with the refuting number sitting unread in the same dict.
     """
-    gate = mining_pool.control_gate(
-        _summary(
-            designed_control={
-                "n_records": 10,
-                "n_masked_at_flank": 10,
-                "n_overlapping_at_flank_0": 0,
-            }
-        )
+    gate = _gate(
+        designed_control={
+            "n_records": 10,
+            "n_masked_at_flank": 10,
+            "n_overlapping_at_flank_0": 0,
+            "n_exact_interval_match": 0,
+        }
     )
     assert gate["overall_pass"] is False
     assert gate["clauses"]["all_controls_masked"] is True
@@ -407,7 +470,7 @@ def test_a_control_that_only_masks_within_the_flank_fails_the_gate() -> None:
 
 def test_a_zero_natural_rate_does_not_fail_the_gate() -> None:
     """No natural contamination is a legitimate result; a dead control is not."""
-    gate = mining_pool.control_gate(_summary(natural={"n_records": 100, "n_masked_at_flank": 0}))
+    gate = _gate(natural={"n_records": 100, "n_masked_at_flank": 0})
     assert gate["overall_pass"] is True
 
 
@@ -431,7 +494,7 @@ def test_an_absent_or_empty_measurement_fails_rather_than_passing_vacuously(
     missing: dict,
 ) -> None:
     """0 == 0 makes ``all_controls_masked`` TRUE exactly when no control ran."""
-    assert mining_pool.control_gate(_summary(**missing))["overall_pass"] is False
+    assert _gate(**missing)["overall_pass"] is False
 
 
 def test_the_gate_is_total_on_a_completely_empty_summary() -> None:
@@ -526,3 +589,137 @@ def test_a_versioned_accession_masks_through_the_full_classify_path() -> None:
         evidence=evidence,
     )
     assert classify_candidate(candidate, index)[0] == OUTCOME_MASKED
+
+
+def test_a_control_that_overlaps_but_does_not_reproduce_its_interval_fails() -> None:
+    """The binding clause: overlap tolerates a shift of up to the locus length.
+
+    Measured on the real pool, uniform shifts through ±160 nt kept 500/500
+    controls both masked and overlapping while the reported natural contamination
+    moved 0.184 % → 0.473 %. Exact reproduction has zero tolerance.
+    """
+    gate = _gate(
+        designed_control={
+            "n_records": 10,
+            "n_masked_at_flank": 10,
+            "n_overlapping_at_flank_0": 10,
+            "n_exact_interval_match": 9,
+        }
+    )
+    assert gate["overall_pass"] is False
+    assert gate["clauses"]["all_controls_overlap"] is True
+    assert gate["clauses"]["all_controls_exact"] is False
+
+
+def test_a_partial_control_draw_fails_rather_than_grading_the_survivors() -> None:
+    """``n_controls`` is a contract, not a request.
+
+    ``carve_pool`` drops any row whose geometry does not fit, so 8 requested → 2
+    emitted previously graded green on the 2 with the shortfall recorded nowhere.
+    """
+    gate = mining_pool.control_gate(_summary(), n_controls_requested=25)
+    assert gate["overall_pass"] is False
+    assert gate["clauses"]["all_requested_controls_carved"] is False
+    assert gate["n_controls_requested"] == 25
+    assert gate["n_control_windows"] == 10
+
+
+def test_an_unstated_control_request_is_false_not_absent() -> None:
+    """Omitting the request must not make the clause vacuously true."""
+    gate = mining_pool.control_gate(_summary())
+    assert gate["clauses"]["all_requested_controls_carved"] is False
+    assert gate["overall_pass"] is False
+
+
+def test_controls_present_is_false_when_the_control_block_is_missing() -> None:
+    """The clause is redundant with the others, but a dead clause is untestable."""
+    gate = mining_pool.control_gate(_summary(designed_control={}), n_controls_requested=0)
+    assert gate["clauses"]["controls_present"] is False
+
+
+def test_exact_interval_match_is_stricter_than_overlap() -> None:
+    """Independent closed form for the primitive the gate now rests on."""
+    index = masking.LocusIndex.from_records([("CP001598", 1_000, 1_200)])
+    assert index.matches_interval_exactly("CP001598.1", 1_000, 1_200) is True
+    assert index.matches_interval_exactly("CP001598.1", 1_200, 1_000) is True  # strand folded
+    for shifted in ((1_001, 1_201), (999, 1_199), (1_000, 1_201)):
+        assert index.is_masked("CP001598.1", *shifted, flank=0) is True
+        assert index.matches_interval_exactly("CP001598.1", *shifted) is False
+    assert index.matches_interval_exactly(None, 1_000, 1_200) is False
+    assert index.matches_interval_exactly("XX999999", 1_000, 1_200) is False
+
+
+def test_exact_match_uses_source_intervals_not_the_merged_spans() -> None:
+    """Merging is lossy: two adjacent loci collapse and neither survives verbatim.
+
+    Measured: 769 of 23,532 locus-centred windows fail an exact match against the
+    merged spans and all 23,532 match against the source intervals.
+    """
+    index = masking.LocusIndex.from_records([("CP001598", 100, 200), ("CP001598", 201, 300)])
+    assert index.n_intervals == 1  # merged into [100, 300]
+    assert index.matches_interval_exactly("CP001598", 100, 200) is True
+    assert index.matches_interval_exactly("CP001598", 201, 300) is True
+    assert index.matches_interval_exactly("CP001598", 100, 300) is False
+
+
+def test_the_namespace_report_publishes_a_normalised_denominator() -> None:
+    """Comparing a normalised intersection to a raw count reads as a false shortfall."""
+    index = masking.LocusIndex.from_records([("CP001598", 100, 200)])
+    report = masking.accession_namespace_report(["CP001598.1", "CP001598.2"], index)
+    assert report["n_distinct_accessions"] == 2  # raw
+    assert report["n_distinct_normalized"] == 1  # the true denominator
+    assert report["n_intersect_normalized"] == 1
+    assert report["n_unaddressable_normalized"] == 0
+
+
+def test_a_dinuc_decoy_records_the_parent_it_permutes() -> None:
+    """ADR-0005 A6's leakage-adjacent link; untested on either leg before now."""
+    from tbox_finder.decoys import POOL_DINUC, build_corpus_pools
+
+    ids = [f"sha{i}" for i in range(4)]
+    records = build_corpus_pools(
+        [0.5] * 4,
+        [20] * 4,
+        ["ACGTACGTACGTACGTACGT"] * 4,
+        seed=42,
+        n_gc=2,
+        n_dinuc_sources=4,
+        dinuc_per_source=2,
+        record_ids=ids,
+    )
+    dinuc = [r for r in records if r["pool"] == POOL_DINUC]
+    assert len(dinuc) == 8
+    for r in dinuc:
+        parent_index = int(r["decoy_id"].split("_")[1])
+        assert r["source_record_id"] == ids[parent_index]
+
+
+def test_omitting_record_ids_leaves_the_parent_link_null_rather_than_guessed() -> None:
+    from tbox_finder.decoys import POOL_DINUC, build_corpus_pools
+
+    records = build_corpus_pools(
+        [0.5] * 4,
+        [20] * 4,
+        ["ACGTACGTACGTACGTACGT"] * 4,
+        seed=42,
+        n_gc=2,
+        n_dinuc_sources=4,
+        dinuc_per_source=1,
+    )
+    assert all(r["source_record_id"] is None for r in records if r["pool"] == POOL_DINUC)
+
+
+def test_mismatched_record_ids_are_refused_rather_than_silently_misaligned() -> None:
+    from tbox_finder.decoys import build_corpus_pools
+
+    with pytest.raises(ValueError, match="record_ids"):
+        build_corpus_pools(
+            [0.5] * 4,
+            [20] * 4,
+            ["ACGTACGTACGTACGTACGT"] * 4,
+            seed=42,
+            n_gc=2,
+            n_dinuc_sources=4,
+            dinuc_per_source=1,
+            record_ids=["only-one"],
+        )

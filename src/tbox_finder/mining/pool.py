@@ -110,6 +110,15 @@ def carve_window(
     """
     if str(row.get("status")) != CONTEXT_STATUS_OK:
         return None
+    # Refuse a missing/blank accession rather than letting str() launder it. A
+    # None/NaN/pd.NA accession stringifies to "None"/"nan"/"<NA>", none of which
+    # masking.is_missing recognises, so the window would reach the mask carrying a
+    # coordinate that addresses no replicon and be classified *minable* instead of
+    # refused. Unreachable today (the only producer sets "" on the bad_name path,
+    # which the status guard above already rejects) — but that guard is one
+    # refactor away and this is the fail-open direction.
+    if masking.is_missing(row.get("accession")) or not str(row.get("accession", "")).strip():
+        return None
     seq = str(row.get("context_seq") or "")
     region_len = len(seq)
     locus_offset = int(row["locus_offset"])
@@ -233,10 +242,16 @@ def mask_pool(
     ):
         n_masked = sum(1 for r in subset if window_is_masked(r, index, flank=flank))
         n_overlap = sum(1 for r in subset if window_is_masked(r, index, flank=0))
+        n_exact = sum(
+            1
+            for r in subset
+            if index.matches_interval_exactly(r["accession"], r["locus_start"], r["locus_end"])
+        )
         out[group] = {
             "n_records": len(subset),
             "n_masked_at_flank": n_masked,
             "n_overlapping_at_flank_0": n_overlap,
+            "n_exact_interval_match": n_exact,
             "masked_fraction": (n_masked / len(subset)) if subset else 0.0,
         }
     out["accession_namespace"] = masking.accession_namespace_report(
@@ -245,41 +260,58 @@ def mask_pool(
     return out
 
 
-def control_gate(mask_summary: Mapping[str, Any]) -> dict[str, Any]:
+def control_gate(
+    mask_summary: Mapping[str, Any], *, n_controls_requested: int | None = None
+) -> dict[str, Any]:
     """The P2-10b non-vacuity gate, re-derived from the recorded evidence.
 
     Every clause is wrapped so that a *missing* measurement is FALSE, not
     vacuously TRUE: a gate assembled from the requested configuration rather than
-    the found evidence passes exactly when the evidence is absent. The control
-    clause demands **all** control windows mask, because each one overlaps a known
-    T-box by construction — anything below 100 % is a coordinate-frame defect, not
-    a biological result (an earlier minus-strand frame scored 23,147/23,535 and
-    the corrected one 23,532/23,532, which is how the defect was found).
+    the found evidence passes exactly when the evidence is absent.
+
+    **The binding clause is exact interval identity, not overlap.** A control
+    window *is* the locus, so overlap survives a shift of up to the locus length:
+    measured uniform shifts of ±160 nt kept 500/500 controls both masked and
+    overlapping while the reported natural contamination moved 0.184 % → 0.473 %.
+    Exact reproduction of the known interval has zero tolerance and holds on the
+    real data (23,532/23,532), so **every** control discriminates a frame error
+    rather than only the ~1.6 % a shift happens to push clear of the locus. The
+    overlap and flank clauses are retained as strictly weaker corroboration.
+
+    ``n_controls_requested`` closes the other fail-open direction: ``carve_pool``
+    treats its ``n_controls`` as a *request*, dropping any row whose geometry does
+    not fit, so a run that emitted 2 of 8 controls previously graded green on the
+    survivors with the shortfall recorded nowhere. Pass it and the shortfall is a
+    failure; omit it and the clause is FALSE rather than absent.
     """
     control = mask_summary.get("designed_control") or {}
     natural = mask_summary.get("natural") or {}
     namespace = mask_summary.get("accession_namespace") or {}
     n_control = int(control.get("n_records", 0))
     n_control_masked = int(control.get("n_masked_at_flank", 0))
-    # Gate on the flank-0 **overlap** count, not the flanked mask count. A control
-    # window IS the locus, so it must intersect its own known interval outright;
-    # allowing the ±flank slack would let a frame error of up to ``flank`` nt pass
-    # with a perfect-looking 100%. The stricter number is computed anyway, so
-    # gating on the weaker one would have meant writing the evidence of the
-    # failure into the report and then not reading it.
     n_control_overlap = int(control.get("n_overlapping_at_flank_0", 0))
+    n_control_exact = int(control.get("n_exact_interval_match", 0))
+    have_control = bool(control) and n_control > 0
     clauses = {
-        "controls_present": bool(control) and n_control > 0,
-        "all_controls_overlap": bool(control) and n_control > 0 and n_control_overlap == n_control,
-        "all_controls_masked": bool(control) and n_control > 0 and n_control_masked == n_control,
+        "controls_present": have_control,
+        "all_controls_exact": have_control and n_control_exact == n_control,
+        "all_controls_overlap": have_control and n_control_overlap == n_control,
+        "all_controls_masked": have_control and n_control_masked == n_control,
+        "all_requested_controls_carved": (
+            have_control
+            and n_controls_requested is not None
+            and n_control == int(n_controls_requested)
+        ),
         "natural_pool_present": bool(natural) and int(natural.get("n_records", 0)) > 0,
         "namespace_compatible": bool(namespace) and bool(namespace.get("namespace_compatible")),
     }
     return {
         "clauses": clauses,
         "n_control_windows": n_control,
+        "n_controls_requested": n_controls_requested,
         "n_control_masked": n_control_masked,
         "n_control_overlapping": n_control_overlap,
+        "n_control_exact_interval_match": n_control_exact,
         "overall_pass": all(clauses.values()),
     }
 
@@ -302,6 +334,20 @@ def build(
     """Carve, mask, gate, and write the coordinate-bearing mining substrate."""
     import pandas as pd
 
+    # A carved flank window must sit at least ``flank_nt`` from its own parent
+    # locus, or the mask would count it as contamination against the very locus it
+    # was carved beside — a construction artifact in the headline natural rate.
+    # ``margin_nt`` provides that clearance and is satisfied today with exactly
+    # 0 nt of slack (both are 50), so a one-line config edit — a masking-flank
+    # sensitivity sweep, say — silently breaks it: measured, flank 51 adds 3
+    # self-masked windows to the natural count where flank 50 has 0.
+    if margin_nt < flank_nt:
+        raise MiningPoolError(
+            f"margin_nt ({margin_nt}) < flank_nt ({flank_nt}): a carved window would fall "
+            "within the masking flank of its own parent locus and be counted as natural "
+            "contamination. Raise mining_margin_nt to at least flank_nt in conf/data/decoys.yaml."
+        )
+
     context = pd.read_parquet(context_parquet)
     rows = context.to_dict("records")
     records = carve_pool(
@@ -319,9 +365,31 @@ def build(
 
     union_loci, n_union_total, n_union_maskable = masking.load_union_loci(union_parquet)
     own_loci = masking.load_own_positive_loci(corpus_parquet)
+    # The union prior must actually contribute. Every locus-centred control is
+    # carved from a corpus positive, so it masks against ``own_loci`` whether or
+    # not the union prior is live — measured: masking from union-only, own-only,
+    # and both gives bit-identical counts (control 500/500, natural 85/46,091).
+    # The designed control therefore cannot detect a dead union prior, and the
+    # report's ``union_denominator`` is derived from the parquet's row count, not
+    # from the loci loaded, so it would still read 24,160 with zero loci in hand.
+    # That is the step's headline guard (ADR-0005 D14's first) degrading silently
+    # to own-positives-only, so it is asserted here rather than inferred.
+    if n_union_maskable > 0 and not union_loci:
+        raise MiningPoolError(
+            f"union prior {union_parquet} reports {n_union_maskable} maskable records but "
+            "yielded 0 loci — the mask would silently degrade to own-positives-only while "
+            "every gate clause stayed green"
+        )
+    if len(union_loci) != n_union_maskable:
+        raise MiningPoolError(
+            f"union prior loci ({len(union_loci)}) != maskable record count ({n_union_maskable}) "
+            "— the loader dropped records the report will still count in its denominator"
+        )
+    if not own_loci:
+        raise MiningPoolError(f"corpus {corpus_parquet} yielded 0 own-positive loci")
     index = masking.LocusIndex.from_records(union_loci + own_loci)
     mask_summary = mask_pool(records, index, flank=flank_nt)
-    gate = control_gate(mask_summary)
+    gate = control_gate(mask_summary, n_controls_requested=n_controls)
 
     for record in records:
         record["masked"] = window_is_masked(record, index, flank=flank_nt)
@@ -344,8 +412,13 @@ def build(
         },
         "masking": mask_summary,
         "control_gate": gate,
+        "n_controls_requested": n_controls,
         "union_denominator": n_union_total,
         "union_maskable_with_coords": n_union_maskable,
+        # Loci actually loaded, beside the denominator derived from row counts —
+        # so a reader can tell a live prior from a dead one without re-running.
+        "n_union_loci_loaded": len(union_loci),
+        "n_own_positive_loci_loaded": len(own_loci),
         "context_sha256": provenance.sha256_file(context_parquet),
         "union_prior_sha256": provenance.sha256_file(union_parquet),
         # The corpus supplies own_loci, so it determines every masked/overlap count
@@ -396,6 +469,8 @@ def build(
             "control_gate_pass": gate["overall_pass"],
             "n_control_masked": gate["n_control_masked"],
             "n_control_overlapping": gate["n_control_overlapping"],
+            "n_control_exact_interval_match": gate["n_control_exact_interval_match"],
+            "n_union_loci_loaded": len(union_loci),
             "n_control_windows": gate["n_control_windows"],
             "natural_masked_fraction": mask_summary["natural"]["masked_fraction"],
         },

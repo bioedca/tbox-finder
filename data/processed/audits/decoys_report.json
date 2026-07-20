@@ -2,36 +2,44 @@
   "accession_namespace": {
     "dinuc_shuffled": {
       "n_distinct_accessions": 0,
+      "n_distinct_normalized": 0,
       "n_index_accessions": 12041,
       "n_intersect_as_is": 0,
       "n_intersect_normalized": 0,
+      "n_unaddressable_normalized": 0,
       "n_with_accession": 0,
       "namespace_compatible": false,
       "normalization_recovered": 0
     },
     "gc_background": {
       "n_distinct_accessions": 0,
+      "n_distinct_normalized": 0,
       "n_index_accessions": 12041,
       "n_intersect_as_is": 0,
       "n_intersect_normalized": 0,
+      "n_unaddressable_normalized": 0,
       "n_with_accession": 0,
       "namespace_compatible": false,
       "normalization_recovered": 0
     },
     "leader_decoy": {
       "n_distinct_accessions": 0,
+      "n_distinct_normalized": 0,
       "n_index_accessions": 12041,
       "n_intersect_as_is": 0,
       "n_intersect_normalized": 0,
+      "n_unaddressable_normalized": 0,
       "n_with_accession": 0,
       "namespace_compatible": false,
       "normalization_recovered": 0
     },
     "structured_rna": {
       "n_distinct_accessions": 2750,
+      "n_distinct_normalized": 2750,
       "n_index_accessions": 12041,
       "n_intersect_as_is": 0,
       "n_intersect_normalized": 269,
+      "n_unaddressable_normalized": 2481,
       "n_with_accession": 2999,
       "namespace_compatible": true,
       "normalization_recovered": 269

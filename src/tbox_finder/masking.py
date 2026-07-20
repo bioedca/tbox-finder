@@ -69,7 +69,7 @@ def normalize_accession(accession: Any) -> str:
     **versioned** (2,999 of 3,000 Rfam decoy headers; 23,535 of 23,535
     ``flank_context`` rows). Comparing the two namespaces raw makes the mask a
     silent no-op: measured intersection of the Rfam decoy accessions with the
-    ``LocusIndex`` keys is **0 of 2,751 distinct** as-is versus **269** after
+    ``LocusIndex`` keys is **0 of 2,750 distinct** as-is versus **269** after
     stripping.
 
     That failure mode is worse than the P0 one it replaces. At P0 the pools
@@ -131,10 +131,18 @@ class LocusIndex:
         pooled: dict[str, list[tuple[int, int]]] = {}
         for acc, ivals in by_accession.items():
             pooled.setdefault(normalize_accession(acc), []).extend(ivals)
+        # Pre-merge intervals, kept for exact-identity queries only. Merging is
+        # what makes the overlap scan fast and correct, but it is lossy: two
+        # overlapping or adjacent loci collapse into one span, so an individual
+        # locus's own interval may no longer be present. Measured P2-10b: 769 of
+        # 23,532 locus-centred windows fail an exact match against the merged
+        # spans and all 23,532 match against these.
+        self._source_intervals: dict[str, frozenset[tuple[int, int]]] = {}
         for acc, ivals in pooled.items():
             merged = _merge_intervals(ivals)
             self._intervals[acc] = merged
             self._starts[acc] = [lo for lo, _ in merged]
+            self._source_intervals[acc] = frozenset(normalize_locus(lo, hi) for lo, hi in ivals)
 
     @classmethod
     def from_records(cls, records: Iterable[tuple[str, int, int]]) -> LocusIndex:
@@ -163,6 +171,32 @@ class LocusIndex:
     def raw_accession_keys(self) -> frozenset[str]:
         """The accession strings as supplied, before version normalisation."""
         return self._raw_keys
+
+    def matches_interval_exactly(self, accession: Any, start: int, end: int) -> bool:
+        """True iff ``[start, end]`` reproduces a known interval **exactly**.
+
+        Overlap is the right test for masking — a decoy anywhere near a known
+        locus must go — but it is far too weak to *validate a coordinate frame*.
+        A window carved to be the locus itself still overlaps it after a shift of
+        up to the locus length (median 281 nt), so a 100 %-overlap control
+        tolerates a ±165 nt frame error (measured P2-10b: uniform shifts through
+        ±160 keep 500/500 controls overlapping). Exact reproduction has zero
+        tolerance, and it holds on the real data — **23,532/23,532** locus-centred
+        windows reproduce their own union-prior/corpus interval — so the stricter
+        test is available for free and every control becomes discriminating
+        rather than only the ~1.6 % that a shift happens to push off the end.
+
+        Matched against the **pre-merge source** intervals, not the merged spans
+        :meth:`is_masked` scans: merging is lossy, and 769 of those 23,532
+        windows sit on accessions whose loci merged, so the merged form would
+        report 22,763/23,532 and no honest threshold could be set on it.
+        """
+        if is_missing(accession):
+            return False
+        intervals = self._source_intervals.get(normalize_accession(accession))
+        if not intervals:
+            return False
+        return normalize_locus(start, end) in intervals
 
     def is_masked(self, accession: Any, start: int, end: int, flank: int = 0) -> bool:
         """True iff ``[start, end]`` (± ``flank``) overlaps a known locus on ``accession``.
@@ -328,6 +362,12 @@ def accession_namespace_report(
     return {
         "n_with_accession": len(raw),
         "n_distinct_accessions": len(distinct_raw),
+        # Published beside the raw count because the intersection below is
+        # computed on normalised keys: comparing 11,447 hits against 11,453 raw
+        # accessions reads as a 6-accession shortfall when it is really 6
+        # version-collapse groups and coverage is 100 %.
+        "n_distinct_normalized": len(distinct_norm),
+        "n_unaddressable_normalized": len(distinct_norm - index.accession_keys),
         "n_index_accessions": index.n_accessions,
         "n_intersect_as_is": len(hit_raw),
         "n_intersect_normalized": len(hit_norm),
