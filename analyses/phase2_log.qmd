@@ -575,3 +575,16 @@ NUL-separated `XY <path>` records, with a rename's extra origin field consumed a
 output on this worktree and correctly classifies `src/…` and `tests/…` as code, so a run made right
 now would rightly refuse to certify. **Validation.** CI-exact, all gates armed: **1,788 passed / 162
 skipped**, zero regressions; ruff + black clean.
+
+**Review (final round, 1 major — applied, and the sharpest of the step).**
+`test_build_report_reads_the_working_tree_only_once` was **tautological**: it called
+`_git_status_snapshot()` directly and asserted one call — proving only that calling a function once
+calls it once. It never drove `build_report`, the thing the invariant is about. Demonstrated rather
+than argued: re-applying the double-read defect to `build_report` and running the OLD test **passes**
+(`1 passed`), while the rewritten test — which now drives the real `build_report` and asserts both
+that exactly one `status` call occurs and that the two derived fields agree — **fails**. A test named
+for an invariant it does not exercise is the same failure as [[tests-can-specify-the-bug]], and it
+survived my own sabotage discipline because I sabotaged the *implementation* and watched a test that
+was never wired to it. Sabotaging the code proves a test bites; it does not prove the test is
+connected to the code. **Validation.** CI-exact, all gates armed: **1,788 passed / 162 skipped**,
+zero regressions; ruff + black clean.

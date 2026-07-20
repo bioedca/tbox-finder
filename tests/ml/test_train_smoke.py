@@ -733,23 +733,49 @@ def test_build_report_reads_the_working_tree_only_once() -> None:
     Two `git status` calls can straddle a change to the tree, producing a boolean and a
     path list that never co-existed — and `_provenance_complete` would then classify
     evidence from two different worlds.
+
+    This drives the REAL `build_report`. An earlier cut of this test called
+    `_git_status_snapshot()` directly and asserted one call, which is a tautology: it
+    proved that calling a function once calls it once, and would have stayed green with
+    `build_report` reading the tree twice — the exact defect it is named for.
     """
-    calls = []
+    calls: list[tuple[str, ...]] = []
     orig = T._git
 
     def counting_git(*args: str):
         calls.append(args)
         if args and args[0] == "status":
             return " M data/processed/splits/split_assignments.parquet\0"
-        return "0" * 40 if args and args[0] == "rev-parse" else ""
+        if args and args[0] == "rev-parse":
+            return "a" * 40
+        return ""
 
     T._git = counting_git
     try:
-        T._git_status_snapshot()
-        before = len([c for c in calls if c and c[0] == "status"])
-        assert before == 1
+        report = T.build_report(
+            cfg=T.Stage1TrainConfig(),
+            class_counts=[10, 2, 1, 1, 1, 1, 1, 1],
+            counts_scope={"n_records": 1, "n_training_fold_records": 1, "full_stream": True},
+            n_blocks=16,
+            n_blocks_wrapped=16,
+            hf_flag_supported=False,
+            losses=[1.6, 1.5],
+            grads_finite=True,
+            world_size=1,
+            wandb_run_id=None,
+        )
     finally:
         T._git = orig
+
+    status_calls = [c for c in calls if c and c[0] == "status"]
+    assert len(status_calls) == 1, f"build_report read the working tree {len(status_calls)}x"
+
+    prov = report["provenance"]
+    # Both fields derive from that single read, and they agree.
+    assert prov["git_dirty"] is True
+    assert prov["git_dirty_paths"] == ["data/processed/splits/split_assignments.parquet"]
+    # Data-only dirt ⇒ the SHA still describes the code, so the clause certifies.
+    assert report["gate"]["provenance_complete"] is True
 
 
 def test_cublas_workspace_config_pins_torch_s_own_literals() -> None:
