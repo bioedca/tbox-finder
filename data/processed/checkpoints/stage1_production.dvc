@@ -1,0 +1,6 @@
+outs:
+- md5: c1b5d24490a535ea645d21307c5083f2.dir
+  size: 31038761
+  nfiles: 2
+  hash: md5
+  path: stage1_production

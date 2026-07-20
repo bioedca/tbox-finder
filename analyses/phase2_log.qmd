@@ -481,3 +481,52 @@ four composition tests plus `tests/ml/test_sweep_selection.py`'s overlay test, f
 omission. Both vars are now armed. Verified the contract bites rather than decorating: with hydra
 absent and the vars armed the five FAIL loudly (`5 failed, 68 passed`); absent and unarmed they go
 `68 passed, 12 skipped` — the exact silent green CI had been reporting.
+
+## Step P2-09 (run) — 2026-07-20: job 671 — the round-0 production Stage-1 checkpoint
+
+**Inputs.** The three staged corpus parquets (re-staged after the cluster re-sync reverted
+`split_assignments.parquet` to a 132-byte LFS pointer; sha256 `6388ba19…` = committed oid, size
+5073699) · `slurm/p2/train_production.sbatch` @ `0f8d527`.
+
+**Process.** Submitted under the §9.3 ack after a pre-ack probe that **composed the sbatch's own
+override tokens in `tbox-ml-dna` on the cluster checkout** — the check whose absence cost job 669.
+Node `two` had gone fully idle (the cryosparc pair holding 8/8 ended after ~14 h), so 671 started
+immediately and ran **14 m 12 s** wall, DDP×8.
+
+**Outputs.** `data/processed/checkpoints/stage1_production/{stage1.pt,provenance.json}` (DVC-tracked,
+`stage1_production.dvc`, md5 `c1b5d244…dir`, 2 files / 31,038,761 B) ·
+`reports/p2/train_stage1_production.json` (git-tracked) · `reports/p2/train_stage1_production.DONE`.
+
+**Validation — artifact-based (`sacct` off, §9.3 step 8).** (a) `squeue -j 671` empty; (b) DONE
+present; (c) checkpoint + sidecar present; (d) report `gate.overall_pass = true` with all seven
+clauses true (`train_step_ran`, `loss_finite`, `grads_finite`, `class_counts_from_stream`,
+`gradient_checkpointing_applied`, `provenance_complete`, `eval_val_scored_on_disjoint_fold`);
+(e) `.err` **897 B — expected non-empty** (W&B-offline chatter), scanned for
+`Traceback|Error|FAILED|assert|OOM|Killed` → **no hits**, not zero-gated. Plus the
+`PRODUCTION_DONE job=671` breadcrumb.
+
+**The numbers.** `world_size = 8`, `n_steps = 1290` — which is exactly the independent prediction for
+ws8 × bs8 × 10 epochs over 8,303 records ((8303//8)//8 × 10 = 1,290), so the step budget is confirmed
+from two directions rather than one. Fold scope: `n_records = 8303`, `n_training_fold_records = 8303`,
+`selection_val_excluded = false`, `n_selection_val_excluded = 0`, `fold_scope = "train"` (not
+`inner_train`) — the **full ADR-0004 D5 fold**, user decision (1). Peak VRAM **1.0948 GiB/rank**,
+matching the P2-05 sizing measurement to four decimals. Checkpoint sha256 `5e9939c3…` verified
+**locally after rsync against the hash the run itself recorded**.
+
+**No val metric, by construction.** `eval_requested = false`, `eval_metrics = null`,
+`eval_scope = null`, `gate4_graded = false`. imp.md's "held-out val F1 reported" gate is **met by
+refusal** (user decision (1)): `selection_val` is now inside the training set and the LOO holdout is
+P2-14's grading set, so no free rung exists. The `eval_val_scored_on_disjoint_fold` clause is
+vacuously true here — but *grounded* vacuity: `eval_requested = false` is recorded evidence that
+nothing was scored, not an absent-evidence default ([[clauses-must-guard-emptiness]]).
+
+**Two honest caveats.** (i) `provenance.git_dirty = true`. Investigated rather than waved through:
+`git diff --stat` over tracked non-`data` paths is **empty** — the dirt is exactly the staged
+`split_assignments.parquet` (real content vs the committed LFS pointer, hash-verified) plus the run's
+own untracked outputs. **Zero tracked code differs**, so `git_sha 0f8d527` does describe what ran.
+(ii) The report's top-level `step` field reads `"P2-04"` — the entrypoint's own label, inherited; the
+checkpoint sidecar correctly carries `step: "P2-09"`. Cosmetic, recorded here rather than silently
+reconciled.
+
+**Decisions.** Round-0 is **not** gate-graded — GATE-4 is P2-14 on the leave-one-order-out holdout.
+Mining is P2-10. **Commit.** SHA pending.
