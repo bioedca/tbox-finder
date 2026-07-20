@@ -113,6 +113,11 @@ _HELIX_RE = re.compile(
     r"nbp\s*=\s*(?P<nbp>\d+)\s+nbp_cov\s*=\s*(?P<nbp_cov>\d+)\s*$"
 )
 
+#: ``# RMs = 8 L = 1460`` — R-scape states its own helix count in the first line of
+#: every ``.helixcov``. Cross-checked against the records actually parsed, so a
+#: silently-skipped record cannot deflate ``nbp_cov`` into a false ``failed``.
+_RM_COUNT_RE = re.compile(r"^#\s*RMs\s*=\s*(?P<n>\d+)\b")
+
 #: ``# R-scape 2.0.4.a (Dec 2023)`` — the banner both ``-h`` and a real run print.
 #: The version token must start with a digit: the line *above* it in the banner is
 #: ``# R-scape :: RNA Structural Covariation Above Phylogenetic Expectation``, and a
@@ -167,10 +172,16 @@ class CovariationResult:
     """
 
     helices: tuple[Helix, ...]
-    evalue: float
+    #: E-value the run used. ``None`` for a result parsed from a file: text carries
+    #: no evidence of the threshold that produced it, and E is what *defines* a
+    #: significant pair, so it is the same provenance class as the version.
+    evalue: float | None = None
     #: Version the binary reported when it produced this result. ``None`` for a
     #: result parsed from a file, which carries no evidence about what ran.
     rscape_version: str | None = None
+    #: Sequences in the alignment that was scored. ``None`` when unknown.
+    #: Load-bearing: see :func:`covariation_verdict`'s ``min_sequences``.
+    n_sequences: int | None = None
 
     @property
     def n_helices(self) -> int:
@@ -224,6 +235,11 @@ class CovariationResult:
             "total_covarying": self.total_covarying,
             "min_covarying_pairs_required": MIN_COVARYING_PAIRS,
             "evalue": self.evalue,
+            "evalue_pinned": DEFAULT_EVALUE,
+            # Without depth, a committed round report cannot tell "this candidate
+            # does not covary" from "this alignment had no power to show it" — the
+            # module's own sweep found 0/12 subsamples passing at 5-8 sequences.
+            "n_sequences": self.n_sequences,
             "rscape_version_observed": self.rscape_version,
             "rscape_version_pinned": PINNED_RSCAPE_VERSION,
             "rscape_version_matches_pin": self.rscape_version == PINNED_RSCAPE_VERSION,
@@ -260,6 +276,7 @@ def rscape_version() -> str:
             [RSCAPE_BINARY, "-h"],
             capture_output=True,
             text=True,
+            errors="replace",
             check=False,
             timeout=VERSION_PROBE_TIMEOUT_S,
         )
@@ -321,8 +338,9 @@ def round_backend_availability(
 def parse_helixcov(
     text: str,
     *,
-    evalue: float = DEFAULT_EVALUE,
+    evalue: float | None = None,
     rscape_version: str | None = None,
+    n_sequences: int | None = None,
 ) -> CovariationResult:
     """Parse a ``.helixcov`` file body into a :class:`CovariationResult`.
 
@@ -330,11 +348,17 @@ def parse_helixcov(
     unit tier exercises against committed fixtures, following the
     :mod:`tbox_finder.infernal` precedent (parser pure, shell-out behind a probe).
 
-    ``rscape_version`` defaults to ``None`` — text alone is no evidence of which
-    binary produced it. :func:`run_rscape` supplies the probed value.
+    ``evalue`` / ``rscape_version`` / ``n_sequences`` all default to ``None`` — text
+    alone is no evidence of the threshold, the binary, or the alignment that
+    produced it. :func:`run_rscape` supplies the observed values.
     """
+    declared: int | None = None
     helices: list[Helix] = []
     for line in text.splitlines():
+        if declared is None:
+            header = _RM_COUNT_RE.match(line.strip())
+            if header is not None:
+                declared = int(header.group("n"))
         match = _HELIX_RE.match(line.strip())
         if match is None:
             continue
@@ -354,9 +378,44 @@ def parse_helixcov(
                 n_covarying=n_covarying,
             )
         )
+    # R-scape declares its own helix count. Any record the regex fails to match
+    # deflates every covariation statistic — which reads as `failed`, i.e. MINABLE.
+    # A silently-skipped record must therefore be an error, not a quieter verdict.
+    if declared is not None and declared != len(helices):
+        raise CovariationBackendError(
+            f"helix-count mismatch: the file declares `# RMs = {declared}` but "
+            f"{len(helices)} record(s) parsed; unparsed records would deflate "
+            "nbp_cov into a false 'failed' (⇒ minable)"
+        )
     return CovariationResult(
-        helices=tuple(helices), evalue=float(evalue), rscape_version=rscape_version
+        helices=tuple(helices),
+        evalue=None if evalue is None else float(evalue),
+        rscape_version=rscape_version,
+        n_sequences=n_sequences,
     )
+
+
+def stockholm_stats(text: str) -> tuple[int, int]:
+    """``(n_alignments, n_sequences)`` for a Stockholm file.
+
+    Both numbers are load-bearing rather than informational. **Alignment count:**
+    R-scape rewrites ``<outname>.helixcov`` once per alignment in the file, so a
+    multi-MSA input leaves only the *last* one's helices on disk — the verdict
+    returned would belong to a different candidate. **Sequence count:** covariation
+    detection is power-limited, and an alignment too shallow to show covariation
+    scores identically to one that genuinely has none.
+    """
+    n_alignments = 0
+    names: set[str] = set()
+    for raw in text.splitlines():
+        line = raw.strip()
+        if line.startswith("# STOCKHOLM"):
+            n_alignments += 1
+            continue
+        if not line or line.startswith("#") or line == "//":
+            continue
+        names.add(line.split(None, 1)[0])
+    return n_alignments, len(names)
 
 
 # --------------------------------------------------------------------------- #
@@ -393,6 +452,15 @@ def run_rscape(
     alignment = Path(alignment)
     if not alignment.is_file():
         raise CovariationBackendError(f"alignment not found: {alignment}")
+    n_alignments, n_sequences = stockholm_stats(
+        alignment.read_text(encoding="utf-8", errors="replace")
+    )
+    if n_alignments != 1:
+        raise CovariationBackendError(
+            f"{alignment} holds {n_alignments} alignment(s); R-scape rewrites "
+            "<outname>.helixcov once per alignment, so only the last one would "
+            "survive and the verdict would belong to a different candidate"
+        )
     outdir = Path(outdir)
     outdir.mkdir(parents=True, exist_ok=True)
 
@@ -411,6 +479,10 @@ def run_rscape(
     cmd = [
         RSCAPE_BINARY,
         "--nofigures",
+        # Belt and braces with the single-alignment assertion above: even if a
+        # multi-MSA file slipped through, only the first is analysed rather than
+        # the last silently overwriting the output.
+        "--onemsa",
         "-E",
         str(evalue),
         "--outdir",
@@ -420,7 +492,14 @@ def run_rscape(
         str(alignment),
     ]
     try:
-        proc = subprocess.run(cmd, capture_output=True, text=True, check=False, timeout=timeout_s)
+        proc = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            errors="replace",
+            check=False,
+            timeout=timeout_s,
+        )
     except subprocess.TimeoutExpired as exc:
         raise CovariationBackendError(
             f"{RSCAPE_BINARY} timed out after {timeout_s}s: {' '.join(cmd)}"
@@ -438,9 +517,10 @@ def run_rscape(
             "does the alignment carry an #=GC SS_cons line?"
         )
     return parse_helixcov(
-        helixcov.read_text(encoding="utf-8"),
+        helixcov.read_text(encoding="utf-8", errors="replace"),
         evalue=evalue,
         rscape_version=observed_version,
+        n_sequences=n_sequences,
     )
 
 
@@ -448,6 +528,7 @@ def covariation_verdict(
     alignment: Path,
     criterion: AnyHelixCriterion,
     *,
+    min_sequences: int,
     evalue: float = DEFAULT_EVALUE,
     timeout_s: float = DEFAULT_RSCAPE_TIMEOUT_S,
 ) -> tuple[str, dict[str, Any]]:
@@ -456,14 +537,46 @@ def covariation_verdict(
     ``status`` is ``STATUS_PASSED`` or ``STATUS_FAILED``, ready to drop into
     :class:`~tbox_finder.mining.spare_rule.SpareRuleEvidence`'s
     ``any_helix_rscape`` field. It is never ``STATUS_UNAVAILABLE``: reaching this
-    function means the backend ran.
+    function means the backend ran *and had the power to answer*.
 
     ``criterion`` is positional and required — see the module docstring.
+
+    ``min_sequences`` is keyword-required with **no default**, for the same reason
+    ``criterion`` is. Covariation detection is power-limited, and R-scape reports a
+    powerless alignment exactly as it reports a genuinely non-covarying one: all
+    ``nbp_cov = 0``. That collapses into ``failed`` ⇒ **minable** — reintroducing,
+    one layer down, the very conflation of "the backend failed this candidate" with
+    "nothing was ever evaluated" that
+    :mod:`tbox_finder.mining.spare_rule` exists to prevent. This module's own sweep
+    measured the regime as decisive: **0/12** seeded subsamples passed at 5–8
+    sequences versus **12/12** at 60 — and a real candidate's homolog set lands in
+    the low band, not the high one. Below ``min_sequences`` this raises, so the
+    caller records ``unavailable`` and the candidate is **spared** (fail-closed).
+
+    The *value* is deliberately not pinned here: like the ``AnyHelixCriterion``
+    choice it is a Tier-2N-protection threshold, i.e. an **ADR-0006 decision owed at
+    P2-10e** (D2's carve-out already anticipates it — "with a minimum-covariation-
+    power caveat reported"). Requiring it explicitly means it cannot be taken by
+    accident, and ``n_sequences`` is recorded in every report either way so a
+    committed round can be re-graded against whatever value is eventually pinned.
     """
     if not isinstance(criterion, AnyHelixCriterion):
         raise CovariationBackendError(
             f"criterion must be an AnyHelixCriterion, got {type(criterion).__name__}"
         )
+    if isinstance(min_sequences, bool) or not isinstance(min_sequences, int):
+        raise CovariationBackendError(
+            f"min_sequences must be an int, got {type(min_sequences).__name__}"
+        )
+    if min_sequences < 1:
+        raise CovariationBackendError(f"min_sequences must be >= 1, got {min_sequences}")
     with tempfile.TemporaryDirectory(prefix="tbox-rscape-") as tmp:
         result = run_rscape(Path(alignment), Path(tmp), evalue=evalue, timeout_s=timeout_s)
+    depth = result.n_sequences
+    if depth is None or depth < min_sequences:
+        raise CovariationBackendError(
+            f"alignment has {depth} sequence(s), below min_sequences={min_sequences}; "
+            "an alignment without the power to show covariation scores identically to "
+            "one that has none, so this candidate is unavailable (⇒ spared), not failed"
+        )
     return result.status(criterion), result.as_report(criterion)

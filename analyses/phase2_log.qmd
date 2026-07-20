@@ -1018,3 +1018,50 @@ rate limit (34-minute wait, escalating per the known pattern) meant the third wa
 recovered were fixed; the third is unread, not dismissed, and the same fail-open class was self-audited
 across the run path (that audit is what added `run_rscape`'s `OSError` arm, which CodeRabbit had only
 flagged on the probe).
+
+**Independent adversarial audit (6 agents, 0 failures) — 11 confirmed defects, all fixed.** Because
+CodeRabbit's r2 reported 3 findings and the rate limit meant only 2 were readable, I ran a three-lens
+read-only audit (fail-open paths / parser / tests) with a refuting verifier per lens. It found more than
+the missing finding, including one that undercut this step's own headline claim.
+
+**The one that mattered — the designed control's matchedness was asserted nowhere.** Both "the control
+is matched" tests compared only R-scape's `# RM` helix geometry — and geometry is a function of
+`#=GC SS_cons` and the gap pattern, which `make_rscape_fixture.py` copies **verbatim** into both arms.
+So matchedness was guaranteed-looking by construction rather than checked: the suite stayed green with
+the control `.sto` replaced by a copy of the positive, and with **both `.sto` files deleted outright**.
+The gate's claim — *"a separation here can only be covariation"* — would have been false, and silently,
+under any regeneration that preserved the gap pattern while destroying per-column composition. The
+fixtures were verified to be genuinely matched (0/1460 columns differing); the property is now
+**asserted** from the alignments themselves (identical ordered names, width, `SS_cons`/`RF`, per-column
+`Counter`, N=60, and control ≠ positive), and `column_shuffle` — the function that *creates* the
+matchedness — gained its own test file. This is the P2-10b lesson recurring inside the file that cites it.
+
+**The second fail-open, one layer below the module's stated purpose.** Covariation detection is
+power-limited, and R-scape reports an alignment too shallow to *show* covariation exactly as it reports
+one that genuinely does not covary: all `nbp_cov = 0` ⇒ `failed` ⇒ **minable**. That is precisely the
+"the backend failed this candidate" vs "nothing was ever evaluated" conflation `spare_rule.py` exists to
+prevent, reintroduced at the layer below it — and this step's own sweep already measured the regime as
+decisive (**0/12** subsamples passing at 5–8 sequences vs **12/12** at 60), with a real candidate's
+homolog set landing in the low band. `covariation_verdict` now takes a keyword-required `min_sequences`
+with **no default** (the same device as `AnyHelixCriterion`, and ADR-0006 D2's carve-out already
+anticipates it — "with a minimum-covariation-power caveat reported"); below it the call raises, so the
+caller records `unavailable` and the candidate is **spared**. `n_sequences` is recorded in every report
+regardless, so a committed round can be re-graded against whatever floor is eventually pinned.
+**The numeric value is a third open ADR-0006 item for P2-10e**, alongside the operator choice.
+
+**Also fixed.** A multi-MSA input silently returned the *last* alignment's verdict (R-scape rewrites
+`<outname>.helixcov` once per alignment) — reproduced end-to-end; now refused, plus `--onemsa`. The
+`# RMs = N` header R-scape writes in every file was discarded instead of cross-checked against the
+records parsed, so any record the regex missed deflated `nbp_cov` into a false `failed`. `as_report`
+claimed an `evalue` the parsed text never evidenced — the *same* defect as the version stamp fixed in
+r1, and `-E` could be deleted from the argv with every test still green. `text=True` let
+`UnicodeDecodeError` escape the "every probe failure becomes `CovariationBackendError`" contract. Four
+`run_rscape` guards had no test anywhere — including the version-mismatch refusal — and two tests used
+bare `pytest.raises` that could not distinguish the branch they were named for.
+
+**Two of my own new tests did not bite, and sabotage is why I know.** The row-shuffle discriminator
+compared *sorted* per-row compositions — sorting throws away exactly the reordering it was meant to
+detect, so a row permutation passed it. And the depth guard's only test lived in the ml tier, which
+skips without the binary, so deleting the guard left bare CI green. Both rewritten; all three re-run
+sabotages now fail the test **named** for the invariant. Suite **1,974 / 158** vs the like-for-like
+`main` baseline **1,915 / 158** = **+59, zero regressions**; fixtures still byte-identical.

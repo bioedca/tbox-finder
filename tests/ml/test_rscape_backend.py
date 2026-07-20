@@ -58,6 +58,10 @@ _SHUFFLED_HELIXCOV = _FIXTURES / "classII_sub.shuffled.helixcov"
 
 _REQUIRE = os.environ.get("TBOX_REQUIRE_RSCAPE") == "1"
 
+#: The committed fixtures hold 60 sequences (asserted in the unit tier). Passed
+#: explicitly because `min_sequences` has no default — see covariation_verdict.
+_FIXTURE_DEPTH = 60
+
 _BOTH_CRITERIA = list(AnyHelixCriterion)
 
 
@@ -124,6 +128,7 @@ def test_committed_helixcov_reproduces_from_the_binary(tmp_path: Path) -> None:
         expected = parse_helixcov(committed.read_text(encoding="utf-8"))
         assert result.helices == expected.helices
         assert result.rscape_version == PINNED_RSCAPE_VERSION
+        assert result.n_sequences == _FIXTURE_DEPTH
 
 
 @pytest.mark.parametrize("criterion", _BOTH_CRITERIA, ids=lambda c: c.value)
@@ -138,8 +143,12 @@ def test_gate_designed_control_fires(criterion: AnyHelixCriterion, tmp_path: Pat
     _need_binary()
     _need_fixtures()
 
-    positive_status, positive_report = covariation_verdict(_POSITIVE_STO, criterion)
-    control_status, control_report = covariation_verdict(_SHUFFLED_STO, criterion)
+    positive_status, positive_report = covariation_verdict(
+        _POSITIVE_STO, criterion, min_sequences=_FIXTURE_DEPTH
+    )
+    control_status, control_report = covariation_verdict(
+        _SHUFFLED_STO, criterion, min_sequences=_FIXTURE_DEPTH
+    )
 
     assert positive_status == STATUS_PASSED, positive_report
     assert control_status == STATUS_FAILED, control_report
@@ -173,7 +182,7 @@ def test_gate_control_is_matched_not_merely_weaker(tmp_path: Path) -> None:
     assert control.total_covarying == 0
 
 
-def test_missing_alignment_raises_rather_than_failing_the_candidate() -> None:
+def test_missing_alignment_raises_rather_than_failing_the_candidate(tmp_path: Path) -> None:
     """An absent input must not read as "this candidate does not covary".
 
     ``failed`` makes a candidate minable; an I/O problem returning ``failed`` would
@@ -181,7 +190,8 @@ def test_missing_alignment_raises_rather_than_failing_the_candidate() -> None:
     """
     _need_binary()
     with pytest.raises(CovariationBackendError, match="not found"):
-        run_rscape(Path("does-not-exist.sto"), Path("/tmp/tbox-rscape-missing"))
+        run_rscape(Path("does-not-exist.sto"), tmp_path / "never-created")
+    assert not (tmp_path / "never-created").exists()
 
 
 def test_alignment_without_ss_cons_raises(tmp_path: Path) -> None:
@@ -192,5 +202,35 @@ def test_alignment_without_ss_cons_raises(tmp_path: Path) -> None:
         "# STOCKHOLM 1.0\n\nseq1 ACGUACGUAC\nseq2 ACGUACGUAC\nseq3 AGGUACGUAC\n//\n",
         encoding="utf-8",
     )
-    with pytest.raises(CovariationBackendError):
+    # `match=` is load-bearing: rc!=0, the no-output branch and OSError all raise
+    # this same class, so a bare `raises` cannot establish which one fired — the
+    # same shape as the PATH bug already caught in the unit tier.
+    with pytest.raises(CovariationBackendError, match="produced no helix-level output"):
         run_rscape(bare, tmp_path / "out", outname="fx")
+
+
+def test_shallow_alignment_is_unavailable_not_failed(tmp_path: Path) -> None:
+    """The gate's other fail-open edge: no *power* must not read as no *signal*.
+
+    R-scape reports an alignment too shallow to detect covariation exactly as it
+    reports one that genuinely does not covary — all ``nbp_cov = 0``, which
+    collapses to ``failed`` ⇒ **minable**. The module's own sweep measured 0/12
+    subsamples passing at 5-8 sequences versus 12/12 at 60, and a real candidate's
+    homolog set lands in the low band. So depth below ``min_sequences`` must raise,
+    letting the caller record ``unavailable`` ⇒ **spared**.
+    """
+    _need_binary()
+    _need_fixtures()
+
+    # The real positive fixture, run against a floor it cannot clear.
+    with pytest.raises(CovariationBackendError, match="below min_sequences"):
+        covariation_verdict(
+            _POSITIVE_STO, AnyHelixCriterion.WITHIN_HELIX, min_sequences=_FIXTURE_DEPTH + 1
+        )
+
+    # ...and it passes at a floor it does clear, so the guard is not just always-on.
+    status, report = covariation_verdict(
+        _POSITIVE_STO, AnyHelixCriterion.WITHIN_HELIX, min_sequences=_FIXTURE_DEPTH
+    )
+    assert status == STATUS_PASSED
+    assert report["n_sequences"] == _FIXTURE_DEPTH
