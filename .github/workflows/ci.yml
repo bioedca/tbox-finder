@@ -157,6 +157,14 @@ jobs:
           # the composition tier that checks the promoted overlay actually reaches the
           # dataclass. Also silently skipped in every CI run until now.
           TBOX_REQUIRE_SWEEP_HYDRA: "1"
+          # P2-10b (tests/ml/test_mining_pool_gate.py) is armed by NO var here, by
+          # design and in two different ways. Its clauses over the committed audit
+          # JSONs raise on a missing file rather than skipping, so they always run —
+          # stronger than a var and immune to becoming an unarmed one. Its clauses
+          # that re-derive from the DVC-tracked parquets carry TBOX_REQUIRE_MINING_POOL
+          # and are deliberately NOT armed: CI does no `dvc pull`, so the inputs are
+          # absent. That tier is the CLAUDE.md §8.5 step-local gate — run it locally
+          # after any decoy/masking/context-pipeline change.
         run: pytest tests/unit tests/golden tests/ml
 
   docker:

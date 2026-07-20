@@ -710,6 +710,18 @@ def build(
     # --- Loci masking: union prior + own positives + flank, from every pool. ---
     union_loci, n_union_total, n_union_maskable = masking.load_union_loci(union_parquet)
     own_loci = masking.load_own_positive_loci(corpus_parquet)
+    # The report's union denominator comes from the parquet's row count, not from
+    # the loci actually loaded, so a loader that silently returned nothing would
+    # still publish a healthy-looking 24,160 (P2-10b review).
+    if n_union_maskable > 0 and not union_loci:
+        raise ValueError(
+            f"union prior {union_parquet} reports {n_union_maskable} maskable records but "
+            "yielded 0 loci — masking would be a no-op while the report read healthy"
+        )
+    if len(union_loci) != n_union_maskable:
+        raise ValueError(
+            f"union prior loci ({len(union_loci)}) != maskable record count ({n_union_maskable})"
+        )
     index = masking.LocusIndex.from_records(union_loci + own_loci)
     pool_mask_counts = dict.fromkeys(POOL_NAMES, 0)
     # Overlap and proximity are separately reported: "masked" at the PRD §9.1

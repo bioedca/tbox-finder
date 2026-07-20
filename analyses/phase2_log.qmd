@@ -719,7 +719,7 @@ a test that bites under sabotage.
 positive and the mined pool, and it could not run: `classify_candidate` returned
 `refused_no_coordinates` for **100 %** of every pool in `MINEABLE_POOLS`. Four measurements decided the
 shape of the fix, all re-derived independently before any code was written. (1) The Rfam headers do
-carry coordinates — **3,000/3,000** parse as `<accession>/<start>-<end>` — but **0 of 2,751** distinct
+carry coordinates — **3,000/3,000** parse as `<accession>/<start>-<end>` — but **0 of 2,750** distinct (of the 2,999 coordinate-bearing records; 2,751 across all 3,000 headers)
 accessions intersect the `LocusIndex` keys, because every union-prior key is unversioned (**0 of
 12,041**) and 2,999/3,000 Rfam accessions are versioned; version-stripping recovers **269**. (2) Even
 then, `structured_rna` contains **0 true overlaps** with the union prior — the nearest record is 5 nt
@@ -741,7 +741,7 @@ is_missing}` + a version-normalising `LocusIndex`; `data/flank_context.forward_b
 **Validation.** Gate PASS. Designed control **500/500** masked (500/500 true overlaps at flank 0);
 natural **85/46,091** = 0.184 % (69 true overlaps); namespace **0 as-is → 11,447 normalised**;
 `structured_rna` coordinate coverage **2,999/3,000**; `refused_no_coordinates` **0/2,000** sampled
-substrate records. Suite **1,848 passed / 184 skipped** against a like-for-like `main` baseline
+substrate records. Suite **1,848 passed / 184 skipped** (the two new files collect **61** tests; the +56 delta quoted here is superseded — see the follow-up stanza) against a like-for-like `main` baseline
 (same data symlinks, clean worktree at `35b62be`) of **1,792 / 184** = **+56, zero regressions**;
 ruff + black + `snakemake --lint` + `snakemake -n` clean. The decoy golden digest is **unchanged**
 (`13061e3e…`) — the schema change is pure column addition.
@@ -836,3 +836,74 @@ both now go through `window_is_masked`. (3) `mining_pool_report.json` recorded `
 `union_prior_sha256` but not the corpus, which supplies `own_loci` and therefore determines every
 masked/overlap count in the report; `corpus_sha256` added. No artifact md5 changed (`84319675…`,
 `be562333…`) and the decoy golden digest is still `13061e3e…`; suite re-run **1,853 / 184**.
+
+## Step P2-10b (follow-up) — 2026-07-20: hardening the guards the review found decorative
+
+**Why.** The P2-10b review's first pass raised 49 findings but 26 of its verifier agents died on
+rate limits, so ~40 findings were recorded "refuted" on no evidence. A second, leaner pass (14 batched
+verifiers, zero failures, every verdict backed by executed sabotage) re-graded those 40: **17 REAL**,
+13 already fixed by the CodeRabbit round, 10 genuinely not real. An independent adjudicator confirmed
+all of them. **Nothing shipped a wrong number** — every finding was a guard weaker than advertised —
+but one landed on the step's own headline.
+
+**The headline guard did not test what it claimed.** The stanza above says the 100 %-must-mask control
+"proves the mask is live". It proves less than that. Every locus-centred control is carved from a
+`flank_context` row that *is* a corpus positive, so it masks against `own_loci` whether or not the
+union prior is alive: sabotaging `load_union_loci` to return `[]` left **all 61 tests green with zero
+new `FAILED` lines**, and masking from union-only, own-only, and both gives *bit-identical* counts
+(control 500/500, natural 85/46,091). The report would still have printed `union_denominator: 24160`,
+because that figure is derived from the parquet's row count, not from the loci actually loaded. ADR-0005
+D14's first guard could have degraded silently to own-positives-only. `build()` now refuses when the
+prior reports maskable records but yields none, the report carries `n_union_loci_loaded` /
+`n_own_positive_loci_loaded` beside the denominator, and a test asserts the **414** accessions only the
+union prior contributes are addressable in a union-only index.
+
+**Overlap was the wrong strictness for a frame check.** A control window *is* the locus, so overlap
+survives a shift of up to the locus length: measured uniform shifts through **±160 nt** kept 500/500
+controls masked *and* overlapping while the reported natural contamination moved 0.184 % → 0.473 %.
+Exact reproduction of the known interval has zero tolerance — and it holds, **23,532/23,532**, with a
+±1 nt shift taking it to **0**. So `all_controls_exact` is now the binding clause and *every* control
+discriminates a frame error, rather than the ~1.6 % of rows a shift happens to push clear of the locus
+(only **5** of the shipped 500). One measurement forced the design: matching against the *merged*
+spans scores 22,763/23,532, because merging is lossy and 769 windows sit on accessions whose loci
+merged — so exact identity is tested against the retained **pre-merge source** intervals. Fitting a
+threshold to 96.7 % would have been the §10.3 failure.
+
+**Other confirmed guards, each now sabotage-verified.** `n_controls` was a *request*, not a contract
+(8 requested → 2 carved → gate green, shortfall recorded nowhere) → `all_requested_controls_carved`.
+`test_an_unanchored_row_yields_no_window` tripped two guards at once and stayed green under removal of
+either alone — the fixture now isolates each. The "determinism" test compared two same-seed calls, so
+it passed with the seed ignored entirely → a seed-42-vs-43 assertion. `source_record_id` and its
+content-addressed corpus join had no test on either leg, and re-narrowing the corpus read silently
+re-points all 2,000 links while leaving them non-null. `carve_window` stringified the accession, so a
+null would have become `"nan"` and classified *minable*. `margin_nt >= flank_nt` was load-bearing with
+0 nt of slack and written down nowhere (flank 51 adds 3 self-masked windows). And
+`TBOX_REQUIRE_MINING_POOL` was armed **nowhere** — 6 of 9 gate clauses skipped green in CI by default;
+the committed-JSON clauses now *raise* on a missing file (stronger than a var, and it cannot rot into
+an unarmed one) while the parquet tier stays an explicit §8.5 step-local gate, documented in `ci.yml`.
+
+**Validation.** Gate PASS with 7 clauses: control **500/500 exact / 500/500 overlapping / 500/500
+masked**, requested == carved (500), natural 85/46,091, namespace compatible. Suite **1,880 passed /
+184 skipped** (from 1,873/164 on the merged step; +7 armed by the new data-present clauses). Decoy
+golden digest unchanged (`13061e3e…`); both artifact md5s unchanged (`84319675…`, `be562333…`).
+Seven sabotage reverts each bite the test **named** for the invariant, `^FAILED` grepped every time.
+
+**Corrections.** `pool.py`'s stale `23,147/23,535` → `23,146/23,532`; `0 of 2,751` → `0 of 2,750`
+(the coordinate-bearing denominator, disambiguated); the namespace report now publishes
+`n_distinct_normalized` / `n_unaddressable_normalized` so a version collapse (6 groups) no longer reads
+as a coverage shortfall.
+
+**Still open, recorded not hidden.** `controls_present` remains strictly implied by the other control
+clauses — kept with a test rather than deleted. The dev-log's earlier `+56` should have been `+61`
+(the two new files collect 61 tests); absolute suite counts are env-dependent and only the delta is
+meaningful. The union-prior liveness check asserts the prior *contributes*, not that any specific
+masking outcome depends on it — measured, no shipped number does.
+
+**CodeRabbit r1 (CLI rung — the GitHub route was rate-limited) — 1 Major, applied.** The new
+committed-file guard used `all(p in _TRACKED for p in missing)`, so a **mixed** missing set fell
+through to the skip branch: `_need(_POOL, _POOL_REPORT)` passes exactly such a set, so a checkout that
+had lost its committed report *and* its DVC parquet would have skipped green rather than raising —
+the same fail-open shape this change exists to remove, reintroduced by the fix for it. Now any missing
+tracked file raises regardless of what else is absent; verified to raise on a mixed set.
+
+**Commit.** `<SHA — reconcile against `git log main` at the P2 exit gate>`
