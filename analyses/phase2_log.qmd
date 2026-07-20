@@ -358,3 +358,233 @@ the working directory keeps its directory component instead of degrading to a ba
 `validate_report` is total against a non-mapping root and against non-int block counts / `n_parents`;
 and the Snakemake rule now **declares** the two `.sto` alignment inputs, so the D9 control cannot
 silently report "unmeasured" because an undeclared input was never built. Suite **1,764 / 162**.
+
+
+## Step P2-09 — 2026-07-19: the round-0 production Stage-1 scanner (authoring — SLURM submit-ack pending)
+
+**Inputs.** The three corpus parquets (`context_v0`, `labels_v0`, `split_assignments`), the pinned
+Caduceus-PS backbone (`kuleshov-group/caduceus-ps_seqlen-131k_d_model-256_n_layer-16` @ `d89eeb85`),
+and the P2-06-promoted winner config `g0.5_lr3e-4_a0.5` (γ=0.5, `optim.lr`=3e-4, `class_weight_alpha`=0.5).
+**Process.** `slurm/p2/train_production.sbatch` drives the real P2-04 entrypoint
+(`src/tbox_finder/train/train_stage1.py`) once, DDP×8, over the **full ADR-0004 D5 fold** (8,303
+records) with `save_checkpoint=true`. The step lands the sbatch + the code the full-fold retrain
+needs: a new `exclude_selection_val` config field threaded to `load_corpus_records`, its
+`__post_init__` guard, a hardened eval clause, and the tests — the checkpoint itself is produced only
+after the submit-ack. **Outputs (this commit).** `slurm/p2/train_production.sbatch` ·
+`train_stage1.py` (`exclude_selection_val`, the config guard, the `class_counts_scope.selection_val_excluded`
+cross-check in `_eval_val_ok`) · `tests/unit/test_production_fold.py` (9) + extended
+`tests/unit/test_eval_val_clause.py` + the `tests/ml/test_train_smoke.py` fixture. **Outputs (post-run,
+follow-up commit).** `data/processed/checkpoints/stage1_production/stage1.pt` (DVC-added) +
+`provenance.json`; `reports/p2/train_stage1_production.json`; W&B (offline) run id.
+
+**Two decisions (user sign-off 2026-07-19).** (1) **Full 8,303 D5 fold, no val metric reported.** A
+sweep must hold `selection_val` out of its points' gradients; once the config is fixed that reason is
+spent, so the shipped checkpoint trains the whole fold (`exclude_selection_val=false`). There is then
+no free held-out rung — the LOO holdout is P2-14's GATE-4 grading set (using it here would contaminate
+the §12 headline), and `selection_val` is now inside training — so the run reports **no** val number
+(`eval_val=false`) rather than an in-sample one. imp.md's "held-out val F1 reported" gate is therefore
+**met by refusal**, with the reason recorded. (2) **fp32, TF32 off — as ADR-0002 A7 pins, not bf16.**
+imp.md's Outputs line says "bf16/TF32", but no PRD line or ADR pins bf16 for Stage-1: PRD §10.3's
+"bf16/TF32 native" describes the A4000 *card*, and A7 disables TF32 for determinism (a re-enable moves
+metrics ≥1e-2). `train_stage1` exposes no precision knob; adding bf16 would need an ADR-0002 amendment.
+imp.md's wording is descriptive drift, flagged here for correction, not a pin.
+
+**The trap the code closes (the step's real yield).** `exclude_selection_val=false` + `eval_val=true`
+trains on the val fold and then scores it — and the disjointness evidence would **still read zero**,
+because `load_selection_val_records` measures overlap against the `inner_train` fold *definition*
+(window_dataset.py:948-957), which is disjoint from `selection_val` by construction however the
+optimiser was fed. The gate would go green on an in-sample number labelled `eval_split: selection_val`
+under a leakage block asserting disjointness — the P2-06a defect in a new costume: a total,
+evidence-guarded clause measuring the wrong population ([[gate-clauses-need-re-derivation]],
+[[nested-train-complement-is-the-loo-holdout]]). Closed at two levels: `Stage1TrainConfig.__post_init__`
+refuses the combination at construction (unreachable from Hydra), and `_eval_val_ok` now cross-checks
+the training scope's own `selection_val_excluded` flag so a hand-assembled or regenerated report that
+bypasses the config still fails. Both guards **sabotage-verified to bite in their own name**.
+
+**Validation.** Authoring gate: unit suite **1,426 passed / 156 skipped** (bare CI-exact) with **zero
+regressions** (the 2 `test_split_table_schema` failures reproduce identically on clean `main` — a
+pre-existing local NaN-comparison in the data state, not P2-09); ruff 0.15.15 + black 25.11.0 clean;
+the new clause + config guard each proven by sabotage. The **run** gate (DONE marker + self-validated
+report + checkpoint DVC-added) fires only after the SLURM submit-ack. **Compute** SLURM
+(`--gres=gpu:a4000:8`); measured est ≈ **1.8 GPU-h / ~0.23 h wall** (the P2-06 winner ran 1,160 steps
+@ 0.605 s median at this exact shape; scaled by 8303/7472). **Commit.** authoring SHA pending.
+
+## Step P2-09a — 2026-07-20: job 669 died on an un-composable override; the sbatch-override gate
+
+**Inputs.** SLURM job 669 (submitted 2026-07-19T15:04:49), `slurm/p2/train_production.sbatch`,
+`conf/train/stage1.yaml`, `reports/p2/train_production_669.{out,err}`.
+
+**What happened.** 669 sat `PENDING (Resources)` for **14 h 36 m** on the cryosparc-fragmented `gpu`
+partition, started at 05:41, and was dead by 05:43 — every rank on::
+
+    Could not override 'exclude_selection_val'.
+    Key 'exclude_selection_val' is not in struct
+
+P2-09 added `exclude_selection_val` as a `Stage1TrainConfig` field (train_stage1.py:181) and passed it
+on the `torchrun` line, but never added the key to `conf/train/stage1.yaml`. Hydra composes in **struct
+mode**, so an override naming an absent key is a hard `ConfigCompositionException` raised before any
+model is built. No GPU-hours were consumed; the cost was the queue wait. Everything upstream worked
+exactly as designed — all three parquets staged and hash-verified (`split_assignments` sha256
+`6388ba19…` = the committed LFS oid), 8×A4000 visible, `selective_scan_cuda` OK, HF cache warm — and
+the CodeRabbit-r1 reorder (stale-output `rm -f` moved *after* the staged-input asserts) meant the
+failure destroyed nothing.
+
+**Why the suite did not catch it.** `tests/unit/test_production_fold.py` exercises
+`_cfg_from_mapping({"exclude_selection_val": False, …})` — a **plain dict, one layer below Hydra** — and
+`sbatch --test-only` validates SLURM resources, never the command. The previous stanza records both
+P2-09 guards as "sabotage-verified to bite in their own name", and they were: at the *dataclass* and
+*report* layers. The composition layer between the shipped file and those guards was untested by
+anything. Quantified: with the config key removed — the exact defect — the pre-existing suite still
+reports **1,774 passed, 0 failed**. All 1,774 tests were blind to it. This is
+[[verify-the-line-you-ship]] again, one layer up: the pre-ack probe checked imports and staged inputs,
+never the override tokens the artifact actually ships.
+
+**Process.** Reproduced locally in the `tbox-finder-data` env (hydra 1.3.2) by composing
+`train/stage1` with the override parsed out of the sbatch's own bytes. Fixed by adding
+`exclude_selection_val: true` to `conf/train/stage1.yaml` — default `true` = the `inner_train` fold,
+matching the dataclass default, so only P2-09's explicit `false` changes behaviour.
+
+**Outputs.** `conf/train/stage1.yaml` (+ the key and its trap note) ·
+`tests/unit/test_sbatch_overrides.py` (**10 tests**) — reads every `slurm/**/*.sbatch`, extracts the
+override tokens after `-m <module>`, resolves each entrypoint's `config_name` by statically parsing its
+`@hydra.main` decorator (no import, no torch), and runs **real struct-mode composition**; 6 launch
+blocks across 5 files are gated · `.github/workflows/ci.yml` (+`hydra-core==1.3.2`,
+`omegaconf==2.3.0`, both == `envs/data.yml`) so the gate cannot `importorskip` green in CI.
+
+**A second hole, found while authoring.** The first cut keyed discovery off launcher names
+(`torchrun`/`python -m`) and **silently dropped** `slurm/p1/gtdb_continued_pretrain.sbatch`, which uses
+`accelerate launch` — a Hydra entrypoint with three ungated overrides. Discovery is now
+launcher-agnostic (`-m tbox_finder.…`), and `test_no_sbatch_launch_is_silently_dropped` asserts
+file-level coverage directly, so a fourth launcher cannot quietly shrink the gate.
+
+**Validation.** CI-exact **1,784 passed / 162 skipped**, against a **1,774**-passed baseline measured
+by the same command ignoring only the new file = **+10, zero regressions**; ruff 0.15.15 + black
+25.11.0 clean. Two sabotages, each naming its test ([[sabotage-attribution-names-the-test]]):
+removing the config key failed exactly `test_every_sbatch_override_composes[…train_production…]` +
+`test_exclude_selection_val_is_a_config_key_and_a_dataclass_field` (8 others still passing — a specific
+bite, not a blanket one); reverting discovery to launcher-names failed exactly
+`test_no_sbatch_launch_is_silently_dropped`, and the collected count fell 10 → 9 as the GTDB case
+vanished — the silent-drop signature made visible.
+
+**Decisions.** No sbatch change: the launch line was correct and the config was wrong, so fixing the
+config keeps the run shape (DDP×8, PRD §10.3) and the P2-06-selected config untouched. Re-submitting
+needs a fresh §9.3 ack — the changed tree voids the job-test 667 preflight. **Commit.** SHA pending.
+
+**Review (CodeRabbit r3, 2 minor — both applied).** (1) The dataclass-field assertion regexed the
+module text, so an indented `exclude_selection_val: bool` *anywhere* — another dataclass, a local
+annotation — would satisfy it while `Stage1TrainConfig` itself had lost the field; now parsed via
+`ast` and scoped to that class's own annotations (AST, not import: the module pulls in torch).
+(2) The `TBOX_REQUIRE_TRAIN_HYDRA` / `TBOX_REQUIRE_SWEEP_HYDRA` comments still read "CI installs no
+hydra" — stale the moment hydra was added. Chasing that flag found a **second, larger hole**: those two
+tiers had been **skipping silently in every CI run since P2-04** — `tests/ml/test_train_smoke.py`'s
+four composition tests plus `tests/ml/test_sweep_selection.py`'s overlay test, five tests, green by
+omission. Both vars are now armed. Verified the contract bites rather than decorating: with hydra
+absent and the vars armed the five FAIL loudly (`5 failed, 68 passed`); absent and unarmed they go
+`68 passed, 12 skipped` — the exact silent green CI had been reporting.
+
+## Step P2-09 (run) — 2026-07-20: job 671 — the round-0 production Stage-1 checkpoint
+
+**Inputs.** The three staged corpus parquets (re-staged after the cluster re-sync reverted
+`split_assignments.parquet` to a 132-byte LFS pointer; sha256 `6388ba19…` = committed oid, size
+5073699) · `slurm/p2/train_production.sbatch` @ `0f8d527`.
+
+**Process.** Submitted under the §9.3 ack after a pre-ack probe that **composed the sbatch's own
+override tokens in `tbox-ml-dna` on the cluster checkout** — the check whose absence cost job 669.
+Node `two` had gone fully idle (the cryosparc pair holding 8/8 ended after ~14 h), so 671 started
+immediately and ran **14 m 12 s** wall, DDP×8.
+
+**Outputs.** `data/processed/checkpoints/stage1_production/{stage1.pt,provenance.json}` (DVC-tracked,
+`stage1_production.dvc`, md5 `c1b5d244…dir`, 2 files / 31,038,761 B) ·
+`reports/p2/train_stage1_production.json` (git-tracked) · `reports/p2/train_stage1_production.DONE`.
+
+**Validation — artifact-based (`sacct` off, §9.3 step 8).** (a) `squeue -j 671` empty; (b) DONE
+present; (c) checkpoint + sidecar present; (d) report `gate.overall_pass = true` with all seven
+clauses true (`train_step_ran`, `loss_finite`, `grads_finite`, `class_counts_from_stream`,
+`gradient_checkpointing_applied`, `provenance_complete`, `eval_val_scored_on_disjoint_fold`);
+(e) `.err` **897 B — expected non-empty** (W&B-offline chatter), scanned for
+`Traceback|Error|FAILED|assert|OOM|Killed` → **no hits**, not zero-gated. Plus the
+`PRODUCTION_DONE job=671` breadcrumb.
+
+**The numbers.** `world_size = 8`, `n_steps = 1290` — which is exactly the independent prediction for
+ws8 × bs8 × 10 epochs over 8,303 records ((8303//8)//8 × 10 = 1,290), so the step budget is confirmed
+from two directions rather than one. Fold scope: `n_records = 8303`, `n_training_fold_records = 8303`,
+`selection_val_excluded = false`, `n_selection_val_excluded = 0`, `fold_scope = "train"` (not
+`inner_train`) — the **full ADR-0004 D5 fold**, user decision (1). Peak VRAM **1.0948 GiB/rank**,
+matching the P2-05 sizing measurement to four decimals. Checkpoint sha256 `5e9939c3…` verified
+**locally after rsync against the hash the run itself recorded**.
+
+**No val metric, by construction.** `eval_requested = false`, `eval_metrics = null`,
+`eval_scope = null`, `gate4_graded = false`. imp.md's "held-out val F1 reported" gate is **met by
+refusal** (user decision (1)): `selection_val` is now inside the training set and the LOO holdout is
+P2-14's grading set, so no free rung exists. The `eval_val_scored_on_disjoint_fold` clause is
+vacuously true here — but *grounded* vacuity: `eval_requested = false` is recorded evidence that
+nothing was scored, not an absent-evidence default ([[clauses-must-guard-emptiness]]).
+
+**Two honest caveats.** (i) `provenance.git_dirty = true`. Investigated rather than waved through:
+`git diff --stat` over tracked non-`data` paths is **empty** — the dirt is exactly the staged
+`split_assignments.parquet` (real content vs the committed LFS pointer, hash-verified) plus the run's
+own untracked outputs. **Zero tracked code differs**, so `git_sha 0f8d527` does describe what ran.
+(ii) The report's top-level `step` field reads `"P2-04"` — the entrypoint's own label, inherited; the
+checkpoint sidecar correctly carries `step: "P2-09"`. Cosmetic, recorded here rather than silently
+reconciled.
+
+**Decisions.** Round-0 is **not** gate-graded — GATE-4 is P2-14 on the leave-one-order-out holdout.
+Mining is P2-10. **Commit.** SHA pending.
+
+**Review (CodeRabbit, run commit) — 1 rejected, 1 accepted.** *Rejected:*
+`eval_val_scored_on_disjoint_fold: true` was flagged as "skipped evaluation represented as
+successful validation". It is not: `_eval_val_ok`'s not-requested branch returns
+`requested is False and metrics_block is None and scope is None` — a **positive three-part
+coherence assertion**, which returns *False* for a run that skipped eval yet still carried metrics.
+Setting it false as suggested would fail `overall_pass` on every correct production run. The finding
+read the JSON, not the clause. *Accepted:* `provenance_complete: true` beside `git_dirty: true` was a
+real gap — `_provenance_complete` ignored `git_dirty` entirely, so a run with genuinely modified
+**code** would have certified identically, its `git_sha` naming a commit that does not contain what
+ran. Requiring a clean tree would fail every cluster run (no git-lfs there ⇒ re-staging dirties the
+tree by construction), so the fix **classifies** instead of prohibiting: `_git_dirty_paths()` records
+the porcelain path list, and the clause requires every dirty path to be data-staging, failing closed
+when a dirty tree carries no path list. Sabotage-verified — reverting to the old always-true form
+fails exactly `test_provenance_clause_separates_staged_data_dirt_from_dirty_code` and
+`test_committed_production_report_records_its_audited_dirty_tree`.
+
+**The checkpoint was NOT re-run** (user decision 2026-07-20): ADR-0002 A7 gives metric-level, not
+bitwise, determinism, so regenerating the report purely to satisfy the new clause would ship
+*different weights* for no scientific gain. Consequence, stated plainly rather than buried: job 671's
+committed report predates the `git_dirty_paths` field, so the strengthened clause **re-derives
+`provenance_complete: False` against its stored `True`**. The stored claim is nonetheless *correct* —
+audited at retrieval on the cluster checkout at `0f8d527`, where `git status --porcelain` showed only
+` M data/processed/splits/split_assignments.parquet` plus untracked outputs and `git diff --stat`
+over tracked non-`data` paths was **empty**. Following the P2-06 precedent (`test_sweep_selection.py`
+locked the 36 points' audited flags), that manual audit is now itself a test: it pins both the stored
+`True` and the re-derived `False`, and fails loudly if the report is ever regenerated — at which
+point the paths exist and the lock must be replaced by the automatic check. Every run from P2-10 on
+records `git_dirty_paths` and is verified without a human in the loop. **Validation.** CI-exact, all
+gates armed: **1,787 passed / 162 skipped** (+3, zero regressions); ruff + black clean.
+
+**Review (follow-up round, 3 findings — all applied).** Two majors on the provenance fix itself,
+both real. (1) `_git_dirty()` and `_git_dirty_paths()` each shelled out to `git status`
+independently, so the boolean and the path list could describe **two different working trees** — and
+the classification would then be judging evidence that never co-existed. Now one
+`_git_status_snapshot()` is read in `build_report` and passed to both. (2) The line-based parser
+split on a literal `" -> "` to strip rename origins, but a **filename may legally contain that
+string** — it would report a phantom path and could even rewrite a dirty source file into a
+`data/`-prefixed one and thereby certify provenance. Now `--porcelain=v1 -z`, parsed structurally:
+NUL-separated `XY <path>` records, with a rename's extra origin field consumed and discarded.
+(3, minor) `git_sha` was checked as a 40-character string; now `[0-9a-f]{40}`. Verified against the
+**real** tree, not only the synthetic fixture: the parser reproduces `git status --porcelain`'s own
+output on this worktree and correctly classifies `src/…` and `tests/…` as code, so a run made right
+now would rightly refuse to certify. **Validation.** CI-exact, all gates armed: **1,788 passed / 162
+skipped**, zero regressions; ruff + black clean.
+
+**Review (final round, 1 major — applied, and the sharpest of the step).**
+`test_build_report_reads_the_working_tree_only_once` was **tautological**: it called
+`_git_status_snapshot()` directly and asserted one call — proving only that calling a function once
+calls it once. It never drove `build_report`, the thing the invariant is about. Demonstrated rather
+than argued: re-applying the double-read defect to `build_report` and running the OLD test **passes**
+(`1 passed`), while the rewritten test — which now drives the real `build_report` and asserts both
+that exactly one `status` call occurs and that the two derived fields agree — **fails**. A test named
+for an invariant it does not exercise is the same failure as [[tests-can-specify-the-bug]], and it
+survived my own sabotage discipline because I sabotaged the *implementation* and watched a test that
+was never wired to it. Sabotaging the code proves a test bites; it does not prove the test is
+connected to the code. **Validation.** CI-exact, all gates armed: **1,788 passed / 162 skipped**,
+zero regressions; ruff + black clean.

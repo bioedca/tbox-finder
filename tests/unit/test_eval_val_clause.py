@@ -52,7 +52,18 @@ def _metrics() -> dict:
 
 
 def _report(**over) -> dict:
-    rep = {"eval_requested": True, "eval_scope": _scope(), "eval_metrics": _metrics()}
+    rep = {
+        "eval_requested": True,
+        "eval_scope": _scope(),
+        "eval_metrics": _metrics(),
+        # The TRAINING scope. A scored val fold is only disjoint from THIS RUN if the run
+        # actually withheld it — `selection_val_excluded` is that fact, measured off the
+        # loader's own emitted records (window_dataset.py). A well-formed inner_train run
+        # carries it True; P2-09 (full D5 fold) carries it False and does not request an
+        # eval, so it never reaches this clause. See test_gate_is_false_when_the_run_trained
+        # _on_the_eval_fold for why the clause reads it.
+        "class_counts_scope": {"selection_val_excluded": True},
+    }
     rep.update(over)
     return rep
 
@@ -100,6 +111,38 @@ def test_gate_is_false_when_the_fold_sits_in_the_loo_holdout():
     rep["eval_scope"]["leakage"]["n_designated_loo_holdout"] = 778
     assert _eval_val_ok(rep) is False
     assert derive_clauses(rep)["eval_val_scored_on_disjoint_fold"] is False
+
+
+def test_gate_is_false_when_the_run_trained_on_the_eval_fold():
+    """P2-09's trap: the disjointness evidence is measured against the inner_train fold
+    DEFINITION, not against the records this run trained on. A production run with
+    ``exclude_selection_val=False`` trains on all 8,303 records — selection_val included —
+    and ``load_selection_val_records`` STILL reports ``shared_record_ids_with_inner_train:
+    0``, because that overlap is computed against a fold it rebuilds from the split table,
+    disjoint from selection_val by construction however the optimiser was fed. Zero,
+    truthfully measured, of the wrong population.
+
+    Every leakage clause above passes this report. The clause is saved from certifying it
+    only by cross-checking the TRAINING scope's own record of whether it withheld the fold.
+    ``__post_init__`` refuses the config combination, but a hand-assembled or regenerated
+    report never passes through the config — the gate has to hold on its own evidence
+    ([[gate-clauses-need-re-derivation]]).
+    """
+    # The report a full-fold run would produce if it also (incoherently) scored the val fold:
+    # leakage all-zero, real metrics, selection_val NOT excluded from training.
+    rep = _report()
+    rep["class_counts_scope"] = {"selection_val_excluded": False}
+    assert _eval_val_ok(rep) is False
+    assert derive_clauses(rep)["eval_val_scored_on_disjoint_fold"] is False
+    # Sabotage the whole training-scope block: absent, non-mapping, or missing the field must
+    # all fail closed — the clause cannot verify disjointness-from-training without it.
+    for bad in (None, {}, {"training_fold_only": True}, "excluded", {"selection_val_excluded": 1}):
+        rep = _report()
+        rep["class_counts_scope"] = bad
+        assert _eval_val_ok(rep) is False, f"class_counts_scope={bad!r} was accepted"
+    # And the well-formed True case (already the default fixture) still passes, so the new
+    # cross-check is a filter, not a blanket reject.
+    assert _eval_val_ok(_report()) is True
 
 
 def test_gate_is_false_when_the_fold_reaches_outside_the_training_fold():

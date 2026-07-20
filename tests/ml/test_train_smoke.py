@@ -24,6 +24,7 @@ from __future__ import annotations
 import json
 import math
 import os
+import re
 from pathlib import Path
 
 import pytest
@@ -340,6 +341,11 @@ def _valid_report() -> dict:
             "training_fold_only": True,
             "occurrence": 0,
             "weighted_draw_stream": False,
+            # This report claims a scored selection-val fold, so the run that produced it
+            # must have withheld that fold from training — the P2-09 cross-check the eval
+            # clause reads (see tests/unit/test_eval_val_clause.py::
+            # test_gate_is_false_when_the_run_trained_on_the_eval_fold).
+            "selection_val_excluded": True,
         },
         "schema_version": "1",
         "step": "P2-04",
@@ -618,6 +624,160 @@ def test_provenance_clause_cross_checks_the_duplicated_seed() -> None:
     assert T.derive_clauses(report)["provenance_complete"] is False
 
 
+def test_provenance_clause_separates_staged_data_dirt_from_dirty_code() -> None:
+    """P2-09: `git_dirty` was ignored outright, so job 671 certified complete provenance
+    beside `git_dirty: true`. True in fact — only the re-staged corpus parquet differed —
+    but the gate did not establish it; a run with modified TRAINING CODE certified
+    identically, with a `git_sha` naming a commit that does not contain what ran.
+
+    Requiring a clean tree instead would fail every cluster run: the cluster has no
+    git-lfs, so each run re-stages `split_assignments.parquet` over its committed pointer
+    and the tree is dirty by construction. Hence classification, not prohibition.
+    """
+    report = _valid_report()
+    base = {"git_sha": "a", "env_lock_sha256": "d", "seed": 42}
+
+    # The real job-671 shape: dirty, but only the staged corpus → certifies.
+    report["provenance"] = {
+        **base,
+        "git_dirty": True,
+        "git_dirty_paths": ["data/processed/splits/split_assignments.parquet"],
+    }
+    assert T.derive_clauses(report)["provenance_complete"] is True
+
+    # One dirty CODE path anywhere in the list voids it, even beside legitimate data dirt.
+    for code_path in (
+        "src/tbox_finder/train/train_stage1.py",
+        "conf/train/stage1.yaml",
+        "slurm/p2/train_production.sbatch",
+    ):
+        report["provenance"] = {
+            **base,
+            "git_dirty": True,
+            "git_dirty_paths": ["data/processed/splits/split_assignments.parquet", code_path],
+        }
+        assert T.derive_clauses(report)["provenance_complete"] is False, code_path
+
+    # Dirty with NO path list is unverifiable, not innocent — fail closed. This is the
+    # exact pre-P2-09 shape, and it must no longer certify.
+    report["provenance"] = {**base, "git_dirty": True}
+    assert T.derive_clauses(report)["provenance_complete"] is False
+    report["provenance"] = {**base, "git_dirty": True, "git_dirty_paths": []}
+    assert T.derive_clauses(report)["provenance_complete"] is False
+    report["provenance"] = {**base, "git_dirty": True, "git_dirty_paths": "data/x"}
+    assert T.derive_clauses(report)["provenance_complete"] is False
+
+    # A clean tree still certifies, and the pre-existing fixtures (no git_dirty key) are
+    # deliberately unaffected — see the BOUNDARY note in _provenance_complete.
+    report["provenance"] = {**base, "git_dirty": False}
+    assert T.derive_clauses(report)["provenance_complete"] is True
+
+
+def test_git_dirty_paths_parses_nul_delimited_porcelain() -> None:
+    """`--porcelain=v1 -z`: NUL-separated `XY <path>`, renames carry an extra origin field.
+
+    The line-based first cut split on a literal `" -> "`, which a FILENAME may legally
+    contain — it would have reported a phantom path and, worse, could have turned a dirty
+    source file into a `data/`-prefixed one and certified provenance (CodeRabbit, P2-09).
+    """
+    seen = {}
+
+    def fake_git(*args: str):
+        seen["args"] = args
+        return (
+            " M data/processed/splits/split_assignments.parquet\0"
+            "M  src/tbox_finder/train/train_stage1.py\0"
+            # rename: destination first, then the origin field that must be consumed
+            "R  conf/train/stage1.yaml\0conf/old.yaml\0"
+            # a filename containing the literal " -> " must survive intact
+            "M  data/raw/weird -> name.txt\0"
+        )
+
+    orig = T._git
+    T._git = fake_git
+    try:
+        paths = T._git_dirty_paths()
+        dirty = T._git_dirty()
+    finally:
+        T._git = orig
+
+    assert paths == [
+        "conf/train/stage1.yaml",
+        "data/processed/splits/split_assignments.parquet",
+        "data/raw/weird -> name.txt",
+        "src/tbox_finder/train/train_stage1.py",
+    ]
+    assert "conf/old.yaml" not in paths, "the rename ORIGIN is not a path on disk"
+    assert dirty is True
+    assert "-z" in seen["args"] and "--untracked-files=no" in seen["args"]
+
+    # One snapshot, two derivations: they must never disagree.
+    T._git = lambda *a: ""
+    try:
+        assert T._git_dirty() is False
+        assert T._git_dirty_paths() == []
+    finally:
+        T._git = orig
+
+    T._git = lambda *a: None
+    try:
+        assert T._git_dirty() is None
+        assert T._git_dirty_paths() is None
+    finally:
+        T._git = orig
+
+
+def test_build_report_reads_the_working_tree_only_once() -> None:
+    """git_dirty and git_dirty_paths must come from ONE snapshot, not two reads.
+
+    Two `git status` calls can straddle a change to the tree, producing a boolean and a
+    path list that never co-existed — and `_provenance_complete` would then classify
+    evidence from two different worlds.
+
+    This drives the REAL `build_report`. An earlier cut of this test called
+    `_git_status_snapshot()` directly and asserted one call, which is a tautology: it
+    proved that calling a function once calls it once, and would have stayed green with
+    `build_report` reading the tree twice — the exact defect it is named for.
+    """
+    calls: list[tuple[str, ...]] = []
+    orig = T._git
+
+    def counting_git(*args: str):
+        calls.append(args)
+        if args and args[0] == "status":
+            return " M data/processed/splits/split_assignments.parquet\0"
+        if args and args[0] == "rev-parse":
+            return "a" * 40
+        return ""
+
+    T._git = counting_git
+    try:
+        report = T.build_report(
+            cfg=T.Stage1TrainConfig(),
+            class_counts=[10, 2, 1, 1, 1, 1, 1, 1],
+            counts_scope={"n_records": 1, "n_training_fold_records": 1, "full_stream": True},
+            n_blocks=16,
+            n_blocks_wrapped=16,
+            hf_flag_supported=False,
+            losses=[1.6, 1.5],
+            grads_finite=True,
+            world_size=1,
+            wandb_run_id=None,
+        )
+    finally:
+        T._git = orig
+
+    status_calls = [c for c in calls if c and c[0] == "status"]
+    assert len(status_calls) == 1, f"build_report read the working tree {len(status_calls)}x"
+
+    prov = report["provenance"]
+    # Both fields derive from that single read, and they agree.
+    assert prov["git_dirty"] is True
+    assert prov["git_dirty_paths"] == ["data/processed/splits/split_assignments.parquet"]
+    # Data-only dirt ⇒ the SHA still describes the code, so the clause certifies.
+    assert report["gate"]["provenance_complete"] is True
+
+
 def test_cublas_workspace_config_pins_torch_s_own_literals() -> None:
     """Only the values torch itself accepts for deterministic cuBLAS (§8.3; ADR-0002 A6).
 
@@ -777,7 +937,56 @@ def test_committed_report_was_produced_from_a_clean_tree() -> None:
         "the committed smoke report was generated from a dirty tree — its git_sha names a "
         "commit that does not contain the code that produced it; re-run after committing"
     )
-    assert isinstance(prov["git_sha"], str) and len(prov["git_sha"]) == 40
+    assert isinstance(prov["git_sha"], str) and re.fullmatch(
+        r"[0-9a-f]{40}", prov["git_sha"]
+    ), f"git_sha must be 40 lowercase hex chars, got {prov['git_sha']!r}"
+
+
+_PRODUCTION_REPORT = _REPO / "reports" / "p2" / "train_stage1_production.json"
+
+
+def test_committed_production_report_records_its_audited_dirty_tree() -> None:
+    """P2-09 job 671 — the ONE committed report whose tree was legitimately dirty.
+
+    Unlike the smoke report above, a cluster run cannot come from a clean tree: the cluster
+    has no git-lfs, so every run re-stages `split_assignments.parquet` over its committed
+    132-byte pointer and `git status` is dirty by construction. The P2-06 precedent
+    (`test_sweep_selection.py`, 36 points) handled this by auditing at retrieval and locking
+    the flag with a test; this is that lock for the production checkpoint.
+
+    AUDITED at retrieval, 2026-07-20, on the cluster checkout at 0f8d527:
+    `git status --porcelain` showed exactly ` M data/processed/splits/split_assignments.parquet`
+    plus untracked run outputs, and `git diff --stat` over tracked non-`data` paths was
+    EMPTY — zero tracked code differed, so `git_sha` does describe what ran.
+
+    The report PREDATES the `git_dirty_paths` field added in the same step, so the
+    strengthened `_provenance_complete` cannot re-confirm that audit from the recorded
+    fields — it re-derives False against a stored True. That divergence is deliberate and
+    is pinned here rather than left to be rediscovered: the checkpoint was NOT re-run,
+    because ADR-0002 A7 gives metric-level (not bitwise) determinism, so regenerating the
+    report purely to satisfy a gate would ship different weights for no scientific gain
+    (user decision, 2026-07-20). Every run from P2-10 on records the paths and is verified
+    automatically; when this file is regenerated, this test must be updated consciously.
+    """
+    if not _PRODUCTION_REPORT.is_file():
+        _fail_or_skip("TBOX_REQUIRE_TRAIN_SMOKE", f"no committed report at {_PRODUCTION_REPORT}")
+    report = json.loads(_PRODUCTION_REPORT.read_text())
+    prov = report["provenance"]
+    assert isinstance(prov["git_sha"], str) and re.fullmatch(
+        r"[0-9a-f]{40}", prov["git_sha"]
+    ), f"git_sha must be 40 lowercase hex chars, got {prov['git_sha']!r}"
+    assert prov["git_dirty"] is True, (
+        "the production report's git_dirty changed — re-audit the working tree at "
+        "retrieval and update this test's recorded audit"
+    )
+    assert "git_dirty_paths" not in prov, (
+        "this report now carries git_dirty_paths — it was regenerated by post-P2-09 code, "
+        "so the manual-audit lock above is obsolete: assert the paths are data-only instead"
+    )
+    # The stored clause reflects the pre-fix contract; the re-derivation reflects the new
+    # one. Pinning BOTH is what makes the divergence impossible to drift through silently.
+    assert report["gate"]["provenance_complete"] is True
+    assert T.derive_clauses(report)["provenance_complete"] is False
 
 
 def test_committed_report_validates_and_its_clauses_re_derive() -> None:
