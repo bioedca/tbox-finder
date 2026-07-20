@@ -24,6 +24,7 @@ from __future__ import annotations
 import json
 import math
 import os
+import re
 from pathlib import Path
 
 import pytest
@@ -672,35 +673,81 @@ def test_provenance_clause_separates_staged_data_dirt_from_dirty_code() -> None:
     assert T.derive_clauses(report)["provenance_complete"] is True
 
 
-def test_git_dirty_paths_parses_porcelain_including_renames() -> None:
-    """`XY PATH`, and `XY OLD -> NEW` for renames — the NEW path is the one that exists."""
+def test_git_dirty_paths_parses_nul_delimited_porcelain() -> None:
+    """`--porcelain=v1 -z`: NUL-separated `XY <path>`, renames carry an extra origin field.
+
+    The line-based first cut split on a literal `" -> "`, which a FILENAME may legally
+    contain — it would have reported a phantom path and, worse, could have turned a dirty
+    source file into a `data/`-prefixed one and certified provenance (CodeRabbit, P2-09).
+    """
     seen = {}
 
     def fake_git(*args: str):
         seen["args"] = args
         return (
-            " M data/processed/splits/split_assignments.parquet\n"
-            "M  src/tbox_finder/train/train_stage1.py\n"
-            "R  conf/old.yaml -> conf/train/stage1.yaml\n"
-            "\n"
+            " M data/processed/splits/split_assignments.parquet\0"
+            "M  src/tbox_finder/train/train_stage1.py\0"
+            # rename: destination first, then the origin field that must be consumed
+            "R  conf/train/stage1.yaml\0conf/old.yaml\0"
+            # a filename containing the literal " -> " must survive intact
+            "M  data/raw/weird -> name.txt\0"
         )
 
     orig = T._git
     T._git = fake_git
     try:
         paths = T._git_dirty_paths()
+        dirty = T._git_dirty()
     finally:
         T._git = orig
+
     assert paths == [
         "conf/train/stage1.yaml",
         "data/processed/splits/split_assignments.parquet",
+        "data/raw/weird -> name.txt",
         "src/tbox_finder/train/train_stage1.py",
     ]
-    assert "--untracked-files=no" in seen["args"], "untracked run outputs are not code dirt"
+    assert "conf/old.yaml" not in paths, "the rename ORIGIN is not a path on disk"
+    assert dirty is True
+    assert "-z" in seen["args"] and "--untracked-files=no" in seen["args"]
+
+    # One snapshot, two derivations: they must never disagree.
+    T._git = lambda *a: ""
+    try:
+        assert T._git_dirty() is False
+        assert T._git_dirty_paths() == []
+    finally:
+        T._git = orig
 
     T._git = lambda *a: None
     try:
+        assert T._git_dirty() is None
         assert T._git_dirty_paths() is None
+    finally:
+        T._git = orig
+
+
+def test_build_report_reads_the_working_tree_only_once() -> None:
+    """git_dirty and git_dirty_paths must come from ONE snapshot, not two reads.
+
+    Two `git status` calls can straddle a change to the tree, producing a boolean and a
+    path list that never co-existed — and `_provenance_complete` would then classify
+    evidence from two different worlds.
+    """
+    calls = []
+    orig = T._git
+
+    def counting_git(*args: str):
+        calls.append(args)
+        if args and args[0] == "status":
+            return " M data/processed/splits/split_assignments.parquet\0"
+        return "0" * 40 if args and args[0] == "rev-parse" else ""
+
+    T._git = counting_git
+    try:
+        T._git_status_snapshot()
+        before = len([c for c in calls if c and c[0] == "status"])
+        assert before == 1
     finally:
         T._git = orig
 
@@ -864,7 +911,9 @@ def test_committed_report_was_produced_from_a_clean_tree() -> None:
         "the committed smoke report was generated from a dirty tree — its git_sha names a "
         "commit that does not contain the code that produced it; re-run after committing"
     )
-    assert isinstance(prov["git_sha"], str) and len(prov["git_sha"]) == 40
+    assert isinstance(prov["git_sha"], str) and re.fullmatch(
+        r"[0-9a-f]{40}", prov["git_sha"]
+    ), f"git_sha must be 40 lowercase hex chars, got {prov['git_sha']!r}"
 
 
 _PRODUCTION_REPORT = _REPO / "reports" / "p2" / "train_stage1_production.json"
@@ -897,7 +946,9 @@ def test_committed_production_report_records_its_audited_dirty_tree() -> None:
         _fail_or_skip("TBOX_REQUIRE_TRAIN_SMOKE", f"no committed report at {_PRODUCTION_REPORT}")
     report = json.loads(_PRODUCTION_REPORT.read_text())
     prov = report["provenance"]
-    assert isinstance(prov["git_sha"], str) and len(prov["git_sha"]) == 40
+    assert isinstance(prov["git_sha"], str) and re.fullmatch(
+        r"[0-9a-f]{40}", prov["git_sha"]
+    ), f"git_sha must be 40 lowercase hex chars, got {prov['git_sha']!r}"
     assert prov["git_dirty"] is True, (
         "the production report's git_dirty changed — re-audit the working tree at "
         "retrieval and update this test's recorded audit"

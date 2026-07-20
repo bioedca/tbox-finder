@@ -584,15 +584,36 @@ def _git_sha() -> str | None:
     return sha or None
 
 
-def _git_dirty() -> bool | None:
+#: Sentinel for "no snapshot supplied — go read one". A plain ``None`` default is
+#: unusable here because ``None`` is itself a meaningful snapshot value (git absent).
+_UNSET: Any = object()
+
+
+def _git_status_snapshot() -> str | None:
+    """ONE ``git status`` read (``None`` if git is unavailable).
+
+    Both ``git_dirty`` and ``git_dirty_paths`` are derived from this single snapshot. Two
+    separate reads could observe two different working trees, and a report whose boolean
+    says "dirty" while its path list came from a later, cleaner state is worse than either
+    alone — the classification in :func:`_provenance_complete` would be judging evidence
+    that never co-existed (CodeRabbit, P2-09).
+
+    ``--porcelain=v1 -z`` is NUL-delimited, so a filename containing the literal ``" -> "``
+    cannot be mistaken for a rename record; ``--untracked-files=no`` because a run's own
+    fresh outputs are not modifications to the code the SHA names.
+    """
+    return _git("status", "--porcelain=v1", "-z", "--untracked-files=no")
+
+
+def _git_dirty(snapshot: Any = _UNSET) -> bool | None:
     """True iff tracked files differ from HEAD (``None`` if git is unavailable).
 
     Recorded because a bare SHA can be actively misleading: a report generated from an
     uncommitted tree names a commit that does **not** contain the code that produced it.
     ``git_dirty=true`` says so out loud instead of letting the SHA imply otherwise (§11).
     """
-    status = _git("status", "--porcelain", "--untracked-files=no")
-    return None if status is None else bool(status.strip())
+    raw = _git_status_snapshot() if snapshot is _UNSET else snapshot
+    return None if raw is None else bool(raw.replace("\0", "").strip())
 
 
 #: Path prefixes whose dirt cannot change what the code did. Only the staged corpus
@@ -603,7 +624,7 @@ def _git_dirty() -> bool | None:
 _DATA_STAGING_PREFIXES = ("data/",)
 
 
-def _git_dirty_paths() -> list[str] | None:
+def _git_dirty_paths(snapshot: Any = _UNSET) -> list[str] | None:
     """Tracked paths differing from HEAD (``None`` if git is unavailable).
 
     ``git_dirty`` alone is not actionable: it collapses "the staged corpus parquet differs
@@ -613,20 +634,27 @@ def _git_dirty_paths() -> list[str] | None:
     :func:`_provenance_complete` tell the two apart instead of ignoring ``git_dirty``
     entirely, which is what let job 671's report certify complete provenance beside
     ``git_dirty: true`` (CodeRabbit, P2-09).
+
+    Parses ``--porcelain=v1 -z`` structurally: records are NUL-separated ``XY <path>``, and
+    a rename/copy (X or Y in ``RC``) is followed by ONE extra NUL field holding the origin
+    path, which is consumed and discarded — the destination is what exists on disk.
     """
-    status = _git("status", "--porcelain", "--untracked-files=no")
-    if status is None:
+    raw = _git_status_snapshot() if snapshot is _UNSET else snapshot
+    if raw is None:
         return None
+    fields = raw.split("\0")
     paths: list[str] = []
-    for line in status.splitlines():
-        if not line.strip():
+    i = 0
+    while i < len(fields):
+        entry = fields[i]
+        i += 1
+        if len(entry) < 4:  # "XY " plus at least one character of path
             continue
-        # Porcelain v1: "XY PATH", and "XY OLD -> NEW" for renames/copies.
-        path = line[3:].strip() if len(line) > 3 else line.strip()
-        if " -> " in path:
-            path = path.split(" -> ", 1)[1].strip()
+        status, path = entry[:2], entry[3:]
         if path:
             paths.append(path)
+        if "R" in status or "C" in status:
+            i += 1  # the origin-path field belongs to this record
     return sorted(set(paths))
 
 
@@ -1273,6 +1301,10 @@ def build_report(
     """Assemble the P2-04 smoke report. Clauses are **re-derived**, never asserted."""
     from tbox_finder.models.caduceus_backbone import REPO_ID, REVISION
 
+    # Read the working-tree state ONCE, here, so `git_dirty` and `git_dirty_paths` below
+    # describe the same instant (CodeRabbit, P2-09).
+    _status_snapshot = _git_status_snapshot()
+
     report: dict[str, Any] = {
         "schema_version": SCHEMA_VERSION,
         "step": STEP,
@@ -1338,11 +1370,14 @@ def build_report(
         "eval_requested": bool(eval_requested),
         "provenance": {
             "git_sha": _git_sha(),
-            "git_dirty": _git_dirty(),
+            # ONE snapshot feeds both fields — two `git status` reads could observe two
+            # different trees, and a boolean that disagrees with its own path list is
+            # worse than either alone. See _git_status_snapshot.
+            "git_dirty": _git_dirty(_status_snapshot),
             # WHICH paths are dirty, so provenance_complete can separate staged-corpus
             # dirt (unavoidable; the cluster has no git-lfs) from modified code (which
             # would make git_sha a lie). See _provenance_complete.
-            "git_dirty_paths": _git_dirty_paths(),
+            "git_dirty_paths": _git_dirty_paths(_status_snapshot),
             "env_lock_sha256": _env_lock_sha256(),
             "seed": int(cfg.seed),
             "config_path": CONFIG_PATH,

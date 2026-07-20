@@ -560,3 +560,18 @@ locked the 36 points' audited flags), that manual audit is now itself a test: it
 point the paths exist and the lock must be replaced by the automatic check. Every run from P2-10 on
 records `git_dirty_paths` and is verified without a human in the loop. **Validation.** CI-exact, all
 gates armed: **1,787 passed / 162 skipped** (+3, zero regressions); ruff + black clean.
+
+**Review (follow-up round, 3 findings — all applied).** Two majors on the provenance fix itself,
+both real. (1) `_git_dirty()` and `_git_dirty_paths()` each shelled out to `git status`
+independently, so the boolean and the path list could describe **two different working trees** — and
+the classification would then be judging evidence that never co-existed. Now one
+`_git_status_snapshot()` is read in `build_report` and passed to both. (2) The line-based parser
+split on a literal `" -> "` to strip rename origins, but a **filename may legally contain that
+string** — it would report a phantom path and could even rewrite a dirty source file into a
+`data/`-prefixed one and thereby certify provenance. Now `--porcelain=v1 -z`, parsed structurally:
+NUL-separated `XY <path>` records, with a rename's extra origin field consumed and discarded.
+(3, minor) `git_sha` was checked as a 40-character string; now `[0-9a-f]{40}`. Verified against the
+**real** tree, not only the synthetic fixture: the parser reproduces `git status --porcelain`'s own
+output on this worktree and correctly classifies `src/…` and `tests/…` as code, so a run made right
+now would rightly refuse to certify. **Validation.** CI-exact, all gates armed: **1,788 passed / 162
+skipped**, zero regressions; ruff + black clean.
