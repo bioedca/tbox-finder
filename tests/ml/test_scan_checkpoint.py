@@ -26,7 +26,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from tbox_finder.data.window_dataset import PAD_TOKEN_ID, encode_bases
+from tbox_finder.data.window_dataset import PAD_TOKEN_ID, WINDOW_NT, encode_bases
 from tbox_finder.infer.reconcile import NUM_CLASSES
 from tbox_finder.infer.scan import (
     DEFAULT_CHECKPOINT,
@@ -178,6 +178,19 @@ def test_non_positive_batch_size_is_refused(bad):
     torch = pytest.importorskip("torch")
     with pytest.raises(ScanError, match="batch_size must be positive"):
         scan_sequence(_stub_model(torch), _seq(200), device="cpu", batch_size=bad)
+
+
+def test_an_empty_window_set_is_named_not_left_to_torch_cat():
+    """CodeRabbit r1. `scan_sequence` cannot produce zero windows, but
+    `scan_encoded_windows` is public and the trainer calls it directly. Unguarded, the batch
+    loop just never runs and `torch.cat([])` raises "expected a non-empty list of Tensors" —
+    an error naming neither the caller's mistake nor this module."""
+    torch = pytest.importorskip("torch")
+    from tbox_finder.infer.scan import scan_encoded_windows
+
+    empty = np.empty((0, WINDOW_NT), dtype=np.int16)
+    with pytest.raises(ScanError, match="no windows"):
+        scan_encoded_windows(_stub_model(torch), empty, [], 100, device="cpu")
 
 
 # ═════════════════════════════════════════════════════════════════════════════

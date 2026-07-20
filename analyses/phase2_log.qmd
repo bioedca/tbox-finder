@@ -701,3 +701,9 @@ checkpoint gate is armed by the artifact's *presence*, so it skips in CI — it 
 real `stage1.pt` (sha256 verified against the P2-09 provenance) and its values are recorded above.
 
 **Commit.** `<SHA — reconcile against `git log main` at the P2 exit gate>`
+
+**CodeRabbit r1 — 1 finding, applied.** `scan_encoded_windows` left an empty `window_ids` to
+`torch.cat([])`, which raises "expected a non-empty list of Tensors" — an error naming neither the
+caller's mistake nor this module. Unreachable through `scan_sequence` (`tile_windows` always emits ≥ 1
+window) but the function is public and the trainer calls it directly, so it is now a named refusal with
+a test that bites under sabotage.

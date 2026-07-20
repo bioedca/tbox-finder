@@ -189,6 +189,12 @@ def scan_encoded_windows(
         )
     if batch_size <= 0:
         raise ScanError(f"batch_size must be positive, got {batch_size}")
+    if ids.shape[0] == 0:
+        # `scan_sequence` cannot reach this (`tile_windows` always emits >= 1 window), but
+        # this function is public and the trainer calls it directly. Without the guard the
+        # batch loop simply never runs and `torch.cat([])` dies with "expected a non-empty
+        # list of Tensors" — an error naming neither the caller's mistake nor this module.
+        raise ScanError("window_ids carries no windows; there is nothing to score")
 
     was_training = bool(getattr(model, "training", False))
     model.eval()
