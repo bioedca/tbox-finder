@@ -907,3 +907,78 @@ the same fail-open shape this change exists to remove, reintroduced by the fix f
 tracked file raises regardless of what else is absent; verified to raise on a mixed set.
 
 **Commit.** `<SHA — reconcile against `git log main` at the P2 exit gate>`
+
+## Step P2-10c — 2026-07-20: the protective spare-rule backend — (a) any-helix R-scape covariation
+
+**Inputs.** `envs/infernal.yml` (the `infernal` 1.1.5 pin and its GATE-1-load-bearing lockfile),
+`src/tbox_finder/mining/spare_rule.py` (`mining_round_readiness`, `SpareRuleEvidence`),
+`src/tbox_finder/mining/hard_negative.py::mine_round`, `data/interim/splits/aligned/class_II.sto`
+(the fixture source), and bioconda.
+
+**Process.** Pinned `rscape` **2.0.4.a** into a **new 7th env** `envs/rscape.yml`
+(+ `envs/rscape.conda-lock.yml`, 125 packages, conda-lock 4.0.2) rather than amending
+`envs/infernal.yml`, and wrote `src/tbox_finder/mining/covariation.py` — a `shutil.which` availability
+probe, a version assertion, a `subprocess` R-scape driver, and a pure-stdlib `.helixcov` parser that
+turns helix-level covariation into the `passed`/`failed` status `SpareRuleEvidence` expects.
+`round_backend_availability` constructs the `mine_round` availability map with the `any_helix_rscape`
+entry **derived from the probe and deliberately un-overridable**. `scripts/make_rscape_fixture.py`
+regenerates the committed matched-control fixture pair.
+
+**Outputs.** `envs/rscape.yml` + `envs/rscape.conda-lock.yml`
+(`content_hash.linux-64 = cf43795d8d3ddf7cdf2471e38a7b2a790e58a85a126c21fcb3d42e1ecc60d917`);
+`src/tbox_finder/mining/covariation.py`; `scripts/make_rscape_fixture.py`;
+`tests/fixtures/rscape/` (4 files, byte-reproducible from the script);
+`tests/unit/test_covariation.py` (22) + `tests/ml/test_rscape_backend.py` (8, armed by
+`TBOX_REQUIRE_RSCAPE=1`); `"rscape"` added to `EXPECTED_ENVS`. No DVC artifact, no Snakemake rule,
+no SLURM.
+
+**Validation.** **The step's stated gate was a tautology and was replaced, not weakened.**
+`mining_round_readiness({'any_helix_rscape': True, …})` returns `ready=true` on `main` today with zero
+code changes — availability is a caller-supplied `bool`, so the clause is satisfied by typing `True`.
+Worse, flipping it on a backend that cannot score does not merely fail to help: every candidate then
+carries `unavailable` evidence, `is_mining_excluded` spares on any `unavailable`, and the round emits a
+report of zeroes indistinguishable from "there was nothing to mine" — the exact failure `mine_round`'s
+docstring says the readiness gate exists to prevent. The gate is therefore carried by a **designed
+matched control**: a seeded 60-sequence subsample of the class-II alignment versus the *same*
+subsample with every column independently permuted across rows. Held fixed — the sequences, each
+column's exact base-and-gap composition, `#=GC SS_cons`, the alignment width, `E ≤ 0.05`, the binary.
+Varied — only the correlation *between* columns. **PASS: positive 8 helices / max 4 covarying pairs in
+one helix / 13 total; control the same 8 helices with identical coordinates and base-pair counts and
+0 covarying pairs everywhere.** Suite **1,945 passed / 158 skipped** with the binary present, against a
+like-for-like `main` baseline of **1,915 / 158** — **+30, zero regressions**. Three sabotage reverts
+each bit the test *named* for the invariant (`^FAILED` grepped): criterion-always-true killed
+`test_designed_control_separates_under_every_criterion[within_helix]`; **availability-hardcoded-`True`
+— the precise tautology this step exists to remove — killed
+`test_readiness_refuses_when_the_binary_is_absent` and
+`test_availability_cannot_be_forced_by_an_argument`**; a dead parser killed both criteria's control
+tests. The armed gate also caught a real bug during development: `_VERSION_RE` matched the banner's
+title line and reported the version as `::`.
+
+**Decisions.** ADR-0002 **A11** (signed 2026-07-20) records the env. A **separate** env because
+`rscape` pulls `gnuplot`'s Qt5/GStreamer closure: amending `envs/infernal.yml` would take it 39 → 135
+packages and force a re-solve of the lockfile the **GATE-1 recall claim** is measured against, for no
+saving (the standalone env is 125 packages either way). `infernal` 1.1.5 is pinned in the new env at
+the **same build string** (`pl5321h7b50bb2_4`); the feared `esl-afetch`/`esl-reformat` collision was
+settled by a **real co-install** (exit 0; both toolchains report their pinned versions afterwards), not
+by a solver dry-run. Version **2.0.4.a is the newest build bioconda ships** while upstream is
+**v2.6.11** — approved **for the mining protective filter only**, because v2.0.5 recalculated the
+covariation power curves, which makes the version a methods-section fact; ADR-0006 D2's *reported* (a)
+criterion at GATE-3/P6 must re-decide it (D8 bump trigger).
+
+**Left open, recorded not hidden.** Two things.
+(1) **The env + caller are necessary but not sufficient.** R-scape scores an *alignment*, never a
+single sequence, and ADR-0006 D2→D7 require the model-independent one. The repo has **no
+homolog-search target database** (`data/external` is 81 MB of T-box-specific FASTA; no RefSeq/GTDB/nt)
+and **no `hmmer`/`blast` in any env**, so no per-candidate verdict is producible yet. That is
+**P2-10c′**, sequenced with P6-01, and it is why the availability probe has no override argument.
+(2) **"any-helix" admits two operators and neither is pinned.** `WITHIN_HELIX` (≥2 covarying pairs
+inside one helix) and `TOTAL_ACROSS_HELICES` (≥2 summed across helices) are not equivalent. Measured on
+seeded subsamples of the class-II alignment they agree on high-power inputs (0 % divergence at 5–8 and
+60 sequences) and **disagree on up to 33 %** of low-power ones (10/12/15/20/30 sequences: 17 %, 25 %,
+17 %, 33 %, 8 %) — the regime a real candidate's homolog set occupies. Every divergent case is one the
+looser operator spares and the stricter one sends to the mining pool, so the choice is directly a
+Tier-2N-protection choice. `AnyHelixCriterion` therefore has **no default** and `covariation_verdict`
+requires it positionally; `CovariationResult.as_report` records the counterfactual verdict. Pinning one
+is an **ADR-0006 decision owed at P2-10e**.
+
+**Commit.** `<SHA — reconcile against `git log main` at the P2 exit gate>`

@@ -1,0 +1,30 @@
+# rscape env — the (a) any-helix covariation backend of the §9.1 mining spare rule (P2-10c).
+#
+# Deliberately a SEPARATE env from envs/infernal.yml, not an amendment to it.
+# rscape pulls gnuplot, which drags in the Qt5/GStreamer stack: adding it to the
+# infernal env takes that env from 39 to 135 packages and forces a re-solve of
+# envs/infernal.conda-lock.yml — the lockfile whose infernal 1.1.5 pin the GATE-1
+# recall claim is measured against (envs/infernal.yml:2-3, ADR-0002 D2/D8). Keeping
+# the covariation backend in its own env leaves that lockfile byte-frozen.
+#
+# rscape 2.0.4.a is the newest build on bioconda (h503566f_1, 2025-08-04); upstream
+# is v2.6.11 (2026-07-03) with no open bioconda bump PR. The gap is recorded as a
+# methods-section fact, not an implementation detail: the v2.0.5 changelog
+# recalculated the covariation power curves and lowered the CaCoFold power
+# threshold. ADR-0002 A11 carries the version rationale and the re-validation list.
+#
+# infernal 1.1.5 is pinned here too (same build as envs/infernal.yml, verified
+# co-installable with rscape without an esl-afetch/esl-reformat clash) so the
+# cmbuild/cmalign half of the ADR-0006 D7 de-novo route lives in the same prefix
+# as the R-scape call that consumes its output.
+#
+# Lockfile: envs/rscape.conda-lock.yml (conda-lock -p linux-64, per-env — never aggregate).
+name: tbox-rscape
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - python=3.12
+  - rscape=2.0.4.a
+  - infernal=1.1.5
+  - biopython=1.87

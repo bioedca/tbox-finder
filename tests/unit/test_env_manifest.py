@@ -21,7 +21,7 @@ RULES_DIR = REPO_ROOT / "workflow" / "rules"
 # env was split into `ml-dna` + `ml-rna` at P0-06c (ADR-0002 A4): transformers 4.57.5
 # (Caduceus trust_remote_code ceiling) is mutually exclusive with `multimolecule` 0.0.9,
 # which at import needs transformers 5.x.
-EXPECTED_ENVS = ["data", "infernal", "ml-dna", "ml-rna", "viz", "app"]
+EXPECTED_ENVS = ["data", "infernal", "ml-dna", "ml-rna", "viz", "app", "rscape"]
 
 # The two GPU envs (ADR-0002 D2/D3/A4); the torch-URL / no-`--extra-index-url` guard
 # applies to both, since both carry the same cu128 URL-pinned closure.
