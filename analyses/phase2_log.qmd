@@ -469,3 +469,15 @@ vanished — the silent-drop signature made visible.
 **Decisions.** No sbatch change: the launch line was correct and the config was wrong, so fixing the
 config keeps the run shape (DDP×8, PRD §10.3) and the P2-06-selected config untouched. Re-submitting
 needs a fresh §9.3 ack — the changed tree voids the job-test 667 preflight. **Commit.** SHA pending.
+
+**Review (CodeRabbit r3, 2 minor — both applied).** (1) The dataclass-field assertion regexed the
+module text, so an indented `exclude_selection_val: bool` *anywhere* — another dataclass, a local
+annotation — would satisfy it while `Stage1TrainConfig` itself had lost the field; now parsed via
+`ast` and scoped to that class's own annotations (AST, not import: the module pulls in torch).
+(2) The `TBOX_REQUIRE_TRAIN_HYDRA` / `TBOX_REQUIRE_SWEEP_HYDRA` comments still read "CI installs no
+hydra" — stale the moment hydra was added. Chasing that flag found a **second, larger hole**: those two
+tiers had been **skipping silently in every CI run since P2-04** — `tests/ml/test_train_smoke.py`'s
+four composition tests plus `tests/ml/test_sweep_selection.py`'s overlay test, five tests, green by
+omission. Both vars are now armed. Verified the contract bites rather than decorating: with hydra
+absent and the vars armed the five FAIL loudly (`5 failed, 68 passed`); absent and unarmed they go
+`68 passed, 12 skipped` — the exact silent green CI had been reporting.

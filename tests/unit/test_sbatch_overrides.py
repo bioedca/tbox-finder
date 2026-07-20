@@ -33,6 +33,7 @@ Two deliberate limits, stated rather than hidden:
 
 from __future__ import annotations
 
+import ast
 import re
 from pathlib import Path
 
@@ -218,7 +219,27 @@ def test_exclude_selection_val_is_a_config_key_and_a_dataclass_field():
     finally:
         GlobalHydra.instance().clear()
 
-    source = (SRC / "tbox_finder" / "train" / "train_stage1.py").read_text()
-    assert re.search(
-        r"^\s+exclude_selection_val: bool", source, re.M
-    ), "Stage1TrainConfig lost the exclude_selection_val field"
+    # Parse the AST rather than regex the text: an indented `exclude_selection_val: bool`
+    # anywhere in the module — another dataclass, a local annotation, a docstring example —
+    # would satisfy a regex while Stage1TrainConfig itself had lost the field. Only the
+    # class-level annotation ON Stage1TrainConfig is the contract. (AST, not import: the
+    # module pulls in torch, which this unit tier does not have.)
+    tree = ast.parse((SRC / "tbox_finder" / "train" / "train_stage1.py").read_text())
+    cls = next(
+        (
+            n
+            for n in ast.walk(tree)
+            if isinstance(n, ast.ClassDef) and n.name == "Stage1TrainConfig"
+        ),
+        None,
+    )
+    assert cls is not None, "Stage1TrainConfig class not found in train_stage1.py"
+    annotated = {
+        n.target.id: ast.unparse(n.annotation)
+        for n in cls.body
+        if isinstance(n, ast.AnnAssign) and isinstance(n.target, ast.Name)
+    }
+    assert (
+        "exclude_selection_val" in annotated
+    ), f"Stage1TrainConfig lost the exclude_selection_val field; has {sorted(annotated)}"
+    assert annotated["exclude_selection_val"] == "bool", annotated["exclude_selection_val"]
