@@ -1130,7 +1130,9 @@ def evaluate_selection_val(
 
     Each record is tiled over its **full context** with ``tile_windows`` (the deterministic
     scan/eval geometry), every window is forwarded, and the per-window logits are
-    reconciled by ``infer.reconcile.reconcile_windows`` — the ADR-0005 D3 + Amendment A3
+    reconciled by ``infer.scan.scan_encoded_windows`` (P2-10a — the promoted loop this
+    function used to own, now shared verbatim with the scanner) over
+    ``infer.reconcile.reconcile_windows`` — the ADR-0005 D3 + Amendment A3
     operator, frozen in code with no config override. Evaluating through it rather than
     through a single locus-centred window is deliberate: it is the operator P5 actually
     scans with, so a config selected here is selected under the arithmetic it will be
@@ -1156,7 +1158,7 @@ def evaluate_selection_val(
         selection_val_problems,
         tile_windows,
     )
-    from tbox_finder.infer.reconcile import reconcile_windows
+    from tbox_finder.infer.scan import scan_encoded_windows
     from tbox_finder.labels import CLASS_ORDER
 
     records, scope = load_selection_val_records(window=cfg.window_nt)
@@ -1215,15 +1217,28 @@ def evaluate_selection_val(
             for rec in records:
                 seq_len = len(rec.context_seq)
                 starts = tile_windows(seq_len, window=cfg.window_nt, stride=cfg.stride_nt)
+                # The STRICT encoder stays here: `encode_eval_window` raises on an overrun,
+                # and that guard is about *this* caller's records (filter 4 guarantees the
+                # window is interior, so an overrun would invent a boundary mid-context, not
+                # find a contig end). The scanner's pad-aware encoder is the right policy for
+                # *its* inputs and the wrong one here — so the seam between the two callers is
+                # drawn at the loop, never at the encoder.
                 ids = np.stack([encode_eval_window(rec, s, window=cfg.window_nt) for s in starts])
-                chunks = []
-                for i in range(0, len(ids), cfg.eval_batch_size):
-                    batch = torch.from_numpy(ids[i : i + cfg.eval_batch_size].astype(np.int64))
-                    chunks.append(model(input_ids=batch.to(device)).float().cpu())
-                logits = torch.cat(chunks, dim=0)
-                n_windows += int(logits.shape[0])
-
-                rec_out = reconcile_windows(logits, np.asarray(starts), seq_len)
+                # ⚠ Do NOT re-inline this loop. `scan_encoded_windows` is the single
+                # forward+reconcile implementation, shared with `infer.scan.scan_sequence`;
+                # a second copy would let the arithmetic a config is SELECTED under drift
+                # from the arithmetic it is DEPLOYED under — the exact property this
+                # function's docstring claims. Nesting is safe: it restores the mode it
+                # observed, and we are already in eval(), so its restore is a no-op.
+                rec_out = scan_encoded_windows(
+                    model,
+                    ids,
+                    starts,
+                    seq_len,
+                    device=device,
+                    batch_size=cfg.eval_batch_size,
+                )
+                n_windows += int(rec_out.n_windows)
                 y_true = context_labels(rec)
                 y_pred = np.asarray(rec_out.prediction)
                 y_true_all.extend(int(x) for x in y_true)
