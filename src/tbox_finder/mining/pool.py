@@ -191,6 +191,20 @@ def carve_pool(
     return records
 
 
+def window_is_masked(record: Mapping[str, Any], index: masking.LocusIndex, *, flank: int) -> bool:
+    """Whether one carved window is masked — the single predicate for the whole module.
+
+    :func:`mask_pool` computes the reported counts and :func:`build` stamps the
+    per-record ``masked`` column; routing both through here is what stops the
+    artifact's own column from silently disagreeing with the report that grades
+    it, which is the failure a second inlined ``is_masked`` call invites
+    (CodeRabbit r1).
+    """
+    return index.is_masked(
+        record["accession"], record["locus_start"], record["locus_end"], flank=flank
+    )
+
+
 def mask_pool(
     records: Sequence[Mapping[str, Any]], index: masking.LocusIndex, *, flank: int
 ) -> dict[str, Any]:
@@ -217,16 +231,8 @@ def mask_pool(
         ("designed_control", [r for r in records if r["is_designed_control"]]),
         ("natural", [r for r in records if not r["is_designed_control"]]),
     ):
-        n_masked = sum(
-            1
-            for r in subset
-            if index.is_masked(r["accession"], r["locus_start"], r["locus_end"], flank=flank)
-        )
-        n_overlap = sum(
-            1
-            for r in subset
-            if index.is_masked(r["accession"], r["locus_start"], r["locus_end"], flank=0)
-        )
+        n_masked = sum(1 for r in subset if window_is_masked(r, index, flank=flank))
+        n_overlap = sum(1 for r in subset if window_is_masked(r, index, flank=0))
         out[group] = {
             "n_records": len(subset),
             "n_masked_at_flank": n_masked,
@@ -318,9 +324,7 @@ def build(
     gate = control_gate(mask_summary)
 
     for record in records:
-        record["masked"] = index.is_masked(
-            record["accession"], record["locus_start"], record["locus_end"], flank=flank_nt
-        )
+        record["masked"] = window_is_masked(record, index, flank=flank_nt)
 
     df = pd.DataFrame.from_records(records)
     out_parquet = Path(out_parquet)
@@ -344,6 +348,10 @@ def build(
         "union_maskable_with_coords": n_union_maskable,
         "context_sha256": provenance.sha256_file(context_parquet),
         "union_prior_sha256": provenance.sha256_file(union_parquet),
+        # The corpus supplies own_loci, so it determines every masked/overlap count
+        # in this report as much as the union prior does — it belongs in the
+        # diagnosis, not only in provenance.json's inputs list (CodeRabbit r1).
+        "corpus_sha256": provenance.sha256_file(corpus_parquet),
         "notes": (
             "P2-10b mining substrate for the ADR-0005 D14 loop — NOT a fifth PRD §9.1 "
             "negative class and NOT annotation-verified 5′UTRs/leaders (that is "

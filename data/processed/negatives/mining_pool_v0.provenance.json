@@ -9,15 +9,15 @@
     "n_records": 46591,
     "natural_masked_fraction": 0.0018441778221344731
   },
-  "generated_at_utc": "2026-07-20T20:09:27.295346+00:00",
-  "git_sha": "35b62be3f523ce745f48353d5667b2c12e40801d",
+  "generated_at_utc": "2026-07-20T20:21:31.625880+00:00",
+  "git_sha": "10d984dd3e359ced0d5fde3a2394ce0bdac21c6e",
   "inputs": {
     "data/interim/flank_context/context_v0.parquet": "415bd09400cbadf5a442236bf657633b529462a4fbbdc3bf9d2928d7c44e7335",
     "data/processed/master_clean_v0.parquet": "1eb76591d0e481019dd7acf72a439f157fec9f2aeecb8cc5c37ba80a7b062dd2",
     "data/processed/priors/union_prior.parquet": "9ff1ff944bf36aabde2fa31f6523d41a777d08b18f768f87c9f840e788e232ed"
   },
   "outputs": {
-    "data/processed/audits/mining_pool_report.json": "0f29c340ba4405a6d98127247ec8988aec72c435ccbba6b2ba243a7c1b3cdac8",
+    "data/processed/audits/mining_pool_report.json": "9e017ed485a8a69b8f22534a8a8a5d6ae4d82c7225838e5310254a6edaf2ed82",
     "data/processed/negatives/mining_pool_v0.parquet": "c7c31366ed1fada76c1a5c228a87db6adbfe4df7990845a93d1d1e3131092d28"
   },
   "rule": "workflow/rules/data.smk :: build_mining_pool",

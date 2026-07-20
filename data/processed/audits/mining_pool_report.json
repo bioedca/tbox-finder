@@ -13,6 +13,7 @@
     "n_control_windows": 500,
     "overall_pass": true
   },
+  "corpus_sha256": "1eb76591d0e481019dd7acf72a439f157fec9f2aeecb8cc5c37ba80a7b062dd2",
   "flank_nt": 50,
   "margin_nt": 50,
   "masking": {

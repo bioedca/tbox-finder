@@ -823,3 +823,16 @@ corrected: three quoted denominators (the frame scores are **23,146** / **23,187
 correct but read as contradictory. Artifact md5s are unchanged by all ten fixes.
 
 **Commit.** `<SHA — reconcile against `git log main` at the P2 exit gate>`
+
+**CodeRabbit r1 — 3 nitpicks, all applied.** All three were the same species as the pre-commit
+findings: a predicate stated twice and free to drift. (1) `coordinate_coverage.n_with_coordinates`
+keyed off the accession alone while the masking loop required all three fields — consistent today only
+because `parse_structured_rna_locus` is all-or-nothing, so a future producer setting an accession
+without coordinates would have over-counted coverage *and* fed unmaskable accessions to the namespace
+report; both now route through one `_has_coordinates`. (2) `build` recomputed `index.is_masked` per
+record to populate the artifact's `masked` column, duplicating the call `mask_pool` had already made
+for the reported counts — the artifact's own column could have drifted from the report that grades it;
+both now go through `window_is_masked`. (3) `mining_pool_report.json` recorded `context_sha256` and
+`union_prior_sha256` but not the corpus, which supplies `own_loci` and therefore determines every
+masked/overlap count in the report; `corpus_sha256` added. No artifact md5 changed (`84319675…`,
+`be562333…`) and the decoy golden digest is still `13061e3e…`; suite re-run **1,853 / 184**.

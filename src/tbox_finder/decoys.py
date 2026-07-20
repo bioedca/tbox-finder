@@ -51,7 +51,7 @@ import re
 import sys
 import urllib.request
 from collections import Counter
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -410,6 +410,21 @@ def _record(
     }
 
 
+def _has_coordinates(record: Mapping[str, Any]) -> bool:
+    """True iff a pool record carries all three maskable coordinate fields.
+
+    One predicate, so the masking loop and the coverage report cannot disagree
+    about what "coordinate-bearing" means — the same reason
+    :meth:`~tbox_finder.mining.hard_negative.MiningCandidate.has_coordinates`
+    shares :func:`tbox_finder.masking.is_missing` with the mask itself.
+    """
+    return not (
+        masking.is_missing(record["accession"])
+        or masking.is_missing(record["locus_start"])
+        or masking.is_missing(record["locus_end"])
+    )
+
+
 def decoys_digest(records: Sequence[dict[str, Any]]) -> str:
     """Whole-artifact golden digest over ``(pool, decoy_id, sequence)`` per record.
 
@@ -704,11 +719,7 @@ def build(
     # overlaps and a single record 5 nt away).
     pool_overlap_counts = dict.fromkeys(POOL_NAMES, 0)
     for r in records:
-        has_coords = not (
-            masking.is_missing(r["accession"])
-            or masking.is_missing(r["locus_start"])
-            or masking.is_missing(r["locus_end"])
-        )
+        has_coords = _has_coordinates(r)
         masked = has_coords and index.is_masked(
             r["accession"], r["locus_start"], r["locus_end"], flank=cfg.flank_nt
         )
@@ -735,7 +746,12 @@ def build(
     namespace: dict[str, dict[str, Any]] = {}
     for pool in POOL_NAMES:
         members = [r for r in records if r["pool"] == pool]
-        with_coords = [r for r in members if not masking.is_missing(r["accession"])]
+        # Same three-field predicate the masking loop uses. Keying coverage off the
+        # accession alone happens to agree today only because
+        # parse_structured_rna_locus is all-or-nothing; a producer that set an
+        # accession without both coordinates would over-count n_with_coordinates
+        # and feed unmaskable accessions to the namespace report (CodeRabbit r1).
+        with_coords = [r for r in members if _has_coordinates(r)]
         coordinate_coverage[pool] = {
             "n_records": len(members),
             "n_with_coordinates": len(with_coords),
