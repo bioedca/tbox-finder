@@ -1,0 +1,56 @@
+{
+  "context_sha256": "415bd09400cbadf5a442236bf657633b529462a4fbbdc3bf9d2928d7c44e7335",
+  "control_gate": {
+    "clauses": {
+      "all_controls_masked": true,
+      "all_controls_overlap": true,
+      "controls_present": true,
+      "namespace_compatible": true,
+      "natural_pool_present": true
+    },
+    "n_control_masked": 500,
+    "n_control_overlapping": 500,
+    "n_control_windows": 500,
+    "overall_pass": true
+  },
+  "flank_nt": 50,
+  "margin_nt": 50,
+  "masking": {
+    "accession_namespace": {
+      "n_distinct_accessions": 11453,
+      "n_index_accessions": 12041,
+      "n_intersect_as_is": 0,
+      "n_intersect_normalized": 11447,
+      "n_with_accession": 46591,
+      "namespace_compatible": true,
+      "normalization_recovered": 11447
+    },
+    "designed_control": {
+      "masked_fraction": 1.0,
+      "n_masked_at_flank": 500,
+      "n_overlapping_at_flank_0": 500,
+      "n_records": 500
+    },
+    "natural": {
+      "masked_fraction": 0.0018441778221344731,
+      "n_masked_at_flank": 85,
+      "n_overlapping_at_flank_0": 69,
+      "n_records": 46091
+    }
+  },
+  "n_context_anchored": 23532,
+  "n_context_rows": 23535,
+  "n_records": 46591,
+  "notes": "P2-10b mining substrate for the ADR-0005 D14 loop \u2014 NOT a fifth PRD \u00a79.1 negative class and NOT annotation-verified 5\u2032UTRs/leaders (that is P2-10b\u2032). Windows are carved from the P2-00 flank_context regions, so they sit on replicons that host known T-boxes and the mask has something to find. designed_control windows are locus-centred and overlap a known locus by construction: they validate the coordinate frame and are excluded from the natural rate.",
+  "pool": "genomic_window",
+  "seed": 42,
+  "side_counts": {
+    "lead": 23040,
+    "locus_control": 500,
+    "trail": 23051
+  },
+  "union_denominator": 24160,
+  "union_maskable_with_coords": 24157,
+  "union_prior_sha256": "9ff1ff944bf36aabde2fa31f6523d41a777d08b18f768f87c9f840e788e232ed",
+  "window_nt": 300
+}

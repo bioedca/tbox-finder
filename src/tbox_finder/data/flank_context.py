@@ -235,6 +235,51 @@ def plan_region(lo: int, hi: int, *, pad_nt: int = DEFAULT_PAD_NT) -> tuple[int,
     return max(1, lo - pad_nt), hi + pad_nt
 
 
+def forward_bounds(
+    *, strand: int, region_start: int, region_len: int, offset: int, length: int
+) -> tuple[int, int]:
+    """Forward-genome 1-based inclusive bounds of ``context_seq[offset:offset+length]``.
+
+    Two traps make the naive arithmetic wrong, and both were measured at P2-10b
+    against the union prior (a locus-centred window must mask against its own
+    known locus, so the control is exactly 100% or the frame is broken). All
+    three scores below are over the **23,532 ``status == "ok"`` rows** — the rows
+    that carry real geometry and that ``mining.pool.carve_window`` accepts:
+
+    * **``context_seq`` is already reverse-complemented on the minus strand.**
+      ``fetch_region`` passes ``strand`` to NCBI efetch, which does the RC
+      server-side (this module's :func:`revcomp` is never called on that path),
+      so for :data:`STRAND_MINUS` index 0 is the *highest* forward coordinate,
+      not the lowest. Indexing minus-strand rows from ``region_start`` scored
+      **23,146/23,532** (386 misses).
+    * **``region_stop`` is the requested stop, not the returned one.**
+      :func:`plan_region` cannot clamp it (contig length is unknown before the
+      fetch), so a region that ran off the contig end is shorter than
+      ``region_stop - region_start + 1``. Anchoring the minus strand to
+      ``region_stop`` therefore skews every clipped row; it scored
+      **23,187/23,532**, with all 345 residual misses ``clipped_start``.
+
+    Anchoring to ``region_start + region_len - 1`` — the *actual* last fetched
+    forward base — scores **23,532/23,532**. Pass ``region_len =
+    len(context_seq)``, never the planned span.
+    """
+    if strand not in (STRAND_PLUS, STRAND_MINUS):
+        raise ValueError(f"strand must be {STRAND_PLUS} or {STRAND_MINUS}, got {strand}")
+    if region_start < 1:
+        raise ValueError(f"region_start must be >= 1, got {region_start}")
+    if length < 1:
+        raise ValueError(f"length must be >= 1, got {length}")
+    if offset < 0 or offset + length > region_len:
+        raise ValueError(
+            f"window [{offset}, {offset + length}) does not fit a region of {region_len} nt"
+        )
+    if strand == STRAND_PLUS:
+        lo = region_start + offset
+        return lo, lo + length - 1
+    hi = region_start + region_len - 1 - offset
+    return hi - length + 1, hi
+
+
 def anchor_offset(region: str, locus: str) -> tuple[int, int]:
     """Locate ``locus`` inside ``region`` by exact match → ``(offset, n_hits)``.
 

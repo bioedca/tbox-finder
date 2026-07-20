@@ -707,3 +707,119 @@ real `stage1.pt` (sha256 verified against the P2-09 provenance) and its values a
 caller's mistake nor this module. Unreachable through `scan_sequence` (`tile_windows` always emits ≥ 1
 window) but the function is public and the trainer calls it directly, so it is now a named refusal with
 a test that bites under sabotage.
+
+## Step P2-10b — 2026-07-20: a coordinate-bearing mineable negative pool
+
+**Inputs.** `data/processed/negatives/decoys_v0.parquet` (7,008 records, four §9.1 pools);
+`data/external/refs/decoys/{structured_rna_refs.fa,leader_decoys.fa}`; `data/interim/flank_context/context_v0.parquet`
+(23,535 rows, 23,532 anchored, P2-00); `data/processed/priors/union_prior.parquet` (24,160 rows);
+`masking.LocusIndex`; `mining/hard_negative.classify_candidate`.
+
+**Process.** ADR-0005 D14 makes the union-prior locus mask the first guard between a Stage-1 false
+positive and the mined pool, and it could not run: `classify_candidate` returned
+`refused_no_coordinates` for **100 %** of every pool in `MINEABLE_POOLS`. Four measurements decided the
+shape of the fix, all re-derived independently before any code was written. (1) The Rfam headers do
+carry coordinates — **3,000/3,000** parse as `<accession>/<start>-<end>` — but **0 of 2,751** distinct
+accessions intersect the `LocusIndex` keys, because every union-prior key is unversioned (**0 of
+12,041**) and 2,999/3,000 Rfam accessions are versioned; version-stripping recovers **269**. (2) Even
+then, `structured_rna` contains **0 true overlaps** with the union prior — the nearest record is 5 nt
+away and only the 50-nt flank catches it, so the pool cannot demonstrate the mask fires. (3)
+`dinuc_shuffled`'s only possible coordinates are its source positives'. (4) `leader_decoy` (N = 8) has
+opaque surrogate ids with no recoverable accession. So the step parsed the Rfam coordinates
+(`decoys.parse_structured_rna_locus`), pinned namespace normalisation at the shared masking boundary
+(`masking.normalize_accession`, both index build and query), and built the substrate none of the four
+pools could be — `mining/pool.py`, real windows carved from the `flank_context` regions with exact
+`(accession, locus_start, locus_end, strand)` on replicons that host known T-boxes.
+
+**Outputs.** `src/tbox_finder/mining/pool.py`; `masking.{normalize_accession, accession_namespace_report,
+is_missing}` + a version-normalising `LocusIndex`; `data/flank_context.forward_bounds`;
+`decoys.parse_structured_rna_locus` + `strand`/`source_record_id` columns;
+`rule build_mining_pool` (`workflow/rules/data.smk`); `data/processed/negatives/mining_pool_v0.parquet`
+(46,591 windows, DVC `84319675…`); `data/processed/audits/mining_pool_report.json`; rebuilt
+`decoys_v0.parquet` (DVC `be562333…`, was `da657ba0…`).
+
+**Validation.** Gate PASS. Designed control **500/500** masked (500/500 true overlaps at flank 0);
+natural **85/46,091** = 0.184 % (69 true overlaps); namespace **0 as-is → 11,447 normalised**;
+`structured_rna` coordinate coverage **2,999/3,000**; `refused_no_coordinates` **0/2,000** sampled
+substrate records. Suite **1,848 passed / 184 skipped** against a like-for-like `main` baseline
+(same data symlinks, clean worktree at `35b62be`) of **1,792 / 184** = **+56, zero regressions**;
+ruff + black + `snakemake --lint` + `snakemake -n` clean. The decoy golden digest is **unchanged**
+(`13061e3e…`) — the schema change is pure column addition.
+
+**The measurement that changed the design.** The gate the step inherited — "a known-locus-overlapping
+candidate is actually masked" — could not be met by any natural pool, because the natural overlap count
+was zero. A natural rate of zero is a legitimate biological result, so it can never distinguish
+"nothing overlaps" from "the mask is structurally dead", and a gate resting on it is unfalsifiable in
+the wrong direction. The gate is therefore carried by a **designed** control: locus-centred windows,
+which overlap a known T-box by construction and must mask at **100 %**. That control immediately earned
+its keep. It scored **23,147/23,535** — and the shortfall was not biology. `context_seq` is
+reverse-complemented server-side for minus-strand records (this module's own `revcomp` is never called
+on that path), so index 0 is the *highest* forward coordinate; and `region_stop` is the *requested*
+stop, which `plan_region` cannot clamp because the contig length is unknown before the fetch, so every
+clipped region is skewed. Over the 23,532 `status == "ok"` rows: anchoring to `region_start` scored
+**23,146**, anchoring to `region_stop` scored **23,187** (all 345 residual misses `clipped_start`), and
+anchoring to `region_start + len(context_seq) - 1` — the actual last fetched base — scores
+**23,532/23,532**. The corrected frame also revised the measured contamination **down**: on the
+lead-flank windows alone (the pilot measurement, 23,040 windows) from **0.84 % to 0.26 %**, the first
+number being inflated by the frame error. *(The shipped rate quoted above, **0.184 %**, is a different
+and larger denominator — lead **and** trail, 85/46,091 — not a third value for the same quantity.)*
+A control that had merely "looked high" would have shipped the bug and a wrong contamination rate with it.
+
+**Decisions.** Two §7 stops were taken to the user and both resolved as recommended.
+(i) The pre-declared Q-question — `dinuc_shuffled` is **not** mineable; carrying its parents' coordinates
+would mask 100 % of the pool against itself and turn the non-vacuity number into a tautology, so it
+leaves `MINEABLE_POOLS` (ADR-0005 **A6**, signed 2026-07-20) and keeps its §9.1 training role, with the
+parent link now recorded as a content-addressed `source_record_id` instead of a corpus row index baked
+into `decoy_id` text. (ii) A **new** stop, raised by the measurements: re-sourcing a true
+5′UTR/tRNA-adjacent `leader_decoy` pool needs CDS/tRNA coordinates the repo does not have (zero GFF/GBK,
+both NCBI fetchers `rettype=fasta`, no `tRNAscan-SE`/`hmmer`/aaRS resource — 3 acquisitions + 2 env
+amendments) and is **not P2-sized**; it is deferred to **P2-10b′** and said so rather than declaring the
+pool "re-sourced" because it grew. The namespace fix was pinned at the shared boundary rather than in
+each producer so a future pool cannot silently re-introduce the empty-intersection no-op; this is a
+semantics change to a key ADR-0006 D11 pins, recorded in A6's impact list with the D11 amendment
+batched to the P2 exit gate by user decision.
+
+**Sabotage verification.** Four reverts, `__pycache__` cleared and `-p no:cacheprovider` each time, each
+checked by `^FAILED` name rather than a red count: identity `normalize_accession` → 11 failed incl.
+`test_a_versioned_query_masks_against_an_unversioned_index` and the ml namespace gate; forward-only
+minus-strand frame → 4 failed incl. `test_every_locus_centred_control_window_masks`; `has_coordinates`
+back to `is not None` → the 3 NaN tests (that guard was a live fail-open: a pandas round-trip through a
+nullable column yields NaN, which passes an identity check and is then classified **mined**, not
+refused); unguarded gate clauses → the 6 emptiness tests. Restore verified green (56 passed) with a
+clean `git status`.
+
+**Disclosed non-delivery.** `refused_no_coordinates` is **not** zero everywhere: it remains 100 % for
+`gc_background` (impossible in principle), `dinuc_shuffled` (by A6), and `leader_decoy` (pending
+P2-10b′), and 1/3,000 for `structured_rna` — an RNAcentral URS with an interval but no replicon, refused
+rather than given a coordinate that addresses no genome. The `genomic_window` substrate is
+annotation-blind: its windows are **not** verified 5′UTRs and nothing here may be described as a leader
+decoy. ADR-0006 D12's per-class joint false-pass estimate still rests on the 8 leader records and is
+under-powered until P2-10b′. No mining round is runnable yet — P2-10c (env stop) and P2-10e (the ADR
+stop for the still-unpinned round count N) remain.
+
+**Pre-commit adversarial review (5 read-only lenses, 49 raised / 9 confirmed).** Ten fixes landed
+before the commit; the tree was audited afterwards (`git status` shows only the intended paths, and the
+one `SABOTAGE` string in the tree is a pre-existing committed comment in `test_reconcile.py` from P2-03).
+The findings worth recording: (1) **three of the new tests were tautologies.**
+`test_normalisation_is_what_makes_the_namespaces_compatible` compared `raw_accession_keys` against
+`accession_keys` — but on this data those sets are *identical* (no union-prior accession carries a
+version), so the assertion was invariant to the function it was named for and **stayed green under the
+exact sabotage it advertised**; it now asserts against `normalize_accession` directly and does bite.
+The decoy-overlap test asserted `n_overlapping <= n_masked`, a monotonicity identity no input can
+falsify, where the claim that matters is the *value* (`== 0`, the premise ADR-0005 A6 rests on). The
+partition test restated how both sides were derived; it now asserts the two partitions are disjoint and
+exhaust the pool. (2) **The gate was one notch too loose:** it required controls to be *masked* (flank
+50) when the stricter *overlap* count (flank 0) was already computed and sitting unread in the same
+dict — a uniform frame error below 50 nt would have scored a perfect 100 %. It now gates on
+`all_controls_overlap` too. (3) `_REPLICON_ACCESSION_RE` rejected `NZ_`-prefixed RefSeq accessions
+(letters after the underscore) — **823 of this project's own 12,041 union-prior accessions**. Harmless
+today (the staged Rfam refs carry only `NC_`/`NW_`), a live trap on any resubsample. (4) A gate-**failed**
+substrate was written to the canonical path before the raise, where `dvc add` would not have consulted
+the gate; the parquet and its provenance are now written only after the gate passes, while the report —
+the diagnosis — is still written unconditionally. (5) The `refused_no_coordinates` test coerced
+`str(row.accession)`, which would have laundered a null into the literal `"nan"` and passed. Also
+corrected: three quoted denominators (the frame scores are **23,146** / **23,187** / **23,532** over the
+**23,532** `status == "ok"` rows, not /23,535), and the dev-log's two contamination rates, which were
+correct but read as contradictory. Artifact md5s are unchanged by all ten fixes.
+
+**Commit.** `<SHA — reconcile against `git log main` at the P2 exit gate>`

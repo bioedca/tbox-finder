@@ -1,0 +1,5 @@
+outs:
+- md5: 84319675287a8833a563df88dbff9e13
+  size: 10696440
+  hash: md5
+  path: mining_pool_v0.parquet

@@ -47,6 +47,7 @@ import hashlib
 import json
 import os
 import random
+import re
 import sys
 import urllib.request
 from collections import Counter
@@ -148,6 +149,69 @@ def gc_fraction(seq: str) -> float:
     up = seq.upper()
     gc = sum(up.count(b) for b in ("G", "C", "S"))
     return gc / len(up)
+
+
+#: Rfam FASTA headers locate each sequence as ``<accession>[.<ver>]/<start>-<end>``
+#: (``start > end`` on the minus strand). ``fetch_refs`` prefixes ``<family>|<rfam_acc>|``,
+#: so the locator is the third pipe-field of the header's **first whitespace token**.
+_RFAM_LOCATOR_RE = re.compile(r"^(?P<acc>\S+)/(?P<start>\d+)-(?P<end>\d+)$")
+
+#: A nucleotide replicon accession, version already stripped — either INSDC
+#: (1-6 letters + >=5 digits: ``CBXI010000044``, ``CP001598``) or RefSeq (a 2-letter
+#: prefix + underscore, then an optional INSDC-style body: ``NC_021162``,
+#: ``NW_009526658``, ``NZ_CP001598``).
+#:
+#: The RefSeq branch admits letters after the underscore deliberately. The staged
+#: Rfam subsample happens to carry only ``NC_``/``NW_`` forms (18 tRNA records — an
+#: INSDC-only pattern silently drops those), but ``NZ_``-prefixed accessions are
+#: **823 of this project's own 12,041 union-prior accessions**, so a digits-only
+#: RefSeq branch would be a live trap for any future resubsample or for any other
+#: caller of this predicate.
+#:
+#: Deliberately still narrow: the subsample also carries an RNAcentral URS
+#: identifier (``URS000080DE72_32630``, taxid 32630 = synthetic construct) which has
+#: an interval but **no replicon**. Admitting it would write a coordinate that
+#: addresses no genome and can never mask — precisely the fiction P2-10b exists to
+#: remove — so it is left coordinate-free and counted as such. The URS form also
+#: carries an underscore, which is why the RefSeq branch pins the underscore to
+#: position 2 rather than allowing underscores anywhere.
+_REPLICON_ACCESSION_RE = re.compile(r"^(?:[A-Z]{1,6}\d{5,}|[A-Z]{2}_[A-Z]{0,6}\d{5,})$")
+
+
+def parse_structured_rna_locus(decoy_id: str) -> tuple[str, int, int, int] | None:
+    """Parse ``<family>|<rfam_acc>|<accession>/<start>-<end> [desc]`` → coordinates.
+
+    Returns ``(accession, locus_start, locus_end, strand)`` with ``start``/``end``
+    **as written** (minus-strand headers keep ``start > end``; masking folds them
+    via :func:`tbox_finder.masking.normalize_locus`), ``strand`` in the
+    :mod:`~tbox_finder.data.flank_context` 1/2 encoding. Returns ``None`` — never
+    a guess — for any header that does not yield a genomic replicon.
+
+    Two header shapes break the obvious ``decoy_id.split("|")[2]`` and both occur
+    in the staged subsample, so the split order is load-bearing:
+
+    * 2,927 of 3,000 headers carry a free-text description, and one description
+      contains **embedded pipes** (``TPP|RF00059|AGNL01045717.1/7292-7390 ENA|AGNL01045717|…``)
+      → splitting on ``|`` first yields five fields for that record. Split on
+      whitespace first, then take exactly three pipe-fields.
+    * one record is an RNAcentral URS, not a replicon (see
+      :data:`_REPLICON_ACCESSION_RE`).
+    """
+    token = str(decoy_id).split()[0] if str(decoy_id).split() else ""
+    parts = token.split("|", 2)
+    if len(parts) != 3:
+        return None
+    match = _RFAM_LOCATOR_RE.match(parts[2])
+    if match is None:
+        return None
+    accession = match.group("acc")
+    if not _REPLICON_ACCESSION_RE.match(masking.normalize_accession(accession)):
+        return None
+    start, end = int(match.group("start")), int(match.group("end"))
+    if start <= 0 or end <= 0:
+        return None
+    strand = 2 if end < start else 1
+    return accession, start, end, strand
 
 
 def dinucleotide_counts(seq: str) -> Counter[str]:
@@ -258,6 +322,7 @@ def build_corpus_pools(
     n_gc: int,
     n_dinuc_sources: int,
     dinuc_per_source: int,
+    record_ids: Sequence[str] | None = None,
 ) -> list[dict[str, Any]]:
     """Build the two corpus-derived pools (GC-matched background + dinuc-shuffle).
 
@@ -265,9 +330,16 @@ def build_corpus_pools(
     it is the reproducible basis of the golden fixture. ``gc_values``/``lengths``
     are the per-positive T-box GC/length (P0-12) bootstrapped for pool 1;
     ``sequences`` are the T-box positive sequences shuffled for pool 3.
+
+    ``record_ids`` (optional, parallel to ``sequences``) attaches each dinucleotide
+    decoy to its parent positive's ``record_id``. It does **not** enter the golden
+    digest — that covers ``(pool, decoy_id, sequence)`` — so supplying it cannot
+    perturb the committed fixture.
     """
     if not (len(gc_values) == len(lengths) == len(sequences)):
         raise ValueError("gc_values, lengths, sequences must be the same length")
+    if record_ids is not None and len(record_ids) != len(sequences):
+        raise ValueError("record_ids must be the same length as sequences")
     if not sequences:
         raise ValueError("no positive sequences supplied")
     records: list[dict[str, Any]] = []
@@ -286,16 +358,43 @@ def build_corpus_pools(
     src_idx = sorted(rng_dn.sample(range(len(sequences)), n_src))
     for i in src_idx:
         src = str(sequences[i]).upper()
+        parent = str(record_ids[i]) if record_ids is not None else None
         for k in range(int(dinuc_per_source)):
             shuf = dinucleotide_shuffle(src, rng_dn)
             records.append(
-                _record(POOL_DINUC, f"dinuc_{i:06d}_{k}", shuf, "dinuc_shuffle_altschul_erikson")
+                _record(
+                    POOL_DINUC,
+                    f"dinuc_{i:06d}_{k}",
+                    shuf,
+                    "dinuc_shuffle_altschul_erikson",
+                    source_record_id=parent,
+                )
             )
     return records
 
 
-def _record(pool: str, decoy_id: str, seq: str, source: str) -> dict[str, Any]:
-    """One decoy pool record. Synthetic/external pools carry no genomic coordinates."""
+def _record(
+    pool: str,
+    decoy_id: str,
+    seq: str,
+    source: str,
+    *,
+    accession: str | None = None,
+    locus_start: int | None = None,
+    locus_end: int | None = None,
+    strand: int | None = None,
+    source_record_id: str | None = None,
+) -> dict[str, Any]:
+    """One decoy pool record; coordinate fields are populated only where they are real.
+
+    ``source_record_id`` links a derived decoy to the corpus positive it was
+    derived from. Before P2-10b the only such link was the corpus **row index**
+    embedded in the ``decoy_id`` text (``dinuc_000007_0``), which is valid solely
+    against one exact corpus row order — any re-sort silently re-points every
+    record. A dinucleotide decoy is a permutation of a real training positive, so
+    that relationship is leakage-adjacent and has to be reconstructable from the
+    schema rather than from a filename convention.
+    """
     return {
         "pool": pool,
         "decoy_id": decoy_id,
@@ -303,9 +402,11 @@ def _record(pool: str, decoy_id: str, seq: str, source: str) -> dict[str, Any]:
         "length": len(seq),
         "gc": gc_fraction(seq),
         "source": source,
-        "accession": None,
-        "locus_start": None,
-        "locus_end": None,
+        "accession": accession,
+        "locus_start": locus_start,
+        "locus_end": locus_end,
+        "strand": strand,
+        "source_record_id": source_record_id,
     }
 
 
@@ -332,6 +433,9 @@ class _Config:
         "dinuc_per_source",
         "rfam_per_family_cap",
         "rfam_max_scan",
+        "mining_window_nt",
+        "mining_margin_nt",
+        "mining_n_controls",
     )
 
     def __init__(self) -> None:
@@ -342,6 +446,12 @@ class _Config:
         self.dinuc_per_source = DEFAULT_DINUC_PER_SOURCE
         self.rfam_per_family_cap = DEFAULT_RFAM_PER_FAMILY_CAP
         self.rfam_max_scan = DEFAULT_RFAM_MAX_SCAN
+        # P2-10b mining substrate (rule build_mining_pool). Defaults mirror
+        # mining.pool's pins; imported lazily there to keep this module's import
+        # graph free of the mining package.
+        self.mining_window_nt = 300
+        self.mining_margin_nt = 50
+        self.mining_n_controls = 500
 
 
 def read_config(config: str | Path | None) -> _Config:
@@ -360,6 +470,9 @@ def read_config(config: str | Path | None) -> _Config:
         "dinuc_per_source": "dinuc_per_source",
         "rfam_per_family_cap": "rfam_per_family_cap",
         "rfam_max_scan": "rfam_max_scan",
+        "mining_window_nt": "mining_window_nt",
+        "mining_margin_nt": "mining_margin_nt",
+        "mining_n_controls": "mining_n_controls",
     }
     for line in path.read_text().splitlines():
         raw = line.split("#", 1)[0].strip()
@@ -535,10 +648,13 @@ def build(
 
     cfg = read_config(config)
 
-    corpus = pd.read_parquet(corpus_parquet, columns=[GC_COL, LEN_COL, SEQ_COL])
+    corpus = pd.read_parquet(corpus_parquet)
     gc_values = corpus[GC_COL].astype(float).tolist()
     lengths = corpus[LEN_COL].astype(int).tolist()
     sequences = corpus[SEQ_COL].astype(str).tolist()
+    # Content-addressed corpus identity (the same key flank_context/splits use),
+    # so a dinuc decoy's parent link survives any re-sort of the corpus.
+    record_ids = list(ingest.compute_record_hashes(corpus))
 
     records = build_corpus_pools(
         gc_values,
@@ -548,11 +664,31 @@ def build(
         n_gc=cfg.gc_background_n,
         n_dinuc_sources=cfg.dinuc_n_sources,
         dinuc_per_source=cfg.dinuc_per_source,
+        record_ids=record_ids,
     )
-    # Pool 2 — structured RNAs (staged Rfam subsample).
+    # Pool 2 — structured RNAs (staged Rfam subsample). The Rfam header locates
+    # each sequence on a real replicon; parse it so the mask can address the pool.
     for h, seq in parse_fasta(Path(structured_refs).read_text()):
-        records.append(_record(POOL_STRUCTURED, h, seq, "rfam_fasta_subsample"))
+        parsed = parse_structured_rna_locus(h)
+        acc, lo, hi, strand = parsed if parsed is not None else (None, None, None, None)
+        records.append(
+            _record(
+                POOL_STRUCTURED,
+                h,
+                seq,
+                "rfam_fasta_subsample",
+                accession=acc,
+                locus_start=lo,
+                locus_end=hi,
+                strand=strand,
+            )
+        )
     # Pool 4 — leader/tRNA-adjacent decoys (staged tboxevo validation negatives).
+    # These carry opaque surrogate ids (``neg_tbdb_-1baL_Tx``) whose only recorded
+    # provenance is an out-of-repo sibling path — no accession is recoverable, so
+    # they stay coordinate-free and are refused by the mining guard rather than
+    # given invented coordinates. Re-sourcing them needs CDS/tRNA annotation the
+    # repo does not have (deferred to P2-10b′; see the imp.md P2-10 preamble).
     for h, seq in parse_fasta(Path(leader_refs).read_text()):
         records.append(_record(POOL_LEADER, h, seq, "tboxevo_validation_negatives"))
 
@@ -561,22 +697,55 @@ def build(
     own_loci = masking.load_own_positive_loci(corpus_parquet)
     index = masking.LocusIndex.from_records(union_loci + own_loci)
     pool_mask_counts = dict.fromkeys(POOL_NAMES, 0)
+    # Overlap and proximity are separately reported: "masked" at the PRD §9.1
+    # flank means "within flank_nt of a known locus", which is not the same claim
+    # as "overlaps one". Collapsing them lets a pool with zero true overlaps read
+    # as contaminated (P2-10b measured exactly that: structured_rna has 0 true
+    # overlaps and a single record 5 nt away).
+    pool_overlap_counts = dict.fromkeys(POOL_NAMES, 0)
     for r in records:
-        masked = (
-            index.is_masked(r["accession"], r["locus_start"], r["locus_end"], flank=cfg.flank_nt)
-            if r["accession"] is not None
-            else False
+        has_coords = not (
+            masking.is_missing(r["accession"])
+            or masking.is_missing(r["locus_start"])
+            or masking.is_missing(r["locus_end"])
+        )
+        masked = has_coords and index.is_masked(
+            r["accession"], r["locus_start"], r["locus_end"], flank=cfg.flank_nt
+        )
+        overlaps = has_coords and index.is_masked(
+            r["accession"], r["locus_start"], r["locus_end"], flank=0
         )
         r["masked"] = masked
         r["mask_reason"] = "union_prior_or_own_positive_flank" if masked else None
         if masked:
             pool_mask_counts[r["pool"]] += 1
+        if overlaps:
+            pool_overlap_counts[r["pool"]] += 1
 
     residual = masking.residual_contamination_report(
         n_union_total=n_union_total,
         n_union_maskable=n_union_maskable,
         pool_mask_counts=pool_mask_counts,
     )
+    # Pool-side coverage + namespace: the union-side residual fraction is
+    # mathematically insensitive to whether any pool is maskable at all, so on its
+    # own it reads reassuring while nothing is masked. These are the pool-side
+    # numbers that can actually fail.
+    coordinate_coverage: dict[str, dict[str, int]] = {}
+    namespace: dict[str, dict[str, Any]] = {}
+    for pool in POOL_NAMES:
+        members = [r for r in records if r["pool"] == pool]
+        with_coords = [r for r in members if not masking.is_missing(r["accession"])]
+        coordinate_coverage[pool] = {
+            "n_records": len(members),
+            "n_with_coordinates": len(with_coords),
+            "n_without_coordinates": len(members) - len(with_coords),
+            "n_masked_at_flank": pool_mask_counts[pool],
+            "n_overlapping_at_flank_0": pool_overlap_counts[pool],
+        }
+        namespace[pool] = masking.accession_namespace_report(
+            (r["accession"] for r in with_coords), index
+        )
     digest = decoys_digest(records)
 
     # --- Write the artifact (parquet), the audit report, and provenance. ---
@@ -595,15 +764,27 @@ def build(
         "flank_nt": cfg.flank_nt,
         "seed": cfg.seed,
         "residual_contamination": residual,
+        "coordinate_coverage": coordinate_coverage,
+        "accession_namespace": namespace,
         "decoys_digest": digest,
         "corpus_sha256": provenance.sha256_file(corpus_parquet),
         "union_prior_sha256": provenance.sha256_file(union_parquet),
         "rfam_families": RFAM_FAMILIES,
         "notes": (
-            "P0 realisation: gc_background is a seeded 0th-order composition null "
-            "(no genome panel at P0); coordinate-masking is a no-op on these "
-            "coordinate-free P0 pools and becomes load-bearing at P2 mined windows; "
-            "residual = un-maskable union records with no coordinates."
+            "gc_background is a seeded 0th-order composition null (no genome panel "
+            "at P0), so it has no genomic coordinates in principle and is not "
+            "mineable. dinuc_shuffled's only possible coordinates are its source "
+            "positives' — carrying them would mask 100% of the pool against its own "
+            "parents, so P2-10b removed it from MINEABLE_POOLS (ADR-0005 A6) and "
+            "records the parent link as source_record_id instead. leader_decoy "
+            "carries opaque surrogate ids with no recoverable accession (re-sourcing "
+            "deferred to P2-10b′). structured_rna coordinates are parsed from the "
+            "Rfam headers as of P2-10b; note n_overlapping_at_flank_0 is reported "
+            "separately from n_masked_at_flank because masking at a flank measures "
+            "proximity, not overlap. residual_contamination is the UNION-side "
+            "denominator (un-maskable union records with no coordinates) and is "
+            "insensitive to pool maskability — coordinate_coverage and "
+            "accession_namespace are the pool-side numbers that can fail."
         ),
     }
     report_path = Path(report_path)
@@ -624,6 +805,10 @@ def build(
             "n_records": len(df),
             "pool_counts": pool_counts,
             "residual_contamination_fraction": residual["residual_contamination_fraction"],
+            "n_with_coordinates": sum(
+                v["n_with_coordinates"] for v in coordinate_coverage.values()
+            ),
+            "total_pool_records_masked": residual["total_pool_records_masked"],
         },
     )
     print(

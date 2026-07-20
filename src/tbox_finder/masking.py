@@ -31,6 +31,7 @@ exercises it without pandas/numpy; the parquet loaders (lazy pandas) are below.
 
 from __future__ import annotations
 
+import re
 from bisect import bisect_right
 from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
@@ -49,10 +50,45 @@ CORPUS_END_COL = "locus_end"
 # (PRD §9.1 "plus a flank"). Config-overridable via conf/data/decoys.yaml.
 DEFAULT_FLANK_NT = 50
 
+#: Trailing INSDC sequence-version suffix (``ABFD02000009.1`` → ``ABFD02000009``).
+#: Stripped on **both** sides of every masking comparison — see
+#: :func:`normalize_accession` for why this is a correctness requirement, not a
+#: convenience.
+_ACCESSION_VERSION_RE = re.compile(r"\.\d+$")
+
 
 # --------------------------------------------------------------------------- #
 # Pure-stdlib locus geometry (unit-testable without pandas)
 # --------------------------------------------------------------------------- #
+def normalize_accession(accession: Any) -> str:
+    """Strip the trailing INSDC ``.version`` so both sides of a mask share a namespace.
+
+    The union prior and the P0-12 corpus store accessions **unversioned**
+    (measured P2-10b: 0 of 12,041 union-prior accessions carry a ``.N`` suffix),
+    while every external coordinate source the negative pools draw on stores them
+    **versioned** (2,999 of 3,000 Rfam decoy headers; 23,535 of 23,535
+    ``flank_context`` rows). Comparing the two namespaces raw makes the mask a
+    silent no-op: measured intersection of the Rfam decoy accessions with the
+    ``LocusIndex`` keys is **0 of 2,751 distinct** as-is versus **269** after
+    stripping.
+
+    That failure mode is worse than the P0 one it replaces. At P0 the pools
+    carried no coordinates at all, so ``total_pool_records_masked = 0`` was
+    *visibly* vacuous. With versioned coordinates the columns are non-null, the
+    pipeline runs clean, and the count is still 0 — with nothing in the artifact
+    saying why. Normalising here, at the shared boundary rather than in each
+    producer, is what stops the next pool re-introducing it (ADR-0006 D11
+    impact list; PRD §9.1).
+
+    A version bump can in principle move coordinates, so this trades a small
+    false-*positive* mask risk (a stale version's interval masking a record it
+    no longer covers) for the certainty of masking nothing at all. Masking is a
+    protective over-approximation — PRD §9.1 already widens every locus by a
+    flank — so erring toward masking is the correct direction.
+    """
+    return _ACCESSION_VERSION_RE.sub("", str(accession))
+
+
 def normalize_locus(start: int, end: int) -> tuple[int, int]:
     """Return ``(lo, hi)`` inclusive bounds, folding reverse-strand ``start > end``.
 
@@ -76,24 +112,36 @@ class LocusIndex:
     to ``(accession, lo, hi)`` closed intervals). ``is_masked`` expands the query
     locus by ``flank`` on both sides before testing overlap, realising the PRD §9.1
     "known loci + flank are masked from every pool" rule.
+
+    Keys are stored :func:`normalize_accession`-normalised and queries are
+    normalised the same way, so a versioned query accession cannot silently miss
+    an unversioned index key (P2-10b). The **raw** keys are retained in
+    :attr:`raw_accession_keys` purely so a report can measure the as-is
+    intersection and show that the normalisation is doing work.
     """
 
     def __init__(self, by_accession: Mapping[str, Sequence[tuple[int, int]]]):
         # Store merged, start-sorted intervals per accession + a parallel list of
-        # interval starts for a bisect-narrowed overlap scan.
+        # interval starts for a bisect-narrowed overlap scan. Two source accessions
+        # differing only by version collapse to one key, so pool their intervals
+        # before merging rather than letting the later one overwrite the earlier.
         self._starts: dict[str, list[int]] = {}
         self._intervals: dict[str, list[tuple[int, int]]] = {}
+        self._raw_keys: frozenset[str] = frozenset(str(a) for a in by_accession)
+        pooled: dict[str, list[tuple[int, int]]] = {}
         for acc, ivals in by_accession.items():
+            pooled.setdefault(normalize_accession(acc), []).extend(ivals)
+        for acc, ivals in pooled.items():
             merged = _merge_intervals(ivals)
-            self._intervals[str(acc)] = merged
-            self._starts[str(acc)] = [lo for lo, _ in merged]
+            self._intervals[acc] = merged
+            self._starts[acc] = [lo for lo, _ in merged]
 
     @classmethod
     def from_records(cls, records: Iterable[tuple[str, int, int]]) -> LocusIndex:
         """Build from ``(accession, start, end)`` triples (strand folded, coords normalized)."""
         by_acc: dict[str, list[tuple[int, int]]] = {}
         for acc, start, end in records:
-            if acc is None:
+            if is_missing(acc):
                 continue
             by_acc.setdefault(str(acc), []).append(normalize_locus(start, end))
         return cls(by_acc)
@@ -106,17 +154,27 @@ class LocusIndex:
     def n_intervals(self) -> int:
         return sum(len(v) for v in self._intervals.values())
 
+    @property
+    def accession_keys(self) -> frozenset[str]:
+        """The normalised accession keys actually used for lookup."""
+        return frozenset(self._intervals)
+
+    @property
+    def raw_accession_keys(self) -> frozenset[str]:
+        """The accession strings as supplied, before version normalisation."""
+        return self._raw_keys
+
     def is_masked(self, accession: Any, start: int, end: int, flank: int = 0) -> bool:
         """True iff ``[start, end]`` (± ``flank``) overlaps a known locus on ``accession``.
 
         A record with no accession (synthetic decoy) carries no genomic
         coordinates and can never overlap a known locus → never masked.
         """
-        if accession is None or _is_missing(accession):
+        if accession is None or is_missing(accession):
             return False
         if flank < 0:
             raise ValueError(f"flank must be >= 0, got {flank}")
-        acc = str(accession)
+        acc = normalize_accession(accession)
         intervals = self._intervals.get(acc)
         if not intervals:
             return False
@@ -149,8 +207,16 @@ def _merge_intervals(intervals: Iterable[tuple[int, int]]) -> list[tuple[int, in
     return merged
 
 
-def _is_missing(value: Any) -> bool:
-    """True for ``None`` / NaN / pandas-NA (mirrors ingest._row_token missing test)."""
+def is_missing(value: Any) -> bool:
+    """True for ``None`` / NaN / pandas-NA (mirrors ingest._row_token missing test).
+
+    Public because every guard that decides "does this candidate have usable
+    coordinates?" must apply the *same* missing test as the mask itself. A guard
+    that tests only ``is not None`` accepts the ``NaN`` a pandas round-trip
+    through a nullable column produces, and the candidate then reaches the mask,
+    fails to match anything, and is classified **minable** rather than refused —
+    a fail-open direction (P2-10b; :mod:`tbox_finder.mining.hard_negative`).
+    """
     if value is None:
         return True
     try:
@@ -235,6 +301,38 @@ def residual_contamination_report(
         "residual_contamination_fraction": residual_fraction,
         "pool_records_masked": {str(k): int(v) for k, v in pool_mask_counts.items()},
         "total_pool_records_masked": int(sum(pool_mask_counts.values())),
+    }
+
+
+def accession_namespace_report(
+    candidate_accessions: Iterable[Any], index: LocusIndex
+) -> dict[str, Any]:
+    """Measure whether a pool's accessions can address the mask at all.
+
+    Returns the intersection of the pool's distinct accessions with the index
+    keys **both as-is and version-normalised**. This is the cheap measurement
+    that distinguishes the two indistinguishable readings of a zero mask count —
+    "this pool genuinely overlaps no known locus" from "this pool's accessions
+    are in a different namespace and could never have matched" (P2-10b measured
+    the latter: 0 as-is versus 269 normalised, on the Rfam pool).
+
+    ``namespace_compatible`` is the gateable clause: it is ``False`` when the
+    pool has accessions but **none** of them addresses an index key even after
+    normalisation, i.e. the mask is structurally incapable of firing.
+    """
+    raw = [a for a in candidate_accessions if not is_missing(a)]
+    distinct_raw = {str(a) for a in raw}
+    distinct_norm = {normalize_accession(a) for a in raw}
+    hit_raw = distinct_raw & index.raw_accession_keys
+    hit_norm = distinct_norm & index.accession_keys
+    return {
+        "n_with_accession": len(raw),
+        "n_distinct_accessions": len(distinct_raw),
+        "n_index_accessions": index.n_accessions,
+        "n_intersect_as_is": len(hit_raw),
+        "n_intersect_normalized": len(hit_norm),
+        "normalization_recovered": len(hit_norm) - len(hit_raw),
+        "namespace_compatible": bool(distinct_raw) and bool(hit_norm),
     }
 
 

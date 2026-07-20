@@ -41,3 +41,22 @@ rfam_max_scan: 20000
 
 # Pool 4 — 5'UTR / tRNA-adjacent leader decoys: the fixed external anchor is the
 # tboxevo idtm_validation_negatives.fasta (8 records), staged via `fetch-refs`.
+
+# --------------------------------------------------------------------------- #
+# P2-10b — the coordinate-bearing mining substrate (rule build_mining_pool;
+# src/tbox_finder/mining/pool.py). NOT a fifth PRD §9.1 negative class: the four
+# pools above are training/benchmark negatives, this is the ADR-0005 D14 mining
+# loop's candidate substrate, written to its own artifact.
+#
+# Windows are carved from the P2-00 flank_context regions, so each carries a real
+# (accession, locus_start, locus_end, strand) on a replicon that hosts a known
+# T-box — which is what gives the union-prior mask something to find.
+mining_window_nt: 300
+# A flank must exceed the window by this margin before a window is carved from it,
+# so a carved window never abuts the locus it was taken beside.
+mining_margin_nt: 50
+# Locus-centred designed-control windows. Each overlaps a known T-box BY
+# CONSTRUCTION, so the gate requires 100% of them to mask: anything less is a
+# coordinate-frame defect, not a biological result. They are tagged
+# `is_designed_control` and excluded from the natural contamination rate.
+mining_n_controls: 500
