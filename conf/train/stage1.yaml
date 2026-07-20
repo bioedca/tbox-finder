@@ -98,6 +98,24 @@ num_workers: 0
 # ⚠ This is the ONLY per-run number a sweep may rank on. Training loss is a function of
 # `gamma` and `class_weight_alpha` themselves, so ranking P2-06's γ/α grid on loss would
 # compare objectives rather than models.
+# Which side of the P2-06a carve trains. true (default) ⇒ the `inner_train` fold, 7,472
+# records, selection_val held OUT — mandatory for anything that RANKS on the val rung
+# (P2-06's sweep). false ⇒ the FULL 8,303-record D5 fold, and it is the production setting:
+# once the config is selected the carve's reason is spent, so P2-09 trains all of it. That
+# combination forfeits the val metric — there is no free held-out rung left (the LOO holdout
+# is P2-14's grading set) — so `eval_val=false` is REQUIRED alongside it and
+# Stage1TrainConfig.__post_init__ raises on `eval_val=true` + `exclude_selection_val=false`
+# rather than reporting an in-sample number as "held out" (P2-09, user decision 2026-07-19).
+#
+# ⚠ THIS KEY MUST EXIST HERE, not just as a Stage1TrainConfig field. Hydra composes in
+# struct mode, so a CLI `exclude_selection_val=false` against a config that lacks the key is
+# a hard ConfigCompositionException ("Could not override … not in struct") — every rank dies
+# in the first seconds. That is exactly how SLURM job 669 was lost: the field was added to
+# the dataclass at P2-09 and the unit tests exercised `_cfg_from_mapping` with a plain dict,
+# which never touches Hydra composition, so the gap was invisible until the run. The
+# tests/unit/test_sbatch_overrides.py gate now composes every shipped sbatch's OWN override
+# tokens; keep any new CLI-overridable field in this file and that gate green.
+exclude_selection_val: true
 eval_val: true
 eval_batch_size: 8
 # null ⇒ all 830 records. The smoke caps it; P2-06/P2-09 leave it null. A capped run

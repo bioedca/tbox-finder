@@ -408,3 +408,64 @@ the new clause + config guard each proven by sabotage. The **run** gate (DONE ma
 report + checkpoint DVC-added) fires only after the SLURM submit-ack. **Compute** SLURM
 (`--gres=gpu:a4000:8`); measured est ≈ **1.8 GPU-h / ~0.23 h wall** (the P2-06 winner ran 1,160 steps
 @ 0.605 s median at this exact shape; scaled by 8303/7472). **Commit.** authoring SHA pending.
+
+## Step P2-09a — 2026-07-20: job 669 died on an un-composable override; the sbatch-override gate
+
+**Inputs.** SLURM job 669 (submitted 2026-07-19T15:04:49), `slurm/p2/train_production.sbatch`,
+`conf/train/stage1.yaml`, `reports/p2/train_production_669.{out,err}`.
+
+**What happened.** 669 sat `PENDING (Resources)` for **14 h 36 m** on the cryosparc-fragmented `gpu`
+partition, started at 05:41, and was dead by 05:43 — every rank on::
+
+    Could not override 'exclude_selection_val'.
+    Key 'exclude_selection_val' is not in struct
+
+P2-09 added `exclude_selection_val` as a `Stage1TrainConfig` field (train_stage1.py:181) and passed it
+on the `torchrun` line, but never added the key to `conf/train/stage1.yaml`. Hydra composes in **struct
+mode**, so an override naming an absent key is a hard `ConfigCompositionException` raised before any
+model is built. No GPU-hours were consumed; the cost was the queue wait. Everything upstream worked
+exactly as designed — all three parquets staged and hash-verified (`split_assignments` sha256
+`6388ba19…` = the committed LFS oid), 8×A4000 visible, `selective_scan_cuda` OK, HF cache warm — and
+the CodeRabbit-r1 reorder (stale-output `rm -f` moved *after* the staged-input asserts) meant the
+failure destroyed nothing.
+
+**Why the suite did not catch it.** `tests/unit/test_production_fold.py` exercises
+`_cfg_from_mapping({"exclude_selection_val": False, …})` — a **plain dict, one layer below Hydra** — and
+`sbatch --test-only` validates SLURM resources, never the command. The previous stanza records both
+P2-09 guards as "sabotage-verified to bite in their own name", and they were: at the *dataclass* and
+*report* layers. The composition layer between the shipped file and those guards was untested by
+anything. Quantified: with the config key removed — the exact defect — the pre-existing suite still
+reports **1,774 passed, 0 failed**. All 1,774 tests were blind to it. This is
+[[verify-the-line-you-ship]] again, one layer up: the pre-ack probe checked imports and staged inputs,
+never the override tokens the artifact actually ships.
+
+**Process.** Reproduced locally in the `tbox-finder-data` env (hydra 1.3.2) by composing
+`train/stage1` with the override parsed out of the sbatch's own bytes. Fixed by adding
+`exclude_selection_val: true` to `conf/train/stage1.yaml` — default `true` = the `inner_train` fold,
+matching the dataclass default, so only P2-09's explicit `false` changes behaviour.
+
+**Outputs.** `conf/train/stage1.yaml` (+ the key and its trap note) ·
+`tests/unit/test_sbatch_overrides.py` (**10 tests**) — reads every `slurm/**/*.sbatch`, extracts the
+override tokens after `-m <module>`, resolves each entrypoint's `config_name` by statically parsing its
+`@hydra.main` decorator (no import, no torch), and runs **real struct-mode composition**; 6 launch
+blocks across 5 files are gated · `.github/workflows/ci.yml` (+`hydra-core==1.3.2`,
+`omegaconf==2.3.0`, both == `envs/data.yml`) so the gate cannot `importorskip` green in CI.
+
+**A second hole, found while authoring.** The first cut keyed discovery off launcher names
+(`torchrun`/`python -m`) and **silently dropped** `slurm/p1/gtdb_continued_pretrain.sbatch`, which uses
+`accelerate launch` — a Hydra entrypoint with three ungated overrides. Discovery is now
+launcher-agnostic (`-m tbox_finder.…`), and `test_no_sbatch_launch_is_silently_dropped` asserts
+file-level coverage directly, so a fourth launcher cannot quietly shrink the gate.
+
+**Validation.** CI-exact **1,784 passed / 162 skipped**, against a **1,774**-passed baseline measured
+by the same command ignoring only the new file = **+10, zero regressions**; ruff 0.15.15 + black
+25.11.0 clean. Two sabotages, each naming its test ([[sabotage-attribution-names-the-test]]):
+removing the config key failed exactly `test_every_sbatch_override_composes[…train_production…]` +
+`test_exclude_selection_val_is_a_config_key_and_a_dataclass_field` (8 others still passing — a specific
+bite, not a blanket one); reverting discovery to launcher-names failed exactly
+`test_no_sbatch_launch_is_silently_dropped`, and the collected count fell 10 → 9 as the GTDB case
+vanished — the silent-drop signature made visible.
+
+**Decisions.** No sbatch change: the launch line was correct and the config was wrong, so fixing the
+config keeps the run shape (DDP×8, PRD §10.3) and the P2-06-selected config untouched. Re-submitting
+needs a fresh §9.3 ack — the changed tree voids the job-test 667 preflight. **Commit.** SHA pending.

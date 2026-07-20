@@ -103,11 +103,17 @@ jobs:
           # pyarrow: the stdlib has no parquet reader. numpy/pandas/scikit-learn:
           # P0-31 makes the golden per-stage hashes + the eval-gate real-fixture tier
           # RE-RUN in CI (they importorskip these, so without them they skip silently).
+          # hydra-core/omegaconf: same anti-skip contract for the P2-09 sbatch-override
+          # gate (tests/unit/test_sbatch_overrides.py), which composes every shipped
+          # sbatch's real CLI overrides. Without them it importorskips GREEN — and that
+          # gate exists precisely because SLURM job 669 died on an override the config
+          # lacked, after a ~9 h queue wait, with the whole suite passing.
           # All pinned == envs/data.yml so the CI reader/metric kernels match the
           # writer/data env bit-for-bit (isolated CI tools, the conda-lock/git-lfs
           # precedent — NOT a science-env / ML-stack change). CLAUDE.md §3.1/§8.6.
           pip install -e . "pytest==9.0.2" "pyarrow==24.0.0" \
-            "numpy==2.5.1" "pandas==2.3.3" "scikit-learn==1.9.0"
+            "numpy==2.5.1" "pandas==2.3.3" "scikit-learn==1.9.0" \
+            "hydra-core==1.3.2" "omegaconf==2.3.0"
       - name: pytest
         env:
           # Fail (never silently skip) if the committed table is unreadable here — the
