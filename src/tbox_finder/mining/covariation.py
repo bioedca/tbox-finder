@@ -163,6 +163,9 @@ class CovariationResult:
 
     helices: tuple[Helix, ...]
     evalue: float
+    #: Version the binary reported when it produced this result. ``None`` for a
+    #: result parsed from a file, which carries no evidence about what ran.
+    rscape_version: str | None = None
 
     @property
     def n_helices(self) -> int:
@@ -195,7 +198,14 @@ class CovariationResult:
         return STATUS_PASSED if self.satisfies(criterion) else STATUS_FAILED
 
     def as_report(self, criterion: AnyHelixCriterion) -> dict[str, Any]:
-        """Auditable record of the verdict **and** its counterfactual."""
+        """Auditable record of the verdict **and** its counterfactual.
+
+        The version fields report what **actually ran** (``None`` for a result
+        parsed from a file, which cannot certify a binary). Stamping the pinned
+        constant here unconditionally would let a report built by a 2.6.x binary
+        claim 2.0.4.a — and since v2.0.5 recalculated the covariation power curves,
+        that is the one field a reader most needs to be true.
+        """
         other = (
             AnyHelixCriterion.TOTAL_ACROSS_HELICES
             if criterion is AnyHelixCriterion.WITHIN_HELIX
@@ -209,17 +219,19 @@ class CovariationResult:
             "total_covarying": self.total_covarying,
             "min_covarying_pairs_required": MIN_COVARYING_PAIRS,
             "evalue": self.evalue,
-            "rscape_version": PINNED_RSCAPE_VERSION,
+            "rscape_version_observed": self.rscape_version,
+            "rscape_version_pinned": PINNED_RSCAPE_VERSION,
+            "rscape_version_matches_pin": self.rscape_version == PINNED_RSCAPE_VERSION,
             "status_under_other_criterion": self.status(other),
             "other_criterion": other.value,
         }
 
 
 # --------------------------------------------------------------------------- #
-# Availability — probed, never asserted
+# Availability — probed and version-gated, never asserted
 # --------------------------------------------------------------------------- #
-def backend_available() -> bool:
-    """Whether the pinned R-scape binary is callable in this environment."""
+def _binary_on_path() -> bool:
+    """Whether *some* ``R-scape`` resolves on ``PATH`` — says nothing about which."""
     return shutil.which(RSCAPE_BINARY) is not None
 
 
@@ -229,7 +241,7 @@ def rscape_version() -> str:
     Raises :class:`CovariationBackendError` if the binary is absent or its banner
     is unparseable — an unidentifiable build must not silently score candidates.
     """
-    if not backend_available():
+    if not _binary_on_path():
         raise CovariationBackendError(
             f"{RSCAPE_BINARY} is not on PATH; run inside the pinned tbox-rscape env "
             f"(envs/rscape.yml, rscape={PINNED_RSCAPE_VERSION})"
@@ -242,6 +254,25 @@ def rscape_version() -> str:
         if match:
             return match.group("version")
     raise CovariationBackendError(f"could not read a version banner from `{RSCAPE_BINARY} -h`")
+
+
+def backend_available() -> bool:
+    """Whether the **pinned** R-scape is callable here — presence *and* version.
+
+    Presence alone is not enough. `rscape` 2.0.5 reverted the null-model gap
+    treatment and **recalculated the covariation power curves**, which moves
+    ``nbp_cov`` — the single number every verdict is computed from. A round run on
+    an unpinned build would produce verdicts this repo cannot reproduce or defend,
+    so a mismatch reads as *unavailable*, and the readiness gate then refuses the
+    round. That is the fail-closed direction: a refused round costs a step, an
+    unpinned round costs the mined curriculum's provenance.
+    """
+    if not _binary_on_path():
+        return False
+    try:
+        return rscape_version() == PINNED_RSCAPE_VERSION
+    except CovariationBackendError:
+        return False
 
 
 def round_backend_availability(
@@ -267,12 +298,20 @@ def round_backend_availability(
 # --------------------------------------------------------------------------- #
 # Parsing
 # --------------------------------------------------------------------------- #
-def parse_helixcov(text: str, *, evalue: float = DEFAULT_EVALUE) -> CovariationResult:
+def parse_helixcov(
+    text: str,
+    *,
+    evalue: float = DEFAULT_EVALUE,
+    rscape_version: str | None = None,
+) -> CovariationResult:
     """Parse a ``.helixcov`` file body into a :class:`CovariationResult`.
 
     Pure text → dataclass; no I/O, no subprocess. This is the layer the bare-CI
     unit tier exercises against committed fixtures, following the
     :mod:`tbox_finder.infernal` precedent (parser pure, shell-out behind a probe).
+
+    ``rscape_version`` defaults to ``None`` — text alone is no evidence of which
+    binary produced it. :func:`run_rscape` supplies the probed value.
     """
     helices: list[Helix] = []
     for line in text.splitlines():
@@ -295,7 +334,9 @@ def parse_helixcov(text: str, *, evalue: float = DEFAULT_EVALUE) -> CovariationR
                 n_covarying=n_covarying,
             )
         )
-    return CovariationResult(helices=tuple(helices), evalue=float(evalue))
+    return CovariationResult(
+        helices=tuple(helices), evalue=float(evalue), rscape_version=rscape_version
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -315,10 +356,19 @@ def run_rscape(
     covariation *per helix* off that consensus structure, and without it no
     ``.helixcov`` records are emitted.
     """
-    if not backend_available():
+    if not _binary_on_path():
         raise CovariationBackendError(
             f"{RSCAPE_BINARY} is not on PATH; run inside the pinned tbox-rscape env "
             f"(envs/rscape.yml, rscape={PINNED_RSCAPE_VERSION})"
+        )
+    # Probed before the run, and recorded on the result, so no report can stamp a
+    # version the binary that produced it did not report.
+    observed_version = rscape_version()
+    if observed_version != PINNED_RSCAPE_VERSION:
+        raise CovariationBackendError(
+            f"{RSCAPE_BINARY} reports {observed_version!r} but envs/rscape.yml pins "
+            f"{PINNED_RSCAPE_VERSION!r}; v2.0.5 recalculated the covariation power "
+            "curves, so verdicts from another build are not comparable (ADR-0002 A11)"
         )
     alignment = Path(alignment)
     if not alignment.is_file():
@@ -354,7 +404,11 @@ def run_rscape(
             f"{RSCAPE_BINARY} produced no helix-level output at {helixcov}; "
             "does the alignment carry an #=GC SS_cons line?"
         )
-    return parse_helixcov(helixcov.read_text(encoding="utf-8"), evalue=evalue)
+    return parse_helixcov(
+        helixcov.read_text(encoding="utf-8"),
+        evalue=evalue,
+        rscape_version=observed_version,
+    )
 
 
 def covariation_verdict(

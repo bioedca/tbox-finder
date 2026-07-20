@@ -982,3 +982,22 @@ requires it positionally; `CovariationResult.as_report` records the counterfactu
 is an **ADR-0006 decision owed at P2-10e**.
 
 **Commit.** `<SHA — reconcile against `git log main` at the P2 exit gate>`
+
+**CodeRabbit r1 — 3 Major + 2 nits, all applied.** The Major that mattered undercut A11's own
+narrative: **the pinned version was documented everywhere and asserted nowhere it was used.**
+`backend_available()` checked only that *some* `R-scape` was on `PATH`, and `as_report()` stamped
+`PINNED_RSCAPE_VERSION` **unconditionally** — so a 2.6.x binary could have produced the numbers while
+every committed report claimed 2.0.4.a, which is precisely the field this step argued a reader most
+needs to be true. Now: availability is presence **and** version (a mismatch reads *unavailable*, so
+the readiness gate refuses the round — the fail-closed direction); `CovariationResult` carries the
+**observed** version (`None` for a parse, which is no evidence of what ran) and the report publishes
+`rscape_version_observed` / `_pinned` / `_matches_pin`; `run_rscape` refuses an unpinned build outright;
+and `scripts/make_rscape_fixture.py` checks the pin **before** overwriting tracked fixtures. Second
+Major: the fixture generator wrote incrementally, so a failure on the second R-scape run would leave a
+fresh positive beside a stale control — a **mismatched pair that still looks matched**, the one thing
+the gate cannot tolerate; all four files are now staged in a temp dir and moved only after both runs
+succeed. Third: the reproduction test claimed "byte-for-byte" while comparing only parsed helices, so a
+changed p-value or aggregation mode would have slipped through — it now diffs the raw file. Two
+sabotage reverts confirm the new invariants bite by name
+(`test_an_unpinned_build_reads_as_unavailable`, `test_report_never_claims_a_version_it_did_not_observe`).
+Suite **1,948 / 158** (+3); fixtures re-verified byte-identical after the rewrite.

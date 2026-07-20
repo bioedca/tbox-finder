@@ -28,6 +28,7 @@ from tbox_finder.mining.covariation import (
     covariation_verdict,
     parse_helixcov,
     round_backend_availability,
+    rscape_version,
 )
 from tbox_finder.mining.spare_rule import (
     STATUS_FAILED,
@@ -145,7 +146,30 @@ def test_report_carries_the_counterfactual() -> None:
     assert report["status"] == STATUS_FAILED
     assert report["other_criterion"] == "total_across_helices"
     assert report["status_under_other_criterion"] == STATUS_PASSED
-    assert report["rscape_version"] == PINNED_RSCAPE_VERSION
+    assert report["rscape_version_pinned"] == PINNED_RSCAPE_VERSION
+
+
+def test_report_never_claims_a_version_it_did_not_observe() -> None:
+    """Parsed text is no evidence of which binary produced it.
+
+    Stamping the pinned constant unconditionally would let a report built by a
+    2.6.x binary claim 2.0.4.a — and since v2.0.5 recalculated the covariation
+    power curves, that is the field a reader most needs to be true.
+    """
+    parsed = parse_helixcov(_read(_POSITIVE))
+    report = parsed.as_report(AnyHelixCriterion.WITHIN_HELIX)
+    assert report["rscape_version_observed"] is None
+    assert report["rscape_version_matches_pin"] is False
+
+    ran = parse_helixcov(_read(_POSITIVE), rscape_version=PINNED_RSCAPE_VERSION)
+    ran_report = ran.as_report(AnyHelixCriterion.WITHIN_HELIX)
+    assert ran_report["rscape_version_observed"] == PINNED_RSCAPE_VERSION
+    assert ran_report["rscape_version_matches_pin"] is True
+
+    other = parse_helixcov(_read(_POSITIVE), rscape_version="2.6.11")
+    other_report = other.as_report(AnyHelixCriterion.WITHIN_HELIX)
+    assert other_report["rscape_version_observed"] == "2.6.11"
+    assert other_report["rscape_version_matches_pin"] is False
 
 
 def test_criterion_is_required_and_typed() -> None:
@@ -208,9 +232,16 @@ def test_status_is_never_unavailable() -> None:
 # --------------------------------------------------------------------------- #
 # Availability is probed, not asserted — the non-tautology clauses
 # --------------------------------------------------------------------------- #
-def _fake_binary(directory: Path) -> None:
+def _fake_binary(directory: Path, version: str = PINNED_RSCAPE_VERSION) -> None:
+    """A stand-in that prints R-scape's real two-line banner, version configurable."""
     target = directory / RSCAPE_BINARY
-    target.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    target.write_text(
+        "#!/bin/sh\n"
+        "echo '# R-scape :: RNA Structural Covariation Above Phylogenetic Expectation'\n"
+        f"echo '# R-scape {version} (Dec 2023)'\n"
+        "exit 0\n",
+        encoding="utf-8",
+    )
     target.chmod(target.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
 
 
@@ -228,6 +259,40 @@ def test_availability_follows_the_real_path_probe(
     _fake_binary(tmp_path)
     monkeypatch.setenv("PATH", str(tmp_path))
     assert backend_available() is True
+
+
+def test_an_unpinned_build_reads_as_unavailable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Presence is not enough — the version is part of availability.
+
+    v2.0.5 recalculated the covariation power curves, which moves ``nbp_cov``, the
+    single number every verdict is computed from. A round on an unpinned build
+    would produce verdicts this repo cannot reproduce, so a mismatch must fail
+    **closed**: unavailable ⇒ the readiness gate refuses the round.
+    """
+    _fake_binary(tmp_path, version="2.6.11")
+    monkeypatch.setenv("PATH", str(tmp_path))
+
+    assert rscape_version() == "2.6.11"
+    assert backend_available() is False
+
+    readiness = mining_round_readiness(round_backend_availability())
+    assert readiness["ready"] is False
+
+
+def test_an_unparseable_banner_reads_as_unavailable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An unidentifiable build must not silently score candidates."""
+    target = tmp_path / RSCAPE_BINARY
+    target.write_text("#!/bin/sh\necho 'no banner here'\nexit 0\n", encoding="utf-8")
+    target.chmod(target.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+    monkeypatch.setenv("PATH", str(tmp_path))
+
+    with pytest.raises(CovariationBackendError, match="version banner"):
+        rscape_version()
+    assert backend_available() is False
 
 
 def test_readiness_refuses_when_the_binary_is_absent(

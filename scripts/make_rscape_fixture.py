@@ -26,10 +26,13 @@ Outputs : tests/fixtures/rscape/{classII_sub.sto,classII_sub.shuffled.sto,
 from __future__ import annotations
 
 import random
+import shutil
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
+
+from tbox_finder.mining.covariation import PINNED_RSCAPE_VERSION, rscape_version
 
 SOURCE = Path("data/interim/splits/aligned/class_II.sto")
 OUTDIR = Path("tests/fixtures/rscape")
@@ -111,6 +114,15 @@ def run_rscape_to(alignment: Path, helixcov_out: Path) -> None:
 def main() -> int:
     if not SOURCE.is_file():
         raise SystemExit(f"{SOURCE} not found — run `dvc pull` first")
+    # Refuse before touching tracked fixtures: regenerating outside the pinned env
+    # would commit outputs from a different build, and v2.0.5 recalculated the
+    # covariation power curves that produce every `nbp_cov` in these files.
+    observed = rscape_version()
+    if observed != PINNED_RSCAPE_VERSION:
+        raise SystemExit(
+            f"R-scape reports {observed!r} but envs/rscape.yml pins "
+            f"{PINNED_RSCAPE_VERSION!r}; run inside the tbox-rscape env"
+        )
     OUTDIR.mkdir(parents=True, exist_ok=True)
 
     seqs, gc = read_pfam_stockholm(SOURCE)
@@ -119,13 +131,27 @@ def main() -> int:
     picked = sorted(random.Random(SEED).sample(range(len(seqs)), N_SEQUENCES))
     subsample = [seqs[i] for i in picked]
 
-    positive = OUTDIR / "classII_sub.sto"
-    shuffled = OUTDIR / "classII_sub.shuffled.sto"
-    write_pfam_stockholm(positive, subsample, gc)
-    write_pfam_stockholm(shuffled, column_shuffle(subsample, SEED + 1), gc)
+    # Stage all four in a temp dir and move them in only once BOTH R-scape runs
+    # succeed. Writing incrementally means a failure on the second run leaves a
+    # fresh positive beside a stale control — a mismatched pair that still looks
+    # like a matched one, which is the single thing the gate cannot tolerate.
+    with tempfile.TemporaryDirectory(prefix="tbox-rscape-stage-") as stage_dir:
+        stage = Path(stage_dir)
+        positive = stage / "classII_sub.sto"
+        shuffled = stage / "classII_sub.shuffled.sto"
+        write_pfam_stockholm(positive, subsample, gc)
+        write_pfam_stockholm(shuffled, column_shuffle(subsample, SEED + 1), gc)
 
-    run_rscape_to(positive, OUTDIR / "classII_sub.helixcov")
-    run_rscape_to(shuffled, OUTDIR / "classII_sub.shuffled.helixcov")
+        run_rscape_to(positive, stage / "classII_sub.helixcov")
+        run_rscape_to(shuffled, stage / "classII_sub.shuffled.helixcov")
+
+        for name in (
+            "classII_sub.sto",
+            "classII_sub.shuffled.sto",
+            "classII_sub.helixcov",
+            "classII_sub.shuffled.helixcov",
+        ):
+            shutil.move(str(stage / name), str(OUTDIR / name))
 
     print(f"wrote {N_SEQUENCES} seqs x {len(subsample[0][1])} cols to {OUTDIR}/")
     return 0

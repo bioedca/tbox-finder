@@ -102,7 +102,13 @@ def test_binary_resolves_inside_the_pinned_env() -> None:
 
 
 def test_committed_helixcov_reproduces_from_the_binary(tmp_path: Path) -> None:
-    """The committed fixtures are what this binary actually emits, today."""
+    """The committed fixtures are what this binary actually emits, today.
+
+    Compared **byte-for-byte** on the raw file, not just on the parsed helices: a
+    parsed-only comparison would pass while R-scape changed a p-value, an
+    aggregation mode, or a field the parser happens to ignore — exactly the kind of
+    drift a version bump introduces and this fixture exists to catch.
+    """
     _need_binary()
     _need_fixtures()
 
@@ -110,9 +116,14 @@ def test_committed_helixcov_reproduces_from_the_binary(tmp_path: Path) -> None:
         (_POSITIVE_STO, _POSITIVE_HELIXCOV),
         (_SHUFFLED_STO, _SHUFFLED_HELIXCOV),
     ):
-        result = run_rscape(alignment, tmp_path / alignment.stem, outname="fx")
+        outdir = tmp_path / alignment.stem
+        result = run_rscape(alignment, outdir, outname="fx")
+        produced = (outdir / "fx.helixcov").read_text(encoding="utf-8")
+        assert produced == committed.read_text(encoding="utf-8"), f"drift on {alignment.name}"
+
         expected = parse_helixcov(committed.read_text(encoding="utf-8"))
-        assert result.helices == expected.helices, f"drift on {alignment.name}"
+        assert result.helices == expected.helices
+        assert result.rscape_version == PINNED_RSCAPE_VERSION
 
 
 @pytest.mark.parametrize("criterion", _BOTH_CRITERIA, ids=lambda c: c.value)
