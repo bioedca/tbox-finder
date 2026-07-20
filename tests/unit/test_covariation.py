@@ -18,6 +18,7 @@ from pathlib import Path
 
 import pytest
 
+from tbox_finder.mining import covariation
 from tbox_finder.mining.covariation import (
     MIN_COVARYING_PAIRS,
     PINNED_RSCAPE_VERSION,
@@ -29,6 +30,7 @@ from tbox_finder.mining.covariation import (
     parse_helixcov,
     round_backend_availability,
     rscape_version,
+    run_rscape,
 )
 from tbox_finder.mining.spare_rule import (
     STATUS_FAILED,
@@ -404,3 +406,67 @@ def test_version_regex_skips_the_banner_title_line() -> None:
     matched = _VERSION_RE.match(version)
     assert matched is not None
     assert matched.group("version") == "2.0.4.a"
+
+
+def test_a_hung_binary_reads_as_unavailable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A probe that times out must refuse the round, not crash the readiness check.
+
+    ``backend_available`` catches only ``CovariationBackendError``, so every way the
+    probe can fail has to arrive as one — a bare ``TimeoutExpired`` escaping here
+    would take down the caller instead of returning False.
+    """
+    target = tmp_path / RSCAPE_BINARY
+    target.write_text("#!/bin/sh\nsleep 30\n", encoding="utf-8")
+    target.chmod(target.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+    # `sleep` is resolved through PATH *inside* the script, so a PATH holding only
+    # tmp_path makes the fake exit 127 instantly and this test would silently
+    # exercise the no-banner branch instead of the timeout one. tmp_path stays
+    # first, so `shutil.which` still resolves the fake.
+    monkeypatch.setenv("PATH", os.pathsep.join([str(tmp_path), "/usr/bin", "/bin"]))
+    monkeypatch.setattr(covariation, "VERSION_PROBE_TIMEOUT_S", 0.5)
+
+    with pytest.raises(CovariationBackendError, match="timed out"):
+        rscape_version()
+    assert backend_available() is False
+    assert mining_round_readiness(round_backend_availability())["ready"] is False
+
+
+def test_an_unexecutable_binary_reads_as_unavailable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A file that resolves on PATH but cannot exec must also fail closed."""
+    target = tmp_path / RSCAPE_BINARY
+    target.write_text("\x7fELF not really\n", encoding="latin-1")
+    target.chmod(target.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+    monkeypatch.setenv("PATH", str(tmp_path))
+
+    with pytest.raises(CovariationBackendError, match="could not execute"):
+        rscape_version()
+    assert backend_available() is False
+
+
+def test_run_refuses_a_pre_existing_helixcov(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A leftover output must never be read as this candidate's verdict.
+
+    R-scape exits 0 without writing a ``.helixcov`` when the alignment carries no
+    ``SS_cons``. With a reused outdir that means an earlier candidate's file would
+    be parsed as this one's — a stale ``passed`` on a candidate never scored, the
+    fail-open direction the module exists to prevent.
+    """
+    _fake_binary(tmp_path)
+    monkeypatch.setenv("PATH", str(tmp_path))
+
+    alignment = tmp_path / "aln.sto"
+    alignment.write_text("# STOCKHOLM 1.0\n//\n", encoding="utf-8")
+    outdir = tmp_path / "out"
+    outdir.mkdir()
+    stale = outdir / "fx.helixcov"
+    stale.write_text("# RM 1-5 20-24, nbp = 5 nbp_cov = 5\n", encoding="utf-8")
+
+    with pytest.raises(CovariationBackendError, match="pre-existing"):
+        run_rscape(alignment, outdir, outname="fx")
+    assert stale.read_text(encoding="utf-8").strip().endswith("nbp_cov = 5")

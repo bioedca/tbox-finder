@@ -100,6 +100,11 @@ MIN_COVARYING_PAIRS = 2
 #: ~1.0 s, so this is a runaway guard, not a working budget.
 DEFAULT_RSCAPE_TIMEOUT_S = 900.0
 
+#: Timeout for the `-h` version probe. Separate from the run budget: printing a
+#: banner is instantaneous, and the probe sits on the readiness path, so it must
+#: not inherit a 15-minute ceiling.
+VERSION_PROBE_TIMEOUT_S = 60.0
+
 #: ``# RM <i>-<j> <k>-<l>, nbp = <n> nbp_cov = <m>`` — one helix per match in the
 #: ``.helixcov`` file. ``nbp`` is the helix's base-pair count; ``nbp_cov`` is how
 #: many of them covary significantly at the requested E-value.
@@ -246,9 +251,24 @@ def rscape_version() -> str:
             f"{RSCAPE_BINARY} is not on PATH; run inside the pinned tbox-rscape env "
             f"(envs/rscape.yml, rscape={PINNED_RSCAPE_VERSION})"
         )
-    proc = subprocess.run(
-        [RSCAPE_BINARY, "-h"], capture_output=True, text=True, check=False, timeout=60
-    )
+    # Every way the probe can fail becomes CovariationBackendError, because
+    # backend_available() catches exactly that and turns it into "unavailable".
+    # A hung binary raising TimeoutExpired, or an unexecutable one raising OSError,
+    # must make the round refuse — not crash the readiness probe itself.
+    try:
+        proc = subprocess.run(
+            [RSCAPE_BINARY, "-h"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=VERSION_PROBE_TIMEOUT_S,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise CovariationBackendError(
+            f"`{RSCAPE_BINARY} -h` timed out after {VERSION_PROBE_TIMEOUT_S}s"
+        ) from exc
+    except OSError as exc:
+        raise CovariationBackendError(f"could not execute {RSCAPE_BINARY}: {exc}") from exc
     for line in (proc.stdout + proc.stderr).splitlines():
         match = _VERSION_RE.match(line.strip())
         if match:
@@ -376,6 +396,18 @@ def run_rscape(
     outdir = Path(outdir)
     outdir.mkdir(parents=True, exist_ok=True)
 
+    helixcov = outdir / f"{outname}.helixcov"
+    # Refuse a pre-existing output rather than risk parsing it. If R-scape exits 0
+    # without writing (it does exactly that on an alignment with no SS_cons), a
+    # leftover file from an earlier run in the same outdir would be read as this
+    # candidate's verdict — a stale `passed` on a candidate never scored, which is
+    # the fail-open direction the whole module is built to avoid.
+    if helixcov.exists():
+        raise CovariationBackendError(
+            f"refusing to reuse a pre-existing helix-level output: {helixcov}; "
+            "pass a fresh outdir (covariation_verdict uses a temporary one)"
+        )
+
     cmd = [
         RSCAPE_BINARY,
         "--nofigures",
@@ -393,12 +425,13 @@ def run_rscape(
         raise CovariationBackendError(
             f"{RSCAPE_BINARY} timed out after {timeout_s}s: {' '.join(cmd)}"
         ) from exc
+    except OSError as exc:
+        raise CovariationBackendError(f"could not execute {RSCAPE_BINARY}: {exc}") from exc
     if proc.returncode != 0:
         raise CovariationBackendError(
             f"{RSCAPE_BINARY} failed (rc={proc.returncode}): {proc.stderr.strip()}"
         )
 
-    helixcov = outdir / f"{outname}.helixcov"
     if not helixcov.is_file():
         raise CovariationBackendError(
             f"{RSCAPE_BINARY} produced no helix-level output at {helixcov}; "

@@ -1001,3 +1001,20 @@ changed p-value or aggregation mode would have slipped through — it now diffs 
 sabotage reverts confirm the new invariants bite by name
 (`test_an_unpinned_build_reads_as_unavailable`, `test_report_never_claims_a_version_it_did_not_observe`).
 Suite **1,948 / 158** (+3); fixtures re-verified byte-identical after the rewrite.
+
+**CodeRabbit r2 — 2 Major applied (a third was lost to the rate limit; see below).** Both were the
+same shape as r1's: a path that could fail **open**. (a) `rscape_version()` let
+`subprocess.TimeoutExpired` and `OSError` escape while `backend_available()` caught only
+`CovariationBackendError`, so a hung or unexecutable binary would have **crashed the readiness probe**
+instead of refusing the round; every probe failure is now a `CovariationBackendError` and the version
+probe has its own 60 s budget rather than inheriting the 15-minute run ceiling. (b) `run_rscape` read
+`<outname>.helixcov` from a caller-supplied `outdir` **without checking it was fresh** — and R-scape
+exits 0 without writing when an alignment carries no `SS_cons`, so a reused outdir would have parsed an
+earlier candidate's file as this one's verdict (a stale `passed` on a candidate never scored). It now
+refuses a pre-existing output outright. `run_rscape` also gained the same `OSError` arm.
+Two more sabotage reverts confirm both bite by name. Suite **1,951 / 158** (+3).
+**Honest gap:** CodeRabbit reported **3** findings in r2 and the CLI's incremental mode plus a Fair-Usage
+rate limit (34-minute wait, escalating per the known pattern) meant the third was never re-read. The two
+recovered were fixed; the third is unread, not dismissed, and the same fail-open class was self-audited
+across the run path (that audit is what added `run_rscape`'s `OSError` arm, which CodeRabbit had only
+flagged on the probe).
