@@ -595,6 +595,41 @@ def _git_dirty() -> bool | None:
     return None if status is None else bool(status.strip())
 
 
+#: Path prefixes whose dirt cannot change what the code did. Only the staged corpus
+#: artifacts live here: the cluster has no git-lfs, so every run re-stages
+#: ``split_assignments.parquet`` over its committed LFS pointer and the tree is dirty by
+#: construction ([[git-lfs-pointers-in-ci]]). Everything else — ``src/``, ``conf/``,
+#: ``slurm/``, ``tests/``, ``workflow/`` — IS the code the SHA is supposed to name.
+_DATA_STAGING_PREFIXES = ("data/",)
+
+
+def _git_dirty_paths() -> list[str] | None:
+    """Tracked paths differing from HEAD (``None`` if git is unavailable).
+
+    ``git_dirty`` alone is not actionable: it collapses "the staged corpus parquet differs
+    from its committed LFS pointer" — unavoidable on this cluster, and irrelevant to what
+    the code did — together with "the training code differs from the SHA I recorded", which
+    makes the whole provenance block a lie. Recording the paths lets
+    :func:`_provenance_complete` tell the two apart instead of ignoring ``git_dirty``
+    entirely, which is what let job 671's report certify complete provenance beside
+    ``git_dirty: true`` (CodeRabbit, P2-09).
+    """
+    status = _git("status", "--porcelain", "--untracked-files=no")
+    if status is None:
+        return None
+    paths: list[str] = []
+    for line in status.splitlines():
+        if not line.strip():
+            continue
+        # Porcelain v1: "XY PATH", and "XY OLD -> NEW" for renames/copies.
+        path = line[3:].strip() if len(line) > 3 else line.strip()
+        if " -> " in path:
+            path = path.split(" -> ", 1)[1].strip()
+        if path:
+            paths.append(path)
+    return sorted(set(paths))
+
+
 def _env_lock_sha256(path: str | Path = ENV_LOCK) -> str | None:
     p = Path(path)
     if not p.is_file():
@@ -878,10 +913,39 @@ def _provenance_complete(report: Mapping[str, Any]) -> bool:
     # The seed must be present in BOTH places and agree; a missing config seed voids it
     # (fail-closed) rather than vacuously matching.
     seed_ok = _non_neg_int(seed) and "seed" in config and config.get("seed") == seed
+
+    # A recorded SHA only describes the run if the tracked CODE matches it. The clause
+    # used to ignore `git_dirty` outright, so job 671 certified `provenance_complete: true`
+    # beside `git_dirty: true` — true in fact (only the staged parquet differed) but
+    # unproven by the gate; a run with genuinely modified code would have certified
+    # identically. Requiring a clean tree instead would fail EVERY cluster run, since
+    # re-staging the LFS-pointered corpus dirties it by construction. So: classify.
+    dirty = prov.get("git_dirty")
+    if dirty is True:
+        paths = prov.get("git_dirty_paths")
+        # Fail closed: a dirty tree with no path list is unverifiable, not innocent. This
+        # is the branch that matters — it is the only way a modified-code run reaches this
+        # clause, and before P2-09 it certified unconditionally.
+        code_clean = (
+            isinstance(paths, list)
+            and bool(paths)
+            and all(isinstance(p, str) and p.startswith(_DATA_STAGING_PREFIXES) for p in paths)
+        )
+    else:
+        # `False` ⇒ nothing differs. `None`/absent ⇒ git was unavailable, in which case
+        # `git_sha` is also None and the clause already fails on the SHA above — so this
+        # branch adds nothing and deliberately does not fail closed a second time.
+        # BOUNDARY, stated rather than implied: a hand-assembled report that simply omits
+        # `git_dirty` is not caught here. It would still need a non-empty SHA, an env-lock
+        # hash and two agreeing seeds; catching it belongs to report authorship, not to a
+        # clause that cannot distinguish "omitted" from "never recorded".
+        code_clean = True
+
     return bool(
         _nonempty_str(prov.get("git_sha"))
         and _nonempty_str(prov.get("env_lock_sha256"))
         and seed_ok
+        and code_clean
     )
 
 
@@ -1275,6 +1339,10 @@ def build_report(
         "provenance": {
             "git_sha": _git_sha(),
             "git_dirty": _git_dirty(),
+            # WHICH paths are dirty, so provenance_complete can separate staged-corpus
+            # dirt (unavoidable; the cluster has no git-lfs) from modified code (which
+            # would make git_sha a lie). See _provenance_complete.
+            "git_dirty_paths": _git_dirty_paths(),
             "env_lock_sha256": _env_lock_sha256(),
             "seed": int(cfg.seed),
             "config_path": CONFIG_PATH,

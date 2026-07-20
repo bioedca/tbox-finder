@@ -530,3 +530,33 @@ reconciled.
 
 **Decisions.** Round-0 is **not** gate-graded — GATE-4 is P2-14 on the leave-one-order-out holdout.
 Mining is P2-10. **Commit.** SHA pending.
+
+**Review (CodeRabbit, run commit) — 1 rejected, 1 accepted.** *Rejected:*
+`eval_val_scored_on_disjoint_fold: true` was flagged as "skipped evaluation represented as
+successful validation". It is not: `_eval_val_ok`'s not-requested branch returns
+`requested is False and metrics_block is None and scope is None` — a **positive three-part
+coherence assertion**, which returns *False* for a run that skipped eval yet still carried metrics.
+Setting it false as suggested would fail `overall_pass` on every correct production run. The finding
+read the JSON, not the clause. *Accepted:* `provenance_complete: true` beside `git_dirty: true` was a
+real gap — `_provenance_complete` ignored `git_dirty` entirely, so a run with genuinely modified
+**code** would have certified identically, its `git_sha` naming a commit that does not contain what
+ran. Requiring a clean tree would fail every cluster run (no git-lfs there ⇒ re-staging dirties the
+tree by construction), so the fix **classifies** instead of prohibiting: `_git_dirty_paths()` records
+the porcelain path list, and the clause requires every dirty path to be data-staging, failing closed
+when a dirty tree carries no path list. Sabotage-verified — reverting to the old always-true form
+fails exactly `test_provenance_clause_separates_staged_data_dirt_from_dirty_code` and
+`test_committed_production_report_records_its_audited_dirty_tree`.
+
+**The checkpoint was NOT re-run** (user decision 2026-07-20): ADR-0002 A7 gives metric-level, not
+bitwise, determinism, so regenerating the report purely to satisfy the new clause would ship
+*different weights* for no scientific gain. Consequence, stated plainly rather than buried: job 671's
+committed report predates the `git_dirty_paths` field, so the strengthened clause **re-derives
+`provenance_complete: False` against its stored `True`**. The stored claim is nonetheless *correct* —
+audited at retrieval on the cluster checkout at `0f8d527`, where `git status --porcelain` showed only
+` M data/processed/splits/split_assignments.parquet` plus untracked outputs and `git diff --stat`
+over tracked non-`data` paths was **empty**. Following the P2-06 precedent (`test_sweep_selection.py`
+locked the 36 points' audited flags), that manual audit is now itself a test: it pins both the stored
+`True` and the re-derived `False`, and fails loudly if the report is ever regenerated — at which
+point the paths exist and the lock must be replaced by the automatic check. Every run from P2-10 on
+records `git_dirty_paths` and is verified without a human in the loop. **Validation.** CI-exact, all
+gates armed: **1,787 passed / 162 skipped** (+3, zero regressions); ruff + black clean.
