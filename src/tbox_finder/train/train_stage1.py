@@ -539,6 +539,34 @@ def is_primary() -> bool:
     return ddp_rank() == 0
 
 
+def _barrier_before_primary_write() -> None:
+    """Order every rank's git-status snapshot **before** rank 0's single report write.
+
+    :func:`build_report` runs on EVERY DDP rank, and its first act is
+    :func:`_git_status_snapshot`; rank 0 **alone** then writes ``cfg.report_path`` — a
+    git-tracked path (since 082f8c7) whose new bytes always differ from HEAD's (a
+    ``SCHEMA_VERSION`` bump plus two new gate keys). With no synchronisation point a
+    straggler rank still short of its own snapshot when that write lands reads the freshly
+    dirtied report as *modified code* outside :data:`_DATA_STAGING_PREFIXES`, so
+    :func:`_provenance_complete` re-derives FALSE → ``overall_pass`` FALSE → ``RuntimeError``
+    on that rank → the whole DDP job dies **after ~20 GPU-h**. That is P2-10d′-c's Blocker B,
+    re-armed by the report WRITE instead of the pre-run ``rm`` — and the window is real: the
+    snapshot→write segment measured 31.6 ms median (509.7 ms tail) on an idle login node, well
+    inside the epilogue's own per-rank jitter.
+
+    The snapshot is captured before ``build_report`` returns and the write happens after this
+    barrier, so a barrier here provably orders every rank's snapshot ahead of the one write —
+    closing the race **by construction, not by out-racing a measured window**. Guarded on
+    ``dist.is_initialized()`` so the single-process local smoke (no process group) is a clean
+    no-op; every rank reaches this call (``build_report`` + ``validate_report`` run on all
+    ranks), so the collective can never half-fire.
+    """
+    import torch.distributed as dist
+
+    if dist.is_initialized():
+        dist.barrier()
+
+
 class ShardedSampler:
     """A rank-disjoint, **equal-length** view of a :class:`WeightedIndexSampler` stream (DDP).
 
@@ -2385,6 +2413,11 @@ def _train_stage1_inner(
     problems = validate_report(report)
     if problems:
         raise ValueError("P2-04 smoke report failed its own validator:\n  " + "\n  ".join(problems))
+    # Every rank ran build_report (hence _git_status_snapshot) above; rank 0 alone writes the
+    # git-tracked report just below. Barrier BETWEEN the two so no rank's snapshot can observe
+    # the freshly-written (dirty) report and re-derive provenance_complete FALSE mid-run
+    # (P2-10d′-e Blocker C; see _barrier_before_primary_write).
+    _barrier_before_primary_write()
     if is_primary():
         out = Path(cfg.report_path)
         out.parent.mkdir(parents=True, exist_ok=True)

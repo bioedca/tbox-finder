@@ -1464,3 +1464,72 @@ the exact failure this step exists to catch, so it is recorded as an `xfail(stri
 is fixed the XPASS **fails** the suite and forces the entry out, so the exemption cannot rot green.
 
 **Still open:** the SLURM submit-ack. No training run has been launched.
+
+## Step P2-10d′-e — 2026-07-21: the DDP report-write barrier, the idempotent re-run, and the last pandas idiom
+
+**Inputs.** `src/tbox_finder/train/train_stage1.py` (the DDP epilogue), `slurm/p2/train_production.sbatch`,
+`scripts/measure_junction_control.py`, `.gitignore`. Off-roadmap, created by the **second** §9.3 pre-ack
+sequence for P2-10d′-b's SLURM half; user decision on the stop was *"fix-up step first"*, scope **Blocker C
++ the script predicate only** — the wider-audit findings (EXIT-trap checkpoint window, the absent A7 pin-7
+tier-1 clause, no composition clause, pin-9 positives-only counts) were offered as a fourth option and **not**
+taken; they stay recorded under P2-10d′-b. No job was submitted. Everything mechanical was green today (node
+`one` idle with 8 A4000s, cluster synced, `sbatch --test-only` → job 678 on `one`); only the two code defects
+below stood between here and the ack.
+
+**Process.** **Blocker C** — the same clause that killed the launch at P2-10d′-c (Blocker B), re-armed by a
+different trigger. `build_report` runs on **all 8 ranks** (`train_stage1.py`), and its first act is
+`_git_status_snapshot()`; rank 0 **alone** then writes `reports/p2/train_stage1_production.json` — git-tracked
+since `082f8c7`, and its bytes always differ from HEAD's (`SCHEMA_VERSION 2` vs the committed `1`, plus two new
+gate keys). With **no** `dist.barrier()` anywhere in the file (grep-confirmed), a rank reaching its snapshot
+**after** rank 0's write reads the freshly-dirtied report as modified code outside
+`_DATA_STAGING_PREFIXES = ("data/",)` → `provenance_complete` FALSE → `overall_pass` FALSE → `RuntimeError` on
+that rank → torchrun rc ≠ 0 → the EXIT trap wipes `$BUILD` with the checkpoint inside, **~20 GPU-h lost at the
+finish line**. Measured on the cluster in `tbox-ml-dna`: `_git_status_snapshot()` median **11.1 ms**; rank 0's
+snapshot→write segment (a 321.8 KB report carrying 14,270 losses) median **31.6 ms**, tail **509.7 ms** — a rank
+drifting > 31.6 ms past rank 0 loses the run, well inside the unsynchronised epilogue's own jitter. Its
+deterministic sibling needs no race: a *successful* run leaves the checkout permanently dirty at that tracked
+report, so any re-submit that does not restore it re-derives FALSE **on all 8 ranks**.
+
+**Outputs.** A new `_barrier_before_primary_write()` — `import torch.distributed as dist; if dist.is_initialized(): dist.barrier()`
+— called in the epilogue **between** `validate_report` and the `is_primary()` write, so every rank's snapshot
+(taken inside `build_report`, before the barrier) provably precedes the one write: the race closes **by
+construction, not by out-racing 31.6 ms**. The guard makes the single-process local smoke a clean no-op. The
+sbatch now **restores** `$REPORT` to HEAD before training (`git ls-files --error-unmatch` → `git checkout HEAD --`;
+**restore, never `rm`** — deleting dirties the tree just the same, the P2-10d′-c ruling), so run #2 is idempotent
+regardless of whether the operator re-ran the LFS-trap `git reset --hard`. `.gitignore` gained this job's four
+run signals (`train_stage1_production.DONE`, `.train_production.lock`, `train_production_*.out|err`) — every
+sibling job ignored its own, this one did not. And `measure_junction_control.py`'s decoy-arm sizing predicate,
+extracted to a testable `decoy_sizes_embedded_arm` reading every cell through **`masking.row_text`** — the last
+`str(x or "")` in the decoy/§9.2-admission path (four unrelated instances survive elsewhere in `src/`:
+`anchors.py` genus, `synth/tier2n.py` parent seq, `train_stage1.py` schema-version string, `mining/pool.py`
+context seq — none reads a fold/id key, none in this step's scope). Under pandas 3 the old idiom read a NaN
+`source_record_id` as the literal parent `"nan"`, sizing the arm at **702** while `embed_decoy_rows` (already on
+`row_text`) admitted **3,701**, so `unique_hosts=True` died "702 hosts cannot carry 703" on the training env; the
+committed `junction_control.json`, built under pandas 2.3.3, is **unchanged** (`row_text ≡ str(x or "")` for
+string cells under pandas 2) and its re-run belongs to the next session's pre-ack sequence, now unblocked.
+
+**Validation.** Full unit suite **1,893 passed / 143 skipped / 8 xfailed** (the 8 are the pre-existing P2-10d′-c
+census; `train_production.sbatch` is **not** among them); ruff, black, `snakemake --lint`/`-n` clean; `bash -n`
+clean on all **10** sbatch files (the roadmap's "11" was a stale count). The load-bearing barrier test is a real
+**2-rank gloo** race on a temp git repo, run LOCAL in `tbox-ml-dna` (4 passed, 6.6 s): the straggler observes rank
+0's write **without** the barrier (dirty) and its snapshot **precedes** the write **with** it (clean) — the
+"rank-ordering forced" gate that fails without the fix and passes with it. **Seven sabotages each redden their
+named test(s):** removing the epilogue call → `test_epilogue_barriers_between_validate_and_the_primary_write`;
+the helper barrier → no-op → the guard test **and** the gloo behavioural test; removing the `is_initialized`
+guard → the guard test; reverting the predicate to `str(x or "")` → the literal-NaN parametrisation **and** the
+AST source-guard; removing the sbatch restore → `test_the_sbatch_restores_the_tracked_report_to_head`; adding
+`rm "$REPORT"` → `test_the_sbatch_never_deletes_the_tracked_report` **and** the census
+`test_no_sbatch_deletes_a_git_tracked_path[train_production.sbatch]`; removing a `.gitignore` signal →
+`test_every_production_run_signal_is_gitignored`. Two of my own tests were caught vacuous **before** shipping and
+fixed: the guard test first read `inspect.getsource` (fooled by the docstring's own `dist.is_initialized()`
+mention → passed with the code-guard removed) and the predicate source-guard tripped on the docstring quoting the
+banned idiom — both rewritten to inspect the **AST**, docstring inert ([[degenerate-fixture-generators]]).
+
+**Decisions.** No ADR — the fix **restores** what ADR-0005 A7 already pins (the run's composition and its clean
+provenance); no sign-off owed. `_DATA_STAGING_PREFIXES` deliberately **not** widened — that would blind the
+clause to genuine `reports/` dirt, the one thing it exists to catch. The barrier is placed AFTER
+`validate_report` (not before `build_report`) so every rank that passes validation participates and the collective
+cannot half-fire.
+
+**Still open:** the SLURM submit-ack, carried from P2-10d′-b. No training run has been launched — the next session
+re-runs the §9.3 sequence (sync → re-stage the LFS split table + the two negative parquets → `--test-only` → ack).
