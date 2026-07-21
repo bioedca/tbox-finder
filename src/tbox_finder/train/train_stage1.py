@@ -317,6 +317,16 @@ class Stage1TrainConfig:
                 "loaded and recorded in the report while contributing zero draws — a mix the "
                 "report describes and the run never trained on."
             )
+        if self.negative_decoy_parquet and not self.negative_pool_parquet:
+            raise ValueError(
+                "negative_decoy_parquet is set but negative_pool_parquet is not. A decoy is "
+                "embedded INTO an admitted mined host window, so with no pool there are no "
+                "hosts: `build_stream`'s decoy branch is nested inside the pool branch and "
+                "would never run. The result would be a positives-only stream reporting "
+                "`negative_embedding: null` — the §9.1 shortfall this step exists to repair, "
+                "reintroduced silently one config key down. Set the pool, or unset the decoy "
+                "parquet."
+            )
         if self.eval_at_step0 and not self.eval_val:
             raise ValueError(
                 "eval_at_step0=True requires eval_val=True — there is no validation ladder "

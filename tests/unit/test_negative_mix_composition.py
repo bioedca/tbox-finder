@@ -171,3 +171,28 @@ def test_the_mix_stream_salt_is_distinct_from_the_embedding_salts() -> None:
     from tbox_finder.data.embedding import CONTROL_STREAM_SALT, EMBED_STREAM_SALT
 
     assert len({MIX_STREAM_SALT, EMBED_STREAM_SALT, CONTROL_STREAM_SALT}) == 3
+
+
+# ── the fail-closed config pairings (CodeRabbit r1) ──────────────────────────────────
+def test_a_decoy_parquet_without_a_pool_is_refused() -> None:
+    """`build_stream`'s decoy branch is nested inside the pool branch, so a decoy parquet
+    with no pool would be silently ignored and the run would be positives-only while
+    reporting `negative_embedding: null` — the §9.1 shortfall this step repairs,
+    reintroduced one config key down. It must be unreachable from Hydra, not discovered."""
+    from tbox_finder.train.train_stage1 import Stage1TrainConfig
+
+    with pytest.raises(ValueError, match="negative_decoy_parquet is set but"):
+        Stage1TrainConfig(negative_decoy_parquet="decoys_v0.parquet")
+
+
+def test_the_shipped_pairing_is_accepted() -> None:
+    """MUST FIRE: if the guard rejected the real configuration too, the test above would
+    pass for the wrong reason."""
+    from tbox_finder.train.train_stage1 import Stage1TrainConfig
+
+    cfg = Stage1TrainConfig(
+        negative_pool_parquet="data/processed/negatives/mining_pool_v0.parquet",
+        negative_decoy_parquet="data/processed/negatives/decoys_v0.parquet",
+        negative_fraction=A7_NEGATIVE_FRACTION,
+    )
+    assert cfg.negative_decoy_parquet and cfg.negative_pool_parquet
