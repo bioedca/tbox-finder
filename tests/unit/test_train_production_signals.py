@@ -35,23 +35,50 @@ _RUN_SIGNALS = [
 
 
 def _is_ignored(rel_path: str) -> bool:
-    """True iff `git check-ignore` says a .gitignore rule matches (exit 0 = ignored)."""
+    """True iff a .gitignore rule matches (exit 0 = ignored).
+
+    `--no-index` evaluates the ignore RULES regardless of whether the path is tracked. Without
+    it, `git check-ignore` reports a tracked path as *not* ignored even when a rule matches — so
+    a run signal that got accidentally committed would slip past `test_every_..._gitignored`,
+    and `test_the_committed_report_is_not_gitignored` would answer "not ignored" for the wrong
+    reason (it is tracked) rather than the right one (no rule matches it). CodeRabbit, r1.
+    """
     return (
         subprocess.run(
-            ["git", "-C", str(REPO), "check-ignore", "-q", rel_path],
+            ["git", "-C", str(REPO), "check-ignore", "--no-index", "-q", rel_path],
             capture_output=True,
         ).returncode
         == 0
     )
 
 
+def _first_executable_line(needle: str) -> int | None:
+    """Index of the first non-comment sbatch line with `needle` (None if only in a comment)."""
+    for i, line in enumerate(SBATCH.read_text().splitlines()):
+        if needle in line and not line.lstrip().startswith("#"):
+            return i
+    return None
+
+
 def test_the_sbatch_restores_the_tracked_report_to_head() -> None:
-    """The report is restored (never rm'd) before training, so re-runs start from a clean tree."""
-    body = SBATCH.read_text()
-    assert 'git checkout HEAD -- "$REPORT"' in body, (
-        "train_production.sbatch must RESTORE $REPORT to HEAD before training — otherwise run "
-        "#2's build_report snapshot reads the leftover-dirty tracked report as modified code "
-        "and fails provenance_complete on all 8 ranks (P2-10d′-e)."
+    """The report is restored (never rm'd) BEFORE training, so re-runs start from a clean tree.
+
+    Line-based, not a bare substring: the restore must be an EXECUTABLE line (a comment
+    mentioning it does not restore anything) and must precede the training invocation (a restore
+    placed after `torchrun` cleans the tree too late — build_report has already snapshotted).
+    CodeRabbit, r1.
+    """
+    restore = _first_executable_line('git checkout HEAD -- "$REPORT"')
+    train = _first_executable_line("torchrun")
+    assert restore is not None, (
+        "train_production.sbatch must RESTORE $REPORT to HEAD as an executable line before "
+        "training — otherwise run #2's build_report snapshot reads the leftover-dirty tracked "
+        "report as modified code and fails provenance_complete on all 8 ranks (P2-10d′-e)."
+    )
+    assert train is not None, "expected a torchrun training invocation in train_production.sbatch."
+    assert restore < train, (
+        "the $REPORT restore must run BEFORE torchrun, or the tree is still dirty at $REPORT when "
+        "build_report snapshots git status on all 8 ranks (P2-10d′-e)."
     )
 
 
