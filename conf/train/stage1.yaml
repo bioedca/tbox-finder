@@ -125,6 +125,43 @@ eval_max_records: null
 # Block-bootstrap replicates, resampled at the homology-cluster level (ADR-0005 D5).
 eval_n_boot: 2000
 
+# ── Mined-negative injection (P2-10d; PRD §9.1, ADR-0005 D14) ────────────────────────────
+# ⚠ THESE FIVE KEYS MUST EXIST HERE, not just as Stage1TrainConfig fields — see the
+# `exclude_selection_val` note above and SLURM job 669. tests/unit/test_sbatch_overrides.py
+# composes every shipped sbatch's own override tokens against this file.
+#
+# null ⇒ positives only: the P2-04 / P2-06 / P2-09 stream, unchanged, and still the default.
+# The pool schema is mining/pool.py's (candidate_id, sequence, masked, is_designed_control).
+negative_pool_parquet: null
+# The share of the EMITTED DRAW STREAM that must be negative — not a pool-size ratio. PRD
+# §9.1's "~10:1 seed ratio" is 10/11 ≈ 0.909 in these units. The realized share is COUNTED
+# off the emitted keys and gated by an exact integer identity re-derived in
+# `train_stage1.derive_clauses`; there is deliberately no tolerance knob.
+#
+# Negatives bypass the PRD §11 curriculum entirely (data/negatives.py::MixedIndexSampler).
+# Routing them through it would make the realized share ~N**(1 - 3*alpha) — N**0.25 at the
+# shipped alpha=0.25 — so a 10x larger pool would move the mix by only ~1.78x while the
+# config went on stating a ratio the sampler contradicts.
+#
+# The two fields are mutually required: a fraction with no pool cannot be honoured, and a
+# pool with fraction 0 would be loaded and reported but never sampled. Both raise at config
+# construction rather than being discovered in the gate.
+negative_fraction: 0.0
+negative_max_records: null   # cap the pool (the smoke needs a stream that composes in seconds)
+
+# ── Warm start (P2-10d) ──────────────────────────────────────────────────────────────────
+# A bare state_dict written by this module (checkpoint_dir/stage1.pt). null ⇒ a fresh build
+# from the pinned HF backbone — the round-0 path, and still the default. ADR-0005 D14's
+# mining loop is iterative, so round N must continue round N-1's weights; without this every
+# round would restart from scratch and the per-round Tier-2N halt/rollback comparison would
+# be between unrelated runs. The load is byte-verified: every model tensor must equal the
+# checkpoint's afterwards, and at least one must have differed before (the designed control).
+init_from_checkpoint: null
+# Score the P2-06a validation ladder BEFORE the first optimiser step. For a warm-started
+# round these are the parent checkpoint's metrics, which is the baseline D14's halt/rollback
+# rule needs. Requires eval_val=true.
+eval_at_step0: false
+
 # ── Outputs ──────────────────────────────────────────────────────────────────────────────
 report_path: reports/p2/train_stage1_smoke.json
 checkpoint_dir: checkpoints/p2/stage1

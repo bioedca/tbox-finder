@@ -64,7 +64,23 @@ from tbox_finder.labels import CLASS_ORDER
 # --------------------------------------------------------------------------------------
 # Provenance constants (CLAUDE.md §11). Single-sourced here; the conf/ files echo them.
 # --------------------------------------------------------------------------------------
-SCHEMA_VERSION = "1"
+#: Report schema. Bumped to ``"2"`` at P2-10d, which added the ``negative_mix`` /
+#: ``warm_start`` / ``eval_*_step0`` evidence blocks and the two gate clauses over them.
+SCHEMA_VERSION = "2"
+
+#: Gate clauses introduced after schema ``"1"``, mapped to the version that introduced them.
+#:
+#: A report is graded against the gate that existed when it was written. P2-04's smoke
+#: report and P2-09's production report are schema ``"1"`` artifacts of runs that measured
+#: none of these things, and adding the keys to them would forge a measurement (CLAUDE.md
+#: §10.3) — but simply ignoring a missing clause would be fail-open on *new* reports too.
+#: So :func:`validate_report` excuses a missing clause **only** when the report declares an
+#: older schema **and** the clause re-derives TRUE from that report's own evidence: an old
+#: report still cannot hide a failure, and a current-schema report must carry every clause.
+CLAUSE_SCHEMA_VERSION: dict[str, str] = {
+    "negative_mix_realized": "2",
+    "warm_start_loaded": "2",
+}
 STEP = "P2-04"
 GENERATED_BY = "src/tbox_finder/train/train_stage1.py"
 ADR = "ADR-0002"
@@ -205,6 +221,33 @@ class Stage1TrainConfig:
     wandb_entity: str | None = None
     wandb_dir: str = "wandb"
 
+    # ── Mined-negative injection (P2-10d; PRD §9.1, ADR-0005 D14) ──────────────────
+    #: The mined-negative pool parquet (`mining/pool.py`'s schema), or None for a
+    #: positives-only stream — the P2-04/P2-06/P2-09 behaviour, and still the default.
+    negative_pool_parquet: str | None = None
+    #: Share of the emitted draw stream that must be negative. NOT a pool-size ratio:
+    #: PRD §9.1's "~10:1" is `10/11 ≈ 0.909` here. The realized share is **counted off
+    #: the emitted stream** and gated by an exact integer identity — see
+    #: `data/negatives.py::MixedIndexSampler` for why negatives bypass the PRD §11
+    #: curriculum entirely (routing them through it makes the realized ratio a sublinear
+    #: function of pool size that no config states).
+    negative_fraction: float = 0.0
+    #: Cap the negative pool (the smoke needs a stream that composes in seconds).
+    negative_max_records: int | None = None
+
+    # ── Warm start (P2-10d; ADR-0005 D14's iterative mining rounds) ────────────────
+    #: Parent checkpoint to initialise from — a bare `state_dict` as written by this
+    #: module. None ⇒ a fresh build from the pinned HF backbone (the round-0 path).
+    #: A mining round is a *continuation*, so round N must start from round N-1's
+    #: weights; without this every round would re-train from scratch and the "recall
+    #: drop halts/rolls back the iteration" rule would be comparing unrelated runs.
+    init_from_checkpoint: str | None = None
+    #: Score the validation ladder BEFORE the first optimiser step. This is the
+    #: measurement D14's halt/rollback rule needs: a warm-started round's step-0 metrics
+    #: are its parent's metrics, so a drop *within* the round is separable from a drop
+    #: carried in. Requires `eval_val`.
+    eval_at_step0: bool = False
+
     # Outputs.
     report_path: str = DEFAULT_REPORT
     checkpoint_dir: str = DEFAULT_CHECKPOINT_DIR
@@ -238,6 +281,40 @@ class Stage1TrainConfig:
                 "DEFINITION, which stays disjoint from selection_val by construction however "
                 "this run was trained. Choose one: train the full D5 fold and report no val "
                 "metric (P2-09), or hold selection_val out and score it (P2-06)."
+            )
+        # ── P2-10d ────────────────────────────────────────────────────────────────────
+        if not isinstance(self.negative_fraction, (int, float)) or isinstance(
+            self.negative_fraction, bool
+        ):
+            raise ValueError(
+                f"negative_fraction must be a real number; got {self.negative_fraction!r}"
+            )
+        if not 0.0 <= float(self.negative_fraction) < 1.0:
+            raise ValueError(
+                f"negative_fraction must lie in [0, 1); got {self.negative_fraction}. "
+                "1.0 asks for a stream with no positives at all, which is not a mix."
+            )
+        # A fraction without a pool is a request the stream cannot honour; a pool without a
+        # fraction is a pool that would be loaded, reported, and never sampled. Both are
+        # states in which the report and the run disagree, so both are refused here rather
+        # than discovered in the gate afterwards.
+        if float(self.negative_fraction) > 0.0 and not self.negative_pool_parquet:
+            raise ValueError(
+                f"negative_fraction={self.negative_fraction} with no negative_pool_parquet: "
+                "there is nothing to draw the negatives from. Set the pool, or set the "
+                "fraction to 0."
+            )
+        if self.negative_pool_parquet and float(self.negative_fraction) == 0.0:
+            raise ValueError(
+                "negative_pool_parquet is set but negative_fraction is 0: the pool would be "
+                "loaded and recorded in the report while contributing zero draws — a mix the "
+                "report describes and the run never trained on."
+            )
+        if self.eval_at_step0 and not self.eval_val:
+            raise ValueError(
+                "eval_at_step0=True requires eval_val=True — there is no validation ladder "
+                "to score at step 0 otherwise, and recording `eval_metrics_step0: null` "
+                "under a True flag would read as 'measured and empty'."
             )
 
 
@@ -476,6 +553,16 @@ class ShardedSampler:
         self._sampler = sampler
         self._rank = rank
         self._world_size = world_size
+
+    @property
+    def inner(self) -> Any:
+        """The wrapped sampler — the object that knows the draw stream's composition.
+
+        Exposed so the P2-10d negative-mix measurement reads it off the sampler that
+        *built* the stream instead of re-deriving the positive/negative boundary from a
+        second source that could drift.
+        """
+        return self._sampler
 
     def set_epoch(self, epoch: int) -> None:
         """Advance the underlying draw stream (must be called every epoch)."""
@@ -807,7 +894,105 @@ def derive_clauses(report: Mapping[str, Any]) -> dict[str, bool]:
         "grads_finite": report.get("grads_finite") is True,
         "eval_val_scored_on_disjoint_fold": _eval_val_ok(report),
         "provenance_complete": _provenance_complete(report),
+        "negative_mix_realized": _negative_mix_ok(report),
+        "warm_start_loaded": _warm_start_ok(report),
     }
+
+
+def _run_config(report: Mapping[str, Any]) -> Mapping[str, Any]:
+    """``diagnostics.config`` — the run's own recorded ``asdict(cfg)``, or ``{}``."""
+    diag = report.get("diagnostics")
+    diag = diag if isinstance(diag, Mapping) else {}
+    cfg = diag.get("config")
+    return cfg if isinstance(cfg, Mapping) else {}
+
+
+def _negative_mix_ok(report: Mapping[str, Any]) -> bool:
+    """The P2-10d clause: the mined-negative mix the run trained on is the one it configured.
+
+    Two branches, both assertions.
+
+    **Block present** — every clause in ``negatives.mix_clauses`` must hold, i.e. the counts
+    are self-consistent *and* the counted negative keys equal the count re-derived from the
+    counted positive keys and the requested fraction. An exact integer identity, so there is
+    no tolerance to widen; and the counts come from classifying the emitted keys, so a
+    fraction the sampler did not realize cannot pass by being restated.
+
+    **Block absent** — the run must also carry no other P2-10d evidence *and* must have
+    requested none: no ``negative_pool_parquet``, ``negative_fraction`` zero-or-unset, no
+    ``init_from_checkpoint``, no ``warm_start`` block, no ``step0_requested``. So a run that
+    asked for a mix and emitted no measurement of it FAILS rather than passing on the
+    absence — while P2-04's and P2-09's committed artifacts, written before any of these
+    fields existed, stay valid (regenerating them to add a field would forge a measurement
+    neither run made, CLAUDE.md §10.3).
+    """
+    from tbox_finder.data.negatives import mix_clauses
+
+    mix = report.get("negative_mix")
+    run_cfg = _run_config(report)
+    if mix is None:
+        requested_fraction = run_cfg.get("negative_fraction")
+        return (
+            not run_cfg.get("negative_pool_parquet")
+            and (requested_fraction is None or requested_fraction == 0)
+            and not run_cfg.get("init_from_checkpoint")
+            and "warm_start" not in report
+            and "step0_requested" not in report
+        )
+    if not isinstance(mix, Mapping):
+        return False
+    stream = mix.get("stream")
+    if not isinstance(stream, Mapping):
+        return False
+    fraction = run_cfg.get("negative_fraction")
+    if not _is_real(fraction):
+        return False
+    return all(mix_clauses(stream, negative_fraction=float(fraction)).values())
+
+
+def _warm_start_ok(report: Mapping[str, Any]) -> bool:
+    """The P2-10d clause: the parent checkpoint's weights are the ones in the model.
+
+    When ``init_from_checkpoint`` is unset the clause is satisfied by the *recorded absence*
+    of a warm start, not by skipping the check — a fresh build must say so.
+
+    When it is set, every one of the following must hold, and all are byte-wise
+    measurements taken around the load rather than properties of the call:
+
+    * ``n_missing_keys``/``n_unexpected_keys``/``n_shape_mismatch`` are all zero;
+    * ``n_model_tensors > 0`` and ``n_checkpoint_tensors == n_model_tensors``;
+    * ``n_tensors_differing_after == 0`` — every tensor now equals the checkpoint's, so a
+      deterministic eval at step 0 cannot produce anything but the parent's metrics;
+    * ``n_tensors_differing_before > 0`` — the designed control. A load into a model that
+      already matched would satisfy every clause above while proving nothing about the
+      loader, and a checkpoint indistinguishable from a fresh build carries no training.
+    """
+    warm = report.get("warm_start")
+    run_cfg = _run_config(report)
+    requested = run_cfg.get("init_from_checkpoint")
+    if not requested:
+        # Absence asserted, not assumed: a run that recorded a warm start it never asked
+        # for is as wrong as one that asked and did not record it.
+        return warm is None
+    if not isinstance(warm, Mapping):
+        return False
+    n_model = warm.get("n_model_tensors")
+    return bool(
+        _pos_int(n_model)
+        and warm.get("n_checkpoint_tensors") == n_model
+        and warm.get("n_missing_keys") == 0
+        and warm.get("n_unexpected_keys") == 0
+        and warm.get("n_shape_mismatch") == 0
+        and warm.get("n_tensors_differing_after") == 0
+        and _pos_int(warm.get("n_tensors_differing_before"))
+        # Both sides normalised: `warm_start` records `str(Path(checkpoint))`, so a config
+        # spelt `./ckpt.pt` or `dir//ckpt.pt` would compare unequal to its own recorded
+        # path and fail a load that in fact succeeded. Path equality is the invariant; the
+        # spelling is not. (Genuinely different checkpoints still differ.)
+        and warm.get("checkpoint") == str(Path(str(requested)))
+        and isinstance(warm.get("checkpoint_sha256"), str)
+        and len(str(warm.get("checkpoint_sha256"))) == 64
+    )
 
 
 def _eval_val_ok(report: Mapping[str, Any]) -> bool:
@@ -977,6 +1162,19 @@ def _provenance_complete(report: Mapping[str, Any]) -> bool:
     )
 
 
+def _schema_precedes(report_schema: Any, introduced: str) -> bool:
+    """Whether ``report_schema`` is strictly older than ``introduced``. Fails CLOSED.
+
+    Numeric comparison, not lexicographic — ``"10" < "2"`` as strings, and this predicate
+    decides whether a missing gate clause is excused. An unparseable or absent version
+    returns False, so a report that cannot say when it was written gets no excuse.
+    """
+    try:
+        return int(str(report_schema)) < int(introduced)
+    except (TypeError, ValueError):
+        return False
+
+
 def validate_report(report: Mapping[str, Any]) -> list[str]:
     """Return a list of problems with a P2-04 smoke report; empty ⇒ valid. Fails closed.
 
@@ -1034,13 +1232,85 @@ def validate_report(report: Mapping[str, Any]) -> list[str]:
                     "(a per-step timing must have exactly one entry per step)"
                 )
 
+    # P2-10d structural floors. Also OPTIONAL (the pre-P2-10d committed artifacts predate
+    # them), and also present-and-wrong must not pass. `negative_mix` is where the mix ratio
+    # is *measured*, so a malformed block would let `_negative_mix_ok` fall to its absence
+    # branch and read as "no mix requested" on a run that requested one.
+    mix = report.get("negative_mix")
+    if "negative_mix" in report:
+        if not isinstance(mix, Mapping):
+            problems.append("negative_mix: present but not a mapping")
+        else:
+            for sub in ("stream", "consumed"):
+                block = mix.get(sub)
+                if not isinstance(block, Mapping):
+                    problems.append(f"negative_mix.{sub}: missing or not a mapping")
+                    continue
+                for key in ("n_total", "n_negative", "n_positive", "negative_pool_size"):
+                    v = block.get(key)
+                    if not _non_neg_int(v):
+                        problems.append(f"negative_mix.{sub}.{key}: must be a non-negative int")
+                if (
+                    all(_non_neg_int(block.get(k)) for k in ("n_total", "n_negative", "n_positive"))
+                    and block["n_total"] != block["n_negative"] + block["n_positive"]
+                ):
+                    problems.append(
+                        f"negative_mix.{sub}: n_total {block['n_total']} != "
+                        f"n_negative {block['n_negative']} + n_positive {block['n_positive']}"
+                    )
+            consumed, stream = mix.get("consumed"), mix.get("stream")
+            if (
+                isinstance(consumed, Mapping)
+                and isinstance(stream, Mapping)
+                and _non_neg_int(consumed.get("n_total"))
+                and _pos_int(stream.get("n_total"))
+                and _pos_int(mix.get("epochs"))
+                # A rank consumes at most its shard of the stream, once per epoch. More than
+                # that means the two blocks describe different streams.
+                and consumed["n_total"] > stream["n_total"] * int(mix["epochs"])
+            ):
+                problems.append(
+                    f"negative_mix: consumed {consumed['n_total']} keys but the emitted "
+                    f"stream is {stream['n_total']} over {mix['epochs']} epoch(s)"
+                )
+    warm = report.get("warm_start")
+    if warm is not None and "warm_start" in report:
+        if not isinstance(warm, Mapping):
+            problems.append("warm_start: present but neither a mapping nor null")
+        else:
+            for key in (
+                "n_checkpoint_tensors",
+                "n_model_tensors",
+                "n_missing_keys",
+                "n_unexpected_keys",
+                "n_shape_mismatch",
+                "n_tensors_differing_before",
+                "n_tensors_differing_after",
+            ):
+                if not _non_neg_int(warm.get(key)):
+                    problems.append(f"warm_start.{key}: must be a non-negative int")
+            if not isinstance(warm.get("checkpoint"), str) or not warm.get("checkpoint"):
+                problems.append("warm_start.checkpoint: missing or not a non-empty string")
+
     derived = derive_clauses(report)
     stored = report.get("gate")
     if not isinstance(stored, Mapping):
         problems.append("gate: missing or not a mapping")
     else:
+        report_schema = str(report.get("schema_version") or "")
         for name, value in derived.items():
             if name not in stored:
+                # Excused only for a report written before the clause existed, and only
+                # when the clause re-derives TRUE from that report's own evidence — see
+                # CLAUSE_SCHEMA_VERSION. A current-schema report must carry every clause,
+                # and an old one still cannot hide a failure behind an absent key.
+                introduced = CLAUSE_SCHEMA_VERSION.get(name)
+                if (
+                    introduced is not None
+                    and value is True
+                    and _schema_precedes(report_schema, introduced)
+                ):
+                    continue
                 problems.append(f"gate.{name}: missing")
             elif stored[name] is not value:
                 problems.append(
@@ -1312,6 +1582,11 @@ def build_report(
     eval_requested: bool = False,
     step_seconds: Sequence[float] | None = None,
     batch_wait_seconds: Sequence[float] | None = None,
+    negative_mix: Mapping[str, Any] | None = None,
+    warm_start: Mapping[str, Any] | None = None,
+    eval_metrics_step0: Mapping[str, Any] | None = None,
+    eval_scope_step0: Mapping[str, Any] | None = None,
+    step0_requested: bool = False,
 ) -> dict[str, Any]:
     """Assemble the P2-04 smoke report. Clauses are **re-derived**, never asserted."""
     from tbox_finder.models.caduceus_backbone import REPO_ID, REVISION
@@ -1383,6 +1658,31 @@ def build_report(
         # requested-config echo, and a clause reading the request rather than the evidence
         # is the exact P2-05 defect ([[clauses-must-guard-emptiness]]).
         "eval_requested": bool(eval_requested),
+        # ── P2-10d ────────────────────────────────────────────────────────────────────
+        # All four keys are OPTIONAL, written only when the run produced them. P2-04's and
+        # P2-09's committed artifacts predate this step, and adding a key to them would
+        # forge a measurement neither run made ([[the step_seconds precedent above]]);
+        # `derive_clauses` therefore has to be total over their absence, not merely over
+        # their falsity.
+        **(
+            {
+                "negative_mix": _sanitize(negative_mix),
+                # `warm_start` is null on a fresh (round-0) build — an explicit "this run
+                # started from the pinned backbone", not an absent key that could equally
+                # mean "the field was never written".
+                "warm_start": _sanitize(warm_start) if warm_start else None,
+                # What THIS rank did, like `eval_requested` above: a config echo would be
+                # true on ranks 1..7 that never evaluated.
+                "step0_requested": bool(step0_requested),
+                # The metrics BEFORE the first optimiser step. For a warm-started round
+                # these are the parent checkpoint's numbers, which is exactly the baseline
+                # ADR-0005 D14's per-round recall-drop halt/rollback compares against.
+                "eval_metrics_step0": _sanitize(eval_metrics_step0) if eval_metrics_step0 else None,
+                "eval_scope_step0": _sanitize(eval_scope_step0) if eval_scope_step0 else None,
+            }
+            if negative_mix is not None
+            else {}
+        ),
         "provenance": {
             "git_sha": _git_sha(),
             # ONE snapshot feeds both fields — two `git status` reads could observe two
@@ -1408,12 +1708,110 @@ def build_report(
 # --------------------------------------------------------------------------------------
 # Build + run
 # --------------------------------------------------------------------------------------
-def build_model(cfg: Stage1TrainConfig, *, device: str) -> tuple[Any, int, int, bool]:
-    """Load the pinned backbone + P1-04 segmenter → (segmenter, blocks, wrapped, hf_supported).
+def _state_digests(state: Mapping[str, Any]) -> dict[str, str]:
+    """``name -> sha256`` of each tensor's raw bytes, on CPU and contiguous.
+
+    Bytes, not ``torch.equal``: the digest is what makes "the checkpoint's weights are the
+    ones in the model" a *recorded measurement* a validator can re-check, rather than a
+    boolean the loader asserts about itself.
+    """
+    import torch
+
+    out: dict[str, str] = {}
+    for name, tensor in state.items():
+        if not isinstance(tensor, torch.Tensor):
+            continue
+        t = tensor.detach().to("cpu").contiguous()
+        out[name] = hashlib.sha256(
+            f"{tuple(t.shape)}|{t.dtype}|".encode() + t.numpy().tobytes()
+        ).hexdigest()
+    return out
+
+
+def warm_start(segmenter: Any, checkpoint: str | Path, *, device: Any) -> dict[str, Any]:
+    """Load a parent checkpoint into ``segmenter`` in place; return the measured evidence.
+
+    ADR-0005 D14's mining loop is iterative: round N continues round N-1's weights, and its
+    Tier-2N halt/rollback rule only means anything if the two rounds are the *same* model
+    trained further. ``build_model`` otherwise always builds fresh from the pinned HF
+    backbone, so every round would have restarted from scratch.
+
+    The returned block is evidence, not a receipt. It carries, per tensor:
+
+    * ``n_tensors_differing_before`` — how many of the model's tensors did **not** already
+      equal the checkpoint's. This is the designed control: a load into a model that
+      already matched would leave every downstream check green while proving nothing, so
+      the gate requires this to be non-zero. A checkpoint that equals a fresh build carries
+      no training, and failing loudly on it is the correct outcome.
+    * ``n_tensors_differing_after`` — how many still differ once loaded. The gate requires
+      **zero**. Together with a deterministic eval this *is* "reproduces its parent's
+      metrics at step 0": identical parameters on identical inputs cannot produce different
+      metrics, and the identity is measured byte-wise rather than inferred from a return
+      code.
+
+    ``strict=True`` on purpose. ``infer/scan.py::load_stage1_checkpoint`` uses
+    ``strict=False`` and then raises on any missing/unexpected key — the same outcome by a
+    longer route, but it exists there to produce a *key-fit report* for an architecture
+    guess. Here the architecture is known (it is this run's own config), so a key mismatch
+    is a configuration error and torch's own message names it best.
+    """
+    import torch
+
+    path = Path(checkpoint)
+    if not path.is_file():
+        raise FileNotFoundError(
+            f"init_from_checkpoint={path} does not exist. A warm start that silently fell "
+            "back to a fresh build would report a continued round it never continued."
+        )
+    state = torch.load(path, map_location=device, weights_only=True)
+    if not isinstance(state, dict):
+        raise ValueError(
+            f"{path} is a {type(state).__name__}, not a state_dict. This module saves "
+            "`segmenter.state_dict()` (train_stage1.py) — a whole-module pickle is not "
+            "loadable here and would not be `weights_only` safe."
+        )
+    ckpt_digests = _state_digests(state)
+    before = _state_digests(segmenter.state_dict())
+    n_before_diff = sum(1 for k, v in before.items() if ckpt_digests.get(k) != v)
+
+    shape_mismatch = [
+        k
+        for k, v in state.items()
+        if isinstance(v, torch.Tensor)
+        and k in dict(segmenter.state_dict())
+        and tuple(v.shape) != tuple(segmenter.state_dict()[k].shape)
+    ]
+    segmenter.load_state_dict(state, strict=True)
+
+    after = _state_digests(segmenter.state_dict())
+    n_after_diff = sum(1 for k, v in after.items() if ckpt_digests.get(k) != v)
+    return {
+        "checkpoint": str(path),
+        "checkpoint_sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+        "n_checkpoint_tensors": len(ckpt_digests),
+        "n_model_tensors": len(after),
+        "n_missing_keys": len([k for k in after if k not in ckpt_digests]),
+        "n_unexpected_keys": len([k for k in ckpt_digests if k not in after]),
+        "n_shape_mismatch": len(shape_mismatch),
+        "n_tensors_differing_before": int(n_before_diff),
+        "n_tensors_differing_after": int(n_after_diff),
+        "strict": True,
+    }
+
+
+def build_model(cfg: Stage1TrainConfig, *, device: str) -> tuple[Any, int, int, bool, Any]:
+    """Backbone + P1-04 segmenter → (segmenter, blocks, wrapped, hf_supported, warm_start).
 
     ``load_caduceus_ps`` returns the backbone in ``.eval()``; a full fine-tune needs
     ``.train()``, so the segmenter is switched explicitly — otherwise dropout and any other
     train-mode module keep their inference behaviour, a silent no-training trap.
+
+    ``warm_start`` is the fifth element, ``None`` when ``cfg.init_from_checkpoint`` is unset.
+    The load happens **before** ``enable_gradient_checkpointing``: the wrap rebinds each
+    block's ``forward`` to a closure and does not touch the ``state_dict``, so either order
+    loads the same weights — but doing it first keeps the wrap's block count a measurement
+    of the model that will actually train, and keeps the load away from the rebound
+    closures entirely.
     """
     from tbox_finder.models.caduceus_backbone import load_caduceus_ps
     from tbox_finder.models.stage1_segmenter import Stage1Segmenter
@@ -1425,6 +1823,11 @@ def build_model(cfg: Stage1TrainConfig, *, device: str) -> tuple[Any, int, int, 
         use_crf=cfg.use_crf,
         dropout=cfg.dropout,
     ).to(device)
+    warm = (
+        warm_start(segmenter, cfg.init_from_checkpoint, device=device)
+        if cfg.init_from_checkpoint
+        else None
+    )
     segmenter.train()
 
     n_blocks = len(backbone_blocks(backbone))
@@ -1432,7 +1835,7 @@ def build_model(cfg: Stage1TrainConfig, *, device: str) -> tuple[Any, int, int, 
     # the measurement about the pristine backbone rather than our mutation of it.
     hf_supported = hf_gradient_checkpointing_supported(backbone)
     n_wrapped = enable_gradient_checkpointing(backbone) if cfg.gradient_checkpointing else 0
-    return segmenter, n_blocks, n_wrapped, hf_supported
+    return segmenter, n_blocks, n_wrapped, hf_supported, warm
 
 
 def _init_wandb(cfg: Stage1TrainConfig) -> Any:
@@ -1465,6 +1868,7 @@ def build_stream(cfg: Stage1TrainConfig) -> tuple[Any, Any, dict[str, Any]]:
     pinned geometry (1024/512, ADR-0005 D3) — this entrypoint does not restate them, so it
     cannot drift from ``window_dataset.py``, which is authoritative.
     """
+    from tbox_finder.data.negatives import MixedIndexSampler, positive_only_sampler
     from tbox_finder.data.window_dataset import (
         Stage1DataConfig,
         Stage1WindowDataset,
@@ -1494,8 +1898,43 @@ def build_stream(cfg: Stage1TrainConfig) -> tuple[Any, Any, dict[str, Any]]:
         klass_alpha=cfg.klass_alpha,
         aa_alpha=cfg.aa_alpha,
     )
-    dataset = Stage1WindowDataset(records, config=data_config)
-    sampler = ShardedSampler(dataset.sampler(), rank=ddp_rank(), world_size=ddp_world_size())
+    # ── Mined-negative injection (P2-10d; PRD §9.1, ADR-0005 D14) ──────────────────────
+    # Negatives are appended AFTER the positives so the positive index space is unchanged
+    # — every existing diagnostic that reads `dataset.records[i]` keeps its meaning — and
+    # the mix knows the boundary is exactly `n_positive`.
+    negative_records: list[Any] = []
+    negative_report: dict[str, Any] | None = None
+    if cfg.negative_pool_parquet:
+        from tbox_finder.data.negatives import load_negative_records
+
+        negative_records, negative_report = load_negative_records(
+            cfg.negative_pool_parquet,
+            window=cfg.window_nt,
+            max_records=cfg.negative_max_records,
+        )
+        if not negative_records:
+            raise ValueError(
+                f"negative pool {cfg.negative_pool_parquet} supplied 0 injectable negatives "
+                f"at window={cfg.window_nt}: {negative_report['excluded_by_reason']}. "
+                "Refusing to train a positives-only run that reports a negative mix — an "
+                "empty pool is a substrate problem, not a smaller run."
+            )
+
+    n_positive = len(records)
+    dataset = Stage1WindowDataset([*records, *negative_records], config=data_config)
+    # The mixer is used even at `negative_fraction == 0`, where it draws zero negatives and
+    # its emitted stream is bit-identical to the bare WeightedIndexSampler's (asserted in
+    # tests/unit/test_negatives.py). Always routing through it is what makes the mix block
+    # *present* on every run: a gate clause that only exists when negatives do would be
+    # vacuously satisfied on exactly the runs that silently lost them.
+    mixer = MixedIndexSampler(
+        positive_only_sampler(dataset, n_positive=n_positive),
+        n_positive_records=n_positive,
+        n_negative_records=len(negative_records),
+        negative_fraction=cfg.negative_fraction,
+        seed=cfg.seed,
+    )
+    sampler = ShardedSampler(mixer, rank=ddp_rank(), world_size=ddp_world_size())
     scope = {
         "n_records": len(records),
         "n_training_fold_records": n_fold,
@@ -1524,13 +1963,42 @@ def build_stream(cfg: Stage1TrainConfig) -> tuple[Any, Any, dict[str, Any]]:
         # constant across all sweep points; select_best ranks on val min_f1, not loss_mass_share.
         # See compute_class_counts + slurm/p2/sweep_stage1.sbatch.
         "weighted_draw_stream": False,
+        # P2-10d: whether `class_counts` was scanned over a stream that CONTAINS the mined
+        # negatives. It is a per-record scan, so an injected negative contributes its 1,024
+        # background positions ONCE regardless of how often the mix draws it — the same
+        # record-scope caveat `weighted_draw_stream: False` already records for oversampled
+        # positives, now with a second population it applies to. Named rather than left to
+        # be inferred from `n_records`, which counts positives only.
+        "n_negative_records": len(negative_records),
+        "class_counts_include_negatives": bool(negative_records),
+        "negative_pool": negative_report,
         "data_config": asdict(data_config),
     }
     return dataset, sampler, scope
 
 
-def _batches(dataset: Any, sampler: Any, cfg: Stage1TrainConfig) -> Iterator[dict[str, Any]]:
-    """Yield collated batches from the sampler's draw stream.
+def batch_plan(sampler: Any, cfg: Stage1TrainConfig) -> list[Any]:
+    """The exact keys this rank will step over, in order.
+
+    Split out of :func:`_batches` so the negative-mix measurement reads the *same* list the
+    training loop consumes rather than a second, independently-derived one. Two lists that
+    "should" agree are two chances for the reported mix to describe a stream the model
+    never saw.
+    """
+    keys = list(iter(sampler))
+    n_steps = len(keys) // cfg.batch_size
+    if cfg.steps_per_epoch is not None:
+        n_steps = min(n_steps, cfg.steps_per_epoch)
+    return keys[: n_steps * cfg.batch_size]
+
+
+def _batches(dataset: Any, plan: Sequence[Any], cfg: Stage1TrainConfig) -> Iterator[dict[str, Any]]:
+    """Yield collated batches for the keys in ``plan`` (from :func:`batch_plan`).
+
+    Takes the already-materialised key list rather than the sampler so the caller can
+    record the very keys it trained on (P2-10d's negative-mix measurement). A function that
+    re-drew its own stream would let the reported mix and the trained mix diverge without
+    anything noticing.
 
     Deliberately not a ``torch.utils.data.DataLoader``: P2-01's sampler yields
     ``(index, occurrence)`` tuples and its ``collate_windows`` is already the collate fn, so
@@ -1540,12 +2008,8 @@ def _batches(dataset: Any, sampler: Any, cfg: Stage1TrainConfig) -> Iterator[dic
     """
     from tbox_finder.data.window_dataset import collate_windows
 
-    keys = list(iter(sampler))
-    n_steps = len(keys) // cfg.batch_size
-    if cfg.steps_per_epoch is not None:
-        n_steps = min(n_steps, cfg.steps_per_epoch)
-    for step in range(n_steps):
-        chunk = keys[step * cfg.batch_size : (step + 1) * cfg.batch_size]
+    for step in range(len(plan) // cfg.batch_size):
+        chunk = plan[step * cfg.batch_size : (step + 1) * cfg.batch_size]
         yield collate_windows([dataset[k] for k in chunk])
 
 
@@ -1609,8 +2073,27 @@ def _train_stage1_inner(
     by_class = dict(zip(CLASS_ORDER, class_counts, strict=True))
     log(f"class counts over {len(dataset)} records: {by_class}")
 
-    segmenter, n_blocks, n_wrapped, hf_supported = build_model(cfg, device=device)
+    segmenter, n_blocks, n_wrapped, hf_supported, warm = build_model(cfg, device=device)
     log(f"gradient checkpointing: wrapped {n_wrapped}/{n_blocks} RCPSMambaBlocks")
+    if warm is not None:
+        log(
+            f"warm start from {warm['checkpoint']}: {warm['n_model_tensors']} tensors, "
+            f"{warm['n_tensors_differing_before']} changed by the load, "
+            f"{warm['n_tensors_differing_after']} still differing"
+        )
+
+    # ── Step-0 validation (P2-10d) ────────────────────────────────────────────────────
+    # Before the optimiser exists, so there is no ambiguity about whether a step was taken;
+    # and before `reset_peak_memory_stats` below, so an eval forward's activations are
+    # excluded from the PRD §10.3 *training* footprint the same way the post-training eval
+    # is (its own ordering comment says why). For a warm-started round these ARE the parent
+    # checkpoint's metrics, which is what ADR-0005 D14's halt/rollback rule compares against.
+    eval_metrics_step0: dict[str, Any] | None = None
+    eval_scope_step0: dict[str, Any] | None = None
+    step0_requested = bool(cfg.eval_at_step0) and is_primary()
+    if step0_requested:
+        eval_metrics_step0, eval_scope_step0 = evaluate_selection_val(segmenter, device, cfg=cfg)
+        log(f"step-0 val: {eval_metrics_step0.get('gate4_core_min_f1')}")
 
     model = segmenter
     if ddp_active:
@@ -1659,12 +2142,19 @@ def _train_stage1_inner(
         if measuring_vram:
             torch.cuda.synchronize(device)
 
+    # Every key this rank actually steps over, across all epochs — the substrate of the
+    # P2-10d `negative_mix.consumed` block. Accumulated from the SAME list `_batches`
+    # iterates, so "what was reported" and "what was trained on" cannot diverge.
+    consumed_keys: list[Any] = []
+
     for epoch in range(cfg.epochs):
         dataset.set_epoch(epoch)  # both must advance, or augmentation/draws freeze (P2-01)
         sampler.set_epoch(epoch)
+        plan = batch_plan(sampler, cfg)
+        consumed_keys.extend(plan)
         _sync()
         t_ready = time.perf_counter()
-        for batch in _batches(dataset, sampler, cfg):
+        for batch in _batches(dataset, plan, cfg):
             # Gap between the previous step finishing and this batch arriving = the carve.
             batch_wait_seconds.append(time.perf_counter() - t_ready)
             t0 = time.perf_counter()
@@ -1748,6 +2238,21 @@ def _train_stage1_inner(
         ),
         "torch": torch.__version__,
     }
+    # ── The negative mix, MEASURED (P2-10d) ───────────────────────────────────────────
+    # `stream` is the emitted, pre-shard draw stream — identical on every rank by
+    # construction (same seed, same epoch) and the only place the configured fraction can
+    # hold as an exact integer identity, which is what the gate re-derives. `consumed` is
+    # what THIS rank stepped over after DDP striding and `steps_per_epoch` truncation: a
+    # prefix of a shuffled stream, so its fraction is a sample rather than an identity. Both
+    # are recorded; only the identity is gated, so the gate needs no tolerance knob.
+    mixer = sampler.inner
+    mix = {
+        "stream": mixer.mix_summary(),
+        "consumed": mixer.mix_summary(consumed_keys),
+        "epochs": int(cfg.epochs),
+        "world_size": int(world_size),
+        "rank": ddp_rank(),
+    }
     report = build_report(
         hardware=hardware,
         cfg=cfg,
@@ -1766,6 +2271,11 @@ def _train_stage1_inner(
         eval_requested=eval_requested,
         step_seconds=step_seconds,
         batch_wait_seconds=batch_wait_seconds,
+        negative_mix=mix,
+        warm_start=warm,
+        eval_metrics_step0=eval_metrics_step0,
+        eval_scope_step0=eval_scope_step0,
+        step0_requested=step0_requested,
     )
     problems = validate_report(report)
     if problems:

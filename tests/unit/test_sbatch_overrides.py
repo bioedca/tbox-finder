@@ -243,3 +243,70 @@ def test_exclude_selection_val_is_a_config_key_and_a_dataclass_field():
         "exclude_selection_val" in annotated
     ), f"Stage1TrainConfig lost the exclude_selection_val field; has {sorted(annotated)}"
     assert annotated["exclude_selection_val"] == "bool", annotated["exclude_selection_val"]
+
+
+#: The P2-10d CLI-overridable fields, with their expected dataclass annotations. Job 669's
+#: lesson generalised: the moment a step adds a knob, both halves must exist — and no
+#: sbatch passes these yet (P2-10e will), so an sbatch-driven gate would not cover them.
+P2_10D_FIELDS: dict[str, str] = {
+    "negative_pool_parquet": "str | None",
+    "negative_fraction": "float",
+    "negative_max_records": "int | None",
+    "init_from_checkpoint": "str | None",
+    "eval_at_step0": "bool",
+}
+
+
+def test_p2_10d_fields_are_config_keys_and_dataclass_fields():
+    """Both halves of the job-669 contract for every knob P2-10d added.
+
+    The config key is asserted by **real composition**, including an actual CLI-shaped
+    override — reading the YAML would prove the text exists, not that Hydra accepts the
+    override under struct mode, which is precisely the distinction job 669 died on.
+    """
+    GlobalHydra.instance().clear()
+    try:
+        with initialize_config_dir(config_dir=str(CONF), version_base=None):
+            cfg = compose(config_name="train/stage1", overrides=[])
+            for key in P2_10D_FIELDS:
+                assert key in cfg, f"{key} missing from conf/train/stage1.yaml: {list(cfg.keys())}"
+            # The shipped defaults are the pre-P2-10d behaviour: positives only, fresh build.
+            assert cfg.negative_pool_parquet is None
+            assert cfg.negative_fraction == 0.0
+            assert cfg.negative_max_records is None
+            assert cfg.init_from_checkpoint is None
+            assert cfg.eval_at_step0 is False
+            # And a realistic P2-10e launch line composes as a whole, not key by key.
+            mined = compose(
+                config_name="train/stage1",
+                overrides=[
+                    "negative_pool_parquet=data/processed/negatives/mined_round1.parquet",
+                    "negative_fraction=0.9090909090909091",
+                    "negative_max_records=20000",
+                    "init_from_checkpoint=data/processed/checkpoints/stage1_production/stage1.pt",
+                    "eval_at_step0=true",
+                ],
+            )
+            assert mined.eval_at_step0 is True
+            assert mined.negative_max_records == 20000
+    finally:
+        GlobalHydra.instance().clear()
+
+    tree = ast.parse((SRC / "tbox_finder" / "train" / "train_stage1.py").read_text())
+    cls = next(
+        (
+            n
+            for n in ast.walk(tree)
+            if isinstance(n, ast.ClassDef) and n.name == "Stage1TrainConfig"
+        ),
+        None,
+    )
+    assert cls is not None, "Stage1TrainConfig class not found in train_stage1.py"
+    annotated = {
+        n.target.id: ast.unparse(n.annotation)
+        for n in cls.body
+        if isinstance(n, ast.AnnAssign) and isinstance(n.target, ast.Name)
+    }
+    for key, annotation in P2_10D_FIELDS.items():
+        assert key in annotated, f"Stage1TrainConfig lost {key}; has {sorted(annotated)}"
+        assert annotated[key] == annotation, (key, annotated[key])

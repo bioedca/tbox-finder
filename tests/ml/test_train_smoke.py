@@ -998,7 +998,18 @@ def test_committed_report_validates_and_its_clauses_re_derive() -> None:
     assert report["gate"]["overall_pass"] is True
     derived = T.derive_clauses(report)
     for name, value in derived.items():
-        assert report["gate"][name] is value, f"{name} was asserted, not derived"
+        if name in report["gate"]:
+            assert report["gate"][name] is value, f"{name} was asserted, not derived"
+            continue
+        # A clause added after this artifact was written. Regenerating the report to carry
+        # it would forge a measurement the run never made (CLAUDE.md §10.3), so
+        # `validate_report` excuses it — but ONLY for an older schema and ONLY when it
+        # re-derives TRUE. Both halves are asserted here, so the excuse cannot silently
+        # widen into "a missing clause is fine".
+        introduced = T.CLAUSE_SCHEMA_VERSION.get(name)
+        assert introduced is not None, f"{name} is missing and was not introduced later"
+        assert int(report["schema_version"]) < int(introduced), name
+        assert value is True, f"{name} is missing AND false — the excuse must not hide it"
 
 
 def test_committed_report_scopes_its_class_counts_honestly() -> None:
