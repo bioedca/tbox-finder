@@ -22,7 +22,9 @@
     "overall_pass": true,
     "parent_fold": {
       "n_distinct_parents": 23132,
+      "n_natural_windows": 45488,
       "n_natural_windows_admissible": 16272,
+      "n_natural_windows_out_of_fold": 29216,
       "n_parent_in_training_fold": 16446,
       "n_parent_out_of_training_fold": 29542,
       "n_records": 45988,
@@ -69,7 +71,9 @@
   "notes": "P2-10b mining substrate for the ADR-0005 D14 loop \u2014 NOT a fifth PRD \u00a79.1 negative class and NOT annotation-verified 5\u2032UTRs/leaders (that is P2-10b\u2032). Windows are carved from the P2-00 flank_context regions, so they sit on replicons that host known T-boxes and the mask has something to find. designed_control windows are locus-centred and overlap a known locus by construction: they validate the coordinate frame and are excluded from the natural rate. P2-10d\u2032-a: every window also carries parent_nested_train \u2014 whether the corpus record its DNA was carved beside is in the \u00a79.2 nested training fold. Only in-fold windows are injectable as \u00a79.1 negatives (negatives.load_negative_records refuses the rest); out-of-fold windows are retained in the artifact so the natural-contamination denominator stays comparable across builds and so the filter's own discrimination is auditable from the artifact.",
   "parent_fold": {
     "n_distinct_parents": 23132,
+    "n_natural_windows": 45488,
     "n_natural_windows_admissible": 16272,
+    "n_natural_windows_out_of_fold": 29216,
     "n_parent_in_training_fold": 16446,
     "n_parent_out_of_training_fold": 29542,
     "n_records": 45988,

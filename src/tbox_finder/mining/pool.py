@@ -274,6 +274,18 @@ def load_parent_folds(split_table: str | Path) -> dict[str, bool]:
         path, columns=[SPLIT_RECORD_ID_COL, SPLIT_NESTED_TRAIN_COL, SPLIT_SOURCE_COL]
     )
     corpus = frame[frame[SPLIT_SOURCE_COL] == SPLIT_CORPUS_SOURCE]
+    # A null `nested_train` must not become `False` via `bool(None)`. That would turn
+    # "this record's fold was never assigned" into "this record is out of fold" — the
+    # exact collapse `stamp_parent_folds` keeps `n_unresolved_parent` separate to
+    # prevent, one layer earlier and without a counter to notice it (CodeRabbit r1).
+    null_folds = corpus[corpus[SPLIT_NESTED_TRAIN_COL].isna()]
+    if len(null_folds):
+        examples = sorted(map(str, null_folds[SPLIT_RECORD_ID_COL]))[:3]
+        raise MiningPoolError(
+            f"split table {path} has {len(null_folds)} corpus rows with a null "
+            f"{SPLIT_NESTED_TRAIN_COL!r} (e.g. {examples}) — a fold that was never "
+            "assigned is not a fold of False"
+        )
     return {
         str(rid): bool(flag)
         for rid, flag in zip(
@@ -311,6 +323,7 @@ def stamp_parent_folds(
     """
     n_unresolved = 0
     n_in_fold = 0
+    n_natural = 0
     n_natural_in_fold = 0
     for record in records:
         flag = fold_by_record_id.get(str(record["source_record_id"]))
@@ -318,10 +331,11 @@ def stamp_parent_folds(
             n_unresolved += 1
             flag = False
         record[PARENT_FOLD_COL] = bool(flag)
+        natural = not record["is_designed_control"]
+        n_natural += natural
         if flag:
             n_in_fold += 1
-            if not record["is_designed_control"]:
-                n_natural_in_fold += 1
+            n_natural_in_fold += natural
     return {
         "n_records": len(records),
         "n_parent_in_training_fold": n_in_fold,
@@ -329,7 +343,15 @@ def stamp_parent_folds(
         "n_unresolved_parent": n_unresolved,
         "n_distinct_parents": len({str(r["source_record_id"]) for r in records}),
         "n_split_table_corpus_records": len(fold_by_record_id),
+        # Natural-scoped, because those are the only rows the loader can ever admit —
+        # designed controls are refused before the fold rule is consulted. Reported as
+        # a pair so no reader has to subtract one denominator from another: the
+        # whole-pool counts above include the 500 controls and the natural counts here
+        # do not, and mixing them is how "16,272 admissible / 29,542 refused" comes to
+        # describe 45,814 of 45,988 windows (CodeRabbit r1).
+        "n_natural_windows": n_natural,
         "n_natural_windows_admissible": n_natural_in_fold,
+        "n_natural_windows_out_of_fold": n_natural - n_natural_in_fold,
     }
 
 
@@ -641,8 +663,9 @@ def build(
         f"(control {gate['n_control_masked']}/{gate['n_control_windows']} masked; "
         f"natural {mask_summary['natural']['n_masked_at_flank']}/"
         f"{mask_summary['natural']['n_records']}; "
-        f"admissible {fold_summary['n_natural_windows_admissible']} natural windows with "
-        f"a nested_train parent, {fold_summary['n_parent_out_of_training_fold']} refused)",
+        f"admissible {fold_summary['n_natural_windows_admissible']}/"
+        f"{fold_summary['n_natural_windows']} natural windows with a nested_train parent, "
+        f"{fold_summary['n_natural_windows_out_of_fold']} refused)",
         file=sys.stderr,
     )
     return 0

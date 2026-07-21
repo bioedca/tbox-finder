@@ -1265,3 +1265,21 @@ taxon membership" trigger is provably not met: clustering reads `FASTA_sequence`
 upstream. The full-corpus gate was re-run anyway, and the selection-val pins above confirm it.
 
 **Commit.** <SHA — see `git log` for `feat(mining): re-fetch flank at pad 1074 …`>
+
+**CodeRabbit r1 — 4 findings, all minor, all applied.** (a) `common.smk::flank_pad_nt` honoured a
+`--config flank_pad_nt=` override unconditionally, so an override *below* the mining geometry would
+spend the entire NCBI fetch and then produce a context from which `build_mining_pool` carves nothing —
+the exact value P2-10d shipped by accident (1,024) is the obvious way to hit it. The override may now
+only raise the pad, never lower it, and the guard is tested by **executing** `common.smk` with a stubbed
+Snakemake `config` rather than text-scanning it (a scan asserting "the word `raise` appears" passes on a
+guard comparing the wrong two numbers), with a must-not-fire companion so a guard that refused *every*
+override cannot pass. (b) The build's stderr line paired `n_natural_windows_admissible` (natural-scoped)
+with `n_parent_out_of_training_fold` (whole-pool, controls included), so "16,272 admissible / 29,542
+refused" described 45,814 of 45,988 windows. The evidence block now carries the natural triple —
+`n_natural_windows` / `_admissible` / `_out_of_fold`, which closes under addition — and the line quotes
+that; the artifact's parquet is byte-identical, only the report moved. (c) `load_parent_folds` let a null
+`nested_train` become `False` through `bool(None)`, collapsing "never assigned" into "out of fold" one
+layer *below* the `n_unresolved_parent` counter that exists to keep them apart — it now refuses, with a
+must-not-fire companion proving non-corpus rows stay out of scope. (d) A stale comment claiming the
+`max_records` report key was still missing (it had been restored). Suite **2,110 / 179**, ruff/black/lint
+clean.

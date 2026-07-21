@@ -13,7 +13,7 @@
     "n_union_loci_loaded": 24157,
     "natural_masked_fraction": 0.03983468167428773
   },
-  "generated_at_utc": "2026-07-21T04:31:30.758393+00:00",
+  "generated_at_utc": "2026-07-21T04:54:51.162876+00:00",
   "git_sha": "f27a7bf4a7caaf88adc86d63d5800e7516a7c54f",
   "inputs": {
     "data/interim/flank_context/context_v0.parquet": "f35f25cda0f7ddc5714baeeece12146aa9e50f943ba9f4a121dbe3fdb3297742",
@@ -22,7 +22,7 @@
     "data/processed/splits/split_assignments.parquet": "6388ba19328811fa81d2d5b84a58643674934b4286581d8eff9df2e2cefba029"
   },
   "outputs": {
-    "data/processed/audits/mining_pool_report.json": "e4e7821f74e57668def127c6351cd44b7b2d399578d3e85be473dd2f7fa0f0cb",
+    "data/processed/audits/mining_pool_report.json": "1765a3f4d7384ee3456a42cd93d3249bc2419f54b6693cd4f0b35fad5f46ef34",
     "data/processed/negatives/mining_pool_v0.parquet": "e57181e1b321c457e4e1b156645e9d668ef6ada4ea1a419f1cc1b6062e4dc84f"
   },
   "rule": "workflow/rules/data.smk :: build_mining_pool",

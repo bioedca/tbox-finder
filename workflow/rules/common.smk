@@ -29,14 +29,24 @@ def flank_pad_nt(path: str = DECOYS_CONF) -> int:
     margin 50, and ``build_mining_pool`` hard-fails rather than degrading — so the
     pad is load-bearing, and its drift is not a warning but an empty substrate.
 
-    Overridable via ``--config flank_pad_nt=<int>``; the derived value is the
-    default and is what every unattended run gets.
+    Overridable **upward** via ``--config flank_pad_nt=<int>``; the derived value is
+    the default and is what every unattended run gets. An override *below* the
+    geometry is refused rather than honoured: it would spend the whole NCBI fetch
+    and then produce a context from which ``build_mining_pool`` carves nothing, so
+    the cheap failure is here and the expensive one is an hour later (CodeRabbit r1).
+    A larger pad is allowed — it costs bandwidth, not correctness.
     """
-    override = config.get("flank_pad_nt")
-    if override is not None:
-        return int(override)
     with open(path, encoding="utf-8") as handle:
         conf = yaml.safe_load(handle) or {}
-    window_nt = int(conf["mining_window_nt"])
-    margin_nt = int(conf["mining_margin_nt"])
-    return window_nt + margin_nt
+    required_nt = int(conf["mining_window_nt"]) + int(conf["mining_margin_nt"])
+    override = config.get("flank_pad_nt")
+    if override is None:
+        return required_nt
+    pad_nt = int(override)
+    if pad_nt < required_nt:
+        raise ValueError(
+            f"--config flank_pad_nt={pad_nt} is below the mining geometry "
+            f"({conf['mining_window_nt']} + {conf['mining_margin_nt']} = {required_nt}): "
+            "the fetched flank could not yield a single carvable mining window"
+        )
+    return pad_nt

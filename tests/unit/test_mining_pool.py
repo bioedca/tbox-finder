@@ -526,7 +526,9 @@ def _fold(**kw: object) -> dict:
         "n_unresolved_parent": 0,
         "n_distinct_parents": 55,
         "n_split_table_corpus_records": 60,
+        "n_natural_windows": 100,
         "n_natural_windows_admissible": 65,
+        "n_natural_windows_out_of_fold": 35,
     }
     base.update(kw)
     return base
@@ -1194,3 +1196,83 @@ def test_the_partition_identity_also_fails_when_the_mask_partition_moves() -> No
     gate = _gate(natural={"n_records": _N_POOL_RECORDS, "n_masked_at_flank": 1})
     assert gate["clauses"]["parent_fold_stamped"] is False
     assert gate["overall_pass"] is False
+
+
+# ═════════════════════════════════════════════════════════════════════════════════════
+# CodeRabbit r1 — the two denominators, and a null fold that is not a False fold
+# ═════════════════════════════════════════════════════════════════════════════════════
+def test_the_natural_counts_are_scoped_to_the_natural_partition() -> None:
+    """The evidence reports both denominators, so no reader has to subtract one.
+
+    ``n_parent_out_of_training_fold`` spans the whole pool (controls included);
+    ``n_natural_windows_admissible`` does not. Pairing them — as the build's stderr
+    line first did — describes fewer windows than the pool contains. The natural
+    triple below closes under addition on its own, which is the property that makes
+    it safe to quote beside the admissible count.
+    """
+
+    def w(parent: str, *, control: bool) -> dict:
+        return _window(source_record_id=parent, is_designed_control=control)
+
+    records = [
+        w("p_in_1", control=False),
+        w("p_in_2", control=False),
+        w("p_out", control=False),
+        w("p_in_1", control=True),
+        w("p_out", control=True),
+    ]
+    fold = mining_pool.stamp_parent_folds(records, {"p_in_1": True, "p_in_2": True, "p_out": False})
+    assert fold["n_natural_windows"] == 3
+    assert fold["n_natural_windows_admissible"] == 2
+    assert fold["n_natural_windows_out_of_fold"] == 1
+    assert (
+        fold["n_natural_windows_admissible"] + fold["n_natural_windows_out_of_fold"]
+        == fold["n_natural_windows"]
+    )
+    # …and the whole-pool counts are genuinely a *different* denominator, so the test
+    # would still pass if the two were accidentally made equal.
+    assert fold["n_parent_in_training_fold"] == 3 != fold["n_natural_windows_admissible"]
+    assert fold["n_records"] == 5 != fold["n_natural_windows"]
+
+
+def test_a_null_nested_train_is_refused_rather_than_read_as_out_of_fold(tmp_path) -> None:
+    """``bool(None)`` is ``False``, and "never assigned" is not "out of fold".
+
+    One layer above, ``stamp_parent_folds`` keeps ``n_unresolved_parent`` apart from
+    the out-of-fold count for exactly this reason. A null surviving the split-table
+    read would make that separation unenforceable, and there is no counter at this
+    layer to notice it — so the loader raises.
+    """
+    pd = pytest.importorskip("pandas")
+    pytest.importorskip("pyarrow")
+    table = tmp_path / "split.parquet"
+    pd.DataFrame(
+        {
+            "record_id": ["a", "b", "c"],
+            "nested_train": [True, None, False],
+            "source": ["corpus", "corpus", "corpus"],
+        }
+    ).to_parquet(table)
+    with pytest.raises(mining_pool.MiningPoolError, match="null 'nested_train'"):
+        mining_pool.load_parent_folds(table)
+
+
+def test_a_null_nested_train_outside_the_corpus_is_not_the_loaders_problem(tmp_path) -> None:
+    """The must-not-fire companion: only ``source == "corpus"`` rows are in scope.
+
+    Externals and synthetic class-II variants live in other id namespaces and are
+    dropped before the null check, so a null there is none of this function's
+    business. Without this test the raise above could be over-broad and nothing
+    would say so.
+    """
+    pd = pytest.importorskip("pandas")
+    pytest.importorskip("pyarrow")
+    table = tmp_path / "split.parquet"
+    pd.DataFrame(
+        {
+            "record_id": ["a", "ext"],
+            "nested_train": [True, None],
+            "source": ["corpus", "anchor"],
+        }
+    ).to_parquet(table)
+    assert mining_pool.load_parent_folds(table) == {"a": True}

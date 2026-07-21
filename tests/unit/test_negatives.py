@@ -829,13 +829,11 @@ def test_max_records_zero_yields_zero_records() -> None:
         records, report = neg.negative_records_from_rows(rows, window=WINDOW, max_records=cap)
         assert len(records) == min(cap, len(rows)), cap
         assert report["n_records"] == len(records)
-        # NOTE (P2-10d′-a): the `max_records` report key was dropped when the new
-        # `require_parent_nested_train` entry replaced its line in `negatives.py`. The
-        # assertion is deliberately left standing rather than deleted — without the key,
-        # a pool that is short and a pool that was truncated by a cap read identically in
-        # the artifact, which is the same ambiguity the two new parent-refusal counts
-        # exist to close. The committed `reports/p2/negative_injection.json` still carries
-        # `"max_records": null`, so a "1.1" report is missing a field a "1.0" one had.
+        # P2-10d′-a briefly dropped this key: the new `require_parent_nested_train`
+        # entry replaced its line in the report dict. Caught by this assertion, which was
+        # left standing rather than deleted — without the key a pool that is *short* and
+        # a pool that was *truncated by a cap* read identically in the artifact, the same
+        # ambiguity the two parent-refusal counts exist to close.
         assert report["max_records"] == cap
 
 

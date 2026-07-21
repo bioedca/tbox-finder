@@ -34,6 +34,8 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+import pytest
+
 from tbox_finder import decoys
 from tbox_finder.mining import pool as mining_pool
 
@@ -209,3 +211,54 @@ def test_the_mining_pool_rule_passes_the_split_table() -> None:
     block = _rule_block(smk, "build_mining_pool")
     assert "split_table=config.get(" in block
     assert mining_pool.DEFAULT_SPLIT_TABLE in block
+
+
+# ═════════════════════════════════════════════════════════════════════════════════════
+# CodeRabbit r1 — the override may raise the pad, never lower it
+# ═════════════════════════════════════════════════════════════════════════════════════
+def _load_common_smk(config: dict) -> dict:
+    """Execute ``common.smk`` with a stubbed Snakemake ``config`` and return its globals.
+
+    The file is plain Python apart from the ``config`` global Snakemake injects, so it
+    runs directly. Executed rather than text-scanned because the behaviour under test is
+    a *comparison*, and a scan asserting "the word raise appears" would pass on a guard
+    that compares the wrong two numbers — the shape of vacuity this whole file exists to
+    remove.
+    """
+    namespace: dict = {"config": config, "__name__": "common_smk"}
+    exec(compile(_read(COMMON_SMK), str(COMMON_SMK), "exec"), namespace)
+    return namespace
+
+
+def test_the_derived_pad_is_the_mining_geometry() -> None:
+    """No override: the pad is window + margin, read from the shipped config."""
+    flank_pad_nt = _load_common_smk({})["flank_pad_nt"]
+    cfg = decoys.read_config(DECOYS_CONF)
+    assert flank_pad_nt(str(DECOYS_CONF)) == cfg.mining_window_nt + cfg.mining_margin_nt
+
+
+def test_an_override_below_the_mining_geometry_is_refused() -> None:
+    """A too-small pad must fail here, not an hour of NCBI requests later.
+
+    `--config flank_pad_nt=1024` is the exact value P2-10d shipped by accident, and it
+    produces a context from which `build_mining_pool` carves **nothing** — a hard failure
+    that arrives only after the whole fetch has run. The cheap refusal is at compose time.
+    """
+    cfg = decoys.read_config(DECOYS_CONF)
+    required = cfg.mining_window_nt + cfg.mining_margin_nt
+    flank_pad_nt = _load_common_smk({"flank_pad_nt": required - 1})["flank_pad_nt"]
+    with pytest.raises(ValueError, match="below the mining geometry"):
+        flank_pad_nt(str(DECOYS_CONF))
+
+
+def test_an_override_at_or_above_the_geometry_is_honoured() -> None:
+    """The must-not-fire companion: a wider pad costs bandwidth, not correctness.
+
+    Without this, a guard that refused *every* override would pass the test above while
+    removing the knob entirely.
+    """
+    cfg = decoys.read_config(DECOYS_CONF)
+    required = cfg.mining_window_nt + cfg.mining_margin_nt
+    for value in (required, required + 1, 3_000):
+        flank_pad_nt = _load_common_smk({"flank_pad_nt": value})["flank_pad_nt"]
+        assert flank_pad_nt(str(DECOYS_CONF)) == value
