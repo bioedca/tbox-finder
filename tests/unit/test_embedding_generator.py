@@ -106,9 +106,14 @@ def test_matchedness_rejects_an_unspliced_host_as_a_control() -> None:
     unspliced = [dataclasses.replace(c, sequence=str(by_id[c.host_id])) for c in control]
     ok, detail = arms_are_matched(decoy, unspliced, _host_map(hosts))
     assert not ok
-    # It trips the INSIDE clause, not the flank clause: an unspliced host agrees with the
-    # decoy arm everywhere outside the interval by construction.
-    assert detail["n_identical_inside"] == 0 or detail["n_flank_mismatch"] == 0
+    # Name the clause that did the rejecting. The first version of this test asserted
+    # `n_identical_inside == 0 or n_flank_mismatch == 0`, which is TRUE for a correctly
+    # matched pair too — a disjunction of two zeros that could only fail if BOTH counters
+    # were non-zero, i.e. it pinned nothing ([[sabotage-attribution-must-name-the-test]]).
+    # The clause that actually catches an unspliced control is `n_control_unspliced`.
+    assert detail["n_control_unspliced"] == len(decoy), detail
+    assert detail["n_identical_inside"] == 0
+    assert detail["n_flank_mismatch"] == 0
     assert detail["n_pairs"] == len(decoy)
 
 
@@ -196,3 +201,30 @@ def test_a_degenerate_host_pool_is_refused_rather_than_silently_unspliced() -> N
     decoy, _ = embed_decoy_rows(_decoy_rows(), flat, seed=SEED, window=WINDOW)
     with pytest.raises(EmbeddingError, match="degenerate over that interval"):
         junction_control(decoy, flat, seed=SEED, window=WINDOW)
+
+
+# ── sabotage 6: the host is unresolvable, so the splice claim cannot be checked ───────
+def test_matchedness_rejects_arms_whose_host_cannot_be_resolved() -> None:
+    """`n_host_unresolved` exists so that "could not check" never reads as "checked and
+    clean". Without a test it is the one clause in the checker that could be deleted
+    outright and leave every other assertion green — while a caller passing an empty or
+    stale host map would get a silent pass on the splice check.
+    """
+    decoy, control, _ = _arms()
+    ok, detail = arms_are_matched(decoy, control, {})
+    assert not ok
+    assert detail["n_host_unresolved"] == len(decoy), detail
+    # And it must be THIS clause, not a coincidental geometry or flank failure.
+    assert detail["n_geometry_mismatch"] == 0
+    assert detail["n_flank_mismatch"] == 0
+    assert detail["n_control_unspliced"] == 0
+
+
+def test_a_stale_host_map_does_not_pass_by_resolving_the_wrong_dna() -> None:
+    """A host map keyed correctly but carrying the WRONG sequences must not silently
+    satisfy the splice check: the comparison is against the host's actual bases."""
+    decoy, control, hosts = _arms()
+    stale = {str(h["candidate_id"]): "A" * WINDOW for h in hosts}
+    ok, detail = arms_are_matched(decoy, control, stale)
+    assert ok is True  # the control genuinely differs from an all-A "host"
+    assert detail["n_host_unresolved"] == 0

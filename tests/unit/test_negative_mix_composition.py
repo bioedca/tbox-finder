@@ -62,11 +62,20 @@ def test_the_seed_ratio_emits_exactly_ten_negatives_per_positive(
     assert drawn == SEED_RATIO_NEGATIVES_PER_POSITIVE * n_positive
 
 
-def test_the_pinned_fraction_is_exactly_ten_elevenths_in_float() -> None:
-    """The sbatch ships a decimal literal. If it ever drifts from the float nearest 10/11
-    the draw count stops being integer-exact and the gate's identity acquires a silent
-    tolerance."""
-    assert float("0.9090909090909091") == A7_NEGATIVE_FRACTION
+def test_the_fraction_the_sbatch_actually_ships_is_exactly_ten_elevenths() -> None:
+    """Read the literal OUT of the sbatch rather than restating it.
+
+    The first version asserted `float("0.9090909090909091") == A7_NEGATIVE_FRACTION` —
+    two constants defined in this file, an assertion no change to the sbatch could ever
+    break. Parsing the shipped token is what makes the drift detectable: if it ever
+    differs from the float nearest 10/11 the draw count stops being integer-exact and the
+    gate's identity acquires a silent tolerance.
+    """
+    match = re.search(r"negative_fraction=([0-9.]+)", SBATCH.read_text())
+    assert match is not None, "the sbatch no longer passes negative_fraction"
+    shipped = float(match.group(1))
+    assert shipped == A7_NEGATIVE_FRACTION
+    assert negative_draw_count(8303, shipped) == 83030
 
 
 # ── the shipped launcher actually asks for the mix ───────────────────────────────────
