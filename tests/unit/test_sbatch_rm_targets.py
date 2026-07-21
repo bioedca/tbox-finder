@@ -43,7 +43,13 @@ SLURM = REPO / "slurm"
 #: bodies actually use. Command substitutions are not resolved (see `_resolve`).
 _ASSIGN = re.compile(r'^\s*([A-Za-z_][A-Za-z0-9_]*)=(".*?"|\'.*?\'|\S*)\s*$')
 #: A deletion. `rm` with any flags, capturing the rest of the (logical) command.
-_RM = re.compile(r"(?:^|\s|;|&&|\|\|)rm\s+((?:-[A-Za-z]+\s+)*)(.+)$")
+_RM = re.compile(
+    r"(?:^|\s|;|&&|\|\|)"  # command position
+    r"(?:command\s+)?"  # `command rm`
+    r"\\?"  # `\rm` — the alias-bypassing form
+    r"(?:/\S*/)?"  # `/bin/rm`, `/usr/bin/rm`
+    r"rm\s+((?:-[A-Za-z]+\s+)*)(.+)$"
+)
 #: Marker left in place of a variable this parser cannot resolve. Never silently dropped.
 _UNRESOLVED = "\x00UNRESOLVED"
 #: `$VAR`, `${VAR}`, or `${VAR:-default}` (the default is taken when VAR is unknown — that
@@ -60,6 +66,10 @@ _VAR = re.compile(
 #: lets `${SLURM_SUBMIT_DIR:-...}/reports/p1/x.json` be scored as the repo-relative path it
 #: actually is, instead of as an unresolvable mystery.
 _SEED_ENV = {"SLURM_SUBMIT_DIR": ".", "REPO": "."}
+#: Absolute roots that cannot be the checkout whatever their variables expand to. An
+#: absolute path is NOT safe merely for being absolute: `/work/$USER/tbox-finder/reports/...`
+#: is unresolved AND absolute AND very possibly the repo (CodeRabbit, P2-10d′-c r4).
+_SCRATCH_ROOTS = ("/tmp/", "/scratch/", "/dev/shm/", "/var/tmp/")
 
 
 def _sbatch_files() -> list[Path]:
@@ -206,6 +216,31 @@ def test_a_backslash_continued_rm_is_still_seen() -> None:
     assert "reports/p2/x.DONE" in found and "other.json" in found
 
 
+@pytest.mark.parametrize(
+    "cmd",
+    ["/bin/rm -f", "/usr/bin/rm -rf", "\\rm -f", "command rm -f"],
+    ids=["abs-path", "abs-path-rf", "escaped", "command-builtin"],
+)
+def test_path_qualified_and_escaped_rm_are_still_seen(cmd: str) -> None:
+    """`rm` is not always spelled `rm`. Each of these deletes exactly what plain rm does."""
+    text = f'{cmd} "reports/p2/train_stage1_production.json"\n'
+    assert "reports/p2/train_stage1_production.json" in [p for _, p in _rm_targets(text)]
+
+
+def test_an_unresolved_absolute_path_is_not_safe_merely_for_being_absolute() -> None:
+    """`/work/$USER/tbox-finder/...` can BE the checkout at runtime — fail closed."""
+    text = 'rm -f "/work/$USER/tbox-finder/reports/p2/train_stage1_production.json"\n'
+    (target,) = [p for _, p in _rm_targets(text)]
+    assert _offence(target, _tracked_paths()) is not None
+
+
+def test_node_local_scratch_stays_exempt() -> None:
+    """The other direction — the build dir must NOT be flagged, or the gate is noise."""
+    text = 'BUILD="/tmp/${USER}-${SLURM_JOB_ID:-local}"\nrm -rf "$BUILD"\n'
+    (target,) = [p for _, p in _rm_targets(text)]
+    assert _offence(target, _tracked_paths()) is None
+
+
 def test_a_command_substitution_is_never_guessed_at() -> None:
     """`$(...)` left as a literal matches nothing and would score clean — fail-open."""
     (target,) = [p for _, p in _rm_targets('rm -f "$(dirname x)/report.json"\n')]
@@ -308,8 +343,12 @@ def _offence(target: str, tracked: set[str]) -> str | None:
     path = posixpath.normpath(target)
     if path in tracked:
         return "tracked path"
+    if path.startswith(_SCRATCH_ROOTS):
+        return None  # node-local scratch can never be the checkout
     if path.startswith("/"):
-        return None  # node-local scratch (/tmp/...) can never be a repo path
+        if _UNRESOLVED not in path:
+            return None  # a fully-resolved absolute path outside the repo
+        return "unresolved absolute path (could be inside the checkout at runtime)"
     # A glob and an unresolved variable are the same question — "could this match a tracked
     # file?" — so they get the same answer. `*` for the unknown part is the WIDEST reading,
     # which is the fail-CLOSED direction: `reports/p2/sweep/g${GAMMAS[i]}_...json` becomes

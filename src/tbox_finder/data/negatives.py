@@ -305,7 +305,13 @@ def admit_pool_rows(
     which the CI §8.2 gate cannot see.
 
     Returned rows carry the **normalised** ``candidate_id`` / ``sequence`` /
-    ``source_record_id`` (stripped, upper-cased), so every consumer sees the same bytes
+    ``source_record_id``: the ids are stripped, the sequence is upper-cased but
+    deliberately **not** stripped — surrounding whitespace makes a sequence fail the
+    window-length check below, which refuses the row rather than silently repairing a
+    pool whose bytes are not what the carver wrote (the fail-closed direction). The
+    docstring previously claimed the sequence was stripped; the code never did, on this
+    branch or before it (CodeRabbit, P2-10d′-c r4).
+    So every consumer sees the same bytes
     the record builder does.
     """
 
