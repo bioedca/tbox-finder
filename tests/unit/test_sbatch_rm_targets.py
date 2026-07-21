@@ -41,7 +41,7 @@ SLURM = REPO / "slurm"
 
 #: ``VAR=value`` / ``VAR="value"`` alone on a line — the assignment forms the shipped sbatch
 #: bodies actually use. Command substitutions are not resolved (see `_resolve`).
-_ASSIGN = re.compile(r'^\s*([A-Za-z_][A-Za-z0-9_]*)=(".*?"|\'.*?\'|\S*)\s*$')
+_ASSIGN = re.compile(r'^\s*([A-Za-z_][A-Za-z0-9_]*)=("[^"]*"|\'[^\']*\'|\S*)\s*$')
 #: Command names that mean `rm`, once the path prefix and the alias-bypassing backslash
 #: are stripped. `\rm`, `/bin/rm` and `command rm` all delete exactly what `rm` deletes.
 _RM_NAMES = {"rm"}
@@ -142,6 +142,20 @@ def _tracked_paths() -> set[str]:
     return {p for p in out.split("\0") if p}
 
 
+def _store(env: dict[str, str], name: str, raw: str) -> None:
+    """Record an assignment, storing UNRESOLVED unless the value FULLY expanded.
+
+    A value that still contains `$` or a backtick did not resolve — `FAM=$(python -c ...)`
+    tokenizes into `FAM=$` plus the substitution's own words, and storing that bare `$`
+    made every later `$FAM` expand to an innocuous-looking literal, silently un-flagging
+    nine tracked deletions. Storing the marker instead keeps the later use fail-CLOSED
+    (CodeRabbit, P2-10d′-c r6).
+    """
+    quoted = len(raw) >= 2 and raw[0] in "\"'" and raw[-1] == raw[0]
+    value = _resolve(raw[1:-1] if quoted else raw, env)
+    env[name] = _UNRESOLVED if ("$" in value or "`" in value) else value
+
+
 def _rm_targets(text: str) -> list[tuple[int, str]]:
     """``(line number, resolved path)`` for every argument of every `rm`, in EXECUTION ORDER.
 
@@ -162,15 +176,28 @@ def _rm_targets(text: str) -> list[tuple[int, str]]:
             continue  # a comment, not a command — the fix's own rationale lives in one
         assign = _ASSIGN.match(line)
         if assign:
-            raw = assign.group(2)
-            quoted = len(raw) >= 2 and raw[0] in "\"'" and raw[-1] == raw[0]
-            env[assign.group(1)] = _resolve(raw[1:-1] if quoted else raw, env)
+            _store(env, assign.group(1), assign.group(2))
             continue
         for command in _commands(line, line_no):
             words = list(command)
+            prefixes: list[str] = []
             while words and _ASSIGN.match(words[0]):
-                words.pop(0)  # `FOO=bar rm ...` — a per-command env prefix
-            if words and words[0] == "command":
+                prefixes.append(words.pop(0))
+            if not words:
+                # An assignment-ONLY command — `REPORT="x.json"; rm -f "$REPORT"` splits
+                # into two commands on the `;`, and this is the first. That assignment
+                # PERSISTS, unlike the `FOO=bar rm ...` per-command prefix above it, which
+                # bash scopes to the one command. Dropping it left the later `rm` resolving
+                # against an absent value — which fails CLOSED (the marker widens to `*`
+                # and flags everything), so it was never a missed detection, but it would
+                # fire spuriously the first time a shipped script used the idiom
+                # (CodeRabbit, P2-10d′-c r6).
+                for prefix in prefixes:
+                    kv = _ASSIGN.match(prefix)
+                    if kv:
+                        _store(env, kv.group(1), kv.group(2))
+                continue
+            if words[0] == "command":
                 words.pop(0)
             if not words:
                 continue
@@ -266,6 +293,23 @@ def test_node_local_scratch_stays_exempt() -> None:
     text = 'BUILD="/tmp/${USER}-${SLURM_JOB_ID:-local}"\nrm -rf "$BUILD"\n'
     (target,) = [p for _, p in _rm_targets(text)]
     assert _offence(target, _tracked_paths()) is None
+
+
+def test_a_separator_joined_assignment_persists() -> None:
+    """`X="..."; rm -f "$X"` — the assignment before the `;` is a real shell assignment."""
+    text = 'REPORT="reports/p2/train_stage1_production.json"; rm -f "$REPORT"\n'
+    assert "reports/p2/train_stage1_production.json" in [p for _, p in _rm_targets(text)]
+
+
+def test_a_per_command_env_prefix_does_NOT_persist() -> None:
+    """The other direction: bash scopes `FOO=bar cmd` to that one command.
+
+    Without this, "persist assignments" would over-correct and let a transient prefix leak
+    into later commands — resolving a path against a value that never existed there.
+    """
+    text = 'REPORT="/tmp/scratch.json" :\nrm -f "$REPORT"\n'
+    (target,) = [p for _, p in _rm_targets(text)]
+    assert _UNRESOLVED in target, target
 
 
 def test_a_separator_cannot_hide_a_tracked_deletion() -> None:
