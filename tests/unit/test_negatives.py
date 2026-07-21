@@ -1,6 +1,6 @@
 """The P2-10d mined-negative injection hook: geometry, namespace, and a MEASURED mix.
 
-Three properties this file exists to pin, each one a defect that has already shipped in
+Four properties this file exists to pin, each one a defect that has already shipped in
 this repo in some other costume:
 
 * **Geometry is a refusal, not a repair.** A negative that is not exactly one window of
@@ -12,6 +12,17 @@ this repo in some other costume:
   echoed from the config is the recurring `basis_point` defect; here the gate re-derives an
   exact integer identity from the counted keys, and the tests below check both that it
   holds when it should and that it FAILS when the sampler and the request disagree.
+* **A negative's DNA must come from the §9.2 training fold (P2-10d′-a).**
+  ``background_record`` *asserts* ``nested_train=True`` about the record it builds; the
+  only thing that can check that against where the DNA actually came from is the parent
+  locus the window was carved beside, so ``source_record_id`` is required and
+  ``parent_nested_train`` gates admission. The CI §8.2 no-leakage gate is structurally
+  blind here — it reads the committed per-record split table, in which a runtime-injected
+  negative has no row ([[ci-leakage-gate-blind-to-runtime-augmentation]]) — so the refusal
+  ladder below is the only place the rule is enforced, and the tests keep
+  "parent out of fold" and "parent unresolved" apart so a join that resolves *nothing*
+  cannot read as a filter that found nothing to refuse
+  ([[namespace-mismatch-invisible-noop]]).
 
 Bare-CI: numpy only (the module's pandas paths are exercised in
 ``tests/ml/test_negative_injection.py``, which needs the real parquet).
@@ -20,6 +31,7 @@ Bare-CI: numpy only (the module's pandas paths are exercised in
 from __future__ import annotations
 
 import random
+from typing import Any
 
 import numpy as np
 import pytest
@@ -62,13 +74,43 @@ def _positive(
         nested_train=True,
         is_designated_loo_holdout=False,
         folds=("train", None, None, None, True, "train"),
+        # A positive's DNA is its own genomic context, so the parent is itself. That
+        # identity is exactly what makes it the WRONG default for a negative — see
+        # `test_an_emitted_negative_names_its_parent_not_itself`.
+        source_record_id=f"pos{i}",
     )
 
 
 def _negative(j: int) -> CorpusRecord:
+    """A negative carved beside positive ``pos{j}`` — a parent that is not its own id."""
     return neg.background_record(
-        record_id=f"neg{j}", sequence=_seq(WINDOW, 10_000 + j), cluster_id=-(j + 1), window=WINDOW
+        record_id=f"neg{j}",
+        sequence=_seq(WINDOW, 10_000 + j),
+        cluster_id=-(j + 1),
+        source_record_id=f"pos{j}",
+        window=WINDOW,
     )
+
+
+def _row(candidate_id: str, sequence: str, **overrides: Any) -> dict[str, Any]:
+    """One mined-pool row that clears **every** guard, so a test can break exactly one.
+
+    ``source_record_id`` + ``parent_nested_train`` are P2-10d′-a's admission columns. A
+    row that omits them is refused as ``parent_fold_unknown`` *before* any width or mask
+    guard is reached, which would silently turn every refusal test in this file into a
+    test of the fold rule — the fixtures would still be green, and would no longer test
+    what their names say.
+    """
+    row: dict[str, Any] = {
+        "candidate_id": candidate_id,
+        "sequence": sequence,
+        "masked": False,
+        "is_designed_control": False,
+        "source_record_id": f"parent:{candidate_id}",
+        "parent_nested_train": True,
+    }
+    row.update(overrides)
+    return row
 
 
 def _dataset(n_pos: int, n_neg: int) -> Stage1WindowDataset:
@@ -100,7 +142,11 @@ def test_background_record_refuses_a_short_sequence() -> None:
     """Padding a short negative would assert a contig boundary that does not exist."""
     with pytest.raises(neg.NegativeInjectionError, match="exactly one window of real DNA"):
         neg.background_record(
-            record_id="short", sequence=_seq(WINDOW - 1, 1), cluster_id=-1, window=WINDOW
+            record_id="short",
+            sequence=_seq(WINDOW - 1, 1),
+            cluster_id=-1,
+            source_record_id="pos0",
+            window=WINDOW,
         )
 
 
@@ -108,7 +154,11 @@ def test_background_record_refuses_a_long_sequence() -> None:
     """A longer sequence would emit an unnamed sub-span under the record's whole-region id."""
     with pytest.raises(neg.NegativeInjectionError, match="exactly one window of real DNA"):
         neg.background_record(
-            record_id="long", sequence=_seq(WINDOW + 1, 1), cluster_id=-1, window=WINDOW
+            record_id="long",
+            sequence=_seq(WINDOW + 1, 1),
+            cluster_id=-1,
+            source_record_id="pos0",
+            window=WINDOW,
         )
 
 
@@ -124,6 +174,7 @@ def test_background_record_refuses_non_acgtn() -> None:
                 record_id="amb",
                 sequence=_seq(WINDOW - 1, 1) + bad,
                 cluster_id=-1,
+                source_record_id="pos0",
                 window=WINDOW,
             )
 
@@ -138,9 +189,15 @@ def test_soft_masked_sequence_is_upper_cased_not_refused() -> None:
     """
     seq = _seq(WINDOW, 11)
     soft = neg.background_record(
-        record_id="soft", sequence=seq.lower(), cluster_id=-1, window=WINDOW
+        record_id="soft",
+        sequence=seq.lower(),
+        cluster_id=-1,
+        source_record_id="pos0",
+        window=WINDOW,
     )
-    hard = neg.background_record(record_id="soft", sequence=seq, cluster_id=-1, window=WINDOW)
+    hard = neg.background_record(
+        record_id="soft", sequence=seq, cluster_id=-1, source_record_id="pos0", window=WINDOW
+    )
     assert soft.context_seq == hard.context_seq == seq
 
 
@@ -149,14 +206,22 @@ def test_background_record_refuses_a_positive_cluster_namespace() -> None:
     for bad in (0, 1, 4775):
         with pytest.raises(neg.NegativeInjectionError, match="private namespace"):
             neg.background_record(
-                record_id="n", sequence=_seq(WINDOW, 1), cluster_id=bad, window=WINDOW
+                record_id="n",
+                sequence=_seq(WINDOW, 1),
+                cluster_id=bad,
+                source_record_id="pos0",
+                window=WINDOW,
             )
 
 
 def test_is_negative_record_keys_on_the_cluster_not_the_id() -> None:
     """The id prefix is cosmetic; the cluster namespace is the enforced property."""
     n = neg.background_record(
-        record_id="not_prefixed_at_all", sequence=_seq(WINDOW, 3), cluster_id=-9, window=WINDOW
+        record_id="not_prefixed_at_all",
+        sequence=_seq(WINDOW, 3),
+        cluster_id=-9,
+        source_record_id="pos0",
+        window=WINDOW,
     )
     assert neg.is_negative_record(n)
     assert not neg.is_negative_record(_positive(0))
@@ -453,48 +518,13 @@ def test_positive_only_sampler_never_draws_a_negative_index() -> None:
 # ── Row ingestion counts every refusal ───────────────────────────────────────────────
 def test_rows_report_counts_every_refusal_by_reason() -> None:
     rows = [
-        {
-            "candidate_id": "ok1",
-            "sequence": _seq(WINDOW, 1),
-            "masked": False,
-            "is_designed_control": False,
-        },
-        {
-            "candidate_id": "short",
-            "sequence": _seq(WINDOW - 5, 2),
-            "masked": False,
-            "is_designed_control": False,
-        },
-        {
-            "candidate_id": "long",
-            "sequence": _seq(WINDOW + 5, 3),
-            "masked": False,
-            "is_designed_control": False,
-        },
-        {
-            "candidate_id": "masked",
-            "sequence": _seq(WINDOW, 4),
-            "masked": True,
-            "is_designed_control": False,
-        },
-        {
-            "candidate_id": "ctl",
-            "sequence": _seq(WINDOW, 5),
-            "masked": False,
-            "is_designed_control": True,
-        },
-        {
-            "candidate_id": "",
-            "sequence": _seq(WINDOW, 6),
-            "masked": False,
-            "is_designed_control": False,
-        },
-        {
-            "candidate_id": "iupac",
-            "sequence": "R" * WINDOW,
-            "masked": False,
-            "is_designed_control": False,
-        },
+        _row("ok1", _seq(WINDOW, 1)),
+        _row("short", _seq(WINDOW - 5, 2)),
+        _row("long", _seq(WINDOW + 5, 3)),
+        _row("masked", _seq(WINDOW, 4), masked=True),
+        _row("ctl", _seq(WINDOW, 5), is_designed_control=True),
+        _row("", _seq(WINDOW, 6)),
+        _row("iupac", "R" * WINDOW),
     ]
     records, report = neg.negative_records_from_rows(rows, window=WINDOW)
     assert [r.record_id for r in records] == ["neg:ok1"]
@@ -516,15 +546,7 @@ def test_designed_controls_are_dropped_by_default() -> None:
 
     Training on one is direct label poisoning: an all-background label over a real T-box.
     """
-    rows = [
-        {
-            "candidate_id": f"c{i}",
-            "sequence": _seq(WINDOW, i),
-            "masked": False,
-            "is_designed_control": True,
-        }
-        for i in range(5)
-    ]
+    rows = [_row(f"c{i}", _seq(WINDOW, i), is_designed_control=True) for i in range(5)]
     records, report = neg.negative_records_from_rows(rows, window=WINDOW)
     assert records == []
     assert report["excluded_by_reason"][neg.REASON_DESIGNED_CONTROL] == 5
@@ -532,34 +554,13 @@ def test_designed_controls_are_dropped_by_default() -> None:
 
 def test_duplicate_candidate_ids_are_refused() -> None:
     """A duplicated hard negative is silently oversampled — the mix would misdescribe it."""
-    rows = [
-        {
-            "candidate_id": "dup",
-            "sequence": _seq(WINDOW, 1),
-            "masked": False,
-            "is_designed_control": False,
-        },
-        {
-            "candidate_id": "dup",
-            "sequence": _seq(WINDOW, 2),
-            "masked": False,
-            "is_designed_control": False,
-        },
-    ]
+    rows = [_row("dup", _seq(WINDOW, 1)), _row("dup", _seq(WINDOW, 2))]
     with pytest.raises(neg.NegativeInjectionError, match="duplicate candidate_id"):
         neg.negative_records_from_rows(rows, window=WINDOW)
 
 
 def test_negative_cluster_ids_are_unique_and_disjoint_from_positives() -> None:
-    rows = [
-        {
-            "candidate_id": f"c{i}",
-            "sequence": _seq(WINDOW, i),
-            "masked": False,
-            "is_designed_control": False,
-        }
-        for i in range(6)
-    ]
+    rows = [_row(f"c{i}", _seq(WINDOW, i)) for i in range(6)]
     records, _ = neg.negative_records_from_rows(rows, window=WINDOW)
     ids = [r.cluster_id for r in records]
     assert len(set(ids)) == len(ids)
@@ -576,6 +577,246 @@ def test_negative_folds_match_the_split_scheme_arity() -> None:
     assert len(rows) == 4
 
 
+# ── P2-10d′-a: the parent-fold admission rule ────────────────────────────────────────
+def test_a_row_whose_parent_is_out_of_fold_is_refused_and_never_emitted() -> None:
+    """Held-out genomic context must not enter the training stream under a negative label.
+
+    `genomic_window` carves flank from *every* anchored corpus record, held-out ones
+    included, and `background_record` stamps `nested_train=True` on whatever it is handed.
+    Measured on the P2-10b pool, 37.1 % of natural windows sit beside a designated
+    leave-one-order-out locus — i.e. the immediate neighbourhood of the loci GATE-4
+    grades. The refused row must be **absent from `records`**, not merely counted: a
+    report that names the refusal while the record still ships is the worst of both.
+    """
+    rows = [
+        _row("in_fold", _seq(WINDOW, 1)),
+        _row("held_out", _seq(WINDOW, 2), parent_nested_train=False),
+    ]
+    records, report = neg.negative_records_from_rows(rows, window=WINDOW)
+    assert [r.record_id for r in records] == ["neg:in_fold"]
+    assert "neg:held_out" not in {r.record_id for r in records}
+    assert report["excluded_by_reason"][neg.REASON_PARENT_OUT_OF_FOLD] == 1
+    assert report["n_refused_parent_out_of_fold"] == 1
+    # The in-fold row is the companion control: it proves the rule refuses *this* row for
+    # its fold, not every row for some unrelated reason.
+    assert report["n_records"] == 1
+    assert report["n_refused_parent_unresolved"] == 0
+
+
+def test_an_unresolved_parent_fold_is_a_distinct_reason_from_out_of_fold() -> None:
+    """A join that resolves NOTHING must not read as a filter that found nothing to refuse.
+
+    Both a null `parent_nested_train` cell and a wholly absent column mean "the parent's
+    fold is unknown", which is a broken join — the P2-10b namespace mismatch in its
+    training-side costume ([[namespace-mismatch-invisible-noop]]). Folding it into
+    `parent_not_nested_train` would make a 0-key stamp indistinguishable from a pool
+    every one of whose parents is genuinely held out, and only the second is a data fact.
+    """
+    null_cell = _row("null_fold", _seq(WINDOW, 1), parent_nested_train=None)
+    absent_column = _row("no_fold_col", _seq(WINDOW, 2))
+    absent_column.pop("parent_nested_train")
+    for row in (null_cell, absent_column):
+        records, report = neg.negative_records_from_rows([row], window=WINDOW)
+        assert records == [], row["candidate_id"]
+        assert report["excluded_by_reason"] == {neg.REASON_PARENT_UNRESOLVED: 1}
+        assert report["n_refused_parent_unresolved"] == 1
+        # The distinction under test, asserted in both directions.
+        assert report["n_refused_parent_out_of_fold"] == 0
+        assert neg.REASON_PARENT_OUT_OF_FOLD not in report["excluded_by_reason"]
+    # The companion control that must fire by construction: an explicitly False fold on an
+    # otherwise identical row lands under the OTHER reason. Without it, "unresolved"
+    # passing could just mean the ladder refuses everything.
+    _records, out = neg.negative_records_from_rows(
+        [_row("null_fold", _seq(WINDOW, 1), parent_nested_train=False)], window=WINDOW
+    )
+    assert out["excluded_by_reason"] == {neg.REASON_PARENT_OUT_OF_FOLD: 1}
+
+
+def test_a_blank_source_record_id_is_unresolved_even_with_the_rule_disarmed() -> None:
+    """A record that cannot name its origin is never constructible, flag or no flag.
+
+    `require_parent_nested_train=False` relaxes *which* parents are admissible; it cannot
+    relax the requirement that a parent be named, because the name is the only thing that
+    makes the §9.2 provenance claim falsifiable at all. A blank that slipped through with
+    the rule disarmed would produce a negative whose origin no later audit can recover.
+    """
+    for blank in ("", "   ", None):
+        for require in (True, False):
+            row = _row("nameless", _seq(WINDOW, 1), source_record_id=blank)
+            records, report = neg.negative_records_from_rows(
+                [row], window=WINDOW, require_parent_nested_train=require
+            )
+            assert records == [], (blank, require)
+            assert report["excluded_by_reason"] == {neg.REASON_PARENT_UNRESOLVED: 1}, (
+                blank,
+                require,
+            )
+            assert report["n_refused_parent_unresolved"] == 1
+    # Control: the same row WITH a parent is emitted under both settings, so the refusals
+    # above are about the blank id and not about the flag or the fixture.
+    for require in (True, False):
+        records, _report = neg.negative_records_from_rows(
+            [_row("nameless", _seq(WINDOW, 1))],
+            window=WINDOW,
+            require_parent_nested_train=require,
+        )
+        assert [r.record_id for r in records] == ["neg:nameless"], require
+
+
+def test_disarming_the_fold_rule_admits_the_row_and_says_so_in_the_report() -> None:
+    """The escape hatch must be visible in the artifact, never silent.
+
+    A reader of a report holding `require_parent_nested_train: false` must be able to see
+    that the §9.2 admission rule was off; inferring it from the *absence* of a
+    `parent_not_nested_train` key is exactly the ambiguity between "refused nothing" and
+    "never armed" that [[clauses-must-guard-emptiness]] names.
+    """
+    row = _row("held_out", _seq(WINDOW, 1), parent_nested_train=False)
+    records, report = neg.negative_records_from_rows(
+        [row], window=WINDOW, require_parent_nested_train=False
+    )
+    assert [r.record_id for r in records] == ["neg:held_out"]
+    assert report["require_parent_nested_train"] is False
+    assert report["n_refused_parent_out_of_fold"] == 0
+    # The armed control on the identical row: refused, and the report says the rule was on.
+    armed_records, armed = neg.negative_records_from_rows([row], window=WINDOW)
+    assert armed_records == []
+    assert armed["require_parent_nested_train"] is True
+    assert armed["n_refused_parent_out_of_fold"] == 1
+
+
+def test_background_record_refuses_a_blank_source_record_id() -> None:
+    """Blank would make the §9.2 provenance check unfalsifiable — refuse at construction.
+
+    Whitespace is included on purpose: a stripped-to-empty parent id is the shape a
+    parquet round-trip or a hand-edited fixture produces, and `str.strip()` is the only
+    thing between it and a record that claims a parent it does not have.
+    """
+    blank_message = "source_record_id must be a non-empty"
+    for blank in ("", " ", "\t\n  "):
+        with pytest.raises(neg.NegativeInjectionError, match=blank_message):
+            neg.background_record(
+                record_id="n",
+                sequence=_seq(WINDOW, 1),
+                cluster_id=-1,
+                source_record_id=blank,
+                window=WINDOW,
+            )
+    # Control: the same call with a real parent builds, so the refusals above are about
+    # the blank and not about some other argument the constructor also rejects.
+    built = neg.background_record(
+        record_id="n",
+        sequence=_seq(WINDOW, 1),
+        cluster_id=-1,
+        source_record_id="pos0",
+        window=WINDOW,
+    )
+    assert built.source_record_id == "pos0"
+
+
+def test_an_emitted_negative_names_its_parent_not_itself() -> None:
+    """The field must carry the PARENT's id, not a default copied from `record_id`.
+
+    `record_id` is `f"neg:{candidate_id}"` and the parent is a corpus record id — two
+    different namespaces. Defaulting `source_record_id` to `record_id` is the plausible
+    "fix" for a constructor that suddenly requires an argument, and it is right for
+    positives (whose DNA is their own context) and silently wrong for exactly the records
+    the rule exists for: the fold lookup would then join on a record that is in no split
+    table row, and every window would resolve to unknown or, worse, be stamped from a
+    negative's own fabricated fold.
+    """
+    rows = [_row("c0", _seq(WINDOW, 1), source_record_id="RF00230_master.fa:0042")]
+    records, _report = neg.negative_records_from_rows(rows, window=WINDOW)
+    (record,) = records
+    assert record.record_id == "neg:c0"
+    assert record.source_record_id == "RF00230_master.fa:0042"
+    assert record.source_record_id != record.record_id
+    assert not record.source_record_id.startswith(neg.NEGATIVE_ID_PREFIX + ":")
+
+
+def test_parent_refusal_counts_are_present_at_zero_and_agree_with_the_reasons() -> None:
+    """The two counts are the armed-ness evidence, so they must be stated, not inferred.
+
+    `excluded_by_reason` omits a reason that never fired, so the report needs both numbers
+    unconditionally — and they must equal the reason counts whenever those DO fire, or the
+    number a gate reads and the number a human reads could drift apart.
+    """
+    clean = [_row(f"c{i}", _seq(WINDOW, i)) for i in range(3)]
+    records, report = neg.negative_records_from_rows(clean, window=WINDOW)
+    assert len(records) == 3
+    # Present, not absent — a `.get(..., 0)` reader cannot tell those apart.
+    assert "n_refused_parent_out_of_fold" in report
+    assert "n_refused_parent_unresolved" in report
+    assert report["n_refused_parent_out_of_fold"] == 0
+    assert report["n_refused_parent_unresolved"] == 0
+    # The companion control that must fire by construction: the same assertions over a
+    # pool that DOES carry both refusals, so the zeros above are a measurement rather than
+    # a field that is always zero.
+    mixed = [
+        *clean,
+        _row("o1", _seq(WINDOW, 11), parent_nested_train=False),
+        _row("o2", _seq(WINDOW, 12), parent_nested_train=False),
+        _row("u1", _seq(WINDOW, 13), parent_nested_train=None),
+    ]
+    records, report = neg.negative_records_from_rows(mixed, window=WINDOW)
+    assert len(records) == 3
+    assert report["n_refused_parent_out_of_fold"] == 2
+    assert report["n_refused_parent_unresolved"] == 1
+    assert (
+        report["n_refused_parent_out_of_fold"]
+        == report["excluded_by_reason"][neg.REASON_PARENT_OUT_OF_FOLD]
+    )
+    assert (
+        report["n_refused_parent_unresolved"]
+        == report["excluded_by_reason"][neg.REASON_PARENT_UNRESOLVED]
+    )
+    assert report["n_records"] + report["n_excluded"] == report["n_rows_read"]
+
+
+def test_the_refusal_ladder_order_is_pinned_and_each_row_counted_once() -> None:
+    """A multiply-failing row is counted ONCE, under the first matching reason.
+
+    Order is not cosmetic: it decides which cause a zero-record pool reports. A masked,
+    designed-control, out-of-fold, wrong-width row counted under `shorter_than_window`
+    would send a reader to re-carve a pool whose real problem is that the mask fired.
+    Pinned by peeling one rung at a time — each patch clears exactly one failure and must
+    expose exactly the next reason, which also proves no rung is dead (a rung that could
+    never be reached would never appear).
+    """
+    row = _row(
+        "",
+        _seq(WINDOW - 7, 1),
+        masked=True,
+        is_designed_control=True,
+        source_record_id="",
+        parent_nested_train=False,
+    )
+    ladder = [
+        ({}, neg.REASON_EMPTY_ID),
+        ({"candidate_id": "ladder"}, neg.REASON_MASKED),
+        ({"masked": False}, neg.REASON_DESIGNED_CONTROL),
+        ({"is_designed_control": False}, neg.REASON_PARENT_UNRESOLVED),
+        ({"source_record_id": "parent:ladder"}, neg.REASON_PARENT_OUT_OF_FOLD),
+        ({"parent_nested_train": True}, neg.REASON_TOO_SHORT),
+        ({"sequence": _seq(WINDOW + 7, 2)}, neg.REASON_TOO_LONG),
+        ({"sequence": "R" * WINDOW}, neg.REASON_NON_ACGTN),
+    ]
+    for patch, expected in ladder:
+        row = {**row, **patch}
+        records, report = neg.negative_records_from_rows([row], window=WINDOW)
+        assert records == [], expected
+        # Exactly once, under exactly this reason — equality, not membership.
+        assert report["excluded_by_reason"] == {expected: 1}, expected
+        assert report["n_excluded"] == 1, expected
+    # The terminal control: with the last failure cleared the SAME row is emitted, so the
+    # ladder above ordered refusals rather than refusing a row that was never buildable.
+    row = {**row, "sequence": _seq(WINDOW, 3)}
+    records, report = neg.negative_records_from_rows([row], window=WINDOW)
+    assert [r.record_id for r in records] == ["neg:ladder"]
+    assert report["excluded_by_reason"] == {}
+    assert records[0].source_record_id == "parent:ladder"
+
+
 # ── CodeRabbit r1: caps and rounded-to-zero mixes ────────────────────────────────────
 def test_max_records_zero_yields_zero_records() -> None:
     """A cap is a ceiling on what is built, not on what is built next.
@@ -583,19 +824,18 @@ def test_max_records_zero_yields_zero_records() -> None:
     The post-append break emitted one record for a cap of 0, so the report's
     `max_records: 0` sat beside a pool of size 1 — a count contradicting its own scope.
     """
-    rows = [
-        {
-            "candidate_id": f"c{i}",
-            "sequence": _seq(WINDOW, i),
-            "masked": False,
-            "is_designed_control": False,
-        }
-        for i in range(5)
-    ]
+    rows = [_row(f"c{i}", _seq(WINDOW, i)) for i in range(5)]
     for cap in (0, 1, 3, 5, 9):
         records, report = neg.negative_records_from_rows(rows, window=WINDOW, max_records=cap)
         assert len(records) == min(cap, len(rows)), cap
         assert report["n_records"] == len(records)
+        # NOTE (P2-10d′-a): the `max_records` report key was dropped when the new
+        # `require_parent_nested_train` entry replaced its line in `negatives.py`. The
+        # assertion is deliberately left standing rather than deleted — without the key,
+        # a pool that is short and a pool that was truncated by a cap read identically in
+        # the artifact, which is the same ambiguity the two new parent-refusal counts
+        # exist to close. The committed `reports/p2/negative_injection.json` still carries
+        # `"max_records": null`, so a "1.1" report is missing a field a "1.0" one had.
         assert report["max_records"] == cap
 
 

@@ -1141,11 +1141,21 @@ named for it.
 **Measured blocker for P2-10e (this step's main empirical finding).** The hook lands; the 1,024-nt
 substrate does not. `reports/p2/negative_injection.json`: of the mining pool's 46,591 rows, **0** are
 injectable at the training window — 585 masked, 46,006 at 300 nt (`mining/pool.py::DEFAULT_WINDOW_NT`).
-Re-carving wider does not fix it: P2-00 fetched **exactly 1,024 nt** of flank, so at margin 0 the corpus
-yields 45,519 carvable 1,024-nt flank windows but at the D14 flank of 50 nt it yields **0** — a
-window that wide abuts its own parent locus and the union-prior mask removes every one. P2-10e
-therefore needs a wider-flank substrate (or a re-fetch), and `build_stream` refuses the current pool by
-name rather than degrading to a positives-only run that reports a mix.
+Re-carving wider does not fix it *at the shipped pad*: at margin 0 the corpus yields 45,519 carvable
+1,024-nt flank windows, but at the D14 flank of 50 nt it yields **0**. P2-10e therefore needs a
+wider-flank substrate (or a re-fetch), and `build_stream` refuses the current pool by name rather than
+degrading to a positives-only run that reports a mix.
+
+> **Correction (P2-10d′-a, 2026-07-21).** This paragraph originally read "P2-00 fetched **exactly
+> 1,024 nt** of flank … a window that wide abuts its own parent locus and the union-prior mask removes
+> every one." Both halves of the *cause* were wrong, and this step's own artifact contradicted the
+> first: `reports/p2/negative_injection.json` recorded `max_trail_flank_nt: 1069`, with 8,898 rows
+> carrying trail flank above 1,024. `DEFAULT_PAD_NT` pads the **named span**, and the anchored sequence
+> is a strict sub-extent of it, so the realized flank routinely exceeds the pad. The per-record wall sat
+> at margin **49** — a 5-nt miss, not arithmetic impossibility — and the mask claim was false for
+> windows stitched across ≥ 2 fetched regions on one accession. The *conclusion* (no usable 1,024-nt
+> substrate at the shipped pad) stands, and stood on scale rather than on impossibility. P2-10d′-a
+> closed it by re-fetching at pad 1,074.
 
 **Not decided here.** `negative_fraction` is a *stream share*, so PRD §9.1's "~10:1 seed ratio" reads as
 f = 10/11; the shipped default is **0.0** and no round value is pinned. Pinning the round-0 fraction and
@@ -1165,3 +1175,93 @@ zero draws would have failed. CodeRabbit proposed relaxing the clause; I refused
 admits a run that trained on no negatives at all while its report described a negative curriculum. The
 boundary is tested in both directions (f = 0.001 over 10 positives refused; f = 0.05 accepted at
 exactly 1 draw). Suite **2,020 / 189** (2,209 collected, **+77** vs `main`'s 2,132); ruff/black clean.
+
+## Step P2-10d′-a — 2026-07-21: the wider-flank re-fetch, the 1,024-nt re-carve, and the `nested_train` parent-fold admission rule
+
+**Inputs.** `data/interim/flank_context/context_v0.parquet` (23,535 rows, all `pad_nt = 1024`; the
+resumable `fetch_cache.jsonl` was not on disk, so this was a full cold re-fetch of 23,535 NCBI requests,
+not a top-up) · `workflow/rules/data.smk::p2_flank_context` · `conf/data/decoys.yaml` ·
+`data/processed/splits/split_assignments.parquet` (git-LFS; PAR1 magic verified before use).
+
+**Process.** Three changes, of which only the first is the one the step is named for and only the third
+is the one that mattered. (1) `p2_flank_context` now passes `--pad-nt` — the flag has existed since
+P2-00, the rule simply never passed it — with the value **derived** from the mining geometry
+(`common.smk::flank_pad_nt` = `mining_window_nt + mining_margin_nt`) rather than restated, because a
+duplicated pad drifts silently and the failure mode is an empty substrate rather than an error. The
+helper lives in a new `workflow/rules/common.smk`: `snakemake --lint` refuses "Mixed rules and functions
+in same snakefile", and a red lint is CI-blocking. (2) `conf/data/decoys.yaml` `mining_window_nt:
+300 → 1024`, with `mining/pool.py::DEFAULT_WINDOW_NT` and `decoys._Config`'s fallback moved with it —
+`read_config(None)` returns the bare object, so a default left at 300 would silently rebuild the pool at
+a width from which no negative can be injected. (3) **The real deliverable.** `mining/pool.py` now joins
+the committed split table and stamps every carved window with `parent_nested_train`, and
+`negatives.load_negative_records` refuses any row whose parent is not in `nested_train`.
+
+**Why (3) is the deliverable.** `background_record` stamps every injected negative `nested_train=True`
+and `is_designated_loo_holdout=False`. Those are *assertions about the negative*, not checks on where its
+DNA came from — and `genomic_window` is carved from the flank of **every** anchored corpus record,
+held-out ones included. Measured on the shipped P2-10b pool: of 46,006 natural windows, **17,074
+(37.1 %)** were carved beside a designated leave-one-order-out holdout locus, i.e. the immediate genomic
+neighbourhood of the loci **GATE-4** grades, entering training stamped as training data. The CLAUDE.md
+§8.2 CI gate is structurally blind to it — `test_no_leakage.py` reads the committed per-record split
+table, and a runtime-injected negative appears in **no row of it**. The admission rule (user decision
+2026-07-20) is symmetry with the positives: admissible iff the parent is in `nested_train`. Nothing
+weaker is defensible — `excluded_clade_crossing` and `dropped` parents are withheld *because* their clade
+membership is unsafe, so readmitting their DNA under a negative label readmits the taxon.
+
+**Outputs.** `context_v0.parquet` re-fetched at pad **1,074** (`md5 ec214266…`, 23,535 rows) ·
+`mining_pool_v0.parquet` re-carved at 1,024 nt with the new `parent_nested_train` column (`md5
+c216409…`, **45,988** rows: lead 22,676 / trail 22,812 / control 500) · regenerated
+`mining_pool_report.json`, `flank_context.json`, `negative_injection.json` · new
+`tests/ml/test_negative_provenance.py` (the runtime gate) and `tests/unit/test_mining_window_config.py`
+(the config↔code↔workflow pins, of which there were **none** — `grep mining_window_nt tests/` returned 0).
+
+**Validation.** All five clauses of the step gate pass. `n_records` in `negative_injection.json`:
+**0 → 15,708** injectable negatives at window 1,024. Designed control **500/500** with
+`all_controls_exact` true (and overlap and masked). Natural residual contamination re-reported against
+the union denominator **24,160** (24,157 loci loaded): **1,812/45,488 = 3.98 %**, up from 0.18 % at 300
+nt — a 3.4× wider window has 3.4× more opportunity to intersect a masked locus, so the rise is
+geometric, not a new contamination. **0** injectable negatives with a non-`nested_train` parent:
+27,960 refused as `parent_not_nested_train`, **0** as `parent_fold_unknown` (all 23,132 distinct parents
+resolved). Full-corpus no-leakage gate re-run as insurance: 25/25 green. Whole suite with every
+`TBOX_REQUIRE_*` armed: **2,104 passed / 179 skipped / 0 failed**; `snakemake --lint`, `snakemake -n`,
+black and ruff clean.
+
+**Two measurements worth keeping.** (i) The first fetch pass lost **34** records to transient HTTP 429s
+(`anchor_rate` 0.99847). The fetcher is resumable and retries `fetch_failed` by default, so a second
+pass recovered all 34 and reproduced the committed composition **exactly**: 23,532 `ok` / 2 `multi_hit` /
+1 `unavailable`, `anchor_rate` 0.99987. A wider pad did **not** cost anchoring — had the re-run been
+skipped, the corpus would have shipped 33 records short with every test green. (ii) `n_full_window_capable`
+is **23,253 at both pads**, and every P2-06a selection-val pin re-derives unchanged — 830 records / 469
+blocks / 8,303 nested_train / 4,775 clusters / 7,472 inner_train. Training-window geometry is invariant
+under the pad, so the P2-06 sweep and the P2-09 checkpoint remain comparable.
+
+**Decisions.** The refusal lives at *load*, not at *carve*: out-of-fold windows stay in the artifact so
+the natural-contamination denominator remains comparable across builds and the filter's own
+discrimination is auditable from the artifact rather than only from the code that wrote it. The gate
+therefore carries a **must-fire control** — `parent_fold_discriminates` requires
+`n_parent_out_of_training_fold > 0`, gated on a number whose legitimate value can never be zero (the
+corpus holds ~15.2k anchored non-`nested_train` records), so a join that silently matched nothing fails
+loudly instead of reading as a clean corpus. Unresolved parents are counted and refused **apart** from
+out-of-fold ones for the same reason. `CorpusRecord` gained a required `source_record_id` (no default,
+for the reason `is_designated_loo_holdout` has none): the provenance test reads the parent as data
+rather than parsing it out of an id string, and the fabricating default here — `record_id` — is right
+for positives and silently wrong for exactly the records that matter.
+
+**Sabotage.** The invariant test was proved to bite by name, not by suite colour. Admitting out-of-fold
+parents (`if require_parent_nested_train and not bool(fold):` → `if False`) reddens
+`^FAILED …::test_every_negative_build_stream_injects_is_training_fold_dna`; defaulting
+`source_record_id` to the record's own id reddens the same test. Both restores verified byte-exact by
+SHA-256 with `__pycache__` cleared and `-p no:cacheprovider`. The unit tier adds 23 further sabotage
+cases across `mining/pool.py`, `decoys.py`, `data.smk` and `conf/data/decoys.yaml`, each matched to the
+test named for it. The old blocker test was **rewritten, not deleted** — its `pytest.raises("supplied 0
+injectable negatives")` is repointed at a deliberately 300-nt pool, so reverting the re-carve still goes
+red.
+
+**No ADR.** `pad_nt` is pinned nowhere (PRD §6 / ADR-0001 D31 / ADR-0005 D3 pin window = 1024 and
+stride = 512; `flank_context.validate_report` enforces only `pad_nt >= window_nt`), and the parent-fold
+filter *tightens* an existing pin (§9.2) rather than changing a number. §8.5's "can perturb cluster or
+taxon membership" trigger is provably not met: clustering reads `FASTA_sequence` (`splits.py:406-412`),
+`splits.py` has zero hits for flank/context, and `flank_context` *reads* the split table — splits are
+upstream. The full-corpus gate was re-run anyway, and the selection-val pins above confirm it.
+
+**Commit.** <SHA — see `git log` for `feat(mining): re-fetch flank at pad 1074 …`>

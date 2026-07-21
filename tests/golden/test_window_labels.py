@@ -82,6 +82,13 @@ def _fixture_records() -> list[wd.CorpusRecord]:
                 # `nested_train` against the table (all 56 agree).
                 is_designated_loo_holdout=_as_bool(row["is_designated_loo_holdout"]),
                 folds=tuple(row[c] for c in wd.FOLD_SCHEME_COLUMNS),
+                # Every fixture row is a real **positive**, and a positive is its own
+                # origin: `context_seq` is that record's own NCBI neighbourhood (P2-00),
+                # so the corpus record the window was carved from is `record_id` itself.
+                # The fixture has no separate parent column and inventing one would be a
+                # fabrication (§10.3); reading it back off the same row is the honest
+                # value, not a placeholder.
+                source_record_id=row["record_id"],
             )
         )
     return records
@@ -331,6 +338,13 @@ def test_digest_moves_if_a_label_shifts() -> None:
         **{
             **victim.__dict__,
             "label_string": victim.label_string[1:] + victim.label_string[:1],
+            # The shifted record is a *derivative* of `victim`, not a new locus: its DNA
+            # is byte-identical to victim's `context_seq`, only the label frame moved. So
+            # it carries the SAME origin as the record it was derived from — restating it
+            # here (the `__dict__` spread would carry it anyway) pins that intent, so a
+            # later edit that rebuilds this record from scratch cannot quietly re-parent
+            # it and make the derivative look like DNA from somewhere else.
+            "source_record_id": victim.source_record_id,
         }
     )
     if shifted.label_string == victim.label_string:

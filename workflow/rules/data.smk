@@ -797,6 +797,12 @@ rule build_mining_pool:
         ),
         union_prior=config.get("decoys_union_prior", "data/processed/priors/union_prior.parquet"),
         corpus=config.get("decoys_corpus", "data/processed/master_clean_v0.parquet"),
+        # P2-10d′-a: the parent-fold source. Every carved window is stamped with
+        # its parent corpus record's `nested_train`, so admissibility as a §9.1
+        # negative is data on the artifact rather than a promise by its loader.
+        split_table=config.get(
+            "mining_pool_split_table", "data/processed/splits/split_assignments.parquet"
+        ),
         conf="conf/data/decoys.yaml",
         env_lock="envs/data.conda-lock.yml",
     log:
@@ -808,6 +814,7 @@ rule build_mining_pool:
         "--context {params.context:q} "
         "--union-prior {params.union_prior:q} "
         "--corpus {params.corpus:q} "
+        "--split-table {params.split_table:q} "
         "--out {output.pool:q} "
         "--provenance {output.provenance:q} "
         "--report {output.report:q} "
@@ -856,6 +863,11 @@ rule p2_flank_context:
         # prefixes an output trips `snakemake --lint`, which is CI-blocking.
         out_dir=lambda wildcards, output: os.path.dirname(output.context),
         external_dir=lambda wildcards, output: os.path.dirname(output.source_provenance),
+        # Derived from conf/data/decoys.yaml (mining_window_nt + mining_margin_nt),
+        # never hardcoded — see common.smk::flank_pad_nt. The CLI flag has existed
+        # since P2-00; this rule simply never passed it, which is why the shipped
+        # context was padded to 1024 and yielded zero carvable 1024-nt windows (P2-10d).
+        pad_nt=flank_pad_nt(),
         env_lock="envs/data.conda-lock.yml",
     log:
         "logs/p2_flank_context.log",
@@ -868,4 +880,5 @@ rule p2_flank_context:
         "--out-dir {params.out_dir:q} "
         "--external-dir {params.external_dir:q} "
         "--report {output.report:q} "
+        "--pad-nt {params.pad_nt:q} "
         "--env-lock {params.env_lock:q} >{log} 2>&1"

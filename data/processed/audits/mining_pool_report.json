@@ -1,5 +1,5 @@
 {
-  "context_sha256": "415bd09400cbadf5a442236bf657633b529462a4fbbdc3bf9d2928d7c44e7335",
+  "context_sha256": "f35f25cda0f7ddc5714baeeece12146aa9e50f943ba9f4a121dbe3fdb3297742",
   "control_gate": {
     "clauses": {
       "all_controls_exact": true,
@@ -7,30 +7,43 @@
       "all_controls_overlap": true,
       "all_requested_controls_carved": true,
       "controls_present": true,
+      "every_window_parent_resolved": true,
       "namespace_compatible": true,
-      "natural_pool_present": true
+      "natural_pool_present": true,
+      "parent_fold_admits_windows": true,
+      "parent_fold_discriminates": true,
+      "parent_fold_stamped": true
     },
     "n_control_exact_interval_match": 500,
     "n_control_masked": 500,
     "n_control_overlapping": 500,
     "n_control_windows": 500,
     "n_controls_requested": 500,
-    "overall_pass": true
+    "overall_pass": true,
+    "parent_fold": {
+      "n_distinct_parents": 23132,
+      "n_natural_windows_admissible": 16272,
+      "n_parent_in_training_fold": 16446,
+      "n_parent_out_of_training_fold": 29542,
+      "n_records": 45988,
+      "n_split_table_corpus_records": 23535,
+      "n_unresolved_parent": 0
+    }
   },
   "corpus_sha256": "1eb76591d0e481019dd7acf72a439f157fec9f2aeecb8cc5c37ba80a7b062dd2",
   "flank_nt": 50,
   "margin_nt": 50,
   "masking": {
     "accession_namespace": {
-      "n_distinct_accessions": 11453,
-      "n_distinct_normalized": 11447,
+      "n_distinct_accessions": 11236,
+      "n_distinct_normalized": 11230,
       "n_index_accessions": 12041,
       "n_intersect_as_is": 0,
-      "n_intersect_normalized": 11447,
+      "n_intersect_normalized": 11230,
       "n_unaddressable_normalized": 0,
-      "n_with_accession": 46591,
+      "n_with_accession": 45988,
       "namespace_compatible": true,
-      "normalization_recovered": 11447
+      "normalization_recovered": 11230
     },
     "designed_control": {
       "masked_fraction": 1.0,
@@ -40,29 +53,39 @@
       "n_records": 500
     },
     "natural": {
-      "masked_fraction": 0.0018441778221344731,
+      "masked_fraction": 0.03983468167428773,
       "n_exact_interval_match": 0,
-      "n_masked_at_flank": 85,
-      "n_overlapping_at_flank_0": 69,
-      "n_records": 46091
+      "n_masked_at_flank": 1812,
+      "n_overlapping_at_flank_0": 1554,
+      "n_records": 45488
     }
   },
   "n_context_anchored": 23532,
   "n_context_rows": 23535,
   "n_controls_requested": 500,
   "n_own_positive_loci_loaded": 23535,
-  "n_records": 46591,
+  "n_records": 45988,
   "n_union_loci_loaded": 24157,
-  "notes": "P2-10b mining substrate for the ADR-0005 D14 loop \u2014 NOT a fifth PRD \u00a79.1 negative class and NOT annotation-verified 5\u2032UTRs/leaders (that is P2-10b\u2032). Windows are carved from the P2-00 flank_context regions, so they sit on replicons that host known T-boxes and the mask has something to find. designed_control windows are locus-centred and overlap a known locus by construction: they validate the coordinate frame and are excluded from the natural rate.",
+  "notes": "P2-10b mining substrate for the ADR-0005 D14 loop \u2014 NOT a fifth PRD \u00a79.1 negative class and NOT annotation-verified 5\u2032UTRs/leaders (that is P2-10b\u2032). Windows are carved from the P2-00 flank_context regions, so they sit on replicons that host known T-boxes and the mask has something to find. designed_control windows are locus-centred and overlap a known locus by construction: they validate the coordinate frame and are excluded from the natural rate. P2-10d\u2032-a: every window also carries parent_nested_train \u2014 whether the corpus record its DNA was carved beside is in the \u00a79.2 nested training fold. Only in-fold windows are injectable as \u00a79.1 negatives (negatives.load_negative_records refuses the rest); out-of-fold windows are retained in the artifact so the natural-contamination denominator stays comparable across builds and so the filter's own discrimination is auditable from the artifact.",
+  "parent_fold": {
+    "n_distinct_parents": 23132,
+    "n_natural_windows_admissible": 16272,
+    "n_parent_in_training_fold": 16446,
+    "n_parent_out_of_training_fold": 29542,
+    "n_records": 45988,
+    "n_split_table_corpus_records": 23535,
+    "n_unresolved_parent": 0
+  },
   "pool": "genomic_window",
   "seed": 42,
   "side_counts": {
-    "lead": 23040,
+    "lead": 22676,
     "locus_control": 500,
-    "trail": 23051
+    "trail": 22812
   },
+  "split_table_sha256": "6388ba19328811fa81d2d5b84a58643674934b4286581d8eff9df2e2cefba029",
   "union_denominator": 24160,
   "union_maskable_with_coords": 24157,
   "union_prior_sha256": "9ff1ff944bf36aabde2fa31f6523d41a777d08b18f768f87c9f840e788e232ed",
-  "window_nt": 300
+  "window_nt": 1024
 }

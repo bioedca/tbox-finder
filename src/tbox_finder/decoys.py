@@ -463,8 +463,12 @@ class _Config:
         self.rfam_max_scan = DEFAULT_RFAM_MAX_SCAN
         # P2-10b mining substrate (rule build_mining_pool). Defaults mirror
         # mining.pool's pins; imported lazily there to keep this module's import
-        # graph free of the mining package.
-        self.mining_window_nt = 300
+        # graph free of the mining package. `read_config(None)` and a missing file
+        # both return this bare object, so a default that disagreed with the
+        # shipped YAML would silently rebuild the pool at a width no negative can
+        # be injected at (P2-10d′-a); the two are pinned equal by
+        # test_the_shipped_mining_window_is_the_training_window.
+        self.mining_window_nt = 1024
         self.mining_margin_nt = 50
         self.mining_n_controls = 500
 

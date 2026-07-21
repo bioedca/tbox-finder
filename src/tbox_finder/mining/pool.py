@@ -69,10 +69,17 @@ MINING_POOL_PARQUET = f"{_NEG_DIR}/mining_pool_v0.parquet"
 MINING_POOL_PROVENANCE = f"{_NEG_DIR}/mining_pool_v0.provenance.json"
 MINING_POOL_REPORT = f"{_AUDIT_DIR}/mining_pool_report.json"
 
-#: Default window length (nt). Sits inside the corpus locus-length range
-#: (104-550 nt, median 281) so a mined window is a plausible candidate rather
-#: than a length outlier the scanner could separate on size alone.
-DEFAULT_WINDOW_NT = 300
+#: Default window length (nt) — the **Stage-1 training window** (PRD §6 /
+#: ADR-0001 D31 / ADR-0005 D3), kept in step with
+#: ``window_dataset.WINDOW_NT`` by ``test_the_shipped_mining_window_is_the_
+#: training_window``. P2-10b carved at 300 nt (inside the corpus locus-length
+#: range, 104-550, median 281) so a mined candidate was not a length outlier;
+#: P2-10d measured the consequence — ``negatives.background_record`` refuses a
+#: sequence that is not exactly one window, so **every** row of a 300-nt pool is
+#: uninjectable and the §9.1 seed mix cannot be built from it at all. The
+#: length-outlier worry is a *scanner* concern and belongs to the candidate
+#: geometry P2-10e mines, not to the substrate the trainer consumes.
+DEFAULT_WINDOW_NT = 1024
 
 #: A flank must exceed the window by this margin before a window is carved from
 #: it, so the window never abuts the locus it was carved beside.
@@ -89,6 +96,29 @@ SIDE_TRAIL = "trail"
 #: The designed positive control: a window centred on the record's own locus.
 #: It overlaps a known T-box by construction, so it MUST mask.
 SIDE_LOCUS_CONTROL = "locus_control"
+
+#: The committed per-record split-assignment table (PRD §9.2) and the three
+#: columns this module reads from it. Mirrored locally rather than imported from
+#: ``window_dataset`` (which is heavy and pulls torch-adjacent machinery) — the
+#: same choice ``masking`` makes for the union/corpus column names.
+DEFAULT_SPLIT_TABLE = "data/processed/splits/split_assignments.parquet"
+SPLIT_RECORD_ID_COL = "record_id"
+SPLIT_NESTED_TRAIN_COL = "nested_train"
+SPLIT_SOURCE_COL = "source"
+#: Only ``source == "corpus"`` rows are keyed by the P2-00 record hash; the 34
+#: external anchors/blinds and the 2,344 synthetic class-II variants carry other
+#: id namespaces and must not shadow a corpus record.
+SPLIT_CORPUS_SOURCE = "corpus"
+
+#: Per-window column recording whether the **parent corpus record** the window's
+#: DNA was carved beside is in the ADR-0004 nested-most-restrictive training fold.
+PARENT_FOLD_COL = "parent_nested_train"
+
+#: First line of a Git LFS v1 pointer file (mirrors ``refs.py:49``). The split
+#: table is git-LFS-tracked, so a checkout without git-lfs leaves a ~132-byte
+#: pointer that is *non-empty* and passes any `[ -s ]`-style guard
+#: ([[git-lfs-pointers-in-ci]]) — and would then resolve zero parents.
+_LFS_POINTER_MAGIC = b"version https://git-lfs.github.com/spec/v1"
 
 
 class MiningPoolError(ValueError):
@@ -214,6 +244,95 @@ def window_is_masked(record: Mapping[str, Any], index: masking.LocusIndex, *, fl
     )
 
 
+def load_parent_folds(split_table: str | Path) -> dict[str, bool]:
+    """``{corpus record_id -> nested_train}`` from the committed §9.2 split table.
+
+    Reads three columns and keeps only ``source == "corpus"`` rows: those are the
+    ones keyed by the P2-00 record SHA-256, which is exactly what ``carve_window``
+    stamps into ``source_record_id``. Externals and synthetic class-II variants
+    live in other id namespaces and are dropped rather than allowed to shadow a
+    corpus key.
+
+    Fails loud on a Git-LFS pointer. An unsmudged pointer parses as *no rows*, so
+    every parent would resolve to "unknown" and — depending on which way the
+    caller defaults — the filter would either refuse everything or admit
+    everything, both silently ([[git-lfs-pointers-in-ci]]).
+    """
+    import pandas as pd
+
+    path = Path(split_table)
+    if not path.is_file():
+        raise MiningPoolError(f"split table not found: {path}")
+    with path.open("rb") as handle:
+        if handle.read(len(_LFS_POINTER_MAGIC)) == _LFS_POINTER_MAGIC:
+            raise MiningPoolError(
+                f"split table {path} is an unsmudged Git-LFS pointer, not a parquet — "
+                "it would resolve zero parent folds while looking like a healthy read "
+                "(git lfs pull, or re-stage it after `git reset --hard`)"
+            )
+    frame = pd.read_parquet(
+        path, columns=[SPLIT_RECORD_ID_COL, SPLIT_NESTED_TRAIN_COL, SPLIT_SOURCE_COL]
+    )
+    corpus = frame[frame[SPLIT_SOURCE_COL] == SPLIT_CORPUS_SOURCE]
+    return {
+        str(rid): bool(flag)
+        for rid, flag in zip(
+            corpus[SPLIT_RECORD_ID_COL], corpus[SPLIT_NESTED_TRAIN_COL], strict=True
+        )
+    }
+
+
+def stamp_parent_folds(
+    records: Sequence[dict[str, Any]], fold_by_record_id: Mapping[str, bool]
+) -> dict[str, Any]:
+    """Stamp :data:`PARENT_FOLD_COL` on every window and return the evidence block.
+
+    ``background_record`` stamps every injected negative ``nested_train=True`` and
+    ``is_designated_loo_holdout=False``. Those are **assertions about the
+    negative**, not a check on where its DNA came from — and ``genomic_window`` is
+    carved from the flank of *every* anchored corpus record, held-out ones
+    included. Measured on the P2-10b pool: 17,074 of 46,006 natural windows
+    (37.1 %) were carved beside a designated leave-one-order-out holdout locus,
+    i.e. the immediate genomic neighbourhood of the very loci GATE-4 grades. The
+    CI §8.2 no-leakage gate cannot see it: it reads the committed per-record split
+    table, and a runtime-injected negative is in no row of it.
+
+    So admissibility has to be **data on the window**, not a promise by whoever
+    loads it. The rule (user decision 2026-07-20) is symmetry with the positives:
+    a window is admissible iff its parent record is in ``nested_train``. Nothing
+    weaker is defensible — ``excluded_clade_crossing`` and ``dropped`` parents are
+    withheld *because* their clade membership is unsafe, so readmitting their DNA
+    under a negative label readmits the taxon.
+
+    An unresolved parent is counted separately and stamped ``False``; it is a
+    broken join, not an out-of-fold record, and :func:`control_gate` fails on it
+    rather than letting a namespace mismatch read as a clean filter
+    ([[namespace-mismatch-invisible-noop]]).
+    """
+    n_unresolved = 0
+    n_in_fold = 0
+    n_natural_in_fold = 0
+    for record in records:
+        flag = fold_by_record_id.get(str(record["source_record_id"]))
+        if flag is None:
+            n_unresolved += 1
+            flag = False
+        record[PARENT_FOLD_COL] = bool(flag)
+        if flag:
+            n_in_fold += 1
+            if not record["is_designed_control"]:
+                n_natural_in_fold += 1
+    return {
+        "n_records": len(records),
+        "n_parent_in_training_fold": n_in_fold,
+        "n_parent_out_of_training_fold": len(records) - n_in_fold,
+        "n_unresolved_parent": n_unresolved,
+        "n_distinct_parents": len({str(r["source_record_id"]) for r in records}),
+        "n_split_table_corpus_records": len(fold_by_record_id),
+        "n_natural_windows_admissible": n_natural_in_fold,
+    }
+
+
 def mask_pool(
     records: Sequence[Mapping[str, Any]], index: masking.LocusIndex, *, flank: int
 ) -> dict[str, Any]:
@@ -261,7 +380,10 @@ def mask_pool(
 
 
 def control_gate(
-    mask_summary: Mapping[str, Any], *, n_controls_requested: int | None = None
+    mask_summary: Mapping[str, Any],
+    *,
+    n_controls_requested: int | None = None,
+    fold_summary: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """The P2-10b non-vacuity gate, re-derived from the recorded evidence.
 
@@ -283,10 +405,23 @@ def control_gate(
     not fit, so a run that emitted 2 of 8 controls previously graded green on the
     survivors with the shortfall recorded nowhere. Pass it and the shortfall is a
     failure; omit it and the clause is FALSE rather than absent.
+
+    ``fold_summary`` (P2-10d′-a) grades :func:`stamp_parent_folds`'s evidence.
+    Its third clause, ``parent_fold_discriminates``, is a **designed control for
+    the join itself**: the corpus holds 15,232 anchored non-``nested_train``
+    records against 8,303 in-fold ones, and windows are carved from the flank of
+    every anchored record, so a real build *must* find out-of-fold parents. Zero
+    of them means the join matched on the wrong namespace, not that the corpus is
+    clean — the failure a "0 leaked" clause alone reads as success
+    ([[namespace-mismatch-invisible-noop]]). It is gated on a number whose
+    legitimate value can never be zero, which is why it may be gated at all.
     """
     control = mask_summary.get("designed_control") or {}
     natural = mask_summary.get("natural") or {}
     namespace = mask_summary.get("accession_namespace") or {}
+    fold = dict(fold_summary or {})
+    n_fold_records = int(fold.get("n_records", 0))
+    have_fold = bool(fold) and n_fold_records > 0
     n_control = int(control.get("n_records", 0))
     n_control_masked = int(control.get("n_masked_at_flank", 0))
     n_control_overlap = int(control.get("n_overlapping_at_flank_0", 0))
@@ -304,6 +439,16 @@ def control_gate(
         ),
         "natural_pool_present": bool(natural) and int(natural.get("n_records", 0)) > 0,
         "namespace_compatible": bool(namespace) and bool(namespace.get("namespace_compatible")),
+        # Every window carries a resolved parent fold …
+        "parent_fold_stamped": have_fold
+        and n_fold_records == int(control.get("n_records", -1)) + int(natural.get("n_records", -1)),
+        "every_window_parent_resolved": have_fold and int(fold.get("n_unresolved_parent", -1)) == 0,
+        # … the filter admits something …
+        "parent_fold_admits_windows": have_fold
+        and int(fold.get("n_natural_windows_admissible", 0)) > 0,
+        # … and it removes something (the must-fire control; see the docstring).
+        "parent_fold_discriminates": have_fold
+        and int(fold.get("n_parent_out_of_training_fold", 0)) > 0,
     }
     return {
         "clauses": clauses,
@@ -312,6 +457,7 @@ def control_gate(
         "n_control_masked": n_control_masked,
         "n_control_overlapping": n_control_overlap,
         "n_control_exact_interval_match": n_control_exact,
+        "parent_fold": fold,
         "overall_pass": all(clauses.values()),
     }
 
@@ -321,6 +467,7 @@ def build(
     context_parquet: str | Path,
     union_parquet: str | Path,
     corpus_parquet: str | Path,
+    split_table: str | Path = DEFAULT_SPLIT_TABLE,
     out_parquet: str | Path = MINING_POOL_PARQUET,
     provenance_path: str | Path = MINING_POOL_PROVENANCE,
     report_path: str | Path = MINING_POOL_REPORT,
@@ -389,7 +536,11 @@ def build(
         raise MiningPoolError(f"corpus {corpus_parquet} yielded 0 own-positive loci")
     index = masking.LocusIndex.from_records(union_loci + own_loci)
     mask_summary = mask_pool(records, index, flank=flank_nt)
-    gate = control_gate(mask_summary, n_controls_requested=n_controls)
+    # The parent-fold stamp is written onto the records themselves (below) AND
+    # graded here, so the artifact's own column cannot disagree with the report —
+    # the same single-predicate discipline `window_is_masked` enforces for `masked`.
+    fold_summary = stamp_parent_folds(records, load_parent_folds(split_table))
+    gate = control_gate(mask_summary, n_controls_requested=n_controls, fold_summary=fold_summary)
 
     for record in records:
         record["masked"] = window_is_masked(record, index, flank=flank_nt)
@@ -411,6 +562,7 @@ def build(
             for side in (SIDE_LEAD, SIDE_TRAIL, SIDE_LOCUS_CONTROL)
         },
         "masking": mask_summary,
+        "parent_fold": fold_summary,
         "control_gate": gate,
         "n_controls_requested": n_controls,
         "union_denominator": n_union_total,
@@ -421,6 +573,7 @@ def build(
         "n_own_positive_loci_loaded": len(own_loci),
         "context_sha256": provenance.sha256_file(context_parquet),
         "union_prior_sha256": provenance.sha256_file(union_parquet),
+        "split_table_sha256": provenance.sha256_file(split_table),
         # The corpus supplies own_loci, so it determines every masked/overlap count
         # in this report as much as the union prior does — it belongs in the
         # diagnosis, not only in provenance.json's inputs list (CodeRabbit r1).
@@ -432,7 +585,13 @@ def build(
             "they sit on replicons that host known T-boxes and the mask has something "
             "to find. designed_control windows are locus-centred and overlap a known "
             "locus by construction: they validate the coordinate frame and are "
-            "excluded from the natural rate."
+            "excluded from the natural rate. P2-10d′-a: every window also carries "
+            "parent_nested_train — whether the corpus record its DNA was carved "
+            "beside is in the §9.2 nested training fold. Only in-fold windows are "
+            "injectable as §9.1 negatives (negatives.load_negative_records refuses "
+            "the rest); out-of-fold windows are retained in the artifact so the "
+            "natural-contamination denominator stays comparable across builds and "
+            "so the filter's own discrimination is auditable from the artifact."
         ),
     }
     # The report is written first and unconditionally — it is the diagnosis — but
@@ -460,7 +619,7 @@ def build(
         rule="workflow/rules/data.smk :: build_mining_pool",
         script="src/tbox_finder/mining/pool.py",
         seed=seed,
-        inputs=[context_parquet, union_parquet, corpus_parquet],
+        inputs=[context_parquet, union_parquet, corpus_parquet, split_table],
         outputs=[out_parquet, report_path],
         env_lock=env_lock,
         adr="ADR-0005",
@@ -473,13 +632,17 @@ def build(
             "n_union_loci_loaded": len(union_loci),
             "n_control_windows": gate["n_control_windows"],
             "natural_masked_fraction": mask_summary["natural"]["masked_fraction"],
+            "n_natural_windows_admissible": fold_summary["n_natural_windows_admissible"],
+            "n_parent_out_of_training_fold": fold_summary["n_parent_out_of_training_fold"],
         },
     )
     print(
         f"built {len(df)} mining-pool windows "
         f"(control {gate['n_control_masked']}/{gate['n_control_windows']} masked; "
         f"natural {mask_summary['natural']['n_masked_at_flank']}/"
-        f"{mask_summary['natural']['n_records']})",
+        f"{mask_summary['natural']['n_records']}; "
+        f"admissible {fold_summary['n_natural_windows_admissible']} natural windows with "
+        f"a nested_train parent, {fold_summary['n_parent_out_of_training_fold']} refused)",
         file=sys.stderr,
     )
     return 0
@@ -490,6 +653,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     p.add_argument("--context", default="data/interim/flank_context/context_v0.parquet")
     p.add_argument("--union-prior", default="data/processed/priors/union_prior.parquet")
     p.add_argument("--corpus", default="data/processed/master_clean_v0.parquet")
+    p.add_argument("--split-table", default=DEFAULT_SPLIT_TABLE)
     p.add_argument("--out", default=MINING_POOL_PARQUET)
     p.add_argument("--provenance", default=MINING_POOL_PROVENANCE)
     p.add_argument("--report", default=MINING_POOL_REPORT)
@@ -505,6 +669,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         context_parquet=a.context,
         union_parquet=a.union_prior,
         corpus_parquet=a.corpus,
+        split_table=a.split_table,
         out_parquet=a.out,
         provenance_path=a.provenance,
         report_path=a.report,

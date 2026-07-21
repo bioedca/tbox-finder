@@ -618,6 +618,18 @@ class CorpusRecord:
     #: exactly the value a fabricating default would supply (CLAUDE.md §10.3).
     is_designated_loo_holdout: bool
     folds: tuple[Any, ...]
+    #: The **corpus record whose genomic context this record's DNA came from**. For a
+    #: positive it is ``record_id`` itself; for a mined negative it is the parent locus
+    #: the window was carved beside, which is a *different* record and the only thing
+    #: that can say whether the DNA is training-fold DNA. `negatives.background_record`
+    #: stamps ``nested_train=True`` unconditionally — an assertion about the negative,
+    #: not a check on its origin — so without this field a window carved from the flank
+    #: of a leave-one-order-out holdout locus is, in the type, indistinguishable from an
+    #: in-fold one (P2-10d′-a). **No default**, for the reason
+    #: ``is_designated_loo_holdout`` has none: a record that cannot name its origin must
+    #: not be constructible, and the fabricating default here is `record_id`, which is
+    #: right for positives and silently wrong for exactly the records that matter.
+    source_record_id: str
 
 
 def _exclusion_reason(row: Mapping[str, Any], *, window: int) -> str | None:
@@ -707,6 +719,10 @@ def _corpus_record(row: Mapping[str, Any]) -> CorpusRecord:
         nested_train=bool(row[NESTED_TRAIN_COL]),
         is_designated_loo_holdout=bool(row[LOO_HOLDOUT_COL]),
         folds=tuple(row[c] for c in FOLD_SCHEME_COLUMNS),
+        # A positive IS its own origin: the window is carved from the context fetched
+        # for this very locus, so the fold the record carries and the fold of the DNA
+        # are the same fold.
+        source_record_id=str(row[RECORD_ID_COL]),
     )
 
 

@@ -73,6 +73,12 @@ def _record(
         nested_train=nested_train,
         is_designated_loo_holdout=is_designated_loo_holdout,
         folds=folds,
+        # A positive IS its own origin: the DNA in `context_seq` is this record's own
+        # genomic neighbourhood, so the corpus record the window was carved from is
+        # `rid` itself. Deriving it from `rid` (rather than hardcoding a literal)
+        # keeps it honest when a test overrides `rid` — a fixed string would claim
+        # every synthetic positive came from the same parent locus (P2-10d'-a).
+        source_record_id=rid,
     )
 
 
