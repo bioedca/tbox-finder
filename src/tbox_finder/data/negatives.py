@@ -10,7 +10,7 @@ This module is the missing **training-side hook**: it turns a mined-negative poo
 already window, and mixes them into the draw stream at a fraction that is **measured off
 the emitted stream, never echoed from the request**.
 
-Three rules govern it, and each is a refusal rather than a repair.
+Four rules govern it, and each is a refusal rather than a repair.
 
 1. **A negative is exactly one honest window of real DNA.** `window_dataset` paints every
    *real* flank position `background` and every *zero-flanked* position `IGNORE_INDEX`
@@ -43,6 +43,20 @@ Three rules govern it, and each is a refusal rather than a repair.
    realized fraction. The gate is an exact integer identity re-derived from the recorded
    counts, so it carries no tolerance knob to loosen.
 
+4. **A negative's DNA must come from the training fold (P2-10d′-a).** ``genomic_window``
+   is carved from the flank of *every* anchored corpus record, held-out ones included,
+   and :func:`background_record` stamps ``nested_train=True`` /
+   ``is_designated_loo_holdout=False`` on the result — assertions about the negative, not
+   checks on where its DNA came from. Measured on the P2-10b pool, **37.1 %** of natural
+   windows were carved beside a designated leave-one-order-out holdout locus, i.e. the
+   immediate genomic neighbourhood of the loci **GATE-4** grades. The CI §8.2 no-leakage
+   gate is structurally blind to it: that gate reads the committed per-record split table,
+   and a runtime-injected negative appears in **no row of it**. So every record carries
+   ``source_record_id`` (the parent it was carved beside), the pool carries
+   ``parent_nested_train`` as *data*, and :func:`load_negative_records` refuses any row
+   whose parent is not in ``nested_train`` — symmetry with the positives, which
+   ``load_corpus_records(training_fold_only=True)`` already enforces.
+
 **What this module does not do.** It does not run a mining round (P2-10e), does not
 decide which candidates are minable (that is `mining/hard_negative.py` + the D14 spare
 rule), and does not source the pool. :func:`load_negative_records` reads whatever pool it
@@ -70,8 +84,11 @@ from tbox_finder.data.window_dataset import (
     WeightedIndexSampler,
 )
 
-SCHEMA_VERSION = "1.0"
-STEP = "P2-10d"
+#: Bumped at P2-10d′-a: the audit report gained `require_parent_nested_train`,
+#: `n_refused_parent_out_of_fold`, and `n_refused_parent_unresolved`. A reader holding a
+#: "1.0" report must not conclude the fold rule passed — it did not exist.
+SCHEMA_VERSION = "1.1"
+STEP = "P2-10d'-a"
 
 # ── The private negative namespace (rule 2) ──────────────────────────────────────────
 #: Stratum keys for injected negatives. Deliberately not ``UNKNOWN``: that bucket is
@@ -105,6 +122,10 @@ SEQUENCE_COL = "sequence"
 MASKED_COL = "masked"
 POOL_COL = "pool"
 CONTROL_COL = "is_designed_control"
+SOURCE_RECORD_ID_COL = "source_record_id"
+#: ``mining/pool.py::PARENT_FOLD_COL`` — whether the parent corpus record this window
+#: was carved beside is in the §9.2 nested training fold (P2-10d′-a).
+PARENT_FOLD_COL = "parent_nested_train"
 
 #: Refusal reasons recorded by :func:`load_negative_records`. Each is a *count*, not a
 #: silent drop: a pool that supplies nothing must say which contract it failed.
@@ -114,6 +135,14 @@ REASON_TOO_SHORT = "shorter_than_window"
 REASON_TOO_LONG = "longer_than_window"
 REASON_NON_ACGTN = "non_acgtn_characters"
 REASON_EMPTY_ID = "missing_candidate_id"
+#: P2-10d′-a — the parent corpus record is not in the §9.2 nested training fold, so the
+#: window's DNA is held-out (or clade-crossing, or dropped) genomic context.
+REASON_PARENT_OUT_OF_FOLD = "parent_not_nested_train"
+#: … and the parent could not be resolved at all. Distinct from the above on purpose: an
+#: unresolvable parent is a broken join, and folding it into "out of fold" would let a
+#: namespace mismatch — which refuses *everything* — read as a clean, working filter
+#: ([[namespace-mismatch-invisible-noop]]).
+REASON_PARENT_UNRESOLVED = "parent_fold_unknown"
 
 _ACGTN = frozenset("ACGTN")
 
@@ -136,6 +165,7 @@ def background_record(
     record_id: str,
     sequence: str,
     cluster_id: int,
+    source_record_id: str,
     window: int = WINDOW_NT,
 ) -> CorpusRecord:
     """Build one all-background :class:`CorpusRecord` from a window-length negative.
@@ -168,12 +198,30 @@ def background_record(
     augmentation still applies (``both_strands`` draws the reverse complement), which is
     the augmentation that matters here: a negative is one specific hard window, and
     re-phasing it would slide the frame into DNA that was never mined or masked.
+
+    ``source_record_id`` is the **parent corpus record the window was carved beside**
+    (``mining/pool.py``'s ``source_record_id`` column). It is required, not defaulted:
+    ``nested_train=True`` below is an assertion this constructor makes about the
+    negative, and the only thing that can check it against the DNA's actual origin is
+    the parent's own fold. A negative carved from the flank of a leave-one-order-out
+    holdout locus puts the immediate neighbourhood of a GATE-4-graded locus into the
+    training stream, and the CI §8.2 no-leakage gate cannot see it — that gate reads
+    the committed per-record split table, in which a runtime-injected negative has no
+    row (P2-10d′-a; [[ci-leakage-gate-blind-to-runtime-augmentation]]).
     """
     if window <= 0:
         raise NegativeInjectionError(f"window must be positive; got {window}")
     rid = str(record_id).strip()
     if not rid:
         raise NegativeInjectionError("record_id must be a non-empty string")
+    parent = str(source_record_id).strip()
+    if not parent:
+        raise NegativeInjectionError(
+            f"negative {rid!r}: source_record_id must be a non-empty string — it names the "
+            "corpus record this window's DNA was carved beside, and it is the only thing "
+            "that can establish the DNA is training-fold DNA. Blank would make the §9.2 "
+            "provenance check unfalsifiable."
+        )
     # Upper-casing is deliberate and lossless: soft-masking is a repeat *annotation*, not a
     # different nucleotide, and every genomic FASTA source in this project may deliver it.
     # It is the one normalisation applied — everything else outside ACGTN is refused below,
@@ -223,6 +271,7 @@ def background_record(
         # Stated explicitly because the field has no default, by design.
         is_designated_loo_holdout=False,
         folds=NEGATIVE_FOLDS,
+        source_record_id=parent,
     )
 
 
@@ -243,6 +292,7 @@ def negative_records_from_rows(
     id_prefix: str = NEGATIVE_ID_PREFIX,
     skip_masked: bool = True,
     skip_designed_controls: bool = True,
+    require_parent_nested_train: bool = True,
     max_records: int | None = None,
 ) -> tuple[list[CorpusRecord], dict[str, Any]]:
     """Turn mined-pool rows into negatives, counting every refusal by reason.
@@ -256,6 +306,15 @@ def negative_records_from_rows(
     overlap a known T-box **by construction** and exist to prove the mask fires — training
     on them would be label poisoning of the most direct kind. Both default on and both are
     counted, so a pool loaded with either disabled says so in its own report.
+
+    ``require_parent_nested_train`` (P2-10d′-a) is the §9.2 admission rule: a window is
+    injectable **iff the corpus record it was carved beside is in ``nested_train``** —
+    symmetry with the positives, which `load_corpus_records(training_fold_only=True)`
+    already enforces and which negatives structurally bypassed. Measured on the P2-10b
+    pool, 37.1 % of natural windows were carved beside a designated leave-one-order-out
+    holdout locus. Weaker rules were considered and rejected: ``excluded_clade_crossing``
+    and ``dropped`` parents are withheld *because* their clade membership is unsafe, so
+    readmitting their DNA under a negative label readmits the taxon.
     """
     if window <= 0:
         raise NegativeInjectionError(f"window must be positive; got {window}")
@@ -281,6 +340,21 @@ def negative_records_from_rows(
             continue
         if skip_designed_controls and bool(row.get(CONTROL_COL)):
             _drop(REASON_DESIGNED_CONTROL)
+            continue
+        parent = str(row.get(SOURCE_RECORD_ID_COL) or "").strip()
+        fold = row.get(PARENT_FOLD_COL)
+        # Unresolved is its own reason, and is checked whether or not the fold rule is
+        # armed: a row that cannot name the corpus record its DNA came from yields a
+        # record whose §9.2 provenance is unfalsifiable, so it is refused rather than
+        # built. Keeping it apart from "out of fold" is what stops a filter that has
+        # stopped resolving *anything* from reading as a filter that found nothing to
+        # refuse ([[namespace-mismatch-invisible-noop]]). `fold is None` covers both a
+        # missing column and a null cell.
+        if not parent or (require_parent_nested_train and fold is None):
+            _drop(REASON_PARENT_UNRESOLVED)
+            continue
+        if require_parent_nested_train and not bool(fold):
+            _drop(REASON_PARENT_OUT_OF_FOLD)
             continue
         if len(seq) < window:
             _drop(REASON_TOO_SHORT)
@@ -308,6 +382,7 @@ def negative_records_from_rows(
                 record_id=f"{id_prefix}:{cid}",
                 sequence=seq,
                 cluster_id=NEGATIVE_CLUSTER_SIGN * (len(records) + 1),
+                source_record_id=parent,
                 window=window,
             )
         )
@@ -323,6 +398,13 @@ def negative_records_from_rows(
         "skip_masked": bool(skip_masked),
         "skip_designed_controls": bool(skip_designed_controls),
         "max_records": None if max_records is None else int(max_records),
+        "require_parent_nested_train": bool(require_parent_nested_train),
+        # The §9.2 admission gate, stated as a number rather than left to be inferred from
+        # the absence of a refusal key: `excluded_by_reason` omits a reason that never
+        # fired, so "no parent_not_nested_train key" is ambiguous between "the rule
+        # refused nothing" and "the rule was never armed" ([[clauses-must-guard-emptiness]]).
+        "n_refused_parent_out_of_fold": int(excluded.get(REASON_PARENT_OUT_OF_FOLD, 0)),
+        "n_refused_parent_unresolved": int(excluded.get(REASON_PARENT_UNRESOLVED, 0)),
         # The measurement that explains a zero-record pool without anyone having to guess:
         # the width distribution the pool actually carries, against the width required.
         "sequence_length_counts": {str(k): int(v) for k, v in sorted(lengths.items())},
@@ -338,13 +420,15 @@ def load_negative_records(
     max_records: int | None = None,
     skip_masked: bool = True,
     skip_designed_controls: bool = True,
+    require_parent_nested_train: bool = True,
 ) -> tuple[list[CorpusRecord], dict[str, Any]]:
     """Read a mined-negative parquet and build the negative records it can honestly supply.
 
     The pool schema is `mining/pool.py`'s: ``candidate_id``, ``sequence``, ``masked``,
-    ``is_designed_control`` (extra columns are ignored). Rows arrive in file order and the
-    resulting ``cluster_id``s are assigned in that order, so the same file yields the same
-    records — no shuffling here, the mix owns that.
+    ``is_designed_control``, ``source_record_id``, ``parent_nested_train`` (extra columns
+    are ignored). Rows arrive in file order and the resulting ``cluster_id``s are assigned
+    in that order, so the same file yields the same records — no shuffling here, the mix
+    owns that.
     """
     import pandas as pd  # lazy: keeps the geometry tier bare-CI importable
 
@@ -352,7 +436,9 @@ def load_negative_records(
     if not path.exists():
         raise NegativeInjectionError(f"negative pool not found: {path}")
     frame = pd.read_parquet(path)
-    missing = [c for c in (CANDIDATE_ID_COL, SEQUENCE_COL) if c not in frame.columns]
+    missing = [
+        c for c in (CANDIDATE_ID_COL, SEQUENCE_COL, SOURCE_RECORD_ID_COL) if c not in frame.columns
+    ]
     if missing:
         raise NegativeInjectionError(
             f"negative pool {path} is missing required column(s) {missing}; found "
@@ -365,12 +451,25 @@ def load_negative_records(
                 "would treat every row as unmasked / not-a-control, i.e. fail OPEN on the "
                 "ADR-0005 D14 guard the column exists to record."
             )
+    # Refused at the FILE level, not per row. A pool with no fold column would drop every
+    # row to `parent_fold_unknown` — a loud enough failure, but the wrong diagnosis: the
+    # pool is stale (pre-P2-10d′-a), not leaky, and the caller must rebuild it rather than
+    # read 46,591 identical refusals as a data problem.
+    if require_parent_nested_train and PARENT_FOLD_COL not in frame.columns:
+        raise NegativeInjectionError(
+            f"negative pool {path} has no {PARENT_FOLD_COL!r} column, so no row can show "
+            "that its DNA came from a §9.2 training-fold record. Rebuild the pool with "
+            "`snakemake build_mining_pool` (P2-10d′-a stamps it); loading without it would "
+            "put held-out genomic context into the training stream under a negative label, "
+            "which the CI §8.2 no-leakage gate cannot see."
+        )
     records, report = negative_records_from_rows(
         frame.to_dict("records"),
         window=window,
         max_records=max_records,
         skip_masked=skip_masked,
         skip_designed_controls=skip_designed_controls,
+        require_parent_nested_train=require_parent_nested_train,
     )
     report["source_parquet"] = str(path)
     report["pools"] = (

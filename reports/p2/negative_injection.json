@@ -1,7 +1,8 @@
 {
   "excluded_by_reason": {
-    "masked_known_locus": 585,
-    "shorter_than_window": 46006
+    "masked_known_locus": 2312,
+    "non_acgtn_characters": 8,
+    "parent_not_nested_train": 27960
   },
   "flank_capacity": {
     "by_margin_nt": {
@@ -12,29 +13,33 @@
         "required_flank_nt": 1024
       },
       "50": {
-        "n_rows_with_lead_flank": 0,
-        "n_rows_with_trail_flank": 0,
-        "n_windows_carvable": 0,
+        "n_rows_with_lead_flank": 22676,
+        "n_rows_with_trail_flank": 22812,
+        "n_windows_carvable": 45488,
         "required_flank_nt": 1074
       }
     },
     "context_parquet": "data/interim/flank_context/context_v0.parquet",
-    "max_lead_flank_nt": 1024,
-    "max_trail_flank_nt": 1069,
+    "max_lead_flank_nt": 1074,
+    "max_trail_flank_nt": 1119,
     "n_rows": 23535,
     "n_rows_anchored": 23532,
     "window_nt": 1024
   },
   "max_records": null,
-  "n_excluded": 46591,
-  "n_records": 0,
-  "n_rows_at_window_length": 0,
-  "n_rows_read": 46591,
+  "n_excluded": 30280,
+  "n_records": 15708,
+  "n_refused_parent_out_of_fold": 27960,
+  "n_refused_parent_unresolved": 0,
+  "n_rows_at_window_length": 45488,
+  "n_rows_read": 45988,
   "pools": {
-    "genomic_window": 46591
+    "genomic_window": 45988
   },
-  "schema_version": "1.0",
+  "require_parent_nested_train": true,
+  "schema_version": "1.1",
   "sequence_length_counts": {
+    "1024": 45488,
     "168": 1,
     "179": 1,
     "180": 1,
@@ -137,7 +142,7 @@
     "297": 4,
     "298": 4,
     "299": 2,
-    "300": 46092,
+    "300": 1,
     "301": 3,
     "302": 2,
     "303": 4,
@@ -257,6 +262,6 @@
   "skip_designed_controls": true,
   "skip_masked": true,
   "source_parquet": "data/processed/negatives/mining_pool_v0.parquet",
-  "step": "P2-10d",
+  "step": "P2-10d'-a",
   "window_nt": 1024
 }

@@ -1,22 +1,22 @@
 {
   "adr": "ADR-0004",
-  "env_lock_hash": null,
+  "env_lock_hash": "a4a6715d411d7218432c4c670d35475f6c9aa7dd6397fd5d906ca7e21293dc34",
   "extra": {
     "anchor_rate": 0.9998725302740599,
-    "digest": "a2bad3699c3222f5a03decde780c5dbac32acc296b65509704dc3ff19f1f501a",
+    "digest": "44195c711ffedd9e24fc5ee6a6992eed71c82e7b66e5c219009ff055f5744c70",
     "n_anchored": 23532,
     "n_records": 23535,
-    "pad_nt": 1024
+    "pad_nt": 1074
   },
-  "generated_at_utc": "2026-07-16T13:58:14.386484+00:00",
-  "git_sha": "9c2658465545b7a5a67341ba826cff852b0efc54",
+  "generated_at_utc": "2026-07-21T04:30:48.412489+00:00",
+  "git_sha": "f27a7bf4a7caaf88adc86d63d5800e7516a7c54f",
   "inputs": {
-    "../../../data/processed/master_clean_v0.parquet": "1eb76591d0e481019dd7acf72a439f157fec9f2aeecb8cc5c37ba80a7b062dd2",
-    "../../../data/processed/splits/split_assignments.parquet": "fb231fe4e66666f8ea2de1ccd4eea4dce282a33e05a46b41c737e3e07dcc5602"
+    "data/processed/master_clean_v0.parquet": "1eb76591d0e481019dd7acf72a439f157fec9f2aeecb8cc5c37ba80a7b062dd2",
+    "data/processed/splits/split_assignments.parquet": "6388ba19328811fa81d2d5b84a58643674934b4286581d8eff9df2e2cefba029"
   },
   "outputs": {
-    "data/interim/flank_context/context_v0.parquet": "415bd09400cbadf5a442236bf657633b529462a4fbbdc3bf9d2928d7c44e7335",
-    "reports/p2/flank_context.json": "a9a6d1bfb991f864b78c92fe45394bfb12569d0a68d6b05d78dfb6241792f26a"
+    "data/interim/flank_context/context_v0.parquet": "f35f25cda0f7ddc5714baeeece12146aa9e50f943ba9f4a121dbe3fdb3297742",
+    "reports/p2/flank_context.json": "14c3dfdcc9f2778756169c22a04f10270932e22468469a62983a34b2df88d071"
   },
   "rule": "workflow/rules/data.smk :: p2_flank_context",
   "schema_version": "1.0",

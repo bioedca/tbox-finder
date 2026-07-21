@@ -165,6 +165,20 @@ jobs:
           # and are deliberately NOT armed: CI does no `dvc pull`, so the inputs are
           # absent. That tier is the CLAUDE.md §8.5 step-local gate — run it locally
           # after any decoy/masking/context-pipeline change.
+          #
+          # P2-10d′-a: tests/ml/test_negative_injection.py and
+          # tests/ml/test_negative_provenance.py follow that same split, and the reason is
+          # recorded here because it was NOT recorded for P2-10d — TBOX_REQUIRE_NEGATIVE_
+          # INJECTION was set in no workflow, no sbatch and no doc, so every clause in that
+          # file skipped green in every CI run since it landed, and nothing said so. It stays
+          # unarmed (its inputs are the DVC-tracked context/pool/split parquets and CI does
+          # no `dvc pull`), but the file now also carries a git-tracked tier over
+          # reports/p2/negative_injection.json that RAISES on absence and therefore runs here.
+          # TBOX_REQUIRE_NEGATIVE_PROVENANCE guards the §9.2 runtime negative-provenance
+          # gate — the leak tests/ml/test_no_leakage.py is structurally blind to, because a
+          # runtime-injected negative appears in no row of the committed split table. It is
+          # a CLAUDE.md §8.5 step-local gate: arm it locally after any change to the mining
+          # pool, the negative loader, or the split logic.
         run: pytest tests/unit tests/golden tests/ml
 
   docker:

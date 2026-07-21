@@ -7,20 +7,23 @@
     "n_control_masked": 500,
     "n_control_overlapping": 500,
     "n_control_windows": 500,
-    "n_records": 46591,
+    "n_natural_windows_admissible": 16272,
+    "n_parent_out_of_training_fold": 29542,
+    "n_records": 45988,
     "n_union_loci_loaded": 24157,
-    "natural_masked_fraction": 0.0018441778221344731
+    "natural_masked_fraction": 0.03983468167428773
   },
-  "generated_at_utc": "2026-07-20T21:02:34.266283+00:00",
-  "git_sha": "2302ca8797f80a0f2e648e7de3725d86b3c75ab3",
+  "generated_at_utc": "2026-07-21T04:54:51.162876+00:00",
+  "git_sha": "f27a7bf4a7caaf88adc86d63d5800e7516a7c54f",
   "inputs": {
-    "data/interim/flank_context/context_v0.parquet": "415bd09400cbadf5a442236bf657633b529462a4fbbdc3bf9d2928d7c44e7335",
+    "data/interim/flank_context/context_v0.parquet": "f35f25cda0f7ddc5714baeeece12146aa9e50f943ba9f4a121dbe3fdb3297742",
     "data/processed/master_clean_v0.parquet": "1eb76591d0e481019dd7acf72a439f157fec9f2aeecb8cc5c37ba80a7b062dd2",
-    "data/processed/priors/union_prior.parquet": "9ff1ff944bf36aabde2fa31f6523d41a777d08b18f768f87c9f840e788e232ed"
+    "data/processed/priors/union_prior.parquet": "9ff1ff944bf36aabde2fa31f6523d41a777d08b18f768f87c9f840e788e232ed",
+    "data/processed/splits/split_assignments.parquet": "6388ba19328811fa81d2d5b84a58643674934b4286581d8eff9df2e2cefba029"
   },
   "outputs": {
-    "data/processed/audits/mining_pool_report.json": "281c3b477506de664bea9ec528877bddf7b01502c435c232ac95cd5d1f11653c",
-    "data/processed/negatives/mining_pool_v0.parquet": "c7c31366ed1fada76c1a5c228a87db6adbfe4df7990845a93d1d1e3131092d28"
+    "data/processed/audits/mining_pool_report.json": "1765a3f4d7384ee3456a42cd93d3249bc2419f54b6693cd4f0b35fad5f46ef34",
+    "data/processed/negatives/mining_pool_v0.parquet": "e57181e1b321c457e4e1b156645e9d668ef6ada4ea1a419f1cc1b6062e4dc84f"
   },
   "rule": "workflow/rules/data.smk :: build_mining_pool",
   "schema_version": "1.0",

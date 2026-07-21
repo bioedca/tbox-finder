@@ -51,7 +51,12 @@ rfam_max_scan: 20000
 # Windows are carved from the P2-00 flank_context regions, so each carries a real
 # (accession, locus_start, locus_end, strand) on a replicon that hosts a known
 # T-box — which is what gives the union-prior mask something to find.
-mining_window_nt: 300
+# P2-10d′-a: 300 → 1024. The mining pool's whole purpose is to supply §9.1
+# training negatives, and Stage-1's training window is 1024 nt (PRD §6 / ADR-0001
+# D31 / ADR-0005 D3), so a 300-nt window is not injectable at all — `background_record`
+# refuses the length mismatch by design. `p2_flank_context` derives its `--pad-nt`
+# from this value plus `mining_margin_nt` (workflow/rules/data.smk::_flank_pad_nt).
+mining_window_nt: 1024
 # A flank must exceed the window by this margin before a window is carved from it,
 # so a carved window never abuts the locus it was taken beside.
 mining_margin_nt: 50

@@ -354,6 +354,143 @@ def test_the_control_draw_is_not_a_head_slice() -> None:
 
 
 # --------------------------------------------------------------------------- #
+# The shipped width (P2-10d′-a: 300 → 1024)
+#
+# Every test above passes ``window_nt=300`` explicitly, so all twelve stayed
+# green through the width change while describing a geometry production no
+# longer uses. They are kept — they test the carve arithmetic, not the shipped
+# config — and these parametrised cases give the width the trainer actually
+# consumes its own direct coverage. ``_context_row``'s 1,000-nt region cannot
+# hold a 1024-nt window at all, which is why the 1024 leg needs its own row.
+# --------------------------------------------------------------------------- #
+#: Both legs of every width sweep: the legacy P2-10b width and the shipped one.
+_WIDTHS = [300, mining_pool.DEFAULT_WINDOW_NT]
+_MARGIN = mining_pool.DEFAULT_FLANK_MARGIN_NT
+_LOCUS_NT = 200
+
+
+def test_the_width_sweep_really_covers_two_distinct_widths() -> None:
+    """Guard on the sweep itself: ``_WIDTHS`` is half-derived from production.
+
+    If ``DEFAULT_WINDOW_NT`` ever collapsed back onto the legacy 300, every
+    parametrised case below would silently run the same leg twice and the shipped
+    width would lose its direct coverage while the ids still read ``[300]``/``[…]``.
+    The value pin itself lives in ``tests/unit/test_mining_window_config.py``.
+    """
+    assert len(set(_WIDTHS)) == 2
+
+
+def _padded_context_row(pad_nt: int, **kw: object) -> dict:
+    """A ``flank_context`` row padded by ``pad_nt`` on each side of a 200-nt locus.
+
+    Mirrors what ``workflow/rules/data.smk::_flank_pad_nt`` makes ``p2_flank_context``
+    request (``mining_window_nt + mining_margin_nt``), so a row built at
+    ``pad_nt = window_nt + margin_nt`` is the *minimum* geometry the shipped
+    pipeline produces — the exact boundary the carve guard sits on.
+    """
+    base = _context_row(
+        lead_flank=pad_nt,
+        trail_flank=pad_nt,
+        locus_offset=pad_nt,
+        locus_length=_LOCUS_NT,
+        context_seq="A" * (2 * pad_nt + _LOCUS_NT),
+    )
+    base.update(kw)
+    return base
+
+
+@pytest.mark.parametrize("window_nt", _WIDTHS)
+def test_a_lead_window_is_carved_at_the_outer_edge_at_every_shipped_width(window_nt: int) -> None:
+    """The lead window starts at the region's first base whatever the width."""
+    row = _padded_context_row(window_nt + _MARGIN)
+    window = mining_pool.carve_window(row, "lead", window_nt=window_nt, margin_nt=_MARGIN)
+    assert window is not None
+    assert (window["locus_start"], window["locus_end"]) == (1_001, 1_000 + window_nt)
+    assert window["length"] == window_nt == len(window["sequence"])
+    assert window["is_designed_control"] is False
+    assert window["source_record_id"] == "rec1"
+
+
+@pytest.mark.parametrize("window_nt", _WIDTHS)
+def test_a_trail_window_is_carved_at_the_far_edge_at_every_shipped_width(window_nt: int) -> None:
+    """The trail window ends on the region's last base — computed here, not read back."""
+    pad_nt = window_nt + _MARGIN
+    region_len = 2 * pad_nt + _LOCUS_NT
+    last_base = 1_000 + region_len
+    window = mining_pool.carve_window(
+        _padded_context_row(pad_nt), "trail", window_nt=window_nt, margin_nt=_MARGIN
+    )
+    assert window is not None
+    assert (window["locus_start"], window["locus_end"]) == (last_base - window_nt + 1, last_base)
+    assert window["length"] == window_nt == len(window["sequence"])
+
+
+@pytest.mark.parametrize("window_nt", _WIDTHS)
+def test_a_flank_one_nt_short_of_window_plus_margin_yields_no_window(window_nt: int) -> None:
+    """The carve precondition is ``flank >= window + margin``, at either width.
+
+    Both legs assert the *companion* at exactly ``window + margin`` too: without
+    it a guard that refused every row — the P2-10d failure, where the shipped
+    1024-padded context yielded **zero** carvable 1024-nt windows at margin 50 —
+    would satisfy the refusal half and look green.
+    """
+    pad_nt = window_nt + _MARGIN
+    row = _padded_context_row(pad_nt)
+    short = mining_pool.carve_window(
+        _padded_context_row(pad_nt, lead_flank=pad_nt - 1),
+        "lead",
+        window_nt=window_nt,
+        margin_nt=_MARGIN,
+    )
+    assert short is None
+    assert mining_pool.carve_window(row, "lead", window_nt=window_nt, margin_nt=_MARGIN) is not None
+
+
+def test_the_shipped_pad_is_exactly_the_carve_precondition() -> None:
+    """The measured P2-10d defect: a context padded to the *window* carves nothing.
+
+    ``p2_flank_context`` shipped a 1024-nt pad, one margin short of what
+    ``carve_window`` needs, so ``build_mining_pool`` had no substrate to carve at
+    the training width. Pinned against ``carve_window`` itself rather than against
+    a second copy of the ``window + margin`` sum, which would drift together.
+    """
+    window_nt = mining_pool.DEFAULT_WINDOW_NT
+    for side in ("lead", "trail"):
+        assert (
+            mining_pool.carve_window(
+                _padded_context_row(window_nt), side, window_nt=window_nt, margin_nt=_MARGIN
+            )
+            is None
+        )
+        assert (
+            mining_pool.carve_window(
+                _padded_context_row(window_nt + _MARGIN),
+                side,
+                window_nt=window_nt,
+                margin_nt=_MARGIN,
+            )
+            is not None
+        )
+
+
+def test_an_un_overridden_carve_pool_uses_the_shipped_default_width() -> None:
+    """``carve_pool``'s default ``window_nt=`` must be ``DEFAULT_WINDOW_NT``.
+
+    Every other geometry test passes ``window_nt=`` explicitly, so the constant
+    the CLI and ``decoys._Config`` are pinned against had nothing tying it to the
+    carved output: ``carve_pool(rows, seed=42)`` could carve at any hardcoded
+    width and the suite would not notice. This asserts the *linkage* only — both
+    sides move together if the constant itself changes, which is deliberate; the
+    value pin (1024 == the training window) lives in
+    ``tests/unit/test_mining_window_config.py``.
+    """
+    rows = [_padded_context_row(mining_pool.DEFAULT_WINDOW_NT + _MARGIN, record_id="rec0")]
+    natural = [r for r in mining_pool.carve_pool(rows, seed=42) if not r["is_designed_control"]]
+    assert len(natural) == 2  # lead + trail
+    assert {r["length"] for r in natural} == {mining_pool.DEFAULT_WINDOW_NT}
+
+
+# --------------------------------------------------------------------------- #
 # The non-vacuity gate
 # --------------------------------------------------------------------------- #
 def _summary(**kw: object) -> dict:
@@ -371,8 +508,42 @@ def _summary(**kw: object) -> dict:
     return base
 
 
-def _gate(**kw: object) -> dict:
-    return mining_pool.control_gate(_summary(**kw), n_controls_requested=10)
+#: 10 designed controls + 100 natural windows — the partition ``_summary`` describes.
+_N_POOL_RECORDS = 10 + 100
+
+
+def _fold(**kw: object) -> dict:
+    """A healthy ``stamp_parent_folds`` evidence block for the ``_summary`` pool.
+
+    Every number is distinct from every other so that a clause reading the wrong
+    key cannot pass by coincidence: 110 windows over 55 distinct parents, 70 in
+    the training fold (65 of them natural, i.e. admissible) and 40 out of it.
+    """
+    base: dict = {
+        "n_records": _N_POOL_RECORDS,
+        "n_parent_in_training_fold": 70,
+        "n_parent_out_of_training_fold": 40,
+        "n_unresolved_parent": 0,
+        "n_distinct_parents": 55,
+        "n_split_table_corpus_records": 60,
+        "n_natural_windows": 100,
+        "n_natural_windows_admissible": 65,
+        "n_natural_windows_out_of_fold": 35,
+    }
+    base.update(kw)
+    return base
+
+
+#: Distinguishes "caller wants the healthy default fold block" from an explicit
+#: ``fold_summary=None``, which is the absent-evidence case the gate must fail on.
+_DEFAULT_FOLD = object()
+
+
+def _gate(fold_summary: object = _DEFAULT_FOLD, **kw: object) -> dict:
+    fold = _fold() if fold_summary is _DEFAULT_FOLD else fold_summary
+    return mining_pool.control_gate(
+        _summary(**kw), n_controls_requested=10, fold_summary=fold  # type: ignore[arg-type]
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -498,7 +669,20 @@ def test_an_absent_or_empty_measurement_fails_rather_than_passing_vacuously(
 
 
 def test_the_gate_is_total_on_a_completely_empty_summary() -> None:
+    """Totality includes the P2-10d′-a fold evidence: no argument shape may raise.
+
+    ``control_gate`` is called on whatever a run recorded; if a missing fold block
+    raised instead of grading FALSE, the failure would surface as a traceback in
+    the builder rather than as a failed clause in the report.
+    """
     assert mining_pool.control_gate({})["overall_pass"] is False
+    assert mining_pool.control_gate({}, fold_summary=None)["overall_pass"] is False
+    assert (
+        mining_pool.control_gate({}, n_controls_requested=0, fold_summary={})["clauses"][
+            "parent_fold_stamped"
+        ]
+        is False
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -723,3 +907,372 @@ def test_mismatched_record_ids_are_refused_rather_than_silently_misaligned() -> 
             dinuc_per_source=1,
             record_ids=["only-one"],
         )
+
+
+# --------------------------------------------------------------------------- #
+# stamp_parent_folds — admissibility as data on the window (P2-10d′-a)
+#
+# ``background_record`` stamps every injected negative ``nested_train=True``.
+# That is an assertion about the negative, not a check on where its DNA came
+# from, and ``genomic_window`` is carved beside *every* anchored corpus record —
+# 37.1 % of the P2-10b natural windows sat beside a designated leave-one-order-out
+# holdout locus. The CI §8.2 gate cannot see it (it reads the committed split
+# table; a runtime-injected negative is in no row of it), so the fold has to
+# travel on the record.
+# --------------------------------------------------------------------------- #
+def _win(source_record_id: str, *, control: bool = False) -> dict:
+    """The two keys ``stamp_parent_folds`` reads, and nothing else."""
+    return {"source_record_id": source_record_id, "is_designed_control": control}
+
+
+def test_the_stamp_joins_on_the_key_carve_window_actually_emits() -> None:
+    """Hand-built dicts would keep passing if ``carve_window`` renamed either key.
+
+    The join is ``source_record_id`` -> the split table's ``record_id``; a rename
+    on the producing side is exactly the namespace mismatch that reads as a clean
+    filter while resolving nothing ([[namespace-mismatch-invisible-noop]]).
+    """
+    window = mining_pool.carve_window(
+        _padded_context_row(mining_pool.DEFAULT_WINDOW_NT + _MARGIN),
+        "lead",
+        window_nt=mining_pool.DEFAULT_WINDOW_NT,
+        margin_nt=_MARGIN,
+    )
+    assert window is not None
+    evidence = mining_pool.stamp_parent_folds([window], {"rec1": True})
+    assert window[mining_pool.PARENT_FOLD_COL] is True
+    assert evidence["n_unresolved_parent"] == 0
+    assert evidence["n_parent_in_training_fold"] == 1
+
+
+def test_every_record_is_stamped_including_the_unresolvable_one() -> None:
+    """An unstamped record has no admissibility column at all — a null, not a False.
+
+    ``load_negative_records`` refuses a missing ``parent_nested_train`` only when
+    the filter is armed, so a window that skipped the stamp is admissible under
+    the unarmed reader.
+    """
+    records = [_win("in"), _win("out"), _win("ghost"), _win("in", control=True)]
+    mining_pool.stamp_parent_folds(records, {"in": True, "out": False})
+    assert all(mining_pool.PARENT_FOLD_COL in r for r in records)
+    assert [r[mining_pool.PARENT_FOLD_COL] for r in records] == [True, False, False, True]
+
+
+def test_an_unresolved_parent_is_stamped_false_and_also_counted() -> None:
+    """Stamping ``False`` alone is how an unresolved parent disguises itself.
+
+    A broken join and a genuinely held-out parent produce the *identical* stamp
+    and the identical ``n_parent_out_of_training_fold`` — asserted here on both
+    arms — so only ``n_unresolved_parent`` tells them apart, which is why the gate
+    reads that number and this test asserts both halves.
+    """
+    unresolved = [_win("in"), _win("ghost")]
+    ev_unresolved = mining_pool.stamp_parent_folds(unresolved, {"in": True})
+    out_of_fold = [_win("in"), _win("out")]
+    ev_out = mining_pool.stamp_parent_folds(out_of_fold, {"in": True, "out": False})
+
+    assert unresolved[1][mining_pool.PARENT_FOLD_COL] is False
+    assert out_of_fold[1][mining_pool.PARENT_FOLD_COL] is False
+    assert ev_unresolved["n_parent_out_of_training_fold"] == 1
+    assert ev_out["n_parent_out_of_training_fold"] == 1  # indistinguishable on this number
+    assert ev_unresolved["n_unresolved_parent"] == 1
+    assert ev_out["n_unresolved_parent"] == 0
+
+
+def test_an_empty_fold_map_makes_every_parent_unresolved_not_out_of_fold() -> None:
+    """The Git-LFS-pointer shape: zero corpus keys must not read as "nothing leaked".
+
+    ``load_parent_folds`` raises on a pointer, but an empty map can also arrive
+    from a wrong ``--split-table`` or a source filter that matched no rows; the
+    gate has to fail on it rather than report a perfectly clean filter.
+    """
+    records = [_win("a"), _win("b")]
+    evidence = mining_pool.stamp_parent_folds(records, {})
+    assert evidence["n_unresolved_parent"] == 2
+    assert evidence["n_natural_windows_admissible"] == 0
+    assert evidence["n_split_table_corpus_records"] == 0
+    gate = mining_pool.control_gate(_summary(), n_controls_requested=10, fold_summary=evidence)
+    assert gate["clauses"]["every_window_parent_resolved"] is False
+    assert gate["clauses"]["parent_fold_admits_windows"] is False
+
+
+def test_the_admissible_count_excludes_the_designed_controls() -> None:
+    """A control window *is* a known T-box locus; it is substrate for the mask, not for injection.
+
+    Counting it admissible would report injectable negative material that must
+    never be injected. The fixture keeps the two numbers unequal (3 in-fold vs 2
+    admissible) so a clause that echoed ``n_parent_in_training_fold`` fails.
+    """
+    records = [
+        _win("in"),
+        _win("in", control=True),
+        _win("in2"),
+        _win("out"),
+        _win("out", control=True),
+    ]
+    evidence = mining_pool.stamp_parent_folds(records, {"in": True, "in2": True, "out": False})
+    assert evidence["n_parent_in_training_fold"] == 3
+    assert evidence["n_natural_windows_admissible"] == 2
+
+
+@pytest.mark.parametrize(
+    "records",
+    [
+        [],
+        [_win("in")],
+        [_win("in"), _win("out"), _win("ghost")],
+        [_win("in"), _win("in", control=True), _win("out"), _win("ghost", control=True)],
+    ],
+)
+def test_the_fold_counts_partition_the_pool(records: list) -> None:
+    """in + out == n_records, always — otherwise ``parent_fold_stamped`` grades a hole.
+
+    The gate's partition-identity clause compares ``n_records`` against the mask
+    summary; if the two fold counts did not themselves sum to it, a window could
+    be stamped and yet appear in neither leg.
+    """
+    evidence = mining_pool.stamp_parent_folds(records, {"in": True, "out": False})
+    assert evidence["n_records"] == len(records)
+    assert (
+        evidence["n_parent_in_training_fold"] + evidence["n_parent_out_of_training_fold"]
+        == evidence["n_records"]
+    )
+    assert evidence["n_unresolved_parent"] <= evidence["n_parent_out_of_training_fold"]
+    assert evidence["n_natural_windows_admissible"] <= evidence["n_parent_in_training_fold"]
+
+
+def test_the_evidence_separates_the_pool_denominator_from_the_join_denominator() -> None:
+    """``n_distinct_parents`` counts the pool's parents; the other count is the table's.
+
+    Reporting one for the other makes a join that resolved a handful of records
+    look like it addressed the whole corpus.
+    """
+    records = [_win("in"), _win("in", control=True), _win("out")]
+    evidence = mining_pool.stamp_parent_folds(
+        records, {"in": True, "out": False, "never_carved": True}
+    )
+    assert evidence["n_records"] == 3
+    assert evidence["n_distinct_parents"] == 2
+    assert evidence["n_split_table_corpus_records"] == 3
+
+
+def test_an_empty_pool_yields_a_fold_block_that_cannot_pass_the_gate() -> None:
+    """Zero windows must not satisfy the fold clauses by ``0 == 0``."""
+    evidence = mining_pool.stamp_parent_folds([], {"in": True})
+    assert evidence["n_records"] == 0
+    assert evidence["n_unresolved_parent"] == 0  # vacuously clean …
+    gate = mining_pool.control_gate(_summary(), n_controls_requested=10, fold_summary=evidence)
+    assert gate["clauses"]["every_window_parent_resolved"] is False  # … but not TRUE
+    assert gate["overall_pass"] is False
+
+
+# --------------------------------------------------------------------------- #
+# The four parent-fold gate clauses
+# --------------------------------------------------------------------------- #
+#: The clauses P2-10d′-a adds to ``control_gate``.
+_FOLD_CLAUSES = [
+    "parent_fold_stamped",
+    "every_window_parent_resolved",
+    "parent_fold_admits_windows",
+    "parent_fold_discriminates",
+]
+
+
+def test_a_healthy_fold_block_passes_all_four_new_clauses() -> None:
+    """The must-pass leg: without it every FALSE case below could be FALSE for free."""
+    gate = _gate()
+    assert gate["overall_pass"] is True
+    assert [gate["clauses"][name] for name in _FOLD_CLAUSES] == [True, True, True, True]
+    assert gate["parent_fold"] == _fold()
+
+
+@pytest.mark.parametrize("clause", _FOLD_CLAUSES)
+@pytest.mark.parametrize("absent", [None, {}, {"n_records": 0}])
+def test_each_fold_clause_is_false_when_the_evidence_is_absent(clause: str, absent) -> None:
+    """Absent evidence is FALSE, never vacuously TRUE (CLAUDE.md §7 / the clause-guard rule).
+
+    ``fold_summary=None`` is what a builder that never ran the stamp passes, and
+    ``{}`` / ``n_records == 0`` are what one that ran it over an empty pool passes.
+    A clause derived from the *requested* configuration would be TRUE in exactly
+    these three cases.
+    """
+    gate = _gate(fold_summary=absent)
+    assert gate["clauses"][clause] is False
+    assert gate["overall_pass"] is False
+
+
+@pytest.mark.parametrize(
+    ("clause", "key"),
+    [
+        ("every_window_parent_resolved", "n_unresolved_parent"),
+        ("parent_fold_admits_windows", "n_natural_windows_admissible"),
+        ("parent_fold_discriminates", "n_parent_out_of_training_fold"),
+    ],
+)
+def test_a_fold_clause_is_false_when_its_own_number_is_missing(clause: str, key: str) -> None:
+    """A present-but-incomplete block must fail the clause that reads the missing key.
+
+    This is the shape a schema drift takes: the block arrives, ``n_records`` is
+    healthy so the evidence looks found, and one key silently defaults.
+    """
+    fold = _fold()
+    del fold[key]
+    gate = _gate(fold_summary=fold)
+    assert gate["clauses"][clause] is False
+    assert gate["overall_pass"] is False
+
+
+def test_dropping_n_records_falsifies_every_fold_clause() -> None:
+    """``n_records`` is the have-evidence guard, so its absence must fail all four."""
+    fold = _fold()
+    del fold["n_records"]
+    gate = _gate(fold_summary=fold)
+    assert [gate["clauses"][name] for name in _FOLD_CLAUSES] == [False, False, False, False]
+
+
+def test_a_join_that_finds_no_out_of_fold_parent_fails_rather_than_reading_clean() -> None:
+    """Zero out-of-fold parents is a broken join, not a clean corpus.
+
+    Windows are carved beside *every* anchored corpus record, and the corpus holds
+    15,232 anchored non-``nested_train`` records against 8,303 in-fold ones, so a
+    real build cannot find zero of them. Zero means the join matched on the wrong
+    namespace and stamped every window from one side — the failure a "0 leaked"
+    clause on its own reads as success ([[namespace-mismatch-invisible-noop]]).
+    The other three clauses are asserted TRUE here so this one is the sole cause.
+    """
+    gate = _gate(
+        fold_summary=_fold(
+            n_parent_in_training_fold=_N_POOL_RECORDS, n_parent_out_of_training_fold=0
+        )
+    )
+    assert gate["clauses"]["parent_fold_discriminates"] is False
+    assert gate["clauses"]["parent_fold_stamped"] is True
+    assert gate["clauses"]["every_window_parent_resolved"] is True
+    assert gate["clauses"]["parent_fold_admits_windows"] is True
+    assert gate["overall_pass"] is False
+
+
+def test_a_filter_that_admits_no_window_fails_rather_than_shipping_an_empty_pool() -> None:
+    """The opposite failure: the join resolves but the filter removes everything.
+
+    A pool with zero admissible natural windows injects nothing, which is not a
+    pass — it is the P2-10d "substrate that does not exist" outcome again.
+    """
+    gate = _gate(fold_summary=_fold(n_natural_windows_admissible=0))
+    assert gate["clauses"]["parent_fold_admits_windows"] is False
+    assert gate["clauses"]["parent_fold_discriminates"] is True
+    assert gate["overall_pass"] is False
+
+
+@pytest.mark.parametrize("n_unresolved", [1, 40, _N_POOL_RECORDS])
+def test_a_single_unresolved_parent_fails_the_gate(n_unresolved: int) -> None:
+    """One broken join is enough: an unresolved parent is stamped ``False`` and so
+    silently joins the out-of-fold pile, where nothing downstream can find it."""
+    gate = _gate(fold_summary=_fold(n_unresolved_parent=n_unresolved))
+    assert gate["clauses"]["every_window_parent_resolved"] is False
+    assert gate["overall_pass"] is False
+
+
+@pytest.mark.parametrize("n_fold_records", [_N_POOL_RECORDS - 1, _N_POOL_RECORDS + 1, 100, 10, 1])
+def test_the_fold_block_must_cover_exactly_the_masked_partition(n_fold_records: int) -> None:
+    """Partition identity: the stamp must have seen every window the mask graded.
+
+    ``_N_POOL_RECORDS - 1`` is the case that matters — a block short by a single
+    window is a stamp that ran on a *subset*, so one record reaches the artifact
+    with no ``parent_nested_train`` while the report's fold numbers still look
+    plausible against the pool size.
+    """
+    gate = _gate(fold_summary=_fold(n_records=n_fold_records))
+    assert gate["clauses"]["parent_fold_stamped"] is False
+    assert gate["overall_pass"] is False
+
+
+def test_the_partition_identity_also_fails_when_the_mask_partition_moves() -> None:
+    """Symmetry: the same clause must catch a mask summary that grew past the stamp.
+
+    Pinning only the fold side would let a re-mask that added windows after the
+    stamp pass, which is the same hole from the other direction.
+    """
+    gate = _gate(natural={"n_records": _N_POOL_RECORDS, "n_masked_at_flank": 1})
+    assert gate["clauses"]["parent_fold_stamped"] is False
+    assert gate["overall_pass"] is False
+
+
+# ═════════════════════════════════════════════════════════════════════════════════════
+# CodeRabbit r1 — the two denominators, and a null fold that is not a False fold
+# ═════════════════════════════════════════════════════════════════════════════════════
+def test_the_natural_counts_are_scoped_to_the_natural_partition() -> None:
+    """The evidence reports both denominators, so no reader has to subtract one.
+
+    ``n_parent_out_of_training_fold`` spans the whole pool (controls included);
+    ``n_natural_windows_admissible`` does not. Pairing them — as the build's stderr
+    line first did — describes fewer windows than the pool contains. The natural
+    triple below closes under addition on its own, which is the property that makes
+    it safe to quote beside the admissible count.
+    """
+
+    def w(parent: str, *, control: bool) -> dict:
+        return _window(source_record_id=parent, is_designed_control=control)
+
+    records = [
+        w("p_in_1", control=False),
+        w("p_in_2", control=False),
+        w("p_out", control=False),
+        w("p_in_1", control=True),
+        w("p_out", control=True),
+    ]
+    fold = mining_pool.stamp_parent_folds(records, {"p_in_1": True, "p_in_2": True, "p_out": False})
+    assert fold["n_natural_windows"] == 3
+    assert fold["n_natural_windows_admissible"] == 2
+    assert fold["n_natural_windows_out_of_fold"] == 1
+    assert (
+        fold["n_natural_windows_admissible"] + fold["n_natural_windows_out_of_fold"]
+        == fold["n_natural_windows"]
+    )
+    # …and the whole-pool counts are genuinely a *different* denominator, so the test
+    # would still pass if the two were accidentally made equal.
+    assert fold["n_parent_in_training_fold"] == 3 != fold["n_natural_windows_admissible"]
+    assert fold["n_records"] == 5 != fold["n_natural_windows"]
+
+
+def test_a_null_nested_train_is_refused_rather_than_read_as_out_of_fold(tmp_path) -> None:
+    """``bool(None)`` is ``False``, and "never assigned" is not "out of fold".
+
+    One layer above, ``stamp_parent_folds`` keeps ``n_unresolved_parent`` apart from
+    the out-of-fold count for exactly this reason. A null surviving the split-table
+    read would make that separation unenforceable, and there is no counter at this
+    layer to notice it — so the loader raises.
+    """
+    pd = pytest.importorskip("pandas")
+    pytest.importorskip("pyarrow")
+    table = tmp_path / "split.parquet"
+    pd.DataFrame(
+        {
+            "record_id": ["a", "b", "c"],
+            "nested_train": [True, None, False],
+            "source": ["corpus", "corpus", "corpus"],
+        }
+    ).to_parquet(table)
+    with pytest.raises(mining_pool.MiningPoolError, match="null 'nested_train'"):
+        mining_pool.load_parent_folds(table)
+
+
+def test_a_null_nested_train_outside_the_corpus_is_not_the_loaders_problem(tmp_path) -> None:
+    """The must-not-fire companion: only ``source == "corpus"`` rows are in scope.
+
+    Externals and synthetic class-II variants live in other id namespaces and are
+    dropped before the null check, so a null there is none of this function's
+    business. Without this test the raise above could be over-broad and nothing
+    would say so.
+    """
+    pd = pytest.importorskip("pandas")
+    pytest.importorskip("pyarrow")
+    table = tmp_path / "split.parquet"
+    pd.DataFrame(
+        {
+            "record_id": ["a", "ext"],
+            "nested_train": [True, None],
+            "source": ["corpus", "anchor"],
+        }
+    ).to_parquet(table)
+    assert mining_pool.load_parent_folds(table) == {"a": True}

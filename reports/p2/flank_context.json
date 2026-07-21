@@ -1,21 +1,23 @@
 {
   "anchor_rate": 0.9998725302740599,
   "coordinates_trusted": false,
-  "digest": "a2bad3699c3222f5a03decde780c5dbac32acc296b65509704dc3ff19f1f501a",
-  "fetch_error_sample": [],
+  "digest": "44195c711ffedd9e24fc5ee6a6992eed71c82e7b66e5c219009ff055f5744c70",
+  "fetch_error_sample": [
+    "HTTPError: HTTP Error 400: Bad Request"
+  ],
   "flank_nt": {
     "lead_min": 0,
-    "lead_p50": 1024,
+    "lead_p50": 1074,
     "trail_min": 0,
-    "trail_p50": 1024
+    "trail_p50": 1074
   },
   "is_science": false,
   "n_anchored": 23532,
-  "n_clipped_end": 704,
-  "n_clipped_start": 841,
+  "n_clipped_end": 720,
+  "n_clipped_start": 856,
   "n_full_window_capable": 23253,
   "n_records": 23535,
-  "pad_nt": 1024,
+  "pad_nt": 1074,
   "per_source_status": {
     "Marks_fulltbox.fa": {
       "bad_name": 0,
@@ -84,7 +86,7 @@
   },
   "schema_version": "1.0",
   "source": {
-    "accessed": "2026-07-16",
+    "accessed": "2026-07-20",
     "base_url": "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/",
     "db": "nuccore",
     "rettype": "fasta",
