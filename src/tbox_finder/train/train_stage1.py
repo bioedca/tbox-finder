@@ -53,7 +53,7 @@ import os
 import subprocess
 import time
 from collections.abc import Iterator, Mapping, Sequence
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from datetime import UTC, datetime
 from itertools import islice
 from pathlib import Path
@@ -86,6 +86,11 @@ GENERATED_BY = "src/tbox_finder/train/train_stage1.py"
 ADR = "ADR-0002"
 ENV_LOCK = "envs/ml-dna.conda-lock.yml"
 CONFIG_PATH = "conf/train/stage1.yaml"
+
+#: How many mined windows are held as donor DNA for the junction-symmetric splice.
+#: A cap, not a sample of everything: the donors are encoded once and kept resident, and
+#: a few thousand real windows already exceed the patch diversity a 550-nt insert needs.
+SYMMETRIC_DONOR_CAP = 2000
 
 DEFAULT_REPORT = "reports/p2/train_stage1_smoke.json"
 DEFAULT_CHECKPOINT_DIR = "checkpoints/p2/stage1"
@@ -234,6 +239,13 @@ class Stage1TrainConfig:
     negative_fraction: float = 0.0
     #: Cap the negative pool (the smoke needs a stream that composes in seconds).
     negative_max_records: int | None = None
+    #: The §9.1 decoy parquet (`decoys_v0.parquet`). When set, each admitted decoy of a
+    #: pool ADR-0005 A7 pin 3 embeds (`dinuc_shuffled`, `structured_rna`) is spliced at a
+    #: random phase into one admitted mined window and appended to the negative arm — the
+    #: user's R2 reading of §9.1 at W=1024, where every decoy record is 57–550 nt and
+    #: `background_record` refuses a length mismatch. None ⇒ mined windows only, which is
+    #: a §9.1 *training-ratio* shortfall on three of the four classes, not a smaller run.
+    negative_decoy_parquet: str | None = None
 
     # ── Warm start (P2-10d; ADR-0005 D14's iterative mining rounds) ────────────────
     #: Parent checkpoint to initialise from — a bare `state_dict` as written by this
@@ -309,6 +321,16 @@ class Stage1TrainConfig:
                 "negative_pool_parquet is set but negative_fraction is 0: the pool would be "
                 "loaded and recorded in the report while contributing zero draws — a mix the "
                 "report describes and the run never trained on."
+            )
+        if self.negative_decoy_parquet and not self.negative_pool_parquet:
+            raise ValueError(
+                "negative_decoy_parquet is set but negative_pool_parquet is not. A decoy is "
+                "embedded INTO an admitted mined host window, so with no pool there are no "
+                "hosts: `build_stream`'s decoy branch is nested inside the pool branch and "
+                "would never run. The result would be a positives-only stream reporting "
+                "`negative_embedding: null` — the §9.1 shortfall this step exists to repair, "
+                "reintroduced silently one config key down. Set the pool, or unset the decoy "
+                "parquet."
             )
         if self.eval_at_step0 and not self.eval_val:
             raise ValueError(
@@ -1904,14 +1926,19 @@ def build_stream(cfg: Stage1TrainConfig) -> tuple[Any, Any, dict[str, Any]]:
     # the mix knows the boundary is exactly `n_positive`.
     negative_records: list[Any] = []
     negative_report: dict[str, Any] | None = None
+    embedding_report: dict[str, Any] | None = None
     if cfg.negative_pool_parquet:
-        from tbox_finder.data.negatives import load_negative_records
+        from tbox_finder.data.negatives import (
+            load_admitted_pool_rows,
+            records_from_admitted_rows,
+        )
 
-        negative_records, negative_report = load_negative_records(
+        host_rows, negative_report = load_admitted_pool_rows(
             cfg.negative_pool_parquet,
             window=cfg.window_nt,
             max_records=cfg.negative_max_records,
         )
+        negative_records = records_from_admitted_rows(host_rows, window=cfg.window_nt)
         if not negative_records:
             raise ValueError(
                 f"negative pool {cfg.negative_pool_parquet} supplied 0 injectable negatives "
@@ -1919,9 +1946,69 @@ def build_stream(cfg: Stage1TrainConfig) -> tuple[Any, Any, dict[str, Any]]:
                 "Refusing to train a positives-only run that reports a negative mix — an "
                 "empty pool is a substrate problem, not a smaller run."
             )
+        # ── The §9.1 decoy embedding (P2-10d′-b; ADR-0005 A7, user's R2 reading) ──────
+        # Appended AFTER the plain mined arm and continuing its negative-cluster
+        # ordinals, so the two arms share one namespace and the pooled draw is uniform
+        # over both — which is exactly what makes the per-class shares pool-proportional
+        # (A7 pin 3) with no per-class weight knob anywhere.
+        if cfg.negative_decoy_parquet:
+            from tbox_finder.data.embedding import (
+                embed_decoy_rows,
+                embedded_negative_records,
+                load_decoy_rows,
+            )
+
+            decoy_rows = load_decoy_rows(cfg.negative_decoy_parquet)
+            # The decoy's OWN §9.2 provenance, not just the host's. `dinuc_shuffled`
+            # records are permutations of corpus positives drawn from all 23,535 records,
+            # and 1,298 of 2,000 have a parent outside the training fold; `records` here
+            # IS the training fold, so its ids are the authoritative admission set.
+            embedded, embedding_report = embed_decoy_rows(
+                decoy_rows,
+                host_rows,
+                seed=cfg.seed,
+                window=cfg.window_nt,
+                training_fold_record_ids={str(r.record_id) for r in records},
+            )
+            if not embedded:
+                raise ValueError(
+                    f"decoy pool {cfg.negative_decoy_parquet} supplied 0 embeddable decoys: "
+                    f"{embedding_report['excluded_by_reason']}. A run that reports a §9.1 "
+                    "four-class mix while embedding none of them is the P2-09 shortfall "
+                    "again, one layer down."
+                )
+            negative_records.extend(
+                embedded_negative_records(
+                    embedded,
+                    cluster_id_start=len(negative_records),
+                    window=cfg.window_nt,
+                )
+            )
 
     n_positive = len(records)
-    dataset = Stage1WindowDataset([*records, *negative_records], config=data_config)
+    # ── Junction-symmetric splicing (ADR-0005 A7 pin 7, amended 2026-07-21) ───────────
+    # The rate is DERIVED, never configured: it is the fraction of the negative arm that
+    # is chimeric, so P(chimeric | positive) == P(chimeric | negative) by construction and
+    # "this window has a splice junction" carries no class information. Measured before
+    # the amendment, a 6-mer probe read the junction at ~0.525 AUROC across four
+    # independent draws — small, reproducible, and class-correlated because only
+    # negatives were spliced.
+    symmetric_rate = 0.0
+    symmetric_lengths: tuple[int, ...] = ()
+    symmetric_donors: list[str] = []
+    if embedding_report and negative_records:
+        n_chimeric = int(embedding_report.get("n_embedded", 0))
+        symmetric_rate = n_chimeric / len(negative_records)
+        symmetric_lengths = tuple(int(w.insert_len) for w in embedded)
+        symmetric_donors = [str(r["sequence"]) for r in host_rows[:SYMMETRIC_DONOR_CAP]]
+        data_config = replace(
+            data_config,
+            junction_symmetric_rate=symmetric_rate,
+            junction_symmetric_lengths=symmetric_lengths,
+        )
+    dataset = Stage1WindowDataset(
+        [*records, *negative_records], config=data_config, symmetric_donors=symmetric_donors
+    )
     # The mixer is used even at `negative_fraction == 0`, where it draws zero negatives and
     # its emitted stream is bit-identical to the bare WeightedIndexSampler's (asserted in
     # tests/unit/test_negatives.py). Always routing through it is what makes the mix block
@@ -1972,6 +2059,24 @@ def build_stream(cfg: Stage1TrainConfig) -> tuple[Any, Any, dict[str, Any]]:
         "n_negative_records": len(negative_records),
         "class_counts_include_negatives": bool(negative_records),
         "negative_pool": negative_report,
+        # P2-10d′-b: the §9.1 embedding's own report — per-pool embedded counts, the
+        # A7-excluded pools with their reasons, and every refusal. Present as `None` on a
+        # mined-only run rather than absent, so "no embedding ran" and "the embedding
+        # block was dropped from the report" are distinguishable.
+        "negative_embedding": embedding_report,
+        # The junction-symmetric augmentation, recorded as the DERIVED quantity it is —
+        # rate, the negative chimeric count it came from, and the donor/length pool sizes
+        # — so a reader can re-derive `n_embedded / n_negative_records` rather than trust
+        # a configured number that no artifact checks.
+        "junction_symmetric": {
+            "rate": float(symmetric_rate),
+            "n_chimeric_negatives": (
+                int(embedding_report.get("n_embedded", 0)) if embedding_report else 0
+            ),
+            "n_negative_records": len(negative_records),
+            "n_donors": len(symmetric_donors),
+            "n_insert_lengths": len(symmetric_lengths),
+        },
         "data_config": asdict(data_config),
     }
     return dataset, sampler, scope

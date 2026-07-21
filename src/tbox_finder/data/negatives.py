@@ -285,40 +285,32 @@ def is_negative_record(record: CorpusRecord) -> bool:
     return int(record.cluster_id) < 0
 
 
-def negative_records_from_rows(
+def admit_pool_rows(
     rows: Iterable[Mapping[str, Any]],
     *,
     window: int = WINDOW_NT,
-    id_prefix: str = NEGATIVE_ID_PREFIX,
     skip_masked: bool = True,
     skip_designed_controls: bool = True,
     require_parent_nested_train: bool = True,
     max_records: int | None = None,
-) -> tuple[list[CorpusRecord], dict[str, Any]]:
-    """Turn mined-pool rows into negatives, counting every refusal by reason.
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Apply the §9.1 / D14 / §9.2 admission rules and return the surviving **rows**.
 
-    Returns ``(records, report)``. The report's ``excluded_by_reason`` is the whole point:
-    a pool whose windows are the wrong width yields **zero** records and a report that
-    names the width, rather than a training run that silently shrinks.
+    Split out of :func:`negative_records_from_rows` at P2-10d′-b so the decoy embedding
+    (`data/embedding.py`) draws its host windows through **this** filter rather than a
+    second copy of it. A forked admission rule would mean fixing one and shipping the bug
+    in the other ([[promote-dont-duplicate-is-a-correctness-rule]]) — and the bug in
+    question would be an embedded negative whose host DNA came from a held-out clade,
+    which the CI §8.2 gate cannot see.
 
-    ``skip_masked`` drops rows the union-prior locus mask flagged (ADR-0005 D14's first
-    guard); ``skip_designed_controls`` drops P2-10b's locus-centred control windows, which
-    overlap a known T-box **by construction** and exist to prove the mask fires — training
-    on them would be label poisoning of the most direct kind. Both default on and both are
-    counted, so a pool loaded with either disabled says so in its own report.
-
-    ``require_parent_nested_train`` (P2-10d′-a) is the §9.2 admission rule: a window is
-    injectable **iff the corpus record it was carved beside is in ``nested_train``** —
-    symmetry with the positives, which `load_corpus_records(training_fold_only=True)`
-    already enforces and which negatives structurally bypassed. Measured on the P2-10b
-    pool, 37.1 % of natural windows were carved beside a designated leave-one-order-out
-    holdout locus. Weaker rules were considered and rejected: ``excluded_clade_crossing``
-    and ``dropped`` parents are withheld *because* their clade membership is unsafe, so
-    readmitting their DNA under a negative label readmits the taxon.
+    Returned rows carry the **normalised** ``candidate_id`` / ``sequence`` /
+    ``source_record_id`` (stripped, upper-cased), so every consumer sees the same bytes
+    the record builder does.
     """
+
     if window <= 0:
         raise NegativeInjectionError(f"window must be positive; got {window}")
-    records: list[CorpusRecord] = []
+    admitted: list[dict[str, Any]] = []
     excluded: dict[str, int] = {}
     lengths: dict[int, int] = {}
     n_rows = 0
@@ -368,7 +360,7 @@ def negative_records_from_rows(
         # BEFORE the append, not after: a post-append break emits one record for
         # `max_records=0`, so the report's `max_records: 0` would sit next to a pool of
         # size 1. A cap is a ceiling on what is built, not on what is built next.
-        if max_records is not None and len(records) >= max_records:
+        if max_records is not None and len(admitted) >= max_records:
             break
         if cid in seen_ids:
             raise NegativeInjectionError(
@@ -377,22 +369,18 @@ def negative_records_from_rows(
                 "that does not exist"
             )
         seen_ids.add(cid)
-        records.append(
-            background_record(
-                record_id=f"{id_prefix}:{cid}",
-                sequence=seq,
-                cluster_id=NEGATIVE_CLUSTER_SIGN * (len(records) + 1),
-                source_record_id=parent,
-                window=window,
-            )
-        )
+        row_out = dict(row)
+        row_out[CANDIDATE_ID_COL] = cid
+        row_out[SEQUENCE_COL] = seq
+        row_out[SOURCE_RECORD_ID_COL] = parent
+        admitted.append(row_out)
 
     report = {
         "schema_version": SCHEMA_VERSION,
         "step": STEP,
         "window_nt": int(window),
         "n_rows_read": int(n_rows),
-        "n_records": len(records),
+        "n_records": len(admitted),
         "excluded_by_reason": dict(sorted(excluded.items())),
         "n_excluded": int(sum(excluded.values())),
         "skip_masked": bool(skip_masked),
@@ -410,10 +398,76 @@ def negative_records_from_rows(
         "sequence_length_counts": {str(k): int(v) for k, v in sorted(lengths.items())},
         "n_rows_at_window_length": int(lengths.get(window, 0)),
     }
-    return records, report
+    return admitted, report
 
 
-def load_negative_records(
+def records_from_admitted_rows(
+    rows: Sequence[Mapping[str, Any]],
+    *,
+    window: int = WINDOW_NT,
+    id_prefix: str = NEGATIVE_ID_PREFIX,
+    cluster_id_start: int = 0,
+) -> list[CorpusRecord]:
+    """Build all-background records from rows :func:`admit_pool_rows` has already cleared.
+
+    ``cluster_id_start`` lets a second negative arm (the P2-10d′-b decoy embedding)
+    continue this arm's negative-cluster ordinals instead of colliding with them.
+    """
+    return [
+        background_record(
+            record_id=f"{id_prefix}:{row[CANDIDATE_ID_COL]}",
+            sequence=str(row[SEQUENCE_COL]),
+            cluster_id=NEGATIVE_CLUSTER_SIGN * (cluster_id_start + i + 1),
+            source_record_id=str(row[SOURCE_RECORD_ID_COL]),
+            window=window,
+        )
+        for i, row in enumerate(rows)
+    ]
+
+
+def negative_records_from_rows(
+    rows: Iterable[Mapping[str, Any]],
+    *,
+    window: int = WINDOW_NT,
+    id_prefix: str = NEGATIVE_ID_PREFIX,
+    skip_masked: bool = True,
+    skip_designed_controls: bool = True,
+    require_parent_nested_train: bool = True,
+    max_records: int | None = None,
+) -> tuple[list[CorpusRecord], dict[str, Any]]:
+    """Turn mined-pool rows into negatives, counting every refusal by reason.
+
+    Returns ``(records, report)``. The report's ``excluded_by_reason`` is the whole point:
+    a pool whose windows are the wrong width yields **zero** records and a report that
+    names the width, rather than a training run that silently shrinks.
+
+    ``skip_masked`` drops rows the union-prior locus mask flagged (ADR-0005 D14's first
+    guard); ``skip_designed_controls`` drops P2-10b's locus-centred control windows, which
+    overlap a known T-box **by construction** and exist to prove the mask fires — training
+    on them would be label poisoning of the most direct kind. Both default on and both are
+    counted, so a pool loaded with either disabled says so in its own report.
+
+    ``require_parent_nested_train`` (P2-10d′-a) is the §9.2 admission rule: a window is
+    injectable **iff the corpus record it was carved beside is in ``nested_train``** —
+    symmetry with the positives, which `load_corpus_records(training_fold_only=True)`
+    already enforces and which negatives structurally bypassed. Measured on the P2-10b
+    pool, 37.1 % of natural windows were carved beside a designated leave-one-order-out
+    holdout locus. Weaker rules were considered and rejected: ``excluded_clade_crossing``
+    and ``dropped`` parents are withheld *because* their clade membership is unsafe, so
+    readmitting their DNA under a negative label readmits the taxon.
+    """
+    admitted, report = admit_pool_rows(
+        rows,
+        window=window,
+        skip_masked=skip_masked,
+        skip_designed_controls=skip_designed_controls,
+        require_parent_nested_train=require_parent_nested_train,
+        max_records=max_records,
+    )
+    return records_from_admitted_rows(admitted, window=window, id_prefix=id_prefix), report
+
+
+def load_admitted_pool_rows(
     parquet_path: str | Path,
     *,
     window: int = WINDOW_NT,
@@ -421,8 +475,8 @@ def load_negative_records(
     skip_masked: bool = True,
     skip_designed_controls: bool = True,
     require_parent_nested_train: bool = True,
-) -> tuple[list[CorpusRecord], dict[str, Any]]:
-    """Read a mined-negative parquet and build the negative records it can honestly supply.
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Read a mined-negative parquet and return the rows that clear every admission rule.
 
     The pool schema is `mining/pool.py`'s: ``candidate_id``, ``sequence``, ``masked``,
     ``is_designed_control``, ``source_record_id``, ``parent_nested_train`` (extra columns
@@ -463,7 +517,7 @@ def load_negative_records(
             "put held-out genomic context into the training stream under a negative label, "
             "which the CI §8.2 no-leakage gate cannot see."
         )
-    records, report = negative_records_from_rows(
+    rows, report = admit_pool_rows(
         frame.to_dict("records"),
         window=window,
         max_records=max_records,
@@ -477,7 +531,33 @@ def load_negative_records(
         if POOL_COL in frame.columns
         else {}
     )
-    return records, report
+    return rows, report
+
+
+def load_negative_records(
+    parquet_path: str | Path,
+    *,
+    window: int = WINDOW_NT,
+    max_records: int | None = None,
+    skip_masked: bool = True,
+    skip_designed_controls: bool = True,
+    require_parent_nested_train: bool = True,
+) -> tuple[list[CorpusRecord], dict[str, Any]]:
+    """Read a mined-negative parquet and build the negative records it can honestly supply.
+
+    A thin composition of :func:`load_admitted_pool_rows` and
+    :func:`records_from_admitted_rows` — the two consumers (the plain negative arm and the
+    P2-10d′-b embedding's host pool) share one admission implementation.
+    """
+    rows, report = load_admitted_pool_rows(
+        parquet_path,
+        window=window,
+        max_records=max_records,
+        skip_masked=skip_masked,
+        skip_designed_controls=skip_designed_controls,
+        require_parent_nested_train=require_parent_nested_train,
+    )
+    return records_from_admitted_rows(rows, window=window), report
 
 
 # ═════════════════════════════════════════════════════════════════════════════════════

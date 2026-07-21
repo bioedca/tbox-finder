@@ -1283,3 +1283,110 @@ layer *below* the `n_unresolved_parent` counter that exists to keep them apart �
 must-not-fire companion proving non-corpus rows stay out of scope. (d) A stale comment claiming the
 `max_records` report key was still missing (it had been restored). Suite **2,110 / 179**, ruff/black/lint
 clean.
+
+## Step P2-10d′-b — 2026-07-21: the §9.1 seed-negative construction (R2 embedding + its matched junction control)
+
+**Inputs.** P2-10d′-a's re-carved pool (`mining_pool_v0.parquet`, 45,988 windows @ 1,024 nt, 15,708
+injectable) · `decoys_v0.parquet` (7,008 records, 4 classes, 57–550 nt) · `master_clean_v0.parquet` ·
+`conf/train/stage1.yaml` · `slurm/p2/train_production.sbatch`.
+
+**Process.** The step's Stop was the **ADR-0005 A7** sign-off, so it opened by measuring the two things
+A7 could not be written without. First, whether the user's R2 embedding hands the model a junction cue:
+`workflow/rules/data.smk`'s `p2_flank_context` docstring has already ruled that "a 0th-order background
+splice would hand the model a trivially separable boundary cue", and R2 puts two junctions into
+**negatives only**. A k-mer logistic probe (5-fold CV AUROC, n = 2,500/arm, seed 20260721) put the
+background→background junction **on the measured null** — 0.487–0.494 at k=4 and 0.505–0.519 at k=6
+against a 0.493/0.520 unspliced-vs-unspliced null, and 0.487–0.510 for a 128-nt window centred on the
+junction itself. The earlier ruling was about a *0th-order synthetic* splice; real DNA spliced into real
+DNA leaves no compositional trace. Second, whether the residual separability (0.71–1.00 for every class)
+is host/insert GC mismatch: GC-matching the host cut mean |ΔGC| from 0.101 to **0.001** and separability
+**did not fall**, so a GC-matched-host pin would buy nothing and was **not** proposed. Third — verified
+directly against the corpus, not from a summary — **2 of the 8 `leader_decoy` records are exact
+substrings of training positives** (`neg_tbdb_-1baL_Tx` in 2 of 23,535 records, `neg_tbdb_GwZsgp7s` in 2),
+and the other 6 are T-box-derived too (`neg_anchor_6UFM`/`6UFG` are PDB class-II T-boxes by this repo's
+own fixture README). The four contested pins were then put to the user with these measurements attached
+and all four recommendations were signed off. Implementation: `data/embedding.py` (the equal-length
+splice, the seeded placement, the matched control, the A7 pool pins), `eval/junction_probe.py` (the
+two-tier gate), `scripts/measure_junction_control.py` (the shipped measurement), plus the training wiring
+— `negative_decoy_parquet` in the dataclass **and** in `conf/train/stage1.yaml` (a dataclass field alone
+is what killed job 669), and the sbatch's `negative_*` tokens with `--time` raised 01:00:00 → 05:00:00.
+`negatives.admit_pool_rows` was **promoted** out of `negative_records_from_rows` so the embedding's hosts
+pass the *same* §9.2 filter rather than a forked copy.
+
+**Outputs.** `src/tbox_finder/data/embedding.py` · `src/tbox_finder/eval/junction_probe.py` ·
+`scripts/measure_junction_control.py` · `reports/p2/junction_control.json` · `docs/decisions/ADR-0005 A7` ·
+`tests/unit/test_embedding.py` (27) · `tests/unit/test_embedding_generator.py` (12) ·
+`tests/unit/test_junction_probe.py` (34) · `tests/unit/test_negative_mix_composition.py` (14) ·
+`tests/ml/test_junction_gate.py` (5).
+
+**⚠ THE FIRST VALIDATION VERDICT IN THIS STANZA WAS WRONG — CORRECTED IN PLACE BELOW, ORIGINAL LEFT VISIBLE.**
+
+**Validation (SUPERSEDED — read the correction).** **PASS.** `reports/p2/junction_control.json` `overall_pass: true`, all 4 clauses true at
+**both** k over 4,999 embedded / 2,804 unspliced windows: k=4 null 0.5060 / junction **0.5179** / content
+0.7394; k=6 null 0.5115 / junction **0.5058** / content 0.7599 (SE_H0 0.0077). Realized composition
+15,708 plain + 4,999 embedded = **20,707** records (75.9 / 9.7 / 14.5 %), 2,008 decoys refused by A7
+pins 4–5. Mix identity re-derived against hand-written literals: 8,303 → **83,030** draws, stream 91,333.
+Suite **2,165 passed / 216 skipped**; ruff, black 25.11.0 and `snakemake --lint` clean.
+
+**Three measurement artifacts caught by their own guards, recorded because each would have produced a
+confident wrong number.** (a) The first probe shared host windows across arms; because every spliced
+window is the pair of its own unspliced counterpart, a CV classifier that memorised a host scored its
+pair in the opposite direction and **every junction AUROC came back below chance (0.25–0.45)**. Disjoint
+hosts per arm fixed it — and because matchedness *requires* shared hosts while the AUROC *forbids* them,
+`junction_measurement` now takes the control twice, in two named roles. (b) Hosts drawn with replacement
+put duplicate-host near-duplicates in the spliced arms and none in the plain arm; that asymmetry alone
+drove the fixture's junction arm to **0.70**. (c) The `plain`/`null_reference` overlap guard fired on the
+real pool: **102 byte-identical windows** exist under distinct `candidate_id`s. None of the three was a
+junction; all three would have read as one.
+
+**Decisions.** ADR-0005 **A7** (9 pins; user sign-off 2026-07-21) — f = 10/11 as a *stream* share;
+pool-proportional per-class shares with the mined `genomic_window` records serving §9.1's dominant class 1;
+`gc_background` and `leader_decoy` to share 0 (the latter re-scoping a **D14** clause); the two-tier
+junction gate with a threshold-free tier-2 rule ("the decoy must beat its own junction null"); cold
+round-0; class weights over the mixed stream. Compute pre-registered in A7 (≈18–21 GPU-h) rather than
+charged to ADR-0003 A2, which is a *sweep* bound. **The SLURM submit-ack is still open** — the training
+run has not been launched.
+
+**Commit.** <SHA — squash pending>
+
+
+> **Correction to the P2-10d′-b stanza (same day, before merge).** Two review findings and a
+> re-measurement changed both the construction and the verdict above. **(1) A leakage gap.** The
+> embedding filtered the *host* window's §9.2 fold but never the decoy's own: `dinuc_shuffled`
+> records are Altschul–Erikson permutations of corpus positives sampled from all 23,535 records,
+> and **1,298 of 2,000 (64.9 %)** have a parent outside `nested_train`. ADR-0005 A7 pin 6 claimed
+> embedded negatives' provenance "cannot be weaker than a plain negative's"; it was. Fixed as
+> **pin 6a** — a decoy carrying a `source_record_id` must have that parent in the training fold,
+> and an unsupplied fold set refuses the row as *unverifiable* rather than admitting it.
+> **(2) The junction claim was false, and the fix is what exposed it.** With the arms re-sized by
+> pin 6a (embedded 4,999 → 3,701, unspliced 2,804 → 4,102) the measurement gained power, and the
+> k=6 junction arm rose to **0.5328** against a null of 0.4947. Across **four independent draws**
+> it is **0.5217 / 0.5264 / 0.5281 / 0.5328** against nulls of 0.4947–0.5042 — above its null
+> every time. A splice junction is a chimera of two genomes and a 6-mer model can read it; the
+> original 0.5058 was the lucky draw. Because R2 spliced **only negatives**, that cue was
+> perfectly class-correlated.
+>
+> **What changed as a result (user decision 2026-07-21, "do 1").** The cue is now removed **by
+> construction** rather than bounded by measurement: positive windows receive the same
+> background→background splice, from the same insert-length distribution, at a rate *derived*
+> from the negative arm (**3,701 / 19,409 = 0.19069**), so P(chimeric | positive) equals
+> P(chimeric | negative). The splice overwrites only positions already background-labelled and
+> already real, equal-length, and draws from an RNG salted apart from the lead/strand stream — so
+> it moves no label, invents no DNA at a contig end, and re-phases no prior run. The failing
+> `junction_within_null_band` clause is **retained and reported** in
+> `reports/p2/junction_control.json` (flagged `junction_is_visible_at_k6: true`) rather than
+> quietly dropped; the gate that replaces it is arithmetic
+> (`junction_symmetry_clauses`: derived rate, zero moved labels, realized rates agree, and a
+> must-fire control that must FAIL with the augmentation disabled).
+>
+> **Corrected composition.** 15,708 plain + **3,701** embedded = **19,409** negative records
+> (80.9 / 15.5 / 3.6 %); refusals 2,008 by pins 4–5, **1,298 by pin 6a**, 1 masked.
+> **Corrected validation:** `overall_pass: true` on the *gated* clauses (`arms_are_matched`,
+> `probe_can_discriminate`) at both k, with `junction_within_null_band` recorded **false at k=6**
+> as the finding. Suite **2,203 passed / 216 skipped**. Sabotage-verified in both directions: an
+> inert augmentation reds 4 named tests, and letting the splice ignore the label reds the
+> DNA-under-labelled-positions assertion — which the label-equality check alone could **not**
+> see, since `labels` is a separate array and overwriting a Stem-II position leaves its label
+> intact over donor DNA.
+>
+> **Still open:** the SLURM submit-ack. No training run has been launched.

@@ -34,11 +34,15 @@
 # WHERE:   cluster `gpu` partition, EIGHT RTX A4000 (sm_86) on ONE node. env tbox-ml-dna
 #          (ADR-0002 A4). No --nodelist (never pin; `one` is often down, and cryosparc keeps
 #          both nodes fragmented — budget an open-ended queue wait).
-# INPUT:   the THREE corpus parquets, STAGED by rsync (the ml envs have no dvc; a checkout
-#          does not carry them). Stage them ONCE before submitting:
+# INPUT:   FIVE parquets, STAGED by rsync (the ml envs have no dvc; a checkout does not
+#          carry them). P2-10d′-b added the last two — the §9.1 seed-negative substrate —
+#          and they are assert_dvc_artifact-guarded below, so an unstaged one exits 2
+#          AFTER the queue wait. Stage them ALL once before submitting:
 #            rsync -avzP data/interim/flank_context/context_v0.parquet two:~/tbox-finder/data/interim/flank_context/
 #            rsync -avzP data/processed/labels/labels_v0.parquet        two:~/tbox-finder/data/processed/labels/
 #            rsync -avzP data/processed/splits/split_assignments.parquet two:~/tbox-finder/data/processed/splits/
+#            rsync -avzP data/processed/negatives/mining_pool_v0.parquet two:~/tbox-finder/data/processed/negatives/
+#            rsync -avzP data/processed/negatives/decoys_v0.parquet      two:~/tbox-finder/data/processed/negatives/
 #          ⚠️ split_assignments.parquet is git-LFS and THIS CLUSTER HAS NO git-lfs — a fresh
 #          checkout / `git reset --hard` leaves a 132-byte POINTER (non-empty, so `[ -s ]`
 #          passes it) that would train the wrong corpus. This body verifies every parquet
@@ -46,7 +50,7 @@
 #          on mismatch.
 # SUBMIT:  from the repo root so relative --output/--error resolve:
 #            ssh two 'bash -lc "cd ~/tbox-finder && git fetch origin && \
-#              git checkout p2-09-production-train && git reset --hard origin/p2-09-production-train && \
+#              git checkout p2-10dp-b && git reset --hard origin/p2-10dp-b && \
 #              sbatch slurm/p2/train_production.sbatch"'
 # PREFLIGHT: ssh two 'bash -lc "cd ~/tbox-finder && sbatch --test-only slurm/p2/train_production.sbatch"'
 # VERIFY (artifact-based; sacct off, §9.3): (a) `squeue -j <jobid>` empty, (b)
@@ -62,12 +66,12 @@
 #            rsync -avzP two:~/tbox-finder/data/processed/checkpoints/stage1_production/ <local>/data/processed/checkpoints/stage1_production/
 #            rsync -avzP two:~/tbox-finder/reports/p2/train_stage1_production.json <local>/reports/p2/
 
-#SBATCH --job-name=tbox-p2-09-production
+#SBATCH --job-name=tbox-p2-10dpb-production
 #SBATCH --partition=gpu
 #SBATCH --gres=gpu:a4000:8
 #SBATCH --cpus-per-task=16
 #SBATCH --mem=64G
-#SBATCH --time=01:00:00
+#SBATCH --time=05:00:00
 #SBATCH --output=reports/p2/train_production_%j.out
 #SBATCH --error=reports/p2/train_production_%j.err
 # No --account / --qos (accounting disabled), no --nodelist (never pin; `one` is often down).
@@ -171,6 +175,15 @@ assert_dvc_artifact data/interim/flank_context/context_v0.parquet \
 assert_dvc_artifact data/processed/labels/labels_v0.parquet \
                     data/processed/labels/labels_v0.parquet.dvc
 assert_lfs_artifact data/processed/splits/split_assignments.parquet
+# P2-10d′-b: the §9.1 seed-negative substrate. Both are DVC-tracked and must be rsync'd like
+# the corpus parquets. Asserted here so a missing one fails at staging rather than deep in
+# the run: a missing mining pool surfaces as "0 injectable negatives" and a missing decoy
+# pool as EmbeddingError("decoy pool not found") — different messages, both only AFTER the
+# queue wait.
+assert_dvc_artifact data/processed/negatives/mining_pool_v0.parquet \
+                    data/processed/negatives/mining_pool_v0.parquet.dvc
+assert_dvc_artifact data/processed/negatives/decoys_v0.parquet \
+                    data/processed/negatives/decoys_v0.parquet.dvc
 
 # ── Stale-output clear — ONLY now that the staged inputs are verified ─────────
 # Deferred to here (not at lock acquisition) so a failed staging check above cannot destroy
@@ -237,6 +250,10 @@ PYTHONHASHSEED=0 PYTHONPATH=src torchrun --standalone --nproc_per_node=8 \
   gamma=0.5 optim.lr=3e-4 class_weight_alpha=0.5 \
   epochs=10 batch_size=8 gradient_checkpointing=true \
   exclude_selection_val=false eval_val=false save_checkpoint=true \
+  negative_pool_parquet=data/processed/negatives/mining_pool_v0.parquet \
+  negative_decoy_parquet=data/processed/negatives/decoys_v0.parquet \
+  negative_fraction=0.9090909090909091 \
+  init_from_checkpoint=null \
   report_path="$REPORT" checkpoint_dir="$BUILD_CKPT" \
   tracking.mode=offline
 rc=$?
@@ -263,22 +280,39 @@ from tbox_finder.provenance import write_provenance
 
 write_provenance(
     "data/processed/checkpoints/stage1_production/provenance.json",
-    rule="slurm/p2/train_production.sbatch :: train_stage1 (P2-09 round-0 production Stage-1 scanner)",
+    rule=(
+        "slurm/p2/train_production.sbatch :: train_stage1 "
+        "(P2-10d'-b round-0 production Stage-1 scanner, §9.1 seed-negative mix)"
+    ),
     script="src/tbox_finder/train/train_stage1.py",
     seed=42,
     inputs=[
         "data/interim/flank_context/context_v0.parquet",
         "data/processed/labels/labels_v0.parquet",
         "data/processed/splits/split_assignments.parquet",
+        "data/processed/negatives/mining_pool_v0.parquet",
+        "data/processed/negatives/decoys_v0.parquet",
     ],
     outputs=["data/processed/checkpoints/stage1_production/stage1.pt"],
     env_lock="envs/ml-dna.conda-lock.yml",
     adr="ADR-0002",
     extra={
-        "step": "P2-09",
+        "step": "P2-10d'-b",
         "report": "reports/p2/train_stage1_production.json",
         "config": "P2-06 winner g0.5_lr3e-4_a0.5 (gamma=0.5, optim.lr=3e-4, class_weight_alpha=0.5)",
         "fold": "full ADR-0004 D5 nested_train (exclude_selection_val=false, ~8,303 records)",
+        "negative_mix": (
+            "PRD §9.1 seed ratio as a STREAM share: negative_fraction=10/11, so "
+            "negative_draw_count emits exactly 10x the positive draws per epoch "
+            "(ADR-0005 A7 pin 1). Pool = the mined genomic windows + the embedded "
+            "dinuc_shuffled/structured_rna decoys, drawn uniformly, so per-class shares "
+            "are pool-proportional (A7 pin 3). gc_background and leader_decoy take "
+            "share 0 (A7 pins 4-5); a decoy whose OWN parent is outside nested_train is "
+            "refused (A7 pin 6a). Realized counts are in the run's own report, not "
+            "restated here."
+        ),
+        "round": "0 — COLD start (init_from_checkpoint=null; A7 pin 8). P2-09 is the "
+                 "pre-mix baseline, NOT this run's parent.",
         "eval_val": False,
         "epochs": 10,
         "batch_size": 8,
