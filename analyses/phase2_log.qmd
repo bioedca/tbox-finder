@@ -1390,3 +1390,77 @@ run has not been launched.
 > intact over donor DNA.
 >
 > **Still open:** the SLURM submit-ack. No training run has been launched.
+
+## Step P2-10d′-c — 2026-07-21: the pre-ack probes that stopped the launch — a pandas dialect that deleted a pinned decoy class, and a stale-output `rm` that fails the run's own gate
+
+**Inputs.** `slurm/p2/train_production.sbatch` @ `748c4f2`, the five staged parquets, and the
+`tbox-ml-dna` env on the cluster. **Process.** The §9.3 pre-ack sequence was run in full —
+cluster synced to `main`, all five parquets verified *by executing the sbatch's own
+`assert_dvc_artifact`/`assert_lfs_artifact` block* (5/5 `staged-ok`), the sbatch's *own*
+`torchrun` argv extracted by shimming `torchrun` to echo its arguments and then composed through
+Hydra → `_cfg_from_mapping` → `Stage1TrainConfig` in the target env (the job-669 probe:
+`COMPOSE_OK`, `lr=3e-4`, γ=0.5, α=0.5, `init_from_checkpoint=None`), and
+`sbatch --test-only` (*"Job 677 to start at 2026-07-21T10:28:24 … on nodes **one**"*). A
+CPU-only `build_stream` dry run — added because a composition failure is invisible until after
+the queue wait — then disagreed with the committed artifact, and a 22-agent adversarial audit of
+the launch path found a second, unrelated defect. **Neither is visible to CI.**
+
+**Finding 1 — a pandas dialect silently deleted a pinned decoy class, and filed it as leakage.**
+`embedding.py` read a decoy's parent as `str(row.get(col) or "")`. Under **pandas 2.3.3**
+(`envs/data.yml`, and CI's pin) a null string cell is `None` → `""` → *absent*. Under **pandas
+3.0.3** — `envs/ml-dna.conda-lock.yml`, the env that actually trains — the default string dtype's
+missing sentinel is `NaN`, which is **truthy**, so the same cell reads as the literal string
+`"nan"`: a present-looking parent id in no fold set. `decoys_v0.parquet` carries that column null
+in **5,008 of 7,008** rows. Measured on the cluster against the staged pools: `n_embedded`
+**702** (`{dinuc_shuffled: 702}`, `structured_rna` **absent**) versus the committed
+`junction_control.json`'s **3,701** (702 + 2,999); `decoy_parent_not_nested_train` **4,297** =
+1,298 real + **2,999 spurious**; realized mix **16,410** instead of 19,409; and the
+junction-symmetric splice rate — which A7 pin 7 *derives* from the negative arm — **0.04278
+instead of 0.19069**. Because that rate is derived, **every clause still passed**: the run would
+have shipped a checkpoint violating **A7 pin 3** with a green report, and the refusal would have
+read as the §9.2 filter working. Two guards did not fire: `missing_wanted` stamps `seen_pools`
+*before* every filter, so it proves only that the name was read; and `if not embedded` passes at
+702 > 0.
+
+**Finding 2 — the stale-output `rm` fails the run's own gate after the full ~20 GPU-h.**
+`train_production.sbatch:192` deleted `reports/p2/train_stage1_production.json`, **git-tracked**
+since `082f8c7`. `_provenance_complete` requires every dirty path to sit under
+`_DATA_STAGING_PREFIXES = ("data/",)`, and `build_report` snapshots `git status` **once** while
+the deletion is live. Measured on the cluster against the live tree: dirty = `[staged parquet]`
+→ `True`; dirty = `[staged parquet, deleted report]` → **`False`**. The chain is
+`provenance_complete` False → `overall_pass` False → `torch.save` **skipped** → the report
+written over the committed P2-09 baseline carrying `overall_pass: false` → `RuntimeError` →
+rc ≠ 0 → the EXIT trap wipes `$BUILD` with the checkpoint inside it. It had never fired because
+job 671's report predates the clause (`schema_version 1`, no `git_dirty_paths` key).
+
+**Outputs.** `masking.row_text` — one pandas-free missing-value boundary, promoted rather than
+duplicated — now backs every nullable-column read in `data/embedding.py` and `data/negatives.py`;
+`negatives.py`'s fold test moved from `fold is None` to `is_missing(fold)` (a NaN fold was
+**truthy**, so a null `parent_nested_train` would have read as *in fold* — fail-open, latent only
+because the shipped pool has no nulls there); a per-pool **admission** guard (gated on `per_pool`,
+the count the records produce, never on the request) refuses a pinned pool that admits nothing;
+`rm -f "$REPORT"` dropped in favour of an md5 **freshness fingerprint**, so nothing tracked is
+deleted yet a stale report still cannot pass as this run's; and the stale SUBMIT recipe — which
+named a branch deleted from origin and chained `git reset --hard` into `sbatch`, re-arming the
+LFS-pointer trap — rewritten as sync → re-stage → submit.
+
+**Validation.** Suite **2,214 passed / 222 skipped / 1 xfailed**; ruff, black, `snakemake --lint`
+and `-n` clean. Five sabotages each redden **exactly one** test, matched **by name**: the two
+`str(x or "")` reverts redden the NaN parametrisations, `fold is None` reddens the
+unresolved-fold gate, removing the admission guard reddens
+`test_a_pinned_pool_that_admits_nothing_is_refused`, and restoring the tracked-file `rm` reddens
+`test_no_sbatch_deletes_a_git_tracked_path[train_production.sbatch]`. The NaN assertions use the
+sentinel as a **literal**, so they bite under both dialects — the parquet round-trip test states
+in its own docstring that it *cannot* discriminate under the CI pin. The suite's only prior
+per-pool assertion had asserted `structured_rna == 0` — the bug's own value — and was **rewritten,
+not deleted**.
+
+**Decisions.** No ADR: the fix *restores* the composition A7 pin 3 already pins. The new gate
+found a second offender, `sizing_smoke.sbatch` (16 tracked files), which is **not** fixed here —
+its aggregation globs `POINT_DIR/*.json`, so merely not deleting would silently mix a previous
+run's points into the report, and the correct fix (redirect `POINT_DIR` to node-local scratch)
+cannot be executed or verified from the laptop. Shipping an unverified edit to a SLURM script is
+the exact failure this step exists to catch, so it is recorded as an `xfail(strict=True)`: when it
+is fixed the XPASS **fails** the suite and forces the entry out, so the exemption cannot rot green.
+
+**Still open:** the SLURM submit-ack. No training run has been launched.

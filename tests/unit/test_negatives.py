@@ -615,7 +615,12 @@ def test_an_unresolved_parent_fold_is_a_distinct_reason_from_out_of_fold() -> No
     null_cell = _row("null_fold", _seq(WINDOW, 1), parent_nested_train=None)
     absent_column = _row("no_fold_col", _seq(WINDOW, 2))
     absent_column.pop("parent_nested_train")
-    for row in (null_cell, absent_column):
+    # …and the pandas-3 spelling of the same null. `fold is None` does NOT catch NaN, and
+    # `bool(NaN)` is **True**, so the guard used to read a null fold as "in fold" — a
+    # fail-open on the §9.2 rule, latent only because the shipped pool has no nulls in this
+    # column. Added at P2-10d′-c with the `is_missing` fix ([[row_text]]).
+    nan_cell = _row("nan_fold", _seq(WINDOW, 3), parent_nested_train=float("nan"))
+    for row in (null_cell, absent_column, nan_cell):
         records, report = neg.negative_records_from_rows([row], window=WINDOW)
         assert records == [], row["candidate_id"]
         assert report["excluded_by_reason"] == {neg.REASON_PARENT_UNRESOLVED: 1}
@@ -630,6 +635,22 @@ def test_an_unresolved_parent_fold_is_a_distinct_reason_from_out_of_fold() -> No
         [_row("null_fold", _seq(WINDOW, 1), parent_nested_train=False)], window=WINDOW
     )
     assert out["excluded_by_reason"] == {neg.REASON_PARENT_OUT_OF_FOLD: 1}
+
+
+def test_a_nan_source_record_id_is_unresolved_not_a_parent_named_nan() -> None:
+    """A NaN parent id must read as ABSENT, never as the literal id "nan".
+
+    Same defect as the decoy side (P2-10d′-c), in the direction that matters here: under
+    `str(x or "")` a pandas-3 null yields the truthy string "nan", which passes the
+    `if not parent` guard, so a row that cannot name its parent would be admitted with an
+    unfalsifiable §9.2 provenance instead of refused.
+    """
+    row = _row("nan_parent", _seq(WINDOW, 4), parent_nested_train=True)
+    row["source_record_id"] = float("nan")
+    records, report = neg.negative_records_from_rows([row], window=WINDOW)
+    assert records == []
+    assert report["n_refused_parent_unresolved"] == 1
+    assert report["excluded_by_reason"] == {neg.REASON_PARENT_UNRESOLVED: 1}
 
 
 def test_a_blank_source_record_id_is_unresolved_even_with_the_rule_disarmed() -> None:
