@@ -145,13 +145,35 @@ def main() -> int:
         run_rscape_to(positive, stage / "classII_sub.helixcov")
         run_rscape_to(shuffled, stage / "classII_sub.shuffled.helixcov")
 
-        for name in (
+        # Publication itself must be transactional too. Moving the four files one
+        # at a time means an interruption or a failed move partway through leaves a
+        # mixed-generation set on disk — the very stale-control state the staging
+        # above exists to prevent, just moved later in the process. So: back the
+        # current generation up, publish all four, and roll the whole set back if
+        # any single move fails.
+        names = (
             "classII_sub.sto",
             "classII_sub.shuffled.sto",
             "classII_sub.helixcov",
             "classII_sub.shuffled.helixcov",
-        ):
-            shutil.move(str(stage / name), str(OUTDIR / name))
+        )
+        backup = Path(stage_dir) / "previous"
+        backup.mkdir()
+        for name in names:
+            if (OUTDIR / name).is_file():
+                shutil.copy2(OUTDIR / name, backup / name)
+        published: list[str] = []
+        try:
+            for name in names:
+                shutil.move(str(stage / name), str(OUTDIR / name))
+                published.append(name)
+        except OSError:
+            for name in published:
+                if (backup / name).is_file():
+                    shutil.copy2(backup / name, OUTDIR / name)
+                else:
+                    (OUTDIR / name).unlink(missing_ok=True)
+            raise
 
     print(f"wrote {N_SEQUENCES} seqs x {len(subsample[0][1])} cols to {OUTDIR}/")
     return 0

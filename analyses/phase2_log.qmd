@@ -1065,3 +1065,15 @@ detect, so a row permutation passed it. And the depth guard's only test lived in
 skips without the binary, so deleting the guard left bare CI green. Both rewritten; all three re-run
 sabotages now fail the test **named** for the invariant. Suite **1,974 / 158** vs the like-for-like
 `main` baseline **1,915 / 158** = **+59, zero regressions**; fixtures still byte-identical.
+
+**CodeRabbit r3 — 2 findings, both applied; the review gate is closed.** (a) *Major:* fixture
+publication was still not transactional — the r2 fix staged all four files in a temp dir but then moved
+them into place **one at a time**, so an interruption partway through left a mixed-generation set on
+disk: the same stale-control state the staging exists to prevent, merely relocated to a later moment.
+Publication now backs up the current generation, moves all four, and **rolls the whole set back** if any
+single move fails. (b) *Minor, and mine:* the row-shuffle test's second clause was written as
+`<composition clause> or <the set clause asserted on the line above>` — satisfied by that earlier line
+no matter what the composition clause said, i.e. an assertion that could never fail. It is now an
+independent per-row-composition multiset comparison, and was re-sabotaged with the set clause deleted to
+confirm it carries the row-shuffle detection **on its own**. Suite **1,974 / 158** unchanged; fixtures
+byte-identical; ruff/black/`snakemake --lint`/DAG dry-run clean; all four GitHub Actions checks green.

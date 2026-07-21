@@ -7,7 +7,7 @@ and a regeneration would then silently ship a non-matched control while every
 fixture-reading test stayed green.
 
 The discriminating clause is
-:func:`test_column_shuffle_does_not_preserve_row_composition` — a *row*-wise
+:func:`test_column_shuffle_does_not_merely_reorder_whole_rows` — a *row*-wise
 permutation preserves every column's multiset just as a column-wise one does and
 is the exact silent-non-match mutation the fixture tests cannot see.
 """
@@ -73,11 +73,15 @@ def test_column_shuffle_does_not_merely_reorder_whole_rows() -> None:
     """
     shuffled = _GEN.column_shuffle(_ROWS, seed=11)
     assert {seq for _, seq in shuffled} != {seq for _, seq in _ROWS}
-    # And the per-row composition genuinely changes for at least one row, which a
-    # pure reordering can never do.
-    assert sorted(Counter(seq) for _, seq in shuffled) != sorted(
-        Counter(seq) for _, seq in _ROWS
-    ) or {seq for _, seq in shuffled} != {seq for _, seq in _ROWS}
+
+    # The multiset of per-row compositions must change too. Asserted on its own:
+    # an earlier version wrote this as `<composition clause> or <the set clause
+    # above>`, which the line above satisfies whatever the composition clause says
+    # — a second assertion that could never fail.
+    def _composition_multiset(rows: list[tuple[str, str]]) -> Counter:
+        return Counter(tuple(sorted(Counter(seq).items())) for _, seq in rows)
+
+    assert _composition_multiset(shuffled) != _composition_multiset(_ROWS)
 
 
 def test_column_shuffle_actually_permutes_something() -> None:
