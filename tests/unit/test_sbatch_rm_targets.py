@@ -42,14 +42,12 @@ SLURM = REPO / "slurm"
 #: ``VAR=value`` / ``VAR="value"`` alone on a line — the assignment forms the shipped sbatch
 #: bodies actually use. Command substitutions are not resolved (see `_resolve`).
 _ASSIGN = re.compile(r'^\s*([A-Za-z_][A-Za-z0-9_]*)=(".*?"|\'.*?\'|\S*)\s*$')
-#: A deletion. `rm` with any flags, capturing the rest of the (logical) command.
-_RM = re.compile(
-    r"(?:^|\s|;|&&|\|\|)"  # command position
-    r"(?:command\s+)?"  # `command rm`
-    r"\\?"  # `\rm` — the alias-bypassing form
-    r"(?:/\S*/)?"  # `/bin/rm`, `/usr/bin/rm`
-    r"rm\s+((?:-[A-Za-z]+\s+)*)(.+)$"
-)
+#: Command names that mean `rm`, once the path prefix and the alias-bypassing backslash
+#: are stripped. `\rm`, `/bin/rm` and `command rm` all delete exactly what `rm` deletes.
+_RM_NAMES = {"rm"}
+#: Tokens that END one command and begin another. Operands are scored per command, so
+#: `rm -f "$REPORT"; :` cannot smuggle a trailing `;` into the path (CodeRabbit r5).
+_SEPARATORS = {";", "&&", "||", "|", "&", "(", ")", "\n"}
 #: Marker left in place of a variable this parser cannot resolve. Never silently dropped.
 _UNRESOLVED = "\x00UNRESOLVED"
 #: `$VAR`, `${VAR}`, or `${VAR:-default}` (the default is taken when VAR is unknown — that
@@ -160,8 +158,7 @@ def _rm_targets(text: str) -> list[tuple[int, str]]:
     env: dict[str, str] = dict(_SEED_ENV)
     targets: list[tuple[int, str]] = []
     for line_no, line in _logical_lines(text):
-        stripped = line.lstrip()
-        if stripped.startswith("#"):
+        if line.lstrip().startswith("#"):
             continue  # a comment, not a command — the fix's own rationale lives in one
         assign = _ASSIGN.match(line)
         if assign:
@@ -169,16 +166,46 @@ def _rm_targets(text: str) -> list[tuple[int, str]]:
             quoted = len(raw) >= 2 and raw[0] in "\"'" and raw[-1] == raw[0]
             env[assign.group(1)] = _resolve(raw[1:-1] if quoted else raw, env)
             continue
-        for _flags, rest in _RM.findall(line):
-            try:
-                words = shlex.split(rest, comments=True)
-            except ValueError:
-                continue  # unbalanced quotes; not a shape we ship
-            for word in words:
+        for command in _commands(line, line_no):
+            words = list(command)
+            while words and _ASSIGN.match(words[0]):
+                words.pop(0)  # `FOO=bar rm ...` — a per-command env prefix
+            if words and words[0] == "command":
+                words.pop(0)
+            if not words:
+                continue
+            name = words[0].lstrip("\\")
+            if posixpath.basename(name) not in _RM_NAMES or name.endswith("/"):
+                continue
+            for word in words[1:]:
                 if word.startswith("-"):
                     continue
                 targets.append((line_no, _resolve(word, env)))
     return targets
+
+
+def _commands(line: str, line_no: int) -> list[list[str]]:
+    """Tokenize one logical line into commands, split on shell separators.
+
+    Scoring "everything after `rm`" treats `;` and `&&` as part of the last operand and
+    hides both a trailing separator and any LATER `rm` on the same line. `shlex` with
+    ``punctuation_chars`` is the tokenizer that gets this right (CodeRabbit r5).
+    """
+    lex = shlex.shlex(line, posix=True, punctuation_chars=True)
+    lex.whitespace_split = True
+    try:
+        tokens = list(lex)
+    except ValueError:
+        # Unbalanced quotes. Fail CLOSED if the line could be a deletion at all: an
+        # unparseable `rm` must not read the same as no `rm`.
+        return [["rm", _UNRESOLVED]] if re.search(r"(?:^|\s|/)rm\b", line) else []
+    out: list[list[str]] = [[]]
+    for token in tokens:
+        if token in _SEPARATORS:
+            out.append([])
+        else:
+            out[-1].append(token)
+    return [c for c in out if c]
 
 
 def test_sbatch_files_are_discovered() -> None:
@@ -239,6 +266,23 @@ def test_node_local_scratch_stays_exempt() -> None:
     text = 'BUILD="/tmp/${USER}-${SLURM_JOB_ID:-local}"\nrm -rf "$BUILD"\n'
     (target,) = [p for _, p in _rm_targets(text)]
     assert _offence(target, _tracked_paths()) is None
+
+
+def test_a_separator_cannot_hide_a_tracked_deletion() -> None:
+    """`rm -f "$REPORT"; :` must not smuggle the `;` into the path (CodeRabbit r5)."""
+    text = 'REPORT="reports/p2/train_stage1_production.json"\nrm -f "$REPORT"; :\n'
+    assert "reports/p2/train_stage1_production.json" in [p for _, p in _rm_targets(text)]
+
+
+def test_a_second_rm_on_the_same_line_is_not_swallowed() -> None:
+    text = "rm -f /tmp/scratch.json && rm -f reports/p2/train_stage1_production.json\n"
+    assert "reports/p2/train_stage1_production.json" in [p for _, p in _rm_targets(text)]
+
+
+def test_an_unparseable_rm_line_fails_closed() -> None:
+    """Unbalanced quotes must not read the same as "there was no rm here"."""
+    targets = [p for _, p in _rm_targets('rm -f "unterminated\n')]
+    assert targets and all(_UNRESOLVED in t for t in targets)
 
 
 def test_a_command_substitution_is_never_guessed_at() -> None:
@@ -308,16 +352,42 @@ def test_a_known_defective_sbatch_cannot_run_at_all(name: str) -> None:
     (path,) = [p for p in _sbatch_files() if p.name == name]
     text = path.read_text()
     first_rm = min(line for line, _ in _rm_targets(text))
-    guards = [
-        lineno
-        for lineno, line in _logical_lines(text)
-        if re.match(r"^exit\s+[1-9]", line) and lineno < first_rm
-    ]
-    assert guards, (
-        f"{name} is exempted from the tracked-path gate but has no unconditional "
+    guards = [n for n, line in _logical_lines(text) if _is_unconditional_exit(text, n, line)]
+    assert any(n < first_rm for n in guards), (
+        f"{name} is exempted from the tracked-path gate but has no UNCONDITIONAL "
         f"`exit <non-zero>` before its first deletion at line {first_rm}. Either fix the "
         "file and remove its _KNOWN_DEFECTIVE entry, or disable it outright."
     )
+
+
+#: Shell words that open / close a control block. Column zero is NOT enough on its own:
+#: `if "$ALLOW"; then` / `exit 1` / `fi` puts an `exit` at column zero that the normal path
+#: never reaches, so the job stays runnable behind a green test (CodeRabbit r5).
+_BLOCK_OPEN = ("if ", "for ", "while ", "until ", "case ")
+_BLOCK_CLOSE = ("fi", "done", "esac", "}")
+
+
+def _block_depth_at(text: str, target_lineno: int) -> int:
+    """Control-block nesting depth immediately before `target_lineno`."""
+    depth = 0
+    for lineno, line in _logical_lines(text):
+        if lineno >= target_lineno:
+            break
+        stripped = line.strip()
+        if stripped.startswith("#"):
+            continue
+        if stripped.startswith(_BLOCK_OPEN):
+            depth += 1
+        elif stripped in _BLOCK_CLOSE or stripped.startswith(("fi ", "done ", "esac ")):
+            depth = max(0, depth - 1)
+        elif stripped.endswith("() {") or stripped.endswith("()  {"):
+            depth += 1
+    return depth
+
+
+def _is_unconditional_exit(text: str, lineno: int, line: str) -> bool:
+    """A non-zero `exit` that the normal path cannot avoid."""
+    return bool(re.match(r"^exit\s+[1-9]", line)) and _block_depth_at(text, lineno) == 0
 
 
 def _param(path: Path):
