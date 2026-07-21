@@ -1077,3 +1077,78 @@ no matter what the composition clause said, i.e. an assertion that could never f
 independent per-row-composition multiset comparison, and was re-sabotaged with the set clause deleted to
 confirm it carries the row-shuffle detection **on its own**. Suite **1,974 / 158** unchanged; fixtures
 byte-identical; ruff/black/`snakemake --lint`/DAG dry-run clean; all four GitHub Actions checks green.
+
+## Step P2-10d — 2026-07-20: mined-negative injection + warm start in Stage-1 training
+
+**Inputs.** `train_stage1::build_stream`/`build_model`/`_train_stage1_inner`, `conf/train/stage1.yaml`,
+P2-01's `window_dataset` (`CorpusRecord`, `carve_window`, `WeightedIndexSampler`, `curriculum_weights`),
+P2-10b's `data/processed/negatives/mining_pool_v0.parquet` (46,591 coordinate-bearing windows), P2-09's
+round-0 production checkpoint `data/processed/checkpoints/stage1_production/stage1.pt`, PRD §9.1,
+ADR-0005 D14.
+
+**Process.** New module `src/tbox_finder/data/negatives.py`: `background_record()` builds an
+all-background `CorpusRecord` whose pseudo-locus is co-extensive with the window, so a negative reaches
+the model down the *same* carve as a positive and emits 1,024 real nucleotides labelled `background`
+with no `IGNORE_INDEX` and no `[PAD]`; `MixedIndexSampler` interleaves negatives into the draw stream at
+a configured share and `mix_summary()` **counts the emitted keys** to report the realized one;
+`positive_only_sampler()` restricts the PRD §11 curriculum to the dataset's positive prefix and
+*verifies* the boundary. In `train_stage1`: `warm_start()` loads a parent `state_dict` (`strict=True`)
+and returns a per-tensor sha256 measurement taken around the load; `build_model` gained the warm-start
+path and a fifth return value; `cfg.eval_at_step0` scores the P2-06a ladder before the first optimiser
+step (placed before `reset_peak_memory_stats`, so eval activations stay out of the §10.3 training VRAM
+figure); `batch_plan()` was split out of `_batches` so the mix is measured on the very keys the loop
+consumes. Five new CLI-overridable fields landed in **both** the dataclass **and**
+`conf/train/stage1.yaml`, gated by a new composition test.
+
+**Outputs.** `src/tbox_finder/data/negatives.py` (new); `train_stage1` gains `warm_start`,
+`_state_digests`, `batch_plan`, `ShardedSampler.inner`, report blocks `negative_mix{stream,consumed}` /
+`warm_start` / `eval_metrics_step0` / `eval_scope_step0` / `step0_requested`, and two gate clauses
+`negative_mix_realized` + `warm_start_loaded`; report `SCHEMA_VERSION` 1 → 2 with
+`CLAUSE_SCHEMA_VERSION`; `reports/p2/negative_injection.json` (the measured substrate audit);
+tests `tests/unit/test_negatives.py`, `tests/unit/test_p2_10d_clauses.py`, `tests/ml/test_warm_start.py`,
+`tests/ml/test_negative_injection.py`, plus `test_sbatch_overrides.py::test_p2_10d_fields_are_config_keys_and_dataclass_fields`.
+
+**Validation.** Both gates PASS, restated as exact identities rather than tolerances. **Mix:** the
+counted negative keys must equal `round(n_positive · f/(1−f))` re-derived from the *counted* positive
+keys — no tolerance knob exists to loosen — and the requested-zero branch asserts an empty pool and zero
+draws rather than skipping. On the real corpus (`tests/ml/test_negative_injection.py`, 100 positives ×
+200 negatives at f = 10/11) the emitted stream is exactly 100 / 1,000, every key counted negative
+indexes a negative record, and the positive sub-stream is **identical** to the positives-only run's, so
+P2-06's ranking and P2-09's checkpoint stay reproducible. **Warm start:** every model tensor byte-equal
+to the parent's after the load (0 missing / 0 unexpected / 0 shape-mismatch), with two designed controls
+— a fresh model must *not* match, and its forward must *differ* — and the warm-started forward is
+bit-identical to the parent's, which is "reproduces its parent's metrics at step 0" in the only form
+that is decidable without a GPU: identical parameters on identical inputs cannot yield different
+metrics. The real P2-09 checkpoint's head keys and shapes fit the shipped `concat`/no-CRF skeleton.
+Suite **2,017 passed / 189 skipped**, 2,206 collected vs `main`'s 2,132 = **+74, zero regressions**;
+ruff + black clean.
+
+**Decisions.** (1) *Negatives bypass the PRD §11 curriculum.* Routing them through it makes the realized
+share `N^(1−3α)` — `N^0.25` at the shipped α = 0.25 — so a 10× larger pool moves the mix by only ~1.78×
+while the config goes on stating a ratio the sampler contradicts. That is the `basis_point` defect in a
+new costume, so the mix is a separate, counted draw stream and negatives carry a **private** stratum and
+(negative) cluster namespace; a test measures that positive-vs-positive weights are unchanged to
+`rtol = 1e-12`, with the shared-`UNKNOWN`-bucket control moving them by > 1e-3. (2) *Geometry is a
+refusal.* A negative must be exactly one window of real DNA; padding a short one asserts a contig
+boundary that does not exist and teaches "`[PAD]`-heavy ⇒ background", a cue absent from the scan
+distribution. (3) *Schema versioning instead of regenerating artifacts.* Two new clauses would have
+invalidated P2-04's and P2-09's committed reports; regenerating them to add the keys would forge
+measurements those runs never made (§10.3). `validate_report` excuses a missing clause **only** for an
+older `schema_version` **and only when it re-derives TRUE**, so an old report still cannot hide a
+failure and a current-schema report must carry every clause — sabotaging either half fails the test
+named for it.
+
+**Measured blocker for P2-10e (this step's main empirical finding).** The hook lands; the 1,024-nt
+substrate does not. `reports/p2/negative_injection.json`: of the mining pool's 46,591 rows, **0** are
+injectable at the training window — 585 masked, 46,006 at 300 nt (`mining/pool.py::DEFAULT_WINDOW_NT`).
+Re-carving wider does not fix it: P2-00 fetched **exactly 1,024 nt** of flank, so at margin 0 the corpus
+yields 45,519 carvable 1,024-nt flank windows but at the D14 flank of 50 nt it yields **0** — a
+window that wide abuts its own parent locus and the union-prior mask removes every one. P2-10e
+therefore needs a wider-flank substrate (or a re-fetch), and `build_stream` refuses the current pool by
+name rather than degrading to a positives-only run that reports a mix.
+
+**Not decided here.** `negative_fraction` is a *stream share*, so PRD §9.1's "~10:1 seed ratio" reads as
+f = 10/11; the shipped default is **0.0** and no round value is pinned. Pinning the round-0 fraction and
+the round budget belongs to P2-10e's ADR-0005 amendment (CLAUDE.md §7 item 2), not to this step.
+
+**Commit.** <SHA — see `git log` for `feat(train): mined-negative injection hook + warm-start path`>
