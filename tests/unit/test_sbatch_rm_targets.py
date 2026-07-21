@@ -49,7 +49,11 @@ _UNRESOLVED = "\x00UNRESOLVED"
 #: `$VAR`, `${VAR}`, or `${VAR:-default}` (the default is taken when VAR is unknown — that
 #: is what makes `${SLURM_SUBMIT_DIR:-$HOME/tbox-finder}` resolvable).
 _VAR = re.compile(
-    r"\$\{([A-Za-z_][A-Za-z0-9_]*)(:-[^}]*)?\}|\$([A-Za-z_][A-Za-z0-9_]*)|\$\{[^}]*\}"
+    r"\$\{([A-Za-z_][A-Za-z0-9_]*)(:-[^}]*)?\}"  # ${VAR} / ${VAR:-default}
+    r"|\$([A-Za-z_][A-Za-z0-9_]*)"  # $VAR
+    r"|\$\{[^}]*\}"  # ${ARR[i]} and other forms this parser cannot expand
+    r"|\$\([^)]*\)"  # $(command substitution) — never guessed at
+    r"|`[^`]*`"  # `command substitution`
 )
 #: Variables whose meaning is fixed by how these jobs are submitted (§9.3: `sbatch` is run
 #: FROM the repo root, so SLURM sets SLURM_SUBMIT_DIR to it). Seeding them as "." is what
@@ -101,10 +105,16 @@ def _resolve(value: str, env: dict[str, str]) -> str:
         name = m.group(1) or m.group(3)
         if name is None:
             return _UNRESOLVED  # `${ARR[i]}` and friends: a form this parser cannot expand
-        if name in env:
-            return env[name]
         default = m.group(2)
-        return default[2:] if default is not None else _UNRESOLVED
+        value = env.get(name)
+        # bash `:-` takes the default when VAR is unset OR EMPTY. Returning the empty
+        # value instead would collapse `${X:-reports/p2/r.json}` to "" — a path that
+        # matches nothing and so scores clean (CodeRabbit, P2-10d′-c r3).
+        if value:
+            return value
+        if default is not None:
+            return default[2:]
+        return _UNRESOLVED if value is None else ""
 
     for _ in range(5):  # bounded: assignments here nest at most a level or two
         new = _VAR.sub(_one, value)
@@ -194,6 +204,18 @@ def test_a_backslash_continued_rm_is_still_seen() -> None:
     text = 'DONE="reports/p2/x.DONE"\nrm -f \\\n  "$DONE" \\\n  "other.json"\n'
     found = [p for _, p in _rm_targets(text)]
     assert "reports/p2/x.DONE" in found and "other.json" in found
+
+
+def test_a_command_substitution_is_never_guessed_at() -> None:
+    """`$(...)` left as a literal matches nothing and would score clean — fail-open."""
+    (target,) = [p for _, p in _rm_targets('rm -f "$(dirname x)/report.json"\n')]
+    assert _UNRESOLVED in target
+
+
+def test_an_empty_value_falls_through_to_the_default_like_bash() -> None:
+    """`${VAR:-default}` uses the default when VAR is set-but-EMPTY, not just when unset."""
+    text = 'X=""\nrm -f "${X:-reports/p2/train_stage1_production.json}"\n'
+    assert "reports/p2/train_stage1_production.json" in [p for _, p in _rm_targets(text)]
 
 
 def test_an_unresolvable_variable_is_not_scored_as_a_safe_literal() -> None:
