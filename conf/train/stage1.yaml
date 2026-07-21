@@ -148,6 +148,22 @@ negative_pool_parquet: null
 # construction rather than being discovered in the gate.
 negative_fraction: 0.0
 negative_max_records: null   # cap the pool (the smoke needs a stream that composes in seconds)
+# The §9.1 decoy parquet (P2-10d′-b; ADR-0005 A7). When set, each admitted decoy of a pool A7
+# pin 3 embeds — `dinuc_shuffled`, `structured_rna` — is spliced at a random phase into one
+# admitted mined window and appended to the negative arm, all positions labelled background.
+# This is the user's R2 reading of §9.1 at W=1024: every decoy record is 57-550 nt, and
+# background_record refuses a length mismatch, so without the embedding three of the four
+# §9.1 classes have no referent at the training window at all.
+#
+# `gc_background` and `leader_decoy` take share 0 (A7 pins 4 and 5) — the first because the
+# 15,708 real mined windows now serve §9.1's class 1 better than a 0th-order surrogate built
+# when no genome panel existed, the second because all 8 of its records are T-box-derived and
+# 2 are exact substrings of training positives. Both exclusions are enforced by name in
+# data/embedding.py and a rename upstream is an error, not a silent pass.
+#
+# null ⇒ mined windows only. That is not a smaller run: it is a §9.1 training-ratio shortfall
+# on three of the four classes, which is exactly the P2-09 non-delivery this step repairs.
+negative_decoy_parquet: null
 
 # ── Warm start (P2-10d) ──────────────────────────────────────────────────────────────────
 # A bare state_dict written by this module (checkpoint_dir/stage1.pt). null ⇒ a fresh build

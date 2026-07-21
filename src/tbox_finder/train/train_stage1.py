@@ -234,6 +234,13 @@ class Stage1TrainConfig:
     negative_fraction: float = 0.0
     #: Cap the negative pool (the smoke needs a stream that composes in seconds).
     negative_max_records: int | None = None
+    #: The §9.1 decoy parquet (`decoys_v0.parquet`). When set, each admitted decoy of a
+    #: pool ADR-0005 A7 pin 3 embeds (`dinuc_shuffled`, `structured_rna`) is spliced at a
+    #: random phase into one admitted mined window and appended to the negative arm — the
+    #: user's R2 reading of §9.1 at W=1024, where every decoy record is 57–550 nt and
+    #: `background_record` refuses a length mismatch. None ⇒ mined windows only, which is
+    #: a §9.1 *training-ratio* shortfall on three of the four classes, not a smaller run.
+    negative_decoy_parquet: str | None = None
 
     # ── Warm start (P2-10d; ADR-0005 D14's iterative mining rounds) ────────────────
     #: Parent checkpoint to initialise from — a bare `state_dict` as written by this
@@ -1904,20 +1911,55 @@ def build_stream(cfg: Stage1TrainConfig) -> tuple[Any, Any, dict[str, Any]]:
     # the mix knows the boundary is exactly `n_positive`.
     negative_records: list[Any] = []
     negative_report: dict[str, Any] | None = None
+    embedding_report: dict[str, Any] | None = None
     if cfg.negative_pool_parquet:
-        from tbox_finder.data.negatives import load_negative_records
+        from tbox_finder.data.negatives import (
+            load_admitted_pool_rows,
+            records_from_admitted_rows,
+        )
 
-        negative_records, negative_report = load_negative_records(
+        host_rows, negative_report = load_admitted_pool_rows(
             cfg.negative_pool_parquet,
             window=cfg.window_nt,
             max_records=cfg.negative_max_records,
         )
+        negative_records = records_from_admitted_rows(host_rows, window=cfg.window_nt)
         if not negative_records:
             raise ValueError(
                 f"negative pool {cfg.negative_pool_parquet} supplied 0 injectable negatives "
                 f"at window={cfg.window_nt}: {negative_report['excluded_by_reason']}. "
                 "Refusing to train a positives-only run that reports a negative mix — an "
                 "empty pool is a substrate problem, not a smaller run."
+            )
+        # ── The §9.1 decoy embedding (P2-10d′-b; ADR-0005 A7, user's R2 reading) ──────
+        # Appended AFTER the plain mined arm and continuing its negative-cluster
+        # ordinals, so the two arms share one namespace and the pooled draw is uniform
+        # over both — which is exactly what makes the per-class shares pool-proportional
+        # (A7 pin 3) with no per-class weight knob anywhere.
+        if cfg.negative_decoy_parquet:
+            from tbox_finder.data.embedding import (
+                embed_decoy_rows,
+                embedded_negative_records,
+                load_decoy_rows,
+            )
+
+            decoy_rows = load_decoy_rows(cfg.negative_decoy_parquet)
+            embedded, embedding_report = embed_decoy_rows(
+                decoy_rows, host_rows, seed=cfg.seed, window=cfg.window_nt
+            )
+            if not embedded:
+                raise ValueError(
+                    f"decoy pool {cfg.negative_decoy_parquet} supplied 0 embeddable decoys: "
+                    f"{embedding_report['excluded_by_reason']}. A run that reports a §9.1 "
+                    "four-class mix while embedding none of them is the P2-09 shortfall "
+                    "again, one layer down."
+                )
+            negative_records.extend(
+                embedded_negative_records(
+                    embedded,
+                    cluster_id_start=len(negative_records),
+                    window=cfg.window_nt,
+                )
             )
 
     n_positive = len(records)
@@ -1972,6 +2014,11 @@ def build_stream(cfg: Stage1TrainConfig) -> tuple[Any, Any, dict[str, Any]]:
         "n_negative_records": len(negative_records),
         "class_counts_include_negatives": bool(negative_records),
         "negative_pool": negative_report,
+        # P2-10d′-b: the §9.1 embedding's own report — per-pool embedded counts, the
+        # A7-excluded pools with their reasons, and every refusal. Present as `None` on a
+        # mined-only run rather than absent, so "no embedding ran" and "the embedding
+        # block was dropped from the report" are distinguishable.
+        "negative_embedding": embedding_report,
         "data_config": asdict(data_config),
     }
     return dataset, sampler, scope
