@@ -8,6 +8,7 @@
         "junction_within_null_band": true,
         "probe_can_discriminate": true
       },
+      "junction_within_null_band_DIAGNOSTIC": true,
       "measurement": {
         "arms_matched": true,
         "arms_matched_detail": {
@@ -17,21 +18,21 @@
           "n_host_unresolved": 0,
           "n_identical_inside": 0,
           "n_length_mismatch": 0,
-          "n_pairs": 4999
+          "n_pairs": 3701
         },
-        "auroc_decoy_vs_junction_control": 0.7394195382385138,
-        "auroc_junction_control_vs_plain": 0.5178676248801829,
-        "auroc_null_unspliced_vs_unspliced": 0.506043498588729,
-        "content_stderr": 0.0057743688833210875,
-        "junction_stderr": 0.006811416457135383,
+        "auroc_decoy_vs_junction_control": 0.7110681435113129,
+        "auroc_junction_control_vs_plain": 0.5018473797915384,
+        "auroc_null_unspliced_vs_unspliced": 0.5244265203664431,
+        "content_stderr": 0.006711107053030827,
+        "junction_stderr": 0.006545014857746317,
         "k": 4,
-        "n_control": 4999,
-        "n_decoy": 4999,
-        "n_matched_control": 4999,
-        "n_null_reference": 2804,
-        "n_plain": 2804,
+        "n_control": 3701,
+        "n_decoy": 3701,
+        "n_matched_control": 3701,
+        "n_null_reference": 4102,
+        "n_plain": 4102,
         "null_band_sigma": 3.0,
-        "null_stderr": 0.007710349911738024,
+        "null_stderr": 0.006374601104335876,
         "schema_version": "1.0",
         "seed": 20260721,
         "step": "P2-10d'-b"
@@ -41,9 +42,10 @@
       "clauses": {
         "arms_are_matched": true,
         "junction_measurement_present": true,
-        "junction_within_null_band": true,
+        "junction_within_null_band": false,
         "probe_can_discriminate": true
       },
+      "junction_within_null_band_DIAGNOSTIC": false,
       "measurement": {
         "arms_matched": true,
         "arms_matched_detail": {
@@ -53,21 +55,21 @@
           "n_host_unresolved": 0,
           "n_identical_inside": 0,
           "n_length_mismatch": 0,
-          "n_pairs": 4999
+          "n_pairs": 3701
         },
-        "auroc_decoy_vs_junction_control": 0.759919697482205,
-        "auroc_junction_control_vs_plain": 0.5058015526072404,
-        "auroc_null_unspliced_vs_unspliced": 0.5114878810787931,
-        "content_stderr": 0.0057743688833210875,
-        "junction_stderr": 0.006811416457135383,
+        "auroc_decoy_vs_junction_control": 0.8067909014272123,
+        "auroc_junction_control_vs_plain": 0.5327904643427245,
+        "auroc_null_unspliced_vs_unspliced": 0.494731880917634,
+        "content_stderr": 0.006711107053030827,
+        "junction_stderr": 0.006545014857746317,
         "k": 6,
-        "n_control": 4999,
-        "n_decoy": 4999,
-        "n_matched_control": 4999,
-        "n_null_reference": 2804,
-        "n_plain": 2804,
+        "n_control": 3701,
+        "n_decoy": 3701,
+        "n_matched_control": 3701,
+        "n_null_reference": 4102,
+        "n_plain": 4102,
         "null_band_sigma": 3.0,
-        "null_stderr": 0.007710349911738024,
+        "null_stderr": 0.006374601104335876,
         "schema_version": "1.0",
         "seed": 20260721,
         "step": "P2-10d'-b"
@@ -79,11 +81,13 @@
     "structured_rna"
   ],
   "embedding_report": {
+    "decoy_parent_fold_checked": true,
     "embedded_pools": [
       "dinuc_shuffled",
       "structured_rna"
     ],
     "excluded_by_reason": {
+      "decoy_parent_not_nested_train": 1298,
       "masked_known_locus": 1,
       "pool_excluded_by_a7": 2008
     },
@@ -91,16 +95,19 @@
       "gc_background": "superseded for training by the 15,708 real mined genomic windows; a 0th-order i.i.d. surrogate built at P0 when no genome panel existed. Retained unchanged as the ADR-0005 D7 GATE-1 benchmark denominator.",
       "leader_decoy": "label collision: all 8 records are T-box-derived and 2 are exact substrings of training-corpus positives. Re-sourcing deferred to P2-10b\u2032 (ADR-0005 A7 re-scopes D14's leader-pool retention clause)."
     },
-    "insert_len_max": 550,
+    "insert_len_max": 548,
     "insert_len_min": 57,
-    "n_distinct_hosts_used": 4999,
-    "n_embedded": 4999,
+    "n_distinct_hosts_used": 3701,
+    "n_embedded": 3701,
     "n_embedded_by_pool": {
-      "dinuc_shuffled": 2000,
+      "dinuc_shuffled": 702,
       "structured_rna": 2999
     },
-    "n_excluded": 2009,
-    "n_hosts_available": 4999,
+    "n_excluded": 3307,
+    "n_hosts_available": 3701,
+    "n_refused_decoy_parent_out_of_fold": 1298,
+    "n_refused_decoy_parent_unverifiable": 0,
+    "n_training_fold_record_ids": 8303,
     "schema_version": "1.0",
     "seed": 20260721,
     "step": "P2-10d'-b",
@@ -111,10 +118,15 @@
     "gc_background": "superseded for training by the 15,708 real mined genomic windows; a 0th-order i.i.d. surrogate built at P0 when no genome panel existed. Retained unchanged as the ADR-0005 D7 GATE-1 benchmark denominator.",
     "leader_decoy": "label collision: all 8 records are T-box-derived and 2 are exact substrings of training-corpus positives. Re-sourcing deferred to P2-10b\u2032 (ADR-0005 A7 re-scopes D14's leader-pool retention clause)."
   },
+  "gated_clauses": [
+    "arms_are_matched",
+    "probe_can_discriminate"
+  ],
+  "junction_is_visible_at_k6": true,
   "n_admitted_pool_windows": 15606,
   "n_duplicate_windows_dropped": 102,
-  "n_embedded_arm": 4999,
-  "n_unspliced_arm": 2804,
+  "n_embedded_arm": 3701,
+  "n_unspliced_arm": 4102,
   "negative_pool_report": {
     "excluded_by_reason": {
       "masked_known_locus": 2312,
@@ -364,5 +376,8 @@
   "schema_version": "1.0",
   "seed": 20260721,
   "step": "P2-10d'-b",
+  "ungated_diagnostic_clauses": [
+    "junction_within_null_band"
+  ],
   "window_nt": 1024
 }

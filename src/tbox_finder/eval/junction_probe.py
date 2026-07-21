@@ -108,16 +108,20 @@ def cv_auroc(
     junction AUROC came back *below* chance (0.25–0.45). That is a pairing artifact, not a
     signal; :func:`junction_measurement` allocates disjoint hosts per arm.
     """
+    # BEFORE the lazy sklearn import, not after: the module promises to stay importable
+    # in a bare environment, and an import-ordered guard turns a named refusal into a
+    # ModuleNotFoundError for every caller without sklearn.
+    if len(positive) < 2 or len(negative) < 2:
+        raise JunctionProbeError(
+            f"each arm needs at least 2 sequences; got {len(positive)} / {len(negative)}"
+        )
+
     from sklearn.linear_model import LogisticRegression
     from sklearn.metrics import roc_auc_score
     from sklearn.model_selection import StratifiedKFold, cross_val_predict
     from sklearn.pipeline import make_pipeline
     from sklearn.preprocessing import StandardScaler
 
-    if len(positive) < 2 or len(negative) < 2:
-        raise JunctionProbeError(
-            f"each arm needs at least 2 sequences; got {len(positive)} / {len(negative)}"
-        )
     features = kmer_frequencies(list(positive) + list(negative), k=k)
     labels = np.r_[np.ones(len(positive)), np.zeros(len(negative))]
     n_splits = int(min(5, len(positive), len(negative)))
@@ -327,6 +331,104 @@ def junction_clauses(report: dict[str, Any] | None) -> dict[str, bool]:
     clauses["probe_can_discriminate"] = deviation(content) > band
     clauses["junction_within_null_band"] = deviation(junction) <= band
     return clauses
+
+
+def junction_symmetry_clauses(
+    summary: dict[str, Any] | None, realized: dict[str, Any] | None = None
+) -> dict[str, bool]:
+    """Re-derive the junction-SYMMETRY gate (ADR-0005 A7 pin 7, amended 2026-07-21).
+
+    This replaces the original `junction_within_null_band` pass/fail, and it is worth
+    being exact about why, because dropping a clause that was failing is otherwise
+    indistinguishable from loosening a bar. The original clause asked whether the splice
+    junction was *invisible* to a k-mer probe. Measured on the real substrate it is not:
+    across four independent draws the k=6 junction arm read 0.5217 / 0.5264 / 0.5281 /
+    0.5328 against nulls of 0.4947–0.5042 — small, but reproducible and one-directional.
+    A splice junction is a chimera of two genomes and a 6-mer model can see it.
+
+    So the cue is no longer *bounded by measurement*; it is *removed by construction*.
+    Positives receive the same background→background splice, at the same rate and from the
+    same insert-length distribution, which makes "this window is chimeric" carry no class
+    information. What must then be true is arithmetic, not statistics:
+
+    ``rate_is_derived``
+        the positive splice rate equals ``n_chimeric_negatives / n_negative_records``
+        exactly — re-derived here from the recorded counts, never read from a config echo.
+    ``labels_unchanged``
+        the splice moved zero per-nucleotide targets. It overwrites only positions already
+        labelled background and already real, and it is equal-length, so any non-zero count
+        means the interval selector is wrong.
+    ``realized_rates_agree``
+        over an actually-emitted epoch stream, the positive and negative chimeric rates
+        agree within three standard errors of their difference. This is the clause that
+        catches an augmentation configured but never firing.
+    ``control_fires_when_disabled``
+        with the augmentation off, ``realized_rates_agree`` must be FALSE. Without it a
+        broken measurement that reports both rates as zero would pass every clause above
+        ([[control-matchedness-must-be-asserted]]).
+    """
+    clauses = {
+        "rate_is_derived": False,
+        "labels_unchanged": False,
+        "realized_rates_agree": False,
+        "control_fires_when_disabled": False,
+    }
+    if not isinstance(summary, dict):
+        return clauses
+
+    def _count(key: str, src: dict[str, Any]) -> int | None:
+        v = src.get(key)
+        if isinstance(v, bool) or not isinstance(v, int) or v < 0:
+            return None
+        return v
+
+    n_chim = _count("n_chimeric_negatives", summary)
+    n_neg = _count("n_negative_records", summary)
+    rate = summary.get("rate")
+    if (
+        n_chim is None
+        or n_neg is None
+        or n_neg == 0
+        or isinstance(rate, bool)
+        or not isinstance(rate, (int, float))
+    ):
+        return clauses
+    clauses["rate_is_derived"] = abs(float(rate) - n_chim / n_neg) < 1e-12
+
+    moved = _count("n_labels_changed", summary)
+    n_checked = _count("n_windows_label_checked", summary)
+    clauses["labels_unchanged"] = moved == 0 and n_checked is not None and n_checked > 0
+
+    if not isinstance(realized, dict):
+        return clauses
+    on = realized.get("augmented")
+    off = realized.get("control_disabled")
+    clauses["realized_rates_agree"] = _rates_agree(on)
+    # MUST FIRE in the opposite direction: the disabled arm has to be separable, or the
+    # measurement has no power to detect a non-firing augmentation.
+    disabled_agrees = _rates_agree(off)
+    clauses["control_fires_when_disabled"] = disabled_agrees is False and off is not None
+    return clauses
+
+
+def _rates_agree(arm: Any) -> bool:
+    """True when a measured arm's positive and negative chimeric rates are compatible."""
+    if not isinstance(arm, dict):
+        return False
+    try:
+        n_pos = int(arm["n_positive_draws"])
+        n_neg = int(arm["n_negative_draws"])
+        c_pos = int(arm["n_positive_chimeric"])
+        c_neg = int(arm["n_negative_chimeric"])
+    except (KeyError, TypeError, ValueError):
+        return False
+    if n_pos <= 0 or n_neg <= 0:
+        return False
+    p, q = c_pos / n_pos, c_neg / n_neg
+    se = math.sqrt(p * (1 - p) / n_pos + q * (1 - q) / n_neg)
+    if se == 0.0:
+        return p == q
+    return abs(p - q) <= 3.0 * se
 
 
 def model_side_pass(*, auroc_decoy_vs_control: float, auroc_control_vs_plain: float) -> bool:

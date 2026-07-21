@@ -53,7 +53,7 @@ import os
 import subprocess
 import time
 from collections.abc import Iterator, Mapping, Sequence
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from datetime import UTC, datetime
 from itertools import islice
 from pathlib import Path
@@ -86,6 +86,11 @@ GENERATED_BY = "src/tbox_finder/train/train_stage1.py"
 ADR = "ADR-0002"
 ENV_LOCK = "envs/ml-dna.conda-lock.yml"
 CONFIG_PATH = "conf/train/stage1.yaml"
+
+#: How many mined windows are held as donor DNA for the junction-symmetric splice.
+#: A cap, not a sample of everything: the donors are encoded once and kept resident, and
+#: a few thousand real windows already exceed the patch diversity a 550-nt insert needs.
+SYMMETRIC_DONOR_CAP = 2000
 
 DEFAULT_REPORT = "reports/p2/train_stage1_smoke.json"
 DEFAULT_CHECKPOINT_DIR = "checkpoints/p2/stage1"
@@ -1954,8 +1959,16 @@ def build_stream(cfg: Stage1TrainConfig) -> tuple[Any, Any, dict[str, Any]]:
             )
 
             decoy_rows = load_decoy_rows(cfg.negative_decoy_parquet)
+            # The decoy's OWN §9.2 provenance, not just the host's. `dinuc_shuffled`
+            # records are permutations of corpus positives drawn from all 23,535 records,
+            # and 1,298 of 2,000 have a parent outside the training fold; `records` here
+            # IS the training fold, so its ids are the authoritative admission set.
             embedded, embedding_report = embed_decoy_rows(
-                decoy_rows, host_rows, seed=cfg.seed, window=cfg.window_nt
+                decoy_rows,
+                host_rows,
+                seed=cfg.seed,
+                window=cfg.window_nt,
+                training_fold_record_ids={str(r.record_id) for r in records},
             )
             if not embedded:
                 raise ValueError(
@@ -1973,7 +1986,29 @@ def build_stream(cfg: Stage1TrainConfig) -> tuple[Any, Any, dict[str, Any]]:
             )
 
     n_positive = len(records)
-    dataset = Stage1WindowDataset([*records, *negative_records], config=data_config)
+    # ── Junction-symmetric splicing (ADR-0005 A7 pin 7, amended 2026-07-21) ───────────
+    # The rate is DERIVED, never configured: it is the fraction of the negative arm that
+    # is chimeric, so P(chimeric | positive) == P(chimeric | negative) by construction and
+    # "this window has a splice junction" carries no class information. Measured before
+    # the amendment, a 6-mer probe read the junction at ~0.525 AUROC across four
+    # independent draws — small, reproducible, and class-correlated because only
+    # negatives were spliced.
+    symmetric_rate = 0.0
+    symmetric_lengths: tuple[int, ...] = ()
+    symmetric_donors: list[str] = []
+    if embedding_report and negative_records:
+        n_chimeric = int(embedding_report.get("n_embedded", 0))
+        symmetric_rate = n_chimeric / len(negative_records)
+        symmetric_lengths = tuple(int(w.insert_len) for w in embedded)
+        symmetric_donors = [str(r["sequence"]) for r in host_rows[:SYMMETRIC_DONOR_CAP]]
+        data_config = replace(
+            data_config,
+            junction_symmetric_rate=symmetric_rate,
+            junction_symmetric_lengths=symmetric_lengths,
+        )
+    dataset = Stage1WindowDataset(
+        [*records, *negative_records], config=data_config, symmetric_donors=symmetric_donors
+    )
     # The mixer is used even at `negative_fraction == 0`, where it draws zero negatives and
     # its emitted stream is bit-identical to the bare WeightedIndexSampler's (asserted in
     # tests/unit/test_negatives.py). Always routing through it is what makes the mix block
@@ -2029,6 +2064,19 @@ def build_stream(cfg: Stage1TrainConfig) -> tuple[Any, Any, dict[str, Any]]:
         # mined-only run rather than absent, so "no embedding ran" and "the embedding
         # block was dropped from the report" are distinguishable.
         "negative_embedding": embedding_report,
+        # The junction-symmetric augmentation, recorded as the DERIVED quantity it is —
+        # rate, the negative chimeric count it came from, and the donor/length pool sizes
+        # — so a reader can re-derive `n_embedded / n_negative_records` rather than trust
+        # a configured number that no artifact checks.
+        "junction_symmetric": {
+            "rate": float(symmetric_rate),
+            "n_chimeric_negatives": (
+                int(embedding_report.get("n_embedded", 0)) if embedding_report else 0
+            ),
+            "n_negative_records": len(negative_records),
+            "n_donors": len(symmetric_donors),
+            "n_insert_lengths": len(symmetric_lengths),
+        },
         "data_config": asdict(data_config),
     }
     return dataset, sampler, scope

@@ -53,7 +53,7 @@ import hashlib
 import math
 from collections import Counter
 from collections.abc import Iterator, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -1227,6 +1227,18 @@ class Stage1DataConfig:
     phylum_alpha: float = DEFAULT_PHYLUM_ALPHA
     klass_alpha: float = DEFAULT_KLASS_ALPHA
     aa_alpha: float = DEFAULT_AA_ALPHA
+    # ── Junction-symmetric splicing (P2-10d′-b, ADR-0005 A7 pin 7 as amended) ────────
+    #: Probability that a POSITIVE window receives a background→background splice.
+    #: The §9.1 decoy embedding splices negatives only, and a splice junction is a
+    #: chimera of two genomes that a 6-mer probe reads at ~0.525 AUROC (reproducible
+    #: across four independent draws), so "chimeric" predicted the class. Setting this
+    #: to the negatives' own chimeric fraction makes the cue carry no class information
+    #: BY CONSTRUCTION rather than bounding it by measurement. 0.0 ⇒ off (the P2-09
+    #: behaviour, and the designed control the gate must see fail).
+    junction_symmetric_rate: float = 0.0
+    #: Insert lengths to draw from — the empirical embedded-decoy length distribution,
+    #: so a positive's spliced patch is not distinguishable from a negative's by length.
+    junction_symmetric_lengths: tuple[int, ...] = ()
 
 
 class Stage1WindowDataset:
@@ -1253,6 +1265,7 @@ class Stage1WindowDataset:
         *,
         config: Stage1DataConfig | None = None,
         augment: bool | None = None,
+        symmetric_donors: Sequence[str] = (),
     ) -> None:
         if len(records) == 0:
             raise ValueError("Stage1WindowDataset needs at least one record")
@@ -1260,6 +1273,25 @@ class Stage1WindowDataset:
         self.config = config or Stage1DataConfig()
         self.augment = self.config.offset_augmentation if augment is None else bool(augment)
         self._epoch = 0
+        # Real background DNA the junction-symmetric splice draws its patches from,
+        # encoded once. Empty ⇒ the augmentation is inert whatever the rate says, and
+        # `__post_init__`-style pairing is enforced below so that cannot pass silently.
+        self._symmetric_donors: list[np.ndarray] = [
+            encode_bases(str(d).upper()) for d in symmetric_donors
+        ]
+        if float(self.config.junction_symmetric_rate) > 0.0 and not self._symmetric_donors:
+            raise ValueError(
+                "junction_symmetric_rate > 0 but no symmetric_donors were supplied. The "
+                "augmentation would be a no-op while the config claimed the junction cue "
+                "was neutralised — the failure mode is invisible in every metric."
+            )
+        if float(self.config.junction_symmetric_rate) > 0.0 and not tuple(
+            self.config.junction_symmetric_lengths
+        ):
+            raise ValueError(
+                "junction_symmetric_rate > 0 but junction_symmetric_lengths is empty; the "
+                "positive splice would have no length to draw and silently never fire."
+            )
         for r in self.records:
             if (
                 window_lead_range(
@@ -1286,6 +1318,19 @@ class Stage1WindowDataset:
 
     def _rng(self, index: int, occurrence: int) -> np.random.Generator:
         return np.random.default_rng([self.config.seed, self._epoch, index, occurrence])
+
+    def _symmetric_rng(self, index: int, occurrence: int) -> np.random.Generator:
+        """A stream SEPARATE from :meth:`_rng`.
+
+        Salted apart on purpose: drawing the splice decision from the augmentation
+        generator would shift every subsequent lead and strand draw, so enabling the
+        augmentation would silently re-phase every window of every prior run.
+        """
+        from tbox_finder.data.embedding import SYMMETRIC_STREAM_SALT
+
+        return np.random.default_rng(
+            [self.config.seed, self._epoch, index, occurrence, SYMMETRIC_STREAM_SALT]
+        )
 
     def window_at(self, index: int, occurrence: int = 0) -> Window:
         """Carve the window for ``index`` under the current epoch's augmentation.
@@ -1314,7 +1359,7 @@ class Stage1WindowDataset:
                 lead_range, window=self.config.window_nt, locus_length=r.locus_length
             )
             rc = False
-        return carve_window(
+        w = carve_window(
             context_seq=r.context_seq,
             locus_offset=r.locus_offset,
             locus_length=r.locus_length,
@@ -1326,6 +1371,48 @@ class Stage1WindowDataset:
             window=self.config.window_nt,
             rc=rc,
         )
+        return self._maybe_symmetric_splice(w, index, occurrence)
+
+    def _maybe_symmetric_splice(self, w: Window, index: int, occurrence: int) -> Window:
+        """Give a POSITIVE window the same junction a negative's decoy embedding leaves.
+
+        Applied only to positives: negatives already carry their chimera (the embedded
+        decoy), and splicing them again would just raise both rates together. The rate is
+        the negatives' own chimeric fraction, so P(chimeric | positive) matches
+        P(chimeric | negative) and the cue stops predicting the class.
+
+        Nothing about the label is touched — the interval is chosen from positions that
+        are already background AND real, and the replacement is equal-length — so this
+        cannot move a single per-nucleotide target.
+        """
+        rate = float(self.config.junction_symmetric_rate)
+        lengths = tuple(self.config.junction_symmetric_lengths)
+        if rate <= 0.0 or not lengths or not self._symmetric_donors:
+            return w
+        # Inlined rather than imported from `data.negatives`: that module imports THIS
+        # one, so the import would be circular. Positive homology-cluster ids are
+        # non-negative by construction (splits.py); negatives take -(1 + ordinal).
+        if int(self.records[index].cluster_id) < 0:
+            return w
+        rng = self._symmetric_rng(index, occurrence)
+        if float(rng.random()) >= rate:
+            return w
+        from tbox_finder.data.embedding import apply_symmetric_splice
+
+        insert_len = int(lengths[int(rng.integers(0, len(lengths)))])
+        donor = self._symmetric_donors[int(rng.integers(0, len(self._symmetric_donors)))]
+        new_ids, span = apply_symmetric_splice(
+            w.input_ids,
+            w.labels,
+            w.real_mask,
+            donor,
+            insert_len,
+            rng,
+            background_index=BACKGROUND_INDEX,
+        )
+        if span is None:
+            return w
+        return replace(w, input_ids=new_ids)
 
     def __getitem__(self, key: int | tuple[int, int]) -> dict[str, Any]:
         """Fetch one sample.

@@ -1319,7 +1319,9 @@ pass the *same* §9.2 filter rather than a forked copy.
 `tests/unit/test_junction_probe.py` (34) · `tests/unit/test_negative_mix_composition.py` (14) ·
 `tests/ml/test_junction_gate.py` (5).
 
-**Validation.** **PASS.** `reports/p2/junction_control.json` `overall_pass: true`, all 4 clauses true at
+**⚠ THE FIRST VALIDATION VERDICT IN THIS STANZA WAS WRONG — CORRECTED IN PLACE BELOW, ORIGINAL LEFT VISIBLE.**
+
+**Validation (SUPERSEDED — read the correction).** **PASS.** `reports/p2/junction_control.json` `overall_pass: true`, all 4 clauses true at
 **both** k over 4,999 embedded / 2,804 unspliced windows: k=4 null 0.5060 / junction **0.5179** / content
 0.7394; k=6 null 0.5115 / junction **0.5058** / content 0.7599 (SE_H0 0.0077). Realized composition
 15,708 plain + 4,999 embedded = **20,707** records (75.9 / 9.7 / 14.5 %), 2,008 decoys refused by A7
@@ -1346,3 +1348,45 @@ charged to ADR-0003 A2, which is a *sweep* bound. **The SLURM submit-ack is stil
 run has not been launched.
 
 **Commit.** <SHA — squash pending>
+
+
+> **Correction to the P2-10d′-b stanza (same day, before merge).** Two review findings and a
+> re-measurement changed both the construction and the verdict above. **(1) A leakage gap.** The
+> embedding filtered the *host* window's §9.2 fold but never the decoy's own: `dinuc_shuffled`
+> records are Altschul–Erikson permutations of corpus positives sampled from all 23,535 records,
+> and **1,298 of 2,000 (64.9 %)** have a parent outside `nested_train`. ADR-0005 A7 pin 6 claimed
+> embedded negatives' provenance "cannot be weaker than a plain negative's"; it was. Fixed as
+> **pin 6a** — a decoy carrying a `source_record_id` must have that parent in the training fold,
+> and an unsupplied fold set refuses the row as *unverifiable* rather than admitting it.
+> **(2) The junction claim was false, and the fix is what exposed it.** With the arms re-sized by
+> pin 6a (embedded 4,999 → 3,701, unspliced 2,804 → 4,102) the measurement gained power, and the
+> k=6 junction arm rose to **0.5328** against a null of 0.4947. Across **four independent draws**
+> it is **0.5217 / 0.5264 / 0.5281 / 0.5328** against nulls of 0.4947–0.5042 — above its null
+> every time. A splice junction is a chimera of two genomes and a 6-mer model can read it; the
+> original 0.5058 was the lucky draw. Because R2 spliced **only negatives**, that cue was
+> perfectly class-correlated.
+>
+> **What changed as a result (user decision 2026-07-21, "do 1").** The cue is now removed **by
+> construction** rather than bounded by measurement: positive windows receive the same
+> background→background splice, from the same insert-length distribution, at a rate *derived*
+> from the negative arm (**3,701 / 19,409 = 0.19069**), so P(chimeric | positive) equals
+> P(chimeric | negative). The splice overwrites only positions already background-labelled and
+> already real, equal-length, and draws from an RNG salted apart from the lead/strand stream — so
+> it moves no label, invents no DNA at a contig end, and re-phases no prior run. The failing
+> `junction_within_null_band` clause is **retained and reported** in
+> `reports/p2/junction_control.json` (flagged `junction_is_visible_at_k6: true`) rather than
+> quietly dropped; the gate that replaces it is arithmetic
+> (`junction_symmetry_clauses`: derived rate, zero moved labels, realized rates agree, and a
+> must-fire control that must FAIL with the augmentation disabled).
+>
+> **Corrected composition.** 15,708 plain + **3,701** embedded = **19,409** negative records
+> (80.9 / 15.5 / 3.6 %); refusals 2,008 by pins 4–5, **1,298 by pin 6a**, 1 masked.
+> **Corrected validation:** `overall_pass: true` on the *gated* clauses (`arms_are_matched`,
+> `probe_can_discriminate`) at both k, with `junction_within_null_band` recorded **false at k=6**
+> as the finding. Suite **2,203 passed / 216 skipped**. Sabotage-verified in both directions: an
+> inert augmentation reds 4 named tests, and letting the splice ignore the label reds the
+> DNA-under-labelled-positions assertion — which the label-equality check alone could **not**
+> see, since `labels` is a separate array and overwriting a Stem-II position leaves its label
+> intact over donor DNA.
+>
+> **Still open:** the SLURM submit-ack. No training run has been launched.

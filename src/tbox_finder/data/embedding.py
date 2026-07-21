@@ -88,7 +88,7 @@ Bare-CI importable: numpy + stdlib only (pandas is the caller's problem).
 from __future__ import annotations
 
 import hashlib
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -118,6 +118,8 @@ DECOY_ID_COL = "decoy_id"
 DECOY_POOL_COL = "pool"
 DECOY_SEQUENCE_COL = "sequence"
 DECOY_MASKED_COL = "masked"
+#: The corpus record a decoy was DERIVED from, where one exists (`dinuc_shuffled` only).
+DECOY_SOURCE_RECORD_COL = "source_record_id"
 
 #: The §9.1 classes embedded into the round-0 training stream (ADR-0005 A7 pin 3).
 TRAINING_DECOY_POOLS: tuple[str, ...] = ("dinuc_shuffled", "structured_rna")
@@ -147,6 +149,19 @@ REASON_EMPTY_ID = "missing_decoy_id"
 REASON_TOO_LONG = "insert_longer_than_window"
 REASON_EMPTY_INSERT = "empty_insert"
 REASON_NON_ACGTN = "non_acgtn_characters"
+#: The decoy's OWN parent corpus record is not in the §9.2 nested training fold. Distinct
+#: from the host's fold rule: `dinuc_shuffled` records are Altschul–Erikson permutations of
+#: *corpus positives* sampled from all 23,535 records, holdout loci included, and
+#: `decoys.py` calls that relationship "leakage-adjacent" itself. Measured on the shipped
+#: pool, **1,298 of 2,000 (64.9 %)** `dinuc_shuffled` decoys are shuffles of a locus outside
+#: `nested_train`. Embedding one puts a permutation of held-out DNA into the training
+#: stream, and the CI §8.2 gate cannot see it — a runtime-injected negative has no row in
+#: the committed split table ([[ci-leakage-gate-blind-to-runtime-augmentation]]).
+REASON_PARENT_OUT_OF_FOLD = "decoy_parent_not_nested_train"
+#: … and the parent could not be checked at all, because no training-fold id set was
+#: supplied. Refused rather than admitted: "could not verify" must never read the same as
+#: "verified clean".
+REASON_PARENT_UNCHECKABLE = "decoy_parent_fold_unverifiable"
 
 _ACGTN = frozenset("ACGTN")
 
@@ -280,6 +295,7 @@ def embed_decoy_rows(
     window: int = WINDOW_NT,
     pools: Sequence[str] = TRAINING_DECOY_POOLS,
     unique_hosts: bool = False,
+    training_fold_record_ids: Collection[str] | None = None,
 ) -> tuple[list[EmbeddedWindow], dict[str, Any]]:
     """Build one :data:`ARM_DECOY` window per admitted decoy record.
 
@@ -304,6 +320,18 @@ def embed_decoy_rows(
     the fixture's junction AUROC to **0.70** while nothing about the junction had changed.
     Under this flag hosts are assigned by a seeded permutation, one per window, and the
     caller must supply at least as many hosts as there are admitted decoys.
+
+    **The decoy's own §9.2 provenance (added after review).** A decoy carrying a
+    ``source_record_id`` was *derived from a corpus record*: `dinuc_shuffled` records are
+    Altschul–Erikson permutations of corpus positives, sampled from all 23,535 records
+    rather than from the training fold. Filtering only the **host** would leave the
+    embedded arm weaker than the plain arm it claims parity with — measured, **1,298 of
+    2,000 (64.9 %)** `dinuc_shuffled` decoys have a parent outside `nested_train`. So a row
+    with a parent must have that parent in ``training_fold_record_ids``, and if no id set
+    is supplied the row is refused as *unverifiable* rather than admitted. A row with **no**
+    parent (`structured_rna` from Rfam, `gc_background` i.i.d.) has no such relationship to
+    the corpus and is unaffected — the distinction is the presence of the column, which
+    `decoys.py` populates precisely to make the link reconstructable.
 
     Returns ``(windows, report)``; every refusal is counted by reason.
     """
@@ -347,6 +375,14 @@ def embed_decoy_rows(
         if set(insert) - _ACGTN:
             _drop(REASON_NON_ACGTN)
             continue
+        parent = str(row.get(DECOY_SOURCE_RECORD_COL) or "").strip()
+        if parent:
+            if training_fold_record_ids is None:
+                _drop(REASON_PARENT_UNCHECKABLE)
+                continue
+            if parent not in training_fold_record_ids:
+                _drop(REASON_PARENT_OUT_OF_FOLD)
+                continue
         if did in seen_ids:
             raise EmbeddingError(
                 f"duplicate decoy_id {did!r} — a duplicated insert is silently oversampled "
@@ -415,12 +451,96 @@ def embed_decoy_rows(
         "excluded_by_reason": dict(sorted(excluded.items())),
         "n_excluded": int(sum(excluded.values())),
         "n_hosts_available": len(hosts),
+        # Stated as a number, not left to be inferred from the absence of a refusal key: an
+        # omitted reason is ambiguous between "the rule refused nothing" and "the rule was
+        # never armed" ([[clauses-must-guard-emptiness]]).
+        "decoy_parent_fold_checked": training_fold_record_ids is not None,
+        "n_training_fold_record_ids": (
+            None if training_fold_record_ids is None else len(training_fold_record_ids)
+        ),
+        "n_refused_decoy_parent_out_of_fold": int(excluded.get(REASON_PARENT_OUT_OF_FOLD, 0)),
+        "n_refused_decoy_parent_unverifiable": int(excluded.get(REASON_PARENT_UNCHECKABLE, 0)),
         "n_distinct_hosts_used": len({w.host_id for w in out}),
         "unique_hosts": bool(unique_hosts),
         "insert_len_min": min((w.insert_len for w in out), default=0),
         "insert_len_max": max((w.insert_len for w in out), default=0),
     }
     return out, report
+
+
+#: Salt for the junction-symmetric augmentation's per-window draw, distinct from the
+#: dataset's own `(seed, epoch, index, occurrence)` augmentation key so that turning the
+#: augmentation on does NOT shift the lead/strand stream of any prior run.
+SYMMETRIC_STREAM_SALT = 0x10E3
+
+
+def symmetric_splice_interval(
+    labels: np.ndarray,
+    real_mask: np.ndarray,
+    insert_len: int,
+    rng: np.random.Generator,
+    *,
+    background_index: int,
+) -> tuple[int, int] | None:
+    """Choose an interval of ``insert_len`` positions that is safe to overwrite.
+
+    Safe means every position in it is **labelled background** and carries a **real
+    nucleotide** — so replacing the bases there changes no label, invents no DNA at a
+    zero-flanked position, and leaves the window length untouched. Returns ``None`` when
+    no such interval exists (a locus that fills its window has no spare flank), and the
+    caller counts that rather than forcing a placement over labelled elements.
+    """
+    if insert_len <= 0:
+        return None
+    ok = (labels == background_index) & real_mask
+    n = len(ok)
+    if n < insert_len:
+        return None
+    # Prefix sums make "is every position in [i, i+L) safe?" an O(1) test per start.
+    csum = np.concatenate(([0], np.cumsum(ok.astype(np.int64))))
+    starts = np.flatnonzero(csum[insert_len:] - csum[:-insert_len] == insert_len)
+    if starts.size == 0:
+        return None
+    lo = int(starts[int(rng.integers(0, starts.size))])
+    return lo, lo + insert_len
+
+
+def apply_symmetric_splice(
+    input_ids: np.ndarray,
+    labels: np.ndarray,
+    real_mask: np.ndarray,
+    donor_ids: np.ndarray,
+    insert_len: int,
+    rng: np.random.Generator,
+    *,
+    background_index: int,
+) -> tuple[np.ndarray, tuple[int, int] | None]:
+    """Overwrite a background-labelled interval with equal-length real donor DNA.
+
+    This is the **junction-symmetric** half of ADR-0005 A7 pin 7 (amended 2026-07-21).
+    R2 splices only negatives, and a splice junction is a chimera of two genomes that a
+    6-mer model reads at ~0.525 AUROC — measured, and reproducible across four independent
+    draws — so "chimeric" was a class-correlated cue. Applying the *same* background→
+    background splice to positives at the *same* rate removes the cue **by construction**
+    rather than bounding it by measurement.
+
+    Equal-length replacement inside an all-background, all-real interval, so the emitted
+    ``labels`` and ``real_mask`` are returned unchanged by the caller and the window stays
+    exactly ``len(input_ids)`` nt. Returns ``(input_ids, None)`` untouched when the window
+    has no admissible interval.
+    """
+    span = symmetric_splice_interval(
+        labels, real_mask, insert_len, rng, background_index=background_index
+    )
+    if span is None:
+        return input_ids, None
+    lo, hi = span
+    if len(donor_ids) < insert_len:
+        return input_ids, None
+    offset = int(rng.integers(0, len(donor_ids) - insert_len + 1))
+    out = np.array(input_ids, copy=True)
+    out[lo:hi] = donor_ids[offset : offset + insert_len]
+    return out, span
 
 
 def load_decoy_rows(parquet_path: str | Path) -> list[dict[str, Any]]:
