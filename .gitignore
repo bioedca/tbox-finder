@@ -111,6 +111,17 @@
 /reports/p2/sweep/slurm_*.out
 /reports/p2/sweep/slurm_*.err
 
+# P2-09/P2-10 production retrain (train_production.sbatch): the DONE marker + flock lock are
+# run signals (§9.3 keys on absence-on-failure), and the SLURM logs are EXPECTED non-empty on
+# success (torchrun rendezvous / trust_remote_code / W&B-offline chatter — do NOT gate on zero
+# bytes). Every sibling job (sizing, sweep) already ignores its own; this one did not, so a
+# `git add -A` on the cluster checkout would commit them (P2-10d′-e). The committed report
+# reports/p2/train_stage1_production.json is the deliverable and is deliberately NOT ignored.
+/reports/p2/train_stage1_production.DONE
+/reports/p2/.train_production.lock
+/reports/p2/train_production_*.out
+/reports/p2/train_production_*.err
+
 # ── Snakemake working dir + rule run-logs (never committed) ──
 .snakemake/
 /logs/

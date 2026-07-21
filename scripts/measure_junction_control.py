@@ -15,7 +15,9 @@ from __future__ import annotations
 
 import argparse
 import json
+from collections.abc import Mapping
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 
@@ -28,11 +30,43 @@ from tbox_finder.data.embedding import (
 )
 from tbox_finder.data.negatives import load_admitted_pool_rows
 from tbox_finder.eval.junction_probe import junction_clauses, junction_measurement
+from tbox_finder.masking import row_text
 
 DEFAULT_POOL = "data/processed/negatives/mining_pool_v0.parquet"
 DEFAULT_DECOYS = "data/processed/negatives/decoys_v0.parquet"
 DEFAULT_OUT = "reports/p2/junction_control.json"
 DEFAULT_SEED = 20260721
+
+
+def decoy_sizes_embedded_arm(row: Mapping[str, Any], fold_ids: set[str]) -> bool:
+    """True iff this decoy row would be embedded — the size of the spliced arm (P2-10d′-e).
+
+    Mirrors the pool / masked / parent-in-fold subset of
+    :func:`tbox_finder.data.embedding.embed_decoy_rows`'s admission ladder, using
+    :func:`tbox_finder.masking.row_text` for **every** nullable read. The idiom this
+    replaces, ``str(row.get(col) or "")``, is pandas-version-dependent: under pandas 3 a
+    missing ``source_record_id`` is ``NaN`` (truthy) and reads as the literal ``"nan"`` — a
+    present-looking parent in no fold set — so the arm was sized at 702 while
+    ``embed_decoy_rows`` (already on ``row_text``) admitted 3,701, and ``unique_hosts=True``
+    then died with "702 hosts cannot carry 703" on the training env (P2-10d′-c). ``row_text``
+    collapses every missing sentinel to ``""`` identically under pandas 2 and 3, so a
+    parentless decoy is sized in (not read as parent ``"nan"``) and the committed artifact,
+    built under pandas 2.3.3, still reproduces bit-for-bit.
+
+    This intentionally re-expresses only the host-independent filters (pool, masked,
+    parent-fold) as a SIZING count; ``embed_decoy_rows`` remains the sole authority on what is
+    actually admitted (it additionally drops empty-id / empty-insert / over-length / non-ACGTN
+    rows), so this can only over-count, never admit a row the embedder refuses.
+    """
+    pool = row_text(row.get("pool")).strip()
+    if pool not in TRAINING_DECOY_POOLS:
+        return False
+    if bool(row.get("masked")):
+        return False
+    parent = row_text(row.get("source_record_id")).strip()
+    # A parentless decoy (structured_rna / gc_background) has no corpus link to check; a
+    # parented one (dinuc_shuffled) must have its parent inside the §9.2 training fold.
+    return not parent or parent in fold_ids
 
 
 def _training_fold_ids(splits_path: str) -> set[str]:
@@ -84,16 +118,7 @@ def main() -> int:
     # Size the spliced arms to the decoy pool: `unique_hosts=True` gives every embedded
     # window its own host, because two windows sharing a host are near-duplicates that a
     # cross-validated probe recognises across folds.
-    n_embed = sum(
-        1
-        for r in decoy_rows
-        if str(r.get("pool") or "") in TRAINING_DECOY_POOLS
-        and not bool(r.get("masked"))
-        and (
-            not str(r.get("source_record_id") or "").strip()
-            or str(r.get("source_record_id")).strip() in fold_ids
-        )
-    )
+    n_embed = sum(1 for r in decoy_rows if decoy_sizes_embedded_arm(r, fold_ids))
     n_plain = (len(host_rows) - 2 * n_embed) // 2
     if n_plain < 2:
         raise SystemExit(

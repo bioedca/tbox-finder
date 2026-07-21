@@ -211,6 +211,22 @@ assert_dvc_artifact data/processed/negatives/decoys_v0.parquet \
 # `reports/` dirt, which is the one thing it exists to catch (P2-10d′-c).
 rm -f "$DONE" "$CKPT_DIR/stage1.pt" "$CKPT_DIR/provenance.json"
 
+# ── RESTORE the tracked report to HEAD — idempotent re-runs (P2-10d′-e) ───────
+# $REPORT is git-tracked, and a SUCCESSFUL run overwrites it in place, so after run #1 the
+# checkout is permanently dirty there. On run #2, `build_report`'s git snapshot (taken on
+# ALL 8 ranks) would read that leftover dirt as modified code outside `_DATA_STAGING_PREFIXES`
+# and re-derive `provenance_complete` FALSE on EVERY rank — losing ~20 GPU-h deterministically,
+# no race needed. RESTORE it to the committed bytes (never `rm` — deleting dirties the tree
+# just the same, the P2-10d′-c ruling), so every run starts from a clean tree at $REPORT. The
+# header's `git reset --hard` also restores it, but operators skip that reset because it
+# re-breaks the LFS parquet — so the restore must live in the job, not the recipe. Restore only
+# if tracked (a checkout that predates 082f8c7 leaves it untracked, hence invisible to the
+# `--untracked-files=no` snapshot anyway); this is a working-tree restore of ONE file that
+# touches no history and no other path.
+if git ls-files --error-unmatch "$REPORT" >/dev/null 2>&1; then
+  git checkout HEAD -- "$REPORT"
+fi
+
 CONDA_SH=/exports/people/mondragonlab/ecc1695/miniconda3/etc/profile.d/conda.sh
 source "$CONDA_SH"
 conda activate tbox-ml-dna
