@@ -81,6 +81,32 @@ export NVCC_PREPEND_FLAGS="${NVCC_PREPEND_FLAGS:-}"
 REPO="${SLURM_SUBMIT_DIR:-$HOME/tbox-finder}"
 cd "$REPO"
 
+# ── ⛔ REFUSES TO RUN — known-destructive, disabled at P2-10d′-c ──────────────
+# This job clears its stale outputs with `rm -f "$DONE" "$REPORT" "$POINT_DIR"/*.json`, and
+# ALL SIXTEEN of those `reports/p2/...` paths are now GIT-TRACKED. Deleting a tracked path
+# leaves the tree dirty outside `train_stage1._DATA_STAGING_PREFIXES = ("data/",)`, and this
+# job runs `train_stage1` per point — so every point would fail its own `provenance_complete`
+# clause AFTER training, exactly as `train_production.sbatch` would have (measured on the
+# cluster: dirty=[staged parquet] -> True; +[a deleted tracked report] -> FALSE).
+#
+# It is NOT patched the way train_production was, because here the deletion is load-bearing:
+# the aggregation below globs `POINTS=("$POINT_DIR"/*.json)`, so merely not deleting would
+# silently fold a PREVIOUS run's points into this run's report — a wrong sizing number that
+# looks right, which is worse than a job that dies. The real fix is to build the points in
+# node-local scratch and copy them back after aggregating (§9.2), and no part of that can be
+# executed or verified from the laptop. So the job is stopped BEFORE it can destroy anything
+# rather than left runnable behind a test exemption (CodeRabbit, P2-10d′-c r1).
+#
+# To re-enable: move POINT_DIR under $BUILD, copy the points back post-aggregation, delete
+# this block, and drop the `sizing_smoke.sbatch` entry from
+# `tests/unit/test_sbatch_rm_targets.py::_KNOWN_DEFECTIVE` (its xfail is strict, so the
+# suite will fail until that entry goes).
+echo "SIZING_DISABLED: slurm/p2/sizing_smoke.sbatch is disabled at P2-10d'-c — its" >&2
+echo "  stale-output clear deletes 16 git-TRACKED reports, which fails every point's" >&2
+echo "  provenance_complete clause after training. Fix POINT_DIR (-> node-local scratch)" >&2
+echo "  before re-enabling; see the block above. Nothing has been deleted." >&2
+exit 2
+
 OUT_DIR="reports/p2"
 POINT_DIR="$OUT_DIR/sizing"
 REPORT="$OUT_DIR/sizing_smoke.json"
