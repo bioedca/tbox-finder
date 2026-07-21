@@ -332,3 +332,24 @@ def test_schema_version_ordering_is_numeric_not_lexicographic() -> None:
     assert _schema_precedes("10", "2") is False
     assert _schema_precedes(None, "2") is False
     assert _schema_precedes("v1", "2") is False
+
+
+def test_the_warm_clause_compares_paths_not_spellings() -> None:
+    """CodeRabbit r1: `warm_start` records `str(Path(...))`, so the clause must normalise.
+
+    A config spelt `./ckpt.pt` would otherwise compare unequal to its own recorded path
+    and fail a load that in fact succeeded — while a genuinely different checkpoint must
+    still fail.
+    """
+    warm = _warm(checkpoint="checkpoints/p2/stage1/stage1.pt")
+    for spelling in (
+        "checkpoints/p2/stage1/stage1.pt",
+        "./checkpoints/p2/stage1/stage1.pt",
+        "checkpoints/p2//stage1/stage1.pt",
+    ):
+        rep = _report(mix=_mix(), warm=warm, config={"init_from_checkpoint": spelling})
+        assert _warm_start_ok(rep) is True, spelling
+    other = _report(
+        mix=_mix(), warm=warm, config={"init_from_checkpoint": "checkpoints/p2/other.pt"}
+    )
+    assert _warm_start_ok(other) is False

@@ -985,7 +985,11 @@ def _warm_start_ok(report: Mapping[str, Any]) -> bool:
         and warm.get("n_shape_mismatch") == 0
         and warm.get("n_tensors_differing_after") == 0
         and _pos_int(warm.get("n_tensors_differing_before"))
-        and warm.get("checkpoint") == str(requested)
+        # Both sides normalised: `warm_start` records `str(Path(checkpoint))`, so a config
+        # spelt `./ckpt.pt` or `dir//ckpt.pt` would compare unequal to its own recorded
+        # path and fail a load that in fact succeeded. Path equality is the invariant; the
+        # spelling is not. (Genuinely different checkpoints still differ.)
+        and warm.get("checkpoint") == str(Path(str(requested)))
         and isinstance(warm.get("checkpoint_sha256"), str)
         and len(str(warm.get("checkpoint_sha256"))) == 64
     )

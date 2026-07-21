@@ -574,3 +574,56 @@ def test_negative_folds_match_the_split_scheme_arity() -> None:
     ds = _dataset(2, 2)
     rows = ds.provenance_rows()  # raises on an arity mismatch
     assert len(rows) == 4
+
+
+# ── CodeRabbit r1: caps and rounded-to-zero mixes ────────────────────────────────────
+def test_max_records_zero_yields_zero_records() -> None:
+    """A cap is a ceiling on what is built, not on what is built next.
+
+    The post-append break emitted one record for a cap of 0, so the report's
+    `max_records: 0` sat beside a pool of size 1 — a count contradicting its own scope.
+    """
+    rows = [
+        {
+            "candidate_id": f"c{i}",
+            "sequence": _seq(WINDOW, i),
+            "masked": False,
+            "is_designed_control": False,
+        }
+        for i in range(5)
+    ]
+    for cap in (0, 1, 3, 5, 9):
+        records, report = neg.negative_records_from_rows(rows, window=WINDOW, max_records=cap)
+        assert len(records) == min(cap, len(rows)), cap
+        assert report["n_records"] == len(records)
+        assert report["max_records"] == cap
+
+
+def test_a_fraction_that_rounds_to_zero_draws_is_refused() -> None:
+    """A mix that samples none of its pool is not a mix — refuse rather than round down.
+
+    Refused at construction so `mix_clauses` can keep requiring a non-empty draw whenever
+    a fraction was requested; relaxing that clause instead would also admit a run that
+    trained on no negatives at all while its report described a negative curriculum.
+    """
+    ds = _dataset(10, 4)
+    assert neg.negative_draw_count(10, 0.001) == 0
+    with pytest.raises(neg.NegativeInjectionError, match="rounds to 0 negative draws"):
+        neg.MixedIndexSampler(
+            neg.positive_only_sampler(ds, n_positive=10),
+            n_positive_records=10,
+            n_negative_records=4,
+            negative_fraction=0.001,
+            seed=1,
+        )
+    # ...and the smallest fraction that DOES round to a draw is accepted, so the guard is
+    # a boundary rather than a blanket refusal of small mixes.
+    assert neg.negative_draw_count(10, 0.05) == 1
+    ok = neg.MixedIndexSampler(
+        neg.positive_only_sampler(ds, n_positive=10),
+        n_positive_records=10,
+        n_negative_records=4,
+        negative_fraction=0.05,
+        seed=1,
+    )
+    assert ok.mix_summary()["n_negative"] == 1

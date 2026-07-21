@@ -291,6 +291,11 @@ def negative_records_from_rows(
         if set(seq) - _ACGTN:
             _drop(REASON_NON_ACGTN)
             continue
+        # BEFORE the append, not after: a post-append break emits one record for
+        # `max_records=0`, so the report's `max_records: 0` would sit next to a pool of
+        # size 1. A cap is a ceiling on what is built, not on what is built next.
+        if max_records is not None and len(records) >= max_records:
+            break
         if cid in seen_ids:
             raise NegativeInjectionError(
                 f"duplicate candidate_id {cid!r} in the negative pool — a duplicated hard "
@@ -306,8 +311,6 @@ def negative_records_from_rows(
                 window=window,
             )
         )
-        if max_records is not None and len(records) >= max_records:
-            break
 
     report = {
         "schema_version": SCHEMA_VERSION,
@@ -510,6 +513,18 @@ class MixedIndexSampler:
                 f"{self.n_negative_draws} negative draws but the pool is EMPTY. Refusing "
                 "rather than training a run that reports a mix it never sampled — an "
                 "empty pool must fail loudly, not degrade to positives-only."
+            )
+        # The other way to end up with a mix that is not one: a fraction so small (or a
+        # positive stream so short) that the draw count rounds to zero. Refused HERE rather
+        # than left to the gate, so `negative_mix_pool_consistent` can keep requiring a
+        # non-empty draw when a fraction was requested — relaxing that clause to admit a
+        # rounded-down zero would also admit a run that trained on no negatives at all
+        # while its report described a negative curriculum.
+        if self.negative_fraction > 0.0 and self.n_negative_draws == 0:
+            raise NegativeInjectionError(
+                f"negative_fraction={self.negative_fraction} over {len(positive)} positive "
+                "draws rounds to 0 negative draws: the stream would carry none of the pool "
+                "while the config named a mix. Raise the fraction or lengthen the epoch."
             )
         self.seed = int(seed)
         self._epoch = 0
