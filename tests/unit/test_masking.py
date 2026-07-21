@@ -169,3 +169,39 @@ def test_residual_contamination_empty_union_no_zero_division():
         n_union_total=0, n_union_maskable=0, pool_mask_counts={}
     )
     assert rep["residual_contamination_fraction"] == 0.0
+
+
+# --------------------------------------------------------------------------- #
+# row_text — the missing-value boundary for nullable parquet string columns
+# --------------------------------------------------------------------------- #
+# P2-10d′-c: `str(value or "")` is version-dependent. pandas 2 hands a null string cell
+# back as `None` (falsy -> ""); pandas 3's default string dtype uses NaN, which is TRUTHY,
+# so the idiom yields the literal string "nan". These assertions are dialect-free: they use
+# the sentinels directly, so they hold under whichever pandas is installed.
+def test_row_text_collapses_every_missing_sentinel():
+    assert masking.row_text(None) == ""
+    assert masking.row_text(float("nan")) == ""
+
+
+def test_row_text_never_yields_the_string_nan():
+    """The whole failure mode in one assertion: a missing cell must not look present."""
+    assert masking.row_text(float("nan")) != "nan"
+
+
+def test_row_text_preserves_real_values():
+    """The other direction — a null-safe read must not erase data."""
+    assert masking.row_text("rec3") == "rec3"
+    assert masking.row_text(" rec3 ") == " rec3 "  # caller owns .strip()
+    assert masking.row_text(0) == "0"  # falsy but PRESENT: `or ""` would have dropped it
+    assert masking.row_text(False) == "False"
+
+
+def test_row_text_handles_a_pandas_na_if_pandas_is_installed():
+    pd = pytest.importorskip("pandas", reason="pd.NA is the nullable-dtype sentinel")
+    assert masking.row_text(pd.NA) == ""
+
+
+def test_row_text_agrees_with_is_missing():
+    """One boundary, not two: a value is textually absent iff `is_missing` says so."""
+    for value in (None, float("nan"), "", "rec3", 0, False, math.inf):
+        assert (masking.row_text(value) == "") == (masking.is_missing(value) or value == ""), value

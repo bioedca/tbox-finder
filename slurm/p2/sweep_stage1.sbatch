@@ -99,6 +99,31 @@ export NVCC_PREPEND_FLAGS="${NVCC_PREPEND_FLAGS:-}"
 REPO="${SLURM_SUBMIT_DIR:-$HOME/tbox-finder}"
 cd "$REPO"
 
+# ── ⛔ REFUSES TO RUN — known-destructive, disabled at P2-10d′-c ──────────────
+# The per-point clear below removes `$SWEEP_DIR/${KEY}.json` / `.OK`, and all 36 of those
+# `reports/p2/sweep/*.json` point reports are now GIT-TRACKED (committed at P2-06 as the
+# sweep's evidence). Deleting a tracked path leaves the tree dirty outside
+# `train_stage1._DATA_STAGING_PREFIXES = ("data/",)`, and this job runs `train_stage1` per
+# point — so every point would fail its own `provenance_complete` clause AFTER training,
+# the same way `train_production.sbatch` would have (measured on the cluster:
+# dirty=[staged parquet] -> True; +[a deleted tracked report] -> FALSE).
+#
+# The P2-06 sweep is COMPLETE and its winner (`g0.5_lr3e-4_a0.5`) is already promoted, so
+# nothing is waiting on this job. Re-enabling it needs the point reports written to
+# node-local scratch and copied back after the array finishes (§9.2) — which cannot be
+# executed or verified from the laptop, so the job is stopped before it can destroy the
+# committed evidence rather than left runnable behind a test exemption (CodeRabbit r1).
+#
+# To re-enable: move the point paths under $BUILD, copy them back at the end, delete this
+# block, and drop `sweep_stage1.sbatch` from `_KNOWN_DEFECTIVE`/`_MUST_BE_DISABLED` in
+# `tests/unit/test_sbatch_rm_targets.py` (the xfail is strict, so the suite fails until
+# that entry goes).
+echo "SWEEP_DISABLED: slurm/p2/sweep_stage1.sbatch is disabled at P2-10d'-c — its" >&2
+echo "  per-point clear deletes 36 git-TRACKED sweep reports, which fails every point's" >&2
+echo "  provenance_complete clause after training. The P2-06 sweep is already complete." >&2
+echo "  Nothing has been deleted." >&2
+exit 2
+
 SWEEP_DIR="reports/p2/sweep"
 mkdir -p "$SWEEP_DIR"
 

@@ -48,10 +48,16 @@
 #          passes it) that would train the wrong corpus. This body verifies every parquet
 #          against its committed pointer (md5 for .dvc, sha256 for LFS) + PAR1 magic, exit 2
 #          on mismatch.
-# SUBMIT:  from the repo root so relative --output/--error resolve:
+# SUBMIT:  from the repo root so relative --output/--error resolve. SYNC FIRST, SUBMIT
+#          SECOND — never in one `&&` chain: `git reset --hard` rewrites the LFS-pointered
+#          split table back to its 132-byte pointer, undoing the staging the job then
+#          verifies, so the parquets MUST be re-rsync'd after the reset and before sbatch.
+#          (The old recipe here chained them and named `p2-10dp-b`, a branch since deleted
+#          from origin — squash-merged as 748c4f2.)
 #            ssh two 'bash -lc "cd ~/tbox-finder && git fetch origin && \
-#              git checkout p2-10dp-b && git reset --hard origin/p2-10dp-b && \
-#              sbatch slurm/p2/train_production.sbatch"'
+#              git checkout main && git reset --hard origin/main"'
+#            # …re-stage ALL FIVE parquets (see INPUT above)…
+#            ssh two 'bash -lc "cd ~/tbox-finder && sbatch slurm/p2/train_production.sbatch"'
 # PREFLIGHT: ssh two 'bash -lc "cd ~/tbox-finder && sbatch --test-only slurm/p2/train_production.sbatch"'
 # VERIFY (artifact-based; sacct off, §9.3): (a) `squeue -j <jobid>` empty, (b)
 #          reports/p2/train_stage1_production.DONE present, (c) the checkpoint +
@@ -189,7 +195,21 @@ assert_dvc_artifact data/processed/negatives/decoys_v0.parquet \
 # Deferred to here (not at lock acquisition) so a failed staging check above cannot destroy
 # a previously successful production checkpoint/report/provenance (CodeRabbit P2-09 r1). Still
 # ahead of conda/HF, so a crash in that failure-prone path leaves no stale DONE.
-rm -f "$DONE" "$REPORT" "$CKPT_DIR/stage1.pt" "$CKPT_DIR/provenance.json"
+#
+# ⚠️ "$REPORT" IS DELIBERATELY *NOT* CLEARED HERE — it is a GIT-TRACKED path (committed at
+# 082f8c7), and deleting it makes the working tree dirty at a path outside
+# `_DATA_STAGING_PREFIXES = ("data/",)`. `build_report` snapshots `git status` ONCE while
+# that deletion is live, so `_provenance_complete` re-derives FALSE -> `overall_pass` FALSE
+# -> `torch.save` is SKIPPED -> the report is written over the committed P2-09 baseline
+# carrying `overall_pass: false` -> RuntimeError -> rc!=0 -> the EXIT trap wipes $BUILD with
+# the checkpoint inside it. That is the ENTIRE run — ~20 GPU-h — destroyed at the finish
+# line, and it had never fired before because job 671's report predates the clause
+# (schema_version 1, no `git_dirty_paths` key). Rank 0 overwrites the report on success
+# anyway, and freshness is still signalled by DONE + checkpoint + provenance, all untracked.
+# Measured: dirty=[staged parquet] -> provenance_complete True; +[the report] -> FALSE.
+# Do NOT "fix" this by widening `_DATA_STAGING_PREFIXES` — that blinds the clause to real
+# `reports/` dirt, which is the one thing it exists to catch (P2-10d′-c).
+rm -f "$DONE" "$CKPT_DIR/stage1.pt" "$CKPT_DIR/provenance.json"
 
 CONDA_SH=/exports/people/mondragonlab/ecc1695/miniconda3/etc/profile.d/conda.sh
 source "$CONDA_SH"
@@ -243,6 +263,10 @@ print("hf cache warm", REPO_ID, REVISION)
 # node-local scratch first, then moved to the repo path below (§9.2: build in /tmp, move only
 # the final artifact).
 BUILD_CKPT="$BUILD/checkpoint"
+# Freshness fingerprint, taken INSTEAD of deleting the tracked report (see the clear above).
+# Absent file -> empty string, which no md5 can equal, so "was missing" and "was replaced"
+# both read as fresh and only "unchanged bytes" reads as stale.
+REPORT_BEFORE="$(md5sum "$REPORT" 2>/dev/null | awk '{print $1}' || true)"
 echo "── training P2-09 round-0 production (full D5 fold, DDP×8, fp32) ──"
 set +e
 PYTHONHASHSEED=0 PYTHONPATH=src torchrun --standalone --nproc_per_node=8 \
@@ -263,6 +287,22 @@ if [ "$rc" -ne 0 ] || [ ! -s "$REPORT" ]; then
   echo "PRODUCTION_FAIL rc=$rc (report not written or process failed its own gate — §9.3 sees the missing DONE)" >&2
   [ "$rc" -ne 0 ] || rc=1
   exit "$rc"
+fi
+# The report is no longer cleared before the run, so "a report exists" no longer implies
+# "THIS run wrote it" — a stale committed one would satisfy `[ -s ]`. Assert it changed.
+# Both failure directions are explicit: an UNCOMPUTABLE fingerprint must not pass by being
+# unequal to the old one (`md5sum` errors are swallowed by the pipe, so an unreadable report
+# yields "" — which differs from every real md5 and would have sailed through), and an
+# UNCHANGED one must not pass at all (CodeRabbit, P2-10d′-c r2).
+REPORT_AFTER="$(md5sum "$REPORT" 2>/dev/null | awk '{print $1}' || true)"
+if [ -z "$REPORT_AFTER" ]; then
+  echo "PRODUCTION_FAIL: could not fingerprint $REPORT after the run (missing or unreadable)." >&2
+  exit 1
+fi
+if [ "$REPORT_BEFORE" = "$REPORT_AFTER" ]; then
+  echo "PRODUCTION_FAIL: $REPORT is byte-identical to the one that was there before this run" >&2
+  echo "  (md5 $REPORT_AFTER) — rank 0 did not write it, so it describes some OTHER run." >&2
+  exit 1
 fi
 if [ ! -s "$BUILD_CKPT/stage1.pt" ]; then
   echo "PRODUCTION_FAIL: report passed its gate but no checkpoint was written at $BUILD_CKPT/stage1.pt." >&2

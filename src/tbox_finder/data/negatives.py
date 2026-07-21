@@ -83,6 +83,7 @@ from tbox_finder.data.window_dataset import (
     CorpusRecord,
     WeightedIndexSampler,
 )
+from tbox_finder.masking import is_missing, row_text
 
 #: Bumped at P2-10d′-a: the audit report gained `require_parent_nested_train`,
 #: `n_refused_parent_out_of_fold`, and `n_refused_parent_unresolved`. A reader holding a
@@ -304,7 +305,13 @@ def admit_pool_rows(
     which the CI §8.2 gate cannot see.
 
     Returned rows carry the **normalised** ``candidate_id`` / ``sequence`` /
-    ``source_record_id`` (stripped, upper-cased), so every consumer sees the same bytes
+    ``source_record_id``: the ids are stripped, the sequence is upper-cased but
+    deliberately **not** stripped — surrounding whitespace makes a sequence fail the
+    window-length check below, which refuses the row rather than silently repairing a
+    pool whose bytes are not what the carver wrote (the fail-closed direction). The
+    docstring previously claimed the sequence was stripped; the code never did, on this
+    branch or before it (CodeRabbit, P2-10d′-c r4).
+    So every consumer sees the same bytes
     the record builder does.
     """
 
@@ -321,9 +328,9 @@ def admit_pool_rows(
 
     for row in rows:
         n_rows += 1
-        seq = str(row.get(SEQUENCE_COL) or "").upper()
+        seq = row_text(row.get(SEQUENCE_COL)).upper()
         lengths[len(seq)] = lengths.get(len(seq), 0) + 1
-        cid = str(row.get(CANDIDATE_ID_COL) or "").strip()
+        cid = row_text(row.get(CANDIDATE_ID_COL)).strip()
         if not cid:
             _drop(REASON_EMPTY_ID)
             continue
@@ -333,16 +340,19 @@ def admit_pool_rows(
         if skip_designed_controls and bool(row.get(CONTROL_COL)):
             _drop(REASON_DESIGNED_CONTROL)
             continue
-        parent = str(row.get(SOURCE_RECORD_ID_COL) or "").strip()
+        parent = row_text(row.get(SOURCE_RECORD_ID_COL)).strip()
         fold = row.get(PARENT_FOLD_COL)
         # Unresolved is its own reason, and is checked whether or not the fold rule is
         # armed: a row that cannot name the corpus record its DNA came from yields a
         # record whose §9.2 provenance is unfalsifiable, so it is refused rather than
         # built. Keeping it apart from "out of fold" is what stops a filter that has
         # stopped resolving *anything* from reading as a filter that found nothing to
-        # refuse ([[namespace-mismatch-invisible-noop]]). `fold is None` covers both a
-        # missing column and a null cell.
-        if not parent or (require_parent_nested_train and fold is None):
+        # refuse ([[namespace-mismatch-invisible-noop]]). `is_missing(fold)` covers a
+        # missing column AND a null cell in either pandas dialect: `fold is None` alone
+        # admits the NaN that pandas 3 substitutes for None in a nullable column, and
+        # `bool(NaN)` is **True**, so a null `parent_nested_train` would have read as
+        # "in fold" — fail-open on the §9.2 rule (P2-10d′-c; [[row_text]]).
+        if not parent or (require_parent_nested_train and is_missing(fold)):
             _drop(REASON_PARENT_UNRESOLVED)
             continue
         if require_parent_nested_train and not bool(fold):

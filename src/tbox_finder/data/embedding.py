@@ -102,6 +102,7 @@ from tbox_finder.data.negatives import (
     background_record,
 )
 from tbox_finder.data.window_dataset import WINDOW_NT, CorpusRecord
+from tbox_finder.masking import row_text
 
 #: Bumped whenever the embedding report gains a field a reader could otherwise mistake
 #: for a rule that ran. "1.0" is P2-10d′-b's first shape.
@@ -353,9 +354,9 @@ def embed_decoy_rows(
         excluded[reason] = excluded.get(reason, 0) + 1
 
     for row in decoy_rows:
-        pool = str(row.get(DECOY_POOL_COL) or "").strip()
+        pool = row_text(row.get(DECOY_POOL_COL)).strip()
         seen_pools.add(pool)
-        did = str(row.get(DECOY_ID_COL) or "").strip()
+        did = row_text(row.get(DECOY_ID_COL)).strip()
         if not did:
             _drop(REASON_EMPTY_ID)
             continue
@@ -365,7 +366,7 @@ def embed_decoy_rows(
         if bool(row.get(DECOY_MASKED_COL)):
             _drop(REASON_MASKED)
             continue
-        insert = normalise_insert(row.get(DECOY_SEQUENCE_COL) or "")
+        insert = normalise_insert(row_text(row.get(DECOY_SEQUENCE_COL)))
         if not insert:
             _drop(REASON_EMPTY_INSERT)
             continue
@@ -375,7 +376,7 @@ def embed_decoy_rows(
         if set(insert) - _ACGTN:
             _drop(REASON_NON_ACGTN)
             continue
-        parent = str(row.get(DECOY_SOURCE_RECORD_COL) or "").strip()
+        parent = row_text(row.get(DECOY_SOURCE_RECORD_COL)).strip()
         if parent:
             if training_fold_record_ids is None:
                 _drop(REASON_PARENT_UNCHECKABLE)
@@ -401,7 +402,7 @@ def embed_decoy_rows(
                 )
             host_index = int(_host_permutation(len(hosts), seed)[len(out)])
         host = hosts[host_index]
-        host_seq = str(host.get("sequence") or "").upper()
+        host_seq = row_text(host.get("sequence")).upper()
         if len(host_seq) != window:
             raise EmbeddingError(
                 f"host {host.get('candidate_id')!r} is {len(host_seq)} nt, not {window}; "
@@ -411,8 +412,8 @@ def embed_decoy_rows(
             EmbeddedWindow(
                 arm=ARM_DECOY,
                 sequence=splice(host_seq, insert, phase),
-                host_id=str(host.get("candidate_id") or "").strip(),
-                host_parent_record_id=str(host.get("source_record_id") or "").strip(),
+                host_id=row_text(host.get("candidate_id")).strip(),
+                host_parent_record_id=row_text(host.get("source_record_id")).strip(),
                 insert_id=did,
                 insert_pool=pool,
                 phase=phase,
@@ -437,6 +438,23 @@ def embed_decoy_rows(
         raise EmbeddingError(
             f"pool(s) {missing_wanted} are pinned into the training mix but absent from the "
             "decoy pool; the realized composition would silently differ from A7 pin 3."
+        )
+    # …and a pool that IS in the file but contributes NOTHING. `seen_pools` is stamped at
+    # the top of the loop, BEFORE every filter, so the guard above only proves the name was
+    # read — not that a single record survived. That gap is not theoretical: it is exactly
+    # how the pandas-3 NaN parent bug shipped a mix with `structured_rna` at share **0**
+    # while `missing_wanted` stayed empty, `n_embedded` stayed > 0, and every downstream
+    # clause passed (P2-10d′-c). A7 pin 3 makes the per-class shares *pool-proportional*
+    # over `wanted`, and a share of zero is not a proportion of anything — so refuse.
+    # Gated on `per_pool`, the count the records themselves produce, never on the request.
+    empty_wanted = sorted(p for p in wanted if per_pool.get(p, 0) == 0)
+    if empty_wanted:
+        raise EmbeddingError(
+            f"pool(s) {empty_wanted} are pinned into the training mix by ADR-0005 A7 pin 3 "
+            f"and are present in the decoy pool, but every one of their records was "
+            f"refused: {dict(sorted(excluded.items()))}. A run that embeds none of a pinned "
+            "class while reporting a four-class mix is the P2-09 shortfall one layer down. "
+            "Refusing rather than shipping a composition that silently differs from the pin."
         )
 
     report = {
@@ -601,7 +619,7 @@ def junction_control(
             "the junction control needs at least two mined windows — the donor segment "
             "must come from a window other than the host"
         )
-    by_id = {str(h.get("candidate_id") or "").strip(): h for h in hosts}
+    by_id = {row_text(h.get("candidate_id")).strip(): h for h in hosts}
     out: list[EmbeddedWindow] = []
     for w in embedded:
         rng = _stable_stream(seed, w.insert_id, w.host_id, salt=CONTROL_STREAM_SALT)
@@ -611,14 +629,14 @@ def junction_control(
                 f"host {w.host_id!r} of an embedded window is not in the host pool; the "
                 "control cannot be matched to a host it cannot find"
             )
-        host_seq = str(host_row.get("sequence") or "").upper()
+        host_seq = row_text(host_row.get("sequence")).upper()
         segment = None
         for _ in range(_MAX_DONOR_DRAWS):
             cand = hosts[int(rng.integers(0, len(hosts)))]
-            cid = str(cand.get("candidate_id") or "").strip()
+            cid = row_text(cand.get("candidate_id")).strip()
             if not cid or cid == w.host_id:
                 continue
-            donor_seq = str(cand.get("sequence") or "").upper()
+            donor_seq = row_text(cand.get("sequence")).upper()
             if len(donor_seq) != window:
                 raise EmbeddingError(f"donor {cid!r} is {len(donor_seq)} nt, not {window}")
             candidate_segment = donor_seq[w.phase : w.phase + w.insert_len]
@@ -644,7 +662,7 @@ def junction_control(
                 sequence=splice(host_seq, segment, w.phase),
                 host_id=w.host_id,
                 host_parent_record_id=w.host_parent_record_id,
-                insert_id=str(donor.get("candidate_id") or "").strip(),
+                insert_id=row_text(donor.get("candidate_id")).strip(),
                 insert_pool=ARM_CONTROL,
                 phase=w.phase,
                 insert_len=w.insert_len,

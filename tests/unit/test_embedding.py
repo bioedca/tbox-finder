@@ -179,13 +179,153 @@ def test_a_missing_training_pool_is_an_error() -> None:
 
 
 def test_masked_decoys_are_refused() -> None:
+    """Masking refuses the records it names — but not the whole pinned pool.
+
+    Rewritten at P2-10d′-c, NOT relaxed. It used to mask *every* ``structured_rna`` row and
+    assert ``n_embedded_by_pool["structured_rna"] == 0``, which is precisely the value the
+    pandas-3 NaN bug produced — so the suite's only per-pool assertion certified the broken
+    composition as correct. A pinned pool at share 0 is now an error in its own right (see
+    :func:`test_a_pinned_pool_that_admits_nothing_is_refused`), so the refusal is asserted
+    on a *subset* and the survivor is asserted too.
+    """
+    rows = _decoy_rows()
+    masked = [r for r in rows if r["pool"] == "structured_rna"][:2]
+    for r in masked:
+        r["masked"] = True
+    _, report = embed_decoy_rows(rows, _hosts(20), seed=SEED, window=WINDOW)
+    assert report["excluded_by_reason"]["masked_known_locus"] == 2
+    assert report["n_embedded_by_pool"]["structured_rna"] == 1
+
+
+def test_a_pinned_pool_that_admits_nothing_is_refused() -> None:
+    """A7 pin 3's shares are pool-proportional, and 0 is not a proportion.
+
+    The pre-existing ``missing_wanted`` guard cannot catch this: ``seen_pools`` is stamped
+    before every filter, so a pool whose every record is refused still counts as "seen".
+    That gap is how ``structured_rna`` reached share 0 in a green run (P2-10d′-c).
+    """
     rows = _decoy_rows()
     for r in rows:
         if r["pool"] == "structured_rna":
             r["masked"] = True
-    _, report = embed_decoy_rows(rows, _hosts(20), seed=SEED, window=WINDOW)
-    assert report["excluded_by_reason"]["masked_known_locus"] == 3
-    assert report["n_embedded_by_pool"].get("structured_rna", 0) == 0
+    with pytest.raises(EmbeddingError, match=r"every one of their records was refused"):
+        embed_decoy_rows(rows, _hosts(20), seed=SEED, window=WINDOW)
+
+
+# ── the decoy's OWN §9.2 parent rule, across pandas' two missing-value dialects ──────
+# The bug these gates lock (P2-10d′-c): `str(row.get(col) or "")` yields `""` for pandas 2's
+# `None` but the string `"nan"` for pandas 3's NaN sentinel — a present-looking parent id in
+# no fold set. All 2,999 unmasked `structured_rna` decoys were refused as
+# `decoy_parent_not_nested_train` in the training env while being admitted in CI's.
+#
+# These assertions use NaN as a LITERAL, not via a parquet round-trip, so they bite under
+# pandas 2 and 3 alike; the round-trip test below locks the loader boundary but cannot
+# discriminate under the pandas CI pins (it says so itself).
+_FOLD = {"rec0", "rec1", "rec2", "rec3", "rec4", "rec5", "rec6", "rec7"}
+
+
+def _parented(parent: object, n: int | None = None) -> list[dict[str, object]]:
+    """The standard decoy rows with the first `n` `structured_rna` rows carrying `parent`.
+
+    `n=None` means all of them. Tests that expect a REFUSAL must pass `n` < the pool size:
+    a pinned pool refused down to zero is now an error in its own right, so refusing the
+    whole pool would raise before the refusal *counts* could be asserted. Mixing admitted
+    and refused rows is also the real situation — `dinuc_shuffled` ships 702 in-fold and
+    1,298 out-of-fold.
+    """
+    rows = _decoy_rows()
+    targets = [r for r in rows if r["pool"] == "structured_rna"]
+    for r in targets if n is None else targets[:n]:
+        r["source_record_id"] = parent
+    return rows
+
+
+@pytest.mark.parametrize(
+    ("sentinel", "label"),
+    [(None, "pandas-2 None"), (float("nan"), "pandas-3 NaN"), ("", "empty string")],
+)
+def test_a_missing_parent_reads_as_absent_not_as_out_of_fold(sentinel: object, label: str) -> None:
+    """A decoy with NO parent has nothing to leak, and must be admitted in every dialect.
+
+    `structured_rna` decoys are Rfam-derived, not permutations of corpus loci, so their
+    `source_record_id` is null for all 3,000 of them. Reading that null as an id is what
+    deleted the pool from the mix.
+    """
+    _, report = embed_decoy_rows(
+        _parented(sentinel),
+        _hosts(20),
+        seed=SEED,
+        window=WINDOW,
+        training_fold_record_ids=_FOLD,
+    )
+    assert report["n_embedded_by_pool"]["structured_rna"] == 3, label
+    assert "decoy_parent_not_nested_train" not in report["excluded_by_reason"], label
+
+
+def test_a_parent_outside_the_fold_is_still_refused() -> None:
+    """The other direction — the fix must not turn the §9.2 rule into a fail-open.
+
+    Without this, collapsing every unrecognised parent to "absent" would admit exactly the
+    held-out-locus permutations pin 6a exists to refuse.
+    """
+    _, report = embed_decoy_rows(
+        _parented("rec_NOT_IN_FOLD", n=2),
+        _hosts(20),
+        seed=SEED,
+        window=WINDOW,
+        training_fold_record_ids=_FOLD,
+    )
+    assert report["excluded_by_reason"]["decoy_parent_not_nested_train"] == 2
+    assert report["n_refused_decoy_parent_out_of_fold"] == 2
+    assert report["n_embedded_by_pool"]["structured_rna"] == 1  # the parentless survivor
+
+
+def test_a_parent_inside_the_fold_is_admitted() -> None:
+    _, report = embed_decoy_rows(
+        _parented("rec3"),
+        _hosts(20),
+        seed=SEED,
+        window=WINDOW,
+        training_fold_record_ids=_FOLD,
+    )
+    assert report["n_embedded_by_pool"]["structured_rna"] == 3
+    assert report["n_refused_decoy_parent_out_of_fold"] == 0
+
+
+def test_an_unverifiable_parent_is_refused_when_no_fold_set_is_supplied() -> None:
+    """ "Could not check" must never read as "checked and clean" — the pre-existing rule,
+    re-asserted here because the null-safety change touches the branch above it."""
+    _, report = embed_decoy_rows(_parented("rec3", n=2), _hosts(20), seed=SEED, window=WINDOW)
+    assert report["excluded_by_reason"]["decoy_parent_fold_unverifiable"] == 2
+    assert report["decoy_parent_fold_checked"] is False
+    assert report["n_embedded_by_pool"]["structured_rna"] == 1
+
+
+def test_decoy_parent_nulls_survive_the_parquet_loader_boundary(tmp_path) -> None:
+    """`load_decoy_rows` -> `embed_decoy_rows` on a REAL parquet with a null parent column.
+
+    STATED LIMIT: under the pandas CI/data pins (2.3.3) the round-trip yields `None`, which
+    the old code also handled, so this test CANNOT discriminate there — it is a boundary
+    lock, not the bite. The parametrised NaN-literal test above is the one that fails under
+    both dialects. Under pandas >= 3 this test additionally reproduces the original bug.
+    """
+    pd = pytest.importorskip("pandas", reason="the loader boundary is pandas-side")
+    rows = _decoy_rows()
+    for r in rows:
+        r["source_record_id"] = None if r["pool"] == "structured_rna" else "rec3"
+    path = tmp_path / "decoys.parquet"
+    pd.DataFrame(rows).to_parquet(path)
+
+    from tbox_finder.data.embedding import load_decoy_rows
+
+    loaded = load_decoy_rows(path)
+    assert len(loaded) == len(rows)
+    _, report = embed_decoy_rows(
+        loaded, _hosts(20), seed=SEED, window=WINDOW, training_fold_record_ids=_FOLD
+    )
+    assert report["n_embedded_by_pool"]["structured_rna"] == 3
+    assert report["n_embedded_by_pool"]["dinuc_shuffled"] == 3
+    assert "decoy_parent_not_nested_train" not in report["excluded_by_reason"]
 
 
 def test_duplicate_decoy_id_is_refused() -> None:

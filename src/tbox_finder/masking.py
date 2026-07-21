@@ -259,6 +259,35 @@ def is_missing(value: Any) -> bool:
         return True
 
 
+def row_text(value: Any) -> str:
+    """Text of a parquet cell, with every missing sentinel collapsing to ``""``.
+
+    The string counterpart of :func:`is_missing`, and the ONLY correct way to read a
+    nullable string column out of a ``to_dict("records")`` row.
+
+    ``str(value or "")`` — the idiom this function replaces — is **version-dependent**.
+    Under pandas 2 a null string cell arrives as ``None``, which is falsy, so the idiom
+    yields ``""``. Under **pandas 3** the default string dtype's missing sentinel is
+    ``NaN`` (pandas' own *migration-3-strings* guide: "the missing value sentinel is now
+    always NaN … code that specifically relied on ``None`` being preserved as ``None``
+    might be impacted", and it recommends ``pd.isna``) — and ``NaN`` is **truthy**, so
+    the idiom yields the string ``"nan"``: a present-looking value that is in no id set,
+    no lookup table and no fold.
+
+    That is not hypothetical. It shipped: ``envs/data.yml`` and CI pin pandas 2.3.3 while
+    ``envs/ml-dna.conda-lock.yml`` — the env that actually trains — carries 3.0.3, so
+    :func:`tbox_finder.data.embedding.embed_decoy_rows` refused all 2,999 unmasked
+    ``structured_rna`` decoys as ``decoy_parent_not_nested_train`` on the cluster while
+    admitting them on the laptop. A parentless decoy read as having an out-of-fold parent
+    is a **silent 60 % cut of the §9.1 embedded mix, filed under a leakage reason** — it
+    reads as the §9.2 filter working (P2-10d′-c).
+
+    Deliberately pandas-free (this module's stdlib-only tier), so it is usable below the
+    pandas boundary and its behaviour cannot drift with the installed pandas.
+    """
+    return "" if is_missing(value) else str(value)
+
+
 # --------------------------------------------------------------------------- #
 # The ADR-0006 D11 / ADR-0005 D14 mining spare-rule (pure predicate)
 # --------------------------------------------------------------------------- #
