@@ -27,9 +27,11 @@ tracked file has the same effect on the same clause.
 
 from __future__ import annotations
 
+import posixpath
 import re
 import shlex
 import subprocess
+from fnmatch import fnmatch
 from pathlib import Path
 
 import pytest
@@ -42,8 +44,18 @@ SLURM = REPO / "slurm"
 _ASSIGN = re.compile(r'^\s*([A-Za-z_][A-Za-z0-9_]*)=(".*?"|\'.*?\'|\S*)\s*$')
 #: A deletion. `rm` with any flags, capturing the rest of the (logical) command.
 _RM = re.compile(r"(?:^|\s|;|&&|\|\|)rm\s+((?:-[A-Za-z]+\s+)*)(.+)$")
-#: `$VAR` or `${VAR}`.
-_VAR = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)")
+#: Marker left in place of a variable this parser cannot resolve. Never silently dropped.
+_UNRESOLVED = "\x00UNRESOLVED"
+#: `$VAR`, `${VAR}`, or `${VAR:-default}` (the default is taken when VAR is unknown — that
+#: is what makes `${SLURM_SUBMIT_DIR:-$HOME/tbox-finder}` resolvable).
+_VAR = re.compile(
+    r"\$\{([A-Za-z_][A-Za-z0-9_]*)(:-[^}]*)?\}|\$([A-Za-z_][A-Za-z0-9_]*)|\$\{[^}]*\}"
+)
+#: Variables whose meaning is fixed by how these jobs are submitted (§9.3: `sbatch` is run
+#: FROM the repo root, so SLURM sets SLURM_SUBMIT_DIR to it). Seeding them as "." is what
+#: lets `${SLURM_SUBMIT_DIR:-...}/reports/p1/x.json` be scored as the repo-relative path it
+#: actually is, instead of as an unresolvable mystery.
+_SEED_ENV = {"SLURM_SUBMIT_DIR": ".", "REPO": "."}
 
 
 def _sbatch_files() -> list[Path]:
@@ -84,8 +96,18 @@ def _resolve(value: str, env: dict[str, str]) -> str:
     Unresolved is deliberately *not* silently dropped: a path this parser cannot resolve
     must not masquerade as a safe literal, so it is reported rather than skipped.
     """
+
+    def _one(m: re.Match) -> str:
+        name = m.group(1) or m.group(3)
+        if name is None:
+            return _UNRESOLVED  # `${ARR[i]}` and friends: a form this parser cannot expand
+        if name in env:
+            return env[name]
+        default = m.group(2)
+        return default[2:] if default is not None else _UNRESOLVED
+
     for _ in range(5):  # bounded: assignments here nest at most a level or two
-        new = _VAR.sub(lambda m: env.get(m.group(1) or m.group(2), "\x00UNRESOLVED"), value)
+        new = _VAR.sub(_one, value)
         if new == value:
             break
         value = new
@@ -115,7 +137,7 @@ def _rm_targets(text: str) -> list[tuple[int, str]]:
 
     (CodeRabbit, P2-10d′-c r1.)
     """
-    env: dict[str, str] = {}
+    env: dict[str, str] = dict(_SEED_ENV)
     targets: list[tuple[int, str]] = []
     for line_no, line in _logical_lines(text):
         stripped = line.lstrip()
@@ -177,7 +199,7 @@ def test_a_backslash_continued_rm_is_still_seen() -> None:
 def test_an_unresolvable_variable_is_not_scored_as_a_safe_literal() -> None:
     """A path the parser cannot resolve must be visibly unresolved, never a clean miss."""
     (target,) = [p for _, p in _rm_targets('rm -f "$UNDEFINED_VAR"\n')]
-    assert "UNRESOLVED" in target
+    assert _UNRESOLVED in target
 
 
 #: Known-defective sbatch files, named rather than skipped. `sizing_smoke.sbatch:98` clears
@@ -194,18 +216,38 @@ def test_an_unresolvable_variable_is_not_scored_as_a_safe_literal() -> None:
 #:
 #: `strict=True` is load-bearing: when sizing_smoke IS fixed this test XPASSes, which
 #: **fails** the suite and forces this entry to be deleted. The exemption cannot rot green.
-_KNOWN_DEFECTIVE = {"sizing_smoke.sbatch": "P2-10d′-c: needs POINT_DIR moved to scratch"}
+_KNOWN_DEFECTIVE = {
+    # P2 — this step's blast radius. Disabled outright (see _MUST_BE_DISABLED).
+    "sizing_smoke.sbatch": "P2-10d′-c: deletes sizing_smoke.json + 15 tracked point reports",
+    "sweep_stage1.sbatch": "P2-10d′-c: deletes 36 tracked sweep point reports",
+    # P1 — the same defect, found by this gate the day it was written. These jobs are
+    # COMPLETE and unscheduled, and disabling seven of them is a scope decision for the
+    # user, not a side effect of a P2 bug fix — so they are recorded here and raised in
+    # TODO.md for a remediation step, not silently fixed or silently ignored.
+    "kernel_smoke.sbatch": "P2-10d′-c census: deletes tracked reports/p1/kernel_smoke.json",
+    "lora_smoke.sbatch": "P2-10d′-c census: deletes tracked reports/p1/lora_vram_smoke.json",
+    "rinalmo_parity.sbatch": "P2-10d′-c census: deletes 9 tracked parity fold reports",
+    "rinalmo_throughput.sbatch": "P2-10d′-c census: deletes tracked rinalmo_throughput.json",
+    "seg_smoke.sbatch": "P2-10d′-c census: deletes a tracked report AND a tracked provenance",
+    "seg_smoke_repro.sbatch": "P2-10d′-c census: deletes tracked reports/p1/seg_smoke_repro.json",
+}
+
+#: Of the above, the ones that must additionally be UNRUNNABLE. An exemption alone is just
+#: permission — the file stays submittable while the suite is green about it (CodeRabbit,
+#: P2-10d′-c r1) — so every P2 job in this step's blast radius carries a hard refusal. The
+#: P1 entries are a census awaiting a scheduled remediation step; they are listed above so
+#: their `strict=True` xfail forces them out the moment they are fixed.
+_MUST_BE_DISABLED = {"sizing_smoke.sbatch", "sweep_stage1.sbatch"}
 
 
-@pytest.mark.parametrize("name", sorted(_KNOWN_DEFECTIVE))
+@pytest.mark.parametrize("name", sorted(_MUST_BE_DISABLED))
 def test_a_known_defective_sbatch_cannot_run_at_all(name: str) -> None:
-    """An exemption from the gate above must come with the job being UNRUNNABLE.
+    """A disabled-for-cause job must refuse BEFORE it can destroy anything.
 
-    Otherwise `xfail` is just permission: the file stays submittable while the suite is
-    green about it (CodeRabbit, P2-10d′-c r1). The refusal must be unconditional (column 0,
-    so not nested inside an `if`) and must precede the first deletion, so the job cannot
-    destroy anything on its way out.
+    The refusal must be unconditional (column 0, so not nested inside an `if`) and must
+    precede the first deletion.
     """
+    assert name in _KNOWN_DEFECTIVE, f"{name} must also carry a gate exemption"
     (path,) = [p for p in _sbatch_files() if p.name == name]
     text = path.read_text()
     first_rm = min(line for line, _ in _rm_targets(text))
@@ -227,13 +269,44 @@ def _param(path: Path):
     return pytest.param(path, marks=marks, id=path.name)
 
 
+def _offence(target: str, tracked: set[str]) -> str | None:
+    """Why `target` is not allowed to be deleted, or None.
+
+    Three ways a deletion reaches a tracked path, all fail-open if only the first is
+    checked (CodeRabbit, P2-10d′-c r2):
+
+    1. It names one literally.
+    2. It is a **glob** that matches one. `rm -f "$POINT_DIR"/*.json` deletes 15 tracked
+       files while the literal string `reports/p2/sizing/*.json` is in no index.
+    3. It could not be **resolved**. An unresolved relative path may be anything at
+       runtime, so scoring it clean is a guess in the fail-open direction. Absolute
+       unresolved paths are exempt — `/tmp/$USER-$SLURM_JOB_ID` is node-local scratch and
+       cannot be a repo path whatever it expands to.
+    """
+    path = posixpath.normpath(target)
+    if path in tracked:
+        return "tracked path"
+    if path.startswith("/"):
+        return None  # node-local scratch (/tmp/...) can never be a repo path
+    # A glob and an unresolved variable are the same question — "could this match a tracked
+    # file?" — so they get the same answer. `*` for the unknown part is the WIDEST reading,
+    # which is the fail-CLOSED direction: `reports/p2/sweep/g${GAMMAS[i]}_...json` becomes
+    # `reports/p2/sweep/g*_...json` and matches the committed sweep points, as it should.
+    pattern = path.replace(_UNRESOLVED, "*")
+    if pattern != path or any(ch in path for ch in "*?["):
+        hits = sorted(t for t in tracked if fnmatch(t, pattern))
+        if hits:
+            return f"pattern matching {len(hits)} tracked path(s), e.g. {hits[0]}"
+    return None
+
+
 @pytest.mark.parametrize("path", [_param(p) for p in _sbatch_files()])
 def test_no_sbatch_deletes_a_git_tracked_path(path: Path) -> None:
     tracked = _tracked_paths()
     offenders = [
-        f"{path.relative_to(REPO)}:{line} rm's tracked path {target!r}"
+        f"{path.relative_to(REPO)}:{line} rm's {why}: {target.replace(_UNRESOLVED, '<?>')!r}"
         for line, target in _rm_targets(path.read_text())
-        if target in tracked
+        if (why := _offence(target, tracked))
     ]
     assert not offenders, (
         "Deleting a tracked path dirties the tree outside `_DATA_STAGING_PREFIXES`, so "

@@ -290,8 +290,16 @@ if [ "$rc" -ne 0 ] || [ ! -s "$REPORT" ]; then
 fi
 # The report is no longer cleared before the run, so "a report exists" no longer implies
 # "THIS run wrote it" — a stale committed one would satisfy `[ -s ]`. Assert it changed.
+# Both failure directions are explicit: an UNCOMPUTABLE fingerprint must not pass by being
+# unequal to the old one (`md5sum` errors are swallowed by the pipe, so an unreadable report
+# yields "" — which differs from every real md5 and would have sailed through), and an
+# UNCHANGED one must not pass at all (CodeRabbit, P2-10d′-c r2).
 REPORT_AFTER="$(md5sum "$REPORT" 2>/dev/null | awk '{print $1}' || true)"
-if [ -n "$REPORT_BEFORE" ] && [ "$REPORT_BEFORE" = "$REPORT_AFTER" ]; then
+if [ -z "$REPORT_AFTER" ]; then
+  echo "PRODUCTION_FAIL: could not fingerprint $REPORT after the run (missing or unreadable)." >&2
+  exit 1
+fi
+if [ "$REPORT_BEFORE" = "$REPORT_AFTER" ]; then
   echo "PRODUCTION_FAIL: $REPORT is byte-identical to the one that was there before this run" >&2
   echo "  (md5 $REPORT_AFTER) — rank 0 did not write it, so it describes some OTHER run." >&2
   exit 1
