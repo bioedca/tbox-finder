@@ -907,3 +907,173 @@ the same fail-open shape this change exists to remove, reintroduced by the fix f
 tracked file raises regardless of what else is absent; verified to raise on a mixed set.
 
 **Commit.** `<SHA — reconcile against `git log main` at the P2 exit gate>`
+
+## Step P2-10c — 2026-07-20: the protective spare-rule backend — (a) any-helix R-scape covariation
+
+**Inputs.** `envs/infernal.yml` (the `infernal` 1.1.5 pin and its GATE-1-load-bearing lockfile),
+`src/tbox_finder/mining/spare_rule.py` (`mining_round_readiness`, `SpareRuleEvidence`),
+`src/tbox_finder/mining/hard_negative.py::mine_round`, `data/interim/splits/aligned/class_II.sto`
+(the fixture source), and bioconda.
+
+**Process.** Pinned `rscape` **2.0.4.a** into a **new 7th env** `envs/rscape.yml`
+(+ `envs/rscape.conda-lock.yml`, 125 packages, conda-lock 4.0.2) rather than amending
+`envs/infernal.yml`, and wrote `src/tbox_finder/mining/covariation.py` — a `shutil.which` availability
+probe, a version assertion, a `subprocess` R-scape driver, and a pure-stdlib `.helixcov` parser that
+turns helix-level covariation into the `passed`/`failed` status `SpareRuleEvidence` expects.
+`round_backend_availability` constructs the `mine_round` availability map with the `any_helix_rscape`
+entry **derived from the probe and deliberately un-overridable**. `scripts/make_rscape_fixture.py`
+regenerates the committed matched-control fixture pair.
+
+**Outputs.** `envs/rscape.yml` + `envs/rscape.conda-lock.yml`
+(`content_hash.linux-64 = cf43795d8d3ddf7cdf2471e38a7b2a790e58a85a126c21fcb3d42e1ecc60d917`);
+`src/tbox_finder/mining/covariation.py`; `scripts/make_rscape_fixture.py`;
+`tests/fixtures/rscape/` (4 files, byte-reproducible from the script);
+`tests/unit/test_covariation.py` (22) + `tests/ml/test_rscape_backend.py` (8, armed by
+`TBOX_REQUIRE_RSCAPE=1`); `"rscape"` added to `EXPECTED_ENVS`. No DVC artifact, no Snakemake rule,
+no SLURM.
+
+**Validation.** **The step's stated gate was a tautology and was replaced, not weakened.**
+`mining_round_readiness({'any_helix_rscape': True, …})` returns `ready=true` on `main` today with zero
+code changes — availability is a caller-supplied `bool`, so the clause is satisfied by typing `True`.
+Worse, flipping it on a backend that cannot score does not merely fail to help: every candidate then
+carries `unavailable` evidence, `is_mining_excluded` spares on any `unavailable`, and the round emits a
+report of zeroes indistinguishable from "there was nothing to mine" — the exact failure `mine_round`'s
+docstring says the readiness gate exists to prevent. The gate is therefore carried by a **designed
+matched control**: a seeded 60-sequence subsample of the class-II alignment versus the *same*
+subsample with every column independently permuted across rows. Held fixed — the sequences, each
+column's exact base-and-gap composition, `#=GC SS_cons`, the alignment width, `E ≤ 0.05`, the binary.
+Varied — only the correlation *between* columns. **PASS: positive 8 helices / max 4 covarying pairs in
+one helix / 13 total; control the same 8 helices with identical coordinates and base-pair counts and
+0 covarying pairs everywhere.** Suite **1,945 passed / 158 skipped** with the binary present, against a
+like-for-like `main` baseline of **1,915 / 158** — **+30, zero regressions**. Three sabotage reverts
+each bit the test *named* for the invariant (`^FAILED` grepped): criterion-always-true killed
+`test_designed_control_separates_under_every_criterion[within_helix]`; **availability-hardcoded-`True`
+— the precise tautology this step exists to remove — killed
+`test_readiness_refuses_when_the_binary_is_absent` and
+`test_availability_cannot_be_forced_by_an_argument`**; a dead parser killed both criteria's control
+tests. The armed gate also caught a real bug during development: `_VERSION_RE` matched the banner's
+title line and reported the version as `::`.
+
+**Decisions.** ADR-0002 **A11** (signed 2026-07-20) records the env. A **separate** env because
+`rscape` pulls `gnuplot`'s Qt5/GStreamer closure: amending `envs/infernal.yml` would take it 39 → 135
+packages and force a re-solve of the lockfile the **GATE-1 recall claim** is measured against, for no
+saving (the standalone env is 125 packages either way). `infernal` 1.1.5 is pinned in the new env at
+the **same build string** (`pl5321h7b50bb2_4`); the feared `esl-afetch`/`esl-reformat` collision was
+settled by a **real co-install** (exit 0; both toolchains report their pinned versions afterwards), not
+by a solver dry-run. Version **2.0.4.a is the newest build bioconda ships** while upstream is
+**v2.6.11** — approved **for the mining protective filter only**, because v2.0.5 recalculated the
+covariation power curves, which makes the version a methods-section fact; ADR-0006 D2's *reported* (a)
+criterion at GATE-3/P6 must re-decide it (D8 bump trigger).
+
+**Left open, recorded not hidden.** Two things.
+(1) **The env + caller are necessary but not sufficient.** R-scape scores an *alignment*, never a
+single sequence, and ADR-0006 D2→D7 require the model-independent one. The repo has **no
+homolog-search target database** (`data/external` is 81 MB of T-box-specific FASTA; no RefSeq/GTDB/nt)
+and **no `hmmer`/`blast` in any env**, so no per-candidate verdict is producible yet. That is
+**P2-10c′**, sequenced with P6-01, and it is why the availability probe has no override argument.
+(2) **"any-helix" admits two operators and neither is pinned.** `WITHIN_HELIX` (≥2 covarying pairs
+inside one helix) and `TOTAL_ACROSS_HELICES` (≥2 summed across helices) are not equivalent. Measured on
+seeded subsamples of the class-II alignment they agree on high-power inputs (0 % divergence at 5–8 and
+60 sequences) and **disagree on up to 33 %** of low-power ones (10/12/15/20/30 sequences: 17 %, 25 %,
+17 %, 33 %, 8 %) — the regime a real candidate's homolog set occupies. Every divergent case is one the
+looser operator spares and the stricter one sends to the mining pool, so the choice is directly a
+Tier-2N-protection choice. `AnyHelixCriterion` therefore has **no default** and `covariation_verdict`
+requires it positionally; `CovariationResult.as_report` records the counterfactual verdict. Pinning one
+is an **ADR-0006 decision owed at P2-10e**.
+
+**Commit.** `<SHA — reconcile against `git log main` at the P2 exit gate>`
+
+**CodeRabbit r1 — 3 Major + 2 nits, all applied.** The Major that mattered undercut A11's own
+narrative: **the pinned version was documented everywhere and asserted nowhere it was used.**
+`backend_available()` checked only that *some* `R-scape` was on `PATH`, and `as_report()` stamped
+`PINNED_RSCAPE_VERSION` **unconditionally** — so a 2.6.x binary could have produced the numbers while
+every committed report claimed 2.0.4.a, which is precisely the field this step argued a reader most
+needs to be true. Now: availability is presence **and** version (a mismatch reads *unavailable*, so
+the readiness gate refuses the round — the fail-closed direction); `CovariationResult` carries the
+**observed** version (`None` for a parse, which is no evidence of what ran) and the report publishes
+`rscape_version_observed` / `_pinned` / `_matches_pin`; `run_rscape` refuses an unpinned build outright;
+and `scripts/make_rscape_fixture.py` checks the pin **before** overwriting tracked fixtures. Second
+Major: the fixture generator wrote incrementally, so a failure on the second R-scape run would leave a
+fresh positive beside a stale control — a **mismatched pair that still looks matched**, the one thing
+the gate cannot tolerate; all four files are now staged in a temp dir and moved only after both runs
+succeed. Third: the reproduction test claimed "byte-for-byte" while comparing only parsed helices, so a
+changed p-value or aggregation mode would have slipped through — it now diffs the raw file. Two
+sabotage reverts confirm the new invariants bite by name
+(`test_an_unpinned_build_reads_as_unavailable`, `test_report_never_claims_a_version_it_did_not_observe`).
+Suite **1,948 / 158** (+3); fixtures re-verified byte-identical after the rewrite.
+
+**CodeRabbit r2 — 2 Major applied (a third was lost to the rate limit; see below).** Both were the
+same shape as r1's: a path that could fail **open**. (a) `rscape_version()` let
+`subprocess.TimeoutExpired` and `OSError` escape while `backend_available()` caught only
+`CovariationBackendError`, so a hung or unexecutable binary would have **crashed the readiness probe**
+instead of refusing the round; every probe failure is now a `CovariationBackendError` and the version
+probe has its own 60 s budget rather than inheriting the 15-minute run ceiling. (b) `run_rscape` read
+`<outname>.helixcov` from a caller-supplied `outdir` **without checking it was fresh** — and R-scape
+exits 0 without writing when an alignment carries no `SS_cons`, so a reused outdir would have parsed an
+earlier candidate's file as this one's verdict (a stale `passed` on a candidate never scored). It now
+refuses a pre-existing output outright. `run_rscape` also gained the same `OSError` arm.
+Two more sabotage reverts confirm both bite by name. Suite **1,951 / 158** (+3).
+**Honest gap:** CodeRabbit reported **3** findings in r2 and the CLI's incremental mode plus a Fair-Usage
+rate limit (34-minute wait, escalating per the known pattern) meant the third was never re-read. The two
+recovered were fixed; the third is unread, not dismissed, and the same fail-open class was self-audited
+across the run path (that audit is what added `run_rscape`'s `OSError` arm, which CodeRabbit had only
+flagged on the probe).
+
+**Independent adversarial audit (6 agents, 0 failures) — 11 confirmed defects, all fixed.** Because
+CodeRabbit's r2 reported 3 findings and the rate limit meant only 2 were readable, I ran a three-lens
+read-only audit (fail-open paths / parser / tests) with a refuting verifier per lens. It found more than
+the missing finding, including one that undercut this step's own headline claim.
+
+**The one that mattered — the designed control's matchedness was asserted nowhere.** Both "the control
+is matched" tests compared only R-scape's `# RM` helix geometry — and geometry is a function of
+`#=GC SS_cons` and the gap pattern, which `make_rscape_fixture.py` copies **verbatim** into both arms.
+So matchedness was guaranteed-looking by construction rather than checked: the suite stayed green with
+the control `.sto` replaced by a copy of the positive, and with **both `.sto` files deleted outright**.
+The gate's claim — *"a separation here can only be covariation"* — would have been false, and silently,
+under any regeneration that preserved the gap pattern while destroying per-column composition. The
+fixtures were verified to be genuinely matched (0/1460 columns differing); the property is now
+**asserted** from the alignments themselves (identical ordered names, width, `SS_cons`/`RF`, per-column
+`Counter`, N=60, and control ≠ positive), and `column_shuffle` — the function that *creates* the
+matchedness — gained its own test file. This is the P2-10b lesson recurring inside the file that cites it.
+
+**The second fail-open, one layer below the module's stated purpose.** Covariation detection is
+power-limited, and R-scape reports an alignment too shallow to *show* covariation exactly as it reports
+one that genuinely does not covary: all `nbp_cov = 0` ⇒ `failed` ⇒ **minable**. That is precisely the
+"the backend failed this candidate" vs "nothing was ever evaluated" conflation `spare_rule.py` exists to
+prevent, reintroduced at the layer below it — and this step's own sweep already measured the regime as
+decisive (**0/12** subsamples passing at 5–8 sequences vs **12/12** at 60), with a real candidate's
+homolog set landing in the low band. `covariation_verdict` now takes a keyword-required `min_sequences`
+with **no default** (the same device as `AnyHelixCriterion`, and ADR-0006 D2's carve-out already
+anticipates it — "with a minimum-covariation-power caveat reported"); below it the call raises, so the
+caller records `unavailable` and the candidate is **spared**. `n_sequences` is recorded in every report
+regardless, so a committed round can be re-graded against whatever floor is eventually pinned.
+**The numeric value is a third open ADR-0006 item for P2-10e**, alongside the operator choice.
+
+**Also fixed.** A multi-MSA input silently returned the *last* alignment's verdict (R-scape rewrites
+`<outname>.helixcov` once per alignment) — reproduced end-to-end; now refused, plus `--onemsa`. The
+`# RMs = N` header R-scape writes in every file was discarded instead of cross-checked against the
+records parsed, so any record the regex missed deflated `nbp_cov` into a false `failed`. `as_report`
+claimed an `evalue` the parsed text never evidenced — the *same* defect as the version stamp fixed in
+r1, and `-E` could be deleted from the argv with every test still green. `text=True` let
+`UnicodeDecodeError` escape the "every probe failure becomes `CovariationBackendError`" contract. Four
+`run_rscape` guards had no test anywhere — including the version-mismatch refusal — and two tests used
+bare `pytest.raises` that could not distinguish the branch they were named for.
+
+**Two of my own new tests did not bite, and sabotage is why I know.** The row-shuffle discriminator
+compared *sorted* per-row compositions — sorting throws away exactly the reordering it was meant to
+detect, so a row permutation passed it. And the depth guard's only test lived in the ml tier, which
+skips without the binary, so deleting the guard left bare CI green. Both rewritten; all three re-run
+sabotages now fail the test **named** for the invariant. Suite **1,974 / 158** vs the like-for-like
+`main` baseline **1,915 / 158** = **+59, zero regressions**; fixtures still byte-identical.
+
+**CodeRabbit r3 — 2 findings, both applied; the review gate is closed.** (a) *Major:* fixture
+publication was still not transactional — the r2 fix staged all four files in a temp dir but then moved
+them into place **one at a time**, so an interruption partway through left a mixed-generation set on
+disk: the same stale-control state the staging exists to prevent, merely relocated to a later moment.
+Publication now backs up the current generation, moves all four, and **rolls the whole set back** if any
+single move fails. (b) *Minor, and mine:* the row-shuffle test's second clause was written as
+`<composition clause> or <the set clause asserted on the line above>` — satisfied by that earlier line
+no matter what the composition clause said, i.e. an assertion that could never fail. It is now an
+independent per-row-composition multiset comparison, and was re-sabotaged with the set clause deleted to
+confirm it carries the row-shuffle detection **on its own**. Suite **1,974 / 158** unchanged; fixtures
+byte-identical; ruff/black/`snakemake --lint`/DAG dry-run clean; all four GitHub Actions checks green.

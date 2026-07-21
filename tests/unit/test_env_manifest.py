@@ -21,7 +21,7 @@ RULES_DIR = REPO_ROOT / "workflow" / "rules"
 # env was split into `ml-dna` + `ml-rna` at P0-06c (ADR-0002 A4): transformers 4.57.5
 # (Caduceus trust_remote_code ceiling) is mutually exclusive with `multimolecule` 0.0.9,
 # which at import needs transformers 5.x.
-EXPECTED_ENVS = ["data", "infernal", "ml-dna", "ml-rna", "viz", "app"]
+EXPECTED_ENVS = ["data", "infernal", "ml-dna", "ml-rna", "viz", "app", "rscape"]
 
 # The two GPU envs (ADR-0002 D2/D3/A4); the torch-URL / no-`--extra-index-url` guard
 # applies to both, since both carry the same cu128 URL-pinned closure.
@@ -57,7 +57,9 @@ def test_env_specs_are_well_formed():
 
 
 def test_all_env_lockfiles_exist():
-    """All six envs are locked: the four CPU envs at P0-05, both GPU envs at P0-06c (A4).
+    """All seven envs are locked: four CPU envs at P0-05, both GPU envs at P0-06c (A4),
+    and `rscape` at P2-10c (A11 — a separate env so the GATE-1-load-bearing
+    `infernal` lock is not re-solved by `rscape`'s gnuplot/Qt closure).
 
     ml-dna / ml-rna are lockable on the laptop only via a full URL-pinned cu128 closure
     (see `test_ml_envs_pin_torch_by_url_not_index`); conda-lock 4.0.2 cannot use an index.
