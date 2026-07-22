@@ -1,6 +1,6 @@
 outs:
-- md5: c1b5d24490a535ea645d21307c5083f2.dir
-  size: 31038761
+- md5: 91bd49dd91997b8a94b6ba262afab071.dir
+  size: 31039704
   nfiles: 2
   hash: md5
   path: stage1_production
