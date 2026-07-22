@@ -865,6 +865,70 @@ rule select_pilot_genomes:
         "--env-lock {params.env_lock:q} >{log} 2>&1"
 
 
+rule fetch_pilot_genomes:
+    """Fetch the ρ-pilot whole-genome sequences from NCBI (P2-10c′-b; ADR-0003 D6).
+
+    ``select_pilot_genomes`` produced an ACCESSION LIST (``pilot_genomes_v0.parquet``);
+    this rule fetches the whole-genome nucleotide sequence for each accession so the SLURM
+    scan (P2-10c′-c) can measure ρ = Stage-1 candidates / Mbp. A GTDB manifest carries
+    **assembly** accessions (``GC[AF]_<n>.<v>``), which are not ``nuccore`` ids, so the
+    fetcher adds the missing assembly → nuccore resolution: esearch(db=assembly) → assembly
+    UID → elink(db=nuccore) → replicon/contig UIDs → epost + batched efetch(fasta). It
+    writes one normalized FASTA per genome into a DVC-tracked directory.
+
+    It measures genome SIZE (bp) only — it counts no candidates, computes no ρ, and chooses
+    no detection threshold (the SLURM scan does that) — so it pins no ADR value and carries
+    no scientific claim (CLAUDE.md §10.3). Fail-closed: every headline number is re-derived
+    from the per-genome evidence, and a run whose success rate or clade span degrades below
+    an operational floor certifies nothing (§7 stop-and-ask).
+
+    A **one-time LOCAL network** rule kept out of ``rule all`` with no ``input:`` — its true
+    source is an external API, not a DAG product. Rate-limited to NCBI's courtesy ceiling (3
+    req/s anonymous, 10 req/s when ``NCBI_API_KEY`` is set) and **resumable** via the
+    sidecar fetch log. Requires ``NCBI_EMAIL`` (E-utilities etiquette). Invoke:
+
+        NCBI_EMAIL=you@example.org \
+            snakemake --cores 1 --use-conda fetch_pilot_genomes
+
+    The fetched-FASTA directory (``_PILOT_GENOME_DIR``) is deliberately **NOT** a Snakemake
+    ``output``: the fetcher accumulates per-genome ``.fna`` files into it *during* the run
+    (before the success gate), so declaring it ``directory()`` would let Snakemake's
+    incomplete-output cleanup ``rmtree`` it on a failed/interrupted run — wiping fetched
+    genomes and breaking the no-requota resumability (review correctness lens). It is a
+    resumable side-product (like ``flank_context``'s ``fetch_cache.jsonl``), DVC-tracked
+    independently and content-addressed by the report ``digest``. The tracked outputs are
+    the report + provenance, written only on the success path, so their absence still
+    correctly triggers a rerun.
+    """
+    output:
+        report=f"{_AUDIT_DIR}/pilot_fetch_report.json",
+        provenance=f"{_INTERIM_DIR}/pilot_genomes.provenance.json",
+    params:
+        manifest=config.get("pilot_manifest", f"{_PILOT_DIR}/pilot_genomes_v0.parquet"),
+        # Derived from the provenance output (never hardcoded): the genome dir is that
+        # sidecar minus ``.provenance.json``, and the fetch log hangs off the dir. A
+        # hardcoded param that string-prefixes an output trips `snakemake --lint`
+        # (CI-blocking; MEMORY: snakemake-lint-param-prefix / the p2_flank_context out_dir
+        # precedent). The dir is deliberately NOT itself an output (see the docstring).
+        genome_dir=lambda wildcards, output: output.provenance.removesuffix(".provenance.json"),
+        fetch_log=lambda wildcards, output: (
+            output.provenance.removesuffix(".provenance.json") + "_fetch_log.jsonl"
+        ),
+        env_lock="envs/data.conda-lock.yml",
+    log:
+        "logs/fetch_pilot_genomes.log",
+    conda:
+        "../../envs/data.yml"
+    shell:
+        "PYTHONHASHSEED=0 python -m tbox_finder.mining.pilot_fetch "
+        "--manifest {params.manifest:q} "
+        "--genome-dir {params.genome_dir:q} "
+        "--log {params.fetch_log:q} "
+        "--report {output.report:q} "
+        "--provenance {output.provenance:q} "
+        "--env-lock {params.env_lock:q} >{log} 2>&1"
+
+
 rule p2_flank_context:
     """Source real flanking genomic context for the training corpus (P2-00).
 

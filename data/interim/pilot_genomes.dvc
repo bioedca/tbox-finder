@@ -1,0 +1,6 @@
+outs:
+- md5: 5bb9d9c8a6c400ce86df46e9226e3ad3.dir
+  size: 293606550
+  nfiles: 100
+  hash: md5
+  path: pilot_genomes
