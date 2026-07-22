@@ -981,7 +981,9 @@ def test_committed_production_report_records_its_audited_dirty_tree() -> None:
     assert (
         isinstance(dirty_paths, list) and dirty_paths
     ), f"post-P2-10 production reports must record their dirty paths; got {dirty_paths!r}"
-    non_data = [p for p in dirty_paths if not p.startswith("data/")]
+    # Mirror `_provenance_complete`'s fail-closed predicate: a non-string path is invalid
+    # (not data-only), reported cleanly rather than raising AttributeError on .startswith.
+    non_data = [p for p in dirty_paths if not (isinstance(p, str) and p.startswith("data/"))]
     assert not non_data, (
         f"the production report's tree was dirty at tracked non-data paths {non_data} — "
         "git_sha does not describe what ran; re-audit at retrieval"
