@@ -1,2 +1,4 @@
 /master_tboxes_ingested.parquet
 /lineage_replaced.parquet
+/pilot_genomes_fetch_log.jsonl
+/pilot_genomes

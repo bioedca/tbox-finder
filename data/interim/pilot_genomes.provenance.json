@@ -1,0 +1,30 @@
+{
+  "adr": "ADR-0003",
+  "env_lock_hash": "a4a6715d411d7218432c4c670d35475f6c9aa7dd6397fd5d906ca7e21293dc34",
+  "extra": {
+    "accessed": "2026-07-22",
+    "digest": "3fb6db2748009c808459a5afa762b946193fd70c069a48124aac702b3619d55c",
+    "eutils_base_url": "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/",
+    "genome_dir": "data/interim/pilot_genomes",
+    "genome_ftp_host": "ftp.ncbi.nlm.nih.gov",
+    "n_genomes": 100,
+    "n_ok": 100,
+    "note": "Whole-genome sequence sourced from NCBI: assembly accession \u2192 assembly UID (esearch) \u2192 assembly FtpPath (esummary) \u2192 whole-genome _genomic.fna.gz (HTTPS GET + gunzip; all replicons/contigs). Measures genome SIZE (bp) only \u2014 no \u03c1, no candidate count, no detection threshold (\u00a710.3). gzip integrity guarantees a complete download (a truncated stream raises).",
+    "success_rate": 1.0,
+    "terms_url": "https://www.ncbi.nlm.nih.gov/home/about/policies/",
+    "total_bp": 287764740,
+    "total_mbp": 287.76474
+  },
+  "generated_at_utc": "2026-07-22T13:27:10.466546+00:00",
+  "git_sha": "b5719701cbde4b25361a23eff4665a33af695cee",
+  "inputs": {
+    "data/processed/pilot/pilot_genomes_v0.parquet": "b3ae7c04bc00b0180c8e9c30d7558750800b600a87b3cdb96e6ffec2f9ea2eea"
+  },
+  "outputs": {
+    "data/processed/audits/pilot_fetch_report.json": "a4d2f5b3e0a5b5ee3299719b896983f7f75db98a8e6256fb4d5ef0a0858bf4a8"
+  },
+  "rule": "workflow/rules/data.smk :: fetch_pilot_genomes",
+  "schema_version": "1.0",
+  "script": "src/tbox_finder/mining/pilot_fetch.py",
+  "seed": 42
+}
