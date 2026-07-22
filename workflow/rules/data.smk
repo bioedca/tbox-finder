@@ -822,6 +822,49 @@ rule build_mining_pool:
         "--env-lock {params.env_lock:q} >{log} 2>&1"
 
 
+_PILOT_DIR = "data/processed/pilot"
+
+
+rule select_pilot_genomes:
+    """Select the ρ-pilot genome manifest (P2-10c′-a; ADR-0003 D6).
+
+    ADR-0003 D6 pins a scan-sizing pilot on "a ~100-genome sample spanning divergent
+    clades" to measure ρ (Stage-1 candidates/Mbp) — the pivot of the P2-10e / P2-10c′
+    homolog-DB + negative-window fetch, priced at 0.7-68 GB pivoting on ρ. This rule
+    builds the SELECTION half: a reproducible, phylum-stratified, divergence-spanning
+    ~100-genome manifest of GTDB R232 species representatives (accession + lineage),
+    drawn round-robin across phyla from the pinned ``sp_clusters_r232.tsv`` crosswalk.
+
+    It fetches no genomes (the LOCAL fetch sub-step does that), scans nothing, and
+    chooses no Stage-1 detection threshold (the SLURM scan sub-step measures ρ) — so it
+    pins no ADR value and carries no scientific claim (CLAUDE.md §10.3). Selection knobs
+    (n_target ~100, seed, per-phylum cap, non-vacuity floors) are pinned in the module.
+
+    A one-time LOCAL rule kept out of ``rule all`` with no ``input:`` — the crosswalk is
+    an external checksummed fetch staged by ``pin_gtdb_release`` (ADR-0003 A1). Invoke:
+
+        snakemake --cores 1 --use-conda select_pilot_genomes
+    """
+    output:
+        manifest=f"{_PILOT_DIR}/pilot_genomes_v0.parquet",
+        provenance=f"{_PILOT_DIR}/pilot_genomes_v0.provenance.json",
+        report=f"{_AUDIT_DIR}/pilot_genomes_report.json",
+    params:
+        crosswalk=config.get("pilot_crosswalk", "data/external/gtdb/sp_clusters_r232.tsv"),
+        env_lock="envs/data.conda-lock.yml",
+    log:
+        "logs/select_pilot_genomes.log",
+    conda:
+        "../../envs/data.yml"
+    shell:
+        "PYTHONHASHSEED=0 python -m tbox_finder.mining.pilot_genomes "
+        "--crosswalk {params.crosswalk:q} "
+        "--out {output.manifest:q} "
+        "--provenance {output.provenance:q} "
+        "--report {output.report:q} "
+        "--env-lock {params.env_lock:q} >{log} 2>&1"
+
+
 rule p2_flank_context:
     """Source real flanking genomic context for the training corpus (P2-00).
 
