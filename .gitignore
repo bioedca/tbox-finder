@@ -122,6 +122,16 @@
 /reports/p2/train_production_*.out
 /reports/p2/train_production_*.err
 
+# P2-10c′-c-ii ρ-pilot scan (scan_pilot.sbatch): the DONE marker + flock lock are run signals
+# (§9.3 keys on absence-on-failure), and the SLURM logs are EXPECTED non-empty on success
+# (trust_remote_code / selective_scan_cuda / HF chatter — do NOT gate on zero bytes). The
+# per-shard partials live in node-local /tmp, never in the repo. The committed deliverable is
+# data/processed/pilot/rho_pilot_report.json (+ its provenance sidecar), deliberately NOT ignored.
+/reports/p2/scan_pilot.DONE
+/reports/p2/.scan_pilot.lock
+/reports/p2/scan_pilot_*.out
+/reports/p2/scan_pilot_*.err
+
 # ── Snakemake working dir + rule run-logs (never committed) ──
 .snakemake/
 /logs/
