@@ -207,6 +207,31 @@ def test_build_content_is_reproducible(tmp_path: Path) -> None:
     pd.testing.assert_frame_equal(a, b)
 
 
+def test_build_succeeds_when_per_phylum_cap_binds(tmp_path: Path) -> None:
+    # When the cap binds below phyla's rep totals the achievable count is
+    # sum(min(cap, size)); the expected-count guard must use that, not the raw rep total,
+    # or a valid cap-constrained selection would raise (CodeRabbit r1 regression guard).
+    pd = pytest.importorskip("pandas")
+    pytest.importorskip("pyarrow")
+    out = tmp_path / "m.parquet"
+    rc = pg.build(
+        crosswalk_path=FIXTURE,
+        out_parquet=out,
+        provenance_path=tmp_path / "m.prov.json",
+        report_path=tmp_path / "r.json",
+        seed=42,
+        n_target=100,
+        per_phylum_cap=2,  # binds: the fixture has phyla with 3-4 reps
+        min_phyla=10,
+        min_archaea=2,
+    )
+    assert rc == 0
+    df = pd.read_parquet(out)
+    # 15 phyla, per-phylum sizes capped at 2 sum to 26 (11 phyla with >=2 reps, 4 with 1).
+    assert len(df) == 26
+    assert df["phylum"].value_counts().max() == 2
+
+
 # --------------------------------------------------------- must-fire guard sabotage
 
 

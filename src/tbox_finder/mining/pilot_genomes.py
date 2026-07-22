@@ -251,7 +251,17 @@ def build(
     summary = _selection_summary(selected)
 
     n_reps_with_phylum = sum(1 for r in reps if str(r.get("phylum", "")).strip())
-    expected = min(n_target, n_reps_with_phylum)
+    phylum_sizes: dict[str, int] = defaultdict(int)
+    for rep in reps:
+        ph = str(rep.get("phylum", "")).strip()
+        if ph:
+            phylum_sizes[ph] += 1
+    # The round-robin can draw at most ``per_phylum_cap`` from any one phylum, so the
+    # *achievable* count — not the raw rep total — is the ceiling this guard checks
+    # against; otherwise a cap that binds below the phylum total makes a correct
+    # cap-constrained selection raise (CodeRabbit r1).
+    max_achievable = sum(min(per_phylum_cap, c) for c in phylum_sizes.values())
+    expected = min(n_target, max_achievable)
     accessions = [r["assembly_accession"] for r in selected]
 
     # Must-fire guards (CLAUDE.md §8.5/§12): each catches a distinct way the selection
@@ -259,7 +269,8 @@ def build(
     if summary["n_selected"] != expected:
         raise PilotSelectionError(
             f"selected {summary['n_selected']} != expected {expected} "
-            f"(min(n_target={n_target}, reps_with_phylum={n_reps_with_phylum})) — "
+            f"(min(n_target={n_target}, max_achievable={max_achievable} at "
+            f"per_phylum_cap={per_phylum_cap} over {len(phylum_sizes)} phyla)) — "
             "the round-robin did not fill the target"
         )
     if summary["n_phyla"] < min_phyla:
