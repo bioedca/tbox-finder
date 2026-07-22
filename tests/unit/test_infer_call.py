@@ -365,6 +365,22 @@ def test_sweep_rows_match_per_point_calls_and_grid_shape():
         assert row["n_zero_flanked_candidates"] == sum(1 for c in direct if c.n_zero_flanked > 0)
 
 
+def test_sweep_validates_zero_flanked_shape():
+    lp = _log_probs_from_pelem(np.full(20, 0.9))
+    with pytest.raises(cc.CandidateError):
+        cc.sweep_candidate_counts(lp, np.zeros(19, dtype=bool))
+
+
+def test_sweep_counts_zero_flanked_candidates_per_point():
+    # a fully zero-flanked short sequence: every called candidate touches pad context, so
+    # each grid point's n_zero_flanked_candidates equals its n_candidates.
+    lp = _log_probs_from_pelem(np.full(40, 0.95))
+    zf = np.ones(40, dtype=bool)
+    rows = cc.sweep_candidate_counts(lp, zf, thresholds=[0.5], min_spans=[1], gap_merges=[0])
+    assert rows[0]["n_candidates"] == 1
+    assert rows[0]["n_zero_flanked_candidates"] == 1
+
+
 def test_provisional_grids_pin_nothing_and_are_nonempty():
     # they are sizing scaffolding, not a pinned operating point — just assert they exist and
     # are usable; ADR-0005 D3 owns the frozen production values, at the phase gate.

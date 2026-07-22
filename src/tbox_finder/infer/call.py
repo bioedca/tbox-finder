@@ -78,6 +78,11 @@ NUM_CLASSES = len(CLASS_ORDER)
 #: re-ordering of ``CLASS_ORDER`` cannot silently point the caller at an element class.
 BACKGROUND_INDEX = CLASS_INDEX["background"]
 
+#: The element-class indices (everything but ``background``), in ascending order. Derived
+#: from :data:`BACKGROUND_INDEX` so ``dominant_class`` selection is robust to a re-ordering of
+#: ``CLASS_ORDER`` — never a hardcoded ``1:`` slice that assumes background sits at index 0.
+_ELEMENT_INDICES = np.array([i for i in range(NUM_CLASSES) if i != BACKGROUND_INDEX])
+
 #: Provisional ρ-pilot sweep grids (user decision 2026-07-22: "sweep ρ(τ), pin nothing").
 #: These bind **no** ADR value — ADR-0005 D3 freezes the production Stage-1 threshold and the
 #: locus geometry at the phase gate (§13.1). They exist only to shape the ρ(τ, min_span,
@@ -244,10 +249,11 @@ def call_candidates(
         if end - start < min_span:
             continue
         run_p = p_elem[start:end]
-        # Mean posterior per class over the run; argmax among the element classes (1..7)
-        # names the driving element. Descriptive only — nothing is gated on it.
+        # Mean posterior per class over the run; argmax among the element classes (all but
+        # background) names the driving element, mapped back to its real class index.
+        # Descriptive only — nothing is gated on it.
         run_class_post = np.exp(lp[start:end]).mean(axis=0)
-        dominant = 1 + int(np.argmax(run_class_post[1:]))
+        dominant = int(_ELEMENT_INDICES[np.argmax(run_class_post[_ELEMENT_INDICES])])
         candidates.append(
             Candidate(
                 start=int(start),
@@ -280,26 +286,40 @@ def sweep_candidate_counts(
 
     Each row also carries ``n_zero_flanked_candidates`` (candidates whose context included
     contig-end pad) so ρ's sensitivity to excluding them is visible per grid point.
+
+    The threshold-independent work is hoisted so it runs once, not per grid point: the element
+    posterior once, the True-runs once per threshold, and the merge once per
+    ``(threshold, gap_merge)`` — only the ``min_span`` filter (a cheap length cut) runs per
+    innermost point. The counts are identical to :func:`call_candidates` at each grid point.
     """
+    p_elem = element_posterior(log_probs)
+    seq_len = p_elem.shape[0]
+    if zero_flanked is None:
+        zf = np.zeros(seq_len, dtype=bool)
+    else:
+        zf = np.asarray(zero_flanked, dtype=bool)
+        if zf.shape != (seq_len,):
+            raise CandidateError(
+                f"zero_flanked must be (seq_len,)=({seq_len},)-shaped, got shape={zf.shape}"
+            )
+
     rows: list[dict[str, Any]] = []
     for threshold in thresholds:
-        for min_span in min_spans:
-            for gap_merge in gap_merges:
-                calls = call_candidates(
-                    log_probs,
-                    zero_flanked,
-                    threshold=threshold,
-                    min_span=min_span,
-                    gap_merge=gap_merge,
-                )
+        runs = _true_runs(p_elem >= float(threshold))
+        for gap_merge in gap_merges:
+            merged = _merge_runs(runs, int(gap_merge))
+            for min_span in min_spans:
+                kept = [(s, e) for s, e in merged if e - s >= int(min_span)]
                 rows.append(
                     {
                         "threshold": float(threshold),
                         "min_span": int(min_span),
                         "gap_merge": int(gap_merge),
-                        "n_candidates": len(calls),
-                        "n_zero_flanked_candidates": sum(1 for c in calls if c.n_zero_flanked > 0),
-                        "total_candidate_nt": sum(c.length for c in calls),
+                        "n_candidates": len(kept),
+                        "n_zero_flanked_candidates": sum(
+                            1 for s, e in kept if bool(np.any(zf[s:e]))
+                        ),
+                        "total_candidate_nt": sum(e - s for s, e in kept),
                     }
                 )
     return rows
