@@ -22,6 +22,14 @@ Modules
     The minimal, recall-favouring form the ρ-pilot (ADR-0003 D6) needs; pins no ADR value
     (ADR-0005 D3 freezes production locus values at the phase gate).
 
+``rho_pilot``
+    P2-10c′-c-ii — the ρ-pilot scan driver: scan the 100 divergent-clade pilot genomes with
+    the production Stage-1 checkpoint (``scan-shard`` per GPU, then ``reduce``) and sum
+    candidate counts over the ``call`` sweep grid → the ρ(τ, min_span, gap_merge) surface =
+    Σ candidates / T[Mbp], plus the throughput ``w`` (windows/sec/GPU). The aggregation +
+    fail-closed report surface is ``numpy``/stdlib-only (torch lazily imported inside the
+    two GPU legs); pins no ADR value (ADR-0003 D6: ρ is a measured ops number).
+
 Heavy dependencies (``torch``, ``transformers``) are imported **lazily inside functions**
 so this package imports in a bare environment (the CI Tier-1 path); the operators
 themselves are ``numpy``-only and accept any array-like (a CPU ``torch.Tensor``
@@ -30,4 +38,4 @@ converts through ``numpy.asarray``).
 
 from __future__ import annotations
 
-__all__ = ["call", "reconcile", "scan"]
+__all__ = ["call", "reconcile", "rho_pilot", "scan"]

@@ -1,0 +1,29 @@
+{
+  "adr": "ADR-0003",
+  "env_lock_hash": "70b66801eeafe1fdec4c19e667de1590e4471143bca36248fe40f16e53bb5003",
+  "extra": {
+    "accessed": "2026-07-23",
+    "checkpoint_sha256": "09931a223c3e670731a39b8ef0b0bb4bcb36a8ff9dcbee889f1715362b380940",
+    "digest": "f3527ff6051a2691e4f5575eed5f7666f9e287fce7fe5e9274a5b8428dc73dc5",
+    "genome_dir": "data/interim/pilot_genomes",
+    "n_genomes": 100,
+    "note": "\u03c1 = Stage-1 candidates / Mbp measured over the 100 pilot genomes with the job-680 production checkpoint (ADR-0003 D6). \u03c1 is a measured ops number that sizes the homolog-DB + negative-window fetch; it pins no ADR value and asserts no scientific claim (ADR-0005 D3 freezes production values at the phase gate).",
+    "scanned_bp": 287764740,
+    "scanned_mbp": 287.76474,
+    "step": "P2-10c'-c-ii",
+    "w_windows_per_sec_per_gpu": 67.67789740587226
+  },
+  "generated_at_utc": "2026-07-23T03:00:07.867529+00:00",
+  "git_sha": "a2cbb8c18240cfc86813b2d59427d374ae977a6f",
+  "inputs": {
+    "data/processed/audits/pilot_fetch_report.json": "a4d2f5b3e0a5b5ee3299719b896983f7f75db98a8e6256fb4d5ef0a0858bf4a8",
+    "data/processed/checkpoints/stage1_production/stage1.pt": "09931a223c3e670731a39b8ef0b0bb4bcb36a8ff9dcbee889f1715362b380940"
+  },
+  "outputs": {
+    "data/processed/pilot/rho_pilot_report.json": "979a1a46fa3c06a0439d07b325e77d45d105058bb9b998451d31a077c95a4f24"
+  },
+  "rule": "slurm/p2/scan_pilot.sbatch :: tbox_finder.infer.rho_pilot reduce",
+  "schema_version": "1.0",
+  "script": "src/tbox_finder/infer/rho_pilot.py",
+  "seed": 42
+}
