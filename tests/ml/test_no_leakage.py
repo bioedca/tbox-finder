@@ -40,6 +40,7 @@ Design (mirrors the repo's pure-core / thin-adapter pattern):
 
 from __future__ import annotations
 
+import inspect
 import json
 import os
 from collections import Counter, defaultdict
@@ -867,3 +868,369 @@ def test_synthetic_recovery_variants_are_evaluation_only(committed):
 
 def test_variant_parent_fold_inheritance(committed):
     assert variant_parent_fold_mismatches(committed) == []
+
+
+# ========================================================================== #
+# P2-10c′-f — the §9.2 held-out-order-negative gate (ADR-0004 A4; a1 + b2).
+#
+# The P0-24 predicates above read the committed split table, where the
+# negatives live in **no row**: a mined/background negative window is injected
+# at RUNTIME by ``data/negatives.py`` and the committed table holds only
+# positives (+ their derived variants). So the leakage this section guards — a
+# background window carved beside a *held-out-order* T-box entering training
+# under a negative label — is invisible to them by construction
+# ([[ci-leakage-gate-blind-to-runtime-augmentation]]).
+#
+# The signed resolution is **a1 + b2, loosening fallback OFF**:
+#   a1 — admissibility keys on the window's PARENT corpus record's fold, which
+#        inherits the leave-one-order-out holdout + the D3 clade-crossing
+#        exclusion + the D4 dropped bucket (ADR-0004 D3/D4/D5), so it is at
+#        least as strict as the positive side. For the current flank-carved
+#        ``genomic_window`` substrate this equals a host-genome→order exclusion
+#        *by the carving geometry* (every window's parent IS a catalogued
+#        locus); that dependency is documented, not assumed away — a future
+#        whole-genome background pool breaks the coincidence and would re-open
+#        the a2 host-accession→order question.
+#   b2 — make that runtime rule CI-VISIBLE here, over the real committed table,
+#        so a loosened loader default OR a broken split→parent join turns the
+#        gate RED instead of silently green-with-nothing-refused
+#        ([[namespace-mismatch-invisible-noop]]).
+# ========================================================================== #
+
+#: Every clause the b2 gate re-derives (asserted complete, so a dropped/renamed
+#: clause is a test failure, not a silent shrink).
+_HELD_OUT_ORDER_NEGATIVE_CLAUSES = (
+    "default_is_fail_closed",
+    "out_of_fold_parents_refused",
+    "join_resolves_every_parent",
+    "join_finds_out_of_fold_parents",
+    "loo_order_among_parents",
+    "parents_are_a_spread",
+    "loosening_admits_the_refused",
+)
+
+#: The shipped negative-loader entry points whose ``require_parent_nested_train``
+#: default is the only thing standing between a held-out-order background window
+#: and the training stream (Q-b: the committed table the P0-24 tier reads has no
+#: negative rows). All four must default to True.
+_PUBLIC_NEGATIVE_LOADERS = (
+    "admit_pool_rows",
+    "negative_records_from_rows",
+    "load_admitted_pool_rows",
+    "load_negative_records",
+)
+
+
+def held_out_order_negative_clauses(
+    shipped_default_require,
+    armed_report,
+    loosened_report,
+    stamp_summary,
+    n_loo_order_parents,
+):
+    """The b2 §9.2 clauses, re-derived from the loader's own recorded evidence.
+
+    Mirrors ``mining/pool.py::control_gate``: every clause is FALSE on a missing
+    or degenerate measurement, never vacuously TRUE — a gate read off the
+    *requested* configuration rather than the *found* evidence passes exactly
+    when the evidence is absent ([[clauses-must-guard-emptiness]]).
+
+    Args: the shipped loader default (``require_parent_nested_train``); the
+    ``admit_pool_rows`` report with the rule ARMED (shipped default) and with it
+    LOOSENED (``require_parent_nested_train=False``); the ``stamp_parent_folds``
+    evidence block; and the count of fixture windows whose parent is a
+    *designated* leave-one-order-out holdout order (the must-fire non-degeneracy
+    witness — a real held-out order genuinely present among the parents).
+    """
+    n_records = int(stamp_summary.get("n_records", 0))
+    n_out = int(stamp_summary.get("n_parent_out_of_training_fold", 0))
+    n_unresolved = int(stamp_summary.get("n_unresolved_parent", -1))
+    n_distinct = int(stamp_summary.get("n_distinct_parents", 0))
+    refused_armed = int(armed_report.get("n_refused_parent_out_of_fold", 0))
+    refused_loose = int(loosened_report.get("n_refused_parent_out_of_fold", -1))
+    admitted_armed = int(armed_report.get("n_records", -1))
+    admitted_loose = int(loosened_report.get("n_records", -1))
+    return {
+        # (i) the SHIPPED loader default is fail-closed — flipping it OFF is a
+        # loosening, not a no-op, so the default is what the gate certifies.
+        "default_is_fail_closed": (
+            shipped_default_require is True
+            and armed_report.get("require_parent_nested_train") is True
+        ),
+        # (ii) a substrate carrying out-of-fold (held-out-order) parents refuses
+        # > 0 of them under that default.
+        "out_of_fold_parents_refused": refused_armed > 0,
+        # non-degeneracy companion (must-fire): the split→parent join is LIVE —
+        # every window resolved a parent fold, so a namespace mismatch (which
+        # would stamp *every* parent False and thus look like total
+        # discrimination) cannot pass here ([[namespace-mismatch-invisible-noop]]).
+        "join_resolves_every_parent": n_records > 0 and n_unresolved == 0,
+        # … it actually finds out-of-fold parents (``parent_fold_discriminates``
+        # shape; on its own this one is FOOLED by the namespace no-op, which is
+        # exactly why it is paired with the two clauses around it).
+        "join_finds_out_of_fold_parents": n_out > 0,
+        # … a *designated LOO holdout order* is genuinely present among the
+        # negative windows' parents — the exact material a1 governs.
+        "loo_order_among_parents": n_loo_order_parents > 0,
+        # … and the parents are a real spread, not one lucky record.
+        "parents_are_a_spread": n_distinct > 1,
+        # (iii) with the rule LOOSENED the same windows are admitted — proving
+        # the armed refusal was the default's doing and nothing else's.
+        "loosening_admits_the_refused": (
+            refused_loose == 0 and admitted_loose == admitted_armed + refused_armed
+        ),
+    }
+
+
+def _clean_held_out_inputs():
+    """A consistent, all-clauses-TRUE evidence set: 10 in-fold + 5 held-out-order
+    windows, join fully resolved. The bite tests below each perturb exactly one
+    field and assert exactly the named clause flips FALSE (§8.7)."""
+    stamp = {
+        "n_records": 15,
+        "n_parent_out_of_training_fold": 5,
+        "n_unresolved_parent": 0,
+        "n_distinct_parents": 15,
+    }
+    armed = {
+        "require_parent_nested_train": True,
+        "n_records": 10,
+        "n_refused_parent_out_of_fold": 5,
+        "n_refused_parent_unresolved": 0,
+    }
+    loosened = {
+        "require_parent_nested_train": False,
+        "n_records": 15,
+        "n_refused_parent_out_of_fold": 0,
+    }
+    return {
+        "shipped_default_require": True,
+        "armed_report": armed,
+        "loosened_report": loosened,
+        "stamp_summary": stamp,
+        "n_loo_order_parents": 5,
+    }
+
+
+def test_held_out_order_clean_inputs_pass():
+    cl = held_out_order_negative_clauses(**_clean_held_out_inputs())
+    assert set(cl) == set(_HELD_OUT_ORDER_NEGATIVE_CLAUSES)  # no clause dropped
+    assert all(cl.values()), cl
+
+
+def test_held_out_order_loosened_default_is_caught():
+    """The banned loosening fallback (``require_parent_nested_train=False``)."""
+    kw = _clean_held_out_inputs()
+    kw["shipped_default_require"] = False
+    kw["armed_report"] = {**kw["armed_report"], "require_parent_nested_train": False}
+    cl = held_out_order_negative_clauses(**kw)
+    assert [k for k, v in cl.items() if not v] == ["default_is_fail_closed"]
+
+
+def test_held_out_order_namespace_noop_join_is_caught():
+    """The join matched nothing — every parent stamped False (so ``n_out`` LOOKS
+    like total discrimination), yet nothing was really refused. The companion
+    (``join_resolves_every_parent`` + ``loo_order_among_parents``) catches it
+    where a lone "found out-of-fold parents" clause would not."""
+    kw = {
+        "shipped_default_require": True,
+        "armed_report": {
+            "require_parent_nested_train": True,
+            "n_records": 0,
+            "n_refused_parent_out_of_fold": 0,
+            "n_refused_parent_unresolved": 15,
+        },
+        "loosened_report": {"n_records": 15, "n_refused_parent_out_of_fold": 0},
+        "stamp_summary": {
+            "n_records": 15,
+            "n_parent_out_of_training_fold": 15,  # the trap: all-False looks discriminating
+            "n_unresolved_parent": 15,
+            "n_distinct_parents": 15,
+        },
+        "n_loo_order_parents": 0,
+    }
+    cl = held_out_order_negative_clauses(**kw)
+    assert cl["join_finds_out_of_fold_parents"] is True  # the fooled clause …
+    assert cl["join_resolves_every_parent"] is False  # … caught by its companion
+    assert cl["out_of_fold_parents_refused"] is False
+    assert cl["loo_order_among_parents"] is False
+    assert not all(cl.values())
+
+
+def test_held_out_order_no_loo_witness_is_caught():
+    """No *designated LOO holdout order* among the parents ⇒ the gate measured
+    nothing about the material a1 governs, even if everything else is consistent."""
+    kw = _clean_held_out_inputs()
+    kw["n_loo_order_parents"] = 0
+    cl = held_out_order_negative_clauses(**kw)
+    assert [k for k, v in cl.items() if not v] == ["loo_order_among_parents"]
+
+
+def test_held_out_order_loosening_that_still_refuses_is_caught():
+    """If loosening the rule still refuses windows, the armed refusal was NOT the
+    default's doing — the gate can no longer claim the default is what protects."""
+    kw = _clean_held_out_inputs()
+    kw["loosened_report"] = {
+        **kw["loosened_report"],
+        "n_records": 10,
+        "n_refused_parent_out_of_fold": 5,
+    }
+    cl = held_out_order_negative_clauses(**kw)
+    assert [k for k, v in cl.items() if not v] == ["loosening_admits_the_refused"]
+
+
+def test_held_out_order_single_parent_is_caught():
+    kw = _clean_held_out_inputs()
+    kw["stamp_summary"] = {**kw["stamp_summary"], "n_distinct_parents": 1}
+    cl = held_out_order_negative_clauses(**kw)
+    assert [k for k, v in cl.items() if not v] == ["parents_are_a_spread"]
+
+
+# ---- b2 real-loader tier: exercise the SHIPPED negative loader, not a re-impl ----
+def _import_loader_or_fail_skip():
+    """Import the shipped negative loader + mining pool, or FAIL under
+    ``TBOX_REQUIRE_NO_LEAKAGE=1`` (never a silent skip — the runtime rule the
+    committed-table tier cannot see must not go unchecked in CI)."""
+    try:
+        from tbox_finder.data import negatives
+        from tbox_finder.mining import pool
+    except ImportError as exc:  # pragma: no cover - only where numpy/pandas absent
+        _fail_or_skip(f"negative loader not importable ({exc})")
+    return negatives, pool
+
+
+def test_shipped_negative_loader_defaults_are_fail_closed():
+    """a1 + b2 (ADR-0004 A4): EVERY public negative-loader entry point defaults
+    ``require_parent_nested_train=True``.
+
+    A silent flip of any one default to False would re-open the held-out-order
+    leak with every P0-24 assertion still green (the committed split table has
+    no negative rows to catch it), so the default itself is asserted here — once
+    per shipped entry point."""
+    negatives, _pool = _import_loader_or_fail_skip()
+    for name in _PUBLIC_NEGATIVE_LOADERS:
+        fn = getattr(negatives, name)
+        param = inspect.signature(fn).parameters.get("require_parent_nested_train")
+        assert param is not None, f"{name} lost its require_parent_nested_train knob"
+        assert param.default is True, (
+            f"{name}(require_parent_nested_train=) defaults to {param.default!r}, not "
+            "True — the §9.2 fail-closed default was silently loosened (ADR-0004 A4)"
+        )
+
+
+def _held_out_order_negative_fixture(committed, negatives, pool, *, n_in_fold=30, n_loo=20):
+    """Synthesize a negative pool over REAL committed corpus parents and run it
+    through the shipped ``stamp_parent_folds`` + ``admit_pool_rows`` path.
+
+    ``fold_by_id`` is the corpus-only ``{record_id -> nested_train}`` projection
+    ``mining/pool.py::load_parent_folds`` builds from this same table; the join
+    under test is ``stamp_parent_folds``'s lookup on each window's
+    ``source_record_id``. Selecting parents from the real table is what makes
+    the non-degeneracy companion bite: fabricated ids would resolve to nothing.
+
+    The two parent sets are DIFFERENT sizes (``n_in_fold`` ≠ ``n_loo``) and the
+    admitted set is asserted downstream by IDENTITY, not count — so a fold-SENSE
+    inversion (a one-token flip that refuses the in-fold windows and admits the
+    held-out-order ones) changes both the counts and *which* windows survive and
+    cannot slip through on a lucky symmetric count. The aggregate-report clauses
+    alone are identity-blind here (stamp reports the true out-of-fold count while
+    the inverted admit refuses the wrong windows), which is exactly why the
+    identity assertion lives in the test, not the pure clause fn
+    ([[degenerate-fixture-generators]]).
+    """
+    c = committed
+    by_id, fold_by_id = {}, {}
+    for rid, src, nt, loo, order in zip(
+        c["record_id"],
+        c["source"],
+        c["nested_train"],
+        c["is_designated_loo_holdout"],
+        c["resolved_order"],
+        strict=True,
+    ):
+        if src != pool.SPLIT_CORPUS_SOURCE:  # only corpus rows are valid parent keys
+            continue
+        by_id[str(rid)] = (bool(nt), bool(loo), order)
+        fold_by_id[str(rid)] = bool(nt)
+    in_fold = sorted(r for r, (nt, _l, _o) in by_id.items() if nt)[:n_in_fold]
+    loo_parents = sorted(
+        r for r, (nt, loo, order) in by_id.items() if (not nt) and loo and order is not None
+    )[:n_loo]
+    if not in_fold or not loo_parents:
+        _fail_or_skip("committed table lacks both in-fold and designated-LOO corpus parents")
+    rows = [
+        {
+            "candidate_id": f"neg_p2_10cf_{i}",
+            "sequence": "A" * negatives.WINDOW_NT,
+            "masked": False,
+            "is_designed_control": False,
+            "source_record_id": rid,
+        }
+        for i, rid in enumerate([*in_fold, *loo_parents])
+    ]
+    stamp_summary = pool.stamp_parent_folds(rows, fold_by_id)  # mutates rows in place
+    n_loo_order_parents = sum(
+        1 for row in rows if by_id[row["source_record_id"]][1] and by_id[row["source_record_id"]][2]
+    )
+    armed_rows, armed_report = negatives.admit_pool_rows(rows, window=negatives.WINDOW_NT)
+    _loose_rows, loose_report = negatives.admit_pool_rows(
+        rows, window=negatives.WINDOW_NT, require_parent_nested_train=False
+    )
+    return {
+        "rows": rows,
+        "stamp_summary": stamp_summary,
+        "n_loo_order_parents": n_loo_order_parents,
+        "armed_rows": armed_rows,
+        "armed_report": armed_report,
+        "loose_report": loose_report,
+        "in_fold_ids": in_fold,
+        "loo_ids": loo_parents,
+    }
+
+
+def test_held_out_order_negatives_refused_by_default(committed):
+    """b2 (ADR-0004 A4): the SHIPPED loader default refuses a background window
+    carved beside a held-out-order T-box — measured end-to-end over the real
+    committed partition, asserted by IDENTITY (which windows, not just how many)
+    so a fold-sense inversion cannot pass on symmetric counts, with the must-fire
+    non-degeneracy companion so a broken split→parent join fails RED."""
+    negatives, pool = _import_loader_or_fail_skip()
+    fx = _held_out_order_negative_fixture(committed, negatives, pool)
+    shipped_default = (
+        inspect.signature(negatives.admit_pool_rows)
+        .parameters["require_parent_nested_train"]
+        .default
+    )
+    clauses = held_out_order_negative_clauses(
+        shipped_default_require=shipped_default,
+        armed_report=fx["armed_report"],
+        loosened_report=fx["loose_report"],
+        stamp_summary=fx["stamp_summary"],
+        n_loo_order_parents=fx["n_loo_order_parents"],
+    )
+    assert all(clauses.values()), {k: v for k, v in clauses.items() if not v}
+
+    in_fold, loo = set(fx["in_fold_ids"]), set(fx["loo_ids"])
+    assert in_fold and loo and len(in_fold) != len(loo)  # asymmetric by construction
+    # IDENTITY, not counts: the admitted windows' parents are EXACTLY the in-fold
+    # set. A fold-sense inversion would admit the held-out-order parents instead —
+    # which a symmetric-count fixture could not distinguish, but this can.
+    admitted_parents = {r["source_record_id"] for r in fx["armed_rows"]}
+    assert admitted_parents == in_fold
+    assert admitted_parents.isdisjoint(loo)
+    # Concrete counts (now asymmetric, so a swap also moves these):
+    assert fx["armed_report"]["n_refused_parent_out_of_fold"] == len(loo)
+    assert fx["armed_report"]["n_refused_parent_unresolved"] == 0
+    assert fx["armed_report"]["n_records"] == len(in_fold)
+    assert fx["loose_report"]["n_records"] == len(in_fold) + len(loo)
+    assert fx["n_loo_order_parents"] == len(loo) > 0
+
+    # A DELEGATING loader (not just admit_pool_rows) must honor the default at
+    # RUNTIME: an internal delegation that silently passed
+    # require_parent_nested_train=False would keep its own signature default True
+    # yet leak here, so the signature tier alone under-checks it.
+    _recs, deleg_report = negatives.negative_records_from_rows(
+        fx["rows"], window=negatives.WINDOW_NT
+    )
+    assert deleg_report["n_records"] == len(in_fold)
+    assert deleg_report["n_refused_parent_out_of_fold"] == len(loo)
