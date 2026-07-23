@@ -132,6 +132,15 @@
 /reports/p2/scan_pilot_*.out
 /reports/p2/scan_pilot_*.err
 
+# P2-10c′-d substrate pre-scan (substrate_prescan.sbatch, ADR-0005 A8): the per-shard SLURM
+# logs + the runtime segment/control/OK intermediates under substrate_prescan_segments/ are run
+# signals (§9.3 keys on the per-shard .OK / zero-byte .err — cmsearch IS quiet on success). The
+# committed deliverable is reports/p2/substrate_prescan.json (+ its provenance sidecar), produced
+# by the LOCAL reduce and deliberately NOT ignored.
+/reports/p2/substrate_prescan_*.out
+/reports/p2/substrate_prescan_*.err
+/reports/p2/substrate_prescan_segments/
+
 # ── Snakemake working dir + rule run-logs (never committed) ──
 .snakemake/
 /logs/
