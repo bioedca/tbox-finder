@@ -25,8 +25,4 @@ spike_1_19           -         T-box                RF00230    cm        1      
 # Version:         1.1.5 (Sep 2023)
 # Pipeline mode:   SEARCH
 # Query file:      data/external/refs/RF00230.cm
-# Target file:     tests/fixtures/substrate_prescan/shard_1.fna
-# Option settings: /home/bioedca/miniconda3/envs/tbox-finder-infernal/bin/cmsearch --tblout tests/fixtures/substrate_prescan/tblout/shard_1.tblout --noali --cpu 2 data/external/refs/RF00230.cm tests/fixtures/substrate_prescan/shard_1.fna 
-# Current dir:     /home/bioedca/tbox-phylogeny/tbox-finder/.claude/worktrees/p2-10cprime-d-substrate-prescan
-# Date:            Thu Jul 23 13:50:27 2026
 # [ok]

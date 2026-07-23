@@ -27,6 +27,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -35,6 +36,22 @@ from tbox_finder import infernal
 from tbox_finder.mining import substrate_prescan as sp
 
 MASTER_FA = Path("data/external/refs/RF00230_master.fa")
+
+#: cmsearch writes its input path, full command line, working dir, and a timestamp into the
+#: tblout header comments. Those leak a username + absolute worktree paths into a committed
+#: fixture (CodeRabbit PR #76), so they are dropped before the tblout is committed. Only comment
+#: metadata is removed — every data row (which `parse_tblout` reads) and the format/column
+#: headers are kept, so the committed file stays a real cmsearch tblout (§8.7).
+_SENSITIVE_TBLOUT_COMMENT = re.compile(
+    r"^#.*(?:/home/|/tmp/|/exports/|Target file:|Option settings:|Current dir:|Date:"
+    r"|target sequence database:)"
+)
+
+
+def sanitize_tblout(text: str) -> str:
+    """Drop environment-specific comment lines from a cmsearch tblout (keeps all data rows)."""
+    kept = [ln for ln in text.splitlines() if not _SENSITIVE_TBLOUT_COMMENT.search(ln)]
+    return "\n".join(kept) + "\n"
 
 
 def deterministic_acgt(n: int, key: str) -> str:
@@ -168,7 +185,6 @@ def mint_fixture(
     cms = _cmsearch_bin()
     segments: list[dict[str, Any]] = []
     selected: list[str] = []
-    control0: dict[str, Any] | None = None
 
     for shard in range(n_shards):
         arms = build_control_arms(
@@ -197,7 +213,10 @@ def mint_fixture(
         )
         if proc.stderr.strip():
             raise RuntimeError(f"cmsearch shard {shard} stderr non-empty: {proc.stderr[:200]}")
-        tblout_text = tblout.read_text(encoding="utf-8")
+        # sanitize BEFORE committing (drop username/absolute paths) and use the sanitized text
+        # for the segment too, so the committed tblout is exactly what build_shard_segment saw.
+        tblout_text = sanitize_tblout(tblout.read_text(encoding="utf-8"))
+        tblout.write_text(tblout_text)
         hits = infernal.parse_tblout(tblout_text)
         seg = sp.build_shard_segment(
             shard,
@@ -224,13 +243,21 @@ def mint_fixture(
             )
             + "\n"
         )
-        if shard == 0:
-            control0 = {
-                "kind": "substrate_prescan_control",
-                "step": sp.STEP,
-                "shard": 0,
-                "arms": arms,
-            }
+        # per-shard control manifest (every shard, so the ml gate can rebuild EACH shard from its
+        # own real tblout + control — CodeRabbit PR #76 asked for shard 1 to be covered too).
+        (out_dir / f"control_shard_{shard}.json").write_text(
+            json.dumps(
+                {
+                    "kind": "substrate_prescan_control",
+                    "step": sp.STEP,
+                    "shard": shard,
+                    "arms": arms,
+                },
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n"
+        )
         # keep the FASTA out of the committed fixture (rebuildable from the specs); remove it
         fasta.unlink()
 
@@ -257,10 +284,6 @@ def mint_fixture(
     (out_dir / "selection_accessions.json").write_text(
         json.dumps(sorted(selected), indent=2, sort_keys=True) + "\n"
     )
-    if control0 is not None:
-        (out_dir / "control_manifest.json").write_text(
-            json.dumps(control0, indent=2, sort_keys=True) + "\n"
-        )
     # a compact summary for the human minting it
     print(
         json.dumps(

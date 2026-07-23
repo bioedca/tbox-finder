@@ -28,10 +28,21 @@ def _load(name: str):
     return json.loads((FIX / name).read_text(encoding="utf-8"))
 
 
+def _n_shards() -> int:
+    return int(_load("golden_report.json")["n_shards"])
+
+
 def test_fixture_present():
     # git-tracked golden fixture — absence is a hard failure (a skip could rot into no coverage)
-    for name in ("golden_report.json", "selection_accessions.json", "control_manifest.json"):
+    for name in ("golden_report.json", "selection_accessions.json"):
         assert (FIX / name).exists(), f"missing committed fixture {name}"
+    for shard in range(_n_shards()):
+        for sub in (
+            f"control_shard_{shard}.json",
+            f"shard_specs/shard_{shard}.json",
+            f"tblout/shard_{shard}.tblout",
+        ):
+            assert (FIX / sub).exists(), f"missing committed fixture {sub}"
 
 
 def test_golden_report_certifies_and_separated():
@@ -68,7 +79,7 @@ def test_golden_sabotage_dropped_genome_fails_validate():
 
 
 def test_generator_matchedness_holds_and_sabotage_fires():
-    arms = _load("control_manifest.json")["arms"]
+    arms = _load("control_shard_0.json")["arms"]
     spike_meta = sp.arm_metadata(arms["spike"])
     null_meta = sp.arm_metadata(arms["null"])
     assert sp.arms_matched(spike_meta, null_meta)  # equal count/length/composition by construction
@@ -82,15 +93,17 @@ def test_generator_matchedness_holds_and_sabotage_fires():
     assert arms["spike"][sorted(arms["spike"])[0]] != arms["null"][sorted(arms["null"])[0]]
 
 
-def test_shard0_rebuilds_from_real_tblout():
-    # exercise the REAL parse+join path on committed real cmsearch output, even in bare CI
+@pytest.mark.parametrize("shard", range(_n_shards()))
+def test_shard_rebuilds_from_real_tblout(shard):
+    # exercise the REAL parse+join path on committed real cmsearch output, EVERY shard, even in
+    # bare CI (shard 1 carries 20 of the 40 recovered spikes — CodeRabbit PR #76).
     report = _load("golden_report.json")
-    arms = _load("control_manifest.json")["arms"]
-    spec = _load("shard_specs/shard_0.json")
-    tblout_text = (FIX / "tblout/shard_0.tblout").read_text(encoding="utf-8")
+    arms = _load(f"control_shard_{shard}.json")["arms"]
+    spec = _load(f"shard_specs/shard_{shard}.json")
+    tblout_text = (FIX / f"tblout/shard_{shard}.tblout").read_text(encoding="utf-8")
     hits = infernal.parse_tblout(tblout_text)
     seg = sp.build_shard_segment(
-        0,
+        shard,
         arm_windows={
             "production": spec["production"],
             "spike": arms["spike"],
@@ -104,7 +117,7 @@ def test_shard0_rebuilds_from_real_tblout():
         shard_ok=True,
         genome_windows=spec["genome_windows"],
     )
-    g0 = next(s for s in report["segments"] if s["shard"] == 0)
+    g = next(s for s in report["segments"] if s["shard"] == shard)
     for key in (
         "n_hits_reported",
         "n_hits_joined",
@@ -112,9 +125,11 @@ def test_shard0_rebuilds_from_real_tblout():
         "n_windows_scanned",
         "n_distinct_names",
     ):
-        assert seg[key] == g0[key], key
+        assert seg[key] == g[key], key
     for arm in sp.ARMS:
-        assert seg["arms"][arm]["n_removed"] == g0["arms"][arm]["n_removed"], arm
+        assert seg["arms"][arm]["n_removed"] == g["arms"][arm]["n_removed"], arm
+    # shard 1's spikes must be genuinely recovered too (not just shard 0's)
+    assert seg["arms"]["spike"]["n_removed"] == seg["arms"]["spike"]["n_windows"] >= sp.MIN_SPIKE_N
 
 
 def test_live_cmsearch_separates_spike_from_null(tmp_path):
@@ -124,7 +139,7 @@ def test_live_cmsearch_separates_spike_from_null(tmp_path):
             pytest.fail("TBOX_REQUIRE_INFERNAL=1 but cmsearch is not on PATH")
         pytest.skip("cmsearch not available (bare CI) — the golden fixture carries the real result")
     report = _load("golden_report.json")
-    arms = _load("control_manifest.json")["arms"]
+    arms = _load("control_shard_0.json")["arms"]
     spec = _load("shard_specs/shard_0.json")
     merged = {**spec["production"], **arms["spike"], **arms["null"]}
     fasta = infernal.write_fasta(merged, tmp_path / "shard0.fna")

@@ -30,13 +30,15 @@
 #   SCORE_THRESHOLD recall-favouring cmsearch score cutoff, frozen at the P2/P6 phase gate.
 #   NSHARDS         shard count from the fetch manifest → `sbatch --array=0-$((NSHARDS-1))`.
 #
-# SUBMIT:  SYNC FIRST, STAGE SECOND, SUBMIT THIRD — never one `&&` chain (§9.3):
+# SUBMIT:  SYNC FIRST, STAGE SECOND, SUBMIT THIRD — never one `&&` chain (§9.3). Set NSHARDS
+#          (the fetch manifest's shard count) in the SAME command as sbatch, or the array
+#          expands to `--array=0--1` (an empty/invalid range):
 #            ssh two 'bash -lc "cd ~/tbox-finder && git fetch origin && \
 #              git checkout <branch> && git reset --hard origin/<branch>"'
 #            # …rsync the fetched substrate spec dir → two:~/tbox-finder/$SUBSTRATE_DIR …
-#            ssh two 'bash -lc "cd ~/tbox-finder && SUBSTRATE_DIR=... SCORE_THRESHOLD=... \
+#            ssh two 'bash -lc "cd ~/tbox-finder && NSHARDS=<n> SUBSTRATE_DIR=<dir> SCORE_THRESHOLD=<x> \
 #              sbatch --array=0-$((NSHARDS-1)) slurm/p2/substrate_prescan.sbatch"'
-# PREFLIGHT: ssh two 'bash -lc "cd ~/tbox-finder && SUBSTRATE_DIR=... SCORE_THRESHOLD=... \
+# PREFLIGHT: ssh two 'bash -lc "cd ~/tbox-finder && NSHARDS=<n> SUBSTRATE_DIR=<dir> SCORE_THRESHOLD=<x> \
 #              sbatch --test-only --array=0-$((NSHARDS-1)) slurm/p2/substrate_prescan.sbatch"'
 # VERIFY (artifact-based; sacct off, §9.3): (a) `squeue -j <jobid>` empty; (b) every shard's
 #          $SEG_DIR/shard_<tid>.OK present AND $SEG_DIR/shard_<tid>.json present; (c) every
