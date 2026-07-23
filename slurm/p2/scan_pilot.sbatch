@@ -86,6 +86,18 @@ if ! flock -n 9; then
   exit 1
 fi
 
+# ── Invalidate any stale DONE — RIGHT AFTER the lock, before anything that can exit ──
+# DONE is the load-bearing §9.3 success signal (the .err is expected non-empty, so it is NOT
+# gated on), and it is gitignored → a prior successful run's DONE (job 687 wrote one) SURVIVES
+# the mandated `git reset --hard` cluster-sync into this run's tree. If this run then aborts at
+# a staged-input assertion below (e.g. a NEW checkpoint whose sha256 != the pinned CKPT_SHA256
+# → exit 2, or a partially-evicted genome dir under the tight HOME quota), the stale DONE + the
+# hard-reset-restored committed report would present a clean green for a scan that never ran —
+# ρ from the OLD checkpoint. Clearing here (only the lock-holding run reaches this; a lock-loser
+# exits above WITHOUT clearing the winner's DONE) restores the invariant: DONE present ⇔ THIS
+# run succeeded. Carries no jobid, so its mere presence must mean freshness.
+rm -f "$DONE"
+
 # ── Staged-input assertions (fail loud, before any GPU time) ──────────────────
 # The checkpoint is content-verified against its committed sha256 (a wrong checkpoint = a
 # wrong ρ, silently). The genome set is verified by count + FASTA magic. The manifest report
@@ -130,7 +142,8 @@ fi
 if git ls-files --error-unmatch "$REPORT" >/dev/null 2>&1; then
   git checkout HEAD -- "$REPORT"
 fi
-rm -f "$DONE"   # DONE is gitignored (a run signal); §9.3 keys on absence-on-failure.
+# (DONE was already cleared right after the lock — see above — so a failure between there and
+# here cannot leave a stale success signal.)
 
 CONDA_SH=/exports/people/mondragonlab/ecc1695/miniconda3/etc/profile.d/conda.sh
 source "$CONDA_SH"

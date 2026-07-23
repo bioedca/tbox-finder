@@ -551,3 +551,84 @@ def test_reduce_refuses_to_write_a_broken_report(tmp_path):
             accessed="2026-07-22",
         )
     assert not out.exists()  # nothing certified
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Strengthened clauses (pre-merge review): throughput + surface-field re-derivation,
+# actual-path recording, pinned geometry, manifest validation
+# ─────────────────────────────────────────────────────────────────────────────
+def test_throughput_total_windows_must_re_derive():
+    report, _, _ = _fixture_report()
+    report["throughput"]["total_windows"] += 1_000_000  # fabricate a faster scan
+    problems = rp.validate_report(report)
+    assert any("total_windows" in p and "re-summed" in p for p in problems)  # MUST FIRE
+
+
+def test_throughput_w_must_re_derive():
+    report, _, _ = _fixture_report()
+    report["throughput"]["w_windows_per_sec_per_gpu"] *= 10.0
+    problems = rp.validate_report(report)
+    assert any("w_windows_per_sec_per_gpu" in p for p in problems)  # MUST FIRE
+
+
+def test_surface_total_candidate_nt_must_re_derive():
+    report, _, _ = _fixture_report()
+    # find a surface row with a non-zero total_candidate_nt to corrupt
+    k = next(i for i, row in enumerate(report["rho_surface"]) if row["total_candidate_nt"] > 0)
+    report["rho_surface"][k]["total_candidate_nt"] += 7
+    problems = rp.validate_report(report)
+    assert any("total_candidate_nt" in p for p in problems)  # MUST FIRE
+
+
+def test_build_report_records_actual_checkpoint_path_not_default():
+    _, genomes, shard_meta = _fixture_report()
+    mok = [g["assembly_accession"] for g in genomes]
+    mtb = sum(g["total_bp"] for g in genomes)
+    report = rp.build_report(
+        genomes,
+        shard_meta,
+        thresholds=THRESHOLDS,
+        min_spans=MIN_SPANS,
+        gap_merges=GAP_MERGES,
+        manifest_total_bp=mtb,
+        manifest_total_mbp=mtb / 1e6,
+        manifest_ok=mok,
+        checkpoint_sha256="a" * 64,
+        accessed="2026-07-22",
+        checkpoint_path="/some/other/stage1.pt",
+        genome_dir="/some/genomes",
+        manifest_report_path="/some/manifest.json",
+    )
+    assert report["checkpoint"]["path"] == "/some/other/stage1.pt"  # not DEFAULT_CHECKPOINT
+    assert report["source"]["genome_dir"] == "/some/genomes"
+    assert report["source"]["manifest_report"] == "/some/manifest.json"
+
+
+def test_geometry_uses_pinned_constants():
+    from tbox_finder.data.window_dataset import STRIDE_NT, WINDOW_NT
+
+    report, _, _ = _fixture_report()
+    assert report["geometry"]["window_nt"] == WINDOW_NT  # not a hardcoded literal
+    assert report["geometry"]["stride_nt"] == STRIDE_NT
+
+
+def test_load_manifest_rejects_malformed(tmp_path):
+    good = {
+        "total_bp": 100,
+        "total_mbp": 0.0001,
+        "per_genome": [{"assembly_accession": "GCA_1.1", "status": "ok"}],
+    }
+    p = tmp_path / "m.json"
+    p.write_text(json.dumps(good))
+    assert rp._load_manifest(p) == ({"GCA_1.1"}, 100, 0.0001)  # good manifest parses
+    # missing total_bp → RhoPilotError, not a bare KeyError
+    bad = dict(good)
+    del bad["total_bp"]
+    p.write_text(json.dumps(bad))
+    with pytest.raises(rp.RhoPilotError):  # MUST FIRE
+        rp._load_manifest(p)
+    # an ok record with no accession → RhoPilotError
+    bad2 = {"total_bp": 1, "total_mbp": 0.0, "per_genome": [{"status": "ok"}]}
+    p.write_text(json.dumps(bad2))
+    with pytest.raises(rp.RhoPilotError):  # MUST FIRE
+        rp._load_manifest(p)

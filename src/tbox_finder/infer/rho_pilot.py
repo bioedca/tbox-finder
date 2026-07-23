@@ -62,6 +62,12 @@ from pathlib import Path
 from typing import Any
 
 from tbox_finder import ingest, provenance
+
+# WINDOW_NT / STRIDE_NT are the pinned scan geometry; imported (not hardcoded) so the report's
+# geometry block cannot drift from what the scan actually tiles at. window_dataset is torch-free
+# at import (scan.py imports the same constants on the bare CI tier), so this stays importable
+# without a GPU.
+from tbox_finder.data.window_dataset import STRIDE_NT, WINDOW_NT
 from tbox_finder.infer.call import (
     PROVISIONAL_GAP_MERGE_GRID,
     PROVISIONAL_MIN_SPAN_GRID,
@@ -474,6 +480,7 @@ def scan_shard(
         "shard": int(shard),
         "n_shards": int(n_shards),
         "device": device,
+        "genome_dir": str(genome_dir),
         "n_genomes": len(per_genome),
         "n_windows": sum(int(g["n_windows"]) for g in per_genome),
         "scan_seconds": sum(float(g["scan_seconds"]) for g in per_genome),
@@ -491,13 +498,31 @@ def scan_shard(
 # Reduce — glob the partials, sum → the ρ surface, certify, write the report
 # ═════════════════════════════════════════════════════════════════════════════
 def _load_manifest(manifest_report: str | Path) -> tuple[set[str], int, float]:
-    """The certified pilot set from the fetch report → (ok accessions, total_bp, total_mbp)."""
-    rep = json.loads(Path(manifest_report).read_text(encoding="utf-8"))
+    """The certified pilot set from the fetch report → (ok accessions, total_bp, total_mbp).
+
+    Fails closed with :class:`RhoPilotError` (naming the manifest) on any missing/malformed
+    required field, rather than surfacing a bare ``KeyError``/``ValueError`` deep in reduce.
+    """
+    manifest = Path(manifest_report)
+    rep = json.loads(manifest.read_text(encoding="utf-8"))
     per = rep.get("per_genome")
     if not isinstance(per, list):
-        raise RhoPilotError(f"{manifest_report} has no per_genome list")
-    ok = {str(r["assembly_accession"]) for r in per if str(r.get("status")) == "ok"}
-    return ok, int(rep["total_bp"]), float(rep["total_mbp"])
+        raise RhoPilotError(f"{manifest} has no per_genome list")
+    if "total_bp" not in rep or "total_mbp" not in rep:
+        raise RhoPilotError(f"{manifest} is missing total_bp/total_mbp")
+    try:
+        total_bp, total_mbp = int(rep["total_bp"]), float(rep["total_mbp"])
+    except (TypeError, ValueError) as exc:
+        raise RhoPilotError(f"{manifest} total_bp/total_mbp are not numeric: {exc}") from exc
+    ok: set[str] = set()
+    for i, r in enumerate(per):
+        if str(r.get("status")) != "ok":
+            continue
+        acc = r.get("assembly_accession")
+        if not isinstance(acc, str) or not acc:
+            raise RhoPilotError(f"{manifest} per_genome[{i}] is ok but has no assembly_accession")
+        ok.add(acc)
+    return ok, total_bp, total_mbp
 
 
 def build_report(
@@ -512,6 +537,9 @@ def build_report(
     manifest_ok: Sequence[str],
     checkpoint_sha256: str,
     accessed: str,
+    checkpoint_path: str | Path = DEFAULT_CHECKPOINT,
+    genome_dir: str | Path = DEFAULT_GENOME_DIR,
+    manifest_report_path: str | Path = DEFAULT_MANIFEST_REPORT,
 ) -> dict[str, Any]:
     """Assemble the ρ-pilot report — every headline re-derived from the per-genome evidence."""
     grid = grid_order(thresholds, min_spans, gap_merges)
@@ -590,12 +618,12 @@ def build_report(
             ),
         },
         "checkpoint": {
-            "path": str(DEFAULT_CHECKPOINT),
+            "path": str(checkpoint_path),
             "sha256": str(checkpoint_sha256),
         },
         "geometry": {
-            "window_nt": 1024,
-            "stride_nt": 512,
+            "window_nt": WINDOW_NT,
+            "stride_nt": STRIDE_NT,
             "scan_batch": DEFAULT_SCAN_BATCH,
         },
         "digest": per_genome_digest(per_sorted),
@@ -611,8 +639,8 @@ def build_report(
         "provisional_grids_bind_nothing": True,
         "manifest_ok_accessions": sorted(str(a) for a in manifest_ok),
         "source": {
-            "genome_dir": str(DEFAULT_GENOME_DIR),
-            "manifest_report": str(DEFAULT_MANIFEST_REPORT),
+            "genome_dir": str(genome_dir),
+            "manifest_report": str(manifest_report_path),
             "accessed": accessed,
         },
         "per_genome": [
@@ -733,8 +761,45 @@ def validate_report(report: Mapping[str, Any]) -> list[str]:  # noqa: C901 - one
         if abs(float(row["rho_per_mbp"]) - n / scanned_mbp) > 1e-9:
             problems.append(f"rho_surface[{k}] rho_per_mbp != n_candidates / T[Mbp]")
         n_zf = int(global_counts["n_zero_flanked_candidates"][k])
+        if int(row["n_zero_flanked_candidates"]) != n_zf:
+            problems.append(
+                f"rho_surface[{k}] n_zero_flanked_candidates {row['n_zero_flanked_candidates']} "
+                f"!= re-summed {n_zf}"
+            )
+        nt = int(global_counts["total_candidate_nt"][k])
+        if int(row["total_candidate_nt"]) != nt:
+            problems.append(
+                f"rho_surface[{k}] total_candidate_nt {row['total_candidate_nt']} != re-summed {nt}"
+            )
         if abs(float(row["rho_excl_zero_flanked_per_mbp"]) - (n - n_zf) / scanned_mbp) > 1e-9:
             problems.append(f"rho_surface[{k}] rho_excl_zero_flanked_per_mbp mis-derived")
+
+    # ── throughput re-derivation from the per-genome evidence ───────────────
+    # w = windows/sec/GPU sizes the whole eventual genome scan (ADR-0003 D6), so it must be
+    # re-derived, not read back: all(clauses) catches a clause flipped FALSE, never a headline
+    # fabricated TRUE ([[gate-clauses-need-re-derivation]]). n_windows/scan_seconds re-sum from
+    # per_genome; a partial whose top-level total was inflated relative to its own evidence fails.
+    thr = report.get("throughput")
+    if not isinstance(thr, Mapping):
+        problems.append("throughput block missing")
+    else:
+        re_windows = sum(int(g["n_windows"]) for g in per)
+        re_seconds = sum(float(g["scan_seconds"]) for g in per)
+        if int(thr.get("total_windows", -1)) != re_windows:
+            problems.append(
+                f"throughput.total_windows {thr.get('total_windows')} != re-summed {re_windows}"
+            )
+        if abs(float(thr.get("total_scan_seconds", -1.0)) - re_seconds) > 1e-6:
+            problems.append(
+                f"throughput.total_scan_seconds {thr.get('total_scan_seconds')} "
+                f"!= re-summed {re_seconds}"
+            )
+        want_w = re_windows / re_seconds if re_seconds > 0 else 0.0
+        if abs(float(thr.get("w_windows_per_sec_per_gpu", -1.0)) - want_w) > 1e-6:
+            problems.append(
+                f"throughput.w_windows_per_sec_per_gpu {thr.get('w_windows_per_sec_per_gpu')} "
+                f"!= total_windows / total_scan_seconds ({want_w})"
+            )
 
     # ── the designed must-fire liveness controls ────────────────────────────
     power = report.get("power", {})
@@ -837,6 +902,9 @@ def reduce_partials(
         manifest_ok=manifest_ok,
         checkpoint_sha256=provenance.sha256_file(checkpoint),
         accessed=accessed,
+        checkpoint_path=checkpoint,
+        genome_dir=partials[0].get("genome_dir", str(DEFAULT_GENOME_DIR)),
+        manifest_report_path=manifest_report,
     )
     problems = validate_report(report)
     if problems:
