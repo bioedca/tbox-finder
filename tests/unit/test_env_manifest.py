@@ -168,6 +168,10 @@ def test_homology_env_pins_hmmer_blast_and_no_infernal():
         lock_problems.append("homology.conda-lock.yml must lock hmmer 3.4")
     if not re.search(r"^- name: blast\n\s+version: '?2\.17\.0'?\s*$", lock, re.MULTILINE):
         lock_problems.append("homology.conda-lock.yml must lock blast 2.17.0")
+    if not re.search(r"^- name: python\n\s+version: '?3\.12\.\d+'?\s*$", lock, re.MULTILINE):
+        lock_problems.append("homology.conda-lock.yml must lock python 3.12.x")
+    if not re.search(r"^- name: biopython\n\s+version: '?1\.87'?\s*$", lock, re.MULTILINE):
+        lock_problems.append("homology.conda-lock.yml must lock biopython 1.87")
     if re.search(r"^- name: infernal$", lock, re.MULTILINE):
         lock_problems.append(
             "homology.conda-lock.yml must NOT contain infernal (A12 esl-* clobber avoidance)"
