@@ -166,11 +166,19 @@ print("hf cache warm", REPO_ID, REVISION)
 '
 
 # ── Scan: one single-GPU worker per allocated A4000 ──────────────────────────
-# K = the GPUs this job was given (SLURM masks CUDA_VISIBLE_DEVICES; the workers all see the
-# same K devices reindexed cuda:0..cuda:K-1, and worker i pins cuda:i). Deterministic LPT
-# sharding means every worker computes the same partition from the same genome directory.
-K="$(nvidia-smi -L | wc -l)"
-if [ "$K" -lt 1 ]; then echo "FATAL: no GPUs visible." >&2; exit 2; fi
+# K = the number of CUDA-VISIBLE devices — what torch can address as cuda:0..cuda:K-1 — and
+# worker i pins cuda:i. ⚠️ NOT `nvidia-smi -L | wc -l`: nvidia-smi lists ALL physical GPUs on
+# the node (8 on `one`) regardless of the --gres allocation, while torch honours the
+# SLURM-set CUDA_VISIBLE_DEVICES (the 4 this job was given). Job 685 died "invalid device
+# ordinal" because nvidia-smi reported 8 → workers 4–7 pinned cuda:4..7 that torch could not
+# see. torch.cuda.device_count() is the ground truth: cuda:0..K-1 are exactly the allocated
+# GPUs. Deterministic LPT sharding means every worker computes the same partition.
+K="$(PYTHONPATH=src python -c 'import torch; print(torch.cuda.device_count())')"
+if [ "$K" -lt 1 ]; then
+  echo "FATAL: torch sees no CUDA devices (torch.cuda.device_count()==0)." >&2
+  exit 2
+fi
+echo "CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-<unset>} → torch device_count K=$K"
 echo "── scanning $N_FNA genomes across K=$K A4000 (one worker per GPU) ──"
 
 pids=()
