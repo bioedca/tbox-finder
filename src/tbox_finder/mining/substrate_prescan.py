@@ -304,7 +304,11 @@ def build_shard_segment(
         "cm_sha256": str(cm_sha256),
         "score_threshold": float(score_threshold),
         "expected_production_windows": int(expected_production_windows),
-        "n_windows_scanned": len(all_windows),
+        # n_windows_scanned counts windows SUBMITTED across all arms (before the merge), so a
+        # cross-arm name collision makes it exceed n_distinct_names (the merged-key count) and
+        # clause (v)(a) fires. Deriving both from the merged dict would make that check vacuous
+        # (dict keys are already unique) — CodeRabbit PR #76.
+        "n_windows_scanned": sum(len(arm_windows.get(arm, {})) for arm in ARMS),
         "n_distinct_names": len(set(all_windows)),
         "n_hits_reported": len(hits),
         "n_hits_joined": int(n_joined),
@@ -714,11 +718,14 @@ def write_report(report: Mapping[str, Any], out_path: str | Path = DEFAULT_REPOR
 def prior_genome_windows_from_fetch_report(path: str | Path) -> dict[str, int]:
     """Per-genome production-window totals from a prior committed fetch report (clause-viii base).
 
-    Uses ``per_genome[].assembly_accession`` → its recorded window total. The pilot fetch report
-    (``pilot_fetch_report.json``) records ``total_bp`` per genome, not ``n_windows``; the
-    production fetch manifest records ``n_windows`` per genome directly. This reads whichever the
-    report carries (``n_windows`` preferred), so the within-genome-shrink leg diffs against the
-    previous report, never a floor ([[ncbi-refetch-429-silent-shrink]]).
+    Uses ``per_genome[].assembly_accession`` → its recorded ``n_windows``. The report MUST carry
+    per-genome ``n_windows`` (the production fetch manifest does): the clause-(viii) within-genome
+    shrink leg compares *window counts*, so silently substituting ``total_bp`` — as an earlier
+    draft did — would compare a window count (~1–hundreds) against a base count (~10⁶) and fail
+    spuriously (CodeRabbit PR #76). A report lacking ``n_windows`` for a selected genome is
+    therefore rejected, not floored ([[ncbi-refetch-429-silent-shrink]]); the pilot fetch report
+    (``total_bp`` only) is NOT a valid window baseline — omit ``--prior-fetch-report`` on the
+    maiden fetch (prior=None → the git-frozen set-equality carries clause viii).
     """
     obj = json.loads(Path(path).read_text(encoding="utf-8"))
     out: dict[str, int] = {}
@@ -726,10 +733,14 @@ def prior_genome_windows_from_fetch_report(path: str | Path) -> dict[str, int]:
         acc = str(g.get("assembly_accession", ""))
         if not acc:
             continue
-        if "n_windows" in g:
-            out[acc] = int(g["n_windows"])
-        elif "total_bp" in g:  # window count is deterministic in bp given the pinned geometry
-            out[acc] = int(g["total_bp"])
+        if "n_windows" not in g:
+            raise SubstratePrescanError(
+                f"prior fetch report {path} genome {acc} has no n_windows — the clause-(viii) "
+                "within-genome shrink baseline requires per-genome window counts, not total_bp "
+                "(comparing a window count to bp is a category error). Use the production fetch "
+                "manifest, or omit --prior-fetch-report on the maiden fetch."
+            )
+        out[acc] = int(g["n_windows"])
     return out
 
 

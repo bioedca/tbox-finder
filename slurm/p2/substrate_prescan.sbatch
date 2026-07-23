@@ -107,7 +107,12 @@ CONDA_SH=/exports/people/mondragonlab/ecc1695/miniconda3/etc/profile.d/conda.sh
 source "$CONDA_SH"
 conda activate tbox-infernal
 command -v cmsearch >/dev/null 2>&1 || { echo "FATAL: cmsearch not on PATH after activating tbox-infernal" >&2; exit 2; }
-cmsearch -h 2>&1 | grep -q "INFERNAL 1.1.5" || echo "WARN: cmsearch is not the pinned INFERNAL 1.1.5" >&2
+# The pinned version is load-bearing (ADR-0002 A11 pattern): a different infernal build can score
+# differently, so a mismatch is a fail-loud exit, not a warning (CodeRabbit PR #76).
+if ! cmsearch -h 2>&1 | grep -q "INFERNAL 1.1.5"; then
+  echo "FATAL: cmsearch is not the pinned INFERNAL 1.1.5" >&2
+  exit 2
+fi
 
 echo "host=$(hostname) job=${SLURM_JOB_ID:-none} tid=$tid sha=$(git rev-parse --short HEAD 2>/dev/null || echo NA)"
 

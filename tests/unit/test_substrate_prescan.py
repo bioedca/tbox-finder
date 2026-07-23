@@ -167,6 +167,28 @@ def test_v_unjoined_hit_must_fire():
     assert _clauses(segs, selected)["hit_window_mapping_total"] is False
 
 
+def test_v_cross_arm_name_collision_fires_in_build():
+    # clause (v)(a) is non-vacuous: a window name shared across two arms makes n_windows_scanned
+    # (submitted, counted per arm) exceed n_distinct_names (merged keys) → mapping clause FALSE.
+    spike = {f"spike_0_{i}": _seq(f"s{i}", 300) for i in range(sp.MIN_SPIKE_N)}
+    null = {f"null_0_{i}": _seq(f"s{i}", 300)[::-1] for i in range(sp.MIN_NULL_N)}
+    # production reuses a spike name — a naming-scheme collision the merge would silently hide
+    production = {"spike_0_0": _seq("collide", 260)}
+    seg = sp.build_shard_segment(
+        0,
+        arm_windows={"production": production, "spike": spike, "null": null},
+        hits=[],
+        tblout_text="# empty\n",
+        cm_sha256=sp.RF00230_CM_SHA256,
+        expected_production_windows=1,
+        score_threshold=THRESH,
+        shard_ok=True,
+        genome_windows={"GCA_T00000.1": 1},
+    )
+    assert seg["n_windows_scanned"] > seg["n_distinct_names"]  # collision visible, not merged away
+    assert _clauses([seg], ["GCA_T00000.1"])["hit_window_mapping_total"] is False
+
+
 def test_v_name_mismatch_deflates_join_in_build():
     # the real build path: mutate a window's name after cmsearch named the hit → the hit no longer
     # joins, n_hits_reported > n_hits_joined, so the mapping clause fires (the .N-suffix guard)
@@ -344,11 +366,13 @@ def test_empty_segments_certifies_nothing():
 
 
 def test_pinned_cm_sha256_matches_committed_cm():
-    # the CM-identity anchor must equal the sha256 recorded in the tier2n probe report
+    # the CM-identity anchor must equal the sha256 recorded in the tier2n probe report;
+    # anchor the path to the repo root (not the process CWD) — CodeRabbit PR #76
     import json
     from pathlib import Path
 
-    probe = json.loads(Path("reports/p2/tier2n_probe.json").read_text())
+    repo = Path(__file__).resolve().parents[2]
+    probe = json.loads((repo / "reports/p2/tier2n_probe.json").read_text())
     assert probe["cm_sha256"] == sp.RF00230_CM_SHA256
 
 
