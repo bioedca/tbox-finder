@@ -1,0 +1,225 @@
+{
+  "accessed": "2026-07-23",
+  "clause_schema_version": 1,
+  "clauses": {
+    "cm_identity": true,
+    "detector_live_every_shard": true,
+    "genome_completeness": true,
+    "hit_window_mapping_total": true,
+    "power_arms_min_n": true,
+    "production_denominator_consistent": true,
+    "shard_completeness_coinvocation": true,
+    "spike_null_separation": true
+  },
+  "cm_pinned_sha256": "082616efe0616479dc9b9f565b5bcab7648d7ea1d629430940319f247af52cea",
+  "consumed_production_windows": 12,
+  "expected_production_windows": 12,
+  "geometry": {
+    "stride_nt": 512,
+    "window_nt": 1024
+  },
+  "is_removal_yield_not_residual": true,
+  "is_science": false,
+  "lower_bound_disclosure": "substrate_removal_rate is a removal/detection YIELD, not a residual: it lower-bounds the true removable-contamination fraction (cmsearch misses ~27.6% of catalogued T-boxes and misses Tier-2N by definition), so a low value is NOT a clean-pool claim. Residual Tier-2N contamination is UNMEASURED above; the D14 per-round recall-drop halt is the directional backstop, not a sufficiency claim.",
+  "n_genomes_scanned": 12,
+  "n_genomes_selected": 12,
+  "n_null_windows": 40,
+  "n_production_windows": 12,
+  "n_production_windows_removed": 0,
+  "n_shards": 2,
+  "n_shards_expected": 2,
+  "n_spike_windows": 40,
+  "overall_pass": true,
+  "pins_no_adr_value": true,
+  "residual_risk_lower_bounded_only": true,
+  "scanned_accessions": [
+    "GCA_FIX00000.1",
+    "GCA_FIX00001.1",
+    "GCA_FIX00002.1",
+    "GCA_FIX00003.1",
+    "GCA_FIX00004.1",
+    "GCA_FIX00005.1",
+    "GCA_FIX01000.1",
+    "GCA_FIX01001.1",
+    "GCA_FIX01002.1",
+    "GCA_FIX01003.1",
+    "GCA_FIX01004.1",
+    "GCA_FIX01005.1"
+  ],
+  "schema_version": "1.0",
+  "score_threshold": 30.0,
+  "segments": [
+    {
+      "arms": {
+        "null": {
+          "composition": {
+            "A": 2691,
+            "C": 2004,
+            "G": 2506,
+            "T": 2627,
+            "other": 0
+          },
+          "invocation_id": "8316324a657a00ae96890b485e7c814a072ed2afc5beab78fb7f5c72d6657008",
+          "length_multiset_sha": "3796ab8817d0738b65818b032b8f7d8f980a436e634d507c3d1e3d61fd3d42ab",
+          "n_removed": 0,
+          "n_windows": 20,
+          "total_bp": 9828
+        },
+        "production": {
+          "composition": {
+            "A": 684,
+            "C": 638,
+            "G": 653,
+            "T": 665,
+            "other": 0
+          },
+          "invocation_id": "8316324a657a00ae96890b485e7c814a072ed2afc5beab78fb7f5c72d6657008",
+          "length_multiset_sha": "2fdd29ce7ecbd956d20697890cbe43480eb755f4cad8bcdc868550e249b93b31",
+          "n_removed": 0,
+          "n_windows": 6,
+          "total_bp": 2640
+        },
+        "spike": {
+          "composition": {
+            "A": 2691,
+            "C": 2004,
+            "G": 2506,
+            "T": 2627,
+            "other": 0
+          },
+          "invocation_id": "8316324a657a00ae96890b485e7c814a072ed2afc5beab78fb7f5c72d6657008",
+          "length_multiset_sha": "3796ab8817d0738b65818b032b8f7d8f980a436e634d507c3d1e3d61fd3d42ab",
+          "n_removed": 20,
+          "n_windows": 20,
+          "total_bp": 9828
+        }
+      },
+      "cm_sha256": "082616efe0616479dc9b9f565b5bcab7648d7ea1d629430940319f247af52cea",
+      "expected_production_windows": 6,
+      "genome_windows": {
+        "GCA_FIX00000.1": 1,
+        "GCA_FIX00001.1": 1,
+        "GCA_FIX00002.1": 1,
+        "GCA_FIX00003.1": 1,
+        "GCA_FIX00004.1": 1,
+        "GCA_FIX00005.1": 1
+      },
+      "genomes": [
+        "GCA_FIX00000.1",
+        "GCA_FIX00001.1",
+        "GCA_FIX00002.1",
+        "GCA_FIX00003.1",
+        "GCA_FIX00004.1",
+        "GCA_FIX00005.1"
+      ],
+      "invocation_id": "8316324a657a00ae96890b485e7c814a072ed2afc5beab78fb7f5c72d6657008",
+      "kind": "shard_segment",
+      "n_distinct_names": 46,
+      "n_hits_joined": 21,
+      "n_hits_reported": 21,
+      "n_tblout_files": 1,
+      "n_windows_scanned": 46,
+      "score_threshold": 30.0,
+      "shard": 0,
+      "shard_ok": true,
+      "step": "P2-10c'-d"
+    },
+    {
+      "arms": {
+        "null": {
+          "composition": {
+            "A": 2614,
+            "C": 2222,
+            "G": 2620,
+            "T": 2554,
+            "other": 0
+          },
+          "invocation_id": "39fce9a1f8f3885b7352aeea604dcfaa908d1e91e7468083b9341539538caeb1",
+          "length_multiset_sha": "64f514f169499270b23b79cc240d72d1133c9e3410100b741a586a0e18d09e2d",
+          "n_removed": 0,
+          "n_windows": 20,
+          "total_bp": 10010
+        },
+        "production": {
+          "composition": {
+            "A": 665,
+            "C": 695,
+            "G": 623,
+            "T": 657,
+            "other": 0
+          },
+          "invocation_id": "39fce9a1f8f3885b7352aeea604dcfaa908d1e91e7468083b9341539538caeb1",
+          "length_multiset_sha": "2fdd29ce7ecbd956d20697890cbe43480eb755f4cad8bcdc868550e249b93b31",
+          "n_removed": 0,
+          "n_windows": 6,
+          "total_bp": 2640
+        },
+        "spike": {
+          "composition": {
+            "A": 2614,
+            "C": 2222,
+            "G": 2620,
+            "T": 2554,
+            "other": 0
+          },
+          "invocation_id": "39fce9a1f8f3885b7352aeea604dcfaa908d1e91e7468083b9341539538caeb1",
+          "length_multiset_sha": "64f514f169499270b23b79cc240d72d1133c9e3410100b741a586a0e18d09e2d",
+          "n_removed": 20,
+          "n_windows": 20,
+          "total_bp": 10010
+        }
+      },
+      "cm_sha256": "082616efe0616479dc9b9f565b5bcab7648d7ea1d629430940319f247af52cea",
+      "expected_production_windows": 6,
+      "genome_windows": {
+        "GCA_FIX01000.1": 1,
+        "GCA_FIX01001.1": 1,
+        "GCA_FIX01002.1": 1,
+        "GCA_FIX01003.1": 1,
+        "GCA_FIX01004.1": 1,
+        "GCA_FIX01005.1": 1
+      },
+      "genomes": [
+        "GCA_FIX01000.1",
+        "GCA_FIX01001.1",
+        "GCA_FIX01002.1",
+        "GCA_FIX01003.1",
+        "GCA_FIX01004.1",
+        "GCA_FIX01005.1"
+      ],
+      "invocation_id": "39fce9a1f8f3885b7352aeea604dcfaa908d1e91e7468083b9341539538caeb1",
+      "kind": "shard_segment",
+      "n_distinct_names": 46,
+      "n_hits_joined": 20,
+      "n_hits_reported": 20,
+      "n_tblout_files": 1,
+      "n_windows_scanned": 46,
+      "score_threshold": 30.0,
+      "shard": 1,
+      "shard_ok": true,
+      "step": "P2-10c'-d"
+    }
+  ],
+  "selected_accessions": [
+    "GCA_FIX00000.1",
+    "GCA_FIX00001.1",
+    "GCA_FIX00002.1",
+    "GCA_FIX00003.1",
+    "GCA_FIX00004.1",
+    "GCA_FIX00005.1",
+    "GCA_FIX01000.1",
+    "GCA_FIX01001.1",
+    "GCA_FIX01002.1",
+    "GCA_FIX01003.1",
+    "GCA_FIX01004.1",
+    "GCA_FIX01005.1"
+  ],
+  "source": {
+    "note": "real local cmsearch",
+    "origin": "make_substrate_prescan_control.py mint-fixture"
+  },
+  "step": "P2-10c'-d",
+  "substrate_removal_rate": 0.0,
+  "substrate_scanned": true,
+  "tier2n_residual_unmeasured_above": true
+}
