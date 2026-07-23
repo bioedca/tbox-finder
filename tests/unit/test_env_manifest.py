@@ -20,8 +20,9 @@ RULES_DIR = REPO_ROOT / "workflow" / "rules"
 # The environments pinned by ADR-0002 D1 (one lockfile each, never aggregate). The `ml`
 # env was split into `ml-dna` + `ml-rna` at P0-06c (ADR-0002 A4): transformers 4.57.5
 # (Caduceus trust_remote_code ceiling) is mutually exclusive with `multimolecule` 0.0.9,
-# which at import needs transformers 5.x.
-EXPECTED_ENVS = ["data", "infernal", "ml-dna", "ml-rna", "viz", "app", "rscape"]
+# which at import needs transformers 5.x. `rscape` was added at P2-10c (A11) and
+# `homology` at P2-10c′-e (A12: hmmer+blast, no infernal co-pin) — eight envs total.
+EXPECTED_ENVS = ["data", "infernal", "ml-dna", "ml-rna", "viz", "app", "rscape", "homology"]
 
 # The two GPU envs (ADR-0002 D2/D3/A4); the torch-URL / no-`--extra-index-url` guard
 # applies to both, since both carry the same cu128 URL-pinned closure.
@@ -57,9 +58,11 @@ def test_env_specs_are_well_formed():
 
 
 def test_all_env_lockfiles_exist():
-    """All seven envs are locked: four CPU envs at P0-05, both GPU envs at P0-06c (A4),
-    and `rscape` at P2-10c (A11 — a separate env so the GATE-1-load-bearing
-    `infernal` lock is not re-solved by `rscape`'s gnuplot/Qt closure).
+    """All eight envs are locked: four CPU envs at P0-05, both GPU envs at P0-06c (A4),
+    `rscape` at P2-10c (A11 — a separate env so the GATE-1-load-bearing `infernal`
+    lock is not re-solved by `rscape`'s gnuplot/Qt closure), and `homology` at
+    P2-10c′-e (A12 — hmmer/blast with NO infernal co-pin, so `envs/infernal.conda-lock.yml`
+    is likewise never re-solved and the `esl-*` two-provider clobber is out of reach).
 
     ml-dna / ml-rna are lockable on the laptop only via a full URL-pinned cu128 closure
     (see `test_ml_envs_pin_torch_by_url_not_index`); conda-lock 4.0.2 cannot use an index.
@@ -126,3 +129,51 @@ def test_snakemake_conda_directives_resolve():
             if not target.is_file():
                 unresolved.append(f"{smk.name} -> {rel}")
     assert not unresolved, f"unresolved conda: directives: {unresolved}"
+
+
+def test_homology_env_pins_hmmer_blast_and_no_infernal():
+    """Lock the ADR-0002 A12 invariant: the 8th `homology` env pins the two absent
+    sequence-search binaries (`hmmer` 3.4 = nhmmer, `blast` 2.17.0 = BLAST+) and
+    **must NOT co-pin `infernal`**.
+
+    The no-infernal rule is the load-bearing decision, not a style choice: `hmmer`
+    and `infernal` each ship their own `esl-*` Easel miniapps into `bin/` and neither
+    vendors Easel, so co-installing them is a genuine two-provider file clobber
+    (A11's vendored-R-scape co-install never faced it). Keeping `infernal` out of
+    this env also leaves the GATE-1-load-bearing `envs/infernal.conda-lock.yml`
+    byte-frozen. This guard fails closed on a future edit that folds `infernal` in
+    or drifts the pins, and confirms spec ↔ lock consistency.
+    """
+    spec = (ENVS_DIR / "homology.yml").read_text()
+    # Strip inline `#` comments so the header prose (which legitimately explains the
+    # esl-*/infernal rationale) is not inspected — only real YAML dependency lines.
+    code = "\n".join(line.split("#", 1)[0] for line in spec.splitlines())
+    problems = []
+    for pat, why in (
+        (r"^\s*-\s*hmmer=3\.4\s*$", "must pin `hmmer=3.4` (provides nhmmer)"),
+        (r"^\s*-\s*blast=2\.17\.0\s*$", "must pin `blast=2.17.0` (BLAST+)"),
+        (r"^\s*-\s*python=3\.12\s*$", "must pin `python=3.12` (ADR-0002 D1)"),
+        (r"^\s*-\s*biopython=1\.87\s*$", "must pin `biopython=1.87` (sibling envs)"),
+    ):
+        if not re.search(pat, code, re.MULTILINE):
+            problems.append(f"homology.yml: {why}")
+    if re.search(r"^\s*-\s*infernal\b", code, re.MULTILINE):
+        problems.append("homology.yml: must NOT co-pin `infernal` (A12 esl-* clobber avoidance)")
+    assert not problems, "homology env A12 invariant violated: " + "; ".join(problems)
+
+    # spec ↔ lock consistency + the same no-infernal invariant in the solved closure.
+    lock = (ENVS_DIR / "homology.conda-lock.yml").read_text()
+    lock_problems = []
+    if not re.search(r"^- name: hmmer\n\s+version: '?3\.4'?\s*$", lock, re.MULTILINE):
+        lock_problems.append("homology.conda-lock.yml must lock hmmer 3.4")
+    if not re.search(r"^- name: blast\n\s+version: '?2\.17\.0'?\s*$", lock, re.MULTILINE):
+        lock_problems.append("homology.conda-lock.yml must lock blast 2.17.0")
+    if not re.search(r"^- name: python\n\s+version: '?3\.12\.\d+'?\s*$", lock, re.MULTILINE):
+        lock_problems.append("homology.conda-lock.yml must lock python 3.12.x")
+    if not re.search(r"^- name: biopython\n\s+version: '?1\.87'?\s*$", lock, re.MULTILINE):
+        lock_problems.append("homology.conda-lock.yml must lock biopython 1.87")
+    if re.search(r"^- name: infernal$", lock, re.MULTILINE):
+        lock_problems.append(
+            "homology.conda-lock.yml must NOT contain infernal (A12 esl-* clobber avoidance)"
+        )
+    assert not lock_problems, "; ".join(lock_problems)

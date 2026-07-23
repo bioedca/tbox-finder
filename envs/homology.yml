@@ -1,0 +1,42 @@
+# homology env — the sequence-search half of the ADR-0006 D7 model-independent
+# homolog set (P2-10c′). Provides the two search binaries that were absent from
+# every env: nhmmer (package hmmer) and BLAST+ (package blast). Their homolog
+# hits are aligned CM-free de-novo and scored by the (a) any-helix R-scape
+# covariation backend (envs/rscape.yml), whose caller A11 shipped without a scorer
+# input; this env closes that input path. See ADR-0002 A12.
+#
+# A SEPARATE 8th env pinning hmmer + blast ONLY, with NO infernal co-pin — the
+# load-bearing reason:
+#   * hmmer ships its own esl-* Easel miniapps into bin/ and infernal ships the
+#     full Easel suite, and NEITHER vendors Easel (unlike A11's R-scape, which
+#     vendors its own HMMER/Easel/Infernal and only ever put esl-afetch/esl-reformat
+#     into bin/ — a benign two-name collision settled by a real co-install,
+#     ADR-0002:232). Co-installing hmmer + infernal is therefore a GENUINE
+#     two-provider bin/-level esl-* file clobber that A11's case never faced.
+#     blast ships no esl-*; hmmer's esl-* land in an otherwise-esl-empty bin/ with
+#     no other esl-* provider, so no esl-* clobber is predicted for this env.
+#   * Keeping infernal out of this env keeps the GATE-1-load-bearing
+#     envs/infernal.conda-lock.yml byte-frozen at content_hash.linux-64 = 776610ae…
+#     and leaves envs/rscape.conda-lock.yml untouched. cmsearch/cmbuild/cmalign-
+#     from-candidate keep running from envs/infernal.yml (or envs/rscape.yml) in
+#     their own Snakemake rule, where infernal stays the sole invoked esl-* provider.
+#
+# Versions are methods-section facts (accessed 2026-07-23), asserted against the
+# running binary at implementation, never assumed:
+#   * hmmer 3.4 — bioconda's newest; upstream HMMER 3.4 (Eddy Lab, 2023-08-15) is the
+#     current stable major (no 3.5); nhmmer has shipped since HMMER 3.1.
+#   * blast 2.17.0 — bioconda's newest BLAST+; upstream NCBI BLAST+ 2.17.0 is current.
+# Pins cleared for the mining protective filter only (bounded-sensitivity use, never
+# a novelty claim); ADR-0006 D2's reported (a) criterion at GATE-3/P6 re-decides them
+# (ADR-0002 D8 bump trigger). No infernal, no LocARNA.
+#
+# Lockfile: envs/homology.conda-lock.yml (conda-lock -p linux-64, per-env — never aggregate).
+name: tbox-homology
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - python=3.12
+  - hmmer=3.4
+  - blast=2.17.0
+  - biopython=1.87
