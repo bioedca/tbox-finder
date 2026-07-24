@@ -58,6 +58,24 @@ DEFAULT_CROSSWALK = "data/external/gtdb/sp_clusters_r232.tsv"
 #: ADR-0003 D6 pins "~100-genome sample"; the cap only binds when n_target > n_phyla.
 DEFAULT_N_TARGET = 100
 DEFAULT_PER_PHYLUM_CAP = 5
+
+#: Provenance metadata for the pilot invocation (generalised so the production selection —
+#: ``mining/production_genomes.py``, ADR-0006 A1 — can reuse this guarded builder verbatim
+#: rather than fork it; only the ADR / rule / notes differ, not the selector or its guards).
+DEFAULT_ADR = "ADR-0003"
+DEFAULT_RULE_NAME = "workflow/rules/data.smk :: select_pilot_genomes"
+_PILOT_NOTES = (
+    "P2-10c′-a: the SELECTION half of the ADR-0003 D6 ρ-pilot. A reproducible, "
+    "phylum-stratified, divergence-spanning ~100-genome sample of GTDB R232 species "
+    "representatives, drawn round-robin across phyla (breadth-first; one rep per "
+    "phylum per pass) so the sample spans the maximum number of divergent clades the "
+    "target allows. This manifest is an ACCESSION LIST only — it fetches no genomes "
+    "(the LOCAL fetch sub-step does that) and measures no ρ, no candidate count, and "
+    "chooses no Stage-1 detection threshold (the SLURM scan sub-step does that, where "
+    "ρ is finally measured). It therefore pins no ADR value and carries no scientific "
+    "claim. ρ sizes the shared GTDB/RefSeq homolog-DB + negative-window fetch "
+    "(P2-10c′/P2-10e), priced at 0.7–68 GB pivoting on ρ."
+)
 #: Non-vacuity floors for the production run (197 phyla available in R232). A divergence-
 #: spanning pilot that collapsed to a handful of clades — or dropped the archaeal stretch
 #: (§7.2) — must fail loud rather than ship a sample that silently understates ρ variance.
@@ -235,8 +253,19 @@ def build(
     min_phyla: int = DEFAULT_MIN_PHYLA,
     min_archaea: int = DEFAULT_MIN_ARCHAEA,
     env_lock: str | Path | None = None,
+    adr: str = DEFAULT_ADR,
+    rule_name: str = DEFAULT_RULE_NAME,
+    notes: str | None = None,
+    kind: str = "pilot",
 ) -> int:
-    """Parse, select, guard, and write the ρ-pilot genome manifest + report + provenance."""
+    """Parse, select, guard, and write a phylum-stratified genome manifest + report + provenance.
+
+    Defaults produce the ADR-0003 D6 ρ-pilot manifest. ``adr`` / ``rule_name`` / ``notes``
+    are the only per-invocation metadata that differ for the ADR-0006 A1 **production**
+    selection (``mining/production_genomes.py``), which reuses this guarded builder — and
+    thus the shared :func:`select_pilot_genomes` selector and every must-fire guard below —
+    verbatim (promote-don't-duplicate; the guards are load-bearing correctness logic).
+    """
     import pandas as pd
 
     reps = parse_species_reps(crosswalk_path)
@@ -324,18 +353,7 @@ def build(
         "gtdb_release": "R232",
         "gtdb_license": "CC-BY-SA-4.0 (GTDB data; https://gtdb.ecogenomic.org/downloads)",
         "crosswalk_sha256": provenance.sha256_file(crosswalk_path),
-        "notes": (
-            "P2-10c′-a: the SELECTION half of the ADR-0003 D6 ρ-pilot. A reproducible, "
-            "phylum-stratified, divergence-spanning ~100-genome sample of GTDB R232 species "
-            "representatives, drawn round-robin across phyla (breadth-first; one rep per "
-            "phylum per pass) so the sample spans the maximum number of divergent clades the "
-            "target allows. This manifest is an ACCESSION LIST only — it fetches no genomes "
-            "(the LOCAL fetch sub-step does that) and measures no ρ, no candidate count, and "
-            "chooses no Stage-1 detection threshold (the SLURM scan sub-step does that, where "
-            "ρ is finally measured). It therefore pins no ADR value and carries no scientific "
-            "claim. ρ sizes the shared GTDB/RefSeq homolog-DB + negative-window fetch "
-            "(P2-10c′/P2-10e), priced at 0.7–68 GB pivoting on ρ."
-        ),
+        "notes": _PILOT_NOTES if notes is None else notes,
     }
     report_path = Path(report_path)
     report_path.parent.mkdir(parents=True, exist_ok=True)
@@ -346,13 +364,13 @@ def build(
     df.to_parquet(out_parquet, index=False)
     provenance.write_provenance(
         provenance_path,
-        rule="workflow/rules/data.smk :: select_pilot_genomes",
+        rule=rule_name,
         script="src/tbox_finder/mining/pilot_genomes.py",
         seed=seed,
         inputs=[crosswalk_path],
         outputs=[out_parquet, report_path],
         env_lock=env_lock,
-        adr="ADR-0003",
+        adr=adr,
         extra={
             "n_selected": summary["n_selected"],
             "n_phyla_spanned": summary["n_phyla"],
@@ -361,7 +379,7 @@ def build(
         },
     )
     print(
-        f"selected {summary['n_selected']} pilot genomes spanning {summary['n_phyla']} phyla "
+        f"selected {summary['n_selected']} {kind} genomes spanning {summary['n_phyla']} phyla "
         f"({summary['n_bacteria']} bacteria, {summary['n_archaea']} archaea) from "
         f"{len(reps)} GTDB R232 species reps",
         file=sys.stderr,

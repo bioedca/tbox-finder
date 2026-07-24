@@ -248,7 +248,7 @@ gate3_rollup(per_corpus_verdicts: dict[str, verdict], breadth_floor_met: bool,
 
 - **PRD.md** §13.3 (decision rule + tiering), §13.2 (orthogonal pipeline), §7.2 (assembly grades + union prior + archaeal posture), §2.3 (rollup + breadth floor), §12 (calibrated-negative-PASS conditions), §20 (mechanistic-compatibility re-verification).
 - **ADR-0001** D7 (project-level GATE-3 outcome strings), **ADR-0003** (scan-plan execution = GATE-3 method sub-gate), **ADR-0004** (D1 element precedence; leakage-controlled split), **ADR-0005** (D3/D7/D9/D12/D13/D14 — the eval contract this validation ADR consumes).
-- **Amended by:** *(none yet — thresholds in D6/D7/D8 are frozen at P6, not by an ADR amendment)*.
+- **Amended by:** **A1** (P2-10c′-g, 2026-07-23 — D7's homolog-search target database + the production genome-selection substrate pinned: ~2,500 GTDB R232 species reps; source+count only, D6/D7/D8 P6-frozen thresholds unchanged).
 
 ## Cross-reference impact list
 
@@ -267,3 +267,30 @@ gate3_rollup(per_corpus_verdicts: dict[str, verdict], breadth_floor_met: bool,
 - **Archaeal-occurrence posture** — riboswitches (incl. TPP) reach Archaea: Wakchaure & Ganguly 2023 [PMID:36594112; DOI:10.1002/wrna.1774] + Gupta & Swati 2019 [PMID:31020937; DOI:10.2174/1386207322666190425143301]. **Flagged:** PRD §7.2's PMID:36008760 is a bacterial (not archaeal) T-box paper — carried here only as a union-prior source; recommend the PRD citation be corrected.
 
 **Blinded-frozen numeric defaults (P0):** (c) synteny window **500 bp** (D4); multiplicity bound **E[false novel clades] < 0.5** (D12). **Frozen-at-P6 rules (values not fabricated at P0):** short-Stem-I nt threshold (D6), RF00230 alignability bit-score cutoff (D8), homolog-search inclusion thresholds (D7).
+
+## Amendment A1 — D7's homolog-search target database + the production genome-selection substrate are pinned: ~2,500 GTDB R232 species representatives (P2-10c′-g, 2026-07-23)
+
+- **Status:** **Accepted (user sign-off 2026-07-23; CLAUDE.md §7 item 2 — "signed", bioedca).** Fills the open slot in **D7**: the decision pins the model-independent homolog-search *method* (nhmmer / BLAST / cmsearch-from-candidate) and freezes its *inclusion thresholds at P6*, but **names no target database**. This amendment names it — and, per the P2-10c′ "A + B together" scope decision (one acquisition, two blockers), the *same* independent-genome set is the substrate for **ADR-0005 D14**'s 1,024-nt negative-window supply (P2-10e). Pins **source + count only**: it does **not** touch D7's P6-frozen inclusion thresholds (D17), D6/D8's P6-frozen values, or any ADR-0005 gate value. First amendment to ADR-0006.
+
+**Trigger.** ADR-0006 D7 requires a model-independent homolog set per candidate, assembled by a sequence-homology search against a sequence database — but no ADR names that database, and the repo has none (`data/external` is 81 MB of T-box-specific reference FASTA; no RefSeq/GTDB/nt). The ρ-pilot (P2-10c′-a/b/c, PR #72–#75) measured **ρ ≈ 0.25–0.59 Stage-1 candidates/Mbp** (max 0.594) over 100 genomes / 287.76 Mbp [`data/processed/pilot/rho_pilot_report.json`], sizing the shared fetch toward the **small–mid** of the audit's 0.7–68 GB range. Sizing entangles two still-open downstream numbers (P2-10e's round count N; D7's `min_sequences` homolog floor), so the count is pinned now as a **revisable ops target**, not derived from them.
+
+**Pinned rules.**
+
+1. **Target database = GTDB R232 species-representative genomes.** The D7 homolog-search target DB and the ADR-0005 D14 negative-window source are one and the same: the GTDB release already pinned in **ADR-0003 A1** (Release 11-RS232; 199,923 species reps = bac120 189,801 + ar53 10,122). A **dereplicated, phylogenetically balanced** set — chosen to maximise phylogenetic coverage per byte for divergent-homolog detection (D7's documented recall concern [DOI:10.1101/gr.5890907]) and to supply diverse independent negatives, over a redundant RefSeq/nt pull. It is **not RF00230-derived and not model-grouped** (preserves the D2/D7 anti-circularity property, §5 mechanism 5). RefSeq/nt are **not** chosen: their redundancy is noise for the negative-diversity goal, and GTDB R232 reuses the already-pinned crosswalk + the pilot's fetch machinery.
+
+2. **Production selection = 2,500 species reps, deterministic + seeded + breadth-first.** Selected by the *same* pure selector + guarded builder as the P2-10c′-a pilot (`mining/pilot_genomes.select_pilot_genomes` / `build`, reused verbatim — promote-don't-duplicate — via `mining/production_genomes.py`), with `n_target = 2500`, `per_phylum_cap = 20`, `seed = 42`. `per_phylum_cap = 20` is the **smallest cap that reaches 2,500** over R232's 197 phyla (`max_achievable = Σ min(cap, size)` = 2,589 at cap 20; 2,493 at cap 19), set at encode from the git-frozen crosswalk (sha256 `96414cdc…`), not fabricated. The count is a **revisable ops target**: if P2-10e's N or D7's `min_sequences` later demand more depth, the manifest is re-selected at a higher `n_target` under the same seeded algorithm — a new ADR-0006 amendment if the pinned count changes (§7 item 2).
+
+3. **The manifest is the git-frozen input to ADR-0005 A8 clause (viii) (`genome_completeness`)** — the fetched-and-scanned set must equal exactly this selection — and the accession source the ρ-sized SLURM fetch consumes. Its eventual homolog-DB build carries **ADR-0002 A12** `envs/homology.yml` (hmmer 3.4 / blast 2.17.0).
+
+**Measured selection (from the frozen R232 crosswalk; deterministic).** `n_target=2500, per_phylum_cap=20, seed=42` → **2,500 reps spanning all 197 R232 phyla — 2,109 bacteria + 391 archaea** [`data/processed/audits/production_genomes_report.json`; manifest `data/processed/mining/production_genomes_v0.parquet` (DVC)]. **Size PROJECTION:** the pilot fetched 100 reps = 287.76 Mbp ≈ 281 MB [`pilot_fetch_report.json`], so ~2,500 reps ≈ ~7.2 Gbp ≈ **~7 GB** decompressed FASTA — the actual bp/size is measured only at the fetch, never here.
+
+**Scope guard (§10.3).** Pins **source + count only**. The step it authorises (P2-10c′-g) fetches **no** genomes, builds **no** homolog DB, carves **no** negatives, runs **no** cmsearch, and pins **no** D7/A8 inclusion threshold and **no** ρ value — all downstream. No discovery claim; the D6/D7/D8 P6 threshold-freeze (D17) is untouched.
+
+**Sequencing.** P2-10c′-g (this LOCAL selection manifest) → the ρ-sized SLURM fetch (§9.3 submit-ack; the ADR-0005 A8 pre-scan gates it) → homolog-DB build (`envs/homology.yml`) → the real tiling/shard-spec emitter feeding A8 → the fetched-window → negative-pool path (ADR-0004 A4 admissibility). Each its own worktree/PR.
+
+**Cross-reference impact.**
+- **ADR-0003 A1** — the R232 release + crosswalk this selection draws from (source, not re-pinned).
+- **ADR-0005 A8** — clause (viii) `genome_completeness` takes this manifest as its git-frozen must-find set; **D14** — the negative-window substrate this selection supplies (P2-10e).
+- **ADR-0002 A12** — `envs/homology.yml`, the homolog-DB build env (downstream).
+- **ADR-0006 D7** — target-DB slot filled; **D17** — D7 inclusion thresholds still P6-frozen (unchanged).
+- **P2-10c′-g** ships `mining/production_genomes.py` (thin reuse of the pilot builder), rule `select_production_genomes`, the manifest + provenance + audit report, and `tests/unit/test_production_genomes.py` (pin-drift + reuse-not-fork + wired-floor + committed-report-lock guards).
