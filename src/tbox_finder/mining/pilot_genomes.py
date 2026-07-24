@@ -257,6 +257,7 @@ def build(
     rule_name: str = DEFAULT_RULE_NAME,
     notes: str | None = None,
     kind: str = "pilot",
+    script: str = "src/tbox_finder/mining/pilot_genomes.py",
 ) -> int:
     """Parse, select, guard, and write a phylum-stratified genome manifest + report + provenance.
 
@@ -365,7 +366,7 @@ def build(
     provenance.write_provenance(
         provenance_path,
         rule=rule_name,
-        script="src/tbox_finder/mining/pilot_genomes.py",
+        script=script,
         seed=seed,
         inputs=[crosswalk_path],
         outputs=[out_parquet, report_path],

@@ -7,8 +7,8 @@
     "n_phyla_spanned": 197,
     "n_selected": 2500
   },
-  "generated_at_utc": "2026-07-24T01:34:55.561300+00:00",
-  "git_sha": "bac19ad4f9cd5e32251eb9b67e4f6571365393fa",
+  "generated_at_utc": "2026-07-24T01:45:20.649366+00:00",
+  "git_sha": "b507c79cb9e414006466bf99d777a3658f356caf",
   "inputs": {
     "data/external/gtdb/sp_clusters_r232.tsv": "96414cdc04addaac0280593f3d32a7c8c30cbc2aa498a9fee81886e478ec9fc9"
   },
@@ -18,6 +18,6 @@
   },
   "rule": "workflow/rules/data.smk :: select_production_genomes",
   "schema_version": "1.0",
-  "script": "src/tbox_finder/mining/pilot_genomes.py",
+  "script": "src/tbox_finder/mining/production_genomes.py",
   "seed": 42
 }

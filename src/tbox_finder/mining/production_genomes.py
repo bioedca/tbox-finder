@@ -53,6 +53,9 @@ PRODUCTION_REPORT = "data/processed/audits/production_genomes_report.json"
 #: ADR-0006 A1 provenance metadata (the only per-invocation difference vs the pilot).
 PRODUCTION_ADR = "ADR-0006"
 PRODUCTION_RULE = "workflow/rules/data.smk :: select_production_genomes"
+#: The module the rule actually invokes (``python -m …production_genomes``); provenance must
+#: record THIS, not the pilot module it delegates to, or the artifact claims the wrong author.
+PRODUCTION_SCRIPT = "src/tbox_finder/mining/production_genomes.py"
 
 #: ADR-0006 A1 pinned selection. ``per_phylum_cap=20`` is the smallest cap reaching the
 #: 2,500 target over R232's 197 phyla (max_achievable 2,589 at 20; 2,493 at 19) — set at
@@ -117,6 +120,7 @@ def build(
         rule_name=PRODUCTION_RULE,
         notes=PRODUCTION_NOTES,
         kind="production",
+        script=PRODUCTION_SCRIPT,
     )
 
 

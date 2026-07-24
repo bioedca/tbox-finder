@@ -69,10 +69,35 @@ def test_production_floors_are_stricter_than_pilot() -> None:
 # --------------------------------------------------------------- reuse, not fork
 
 
-def test_build_delegates_to_shared_builder(tmp_path: Path) -> None:
-    # Same inputs → the production manifest must be identical to the pilot builder's
-    # (proving production reuses select_pilot_genomes, not a forked copy). Only the
-    # metadata is allowed to differ.
+def test_build_invokes_shared_pilot_builder(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Enforce the delegation SEAM directly (not just equivalent output, which a forked
+    # copy that happens to match on a fixture would also pass — CodeRabbit): production
+    # build must call pilot_genomes.build, forwarding the ADR-0006 metadata + its own
+    # module as the provenance script.
+    calls: list[dict] = []
+
+    def spy(**kwargs: object) -> int:
+        calls.append(dict(kwargs))
+        return 0
+
+    monkeypatch.setattr(pg, "build", spy)
+    rc = prod.build(crosswalk_path=FIXTURE)
+    assert rc == 0
+    assert len(calls) == 1, "production build did not delegate to pilot_genomes.build"
+    kw = calls[0]
+    assert kw["adr"] == "ADR-0006"
+    assert kw["rule_name"] == prod.PRODUCTION_RULE
+    assert kw["notes"] == prod.PRODUCTION_NOTES
+    assert kw["script"] == prod.PRODUCTION_SCRIPT
+    assert kw["kind"] == "production"
+    assert kw["n_target"] == prod.PRODUCTION_N_TARGET
+    assert kw["per_phylum_cap"] == prod.PRODUCTION_PER_PHYLUM_CAP
+
+
+def test_build_output_matches_shared_builder(tmp_path: Path) -> None:
+    # Behavioral output-equivalence: same inputs → the production manifest is identical
+    # to the pilot builder's (complements the seam test above; catches a metadata-only
+    # wrapper that silently perturbs the selected rows).
     pd = pytest.importorskip("pandas")
     pytest.importorskip("pyarrow")
 
@@ -115,6 +140,9 @@ def test_build_stamps_adr0006_metadata(tmp_path: Path) -> None:
     provrec = json.loads((dst / "m.prov.json").read_text())
     assert provrec["adr"] == "ADR-0006"
     assert provrec["rule"] == prod.PRODUCTION_RULE
+    # Provenance must name the module the rule invokes, not the pilot module it delegates
+    # to — else the artifact claims the wrong author (CodeRabbit major).
+    assert provrec["script"] == prod.PRODUCTION_SCRIPT
     report = json.loads((dst / "r.json").read_text())
     # The production notes name its role; a pilot-notes leak (wrong `notes=` wiring) fails.
     assert "PRODUCTION genome-selection manifest" in report["notes"]
