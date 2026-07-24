@@ -141,6 +141,14 @@
 /reports/p2/substrate_prescan_*.err
 /reports/p2/substrate_prescan_segments/
 
+# P2-10c′-fetch production genome fetch (fetch_production_genomes.sbatch, ADR-0006 A1): the DONE
+# marker + the SLURM logs are run signals (§9.3 keys on the DONE marker's ABSENCE on failure).
+# The committed deliverable is data/processed/audits/production_fetch_report.json (+ the provenance
+# sidecar), written only on the success gate and deliberately NOT ignored.
+/reports/p2/fetch_production_genomes.DONE
+/reports/p2/fetch_production_genomes_*.out
+/reports/p2/fetch_production_genomes_*.err
+
 # ── Snakemake working dir + rule run-logs (never committed) ──
 .snakemake/
 /logs/
