@@ -823,6 +823,7 @@ rule build_mining_pool:
 
 
 _PILOT_DIR = "data/processed/pilot"
+_MINING_DIR = "data/processed/mining"
 
 
 rule select_pilot_genomes:
@@ -858,6 +859,48 @@ rule select_pilot_genomes:
         "../../envs/data.yml"
     shell:
         "PYTHONHASHSEED=0 python -m tbox_finder.mining.pilot_genomes "
+        "--crosswalk {params.crosswalk:q} "
+        "--out {output.manifest:q} "
+        "--provenance {output.provenance:q} "
+        "--report {output.report:q} "
+        "--env-lock {params.env_lock:q} >{log} 2>&1"
+
+
+rule select_production_genomes:
+    """Select the PRODUCTION homolog-DB + negative-window genome manifest (P2-10c′-g; ADR-0006 A1).
+
+    ADR-0006 **D7** pins the model-independent homolog-search *method* but names no target
+    database; **Amendment A1** pins it — and the same independent-genome set is the source
+    for **ADR-0005 D14**'s 1,024-nt negative-window supply (P2-10e). This rule builds the
+    SELECTION half: a reproducible, phylum-stratified selection of **~2,500 GTDB R232
+    species representatives** (accession + lineage), drawn round-robin across all 197 phyla
+    from the pinned ``sp_clusters_r232.tsv`` crosswalk (n_target=2500, per_phylum_cap=20,
+    seed=42 → 2,109 bacteria + 391 archaea, all 197 phyla).
+
+    It fetches no genomes (the ρ-sized SLURM fetch does that), builds no homolog DB, carves
+    no negatives, runs no cmsearch, and pins no D7/A8 inclusion threshold and no ρ value —
+    so it pins no ADR value and carries no scientific claim (CLAUDE.md §10.3). The manifest
+    is the git-frozen input to ADR-0005 A8 clause (viii) (``genome_completeness``). Selection
+    knobs are pinned in ``mining/production_genomes.py``.
+
+    A one-time LOCAL rule kept out of ``rule all`` with no ``input:`` — the crosswalk is an
+    external checksummed fetch staged by ``pin_gtdb_release`` (ADR-0003 A1). Invoke:
+
+        snakemake --cores 1 --use-conda select_production_genomes
+    """
+    output:
+        manifest=f"{_MINING_DIR}/production_genomes_v0.parquet",
+        provenance=f"{_MINING_DIR}/production_genomes_v0.provenance.json",
+        report=f"{_AUDIT_DIR}/production_genomes_report.json",
+    params:
+        crosswalk=config.get("pilot_crosswalk", "data/external/gtdb/sp_clusters_r232.tsv"),
+        env_lock="envs/data.conda-lock.yml",
+    log:
+        "logs/select_production_genomes.log",
+    conda:
+        "../../envs/data.yml"
+    shell:
+        "PYTHONHASHSEED=0 python -m tbox_finder.mining.production_genomes "
         "--crosswalk {params.crosswalk:q} "
         "--out {output.manifest:q} "
         "--provenance {output.provenance:q} "

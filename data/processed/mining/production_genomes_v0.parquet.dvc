@@ -1,0 +1,5 @@
+outs:
+- md5: 1775722fa40b82efe099969f99ea664f
+  size: 165869
+  hash: md5
+  path: production_genomes_v0.parquet
