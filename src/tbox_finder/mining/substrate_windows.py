@@ -371,6 +371,11 @@ def emit_shard_specs(
     what clause (viii) ``set_ok`` requires. Each spec is round-tripped through
     :func:`substrate_prescan.read_shard_spec` before it is trusted.
     """
+    if not _geometry_is_consistent():
+        raise SubstrateWindowsError(
+            "tiling geometry drift: window_dataset "
+            f"({WINDOW_NT}/{STRIDE_NT}) != substrate_prescan ({sp.WINDOW_NT}/{sp.STRIDE_NT})"
+        )
     accessions = load_selection_accessions(selection_manifest)
     expected_by_accession = load_manifest_window_counts(window_manifest)
     missing = [a for a in accessions if a not in expected_by_accession]
