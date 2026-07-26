@@ -1,0 +1,6 @@
+outs:
+- md5: 0d477f389aaf3573f277dea00d71042a.dir
+  size: 7178705204
+  nfiles: 2500
+  hash: md5
+  path: production_genomes
