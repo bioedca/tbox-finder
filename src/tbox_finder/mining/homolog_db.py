@@ -136,6 +136,8 @@ def load_baseline(
     """
     try:
         data = json.loads(Path(report_path).read_text(encoding="utf-8"))
+    except OSError as exc:
+        raise HomologDbError(f"baseline report {report_path} is unreadable: {exc}") from exc
     except json.JSONDecodeError as exc:
         raise HomologDbError(f"baseline report {report_path} is not valid JSON: {exc}") from exc
     per_genome_rows = data.get("per_genome")
@@ -619,6 +621,10 @@ def build(
     )
     Path(report_path).parent.mkdir(parents=True, exist_ok=True)
     Path(report_path).write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
+    # provenance HASHES its outputs (provenance.sha256_paths), so they must be the paths where the
+    # files actually exist NOW — the node-local out_dir the driver wrote to, not the canonical
+    # DB_DIR the sbatch promotes to AFTER this returns (that path does not exist yet; hashing it
+    # would raise). build_report's string labels differ — they hash nothing, so they name DB_DIR.
     provenance.write_provenance(
         provenance_path,
         rule=RULE,

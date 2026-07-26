@@ -113,6 +113,11 @@ def test_load_baseline_rejects_invalid_json(tmp_path) -> None:
         hdb.load_baseline(p)
 
 
+def test_load_baseline_rejects_missing_file(tmp_path) -> None:
+    with pytest.raises(hdb.HomologDbError):
+        hdb.load_baseline(tmp_path / "does_not_exist.json")
+
+
 # ── concatenation + header rewrite ───────────────────────────────────────────
 def test_concatenate_rewrites_headers_skips_empty(tmp_path) -> None:
     gdir = tmp_path / "genomes"
