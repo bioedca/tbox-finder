@@ -1234,3 +1234,251 @@ def test_held_out_order_negatives_refused_by_default(committed):
     )
     assert deleg_report["n_records"] == len(in_fold)
     assert deleg_report["n_refused_parent_out_of_fold"] == len(loo)
+
+
+# ========================================================================== #
+# P2-10c′-a2 — the whole-genome host-ORDER negative gate (ADR-0004 A5).
+#
+# A4/a1 keyed admissibility on a window's PARENT corpus record — which the
+# flank-carved substrate always has. The fetched whole-genome pool (ADR-0006 A1;
+# 2,500 GTDB reps, 13,481,953 windows) has none: a window's host is a GCA_/GCF_
+# assembly accession, so the a1 join refuses every one ``parent_fold_unknown``
+# and the pool is unusable. A5 (option a2) resolves each host genome
+# gtdb_accession → NCBI taxid → corpus-namespace order/phylum/class (the SAME
+# taxdump + vintage reconciliation that produced resolved_order) and refuses a
+# window iff its host lands in a designated D5 holdout unit (one of the 30 LOO
+# orders / the Actinobacteria phylum-holdout) or is unresolvable (fail-closed).
+#
+# This gate is CI-VISIBLE over the real committed host-order table
+# (``production_host_orders_v0.parquet``) + the split table, so a loosened rule,
+# a broken taxid→order join, or a namespace mismatch turns RED instead of
+# silently green-with-nothing-refused ([[namespace-mismatch-invisible-noop]]).
+# ========================================================================== #
+
+_HOST_TABLE = _REPO / "data" / "processed" / "mining" / "production_host_orders_v0.parquet"
+
+#: Every clause the a2 gate re-derives (asserted complete, so a dropped clause fails).
+_HOST_ORDER_NEGATIVE_CLAUSES = (
+    "armed_refuses_heldout_hosts",
+    "join_covers_every_host",
+    "heldout_order_host_witness",
+    "hosts_are_a_spread",
+    "loosening_admits_the_refused",
+    "broken_join_turns_red",
+    "unresolvable_host_fails_closed",
+)
+
+
+def host_order_negative_clauses(
+    armed_summary,
+    loosened_summary,
+    n_heldout_order_hosts,
+    n_unknown_when_broken,
+    n_unresolvable_refused,
+):
+    """The a2 clauses, re-derived from the shipped ``stamp_host_folds`` evidence.
+
+    Each clause is FALSE on a missing or degenerate measurement, never vacuously
+    TRUE ([[clauses-must-guard-emptiness]]). ``armed_summary``/``loosened_summary``
+    are ``stamp_host_folds`` evidence with the real classify verdicts vs an
+    all-admit map; the three counts are the must-fire non-degeneracy witnesses.
+    """
+    a_records = int(armed_summary.get("n_records", 0))
+    a_refused = int(armed_summary.get("n_refused", 0))
+    a_admissible = int(armed_summary.get("n_admissible", -1))
+    a_unknown = int(armed_summary.get("n_host_unknown", -1))
+    a_distinct = int(armed_summary.get("n_distinct_hosts", 0))
+    l_refused = int(loosened_summary.get("n_refused", -1))
+    l_admissible = int(loosened_summary.get("n_admissible", -1))
+    return {
+        # (i) the shipped rule refuses > 0 held-out-host windows.
+        "armed_refuses_heldout_hosts": a_refused > 0,
+        # non-degeneracy companion: the taxid→order join is LIVE — no host fell
+        # through as unknown, so a namespace mismatch (which would refuse EVERY
+        # host and thus look like total discrimination) cannot pass here.
+        "join_covers_every_host": a_records > 0 and a_unknown == 0,
+        # a *designated LOO holdout order* genuinely hosts some of the windows.
+        "heldout_order_host_witness": n_heldout_order_hosts > 0,
+        # the hosts are a real spread, not one lucky genome.
+        "hosts_are_a_spread": a_distinct > 1,
+        # (ii) loosening the rule (all-admit) admits the same windows — proving
+        # the armed refusal was the rule's doing and nothing else's.
+        "loosening_admits_the_refused": (
+            l_refused == 0 and l_admissible == a_admissible + a_refused
+        ),
+        # (iii) a host ABSENT from the table is refused host_unknown, never a
+        # silent admit — a broken join fails RED.
+        "broken_join_turns_red": n_unknown_when_broken > 0,
+        # (iv) an unresolvable host (no formal NCBI order) fails closed (D4 mirror).
+        "unresolvable_host_fails_closed": n_unresolvable_refused > 0,
+    }
+
+
+def _clean_host_order_inputs():
+    """A consistent, all-clauses-TRUE evidence set: 7 admitted + 3 held-out-order
+    windows, join fully covered. The bite tests perturb one field each."""
+    armed = {
+        "n_records": 10,
+        "n_admissible": 7,
+        "n_refused": 3,
+        "n_host_unknown": 0,
+        "n_distinct_hosts": 10,
+    }
+    loosened = {
+        "n_records": 10,
+        "n_admissible": 10,
+        "n_refused": 0,
+        "n_host_unknown": 0,
+        "n_distinct_hosts": 10,
+    }
+    return {
+        "armed_summary": armed,
+        "loosened_summary": loosened,
+        "n_heldout_order_hosts": 3,
+        "n_unknown_when_broken": 1,
+        "n_unresolvable_refused": 1,
+    }
+
+
+def test_host_order_clean_inputs_pass():
+    cl = host_order_negative_clauses(**_clean_host_order_inputs())
+    assert set(cl) == set(_HOST_ORDER_NEGATIVE_CLAUSES)  # no clause dropped
+    assert all(cl.values()), cl
+
+
+def test_host_order_namespace_noop_join_is_caught():
+    """The join matched nothing — every host refused unknown (so ``n_refused``
+    LOOKS like total discrimination), yet nothing was really classified. The
+    companion (``join_covers_every_host``) catches it."""
+    kw = _clean_host_order_inputs()
+    kw["armed_summary"] = {
+        **kw["armed_summary"],
+        "n_refused": 10,
+        "n_admissible": 0,
+        "n_host_unknown": 10,
+    }
+    cl = host_order_negative_clauses(**kw)
+    assert cl["armed_refuses_heldout_hosts"] is True  # the fooled clause …
+    assert cl["join_covers_every_host"] is False  # … caught by its companion
+    assert not all(cl.values())
+
+
+def test_host_order_no_heldout_witness_is_caught():
+    kw = _clean_host_order_inputs()
+    kw["n_heldout_order_hosts"] = 0
+    cl = host_order_negative_clauses(**kw)
+    assert [k for k, v in cl.items() if not v] == ["heldout_order_host_witness"]
+
+
+def test_host_order_loosening_that_still_refuses_is_caught():
+    kw = _clean_host_order_inputs()
+    kw["loosened_summary"] = {**kw["loosened_summary"], "n_admissible": 7, "n_refused": 3}
+    cl = host_order_negative_clauses(**kw)
+    assert [k for k, v in cl.items() if not v] == ["loosening_admits_the_refused"]
+
+
+def test_host_order_single_host_is_caught():
+    kw = _clean_host_order_inputs()
+    kw["armed_summary"] = {**kw["armed_summary"], "n_distinct_hosts": 1}
+    cl = host_order_negative_clauses(**kw)
+    assert [k for k, v in cl.items() if not v] == ["hosts_are_a_spread"]
+
+
+def test_host_order_no_broken_join_witness_is_caught():
+    kw = _clean_host_order_inputs()
+    kw["n_unknown_when_broken"] = 0
+    cl = host_order_negative_clauses(**kw)
+    assert [k for k, v in cl.items() if not v] == ["broken_join_turns_red"]
+
+
+def test_host_order_no_unresolvable_witness_is_caught():
+    kw = _clean_host_order_inputs()
+    kw["n_unresolvable_refused"] = 0
+    cl = host_order_negative_clauses(**kw)
+    assert [k for k, v in cl.items() if not v] == ["unresolvable_host_fails_closed"]
+
+
+# ---- a2 real-loader tier: exercise the SHIPPED host_order path, not a re-impl ----
+def _import_host_order_or_fail_skip():
+    try:
+        from tbox_finder.mining import host_order
+        from tbox_finder.mining.substrate_windows import window_name
+    except ImportError as exc:  # pragma: no cover - only where numpy/pandas absent
+        _fail_or_skip(f"host_order path not importable ({exc})")
+    return host_order, window_name
+
+
+@pytest.mark.skipif(
+    not _HOST_TABLE.exists(),
+    reason="committed host-order table absent (run build_production_host_orders)",
+)
+def test_host_order_negatives_refused_by_default():
+    """a2 (ADR-0004 A5): the SHIPPED host-order rule refuses a whole-genome window
+    whose host is a held-out order — measured end-to-end over the real committed
+    host-order + split tables, asserted by IDENTITY (which hosts, not just how many)
+    from ASYMMETRIC groups so a fold-sense inversion cannot pass on a symmetric
+    count, with the must-fire companions (join covers every host; loosening
+    re-admits exactly the refused; a broken join fails RED)."""
+    host_order, window_name = _import_host_order_or_fail_skip()
+    verdicts, _heldout = host_order.load_host_folds(_HOST_TABLE, _COMMITTED)
+
+    heldout_hosts = sorted(
+        a for a, (_adm, r) in verdicts.items() if r == host_order.REFUSED_HELDOUT_ORDER
+    )[:3]
+    admitted_hosts = sorted(a for a, (adm, _r) in verdicts.items() if adm)[:7]
+    unresolvable_hosts = [
+        a for a, (_adm, r) in verdicts.items() if r == host_order.REFUSED_UNRESOLVABLE
+    ][:1]
+    if not heldout_hosts or not admitted_hosts:
+        _fail_or_skip("committed host-order table lacks both held-out-order and admitted hosts")
+    assert len(heldout_hosts) != len(admitted_hosts)  # asymmetric by construction
+
+    def _records(accessions):
+        return [{"window_name": window_name(a, 0, 0)} for a in accessions]
+
+    armed_records = _records(heldout_hosts + admitted_hosts)
+    armed_summary = host_order.stamp_host_folds(armed_records, verdicts)
+    all_admit = {a: (True, host_order.ADMITTED) for a in heldout_hosts + admitted_hosts}
+    loosened_summary = host_order.stamp_host_folds(
+        _records(heldout_hosts + admitted_hosts), all_admit
+    )
+
+    # broken join: a host absent from the table must refuse host_unknown, not admit.
+    broken = host_order.stamp_host_folds(_records(["GCA_not_in_table_xyz.999"]), verdicts)
+
+    # an unresolvable host (no formal NCBI order) must fail closed (skip only if the
+    # real table happens to carry none — it carries 1,776, so this all but always runs).
+    n_unresolvable_refused = 0
+    if unresolvable_hosts:
+        unres = host_order.stamp_host_folds(_records(unresolvable_hosts), verdicts)
+        assert unres["n_refused"] == 1
+        n_unresolvable_refused = unres["n_refused"]
+
+    clauses = host_order_negative_clauses(
+        armed_summary=armed_summary,
+        loosened_summary=loosened_summary,
+        n_heldout_order_hosts=len(heldout_hosts),
+        n_unknown_when_broken=broken["n_host_unknown"],
+        n_unresolvable_refused=n_unresolvable_refused,
+    )
+    assert all(clauses.values()), {k: v for k, v in clauses.items() if not v}
+
+    # IDENTITY, not counts: the admitted windows' hosts are EXACTLY the admitted set;
+    # the refused ones are EXACTLY the held-out set. A fold-sense inversion would swap
+    # them — indistinguishable on a symmetric count, caught here.
+    admitted = {
+        host_order.host_accession(r["window_name"])
+        for r in armed_records
+        if r[host_order.HOST_FOLD_COL]
+    }
+    refused = {
+        host_order.host_accession(r["window_name"])
+        for r in armed_records
+        if not r[host_order.HOST_FOLD_COL]
+    }
+    assert admitted == set(admitted_hosts)
+    assert refused == set(heldout_hosts)
+    assert admitted.isdisjoint(refused)
+    assert armed_summary["n_admissible"] == len(admitted_hosts)
+    assert armed_summary["n_refused"] == len(heldout_hosts)
+    assert armed_summary["n_host_unknown"] == 0
