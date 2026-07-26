@@ -1,0 +1,6 @@
+outs:
+- md5: db1ff8647449f053f0b563710e6e8794.dir
+  size: 18389397693
+  nfiles: 10
+  hash: md5
+  path: homolog_db

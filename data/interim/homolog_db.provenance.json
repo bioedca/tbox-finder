@@ -1,0 +1,26 @@
+{
+  "adr": "ADR-0006",
+  "env_lock_hash": "48e2f7024801dab7f3a27609cb47299860e15f775d003e2fa79817f70617ce4a",
+  "extra": {
+    "blast_version": "2.17.0",
+    "db_dir": "/tmp/ecc1695-741/homolog_db",
+    "genome_dir": "data/interim/production_genomes",
+    "hmmer_version": "3.4",
+    "n_genomes": 2500,
+    "notes": "P2-10c\u2032-homologdb (ADR-0006 D7 + A1): build the model-independent homolog-search TARGET DB over the 2,500 GTDB R232 reps \u2014 concatenated target FASTA (headers rewritten to <accession>:c<contig_index>) + makeblastdb nucleotide DB + makehmmerdb FM-index, the targets blastn / nhmmer / cmsearch-from-candidate search a candidate against (D7). Integrity is a two-independent-reads check (re-measured per-genome contig/bp == the git-frozen production_windows_report baseline; blastdbcmd -info == the same measured totals) plus a must-fire round-trip control (first+last accession-sorted genome self-recovers at its own <accession>:c<ci> via blastn AND nhmmer). Builds an index and proves it searchable \u2014 no genome scan, no cmsearch, no candidate count, no homolog-set assembly, no D7 threshold (P6-frozen, D17). Pins no ADR value beyond A1's already-signed source+count.",
+    "step": "P2-10c'-homologdb"
+  },
+  "generated_at_utc": "2026-07-26T07:05:42.965403+00:00",
+  "git_sha": "af773d700409c70b9b1ed79e8e53587e0eaf90a4",
+  "inputs": {
+    "data/processed/audits/production_windows_report.json": "72e22c60442f4c6755dc2add208b83e1df99933587a04d679060811fbff5e9fa"
+  },
+  "outputs": {
+    "/tmp/ecc1695-741/homolog_db/target.fna": "fb26decb3f53862a923f65e0ebb6f3db389dc19e221a6822b423d0217c16ee99",
+    "/tmp/ecc1695-741/homolog_db_report.json": "0c42d54dbd2ad30c1ad4ceac1df03ebcfd721ca39d146a51009f21accc62eb37"
+  },
+  "rule": "slurm/p2/build_homolog_db.sbatch :: python -m tbox_finder.mining.homolog_db build",
+  "schema_version": "1.0",
+  "script": "src/tbox_finder/mining/homolog_db.py",
+  "seed": 42
+}
