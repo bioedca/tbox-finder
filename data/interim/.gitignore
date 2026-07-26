@@ -2,3 +2,8 @@
 /lineage_replaced.parquet
 /pilot_genomes_fetch_log.jsonl
 /pilot_genomes
+# P2-10c′-fetch: the DVC-tracked production genome dir + its resumable fetch log (large,
+# never committed to git). The provenance sidecar production_genomes.provenance.json + the
+# audit report data/processed/audits/production_fetch_report.json ARE committed deliverables.
+/production_genomes_fetch_log.jsonl
+/production_genomes

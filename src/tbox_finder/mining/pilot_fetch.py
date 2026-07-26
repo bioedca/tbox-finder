@@ -155,6 +155,26 @@ DEFAULT_LOG = Path("data/interim/pilot_genomes_fetch_log.jsonl")
 DEFAULT_PROVENANCE = Path("data/interim/pilot_genomes.provenance.json")
 DEFAULT_REPORT = Path("data/processed/audits/pilot_fetch_report.json")
 
+#: Report ``step`` label + provenance metadata for the pilot invocation. Generalised (like
+#: ``pilot_genomes.build``) so the ADR-0006 A1 **production** fetch (``mining/production_fetch.py``,
+#: P2-10c′-fetch) can reuse this fetcher + its fail-closed report/validator + the two operational
+#: floors verbatim (promote-don't-duplicate) rather than fork them — only the step label, the
+#: ADR/rule/script provenance, the provenance note, and the two floor VALUES differ per invocation.
+PILOT_STEP = "P2-10c'-b"
+DEFAULT_ADR = "ADR-0003"
+DEFAULT_RULE_NAME = "workflow/rules/data.smk :: fetch_pilot_genomes"
+DEFAULT_SCRIPT = "src/tbox_finder/mining/pilot_fetch.py"
+#: Method-descriptive provenance note (identical mechanism for the pilot + production fetch; a
+#: caller may override it to name its own role). Threaded so ``adr``/``rule``/``script`` and the
+#: note never disagree about which step authored an artifact.
+DEFAULT_PROVENANCE_NOTE = (
+    "Whole-genome sequence sourced from NCBI: assembly accession → assembly UID "
+    "(esearch) → assembly FtpPath (esummary) → whole-genome _genomic.fna.gz "
+    "(HTTPS GET + gunzip; all replicons/contigs). Measures genome SIZE (bp) only "
+    "— no ρ, no candidate count, no detection threshold (§10.3). gzip integrity "
+    "guarantees a complete download (a truncated stream raises)."
+)
+
 #: per-genome log/report row columns.
 GENOME_COLS: tuple[str, ...] = (
     "assembly_accession",
@@ -363,7 +383,11 @@ def _percentiles(values: Sequence[int]) -> dict[str, int]:
 
 
 def build_report(
-    rows: Sequence[Mapping[str, Any]], *, accessed: str, errors: Sequence[str] | None = None
+    rows: Sequence[Mapping[str, Any]],
+    *,
+    accessed: str,
+    errors: Sequence[str] | None = None,
+    step: str = PILOT_STEP,
 ) -> dict[str, Any]:
     """Assemble the measured fetch-audit report (every field derived, none asserted)."""
     counts = derive_status_counts(rows)
@@ -382,7 +406,7 @@ def build_report(
 
     return {
         "schema_version": SCHEMA_VERSION,
-        "step": "P2-10c'-b",
+        "step": step,
         "n_genomes": len(rows),
         "n_ok": len(ok),
         "success_rate": derive_success_rate(counts),
@@ -414,13 +438,24 @@ def build_report(
     }
 
 
-def validate_report(report: Mapping[str, Any]) -> list[str]:  # noqa: C901 - one flat clause list
+def validate_report(
+    report: Mapping[str, Any],
+    *,
+    min_success_rate: float | None = None,
+    min_phyla_ok: int | None = None,
+) -> list[str]:  # noqa: C901 - one flat clause list
     """Return a list of schema/consistency problems (empty ⇒ valid). Never raises.
 
     Fails **closed**: every headline number is **re-derived** from the report's own
     per-genome rows, so a report cannot certify a success rate, a base-pair total, or an
     ``ok`` genome its evidence does not support (the P1-15/P1-16 lesson).
+
+    ``min_success_rate`` / ``min_phyla_ok`` default to the module floors :data:`MIN_SUCCESS_RATE`
+    / :data:`MIN_PHYLA_OK` (resolved at call time, so a monkeypatch of the module constant still
+    takes effect); the ADR-0006 A1 production fetch passes its own re-scoped values.
     """
+    _min_rate = MIN_SUCCESS_RATE if min_success_rate is None else min_success_rate
+    _min_phyla = MIN_PHYLA_OK if min_phyla_ok is None else min_phyla_ok
     problems: list[str] = []
     if not isinstance(report, Mapping):
         return ["report is not a mapping"]
@@ -520,11 +555,11 @@ def validate_report(report: Mapping[str, Any]) -> list[str]:  # noqa: C901 - one
         expected = derive_success_rate({s: int(counts[s]) for s in STATUS_VALUES})
         if abs(float(reported) - expected) > 1e-9:
             problems.append(f"success_rate {reported} != re-derived {expected}")
-        elif float(reported) < MIN_SUCCESS_RATE:
+        elif float(reported) < _min_rate:
             problems.append(
-                f"success_rate {float(reported):.4f} < MIN_SUCCESS_RATE {MIN_SUCCESS_RATE} — "
-                "too many pilot genomes failed to fetch; a run this degraded is a CLAUDE.md "
-                "§7 stop-and-ask, not a certified pilot"
+                f"success_rate {float(reported):.4f} < MIN_SUCCESS_RATE {_min_rate} — "
+                "too many genomes failed to fetch; a run this degraded is a CLAUDE.md "
+                "§7 stop-and-ask, not a certified fetch"
             )
 
     # total_bp / total_mbp re-derived from the ok rows.
@@ -552,9 +587,9 @@ def validate_report(report: Mapping[str, Any]) -> list[str]:  # noqa: C901 - one
         problems.append(
             f"n_phyla_spanned_ok {report['n_phyla_spanned_ok']} != re-derived {derived_phyla}"
         )
-    if derived_phyla < MIN_PHYLA_OK:
+    if derived_phyla < _min_phyla:
         problems.append(
-            f"ok genomes span {derived_phyla} phyla < MIN_PHYLA_OK {MIN_PHYLA_OK} — the "
+            f"ok genomes span {derived_phyla} phyla < MIN_PHYLA_OK {_min_phyla} — the "
             "divergence-spanning property the selection guaranteed did not survive the fetch; "
             "ρ measured on it would not bound cross-clade variance (§7 stop-and-ask)"
         )
@@ -903,8 +938,22 @@ def build_pilot_fetch(
     api_key: str | None = None,
     limit: int | None = None,
     env_lock: str | Path | None = None,
+    step: str = PILOT_STEP,
+    adr: str = DEFAULT_ADR,
+    rule_name: str = DEFAULT_RULE_NAME,
+    script: str = DEFAULT_SCRIPT,
+    provenance_note: str | None = None,
+    min_success_rate: float | None = None,
+    min_phyla_ok: int | None = None,
 ) -> dict[str, Any]:
-    """Fetch every manifest genome from NCBI, write per-genome FASTA + audit + provenance."""
+    """Fetch every manifest genome from NCBI, write per-genome FASTA + audit + provenance.
+
+    Defaults reproduce the ADR-0003 D6 ρ-pilot fetch. ``step`` / ``adr`` / ``rule_name`` /
+    ``script`` / ``provenance_note`` and the two operational floors ``min_success_rate`` /
+    ``min_phyla_ok`` are the only per-invocation differences for the ADR-0006 A1 **production**
+    fetch (``mining/production_fetch.py``), which reuses this fetcher — and thus the shared
+    fail-closed report/validator + resumable transport — verbatim (promote-don't-duplicate).
+    """
     email = email or os.environ.get("NCBI_EMAIL") or ""
     if not email:
         raise ValueError(
@@ -971,13 +1020,13 @@ def build_pilot_fetch(
 
     rows = [by_acc[rec["accession"]] for rec in manifest]
     accessed = date.today().isoformat()
-    report = build_report(rows, accessed=accessed, errors=errors)
-    problems = validate_report(report)
+    report = build_report(rows, accessed=accessed, errors=errors, step=step)
+    problems = validate_report(report, min_success_rate=min_success_rate, min_phyla_ok=min_phyla_ok)
     if problems:
         # Nothing certified: no report, no provenance. The resumable log + fetched FASTAs
         # survive on disk, so a fixed re-run costs no NCBI quota for the genomes already in.
         raise ValueError(
-            "P2-10c'-b pilot-fetch report failed validation (nothing certified):\n  - "
+            f"{step} fetch report failed validation (nothing certified):\n  - "
             + "\n  - ".join(problems)
             + (f"\n  fetch errors seen: {report['fetch_error_sample']}" if errors else "")
         )
@@ -996,7 +1045,7 @@ def build_pilot_fetch(
         missing = sorted(ok_accs - on_disk)
         if orphans or missing:
             raise ValueError(
-                "P2-10c'-b pilot-fetch genome directory does not match the certified set "
+                f"{step} fetch genome directory does not match the certified set "
                 "(nothing certified):\n"
                 f"  orphan .fna not in the ok set (remove them): {orphans[:10]}\n"
                 f"  ok genomes missing a .fna on disk: {missing[:10]}"
@@ -1005,8 +1054,8 @@ def build_pilot_fetch(
     report_path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     provenance.write_provenance(
         provenance_path,
-        rule="workflow/rules/data.smk :: fetch_pilot_genomes",
-        script="src/tbox_finder/mining/pilot_fetch.py",
+        rule=rule_name,
+        script=script,
         seed=provenance.DEFAULT_SEED,
         inputs=[str(manifest_parquet)],
         # provenance hashes FILES; the genome set is a DVC-tracked *directory* whose content
@@ -1014,7 +1063,7 @@ def build_pilot_fetch(
         # seq_sha256). Trace the report file here; carry the dir + digest below.
         outputs=[str(report_path)],
         env_lock=env_lock,
-        adr="ADR-0003",
+        adr=adr,
         extra={
             "genome_dir": str(genome_dir),
             "digest": report["digest"],
@@ -1027,17 +1076,12 @@ def build_pilot_fetch(
             "genome_ftp_host": GENOME_FTP_HOST,
             "terms_url": NCBI_TERMS_URL,
             "accessed": accessed,
-            "note": (
-                "Whole-genome sequence sourced from NCBI: assembly accession → assembly UID "
-                "(esearch) → assembly FtpPath (esummary) → whole-genome _genomic.fna.gz "
-                "(HTTPS GET + gunzip; all replicons/contigs). Measures genome SIZE (bp) only "
-                "— no ρ, no candidate count, no detection threshold (§10.3). gzip integrity "
-                "guarantees a complete download (a truncated stream raises)."
-            ),
+            "step": step,
+            "note": provenance_note or DEFAULT_PROVENANCE_NOTE,
         },
     )
     print(
-        f"fetched {report['n_ok']}/{report['n_genomes']} pilot genomes "
+        f"fetched {report['n_ok']}/{report['n_genomes']} genomes "
         f"({report['total_mbp']:.1f} Mbp total across {report['n_phyla_spanned_ok']} phyla)",
         file=sys.stderr,
     )

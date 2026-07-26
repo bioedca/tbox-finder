@@ -1,0 +1,31 @@
+{
+  "adr": "ADR-0006",
+  "env_lock_hash": "a4a6715d411d7218432c4c670d35475f6c9aa7dd6397fd5d906ca7e21293dc34",
+  "extra": {
+    "accessed": "2026-07-25",
+    "digest": "49d687ab0a47b34342894f43b3dea9fa96266093c45db613f3baf9e9d7a5110e",
+    "eutils_base_url": "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/",
+    "genome_dir": "/tmp/ecc1695-739/production_genomes",
+    "genome_ftp_host": "ftp.ncbi.nlm.nih.gov",
+    "n_genomes": 2500,
+    "n_ok": 2500,
+    "note": "P2-10c\u2032-fetch (ADR-0006 A1): the PRODUCTION whole-genome fetch of the 2,500 GTDB R232 species-representative manifest \u2014 the model-independent homolog-search target DB (ADR-0006 D7) and the independent-genome source for ADR-0005 D14's 1,024-nt negative-window supply (P2-10e), one acquisition for two blockers. Whole-genome sequence sourced from NCBI: assembly accession \u2192 assembly UID (esearch) \u2192 assembly FtpPath (esummary) \u2192 whole-genome _genomic.fna.gz (HTTPS GET + gunzip; all replicons/contigs). Measures genome SIZE (bp) only \u2014 no \u03c1, no candidate count, no detection threshold, no homolog DB, no negatives, no cmsearch (\u00a710.3). The fetched substrate is gated by the ADR-0005 A8 cmsearch pre-scan before it enters the mining/negative pool. gzip integrity guarantees a complete download (a truncated stream raises).",
+    "step": "P2-10c'-fetch",
+    "success_rate": 1.0,
+    "terms_url": "https://www.ncbi.nlm.nih.gov/home/about/policies/",
+    "total_bp": 7023377857,
+    "total_mbp": 7023.377857
+  },
+  "generated_at_utc": "2026-07-26T03:21:37.240024+00:00",
+  "git_sha": "dea6ad11cefb16e46c9353a9a14afed6f44ab898",
+  "inputs": {
+    "data/processed/mining/production_genomes_v0.parquet": "e52b34b79256d16a8cf9986cdc8e1d0d5de229ee43562b5a6ddb9528e7109f22"
+  },
+  "outputs": {
+    "/tmp/ecc1695-739/production_fetch_report.json": "b2bbcb02ef77cae83f9373fcf8022640392a3504659afc3c8ab9bb04e9edd77b"
+  },
+  "rule": "slurm/p2/fetch_production_genomes.sbatch :: python -m tbox_finder.mining.production_fetch",
+  "schema_version": "1.0",
+  "script": "src/tbox_finder/mining/production_fetch.py",
+  "seed": 42
+}
