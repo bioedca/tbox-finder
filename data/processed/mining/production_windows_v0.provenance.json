@@ -1,0 +1,26 @@
+{
+  "adr": "ADR-0005",
+  "env_lock_hash": "a4a6715d411d7218432c4c670d35475f6c9aa7dd6397fd5d906ca7e21293dc34",
+  "extra": {
+    "expected_production_windows": 13481953,
+    "genome_dir": "/home/bioedca/tbox-phylogeny/tbox-finder/data/interim/production_genomes",
+    "n_genomes": 2500,
+    "notes": "P2-10c\u2032-shardspec (ADR-0005 A8): the REAL production tiling/shard-spec emitter for the off-catalogue cmsearch substrate pre-scan. build-manifest tiles the 2,500 fetched genomes at the frozen 1024/512 scan geometry (window_dataset.tile_windows) and records a FASTA-independent per-genome window-count manifest \u2014 the clause-(i) `expected` basis and a valid clause-(viii) shrink baseline (per_genome[].n_windows, which the fetch report lacks). emit-specs partitions the selection across NSHARDS (rho_pilot.assign_shards, LPT) and writes read_shard_spec-shaped shard JSONs. Pure geometry: no cmsearch, no model, no threshold, no \u03c1, no contamination claim \u2014 the scan is downstream (P2-10e). Pins no ADR value beyond A8's already-signed geometry.",
+    "step": "P2-10c'-shardspec",
+    "stride_nt": 512,
+    "window_nt": 1024
+  },
+  "generated_at_utc": "2026-07-26T04:35:01.675576+00:00",
+  "git_sha": "b3624f1f2c5fa074842da1be7bf1e4d9fdad61f9",
+  "inputs": {
+    "/home/bioedca/tbox-phylogeny/tbox-finder/data/processed/mining/production_genomes_v0.parquet": "e52b34b79256d16a8cf9986cdc8e1d0d5de229ee43562b5a6ddb9528e7109f22"
+  },
+  "outputs": {
+    "data/processed/audits/production_windows_report.json": "72e22c60442f4c6755dc2add208b83e1df99933587a04d679060811fbff5e9fa",
+    "data/processed/mining/production_windows_v0.parquet": "7bc77ab30feeb5f7e4ae416ebf55d6de544bd854a3eef1e643f8ca9e78a3595d"
+  },
+  "rule": "workflow/rules/data.smk :: emit_substrate_windows",
+  "schema_version": "1.0",
+  "script": "src/tbox_finder/mining/substrate_windows.py",
+  "seed": 42
+}
