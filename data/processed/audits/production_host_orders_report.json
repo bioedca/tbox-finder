@@ -1,0 +1,26 @@
+{
+  "admissible_window_fraction": 0.269299,
+  "genome_reason_counts": {
+    "admitted": 660,
+    "refused_heldout_order": 53,
+    "refused_heldout_phylum": 11,
+    "refused_unresolvable_host": 1776
+  },
+  "heldout_phyla": [
+    "Actinobacteria"
+  ],
+  "n_admissible_genomes": 660,
+  "n_admissible_windows": 3630683,
+  "n_designated_heldout_orders": 30,
+  "n_genomes": 2500,
+  "n_heldout_orders_present_among_hosts": 18,
+  "n_refused_genomes": 1840,
+  "n_refused_windows": 9851270,
+  "n_windows_total": 13481953,
+  "window_reason_counts": {
+    "admitted": 3630683,
+    "refused_heldout_order": 318331,
+    "refused_heldout_phylum": 60465,
+    "refused_unresolvable_host": 9472474
+  }
+}

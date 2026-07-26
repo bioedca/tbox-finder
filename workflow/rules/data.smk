@@ -956,6 +956,48 @@ rule emit_substrate_windows:
         "--env-lock {params.env_lock:q} >{log} 2>&1"
 
 
+rule build_production_host_orders:
+    """Resolve each fetched genome's host order → the a2 negative-admission table (P2-10c′-a2; ADR-0004 A5).
+
+    ADR-0004 **A5** (option a2) admits a whole-genome fetched window as a training negative
+    **iff its host genome resolves to a corpus-namespace ``resolved_order``/phylum/class that
+    is not a designated D5 holdout unit** (one of the 30 leave-one-order-out held-out orders
+    or the Actinobacteria phylum-holdout); unresolvable hosts fail closed. This rule builds
+    the bridge: it fetches (MD5-verified via ``taxonomy.ensure_file``) the two URL+MD5-pinned
+    GTDB metadata files (``bac120/ar53_metadata_r232.tsv.gz``, an external checksummed download
+    into ``data/external/gtdb``), joins ``gtdb_accession → ncbi_taxid``, and resolves each host
+    taxid to an NCBI order/phylum/class via the **same** pinned taxdump + vintage reconciliation
+    (``taxonomy.read_taxdump``/``resolve_row``) that produced the corpus ``resolved_order`` — so
+    string equality against the committed D5 holdout set is well-defined. Deterministic, LOCAL,
+    no live-API, pins no ADR value beyond A5 (already signed; CLAUDE.md §10.3).
+
+    The committed, sequence-free ``production_host_orders_v0.parquet`` (keyed on
+    ``assembly_accession``) is the source ``tests/ml/test_no_leakage.py``'s a2 gate reads, so
+    it is committed to git (not DVC) like ``split_assignments.parquet``. A one-time LOCAL rule
+    kept out of ``rule all`` with no ``input:`` — the production manifests, split table, corpus,
+    and taxdump are committed / DVC / external-fetch artifacts, passed via the module defaults
+    (the one-time-LOCAL convention ``select_production_genomes`` follows). Invoke:
+
+        snakemake --cores 1 --use-conda build_production_host_orders
+    """
+    output:
+        table=f"{_MINING_DIR}/production_host_orders_v0.parquet",
+        provenance=f"{_MINING_DIR}/production_host_orders_v0.provenance.json",
+        report=f"{_AUDIT_DIR}/production_host_orders_report.json",
+    params:
+        env_lock="envs/data.conda-lock.yml",
+    log:
+        "logs/build_production_host_orders.log",
+    conda:
+        "../../envs/data.yml"
+    shell:
+        "PYTHONHASHSEED=0 python -m tbox_finder.mining.host_order "
+        "--out {output.table:q} "
+        "--provenance {output.provenance:q} "
+        "--report {output.report:q} "
+        "--env-lock {params.env_lock:q} >{log} 2>&1"
+
+
 rule fetch_pilot_genomes:
     """Fetch the ρ-pilot whole-genome sequences from NCBI (P2-10c′-b; ADR-0003 D6).
 

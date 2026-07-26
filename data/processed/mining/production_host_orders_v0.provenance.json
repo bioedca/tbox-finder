@@ -1,0 +1,36 @@
+{
+  "adr": "ADR-0004",
+  "env_lock_hash": "a4a6715d411d7218432c4c670d35475f6c9aa7dd6397fd5d906ca7e21293dc34",
+  "extra": {
+    "admissible_window_fraction": 0.269299,
+    "metadata_md5_pinned": {
+      "ar53_metadata_r232.tsv.gz": "0f51fe6f01b4ccbf0d9bab6c07df87af",
+      "bac120_metadata_r232.tsv.gz": "0ba4237077b65cfc5556e1d8be797485"
+    },
+    "metadata_sha256_fetched": {
+      "ar53_metadata_r232.tsv.gz": "d6ddc0f95d269a6e31af8329e0c3c2af0d90d5dad48f5b3e9d820f340951d8c3",
+      "bac120_metadata_r232.tsv.gz": "1650d3164666e5839c20ee15d82511909a5bbd5269035a7b564b9048dd777893"
+    },
+    "n_admissible_genomes": 660,
+    "n_admissible_windows": 3630683,
+    "n_genomes": 2500,
+    "taxdump_snapshot": "taxdmp_2026-07-01.zip"
+  },
+  "generated_at_utc": "2026-07-26T17:27:57.452847+00:00",
+  "git_sha": "da27c77ba072b7f92565e450eb37570a9065b68f",
+  "inputs": {
+    "data/external/ncbi_taxonomy/taxdmp_2026-07-01.zip": "7afc2d0707abd481baff334bb5c345e9fbd36f4f0d1d912d2660ac18920def05",
+    "data/processed/master_clean_v0.parquet": "1eb76591d0e481019dd7acf72a439f157fec9f2aeecb8cc5c37ba80a7b062dd2",
+    "data/processed/mining/production_genomes_v0.parquet": "e52b34b79256d16a8cf9986cdc8e1d0d5de229ee43562b5a6ddb9528e7109f22",
+    "data/processed/mining/production_windows_v0.parquet": "7bc77ab30feeb5f7e4ae416ebf55d6de544bd854a3eef1e643f8ca9e78a3595d",
+    "data/processed/splits/split_assignments.parquet": "6388ba19328811fa81d2d5b84a58643674934b4286581d8eff9df2e2cefba029"
+  },
+  "outputs": {
+    "data/processed/audits/production_host_orders_report.json": "d3a06210115dd582a3c42efa4a03f97d60a6f044a17d0f0c5d221b29b02e99d1",
+    "data/processed/mining/production_host_orders_v0.parquet": "a543b3478041faaaa8fb7deb6a5967de0c87e532a658908417c6057ec5865889"
+  },
+  "rule": "workflow/rules/data.smk :: build_production_host_orders",
+  "schema_version": "1.0",
+  "script": "src/tbox_finder/mining/host_order.py",
+  "seed": 42
+}
