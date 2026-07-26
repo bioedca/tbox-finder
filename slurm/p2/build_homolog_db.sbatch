@@ -109,12 +109,28 @@ PYTHONHASHSEED=0 PYTHONPATH=src python -m tbox_finder.mining.homolog_db build \
   --provenance "$B_PROVENANCE" \
   --env-lock envs/homology.conda-lock.yml
 
-# ── Move the certified outputs to the shared checkout (fail-closed on quota under `set -e`) ──────
-rsync -a --delete "$B_DB_DIR/" "$REPO/$DB_DIR/"
-cp "$B_REPORT" "$REPO/$REPORT"
-cp "$B_PROVENANCE" "$REPO/$PROVENANCE"
+# ── Promote the certified outputs to the shared checkout as an ALL-OR-NOTHING set ────────────────
+# The failure-prone, cross-filesystem /tmp→HOME copies (esp. the ~18 GB DB under a tight HOME quota)
+# land in $REPO-side `.staging` siblings FIRST; only once ALL stages succeed (`set -e` aborts the run
+# otherwise, before anything final is touched — so the prior committed set is preserved on failure)
+# are they flipped into place with **same-filesystem renames** (`/tmp`↔HOME cannot be renamed
+# atomically — different filesystems — but `$REPO`↔`$REPO` can). DONE is still written LAST, so §9.3
+# verify never sees a green for an incomplete promotion (fail-closed); a re-run overwrites the staging.
+STAGE_DB="$REPO/${DB_DIR}.staging"
+STAGE_REPORT="$REPO/${REPORT}.staging"
+STAGE_PROV="$REPO/${PROVENANCE}.staging"
+rm -rf "$STAGE_DB"
+rsync -a --delete "$B_DB_DIR/" "$STAGE_DB/"   # cross-fs copy → staging (not the live path)
+cp "$B_REPORT" "$STAGE_REPORT"
+cp "$B_PROVENANCE" "$STAGE_PROV"
 
-echo "staged homolog DB → $DB_DIR ($(du -sh "$REPO/$DB_DIR" | cut -f1)); report → $REPORT"
+# All stages materialized (else `set -e` already aborted, live set untouched). Flip atomically:
+rm -rf "$REPO/$DB_DIR"                          # DVC/git-ignored (data/-prefixed) — no tracked path dirtied
+mv "$STAGE_DB" "$REPO/$DB_DIR"                  # same-fs rename
+mv "$STAGE_REPORT" "$REPO/$REPORT"             # same-fs rename over any prior report
+mv "$STAGE_PROV" "$REPO/$PROVENANCE"
+
+echo "promoted homolog DB → $DB_DIR ($(du -sh "$REPO/$DB_DIR" | cut -f1)); report → $REPORT"
 
 touch "$DONE"
 echo "homolog-DB build complete — DONE marker written; run the LOCAL retrieval (see header) then dvc add + commit"
