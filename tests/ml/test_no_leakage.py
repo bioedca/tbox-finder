@@ -1446,8 +1446,10 @@ def test_host_order_negatives_refused_by_default():
     # broken join: a host absent from the table must refuse host_unknown, not admit.
     broken = host_order.stamp_host_folds(_records(["GCA_not_in_table_xyz.999"]), verdicts)
 
-    # an unresolvable host (no formal NCBI order) must fail closed (skip only if the
-    # real table happens to carry none — it carries 1,776, so this all but always runs).
+    # an unresolvable host (no formal NCBI order) must fail closed. Only the inner stamping
+    # assertion is conditional: if the committed table ever carries no unresolvable host,
+    # n_unresolvable_refused stays 0 and the aggregate `unresolvable_host_fails_closed` clause
+    # below then hard-fails (by design, never skips) — the table carries 1,776, so it runs.
     n_unresolvable_refused = 0
     if unresolvable_hosts:
         unres = host_order.stamp_host_folds(_records(unresolvable_hosts), verdicts)

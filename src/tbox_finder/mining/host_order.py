@@ -265,10 +265,13 @@ def derive_heldout_units(split_table: str | Path = splits.COMMITTED_TABLE) -> He
         ],
     )
     corpus = frame[frame[SPLIT_SOURCE_COL] == SPLIT_CORPUS_SOURCE]
+    # Store the CLEANED name (not the raw cell): classify_host looks up ``_clean(order)``, so a
+    # whitespace-padded / non-str cell in the split table would otherwise store one form and be
+    # queried by another — a silent miss that ADMITS a held-out host (CodeRabbit).
     orders = frozenset(
-        o
+        cleaned
         for o, d in zip(corpus["resolved_order"], corpus["is_designated_loo_holdout"], strict=True)
-        if bool(d) and _clean(o) is not None
+        if bool(d) and (cleaned := _clean(o)) is not None
     )
     if not orders:
         raise HostOrderError(
@@ -288,9 +291,9 @@ def derive_heldout_units(split_table: str | Path = splits.COMMITTED_TABLE) -> He
             f"{path} — splits.HOLDOUT_PHYLUM has drifted from the committed partition"
         )
     classes = frozenset(
-        c
+        cleaned
         for c, p in zip(corpus["resolved_class"], corpus["resolved_phylum"], strict=True)
-        if _clean(p) in phyla and _clean(c) is not None
+        if _clean(p) in phyla and (cleaned := _clean(c)) is not None
     )
     return HeldoutUnits(orders=orders, phyla=phyla, classes=classes)
 

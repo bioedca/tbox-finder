@@ -286,9 +286,10 @@ _HOST_TABLE = _REPO / ho.HOST_ORDER_TABLE
 
 
 def _is_lfs_pointer(path: Path) -> bool:
-    return (
-        path.is_file() and path.open("rb").read(len(ho._LFS_POINTER_MAGIC)) == ho._LFS_POINTER_MAGIC
-    )
+    if not path.is_file():
+        return False
+    with path.open("rb") as handle:
+        return handle.read(len(ho._LFS_POINTER_MAGIC)) == ho._LFS_POINTER_MAGIC
 
 
 @pytest.mark.skipif(
