@@ -96,6 +96,23 @@ def test_load_baseline_rejects_aggregate_mismatch(tmp_path) -> None:
         hdb.load_baseline(p)
 
 
+def test_load_baseline_rejects_malformed_row(tmp_path) -> None:
+    # A non-integer total_bp must surface as HomologDbError, not a bare ValueError.
+    p = tmp_path / "b.json"
+    d = _baseline_dict([_row("A", 1, 10)])
+    d["per_genome"][0]["total_bp"] = "not-an-int"
+    p.write_text(json.dumps(d))
+    with pytest.raises(hdb.HomologDbError):
+        hdb.load_baseline(p)
+
+
+def test_load_baseline_rejects_invalid_json(tmp_path) -> None:
+    p = tmp_path / "b.json"
+    p.write_text("{ this is not json")
+    with pytest.raises(hdb.HomologDbError):
+        hdb.load_baseline(p)
+
+
 # ── concatenation + header rewrite ───────────────────────────────────────────
 def test_concatenate_rewrites_headers_skips_empty(tmp_path) -> None:
     gdir = tmp_path / "genomes"
@@ -237,6 +254,20 @@ def test_extract_probe_picks_first_long_contig() -> None:
 def test_extract_probe_raises_when_no_long_contig() -> None:
     with pytest.raises(hdb.HomologDbError):
         hdb.extract_probe(_genome_fasta([_seq(100, 1)]), probe_len=500)
+
+
+def test_extract_probe_skips_N_window() -> None:
+    # The quarter-point window (offset 375) is a 500-nt N-gap; the next stride window (875) is
+    # clean. A fixed quarter-point would have returned an N-run probe that cannot self-recover.
+    seq = _seq(375, 7) + "N" * 500 + _seq(625, 8)  # len 1500
+    ci, offset, sub = hdb.extract_probe(_genome_fasta([seq]), probe_len=500)
+    assert ci == 0 and offset == 875 and set(sub) <= set("ACGT")
+
+
+def test_extract_probe_raises_when_all_N() -> None:
+    # A long-enough contig with no pure-ACGT window must fail loud, not return a dead probe.
+    with pytest.raises(hdb.HomologDbError):
+        hdb.extract_probe(_genome_fasta(["N" * 600]), probe_len=500)
 
 
 # ── the must-fire round-trip control predicate ───────────────────────────────

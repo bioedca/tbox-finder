@@ -134,18 +134,24 @@ def load_baseline(
     the concatenation's re-measurement a real integrity check rather than a self-comparison. It is
     git-tracked stdlib JSON, so it needs no pandas — the tbox-homology env has none.
     """
-    data = json.loads(Path(report_path).read_text(encoding="utf-8"))
+    try:
+        data = json.loads(Path(report_path).read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise HomologDbError(f"baseline report {report_path} is not valid JSON: {exc}") from exc
     per_genome_rows = data.get("per_genome")
     if not per_genome_rows:
         raise HomologDbError(f"baseline report {report_path} carries no per_genome rows")
     baseline: dict[str, dict[str, int]] = {}
-    for row in per_genome_rows:
-        acc = str(row["assembly_accession"])
-        if acc in baseline:
-            raise HomologDbError(f"duplicate accession {acc!r} in baseline report")
-        baseline[acc] = {"n_contigs": int(row["n_contigs"]), "total_bp": int(row["total_bp"])}
-    total_bp = int(data["total_bp"])
-    n_genomes = int(data["n_genomes"])
+    try:
+        for row in per_genome_rows:
+            acc = str(row["assembly_accession"])
+            if acc in baseline:
+                raise HomologDbError(f"duplicate accession {acc!r} in baseline report")
+            baseline[acc] = {"n_contigs": int(row["n_contigs"]), "total_bp": int(row["total_bp"])}
+        total_bp = int(data["total_bp"])
+        n_genomes = int(data["n_genomes"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise HomologDbError(f"malformed baseline report {report_path}: {exc}") from exc
     if n_genomes != len(baseline):
         raise HomologDbError(
             f"baseline n_genomes ({n_genomes}) != per_genome rows ({len(baseline)})"
@@ -323,18 +329,31 @@ def parse_nhmmer_tblout(text: str) -> list[dict[str, str]]:
 # ═════════════════════════════════════════════════════════════════════════════
 # The must-fire round-trip self-recovery control
 # ═════════════════════════════════════════════════════════════════════════════
+_ACGT = frozenset("ACGT")
+
+
 def extract_probe(fasta_text: str, probe_len: int = PROBE_LEN) -> tuple[int, int, str]:
-    """``(contig_index, offset, subsequence)`` for a deterministic probe from the first long contig.
+    """``(contig_index, offset, subsequence)`` for a deterministic **pure-ACGT** probe.
 
     ``contig_index`` is the position in the genome's *full* record list (matching
-    :func:`target_seq_name`); the offset is a fixed mid-contig position (no RNG — the control is
-    reproducible). Raises if no contig is ≥ ``probe_len``.
+    :func:`target_seq_name`). The offset is deterministic (no RNG — the control is reproducible):
+    a fixed mid-contig start, then scanned mid→end then head→mid in ``probe_len`` steps for the
+    first window with **no** ambiguity codes / ``N``-runs. A quarter-point window can land in an
+    assembly gap (a run of ``N``) or an ambiguity stretch that blastn/nhmmer would not self-recover
+    — a *spurious* round-trip failure — so a clean, uniquely-alignable window is required. Raises if
+    no contig yields a pure-ACGT ``probe_len`` window (a genome that degenerate should fail loud).
     """
     for ci, (_header, seq) in enumerate(iter_fasta_records(fasta_text)):
-        if len(seq) >= probe_len:
-            offset = min(max(len(seq) // 4, 0), len(seq) - probe_len)
-            return ci, offset, seq[offset : offset + probe_len]
-    raise HomologDbError(f"no contig ≥ {probe_len} nt for probe extraction")
+        if len(seq) < probe_len:
+            continue
+        last = len(seq) - probe_len
+        start0 = min(max(len(seq) // 4, 0), last)
+        # Non-overlapping probe_len steps (bounded work on a huge contig), deterministic order.
+        for offset in [*range(start0, last + 1, probe_len), *range(0, start0, probe_len)]:
+            window = seq[offset : offset + probe_len]
+            if set(window) <= _ACGT:
+                return ci, offset, window
+    raise HomologDbError(f"no pure-ACGT contig window ≥ {probe_len} nt for probe extraction")
 
 
 def assert_self_recovery(
@@ -567,23 +586,27 @@ def build(
 
     # Must-fire round-trip control: first + last accession-sorted genome self-recovers by both.
     probes: list[dict[str, Any]] = []
-    for acc in (accessions[0], accessions[-1]):
+    # dict.fromkeys dedups: a 1-genome baseline has accessions[0] == accessions[-1] → one probe.
+    for acc in dict.fromkeys((accessions[0], accessions[-1])):
         ci, offset, sub = extract_probe(read_genome_fasta(genome_dir, acc), probe_len)
         query = out_dir / f"probe_{acc}.fna"
+        tbl = out_dir / f"probe_{acc}.tbl"
         query.write_text(f">probe_{acc}:c{ci}:{offset}\n{sub}\n", encoding="utf-8")
-        blast_hits = run_blastn(query, blast_prefix)
-        nhmmer_hits = run_nhmmer(query, fm_index, out_dir / f"probe_{acc}.tbl")
-        probes.append(
-            assert_self_recovery(
-                accession=acc,
-                contig_index=ci,
-                probe_len=len(sub),
-                blast_hits=blast_hits,
-                nhmmer_hits=nhmmer_hits,
+        try:
+            blast_hits = run_blastn(query, blast_prefix)
+            nhmmer_hits = run_nhmmer(query, fm_index, tbl)
+            probes.append(
+                assert_self_recovery(
+                    accession=acc,
+                    contig_index=ci,
+                    probe_len=len(sub),
+                    blast_hits=blast_hits,
+                    nhmmer_hits=nhmmer_hits,
+                )
             )
-        )
-        query.unlink()
-        (out_dir / f"probe_{acc}.tbl").unlink()
+        finally:  # scratch files always cleaned, even if a self-recovery assertion raises
+            query.unlink(missing_ok=True)
+            tbl.unlink(missing_ok=True)
 
     report = build_report(
         baseline_n=baseline_n,
