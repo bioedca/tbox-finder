@@ -557,12 +557,11 @@ def build(
     if not fm_index.is_file() or fm_index.stat().st_size == 0:
         raise HomologDbError(f"makehmmerdb produced no FM-index at {fm_index}")
 
-    # Assert the pinned tool versions where they ran (A12).
+    # Assert the pinned tool versions where they ran (A12). Both `-version`/`-h` exit 0 (verified
+    # in-env), so the checked `_run` helper is the right transport — a non-zero here means a broken
+    # binary and should fail the build, not silently yield an unparseable banner.
     blast_version = parse_makeblastdb_version(_run([tool_path("makeblastdb"), "-version"]).stdout)
-    hmmer_banner = subprocess.run(
-        [tool_path("nhmmer"), "-h"], capture_output=True, text=True
-    ).stdout
-    hmmer_version = parse_hmmer_version(hmmer_banner)
+    hmmer_version = parse_hmmer_version(_run([tool_path("nhmmer"), "-h"]).stdout)
     assert_tool_version("blast", blast_version, EXPECTED_BLAST_VERSION_PREFIX)
     assert_tool_version("hmmer", hmmer_version, EXPECTED_HMMER_VERSION_PREFIX)
 
@@ -629,7 +628,15 @@ def build_report(
     hmmer_version: str,
     probes: Sequence[dict[str, Any]],
 ) -> dict[str, Any]:
-    """The committed audit: what was indexed, by which tool builds, and the round-trip evidence."""
+    """The committed audit: what was indexed, by which tool builds, and the round-trip evidence.
+
+    The ``blastdb.prefix`` / ``fmindex.path`` / ``target_fasta`` fields are the DB's **canonical
+    committed location** (``DB_DIR`` = ``data/interim/homolog_db/``) — where the sbatch **promotes**
+    the DVC-tracked DB — **not** the transient node-local ``out_dir`` the build wrote to. This is
+    deliberate: a reader of the committed report (or its downstream P6-07 consumer) needs the path
+    the artifact rests at, so threading the ephemeral ``/tmp/$USER-$JOB/…`` ``out_dir`` here would
+    record a path that no longer exists after the job. ``DB_DIR`` is the one true resting place.
+    """
     if not probes:
         raise HomologDbError("no round-trip probe recovered — refusing to certify an unproven DB")
     return {
