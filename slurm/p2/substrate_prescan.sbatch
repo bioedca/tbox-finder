@@ -26,16 +26,19 @@
 #
 # ── PARAMETERS resolved by P2-10c′ (the ρ-sized fetch) — set at submit, no default ──
 #   SUBSTRATE_DIR   dir of per-shard specs shard_<tid>.json (production windows + genome_windows
-#                   + expected_production_windows), emitted by the fetch/tiling step.
+#                   + expected_production_windows), emitted LOCALLY by the tiling step
+#                   `python -m tbox_finder.mining.substrate_windows emit-specs` (P2-10c′-shardspec)
+#                   over data/interim/production_genomes + the production_windows_v0 manifest.
 #   SCORE_THRESHOLD recall-favouring cmsearch score cutoff, frozen at the P2/P6 phase gate.
-#   NSHARDS         shard count from the fetch manifest → `sbatch --array=0-$((NSHARDS-1))`.
+#   NSHARDS         emit-specs `--n-shards` → `sbatch --array=0-$((NSHARDS-1))` (both the same n).
 #
 # SUBMIT:  SYNC FIRST, STAGE SECOND, SUBMIT THIRD — never one `&&` chain (§9.3). Set NSHARDS
 #          (the fetch manifest's shard count) in the SAME command as sbatch, or the array
 #          expands to `--array=0--1` (an empty/invalid range):
 #            ssh two 'bash -lc "cd ~/tbox-finder && git fetch origin && \
 #              git checkout <branch> && git reset --hard origin/<branch>"'
-#            # …rsync the fetched substrate spec dir → two:~/tbox-finder/$SUBSTRATE_DIR …
+#            # LOCAL: python -m tbox_finder.mining.substrate_windows emit-specs --n-shards <n> \
+#            #          --out-dir <dir>  →  rsync <dir> → two:~/tbox-finder/$SUBSTRATE_DIR …
 #            ssh two 'bash -lc "cd ~/tbox-finder && NSHARDS=<n> SUBSTRATE_DIR=<dir> SCORE_THRESHOLD=<x> \
 #              sbatch --array=0-$((NSHARDS-1)) slurm/p2/substrate_prescan.sbatch"'
 # PREFLIGHT: ssh two 'bash -lc "cd ~/tbox-finder && NSHARDS=<n> SUBSTRATE_DIR=<dir> SCORE_THRESHOLD=<x> \
@@ -103,7 +106,7 @@ GOT_SHA="$(sha256sum "$CM" | awk '{print $1}')"
   echo "FATAL: $CM sha256 $GOT_SHA != pinned $CM_SHA256_PIN — wrong/truncated CM (git-lfs pointer?)" >&2
   exit 2
 }
-[ -s "$SPEC" ] || { echo "FATAL: shard spec $SPEC missing — produced by the P2-10c′ fetch/tiling step" >&2; exit 2; }
+[ -s "$SPEC" ] || { echo "FATAL: shard spec $SPEC missing — run substrate_windows emit-specs + rsync" >&2; exit 2; }
 
 CONDA_SH=/exports/people/mondragonlab/ecc1695/miniconda3/etc/profile.d/conda.sh
 source "$CONDA_SH"

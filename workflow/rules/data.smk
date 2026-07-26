@@ -824,6 +824,10 @@ rule build_mining_pool:
 
 _PILOT_DIR = "data/processed/pilot"
 _MINING_DIR = "data/processed/mining"
+#: The production negative-substrate FASTAs fetched by ``slurm/p2/fetch_production_genomes.sbatch``
+#: (P2-10c′-fetch) — a DVC-tracked interim directory, deliberately NOT a Snakemake input (it is a
+#: SLURM/NCBI acquisition, like ``_PILOT_GENOME_DIR``), consumed by ``emit_substrate_windows``.
+_PRODUCTION_GENOME_DIR = f"{_INTERIM_DIR}/production_genomes"
 
 
 rule select_pilot_genomes:
@@ -902,6 +906,50 @@ rule select_production_genomes:
     shell:
         "PYTHONHASHSEED=0 python -m tbox_finder.mining.production_genomes "
         "--crosswalk {params.crosswalk:q} "
+        "--out {output.manifest:q} "
+        "--provenance {output.provenance:q} "
+        "--report {output.report:q} "
+        "--env-lock {params.env_lock:q} >{log} 2>&1"
+
+
+rule emit_substrate_windows:
+    """Tile the fetched production substrate → per-genome window-count manifest (P2-10c′-shardspec; ADR-0005 A8).
+
+    ADR-0005 **A8** pins a sharded ``cmsearch`` pre-scan over the fetched GTDB negative substrate;
+    its GATE (``mining/substrate_prescan.py``) reads per-shard ``read_shard_spec`` JSONs that only a
+    fixture minter produced. This rule runs the REAL emitter's ``build-manifest`` half: it tiles the
+    2,500 fetched genomes (``_PRODUCTION_GENOME_DIR``) at the frozen 1024/512 scan geometry
+    (``window_dataset.tile_windows``) and records a **FASTA-independent per-genome window-count
+    manifest** — the clause-(i) ``expected`` basis (A8 pin 4) and a valid clause-(viii) shrink
+    baseline (``per_genome[].n_windows``, which the fetch report lacks).
+
+    Pure geometry: it runs no ``cmsearch``, loads no model, and pins no threshold / no ρ / no ADR
+    value — A8 is already signed, so this is execution of a frozen pin (CLAUDE.md §10.3). The
+    per-shard scan specs (``emit-specs``) and the scan itself are downstream (P2-10e).
+
+    A one-time LOCAL rule kept out of ``rule all`` with no ``input:`` — the genome directory is a
+    SLURM/NCBI acquisition (DVC-tracked, like ``_PILOT_GENOME_DIR``) and the selection manifest is a
+    committed artifact of ``select_production_genomes``; both are passed as params (the one-time-LOCAL
+    convention ``select_production_genomes`` follows). Invoke:
+
+        snakemake --cores 1 --use-conda emit_substrate_windows
+    """
+    output:
+        manifest=f"{_MINING_DIR}/production_windows_v0.parquet",
+        provenance=f"{_MINING_DIR}/production_windows_v0.provenance.json",
+        report=f"{_AUDIT_DIR}/production_windows_report.json",
+    params:
+        genome_dir=_PRODUCTION_GENOME_DIR,
+        selection=f"{_MINING_DIR}/production_genomes_v0.parquet",
+        env_lock="envs/data.conda-lock.yml",
+    log:
+        "logs/emit_substrate_windows.log",
+    conda:
+        "../../envs/data.yml"
+    shell:
+        "PYTHONHASHSEED=0 python -m tbox_finder.mining.substrate_windows build-manifest "
+        "--genome-dir {params.genome_dir:q} "
+        "--selection {params.selection:q} "
         "--out {output.manifest:q} "
         "--provenance {output.provenance:q} "
         "--report {output.report:q} "
