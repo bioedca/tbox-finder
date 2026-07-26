@@ -7,3 +7,4 @@
 # audit report data/processed/audits/production_fetch_report.json ARE committed deliverables.
 /production_genomes_fetch_log.jsonl
 /production_genomes
+/homolog_db

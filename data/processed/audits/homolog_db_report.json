@@ -1,0 +1,61 @@
+{
+  "adr": "ADR-0006",
+  "assembles_no_homolog_set": true,
+  "blast_version": "2.17.0",
+  "blastdb": {
+    "n_sequences": 477739,
+    "prefix": "data/interim/homolog_db/target",
+    "total_bases": 7023377857
+  },
+  "builds_index_only": true,
+  "counts_no_candidates": true,
+  "fmindex": {
+    "bytes": 9323021471,
+    "path": "data/interim/homolog_db/target.fm"
+  },
+  "hmmer_version": "3.4",
+  "n_genomes": 2500,
+  "n_sequences": 477739,
+  "pins_no_inclusion_threshold": true,
+  "round_trip": {
+    "all_recovered": true,
+    "probes": [
+      {
+        "accession": "GCA_000220375.1",
+        "blastn": {
+          "evalue": "0.0",
+          "length": "500",
+          "pident": "100.000"
+        },
+        "nhmmer": {
+          "evalue": "4.9e-145",
+          "score": "492.6"
+        },
+        "probe_len": 500,
+        "recovered": true,
+        "target": "GCA_000220375.1:c0"
+      },
+      {
+        "accession": "GCF_964020195.1",
+        "blastn": {
+          "evalue": "0.0",
+          "length": "500",
+          "pident": "100.000"
+        },
+        "nhmmer": {
+          "evalue": "2.4e-114",
+          "score": "392.9"
+        },
+        "probe_len": 500,
+        "recovered": true,
+        "target": "GCF_964020195.1:c0"
+      }
+    ]
+  },
+  "runs_no_cmsearch": true,
+  "runs_no_genome_scan": true,
+  "schema_version": "1.0",
+  "step": "P2-10c'-homologdb",
+  "target_fasta": "data/interim/homolog_db/target.fna",
+  "total_bp": 7023377857
+}
