@@ -111,7 +111,7 @@ def build_round_availability(
 def plan_round(
     *,
     rscape_installed: bool,
-    msa_supply_available: bool = MSA_SUPPLY_AVAILABLE,
+    msa_supply_available: bool | None = None,
     relaxed_arch_available: bool = False,
     synteny_available: bool = False,
 ) -> dict[str, Any]:
@@ -120,7 +120,13 @@ def plan_round(
     Returns ``{availability, readiness, ready, ...}``. ``ready`` is ``False`` at P2 (no
     protective backend), and the driver's caller (``mine_round.sbatch``) exits on it rather
     than scanning 3.63M windows only to have :func:`hard_negative.mine_round` refuse.
+
+    ``msa_supply_available`` defaults to the module flag :data:`MSA_SUPPLY_AVAILABLE`, resolved
+    via a ``None`` sentinel at **call** time (not bound at import) so that flipping the flag at
+    the unblock step reaches every caller, including direct ones.
     """
+    if msa_supply_available is None:
+        msa_supply_available = MSA_SUPPLY_AVAILABLE
     availability = build_round_availability(
         rscape_installed=rscape_installed,
         msa_supply_available=msa_supply_available,

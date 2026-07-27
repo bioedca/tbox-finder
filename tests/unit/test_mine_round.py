@@ -93,6 +93,14 @@ def test_msa_supply_default_is_unavailable_at_p2():
     assert plan["ready"] is False
 
 
+def test_plan_round_default_resolves_msa_flag_at_call_time(monkeypatch):
+    # The default is a None sentinel resolved at call time (not bound at import), so flipping
+    # MSA_SUPPLY_AVAILABLE at the unblock step reaches direct plan_round callers, not only the CLI.
+    assert mr.plan_round(rscape_installed=True)["ready"] is False
+    monkeypatch.setattr(mr, "MSA_SUPPLY_AVAILABLE", True)
+    assert mr.plan_round(rscape_installed=True)["ready"] is True
+
+
 # --------------------------------------------------------------------------- #
 # parse_window_name + the window→genome coordinate adapter.
 # --------------------------------------------------------------------------- #
