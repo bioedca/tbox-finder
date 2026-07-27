@@ -17,11 +17,13 @@ never from the model's own covariation:
      FASTAs, one representative per subject contig, ``candidate`` + homologs; fewer than
      ``min_sequences`` homologs is **not producible** ⇒ ``None`` ⇒ ``covariation_spare_status``
      returns ``unavailable`` ⇒ the candidate is **spared, never silently mined** (fail-closed).
-  3. **align** CM-free de-novo — a covariance model built *from the candidate*: ``RNAfold`` folds
-     the candidate → ``#=GC SS_cons`` → ``cmbuild`` a CM from that single-sequence structure →
-     ``cmalign --outformat Pfam`` aligns the homolog set to it. (D7's "a covariance model built
-     from the candidates" alternative to LocARNA — chosen because LocARNA is in no pinned env,
-     while ``cmbuild``/``cmalign``/``RNAfold`` are, so no env amendment is owed.)
+  3. **align** CM-free de-novo — ``mlocarna`` (LocARNA's Sankoff simultaneous fold-and-align)
+     aligns ``candidate`` + homologs and emits a Pfam Stockholm carrying an RNAalifold
+     ``#=GC SS_cons`` **comparative** consensus (``<tgtdir>/results/result.stk``). This is D7's
+     *first-named* exemplar (ADR-0006 **A3**): a genuine comparative consensus, unlike a CM built
+     from ONE candidate's MFE fold, which certification (SLURM job 748) showed yields 0 covariation
+     on real class-II seeds. The env is pinned in ``envs/locarna.yml`` (``locarna`` 2.0.1; ADR-0002
+     **A13**).
   4. **score** — reuse :func:`covariation.covariation_spare_status` (pins
      ``TOTAL_ACROSS_HELICES`` + ``min_sequences=20``, ADR-0006 A2).
 
@@ -34,7 +36,7 @@ not a pin. ``min_sequences`` is the one exception — it is *already pinned* (A2
 ``MIN_REAL_HOMOLOG_N`` = 20), so it defaults to that.
 
 MULTI-ENV. The three stages run in three pinned envs (search: ``tbox-homology`` blast/hmmer;
-align: ``tbox-infernal`` RNAfold/cmbuild/cmalign; score: ``tbox-rscape`` R-scape). A single Python
+align: ``tbox-locarna`` mlocarna; score: ``tbox-rscape`` R-scape). A single Python
 process cannot switch conda envs, so orchestration lives in the ``certify_homolog_msa.sbatch``,
 and this module exposes one CLI subcommand per stage. Imports are stdlib + the pandas/torch-free
 transport in :mod:`tbox_finder.mining.homolog_db` / :mod:`~.pilot_fetch`; ``covariation`` (and its
@@ -47,6 +49,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -64,7 +67,6 @@ from typing import Any
 from tbox_finder.mining.homolog_db import (
     DB_DIR,
     GENOME_DIR,
-    HomologDbError,
     _run,
     read_genome_fasta,
     tool_path,
@@ -81,9 +83,10 @@ ADR = "ADR-0006"  # D7 (route) + A1 (target DB) + A2 (MSA-producibility gate); D
 BLAST_PREFIX = f"{DB_DIR}/target"  # makeblastdb -out prefix (target.n*)
 FM_INDEX = f"{DB_DIR}/target.fm"  # makehmmerdb FM-index (nhmmer target)
 
-# ── Pinned tool versions (assert where USED — the ADR-0002 A11 rule) ─────────
-EXPECTED_INFERNAL_VERSION_PREFIX = "1.1.5"  # envs/infernal.yml / envs/rscape.yml co-pin
-EXPECTED_VIENNARNA_VERSION_PREFIX = "2.7"  # envs/infernal.yml (RNAfold)
+# ── Pinned tool versions (assert where USED — the ADR-0002 A11/A13 rule) ─────
+#: The LocARNA version envs/locarna.yml pins; asserted against ``mlocarna --version`` at align time
+#: (:func:`assert_mlocarna_version`) and re-checked in slurm/p2/certify_homolog_msa.sbatch (A13).
+PINNED_LOCARNA_VERSION = "2.0.1"
 
 #: The blastn -outfmt 6 columns the producer requests + parses (request and parser cannot drift).
 #: Adds sstart/send to the homolog_db self-recovery set — the aligned subject subrange whose
@@ -98,12 +101,6 @@ BLAST_OUTFMT_COLUMNS = (
     "sstart",
     "send",
 )
-
-#: The dot-bracket / WUSS alphabet a valid ``#=GC SS_cons`` line may contain.
-_SS_PAIR_OPEN = "([{<"
-_SS_PAIR_CLOSE = ")]}>"
-_SS_UNPAIRED = ".,_-:~"
-_SS_ALPHABET = frozenset(_SS_PAIR_OPEN + _SS_PAIR_CLOSE + _SS_UNPAIRED)
 
 _ACGT = frozenset("ACGT")
 
@@ -189,13 +186,20 @@ def blastn_argv(
     max_target_seqs: int,
     columns: Sequence[str] = BLAST_OUTFMT_COLUMNS,
 ) -> list[str]:
-    """argv for ``blastn`` against the makeblastdb nucleotide DB (cutoffs are the caller's)."""
+    """argv for ``blastn`` against the makeblastdb nucleotide DB (cutoffs are the caller's).
+
+    Uses ``-task blastn`` (the sensitive gapped task), **not** the ``blastn`` default ``megablast``:
+    megablast seeds long exact words and finds **0** divergent-RNA homologs (job 748 fail-closed at
+    megablast→0); the sensitive task recovers ample distinct homologs (ADR-0002 A13).
+    """
     return [
         tool_path("blastn"),
         "-query",
         str(query_fasta),
         "-db",
         str(prefix),
+        "-task",
+        "blastn",
         "-outfmt",
         "6 " + " ".join(columns),
         "-max_target_seqs",
@@ -366,89 +370,63 @@ def homolog_record_name(sseqid: str, lo: int, hi: int, strand: str) -> str:
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-# CM-free de-novo alignment (RNAfold → cmbuild → cmalign) — argv builders + parse
+# CM-free de-novo alignment (mlocarna comparative consensus) — argv builder + version guard
 # ═════════════════════════════════════════════════════════════════════════════
-def rnafold_argv() -> list[str]:
-    """argv for ``RNAfold --noPS`` (candidate read from stdin; T→U auto-substituted)."""
-    return [tool_path("RNAfold"), "--noPS"]
-
-
-def cmbuild_argv(cm_out: str | Path, sto_in: str | Path, *, name: str) -> list[str]:
-    """argv for ``cmbuild`` — a CM from the single-sequence candidate Stockholm (its SS_cons)."""
-    return [tool_path("cmbuild"), "-F", "-n", _safe_seq_name(name), str(cm_out), str(sto_in)]
-
-
-def cmalign_argv(
-    cm: str | Path, seqfile: str | Path, out_sto: str | Path, *, cpu: int
+def mlocarna_argv(
+    input_fasta: str | Path,
+    tgtdir: str | Path,
+    *,
+    threads: int,
+    consensus_structure: str = "alifold",
 ) -> list[str]:
-    """argv for ``cmalign`` — align the homolog set to the candidate CM, Pfam single-block out."""
+    """argv for ``mlocarna`` (LocARNA's Sankoff simultaneous fold-and-align).
+
+    The input is ONE multi-FASTA of ``candidate`` + homologs (search_homologs already writes the
+    candidate as record 0), aligned de-novo; the result is ``<tgtdir>/results/result.stk``, a Pfam
+    Stockholm. ``--consensus-structure alifold`` embeds the RNAalifold ``#=GC SS_cons``
+    **comparative** consensus — load-bearing: mlocarna's default is ``none``, which writes NO
+    ``SS_cons`` line, leaving R-scape nothing to score. ``--threads`` is kept small (the man page
+    warns LocARNA does not scale past ~2–3). Options precede the positional FASTA (Getopt::Long).
+    """
     return [
-        tool_path("cmalign"),
-        "--outformat",
-        "Pfam",
-        "--noprob",
-        "--cpu",
-        str(cpu),
-        "-o",
-        str(out_sto),
-        str(cm),
-        str(seqfile),
+        tool_path("mlocarna"),
+        "--stockholm",
+        "--consensus-structure",
+        consensus_structure,
+        "--threads",
+        str(threads),
+        "--tgtdir",
+        str(tgtdir),
+        str(input_fasta),
     ]
 
 
-def parse_rnafold_structure(text: str, *, expected_len: int) -> str:
-    """Extract the dot-bracket structure line from ``RNAfold --noPS`` stdout.
+def mlocarna_version_argv() -> list[str]:
+    """argv for ``mlocarna --version`` (execs ``locarna --version`` → banner ``LocARNA <v>``)."""
+    return [tool_path("mlocarna"), "--version"]
 
-    RNAfold prints ``>header`` / sequence / ``<structure> ( <energy>)``. The structure is the
-    first whitespace-delimited token of the structure line — identified robustly as the first
-    token that is all-in-:data:`_SS_ALPHABET` and exactly ``expected_len`` long (so the energy
-    field, the echoed sequence, and any header cannot be mistaken for it).
+
+@lru_cache(maxsize=1)
+def _mlocarna_version_banner() -> str:
+    proc = subprocess.run(  # noqa: S603 (tool_path-resolved argv, no shell, fixed args)
+        mlocarna_version_argv(), capture_output=True, text=True
+    )
+    return (proc.stdout or "") + (proc.stderr or "")
+
+
+def assert_mlocarna_version(banner: str | None = None) -> str:
+    """Assert the ``mlocarna`` on PATH is the pinned ``LocARNA`` :data:`PINNED_LOCARNA_VERSION`
+    (ADR-0002 A13; the A11 ``PINNED_RSCAPE_VERSION`` assert-where-used precedent); returns the
+    banner. ``banner`` defaults to a cached live ``mlocarna --version`` probe and is injectable so
+    the match logic is unit-testable without the binary. The trailing ``\\b`` rejects a look-alike
+    bump — e.g. ``LocARNA 2.0.10`` must NOT satisfy a ``2.0.1`` pin.
     """
-    for line in text.splitlines():
-        parts = line.split()
-        if not parts:
-            continue
-        token = parts[0]
-        if len(token) == expected_len and set(token) <= _SS_ALPHABET:
-            return token
-    raise HomologMsaError(
-        f"could not parse a length-{expected_len} dot-bracket structure from RNAfold output"
-    )
-
-
-def assert_balanced_structure(structure: str) -> None:
-    """Raise unless every pair symbol is nested-balanced (cmbuild needs a balanced SS_cons)."""
-    close_to_open = dict(zip(_SS_PAIR_CLOSE, _SS_PAIR_OPEN, strict=True))
-    pair_stack: list[str] = []
-    for ch in structure:
-        if ch in _SS_PAIR_OPEN:
-            pair_stack.append(ch)
-        elif ch in _SS_PAIR_CLOSE:
-            want = close_to_open[ch]
-            if not pair_stack or pair_stack[-1] != want:
-                raise HomologMsaError(f"unbalanced SS_cons near {ch!r}: {structure!r}")
-            pair_stack.pop()
-        elif ch not in _SS_UNPAIRED:
-            raise HomologMsaError(f"illegal SS_cons character {ch!r}: {structure!r}")
-    if pair_stack:
-        raise HomologMsaError(f"unclosed pairs in SS_cons: {structure!r}")
-
-
-def build_candidate_stockholm(name: str, sequence: str, structure: str) -> str:
-    """A single-sequence Pfam Stockholm (candidate row + ``#=GC SS_cons``) for ``cmbuild``."""
-    if len(sequence) != len(structure):
+    text = _mlocarna_version_banner() if banner is None else banner
+    if not re.search(rf"LocARNA\s+{re.escape(PINNED_LOCARNA_VERSION)}\b", text):
         raise HomologMsaError(
-            f"candidate seq ({len(sequence)}) and structure ({len(structure)}) length mismatch"
+            f"mlocarna is not the pinned LocARNA {PINNED_LOCARNA_VERSION} (ADR-0002 A13): {text!r}"
         )
-    assert_balanced_structure(structure)
-    tag = _safe_seq_name(name)
-    width = max(len(tag), len("#=GC SS_cons"))
-    return (
-        "# STOCKHOLM 1.0\n\n"
-        f"{tag.ljust(width)} {sequence}\n"
-        f"{'#=GC SS_cons'.ljust(width)} {structure}\n"
-        "//\n"
-    )
+    return text.strip()
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -519,19 +497,6 @@ def extract_homolog_sequence(
         raise HomologMsaError(f"range {lo}-{hi} out of bounds for {sseqid} (contig len {len(seq)})")
     sub = seq[lo - 1 : hi]
     return _revcomp(sub) if strand == "minus" else sub
-
-
-def run_rnafold_structure(sequence: str) -> str:
-    """Fold ``sequence`` with RNAfold and return its dot-bracket structure (same length)."""
-    proc = subprocess.run(  # noqa: S603 (tool_path-resolved argv, fixed FASTA on stdin)
-        rnafold_argv(),
-        input=f">candidate\n{sequence}\n",
-        capture_output=True,
-        text=True,
-    )
-    if proc.returncode != 0:
-        raise HomologDbError(f"RNAfold failed ({proc.returncode}): {proc.stderr}")
-    return parse_rnafold_structure(proc.stdout, expected_len=len(sequence))
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -624,7 +589,7 @@ def _write_multi_fasta(
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-# Stage 2: CM-free de-novo alignment
+# Stage 2: CM-free de-novo alignment (mlocarna comparative consensus)
 # ═════════════════════════════════════════════════════════════════════════════
 def align_candidate(
     *,
@@ -632,26 +597,51 @@ def align_candidate(
     homologs_fasta: str | Path,
     out_sto: str | Path,
     work_dir: str | Path,
-    cpu: int = 4,
+    cpu: int = 2,
 ) -> Path:
-    """RNAfold(candidate)→cmbuild→cmalign(homologs) → a Pfam Stockholm MSA with ``#=GC SS_cons``."""
+    """``mlocarna``(candidate+homologs) → a Pfam Stockholm MSA with an RNAalifold ``#=GC SS_cons``
+    **comparative** consensus (ADR-0006 A3 / ADR-0002 A13).
+
+    ``homologs_fasta`` (search_homologs' output) already carries the candidate as record 0, so that
+    ONE multi-FASTA is mlocarna's input; ``candidate_fasta`` is retained for the (unchanged) public
+    signature and an input-integrity guard. mlocarna's ``<tgtdir>/results/result.stk`` is copied to
+    ``out_sto`` unchanged — already a Pfam Stockholm with the consensus R-scape scores. ``cpu`` is
+    passed as ``--threads`` and kept small (LocARNA does not scale past ~2–3).
+    """
+    assert_mlocarna_version()
+    _assert_candidate_in_homologs(candidate_fasta, homologs_fasta)
+
     work = Path(work_dir)
     work.mkdir(parents=True, exist_ok=True)
-    cand_name, cand_seq = read_single_sequence(candidate_fasta)
-    cand_seq = degap_to_dna(cand_seq)
+    tgt = work / "mlocarna"
+    if tgt.exists():
+        shutil.rmtree(tgt)  # mlocarna writes into a fresh tgtdir; ours to clear (under work_dir)
 
-    structure = run_rnafold_structure(cand_seq)
-    cand_sto = work / "candidate.sto"
-    cand_sto.write_text(
-        build_candidate_stockholm("candidate", cand_seq, structure), encoding="utf-8"
-    )
+    _run(mlocarna_argv(homologs_fasta, tgt, threads=cpu))
 
-    cm = work / "candidate.cm"
-    _run(cmbuild_argv(cm, cand_sto, name="candidate"))
-    _run(cmalign_argv(cm, homologs_fasta, out_sto, cpu=cpu))
-
+    result_stk = tgt / "results" / "result.stk"
+    if not result_stk.is_file():
+        raise HomologMsaError(
+            f"mlocarna produced no {result_stk} (needs --stockholm; input={homologs_fasta})"
+        )
+    Path(out_sto).write_text(result_stk.read_text(encoding="utf-8"), encoding="utf-8")
     _assert_single_alignment_with_ss_cons(out_sto)
     return Path(out_sto)
+
+
+def _assert_candidate_in_homologs(candidate_fasta: str | Path, homologs_fasta: str | Path) -> None:
+    """Fail-closed guard on the align inputs: mlocarna aligns candidate+homologs from ONE
+    multi-FASTA, and search_homologs writes the candidate as record 0 of ``homologs_fasta`` — so a
+    call whose ``homologs_fasta`` does not contain the ``candidate_fasta`` sequence is a mismatched
+    search/align pair (e.g. stale inputs), not an alignment to run."""
+    _, cand_seq = read_single_sequence(candidate_fasta)
+    cand_seq = degap_to_dna(cand_seq)
+    records = iter_fasta_records(Path(homologs_fasta).read_text(encoding="utf-8"))
+    if not any(degap_to_dna(seq) == cand_seq for _, seq in records):
+        raise HomologMsaError(
+            f"candidate sequence ({candidate_fasta}) is absent from the mlocarna input "
+            f"{homologs_fasta} — mismatched search/align inputs"
+        )
 
 
 def _assert_single_alignment_with_ss_cons(sto: str | Path) -> None:
@@ -862,12 +852,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     p_search.add_argument("--report", default=None)
     p_search.set_defaults(func=_cmd_search)
 
-    p_align = sub.add_parser("align", help="CM-free de-novo alignment (RNAfold→cmbuild→cmalign)")
+    p_align = sub.add_parser(
+        "align", help="CM-free de-novo alignment (mlocarna comparative consensus)"
+    )
     p_align.add_argument("--candidate-fasta", required=True)
     p_align.add_argument("--homologs-fasta", required=True)
     p_align.add_argument("--out-sto", required=True)
     p_align.add_argument("--work-dir", required=True)
-    p_align.add_argument("--cpu", type=int, default=4)
+    # mlocarna --threads; small — LocARNA does not scale past ~2–3 (man page caveat).
+    p_align.add_argument("--cpu", type=int, default=2)
     p_align.set_defaults(func=_cmd_align)
 
     p_cert = sub.add_parser("certify", help="must-fire matched-control certification of an MSA")

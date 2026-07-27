@@ -20,9 +20,21 @@ RULES_DIR = REPO_ROOT / "workflow" / "rules"
 # The environments pinned by ADR-0002 D1 (one lockfile each, never aggregate). The `ml`
 # env was split into `ml-dna` + `ml-rna` at P0-06c (ADR-0002 A4): transformers 4.57.5
 # (Caduceus trust_remote_code ceiling) is mutually exclusive with `multimolecule` 0.0.9,
-# which at import needs transformers 5.x. `rscape` was added at P2-10c (A11) and
-# `homology` at P2-10c′-e (A12: hmmer+blast, no infernal co-pin) — eight envs total.
-EXPECTED_ENVS = ["data", "infernal", "ml-dna", "ml-rna", "viz", "app", "rscape", "homology"]
+# which at import needs transformers 5.x. `rscape` was added at P2-10c (A11),
+# `homology` at P2-10c′-e (A12: hmmer+blast, no infernal co-pin), and `locarna` at
+# P2-10e-msa (A13: locarna 2.0.1 / mlocarna, the D7 CM-free comparative-consensus aligner)
+# — nine envs total.
+EXPECTED_ENVS = [
+    "data",
+    "infernal",
+    "ml-dna",
+    "ml-rna",
+    "viz",
+    "app",
+    "rscape",
+    "homology",
+    "locarna",
+]
 
 # The two GPU envs (ADR-0002 D2/D3/A4); the torch-URL / no-`--extra-index-url` guard
 # applies to both, since both carry the same cu128 URL-pinned closure.
@@ -58,11 +70,13 @@ def test_env_specs_are_well_formed():
 
 
 def test_all_env_lockfiles_exist():
-    """All eight envs are locked: four CPU envs at P0-05, both GPU envs at P0-06c (A4),
+    """All nine envs are locked: four CPU envs at P0-05, both GPU envs at P0-06c (A4),
     `rscape` at P2-10c (A11 — a separate env so the GATE-1-load-bearing `infernal`
-    lock is not re-solved by `rscape`'s gnuplot/Qt closure), and `homology` at
+    lock is not re-solved by `rscape`'s gnuplot/Qt closure), `homology` at
     P2-10c′-e (A12 — hmmer/blast with NO infernal co-pin, so `envs/infernal.conda-lock.yml`
-    is likewise never re-solved and the `esl-*` two-provider clobber is out of reach).
+    is likewise never re-solved and the `esl-*` two-provider clobber is out of reach), and
+    `locarna` at P2-10e-msa (A13 — locarna 2.0.1/mlocarna, again a separate env so the
+    infernal lock stays byte-frozen).
 
     ml-dna / ml-rna are lockable on the laptop only via a full URL-pinned cu128 closure
     (see `test_ml_envs_pin_torch_by_url_not_index`); conda-lock 4.0.2 cannot use an index.
@@ -176,4 +190,48 @@ def test_homology_env_pins_hmmer_blast_and_no_infernal():
         lock_problems.append(
             "homology.conda-lock.yml must NOT contain infernal (A12 esl-* clobber avoidance)"
         )
+    assert not lock_problems, "; ".join(lock_problems)
+
+
+def test_locarna_env_pins_locarna_2_0_1_and_no_infernal():
+    """Lock the ADR-0002 A13 invariant: the 9th `locarna` env pins `locarna` 2.0.1 (the package
+    shipping `mlocarna`, D7's first-named CM-free de-novo comparative-consensus aligner) over
+    python 3.12 + biopython 1.87, with `viennarna` pulled transitively (mlocarna → RNAalifold).
+
+    A SEPARATE env with **no `infernal` co-pin** — the load-bearing reason mirrors A11/A12: adding
+    any dependency to `envs/infernal.yml` would re-solve the GATE-1-load-bearing
+    `envs/infernal.conda-lock.yml` (byte-frozen at `776610ae…`). This guard fails closed on a
+    drifted pin or an `infernal` fold-in, and confirms spec ↔ lock consistency.
+    """
+    spec = (ENVS_DIR / "locarna.yml").read_text()
+    # Strip inline `#` comments so the header prose (which explains the isolation rationale) is not
+    # inspected — only real YAML dependency lines.
+    code = "\n".join(line.split("#", 1)[0] for line in spec.splitlines())
+    problems = []
+    for pat, why in (
+        (r"^\s*-\s*locarna=2\.0\.1\s*$", "must pin `locarna=2.0.1` (provides mlocarna)"),
+        (r"^\s*-\s*python=3\.12\s*$", "must pin `python=3.12` (ADR-0002 D1)"),
+        (r"^\s*-\s*biopython=1\.87\s*$", "must pin `biopython=1.87` (sibling envs)"),
+    ):
+        if not re.search(pat, code, re.MULTILINE):
+            problems.append(f"locarna.yml: {why}")
+    if re.search(r"^\s*-\s*infernal\b", code, re.MULTILINE):
+        problems.append(
+            "locarna.yml: must NOT co-pin `infernal` (A13 keeps the infernal lock frozen)"
+        )
+    assert not problems, "locarna env A13 invariant violated: " + "; ".join(problems)
+
+    # spec ↔ lock consistency + the same no-infernal invariant + the transitive viennarna runtime.
+    lock = (ENVS_DIR / "locarna.conda-lock.yml").read_text()
+    lock_problems = []
+    if not re.search(r"^- name: locarna\n\s+version: '?2\.0\.1'?\s*$", lock, re.MULTILINE):
+        lock_problems.append("locarna.conda-lock.yml must lock locarna 2.0.1")
+    if not re.search(r"^- name: python\n\s+version: '?3\.12\.\d+'?\s*$", lock, re.MULTILINE):
+        lock_problems.append("locarna.conda-lock.yml must lock python 3.12.x")
+    if not re.search(r"^- name: biopython\n\s+version: '?1\.87'?\s*$", lock, re.MULTILINE):
+        lock_problems.append("locarna.conda-lock.yml must lock biopython 1.87")
+    if not re.search(r"^- name: viennarna\n", lock, re.MULTILINE):
+        lock_problems.append("locarna.conda-lock.yml must pull viennarna (mlocarna → RNAalifold)")
+    if re.search(r"^- name: infernal$", lock, re.MULTILINE):
+        lock_problems.append("locarna.conda-lock.yml must NOT contain infernal (A13 frozen lock)")
     assert not lock_problems, "; ".join(lock_problems)

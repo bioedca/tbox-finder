@@ -10,6 +10,7 @@ not counts (symmetric-count-fixture-blind-to-inversion), and checks controls fir
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -166,37 +167,103 @@ def test_parse_nhmmer_hits_positional_and_reject_short_row() -> None:
         hm.parse_nhmmer_hits("A:c0 - query - 1 220\n")
 
 
-# ── RNAfold structure parse + SS_cons validation ─────────────────────────────
-def test_parse_rnafold_structure_extracts_dot_bracket() -> None:
-    out = ">candidate\nGGGAAACCC\n(((...))) ( -1.20)\n"
-    assert hm.parse_rnafold_structure(out, expected_len=9) == "(((...)))"
+# ── mlocarna argv + version guard + align orchestration (ADR-0006 A3 / ADR-0002 A13) ─────────────
+def test_mlocarna_argv(_stub_tool_path: None) -> None:
+    argv = hm.mlocarna_argv("in.fa", "work/tgt", threads=2)
+    assert argv[0] == "mlocarna"
+    assert "--stockholm" in argv
+    # --consensus-structure alifold is load-bearing: the default `none` writes NO #=GC SS_cons line
+    assert argv[argv.index("--consensus-structure") + 1] == "alifold"
+    assert argv[argv.index("--threads") + 1] == "2"
+    assert argv[argv.index("--tgtdir") + 1] == "work/tgt"
+    assert argv[-1] == "in.fa"  # the positional multi-FASTA trails the options (Getopt::Long)
 
 
-def test_parse_rnafold_structure_raises_when_no_length_match() -> None:
-    out = ">candidate\nGGGAAACCC\n(((...))) ( -1.20)\n"
+def test_assert_mlocarna_version_accepts_pin_and_rejects_lookalike() -> None:
+    # banner is injectable so the match logic is unit-testable without the binary
+    assert hm.assert_mlocarna_version(banner="LocARNA 2.0.1\n") == "LocARNA 2.0.1"
+    # a look-alike bump (2.0.10) must NOT satisfy the 2.0.1 pin (the \b guard), nor a wrong tool/ver
+    for bad in ("LocARNA 2.0.10", "LocARNA 1.9.0", "locarna 2.0.1", "", "mlocarna 2.0.1"):
+        with pytest.raises(hm.HomologMsaError):
+            hm.assert_mlocarna_version(banner=bad)
+    assert hm.PINNED_LOCARNA_VERSION == "2.0.1"  # the pin envs/locarna.yml + the sbatch agree on
+
+
+def test_pinned_locarna_version_matches_lockfile() -> None:
+    """Tie the code pin to the solved env: PINNED_LOCARNA_VERSION must equal the `locarna`
+    version in envs/locarna.conda-lock.yml (bumping one without the other fails here)."""
+    lock = (REPO_ROOT / "envs" / "locarna.conda-lock.yml").read_text(encoding="utf-8")
+    assert re.search(
+        rf"^- name: locarna\n\s+version: '?{re.escape(hm.PINNED_LOCARNA_VERSION)}'?\s*$",
+        lock,
+        re.MULTILINE,
+    ), "PINNED_LOCARNA_VERSION must match the locarna version in envs/locarna.conda-lock.yml"
+
+
+def test_assert_candidate_in_homologs_present_and_absent(tmp_path: Path) -> None:
+    cand = tmp_path / "cand.fa"
+    cand.write_text(">c\nACGTACGTACGT\n", encoding="utf-8")
+    # search_homologs writes the candidate as record 0; degap+U→T normalisation must match it
+    ok = tmp_path / "ok.fa"
+    ok.write_text(">candidate\nACGU-ACGTACGT\n>h1\nACGTACGTAAAA\n", encoding="utf-8")
+    hm._assert_candidate_in_homologs(cand, ok)  # present after degap → no raise
+    bad = tmp_path / "bad.fa"
+    bad.write_text(">h1\nTTTTGGGGCCCC\n>h2\nAAAACCCCGGGG\n", encoding="utf-8")
     with pytest.raises(hm.HomologMsaError):
-        hm.parse_rnafold_structure(out, expected_len=42)
+        hm._assert_candidate_in_homologs(cand, bad)  # candidate absent → mismatched search/align
 
 
-def test_assert_balanced_structure() -> None:
-    hm.assert_balanced_structure("<<<...>>>")
-    hm.assert_balanced_structure("((..)).<>")
-    with pytest.raises(hm.HomologMsaError):
-        hm.assert_balanced_structure("((..)")  # unclosed
-    with pytest.raises(hm.HomologMsaError):
-        hm.assert_balanced_structure(")(")  # close before open
-    with pytest.raises(hm.HomologMsaError):
-        hm.assert_balanced_structure("((.x.))")  # illegal char
+def _stub_align_inputs(tmp_path: Path) -> tuple[Path, Path]:
+    cand = tmp_path / "cand.fa"
+    cand.write_text(">c\nACGTACGTACGT\n", encoding="utf-8")
+    homologs = tmp_path / "homologs.fa"
+    homologs.write_text(">candidate\nACGTACGTACGT\n>h1\nACGTACGTAAAA\n", encoding="utf-8")
+    return cand, homologs
 
 
-def test_build_candidate_stockholm_shape_and_length_guard() -> None:
-    sto = hm.build_candidate_stockholm("cand", "GGGAAACCC", "(((...)))")
-    assert sto.count("# STOCKHOLM 1.0") == 1
-    assert sto.rstrip().endswith("//")
-    assert "#=GC SS_cons (((...)))" in sto
-    assert "cand" in sto.split("\n")[2]  # the sequence row
+def test_align_candidate_copies_result_stk_and_runs_ss_cons_guard(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cand, homologs = _stub_align_inputs(tmp_path)
+    monkeypatch.setattr(hm, "assert_mlocarna_version", lambda *a, **k: "LocARNA 2.0.1")
+    monkeypatch.setattr(hm, "tool_path", lambda name: name)  # no mlocarna binary in bare CI
+
+    # stub `_run(...)` to write the <tgtdir>/results/result.stk that mlocarna would produce
+    def _fake_run(argv, *a, **k):  # noqa: ANN001, ANN002, ANN003
+        tgt = Path(argv[argv.index("--tgtdir") + 1])
+        (tgt / "results").mkdir(parents=True, exist_ok=True)
+        (tgt / "results" / "result.stk").write_text(
+            "# STOCKHOLM 1.0\n\ncandidate   ACGUACGUACGU\nh1          ACGUACGUAAAA\n"
+            "#=GC SS_cons <<<....>>>.\n//\n",
+            encoding="utf-8",
+        )
+        return None
+
+    monkeypatch.setattr(hm, "_run", _fake_run)
+    out = tmp_path / "out.sto"
+    result = hm.align_candidate(
+        candidate_fasta=cand, homologs_fasta=homologs, out_sto=out, work_dir=tmp_path / "w", cpu=2
+    )
+    assert result == out
+    text = out.read_text(encoding="utf-8")
+    assert "# STOCKHOLM 1.0" in text and "#=GC SS_cons" in text  # copied verbatim + guard passed
+
+
+def test_align_candidate_raises_when_mlocarna_writes_no_stockholm(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cand, homologs = _stub_align_inputs(tmp_path)
+    monkeypatch.setattr(hm, "assert_mlocarna_version", lambda *a, **k: "LocARNA 2.0.1")
+    monkeypatch.setattr(hm, "tool_path", lambda name: name)  # no mlocarna binary in bare CI
+    monkeypatch.setattr(hm, "_run", lambda *a, **k: None)  # produces no result.stk
     with pytest.raises(hm.HomologMsaError):
-        hm.build_candidate_stockholm("cand", "GGGAAACCC", "(((...))")  # length mismatch
+        hm.align_candidate(
+            candidate_fasta=cand,
+            homologs_fasta=homologs,
+            out_sto=tmp_path / "out.sto",
+            work_dir=tmp_path / "w",
+            cpu=2,
+        )
 
 
 def test_homolog_record_name_is_unique_and_whitespace_free() -> None:
@@ -238,6 +305,8 @@ def test_blastn_argv(_stub_tool_path: None) -> None:
     argv = hm.blastn_argv("q.fa", "db/target", evalue=1e-3, max_target_seqs=500)
     assert argv[0] == "blastn"
     assert argv[1:5] == ["-query", "q.fa", "-db", "db/target"]
+    # sensitive gapped task, not megablast (A13; job-748 megablast found 0 homologs)
+    assert argv[argv.index("-task") + 1] == "blastn"
     assert "-outfmt" in argv and "6 " + " ".join(hm.BLAST_OUTFMT_COLUMNS) in argv
     assert "-max_target_seqs" in argv and "500" in argv
     assert argv[argv.index("-evalue") + 1] == repr(1e-3)
@@ -283,26 +352,6 @@ def test_extract_homolog_sequence_from_genome_plus_and_minus(tmp_path: Path) -> 
     with pytest.raises(hm.HomologMsaError):
         hm.extract_homolog_sequence(tmp_path, "GCA_9.1:c0", 5, 99, "plus")  # range OOB
     hm._genome_records.cache_clear()
-
-
-def test_cmbuild_and_cmalign_argv(_stub_tool_path: None) -> None:
-    assert hm.cmbuild_argv("c.cm", "c.sto", name="candidate") == [
-        "cmbuild",
-        "-F",
-        "-n",
-        "candidate",
-        "c.cm",
-        "c.sto",
-    ]
-    argv = hm.cmalign_argv("c.cm", "h.fa", "out.sto", cpu=8)
-    assert argv[:3] == ["cmalign", "--outformat", "Pfam"]
-    assert "--noprob" in argv
-    assert argv[-3:] == ["out.sto", "c.cm", "h.fa"] or argv[-2:] == ["c.cm", "h.fa"]
-    assert argv[argv.index("-o") + 1] == "out.sto"
-
-
-def test_rnafold_argv(_stub_tool_path: None) -> None:
-    assert hm.rnafold_argv() == ["RNAfold", "--noPS"]
 
 
 def test_fmt_evalue_rejects_nonpositive_and_bool() -> None:

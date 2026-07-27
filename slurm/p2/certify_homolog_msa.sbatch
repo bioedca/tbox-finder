@@ -12,19 +12,20 @@
 #
 # ── SHAPE: a SINGLE CPU-only job on the `gpu` partition (NOT an --array), THREE conda envs ──────────
 #   Stage 1 SEARCH  (tbox-homology): blastn the seed against the A1 target DB → candidate+homolog FASTA
-#   Stage 2 ALIGN   (tbox-infernal): RNAfold(seed) → cmbuild → cmalign → Pfam Stockholm (+ #=GC SS_cons)
+#   Stage 2 ALIGN   (tbox-locarna) : mlocarna(candidate+homologs) → Pfam Stockholm (+ #=GC SS_cons alifold)
 #   Stage 3 CERTIFY (tbox-rscape)  : R-scape score positive (PASS) + column-shuffled twin (not PASS)
 # No GPU (search/align/score are CPU). §9.2 forbids the `compute` partition (=zero) and pinning a node
 # (`one` is often down); the gpu nodes carry the tools + the 15 GB DB. NO --gres/--nodelist/--array.
 #
 # ── ⛔ CLUSTER-ENV PREREQUISITE (generalises [[cluster-has-no-tbox-data-env]]) ─────────────────────
-# The cluster has tbox-homology but NOT tbox-infernal / tbox-rscape (verified 2026-07-26). Create both
-# ONCE from the pinned locks before submitting (they are CPU-only, ~1-3 GB each; watch the tight HOME
-# quota). This is part of the §9.3 submit-ack, done on `submit`, NOT before it:
+# The cluster has tbox-homology but NOT tbox-locarna / tbox-rscape (tbox-infernal is NO LONGER used by
+# this sbatch — the ALIGN stage is mlocarna now, ADR-0006 A3 / ADR-0002 A13). Create both ONCE from the
+# pinned locks before submitting (CPU-only, ~1-3 GB each; watch the tight HOME quota). This is part of
+# the §9.3 submit-ack, done on `submit`, NOT before it:
 #   ssh two 'bash -lc "source ~/miniconda3/etc/profile.d/conda.sh && conda activate condalock && \
-#     conda-lock install --name tbox-infernal envs/infernal.conda-lock.yml"'
+#     conda-lock install --name tbox-locarna envs/locarna.conda-lock.yml"'
 #   ssh two 'bash -lc "source ~/miniconda3/etc/profile.d/conda.sh && conda activate condalock && \
-#     conda-lock install --name tbox-rscape   envs/rscape.conda-lock.yml"'
+#     conda-lock install --name tbox-rscape  envs/rscape.conda-lock.yml"'
 #
 # ── SUBMIT (SYNC FIRST, SUBMIT SECOND — never one `&&` chain, §9.3) ─────────────────────────────────
 #   ssh two 'bash -lc "cd ~/tbox-finder && git fetch origin && git checkout p2-10e-msa && \
@@ -75,13 +76,15 @@ CERTIFIED_MSA="data/interim/homolog_msa/certified_positive.sto"
 
 # ── CONTROL cutoffs — these are the certification's control parameters, NOT a pin (D17: the D7 ─────
 # inclusion thresholds are P6-frozen). Recall-favouring, chosen so a real class-II seed recovers a
-# DIVERGENT >=20-homolog set with covariation power. If <20 recovered or the positive does not pass,
-# LOOSEN these and re-ack — they carry no methodological weight. ─────────────────────────────────────
+# DIVERGENT >=20-homolog set with covariation power. Loosened at P2-10e-msa-locarna (ADR-0002 A13):
+# 1e-3/60/0.5 → 10/40/0.2, because job 748's stricter cutoffs recovered too few / too-close homologs
+# for covariation power. If <20 recovered or the positive does not pass, LOOSEN further and re-ack —
+# they carry no methodological weight (the D7 homolog-search inclusion thresholds stay P6-frozen). ───
 CTRL_ENGINE="blastn"
-CTRL_EVALUE="1e-3"
+CTRL_EVALUE="10"
 CTRL_MAX_TARGET_SEQS="500"
-CTRL_MIN_PIDENT="60"
-CTRL_MIN_COV="0.5"
+CTRL_MIN_PIDENT="40"
+CTRL_MIN_COV="0.2"
 SHUFFLE_SEED="20260726"
 
 BUILD="/tmp/${USER}-${SLURM_JOB_ID:-local}"
@@ -132,16 +135,17 @@ elif [ "$search_rc" -ne 0 ]; then
   echo "FATAL: search failed rc=$search_rc" >&2; exit "$search_rc"
 fi
 
-# ── STAGE 2: ALIGN (tbox-infernal) ───────────────────────────────────────────────────────────────
-conda activate tbox-infernal
-for t in RNAfold cmbuild cmalign; do
-  command -v "$t" >/dev/null || { echo "FATAL: $t not on PATH — tbox-infernal not active/created?" >&2; exit 2; }
-done
-cmbuild -h 2>&1 | grep -q "INFERNAL 1.1.5" || { echo "FATAL: cmbuild != INFERNAL 1.1.5 (ADR-0002 A12)" >&2; exit 2; }
-RNAfold --version 2>&1 | grep -q "RNAfold 2.7" || { echo "FATAL: RNAfold != 2.7.x (envs/infernal.yml)" >&2; exit 2; }
+# ── STAGE 2: ALIGN (tbox-locarna) ────────────────────────────────────────────────────────────────
+conda activate tbox-locarna
+command -v mlocarna >/dev/null || { echo "FATAL: mlocarna not on PATH — tbox-locarna not active/created?" >&2; exit 2; }
+# Assert the pinned LocARNA (ADR-0002 A13); decouple the version grep from mlocarna's exit code.
+MLOCARNA_VERSION="$(mlocarna --version 2>&1 || true)"
+echo "$MLOCARNA_VERSION" | grep -q "LocARNA 2.0.1" || { echo "FATAL: mlocarna != LocARNA 2.0.1 (envs/locarna.yml, ADR-0002 A13): $MLOCARNA_VERSION" >&2; exit 2; }
+# mlocarna aligns candidate+homologs from ONE multi-FASTA — the search stage already wrote the seed as
+# record 0 of $HOMOLOGS_FA; --cpu is passed to mlocarna --threads, kept small (LocARNA scaling caveat).
 PYTHONHASHSEED=0 PYTHONPATH=src python -m tbox_finder.mining.homolog_msa align \
   --candidate-fasta "$SEED_FA" --homologs-fasta "$HOMOLOGS_FA" \
-  --out-sto "$POS_STO" --work-dir "$BUILD/align" --cpu 8
+  --out-sto "$POS_STO" --work-dir "$BUILD/align" --cpu 2
 
 # ── STAGE 3: CERTIFY (tbox-rscape) ───────────────────────────────────────────────────────────────
 conda activate tbox-rscape
