@@ -34,6 +34,17 @@ from pathlib import Path
 
 from tbox_finder.mining.covariation import PINNED_RSCAPE_VERSION, rscape_version
 
+# The Pfam read/write + column-shuffle now live in a production module so the runtime
+# P2-10e homolog-MSA certification and this fixture minter share one implementation
+# ([[promote-dont-duplicate-is-a-correctness-rule]]). The wrappers below preserve this
+# script's original call shapes (path-in/path-out) over the promoted string-based API, so
+# the committed fixtures regenerate byte-for-byte identically (the shuffle is seed-exact).
+from tbox_finder.mining.msa_shuffle import (
+    read_pfam_alignment,
+    shuffle_alignment_columns,
+    write_pfam_alignment,
+)
+
 SOURCE = Path("data/interim/splits/aligned/class_II.sto")
 OUTDIR = Path("tests/fixtures/rscape")
 
@@ -47,42 +58,18 @@ EVALUE = 0.05
 
 
 def read_pfam_stockholm(path: Path) -> tuple[list[tuple[str, str]], dict[str, str]]:
-    """Read a one-line-per-sequence (pfam-format) Stockholm alignment."""
-    seqs: list[tuple[str, str]] = []
-    gc: dict[str, str] = {}
-    for line in path.read_text(encoding="utf-8").splitlines():
-        if line.startswith("#=GC "):
-            _, tag, val = line.split(None, 2)
-            gc[tag] = val
-        elif line.startswith("#") or line.strip() in {"", "//"}:
-            continue
-        else:
-            name, aseq = line.split(None, 1)
-            seqs.append((name, aseq.strip()))
-    return seqs, gc
+    """Read a one-line-per-sequence (pfam-format) Stockholm alignment (thin path wrapper)."""
+    return read_pfam_alignment(path)
 
 
 def write_pfam_stockholm(path: Path, seqs: list[tuple[str, str]], gc: dict[str, str]) -> None:
-    width = max([len(n) for n, _ in seqs] + [len("#=GC " + t) for t in gc])
-    lines = ["# STOCKHOLM 1.0", ""]
-    lines += [f"{name.ljust(width)} {aseq}" for name, aseq in seqs]
-    lines += [f"{('#=GC ' + tag).ljust(width)} {val}" for tag, val in gc.items()]
-    lines.append("//")
-    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    """Write ``seqs`` + ``gc`` as a Pfam-format Stockholm file (thin path wrapper)."""
+    path.write_text(write_pfam_alignment(seqs, gc), encoding="utf-8")
 
 
 def column_shuffle(seqs: list[tuple[str, str]], seed: int) -> list[tuple[str, str]]:
-    """Permute every alignment column independently across rows."""
-    rng = random.Random(seed)
-    names = [n for n, _ in seqs]
-    shuffled_columns = []
-    for column in zip(*[aseq for _, aseq in seqs], strict=True):
-        cells = list(column)
-        rng.shuffle(cells)
-        shuffled_columns.append(cells)
-    return list(
-        zip(names, ["".join(row) for row in zip(*shuffled_columns, strict=True)], strict=True)
-    )
+    """Permute every alignment column independently across rows (thin positional wrapper)."""
+    return shuffle_alignment_columns(seqs, seed=seed)
 
 
 def run_rscape_to(alignment: Path, helixcov_out: Path) -> None:
