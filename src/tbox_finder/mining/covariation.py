@@ -74,7 +74,8 @@ from enum import Enum
 from pathlib import Path
 from typing import Any
 
-from tbox_finder.mining.spare_rule import STATUS_FAILED, STATUS_PASSED
+from tbox_finder.mining.spare_rule import STATUS_FAILED, STATUS_PASSED, STATUS_UNAVAILABLE
+from tbox_finder.power import MIN_REAL_HOMOLOG_N
 
 # --------------------------------------------------------------------------- #
 # Pinned tool
@@ -580,3 +581,59 @@ def covariation_verdict(
             "one that has none, so this candidate is unavailable (⇒ spared), not failed"
         )
     return result.status(criterion), result.as_report(criterion)
+
+
+def covariation_spare_status(
+    alignment: Path | None,
+    *,
+    min_sequences: int = MIN_REAL_HOMOLOG_N,
+    evalue: float = DEFAULT_EVALUE,
+    timeout_s: float = DEFAULT_RSCAPE_TIMEOUT_S,
+) -> str:
+    """The pinned per-candidate covariation spare-rule status (ADR-0006 **Amendment A2**).
+
+    This is the single production call site of :func:`covariation_verdict`, and the point
+    at which Amendment A2's two decisions are pinned:
+
+    * **operator = :attr:`AnyHelixCriterion.TOTAL_ACROSS_HELICES`** (A2 Pin 1) — the looser,
+      more Tier-2N-protective reading (≥ ``MIN_COVARYING_PAIRS`` significant pairs *summed
+      across* helices). Every low-power alignment on which the two operators disagree is one
+      the looser operator **spares** and the stricter one mines, so this is the safe
+      direction for a rule whose job is to keep real Tier-2N loci out of the mining pool;
+    * **min_sequences = :data:`tbox_finder.power.MIN_REAL_HOMOLOG_N`** (A2 Pin 2, = 20) — the
+      covariation alignment-depth floor, aligned with the D18/A1 homolog-N floor. Below it
+      R-scape cannot distinguish a powerless alignment from a genuinely non-covarying one, so
+      the leg is routed to *"can't tell"* rather than forced to a verdict.
+
+    The return value is one of :data:`~tbox_finder.mining.spare_rule.STATUS_PASSED` /
+    :data:`~tbox_finder.mining.spare_rule.STATUS_FAILED` /
+    :data:`~tbox_finder.mining.spare_rule.STATUS_UNAVAILABLE`, ready to drop into
+    :class:`~tbox_finder.mining.spare_rule.SpareRuleEvidence`'s ``any_helix_rscape`` field.
+
+    **Fail-closed → spared** (ADR-0006 A2 scope guard). The covariation leg is *additionally*
+    gated by the per-candidate homolog-search MSA supply (ADR-0006 D7 / A1: homolog-DB search
+    + CM-free de-novo alignment), which is downstream infrastructure. ``alignment is None``
+    means no such MSA exists for this candidate ⇒ ``STATUS_UNAVAILABLE`` ⇒ the candidate is
+    **spared, never silently mined**. A :class:`CovariationBackendError` (R-scape absent /
+    unpinned, or depth below ``min_sequences``) maps to the same ``STATUS_UNAVAILABLE``.
+
+    ⚠ Availability at the *round* level is a separate, stricter question than "R-scape is
+    installed": a round in which no candidate can be handed an MSA would spare every
+    candidate and mine nothing. Whether the round may run at all is decided by
+    :func:`tbox_finder.mining.spare_rule.mining_round_readiness` on an availability map that
+    must reflect **MSA-producibility**, not merely :func:`backend_available` — see
+    :mod:`tbox_finder.mining.mine_round`.
+    """
+    if alignment is None:
+        return STATUS_UNAVAILABLE
+    try:
+        status, _report = covariation_verdict(
+            Path(alignment),
+            AnyHelixCriterion.TOTAL_ACROSS_HELICES,
+            min_sequences=min_sequences,
+            evalue=evalue,
+            timeout_s=timeout_s,
+        )
+    except CovariationBackendError:
+        return STATUS_UNAVAILABLE
+    return status
