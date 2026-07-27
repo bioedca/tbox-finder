@@ -29,6 +29,7 @@ from tbox_finder.mining.covariation import (
     AnyHelixCriterion,
     CovariationBackendError,
     backend_available,
+    covariation_spare_status,
     covariation_verdict,
     parse_helixcov,
     round_backend_availability,
@@ -44,6 +45,7 @@ from tbox_finder.mining.spare_rule import (
     is_mining_excluded,
     mining_round_readiness,
 )
+from tbox_finder.power import MIN_REAL_HOMOLOG_N
 
 _FIXTURES = Path(__file__).resolve().parents[1] / "fixtures" / "rscape"
 _POSITIVE = _FIXTURES / "classII_sub.helixcov"
@@ -791,3 +793,67 @@ def test_depth_guard_admits_a_deep_enough_alignment(
     assert status == STATUS_PASSED
     assert report["n_sequences"] == 8
     assert report["rscape_version_matches_pin"] is True
+
+
+# --------------------------------------------------------------------------- #
+# covariation_spare_status — the pinned per-candidate spare-rule call site
+# (ADR-0006 Amendment A2: operator = TOTAL_ACROSS_HELICES, min_sequences = 20).
+# --------------------------------------------------------------------------- #
+def _spy_verdict(monkeypatch, *, status=STATUS_PASSED, raises=None):
+    """Replace covariation_verdict with a spy; return the captured-call list."""
+    calls: list[dict] = []
+
+    def fake(alignment, criterion, *, min_sequences, **kw):
+        calls.append(
+            {"alignment": alignment, "criterion": criterion, "min_sequences": min_sequences}
+        )
+        if raises is not None:
+            raise raises
+        return status, {"stub": True}
+
+    monkeypatch.setattr(covariation, "covariation_verdict", fake)
+    return calls
+
+
+def test_spare_status_none_alignment_is_unavailable_without_running(monkeypatch):
+    # No per-candidate MSA (D7/A1 supply absent) ⇒ fail-closed ⇒ spared, and the backend
+    # must NOT be invoked (short-circuit), so a missing MSA never touches R-scape.
+    calls = _spy_verdict(monkeypatch)
+    assert covariation_spare_status(None) == STATUS_UNAVAILABLE
+    assert calls == []
+
+
+def test_spare_status_pins_total_across_helices_and_the_homolog_floor(monkeypatch):
+    calls = _spy_verdict(monkeypatch, status=STATUS_PASSED)
+    assert covariation_spare_status(Path("candidate.sto")) == STATUS_PASSED
+    assert len(calls) == 1
+    # Pin 1: the looser, Tier-2N-protective operator; Pin 2: the homolog-N power floor.
+    assert calls[0]["criterion"] is AnyHelixCriterion.TOTAL_ACROSS_HELICES
+    assert calls[0]["min_sequences"] == MIN_REAL_HOMOLOG_N == 20
+
+
+def test_spare_status_passes_failed_through(monkeypatch):
+    # A genuinely non-covarying candidate at adequate depth is `failed` on this leg —
+    # minable (not spared) by the covariation disjunct alone.
+    _spy_verdict(monkeypatch, status=STATUS_FAILED)
+    assert covariation_spare_status(Path("candidate.sto")) == STATUS_FAILED
+
+
+def test_spare_status_fail_closed_on_backend_error(monkeypatch):
+    # R-scape absent/unpinned, or depth below the floor ⇒ CovariationBackendError ⇒
+    # unavailable ⇒ spared. This is the fail-closed direction the whole leg turns on.
+    _spy_verdict(monkeypatch, raises=CovariationBackendError("below min_sequences"))
+    assert covariation_spare_status(Path("candidate.sto")) == STATUS_UNAVAILABLE
+
+
+def test_spare_status_default_min_sequences_is_the_homolog_floor():
+    import inspect
+
+    default = inspect.signature(covariation_spare_status).parameters["min_sequences"].default
+    assert default == MIN_REAL_HOMOLOG_N == 20
+
+
+def test_spare_status_forwards_min_sequences_override(monkeypatch):
+    calls = _spy_verdict(monkeypatch)
+    covariation_spare_status(Path("candidate.sto"), min_sequences=8)
+    assert calls[0]["min_sequences"] == 8
