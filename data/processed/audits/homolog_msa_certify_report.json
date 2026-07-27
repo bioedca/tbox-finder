@@ -1,0 +1,21 @@
+{
+  "adr": "ADR-0006",
+  "certified": true,
+  "expects": {
+    "positive": "passed",
+    "shuffled": "failed"
+  },
+  "matched_control": {
+    "composition_matched": true,
+    "depth": 24,
+    "depth_matched": true,
+    "ss_cons_matched": true,
+    "width_matched": true
+  },
+  "min_sequences": 20,
+  "positive_status": "passed",
+  "schema_version": "1.0",
+  "shuffle_seed": 20260726,
+  "shuffled_status": "failed",
+  "step": "P2-10e-msa"
+}
