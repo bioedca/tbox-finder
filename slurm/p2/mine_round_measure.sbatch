@@ -29,9 +29,13 @@
 #   ssh two 'bash -lc "source ~/miniconda3/etc/profile.d/conda.sh && conda activate condalock && \
 #     conda-lock install --name tbox-rscape  envs/rscape.conda-lock.yml"'
 #
-# ── SUBMIT (SYNC FIRST — incl. git lfs pull for the split table — STAGE SECOND, SUBMIT THIRD, §9.3) ─
+# ── SUBMIT (SYNC FIRST, STAGE SECOND — incl. the LFS split table — SUBMIT THIRD, §9.3) ──────────────
 #   ssh two 'bash -lc "cd ~/tbox-finder && git fetch origin && git checkout p2-10e-msa-producer && \
-#     git reset --hard origin/p2-10e-msa-producer && git lfs pull"'   # split_assignments.parquet is LFS
+#     git reset --hard origin/p2-10e-msa-producer"'
+#   # ⚠ the cluster has NO git-lfs: `reset --hard` leaves split_assignments.parquet a 132-byte pointer
+#   #   ([ -s ] passes; pd.read_parquet then reads 0 rows → the a2 blacklist guard refuses). Stage the
+#   #   REAL split table by rsync from the laptop AFTER the reset (which reverts it to the pointer):
+#   #     rsync -avzP data/processed/splits/split_assignments.parquet two:~/tbox-finder/data/processed/splits/
 #   # …create the two envs (above); stage the checkpoint + genome dirs + homolog DB (see INPUT)…
 #   ssh two 'bash -lc "cd ~/tbox-finder && sbatch slurm/p2/mine_round_measure.sbatch"'
 # PREFLIGHT: ssh two 'bash -lc "cd ~/tbox-finder && sbatch --test-only slurm/p2/mine_round_measure.sbatch"'
@@ -39,7 +43,7 @@
 #   rsync -avzP data/processed/checkpoints/stage1_production/ two:~/tbox-finder/data/processed/checkpoints/stage1_production/
 #   rsync -avzP data/interim/production_genomes/ two:~/tbox-finder/data/interim/production_genomes/
 #   rsync -avzP data/interim/homolog_db/         two:~/tbox-finder/data/interim/homolog_db/
-#   (the a2 host-order table + the split table are git-committed — they ride the checkout, git lfs pull.)
+#   (the a2 host-order table is plain-git — rides the checkout; the split table is LFS → rsync it, above.)
 # VERIFY (artifact-based; sacct off, §9.3): (a) `squeue -j <jobid>` empty; (b) DONE marker
 #   reports/p2/mine_round_measure.DONE present; (c) reports/p2/mine_round_measure.json present with
 #   n0_false_positives > 0 and k_sample >= 50. Any missing → §9.3 stop (surface it; NO auto-resubmit).
@@ -86,9 +90,12 @@ CTRL_MIN_PIDENT="40"   # ignored on the nhmmer path; kept for the CLI-required a
 CTRL_MIN_COV="0.5"
 K_SAMPLE="50"          # A10 Pin 1 bounded sample (K >= 50); accession-sorted, deterministic
 
-BUILD="/tmp/${USER}-${SLURM_JOB_ID:-local}"
-mkdir -p "$BUILD" "$BUILD/work"
-trap 'rm -rf "$BUILD"' EXIT   # clean node-local scratch on every exit path; touches only $BUILD.
+# NOTE: name this JOB_SCRATCH, never BUILD/HOST — `conda activate tbox-ml-dna` (the compiler
+# toolchain) exports BUILD=HOST=x86_64-conda-linux-gnu, which would clobber a $BUILD scratch path
+# the instant LEG a's env activates (job 789 died here: $BUILD/accessions.txt → a bad relative path).
+JOB_SCRATCH="/tmp/${USER}-${SLURM_JOB_ID:-local}"
+mkdir -p "$JOB_SCRATCH" "$JOB_SCRATCH/work"
+trap 'rm -rf "$JOB_SCRATCH"' EXIT   # clean node-local scratch on every exit path; touches only $JOB_SCRATCH.
 
 # ── Staged-input assertions (fail loud, before any GPU/tool time) ─────────────────────────────────
 [ -s "$CKPT" ]      || { echo "FATAL: $CKPT missing — stage the round-0 checkpoint (rsync)." >&2; exit 2; }
@@ -108,39 +115,39 @@ export PYTHONHASHSEED=0
 export TOKENIZERS_PARALLELISM=false
 command -v python >/dev/null || { echo "FATAL: tbox-ml-dna not active?" >&2; exit 2; }
 
-PYTHONPATH=src python -m tbox_finder.mining.mine_round admissible-accessions --out "$BUILD/accessions.txt"
+PYTHONPATH=src python -m tbox_finder.mining.mine_round admissible-accessions --out "$JOB_SCRATCH/accessions.txt"
 # Split the 660 admissible accessions into 8 line-balanced slices (slice_00.txt … slice_07.txt).
-split -n l/8 --numeric-suffixes=0 --additional-suffix=.txt "$BUILD/accessions.txt" "$BUILD/slice_"
+split -n l/8 --numeric-suffixes=0 --additional-suffix=.txt "$JOB_SCRATCH/accessions.txt" "$JOB_SCRATCH/slice_"
 
 pids=()
 for i in $(seq 0 7); do
-  slice="$(printf "%s/slice_%02d.txt" "$BUILD" "$i")"
+  slice="$(printf "%s/slice_%02d.txt" "$JOB_SCRATCH" "$i")"
   [ -s "$slice" ] || continue   # fewer than 8 non-empty slices if the admissible set ever shrinks
   CUDA_VISIBLE_DEVICES="$i" PYTHONHASHSEED=0 PYTHONPATH=src \
     python -m tbox_finder.mining.mine_round scan-shard \
       --checkpoint "$CKPT" --accessions "$slice" --genome-dir "$GENOME_DIR" \
-      --out-manifest "$BUILD/fp_$i.json" > "$BUILD/scan_$i.log" 2>&1 &
+      --out-manifest "$JOB_SCRATCH/fp_$i.json" > "$JOB_SCRATCH/scan_$i.log" 2>&1 &
   pids+=("$!")
 done
 scan_fail=0
 for p in "${pids[@]}"; do wait "$p" || scan_fail=1; done
 if [ "$scan_fail" -ne 0 ]; then
-  echo "FATAL: a scan shard failed — logs follow" >&2; cat "$BUILD"/scan_*.log >&2; exit 3
+  echo "FATAL: a scan shard failed — logs follow" >&2; cat "$JOB_SCRATCH"/scan_*.log >&2; exit 3
 fi
 
 PYTHONPATH=src python -m tbox_finder.mining.mine_round collect \
-  --manifests "$BUILD"/fp_*.json --out "$FP_MANIFEST_OUT"
+  --manifests "$JOB_SCRATCH"/fp_*.json --out "$FP_MANIFEST_OUT"
 echo "LEG a: collected round-0 FP manifest → $FP_MANIFEST_OUT"
 
 # ── SAMPLE: deterministic first-K accession-sorted FPs ────────────────────────────────────────────
 PYTHONPATH=src python -m tbox_finder.mining.covariation_producer select-sample \
-  --manifest "$FP_MANIFEST_OUT" --k "$K_SAMPLE" --out "$BUILD/sample.json"
+  --manifest "$FP_MANIFEST_OUT" --k "$K_SAMPLE" --out "$JOB_SCRATCH/sample.json"
 
 # ── PRODUCE Stage 1: SEARCH (tbox-homology) ───────────────────────────────────────────────────────
 conda activate tbox-homology
 for t in blastn nhmmer; do command -v "$t" >/dev/null || { echo "FATAL: $t not on PATH — tbox-homology?" >&2; exit 2; }; done
 PYTHONHASHSEED=0 PYTHONPATH=src python -m tbox_finder.mining.covariation_producer search-shard \
-  --shard "$BUILD/sample.json" --workroot "$BUILD/work" --engine "$CTRL_ENGINE" \
+  --shard "$JOB_SCRATCH/sample.json" --workroot "$JOB_SCRATCH/work" --engine "$CTRL_ENGINE" \
   --evalue "$CTRL_EVALUE" --max-target-seqs "$CTRL_MAX_TARGET_SEQS" \
   --min-pident "$CTRL_MIN_PIDENT" --min-cov "$CTRL_MIN_COV" \
   --db-prefix "$BLAST_PREFIX" --fm-index "$FM_INDEX" --genome-dir "$GENOME_DIR"
@@ -151,17 +158,17 @@ command -v mlocarna >/dev/null || { echo "FATAL: mlocarna not on PATH — tbox-l
 MLOCARNA_VERSION="$(mlocarna --version 2>&1 || true)"
 echo "$MLOCARNA_VERSION" | grep -q "LocARNA 2.0.1" || { echo "FATAL: mlocarna != LocARNA 2.0.1 (ADR-0002 A13): $MLOCARNA_VERSION" >&2; exit 2; }
 PYTHONHASHSEED=0 PYTHONPATH=src python -m tbox_finder.mining.covariation_producer align-shard \
-  --shard "$BUILD/sample.json" --workroot "$BUILD/work" --cpu 2
+  --shard "$JOB_SCRATCH/sample.json" --workroot "$JOB_SCRATCH/work" --cpu 2
 
 # ── PRODUCE Stage 3: SCORE (tbox-rscape) ──────────────────────────────────────────────────────────
 conda activate tbox-rscape
 command -v R-scape >/dev/null || { echo "FATAL: R-scape not on PATH — tbox-rscape not created?" >&2; exit 2; }
 PYTHONHASHSEED=0 PYTHONPATH=src python -m tbox_finder.mining.covariation_producer score-shard \
-  --shard "$BUILD/sample.json" --workroot "$BUILD/work" --out-table "$BUILD/sample_status.json"
+  --shard "$JOB_SCRATCH/sample.json" --workroot "$JOB_SCRATCH/work" --out-table "$JOB_SCRATCH/sample_status.json"
 
 # ── REPORT: N₀ + per-stage wall + depth + extrapolated envelope (A10 Pin 1) ───────────────────────
 PYTHONHASHSEED=0 PYTHONPATH=src python -m tbox_finder.mining.covariation_producer measure-report \
-  --manifest "$FP_MANIFEST_OUT" --status-table "$BUILD/sample_status.json" --out "$MEASURE_REPORT"
+  --manifest "$FP_MANIFEST_OUT" --status-table "$JOB_SCRATCH/sample_status.json" --out "$MEASURE_REPORT"
 
 echo "A10 Phase-1 measurement complete → $MEASURE_REPORT (N₀ manifest → $FP_MANIFEST_OUT)"
 touch "$DONE"
