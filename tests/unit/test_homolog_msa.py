@@ -616,3 +616,29 @@ def test_assert_matched_control_rejects_mismatches(tmp_path: Path) -> None:
     bad_comp.write_text(write_pfam_alignment(mutated, gc), encoding="utf-8")
     with pytest.raises(hm.HomologMsaError):
         hm.assert_matched_control(pos, bad_comp)
+
+
+# --------------------------------------------------------------------------- #
+# resolve_candidate_sequence — a MiningCandidate's OWN nucleotides (0-based half-open)
+# --------------------------------------------------------------------------- #
+def test_resolve_candidate_sequence_half_open_plus_and_minus(tmp_path: Path):
+    # contig c0 = 8 nt "AACCGGTT"; c1 = "ACGT".
+    (tmp_path / "GCA_9.1.fna").write_text(">c0\nAACCGGTT\n>c1\nACGT\n", encoding="utf-8")
+    # 0-based half-open [2, 6) of c0 → "CCGG" (deliberately NOT the 1-based-inclusive convention
+    # extract_homolog_sequence uses — the candidate coords come from window_start + cand.start).
+    assert hm.resolve_candidate_sequence(tmp_path, "GCA_9.1:c0", 2, 6) == "CCGG"
+    assert hm.resolve_candidate_sequence(tmp_path, "GCA_9.1:c1", 0, 4) == "ACGT"
+    # minus strand reverse-complements the same span.
+    assert hm.resolve_candidate_sequence(tmp_path, "GCA_9.1:c1", 0, 4, strand="minus") == "ACGT"[
+        ::-1
+    ].translate(str.maketrans("ACGT", "TGCA"))
+
+
+def test_resolve_candidate_sequence_rejects_out_of_bounds(tmp_path: Path):
+    (tmp_path / "GCA_9.2.fna").write_text(">c0\nAACCGGTT\n", encoding="utf-8")
+    with pytest.raises(hm.HomologMsaError):
+        hm.resolve_candidate_sequence(tmp_path, "GCA_9.2:c0", 4, 99)  # end past contig
+    with pytest.raises(hm.HomologMsaError):
+        hm.resolve_candidate_sequence(tmp_path, "GCA_9.2:c9", 0, 4)  # contig index OOB
+    with pytest.raises(hm.HomologMsaError):
+        hm.resolve_candidate_sequence(tmp_path, "GCA_9.2:c0", 5, 5)  # empty half-open span

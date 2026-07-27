@@ -13,6 +13,7 @@ from tbox_finder.eval.mining_criterion import ProvisionalCriterionError
 from tbox_finder.eval.tier2n_probe import ROUND_CONTINUE, ROUND_HALT_ROLLBACK, ProbeSet
 from tbox_finder.infer.call import Candidate
 from tbox_finder.mining import mine_round as mr
+from tbox_finder.mining.spare_rule import STATUS_FAILED, STATUS_PASSED, STATUS_UNAVAILABLE
 
 
 def _cand(start: int, end: int, *, peak: float = 0.95) -> Candidate:
@@ -214,3 +215,62 @@ def test_cli_rejects_invalid_rscape_override(capsys):
     with pytest.raises(SystemExit):
         mr.main(["plan", "--rscape-installed", "treu"])
     capsys.readouterr()
+
+
+# --------------------------------------------------------------------------- #
+# A10 producer wiring — window_candidates_to_mining stamps the produced covariation
+# status onto any_helix_rscape; an absent id is fail-closed to 'unavailable' (⇒ spared),
+# and the flag stays False until the Phase-2 pin flips it.
+# --------------------------------------------------------------------------- #
+def test_msa_supply_flag_stays_false_this_step():
+    # The producer + wiring land now; MSA_SUPPLY_AVAILABLE is flipped only at the A10 Phase-2 pin,
+    # after the measurement. If this reads True, a round is silently unblocked without the budget.
+    assert mr.MSA_SUPPLY_AVAILABLE is False
+
+
+def test_window_candidates_default_evidence_is_all_unavailable():
+    # No status table (scan/collect legs) → the default all-'unavailable' evidence (spared).
+    cands = mr.window_candidates_to_mining([_cand(10, 40)], window_name="GCA_1.1:c0:512")
+    assert cands[0].evidence.any_helix_rscape == STATUS_UNAVAILABLE
+    assert cands[0].candidate_id == "GCA_1.1:c0:512:522-552"
+
+
+def test_window_candidates_apply_covariation_status_and_fail_closed_absent():
+    win = "GCA_1.1:c0:512"
+    present_id = f"{win}:522-552"
+    status = {present_id: STATUS_FAILED}  # this candidate WAS scored (failed covariation)
+    # Two candidates: one in the table (failed), one absent (must fail-closed to unavailable).
+    cands = mr.window_candidates_to_mining(
+        [_cand(10, 40), _cand(100, 130)], window_name=win, covariation_status=status
+    )
+    by_id = {c.candidate_id: c for c in cands}
+    assert by_id[present_id].evidence.any_helix_rscape == STATUS_FAILED
+    absent = by_id[f"{win}:612-642"]
+    assert absent.evidence.any_helix_rscape == STATUS_UNAVAILABLE  # dropped shard cannot fail open
+
+
+def test_candidate_evidence_passes_through_status():
+    assert mr.candidate_evidence("x", None).any_helix_rscape == STATUS_UNAVAILABLE
+    assert mr.candidate_evidence("x", {"x": STATUS_PASSED}).any_helix_rscape == STATUS_PASSED
+
+
+def test_fp_manifest_roundtrip_and_status_stamp(tmp_path):
+    win = "GCA_2.1:c1:0"
+    cands = mr.window_candidates_to_mining([_cand(5, 35), _cand(50, 80)], window_name=win)
+    path = tmp_path / "fp.json"
+    mr.write_fp_manifest(cands, path)
+
+    # The producer reads the FP manifest with its own reader (coords only; score/pool ignored).
+    from tbox_finder.mining import covariation_producer as cp
+
+    specs = cp.read_candidate_manifest(path)
+    assert [s.candidate_id for s in specs] == [c.candidate_id for c in cands]
+    assert specs[0].accession == "GCA_2.1:c1"
+
+    # Retrain leg reloads with the merged status → stamps any_helix_rscape (absent ⇒ unavailable).
+    first = cands[0].candidate_id
+    reloaded = mr.read_fp_manifest(path, covariation_status={first: STATUS_PASSED})
+    by_id = {c.candidate_id: c for c in reloaded}
+    assert by_id[first].evidence.any_helix_rscape == STATUS_PASSED
+    assert by_id[cands[1].candidate_id].evidence.any_helix_rscape == STATUS_UNAVAILABLE
+    assert by_id[first].locus_start == 5 and by_id[first].locus_end == 35  # coords preserved

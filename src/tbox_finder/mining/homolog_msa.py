@@ -499,6 +499,51 @@ def extract_homolog_sequence(
     return _revcomp(sub) if strand == "minus" else sub
 
 
+def resolve_candidate_sequence(
+    genome_dir: str | Path,
+    accession: str,
+    locus_start: int,
+    locus_end: int,
+    *,
+    strand: str = "plus",
+) -> str:
+    """Carve a mined false-positive candidate's OWN nucleotides from its source genome contig.
+
+    A :class:`tbox_finder.mining.hard_negative.MiningCandidate` carries **coordinates only** —
+    ``accession = "<assembly>:c<contig_index>"`` plus ``locus_start``/``locus_end`` — so the
+    per-candidate covariation producer must re-resolve those coordinates to the query sequence
+    before the homolog search can run. The contig-scoped accession maps to the genome's contig by
+    the SAME :func:`~tbox_finder.mining.pilot_fetch.iter_fasta_records` order the homolog-DB /
+    scan used (:func:`extract_homolog_sequence` / ``substrate_windows.window_name``), so
+    ``records[ci]`` is the candidate's contig.
+
+    ``locus_start``/``locus_end`` are **0-based half-open** contig coordinates
+    (``mine_round.window_candidates_to_mining`` sets ``genome_start = window_start + cand.start``,
+    both 0-based half-open) — deliberately *not* the 1-based-inclusive convention
+    :func:`extract_homolog_sequence` carves a homolog subrange in — so this slices
+    ``seq[start:end]`` directly. The a2 substrate is tiled forward, so a candidate is plus-strand;
+    the ``strand`` argument is retained for symmetry and reverse-complements a minus-strand span.
+    """
+    assembly, ci = parse_subject_id(accession)
+    records = _genome_records(str(genome_dir), assembly)
+    if not (0 <= ci < len(records)):
+        raise HomologMsaError(
+            f"contig index {ci} out of range for {assembly} ({len(records)} records)"
+        )
+    seq = records[ci][1].upper()
+    if not (0 <= locus_start < locus_end <= len(seq)):
+        raise HomologMsaError(
+            f"candidate span [{locus_start}, {locus_end}) out of bounds for {accession} "
+            f"(contig len {len(seq)})"
+        )
+    sub = seq[locus_start:locus_end]
+    if not sub or set(sub) - _ACGT - {"N"}:
+        raise HomologMsaError(
+            f"candidate span for {accession} is not clean nucleotides: {sub[:32]!r}"
+        )
+    return _revcomp(sub) if strand == "minus" else sub
+
+
 # ═════════════════════════════════════════════════════════════════════════════
 # Stage 1: search + assemble the homolog FASTA
 # ═════════════════════════════════════════════════════════════════════════════

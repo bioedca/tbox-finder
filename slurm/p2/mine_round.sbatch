@@ -107,11 +107,55 @@ elif [ "$plan_rc" -ne 0 ]; then
   exit "$plan_rc"
 fi
 
-# ── LEGS (a)–(d): the ready-path — reached only once a protective backend is MSA-producible ──
-# Unreachable at P2 (the plan refuses above). Wired at the MSA-supply unblock step, composing
-# the entrypoints named in SHAPE. Guarded so a premature "ready" cannot masquerade as a
-# completed round (§10.3): fail loudly rather than silently skip the mining legs.
-echo "READY — but legs (a)–(d) are wired at the MSA-supply unblock step (ADR-0006 D7/A1)." >&2
-echo "See mine_round.scan_substrate_windows / window_candidates_to_mining / " >&2
-echo "hard_negative.mine_round / scan_probe_variants / evaluate_probe_round + torchrun retrain." >&2
-exit 2
+# ── LEGS (a)–(b): the ready-path — reached only once a protective backend is MSA-producible ──
+# Unreachable at P2 (the plan refuses above; MSA_SUPPLY_AVAILABLE=False). This job runs the GPU
+# legs (a)+(b) inline, then SUBMITS the decoupled CPU producer array (leg c) and the GPU retrain
+# (leg d, dependent on the array) and EXITS — releasing its 8-GPU allocation so the CPU producer
+# does not hold 8 idle GPUs (A10 Pin 2 decoupling). The array WIDTH is the A10 Phase-2 pin
+# (measured by mine_round_measure.sbatch); ARRAY_WIDTH is passed in, no silent default guess.
+ROUND="${ROUND:-0}"
+ARRAY_WIDTH="${ARRAY_WIDTH:?set ARRAY_WIDTH (the A10 Phase-2-pinned producer array width) via --export}"
+ROUND_DIR="data/processed/mining/round_${ROUND}"
+FP_MANIFEST="$ROUND_DIR/fp_manifest.json"
+SHARD_DIR="$ROUND_DIR/shards"
+mkdir -p "$ROUND_DIR"
+
+echo "READY — round $ROUND, producer array width $ARRAY_WIDTH (A10 Phase-2 pin)."
+
+# LEG a: 8-way GPU-sharded scan over the 660 a2-admissible genomes → per-GPU FP manifests.
+export CUDA_HOME="$CONDA_PREFIX"
+export TOKENIZERS_PARALLELISM=false
+CKPT="${CKPT:-data/processed/checkpoints/stage1_production/stage1.pt}"   # round k−1 parent
+BUILD="/tmp/${USER}-${SLURM_JOB_ID:-local}"
+mkdir -p "$BUILD"
+PYTHONPATH=src python -m tbox_finder.mining.mine_round admissible-accessions --out "$BUILD/accessions.txt"
+split -n l/8 --numeric-suffixes=0 --additional-suffix=.txt "$BUILD/accessions.txt" "$BUILD/slice_"
+pids=()
+for i in $(seq 0 7); do
+  slice="$(printf "%s/slice_%02d.txt" "$BUILD" "$i")"
+  [ -s "$slice" ] || continue
+  CUDA_VISIBLE_DEVICES="$i" PYTHONHASHSEED=0 PYTHONPATH=src \
+    python -m tbox_finder.mining.mine_round scan-shard --checkpoint "$CKPT" \
+      --accessions "$slice" --out-manifest "$BUILD/fp_$i.json" > "$BUILD/scan_$i.log" 2>&1 &
+  pids+=("$!")
+done
+scan_fail=0; for p in "${pids[@]}"; do wait "$p" || scan_fail=1; done
+[ "$scan_fail" -eq 0 ] || { echo "FATAL: a scan shard failed" >&2; cat "$BUILD"/scan_*.log >&2; exit 3; }
+
+# LEG b: collect per-GPU FP manifests → the round FP manifest → array shards.
+PYTHONPATH=src python -m tbox_finder.mining.mine_round collect --manifests "$BUILD"/fp_*.json --out "$FP_MANIFEST"
+PYTHONPATH=src python -m tbox_finder.mining.covariation_producer make-shards \
+  --manifest "$FP_MANIFEST" --n-shards "$ARRAY_WIDTH" --out-dir "$SHARD_DIR"
+rm -rf "$BUILD"
+
+# LEG c: submit the decoupled producer array (CPU-only, partition=gpu no --gres); LEG d: the retrain,
+# afterok-dependent on the whole array. Each is its own §9.3 artifact-verified job.
+PRODUCER_JOB="$(sbatch --parsable --array="0-$((ARRAY_WIDTH - 1))" \
+  --export=ALL,ROUND="$ROUND",SHARD_DIR="$SHARD_DIR",ROUND_DIR="$ROUND_DIR" \
+  slurm/p2/mine_round_producer.sbatch)"
+echo "LEG c: submitted producer array job $PRODUCER_JOB (width $ARRAY_WIDTH)"
+RETRAIN_JOB="$(sbatch --parsable --dependency="afterok:$PRODUCER_JOB" \
+  --export=ALL,ROUND="$ROUND",ROUND_DIR="$ROUND_DIR",FP_MANIFEST="$FP_MANIFEST",CKPT="$CKPT" \
+  slurm/p2/mine_round_retrain.sbatch)"
+echo "LEG d: submitted retrain job $RETRAIN_JOB (afterok:$PRODUCER_JOB)"
+echo "mine_round orchestrator done — legs (c)+(d) run downstream; verify their DONE markers (§9.3)."
