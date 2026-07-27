@@ -112,7 +112,8 @@ def test_window_candidates_to_mining_maps_genome_coordinates():
     )
     assert len(mined) == 2
     first = mined[0]
-    assert first.accession == "GCA_000220375.1"
+    # Contig-scoped accession (`<assembly>:c<ci>`), NOT the bare assembly accession.
+    assert first.accession == "GCA_000220375.1:c2"
     assert first.pool == "genomic_window"
     assert first.locus_start == 1010  # window_start 1000 + candidate.start 10
     assert first.locus_end == 1070
@@ -124,6 +125,17 @@ def test_window_candidates_to_mining_maps_genome_coordinates():
         "any_helix_rscape",
         "downstream_aaRS_synteny",
     )
+
+
+def test_same_offset_on_different_contigs_does_not_collapse():
+    # Two contigs of one assembly, an identical window offset + candidate span: the mask keys
+    # on (accession, locus_start, locus_end), so a bare-assembly accession would collapse
+    # these two distinct loci. The contig-scoped accession keeps them separable.
+    c0 = mr.window_candidates_to_mining([_cand(10, 70)], window_name="GCA_1:c0:1000")[0]
+    c1 = mr.window_candidates_to_mining([_cand(10, 70)], window_name="GCA_1:c1:1000")[0]
+    assert (c0.locus_start, c0.locus_end) == (c1.locus_start, c1.locus_end)  # same coords
+    assert c0.accession != c1.accession  # …but different mask keys ⇒ no collapse
+    assert (c0.accession, c1.accession) == ("GCA_1:c0", "GCA_1:c1")
 
 
 # --------------------------------------------------------------------------- #

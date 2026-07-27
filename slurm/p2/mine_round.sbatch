@@ -64,14 +64,14 @@ set -eo pipefail   # NOT -u: the cuda-nvcc conda activate hook reads unset NVCC_
 export NVCC_PREPEND_FLAGS="${NVCC_PREPEND_FLAGS:-}"
 
 REPO="${SLURM_SUBMIT_DIR:-$HOME/tbox-finder}"
-cd "$REPO"
-
-mkdir -p reports/p2
-DONE="reports/p2/mine_round.DONE"
-PLAN="reports/p2/mine_round_plan.json"
-# Clear the DONE marker FIRST, before anything that can exit, so a stale marker surviving a
-# `git reset --hard` cannot green a round that never ran ([[gate-reads-state-the-run-mutates]]).
+DONE="$REPO/reports/p2/mine_round.DONE"
+PLAN="$REPO/reports/p2/mine_round_plan.json"
+# Clear the stale completion marker FIRST — before `cd`/`mkdir` or anything else that can exit
+# under `set -e` — so a DONE surviving a `git reset --hard` cannot green a round that never
+# ran. Absolute paths (from REPO) so the clear does not depend on the working directory.
 rm -f "$DONE"
+cd "$REPO"
+mkdir -p reports/p2
 
 CONDA_SH=/exports/people/mondragonlab/ecc1695/miniconda3/etc/profile.d/conda.sh
 source "$CONDA_SH"

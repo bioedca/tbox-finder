@@ -178,8 +178,16 @@ def window_candidates_to_mining(
     resulting candidate is a false positive by construction — the a2 substrate is a
     host-order-admissible negative window masked of all known T-boxes — so it enters with the
     default all-``unavailable`` :class:`SpareRuleEvidence` (the spare rule decides its fate).
+
+    ``MiningCandidate.accession`` is set to the **contig-scoped** id ``<accession>:c<ci>`` —
+    the same contig-id namespace the homolog-DB build uses — not the bare assembly accession.
+    Window offsets are per-contig (each contig is 0-based), so keying the union-prior mask on
+    the assembly accession alone would collapse two distinct loci at the same offset on
+    different contigs of one assembly onto the same coordinates (masking/mining keys on
+    ``(accession, locus_start, locus_end)``); the contig-scoped key keeps them distinct.
     """
-    accession, _contig_index, window_start = parse_window_name(window_name)
+    accession, contig_index, window_start = parse_window_name(window_name)
+    contig_id = f"{accession}:c{contig_index}"
     out: list[MiningCandidate] = []
     for cand in candidates:
         genome_start = window_start + int(cand.start)
@@ -188,7 +196,7 @@ def window_candidates_to_mining(
             MiningCandidate(
                 candidate_id=f"{window_name}:{genome_start}-{genome_end}",
                 pool=GENOMIC_WINDOW_POOL,
-                accession=accession,
+                accession=contig_id,
                 locus_start=genome_start,
                 locus_end=genome_end,
                 score=float(cand.peak_p_elem),
