@@ -74,17 +74,23 @@ SEARCH_REPORT="reports/p2/homolog_msa_search_report.json"
 CERTIFY_REPORT="data/processed/audits/homolog_msa_certify_report.json"
 CERTIFIED_MSA="data/interim/homolog_msa/certified_positive.sto"
 
-# ── CONTROL cutoffs — these are the certification's control parameters, NOT a pin (D17: the D7 ─────
-# inclusion thresholds are P6-frozen). Recall-favouring, chosen so a real class-II seed recovers a
-# DIVERGENT >=20-homolog set with covariation power. Loosened at P2-10e-msa-locarna (ADR-0002 A13):
-# 1e-3/60/0.5 → 10/40/0.2, because job 748's stricter cutoffs recovered too few / too-close homologs
-# for covariation power. If <20 recovered or the positive does not pass, LOOSEN further and re-ack —
-# they carry no methodological weight (the D7 homolog-search inclusion thresholds stay P6-frozen). ───
-CTRL_ENGINE="blastn"
-CTRL_EVALUE="10"
+# ── CONTROL cutoffs — the certification's control parameters, NOT a pin (D17: the D7 inclusion ─────
+# thresholds are P6-frozen; nhmmer is one of D7's three sanctioned engines, none singly pinned).
+# Recall-favouring, chosen so a real class-II seed recovers a DIVERGENT FULL-LENGTH >=20-homolog set
+# with covariation power. Engine switched blastn→nhmmer at P2-10e-msa-locarna (job 755 diagnostic):
+# `-task blastn` found 69 hits but ALL short (~20-33 nt) high-identity anchors on a conserved core →
+# only 4 cleared cov>=0.2 (blastn cannot extend across the divergent flanks of a structured RNA).
+# nhmmer against the FM-index recovers FULL-LENGTH divergent homologs: at E<=100/cov>=0.5, 24 distinct
+# targets each covering >=50% of the 221-nt element (18 at E<=10). Switching to nhmmer + demanding
+# cov>=0.5 stays within D7 (engine is a menu choice; thresholds "frozen at P6, value at the phase
+# gate" — no number pinned to contradict; the P2 values here are provisional, frozen at P6). If <20
+# recovered or the positive does not pass, adjust these (raise E / lower cov) and re-ack — they carry
+# no methodological weight; min_sequences=20 stays the pinned floor (ADR-0006 A2). ─────────────────
+CTRL_ENGINE="nhmmer"
+CTRL_EVALUE="100"
 CTRL_MAX_TARGET_SEQS="500"
-CTRL_MIN_PIDENT="40"
-CTRL_MIN_COV="0.2"
+CTRL_MIN_PIDENT="40"   # ignored on the nhmmer path (no pident filter); kept for the CLI-required arg
+CTRL_MIN_COV="0.5"
 SHUFFLE_SEED="20260726"
 
 BUILD="/tmp/${USER}-${SLURM_JOB_ID:-local}"
