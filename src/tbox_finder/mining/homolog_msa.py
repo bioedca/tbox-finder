@@ -605,8 +605,10 @@ def align_candidate(
     ``homologs_fasta`` (search_homologs' output) already carries the candidate as record 0, so that
     ONE multi-FASTA is mlocarna's input; ``candidate_fasta`` is retained for the (unchanged) public
     signature and an input-integrity guard. mlocarna's ``<tgtdir>/results/result.stk`` is copied to
-    ``out_sto`` unchanged — already a Pfam Stockholm with the consensus R-scape scores. ``cpu`` is
-    passed as ``--threads`` and kept small (LocARNA does not scale past ~2–3).
+    ``out_sto`` unchanged — a standard (interleaved/wrapped) Stockholm carrying the RNAalifold
+    ``#=GC SS_cons``; both R-scape/Easel and ``msa_shuffle.read_pfam_alignment`` (which merges the
+    wrapped blocks per row) parse it. ``cpu`` is passed as ``--threads`` and kept small (LocARNA
+    does not scale past ~2–3).
     """
     assert_mlocarna_version()
     _assert_candidate_in_homologs(candidate_fasta, homologs_fasta)

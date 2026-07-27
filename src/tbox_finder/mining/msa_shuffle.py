@@ -32,24 +32,43 @@ __all__ = [
 
 
 def read_pfam_alignment(source: str | Path) -> tuple[list[tuple[str, str]], dict[str, str]]:
-    """Read a one-line-per-sequence (Pfam-format) Stockholm alignment.
+    """Read a Stockholm alignment, concatenating interleaved (wrapped) blocks per row.
 
-    Returns ``([(name, aligned_seq), ...], {gc_tag: value})``. The ``#=GC`` block (which
-    carries ``SS_cons``) is captured separately so a shuffle can hold it fixed. ``source``
-    may be a path or the alignment text itself (a leading ``# STOCKHOLM`` marks text).
+    Returns ``([(name, aligned_seq), ...], {gc_tag: value})`` in first-seen row order. Sequence
+    rows and ``#=GC`` lines are accumulated by name / tag and joined across blocks, so BOTH a
+    one-line-per-sequence (Pfam) alignment AND mlocarna's multi-block interleaved ``result.stk``
+    — 24 rows wrapped over N column-blocks (e.g. widths 120/120/49) — parse to full-width rows.
+    A naive "one line == one row" read instead yields ``rows × blocks`` ragged rows and crashes
+    the column shuffle's ``zip(..., strict=True)``. The ``#=GC`` block (which carries ``SS_cons``)
+    is captured separately so a shuffle can hold it fixed. ``source`` may be a path or the
+    alignment text itself (a leading ``# STOCKHOLM`` marks text).
+
+    For an already-unwrapped alignment each name / tag appears once, so the join is the identity
+    and the output is byte-for-byte the pre-existing behaviour — the committed P2-10b fixtures are
+    unwrapped, so their round-trip and seeded-shuffle locks are unchanged.
     """
     text = _read_text(source)
-    seqs: list[tuple[str, str]] = []
-    gc: dict[str, str] = {}
+    seq_names: list[str] = []
+    seq_frags: dict[str, list[str]] = {}
+    gc_tags: list[str] = []
+    gc_frags: dict[str, list[str]] = {}
     for line in text.splitlines():
         if line.startswith("#=GC "):
             _, tag, val = line.split(None, 2)
-            gc[tag] = val
+            if tag not in gc_frags:
+                gc_frags[tag] = []
+                gc_tags.append(tag)
+            gc_frags[tag].append(val)
         elif line.startswith("#") or line.strip() in {"", "//"}:
             continue
         else:
             name, aseq = line.split(None, 1)
-            seqs.append((name, aseq.strip()))
+            if name not in seq_frags:
+                seq_frags[name] = []
+                seq_names.append(name)
+            seq_frags[name].append(aseq.strip())
+    seqs = [(name, "".join(seq_frags[name])) for name in seq_names]
+    gc = {tag: "".join(gc_frags[tag]) for tag in gc_tags}
     return seqs, gc
 
 
