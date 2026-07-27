@@ -316,3 +316,21 @@ gate3_rollup(per_corpus_verdicts: dict[str, verdict], breadth_floor_met: bool,
 - **D2 / D11** — the "any-helix R-scape covariation" disjunct's operator + power floor are pinned; **D7** — its per-candidate MSA supply is named the round-level covariation-availability prerequisite (thresholds still P6-frozen, unchanged); **A1** — the homolog-DB target the (a)-leg searches against (source, not re-pinned).
 - **`mining/covariation.py`** (`covariation_spare_status`) + **`mining/mine_round.py`** (`build_round_availability`, `plan_round`) + **`slurm/p2/mine_round.sbatch`** (readiness preflight, honest fail-closed) — the encoding sites; `tests/unit/test_covariation.py` + `tests/unit/test_mine_round.py` lock the pins + the fail-closed routing.
 - **P2 exit gate** — README + `paper/manuscript.qmd` owe this step a line, batched there per §6.4.
+
+## Amendment A3 — The D7 CM-free de-novo aligner is instantiated by LocARNA/mlocarna (comparative consensus), superseding the degenerate cmbuild-from-one-candidate route (P2-10e-msa-locarna, 2026-07-27)
+
+- **Status:** **Accepted (user sign-off 2026-07-27; CLAUDE.md §7 item 2, bioedca).** Records — does not change — which of **D7**'s already-enumerated CM-free de-novo structure-aware aligners instantiates the per-candidate covariation-(a) MSA supply. **No D7 threshold, no A1, no A2 pin is amended.**
+
+**What D7 sanctions (unchanged).** D7's alignment clause: the alignment is built by "a **CM-free de-novo structure-aware aligner** (*e.g. LocARNA, or a covariance model built from the candidates*), never from RF00230 and never from the model's covariation." The "e.g." makes the sanctioned set an **open class** with two named exemplars; the only hard constraints are the two negatives (anti-circularity, §5 mechanism 5).
+
+**Why the instantiation is being recorded.** The P2-10e-msa machinery (`6d20451`) chose the *second* exemplar — a CM built from a **single** candidate's `RNAfold` MFE fold — and certification (SLURM job **748**) showed it yields **0 covarying pairs** on real class-II seeds 6/42/48 (each ≥20 homologs). Root cause: a single-sequence MFE fold is **not a comparative consensus** (D7's wording is a CM from "the candidate**s**", plural), so `cmalign` forces the wrong pairing and covariation cannot register. This amendment pins the instantiation to D7's **first-named** exemplar to obtain the comparative consensus D7 intends.
+
+**Pinned instantiation.** The per-candidate homolog MSA (D7 alignment step) is produced by **LocARNA `mlocarna`** (Sankoff simultaneous fold-and-align), emitting a Pfam Stockholm with an RNAalifold `#=GC SS_cons` **comparative** consensus, scored by R-scape. The env is pinned separately in **ADR-0002 A13** (`envs/locarna.yml`, `locarna` 2.0.1). Anti-circularity preserved: the consensus is built purely from the candidate's own homolog set — never RF00230, never the model's covariation.
+
+**Not amended.** D7's homolog-search inclusion thresholds (P6-frozen, **D17**); A1's target-DB source + count (2,500 GTDB R232 reps); A2's operator (`TOTAL_ACROSS_HELICES`) + `min_sequences = 20` floor. The homolog-set **assembly** method (nhmmer / BLAST / cmsearch-from-candidate) is unchanged; only the **alignment** step's aligner is pinned.
+
+**§10.1 evidence.** As ADR-0002 A13 (two-claim citation block; LocARNA comparative consensus + R-scape's comparative-MSA requirement; ≥2 independent sources each; accessed 2026-07-27): Will et al. 2007 (PMID:17432929; DOI:10.1371/journal.pcbi.0030065) · Will et al. 2012 (PMID:22450757; DOI:10.1261/rna.029041.111) · Ray & Maiti 2015 (DOI:10.1002/widm.1142); Rivas, Clements & Eddy 2017 (PMID:27819659; DOI:10.1038/nmeth.4066) · Rivas 2021 (DOI:10.1002/wrna.1649) · Washietl et al. 2012 (DOI:10.1002/wrna.1134).
+
+**Cross-reference impact.** ADR-0002 **A13** (the env providing mlocarna) · **D7** (instantiation recorded; open "e.g." class, thresholds P6-frozen) · **A2** (this supply flips `msa_supply_available` TRUE, unblocking the round-readiness gate) · ADR-0005 **A9/D14** (the (a)-backend the N=4 RUN's readiness gate waits on) · **A1** (the target DB searched).
+
+- **Amendment A3 sign-off:** ☑ recorded 2026-07-27 (bioedca), CLAUDE.md §7 item 2 — D7's CM-free de-novo aligner instantiated by LocARNA/mlocarna comparative consensus (job-748 cmbuild-from-one root cause); no D7/A1/A2 threshold changed.

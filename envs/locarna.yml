@@ -1,0 +1,43 @@
+# locarna env — the CM-free de-novo comparative-consensus aligner for the ADR-0006 D7
+# covariation-(a) MSA supply (P2-10e-msa-locarna). Provides `mlocarna` (the Perl
+# multiple-alignment driver) + the `locarna`/`locarna_p`/`sparse` binaries.
+#
+# WHY A NEW 9th env, not `locarna` added to envs/infernal.yml (the A11/A12 precedent):
+#   (i)  GATE-1 isolation — envs/infernal.conda-lock.yml is byte-frozen at
+#        content_hash.linux-64 = 776610ae… because infernal 1.1.5 is the exact suite the
+#        recall-vs-cmsearch GATE-1 metric is measured against (ADR-0002 D2/D8); adding any
+#        dependency there forces a full re-solve and unfreezes that pin.
+#   (ii) Footprint — locarna carries its own ViennaRNA constraint (>=2.5.1,<3) + a Perl
+#        runtime; an isolated env solves cleanly without perturbing infernal's pinned
+#        viennarna 2.7.2 (mlocarna calls RNAalifold for the comparative consensus).
+#   (iii) Structural fit — certify_homolog_msa.sbatch is already a 3-env sequential pipeline
+#        (tbox-homology → tbox-infernal → tbox-rscape); the LocARNA align stage slots in as a
+#        clean `conda activate tbox-locarna` swap for the infernal align stage.
+#
+# ROUTE CHANGE it enables (ADR-0006 A3 / ADR-0002 A13). The P2-10e-msa machinery first built a
+# CM from ONE candidate's RNAfold MFE fold → cmalign; certification (SLURM job 748) established
+# that a single-sequence MFE fold is NOT a comparative consensus, so R-scape found 0 covarying
+# pairs on real class-II seeds 6/42/48 (each ≥20 homologs). LocARNA's Sankoff simultaneous
+# fold-and-align yields a genuine comparative consensus — D7's FIRST-named exemplar.
+# Anti-circularity preserved: the consensus is built purely from the candidate's own homolog set,
+# never from RF00230 and never from the model's covariation (ADR-0006 §5 mechanism 5).
+#
+# Versions are methods-section facts (accessed 2026-07-27), asserted against the running binary
+# at implementation (the A11 PINNED_RSCAPE_VERSION precedent), never assumed:
+#   * locarna 2.0.1 — bioconda's pinned build; ships the `mlocarna` driver. context7 has NO
+#     LocARNA entry (checked); the CLI is pinned from the bioconda recipe + the official
+#     mlocarna man page.
+#   * viennarna is pulled transitively by locarna's >=2.5.1,<3 runtime constraint (RNAalifold).
+# The ML stack (ADR-0002 D8) is untouched; envs/{infernal,rscape,homology}.conda-lock.yml stay
+# byte-frozen. This env is provisioned for the mining protective filter only; GATE-3/P6 re-decides
+# any reported version (D8 bump trigger).
+#
+# Lockfile: envs/locarna.conda-lock.yml (conda-lock -p linux-64, per-env — never aggregate).
+name: tbox-locarna
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - python=3.12
+  - locarna=2.0.1
+  - biopython=1.87

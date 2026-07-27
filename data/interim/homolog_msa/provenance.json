@@ -1,0 +1,56 @@
+{
+  "adr": "ADR-0006 D7/A1 (homolog search + target DB) \u00b7 A2 (TOTAL_ACROSS_HELICES + min_sequences=20) \u00b7 A3 (mlocarna aligner) \u00b7 ADR-0002 A11 (R-scape 2.0.4.a) \u00b7 A13 (envs/locarna.yml)",
+  "env_lock_hash": "eb34260b1aad74e71da3b73d8b8d85940189720c8061970f63d1a9c1acf4718a",
+  "extra": {
+    "env_lock_hashes": {
+      "locarna": "eb34260b1aad74e71da3b73d8b8d85940189720c8061970f63d1a9c1acf4718a",
+      "rscape": "c03372548ab5e9038b465b42a9072d25500ce2116069bca1474b97cbad370d4a"
+    },
+    "envs": {
+      "align": "tbox-locarna (LocARNA 2.0.1)",
+      "certify": "tbox-rscape (R-scape 2.0.4.a)",
+      "search": "tbox-homology"
+    },
+    "matched_control": {
+      "composition_matched": true,
+      "depth": 24,
+      "depth_matched": true,
+      "ss_cons_matched": true,
+      "width_matched": true
+    },
+    "min_sequences_floor": 20,
+    "n_homologs": 23,
+    "n_records": 24,
+    "note": "RESULT-COMMIT deferral: MSA_SUPPLY_AVAILABLE stays False and mine_round.sbatch legs a-d stay stubbed \u2014 the certified producer is not yet composed into the mining loop (window_candidates_to_mining attaches default-unavailable SpareRuleEvidence). Flipping the flag would make the readiness gate lie. The per-candidate covariation-evidence producer is the next step. DVC unavailable locally; the 10 KB certified MSA is git-committed directly (byte-identical to tests/fixtures/rscape/mlocarna_interleaved.sto).",
+    "positive_status": "passed",
+    "purpose": "Must-fire matched-control certification that the ADR-0006 D7/A1 per-candidate CM-free de-novo MSA supply is covariation-PRODUCIBLE (not merely R-scape-installed) for a real divergent class-II T-box, before MSA_SUPPLY_AVAILABLE is flipped.",
+    "search_cutoffs": {
+      "evalue": 100.0,
+      "max_target_seqs": 500,
+      "min_cov": 0.5,
+      "min_pident": 40.0
+    },
+    "search_engine": "nhmmer",
+    "shuffle_seed": 20260726,
+    "shuffled_status": "failed",
+    "slurm_job": 766,
+    "slurm_node": "one",
+    "step": "P2-10e-msa",
+    "verification": "artifact-based (sacct off): squeue empty; DONE marker; .err 0 bytes; certified==true"
+  },
+  "generated_at_utc": "2026-07-27T20:11:03.530008+00:00",
+  "git_sha": "f19e548506ba2445e3047c26a650f766c986a6bb",
+  "inputs": {
+    "data/interim/homolog_db (DVC)": "db1ff8647449f053f0b563710e6e8794.dir",
+    "tests/fixtures/rscape/classII_sub.sto": "6c8c2de15b9c017c27f7de33561837162ddb9102727e41cac1e18bcee4bc2c8b"
+  },
+  "outputs": {
+    "data/interim/homolog_msa/certified_positive.sto": "387b1cac795ec7898eed2c35acbb1429d50949eaaf026899dca124f86c2648a0",
+    "data/processed/audits/homolog_msa_certify_report.json": "9e86bfd5a3e56c5ff1a300dd996ccbf875092d7a21a55dadb029ae252f866e96",
+    "reports/p2/homolog_msa_search_report.json": "778236bd88be8f2d74ebb701714abd0ee181e0ad0b95817eef58dc2db1dd37f6"
+  },
+  "rule": "slurm/p2/certify_homolog_msa.sbatch :: certify_homolog_msa",
+  "schema_version": "1.0",
+  "script": "src/tbox_finder/mining/homolog_msa.py",
+  "seed": 20260726
+}
