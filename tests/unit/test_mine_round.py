@@ -113,6 +113,13 @@ def test_parse_window_name_rejects_malformed():
         mr.parse_window_name("GCA_000220375.1")
 
 
+def test_parse_window_name_rejects_negative_contig_or_start():
+    with pytest.raises(mr.MineRoundError):
+        mr.parse_window_name("GCA_1:c-1:5")
+    with pytest.raises(mr.MineRoundError):
+        mr.parse_window_name("GCA_1:c0:-5")
+
+
 def test_window_candidates_to_mining_maps_genome_coordinates():
     mined = mr.window_candidates_to_mining(
         [_cand(10, 70, peak=0.97), _cand(200, 260)],

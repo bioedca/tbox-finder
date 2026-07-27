@@ -167,9 +167,12 @@ def parse_window_name(window_name: str) -> tuple[str, int, int]:
     if len(parts) != 2:
         raise MineRoundError(f"window id {window_name!r} does not parse to contig+start")
     try:
-        return accession, int(parts[0]), int(parts[1])
+        contig_index, window_start = int(parts[0]), int(parts[1])
     except ValueError as exc:
         raise MineRoundError(f"window id {window_name!r} has a non-integer contig/start") from exc
+    if contig_index < 0 or window_start < 0:
+        raise MineRoundError(f"window id {window_name!r} has a negative contig/start")
+    return accession, contig_index, window_start
 
 
 def window_candidates_to_mining(
