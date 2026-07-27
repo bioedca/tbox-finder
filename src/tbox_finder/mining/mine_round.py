@@ -310,6 +310,20 @@ def scan_substrate_windows(
 # ═════════════════════════════════════════════════════════════════════════════
 # CLI — the sbatch's readiness preflight (`plan`); exits nonzero when a round is refused
 # ═════════════════════════════════════════════════════════════════════════════
+def _parse_bool(value: str) -> bool:
+    """Strict bool parser for CLI overrides — an unrecognized value is an error, not False.
+
+    A silent ``"treu" → False`` would quietly force a refused plan on a typo, hiding operator
+    intent (the whole point of an explicit override).
+    """
+    normalized = value.strip().lower()
+    if normalized in ("1", "true", "yes"):
+        return True
+    if normalized in ("0", "false", "no"):
+        return False
+    raise argparse.ArgumentTypeError(f"expected true/false, got {value!r}")
+
+
 def _cmd_plan(args: argparse.Namespace) -> int:
     from tbox_finder.mining.covariation import backend_available
 
@@ -345,14 +359,19 @@ def main(argv: Sequence[str] | None = None) -> int:
     plan = sub.add_parser("plan", help="readiness preflight (refuses when no protective backend)")
     plan.add_argument(
         "--rscape-installed",
-        type=lambda s: s.lower() in ("1", "true", "yes"),
+        type=_parse_bool,
         default=None,
         help="override R-scape presence (default: probe covariation.backend_available())",
     )
     plan.add_argument(
         "--msa-supply-available",
         action="store_true",
-        help="declare the ADR-0006 D7/A1 per-candidate MSA supply available (default: False)",
+        default=MSA_SUPPLY_AVAILABLE,
+        help=(
+            "declare the ADR-0006 D7/A1 per-candidate MSA supply available; absent ⇒ the "
+            "module default MSA_SUPPLY_AVAILABLE, so flipping that flag at the unblock step "
+            "unblocks the preflight without a CLI change"
+        ),
     )
     plan.add_argument("--relaxed-arch-available", action="store_true")
     plan.add_argument("--synteny-available", action="store_true")

@@ -179,3 +179,23 @@ def test_later_round_does_not_run_degenerate_guard():
     out = mr.evaluate_probe_round(probe, set(probe.synthetic), [1.0], round_index=1)
     assert out["degenerate_guard"] is None
     assert out["decision"]["decision"] == ROUND_CONTINUE
+
+
+# --------------------------------------------------------------------------- #
+# CLI — the unblock contract + strict bool parsing.
+# --------------------------------------------------------------------------- #
+def test_cli_default_tracks_msa_supply_flag(monkeypatch, capsys):
+    # Absent --msa-supply-available, the CLI default is MSA_SUPPLY_AVAILABLE, so flipping that
+    # one module flag at the unblock step unblocks the preflight WITHOUT a CLI change. If the
+    # CLI hardcoded False, the documented unblock switch would be a dead letter.
+    assert mr.main(["plan", "--rscape-installed", "true"]) == 3  # refused at P2 (flag False)
+    monkeypatch.setattr(mr, "MSA_SUPPLY_AVAILABLE", True)
+    assert mr.main(["plan", "--rscape-installed", "true"]) == 0  # ready now, no CLI change
+    capsys.readouterr()
+
+
+def test_cli_rejects_invalid_rscape_override(capsys):
+    # A typo must be an error, not a silent refuse. argparse exits (SystemExit 2) on a bad type.
+    with pytest.raises(SystemExit):
+        mr.main(["plan", "--rscape-installed", "treu"])
+    capsys.readouterr()
