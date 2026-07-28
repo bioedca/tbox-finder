@@ -20,6 +20,25 @@
 # that into its own CPU array (mine_round_producer.sbatch, A10 Pin 2). §9.2 forbids `compute`(=zero)
 # and pinning a node (`one` is often down); no --nodelist.
 #
+# ── SIZED + HARDENED from the job-806 probe (23.87 win/s/GPU; reports/p2/mine_round_probe.json) ─────
+#   WALL: the probe measured 23.87 win/s/GPU (robust across genomes), so the heaviest a2 shard
+#   (524,959 windows under `split -n l/8`) needs 524,959/23.87 ≈ 6.1 h of scan, and the CPU producer
+#   phase adds ~2 h → ~8.1 h total. `--time=12:00:00` clears that with margin (the gpu partition
+#   TIMELIMIT is *infinite*, so a longer wall is a free soft ceiling; job 793 TIMED OUT at the old
+#   fixed 6 h, exactly the 6.1 h heaviest-shard scan).
+#   PER-SHARD PROGRESS: each of the 8 scan-shard legs writes win/s/GPU + the partial FP-rate to a
+#   PERSISTENT reports/p2/mine_round_measure_shard<i>.json (NOT /tmp) via --progress-out, flushed
+#   every 500 windows + on the wall-clock SIGTERM (preserve-partials) — so a second timeout would
+#   still pin which shard/genome was mid-scan, the exact diagnostic job 793 lacked.
+#   ⚠ SCAN THROUGHPUT NOT OPTIMISED HERE (deliberate): the ~2.8× gap vs the A9 67.68 win/s/GPU
+#   estimate is the mining scan forwarding one 1024-nt window per model call (batch=1;
+#   mine_round._scan_one_window → scan.scan_sequence, one window → one forward). Batching across
+#   substrate windows is result-preserving in principle but is a numerics-sensitive scan-hot-path
+#   change with NO validation path this session (CI installs no torch; no local torch+pytest env;
+#   WSL2 CUDA is unreliable for RNA inference) — so it is DEFERRED to its own validated step rather
+#   than bundled into the run that produces the headline N₀ (§10.3). This measurement runs the exact
+#   scan the probe (job 806) validated; the 12 h wall accommodates it at the measured 23.87 win/s.
+#
 # ── ⛔ CLUSTER-ENV PREREQUISITE (generalises [[cluster-has-no-tbox-data-env]]) ─────────────────────
 # tbox-ml-dna + tbox-homology exist; tbox-locarna + tbox-rscape may not. Create both ONCE from the
 # pinned locks (CPU-only, ~1-3 GB each; watch the tight HOME quota) — part of the §9.3 submit-ack, on
@@ -47,6 +66,10 @@
 # VERIFY (artifact-based; sacct off, §9.3): (a) `squeue -j <jobid>` empty; (b) DONE marker
 #   reports/p2/mine_round_measure.DONE present; (c) reports/p2/mine_round_measure.json present with
 #   n0_false_positives > 0 and k_sample >= 50. Any missing → §9.3 stop (surface it; NO auto-resubmit).
+#   ON A TIMEOUT/STALL (no DONE): the persistent reports/p2/mine_round_measure_shard<i>.json carry
+#   each shard's last win/s/GPU + FP-rate + in_progress_accession (`complete:false`) — read them to
+#   tell a slow scan (all shards progressing, near 23.87 win/s) from a stalled genome (one shard's
+#   in_progress_accession frozen) before deciding whether to raise the wall or fix throughput.
 # RETRIEVE (LOCAL follow-up — the Phase-2 pin session; the cluster checkout has no dvc):
 #   rsync -avzP two:~/tbox-finder/reports/p2/mine_round_measure.json <local>/reports/p2/
 #   rsync -avzP two:~/tbox-finder/data/processed/mining/round0_fp_manifest.json <local>/data/processed/mining/
@@ -57,7 +80,7 @@
 #SBATCH --gres=gpu:a4000:8
 #SBATCH --cpus-per-task=32
 #SBATCH --mem=128G
-#SBATCH --time=06:00:00
+#SBATCH --time=12:00:00
 #SBATCH --output=reports/p2/mine_round_measure_%j.out
 #SBATCH --error=reports/p2/mine_round_measure_%j.err
 # No --account/--qos (accounting disabled), no --nodelist (never pin; `one` is often down).
@@ -119,14 +142,23 @@ PYTHONPATH=src python -m tbox_finder.mining.mine_round admissible-accessions --o
 # Split the 660 admissible accessions into 8 line-balanced slices (slice_00.txt … slice_07.txt).
 split -n l/8 --numeric-suffixes=0 --additional-suffix=.txt "$JOB_SCRATCH/accessions.txt" "$JOB_SCRATCH/slice_"
 
+# Persistent per-shard throughput progress lives in reports/ (NOT $JOB_SCRATCH) so it survives the
+# wall-clock SIGTERM + the EXIT trap: --progress-out makes scan-shard flush win/s/GPU + the partial
+# FP-rate at start + per genome + every --flush-every-windows windows, and installs a SIGTERM→
+# SystemExit handler so the wall-kill runs run_measured_scan's finally-flush (preserve-partials —
+# job 793's gap: it cleaned its /tmp evidence on timeout with no persistent per-shard progress).
+# The FP manifest ($JOB_SCRATCH/fp_$i.json) is node-local; leg (b) `collect` persists the merged N₀.
 pids=()
 for i in $(seq 0 7); do
   slice="$(printf "%s/slice_%02d.txt" "$JOB_SCRATCH" "$i")"
   [ -s "$slice" ] || continue   # fewer than 8 non-empty slices if the admissible set ever shrinks
+  shard_progress="$(printf "reports/p2/mine_round_measure_shard%d.json" "$i")"
   CUDA_VISIBLE_DEVICES="$i" PYTHONHASHSEED=0 PYTHONPATH=src \
     python -m tbox_finder.mining.mine_round scan-shard \
       --checkpoint "$CKPT" --accessions "$slice" --genome-dir "$GENOME_DIR" \
-      --out-manifest "$JOB_SCRATCH/fp_$i.json" > "$JOB_SCRATCH/scan_$i.log" 2>&1 &
+      --out-manifest "$JOB_SCRATCH/fp_$i.json" \
+      --progress-out "$shard_progress" --flush-every-windows 500 \
+      > "$JOB_SCRATCH/scan_$i.log" 2>&1 &
   pids+=("$!")
 done
 scan_fail=0
