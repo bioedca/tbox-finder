@@ -1,0 +1,37 @@
+{
+  "candidates_found": 0,
+  "candidates_per_window": 0.0,
+  "complete": true,
+  "genomes_completed": 3,
+  "in_progress_accession": null,
+  "in_progress_windows": 0,
+  "note": "window_cap",
+  "per_genome": [
+    {
+      "accession": "GCA_000296795.1",
+      "n_candidates": 0,
+      "n_windows": 7980,
+      "wall_s": 338.2873064359992,
+      "windows_per_s": 23.58941600284296
+    },
+    {
+      "accession": "GCA_000372225.1",
+      "n_candidates": 0,
+      "n_windows": 3998,
+      "wall_s": 166.10122931300066,
+      "windows_per_s": 24.069659306772383
+    },
+    {
+      "accession": "GCA_000522425.1",
+      "n_candidates": 0,
+      "n_windows": 18022,
+      "wall_s": 752.3218160140023,
+      "windows_per_s": 23.955173991211993
+    }
+  ],
+  "schema_version": "1.0",
+  "step": "P2-10e",
+  "wall_s": 1257.0101409499985,
+  "windows_per_s": 23.866155906528476,
+  "windows_scanned": 30000
+}
