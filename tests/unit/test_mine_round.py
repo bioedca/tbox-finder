@@ -7,6 +7,8 @@ window→genome coordinate adapter (identity), and the per-round decision + dege
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from tbox_finder.eval.mining_criterion import ProvisionalCriterionError
@@ -274,3 +276,159 @@ def test_fp_manifest_roundtrip_and_status_stamp(tmp_path):
     assert by_id[first].evidence.any_helix_rscape == STATUS_PASSED
     assert by_id[cands[1].candidate_id].evidence.any_helix_rscape == STATUS_UNAVAILABLE
     assert by_id[first].locus_start == 5 and by_id[first].locus_end == 35  # coords preserved
+
+
+# --------------------------------------------------------------------------- #
+# A10 Phase-1 scan-throughput probe — persistent, timeout-surviving instrumentation.
+# The GPU scan itself is torch (untested); ScanThroughputLog + run_measured_scan are the
+# pure accounting/persistence that turn a scan into win/s/GPU + FPs/window, so they carry
+# the measurement's correctness and are the sabotage targets. A fake scan_window + an
+# injected clock keep them deterministic and torch-free.
+# --------------------------------------------------------------------------- #
+class _Clock:
+    """A deterministic monotonic clock: each call advances by ``dt`` (so ``wall_s`` > 0)."""
+
+    def __init__(self, dt: float = 1.0) -> None:
+        self._t = 0.0
+        self._dt = dt
+
+    def __call__(self) -> float:
+        self._t += self._dt
+        return self._t
+
+
+def _fake_genome_windows(genomes):
+    """``[(accession, n_windows), ...]`` → the ``(accession, [(window_name, seq), ...])`` stream."""
+    for acc, n in genomes:
+        yield acc, [(f"{acc}:c0:{i * 512}", "ACGT") for i in range(n)]
+
+
+def _fp_scan_window(fp_map):
+    """A fake ``scan_window`` emitting ``fp_map[window_name]`` placeholder FPs (0 if absent)."""
+
+    def scan(window_name, seq):
+        return [object() for _ in range(fp_map.get(window_name, 0))]
+
+    return scan
+
+
+def test_scan_throughput_log_math():
+    log = mr.ScanThroughputLog()
+    log.begin(100.0)
+    log.begin_genome("GCA_1.1", 100.0)
+    log.record_window(2)
+    log.record_window(0)
+    log.record_window(1)  # 3 windows, 3 FPs
+    log.end_genome(110.0)  # genome wall = 10 s
+    snap = log.snapshot(110.0, complete=True, note="completed")
+    assert snap["windows_scanned"] == 3
+    assert snap["candidates_found"] == 3
+    assert snap["genomes_completed"] == 1
+    assert snap["wall_s"] == 10.0
+    assert snap["windows_per_s"] == 0.3  # 3 windows / 10 s — the headline win/s number
+    assert snap["candidates_per_window"] == 1.0  # 3 FPs / 3 windows — the partial N₀ rate
+    assert snap["per_genome"][0]["n_windows"] == 3
+    assert snap["per_genome"][0]["windows_per_s"] == 0.3
+    assert snap["complete"] is True and snap["note"] == "completed"
+
+
+def test_scan_throughput_log_zero_guards():
+    log = mr.ScanThroughputLog()
+    snap = log.snapshot(0.0)  # nothing recorded → rates are None, never 0/0 or inf
+    assert snap["windows_scanned"] == 0
+    assert snap["wall_s"] == 0.0
+    assert snap["windows_per_s"] is None
+    assert snap["candidates_per_window"] is None
+    log.begin(5.0)
+    snap2 = log.snapshot(9.0)  # 4 s elapsed, still 0 windows
+    assert snap2["wall_s"] == 4.0
+    assert snap2["windows_per_s"] == 0.0  # 0 windows / 4 s = a real measured rate of 0
+    assert snap2["candidates_per_window"] is None  # 0 windows → FP-rate undefined, not fabricated 0
+
+
+def test_measured_scan_flushes_persistent_progress_before_interruption(tmp_path):
+    out_path = tmp_path / "probe.json"
+    calls = {"n": 0}
+
+    def scan(window_name, seq):
+        calls["n"] += 1
+        if calls["n"] == 4:  # a stall→wall-kill lands on the 4th window
+            raise RuntimeError("boom")
+        return []
+
+    with pytest.raises(RuntimeError):
+        mr.run_measured_scan(
+            _fake_genome_windows([("GCA_1.1", 10)]),
+            scan,
+            progress_out=out_path,
+            flush_every_windows=2,
+            now=_Clock(),
+        )
+    # The finally-flush left the last measurement on disk despite the mid-genome death.
+    snap = json.loads(out_path.read_text())
+    assert snap["complete"] is False
+    assert snap["note"] == "interrupted"
+    assert snap["windows_scanned"] == 3  # 3 succeeded before the 4th raised
+    assert snap["in_progress_accession"] == "GCA_1.1"  # the offending genome is pinned
+
+
+def test_measured_scan_window_cap_stops_and_marks_complete(tmp_path):
+    out_path = tmp_path / "probe.json"
+    out, _log = mr.run_measured_scan(
+        _fake_genome_windows([("GCA_A", 5), ("GCA_B", 5)]),
+        _fp_scan_window({}),
+        progress_out=out_path,
+        flush_every_windows=100,
+        max_windows=3,
+        now=_Clock(),
+    )
+    snap = json.loads(out_path.read_text())
+    assert snap["windows_scanned"] == 3  # stopped exactly at the cap
+    assert snap["complete"] is True  # an intentional stop, not an interruption
+    assert snap["note"] == "window_cap"
+    assert snap["genomes_completed"] == 1  # only GCA_A opened; GCA_B never scanned
+    assert snap["per_genome"][0]["accession"] == "GCA_A"
+    assert snap["per_genome"][0]["n_windows"] == 3  # honestly partial (not the 5-tile total)
+    assert len(out) == 0
+
+
+def test_measured_scan_counts_candidates_and_fp_rate(tmp_path):
+    out_path = tmp_path / "probe.json"
+    fp = {"GCA_A:c0:0": 2, "GCA_A:c0:512": 1}  # 3 FPs over 4 windows
+    out, _log = mr.run_measured_scan(
+        _fake_genome_windows([("GCA_A", 4)]),
+        _fp_scan_window(fp),
+        progress_out=out_path,
+        flush_every_windows=100,
+        now=_Clock(),
+    )
+    assert len(out) == 3
+    snap = json.loads(out_path.read_text())
+    assert snap["candidates_found"] == 3
+    assert snap["windows_scanned"] == 4
+    assert snap["candidates_per_window"] == 0.75  # 3 / 4
+    assert snap["complete"] is True and snap["note"] == "completed"
+
+
+def test_measured_scan_rejects_bad_bounds():
+    with pytest.raises(mr.MineRoundError):
+        mr.run_measured_scan(
+            _fake_genome_windows([("A", 1)]), _fp_scan_window({}), flush_every_windows=0
+        )
+    with pytest.raises(mr.MineRoundError):
+        mr.run_measured_scan(_fake_genome_windows([("A", 1)]), _fp_scan_window({}), max_windows=0)
+
+
+def test_scan_progress_write_is_atomic(tmp_path):
+    out_path = tmp_path / "probe.json"
+    log = mr.ScanThroughputLog()
+    log.begin(0.0)
+    log.begin_genome("A", 0.0)
+    log.record_window(1)
+    log.end_genome(1.0)
+    log.write(out_path, 1.0, complete=True, note="completed")
+    assert out_path.exists()
+    assert not (
+        tmp_path / "probe.json.tmp"
+    ).exists()  # the staging sibling was swapped in, not left
+    json.loads(out_path.read_text())  # a full document (os.replace is atomic), never a half-write

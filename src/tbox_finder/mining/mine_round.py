@@ -48,8 +48,11 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import signal
 import sys
-from collections.abc import Mapping, Sequence
+import time
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -429,6 +432,192 @@ def evaluate_probe_round(
 
 
 # ═════════════════════════════════════════════════════════════════════════════
+# Scan throughput instrumentation — persistent, timeout-surviving win/s + FP-rate
+# ═════════════════════════════════════════════════════════════════════════════
+def _safe_ratio(numerator: float, denominator: float | None) -> float | None:
+    """``numerator / denominator``, or ``None`` when the denominator is 0 / unmeasured.
+
+    The throughput ratios (windows/s, FPs/window) are ``None`` — not ``0`` or ``inf`` — before any
+    window or wall time has accrued, so an early snapshot reads as "not yet measured" rather than a
+    fabricated rate (a first flush at wall ``0`` would otherwise divide by zero).
+    """
+    if denominator is None or denominator <= 0:
+        return None
+    return numerator / denominator
+
+
+class ScanThroughputLog:
+    """A persistent, timeout-surviving accountant for the LEG-(a) genome scan.
+
+    Accumulates windows scanned, false positives found, and wall time so a snapshot yields the two
+    numbers job 793's 6 h TIMEOUT could not measure: **win/s/GPU** (``windows_per_s``, the ADR-0005
+    A9 throughput the whole-node job over-estimated ~3×) and the **partial N₀ rate**
+    (``candidates_per_window``, FPs/window). It is written incrementally to a **persistent**
+    ``reports/`` path (never node-local ``/tmp``) so a wall-clock kill leaves the last snapshot on
+    disk — the instrumentation gap the TIMEOUT exposed (job 793 auto-cleaned its ``/tmp`` evidence
+    on SIGTERM). Pure: the clock is injected by the caller, so the accounting is deterministic
+    under test.
+    """
+
+    def __init__(self, *, step: str = STEP, schema_version: str = SCHEMA_VERSION) -> None:
+        self.step = step
+        self.schema_version = schema_version
+        self.windows_scanned = 0
+        self.candidates_found = 0
+        self.genomes_completed = 0
+        self.per_genome: list[dict[str, Any]] = []
+        self.current_accession: str | None = None
+        self._current_windows = 0
+        self._current_candidates = 0
+        self._start: float | None = None
+        self._genome_start: float | None = None
+
+    def begin(self, now: float) -> None:
+        """Stamp the scan start (idempotent — the first call wins, so wall_s is from t0)."""
+        if self._start is None:
+            self._start = now
+
+    def begin_genome(self, accession: str, now: float) -> None:
+        self.begin(now)
+        self.current_accession = accession
+        self._current_windows = 0
+        self._current_candidates = 0
+        self._genome_start = now
+
+    def record_window(self, n_candidates: int) -> None:
+        self.windows_scanned += 1
+        self._current_windows += 1
+        self.candidates_found += int(n_candidates)
+        self._current_candidates += int(n_candidates)
+
+    def end_genome(self, now: float) -> None:
+        """Close the current genome into ``per_genome`` (a no-op if none is open).
+
+        The window count is whatever this genome contributed — partial when a window cap or an
+        interruption cut it short — so the record is honestly labelled, never inflated to the tile
+        count of a genome that did not finish.
+        """
+        if self.current_accession is None:
+            return
+        wall = None if self._genome_start is None else max(0.0, now - self._genome_start)
+        self.per_genome.append(
+            {
+                "accession": self.current_accession,
+                "n_windows": self._current_windows,
+                "n_candidates": self._current_candidates,
+                "wall_s": wall,
+                "windows_per_s": _safe_ratio(self._current_windows, wall),
+            }
+        )
+        self.genomes_completed += 1
+        self.current_accession = None
+        self._current_windows = 0
+        self._current_candidates = 0
+        self._genome_start = None
+
+    def snapshot(
+        self, now: float, *, complete: bool = False, note: str | None = None
+    ) -> dict[str, Any]:
+        """The measurement, derived from the recorded counts + the injected clock."""
+        wall = 0.0 if self._start is None else max(0.0, now - self._start)
+        return {
+            "schema_version": self.schema_version,
+            "step": self.step,
+            "complete": bool(complete),
+            "note": note,
+            "windows_scanned": self.windows_scanned,
+            "candidates_found": self.candidates_found,
+            "genomes_completed": self.genomes_completed,
+            "wall_s": wall,
+            "windows_per_s": _safe_ratio(self.windows_scanned, wall),
+            "candidates_per_window": _safe_ratio(self.candidates_found, self.windows_scanned),
+            "in_progress_accession": self.current_accession,
+            "in_progress_windows": self._current_windows,
+            "per_genome": list(self.per_genome),
+        }
+
+    def write(
+        self, path: str | Path, now: float, *, complete: bool = False, note: str | None = None
+    ) -> Path:
+        """Persist the snapshot **atomically** (write a sibling ``.tmp`` → ``os.replace``).
+
+        Atomicity is load-bearing: a SIGTERM landing mid-write must not truncate the last good
+        snapshot, so the new bytes are staged and swapped in with a single ``os.replace`` — the
+        reader ever sees either the previous complete snapshot or the new one, never a half-file.
+        """
+        p = Path(path)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        tmp = p.with_name(p.name + ".tmp")
+        payload = json.dumps(
+            self.snapshot(now, complete=complete, note=note), indent=2, sort_keys=True
+        )
+        tmp.write_text(payload + "\n", encoding="utf-8")
+        os.replace(tmp, p)
+        return p
+
+
+def run_measured_scan(
+    genome_windows: Iterable[tuple[str, Iterable[tuple[str, str]]]],
+    scan_window: Callable[[str, str], Sequence[MiningCandidate]],
+    *,
+    progress_out: str | Path | None = None,
+    flush_every_windows: int = 500,
+    max_windows: int | None = None,
+    now: Callable[[], float] = time.monotonic,
+    log: ScanThroughputLog | None = None,
+) -> tuple[list[MiningCandidate], ScanThroughputLog]:
+    """Drive a genome-streamed scan with persistent throughput accounting.
+
+    ``genome_windows`` yields ``(accession, windows)`` where ``windows`` is any iterable of
+    ``(window_name, sequence)``; ``scan_window`` maps one window to its (possibly empty) list of
+    false-positive :class:`MiningCandidate` s. The throughput log is flushed to ``progress_out``
+    at the start, every ``flush_every_windows`` windows, at each genome boundary, and — in a
+    ``finally`` — once more at the end (or at a mid-scan interruption), so a wall-clock kill leaves
+    the last snapshot. With ``max_windows`` set the scan stops cleanly after that many windows (a
+    self-terminating throughput sample that finishes inside a short wall); the stop is intentional,
+    so the final snapshot is marked ``complete``. The clock is injected (``now``) so the accounting
+    is deterministic under test.
+    """
+    if flush_every_windows < 1:
+        raise MineRoundError(f"flush_every_windows must be >= 1, got {flush_every_windows}")
+    if max_windows is not None and max_windows < 1:
+        raise MineRoundError(f"max_windows must be >= 1 when set, got {max_windows}")
+
+    log = log if log is not None else ScanThroughputLog()
+    out: list[MiningCandidate] = []
+    log.begin(now())
+    if progress_out is not None:
+        log.write(progress_out, now())  # an initial snapshot: an immediate stall is still visible
+    completed = False
+    reached_cap = False
+    try:
+        for accession, windows in genome_windows:
+            log.begin_genome(str(accession), now())
+            hit_cap = False
+            for window_name, seq in windows:
+                candidates = scan_window(window_name, seq)
+                out.extend(candidates)
+                log.record_window(len(candidates))
+                if progress_out is not None and log.windows_scanned % flush_every_windows == 0:
+                    log.write(progress_out, now())
+                if max_windows is not None and log.windows_scanned >= max_windows:
+                    hit_cap = True
+                    break
+            log.end_genome(now())
+            if progress_out is not None:
+                log.write(progress_out, now())
+            if hit_cap:
+                reached_cap = True
+                break
+        completed = True
+    finally:
+        if progress_out is not None:
+            note = "window_cap" if reached_cap else ("completed" if completed else "interrupted")
+            log.write(progress_out, now(), complete=completed, note=note)
+    return out, log
+
+
+# ═════════════════════════════════════════════════════════════════════════════
 # Scan primitives (ready-path; torch lazily imported) — reuse scan + call
 # ═════════════════════════════════════════════════════════════════════════════
 def scan_probe_variants(
@@ -454,6 +643,37 @@ def scan_probe_variants(
     return mining_criterion.recovered_ids(scored)
 
 
+def _scan_one_window(
+    model: Any,
+    dev: Any,
+    window_name: str,
+    seq: str,
+    *,
+    covariation_status: Mapping[str, str] | None = None,
+) -> list[MiningCandidate]:
+    """Scan one ``(window_name, sequence)`` with a **preloaded** model → its FP candidates.
+
+    The single per-window scan step, shared verbatim by :func:`_scan_windows` (the substrate-window
+    path) and :func:`scan_admissible_genomes`'s measured driver (promote-don't-duplicate: one call
+    site for ``scan_sequence`` + the D3 operator ``call_candidates`` under the provisional
+    criterion, so both paths call loci identically).
+    """
+    from tbox_finder.infer.call import call_candidates
+    from tbox_finder.infer.scan import scan_sequence
+
+    reconciled = scan_sequence(model, seq, device=dev)
+    candidates = call_candidates(
+        reconciled.log_probs,
+        reconciled.zero_flanked,
+        threshold=mining_criterion.PROVISIONAL_THRESHOLD,
+        min_span=mining_criterion.PROVISIONAL_MIN_SPAN,
+        gap_merge=mining_criterion.PROVISIONAL_GAP_MERGE,
+    )
+    return window_candidates_to_mining(
+        candidates, window_name=window_name, covariation_status=covariation_status
+    )
+
+
 def _scan_windows(
     model: Any,
     windows: Any,
@@ -463,27 +683,13 @@ def _scan_windows(
 ) -> list[MiningCandidate]:
     """Scan an iterable of ``(window_name, sequence)`` with a **preloaded** model → candidates.
 
-    Shared by :func:`scan_substrate_windows` (one window list) and :func:`scan_admissible_genomes`
-    (a genome slice, tiled on the fly) so the checkpoint is loaded once, not once per genome. Reuses
-    ``scan_sequence`` + the D3 operator ``call_candidates`` under the provisional criterion.
+    Used by :func:`scan_substrate_windows` (one window list); the checkpoint is loaded once by the
+    caller, not once per window. Delegates each window to :func:`_scan_one_window`.
     """
-    from tbox_finder.infer.call import call_candidates
-    from tbox_finder.infer.scan import scan_sequence
-
     out: list[MiningCandidate] = []
     for window_name, seq in windows:
-        reconciled = scan_sequence(model, seq, device=dev)
-        candidates = call_candidates(
-            reconciled.log_probs,
-            reconciled.zero_flanked,
-            threshold=mining_criterion.PROVISIONAL_THRESHOLD,
-            min_span=mining_criterion.PROVISIONAL_MIN_SPAN,
-            gap_merge=mining_criterion.PROVISIONAL_GAP_MERGE,
-        )
         out.extend(
-            window_candidates_to_mining(
-                candidates, window_name=window_name, covariation_status=covariation_status
-            )
+            _scan_one_window(model, dev, window_name, seq, covariation_status=covariation_status)
         )
     return out
 
@@ -514,6 +720,9 @@ def scan_admissible_genomes(
     *,
     genome_dir: str | Path = "data/interim/production_genomes",
     device: Any = None,
+    progress_out: str | Path | None = None,
+    flush_every_windows: int = 500,
+    max_windows: int | None = None,
 ) -> list[MiningCandidate]:
     """Tile + scan a slice of the a2 host-order-admissible genomes → false-positive candidates.
 
@@ -522,17 +731,34 @@ def scan_admissible_genomes(
     :func:`tbox_finder.mining.substrate_windows.iter_genome_windows` (canonical 1024/512 tiling) so
     the scanned geometry is identical to the shard-spec emitter's, and streams genome-by-genome so a
     slice holds one genome's windows at a time. The checkpoint is loaded once for the whole slice.
+
+    ``progress_out`` / ``flush_every_windows`` / ``max_windows`` thread the
+    :func:`run_measured_scan` throughput instrumentation through leg (a): with ``progress_out`` set,
+    win/s/GPU + the partial FP-rate are flushed to that **persistent** path (per genome + every
+    ``flush_every_windows`` windows) so a wall-clock kill still yields a measurement;
+    ``max_windows`` bounds the scan to a self-terminating throughput sample (the A10 Phase-1 probe).
     """
     from tbox_finder.infer.scan import load_stage1_checkpoint
     from tbox_finder.mining.substrate_windows import iter_genome_windows, read_genome_fasta
 
     model = load_stage1_checkpoint(checkpoint_path, device=device)
     dev = device if device is not None else next(model.parameters()).device
-    out: list[MiningCandidate] = []
-    for acc in accessions:
-        windows = iter_genome_windows(str(acc), read_genome_fasta(genome_dir, str(acc)))
-        out.extend(_scan_windows(model, windows, dev))
-    return out
+
+    def scan_window(window_name: str, seq: str) -> list[MiningCandidate]:
+        return _scan_one_window(model, dev, window_name, seq)
+
+    genome_windows = (
+        (acc, iter_genome_windows(str(acc), read_genome_fasta(genome_dir, str(acc))))
+        for acc in accessions
+    )
+    candidates, _log = run_measured_scan(
+        genome_windows,
+        scan_window,
+        progress_out=progress_out,
+        flush_every_windows=flush_every_windows,
+        max_windows=max_windows,
+    )
+    return candidates
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -589,7 +815,27 @@ def _cmd_admissible(args: argparse.Namespace) -> int:
     return 0
 
 
+def _install_sigterm_flush() -> None:
+    """Convert SLURM's wall-clock SIGTERM into a ``SystemExit`` so ``finally`` blocks run.
+
+    SLURM sends SIGTERM (then SIGKILL after ``KillWait``) when a job hits its ``--time`` wall. The
+    default SIGTERM disposition terminates the process **without** unwinding the stack, so
+    :func:`run_measured_scan`'s ``finally``-flush would not fire and the last flushed progress
+    snapshot (up to ``flush_every_windows`` windows old) would be the newest evidence. Raising
+    ``SystemExit`` instead lets the ``finally`` write one last snapshot — pinning the exact
+    in-progress genome when the wall hit — before the process exits (within ``KillWait``). This is
+    the belt to the periodic-flush suspenders; both write only to the persistent ``reports/`` path.
+    """
+
+    def _handler(signum: int, _frame: Any) -> None:
+        raise SystemExit(128 + signum)
+
+    signal.signal(signal.SIGTERM, _handler)
+
+
 def _cmd_scan_shard(args: argparse.Namespace) -> int:
+    if args.progress_out:
+        _install_sigterm_flush()
     accessions = [
         line.strip()
         for line in Path(args.accessions).read_text(encoding="utf-8").splitlines()
@@ -598,7 +844,13 @@ def _cmd_scan_shard(args: argparse.Namespace) -> int:
     if args.limit is not None:
         accessions = accessions[: args.limit]
     candidates = scan_admissible_genomes(
-        args.checkpoint, accessions, genome_dir=args.genome_dir, device=args.device
+        args.checkpoint,
+        accessions,
+        genome_dir=args.genome_dir,
+        device=args.device,
+        progress_out=args.progress_out,
+        flush_every_windows=args.flush_every_windows,
+        max_windows=args.max_windows,
     )
     write_fp_manifest(candidates, args.out_manifest)
     print(
@@ -690,7 +942,28 @@ def main(argv: Sequence[str] | None = None) -> int:
     scan.add_argument("--genome-dir", default="data/interim/production_genomes")
     scan.add_argument("--device", default=None, help="torch device (default: the model's device)")
     scan.add_argument(
-        "--limit", type=int, default=None, help="scan only the first N (sizing smoke)"
+        "--limit", type=int, default=None, help="scan only the first N genomes (sizing smoke/probe)"
+    )
+    scan.add_argument(
+        "--progress-out",
+        default=None,
+        help=(
+            "persistent throughput-snapshot path (write under reports/, NEVER /tmp): win/s/GPU + "
+            "FP-rate, flushed at start + per genome + every --flush-every-windows windows + on "
+            "exit; survives a wall-clock SIGTERM so a timed-out scan still yields a measurement"
+        ),
+    )
+    scan.add_argument(
+        "--flush-every-windows",
+        type=int,
+        default=500,
+        help="flush the throughput snapshot every N windows (default 500)",
+    )
+    scan.add_argument(
+        "--max-windows",
+        type=int,
+        default=None,
+        help="stop cleanly after N windows — a self-terminating throughput sample (A10 probe)",
     )
     scan.set_defaults(func=_cmd_scan_shard)
 
@@ -721,6 +994,7 @@ __all__ = [
     "MineRoundError",
     "SCHEMA_VERSION",
     "STEP",
+    "ScanThroughputLog",
     "apply_spare_rule",
     "build_round_availability",
     "candidate_evidence",
@@ -730,6 +1004,7 @@ __all__ = [
     "parse_window_name",
     "plan_round",
     "read_fp_manifest",
+    "run_measured_scan",
     "scan_admissible_genomes",
     "scan_probe_variants",
     "scan_substrate_windows",
