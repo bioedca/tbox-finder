@@ -562,3 +562,22 @@ Rationale for provisional-over-reorder: reordering (pinning the final D3 operati
 
 ## Sign-off
 ☑ recorded 2026-07-27 (bioedca), CLAUDE.md §7 item 2 — per-candidate covariation-producer mining-time compute pinned as a new CPU cost centre: measure-first 2-phase budget + decoupled SLURM-array orchestration (scores every FP); amends A9's ≈0 Leg-2 pricing; no ADR-0006 pin changed.
+
+### A10 Phase-2 pin — the per-round producer budget, measured (P2-10e-msa-producer, 2026-07-28)
+
+- **Status:** **Accepted (user sign-off 2026-07-28; CLAUDE.md §7 item 2, bioedca).** Fills the Pin-1 Phase-2 slot on the §9.3-verified round-0 measurement (job 816). Amends no other pin. **Documented, not exercised** — the N=4 RUN is deferred (§7 decision below), so this envelope is *disclosed, not spent*.
+
+**Measured inputs** (`reports/p2/mine_round_measure.json`, job 816; §9.3-verified — `squeue` empty · `.err` 0 bytes · DONE marker · `n0_false_positives` > 0 · `k_sample` ≥ 50):
+- **N₀ = 941** round-0 FP candidates over the 660 a2-admissible genomes, at the A9 Pin-3 provisional detection triple (τ = 0.9 / min_span = 50 / gap_merge = 10).
+- **K = 50** accession-sorted producer sample: per-candidate wall **mean 16.92 s / median 9.01 s / max 114.22 s**. Stage split: search[nhmmer] mean 9.43 / **max 114.22 s** (the right-skew tail), align[mlocarna] mean 7.37 / max 47.53, score[R-scape] mean 0.11. Homolog depth median 20 / mean 21.4 / max 73. Covariation status {passed 16, failed 10, unavailable 24}.
+
+**Pin — decoupled-array sizing (the A10 Pin-2 architecture, priced on the measured wall):**
+- **Per-round producer cost ≈ 4.42 CPU-core-h** (sum-faithful: 941 × mean 16.92 s), **not** the report's median-based `est_core_h = 2.35`. The median understates by **1.88×** because the nhmmer search stage is right-skewed; §10.3 requires sizing on the sum, not the median.
+- **Array width = 48, cpus-per-task = 2** for `slurm/p2/mine_round_producer.sbatch` on one 96-core gpu-partition node (**no `--gres`**, CPU-only; `compute` = `zero` stays forbidden, §9.2). All 48 tasks run concurrently (48 × 2 = 96 cores, no queueing), giving each nhmmer/mlocarna 2 threads for the search tail. **Per-round wall ≈ 7 min** (mean 5.6 / worst-case 7.3 min; the worst-case guarantees ≥ 1 full 114 s nhmmer tail per round). Width 96 (1 core/task) halves the wall but leaves no threading headroom for the tail — **48 is the pinned width**.
+- **0 GPU-h.** The producer is CPU-only and orthogonal to A9's ≈ 135 GPU-h scan budget; against that envelope the ≈ 4.4 core-h / < 8-min producer is negligible and never the bottleneck. Over N = 4 rounds ≈ **17.7 core-h** total.
+
+**Deferral — the §7 structural-0-yield decision (2026-07-28, bioedca).** The N = 4 RUN is **skipped/deferred**. Verified from code this session (2 independent traces + an adversarial refuter, 0 errors): mining a candidate requires **all three** model-independent disjuncts to run-and-`fail` (`is_mining_excluded`, `mining/spare_rule.py`), but `relaxed_architecture` and `downstream_aaRS_synteny` have **no backend** (`candidate_evidence` sets only `any_helix_rscape`; the other two default `unavailable`), so all 941 FPs are spared — the producer is **1 of 3** backends: it makes `mining_round_readiness` return `ready = True` but yield is structurally **0** (each round's retrain skips on `n_mined = 0`). This is the signed fail-closed conservatism (ADR-0006 A2 / D9 row 5 / D11; ADR-0005 D14) and the D14 diminishing-yield halt at k = 0. `MSA_SUPPLY_AVAILABLE` stays **False**; ~0 GPU-h spent. Real mining yield is gated on building the two remaining backends (a new step).
+
+**Scope guard (§10.3):** records the measured envelope only; pins no threshold / operator / power-floor / sparing change; authorizes no submit; changes no code; flips no flag.
+**§10.1 evidence gate:** N/A — compute-budget arithmetic on measured wall (ordinary engineering); asserts no biological/statistical fact.
+**Sign-off (A10 Phase-2):** ☑ recorded 2026-07-28 (bioedca), CLAUDE.md §7 item 2 — per-round producer budget pinned on the measured round-0 numbers (N₀ = 941; ≈ 4.42 CPU-core-h/round; array width 48 × cpus-per-task 2; ~7 min wall/round; 0 GPU-h). The N = 4 RUN is deferred (structural-0-yield; `MSA_SUPPLY_AVAILABLE` stays False); envelope documented, not exercised.
