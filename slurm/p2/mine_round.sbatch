@@ -55,7 +55,10 @@
 #SBATCH --gres=gpu:a4000:8
 #SBATCH --cpus-per-task=16
 #SBATCH --mem=64G
-#SBATCH --time=05:00:00
+# 12 h wall: at the MEASURED 23.87 win/s/GPU (job 806) the heaviest `split -n l/8` shard
+# (524,959 windows) ≈ 6.1 h scan; the old 5 h wall timed leg (a) out before the producer
+# array (job 793). The gpu partition TIMELIMIT is infinite, so a longer soft ceiling is free.
+#SBATCH --time=12:00:00
 #SBATCH --output=reports/p2/mine_round_%j.out
 #SBATCH --error=reports/p2/mine_round_%j.err
 # No --account / --qos (accounting disabled), no --nodelist (never pin; `one` is often down).
@@ -107,11 +110,71 @@ elif [ "$plan_rc" -ne 0 ]; then
   exit "$plan_rc"
 fi
 
-# ── LEGS (a)–(d): the ready-path — reached only once a protective backend is MSA-producible ──
-# Unreachable at P2 (the plan refuses above). Wired at the MSA-supply unblock step, composing
-# the entrypoints named in SHAPE. Guarded so a premature "ready" cannot masquerade as a
-# completed round (§10.3): fail loudly rather than silently skip the mining legs.
-echo "READY — but legs (a)–(d) are wired at the MSA-supply unblock step (ADR-0006 D7/A1)." >&2
-echo "See mine_round.scan_substrate_windows / window_candidates_to_mining / " >&2
-echo "hard_negative.mine_round / scan_probe_variants / evaluate_probe_round + torchrun retrain." >&2
-exit 2
+# ── LEGS (a)–(b): the ready-path — reached only once a protective backend is MSA-producible ──
+# Unreachable at P2 (the plan refuses above; MSA_SUPPLY_AVAILABLE=False). This job runs the GPU
+# legs (a)+(b) inline, then SUBMITS the decoupled CPU producer array (leg c) and the GPU retrain
+# (leg d, dependent on the array) and EXITS — releasing its 8-GPU allocation so the CPU producer
+# does not hold 8 idle GPUs (A10 Pin 2 decoupling). The array WIDTH is the A10 Phase-2 pin
+# (measured by mine_round_measure.sbatch); ARRAY_WIDTH is passed in, no silent default guess.
+ROUND="${ROUND:-0}"
+ARRAY_WIDTH="${ARRAY_WIDTH:?set ARRAY_WIDTH (the A10 Phase-2-pinned producer array width) via --export}"
+ROUND_DIR="data/processed/mining/round_${ROUND}"
+FP_MANIFEST="$ROUND_DIR/fp_manifest.json"
+SHARD_DIR="$ROUND_DIR/shards"
+mkdir -p "$ROUND_DIR"
+
+echo "READY — round $ROUND, producer array width $ARRAY_WIDTH (A10 Phase-2 pin)."
+
+# LEG a: 8-way GPU-sharded scan over the 660 a2-admissible genomes → per-GPU FP manifests.
+export CUDA_HOME="$CONDA_PREFIX"
+export TOKENIZERS_PARALLELISM=false
+CKPT="${CKPT:-data/processed/checkpoints/stage1_production/stage1.pt}"   # round k−1 parent
+[ -s "$CKPT" ] || { echo "FATAL: parent checkpoint $CKPT missing — stage the round k−1 ckpt (rsync)." >&2; exit 2; }
+# NOTE: name this JOB_SCRATCH, never BUILD/HOST — `conda activate tbox-ml-dna` (the compiler
+# toolchain) exports BUILD=HOST=x86_64-conda-linux-gnu and would clobber a $BUILD scratch path the
+# instant the env activates (job 789 died on exactly this). The EXIT trap cleans it on EVERY exit
+# path (incl. the failing-shard `exit 3` below) — a bare `rm` only ran on the success path.
+JOB_SCRATCH="/tmp/${USER}-${SLURM_JOB_ID:-local}"
+mkdir -p "$JOB_SCRATCH"
+trap 'rm -rf "$JOB_SCRATCH"' EXIT
+PYTHONPATH=src python -m tbox_finder.mining.mine_round admissible-accessions --out "$JOB_SCRATCH/accessions.txt"
+# Fail loud on an empty admissible set — the cluster has no git-lfs, so a `git reset --hard` can
+# leave split_assignments.parquet a 132-byte LFS pointer that reads 0 rows ([[git-lfs-pointers-in-ci]]);
+# without this the 8-way split yields all-empty slices and `collect` dies later on an unexpanded glob.
+n_acc="$(wc -l < "$JOB_SCRATCH/accessions.txt")"
+[ "$n_acc" -ge 8 ] || { echo "FATAL: only $n_acc admissible accessions (<8) — is split_assignments.parquet an LFS pointer?" >&2; exit 2; }
+split -n l/8 --numeric-suffixes=0 --additional-suffix=.txt "$JOB_SCRATCH/accessions.txt" "$JOB_SCRATCH/slice_"
+pids=()
+for i in $(seq 0 7); do
+  slice="$(printf "%s/slice_%02d.txt" "$JOB_SCRATCH" "$i")"
+  [ -s "$slice" ] || continue
+  # Persistent per-shard throughput progress in reports/ (NOT $JOB_SCRATCH, which the EXIT trap
+  # wipes) so a wall-clock timeout still leaves win/s/GPU + FP-rate + in_progress_accession per shard
+  # — the job-793 diagnostic gap. --progress-out installs the SIGTERM→finally-flush handler.
+  shard_progress="$(printf "reports/p2/mine_round_r%s_shard%d.json" "$ROUND" "$i")"
+  CUDA_VISIBLE_DEVICES="$i" PYTHONHASHSEED=0 PYTHONPATH=src \
+    python -m tbox_finder.mining.mine_round scan-shard --checkpoint "$CKPT" \
+      --accessions "$slice" --out-manifest "$JOB_SCRATCH/fp_$i.json" \
+      --progress-out "$shard_progress" --flush-every-windows 500 \
+      > "$JOB_SCRATCH/scan_$i.log" 2>&1 &
+  pids+=("$!")
+done
+scan_fail=0; for p in "${pids[@]}"; do wait "$p" || scan_fail=1; done
+[ "$scan_fail" -eq 0 ] || { echo "FATAL: a scan shard failed" >&2; cat "$JOB_SCRATCH"/scan_*.log >&2; exit 3; }
+
+# LEG b: collect per-GPU FP manifests → the round FP manifest → array shards.
+PYTHONPATH=src python -m tbox_finder.mining.mine_round collect --manifests "$JOB_SCRATCH"/fp_*.json --out "$FP_MANIFEST"
+PYTHONPATH=src python -m tbox_finder.mining.covariation_producer make-shards \
+  --manifest "$FP_MANIFEST" --n-shards "$ARRAY_WIDTH" --out-dir "$SHARD_DIR"
+
+# LEG c: submit the decoupled producer array (CPU-only, partition=gpu no --gres); LEG d: the retrain,
+# afterok-dependent on the whole array. Each is its own §9.3 artifact-verified job.
+PRODUCER_JOB="$(sbatch --parsable --array="0-$((ARRAY_WIDTH - 1))" \
+  --export=ALL,ROUND="$ROUND",SHARD_DIR="$SHARD_DIR",ROUND_DIR="$ROUND_DIR" \
+  slurm/p2/mine_round_producer.sbatch)"
+echo "LEG c: submitted producer array job $PRODUCER_JOB (width $ARRAY_WIDTH)"
+RETRAIN_JOB="$(sbatch --parsable --dependency="afterok:$PRODUCER_JOB" \
+  --export=ALL,ROUND="$ROUND",ROUND_DIR="$ROUND_DIR",FP_MANIFEST="$FP_MANIFEST",CKPT="$CKPT" \
+  slurm/p2/mine_round_retrain.sbatch)"
+echo "LEG d: submitted retrain job $RETRAIN_JOB (afterok:$PRODUCER_JOB)"
+echo "mine_round orchestrator done — legs (c)+(d) run downstream; verify their DONE markers (§9.3)."

@@ -7,12 +7,15 @@ window→genome coordinate adapter (identity), and the per-round decision + dege
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from tbox_finder.eval.mining_criterion import ProvisionalCriterionError
 from tbox_finder.eval.tier2n_probe import ROUND_CONTINUE, ROUND_HALT_ROLLBACK, ProbeSet
 from tbox_finder.infer.call import Candidate
 from tbox_finder.mining import mine_round as mr
+from tbox_finder.mining.spare_rule import STATUS_FAILED, STATUS_PASSED, STATUS_UNAVAILABLE
 
 
 def _cand(start: int, end: int, *, peak: float = 0.95) -> Candidate:
@@ -214,3 +217,218 @@ def test_cli_rejects_invalid_rscape_override(capsys):
     with pytest.raises(SystemExit):
         mr.main(["plan", "--rscape-installed", "treu"])
     capsys.readouterr()
+
+
+# --------------------------------------------------------------------------- #
+# A10 producer wiring — window_candidates_to_mining stamps the produced covariation
+# status onto any_helix_rscape; an absent id is fail-closed to 'unavailable' (⇒ spared),
+# and the flag stays False until the Phase-2 pin flips it.
+# --------------------------------------------------------------------------- #
+def test_msa_supply_flag_stays_false_this_step():
+    # The producer + wiring land now; MSA_SUPPLY_AVAILABLE is flipped only at the A10 Phase-2 pin,
+    # after the measurement. If this reads True, a round is silently unblocked without the budget.
+    assert mr.MSA_SUPPLY_AVAILABLE is False
+
+
+def test_window_candidates_default_evidence_is_all_unavailable():
+    # No status table (scan/collect legs) → the default all-'unavailable' evidence (spared).
+    cands = mr.window_candidates_to_mining([_cand(10, 40)], window_name="GCA_1.1:c0:512")
+    assert cands[0].evidence.any_helix_rscape == STATUS_UNAVAILABLE
+    assert cands[0].candidate_id == "GCA_1.1:c0:512:522-552"
+
+
+def test_window_candidates_apply_covariation_status_and_fail_closed_absent():
+    win = "GCA_1.1:c0:512"
+    present_id = f"{win}:522-552"
+    status = {present_id: STATUS_FAILED}  # this candidate WAS scored (failed covariation)
+    # Two candidates: one in the table (failed), one absent (must fail-closed to unavailable).
+    cands = mr.window_candidates_to_mining(
+        [_cand(10, 40), _cand(100, 130)], window_name=win, covariation_status=status
+    )
+    by_id = {c.candidate_id: c for c in cands}
+    assert by_id[present_id].evidence.any_helix_rscape == STATUS_FAILED
+    absent = by_id[f"{win}:612-642"]
+    assert absent.evidence.any_helix_rscape == STATUS_UNAVAILABLE  # dropped shard cannot fail open
+
+
+def test_candidate_evidence_passes_through_status():
+    assert mr.candidate_evidence("x", None).any_helix_rscape == STATUS_UNAVAILABLE
+    assert mr.candidate_evidence("x", {"x": STATUS_PASSED}).any_helix_rscape == STATUS_PASSED
+
+
+def test_fp_manifest_roundtrip_and_status_stamp(tmp_path):
+    win = "GCA_2.1:c1:0"
+    cands = mr.window_candidates_to_mining([_cand(5, 35), _cand(50, 80)], window_name=win)
+    path = tmp_path / "fp.json"
+    mr.write_fp_manifest(cands, path)
+
+    # The producer reads the FP manifest with its own reader (coords only; score/pool ignored).
+    from tbox_finder.mining import covariation_producer as cp
+
+    specs = cp.read_candidate_manifest(path)
+    assert [s.candidate_id for s in specs] == [c.candidate_id for c in cands]
+    assert specs[0].accession == "GCA_2.1:c1"
+
+    # Retrain leg reloads with the merged status → stamps any_helix_rscape (absent ⇒ unavailable).
+    first = cands[0].candidate_id
+    reloaded = mr.read_fp_manifest(path, covariation_status={first: STATUS_PASSED})
+    by_id = {c.candidate_id: c for c in reloaded}
+    assert by_id[first].evidence.any_helix_rscape == STATUS_PASSED
+    assert by_id[cands[1].candidate_id].evidence.any_helix_rscape == STATUS_UNAVAILABLE
+    assert by_id[first].locus_start == 5 and by_id[first].locus_end == 35  # coords preserved
+
+
+# --------------------------------------------------------------------------- #
+# A10 Phase-1 scan-throughput probe — persistent, timeout-surviving instrumentation.
+# The GPU scan itself is torch (untested); ScanThroughputLog + run_measured_scan are the
+# pure accounting/persistence that turn a scan into win/s/GPU + FPs/window, so they carry
+# the measurement's correctness and are the sabotage targets. A fake scan_window + an
+# injected clock keep them deterministic and torch-free.
+# --------------------------------------------------------------------------- #
+class _Clock:
+    """A deterministic monotonic clock: each call advances by ``dt`` (so ``wall_s`` > 0)."""
+
+    def __init__(self, dt: float = 1.0) -> None:
+        self._t = 0.0
+        self._dt = dt
+
+    def __call__(self) -> float:
+        self._t += self._dt
+        return self._t
+
+
+def _fake_genome_windows(genomes):
+    """``[(accession, n_windows), ...]`` → the ``(accession, [(window_name, seq), ...])`` stream."""
+    for acc, n in genomes:
+        yield acc, [(f"{acc}:c0:{i * 512}", "ACGT") for i in range(n)]
+
+
+def _fp_scan_window(fp_map):
+    """A fake ``scan_window`` emitting ``fp_map[window_name]`` placeholder FPs (0 if absent)."""
+
+    def scan(window_name, seq):
+        return [object() for _ in range(fp_map.get(window_name, 0))]
+
+    return scan
+
+
+def test_scan_throughput_log_math():
+    log = mr.ScanThroughputLog()
+    log.begin(100.0)
+    log.begin_genome("GCA_1.1", 100.0)
+    log.record_window(2)
+    log.record_window(0)
+    log.record_window(1)  # 3 windows, 3 FPs
+    log.end_genome(110.0)  # genome wall = 10 s
+    snap = log.snapshot(110.0, complete=True, note="completed")
+    assert snap["windows_scanned"] == 3
+    assert snap["candidates_found"] == 3
+    assert snap["genomes_completed"] == 1
+    assert snap["wall_s"] == 10.0
+    assert snap["windows_per_s"] == 0.3  # 3 windows / 10 s — the headline win/s number
+    assert snap["candidates_per_window"] == 1.0  # 3 FPs / 3 windows — the partial N₀ rate
+    assert snap["per_genome"][0]["n_windows"] == 3
+    assert snap["per_genome"][0]["windows_per_s"] == 0.3
+    assert snap["complete"] is True and snap["note"] == "completed"
+
+
+def test_scan_throughput_log_zero_guards():
+    log = mr.ScanThroughputLog()
+    snap = log.snapshot(0.0)  # nothing recorded → rates are None, never 0/0 or inf
+    assert snap["windows_scanned"] == 0
+    assert snap["wall_s"] == 0.0
+    assert snap["windows_per_s"] is None
+    assert snap["candidates_per_window"] is None
+    log.begin(5.0)
+    snap2 = log.snapshot(9.0)  # 4 s elapsed, still 0 windows
+    assert snap2["wall_s"] == 4.0
+    assert snap2["windows_per_s"] == 0.0  # 0 windows / 4 s = a real measured rate of 0
+    assert snap2["candidates_per_window"] is None  # 0 windows → FP-rate undefined, not fabricated 0
+
+
+def test_measured_scan_flushes_persistent_progress_before_interruption(tmp_path):
+    out_path = tmp_path / "probe.json"
+    calls = {"n": 0}
+
+    def scan(window_name, seq):
+        calls["n"] += 1
+        if calls["n"] == 4:  # a stall→wall-kill lands on the 4th window
+            raise RuntimeError("boom")
+        return []
+
+    with pytest.raises(RuntimeError):
+        mr.run_measured_scan(
+            _fake_genome_windows([("GCA_1.1", 10)]),
+            scan,
+            progress_out=out_path,
+            flush_every_windows=2,
+            now=_Clock(),
+        )
+    # The finally-flush left the last measurement on disk despite the mid-genome death.
+    snap = json.loads(out_path.read_text())
+    assert snap["complete"] is False
+    assert snap["note"] == "interrupted"
+    assert snap["windows_scanned"] == 3  # 3 succeeded before the 4th raised
+    assert snap["in_progress_accession"] == "GCA_1.1"  # the offending genome is pinned
+
+
+def test_measured_scan_window_cap_stops_and_marks_complete(tmp_path):
+    out_path = tmp_path / "probe.json"
+    out, _log = mr.run_measured_scan(
+        _fake_genome_windows([("GCA_A", 5), ("GCA_B", 5)]),
+        _fp_scan_window({}),
+        progress_out=out_path,
+        flush_every_windows=100,
+        max_windows=3,
+        now=_Clock(),
+    )
+    snap = json.loads(out_path.read_text())
+    assert snap["windows_scanned"] == 3  # stopped exactly at the cap
+    assert snap["complete"] is True  # an intentional stop, not an interruption
+    assert snap["note"] == "window_cap"
+    assert snap["genomes_completed"] == 1  # only GCA_A opened; GCA_B never scanned
+    assert snap["per_genome"][0]["accession"] == "GCA_A"
+    assert snap["per_genome"][0]["n_windows"] == 3  # honestly partial (not the 5-tile total)
+    assert len(out) == 0
+
+
+def test_measured_scan_counts_candidates_and_fp_rate(tmp_path):
+    out_path = tmp_path / "probe.json"
+    fp = {"GCA_A:c0:0": 2, "GCA_A:c0:512": 1}  # 3 FPs over 4 windows
+    out, _log = mr.run_measured_scan(
+        _fake_genome_windows([("GCA_A", 4)]),
+        _fp_scan_window(fp),
+        progress_out=out_path,
+        flush_every_windows=100,
+        now=_Clock(),
+    )
+    assert len(out) == 3
+    snap = json.loads(out_path.read_text())
+    assert snap["candidates_found"] == 3
+    assert snap["windows_scanned"] == 4
+    assert snap["candidates_per_window"] == 0.75  # 3 / 4
+    assert snap["complete"] is True and snap["note"] == "completed"
+
+
+def test_measured_scan_rejects_bad_bounds():
+    with pytest.raises(mr.MineRoundError):
+        mr.run_measured_scan(
+            _fake_genome_windows([("A", 1)]), _fp_scan_window({}), flush_every_windows=0
+        )
+    with pytest.raises(mr.MineRoundError):
+        mr.run_measured_scan(_fake_genome_windows([("A", 1)]), _fp_scan_window({}), max_windows=0)
+
+
+def test_scan_progress_write_is_atomic(tmp_path):
+    out_path = tmp_path / "probe.json"
+    log = mr.ScanThroughputLog()
+    log.begin(0.0)
+    log.begin_genome("A", 0.0)
+    log.record_window(1)
+    log.end_genome(1.0)
+    log.write(out_path, 1.0, complete=True, note="completed")
+    assert out_path.exists()
+    assert not (
+        tmp_path / "probe.json.tmp"
+    ).exists()  # the staging sibling was swapped in, not left
+    json.loads(out_path.read_text())  # a full document (os.replace is atomic), never a half-write

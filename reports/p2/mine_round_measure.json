@@ -1,0 +1,83 @@
+{
+  "adr": "ADR-0005",
+  "extrapolated_envelope": {
+    "16": {
+      "array_width": 16,
+      "est_core_h": 2.35,
+      "est_wall_h_per_task": 0.15
+    },
+    "32": {
+      "array_width": 32,
+      "est_core_h": 2.35,
+      "est_wall_h_per_task": 0.07
+    },
+    "48": {
+      "array_width": 48,
+      "est_core_h": 2.35,
+      "est_wall_h_per_task": 0.05
+    },
+    "8": {
+      "array_width": 8,
+      "est_core_h": 2.35,
+      "est_wall_h_per_task": 0.29
+    },
+    "96": {
+      "array_width": 96,
+      "est_core_h": 2.35,
+      "est_wall_h_per_task": 0.02
+    }
+  },
+  "homolog_depth": {
+    "max": 73.0,
+    "mean": 21.44,
+    "median": 20.0,
+    "min": 0.0,
+    "n": 50,
+    "total": 1072.0
+  },
+  "k_sample": 50,
+  "n0_false_positives": 941,
+  "note": "MEASURED (not estimated): N0 from the full-substrate scan, per-stage wall/depth from the K-sample producer run. Phase 2 pins the decoupled-array width on these numbers (A10 Pin 2) and flips MSA_SUPPLY_AVAILABLE.",
+  "phase": 1,
+  "schema_version": "1.0",
+  "status_counts": {
+    "failed": 10,
+    "passed": 16,
+    "unavailable": 24
+  },
+  "step": "P2-10e-msa-producer",
+  "wall_seconds": {
+    "align": {
+      "max": 47.5293,
+      "mean": 7.3717,
+      "median": 2.2348,
+      "min": 0.0,
+      "n": 50,
+      "total": 368.5849
+    },
+    "score": {
+      "max": 0.3856,
+      "mean": 0.1144,
+      "median": 0.1055,
+      "min": 0.0,
+      "n": 50,
+      "total": 5.7201
+    },
+    "search": {
+      "max": 114.2154,
+      "mean": 9.4316,
+      "median": 6.555,
+      "min": 3.2728,
+      "n": 50,
+      "total": 471.5805
+    },
+    "total_per_candidate": {
+      "max": 114.2273,
+      "mean": 16.9177,
+      "median": 9.0081,
+      "min": 4.7756,
+      "n": 50,
+      "total": 845.8855
+    }
+  }
+}
