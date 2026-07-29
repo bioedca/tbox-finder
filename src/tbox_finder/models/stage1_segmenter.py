@@ -18,7 +18,8 @@ terminator). An **order-destroying average** of the two strand-halves — a comb
 that is *symmetric* under swapping the forward and RC channel halves — collapses that
 distinction (its output cannot tell a window from its reverse complement), so it would
 **defeat strand resolution**. PRD §6 / §10.1 therefore **constrain the RC-combination
-ablation to a directionality-preserving (non-averaged) form**, pinned in ADR-0002.
+ablation to a directionality-preserving (non-averaged) form**, pinned in **ADR-0005 D15**
+(provenance corrected at P2-12: ADR-0002 pins the env/ML stack, not RC directionality).
 
 So the ``rc_combine`` knob is bounded to non-averaged forms (a P2 ablation dimension,
 PRD §11 Sweeps: *RC-combination*):
@@ -98,7 +99,8 @@ class RCCombine(nn.Module):
     """Combine the ``2*d_model`` RC-concatenated Caduceus-PS hidden state for the seg head.
 
     Bounded to **directionality-preserving (non-averaged)** forms (:data:`ALLOWED_RC_COMBINE`),
-    per PRD §6/§10.1 (ADR-0002). ``forward`` maps ``(B, L, 2*d_model) → (B, L, output_dim)``.
+    per PRD §6/§10.1 (**ADR-0005 D15**). ``forward`` maps ``(B, L, 2*d_model)`` →
+    ``(B, L, output_dim)``.
 
     Args:
         d_model: per-strand hidden width (Caduceus-PS ``d_model`` = 256; the input is twice

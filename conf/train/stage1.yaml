@@ -77,6 +77,28 @@ dropout: 0.0
 # rc_combine is single-sourced to the /model group (caduceus_stage1.yaml: rc_combine.mode);
 # override via `model.rc_combine.mode=gate`. "mean" is rejected in code (ADR-0005 D15).
 
+# ── Backbone checkpoint (P2-12 size / effective-context ablation; ADR-0002 A14) ───────────
+# Which of the THREE allow-listed Caduceus-PS checkpoints to fine-tune. The allow-list —
+# repo id, revision, d_model, n_layer and the parameter count each one must MEASURE at load
+# — is frozen in code (src/tbox_finder/models/backbone_registry.py::CHECKPOINTS), so no
+# config can name an unpinned checkpoint or weaken the identity check; this key only selects
+# among pinned entries. Values: `caduceus-ps-131k-d256-l16` (production, 7,725,312 params,
+# the default and the only value P2-04…P2-11 ever ran), `caduceus-ps-1k-d256-l4` (1,934,592)
+# and `caduceus-ps-1k-d118-l4` (470,702) — the two PRD §10.1 downward-search points.
+#
+# ⚠ Both smaller checkpoints are `seqlen-1k` pretrained, so selecting one moves parameter
+# count AND pretraining context together: a joint size×context arm, not a pure size sweep
+# (ADR-0002 A14). The SCAN geometry is unaffected — window/stride stay at the ADR-0005
+# D3+A3 1024/512 for every leg (Caduceus is a Mamba stack with no positional table, so
+# `seqlen-1k` is a pretraining-distribution fact, not an architectural cap).
+#
+# ⚠ THIS KEY MUST EXIST HERE (the job-669 struct-mode lesson above): a CLI
+# `backbone=…` against a config that lacks the key is a hard ConfigCompositionException.
+# It is deliberately NOT also a `model.*` key: `_cfg_from_mapping` runs its group loop AFTER
+# the top-level pass, so a key living in both places is silently won by the group — the `lr`
+# trap `conf/optim/stage1_best.yaml` documents. One key, one home.
+backbone: caduceus-ps-131k-d256-l16
+
 # ── Stream shaping ───────────────────────────────────────────────────────────────────────
 # null ⇒ the full 8,303-record nested_train fold. The smoke overrides these to compose in
 # seconds; P2-09's production run leaves them null.

@@ -48,6 +48,7 @@ hydra = pytest.importorskip("hydra", reason="hydra-core drives the run-config co
 
 from hydra import compose, initialize_config_dir  # noqa: E402
 from hydra.core.global_hydra import GlobalHydra  # noqa: E402
+from omegaconf import OmegaConf  # noqa: E402
 
 #: A Hydra CLI override: optional leading ``+``, a dotted key, then ``=``.
 _OVERRIDE = re.compile(r"^\+?[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z0-9_]+)*=")
@@ -299,6 +300,85 @@ def test_label_source_is_a_config_key_and_a_dataclass_field():
         "label_source" in annotated
     ), f"Stage1TrainConfig lost label_source; has {sorted(annotated)}"
     assert annotated["label_source"] == "str", annotated["label_source"]
+
+
+def test_backbone_is_a_config_key_and_a_dataclass_field():
+    """P2-12's knob, both halves of the job-669 contract — and a third half of its own.
+
+    Before P2-12 the checkpoint identity had **no** config surface: ``model.repo_id=…``
+    composed cleanly (the /model group carries a ``repo_id`` key for the record),
+    ``_cfg_from_mapping`` dropped it, and the report echoed the code constants. The "size
+    ablation" would have trained the pinned production model and passed its gate — the P2-11
+    ``label_source`` footgun. So assert (a) the config key by real composition of the actual
+    override, (b) the dataclass field by AST, and (c) that the value REACHES the dataclass,
+    which is the half a key-existence check cannot see.
+    """
+    from tbox_finder.train.train_stage1 import _cfg_from_mapping
+
+    GlobalHydra.instance().clear()
+    try:
+        with initialize_config_dir(config_dir=str(CONF), version_base=None):
+            cfg = compose(config_name="train/stage1", overrides=[])
+            assert "backbone" in cfg, list(cfg.keys())
+            assert cfg.backbone == "caduceus-ps-131k-d256-l16", cfg.backbone
+            small = compose(
+                config_name="train/stage1", overrides=["backbone=caduceus-ps-1k-d118-l4"]
+            )
+            assert small.backbone == "caduceus-ps-1k-d118-l4"
+            resolved = _cfg_from_mapping(OmegaConf.to_container(small, resolve=True))
+            assert resolved.backbone == "caduceus-ps-1k-d118-l4", (
+                "the override composed but did not reach Stage1TrainConfig — exactly the "
+                "silent-drop the ablation cannot survive"
+            )
+    finally:
+        GlobalHydra.instance().clear()
+
+    tree = ast.parse((SRC / "tbox_finder" / "train" / "train_stage1.py").read_text())
+    cls = next(
+        (
+            n
+            for n in ast.walk(tree)
+            if isinstance(n, ast.ClassDef) and n.name == "Stage1TrainConfig"
+        ),
+        None,
+    )
+    assert cls is not None, "Stage1TrainConfig class not found in train_stage1.py"
+    annotated = {
+        n.target.id: ast.unparse(n.annotation)
+        for n in cls.body
+        if isinstance(n, ast.AnnAssign) and isinstance(n.target, ast.Name)
+    }
+    assert "backbone" in annotated, f"Stage1TrainConfig lost backbone; has {sorted(annotated)}"
+    assert annotated["backbone"] == "str", annotated["backbone"]
+
+
+def test_backbone_has_exactly_one_home_in_the_config_tree():
+    """``backbone`` must NOT also be a ``model.*`` key that ``_cfg_from_mapping`` maps.
+
+    ``_cfg_from_mapping`` fills the top-level dataclass fields FIRST and runs its config-group
+    loop SECOND, so a key that lives in both places is silently won by the group — the trap
+    ``conf/optim/stage1_best.yaml`` documents for ``lr``, where a flat override is overwritten
+    and the run reports the value you wrote while training another. Assert the group loop
+    contains no ``backbone`` destination, so `backbone=` on the CLI cannot become inert.
+    """
+    source = (SRC / "tbox_finder" / "train" / "train_stage1.py").read_text()
+    tree = ast.parse(source)
+    fn = next(
+        n
+        for n in ast.walk(tree)
+        if isinstance(n, ast.FunctionDef) and n.name == "_cfg_from_mapping"
+    )
+    mapped_destinations = {
+        ast.literal_eval(elt.elts[2])
+        for node in ast.walk(fn)
+        if isinstance(node, ast.Tuple)
+        for elt in [node]
+        if len(elt.elts) == 3 and isinstance(elt.elts[2], ast.Constant)
+    }
+    assert "backbone" not in mapped_destinations, (
+        "backbone is mapped from a config group as well as read top-level; the group pass "
+        f"runs last and would win. Group destinations: {sorted(mapped_destinations)}"
+    )
 
 
 #: The P2-10d CLI-overridable fields, with their expected dataclass annotations. Job 669's

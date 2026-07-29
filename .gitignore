@@ -111,6 +111,18 @@
 /reports/p2/sweep/slurm_*.out
 /reports/p2/sweep/slurm_*.err
 
+# P2-12 architecture ablations (ablate_stage1.sbatch) + the throughput probe
+# (backbone_throughput.sbatch): every run SIGNAL lives under a `status/` subdirectory and is
+# ignored, while the measured artifacts — reports/p2/ablation/<KEY>.json,
+# reports/p2/ablation_table.json, reports/p2/backbone_throughput.json — are committed evidence
+# and are deliberately NOT ignored. The split is deliberate: the jobs `rm -f` only paths under
+# these ignored directories, so tests/unit/test_sbatch_rm_targets.py can prove no deletion can
+# ever reach a tracked file (the P2-10d′-c defect that disabled sweep_stage1.sbatch).
+# The .err files are EXPECTED non-empty on success (torchrun / trust_remote_code / W&B-offline
+# chatter) — scan them for tracebacks, never gate on zero bytes.
+/reports/p2/ablation/status/
+/reports/p2/status/
+
 # P2-09/P2-10 production retrain (train_production.sbatch): the DONE marker + flock lock are
 # run signals (§9.3 keys on absence-on-failure), and the SLURM logs are EXPECTED non-empty on
 # success (torchrun rendezvous / trust_remote_code / W&B-offline chatter — do NOT gate on zero
