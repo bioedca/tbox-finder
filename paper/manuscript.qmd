@@ -114,6 +114,31 @@ structure; PMID:40593636, DOI:10.1038/s41467-025-60872-5; accessed 2026-07-13),
 accessed through the transformers-native `multimolecule/rinalmo-giga` mirror at a pinned
 revision.
 
+Three Stage-1 architecture choices — reverse-complement combination, segmentation head, and
+backbone size/effective context — were fixed by a pre-registered ablation rather than by
+default. Each leg reused the promoted training protocol unchanged (`inner_train`,
+positives-only, seed 42, the 1024/512 geometry) and was scored on a disjoint 830-record,
+469-homology-cluster selection fold with cluster-blocked bootstrap intervals; the promoted
+configuration supplies the baseline row. Ranked on the conservative lower interval bound, a
+CRF head (0.9416, 95% CI [0.9196, 0.9571]), the baseline linear head (0.9386, [0.9125,
+0.9550]), a gated RC combination (0.9242, [0.9005, 0.9387]) and a 1.93 M-parameter backbone
+(0.9191, [0.8920, 0.9412]) are **not distinguishable at this power** — their intervals all
+overlap the baseline's, which is a statement about resolution, not a demonstration of
+equivalence. Exactly one arm separates, and it separates downward: the smallest
+(471 k-parameter) checkpoint reaches 0.8890 with an interval [0.8581, 0.9047] lying entirely
+below the baseline's lower bound, locating the floor of the downward search. Because that
+search is throughput-driven — a validation column alone cannot deliver it — forward-only scan
+rate was measured for each checkpoint at the same window geometry on one GPU: 69.5, 268.4 and
+423.5 windows/s (1.0×, 3.86×, 6.10×). The 1.93 M checkpoint therefore buys 3.86× scan
+throughput at no *resolvable* accuracy cost while the 471 k checkpoint's 6.10× is bought at a
+measurable one. Both smaller checkpoints are pretrained at 1 kb against production's 131 kb,
+so this is a joint size × pretraining-context arm and no difference may be attributed to
+parameter count alone; the CRF arm is graded under the frozen reconcile→argmax operator, so
+Viterbi decoding is not exercised and the arm measures the CRF as a training signal only. The
+order-destroying averaged RC combination is not an arm of this ablation: it is excluded by
+design, because the strand resolver derives orientation from predicted element order. These
+are selection-fold measurements used to fix architecture, not generalization results.
+
 Because the central claim of this work is a **generalization** claim, neither backbone is
 assumed to transfer: each was gated before use. Caduceus-PS transfer was tested in two
 parts — a non-binding frozen-embedding linear-separability pre-filter (AUROC 0.992 on

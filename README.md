@@ -8,7 +8,7 @@ per-nucleotide T-box structural-element annotations with **calibrated**
 confidence. The scientific value is defensible, non-circular discovery, so
 data-leakage control, calibration, and orthogonal validation are first-class.
 
-> **Status:** **Phase 1 — Backbones & heads: complete.** Next: Phase 2 (Stage-1 training).
+> **Status:** **Phase 2 — Stage-1 training: in progress** (Phase 1 complete).
 > Methodology decisions are pinned in `docs/decisions/` (ADRs); the released
 > model/dataset cards will document intended use, splits, calibration, and limitations.
 
@@ -40,6 +40,19 @@ data-leakage control, calibration, and orthogonal validation are first-class.
   NT-multispecies) is **built but untriggered** — the go/no-go passed.
   *Still no detector and no discovery result: Phase 1 ships validated backbones, and its
   smoke runs are mechanics/expressivity probes, not generalization claims.*
+
+- **Phase 2 — Stage-1 training (in progress).** Stage-1 **architecture ablations** are
+  measured (`reports/p2/ablation_table.json`): on a disjoint 830-record / 469-cluster
+  selection fold with cluster-blocked bootstrap intervals, a CRF head, a gated
+  reverse-complement combination and a 1.93M-parameter backbone are **not distinguishable**
+  from the promoted baseline (all intervals overlap — a statement about power, not
+  equivalence), while the smallest **471k** checkpoint separates **downward**
+  (0.8890, CI [0.8581, 0.9047] vs baseline 0.9386, [0.9125, 0.9550]), locating the floor of
+  the throughput-driven downward search. Measured forward-only scan rate across the three
+  pinned checkpoints: **69.5 / 268.4 / 423.5** windows/s/GPU (1.0× / 3.86× / 6.10×), so
+  1.93M buys 3.86× throughput at no resolvable accuracy cost.
+  *Selection-fold measurements that fix architecture — **not** generalization results;
+  GATE-4 is graded later in Phase 2 on the leave-one-order-out holdout.*
 
 ## Layout (PRD §16)
 

@@ -57,8 +57,15 @@
 # COST:    ADR-0003 A3 — per-leg basis 1.6201 GPU-h train (the heaviest of the 36 uniform
 #          1,160-step x ws8 sweep points) + <= 0.065 val-eval; 1.889 GPU-h/leg node-reserved;
 #          4 legs => ~9.5 GPU-h node-reserved / ~8.6 active, pre-registered bound <= 18 GPU-h.
-#          Measured wall is 0.2025 h/leg at worst, so --time=02:00:00 is ~10x headroom (the CRF
-#          and gate per-step costs are UNMEASURED; A3 carries a +25% allowance for them).
+#          MEASURED 2026-07-29 (jobs 883_0..3), superseding the pre-run estimate below: the legs
+#          ran 0.258 / 0.761 / 0.090 / 0.089 wall-h => 9.589 GPU-h node-reserved for the array,
+#          inside A3's <= 18 bound. The CRF leg cost 3.2x its 1.889 basis, well past A3's +25%
+#          allowance for the two unmeasured-per-step legs; the two small-checkpoint legs came in
+#          at ~38% of theirs, which is the conservatism A3 built in, and the aggregate held.
+#          Price a future CRF leg at ~3x a linear-head leg. --time=02:00:00 is therefore ~2.6x
+#          headroom over the heaviest measured leg, NOT the ~10x the sweep basis suggested.
+#          (Pre-run estimate, kept for the record: worst sweep wall 0.2025 h/leg; the CRF and
+#          gate per-step costs were UNMEASURED and A3 carried a +25% allowance for them.)
 #          A2's <= 90 GPU-h *sweep* bound is untouched and is NOT drawn against.
 # INPUT:   the THREE corpus parquets are STAGED by rsync, NOT dvc-pulled (the ml envs have no
 #          dvc) and NOT carried by the checkout. Stage them ONCE before submitting:
