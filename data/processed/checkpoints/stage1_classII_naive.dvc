@@ -1,0 +1,6 @@
+outs:
+- md5: 93c631b8f9ac9993283ed3329217d48b.dir
+  size: 31040145
+  nfiles: 2
+  hash: md5
+  path: stage1_classII_naive
