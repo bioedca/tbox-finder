@@ -55,7 +55,10 @@
 #SBATCH --gres=gpu:a4000:8
 #SBATCH --cpus-per-task=16
 #SBATCH --mem=64G
-#SBATCH --time=05:00:00
+# 12 h wall: at the MEASURED 23.87 win/s/GPU (job 806) the heaviest `split -n l/8` shard
+# (524,959 windows) ≈ 6.1 h scan; the old 5 h wall timed leg (a) out before the producer
+# array (job 793). The gpu partition TIMELIMIT is infinite, so a longer soft ceiling is free.
+#SBATCH --time=12:00:00
 #SBATCH --output=reports/p2/mine_round_%j.out
 #SBATCH --error=reports/p2/mine_round_%j.err
 # No --account / --qos (accounting disabled), no --nodelist (never pin; `one` is often down).
@@ -126,27 +129,43 @@ echo "READY — round $ROUND, producer array width $ARRAY_WIDTH (A10 Phase-2 pin
 export CUDA_HOME="$CONDA_PREFIX"
 export TOKENIZERS_PARALLELISM=false
 CKPT="${CKPT:-data/processed/checkpoints/stage1_production/stage1.pt}"   # round k−1 parent
-BUILD="/tmp/${USER}-${SLURM_JOB_ID:-local}"
-mkdir -p "$BUILD"
-PYTHONPATH=src python -m tbox_finder.mining.mine_round admissible-accessions --out "$BUILD/accessions.txt"
-split -n l/8 --numeric-suffixes=0 --additional-suffix=.txt "$BUILD/accessions.txt" "$BUILD/slice_"
+[ -s "$CKPT" ] || { echo "FATAL: parent checkpoint $CKPT missing — stage the round k−1 ckpt (rsync)." >&2; exit 2; }
+# NOTE: name this JOB_SCRATCH, never BUILD/HOST — `conda activate tbox-ml-dna` (the compiler
+# toolchain) exports BUILD=HOST=x86_64-conda-linux-gnu and would clobber a $BUILD scratch path the
+# instant the env activates (job 789 died on exactly this). The EXIT trap cleans it on EVERY exit
+# path (incl. the failing-shard `exit 3` below) — a bare `rm` only ran on the success path.
+JOB_SCRATCH="/tmp/${USER}-${SLURM_JOB_ID:-local}"
+mkdir -p "$JOB_SCRATCH"
+trap 'rm -rf "$JOB_SCRATCH"' EXIT
+PYTHONPATH=src python -m tbox_finder.mining.mine_round admissible-accessions --out "$JOB_SCRATCH/accessions.txt"
+# Fail loud on an empty admissible set — the cluster has no git-lfs, so a `git reset --hard` can
+# leave split_assignments.parquet a 132-byte LFS pointer that reads 0 rows ([[git-lfs-pointers-in-ci]]);
+# without this the 8-way split yields all-empty slices and `collect` dies later on an unexpanded glob.
+n_acc="$(wc -l < "$JOB_SCRATCH/accessions.txt")"
+[ "$n_acc" -ge 8 ] || { echo "FATAL: only $n_acc admissible accessions (<8) — is split_assignments.parquet an LFS pointer?" >&2; exit 2; }
+split -n l/8 --numeric-suffixes=0 --additional-suffix=.txt "$JOB_SCRATCH/accessions.txt" "$JOB_SCRATCH/slice_"
 pids=()
 for i in $(seq 0 7); do
-  slice="$(printf "%s/slice_%02d.txt" "$BUILD" "$i")"
+  slice="$(printf "%s/slice_%02d.txt" "$JOB_SCRATCH" "$i")"
   [ -s "$slice" ] || continue
+  # Persistent per-shard throughput progress in reports/ (NOT $JOB_SCRATCH, which the EXIT trap
+  # wipes) so a wall-clock timeout still leaves win/s/GPU + FP-rate + in_progress_accession per shard
+  # — the job-793 diagnostic gap. --progress-out installs the SIGTERM→finally-flush handler.
+  shard_progress="$(printf "reports/p2/mine_round_r%s_shard%d.json" "$ROUND" "$i")"
   CUDA_VISIBLE_DEVICES="$i" PYTHONHASHSEED=0 PYTHONPATH=src \
     python -m tbox_finder.mining.mine_round scan-shard --checkpoint "$CKPT" \
-      --accessions "$slice" --out-manifest "$BUILD/fp_$i.json" > "$BUILD/scan_$i.log" 2>&1 &
+      --accessions "$slice" --out-manifest "$JOB_SCRATCH/fp_$i.json" \
+      --progress-out "$shard_progress" --flush-every-windows 500 \
+      > "$JOB_SCRATCH/scan_$i.log" 2>&1 &
   pids+=("$!")
 done
 scan_fail=0; for p in "${pids[@]}"; do wait "$p" || scan_fail=1; done
-[ "$scan_fail" -eq 0 ] || { echo "FATAL: a scan shard failed" >&2; cat "$BUILD"/scan_*.log >&2; exit 3; }
+[ "$scan_fail" -eq 0 ] || { echo "FATAL: a scan shard failed" >&2; cat "$JOB_SCRATCH"/scan_*.log >&2; exit 3; }
 
 # LEG b: collect per-GPU FP manifests → the round FP manifest → array shards.
-PYTHONPATH=src python -m tbox_finder.mining.mine_round collect --manifests "$BUILD"/fp_*.json --out "$FP_MANIFEST"
+PYTHONPATH=src python -m tbox_finder.mining.mine_round collect --manifests "$JOB_SCRATCH"/fp_*.json --out "$FP_MANIFEST"
 PYTHONPATH=src python -m tbox_finder.mining.covariation_producer make-shards \
   --manifest "$FP_MANIFEST" --n-shards "$ARRAY_WIDTH" --out-dir "$SHARD_DIR"
-rm -rf "$BUILD"
 
 # LEG c: submit the decoupled producer array (CPU-only, partition=gpu no --gres); LEG d: the retrain,
 # afterok-dependent on the whole array. Each is its own §9.3 artifact-verified job.

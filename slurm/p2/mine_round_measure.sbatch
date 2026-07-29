@@ -139,6 +139,12 @@ export TOKENIZERS_PARALLELISM=false
 command -v python >/dev/null || { echo "FATAL: tbox-ml-dna not active?" >&2; exit 2; }
 
 PYTHONPATH=src python -m tbox_finder.mining.mine_round admissible-accessions --out "$JOB_SCRATCH/accessions.txt"
+# Fail loud on an empty/under-filled admissible set: the cluster has no git-lfs, so a `git reset
+# --hard` can leave split_assignments.parquet a 132-byte LFS pointer that reads 0 rows
+# ([[git-lfs-pointers-in-ci]]); without this the 8-way split yields all-empty slices, every shard
+# is skipped, and `collect` dies later on an unexpanded fp_*.json glob — a green job that measured nothing.
+n_acc="$(wc -l < "$JOB_SCRATCH/accessions.txt")"
+[ "$n_acc" -ge 8 ] || { echo "FATAL: only $n_acc admissible accessions (<8) — is split_assignments.parquet an LFS pointer?" >&2; exit 2; }
 # Split the 660 admissible accessions into 8 line-balanced slices (slice_00.txt … slice_07.txt).
 split -n l/8 --numeric-suffixes=0 --additional-suffix=.txt "$JOB_SCRATCH/accessions.txt" "$JOB_SCRATCH/slice_"
 
@@ -197,6 +203,10 @@ conda activate tbox-rscape
 command -v R-scape >/dev/null || { echo "FATAL: R-scape not on PATH — tbox-rscape not created?" >&2; exit 2; }
 PYTHONHASHSEED=0 PYTHONPATH=src python -m tbox_finder.mining.covariation_producer score-shard \
   --shard "$JOB_SCRATCH/sample.json" --workroot "$JOB_SCRATCH/work" --out-table "$JOB_SCRATCH/sample_status.json"
+# Persist the raw per-candidate K-sample evidence (the numbers behind every figure in the report)
+# to reports/ BEFORE the EXIT trap wipes $JOB_SCRATCH, so the A10 Phase-2 pin is re-derivable
+# without re-running the ~2 h producer phase.
+cp "$JOB_SCRATCH/sample_status.json" reports/p2/mine_round_measure_sample_status.json
 
 # ── REPORT: N₀ + per-stage wall + depth + extrapolated envelope (A10 Pin 1) ───────────────────────
 PYTHONHASHSEED=0 PYTHONPATH=src python -m tbox_finder.mining.covariation_producer measure-report \

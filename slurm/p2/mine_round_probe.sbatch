@@ -95,6 +95,11 @@ command -v python >/dev/null || { echo "FATAL: tbox-ml-dna not active?" >&2; exi
 
 # ── The a2 admissible substrate (same rule the §8.2 CI reads); first --limit are the deterministic slice ──
 PYTHONPATH=src python -m tbox_finder.mining.mine_round admissible-accessions --out "$JOB_SCRATCH/accessions.txt"
+# Fail loud on an empty admissible set: the cluster has no git-lfs, so a `git reset --hard` can leave
+# split_assignments.parquet a 132-byte LFS pointer that reads 0 rows ([[git-lfs-pointers-in-ci]]);
+# without this the scan finds 0 windows and the probe greens (DONE, exit 0) having measured nothing.
+n_acc="$(wc -l < "$JOB_SCRATCH/accessions.txt")"
+[ "$n_acc" -ge 1 ] || { echo "FATAL: 0 admissible accessions — is split_assignments.parquet an LFS pointer?" >&2; exit 2; }
 
 # ── LEG (a) scan → persistent throughput snapshot (the measurement) + an FP manifest (byproduct) ──────
 PYTHONHASHSEED=0 PYTHONPATH=src python -m tbox_finder.mining.mine_round scan-shard \

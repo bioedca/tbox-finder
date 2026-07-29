@@ -16,6 +16,7 @@ import pytest
 
 from tbox_finder.mining import covariation_producer as cp
 from tbox_finder.mining.homolog_db import HomologDbError
+from tbox_finder.mining.homolog_msa import HomologMsaError
 from tbox_finder.mining.spare_rule import STATUS_UNAVAILABLE
 
 
@@ -183,6 +184,39 @@ def test_search_shard_propagates_env_fault(tmp_path: Path, monkeypatch: pytest.M
             min_cov=0.5,
             genome_dir=gdir,
         )
+
+
+# --------------------------------------------------------------------------- #
+# align_shard — both fail-closed branches (no MSA written ⇒ score reads unavailable ⇒ spared)
+# --------------------------------------------------------------------------- #
+def test_align_shard_skips_insufficient_homologs(tmp_path: Path):
+    spec = _spec("GCA_1.1:c0:0-30")
+    wd = cp.candidate_workdir(tmp_path / "work", spec.candidate_id)
+    wd.mkdir(parents=True, exist_ok=True)
+    # The search stage found too few homologs → align_shard skips WITHOUT calling mlocarna.
+    (wd / "search.json").write_text('{"sufficient": false}', encoding="utf-8")
+    rows = cp.align_shard([spec], workroot=tmp_path / "work")
+    assert rows[0]["aligned"] is False and rows[0]["reason"] == "insufficient_homologs"
+    assert not (wd / "msa.sto").exists()  # no MSA ⇒ the score stage reads unavailable ⇒ spared
+
+
+def test_align_shard_records_align_failure_without_raising(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    spec = _spec("GCA_1.1:c0:0-30")
+    wd = cp.candidate_workdir(tmp_path / "work", spec.candidate_id)
+    wd.mkdir(parents=True, exist_ok=True)
+    (wd / "search.json").write_text('{"sufficient": true}', encoding="utf-8")
+
+    def _boom(**_kwargs):
+        raise HomologMsaError("mlocarna emitted no #=GC SS_cons")
+
+    # A per-candidate alignment failure is RECORDED aligned=False, never raised — the same
+    # fail-closed reason the score stage then reads as unavailable (⇒ spared), never mined.
+    monkeypatch.setattr(cp, "align_candidate", _boom)
+    rows = cp.align_shard([spec], workroot=tmp_path / "work")
+    assert rows[0]["aligned"] is False and rows[0]["reason"] == "align_failed"
+    assert not (wd / "msa.sto").exists()
 
 
 # --------------------------------------------------------------------------- #

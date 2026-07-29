@@ -32,6 +32,9 @@ ROUND="${ROUND:-0}"
 ROUND_DIR="${ROUND_DIR:?set ROUND_DIR via --export}"
 FP_MANIFEST="${FP_MANIFEST:?set FP_MANIFEST via --export}"
 CKPT="${CKPT:-data/processed/checkpoints/stage1_production/stage1.pt}"   # round k−1 parent
+# Fail fast if the parent checkpoint is missing/misstaged, before the expensive 8-GPU DDP launch —
+# else init_from_checkpoint fails deep inside torchrun instead of here with a clear message.
+[ -s "$CKPT" ] || { echo "FATAL: parent checkpoint $CKPT missing — stage the round k−1 ckpt (rsync)." >&2; exit 2; }
 STATUS_DIR="$ROUND_DIR/status"
 MERGED_STATUS="$ROUND_DIR/covariation_status.json"
 ROUND_REPORT="$ROUND_DIR/mine_round_report.json"
