@@ -36,10 +36,17 @@ cd "$REPO"
 TASK="${SLURM_ARRAY_TASK_ID:-0}"
 SHARD_DIR="${SHARD_DIR:?set SHARD_DIR (the make-shards output dir) via --export}"
 ROUND_DIR="${ROUND_DIR:?set ROUND_DIR via --export}"
-SHARD="$(printf "%s/shard_%03d.json" "$SHARD_DIR" "$TASK")"
+# Zero-pad the task id to match make-shards' `shard_{i:03d}.json` (covariation_producer.py:199).
+# Build these paths with plain interpolation, NOT `$(printf …)`: the tracked-path gate
+# (tests/unit/test_sbatch_rm_targets.py) cannot resolve a command substitution, so a `rm` on a
+# `$(printf …)`-derived path resolves to the widest `*` and matches every tracked file. The plain
+# form below resolves to `*/status/shard_*.SHARD_OK` — a suffix that matches no tracked path —
+# exactly like the sibling `mine_round_retrain.sbatch:39-40` clears its own `.DONE` marker.
+printf -v TASK3 "%03d" "$TASK"
+SHARD="$SHARD_DIR/shard_$TASK3.json"
 STATUS_DIR="$ROUND_DIR/status"
-STATUS_OUT="$(printf "%s/status_%03d.json" "$STATUS_DIR" "$TASK")"
-OK_MARKER="$(printf "%s/shard_%03d.SHARD_OK" "$STATUS_DIR" "$TASK")"
+STATUS_OUT="$STATUS_DIR/status_$TASK3.json"
+OK_MARKER="$STATUS_DIR/shard_$TASK3.SHARD_OK"
 mkdir -p "$STATUS_DIR"
 rm -f "$OK_MARKER"   # clear FIRST so a stale marker cannot green a shard that did not complete.
 
