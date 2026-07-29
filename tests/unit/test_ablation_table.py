@@ -367,6 +367,49 @@ def test_the_config_rejects_the_forbidden_rc_combination_at_construction():
         Stage1TrainConfig(rc_combine="bogus")
 
 
+def test_build_report_refuses_to_emit_a_report_it_would_itself_reject():
+    """``backbone_info`` is required, and the refusal is the point.
+
+    A default would have to invent a ``measured_param_count`` — forging a measurement (§10.3)
+    — or omit it, and a schema-3 report that omits it fails this module's own
+    ``validate_report``. The convenient default therefore writes an artifact the writer would
+    reject, which is worse than either: the run "succeeds" and the evidence is invalid. So it
+    raises, and a caller with no model must state what it is claiming.
+    """
+    import tbox_finder.train.train_stage1 as ts
+
+    kwargs = dict(
+        cfg=Stage1TrainConfig(),
+        class_counts=[10, 2, 1, 1, 1, 1, 1, 1],
+        counts_scope={"n_records": 1, "n_training_fold_records": 1, "full_stream": True},
+        n_blocks=16,
+        n_blocks_wrapped=16,
+        hf_flag_supported=False,
+        losses=[1.6, 1.5],
+        grads_finite=True,
+        world_size=1,
+        wandb_run_id=None,
+    )
+    with pytest.raises(ValueError, match="requires backbone_info"):
+        ts.build_report(**kwargs)
+
+    spec = R.resolve_checkpoint("caduceus-ps-1k-d118-l4")
+    report = ts.build_report(
+        **kwargs,
+        backbone_info={
+            **R.checkpoint_summary(spec),
+            "measured_param_count": spec.expected_param_count,
+            "measured_d_model": spec.d_model,
+        },
+    )
+    # With the evidence supplied the report validates AND names the leg's own checkpoint —
+    # not production, which is what the old module-constant echo would have written.
+    assert ts.validate_report(report) == []
+    assert report["backbone"]["key"] == "caduceus-ps-1k-d118-l4"
+    assert report["backbone"]["measured_param_count"] == 470_702
+    assert report["schema_version"] == SCHEMA_VERSION
+
+
 def test_backbone_is_declared_swept_by_p2_12():
     """``diagnostics.swept_by`` is what tells a later reader which step owns an axis; the
     36 committed sweep points already carry rc_combine/use_crf -> P2-12."""

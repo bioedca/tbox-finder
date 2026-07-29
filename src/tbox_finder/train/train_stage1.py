@@ -1778,17 +1778,25 @@ def build_report(
 
     # P2-12: the backbone block is what the run RESOLVED and MEASURED, threaded from
     # `build_model`. It used to be `{REPO_ID, REVISION}` read straight off the module
-    # constants — which is exactly the shape that reports the pinned production checkpoint
-    # no matter which one trained, and is why the size ablation could not have been trusted
-    # before this step (ADR-0002 A14; §10.3). Falling back to the registry's PRODUCTION
-    # entry keeps callers that build a report without a model (validators, tests) honest
-    # about the pins while carrying no measurement they did not take.
+    # constants — exactly the shape that reports the pinned production checkpoint no matter
+    # which one trained, which is why the size ablation could not have been trusted before
+    # this step (ADR-0002 A14; §10.3).
+    #
+    # It is REQUIRED, not defaulted. A default would have to invent a `measured_param_count`
+    # (forging a measurement, §10.3) or omit it — and a schema-3 report that omits it fails
+    # this module's own `validate_report`, so the "convenient" default emits an artifact the
+    # writer would then reject. A report is the record of a run, and every run loads a
+    # backbone; a caller with no model must say what it is claiming rather than inherit a
+    # claim about production.
     if backbone_info is None:
-        backbone_block: dict[str, Any] = checkpoint_summary(
-            resolve_checkpoint(PRODUCTION_CHECKPOINT)
+        raise ValueError(
+            "build_report requires backbone_info — the resolved allow-list entry plus the "
+            "parameter count MEASURED at load (build_model returns it). There is no honest "
+            "default: filling in production's pins would report the wrong checkpoint for "
+            "every ablation leg, and omitting the measured count emits a schema "
+            f"{SCHEMA_VERSION} report that validate_report rejects (ADR-0002 A14; §10.3)."
         )
-    else:
-        backbone_block = dict(_sanitize(backbone_info))
+    backbone_block: dict[str, Any] = dict(_sanitize(backbone_info))
 
     report: dict[str, Any] = {
         "schema_version": SCHEMA_VERSION,

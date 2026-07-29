@@ -32,6 +32,23 @@ import pytest
 from tbox_finder.labels import CLASS_ORDER
 from tbox_finder.train import train_stage1 as T
 
+
+#: The P2-12 backbone evidence block a caller must hand ``build_report``. Built from the
+#: registry rather than hand-typed, so a pin change cannot leave these tests asserting a
+#: checkpoint identity the code no longer holds. It is REQUIRED (there is no honest default:
+#: production's pins would be the wrong checkpoint for every ablation leg, and omitting the
+#: measured count emits a schema-3 report ``validate_report`` rejects — ADR-0002 A14, §10.3).
+def _backbone_info(key: str | None = None) -> dict:
+    from tbox_finder.models import backbone_registry as _R
+
+    spec = _R.resolve_checkpoint(key or _R.PRODUCTION_CHECKPOINT)
+    return {
+        **_R.checkpoint_summary(spec),
+        "measured_param_count": spec.expected_param_count,
+        "measured_d_model": spec.d_model,
+    }
+
+
 _REPO = Path(__file__).resolve().parents[2]
 _TRAIN_CONF = _REPO / "conf" / "train" / "stage1.yaml"
 _OPTIM_CONF = _REPO / "conf" / "optim" / "stage1.yaml"
@@ -543,6 +560,7 @@ def test_build_report_plumbs_the_timing_kwargs_through() -> None:
         wandb_run_id=None,
         step_seconds=[0.21, 0.19],
         batch_wait_seconds=[0.01, 0.02],
+        backbone_info=_backbone_info(),
     )
     assert report["steps"]["step_seconds"] == [0.21, 0.19]
     assert report["steps"]["batch_wait_seconds"] == [0.01, 0.02]
@@ -562,6 +580,7 @@ def test_build_report_omits_timing_keys_when_not_instrumented() -> None:
         grads_finite=True,
         world_size=1,
         wandb_run_id=None,
+        backbone_info=_backbone_info(),
     )
     assert "step_seconds" not in report["steps"]
     assert "batch_wait_seconds" not in report["steps"]
@@ -763,6 +782,7 @@ def test_build_report_reads_the_working_tree_only_once() -> None:
             grads_finite=True,
             world_size=1,
             wandb_run_id=None,
+            backbone_info=_backbone_info(),
         )
     finally:
         T._git = orig
