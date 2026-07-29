@@ -200,6 +200,16 @@ class Stage1TrainConfig:
     #: the wrong population ([[gate-clauses-need-re-derivation]],
     #: [[nested-train-complement-is-the-loo-holdout]]).
     exclude_selection_val: bool = True
+    #: Which per-nt target the datamodule loads (``window_dataset.LABEL_SOURCE_COLUMNS``):
+    #: ``"production"`` (default) = the full 8-class ``label_string`` — the shipped scanner;
+    #: ``"naive"`` = ``naive_label_string``, every class-II record all-``background`` so
+    #: TBDB001.cm structure is withheld — the P2-11 anti-mimicry ablation (ADR-0004 D5;
+    #: ADR-0005 D9). The two checkpoints share ONE leakage-controlled partition and differ
+    #: only in this field. It is a REAL dataclass field (not an unknown Hydra key) precisely
+    #: so ``_cfg_from_mapping`` threads it and a ``label_source=naive`` override cannot be
+    #: silently dropped into a CM-bearing run ([[gate-clauses-need-re-derivation]]); the
+    #: run's report records the RESOLVED source so the sbatch can assert it.
+    label_source: str = "production"
     eval_batch_size: int = 8
     #: Cap the val fold for the smoke (None ⇒ all 830, the P2-06a inner-rung carve).
     #: Recorded in the eval scope AND enforced: a capped run records `full_fold: false`,
@@ -279,6 +289,15 @@ class Stage1TrainConfig:
                 raise ValueError(f"{name} must be >= 0; got {value}")
         if self.wandb_mode not in ("offline", "online", "disabled"):
             raise ValueError(f"wandb_mode must be offline/online/disabled; got {self.wandb_mode!r}")
+        # Reject an unknown label_source at CONSTRUCTION — unreachable from Hydra, not merely
+        # detected later. A silent fallback to production labels would train the "naive"
+        # ablation on the CM-bearing structure it exists to withhold (CLAUDE.md §10.3). The
+        # valid set mirrors window_dataset.LABEL_SOURCE_COLUMNS (authoritative for the column
+        # names); the same-commit test asserts both agree.
+        if self.label_source not in ("production", "naive"):
+            raise ValueError(
+                f"label_source must be 'production' or 'naive'; got {self.label_source!r}"
+            )
         # Fail at CONSTRUCTION, not after the model loads: this combination cannot produce an
         # honest val number, and every downstream check of it reads zero overlap (see the
         # `exclude_selection_val` field docstring). Refusing it here means the trap is
@@ -1934,6 +1953,7 @@ def build_stream(cfg: Stage1TrainConfig) -> tuple[Any, Any, dict[str, Any]]:
         training_fold_only=True,
         window=cfg.window_nt,
         exclude_selection_val=cfg.exclude_selection_val,
+        label_source=cfg.label_source,
     )
     n_fold = len(records)
     if cfg.max_records is not None:
@@ -2060,6 +2080,11 @@ def build_stream(cfg: Stage1TrainConfig) -> tuple[Any, Any, dict[str, Any]]:
         # correct answers to "how big is the training fold" and a reader cannot tell which
         # one a bare number means.
         "fold_scope": fold_report["fold_scope"],
+        # The RESOLVED per-nt target this run trained on — surfaced from the loader's own
+        # report so the sbatch (and any auditor) can assert a "naive" ablation actually
+        # loaded naive_label_string, not merely requested it (P2-11; ADR-0004 D5).
+        "label_source": fold_report["label_source"],
+        "label_column": fold_report["label_column"],
         "selection_val_excluded": fold_report["exclude_selection_val"],
         "n_selection_val_excluded": fold_report["n_selection_val_excluded"],
         # The occurrence the scan is pinned at. NOT "the deterministic lead": with
