@@ -46,6 +46,8 @@ exercised at the P1-07 fine-tune smoke, not here. Torch is imported at module to
 
 from __future__ import annotations
 
+from typing import Any
+
 import torch
 from torch import Tensor, nn
 
@@ -77,6 +79,14 @@ __all__ = [
 #: at init (``≠ 0.5``): the forward and RC channel-halves are weighted asymmetrically by
 #: construction, i.e. directionality-preserving from the first step (learnable thereafter).
 GATE_INIT_LOGIT: float = 0.5
+
+#: Numerical-equality tolerance for "is this gate channel *exactly* the forbidden mean?".
+#: **Not a scientific threshold.** The forbidden form is the exact symmetric average
+#: ``g ≡ 0.5``; this is only the tolerance at which a float counts as equal to ``0.5`` — the
+#: role ``torch.allclose``'s ``atol`` plays. The *degree* of asymmetry is reported as a
+#: measurement (:meth:`RCCombine.gate_summary`) and is never gated on, so no number here
+#: decides a scientific verdict; a strength bound would need ADR sign-off.
+GATE_MEAN_ATOL: float = 1e-6
 
 
 def swap_strand_channels(hidden: Tensor) -> Tensor:
@@ -126,10 +136,58 @@ class RCCombine(nn.Module):
         else:  # "concat"
             self.output_dim = self.in_dim
 
+    def gate_summary(self) -> dict[str, Any]:
+        """Measured evidence about this combination's distance from the forbidden average.
+
+        The order-destroying form ADR-0005 D15 forbids is the **symmetric** mean — the unique
+        member of ``g⊙fwd + (1-g)⊙rc`` that is invariant under :func:`swap_strand_channels`,
+        namely ``g ≡ 0.5`` in every channel. So the deciding quantity is ``|g - 0.5|``, and it
+        is read **off the live parameter**: after training the mode string still says
+        ``"gate"`` whatever the weights became, so the name is not evidence.
+
+        ``"concat"`` carries no gate and preserves directionality *structurally* (the head
+        sees both halves; the map is injective), so it reports its mode and nothing else.
+        """
+        if self.mode != "gate":
+            return {"mode": self.mode, "structural": True}
+        with torch.no_grad():
+            g = torch.sigmoid(self.gate_logit.detach().float())
+            dev = (g - 0.5).abs()
+        return {
+            "mode": "gate",
+            "structural": False,
+            "n_channels": int(g.numel()),
+            "gate_min": float(g.min()),
+            "gate_max": float(g.max()),
+            "gate_mean": float(g.mean()),
+            "abs_dev_from_half_max": float(dev.max()),
+            "abs_dev_from_half_mean": float(dev.mean()),
+            "n_channels_at_half": int((dev <= GATE_MEAN_ATOL).sum()),
+            "atol": GATE_MEAN_ATOL,
+        }
+
     @property
     def directionality_preserving(self) -> bool:
-        """Always True — the module only admits non-averaged modes (never constructs a mean)."""
-        return True
+        """Re-derived from the live module — never asserted.
+
+        This previously returned a literal ``True`` and had **no callers**: a clause that
+        cannot be false is not evidence, only the appearance of it (the P1-15/P1-16 lesson).
+        ``"concat"`` is directionality-preserving structurally. ``"gate"`` is preserving only
+        while its learned gate stays off ``0.5``, and *nothing in training constrains it* —
+        ``weight_decay`` applies to ``gate_logit`` like any other parameter and pulls it
+        toward 0, i.e. toward the forbidden mean — so it is measured, not assumed.
+
+        The verdict answers the **exact structural** question ("is this combination the
+        symmetric average?"), which is decided when *every* channel sits at ``0.5``. It is
+        deliberately not a *strength* bound: "the gate is asymmetric **enough**" would be a
+        new pinned number, and pinning one is an ADR decision (CLAUDE.md §7 item 2), not a
+        constant to invent here. :meth:`gate_summary` therefore reports the degree of
+        asymmetry as a measurement so a reader can judge it directly.
+        """
+        summary = self.gate_summary()
+        if summary["mode"] != "gate":
+            return True
+        return int(summary["n_channels_at_half"]) < int(summary["n_channels"])
 
     def forward(self, hidden: Tensor) -> Tensor:
         """``(B, L, 2*d_model) → (B, L, output_dim)`` per the selected non-averaged mode."""

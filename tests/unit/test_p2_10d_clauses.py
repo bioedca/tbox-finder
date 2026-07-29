@@ -28,6 +28,7 @@ import pytest
 
 from tbox_finder.train.train_stage1 import (
     _negative_mix_ok,
+    _rc_combine_ok,
     _warm_start_ok,
     derive_clauses,
     validate_report,
@@ -353,3 +354,102 @@ def test_the_warm_clause_compares_paths_not_spellings() -> None:
         mix=_mix(), warm=warm, config={"init_from_checkpoint": "checkpoints/p2/other.pt"}
     )
     assert _warm_start_ok(other) is False
+
+
+# ══════════════════════════════════════════════════════════════════════════════════════
+# rc_directionality_preserved (P2-12 RESULT) — the same absence-is-an-assertion shape
+# ══════════════════════════════════════════════════════════════════════════════════════
+# ADR-0005 D15 forbids the order-destroying symmetric fwd/RC average. Before this clause the
+# constraint was enforced only on the mode NAME at config time — but "gate" is
+# g*fwd + (1-g)*rc with a LEARNED g, and it *becomes* the forbidden average at g == 0.5.
+# The name cannot see that, nothing in training prevents it (weight_decay pulls the logit
+# toward 0), and the module property that claimed to check it returned a literal True with
+# no callers. So the clause re-derives from a census of the trained gate.
+def _gate_block(*, n_channels: int = 256, n_at_half: int = 0, mode: str = "gate") -> dict:
+    return {
+        "mode": mode,
+        "structural": False,
+        "n_channels": n_channels,
+        "n_channels_at_half": n_at_half,
+        "gate_min": 0.61,
+        "gate_max": 0.63,
+        "gate_mean": 0.62,
+        "abs_dev_from_half_max": 0.13,
+        "abs_dev_from_half_mean": 0.12,
+        "atol": 1e-6,
+    }
+
+
+def _rc_report(*, block=..., mode: str = "gate") -> dict:
+    rep = _report(mix=_mix(), warm=_warm(), config={"rc_combine": mode})
+    if block is not ...:
+        rep["rc_combine"] = block
+    return rep
+
+
+def test_a_gate_run_that_measured_its_gate_passes() -> None:
+    assert _rc_combine_ok(_rc_report(block=_gate_block())) is True
+
+
+def test_a_gate_collapsed_to_the_symmetric_average_fails() -> None:
+    """The whole point: every channel at 0.5 IS the forbidden mean, under the name "gate"."""
+    collapsed = _gate_block(n_channels=256, n_at_half=256)
+    assert _rc_combine_ok(_rc_report(block=collapsed)) is False
+    # One channel off 0.5 is no longer the exact symmetric average.
+    assert _rc_combine_ok(_rc_report(block=_gate_block(n_at_half=255))) is True
+
+
+def test_a_gate_run_that_recorded_no_census_fails_rather_than_passing_on_absence() -> None:
+    """This is what keeps the unmeasured P2-12 rc_gate leg out, not a skip."""
+    assert _rc_combine_ok(_rc_report(block=..., mode="gate")) is False
+
+
+def test_a_concat_run_needs_no_census() -> None:
+    """concat is directionality-preserving structurally — its absence is not a gap."""
+    assert _rc_combine_ok(_rc_report(block=..., mode="concat")) is True
+    concat_census = {"mode": "concat", "structural": True}
+    assert _rc_combine_ok(_rc_report(block=concat_census, mode="concat")) is True
+
+
+def test_a_block_describing_another_mode_is_not_evidence_about_this_run() -> None:
+    """A concat census attached to a gate run would otherwise wave the gate through."""
+    rep = _rc_report(block={"mode": "concat", "structural": True}, mode="gate")
+    assert _rc_combine_ok(rep) is False
+
+
+def test_a_forbidden_mode_name_in_the_block_fails() -> None:
+    rep = _report(mix=_mix(), warm=_warm(), config={"rc_combine": "mean"})
+    rep["rc_combine"] = {"mode": "mean", "structural": True}
+    assert _rc_combine_ok(rep) is False
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("n_channels", None),
+        ("n_channels", 0),
+        ("n_channels", "256"),
+        ("n_channels_at_half", None),
+        ("n_channels_at_half", -1),
+        ("mode", ""),
+    ],
+)
+def test_every_field_the_rc_clause_reads_can_break_it(field, value) -> None:
+    block = _gate_block()
+    block[field] = value
+    assert _rc_combine_ok(_rc_report(block=block)) is False
+
+
+def test_a_malformed_rc_block_fails_closed() -> None:
+    assert _rc_combine_ok(_rc_report(block=["not", "a", "mapping"])) is False
+
+
+def test_the_rc_clause_is_in_derive_clauses_and_is_version_gated() -> None:
+    from tbox_finder.train.train_stage1 import CLAUSE_SCHEMA_VERSION
+
+    assert "rc_directionality_preserved" in derive_clauses(_rc_report(block=_gate_block()))
+    # Version-gated so the committed schema-3 reports stay valid without back-filling a
+    # measurement nobody took (§10.3) — while a schema-3 GATE run still re-derives False.
+    assert CLAUSE_SCHEMA_VERSION["rc_directionality_preserved"] == "4"
+    assert derive_clauses(_rc_report(block=..., mode="concat"))["rc_directionality_preserved"]
+    assert not derive_clauses(_rc_report(block=..., mode="gate"))["rc_directionality_preserved"]

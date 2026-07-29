@@ -394,8 +394,19 @@ def main(argv: Sequence[str] | None = None) -> int:
     problems = artifact_problems(artifact, expect_rows=args.expect_rows)
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(json.dumps(artifact, indent=2, sort_keys=True, allow_nan=False) + "\n")
-    print(f"wrote {out} ({artifact['n_rows']} rows, {artifact['n_rejected']} rejected)")
+    payload = json.dumps(artifact, indent=2, sort_keys=True, allow_nan=False) + "\n"
+    # An invalid table must NOT land on the canonical path. Returning 2 while having already
+    # written it leaves an artifact that reads as the deliverable to anything that opens the
+    # file rather than the exit code — and this artifact is git-committed evidence. So the
+    # rejected build is diverted to a clearly-marked sibling, which keeps it inspectable
+    # without letting it impersonate a validated table (CodeRabbit, P2-12 RESULT).
+    if problems:
+        out = out.with_suffix(".invalid.json")
+        out.write_text(payload)
+        print(f"wrote {out} — NOT PUBLISHED: the table failed its own validator")
+    else:
+        out.write_text(payload)
+        print(f"wrote {out} ({artifact['n_rows']} rows, {artifact['n_rejected']} rejected)")
     for row in artifact["rows"]:
         axes = row["axes"]
         flag = "baseline" if row["is_baseline"] else f"sep={row['separated_from_baseline']}"

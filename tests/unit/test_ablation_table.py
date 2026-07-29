@@ -28,6 +28,7 @@ from tbox_finder.train.train_stage1 import (
     SCHEMA_VERSION,
     Stage1TrainConfig,
     _backbone_block_problems,
+    _schema_precedes,
     diagnostics,
 )
 
@@ -302,7 +303,15 @@ def test_an_older_schema_report_is_excused_but_not_exempted():
     baseline = _baseline()
     assert baseline["schema_version"] != SCHEMA_VERSION
     assert _backbone_block_problems(baseline) == []
-    assert set(BLOCK_FIELD_SCHEMA_VERSION.values()) == {SCHEMA_VERSION}
+    # The invariant is that the baseline predates EVERY block field it is excused — not that
+    # those fields were introduced at whatever the current schema happens to be. The former
+    # coupling held only while P2-12's ENCODE bump and these fields landed together; the
+    # P2-12 RESULT bumped the schema again (for the rc_combine census) without adding a block
+    # field, which would have falsified it. Assert the excuse itself.
+    assert all(
+        _schema_precedes(baseline["schema_version"], introduced)
+        for introduced in BLOCK_FIELD_SCHEMA_VERSION.values()
+    )
 
     drifted = copy.deepcopy(baseline)
     drifted["backbone"]["revision"] = "0" * 40
@@ -581,3 +590,49 @@ def test_a_cpu_throughput_number_is_refused_rather_than_emitted():
     number would be a ~871x slower fallback reported as if it were the scan rate."""
     with pytest.raises(RuntimeError, match="must be measured on CUDA"):
         T.measure_throughput(PRODUCTION, device="cpu")
+
+
+def test_an_invalid_table_is_not_published_to_the_canonical_path(tmp_path) -> None:
+    """Returning 2 while having already written the canonical file is fail-open in practice.
+
+    ``reports/p2/ablation_table.json`` is git-committed evidence; anything that opens the
+    file rather than reading the exit code would take a rejected build for the deliverable.
+    So a failed validation diverts to a clearly-marked sibling (CodeRabbit, P2-12 RESULT).
+    """
+    out = tmp_path / "ablation_table.json"
+    # --expect-rows 99 cannot be satisfied by the committed baseline alone, so the artifact
+    # is built but fails its own validator.
+    rc = A.main(
+        [
+            "--baseline",
+            str(REPO / A.DEFAULT_BASELINE),
+            "--ablation-dir",
+            str(tmp_path / "no-legs-here"),
+            "--out",
+            str(out),
+            "--expect-rows",
+            "99",
+        ]
+    )
+    assert rc == 2
+    assert not out.exists(), "a table that failed its validator must not occupy the real path"
+    assert out.with_suffix(".invalid.json").exists(), "the rejected build stays inspectable"
+
+
+def test_a_valid_table_is_published_to_the_canonical_path(tmp_path) -> None:
+    out = tmp_path / "ablation_table.json"
+    rc = A.main(
+        [
+            "--baseline",
+            str(REPO / A.DEFAULT_BASELINE),
+            "--ablation-dir",
+            str(tmp_path / "no-legs-here"),
+            "--out",
+            str(out),
+            "--expect-rows",
+            "1",
+        ]
+    )
+    assert rc == 0
+    assert out.exists()
+    assert not out.with_suffix(".invalid.json").exists()
