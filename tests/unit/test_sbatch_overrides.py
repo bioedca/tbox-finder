@@ -180,6 +180,20 @@ def test_production_block_carries_the_override_that_broke_job_669():
     assert "exclude_selection_val=false" in tokens, tokens
 
 
+def test_naive_ablation_block_carries_label_source_naive():
+    """P2-11: the class-II-CM-naive sbatch must actually pass ``label_source=naive``.
+
+    The whole ablation IS that override — a naive sbatch that dropped the token would train
+    on the production TBDB001.cm-derived labels and silently become the shipped scanner. Pin
+    the fixture to the token so this file cannot drift into gating a launch line that no
+    longer selects the naive labels.
+    """
+    naive = [b for b in GATED if b.path.name == "train_classII_naive.sbatch"]
+    assert naive, "slurm/p2/train_classII_naive.sbatch has no gated launch block"
+    tokens = [t for b in naive for t in b.overrides]
+    assert "label_source=naive" in tokens, tokens
+
+
 @pytest.mark.parametrize("block", GATED, ids=repr)
 def test_every_sbatch_override_composes(block: Block):
     """Real struct-mode composition of the overrides as the sbatch actually spells them."""
@@ -243,6 +257,48 @@ def test_exclude_selection_val_is_a_config_key_and_a_dataclass_field():
         "exclude_selection_val" in annotated
     ), f"Stage1TrainConfig lost the exclude_selection_val field; has {sorted(annotated)}"
     assert annotated["exclude_selection_val"] == "bool", annotated["exclude_selection_val"]
+
+
+def test_label_source_is_a_config_key_and_a_dataclass_field():
+    """P2-11's knob, both halves of the job-669 contract.
+
+    ``label_source`` is the ONLY difference between the shipped scanner and the class-II-CM-
+    naive ablation, so a missing config key (Hydra struct-mode death, job 669) or a missing
+    dataclass field (the override silently dropped onto production labels — a naive run that
+    trains on TBDB001.cm structure) each voids the ablation. Assert the config key by real
+    composition — including the actual ``label_source=naive`` override — and the field by AST.
+    """
+    GlobalHydra.instance().clear()
+    try:
+        with initialize_config_dir(config_dir=str(CONF), version_base=None):
+            cfg = compose(config_name="train/stage1", overrides=[])
+            assert "label_source" in cfg, list(cfg.keys())
+            # Default must be the shipped scanner's labels, not the ablation's.
+            assert cfg.label_source == "production"
+            naive = compose(config_name="train/stage1", overrides=["label_source=naive"])
+            assert naive.label_source == "naive"
+    finally:
+        GlobalHydra.instance().clear()
+
+    tree = ast.parse((SRC / "tbox_finder" / "train" / "train_stage1.py").read_text())
+    cls = next(
+        (
+            n
+            for n in ast.walk(tree)
+            if isinstance(n, ast.ClassDef) and n.name == "Stage1TrainConfig"
+        ),
+        None,
+    )
+    assert cls is not None, "Stage1TrainConfig class not found in train_stage1.py"
+    annotated = {
+        n.target.id: ast.unparse(n.annotation)
+        for n in cls.body
+        if isinstance(n, ast.AnnAssign) and isinstance(n.target, ast.Name)
+    }
+    assert (
+        "label_source" in annotated
+    ), f"Stage1TrainConfig lost label_source; has {sorted(annotated)}"
+    assert annotated["label_source"] == "str", annotated["label_source"]
 
 
 #: The P2-10d CLI-overridable fields, with their expected dataclass annotations. Job 669's

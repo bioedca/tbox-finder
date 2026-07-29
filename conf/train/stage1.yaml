@@ -116,6 +116,14 @@ num_workers: 0
 # tests/unit/test_sbatch_overrides.py gate now composes every shipped sbatch's OWN override
 # tokens; keep any new CLI-overridable field in this file and that gate green.
 exclude_selection_val: true
+# Which per-nt target the datamodule loads. "production" (default) = the full 8-class
+# `label_string` — the shipped scanner. "naive" = `naive_label_string`, every class-II
+# record all-background so TBDB001.cm structure is withheld: the P2-11 class-II-CM-naive
+# anti-mimicry ablation (ADR-0004 D5; ADR-0005 D9), scored Stage-1-only at P4. The two
+# checkpoints share ONE partition and differ only here. ⚠ THIS KEY MUST EXIST HERE (the
+# job-669 struct-mode lesson above): slurm/p2/train_classII_naive.sbatch overrides it to
+# `label_source=naive`, and test_sbatch_overrides.py composes that token against this file.
+label_source: production
 eval_val: true
 eval_batch_size: 8
 # null ⇒ all 830 records. The smoke caps it; P2-06/P2-09 leave it null. A capped run

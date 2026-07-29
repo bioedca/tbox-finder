@@ -127,6 +127,12 @@ CLIPPED_START_COL = "clipped_start"
 CLIPPED_END_COL = "clipped_end"
 STATUS_COL = "status"
 LABEL_STRING_COL = "label_string"
+#: The class-II-CM-naive per-nt target column (labels.py:416): every class-II
+#: (TBDB001.cm-sourced) record is all-``background`` here — its structure is withheld —
+#: while class-I records are byte-identical to ``label_string``. P0-20 emits BOTH columns
+#: into ``labels_v0.parquet``; :func:`load_corpus_records` selects between them by
+#: ``label_source`` (P2-11, the class-II-CM-naive Stage-1 ablation; ADR-0004 D5).
+NAIVE_LABEL_STRING_COL = "naive_label_string"
 LABELS_ID_COL = "record_sha256"
 COGNATE_AA_COL = "cognate_aa"
 KLASS_COL = "klass"
@@ -655,11 +661,44 @@ def _exclusion_reason(row: Mapping[str, Any], *, window: int) -> str | None:
     return None
 
 
+#: Which per-nt target column each ``label_source`` reads from the labels table.
+#: ``"production"`` = the full 8-class ``label_string`` (the shipped scanner);
+#: ``"naive"`` = ``naive_label_string``, class-II CM structure withheld (the P2-11
+#: anti-mimicry ablation, ADR-0004 D5 / ADR-0005 D9). The two checkpoints share one
+#: leakage-controlled partition and differ ONLY in this column (ADR-0004:100).
+LABEL_SOURCE_PRODUCTION = "production"
+LABEL_SOURCE_NAIVE = "naive"
+LABEL_SOURCE_COLUMNS: dict[str, str] = {
+    LABEL_SOURCE_PRODUCTION: LABEL_STRING_COL,
+    LABEL_SOURCE_NAIVE: NAIVE_LABEL_STRING_COL,
+}
+
+
+def resolve_label_column(label_source: str) -> str:
+    """Map a ``label_source`` to the labels-table column it reads.
+
+    Fails LOUD on any unrecognised source rather than falling back to the production
+    column: a silent fallback would train the "naive" ablation on the CM-bearing labels
+    it exists to withhold and report success — the anti-mimicry test would then be
+    measuring RF00230 mimicry, exactly the confound PRD §5 mech 3 rules out (CLAUDE.md
+    §10.3). ``Stage1TrainConfig.__post_init__`` also rejects the value at config
+    construction, so an unknown source is unreachable from Hydra as well as from here.
+    """
+    try:
+        return LABEL_SOURCE_COLUMNS[label_source]
+    except KeyError:
+        raise ValueError(
+            f"unknown label_source {label_source!r}; expected one of "
+            f"{sorted(LABEL_SOURCE_COLUMNS)}"
+        ) from None
+
+
 def _merge_corpus_tables(
     *,
     context_parquet: str | Path,
     labels_parquet: str | Path,
     split_table: str | Path,
+    label_column: str = LABEL_STRING_COL,
 ) -> Any:
     """Join the P2-00 context, the P0-20 labels, and the ADR-0004 split table.
 
@@ -678,6 +717,22 @@ def _merge_corpus_tables(
     lab = pd.read_parquet(labels_parquet)
     spl = pd.read_parquet(split_table)
 
+    if label_column not in lab.columns:
+        raise ValueError(
+            f"labels table {labels_parquet} has no {label_column!r} column "
+            f"(has {sorted(lab.columns)}); the class-II-CM-naive ablation needs the "
+            f"{NAIVE_LABEL_STRING_COL!r} column P0-20 emits — stage a labels_v0.parquet "
+            "that carries it (a stale production-only table would silently un-withhold)."
+        )
+    # Select the requested per-nt target and normalise it to LABEL_STRING_COL so
+    # _corpus_record reads ONE column name whichever source was chosen. The source is
+    # recorded in load_corpus_records' report, never smuggled through the column name —
+    # a mislabelled column would let a naive run describe itself as production, or vice
+    # versa, with the actual target unchanged (CLAUDE.md §10.3).
+    labels_view = lab[[LABELS_ID_COL, label_column, COGNATE_AA_COL]].rename(
+        columns={label_column: LABEL_STRING_COL}
+    )
+
     positives = spl[spl[SOURCE_COL] == POSITIVE_SOURCE]
     keep = [
         RECORD_ID_COL,
@@ -689,7 +744,7 @@ def _merge_corpus_tables(
         *FOLD_SCHEME_COLUMNS,
     ]
     merged = ctx.merge(
-        lab[[LABELS_ID_COL, LABEL_STRING_COL, COGNATE_AA_COL]],
+        labels_view,
         left_on=RECORD_ID_COL,
         right_on=LABELS_ID_COL,
         how="inner",
@@ -795,6 +850,7 @@ def load_corpus_records(
     *,
     context_parquet: str | Path = DEFAULT_CONTEXT,
     labels_parquet: str | Path = DEFAULT_LABELS,
+    label_source: str = LABEL_SOURCE_PRODUCTION,
     split_table: str | Path = DEFAULT_SPLIT_TABLE,
     window: int = WINDOW_NT,
     training_fold_only: bool = True,
@@ -834,10 +890,12 @@ def load_corpus_records(
             "carve partitions the nested training fold, so removing it from a pooled "
             "train+val+test load is not a defined operation"
         )
+    label_column = resolve_label_column(label_source)
     merged = _merge_corpus_tables(
         context_parquet=context_parquet,
         labels_parquet=labels_parquet,
         split_table=split_table,
+        label_column=label_column,
     )
 
     n_total = len(merged)
@@ -876,6 +934,11 @@ def load_corpus_records(
         "schema_version": SCHEMA_VERSION,
         "step": STEP,
         "window_nt": int(window),
+        # The per-nt target actually loaded — the RESOLVED source, not the requested one:
+        # a naive ablation records label_source="naive"/label_column="naive_label_string"
+        # so its run report proves it withheld TBDB001.cm structure (P2-11; ADR-0004 D5).
+        "label_source": str(label_source),
+        "label_column": str(label_column),
         "n_context_records": int(n_total),
         "training_fold_only": bool(training_fold_only),
         "fold_scope": fold_scope,
