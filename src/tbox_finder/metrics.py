@@ -82,6 +82,7 @@ __all__ = [
     "recall_at_matched_precision",
     "recall_gap_pp",
     "gate1_recall_bar",
+    "reliability_bins",
     "binned_ece",
     "gate2_ece_pass",
     "macro_average",
@@ -370,6 +371,57 @@ def gate1_recall_bar(
 # --------------------------------------------------------------------------- #
 # Calibration: binned ECE (GATE-2)
 # --------------------------------------------------------------------------- #
+def reliability_bins(
+    y_true: Sequence[int],
+    p_pos: Sequence[float],
+    n_bins: int = ECE_N_BINS,
+) -> list[dict]:
+    """The per-bin reliability table underlying :func:`binned_ece` — one row per non-empty
+    **equal-mass** bin, in ascending-confidence order (ADR-0005 D11).
+
+    Each row carries ``{n, weight, p_min, p_max, conf, acc, gap, debiased_gap}``: ``conf``
+    is the mean posterior in the bin, ``acc`` the observed positive rate, ``gap``
+    ``|acc − conf|``, and ``debiased_gap`` that gap less the calibrated-null noise floor
+    (see :func:`binned_ece` for the correction and its provenance).
+
+    **This is the single implementation of the binning.** :func:`binned_ece` is a weighted
+    sum over these rows, and the P2-13 reliability diagram plots them, so the plotted curve
+    and the reported ECE cannot drift apart ([[promote-dont-duplicate-is-a-correctness-rule]]:
+    a second copy of the bin arithmetic means fixing one and shipping the bug in the other).
+    The non-tautological guard on the shared kernel is the hand-computed expectation in
+    ``tests/ml/test_eval_gate.py`` — a delegation makes an "A agrees with B" test vacuous,
+    an independently-computed number does not.
+    """
+    if len(y_true) != len(p_pos):
+        raise ValueError("y_true and p_pos must be the same length")
+    n = len(p_pos)
+    if n == 0:
+        return []
+    order = sorted(range(n), key=lambda k: p_pos[k])
+    rows: list[dict] = []
+    for b in _array_split(order, n_bins):
+        if not b:
+            continue
+        m = len(b)
+        conf = sum(p_pos[k] for k in b) / m
+        acc = sum(1 for k in b if y_true[k] == 1) / m
+        gap = abs(acc - conf)
+        sigma = math.sqrt(max(conf * (1.0 - conf), 0.0) / m)
+        rows.append(
+            {
+                "n": m,
+                "weight": m / n,
+                "p_min": p_pos[b[0]],
+                "p_max": p_pos[b[-1]],
+                "conf": conf,
+                "acc": acc,
+                "gap": gap,
+                "debiased_gap": max(0.0, gap - sigma * math.sqrt(2.0 / math.pi)),
+            }
+        )
+    return rows
+
+
 def binned_ece(
     y_true: Sequence[int],
     p_pos: Sequence[float],
@@ -394,25 +446,17 @@ def binned_ece(
     mean of a half-normal, the leading-order ``E|acc_b − conf_b|`` under the calibrated
     null) — flooring each debiased gap at 0. Final certification of the debiasing term is
     a P3-exit / ADR concern (CLAUDE.md §7); ``debias=False`` gives the raw plug-in ECE.
+
+    Computed as the weighted sum over :func:`reliability_bins` — the one place the binning
+    lives, so the reliability diagram P2-13 plots and this number are the same arithmetic.
     """
-    if len(y_true) != len(p_pos):
-        raise ValueError("y_true and p_pos must be the same length")
-    n = len(p_pos)
-    if n == 0:
+    rows = reliability_bins(y_true, p_pos, n_bins)
+    if not rows:
         return float("nan")
-    order = sorted(range(n), key=lambda k: p_pos[k])
+    key = "debiased_gap" if debias else "gap"
     ece = 0.0
-    for b in _array_split(order, n_bins):
-        if not b:
-            continue
-        m = len(b)
-        conf = sum(p_pos[k] for k in b) / m
-        acc = sum(1 for k in b if y_true[k] == 1) / m
-        gap = abs(acc - conf)
-        if debias:
-            sigma = math.sqrt(max(conf * (1.0 - conf), 0.0) / m)
-            gap = max(0.0, gap - sigma * math.sqrt(2.0 / math.pi))
-        ece += (m / n) * gap
+    for row in rows:
+        ece += row["weight"] * row[key]
     return ece
 
 
