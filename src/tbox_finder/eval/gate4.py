@@ -185,6 +185,54 @@ def score_records(
     }
 
 
+def same_number(a: float | None, b: float | None) -> bool:
+    """True iff two route-derived scores are the same number, **NaN included**.
+
+    ``nan == nan`` is False and ``nan`` is the honest value for an element no position
+    exercises, so a naive equality check would read two agreeing routes as disagreeing
+    exactly on the undefined elements — the case a consistency check most needs to pass
+    quietly. ``None`` (an absent score) matches only ``None``.
+    """
+    if a is None or b is None:
+        return a is None and b is None
+    a, b = float(a), float(b)
+    if math.isnan(a) or math.isnan(b):
+        return math.isnan(a) and math.isnan(b)
+    return math.isclose(a, b, rel_tol=1e-12, abs_tol=1e-12)
+
+
+def cross_route_disagreements(
+    *,
+    pooled_f1: Mapping[str, float],
+    pooled_iou: Mapping[str, float],
+    confusion_f1: Mapping[str, float],
+    confusion_iou: Mapping[str, float],
+    pooled_min_f1: float,
+    confusion_min_f1: float,
+) -> list[str]:
+    """Name every score the two exact routes disagree on — empty when they agree.
+
+    Each reported quantity has TWO routes in this file: the pooled ``metrics`` kernels walking
+    every position, and the ``*_from_confusion`` re-association of the per-block ``(8, 3)``
+    sufficient statistics the block bootstrap and the LOO read run on. The identity is exact,
+    not an approximation, so any disagreement is a defect in one of them — and a caller that
+    does not check would ship a report carrying ``gated.min_f1`` (pooled) and
+    ``gated.block_bootstrap_ci.point`` (confusions) as two different values of one statistic.
+
+    Pure and total: no model, no I/O, NaN-safe (see :func:`same_number`), so the check itself
+    is testable rather than reachable only through a GPU forward pass.
+    """
+    return [
+        f"{label}: pooled={pooled!r} confusions={via!r}"
+        for label, pooled, via in (
+            *((f"F1[{n}]", pooled_f1[n], confusion_f1[n]) for n in CLASS_ORDER),
+            *((f"IoU[{n}]", pooled_iou[n], confusion_iou[n]) for n in CLASS_ORDER),
+            ("gate4.min_f1", pooled_min_f1, confusion_min_f1),
+        )
+        if not same_number(pooled, via)
+    ]
+
+
 def summed_confusions(blocks: Sequence[Any]) -> Any:
     """Sum a list of ``(8, 3)`` confusion vectors into one. ``None`` on an empty list —
     never a zero matrix, which would score every class as an honest NaN and hide that
@@ -282,6 +330,14 @@ def pdb_label_noise_ceiling(fixture: Mapping[str, Any]) -> dict[str, Any]:
     entries = fixture.get("entries")
     n_entries = len(entries) if isinstance(entries, (list, dict)) else None
     estimable = not unresolved_core
+    # The prose reports the SAME numbers the block above re-derives — the deposition count
+    # from the fixture, the floor from `power.GATE4_F1_FLOOR`. Writing "0 of the 9" / "0.80"
+    # as literals would have this sentence keep asserting 9 depositions and a 0.80 floor
+    # after a tenth deposition lands or ADR-0004 re-signs δ, which is a fabricated number in
+    # a shipped report (CLAUDE.md §10.3) and would undo the point of re-deriving `estimable`
+    # from the evidence rather than restating the fixture's prose. CodeRabbit, r1.
+    depositions = f"the {n_entries}" if n_entries is not None else "the depositions supplied"
+    small_n = f"N<={n_entries}" if n_entries is not None else "small-N"
     return {
         "gated": False,
         "n_depositions": n_entries,
@@ -294,10 +350,11 @@ def pdb_label_noise_ceiling(fixture: Mapping[str, Any]) -> dict[str, Any]:
         "delta_governance": (
             "C is NOT estimable from these depositions: "
             + ", ".join(unresolved_core)
-            + " are resolved to a residue extent in 0 of the 9, so no cross-source per-nt F1 "
-            "over the gated elements exists. D6's recalibration path (floor := a documented "
-            "function of C) is therefore CLOSED and the floor stays 0.80 — the N<=9 crystal "
-            "ceiling must not one-directionally lower the bar."
+            + f" are resolved to a residue extent in 0 of {depositions}, so no cross-source "
+            "per-nt F1 over the gated elements exists. D6's recalibration path (floor := a "
+            f"documented function of C) is therefore CLOSED and the floor stays "
+            f"{GATE4_F1_FLOOR} — the {small_n} crystal ceiling must not one-directionally "
+            "lower the bar."
             if not estimable
             else (
                 "every core element is resolved in >=1 deposition, so a numeric C is now "
@@ -687,6 +744,38 @@ def compute_gate4(
 
     per_class_f1 = M.per_nt_f1_by_class(y_true, y_pred)
     iou = M.boundary_iou_by_element(y_true, y_pred)
+
+    # ── Cross-route consistency: pooled positions vs summed block confusions ──────────
+    # Every number above has TWO exact routes in this file: the pooled `metrics` kernels
+    # walking ~3.0M positions, and the `*_from_confusion` re-association of the per-block
+    # `(8, 3)` sufficient statistics that the block bootstrap and the LOO read run on. The
+    # identity is exact, not an approximation — so a disagreement is a defect in one of the
+    # two, and until now nothing here would have seen it: the report would simply carry
+    # `gated.min_f1` (pooled) and `gated.block_bootstrap_ci.point` (confusions) as two
+    # contradictory headline numbers for the same statistic. `test_confusion_route_
+    # reproduces_the_pinned_f1_and_iou_kernels` pins the identity on a fixture; this pins it
+    # on the run that actually ships (CLAUDE.md §10.3 — re-derive, never trust). CodeRabbit, r1.
+    total = summed_confusions([c for blks in scored["per_block"].values() for c in blks])
+    if total is None:
+        raise ValueError(
+            f"no per-block confusions accumulated over {len(records)} records — the gated "
+            "statistic would be computed on a population the bootstrap never saw"
+        )
+    disagreements = cross_route_disagreements(
+        pooled_f1=per_class_f1,
+        pooled_iou=iou,
+        confusion_f1=f1_by_class_from_confusion(total),
+        confusion_iou=iou_by_class_from_confusion(total),
+        pooled_min_f1=gate4["min_f1"],
+        confusion_min_f1=ci["point"],
+    )
+    if disagreements:
+        raise ValueError(
+            "the pooled-position and block-confusion metric routes disagree, so the report "
+            "would carry two different values for the same statistic:\n  "
+            + "\n  ".join(disagreements)
+        )
+
     codon = M.specifier_exact_codon_detection(
         [(t.tolist(), p.tolist()) for t, p in scored["per_record"]]
     )

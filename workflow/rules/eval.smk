@@ -45,6 +45,14 @@ rule gate4_stage1:
         train_report=_GATE4_TWIN_REPORT,
         provenance=_GATE4_TWIN_PROVENANCE,
         pdb_extents=_PDB_EXTENTS,
+        # Read by the command, just not through it: `eval.gate4` calls
+        # `window_dataset.load_gate4_eval_records`, whose `context_parquet` / `labels_parquet`
+        # / `split_table` default to exactly these three paths (DEFAULT_CONTEXT,
+        # DEFAULT_LABELS, DEFAULT_SPLIT_TABLE). Declaring them is what makes the DAG rebuild
+        # the gate when the corpus, the labels, or the split assignment changes — and the
+        # split table above is the file that DEFINES the graded population (ADR-0004 A6), so
+        # dropping it because no `--flag` names it would leave GATE-4 silently stale against
+        # a re-cut fold. Do not "clean up" these three. CodeRabbit, r1.
         context="data/interim/flank_context/context_v0.parquet",
         labels="data/processed/labels/labels_v0.parquet",
         splits="data/processed/splits/split_assignments.parquet",

@@ -1977,3 +1977,85 @@ the refuse-to-grade clause). §10.1 evidence gate N/A — every claim here is a 
 this repo's own artifacts, not a biological one. **Nothing was graded this session:** no twin
 exists yet, `reports/p2/gate4.json` is not written, and no GATE-4 number is claimed.
 **Commit.** this stanza's commit on `p2-14-gate4`.
+
+## Step P2-14 (CodeRabbit round 1) — 2026-07-30: five findings, three real, and one whose stated failure mode was wrong while the defect underneath was not
+
+**Inputs.** A real CodeRabbit CLI review of `p2-14-gate4` against `main` — 5 findings (2 major,
+3 minor) over 15 reviewed files. The GitHub check was again only the Fair-Usage
+`Review limit reached` notice rendered as a green `CodeRabbit` status
+(`[[coderabbit-fair-usage-rate-limit]]`), so the CLI is what satisfied CLAUDE.md §5.1; the
+Copilot reviewer separately reported a quota exhaustion. CI on `61a0e7a` was green.
+
+**Fixed (1) — the δ-governance sentence carried baked-in numbers.**
+`pdb_label_noise_ceiling` re-derives `estimable` from the fixture's own resolved-class map
+specifically so a tenth deposition flips it without a code change — and then the prose beside
+that derivation said *"0 of the 9"* and *"the floor stays 0.80"* as string literals. Those are
+reported numbers in a shipped artifact: after a fixture grows or ADR-0004 re-signs δ they keep
+asserting nine depositions and a 0.80 floor, and a wrong number reads exactly like a right one
+(§10.3). Both now come from the evidence — the count from the fixture's `entries`, the floor
+from `power.GATE4_F1_FLOOR` — with an honest degradation ("the depositions supplied") when the
+fixture carries no `entries` block at all, rather than an f-string rendering `None`.
+
+**Fixed (2) — one statistic, two exact routes, and nothing compared them.** Every gated number
+has two routes in `eval/gate4.py`: the pooled `metrics` kernels walking ~3.0M positions, and
+the `*_from_confusion` re-association of the per-block `(8, 3)` sufficient statistics. The
+identity is exact, and `test_confusion_route_reproduces_the_pinned_f1_and_iou_kernels` pins it
+**on a fixture** — but `compute_gate4` computed `gated.min_f1` pooled and
+`gated.block_bootstrap_ci.point` from confusions and never checked them against each other, so
+on the run that actually ships a divergence would have been published as two contradictory
+headline values for one statistic. The check is now a pure kernel,
+`cross_route_disagreements`, called on the real run and unit-tested directly: it compares all
+eight per-class F1s, all eight IoUs and the gated minimum, and names each disagreement. It is
+NaN-aware by construction — `nan == nan` is False and NaN is the honest score for an element no
+position exercises, so a naive equality check would have fired on every clean run and been
+turned off. No reported number changes (the identity is exact); what changes is that a
+divergence now raises instead of shipping.
+
+**Fixed (3) — the twin's four run signals were not gitignored.** `train_gate4_twin.sbatch`
+clones `train_production.sbatch`, including its DONE marker, flock lock and `%j` SLURM logs —
+and arrived with none of the four ignored, which is the P2-10d′-e defect one job later: a
+`git add -A` on the sacrificial cluster checkout commits a lock file and torchrun chatter where
+the sibling jobs all ignore their own. ⚠ **The reviewer's stated mechanism was wrong** — it
+claimed `_provenance_complete` would read the lock as dirty state, but `train_stage1.py:852`
+snapshots `git status --porcelain=v1 -z --untracked-files=no`, so untracked run signals are
+invisible to that gate. The hygiene defect underneath was real regardless. Rather than copy
+`test_train_production_signals.py` into a second per-file version — the arrangement where one
+copy gets fixed and the other ships the bug — its four cases are now parametrised over a
+registry of DDP training sbatches, plus a new case asserting the registry names paths the
+sbatch **actually writes**, so a drifted entry cannot make the other four self-certify.
+
+**Refuted (4) — the `gate4_stage1` rule's three "unused" parquet inputs.** `context`, `labels`
+and `splits` are declared but passed to no CLI flag, which the review read as Snakemake
+tracking files the command does not read. It reads all three:
+`eval.gate4` → `window_dataset.load_gate4_eval_records`, whose `context_parquet` /
+`labels_parquet` / `split_table` default to exactly those paths. Dropping them would stop the
+DAG rebuilding GATE-4 when the corpus, labels, or — decisively — the split table that *defines*
+the graded population (ADR-0004 A6) changes. Kept, with the reasoning written into the rule so
+the next reader does not "clean up" a staleness guard.
+
+**Refuted (5) — the hardcoded `CONDA_SH`.** The suggestion was to derive it from `$HOME`. The
+path is pinned by CLAUDE.md §9.2, all fifteen sbatch files in the repo use the same literal,
+and a `${CONDA_SH:-…}` fallback would introduce a silent path to a different conda. It would
+also break the property the twin exists to have: byte-for-byte identical to
+`train_production.sbatch` apart from the single `exclude_gate4_eval=true` override, without
+which its grade is not comparable to the shipped checkpoint's protocol.
+
+**Validation.** Unit **78/78** on the two affected files (9 new: NaN/None agreement semantics,
+the clean-run silence, four parametrised per-quantity bites, the asymmetric-NaN bite, and two
+prose-derivation cases); full local `tests/unit` + `tests/golden` **2,612 passed / 12 failed**,
+where all 12 are `ImportError` for `pyarrow` / `mamba_ssm` absent from the only local env with
+pytest — an env gap, not a regression (none of the 12 imports anything touched here;
+`[[no-local-pytest-env-validate-standalone]]`). `tests/ml/test_eval_gate.py` 10 passed / 3
+skipped. `ruff@0.15.15` + `black@25.11.0` clean; `snakemake --lint` + `-n` clean. **Four
+source-sabotage bites, each restored and sha256-verified against a pre-sabotage manifest:**
+dropping the twin lock's ignore rule → `test_every_run_signal_is_gitignored[train_gate4_twin]`
+RED by name; typo'ing a registry entry → that case **plus** the new drift case RED; restoring
+the `"0 of the 9"` / `0.8` literals → both prose cases RED; making `same_number` NaN-blind →
+the NaN case RED. ⚠ One process note worth carrying: the first restore used
+`git checkout -- .gitignore`, which reverted the file to **HEAD** and silently discarded the
+uncommitted fix along with the sabotage — the tracked-file twin of
+`[[sabotage-restore-untracked-file-git-checkout-noop]]`. The remaining three restored from a
+digest-verified backup copy.
+
+**Nothing was graded this session.** No twin exists, `reports/p2/gate4.json` is not written, and
+no GATE-4 number is claimed. **Commit.** this stanza's commit on `p2-14-gate4`.

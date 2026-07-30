@@ -167,6 +167,97 @@ def test_summed_confusions_returns_none_on_empty_rather_than_a_zero_matrix():
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# The cross-route consistency check (CodeRabbit r1): one statistic, two exact routes
+# ══════════════════════════════════════════════════════════════════════════════
+def test_same_number_treats_two_nans_as_agreement_not_disagreement():
+    """NaN is the honest score for an element no position exercises, and ``nan == nan`` is
+    False — so a naive equality check would report two AGREEING routes as disagreeing on
+    exactly the undefined elements, i.e. the check would fire on every clean run and be
+    turned off. ``None`` matches only ``None``."""
+    from tbox_finder.eval.gate4 import same_number
+
+    nan = float("nan")
+    assert same_number(nan, nan)
+    assert not same_number(nan, 0.0)
+    assert not same_number(0.0, nan)
+    assert same_number(None, None)
+    assert not same_number(None, 0.0)
+    assert same_number(0.5, 0.5)
+    assert not same_number(0.5, 0.5 + 1e-6)
+    # float noise from two orders of summation is agreement, not a defect
+    assert same_number(0.1 + 0.2, 0.3)
+
+
+def _agreeing_routes():
+    """Both routes on one expressive fixture — the clean-run state the check must not fire on."""
+    np = pytest.importorskip("numpy")
+    from tbox_finder import metrics as M
+    from tbox_finder.eval.gate4 import f1_by_class_from_confusion, iou_by_class_from_confusion
+
+    y_true, y_pred = _expressive_pair()
+    total = np.zeros((len(M.CLASS_ORDER), 3), dtype=np.int64)
+    t, p = np.asarray(y_true), np.asarray(y_pred)
+    for c in range(len(M.CLASS_ORDER)):
+        total[c] = [
+            int(np.sum((t == c) & (p == c))),
+            int(np.sum((t != c) & (p == c))),
+            int(np.sum((t == c) & (p != c))),
+        ]
+    gate = M.gate4_core_min_f1(y_true, y_pred)
+    return {
+        "pooled_f1": M.per_nt_f1_by_class(y_true, y_pred),
+        "pooled_iou": M.boundary_iou_by_element(y_true, y_pred),
+        "confusion_f1": f1_by_class_from_confusion(total),
+        "confusion_iou": iou_by_class_from_confusion(total),
+        "pooled_min_f1": gate["min_f1"],
+        "confusion_min_f1": min(gate["per_element_f1"].values()),
+    }
+
+
+def test_cross_route_check_is_silent_when_the_two_routes_agree():
+    from tbox_finder.eval.gate4 import cross_route_disagreements
+
+    assert cross_route_disagreements(**_agreeing_routes()) == []
+
+
+@pytest.mark.parametrize(
+    "field,key,expect",
+    [
+        ("confusion_f1", "Stem_I", "F1[Stem_I]"),
+        ("confusion_f1", "Terminator", "F1[Terminator]"),
+        ("confusion_iou", "Specifier", "IoU[Specifier]"),
+        ("confusion_min_f1", None, "gate4.min_f1"),
+    ],
+)
+def test_cross_route_check_bites_on_each_perturbed_score(field, key, expect):
+    """One route perturbed at one score ⇒ that score is NAMED. Parametrised per quantity
+    because a check that only notices `min_f1` would let a wrong per-class F1 or IoU into the
+    non-gated half of the report unremarked ([[sabotage-attribution-names-the-test]])."""
+    from tbox_finder.eval.gate4 import cross_route_disagreements
+
+    routes = _agreeing_routes()
+    if key is None:
+        routes[field] = float(routes[field]) - 0.01
+    else:
+        routes[field] = {**routes[field], key: float(routes[field][key]) - 0.01}
+    problems = cross_route_disagreements(**routes)
+    assert len(problems) == 1, problems
+    assert problems[0].startswith(expect), problems
+
+
+def test_cross_route_check_bites_when_one_route_alone_is_nan():
+    """The asymmetric case: a route that silently drops an element to NaN while the other
+    scores it is exactly what two implementations drifting looks like, and it must NOT be
+    absorbed by the NaN-tolerance that the both-NaN case needs."""
+    from tbox_finder.eval.gate4 import cross_route_disagreements
+
+    routes = _agreeing_routes()
+    routes["confusion_iou"] = {**routes["confusion_iou"], "Antiterminator_Tbox_seq": float("nan")}
+    problems = cross_route_disagreements(**routes)
+    assert [p.split(":")[0] for p in problems] == ["IoU[Antiterminator_Tbox_seq]"], problems
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # Macro-over-blocks (ADR-0005 D5) — undefined blocks are excluded, never 0-filled
 # ══════════════════════════════════════════════════════════════════════════════
 def test_macro_over_blocks_excludes_undefined_blocks_and_counts_them():
@@ -232,6 +323,48 @@ def test_pdb_ceiling_flips_to_estimable_when_every_core_element_resolves():
     assert got["estimable"] is True
     assert got["unresolved_core_elements"] == []
     assert "ADR-0004 re-sign-off" in got["delta_governance"]
+
+
+def test_pdb_ceiling_prose_reports_the_derived_count_and_floor_not_baked_in_literals():
+    """The δ-governance sentence is a REPORTED number, so it must track the evidence.
+
+    The block re-derives `estimable` from the fixture precisely so a tenth deposition flips it
+    on its own — but the sentence beside it used to say "0 of the 9" and "the floor stays 0.80"
+    as literals, which would keep asserting nine depositions and a 0.80 floor after the fixture
+    grew or ADR-0004 re-signed δ. A wrong number in a shipped report reads exactly like a right
+    one (CLAUDE.md §10.3). CodeRabbit, r1.
+    """
+    from tbox_finder.eval.gate4 import pdb_label_noise_ceiling
+    from tbox_finder.power import GATE4_F1_FLOOR
+
+    fixture = {
+        "entries": {f"E{i}": {} for i in range(12)},  # NOT 9
+        "label_noise_ceiling": {"cross_source_resolved_classes": {"Stem_I": ["E0", "E1"]}},
+    }
+    msg = pdb_label_noise_ceiling(fixture)["delta_governance"]
+    assert "0 of the 12" in msg, msg
+    assert "N<=12" in msg, msg
+    assert "of the 9" not in msg and "N<=9" not in msg, msg
+    assert f"floor stays {GATE4_F1_FLOOR}" in msg, msg
+
+    # …and on the committed 9-deposition fixture it still says 9, so the derivation is not
+    # just "any number": the two assertions together pin it to the fixture, not to a constant.
+    committed = pdb_label_noise_ceiling(json.loads(PDB_FIXTURE.read_text()))
+    assert "0 of the 9" in committed["delta_governance"]
+    assert committed["n_depositions"] == 9
+
+
+def test_pdb_ceiling_prose_degrades_honestly_when_the_deposition_count_is_unknown():
+    """`n_entries` is None when the fixture carries no `entries` block — the sentence must not
+    invent a count (an f-string over None would render the literal "0 of the None")."""
+    from tbox_finder.eval.gate4 import pdb_label_noise_ceiling
+
+    got = pdb_label_noise_ceiling(
+        {"label_noise_ceiling": {"cross_source_resolved_classes": {"Stem_I": ["E0"]}}}
+    )
+    assert got["n_depositions"] is None
+    assert "None" not in got["delta_governance"], got["delta_governance"]
+    assert "the depositions supplied" in got["delta_governance"]
 
 
 def test_pdb_ceiling_refuses_to_assert_non_estimability_without_the_evidence():

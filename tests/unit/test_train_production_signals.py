@@ -1,4 +1,4 @@
-"""P2-10d′-e — train_production.sbatch: RESTORE the tracked report, and IGNORE its run signals.
+"""P2-10d′-e — the DDP training sbatches: RESTORE the tracked report, and IGNORE the run signals.
 
 Two deterministic-sibling defects of the DDP report-write race, both fixable in the sbatch and
 `.gitignore` rather than in the training code:
@@ -13,25 +13,64 @@ Two deterministic-sibling defects of the DDP report-write race, both fixable in 
    train_production did not, so a `git add -A` on the cluster checkout would commit them. The
    committed report itself must stay tracked.
 
+Both properties are checked for **every** DDP training sbatch, not just the one whose defect
+named them: P2-14's `train_gate4_twin.sbatch` is a clone of `train_production.sbatch` and
+arrived with its four run signals un-ignored (CodeRabbit, r1). A per-file copy of these tests
+is how one gets fixed and the other ships the bug, so the cases are parametrised over a
+registry and a new sbatch is added by adding a row.
+
 Pure-subprocess `git` — runs in bare CI.
 """
 
 from __future__ import annotations
 
 import subprocess
+from dataclasses import dataclass
 from pathlib import Path
 
-REPO = Path(__file__).resolve().parents[2]
-SBATCH = REPO / "slurm" / "p2" / "train_production.sbatch"
+import pytest
 
-# The tracked deliverable (NOT a run signal) and the four run signals it must ignore.
-_COMMITTED_REPORT = "reports/p2/train_stage1_production.json"
-_RUN_SIGNALS = [
-    "reports/p2/train_stage1_production.DONE",
-    "reports/p2/.train_production.lock",
-    "reports/p2/train_production_678.out",  # the %j-stamped SLURM logs
-    "reports/p2/train_production_678.err",
+REPO = Path(__file__).resolve().parents[2]
+
+
+@dataclass(frozen=True)
+class TrainSbatch:
+    """One DDP training sbatch: its file, its committed deliverable, and its run signals."""
+
+    name: str
+    path: Path
+    committed_report: str
+    run_signals: tuple[str, ...]
+
+
+_JOB = "678"  # a concrete %j stamp — `check-ignore` needs a literal path, not a glob
+
+SBATCHES = [
+    TrainSbatch(
+        name="train_production",
+        path=REPO / "slurm" / "p2" / "train_production.sbatch",
+        committed_report="reports/p2/train_stage1_production.json",
+        run_signals=(
+            "reports/p2/train_stage1_production.DONE",
+            "reports/p2/.train_production.lock",
+            f"reports/p2/train_production_{_JOB}.out",
+            f"reports/p2/train_production_{_JOB}.err",
+        ),
+    ),
+    TrainSbatch(
+        name="train_gate4_twin",
+        path=REPO / "slurm" / "p2" / "train_gate4_twin.sbatch",
+        committed_report="reports/p2/train_stage1_gate4_twin.json",
+        run_signals=(
+            "reports/p2/train_stage1_gate4_twin.DONE",
+            "reports/p2/.train_gate4_twin.lock",
+            f"reports/p2/train_gate4_twin_{_JOB}.out",
+            f"reports/p2/train_gate4_twin_{_JOB}.err",
+        ),
+    ),
 ]
+
+_IDS = [s.name for s in SBATCHES]
 
 
 def _is_ignored(rel_path: str) -> bool:
@@ -52,15 +91,16 @@ def _is_ignored(rel_path: str) -> bool:
     )
 
 
-def _first_executable_line(needle: str) -> int | None:
+def _first_executable_line(sbatch: Path, needle: str) -> int | None:
     """Index of the first non-comment sbatch line with `needle` (None if only in a comment)."""
-    for i, line in enumerate(SBATCH.read_text().splitlines()):
+    for i, line in enumerate(sbatch.read_text().splitlines()):
         if needle in line and not line.lstrip().startswith("#"):
             return i
     return None
 
 
-def test_the_sbatch_restores_the_tracked_report_to_head() -> None:
+@pytest.mark.parametrize("sb", SBATCHES, ids=_IDS)
+def test_the_sbatch_restores_the_tracked_report_to_head(sb: TrainSbatch) -> None:
     """The report is restored (never rm'd) BEFORE training, so re-runs start from a clean tree.
 
     Line-based, not a bare substring: the restore must be an EXECUTABLE line (a comment
@@ -68,44 +108,70 @@ def test_the_sbatch_restores_the_tracked_report_to_head() -> None:
     placed after `torchrun` cleans the tree too late — build_report has already snapshotted).
     CodeRabbit, r1.
     """
-    restore = _first_executable_line('git checkout HEAD -- "$REPORT"')
-    train = _first_executable_line("torchrun")
+    restore = _first_executable_line(sb.path, 'git checkout HEAD -- "$REPORT"')
+    train = _first_executable_line(sb.path, "torchrun")
     assert restore is not None, (
-        "train_production.sbatch must RESTORE $REPORT to HEAD as an executable line before "
+        f"{sb.name}.sbatch must RESTORE $REPORT to HEAD as an executable line before "
         "training — otherwise run #2's build_report snapshot reads the leftover-dirty tracked "
         "report as modified code and fails provenance_complete on all 8 ranks (P2-10d′-e)."
     )
-    assert train is not None, "expected a torchrun training invocation in train_production.sbatch."
+    assert train is not None, f"expected a torchrun training invocation in {sb.name}.sbatch."
     assert restore < train, (
         "the $REPORT restore must run BEFORE torchrun, or the tree is still dirty at $REPORT when "
         "build_report snapshots git status on all 8 ranks (P2-10d′-e)."
     )
 
 
-def test_the_sbatch_never_deletes_the_tracked_report() -> None:
+@pytest.mark.parametrize("sb", SBATCHES, ids=_IDS)
+def test_the_sbatch_never_deletes_the_tracked_report(sb: TrainSbatch) -> None:
     """`rm`-ing $REPORT dirties the tree exactly like leaving it dirty does — restore instead.
 
     Belt-and-braces beside `test_sbatch_rm_targets.py`'s census: name the specific regression.
     """
-    body = SBATCH.read_text()
+    body = sb.path.read_text()
     for token in ('rm -f "$REPORT"', 'rm "$REPORT"', 'rm -rf "$REPORT"'):
         assert token not in body, (
-            f"train_production.sbatch must not delete the git-tracked report ({token!r}); "
+            f"{sb.name}.sbatch must not delete the git-tracked report ({token!r}); "
             "deleting it dirties the tree outside _DATA_STAGING_PREFIXES too (P2-10d′-c)."
         )
 
 
-def test_every_production_run_signal_is_gitignored() -> None:
+@pytest.mark.parametrize("sb", SBATCHES, ids=_IDS)
+def test_every_run_signal_is_gitignored(sb: TrainSbatch) -> None:
     """Each of DONE / lock / .out / .err is ignored — a `git add -A` cannot commit a run signal."""
-    not_ignored = [s for s in _RUN_SIGNALS if not _is_ignored(s)]
+    not_ignored = [s for s in sb.run_signals if not _is_ignored(s)]
     assert not not_ignored, (
-        "these train_production run signals are not gitignored, so `git add -A` on the cluster "
+        f"these {sb.name} run signals are not gitignored, so `git add -A` on the cluster "
         "checkout would commit them (every sibling job ignores its own): " + ", ".join(not_ignored)
     )
 
 
-def test_the_committed_report_is_not_gitignored() -> None:
+@pytest.mark.parametrize("sb", SBATCHES, ids=_IDS)
+def test_the_committed_report_is_not_gitignored(sb: TrainSbatch) -> None:
     """The deliverable stays tracked — ignoring it would silently drop the run's evidence."""
-    assert not _is_ignored(
-        _COMMITTED_REPORT
-    ), f"{_COMMITTED_REPORT} is the committed deliverable and must remain tracked, not ignored."
+    assert not _is_ignored(sb.committed_report), (
+        f"{sb.committed_report} is {sb.name}'s committed deliverable and must remain tracked, "
+        "not ignored."
+    )
+
+
+def test_the_run_signal_paths_are_the_ones_the_sbatch_actually_writes() -> None:
+    """The registry above is evidence only if it names the sbatch's OWN paths.
+
+    Without this, a typo'd or drifted entry (a renamed DONE marker, a re-pointed --output) makes
+    every case above pass while the real signals stay un-ignored — the registry would be
+    self-certifying rather than checking the file. Each signal's distinctive stem must appear in
+    the sbatch body.
+    """
+    for sb in SBATCHES:
+        body = sb.path.read_text()
+        for signal in sb.run_signals:
+            stem = Path(signal).name.split(f"_{_JOB}")[0]
+            assert stem in body, (
+                f"{sb.name}.sbatch never mentions {stem!r}, so the run signal {signal!r} this "
+                "test claims to lock is not a path that sbatch writes — the registry has drifted."
+            )
+        assert Path(sb.committed_report).name in body, (
+            f"{sb.name}.sbatch never mentions {Path(sb.committed_report).name!r} — the committed "
+            "deliverable this test protects is not the one the job writes."
+        )
