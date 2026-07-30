@@ -195,6 +195,58 @@ def test_fit_rejects_malformed_inputs(logits, labels, match: str) -> None:
         T.fit_temperature(logits, labels)
 
 
+def test_fit_refuses_a_width_terminated_bracket_rather_than_certifying_it() -> None:
+    """A bracket that collapses before the stationarity residual is reached is NOT converged.
+
+    Regression guard (CodeRabbit r1): the loop used to accept ``width <= tol`` as convergence,
+    so it could return ``converged=True`` carrying a gradient larger than ``grad_tol`` — a fit
+    whose own ``validate_report`` clause rejects it. Forced here by an absurdly tight
+    ``grad_tol`` with a loose width ``tol``.
+    """
+    logits, labels, _ = _synthetic_logits(n=800, seed=13)
+    with pytest.raises(T.TemperatureFitError, match="bracket collapsed to width"):
+        T.fit_temperature(logits, labels, tol=1e-2, grad_tol=1e-30)
+
+
+def test_per_class_reliability_rejects_a_non_posterior() -> None:
+    """NaN / out-of-range inputs sort somewhere arbitrary and return a plausible-looking ECE."""
+    n, k = 40, len(CLASS_ORDER)
+    y = [i % k for i in range(n)]
+    probs = np.full((n, k), 1.0 / k)
+    good = T.per_class_reliability(y, probs)
+    assert set(good) == set(CLASS_ORDER)
+    for corrupt, needle in (
+        (np.nan, "n_nonfinite"),
+        (1.5, "max="),
+        (-0.5, "min="),
+        (np.inf, "n_nonfinite"),
+    ):
+        bad = probs.copy()
+        bad[3, 2] = corrupt
+        with pytest.raises(ValueError, match=needle):
+            T.per_class_reliability(y, bad)
+
+
+def test_portable_path_relativises_in_tree_inputs_only() -> None:
+    from pathlib import Path
+
+    checkout = Path(T.__file__).resolve().parents[3]
+    rel = "data/processed/checkpoints/stage1_production/stage1.pt"
+    assert T._portable_path(checkout / rel) == rel
+    assert not T._portable_path(checkout / rel).startswith("/")  # no home dir in a public file
+    # a worktree's inputs live in the MAIN checkout (DVC data is materialised only there), so
+    # relativising against the worktree alone would fall back to absolute for every real input
+    parts = checkout.parts
+    if ".claude" in parts and parts[parts.index(".claude") : parts.index(".claude") + 2] == (
+        ".claude",
+        "worktrees",
+    ):
+        main_checkout = Path(*parts[: parts.index(".claude")])
+        assert T._portable_path(main_checkout / rel) == rel
+    outside = Path("/opt/elsewhere/stage1.pt")
+    assert T._portable_path(outside) == "/opt/elsewhere/stage1.pt"
+
+
 @pytest.mark.parametrize("bad", [0.0, -1.0, float("nan"), float("inf"), True, "2"])
 def test_apply_temperature_rejects_a_non_temperature(bad) -> None:
     with pytest.raises(T.TemperatureFitError):
@@ -471,6 +523,42 @@ def test_validator_is_total_on_junk() -> None:
         problems = T.validate_report(junk)  # type: ignore[arg-type]
         assert problems and isinstance(problems, list)
         assert T.derive_clauses(junk if isinstance(junk, dict) else {})["overall_pass"] is False
+
+
+@pytest.mark.parametrize(
+    ("mutate", "expect"),
+    [
+        # each of these used to RAISE inside the validator (TypeError / KeyError), and a
+        # validator that dies reports nothing — strictly worse than one that reports a problem
+        (
+            lambda r: r["read"]["tempered"]["per_class"]["background"].update(reliability=["x"]),
+            "row",
+        ),
+        (
+            lambda r: r["read"]["uncalibrated"]["per_class"]["Stem_I"]["reliability"][0].pop(
+                "weight"
+            ),
+            "row",
+        ),
+        (
+            lambda r: r["read"]["tempered"]["per_class"]["Stem_I"]["reliability"][0].update(
+                debiased_gap="big"
+            ),
+            "row",
+        ),
+        (lambda r: r["read"]["uncalibrated"]["per_class"].update(Stem_I=None), "not a mapping"),
+        (
+            lambda r: r["read"]["tempered"]["per_class"]["Specifier"].pop("ece"),
+            "core element's ece",
+        ),
+    ],
+)
+def test_validator_never_raises_on_a_malformed_report(mutate, expect: str) -> None:
+    report = _valid_report()
+    mutate(report)
+    problems = T.validate_report(report)  # must RETURN, not raise
+    assert any(expect in p for p in problems), f"expected {expect!r} in {problems}"
+    assert T.derive_clauses(report)["overall_pass"] is False
 
 
 def test_figure_data_carries_the_plotted_curves_only() -> None:

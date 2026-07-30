@@ -110,6 +110,13 @@ DISCLOSURES: tuple[str, ...] = (
     "background; the per-class one-vs-rest reads are reported separately for that reason, "
     "with no cross-class mean (the core-element summary is the WORST/max, mirroring GATE-4's "
     "min-over-core discipline).",
+    "NOT bit-reproducible run-to-run: the fit and the halving are exactly deterministic, but "
+    "the GPU forward is not (the Mamba/CUDA kernels reduce in a run-dependent order). "
+    "MEASURED over two full re-runs of this artifact at the same commit and inputs: T, every "
+    "count (arg-max changes, coverage, cluster halves) and gate4_core_min_f1 are IDENTICAL; "
+    "every per-class ECE agrees to <= 3e-8 relative; the largest disagreement anywhere in the "
+    "read is 4.5e-6 relative on a bin edge, and `temperature.grad_at_solution` — a cancelling "
+    "sum over ~1.8e6 terms — differs by 2.7e-4 relative. Re-derive, do not diff for equality.",
 )
 
 STACK_ORDER: tuple[str, ...] = ("train", "temperature_scale", "prior_shift")
@@ -287,9 +294,21 @@ def fit_temperature(
         iterations += 1
         beta = 0.5 * (lo + hi)
         _, grad = _nll_and_grad(z, y, beta)
-        if abs(grad) <= grad_tol or (hi - lo) <= tol * max(1.0, beta):
+        if abs(grad) <= grad_tol:
             converged = True
             break
+        if (hi - lo) <= tol * max(1.0, beta):
+            # ⚠ Width alone must NOT certify convergence. It used to, and that made the two
+            # exits disagree: a width-terminated fit returned `converged=True` carrying a
+            # gradient larger than `grad_tol`, which is precisely what `validate_report`
+            # rejects — the module could emit a report its own validator refuses (the P2-12
+            # `build_report`-vs-`validate_report` shape, one layer in). If the bracket
+            # collapses before the stationarity residual is reached, no T is certified.
+            raise TemperatureFitError(
+                f"bracket collapsed to width {hi - lo:.3g} at beta={beta:.6g} while "
+                f"|dNLL/dbeta|={abs(grad):.6g} still exceeds grad_tol {grad_tol:.3g}: the "
+                "stationarity residual is not attainable at this scale, so no T is certified"
+            )
         if grad > 0.0:
             hi = beta
         else:
@@ -414,6 +433,18 @@ def per_class_reliability(
         raise ValueError(f"y_true carries {len(y_true)} positions but probs carries {p.shape[0]}")
     if p.shape[1] != len(CLASS_ORDER):
         raise ValueError(f"probs carries {p.shape[1]} classes, expected {len(CLASS_ORDER)}")
+    # The estimator sorts by posterior, so a NaN or an out-of-range value does not fail — it
+    # sorts somewhere arbitrary and returns a number that looks like an ECE (§10.3). The check
+    # lives HERE rather than inside `metrics.binned_ece` on purpose: that kernel is frozen and
+    # golden-locked (tests/ml/test_eval_gate.py), and a per-call scan of its Sequence inputs
+    # would run once per class per bootstrap replicate. One vectorised check per read is O(N)
+    # in numpy and covers every value this module ever hands it.
+    if not np.isfinite(p).all() or float(p.min()) < 0.0 or float(p.max()) > 1.0:
+        raise ValueError(
+            "probs must be finite and in [0, 1] — got "
+            f"min={float(np.nanmin(p))!r} max={float(np.nanmax(p))!r} "
+            f"n_nonfinite={int((~np.isfinite(p)).sum())}"
+        )
     truth = np.asarray(y_true, dtype=np.int64)
     out: dict[str, dict[str, Any]] = {}
     for i, name in enumerate(CLASS_ORDER):
@@ -488,6 +519,35 @@ def _forward_window_logits(
     finally:
         if was_training:
             model.train()
+
+
+def _portable_path(path: Path) -> str:
+    """A repo-relative path when the file sits under the checkout, else the absolute one.
+
+    The artifact is committed to a **public** repo, so recording ``/home/<user>/…`` would ship
+    a developer-specific path that no reviewer can resolve and that names a local account for
+    no provenance gain. Falls back to the absolute path when the input genuinely lives outside
+    the checkout — an out-of-tree input is a fact worth recording, not one worth hiding.
+
+    Both the running checkout **and** its main checkout are tried, because this step runs from
+    a `.claude/worktrees/<concern>` worktree (CLAUDE.md §5.0) while the DVC-tracked inputs are
+    materialised only in the main checkout: relativising against the worktree alone would fall
+    back to absolute for every real input and the guard would never fire where it matters.
+    """
+    resolved = path.resolve()
+    checkout = Path(__file__).resolve().parents[3]
+    roots = [checkout]
+    parts = checkout.parts
+    if ".claude" in parts:
+        idx = parts.index(".claude")
+        if parts[idx : idx + 2] == (".claude", "worktrees"):
+            roots.append(Path(*parts[:idx]))
+    for root in roots:
+        try:
+            return str(resolved.relative_to(root))
+        except ValueError:
+            continue
+    return str(resolved)
 
 
 def _reconcile(window_logits: np.ndarray, starts: Sequence[int], seq_len: int) -> Any:
@@ -668,7 +728,7 @@ def run_calibration(
         "generated_at_utc": datetime.now(UTC).isoformat(timespec="seconds"),
         "is_science": False,
         "gated": False,
-        "checkpoint": str(ckpt),
+        "checkpoint": _portable_path(ckpt),
         "geometry": {"window_nt": int(window_nt), "stride_nt": int(stride_nt)},
         "stack_order": {
             "pinned": list(STACK_ORDER),
@@ -852,6 +912,9 @@ def validate_report(report: Mapping[str, Any]) -> list[str]:
             problems.append(f"read.{cond}.per_class: must carry exactly the 8 CLASS_ORDER keys")
             continue
         for name, entry in per_class.items():
+            if not isinstance(entry, Mapping):
+                problems.append(f"read.{cond}.per_class.{name}: not a mapping")
+                continue
             ece = entry.get("ece")
             if not _finite(ece) or not 0.0 <= float(ece) <= 1.0:
                 problems.append(f"read.{cond}.per_class.{name}.ece: not a probability-scale value")
@@ -859,7 +922,22 @@ def validate_report(report: Mapping[str, Any]) -> list[str]:
             if not isinstance(rows, list) or not rows:
                 problems.append(f"read.{cond}.per_class.{name}.reliability: missing bin table")
                 continue
-            weight = sum(float(r.get("weight", 0.0)) for r in rows)
+            # ⚠ Shape-check the rows BEFORE arithmetic on them. This function's contract is
+            # "total — returns problems, never raises", and a validator that dies on a
+            # malformed artifact reports nothing, which is strictly worse than one that
+            # reports a problem (the P2-12 round-4 lesson, same failure one layer in).
+            if not all(
+                isinstance(r, Mapping)
+                and _finite(r.get("weight"))
+                and _finite(r.get("debiased_gap"))
+                for r in rows
+            ):
+                problems.append(
+                    f"read.{cond}.per_class.{name}.reliability: every row must carry a finite "
+                    "'weight' and 'debiased_gap'"
+                )
+                continue
+            weight = sum(float(r["weight"]) for r in rows)
             if abs(weight - 1.0) > 1e-9:
                 problems.append(
                     f"read.{cond}.per_class.{name}.reliability: bin weights sum to {weight!r}"
@@ -870,8 +948,16 @@ def validate_report(report: Mapping[str, Any]) -> list[str]:
                     f"read.{cond}.per_class.{name}: reported ece {ece!r} does not re-sum from "
                     f"its own reliability rows ({resummed!r})"
                 )
-        if _finite(block.get("core_worst_ece")):
-            worst = max(float(per_class[e]["ece"]) for e in CORE_ELEMENTS)
+        core_eces = [
+            per_class[e].get("ece") for e in CORE_ELEMENTS if isinstance(per_class.get(e), Mapping)
+        ]
+        if len(core_eces) != len(CORE_ELEMENTS) or not all(_finite(v) for v in core_eces):
+            problems.append(
+                f"read.{cond}.per_class: a core element's ece is missing or not finite, so "
+                "core_worst_ece cannot be re-derived"
+            )
+        elif _finite(block.get("core_worst_ece")):
+            worst = max(float(v) for v in core_eces)
             if abs(float(block["core_worst_ece"]) - worst) > 1e-12:
                 problems.append(
                     f"read.{cond}.core_worst_ece: {block['core_worst_ece']!r} is not the max over "
