@@ -19,5 +19,12 @@
   "n_positives": 100,
   "n_seg_positions": 41513,
   "recall_at_matched_precision": 0.95,
-  "recall_gap_pp": 13.0
+  "recall_gap_pp": 13.0,
+  "specifier_exact_codon": {
+    "exact_rate": 0.010638297872340425,
+    "n_exact": 1,
+    "n_overlapping": 93,
+    "n_right_length": 1,
+    "n_scorable": 94
+  }
 }

@@ -161,6 +161,15 @@ POSITIVE_SOURCE = "corpus"
 # See `load_selection_val_records` for the rung that replaced it.
 FOLD_RANDOM_VAL = "val"
 
+#: Scheme A's **test** fold value — the other half of the independence problem
+#: :data:`FOLD_RANDOM_VAL` documents, and the one GATE-4 grades. `fold_random == "test"`
+#: alone is **51.2 % training records** (1,204 / 2,353 corpus rows are ``nested_train``);
+#: of the 1,149 that are not, 796 are LOO/phylum/anchor holdouts and the remaining 353 are
+#: the clade-crossing + no-clade residue splits.py marks *never scored*. So the GATE-4
+#: population is the **intersection** with ``nested_train``, withheld from the twin's
+#: training stream by whole clusters (:func:`gate4_eval_cluster_ids`). ADR-0004 A6.
+FOLD_RANDOM_TEST = "test"
+
 #: Fold scopes a loader can return.
 #:
 #: * ``train`` — the full ADR-0004 D5 nested training fold (8,303 rec / 4,775 clusters).
@@ -168,13 +177,27 @@ FOLD_RANDOM_VAL = "val"
 #:   point actually trains on.
 #: * ``selection_val`` — the P2-06a inner rung carved from *inside* ``train``: what P2-06
 #:   promotes its best config on (:func:`load_selection_val_records`).
+#: * ``gate4_eval`` — the ADR-0004 **A6** GATE-4 graded population: scheme-A ``test``
+#:   **inside** ``nested_train`` (:func:`load_gate4_eval_records`).
+#: * ``gate4_twin_train`` — ``train`` minus the ``gate4_eval`` clusters: what the GATE-4
+#:   eval twin trains on. The **shipped** checkpoint is not this scope (it trained on all
+#:   of ``train``, ``gate4_eval`` included) — which is the whole reason the twin exists.
+#: * ``loo_holdout`` — the designated leave-one-order-out holdout, reported **non-gated**
+#:   at P2-14 and genuinely held out from *both* checkpoints
+#:   (:func:`load_loo_holdout_records`).
 FOLD_SCOPE_TRAIN = "train"
 FOLD_SCOPE_INNER_TRAIN = "inner_train"
 FOLD_SCOPE_SELECTION_VAL = "selection_val"
+FOLD_SCOPE_GATE4_EVAL = "gate4_eval"
+FOLD_SCOPE_GATE4_TWIN_TRAIN = "gate4_twin_train"
+FOLD_SCOPE_LOO_HOLDOUT = "loo_holdout"
 FOLD_SCOPE_ALL = "all"
 
 #: The step that owns the selection-val loader (its report's provenance).
 STEP_SELECTION_VAL = "P2-06a"
+
+#: The step that owns the GATE-4 folds (ADR-0004 D6 + A6).
+STEP_GATE4 = "P2-14"
 
 #: The P2-06a inner-rung carve (user decision 2026-07-17, re-taken after the first
 #: definition was measured to be 88.4% designated-LOO-holdout).
@@ -846,6 +869,46 @@ def selection_val_cluster_ids(
     return frozenset(chosen)
 
 
+def gate4_eval_cluster_ids(rows: Sequence[Mapping[str, Any]]) -> frozenset[int]:
+    """The whole clusters forming the ADR-0004 **A6** GATE-4 graded population.
+
+    **The rule.** A cluster is in the GATE-4 bucket iff it contains at least one corpus
+    record that is both ``nested_train`` and scheme-A ``fold_random == "test"``. Unlike
+    :func:`selection_val_cluster_ids` this is **not** a seeded draw — it is a *lookup* of
+    a partition splits.py already committed, so there is no fraction, no seed, and nothing
+    to re-derive differently on a re-run.
+
+    **Why clusters and not records.** ``fold_random`` is assigned whole-cluster, but
+    ``nested_train`` is an independent filter, so their intersection can be a strict
+    *part* of a scheme-A cluster (the rest of it held out for LOO/clade-crossing reasons).
+    Withholding only the intersection's records would leave their homologous cluster-mates
+    in training — precisely the PRD §9.2 cluster-non-splitting violation the whole split
+    ladder exists to prevent. Taking the closure is measurable, and on the committed table
+    it is free: the closure over ``nested_train`` is exactly the 1,204 records themselves
+    (measured — every cluster-mate inside the training fold is already in the bucket).
+
+    Returns the cluster ids; the *records* are loaded by :func:`load_gate4_eval_records`
+    and withheld from training by ``load_corpus_records(exclude_gate4_eval=True)``.
+    """
+    return frozenset(
+        int(r[CLUSTER_COL])
+        for r in rows
+        if bool(r[NESTED_TRAIN_COL]) and str(r[FOLD_RANDOM_COL]) == FOLD_RANDOM_TEST
+    )
+
+
+def record_order(record: CorpusRecord) -> str:
+    """The record's taxonomic **order** (splits.py's ``loo_order_unit``), off ``folds``.
+
+    The leave-one-order-out block key. Read through
+    ``FOLD_SCHEME_COLUMNS.index`` rather than a hard-coded tuple position so a column
+    reordering upstream is a loud failure here, not a silently mis-keyed macro-average.
+    """
+    idx = FOLD_SCHEME_COLUMNS.index("loo_order_unit")
+    value = record.folds[idx]
+    return _normalise_stratum(value)
+
+
 def load_corpus_records(
     *,
     context_parquet: str | Path = DEFAULT_CONTEXT,
@@ -855,6 +918,7 @@ def load_corpus_records(
     window: int = WINDOW_NT,
     training_fold_only: bool = True,
     exclude_selection_val: bool | None = None,
+    exclude_gate4_eval: bool = False,
     selection_val_fraction: float = SELECTION_VAL_FRACTION,
     selection_val_seed: int = SELECTION_VAL_SEED,
 ) -> tuple[list[CorpusRecord], dict[str, Any]]:
@@ -875,9 +939,18 @@ def load_corpus_records(
     retrain once the config is fixed, and :mod:`sizing`, whose committed P2-05 figures are
     full-fold extrapolations — must say ``exclude_selection_val=False`` and mean it.
 
+    ``exclude_gate4_eval`` (default **off**) additionally removes the
+    :func:`gate4_eval_cluster_ids` bucket — scheme-A ``test`` inside ``nested_train``,
+    by whole clusters — yielding the ``gate4_twin_train`` fold the **GATE-4 eval twin**
+    trains on (ADR-0004 A6). Off by default because it is not the shipped protocol: the
+    P2-10d′-b production checkpoint trained on all of ``train``, which is precisely why
+    GATE-4 has no untrained-on in-distribution population without this flag. A run that
+    sets it is an eval twin and says so in its report; a run that does not, is not.
+
     ⚠ ``training_fold_only=False`` returns train+val+test **pooled**, not a val fold; the
     carve is undefined there (it is a partition *of the training fold*), so passing
-    ``exclude_selection_val=True`` alongside it raises rather than silently no-opping.
+    ``exclude_selection_val=True`` — or ``exclude_gate4_eval=True`` — alongside it raises
+    rather than silently no-opping.
 
     Returns ``(records, report)``; the report counts every exclusion by reason
     (CLAUDE.md §10.3 — excluded records are reported, never silently dropped).
@@ -889,6 +962,12 @@ def load_corpus_records(
             "exclude_selection_val=True requires training_fold_only=True — the P2-06a "
             "carve partitions the nested training fold, so removing it from a pooled "
             "train+val+test load is not a defined operation"
+        )
+    if exclude_gate4_eval and not training_fold_only:
+        raise ValueError(
+            "exclude_gate4_eval=True requires training_fold_only=True — the ADR-0004 A6 "
+            "GATE-4 population is defined as scheme-A test INSIDE nested_train, so "
+            "removing it from a pooled train+val+test load is not a defined operation"
         )
     label_column = resolve_label_column(label_source)
     merged = _merge_corpus_tables(
@@ -907,17 +986,24 @@ def load_corpus_records(
             fraction=selection_val_fraction,
             seed=selection_val_seed,
         )
+    gate4_clusters: frozenset[int] = frozenset()
+    if exclude_gate4_eval:
+        gate4_clusters = gate4_eval_cluster_ids(rows)
 
     excluded: Counter[str] = Counter()
     records: list[CorpusRecord] = []
     n_out_of_fold = 0
     n_selection_val = 0
+    n_gate4_eval = 0
     for row in rows:
         if training_fold_only and not bool(row[NESTED_TRAIN_COL]):
             n_out_of_fold += 1
             continue
         if exclude_selection_val and int(row[CLUSTER_COL]) in val_clusters:
             n_selection_val += 1
+            continue
+        if exclude_gate4_eval and int(row[CLUSTER_COL]) in gate4_clusters:
+            n_gate4_eval += 1
             continue
         reason = _exclusion_reason(row, window=window)
         if reason is not None:
@@ -926,10 +1012,20 @@ def load_corpus_records(
         records.append(_corpus_record(row))
     records.sort(key=lambda r: r.record_id)
 
-    if training_fold_only:
-        fold_scope = FOLD_SCOPE_INNER_TRAIN if exclude_selection_val else FOLD_SCOPE_TRAIN
-    else:
+    if not training_fold_only:
         fold_scope = FOLD_SCOPE_ALL
+    elif exclude_gate4_eval:
+        # The twin's scope wins the name because it is the one an operator must be able to
+        # read off a report without recomputing anything: `gate4_twin_train` is the ONLY
+        # scope whose checkpoint may be graded by GATE-4 (ADR-0004 A6), and a run that
+        # merely said `inner_train` while also withholding the graded fold would be
+        # indistinguishable from a sweep point. Both flags are still reported separately
+        # below, so the composite is re-derivable and not merely asserted here.
+        fold_scope = FOLD_SCOPE_GATE4_TWIN_TRAIN
+    elif exclude_selection_val:
+        fold_scope = FOLD_SCOPE_INNER_TRAIN
+    else:
+        fold_scope = FOLD_SCOPE_TRAIN
     report = {
         "schema_version": SCHEMA_VERSION,
         "step": STEP,
@@ -947,6 +1043,14 @@ def load_corpus_records(
         # reach. Measured on the pass that emitted `records`, not predicted from the rule.
         "n_selection_val_excluded": int(n_selection_val),
         "n_selection_val_clusters": len(val_clusters),
+        # ADR-0004 A6. The twin's own evidence that the graded fold never entered its
+        # gradients — MEASURED on the pass that emitted `records`, so a flag that was set
+        # but reached nothing reads as 0 here and the twin gate refuses it. (A flag read
+        # back from the config would be vacuously true exactly when the carve misfired:
+        # [[clauses-must-guard-emptiness]].)
+        "exclude_gate4_eval": bool(exclude_gate4_eval),
+        "n_gate4_eval_excluded": int(n_gate4_eval),
+        "n_gate4_eval_clusters": len(gate4_clusters),
         "n_out_of_training_fold": int(n_out_of_fold),
         "n_excluded": int(sum(excluded.values())),
         "excluded_by_reason": dict(sorted(excluded.items())),
@@ -1200,6 +1304,322 @@ def selection_val_problems(report: Mapping[str, Any]) -> list[str]:
     if not isinstance(n_ii, int) or isinstance(n_ii, bool) or n_ii < 0:
         problems.append(f"class_ii_records: must be a non-negative int, got {n_ii!r}")
     return problems
+
+
+def load_gate4_eval_records(
+    *,
+    context_parquet: str | Path = DEFAULT_CONTEXT,
+    labels_parquet: str | Path = DEFAULT_LABELS,
+    split_table: str | Path = DEFAULT_SPLIT_TABLE,
+    window: int = WINDOW_NT,
+) -> tuple[list[CorpusRecord], dict[str, Any]]:
+    """Load the **GATE-4 graded population** (ADR-0004 D6 gated quantity, A6 population).
+
+    ``nested_train`` ∧ scheme-A ``fold_random == "test"``, whole-cluster closed — the
+    in-distribution homology-clustered genus-stratified split D6 gates on. On the
+    committed table: **1,201 records / 1,029 clusters / 154 genera / 15 orders**, after
+    filter 3 drops 3 records whose real context is shorter than one window.
+
+    **Why this fold and not the obvious ones.** Three candidate populations look like
+    "scheme-A held out" and none of them is:
+
+    * ``fold_random == "test"`` raw — **51.2 %** of it (1,204 / 2,353 corpus rows) is
+      inside the training fold, because ``fold_random`` and ``nested_train`` are
+      independent schemes on one table (the P2-06a lesson, one rung up).
+    * that minus the training fold — **796 of the remaining 1,149** are LOO-designated
+      (786) or Actinobacteria/anchor (10) holdouts. That is the *generalization* split;
+      grading D6's in-distribution reference on it would both answer the wrong question
+      and pre-read the PRD §12:241 headline.
+    * the 353 that are neither — clade-crossing debris (271) and the no-clade D4 residue
+      (82), which ``splits.py`` marks **never scored** in both cases.
+
+    So the graded population must come from *inside* the training fold, and the checkpoint
+    that grades it must be one that withheld it: the **GATE-4 eval twin**
+    (``load_corpus_records(exclude_gate4_eval=True)``). The shipped P2-10d′-b checkpoint
+    trained on all 8,303 records and therefore **cannot** be graded on any in-distribution
+    population — the two-run split PRD §10.1 requires the model card to disclose.
+
+    Filters, in order (each counted, never silent):
+
+    1. ``nested_train`` — the population is carved from inside the training fold.
+    2. ``fold_random == "test"`` — scheme A's held-out third, assigned whole-cluster and
+       genus-stratified by ``splits.py``.
+    3. ``len(context_seq) >= window`` — the eval tiles the **full context**, so every
+       window must be wholly real DNA (no invented boundary; PRD §6).
+
+    Returns ``(records, report)``. Every number in ``report["leakage"]`` is measured back
+    off the emitted records, never asserted from the filter that produced them
+    ([[gate-clauses-need-re-derivation]]).
+    """
+    merged = _merge_corpus_tables(
+        context_parquet=context_parquet,
+        labels_parquet=labels_parquet,
+        split_table=split_table,
+    )
+
+    rows = merged.to_dict("records")
+    gate4_clusters = gate4_eval_cluster_ids(rows)
+
+    n_total = len(rows)
+    excluded: Counter[str] = Counter()
+    records: list[CorpusRecord] = []
+    # The complement, built in the SAME pass under the SAME rule: what the twin trains on.
+    # Disjointness is then measured against the population the twin's optimiser actually
+    # sees, not against a fold *definition* that is disjoint by construction whatever the
+    # run did (the P2-09 `shared_record_ids_with_inner_train: 0` trap, train_stage1.py).
+    twin_train_ids: set[str] = set()
+    twin_train_clusters: set[int] = set()
+    for row in rows:
+        if not bool(row[NESTED_TRAIN_COL]):
+            excluded["not_in_training_fold"] += 1
+            continue
+        if int(row[CLUSTER_COL]) not in gate4_clusters:
+            if _exclusion_reason(row, window=window) is None:
+                twin_train_ids.add(str(row[RECORD_ID_COL]))
+                twin_train_clusters.add(int(row[CLUSTER_COL]))
+            excluded["gate4_twin_train_cluster"] += 1
+            continue
+        if str(row[FOLD_RANDOM_COL]) != FOLD_RANDOM_TEST:
+            # In a GATE-4 cluster but not itself scheme-A test: a cluster-mate pulled in by
+            # the closure. It is withheld from the twin (its cluster is) but it is NOT the
+            # graded population, so it is scored nowhere and counted here. Measured 0 on
+            # the committed table; counted anyway, because a future re-split could make it
+            # non-zero and a silent inclusion would widen the gated fold without saying so.
+            excluded["cluster_mate_not_scheme_a_test"] += 1
+            continue
+        if len(str(row[CONTEXT_SEQ_COL])) < window:
+            excluded["context_shorter_than_window"] += 1
+            continue
+        reason = _exclusion_reason(row, window=window)
+        if reason is not None:
+            excluded[reason] += 1
+            continue
+        records.append(_corpus_record(row))
+    records.sort(key=lambda r: r.record_id)
+
+    got_ids = {r.record_id for r in records}
+    got_clusters = {r.cluster_id for r in records}
+    klass_counts = Counter(r.klass for r in records)
+    orders = Counter(record_order(r) for r in records)
+    report = {
+        "schema_version": SCHEMA_VERSION,
+        "step": STEP_GATE4,
+        "window_nt": int(window),
+        "fold_scope": FOLD_SCOPE_GATE4_EVAL,
+        "scheme": (
+            "ADR-0004 A6 — PRD §9.2 scheme A (random, genus-stratified, whole-cluster) "
+            "INTERSECTED with the D5 nested_train fold; the in-distribution "
+            "homology-clustered segmentation-quality reference D6 gates on"
+        ),
+        "carve": {
+            "rule": (
+                "lookup, not a draw: whole clusters containing >=1 nested_train record "
+                "with fold_random == 'test'"
+            ),
+            "fold_random_value": FOLD_RANDOM_TEST,
+            "n_gate4_clusters": len(gate4_clusters),
+            "cluster_digest": hashlib.sha256(
+                ",".join(str(c) for c in sorted(gate4_clusters)).encode()
+            ).hexdigest(),
+        },
+        "n_context_records": int(n_total),
+        "n_records": len(records),
+        "n_blocks": len(got_clusters),
+        "n_excluded": int(sum(excluded.values())),
+        "excluded_by_reason": dict(sorted(excluded.items())),
+        "klass_counts": dict(sorted(klass_counts.items())),
+        "phylum_counts": dict(sorted(Counter(r.phylum for r in records).items())),
+        "order_counts": dict(sorted(orders.items())),
+        "n_orders": len(orders),
+        "leakage": {
+            # The fold is inside nested_train, so this is 0 by construction — measured
+            # anyway, because "by construction" is what the P2-06a rung also said.
+            "n_designated_loo_holdout": sum(1 for r in records if r.is_designated_loo_holdout),
+            "n_not_nested_train": sum(1 for r in records if not r.nested_train),
+            # Against what the twin TRAINS on, not against a fold definition.
+            "shared_record_ids_with_twin_train": len(got_ids & twin_train_ids),
+            "shared_cluster_ids_with_twin_train": len(got_clusters & twin_train_clusters),
+            "n_twin_train_records": len(twin_train_ids),
+            "n_twin_train_blocks": len(twin_train_clusters),
+        },
+        # ⚠ The disclosure that keeps this fold honest about what it is NOT. The shipped
+        # production checkpoint trained on every record here; only a twin that withheld
+        # them may be graded. Carried in the loader's own report so the eval driver cannot
+        # emit a GATE-4 number without it (ADR-0004 A6; PRD §10.1 two-run split).
+        "graded_checkpoint_requirement": (
+            "gate4_twin_train — a checkpoint trained with exclude_gate4_eval=true. The "
+            "shipped P2-10d'-b production checkpoint trained on this fold and is NOT "
+            "gradeable on it."
+        ),
+        "synthetic_flank": False,
+    }
+    return records, report
+
+
+def gate4_eval_problems(report: Mapping[str, Any]) -> list[str]:
+    """Re-derive the GATE-4 population's invariants from ``report``; ``[]`` when clean.
+
+    Total and evidence-guarded, for the reason :func:`selection_val_problems` documents: a
+    clause read off a *missing* block is vacuously true exactly when the evidence failed to
+    materialise ([[clauses-must-guard-emptiness]]).
+    """
+    problems: list[str] = []
+    leak = report.get("leakage")
+    if not isinstance(leak, Mapping) or not leak:
+        return ["leakage: block missing — a GATE-4 population with no leak evidence is not usable"]
+
+    _ZERO_CLAUSES = {
+        "n_designated_loo_holdout": (
+            "the GATE-4 population reaches into the designated leave-one-order-out "
+            "holdout; D6 gates the IN-DISTRIBUTION reference, not the generalization arm"
+        ),
+        "n_not_nested_train": (
+            "the GATE-4 population reaches outside the D5 training fold, whose complement "
+            "IS the holdout (splits.py:733) — that is the generalization split, not this one"
+        ),
+        "shared_record_ids_with_twin_train": (
+            "the graded fold overlaps what the twin trains on; GATE-4 would be graded "
+            "train-on-train (CLAUDE.md §8.2)"
+        ),
+        "shared_cluster_ids_with_twin_train": (
+            "a homology cluster straddles the twin boundary; the graded fold is "
+            "homology-leaky (PRD §9.2 cluster non-splitting)"
+        ),
+    }
+    for key, why in _ZERO_CLAUSES.items():
+        val = leak.get(key)
+        if not isinstance(val, int) or isinstance(val, bool):
+            problems.append(f"leakage.{key}: must be an int, got {val!r}")
+        elif val != 0:
+            problems.append(f"leakage.{key} = {val} — {why}")
+    n_twin = leak.get("n_twin_train_records")
+    if not isinstance(n_twin, int) or isinstance(n_twin, bool) or n_twin <= 0:
+        problems.append(
+            f"leakage.n_twin_train_records: must be a positive int, got {n_twin!r} — a "
+            "disjointness of 0 against an EMPTY training fold is vacuously true"
+        )
+
+    carve = report.get("carve")
+    if not isinstance(carve, Mapping) or not carve:
+        problems.append("carve: block missing — the fold's provenance is unreproducible")
+    else:
+        if carve.get("fold_random_value") != FOLD_RANDOM_TEST:
+            problems.append(
+                f"carve.fold_random_value: must be {FOLD_RANDOM_TEST!r} (ADR-0004 A6), got "
+                f"{carve.get('fold_random_value')!r} — a different scheme-A fold is a "
+                "different population"
+            )
+        n_c = carve.get("n_gate4_clusters")
+        if not (isinstance(n_c, int) and not isinstance(n_c, bool) and n_c > 0):
+            problems.append(f"carve.n_gate4_clusters: must be a positive int, got {n_c!r}")
+
+    if report.get("fold_scope") != FOLD_SCOPE_GATE4_EVAL:
+        problems.append(
+            f"fold_scope: must be {FOLD_SCOPE_GATE4_EVAL!r}, got {report.get('fold_scope')!r}"
+        )
+    n_records = report.get("n_records")
+    if not isinstance(n_records, int) or isinstance(n_records, bool) or n_records <= 0:
+        problems.append(f"n_records: must be a positive int, got {n_records!r}")
+    n_blocks = report.get("n_blocks")
+    if not isinstance(n_blocks, int) or isinstance(n_blocks, bool) or n_blocks < 2:
+        problems.append(
+            f"n_blocks: must be >= 2, got {n_blocks!r} — fewer than 2 blocks is not "
+            "block-resamplable (ADR-0005 D5 / Amendment A1)"
+        )
+    return problems
+
+
+def load_loo_holdout_records(
+    *,
+    context_parquet: str | Path = DEFAULT_CONTEXT,
+    labels_parquet: str | Path = DEFAULT_LABELS,
+    split_table: str | Path = DEFAULT_SPLIT_TABLE,
+    window: int = WINDOW_NT,
+    min_records_per_order: int = 1,
+) -> tuple[list[CorpusRecord], dict[str, Any]]:
+    """Load the **designated leave-one-order-out holdout** — P2-14's *non-gated* read.
+
+    ``is_designated_loo_holdout`` (splits.py's own indicator, not the negation of
+    ``nested_train`` and not ``nested_role == "heldout"``, which conflates the LOO orders
+    with the Actinobacteria phylum arm and the external anchors). This population is
+    genuinely held out from **both** Stage-1 checkpoints — the shipped one and the twin —
+    because ``nested_train`` excludes every designated holdout order by construction.
+
+    ⚠ **Reported, never gated at P2.** ADR-0004 D6 gates the in-distribution reference
+    (:func:`load_gate4_eval_records`); this is the population PRD §12:241 reports as the
+    generalization headline and PRD §2.3 grades at **GATE-1 / P4**. Two in-repo comments
+    call it "P2-14's grading set" (``conf/train/stage1.yaml`` and
+    ``slurm/p2/train_production.sbatch``); both are code-comment drift against D6's own
+    words and are corrected in this step (ADR-0004 A6). Grading here would answer a
+    different question and spend the headline population early.
+
+    Blocks are **orders**, not clusters: ADR-0005 D5 macro-averages the leave-clade-out
+    statistic across held-out orders (micro would be dominated by the ~90 % Firmicutes
+    corpus). ``min_records_per_order`` drops nothing by default; it exists so a caller can
+    state a min-N rather than discover one.
+    """
+    merged = _merge_corpus_tables(
+        context_parquet=context_parquet,
+        labels_parquet=labels_parquet,
+        split_table=split_table,
+    )
+
+    rows = merged.to_dict("records")
+    n_total = len(rows)
+    excluded: Counter[str] = Counter()
+    records: list[CorpusRecord] = []
+    for row in rows:
+        if not bool(row[LOO_HOLDOUT_COL]):
+            excluded["not_designated_loo_holdout"] += 1
+            continue
+        if len(str(row[CONTEXT_SEQ_COL])) < window:
+            excluded["context_shorter_than_window"] += 1
+            continue
+        reason = _exclusion_reason(row, window=window)
+        if reason is not None:
+            excluded[reason] += 1
+            continue
+        records.append(_corpus_record(row))
+    records.sort(key=lambda r: r.record_id)
+
+    if min_records_per_order > 1:
+        counts = Counter(record_order(r) for r in records)
+        kept = [r for r in records if counts[record_order(r)] >= min_records_per_order]
+        excluded["order_below_min_records"] += len(records) - len(kept)
+        records = kept
+
+    orders = Counter(record_order(r) for r in records)
+    report = {
+        "schema_version": SCHEMA_VERSION,
+        "step": STEP_GATE4,
+        "window_nt": int(window),
+        "fold_scope": FOLD_SCOPE_LOO_HOLDOUT,
+        "scheme": (
+            "PRD §9.2 scheme B — leave-one-order-out; splits.py's designated holdout "
+            "indicator. REPORTED non-gated at P2-14; gated at GATE-1 / P4 (ADR-0005 D5)"
+        ),
+        "gated": False,
+        "block_unit": "resolved_order",
+        "min_records_per_order": int(min_records_per_order),
+        "n_context_records": int(n_total),
+        "n_records": len(records),
+        "n_blocks": len(orders),
+        "n_excluded": int(sum(excluded.values())),
+        "excluded_by_reason": dict(sorted(excluded.items())),
+        "klass_counts": dict(sorted(Counter(r.klass for r in records).items())),
+        "phylum_counts": dict(sorted(Counter(r.phylum for r in records).items())),
+        "order_counts": dict(sorted(orders.items())),
+        "leakage": {
+            # Every record here must be a designated holdout, and none may be in the
+            # training fold — the mirror of the gated fold's clauses, measured the same way.
+            "n_not_designated_loo_holdout": sum(
+                1 for r in records if not r.is_designated_loo_holdout
+            ),
+            "n_nested_train": sum(1 for r in records if r.nested_train),
+        },
+        "synthetic_flank": False,
+    }
+    return records, report
 
 
 def context_labels(record: CorpusRecord) -> np.ndarray:

@@ -8,15 +8,18 @@
 # (`g0.5_lr3e-4_a0.5`: γ=0.5, optim.lr=3e-4, class_weight_alpha=0.5), and SAVES the
 # checkpoint. This is the shipped scanner lineage (§10.1); the FINAL production checkpoint
 # emerges only after the P2-10 mining rounds. Round-0 is NOT itself gate-graded — GATE-4 is
-# P2-14 on the leave-one-order-out holdout. Its gate here is operational only.
+# P2-14, on the ADR-0004 A6 in-distribution population (scheme-A test inside nested_train),
+# graded on an eval TWIN because this run trains that population too. Its gate here is
+# operational only.
 #
 # ── WHY THE FULL FOLD, AND WHY NO VAL METRIC (user decision 2026-07-19) ──────
 # A sweep selects a config on the P2-06a `selection_val` rung, so that rung must stay OUT of
 # the points' gradients (`exclude_selection_val=true`, the default). Once the config is
 # fixed, that reason is spent: withholding 10.01% of the corpus (8,303 → 7,472) from the
 # SHIPPED checkpoint buys nothing, so P2-09 trains the full D5 fold. The cost is that there
-# is then no free held-out rung to report a val number on — the LOO holdout is P2-14's
-# grading set (using it here contaminates the §12 headline), and `selection_val` is now
+# is then no free held-out rung to report a val number on — the LOO holdout is the PRD
+# §12:241 generalization headline (using it here contaminates it; P2-14 reports it
+# non-gated and GATE-1/P4 grades it), and `selection_val` is now
 # inside the training set. So this run reports NO val metric (`eval_val=false`); an in-sample
 # number labelled "held-out" is the exact failure the P2-06a rung exists to prevent. The
 # entrypoint REFUSES `eval_val=true` alongside `exclude_selection_val=false` at construction

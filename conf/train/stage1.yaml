@@ -114,8 +114,10 @@ num_workers: 0
 # the leave-one-order-out holdout — so the PRD §12:241 headline stays genuinely held out
 # (user decision 2026-07-17, RE-TAKEN the same day: the first definition filtered
 # `fold_random==val & not nested_train` and landed 88.4% inside that holdout). A nested
-# design — the inner rung here, the outer rung at P2-14. The carve costs 10.0% of the
-# training fold (8,303 → 7,472); train_stage1 loads `inner_train` by default.
+# design — the inner rung here, the outer rung at P2-14 (which grades the ADR-0004 A6
+# in-distribution population, NOT the LOO holdout: D6 gates the segmentation-quality
+# reference and reports the leave-one-order-out read non-gated beside it). The carve costs
+# 10.0% of the training fold (8,303 → 7,472); train_stage1 loads `inner_train` by default.
 #
 # ⚠ This is the ONLY per-run number a sweep may rank on. Training loss is a function of
 # `gamma` and `class_weight_alpha` themselves, so ranking P2-06's γ/α grid on loss would
@@ -124,8 +126,8 @@ num_workers: 0
 # records, selection_val held OUT — mandatory for anything that RANKS on the val rung
 # (P2-06's sweep). false ⇒ the FULL 8,303-record D5 fold, and it is the production setting:
 # once the config is selected the carve's reason is spent, so P2-09 trains all of it. That
-# combination forfeits the val metric — there is no free held-out rung left (the LOO holdout
-# is P2-14's grading set) — so `eval_val=false` is REQUIRED alongside it and
+# combination forfeits the val metric — there is no free held-out rung left — so
+# `eval_val=false` is REQUIRED alongside it and
 # Stage1TrainConfig.__post_init__ raises on `eval_val=true` + `exclude_selection_val=false`
 # rather than reporting an in-sample number as "held out" (P2-09, user decision 2026-07-19).
 #
@@ -138,6 +140,25 @@ num_workers: 0
 # tests/unit/test_sbatch_overrides.py gate now composes every shipped sbatch's OWN override
 # tokens; keep any new CLI-overridable field in this file and that gate green.
 exclude_selection_val: true
+# ── The GATE-4 eval twin (P2-14; ADR-0004 A6) ────────────────────────────────────────────
+# Withhold the GATE-4 GRADED population — scheme-A `test` INSIDE nested_train, by whole
+# clusters (8,303 → 7,099 records / 1,031 clusters). false (default) is every run this repo
+# has made, the shipped P2-10d′-b production checkpoint included; true makes a run the
+# **GATE-4 eval twin**, the only kind of checkpoint `eval/gate4.py` will grade.
+#
+# Why a twin exists at all: `exclude_selection_val=false` (the production setting, two keys
+# up) leaves NO in-distribution population held out from the shipped checkpoint — scheme-A
+# `test` is 51.2% inside the training fold, and of the 1,149 that are not, 796 are LOO /
+# Actinobacteria / anchor holdouts (the generalization arm, which D6 does NOT gate) and the
+# remaining 353 are the clade-crossing + no-clade residue splits.py marks never-scored. So
+# GATE-4 grades a twin that withheld the graded fold, the shipped checkpoint stays the
+# full-fold one, and the difference is the two-run split PRD §10.1 makes the model card
+# disclose. The twin's number is CONSERVATIVE: it trained on 14.5% fewer records.
+#
+# ⚠ THIS KEY MUST EXIST HERE (the job-669 struct-mode lesson above):
+# slurm/p2/train_gate4_twin.sbatch overrides it to `exclude_gate4_eval=true`, and
+# tests/unit/test_sbatch_overrides.py composes that token against this file.
+exclude_gate4_eval: false
 # Which per-nt target the datamodule loads. "production" (default) = the full 8-class
 # `label_string` — the shipped scanner. "naive" = `naive_label_string`, every class-II
 # record all-background so TBDB001.cm structure is withheld: the P2-11 class-II-CM-naive

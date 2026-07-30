@@ -75,7 +75,11 @@ __all__ = [
     "gate4_core_min_f1",
     "gate4_pass",
     "element_extent_iou",
+    "iou_from_confusion",
     "boundary_iou_by_element",
+    "class_runs",
+    "SPECIFIER_CODON_NT",
+    "specifier_exact_codon_detection",
     "average_precision",
     "precision_recall_at_threshold",
     "baseline_operating_point",
@@ -238,6 +242,18 @@ def element_extent_iou(y_true: Sequence[int], y_pred: Sequence[int], class_index
     return _safe_div(inter, union)
 
 
+def iou_from_confusion(tp: int, fp: int, fn: int) -> float:
+    """Extent IoU from one class's confusion counts: ``tp / (tp + fp + fn)``.
+
+    The identity :func:`element_extent_iou` computes position-by-position — intersection
+    is ``tp``, union is ``tp + fp + fn`` — exposed so a caller holding **summed per-block
+    confusion vectors** (the block bootstrap's sufficient statistic) gets the same number
+    without re-walking millions of nucleotides. NaN on an empty union, exactly as
+    :func:`element_extent_iou` returns NaN when the element is absent from both.
+    """
+    return _safe_div(tp, tp + fp + fn)
+
+
 def boundary_iou_by_element(
     y_true: Sequence[int],
     y_pred: Sequence[int],
@@ -245,6 +261,114 @@ def boundary_iou_by_element(
 ) -> dict[str, float]:
     """Extent IoU per named class → ``{class_name: iou}`` (reported; ADR-0004 D6)."""
     return {name: element_extent_iou(y_true, y_pred, CLASS_INDEX[name]) for name in classes}
+
+
+# --------------------------------------------------------------------------- #
+# Specifier exact-3-nt-codon detection (reported, NON-gated; ADR-0004 D6)
+# --------------------------------------------------------------------------- #
+def class_runs(y: Sequence[int], class_index: int) -> list[tuple[int, int]]:
+    """Maximal contiguous runs of ``class_index`` in ``y`` as ``[(start, end))`` pairs.
+
+    Half-open, 0-based. The extent extractor the exact-codon check needs and that
+    ``element_extent_iou`` deliberately does not do: IoU is set-wise and cannot tell a
+    single 3-nt call from three scattered 1-nt calls, which is the entire question
+    ADR-0004 D6's *"Specifier exact-3-nt-codon detection"* sanity check asks.
+    """
+    runs: list[tuple[int, int]] = []
+    start: int | None = None
+    for i, v in enumerate(y):
+        if v == class_index:
+            if start is None:
+                start = i
+        elif start is not None:
+            runs.append((start, i))
+            start = None
+    if start is not None:
+        runs.append((start, len(y)))
+    return runs
+
+
+#: The specifier codon's length in nucleotides. `labels.ELEMENT_COORDS["Specifier"]` is
+#: ``(codon_start, codon_end)`` — the annotated codon itself — so a well-formed truth
+#: extent is exactly one run of this length. Measured on ``labels_v0.parquet``: 22,987 of
+#: 23,535 records satisfy it; 393 carry no specifier and 155 carry a clamped/odd extent.
+SPECIFIER_CODON_NT = 3
+
+
+def specifier_exact_codon_detection(
+    per_record: Sequence[tuple[Sequence[int], Sequence[int]]],
+) -> dict:
+    """Per-record exact-codon detection (ADR-0004 D6, **reported non-gated**).
+
+    ``per_record`` is ``[(y_true, y_pred), …]`` over whole records — per *record*, not
+    pooled, because "the model called the right 3 nucleotides" is a statement about one
+    locus and pooling would let a Specifier hit in record A pay for a miss in record B.
+
+    A record is **scorable** only when its truth carries exactly one Specifier run of
+    exactly :data:`SPECIFIER_CODON_NT` nt; anything else is a label-side artifact (no
+    annotated codon, or a coordinate-clamped extent) and is **excluded and counted**,
+    never scored as a miss — a label defect is not a model error (CLAUDE.md §10.3).
+
+    Reports three nested strictnesses, so a shortfall is attributable:
+
+    * ``exact`` — the prediction has exactly one Specifier run and it is the same
+      half-open interval as truth. The headline of this check.
+    * ``right_length`` — exactly one predicted run, of 3 nt, anywhere.
+    * ``overlapping`` — at least one predicted Specifier nucleotide inside the true codon
+      (the element was found; the extent may be wrong).
+
+    ``*_rate`` values are ``None`` — never 0.0 — when nothing was scorable, because a rate
+    over an empty denominator is undefined and a silent 0.0 reads as a measured failure.
+    """
+    idx = CLASS_INDEX["Specifier"]
+    n_exact = n_right_length = n_overlapping = 0
+    n_scorable = 0
+    excluded: dict[str, int] = {}
+    pred_run_counts: dict[str, int] = {}
+
+    def _bump(d: dict[str, int], key: str) -> None:
+        d[key] = d.get(key, 0) + 1
+
+    for y_true, y_pred in per_record:
+        if len(y_true) != len(y_pred):
+            raise ValueError("y_true and y_pred must be the same length")
+        true_runs = class_runs(y_true, idx)
+        if not true_runs:
+            _bump(excluded, "truth_has_no_specifier")
+            continue
+        if len(true_runs) > 1:
+            _bump(excluded, "truth_specifier_fragmented")
+            continue
+        t0, t1 = true_runs[0]
+        if t1 - t0 != SPECIFIER_CODON_NT:
+            _bump(excluded, f"truth_specifier_len_{t1 - t0}")
+            continue
+        n_scorable += 1
+        pred_runs = class_runs(y_pred, idx)
+        _bump(pred_run_counts, str(min(len(pred_runs), 3)))
+        if any(p0 < t1 and t0 < p1 for p0, p1 in pred_runs):
+            n_overlapping += 1
+        if len(pred_runs) == 1:
+            p0, p1 = pred_runs[0]
+            if p1 - p0 == SPECIFIER_CODON_NT:
+                n_right_length += 1
+                if (p0, p1) == (t0, t1):
+                    n_exact += 1
+    rate = lambda n: (n / n_scorable) if n_scorable else None  # noqa: E731
+    return {
+        "n_records": len(per_record),
+        "n_scorable": n_scorable,
+        "n_exact": n_exact,
+        "n_right_length": n_right_length,
+        "n_overlapping": n_overlapping,
+        "exact_rate": rate(n_exact),
+        "right_length_rate": rate(n_right_length),
+        "overlapping_rate": rate(n_overlapping),
+        "codon_nt": SPECIFIER_CODON_NT,
+        "excluded_by_reason": dict(sorted(excluded.items())),
+        "predicted_run_count_hist": dict(sorted(pred_run_counts.items())),
+        "gated": False,
+    }
 
 
 # --------------------------------------------------------------------------- #

@@ -1,0 +1,517 @@
+"""P2-14 — GATE-4: the gated statistic, the graded population, and the non-gated companions.
+
+Torch-free by construction (the CI unit tier has numpy but no torch): every test here works
+on synthetic label vectors, synthetic confusion vectors, and synthetic *reports*. The
+forward pass is exercised by ``tests/ml/`` and by the run itself.
+
+The organising discipline is the repo's: a clause is only worth having if it **bites**, so
+every clause in ``gate4_problems`` / ``gate4_eval_problems`` is sabotaged one at a time and
+must name its own violation ([[sabotage-attribution-must-name-the-test]]).
+"""
+
+from __future__ import annotations
+
+import copy
+import json
+import math
+from pathlib import Path
+
+import pytest
+
+REPO = Path(__file__).resolve().parents[2]
+PDB_FIXTURE = REPO / "tests" / "fixtures" / "pdb_element_extents" / "pdb_element_extents.json"
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Run extraction + Specifier exact-3-nt-codon detection (reported, non-gated)
+# ══════════════════════════════════════════════════════════════════════════════
+def test_class_runs_are_maximal_half_open_and_include_a_trailing_run():
+    from tbox_finder.metrics import class_runs
+
+    assert class_runs([0, 2, 2, 2, 0, 2], 2) == [(1, 4), (5, 6)]
+    assert class_runs([2, 2], 2) == [(0, 2)]  # a run that reaches the end is closed
+    assert class_runs([0, 0], 2) == []
+    assert class_runs([], 2) == []
+
+
+def _codon_case(true_at: int | None, pred: list[tuple[int, int]], n: int = 12):
+    """Build one ``(y_true, y_pred)`` record: a 3-nt Specifier at ``true_at`` (or none),
+    and predicted Specifier runs at the given half-open spans."""
+    from tbox_finder.metrics import CLASS_INDEX
+
+    s = CLASS_INDEX["Specifier"]
+    y_true = [0] * n
+    if true_at is not None:
+        y_true[true_at : true_at + 3] = [s] * 3
+    y_pred = [0] * n
+    for a, b in pred:
+        y_pred[a:b] = [s] * (b - a)
+    return y_true, y_pred
+
+
+def test_specifier_exact_codon_separates_exact_from_shifted_from_fragmented():
+    """Three nested strictnesses, so a shortfall is attributable rather than just low.
+
+    An IoU-style measure cannot make these distinctions — it is set-wise, so one 3-nt call
+    and three scattered 1-nt calls with the same overlap score identically. That is why D6
+    asks for *exact-codon detection* as its own sanity check.
+    """
+    from tbox_finder.metrics import specifier_exact_codon_detection
+
+    got = specifier_exact_codon_detection(
+        [
+            _codon_case(4, [(4, 7)]),  # exact
+            _codon_case(4, [(5, 8)]),  # right length, shifted 1 nt, overlapping
+            _codon_case(4, [(4, 5), (6, 7)]),  # fragmented, overlapping
+            _codon_case(4, []),  # missed entirely
+            _codon_case(4, [(9, 12)]),  # right length, disjoint — NOT overlapping
+        ]
+    )
+    assert got["n_scorable"] == 5
+    assert got["n_exact"] == 1
+    assert got["n_right_length"] == 3  # exact + shifted + disjoint
+    assert got["n_overlapping"] == 3  # exact + shifted + fragmented
+    assert got["exact_rate"] == pytest.approx(1 / 5)
+    assert got["gated"] is False
+
+
+def test_specifier_exact_codon_excludes_label_side_artifacts_instead_of_scoring_them_as_misses():
+    """A record whose *truth* is not one clean 3-nt codon is a label defect, not a model
+    error — 393 corpus records carry no specifier and ~155 a clamped extent. Counting them
+    as misses would report annotation coverage as segmentation quality (§10.3)."""
+    from tbox_finder.metrics import CLASS_INDEX, specifier_exact_codon_detection
+
+    s = CLASS_INDEX["Specifier"]
+    no_specifier = ([0] * 8, [0] * 8)
+    two_nt = ([0, 0, s, s, 0, 0, 0, 0], [0, 0, s, s, 0, 0, 0, 0])
+    fragmented_truth = ([0, s, 0, s, 0, s, 0, 0], [0, s, 0, s, 0, s, 0, 0])
+    got = specifier_exact_codon_detection([no_specifier, two_nt, fragmented_truth])
+    assert got["n_records"] == 3
+    assert got["n_scorable"] == 0
+    assert got["excluded_by_reason"] == {
+        "truth_has_no_specifier": 1,
+        "truth_specifier_fragmented": 1,
+        "truth_specifier_len_2": 1,
+    }
+    # ⚠ A rate over an empty denominator is UNDEFINED. A silent 0.0 here reads as a
+    # measured total failure, which is the opposite of "nothing was measurable".
+    assert got["exact_rate"] is None
+    assert got["overlapping_rate"] is None
+
+
+def test_specifier_exact_codon_refuses_mismatched_lengths():
+    from tbox_finder.metrics import specifier_exact_codon_detection
+
+    with pytest.raises(ValueError):
+        specifier_exact_codon_detection([([0, 0, 0], [0, 0])])
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# The confusion route == the pinned kernels (no second arithmetic)
+# ══════════════════════════════════════════════════════════════════════════════
+def _expressive_pair():
+    """A truth/prediction pair with every class present and errors in both directions."""
+    from tbox_finder.metrics import CLASS_ORDER
+
+    n_classes = len(CLASS_ORDER)
+    y_true, y_pred = [], []
+    for c in range(n_classes):
+        y_true.extend([c] * 9)
+        # 6 correct, 2 confused with the next class, 1 dropped to background
+        y_pred.extend([c] * 6 + [(c + 1) % n_classes] * 2 + [0])
+    return y_true, y_pred
+
+
+def test_confusion_route_reproduces_the_pinned_f1_and_iou_kernels():
+    """``f1_by_class_from_confusion`` / ``iou_by_class_from_confusion`` must be the SAME
+    numbers as ``per_nt_f1_by_class`` / ``boundary_iou_by_element`` — the confusion route is
+    a re-association of identical counts (it exists so a 21M-nt read is affordable), never a
+    second, drift-prone formula ([[promote-dont-duplicate-is-a-correctness-rule]])."""
+    np = pytest.importorskip("numpy")
+    from tbox_finder import metrics as M
+    from tbox_finder.eval.gate4 import f1_by_class_from_confusion, iou_by_class_from_confusion
+
+    y_true, y_pred = _expressive_pair()
+    total = np.zeros((len(M.CLASS_ORDER), 3), dtype=np.int64)
+    t = np.asarray(y_true)
+    p = np.asarray(y_pred)
+    for c in range(len(M.CLASS_ORDER)):
+        total[c] = [
+            int(np.sum((t == c) & (p == c))),
+            int(np.sum((t != c) & (p == c))),
+            int(np.sum((t == c) & (p != c))),
+        ]
+
+    assert f1_by_class_from_confusion(total) == pytest.approx(M.per_nt_f1_by_class(y_true, y_pred))
+    assert iou_by_class_from_confusion(total) == pytest.approx(
+        M.boundary_iou_by_element(y_true, y_pred)
+    )
+    # And the fixture is expressive, not degenerate: nothing is perfect, nothing is zero.
+    f1s = list(f1_by_class_from_confusion(total).values())
+    assert all(0.0 < v < 1.0 for v in f1s), f1s
+
+
+def test_iou_from_confusion_is_nan_on_an_empty_union_not_zero():
+    from tbox_finder.metrics import element_extent_iou, iou_from_confusion
+
+    assert math.isnan(iou_from_confusion(0, 0, 0))
+    assert math.isnan(element_extent_iou([0, 0], [0, 0], 3))
+
+
+def test_summed_confusions_returns_none_on_empty_rather_than_a_zero_matrix():
+    """A zero matrix would score every class as an honest NaN and hide that NOTHING was
+    measured — the [[clauses-must-guard-emptiness]] shape."""
+    from tbox_finder.eval.gate4 import summed_confusions
+
+    assert summed_confusions([]) is None
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Macro-over-blocks (ADR-0005 D5) — undefined blocks are excluded, never 0-filled
+# ══════════════════════════════════════════════════════════════════════════════
+def test_macro_over_blocks_excludes_undefined_blocks_and_counts_them():
+    from tbox_finder.eval.gate4 import macro_over_blocks
+
+    per_block = {
+        "OrderA": {"Terminator": 0.90},
+        "OrderB": {"Terminator": 0.70},
+        # An order with no Terminator at all: F1 undefined, NOT a zero.
+        "OrderC": {"Terminator": float("nan")},
+    }
+    got = macro_over_blocks(per_block, "Terminator")
+    assert got["macro"] == pytest.approx(0.80)  # not 0.5333 (the 0-filled average)
+    assert got["n_blocks_defined"] == 2
+    assert got["n_blocks_undefined"] == 1
+    assert got["min"] == pytest.approx(0.70)
+    assert got["max"] == pytest.approx(0.90)
+
+
+def test_macro_over_blocks_is_none_when_no_block_defines_the_element():
+    from tbox_finder.eval.gate4 import macro_over_blocks
+
+    got = macro_over_blocks({"OrderA": {"Terminator": float("nan")}}, "Terminator")
+    assert got["macro"] is None
+    assert got["n_blocks_defined"] == 0
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# The 9-PDB cross-source label-noise ceiling (D6 δ-governance)
+# ══════════════════════════════════════════════════════════════════════════════
+def test_pdb_ceiling_re_derives_non_estimability_from_the_committed_fixture():
+    """Re-derived from the fixture's own resolved-class map, not copied from its prose: 0 of
+    the 9 depositions resolve Specifier or Antiterminator to a residue extent, so no
+    cross-source per-nt F1 over the gated elements exists and D6's δ-recalibration path
+    stays CLOSED — the floor is 0.80 whatever GATE-4 measures."""
+    from tbox_finder.eval.gate4 import pdb_label_noise_ceiling
+
+    got = pdb_label_noise_ceiling(json.loads(PDB_FIXTURE.read_text()))
+    assert got["estimable"] is False
+    assert got["ceiling_c"] is None
+    assert got["unresolved_core_elements"] == ["Antiterminator_Tbox_seq", "Specifier"]
+    assert got["resolved_depositions_by_class"]["Stem_I"] == 5
+    assert got["floor_unchanged"] == 0.80
+    assert got["gated"] is False
+
+
+def test_pdb_ceiling_flips_to_estimable_when_every_core_element_resolves():
+    """The clause is LIVE, not a constant: a future deposition resolving the missing core
+    elements re-opens D6's δ question on its own, and this proves the code would say so."""
+    from tbox_finder.eval.gate4 import pdb_label_noise_ceiling
+
+    fixture = {
+        "entries": {"X": {}, "Y": {}},
+        "label_noise_ceiling": {
+            "cross_source_resolved_classes": {
+                "Stem_I": ["X"],
+                "Specifier": ["X", "Y"],
+                "Antiterminator_Tbox_seq": ["Y"],
+            }
+        },
+    }
+    got = pdb_label_noise_ceiling(fixture)
+    assert got["estimable"] is True
+    assert got["unresolved_core_elements"] == []
+    assert "ADR-0004 re-sign-off" in got["delta_governance"]
+
+
+def test_pdb_ceiling_refuses_to_assert_non_estimability_without_the_evidence():
+    """Asserting "not estimable" with no evidence block is the same fabrication as asserting
+    a number (§10.3)."""
+    from tbox_finder.eval.gate4 import pdb_label_noise_ceiling
+
+    with pytest.raises(ValueError, match="label_noise_ceiling"):
+        pdb_label_noise_ceiling({"entries": {}})
+    with pytest.raises(ValueError, match="cross_source_resolved_classes"):
+        pdb_label_noise_ceiling({"label_noise_ceiling": {"cross_source_resolved_classes": {}}})
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# The graded population's own clauses (window_dataset.gate4_eval_problems)
+# ══════════════════════════════════════════════════════════════════════════════
+def _good_gate4_scope() -> dict:
+    """The shape measured on the committed table (1,201 / 1,029 / 7,099)."""
+    return {
+        "fold_scope": "gate4_eval",
+        "n_records": 1201,
+        "n_blocks": 1029,
+        "carve": {"fold_random_value": "test", "n_gate4_clusters": 1031},
+        "leakage": {
+            "n_designated_loo_holdout": 0,
+            "n_not_nested_train": 0,
+            "shared_record_ids_with_twin_train": 0,
+            "shared_cluster_ids_with_twin_train": 0,
+            "n_twin_train_records": 7099,
+            "n_twin_train_blocks": 3744,
+        },
+    }
+
+
+def test_gate4_eval_problems_accepts_the_measured_scope():
+    from tbox_finder.data.window_dataset import gate4_eval_problems
+
+    assert gate4_eval_problems(_good_gate4_scope()) == []
+
+
+@pytest.mark.parametrize(
+    "mutate, expect",
+    [
+        (lambda s: s.pop("leakage"), "leakage"),
+        (lambda s: s.__setitem__("leakage", {}), "leakage"),
+        # The population must be in-distribution: 786 is the measured count of designated
+        # LOO records in the scheme-A test fold, i.e. the wrong-population failure.
+        (
+            lambda s: s["leakage"].__setitem__("n_designated_loo_holdout", 786),
+            "leave-one-order-out",
+        ),
+        (lambda s: s["leakage"].__setitem__("n_not_nested_train", 1149), "outside the D5"),
+        (
+            lambda s: s["leakage"].__setitem__("shared_record_ids_with_twin_train", 1),
+            "train-on-train",
+        ),
+        (
+            lambda s: s["leakage"].__setitem__("shared_cluster_ids_with_twin_train", 12),
+            "homology-leaky",
+        ),
+        # 0 overlap against an EMPTY training fold is vacuously true.
+        (lambda s: s["leakage"].__setitem__("n_twin_train_records", 0), "vacuously true"),
+        (lambda s: s.pop("carve"), "carve"),
+        (lambda s: s["carve"].__setitem__("fold_random_value", "val"), "fold_random_value"),
+        (lambda s: s["carve"].__setitem__("n_gate4_clusters", 0), "n_gate4_clusters"),
+        (lambda s: s.__setitem__("fold_scope", "selection_val"), "fold_scope"),
+        (lambda s: s.__setitem__("n_records", 0), "n_records"),
+        (lambda s: s.__setitem__("n_blocks", 1), "block-resamplable"),
+        # isinstance(True, int) is True — the bool-as-count trap.
+        (lambda s: s["leakage"].__setitem__("n_twin_train_records", True), "positive int"),
+    ],
+)
+def test_gate4_eval_problems_bites_on_each_violation(mutate, expect):
+    from tbox_finder.data.window_dataset import gate4_eval_problems
+
+    scope = _good_gate4_scope()
+    mutate(scope)
+    problems = gate4_eval_problems(scope)
+    assert problems, f"sabotage {expect!r} was not caught — the clause is vacuous"
+    assert any(expect in p for p in problems), f"{expect!r} not in {problems}"
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# The GATE-4 report's own clauses (eval.gate4.gate4_problems)
+# ══════════════════════════════════════════════════════════════════════════════
+def _good_report() -> dict:
+    from tbox_finder.infer.reconcile import OPERATOR
+
+    return {
+        "schema_version": "1",
+        "step": "P2-14",
+        "posterior": "uncalibrated",
+        "operator": OPERATOR,
+        "twin": {
+            "fold_scope": "gate4_twin_train",
+            "exclude_gate4_eval_config": True,
+            "exclude_gate4_eval_measured": True,
+            "n_gate4_eval_excluded": 1204,
+            "n_gate4_eval_clusters": 1031,
+            "n_training_records": 7099,
+            "label_source": "production",
+            "checkpoint_identity_verified": True,
+        },
+        "scope": _good_gate4_scope(),
+        "gate": {
+            "per_element_f1": {
+                "Stem_I": 0.93,
+                "Specifier": 0.88,
+                "Antiterminator_Tbox_seq": 0.91,
+            },
+            "min_f1": 0.88,
+            "floor": 0.80,
+            "passes": True,
+            "block_bootstrap_ci": {"n_blocks": 1029, "lo": 0.86, "hi": 0.90},
+            "n_records": 1201,
+            "n_positions": 2976259,
+        },
+        "reported_non_gated": {
+            "per_nt_f1_by_class": {"background": 0.99},
+            "boundary_iou_by_element": {"Stem_I": 0.9},
+            "non_core_classes": {"Stem_II": {"per_nt_f1": 0.7, "boundary_iou": 0.6}},
+            "specifier_exact_codon": {"n_scorable": 1190, "exact_rate": 0.8},
+            "pdb_label_noise_ceiling": {"estimable": False, "ceiling_c": None},
+        },
+        "loo_holdout": {"gated": False, "macro_per_element_f1": {}},
+    }
+
+
+def test_gate4_problems_accepts_a_clean_report():
+    from tbox_finder.eval.gate4 import gate4_problems
+
+    assert gate4_problems(_good_report()) == []
+
+
+@pytest.mark.parametrize(
+    "mutate, expect",
+    [
+        # ── THE clause of this step: the shipped checkpoint is not gradeable here ──
+        (lambda r: r["twin"].__setitem__("fold_scope", "train"), "gate4_twin_train"),
+        (lambda r: r.pop("twin"), "twin"),
+        (lambda r: r["twin"].__setitem__("exclude_gate4_eval_measured", False), "withholding"),
+        # A flag that was SET but excluded nothing — how this clause fabricates TRUE.
+        (lambda r: r["twin"].__setitem__("n_gate4_eval_excluded", 0), "excluded NOTHING"),
+        (
+            lambda r: r["twin"].__setitem__("checkpoint_identity_verified", False),
+            "DIFFERENT checkpoint",
+        ),
+        (lambda r: r["twin"].__setitem__("label_source", "naive"), "PRODUCTION scanner"),
+        # ── the gated statistic, re-derived ──
+        # 0.9067 is the MEAN of the three; D6 gates the MIN.
+        (lambda r: r["gate"].__setitem__("min_f1", 0.9066666666666666), "MIN, not a mean"),
+        (lambda r: r["gate"].__setitem__("passes", False), "re-derives"),
+        (lambda r: (r["gate"].__setitem__("min_f1", 0.5)), "re-derives"),
+        (lambda r: r["gate"].__setitem__("floor", 0.5), "blinded-frozen"),
+        (lambda r: r["gate"]["per_element_f1"].pop("Specifier"), "missing core element"),
+        (lambda r: r["gate"].pop("per_element_f1"), "per_element_f1"),
+        (lambda r: r["gate"].__setitem__("n_positions", 0), "n_positions"),
+        (
+            lambda r: r["gate"]["block_bootstrap_ci"].__setitem__("n_blocks", 469),
+            "does not describe",
+        ),
+        (lambda r: r["gate"].pop("block_bootstrap_ci"), "block_bootstrap_ci"),
+        (lambda r: r.pop("gate"), "gate"),
+        # ── posterior + operator ──
+        (lambda r: r.__setitem__("posterior", "temperature_scaled"), "A11 Pin 4"),
+        (lambda r: r.__setitem__("operator", "argmax_of_last_window"), "512-grid artifact"),
+        # ── the population's own clauses, surfaced through the report ──
+        (
+            lambda r: r["scope"]["leakage"].__setitem__("n_designated_loo_holdout", 786),
+            "scope.leakage",
+        ),
+        (lambda r: r.pop("scope"), "scope"),
+        # ── the non-gated companions D6 requires ALONGSIDE the gate ──
+        (lambda r: r["reported_non_gated"].pop("specifier_exact_codon"), "specifier_exact_codon"),
+        (
+            lambda r: r["reported_non_gated"].pop("pdb_label_noise_ceiling"),
+            "pdb_label_noise_ceiling",
+        ),
+        (lambda r: r["reported_non_gated"].pop("boundary_iou_by_element"), "boundary_iou"),
+        (lambda r: r.pop("reported_non_gated"), "reported_non_gated"),
+        (
+            lambda r: r["reported_non_gated"]["pdb_label_noise_ceiling"].__setitem__(
+                "estimable", True
+            ),
+            "re-sign-off",
+        ),
+        (
+            lambda r: r["reported_non_gated"]["non_core_classes"].__setitem__("Specifier", {}),
+            "excluded from the gate",
+        ),
+        # ── the LOO read must stay non-gated at P2 ──
+        (lambda r: r["loo_holdout"].__setitem__("gated", True), "REPORTED at"),
+    ],
+)
+def test_gate4_problems_bites_on_each_violation(mutate, expect):
+    """Every clause must FAIL on its own violation — one at a time, by sabotage. A red list
+    proves *some* clause bit; asserting the message proves it was **this** one
+    ([[sabotage-attribution-must-name-the-test]])."""
+    from tbox_finder.eval.gate4 import gate4_problems
+
+    report = _good_report()
+    mutate(report)
+    problems = gate4_problems(report)
+    assert problems, f"sabotage {expect!r} was not caught — the clause is vacuous"
+    assert any(expect in p for p in problems), f"{expect!r} not in {problems}"
+
+
+def test_gate4_min_f1_clause_accepts_a_genuine_nan_but_never_a_pass():
+    """An unmeasurable core element makes the gated statistic NaN, and NaN must never
+    certify: ``gate4_pass(nan)`` is False and the clause must agree with it."""
+    from tbox_finder.eval.gate4 import gate4_problems
+
+    report = _good_report()
+    report["gate"]["per_element_f1"]["Specifier"] = float("nan")
+    report["gate"]["min_f1"] = float("nan")
+    report["gate"]["passes"] = False
+    assert gate4_problems(report) == []
+
+    report["gate"]["passes"] = True
+    problems = gate4_problems(report)
+    assert any("re-derives" in p for p in problems), problems
+
+
+def test_the_gate_floor_is_single_sourced_from_power():
+    """No local 0.80. The floor is blinded-frozen at P0 and lives in one place (ADR-0004
+    D6/A2); a second copy is how a threshold drifts without an ADR."""
+    from tbox_finder.eval import gate4 as G
+    from tbox_finder.power import GATE4_F1_FLOOR
+
+    assert G.GATE4_F1_FLOOR is GATE4_F1_FLOOR
+    src = (REPO / "src" / "tbox_finder" / "eval" / "gate4.py").read_text()
+    # The number itself may appear in prose; it must never appear as an assignment.
+    assert "floor = 0.8" not in src
+    assert "FLOOR = 0.8" not in src
+
+
+def test_non_core_classes_are_exactly_the_four_d6_excludes():
+    from tbox_finder.eval.gate4 import NON_CORE_CLASSES
+
+    assert set(NON_CORE_CLASSES) == {"Stem_II", "Stem_III", "Terminator", "Discriminator"}
+
+
+def test_report_disclosures_name_the_two_run_split_and_the_conservative_direction():
+    """The disclosures are load-bearing, not decoration: a reader of ``gate4.json`` must be
+    able to see that the graded artifact is not the shipped one, and in which direction the
+    difference points (PRD §10.1; ADR-0004 A6)."""
+    from tbox_finder.eval.gate4 import build_report
+
+    report = build_report(
+        checkpoint="data/processed/checkpoints/stage1_gate4_twin/stage1.pt",
+        twin=_good_report()["twin"],
+        scope=_good_gate4_scope(),
+        gated=_good_report()["gate"],
+        non_gated=_good_report()["reported_non_gated"],
+        loo=None,
+        geometry={"window_nt": 1024, "stride_nt": 512, "n_boot": 2000},
+    )
+    blob = " ".join(report["disclosures"])
+    assert "two-run split" in blob
+    assert "CONSERVATIVE" in blob
+    assert "NEVER GATED" in blob  # the LOO read
+    assert report["gated"] is True
+    assert report["posterior"] == "uncalibrated"
+
+
+def test_a_report_that_fails_its_own_clauses_is_still_buildable_but_never_clean():
+    """``build_report`` is pure assembly — it must NOT silently repair a bad input, or the
+    clause set would be checking the builder instead of the run."""
+    from tbox_finder.eval.gate4 import build_report, gate4_problems
+
+    bad_twin = copy.deepcopy(_good_report()["twin"])
+    bad_twin["fold_scope"] = "train"
+    report = build_report(
+        checkpoint="x.pt",
+        twin=bad_twin,
+        scope=_good_gate4_scope(),
+        gated=_good_report()["gate"],
+        non_gated=_good_report()["reported_non_gated"],
+        loo=None,
+        geometry={"window_nt": 1024, "stride_nt": 512, "n_boot": 2000},
+    )
+    assert report["twin"]["fold_scope"] == "train"
+    assert any("gate4_twin_train" in p for p in gate4_problems(report))

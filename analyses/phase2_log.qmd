@@ -1890,3 +1890,90 @@ The bound **holds across the whole range**, which is what matters. But the headr
 **Fixed.** `read.n_positions_coverage_ge_2` was reported, printed by the CLI summary, and load-bearing for the A11 Pin 4 reading — the coverage ≥ 2 mass is precisely what makes the reconciled arg-max movable at all — yet it was the one counter `validate_report` did not check. It is now validated like every other: a non-int, a boolean, or a negative value is a reported problem. **The committed artifact is unaffected and was checked rather than assumed:** re-validating it under the new clause set returns zero problems and re-derives `overall_pass = True` (the recorded value is 664,399). That check is the point — a new gate clause can silently invalidate every already-committed report (`[[new-gate-clause-invalidates-old-reports]]`), so adding one means re-running the validator over the artifacts in the tree, not reasoning about it.
 
 **Validation.** Unit **81/81** (3 new: the counter missing, negative, and a boolean sneaking through `isinstance(x, int)`). One further byte-verified sabotage bite: dropping the clause turns both new cases RED, restored byte-identically. §10.1 N/A. **Commit.** this stanza's commit on `p2-13-calibration`.
+
+## Step P2-14 (ENCODE) — 2026-07-30: the gate had no population, and building one cost a second training run
+
+**Inputs.** ADR-0004 D6 (the gated statistic + the 0.80 floor), the committed split table
+`data/processed/splits/split_assignments.parquet`, the shipped production checkpoint's own
+training report `reports/p2/train_stage1_production.json`, the P0-21 crystal fixture
+`tests/fixtures/pdb_element_extents/`, and the pinned kernels already in `metrics.py`.
+
+**The finding that shaped the step.** D6 gates *"the in-distribution homology-clustered
+(genus-stratified) split"*, and **no such population is held out from the checkpoint D6
+grades**. The shipped scanner trained on the full D5 fold — `selection_val_excluded: false`,
+`n_records: 8303` in its own report — so, measured on the committed table: scheme-A `test`
+is **1,204 / 2,353 (51.2 %)** inside the training stream; of the 1,149 that are not, **786**
+are designated leave-one-order-out records (the generalization arm D6 does *not* gate); and
+the 353 that are neither are the clade-crossing (271) and no-clade (82) residues `splits.py`
+marks *never scored*. `selection_val` is both inside the training stream and the fold the
+P2-06 sweep selected γ/lr/α on. Every candidate population was disqualified for a different
+reason, and the disqualifications are measurements, not readings of prose.
+
+**Process.** That went to the user as a §7 stop with the four options costed. The signed
+answer (2026-07-30, AskUserQuestion) is **ADR-0004 A6**: grade a **GATE-4 eval twin** —
+the production protocol with one changed override, `exclude_gate4_eval=true` — on
+`gate4_eval`, the scheme-A `test` records **inside** `nested_train`. Measured with the
+shipped loader: **1,201 records / 1,029 clusters / 154 genera / 15 orders / 2,976,259 nt**
+(3 records excluded as shorter than one window, counted not padded), and the carve is
+cluster-closed — withholding it costs the twin exactly its own 1,204 records, **8,303 →
+7,099**, nothing lost unscored. The **shipped** checkpoint stays the full-fold one, so the
+twin's grade is a *conservative* proxy for it: PRD §10.1's two-run split, now with a
+mechanism behind the phrase.
+
+**Outputs.** `src/tbox_finder/eval/gate4.py` (`score_records` — the tile → forward →
+reconcile → per-block-confusion loop **promoted** out of `train_stage1.evaluate_selection_val`,
+which now delegates to it, so the arithmetic a config is *selected* under and the arithmetic
+GATE-4 *grades* under are one implementation; `compute_gate4`; `pdb_label_noise_ceiling`;
+`build_report`; `gate4_problems`); `window_dataset.{gate4_eval_cluster_ids,
+load_gate4_eval_records, gate4_eval_problems, load_loo_holdout_records, record_order}` +
+`load_corpus_records(exclude_gate4_eval=)`; `train_stage1.exclude_gate4_eval` +
+`conf/train/stage1.yaml`'s key (the job-669 struct-mode lesson); `metrics.{class_runs,
+iou_from_confusion, specifier_exact_codon_detection}`; `workflow/rules/eval.smk::gate4_stage1`;
+`slurm/p2/train_gate4_twin.sbatch`; ADR-0004 **A6**.
+
+**Three things the design refuses to assume.** (i) The gate **re-derives** `min_f1` from the
+per-element F1s rather than trusting the reported value, and re-derives `passes` from the
+floor — a copied statistic is exactly what a mean-instead-of-min bug would produce. (ii) It
+refuses to grade a checkpoint that cannot **prove** it is a twin: the twin property is read
+from the training run's own report (`fold_scope == "gate4_twin_train"` *and*
+`n_gate4_eval_excluded > 0`, the **measured** exclusion, not the requested flag) and bound to
+the checkpoint bytes by sha256 through the provenance sidecar. A flag that was set but
+carved nothing fails the clause. (iii) The **9-PDB ceiling is re-derived, not restated**: 0 of
+the 9 depositions resolve Specifier or Antiterminator to a residue extent, so `C` is not
+estimable, D6's δ-recalibration path is **closed**, and the floor stands at 0.80 whatever the
+gate measures — and the clause flips on its own if a future deposition resolves them.
+
+**The LOO read is reported, never gated.** 8,621 records / 30 orders / 21.0M nt, held out
+from both checkpoints, macro-averaged across orders (ADR-0005 D5) via the `(8,3)` confusion
+sufficient statistic — pooled position lists at that size buy nothing. Two in-repo comments
+(`conf/train/stage1.yaml`, `slurm/p2/train_production.sbatch`) called that population
+*"P2-14's grading set"*; that is code-comment drift against D6's own words, corrected here.
+
+**Validation.** Unit **60/60** green in the standalone runner
+(`[[no-local-pytest-env-validate-standalone]]`), plus the eval-gate tier **13/13** with the
+committed `expected.json` values reproducing **bit-exactly** across the per-record refactor
+(the new `specifier_exact_codon` block is additive: 94 scorable / 93 overlapping / 1 exact on
+the synthetic smoke model — a check that discriminates rather than merely runs). `ruff@0.15.15`
++ `black@25.11.0` clean at CI-exact versions; `bash -n` clean; `snakemake --lint` +
+`snakemake -n` clean; the shipped rm-target gate clean on the new sbatch with no sweep
+regression. **Three source-sabotage bites, each restored byte-identically and each verified
+by sha256** (`gate4.py` is new and therefore untracked — `git checkout` would have been a
+silent no-op, `[[sabotage-restore-untracked-file-git-checkout-noop]]`): the min-re-derivation
+replaced by the reported value → exactly one case RED, the "MIN, not a mean" one; the twin
+`fold_scope` clause short-circuited → RED; and, **against the real committed table**, dropping
+the `nested_train` filter from the graded-fold loader → 10 out-of-fold records enter and
+`leakage.n_not_nested_train = 10` fires by name.
+
+**Cost, measured not guessed.** The twin is the production protocol, whose shipped run
+records **14,270 steps / Σ 8,503.6 s = 2.36 h wall = 18.9 GPU-h** for 8,303 positives; scaled
+by 7,099/8,303 the twin is **≈12,201 steps ≈ 2.02 h ≈ 16.1 GPU-h**. ⚠ The §7 fork was
+presented with a **1.9 GPU-h** figure taken from job 671 (P2-09, positives-only) — the wrong
+lineage: the shipped checkpoint is the P2-10d′-b re-run *with* the 10:1 negative mix. The
+correction is recorded in A6 and lands before any GPU time, since the RUN is a fresh §9.3
+submit-ack.
+
+**Decisions.** ADR-0004 **A6** (signed as drafted; population + eval twin + two-run split +
+the refuse-to-grade clause). §10.1 evidence gate N/A — every claim here is a measurement of
+this repo's own artifacts, not a biological one. **Nothing was graded this session:** no twin
+exists yet, `reports/p2/gate4.json` is not written, and no GATE-4 number is claimed.
+**Commit.** this stanza's commit on `p2-14-gate4`.

@@ -243,6 +243,19 @@ class Stage1TrainConfig:
     #: the wrong population ([[gate-clauses-need-re-derivation]],
     #: [[nested-train-complement-is-the-loo-holdout]]).
     exclude_selection_val: bool = True
+    #: Withhold the **GATE-4 graded population** (ADR-0004 A6) from training — scheme-A
+    #: ``test`` inside ``nested_train``, by whole clusters (8,303 → 7,099). ``False`` (the
+    #: default) is every run this repo has made so far, including the shipped P2-10d′-b
+    #: production checkpoint; ``True`` makes a run a **GATE-4 eval twin**, the only kind of
+    #: checkpoint ``eval.gate4`` will grade.
+    #:
+    #: ⚠ It is **not** interchangeable with ``exclude_selection_val``. The selection carve
+    #: is a *seeded* bucket drawn to rank configs; this is a *lookup* of the committed
+    #: scheme-A partition, and the two folds are disjoint questions ("what did the sweep
+    #: rank on" vs "what may the gate grade on"). A run may set both, and a run that sets
+    #: neither — the production setting — has **no** in-distribution population left to be
+    #: graded on, which is the fact ADR-0004 A6 exists to resolve.
+    exclude_gate4_eval: bool = False
     #: Which per-nt target the datamodule loads (``window_dataset.LABEL_SOURCE_COLUMNS``):
     #: ``"production"`` (default) = the full 8-class ``label_string`` — the shipped scanner;
     #: ``"naive"`` = ``naive_label_string``, every class-II record all-``background`` so
@@ -377,6 +390,19 @@ class Stage1TrainConfig:
                 "DEFINITION, which stays disjoint from selection_val by construction however "
                 "this run was trained. Choose one: train the full D5 fold and report no val "
                 "metric (P2-09), or hold selection_val out and score it (P2-06)."
+            )
+        # ── P2-14 (ADR-0004 A6) ───────────────────────────────────────────────────────
+        # A bool, checked at construction for the reason `label_source` is: a Hydra string
+        # "false" is truthy, and a twin that silently trained on its own graded fold would
+        # publish a GATE-4 number that is train-on-train and looks exactly like a real one.
+        # The measured counterpart (`n_gate4_eval_excluded`) is what `eval.gate4` grades on;
+        # this only makes the request itself unambiguous.
+        if not isinstance(self.exclude_gate4_eval, bool):
+            raise ValueError(
+                f"exclude_gate4_eval must be a bool, got {self.exclude_gate4_eval!r} "
+                f"({type(self.exclude_gate4_eval).__name__}) — a truthy string would set the "
+                "GATE-4 twin flag by accident, or a 'false' string would set it while reading "
+                "as off"
             )
         # ── P2-10d ────────────────────────────────────────────────────────────────────
         if not isinstance(self.negative_fraction, (int, float)) or isinstance(
@@ -1632,7 +1658,11 @@ def evaluate_selection_val(
     Each record is tiled over its **full context** with ``tile_windows`` (the deterministic
     scan/eval geometry), every window is forwarded, and the per-window logits are
     reconciled by ``infer.scan.scan_encoded_windows`` (P2-10a — the promoted loop this
-    function used to own, now shared verbatim with the scanner) over
+    function used to own, now shared verbatim with the scanner). The surrounding
+    per-record loop — tile, encode, scan, accumulate per-block confusions — is itself
+    promoted to ``eval.gate4.score_records`` (P2-14), so this rung and **GATE-4** are one
+    implementation and a config cannot be selected under different arithmetic than the
+    gate grades it under. It runs over
     ``infer.reconcile.reconcile_windows`` — the ADR-0005 D3 + Amendment A3
     operator, frozen in code with no config override. Evaluating through it rather than
     through a single locus-centred window is deliberate: it is the operator P5 actually
@@ -1640,26 +1670,21 @@ def evaluate_selection_val(
     deployed under. It also puts the A3 operator on **real** logits for the first time —
     P2-03's golden could only pin synthetic ones (no Stage-1 checkpoint existed yet).
 
-    ⚠ ``model.eval()`` + ``torch.no_grad()``, then ``model.train()`` restored. context7
-    (``/pytorch/pytorch``, autograd notes) is explicit that ``inference_mode`` does **not**
-    imply ``eval()`` and that tensors it creates **cannot re-enter autograd** — this eval
-    runs inside a training entrypoint, so ``no_grad`` is the conservative choice and the
-    marginal speed-up is irrelevant against a ~3.5k-window forward. ``eval()`` matters here
-    on its own terms: ``dropout`` is a swept axis, and scoring with dropout live would add
-    noise to the very comparison the sweep is making.
+    ⚠ ``model.eval()`` + ``torch.no_grad()``, then ``model.train()`` restored — now inside
+    ``score_records``, unchanged. context7 (``/pytorch/pytorch``, autograd notes) is
+    explicit that ``inference_mode`` does **not** imply ``eval()`` and that tensors it
+    creates **cannot re-enter autograd** — this eval runs inside a training entrypoint, so
+    ``no_grad`` is the conservative choice and the marginal speed-up is irrelevant against
+    a ~3.5k-window forward. ``eval()`` matters here on its own terms: ``dropout`` is a
+    swept axis, and scoring with dropout live would add noise to the very comparison the
+    sweep is making.
     """
-    import numpy as np
-    import torch
-
     from tbox_finder import metrics as M
     from tbox_finder.data.window_dataset import (
-        context_labels,
-        encode_eval_window,
         load_selection_val_records,
         selection_val_problems,
-        tile_windows,
     )
-    from tbox_finder.infer.scan import scan_encoded_windows
+    from tbox_finder.eval.gate4 import score_records
     from tbox_finder.labels import CLASS_ORDER
 
     records, scope = load_selection_val_records(window=cfg.window_nt)
@@ -1706,55 +1731,29 @@ def evaluate_selection_val(
         "reconciliation": "ADR-0005 D3 + A3 (per-window-normalised LSE -> argmax)",
     }
 
-    was_training = model.training
-    model.eval()
-    per_block: dict[int, list[Any]] = {}
-    y_true_all: list[int] = []
-    y_pred_all: list[int] = []
-    prob_all: list[Any] = []
-    n_windows = 0
-    try:
-        with torch.no_grad():
-            for rec in records:
-                seq_len = len(rec.context_seq)
-                starts = tile_windows(seq_len, window=cfg.window_nt, stride=cfg.stride_nt)
-                # The STRICT encoder stays here: `encode_eval_window` raises on an overrun,
-                # and that guard is about *this* caller's records (filter 4 guarantees the
-                # window is interior, so an overrun would invent a boundary mid-context, not
-                # find a contig end). The scanner's pad-aware encoder is the right policy for
-                # *its* inputs and the wrong one here — so the seam between the two callers is
-                # drawn at the loop, never at the encoder.
-                ids = np.stack([encode_eval_window(rec, s, window=cfg.window_nt) for s in starts])
-                # ⚠ Do NOT re-inline this loop. `scan_encoded_windows` is the single
-                # forward+reconcile implementation, shared with `infer.scan.scan_sequence`;
-                # a second copy would let the arithmetic a config is SELECTED under drift
-                # from the arithmetic it is DEPLOYED under — the exact property this
-                # function's docstring claims. Nesting is safe: it restores the mode it
-                # observed, and we are already in eval(), so its restore is a no-op.
-                rec_out = scan_encoded_windows(
-                    model,
-                    ids,
-                    starts,
-                    seq_len,
-                    device=device,
-                    batch_size=cfg.eval_batch_size,
-                )
-                n_windows += int(rec_out.n_windows)
-                y_true = context_labels(rec)
-                y_pred = np.asarray(rec_out.prediction)
-                y_true_all.extend(int(x) for x in y_true)
-                y_pred_all.extend(int(x) for x in y_pred)
-                prob_all.append(np.exp(np.asarray(rec_out.log_probs)))
-                per_block.setdefault(rec.cluster_id, []).append(
-                    class_confusions(y_true, y_pred, n_classes=NUM_CLASSES)
-                )
-    finally:
-        if was_training:
-            model.train()
+    # ⚠ Do NOT re-inline this loop. `eval.gate4.score_records` is the single
+    # tile → forward → reconcile → per-block-confusion implementation (itself built on
+    # `infer.scan.scan_encoded_windows`, the single forward+reconcile loop shared with the
+    # scanner). A second copy would let the arithmetic a config is SELECTED under drift
+    # from the arithmetic it is GRADED and DEPLOYED under — the exact property this
+    # function's docstring claims, now shared with GATE-4 itself (P2-14).
+    scored = score_records(
+        model,
+        device,
+        records,
+        block_key=lambda rec: rec.cluster_id,
+        window=cfg.window_nt,
+        stride=cfg.stride_nt,
+        batch_size=cfg.eval_batch_size,
+    )
+    per_block = scored["per_block"]
+    n_windows = scored["n_windows"]
+    y_true_all = [int(x) for pair in scored["per_record"] for x in pair[0]]
+    y_pred_all = [int(x) for pair in scored["per_record"] for x in pair[1]]
 
     # ── Point estimates through the PINNED kernels (metrics.py), not this module's ──
     gate4 = M.gate4_core_min_f1(y_true_all, y_pred_all)
-    probs = np.concatenate(prob_all, axis=0)
+    probs = scored["probs"]
     auprc = {
         name: M.average_precision([1 if t == i else 0 for t in y_true_all], probs[:, i].tolist())
         for i, name in enumerate(CLASS_ORDER)
@@ -2164,10 +2163,15 @@ def build_stream(cfg: Stage1TrainConfig) -> tuple[Any, Any, dict[str, Any]]:
     # selects on is train-on-train, and it is silent; losing 10.01% of records (8,303 ->
     # 7,472) is neither. The full D5 fold is `exclude_selection_val=False`, which is what
     # a post-sweep production retrain (P2-09) would want.
+    # `exclude_gate4_eval` defaults OFF and is ON only for the GATE-4 eval twin (ADR-0004
+    # A6): it withholds scheme-A `test` inside nested_train — the population D6 grades —
+    # so a checkpoint exists that may be graded on it. The shipped production checkpoint
+    # trained without it, which is exactly why the twin is needed.
     records, fold_report = load_corpus_records(
         training_fold_only=True,
         window=cfg.window_nt,
         exclude_selection_val=cfg.exclude_selection_val,
+        exclude_gate4_eval=cfg.exclude_gate4_eval,
         label_source=cfg.label_source,
     )
     n_fold = len(records)
@@ -2302,6 +2306,12 @@ def build_stream(cfg: Stage1TrainConfig) -> tuple[Any, Any, dict[str, Any]]:
         "label_column": fold_report["label_column"],
         "selection_val_excluded": fold_report["exclude_selection_val"],
         "n_selection_val_excluded": fold_report["n_selection_val_excluded"],
+        # ADR-0004 A6 — the twin's evidence, surfaced the same way `label_source` is: the
+        # MEASURED exclusion, so `eval.gate4` can refuse to grade a checkpoint whose flag
+        # was set but whose carve reached nothing, not merely one that never asked.
+        "exclude_gate4_eval": fold_report["exclude_gate4_eval"],
+        "n_gate4_eval_excluded": fold_report["n_gate4_eval_excluded"],
+        "n_gate4_eval_clusters": fold_report["n_gate4_eval_clusters"],
         # The occurrence the scan is pinned at. NOT "the deterministic lead": with
         # offset_augmentation on, window_at draws the phase/strand from the seeded
         # augmentation RNG, so this is reproducible-at-epoch-0, not phase-independent.
