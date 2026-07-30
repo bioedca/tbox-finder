@@ -9,6 +9,15 @@
 #   tid 1  use_crf=true                          (axis iii — head, linear vs +CRF)
 #   tid 2  backbone=caduceus-ps-1k-d256-l4       (axis ii  — ~1.93M, seqlen-1k)
 #   tid 3  backbone=caduceus-ps-1k-d118-l4       (axis ii  — ~471k,  seqlen-1k)
+#
+# A FIFTH table entry, tid 4 `baseline`, re-trains the comparator arm itself. It is NOT in
+# the default `--array=0-3` and is deliberately OPT-IN: a default submit must not silently
+# spend ~1.6 GPU-h re-training the arm whose committed P2-06 point is precisely why the
+# baseline row costs 0 new GPU-h. Run it — and any replicate — by explicit override:
+#     sbatch --array=4          slurm/p2/ablate_stage1.sbatch   # baseline, replicate 1
+#     sbatch --array=13,23      slurm/p2/ablate_stage1.sbatch   # leg 3, replicates 2 and 3
+# (the decode is leg = tid % 10, replicate = tid / 10 + 1; see below). Job 918 ran
+# `--array=4,12,13,23` to replicate the comparator and the two size legs.
 # The BASELINE (production backbone, rc_combine=concat, use_crf=false) is NOT retrained: it is
 # reports/p2/sweep/g0.5_lr3e-4_a0.5.json, the promoted P2-06 point — same fold, same protocol,
 # same seed. Retraining it would spend ~1.9 GPU-h reproducing a committed measurement.

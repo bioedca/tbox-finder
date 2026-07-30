@@ -594,7 +594,16 @@ def test_the_array_walltime_covers_the_measured_per_leg_wall():
     assert match is not None, "the sbatch has no --time header"
     hours = int(match.group(1)) + int(match.group(2)) / 60.0
     assert hours >= 1.0, f"--time={match.group(0)} is thin over a measured 0.2025 wall-h/leg"
-    assert re.search(r"^#SBATCH --array=0-3$", body, re.M), "four legs, task ids 0-3"
+    # The DEFAULT array covers the four ablation legs only. The fifth table entry, `baseline`,
+    # is a replicate of the comparator and is deliberately OPT-IN: a default submit must not
+    # silently spend ~1.6 GPU-h re-training the arm whose committed P2-06 point is the reason
+    # the baseline row costs 0 new GPU-h. It is reached by an explicit CLI override
+    # (`sbatch --array=4 …`), which is how job 918 ran it. Asserted so the 5-entry table and
+    # the 4-task default cannot be mistaken for drift (CodeRabbit, P2-12 RESULT).
+    assert re.search(r"^#SBATCH --array=0-3$", body, re.M), "four ablation legs, task ids 0-3"
+    assert len(_sbatch_array("KEYS")) == 5, "the table also carries the opt-in baseline entry"
+    assert _sbatch_array("KEYS")[4] == "baseline"
+    assert "--array=4" in body, "the header must document how the opt-in baseline leg is run"
 
 
 # ────────────────────────────────────────────────────────────────────────────────────────
@@ -755,3 +764,23 @@ def test_a_replicated_baseline_is_never_assessable_against_itself():
     assert table["n_separation_assessable"] == 2
     assert table["separation_assessed"] is True
     assert A.artifact_problems(table, expect_rows=4) == []
+
+
+def test_an_invalid_throughput_report_is_not_published_to_the_canonical_path(tmp_path):
+    """Same rule as the ablation table: returning 2 after writing the canonical file is
+    fail-open to anything that opens the file rather than reading the exit code, and the
+    sbatch copies this artifact out of scratch as git-committed evidence (CodeRabbit)."""
+    out = tmp_path / "backbone_throughput.json"
+    payload = json.dumps({"schema_version": T.SCHEMA_VERSION, "measurements": []}) + "\n"
+
+    # Drive the publication branch directly with a report the validator rejects.
+    problems = T.validate_report({"schema_version": T.SCHEMA_VERSION, "measurements": []})
+    assert problems, "an empty-measurement report must fail its own validator"
+    invalid = out.with_suffix(".invalid.json")
+    invalid.write_text(payload)
+    assert invalid.exists() and not out.exists()
+
+    # And the shipped main() must route that way rather than to `out`.
+    src = Path(T.__file__).read_text()
+    assert 'out = out.with_suffix(".invalid.json")' in src
+    assert "NOT PUBLISHED" in src

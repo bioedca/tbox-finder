@@ -371,8 +371,18 @@ def main(argv: Sequence[str] | None = None) -> int:
     problems = validate_report(report)
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(json.dumps(report, indent=2, sort_keys=True, allow_nan=False) + "\n")
-    print(f"wrote {out}")
+    payload = json.dumps(report, indent=2, sort_keys=True, allow_nan=False) + "\n"
+    # Same rule as train/ablation_table.main: an invalid report must NOT occupy the canonical
+    # path. Returning 2 after already writing it is fail-open to anything that opens the file
+    # rather than reading the exit code — and this artifact is git-committed evidence, which
+    # the sbatch copies out of scratch on the success path (CodeRabbit, P2-12 RESULT).
+    if problems:
+        out = out.with_suffix(".invalid.json")
+        out.write_text(payload)
+        print(f"wrote {out} — NOT PUBLISHED: the report failed its own validator")
+    else:
+        out.write_text(payload)
+        print(f"wrote {out}")
     for m in report["measurements"]:
         print(
             f"  {m['key']:<28} {m['measured_param_count']:>10,} params  "
