@@ -107,7 +107,7 @@
   "env_lock": "envs/ml-dna.conda-lock.yml",
   "fold_scope": "selection_val",
   "gate4_graded": false,
-  "generated_at_utc": "2026-07-30T05:40:48+00:00",
+  "generated_at_utc": "2026-07-30T06:01:48+00:00",
   "generated_by": "src/tbox_finder/train/ablation_table.py",
   "is_science": false,
   "n_rejected": 0,

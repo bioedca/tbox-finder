@@ -299,8 +299,13 @@ def build_table(
     # withheld (`None`) rather than asserted: one run cannot show a difference survives the
     # run-to-run variance a replicate has already demonstrated on this statistic (§10.3).
     base_span = baseline.get("replicate_span") if baseline else None
+    # The baseline arm is an AXIS TUPLE, not one file. Keying this on the leg label made a
+    # replicate of the baseline configuration look like an ablation arm and compare against
+    # itself — reporting `separated: False` and `assessable: True` for a comparison that is
+    # not one. The `baseline` leg the replicate array adds produces exactly that row.
+    base_axis = _axis_key(baseline["axes"]) if baseline else None
     for row in rows:
-        row["is_baseline"] = bool(baseline is not None and row["leg"] == baseline["leg"])
+        row["is_baseline"] = bool(base_axis is not None and _axis_key(row["axes"]) == base_axis)
         overlap = None if row["is_baseline"] else _overlaps(row.get("replicate_span"), base_span)
         row["ci_overlaps_baseline"] = overlap
         n_rep = (row.get("replicate_span") or {}).get("n_replicates", 1)
@@ -312,7 +317,11 @@ def build_table(
         row["separated_from_baseline"] = (
             None if (overlap is None or unreplicated) else (overlap is False)
         )
-        row["separation_assessable"] = not unreplicated
+        # The baseline is never assessed AGAINST itself, however many replicates it accrues —
+        # otherwise its own row reports `separation_assessable: true` beside
+        # `separated_from_baseline: null`, and inflates the table's assessed count with a
+        # comparison that was never made (CodeRabbit, P2-12 RESULT).
+        row["separation_assessable"] = (not row["is_baseline"]) and not unreplicated
         row["delta_vs_baseline"] = (
             float(row["score"]) - float(baseline["score"]) if baseline else None
         )
@@ -433,6 +442,36 @@ def artifact_problems(artifact: Mapping[str, Any], *, expect_rows: int) -> list[
         problems.append(
             f"n_separated_from_baseline {artifact.get('n_separated_from_baseline')!r} != the "
             f"{n_sep} row(s) that actually carry it"
+        )
+    # `separation_assessable` is the field that keeps "nothing could be assessed" from reading
+    # as "measured, nothing separates", so it is re-derived too rather than trusted — and the
+    # baseline's own row can never be assessed against itself, whatever its replicate count.
+    n_assessable = 0
+    for i, row in enumerate(rows):
+        if not isinstance(row, Mapping):
+            continue
+        n_rep = (row.get("replicate_span") or {}).get("n_replicates", 1)
+        n_rep_base = (
+            (baseline.get("replicate_span") or {}).get("n_replicates", 1)
+            if isinstance(baseline, Mapping)
+            else 1
+        )
+        want = (not row.get("is_baseline")) and n_rep >= 2 and n_rep_base >= 2
+        if row.get("separation_assessable") is not want:
+            problems.append(
+                f"rows[{i}]: separation_assessable {row.get('separation_assessable')!r} does "
+                f"not re-derive from the recorded replicate counts ({want!r})"
+            )
+        n_assessable += bool(want)
+    if artifact.get("n_separation_assessable") != n_assessable:
+        problems.append(
+            f"n_separation_assessable {artifact.get('n_separation_assessable')!r} != the "
+            f"{n_assessable} row(s) that actually re-derive as assessable"
+        )
+    if artifact.get("separation_assessed") is not bool(n_assessable):
+        problems.append(
+            f"separation_assessed {artifact.get('separation_assessed')!r} != "
+            f"{bool(n_assessable)!r} re-derived from the assessable rows"
         )
     return problems
 

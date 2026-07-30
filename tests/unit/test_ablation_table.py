@@ -716,3 +716,42 @@ def test_a_valid_table_is_published_to_the_canonical_path(tmp_path) -> None:
     assert rc == 0
     assert out.exists()
     assert not out.with_suffix(".invalid.json").exists()
+
+
+def test_a_replicated_baseline_is_never_assessable_against_itself():
+    """The scenario the replicate array creates: the baseline accrues a second replicate.
+
+    `separated_from_baseline` was already forced None for the baseline row, but
+    `separation_assessable` was computed generically — so a replicated baseline reported
+    `assessable: true` beside `separated: null` and inflated the table's assessed count with
+    a comparison that was never made (CodeRabbit, P2-12 RESULT).
+    """
+    baseline = _baseline()
+    base_ci = baseline["eval_metrics"]["block_bootstrap_ci"]
+    base_rep = copy.deepcopy(baseline)
+    base_rep["report_path"] = "reports/p2/ablation/baseline.json"
+    leg = _leg(
+        key="size_d118_l4",
+        backbone="caduceus-ps-1k-d118-l4",
+        rc="concat",
+        crf=False,
+        lower=base_ci["lower"] - 0.05,
+        upper=base_ci["lower"] - 0.01,
+    )
+    leg_rep = copy.deepcopy(leg)
+    leg_rep["report_path"] = "reports/p2/ablation/size_d118_l4_rep2.json"
+
+    table = A.build_table([baseline, base_rep, leg, leg_rep], baseline_leg=str(BASELINE_PATH))
+    by_leg = {r["leg"]: r for r in table["rows"]}
+    base_row = by_leg[str(BASELINE_PATH)]
+    assert base_row["replicate_span"]["n_replicates"] == 2
+    assert base_row["separated_from_baseline"] is None
+    assert base_row["separation_assessable"] is False, "the baseline is not assessed against itself"
+
+    # Both replicated arms of the leg ARE assessable, and both separate.
+    assert by_leg[leg["report_path"]]["separation_assessable"] is True
+    assert by_leg[leg["report_path"]]["separated_from_baseline"] is True
+    # The count excludes the baseline's two rows entirely.
+    assert table["n_separation_assessable"] == 2
+    assert table["separation_assessed"] is True
+    assert A.artifact_problems(table, expect_rows=4) == []
