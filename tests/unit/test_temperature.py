@@ -234,17 +234,30 @@ def test_portable_path_relativises_in_tree_inputs_only() -> None:
     rel = "data/processed/checkpoints/stage1_production/stage1.pt"
     assert T._portable_path(checkout / rel) == rel
     assert not T._portable_path(checkout / rel).startswith("/")  # no home dir in a public file
-    # a worktree's inputs live in the MAIN checkout (DVC data is materialised only there), so
-    # relativising against the worktree alone would fall back to absolute for every real input
-    parts = checkout.parts
-    if ".claude" in parts and parts[parts.index(".claude") : parts.index(".claude") + 2] == (
-        ".claude",
-        "worktrees",
-    ):
-        main_checkout = Path(*parts[: parts.index(".claude")])
-        assert T._portable_path(main_checkout / rel) == rel
     outside = Path("/opt/elsewhere/stage1.pt")
     assert T._portable_path(outside) == "/opt/elsewhere/stage1.pt"
+
+
+def test_portable_path_resolves_a_worktree_against_its_main_checkout() -> None:
+    """Exercised UNCONDITIONALLY via the injected checkout.
+
+    A worktree's inputs live in the **main** checkout (the DVC-tracked data is materialised
+    only there), so relativising against the worktree alone falls back to absolute for every
+    real input. Gating this assertion on "am I currently running inside a worktree" would make
+    it vacuous in CI, which checks the repo out normally — i.e. it would certify the branch
+    exactly where it never runs.
+    """
+    from pathlib import Path
+
+    main = Path("/srv/repo")
+    worktree = main / ".claude" / "worktrees" / "some-concern"
+    rel = "data/processed/checkpoints/stage1_production/stage1.pt"
+    assert T._portable_path(worktree / rel, checkout=worktree) == rel  # inside the worktree
+    assert T._portable_path(main / rel, checkout=worktree) == rel  # inside the MAIN checkout
+    # a sibling checkout is genuinely out of tree and stays absolute
+    assert T._portable_path(Path("/srv/other") / rel, checkout=worktree) == f"/srv/other/{rel}"
+    # and a plain (non-worktree) checkout must NOT climb to its parent directory
+    assert T._portable_path(Path("/srv") / rel, checkout=main) == f"/srv/{rel}"
 
 
 @pytest.mark.parametrize("bad", [0.0, -1.0, float("nan"), float("inf"), True, "2"])
@@ -583,6 +596,44 @@ def _gaps(curve: dict) -> list[float]:
         sigma = math.sqrt(max(conf * (1.0 - conf), 0.0) / n)
         out.append(max(0.0, abs(acc - conf) - sigma * math.sqrt(2.0 / math.pi)))
     return out
+
+
+def test_invalid_reports_divert_BOTH_artifacts_together() -> None:
+    """The figure data must not stay at the canonical name when its report is diverted."""
+    from pathlib import Path
+
+    good = T._output_paths("reports/p2/calibration.json", "reports/p2/fd.json", valid=True)
+    assert good == (Path("reports/p2/calibration.json"), Path("reports/p2/fd.json"))
+    bad = T._output_paths("reports/p2/calibration.json", "reports/p2/fd.json", valid=False)
+    assert bad == (
+        Path("reports/p2/calibration.invalid.json"),
+        Path("reports/p2/fd.invalid.json"),
+    )
+    # the diagram is rendered FROM the figure-data file, so a diverted report must never
+    # leave a plottable file behind under the good name
+    assert bad[1].name.endswith(".invalid.json")
+
+
+def test_figure_data_raises_on_a_malformed_report_so_main_must_guard_it() -> None:
+    """Locks the precondition for `main`'s try/except: this call is genuinely raisable.
+
+    Diverting an invalid report means execution now CONTINUES to the figure-data build for
+    reports that previously never got there — so an unguarded call would trade the validator's
+    diagnostic for a traceback.
+    """
+    with pytest.raises((KeyError, TypeError)):
+        T.figure_data({})
+    with pytest.raises((KeyError, TypeError)):
+        T.figure_data({"read": {}, "temperature": {}})
+
+
+def test_render_never_raises_on_a_missing_number() -> None:
+    """The summary runs for INVALID reports too — a numeric spec on None would traceback
+    over the validator's diagnostic, which is the complaint the operator actually needs."""
+    assert T._render(0.123456789) == "0.123457"
+    assert T._render(2) == "2.000000"
+    for missing in (None, "n/a", [], {}, True):
+        assert T._render(missing) == "n/a"
 
 
 def test_cli_parser_exposes_run_and_plot() -> None:

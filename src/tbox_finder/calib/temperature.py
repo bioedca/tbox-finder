@@ -521,7 +521,7 @@ def _forward_window_logits(
             model.train()
 
 
-def _portable_path(path: Path) -> str:
+def _portable_path(path: Path, *, checkout: Path | str | None = None) -> str:
     """A repo-relative path when the file sits under the checkout, else the absolute one.
 
     The artifact is committed to a **public** repo, so recording ``/home/<user>/…`` would ship
@@ -533,9 +533,14 @@ def _portable_path(path: Path) -> str:
     a `.claude/worktrees/<concern>` worktree (CLAUDE.md §5.0) while the DVC-tracked inputs are
     materialised only in the main checkout: relativising against the worktree alone would fall
     back to absolute for every real input and the guard would never fire where it matters.
+
+    ``checkout`` overrides the derived root. It exists so the worktree branch is testable
+    **unconditionally** — CI checks the repo out normally, so a test that only exercised that
+    branch when it happened to be running inside a worktree would be vacuous exactly where the
+    suite actually runs.
     """
     resolved = path.resolve()
-    checkout = Path(__file__).resolve().parents[3]
+    checkout = Path(__file__).resolve().parents[3] if checkout is None else Path(checkout)
     roots = [checkout]
     parts = checkout.parts
     if ".claude" in parts:
@@ -1122,6 +1127,36 @@ def plot_figures(
 # --------------------------------------------------------------------------- #
 # CLI
 # --------------------------------------------------------------------------- #
+def _output_paths(
+    report_path: str | Path, figure_data_path: str | Path, *, valid: bool
+) -> tuple[Path, Path]:
+    """Where the run's two artifacts go — both diverted together when the report is invalid.
+
+    An invalid report never lands on the step's path: a malformed artifact at the real name is
+    indistinguishable from a good one downstream. The figure data is diverted **with** it,
+    because the reliability diagram is rendered *from that file* — leaving it at the canonical
+    name would let a wrong curve be plotted under the good name while the report it came from
+    sits beside it marked invalid, i.e. the same substitution one file along.
+    """
+    out, fd = Path(report_path), Path(figure_data_path)
+    if valid:
+        return out, fd
+    return out.with_suffix(".invalid.json"), fd.with_suffix(".invalid.json")
+
+
+def _render(value: Any, spec: str = ".6f") -> str:
+    """Format a number, or ``n/a`` for a missing/non-numeric one.
+
+    The summary runs for **invalid** reports too (they are diverted, not aborted), and a
+    numeric format spec against a ``None`` raises ``TypeError`` *before* the validator's
+    diagnostic prints — the operator would see a formatting traceback instead of the actual
+    complaint. Same defect P2-12's throughput summary shipped and had to fix.
+    """
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return "n/a"
+    return format(value, spec)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="python -m tbox_finder.calib.temperature",
@@ -1172,35 +1207,38 @@ def main(argv: Sequence[str] | None = None) -> int:
     problems = validate_report(report)
     clauses = derive_clauses(report)
     report["gate"] = clauses
-    out = Path(args.out)
-    if problems:
-        # An invalid report is diverted, never written to the step's path: a malformed
-        # artifact at the real name is indistinguishable from a good one downstream.
-        out = out.with_suffix(".invalid.json")
+    out, fd = _output_paths(args.out, args.figure_data, valid=not problems)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
-    fd = Path(args.figure_data)
-    fd.parent.mkdir(parents=True, exist_ok=True)
-    fd.write_text(json.dumps(figure_data(report), indent=2, sort_keys=True) + "\n")
+    try:
+        payload = json.dumps(figure_data(report), indent=2, sort_keys=True) + "\n"
+    except (KeyError, TypeError, ValueError) as exc:
+        # Diverting the report means execution now CONTINUES past the write for reports
+        # that previously never got here, so this path is reachable and must not trade the
+        # validator's diagnostic for a traceback (the P2-12 round-4 lesson).
+        payload = None
+        print(f"figure data not derivable from this report: {type(exc).__name__}: {exc}")
+    if payload is not None:
+        fd.parent.mkdir(parents=True, exist_ok=True)
+        fd.write_text(payload)
 
-    temp = report["temperature"]["temperature"]
-    read = report["read"]
+    read = report.get("read") or {}
     print(f"wrote {out}")
     print(
-        f"T = {temp:.6f}  (fitted on {report['split']['n_records_fit']} records / "
-        f"{report['split']['n_clusters_fit']} clusters)"
+        f"T = {_render(report.get('temperature', {}).get('temperature'))}  "
+        f"(fitted on {report.get('split', {}).get('n_records_fit')} records / "
+        f"{report.get('split', {}).get('n_clusters_fit')} clusters)"
     )
     for cond in ("uncalibrated", "tempered"):
-        worst = read[cond]["core_worst_ece"]
+        block = read.get(cond) or {}
         print(
-            f"  {cond:>13}: core-worst ECE {worst:.6f}  "
-            f"gate4_core_min_f1 {read[cond]['gate4_core_min_f1']:.6f}"
+            f"  {cond:>13}: core-worst ECE {_render(block.get('core_worst_ece'))}  "
+            f"gate4_core_min_f1 {_render(block.get('gate4_core_min_f1'))}"
         )
     print(
-        f"  arg-max changed at {read['n_positions_argmax_changed']:,} / "
-        f"{read['n_positions']:,} positions "
-        f"({read['argmax_change_fraction'] * 100:.4f} %); "
-        f"coverage>=2 at {read['n_positions_coverage_ge_2']:,}"
+        f"  arg-max changed at {read.get('n_positions_argmax_changed')} / "
+        f"{read.get('n_positions')} positions; "
+        f"coverage>=2 at {read.get('n_positions_coverage_ge_2')}"
     )
     if problems:
         print("REPORT INVALID:")
