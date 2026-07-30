@@ -331,7 +331,18 @@ def validate_report(report: Mapping[str, Any]) -> list[str]:
                 f"len(batch_seconds) {len(seconds)}"
             )
         elif _finite_positive(n_windows) and _finite_positive(m.get("windows_per_s_per_gpu")):
-            want = float(n_windows) / float(sum(seconds))
+            total = float(sum(seconds))
+            # A degenerate total would make the re-derivation raise ZeroDivisionError inside
+            # the validator — a validator that crashes reports nothing, which is strictly
+            # worse than one that reports a problem (CodeRabbit, P2-12 RESULT).
+            if not (math.isfinite(total) and total > 0.0):
+                problems.append(
+                    f"measurements[{i}]: sum(batch_seconds) is {total!r}; a rate cannot be "
+                    "re-derived from a non-positive total, so the recorded "
+                    "windows_per_s_per_gpu is unverifiable"
+                )
+                continue
+            want = float(n_windows) / total
             got = float(m["windows_per_s_per_gpu"])
             if not math.isclose(want, got, rel_tol=1e-9):
                 problems.append(
@@ -383,10 +394,20 @@ def main(argv: Sequence[str] | None = None) -> int:
     else:
         out.write_text(payload)
         print(f"wrote {out}")
+
+    # Render nullable fields defensively. Diverting an invalid report to `.invalid.json`
+    # made this loop reachable for reports whose rates are None, where a numeric format spec
+    # raises TypeError *before* the REPORT INVALID diagnostic below is ever printed — the
+    # failure would be a traceback about formatting rather than the validator's actual
+    # complaint (CodeRabbit, P2-12 RESULT).
+    def _fmt(value: Any, spec: str) -> str:
+        return format(value, spec) if isinstance(value, (int, float)) else "n/a"
+
     for m in report["measurements"]:
         print(
-            f"  {m['key']:<28} {m['measured_param_count']:>10,} params  "
-            f"{m['windows_per_s_per_gpu']:.2f} win/s/GPU  peak {m['peak_vram_gib']:.3f} GiB"
+            f"  {str(m.get('key')):<28} {_fmt(m.get('measured_param_count'), '>10,')} params  "
+            f"{_fmt(m.get('windows_per_s_per_gpu'), '.2f')} win/s/GPU  "
+            f"peak {_fmt(m.get('peak_vram_gib'), '.3f')} GiB"
         )
     if problems:
         print("REPORT INVALID:\n  " + "\n  ".join(problems), file=sys.stderr)

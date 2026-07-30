@@ -805,3 +805,22 @@ def test_the_replicate_disclosure_states_what_it_does_not_cover():
     assert "seed 42" in joined
     assert "NOT seed variance" in joined
     assert "separated at the pinned seed" in joined
+
+
+def test_a_zero_total_batch_time_is_reported_not_raised():
+    """A validator that crashes reports nothing, which is worse than one that reports."""
+    report = _throughput_report()
+    report["measurements"][0]["batch_seconds"] = [0.0] * 30
+    problems = T.validate_report(report)
+    assert any("non-positive total" in p for p in problems), problems
+
+
+def test_the_summary_renders_nullable_measurements_instead_of_raising(tmp_path, capsys=None):
+    """Diverting invalid reports to `.invalid.json` made the summary loop reachable for
+    reports whose rates are None; a numeric format spec would raise TypeError before the
+    REPORT INVALID diagnostic ever printed (CodeRabbit)."""
+    src = Path(T.__file__).read_text()
+    assert 'return format(value, spec) if isinstance(value, (int, float)) else "n/a"' in src
+    # And the loop must not index the raw keys with a numeric spec any more.
+    assert "{m['windows_per_s_per_gpu']:.2f}" not in src
+    assert "{m['peak_vram_gib']:.3f}" not in src
