@@ -2116,3 +2116,65 @@ path that reported the wrong problem entirely.
 
 **Nothing was graded this session.** No twin exists, `reports/p2/gate4.json` is not written, and
 no GATE-4 number is claimed. **Commit.** this stanza's commit on `p2-14-gate4`.
+
+## Step P2-14 (CodeRabbit round 3) — 2026-07-30: a deliverable no non-Python reader could parse, and a clause bound to the wrong bytes
+
+**Inputs.** A third CodeRabbit CLI review after the r2 commit — 3 findings, all flagged major,
+all in the ENCODE code rather than in the review fixes. Two real, one refuted from the source.
+
+**Fixed (1) — the GATE-4 report would not have been valid JSON.** `main` wrote it with a plain
+`json.dumps`, which emits bare `NaN` / `Infinity` tokens. Python's own `json.loads` reads those
+back, which is exactly why this survives every Python-side check — but they are not JSON, and
+`jq`, JavaScript, R's `jsonlite`, Go and Rust all reject the **entire file**. This is not a
+hypothetical for GATE-4, which produces NaN *by design*: an element no position exercises
+scores NaN so it cannot silently certify the gate, `iou_from_confusion` is NaN on an empty
+union (Stem III and Discriminator can easily be absent from 1,201 records), and
+`block_bootstrap_ci` is NaN below two blocks. The phase-exit deliverable of a public repo
+would have been unparseable for reviewers while looking clean from inside the pipeline. Fixed
+with `json_safe` — the `eval/backbone_throughput.py` idiom already in this package — mapping
+non-finite floats to `null`, converting numpy scalars (`np.int64` does not subclass `int`),
+and deliberately *not* stringifying unknown types so `json.dumps` still raises on them rather
+than writing a plausible-looking value. `allow_nan=False` follows as the belt: it can only fire
+if the sanitiser missed something. Nothing re-validates the written file — `gate4_problems`
+runs on the in-memory report inside `compute_gate4`, before the write — so the NaN semantics
+the gate depends on are untouched. The test asserts on the serialised **text**, because
+`json.loads` accepts `NaN` and a round-trip test would have passed either way.
+
+**Fixed (2) — the identity clause was bound to whichever sidecar entry came first.**
+`twin_evidence` read the provenance sidecar's `outputs` map by iterating and taking the first
+value. `checkpoint_identity_verified` is the clause that binds the report to the checkpoint
+*bytes* — the thing standing between GATE-4 and grading a checkpoint that is not the twin — and
+"some output of some sidecar" is not evidence of the artifact it names. Today every training
+sidecar records exactly one output, so this was latent, and the existing clause makes a
+mismatch fail **loudly** rather than pass, which bounds the live cost at a spurious refusal
+after a ~16 GPU-h run rather than a fabricated pass. Now a lookup: the graded checkpoint's path
+first, its basename second, a lone entry third, and `None` — a refusal the clause judges —
+when two entries share a basename or several exist with no path to disambiguate.
+
+**Refuted (3) — `exclude_selection_val` + `exclude_gate4_eval` do not make the selection bucket
+drift.** The concern was that the selection carve should be drawn from the non-GATE-4 remainder,
+or the two sets validated disjoint. Read from the source: `load_corpus_records` computes
+`val_clusters` from `_training_fold_cluster_sizes(rows)` and `gate4_clusters` from
+`gate4_eval_cluster_ids(rows)` — **both from the same unfiltered rows** — and then applies them
+as independent membership filters in one pass. So the seeded draw never sees a shrunken pool,
+and an overlapping record is simply excluded once. Deriving the selection bucket from the
+remainder, as suggested, is the change that would introduce the defect: it would silently
+re-cut the very fold the P2-06 sweep chose its winner on. No shipped config sets both flags in
+any case (the twin sets `exclude_gate4_eval` alone). Rather than change the code, the property
+is now pinned by a test that builds a fixture where the two derivations *provably* differ, then
+asserts from the source that the shipped loader uses the non-drifting one — so a future
+"cleanup" toward the reviewer's suggestion goes red.
+
+**Validation.** Unit **90/90** on `test_gate4_metrics.py` (12 further new: NaN/Infinity
+serialisation asserted on the text, numpy-scalar conversion + loud failure on unknown types,
+seven provenance-lookup cases including not-first / ambiguous-basename, the end-to-end twin
+identity check both ways, and the carve non-drift pin). Full local `tests/unit` + `tests/golden`
++ `tests/ml`: **2,973 passed / 13 failed**, all 13 the same `ImportError` for `pyarrow` /
+`mamba_ssm` absent from the only local env carrying pytest — unchanged from the r1 baseline and
+touching nothing in this diff. `ruff@0.15.15` + `black@25.11.0` clean; `snakemake --lint` clean.
+**Two further source-sabotage bites, restored sha256-verified:** dropping `json_safe`'s
+non-finite branch → 2 RED; restoring the first-entry provenance lookup → 4 RED, including the
+`not-first` and `ambiguous-basename` cases by name.
+
+**Nothing was graded this session.** No twin exists, `reports/p2/gate4.json` is not written, and
+no GATE-4 number is claimed. **Commit.** this stanza's commit on `p2-14-gate4`.

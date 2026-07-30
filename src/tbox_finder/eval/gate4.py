@@ -368,6 +368,42 @@ def pdb_label_noise_ceiling(fixture: Mapping[str, Any]) -> dict[str, Any]:
 # ══════════════════════════════════════════════════════════════════════════════════════
 # Report
 # ══════════════════════════════════════════════════════════════════════════════════════
+def json_safe(obj: Any) -> Any:
+    """Recursively map non-finite floats to ``None`` so the written report is **valid JSON**.
+
+    ``json.dumps`` emits bare ``NaN`` / ``Infinity`` tokens by default. Python's own
+    ``json.loads`` reads them back, which is exactly why this goes unnoticed — but they are
+    not JSON, and every other consumer of a public phase-exit artifact (``jq``, JavaScript,
+    R's ``jsonlite``, Go, Rust) rejects the whole file.
+
+    GATE-4 produces NaN **by design**, so a real run very likely writes one: an element no
+    position exercises scores NaN so an unmeasurable element cannot silently certify the gate,
+    ``metrics.iou_from_confusion`` is NaN on an empty union (Stem III / Discriminator can
+    easily be absent from 1,201 records), and ``block_bootstrap_ci`` is NaN below two blocks.
+
+    Nothing re-validates the *written* file — :func:`gate4_problems` runs on the in-memory
+    report inside :func:`compute_gate4`, before this — so ``NaN → null`` costs the gate
+    nothing and buys a parseable deliverable. The ``eval/backbone_throughput.py`` idiom.
+    CodeRabbit, r3.
+    """
+    if isinstance(obj, Mapping):
+        return {str(k): json_safe(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [json_safe(v) for v in obj]
+    if isinstance(obj, bool) or obj is None or isinstance(obj, (str, int)):
+        return obj
+    if isinstance(obj, float):  # np.float64 subclasses float, so this catches it too
+        return float(obj) if math.isfinite(obj) else None
+    if isinstance(obj, np.generic):  # np.int64 / np.bool_ do NOT subclass int / bool
+        return json_safe(obj.item())
+    if isinstance(obj, Path):
+        return str(obj)
+    # Anything else is returned untouched so `json.dumps` raises on it. Stringifying an
+    # unexpected type would put a plausible-looking value in a shipped report (§10.3); a
+    # TypeError names the key instead.
+    return obj
+
+
 def _portable_path(path: str | Path) -> str:
     return str(Path(path).as_posix())
 
@@ -381,11 +417,49 @@ def file_sha256(path: str | Path) -> str:
     return h.hexdigest()
 
 
+def provenance_output_sha256(
+    checkpoint_provenance: Mapping[str, Any] | None,
+    checkpoint_path: str | Path | None,
+) -> str | None:
+    """The sidecar's recorded digest **for the graded checkpoint** — ``None`` if unresolvable.
+
+    ``provenance.sha256_paths`` keys ``outputs`` by the path as the producing rule referenced
+    it, so a sidecar recording more than one artifact must be **looked up, not iterated**:
+    taking the first value binds ``checkpoint_identity_verified`` to whichever artifact
+    happens to come first in insertion order. Today every training sidecar records exactly
+    one output, so this is latent — and the existing clause makes a mismatch fail LOUDLY
+    rather than pass, so the live cost would be a spurious refusal after a ~16 GPU-h run, not
+    a fabricated pass. But a clause whose evidence is "some output of some sidecar" is not
+    evidence of the thing it names. Total by contract, like its caller: an unresolvable or
+    ambiguous lookup returns ``None`` and :func:`gate4_problems` does the judging.
+    CodeRabbit, r3.
+    """
+    outputs = (
+        checkpoint_provenance.get("outputs") if isinstance(checkpoint_provenance, Mapping) else None
+    )
+    if not isinstance(outputs, Mapping) or not outputs:
+        return None
+    if checkpoint_path is not None:
+        want = Path(str(checkpoint_path))
+        for key, value in outputs.items():
+            if Path(str(key)) == want:
+                return str(value)
+        by_name = [str(v) for k, v in outputs.items() if Path(str(k)).name == want.name]
+        if len(by_name) > 1:
+            return None  # ambiguous basename — refuse rather than pick one
+        if by_name:
+            return by_name[0]
+    # No path to match on (or a single-output sidecar spelled differently): the one entry is
+    # unambiguous, and a wrong one still has to survive the sha256 comparison downstream.
+    return str(next(iter(outputs.values()))) if len(outputs) == 1 else None
+
+
 def twin_evidence(
     train_report: Mapping[str, Any],
     *,
     checkpoint_sha256: str | None = None,
     checkpoint_provenance: Mapping[str, Any] | None = None,
+    checkpoint_path: str | Path | None = None,
 ) -> dict[str, Any]:
     """Extract — never assert — the evidence that the graded checkpoint is a GATE-4 twin.
 
@@ -400,14 +474,7 @@ def twin_evidence(
     cfg = train_report.get("diagnostics")
     cfg = cfg.get("config") if isinstance(cfg, Mapping) else None
     cfg = cfg if isinstance(cfg, Mapping) else {}
-    prov_outputs = (
-        checkpoint_provenance.get("outputs") if isinstance(checkpoint_provenance, Mapping) else None
-    )
-    prov_sha = None
-    if isinstance(prov_outputs, Mapping):
-        for value in prov_outputs.values():
-            prov_sha = str(value)
-            break
+    prov_sha = provenance_output_sha256(checkpoint_provenance, checkpoint_path)
     return {
         "fold_scope": scope.get("fold_scope"),
         "exclude_gate4_eval_config": cfg.get("exclude_gate4_eval"),
@@ -814,6 +881,7 @@ def compute_gate4(
         train_report,
         checkpoint_sha256=file_sha256(checkpoint),
         checkpoint_provenance=provenance,
+        checkpoint_path=checkpoint,
     )
 
     # `load_stage1_checkpoint` returns the segmenter itself, already `.eval()`, having
@@ -1026,7 +1094,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
     tmp = out.with_suffix(out.suffix + ".tmp")
-    tmp.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
+    # `allow_nan=False` AFTER `json_safe` is the belt, not the fix: the sanitiser has already
+    # replaced every non-finite float, so this can only fire if it missed one — in which case
+    # the run fails loudly instead of writing a file no non-Python reader can parse.
+    tmp.write_text(json.dumps(json_safe(report), indent=2, sort_keys=True, allow_nan=False) + "\n")
     tmp.replace(out)
     gate = report["gate"]
     print(

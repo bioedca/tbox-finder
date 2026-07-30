@@ -761,3 +761,155 @@ def test_a_report_that_fails_its_own_clauses_is_still_buildable_but_never_clean(
     )
     assert report["twin"]["fold_scope"] == "train"
     assert any("gate4_twin_train" in p for p in gate4_problems(report))
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Serialisation + provenance binding (CodeRabbit r3)
+# ══════════════════════════════════════════════════════════════════════════════
+def test_the_written_report_is_valid_json_even_though_gate4_produces_nans():
+    """`json.dumps` writes bare `NaN` tokens, which Python reads back and nothing else does.
+
+    GATE-4 emits NaN by design — an unmeasurable element must not certify the gate, IoU is
+    NaN on an empty union, the CI is NaN below two blocks — so a real run very likely writes
+    one, and the phase-exit deliverable would be unparseable by jq / JS / R / Go while looking
+    fine from Python. Asserting on the TEXT, not on a Python round-trip, is the whole point:
+    `json.loads` accepts `NaN` and would pass either way.
+    """
+    from tbox_finder.eval.gate4 import json_safe
+
+    report = {
+        "gate": {"min_f1": float("nan"), "floor": 0.8},
+        "reported_non_gated": {"boundary_iou_by_element": {"Stem_III": float("nan")}},
+        "ci": {"lower": float("-inf"), "upper": float("inf"), "point": 0.9},
+        "counts": [1, 2, 3],
+    }
+    text = json.dumps(json_safe(report), indent=2, sort_keys=True, allow_nan=False)
+    assert "NaN" not in text and "Infinity" not in text, text
+    back = json.loads(text)
+    assert back["gate"]["min_f1"] is None
+    assert back["reported_non_gated"]["boundary_iou_by_element"]["Stem_III"] is None
+    assert back["ci"] == {"lower": None, "upper": None, "point": 0.9}
+    assert back["counts"] == [1, 2, 3]  # finite values pass through untouched
+
+
+def test_json_safe_converts_numpy_scalars_and_leaves_unknown_types_to_fail_loudly():
+    """np.int64 does not subclass int, so an unconverted one raises inside `json.dumps` — and
+    an unknown type must keep raising rather than be stringified into a plausible value."""
+    np = pytest.importorskip("numpy")
+    from tbox_finder.eval.gate4 import json_safe
+
+    got = json_safe({"i": np.int64(7), "f": np.float64("nan"), "b": np.bool_(True)})
+    assert got == {"i": 7, "f": None, "b": True}
+    assert isinstance(got["i"], int) and isinstance(got["b"], bool)
+    with pytest.raises(TypeError):
+        json.dumps(json_safe({"bad": {1, 2}}), allow_nan=False)
+
+
+_TWIN_CKPT = "data/processed/checkpoints/stage1_gate4_twin/stage1.pt"
+
+
+@pytest.mark.parametrize(
+    "outputs,path,expect",
+    [
+        ({_TWIN_CKPT: "aa"}, _TWIN_CKPT, "aa"),
+        # the graded checkpoint is NOT first in insertion order
+        (
+            {"data/processed/checkpoints/stage1_production/stage1.pt": "pp", _TWIN_CKPT: "tt"},
+            _TWIN_CKPT,
+            "tt",
+        ),
+        # same basename under two directories — ambiguous, refuse rather than pick
+        ({"a/stage1.pt": "aa", "b/stage1.pt": "bb"}, "c/stage1.pt", None),
+        # a lone entry spelled differently still resolves (it must still match by sha256)
+        ({"./checkpoints/stage1.pt": "zz"}, _TWIN_CKPT, "zz"),
+        # several entries and no path to disambiguate on
+        ({"a/x.pt": "aa", "b/y.pt": "bb"}, None, None),
+        ({}, _TWIN_CKPT, None),
+        (None, _TWIN_CKPT, None),
+    ],
+    ids=[
+        "single-match",
+        "not-first",
+        "ambiguous-basename",
+        "lone-other-spelling",
+        "multi-no-path",
+        "empty",
+        "no-sidecar",
+    ],
+)
+def test_provenance_lookup_binds_to_the_graded_checkpoint_not_the_first_entry(
+    outputs, path, expect
+):
+    """`checkpoint_identity_verified` is what binds the report to the checkpoint BYTES.
+
+    Iterating `outputs` and taking the first value binds it to whichever artifact happens to
+    come first — evidence about "some output", not about the thing the clause names."""
+    from tbox_finder.eval.gate4 import provenance_output_sha256
+
+    prov = None if outputs is None else {"outputs": outputs}
+    assert provenance_output_sha256(prov, path) == expect
+
+
+def test_twin_evidence_verifies_identity_against_the_matching_sidecar_entry():
+    """End-to-end through `twin_evidence`: a multi-output sidecar must still verify the twin."""
+    from tbox_finder.eval.gate4 import twin_evidence
+
+    prov = {
+        "outputs": {
+            "data/processed/checkpoints/stage1_production/stage1.pt": "production-sha",
+            _TWIN_CKPT: "twin-sha",
+        }
+    }
+    got = twin_evidence(
+        {"class_counts_scope": {"fold_scope": "gate4_twin_train"}},
+        checkpoint_sha256="twin-sha",
+        checkpoint_provenance=prov,
+        checkpoint_path=_TWIN_CKPT,
+    )
+    assert got["provenance_output_sha256"] == "twin-sha"
+    assert got["checkpoint_identity_verified"] is True
+    # …and grading the OTHER checkpoint against the same sidecar must not verify.
+    other = twin_evidence(
+        {"class_counts_scope": {"fold_scope": "gate4_twin_train"}},
+        checkpoint_sha256="twin-sha",
+        checkpoint_provenance=prov,
+        checkpoint_path="data/processed/checkpoints/stage1_production/stage1.pt",
+    )
+    assert other["checkpoint_identity_verified"] is False
+
+
+def test_the_selection_carve_does_not_move_when_the_gate4_carve_is_also_applied():
+    """CodeRabbit r3 asked whether `exclude_selection_val` + `exclude_gate4_eval` together
+    make the selection bucket drift. They cannot: both cluster sets are computed from the
+    SAME unfiltered rows in `load_corpus_records` and then applied as independent membership
+    filters, so the seeded draw never sees a shrunken pool. That is the property that keeps a
+    twin's inner rung identical to the one the P2-06 sweep selected on — pin it, because a
+    future "derive the selection bucket from the non-GATE-4 remainder" refactor would silently
+    re-cut the fold the sweep's winner was chosen on."""
+    from tbox_finder.data.window_dataset import (
+        _training_fold_cluster_sizes,
+        selection_val_cluster_ids,
+    )
+
+    rows = [{"cluster_id": i // 3, "nested_train": (i % 7) != 0} for i in range(300)]
+    full = selection_val_cluster_ids(_training_fold_cluster_sizes(rows))
+    # The gate-4 carve removes whole clusters; the selection draw must be computed BEFORE any
+    # such removal, i.e. from the same full row set.
+    gate4_like = {c for c in {int(r["cluster_id"]) for r in rows} if c % 5 == 0}
+    remainder = [r for r in rows if int(r["cluster_id"]) not in gate4_like]
+    drifted = selection_val_cluster_ids(_training_fold_cluster_sizes(remainder))
+
+    assert full, "the fixture must actually carve something, or this test is vacuous"
+    assert full != drifted, (
+        "the fixture is degenerate: drawing from the remainder gave the SAME bucket, so this "
+        "test could not tell the two derivations apart"
+    )
+    # The shipped loader uses `full`. Prove it, from the source, rather than from memory.
+    src = (REPO / "src" / "tbox_finder" / "data" / "window_dataset.py").read_text()
+    draw = src.index("val_clusters = selection_val_cluster_ids(")
+    carve = src.index("gate4_clusters = gate4_eval_cluster_ids(")
+    assert draw < carve, "the selection draw must be computed before the gate-4 cluster set"
+    assert "_training_fold_cluster_sizes(rows)" in src[draw : draw + 200], (
+        "the selection draw must read the unfiltered `rows`; deriving it from a gate-4-carved "
+        "remainder would re-cut the fold the P2-06 sweep selected its winner on"
+    )
