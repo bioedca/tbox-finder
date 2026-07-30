@@ -630,6 +630,119 @@ def test_report_disclosures_name_the_two_run_split_and_the_conservative_directio
     assert report["posterior"] == "uncalibrated"
 
 
+def test_disclosures_report_the_evidence_they_were_handed_not_baked_in_literals():
+    """The disclosures ship inside `gate4.json` and are the only place a reader learns the
+    graded artifact is not the shipped one — so their numbers must track the run that made
+    them. Literals here would keep asserting one run's twin size, phylum share, deposition
+    count and floor under another's (§10.3). CodeRabbit, r2."""
+    from tbox_finder.eval.gate4 import disclosures
+    from tbox_finder.power import GATE4_F1_FLOOR
+
+    blob = " ".join(
+        disclosures(
+            twin={"n_training_records": 4242},
+            scope={"n_records": 400, "phylum_counts": {"Actinomycetota": 300, "Bacillota": 100}},
+            non_gated={
+                "pdb_label_noise_ceiling": {
+                    "estimable": False,
+                    "n_depositions": 12,
+                    "unresolved_core_elements": ["Specifier"],
+                }
+            },
+        )
+    )
+    assert "4242 records" in blob, blob
+    assert "75.0% Actinomycetota (300/400 records)" in blob, blob
+    assert "0 of 12 depositions" in blob, blob
+    assert f"the {GATE4_F1_FLOOR} floor stands" in blob, blob
+    # …and none of the previously-baked-in values survive when the evidence says otherwise.
+    for stale in ("7,099 records", "98.7%", "1,188/1,204", "0 of 9 ", "Firmicutes"):
+        assert stale not in blob, f"{stale!r} is a literal from another run: {blob}"
+
+
+@pytest.mark.parametrize(
+    "twin,scope,non_gated,expect_absent,expect_refusal",
+    [
+        (
+            {},
+            {"n_records": 4, "phylum_counts": {"B": 4}},
+            {},
+            "records — strictly fewer",
+            "NOT re-derivable from this report",
+        ),
+        (
+            {"n_training_records": 7},
+            {"n_records": 0, "phylum_counts": {}},
+            {},
+            "% ",
+            "NOT re-derivable from this report",
+        ),
+        (
+            {"n_training_records": 7},
+            {"n_records": 4, "phylum_counts": {"B": 4}},
+            {},
+            "0 of",
+            "NOT reported here",
+        ),
+    ],
+    ids=["twin-size-missing", "phylum-counts-missing", "ceiling-missing"],
+)
+def test_disclosures_refuse_by_name_when_the_evidence_is_absent(
+    twin, scope, non_gated, expect_absent, expect_refusal
+):
+    """Absent evidence must produce a NAMED refusal, never an invented number and never a
+    silently-dropped sentence — a disclosure that quietly vanishes is how a reader concludes
+    the caveat did not apply ([[clauses-must-guard-emptiness]])."""
+    from tbox_finder.eval.gate4 import disclosures
+
+    got = disclosures(twin=twin, scope=scope, non_gated=non_gated)
+    assert len(got) == 5, got  # the sentence is still there, saying it cannot say
+    blob = " ".join(got)
+    assert expect_refusal in blob, blob
+    assert expect_absent not in blob, blob
+    assert "None" not in blob, blob
+
+
+def test_disclosures_say_the_delta_path_re_opened_when_the_ceiling_becomes_estimable():
+    """The estimable branch is not decoration: it is the sentence that tells a reader D6's
+    recalibration question is live again — and it must still refuse to move the floor."""
+    from tbox_finder.eval.gate4 import disclosures
+    from tbox_finder.power import GATE4_F1_FLOOR
+
+    blob = " ".join(
+        disclosures(
+            twin={"n_training_records": 7},
+            scope={"n_records": 4, "phylum_counts": {"B": 4}},
+            non_gated={
+                "pdb_label_noise_ceiling": {
+                    "estimable": True,
+                    "n_depositions": 11,
+                    "unresolved_core_elements": [],
+                }
+            },
+        )
+    )
+    assert "ESTIMABLE from 11 depositions" in blob, blob
+    assert "ADR-0004 re-sign-off" in blob, blob
+    assert f"still {GATE4_F1_FLOOR}" in blob, blob
+
+
+@pytest.mark.parametrize("bad", [None, "0.9", {"f1": 0.9}, [0.9], True])
+def test_gate4_problems_reports_a_non_numeric_per_element_f1_instead_of_raising(bad):
+    """``gate4_problems`` is TOTAL — problems out, never an exception. `float(...)` over the
+    per-element F1s raised on exactly the corrupt artifacts the clause exists to catch, and a
+    validator that dies reports nothing at all. CodeRabbit, r2."""
+    from tbox_finder.eval.gate4 import gate4_problems
+
+    report = _good_report()
+    report["gate"]["per_element_f1"] = {**report["gate"]["per_element_f1"], "Specifier": bad}
+    problems = gate4_problems(report)  # must not raise
+    assert any("non-numeric core element" in p for p in problems), problems
+    # …and it must NOT also claim the min disagrees — that re-derivation was skipped, not run
+    # on coerced garbage.
+    assert not any("is a MIN, not a mean" in p for p in problems), problems
+
+
 def test_a_report_that_fails_its_own_clauses_is_still_buildable_but_never_clean():
     """``build_report`` is pure assembly — it must NOT silently repair a bad input, or the
     clause set would be checking the builder instead of the run."""

@@ -424,6 +424,110 @@ def twin_evidence(
     }
 
 
+#: The SHIPPED P2-10d′-b production checkpoint's training-fold size. Unlike every other
+#: number in the disclosures this one describes a **different artifact** — it is recorded in
+#: `reports/p2/train_stage1_production.json` and pinned by ADR-0004 A6 — so no key of *this*
+#: run re-derives it and it is a named constant rather than a derivation.
+SHIPPED_CHECKPOINT_N_TRAIN = 8303
+
+
+def disclosures(
+    *,
+    twin: Mapping[str, Any],
+    scope: Mapping[str, Any],
+    non_gated: Mapping[str, Any],
+) -> list[str]:
+    """The PRD §10.1 / ADR-0004 A6 disclosures, **derived from the evidence they describe**.
+
+    These sentences ship inside ``gate4.json`` and are the only place a reader learns that the
+    graded artifact is not the shipped one. Writing the twin's record count, the population's
+    phylum share, the deposition count and the floor as string literals — as this block first
+    did — makes them keep asserting one run's numbers under another's the moment the fold is
+    re-cut, the fixture grows, or ADR-0004 re-signs δ, and a stale number in a shipped report
+    reads exactly like a live one (CLAUDE.md §10.3). It also contradicted ``build_report``'s
+    own contract, *"pure: every number is passed in already measured"*. Each sentence now
+    degrades to a named refusal when its evidence is absent rather than inventing a value.
+    CodeRabbit, r2 — the same finding as r1's δ-governance sentence, one block over.
+    """
+    n_twin_train = twin.get("n_training_records")
+    twin_size = (
+        f"The twin trained on {n_twin_train} records — strictly fewer — so this number is a "
+        "CONSERVATIVE proxy for the shipped model, not a measurement of it."
+        if isinstance(n_twin_train, int)
+        else (
+            "The twin's training-fold size is NOT re-derivable from this report "
+            "(twin.n_training_records is missing), so the CONSERVATIVE direction of the "
+            "two-run split cannot be checked from this sentence — read the twin's own "
+            "training report."
+        )
+    )
+
+    phylum_counts = scope.get("phylum_counts")
+    n_scope = scope.get("n_records")
+    if (
+        isinstance(phylum_counts, Mapping)
+        and phylum_counts
+        and isinstance(n_scope, int)
+        and n_scope
+    ):
+        # Ties broken by name so the sentence is deterministic across runs (CLAUDE.md §8.3).
+        top_phylum, top_n = max(phylum_counts.items(), key=lambda kv: (kv[1], str(kv[0])))
+        composition = (
+            f"The graded population is {100.0 * top_n / n_scope:.1f}% {top_phylum} "
+            f"({top_n}/{n_scope} records), which is the corpus composition left after the "
+            "leave-one-order-out holdout is removed, not a sampling choice. The point "
+            "estimate is pooled MICRO over positions; the cluster-blocked CI is the D5 "
+            "estimator."
+        )
+    else:
+        composition = (
+            "The graded population's phylum composition is NOT re-derivable from this report "
+            "(scope.phylum_counts is missing or empty) — do not read a composition claim off "
+            "this sentence. The point estimate is pooled MICRO over positions; the "
+            "cluster-blocked CI is the D5 estimator."
+        )
+
+    ceiling = non_gated.get("pdb_label_noise_ceiling")
+    ceiling = ceiling if isinstance(ceiling, Mapping) else {}
+    unresolved = ceiling.get("unresolved_core_elements") or []
+    n_dep = ceiling.get("n_depositions")
+    depositions = f"{n_dep} depositions" if n_dep is not None else "the depositions supplied"
+    if ceiling.get("estimable") is False and unresolved:
+        ceiling_note = (
+            f"The cross-source label-noise ceiling C is NOT estimable ({', '.join(unresolved)} "
+            f"resolve to a residue extent in 0 of {depositions}), so D6's δ-recalibration path "
+            f"is closed and the {GATE4_F1_FLOOR} floor stands as written."
+        )
+    elif ceiling.get("estimable") is True:
+        ceiling_note = (
+            f"The cross-source label-noise ceiling C is now ESTIMABLE from {depositions}, so "
+            "D6's δ-recalibration path has re-opened. The floor here is still "
+            f"{GATE4_F1_FLOOR}: changing it requires ADR-0004 re-sign-off (CLAUDE.md §7 "
+            "item 2), never this report."
+        )
+    else:
+        ceiling_note = (
+            "The cross-source label-noise ceiling is NOT reported here "
+            "(reported_non_gated.pdb_label_noise_ceiling is missing or carries no verdict), so "
+            f"nothing in this run bears on D6's δ-recalibration path and the {GATE4_F1_FLOOR} "
+            "floor stands as written."
+        )
+
+    return [
+        "GATE-4 grades the eval TWIN, not the shipped checkpoint: the shipped P2-10d'-b "
+        f"production checkpoint trained on all {SHIPPED_CHECKPOINT_N_TRAIN} D5-fold records, "
+        "this population included, so it has no in-distribution held-out population at all "
+        f"(ADR-0004 A6). {twin_size} PRD §10.1's two-run split disclosure.",
+        composition,
+        "The leave-one-order-out read is REPORTED, NEVER GATED here (ADR-0004 D6 gates the "
+        "in-distribution reference). It is the population PRD §12:241 reports as the "
+        "generalization headline and PRD §2.3 grades at GATE-1 / P4.",
+        "Graded on the UNCALIBRATED posterior (ADR-0005 A11 Pin 4); P2-13's T = 0.9896 is a "
+        "machinery demonstration and is not shipped.",
+        ceiling_note,
+    ]
+
+
 def build_report(
     *,
     checkpoint: str | Path,
@@ -455,26 +559,7 @@ def build_report(
         "gate": dict(gated),
         "reported_non_gated": dict(non_gated),
         "loo_holdout": dict(loo) if loo is not None else None,
-        "disclosures": [
-            "GATE-4 grades the eval TWIN, not the shipped checkpoint: the shipped "
-            "P2-10d'-b production checkpoint trained on all 8,303 D5-fold records, this "
-            "population included, so it has no in-distribution held-out population at all "
-            "(ADR-0004 A6). The twin trained on 7,099 records — strictly fewer — so this "
-            "number is a CONSERVATIVE proxy for the shipped model, not a measurement of it. "
-            "PRD §10.1's two-run split disclosure.",
-            "The population is 98.7% Firmicutes (1,188/1,204 before the window filter), "
-            "which is the corpus composition after the leave-one-order-out holdout is "
-            "removed, not a sampling choice. The point estimate is pooled MICRO over "
-            "positions; the cluster-blocked CI is the D5 estimator.",
-            "The leave-one-order-out read is REPORTED, NEVER GATED here (ADR-0004 D6 gates "
-            "the in-distribution reference). It is the population PRD §12:241 reports as "
-            "the generalization headline and PRD §2.3 grades at GATE-1 / P4.",
-            "Graded on the UNCALIBRATED posterior (ADR-0005 A11 Pin 4); P2-13's T = 0.9896 "
-            "is a machinery demonstration and is not shipped.",
-            "The 9-PDB cross-source label-noise ceiling C is NOT estimable (0 of 9 "
-            "depositions resolve Specifier / Antiterminator to a residue extent), so D6's "
-            "δ-recalibration path is closed and the 0.80 floor stands as written.",
-        ],
+        "disclosures": disclosures(twin=twin, scope=scope, non_gated=non_gated),
     }
 
 
@@ -569,19 +654,39 @@ def gate4_problems(report: Mapping[str, Any]) -> list[str]:
                 "all three or it is not the D6 statistic"
             )
         else:
-            vals = [float(per_element[e]) for e in CORE_ELEMENTS]
-            expected = float("nan") if any(math.isnan(v) for v in vals) else min(vals)
+            # `float(per_element[e])` raises on None / a dict / a non-numeric string, and this
+            # function's contract is TOTAL — it returns problems, never raises. A validator
+            # that dies reports nothing, which is strictly worse than one that reports the
+            # malformed value, and it dies exactly on the corrupt artifacts it exists to
+            # catch (the same defect fixed in P2-13's calibration validator). Non-numeric
+            # per-element F1s become problems and the re-derivation is skipped rather than
+            # run on coerced garbage. CodeRabbit, r2.
+            vals: list[float] = []
+            bad = []
+            for e in CORE_ELEMENTS:
+                v = per_element[e]
+                if isinstance(v, bool) or not isinstance(v, (int, float)):
+                    bad.append(f"{e}={v!r}")
+                else:
+                    vals.append(float(v))
+            if bad:
+                problems.append(
+                    "gate.per_element_f1: non-numeric core element(s) "
+                    f"{', '.join(bad)} — min_f1 cannot be re-derived from them"
+                )
             got = gate.get("min_f1")
             if not isinstance(got, (int, float)) or isinstance(got, bool):
                 problems.append(f"gate.min_f1: must be a number, got {got!r}")
-            elif math.isnan(expected) != math.isnan(float(got)) or (
-                not math.isnan(expected) and abs(float(got) - expected) > 1e-12
-            ):
-                per_core = dict(zip(CORE_ELEMENTS, vals, strict=True))
-                problems.append(
-                    f"gate.min_f1 = {got!r} but the minimum over {per_core} is "
-                    f"{expected!r} — the gated statistic is a MIN, not a mean (ADR-0004 D6)"
-                )
+            elif not bad:
+                expected = float("nan") if any(math.isnan(v) for v in vals) else min(vals)
+                if math.isnan(expected) != math.isnan(float(got)) or (
+                    not math.isnan(expected) and abs(float(got) - expected) > 1e-12
+                ):
+                    per_core = dict(zip(CORE_ELEMENTS, vals, strict=True))
+                    problems.append(
+                        f"gate.min_f1 = {got!r} but the minimum over {per_core} is "
+                        f"{expected!r} — the gated statistic is a MIN, not a mean (ADR-0004 D6)"
+                    )
             floor = gate.get("floor")
             if floor != GATE4_F1_FLOOR:
                 problems.append(

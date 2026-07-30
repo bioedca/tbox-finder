@@ -2059,3 +2059,60 @@ digest-verified backup copy.
 
 **Nothing was graded this session.** No twin exists, `reports/p2/gate4.json` is not written, and
 no GATE-4 number is claimed. **Commit.** this stanza's commit on `p2-14-gate4`.
+
+## Step P2-14 (CodeRabbit round 2) — 2026-07-30: the same defect one block over, and a validator that died on the artifacts it exists to catch
+
+**Inputs.** A second CodeRabbit CLI review of `p2-14-gate4` against `main` after the r1 fix
+commit — 3 findings, all minor, all real, all fixed.
+
+**Fixed (1) — the shipped disclosures carried the numbers r1 had just stopped hardcoding
+elsewhere.** `build_report`'s docstring reads *"pure: every number is passed in already
+measured"*, and its `disclosures` block then wrote `7,099` records, `98.7% Firmicutes
+(1,188/1,204)`, `0 of 9 depositions` and the `0.80` floor as string literals. These are the
+sentences that ship inside `gate4.json` and the only place a reader learns the graded artifact
+is not the shipped one (PRD §10.1), so a re-cut fold or a grown fixture would have them
+asserting one run's numbers under another's. They are now built by a `disclosures()` function
+from the evidence they describe — `twin.n_training_records`, `scope.phylum_counts` /
+`scope.n_records`, `reported_non_gated.pdb_label_noise_ceiling`, `power.GATE4_F1_FLOOR` — with
+each sentence degrading to a **named refusal** ("NOT re-derivable from this report") rather
+than an invented value or a silently dropped caveat, and a live branch for the case where the
+ceiling *becomes* estimable that still refuses to move the floor without ADR-0004 re-sign-off.
+Two literals were deliberately kept: the shipped checkpoint's 8,303-record fold, promoted to a
+named constant because it describes a **different artifact** that no key of this run
+re-derives. Note the phylum share is now the share of the graded population
+(`scope.n_records`), not the pre-window-filter 1,204 no key of the report carries — the
+derivable number rather than the one that reads better. This is r1's δ-governance finding
+recurring one block over, which is the P2-13 r2 shape exactly: my own round-1 fix was
+incomplete where I did not look.
+
+**Fixed (2) — `gate4_problems` could die instead of reporting.** Its contract is total —
+problems out, never an exception — and it did `float(per_element[e])` over the three core F1s.
+That raises `TypeError` on `None`, a dict or a list, i.e. precisely the malformed artifacts the
+clause exists to catch, and a validator that crashes reports nothing at all. Worse, the two
+values it did *not* crash on were the quiet ones: `float("0.9")` and `float(True)` coerced a
+string and a boolean into scores and the re-derivation then compared against them as if they
+were measurements. Core elements are now type-checked, non-numeric ones become a named problem,
+and the min re-derivation is **skipped** rather than run on coerced garbage. Same defect as
+P2-13 r1's calibration validator, in the sibling module.
+
+**Fixed (3) — my own r1 drift test only compared stems.** The registry case I added asserted
+that each run signal's *stem* appears in the sbatch body, which `--output=logs/train_gate4_twin_%j.out`
+satisfies just as well as `reports/p2/…`. Since the ignore rules are path-anchored, a
+re-pointed log directory would have left the real logs un-ignored with all five cases green —
+the test would have certified the registry rather than the file. The SLURM logs are now parsed
+out of the `#SBATCH --output=` / `--error=` headers and compared as **whole paths** (with `%j`
+normalised to the fixture job id); the DONE marker and lock keep the name check, which is
+sufficient because both are built from `$OUT_DIR` in the body.
+
+**Validation.** Unit **88/88** on the two affected files (10 further new: the derived-number
+disclosure, three absent-evidence refusals, the re-opened-δ branch, and five malformed
+per-element F1 shapes); with `tests/ml/test_eval_gate.py` **98 passed / 3 skipped**.
+`ruff@0.15.15` + `black@25.11.0` clean (black reformatted three files, re-verified after);
+`snakemake --lint` clean. **Three further source-sabotage bites, each restored and
+sha256-verified against a pre-sabotage manifest:** re-pointing the twin's `--output` to `logs/`
+→ the drift case RED naming both paths; restoring the `7,099` literal → the disclosure case RED;
+restoring the raising `float()` → **5** RED, three by `TypeError` and two by the silent-coercion
+path that reported the wrong problem entirely.
+
+**Nothing was graded this session.** No twin exists, `reports/p2/gate4.json` is not written, and
+no GATE-4 number is claimed. **Commit.** this stanza's commit on `p2-14-gate4`.

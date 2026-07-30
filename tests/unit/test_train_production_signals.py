@@ -24,6 +24,7 @@ Pure-subprocess `git` — runs in bare CI.
 
 from __future__ import annotations
 
+import re
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -155,21 +156,57 @@ def test_the_committed_report_is_not_gitignored(sb: TrainSbatch) -> None:
     )
 
 
+def _sbatch_log_directives(body: str) -> dict[str, str]:
+    """`{"output": <path>, "error": <path>}` from the `#SBATCH --output=/--error=` headers."""
+    found: dict[str, str] = {}
+    for line in body.splitlines():
+        m = re.match(r"#SBATCH\s+--(output|error)[=\s]+(\S+)", line.strip())
+        if m and m.group(1) not in found:
+            found[m.group(1)] = m.group(2)
+    return found
+
+
 def test_the_run_signal_paths_are_the_ones_the_sbatch_actually_writes() -> None:
     """The registry above is evidence only if it names the sbatch's OWN paths.
 
-    Without this, a typo'd or drifted entry (a renamed DONE marker, a re-pointed --output) makes
-    every case above pass while the real signals stay un-ignored — the registry would be
-    self-certifying rather than checking the file. Each signal's distinctive stem must appear in
-    the sbatch body.
+    Without this, a typo'd or drifted entry (a renamed DONE marker, a re-pointed `--output`)
+    makes every case above pass while the real signals stay un-ignored — the registry would be
+    self-certifying rather than checking the file.
+
+    The SLURM logs are compared as WHOLE PATHS, not stems: `--output=logs/train_gate4_twin_%j.out`
+    still contains the stem `train_gate4_twin`, so a stem check would bless a registry claiming
+    `reports/p2/…` while the job writes somewhere the `/reports/p2/…` ignore rule cannot reach —
+    the exact drift this test exists to catch. CodeRabbit, r2.
     """
     for sb in SBATCHES:
         body = sb.path.read_text()
+
+        directives = _sbatch_log_directives(body)
+        assert set(directives) == {"output", "error"}, (
+            f"{sb.name}.sbatch must declare both #SBATCH --output and --error; found "
+            f"{sorted(directives)}."
+        )
+        registered = {
+            Path(s).suffix.lstrip("."): s
+            for s in sb.run_signals
+            if Path(s).suffix in (".out", ".err")
+        }
+        for stream, suffix in (("output", "out"), ("error", "err")):
+            declared = directives[stream].replace("%j", _JOB)
+            assert declared == registered.get(suffix), (
+                f"{sb.name}.sbatch writes its {stream} to {directives[stream]!r} but the registry "
+                f"locks {registered.get(suffix)!r}. The ignore rule is path-anchored, so a "
+                "re-pointed log directory leaves the real logs un-ignored while these tests stay "
+                "green."
+            )
+
         for signal in sb.run_signals:
-            stem = Path(signal).name.split(f"_{_JOB}")[0]
-            assert stem in body, (
-                f"{sb.name}.sbatch never mentions {stem!r}, so the run signal {signal!r} this "
-                "test claims to lock is not a path that sbatch writes — the registry has drifted."
+            if Path(signal).suffix in (".out", ".err"):
+                continue  # already compared as a whole path above
+            assert Path(signal).name in body, (
+                f"{sb.name}.sbatch never mentions {Path(signal).name!r}, so the run signal "
+                f"{signal!r} this test claims to lock is not a path that sbatch writes — the "
+                "registry has drifted."
             )
         assert Path(sb.committed_report).name in body, (
             f"{sb.name}.sbatch never mentions {Path(sb.committed_report).name!r} — the committed "
