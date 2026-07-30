@@ -98,18 +98,28 @@ DISCLOSURES: tuple[str, ...] = (
     "and its absence is not a gap in this table.",
     "This is a SELECTION-rung table, not GATE-4. GATE-4 is graded at P2-14 on the real "
     "leave-one-order-out holdout; no number here is a generalization result.",
-    "MEASURED run-to-run variance: a same-seed, same-config re-run of the rc_gate leg moved "
-    "min-core-F1 0.9242 -> 0.7568. The entire swing was ONE element (Antiterminator per-nt "
-    "F1 0.9242->0.7568, boundary IoU 0.8590->0.6087) while its AUPRC barely moved "
-    "(0.9843->0.9705): the ranking held and the argmax decision boundary moved. "
-    "block_bootstrap_ci resamples clusters against a FIXED checkpoint, so it measures "
-    "sampling variance ONLY and understated this by roughly 4x. min_f1 is a MINIMUM over "
-    "three core elements, so it reports whichever element lands worst, and Antiterminator is "
-    "the unstable one. Separation is therefore judged on replicate-widened intervals and is "
-    "withheld entirely for any leg (or baseline) with fewer than two replicates.",
-    "Stage-1 outputs here are UNCALIBRATED — temperature scaling is P2-13, which has not "
-    "run. The instability above is a property of argmax over uncalibrated logits under the "
-    "frozen ADR-0005 D3 reconcile->argmax operator, and is flagged to P2-13.",
+    "REPLICATION, measured. Every concat-path leg reproduces essentially exactly across "
+    "independent runs, different commits and different nodes: size_d118_l4 spread 0.0001 "
+    "over 3 replicates, size_d256_l4 0.0000 over 2, baseline 0.0006 over 2. Separation is "
+    "therefore judged on replicate-widened intervals, and is WITHHELD (null, never false) "
+    "for any leg -- or for the baseline -- carrying fewer than two replicates.",
+    "ONE arm did NOT reproduce, and its verdict is withheld for that reason. Two runs of the "
+    "rc_gate leg at the same seed and config gave min-core-F1 0.9242 and 0.7568. The entire "
+    "difference sat in one element (Antiterminator per-nt F1 0.9242->0.7568, boundary IoU "
+    "0.8590->0.6087) while its AUPRC barely moved (0.9843->0.9705) -- the ranking held and "
+    "the argmax decision boundary moved. The two runs were at DIFFERENT commits, and no two "
+    "gate runs exist at one commit, so this is NOT established as run-to-run nondeterminism: "
+    "either the gate path is nondeterministic (it is the only arm whose RCCombine holds a "
+    "learned parameter, hence the only one whose backward reduces over batch x length), or "
+    "something in the intervening commits moved that leg specifically. Every concat leg was "
+    "bit-stable across the same commit span, which rules those commits out for concat but "
+    "not for gate. UNRESOLVED, and resolvable only by two gate runs at one commit.",
+    "min_f1 is a MINIMUM over three core elements, so it reports whichever element lands "
+    "worst: baseline / head_crf / size_d256_l4 are limited by Specifier, while rc_gate and "
+    "size_d118_l4 are limited by Antiterminator. Stage-1 outputs here are UNCALIBRATED "
+    "(temperature scaling is P2-13, which has not run), and an AUPRC-stable / IoU-collapsing "
+    "shift is the signature of a threshold effect under the frozen ADR-0005 D3 "
+    "reconcile->argmax operator rather than of a learning failure. Flagged to P2-13.",
 )
 
 
