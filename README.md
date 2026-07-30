@@ -43,16 +43,20 @@ data-leakage control, calibration, and orthogonal validation are first-class.
 
 - **Phase 2 — Stage-1 training (in progress).** Stage-1 **architecture ablations** are
   measured (`reports/p2/ablation_table.json`): on a disjoint 830-record / 469-cluster
-  selection fold with cluster-blocked bootstrap intervals, a CRF head, a gated
-  reverse-complement combination and a 1.93M-parameter backbone are **not distinguishable**
-  from the promoted baseline (all intervals overlap — a statement about power, not
-  equivalence), while the smallest **471k** checkpoint separates **downward**
-  (0.8890, CI [0.8581, 0.9047] vs baseline 0.9386, [0.9125, 0.9550]), locating the floor of
-  the throughput-driven downward search. Measured forward-only scan rate across the three
-  pinned checkpoints: **69.5 / 268.4 / 423.5** windows/s/GPU (1.0× / 3.86× / 6.10×), so
-  1.93M buys 3.86× throughput at no resolvable accuracy cost.
-  *Selection-fold measurements that fix architecture — **not** generalization results;
-  GATE-4 is graded later in Phase 2 on the leave-one-order-out holdout.*
+  selection fold, a CRF head, a gated reverse-complement combination and both smaller
+  backbones span 0.8890–0.9416 min-core-F1 against the promoted baseline's 0.9386, and
+  **no arm is reported as separated**. The limit is run-to-run training variance, not fold
+  size: an **identical-seed, identical-config re-run** of one arm moved 0.9242 → **0.7568**,
+  the whole shift in one element (antiterminator per-nt F1 0.9242→0.7568, boundary IoU
+  0.8590→0.6087) while its AUPRC barely moved (0.9843→0.9705) — the argmax boundary moved,
+  not the representation. Cluster-blocked bootstrap CIs resample a *fixed* checkpoint, so
+  they exclude that variance and understated it ~4×; separation is now judged only on
+  replicate-widened intervals. The **throughput** half is unaffected (a property of the
+  architecture, not of a trained checkpoint): **69.5 / 268.4 / 423.5** windows/s/GPU
+  (1.0× / 3.86× / 6.10×) across the three pinned checkpoints.
+  *Selection-fold measurements — **not** generalization results; GATE-4 is graded later in
+  Phase 2 on the leave-one-order-out holdout. Stage-1 outputs here are uncalibrated
+  (temperature scaling is a later Phase-2 step).*
 
 ## Layout (PRD §16)
 

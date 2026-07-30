@@ -119,39 +119,64 @@ mkdir -p "$ABLATE_DIR" "$STATUS_DIR"
 # Parallel arrays, one entry per leg, indexed by SLURM_ARRAY_TASK_ID. Enforced against the
 # table length so the --array range and this table cannot drift apart silently.
 PRODUCTION_BACKBONE=caduceus-ps-131k-d256-l16
-KEYS=(rc_gate head_crf size_d256_l4 size_d118_l4)
-BACKBONES=("$PRODUCTION_BACKBONE" "$PRODUCTION_BACKBONE" caduceus-ps-1k-d256-l4 caduceus-ps-1k-d118-l4)
-RC_MODES=(gate concat concat concat)
-USE_CRFS=(false true false false)
+KEYS=(rc_gate head_crf size_d256_l4 size_d118_l4 baseline)
+BACKBONES=("$PRODUCTION_BACKBONE" "$PRODUCTION_BACKBONE" caduceus-ps-1k-d256-l4 caduceus-ps-1k-d118-l4 "$PRODUCTION_BACKBONE")
+RC_MODES=(gate concat concat concat concat)
+USE_CRFS=(false true false false false)
+#: The one entry allowed to differ from the baseline arm on ZERO axes — it IS the baseline
+#: arm, re-trained here to measure run-to-run variance rather than to ablate anything.
+BASELINE_KEY=baseline
 NLEGS=${#KEYS[@]}
-tid="${SLURM_ARRAY_TASK_ID:?this sbatch must be launched as an --array job (no SLURM_ARRAY_TASK_ID)}"
+raw_tid="${SLURM_ARRAY_TASK_ID:?this sbatch must be launched as an --array job (no SLURM_ARRAY_TASK_ID)}"
+
+# ── Replicate decode (P2-12 RESULT) ──────────────────────────────────────────────────────
+# A same-seed re-run of leg 0 moved min-core-F1 0.9242 -> 0.7568 — the whole swing in ONE
+# element (Antiterminator: per-nt F1 0.9242->0.7568, boundary IoU 0.8590->0.6087) while its
+# AUPRC barely moved (0.9843->0.9705). The ranking held; the ARGMAX BOUNDARY moved. So the
+# block-bootstrap CI, which resamples clusters against a FIXED checkpoint, cannot see
+# training-run variance — and it measured ~4x narrower than that variance. Separation
+# therefore has to be judged against replicates, so the array id carries one:
+#     leg       = tid % 10          (index into the table above)
+#     replicate = tid / 10 + 1      (integer division)
+# tid 0-4 are replicate 1 and keep their original un-suffixed report names, so the already
+# committed leg reports stay exactly where they are; tid 13 is leg 3 replicate 2, and so on.
+# The CONFIG is identical across replicates (seed 42 included, per the ADR-0003 A3 protocol)
+# — only the output paths differ. Varying the seed instead would confound seed variance with
+# the run-to-run nondeterminism this is built to measure, and would move the pinned protocol.
+tid=$((raw_tid % 10))
+REPLICATE=$((raw_tid / 10 + 1))
 if [ "$tid" -lt 0 ] || [ "$tid" -ge "$NLEGS" ]; then
-  echo "FATAL: SLURM_ARRAY_TASK_ID=$tid out of range [0,$NLEGS); --array range disagrees with the leg table." >&2
+  echo "FATAL: SLURM_ARRAY_TASK_ID=$raw_tid decodes to leg $tid, outside [0,$NLEGS); --array disagrees with the leg table." >&2
   exit 2
 fi
 if [ "${#BACKBONES[@]}" -ne "$NLEGS" ] || [ "${#RC_MODES[@]}" -ne "$NLEGS" ] || [ "${#USE_CRFS[@]}" -ne "$NLEGS" ]; then
   echo "FATAL: the leg table's parallel arrays have different lengths — a leg would silently take another leg's axis." >&2
   exit 2
 fi
-KEY="${KEYS[$tid]}"
+LEG="${KEYS[$tid]}"
 BACKBONE="${BACKBONES[$tid]}"
 RC_MODE="${RC_MODES[$tid]}"
 USE_CRF="${USE_CRFS[$tid]}"
+# Replicate 1 keeps the original name so committed artifacts are untouched; 2+ get a suffix.
+if [ "$REPLICATE" -eq 1 ]; then KEY="$LEG"; else KEY="${LEG}_rep${REPLICATE}"; fi
 
-# Exactly ONE leg may differ from the baseline arm on more than nothing, and none may differ on
-# two axes at once — an ablation table cannot attribute a delta to an axis a leg shares with a
-# second change. Re-derived here rather than trusted to the table above.
+# An ablation leg may differ from the baseline arm on EXACTLY ONE axis — never two, or the
+# table cannot attribute a delta. The sole exception is the explicitly-named baseline entry,
+# which differs on zero BY CONSTRUCTION: it is the comparator being replicated, not an arm.
+# Re-derived here rather than trusted to the table above.
 NDIFF=0
 [ "$BACKBONE" = "$PRODUCTION_BACKBONE" ] || NDIFF=$((NDIFF + 1))
 [ "$RC_MODE" = "concat" ] || NDIFF=$((NDIFF + 1))
 [ "$USE_CRF" = "false" ] || NDIFF=$((NDIFF + 1))
-if [ "$NDIFF" -ne 1 ]; then
-  echo "FATAL: leg $KEY differs from the baseline arm on $NDIFF axes (must be exactly 1);" >&2
+WANT_NDIFF=1
+[ "$LEG" != "$BASELINE_KEY" ] || WANT_NDIFF=0
+if [ "$NDIFF" -ne "$WANT_NDIFF" ]; then
+  echo "FATAL: leg $LEG differs from the baseline arm on $NDIFF axes (must be exactly $WANT_NDIFF);" >&2
   echo "  backbone=$BACKBONE rc_combine=$RC_MODE use_crf=$USE_CRF" >&2
   exit 2
 fi
 
-OK="$STATUS_DIR/leg_${tid}.OK"
+OK="$STATUS_DIR/leg_${raw_tid}.OK"
 # Clear only THIS leg's stale success marker, before the failure-prone conda activate / HF
 # download, so a crash during import cannot leave a previous run's OK behind (§9.3 keys on
 # absence-on-failure). $STATUS_DIR is gitignored and matches no tracked path.
@@ -255,7 +280,7 @@ SCRATCH_REPORT="$JOB_SCRATCH/${KEY}.json"
 REPORT="$ABLATE_DIR/${KEY}.json"
 
 echo "host=$(hostname) job=${SLURM_JOB_ID:-none} array=${SLURM_ARRAY_JOB_ID:-none}:${SLURM_ARRAY_TASK_ID:-none}"
-echo "leg tid=$tid KEY=$KEY backbone=$BACKBONE rc_combine=$RC_MODE use_crf=$USE_CRF"
+echo "leg tid=$raw_tid (leg=$tid replicate=$REPLICATE) KEY=$KEY backbone=$BACKBONE rc_combine=$RC_MODE use_crf=$USE_CRF"
 echo "sha=$(git rev-parse --short HEAD 2>/dev/null || echo NA)"
 nvidia-smi --query-gpu=name,driver_version,memory.total --format=csv,noheader || true
 

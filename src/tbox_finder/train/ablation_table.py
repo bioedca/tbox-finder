@@ -98,6 +98,18 @@ DISCLOSURES: tuple[str, ...] = (
     "and its absence is not a gap in this table.",
     "This is a SELECTION-rung table, not GATE-4. GATE-4 is graded at P2-14 on the real "
     "leave-one-order-out holdout; no number here is a generalization result.",
+    "MEASURED run-to-run variance: a same-seed, same-config re-run of the rc_gate leg moved "
+    "min-core-F1 0.9242 -> 0.7568. The entire swing was ONE element (Antiterminator per-nt "
+    "F1 0.9242->0.7568, boundary IoU 0.8590->0.6087) while its AUPRC barely moved "
+    "(0.9843->0.9705): the ranking held and the argmax decision boundary moved. "
+    "block_bootstrap_ci resamples clusters against a FIXED checkpoint, so it measures "
+    "sampling variance ONLY and understated this by roughly 4x. min_f1 is a MINIMUM over "
+    "three core elements, so it reports whichever element lands worst, and Antiterminator is "
+    "the unstable one. Separation is therefore judged on replicate-widened intervals and is "
+    "withheld entirely for any leg (or baseline) with fewer than two replicates.",
+    "Stage-1 outputs here are UNCALIBRATED — temperature scaling is P2-13, which has not "
+    "run. The instability above is a property of argmax over uncalibrated logits under the "
+    "frozen ADR-0005 D3 reconcile->argmax operator, and is flagged to P2-13.",
 )
 
 
@@ -137,6 +149,11 @@ def axes_of(report: Mapping[str, Any]) -> dict[str, Any]:
                 "re-derived from backbone.repo_id + revision (pre-P2-12 schema)"
             )
     return axes
+
+
+def _axis_key(axes: Mapping[str, Any]) -> tuple:
+    """The identity of a *leg* — rows sharing it are replicates of one configuration."""
+    return tuple(axes.get(a) for a in ABLATION_AXES)
 
 
 def _ci_of(report: Mapping[str, Any]) -> dict[str, Any] | None:
@@ -233,6 +250,33 @@ def build_table(
         accepted.append(r)
         rows.append(_row(r, i))
 
+    # ── Replicates (P2-12 RESULT) ───────────────────────────────────────────────────────
+    # A same-seed re-run of `rc_gate` moved min-core-F1 0.9242 -> 0.7568, the entire swing in
+    # ONE element (Antiterminator per-nt F1 0.9242->0.7568, boundary IoU 0.8590->0.6087) while
+    # its AUPRC barely moved (0.9843->0.9705): the ranking held and the ARGMAX BOUNDARY moved.
+    # ``block_bootstrap_ci`` resamples clusters against a FIXED checkpoint, so it cannot see
+    # that variance — and measured ~4x narrower than it. Rows sharing an axis tuple are
+    # therefore REPLICATES of one leg, not duplicates, and the spread between them is the
+    # honest error bar on this statistic.
+    replicates: dict[tuple, list[dict[str, Any]]] = {}
+    for row in rows:
+        replicates.setdefault(_axis_key(row["axes"]), []).append(row)
+    for group in replicates.values():
+        scores = sorted(float(r["score"]) for r in group)
+        span = {
+            "n_replicates": len(group),
+            "scores": scores,
+            "score_min": scores[0],
+            "score_max": scores[-1],
+            "spread": scores[-1] - scores[0],
+            # The interval a separation verdict must clear: the widest CI across replicates,
+            # extended to the worst and best point either replicate produced.
+            "lower": min(float(r["ci"]["lower"]) for r in group),
+            "upper": max(float(r["ci"]["upper"]) for r in group),
+        }
+        for row in group:
+            row["replicate_span"] = span
+
     baseline = None
     if baseline_leg is not None:
         baseline = next((row for row in rows if row["leg"] == baseline_leg), None)
@@ -250,14 +294,25 @@ def build_table(
             None,
         )
 
-    base_ci = baseline["ci"] if baseline else None
+    # Separation is judged on the REPLICATE-WIDENED interval, never the single-run CI. With
+    # only one run of a leg the widened interval IS that CI, and the verdict is additionally
+    # withheld (`None`) rather than asserted: one run cannot show a difference survives the
+    # run-to-run variance a replicate has already demonstrated on this statistic (§10.3).
+    base_span = baseline.get("replicate_span") if baseline else None
     for row in rows:
         row["is_baseline"] = bool(baseline is not None and row["leg"] == baseline["leg"])
-        overlap = None if row["is_baseline"] else _overlaps(row["ci"], base_ci)
+        overlap = None if row["is_baseline"] else _overlaps(row.get("replicate_span"), base_span)
         row["ci_overlaps_baseline"] = overlap
-        # TRUE only on a measured non-overlap. `None` (unmeasurable) must not read as
-        # separated, and neither must the baseline's own row.
-        row["separated_from_baseline"] = (overlap is False) if overlap is not None else None
+        n_rep = (row.get("replicate_span") or {}).get("n_replicates", 1)
+        n_rep_base = (base_span or {}).get("n_replicates", 1)
+        unreplicated = n_rep < 2 or n_rep_base < 2
+        # TRUE only on a measured non-overlap of the replicate-widened intervals, and only
+        # when BOTH sides were actually replicated. `None` (could not be assessed) must never
+        # render as separated, and neither must the baseline's own row.
+        row["separated_from_baseline"] = (
+            None if (overlap is None or unreplicated) else (overlap is False)
+        )
+        row["separation_assessable"] = not unreplicated
         row["delta_vs_baseline"] = (
             float(row["score"]) - float(baseline["score"]) if baseline else None
         )
@@ -289,6 +344,11 @@ def build_table(
         # The headline sentence, re-derived rather than narrated. With 4 legs on an
         # 830-record fold the expected value is 0, and reporting that plainly is the point.
         "any_axis_separated_from_baseline": bool(n_separated),
+        # How many rows could be ASSESSED at all. Distinct from the count above, and
+        # load-bearing: with unreplicated legs `any_axis_separated` is False because nothing
+        # was assessable, which must not be read as "measured, and nothing separates".
+        "n_separation_assessable": sum(1 for r in rows if r.get("separation_assessable")),
+        "separation_assessed": any(r.get("separation_assessable") for r in rows),
         "cross_point_consistency": cross_point_consistency(accepted),
         "disclosures": list(DISCLOSURES),
         "rows": rows,
@@ -337,10 +397,12 @@ def artifact_problems(artifact: Mapping[str, Any], *, expect_rows: int) -> list[
         if not isinstance(axes, Mapping):
             problems.append(f"rows[{i}]: axes missing")
             continue
-        key = tuple(axes.get(a) for a in ABLATION_AXES)
-        if key in seen:
-            problems.append(f"rows[{i}]: duplicate axis tuple {key!r} — two runs of one leg")
-        seen.add(key)
+        # Rows sharing an axis tuple are REPLICATES (see build_table) and are expected; what
+        # must stay unique is the leg label, i.e. the report each row came from.
+        label = row.get("leg")
+        if label in seen:
+            problems.append(f"rows[{i}]: duplicate leg label {label!r} — one report, two rows")
+        seen.add(label)
         if not _is_real(row.get("score")):
             problems.append(f"rows[{i}]: score is not a finite real")
         ci = row.get("ci")
@@ -353,9 +415,14 @@ def artifact_problems(artifact: Mapping[str, Any], *, expect_rows: int) -> list[
             problems.append(f"rows[{i}]: ci.lower > ci.upper")
         # Re-derive the separation verdict from the intervals rather than trusting the
         # stored boolean — a flag echoed by the builder is not evidence (P1-15/P1-16).
+        # Mirrors build_table: replicate-widened intervals, and withheld unless BOTH sides
+        # carry >= 2 replicates.
         if not row.get("is_baseline") and isinstance(baseline, Mapping):
-            want = _overlaps(ci, baseline.get("ci"))
-            want_sep = (want is False) if want is not None else None
+            want = _overlaps(row.get("replicate_span"), baseline.get("replicate_span"))
+            n_rep = (row.get("replicate_span") or {}).get("n_replicates", 1)
+            n_rep_base = (baseline.get("replicate_span") or {}).get("n_replicates", 1)
+            unreplicated = n_rep < 2 or n_rep_base < 2
+            want_sep = None if (want is None or unreplicated) else (want is False)
             if row.get("separated_from_baseline") is not want_sep:
                 problems.append(
                     f"rows[{i}]: separated_from_baseline {row.get('separated_from_baseline')!r} "

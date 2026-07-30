@@ -175,14 +175,66 @@ def test_separation_is_true_only_on_a_measured_non_overlap():
         lower=base_ci["upper"] + 0.005,
         upper=base_ci["upper"] + 0.02,
     )
+    # UNREPLICATED: a separation verdict is WITHHELD, not asserted. A same-seed re-run of the
+    # real rc_gate leg moved min-core-F1 0.9242 -> 0.7568, so one run per arm cannot show a
+    # difference survives run-to-run variance, however cleanly the single-run CIs miss.
     table = A.build_table([baseline, overlapping, separated], baseline_leg=str(BASELINE_PATH))
     by_leg = {r["leg"]: r for r in table["rows"]}
-    assert by_leg[overlapping["report_path"]]["separated_from_baseline"] is False
+    assert by_leg[separated["report_path"]]["separated_from_baseline"] is None
+    assert by_leg[separated["report_path"]]["separation_assessable"] is False
+    assert table["n_separated_from_baseline"] == 0
+    assert table["separation_assessed"] is False
+
+    # REPLICATED on both sides: now the verdict is measurable. Replicates are additional
+    # reports carrying the same axis tuple.
+    def _rep(row: dict, path: str, lo: float, hi: float) -> dict:
+        clone = copy.deepcopy(row)
+        clone["report_path"] = path
+        clone["eval_metrics"]["block_bootstrap_ci"] = {
+            **clone["eval_metrics"]["block_bootstrap_ci"],
+            "lower": lo,
+            "point": (lo + hi) / 2,
+            "upper": hi,
+        }
+        clone["eval_metrics"]["gate4_core_min_f1"]["min_f1"] = (lo + hi) / 2
+        return clone
+
+    reps = [
+        _rep(
+            baseline, "reports/p2/ablation/baseline_rep2.json", base_ci["lower"], base_ci["upper"]
+        ),
+        _rep(
+            separated,
+            "reports/p2/ablation/head_crf_rep2.json",
+            base_ci["upper"] + 0.006,
+            base_ci["upper"] + 0.019,
+        ),
+        _rep(
+            overlapping, "reports/p2/ablation/rc_gate_rep2.json", base_ci["lower"], base_ci["upper"]
+        ),
+    ]
+    table = A.build_table(
+        [baseline, overlapping, separated, *reps], baseline_leg=str(BASELINE_PATH)
+    )
+    by_leg = {r["leg"]: r for r in table["rows"]}
     assert by_leg[separated["report_path"]]["separated_from_baseline"] is True
+    assert by_leg[overlapping["report_path"]]["separated_from_baseline"] is False
     # The baseline's own row is neither separated from nor overlapping itself.
     assert by_leg[str(BASELINE_PATH)]["separated_from_baseline"] is None
-    assert table["n_separated_from_baseline"] == 1
+    assert table["n_separated_from_baseline"] == 2  # both head_crf replicate rows
     assert table["any_axis_separated_from_baseline"] is True
+    assert table["separation_assessed"] is True
+
+    # A replicate that lands back across the baseline WITHDRAWS the separation — the whole
+    # point of widening on the observed spread rather than the single-run CI.
+    straddle = _rep(
+        separated, "reports/p2/ablation/head_crf_rep3.json", base_ci["lower"], base_ci["upper"]
+    )
+    table = A.build_table(
+        [baseline, overlapping, separated, *reps, straddle], baseline_leg=str(BASELINE_PATH)
+    )
+    by_leg = {r["leg"]: r for r in table["rows"]}
+    assert by_leg[separated["report_path"]]["separated_from_baseline"] is False
 
     assert A._overlaps(None, base_ci) is None
     assert A._overlaps({"lower": None, "upper": 1.0}, base_ci) is None
@@ -274,14 +326,35 @@ def test_a_forged_separation_flag_does_not_survive_re_derivation():
     assert any("does not re-derive" in p for p in problems), problems
 
 
-def test_two_runs_of_one_leg_are_caught():
-    """A duplicated axis tuple means the same leg entered the table twice — a re-submit whose
-    older report was not cleaned. Two rows for one arm would double its weight in any read."""
+def test_two_runs_of_one_leg_are_grouped_as_replicates_not_rejected():
+    """Rows sharing an axis tuple are REPLICATES of one configuration, and their spread is the
+    honest error bar — the measured rc_gate pair differs by 0.167 min-core-F1 at one seed."""
     legs = _four_legs()
-    dup = copy.deepcopy(legs[0])
-    dup["report_path"] = "reports/p2/ablation/rc_gate_rerun.json"
-    table = A.build_table([_baseline(), *legs, dup], baseline_leg=str(BASELINE_PATH))
-    assert any("duplicate axis tuple" in p for p in A.artifact_problems(table, expect_rows=6))
+    rerun = copy.deepcopy(legs[0])
+    rerun["report_path"] = "reports/p2/ablation/rc_gate_rep2.json"
+    rerun["eval_metrics"]["gate4_core_min_f1"]["min_f1"] = 0.7568
+    rerun["eval_metrics"]["block_bootstrap_ci"] = {
+        **rerun["eval_metrics"]["block_bootstrap_ci"],
+        "lower": 0.7301,
+        "point": 0.7568,
+        "upper": 0.7852,
+    }
+    table = A.build_table([_baseline(), *legs, rerun], baseline_leg=str(BASELINE_PATH))
+    assert A.artifact_problems(table, expect_rows=6) == []
+    span = next(r["replicate_span"] for r in table["rows"] if r["axes"]["rc_combine"] == "gate")
+    assert span["n_replicates"] == 2
+    assert span["spread"] > 0.16
+    # The widened interval spans BOTH runs — not just the one that happened to be read first.
+    assert span["lower"] <= 0.7301 and span["upper"] >= 0.9387
+
+
+def test_one_report_appearing_twice_is_still_caught():
+    """Replicates are distinct reports. The same report twice would double an arm's weight."""
+    legs = _four_legs()
+    table = A.build_table(
+        [_baseline(), *legs, copy.deepcopy(legs[0])], baseline_leg=str(BASELINE_PATH)
+    )
+    assert any("duplicate leg label" in p for p in A.artifact_problems(table, expect_rows=6))
 
 
 # ────────────────────────────────────────────────────────────────────────────────────────
@@ -452,8 +525,12 @@ def test_the_shipped_leg_table_covers_all_three_axes_one_at_a_time():
     backbones = _sbatch_array("BACKBONES")
     rc_modes = _sbatch_array("RC_MODES")
     use_crfs = _sbatch_array("USE_CRFS")
-    assert len(keys) == 4, keys
-    assert len(backbones) == len(rc_modes) == len(use_crfs) == 4
+    # Five entries: the four ablation legs, plus the `baseline` replicate entry added at the
+    # P2-12 RESULT so the COMPARATOR's own run-to-run variance can be measured. The baseline
+    # entry is the one row allowed to move zero axes — and it must move zero, or it is not
+    # the comparator.
+    assert keys == ["rc_gate", "head_crf", "size_d256_l4", "size_d118_l4", "baseline"], keys
+    assert len(backbones) == len(rc_modes) == len(use_crfs) == len(keys)
 
     moved: list[str] = []
     for key, backbone, rc, crf in zip(keys, backbones, rc_modes, use_crfs, strict=True):
@@ -465,6 +542,9 @@ def test_the_shipped_leg_table_covers_all_three_axes_one_at_a_time():
             ("use_crf", crf != "false"),
         ]
         differing = [name for name, changed in axes if changed]
+        if key == "baseline":
+            assert differing == [], f"the baseline entry must move NO axis, moves {differing}"
+            continue
         assert len(differing) == 1, f"leg {key} moves {differing}, must move exactly one"
         moved.append(differing[0])
     assert sorted(set(moved)) == ["backbone", "rc_combine", "use_crf"], moved

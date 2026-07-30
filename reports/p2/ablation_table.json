@@ -1,6 +1,6 @@
 {
   "adr": "ADR-0003 A3; ADR-0002 A14; ADR-0005 D15 + D3/A3",
-  "any_axis_separated_from_baseline": true,
+  "any_axis_separated_from_baseline": false,
   "axes": [
     "backbone",
     "rc_combine",
@@ -35,8 +35,20 @@
       "Specifier": 0.9386381631037213,
       "Stem_I": 0.9600162602658807
     },
+    "replicate_span": {
+      "lower": 0.9124749305285347,
+      "n_replicates": 1,
+      "score_max": 0.9386381631037213,
+      "score_min": 0.9386381631037213,
+      "scores": [
+        0.9386381631037213
+      ],
+      "spread": 0.0,
+      "upper": 0.9549853341770409
+    },
     "score": 0.9386381631037213,
-    "separated_from_baseline": null
+    "separated_from_baseline": null,
+    "separation_assessable": false
   },
   "cross_point_consistency": {
     "all_agree": false,
@@ -53,7 +65,8 @@
         "agrees": false,
         "distinct": [
           "4c723fd7a8bd2a74154d01e45fb8dfafb9f87beb",
-          "a1476b2aa24658b282cec5da89a4f9571b4ca890"
+          "a1476b2aa24658b282cec5da89a4f9571b4ca890",
+          "cc04667c00058f3ad0f8e8dfcc2a52777bb3590e"
         ],
         "n_points_carrying": 5
       },
@@ -87,17 +100,20 @@
     "selection_val is 810/830 Firmicutes and is pooled MICRO (metrics.macro_average has zero src/ callers, so ADR-0005 D5's macro-over-held-out-orders half is unwired). The point estimate is Firmicutes-dominated; the CI is cluster-blocked over 469 homology clusters.",
     "The scan geometry is HELD at ADR-0005 D3+A3's 1024/512 for every leg, including the two seqlen-1k checkpoints, so no leg unpins the reconciliation geometry.",
     "The order-destroying averaged RC combination is NOT run. ADR-0005 D15 + PRD \u00a76/\u00a710.1 forbid it outright and models/rc_combine.py raises on it; it is not a negative control and its absence is not a gap in this table.",
-    "This is a SELECTION-rung table, not GATE-4. GATE-4 is graded at P2-14 on the real leave-one-order-out holdout; no number here is a generalization result."
+    "This is a SELECTION-rung table, not GATE-4. GATE-4 is graded at P2-14 on the real leave-one-order-out holdout; no number here is a generalization result.",
+    "MEASURED run-to-run variance: a same-seed, same-config re-run of the rc_gate leg moved min-core-F1 0.9242 -> 0.7568. The entire swing was ONE element (Antiterminator per-nt F1 0.9242->0.7568, boundary IoU 0.8590->0.6087) while its AUPRC barely moved (0.9843->0.9705): the ranking held and the argmax decision boundary moved. block_bootstrap_ci resamples clusters against a FIXED checkpoint, so it measures sampling variance ONLY and understated this by roughly 4x. min_f1 is a MINIMUM over three core elements, so it reports whichever element lands worst, and Antiterminator is the unstable one. Separation is therefore judged on replicate-widened intervals and is withheld entirely for any leg (or baseline) with fewer than two replicates.",
+    "Stage-1 outputs here are UNCALIBRATED \u2014 temperature scaling is P2-13, which has not run. The instability above is a property of argmax over uncalibrated logits under the frozen ADR-0005 D3 reconcile->argmax operator, and is flagged to P2-13."
   ],
   "env_lock": "envs/ml-dna.conda-lock.yml",
   "fold_scope": "selection_val",
   "gate4_graded": false,
-  "generated_at_utc": "2026-07-29T16:38:52+00:00",
+  "generated_at_utc": "2026-07-30T05:40:48+00:00",
   "generated_by": "src/tbox_finder/train/ablation_table.py",
   "is_science": false,
   "n_rejected": 0,
   "n_rows": 5,
-  "n_separated_from_baseline": 1,
+  "n_separated_from_baseline": 0,
+  "n_separation_assessable": 0,
   "ranked_on": "eval_metrics.block_bootstrap_ci.lower (the conservative bound), then the point estimate, then the leg label",
   "rejected": [],
   "rows": [
@@ -129,8 +145,20 @@
         "Specifier": 0.9415739268680445,
         "Stem_I": 0.9585889863107765
       },
+      "replicate_span": {
+        "lower": 0.9196327560700277,
+        "n_replicates": 1,
+        "score_max": 0.9415739268680445,
+        "score_min": 0.9415739268680445,
+        "scores": [
+          0.9415739268680445
+        ],
+        "spread": 0.0,
+        "upper": 0.9570619784803359
+      },
       "score": 0.9415739268680445,
-      "separated_from_baseline": false
+      "separated_from_baseline": null,
+      "separation_assessable": false
     },
     {
       "axes": {
@@ -161,39 +189,20 @@
         "Specifier": 0.9386381631037213,
         "Stem_I": 0.9600162602658807
       },
+      "replicate_span": {
+        "lower": 0.9124749305285347,
+        "n_replicates": 1,
+        "score_max": 0.9386381631037213,
+        "score_min": 0.9386381631037213,
+        "scores": [
+          0.9386381631037213
+        ],
+        "spread": 0.0,
+        "upper": 0.9549853341770409
+      },
       "score": 0.9386381631037213,
-      "separated_from_baseline": null
-    },
-    {
-      "axes": {
-        "backbone": "caduceus-ps-131k-d256-l16",
-        "rc_combine": "gate",
-        "use_crf": false
-      },
-      "backbone_params": 7725312,
-      "backbone_pretrain_seq_len": 131072,
-      "ci": {
-        "ci_level": 0.95,
-        "lower": 0.9004869325750708,
-        "n_blocks": 469,
-        "n_boot": 2000,
-        "point": 0.924164263373817,
-        "upper": 0.9386826180673314
-      },
-      "ci_overlaps_baseline": true,
-      "delta_vs_baseline": -0.014473899729904316,
-      "git_sha": "a1476b2aa24658b282cec5da89a4f9571b4ca890",
-      "is_baseline": false,
-      "leg": "reports/p2/ablation/rc_gate.json",
-      "n_eval_blocks": 469,
-      "n_eval_records": 830,
-      "per_element_f1": {
-        "Antiterminator_Tbox_seq": 0.924164263373817,
-        "Specifier": 0.9304791830322073,
-        "Stem_I": 0.9635213542098846
-      },
-      "score": 0.924164263373817,
-      "separated_from_baseline": false
+      "separated_from_baseline": null,
+      "separation_assessable": false
     },
     {
       "axes": {
@@ -223,8 +232,20 @@
         "Specifier": 0.9190549961270333,
         "Stem_I": 0.9512891443474518
       },
+      "replicate_span": {
+        "lower": 0.8919609675457575,
+        "n_replicates": 1,
+        "score_max": 0.9190549961270333,
+        "score_min": 0.9190549961270333,
+        "scores": [
+          0.9190549961270333
+        ],
+        "spread": 0.0,
+        "upper": 0.9412394220997171
+      },
       "score": 0.9190549961270333,
-      "separated_from_baseline": false
+      "separated_from_baseline": null,
+      "separation_assessable": false
     },
     {
       "axes": {
@@ -254,11 +275,67 @@
         "Specifier": 0.8900866217516843,
         "Stem_I": 0.9314273364413844
       },
+      "replicate_span": {
+        "lower": 0.8581093338140463,
+        "n_replicates": 1,
+        "score_max": 0.8889802309649638,
+        "score_min": 0.8889802309649638,
+        "scores": [
+          0.8889802309649638
+        ],
+        "spread": 0.0,
+        "upper": 0.9046699610593412
+      },
       "score": 0.8889802309649638,
-      "separated_from_baseline": true
+      "separated_from_baseline": null,
+      "separation_assessable": false
+    },
+    {
+      "axes": {
+        "backbone": "caduceus-ps-131k-d256-l16",
+        "rc_combine": "gate",
+        "use_crf": false
+      },
+      "backbone_params": 7725312,
+      "backbone_pretrain_seq_len": 131072,
+      "ci": {
+        "ci_level": 0.95,
+        "lower": 0.7301279944114689,
+        "n_blocks": 469,
+        "n_boot": 2000,
+        "point": 0.7567882143629138,
+        "upper": 0.7852112207025863
+      },
+      "ci_overlaps_baseline": false,
+      "delta_vs_baseline": -0.1818499487408075,
+      "git_sha": "cc04667c00058f3ad0f8e8dfcc2a52777bb3590e",
+      "is_baseline": false,
+      "leg": "reports/p2/ablation/rc_gate.json",
+      "n_eval_blocks": 469,
+      "n_eval_records": 830,
+      "per_element_f1": {
+        "Antiterminator_Tbox_seq": 0.7567882143629138,
+        "Specifier": 0.9354392892398815,
+        "Stem_I": 0.9620111447545864
+      },
+      "replicate_span": {
+        "lower": 0.7301279944114689,
+        "n_replicates": 1,
+        "score_max": 0.7567882143629138,
+        "score_min": 0.7567882143629138,
+        "scores": [
+          0.7567882143629138
+        ],
+        "spread": 0.0,
+        "upper": 0.7852112207025863
+      },
+      "score": 0.7567882143629138,
+      "separated_from_baseline": null,
+      "separation_assessable": false
     }
   ],
   "schema_version": "1",
   "selected_on": "gate4_core_min_f1.min_f1",
+  "separation_assessed": false,
   "step": "P2-12"
 }
