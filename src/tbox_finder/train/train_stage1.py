@@ -61,12 +61,33 @@ from typing import Any
 
 from tbox_finder.labels import CLASS_ORDER
 
+# Torch-free imports: both modules are pure contract tables, so `Stage1TrainConfig` can
+# reject an unknown backbone or an order-destroying rc_combine at COMPOSE time on the login
+# node — before sbatch, before a GPU node, before a 2.5 GB backbone download.
+from tbox_finder.models.backbone_registry import (
+    PRODUCTION_CHECKPOINT,
+    checkpoint_summary,
+    resolve_checkpoint,
+)
+from tbox_finder.models.rc_combine import (
+    ALLOWED_RC_COMBINE,
+    is_directionality_preserving,
+    normalize_rc_combine,
+)
+
 # --------------------------------------------------------------------------------------
 # Provenance constants (CLAUDE.md §11). Single-sourced here; the conf/ files echo them.
 # --------------------------------------------------------------------------------------
 #: Report schema. Bumped to ``"2"`` at P2-10d, which added the ``negative_mix`` /
 #: ``warm_start`` / ``eval_*_step0`` evidence blocks and the two gate clauses over them.
-SCHEMA_VERSION = "2"
+#: Bumped to ``"3"`` at P2-12, which widened the ``backbone`` block from the two module
+#: constants to the **resolved** ADR-0002 A14 allow-list entry plus the parameter count and
+#: hidden width **measured at load** (see :data:`BLOCK_FIELD_SCHEMA_VERSION`).
+#: Bumped to ``"4"`` at the P2-12 RESULT: the ``rc_combine`` evidence block plus the
+#: ``rc_directionality_preserved`` clause over it. Until then the ADR-0005 D15 guarantee for
+#: the ``gate`` arm rested on a *mode-name string* and a nonzero init, while the module
+#: property that claimed to check it returned a literal ``True`` and had no callers.
+SCHEMA_VERSION = "4"
 
 #: Gate clauses introduced after schema ``"1"``, mapped to the version that introduced them.
 #:
@@ -80,6 +101,22 @@ SCHEMA_VERSION = "2"
 CLAUSE_SCHEMA_VERSION: dict[str, str] = {
     "negative_mix_realized": "2",
     "warm_start_loaded": "2",
+    "rc_directionality_preserved": "4",
+}
+
+#: Evidence-block *fields* introduced after schema ``"1"``, mapped to the version that
+#: introduced them — the :data:`CLAUSE_SCHEMA_VERSION` idea applied to blocks rather than
+#: gate clauses, and for the same reason. Schema ``"3"`` (P2-12) widened ``backbone`` from
+#: ``{repo_id, revision}`` (echoed from module constants) to the **resolved** allow-list
+#: entry plus a **measured** parameter count. The 36 committed P2-06 sweep reports and the
+#: P2-09/P2-11 production reports are schema ``"2"`` artifacts of runs that measured no such
+#: thing; requiring the field of them would either invalidate committed evidence or invite
+#: back-filling a number nobody measured (§10.3). So it is required at schema ``>= 3`` and
+#: excused below it — while the loader's own hard raise, which no report can opt out of,
+#: remains the actual guarantee.
+BLOCK_FIELD_SCHEMA_VERSION: dict[str, str] = {
+    "backbone.key": "3",
+    "backbone.measured_param_count": "3",
 }
 STEP = "P2-04"
 GENERATED_BY = "src/tbox_finder/train/train_stage1.py"
@@ -152,6 +189,12 @@ class Stage1TrainConfig:
     # Model (P1-04; rc_combine constrained non-averaged by ADR-0005 D15, enforced in code).
     rc_combine: str = "concat"
     dropout: float = 0.0
+    # P2-12 / ADR-0002 A14: which allow-listed Caduceus-PS checkpoint to fine-tune. A
+    # top-level field ON PURPOSE — `_cfg_from_mapping` runs its config-group loop AFTER the
+    # top-level pass, so a key that lives in BOTH places is silently won by the group (the
+    # `lr` trap `conf/optim/stage1_best.yaml` documents). `backbone` therefore has exactly
+    # one home, here and in `conf/train/stage1.yaml`, and no `model.*` mapping.
+    backbone: str = PRODUCTION_CHECKPOINT
 
     # Datamodule (the `/data: stage1` group). These MUST be threaded through to
     # Stage1DataConfig rather than left to its defaults: PRD §11 makes window/stride a
@@ -302,6 +345,28 @@ class Stage1TrainConfig:
         # honest val number, and every downstream check of it reads zero overlap (see the
         # `exclude_selection_val` field docstring). Refusing it here means the trap is
         # unreachable from Hydra rather than merely detected afterwards.
+        # ── P2-12 (ADR-0002 A14 / ADR-0005 D15) ──────────────────────────────────────
+        # Both knobs are rejected HERE, at config construction, and not only where they are
+        # consumed. `backbone` used to have no config surface at all, so a `model.repo_id=…`
+        # override composed cleanly, was dropped by `_cfg_from_mapping`, and the run trained
+        # the pinned production model while the report echoed the code constants — the P2-11
+        # `label_source` footgun (§10.3). `rc_combine="mean"` composed and died only after
+        # the backbone load on a GPU node. A dataclass built on the login node now refuses
+        # both, so the failure costs a second instead of a queue wait plus GPU-hours.
+        resolve_checkpoint(self.backbone)
+        # normalize_rc_combine owns the ADR-0005 D15 rationale and tells an order-destroying
+        # average apart from a plain typo, so raise THROUGH it rather than restating a
+        # second, drift-prone message. Then require the configured value to already BE the
+        # canonical form: `diagnostics.config.rc_combine` is echoed verbatim into the report
+        # and keys the ablation table, so accepting "CONCAT" would split one leg across two
+        # rows that are the same run.
+        canonical = normalize_rc_combine(self.rc_combine)
+        if self.rc_combine != canonical:
+            raise ValueError(
+                f"rc_combine must be given in canonical form {canonical!r}, got "
+                f"{self.rc_combine!r}; the raw value is what the report and the ablation "
+                f"table record. Allowed: {ALLOWED_RC_COMBINE}."
+            )
         if self.eval_val and not self.exclude_selection_val:
             raise ValueError(
                 "eval_val=True with exclude_selection_val=False trains on the selection-val "
@@ -857,6 +922,7 @@ def diagnostics(cfg: Stage1TrainConfig) -> dict[str, Any]:
             "class_weight_alpha": "P2-06",
             "rc_combine": "P2-12",
             "use_crf": "P2-12",
+            "backbone": "P2-12",
         },
         "class_order": list(CLASS_ORDER),
     }
@@ -965,7 +1031,47 @@ def derive_clauses(report: Mapping[str, Any]) -> dict[str, bool]:
         "provenance_complete": _provenance_complete(report),
         "negative_mix_realized": _negative_mix_ok(report),
         "warm_start_loaded": _warm_start_ok(report),
+        "rc_directionality_preserved": _rc_combine_ok(report),
     }
+
+
+def _rc_combine_ok(report: Mapping[str, Any]) -> bool:
+    """The P2-12 clause: the RC combination the run *trained with* is non-averaged.
+
+    ADR-0005 D15 constrains the combination to a directionality-preserving form because the
+    §6 strand-resolver reads orientation off predicted element order, which the symmetric
+    fwd/RC average collapses. Before this clause that constraint was enforced only at
+    *config* time, on the mode **name** — but ``"gate"`` is ``g⊙fwd + (1-g)⊙rc`` with a
+    learned ``g``, and it *becomes* the forbidden average at ``g ≡ 0.5``. The name cannot
+    see that, and nothing in training prevents it (``weight_decay`` even pulls the logit
+    toward 0). So the verdict is re-derived from a measurement of the trained gate.
+
+    **Block present** — its recorded mode must match the run's configured ``rc_combine``
+    (a block describing another mode is not evidence about this run), and for ``"gate"`` the
+    channel census must show at least one channel off ``0.5``, i.e. the combination is not
+    the symmetric average. ``"concat"`` is preserving structurally.
+
+    **Block absent** — TRUE only if the run did not configure ``"gate"``. A concat/CRF/size
+    leg has no gate to measure, so its absence is not a gap; a ``gate`` run that recorded no
+    measurement FAILS rather than passing on the absence. That is what keeps the pre-P2-12
+    schema-3 reports valid without letting the unmeasured ``rc_gate`` leg through.
+    """
+    configured = str(_run_config(report).get("rc_combine") or "").strip().lower()
+    block = report.get("rc_combine")
+    if block is None:
+        return configured != "gate"
+    if not isinstance(block, Mapping):
+        return False
+    mode = str(block.get("mode") or "").strip().lower()
+    if not mode or (configured and mode != configured):
+        return False
+    if mode != "gate":
+        return is_directionality_preserving(mode)
+    n_channels = block.get("n_channels")
+    n_at_half = block.get("n_channels_at_half")
+    if not _pos_int(n_channels) or not _non_neg_int(n_at_half):
+        return False
+    return int(n_at_half) < int(n_channels)
 
 
 def _run_config(report: Mapping[str, Any]) -> Mapping[str, Any]:
@@ -1244,6 +1350,60 @@ def _schema_precedes(report_schema: Any, introduced: str) -> bool:
         return False
 
 
+def _backbone_block_problems(report: Mapping[str, Any]) -> list[str]:
+    """Check the ``backbone`` evidence block (P2-12, schema ``"3"``). Fails closed.
+
+    Three things must hold, and the third is the whole point:
+
+    1. the block is a mapping carrying a pinned ``repo_id`` / ``revision`` (every schema);
+    2. at schema ``>= 3`` it also carries the **resolved allow-list key** and the parameter
+       count **measured at load** (:data:`BLOCK_FIELD_SCHEMA_VERSION` excuses older reports,
+       which measured no such thing — back-filling one would forge a measurement, §10.3);
+    3. the recorded identity must be **internally consistent**: the resolved key's registry
+       entry must be the one whose ``repo_id`` / ``revision`` the block names, and the
+       measured count must equal that entry's expectation. A block that names checkpoint A
+       and reports checkpoint B's parameter count is precisely the silent-ablation failure
+       this step exists to make impossible, and it is re-derived here rather than trusted —
+       an all-consistent block is self-consistent whatever the run actually loaded, so the
+       *loader's* raise stays the guarantee and this is the report-side corroboration.
+    """
+    problems: list[str] = []
+    block = report.get("backbone")
+    if not isinstance(block, Mapping):
+        return ["backbone: missing or not a mapping"]
+
+    schema = report.get("schema_version")
+    for field, introduced in sorted(BLOCK_FIELD_SCHEMA_VERSION.items()):
+        name = field.split(".", 1)[1]
+        if name not in block and not _schema_precedes(schema, introduced):
+            problems.append(f"backbone.{name}: required at schema >= {introduced}, missing")
+
+    key = block.get("key")
+    if key is None:
+        return problems  # older schema: nothing further is recorded to cross-check
+    try:
+        spec = resolve_checkpoint(key)
+    except ValueError as exc:
+        return [*problems, f"backbone.key: {exc}"]
+
+    for name, want in (("repo_id", spec.repo_id), ("revision", spec.revision)):
+        got = block.get(name)
+        if got != want:
+            problems.append(f"backbone.{name}: {got!r} != {want!r} for backbone {key!r}")
+    for name, want in (
+        ("expected_param_count", spec.expected_param_count),
+        ("measured_param_count", spec.expected_param_count),
+        ("d_model", spec.d_model),
+        ("measured_d_model", spec.d_model),
+    ):
+        if name not in block:
+            continue
+        got = block.get(name)
+        if isinstance(got, bool) or not isinstance(got, int) or got != want:
+            problems.append(f"backbone.{name}: {got!r} != {want!r} for backbone {key!r}")
+    return problems
+
+
 def validate_report(report: Mapping[str, Any]) -> list[str]:
     """Return a list of problems with a P2-04 smoke report; empty ⇒ valid. Fails closed.
 
@@ -1274,6 +1434,8 @@ def validate_report(report: Mapping[str, Any]) -> list[str]:
     counts = report.get("class_counts")
     if not isinstance(counts, list) or len(counts) != NUM_CLASSES:
         problems.append(f"class_counts: must be a list of {NUM_CLASSES} ints")
+
+    problems.extend(_backbone_block_problems(report))
 
     # P2-05 timing floors. The keys are OPTIONAL (P2-04's committed artifact predates them),
     # but present-and-wrong must not pass: these lists are the denominator of every
@@ -1656,13 +1818,47 @@ def build_report(
     eval_metrics_step0: Mapping[str, Any] | None = None,
     eval_scope_step0: Mapping[str, Any] | None = None,
     step0_requested: bool = False,
+    backbone_info: Mapping[str, Any] | None = None,
+    rc_combine_info: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Assemble the P2-04 smoke report. Clauses are **re-derived**, never asserted."""
-    from tbox_finder.models.caduceus_backbone import REPO_ID, REVISION
-
     # Read the working-tree state ONCE, here, so `git_dirty` and `git_dirty_paths` below
     # describe the same instant (CodeRabbit, P2-09).
     _status_snapshot = _git_status_snapshot()
+
+    # P2-12: the backbone block is what the run RESOLVED and MEASURED, threaded from
+    # `build_model`. It used to be `{REPO_ID, REVISION}` read straight off the module
+    # constants — exactly the shape that reports the pinned production checkpoint no matter
+    # which one trained, which is why the size ablation could not have been trusted before
+    # this step (ADR-0002 A14; §10.3).
+    #
+    # It is REQUIRED, not defaulted. A default would have to invent a `measured_param_count`
+    # (forging a measurement, §10.3) or omit it — and a schema-3 report that omits it fails
+    # this module's own `validate_report`, so the "convenient" default emits an artifact the
+    # writer would then reject. A report is the record of a run, and every run loads a
+    # backbone; a caller with no model must say what it is claiming rather than inherit a
+    # claim about production.
+    if backbone_info is None:
+        raise ValueError(
+            "build_report requires backbone_info — the resolved allow-list entry plus the "
+            "parameter count MEASURED at load (build_model returns it). There is no honest "
+            "default: filling in production's pins would report the wrong checkpoint for "
+            "every ablation leg, and omitting the measured count emits a schema "
+            f"{SCHEMA_VERSION} report that validate_report rejects (ADR-0002 A14; §10.3)."
+        )
+    backbone_block: dict[str, Any] = dict(_sanitize(backbone_info))
+
+    # The measured RC-combination evidence (schema "4"). Required whenever the run configured
+    # the learned `gate`, because that is the mode whose D15 compliance a *name* cannot
+    # establish; `concat` needs no census and may omit the block (see _rc_combine_ok).
+    if rc_combine_info is None and str(getattr(cfg, "rc_combine", "")).strip().lower() == "gate":
+        raise ValueError(
+            "build_report requires rc_combine_info for a `gate` run: `gate` is "
+            "g*fwd + (1-g)*rc and BECOMES the ADR-0005 D15 forbidden symmetric average at "
+            "g == 0.5, which the mode name cannot see. Pass "
+            "segmenter.rc_combine.gate_summary() — a report without it re-derives "
+            "rc_directionality_preserved FALSE rather than passing on the absence (§10.3)."
+        )
 
     report: dict[str, Any] = {
         "schema_version": SCHEMA_VERSION,
@@ -1675,7 +1871,8 @@ def build_report(
         # entrypoint RUNS, not that the model LEARNS. GATE-4 is P2-14, on the real split.
         "is_science": False,
         "gate4_graded": False,
-        "backbone": {"repo_id": REPO_ID, "revision": REVISION},
+        "backbone": backbone_block,
+        **({"rc_combine": dict(_sanitize(rc_combine_info))} if rc_combine_info else {}),
         "gradient_checkpointing": {
             "requested": bool(cfg.gradient_checkpointing),
             "n_blocks": int(n_blocks),
@@ -1868,8 +2065,10 @@ def warm_start(segmenter: Any, checkpoint: str | Path, *, device: Any) -> dict[s
     }
 
 
-def build_model(cfg: Stage1TrainConfig, *, device: str) -> tuple[Any, int, int, bool, Any]:
-    """Backbone + P1-04 segmenter → (segmenter, blocks, wrapped, hf_supported, warm_start).
+def build_model(
+    cfg: Stage1TrainConfig, *, device: str
+) -> tuple[Any, int, int, bool, Any, dict[str, Any]]:
+    """Backbone + P1-04 segmenter → (segmenter, blocks, wrapped, hf_supported, warm, backbone).
 
     ``load_caduceus_ps`` returns the backbone in ``.eval()``; a full fine-tune needs
     ``.train()``, so the segmenter is switched explicitly — otherwise dropout and any other
@@ -1882,16 +2081,32 @@ def build_model(cfg: Stage1TrainConfig, *, device: str) -> tuple[Any, int, int, 
     of the model that will actually train, and keeps the load away from the rebound
     closures entirely.
     """
-    from tbox_finder.models.caduceus_backbone import load_caduceus_ps
+    from tbox_finder.models.caduceus_backbone import count_parameters, load_caduceus_ps
     from tbox_finder.models.stage1_segmenter import Stage1Segmenter
 
-    backbone = load_caduceus_ps(device=device)  # pinned revision; rejects any other
+    # P2-12: the checkpoint is selected through the ADR-0002 A14 closed allow-list. The
+    # loader re-checks the pinned revision AND gates the measured parameter count / d_model
+    # against the entry, so an unknown key or a drifted revision cannot reach training.
+    spec = resolve_checkpoint(cfg.backbone)
+    backbone = load_caduceus_ps(checkpoint=spec.key, device=device)
+    # Size the head off the width the backbone ACTUALLY emits, never off the module default:
+    # the ~471k ablation checkpoint is d_model 118, so a head left at 256 would be built for
+    # a 512-wide hidden state the backbone never produces.
+    measured_d_model = int(backbone.config.d_model)
     segmenter = Stage1Segmenter(
         backbone=backbone,
         rc_combine=cfg.rc_combine,  # ADR-0005 D15: "mean" is rejected in rc_combine.py
         use_crf=cfg.use_crf,
         dropout=cfg.dropout,
+        d_model=measured_d_model,
     ).to(device)
+    # Measured, not asserted (§10.3) — and measured off the model that will actually train,
+    # after `.to(device)`, so the report describes this run rather than the registry table.
+    backbone_info: dict[str, Any] = {
+        **checkpoint_summary(spec),
+        "measured_param_count": count_parameters(backbone),
+        "measured_d_model": measured_d_model,
+    }
     warm = (
         warm_start(segmenter, cfg.init_from_checkpoint, device=device)
         if cfg.init_from_checkpoint
@@ -1904,7 +2119,7 @@ def build_model(cfg: Stage1TrainConfig, *, device: str) -> tuple[Any, int, int, 
     # the measurement about the pristine backbone rather than our mutation of it.
     hf_supported = hf_gradient_checkpointing_supported(backbone)
     n_wrapped = enable_gradient_checkpointing(backbone) if cfg.gradient_checkpointing else 0
-    return segmenter, n_blocks, n_wrapped, hf_supported, warm
+    return segmenter, n_blocks, n_wrapped, hf_supported, warm, backbone_info
 
 
 def _init_wandb(cfg: Stage1TrainConfig) -> Any:
@@ -2231,7 +2446,9 @@ def _train_stage1_inner(
     by_class = dict(zip(CLASS_ORDER, class_counts, strict=True))
     log(f"class counts over {len(dataset)} records: {by_class}")
 
-    segmenter, n_blocks, n_wrapped, hf_supported, warm = build_model(cfg, device=device)
+    segmenter, n_blocks, n_wrapped, hf_supported, warm, backbone_info = build_model(
+        cfg, device=device
+    )
     log(f"gradient checkpointing: wrapped {n_wrapped}/{n_blocks} RCPSMambaBlocks")
     if warm is not None:
         log(
@@ -2434,6 +2651,10 @@ def _train_stage1_inner(
         eval_metrics_step0=eval_metrics_step0,
         eval_scope_step0=eval_scope_step0,
         step0_requested=step0_requested,
+        backbone_info=backbone_info,
+        # Measured off the UNWRAPPED segmenter's live parameter, after training — the whole
+        # point is that the trained gate, not the configured mode name, decides D15.
+        rc_combine_info=segmenter.rc_combine.gate_summary(),
     )
     problems = validate_report(report)
     if problems:

@@ -2,11 +2,18 @@
 
 The Stage-1 segmenter combines the Caduceus-PS ``2*d_model`` RC-concatenated hidden state
 (forward-strand channels ``||`` reverse-complement-strand channels) before the seg head.
-PRD §6/§10.1 (ADR-0002) **constrain that combination to a directionality-preserving
-(non-averaged) form**: the §6 strand-resolver derives strand + 5′→3′ orientation from the
-**predicted element order** (Specifier / Stem I → antiterminator / terminator), and an
-order-destroying *average* of the two strand-halves — a form symmetric under swapping the
-forward and RC channels — collapses that order, defeating strand resolution.
+PRD §6/§10.1 — pinned by **ADR-0005 D15**, the constraint's owner — **constrain that
+combination to a directionality-preserving (non-averaged) form**: the §6 strand-resolver
+derives strand + 5′→3′ orientation from the **predicted element order** (Specifier / Stem I →
+antiterminator / terminator), and an order-destroying *average* of the two strand-halves — a
+form symmetric under swapping the forward and RC channels — collapses that order, defeating
+strand resolution.
+
+(Provenance corrected at P2-12: this module previously credited **ADR-0002**, which pins the
+environment and the ML stack and says nothing about RC directionality — the same
+misattribution imp.md:725 carried. ADR-0005 **D15** is the owner, and it constrains the
+*ablation itself*: the averaged form is forbidden outright and is **not** run as a P2-12
+negative control.)
 
 These pure predicates/constants carry no ``torch`` dependency (unlike the ``nn.Module``
 combinations in :mod:`tbox_finder.models.stage1_segmenter`), so the **bare CI test tier**
@@ -28,7 +35,7 @@ ALLOWED_RC_COMBINE: tuple[str, ...] = ("concat", "gate")
 FORBIDDEN_RC_COMBINE: tuple[str, ...] = ("mean", "average", "avg")
 
 #: Default RC-combination mode (PRD §10.1: the head consumes the full RC-concatenated hidden
-#: state — directionality-preserving by construction; ADR-0002).
+#: state — directionality-preserving by construction; the constraint's owner is ADR-0005 D15).
 DEFAULT_RC_COMBINE: str = "concat"
 
 
@@ -44,7 +51,7 @@ def normalize_rc_combine(mode: str) -> str:
         raise ValueError(
             f"rc_combine {mode!r} is an order-destroying (RC-invariant) average and is "
             "disallowed: the §6 strand-resolver derives orientation from predicted element "
-            "order, which a symmetric fwd/RC average collapses (PRD §6/§10.1; ADR-0002). "
+            "order, which a symmetric fwd/RC average collapses (PRD §6/§10.1; ADR-0005 D15). "
             f"Use a directionality-preserving form: {ALLOWED_RC_COMBINE}."
         )
     if m not in ALLOWED_RC_COMBINE:

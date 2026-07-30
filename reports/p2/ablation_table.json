@@ -1,0 +1,526 @@
+{
+  "adr": "ADR-0003 A3; ADR-0002 A14; ADR-0005 D15 + D3/A3",
+  "any_axis_separated_from_baseline": true,
+  "axes": [
+    "backbone",
+    "rc_combine",
+    "use_crf"
+  ],
+  "baseline": {
+    "axes": {
+      "backbone": "caduceus-ps-131k-d256-l16",
+      "backbone_source": "re-derived from backbone.repo_id + revision (pre-P2-12 schema)",
+      "rc_combine": "concat",
+      "use_crf": false
+    },
+    "backbone_params": 7725312,
+    "backbone_pretrain_seq_len": 131072,
+    "ci": {
+      "ci_level": 0.95,
+      "lower": 0.9124749305285347,
+      "n_blocks": 469,
+      "n_boot": 2000,
+      "point": 0.9386381631037213,
+      "upper": 0.9549853341770409
+    },
+    "ci_overlaps_baseline": null,
+    "delta_vs_baseline": 0.0,
+    "git_sha": "4c723fd7a8bd2a74154d01e45fb8dfafb9f87beb",
+    "is_baseline": true,
+    "leg": "reports/p2/sweep/g0.5_lr3e-4_a0.5.json",
+    "n_eval_blocks": 469,
+    "n_eval_records": 830,
+    "per_element_f1": {
+      "Antiterminator_Tbox_seq": 0.9428845592223288,
+      "Specifier": 0.9386381631037213,
+      "Stem_I": 0.9600162602658807
+    },
+    "replicate_span": {
+      "lower": 0.9124749305285347,
+      "n_replicates": 2,
+      "score_max": 0.9392680514342235,
+      "score_min": 0.9386381631037213,
+      "scores": [
+        0.9386381631037213,
+        0.9392680514342235
+      ],
+      "spread": 0.0006298883305022596,
+      "upper": 0.9576413772901323
+    },
+    "score": 0.9386381631037213,
+    "separated_from_baseline": null,
+    "separation_assessable": false
+  },
+  "cross_point_consistency": {
+    "all_agree": false,
+    "n_points": 9,
+    "per_field": {
+      "env_lock": {
+        "agrees": true,
+        "distinct": [
+          "envs/ml-dna.conda-lock.yml"
+        ],
+        "n_points_carrying": 9
+      },
+      "git_sha": {
+        "agrees": false,
+        "distinct": [
+          "4c723fd7a8bd2a74154d01e45fb8dfafb9f87beb",
+          "a1476b2aa24658b282cec5da89a4f9571b4ca890",
+          "cc04667c00058f3ad0f8e8dfcc2a52777bb3590e",
+          "cec42efe529d7d64448c7dff0666dfb8054a677c"
+        ],
+        "n_points_carrying": 9
+      },
+      "n_eval_blocks": {
+        "agrees": true,
+        "distinct": [
+          "469"
+        ],
+        "n_points_carrying": 9
+      },
+      "n_eval_records": {
+        "agrees": true,
+        "distinct": [
+          "830"
+        ],
+        "n_points_carrying": 9
+      },
+      "seed": {
+        "agrees": true,
+        "distinct": [
+          "42"
+        ],
+        "n_points_carrying": 9
+      }
+    }
+  },
+  "disclosures": [
+    "Every leg is POSITIVES-ONLY, while the shipped Stage-1 stack carries the ADR-0005 D14 10:1 mined-negative mix. This is the same protocol on which gamma/lr/alpha were selected and promoted (P2-06), which is what makes the baseline row reusable at 0 new GPU-h; it is not the shipped training distribution.",
+    "The CRF leg trains a structured (CRF) objective but is GRADED under the frozen ADR-0005 D3+A3 reconcile->argmax operator: Viterbi decoding is NOT exercised. A CRF's benefit is partly a decode-time benefit, so this arm measures the CRF as a training signal only.",
+    "The size axis moves parameter count AND pretraining context together \u2014 both smaller checkpoints are seqlen-1k while production is seqlen-131k (ADR-0002 A14). It is a joint size x context arm; no delta may be attributed to size alone.",
+    "selection_val is 810/830 Firmicutes and is pooled MICRO (metrics.macro_average has zero src/ callers, so ADR-0005 D5's macro-over-held-out-orders half is unwired). The point estimate is Firmicutes-dominated; the CI is cluster-blocked over 469 homology clusters.",
+    "The scan geometry is HELD at ADR-0005 D3+A3's 1024/512 for every leg, including the two seqlen-1k checkpoints, so no leg unpins the reconciliation geometry.",
+    "The order-destroying averaged RC combination is NOT run. ADR-0005 D15 + PRD \u00a76/\u00a710.1 forbid it outright and models/rc_combine.py raises on it; it is not a negative control and its absence is not a gap in this table.",
+    "This is a SELECTION-rung table, not GATE-4. GATE-4 is graded at P2-14 on the real leave-one-order-out holdout; no number here is a generalization result.",
+    "REPLICATION, measured -- and SCOPED. Every concat-path leg reproduces essentially exactly across independent runs, different commits and different nodes: size_d118_l4 spread 0.0001 over 3 replicates, size_d256_l4 0.0000 over 2, baseline 0.0006 over 2. Separation is judged on replicate-widened intervals and is WITHHELD (null, never false) for any leg -- or for the baseline -- carrying fewer than two replicates. WHAT THIS DOES NOT COVER: every replicate holds seed 42, because the seed is part of the ADR-0003 A3 pinned protocol and changing it is an ADR decision, not a reducer choice. So these replicates measure run-to-run DETERMINISM at a fixed seed -- which is near-total, hence the ~0 spreads -- and NOT seed variance. A different seed is an equally valid draw of the same training procedure, so the separation verdict below does NOT account for seed-to-seed variation, and the widened intervals are consequently barely wider than the single-run CIs. Establishing that an architecture difference is robust to initialisation would need a seed sweep under ADR sign-off; until then, read `separated_from_baseline` as 'separated at the pinned seed', not 'separated in general'.",
+    "ONE arm did NOT reproduce, and its verdict is withheld for that reason. Two runs of the rc_gate leg at the same seed and config gave min-core-F1 0.9242 and 0.7568. The entire difference sat in one element (Antiterminator per-nt F1 0.9242->0.7568, boundary IoU 0.8590->0.6087) while its AUPRC barely moved (0.9843->0.9705) -- the ranking held and the argmax decision boundary moved. The two runs were at DIFFERENT commits, and no two gate runs exist at one commit, so this is NOT established as run-to-run nondeterminism: either the gate path is nondeterministic (it is the only arm whose RCCombine holds a learned parameter, hence the only one whose backward reduces over batch x length), or something in the intervening commits moved that leg specifically. Every concat leg was bit-stable across the same commit span, which rules those commits out for concat but not for gate. UNRESOLVED, and resolvable only by two gate runs at one commit.",
+    "min_f1 is a MINIMUM over three core elements, so it reports whichever element lands worst: baseline / head_crf / size_d256_l4 are limited by Specifier, while rc_gate and size_d118_l4 are limited by Antiterminator. Stage-1 outputs here are UNCALIBRATED (temperature scaling is P2-13, which has not run), and an AUPRC-stable / IoU-collapsing shift is the signature of a threshold effect under the frozen ADR-0005 D3 reconcile->argmax operator rather than of a learning failure. Flagged to P2-13."
+  ],
+  "env_lock": "envs/ml-dna.conda-lock.yml",
+  "fold_scope": "selection_val",
+  "gate4_graded": false,
+  "generated_at_utc": "2026-07-30T08:50:20+00:00",
+  "generated_by": "src/tbox_finder/train/ablation_table.py",
+  "is_science": false,
+  "n_rejected": 0,
+  "n_rows": 9,
+  "n_separated_from_baseline": 3,
+  "n_separation_assessable": 5,
+  "ranked_on": "eval_metrics.block_bootstrap_ci.lower (the conservative bound), then the point estimate, then the leg label",
+  "rejected": [],
+  "rows": [
+    {
+      "axes": {
+        "backbone": "caduceus-ps-131k-d256-l16",
+        "rc_combine": "concat",
+        "use_crf": true
+      },
+      "backbone_params": 7725312,
+      "backbone_pretrain_seq_len": 131072,
+      "ci": {
+        "ci_level": 0.95,
+        "lower": 0.9196327560700277,
+        "n_blocks": 469,
+        "n_boot": 2000,
+        "point": 0.9415739268680445,
+        "upper": 0.9570619784803359
+      },
+      "ci_overlaps_baseline": true,
+      "delta_vs_baseline": 0.0029357637643232515,
+      "git_sha": "a1476b2aa24658b282cec5da89a4f9571b4ca890",
+      "is_baseline": false,
+      "leg": "reports/p2/ablation/head_crf.json",
+      "n_eval_blocks": 469,
+      "n_eval_records": 830,
+      "per_element_f1": {
+        "Antiterminator_Tbox_seq": 0.948443641102167,
+        "Specifier": 0.9415739268680445,
+        "Stem_I": 0.9585889863107765
+      },
+      "replicate_span": {
+        "lower": 0.9196327560700277,
+        "n_replicates": 1,
+        "score_max": 0.9415739268680445,
+        "score_min": 0.9415739268680445,
+        "scores": [
+          0.9415739268680445
+        ],
+        "spread": 0.0,
+        "upper": 0.9570619784803359
+      },
+      "score": 0.9415739268680445,
+      "separated_from_baseline": null,
+      "separation_assessable": false
+    },
+    {
+      "axes": {
+        "backbone": "caduceus-ps-131k-d256-l16",
+        "rc_combine": "concat",
+        "use_crf": false
+      },
+      "backbone_params": 7725312,
+      "backbone_pretrain_seq_len": 131072,
+      "ci": {
+        "ci_level": 0.95,
+        "lower": 0.9152728196530067,
+        "n_blocks": 469,
+        "n_boot": 2000,
+        "point": 0.9392680514342235,
+        "upper": 0.9576413772901323
+      },
+      "ci_overlaps_baseline": null,
+      "delta_vs_baseline": 0.0006298883305022596,
+      "git_sha": "cec42efe529d7d64448c7dff0666dfb8054a677c",
+      "is_baseline": true,
+      "leg": "reports/p2/ablation/baseline.json",
+      "n_eval_blocks": 469,
+      "n_eval_records": 830,
+      "per_element_f1": {
+        "Antiterminator_Tbox_seq": 0.9500210349179639,
+        "Specifier": 0.9392680514342235,
+        "Stem_I": 0.9630509788472413
+      },
+      "replicate_span": {
+        "lower": 0.9124749305285347,
+        "n_replicates": 2,
+        "score_max": 0.9392680514342235,
+        "score_min": 0.9386381631037213,
+        "scores": [
+          0.9386381631037213,
+          0.9392680514342235
+        ],
+        "spread": 0.0006298883305022596,
+        "upper": 0.9576413772901323
+      },
+      "score": 0.9392680514342235,
+      "separated_from_baseline": null,
+      "separation_assessable": false
+    },
+    {
+      "axes": {
+        "backbone": "caduceus-ps-131k-d256-l16",
+        "backbone_source": "re-derived from backbone.repo_id + revision (pre-P2-12 schema)",
+        "rc_combine": "concat",
+        "use_crf": false
+      },
+      "backbone_params": 7725312,
+      "backbone_pretrain_seq_len": 131072,
+      "ci": {
+        "ci_level": 0.95,
+        "lower": 0.9124749305285347,
+        "n_blocks": 469,
+        "n_boot": 2000,
+        "point": 0.9386381631037213,
+        "upper": 0.9549853341770409
+      },
+      "ci_overlaps_baseline": null,
+      "delta_vs_baseline": 0.0,
+      "git_sha": "4c723fd7a8bd2a74154d01e45fb8dfafb9f87beb",
+      "is_baseline": true,
+      "leg": "reports/p2/sweep/g0.5_lr3e-4_a0.5.json",
+      "n_eval_blocks": 469,
+      "n_eval_records": 830,
+      "per_element_f1": {
+        "Antiterminator_Tbox_seq": 0.9428845592223288,
+        "Specifier": 0.9386381631037213,
+        "Stem_I": 0.9600162602658807
+      },
+      "replicate_span": {
+        "lower": 0.9124749305285347,
+        "n_replicates": 2,
+        "score_max": 0.9392680514342235,
+        "score_min": 0.9386381631037213,
+        "scores": [
+          0.9386381631037213,
+          0.9392680514342235
+        ],
+        "spread": 0.0006298883305022596,
+        "upper": 0.9576413772901323
+      },
+      "score": 0.9386381631037213,
+      "separated_from_baseline": null,
+      "separation_assessable": false
+    },
+    {
+      "axes": {
+        "backbone": "caduceus-ps-1k-d256-l4",
+        "rc_combine": "concat",
+        "use_crf": false
+      },
+      "backbone_params": 1934592,
+      "backbone_pretrain_seq_len": 1024,
+      "ci": {
+        "ci_level": 0.95,
+        "lower": 0.8919609675457575,
+        "n_blocks": 469,
+        "n_boot": 2000,
+        "point": 0.9190549961270333,
+        "upper": 0.9412394220997171
+      },
+      "ci_overlaps_baseline": true,
+      "delta_vs_baseline": -0.019583166976687938,
+      "git_sha": "a1476b2aa24658b282cec5da89a4f9571b4ca890",
+      "is_baseline": false,
+      "leg": "reports/p2/ablation/size_d256_l4.json",
+      "n_eval_blocks": 469,
+      "n_eval_records": 830,
+      "per_element_f1": {
+        "Antiterminator_Tbox_seq": 0.9383044644528082,
+        "Specifier": 0.9190549961270333,
+        "Stem_I": 0.9512891443474518
+      },
+      "replicate_span": {
+        "lower": 0.8919609675457575,
+        "n_replicates": 2,
+        "score_max": 0.9190549961270333,
+        "score_min": 0.9190549961270333,
+        "scores": [
+          0.9190549961270333,
+          0.9190549961270333
+        ],
+        "spread": 0.0,
+        "upper": 0.9412394220997171
+      },
+      "score": 0.9190549961270333,
+      "separated_from_baseline": false,
+      "separation_assessable": true
+    },
+    {
+      "axes": {
+        "backbone": "caduceus-ps-1k-d256-l4",
+        "rc_combine": "concat",
+        "use_crf": false
+      },
+      "backbone_params": 1934592,
+      "backbone_pretrain_seq_len": 1024,
+      "ci": {
+        "ci_level": 0.95,
+        "lower": 0.8919609675457575,
+        "n_blocks": 469,
+        "n_boot": 2000,
+        "point": 0.9190549961270333,
+        "upper": 0.9412394220997171
+      },
+      "ci_overlaps_baseline": true,
+      "delta_vs_baseline": -0.019583166976687938,
+      "git_sha": "cec42efe529d7d64448c7dff0666dfb8054a677c",
+      "is_baseline": false,
+      "leg": "reports/p2/ablation/size_d256_l4_rep2.json",
+      "n_eval_blocks": 469,
+      "n_eval_records": 830,
+      "per_element_f1": {
+        "Antiterminator_Tbox_seq": 0.9383044644528082,
+        "Specifier": 0.9190549961270333,
+        "Stem_I": 0.9512891443474518
+      },
+      "replicate_span": {
+        "lower": 0.8919609675457575,
+        "n_replicates": 2,
+        "score_max": 0.9190549961270333,
+        "score_min": 0.9190549961270333,
+        "scores": [
+          0.9190549961270333,
+          0.9190549961270333
+        ],
+        "spread": 0.0,
+        "upper": 0.9412394220997171
+      },
+      "score": 0.9190549961270333,
+      "separated_from_baseline": false,
+      "separation_assessable": true
+    },
+    {
+      "axes": {
+        "backbone": "caduceus-ps-1k-d118-l4",
+        "rc_combine": "concat",
+        "use_crf": false
+      },
+      "backbone_params": 470702,
+      "backbone_pretrain_seq_len": 1024,
+      "ci": {
+        "ci_level": 0.95,
+        "lower": 0.8582635020996161,
+        "n_blocks": 469,
+        "n_boot": 2000,
+        "point": 0.8890150328844347,
+        "upper": 0.9047282714329766
+      },
+      "ci_overlaps_baseline": false,
+      "delta_vs_baseline": -0.04962313021928655,
+      "git_sha": "cec42efe529d7d64448c7dff0666dfb8054a677c",
+      "is_baseline": false,
+      "leg": "reports/p2/ablation/size_d118_l4_rep3.json",
+      "n_eval_blocks": 469,
+      "n_eval_records": 830,
+      "per_element_f1": {
+        "Antiterminator_Tbox_seq": 0.8890150328844347,
+        "Specifier": 0.8900866217516843,
+        "Stem_I": 0.9314379928492476
+      },
+      "replicate_span": {
+        "lower": 0.8580940005640507,
+        "n_replicates": 3,
+        "score_max": 0.8890150328844347,
+        "score_min": 0.888962831026991,
+        "scores": [
+          0.888962831026991,
+          0.8889802309649638,
+          0.8890150328844347
+        ],
+        "spread": 5.2201857443701094e-05,
+        "upper": 0.9047282714329766
+      },
+      "score": 0.8890150328844347,
+      "separated_from_baseline": true,
+      "separation_assessable": true
+    },
+    {
+      "axes": {
+        "backbone": "caduceus-ps-1k-d118-l4",
+        "rc_combine": "concat",
+        "use_crf": false
+      },
+      "backbone_params": 470702,
+      "backbone_pretrain_seq_len": 1024,
+      "ci": {
+        "ci_level": 0.95,
+        "lower": 0.8581093338140463,
+        "n_blocks": 469,
+        "n_boot": 2000,
+        "point": 0.8889802309649638,
+        "upper": 0.9046699610593412
+      },
+      "ci_overlaps_baseline": false,
+      "delta_vs_baseline": -0.049657932138757466,
+      "git_sha": "a1476b2aa24658b282cec5da89a4f9571b4ca890",
+      "is_baseline": false,
+      "leg": "reports/p2/ablation/size_d118_l4.json",
+      "n_eval_blocks": 469,
+      "n_eval_records": 830,
+      "per_element_f1": {
+        "Antiterminator_Tbox_seq": 0.8889802309649638,
+        "Specifier": 0.8900866217516843,
+        "Stem_I": 0.9314273364413844
+      },
+      "replicate_span": {
+        "lower": 0.8580940005640507,
+        "n_replicates": 3,
+        "score_max": 0.8890150328844347,
+        "score_min": 0.888962831026991,
+        "scores": [
+          0.888962831026991,
+          0.8889802309649638,
+          0.8890150328844347
+        ],
+        "spread": 5.2201857443701094e-05,
+        "upper": 0.9047282714329766
+      },
+      "score": 0.8889802309649638,
+      "separated_from_baseline": true,
+      "separation_assessable": true
+    },
+    {
+      "axes": {
+        "backbone": "caduceus-ps-1k-d118-l4",
+        "rc_combine": "concat",
+        "use_crf": false
+      },
+      "backbone_params": 470702,
+      "backbone_pretrain_seq_len": 1024,
+      "ci": {
+        "ci_level": 0.95,
+        "lower": 0.8580940005640507,
+        "n_blocks": 469,
+        "n_boot": 2000,
+        "point": 0.888962831026991,
+        "upper": 0.904668613136925
+      },
+      "ci_overlaps_baseline": false,
+      "delta_vs_baseline": -0.04967533207673025,
+      "git_sha": "cec42efe529d7d64448c7dff0666dfb8054a677c",
+      "is_baseline": false,
+      "leg": "reports/p2/ablation/size_d118_l4_rep2.json",
+      "n_eval_blocks": 469,
+      "n_eval_records": 830,
+      "per_element_f1": {
+        "Antiterminator_Tbox_seq": 0.888962831026991,
+        "Specifier": 0.8900866217516843,
+        "Stem_I": 0.9314322411727656
+      },
+      "replicate_span": {
+        "lower": 0.8580940005640507,
+        "n_replicates": 3,
+        "score_max": 0.8890150328844347,
+        "score_min": 0.888962831026991,
+        "scores": [
+          0.888962831026991,
+          0.8889802309649638,
+          0.8890150328844347
+        ],
+        "spread": 5.2201857443701094e-05,
+        "upper": 0.9047282714329766
+      },
+      "score": 0.888962831026991,
+      "separated_from_baseline": true,
+      "separation_assessable": true
+    },
+    {
+      "axes": {
+        "backbone": "caduceus-ps-131k-d256-l16",
+        "rc_combine": "gate",
+        "use_crf": false
+      },
+      "backbone_params": 7725312,
+      "backbone_pretrain_seq_len": 131072,
+      "ci": {
+        "ci_level": 0.95,
+        "lower": 0.7301279944114689,
+        "n_blocks": 469,
+        "n_boot": 2000,
+        "point": 0.7567882143629138,
+        "upper": 0.7852112207025863
+      },
+      "ci_overlaps_baseline": false,
+      "delta_vs_baseline": -0.1818499487408075,
+      "git_sha": "cc04667c00058f3ad0f8e8dfcc2a52777bb3590e",
+      "is_baseline": false,
+      "leg": "reports/p2/ablation/rc_gate.json",
+      "n_eval_blocks": 469,
+      "n_eval_records": 830,
+      "per_element_f1": {
+        "Antiterminator_Tbox_seq": 0.7567882143629138,
+        "Specifier": 0.9354392892398815,
+        "Stem_I": 0.9620111447545864
+      },
+      "replicate_span": {
+        "lower": 0.7301279944114689,
+        "n_replicates": 1,
+        "score_max": 0.7567882143629138,
+        "score_min": 0.7567882143629138,
+        "scores": [
+          0.7567882143629138
+        ],
+        "spread": 0.0,
+        "upper": 0.7852112207025863
+      },
+      "score": 0.7567882143629138,
+      "separated_from_baseline": null,
+      "separation_assessable": false
+    }
+  ],
+  "schema_version": "1",
+  "selected_on": "gate4_core_min_f1.min_f1",
+  "separation_assessed": true,
+  "step": "P2-12"
+}

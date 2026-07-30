@@ -245,3 +245,86 @@ class TestStage1SegmenterTorch:
         seg = Stage1Segmenter(backbone=None, rc_combine="concat")
         with pytest.raises(RuntimeError, match="no backbone"):
             seg.forward(input_ids=torch.zeros(1, 8, dtype=torch.long))
+
+
+# ========================================================================== #
+# P2-12 RESULT — the directionality property re-derives from the LIVE gate
+# ========================================================================== #
+@requires_torch
+def test_the_property_is_measured_not_asserted_and_can_go_false():
+    """It previously returned a literal ``True`` with no callers — unfalsifiable.
+
+    ``gate`` is ``g*fwd + (1-g)*rc``; at ``g == 0.5`` in every channel that IS the
+    order-destroying symmetric average ADR-0005 D15 forbids, and the mode name still reads
+    ``"gate"``. So a zeroed gate logit must flip the verdict.
+    """
+    import torch
+
+    from tbox_finder.models.stage1_segmenter import RCCombine
+
+    combine = RCCombine(D_MODEL, mode="gate")
+    assert combine.directionality_preserving is True  # asymmetric init
+
+    with torch.no_grad():
+        combine.gate_logit.zero_()  # g = sigmoid(0) = 0.5 everywhere ⇒ the forbidden mean
+    assert combine.directionality_preserving is False
+
+    with torch.no_grad():
+        combine.gate_logit[0] = 1.0  # one channel off 0.5 ⇒ no longer the exact average
+    assert combine.directionality_preserving is True
+
+
+@requires_torch
+def test_a_zeroed_gate_really_does_produce_the_forbidden_average():
+    """Ground the verdict in the arithmetic, not in the census bookkeeping.
+
+    A collapsed gate must be invariant under the fwd/RC channel-half swap — the very
+    property :func:`swap_strand_channels` exists to probe, and the one that collapses the
+    element order the §6 strand-resolver reads.
+    """
+    import torch
+
+    from tbox_finder.models.stage1_segmenter import RCCombine, swap_strand_channels
+
+    hidden = torch.randn(2, 7, _INPUT_DIM)
+    combine = RCCombine(D_MODEL, mode="gate")
+
+    # Asymmetric (as initialised): swapping the strand halves CHANGES the output.
+    assert not torch.allclose(combine(hidden), combine(swap_strand_channels(hidden)))
+
+    with torch.no_grad():
+        combine.gate_logit.zero_()
+    # Collapsed: invariant under the swap, i.e. exactly the forbidden symmetric mean.
+    assert torch.allclose(combine(hidden), combine(swap_strand_channels(hidden)), atol=1e-6)
+    fwd, rc = torch.chunk(hidden, 2, dim=-1)
+    assert torch.allclose(combine(hidden), 0.5 * (fwd + rc), atol=1e-6)
+
+
+@requires_torch
+def test_gate_summary_reports_the_measured_census():
+    import torch
+
+    from tbox_finder.models.stage1_segmenter import GATE_MEAN_ATOL, RCCombine
+
+    combine = RCCombine(D_MODEL, mode="gate")
+    summary = combine.gate_summary()
+    assert summary["mode"] == "gate"
+    assert summary["n_channels"] == D_MODEL
+    assert summary["n_channels_at_half"] == 0
+    assert summary["atol"] == GATE_MEAN_ATOL
+    assert summary["abs_dev_from_half_max"] > 0.1  # sigmoid(0.5) ≈ 0.622
+
+    with torch.no_grad():
+        combine.gate_logit.zero_()
+    collapsed = combine.gate_summary()
+    assert collapsed["n_channels_at_half"] == D_MODEL
+    assert collapsed["abs_dev_from_half_max"] <= GATE_MEAN_ATOL
+
+
+@requires_torch
+def test_concat_is_structurally_preserving_and_carries_no_census():
+    from tbox_finder.models.stage1_segmenter import RCCombine
+
+    combine = RCCombine(D_MODEL, mode="concat")
+    assert combine.directionality_preserving is True
+    assert combine.gate_summary() == {"mode": "concat", "structural": True}

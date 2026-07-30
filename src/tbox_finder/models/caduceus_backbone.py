@@ -52,16 +52,29 @@ import sys
 from collections.abc import Mapping, Sequence
 from typing import Any
 
+from tbox_finder.models.backbone_registry import (
+    PRODUCTION_CHECKPOINT,
+    CaduceusCheckpoint,
+    require_pinned_revision,
+    resolve_checkpoint,
+)
 from tbox_finder.provenance import write_provenance
 
 SCHEMA_VERSION = "1"
 
 # --- Pinned checkpoint identity (the reproducibility anchor) ---------------------------
+# P2-12/ADR-0002 A14: the identity now lives in the torch-free closed allow-list
+# `models/backbone_registry.py`, so a compose-time check can reject an unknown backbone on the
+# login node and the bare CI tier can lock the pins. The module constants below are the
+# PRODUCTION entry's fields, *derived* from that single source rather than restated beside it —
+# a second literal is a second thing to forget to update (the promote-don't-duplicate rule).
+#: The production Stage-1 checkpoint spec (PRD §6/§10.1; ADR-0002 D2/D7 + A14).
+PRODUCTION = resolve_checkpoint(PRODUCTION_CHECKPOINT)
 #: The default Stage-1 checkpoint (PRD §6/§10.1; ADR-0002 D7).
-REPO_ID = "kuleshov-group/caduceus-ps_seqlen-131k_d_model-256_n_layer-16"
+REPO_ID = PRODUCTION.repo_id
 #: IMMUTABLE commit revision — never ``main`` (ADR-0002 D2). Resolved from the Hub
 #: ``main`` branch head on 2026-07-12; pinning the SHA freezes the weights + remote code.
-REVISION = "d89eeb853136ea64da7feb3d0c8e909771b17ae6"
+REVISION = PRODUCTION.revision
 #: Canonical source URL recorded in the provenance / model card.
 HUB_URL = f"https://huggingface.co/{REPO_ID}"
 
@@ -70,9 +83,9 @@ HUB_URL = f"https://huggingface.co/{REPO_ID}"
 #: "7.73 M" of PRD §10.1, to the exact integer. Frozen in CODE (not config) so a
 #: generated provenance record can never silently drift from the checkpoint identity
 #: (the coverage.py::OOD_ECE_MIN_N precedent).
-EXPECTED_PARAM_COUNT = 7_725_312
-D_MODEL = 256
-N_LAYER = 16
+EXPECTED_PARAM_COUNT = PRODUCTION.expected_param_count
+D_MODEL = PRODUCTION.d_model
+N_LAYER = PRODUCTION.n_layer
 
 #: Pretraining domain, verbatim from the two authoritative sources (see module docstring).
 PRETRAINING_DOMAIN = "human reference genome"
@@ -268,43 +281,105 @@ def validate_report(report: Mapping[str, Any]) -> list[str]:
 # ====================================================================================== #
 # Heavy loaders — lazy torch / transformers (inside functions only).
 # ====================================================================================== #
-def _require_pinned_revision(revision: str) -> None:
-    """Reject any revision other than the code-pinned :data:`REVISION`.
+def _require_pinned_revision(revision: str, *, checkpoint: str = PRODUCTION_CHECKPOINT) -> None:
+    """Reject any revision other than ``checkpoint``'s code-pinned one.
 
     ``trust_remote_code=True`` **executes** the Hub modeling code at ``revision`` on load,
     so an arbitrary revision is arbitrary remote-code execution. The revision is pinned in
-    code (ADR-0002 D2); re-pinning is a code change to :data:`REVISION` + re-sign-off, never
-    a runtime argument — so the loaders accept only the pinned value.
+    code (ADR-0002 D2 + A14's allow-list); re-pinning is a code change plus re-sign-off,
+    never a runtime argument — so the loaders accept only the pinned value.
+
+    P2-12 generalised this **per checkpoint** rather than relaxing it: the default keeps the
+    original single-pin behaviour for every pre-existing caller.
     """
-    if revision != REVISION:
+    require_pinned_revision(checkpoint, revision)
+
+
+def assert_expected_params(model, spec: CaduceusCheckpoint) -> int:
+    """Measure ``model``'s parameter count and require it to equal ``spec``'s expectation.
+
+    The count is **measured** (:func:`count_parameters`) and compared; it is never asserted
+    from the PRD, whose §10.1 wording ("~1.93M", "471k") is an approximation and, for the
+    repo ids, was outright incomplete (the real ids carry an ``_lr-8e-3`` suffix — ADR-0002
+    A14). A mismatch means the Hub content at a pinned SHA is not what the pin was recorded
+    against, which is a CLAUDE.md §7 stop, so it raises rather than warns.
+
+    Returns the measured count, so the caller records the measurement it just gated on
+    instead of re-deriving a second, possibly different, number.
+    """
+    measured = count_parameters(model)
+    if measured != spec.expected_param_count:
         raise ValueError(
-            f"revision must be the code-pinned REVISION {REVISION!r}; loading remote code "
-            f"(trust_remote_code=True) from another revision is not allowed, got {revision!r}"
+            f"backbone {spec.key!r} ({spec.repo_id} @ {spec.revision}) has {measured:,} "
+            f"parameters, expected {spec.expected_param_count:,} (ADR-0002 A14, measured at "
+            "load 2026-07-29). The pinned revision no longer resolves to the checkpoint the "
+            "pin was recorded against — a §7 stop, not a tolerance."
         )
+    return measured
 
 
-def load_caduceus_ps(*, revision: str = REVISION, device: str | None = None, dtype: Any = None):
-    """Load the Caduceus-PS backbone (``AutoModel``) at the code-pinned ``revision``.
+def assert_expected_d_model(model, spec: CaduceusCheckpoint) -> int:
+    """Require the loaded config's ``d_model`` to equal ``spec``'s, and return it.
+
+    Load-bearing for the size ablation: the ~471k checkpoint is ``d_model`` **118**, so a
+    segmentation head left at the module-default 256 would be sized to a 512-wide hidden
+    state the backbone never emits. Sizing the head off a *measured* width and checking it
+    against the pin is what keeps that a loud failure instead of a shape error two frames
+    deep in the RC-combine.
+    """
+    cfg = getattr(model, "config", None)
+    measured = getattr(cfg, "d_model", None)
+    if not isinstance(measured, int) or measured != spec.d_model:
+        raise ValueError(
+            f"backbone {spec.key!r} loaded config.d_model={measured!r}, expected "
+            f"{spec.d_model} (ADR-0002 A14). The seg head is sized to 2*d_model, so a "
+            "mismatch here silently mis-shapes the whole Stage-1 model."
+        )
+    return int(measured)
+
+
+def load_caduceus_ps(
+    *,
+    checkpoint: str = PRODUCTION_CHECKPOINT,
+    revision: str | None = None,
+    device: str | None = None,
+    dtype: Any = None,
+):
+    """Load a Caduceus-PS backbone (``AutoModel``) from the ADR-0002 A14 closed allow-list.
 
     Args:
-        revision: must equal :data:`REVISION` (the only accepted value — see
-            :func:`_require_pinned_revision`); anything else is rejected.
+        checkpoint: an allow-list key (:data:`CHECKPOINT_KEYS`); anything else raises.
+            Defaults to the **production** pin, so every pre-P2-12 caller is unchanged.
+        revision: ``None`` (the default) means "``checkpoint``'s pinned revision". An
+            explicit value must equal that revision — see :func:`_require_pinned_revision`;
+            anything else is rejected.
         device: torch device string; defaults to ``"cuda"`` if available else ``"cpu"``
             (note: a forward requires CUDA — ADR-0002 A2 C2).
         dtype: optional torch dtype override.
 
     Returns:
         The Caduceus base model in ``.eval()`` mode on ``device``.
+
+    Raises:
+        ValueError: unknown ``checkpoint``, unpinned ``revision``, or a measured parameter
+            count / ``d_model`` that misses the allow-list expectation.
     """
-    _require_pinned_revision(revision)
+    spec = resolve_checkpoint(checkpoint)
+    revision = spec.revision if revision is None else revision
+    require_pinned_revision(spec.key, revision)
     import torch  # lazy
     from transformers import AutoModel  # lazy
 
     if device is None:
         device = "cuda" if torch.cuda.is_available() else "cpu"
-    model = AutoModel.from_pretrained(REPO_ID, revision=revision, trust_remote_code=True)
+    model = AutoModel.from_pretrained(spec.repo_id, revision=revision, trust_remote_code=True)
     if dtype is not None:
         model = model.to(dtype=dtype)
+    # Gate the identity on the WEIGHTS, not just on the strings: a repo id and a SHA are
+    # metadata, the parameter count and hidden width are the model. Both are checked here so
+    # every caller — trainer, probe, scanner — inherits the check without repeating it.
+    assert_expected_params(model, spec)
+    assert_expected_d_model(model, spec)
     return model.to(device).eval()
 
 
@@ -345,12 +420,20 @@ def load_caduceus_ps_for_masked_lm(
     return model.to(device)
 
 
-def load_tokenizer(*, revision: str = REVISION):
-    """Load the Caduceus char tokenizer at the code-pinned ``revision`` (remote code)."""
-    _require_pinned_revision(revision)
+def load_tokenizer(*, checkpoint: str = PRODUCTION_CHECKPOINT, revision: str | None = None):
+    """Load a Caduceus char tokenizer at its code-pinned revision (remote code).
+
+    All three allow-listed repos ship the same 16-token char vocabulary and the same
+    ``tokenization_caduceus.py``, but the tokenizer is still loaded from the checkpoint's own
+    repo at its own pinned revision — borrowing the production tokenizer for an ablation
+    checkpoint would be an unrecorded assumption about two repos agreeing.
+    """
+    spec = resolve_checkpoint(checkpoint)
+    revision = spec.revision if revision is None else revision
+    require_pinned_revision(spec.key, revision)
     from transformers import AutoTokenizer  # lazy
 
-    return AutoTokenizer.from_pretrained(REPO_ID, revision=revision, trust_remote_code=True)
+    return AutoTokenizer.from_pretrained(spec.repo_id, revision=revision, trust_remote_code=True)
 
 
 def count_parameters(model) -> int:

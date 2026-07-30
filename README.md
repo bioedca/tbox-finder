@@ -8,7 +8,7 @@ per-nucleotide T-box structural-element annotations with **calibrated**
 confidence. The scientific value is defensible, non-circular discovery, so
 data-leakage control, calibration, and orthogonal validation are first-class.
 
-> **Status:** **Phase 1 — Backbones & heads: complete.** Next: Phase 2 (Stage-1 training).
+> **Status:** **Phase 2 — Stage-1 training: in progress** (Phase 1 complete).
 > Methodology decisions are pinned in `docs/decisions/` (ADRs); the released
 > model/dataset cards will document intended use, splits, calibration, and limitations.
 
@@ -40,6 +40,25 @@ data-leakage control, calibration, and orthogonal validation are first-class.
   NT-multispecies) is **built but untriggered** — the go/no-go passed.
   *Still no detector and no discovery result: Phase 1 ships validated backbones, and its
   smoke runs are mechanics/expressivity probes, not generalization claims.*
+
+- **Phase 2 — Stage-1 training (in progress).** Stage-1 **architecture ablations** are
+  measured (`reports/p2/ablation_table.json`): on a disjoint 830-record / 469-cluster
+  selection fold, arms are **replicated** and separation is judged on replicate-widened
+  intervals (re-runs reproduce closely: spread **0.0001** over 3 replicates of the 471k
+  backbone, 0.0000 over 2 of the 1.93M, 0.0006 over 2 of the baseline). The 1.93M backbone
+  (0.9191, [0.8920, 0.9412]) is **not distinguishable** from the baseline (0.9386/0.9393,
+  [0.9125, 0.9576]), while the smallest **471k** checkpoint separates **downward**
+  (0.8890, [0.8581, 0.9047]) — the floor of the throughput-driven downward search.
+  Measured forward-only scan rate: **69.5 / 268.4 / 423.5** windows/s/GPU
+  (1.0× / 3.86× / 6.10×), so 1.93M buys 3.86× throughput at no resolvable accuracy cost.
+  Two unreplicated arms are reported **without** a verdict — the CRF head, and a gated
+  RC combination withheld for cause (its two runs disagreed 0.9242 vs 0.7568, entirely in
+  one element whose AUPRC held but whose boundary IoU collapsed 0.8590→0.6087: a
+  decision-threshold shift under uncalibrated outputs, unattributed since the runs were at
+  different commits).
+  *Selection-fold measurements — **not** generalization results; GATE-4 is graded later in
+  Phase 2 on the leave-one-order-out holdout. Stage-1 outputs here are uncalibrated
+  (temperature scaling is a later Phase-2 step).*
 
 ## Layout (PRD §16)
 
