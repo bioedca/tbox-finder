@@ -485,6 +485,9 @@ def test_valid_report_validates_and_passes_its_gate() -> None:
         (lambda r: r["operator_agreement"].update(max_abs_log_prob_diff=1e-9), "bit-exactly"),
         (lambda r: r["read"].update(n_blocks=999), "n_blocks"),
         (lambda r: r["read"].update(n_positions_argmax_changed=None), "argmax_changed"),
+        (lambda r: r["read"].update(n_positions_coverage_ge_2=None), "coverage_ge_2"),
+        (lambda r: r["read"].update(n_positions_coverage_ge_2=-1), "coverage_ge_2"),
+        (lambda r: r["read"].update(n_boot=True), "n_boot"),
         (lambda r: r["read"]["tempered"].update(core_worst_ece=0.0), "core_worst_ece"),
         (lambda r: r["read"]["tempered"]["per_class"].pop("background"), "CLASS_ORDER keys"),
         (

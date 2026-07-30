@@ -901,7 +901,17 @@ def validate_report(report: Mapping[str, Any]) -> list[str]:
     read = report.get("read")
     if not isinstance(read, Mapping):
         return [*problems, "read: missing"]
-    for key in ("n_positions", "n_records", "n_blocks", "n_boot", "n_positions_argmax_changed"):
+    for key in (
+        "n_positions",
+        "n_records",
+        "n_blocks",
+        "n_boot",
+        "n_positions_argmax_changed",
+        # reported AND consumed by the CLI summary and by the A11 Pin 4 reading (the
+        # coverage>=2 mass is what makes the reconciled arg-max movable at all), so it is
+        # validated like every other counter rather than trusted because it is printed
+        "n_positions_coverage_ge_2",
+    ):
         v = read.get(key)
         if not isinstance(v, int) or isinstance(v, bool) or v < 0:
             problems.append(f"read.{key}: missing or not a non-negative int")
