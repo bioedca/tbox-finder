@@ -98,11 +98,20 @@ DISCLOSURES: tuple[str, ...] = (
     "and its absence is not a gap in this table.",
     "This is a SELECTION-rung table, not GATE-4. GATE-4 is graded at P2-14 on the real "
     "leave-one-order-out holdout; no number here is a generalization result.",
-    "REPLICATION, measured. Every concat-path leg reproduces essentially exactly across "
-    "independent runs, different commits and different nodes: size_d118_l4 spread 0.0001 "
-    "over 3 replicates, size_d256_l4 0.0000 over 2, baseline 0.0006 over 2. Separation is "
-    "therefore judged on replicate-widened intervals, and is WITHHELD (null, never false) "
-    "for any leg -- or for the baseline -- carrying fewer than two replicates.",
+    "REPLICATION, measured -- and SCOPED. Every concat-path leg reproduces essentially "
+    "exactly across independent runs, different commits and different nodes: size_d118_l4 "
+    "spread 0.0001 over 3 replicates, size_d256_l4 0.0000 over 2, baseline 0.0006 over 2. "
+    "Separation is judged on replicate-widened intervals and is WITHHELD (null, never false) "
+    "for any leg -- or for the baseline -- carrying fewer than two replicates. "
+    "WHAT THIS DOES NOT COVER: every replicate holds seed 42, because the seed is part of "
+    "the ADR-0003 A3 pinned protocol and changing it is an ADR decision, not a reducer "
+    "choice. So these replicates measure run-to-run DETERMINISM at a fixed seed -- which is "
+    "near-total, hence the ~0 spreads -- and NOT seed variance. A different seed is an "
+    "equally valid draw of the same training procedure, so the separation verdict below does "
+    "NOT account for seed-to-seed variation, and the widened intervals are consequently "
+    "barely wider than the single-run CIs. Establishing that an architecture difference is "
+    "robust to initialisation would need a seed sweep under ADR sign-off; until then, read "
+    "`separated_from_baseline` as 'separated at the pinned seed', not 'separated in general'.",
     "ONE arm did NOT reproduce, and its verdict is withheld for that reason. Two runs of the "
     "rc_gate leg at the same seed and config gave min-core-F1 0.9242 and 0.7568. The entire "
     "difference sat in one element (Antiterminator per-nt F1 0.9242->0.7568, boundary IoU "
@@ -436,7 +445,17 @@ def artifact_problems(artifact: Mapping[str, Any], *, expect_rows: int) -> list[
         # stored boolean — a flag echoed by the builder is not evidence (P1-15/P1-16).
         # Mirrors build_table: replicate-widened intervals, and withheld unless BOTH sides
         # carry >= 2 replicates.
-        if not row.get("is_baseline") and isinstance(baseline, Mapping):
+        if row.get("is_baseline"):
+            # Validate the baseline row rather than SKIPPING it: skipping left the one row
+            # whose verdict is structurally fixed as the one row nothing checked, so a
+            # fabricated value there would have survived (CodeRabbit, P2-12 RESULT).
+            if row.get("separated_from_baseline") is not None:
+                problems.append(
+                    f"rows[{i}]: is_baseline row carries separated_from_baseline "
+                    f"{row.get('separated_from_baseline')!r} — a row is never separated "
+                    "from itself"
+                )
+        elif isinstance(baseline, Mapping):
             want = _overlaps(row.get("replicate_span"), baseline.get("replicate_span"))
             n_rep = (row.get("replicate_span") or {}).get("n_replicates", 1)
             n_rep_base = (baseline.get("replicate_span") or {}).get("n_replicates", 1)

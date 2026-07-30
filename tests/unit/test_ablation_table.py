@@ -784,3 +784,24 @@ def test_an_invalid_throughput_report_is_not_published_to_the_canonical_path(tmp
     src = Path(T.__file__).read_text()
     assert 'out = out.with_suffix(".invalid.json")' in src
     assert "NOT PUBLISHED" in src
+
+
+def test_a_fabricated_verdict_on_the_baseline_row_does_not_survive_validation():
+    """The baseline's verdict is structurally fixed at None — which made it the one row
+    nothing re-derived, so a fabricated value there would have survived (CodeRabbit)."""
+    table = A.build_table([_baseline(), *_four_legs()], baseline_leg=str(BASELINE_PATH))
+    assert A.artifact_problems(table, expect_rows=5) == []
+    forged = copy.deepcopy(table)
+    base_row = next(r for r in forged["rows"] if r["is_baseline"])
+    base_row["separated_from_baseline"] = True
+    problems = A.artifact_problems(forged, expect_rows=5)
+    assert any("never separated from itself" in p for p in problems), problems
+
+
+def test_the_replicate_disclosure_states_what_it_does_not_cover():
+    """Replicates hold seed 42 (the A3-pinned protocol), so they measure determinism, not
+    seed variance. A reader must not take ~0 spread for 'robust to initialisation'."""
+    joined = " ".join(A.DISCLOSURES)
+    assert "seed 42" in joined
+    assert "NOT seed variance" in joined
+    assert "separated at the pinned seed" in joined
