@@ -18,8 +18,14 @@ Modules
     The advisory RiNALMo-giga forward-throughput probe (candidates/sec/GPU on one
     A4000, bf16) — surfaces the §10.2 genome-scale latency risk early; the binding
     latency decision is frozen to the P5 sizing gate (P1-14). PRD §10.2; ADR-0002.
+``gate4``
+    **GATE-4** — the Stage-1 segmentation-quality gate (P2-14): the min per-element
+    per-nucleotide-class F1 over the three core elements on the ADR-0004 A6
+    in-distribution population, graded on the eval twin, plus the non-gated
+    leave-one-order-out / codon / 9-PDB-ceiling / boundary-IoU / non-core reads.
+    PRD §2.3, §12; ADR-0004 D6 + A6.
 """
 
 from __future__ import annotations
 
-__all__ = ["archiveii_lofo", "rinalmo_parity", "rinalmo_throughput"]
+__all__ = ["archiveii_lofo", "gate4", "rinalmo_parity", "rinalmo_throughput"]

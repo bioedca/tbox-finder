@@ -225,9 +225,16 @@ def _build_smoke():
     _, _, prod_codes, _ = labels.derive_labels(clean)
 
     # --- segmentation task: concat real per-nt labels; perturb deterministically ---
+    # `seg_lengths` keeps the per-RECORD boundaries the pooled vectors erase. GATE-4's
+    # exact-3-nt-codon check (ADR-0004 D6) is a per-locus question — "did the model call the
+    # right three nucleotides in THIS record" — and pooling would let one record's Specifier
+    # hit pay for another's miss (P2-14).
     seg_true: list[int] = []
+    seg_lengths: list[int] = []
     for code in prod_codes:
-        seg_true.extend(labels.label_string_to_indices(code))
+        idx = labels.label_string_to_indices(code)
+        seg_true.extend(idx)
+        seg_lengths.append(len(idx))
     rng = random.Random(_SEED)
     seg_pred: list[int] = []
     for t in seg_true:
@@ -257,17 +264,39 @@ def _build_smoke():
     # synthetic "cmsearch" baseline: independent seeded hit mask (a fixed operating point)
     brng = random.Random(_SEED + 2)
     baseline_hit = [1 if (brng.random() < (0.80 if y == 1 else 0.05)) else 0 for y in det_labels]
-    return seg_true, seg_pred, det_labels, det_scores, baseline_hit, n_pos, n_dec
+    return seg_true, seg_pred, seg_lengths, det_labels, det_scores, baseline_hit, n_pos, n_dec
+
+
+def _per_record_pairs(seg_true, seg_pred, seg_lengths):
+    """Slice the pooled segmentation vectors back into per-record ``(true, pred)`` pairs."""
+    pairs, start = [], 0
+    for n in seg_lengths:
+        pairs.append((seg_true[start : start + n], seg_pred[start : start + n]))
+        start += n
+    assert start == len(seg_true), "record lengths do not tile the pooled vector"
+    return pairs
 
 
 def _compute_smoke_metrics() -> dict:
     """Compute every PRD §2 gate metric on the smoke fixture (the committed-expectation
     payload). Deterministic — the source of ``expected.json``."""
-    seg_true, seg_pred, det_labels, det_scores, baseline_hit, n_pos, n_dec = _build_smoke()
+    seg_true, seg_pred, seg_lengths, det_labels, det_scores, baseline_hit, n_pos, n_dec = (
+        _build_smoke()
+    )
     gate4 = M.gate4_core_min_f1(seg_true, seg_pred)
     base_p, base_r = M.baseline_operating_point(det_labels, baseline_hit)
     matched = M.recall_at_matched_precision(det_labels, det_scores, base_p)
+    codon = M.specifier_exact_codon_detection(_per_record_pairs(seg_true, seg_pred, seg_lengths))
     return {
+        # GATE-4's reported (non-gated) exact-codon sanity check, on the same fixture and
+        # the same synthetic perturbation as the gated statistic above (P2-14).
+        "specifier_exact_codon": {
+            "n_scorable": codon["n_scorable"],
+            "n_exact": codon["n_exact"],
+            "n_right_length": codon["n_right_length"],
+            "n_overlapping": codon["n_overlapping"],
+            "exact_rate": codon["exact_rate"],
+        },
         "n_positives": n_pos,
         "n_decoys": n_dec,
         "n_seg_positions": len(seg_true),
@@ -332,6 +361,19 @@ def test_eval_gate_matches_committed_expectation() -> None:
     assert got["n_decoys"] == expected["n_decoys"]
     assert got["n_seg_positions"] == expected["n_seg_positions"]
 
+    # GATE-4's non-gated exact-codon check (P2-14). Counts are exact; the rate is float.
+    codon_got, codon_exp = got["specifier_exact_codon"], expected["specifier_exact_codon"]
+    assert set(codon_got) == set(codon_exp)
+    for key in ("n_scorable", "n_exact", "n_right_length", "n_overlapping"):
+        assert codon_got[key] == codon_exp[key], key
+    _close(codon_got["exact_rate"], codon_exp["exact_rate"])
+    # The check must DISCRIMINATE on this fixture, not merely run: the synthetic model
+    # scatters Specifier calls across each record, so it overlaps the true codon almost
+    # always and reproduces it exactly almost never. A harness where those two numbers
+    # coincided would be measuring nothing (§8.4).
+    assert codon_got["n_overlapping"] > codon_got["n_exact"]
+    assert 0 < codon_got["n_scorable"] <= expected["n_positives"]
+
 
 def test_stdlib_kernels_match_sklearn_and_numpy() -> None:
     """Prove the stdlib AUPRC / ECE binning equal the canonical scikit-learn / numpy
@@ -341,7 +383,7 @@ def test_stdlib_kernels_match_sklearn_and_numpy() -> None:
     import numpy as np
     from sklearn.metrics import average_precision_score
 
-    _, _, det_labels, det_scores, *_ = _build_smoke()
+    _, _, _, det_labels, det_scores, *_ = _build_smoke()
 
     mine_ap = M.average_precision(det_labels, det_scores)
     ref_ap = float(average_precision_score(det_labels, det_scores))

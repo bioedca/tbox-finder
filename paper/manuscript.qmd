@@ -184,12 +184,58 @@ unused.
 
 # Results
 
-*[Placeholder — GATE-4 (Phase 2), GATE-2 (Phase 3), GATE-1 (Phase 4), the
-genome-scale scan + FDR (Phase 5), and orthogonal validation / GATE-3 (Phase 6)
-paragraphs are added at each phase-exit gate. Phase 1 contributes no Results
-paragraph and no figure: it validated backbones and retired transfer risk, and its
-smoke runs are mechanics/expressivity probes — reporting them as results would
-present a learnability measurement as a generalization finding.]*
+## Stage-1 segments T-box elements accurately in distribution, and substantially less so across held-out taxonomic orders {#sec-gate4}
+
+**GATE-4 passes.** The minimum per-nucleotide class F1 over the three core
+structural elements — the gated statistic, deliberately a minimum rather than a
+mean, so a strong element cannot mask a weak one — is **0.952** against a
+pre-registered floor of 0.80, with a homology-cluster-blocked bootstrap 95%
+interval of **[0.943, 0.960]** (1,029 clusters, 2,000 resamples) that clears the
+floor by its lower bound. Per element: Stem I 0.975, Antiterminator 0.970, and
+Specifier 0.952, the minimum and therefore the statistic. Element extents are
+recovered, not merely nucleotides labelled: boundary IoU is 0.951 (Stem I), 0.941
+(Antiterminator) and 0.908 (Specifier), computed through the overlapping-window
+log-mean-exp reconciliation operator the scanner itself deploys, so these are not
+artefacts of the 512-nt tiling grid. Non-core classes are reported but not gated;
+Stem III is weakest (F1 0.880, IoU 0.786). Specifier codon localisation is exact
+to all three nucleotides in 89.8% of scorable loci and overlaps truth in 98.7%.
+
+Two properties of this measurement constrain how it should be read. First, the
+graded artefact is an **evaluation twin**, not the shipped detector: the shipped
+checkpoint trained on the entire in-distribution fold, leaving no held-out
+population, so a second checkpoint was trained with the graded clusters withheld
+(8,303 → 7,099 records; 1,204 records in 1,031 clusters removed) and graded in its
+place. The twin saw strictly less data, so 0.952 is a **conservative proxy** for
+the shipped model rather than a measurement of it, and the graded population shares
+zero clusters and zero records with the twin's training fold. Second, the graded
+population is 98.7% Firmicutes (1,185/1,201 records) — the corpus composition that
+remains once the leave-one-order-out holdout is removed, not a sampling decision.
+
+**The same checkpoint generalises far less well across taxonomic orders.** On the
+leave-one-order-out holdout (21.0 M positions, macro-averaged across 30 held-out
+orders), per-element F1 falls to 0.765 (Antiterminator), 0.721 (Stem I) and 0.715
+(Specifier), with per-order minima approaching zero. This read is reported and
+explicitly **not** gated here: GATE-4 grades in-distribution segmentation quality,
+whereas the generalization claim this work makes is graded at GATE-1 (@sec-eval)
+on precisely this axis. The gap between 0.95 in distribution and ~0.72 across
+orders is the quantity that matters for novel-clade discovery, and it is reported
+alongside the passing gate rather than after it.
+
+The cross-source label-noise ceiling that would license recalibrating the 0.80
+floor is **not estimable** from the available crystal structures: Antiterminator
+and Specifier are resolved to a residue extent in 0 of the 9 depositions (Stem I in
+5, Stem II in 1), so no cross-source agreement over the gated elements can be
+computed. The recalibration path is therefore closed and the floor stands as
+pre-registered — a ceiling estimated from N ≤ 9 must not be allowed to lower the
+bar in one direction only. All figures above are computed on the uncalibrated
+posterior.
+
+*[Placeholder — GATE-2 (Phase 3), GATE-1 (Phase 4), the genome-scale scan + FDR
+(Phase 5), and orthogonal validation / GATE-3 (Phase 6) paragraphs are added at
+each phase-exit gate. Phase 1 contributes no Results paragraph and no figure: it
+validated backbones and retired transfer risk, and its smoke runs are
+mechanics/expressivity probes — reporting them as results would present a
+learnability measurement as a generalization finding.]*
 
 # Discussion
 

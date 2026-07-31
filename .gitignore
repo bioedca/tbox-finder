@@ -134,6 +134,17 @@
 /reports/p2/train_production_*.out
 /reports/p2/train_production_*.err
 
+# P2-14 GATE-4 eval twin (train_gate4_twin.sbatch): the same four run signals as its
+# production original, which it clones. Ignored for the same reason — a `git add -A` on the
+# sacrificial cluster checkout would otherwise commit a DONE marker, a lock file and the
+# torchrun/W&B log chatter (the P2-10d′-e defect, one job later). The committed report
+# reports/p2/train_stage1_gate4_twin.json is the deliverable and is deliberately NOT ignored;
+# tests/unit/test_train_production_signals.py locks both halves for BOTH sbatch files.
+/reports/p2/train_stage1_gate4_twin.DONE
+/reports/p2/.train_gate4_twin.lock
+/reports/p2/train_gate4_twin_*.out
+/reports/p2/train_gate4_twin_*.err
+
 # P2-10c′-c-ii ρ-pilot scan (scan_pilot.sbatch): the DONE marker + flock lock are run signals
 # (§9.3 keys on absence-on-failure), and the SLURM logs are EXPECTED non-empty on success
 # (trust_remote_code / selective_scan_cuda / HF chatter — do NOT gate on zero bytes). The

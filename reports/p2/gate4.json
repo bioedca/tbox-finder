@@ -1,0 +1,710 @@
+{
+  "adr": "ADR-0004 D6 (gated statistic + floor) + A6 (graded population, eval twin, two-run split); ADR-0005 D3+A3 (reconciliation operator, consumed); ADR-0005 D5 (block-level resampling + macro-over-orders); ADR-0005 A11 Pin 4 (graded on the uncalibrated posterior)",
+  "checkpoint": "data/processed/checkpoints/stage1_gate4_twin/stage1.pt",
+  "disclosures": [
+    "GATE-4 grades the eval TWIN, not the shipped checkpoint: the shipped P2-10d'-b production checkpoint trained on all 8303 D5-fold records, this population included, so it has no in-distribution held-out population at all (ADR-0004 A6). The twin trained on 7099 records \u2014 strictly fewer \u2014 so this number is a CONSERVATIVE proxy for the shipped model, not a measurement of it. PRD \u00a710.1's two-run split disclosure.",
+    "The graded population is 98.7% Firmicutes (1185/1201 records), which is the corpus composition left after the leave-one-order-out holdout is removed, not a sampling choice. The point estimate is pooled MICRO over positions; the cluster-blocked CI is the D5 estimator.",
+    "The leave-one-order-out read is REPORTED, NEVER GATED here (ADR-0004 D6 gates the in-distribution reference). It is the population PRD \u00a712:241 reports as the generalization headline and PRD \u00a72.3 grades at GATE-1 / P4.",
+    "Graded on the UNCALIBRATED posterior (ADR-0005 A11 Pin 4); P2-13's T = 0.9896 is a machinery demonstration and is not shipped.",
+    "The cross-source label-noise ceiling C is NOT estimable (Antiterminator_Tbox_seq, Specifier resolve to a residue extent in 0 of 9 depositions), so D6's \u03b4-recalibration path is closed and the 0.8 floor stands as written."
+  ],
+  "env_lock": "envs/ml-dna.conda-lock.yml",
+  "gate": {
+    "block_bootstrap_ci": {
+      "ci_level": 0.95,
+      "lower": 0.9425956384679155,
+      "n_blocks": 1029,
+      "n_boot": 2000,
+      "point": 0.9517755976233245,
+      "upper": 0.9604828322598852
+    },
+    "floor": 0.8,
+    "min_f1": 0.9517755976233245,
+    "n_positions": 2976259,
+    "n_records": 1201,
+    "n_windows_forwarded": 5102,
+    "passes": true,
+    "per_element_f1": {
+      "Antiterminator_Tbox_seq": 0.9697077584928052,
+      "Specifier": 0.9517755976233245,
+      "Stem_I": 0.9748523373910538
+    },
+    "population": "gate4_eval",
+    "statistic": "min over {Stem_I, Specifier, Antiterminator_Tbox_seq} of per-nt class F1"
+  },
+  "gated": true,
+  "generated_at_utc": "2026-07-31T09:23:09+00:00",
+  "generated_by": "src/tbox_finder/eval/gate4.py",
+  "geometry": {
+    "n_boot": 2000,
+    "stride_nt": 512,
+    "window_nt": 1024
+  },
+  "is_science": true,
+  "loo_holdout": {
+    "block_unit": "resolved_order",
+    "gated": false,
+    "macro_non_core_f1": {
+      "Discriminator": {
+        "macro": 0.8600782878338157,
+        "max": 1.0,
+        "min": 0.3798449612403101,
+        "n_blocks_defined": 30,
+        "n_blocks_undefined": 0
+      },
+      "Stem_II": {
+        "macro": 0.7073494747240903,
+        "max": 0.9962825278810409,
+        "min": 0.02573340195573855,
+        "n_blocks_defined": 30,
+        "n_blocks_undefined": 0
+      },
+      "Stem_III": {
+        "macro": 0.6981204635192955,
+        "max": 0.9575871819038643,
+        "min": 0.18743228602383533,
+        "n_blocks_defined": 30,
+        "n_blocks_undefined": 0
+      },
+      "Terminator": {
+        "macro": 0.6959817005461081,
+        "max": 0.988490182802979,
+        "min": 0.0,
+        "n_blocks_defined": 30,
+        "n_blocks_undefined": 0
+      }
+    },
+    "macro_per_element_f1": {
+      "Antiterminator_Tbox_seq": {
+        "macro": 0.7646477317089974,
+        "max": 1.0,
+        "min": 0.12420091324200913,
+        "n_blocks_defined": 30,
+        "n_blocks_undefined": 0
+      },
+      "Specifier": {
+        "macro": 0.715396116833238,
+        "max": 1.0,
+        "min": 0.0,
+        "n_blocks_defined": 30,
+        "n_blocks_undefined": 0
+      },
+      "Stem_I": {
+        "macro": 0.7213542593750248,
+        "max": 1.0,
+        "min": 0.010576551012511285,
+        "n_blocks_defined": 30,
+        "n_blocks_undefined": 0
+      }
+    },
+    "n_positions": 21030072,
+    "n_windows_forwarded": 35431,
+    "note": "REPORTED, NOT GATED at P2-14 (ADR-0004 D6 gates the in-distribution reference). Macro across held-out orders per ADR-0005 D5; the pooled micro row is reported beside it because the corpus is ~90% Firmicutes and the two differ for that reason, not because of a model property.",
+    "per_order_f1": {
+      "Acholeplasmatales": {
+        "Antiterminator_Tbox_seq": 0.9776334776334776,
+        "Discriminator": 0.9719626168224299,
+        "Specifier": 0.8825396825396825,
+        "Stem_I": 0.970513900589722,
+        "Stem_II": 0.9389635316698657,
+        "Stem_III": 0.9119170984455959,
+        "Terminator": 0.9405806887238353,
+        "background": 0.9967101024764424
+      },
+      "Acidaminococcales": {
+        "Antiterminator_Tbox_seq": 0.9611231101511879,
+        "Discriminator": 0.9784172661870504,
+        "Specifier": 0.977491961414791,
+        "Stem_I": 0.9896362098138748,
+        "Stem_II": 0.9610042735042735,
+        "Stem_III": 0.7751389590702374,
+        "Terminator": 0.9391675560298826,
+        "background": 0.9968568112307575
+      },
+      "Actinomycetales": {
+        "Antiterminator_Tbox_seq": 0.19043659043659045,
+        "Discriminator": 0.5476190476190477,
+        "Specifier": 0.0,
+        "Stem_I": 0.05843681519357195,
+        "Stem_II": 0.15287072912997535,
+        "Stem_III": 0.25477707006369427,
+        "Terminator": 0.0,
+        "background": 0.9612326611583982
+      },
+      "Anaerolineales": {
+        "Antiterminator_Tbox_seq": 0.9832584728460596,
+        "Discriminator": 0.9820359281437125,
+        "Specifier": 0.9629629629629629,
+        "Stem_I": 0.9795865297100507,
+        "Stem_II": 0.9783958281599205,
+        "Stem_III": 0.8447573175250093,
+        "Terminator": 0.9329923273657289,
+        "background": 0.9960024429515296
+      },
+      "Bifidobacteriales": {
+        "Antiterminator_Tbox_seq": 0.3285573122529644,
+        "Discriminator": 0.6984126984126984,
+        "Specifier": 0.02830188679245283,
+        "Stem_I": 0.09858467545143973,
+        "Stem_II": 0.02573340195573855,
+        "Stem_III": 0.2900385250412768,
+        "Terminator": 0.029339853300733496,
+        "background": 0.9598134399390824
+      },
+      "Candidatus Izemoplasmatales": {
+        "Antiterminator_Tbox_seq": 1.0,
+        "Discriminator": 1.0,
+        "Specifier": 0.9251700680272109,
+        "Stem_I": 0.9959422903516681,
+        "Stem_II": 0.9929802169751116,
+        "Stem_III": 0.9433962264150944,
+        "Terminator": 0.9699115044247788,
+        "background": 0.999126588341363
+      },
+      "Chloroflexales": {
+        "Antiterminator_Tbox_seq": 0.9791304347826087,
+        "Discriminator": 1.0,
+        "Specifier": 1.0,
+        "Stem_I": 0.9774762550881954,
+        "Stem_II": 0.9958847736625515,
+        "Stem_III": 0.8800721370604148,
+        "Terminator": 0.8884955752212389,
+        "background": 0.9963106945805755
+      },
+      "Corynebacteriales": {
+        "Antiterminator_Tbox_seq": 0.2537183864806991,
+        "Discriminator": 0.4958139534883721,
+        "Specifier": 0.08747855917667238,
+        "Stem_I": 0.06563388028233569,
+        "Stem_II": 0.08698973096834423,
+        "Stem_III": 0.32577001062083616,
+        "Terminator": 0.03292847503373819,
+        "background": 0.9666081339010424
+      },
+      "Dehalococcoidales": {
+        "Antiterminator_Tbox_seq": 1.0,
+        "Discriminator": 0.9927007299270073,
+        "Specifier": 1.0,
+        "Stem_I": 0.99569446659225,
+        "Stem_II": 0.9962825278810409,
+        "Stem_III": 0.720616570327553,
+        "Terminator": 0.9778645833333334,
+        "background": 0.9957962429322329
+      },
+      "Deinococcales": {
+        "Antiterminator_Tbox_seq": 0.7404699738903394,
+        "Discriminator": 0.8918918918918919,
+        "Specifier": 0.8270676691729323,
+        "Stem_I": 0.6933830382106244,
+        "Stem_II": 0.6719211822660098,
+        "Stem_III": 0.8574181117533719,
+        "Terminator": 0.7566525260316236,
+        "background": 0.9831431120056723
+      },
+      "Desulfuromonadales": {
+        "Antiterminator_Tbox_seq": 0.9892030848329049,
+        "Discriminator": 1.0,
+        "Specifier": 1.0,
+        "Stem_I": 1.0,
+        "Stem_II": 0.9837767683322518,
+        "Stem_III": 0.8944591029023746,
+        "Terminator": 0.988490182802979,
+        "background": 0.9981954186919696
+      },
+      "Entomoplasmatales": {
+        "Antiterminator_Tbox_seq": 0.8774268328020863,
+        "Discriminator": 0.9494163424124513,
+        "Specifier": 0.6530612244897959,
+        "Stem_I": 0.8483978957436633,
+        "Stem_II": 0.7971014492753623,
+        "Stem_III": 0.8488372093023255,
+        "Terminator": 0.9373134328358209,
+        "background": 0.9922023571015156
+      },
+      "Erysipelotrichales": {
+        "Antiterminator_Tbox_seq": 0.9799982377301965,
+        "Discriminator": 0.9838937552981069,
+        "Specifier": 0.95423855963991,
+        "Stem_I": 0.9823474224767924,
+        "Stem_II": 0.9748355639909683,
+        "Stem_III": 0.8853810686194739,
+        "Terminator": 0.9357362814882124,
+        "background": 0.9973780721720672
+      },
+      "Halanaerobiales": {
+        "Antiterminator_Tbox_seq": 0.9581554227156277,
+        "Discriminator": 0.9655172413793104,
+        "Specifier": 0.9556650246305419,
+        "Stem_I": 0.9661538461538461,
+        "Stem_II": 0.958256880733945,
+        "Stem_III": 0.8961493582263711,
+        "Terminator": 0.9487813493465207,
+        "background": 0.9954589714888932
+      },
+      "Haloplasmatales": {
+        "Antiterminator_Tbox_seq": 0.9636048526863085,
+        "Discriminator": 0.9767441860465116,
+        "Specifier": 0.9774436090225563,
+        "Stem_I": 0.9987831589194451,
+        "Stem_II": 0.9366324683162341,
+        "Stem_III": 0.7205199628597957,
+        "Terminator": 0.9313099041533547,
+        "background": 0.996242697000351
+      },
+      "Ktedonobacterales": {
+        "Antiterminator_Tbox_seq": 0.8635809987819733,
+        "Discriminator": 0.9166666666666666,
+        "Specifier": 0.8888888888888888,
+        "Stem_I": 0.8896637608966376,
+        "Stem_II": 0.8935993349958438,
+        "Stem_III": 0.8449339207048459,
+        "Terminator": 0.7881996974281392,
+        "background": 0.9844621765585195
+      },
+      "Lactobacillales": {
+        "Antiterminator_Tbox_seq": 0.9445268722720791,
+        "Discriminator": 0.9480489706084644,
+        "Specifier": 0.7914755530593778,
+        "Stem_I": 0.9220444029922915,
+        "Stem_II": 0.8841604613149292,
+        "Stem_III": 0.8200867231055131,
+        "Terminator": 0.9170245757393027,
+        "background": 0.9927113638392248
+      },
+      "Micrococcales": {
+        "Antiterminator_Tbox_seq": 0.163048570982352,
+        "Discriminator": 0.44414715719063547,
+        "Specifier": 0.012048192771084338,
+        "Stem_I": 0.010576551012511285,
+        "Stem_II": 0.12461538461538461,
+        "Stem_III": 0.19419324131366017,
+        "Terminator": 0.0,
+        "background": 0.9638243078280722
+      },
+      "Micromonosporales": {
+        "Antiterminator_Tbox_seq": 0.2853787433940106,
+        "Discriminator": 0.5416666666666666,
+        "Specifier": 0.27956989247311825,
+        "Stem_I": 0.2938322938322938,
+        "Stem_II": 0.22874251497005987,
+        "Stem_III": 0.38969201759899436,
+        "Terminator": 0.3924572775486152,
+        "background": 0.9690662759909141
+      },
+      "Mycoplasmatales": {
+        "Antiterminator_Tbox_seq": 0.998298355076574,
+        "Discriminator": 0.9965156794425087,
+        "Specifier": 0.811965811965812,
+        "Stem_I": 0.9744296432399326,
+        "Stem_II": 0.9418710263396912,
+        "Stem_III": 0.9136302294197031,
+        "Terminator": 0.97349709114415,
+        "background": 0.998118192467785
+      },
+      "Natranaerobiales": {
+        "Antiterminator_Tbox_seq": 0.9659763313609467,
+        "Discriminator": 0.9583333333333334,
+        "Specifier": 0.9428571428571428,
+        "Stem_I": 0.9691889442682374,
+        "Stem_II": 0.9264024704065877,
+        "Stem_III": 0.9475494411006019,
+        "Terminator": 0.955249569707401,
+        "background": 0.9960150158821831
+      },
+      "Propionibacteriales": {
+        "Antiterminator_Tbox_seq": 0.1936903888481291,
+        "Discriminator": 0.5843828715365239,
+        "Specifier": 0.03940886699507389,
+        "Stem_I": 0.016418676244227808,
+        "Stem_II": 0.08151549942594719,
+        "Stem_III": 0.18743228602383533,
+        "Terminator": 0.2016,
+        "background": 0.9680337917066411
+      },
+      "Pseudonocardiales": {
+        "Antiterminator_Tbox_seq": 0.12420091324200913,
+        "Discriminator": 0.3798449612403101,
+        "Specifier": 0.08,
+        "Stem_I": 0.1177899210686096,
+        "Stem_II": 0.07129595246936501,
+        "Stem_III": 0.19768339768339768,
+        "Terminator": 0.45365853658536587,
+        "background": 0.9665020758322529
+      },
+      "Selenomonadales": {
+        "Antiterminator_Tbox_seq": 0.9442481953616956,
+        "Discriminator": 0.9470304975922953,
+        "Specifier": 0.9814951887490747,
+        "Stem_I": 0.991788800305533,
+        "Stem_II": 0.9744916070794665,
+        "Stem_III": 0.7775156426300134,
+        "Terminator": 0.9133496874258131,
+        "background": 0.9959473466107316
+      },
+      "Streptomycetales": {
+        "Antiterminator_Tbox_seq": 0.6780651760923572,
+        "Discriminator": 0.9136786188579017,
+        "Specifier": 0.8384615384615385,
+        "Stem_I": 0.4725557461406518,
+        "Stem_II": 0.47749707210975406,
+        "Stem_III": 0.7574240907574241,
+        "Terminator": 0.06927944931719773,
+        "background": 0.9708396224907119
+      },
+      "Streptosporangiales": {
+        "Antiterminator_Tbox_seq": 0.7358490566037735,
+        "Discriminator": 0.8804347826086957,
+        "Specifier": 0.7380952380952381,
+        "Stem_I": 0.45327754532775455,
+        "Stem_II": 0.3300813008130081,
+        "Stem_III": 0.5572687224669604,
+        "Terminator": 0.41788958770090845,
+        "background": 0.9724334165911857
+      },
+      "Synergistales": {
+        "Antiterminator_Tbox_seq": 0.9968808484092326,
+        "Discriminator": 1.0,
+        "Specifier": 0.9210526315789473,
+        "Stem_I": 0.9595676541232986,
+        "Stem_II": 0.9496659242761692,
+        "Stem_III": 0.9575871819038643,
+        "Terminator": 0.8644859813084113,
+        "background": 0.9956045920232689
+      },
+      "Thermoanaerobacterales": {
+        "Antiterminator_Tbox_seq": 0.964997964997965,
+        "Discriminator": 0.9666975023126735,
+        "Specifier": 0.9775561097256857,
+        "Stem_I": 0.9819385304623333,
+        "Stem_II": 0.9629480060575467,
+        "Stem_III": 0.7979805370600717,
+        "Terminator": 0.8958076895228441,
+        "background": 0.9959664492078285
+      },
+      "Tissierellales": {
+        "Antiterminator_Tbox_seq": 0.9679066696015849,
+        "Discriminator": 0.9693396226415094,
+        "Specifier": 0.9453125,
+        "Stem_I": 0.976608639587363,
+        "Stem_II": 0.9516376207277523,
+        "Stem_III": 0.8090339892665475,
+        "Terminator": 0.9305051388585174,
+        "background": 0.9956893154702537
+      },
+      "Veillonellales": {
+        "Antiterminator_Tbox_seq": 0.9300666770041867,
+        "Discriminator": 0.9211356466876972,
+        "Specifier": 0.982274741506647,
+        "Stem_I": 0.9903762871715908,
+        "Stem_II": 0.9703307392996109,
+        "Stem_III": 0.7423537563100069,
+        "Terminator": 0.8968824940047961,
+        "background": 0.9953798311861395
+      }
+    },
+    "per_order_min_core_f1": {
+      "Acholeplasmatales": 0.8825396825396825,
+      "Acidaminococcales": 0.9611231101511879,
+      "Actinomycetales": 0.0,
+      "Anaerolineales": 0.9629629629629629,
+      "Bifidobacteriales": 0.02830188679245283,
+      "Candidatus Izemoplasmatales": 0.9251700680272109,
+      "Chloroflexales": 0.9774762550881954,
+      "Corynebacteriales": 0.06563388028233569,
+      "Dehalococcoidales": 0.99569446659225,
+      "Deinococcales": 0.6933830382106244,
+      "Desulfuromonadales": 0.9892030848329049,
+      "Entomoplasmatales": 0.6530612244897959,
+      "Erysipelotrichales": 0.95423855963991,
+      "Halanaerobiales": 0.9556650246305419,
+      "Haloplasmatales": 0.9636048526863085,
+      "Ktedonobacterales": 0.8635809987819733,
+      "Lactobacillales": 0.7914755530593778,
+      "Micrococcales": 0.010576551012511285,
+      "Micromonosporales": 0.27956989247311825,
+      "Mycoplasmatales": 0.811965811965812,
+      "Natranaerobiales": 0.9428571428571428,
+      "Propionibacteriales": 0.016418676244227808,
+      "Pseudonocardiales": 0.08,
+      "Selenomonadales": 0.9442481953616956,
+      "Streptomycetales": 0.4725557461406518,
+      "Streptosporangiales": 0.45327754532775455,
+      "Synergistales": 0.9210526315789473,
+      "Thermoanaerobacterales": 0.964997964997965,
+      "Tissierellales": 0.9453125,
+      "Veillonellales": 0.9300666770041867
+    },
+    "pooled_micro_boundary_iou": {
+      "Antiterminator_Tbox_seq": 0.767580429862065,
+      "Discriminator": 0.8457854146935462,
+      "Specifier": 0.6553389859135899,
+      "Stem_I": 0.8453685326295637,
+      "Stem_II": 0.6911085383165391,
+      "Stem_III": 0.632019955682612,
+      "Terminator": 0.7882392797619975,
+      "background": 0.9799969824103378
+    },
+    "pooled_micro_per_nt_f1": {
+      "Antiterminator_Tbox_seq": 0.8685097627178006,
+      "Discriminator": 0.9164504258843882,
+      "Specifier": 0.7917882578617635,
+      "Stem_I": 0.9162056442188847,
+      "Stem_II": 0.8173437986476282,
+      "Stem_III": 0.7745247887220376,
+      "Terminator": 0.8815814401156726,
+      "background": 0.989897450467166
+    },
+    "scope": {
+      "block_unit": "resolved_order",
+      "excluded_by_reason": {
+        "context_shorter_than_window": 20,
+        "not_designated_loo_holdout": 14894
+      },
+      "fold_scope": "loo_holdout",
+      "full_fold": true,
+      "gated": false,
+      "klass_counts": {
+        "I": 7484,
+        "II": 1137
+      },
+      "leakage": {
+        "n_nested_train": 0,
+        "n_not_designated_loo_holdout": 0
+      },
+      "min_records_per_order": 1,
+      "n_blocks": 30,
+      "n_context_records": 23535,
+      "n_excluded": 14914,
+      "n_records": 8621,
+      "n_records_scored": 8621,
+      "order_counts": {
+        "Acholeplasmatales": 52,
+        "Acidaminococcales": 52,
+        "Actinomycetales": 42,
+        "Anaerolineales": 41,
+        "Bifidobacteriales": 69,
+        "Candidatus Izemoplasmatales": 24,
+        "Chloroflexales": 20,
+        "Corynebacteriales": 370,
+        "Dehalococcoidales": 34,
+        "Deinococcales": 28,
+        "Desulfuromonadales": 31,
+        "Entomoplasmatales": 68,
+        "Erysipelotrichales": 444,
+        "Halanaerobiales": 99,
+        "Haloplasmatales": 22,
+        "Ktedonobacterales": 22,
+        "Lactobacillales": 5305,
+        "Micrococcales": 275,
+        "Micromonosporales": 65,
+        "Mycoplasmatales": 36,
+        "Natranaerobiales": 23,
+        "Propionibacteriales": 66,
+        "Pseudonocardiales": 48,
+        "Selenomonadales": 224,
+        "Streptomycetales": 197,
+        "Streptosporangiales": 24,
+        "Synergistales": 27,
+        "Thermoanaerobacterales": 270,
+        "Tissierellales": 420,
+        "Veillonellales": 223
+      },
+      "phylum_counts": {
+        "Actinobacteria": 1156,
+        "Chloroflexi": 117,
+        "Deinococcus-Thermus": 28,
+        "Firmicutes": 7060,
+        "Proteobacteria": 31,
+        "Synergistetes": 27,
+        "Tenericutes": 202
+      },
+      "schema_version": "1.0",
+      "scheme": "PRD \u00a79.2 scheme B \u2014 leave-one-order-out; splits.py's designated holdout indicator. REPORTED non-gated at P2-14; gated at GATE-1 / P4 (ADR-0005 D5)",
+      "step": "P2-14",
+      "synthetic_flank": false,
+      "window_nt": 1024
+    }
+  },
+  "operator": "log_mean_exp_of_per_window_log_softmax_then_argmax",
+  "posterior": "uncalibrated",
+  "reported_non_gated": {
+    "auprc_by_class": {
+      "Antiterminator_Tbox_seq": 0.9886865519174324,
+      "Discriminator": 0.9924229811864459,
+      "Specifier": 0.979216779835409,
+      "Stem_I": 0.9941654833320868,
+      "Stem_II": 0.9798417468678693,
+      "Stem_III": 0.9519978753330068,
+      "Terminator": 0.9821607507424909,
+      "background": 0.9999437378757317
+    },
+    "boundary_iou_by_element": {
+      "Antiterminator_Tbox_seq": 0.9411967977884006,
+      "Discriminator": 0.9492076391710687,
+      "Specifier": 0.9079883996836278,
+      "Stem_I": 0.9509384578901605,
+      "Stem_II": 0.9126840997896002,
+      "Stem_III": 0.7857271310394437,
+      "Terminator": 0.8845738942826321,
+      "background": 0.9931058888484264
+    },
+    "macro_f1": 0.9549909983229299,
+    "micro_f1": 0.9928776359853091,
+    "non_core_classes": {
+      "Discriminator": {
+        "boundary_iou": 0.9492076391710687,
+        "per_nt_f1": 0.9739420471127789
+      },
+      "Stem_II": {
+        "boundary_iou": 0.9126840997896002,
+        "per_nt_f1": 0.9543490217647521
+      },
+      "Stem_III": {
+        "boundary_iou": 0.7857271310394437,
+        "per_nt_f1": 0.8800080565299854
+      },
+      "Terminator": {
+        "boundary_iou": 0.8845738942826321,
+        "per_nt_f1": 0.9387521465369204
+      }
+    },
+    "pdb_label_noise_ceiling": {
+      "ceiling_c": null,
+      "core_elements": [
+        "Stem_I",
+        "Specifier",
+        "Antiterminator_Tbox_seq"
+      ],
+      "delta_governance": "C is NOT estimable from these depositions: Antiterminator_Tbox_seq, Specifier are resolved to a residue extent in 0 of the 9, so no cross-source per-nt F1 over the gated elements exists. D6's recalibration path (floor := a documented function of C) is therefore CLOSED and the floor stays 0.8 \u2014 the N<=9 crystal ceiling must not one-directionally lower the bar.",
+      "estimable": false,
+      "floor_unchanged": 0.8,
+      "gated": false,
+      "n_depositions": 9,
+      "resolved_depositions_by_class": {
+        "Antiterminator_Tbox_seq": 0,
+        "Discriminator": 0,
+        "Specifier": 0,
+        "Stem_I": 5,
+        "Stem_II": 1,
+        "Terminator": 0
+      },
+      "unresolved_core_elements": [
+        "Antiterminator_Tbox_seq",
+        "Specifier"
+      ]
+    },
+    "per_nt_f1_by_class": {
+      "Antiterminator_Tbox_seq": 0.9697077584928052,
+      "Discriminator": 0.9739420471127789,
+      "Specifier": 0.9517755976233245,
+      "Stem_I": 0.9748523373910538,
+      "Stem_II": 0.9543490217647521,
+      "Stem_III": 0.8800080565299854,
+      "Terminator": 0.9387521465369204,
+      "background": 0.9965410211318192
+    },
+    "specifier_exact_codon": {
+      "codon_nt": 3,
+      "exact_rate": 0.8978540772532189,
+      "excluded_by_reason": {
+        "truth_has_no_specifier": 26,
+        "truth_specifier_len_1": 1,
+        "truth_specifier_len_2": 6,
+        "truth_specifier_len_8": 3
+      },
+      "gated": false,
+      "n_exact": 1046,
+      "n_overlapping": 1150,
+      "n_records": 1201,
+      "n_right_length": 1070,
+      "n_scorable": 1165,
+      "overlapping_rate": 0.9871244635193133,
+      "predicted_run_count_hist": {
+        "0": 4,
+        "1": 1133,
+        "2": 25,
+        "3": 3
+      },
+      "right_length_rate": 0.9184549356223176
+    }
+  },
+  "schema_version": "1",
+  "scope": {
+    "carve": {
+      "cluster_digest": "f31cf32a1464eefefcea446edef23f04b4bb12e3fd3a8d9c7c8ea208742483a2",
+      "fold_random_value": "test",
+      "n_gate4_clusters": 1031,
+      "rule": "lookup, not a draw: whole clusters containing >=1 nested_train record with fold_random == 'test'"
+    },
+    "excluded_by_reason": {
+      "context_shorter_than_window": 3,
+      "gate4_twin_train_cluster": 7099,
+      "not_in_training_fold": 15232
+    },
+    "fold_scope": "gate4_eval",
+    "full_fold": true,
+    "graded_checkpoint_requirement": "gate4_twin_train \u2014 a checkpoint trained with exclude_gate4_eval=true. The shipped P2-10d'-b production checkpoint trained on this fold and is NOT gradeable on it.",
+    "klass_counts": {
+      "I": 1199,
+      "II": 2
+    },
+    "leakage": {
+      "n_designated_loo_holdout": 0,
+      "n_not_nested_train": 0,
+      "n_twin_train_blocks": 3744,
+      "n_twin_train_records": 7099,
+      "shared_cluster_ids_with_twin_train": 0,
+      "shared_record_ids_with_twin_train": 0
+    },
+    "max_records": null,
+    "n_blocks": 1029,
+    "n_context_records": 23535,
+    "n_excluded": 22334,
+    "n_orders": 15,
+    "n_records": 1201,
+    "order_counts": {
+      "Ardenticatenales": 2,
+      "Bacillales": 714,
+      "Caldilineales": 1,
+      "Candidatus Thermobaculales": 1,
+      "Chthonomonadales": 1,
+      "Clostridiales": 469,
+      "Dictyoglomales": 4,
+      "Diptera": 1,
+      "Herpetosiphonales": 1,
+      "Hymenoptera": 1,
+      "Limnochordales": 2,
+      "Sphaerobacterales": 1,
+      "Spirochaetales": 1,
+      "Thermales": 1,
+      "Thermomicrobiales": 1
+    },
+    "phylum_counts": {
+      "Armatimonadetes": 1,
+      "Arthropoda": 2,
+      "Chloroflexi": 7,
+      "Deinococcus-Thermus": 1,
+      "Dictyoglomi": 4,
+      "Firmicutes": 1185,
+      "Spirochaetes": 1
+    },
+    "schema_version": "1.0",
+    "scheme": "ADR-0004 A6 \u2014 PRD \u00a79.2 scheme A (random, genus-stratified, whole-cluster) INTERSECTED with the D5 nested_train fold; the in-distribution homology-clustered segmentation-quality reference D6 gates on",
+    "step": "P2-14",
+    "synthetic_flank": false,
+    "window_nt": 1024
+  },
+  "step": "P2-14",
+  "twin": {
+    "checkpoint_identity_verified": true,
+    "checkpoint_sha256": "0140a8a32f82f49fec9ddf047de6590a130cd51cd5feab01086ed89032944a29",
+    "exclude_gate4_eval_config": true,
+    "exclude_gate4_eval_measured": true,
+    "fold_scope": "gate4_twin_train",
+    "label_source": "production",
+    "n_gate4_eval_clusters": 1031,
+    "n_gate4_eval_excluded": 1204,
+    "n_training_records": 7099,
+    "provenance_output_sha256": "0140a8a32f82f49fec9ddf047de6590a130cd51cd5feab01086ed89032944a29"
+  }
+}

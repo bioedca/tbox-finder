@@ -302,6 +302,67 @@ def test_label_source_is_a_config_key_and_a_dataclass_field():
     assert annotated["label_source"] == "str", annotated["label_source"]
 
 
+def test_gate4_twin_block_carries_exclude_gate4_eval():
+    """P2-14: the GATE-4 eval twin's sbatch must actually pass ``exclude_gate4_eval=true``.
+
+    That override IS the twin. Dropped, the job trains the full D5 fold under the twin's
+    name and ``eval/gate4.py`` grades a checkpoint on its own training data — a number
+    indistinguishable from a real one (CLAUDE.md §10.3). The sbatch's own publish guard
+    re-derives the property from the run's report, but that guard costs a queue wait plus
+    ~16 GPU-h to fire; this costs milliseconds.
+    """
+    twin = [b for b in GATED if b.path.name == "train_gate4_twin.sbatch"]
+    assert twin, "slurm/p2/train_gate4_twin.sbatch has no gated launch block"
+    tokens = [t for b in twin for t in b.overrides]
+    assert "exclude_gate4_eval=true" in tokens, tokens
+    # The twin must differ from production in exactly this one thing: it holds
+    # `exclude_selection_val=false` (production's setting), so its grade stays comparable.
+    assert "exclude_selection_val=false" in tokens, tokens
+    assert "eval_val=false" in tokens, tokens
+
+
+def test_exclude_gate4_eval_is_a_config_key_and_a_dataclass_field():
+    """P2-14's knob, both halves of the job-669 contract (ADR-0004 A6).
+
+    Same two-sided contract as ``exclude_selection_val``: a missing config key is a
+    struct-mode death on the cluster after the queue wait, and a missing dataclass field is
+    the P2-11 footgun — the override composes, ``_cfg_from_mapping`` drops it, and the run
+    trains the graded fold while calling itself a twin.
+    """
+    GlobalHydra.instance().clear()
+    try:
+        with initialize_config_dir(config_dir=str(CONF), version_base=None):
+            cfg = compose(config_name="train/stage1", overrides=[])
+            assert "exclude_gate4_eval" in cfg, list(cfg.keys())
+            # Default must be OFF: every run except the twin trains the graded fold, and
+            # the shipped production checkpoint is one of them.
+            assert cfg.exclude_gate4_eval is False
+            twin = compose(config_name="train/stage1", overrides=["exclude_gate4_eval=true"])
+            assert twin.exclude_gate4_eval is True
+    finally:
+        GlobalHydra.instance().clear()
+
+    tree = ast.parse((SRC / "tbox_finder" / "train" / "train_stage1.py").read_text())
+    cls = next(
+        (
+            n
+            for n in ast.walk(tree)
+            if isinstance(n, ast.ClassDef) and n.name == "Stage1TrainConfig"
+        ),
+        None,
+    )
+    assert cls is not None, "Stage1TrainConfig class not found in train_stage1.py"
+    annotated = {
+        n.target.id: ast.unparse(n.annotation)
+        for n in cls.body
+        if isinstance(n, ast.AnnAssign) and isinstance(n.target, ast.Name)
+    }
+    assert (
+        "exclude_gate4_eval" in annotated
+    ), f"Stage1TrainConfig lost exclude_gate4_eval; has {sorted(annotated)}"
+    assert annotated["exclude_gate4_eval"] == "bool", annotated["exclude_gate4_eval"]
+
+
 def test_backbone_is_a_config_key_and_a_dataclass_field():
     """P2-12's knob, both halves of the job-669 contract — and a third half of its own.
 
