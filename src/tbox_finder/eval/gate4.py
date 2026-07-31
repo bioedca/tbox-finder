@@ -705,6 +705,28 @@ def gate4_problems(report: Mapping[str, Any]) -> list[str]:
 
         problems.extend(f"scope.{p}" for p in gate4_eval_problems(scope))
 
+        # ── Completeness: a truncated run must never certify ──
+        # `--max-records` / `--loo-max-records` / `--no-loo` are cost knobs, and every
+        # clause above survives truncation unharmed: a 8-record prefix of a disjoint
+        # population is still disjoint, still `gate4_eval`, still >= 2 blocks. So the
+        # cheap smoke would assemble a report whose `passes` is computed over a
+        # population that is not D6's, write it to the phase-exit path, and read there
+        # exactly like a full grade (§10.3). These clauses are what make `build_report`'s
+        # hardcoded `is_science: True` honest: an incomplete run raises in
+        # `compute_gate4` and no file is written at all.
+        if scope.get("full_fold") is not True:
+            problems.append(
+                f"scope.full_fold = {scope.get('full_fold')!r}, must be True — the minimum "
+                "over a truncated population is not the ADR-0004 D6 statistic, and a report "
+                "that certified it would sit at the phase-exit path indistinguishable from a "
+                "full grade"
+            )
+        if scope.get("max_records") is not None:
+            problems.append(
+                f"scope.max_records = {scope.get('max_records')!r}, must be None — a "
+                "record-capped run is a mechanics smoke, never a graded result"
+            )
+
     # ── The gated statistic, RE-DERIVED ──
     gate = report.get("gate")
     if not isinstance(gate, Mapping) or not gate:
@@ -811,12 +833,28 @@ def gate4_problems(report: Mapping[str, Any]) -> list[str]:
                     "the gate's own elements are not 'excluded from the gate' (D6)"
                 )
 
+    # The absence guard matters more than the value guard: `--no-loo` sets this block to
+    # None, and a clause written as `isinstance(loo, Mapping) and loo and ...` is vacuously
+    # TRUE exactly when the evidence D6 requires alongside the gate failed to materialise
+    # ([[clauses-must-guard-emptiness]]).
     loo = report.get("loo_holdout")
-    if isinstance(loo, Mapping) and loo and loo.get("gated") is not False:
+    if not isinstance(loo, Mapping) or not loo:
         problems.append(
-            "loo_holdout.gated must be False — the leave-one-order-out read is REPORTED at "
-            "P2-14 and gated at GATE-1 / P4 (ADR-0004 D6; PRD §2.3)"
+            "loo_holdout: block missing — D6 requires the leave-one-order-out read REPORTED "
+            "alongside the gate, so a --no-loo run cannot certify"
         )
+    else:
+        if loo.get("gated") is not False:
+            problems.append(
+                "loo_holdout.gated must be False — the leave-one-order-out read is REPORTED at "
+                "P2-14 and gated at GATE-1 / P4 (ADR-0004 D6; PRD §2.3)"
+            )
+        loo_scope = loo.get("scope")
+        if not isinstance(loo_scope, Mapping) or loo_scope.get("full_fold") is not True:
+            problems.append(
+                "loo_holdout.scope.full_fold is not True — a --loo-max-records run reports a "
+                "macro over a truncated order set, which is not the ADR-0005 D5 read"
+            )
     return problems
 
 

@@ -468,7 +468,9 @@ def _good_report() -> dict:
             "label_source": "production",
             "checkpoint_identity_verified": True,
         },
-        "scope": _good_gate4_scope(),
+        # `full_fold` / `max_records` are added by `compute_gate4`, not by the loader, so
+        # they are absent from `_good_gate4_scope()` and present here — the real shape.
+        "scope": {**_good_gate4_scope(), "full_fold": True, "max_records": None},
         "gate": {
             "per_element_f1": {
                 "Stem_I": 0.93,
@@ -489,7 +491,11 @@ def _good_report() -> dict:
             "specifier_exact_codon": {"n_scorable": 1190, "exact_rate": 0.8},
             "pdb_label_noise_ceiling": {"estimable": False, "ceiling_c": None},
         },
-        "loo_holdout": {"gated": False, "macro_per_element_f1": {}},
+        "loo_holdout": {
+            "gated": False,
+            "macro_per_element_f1": {},
+            "scope": {"full_fold": True},
+        },
     }
 
 
@@ -497,6 +503,27 @@ def test_gate4_problems_accepts_a_clean_report():
     from tbox_finder.eval.gate4 import gate4_problems
 
     assert gate4_problems(_good_report()) == []
+
+
+def test_the_committed_gate4_report_still_re_derives_clean():
+    """The shipped P2-14 verdict must survive every clause added after it was measured.
+
+    Adding a clause is how a previously-valid committed artifact silently becomes
+    uncertifiable ([[new-gate-clause-invalidates-old-reports]]). This runs the CURRENT
+    validator over the REAL committed report, so a future clause that the measured run
+    cannot satisfy goes red here rather than being discovered at the phase-exit gate —
+    and it cannot be fixed by re-writing the report, because re-running is the only
+    honest way to change a measurement.
+    """
+    from tbox_finder.eval.gate4 import gate4_problems
+
+    path = Path(__file__).resolve().parents[2] / "reports" / "p2" / "gate4.json"
+    assert path.exists(), f"{path} is the P2-14 deliverable and must stay committed"
+    report = json.loads(path.read_text())
+    assert gate4_problems(report) == []
+    # The verdict itself, pinned: a clause change must not quietly flip the gate.
+    assert report["gate"]["passes"] is True
+    assert report["scope"]["full_fold"] is True and report["scope"]["max_records"] is None
 
 
 @pytest.mark.parametrize(
@@ -557,6 +584,20 @@ def test_gate4_problems_accepts_a_clean_report():
         ),
         # ── the LOO read must stay non-gated at P2 ──
         (lambda r: r["loo_holdout"].__setitem__("gated", True), "REPORTED at"),
+        # ── completeness: a cost knob must never produce a certified grade ──
+        # Every other clause survives truncation unharmed (a prefix of a disjoint
+        # population is still disjoint), so absent these the cheap smoke writes the
+        # phase-exit deliverable and it reads exactly like a full grade. CodeRabbit, r5.
+        (lambda r: r["scope"].__setitem__("full_fold", False), "scope.full_fold"),
+        (lambda r: r["scope"].pop("full_fold"), "scope.full_fold"),
+        (lambda r: r["scope"].__setitem__("max_records", 8), "max_records"),
+        # `--no-loo` sets the block to None: the clause must fire on ABSENCE, which is
+        # exactly where a `isinstance(x, Mapping) and x and ...` guard goes vacuous.
+        (lambda r: r.__setitem__("loo_holdout", None), "loo_holdout: block missing"),
+        (lambda r: r.pop("loo_holdout"), "loo_holdout: block missing"),
+        # `--loo-max-records` truncates the ORDER set the D5 macro is taken over.
+        (lambda r: r["loo_holdout"]["scope"].__setitem__("full_fold", False), "truncated order"),
+        (lambda r: r["loo_holdout"].pop("scope"), "truncated order"),
     ],
 )
 def test_gate4_problems_bites_on_each_violation(mutate, expect):

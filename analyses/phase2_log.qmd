@@ -2264,3 +2264,47 @@ estimable. **Still open:** the staged split table's sha256 is verified by the ru
 its own log, but is still not a *field* in the training report — back-filling it into a
 completed run's report would forge a measurement, so that follow-up stays open for the next
 training leg. **Commit.** this stanza's commit on `p2-14-gate4`.
+
+## Step P2-14 (CodeRabbit round 5) — 2026-07-31: the cost knobs could certify, and the truncated number was the flattering one
+
+**Inputs.** `coderabbit review --agent -t committed --base main` over `3c6162c`, the RESULT
+commit. **Process.** One finding, major, and real. The knobs `--max-records`,
+`--loo-max-records` and `--no-loo` exist to make a cheap run possible, but nothing stopped a
+cheap run from *certifying*: every clause in `gate4_problems` survives truncation unharmed,
+because an 8-record prefix of a disjoint population is still disjoint, still `gate4_eval`, and
+still has ≥ 2 blocks. The LOO clause was worse than merely silent — written
+`isinstance(loo, Mapping) and loo and loo.get("gated") is not False`, it went **vacuous exactly
+when `--no-loo` removed the evidence** D6 requires alongside the gate, the
+[[clauses-must-guard-emptiness]] shape this project has now hit four times. I confirmed the
+defect by running the **committed pre-fix bytes** rather than reasoning about them
+([[verify-the-line-you-ship]]): `--max-records 8 --no-loo` wrote `is_science: true`,
+`gated: true`, `passes: true`, `min_f1 = 0.9864` over **eight** records with
+`loo_holdout: null`, to the default `--out` — which is the phase-exit deliverable path. Note
+the direction: the truncated number is **higher** than the real 0.9518, so the failure mode
+flatters.
+
+**Outputs.** Three clauses in `gate4_problems`, total and evidence-guarded like the rest:
+`scope.full_fold` must be True, `scope.max_records` must be None, and `loo_holdout` must be
+**present** — firing on absence, not only on a wrong value — with `loo_holdout.scope.full_fold`
+True. No new refusal machinery was needed: `compute_gate4` already raises on any problem
+*before* writing, so an incomplete run now emits no file at all, and that is precisely what
+makes `build_report`'s hardcoded `is_science: True` honest rather than decorative. Post-fix the
+same command exits 1 naming all three problems and writes nothing; `reports/p2/gate4.json` is
+byte-untouched.
+
+**Validation.** 98/98 standalone (was 90) — the local pytest env is py3.10 and dies importing
+`datetime.UTC`, so the suite runs through a stub-`pytest` harness in the py3.12 env
+([[no-local-pytest-env-validate-standalone]]). Seven new cases: five sabotages of the report
+and, deliberately, **a regression test that runs the CURRENT validator over the REAL committed
+report** — adding a clause is exactly how a previously-valid measured artifact silently becomes
+uncertifiable ([[new-gate-clause-invalidates-old-reports]]), and that cannot be fixed by
+editing the report, because re-running is the only honest way to change a measurement. **Seven
+source-sabotage bites, each RED by name:** disabling the two scope clauses reds cases 27/28/29;
+restoring the *exact* pre-fix LOO block reds 30/31/32/33. My first attempt at that second
+sabotage left a malformed `else:` and killed the cases on an `AttributeError` instead of the
+named assertion — a bite for the wrong reason is not a bite
+([[sabotage-attribution-names-the-test]]), so it was redone as a bounded block swap with an
+`ast.parse` check. Both restores sha256-verified to `bb9c1cb7…`, sabotage runs under
+`python -B` ([[sabotage-restores-masked-by-pycache]]). `ruff@0.15.15` + `black@25.11.0` clean.
+**Decisions.** None pinned; no threshold or gate semantics moved. **Commit.** this stanza's
+commit on `p2-14-gate4`.
