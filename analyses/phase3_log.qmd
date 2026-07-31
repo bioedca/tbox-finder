@@ -1,0 +1,182 @@
+---
+title: "tbox-finder — Phase 3 (Stage-2 + integration) dev-log"
+author: "bioedca"
+format:
+  typst:
+    toc: true
+    number-sections: true
+---
+
+<!-- Rendered with the Typst engine (quarto >=1.9, `format: typst`): the
+     laptop/CI toolchain ships no LaTeX, and Typst produces the PDF natively.
+     Renders via `conda run -n tbox-viz quarto render analyses/phase3_log.qmd`
+     (the COMMITTED env name, `envs/viz.yml` -> `name: tbox-viz`; a laptop may
+     have it under a different directory name, but a fresh clone will not).
+     NOTE (P1 exit-gate lesson): a bare `at`-prefixed token (a length like
+     "at-300", a revision like "at-2c2c5c14") is parsed by pandoc as a citation
+     key against a doc with no bibliography and kills the render — escape or
+     rephrase any such token rather than writing it bare.
+     NOTE (P2 exit-gate lesson): every stanza's `Commit.` line must resolve from
+     `main`. A stanza written on a feature branch cannot know its squash SHA, so
+     it says so explicitly and the P3-exit gate derives each mapping with
+     `git show <sha> -- analyses/phase3_log.qmd | grep '^+## Step'` — never from
+     notes, and never a phrasing that reads like a record while naming a commit
+     the squash discarded. -->
+
+# Phase 3 — Stage-2 + integration
+
+Per-step development log (CLAUDE.md §2.4). One stanza is appended after every
+step's commit; this file renders to `docs/dev-log/phase3_<YYYY-MM-DD>.pdf` at
+the phase-exit gate.
+
+Phase-3 goal (imp.md): the RiNALMo Stage-2 re-ranker plus aux heads, the
+end-to-end two-stage system, and calibration — with the phase's gated statistic
+being the **GATE-2 first half**, in-distribution ECE ≤ 0.05 on the
+**pre-prior-shift** temperature-scaled posterior (PRD §12; ADR-0005). Phase 2
+shipped a segmenter and one passing method gate (GATE-4); it shipped no
+calibrated output. Nothing in this phase may be quoted as a discovery result.
+
+## Step P3-01 — 2026-07-31: assemble the Stage-2 supervised dataset + RNA tokenizer adapter
+
+**Inputs.** `data/processed/master_clean_v0.parquet` (DVC, 23,535 records),
+`data/processed/labels/labels_v0.parquet` (DVC; the P0-20 per-nt `label_string`
+plus the §8 aux labels), the git-LFS `data/processed/splits/split_assignments.parquet`
+(ADR-0004 D7, 25,913 rows) and `data/processed/negatives/decoys_v0.parquet`
+(DVC, 7,008 §9.1 static decoys). LOCAL, ~8 s, no GPU and no network.
+
+**Process.** `src/tbox_finder/stage2/dataset.py` (rule
+`workflow/rules/stage2.smk::stage2_dataset`) emits one row per RNA sequence
+Stage 2 will ever score — every positive plus every unmasked decoy — carrying
+the binary label, the per-nucleotide boundary target, the §8 aux targets, a
+dot-bracket pairing target for the P3-05 structure-consistency loss, and the
+ADR-0004 fold/parentage columns. Three choices are load-bearing.
+
+*(i) Sequence-only, flank 0 nt for both classes.* PRD §6 hands Stage 2 a
+"locus ± flank", but the named P3-01 inputs supply real genomic flank for
+positives only (P2-00's `context_v0`); the four decoy pools are generated,
+Rfam-sourced or shuffled and have none. A positives-only flank makes "is
+embedded in real genomic context" a perfectly separable shortcut for the binary
+head — the §5 circularity failure the project exists to avoid — so `flank_nt` is
+a pinned parameter, recorded per row and in provenance, and v0 pins it to **0
+for both classes**; a non-zero value is refused by the builder until a matching
+flank exists for every pool. Structure appears **only** as a target column, never
+an input channel (PRD §6).
+
+*(ii) Folds inherited, never invented.* Each row records `fold_basis` ∈
+{`corpus_record`, `parent_record`, `decoy_pool_random`}. A positive copies every
+scheme column from its own split-table row. A dinucleotide-shuffled decoy
+**inherits its parent's fold across every scheme** — ADR-0004 D7's
+variant→parent→fold rule applied to the negative side — and is refused
+fail-closed if its parent is absent. The 5,007 decoys with no corpus parent
+(generated GC-matched background, Rfam structured RNAs, tboxevo leader decoys)
+belong to no cluster and no clade, so no leave-clade-out holdout unit can contain
+them; they are handled the way **ADR-0004 D4** handles taxonomy-incomplete
+positives — kept **only in the random split**, every clade-scheme column left
+null, `clade_holdout_eligible` False — with a deterministic keyed-hash
+`fold_random` (seed 20260731, order-independent). `nested_train` is left **null**
+for them rather than set True: whether a parentless decoy may enter the nested
+training fold is a P3-03 sampling policy, and a `True` here would be a policy
+decision disguised as a data field. **This convention is a reading of ADR-0004
+D4/D7, not a pinned decision** — flagged for sign-off at the P3-exit gate, since
+P3-02's calibration carve inherits it.
+
+*(iii) The pairing target is projected and measured, not assumed.* TBDB's
+`Structure` (WUSS) is aligned to `Sequence`, the gapped cmalign row, **not** to
+the genomic `FASTA_sequence` locus (median 238 vs 281 nt; co-extensive with each
+other on 99.996 % of records but with the locus on 0.5 %). The builder validates
+the alignment row, strips gaps, and requires the gap-stripped sequence to occur
+**exactly once** in the locus before mapping the pairs through that offset.
+Measured over the full corpus: **18,269 / 23,535 (77.62 %)** anchor, with **zero**
+no-hit and **zero** multi-hit rows — every clean-alphabet row anchors uniquely,
+which is a strong internal consistency check on the projection rather than a
+tuned threshold. The other 5,266 render unaligned inserts as `~` / `[n]` / `*`
+with the nucleotides **elided** (a lossy view: after sanitising the junk glyphs,
+4,590 of 5,259 still have no locus match at all — measured, not assumed), so they
+carry `pairing_status = "unanchorable_alignment"` and a **null** target. No
+approximate or re-folded structure is substituted (CLAUDE.md §10.3).
+
+A first implementation *rejected* any record whose consensus structure paired
+into a column this member had deleted; that discarded 8,634 further records.
+Measurement showed the rule was wrong: `Structure` is a consensus line, and only
+**20,854 of 850,029 pairs (2.5 %)** have a deleted partner (per-row median
+fraction 0.000, max 0.426). Such a pair is not formed in this sequence, so it is
+now **dropped and counted** (`n_pairs_dropped_gap`), never re-based onto a
+neighbouring nucleotide and never grounds for discarding the row's other 97.5 %
+of real pairs. Dropping pairs from a nested set leaves it nested.
+
+**The tokenizer adapter** (`src/tbox_finder/stage2/tokenizer.py`) pins RiNALMo's
+28-token alphabet in **pure Python** so the build runs in `envs/data.yml`
+alongside every other data-layer rule: `multimolecule` exists only in
+`envs/ml-rna.yml` (the ADR-0002 A4 env split) and pulls `deepspeed` at import.
+The context bound is **derived, not copied** — `RiNALMoConfig.max_position_embeddings`
+is 1024 at the pinned revision and `RnaTokenizer` wraps the sequence in
+`<cls>`/`<eos>`, giving PRD §10.2's 1022. Behaviour was read off the live
+tokenizer, not assumed: input is upper-cased, `T`→`U`, the 15 IUPAC codes plus
+`- . * | ? X I N` are in-vocabulary, and anything else becomes `<unk>` rather
+than being dropped, so token length always equals sequence length and the
+per-nucleotide target stays index-aligned.
+
+**Outputs.** `data/processed/stage2_dataset.parquet` (DVC, **30,542 rows** ×
+34 columns = 23,535 positives + 7,007 decoys; 1 union-prior-masked decoy
+excluded) + `stage2_dataset.provenance.json` +
+`data/processed/audits/stage2_dataset_report.json`. Artifact digest
+`03263354175c0c3db19cd4262b8aff1bbe3ab0f160f30b13774973bec27af764`; longest row
+550 nt / 552 tokens (well inside 1024). Fold basis: 23,535 `corpus_record`,
+2,000 `parent_record`, 5,007 `decoy_pool_random`. Pairing: 18,269 anchored /
+5,266 unanchorable / 7,007 not-applicable; 829,175 base pairs emitted, 20,854
+consensus pairs dropped on a deleted partner across 8,634 rows, and **no**
+anchored row ends with zero pairs.
+
+**Validation.** Gate **PASS**. Unit + golden green (54 passed / 2 skipped in
+`tbox-data`; the 2 skips are the `multimolecule` parity legs, which run **23
+passed / 0 skipped** in `tbox-ml-rna`). Tokenizer round-trip
+`decode(encode(s)) == s` exact on all 100 real T-box loci of the committed
+ingest slice and on the hand-authored alphabet fixture; the pinned vocabulary is
+asserted **equal to the live `RnaTokenizer`** at the ADR-0002 A9 revision
+`2a71f6f9…`, and the pinned digest is re-derived stdlib-only so a hand-edit
+fails in CI even where parity skips. Every row carries a non-null `fold_random`,
+`parent_record_id` and a `fold_basis` in the closed set; max tokens 552 ≤ 1022.
+`ruff check` + `black --check` clean; `snakemake --lint` "workflow is in a good
+condition" and `snakemake -n` parses.
+
+*No pytest exists in any local env, so the suites were executed with a
+stdlib pytest shim (`raises`/`match`, `importorskip`, `parametrize`) in both
+`tbox-data` and `tbox-ml-rna`; CI runs the real pytest.* **Seven sabotage bites**
+were run with `__pycache__` cleared and each restore proved by `cmp` (these files
+are new, so `git checkout --` would be a silent no-op): wrong split row for a
+derived decoy → `test_derived_decoy_inherits_every_scheme_value_from_its_parent`
+(+ golden); gap-partner pair re-based instead of dropped →
+`test_projection_drops_a_pair_whose_partner_is_a_deleted_column` (+ golden);
+ambiguous anchor takes the first hit → `test_projection_refuses_an_ambiguous_anchor`;
+invented clade units on a parentless decoy →
+`test_parentless_decoys_are_random_only_and_invent_no_clade` (+ golden); a
+vocabulary id edited → `test_vocab_digest_is_pinned` (+3); the T→U transcription
+removed → 14 tests incl. the golden. A seventh bite edited a vocabulary id **and
+recomputed the pinned digest**, so the CI-side guards pass — it is caught only by
+`test_pinned_vocab_matches_live_tokenizer` in `tbox-ml-rna`, proving that leg is
+not vacuous.
+
+**Decisions.** (a) `flank_nt = 0` for both classes, refused otherwise — a
+symmetry requirement, not a convenience (PRD §5/§6). (b) Parentless decoys are
+random-split-only with null clade columns and a null `nested_train` — the
+ADR-0004 D4 pattern extended to a class D4 does not name; **owed sign-off at the
+P3-exit gate**, cross-ref ADR-0004 D4/D7. (c) The build runs in the `data` env
+via a pinned-vocabulary adapter rather than in `ml-rna`, keeping the golden test
+CI-runnable; cross-ref ADR-0002 A4/A8/A9. (d) The golden fixture runs with
+`require_full_join=False` because 6 of the 100 ingest-fixture records predate the
+corpus de-duplication and have no split row; the refused counts (6 records, and
+the 4 dinucleotide decoys parented on them) are **asserted**, so the relaxation
+is pinned rather than silent — and it makes ADR-0004 D7's fail-closed rule fire
+on real data inside the golden. (e) The imp.md gate names "the 9-PDB +
+hand-checked fixture" for the round-trip, but those P0-21 fixtures record element
+extents and window lengths, **not sequences**; they are used for what they can
+assert (the token axis stays index-aligned with the per-nucleotide label axis at
+exactly those 11 window lengths) and the round-trip itself runs over real T-box
+loci. (f) README/`paper/manuscript.qmd` are **not** touched: this step lands no
+analysis result and the repo batches both at the phase-exit gate (the P2
+precedent).
+
+**Commit.** Branch `p3-01-stage2-dataset`, PR pending — the **squash SHA on
+`main` is not yet known** and must be reconciled at the P3-exit gate by deriving
+it (`git show <sha> -- analyses/phase3_log.qmd | grep '^+## Step'`), never copied
+from notes.
