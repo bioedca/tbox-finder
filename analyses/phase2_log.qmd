@@ -2427,3 +2427,37 @@ first draft (B023: the substitution lambda closed over the loop variable `env`, 
 would have substituted from whichever dict the loop ended on); fixed by passing `env` as a
 parameter. `ruff` + `black@25.11.0` clean over `src/` + `tests/` (190 files). **Decisions.**
 None. **Commit.** this stanza's commit on `p2-14-gate4`.
+
+## Step P2-14 (CodeRabbit round 9) — 2026-07-31: one finding, refuted by execution; the review converges
+
+**Inputs.** `coderabbit review --agent -t committed --base main` over `c9651d1`. One finding,
+major, **refuted**. **Process.** It read the twin's training report — `eval_requested: false`,
+`warm_start: null`, yet `gate.eval_val_scored_on_disjoint_fold: true` and
+`gate.warm_start_loaded: true` — and inferred the two clauses "default to true" when the
+evidence is absent. That is the right suspicion to have here: it is the
+[[clauses-must-guard-emptiness]] shape that cost this project ~20 GPU-h once and produced a
+green P2-05 gate resting on zero measurements. It is also, in this instance, wrong — and the
+way to establish that is to run the clauses, not to read their docstrings.
+
+Both absence branches **require the absence to be recorded and coherent**, not merely
+unviolated: `_eval_val_ok` returns `requested is False and metrics_block is None and scope is
+None`, and `_warm_start_ok` requires a fresh build to *say so* and cross-checks the run config.
+Five designed controls, every one of which would stay TRUE under the alleged defect, all return
+**False**: an `eval_requested: false` report that nonetheless claims `eval_metrics`; one that
+claims an `eval_scope`; an `eval_requested` that is absent rather than explicitly `False`; an
+`eval_requested: true` with the scope missing; and a `warm_start` block claimed with no
+`init_from_checkpoint` in the config. The clauses were hardened into this shape by P2-06a and
+P2-10d and their docstrings carry the reasoning; nothing was changed.
+
+Worth recording for the next reader: these clauses do not gate GATE-4 in any case.
+`eval/gate4.py` reads the training report's `class_counts_scope` and the provenance sha256 —
+never `report["gate"]` — so the twin's internal self-certification and the GATE-4 verdict are
+independent chains.
+
+**Nine rounds, and this is the convergence point.** r5–r8 each found something real and each
+was fixed; r9's only finding does not survive execution. The findings also migrated outward
+over the rounds — from the deliverable's own certification (r5), to the ADR pins behind it
+(r6, r7), to helper strictness in a pre-existing test file (r8), to a refuted reading of a
+pre-existing trainer clause (r9) — which is what convergence looks like. **Validation.** No
+code changed this round; the refutation is the artifact. **Commit.** this stanza's commit on
+`p2-14-gate4`.
