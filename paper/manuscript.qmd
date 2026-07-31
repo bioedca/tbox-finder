@@ -237,8 +237,10 @@ cluster-blocked bootstrap 95% interval [0.943, 0.960] shown against the
 pre-registered 0.80 floor; non-core classes are plotted but excluded from the
 gate, Stem III being the weakest at 0.880. *Right*, the same checkpoint on the
 leave-one-order-out holdout (21.0 M nucleotides), macro-averaged over 30 held-out
-orders, where the core elements fall to 0.765 / 0.721 / 0.715 and per-order
-minima approach zero; whiskers span the per-order range. The two panels share an
+orders, where the core elements fall to 0.765 (Antiterminator), 0.721 (Stem I)
+and 0.715 (Specifier) — a different rank order from the left panel, hence the
+explicit labels — with per-order minima approaching zero; whiskers span the
+per-order range. The two panels share an
 axis deliberately: the vertical distance between them, not the height of the left
 panel, is what bears on discovery in unrepresented lineages. The gate is graded
 on the left panel only, and on the twin rather than the shipped checkpoint, so

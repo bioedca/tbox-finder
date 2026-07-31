@@ -2532,3 +2532,35 @@ scope. §10.1 N/A — this step asserts no new biological or statistical fact; e
 re-read from a committed report.
 
 **Commit.** squash SHA + PR recorded at the P2-15 merge; feature-branch commit on `p2-15-exit`.
+
+## Step P2-15 (ultrareview round) — 2026-07-31: a caption that reordered its own referents
+
+**Inputs.** The cloud `/ultrareview` of PR [#92](https://github.com/bioedca/tbox-finder/pull/92)
+(user-triggered — CLAUDE.md §11). **One** finding, severity nit, **valid and applied**.
+
+**Process.** The Figure 2 caption enumerated the left panel's core elements in one order —
+`Stem I 0.975, Antiterminator 0.970, Specifier 0.952`, descending-numeric *for that panel* — and
+then gave the right panel as bare `0.765 / 0.721 / 0.715`. The across-order triple is also
+descending-numeric, but its rank order is **different**: Antiterminator 0.7646, Stem I 0.7214,
+Specifier 0.7154 (`reports/p2/gate4.json` → `loo_holdout.macro_per_element_f1`). A reader applying
+the same-order-within-a-caption convention therefore gets Stem I = 0.765 and Antiterminator =
+0.721 — the top two inverted, reading Stem I as the LOO-strongest core element when it is the
+second-weakest of the three. The values were right; the labelling was not. Captions are read
+standalone, and the labelled ground truth living one paragraph above (manuscript:216) and in
+`docs/model_card.md` §5.2 does not rescue a caption cited on its own. Fixed by relabelling the
+right-panel numbers in the same explicit style used everywhere else, plus a clause saying *why*
+the labels are there — the rank order genuinely differs between panels, which is itself part of
+the finding rather than a formatting accident. No number changed.
+
+**Validation.** Re-read the three LOO values from `reports/p2/gate4.json` before editing rather
+than copying the reviewer's quotation ([[size-a-run-from-the-protocols-own-report]]) — they match.
+Manuscript re-rendered clean, `@fig-gate4` still resolves to "Figure 2"; this dev-log re-rendered
+to `docs/dev-log/phase2_2026-07-31.pdf` so the committed PDF carries this stanza. CI green.
+
+**Decisions.** None pinned; no threshold, gate, ADR, or committed metric moved — this is a
+labelling fix inside a draft manuscript whose submission gate is Phase 7. `README.md` and
+`docs/model_card.md` were checked for the same positional-ambiguity shape: the model card §5.2
+already labels every element, and the README quotes only the aggregate ~0.72, so neither needed
+a change.
+
+**Commit.** squash SHA + PR recorded at the P2-15 merge; feature-branch commit on `p2-15-exit`.
