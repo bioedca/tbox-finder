@@ -199,6 +199,23 @@ STEP_SELECTION_VAL = "P2-06a"
 #: The step that owns the GATE-4 folds (ADR-0004 D6 + A6).
 STEP_GATE4 = "P2-14"
 
+#: ADR-0004 **A6 pins the graded population by measurement**, not by its carve rule alone:
+#: "1,201 records / 1,029 clusters / 154 genera / 15 orders / 2,976,259 nt", and the twin
+#: carve "8,303 → 7,099" withholding 1,204 records in 1,031 clusters. The rule-shaped
+#: clauses below (fold_scope, carve value, leakage zeros, n >= 2 blocks) all survive a
+#: *drifted* table unharmed — a re-clustered or re-drawn `fold_random` yields a different
+#: population that is still `gate4_eval`, still disjoint, still resamplable — so without
+#: these an ADR-signed population could silently change identity underneath a passing gate
+#: and the number would look exactly like the pinned one. Changing the graded population is
+#: an ADR-0004 amendment (CLAUDE.md §7 item 2); these constants are where that decision
+#: becomes mechanical, so a drift fails closed at load time, before any forward pass.
+A6_N_RECORDS = 1201
+A6_N_CLUSTERS = 1029
+A6_N_POSITIONS = 2_976_259
+A6_N_TWIN_EXCLUDED_RECORDS = 1204
+A6_N_TWIN_EXCLUDED_CLUSTERS = 1031
+A6_N_TWIN_TRAIN_RECORDS = 7099
+
 #: The P2-06a inner-rung carve (user decision 2026-07-17, re-taken after the first
 #: definition was measured to be 88.4% designated-LOO-holdout).
 #:
@@ -1525,6 +1542,13 @@ def gate4_eval_problems(report: Mapping[str, Any]) -> list[str]:
         problems.append(
             f"n_blocks: must be >= 2, got {n_blocks!r} — fewer than 2 blocks is not "
             "block-resamplable (ADR-0005 D5 / Amendment A1)"
+        )
+    # The A6 identity pin. Everything above is rule-shaped and a drifted table satisfies it.
+    if n_records != A6_N_RECORDS or n_blocks != A6_N_CLUSTERS:
+        problems.append(
+            f"population drift: {n_records!r} records / {n_blocks!r} clusters, but ADR-0004 A6 "
+            f"pins the graded population at {A6_N_RECORDS} / {A6_N_CLUSTERS} — a different "
+            "population grading the same gate is a signed decision (§7 item 2), not a re-run"
         )
     return problems
 

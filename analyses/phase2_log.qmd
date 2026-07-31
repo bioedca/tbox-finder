@@ -2308,3 +2308,53 @@ named assertion — a bite for the wrong reason is not a bite
 `python -B` ([[sabotage-restores-masked-by-pycache]]). `ruff@0.15.15` + `black@25.11.0` clean.
 **Decisions.** None pinned; no threshold or gate semantics moved. **Commit.** this stanza's
 commit on `p2-14-gate4`.
+
+## Step P2-14 (CodeRabbit round 6) — 2026-07-31: an ADR-signed population that nothing enforced, and a wording change refused
+
+**Inputs.** `coderabbit review --agent -t committed --base main` over `6c7859a`. Two findings,
+one real. **Process.** The real one: the twin's publish guard checked
+`n_gate4_eval_excluded > 0`, and a positive count cannot tell **1,204** from 900. Reading the
+governing text rather than the roadmap's paraphrase ([[convenience-is-not-a-prd-argument]]),
+ADR-0004 **A6 pins the graded population by measurement**, not by its carve rule alone —
+"1,201 records / 1,029 clusters / 154 genera / 15 orders / 2,976,259 nt", and the twin carve
+"8,303 → 7,099" withholding 1,204 records in 1,031 clusters — and **nothing in the repo
+enforced a single one of those numbers**. Every clause that did exist is rule-shaped and a
+drifted split table satisfies all of them: a re-clustered or re-drawn `fold_random` yields a
+different population that is still `gate4_eval`, still disjoint from the twin, still
+block-resamplable, and its GATE-4 number would look exactly like the signed one.
+
+**Outputs.** Six A6 constants single-sourced in `window_dataset` beside the loader that owns
+the population, and checked in three places: `gate4_eval_problems` gains a
+**`population drift`** clause on records × clusters — which `compute_gate4` calls *before any
+forward pass*, so a drifted population can never be graded at all; `gate4_problems` pins the
+twin's `n_gate4_eval_excluded` / `n_gate4_eval_clusters` / `n_training_records` and the gated
+`n_positions` (the same record count over a different nucleotide extent is a different
+measurement); and the sbatch's pre-publish guard refuses the same three, so a drifted twin's
+checkpoint is never published. Changing the graded population is an ADR-0004 amendment
+(§7 item 2) — these constants are where that becomes mechanical rather than aspirational.
+
+**The second finding is refused, and the reasoning lives here.** It asked to reword the
+`delta_governance` sentence so "0 of the 9" reads "0 of the 9 depositions", **and to regenerate
+the report to match**. The sentence already opens "C is NOT estimable from these depositions",
+so the referent is not ambiguous, and the fallback branch ("0 of the depositions supplied") is
+already grammatical. Re-running a completed grade to change prose would put a freshly-generated
+`generated_at_utc` on a measurement nothing about the science moved; editing the code without
+re-running would leave the committed artifact one wording behind its generator, which is worse
+than the wording. Neither is worth it, so nothing changed.
+
+**Validation.** 105/105 standalone (was 98). **Seven further source-sabotage bites, each RED by
+name:** neutering the drift clause reds the two `population drift` cases, the twin-pin loop reds
+all four `pins it at …` cases, and the `n_positions` pin reds `different nucleotide`. Restores
+sha256-verified (`a5bb45e4…`, `b5c067fb…`) under `python -B`. One case is worth recording: with
+the drift clause disabled, `scope.n_blocks = 1028` is caught only by the CI-vs-scope block
+mismatch, which fires solely because the CI block count stayed 1029 — a *consistently* drifted
+run would trip nothing. The clause is not redundant with it. The sbatch's publish guard was
+validated by extracting its heredoc and `ast.parse`-ing the shipped bytes, then driving it
+against the **real** committed twin report (all three pins satisfied); `bash -n` clean;
+`test_train_production_signals.py` + `test_sbatch_overrides.py` 9 passed / 1 skipped;
+`ruff@0.15.15` over `src/` + `tests/` and `black@25.11.0` clean. The neighbouring suites that
+touch the changed validator were run too, and their failures are harness artefacts (my
+stub-`pytest` supplies no `tmp_path`/`pd` fixtures and stubs `approx` as identity) — **identical
+counts before and after the change**, confirmed by stashing the edits and re-running.
+**Decisions.** No pinned value moves; A6's numbers are enforced, not chosen. **Commit.** this
+stanza's commit on `p2-14-gate4`.

@@ -639,6 +639,15 @@ def gate4_problems(report: Mapping[str, Any]) -> list[str]:
     statistic is **recomputed from the per-element F1s** rather than trusted
     ([[gate-clauses-need-re-derivation]]).
     """
+    # Local, like every other `window_dataset` use here: the module pulls pandas, and this
+    # validator is imported by tests that must run without it.
+    from tbox_finder.data.window_dataset import (
+        A6_N_POSITIONS,
+        A6_N_TWIN_EXCLUDED_CLUSTERS,
+        A6_N_TWIN_EXCLUDED_RECORDS,
+        A6_N_TWIN_TRAIN_RECORDS,
+    )
+
     problems: list[str] = []
 
     if report.get("posterior") != POSTERIOR:
@@ -683,6 +692,21 @@ def gate4_problems(report: Mapping[str, Any]) -> list[str]:
                 f"twin.n_gate4_eval_excluded: must be a positive int, got {n_ex!r} — a flag "
                 "that was set but excluded NOTHING is exactly how this clause fabricates TRUE"
             )
+        # …and a positive count cannot tell 1,204 from 900. ADR-0004 A6 pins the carve by
+        # measurement (8,303 → 7,099, withholding 1,204 records in 1,031 clusters), so the
+        # twin's own numbers are checked against it, not merely against zero.
+        for key, pinned in (
+            ("n_gate4_eval_excluded", A6_N_TWIN_EXCLUDED_RECORDS),
+            ("n_gate4_eval_clusters", A6_N_TWIN_EXCLUDED_CLUSTERS),
+            ("n_training_records", A6_N_TWIN_TRAIN_RECORDS),
+        ):
+            got = twin.get(key)
+            if got != pinned:
+                problems.append(
+                    f"twin.{key} = {got!r}, but ADR-0004 A6 pins it at {pinned} — the twin "
+                    "carved a different fold than the signed one, so its grade is not the "
+                    "one D6 defines"
+                )
         if twin.get("checkpoint_identity_verified") is not True:
             problems.append(
                 "twin.checkpoint_identity_verified is not True — the graded checkpoint's "
@@ -793,6 +817,12 @@ def gate4_problems(report: Mapping[str, Any]) -> list[str]:
     n_positions = gate.get("n_positions")
     if not isinstance(n_positions, int) or isinstance(n_positions, bool) or n_positions <= 0:
         problems.append(f"gate.n_positions: must be a positive int, got {n_positions!r}")
+    elif n_positions != A6_N_POSITIONS:
+        problems.append(
+            f"gate.n_positions = {n_positions}, but ADR-0004 A6 pins the graded population at "
+            f"{A6_N_POSITIONS} nt — the same record count over a different nucleotide extent "
+            "is a different measurement"
+        )
     ci = gate.get("block_bootstrap_ci")
     if not isinstance(ci, Mapping) or not ci:
         problems.append("gate.block_bootstrap_ci: block missing (ADR-0005 D5)")

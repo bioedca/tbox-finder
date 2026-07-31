@@ -598,6 +598,19 @@ def test_the_committed_gate4_report_still_re_derives_clean():
         # `--loo-max-records` truncates the ORDER set the D5 macro is taken over.
         (lambda r: r["loo_holdout"]["scope"].__setitem__("full_fold", False), "truncated order"),
         (lambda r: r["loo_holdout"].pop("scope"), "truncated order"),
+        # ── the A6 identity pins: a positive count cannot tell 1,204 from 900 ──
+        # Every clause above is rule-shaped and a DRIFTED split table satisfies all of them:
+        # a re-clustered or re-drawn fold is still gate4_eval, still disjoint, still
+        # resamplable. Counts alone are also blind to a swap
+        # ([[symmetric-count-fixture-blind-to-inversion]]), which is why the pins are on the
+        # population's size AND its nucleotide extent. CodeRabbit, r6.
+        (lambda r: r["twin"].__setitem__("n_gate4_eval_excluded", 900), "pins it at 1204"),
+        (lambda r: r["twin"].__setitem__("n_gate4_eval_clusters", 1030), "pins it at 1031"),
+        (lambda r: r["twin"].__setitem__("n_training_records", 7100), "pins it at 7099"),
+        (lambda r: r["twin"].pop("n_gate4_eval_clusters"), "pins it at 1031"),
+        (lambda r: r["gate"].__setitem__("n_positions", 2_976_258), "different nucleotide"),
+        (lambda r: r["scope"].__setitem__("n_records", 1200), "population drift"),
+        (lambda r: r["scope"].__setitem__("n_blocks", 1028), "population drift"),
     ],
 )
 def test_gate4_problems_bites_on_each_violation(mutate, expect):

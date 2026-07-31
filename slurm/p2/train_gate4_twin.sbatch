@@ -297,6 +297,18 @@ if cfg.get("exclude_gate4_eval") is not True:
 n_ex = scope.get("n_gate4_eval_excluded")
 if not isinstance(n_ex, int) or isinstance(n_ex, bool) or n_ex <= 0:
     problems.append(f"class_counts_scope.n_gate4_eval_excluded = {n_ex!r}, want a positive int")
+# ...and a positive count cannot tell 1,204 from 900. ADR-0004 A6 pins the carve by
+# measurement (8,303 -> 7,099, withholding 1,204 records in 1,031 clusters); a drifted split
+# table would train a DIFFERENT twin that still satisfies every rule-shaped clause above, so
+# the checkpoint is not published unless its own report re-derives the signed numbers. The
+# same pins gate the grade in eval.gate4.gate4_problems; this one just refuses earlier.
+for key, pinned in (
+    ("n_gate4_eval_excluded", 1204),
+    ("n_gate4_eval_clusters", 1031),
+    ("n_records", 7099),
+):
+    if scope.get(key) != pinned:
+        problems.append(f"class_counts_scope.{key} = {scope.get(key)!r}, want {pinned} (ADR-0004 A6)")
 if scope.get("label_source") != "production":
     problems.append(f"class_counts_scope.label_source = {scope.get('label_source')!r}, want 'production'")
 if problems:
