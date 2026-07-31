@@ -92,12 +92,75 @@ def _is_ignored(rel_path: str) -> bool:
     )
 
 
+def _strip_inline_comment(line: str) -> str:
+    """The executable part of a shell line — everything before an unquoted `#`.
+
+    Quote-aware on purpose: a bare `line.split("#")` would truncate at a `#` inside a
+    quoted string (a heredoc's python, a URL), which is the kind of silent mis-parse that
+    makes a test look stricter than it is.
+    """
+    out: list[str] = []
+    quote: str | None = None
+    for j, ch in enumerate(line):
+        if quote:
+            if ch == quote:
+                quote = None
+        elif ch in ("'", '"'):
+            quote = ch
+        elif ch == "#" and (j == 0 or line[j - 1].isspace()):
+            break
+        out.append(ch)
+    return "".join(out)
+
+
 def _first_executable_line(sbatch: Path, needle: str) -> int | None:
-    """Index of the first non-comment sbatch line with `needle` (None if only in a comment)."""
+    """Index of the first sbatch line whose EXECUTABLE part contains `needle`.
+
+    Comments are excluded twice over: a whole-line comment, and — the case that actually
+    bit — a *trailing* comment on a real command. `export OMP_NUM_THREADS=2  # …torchrun
+    warns…` is not a comment line, so the previous substring test matched it and reported
+    the training invocation ~34 lines earlier than it is; the ordering assertion below then
+    held for the wrong reason and would have false-alarmed on a restore placed between the
+    two. Matching on the executable part is also why the needle stays a substring rather
+    than a prefix: the real call is `PYTHONHASHSEED=0 PYTHONPATH=src torchrun …`, which no
+    `startswith("torchrun")` would ever find. CodeRabbit, r8.
+    """
     for i, line in enumerate(sbatch.read_text().splitlines()):
-        if needle in line and not line.lstrip().startswith("#"):
+        if line.lstrip().startswith("#"):
+            continue
+        if needle in _strip_inline_comment(line):
             return i
     return None
+
+
+_VAR_ASSIGN = re.compile(r'^([A-Za-z_][A-Za-z0-9_]*)="([^"]*)"\s*$', re.M)
+_VAR_REF = re.compile(r"\$\{?([A-Za-z_][A-Za-z0-9_]*)\}?")
+
+
+def _expand_shell_vars(body: str) -> str:
+    """Substitute the sbatch's own `VAR="literal"` assignments through its text.
+
+    The run signals are written as `"$OUT_DIR/train_stage1_gate4_twin.DONE"`, so their whole
+    path never appears literally and a basename test was the only thing on offer. That test
+    has a real blind spot: `.gitignore` rules for these signals are **path-anchored**
+    (`/reports/p2/…`), so re-pointing `OUT_DIR` moves every signal out from under its ignore
+    rule while the basenames — and the test — stay exactly the same. Expanding first lets the
+    registry be compared as whole paths, the way the `--output`/`--error` directives already
+    are. CodeRabbit, r8.
+    """
+
+    def _sub(text: str, env: dict[str, str]) -> str:
+        # `env` is a parameter, not a closed-over loop variable: binding it late would make
+        # every pass substitute from whichever dict the loop happened to end on (ruff B023).
+        return _VAR_REF.sub(lambda m: env.get(m.group(1), m.group(0)), text)
+
+    env = dict(_VAR_ASSIGN.findall(body))
+    for _ in range(5):  # resolve nesting; a fixed point in one or two passes in practice
+        resolved = {k: _sub(v, env) for k, v in env.items()}
+        if resolved == env:
+            break
+        env = resolved
+    return _sub(body, env)
 
 
 @pytest.mark.parametrize("sb", SBATCHES, ids=_IDS)
@@ -200,15 +263,65 @@ def test_the_run_signal_paths_are_the_ones_the_sbatch_actually_writes() -> None:
                 "green."
             )
 
+        expanded = _expand_shell_vars(body)
         for signal in sb.run_signals:
             if Path(signal).suffix in (".out", ".err"):
                 continue  # already compared as a whole path above
-            assert Path(signal).name in body, (
-                f"{sb.name}.sbatch never mentions {Path(signal).name!r}, so the run signal "
-                f"{signal!r} this test claims to lock is not a path that sbatch writes — the "
-                "registry has drifted."
+            assert signal in expanded, (
+                f"{sb.name}.sbatch never writes the whole path {signal!r} (basename "
+                f"{Path(signal).name!r} alone is not enough: the ignore rules are "
+                "path-anchored, so a re-pointed $OUT_DIR leaves the real signals un-ignored "
+                "while a basename test stays green) — the registry has drifted."
             )
-        assert Path(sb.committed_report).name in body, (
-            f"{sb.name}.sbatch never mentions {Path(sb.committed_report).name!r} — the committed "
-            "deliverable this test protects is not the one the job writes."
+        assert sb.committed_report in expanded, (
+            f"{sb.name}.sbatch never writes the whole path {sb.committed_report!r} — the "
+            "committed deliverable this test protects is not the one the job writes."
         )
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# The two parsers the assertions above lean on. A test whose helper silently
+# matches the wrong line is weaker than it reads, and the way that stays
+# invisible is never testing the helper ([[tests-can-specify-the-bug]]).
+# ══════════════════════════════════════════════════════════════════════════════
+def test_first_executable_line_ignores_a_trailing_comment_mention(tmp_path):
+    """The case that actually bit: a real command whose *inline comment* names the needle."""
+    sbatch = tmp_path / "x.sbatch"
+    sbatch.write_text(
+        "#!/bin/bash\n"
+        "# torchrun is mentioned in this whole-line comment\n"
+        "export OMP_NUM_THREADS=2   # 16 cpus / 8 ranks; torchrun warns and defaults to 1.\n"
+        "PYTHONHASHSEED=0 PYTHONPATH=src torchrun --standalone --nproc_per_node=8 \\\n"
+    )
+    assert _first_executable_line(sbatch, "torchrun") == 3  # the invocation, not the export
+
+
+def test_first_executable_line_matches_a_command_that_is_not_the_line_prefix(tmp_path):
+    """`torchrun` is reached through an env prefix, so a prefix match would find nothing."""
+    sbatch = tmp_path / "x.sbatch"
+    sbatch.write_text("#!/bin/bash\nPYTHONHASHSEED=0 PYTHONPATH=src torchrun --standalone\n")
+    assert _first_executable_line(sbatch, "torchrun") == 1
+    assert _first_executable_line(sbatch, "nothing-here") is None
+
+
+def test_strip_inline_comment_keeps_a_hash_inside_quotes():
+    """A bare split on '#' would truncate a quoted hash and quietly shorten the match text."""
+    assert _strip_inline_comment('echo "a # b"   # real comment').strip() == 'echo "a # b"'
+    assert _strip_inline_comment("cmd 'x #y'").strip() == "cmd 'x #y'"
+    assert _strip_inline_comment("cmd   # tail").strip() == "cmd"
+
+
+def test_expand_shell_vars_resolves_the_declared_signal_paths():
+    """`$OUT_DIR/x.DONE` must compare as a whole path — the ignore rules are path-anchored."""
+    body = 'OUT_DIR="reports/p2"\nDONE="$OUT_DIR/train_stage1_gate4_twin.DONE"\n'
+    expanded = _expand_shell_vars(body)
+    assert "reports/p2/train_stage1_gate4_twin.DONE" in expanded
+    # …and the blind spot it closes: re-pointing OUT_DIR must change the compared path.
+    moved = _expand_shell_vars(body.replace('OUT_DIR="reports/p2"', 'OUT_DIR="logs/p2"'))
+    assert "reports/p2/train_stage1_gate4_twin.DONE" not in moved
+    assert "logs/p2/train_stage1_gate4_twin.DONE" in moved
+
+
+def test_expand_shell_vars_leaves_runtime_only_variables_alone():
+    """`$SLURM_JOB_ID` has no literal assignment; it must survive rather than vanish."""
+    assert "$SLURM_JOB_ID" in _expand_shell_vars('B="/tmp/$USER-$SLURM_JOB_ID"\n')

@@ -2387,3 +2387,43 @@ guard that only passes is not evidence; the designed control that must fire is
 ([[namespace-mismatch-invisible-noop]]). `bash -n` clean; `ruff@0.15.15` and `black@25.11.0`
 clean over `src/` + `tests/` (190 files). **Decisions.** None; no pinned value moves.
 **Commit.** this stanza's commit on `p2-14-gate4`.
+
+## Step P2-14 (CodeRabbit round 8) — 2026-07-31: a helper that matched the wrong line, and a suggestion that was wrong about why
+
+**Inputs.** `coderabbit review --agent -t committed --base main` over `69ca8eb`. Two findings,
+both on `test_train_production_signals.py` — a *pre-existing* file this step did not author,
+and both real. **Process.** The first: `_first_executable_line` skipped whole-line comments but
+not **trailing** ones, so `_first_executable_line(sb.path, "torchrun")` matched
+`export OMP_NUM_THREADS=2   # 16 cpus / 8 ranks; torchrun warns…` at line **207** rather than
+the invocation at **241**. The restore-precedes-training assertion then held for the wrong
+reason, and would have false-alarmed on a restore legitimately placed between the two.
+
+**The suggested fix was wrong about the mechanism, and taking it would have broken the test.**
+CodeRabbit proposed matching lines that *start with* the command. The real invocation is
+`PYTHONHASHSEED=0 PYTHONPATH=src torchrun --standalone …`, so `startswith("torchrun")` finds
+**nothing**, `train` becomes `None`, and the ordering assertion collapses. The defect is the
+trailing comment, not the substring match, so the fix is a quote-aware
+`_strip_inline_comment` — quote-aware because a bare `split("#")` would truncate at a `#`
+inside a quoted string and silently shorten the text being matched.
+
+The second: the run-signal assertions compared **basenames**, because the signals are written
+as `"$OUT_DIR/train_stage1_gate4_twin.DONE"` and no whole path appears literally. That has a
+genuine blind spot — the `.gitignore` rules for these signals are **path-anchored**
+(`/reports/p2/…`), so re-pointing `OUT_DIR` moves every signal out from under its ignore rule
+while the basenames, and the test, stay identical. `_expand_shell_vars` resolves the sbatch's
+own `VAR="literal"` assignments so the registry is compared as whole paths, the way the
+`--output`/`--error` directives already were.
+
+**Validation.** 14 passed on the file (was 9): five new tests for the two **helpers
+themselves** — the trailing-comment case by line number, the env-prefixed invocation a prefix
+match would miss, a `#` inside quotes, the `$OUT_DIR` expansion *and* the blind spot it closes,
+and `$SLURM_JOB_ID` surviving with no assignment to resolve. A helper that quietly matches the
+wrong line makes every assertion above it weaker than it reads, and the way that stays
+invisible is never testing the helper ([[tests-can-specify-the-bug]]). **Sabotage:** re-pointing
+`OUT_DIR` from `reports/p2` to `logs/p2` in the shipped sbatch reds
+`test_the_run_signal_paths_are_the_ones_the_sbatch_actually_writes` — which the basename version
+passed — restore sha256-verified (`7a465b65…`). `ruff@0.15.15` caught a real defect in my own
+first draft (B023: the substitution lambda closed over the loop variable `env`, so every pass
+would have substituted from whichever dict the loop ended on); fixed by passing `env` as a
+parameter. `ruff` + `black@25.11.0` clean over `src/` + `tests/` (190 files). **Decisions.**
+None. **Commit.** this stanza's commit on `p2-14-gate4`.
