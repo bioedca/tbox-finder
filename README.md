@@ -8,9 +8,11 @@ per-nucleotide T-box structural-element annotations with **calibrated**
 confidence. The scientific value is defensible, non-circular discovery, so
 data-leakage control, calibration, and orthogonal validation are first-class.
 
-> **Status:** **Phase 2 — Stage-1 training: in progress** (Phase 1 complete).
-> Methodology decisions are pinned in `docs/decisions/` (ADRs); the released
-> model/dataset cards will document intended use, splits, calibration, and limitations.
+> **Status:** **Phase 2 — Stage-1 training: complete.** Next: Phase 3 (Stage-2
+> re-ranker + integration). Methodology decisions are pinned in
+> `docs/decisions/` (ADRs); a Phase-2 model-card draft is at
+> [`docs/model_card.md`](docs/model_card.md), and the released model/dataset
+> cards will document intended use, splits, calibration, and limitations.
 
 ## Phase headlines
 
@@ -41,7 +43,31 @@ data-leakage control, calibration, and orthogonal validation are first-class.
   *Still no detector and no discovery result: Phase 1 ships validated backbones, and its
   smoke runs are mechanics/expressivity probes, not generalization claims.*
 
-- **Phase 2 — Stage-1 training (in progress).** Stage-1 **architecture ablations** are
+- **Phase 2 — Stage-1 training (2026-07-31).** **GATE-4 passes.** A per-nucleotide
+  8-class Caduceus-PS segmenter reaches a **minimum per-element per-nt F1 of 0.952**
+  over the three core elements {Stem I, Specifier, Antiterminator} against a
+  pre-registered floor of **0.80**, with a homology-cluster-blocked bootstrap 95%
+  interval of **[0.943, 0.960]** (1,029 clusters, 2,000 resamples) that clears the floor
+  by its *lower* bound. Per element: Stem I 0.975, Antiterminator 0.970, Specifier 0.952
+  (the minimum, and therefore the statistic); boundary IoU 0.951 / 0.941 / 0.908 through
+  the deployed overlapping-window reconciliation operator. **The gate grades an
+  evaluation twin, not the shipped checkpoint** — the shipped scanner trained on the
+  entire in-distribution fold and has no held-out population, so a twin trained with the
+  graded clusters withheld (8,303 → 7,099 records, 0 shared clusters and 0 shared
+  records) was graded in its place; 0.952 is therefore a **conservative proxy**.
+  *The number beside it that matters more for discovery:* on the **leave-one-order-out**
+  holdout the same checkpoint falls to **~0.72** macro per-element F1 across 30 held-out
+  orders. GATE-4 grades in-distribution segmentation quality — an explicitly labelled
+  reference, **not** a generalization test; the generalization claim is graded at GATE-1
+  in Phase 4. Two further Stage-1 checkpoints are retained: the **class-II-CM-naive
+  anti-mimicry ablation** (scored Stage-1-only at GATE-1) and the GATE-4 twin.
+  Calibration machinery is fitted (T = 0.9896) but **not shipped** and **not gated** —
+  every Phase-2 number is computed on the uncalibrated posterior. The §9.1
+  hard-negative-mining loop is machinery-complete, measured, and **deliberately not
+  executed** (1 of its 3 spare-rule evidence backends exists, so the rule fails closed
+  and a round would be a verified no-op) — deferred, not cancelled.
+
+  Stage-1 **architecture ablations** are
   measured (`reports/p2/ablation_table.json`): on a disjoint 830-record / 469-cluster
   selection fold, arms are **replicated** and separation is judged on replicate-widened
   intervals (re-runs reproduce closely: spread **0.0001** over 3 replicates of the 471k
@@ -56,9 +82,10 @@ data-leakage control, calibration, and orthogonal validation are first-class.
   one element whose AUPRC held but whose boundary IoU collapsed 0.8590→0.6087: a
   decision-threshold shift under uncalibrated outputs, unattributed since the runs were at
   different commits).
-  *Selection-fold measurements — **not** generalization results; GATE-4 is graded later in
-  Phase 2 on the leave-one-order-out holdout. Stage-1 outputs here are uncalibrated
-  (temperature scaling is a later Phase-2 step).*
+  *These ablation figures are selection-fold measurements — **not** generalization
+  results, and not the gated statistic. Phase 2 ships a trained segmenter and one passing
+  method gate; it ships no discovery result, no calibrated output, and no evidence about
+  novel lineages.*
 
 ## Layout (PRD §16)
 
