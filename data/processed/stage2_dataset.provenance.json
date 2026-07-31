@@ -1,0 +1,35 @@
+{
+  "adr": "ADR-0004",
+  "env_lock_hash": "a4a6715d411d7218432c4c670d35475f6c9aa7dd6397fd5d906ca7e21293dc34",
+  "extra": {
+    "decoy_fold_seed": 20260731,
+    "digest": "03263354175c0c3db19cd4262b8aff1bbe3ab0f160f30b13774973bec27af764",
+    "flank_nt": 0,
+    "n_rows": 30542,
+    "schema_version": "1.0",
+    "step": "P3-01",
+    "tokenizer": {
+      "max_nucleotide_tokens": 1022,
+      "repo_id": "multimolecule/rinalmo-giga",
+      "revision": "2a71f6f98fb41dd2e6542a5e131d3778111d1468",
+      "vocab_digest": "ac3cff22ff7eee31923e5b921470be247314794f3d283b3bc01f26049d3902b4",
+      "vocab_size": 28
+    }
+  },
+  "generated_at_utc": "2026-07-31T23:11:01.430330+00:00",
+  "git_sha": "51e4669d0d79ae4ce0f2a89ce6e7964d3b266a9c",
+  "inputs": {
+    "data/processed/labels/labels_v0.parquet": "6caf46eae0735dd9361dc69b448e5518eb6aaf92784b4949baf937110aa447e4",
+    "data/processed/master_clean_v0.parquet": "1eb76591d0e481019dd7acf72a439f157fec9f2aeecb8cc5c37ba80a7b062dd2",
+    "data/processed/negatives/decoys_v0.parquet": "e19da2a959bcf597be0760310e04f3b4b44984c5a86bb1c946afc55b99d09636",
+    "data/processed/splits/split_assignments.parquet": "6388ba19328811fa81d2d5b84a58643674934b4286581d8eff9df2e2cefba029"
+  },
+  "outputs": {
+    "data/processed/audits/stage2_dataset_report.json": "ac7060255a5802f1dcb016edc4479f74249e0d1d93543f56de2a3b1ce6219691",
+    "data/processed/stage2_dataset.parquet": "aac7695236df94096a177147898463fa6ce35138a8ce6e9b03ef7f4b57044ec0"
+  },
+  "rule": "workflow/rules/stage2.smk :: stage2_dataset",
+  "schema_version": "1.0",
+  "script": "src/tbox_finder/stage2/dataset.py",
+  "seed": 42
+}

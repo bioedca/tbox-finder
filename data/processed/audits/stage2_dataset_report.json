@@ -1,0 +1,60 @@
+{
+  "clade_holdout_eligible": 24576,
+  "decoy_fold_seed": 20260731,
+  "digest": "03263354175c0c3db19cd4262b8aff1bbe3ab0f160f30b13774973bec27af764",
+  "flank_nt": 0,
+  "fold_basis_counts": {
+    "corpus_record": 23535,
+    "decoy_pool_random": 5007,
+    "parent_record": 2000
+  },
+  "fold_random_counts": {
+    "test": 3045,
+    "train": 24430,
+    "val": 3067
+  },
+  "max_n_tokens": 552,
+  "max_seq_length": 550,
+  "n_anchored_rows_with_zero_pairs": 0,
+  "n_base_pairs_total": 829175,
+  "n_corpus_refused_unjoined": 0,
+  "n_decoys_masked_out": 1,
+  "n_decoys_refused_no_parent": 0,
+  "n_negatives": 7007,
+  "n_pairs_dropped_gap_total": 20854,
+  "n_positives": 23535,
+  "n_rows": 30542,
+  "n_rows_with_pairs_dropped_gap": 8634,
+  "pairing_coverage_over_positives": 0.7762481410664968,
+  "pairing_reject_reasons": {
+    "ambiguous_locus_match": 0,
+    "lossy_insert_rendering": 5265,
+    "no_exact_locus_match": 0,
+    "null_alignment_field": 1,
+    "seq_structure_length_mismatch": 0,
+    "unbalanced_wuss": 0,
+    "unexpected_wuss_glyph": 0
+  },
+  "pairing_status_counts": {
+    "anchored": 18269,
+    "not_applicable": 7007,
+    "unanchorable_alignment": 5266
+  },
+  "pool_counts": {
+    "corpus": 23535,
+    "dinuc_shuffled": 2000,
+    "gc_background": 2000,
+    "leader_decoy": 8,
+    "structured_rna": 2999
+  },
+  "require_full_join": true,
+  "schema_version": "1.0",
+  "step": "P3-01",
+  "tokenizer": {
+    "max_nucleotide_tokens": 1022,
+    "repo_id": "multimolecule/rinalmo-giga",
+    "revision": "2a71f6f98fb41dd2e6542a5e131d3778111d1468",
+    "vocab_digest": "ac3cff22ff7eee31923e5b921470be247314794f3d283b3bc01f26049d3902b4",
+    "vocab_size": 28
+  }
+}

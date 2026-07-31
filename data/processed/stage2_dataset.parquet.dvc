@@ -1,0 +1,5 @@
+outs:
+- md5: 9f04c5de24d7f82608653e0d01e9a45a
+  size: 10043121
+  hash: md5
+  path: stage2_dataset.parquet
