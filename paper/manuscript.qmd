@@ -219,7 +219,33 @@ explicitly **not** gated here: GATE-4 grades in-distribution segmentation qualit
 whereas the generalization claim this work makes is graded at GATE-1 (@sec-eval)
 on precisely this axis. The gap between 0.95 in distribution and ~0.72 across
 orders is the quantity that matters for novel-clade discovery, and it is reported
-alongside the passing gate rather than after it.
+alongside the passing gate rather than after it (@fig-gate4).
+
+::: {#fig-gate4}
+*[Figure — Stage-1 segmentation quality. Placeholder image inserted at render
+time.]*
+
+**Figure 2. Stage-1 segmentation is accurate in distribution and degrades
+sharply across held-out taxonomic orders.** Per-nucleotide class F1 for each of
+the eight segmentation classes, measured on the GATE-4 evaluation twin through
+the overlapping-window log-mean-exp reconciliation operator the scanner deploys.
+*Left*, the in-distribution homology-clustered reference population (1,201
+records, 1,029 clusters, 2.98 M nucleotides): the three core elements that
+constitute the gate — Stem I 0.975, Antiterminator 0.970, Specifier 0.952 — are
+marked, with the gated statistic (their **minimum**, 0.952) and its
+cluster-blocked bootstrap 95% interval [0.943, 0.960] shown against the
+pre-registered 0.80 floor; non-core classes are plotted but excluded from the
+gate, Stem III being the weakest at 0.880. *Right*, the same checkpoint on the
+leave-one-order-out holdout (21.0 M nucleotides), macro-averaged over 30 held-out
+orders, where the core elements fall to 0.765 (Antiterminator), 0.721 (Stem I)
+and 0.715 (Specifier) — a different rank order from the left panel, hence the
+explicit labels — with per-order minima approaching zero; whiskers span the
+per-order range. The two panels share an
+axis deliberately: the vertical distance between them, not the height of the left
+panel, is what bears on discovery in unrepresented lineages. The gate is graded
+on the left panel only, and on the twin rather than the shipped checkpoint, so
+the left-hand values are a conservative proxy for the deployed model.
+:::
 
 The cross-source label-noise ceiling that would license recalibrating the 0.80
 floor is **not estimable** from the available crystal structures: Antiterminator
