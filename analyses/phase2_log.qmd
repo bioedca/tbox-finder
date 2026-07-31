@@ -2358,3 +2358,32 @@ stub-`pytest` supplies no `tmp_path`/`pd` fixtures and stubs `approx` as identit
 counts before and after the change**, confirmed by stashing the edits and re-running.
 **Decisions.** No pinned value moves; A6's numbers are enforced, not chosen. **Commit.** this
 stanza's commit on `p2-14-gate4`.
+
+## Step P2-14 (CodeRabbit round 7) — 2026-07-31: the last cost knob, and two copies of a pinned number
+
+**Inputs.** `coderabbit review --agent -t committed --base main` over `390f7ad`. Two findings,
+both minor, both real. **Process + outputs.** **(1)** The r5 clauses closed `--max-records`,
+`--loo-max-records` and `--no-loo`, but not `--n-boot`: a `--n-boot 50` run produces a far
+noisier interval that is **not** the ADR-0005 D5 estimator and, at the phase-exit path, reads
+exactly like the shipped one — the same shape of defect, one knob over. `--window` / `--stride`
+are worse in kind, since re-tiling changes the reconciliation the frozen ADR-0005 D3+A3
+operator is *defined* over. `gate4_problems` now pins the whole `geometry` block to
+`(WINDOW_NT, STRIDE_NT, DEFAULT_N_BOOT)` = 1024/512/2000, rejecting missing and malformed as
+well as mismatched. **(2)** My own r6 fix retyped `1204` / `1031` / `7099` into the sbatch
+guard rather than importing them — exactly the two-copies-of-a-pinned-number shape that means
+one gets amended and the other ships the old value
+([[promote-dont-duplicate-is-a-correctness-rule]]). The guard now imports the three constants
+from `window_dataset`, so `window_dataset` is the single source and an A6 amendment cannot
+leave the cluster-side guard behind.
+
+**Validation.** 109/109 standalone (was 105). Four further sabotage cases, and neutering the
+geometry clause reds all four by name (`not the ADR-0005 D5 estimator`, `frozen scan geometry`
+×3); restore sha256-verified (`6f6b5481…`). The sbatch guard was not merely re-read: its
+heredoc was extracted and **executed as its own bytes** ([[verify-the-line-you-ship]]) under
+`PYTHONPATH=src` in `tbox-ml-dna` — against the real committed twin report it prints
+`twin-ok fold_scope=gate4_twin_train n_gate4_eval_excluded=1204 n_records=7099` and exits 0,
+and against a report with `n_gate4_eval_excluded` set to 900 it exits **1** naming the pin. A
+guard that only passes is not evidence; the designed control that must fire is
+([[namespace-mismatch-invisible-noop]]). `bash -n` clean; `ruff@0.15.15` and `black@25.11.0`
+clean over `src/` + `tests/` (190 files). **Decisions.** None; no pinned value moves.
+**Commit.** this stanza's commit on `p2-14-gate4`.

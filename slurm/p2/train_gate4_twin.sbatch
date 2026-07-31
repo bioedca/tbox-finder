@@ -302,10 +302,18 @@ if not isinstance(n_ex, int) or isinstance(n_ex, bool) or n_ex <= 0:
 # table would train a DIFFERENT twin that still satisfies every rule-shaped clause above, so
 # the checkpoint is not published unless its own report re-derives the signed numbers. The
 # same pins gate the grade in eval.gate4.gate4_problems; this one just refuses earlier.
+# IMPORTED, never retyped: two copies of a pinned number is how one gets amended and the
+# other ships the old value ([[promote-dont-duplicate-is-a-correctness-rule]]).
+from tbox_finder.data.window_dataset import (
+    A6_N_TWIN_EXCLUDED_CLUSTERS,
+    A6_N_TWIN_EXCLUDED_RECORDS,
+    A6_N_TWIN_TRAIN_RECORDS,
+)
+
 for key, pinned in (
-    ("n_gate4_eval_excluded", 1204),
-    ("n_gate4_eval_clusters", 1031),
-    ("n_records", 7099),
+    ("n_gate4_eval_excluded", A6_N_TWIN_EXCLUDED_RECORDS),
+    ("n_gate4_eval_clusters", A6_N_TWIN_EXCLUDED_CLUSTERS),
+    ("n_records", A6_N_TWIN_TRAIN_RECORDS),
 ):
     if scope.get(key) != pinned:
         problems.append(f"class_counts_scope.{key} = {scope.get(key)!r}, want {pinned} (ADR-0004 A6)")

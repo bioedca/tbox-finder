@@ -496,6 +496,7 @@ def _good_report() -> dict:
             "macro_per_element_f1": {},
             "scope": {"full_fold": True},
         },
+        "geometry": {"window_nt": 1024, "stride_nt": 512, "n_boot": 2000},
     }
 
 
@@ -611,6 +612,11 @@ def test_the_committed_gate4_report_still_re_derives_clean():
         (lambda r: r["gate"].__setitem__("n_positions", 2_976_258), "different nucleotide"),
         (lambda r: r["scope"].__setitem__("n_records", 1200), "population drift"),
         (lambda r: r["scope"].__setitem__("n_blocks", 1028), "population drift"),
+        # ── the last cost knob: a cheap CI reads exactly like the shipped one ──
+        (lambda r: r["geometry"].__setitem__("n_boot", 50), "not the ADR-0005 D5 estimator"),
+        (lambda r: r["geometry"].__setitem__("stride_nt", 1024), "frozen scan geometry"),
+        (lambda r: r["geometry"].__setitem__("window_nt", 2048), "frozen scan geometry"),
+        (lambda r: r.pop("geometry"), "frozen scan geometry"),
     ],
 )
 def test_gate4_problems_bites_on_each_violation(mutate, expect):

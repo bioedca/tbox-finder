@@ -823,6 +823,23 @@ def gate4_problems(report: Mapping[str, Any]) -> list[str]:
             f"{A6_N_POSITIONS} nt — the same record count over a different nucleotide extent "
             "is a different measurement"
         )
+    # The last cost knob that could certify. `--n-boot 50` yields a far noisier interval that
+    # is not the ADR-0005 D5 estimator and reads, at the phase-exit path, exactly like the
+    # full one; `--window`/`--stride` would likewise re-tile the reconciliation the frozen
+    # ADR-0005 D3+A3 operator is defined over. Same class as the r5 truncation clauses.
+    geometry = report.get("geometry")
+    got_geometry = (
+        (geometry.get("window_nt"), geometry.get("stride_nt"), geometry.get("n_boot"))
+        if isinstance(geometry, Mapping)
+        else None
+    )
+    if got_geometry != (WINDOW_NT, STRIDE_NT, DEFAULT_N_BOOT):
+        problems.append(
+            f"geometry = {geometry!r}, must be the frozen scan geometry at the shipped CI "
+            f"resolution ({WINDOW_NT}/{STRIDE_NT}/{DEFAULT_N_BOOT}) — a reduced --n-boot is "
+            "not the ADR-0005 D5 estimator, and a retiled window is not the D3 operator"
+        )
+
     ci = gate.get("block_bootstrap_ci")
     if not isinstance(ci, Mapping) or not ci:
         problems.append("gate.block_bootstrap_ci: block missing (ADR-0005 D5)")
