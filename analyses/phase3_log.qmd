@@ -203,8 +203,20 @@ overlap scan fails only
 `test_projection_refuses_an_OVERLAPPING_ambiguous_anchor`, reverting `_text` fails
 only `test_a_null_parent_link_is_refused_not_stringified`.
 
-**Commit.** Branch `p3-01-stage2-dataset`, PR #93 (2 commits: the step + this
-review round) — the **squash SHA on `main` is not yet known** and must be
+**Review round 2 (CodeRabbit, PR #93) — 2 minor findings, both applied.**
+`decode`/`id_to_token` cast with `int()`, and `int(6.9)` is `6`, so a corrupted
+float id would silently decode as the nucleotide at 6 — the opposite of the
+docstring's "an id outside the vocabulary is an error, not a silent `<unk>`".
+Now `operator.index`, which still accepts the NumPy integers a parquet round-trip
+yields (asserted) and refuses floats/strings/`None`; new test
+`test_decode_refuses_a_non_integer_id`, sabotage-verified (reverting to `int()`
+fails that test alone). The second finding was prose: the round-1 comment said
+"scan every start position" while the code does two `find`s — corrected to
+describe the second search from `offset + 1`, no code change. 57 passed / 2
+skipped in `tbox-data`; 24 passed / 0 skipped in `tbox-ml-rna`.
+
+**Commit.** Branch `p3-01-stage2-dataset`, PR #93 (3 commits: the step + two
+review rounds) — the **squash SHA on `main` is not yet known** and must be
 reconciled at the P3-exit gate by deriving it
 (`git show <sha> -- analyses/phase3_log.qmd | grep '^+## Step'`), never copied
 from notes.

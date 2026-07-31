@@ -338,9 +338,10 @@ def project_structure_to_locus(
     # `str.count` counts NON-overlapping occurrences ("AAA".count("AA") == 1), so it can
     # report a genuinely ambiguous probe as unique and this function would then place the
     # structure at the first offset — the exact silent mis-placement the uniqueness rule
-    # exists to prevent. Scan every start position instead. (Measured: 0 of 23,535 corpus
-    # records differ between the two counts, so this changes no current number; it closes
-    # the hole rather than papering over a symptom.)
+    # exists to prevent. Instead: find the first occurrence, then search again from
+    # `offset + 1`, which also detects an occurrence that *overlaps* the first.
+    # (Measured: 0 of 23,535 corpus records differ between the two counts, so this
+    # changes no current number; it closes the hole rather than papering over a symptom.)
     offset = locus.find(probe)
     if offset < 0:
         return None, REJECT_NO_ANCHOR, 0

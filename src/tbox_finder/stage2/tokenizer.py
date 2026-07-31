@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import operator
 from collections.abc import Iterable, Sequence
 from typing import Any
 
@@ -166,6 +167,20 @@ def encode(sequence: str, *, add_special_tokens: bool = True) -> list[int]:
     return body
 
 
+def _token_id(value: Any) -> int:
+    """Coerce a token id, refusing anything that is not integral.
+
+    ``int(6.9)`` is ``6``, so an ``int()`` cast would silently decode a corrupted
+    float id as the nucleotide at 6 — the opposite of what :func:`decode`'s contract
+    promises. ``operator.index`` accepts Python and NumPy integers (parquet round-trips
+    give the latter) and rejects floats, strings and ``None``.
+    """
+    try:
+        return operator.index(value)
+    except TypeError:
+        raise ValueError(f"token id {value!r} is not an integer") from None
+
+
 def decode(ids: Iterable[int], *, skip_special_tokens: bool = True) -> str:
     """Ids → the bare sequence string (no separators).
 
@@ -176,7 +191,7 @@ def decode(ids: Iterable[int], *, skip_special_tokens: bool = True) -> str:
     """
     out: list[str] = []
     for i in ids:
-        key = int(i)
+        key = _token_id(i)
         try:
             token = _ID_TO_TOKEN[key]
         except KeyError:
@@ -192,7 +207,7 @@ def decode(ids: Iterable[int], *, skip_special_tokens: bool = True) -> str:
 def id_to_token(token_id: int) -> str:
     """The vocabulary token for ``token_id`` (raises on an out-of-vocabulary id)."""
     try:
-        return _ID_TO_TOKEN[int(token_id)]
+        return _ID_TO_TOKEN[_token_id(token_id)]
     except KeyError:
         raise ValueError(
             f"id {token_id} is outside the RiNALMo vocabulary (0-{len(VOCAB) - 1})"

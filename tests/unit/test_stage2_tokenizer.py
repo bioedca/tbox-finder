@@ -125,6 +125,22 @@ def test_decode_refuses_an_out_of_vocabulary_id() -> None:
         tok.id_to_token(-1)
 
 
+def test_decode_refuses_a_non_integer_id() -> None:
+    """``int(6.9) == 6`` — a float id must not silently decode as the token at 6.
+
+    (CodeRabbit r2, PR #93.) NumPy integers, which is what a parquet round-trip yields,
+    must keep working.
+    """
+    assert int(6.9) == 6, "the premise: int() truncates rather than refusing"
+    for bad in (6.9, "6", None):
+        with pytest.raises(ValueError, match="is not an integer"):
+            tok.decode([bad])
+        with pytest.raises(ValueError, match="is not an integer"):
+            tok.id_to_token(bad)
+    np = pytest.importorskip("numpy")
+    assert tok.decode([np.int64(6), np.int32(7)]) == "AC"
+
+
 def test_token_axis_stays_aligned_at_the_pdb_window_lengths() -> None:
     """The 9 PDB + 2 hand-checked cases: one token per labelled nucleotide, exactly.
 
