@@ -2178,3 +2178,89 @@ non-finite branch → 2 RED; restoring the first-entry provenance lookup → 4 R
 
 **Nothing was graded this session.** No twin exists, `reports/p2/gate4.json` is not written, and
 no GATE-4 number is claimed. **Commit.** this stanza's commit on `p2-14-gate4`.
+
+## Step P2-14 (RUN + RESULT) — 2026-07-31: GATE-4 passes in-distribution at 0.952, and the same checkpoint reads 0.72 macro across held-out orders
+
+**Inputs.** `slurm/p2/train_gate4_twin.sbatch` at commit `1128974` on the cluster checkout; the
+five staged parquets, each verified by the run against its committed pointer before any GPU
+time — including `data/processed/splits/split_assignments.parquet` at sha256
+`6388ba19328811fa81d2d5b84a58643674934b4286581d8eff9df2e2cefba029`, equal to its committed
+git-LFS pointer. **Process.** Job **957** was submitted 2026-07-30T15:35:59Z and then sat
+**PENDING for 15.3 hours** — not a queue wait but a structural one: both GPU nodes were fully
+allocated to four `cryosparc` jobs at `gres/gpu:a4000:4` each, **twelve more cryosparc jobs
+were queued ahead at UNLIMITED walltime**, and job 957 carried `Priority=1`, the floor. Every
+4-GPU block that freed went to the next cryosparc job; an 8-GPU-on-one-node request can only
+start when a whole node empties *and* that queue is dry, which is why SLURM reported
+`StartTime=2027-07-30T14:55:15` — its one-year placeholder for *unschedulable*. The one change
+that would have made it fit — dropping to four GPUs — was rejected rather than taken: the
+trainer has no gradient accumulation, so world size 8 → 4 moves the global batch 64 → 32 and
+re-slices the `rank::world_size` draw stream, and the twin's entire evidential value is that it
+differs from the shipped production run by **exactly one override**. The user decision
+(2026-07-31) was to keep it queued unchanged; node `two` freed at 06:53Z and the job ran
+**≈2 h 11 m** (Σ rank-0 step time 7,494.9 s = 2.082 h over 12,200 steps, ≈17.5 GPU-h
+node-reserved against the ≈16.1 estimate). **Outputs.**
+`data/processed/checkpoints/stage1_gate4_twin/`
+(DVC, `stage1_gate4_twin.dvc`, dir-md5 `7869eec10539f4d3172ef9f4c3b28496`)
++ `reports/p2/train_stage1_gate4_twin.json` + `reports/p2/gate4.json`.
+
+**§9.3 step-8 verification — artifact-based (sacct off), all green.** `squeue -j 957` empty
+(rc=0); `train_stage1_gate4_twin.DONE` present; checkpoint + `provenance.json` present; and the
+run's own publish guard printed `twin-ok fold_scope=gate4_twin_train n_gate4_eval_excluded=1204
+n_records=7099` — the pinned 8,303 → 7,099 carve, re-derived from the run's own report rather
+than asserted. The `.err` is **expected non-empty** for this job (32 lines of `trust_remote_code`
+/ torchrun / W&B-offline chatter) and was therefore *scanned*, not zero-gated: zero
+`Traceback`/`Error`/`CUDA`/`assert`/`Killed` hits. The retrieved `stage1.pt` hashes to
+`0140a8a32f82f49fec9ddf047de6590a130cd51cd5feab01086ed89032944a29`, **equal** to the sha256 its
+provenance sidecar independently recorded — the report is bound to the checkpoint bytes, not to
+a filename. The run's provenance shows `git_sha 1128974…` with `git_dirty_paths` = the staged
+split table alone, the documented `_DATA_STAGING_PREFIXES` allowance.
+
+**Validation — GATE-4 PASS.** Minimum per-nucleotide class F1 over {Stem I, Specifier,
+Antiterminator} = **0.951776** against the ADR-0004 D6 floor **0.80**, on the ADR-0004 A6
+`gate4_eval` population: 1,201 records / 1,029 homology clusters / 15 orders / 2,976,259
+positions / 5,102 reconciled windows. Cluster-blocked bootstrap 95 % CI **[0.9426, 0.9605]**
+(1,029 blocks, 2,000 resamples), so the floor is cleared by the *lower* bound, not just the
+point. Per element: Stem I 0.9749, Antiterminator 0.9697, **Specifier 0.9518 — the minimum, and
+the statistic**. The population is disjoint from what the graded checkpoint saw, and the report
+proves it rather than assuming it: **0** shared cluster ids and **0** shared record ids with the
+twin's 7,099-record training fold, 0 records from the designated leave-one-order-out holdout,
+0 outside `nested_train`.
+
+**Reported, explicitly non-gated.** Micro F1 0.9929, macro 0.9550. Boundary IoU per core
+element — Stem I 0.951, Antiterminator 0.941, Specifier 0.908 — computed through the frozen
+ADR-0005 D3+A3 log-mean-exp operator, which is what makes them element extents rather than
+512-grid artefacts. Non-core: Discriminator 0.974 / IoU 0.949, Stem II 0.954 / 0.913,
+Terminator 0.939 / 0.885, **Stem III 0.880 / 0.786** — the weakest class by both measures, and
+correctly outside the gate. AUPRC spans 0.952 (Stem III) to 0.9999 (background). Specifier
+exact-3-nt-codon detection: **89.79 %** exact (1,046 / 1,165 scorable), 91.85 % right-length,
+98.71 % overlapping; 36 records are unscorable and are reported by reason rather than dropped
+(26 have no Specifier in truth, 10 have a truth Specifier of length 1, 2, or 8).
+
+**The 9-PDB label-noise ceiling refuses, and the refusal is the finding.** C is **not
+estimable**: Antiterminator and Specifier resolve to a residue extent in **0 of the 9**
+depositions (Stem I in 5, Stem II in 1), so no cross-source per-nt F1 over the gated elements
+exists. D6's δ-recalibration path — floor := a documented function of C — is therefore
+**closed**, and the floor stands at 0.80 as written. An N ≤ 9 crystal ceiling must not
+one-directionally lower the bar, and here it cannot even try.
+
+**The number that is not the headline.** The leave-one-order-out read, over 21,030,072
+positions / 35,431 windows and macro-averaged across **30** held-out orders per ADR-0005 D5,
+gives Antiterminator **0.765**, Stem I **0.721**, Specifier **0.715** — every core element well
+under the in-distribution 0.95, with per-order minima at or near zero. That gap is the honest
+shape of the project: GATE-4 grades *segmentation quality on the in-distribution reference*
+(ADR-0004 D6), and the generalization claim PRD §12:241 makes is graded at GATE-1 / P4 on
+exactly this axis. Reporting the 0.952 without the 0.72 beside it would be the paper's central
+error, so both ship in the same report and the same manuscript paragraph.
+
+**Decisions.** No threshold moved, no tier changed. Five disclosures ship *inside* `gate4.json`,
+each derived from the run's own evidence rather than typed in: the graded artefact is the
+**twin**, not the shipped checkpoint (which trained on all 8,303 D5 records including this
+population, so it has no in-distribution holdout at all — the twin saw strictly fewer records,
+making 0.952 a **conservative proxy**, PRD §10.1's two-run split); the population is **98.7 %
+Firmicutes** (1,185/1,201), which is what the corpus leaves after the order-holdout is removed,
+not a sampling choice; the LOO read is never gated here; the grade is on the **uncalibrated**
+posterior (ADR-0005 A11 Pin 4 — P2-13's T = 0.9896 is machinery, not shipped); and C is not
+estimable. **Still open:** the staged split table's sha256 is verified by the run and printed to
+its own log, but is still not a *field* in the training report — back-filling it into a
+completed run's report would forge a measurement, so that follow-up stays open for the next
+training leg. **Commit.** this stanza's commit on `p2-14-gate4`.

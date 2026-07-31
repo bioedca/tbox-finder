@@ -1,0 +1,6 @@
+outs:
+- md5: 7869eec10539f4d3172ef9f4c3b28496.dir
+  size: 31039731
+  nfiles: 2
+  hash: md5
+  path: stage1_gate4_twin
