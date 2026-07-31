@@ -335,12 +335,17 @@ def project_structure_to_locus(
 
     probe = "".join(ungapped_chars).replace("U", "T")
     locus = str(locus_dna).upper()
-    hits = locus.count(probe)
-    if hits == 0:
-        return None, REJECT_NO_ANCHOR, 0
-    if hits > 1:
-        return None, REJECT_MULTI_ANCHOR, 0
+    # `str.count` counts NON-overlapping occurrences ("AAA".count("AA") == 1), so it can
+    # report a genuinely ambiguous probe as unique and this function would then place the
+    # structure at the first offset — the exact silent mis-placement the uniqueness rule
+    # exists to prevent. Scan every start position instead. (Measured: 0 of 23,535 corpus
+    # records differ between the two counts, so this changes no current number; it closes
+    # the hole rather than papering over a symptom.)
     offset = locus.find(probe)
+    if offset < 0:
+        return None, REJECT_NO_ANCHOR, 0
+    if locus.find(probe, offset + 1) >= 0:
+        return None, REJECT_MULTI_ANCHOR, 0
 
     chars = [DOT] * len(locus)
     dropped = 0
@@ -495,7 +500,11 @@ def build_dataset(
                 "row_id": record_id,
                 "source": SOURCE_CORPUS,
                 "pool": POOL_CORPUS,
-                "parent_record_id": str(split_row[SPLIT_PARENT_COL]),
+                # `_text`, not `str()`: under pandas 3 a null string cell arrives as NaN
+                # and `str(NaN)` is the *present-looking* value "nan", which would sail
+                # past the null gate in `_assert_dataset_invariants` as a fabricated
+                # parent link ([[pandas-3-nan-truthy-in-training-env]]).
+                "parent_record_id": _text(split_row[SPLIT_PARENT_COL]),
                 "rna_sequence": rna,
                 "seq_length": len(rna),
                 "n_tokens": rna_tokenizer.token_length(rna),

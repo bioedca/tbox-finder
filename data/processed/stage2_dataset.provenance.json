@@ -16,8 +16,8 @@
       "vocab_size": 28
     }
   },
-  "generated_at_utc": "2026-07-31T23:01:17.357295+00:00",
-  "git_sha": "30248f0b203a57b0aa2e9e624e6b5992d28d8e47",
+  "generated_at_utc": "2026-07-31T23:11:01.430330+00:00",
+  "git_sha": "51e4669d0d79ae4ce0f2a89ce6e7964d3b266a9c",
   "inputs": {
     "data/processed/labels/labels_v0.parquet": "6caf46eae0735dd9361dc69b448e5518eb6aaf92784b4949baf937110aa447e4",
     "data/processed/master_clean_v0.parquet": "1eb76591d0e481019dd7acf72a439f157fec9f2aeecb8cc5c37ba80a7b062dd2",

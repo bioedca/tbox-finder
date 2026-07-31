@@ -101,6 +101,23 @@ def test_projection_refuses_an_ambiguous_anchor() -> None:
     assert dropped == 0
 
 
+def test_projection_refuses_an_OVERLAPPING_ambiguous_anchor() -> None:
+    """``str.count`` is non-overlapping — ``"AAA".count("AA") == 1``.
+
+    A count-based uniqueness check would call this probe unique and silently place the
+    structure at offset 0, which is the mis-placement the rule exists to prevent
+    (CodeRabbit r1, PR #93). The disjoint-occurrence case above cannot catch it.
+    """
+    assert "AAA".count("AA") == 1, "the premise: str.count under-counts overlaps"
+    db, reason, _ = ds.project_structure_to_locus(
+        aligned_sequence="AA",
+        aligned_structure="<>",
+        locus_dna="AAA",  # occurrences at offsets 0 and 1, overlapping
+    )
+    assert db is None
+    assert reason == ds.REJECT_MULTI_ANCHOR
+
+
 @pytest.mark.parametrize(
     ("seq", "struct", "locus", "reason"),
     [
@@ -366,6 +383,20 @@ def test_corpus_record_without_a_split_row_is_refused() -> None:
     )
     assert report["n_corpus_refused_unjoined"] == 1
     assert report["n_positives"] == 1
+
+
+def test_a_null_parent_link_is_refused_not_stringified() -> None:
+    """A missing ``parent_record_id`` must reach the null gate, not arrive as ``"nan"``.
+
+    ``str(cell)`` turns a null into the *present-looking* strings ``"None"`` (pandas 2) or
+    ``"nan"`` (pandas 3), either of which sails past a not-null check as a fabricated
+    parent link — the P3-01 gate requires every row to name its parent for real
+    (CodeRabbit r1, PR #93).
+    """
+    corpus, ids, labels, splits = _fixture_frames()
+    splits.loc[0, "parent_record_id"] = None
+    with pytest.raises(ValueError, match="parent_record_id is null"):
+        ds.build_dataset(corpus=corpus, labels=labels, splits=splits, decoys=_decoys(ids))
 
 
 def test_a_nonzero_flank_is_refused() -> None:

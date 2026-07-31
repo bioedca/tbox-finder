@@ -176,7 +176,35 @@ loci. (f) README/`paper/manuscript.qmd` are **not** touched: this step lands no
 analysis result and the repo batches both at the phase-exit gate (the P2
 precedent).
 
-**Commit.** Branch `p3-01-stage2-dataset`, PR pending — the **squash SHA on
-`main` is not yet known** and must be reconciled at the P3-exit gate by deriving
-it (`git show <sha> -- analyses/phase3_log.qmd | grep '^+## Step'`), never copied
+**Review round 1 (CodeRabbit, PR #93) — 3 findings, 2 applied, 1 skipped with
+reason.** *(major, applied)* The uniqueness check used `str.count`, which counts
+**non-overlapping** occurrences — `"AAA".count("AA") == 1` — so a genuinely
+ambiguous probe could be reported unique and the structure silently placed at the
+first offset, the exact mis-placement the rule exists to prevent. Replaced with an
+overlap-aware scan. Re-measured on the full corpus before and after: **0 of 23,535
+records differ between the two counts**, anchored stays 18,269 and the artifact
+digest is byte-identical — a latent hole closed, not a number moved.
+*(minor, applied)* `parent_record_id` was built with `str(cell)`, which turns a
+null into the present-looking `"None"` (pandas 2) / `"nan"` (pandas 3) and would
+sail past the null gate as a fabricated parent link; now `_text`, so a null
+reaches the gate. *(major, skipped with reason)* The reviewer asked for the four
+source artifacts to be declared as Snakemake `input:`. Tested rather than argued:
+adding them (a) **fails `snakemake --lint`** with "Param … is a prefix of input or
+output file but hardcoded" — the CI-blocking rule — and (b) makes
+`snakemake -n stage2_dataset` schedule a **6-job rebuild** of
+`extract_split_sequences` → `align_split_positives` → `cluster_and_split` →
+`classII_recovery_set` → `split_assignment_table`, i.e. it would **regenerate the
+committed ADR-0004 split table** the no-leakage CI gate is anchored on. The
+DVC/git-LFS-tracked inputs stay out of the DAG, which is the documented house
+convention (`data.smk::derive_labels`). Restored byte-identical (`cmp`); with the
+rule as shipped, `snakemake -n stage2_dataset` says "Nothing to be done".
+Both applied fixes carry a new test and were sabotage-verified: reverting the
+overlap scan fails only
+`test_projection_refuses_an_OVERLAPPING_ambiguous_anchor`, reverting `_text` fails
+only `test_a_null_parent_link_is_refused_not_stringified`.
+
+**Commit.** Branch `p3-01-stage2-dataset`, PR #93 (2 commits: the step + this
+review round) — the **squash SHA on `main` is not yet known** and must be
+reconciled at the P3-exit gate by deriving it
+(`git show <sha> -- analyses/phase3_log.qmd | grep '^+## Step'`), never copied
 from notes.
