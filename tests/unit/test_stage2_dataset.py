@@ -17,6 +17,8 @@ copies the wrong row.
 
 from __future__ import annotations
 
+import hashlib
+
 import pytest
 
 from tbox_finder.stage2 import dataset as ds
@@ -423,11 +425,28 @@ def test_decoy_calib_is_independent_of_the_fold_draw() -> None:
     """
     ids = [f"gcbg_{i:06d}" for i in range(4000)]
     train = [i for i in ids if ds.decoy_fold(i) == "train"]
-    drawn = [i for i in train if ds.decoy_calib(i, fold_random="train")]
+    drawn = {i for i in train if ds.decoy_calib(i, fold_random="train")}
     assert drawn, "no decoy was drawn"
+
+    # The bug this guards: `calib` implemented as the low tail of the SAME unit interval
+    # `decoy_fold` already partitions. Assert against that implementation **by identity**,
+    # not by a rate band — measured, the shared-domain rate is 0.0536 among train-fold
+    # decoys (DECOY_CALIB_RATE / 0.80), which sits comfortably inside any tolerance loose
+    # enough to survive binomial noise, so a rate check cannot separate them
+    # ([[vacuous-test-perturbations]]).
+    def _shared_domain_unit(row_id: str) -> float:
+        digest = hashlib.sha256(f"{ds.DECOY_FOLD_SEED}:{row_id}".encode()).digest()
+        return int.from_bytes(digest[:8], "big") / float(1 << 64)
+
+    shared = {i for i in train if _shared_domain_unit(i) < ds.DECOY_CALIB_RATE}
+    assert shared, "the shared-domain comparison set is empty — the test proves nothing"
+    assert drawn != shared, "decoy_calib reuses decoy_fold's hash domain"
+    # and it is a genuinely different draw, not an off-by-a-handful one
+    assert len(drawn ^ shared) > 0.5 * len(shared)
+
     rate = len(drawn) / len(train)
-    # Binomial noise around the pinned rate; the assertion is deliberately loose because
-    # the *realised* count is a measurement, not a target to tune (CLAUDE.md §10.3).
+    # Binomial sanity only; the *realised* count is a measurement, not a target to tune
+    # (CLAUDE.md §10.3). Independence is asserted above, by identity.
     assert 0.5 * ds.DECOY_CALIB_RATE < rate < 2.0 * ds.DECOY_CALIB_RATE, rate
 
 

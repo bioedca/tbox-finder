@@ -345,6 +345,49 @@ and **no `T` from P2-13 is inherited**. `imp.md` P3-02 named
 `src/tbox_finder/data/splits.py::carve_calibration_split`; there is no such module and the
 entry point landed in `src/tbox_finder/splits.py` — roadmap path drift, corrected there.
 
-**Commit.** Branch `p3-02-calib-split` — the **squash SHA on `main` is not yet known** and
-must be reconciled at the P3-exit gate by deriving it
-(`git show <sha> -- analyses/phase3_log.qmd | grep '^+## Step'`), never copied from notes.
+**Review round 1 (CodeRabbit CLI, PR #94) — 2 findings, both real defects, both fixed.**
+*(a)* `CALIB_STRATUM_COLUMN` was **decorative**: it is a pinned constant *and* the value
+the provenance sidecar reports as `calib.stratum_column`, but the carve read
+`table["resolved_genus"]` by name. Changing the constant would have left the committed
+provenance claiming a stratification the carve never performed — a fabricated provenance
+value (§10.3) with nothing failing. Every caller now selects the column through the
+constant; verified load-bearing by execution (the real carve moves **859 → 526** records
+when it is pointed at `resolved_order`). *(b)* The calib guard re-derived with the
+**module-default** seed while `build_dataset` threads a caller's `decoy_fold_seed` into
+`decoy_calib` — so any non-default seed compared the built rows against a different hash:
+the guard would fire on a correct build and could never fire on a wrong one. The seed is
+threaded through, and the guard now re-derives over **every** parentless row instead of
+filtering to `calib=True` first, so a decoy wrongly left *out* — the count-preserving
+direction — is caught too.
+
+**Two of my own tests were structurally blind, and sabotage is what said so.** The first
+seed test used `DECOY_FOLD_SEED + 1`; the fixture has only two parentless decoys and at
+rate 0.0469 almost every seed leaves both False, so it **passed with the fix reverted**. It
+now uses a *searched* seed (20260737) that provably disagrees with the default and asserts
+that disagreement explicitly, so it cannot go vacuous again. The stratum test had the
+mirror problem: the unit fixture carried one genus per order, so genus- and
+order-stratification coincided (both → 2) and the test passed with the constant still
+decorative; the fixture now holds two genera inside one order (genus → 3, order → 2)
+([[vacuous-test-perturbations]], [[degenerate-fixture-generators]]).
+
+**Review round 2 (CodeRabbit CLI) — 2 findings, both applied; one real, one defensive.**
+*(a)* **Real:** `test_decoy_calib_is_independent_of_the_fold_draw` asserted independence
+through a rate band, but the very bug it names — implementing `calib` as the low tail of
+the *same* unit interval `decoy_fold` partitions — yields **0.0536** among train-fold
+decoys (`DECOY_CALIB_RATE / 0.80`), which sits inside any band loose enough to survive
+binomial noise. Measured, then replaced with an assertion **by identity** against the
+shared-domain set; sabotage-verified (collapsing the hash domain now fails that test).
+*(b)* **Defensive:** `_calib_provenance` counted `calib` over all rows while
+`n_eligible_records` counted corpus rows only. Measured on the committed table this is a
+**no-op** — 0 non-corpus calib rows, and `_assert_calib_disjoint` refuses them before the
+provenance is written — but numerator and denominator now range over the same population,
+so a `realised_fraction` cannot go wrong if that assertion is ever reordered or relaxed.
+
+Artifacts are **byte-identical across both review rounds** (split table sha256
+`d51252ee…`, Stage-2 digest `c5a2c251…`): these were fixes to guards, plumbing and tests,
+not to the carve.
+
+**Commit.** Branch `p3-02-calib-split`, PR #94 (3 commits: the step + two review rounds) —
+the **squash SHA on `main` is not yet known** and must be reconciled at the P3-exit gate by
+deriving it (`git show <sha> -- analyses/phase3_log.qmd | grep '^+## Step'`), never copied
+from notes.

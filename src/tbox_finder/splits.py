@@ -1413,7 +1413,14 @@ def _calib_provenance(table) -> dict:
         nested_train=list(table["nested_train"]),
         fold_random=list(table["fold_random"]),
     )
-    calib = table[table["calib"]]
+    # Corpus-restricted, matching `calib_eligible_row_indices`, so the numerator and
+    # the `n_eligible_records` denominator count the same population. Measured on the
+    # committed table this changes nothing (0 non-corpus calib rows — externals and
+    # variants cannot be drawn, and `_assert_calib_disjoint` refuses them outright).
+    # It is written this way so the two definitions cannot drift apart if that
+    # assertion is ever reordered or relaxed: a realised_fraction whose numerator and
+    # denominator range over different populations is a wrong number, not a loose one.
+    calib = table[table["calib"] & (table["source"] == "corpus")]
     elig_clusters = {int(table["cluster_id"].iloc[i]) for i in eligible}
     return {
         "adr": "ADR-0004 A7",
