@@ -682,7 +682,7 @@ def build_dataset(
         )
 
     frame = pd.DataFrame(rows, columns=list(OUTPUT_COLUMNS))
-    _assert_dataset_invariants(frame)
+    _assert_dataset_invariants(frame, decoy_fold_seed=decoy_fold_seed)
 
     positives = frame[frame["is_tbox"]]
     negatives = frame[~frame["is_tbox"]]
@@ -732,7 +732,7 @@ def build_dataset(
     return frame, report
 
 
-def _assert_calib_columns(frame: Any) -> None:
+def _assert_calib_columns(frame: Any, *, decoy_fold_seed: int = DECOY_FOLD_SEED) -> None:
     """ADR-0004 **A7** invariants on the Stage-2 side of the calibration carve.
 
     The split-table side is guarded by ``splits._assert_calib_disjoint``; this is the
@@ -754,24 +754,36 @@ def _assert_calib_columns(frame: Any) -> None:
             f"{graded['row_id'].iloc[0]!r}); the calibration fold must not overlap the "
             "split GATE-2 grades (PRD §12)"
         )
-    # A parentless decoy has no cluster and no clade, so it can only ever have entered
-    # calib through `decoy_calib`. Assert the converse of that rule holds as built: no
-    # parentless decoy outside the train portion is in calib. (The `graded` clause above
-    # already covers it for val/test; this one names the *route*, so a future edit that
-    # admits parentless decoys some other way fails here rather than silently.)
-    parentless = calib[calib["fold_basis"] == FOLD_BASIS_DECOY_RANDOM]
-    wrong_route = parentless[
-        ~parentless["row_id"].map(lambda r: decoy_calib(str(r), fold_random=FOLD_RANDOM_VALUES[0]))
+    # A parentless decoy has no cluster and no clade, so `decoy_calib` is the ONLY route
+    # by which it can be in *or* out of calib. Re-derive that verdict for **every**
+    # parentless row — not just the calib=True ones — using **this run's** seed, and
+    # require exact agreement.
+    #
+    # Both halves are load-bearing:
+    #   * checking only the calib=True rows would miss a decoy wrongly left OUT, a
+    #     count-preserving error in the other direction that no total would reveal
+    #     ([[symmetric-count-fixture-blind-to-inversion]]);
+    #   * re-deriving with the module default while the rows were built with a caller's
+    #     `decoy_fold_seed` compares against a different hash entirely — the guard would
+    #     fire on a correct build and could never fire on a wrong one.
+    parentless = frame[frame["fold_basis"] == FOLD_BASIS_DECOY_RANDOM]
+    expected = [
+        decoy_calib(str(r), fold_random=str(f), seed=decoy_fold_seed)
+        for r, f in zip(parentless["row_id"], parentless["fold_random"], strict=True)
     ]
-    if len(wrong_route):
+    actual = [not masking.is_missing(v) and bool(v) for v in parentless["calib"]]
+    mismatched = [
+        rid for rid, e, a in zip(parentless["row_id"], expected, actual, strict=True) if e != a
+    ]
+    if mismatched:
         raise ValueError(
-            f"{len(wrong_route)} parentless decoy(s) carry calib=True but are not drawn by "
-            f"decoy_calib (first: {wrong_route['row_id'].iloc[0]!r}) — A7.4 admits them by "
-            "that keyed hash and by no other route"
+            f"{len(mismatched)} parentless decoy(s) disagree with decoy_calib at seed "
+            f"{decoy_fold_seed} (first: {mismatched[0]!r}) — A7.4 admits them by that keyed "
+            "hash and by no other route, in both directions"
         )
 
 
-def _assert_dataset_invariants(frame: Any) -> None:
+def _assert_dataset_invariants(frame: Any, *, decoy_fold_seed: int = DECOY_FOLD_SEED) -> None:
     """The P3-01 validation gate, enforced at build time as well as in the tests."""
     if list(frame.columns) != list(OUTPUT_COLUMNS):
         raise ValueError(f"unexpected schema: {list(frame.columns)}")
@@ -794,7 +806,7 @@ def _assert_dataset_invariants(frame: Any) -> None:
     ):
         if frame[column].map(masking.is_missing).any():
             raise ValueError(f"{column} is null on at least one row (fold/provenance gate)")
-    _assert_calib_columns(frame)
+    _assert_calib_columns(frame, decoy_fold_seed=decoy_fold_seed)
     bad_basis = set(frame["fold_basis"]) - set(FOLD_BASES)
     if bad_basis:
         raise ValueError(f"unknown fold_basis value(s): {sorted(bad_basis)}")

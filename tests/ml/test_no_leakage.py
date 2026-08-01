@@ -740,7 +740,7 @@ def calib_carve_clauses(c):
 
     Fail-closed and **identity-based**. The committed ``calib`` boolean is never trusted
     on its own: ``splits.calib_cluster_ids`` is re-run against ``cluster_id`` /
-    ``nested_train`` / ``fold_random`` / ``resolved_genus`` plus the pinned seed and
+    ``nested_train`` / ``fold_random`` / the pinned stratum column, plus the seed and
     fraction, and the drawn cluster set must equal the committed one
     ([[gate-clauses-need-re-derivation]] — reading a flag back only catches a clause
     flipped FALSE, never one written TRUE by a broken carve).
@@ -757,7 +757,7 @@ def calib_carve_clauses(c):
         cluster_id=c["cluster_id"],
         nested_train=c["nested_train"],
         fold_random=c["fold_random"],
-        resolved_genus=c["resolved_genus"],
+        stratum=c[splits.CALIB_STRATUM_COLUMN],
     )
     eligible, selection_val = splits.calib_eligible_row_indices(
         source=c["source"],
@@ -833,7 +833,7 @@ def test_calib_clause_set_catches_a_reseeded_carve(committed):
         cluster_id=c["cluster_id"],
         nested_train=c["nested_train"],
         fold_random=c["fold_random"],
-        resolved_genus=c["resolved_genus"],
+        stratum=c[splits.CALIB_STRATUM_COLUMN],
         seed=splits.CALIB_CARVE_SEED + 1,
     )
     committed_calib = {

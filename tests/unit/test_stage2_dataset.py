@@ -363,6 +363,57 @@ def test_decoy_calib_is_deterministic_and_id_keyed() -> None:
     assert not all(first), "the draw admitted everything over 500 ids"
 
 
+#: A ``decoy_fold_seed`` under which the fixture's parentless decoys get a **different**
+#: calib verdict than the module default would assign them. Searched for, not guessed:
+#: the fixture carries only two parentless decoys and at ``DECOY_CALIB_RATE = 0.0469``
+#: almost every seed leaves both False, so a naive ``DECOY_FOLD_SEED + 1`` makes the test
+#: below **structurally blind** — it passes with the bug present. (It did; the first draft
+#: of this test survived reverting the fix. [[vacuous-test-perturbations]])
+_SEED_THAT_DISAGREES_WITH_THE_DEFAULT = 20260737
+
+
+def test_the_calib_guard_re_derives_with_the_runs_own_seed() -> None:
+    """CodeRabbit r1: the guard must use the build's ``decoy_fold_seed``, not the default.
+
+    ``build_dataset`` takes ``decoy_fold_seed`` and threads it into ``decoy_calib``. The
+    guard used to re-derive with the *module default*, so a caller passing any other seed
+    had their rows compared against a different hash — the check would fire on a correct
+    build and could never fire on a wrong one.
+
+    Both halves are asserted: building at the non-default seed **succeeds** (the guard
+    agrees with the build), and validating that same frame at the **default** seed
+    **raises** (so the seed genuinely reaches the comparison).
+    """
+    seed = _SEED_THAT_DISAGREES_WITH_THE_DEFAULT
+    (frame, _), _ = _build(decoy_fold_seed=seed)  # builds ⇒ the guard agreed, at `seed`
+    free = frame[frame["fold_basis"] == ds.FOLD_BASIS_DECOY_RANDOM]
+    assert free["calib"].notna().all()
+    for rid, fold, on in zip(free["row_id"], free["fold_random"], free["calib"], strict=True):
+        assert bool(on) is ds.decoy_calib(str(rid), fold_random=str(fold), seed=seed)
+    # the chosen seed must actually disagree with the default, or this proves nothing
+    assert any(
+        bool(on) is not ds.decoy_calib(str(rid), fold_random=str(fold))
+        for rid, fold, on in zip(free["row_id"], free["fold_random"], free["calib"], strict=True)
+    ), "the fixture seed does not disagree with the default — the test would be vacuous"
+    with pytest.raises(ValueError, match="disagree with decoy_calib"):
+        ds._assert_calib_columns(frame)  # re-derived at the DEFAULT seed ⇒ must reject
+
+
+def test_the_calib_guard_catches_a_decoy_wrongly_left_OUT() -> None:
+    """The count-preserving direction: a decoy that *should* be calib but is False.
+
+    Checking only the ``calib=True`` rows would miss this entirely, which is why the
+    guard re-derives over **every** parentless row rather than filtering first.
+    """
+    (frame, _), _ = _build()
+    free = frame[frame["fold_basis"] == ds.FOLD_BASIS_DECOY_RANDOM]
+    # flip one parentless decoy's verdict, whichever way it currently points
+    idx = free.index[0]
+    frame.loc[idx, "calib"] = not bool(frame.loc[idx, "calib"])
+    with pytest.raises(ValueError, match="disagree with decoy_calib"):
+        ds._assert_calib_columns(frame)
+
+
 def test_decoy_calib_is_independent_of_the_fold_draw() -> None:
     """A distinct hash domain: calib membership must not be a function of the fold draw.
 

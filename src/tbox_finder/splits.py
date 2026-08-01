@@ -1282,7 +1282,7 @@ def calib_cluster_ids(
     cluster_id: Sequence[Any],
     nested_train: Sequence[Any],
     fold_random: Sequence[Any],
-    resolved_genus: Sequence[Any],
+    stratum: Sequence[Any],
     fraction: float = CALIB_CARVE_FRACTION,
     seed: int = CALIB_CARVE_SEED,
 ) -> frozenset[int]:
@@ -1294,7 +1294,8 @@ def calib_cluster_ids(
     iteration order (CLAUDE.md §8.3):
 
     1. each eligible cluster takes one stratum = its **first non-null**
-       ``resolved_genus`` in table order, or :data:`CALIB_UNASSIGNED_STRATUM`;
+       :data:`CALIB_STRATUM_COLUMN` value in table order, or
+       :data:`CALIB_UNASSIGNED_STRATUM`;
     2. strata are visited in **sorted** order;
     3. within a stratum, cluster ids are **sorted**, then permuted by a single
        ``numpy.random.default_rng(seed)`` shared across strata;
@@ -1336,8 +1337,8 @@ def calib_cluster_ids(
     for i in eligible:
         cid = int(cluster_id[i])
         sizes[cid] += 1
-        if cid not in stratum_of and not masking.is_missing(resolved_genus[i]):
-            stratum_of[cid] = masking.row_text(resolved_genus[i])
+        if cid not in stratum_of and not masking.is_missing(stratum[i]):
+            stratum_of[cid] = masking.row_text(stratum[i])
 
     by_stratum: dict[str, list[int]] = defaultdict(list)
     for cid in sizes:
@@ -1381,7 +1382,10 @@ def carve_calibration_split(table):
     import numpy as np
 
     cols = {c: list(table[c]) for c in ("source", "cluster_id", "nested_train", "fold_random")}
-    cols["resolved_genus"] = list(table["resolved_genus"])
+    # Read through the pinned constant, never a hardcoded name: the provenance
+    # sidecar reports ``stratum_column: CALIB_STRATUM_COLUMN``, so a hardcoded read
+    # would let that field claim a stratification the carve never performed.
+    cols["stratum"] = list(table[CALIB_STRATUM_COLUMN])
     eligible, _ = calib_eligible_row_indices(
         source=cols["source"],
         cluster_id=cols["cluster_id"],

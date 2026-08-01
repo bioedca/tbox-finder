@@ -112,7 +112,17 @@ def _interim_frame():
             ],
             "resolved_class": ["Actinobacteria", "Bacilli", None, *["Bacilli"] * n_extra],
             "resolved_order": ["Frankiales", "Bacillales", None, *["Bacillales"] * n_extra],
-            "resolved_genus": ["Frankia", "Bacillus", None, *["Bacillus"] * n_extra],
+            # Two genera inside ONE order, on purpose: it makes genus- and
+            # order-stratification carve *differently*, which is what lets
+            # `test_calib_stratum_column_is_load_bearing` prove anything. With a single
+            # genus per order the two partitions coincide and that test passes with the
+            # constant still decorative ([[degenerate-fixture-generators]]).
+            "resolved_genus": [
+                "Frankia",
+                "Bacillus",
+                None,
+                *(["Bacillus"] * (n_extra // 2) + ["Geobacillus"] * (n_extra - n_extra // 2)),
+            ],
             "fold_random": ["train", "val", "train", *["train"] * n_extra],
             "loo_order_unit": ["Frankiales", "Bacillales", None, *["Bacillales"] * n_extra],
             "class_holdout_unit": ["Actinobacteria", None, None, *[None] * n_extra],
@@ -151,7 +161,7 @@ def _carve_cols(frame):
         "cluster_id": list(frame["cluster_id"]),
         "nested_train": list(frame["nested_train"]),
         "fold_random": list(frame["fold_random"]),
-        "resolved_genus": list(frame["resolved_genus"]),
+        "stratum": list(frame[splits.CALIB_STRATUM_COLUMN]),
     }
 
 
@@ -181,6 +191,22 @@ def test_calib_carve_is_deterministic_and_seed_sensitive():
     assert splits.calib_cluster_ids(**cols) == splits.calib_cluster_ids(**cols)
     other = splits.calib_cluster_ids(**cols, seed=splits.CALIB_CARVE_SEED + 1)
     assert isinstance(other, frozenset)
+
+
+def test_calib_stratum_column_is_load_bearing(monkeypatch):
+    """CodeRabbit r1: `CALIB_STRATUM_COLUMN` must actually drive the stratification.
+
+    It is a *pinned* constant and the provenance sidecar reports it as
+    ``calib.stratum_column``. It used to be decorative — the carve read
+    ``table["resolved_genus"]`` by name — so changing the constant would have left the
+    provenance claiming a stratification the carve never performed, i.e. a fabricated
+    provenance value (CLAUDE.md §10.3), with nothing failing.
+    """
+    pytest.importorskip("pandas")
+    frame = splits.build_split_table(_interim_frame())
+    baseline = splits.carve_calibration_split(frame).sum()
+    monkeypatch.setattr(splits, "CALIB_STRATUM_COLUMN", "resolved_order")
+    assert splits.carve_calibration_split(frame).sum() != baseline
 
 
 def test_calib_carve_ignores_row_order():
