@@ -232,15 +232,22 @@ A6_N_TWIN_TRAIN_RECORDS = 7099
 SELECTION_VAL_FRACTION = 0.10
 SELECTION_VAL_SEED = 20260717
 
-# The six fold-per-scheme columns (splits.FOLD_SCHEME_COLUMNS). A variant must
-# inherit every one from its parent (ADR-0004 D7).
-FOLD_SCHEME_COLUMNS: tuple[str, ...] = (
-    "fold_random",
-    "loo_order_unit",
-    "class_holdout_unit",
-    "phylum_holdout_unit",
-    "nested_train",
-    "nested_role",
+#: Fold columns Stage 1 deliberately does **not** carry. ``calib`` is the ADR-0004 A7
+#: carve for ADR-0005 D11's Stage-2 temperature fit: Stage 1 neither reads nor writes it,
+#: and widening :class:`CorpusRecord`'s ``folds`` tuple to hold it would change
+#: ``negatives.NEGATIVE_FOLDS``, every ``zip(..., strict=True)`` over the pair, and the
+#: shape of every committed Stage-1 report — for a flag Stage 1 has no use for.
+STAGE2_ONLY_FOLD_COLUMNS: frozenset[str] = frozenset({"calib"})
+
+#: The §9.2 fold-per-scheme columns Stage 1 carries; a variant must inherit every one
+#: from its parent (ADR-0004 D7). **Derived** from ``splits.FOLD_SCHEME_COLUMNS`` rather
+#: than retyped: this tuple was a hand-copied fork, and P3-02 caught it silently one
+#: column behind the moment ADR-0004 A7 added ``calib``. Deriving means a *new §9.2
+#: scheme* added upstream flows here automatically, while the one deliberate omission is
+#: named above and asserted in ``tests/unit/test_window_dataset.py``
+#: ([[promote-dont-duplicate-is-a-correctness-rule]]).
+FOLD_SCHEME_COLUMNS: tuple[str, ...] = tuple(
+    c for c in splits_mod.FOLD_SCHEME_COLUMNS if c not in STAGE2_ONLY_FOLD_COLUMNS
 )
 
 # ── Default artifact paths ───────────────────────────────────────────────────

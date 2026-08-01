@@ -2,6 +2,20 @@
   "adr": "ADR-0004",
   "env_lock_hash": "a4a6715d411d7218432c4c670d35475f6c9aa7dd6397fd5d906ca7e21293dc34",
   "extra": {
+    "calib": {
+      "adr": "ADR-0004 A7",
+      "fraction": 0.1,
+      "n_clusters": 431,
+      "n_eligible_clusters": 2526,
+      "n_eligible_records": 5034,
+      "n_orders": 23,
+      "n_phyla": 13,
+      "n_records": 859,
+      "n_selection_val_clusters_excluded": 469,
+      "realised_fraction": 0.17064,
+      "seed": 20260801,
+      "stratum_column": "resolved_genus"
+    },
     "dome": {
       "partition_strategy": {
         "clade_crossing_diagnostic": {
@@ -45,17 +59,18 @@
     "n_corpus": 23535,
     "n_external": 34,
     "n_records": 25913,
-    "n_synthetic_variants": 2344
+    "n_synthetic_variants": 2344,
+    "table_schema_version": "1.1"
   },
-  "generated_at_utc": "2026-07-19T18:51:53.585797+00:00",
-  "git_sha": "ed258da099b047315665eda8a417b29ae4997f12",
+  "generated_at_utc": "2026-08-01T21:21:21.143732+00:00",
+  "git_sha": "c8e8637ccc8a0e3e5730ed1f1b2d8fe10b9a4df7",
   "inputs": {
     "data/interim/splits/split_assignments.parquet": "b365987a3b4aa1087be96e51e8315d5cfd4a7e866bba5a877b1e472d06f921d8",
     "data/processed/audits/split_construction_report.json": "a33bbeaa723eb191ed03e9f87ead1b4edf40e6ee2fa80e7d20c1c7873cd6a0bd",
     "data/processed/master_clean_v0.parquet": "1eb76591d0e481019dd7acf72a439f157fec9f2aeecb8cc5c37ba80a7b062dd2"
   },
   "outputs": {
-    "data/processed/splits/split_assignments.parquet": "6388ba19328811fa81d2d5b84a58643674934b4286581d8eff9df2e2cefba029"
+    "data/processed/splits/split_assignments.parquet": "d51252ee8b2211603d672f0da2963b3364fe1acc48c542269da6eb63f0c6ebc3"
   },
   "rule": "workflow/rules/data.smk :: split_assignment_table",
   "schema_version": "1.0",

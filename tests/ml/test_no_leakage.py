@@ -143,6 +143,45 @@ def order_rank_train_test_straddle(is_designated_loo, resolved_order, nested_tra
     return sorted(held & trained)
 
 
+def calib_outside_its_pool(calib, source, nested_train, fold_random):
+    """ADR-0004 A7: a ``calib`` record must be a corpus row, inside the D5 training fold,
+    and outside the scheme-A val/test split.
+
+    The last conjunct is the one PRD §12 makes load-bearing — GATE-2's ECE is graded on
+    the in-distribution **test** split, and a temperature fitted on any part of it would
+    inflate the gate it exists to check. The first two say the fold is *training* data:
+    an external is held out wholesale, and a non-``nested_train`` record is outside the
+    training fold of some §9.2 scheme.
+    """
+    return [
+        i
+        for i, on in enumerate(calib)
+        if bool(on)
+        and (
+            source[i] != "corpus" or not bool(nested_train[i]) or fold_random[i] in ("val", "test")
+        )
+    ]
+
+
+def clusters_straddling_calib(cluster_id, calib, nested_train):
+    """ADR-0004 A7 cluster non-splitting: no cluster may hold a ``calib`` record and a
+    **training-stream** record left outside ``calib``.
+
+    Stated over the training stream rather than "every row", because the D4
+    taxonomy-incomplete ``dropped`` cluster-mates are deliberately outside the carve —
+    they are neither trained nor scored, so leaving them out leaks nothing, whereas a
+    trained cluster-mate would be a homolog of a calibration record sitting in training.
+    """
+    in_calib = {c for c, on in zip(cluster_id, calib, strict=True) if bool(on)}
+    return sorted(
+        {
+            c
+            for c, on, t in zip(cluster_id, calib, nested_train, strict=True)
+            if c in in_calib and bool(t) and not bool(on)
+        }
+    )
+
+
 def phylum_holdout_cluster_straddle(cluster_id, resolved_phylum, nested_train):
     """Phylum scheme (Actinobacteria): no cluster containing an Actinobacteria member may
     also contain a trained member (D3 forces the whole cluster out of training)."""
@@ -348,6 +387,10 @@ def _clean_cols():
         "is_anchor_heldout": [False, False, False, False, False, True],
         "clade_crossing_cluster": [False, False, False, False, False, False],
         "dropped_from_clade_holdout": [False, False, False, False, True, False],
+        # ADR-0004 A7: cluster 0 (rows 0,1 — corpus, nested_train, fold_random train)
+        # is carved **whole** into calib. Every other row is outside the eligible pool:
+        # rows 2,3 are held out, row 4 is `dropped`, row 5 is an external.
+        "calib": [True, True, False, False, False, False],
     }
 
 
@@ -369,6 +412,10 @@ def _all_violations(c):
         "phylum_straddle": phylum_holdout_cluster_straddle(
             c["cluster_id"], c["resolved_phylum"], c["nested_train"]
         ),
+        "calib_pool": calib_outside_its_pool(
+            c["calib"], c["source"], c["nested_train"], c["fold_random"]
+        ),
+        "calib_straddle": clusters_straddling_calib(c["cluster_id"], c["calib"], c["nested_train"]),
         "d4": no_clade_records_silently_passing(
             c["source"],
             c["resolved_order"],
@@ -401,6 +448,49 @@ def test_random_cluster_split_is_caught():
     c = _clean_cols()
     c["fold_random"][1] = "val"  # cluster 0 now straddles train/val
     assert clusters_split_across_random_fold(c["cluster_id"], c["fold_random"]) == [0]
+
+
+def test_calib_reaching_the_graded_split_is_caught():
+    """The A7 failure that would inflate GATE-2: a calibration record in the test split."""
+    c = _clean_cols()
+    c["fold_random"][0] = "test"
+    c["fold_random"][1] = "test"  # move the whole calib cluster into the graded split
+    assert calib_outside_its_pool(c["calib"], c["source"], c["nested_train"], c["fold_random"]) == [
+        0,
+        1,
+    ]
+
+
+def test_calib_outside_the_training_fold_is_caught():
+    c = _clean_cols()
+    c["calib"][2] = True  # a held-out record joins the calibration fold
+    assert 2 in calib_outside_its_pool(c["calib"], c["source"], c["nested_train"], c["fold_random"])
+
+
+def test_calib_on_an_external_is_caught():
+    c = _clean_cols()
+    c["calib"][5] = True  # the literature anchor joins the calibration fold
+    assert 5 in calib_outside_its_pool(c["calib"], c["source"], c["nested_train"], c["fold_random"])
+
+
+def test_calib_splitting_a_cluster_is_caught():
+    """A *count-preserving* failure: the carve stays the right size but stops being
+    whole-cluster, leaving a homolog of a calibration record inside training."""
+    c = _clean_cols()
+    c["calib"][1] = False  # cluster 0 now half in calib, half in the training stream
+    assert clusters_straddling_calib(c["cluster_id"], c["calib"], c["nested_train"]) == [0]
+
+
+def test_calib_excluding_a_dropped_cluster_mate_is_not_a_straddle():
+    """The 22 real ``dropped`` cluster-mates are outside calib by design (A7.3).
+
+    Asserted explicitly so a future 'fix' that widens the carve to whole clusters
+    regardless of role — pulling never-scored records into a calibration fit — has to
+    change a test that says why it is wrong, rather than silently passing.
+    """
+    c = _clean_cols()
+    c["cluster_id"][4] = 0  # the dropped row is now a cluster-mate of the calib cluster
+    assert clusters_straddling_calib(c["cluster_id"], c["calib"], c["nested_train"]) == []
 
 
 def test_nested_cluster_train_heldout_mix_is_caught():
@@ -645,6 +735,129 @@ def test_scheme_random_cluster_non_splitting(committed):
     assert clusters_split_across_random_fold(c["cluster_id"], c["fold_random"]) == []
 
 
+def calib_carve_clauses(c):
+    """The ADR-0004 **A7** clause set, re-derived from the committed table's own columns.
+
+    Fail-closed and **identity-based**. The committed ``calib`` boolean is never trusted
+    on its own: ``splits.calib_cluster_ids`` is re-run against ``cluster_id`` /
+    ``nested_train`` / ``fold_random`` / the pinned stratum column, plus the seed and
+    fraction, and the drawn cluster set must equal the committed one
+    ([[gate-clauses-need-re-derivation]] — reading a flag back only catches a clause
+    flipped FALSE, never one written TRUE by a broken carve).
+
+    Identity rather than counts, because two near-equal partitions make a mis-keyed or
+    re-seeded draw invisible to every count in the artifact
+    ([[symmetric-count-fixture-blind-to-inversion]]).
+    """
+    committed_calib = {
+        int(cid) for cid, on in zip(c["cluster_id"], c["calib"], strict=True) if bool(on)
+    }
+    rederived = splits.calib_cluster_ids(
+        source=c["source"],
+        cluster_id=c["cluster_id"],
+        nested_train=c["nested_train"],
+        fold_random=c["fold_random"],
+        stratum=c[splits.CALIB_STRATUM_COLUMN],
+    )
+    eligible, selection_val = splits.calib_eligible_row_indices(
+        source=c["source"],
+        cluster_id=c["cluster_id"],
+        nested_train=c["nested_train"],
+        fold_random=c["fold_random"],
+    )
+    eligible_clusters = {int(c["cluster_id"][i]) for i in eligible}
+    n_calib = sum(1 for on in c["calib"] if bool(on))
+
+    # The must-fire companion: strip the `fold_random == "train"` restriction and the
+    # eligible pool MUST grow. If it does not, the conjunct is a no-op — the state it
+    # refuses does not exist in this table — and every "disjoint from the graded split"
+    # clause above it is vacuous ([[namespace-mismatch-invisible-noop]]).
+    loosened = [
+        i
+        for i in range(len(c["record_id"]))
+        if c["source"][i] == "corpus"
+        and bool(c["nested_train"][i])
+        and int(c["cluster_id"][i]) not in selection_val
+    ]
+    return {
+        "carve_is_nonempty": n_calib > 0,
+        "carve_is_not_the_whole_pool": 0 < len(committed_calib) < len(eligible_clusters),
+        "cluster_set_matches_rederivation": committed_calib == set(rederived),
+        "every_calib_row_is_in_the_pool": calib_outside_its_pool(
+            c["calib"], c["source"], c["nested_train"], c["fold_random"]
+        )
+        == [],
+        "no_cluster_straddles_calib": clusters_straddling_calib(
+            c["cluster_id"], c["calib"], c["nested_train"]
+        )
+        == [],
+        "disjoint_from_selection_val": not (committed_calib & set(selection_val)),
+        "disjoint_from_gate4_eval": not (committed_calib & _gate4_eval_clusters(c)),
+        "loosening_admits_the_refused": len(loosened) > len(eligible),
+    }
+
+
+def _gate4_eval_clusters(c):
+    """ADR-0004 A6's GATE-4 graded population, re-derived here.
+
+    Deliberately a *second* derivation rather than an import of
+    ``window_dataset.gate4_eval_cluster_ids``: that module is not in the bare-CI tier's
+    dependency set, and the rule ("nested_train ∧ scheme-A test, by cluster") is one
+    line. A drift between the two would mean A6 and A7 disagree about what GATE-4 grades,
+    which is exactly what this clause exists to notice.
+    """
+    return {
+        int(cid)
+        for cid, t, f in zip(c["cluster_id"], c["nested_train"], c["fold_random"], strict=True)
+        if bool(t) and f == "test"
+    }
+
+
+def test_scheme_calibration_carve_is_disjoint_and_rederivable(committed):
+    """ADR-0004 A7 / ADR-0005 D11 — the disjoint calibration split, on the real partition."""
+    clauses = calib_carve_clauses(committed)
+    failed = sorted(k for k, ok in clauses.items() if not ok)
+    assert not failed, f"calib carve clauses failed: {failed}"
+
+
+def test_calib_clause_set_catches_a_reseeded_carve(committed):
+    """Must-fire: a carve drawn with a different seed must break the identity clause.
+
+    Guards the direction a count-based check cannot see — a re-seeded draw has the same
+    record count, the same cluster count and the same prevalence, and differs only in
+    *which* clusters it took.
+    """
+    c = dict(committed)
+    other = splits.calib_cluster_ids(
+        source=c["source"],
+        cluster_id=c["cluster_id"],
+        nested_train=c["nested_train"],
+        fold_random=c["fold_random"],
+        stratum=c[splits.CALIB_STRATUM_COLUMN],
+        seed=splits.CALIB_CARVE_SEED + 1,
+    )
+    committed_calib = {
+        int(cid) for cid, on in zip(c["cluster_id"], c["calib"], strict=True) if bool(on)
+    }
+    assert other != committed_calib, "a re-seeded draw reproduced the committed carve"
+    c["calib"] = [int(cid) in other for cid in c["cluster_id"]]
+    assert calib_carve_clauses(c)["cluster_set_matches_rederivation"] is False
+
+
+def test_calib_clause_set_catches_an_all_false_column(committed):
+    """Must-fire: the vacuous-green failure — a carve that reached nothing.
+
+    Every "calib does not overlap X" clause is trivially TRUE on an empty carve
+    ([[clauses-must-guard-emptiness]]), so the emptiness clause is what makes the rest
+    mean anything.
+    """
+    c = dict(committed)
+    c["calib"] = [False] * len(c["record_id"])
+    clauses = calib_carve_clauses(c)
+    assert clauses["carve_is_nonempty"] is False
+    assert clauses["every_calib_row_is_in_the_pool"] is True  # vacuously — the point
+
+
 def test_scheme_leave_clade_out_cluster_non_splitting(committed):
     # nested realization ⇒ every leave-clade-out scheme (order / class / phylum): no
     # cluster mixes a trained and a held-out member.
@@ -742,6 +955,10 @@ def _with_synthetic_variant(**over):
         "is_anchor_heldout": False,
         "clade_crossing_cluster": False,
         "dropped_from_clade_holdout": False,
+        # ADR-0004 A7: inherited from the held-out parent r2, so False. `calib` is in
+        # FOLD_SCHEME_COLUMNS, so `variant_parent_fold_mismatches` now covers it and a
+        # variant claiming a calib its parent does not have is caught for free.
+        "calib": False,
     }
     row.update(over)
     for k in c:

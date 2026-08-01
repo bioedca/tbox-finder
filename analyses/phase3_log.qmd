@@ -220,3 +220,174 @@ review rounds) — the **squash SHA on `main` is not yet known** and must be
 reconciled at the P3-exit gate by deriving it
 (`git show <sha> -- analyses/phase3_log.qmd | grep '^+## Step'`), never copied
 from notes.
+
+## Step P3-02 — 2026-08-01: carve the disjoint calibration split (cluster-respecting) + re-run no-leakage
+
+**Inputs.** The committed git-LFS `data/processed/splits/split_assignments.parquet`
+(ADR-0004 D7, 25,913 rows, sha256 `6388ba19…`), its DVC-interim source, and
+`data/processed/stage2_dataset.parquet` (P3-01, 30,542 rows, digest `03263354…`).
+LOCAL, ~30 s, no GPU and no network.
+
+**Process.** ADR-0005 **D11** pins the recalibration stack as *train → temperature-scale
+on a disjoint calibration split → prior-shift*, but ADR-0004's fold vocabulary had **no
+calibration fold**: A11 (P2-13) recorded the absence, fitted its non-gated Stage-1 `T` on
+a seeded half of the P2-06a `selection_val` rung as a stopgap, and named P3-02 as the step
+that carves the real one. This step signs **ADR-0004 A7** and builds it. `calib` is drawn
+by `splits.calib_cluster_ids` from the pool
+`source == "corpus" ∧ nested_train ∧ fold_random == "train" ∧ cluster ∉ selection_val`
+(**5,034 records / 2,526 clusters**), and written by `splits.carve_calibration_split`
+inside `build_split_table` — *before* `append_variant_rows`, which is what makes variant
+`calib` inheritance structural rather than conventional.
+
+Three choices are load-bearing.
+
+*(i) The `fold_random == "train"` conjunct does the disjointness structurally.* `fold_random`
+is whole-cluster assigned (measured: **0** clusters span >1 non-null value), so excluding
+the value excludes the cluster. It also removes ADR-0004 **A6**'s `gate4_eval` population
+(1,204 records / 1,031 clusters) in full — measured, the pool is the same 5,034 records
+with or without a separate `gate4_eval` exclusion, so the emptiness of that intersection is
+a *consequence* of the rule, asserted rather than assumed. The pool is disjoint from **both**
+candidate Stage-2 in-distribution test populations, so it does not pre-empt P3-03's
+train-eligibility policy.
+
+*(ii) The draw is genus-stratified because the uniform one is not representative — measured.*
+The eligible pool is **98.5 % Firmicutes / 56.7 % Bacillales**, and only **2 of its 25
+orders** carry ≥ 20 records. The uniform whole-cluster draw used for `selection_val` reaches
+**6 orders / 4 phyla** at fraction 0.10; genus stratification reaches **23 orders / 13
+phyla** (859 records / 431 clusters, realised fraction **17.1 %** — a stratum cannot
+subdivide a whole cluster). Genus is not a new device: scheme A is itself
+"random (**genus-stratified**)" (PRD §9.2), so `calib` is drawn the way the split it must
+mirror was drawn. Stage-2 training loses those 859 of 5,034 eligible positives — the
+intrinsic price of D11's word *disjoint*.
+
+*(iii) The negative side is prevalence-matched, because a binary head cannot be calibrated
+on a positives-only fold.* The committed table has **no negative rows** at all (the A4/b2
+blind spot), so P3-01 had left open — explicitly, flagged for this step — whether a
+parentless decoy may enter `calib`. Inherit-only gives 64 negatives → prevalence **0.931**
+against the in-distribution test split's **0.7727**; admitting every train-fold parentless
+decoy gives **0.174**. A7.4 therefore admits parentless decoys from the **train portion
+only**, at `DECOY_CALIB_RATE = 0.0469`, by a keyed hash under a distinct `":calib:"` domain
+prefix — a *second* draw rather than a 4-way widening of `decoy_fold`, because
+re-partitioning the existing 0.80/0.10/0.10 mass would move decoys across the train/val/test
+boundary and silently change a partition P3-01 already committed. `nested_train` stays
+**null** for them: A7 says what the calibration *fit* may see, and resolves nothing about
+P3-03's sampling policy.
+
+**A fork this step exposed.** `data/window_dataset.py` carried its own hand-typed
+`FOLD_SCHEME_COLUMNS` commented *"the six … (splits.FOLD_SCHEME_COLUMNS)"*. Adding `calib`
+upstream put it one column behind and **nothing failed**. Stage 1 is right not to carry a
+Stage-2 calibration flag — widening `CorpusRecord.folds` would change
+`negatives.NEGATIVE_FOLDS`, every `zip(…, strict=True)` over the pair, and every committed
+Stage-1 report shape — so the tuple is now **derived** as
+`splits.FOLD_SCHEME_COLUMNS − STAGE2_ONLY_FOLD_COLUMNS`, leaving its content and order
+identical while making the omission a named decision
+([[promote-dont-duplicate-is-a-correctness-rule]]).
+
+**Outputs.** Regenerated `data/processed/splits/split_assignments.parquet` (git-LFS,
+25,913 × **21** columns, sha256 `d51252ee…`, `extra.table_schema_version` **1.1**) with its
+provenance `extra.calib` block (seed 20260801, fraction 0.10, 5,034 eligible → **859
+records / 431 clusters / 23 orders / 13 phyla**, realised 0.17064); regenerated
+`data/processed/stage2_dataset.parquet` (DVC, md5 `23f412dc…`, digest `c5a2c251…`,
+30,542 × **35** columns) + `stage2_dataset_report.json → calib`.
+
+**Validation.** Gate **PASS**. The full-corpus no-leakage suite is green — **57 passed /
+0 failed** (49 before this step) with `TBOX_REQUIRE_NO_LEAKAGE=1`, including the new
+`test_scheme_calibration_carve_is_disjoint_and_rederivable`. On the real partition:
+calib ∩ {val, test} = **0**, ∩ `selection_val` = **0**, ∩ `gate4_eval` = **0**, ∩ designated
+LOO holdout = **0**, ∩ clade-crossing = **0**, clusters straddling calib/training = **0**.
+The 22 corpus cluster-mates left outside `calib` are **all** `nested_role == "dropped"` and
+**0** are `nested_train`, so nothing in the training stream is orphaned.
+
+The CI clause never reads the committed boolean back: it **re-derives** the carve from
+`cluster_id`/`nested_train`/`fold_random`/`resolved_genus` + the pinned seed and asserts
+**set identity** ([[gate-clauses-need-re-derivation]]). Verified by sabotage on the real
+table, not by reading — seven targeted mutations (clear one bit, admit one extra record,
+move a calib record to `test`, split a calib cluster, blank the column, carve the whole
+pool, admit a `selection_val` record), each biting the intended clause;
+`loosening_admits_the_refused` is non-vacuous the other way, TRUE at baseline because
+dropping the `fold_random == "train"` conjunct grows the pool **5,034 → 6,366**.
+`disjoint_from_selection_val` / `disjoint_from_gate4_eval` are structurally implied by the
+pool definition and are retained as guards on a future pool change, not as independent
+evidence — stated rather than counted as bite.
+
+Other suites: `test_split_table_schema` 33 (was 27), `test_stage2_dataset` 27 (was 24),
+`test_window_dataset` 76 (was 75), golden 3, `test_negatives` 36, `test_split_assignment`
+11 — all 0 failed against a **matched control sweep of the same runner on `main`**, which
+is how the 11 apparent new "skips" were traced to DVC artifacts absent in a fresh worktree
+rather than to this change. `ruff check` + `black --check` clean at the CI-pinned versions
+(0.15.15 / 25.11.0); `snakemake --lint` "workflow is in a good condition"; `snakemake -n`
+parses. Both artifacts were regenerated **after** the `black` reformat and reproduce
+byte-identical digests, so the shipped bytes are the measured ones
+([[verify-the-line-you-ship]]).
+
+**The one number that did not land on target, reported not tuned.** The realised
+calibration set is **859 positives / 230 negatives = prevalence 0.7888** against the test
+split's **0.7727** — **+1.6 pp**. The keyed hash drew 168 parentless decoys where the rate's
+expectation is 188.9 (−1.6 σ), and 62 rather than 64 inherited, two eligible shuffles being
+union-prior-masked out. `DECOY_CALIB_RATE` is **not** re-tuned to close the gap: the rate is
+the pinned quantity and the prevalence is a measurement (CLAUDE.md §10.3). The rejected
+inherit-only rule sits 15.4 pp off. Both numbers ship as report constants so a drift is
+visible rather than inferred.
+
+**Disclosed limitation.** `calib` is carved from inside `nested_train`, so its clade support
+is narrower than the test split's **by construction**: 23 orders / 13 phyla vs the test
+split's 48 orders / 12 phyla (the extra orders are the held-out clades `nested_train`
+excludes — they *cannot* appear in a training-fold carve). At phylum level the two are close
+(Firmicutes 0.962 vs 0.941); at order level calib is Bacillales 0.491 / Clostridiales 0.469
+vs test 0.364 / 0.278. This is a calibration-transfer caveat for the P3-10 GATE-2 artifact
+to carry, **not** corrected by reweighting, which would be an unpinned estimator.
+
+**Decisions.** **ADR-0004 A7** drafted, measured, and **signed** (bioedca, 2026-08-01,
+AskUserQuestion; CLAUDE.md §7 item 2) — all three forks taken as drafted: prevalence-matched
+negatives, fraction 0.10, and a committed column plus CI re-derivation rather than a derived
+predicate. A7 discharges ADR-0005 **A11**'s disclosure (iii): GATE-2's `T` is re-fitted here,
+and **no `T` from P2-13 is inherited**. `imp.md` P3-02 named
+`src/tbox_finder/data/splits.py::carve_calibration_split`; there is no such module and the
+entry point landed in `src/tbox_finder/splits.py` — roadmap path drift, corrected there.
+
+**Review round 1 (CodeRabbit CLI, PR #94) — 2 findings, both real defects, both fixed.**
+*(a)* `CALIB_STRATUM_COLUMN` was **decorative**: it is a pinned constant *and* the value
+the provenance sidecar reports as `calib.stratum_column`, but the carve read
+`table["resolved_genus"]` by name. Changing the constant would have left the committed
+provenance claiming a stratification the carve never performed — a fabricated provenance
+value (§10.3) with nothing failing. Every caller now selects the column through the
+constant; verified load-bearing by execution (the real carve moves **859 → 526** records
+when it is pointed at `resolved_order`). *(b)* The calib guard re-derived with the
+**module-default** seed while `build_dataset` threads a caller's `decoy_fold_seed` into
+`decoy_calib` — so any non-default seed compared the built rows against a different hash:
+the guard would fire on a correct build and could never fire on a wrong one. The seed is
+threaded through, and the guard now re-derives over **every** parentless row instead of
+filtering to `calib=True` first, so a decoy wrongly left *out* — the count-preserving
+direction — is caught too.
+
+**Two of my own tests were structurally blind, and sabotage is what said so.** The first
+seed test used `DECOY_FOLD_SEED + 1`; the fixture has only two parentless decoys and at
+rate 0.0469 almost every seed leaves both False, so it **passed with the fix reverted**. It
+now uses a *searched* seed (20260737) that provably disagrees with the default and asserts
+that disagreement explicitly, so it cannot go vacuous again. The stratum test had the
+mirror problem: the unit fixture carried one genus per order, so genus- and
+order-stratification coincided (both → 2) and the test passed with the constant still
+decorative; the fixture now holds two genera inside one order (genus → 3, order → 2)
+([[vacuous-test-perturbations]], [[degenerate-fixture-generators]]).
+
+**Review round 2 (CodeRabbit CLI) — 2 findings, both applied; one real, one defensive.**
+*(a)* **Real:** `test_decoy_calib_is_independent_of_the_fold_draw` asserted independence
+through a rate band, but the very bug it names — implementing `calib` as the low tail of
+the *same* unit interval `decoy_fold` partitions — yields **0.0536** among train-fold
+decoys (`DECOY_CALIB_RATE / 0.80`), which sits inside any band loose enough to survive
+binomial noise. Measured, then replaced with an assertion **by identity** against the
+shared-domain set; sabotage-verified (collapsing the hash domain now fails that test).
+*(b)* **Defensive:** `_calib_provenance` counted `calib` over all rows while
+`n_eligible_records` counted corpus rows only. Measured on the committed table this is a
+**no-op** — 0 non-corpus calib rows, and `_assert_calib_disjoint` refuses them before the
+provenance is written — but numerator and denominator now range over the same population,
+so a `realised_fraction` cannot go wrong if that assertion is ever reordered or relaxed.
+
+Artifacts are **byte-identical across both review rounds** (split table sha256
+`d51252ee…`, Stage-2 digest `c5a2c251…`): these were fixes to guards, plumbing and tests,
+not to the carve.
+
+**Commit.** Branch `p3-02-calib-split`, PR #94 (3 commits: the step + two review rounds) —
+the **squash SHA on `main` is not yet known** and must be reconciled at the P3-exit gate by
+deriving it (`git show <sha> -- analyses/phase3_log.qmd | grep '^+## Step'`), never copied
+from notes.

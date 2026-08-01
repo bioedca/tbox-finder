@@ -46,9 +46,11 @@ import json
 import subprocess
 import sys
 from collections import Counter, defaultdict
+from collections.abc import Sequence
 from pathlib import Path
+from typing import Any
 
-from tbox_finder import provenance
+from tbox_finder import masking, provenance
 
 # --------------------------------------------------------------------------- #
 # Pinned constants (ADR-0004 D2; PRD §9.2/§12). Any change to the D2 cut needs
@@ -83,6 +85,30 @@ MIN_HELDOUT_POSITIVES = 20
 TRAIN_COVERAGE_FLOOR = 0.60
 #: The one well-powered held-out phylum (ADR-0004 D5 (ii); PRD §9.2).
 HOLDOUT_PHYLUM = "Actinobacteria"
+
+# --------------------------------------------------------------------------- #
+# ADR-0004 A7 (P3-02) — the ADR-0005 D11 *disjoint calibration split*.
+# Changing any of these three re-partitions the fold GATE-2's temperature is
+# fitted on, so they need ADR-0004 re-sign-off (CLAUDE.md §7 item 2).
+# --------------------------------------------------------------------------- #
+#: Seed for the whole-cluster calibration draw (A7.2).
+CALIB_CARVE_SEED = 20260801
+#: Nominal per-stratum record fraction. The *realised* fraction is larger (17.1%
+#: as built) because a stratum cannot subdivide a whole cluster — a stratum whose
+#: only cluster holds 3 records contributes 3 or 0, never 0.3. The realised number
+#: is measured and reported, never back-solved for (CLAUDE.md §10.3).
+CALIB_CARVE_FRACTION = 0.10
+#: Stratification key. Scheme A is itself "random (**genus-stratified**)" (PRD
+#: §9.2; :func:`assign_random_folds`), so ``calib`` is drawn the same way the
+#: split it must mirror was drawn. Measured justification (A7.2): the eligible
+#: pool is 98.5% Firmicutes / 56.7% Bacillales, so the *uniform* whole-cluster
+#: draw used for ``selection_val`` reaches only **6 of 25 orders** at this
+#: fraction, whereas genus stratification reaches **23**.
+CALIB_STRATUM_COLUMN = "resolved_genus"
+#: Explicit stratum for a cluster with no resolved genus — a named bucket, never
+#: a silent drop (the D4 discipline: a record with no clade label cannot pass by
+#: falling out of a filter).
+CALIB_UNASSIGNED_STRATUM = "__unassigned__"
 
 DEFAULT_SEED = provenance.DEFAULT_SEED  # 42
 
@@ -151,6 +177,7 @@ BOOL_FLAG_COLUMNS = (
     "is_anchor_heldout",
     "clade_crossing_cluster",
     "dropped_from_clade_holdout",
+    "calib",
 )
 #: One fold assignment per §9.2 partition scheme + the D5 nested single-checkpoint
 #: fold (``nested_train``/``nested_role``).
@@ -161,6 +188,15 @@ FOLD_SCHEME_COLUMNS = (
     "phylum_holdout_unit",
     "nested_train",
     "nested_role",
+    # ADR-0004 A7 (P3-02) — the D11 disjoint calibration carve. **Appended last,
+    # and it must stay last**: consumers index this tuple positionally
+    # (``window_dataset.record_order`` does ``FOLD_SCHEME_COLUMNS.index(...)``
+    # against ``CorpusRecord.folds``), so inserting anywhere else would silently
+    # mis-key the leave-one-order-out macro-average rather than fail loudly.
+    # Membership here is deliberate: it makes the existing
+    # ``variant_parent_fold_mismatches`` / ``synthetic_variant_leaks`` predicates
+    # cover ``calib`` inheritance for the 2,344 synthetic variants for free.
+    "calib",
 )
 #: Closed, ordered allowlist of committed-table columns. Enforced as an *equality*
 #: (not a superset) so the "no sequences" guarantee is structural: a column
@@ -179,6 +215,9 @@ COMMITTED_TABLE_COLUMNS = (
     "clade_crossing_cluster",
     "dropped_from_clade_holdout",
 )
+#: Version of the *committed table's* column schema (distinct from the provenance
+#: sidecar's own ``schema_version``). 1.0 → **1.1** adds ``calib`` (ADR-0004 A7).
+COMMITTED_TABLE_SCHEMA_VERSION = "1.1"
 #: Column names that would carry sequence content — never permitted in the
 #: committed carve-out (belt-and-braces alongside the closed allowlist above).
 SEQUENCE_COLUMN_DENYLIST = frozenset(
@@ -1177,6 +1216,282 @@ def _is_hex64(value) -> bool:
     return all(c in "0123456789abcdef" for c in value)
 
 
+def calib_eligible_row_indices(
+    *,
+    source: Sequence[Any],
+    cluster_id: Sequence[Any],
+    nested_train: Sequence[Any],
+    fold_random: Sequence[Any],
+) -> tuple[list[int], frozenset[int]]:
+    """Row indices of the ADR-0004 **A7.1** calibration-eligible pool, + the excluded rung.
+
+    The pool is ``source == "corpus" ∧ nested_train ∧ fold_random == "train" ∧
+    cluster ∉ selection_val``. Returns ``(indices, selection_val_cluster_ids)`` so a
+    caller (and the CI re-derivation) can report *what was excluded* rather than only
+    what survived.
+
+    Each conjunct is load-bearing and none is redundant:
+
+    * ``nested_train`` — the D5 most-restrictive training fold, so a calibration
+      record is inside the training fold of **every** §9.2 scheme.
+    * ``fold_random == "train"`` — keeps ``calib`` out of the in-distribution split
+      GATE-2's ECE is graded on (ADR-0005 D11; PRD §12 requires the two not overlap
+      "or the ECE gate is inflated"). Because ``fold_random`` is whole-cluster
+      assigned (measured: 0 clusters span >1 non-null value), excluding the *value*
+      excludes the *cluster* — the disjointness is structural, not drawn.
+      This conjunct also removes ADR-0004 **A6**'s ``gate4_eval`` population in full,
+      since A6 defines it as ``nested_train ∧ fold_random == "test"``; measured on the
+      committed table the extra ``gate4_eval`` exclusion is a no-op (5,034 either way),
+      which is a *consequence* of this line and is asserted, not assumed.
+    * ``∉ selection_val`` — the P2-06a inner rung is the fold the sweep selected
+      γ/lr/α on. ADR-0005 A11 already refused to fit a temperature there because
+      "the read becomes in-sample"; reusing it here would repeat that error.
+
+    ``externals`` (``source`` ∈ ``anchor``/``blind``) and ``derived`` rows
+    (``synthetic_classII``) are excluded by the ``corpus`` conjunct: an external is
+    held out wholesale and a variant inherits its parent's ``calib`` through
+    :func:`append_variant_rows`, so neither may be *drawn*.
+    """
+    from tbox_finder.data.window_dataset import (  # local: window_dataset imports this module
+        SELECTION_VAL_FRACTION,
+        SELECTION_VAL_SEED,
+        selection_val_cluster_ids,
+    )
+
+    n = len(source)
+    nested_rows = [
+        i for i in range(n) if masking.row_text(source[i]) == "corpus" and bool(nested_train[i])
+    ]
+    fold_sizes: Counter[int] = Counter(int(cluster_id[i]) for i in nested_rows)
+    if not fold_sizes:
+        raise ValueError("no corpus rows in nested_train — there is no fold to carve from")
+    selection_val = selection_val_cluster_ids(
+        fold_sizes, fraction=SELECTION_VAL_FRACTION, seed=SELECTION_VAL_SEED
+    )
+    eligible = [
+        i
+        for i in nested_rows
+        if masking.row_text(fold_random[i]) == "train" and int(cluster_id[i]) not in selection_val
+    ]
+    return eligible, selection_val
+
+
+def calib_cluster_ids(
+    *,
+    source: Sequence[Any],
+    cluster_id: Sequence[Any],
+    nested_train: Sequence[Any],
+    fold_random: Sequence[Any],
+    stratum: Sequence[Any],
+    fraction: float = CALIB_CARVE_FRACTION,
+    seed: int = CALIB_CARVE_SEED,
+) -> frozenset[int]:
+    """The whole clusters forming the ADR-0004 **A7** disjoint calibration split.
+
+    A **genus-stratified, whole-cluster, seeded** draw from
+    :func:`calib_eligible_row_indices`. Pinned algorithm (A7.2) — every step is
+    ordered so the result depends on the columns' *content*, never on row or dict
+    iteration order (CLAUDE.md §8.3):
+
+    1. each eligible cluster takes one stratum = its **first non-null**
+       :data:`CALIB_STRATUM_COLUMN` value in table order, or
+       :data:`CALIB_UNASSIGNED_STRATUM`;
+    2. strata are visited in **sorted** order;
+    3. within a stratum, cluster ids are **sorted**, then permuted by a single
+       ``numpy.random.default_rng(seed)`` shared across strata;
+    4. whole clusters are taken until that stratum's own ``fraction × records``
+       target is met.
+
+    **Whole clusters, and only whole ones**, so no homology cluster straddles the
+    calib/train boundary (PRD §9.2 cluster non-splitting; ADR-0004 D2).
+
+    **One rule, one implementation, two callers** — :func:`carve_calibration_split`
+    (which *writes* the column) and ``tests/ml/test_no_leakage.py`` (which
+    *re-derives* it and asserts set identity against the committed column) call this
+    same function. A second copy would let the writer and the checker disagree about
+    which records the temperature was fitted on while each self-consistently reported
+    success ([[promote-dont-duplicate-is-a-correctness-rule]]).
+
+    Raises on a degenerate carve — empty, or the whole pool — rather than returning
+    it: a calibration fold that reached nothing would make every downstream
+    "disjoint" claim vacuously true.
+    """
+    import numpy as np
+
+    if not isinstance(fraction, float) or not 0.0 < fraction < 1.0:
+        raise ValueError(f"fraction must be a float in (0, 1), got {fraction!r}")
+    if not isinstance(seed, int) or isinstance(seed, bool):
+        raise ValueError(f"seed must be an int, got {seed!r}")
+
+    eligible, _selection_val = calib_eligible_row_indices(
+        source=source,
+        cluster_id=cluster_id,
+        nested_train=nested_train,
+        fold_random=fold_random,
+    )
+    if not eligible:
+        raise ValueError("calibration pool is empty — nothing to carve (A7.1)")
+
+    sizes: Counter[int] = Counter()
+    stratum_of: dict[int, str] = {}
+    for i in eligible:
+        cid = int(cluster_id[i])
+        sizes[cid] += 1
+        if cid not in stratum_of and not masking.is_missing(stratum[i]):
+            stratum_of[cid] = masking.row_text(stratum[i])
+
+    by_stratum: dict[str, list[int]] = defaultdict(list)
+    for cid in sizes:
+        by_stratum[stratum_of.get(cid, CALIB_UNASSIGNED_STRATUM)].append(cid)
+
+    rng = np.random.default_rng(seed)
+    chosen: set[int] = set()
+    for stratum in sorted(by_stratum):
+        ids = sorted(by_stratum[stratum])
+        target = fraction * sum(sizes[c] for c in ids)
+        held = 0
+        for idx in rng.permutation(len(ids)):
+            if held >= target:
+                break
+            cid = ids[int(idx)]
+            chosen.add(cid)
+            held += sizes[cid]
+
+    if not chosen or len(chosen) == len(sizes):
+        raise ValueError(
+            f"calibration carve degenerate: {len(chosen)} of {len(sizes)} eligible "
+            "clusters chosen — a fold that is empty or the whole pool is not a "
+            "*disjoint* calibration split (ADR-0005 D11)"
+        )
+    return frozenset(chosen)
+
+
+def carve_calibration_split(table):
+    """Return the boolean ``calib`` column for ``table`` (ADR-0004 A7).
+
+    A record is ``calib`` iff it is in the A7.1 eligible pool **and** its cluster was
+    drawn by :func:`calib_cluster_ids`. Membership is a *record-level* predicate over
+    the pool, not "every row of a drawn cluster": measured on the committed table, 22
+    corpus rows are cluster-mates of a drawn cluster yet sit outside the pool, and
+    **all 22 are** ``nested_role == "dropped"`` (the D4 taxonomy-incomplete bucket —
+    never trained, never scored). Admitting them would put never-scored records into a
+    calibration fit; excluding them leaks nothing, because **0** of them are
+    ``nested_train`` — which :func:`_assert_calib_disjoint` re-checks rather than
+    trusting this comment.
+    """
+    import numpy as np
+
+    cols = {c: list(table[c]) for c in ("source", "cluster_id", "nested_train", "fold_random")}
+    # Read through the pinned constant, never a hardcoded name: the provenance
+    # sidecar reports ``stratum_column: CALIB_STRATUM_COLUMN``, so a hardcoded read
+    # would let that field claim a stratification the carve never performed.
+    cols["stratum"] = list(table[CALIB_STRATUM_COLUMN])
+    eligible, _ = calib_eligible_row_indices(
+        source=cols["source"],
+        cluster_id=cols["cluster_id"],
+        nested_train=cols["nested_train"],
+        fold_random=cols["fold_random"],
+    )
+    drawn = calib_cluster_ids(**cols)
+    flags = np.zeros(len(table), dtype=bool)
+    for i in eligible:
+        if int(cols["cluster_id"][i]) in drawn:
+            flags[i] = True
+    return flags
+
+
+def _calib_provenance(table) -> dict:
+    """The A7 carve's *measured* footprint, for the committed provenance sidecar.
+
+    Records the three pinned knobs beside what they actually reached, so a reader can
+    tell a carve that ran from one that silently reached nothing — the failure mode a
+    bare ``"fraction": 0.10`` would hide ([[clauses-must-guard-emptiness]]).
+    """
+    eligible, selection_val = calib_eligible_row_indices(
+        source=list(table["source"]),
+        cluster_id=list(table["cluster_id"]),
+        nested_train=list(table["nested_train"]),
+        fold_random=list(table["fold_random"]),
+    )
+    # Corpus-restricted, matching `calib_eligible_row_indices`, so the numerator and
+    # the `n_eligible_records` denominator count the same population. Measured on the
+    # committed table this changes nothing (0 non-corpus calib rows — externals and
+    # variants cannot be drawn, and `_assert_calib_disjoint` refuses them outright).
+    # It is written this way so the two definitions cannot drift apart if that
+    # assertion is ever reordered or relaxed: a realised_fraction whose numerator and
+    # denominator range over different populations is a wrong number, not a loose one.
+    calib = table[table["calib"] & (table["source"] == "corpus")]
+    elig_clusters = {int(table["cluster_id"].iloc[i]) for i in eligible}
+    return {
+        "adr": "ADR-0004 A7",
+        "seed": CALIB_CARVE_SEED,
+        "fraction": CALIB_CARVE_FRACTION,
+        "stratum_column": CALIB_STRATUM_COLUMN,
+        "n_eligible_records": len(eligible),
+        "n_eligible_clusters": len(elig_clusters),
+        "n_selection_val_clusters_excluded": len(selection_val),
+        "n_records": int(len(calib)),
+        "n_clusters": int(calib["cluster_id"].nunique()),
+        "n_orders": int(calib["resolved_order"].nunique()),
+        "n_phyla": int(calib["resolved_phylum"].nunique()),
+        "realised_fraction": round(len(calib) / len(eligible), 6) if eligible else 0.0,
+    }
+
+
+def _assert_calib_disjoint(table) -> None:
+    """Fail loud (§10.3) if the ``calib`` carve violates an ADR-0004 A7.3 invariant.
+
+    Asserted **before** any artifact is materialised, so a broken carve can never
+    leave a committed table on disk that the CI would then have to catch. Every
+    clause is a *measured* invariant from A7.3, re-derived here from the table's own
+    columns rather than read back off a flag.
+    """
+    calib_flags = [bool(v) for v in table["calib"]]
+    calib = [i for i, v in enumerate(calib_flags) if v]
+    if not calib:
+        raise ValueError("calib carve is empty — a vacuously-disjoint calibration fold")
+
+    fold_random = list(table["fold_random"])
+    nested_train = list(table["nested_train"])
+    cluster_id = list(table["cluster_id"])
+    source = list(table["source"])
+
+    graded = [i for i in calib if masking.row_text(fold_random[i]) in ("val", "test")]
+    if graded:
+        raise ValueError(
+            f"{len(graded)} calib records are in the scheme-A val/test split — the "
+            "calibration fold must not overlap the split GATE-2 grades (PRD §12)"
+        )
+    outside_fold = [i for i in calib if not bool(nested_train[i])]
+    if outside_fold:
+        raise ValueError(
+            f"{len(outside_fold)} calib records are outside the D5 nested training "
+            "fold — calib is carved from *inside* training (A7.1)"
+        )
+    non_corpus = [i for i in calib if masking.row_text(source[i]) != "corpus"]
+    if non_corpus:
+        raise ValueError(
+            f"{len(non_corpus)} drawn calib records are not corpus rows — externals are "
+            "held out wholesale and variants inherit, neither is drawable (A7.1)"
+        )
+
+    # Cluster non-splitting, in its operative form: no cluster may hold a calib
+    # record *and* a training-stream record left outside calib. Stated over the
+    # training stream (not "every row"), because the 22 never-scored `dropped`
+    # cluster-mates are deliberately outside — see carve_calibration_split.
+    calib_clusters = {int(cluster_id[i]) for i in calib}
+    straddle = {
+        int(cluster_id[i])
+        for i in range(len(cluster_id))
+        if int(cluster_id[i]) in calib_clusters and bool(nested_train[i]) and not calib_flags[i]
+    }
+    if straddle:
+        raise ValueError(
+            f"{len(straddle)} clusters straddle the calib/training boundary "
+            f"(leakage): {sorted(straddle)[:5]}"
+        )
+
+
 def validate_table_schema(table) -> None:
     """Fail loud (§10.3) unless ``table`` matches the committed-table schema.
 
@@ -1245,8 +1560,17 @@ def build_split_table(interim, *, corpus_sha256: str | None = None):
     df["parent_record_id"] = df["record_id"]
     # Externals are not in the corpus → their per-record hash-link is empty → NA.
     df["corpus_record_sha256"] = df["corpus_record_sha256"].replace("", pd.NA)
+    # ADR-0004 A7 (P3-02): the D11 disjoint calibration carve. Computed **here**,
+    # inside the projector, and therefore *before* append_variant_rows — which is
+    # what makes variant `calib` inheritance structural: a variant copies `calib`
+    # off its parent row along with every other fold, because the column already
+    # exists by the time the append runs. The interim table has no `calib`; it is
+    # a derived fold, not an upstream one, so re-running `cluster-split` is not
+    # required to change it.
+    df["calib"] = carve_calibration_split(df)
     df = df[list(COMMITTED_TABLE_COLUMNS)]
     validate_table_schema(df)
+    _assert_calib_disjoint(df)
     return df
 
 
@@ -1414,9 +1738,13 @@ def write_table(
         table = append_variant_rows(table, variants.to_dict("records"))
         n_variants = len(variants)
 
-    # Load-bearing §8.2 invariant — assert *before* materializing any output so a
+    # Load-bearing §8.2 invariants — assert *before* materializing any output so a
     # failed leakage check can never leave an invalid committed artifact on disk.
+    # Re-run after the variant append (not only inside build_split_table), because
+    # the append adds rows that carry a `calib` value and could, if the inheritance
+    # ever broke, straddle the boundary the first call cleared.
     _assert_no_cluster_split(table)
+    _assert_calib_disjoint(table)
 
     out_parquet = Path(out_parquet)
     out_parquet.parent.mkdir(parents=True, exist_ok=True)
@@ -1444,6 +1772,12 @@ def write_table(
             "n_external": int(table["source"].isin(EXTERNAL_POSITIVE_SOURCES).sum()),
             "n_synthetic_variants": int(table["source"].isin(DERIVED_SOURCES).sum()),
             "n_clusters": int(table["cluster_id"].nunique()),
+            # ADR-0004 A7 (P3-02). The committed table's own schema version — NOT
+            # the provenance record's `schema_version`, which versions the sidecar
+            # format and is shared by every artifact in the repo. 1.0 → 1.1 is the
+            # `calib` column; a consumer pinned to 1.0 must be updated, not coerced.
+            "table_schema_version": COMMITTED_TABLE_SCHEMA_VERSION,
+            "calib": _calib_provenance(table),
             "dome": dome_reporting_fields(report),
         },
     )

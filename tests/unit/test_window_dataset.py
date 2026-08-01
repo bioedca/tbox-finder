@@ -105,6 +105,34 @@ def test_ignore_index_is_the_adr0005_literal_and_does_not_drift() -> None:
     assert wd.IGNORE_INDEX == seg_smoke.IGNORE_INDEX
 
 
+def test_stage1_fold_columns_derive_from_splits_minus_the_named_stage2_carve() -> None:
+    """Stage 1's fold tuple must be splits' tuple minus exactly the named omissions.
+
+    It used to be a hand-typed copy, and ADR-0004 A7 (P3-02) put it one column behind
+    without anything failing. Now it is derived, and this test pins the *relationship*
+    rather than the literal, so:
+
+    * a new §9.2 scheme column added to ``splits`` flows into Stage 1 automatically, and
+    * dropping a column from Stage 1 requires naming it in ``STAGE2_ONLY_FOLD_COLUMNS``
+      — a decision, not an omission.
+    """
+    from tbox_finder import splits as splits_mod
+    from tbox_finder.data import negatives as neg_mod
+
+    assert set(splits_mod.FOLD_SCHEME_COLUMNS) >= wd.STAGE2_ONLY_FOLD_COLUMNS
+    assert set(wd.FOLD_SCHEME_COLUMNS) == (
+        set(splits_mod.FOLD_SCHEME_COLUMNS) - wd.STAGE2_ONLY_FOLD_COLUMNS
+    )
+    # order is preserved, so positional `.index()` lookups stay valid
+    assert list(wd.FOLD_SCHEME_COLUMNS) == [
+        c for c in splits_mod.FOLD_SCHEME_COLUMNS if c not in wd.STAGE2_ONLY_FOLD_COLUMNS
+    ]
+    # the synthetic negatives' fold tuple is zipped against this one under strict=True
+    assert len(neg_mod.NEGATIVE_FOLDS) == len(wd.FOLD_SCHEME_COLUMNS)
+    # `calib` is a Stage-2 fold: Stage 1 must not carry it
+    assert "calib" not in wd.FOLD_SCHEME_COLUMNS
+
+
 def test_class_vocabulary_pins() -> None:
     """background is index 0 and there are 8 classes (PRD §8 / ADR-0004 D1)."""
     assert wd.BACKGROUND_INDEX == 0

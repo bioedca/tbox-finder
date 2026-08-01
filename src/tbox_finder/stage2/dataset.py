@@ -103,6 +103,12 @@ DEFAULT_FLANK_NT = 0
 DECOY_FOLD_SEED = 20260731
 #: train / val / test mass for that assignment.
 DECOY_FOLD_FRACTIONS: tuple[float, float, float] = (0.80, 0.10, 0.10)
+#: ADR-0004 A7.4 — fraction of the **train-fold** parentless decoys that join the
+#: calibration set. Derived, not chosen: 189 / 4,028, the count that brings `calib`
+#: to the in-distribution test split's own prevalence (0.7727) given the 859 calib
+#: positives and the 64 decoys that *inherit* calib from a calib parent. Changing it
+#: re-balances the fold GATE-2's temperature is fitted on ⇒ ADR-0004 re-sign-off.
+DECOY_CALIB_RATE = 0.0469
 
 SOURCE_CORPUS = "corpus"
 SOURCE_DECOY = "decoy"
@@ -151,6 +157,10 @@ SPLIT_CARRIED_COLUMNS: tuple[str, ...] = (
     "nested_role",
     "is_designated_loo_holdout",
     "dropped_from_clade_holdout",
+    # ADR-0004 A7 (P3-02). Carried, never recomputed here: a positive copies its own
+    # row's `calib`, a parented decoy copies its **parent's** — D7 variant→parent→fold
+    # applied to the negative side, exactly as every other fold column above.
+    "calib",
 )
 
 #: Exact output schema (order included). Asserted by the unit tests, so adding a column
@@ -216,6 +226,7 @@ REJECT_REASONS: tuple[str, ...] = (
 )
 
 __all__ = [
+    "DECOY_CALIB_RATE",
     "DECOY_FOLD_SEED",
     "DEFAULT_FLANK_NT",
     "FOLD_BASES",
@@ -224,6 +235,7 @@ __all__ = [
     "REJECT_REASONS",
     "build_dataset",
     "dataset_digest",
+    "decoy_calib",
     "decoy_fold",
     "dot_bracket_to_partners",
     "project_structure_to_locus",
@@ -382,6 +394,41 @@ def decoy_fold(row_id: str, *, seed: int = DECOY_FOLD_SEED) -> str:
     return FOLD_RANDOM_VALUES[2]
 
 
+def decoy_calib(row_id: str, *, fold_random: str, seed: int = DECOY_FOLD_SEED) -> bool:
+    """Whether a **parentless** decoy joins the ADR-0004 A7.4 calibration set.
+
+    P3-01 deliberately left this open: a parentless decoy has no cluster and no clade,
+    so no §9.2 holdout unit can contain it, and its ``nested_train`` is **null** because
+    "whether it may enter the nested training fold is a P3-03 sampling policy". A7.4
+    answers only the narrower question — which negatives the *temperature fit* may see —
+    and answers it with a stated rule and a rate, never a join default.
+
+    **Drawn only from the train portion.** A decoy whose ``fold_random`` is ``val`` or
+    ``test`` returns ``False`` unconditionally, so the carve provably cannot reach the
+    split GATE-2 is graded on. This is why the draw is a *second, independent* keyed hash
+    rather than a 4-way widening of :func:`decoy_fold`: re-partitioning the existing
+    0.80/0.10/0.10 mass would move decoys across the train/val/test boundary, silently
+    changing a partition P3-01 already committed.
+
+    **Why this rate.** :data:`DECOY_CALIB_RATE` is *derived*, not chosen: it is the rate
+    that brings the calibration set to the in-distribution test split's own prevalence
+    (0.7727 as measured on this artifact), which is the prevalence ADR-0005 D11 grades
+    the ECE at. Fitting a temperature on a set whose prevalence the graded split never
+    sees is the failure this rule exists to prevent. Because a keyed hash draws an
+    *approximate* count, the realised negative count and the realised calibration
+    prevalence are **measured and reported**, never tuned back to the target
+    (CLAUDE.md §10.3).
+
+    Keyed on the decoy id with a distinct domain prefix, so it is independent of
+    :func:`decoy_fold`'s draw on the same id and stays invariant under a pool resize.
+    """
+    if fold_random != FOLD_RANDOM_VALUES[0]:
+        return False
+    digest = hashlib.sha256(f"{seed}:calib:{row_id}".encode()).digest()
+    unit = int.from_bytes(digest[:8], "big") / float(1 << 64)
+    return unit < DECOY_CALIB_RATE
+
+
 def _carried(split_row: Mapping[str, Any]) -> dict[str, Any]:
     return {c: split_row[c] for c in SPLIT_CARRIED_COLUMNS}
 
@@ -396,6 +443,37 @@ def _null_carried() -> dict[str, Any]:
 def _text(value: Any) -> str | None:
     """A nullable string cell as ``str`` or ``None`` (pandas-2/3 safe)."""
     return None if masking.is_missing(value) else str(value)
+
+
+def _calib_report(frame: Any) -> dict[str, Any]:
+    """The measured ADR-0004 A7.4 calibration set, beside the split it must match.
+
+    Reports the **realised** prevalence next to the in-distribution test split's, so a
+    keyed-hash draw that landed off target is visible in the artifact instead of being
+    silently absorbed. Both numbers are computed, neither is asserted here — the gate
+    that would fail on a bad draw is a test, not a rounding rule.
+    """
+    # Null-safe truth test: `astype(bool)` would read a null `calib` as **True**
+    # ([[pandas-3-nan-truthy-in-training-env]]), silently enlarging the fold the
+    # temperature is fitted on. There should be no nulls — `_assert_calib_columns`
+    # proves it — but the reader must not be the thing that hides one.
+    calib = frame[frame["calib"].map(lambda v: not masking.is_missing(v) and bool(v))]
+    n_pos = int(calib["is_tbox"].sum())
+    n_neg = int(len(calib)) - n_pos
+    test = frame[frame["fold_random"] == FOLD_RANDOM_VALUES[2]]
+    n_test_pos = int(test["is_tbox"].sum())
+    return {
+        "adr": "ADR-0004 A7",
+        "decoy_calib_rate": DECOY_CALIB_RATE,
+        "n_rows": int(len(calib)),
+        "n_positives": n_pos,
+        "n_negatives": n_neg,
+        "n_negatives_inherited": int((calib["fold_basis"] == FOLD_BASIS_PARENT).sum()),
+        "n_negatives_parentless": int((calib["fold_basis"] == FOLD_BASIS_DECOY_RANDOM).sum()),
+        "prevalence": round(n_pos / len(calib), 6) if len(calib) else 0.0,
+        "in_distribution_test_prevalence": (round(n_test_pos / len(test), 6) if len(test) else 0.0),
+        "n_calib_in_val_or_test": int(calib["fold_random"].isin(FOLD_RANDOM_VALUES[1:]).sum()),
+    }
 
 
 def build_dataset(
@@ -550,6 +628,12 @@ def build_dataset(
         if parent_id is None:
             carried = _null_carried()
             carried["fold_random"] = decoy_fold(decoy_id, seed=decoy_fold_seed)
+            # ADR-0004 A7.4: a parentless decoy may enter `calib` **only** from the
+            # train portion, by its own keyed hash. `nested_train` stays null — A7
+            # decides what the calibration *fit* may see, not P3-03's sampling policy.
+            carried["calib"] = decoy_calib(
+                decoy_id, fold_random=carried["fold_random"], seed=decoy_fold_seed
+            )
             fold_basis = FOLD_BASIS_DECOY_RANDOM
             parent = decoy_id
             clade_eligible = False
@@ -598,7 +682,7 @@ def build_dataset(
         )
 
     frame = pd.DataFrame(rows, columns=list(OUTPUT_COLUMNS))
-    _assert_dataset_invariants(frame)
+    _assert_dataset_invariants(frame, decoy_fold_seed=decoy_fold_seed)
 
     positives = frame[frame["is_tbox"]]
     negatives = frame[~frame["is_tbox"]]
@@ -627,6 +711,7 @@ def build_dataset(
             str(k): int(v) for k, v in frame["fold_random"].value_counts().items()
         },
         "clade_holdout_eligible": int(frame["clade_holdout_eligible"].sum()),
+        "calib": _calib_report(frame),
         "pairing_status_counts": pairing_counts,
         "pairing_reject_reasons": reject_counts,
         "pairing_coverage_over_positives": (
@@ -647,7 +732,58 @@ def build_dataset(
     return frame, report
 
 
-def _assert_dataset_invariants(frame: Any) -> None:
+def _assert_calib_columns(frame: Any, *, decoy_fold_seed: int = DECOY_FOLD_SEED) -> None:
+    """ADR-0004 **A7** invariants on the Stage-2 side of the calibration carve.
+
+    The split-table side is guarded by ``splits._assert_calib_disjoint``; this is the
+    mirror for the rows that table has no representation for — the decoys. Both must
+    hold, and neither implies the other: the table has **no negative rows at all**
+    (the A4/b2 blind spot), so a decoy could reach ``calib`` in the graded split
+    without any split-table clause noticing.
+    """
+    calib = frame[frame["calib"].map(lambda v: not masking.is_missing(v) and bool(v))]
+    if not len(calib):
+        raise ValueError(
+            "no row carries calib=True — the calibration fold GATE-2's temperature is "
+            "fitted on is empty (ADR-0005 D11)"
+        )
+    graded = calib[calib["fold_random"].isin(FOLD_RANDOM_VALUES[1:])]
+    if len(graded):
+        raise ValueError(
+            f"{len(graded)} calib row(s) are in the scheme-A val/test split (first: "
+            f"{graded['row_id'].iloc[0]!r}); the calibration fold must not overlap the "
+            "split GATE-2 grades (PRD §12)"
+        )
+    # A parentless decoy has no cluster and no clade, so `decoy_calib` is the ONLY route
+    # by which it can be in *or* out of calib. Re-derive that verdict for **every**
+    # parentless row — not just the calib=True ones — using **this run's** seed, and
+    # require exact agreement.
+    #
+    # Both halves are load-bearing:
+    #   * checking only the calib=True rows would miss a decoy wrongly left OUT, a
+    #     count-preserving error in the other direction that no total would reveal
+    #     ([[symmetric-count-fixture-blind-to-inversion]]);
+    #   * re-deriving with the module default while the rows were built with a caller's
+    #     `decoy_fold_seed` compares against a different hash entirely — the guard would
+    #     fire on a correct build and could never fire on a wrong one.
+    parentless = frame[frame["fold_basis"] == FOLD_BASIS_DECOY_RANDOM]
+    expected = [
+        decoy_calib(str(r), fold_random=str(f), seed=decoy_fold_seed)
+        for r, f in zip(parentless["row_id"], parentless["fold_random"], strict=True)
+    ]
+    actual = [not masking.is_missing(v) and bool(v) for v in parentless["calib"]]
+    mismatched = [
+        rid for rid, e, a in zip(parentless["row_id"], expected, actual, strict=True) if e != a
+    ]
+    if mismatched:
+        raise ValueError(
+            f"{len(mismatched)} parentless decoy(s) disagree with decoy_calib at seed "
+            f"{decoy_fold_seed} (first: {mismatched[0]!r}) — A7.4 admits them by that keyed "
+            "hash and by no other route, in both directions"
+        )
+
+
+def _assert_dataset_invariants(frame: Any, *, decoy_fold_seed: int = DECOY_FOLD_SEED) -> None:
     """The P3-01 validation gate, enforced at build time as well as in the tests."""
     if list(frame.columns) != list(OUTPUT_COLUMNS):
         raise ValueError(f"unexpected schema: {list(frame.columns)}")
@@ -656,9 +792,21 @@ def _assert_dataset_invariants(frame: Any) -> None:
     if frame["row_id"].duplicated().any():
         dup = frame.loc[frame["row_id"].duplicated(), "row_id"].iloc[0]
         raise ValueError(f"duplicate row_id {dup!r}")
-    for column in ("row_id", "parent_record_id", "rna_sequence", "fold_random", "fold_basis"):
+    for column in (
+        "row_id",
+        "parent_record_id",
+        "rna_sequence",
+        "fold_random",
+        "fold_basis",
+        # ADR-0004 A7: `calib` must be a decided True/False on **every** row. A null
+        # would be exactly the "falls out of a join default" outcome P3-01 flagged and
+        # A7.4 exists to refuse — and a downstream `astype(bool)` would then read it as
+        # True, quietly enlarging the temperature-fit fold.
+        "calib",
+    ):
         if frame[column].map(masking.is_missing).any():
             raise ValueError(f"{column} is null on at least one row (fold/provenance gate)")
+    _assert_calib_columns(frame, decoy_fold_seed=decoy_fold_seed)
     bad_basis = set(frame["fold_basis"]) - set(FOLD_BASES)
     if bad_basis:
         raise ValueError(f"unknown fold_basis value(s): {sorted(bad_basis)}")
