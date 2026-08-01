@@ -1,6 +1,6 @@
 # ADR-0004 — Split & leakage policy
 
-- **Status:** Accepted (user sign-off 2026-07-10; **Amendment A1** — D2 coverage denominator — user sign-off 2026-07-10, P0-22; **A3** synthetic class-II parents 2026-07-19; **A4** held-out-order negative-window rule (a1+b2) 2026-07-23; **A5** whole-genome host-order negative-admission rule (a2) 2026-07-26; CLAUDE.md §7 item 2)
+- **Status:** Accepted (user sign-off 2026-07-10; **Amendment A1** — D2 coverage denominator — user sign-off 2026-07-10, P0-22; **A3** synthetic class-II parents 2026-07-19; **A4** held-out-order negative-window rule (a1+b2) 2026-07-23; **A5** whole-genome host-order negative-admission rule (a2) 2026-07-26; **A7** the D11 disjoint calibration carve (P3-02) 2026-08-01; CLAUDE.md §7 item 2)
 - **Date:** 2026-07-10
 - **Deciders:** bioedca (project owner)
 - **Phase:** P0 (seed ADR)
@@ -262,3 +262,327 @@ The test is **CI-blocking**; per CLAUDE.md §8.5 (broadened) **any data/label/cl
 **No pinned value changes; scope-extending.** No D2 cut, D6 floor, or fold size moves. A5 **extends** the negative-admission contract to a substrate a1 could not reach (whole-genome, no corpus parent) and introduces the **first order-level negative exclusion** (which A8 explicitly disclaimed). `nested_train` membership and every positive-side D-decision are unchanged.
 
 **Scope of re-validation.** The bridge module (`mining/host_order.py`: persist per-genome NCBI taxid via the GTDB metadata join + resolve host order via the existing taxdump path; the genome-accession-keyed admit path `load_host_folds`/`stamp_host_folds`, default-armed), rule `build_production_host_orders`, the committed host-order table + provenance + report, `tests/unit/test_host_order.py`, the `tests/ml/test_no_leakage.py` host-order gate, this ADR, and a PRD §9.2 supplement note (PRD > ADR). The a1/b2 clauses and the P0-24 predicates are **untouched**. New provenance: the per-genome host-order artifact (from the two GTDB metadata files — a new checksummed `data/external` fetch, §5.2 immutable-fetch) + its committed host-order resolution.
+
+### A7 — the D11 **disjoint calibration split**: a `calib` carve from inside the D5 training fold, genus-stratified whole-cluster, prevalence-matched on the negative side (P3-02; user sign-off 2026-08-01)
+
+- **Status:** **Accepted (user sign-off 2026-08-01, bioedca; CLAUDE.md §7 item 2 — AskUserQuestion: negative rule = "prevalence-matched", carve size = "0.10 → 859 records", placement = "committed column + CI re-derivation", all three taken as drafted).** Extends **D7** (the committed split-table schema) and adds the
+  fold-vocabulary entry ADR-0005 **D11** presumes and **A11** explicitly deferred to this
+  step. **Pins no gate and moves no gate:** GATE-2's gated object (the pre-prior-shift
+  named posterior), its threshold (**ECE ≤ 0.05**), its estimator (15 equal-mass debiased
+  bins) and its **P3-exit** grading point are all unchanged (ADR-0005 D11).
+
+**Trigger.** ADR-0005 D11 pins the recalibration stack as *train → temperature-scale on a
+disjoint calibration split → prior-shift*, but **ADR-0004's fold vocabulary contains no
+calibration fold** and the committed table has no `calib` column. A11 (P2-13) recorded this
+absence explicitly, fitted its non-gated Stage-1 `T` on a seeded half of the P2-06a
+`selection_val` rung as a stopgap, shipped the disclosure *"`selection_val` is the fold the
+P2-06 sweep **selected on** — it is **NOT** D11's disjoint calibration split"*, and named
+**P3-02** as the step that carves the real one. GATE-2's `T` is re-fitted here; **no `T`
+from P2-13 is inherited.**
+
+---
+
+#### A7.1 — The eligible pool (measured)
+
+`calib` is drawn from **corpus records that are in the D5 nested training fold *and* in the
+scheme-A `train` fold *and* outside the P2-06a `selection_val` clusters**:
+
+```
+pool = source == "corpus"
+     ∧ nested_train == True                       # D5: inside every scheme's training fold
+     ∧ fold_random == "train"                     # scheme A: outside the in-distribution val/test
+     ∧ cluster_id ∉ selection_val_cluster_ids(…)  # outside the P2-06 model-selection rung
+```
+
+| population | records | clusters | orders | phyla |
+|---|--:|--:|--:|--:|
+| corpus ∧ `nested_train` (D5 fold) | 8,303 | 4,775 | 29 | 16 |
+| …∧ `fold_random == "train"` | 5,654 | 2,810 | 26 | 15 |
+| …∧ ∉ `selection_val` — **the eligible pool** | **5,034** | **2,526** | **25** | **14** |
+
+The `nested_train` fold splits `fold_random` as **train 5,654 / val 1,445 / test 1,204**.
+
+**Three exclusions, each load-bearing:**
+
+1. **`fold_random == "test"` is excluded** — this is the in-distribution split GATE-2's ECE
+   is graded on (ADR-0005 D11; `imp.md` P3-10). PRD §12's requirement that the calibration
+   split and the graded split *"must not overlap or the ECE gate is inflated"* is satisfied
+   **structurally**: `fold_random` is whole-cluster assigned (measured: **0** clusters span
+   more than one non-null `fold_random`), so excluding the value excludes the cluster.
+2. **`gate4_eval` needs no separate exclusion** — ADR-0004 **A6** defines it as
+   `nested_train ∧ fold_random == "test"` (1,204 records / 1,031 clusters, re-derived here
+   with the shipped helper), which exclusion (1) already removes in full. Measured:
+   pool-minus-`selection_val` and pool-minus-`selection_val`-minus-`gate4_eval` are the
+   **same 5,034 records** — the intersection is empty by construction, not by luck.
+3. **`selection_val` is excluded** — it is the fold the P2-06 sweep selected γ/lr/α on, and
+   A11 already rejected reusing it as *"the read becomes in-sample"*. It re-derives to
+   **831 records / 469 clusters** here (A11 reports 830 after `window_dataset`'s ≥1024-nt
+   interior-window filter — the carve is identical, the filter is downstream).
+
+**Robust to P3-03.** `imp.md` leaves Stage-2's train-eligibility policy to P3-03, and A6
+showed that scheme-A `test` is 51.2 % `nested_train` — so whether Stage-2's in-distribution
+test population ends up being all of `fold_random == "test"` (3,045 rows) or only its
+non-`nested_train` part (1,741 rows), a pool restricted to `fold_random == "train"` is
+disjoint from **both**. The carve does not pre-empt P3-03.
+
+---
+
+#### A7.2 — The draw: genus-stratified, whole-cluster, seeded (the pinned rule)
+
+> **`CALIB_CARVE_SEED = 20260801`, `CALIB_CARVE_FRACTION = 0.10`, stratum = `resolved_genus`.**
+
+**Algorithm (pinned, deterministic in content not iteration order — CLAUDE.md §8.3).**
+Each cluster is assigned one stratum = its first non-null `resolved_genus`
+(a null-genus cluster gets the explicit `"__unassigned__"` stratum, never a silent drop).
+Strata are visited in **sorted** order; within a stratum, cluster ids are **sorted**, then
+permuted by a single `np.random.default_rng(CALIB_CARVE_SEED)`, and whole clusters are taken
+until that stratum's own record target `fraction × stratum_records` is reached.
+
+**Why stratified and not the uniform `selection_val_cluster_ids` draw — measured, not asserted.**
+The eligible pool is **98.5 % Firmicutes** and **56.7 % Bacillales**; only **2 of its 25
+orders** carry ≥ 20 records. A uniform whole-cluster draw collapses onto that mode:
+
+| draw | records | clusters | **orders** | **phyla** |
+|---|--:|--:|--:|--:|
+| uniform (the `selection_val` rule), fraction 0.10 | 505 | 241 | **6** | **4** |
+| uniform, fraction 0.20 | 1,008 | 513 | 12 | 7 |
+| **genus-stratified, fraction 0.10 (pinned)** | **859** | **431** | **23** | **13** |
+| genus-stratified, fraction 0.15 | 1,095 | 573 | 23 | 13 |
+
+A 6-order calibration set for a model whose deployment claim is phylogenetic breadth would
+fit `T` on essentially two orders. Genus stratification is **not a new device**: scheme A is
+*"random (**genus-stratified**)"* in PRD §9.2 and `splits.assign_random_folds` already builds
+it that way, so `calib` is drawn the same way the split it must mirror was drawn.
+The realized fraction (**17.1 %**, 859/5,034) exceeds the nominal 0.10 because small strata
+cannot subdivide a whole cluster — a stratum of one 3-record cluster contributes 3 records or
+0. The realized number is reported, never back-solved for.
+
+**Cost.** Stage-2 training loses **859** of the 5,034 eligible positives (the D5 fold goes
+8,303 → 7,444 for Stage 2). This is the intrinsic price of D11's word *"disjoint"*.
+
+---
+
+#### A7.3 — Measured leakage invariants (all clean under the pinned draw)
+
+| invariant | measured |
+|---|--:|
+| `calib` ∩ `fold_random ∈ {val, test}` | **0** |
+| `calib` ∩ `selection_val` clusters | **0** |
+| `calib` ∩ `gate4_eval` clusters (A6) | **0** |
+| `calib` ∩ `is_designated_loo_holdout` | **0** |
+| `calib` ∩ `clade_crossing_cluster` | **0** |
+| clusters split across the calib/train boundary | **0** |
+| training-stream (`nested_train`) cluster-mates of a calib cluster left outside `calib` | **0** |
+| non-`corpus` rows falling inside a calib cluster | **0** (all 881 rows in the 431 clusters are `corpus`) |
+
+**The one residue, named rather than absorbed.** 22 corpus records are cluster-mates of a
+calib cluster but sit outside `calib`. **All 22 are `nested_role == "dropped"`** — the D4
+taxonomy-incomplete bucket, which is never trained and never scored. `calib` is therefore
+defined as a **record-level predicate over the eligible pool**, and cluster-closure is
+asserted in the operative form: *no cluster has a member in `calib` and a member in the
+training stream or in any scored population*. Admitting the 22 would put never-scored records
+into a calibration fit; excluding them leaks nothing, because 0 of them are `nested_train`.
+
+---
+
+#### A7.4 — The negative side: prevalence-matched (the decision `imp.md`/P3-01 flagged)
+
+The committed split table has **no negative rows** (verified: `source` ∈
+{corpus, synthetic_classII, blind, anchor}) — the A4/b2 blind spot. But GATE-2's head is
+**binary**, so a positives-only `calib` cannot fit `T` at a meaningful prevalence. P3-01 left
+this open deliberately: its 5,007 parentless decoys carry a **null** `nested_train`, because
+*"whether a parentless decoy may enter the nested training fold is a P3-03 sampling policy,
+and a `True` here would be a policy decision disguised as a data field."*
+
+**Measured supply and the mismatch it creates:**
+
+| calib negative rule | negatives | calib prevalence | vs. in-distribution test |
+|---|--:|--:|--:|
+| (a) inherit-only (dinuc decoys whose parent is a calib record) | 64 | **0.931** | 0.773 — **badly off** |
+| (b) **prevalence-matched (pinned)** | **253** | **0.7725** | **0.7727 — matched** |
+| (c) all 4,028 train-fold parentless decoys | 4,092 | 0.174 | 0.773 — badly off the other way |
+
+**The pinned rule (b).** `calib`'s negatives are drawn to reproduce the **in-distribution
+test split's own prevalence**, which is what D11 grades the ECE at (*"at the in-distribution
+split's own prevalence"*, PRD §12). Measured on the P3-01 Stage-2 dataset, the
+`fold_random == "test"` population is **2,353 positives / 692 negatives = 0.7727**. For 859
+calib positives that target needs ≈**253** negatives, supplied by two routes in a fixed order:
+
+1. Dinucleotide-shuffled decoys whose parent record is in `calib` — they inherit `calib`
+   from their parent, exactly as P3-01 already has them inherit every other scheme
+   (ADR-0004 D7 variant→parent→fold, applied to the negative side). This is
+   **inheritance, not a draw**; it is not optional and it is not re-drawable.
+2. Parentless decoys drawn from the **4,028 whose `fold_random == "train"`** at
+   `DECOY_CALIB_RATE = 0.0469`, by a deterministic keyed hash on the decoy id
+   (`stage2.dataset.decoy_calib`, sharing `DECOY_FOLD_SEED = 20260731` under a distinct
+   `":calib:"` domain prefix). **A parentless decoy with `fold_random ∈ {val, test}`
+   returns False unconditionally** — so the carve is *structurally* unable to reach the
+   graded split, and the 979 val/test parentless decoys are untouchable.
+
+   **Why a second hash and not a 4-way widening of `decoy_fold`.** Re-partitioning the
+   existing 0.80/0.10/0.10 mass into four outcomes would move decoys **across** the
+   train/val/test boundary, silently changing a partition P3-01 already committed. A
+   second, independent draw restricted to the train portion realises the same admissible
+   set without disturbing `fold_random` at all.
+
+**As built (measured, not tuned).** The realised calibration set is **859 positives / 230
+negatives = prevalence 0.7888**, against the test split's **0.7727** — a **+1.6 pp**
+overshoot. The keyed hash drew **168** parentless decoys where the rate's expectation is
+188.9 (−1.6 σ of the binomial), and **62** rather than 64 decoys inherited, because two of
+the eligible dinucleotide shuffles are union-prior-masked out of the dataset. `DECOY_CALIB_RATE`
+is **not** re-tuned to close that 1.6 pp: the rate is the pinned quantity and the realised
+prevalence is a measurement (CLAUDE.md §10.3). For scale, the rejected inherit-only rule
+sits **15.4 pp** off. Both numbers ship as report constants in
+`data/processed/audits/stage2_dataset_report.json → calib` (`prevalence`,
+`in_distribution_test_prevalence`), so a future drift is visible rather than inferred.
+
+This makes the decision **explicit and measured**, which is precisely what P3-01 asked for:
+a parentless decoy's `calib` membership is a stated rule with a rate, not a join default, and
+its `nested_train` stays **null** — A7 does **not** resolve P3-03's sampling policy, it only
+says which decoys the calibration *fit* may see.
+
+**Disclosed, not hidden.** `calib` is drawn from inside `nested_train`, so its clade support
+is narrower than the test split's by construction: **23 orders / 13 phyla** vs the test
+split's **48 orders / 12 phyla** (the extra orders are the held-out clades `nested_train`
+excludes — they *cannot* be in a training-fold carve). At phylum level the two are close
+(Firmicutes **0.962** vs **0.941**); at order level calib is Bacillales 0.491 /
+Clostridiales 0.469 vs test 0.364 / 0.278. This is reported as a calibration-transfer caveat
+in the P3-10 GATE-2 artifact, **not** corrected by reweighting (which would be an
+unpinned estimator).
+
+---
+
+#### A7.5 — Where `calib` lives: a committed column **plus** a re-derivation identity clause
+
+`calib` (`bool`, non-null on every row) is **appended last to
+`splits.FOLD_SCHEME_COLUMNS`** — and therefore lands in `COMMITTED_TABLE_COLUMNS`
+immediately after `nested_role`, which splices that tuple. The **committed table's** schema
+version goes **1.0 → 1.1**, recorded as `extra.table_schema_version`
+(`splits.COMMITTED_TABLE_SCHEMA_VERSION`); the provenance sidecar's own top-level
+`schema_version` is a *different* field, shared by every artifact in the repo, and is
+**not** touched.
+
+- **Appended last** so `FOLD_SCHEME_COLUMNS.index(...)` lookups (e.g.
+  `window_dataset.record_order`) keep their positions — a reordering would silently
+  mis-key the leave-one-order-out macro-average.
+- **In `FOLD_SCHEME_COLUMNS`** so the existing `variant_parent_fold_mismatches` /
+  `synthetic_variant_leaks` predicates cover `calib` inheritance for the 2,344 synthetic
+  variants for free. All 2,344 are held-out-parented (A3), so all inherit `calib = False`;
+  the 34 externals are `calib = False` (`fold_random` is null for them).
+- **In `BOOL_FLAG_COLUMNS`** so the dtype is asserted — `bool("False") is True` would blind
+  every predicate that reads it.
+
+**Why a committed column and not a derived predicate** (the `selection_val` / `gate4_eval`
+pattern): D7's whole point is that the CI re-checks the **real** partition off a committed
+artifact. A derived-only `calib` would make the calibration fold a function of code that can
+drift between the fitter and the checker — [[promote-dont-duplicate-is-a-correctness-rule]].
+
+**Why the column is nevertheless not trusted on its own.** The no-leakage test **re-derives**
+the carve from `cluster_id` / `nested_train` / `fold_random` / `resolved_genus` + the pinned
+seed and fraction, and asserts **set identity** with the committed column — it never reads
+back the boolean and calls that a pass ([[gate-clauses-need-re-derivation]]). Because two
+near-equal partitions make a mis-wired carve invisible to every *count*, the assertion is on
+the **identity of the cluster set**, mirroring A11's *"the validator re-cuts the fit half"*
+discipline and A4/A5's must-fire companion pattern.
+
+**New `tests/ml/test_no_leakage.py` clause set `_CALIB_CARVE_CLAUSES`** (fail-closed, each
+independently sabotage-tested):
+
+| clause | what it refuses |
+|---|---|
+| `calib_is_nonempty` | a carve that reached nothing (the vacuous-green failure mode) |
+| `calib_cluster_set_matches_rederivation` | a committed column that disagrees with the pinned rule |
+| `calib_never_in_val_or_test` | any calib record in the graded in-distribution split |
+| `calib_inside_nested_train` | a calib record outside the D5 training fold |
+| `calib_disjoint_from_selection_val` | reuse of the P2-06 model-selection rung |
+| `calib_disjoint_from_gate4_eval` | overlap with the A6 GATE-4 graded population |
+| `calib_clusters_do_not_straddle` | a cluster with members in both `calib` and the training stream |
+| `calib_variants_inherit_parent` | a synthetic variant with a `calib` differing from its parent's |
+| `loosening_admits_the_refused` | the must-fire companion: dropping the pool restriction re-admits exactly the refused rows, so a namespace/dtype no-op cannot read as a clean pass ([[namespace-mismatch-invisible-noop]]) |
+
+---
+
+#### A7.5b — A fork this step exposed: Stage 1's fold tuple was a hand-typed copy
+
+`data/window_dataset.py` carried its **own** literal `FOLD_SCHEME_COLUMNS`, commented
+*"the six fold-per-scheme columns (splits.FOLD_SCHEME_COLUMNS)"*. Adding `calib` upstream
+put it one column behind **and nothing failed** — the only consumer that would have
+noticed is a subset check. That is the forked-helper failure mode exactly
+([[promote-dont-duplicate-is-a-correctness-rule]]): the copy silently stops meaning what
+its comment says.
+
+Stage 1 is nonetheless **right not to carry `calib`** — it is a Stage-2 calibration fold,
+and widening `CorpusRecord.folds` to hold it would change `negatives.NEGATIVE_FOLDS`, every
+`zip(..., strict=True)` over the pair, and the shape of every committed Stage-1 report, for
+a flag Stage 1 never reads. So the fix is not to lengthen it but to **derive** it:
+
+```python
+STAGE2_ONLY_FOLD_COLUMNS = frozenset({"calib"})
+FOLD_SCHEME_COLUMNS = tuple(
+    c for c in splits.FOLD_SCHEME_COLUMNS if c not in STAGE2_ONLY_FOLD_COLUMNS
+)
+```
+
+A new **§9.2 scheme** added upstream now flows into Stage 1 automatically, while the one
+deliberate omission is *named* and asserted
+(`tests/unit/test_window_dataset.py::test_stage1_fold_columns_derive_from_splits_minus_the_named_stage2_carve`,
+which also re-checks `len(NEGATIVE_FOLDS) == len(FOLD_SCHEME_COLUMNS)`). Stage 1's tuple is
+unchanged in content and order, so no Stage-1 artifact, checkpoint, or report is affected.
+
+#### A7.5c — The clause set is verified by sabotage, not by reading
+
+Each A7 clause was mutated on the **real committed partition** and confirmed to flip:
+clearing one `calib` bit, admitting one extra training record, moving a calib record's
+`fold_random` to `test`, splitting a calib cluster, blanking the column, carving the whole
+pool, and admitting a `selection_val` record — seven targeted sabotages, each biting the
+intended clause. `loosening_admits_the_refused` is verified non-vacuous the other way: it
+is TRUE at baseline because dropping the `fold_random == "train"` conjunct grows the pool
+**5,034 → 6,366**, so the conjunct demonstrably refuses records rather than describing a
+state that does not occur ([[namespace-mismatch-invisible-noop]]).
+
+`disjoint_from_selection_val` and `disjoint_from_gate4_eval` are **structurally implied**
+by the pool definition and cannot fail while `cluster_set_matches_rederivation` holds; both
+were nevertheless shown reachable under a direct mutation, and they are retained as guards
+against a future change to the pool definition rather than as independent evidence.
+
+#### A7.6 — What is **not** amended
+
+D1–D6 in full; D7's *contents* guarantee (no sequences), its variant→parent→fold rule and
+its CI-blocking status (all preserved, one column wider); D2's `d ≤ 0.30` / coverage ≥ 0.70
+cut and D6's 0.80 floor (both blinded-frozen); A4/A5's negative-admission rules (untouched —
+A7 governs the *calibration fit's* negative supply, not training admission); ADR-0005 D11's
+gated object, threshold, estimator and P3-exit grading point; A11's Stage-1 `T`, which stays
+**non-gated and un-inherited**.
+
+#### A7.7 — Cross-reference impact list
+
+- **P3-02** (this step): `src/tbox_finder/splits.py` (`carve_calibration_split`,
+  `COMMITTED_TABLE_COLUMNS`, `FOLD_SCHEME_COLUMNS`, `BOOL_FLAG_COLUMNS`, `write_table`,
+  `append_variant_rows`), the regenerated git-LFS `split_assignments.parquet` +
+  `schema_version` 1.1 provenance, `tests/ml/test_no_leakage.py`,
+  `tests/unit/test_split_table_schema.py` (the `==` column-list assertion).
+- **P3-01 artifact**: `stage2/dataset.py::SPLIT_CARRIED_COLUMNS` gains `calib` and
+  `decoy_fold` gains the 4-way outcome ⇒ `stage2_dataset.parquet` is **re-run**, and its
+  golden digest (`tests/fixtures/stage2_dataset/expected.sha256`) is re-baselined in the same
+  commit — a deliberate consequence, recorded, not a side effect.
+- **P3-03**: train-eligibility must exclude `calib` (and the parentless decoys' `nested_train`
+  stays null — A7 resolves nothing about it).
+- **P3-07** (`calibration/recalibrate.py`): fits `T` on `calib`, **never** on test.
+- **P3-10 / GATE-2**: grades ECE on the in-distribution test split; carries the A7.4
+  clade-support caveat as a reported constant.
+- **ADR-0005 D11/A11**: the "disjoint calibration split" A11 deferred now exists; A11's
+  disclosure (iii) *"GATE-2's T is re-fitted at P3-02/P3 on the `calib` carve"* is discharged.
+- **`imp.md` P3-02** names `src/tbox_finder/data/splits.py::carve_calibration_split`; the
+  shipped module is `src/tbox_finder/splits.py` (there is no `data/splits.py`) — **path drift
+  in the roadmap, corrected there.**
+- **Cards / paper**: dataset card (partition strategy gains the calibration fold),
+  `paper/manuscript.qmd` calibration paragraph at P3-10.
+
+#### A7.8 — §10.1 evidence gate
+
+A7 pins no biological or statistical *fact*; it pins a partition. The one methodological
+claim it leans on — that post-hoc temperature scaling is fitted on a **held-out** split
+disjoint from the graded one — is already cited by D11 (arXiv:1706.04599, Guo et al. 2017)
+and is restated, not re-derived. The genus-stratification choice is justified by a
+**measurement in this document** (6 orders vs 23), not by an appeal to literature. Every
+count above is reproducible from the two committed artifacts by the pinned algorithm.

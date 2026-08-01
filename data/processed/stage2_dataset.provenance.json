@@ -3,7 +3,7 @@
   "env_lock_hash": "a4a6715d411d7218432c4c670d35475f6c9aa7dd6397fd5d906ca7e21293dc34",
   "extra": {
     "decoy_fold_seed": 20260731,
-    "digest": "03263354175c0c3db19cd4262b8aff1bbe3ab0f160f30b13774973bec27af764",
+    "digest": "c5a2c251d5848c1dc35f6b9715609b2147c8fc84c61fd452049ce3f6008e9db5",
     "flank_nt": 0,
     "n_rows": 30542,
     "schema_version": "1.0",
@@ -16,17 +16,17 @@
       "vocab_size": 28
     }
   },
-  "generated_at_utc": "2026-07-31T23:11:01.430330+00:00",
-  "git_sha": "51e4669d0d79ae4ce0f2a89ce6e7964d3b266a9c",
+  "generated_at_utc": "2026-08-01T21:21:26.395603+00:00",
+  "git_sha": "c8e8637ccc8a0e3e5730ed1f1b2d8fe10b9a4df7",
   "inputs": {
     "data/processed/labels/labels_v0.parquet": "6caf46eae0735dd9361dc69b448e5518eb6aaf92784b4949baf937110aa447e4",
     "data/processed/master_clean_v0.parquet": "1eb76591d0e481019dd7acf72a439f157fec9f2aeecb8cc5c37ba80a7b062dd2",
     "data/processed/negatives/decoys_v0.parquet": "e19da2a959bcf597be0760310e04f3b4b44984c5a86bb1c946afc55b99d09636",
-    "data/processed/splits/split_assignments.parquet": "6388ba19328811fa81d2d5b84a58643674934b4286581d8eff9df2e2cefba029"
+    "data/processed/splits/split_assignments.parquet": "d51252ee8b2211603d672f0da2963b3364fe1acc48c542269da6eb63f0c6ebc3"
   },
   "outputs": {
-    "data/processed/audits/stage2_dataset_report.json": "ac7060255a5802f1dcb016edc4479f74249e0d1d93543f56de2a3b1ce6219691",
-    "data/processed/stage2_dataset.parquet": "aac7695236df94096a177147898463fa6ce35138a8ce6e9b03ef7f4b57044ec0"
+    "data/processed/audits/stage2_dataset_report.json": "a563d6c40f8b85346961c8a77ce0be55bc152ccf9a6a14749556075955d08c58",
+    "data/processed/stage2_dataset.parquet": "376ad12bd6462686cc7467a5c3e34e63977ccca0c06465e24ec8345224a45f65"
   },
   "rule": "workflow/rules/stage2.smk :: stage2_dataset",
   "schema_version": "1.0",

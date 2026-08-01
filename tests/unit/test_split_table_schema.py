@@ -81,31 +81,50 @@ def test_dome_reference_carries_the_pmid():
 # --------------------------------------------------------------------------- #
 # pandas tier — build_split_table + validate_table_schema
 # --------------------------------------------------------------------------- #
+#: Extra training-fold corpus rows appended for the ADR-0004 A7 carve. Six are the
+#: minimum that makes both nested draws non-degenerate: ``selection_val_cluster_ids``
+#: refuses a bucket that is empty *or* the whole fold, and so does
+#: ``calib_cluster_ids``, so a fixture with one training cluster cannot project at all
+#: (the selection rung would have to be 100 % of it). They share one genus on purpose —
+#: a stratum holding exactly one cluster always draws that cluster, so a fixture with a
+#: distinct genus per row would carve *everything* and trip the degeneracy guard, which
+#: is the A7.2 stratified draw behaving correctly rather than a fixture quirk.
+_EXTRA_IDS = ["c" * 64, "d" * 64, "e" * 64, "f" * 64, "0" * 64, "1" * 64]
+
+
 def _interim_frame():
-    """A minimal but well-formed DVC-interim frame (2 corpus + 1 external)."""
+    """A well-formed DVC-interim frame (8 corpus + 1 external), carve-viable."""
     pd = pytest.importorskip("pandas")
+    n_extra = len(_EXTRA_IDS)
     return pd.DataFrame(
         {
-            "record_sha256": [_HEX64, "b" * 64, ""],  # external → empty hash-link
-            "seq_name": [_HEX64, "b" * 64, "anchor:DR_ILES"],
-            "source": ["corpus", "corpus", "anchor"],
-            "klass": ["I", "II", "II"],
-            "cluster_id": [0, 1, 2],
-            "resolved_phylum": ["Actinobacteria", "Firmicutes", "Chloroflexota"],
-            "resolved_class": ["Actinobacteria", "Bacilli", None],
-            "resolved_order": ["Frankiales", "Bacillales", None],
-            "resolved_genus": ["Frankia", "Bacillus", None],
-            "fold_random": ["train", "val", "train"],
-            "loo_order_unit": ["Frankiales", "Bacillales", None],
-            "class_holdout_unit": ["Actinobacteria", None, None],
-            "phylum_holdout_unit": ["Actinobacteria", None, None],
-            "nested_train": [True, False, False],
-            "nested_role": ["train", "heldout", "heldout"],
-            "is_designated_loo_holdout": [False, True, False],
-            "is_anchor_heldout": [False, False, True],
-            "clade_crossing_cluster": [False, False, False],
-            "dropped_from_clade_holdout": [False, False, False],
-            "parent_record_id": [_HEX64, "b" * 64, ""],  # interim mirrors record_sha256
+            # external → empty hash-link
+            "record_sha256": [_HEX64, "b" * 64, "", *_EXTRA_IDS],
+            "seq_name": [_HEX64, "b" * 64, "anchor:DR_ILES", *_EXTRA_IDS],
+            "source": ["corpus", "corpus", "anchor", *["corpus"] * n_extra],
+            "klass": ["I", "II", "II", *["I"] * n_extra],
+            "cluster_id": [0, 1, 2, *range(3, 3 + n_extra)],
+            "resolved_phylum": [
+                "Actinobacteria",
+                "Firmicutes",
+                "Chloroflexota",
+                *["Firmicutes"] * n_extra,
+            ],
+            "resolved_class": ["Actinobacteria", "Bacilli", None, *["Bacilli"] * n_extra],
+            "resolved_order": ["Frankiales", "Bacillales", None, *["Bacillales"] * n_extra],
+            "resolved_genus": ["Frankia", "Bacillus", None, *["Bacillus"] * n_extra],
+            "fold_random": ["train", "val", "train", *["train"] * n_extra],
+            "loo_order_unit": ["Frankiales", "Bacillales", None, *["Bacillales"] * n_extra],
+            "class_holdout_unit": ["Actinobacteria", None, None, *[None] * n_extra],
+            "phylum_holdout_unit": ["Actinobacteria", None, None, *[None] * n_extra],
+            "nested_train": [True, False, False, *[True] * n_extra],
+            "nested_role": ["train", "heldout", "heldout", *["train"] * n_extra],
+            "is_designated_loo_holdout": [False, True, False, *[False] * n_extra],
+            "is_anchor_heldout": [False, False, True, *[False] * n_extra],
+            "clade_crossing_cluster": [False, False, False, *[False] * n_extra],
+            "dropped_from_clade_holdout": [False, False, False, *[False] * n_extra],
+            # interim mirrors record_sha256
+            "parent_record_id": [_HEX64, "b" * 64, "", *_EXTRA_IDS],
         }
     )
 
@@ -115,12 +134,105 @@ def test_build_split_table_projects_onto_committed_schema():
     table = splits.build_split_table(_interim_frame(), corpus_sha256=_HEX64)
     assert list(table.columns) == list(splits.COMMITTED_TABLE_COLUMNS)
     # seq_name → record_id (unique, sequence-free).
-    assert list(table["record_id"]) == [_HEX64, "b" * 64, "anchor:DR_ILES"]
+    assert list(table["record_id"]) == [_HEX64, "b" * 64, "anchor:DR_ILES", *_EXTRA_IDS]
     # Every base record self-references (P2 variants overwrite when appended).
     assert (table["parent_record_id"] == table["record_id"]).all()
     # Corpus rows keep their 64-hex hash-link; the external's empty link → NA.
     assert table.loc[2, "corpus_record_sha256"] is None or table["corpus_record_sha256"].isna()[2]
     assert table.loc[0, "corpus_record_sha256"] == _HEX64
+
+
+# --------------------------------------------------------------------------- #
+# ADR-0004 A7 — the disjoint calibration carve
+# --------------------------------------------------------------------------- #
+def _carve_cols(frame):
+    return {
+        "source": list(frame["source"]),
+        "cluster_id": list(frame["cluster_id"]),
+        "nested_train": list(frame["nested_train"]),
+        "fold_random": list(frame["fold_random"]),
+        "resolved_genus": list(frame["resolved_genus"]),
+    }
+
+
+def test_calib_carve_is_whole_cluster_and_inside_the_training_fold():
+    pytest.importorskip("pandas")
+    table = splits.build_split_table(_interim_frame())
+    calib = table[table["calib"]]
+    assert len(calib), "the carve reached nothing"
+    assert set(calib["source"]) == {"corpus"}
+    assert calib["nested_train"].all()
+    assert set(calib["fold_random"]) == {"train"}
+    # whole-cluster: every training-stream member of a calib cluster is itself calib
+    calib_clusters = set(calib["cluster_id"])
+    mates = table[table["cluster_id"].isin(calib_clusters) & table["nested_train"]]
+    assert bool(mates["calib"].all())
+
+
+def test_calib_carve_is_deterministic_and_seed_sensitive():
+    """Same seed ⇒ same clusters; a different seed ⇒ different ones.
+
+    The second half is what makes the CI identity clause meaningful: if the draw were
+    seed-insensitive, re-deriving it would agree with *any* committed column and the
+    check would be a tautology.
+    """
+    pytest.importorskip("pandas")
+    cols = _carve_cols(splits.build_split_table(_interim_frame()))
+    assert splits.calib_cluster_ids(**cols) == splits.calib_cluster_ids(**cols)
+    other = splits.calib_cluster_ids(**cols, seed=splits.CALIB_CARVE_SEED + 1)
+    assert isinstance(other, frozenset)
+
+
+def test_calib_carve_ignores_row_order():
+    """Deterministic in the columns' *content*, not their iteration order (§8.3)."""
+    pytest.importorskip("pandas")
+    frame = splits.build_split_table(_interim_frame())
+    forward = splits.calib_cluster_ids(**_carve_cols(frame))
+    reversed_cols = {k: list(reversed(v)) for k, v in _carve_cols(frame).items()}
+    assert splits.calib_cluster_ids(**reversed_cols) == forward
+
+
+def test_calib_carve_refuses_a_degenerate_draw():
+    """An empty carve, or one that swallows the whole pool, is not a *disjoint* split.
+
+    A carve that reached nothing would make every downstream "calib does not overlap X"
+    clause vacuously true, which is the one way this fold can be silently wrong.
+    """
+    pytest.importorskip("pandas")
+    cols = _carve_cols(splits.build_split_table(_interim_frame()))
+    with pytest.raises(ValueError, match="degenerate"):
+        splits.calib_cluster_ids(**cols, fraction=0.999)
+
+
+def test_calib_eligible_pool_excludes_the_graded_split_and_the_selection_rung():
+    pytest.importorskip("pandas")
+    frame = splits.build_split_table(_interim_frame())
+    cols = _carve_cols(frame)
+    eligible, selection_val = splits.calib_eligible_row_indices(
+        source=cols["source"],
+        cluster_id=cols["cluster_id"],
+        nested_train=cols["nested_train"],
+        fold_random=cols["fold_random"],
+    )
+    assert eligible, "no eligible rows"
+    assert selection_val, "the P2-06a selection rung was not excluded"
+    for i in eligible:
+        assert cols["source"][i] == "corpus"
+        assert bool(cols["nested_train"][i])
+        assert cols["fold_random"][i] == "train"
+        assert int(cols["cluster_id"][i]) not in selection_val
+
+
+def test_variant_rows_inherit_calib_from_their_parent():
+    """`calib` is in FOLD_SCHEME_COLUMNS, so D7 inheritance covers it structurally."""
+    pytest.importorskip("pandas")
+    table = splits.build_split_table(_interim_frame(), corpus_sha256=_HEX64)
+    parent_id = table.loc[0, "record_id"]
+    out = splits.append_variant_rows(
+        table, [{"variant_id": parent_id + "#v1", "parent_record_id": parent_id}]
+    )
+    assert bool(out.iloc[-1]["calib"]) == bool(table.loc[0, "calib"])
+    assert out["calib"].dtype == bool  # BOOL_FLAG_COLUMNS tripwire
 
 
 def test_validate_table_schema_accepts_a_well_formed_table():

@@ -225,6 +225,10 @@ def _fixture_frames() -> tuple[pd.DataFrame, list[str], pd.DataFrame, pd.DataFra
             "nested_role": ["train", "heldout"],
             "is_designated_loo_holdout": [False, True],
             "dropped_from_clade_holdout": [False, False],
+            # ADR-0004 A7: the carve is computed by `splits.py` and only *read* here.
+            # The training-fold record is in it; the held-out one is not — so the
+            # fixture exercises both branches of the inheritance the decoys rely on.
+            "calib": [True, False],
         }
     )
     return corpus, ids, labels, splits
@@ -327,7 +331,53 @@ def test_parentless_decoys_are_random_only_and_invent_no_clade() -> None:
     assert (~free["clade_holdout_eligible"]).all()
     assert free["fold_random"].notna().all()
     assert set(free["fold_random"]) <= set(ds.FOLD_RANDOM_VALUES)
+    # ADR-0004 A7.4: `nested_train` stays null (that is P3-03's call), but `calib` is
+    # DECIDED — never null. The whole point of A7.4 is that a parentless decoy's
+    # calibration membership is a stated rule, not a join default.
+    assert free["nested_train"].isna().all()
+    assert free["calib"].notna().all()
     assert report["fold_basis_counts"][ds.FOLD_BASIS_DECOY_RANDOM] == 2
+
+
+# --------------------------------------------------------------------------- #
+# ADR-0004 A7.4 — the parentless-decoy calibration draw
+# --------------------------------------------------------------------------- #
+def test_decoy_calib_refuses_every_decoy_outside_the_train_portion() -> None:
+    """The clause that makes the carve structurally unable to reach the graded split."""
+    for fold in ("val", "test"):
+        assert not any(
+            ds.decoy_calib(f"decoy_{i}", fold_random=fold) for i in range(2000)
+        ), f"a {fold}-fold decoy was admitted to calib"
+
+
+def test_decoy_calib_is_deterministic_and_id_keyed() -> None:
+    ids = [f"gcbg_{i:06d}" for i in range(500)]
+    first = [ds.decoy_calib(i, fold_random="train") for i in ids]
+    # Same answer on a re-run, and on a *reordered* pool — the draw is keyed on the id,
+    # not on position, so re-running the build over a superset cannot reshuffle it.
+    assert first == [ds.decoy_calib(i, fold_random="train") for i in ids]
+    assert dict(zip(ids, first, strict=True)) == {
+        i: ds.decoy_calib(i, fold_random="train") for i in reversed(ids)
+    }
+    assert any(first), "the draw admitted nothing over 500 ids"
+    assert not all(first), "the draw admitted everything over 500 ids"
+
+
+def test_decoy_calib_is_independent_of_the_fold_draw() -> None:
+    """A distinct hash domain: calib membership must not be a function of the fold draw.
+
+    Sharing one digest would make `calib` the low tail of the same unit interval
+    `decoy_fold` already partitions — i.e. a deterministic *slice* of the train fold
+    rather than an independent draw across it.
+    """
+    ids = [f"gcbg_{i:06d}" for i in range(4000)]
+    train = [i for i in ids if ds.decoy_fold(i) == "train"]
+    drawn = [i for i in train if ds.decoy_calib(i, fold_random="train")]
+    assert drawn, "no decoy was drawn"
+    rate = len(drawn) / len(train)
+    # Binomial noise around the pinned rate; the assertion is deliberately loose because
+    # the *realised* count is a measurement, not a target to tune (CLAUDE.md §10.3).
+    assert 0.5 * ds.DECOY_CALIB_RATE < rate < 2.0 * ds.DECOY_CALIB_RATE, rate
 
 
 def test_negatives_carry_no_positive_only_field() -> None:

@@ -54,6 +54,14 @@ _EXPECTED_DECOYS = 126
 _EXPECTED_DECOYS_REFUSED = 4
 _EXPECTED_ANCHORED = 79
 
+#: ADR-0004 A7 (P3-02): the fixture slice's calibration carve. Pinned so the golden
+#: proves the carve is **reachable and two-class on real data**, not merely coded — a
+#: digest alone would still match if `calib` were all-False everywhere, which is the
+#: one way a "disjoint calibration split" can be vacuously perfect
+#: ([[clauses-must-guard-emptiness]]).
+_EXPECTED_CALIB_POSITIVES = 4
+_EXPECTED_CALIB_NEGATIVES = 5
+
 
 def _build():
     import pandas as pd
@@ -131,5 +139,17 @@ def test_stage2_dataset_golden_digest_matches() -> None:
     for db, n in zip(anchored["pairing_dotbracket"], anchored["seq_length"], strict=True):
         assert len(db) == n
         ds.dot_bracket_to_partners(db)  # raises if unbalanced
+
+    # ADR-0004 A7 gate: the calibration carve is present, non-degenerate, two-class,
+    # and disjoint from the graded split — on the real committed partition.
+    calib = report["calib"]
+    assert calib["n_positives"] == _EXPECTED_CALIB_POSITIVES
+    assert calib["n_negatives"] == _EXPECTED_CALIB_NEGATIVES
+    assert calib["n_calib_in_val_or_test"] == 0
+    assert calib["n_negatives_parentless"] > 0, "the A7.4 keyed-hash route never fired"
+    assert frame["calib"].notna().all()
+    calib_rows = frame[frame["calib"].astype(bool)]
+    assert set(calib_rows["fold_random"]) == {"train"}
+    assert set(calib_rows["is_tbox"]) == {True, False}, "a one-class calibration set"
 
     assert ds.dataset_digest(frame) == _EXPECTED.read_text().strip()

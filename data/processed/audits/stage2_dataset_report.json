@@ -1,7 +1,19 @@
 {
+  "calib": {
+    "adr": "ADR-0004 A7",
+    "decoy_calib_rate": 0.0469,
+    "in_distribution_test_prevalence": 0.772742,
+    "n_calib_in_val_or_test": 0,
+    "n_negatives": 230,
+    "n_negatives_inherited": 62,
+    "n_negatives_parentless": 168,
+    "n_positives": 859,
+    "n_rows": 1089,
+    "prevalence": 0.788797
+  },
   "clade_holdout_eligible": 24576,
   "decoy_fold_seed": 20260731,
-  "digest": "03263354175c0c3db19cd4262b8aff1bbe3ab0f160f30b13774973bec27af764",
+  "digest": "c5a2c251d5848c1dc35f6b9715609b2147c8fc84c61fd452049ce3f6008e9db5",
   "flank_nt": 0,
   "fold_basis_counts": {
     "corpus_record": 23535,
