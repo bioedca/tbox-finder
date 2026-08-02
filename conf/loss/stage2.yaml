@@ -1,0 +1,85 @@
+# @package loss
+# loss/stage2.yaml — P3-04 Stage-2 multi-task objective (PRD §8/§11; ADR-0005 D16).
+#
+# Drives: src/tbox_finder/stage2/losses.py::Stage2LossConfig, built field-by-field by the
+# P3-06 trainer (the conf/optim → Stage1TrainConfig precedent: the group is the ONE home for
+# these keys; do not restate any of them top-level in conf/train/stage2.yaml, or the group
+# pass silently wins and the top-level copy reads as live while changing nothing — the `lr`
+# trap documented in conf/optim/stage1_best.yaml).
+#
+# `# @package loss` is the group's own default package, stated explicitly rather than
+# inherited: every key here lands at `cfg.loss.*`, so the PRD §11 sweep axis is
+# `loss.aux_weight=…` exactly as the learning-rate axis is `optim.lr=…`.
+#
+# ⚠ EVERY OVERRIDABLE FIELD MUST BE A LITERAL KEY IN THIS FILE, not just a dataclass field.
+# Hydra composes in struct mode, so a CLI `loss.aux_weight=0.0` against a config lacking the
+# key is a hard ConfigCompositionException — that is how SLURM job 669 was lost at P2-09
+# (the field existed on the dataclass, the unit tests exercised a plain dict, and the gap was
+# invisible until the run). tests/unit/test_stage2_losses.py::TestHydraSweepAxis composes
+# this file for real and asserts the override lands.
+#
+# NOTHING HERE IS AUTHORITATIVE OVER CODE. ADR-0005 D16 pins the weighting *method* and the
+# rule that the binary head dominates; both are enforced in Stage2LossConfig.__post_init__,
+# which refuses at construction (login node, before any GPU time) rather than after the run.
+# No value in this file can weaken either.
+
+# ── ADR-0005 D16: the pinned weighting method ────────────────────────────────────────────
+# "fixed" = D16's default (fixed manual task weights, binary head dominating).
+# "uncertainty" = D16's PRE-REGISTERED ALTERNATIVE (Kendall-style homoscedastic uncertainty),
+# to be selected only if the fixed weights underperform on the validation ladder — and it
+# needs learnable log-variances the trainer must create and hand to the optimiser
+# (losses.uncertainty_log_variances). A third value is an ADR amendment, not a config edit:
+# the allow-list is closed in code.
+weighting: fixed
+
+# ── The PRD §11 sweep axis ───────────────────────────────────────────────────────────────
+# Global multiplier on all five aux terms (heads b, c, d1-d3). The binary head (a) is NOT
+# scaled by it, so `aux_weight: 0.0` is exactly the no-aux arm P3-08 consumes: the objective
+# collapses to the binary term alone.
+#
+# Its admissible range is bounded by D16's dominance rule, not by taste: at the base weights
+# below (Σ aux = 0.7 against binary 1.0) any value ≤ 1.4285714… is admitted and anything
+# above RAISES at construction. Widening that cap means changing binary_weight or amending
+# ADR-0005 — Stage2LossConfig.max_aux_weight reports the current bound.
+aux_weight: 1.0
+
+# ── Per-term base weights — implementer defaults on a swept axis, NOT ADR-pinned ──────────
+# D16 pins the method and "binary head weighted to dominate"; it pins no number. These are
+# a starting point: the binary head carries 1.0, the per-nucleotide boundary head the largest
+# aux share, and the four record-level heads an equal small share. The effective weight of an
+# aux term is `aux_weight * <term>_weight`.
+binary_weight: 1.0
+boundary_weight: 0.3
+regulatory_mode_weight: 0.1
+specifier_codon_weight: 0.1
+cognate_aa_weight: 0.1
+trna_family_weight: 0.1
+
+# ── Focal focusing parameters (PRD §11 focal loss for the imbalanced regime) ──────────────
+# Head (b) is the dense-background per-nucleotide regime focal loss was written for, so it
+# starts at Lin et al.'s γ=2 [arXiv:1708.02002]; the record-level heads start at plain
+# cross-entropy (γ=0). Safe below γ=1: P2-02 fixed the silent NaN gradient at 0<γ<1 in the
+# shared focal_cross_entropy these terms all call.
+binary_gamma: 0.0
+boundary_gamma: 2.0
+aux_gamma: 0.0
+
+# ── Inverse-frequency class weighting (PRD §8 "handle as class imbalance") ────────────────
+# 0 ⇒ unweighted, and the default: PRD §11 offers focal loss OR inverse-frequency weighting
+# as alternative correctives for the same imbalance, so the default expresses exactly one of
+# them (the Stage-1 objective's convention).
+#
+# When > 0 the trainer MUST supply per-term class counts measured on the stream it will
+# actually train on — MultitaskLoss raises rather than assuming them, and
+# inverse_frequency_weights raises on any class with zero count rather than clamping the
+# undefined inverse frequency to a plausible stand-in. That refusal is load-bearing on the
+# 64-wide specifier-codon axis, where the training fold need not realise every codon.
+binary_class_weight_alpha: 0.0
+boundary_class_weight_alpha: 0.0
+aux_class_weight_alpha: 0.0
+
+# Target sentinel for an unsupervised element. Single-sourced from stage2/heads.py's
+# IGNORE_INDEX (torch's own cross-entropy default); Stage2HeadSpec.encode already emits it
+# for every missing / blank / out-of-vocabulary / stringified-null cell, which is why all
+# 7,007 decoy rows contribute to the binary and boundary terms and to nothing else.
+ignore_index: -100

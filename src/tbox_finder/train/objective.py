@@ -66,7 +66,7 @@ DEFAULT_CLASS_WEIGHT_ALPHA = 0.0
 DEFAULT_CRF_WEIGHT = 1.0
 
 
-def _finite_float(value: Any, name: str, *, minimum: float = 0.0) -> float:
+def finite_float(value: Any, name: str, *, minimum: float = 0.0) -> float:
     """Coerce to float and reject NaN / ±inf as well as out-of-range values.
 
     A bare ``x < 0`` test **passes** for NaN (every comparison with NaN is False), so a
@@ -74,6 +74,9 @@ def _finite_float(value: Any, name: str, *, minimum: float = 0.0) -> float:
     whole loss — and then every parameter — silently NaN. Non-finite hyperparameters are
     never meaningful here, so they are rejected at the boundary (CLAUDE.md §10.3: fail
     loudly rather than emit a wrong number).
+
+    Public since P3-04, which validates the Stage-2 objective's hyperparameters against the
+    same rule; a second copy would be a second place for the NaN hole to reopen.
     """
     out = float(value)
     if not math.isfinite(out):
@@ -81,6 +84,10 @@ def _finite_float(value: Any, name: str, *, minimum: float = 0.0) -> float:
     if out < minimum:
         raise ValueError(f"{name} must be >= {minimum:g}, got {out}")
     return out
+
+
+#: Pre-P3-04 private name, kept so nothing that reached for it breaks. Same function object.
+_finite_float = finite_float
 
 
 __all__ = [
@@ -93,7 +100,9 @@ __all__ = [
     "Stage1LossConfig",
     "class_weights_from_counts",
     "core_mass_share",
+    "finite_float",
     "focal_cross_entropy",
+    "inverse_frequency_weights",
     "left_align_for_crf",
     "loss_mass_share",
 ]
@@ -102,6 +111,28 @@ __all__ = [
 # --------------------------------------------------------------------------- #
 # Pure tier — class-frequency statistics → weights, and the consequence diagnostic
 # --------------------------------------------------------------------------- #
+def _as_count(value: Any, name: str) -> int:
+    """One count → a non-negative ``int``, rejecting bools and non-integers."""
+    # ``bool`` is an ``int`` subclass and implements ``__index__``, so it must be
+    # rejected explicitly — a True/False slipping through would silently count as 1/0
+    # (the P1-15/P1-16 bool-as-count defect class).
+    if isinstance(value, bool):
+        raise TypeError(f"count for {name!r} must be an int, got bool")
+    # ``operator.index`` is the integer protocol, so numpy integers (what np.bincount
+    # returns — the natural way a caller tallies these) are accepted, while np.bool_,
+    # floats and strings raise. A bare ``isinstance(value, int)`` would reject np.int64
+    # and force every caller to hand-convert.
+    try:
+        n = operator.index(value)
+    except TypeError:
+        raise TypeError(
+            f"count for {name!r} must be an integer, got {type(value).__name__}"
+        ) from None
+    if n < 0:
+        raise ValueError(f"count for {name!r} must be >= 0, got {n}")
+    return n
+
+
 def _counts_in_class_order(counts: Mapping[str, int] | Sequence[int]) -> tuple[int, ...]:
     """Normalise a count mapping/sequence into a tuple in :data:`CLASS_ORDER` order."""
     if isinstance(counts, Mapping):
@@ -116,27 +147,55 @@ def _counts_in_class_order(counts: Mapping[str, int] | Sequence[int]) -> tuple[i
         ordered = list(counts)
         if len(ordered) != NUM_CLASSES:
             raise ValueError(f"class counts must have {NUM_CLASSES} entries, got {len(ordered)}")
-    out: list[int] = []
-    for name, value in zip(CLASS_ORDER, ordered, strict=True):
-        # ``bool`` is an ``int`` subclass and implements ``__index__``, so it must be
-        # rejected explicitly — a True/False slipping through would silently count as 1/0
-        # (the P1-15/P1-16 bool-as-count defect class).
-        if isinstance(value, bool):
-            raise TypeError(f"count for {name!r} must be an int, got bool")
-        # ``operator.index`` is the integer protocol, so numpy integers (what np.bincount
-        # returns — the natural way a caller tallies these) are accepted, while np.bool_,
-        # floats and strings raise. A bare ``isinstance(value, int)`` would reject np.int64
-        # and force every caller to hand-convert.
-        try:
-            n = operator.index(value)
-        except TypeError:
-            raise TypeError(
-                f"count for {name!r} must be an integer, got {type(value).__name__}"
-            ) from None
-        if n < 0:
-            raise ValueError(f"count for {name!r} must be >= 0, got {n}")
-        out.append(n)
-    return tuple(out)
+    return tuple(_as_count(value, name) for name, value in zip(CLASS_ORDER, ordered, strict=True))
+
+
+def inverse_frequency_weights(
+    counts: Sequence[int],
+    *,
+    alpha: float = 1.0,
+) -> tuple[float, ...]:
+    """Inverse-frequency weights ``w_c ∝ (N / n_c) ** alpha`` over **any** vocabulary.
+
+    The arithmetic behind :func:`class_weights_from_counts`, promoted at P3-04 so the
+    Stage-2 heads — whose axes are 2, 20, 61 and 64 wide, not 8 — reuse it instead of
+    carrying a second copy that could drift from this one.
+
+    ``counts`` is a per-class count vector of **any** length ≥ 1, index-aligned to the
+    logit axis it will weight. Weights are normalised to **mean 1**: under the ``"mean"``
+    reduction that is a no-op on the loss value (the weighted mean divides by ``Σ w``, so a
+    global rescale cancels), but it matters for ``"sum"`` and keeps a printed vector
+    readable against the unweighted baseline of 1.0.
+
+    Raises:
+        ValueError: if ``counts`` is empty, if every count is zero, if **any** count is
+            zero (the inverse frequency is undefined there — reported rather than silently
+            clamped to a finite stand-in, CLAUDE.md §10.3), or if ``alpha`` is negative.
+
+    Note:
+        The zero-count refusal is deliberate and has a Stage-2 consequence worth stating: a
+        64-wide specifier-codon axis whose training fold never realises some codon cannot be
+        inverse-frequency weighted at all. Weighting an absent class 0 would be harmless in
+        training (its weight is never gathered, since it is never a target) but silently
+        drops any *evaluation* row that does realise it — zero weight, zero denominator
+        contribution. Refusing makes the caller choose, rather than choosing for it.
+    """
+    alpha = finite_float(alpha, "alpha")
+    ordered = tuple(_as_count(value, str(i)) for i, value in enumerate(counts))
+    if not ordered:
+        raise ValueError("counts is empty — there is no vocabulary to weight")
+    total = sum(ordered)
+    if total <= 0:
+        raise ValueError("class counts are all zero — no training stream to weight against")
+    zero = [i for i, n in enumerate(ordered) if n == 0]
+    if zero:
+        raise ValueError(
+            f"class indices {zero} have zero count: the inverse frequency is undefined. "
+            "Supply counts from a stream that covers every class, or drop the class."
+        )
+    raw = [(total / n) ** alpha for n in ordered]
+    mean_raw = sum(raw) / len(raw)
+    return tuple(w / mean_raw for w in raw)
 
 
 def class_weights_from_counts(
@@ -165,20 +224,20 @@ def class_weights_from_counts(
             reported rather than silently clamped to a finite stand-in, CLAUDE.md §10.3),
             or if ``alpha`` is negative.
     """
-    alpha = _finite_float(alpha, "alpha")
+    alpha = finite_float(alpha, "alpha")
     ordered = _counts_in_class_order(counts)
     total = sum(ordered)
     if total <= 0:
         raise ValueError("class counts are all zero — no training stream to weight against")
+    # Checked here rather than left to inverse_frequency_weights so the message names the
+    # zero classes by CLASS_ORDER **name**, which is what a Stage-1 caller can act on.
     zero = [name for name, n in zip(CLASS_ORDER, ordered, strict=True) if n == 0]
     if zero:
         raise ValueError(
             f"classes {zero} have zero nucleotides: the inverse frequency is undefined. "
             "Supply counts from a stream that covers every class, or drop the class."
         )
-    raw = [(total / n) ** alpha for n in ordered]
-    mean_raw = sum(raw) / len(raw)
-    return tuple(w / mean_raw for w in raw)
+    return inverse_frequency_weights(ordered, alpha=alpha)
 
 
 def loss_mass_share(
