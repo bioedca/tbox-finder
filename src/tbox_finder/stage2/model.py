@@ -13,11 +13,23 @@ head    what it predicts (PRD §10.2 / §8)          output
 (d)     G-D auxiliary multi-task: specifier        ``specifier_codon_logits`` ``(B, 64)``
         codon / cognate amino acid / tRNA          ``cognate_aa_logits``      ``(B, n)``
         family                                     ``trna_family_logits``     ``(B, n)``
+(e)     **optional** per-base pairing partner      ``structure_logits``
+        (P3-05, off by default)                    ``(B, L, 1 + L)``
 ======  =========================================  ===================================
 
 Head widths come from :class:`~tbox_finder.stage2.heads.Stage2HeadSpec`, which derives
 them rather than declaring them — see that module for why (the PRD and the ADRs name
-the heads but pin no cardinality).
+the heads but pin no cardinality). Head (e) is the exception: its class axis *is* the
+sequence's own position axis, so its width is the batch's padded length, not a
+vocabulary (:class:`PairingHead`).
+
+Head (e) is opt-in (``structure_head=False``)
+---------------------------------------------
+PRD §8 calls the pairing-partner label *"optional (Stage-2)"* and PRD §11 *"Optional
+structure-consistency auxiliary loss from dot-bracket pairing"*; ADR-0005 D16's head
+enumeration does not name it. So it is **not built unless asked for**, and the default
+model is exactly the six-head D16 objective P3-03/P3-04 shipped. Turning it on is the
+optional arm P3-08 folds into the aux ablation, not a change to the pinned default.
 
 Sequence-only, structurally (the load-bearing prohibition)
 ----------------------------------------------------------
@@ -28,6 +40,13 @@ structure-consistency* **target**\\ *, not a Stage-2 input"*, and ADR-0002 D5 re
 ``attention_mask`` and declares no ``**kwargs``: passing a dot-bracket string is a
 ``TypeError`` at the call site, not a convention someone can drift past. A unit test
 locks the signature, because a prohibition enforced only by review is enforced by nobody.
+
+Head (e) does not weaken that: it **emits** structure and consumes none. Its only inputs
+are the hidden states the encoder produced from the sequence and the nucleotide mask, so
+the direction of travel is model → dot-bracket, which is precisely what PRD §6 permits
+("used solely as the … **target**"). Both public entries — :meth:`Stage2Model.forward`
+*and* :meth:`Stage2Model.heads_from_hidden` — are signature-locked by the same ``ast``
+test, so structure cannot enter through the backbone-free path either.
 
 Token axis vs nucleotide axis
 -----------------------------
@@ -79,9 +98,20 @@ from tbox_finder.stage2.heads import (
     Stage2HeadSpec,
 )
 
-__all__ = ["HEAD_OUTPUT_KEYS", "OUTPUT_KEYS", "Stage2Model", "build_stage2_model"]
+__all__ = [
+    "ALL_HEAD_OUTPUT_KEYS",
+    "DEFAULT_PAIRING_PROJ_DIM",
+    "HEAD_OUTPUT_KEYS",
+    "OPTIONAL_HEAD_OUTPUT_KEYS",
+    "OUTPUT_KEYS",
+    "STRUCTURE_OUTPUT_KEY",
+    "PairingHead",
+    "Stage2Model",
+    "build_stage2_model",
+]
 
-#: The logit keys :meth:`Stage2Model.forward` returns, in PRD §10.2 head order (a–d).
+#: The logit keys :meth:`Stage2Model.forward` **always** returns, in PRD §10.2 head
+#: order (a–d).
 HEAD_OUTPUT_KEYS: tuple[str, ...] = (
     "tbox_logit",
     "boundary_logits",
@@ -91,9 +121,29 @@ HEAD_OUTPUT_KEYS: tuple[str, ...] = (
     "trna_family_logits",
 )
 
-#: Everything :meth:`Stage2Model.forward` returns: the head logits plus the nucleotide
-#: mask, which the P3-04 loss needs to drop padded positions from the per-nt term.
+#: Head (e)'s key — present only when ``structure_head=True`` (PRD §8/§11 "optional").
+STRUCTURE_OUTPUT_KEY = "structure_logits"
+
+#: The logit keys an opt-in head contributes. Kept separate from
+#: :data:`HEAD_OUTPUT_KEYS` so "what a default model returns" stays a constant a test can
+#: pin, while :attr:`Stage2Model.output_keys` reports what *this* model returns.
+OPTIONAL_HEAD_OUTPUT_KEYS: tuple[str, ...] = (STRUCTURE_OUTPUT_KEY,)
+
+#: Every head key that can appear, in PRD head order (a–e). The P3-04/P3-05 loss module
+#: names its term→key map by hand (it must stay torch-free) and is drift-guarded against
+#: this tuple.
+ALL_HEAD_OUTPUT_KEYS: tuple[str, ...] = (*HEAD_OUTPUT_KEYS, *OPTIONAL_HEAD_OUTPUT_KEYS)
+
+#: Everything a **default** :meth:`Stage2Model.forward` returns: the six always-on head
+#: logits plus the nucleotide mask, which the P3-04 loss needs to drop padded positions
+#: from the per-nt terms.
 OUTPUT_KEYS: tuple[str, ...] = (*HEAD_OUTPUT_KEYS, "nucleotide_mask")
+
+#: Head (e)'s inner projection width. An implementer default, not an ADR-pinned number:
+#: no ADR or PRD line pins a cardinality for the structure-consistency head. It sets the
+#: rank of the pairing score matrix, not its shape, so it is a capacity knob and not part
+#: of any contract.
+DEFAULT_PAIRING_PROJ_DIM = 64
 
 
 def _hidden_size(backbone: nn.Module) -> int:
@@ -119,6 +169,84 @@ def _hidden_size(backbone: nn.Module) -> int:
     )
 
 
+class PairingHead(nn.Module):
+    """Head (e): per-base pairing-partner logits ``(B, L, 1 + L)`` (PRD §8, P3-05).
+
+    The class axis is ``1 + L``: **class 0 is "unpaired"** and class ``j + 1`` is "paired
+    with position ``j``". Putting the unpaired class *first* rather than last is
+    load-bearing — it makes a target index independent of the batch's padded length, so a
+    row encoded alone and the same row encoded inside a longer batch carry identical
+    targets. With the sentinel at the end, ``L_pad`` would leak into the label.
+
+    **Scores are symmetric by construction.** Base pairing is a symmetric relation, so
+    the raw bilinear score matrix is averaged with its own transpose before the unpaired
+    column is prepended. That does not force the *predictions* to be symmetric (the
+    softmax is still per-row), but it removes the model's ability to score ``i→j``
+    differently from ``j→i`` — the cheapest form of the consistency this head is named
+    for, and one that costs a single transpose.
+
+    Two positions are forbidden outright rather than left to be learned: the diagonal (a
+    base cannot pair with itself) and every padded column (a partner that is padding is
+    not a partner). Both are filled with ``finfo(dtype).min`` rather than ``-inf``, which
+    keeps a fully-masked row's ``logsumexp`` finite; the unpaired class is never masked,
+    so no row is ever fully masked in practice either.
+
+    **Cost is quadratic in length**, which is why P3-06 must size for it: the logits alone
+    are ``B × L × (1+L)``, i.e. ~33 MB in fp32 at ``B=8, L=1022`` (RiNALMo's context —
+    :data:`~tbox_finder.stage2.tokenizer.MAX_NUCLEOTIDE_TOKENS`), before the cross-entropy
+    intermediates. The projections themselves are cheap: ``2 · d_model · proj_dim + d_model``
+    parameters.
+
+    Args:
+        d_model: per-position hidden width of the states this head reads.
+        proj_dim: rank of the bilinear score (:data:`DEFAULT_PAIRING_PROJ_DIM`).
+        dropout: applied to the hidden states before the projections.
+    """
+
+    def __init__(
+        self,
+        d_model: int,
+        *,
+        proj_dim: int = DEFAULT_PAIRING_PROJ_DIM,
+        dropout: float = 0.0,
+    ) -> None:
+        super().__init__()
+        if int(d_model) <= 0:
+            raise ValueError(f"d_model must be positive, got {d_model}")
+        if int(proj_dim) <= 0:
+            raise ValueError(f"proj_dim must be positive, got {proj_dim}")
+        self.d_model = int(d_model)
+        self.proj_dim = int(proj_dim)
+        self.dropout = nn.Dropout(float(dropout))
+        self.left = nn.Linear(self.d_model, self.proj_dim)
+        self.right = nn.Linear(self.d_model, self.proj_dim)
+        # One logit per position for "this base is unpaired" — a genuine class, not a
+        # threshold on the pairing scores: the dot-bracket supervises it directly.
+        self.unpaired = nn.Linear(self.d_model, 1)
+
+    def forward(self, nucleotide_hidden: Tensor, nucleotide_mask: Tensor) -> Tensor:
+        """``(B, L, H), (B, L) → (B, L, 1 + L)``. Hidden states in, pairing logits out."""
+        if nucleotide_hidden.dim() != 3:
+            raise ValueError(
+                f"nucleotide_hidden must be (B, L, H), got {tuple(nucleotide_hidden.shape)}"
+            )
+        if nucleotide_mask.shape != nucleotide_hidden.shape[:2]:
+            raise ValueError(
+                f"nucleotide_mask {tuple(nucleotide_mask.shape)} != nucleotide_hidden[:2] "
+                f"{tuple(nucleotide_hidden.shape[:2])}"
+            )
+        hidden = self.dropout(nucleotide_hidden)
+        scores = torch.matmul(self.left(hidden), self.right(hidden).transpose(1, 2))
+        scores = scores * (self.proj_dim**-0.5)
+        scores = 0.5 * (scores + scores.transpose(1, 2))
+
+        length = scores.shape[1]
+        self_pair = torch.eye(length, dtype=torch.bool, device=scores.device)
+        padded_partner = ~nucleotide_mask.bool().unsqueeze(1)  # (B, 1, L) over partners j
+        scores = scores.masked_fill(self_pair | padded_partner, torch.finfo(scores.dtype).min)
+        return torch.cat([self.unpaired(hidden), scores], dim=-1)
+
+
 class Stage2Model(nn.Module):
     """RiNALMo-giga encoder → four PRD §10.2 heads. Sequence in, logits out.
 
@@ -135,9 +263,15 @@ class Stage2Model(nn.Module):
         d_model: per-position hidden width. Read off ``backbone`` when one is given —
             passing a conflicting value is an error, not an override.
         dropout: applied to the pooled representation before heads (a), (c) and (d), and
-            forwarded to head (b).
+            forwarded to heads (b) and (e).
         boundary_use_crf: attach the :class:`~tbox_finder.models.seg_head.LinearChainCRF`
             transition layer to head (b) for boundary-coherent loss/decoding.
+        structure_head: attach head (e), the optional PRD §8/§11 pairing-partner head
+            (:class:`PairingHead`). **Off by default** — see the module docstring. Must
+            agree with ``Stage2LossConfig.structure_enabled``: an attached head whose term
+            is disabled would sit in the optimiser receiving no gradient, and
+            :func:`~tbox_finder.stage2.losses.multitask_loss` refuses that pairing.
+        pairing_proj_dim: head (e)'s bilinear rank (:data:`DEFAULT_PAIRING_PROJ_DIM`).
     """
 
     def __init__(
@@ -148,6 +282,8 @@ class Stage2Model(nn.Module):
         d_model: int | None = None,
         dropout: float = 0.0,
         boundary_use_crf: bool = False,
+        structure_head: bool = False,
+        pairing_proj_dim: int = DEFAULT_PAIRING_PROJ_DIM,
     ) -> None:
         super().__init__()
         if not (0.0 <= float(dropout) < 1.0):
@@ -182,6 +318,14 @@ class Stage2Model(nn.Module):
         self.specifier_codon_head = nn.Linear(resolved, spec.size(CODON_FIELD))
         self.cognate_aa_head = nn.Linear(resolved, spec.size(AMINO_ACID_FIELD))
         self.trna_family_head = nn.Linear(resolved, spec.size(TRNA_FAMILY_FIELD))
+        # (e) the optional pairing-partner head — built only when asked for, so the
+        # default model is exactly the six-head ADR-0005 D16 objective. Assigned as None
+        # rather than left unset so `structure_head` is always a readable attribute.
+        self.structure_head: PairingHead | None = (
+            PairingHead(resolved, proj_dim=int(pairing_proj_dim), dropout=float(dropout))
+            if structure_head
+            else None
+        )
 
     @staticmethod
     def _resolve_d_model(backbone: nn.Module | None, d_model: int | None) -> int:
@@ -198,8 +342,13 @@ class Stage2Model(nn.Module):
     # -- properties ----------------------------------------------------------- #
     @property
     def head_modules(self) -> dict[str, nn.Module]:
-        """The six head modules, keyed by attribute name — the LoRA-exclusion set."""
-        return {
+        """The live head modules, keyed by attribute name — the LoRA-exclusion set.
+
+        Head (e) appears only when it was attached, so ``build_stage2_model``'s measured
+        head/backbone split counts what this model actually has rather than what the
+        default has.
+        """
+        modules: dict[str, nn.Module] = {
             "tbox_head": self.tbox_head,
             "boundary_head": self.boundary_head,
             "regulatory_mode_head": self.regulatory_mode_head,
@@ -207,6 +356,22 @@ class Stage2Model(nn.Module):
             "cognate_aa_head": self.cognate_aa_head,
             "trna_family_head": self.trna_family_head,
         }
+        if self.structure_head is not None:
+            modules["structure_head"] = self.structure_head
+        return modules
+
+    @property
+    def has_structure_head(self) -> bool:
+        """Was the optional PRD §8/§11 head (e) attached?"""
+        return self.structure_head is not None
+
+    @property
+    def output_keys(self) -> tuple[str, ...]:
+        """The keys :meth:`forward` returns for **this** model, head order then the mask."""
+        head_keys = HEAD_OUTPUT_KEYS + (
+            OPTIONAL_HEAD_OUTPUT_KEYS if self.has_structure_head else ()
+        )
+        return (*head_keys, "nucleotide_mask")
 
     @property
     def head_dtype(self) -> torch.dtype:
@@ -286,15 +451,18 @@ class Stage2Model(nn.Module):
         # their own dtype, and one explicit cast beats a dtype error inside each head.
         nucleotide_hidden = nucleotide_hidden.to(self.head_dtype)
         pooled = self.pool_dropout(self.pool(nucleotide_hidden, nucleotide_mask))
-        return {
+        outputs = {
             "tbox_logit": self.tbox_head(pooled).squeeze(-1),
             "boundary_logits": self.boundary_head(nucleotide_hidden),
             "regulatory_mode_logits": self.regulatory_mode_head(pooled),
             "specifier_codon_logits": self.specifier_codon_head(pooled),
             "cognate_aa_logits": self.cognate_aa_head(pooled),
             "trna_family_logits": self.trna_family_head(pooled),
-            "nucleotide_mask": nucleotide_mask,
         }
+        if self.structure_head is not None:
+            outputs[STRUCTURE_OUTPUT_KEY] = self.structure_head(nucleotide_hidden, nucleotide_mask)
+        outputs["nucleotide_mask"] = nucleotide_mask
+        return outputs
 
     # -- the full forward ------------------------------------------------------ #
     def forward(
@@ -330,6 +498,8 @@ def build_stage2_model(
     device: str | None = None,
     dropout: float = 0.0,
     boundary_use_crf: bool = False,
+    structure_head: bool = False,
+    pairing_proj_dim: int = DEFAULT_PAIRING_PROJ_DIM,
 ) -> tuple[Stage2Model, dict[str, Any]]:
     """LoRA-wrap the pinned RiNALMo encoder, then attach the heads. Returns ``(model, info)``.
 
@@ -360,6 +530,8 @@ def build_stage2_model(
         backbone=peft_model,
         dropout=dropout,
         boundary_use_crf=boundary_use_crf,
+        structure_head=structure_head,
+        pairing_proj_dim=pairing_proj_dim,
     )
 
     head_param_names = {
@@ -379,7 +551,10 @@ def build_stage2_model(
         "stage2_heads": {
             "d_model": model.d_model,
             "head_sizes": spec.head_sizes,
-            "output_keys": list(OUTPUT_KEYS),
+            # The LIVE keys, not the default tuple: a report that echoed OUTPUT_KEYS
+            # would say "six heads" for a seven-head model.
+            "output_keys": list(model.output_keys),
+            "structure_head": model.has_structure_head,
             "n_head_parameters": sum(
                 p.numel() for module in model.head_modules.values() for p in module.parameters()
             ),

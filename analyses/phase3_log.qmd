@@ -721,3 +721,107 @@ yet known** and must be reconciled at the P3-exit gate by deriving it
 > After r2: **108 pass / 0 fail** under `tbox-ml-rna`, **72 pass / 36 skip** torch-free,
 > and **14 sabotage bites**, every one RED against its named test and every restore
 > sha256-verified.
+
+## Step P3-05 — 2026-08-02: the optional structure-consistency auxiliary loss (dot-bracket pairing)
+
+**Inputs.** P3-01's `pairing_dotbracket` column of `data/processed/stage2_dataset.parquet`
+(18,269 anchored rows; 12,273 null — 7,007 decoys with no structure at all plus 5,266
+positives whose alignment could not be anchored) and its `dataset.py::dot_bracket_to_partners`
+decoder, written at P3-01 *for* this step; P3-03's `Stage2Model` and its `nucleotide_mask`;
+P3-04's `losses.py` conventions and `conf/loss/stage2.yaml`. LOCAL, CPU only — no GPU, no
+SLURM, no checkpoint, no DVC artifact.
+
+**Process.** `stage2/losses.py::structure_consistency_loss` is one masked focal
+cross-entropy per nucleotide over a `1 + L`-wide class axis: class 0 is "unpaired", class
+`j + 1` is "paired with position `j`" — PRD §8's *"pairing partner per base from the
+dot-bracket"* taken literally, rather than a contact-map regression. `encode_pairing_target`
+is the pure-tier encoder that reconciles the three sentinels the corpus and the loss each
+use for a different thing. It is fed by a new head (e), `model.py::PairingHead`: a rank-64
+bilinear score over the encoder's own hidden states, averaged with its transpose so `i→j`
+and `j→i` cannot be scored differently, with the diagonal and every padded partner column
+filled at `finfo.min`. The term joins `TERMS` as the seventh, scaled by `aux_weight` like
+every other aux term.
+
+**Outputs.** `structure_consistency_loss` + `encode_pairing_target` + `UNPAIRED_CLASS` /
+`STRUCTURE_TERM` / `OPTIONAL_TERMS` / `NON_VOCAB_AUX_TERMS` in `stage2/losses.py`;
+`PairingHead` + `Stage2Model(structure_head=…)` + `structure_logits` +
+`ALL_HEAD_OUTPUT_KEYS` / `OPTIONAL_HEAD_OUTPUT_KEYS` + `Stage2Model.output_keys` in
+`stage2/model.py`; `structure_enabled` / `structure_weight` / `structure_gamma` in
+`conf/loss/stage2.yaml`; `tests/unit/test_structure_consistency_loss.py`.
+
+**Validation.** The imp.md gate, both halves. *Target well-formed:* the hand-checked
+`((..))` encodes to `[6, 5, 0, 0, 2, 1]` worked out by hand, is graded position-by-position
+against `dot_bracket_to_partners` (never against a second parser here), and every
+pseudoknot bracket `[ ] { } < > A a` is refused rather than read as unpaired. *Loss
+decreases:* 60 SGD steps on the fixture, and at 400 steps `argmax` recovers exactly
+`[6, 5, 0, 0, 2, 1]` — with a control asserting the untrained head does **not** already
+predict it, so a falling curve cannot pass for a fitted one. The term is graded in fp64 at
+`atol=1e-12` against torch's own `F.cross_entropy`, and the all-ignored batch asserts
+torch's `mean` returning **nan** as the witness that reducing to `0.0` is doing work.
+`test_structure_consistency_loss.py`: **90 pass / 0 fail** under `tbox-ml-rna`, **45 pass /
+45 skip** torch-free (the bare run includes the Hydra tier). Neighbours green:
+`test_stage2_losses` 116, `test_stage2_model` 31, `test_objective` 92, `test_stage2_tokenizer`
+24. **24 source sabotages, each RED against its named test, each restored byte-identically**
+(sha256, `python -B`, `__pycache__` cleared).
+
+**Decisions.** Five, each stated rather than assumed.
+
+*The term ships off by default.* ADR-0005 D16 enumerates the binary / boundary /
+regulatory-mode / G-D heads and does not name a structure head; PRD §8 and §11 do, and call
+it **optional** both times. With `structure_enabled=False` the shipped default objective is
+exactly the six-term D16 one P3-04 validated, so no ADR amendment is in play (§7 item 2);
+turning it on is the PRD-authorised optional arm on §11's swept axis, which P3-08 folds into
+the aux ablation. This is a reading, reported not self-certified — and the conservative one:
+the alternative default would have changed the pinned objective without sign-off.
+
+*Enabling it moves the D16 dominance cap.* Σ base aux goes 0.7 → 0.8 against a binary of
+1.0, so `max_aux_weight` falls **1.4286 → 1.25** — the number P3-04's hand-off predicted,
+now measured by a test rather than restated. A *disabled* term reports a base weight of
+`0.0` so it cannot tighten a cap it does not use.
+
+*The toggle is structural, not a weight of zero.* `structure_enabled=True` with
+`structure_weight=0` is refused: it reads as "on" while computing nothing, and would attach
+a head that never receives a gradient. The model must carry the same toggle — a head with no
+term is refused (dead optimiser parameters, the reason P3-04 refuses stray `log_variances`)
+while a *target* for a disabled term is accepted and reported in
+`components["unused_targets"]`. Refuse a dead parameter; report unused data.
+
+*The unpaired class sits at index 0, not L.* With the sentinel last, the batch's padded
+length would leak into every label and the same row would carry different targets alone and
+in a batch. A sabotage that reverses the concatenation turns five tests red.
+
+*Head (e) has no class weights and never will.* Its classes are sequence positions, so an
+inverse-frequency weight would weight "index 37 of this batch" rather than a category;
+`class_weight_alpha('structure')` is `0.0` by construction and both `class_weights` and
+`class_counts` entries for it are refused.
+
+**Two things carried forward.** (1) **A self-pair is trivially symmetric** — `i → i`
+satisfies "does `j` claim `i` back?", so the symmetry check alone could not see it, and
+before the dedicated guard a self-pair trained against the diagonal logit pinned at
+`finfo.min`: an enormous but perfectly finite loss. Found by the test, not by review.
+(2) **Head (e) costs O(L²)** — the logits alone are `B × L × (1+L)`, ~33 MB in fp32 at
+`B=8, L=1022`, before the cross-entropy intermediates. P3-06 must size for it if the arm is
+enabled.
+
+**⚠ Label noise this target cannot avoid, and does not pretend to.** The nested dot-bracket
+cannot encode crossing pairs (PRD §8) and the corpus `Structure` column carries no
+pseudoknot brackets at all, so a pseudoknot-paired base arrives as `.` and is supervised as
+*unpaired*. The information needed to mark it ignorable is absent from the source
+annotation, not discarded here — the same limitation PRD §8 accepts for the 8-class boundary
+labels, where `Stem_II` subsumes the IIA/B pseudoknot extent rather than a standalone class
+being trained.
+
+**⚠ A shipped test had to be narrowed, and was replaced by a stronger one.**
+`test_stage2_model.py::test_no_submodule_is_a_structure_encoder` forbade any submodule whose
+*name* contained "structure" / "pairing" / "dotbracket" / "wuss" / "basepair". PRD §6
+prohibits structure as an **input**; a head that *emits* a dot-bracket is what §6 explicitly
+permits ("used solely as the … **target**"), so the name blacklist was the wrong shape for
+P3-05 — it would have refused the head the PRD authorises. It is now
+`test_no_submodule_can_ingest_a_structure_string`, which checks what each module can *read*
+(no `nn.Embedding` anywhere; every head projection's `in_features` is the model's own
+`d_model`) and runs with the optional head both off **and** on. Net stronger, not weaker:
+`heads_from_hidden` — the other public entry, previously unlocked — is now `ast`-signature-
+locked alongside `forward`, and `PairingHead.forward` is locked too, all in the **bare** tier
+so CI checks them on every push.
+
+**Commit.** `222305abd982254beb449a3fb26acd6fbf08d9a9`

@@ -1,4 +1,4 @@
-"""Stage-2 multi-task objective (P3-04).
+"""Stage-2 multi-task objective (P3-04) + the optional structure-consistency term (P3-05).
 
 PRD §11 pins Stage 2 as *"binary + multi-task aux losses with a **pinned weighting method**
 (fixed weights or uncertainty/GradNorm-style balancing, set in ADR-0005), plus a
@@ -13,10 +13,31 @@ D16 pins the **method**, not the numbers — the per-term weights are implemente
 the PRD §11 ``aux-loss weight`` sweep axis, and :meth:`Stage2LossConfig.diagnostics` says so
 per field rather than letting a swept default read as a decision.
 
-The six terms are the PRD §10.2 heads that :meth:`~tbox_finder.stage2.model.Stage2Model.forward`
-returns: (a) the binary T-box logit, (b) the per-nucleotide boundary logits, (c) the
-regulatory-mode logits, and (d) the three G-D auxiliaries (specifier codon, cognate amino
-acid, tRNA family).
+The six default terms are the PRD §10.2 heads that
+:meth:`~tbox_finder.stage2.model.Stage2Model.forward` returns: (a) the binary T-box logit,
+(b) the per-nucleotide boundary logits, (c) the regulatory-mode logits, and (d) the three
+G-D auxiliaries (specifier codon, cognate amino acid, tRNA family).
+
+The optional seventh term (P3-05)
+---------------------------------
+PRD §11 also names an *"**Optional** structure-consistency auxiliary loss from dot-bracket
+pairing"*, whose label PRD §8 defines as *"pairing partner per base from the dot-bracket"*
+— :func:`structure_consistency_loss`, against head (e)
+(:class:`~tbox_finder.stage2.model.PairingHead`).
+
+It ships **off** (``structure_enabled=False``), and that default is a reading worth stating
+rather than assuming. ADR-0005 D16 enumerates the binary / boundary / regulatory-mode /
+G-D heads and does **not** name a structure head; PRD §8/§11 do, and call it optional. With
+the term off, the shipped default objective is byte-for-byte the D16 one P3-04 validated;
+turning it on is the PRD-authorised optional arm on §11's swept axis, folded into the P3-08
+aux ablation. Enabling it is therefore a config act, not an ADR amendment — but it is also
+not something to leave on by accident, which is why it is a toggle and not merely a weight.
+
+Two consequences a caller must know. **(1)** Enabling it lowers the D16 dominance cap: at
+the shipped base weights the aux total goes 0.7 → 0.8, so ``max_aux_weight`` falls from
+1.4286 to 1.25. **(2)** The model must be built with the matching toggle
+(``Stage2Model(structure_head=True)``); a head without its term, or a term without its
+head, is refused rather than silently trained or silently idle.
 
 Design notes
 ------------
@@ -60,6 +81,8 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, fields
 from typing import TYPE_CHECKING, Any
 
+from tbox_finder import masking
+from tbox_finder.stage2.dataset import UNPAIRED_PARTNER, dot_bracket_to_partners
 from tbox_finder.stage2.heads import IGNORE_INDEX, VOCAB_FIELDS
 from tbox_finder.train.objective import (
     finite_float,
@@ -75,14 +98,20 @@ __all__ = [
     "BINARY_TERM",
     "IGNORE_INDEX",
     "MultitaskLoss",
+    "NON_VOCAB_AUX_TERMS",
     "NUCLEOTIDE_MASK_KEY",
+    "OPTIONAL_TERMS",
     "PER_NUCLEOTIDE_TERMS",
+    "STRUCTURE_TERM",
     "Stage2LossConfig",
     "TERMS",
     "TERM_TO_FIELD",
     "TERM_TO_LOGITS",
+    "UNPAIRED_CLASS",
     "WEIGHTING_METHODS",
+    "encode_pairing_target",
     "multitask_loss",
+    "structure_consistency_loss",
     "uncertainty_log_variances",
 ]
 
@@ -93,26 +122,41 @@ __all__ = [
 #: calibrates and the one the with/without-aux check (P3-08) protects.
 BINARY_TERM = "binary"
 
-#: Heads (b)–(d): everything ``aux_weight`` scales, and everything the P3-08 no-aux arm
-#: (``aux_weight=0``) removes. Ordered as PRD §10.2 lists the heads.
+#: PRD §8/§11 head (e) — the **optional** structure-consistency term (P3-05). Named
+#: separately because it is the one term that can be switched off structurally rather than
+#: by weight: see :data:`OPTIONAL_TERMS`.
+STRUCTURE_TERM = "structure"
+
+#: Heads (b)–(e): everything ``aux_weight`` scales, and everything the P3-08 no-aux arm
+#: (``aux_weight=0``) removes. Ordered as PRD §10.2 lists the heads, with §8's optional
+#: structure label last.
 AUX_TERMS: tuple[str, ...] = (
     "boundary",
     "regulatory_mode",
     "specifier_codon",
     "cognate_aa",
     "trna_family",
+    STRUCTURE_TERM,
 )
 
-#: All six, primary first.
+#: Terms a config may disable outright, so that neither their head nor their target is
+#: required. Exactly the terms the PRD calls "optional" (§8 "optional Stage-2", §11
+#: "Optional structure-consistency auxiliary loss"); every other term is mandatory and can
+#: only be down-weighted. A closed tuple: making a mandatory term optional would change the
+#: ADR-0005 D16 objective, not a config value.
+OPTIONAL_TERMS: tuple[str, ...] = (STRUCTURE_TERM,)
+
+#: All seven, primary first.
 TERMS: tuple[str, ...] = (BINARY_TERM, *AUX_TERMS)
 
 #: Terms whose logits carry a length axis. Everything else is one prediction per record.
-PER_NUCLEOTIDE_TERMS: tuple[str, ...] = ("boundary",)
+PER_NUCLEOTIDE_TERMS: tuple[str, ...] = ("boundary", STRUCTURE_TERM)
 
 #: The ``Stage2Model.forward`` output key each term reads. Hand-written because the mapping
 #: is not a transform of either name (``boundary`` ↔ ``boundary_logits`` but ``binary`` ↔
-#: ``tbox_logit``), and drift-guarded in the torch tier against ``model.HEAD_OUTPUT_KEYS`` —
-#: importing that here would drag torch into this bare-importable module.
+#: ``tbox_logit``), and drift-guarded in the torch tier against
+#: ``model.ALL_HEAD_OUTPUT_KEYS`` — importing that here would drag torch into this
+#: bare-importable module.
 TERM_TO_LOGITS: Mapping[str, str] = {
     "binary": "tbox_logit",
     "boundary": "boundary_logits",
@@ -120,6 +164,7 @@ TERM_TO_LOGITS: Mapping[str, str] = {
     "specifier_codon": "specifier_codon_logits",
     "cognate_aa": "cognate_aa_logits",
     "trna_family": "trna_family_logits",
+    STRUCTURE_TERM: "structure_logits",
 }
 
 #: The ``stage2_dataset.parquet`` column each aux term supervises, i.e. the
@@ -136,12 +181,25 @@ TERM_TO_FIELD: Mapping[str, str] = {
     "trna_family": "trna_family",
 }
 
-if tuple(TERM_TO_FIELD[term] for term in AUX_TERMS) != VOCAB_FIELDS:  # pragma: no cover
+#: Aux terms that deliberately have **no** ``Stage2HeadSpec`` vocabulary field, and why.
+#: ``structure``'s class axis is the sequence's own position axis — it is derived per batch
+#: from the padded length, not from a categorical spelling, so there is nothing for
+#: ``Stage2HeadSpec`` to hold. Declared rather than inferred so the 1:1 guard below still
+#: bites: a term that merely *forgot* its field would otherwise look like this one.
+NON_VOCAB_AUX_TERMS: tuple[str, ...] = (STRUCTURE_TERM,)
+
+_VOCAB_AUX_TERMS = tuple(term for term in AUX_TERMS if term not in NON_VOCAB_AUX_TERMS)
+if (  # pragma: no cover - import-time contract, exercised by sabotage not by coverage
+    tuple(TERM_TO_FIELD[term] for term in _VOCAB_AUX_TERMS) != VOCAB_FIELDS
+    or any(term in TERM_TO_FIELD for term in NON_VOCAB_AUX_TERMS)
+    or set(TERM_TO_FIELD) != set(_VOCAB_AUX_TERMS)
+):
     raise RuntimeError(
-        "the aux terms no longer pair 1:1 with Stage2HeadSpec's vocabulary fields: "
-        f"{tuple(TERM_TO_FIELD[term] for term in AUX_TERMS)} != {VOCAB_FIELDS}. Raised at "
-        "import rather than left to a test, because a term paired with the wrong field "
-        "supervises a head with another head's targets and every loss stays finite."
+        "the vocabulary-backed aux terms no longer pair 1:1 with Stage2HeadSpec's "
+        f"vocabulary fields: {tuple(TERM_TO_FIELD.get(t) for t in _VOCAB_AUX_TERMS)} != "
+        f"{VOCAB_FIELDS} (non-vocabulary terms: {NON_VOCAB_AUX_TERMS}). Raised at import "
+        "rather than left to a test, because a term paired with the wrong field supervises "
+        "a head with another head's targets and every loss stays finite."
     )
 
 #: The ``forward`` output that says which positions of head (b) carry a nucleotide.
@@ -161,9 +219,78 @@ DEFAULT_WEIGHTING = "fixed"
 DEFAULT_BOUNDARY_GAMMA = 2.0
 DEFAULT_GAMMA = 0.0
 
+#: Head (e)'s "this base is unpaired" class, and the reason it sits at index **0**.
+#: The class axis is ``1 + L``: class 0 = unpaired, class ``j + 1`` = paired with position
+#: ``j``. Putting the sentinel first makes a target index independent of the batch's padded
+#: length — with it last, ``L_pad`` would leak into every label and the same row would carry
+#: different targets alone and in a batch.
+UNPAIRED_CLASS = 0
+
 
 def _term_error(term: str) -> ValueError:
     return ValueError(f"unknown term {term!r}; expected one of {TERMS}")
+
+
+# --------------------------------------------------------------------------- #
+# Head (e)'s target — pure tier, no torch
+# --------------------------------------------------------------------------- #
+def encode_pairing_target(dot_bracket: Any, *, length: int) -> list[int]:
+    """``pairing_dotbracket`` → head (e)'s per-base class indices, length ``length``.
+
+    PRD §8: *"Structure-derived secondary labels (optional Stage-2): pairing partner per
+    base from the dot-bracket (for a structure-consistency objective)."* This is that
+    encoding, and it is the **only** place the three sentinels are reconciled:
+
+    ==========================  ==================  =========================================
+    situation                   emitted class       why
+    ==========================  ==================  =========================================
+    base ``i`` pairs with ``j``  ``j + 1``          0-based partner, shifted past the sentinel
+    base ``i`` is unpaired       :data:`UNPAIRED_CLASS` (``0``)  a supervised negative, not a gap
+    no dot-bracket for the row   ``IGNORE_INDEX``   12,273 of 30,542 rows: 7,007 decoys with
+                                                    no structure at all + 5,266 positives
+                                                    whose alignment could not be anchored
+    ==========================  ==================  =========================================
+
+    The middle row is the trap this function exists to close.
+    :func:`~tbox_finder.stage2.dataset.dot_bracket_to_partners` marks unpaired with
+    ``-1`` (:data:`~tbox_finder.stage2.dataset.UNPAIRED_PARTNER`) while the loss marks
+    *unsupervised* with ``-100``; feeding its output to a cross-entropy unchanged would
+    make every unpaired base a class ``-1`` target. ``-1`` means "supervise this base as
+    unpaired"; ``-100`` means "this base teaches nothing".
+
+    **Pseudoknots.** The nested dot-bracket cannot encode crossing pairs (PRD §8), and the
+    corpus ``Structure`` column carries no pseudoknot brackets at all — so a
+    pseudoknot-paired base arrives here as ``.`` and is supervised as *unpaired*. That is
+    label noise this target cannot avoid and does not pretend to: the information needed to
+    mark it ignorable is absent from the source annotation, not discarded here. It is the
+    same limitation PRD §8 accepts for the 8-class boundary labels (``Stem_II`` subsumes the
+    IIA/B pseudoknot extent rather than a standalone class being trained).
+
+    Args:
+        dot_bracket: the row's ``pairing_dotbracket`` cell, or any missing value
+            (``None`` / ``NaN`` / ``pd.NA``) for a row with no structure target.
+        length: the row's nucleotide count. Must equal ``len(dot_bracket)`` when one is
+            given — a mismatch means the target is misaligned to the sequence, which is
+            silent corruption rather than a shape error downstream.
+
+    Returns:
+        ``length`` class indices. Padding to the batch's width is the collator's job and
+        must use ``IGNORE_INDEX``; :func:`structure_consistency_loss` checks that it did.
+    """
+    if int(length) < 0:
+        raise ValueError(f"length must be non-negative, got {length}")
+    length = int(length)
+    if masking.is_missing(dot_bracket):
+        return [IGNORE_INDEX] * length
+
+    text = str(dot_bracket)
+    if len(text) != length:
+        raise ValueError(
+            f"pairing_dotbracket is {len(text)} long but the sequence is {length}; the "
+            "per-base structure target would be misaligned to the sequence it labels"
+        )
+    partners = dot_bracket_to_partners(text)
+    return [UNPAIRED_CLASS if p == UNPAIRED_PARTNER else int(p) + 1 for p in partners]
 
 
 # --------------------------------------------------------------------------- #
@@ -204,14 +331,27 @@ class Stage2LossConfig:
         specifier_codon_weight: base weight on head (d1), before ``aux_weight``.
         cognate_aa_weight: base weight on head (d2), before ``aux_weight``.
         trna_family_weight: base weight on head (d3), before ``aux_weight``.
+        structure_enabled: attach PRD §8/§11's **optional** structure-consistency term
+            (head (e)). ``False`` by default, which is why the shipped default objective is
+            exactly ADR-0005 D16's six-term one. When ``False`` the term costs nothing, is
+            excluded from the dominance sum, and neither its head nor its target is
+            required; when ``True`` the model must carry the matching
+            :class:`~tbox_finder.stage2.model.PairingHead`.
+        structure_weight: base weight on head (e), before ``aux_weight``. Only read when
+            :attr:`structure_enabled`; a zero here with the term enabled is refused, since
+            it says "on" and computes nothing (use ``structure_enabled=False``).
         binary_gamma: focal focusing parameter for head (a); ``0`` ⇒ cross-entropy.
         boundary_gamma: focal focusing parameter for head (b).
         aux_gamma: focal focusing parameter shared by heads (c) and (d1–d3).
+        structure_gamma: focal focusing parameter for head (e). Its own field rather than
+            ``aux_gamma``'s: head (e) is per-nucleotide over a ``1 + L``-wide axis on which
+            exactly one class is correct, an imbalance unlike either of the other regimes.
         binary_class_weight_alpha: inverse-frequency exponent for head (a)'s two classes.
         boundary_class_weight_alpha: inverse-frequency exponent for head (b)'s 8 classes.
         aux_class_weight_alpha: inverse-frequency exponent for heads (c)/(d1–d3). PRD §8
             flags the specifier amino-acid distribution as skewed (Trp/Leu/Ile common,
             Lys/Glu/Gln rare) and routes it to class-imbalance handling; this is that knob.
+            It deliberately does **not** reach head (e) — see :meth:`class_weight_alpha`.
         ignore_index: target sentinel for an unsupervised element.
     """
 
@@ -223,13 +363,19 @@ class Stage2LossConfig:
     specifier_codon_weight: float = 0.1
     cognate_aa_weight: float = 0.1
     trna_family_weight: float = 0.1
+    structure_enabled: bool = False
+    structure_weight: float = 0.1
     binary_gamma: float = DEFAULT_GAMMA
     boundary_gamma: float = DEFAULT_BOUNDARY_GAMMA
     aux_gamma: float = DEFAULT_GAMMA
+    structure_gamma: float = DEFAULT_GAMMA
     binary_class_weight_alpha: float = 0.0
     boundary_class_weight_alpha: float = 0.0
     aux_class_weight_alpha: float = 0.0
     ignore_index: int = IGNORE_INDEX
+
+    #: Fields that are not non-negative finite scalars, and so route to their own check.
+    _NON_SCALAR_FIELDS = ("weighting", "structure_enabled", "ignore_index")
 
     def __post_init__(self) -> None:
         if self.weighting not in WEIGHTING_METHODS:
@@ -239,11 +385,22 @@ class Stage2LossConfig:
                 "not a config value."
             )
         for field in fields(self):
-            if field.name in ("weighting", "ignore_index"):
+            if field.name in self._NON_SCALAR_FIELDS:
                 continue
             finite_float(getattr(self, field.name), field.name)
         if isinstance(self.ignore_index, bool) or not isinstance(self.ignore_index, int):
             raise ValueError(f"ignore_index must be an int, got {self.ignore_index!r}")
+        if not isinstance(self.structure_enabled, bool):
+            # Not coerced: `structure_enabled="false"` is truthy in Python and would turn
+            # the optional term ON while reading, in a config dump, as off.
+            raise ValueError(f"structure_enabled must be a bool, got {self.structure_enabled!r}")
+        if self.structure_enabled and float(self.structure_weight) == 0.0:
+            raise ValueError(
+                "structure_enabled=True with structure_weight=0 says the optional PRD "
+                "§8/§11 term is on while contributing nothing — and it would attach a head "
+                "that never receives a gradient. Set structure_enabled=False to turn the "
+                "term off, or give it a weight."
+            )
         if self.weighting == "uncertainty" and float(self.aux_weight) not in (0.0, 1.0):
             raise ValueError(
                 "under weighting='uncertainty' the per-task weights are learned, so "
@@ -262,11 +419,36 @@ class Stage2LossConfig:
                     "changing the rule itself needs an ADR-0005 amendment (CLAUDE.md §7)."
                 )
 
-    # -- weights ------------------------------------------------------------ #
-    def base_weight(self, term: str) -> float:
-        """The declared weight on ``term``, before :attr:`aux_weight` is applied."""
+    # -- which terms are live ------------------------------------------------ #
+    def is_enabled(self, term: str) -> bool:
+        """Is ``term`` structurally on? Only :data:`OPTIONAL_TERMS` can answer ``False``.
+
+        Distinct from having weight zero: a disabled term needs neither a head nor a
+        target, while a zero-weighted one is present, supervised and merely not counted
+        (the P3-08 ``aux_weight=0`` arm).
+        """
         if term not in TERMS:
             raise _term_error(term)
+        if term == STRUCTURE_TERM:
+            return bool(self.structure_enabled)
+        return True
+
+    def active_terms(self) -> tuple[str, ...]:
+        """The terms this configuration expects logits and targets for, in TERMS order."""
+        return tuple(term for term in TERMS if self.is_enabled(term))
+
+    # -- weights ------------------------------------------------------------ #
+    def base_weight(self, term: str) -> float:
+        """The declared weight on ``term``, before :attr:`aux_weight` is applied.
+
+        A **disabled** optional term reports ``0.0`` rather than its declared field: the
+        field is what it *would* weigh, and letting it into the dominance sum would tighten
+        the D16 cap for a term that contributes nothing.
+        """
+        if term not in TERMS:
+            raise _term_error(term)
+        if not self.is_enabled(term):
+            return 0.0
         return float(getattr(self, "binary_weight" if term == BINARY_TERM else f"{term}_weight"))
 
     def effective_weights(self) -> dict[str, float]:
@@ -317,16 +499,27 @@ class Stage2LossConfig:
             return float(self.binary_gamma)
         if term == "boundary":
             return float(self.boundary_gamma)
+        if term == STRUCTURE_TERM:
+            return float(self.structure_gamma)
         if term in AUX_TERMS:
             return float(self.aux_gamma)
         raise _term_error(term)
 
     def class_weight_alpha(self, term: str) -> float:
-        """Inverse-frequency exponent for ``term``; ``0`` ⇒ unweighted."""
+        """Inverse-frequency exponent for ``term``; ``0`` ⇒ unweighted.
+
+        Head (e) is always ``0`` and cannot be set otherwise: its classes are **positions**,
+        not a fixed vocabulary, so "the inverse frequency of class 37" would mean the
+        inverse frequency of *index 37 in this batch's padding* — a number that changes
+        meaning with the batch. :func:`multitask_loss` refuses an explicit
+        ``class_weights['structure']`` for the same reason.
+        """
         if term == BINARY_TERM:
             return float(self.binary_class_weight_alpha)
         if term == "boundary":
             return float(self.boundary_class_weight_alpha)
+        if term == STRUCTURE_TERM:
+            return 0.0
         if term in AUX_TERMS:
             return float(self.aux_class_weight_alpha)
         raise _term_error(term)
@@ -338,6 +531,9 @@ class Stage2LossConfig:
             "weighting_methods": list(WEIGHTING_METHODS),
             "terms": list(TERMS),
             "aux_terms": list(AUX_TERMS),
+            "optional_terms": list(OPTIONAL_TERMS),
+            "active_terms": list(self.active_terms()),
+            "structure_enabled": bool(self.structure_enabled),
             "aux_weight": float(self.aux_weight),
             "base_weights": {term: self.base_weight(term) for term in TERMS},
             "effective_weights": self.effective_weights(),
@@ -354,6 +550,12 @@ class Stage2LossConfig:
                 "weight_values": False,
                 "gamma_values": False,
                 "class_weight_alpha_values": False,
+                # D16 enumerates the binary/boundary/regulatory-mode/G-D heads and does not
+                # name a structure head; PRD §8/§11 do, calling the term "optional". So the
+                # term's EXISTENCE is a PRD option on the §11 swept axis, not an ADR pin —
+                # which is why the default is off and this says so rather than implying D16
+                # blessed it.
+                "structure_term": "PRD §8/§11 optional (not enumerated by ADR-0005 D16)",
             },
         }
 
@@ -469,6 +671,134 @@ def _boundary_term(
     )
 
 
+def structure_consistency_loss(
+    logits: Tensor,
+    target: Tensor,
+    mask: Tensor,
+    *,
+    gamma: float = DEFAULT_GAMMA,
+    ignore_index: int = IGNORE_INDEX,
+) -> Tensor:
+    """Head (e): masked focal cross-entropy over the per-base pairing partner (P3-05).
+
+    PRD §11's *"Optional structure-consistency auxiliary loss from dot-bracket pairing"*,
+    posed exactly as PRD §8 words the label — *"pairing partner per base"* — i.e. one
+    ``1 + L``-way classification per nucleotide, not a contact-map regression. Class 0 is
+    "unpaired" and class ``j + 1`` is "paired with position ``j``" (:data:`UNPAIRED_CLASS`,
+    and :class:`~tbox_finder.stage2.model.PairingHead` emits the axis in that order).
+
+    Structure is a **target** here and nowhere an input: the logits are a function of the
+    sequence-derived hidden states alone (PRD §6, PRD.md:133).
+
+    Four things are refused rather than absorbed, because each one is silent otherwise:
+
+    * **A padded position carrying a real class.** Same one-directional rule as the
+      boundary term: padding must be ``ignore_index``, while a real position may legitimately
+      carry none (the 12,273 rows with no dot-bracket).
+    * **A partner that is padding.** ``target[b, i] = j + 1`` with ``mask[b, j]`` false
+      points a pair at a position that does not exist — a cropped or mis-collated window.
+    * **An asymmetric pair, or a self-pair.** ``i → j`` without ``j → i`` is not a base
+      pair; it is exactly the corruption a truncation produces (one end of a pair kept, the
+      other cut), which no shape check can see. ``i → i`` needs its own refusal because it
+      is trivially symmetric — and it would train against the diagonal logit head (e) pins
+      at ``finfo.min``, giving a huge but perfectly finite loss.
+    * **A class index outside ``[0, L]``.** Including the "partner ``j`` shifted" arithmetic
+      being applied twice, or not at all.
+
+    Args:
+        logits: ``(B, L, 1 + L)`` from :class:`~tbox_finder.stage2.model.PairingHead`.
+        target: ``(B, L)`` class indices from :func:`encode_pairing_target`, padded with
+            ``ignore_index``.
+        mask: ``(B, L)`` nucleotide mask — ``Stage2Model``'s own ``nucleotide_mask``.
+        gamma: focal focusing parameter; ``0`` ⇒ plain cross-entropy.
+        ignore_index: target sentinel for an unsupervised position.
+
+    Returns:
+        The masked mean over supervised positions — ``0.0``, never ``nan``, when the batch
+        supervises none (:func:`~tbox_finder.train.objective.focal_cross_entropy`'s
+        convention, which is why this term does not reduce with torch's own ``mean``).
+    """
+    import torch  # lazy
+
+    if logits.dim() != 3:
+        raise ValueError(f"structure_logits must be (B, L, 1 + L), got {tuple(logits.shape)}")
+    batch, length, n_classes = logits.shape
+    if n_classes != length + 1:
+        raise ValueError(
+            f"structure_logits class axis is {n_classes} but the position axis is {length}; "
+            f"head (e) emits 1 + L classes (unpaired + one per position), so {length + 1} "
+            "was expected. A different width means the unpaired class and the partner "
+            "indices no longer line up, which mislabels every base by one."
+        )
+    if target.shape != (batch, length):
+        raise ValueError(
+            f"structure target {tuple(target.shape)} != structure_logits[:2] {(batch, length)}"
+        )
+    if mask.shape != (batch, length):
+        raise ValueError(
+            f"{NUCLEOTIDE_MASK_KEY} {tuple(mask.shape)} != structure_logits[:2] "
+            f"{(batch, length)}"
+        )
+
+    # int64 throughout: a partner index runs to L (up to 1,022 nucleotides), so the `- 1`
+    # and the gathers below must not be done in the narrower integer dtypes
+    # `_check_supervised_targets` admits — int8 would wrap a partner index into a valid-
+    # looking class. torch's own cross_entropy requires int64 anyway.
+    target = target.long()
+    valid = mask.bool()
+    supervised = target != ignore_index
+    if bool((supervised & ~valid).any()):
+        raise ValueError(
+            f"a position masked out by {NUCLEOTIDE_MASK_KEY} carries a real pairing class; "
+            "the collator must set ignore_index at every padded position, or head (e) would "
+            "be trained to pair a base that does not exist."
+        )
+    if bool(((target < 0) | (target > length))[supervised].any()):
+        raise ValueError(
+            f"a supervised pairing target is outside [0, {length}]; class 0 is 'unpaired' "
+            "and class j+1 is 'paired with position j', so the largest admissible class is "
+            "the padded length."
+        )
+
+    # `partner` is the 0-based position each supervised base claims; -1 where the base is
+    # unpaired or unsupervised, which `torch.where` keeps out of every gather below.
+    paired = supervised & (target != UNPAIRED_CLASS)
+    partner = torch.where(paired, target - 1, torch.zeros_like(target))
+    if bool((~valid.gather(1, partner) & paired).any()):
+        raise ValueError(
+            "a supervised pairing target names a partner position that the nucleotide mask "
+            "says is padding; the pair points outside the sequence."
+        )
+    positions = torch.arange(length, device=target.device).unsqueeze(0).expand(batch, length)
+    # A self-pair passes the symmetry check below (i claims i, and i claims i back), so it
+    # needs its own refusal. It would otherwise index the diagonal logit head (e) fills with
+    # finfo.min — an enormous but perfectly finite loss on a base pair that cannot exist.
+    if bool((paired & (partner == positions)).any()):
+        raise ValueError(
+            "a supervised pairing target pairs a position with itself; class j+1 means "
+            "'paired with position j', and head (e) masks the diagonal out, so this would "
+            "train against a logit that is fixed at the dtype minimum."
+        )
+    # Symmetry: whatever position i claims as its partner must claim i back. Checked on the
+    # gathered round trip rather than by building an (L, L) matrix.
+    round_trip = target.gather(1, partner)
+    if bool((paired & (round_trip != positions + 1)).any()):
+        raise ValueError(
+            "the pairing target is not symmetric: some position i is paired with j while j "
+            "is not paired with i. A dot-bracket cannot produce that, so the target was "
+            "cropped, shifted or padded after it was encoded."
+        )
+
+    return focal_cross_entropy(
+        logits,
+        target,
+        gamma=gamma,
+        weight=None,  # the class axis is positions, not a vocabulary — see class_weight_alpha
+        ignore_index=ignore_index,
+        reduction="mean",
+    )
+
+
 def _record_term(
     logits: Tensor,
     target: Tensor,
@@ -527,20 +857,28 @@ def multitask_loss(
     log_variances: Tensor | None = None,
     boundary_crf: Any = None,
 ) -> tuple[Tensor, dict[str, Any]]:
-    """Combine the six Stage-2 head losses under the ADR-0005 D16 weighting method.
+    """Combine the Stage-2 head losses under the ADR-0005 D16 weighting method.
+
+    Six terms by default; seven when PRD §8/§11's optional structure-consistency term is
+    enabled (``config.structure_enabled``), in which case ``outputs`` must carry head (e)'s
+    logits and ``targets`` its per-base pairing classes.
 
     Args:
-        outputs: what ``Stage2Model.forward`` returned — the six logit tensors keyed by
-            :data:`TERM_TO_LOGITS` plus :data:`NUCLEOTIDE_MASK_KEY`.
-        targets: ``term -> target tensor``, keyed by :data:`TERMS`. Every key is required and
-            an unknown key raises: a mis-keyed target would otherwise train nothing while
-            every loss stayed finite and plausible. Shapes are ``(B,)`` for every term except
-            ``boundary``, which is ``(B, L)``. Unsupervised elements carry
-            ``config.ignore_index``.
+        outputs: what ``Stage2Model.forward`` returned — one logit tensor per **active**
+            term, keyed by :data:`TERM_TO_LOGITS`, plus :data:`NUCLEOTIDE_MASK_KEY`.
+            Logits for a *disabled* term raise: that head would sit in the optimiser with
+            no gradient reaching it.
+        targets: ``term -> target tensor``, keyed by :data:`TERMS`. Every **active** term is
+            required and an unknown key raises: a mis-keyed target would otherwise train
+            nothing while every loss stayed finite and plausible. A target for a disabled
+            term is unused and reported in ``components["unused_targets"]``. Shapes are
+            ``(B,)`` for every term except ``boundary`` and ``structure``, which are
+            ``(B, L)``. Unsupervised elements carry ``config.ignore_index``.
         config: defaults to :class:`Stage2LossConfig` — D16's fixed manual weights.
         class_weights: optional ``term -> per-class weights`` (length ``C`` for that head;
             ``[w_negative, w_positive]`` for ``binary``). Derive them from measured counts
-            with :class:`MultitaskLoss` rather than assuming them.
+            with :class:`MultitaskLoss` rather than assuming them. ``structure`` is refused
+            — its classes are positions, not categories.
         log_variances: required iff ``config.weighting == "uncertainty"``, forbidden
             otherwise; build it with :func:`uncertainty_log_variances`.
         boundary_crf: must be ``None``. Present so that turning on ``use_crf`` at P3-06
@@ -578,20 +916,41 @@ def multitask_loss(
             "would leave the CRF's transition parameters with no gradient at all."
         )
 
-    missing_targets = [term for term in TERMS if term not in targets]
+    active = cfg.active_terms()
+    disabled = tuple(term for term in TERMS if term not in active)
+
+    missing_targets = [term for term in active if term not in targets]
     if missing_targets:
-        raise ValueError(f"targets is missing terms {missing_targets}; expected all of {TERMS}")
+        raise ValueError(f"targets is missing terms {missing_targets}; expected all of {active}")
     unknown_targets = [key for key in targets if key not in TERMS]
     if unknown_targets:
         raise ValueError(
             f"targets carries unknown keys {unknown_targets}; expected exactly {TERMS}. A "
             "mis-keyed target trains nothing while every loss stays finite."
         )
+    # A target for a DISABLED term is unused data — accepted, but named in `components`
+    # so "the collator emitted it and nothing consumed it" is a visible fact rather than a
+    # silence. Logits for a disabled term are a different matter: see below.
+    unused_targets = [term for term in disabled if term in targets]
+
+    required_outputs = [TERM_TO_LOGITS[term] for term in active]
     missing_outputs = [
-        key for key in (*TERM_TO_LOGITS.values(), NUCLEOTIDE_MASK_KEY) if key not in outputs
+        key for key in (*required_outputs, NUCLEOTIDE_MASK_KEY) if key not in outputs
     ]
     if missing_outputs:
-        raise ValueError(f"outputs is missing {missing_outputs} (see Stage2Model.OUTPUT_KEYS)")
+        raise ValueError(
+            f"outputs is missing {missing_outputs} (see Stage2Model.output_keys); the "
+            f"config's active terms are {active}"
+        )
+    stray_outputs = [TERM_TO_LOGITS[term] for term in disabled if TERM_TO_LOGITS[term] in outputs]
+    if stray_outputs:
+        raise ValueError(
+            f"outputs carries {stray_outputs} but the corresponding term(s) "
+            f"{[t for t in disabled if TERM_TO_LOGITS[t] in outputs]} are disabled by this "
+            "config: the head exists, sits in the optimiser, and would receive no gradient "
+            "at all. Build the model with the same toggle the loss uses (Stage2Model("
+            "structure_head=...) ↔ Stage2LossConfig.structure_enabled)."
+        )
 
     if cfg.weighting == "uncertainty":
         if log_variances is None:
@@ -616,6 +975,13 @@ def multitask_loss(
         unknown = [key for key in class_weights if key not in known_weight_keys]
         if unknown:
             raise ValueError(f"class_weights carries unknown terms {unknown}")
+        if STRUCTURE_TERM in class_weights:
+            raise ValueError(
+                f"class_weights[{STRUCTURE_TERM!r}] is not meaningful: head (e)'s classes are "
+                "sequence positions, not a vocabulary, so a per-class weight would weight "
+                "'index 37 of this batch' rather than a category. Head (e) is unweighted by "
+                "construction (Stage2LossConfig.class_weight_alpha returns 0 for it)."
+            )
 
     ignore_index = int(cfg.ignore_index)
     effective = cfg.effective_weights()
@@ -623,7 +989,7 @@ def multitask_loss(
 
     values: dict[str, Tensor] = {}
     n_supervised: dict[str, int] = {}
-    for term in TERMS:
+    for term in active:
         logits = outputs[TERM_TO_LOGITS[term]]
         target = targets[term]
         _check_supervised_targets(target, term=term, ignore_index=ignore_index)
@@ -632,6 +998,10 @@ def multitask_loss(
         if term == BINARY_TERM:
             value = _binary_term(
                 logits, target, gamma=gamma, weight=weight, ignore_index=ignore_index
+            )
+        elif term == STRUCTURE_TERM:
+            value = structure_consistency_loss(
+                logits, target, mask, gamma=gamma, ignore_index=ignore_index
             )
         elif term in PER_NUCLEOTIDE_TERMS:
             value = _boundary_term(
@@ -652,15 +1022,15 @@ def multitask_loss(
     # A term contributes only where it has both supervision and a non-zero weight. Both
     # exclusions are recorded: a 0.0 term value means something different in each case, and
     # in neither case is it "the head is doing well".
-    skipped_unsupervised = [term for term in TERMS if n_supervised[term] == 0]
+    skipped_unsupervised = [term for term in active if n_supervised[term] == 0]
     if cfg.weighting == "uncertainty":
         included = [
             term
-            for term in TERMS
+            for term in active
             if n_supervised[term] > 0 and (term == BINARY_TERM or float(cfg.aux_weight) > 0.0)
         ]
     else:
-        included = [term for term in TERMS if n_supervised[term] > 0 and effective[term] != 0.0]
+        included = [term for term in active if n_supervised[term] > 0 and effective[term] != 0.0]
 
     # Multiplying by 0 rather than torch.zeros(): a batch in which every term is excluded
     # (no supervision anywhere, or aux_weight=0 with an unsupervised binary target) must
@@ -671,6 +1041,9 @@ def multitask_loss(
         "terms": values,
         "n_supervised": n_supervised,
         "weighting": cfg.weighting,
+        "active": list(active),
+        "disabled": list(disabled),
+        "unused_targets": unused_targets,
         "skipped_unsupervised": skipped_unsupervised,
         "included": included,
     }
@@ -737,6 +1110,13 @@ class MultitaskLoss:
             unknown = [term for term in self.class_counts if term not in TERMS]
             if unknown:
                 raise ValueError(f"class_counts carries unknown terms {unknown}")
+            if STRUCTURE_TERM in self.class_counts:
+                raise ValueError(
+                    f"class_counts[{STRUCTURE_TERM!r}] cannot be used: head (e)'s classes are "
+                    "sequence positions, so 'the frequency of class 37' is the frequency of "
+                    "an index, not of a category. Supplying it would look like weighting and "
+                    "do nothing."
+                )
         weights: dict[str, tuple[float, ...]] = {}
         for term in TERMS:
             alpha = self.config.class_weight_alpha(term)
