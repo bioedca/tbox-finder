@@ -58,6 +58,11 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 CONF_DIR = REPO_ROOT / "conf"
 LOSS_CONF = CONF_DIR / "loss" / "stage2.yaml"
 
+#: Config fields that are not non-negative scalars, and so are not covered by the
+#: negative-value refusal. Derived by exclusion so a new scalar field is covered the day it
+#: is added, rather than the day someone remembers to extend a hand-written list.
+_NON_SCALAR = frozenset({"weighting", "ignore_index"})
+
 #: Head widths, read off the committed vocabulary rather than retyped.
 SPEC = H.load_head_spec()
 WIDTHS = {
@@ -196,10 +201,28 @@ class TestConfigValidation:
         with pytest.raises(ValueError, match="finite"):
             L.Stage2LossConfig(**{field: float("nan")})
 
-    @pytest.mark.parametrize("field", ["aux_weight", "binary_weight", "boundary_gamma"])
-    def test_negative_is_refused(self, field):
-        with pytest.raises(ValueError):
+    @pytest.mark.parametrize(
+        "field",
+        [f.name for f in dataclasses.fields(L.Stage2LossConfig) if f.name not in _NON_SCALAR],
+    )
+    def test_negative_is_refused_on_every_scalar(self, field):
+        """Every scalar, not a sample of three.
+
+        A negative weight is not merely odd: it would make the term a *reward*, and a
+        negative aux base weight would shrink the dominance sum so the D16 rule reads as
+        satisfied while the aux heads pull the model apart. CodeRabbit r1 read the guard as
+        absent (it is not — `finite_float` carries `minimum=0.0`), but it was right that
+        only three of the thirteen scalars were covered.
+        """
+        with pytest.raises(ValueError, match=">= 0"):
             L.Stage2LossConfig(**{field: -1.0})
+
+    def test_max_aux_weight_is_unbounded_only_when_the_aux_total_is_zero(self):
+        """`inf` there is the right answer, not a missing guard: Σ aux = 0 ≤ any binary."""
+        cfg = L.Stage2LossConfig(**{f"{term}_weight": 0.0 for term in L.AUX_TERMS})
+        assert cfg.max_aux_weight == math.inf
+        assert cfg.dominance()["holds"]
+        assert cfg.dominance()["aux_total"] == 0.0
 
     def test_gamma_and_alpha_route_per_term(self):
         cfg = L.Stage2LossConfig(binary_gamma=1.0, boundary_gamma=2.5, aux_gamma=0.5)
@@ -477,7 +500,7 @@ class TestMaskedNotDense:
         """Degenerate batches must not blow up the caller's backward()."""
         out, lengths = _outputs()
         tgt = _targets(out, lengths, supervise_aux=False)
-        tgt["binary"] = torch.full((out["tbox_logit"].shape[0],), L.IGNORE_INDEX)
+        tgt["binary"] = torch.full((out["tbox_logit"].shape[0],), L.IGNORE_INDEX, dtype=torch.long)
         total, parts = L.multitask_loss(out, tgt)
         assert parts["included"] == []
         assert float(total) == 0.0

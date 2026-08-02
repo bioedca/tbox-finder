@@ -661,3 +661,32 @@ rather than letting a swept default read as a decision.
 **Commit.** Branch `p3-04-stage2-losses`, PR pending — the **squash SHA on `main` is not
 yet known** and must be reconciled at the P3-exit gate by deriving it
 (`git show <sha> -- analyses/phase3_log.qmd | grep '^+## Step'`), never copied from notes.
+
+> **Review-round addendum (CodeRabbit CLI r1, 2026-08-02).** Two findings over the seven
+> reviewed files; **one applied, one refuted by execution but converted into the coverage
+> it was really pointing at.**
+>
+> The **Major** — *"reject negative weight, gamma and class_weight_alpha values … guard
+> `max_aux_weight` against non-positive totals rather than treating negative totals as
+> unbounded"* — is **refuted**: `Stage2LossConfig.__post_init__` already routes every
+> scalar through `finite_float`, whose `minimum` defaults to `0.0`, and executing
+> `Stage2LossConfig(<field>=-1.0)` for **all thirteen** scalars raises on every one. The
+> `inf` branch is likewise correct rather than missing: it fires only when Σ aux base
+> weights is *exactly* zero, where every `aux_weight` genuinely satisfies the D16 rule
+> (Σ aux = 0 ≤ binary), and a negative total is unreachable by the guard above. But the
+> finding was right about something adjacent — my negative-value test sampled **three** of
+> the thirteen fields. It now covers every scalar, derived by exclusion so a field added
+> later is covered the day it is added, plus an explicit test pinning the `inf` branch's
+> reason. Two new sabotage bites confirm both bite: loosening the floor to `minimum=-1e9`
+> and returning `0.0` instead of `inf` each turn the named test RED.
+>
+> The **Minor** — `torch.full((B,), IGNORE_INDEX)` without an explicit `dtype` — is
+> **applied**, though its stated rationale ("ensuring the test exercises the intended
+> integer-target path") does not hold: `torch.full` already returns `int64` here on the
+> pinned torch 2.7.1, and a float target would have been *refused* by
+> `_check_supervised_targets`, so the test could not have been passing on the float path.
+> Explicit is still better than inferred, and it makes the test robust to a default that
+> has changed before.
+>
+> After r1: **102 pass / 0 fail** under `tbox-ml-rna`, **12 sabotage bites** all RED
+> against their named tests and all restored byte-identically.
