@@ -503,3 +503,33 @@ free knob).
 **Commit.** Branch `p3-03-stage2-model`, PR pending — the **squash SHA on `main` is not
 yet known** and must be reconciled at the P3-exit gate by deriving it
 (`git show <sha> -- analyses/phase3_log.qmd | grep '^+## Step'`), never copied from notes.
+
+> **Review-round addendum (CodeRabbit CLI r1, 2026-08-02).** Four findings; **three
+> applied, one refuted.** The three were all the same shape — the committed
+> `head_vocab.json` documented self-checks it did not fully perform. `schema_version` was
+> *written and exported but never read on load*, the exact
+> constant-that-nothing-reads pattern this repo has been bitten by before; `sizes` was
+> checked in one direction only, so a `sizes` key with no vocabulary raised a bare
+> `KeyError` on the lookup instead of the document-is-inconsistent `ValueError` beside
+> it, and a vocabulary with no `sizes` entry skipped the checksum entirely — silently
+> removing, for that one axis, the redundancy the block exists to provide; and
+> `from_dict`'s docstring promised a canonical fallback for *absent keys*, true only of
+> the three canonical axes, so a truncated document lost a corpus-derived axis with an
+> error naming only the dict key. Each fix carries a regression test (5 added; 84 pass
+> under `tbox-ml-rna`, 62 pass / 22 skip torch-free) and the `schema_version` guard was
+> sabotage-verified (`if False` → its test RED, restored green). `head_vocab.json` is
+> **byte-identical** — these were fixes to the loader's guards, not to the derivation.
+>
+> The **Major** finding — *"commit `head_vocab.json`, the file is currently untracked"* —
+> is **refuted by execution**: `git ls-tree HEAD src/tbox_finder/stage2/` lists it, the
+> GitHub contents API returns it at **4,863 bytes** on the pushed branch, and
+> CodeRabbit's own report names it among the seven files it reviewed. No change made.
+> **r2 returned 0 findings** over the same seven files (a real review, not the
+> fair-usage rate-limit notice — the *GitHub* CodeRabbit check on this PR **is** that
+> notice, so the §5.1 gate is satisfied by the CLI route, not by that green check).
+>
+> **CI ran the real pytest**: `3076 passed, 247 skipped, 8 xfailed`, `ruff`/`black` and
+> `snakemake --lint` + dry-run all green. That retires this step's local caveat — no
+> laptop env carries both pytest and torch, so the shipped test bytes were executed
+> through a minimal pytest shim locally, and CI is what confirms the collection and
+> skip behaviour under the real runner.
