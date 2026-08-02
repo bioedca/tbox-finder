@@ -824,4 +824,4 @@ P3-05 — it would have refused the head the PRD authorises. It is now
 locked alongside `forward`, and `PairingHead.forward` is locked too, all in the **bare** tier
 so CI checks them on every push.
 
-**Commit.** `222305abd982254beb449a3fb26acd6fbf08d9a9`
+**Commit.** `cbbbf3ac2e487b64a8be9dce15b7a3604dbb6854`
