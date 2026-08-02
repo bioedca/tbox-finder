@@ -690,3 +690,34 @@ yet known** and must be reconciled at the P3-exit gate by deriving it
 >
 > After r1: **102 pass / 0 fail** under `tbox-ml-rna`, **12 sabotage bites** all RED
 > against their named tests and all restored byte-identically.
+
+> **Review-round addendum (CodeRabbit CLI r2, 2026-08-02).** Three findings; **two
+> applied, one refuted by execution.**
+>
+> The **Major** — *"guard the torch-dependent `tbox_finder.stage2.losses` import so
+> collection succeeds when torch is unavailable"* — is **refuted**: `losses.py` is
+> torch-lazy by construction (the design note at its head says so, and torch appears only
+> inside functions), so it imports bare. Executed rather than argued — the whole file runs
+> in `tbox-finder-data`, an env with **no torch installed**, where 72 tests pass and 36
+> skip. Guarding that import would have made the pure tier — the weighting scheme, the
+> dominance rule, the entire Hydra sweep-axis gate — skip in CI, which installs no torch.
+> That is precisely the tier this step needs CI to run.
+>
+> The two **Minors** are both real and both applied. (i) The `try`/`except` guard's comment
+> claimed that "a broken `tbox_finder.train.objective` must raise here", but the `else`
+> branch imported only `torch.nn.functional` — the comment named a module the guard did not
+> import, which is a comment that describes a protection nobody has. Fixed in its **stronger
+> form** rather than by rewording: the `else` branch now imports `stage2.model`'s output
+> keys and `models.seg_head.LinearChainCRF`, the two torch-tier siblings this file grades
+> against, so a broken sibling raises at collection instead of self-skipping the whole
+> tensor tier green (the P1-15 failure mode the idiom exists for). A new sabotage bite
+> proves it: a `NameError` planted in `stage2/model.py` makes the module import **raise**,
+> not skip. (ii) The NaN-refusal test carried a hand-written seven-field list beside a
+> negative-refusal test that derived its fields from `dataclasses.fields`; the hand-written
+> copy goes one field stale with nothing failing, so it is now derived the same way. Both
+> gates therefore cover all **thirteen** scalars, and a bite that removes `finite_float`'s
+> `isfinite` check turns thirteen of them RED.
+>
+> After r2: **108 pass / 0 fail** under `tbox-ml-rna`, **72 pass / 36 skip** torch-free,
+> and **14 sabotage bites**, every one RED against its named test and every restore
+> sha256-verified.

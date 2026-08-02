@@ -41,11 +41,19 @@ except ModuleNotFoundError as exc:  # pragma: no cover - exercised only in the b
         raise
     torch = None
     F = None
+    LinearChainCRF = None
+    HEAD_OUTPUT_KEYS = OUTPUT_KEYS = None
     _HAS_TORCH = False
 else:
-    # Deliberately OUTSIDE the guard: a broken tbox_finder.train.objective must raise here,
-    # not be swallowed into `_HAS_TORCH = False` and silently skip the tensor tier green.
+    # Deliberately OUTSIDE the guard, and deliberately naming the torch-tier siblings this
+    # file grades against: a broken `stage2.model` or `models.seg_head` must raise HERE, not
+    # be swallowed into `_HAS_TORCH = False` and silently skip the whole tensor tier green.
+    # That self-skipping-green failure mode already bit P1-15. Only a missing *torch* may
+    # reach the skip, which is what the `exc.name != "torch"` re-raise above enforces.
     import torch.nn.functional as F
+
+    from tbox_finder.models.seg_head import LinearChainCRF
+    from tbox_finder.stage2.model import HEAD_OUTPUT_KEYS, OUTPUT_KEYS
 
     _HAS_TORCH = True
 
@@ -186,18 +194,15 @@ class TestDominance:
 class TestConfigValidation:
     @pytest.mark.parametrize(
         "field",
-        [
-            "aux_weight",
-            "binary_weight",
-            "boundary_weight",
-            "binary_gamma",
-            "boundary_gamma",
-            "aux_gamma",
-            "aux_class_weight_alpha",
-        ],
+        [f.name for f in dataclasses.fields(L.Stage2LossConfig) if f.name not in _NON_SCALAR],
     )
     def test_nan_is_refused_on_every_scalar(self, field):
-        """`x < 0` is False for NaN, so a NaN sweep value would sail through a bare check."""
+        """`x < 0` is False for NaN, so a NaN sweep value would sail through a bare check.
+
+        Derived by exclusion, like the negative-value gate below: a hand-written field list
+        goes one field stale with nothing failing, which is how a swept scalar ends up with
+        no NaN guard at all.
+        """
         with pytest.raises(ValueError, match="finite"):
             L.Stage2LossConfig(**{field: float("nan")})
 
@@ -796,8 +801,6 @@ class TestFailClosedGuards:
 
     def test_the_boundary_crf_is_refused_not_silently_ignored(self):
         """A CE term would leave the CRF's transitions with no gradient at all."""
-        from tbox_finder.models.seg_head import LinearChainCRF
-
         out, lengths = _outputs()
         tgt = _targets(out, lengths)
         with pytest.raises(NotImplementedError, match="P3-06"):
@@ -818,8 +821,6 @@ class TestFailClosedGuards:
 class TestModelContractDrift:
     def test_the_logit_keys_are_the_models_own_head_outputs(self):
         """``losses`` names these by hand (it must stay torch-free); this is the guard."""
-        from tbox_finder.stage2.model import HEAD_OUTPUT_KEYS, OUTPUT_KEYS
-
         assert tuple(L.TERM_TO_LOGITS[term] for term in L.TERMS) == HEAD_OUTPUT_KEYS
         assert L.NUCLEOTIDE_MASK_KEY in OUTPUT_KEYS
         assert set(OUTPUT_KEYS) == set(HEAD_OUTPUT_KEYS) | {L.NUCLEOTIDE_MASK_KEY}
