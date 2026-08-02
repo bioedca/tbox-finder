@@ -391,3 +391,115 @@ not to the carve.
 the **squash SHA on `main` is not yet known** and must be reconciled at the P3-exit gate by
 deriving it (`git show <sha> -- analyses/phase3_log.qmd | grep '^+## Step'`), never copied
 from notes.
+
+## Step P3-03 — 2026-08-02: build the RiNALMo-giga Stage-2 multi-head model (sequence-only)
+
+**Inputs.** The pinned `multimolecule/rinalmo-giga` encoder @ revision
+`2a71f6f98fb4…` (ADR-0002 D2/D5/A9); `src/tbox_finder/train/lora_harness.py` (the P1-15
+LoRA entry, which owns the PRD §10.3 pins); `data/processed/stage2_dataset.parquet`
+(P3-02-regenerated, digest `c5a2c251…`, 30,542 rows) read once to derive two head
+vocabularies; `labels.CLASS_ORDER`, `ingest.TYPE_TO_CLASS`, and
+`tests/fixtures/pdb_element_extents/`. LOCAL, CPU only — no GPU, no SLURM, no network
+beyond the already-cached checkpoint.
+
+**Process.** `src/tbox_finder/stage2/model.py::Stage2Model` puts the four PRD §10.2 heads
+on the encoder: (a) binary T-box `(B,)`, (b) per-base boundary refinement `(B, L, 8)`,
+(c) regulatory mode `(B, 2)`, (d) the G-D auxiliary triple — specifier codon `(B, 64)`,
+cognate amino acid `(B, 20)`, tRNA family `(B, 61)`. Head (b) **reuses**
+`models.seg_head.SegmentationHead` rather than reimplementing an 8-class per-nt head, so
+Stage 1 and Stage 2 cannot drift apart on the ADR-0004 D1 vocabulary. The backbone-free
+surface (`heads_from_hidden`) mirrors `Stage1Segmenter`'s and is what the CPU unit tier
+drives, so no test needs the 2.5 GB checkout.
+
+Four things are load-bearing.
+
+*(i) No ADR or the PRD pins a single head cardinality*, so none is typed here.
+`stage2/heads.py` (torch-free, hence CI-locked) derives head (b) from
+`labels.CLASS_ORDER`, head (c) from the keys of `ingest.TYPE_TO_CLASS`, and head (d1) by
+enumerating `product("ACGU", 3)` — all 64 triplets are attested in the corpus, so the
+axis is the genetic code, not an over-wide guess. The cognate-amino-acid and tRNA-family
+axes are TBDB *spellings* with no canonical source, so `derive_head_spec` reads them off
+the **whole** committed dataset and the result is committed as
+`src/tbox_finder/stage2/head_vocab.json` with provenance. Per-caller derivation was
+rejected: a vocabulary read from the train fold alone gives the test fold classes the
+head has no logit for.
+
+*(ii) The sequence-only prohibition is structural, not conventional.* PRD §10.2 —
+"RiNALMo ingests **sequence only** (no structure-input channel)" — is enforced by
+`forward(*, input_ids, attention_mask)` declaring no `**kwargs`, so a dot-bracket string
+is a `TypeError` at the call site. The test that locks this reads the shipped file with
+`ast` instead of importing it: `model.py` imports `torch` at module top, so an
+import-based check could only run where torch exists, i.e. never in CI — the one place
+the prohibition is checked on every push.
+
+*(iii) LoRA wraps the encoder; the heads sit outside it.* `build_stage2_model` calls
+`lora_harness.build_peft_model` on the backbone **alone**, then attaches the heads. Both
+halves matter: `target_modules="all-linear"` adapts every `nn.Linear` it can reach, so
+heads inside the wrapper would be LoRA-adapted rather than trained; and
+`build_peft_model`'s frozen-base clause ("no trainable parameter lacking `lora_` in its
+name") would be tripped by the heads and stop meaning anything. The split is
+**re-measured** off the assembled model into `info["stage2_heads"]`, not asserted.
+
+*(iv) The token axis is not the nucleotide axis.* `RnaTokenizer` wraps every sequence in
+`<cls> … <eos>`, so the encoder emits `L + 2` positions while `label_string` has `L`.
+`strip_special_tokens` reproduces `multimolecule`'s own `remove_special_tokens` contract
+(drop position 0, zero each row's EOS at its own last valid index, drop the trailing
+column), which leaves every row's nucleotides at indices `0 … L_i-1` with padding zeroed
+— index-aligned to that row's label string, in a ragged batch, with no gather.
+
+**A data defect the derivation surfaced.** The first derived tRNA-family vocabulary had
+**62** entries, one of them the literal `"None (UCA)"`. All **9** rows carrying it have a
+blank `cognate_aa` and a `UGA` (opal) specifier: TBDB composes the family as
+`f"{amino_acid} ({anticodon})"`, so a record with no amino acid renders its own absence
+as text. It survives every missing check — `masking.is_missing` sees a well-formed string
+— and would have given head (d3) a logit for a tRNA family that does not exist.
+`is_admissible_label` now refuses whole-cell null tokens on every axis and a null
+amino-acid component on the family axis, at **both** the vocabulary-building and the
+encoding site so the two cannot disagree. The axis is **61**, and the cross-check that
+makes it verifiable is that `trna_family` and `cognate_aa` now encode the *same*
+**22,932** rows — as they must, one being composed from the other.
+
+**Outputs.** `src/tbox_finder/stage2/heads.py` · `src/tbox_finder/stage2/model.py` ·
+`src/tbox_finder/stage2/head_vocab.json` (head widths 8 / 2 / 64 / 20 / 61, source digest
+`c5a2c251…`) · `tests/unit/test_stage2_heads.py` · `tests/unit/test_stage2_model.py` ·
+the `stage2/__init__.py` docstring carve-out for the one module that may import torch at
+top level. No DVC artifact, no checkpoint, no W&B run — this step trains nothing.
+
+**Validation.** **79 passed / 0 failed** in `tbox-ml-rna`; **57 passed / 22 skipped /
+0 failed** in a torch-free env (the CI tier). No local env carries both pytest and torch,
+so the shipped test bytes were executed through a minimal pytest shim; CI runs the real
+pytest. **Four source sabotages, each RED then restored byte-identical (sha256-verified,
+`python -B`):** dropping the EOS removal → 8 RED incl.
+`test_the_eos_token_is_removed_not_merely_shifted`; deleting the tRNA null-amino-acid
+clause → 4 RED; making an out-of-vocabulary value encode to class 0 instead of masking →
+2 RED; adding `**kwargs` to `forward` → `test_forward_declares_no_var_kwargs` RED **in
+the bare tier**, which is the tier that has to catch it. **Step-local §8.5 gate on the
+real pretrained checkpoint** (the imp.md gate clause, too heavy for CI):
+`LoraConfig(r=16, α=32, dropout=0.05, target_modules="all-linear")` loads on
+rinalmo-giga @ `2a71f6f9…` and adapts **231 of 231** eligible `nn.Linear`
+(`all_linear_fully_covered = true`, PEFT suffix-minimises the selector to six leaf names
+— not a count); `base_frozen = true` with **0** base trainable params; trainable
+**12,840,432 / 662,079,483 = 1.9394 %**; the six heads are **199,836** params, **none**
+LoRA-adapted and **all** trainable; `d_model = 1280` measured off the backbone, not
+defaulted; a CPU forward on two real-length RNAs gives every head its correct shape, all
+finite, with `nucleotide_mask` sums `[34, 28]` equal to the input sequence lengths. The
+load report's `lm_head.*` UNEXPECTED keys are the pretraining MLM head, correctly not
+loaded into the encoder-only `RiNALMoModel`. `ruff check` + `black --check` clean at the CI-pinned versions (ruff 0.15.15, black 25.11.0).
+
+**Decisions.** No new ADR and no amendment: ADR-0002 D5/A9 already pin the checkpoint and
+PRD §10.3 already pins the LoRA scalars, and this step re-uses both rather than restating
+either — the head cardinalities the documents leave open are *derived and committed*, not
+pinned by fiat. Two defaults are this step's own and are flagged for P3-06 rather than
+frozen: sequence-level pooling is a **masked mean over nucleotide positions** (the
+checkpoint has no pooler and `load_rinalmo_backbone` passes `add_pooling_layer=False`, so
+there is no pretrained `<cls>` summary to read), and head (b) defaults to `use_crf=False`
+with the CRF exposed as a constructor knob. §10.1 evidence gate N/A — this step asserts no
+biological fact; the one factual claim it makes (`"None (UCA)"` is a rendered absence) is
+measured off the committed corpus, not from the literature. Cross-refs: ADR-0004 D1
+(head (b)'s class order), ADR-0005 D16 (the aux-weighting method P3-04 will apply to
+these heads), ADR-0002 A2 K1 (attention backend selected from measured evidence, never a
+free knob).
+
+**Commit.** Branch `p3-03-stage2-model`, PR pending — the **squash SHA on `main` is not
+yet known** and must be reconciled at the P3-exit gate by deriving it
+(`git show <sha> -- analyses/phase3_log.qmd | grep '^+## Step'`), never copied from notes.
