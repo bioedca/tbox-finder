@@ -304,7 +304,19 @@ class Stage2HeadSpec:
 
     @classmethod
     def from_dict(cls, payload: Mapping[str, Any]) -> Stage2HeadSpec:
-        """Inverse of :meth:`to_dict`; absent keys fall back to the canonical defaults."""
+        """Inverse of :meth:`to_dict`.
+
+        The three **canonical** axes fall back to their in-repo defaults when absent. The
+        two **corpus-derived** axes are required and have no defensible default, so a
+        payload missing one is refused by name rather than raising a bare ``KeyError``
+        that says only which dict key was looked up.
+        """
+        missing = [field for field in DERIVED_VOCAB_FIELDS if field not in payload]
+        if missing:
+            raise KeyError(
+                f"head vocabulary document is missing the required corpus-derived "
+                f"{missing} — regenerate it with derive_head_spec over the full dataset"
+            )
         spec = cls(
             cognate_aa_classes=tuple(payload[AMINO_ACID_FIELD]),
             trna_family_classes=tuple(payload[TRNA_FAMILY_FIELD]),
@@ -445,14 +457,32 @@ def read_head_vocab(path: str | Path = HEAD_VOCAB_PATH) -> dict[str, Any]:
 def load_head_spec(path: str | Path = HEAD_VOCAB_PATH) -> Stage2HeadSpec:
     """Load :data:`HEAD_VOCAB_PATH` into a spec, checking the document against itself.
 
-    Refuses a document whose ``sizes`` disagree with its own ``vocabularies``, or whose
-    canonical axes have drifted from the in-repo constants — the latter means the file
-    was written against a different class order, and loading it would silently re-index
-    every target.
+    Refuses a document written under another ``schema_version``; one whose ``sizes`` and
+    ``vocabularies`` do not describe the same axes, or disagree on a width; or whose
+    canonical axes have drifted from the in-repo constants — the last means the file was
+    written against a different class order, and loading it would silently re-index every
+    target.
+
+    The ``sizes`` block is a checksum, so both directions of the key-set have to match: a
+    ``sizes`` key with no vocabulary is an inconsistency (not a bare ``KeyError`` on a
+    lookup), and a vocabulary with no ``sizes`` entry is silently *unchecked*, which
+    removes the redundancy the block exists to provide.
     """
     document = read_head_vocab(path)
+    version = document.get("schema_version")
+    if version != HEAD_VOCAB_SCHEMA_VERSION:
+        # A version field nothing reads records intent and enforces nothing.
+        raise ValueError(
+            f"{path}: schema_version {version!r} is not the supported "
+            f"{HEAD_VOCAB_SCHEMA_VERSION!r} — regenerate the document"
+        )
     vocabularies = document["vocabularies"]
     sizes = document.get("sizes", {})
+    if set(sizes) != set(vocabularies):
+        raise ValueError(
+            f"{path}: sizes describes {sorted(sizes)} but vocabularies has "
+            f"{sorted(vocabularies)} — the document is internally inconsistent"
+        )
     for field, expected in sizes.items():
         actual = len(vocabularies[field])
         if int(expected) != actual:

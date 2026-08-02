@@ -423,3 +423,46 @@ class TestLoadHeadSpecRefusals:
         # Same length, different order — every per-nt target would be silently re-indexed.
         with pytest.raises(ValueError, match="drifted from its canonical"):
             H.load_head_spec(self._write(tmp_path, mutate))
+
+    def test_another_schema_version_is_refused(self, tmp_path):
+        # A version field nothing reads records intent and enforces nothing.
+        def mutate(doc):
+            doc["schema_version"] = "9.9"
+
+        with pytest.raises(ValueError, match="schema_version"):
+            H.load_head_spec(self._write(tmp_path, mutate))
+
+    def test_a_sizes_key_with_no_vocabulary_is_an_inconsistency(self, tmp_path):
+        def mutate(doc):
+            doc["sizes"]["not_a_column"] = 3
+
+        # Not a bare KeyError on the lookup — the document is what is wrong.
+        with pytest.raises(ValueError, match="internally inconsistent"):
+            H.load_head_spec(self._write(tmp_path, mutate))
+
+    def test_a_vocabulary_with_no_sizes_entry_is_refused(self, tmp_path):
+        # Otherwise that axis skips the checksum entirely and the redundancy the sizes
+        # block exists to provide is silently absent for it.
+        def mutate(doc):
+            doc["sizes"].pop("trna_family")
+
+        with pytest.raises(ValueError, match="internally inconsistent"):
+            H.load_head_spec(self._write(tmp_path, mutate))
+
+    def test_a_missing_corpus_derived_axis_is_named(self, tmp_path):
+        def mutate(doc):
+            doc["vocabularies"].pop("cognate_aa")
+            doc["sizes"].pop("cognate_aa")
+
+        # The three canonical axes have defaults; these two have none, so the error must
+        # say which axis and how to rebuild it, not just which dict key was looked up.
+        with pytest.raises(KeyError, match="derive_head_spec"):
+            H.load_head_spec(self._write(tmp_path, mutate))
+
+    def test_from_dict_falls_back_only_for_the_canonical_axes(self):
+        spec = H.Stage2HeadSpec.from_dict({"cognate_aa": ["ILE"], "trna_family": ["ILE (GAU)"]})
+        assert spec.boundary_classes == H.BOUNDARY_CLASSES
+        assert spec.regulatory_mode_classes == H.REGULATORY_MODE_CLASSES
+        assert spec.specifier_codon_classes == H.SPECIFIER_CODON_CLASSES
+        with pytest.raises(KeyError, match="trna_family"):
+            H.Stage2HeadSpec.from_dict({"cognate_aa": ["ILE"]})
