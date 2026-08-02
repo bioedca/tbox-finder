@@ -29,6 +29,7 @@
 defaults:
   - _self_
   - /model: rinalmo_stage2
+  - /loss: stage2      # P3-04's multi-task objective — the ONE home for `loss.*` (ADR-0005 D16)
   - /tracking: wandb
 
 # Determinism (§8.3).

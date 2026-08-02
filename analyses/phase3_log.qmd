@@ -533,3 +533,191 @@ yet known** and must be reconciled at the P3-exit gate by deriving it
 > laptop env carries both pytest and torch, so the shipped test bytes were executed
 > through a minimal pytest shim locally, and CI is what confirms the collection and
 > skip behaviour under the real runner.
+
+## Step P3-04 — 2026-08-02: the multi-task aux-loss with the ADR-0005 D16 pinned weighting method
+
+**Inputs.** The six `Stage2Model.forward` head outputs plus the `nucleotide_mask` P3-03
+returns for exactly this purpose (`stage2/model.py::OUTPUT_KEYS`); `stage2/heads.py`'s
+`IGNORE_INDEX` and the committed `head_vocab.json` widths 8 / 2 / 64 / 20 / 61;
+`train/objective.py::focal_cross_entropy` and its inverse-frequency weight arithmetic.
+LOCAL, CPU only — no GPU, no SLURM, no checkpoint, no DVC artifact.
+
+**Process.** `src/tbox_finder/stage2/losses.py::multitask_loss` combines six masked terms —
+(a) binary, (b) per-nucleotide boundary, (c) regulatory mode, (d1–d3) the G-D auxiliaries —
+under ADR-0005 D16's pinned method, with `MultitaskLoss` as the stateful wrapper that
+derives class weights from measured counts and `Stage2LossConfig` as the frozen, validated
+config. `conf/loss/stage2.yaml` is a new Hydra group carrying every field as a literal key
+and wired into `conf/train/lora_stage2.yaml`, so the PRD §11 sweep axis is
+`loss.aux_weight=…` exactly as the learning-rate axis is `optim.lr=…`.
+
+Five choices are load-bearing.
+
+**(1) Nothing is forked; the binary head is restated rather than reimplemented.** Every
+term routes through the P2-02 `focal_cross_entropy`, including head (a), whose single
+logit `z` is expressed as the pair `[0, z]` — softmax over which is `[1-σ(z), σ(z)]`, so
+cross-entropy against a `{0,1}` target *is* `binary_cross_entropy_with_logits`, with the
+same `σ(z) − y` gradient (the fabricated channel is a `zeros_like` constant and carries
+none). A unit test pins that equality against torch's own BCE as an **external** witness,
+and a sabotage bite that swaps the two channels turns it RED. The point is not economy: a
+separate binary focal loss would be a second place to get the ignore-index handling, the
+`Σ w_y` weighted-mean denominator, and P2-02's `clamp_min(eps)` — the fix for the silent
+NaN gradient at `0 < γ < 1` — wrong.
+
+**(2) Masked, not dense, with the emptiness made visible.** All 7,007 decoy rows carry no
+head-(c)/(d) target at all, so a term must reduce over its supervised elements only.
+Measured on the pinned torch 2.7.1, `F.cross_entropy(reduction="mean")` returns **nan**
+when every target in a batch is ignored — the shared focal path returns `0.0` instead. But
+a silently-vacuous term and a well-behaved one both read as a small number, so every term
+reports its own `n_supervised` beside its value and the excluded terms are listed by name
+(`skipped_unsupervised`, `included`). The test that pins this also asserts the *witness*:
+torch's own path on the same batch **is** nan, so the check is not vacuous.
+
+**(3) D16's "binary head weighted to dominate" is qualitative, and the encoding is
+reported rather than self-certified.** It is enforced as `binary_weight ≥ Σ effective aux
+weights`, checked at construction (login node, before any GPU time); the weaker per-term
+reading (`binary ≥ each aux`) is computed and reported beside it. The two are **not** the
+same rule, and the divergence was measured across the sweep range rather than argued: at
+the shipped base weights (binary 1.0; boundary 0.3; four record-level heads 0.1 each,
+Σ aux = 0.7) they agree for `aux_weight ≤ 1.4286` and again for `> 3.334`, and **disagree
+on `aux_weight ∈ (1.4286, 3.334]`** — a window a sweep could plausibly enter. The sum
+reading is the one that ships because under the weak one five aux terms at 0.99 out-gradient
+a binary at 1.0 while still being called dominated. Raising the cap is an ADR-0005 amendment
+(CLAUDE.md §7 item 2), not a config value.
+
+**(4) `aux_weight = 0` is exactly the P3-08 no-aux arm, to the last bit.** It scales all
+five non-binary terms and not head (a), so the total reduces to the binary term
+(`allclose atol=1e-14`), the aux heads receive no gradient at all, and their unweighted
+values are still *reported* — turning the aux heads off stays auditable rather than
+becoming invisible. Under the uncertainty method the aux tasks are dropped entirely,
+regulariser included, because a task with a live `s_i/2` and no data term opposing it hands
+the optimiser a free minimisation that drives that weight to infinity; the same exclusion
+therefore applies per batch to any term with no supervision in it.
+
+**(5) Two things are refused rather than quietly done.** A `boundary_crf` argument raises:
+`SegmentationHead(use_crf=True)` adds transition parameters a cross-entropy term would leave
+with zero gradient, and P3-06 owns that decision (P3-03 flagged it), so a model that looks
+trained with a dead CRF is not reachable from here. And an unknown key in `targets` raises,
+because a mis-keyed target trains nothing while every loss stays finite and plausible — the
+failure mode `label_source` had at P2-11.
+
+D16's **pre-registered alternative** is implemented too, off by default and behind a closed
+two-value allow-list: `weighting="uncertainty"` uses the log-variance form
+`Σ_i [ exp(−s_i)·L_i + s_i/2 ]` with `s_i = log σ_i²`, i.e. Kendall, Gal & Cipolla's
+homoscedastic-uncertainty weighting (arXiv:1705.07115) in the **classification**
+parameterisation `σ⁻²L + log σ` — every Stage-2 term here is a cross-entropy, so that is the
+applicable coefficient rather than the regression form's extra ½ on the data term
+(DOI:10.1002/mp.15870 eq. 4; DOI:10.1049/cmu2.12793 eq. 17, both accessed 2026-08-02; the
+`s` parameterisation avoids the `1/σ²` division by zero, DOI:10.1155/2022/6653598 eq. 12).
+The learnable log-variances belong to the **caller** (`uncertainty_log_variances`), keeping
+this a parameter-free callable the way `Stage1Loss` consumes the head's CRF. Selecting it is
+not a method change — D16 names it — but it is recorded in `diagnostics()` so a run using it
+is visible.
+
+`train/objective.py` gained one promotion, not a fork: the inverse-frequency arithmetic is
+now `inverse_frequency_weights(counts, alpha=…)` over **any** vocabulary (the Stage-2 axes
+are 2 / 20 / 61 / 64 wide, not 8), with `class_weights_from_counts` delegating to it and
+keeping its CLASS_ORDER-named zero-count message. Verified bit-identical to the
+pre-promotion formula over **2,000 random count vectors × α** (0 differences at the bit
+level), with `test_objective.py` green as the regression net. `_finite_float` became public
+`finite_float` with the private name kept as an alias.
+
+**Validation.** `tests/unit/test_stage2_losses.py`, four tiers: **91 pass / 0 fail** under
+`tbox-ml-rna`, and **55 pass / 36 skip** torch-free — the bare run includes the Hydra tier,
+which composes the shipped `conf/` tree for real and asserts that *every* dataclass field
+has a literal YAML key (the job-669 struct-mode trap), that `loss.aux_weight=0.0` lands,
+that a mistyped key is refused, and that the YAML defaults equal the dataclass defaults.
+Terms are graded against **external** references (`F.binary_cross_entropy_with_logits`,
+`F.cross_entropy`) in fp64 at `atol=1e-12`, never against a recomputation of the
+implementation. Gradients flow to all six heads and are exactly zero at ignored targets, at
+γ ∈ {0, 0.5, 2} — 0.5 being the regime P2-02's `clamp_min` exists for. Neighbouring suites
+re-run green: `test_objective` 92, `test_lora_harness` 107, `test_stage2_heads` 60,
+`test_stage2_model` 24, `test_stage2_tokenizer` 24. `ruff@0.15.15` + `black@25.11.0` clean.
+
+**Ten source sabotages, each RED against the named test, each restored byte-identically**
+(sha256-verified, `python -B`, `__pycache__` cleared): the binary channel swap; the
+dominance rule downgraded to the weak reading; an unsupervised term left in the uncertainty
+total; the padded-position test inverted; `aux_weight` applied to the binary term;
+two aux terms' vocabulary fields swapped (an **import-time** `RuntimeError` — the pairing
+guard runs on load, not only in a test); `n_supervised` reporting the padded element count;
+the graph-carrying zero replaced by `torch.zeros(())`; the ½ dropped from the log-variance
+regulariser; and `aux_weight` commented out of the YAML.
+
+**One of my own tests was structurally blind and only sabotage said so.** The
+padded-position refusal asserted "it raised" — which an *inverted* mask test also satisfies,
+since a check that raises on everything raises there too. It now carries its own positive
+control (the identical uncorrupted batch must succeed first), and the bite lands on that
+test by name.
+
+⚠ No laptop env carries both pytest and torch, so the shipped test bytes were executed
+locally through a minimal pytest shim (which expands `parametrize` rather than skipping it);
+CI is what confirms collection and skip behaviour under the real runner.
+
+**Decisions.** ADR-0005 D16 is implemented as written — the *method* is unchanged, so no
+amendment and no §7 sign-off (imp.md P3-04's `Stops:` makes sign-off conditional on a
+method change that only P3-08 could force). Every numeric weight, γ and α is an implementer
+default on the PRD §11 swept axis and `diagnostics()["pinned"]` records that split per field
+rather than letting a swept default read as a decision.
+
+**Commit.** Branch `p3-04-stage2-losses`, PR pending — the **squash SHA on `main` is not
+yet known** and must be reconciled at the P3-exit gate by deriving it
+(`git show <sha> -- analyses/phase3_log.qmd | grep '^+## Step'`), never copied from notes.
+
+> **Review-round addendum (CodeRabbit CLI r1, 2026-08-02).** Two findings over the seven
+> reviewed files; **one applied, one refuted by execution but converted into the coverage
+> it was really pointing at.**
+>
+> The **Major** — *"reject negative weight, gamma and class_weight_alpha values … guard
+> `max_aux_weight` against non-positive totals rather than treating negative totals as
+> unbounded"* — is **refuted**: `Stage2LossConfig.__post_init__` already routes every
+> scalar through `finite_float`, whose `minimum` defaults to `0.0`, and executing
+> `Stage2LossConfig(<field>=-1.0)` for **all thirteen** scalars raises on every one. The
+> `inf` branch is likewise correct rather than missing: it fires only when Σ aux base
+> weights is *exactly* zero, where every `aux_weight` genuinely satisfies the D16 rule
+> (Σ aux = 0 ≤ binary), and a negative total is unreachable by the guard above. But the
+> finding was right about something adjacent — my negative-value test sampled **three** of
+> the thirteen fields. It now covers every scalar, derived by exclusion so a field added
+> later is covered the day it is added, plus an explicit test pinning the `inf` branch's
+> reason. Two new sabotage bites confirm both bite: loosening the floor to `minimum=-1e9`
+> and returning `0.0` instead of `inf` each turn the named test RED.
+>
+> The **Minor** — `torch.full((B,), IGNORE_INDEX)` without an explicit `dtype` — is
+> **applied**, though its stated rationale ("ensuring the test exercises the intended
+> integer-target path") does not hold: `torch.full` already returns `int64` here on the
+> pinned torch 2.7.1, and a float target would have been *refused* by
+> `_check_supervised_targets`, so the test could not have been passing on the float path.
+> Explicit is still better than inferred, and it makes the test robust to a default that
+> has changed before.
+>
+> After r1: **102 pass / 0 fail** under `tbox-ml-rna`, **12 sabotage bites** all RED
+> against their named tests and all restored byte-identically.
+
+> **Review-round addendum (CodeRabbit CLI r2, 2026-08-02).** Three findings; **two
+> applied, one refuted by execution.**
+>
+> The **Major** — *"guard the torch-dependent `tbox_finder.stage2.losses` import so
+> collection succeeds when torch is unavailable"* — is **refuted**: `losses.py` is
+> torch-lazy by construction (the design note at its head says so, and torch appears only
+> inside functions), so it imports bare. Executed rather than argued — the whole file runs
+> in `tbox-finder-data`, an env with **no torch installed**, where 72 tests pass and 36
+> skip. Guarding that import would have made the pure tier — the weighting scheme, the
+> dominance rule, the entire Hydra sweep-axis gate — skip in CI, which installs no torch.
+> That is precisely the tier this step needs CI to run.
+>
+> The two **Minors** are both real and both applied. (i) The `try`/`except` guard's comment
+> claimed that "a broken `tbox_finder.train.objective` must raise here", but the `else`
+> branch imported only `torch.nn.functional` — the comment named a module the guard did not
+> import, which is a comment that describes a protection nobody has. Fixed in its **stronger
+> form** rather than by rewording: the `else` branch now imports `stage2.model`'s output
+> keys and `models.seg_head.LinearChainCRF`, the two torch-tier siblings this file grades
+> against, so a broken sibling raises at collection instead of self-skipping the whole
+> tensor tier green (the P1-15 failure mode the idiom exists for). A new sabotage bite
+> proves it: a `NameError` planted in `stage2/model.py` makes the module import **raise**,
+> not skip. (ii) The NaN-refusal test carried a hand-written seven-field list beside a
+> negative-refusal test that derived its fields from `dataclasses.fields`; the hand-written
+> copy goes one field stale with nothing failing, so it is now derived the same way. Both
+> gates therefore cover all **thirteen** scalars, and a bite that removes `finite_float`'s
+> `isfinite` check turns thirteen of them RED.
+>
+> After r2: **108 pass / 0 fail** under `tbox-ml-rna`, **72 pass / 36 skip** torch-free,
+> and **14 sabotage bites**, every one RED against its named test and every restore
+> sha256-verified.

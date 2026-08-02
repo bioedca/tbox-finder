@@ -18,8 +18,11 @@ The one exception is :mod:`tbox_finder.stage2.model`, which *is* a ``torch`` mod
 imports ``torch`` at module top (the :mod:`tbox_finder.models.stage1_segmenter`
 precedent). This ``__init__`` deliberately does not import it, so the package itself
 still imports bare and the ``data``-env rules are unaffected.
+:mod:`tbox_finder.stage2.losses` follows the lazy-import rule, not the exception: its
+weighting scheme, dominance rule and config validation are all pure, so they run — and are
+tested — in the bare CI env where torch is absent.
 """
 
 from __future__ import annotations
 
-__all__ = ["dataset", "heads", "model", "tokenizer"]
+__all__ = ["dataset", "heads", "losses", "model", "tokenizer"]
