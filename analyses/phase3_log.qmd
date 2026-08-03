@@ -825,3 +825,135 @@ locked alongside `forward`, and `PairingHead.forward` is locked too, all in the 
 so CI checks them on every push.
 
 **Commit.** `cbbbf3ac2e487b64a8be9dce15b7a3604dbb6854`
+
+## Step P3-06 — 2026-08-03: the SLURM LoRA fine-tune entrypoint + the PRD §11 sweep (ENCODE; the submit-ack is open)
+
+**Inputs.** `data/processed/stage2_dataset.parquet` (30,542 rows, P3-01);
+`src/tbox_finder/stage2/{model,losses,heads,tokenizer}.py` (P3-03/04/05);
+`src/tbox_finder/train/lora_harness.py` (P1-15's pinned §10.3 LoRA contract + the measured
+attention-backend selection); `reports/p1/lora_vram_smoke.json` (P1-16, for sizing);
+`conf/{model/rinalmo_stage2,loss/stage2,tracking/wandb}.yaml`.
+
+**Process.** `src/tbox_finder/stage2/train.py` is the Hydra entrypoint the P1-15 harness
+config was waiting for — it composes the new primary `conf/train/stage2.yaml`, selects the
+training population, builds the P3-03 model through `build_stage2_model`, drives DDP×8 with
+`MultitaskLoss`, and writes a self-validating JSON report next to a LoRA adapter + head
+state-dict. `conf/optim/stage2.yaml` is the one home for `optim.*`.
+`slurm/p3/stage2_lora_finetune.sbatch` runs the sweep as a **SLURM `--array`**, not a literal
+Hydra `--multirun`: each point wants the whole 8-GPU node and Hydra's basic launcher iterates
+points in one process, so an OOM or a NaN-grad in point *k* would poison every later point —
+the same reasoning P2-06 settled for Stage-1, restated here because imp.md's Outputs line
+says "`--multirun`". Six points: `loss.aux_weight` {0.0, 0.5, 1.0} × `optim.lr` {1e-4, 3e-4};
+`aux_weight=0` is the no-aux arm P3-08 consumes and `aux1.0_lr1e-4` is the production arm
+(exactly the shipped defaults). **No point is promoted here** — that is the validation
+ladder's job. `tbox_finder/train/ddp.py` was created by **promoting** the rank helpers, the
+`PYTHONHASHSEED` verifier and `ShardedSampler` out of `train_stage1.py`, which now imports
+them: the two trainers run in different conda envs (ADR-0002 A4), so a forked copy would let a
+fix land in one and the bug keep shipping in the other.
+
+**Outputs.** `src/tbox_finder/stage2/train.py` · `src/tbox_finder/train/ddp.py` ·
+`conf/train/stage2.yaml` · `conf/optim/stage2.yaml` ·
+`slurm/p3/stage2_lora_finetune.sbatch` · `tests/ml/test_stage2_train_smoke.py`. **No
+checkpoint and no `dvc add`** — nothing has been trained; the §9.3 submit-ack is open.
+
+**The §7 stop this step existed to settle.** `imp.md` hands the Stage-2 train-eligibility
+policy here, and both halves went to the user (AskUserQuestion, 2026-08-03; both
+recommendations taken). The rule is now one function, `row_eligibility`:
+
+> admit **iff** `fold_random == "train"` **and not** `calib` **and**
+> (`nested_train is True` **or** `fold_basis == decoy_pool_random`)
+
+*Why the D5 fold at all.* PRD §12 grades leave-one-order-out recall on the **two-stage**
+system, so a Stage-2 that saw a held-out order contaminates the headline exactly as a Stage-1
+that did would. *Why also intersect the scheme-A `train` rung* rather than take the whole D5
+fold as P2-09 did for Stage-1: it leaves the in-distribution `val`/`test` rungs untrained, so
+P3-07 fits its temperature on the disjoint `calib` split and P3-10 grades GATE-2's
+in-distribution ECE on **this** checkpoint instead of on an ADR-0004 A6-style eval twin. For
+GATE-4 (segmentation quality) a twin was acceptable; for a **calibration** gate it is much
+weaker, because calibration is a property of the model that ships. The measured cost of the
+restriction is 8 records across 5 tiny orders (Diptera 3, Spirochaetales 2,
+Hymenoptera/Funariales/Caryophyllales 1 each) and 3 rare phyla (Arthropoda 4, Spirochaetes 2,
+Streptophyta 2) — 8,084 → 5,199 corpus rows. *Why the parentless decoys are admitted:* the
+5,007 `structured_rna` / `gc_background` / `leader_decoy` rows carry `nested_train = NULL`
+because they were **built, not carved**, so they have no corpus parent and no order to hold
+out; the ADR-0004 A4/A5 `require_parent_nested_train` rule governs the *mined genomic-window*
+substrate and has nothing to key on here. Refusing them fail-closed would have left 404
+negatives against 4,795 positives, with the binary head seeing only the null PRD §12 itself
+calls the optimistic lower bound.
+
+**Measured population** (`select_rows` over the committed parquet): **9,059 train rows**
+(5,199 D5-corpus + 3,860 parentless decoy; 4,795 positive / 4,264 negative) and **2,070 val**
+(1,581 + 489), row-id overlap **0**. Refusals: 14,282 D5 holdout/excluded (heldout 7,718,
+clade-crossing 5,778, dropped 786), 6,112 other-rung, 1,089 calib, 0 unplaceable. The
+partition is exact: 9,059 + 21,483 = 30,542.
+
+**Two hand-offs resolved rather than deferred again.** `boundary_use_crf` is **False and
+`True` is refused at construction** — `multitask_loss` already raises on any `boundary_crf`
+because computing the plain cross-entropy instead would leave the CRF's transitions with no
+gradient at all, and refusing in `__post_init__` moves that refusal to the login node, ahead
+of the queue wait. Sequence pooling stays **masked-mean** (the checkpoint carries no pooler
+and `add_pooling_layer=False` keeps PEFT from adapting a randomly-initialised module);
+recorded in `diagnostics`, not exposed as a knob.
+
+**⚠ `find_unused_parameters=True` is required, not tuned — and `static_graph=True` would be
+a false statement.** `multitask_loss` drops a term with no supervision in the batch, so a
+pure-decoy batch leaves the four record-level heads without a gradient, and the whole no-aux
+arm leaves them without one for the entire run. PyTorch documents "activation checkpointing
+when model has unused parameters" as unsupported for the *reentrant* checkpoint variant
+outside `static_graph=True`; `static_graph` is wrong here because the used/unused set really
+does change batch to batch. So gradient checkpointing is re-enabled with
+`use_reentrant=False` and the **module count carrying the flag is measured** — a checkpointing
+flag that no-ops looks exactly like one that works.
+
+**⚠ The gate's `objective_terms_match` clause nearly failed the no-aux arm by construction.**
+`active_terms()` still lists all six terms at `aux_weight=0` (a zero-weighted term is present
+and supervised, merely not counted), so a clause demanding `terms_seen == active_terms` would
+have failed two of the six points on every step of the run. It re-derives the expectation
+from the recorded **effective weights** instead, which both admits the no-aux arm and still
+refuses an aux head that never once found supervision.
+
+**Validation.** `tests/ml/test_stage2_train_smoke.py`, four fail-closed tiers, each with its
+own env var (folding them was the P1-16 landmine): **80 pass / 0 fail** torch-free under
+`tbox-finder-data` with the hydra and real-corpus tiers armed; **87 pass** under `tbox-ml-rna`
+with the torch tier armed, including a real LoRA wrap + backward through a tiny
+same-architecture RiNALMo. The shipped `tests/unit/test_sbatch_overrides.py` composes all ten
+of this sbatch's override tokens for real (**22 pass**), and
+`tests/unit/test_sbatch_rm_targets.py` clears the new file. `ruff@0.15.15` + `black@25.11.0`
+clean; `bash -n` clean. **10 source sabotages, each RED against its NAMED test, each restored
+byte-identically** (sha256, `python -B`, `__pycache__` cleared): LOO-holdout admitted;
+calib check dropped; the parentless-branch guard removed; `"nan"` read as `True`;
+`full_population` hardwired true; the must-fire clause weakened to a presence check; the
+objective clause demanding the active set; the LR schedule collapsed to a constant;
+`ShardedSampler` striding before truncating; the collator padding with class 0.
+
+**End-to-end proof that the gate bites where it should.** A CPU run of `train_stage2` with
+`max_records=32` completed the whole loop — model, objective, backward, val, checkpoint,
+report — and failed its own gate on **exactly one clause, `full_population`**. Every
+rule-shaped clause survives truncation, which is why completeness is asserted beside
+correctness rather than assumed from them.
+
+**⚠ The rm-target gate caught the sbatch before CI did.** The first draft cleared stale
+outputs with `rm -rf "${CKPT_DIR:?}/provenance.json"`. `tests/unit/test_sbatch_rm_targets.py`
+cannot resolve the `${VAR:?}` form, so it scored the target as a bare wildcard and matched 12
+tracked `provenance.json` paths — red CI, from a guard added *for* safety. It is now a plain
+`rm -rf "$CKPT_DIR"` behind an explicit `[ -z "$KEY" ]` check: the same protection, in a form
+the gate can read.
+
+**Sizing — an extrapolation, and labelled as one.** No fresh GPU smoke was run before the
+ack, because a GPU smoke on this cluster is itself a §9.3 submit. The estimate comes from
+P1-16's measurement of this exact stack on a real A4000 (batch 8 → 985.8 ms/step, 2.014 GiB
+peak at 350 nt; largest fitting batch 16 at 2.647 GiB against 15.602 GiB): 9,059 rows at
+batch 8 over DDP×8 = 142 steps/epoch/rank; scaling the step time by the corpus's real token
+length (289 mean / 475 p95 / 552 max) gives ≈1.35 s/step ⇒ ≈35 min for 10 epochs + the
+2,070-row val rung. `--time=02:00:00` per array task is ≈3.4× that; estimated total ≈29 GPU-h
+over the six points.
+
+**Decisions.** The eligibility policy above (user sign-off, no ADR — it realises ADR-0004 D5
+and PRD §12 rather than amending either). No ADR was written or amended: the LoRA contract is
+PRD §10.3 via P1-15's frozen constants, the objective is ADR-0005 D16 via `conf/loss/stage2.yaml`,
+and the fold is ADR-0004 D5. **LoRA rank is not swept** even though PRD §11 names it an axis —
+§10.3 pins `r=16` and `lora_harness` holds it as a drift-guarded constant, so varying it is an
+ADR-0002 question; named in the sbatch header rather than silently dropped.
+
+**Commit.** Feature branch `p3-06-stage2-lora`; the squash SHA is not knowable from this
+branch and is derived at the phase-exit gate.

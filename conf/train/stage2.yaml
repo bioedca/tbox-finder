@@ -1,0 +1,127 @@
+# @package _global_
+# train/stage2.yaml — the P3-06 Stage-2 RiNALMo-giga LoRA fine-tune (PRD §10.2/§10.3/§11).
+#
+# Drives: src/tbox_finder/stage2/train.py::main, under torchrun, in the `tbox-ml-rna` env
+# (ADR-0002 A4). This is the file conf/train/lora_stage2.yaml's "HONEST STATUS: nothing
+# loads this file yet … it becomes live when P3 wires the Stage-2 run" was waiting for —
+# that file remains the P1-15 harness RECORD (its drift-guard test still owns the §10.3
+# LoRA contract echo); this one is the run.
+#
+# `@package _global_` lifts this nested (conf/train/) primary config's keys to the root so
+# `cfg.seed`/`cfg.epochs`/… are top-level, while the `/model` `/loss` `/optim` `/tracking`
+# groups keep their own packages. A conf/<group>/ primary needs BOTH that directive and
+# leading-slash `/group` defaults or it silently fails to compose.
+#
+# ⚠ EVERY OVERRIDABLE FIELD MUST BE A LITERAL KEY HERE, not merely a dataclass field.
+# Hydra composes in struct mode, so a CLI `max_records=8` against a config lacking the key
+# is a hard ConfigCompositionException — that is how SLURM job 669 was lost after a 14 h
+# queue wait. tests/unit/test_sbatch_overrides.py composes every override this repo's
+# sbatch files write, so the guard is CI-visible rather than a convention.
+#
+# ⚠ DO NOT restate any `loss.*` or `optim.*` key top-level. `_cfg_from_mapping` runs the
+# top-level pass first and the group pass second, so the group silently wins and the
+# top-level copy reads as live while changing nothing.
+
+defaults:
+  - _self_
+  - /model: rinalmo_stage2   # the pinned checkpoint + revision (ADR-0002 D5/A8)
+  - /loss: stage2            # P3-04/P3-05's objective — the ONE home for `loss.*`
+  - /optim: stage2           # the ONE home for `optim.*` (lr / weight_decay / warmup / clip)
+  - /tracking: wandb
+
+# ── Determinism (§8.3) ───────────────────────────────────────────────────────────────────
+# `pythonhashseed` is VERIFIED, never set: CPython fixes hash randomisation at interpreter
+# startup, so the launcher must export it before python starts. train.py raises if it did not.
+seed: 42
+pythonhashseed: 0
+
+# ── The training population (user decision, AskUserQuestion 2026-08-03) ──────────────────
+# The shipped checkpoint trains on the ADR-0004 D5 nested training fold INTERSECTED with the
+# scheme-A (random, genus-stratified) `train` rung, minus the P3-02 `calib` split:
+#
+#   admit  iff  fold_random == train  AND  NOT calib  AND
+#               ( nested_train is True  OR  fold_basis == decoy_pool_random )
+#
+# D5 because PRD §12 grades leave-one-order-out on the TWO-STAGE system — a Stage-2 that saw
+# a held-out order contaminates the headline exactly as a Stage-1 that did would. The
+# scheme-A restriction because P3-10 grades GATE-2's in-distribution ECE on the `test` rung
+# and P3-07 fits its temperature on `calib`: leaving both untrained lets the gate grade THIS
+# checkpoint instead of an ADR-0004 A6-style eval twin, which for a *calibration* gate is
+# the difference between grading the model that ships and grading a sibling of it.
+#
+# The disjunct is the parentless-decoy clause: structured_rna / gc_background / leader_decoy
+# rows are built, not carved, so they carry no corpus parent and no order to hold out.
+# Refusing them fail-closed would leave 404 negatives against 4,795 positives.
+#
+# Everything else is refused BY NAME and the counts are gate clauses — two of them must-fire,
+# because a filter that refuses nothing is indistinguishable from one that never ran.
+# Flipping `admit_parentless_decoys` to false is a scientific change, not a tuning knob:
+# it re-opens the question this step's §7 stop settled.
+train_rung: train
+val_rung: val
+admit_parentless_decoys: true
+
+dataset_parquet: data/processed/stage2_dataset.parquet
+
+# Cost knobs — null in every real run. They exist for the smoke tier, and `full_population`
+# is a gate clause precisely so a truncated run cannot certify: every rule-shaped clause
+# survives truncation, so completeness has to be asserted separately.
+max_records: null
+eval_max_records: null
+num_workers: 2
+
+# ── Optimisation ─────────────────────────────────────────────────────────────────────────
+# Nothing here is ADR-pinned. epochs/batch_size are implementer choices on the P2-09
+# precedent (epochs=10, batch_size=8); batch_size=8 sits inside the MEASURED A4000 envelope
+# from P1-16 (reports/p1/lora_vram_smoke.json: 2.014 GiB peak, 985.8 ms/step at 350 nt,
+# bf16 + gradient checkpointing, largest fitting batch 16 at 2.647 GiB against a 15.602 GiB
+# device). Sequence lengths here are longer than that smoke's — the corpus is 289 tokens
+# mean / 475 p95 / 552 max — so 8 keeps headroom rather than spending the measurement.
+epochs: 10
+batch_size: 8
+eval_batch_size: 16
+gradient_accumulation_steps: 1
+
+# ── Model (PRD §10.3) ────────────────────────────────────────────────────────────────────
+# revision / dtype / attn_implementation are null = "use the pinned defaults": the immutable
+# checkpoint revision from eval/rinalmo_parity.py, bfloat16 from lora_harness.TRAIN_DTYPE,
+# and the attention backend SELECTED from measured sm_86 evidence
+# (reports/p1/kernel_smoke.json → FA-2, SDPA fallback). Pinning a backend here would be the
+# silent assumption the §10.3 gate forbids; these keys exist so a diagnostic run can force
+# one, and the report records what the model actually carried, not what was asked for.
+revision: null
+dtype: null
+attn_implementation: null
+gradient_checkpointing: true
+dropout: 0.1
+
+# The P3-03 hand-off, decided here: the boundary CRF is OFF and `true` is REFUSED at
+# construction. losses.multitask_loss already raises on any boundary_crf, because computing
+# the plain cross-entropy instead would leave the CRF's transitions with no gradient at all.
+# Refusing on the login node means refusing before the queue wait, not after it.
+boundary_use_crf: false
+
+# PRD §8/§11's optional structure-consistency arm (head e). OFF by default, so the shipped
+# objective is exactly ADR-0005 D16's six-term one. It must agree with
+# `loss.structure_enabled` — train.py refuses a mismatch, since a head with no term sits in
+# the optimiser receiving no gradient. Head (e) costs O(L²): B × L × (1+L) logits, ~10 MB
+# fp32 at batch_size=8 / L=552 here.
+structure_head: false
+pairing_proj_dim: 64
+
+# ── Eval / IO ────────────────────────────────────────────────────────────────────────────
+# The val rung is scheme-A `val` inside the same D5 fold — held out of training by the
+# eligibility rule, and asserted disjoint from the train rung by row-id IDENTITY (a count
+# check is satisfied by a fold-sense inversion). It is a training monitor and a
+# best-checkpoint signal only; it is NOT the P3-10 GATE-2 population, which is the `test` rung.
+eval_val: true
+save_checkpoint: true
+checkpoint_dir: data/processed/checkpoints/stage2_rinalmo
+report_path: reports/p3/train_stage2.json
+log_every: 20
+device: null
+
+hydra:
+  run:
+    dir: .
+  output_subdir: null

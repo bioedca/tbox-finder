@@ -1,0 +1,38 @@
+# @package optim
+# optim/stage2.yaml — AdamW for the P3-06 Stage-2 RiNALMo LoRA fine-tune.
+#
+# Consumed by src/tbox_finder/stage2/train.py::_cfg_from_mapping, which flattens
+# `optim.lr` -> Stage2TrainConfig.lr (and the three below likewise).
+#
+# ⚠ THE GROUP IS THE ONE HOME FOR THESE KEYS. `_cfg_from_mapping` applies the top-level
+# pass FIRST and the group pass SECOND, so a key restated top-level in conf/train/stage2.yaml
+# is silently overwritten by whatever this file says — the `lr` trap documented in
+# conf/optim/stage1_best.yaml and re-learnt at P2-06, where a flat `lr=` would have trained
+# all 36 sweep points at 1e-4 while each self-consistently reported its swept value.
+# The PRD §11 learning-rate sweep axis is therefore `optim.lr=…`, never `lr=…`.
+#
+# NOTHING HERE IS ADR-PINNED. PRD §11 makes the learning rate a swept axis and pins no
+# value; §10.3 pins the LoRA contract (r/alpha/dropout/target_modules), not the optimiser.
+# These are implementer defaults on a swept axis, recorded as such.
+
+name: adamw
+
+# 1e-4 is the LoRA-era default and the value the P1-16 VRAM/mechanics smoke ran at
+# (reports/p1/lora_vram_smoke.json config.lr), so the first production arm starts where the
+# only measured Stage-2 optimisation on this hardware ran. The sweep explores upward: LoRA
+# adapters are randomly initialised into a frozen backbone and typically tolerate an order
+# more than a full fine-tune would.
+lr: 1.0e-4
+
+# Decoupled weight decay. Matches conf/optim/stage1.yaml so the two stages do not differ on
+# an axis neither the PRD nor an ADR distinguishes them on.
+weight_decay: 0.01
+
+# Fraction of total optimiser steps spent linearly warming up before the cosine decay.
+# Implemented by stage2.train.lr_scale, which is a pure function precisely so the bare CI
+# tier can assert the schedule's SHAPE — a scheduler that silently returns a constant is
+# invisible in a loss curve for the first few hundred steps.
+warmup_ratio: 0.06
+
+# Global-norm gradient clipping over the trainable set (adapters + heads). 0 disables.
+grad_clip: 1.0
