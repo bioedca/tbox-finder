@@ -32,8 +32,12 @@ try:
     import torch  # noqa: E402
 
     from tbox_finder.stage2.model import (  # noqa: E402
+        ALL_HEAD_OUTPUT_KEYS,
         HEAD_OUTPUT_KEYS,
+        OPTIONAL_HEAD_OUTPUT_KEYS,
         OUTPUT_KEYS,
+        STRUCTURE_OUTPUT_KEY,
+        PairingHead,
         Stage2Model,
         build_stage2_model,
     )
@@ -41,6 +45,8 @@ try:
     _HAS_TORCH = True
 except ImportError:  # pragma: no cover - exercised only in the bare CI env
     torch = None
+    PairingHead = None
+    ALL_HEAD_OUTPUT_KEYS = OPTIONAL_HEAD_OUTPUT_KEYS = STRUCTURE_OUTPUT_KEY = None
     _HAS_TORCH = False
 
 requires_torch = pytest.mark.skipif(
@@ -114,14 +120,17 @@ class TestSequenceOnlyContract:
     """
 
     @staticmethod
-    def _forward_args():
+    def _args(method, cls="Stage2Model"):
         source = Path(__file__).resolve().parents[2] / "src" / "tbox_finder" / "stage2" / "model.py"
         tree = ast.parse(source.read_text(encoding="utf-8"))
         classes = [n for n in ast.walk(tree) if isinstance(n, ast.ClassDef)]
-        stage2 = next(n for n in classes if n.name == "Stage2Model")
+        target = next(n for n in classes if n.name == cls)
         return next(
-            n.args for n in stage2.body if isinstance(n, ast.FunctionDef) and n.name == "forward"
+            n.args for n in target.body if isinstance(n, ast.FunctionDef) and n.name == method
         )
+
+    def _forward_args(self):
+        return self._args("forward")
 
     def test_forward_accepts_exactly_input_ids_and_attention_mask(self):
         args = self._forward_args()
@@ -136,28 +145,74 @@ class TestSequenceOnlyContract:
         assert args.kwarg is None
         assert args.vararg is None
 
+    def test_the_backbone_free_entry_is_locked_too(self):
+        """``heads_from_hidden`` is the *other* public way in, so it is locked identically.
+
+        P3-05 attaches a head that emits structure; the guarantee that nothing *consumes*
+        one has to hold on every entry point, not just ``forward``.
+        """
+        args = self._args("heads_from_hidden")
+        assert [a.arg for a in args.args] == ["self", "hidden_states", "attention_mask"]
+        assert args.kwonlyargs == []
+        assert args.kwarg is None
+        assert args.vararg is None
+
+    def test_head_e_consumes_hidden_states_and_a_mask_and_nothing_else(self):
+        """PRD §6 permits structure as a target; head (e) may emit one, never read one."""
+        args = self._args("forward", cls="PairingHead")
+        assert [a.arg for a in args.args] == ["self", "nucleotide_hidden", "nucleotide_mask"]
+        assert args.kwonlyargs == []
+        assert args.kwarg is None
+        assert args.vararg is None
+
 
 @requires_torch
 class TestSequenceOnlyContractTorch:
     def test_the_output_contract_is_logits_plus_a_mask(self):
         assert (*HEAD_OUTPUT_KEYS, "nucleotide_mask") == OUTPUT_KEYS
         assert len(HEAD_OUTPUT_KEYS) == 6
+        assert Stage2Model(_spec(), d_model=8).output_keys == OUTPUT_KEYS
 
-    def test_passing_a_structure_channel_is_a_type_error(self):
-        model = Stage2Model(_spec(), d_model=8)
+    def test_the_optional_head_adds_exactly_one_key(self):
+        model = Stage2Model(_spec(), d_model=8, structure_head=True)
+        assert OPTIONAL_HEAD_OUTPUT_KEYS == (STRUCTURE_OUTPUT_KEY,)
+        assert (*HEAD_OUTPUT_KEYS, *OPTIONAL_HEAD_OUTPUT_KEYS) == ALL_HEAD_OUTPUT_KEYS
+        assert model.output_keys == (*ALL_HEAD_OUTPUT_KEYS, "nucleotide_mask")
+        assert len(model.output_keys) == len(OUTPUT_KEYS) + 1
+
+    @pytest.mark.parametrize("structure_head", [False, True])
+    def test_passing_a_structure_channel_is_a_type_error(self, structure_head):
+        model = Stage2Model(_spec(), d_model=8, structure_head=structure_head)
         ids = torch.ones(1, 5, dtype=torch.long)
         with pytest.raises(TypeError):
             model(input_ids=ids, pairing_dotbracket="((...))")
 
-    def test_no_submodule_is_a_structure_encoder(self):
-        model = Stage2Model(_spec(), d_model=8)
-        forbidden = ("structure", "dotbracket", "pairing", "wuss", "basepair")
-        offenders = [
-            name
-            for name, _ in model.named_modules()
-            if any(token in name.lower() for token in forbidden)
-        ]
-        assert offenders == []
+    @pytest.mark.parametrize("structure_head", [False, True])
+    def test_no_submodule_can_ingest_a_structure_string(self, structure_head):
+        """The prohibition is on structure as an INPUT, so this tests inputs, not names.
+
+        It used to be a name blacklist that included "structure" and "pairing", which P3-05
+        makes wrong: the pairing head *emits* structure (PRD §8/§11) and PRD §6 permits
+        exactly that. Every module is therefore checked for what it can *read*: a structure
+        channel would have to arrive either as an embedding over a bracket alphabet or as a
+        projection whose input width is not the model's hidden width.
+        """
+        model = Stage2Model(_spec(), d_model=8, structure_head=structure_head)
+        for name, module in model.named_modules():
+            assert not isinstance(module, torch.nn.Embedding), f"{name} embeds a token table"
+            if isinstance(module, torch.nn.Linear) and name.endswith(("left", "right", "unpaired")):
+                assert module.in_features == model.d_model, name
+        # ...and no head reads anything but hidden states: the only tensors reaching the
+        # heads come from `heads_from_hidden`, whose signature is locked in the bare tier.
+        assert set(model.head_modules) - {"structure_head"} == {
+            "tbox_head",
+            "boundary_head",
+            "regulatory_mode_head",
+            "specifier_codon_head",
+            "cognate_aa_head",
+            "trna_family_head",
+        }
+        assert ("structure_head" in model.head_modules) is structure_head
 
 
 # --------------------------------------------------------------------------- #
@@ -167,6 +222,24 @@ class TestSequenceOnlyContractTorch:
 
 @requires_torch
 class TestConstruction:
+    def test_the_optional_head_is_absent_unless_asked_for(self):
+        """PRD §8/§11 call it optional and ADR-0005 D16 does not enumerate it, so the
+        DEFAULT model must be exactly the six-head D16 one P3-03/P3-04 validated."""
+        default = Stage2Model(_spec(), d_model=16)
+        assert default.structure_head is None
+        assert default.has_structure_head is False
+        assert len(default.head_modules) == 6
+        with_head = Stage2Model(_spec(), d_model=16, structure_head=True)
+        assert isinstance(with_head.structure_head, PairingHead)
+        assert len(with_head.head_modules) == 7
+
+    def test_the_optional_head_reads_the_measured_d_model(self):
+        model = Stage2Model(_spec(), d_model=16, structure_head=True, pairing_proj_dim=5)
+        assert model.structure_head.d_model == model.d_model == 16
+        assert model.structure_head.proj_dim == 5
+        assert model.structure_head.left.in_features == 16
+        assert model.structure_head.unpaired.out_features == 1
+
     def test_head_widths_come_from_the_spec(self):
         spec = _spec()
         model = Stage2Model(spec, d_model=16)

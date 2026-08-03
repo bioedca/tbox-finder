@@ -42,6 +42,7 @@ except ModuleNotFoundError as exc:  # pragma: no cover - exercised only in the b
     torch = None
     F = None
     LinearChainCRF = None
+    ALL_HEAD_OUTPUT_KEYS = OPTIONAL_HEAD_OUTPUT_KEYS = None
     HEAD_OUTPUT_KEYS = OUTPUT_KEYS = None
     _HAS_TORCH = False
 else:
@@ -53,7 +54,12 @@ else:
     import torch.nn.functional as F
 
     from tbox_finder.models.seg_head import LinearChainCRF
-    from tbox_finder.stage2.model import HEAD_OUTPUT_KEYS, OUTPUT_KEYS
+    from tbox_finder.stage2.model import (
+        ALL_HEAD_OUTPUT_KEYS,
+        HEAD_OUTPUT_KEYS,
+        OPTIONAL_HEAD_OUTPUT_KEYS,
+        OUTPUT_KEYS,
+    )
 
     _HAS_TORCH = True
 
@@ -68,8 +74,18 @@ LOSS_CONF = CONF_DIR / "loss" / "stage2.yaml"
 
 #: Config fields that are not non-negative scalars, and so are not covered by the
 #: negative-value refusal. Derived by exclusion so a new scalar field is covered the day it
-#: is added, rather than the day someone remembers to extend a hand-written list.
-_NON_SCALAR = frozenset({"weighting", "ignore_index"})
+#: is added, rather than the day someone remembers to extend a hand-written list — which is
+#: why this is read off the dataclass's own declaration rather than retyped here. Each
+#: exempt field carries its own refusal test below; the exemption is not a hole.
+_NON_SCALAR = frozenset(L.Stage2LossConfig._NON_SCALAR_FIELDS)
+
+#: The terms a **default** config runs — ADR-0005 D16's six. PRD §8/§11's optional
+#: structure term (P3-05) is off by default and has its own gate in
+#: ``test_structure_consistency_loss.py``; this file grades the D16 objective, so it reads
+#: the active set off the config rather than assuming ``TERMS`` and the two can diverge
+#: silently.
+_DEFAULT_TERMS = L.Stage2LossConfig().active_terms()
+_DEFAULT_AUX_TERMS = tuple(t for t in _DEFAULT_TERMS if t != L.BINARY_TERM)
 
 #: Head widths, read off the committed vocabulary rather than retyped.
 SPEC = H.load_head_spec()
@@ -87,10 +103,14 @@ WIDTHS = {
 # Bare tier — the term inventory
 # ====================================================================================== #
 class TestTermInventory:
-    def test_terms_are_the_six_prd_heads_primary_first(self):
+    def test_terms_are_the_prd_heads_primary_first(self):
         assert L.BINARY_TERM == "binary"
         assert (L.BINARY_TERM, *L.AUX_TERMS) == L.TERMS
-        assert len(L.TERMS) == 6
+        assert len(L.TERMS) == 7
+        # Six of them are ADR-0005 D16's, and the seventh is PRD §8/§11's optional one,
+        # which is why a DEFAULT config runs six terms (P3-05).
+        assert len(L.Stage2LossConfig().active_terms()) == 6
+        assert L.OPTIONAL_TERMS == (L.STRUCTURE_TERM,)
         assert set(L.TERM_TO_LOGITS) == set(L.TERMS)
 
     def test_aux_terms_pair_one_to_one_with_the_head_vocabularies(self):
@@ -100,17 +120,25 @@ class TestTermInventory:
         and five fields would still line up if two of them were swapped, and two heads of
         the same width (there are none today, but `regulatory_mode` is 2 and the binary
         restatement is 2) would then train on each other's labels with every loss finite.
+
+        The one term with no vocabulary field must *declare* itself as such
+        (``NON_VOCAB_AUX_TERMS``) — head (e)'s classes are sequence positions — so that a
+        term which merely forgot its field cannot hide behind the exemption.
         """
-        assert tuple(L.TERM_TO_FIELD[term] for term in L.AUX_TERMS) == H.VOCAB_FIELDS
+        vocab_terms = tuple(t for t in L.AUX_TERMS if t not in L.NON_VOCAB_AUX_TERMS)
+        assert tuple(L.TERM_TO_FIELD[term] for term in vocab_terms) == H.VOCAB_FIELDS
         assert L.BINARY_TERM not in L.TERM_TO_FIELD
+        assert set(L.TERM_TO_FIELD) == set(vocab_terms)
+        assert all(term not in L.TERM_TO_FIELD for term in L.NON_VOCAB_AUX_TERMS)
 
     def test_ignore_index_is_the_heads_sentinel(self):
         assert L.IGNORE_INDEX == H.IGNORE_INDEX == -100
         assert L.Stage2LossConfig().ignore_index == H.IGNORE_INDEX
 
-    def test_only_the_boundary_term_is_per_nucleotide(self):
-        assert L.PER_NUCLEOTIDE_TERMS == ("boundary",)
+    def test_the_per_nucleotide_terms_are_boundary_and_structure(self):
+        assert L.PER_NUCLEOTIDE_TERMS == ("boundary", L.STRUCTURE_TERM)
         assert set(L.PER_NUCLEOTIDE_TERMS) <= set(L.AUX_TERMS)
+        assert L.BINARY_TERM not in L.PER_NUCLEOTIDE_TERMS
 
     def test_the_hydra_group_file_is_where_the_sweep_axis_lives(self):
         """Breaks loudly on a rename even in an env without hydra installed."""
@@ -222,9 +250,21 @@ class TestConfigValidation:
         with pytest.raises(ValueError, match=">= 0"):
             L.Stage2LossConfig(**{field: -1.0})
 
+    def test_every_non_scalar_field_carries_its_own_refusal(self):
+        """The exemption list above must not be a way to smuggle a field past validation."""
+        assert set(_NON_SCALAR) == {"weighting", "structure_enabled", "ignore_index"}
+        with pytest.raises(ValueError, match="weighting must be"):
+            L.Stage2LossConfig(weighting="gradnorm")
+        with pytest.raises(ValueError, match="structure_enabled must be a bool"):
+            L.Stage2LossConfig(structure_enabled="true")
+        with pytest.raises(ValueError, match="ignore_index must be an int"):
+            L.Stage2LossConfig(ignore_index=1.5)
+
     def test_max_aux_weight_is_unbounded_only_when_the_aux_total_is_zero(self):
         """`inf` there is the right answer, not a missing guard: Σ aux = 0 ≤ any binary."""
-        cfg = L.Stage2LossConfig(**{f"{term}_weight": 0.0 for term in L.AUX_TERMS})
+        cfg = L.Stage2LossConfig(
+            **{f"{term}_weight": 0.0 for term in L.AUX_TERMS if term != L.STRUCTURE_TERM}
+        )
         assert cfg.max_aux_weight == math.inf
         assert cfg.dominance()["holds"]
         assert cfg.dominance()["aux_total"] == 0.0
@@ -477,7 +517,7 @@ class TestMaskedNotDense:
         tgt = _targets(out, lengths, supervise_aux=False)
         total, parts = L.multitask_loss(out, tgt)
         assert torch.isfinite(total)
-        for term in L.AUX_TERMS:
+        for term in _DEFAULT_AUX_TERMS:
             assert parts["n_supervised"][term] == 0
             assert float(parts["terms"][term]) == 0.0
             assert term in parts["skipped_unsupervised"]
@@ -559,7 +599,7 @@ class TestFixedWeighting:
         cfg = L.Stage2LossConfig(aux_weight=0.5)
         total, parts = L.multitask_loss(out, tgt, config=cfg)
         expected = sum(
-            (cfg.effective_weights()[term] * parts["terms"][term] for term in L.TERMS),
+            (cfg.effective_weights()[term] * parts["terms"][term] for term in cfg.active_terms()),
             start=torch.zeros((), dtype=total.dtype),
         )
         assert torch.allclose(total, expected, atol=1e-12)
@@ -570,7 +610,8 @@ class TestFixedWeighting:
         a, parts_a = L.multitask_loss(out, tgt, config=L.Stage2LossConfig(aux_weight=1.0))
         b, parts_b = L.multitask_loss(out, tgt, config=L.Stage2LossConfig(aux_weight=0.5))
         # The unweighted terms are identical; only the combination moved.
-        for term in L.TERMS:
+        assert parts_a["active"] == parts_b["active"] == list(_DEFAULT_TERMS)
+        for term in _DEFAULT_TERMS:
             assert torch.allclose(parts_a["terms"][term], parts_b["terms"][term], atol=1e-14)
         aux_a = a - parts_a["terms"]["binary"]
         aux_b = b - parts_b["terms"]["binary"]
@@ -584,7 +625,7 @@ class TestFixedWeighting:
         assert torch.allclose(total, parts["terms"]["binary"], atol=1e-14)
         assert parts["included"] == [L.BINARY_TERM]
         # ...and the aux terms are still *reported*, so "we turned them off" stays auditable.
-        for term in L.AUX_TERMS:
+        for term in _DEFAULT_AUX_TERMS:
             assert float(parts["terms"][term]) > 0.0
             assert parts["n_supervised"][term] > 0
 
@@ -636,12 +677,16 @@ class TestUncertaintyWeighting:
         cfg = L.Stage2LossConfig(weighting="uncertainty")
         s = L.uncertainty_log_variances(dtype=torch.float64)
         with torch.no_grad():
-            s.copy_(torch.tensor([0.3, -0.7, 0.1, 0.0, 1.2, -0.4], dtype=torch.float64))
+            s.copy_(torch.tensor([0.3, -0.7, 0.1, 0.0, 1.2, -0.4, 0.9], dtype=torch.float64))
         total, parts = L.multitask_loss(out, tgt, config=cfg, log_variances=s)
+        # `s` is indexed in TERMS order (all seven) but only the ACTIVE terms combine —
+        # index 6 belongs to the optional term this config does not run.
+        assert tuple(s.shape) == (len(L.TERMS),)
         expected = sum(
             (
-                torch.exp(-s[i]) * parts["terms"][term] + 0.5 * s[i]
-                for i, term in enumerate(L.TERMS)
+                torch.exp(-s[L.TERMS.index(term)]) * parts["terms"][term]
+                + 0.5 * s[L.TERMS.index(term)]
+                for term in cfg.active_terms()
             ),
             start=torch.zeros((), dtype=torch.float64),
         )
@@ -655,7 +700,7 @@ class TestUncertaintyWeighting:
             out, tgt, config=L.Stage2LossConfig(weighting="uncertainty"), log_variances=s
         )
         plain = sum(
-            (parts["terms"][term] for term in L.TERMS),
+            (parts["terms"][term] for term in _DEFAULT_TERMS),
             start=torch.zeros((), dtype=total.dtype),
         )
         assert torch.allclose(total, plain, atol=1e-12)
@@ -737,11 +782,12 @@ class TestGradientFlowAndFiniteness:
         tgt = _targets(out, lengths)
         cfg = L.Stage2LossConfig(binary_gamma=gamma, boundary_gamma=gamma, aux_gamma=gamma)
         total, parts = L.multitask_loss(out, tgt, config=cfg)
-        for term in L.TERMS:
+        assert parts["active"] == list(_DEFAULT_TERMS)
+        for term in _DEFAULT_TERMS:
             assert torch.isfinite(parts["terms"][term]), term
         assert torch.isfinite(total)
         total.backward()
-        for term in L.TERMS:
+        for term in _DEFAULT_TERMS:
             grad = out[L.TERM_TO_LOGITS[term]].grad
             assert grad is not None, term
             assert torch.isfinite(grad).all(), term
@@ -820,8 +866,18 @@ class TestFailClosedGuards:
 @requires_torch
 class TestModelContractDrift:
     def test_the_logit_keys_are_the_models_own_head_outputs(self):
-        """``losses`` names these by hand (it must stay torch-free); this is the guard."""
-        assert tuple(L.TERM_TO_LOGITS[term] for term in L.TERMS) == HEAD_OUTPUT_KEYS
+        """``losses`` names these by hand (it must stay torch-free); this is the guard.
+
+        Every term maps to a real model key, and the split between always-on and optional
+        keys is the same on both sides — a term that moved from one group to the other
+        without the model moving with it would otherwise pass a set-equality check.
+        """
+        assert tuple(L.TERM_TO_LOGITS[term] for term in L.TERMS) == ALL_HEAD_OUTPUT_KEYS
+        assert tuple(L.TERM_TO_LOGITS[t] for t in _DEFAULT_TERMS) == HEAD_OUTPUT_KEYS
+        assert (
+            tuple(L.TERM_TO_LOGITS[t] for t in L.TERMS if t not in _DEFAULT_TERMS)
+            == OPTIONAL_HEAD_OUTPUT_KEYS
+        )
         assert L.NUCLEOTIDE_MASK_KEY in OUTPUT_KEYS
         assert set(OUTPUT_KEYS) == set(HEAD_OUTPUT_KEYS) | {L.NUCLEOTIDE_MASK_KEY}
 

@@ -33,14 +33,15 @@
 weighting: fixed
 
 # ── The PRD §11 sweep axis ───────────────────────────────────────────────────────────────
-# Global multiplier on all five aux terms (heads b, c, d1-d3). The binary head (a) is NOT
-# scaled by it, so `aux_weight: 0.0` is exactly the no-aux arm P3-08 consumes: the objective
-# collapses to the binary term alone.
+# Global multiplier on every aux term (heads b, c, d1-d3, and e when enabled). The binary
+# head (a) is NOT scaled by it, so `aux_weight: 0.0` is exactly the no-aux arm P3-08
+# consumes: the objective collapses to the binary term alone.
 #
 # Its admissible range is bounded by D16's dominance rule, not by taste: at the base weights
 # below (Σ aux = 0.7 against binary 1.0) any value ≤ 1.4285714… is admitted and anything
-# above RAISES at construction. Widening that cap means changing binary_weight or amending
-# ADR-0005 — Stage2LossConfig.max_aux_weight reports the current bound.
+# above RAISES at construction. Enabling the optional structure term takes Σ aux to 0.8 and
+# the cap to 1.25 — the cap MOVES with the config. Widening it means changing binary_weight
+# or amending ADR-0005 — Stage2LossConfig.max_aux_weight reports the current bound.
 aux_weight: 1.0
 
 # ── Per-term base weights — implementer defaults on a swept axis, NOT ADR-pinned ──────────
@@ -55,14 +56,37 @@ specifier_codon_weight: 0.1
 cognate_aa_weight: 0.1
 trna_family_weight: 0.1
 
+# ── P3-05: the OPTIONAL structure-consistency term (head e) ───────────────────────────────
+# PRD §8 "Structure-derived secondary labels (optional Stage-2): pairing partner per base
+# from the dot-bracket"; PRD §11 "Optional structure-consistency auxiliary loss from
+# dot-bracket pairing". ADR-0005 D16's head enumeration does NOT name this head, so with the
+# toggle off the objective is exactly D16's six-term one — that is why the default is off
+# rather than on. Turning it on is the PRD-authorised optional arm P3-08 folds into the aux
+# ablation; it is not an ADR amendment, and it is not a decision this file makes for a run.
+#
+# The toggle is structural, not a weight of zero: with it off, neither head (e) nor the
+# per-base pairing target is required, and the term leaves the dominance sum entirely. The
+# model must be built with the SAME toggle — `Stage2Model(structure_head=…)` — or the loss
+# refuses (a head with no term receives no gradient; a term with no head has no logits).
+#
+# Structure is a TARGET here and never an input (PRD §6): head (e) reads only the hidden
+# states the encoder produced from the sequence.
+structure_enabled: false
+structure_weight: 0.1
+
 # ── Focal focusing parameters (PRD §11 focal loss for the imbalanced regime) ──────────────
 # Head (b) is the dense-background per-nucleotide regime focal loss was written for, so it
 # starts at Lin et al.'s γ=2 [arXiv:1708.02002]; the record-level heads start at plain
 # cross-entropy (γ=0). Safe below γ=1: P2-02 fixed the silent NaN gradient at 0<γ<1 in the
 # shared focal_cross_entropy these terms all call.
+#
+# structure_gamma is head (e)'s own knob rather than aux_gamma's: head (e) is per-nucleotide
+# over a 1+L-wide axis on which exactly one class is correct, which is neither the 8-class
+# dense-background regime nor the record-level one. It starts at plain cross-entropy.
 binary_gamma: 0.0
 boundary_gamma: 2.0
 aux_gamma: 0.0
+structure_gamma: 0.0
 
 # ── Inverse-frequency class weighting (PRD §8 "handle as class imbalance") ────────────────
 # 0 ⇒ unweighted, and the default: PRD §11 offers focal loss OR inverse-frequency weighting
@@ -74,6 +98,11 @@ aux_gamma: 0.0
 # inverse_frequency_weights raises on any class with zero count rather than clamping the
 # undefined inverse frequency to a plausible stand-in. That refusal is load-bearing on the
 # 64-wide specifier-codon axis, where the training fold need not realise every codon.
+#
+# There is deliberately no structure_class_weight_alpha: head (e)'s classes are sequence
+# POSITIONS, so an inverse-frequency weight would weight "index 37 of this batch" rather
+# than a category. class_weight_alpha('structure') is 0 by construction and both
+# class_weights['structure'] and class_counts['structure'] are refused.
 binary_class_weight_alpha: 0.0
 boundary_class_weight_alpha: 0.0
 aux_class_weight_alpha: 0.0
