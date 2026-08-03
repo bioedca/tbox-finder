@@ -65,6 +65,13 @@ branch, not from a PR head — on #98 it kept applying the dashboard's `fileChan
 and refused a 4-file PR even after the file existed on the branch. So expect dashboard
 behaviour, not this file's behaviour, on any PR opened before it merged.
 
+> **Not yet demonstrated end-to-end.** On #98, manual triggers via both `@greptileai` and
+> `@greptile-apps` produced **no** review — the sticky comment was never updated — while the
+> dashboard's 1-file limit was still the governing config. So the manual trigger path is
+> configured but **unproven** on this repo. The first time Greptile is genuinely needed,
+> confirm it actually posts a review before relying on it, and if it stays silent treat the
+> gate as unmet and fall through to `/code-review` rather than merging on an absent review.
+
 ## The 16/month cap
 
 Greptile has **no native per-repo review quota**. Its only usage control is an
