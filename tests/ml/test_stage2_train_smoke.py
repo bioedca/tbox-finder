@@ -1697,6 +1697,14 @@ def test_every_committed_report_carries_its_legacy_annotation() -> None:
         )
         assert report["schema_version"] == "1" == legacy["schema_version_of_this_file"]
         assert legacy["fails_current_gate_on"] == ["losses_finite", "steps_ran"]
+        # The flag is DERIVED from the epochs, not asserted. A first version hardcoded it True
+        # on all six while two arms have best == saved — the annotation contradicting the very
+        # test below that counts four differing arms.
+        differs = legacy["best_val_epoch_observed_during_training"] != legacy["saved_from_epoch"]
+        assert legacy["best_val_total_is_NOT_the_saved_weights"] is differs
+        # …and the note matches the case it describes, rather than one blanket wording.
+        assert ("discarded" in legacy["note"]) is differs
+        assert ("agree and neither is misleading" in legacy["note"]) is not differs
         # …and that list must still be the truth, not a stale copy.
         assert (
             sorted(k for k, v in T.derive_clauses(report).items() if not v)

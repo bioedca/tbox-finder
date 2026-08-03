@@ -228,13 +228,13 @@
   "legacy": {
     "annotation_only": "no measured value in this file was changed",
     "best_val_epoch_observed_during_training": 9,
-    "best_val_total_is_NOT_the_saved_weights": true,
+    "best_val_total_is_NOT_the_saved_weights": false,
     "best_val_total_observed_during_training": 0.03995415618032279,
     "fails_current_gate_on": [
       "losses_finite",
       "steps_ran"
     ],
-    "note": "LEGACY ANNOTATION added 2026-08-03 by the P3-06 review round; NO measured value in this file was altered. (1) `checkpoint.best_val_total` / `best_val_epoch` describe an epoch that was OBSERVED and NOT restored \u2014 this trainer has no best-checkpoint restore, so the saved weights are `checkpoint.saved_from_epoch`'s. The score those weights actually achieve is `legacy.saved_val_total` below, derived from this file's own `val.history`. Compare arms on that, never on best_val_total. (2) This report is schema_version 1 and FAILS the current (schema 2) gate on two clauses: `steps_ran`, because this run sized the LR cosine in micro-batches so the optimiser advanced half the scheduled steps; and `losses_finite`, because schema 1 predates `n_nonfinite_grad_steps` and the post-all-reduce gradient check was never measured \u2014 unmeasured, not failed. Both are pinned by tests/ml/test_stage2_train_smoke.py.",
+    "note": "LEGACY ANNOTATION added 2026-08-03 by the P3-06 review round; NO measured value in this file was altered. (1) This trainer has no best-checkpoint restore: the saved weights are `checkpoint.saved_from_epoch`'s, and the score they actually achieve is `legacy.saved_val_total`, derived from this file's own `val.history`. For THIS arm the best epoch IS the saved epoch, so `checkpoint.best_val_total` and `saved_val_total` agree and neither is misleading. The flag below is false for that reason, not because the distinction stopped mattering \u2014 four of the six arms do differ. (2) This report is schema_version 1 and FAILS the current (schema 2) gate on two clauses: `steps_ran`, because this run sized the LR cosine in micro-batches so the optimiser advanced half the scheduled steps; and `losses_finite`, because schema 1 predates `n_nonfinite_grad_steps` and the post-all-reduce gradient check was never measured \u2014 unmeasured, not failed. Both are pinned by tests/ml/test_stage2_train_smoke.py.",
     "saved_from_epoch": 9,
     "saved_val_total": 0.03995415618032279,
     "schema_version_of_this_file": "1"

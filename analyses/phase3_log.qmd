@@ -1601,3 +1601,33 @@ gradients and is a valid post-reduction signal.
 **Validation.** Trainer **121 pass**, sizing 20, overrides 22, backfill 4; ruff + black clean.
 
 **Commit.** Feature branch `p3-06-stage2-lora`; squash SHA derived at the phase-exit gate.
+
+## Step P3-06 (review r5) — 2026-08-03: one minor finding, and the rounds converge
+
+**r5 via the CodeRabbit CLI**, scoped with `--base-commit c6fc074` to the two genuinely
+unreviewed commits (529 insertions) rather than re-reviewing the whole branch — and via the CLI
+rather than a PR comment, so it consumed none of the GitHub review quota. **One finding,
+minor.** The series across the step: **11 → 12 → 3 → 3 → 1**.
+
+**The finding, and it is a self-inflicted inconsistency.** The legacy annotation hardcoded
+`best_val_total_is_NOT_the_saved_weights: True` on all six arms, while two of them
+(`aux1.0_lr1e-4`, `aux1.0_lr3e-4`) have best epoch **== 9 == saved**, so the flag was simply
+false for those. Worse, the test written in the *same commit*
+(`test_the_annotation_names_a_gap_that_is_real_in_four_of_six_arms`) asserts exactly that four
+of six differ — the annotation contradicted its own test file. The flag is now **derived** from
+the epoch comparison, and the note has two wordings: one saying `best_val_total` describes
+discarded weights, one saying the two agree and neither is misleading *and why that does not
+make the distinction moot*. Still annotation-only: **84 insertions, 0 deletions** against the
+pre-annotation commit.
+
+The test now asserts the flag equals the epoch comparison and that the note matches the case it
+describes. Verified non-tautological by sabotage: restoring the hardcoded `True` turns it red.
+
+**On stopping.** Four consecutive rounds found real defects in the *previous* round's fixes,
+which is why none of them was a safe place to stop. This one found a documentation-consistency
+nit in an annotation block — no behaviour, no gate, no artifact. That is a different kind of
+result, and a reasonable place to stop reviewing rather than a claim that nothing remains.
+
+**Validation.** Trainer **121 pass**, sizing 20, overrides 22, backfill 4; ruff + black clean.
+
+**Commit.** Feature branch `p3-06-stage2-lora`; squash SHA derived at the phase-exit gate.
