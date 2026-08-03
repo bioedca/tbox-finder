@@ -1068,3 +1068,59 @@ scheduler choice. It carries §13's risk in mirror image (if `one` also goes dow
 starves), which is why it is dated and removed on the reboot. User-approved 2026-08-03.
 
 **Commit.** Feature branch `p3-06-stage2-lora`; squash SHA derived at the phase-exit gate.
+
+## Step P3-06 (addendum 2) — 2026-08-03: submit #2 OOM'd; the sizing smoke imp.md asked for
+
+**Result.** Job 1044: all six points `torch.OutOfMemoryError` in the backbone forward
+(`model.py:483`), ~16 min in, 0 checkpoints. **The three job-1036 causes are gone** — every
+point reached training and iterated decoy batches (A fixed), all six placed on `one` after
+`cuda ok: 8 device(s), capability (8, 6)` (B neutralised), and **no SIGSEGV recurred**, on any
+point including the `aux_weight=0.0` arm (C did not reproduce). One uniform new failure:
+GPU 6 held **13.97 GiB allocated** of 15.60 GiB and failed a 56 MiB request, without printing
+a single `log_every=20` line — so it did not survive 20 optimiser steps.
+
+**⚠ Root cause of the mis-sizing, and it is methodological.** Both submits were sized from
+`reports/p1/lora_vram_smoke.json` (P1-16: batch 8 → **2.014 GiB**, 985.8 ms/step). That
+report's own config block states what it measured: **`loss_is_placeholder: true`,
+`data_is_synthetic: true`, `is_science: false`, `seq_len_nt: 350`, five timed steps** — a bare
+LoRA-wrapped **backbone** under `placeholder_loss(hidden_states)`, no heads, no objective. It
+was extrapolated to a **seven-head multi-task objective on real sequences up to 552 tokens for
+1,420 steps**. The *wall-clock* was labelled an extrapolation in the ack; the **VRAM headroom
+was never questioned at all**, and that is the miss. P1-16's number was not wrong — it
+answered a different question. imp.md's Compute line had asked for exactly the thing that was
+skipped: *"re-confirm est via a 100-record smoke before submit."*
+
+**The correction: `src/tbox_finder/stage2/sizing.py` + `slurm/p3/stage2_sizing_smoke.sbatch`.**
+One GPU, no DDP, real rows from the real admitted population, and — the load-bearing
+part — it measures **the shipped step**: `train.forward_backward` was extracted from the
+trainer's loop so both call one implementation. A harness that reimplemented the step would be
+free to drift from it in precisely the way P1-16 did, so `real_objective` is a gate clause that
+reads `step_function == "tbox_finder.stage2.train.forward_backward"` alongside
+`data_is_synthetic: false` / `loss_is_placeholder: false` — the three flags whose values are
+the whole difference. A test asserts by **interception** that `measure_batch` really calls the
+trainer's function, so a future inlining is caught rather than merely discouraged.
+
+**Four things it measures that the old smoke did not.** A **descending batch sweep** (8, 4, 2,
+1) with OOM caught per point, so one failure does not end the sweep. Both a **worst-case** and
+a **typical** batch — sequences run 59–552 tokens and the collator pads to the batch maximum,
+so sizing on the median would reproduce this failure at a lower batch size. **Six optimiser
+steps** per point, because AdamW allocates `exp_avg`/`exp_avg_sq` lazily on the first `.step()`
+and because a footprint that *grows* across steps — the open question job 1044 left — is only
+visible as a per-step series, reported with an explicit `growth_ratio`. And **gradient-
+checkpointing effectiveness** as an on/off comparison, since a flag that is "enabled" and saves
+nothing looks exactly like one that works.
+
+**⚠ The gate grades the measurement, not the answer.** "Batch 8 does not fit" is a *successful*
+sizing run and exits 0. A first draft of the `swept` clause required at least one point to have
+run steps, which failed an all-OOM sweep — a gate that pressures the harness toward a
+convenient number, which is the exact failure being corrected. It now requires every point to
+reach a **definite** outcome (ran, or OOM'd), refusing only a point that silently did neither.
+
+**Validation.** `tests/ml/test_stage2_sizing.py` **17 pass / 0 fail** with the torch and
+real-corpus tiers armed; the trainer's own suite still **92 pass** after the `forward_backward`
+extraction; `ruff` + `black` clean; `bash -n` clean. **4 further source sabotages**, each RED
+against its NAMED test, each restored byte-identically: the worst-case picker taking the
+shortest rows; `real_objective` no longer reading the placeholder flags; the optimiser-state
+clause hardwired true; the growth ratio always reporting flat. **16 sabotages across the step.**
+
+**Commit.** Feature branch `p3-06-stage2-lora`; squash SHA derived at the phase-exit gate.

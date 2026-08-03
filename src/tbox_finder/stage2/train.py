@@ -102,6 +102,7 @@ __all__ = [
     "build_report",
     "derive_clauses",
     "diagnostics",
+    "forward_backward",
     "lr_scale",
     "row_eligibility",
     "select_rows",
@@ -891,6 +892,30 @@ def collate_stage2(batch: Sequence[Mapping[str, Any]], *, ignore_index: int = H.
     }
 
 
+def forward_backward(model: Any, loss_fn: Any, batch: Mapping[str, Any], *, scale: float = 1.0):
+    """The forward + objective + backward that **is** one training step's cost.
+
+    Extracted so :mod:`tbox_finder.stage2.sizing` measures the step the trainer actually
+    runs rather than a re-implementation of it. That distinction is not academic: P3-06's
+    first two submits were sized from P1-16's smoke, which measured a bare backbone under a
+    *placeholder* loss with no heads — a different computation wearing the same name, and
+    the VRAM figure it produced was off by ~7×. A sizing harness that duplicates the step is
+    free to drift from it in exactly that way; one that calls it cannot.
+
+    The optimiser is the caller's business, because *when* it steps differs between the two
+    (gradient accumulation in the trainer, every step in the sizing sweep) — but note that
+    AdamW allocates its state lazily on the first ``.step()``, so any peak-VRAM measurement
+    must include at least one.
+
+    Returns ``(loss_value, components)``; ``scale`` divides the loss before backward.
+    """
+    outputs = model(input_ids=batch["input_ids"], attention_mask=batch["attention_mask"])
+    loss, components = loss_fn(outputs, batch["targets"])
+    value = float(loss.detach())
+    (loss / scale).backward()
+    return value, components
+
+
 def _count_checkpointed_modules(module: Any) -> int:
     """Modules whose ``gradient_checkpointing`` flag is actually on — a measurement."""
     return sum(1 for m in module.modules() if getattr(m, "gradient_checkpointing", False))
@@ -1182,15 +1207,12 @@ def train_stage2(
             )
         ):
             batch = _to_device(batch, device)
-            outputs = ddp_model(
-                input_ids=batch["input_ids"], attention_mask=batch["attention_mask"]
+            value, components = forward_backward(
+                ddp_model, loss_fn, batch, scale=cfg.gradient_accumulation_steps
             )
-            loss, components = loss_fn(outputs, batch["targets"])
             terms_seen.update(components.get("included") or [])
-            value = float(loss.detach())
             if not math.isfinite(value):
                 n_nonfinite += 1
-            (loss / cfg.gradient_accumulation_steps).backward()
             n_steps += 1
             if n_steps % cfg.gradient_accumulation_steps == 0:
                 if cfg.grad_clip > 0:
