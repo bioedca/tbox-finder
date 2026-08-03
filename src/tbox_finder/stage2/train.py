@@ -984,6 +984,31 @@ def build_model(cfg: Stage2TrainConfig, *, base_model: Any = None):
     return model, info
 
 
+def checkpoint_output_files(checkpoint_dir: str | Path) -> list[str]:
+    """Every FILE under a checkpoint directory, sorted — the provenance `outputs` list.
+
+    ``lora_adapter`` is PEFT's ``save_pretrained`` layout, i.e. a **directory**, and
+    :func:`tbox_finder.provenance.sha256_file` opens each declared output as a file and
+    raises on anything else. That fail-loud behaviour is correct for a shared helper and is
+    deliberately not weakened; the defect was declaring a directory as an output, which cost
+    job 1064's first two points their sidecar and their ``.OK`` marker. (The checkpoints
+    themselves survived — the copy out of node-local scratch precedes the sidecar write.)
+
+    Enumerated rather than hard-coded so a PEFT version writing a different file set is still
+    hashed in full instead of silently under-recorded, and returned sorted so the provenance
+    record is stable across runs.
+    """
+    root = Path(checkpoint_dir)
+    if not root.is_dir():
+        raise NotADirectoryError(f"{root} is not a checkpoint directory")
+    files = sorted(str(f) for f in root.rglob("*") if f.is_file())
+    if not files:
+        # An empty checkpoint dir means the save silently produced nothing; recording an
+        # empty `outputs` would make the sidecar assert provenance over no artifact at all.
+        raise FileNotFoundError(f"{root} contains no files to record as outputs")
+    return files
+
+
 def device_record() -> dict[str, Any]:
     """The GPU this rank actually ran on — name, capability, and DRIVER VERSION.
 

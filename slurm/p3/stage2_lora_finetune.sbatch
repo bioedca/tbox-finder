@@ -350,10 +350,10 @@ write_provenance(
         "data/processed/stage2_dataset.parquet",
         "src/tbox_finder/stage2/head_vocab.json",
     ],
-    outputs=[
-        f"{ckpt_dir}/lora_adapter",
-        f"{ckpt_dir}/stage2_heads.pt",
-    ],
+    # FILES, not the adapter DIRECTORY — see train.checkpoint_output_files for why, and for
+    # the failure that taught it. Shared with the backfill so the two cannot disagree about
+    # what a checkpoint's outputs are.
+    outputs=T.checkpoint_output_files(ckpt_dir),
     env_lock=T.ENV_LOCK,
     adr="ADR-0002; ADR-0004 D5; ADR-0005 D16",
     extra={

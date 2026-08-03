@@ -662,9 +662,13 @@ def test_every_inline_python_block_in_every_sbatch_actually_compiles() -> None:
     blocks = [
         (path, match.group(1))
         for path in sorted((_REPO / "slurm").rglob("*.sbatch"))
-        for match in re.finditer(
-            r"^PYTHONPATH=\S* python -c '\n(.*?)\n'$", path.read_text(), re.S | re.M
+        for pattern in (
+            r"^PYTHONPATH=\S* python -c '\n(.*?)\n'$",
+            # Heredoc form too — `python - <<'PY' … PY`. The provenance writer lives in one
+            # of these, and an unparsed heredoc is exactly as dead as an unparsed -c block.
+            r"python - <<'PY'\n(.*?)\nPY$",
         )
+        for match in re.finditer(pattern, path.read_text(), re.S | re.M)
     ]
     # Emptiness guard: a regex that matched nothing would make this vacuously green.
     assert blocks, "no inline `python -c` blocks discovered in any sbatch at all"
@@ -1137,3 +1141,46 @@ def test_device_record_survives_a_missing_nvidia_smi() -> None:
     assert record["torch_version"] == torch.__version__
     # On a CPU-only box driver_version is None and that is a recorded fact, not an error.
     assert record["driver_version"] is None or isinstance(record["driver_version"], str)
+
+
+def test_checkpoint_outputs_are_files_never_the_adapter_DIRECTORY(tmp_path=None) -> None:
+    """The job-1064 defect: PEFT's `lora_adapter` is a directory, and provenance hashes files.
+
+    `provenance.sha256_file` opens each declared output and raises on a directory — correct
+    fail-loud behaviour for a shared helper, deliberately not weakened. So the enumeration
+    must yield only files, recursively, and must refuse the two ways it could silently record
+    nothing: a path that is not a directory, and a directory with no files in it.
+    """
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as root:
+        ckpt = Path(root) / "aux1.0_lr1e-4"
+        adapter = ckpt / "lora_adapter"
+        adapter.mkdir(parents=True)
+        (adapter / "adapter_config.json").write_text("{}")
+        (adapter / "adapter_model.safetensors").write_bytes(b"\x00")
+        (ckpt / "stage2_heads.pt").write_bytes(b"\x00")
+
+        outputs = T.checkpoint_output_files(ckpt)
+        assert len(outputs) == 3
+        assert all(Path(o).is_file() for o in outputs), outputs
+        assert not any(Path(o).is_dir() for o in outputs)
+        # Sorted, so the sidecar is stable across runs rather than filesystem-order dependent.
+        assert outputs == sorted(outputs)
+        # It is the ADAPTER DIR that must never appear — the exact value that raised.
+        assert str(adapter) not in outputs
+
+        # Every declared output must actually be hashable by the real helper.
+        from tbox_finder.provenance import sha256_file
+
+        for o in outputs:
+            assert len(sha256_file(o)) == 64
+
+        # And the directory itself still raises, so the contract is asserted, not assumed.
+        with pytest.raises(IsADirectoryError):
+            sha256_file(adapter)
+
+    with tempfile.TemporaryDirectory() as empty, pytest.raises(FileNotFoundError):
+        T.checkpoint_output_files(empty)
+    with pytest.raises(NotADirectoryError):
+        T.checkpoint_output_files(Path(__file__))
