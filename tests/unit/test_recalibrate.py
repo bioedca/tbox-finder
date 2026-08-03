@@ -300,11 +300,21 @@ def test_the_census_counts_every_rung_including_the_empty_ones():
 
 
 def test_an_empty_calib_rung_raises_and_names_what_it_saw():
-    """The all-``False`` calib column: filters clean, fits on nothing, must not look fine."""
+    """The all-``False`` calib column: filters clean, fits on nothing, must not look fine.
+
+    The message is asserted in three parts, not one: the phrase, the **census** (so a
+    silently-wrong census cannot hide behind a correct headline), and the count of rows on
+    ``GRADED_RUNGS`` — which is the only place that constant is read, so asserting only the
+    first clause would leave it a pinned constant nothing checks.
+    """
     spec = [row for row in _MIXED if row[0] != R.CALIB_RUNG]
     z, y, rungs = _table(spec)
-    with pytest.raises(ValueError, match="no rows on the 'calib' rung"):
+    with pytest.raises(ValueError) as excinfo:
         R.temperature_scale(z, y, rung=rungs)
+    message = str(excinfo.value)
+    assert "no rows on the 'calib' rung out of 12" in message
+    assert "{'calib': 0, 'test': 5, 'train': 4, 'val': 3}" in message
+    assert "the 8 rows of the graded rungs ['val', 'test']" in message  # 5 test + 3 val
 
     # Positive control: the identical rows, with the (non-separable) train arm relabelled
     # calib, fit fine — so the refusal above is about emptiness, not about these rows.
@@ -312,8 +322,23 @@ def test_an_empty_calib_rung_raises_and_names_what_it_saw():
     assert R.temperature_scale(z, y, rung=rescued).n_fitted == 4
 
 
-def test_a_single_class_calib_rung_raises():
-    z, y, rungs = _table([("calib", 1.0, 1), ("calib", 2.0, 1), ("test", -1.0, 0)])
+@pytest.mark.parametrize(
+    "labels,described",
+    [
+        ([1, 1], "all-positive"),
+        ([0, 0], "all-negative"),
+    ],
+)
+def test_a_single_class_calib_rung_raises(labels, described):
+    """**Both** halves of the compound guard, sabotaged separately.
+
+    ``n_pos == 0 or n_pos == n_fitted`` is a disjunct, and a test that exercises only the
+    all-positive half leaves the other free to be deleted
+    ([[sabotage-attribution-names-the-test]]). The all-negative half is the realistic one: a
+    P3-02 join that drops the positive class yields a calib carve of pure negatives, on which
+    the fit **converges cleanly** and returns a fully certified `T` if the guard is gone.
+    """
+    z, y, rungs = _table([("calib", -1.0, labels[0]), ("calib", 2.0, labels[1])])
     with pytest.raises(ValueError, match="single-class"):
         R.temperature_scale(z, y, rung=rungs)
 
@@ -338,21 +363,66 @@ def test_an_unrecognised_rung_token_is_refused_not_filtered(token):
 
 
 @pytest.mark.parametrize(
-    "bad",
+    "bad,expected",
     [
-        {"labels": np.array([0, 1, 2])},
-        {"logits": np.zeros((3, 2))},
+        ({"labels": np.array([0, 1, 2])}, "labels must be binary 0/1"),
+        ({"logits": np.zeros((3, 2))}, "logits must be 1-D"),
+        ({"labels": np.array([[0], [1], [0]])}, "labels must be 1-D"),
     ],
 )
-def test_shape_and_domain_violations_raise(bad):
+def test_shape_and_domain_violations_raise(bad, expected):
+    """``match=`` on **this module's own** message, not a bare ``ValueError``.
+
+    A bare `pytest.raises(ValueError)` passes here even with both of these guards deleted,
+    because the delegated multi-class fitter raises its own (differently-worded, and for the
+    2-D case *wrongly-scoped*) error further in. Matching the text is what makes the guard
+    this module owns the thing under test.
+    """
     z, y, rungs = _table(_TINY)
     kwargs = {"logits": z, "labels": y}
     kwargs.update(bad)
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match=expected):
         R.temperature_scale(kwargs["logits"], kwargs["labels"], rung=rungs)
 
     # Positive control: the untouched arguments succeed.
     assert R.temperature_scale(z, y, rung=rungs).n_fitted == 3
+
+
+@pytest.mark.parametrize(
+    "labels,expected",
+    [
+        (np.array([1.0, 0.6, 0.0]), "must be integral"),
+        (np.array([1.0, 1.7, 0.0]), "must be integral"),
+        (np.array([1.0, -0.9, 0.0]), "must be integral"),
+        (np.array([1.0, np.nan, 0.0]), "non-finite"),
+        (np.array([1.0, np.inf, 0.0]), "non-finite"),
+        (np.array(["1", "0", "1"]), "boolean or numeric"),
+        (np.array([None, 1, 0], dtype=object), "boolean or numeric"),
+    ],
+)
+def test_a_non_integral_label_is_refused_before_the_int64_cast(labels, expected):
+    """``astype(np.int64)`` truncates toward zero, so a range test placed *after* it is blind.
+
+    A target written as ``0.6`` becomes ``0`` and the fit then runs — successfully, and
+    bit-identically to the truncated targets — on values the caller never wrote; a ``NaN``
+    label becomes the int64 sentinel and surfaces as a misleading ``range [-9.2e18, 1]``.
+    The domain check therefore happens in the original dtype.
+    """
+    z = np.array([1.0, 1.0, -1.0])
+    with pytest.raises(ValueError, match=expected):
+        R.temperature_scale(z, labels, rung=["calib"] * 3)
+
+    # Positive control: the same logits with the integral targets the caller meant.
+    assert R.temperature_scale(z, np.array([1.0, 0.0, 0.0]), rung=["calib"] * 3).n_fitted == 3
+
+
+@pytest.mark.parametrize("labels", [[True, False, False], np.array([1, 0, 0], dtype=np.int8)])
+def test_boolean_and_integer_label_dtypes_are_accepted(labels):
+    """The refusal above must not also refuse the dtypes parquet actually delivers."""
+    z = np.array([1.0, 1.0, -1.0])
+    result = R.temperature_scale(z, labels, rung=["calib"] * 3, grad_tol=1e-8)
+    # ...and land on the same hand-derived root the float path does: T* = 1/ln2.
+    assert result.temperature == pytest.approx(1.0 / math.log(2.0), abs=1e-6)
 
 
 def test_length_disagreements_raise():
@@ -410,6 +480,63 @@ def test_a_missing_calib_flag_raises_rather_than_reading_nan_as_true(missing):
     with pytest.raises(ValueError, match="calib is missing"):
         R.assign_rung(calib=missing, fold_random="train")
     assert R.assign_rung(calib=True, fold_random="train") == "calib"  # positive control
+
+
+@pytest.mark.parametrize("token", ["False", "false", "0", "FALSE"])
+def test_a_stringified_false_calib_flag_is_read_as_false_not_as_truthy(token):
+    """``bool("False")`` is ``True`` — the second half of the same fail-open as NaN.
+
+    The NaN guard closes the *missing* spelling; this closes the *rendered* one. A
+    string-typed `calib` column (an object-dtype widening, a re-materialised join) carrying
+    an explicit ``"False"`` would otherwise be promoted into the set ``T`` is fitted on, with
+    every count still looking clean. Read through ``masking.bool_or_none``, the same parse
+    ``stage2.train`` uses for the fold columns.
+    """
+    assert bool(token) is True  # the bite, stated outright
+    assert R.assign_rung(calib=token, fold_random="train") == "train"
+
+
+@pytest.mark.parametrize("token", ["True", "true", "1", "TRUE"])
+def test_a_stringified_true_calib_flag_is_still_the_calib_rung(token):
+    """Positive control for the refusal above — the parse is strict, not blanket-rejecting."""
+    assert R.assign_rung(calib=token, fold_random="train") == "calib"
+
+
+@pytest.mark.parametrize("bad", ["yes", "no", "maybe", "0.5", [0], (0,), 0.5, -1, 2])
+def test_a_non_boolean_calib_flag_raises_rather_than_being_coerced(bad):
+    """Anything outside the boolean vocabulary is an error, never a silent ``True``.
+
+    ``0.5``, ``-1``, ``2``, ``[0]`` and ``(0,)`` are all truthy-or-falsy under bare
+    ``bool()`` and none of them is a calibration flag; a column carrying them is a schema
+    fault, and a fault must not resolve to a rung.
+    """
+    with pytest.raises(ValueError, match="neither missing nor boolean"):
+        R.assign_rung(calib=bad, fold_random="train")
+    assert R.assign_rung(calib=True, fold_random="train") == "calib"  # positive control
+
+
+def test_a_string_typed_calib_column_does_not_inflate_the_fit():
+    """End to end: three genuine calib rows in a stringified column stay three.
+
+    Before the strict parse this returned ``['calib'] * 6`` and `temperature_scale` reported
+    `n_fitted=6` — three *training* rows fitted as if they were the carve, with the census
+    agreeing. The identity assertion is the fitted `T`: it must equal the `T` from the three
+    intended rows alone, and differ from the six-row one.
+    """
+    calib = ["True", "True", "True", "False", "False", "False"]
+    fold = ["train"] * 6
+    z = np.array([1.0, 1.0, -1.0, 3.0, -3.0, 0.2])
+    y = np.array([1, 0, 0, 1, 0, 1])
+
+    labels = R.rung_labels(calib=calib, fold_random=fold)
+    assert labels == ["calib", "calib", "calib", "train", "train", "train"]
+
+    got = R.temperature_scale(z, y, rung=labels)
+    assert got.n_fitted == 3
+    intended = R.temperature_scale(z[:3], y[:3], rung=["calib"] * 3)
+    assert got.temperature == intended.temperature
+    inflated = R.temperature_scale(z, y, rung=["calib"] * 6)
+    assert got.temperature != inflated.temperature
 
 
 @pytest.mark.parametrize("missing", [None, float("nan"), "", "   "])
@@ -641,6 +768,37 @@ def test_with_both_priors_the_full_pinned_stack_is_recorded_as_applied():
         R.log_odds_shift(source_prior=0.75, target_prior=R.prior_from_odds_ratio(1e4))
     )
     assert payload["target_prior_in_prd_band"] is True
+
+
+def test_the_payload_echoes_its_inputs_unswapped_and_carries_its_own_provenance():
+    """The recorded priors and ``T`` must be the ones actually used, in the right slots.
+
+    Without this, swapping the two prior assignments produces an internally contradictory
+    artifact — ``source_prior`` holding the deployment prior, ``target_prior`` the calib
+    prevalence, and ``target_prior_in_prd_band`` computed from the *real* argument so it
+    still reads ``True`` — and the whole suite stays green. The provenance scalars are
+    asserted for the same reason: a constant nothing reads is a constant nothing checks.
+    """
+    z = np.array([-2.0, 0.0, 1.5])
+    p_s, p_t = 0.75, R.prior_from_odds_ratio(1e4)
+    payload = R.calibrated_posterior(z, temperature=1.1, source_prior=p_s, target_prior=p_t)
+
+    assert payload["source_prior"] == p_s
+    assert payload["target_prior"] == p_t
+    assert payload["source_prior"] != payload["target_prior"]  # asymmetric on purpose
+    assert payload["temperature"] == 1.1
+    assert payload["n_rows"] == z.shape[0] == 3
+    # The shift is derived from the recorded pair, so a swap could not stay self-consistent.
+    assert payload["log_odds_shift"] == pytest.approx(
+        R.log_odds_shift(
+            source_prior=payload["source_prior"], target_prior=payload["target_prior"]
+        ),
+        rel=0,
+        abs=1e-15,
+    )
+    assert payload["step"] == "P3-07"
+    assert payload["generated_by"] == "src/tbox_finder/calib/recalibrate.py"
+    assert "D11" in payload["adr"]
 
 
 @pytest.mark.parametrize("kwargs", [{"source_prior": 0.5}, {"target_prior": 0.001}])

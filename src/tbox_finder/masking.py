@@ -288,6 +288,53 @@ def row_text(value: Any) -> str:
     return "" if is_missing(value) else str(value)
 
 
+#: Spellings a *stringified* null arrives as. :func:`is_missing` catches the real sentinels
+#: (``None`` / NaN / pandas-NA); these are what is left after something upstream has already
+#: rendered one into text. Lives here, beside the missing test it completes, so the several
+#: modules that need it share **one** null vocabulary — ``stage2.heads.NULL_TOKENS`` is a
+#: re-export of this name, not a second copy.
+NULL_TOKENS: frozenset[str] = frozenset({"none", "nan", "na", "<na>", "null", "n/a"})
+
+
+def bool_or_none(value: Any, *, field: str = "value") -> bool | None:
+    """A tri-state boolean read of a parquet cell, with pandas' several spellings of missing.
+
+    Returns ``True``/``False`` for an unambiguous boolean, ``None`` when the cell carries no
+    value at all (a real sentinel, an empty cell, or a :data:`NULL_TOKENS` string), and
+    **raises** on anything else — so an unrecognised spelling routes to a caller's fail-closed
+    branch or to an error, never to a silent ``True``.
+
+    ``field`` names the column in the failure message, because a schema migration putting
+    ``"yes"`` in one column should not raise an error blaming a different one.
+
+    ``is_missing`` rather than ``value or None``: under the ``ml-rna`` env's pandas the string
+    form of a missing cell is ``"nan"``, which is **truthy**, and that exact difference once
+    deleted 60 % of a training mix while every clause stayed green
+    ([[pandas-3-nan-truthy-in-training-env]]). The bare ``bool(value)`` this replaces has the
+    same shape one step further out: ``bool("False")`` and ``bool("0")`` are both ``True``.
+
+    Promoted here from ``stage2.train`` (P3-07) so the fold readers and the calibration-rung
+    reader share one parse: a second copy means fixing one and shipping the bug in the other
+    ([[promote-dont-duplicate-is-a-correctness-rule]]). ``stage2.train._bool_or_none``
+    delegates to this function.
+    """
+    if is_missing(value):
+        return None
+    if isinstance(value, bool):
+        return value
+    # numpy.bool_ / 0 / 1 / "True" all arrive here from parquet round-trips.
+    text = row_text(value).strip().lower()
+    if text in {"true", "1"}:
+        return True
+    if text in {"false", "0"}:
+        return False
+    if not text or text in NULL_TOKENS:
+        # An empty cell, or one whose STRING form is a null token, carries no assignment — so
+        # it is missing, and routes to the caller's fail-closed refusal rather than raising.
+        return None
+    raise ValueError(f"{field}={value!r} is neither missing nor boolean")
+
+
 # --------------------------------------------------------------------------- #
 # The ADR-0006 D11 / ADR-0005 D14 mining spare-rule (pure predicate)
 # --------------------------------------------------------------------------- #

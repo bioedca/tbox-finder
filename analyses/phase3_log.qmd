@@ -1715,3 +1715,76 @@ by the overflowing one, single-class guard removed, priors of exactly 0/1 admitt
 posterior, both of which this implements verbatim, and the one value that would have needed a
 pin is the one the module refuses to supply. **Commit.** Feature branch
 `p3-07-calibration-stack`; squash SHA derived at the phase-exit gate.
+
+## Step P3-07 (review r1) — 2026-08-03: two fail-open guards, and a boolean parse that was already written
+
+**Two review sources, deduplicated to six fixes.** CodeRabbit r1 on `88879fd` returned 1
+actionable + 1 nitpick; a 44-agent adversarial pass over the same diff returned 20 findings, 10
+surviving two independent refuters. The overlap is the interesting part: **both** independently
+found the same defect at the `int64` cast, from opposite directions.
+
+**Fix 1 — the "labels must be binary 0/1" guard was vacuous.** It ran *after*
+`y.astype(np.int64)`, which truncates toward zero, so the check saw only what the cast had
+already produced. Demonstrated, not argued: `temperature_scale(z=[1,1,−1], y=[1.0, 0.4, 0.6])`
+**succeeds** and returns `T = 1.4427030259199125`, bit-identical to the fit for `[1,0,0]` — a
+target the caller wrote as `0.6` was silently scored a negative. A `NaN` label cast to the
+int64 sentinel and surfaced as `range [-9223372036854775808, 1]`, a message pointing at the
+wrong problem. The domain check now happens in the original dtype: booleans and integers pass,
+floats must be finite and integral, any other dtype is refused by name.
+
+**Fix 2 — `bool(calib)` closed the NaN hole and left the string hole open.** The guard existed
+*because* pandas 3 delivers a null as `NaN` and `bool(nan) is True`; one step further out,
+`bool("False")` and `bool("0")` are also `True`. A string-typed `calib` column would therefore
+promote its explicit **negatives** into the set `T` is fitted on, with every count agreeing.
+Reproduced end to end: `rung_labels(calib=["True","False",…], …)` returned `["calib"]*6`.
+
+**And the fix for it was already in the repo, which is the actual lesson.**
+`stage2/train.py::_bool_or_none` is exactly this parse — tri-state, `masking.is_missing`-based,
+`{"true","1"}/{"false","0"}`, raising on anything else — written for the fold columns and
+documented as also reading `calib`. It could not be imported here (that module is
+torch-adjacent; this one is deliberately numpy-only), so the parse was **promoted down** to
+`masking.py`, beside the `is_missing`/`row_text` it completes, with `NULL_TOKENS` moving with
+it. `stage2.heads.NULL_TOKENS` is now a re-export and `stage2.train._bool_or_none` a
+delegation: one vocabulary, one parse, three call sites. Writing a fourth copy here would have
+been the cheaper diff and the wrong one
+([[promote-dont-duplicate-is-a-correctness-rule]]).
+
+**Fixes 3–6, all test-side, all found by sabotage rather than by reading.** (3) The
+single-class guard is a **disjunct**, `n_pos == 0 or n_pos == n_fitted`, and only the
+all-positive half was tested — with the other half deleted, an all-negative calib carve (the
+realistic P3-02 join failure) returns a **cleanly converged, fully certified** `T`. Both halves
+are now parametrized. (4) `test_shape_and_domain_violations_raise` used a bare
+`pytest.raises(ValueError)`, and both of this module's own guards could be deleted with the
+test still green, because the delegated fitter raises its own differently-worded error further
+in; it now matches on this module's text. (5) The empty-calib refusal asserted only its first
+clause, leaving the census and the `GRADED_RUNGS` count — the only place that constant is read
+— unchecked; all three are asserted. (6) The payload's `source_prior`/`target_prior` were
+written and never read, so **swapping the two assignments left the suite green** while emitting
+an artifact that recorded the deployment prior as the calib prevalence.
+
+**One finding fixed by deletion.** The docstring cited the known-prior closed form as "Elkan
+2001, Theorem 1"; a reviewer put it at Theorem 2 (Theorem 1 being the cost-threshold result).
+The numbering could not be verified against the paper from here, so the theorem number is
+**gone** rather than guessed — a citation pointing at the wrong theorem is worse than one
+pointing at the paper, and the DOI'd Saerens reference is the traceable half anyway.
+
+**Not fixed, with reasons.** Ten findings were refuted by their own verifiers and are recorded
+rather than acted on — among them "the calib certificate is self-referential and vacuous"
+(refuted: the selection is by identity against `CALIB_RUNG`, and the inversion test asserts the
+swapped fit equals the test arm's own `T`), "`RUNG_VOCABULARY` is not closed because `.strip()`
+admits padded tokens" (`" calib "` is a legitimate parquet spelling of `calib`; `"  "` is
+refused), and a naming divergence between this module's flat `stack_order` and
+`temperature.py`'s nested one (the two artifacts have no coupling path and different
+validators).
+
+**Validation.** `test_recalibrate` **138 pass** (was 108); `test_temperature` 81,
+`test_masking` + `test_stage2_heads` + `test_stage2_train_smoke` 411 pass together — the
+promotion is behaviour-preserving on both sides. Full `unit+golden+ml` tier: the worktree's 14
+failures are a **strict subset** of the 31 that untouched `main` produces in this local runner
+(py3.11 / numpy 2.4.2, the only local env with pytest), i.e. zero regressions; CI runs the
+pinned stack. ruff 0.15.15 + black 25.11.0 clean. **24 source sabotages, each RED against its
+NAMED test, each restored byte-identically** (up from 15; the nine new ones cover the strict
+boolean parse, all three label-domain branches, both halves of the single-class disjunct,
+`GRADED_RUNGS`, the payload prior swap, the payload provenance, and the 1-D logits guard).
+
+**Commit.** Feature branch `p3-07-calibration-stack`; squash SHA derived at the phase-exit gate.

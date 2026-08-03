@@ -275,21 +275,25 @@ def assign_rung(*, calib: Any, fold_random: Any) -> str:
     in one place. Fail-closed in three directions, each of which is a real failure mode rather
     than a hypothetical:
 
-    * a **missing** ``calib`` or ``fold_random`` raises — tested with
-      :func:`tbox_finder.masking.is_missing`, because under pandas 3 a null string cell
-      arrives as ``NaN``, which is *truthy*, so ``bool(value)`` would read a missing calib
-      flag as ``True`` and a missing fold as the string ``"nan"``;
+    * a **missing** ``calib`` or ``fold_random`` raises, and a ``calib`` cell that is neither
+      missing nor unambiguously boolean raises too — both read through
+      :func:`tbox_finder.masking.bool_or_none`, the same tri-state parse ``stage2.train``
+      uses for the fold columns. ``bool(value)`` is wrong twice over here: under pandas 3 a
+      null cell arrives as ``NaN``, which is *truthy*, so a row with **no** flag would be
+      promoted into the fit; and one step further out ``bool("False")`` and ``bool("0")`` are
+      *also* ``True``, so a string-typed column would promote its explicit negatives. Both
+      failures are silent and both look exactly like a working filter;
     * a ``calib`` row outside the ``train`` rung raises — that is the P3-02 invariant
       (``splits._assert_calib_disjoint``), re-derived here at the point where violating it
       would corrupt a gate rather than trusted from upstream;
     * an unrecognised ``fold_random`` raises, instead of being bucketed as "other".
     """
-    if masking.is_missing(calib):
+    in_calib = masking.bool_or_none(calib, field="calib")
+    if in_calib is None:
         raise ValueError("calib is missing — a row with no calibration flag has no rung")
     fold = masking.row_text(fold_random).strip()
     if not fold:
         raise ValueError("fold_random is missing — a row with no scheme-A fold has no rung")
-    in_calib = bool(calib)
     if in_calib:
         if fold != "train":
             raise ValueError(
@@ -368,6 +372,25 @@ def temperature_scale(
         raise ValueError(f"logits carries {z.shape[0]} rows but labels carries {y.shape[0]}")
     if len(rung) != z.shape[0]:
         raise ValueError(f"logits carries {z.shape[0]} rows but rung carries {len(rung)}")
+    # Domain-check in the ORIGINAL dtype, before the cast. `astype(np.int64)` truncates
+    # toward zero, so a range test placed after it is vacuous in both directions: a label of
+    # 0.6 becomes 0 and a label of 1.7 becomes 1, and the fit then runs — successfully, and
+    # bit-identically to the truncated targets — on values the caller never wrote. A NaN
+    # label casts to the int64 sentinel and surfaces as a misleading
+    # "range [-9223372036854775808, 1]" rather than as the missing value it is.
+    if y.size:
+        if np.issubdtype(y.dtype, np.bool_) or np.issubdtype(y.dtype, np.integer):
+            pass
+        elif np.issubdtype(y.dtype, np.floating):
+            if not np.isfinite(y).all():
+                raise ValueError("labels carries a non-finite value")
+            if not np.array_equal(y, np.rint(y)):
+                raise ValueError(
+                    "labels must be integral 0/1 — a fractional target would truncate "
+                    "silently and move the fit"
+                )
+        else:
+            raise ValueError(f"labels must be a boolean or numeric 0/1 array, got dtype {y.dtype}")
     y = y.astype(np.int64, copy=False)
     if y.size and (int(y.min()) < 0 or int(y.max()) > 1):
         raise ValueError(
@@ -432,10 +455,12 @@ def prior_shift(logits: Any, *, source_prior: float, target_prior: float) -> np.
 
     The Saerens/Elkan correction in the log-odds form ADR-0005 D11 names [Saerens, Latinne &
     Decaestecker, *Neural Computation* 14(1):21–41, DOI:10.1162/089976602753284446 (accessed
-    2026-08-03); Elkan, *The foundations of cost-sensitive learning*, IJCAI 2001, Theorem 1]:
-    under a pure prior shift the class-conditional densities are unchanged, so the likelihood
-    ratio is unchanged and the whole correction is the additive constant
-    ``logit(π_t) − logit(π_s)``::
+    2026-08-03); Elkan, *The foundations of cost-sensitive learning*, IJCAI 2001 — cited
+    without a theorem number, because the base-rate result's numbering could not be verified
+    against the paper here and a pointer to the wrong theorem is worse than none; the DOI'd
+    Saerens reference is the traceable one]: under a pure prior shift the class-conditional
+    densities are unchanged, so the likelihood ratio is unchanged and the whole correction is
+    the additive constant ``logit(π_t) − logit(π_s)``::
 
         z' = z + log(π_t/(1−π_t)) − log(π_s/(1−π_s))
 
@@ -496,6 +521,12 @@ def calibrated_posterior(
     named = posterior_from_logits(tempered)
 
     payload: dict[str, Any] = {
+        # Provenance travels *in* the payload, so a report serialised from it says which step
+        # and which pinned decision produced the numbers beside it rather than leaving that to
+        # whoever writes the report ([[pinned-constant-that-nothing-reads]]).
+        "step": STEP,
+        "generated_by": GENERATED_BY,
+        "adr": ADR,
         "stack_order": list(STACK_ORDER),
         "temperature": float(temperature),
         NAMED_POSTERIOR_KEY: named,
