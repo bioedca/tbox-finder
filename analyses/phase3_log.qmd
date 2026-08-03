@@ -1040,4 +1040,31 @@ against its NAMED test, each restored byte-identically. The CPU end-to-end run n
 16/16 steps over decoy-containing batches with a finite loss and all six terms contributing,
 failing its own gate on **only** `full_population`.
 
+**Root cause of (B), traced.** Node `two` runs kernel `6.8.0-110-generic` (booted
+2026-07-14) with a **resident** nvidia module of `595.71.05`, while userspace is
+`libnvidia-ml.so.595.84`. `/var/log/dpkg.log` dates it exactly: the 595 series was installed
+2026-07-14 14:52 (47 min before that boot), then upgraded **595.71.05 → 595.84** on
+**2026-07-31 06:26**. DKMS built 595.84 for kernels `-134`/`-136` only — not for the running
+`-110`, whose `nvidia.ko.zst` no longer exists — and removed the old build, while the already
+loaded module stayed resident. So the node has been GPU-dead since 2026-07-31 06:27, three
+days before this run. **A reboot fixes it** (`GRUB_DEFAULT=0` selects `-136`, which has the
+matching 595.84 module); a module reload cannot, because `-110` has nothing to reload. Written
+up for the admin, along with the two deeper issues: after the reboot `two` will be on 595.84
+while `one` is on 590.48.01 — a heterogeneous driver estate under a scheduler that picks
+either — and three driver series (550, 590-open, 595-open) are installed at once despite a
+`nvidia-driver-pinning-590` package saying 590 is intended.
+
+**⚠ This does NOT explain (C), and the tidy story is the wrong one.** The 595.84 upgrade
+landed on 2026-07-31, not during job 1036, so "a driver upgrade rolled across the cluster
+mid-run" is refuted by its own timestamp rather than merely unsupported. Point 0's SIGSEGV on
+node `one` stays unattributed.
+
+**Placement.** `--exclude=two` is added, **dated and scoped** to this fault, with a test that
+refuses it unless the sbatch also carries its removal condition — so the carve-out cannot
+quietly outlive the reboot and silently halve the cluster. This is `--exclude`, not the
+`--nodelist` CLAUDE.md §13 forbids: §13 bans pinning *to* a preferred node because `one` is
+often down, whereas this excludes a node *measured* broken and leaves `one` an ordinary
+scheduler choice. It carries §13's risk in mirror image (if `one` also goes down the array
+starves), which is why it is dated and removed on the reboot. User-approved 2026-08-03.
+
 **Commit.** Feature branch `p3-06-stage2-lora`; squash SHA derived at the phase-exit gate.

@@ -95,6 +95,21 @@
 # risks burning the whole array on the bad node before a single point completes.
 # Serialised, each task's placement is an independent draw and the health check above
 # turns a bad draw into a 5-second exit. Restore 0-5 once both nodes are healthy.
+#SBATCH --exclude=two
+# ⚠ TEMPORARY, DATED 2026-08-03 — REMOVE once node `two` has been rebooted.
+# `two` boots kernel 6.8.0-110-generic (up since 2026-07-14) while the 2026-07-31 upgrade
+# to nvidia 595.84 built its DKMS module ONLY for kernels 6.8.0-134/-136 and removed the
+# 595.71.05 build. So userspace NVML 595.84 talks to a resident 595.71.05 kernel module and
+# every CUDA call fails: "Driver/library version mismatch". Job 1036 lost three points to it
+# inside init_process_group. A reboot fixes it (GRUB_DEFAULT=0 will select -136, which has
+# the matching 595.84 module).
+#
+# This is `--exclude`, NOT the `--nodelist` CLAUDE.md §13 forbids, and the distinction is
+# the point: §13 bans pinning TO a preferred node because `one` is often down. This excludes
+# a node MEASURED to be broken and leaves `one` as an ordinary scheduler choice. It does
+# carry §13's risk in mirror image — if `one` also goes down this array starves instead of
+# queueing — which is why it is dated, scoped to this one fault, and removed on the reboot.
+# User-approved 2026-08-03 after the job-1036 post-mortem.
 #SBATCH --output=reports/p3/sweep/slurm_%A_%a.out
 #SBATCH --error=reports/p3/sweep/slurm_%A_%a.err
 # No --account / --qos (accounting disabled), no --nodelist (never pin; `one` is often down).

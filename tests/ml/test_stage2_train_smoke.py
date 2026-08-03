@@ -605,6 +605,12 @@ def test_the_sbatch_requests_a_whole_gpu_node_and_pins_nothing() -> None:
     assert directives
     for forbidden in ("--nodelist", "--account", "--qos", "--partition=compute"):
         assert not any(forbidden in ln for ln in directives), forbidden
+    # `--exclude=two` is a DATED, temporary carve-out for a measured node fault (job 1036).
+    # If it is present it must carry its removal condition, so it cannot quietly outlive the
+    # reboot that fixes the node and silently halve the cluster.
+    if any("--exclude" in ln for ln in directives):
+        assert "REMOVE once node `two` has been rebooted" in text
+        assert "Driver/library version mismatch" in text
 
 
 def test_the_sbatch_activates_the_rna_env_not_the_dna_one() -> None:
