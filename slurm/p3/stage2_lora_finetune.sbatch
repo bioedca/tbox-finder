@@ -207,7 +207,18 @@ fi
 # below is untracked (reports/p3/sweep/ and the checkpoint dir are both DVC/scratch, not git),
 # so no deletion here can dirty a tracked path — which is the condition that turns a run's own
 # provenance clause against it.
-rm -f "$OK" "$REPORT"
+rm -f "$OK"   # untracked marker only — see the fingerprint below
+
+# ── Freshness fingerprint, taken INSTEAD of deleting the report ──────────────
+# "$REPORT" is now a GIT-TRACKED path (the P3-06 RESULT commit landed all six sweep
+# reports), so `rm`-ing it would dirty the tree outside `_DATA_STAGING_PREFIXES` — the
+# P2-09/P2-10d'-c ruling, and what tests/unit/test_sbatch_rm_targets.py enforces. Note the
+# test's verdict CHANGED when those reports were committed: the same `rm` was safe while
+# they were untracked. So freshness is proved by fingerprint, not by absence.
+#
+# Absent file -> empty string, which no md5 can equal, so "was missing" and "was replaced"
+# both read as fresh and only "unchanged bytes" reads as stale.
+REPORT_BEFORE="$(md5sum "$REPORT" 2>/dev/null | awk '{print $1}' || true)"
 rm -rf "$CKPT_DIR"
 mkdir -p "$CKPT_DIR"
 
@@ -320,6 +331,22 @@ if [ "$rc" -ne 0 ] || [ ! -s "$REPORT" ]; then
   [ "$rc" -ne 0 ] || rc=1
   exit "$rc"
 fi
+
+# The report is no longer cleared before the run, so "a report exists" no longer implies
+# "THIS run wrote it" — a stale committed one would satisfy `[ -s ]`. Assert it CHANGED.
+# Both failure directions are explicit: an UNCOMPUTABLE fingerprint must not pass by being
+# unequal to the old one, and an UNCHANGED one must not pass at all.
+REPORT_AFTER="$(md5sum "$REPORT" 2>/dev/null | awk '{print $1}' || true)"
+if [ -z "$REPORT_AFTER" ]; then
+  echo "STAGE2_POINT_FAIL: could not fingerprint $REPORT after the run (missing or unreadable)." >&2
+  exit 1
+fi
+if [ "$REPORT_BEFORE" = "$REPORT_AFTER" ]; then
+  echo "STAGE2_POINT_FAIL: $REPORT is byte-identical to the one that was there before this run" >&2
+  echo "  (md5 $REPORT_AFTER) — this run did not write it, so it describes some OTHER run." >&2
+  exit 1
+fi
+
 if [ ! -d "$SCRATCH_CKPT/lora_adapter" ] || [ ! -s "$SCRATCH_CKPT/stage2_heads.pt" ]; then
   echo "STAGE2_POINT_FAIL $KEY: report passed its gate but no checkpoint was written at $SCRATCH_CKPT." >&2
   exit 1

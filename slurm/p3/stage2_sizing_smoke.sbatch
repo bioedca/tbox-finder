@@ -33,8 +33,11 @@
 # allocator state set the next point's peak).
 #
 # WHERE:   cluster `gpu` partition, ONE RTX A4000 (sm_86). env tbox-ml-rna (ADR-0002 A4).
-#          --exclude=two while that node's driver stack is broken (see the production sbatch's
-#          header; NVML 595.84 vs a resident 595.71.05 module, needs a reboot).
+#          No node carve-out: `two` was rebooted 2026-08-03 into kernel 6.8.0-134-generic with
+#          a resident nvidia 595.84 matching userspace, verified. ⚠ The nodes now run DIFFERENT
+#          drivers (`one` 590.48.01, `two` 595.84), so a re-measurement may land on either —
+#          the report's `device` block records which, and a sizing number should be read
+#          against the driver that produced it rather than assumed portable.
 # INPUT:   data/processed/stage2_dataset.parquet, staged by rsync and verified below.
 # SUBMIT:  ssh two 'bash -lc "cd ~/tbox-finder && sbatch slurm/p3/stage2_sizing_smoke.sbatch"'
 # PREFLIGHT: ssh two 'bash -lc "cd ~/tbox-finder && sbatch --test-only slurm/p3/stage2_sizing_smoke.sbatch"'
@@ -51,12 +54,6 @@
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=32G
 #SBATCH --time=00:45:00
-#SBATCH --exclude=two
-# ⚠ TEMPORARY, DATED 2026-08-03 — REMOVE once node `two` has been rebooted.
-# `two` runs kernel 6.8.0-110-generic with a resident nvidia 595.71.05 module against
-# userspace 595.84: "Driver/library version mismatch". Every CUDA call there fails. This is
-# `--exclude`, not the `--nodelist` CLAUDE.md §13 forbids — it excludes a node MEASURED
-# broken rather than pinning to a preferred one. User-approved 2026-08-03.
 #SBATCH --output=reports/p3/stage2_sizing_%j.out
 #SBATCH --error=reports/p3/stage2_sizing_%j.err
 # No --account / --qos (accounting disabled), no --nodelist.
@@ -99,7 +96,18 @@ assert_dvc_artifact data/processed/stage2_dataset.parquet \
                     data/processed/stage2_dataset.parquet.dvc
 
 # Untracked outputs only — nothing here can dirty a git-tracked path.
-rm -f "$DONE" "$REPORT"
+rm -f "$DONE"   # untracked marker only — see the fingerprint below
+
+# ── Freshness fingerprint, taken INSTEAD of deleting the report ──────────────
+# "$REPORT" is now a GIT-TRACKED path (the P3-06 RESULT commit landed all six sweep
+# reports), so `rm`-ing it would dirty the tree outside `_DATA_STAGING_PREFIXES` — the
+# P2-09/P2-10d'-c ruling, and what tests/unit/test_sbatch_rm_targets.py enforces. Note the
+# test's verdict CHANGED when those reports were committed: the same `rm` was safe while
+# they were untracked. So freshness is proved by fingerprint, not by absence.
+#
+# Absent file -> empty string, which no md5 can equal, so "was missing" and "was replaced"
+# both read as fresh and only "unchanged bytes" reads as stale.
+REPORT_BEFORE="$(md5sum "$REPORT" 2>/dev/null | awk '{print $1}' || true)"
 
 CONDA_SH=/exports/people/mondragonlab/ecc1695/miniconda3/etc/profile.d/conda.sh
 source "$CONDA_SH"
@@ -174,6 +182,22 @@ if [ "$rc" -ne 0 ] || [ ! -s "$REPORT" ]; then
   echo "SIZING_FAIL rc=$rc (report not written, or it failed its own measurement gate)" >&2
   [ "$rc" -ne 0 ] || rc=1
   exit "$rc"
+fi
+
+
+# The report is no longer cleared before the run, so "a report exists" no longer implies
+# "THIS run wrote it" — a stale committed one would satisfy `[ -s ]`. Assert it CHANGED.
+# Both failure directions are explicit: an UNCOMPUTABLE fingerprint must not pass by being
+# unequal to the old one, and an UNCHANGED one must not pass at all.
+REPORT_AFTER="$(md5sum "$REPORT" 2>/dev/null | awk '{print $1}' || true)"
+if [ -z "$REPORT_AFTER" ]; then
+  echo "SIZING_FAIL: could not fingerprint $REPORT after the run (missing or unreadable)." >&2
+  exit 1
+fi
+if [ "$REPORT_BEFORE" = "$REPORT_AFTER" ]; then
+  echo "SIZING_FAIL: $REPORT is byte-identical to the one that was there before this run" >&2
+  echo "  (md5 $REPORT_AFTER) — this run did not write it, so it describes some OTHER run." >&2
+  exit 1
 fi
 
 touch "$DONE"
