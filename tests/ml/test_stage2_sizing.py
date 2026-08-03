@@ -74,6 +74,9 @@ def _measurements(**over: Any) -> list[dict[str, Any]]:
     base = [
         {
             "batch_size": b,
+            # A fitting point must have measured the batch it claims — otherwise "batch 8
+            # fits" can mean "3 rows fit", the request standing in for the measurement.
+            "measured_batch_size": b,
             "regime": r,
             "oom": False,
             "n_steps": 6,
@@ -329,3 +332,35 @@ def test_the_pinned_rinalmo_still_does_not_implement_gradient_checkpointing() ->
         "gradient_checkpointing would finally save memory and admit a larger batch — "
         "re-run slurm/p3/stage2_sizing_smoke.sbatch and re-size conf/train/stage2.yaml."
     )
+
+
+def test_a_point_that_measured_fewer_rows_than_it_requested_is_refused() -> None:
+    """`batch 8 fits` must not be sayable when only 3 rows were put through the step.
+
+    `measure_batch` truncates the batch to `len(ds)`, so a short row pool silently shrinks
+    the thing being measured while the record still names the requested size — the same
+    request-standing-in-for-measurement defect this whole harness exists to correct.
+    """
+    payload = {
+        "measurements": [dict(m, measured_batch_size=3) for m in _measurements()],
+        "population": {"n_rows": 200},
+        "device": {"is_cuda": True, "name": "A4000", "total_memory_gib": 15.6},
+        "checkpointing": {"on_peak_gib": 3.0, "off_peak_gib": 9.0},
+        "config": {},
+    }
+    assert S.derive_clauses(S.build_report(**payload))["measured_the_requested_batch"] is False
+    # Positive control: the honest fixture passes.
+    assert S.derive_clauses(_report())["measured_the_requested_batch"] is True
+
+
+def test_a_stale_recommendation_is_caught_by_the_validator() -> None:
+    """The one field a reader acts on — it chose batch_size=4 for the production sweep.
+
+    Nothing re-derived it, so a hand-edited or older-shape report could ship a recommendation
+    that does not follow from its own measurements, past a green gate.
+    """
+    report = _report()
+    assert S.validate_report(report) == []
+    report["recommendation"] = {"batch_size": 8, "basis": "fits with headroom"}
+    problems = S.validate_report(report)
+    assert any("recommendation" in p for p in problems), problems

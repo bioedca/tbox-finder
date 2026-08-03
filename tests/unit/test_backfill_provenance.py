@@ -75,3 +75,19 @@ def test_the_adapter_directory_is_never_an_output() -> None:
         outputs = backfill.checkpoint_output_files(ckpt)
         assert str(ckpt / "lora_adapter") not in outputs
         assert all(Path(o).is_file() for o in outputs)
+
+
+def test_the_backfill_excludes_its_own_sidecar_so_write_is_idempotent() -> None:
+    """A second --write would otherwise enumerate the provenance.json the first one wrote.
+
+    The record would then declare itself as one of its own outputs, and that entry's hash can
+    never match after the file is written — a self-referential provenance record.
+    """
+    backfill = _load_script()
+    with tempfile.TemporaryDirectory() as root:
+        ckpt = _checkpoint(Path(root))
+        before = backfill.checkpoint_output_files(ckpt)
+        (ckpt / "provenance.json").write_text("{}")
+        after = backfill.checkpoint_output_files(ckpt)
+        assert after == before, "the sidecar leaked into its own outputs list"
+        assert not any(Path(o).name == "provenance.json" for o in after)

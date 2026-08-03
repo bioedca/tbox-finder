@@ -1397,3 +1397,59 @@ into the schedule correction rather than taken verbatim.
 `bash -n` clean. **23 sabotages across the step**, each RED against its NAMED test.
 
 **Commit.** Feature branch `p3-06-stage2-lora`; squash SHA derived at the phase-exit gate.
+
+## Step P3-06 (review r2) — 2026-08-03: the reported val numbers described discarded weights
+
+**r2 = 12 findings, and it was sharper than r1** because it reviewed the r1 fixes. Every one
+verified by execution before being accepted or refused.
+
+**⚠ THE FINDING THAT CORRECTS A NUMBER ALREADY REPORTED.** The `checkpoint` block advertised a
+`best_val_total` the saved weights do not achieve. There is **no best-checkpoint restore** in
+this trainer — `saved_from_epoch` is 9 in every arm — so `best_val_*` described epochs whose
+weights were thrown away:
+
+| point | saved | best | previously reported | what the SAVED weights score |
+|---|---:|---:|---:|---:|
+| aux0.0_lr1e-4 | 9 | 6 | 0.000380 | **0.008841** (23×) |
+| aux0.0_lr3e-4 | 9 | 8 | 0.000599 | **0.002500** (4×) |
+| aux0.5_lr1e-4 | 9 | 8 | 0.023589 | 0.024180 |
+| aux1.0_lr1e-4 | 9 | 9 | 0.039954 | 0.039954 |
+
+The dev-log's own RESULT table quoted the best-epoch column. **The corrected quantity is
+`saved_val_total`**, now written into the checkpoint block beside a `note` stating plainly that
+the saved weights are the final epoch's and that arms must be compared on it.
+
+**⚠ AND r1 HAD ALREADY POINTED AT THIS.** r1 raised the `conf/train/stage2.yaml` comment calling
+the val rung a "best-checkpoint signal" — a *minor*, filed as wording. It was folded into the
+schedule correction rather than followed to the artifact it described, and the misreported
+numbers survived a whole review round because a correct finding was classified as cosmetic.
+The lesson is not "read minors more carefully"; it is that a comment claiming behaviour the
+code does not have is a **defect report about the code**, and the cheap fix (edit the comment)
+is the wrong one whenever the comment describes what a reader would want to be true.
+
+**The other majors, each sabotage-bitten.** `steps_ran` graded only the micro-batch domain, so
+the scheduler-domain regression it was written for could return unseen — it now compares
+measured against expected optimiser steps *and* against the scheduler's own domain, with a
+test case that only the first comparison can catch so the two cannot cover for each other.
+`gradient_checkpointing_verified` is renamed **`gradient_checkpointing_flag_consistent`**,
+because counting an attribute on 36 modules while `_gradient_checkpointing_func` is never
+called is not verification, and the name asserted more than the evidence. The sizing
+`recommendation` — the single field a reader acts on, the one that chose `batch_size=4` — is
+now **re-derived by the validator**, not merely written. The sbatch's checkpoint clear moved
+again: past the health check was not enough, since an OOM between the two still ended a point
+with nothing and the previous arm already deleted; it now sits immediately before the copy that
+supersedes it. The backfill excludes its own sidecar from `outputs`, so `--write` is idempotent
+rather than self-referential. `num_workers` is **deleted** — no `DataLoader` exists, so every
+report claimed a setting the run never applied.
+
+**⚠ THREE MORE OF MY OWN TESTS WERE WEAKER THAN THEY LOOKED, and sabotage found all three.**
+The `steps_ran` test passed with either new comparison removed, because the other covered for
+it. The sbatch-ordering test asserted only "after the health check", which is not the property
+r2 actually established. And the backfill sabotage missed on a stale anchor. Across this step
+that is now **five** tests that looked adequate and were not — every one caught by mutating the
+source rather than by reading it.
+
+**Validation.** Trainer **110 pass**, sizing **20**, overrides 22, backfill 4; ruff + black
+clean; `bash -n` clean. **28 sabotages across the step**, each RED against its NAMED test.
+
+**Commit.** Feature branch `p3-06-stage2-lora`; squash SHA derived at the phase-exit gate.

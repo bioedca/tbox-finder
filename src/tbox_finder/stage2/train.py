@@ -378,7 +378,6 @@ class Stage2TrainConfig:
     admit_parentless_decoys: bool = True
     max_records: int | None = None
     eval_max_records: int | None = None
-    num_workers: int = 2
 
     # Optimisation
     epochs: int = 10
@@ -440,8 +439,6 @@ class Stage2TrainConfig:
             raise ValueError(f"warmup_ratio must be in [0, 1), got {self.warmup_ratio}")
         if not 0.0 <= float(self.dropout) < 1.0:
             raise ValueError(f"dropout must be in [0, 1), got {self.dropout}")
-        if self.num_workers < 0 or isinstance(self.num_workers, bool):
-            raise ValueError(f"num_workers must be an int >= 0, got {self.num_workers!r}")
         if self.log_every < 1:
             raise ValueError(f"log_every must be >= 1, got {self.log_every}")
         if self.train_rung == self.val_rung:
@@ -578,11 +575,18 @@ def derive_clauses(report: Mapping[str, Any]) -> dict[str, bool]:
     )
 
     # -- optimisation ---------------------------------------------------------------- #
+    # Both domains, because job 1064 failed on the one that was not graded: every recorded
+    # number was self-consistent while the optimiser advanced half the scheduled steps. A
+    # clause that checks only micro-batches cannot see that regression return.
     clauses["steps_ran"] = (
         _pos_int(steps.get("n_steps"))
         and _pos_int(steps.get("n_optimizer_steps"))
         and _pos_int(steps.get("world_size"))
         and steps.get("n_steps") == steps.get("expected_n_steps")
+        and steps.get("n_optimizer_steps") == steps.get("expected_n_optimizer_steps")
+        # The scheduler's domain must equal the steps actually taken, or the LR schedule
+        # stopped short of (or overran) its end — the job-1064 defect, either direction.
+        and steps.get("total_scheduled_optimizer_steps") == steps.get("n_optimizer_steps")
     )
     clauses["losses_finite"] = (
         _finite(losses.get("final_train_total"))
@@ -609,7 +613,12 @@ def derive_clauses(report: Mapping[str, Any]) -> dict[str, bool]:
     )
     # Verified, not requested: a checkpointing flag that no-ops looks exactly like one that
     # works ([[in-process-no-ops-look-like-compliance]]).
-    clauses["gradient_checkpointing_verified"] = (
+    # ⚠ Renamed from `gradient_checkpointing_verified`, which was a lie: the count reads an
+    # ATTRIBUTE, and on this backbone 36 modules carry it while `_gradient_checkpointing_func`
+    # is never called (measured saving ratio 0.9986). "Requested and flagged" is all this can
+    # honestly assert. Effect is measured by the sizing harness's on/off comparison, which is
+    # where a claim about memory belongs; a clause here could only ever count flags.
+    clauses["gradient_checkpointing_flag_consistent"] = (
         _pos_int(wrap.get("n_modules_with_checkpointing"))
         and wrap.get("checkpoint_use_reentrant") is False
         if wrap.get("gradient_checkpointing")
@@ -1360,15 +1369,29 @@ def train_stage2(
     elapsed = time.time() - started
 
     # -- checkpoint (rank 0 only) ------------------------------------------------------ #
+    # ⚠ The saved weights are the FINAL epoch's, not the best epoch's — there is no
+    # best-checkpoint restore in this trainer. Reporting `best_val_*` beside `saved_from_epoch`
+    # without also reporting the saved epoch's own score advertises a number the artifact does
+    # not achieve: on job 1064's aux0.0_lr1e-4 the best was 0.000380 at epoch 6 while the
+    # saved epoch-9 weights score 0.008841, a 23x gap. `best_val_*` is retained because the
+    # training curve is worth keeping, but it is now unambiguously labelled as an observation
+    # during training, and `saved_val_total` is what the checkpoint on disk is worth.
+    saved_epoch = cfg.epochs - 1
+    saved_val = next((m.get("total") for m in val_history if m.get("epoch") == saved_epoch), None)
     checkpoint: dict[str, Any] = {
         "adapter_dir": None,
         "heads_path": None,
         "adapter_bytes": 0,
         "heads_bytes": 0,
         "n_saved_parameters": 0,
-        "best_val_total": best_val,
-        "best_val_epoch": best_epoch,
-        "saved_from_epoch": cfg.epochs - 1,
+        "saved_from_epoch": saved_epoch,
+        "saved_val_total": saved_val,
+        "best_val_total_observed_during_training": best_val,
+        "best_val_epoch_observed_during_training": best_epoch,
+        "note": (
+            "the saved weights are the FINAL epoch's; best_val_* describe an epoch that was "
+            "observed and NOT restored. Compare arms on saved_val_total."
+        ),
     }
     if cfg.save_checkpoint and primary:
         out = Path(cfg.checkpoint_dir)

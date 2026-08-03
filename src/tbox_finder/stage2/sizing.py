@@ -133,6 +133,7 @@ def measure_batch(
     )
     record: dict[str, Any] = {
         "batch_size": batch_size,
+        "measured_batch_size": None,
         "gradient_checkpointing": gradient_checkpointing,
         "oom": False,
         "error": None,
@@ -162,6 +163,9 @@ def measure_batch(
             ignore_index=loss_config.ignore_index,
         )
         record["padded_tokens"] = int(batch["input_ids"].shape[1])
+        # The requested batch is truncated to len(ds); recording only the request would let a
+        # report say "batch 8 fits" when 3 rows were measured.
+        record["measured_batch_size"] = int(batch["input_ids"].shape[0])
         batch = T._to_device(batch, target)
 
         # ⚠ Reset the peak counter per step, or the series is a RUNNING MAXIMUM and monotonic
@@ -248,6 +252,11 @@ def derive_clauses(report: Mapping[str, Any]) -> dict[str, bool]:
         and all(m.get("n_steps", 0) > 0 or m.get("oom") is True for m in meas),
         # Enough steps that AdamW state is allocated and a trend is visible.
         "enough_steps_for_optimizer_state": all(m.get("n_steps", 0) >= 3 for m in with_numbers),
+        # A fitting point must have MEASURED the batch size it reports, or "batch 8 fits" can
+        # mean "3 rows fit" — the request standing in for the measurement once again.
+        "measured_the_requested_batch": all(
+            m.get("measured_batch_size") == m.get("batch_size") for m in with_numbers
+        ),
         # The worst case was actually exercised — sizing on the median is how this failed.
         "worst_case_measured": any(m.get("regime") == "worst_case" for m in meas),
         # Checkpointing effectiveness was measured, not assumed.
@@ -281,6 +290,22 @@ def validate_report(report: Mapping[str, Any]) -> list[str]:
             problems.append(f"gate.clauses[{name!r}] disagrees with re-derivation ({value})")
     if bool(gate.get("overall_pass")) != all(recomputed.values()):
         problems.append("gate.overall_pass disagrees with the re-derived clauses")
+    # ⚠ Re-derive the RECOMMENDATION too, not just the clauses. It is the one field a reader
+    # acts on — it chose batch_size=4 for the production sweep — and nothing checked that it
+    # followed from `measurements`. A report edited by hand, or written by an older shape,
+    # would ship a stale recommendation past a green gate.
+    meas = report.get("measurements") or []
+    fitting = [m for m in meas if not m.get("oom") and m.get("regime") == "worst_case"]
+    expected = _recommend(
+        fitting,
+        max((m["batch_size"] for m in fitting), default=None),
+        report.get("device") or {},
+    )
+    if report.get("recommendation") != expected:
+        problems.append(
+            f"recommendation {report.get('recommendation')!r} does not follow from the "
+            f"measurements; re-derivation gives {expected!r}"
+        )
     return problems
 
 

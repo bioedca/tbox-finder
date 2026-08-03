@@ -44,6 +44,7 @@ from tbox_finder.provenance import write_provenance  # noqa: E402
 #: `train.checkpoint_output_files` on identical input, so the two cannot drift apart.
 STEP = "P3-06"
 ENTRYPOINT = "tbox_finder.stage2.train"
+SIDECAR = "provenance.json"
 
 
 def checkpoint_output_files(checkpoint_dir: str | Path) -> list[str]:
@@ -51,7 +52,10 @@ def checkpoint_output_files(checkpoint_dir: str | Path) -> list[str]:
     root = Path(checkpoint_dir)
     if not root.is_dir():
         raise NotADirectoryError(f"{root} is not a checkpoint directory")
-    files = sorted(str(f) for f in root.rglob("*") if f.is_file())
+    # Exclude the sidecar from its own outputs, or a second --write enumerates the
+    # provenance.json written by the first and the record declares itself as an output of
+    # itself — self-referential, and its hash can never match after the write.
+    files = sorted(str(f) for f in root.rglob("*") if f.is_file() and f.name != SIDECAR)
     if not files:
         raise FileNotFoundError(f"{root} contains no files to record as outputs")
     return files
@@ -59,7 +63,6 @@ def checkpoint_output_files(checkpoint_dir: str | Path) -> list[str]:
 
 SWEEP_DIR = Path("reports/p3/sweep")
 CKPT_ROOT = Path("data/processed/checkpoints/stage2_rinalmo")
-SIDECAR = "provenance.json"
 
 
 def _points() -> list[tuple[str, Path, Path]]:

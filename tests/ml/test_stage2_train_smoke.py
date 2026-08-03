@@ -403,13 +403,19 @@ def _passing_report() -> dict[str, Any]:
             "n_train_val_row_id_overlap": 0,
         },
         steps={
-            "n_steps": 1420,
-            "expected_n_steps": 1420,
-            "n_optimizer_steps": 1420,
-            "batches_per_epoch_per_rank": 142,
+            # Mirrors the shipped shape exactly (train_stage2's `steps` block). A fixture that
+            # drifts from it lets a clause pass here and fail on a real report — which is how
+            # the scheduler-domain regression stayed invisible to the gate.
+            "n_steps": 2830,
+            "expected_n_steps": 2830,
+            "n_optimizer_steps": 1415,
+            "expected_n_optimizer_steps": 1415,
+            "batches_per_epoch_per_rank": 283,
+            "optimizer_steps_per_epoch_per_rank": 142,
+            "gradient_accumulation_steps": 2,
             "world_size": 8,
             "warmup_steps": 85,
-            "total_scheduled_steps": 1420,
+            "total_scheduled_optimizer_steps": 1415,
             "elapsed_seconds": 2100.0,
         },
         wrap={
@@ -450,6 +456,10 @@ def _passing_report() -> dict[str, Any]:
             "adapter_bytes": 51_000_000,
             "heads_bytes": 800_000,
             "n_saved_parameters": 13_040_268,
+            "saved_from_epoch": 9,
+            "saved_val_total": 0.0088,
+            "best_val_total_observed_during_training": 0.00038,
+            "best_val_epoch_observed_during_training": 6,
         },
         device={
             "is_cuda": True,
@@ -511,11 +521,11 @@ def test_the_validator_catches_a_clause_fabricated_true() -> None:
         ),
         (
             lambda r: r["wrap"].__setitem__("n_modules_with_checkpointing", 0),
-            "gradient_checkpointing_verified",
+            "gradient_checkpointing_flag_consistent",
         ),
         (
             lambda r: r["wrap"].__setitem__("checkpoint_use_reentrant", True),
-            "gradient_checkpointing_verified",
+            "gradient_checkpointing_flag_consistent",
         ),
         (lambda r: r["objective"].__setitem__("terms_seen", ["binary"]), "objective_terms_match"),
         (
@@ -1098,9 +1108,7 @@ def test_train_stage2_returns_without_judging_on_a_non_primary_rank() -> None:
     import inspect
 
     source = inspect.getsource(T.train_stage2)
-    tree = ast.parse(inspect.cleandoc(source.split("\n", 1)[1]) if False else source.lstrip())
-    text = ast.dump(tree)
-    assert "validate_report" in text
+    assert "validate_report" in ast.dump(ast.parse(source.lstrip()))
     body = source[source.index("if not primary:") :]
     assert body.index("return report") < body.index("validate_report"), (
         "the non-primary early return must precede validate_report, or ranks without the "
@@ -1294,9 +1302,84 @@ def test_world_size_zero_raises_rather_than_becoming_one() -> None:
 
 
 def test_the_sbatch_clears_the_checkpoint_only_after_the_node_is_known_good() -> None:
-    """A task landing on a bad node used to rm the last good checkpoint, then exit 2."""
+    """The clear must sit next to the COPY that replaces it — not merely after the health check.
+
+    Two versions of this were too weak. Clearing before the health check let a bad node destroy
+    a good artifact on its way out; clearing after the health check but BEFORE training let an
+    OOM, a NaN gate, or a failed freshness check end the point with no checkpoint and the
+    previous one already gone. The property that actually holds is: nothing is deleted until
+    training has produced a replacement.
+    """
     text = _SBATCH.read_text()
-    assert text.index("STAGE2_NODE_UNHEALTHY") < text.index('rm -rf "$CKPT_DIR"'), (
-        "the checkpoint clear precedes the health check — a bad node destroys a good artifact "
-        "on its way out"
+    clear_at = text.index('rm -rf "$CKPT_DIR"')
+    assert text.index("STAGE2_NODE_UNHEALTHY") < clear_at, "clear precedes the health check"
+    assert text.index("torchrun --standalone") < clear_at, (
+        "the checkpoint clear precedes the training launch — a failed run destroys the last "
+        "good artifact and produces nothing to replace it"
     )
+    # …and the copy that supersedes it follows immediately.
+    assert clear_at < text.index('cp -r "$SCRATCH_CKPT/lora_adapter"')
+
+
+@pytest.mark.parametrize(
+    ("per_epoch", "accum"),
+    [(283, 2), (284, 2), (283, 1), (283, 3), (283, 4), (1, 2), (2, 2), (9, 4)],
+)
+def test_the_predicted_optimiser_step_count_equals_what_the_loop_actually_does(
+    per_epoch: int, accum: int
+) -> None:
+    """`total_opt_steps` must equal the number of `scheduler.step()` calls, exactly.
+
+    The fix for the micro-batch domain introduced a second way to get this wrong: the flush of
+    a trailing partial group adds a `scheduler.step()` that the ceiling-division prediction has
+    to have anticipated. One too many and the cosine overruns its domain; one too few and it
+    stops short — the same defect as job 1064's, in either direction.
+
+    So the loop's stepping logic is replayed here rather than reasoned about, over the real
+    shape (283 micro-batches per rank) plus the even, unit, and remainder-heavy cases.
+    """
+    epochs = 10
+    opt_per_epoch = T._n_batches(per_epoch, accum)
+    total_opt = opt_per_epoch * epochs
+
+    calls = 0
+    for _ in range(epochs):
+        micro = 0
+        for _ in range(per_epoch):
+            micro += 1
+            if micro == accum:
+                calls += 1
+                micro = 0
+        if micro:  # the trailing-group flush the shipped loop performs
+            calls += 1
+
+    assert calls == total_opt, (
+        f"predicted {total_opt} scheduler steps but the loop makes {calls} at "
+        f"per_epoch={per_epoch}, accum={accum}"
+    )
+    # …and the schedule therefore lands exactly at zero, not short of it and not past it.
+    warmup = int(round(0.06 * total_opt))
+    assert T.lr_scale(calls, warmup_steps=warmup, total_steps=total_opt) == pytest.approx(0.0)
+
+
+def test_the_gate_grades_BOTH_step_domains() -> None:
+    """Job 1064's every recorded number was self-consistent while the optimiser did half.
+
+    A clause that checks only micro-batches cannot see the scheduler-domain regression
+    return, which is exactly how it shipped.
+    """
+    report = _passing_report()
+    assert T.derive_clauses(report)["steps_ran"] is True
+    stale = json.loads(json.dumps(report))
+    stale["steps"]["n_optimizer_steps"] = 707  # half, as job 1064 did
+    assert T.derive_clauses(stale)["steps_ran"] is False
+    drifted = json.loads(json.dumps(report))
+    drifted["steps"]["total_scheduled_optimizer_steps"] = 2830  # the micro-batch domain
+    assert T.derive_clauses(drifted)["steps_ran"] is False
+    # A case ONLY the expected-vs-measured comparison catches: the scheduler's domain still
+    # agrees with what was taken, but the loop took a different number than predicted. Without
+    # this the two new comparisons cover for each other and neither is individually tested.
+    under = json.loads(json.dumps(report))
+    under["steps"]["expected_n_optimizer_steps"] = 1500
+    assert under["steps"]["total_scheduled_optimizer_steps"] == under["steps"]["n_optimizer_steps"]
+    assert T.derive_clauses(under)["steps_ran"] is False

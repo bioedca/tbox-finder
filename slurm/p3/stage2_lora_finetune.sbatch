@@ -316,19 +316,6 @@ print(f"run will select attn={selected} :: {reason}")
 # reporting its swept value.
 # The checkpoint is built in node-local scratch and moved below (§9.2: build in /tmp, move
 # only the final artifact).
-# ── Stale-checkpoint clear — ONLY now that the node is known good ────────────
-# Deferred past the health check on purpose: a task landing on a node with a broken driver
-# stack used to `rm -rf` the previous point's checkpoint and THEN exit 2, destroying a good
-# artifact to produce nothing. Same shape as the P2-09 ruling that a failed staging check must
-# not delete a last-good checkpoint. Every path here is untracked (DVC/scratch), so no
-# deletion can dirty a git-tracked path.
-if [ -z "$KEY" ]; then
-  echo "FATAL: the sweep KEY resolved empty; refusing to touch $CKPT_DIR." >&2
-  exit 2
-fi
-rm -rf "$CKPT_DIR"
-mkdir -p "$CKPT_DIR"
-
 SCRATCH_CKPT="$JOB_SCRATCH/checkpoint"
 echo "── training point $KEY (aux_weight=$AUX_WEIGHT lr=$LR, DDP×8, bf16 LoRA) ──"
 set +e
@@ -372,6 +359,20 @@ fi
 # Provenance is written HERE, on the node that produced it, so git_sha, env-lock hash, seed
 # and the input/output paths are all this run's own. The `dvc add` happens LOCALLY after
 # retrieval (no dvc in the ml envs); provenance.json is a small sidecar, not dvc-tracked.
+# ── Stale-checkpoint clear — immediately before the copy that REPLACES it ────
+# Not merely after the health check: the training output lives in $SCRATCH_CKPT until the
+# copy below, so clearing any earlier means an OOM, a NaN gate, or a failed freshness check
+# ends the point with no checkpoint AND the previous good one already deleted. Deferring to
+# here makes the destructive step adjacent to the thing that supersedes it — the P2-09 ruling
+# that a failed check must never destroy a last-good artifact. Every path is untracked
+# (DVC/scratch), so no deletion here can dirty a git-tracked path.
+if [ -z "$KEY" ]; then
+  echo "FATAL: the sweep KEY resolved empty; refusing to touch $CKPT_DIR." >&2
+  exit 2
+fi
+rm -rf "$CKPT_DIR"
+mkdir -p "$CKPT_DIR"
+
 cp -r "$SCRATCH_CKPT/lora_adapter" "$CKPT_DIR/lora_adapter"
 cp "$SCRATCH_CKPT/stage2_heads.pt" "$CKPT_DIR/stage2_heads.pt"
 

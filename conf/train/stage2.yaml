@@ -68,7 +68,6 @@ dataset_parquet: data/processed/stage2_dataset.parquet
 # survives truncation, so completeness has to be asserted separately.
 max_records: null
 eval_max_records: null
-num_workers: 2
 
 # ── Optimisation ─────────────────────────────────────────────────────────────────────────
 # Nothing here is ADR-pinned; epochs=10 follows the P2-09 precedent. The batch size is
@@ -132,8 +131,11 @@ pairing_proj_dim: 64
 # ── Eval / IO ────────────────────────────────────────────────────────────────────────────
 # The val rung is scheme-A `val` inside the same D5 fold — held out of training by the
 # eligibility rule, and asserted disjoint from the train rung by row-id IDENTITY (a count
-# check is satisfied by a fold-sense inversion). It is a training monitor and a
-# best-checkpoint signal only; it is NOT the P3-10 GATE-2 population, which is the `test` rung.
+# check is satisfied by a fold-sense inversion). It is a training MONITOR whose best epoch is
+# RECORDED, not restored: the saved adapter is always the LAST epoch's, and the report states
+# what those weights score (`saved_val_total`) beside the best ever observed. Saying
+# "best-checkpoint signal" here was wrong and let job 1064's reports advertise a val the
+# artifact does not achieve. It is NOT the P3-10 GATE-2 population, which is the `test` rung.
 eval_val: true
 save_checkpoint: true
 checkpoint_dir: data/processed/checkpoints/stage2_rinalmo
