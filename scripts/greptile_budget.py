@@ -52,6 +52,10 @@ Exit codes:
     0  budget available    (prints remaining)
     2  budget exhausted    (used >= limit) — do NOT invoke Greptile
     3  could not measure   (fail-closed) — do NOT invoke Greptile
+    4  usage error         (bad CLI args; nothing was measured)
+
+Only 0 means "invoke". 4 exists because argparse's own usage-error exit is 2, which would
+otherwise be read as "this month's budget is spent" on nothing worse than a mistyped flag.
 
 Usage:
     python scripts/greptile_budget.py                  # human summary + JSON
@@ -91,6 +95,7 @@ _TRIGGER_RE = re.compile(r"@greptile(?:ai|-apps)(?!\w)", re.IGNORECASE)
 _BOT_LOGIN_PREFIX = "greptile"
 
 USER_AGENT = "tbox-finder-greptile-budget/1.0 (+CLAUDE.md-5.1)"
+USAGE_ERROR_EXIT = 4  # kept outside the 0/2/3 budget contract (argparse itself exits 2)
 _MAX_PAGES = 100  # 100 pages x 100 comments; exceeding this raises rather than truncating
 
 
@@ -172,6 +177,12 @@ def _get(url: str, token: str | None) -> tuple[int, bytes, dict[str, str]]:
         return exc.code, exc.read(), dict(exc.headers or {})
     except urllib.error.URLError as exc:
         return 0, str(exc.reason).encode(), {}
+    except OSError as exc:
+        # A read timeout mid-`resp.read()` surfaces as a bare TimeoutError, which urllib
+        # does NOT wrap in URLError. Uncaught it would escape the BudgetError path and exit
+        # 1, outside the 0/2/3 contract. Ordering matters: HTTPError < URLError < OSError,
+        # so this must stay last or it would swallow the two more specific cases.
+        return 0, f"{type(exc).__name__}: {exc}".encode(), {}
 
 
 def _next_link(headers: dict[str, str]) -> str | None:
@@ -333,7 +344,16 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--anchor", default=DEFAULT_ANCHOR, help="YYYY-MM-DD period anchor")
     ap.add_argument("--now", help="override 'now' as YYYY-MM-DDTHH:MM:SSZ (testing)")
     ap.add_argument("--json", metavar="PATH", help="also write the JSON report to PATH")
-    args = ap.parse_args(argv)
+    try:
+        args = ap.parse_args(argv)
+    except SystemExit as exc:
+        # argparse exits 2 on a usage error, which collides with this script's "exhausted".
+        # A mistyped flag would otherwise read as "the month's budget is spent". Remap to a
+        # code outside the 0/2/3 budget contract; --help/--version (code 0) stay 0.
+        if exc.code in (0, None):
+            return 0
+        print("greptile-budget: usage error; no budget was measured.", file=sys.stderr)
+        return USAGE_ERROR_EXIT
 
     token = os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN")
     try:

@@ -70,7 +70,11 @@ GH_TOKEN=$(gh auth token --user bioedca) python scripts/greptile_budget.py
 #   exit 0 → budget available (prints how many remain)
 #   exit 2 → exhausted; do NOT invoke Greptile this period
 #   exit 3 → could not measure; do NOT invoke Greptile (fail-closed)
+#   exit 4 → usage error (bad CLI args); nothing was measured
 ```
+
+Only **0** means "invoke". Exit 4 exists because argparse's own usage-error exit is 2 — without
+the remap, a mistyped flag would report as "this month's budget is spent".
 
 Run it **before** commenting `@greptileai`. The count is re-derived from the GitHub API on
 every call rather than read from a ledger this repo writes about itself, so an invocation that

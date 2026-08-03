@@ -394,6 +394,54 @@ def test_counts_via_the_repo_wide_comment_feed_not_a_pr_enumeration(monkeypatch)
     assert "state=" not in seen[0]
 
 
+def test_a_bare_socket_timeout_still_fails_closed(monkeypatch):
+    """A read timeout surfaces as bare TimeoutError, which urllib does NOT wrap in URLError.
+
+    Uncaught it escapes the BudgetError path and exits 1, outside the 0/2/3 contract.
+    """
+    import urllib.request
+
+    def _boom(*a, **k):
+        raise TimeoutError("read timed out")
+
+    monkeypatch.setattr(urllib.request, "urlopen", _boom)
+    with pytest.raises(mod.BudgetError):
+        mod.fetch_issue_comments("o/r", P_START, None)
+
+
+def test_http_error_is_not_swallowed_by_the_oserror_catch(monkeypatch):
+    """Positive control for catch ordering: HTTPError < URLError < OSError.
+
+    If the OSError arm were placed first it would swallow both, and every HTTP status
+    would collapse to the status-0 transport case.
+    """
+    import urllib.error
+    import urllib.request
+
+    def _raise_http(*a, **k):
+        raise urllib.error.HTTPError("http://x", 404, "Not Found", {}, None)
+
+    monkeypatch.setattr(urllib.request, "urlopen", _raise_http)
+    code, _body, _headers = mod._get("http://x", None)
+    assert code == 404, "a real HTTP status must survive, not be flattened to 0"
+
+
+@pytest.mark.parametrize("argv", [["--bogus-flag"], ["--limit", "notanint"]])
+def test_usage_errors_do_not_masquerade_as_budget_exhausted(argv, capsys):
+    """argparse exits 2 on a usage error — the same code this script means by "exhausted".
+
+    A mistyped flag must not read as "the month's budget is spent".
+    """
+    rc = mod.main(argv)
+    assert rc == mod.USAGE_ERROR_EXIT
+    assert rc not in (0, 2, 3), "usage errors must sit outside the budget contract"
+
+
+def test_help_still_exits_zero(capsys):
+    """Positive control: the SystemExit remap must not turn --help into an error."""
+    assert mod.main(["--help"]) == 0
+
+
 def test_main_exit_codes_are_distinct(monkeypatch, capsys):
     """0 available / 2 exhausted / 3 unmeasurable must never collapse into each other."""
     monkeypatch.setattr(mod, "fetch_issue_comments", lambda *a, **k: [_trigger(THREAD_A)])
