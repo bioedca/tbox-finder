@@ -1277,3 +1277,61 @@ carve-out to carry a date and a removal condition, and requires the accepted cav
 written down.
 
 **Commit.** Feature branch `p3-06-stage2-lora`; squash SHA derived at the phase-exit gate.
+
+## Step P3-06 (RESULT) — 2026-08-03: the sweep landed — six checkpoints, six passing gates
+
+**Job 1064 completed all six points.** Verification is artifact-based (`sacct` off): array gone
+from `squeue` (its terminal signal is `Invalid job id specified`, not empty output — the poll
+branches on the text), **six reports**, **six 48 MB checkpoints** of four files each with
+`stage2_heads.pt` present, and **zero real failures** — no OOM, no SIGSEGV, no node fault. The
+only error in any `.err` was 6 × `IsADirectoryError`, uniformly the known sidecar defect.
+
+| point | aux_weight | lr | best val | epoch | driver |
+|---|---:|---|---:|---:|---|
+| aux0.0_lr1e-4 | 0.0 | 1e-4 | 0.000380 | 6 | 595.84 |
+| aux0.0_lr3e-4 | 0.0 | 3e-4 | 0.000599 | 8 | 590.48.01 |
+| aux0.5_lr1e-4 | 0.5 | 1e-4 | 0.023589 | 8 | 590.48.01 |
+
+**⚠ These totals are NOT comparable across arms, and nothing downstream may treat them as if
+they were.** At `aux_weight=0` the objective *is* the binary term alone; at 0.5 it is the
+binary term plus five weighted aux terms. The jump from 0.00038 to 0.0236 is a change of
+*quantity*, not of quality. Comparing arms means comparing the **calibrated binary head on
+matched metrics**, which is exactly what P3-08's with/without-aux check exists to do — and the
+`.json` reports carry the per-term breakdown it needs.
+
+**The driver split is 3/3**, as the accepted caveat allowed: `aux0.0_lr1e-4`, `aux0.5_lr3e-4`
+and `aux1.0_lr3e-4` on **595.84**; the other three on **590.48.01**. Recorded per point in each
+report's `device` block, so the axis is auditable rather than assumed uniform — which is the
+whole reason that block was added an hour before the run that needed it.
+
+**Provenance: reconstructed, and labelled as such.** All six sidecars were lost to the
+`IsADirectoryError`, so they were rebuilt by `scripts/backfill_stage2_provenance.py` from each
+run's own report. Every field is either copied from that report or computed by hashing the
+artifact; nothing is invented. Each carries `reconstructed: true`, the reason, the source
+report and an explicit limitation: written after the fact, so it cannot attest the node's tree
+was unchanged between the run and the write.
+
+**⚠ Two guards in that script earned their place, and one of them exposed a constraint on
+itself.** (1) `build_provenance` derives the top-level `git_sha` from whatever tree it runs in
+and offers no override — so a backfill from a moved checkout would misattribute the run in the
+very field CLAUDE.md §11 names. It is now verified, and on mismatch the sidecar is **deleted**
+and the point refused. (2) That guard then refused the first cluster attempt for a reason worth
+recording: the script imported `train.checkpoint_output_files`, added *after* the run's commit,
+while the guard requires running *at* the run's commit. A repair script cannot depend on code
+newer than the tree it repairs. The enumeration is therefore defined in the script, with
+`tests/unit/test_backfill_provenance.py` pinning it to the shared helper on identical input —
+including both refusal paths — so the deliberate fork cannot drift.
+
+**Retrieval verified against the recorded hashes.** All 24 output files rsync'd down (300 MB)
+and **every one matches its sidecar sha256** — the backfilled hashes doing precisely the job
+claimed for them. `dvc add` → `data/processed/checkpoints/stage2_rinalmo.dvc`
+(md5 `b3d1c09cca77b54b064662aa2f2e5984.dir`, 313,437,285 bytes, 30 files), into the **shared**
+main-repo cache via `.dvc/config.local`, because a worktree's own `.dvc/` is empty and the
+object would otherwise land somewhere the phase-exit `dvc push` will never look.
+
+**Still owed, and not papered over:** the six `.OK` markers were never written, since the
+sidecar crash preceded them. The §9.3 verification above stands on the reports, checkpoints and
+`.err` scan instead — a weaker signal than the marker, stated as such. The corrected sbatch
+(`cfb8971`) writes both natively, so the next run needs no backfill.
+
+**Commit.** Feature branch `p3-06-stage2-lora`; squash SHA derived at the phase-exit gate.

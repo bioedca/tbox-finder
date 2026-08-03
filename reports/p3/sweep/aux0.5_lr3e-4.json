@@ -1,0 +1,530 @@
+{
+  "adr": "ADR-0002 (D2/D3/D5 backbone+kernels+LoRA); ADR-0004 D5 (fold); ADR-0005 D16",
+  "checkpoint": {
+    "adapter_bytes": 51432083,
+    "adapter_dir": "/tmp/ecc1695-1073-3/checkpoint/lora_adapter",
+    "best_val_epoch": 7,
+    "best_val_total": 0.021387886384467064,
+    "heads_bytes": 803929,
+    "heads_path": "/tmp/ecc1695-1073-3/checkpoint/stage2_heads.pt",
+    "n_saved_parameters": 13040268,
+    "saved_from_epoch": 9
+  },
+  "config": {
+    "admit_parentless_decoys": true,
+    "attn_implementation": null,
+    "batch_size": 4,
+    "boundary_use_crf": false,
+    "checkpoint_dir": "/tmp/ecc1695-1073-3/checkpoint",
+    "dataset_parquet": "data/processed/stage2_dataset.parquet",
+    "device": null,
+    "dropout": 0.1,
+    "dtype": null,
+    "epochs": 10,
+    "eval_batch_size": 8,
+    "eval_max_records": null,
+    "eval_val": true,
+    "grad_clip": 1.0,
+    "gradient_accumulation_steps": 2,
+    "gradient_checkpointing": false,
+    "log_every": 20,
+    "loss": {
+      "active_terms": [
+        "binary",
+        "boundary",
+        "regulatory_mode",
+        "specifier_codon",
+        "cognate_aa",
+        "trna_family"
+      ],
+      "aux_terms": [
+        "boundary",
+        "regulatory_mode",
+        "specifier_codon",
+        "cognate_aa",
+        "trna_family",
+        "structure"
+      ],
+      "aux_weight": 0.5,
+      "base_weights": {
+        "binary": 1.0,
+        "boundary": 0.3,
+        "cognate_aa": 0.1,
+        "regulatory_mode": 0.1,
+        "specifier_codon": 0.1,
+        "structure": 0.0,
+        "trna_family": 0.1
+      },
+      "class_weight_alpha": {
+        "binary": 0.0,
+        "boundary": 0.0,
+        "cognate_aa": 0.0,
+        "regulatory_mode": 0.0,
+        "specifier_codon": 0.0,
+        "structure": 0.0,
+        "trna_family": 0.0
+      },
+      "dominance": {
+        "aux_max": 0.15,
+        "aux_total": 0.35,
+        "binary": 1.0,
+        "holds": true,
+        "max_margin": 0.85,
+        "rule": "binary_weight >= sum(effective aux weights)",
+        "sum_margin": 0.65
+      },
+      "effective_weights": {
+        "binary": 1.0,
+        "boundary": 0.15,
+        "cognate_aa": 0.05,
+        "regulatory_mode": 0.05,
+        "specifier_codon": 0.05,
+        "structure": 0.0,
+        "trna_family": 0.05
+      },
+      "gamma": {
+        "binary": 0.0,
+        "boundary": 2.0,
+        "cognate_aa": 0.0,
+        "regulatory_mode": 0.0,
+        "specifier_codon": 0.0,
+        "structure": 0.0,
+        "trna_family": 0.0
+      },
+      "ignore_index": -100,
+      "max_aux_weight": 1.4285714285714286,
+      "optional_terms": [
+        "structure"
+      ],
+      "pinned": {
+        "class_weight_alpha_values": false,
+        "dominance_rule": "ADR-0005 D16",
+        "gamma_values": false,
+        "structure_term": "PRD \u00a78/\u00a711 optional (not enumerated by ADR-0005 D16)",
+        "weight_values": false,
+        "weighting_method": "ADR-0005 D16"
+      },
+      "structure_enabled": false,
+      "terms": [
+        "binary",
+        "boundary",
+        "regulatory_mode",
+        "specifier_codon",
+        "cognate_aa",
+        "trna_family",
+        "structure"
+      ],
+      "weighting": "fixed",
+      "weighting_methods": [
+        "fixed",
+        "uncertainty"
+      ]
+    },
+    "lr": 0.0003,
+    "max_records": null,
+    "num_workers": 2,
+    "pairing_proj_dim": 64,
+    "pooling": "masked_mean",
+    "pythonhashseed": 0,
+    "report_path": "reports/p3/sweep/aux0.5_lr3e-4.json",
+    "revision": null,
+    "save_checkpoint": true,
+    "seed": 42,
+    "structure_head": false,
+    "train_rung": "train",
+    "val_rung": "val",
+    "wandb_dir": "wandb",
+    "wandb_entity": null,
+    "wandb_mode": "offline",
+    "wandb_project": "tbox-finder",
+    "warmup_ratio": 0.06,
+    "weight_decay": 0.01
+  },
+  "data": {
+    "dataset_parquet": "data/processed/stage2_dataset.parquet",
+    "n_dataset_rows": 30542,
+    "n_train_rows": 9059,
+    "n_train_val_row_id_overlap": 0,
+    "n_val_rows": 2070,
+    "train_census": {
+      "admit_parentless_decoys": true,
+      "admitted_by_route": {
+        "nested_train": 5199,
+        "parentless_decoy": 3860
+      },
+      "d5_refusal_roles": {
+        "dropped": 786,
+        "excluded_clade_crossing": 5778,
+        "heldout": 7718
+      },
+      "n_admitted": 9059,
+      "n_admitted_negative": 4264,
+      "n_admitted_positive": 4795,
+      "n_rows_scanned": 30542,
+      "refused": {
+        "calibration_split": 1089,
+        "d5_holdout_or_excluded": 14282,
+        "other_scheme_a_rung": 6112,
+        "unplaceable_missing_nested_train": 0
+      },
+      "rung": "train"
+    },
+    "val_census": {
+      "admit_parentless_decoys": true,
+      "admitted_by_route": {
+        "nested_train": 1581,
+        "parentless_decoy": 489
+      },
+      "d5_refusal_roles": {
+        "dropped": 79,
+        "excluded_clade_crossing": 63,
+        "heldout": 855
+      },
+      "n_admitted": 2070,
+      "n_admitted_negative": 625,
+      "n_admitted_positive": 1445,
+      "n_rows_scanned": 30542,
+      "refused": {
+        "calibration_split": 1089,
+        "d5_holdout_or_excluded": 997,
+        "other_scheme_a_rung": 26386,
+        "unplaceable_missing_nested_train": 0
+      },
+      "rung": "val"
+    }
+  },
+  "device": {
+    "capability": [
+      8,
+      6
+    ],
+    "cuda_runtime": "12.8",
+    "driver_version": "595.84",
+    "is_cuda": true,
+    "n_visible_devices": 8,
+    "name": "NVIDIA RTX A4000",
+    "torch_version": "2.7.1+cu128"
+  },
+  "eval_val": true,
+  "gate": {
+    "clauses": {
+      "both_admit_routes_fired": true,
+      "calib_refused": true,
+      "checkpoint_written": true,
+      "full_population": true,
+      "gradient_checkpointing_verified": true,
+      "heads_outside_wrapper": true,
+      "lora_contract_held": true,
+      "losses_finite": true,
+      "no_d5_holdout_trained": true,
+      "objective_terms_match": true,
+      "provenance_recorded": true,
+      "steps_ran": true,
+      "val_disjoint_from_train": true
+    },
+    "failed": [],
+    "overall_pass": true
+  },
+  "losses": {
+    "final_train_total": 0.001089336583390832,
+    "n_nonfinite_steps": 0,
+    "per_term_final": {
+      "binary": 2.4169132302631624e-05,
+      "boundary": 0.0037378999404609203,
+      "cognate_aa": 0.0025634667836129665,
+      "regulatory_mode": 0.0001284980244236067,
+      "specifier_codon": 0.0026831950526684523,
+      "trna_family": 0.004714488983154297
+    }
+  },
+  "objective": {
+    "active_terms": [
+      "binary",
+      "boundary",
+      "regulatory_mode",
+      "specifier_codon",
+      "cognate_aa",
+      "trna_family"
+    ],
+    "dominance": {
+      "aux_max": 0.15,
+      "aux_total": 0.35,
+      "binary": 1.0,
+      "holds": true,
+      "max_margin": 0.85,
+      "rule": "binary_weight >= sum(effective aux weights)",
+      "sum_margin": 0.65
+    },
+    "effective_weights": {
+      "binary": 1.0,
+      "boundary": 0.15,
+      "cognate_aa": 0.05,
+      "regulatory_mode": 0.05,
+      "specifier_codon": 0.05,
+      "structure": 0.0,
+      "trna_family": 0.05
+    },
+    "max_aux_weight": 1.4285714285714286,
+    "terms_seen": [
+      "binary",
+      "boundary",
+      "regulatory_mode",
+      "specifier_codon",
+      "cognate_aa",
+      "trna_family"
+    ],
+    "weighting": "fixed"
+  },
+  "prd": "PRD \u00a710.2, \u00a710.3, \u00a711",
+  "provenance": {
+    "config_path": "conf/train/stage2.yaml",
+    "dataset_parquet": "data/processed/stage2_dataset.parquet",
+    "entrypoint": "tbox_finder.stage2.train",
+    "env_lock": "envs/ml-rna.conda-lock.yml",
+    "env_lock_sha256": "60f966a8f009abfa3900357ffd0ac7c685d8b55b713da4498306480720bcf3b3",
+    "git_branch": "p3-06-stage2-lora",
+    "git_dirty": false,
+    "git_dirty_paths": [],
+    "git_sha": "5a215d765a96dcdc4fe6673eb0a713b6d127295a",
+    "script": "src/tbox_finder/stage2/train.py",
+    "seed": 42,
+    "step": "P3-06"
+  },
+  "save_checkpoint": true,
+  "schema_version": "1",
+  "step": "P3-06",
+  "steps": {
+    "batches_per_epoch_per_rank": 283,
+    "elapsed_seconds": 2985.011,
+    "expected_n_steps": 2830,
+    "n_optimizer_steps": 1415,
+    "n_steps": 2830,
+    "total_scheduled_steps": 2830,
+    "warmup_steps": 170,
+    "world_size": 8
+  },
+  "val": {
+    "best_epoch": 7,
+    "best_total": 0.021387886384467064,
+    "history": [
+      {
+        "binary_accuracy": 0.993719806763285,
+        "epoch": 0,
+        "n_batches": 259,
+        "n_records": 2070,
+        "per_term": {
+          "binary": 0.017275158864712075,
+          "boundary": 0.06476664685013364,
+          "cognate_aa": 1.7920414347446103,
+          "regulatory_mode": 0.01005352520955633,
+          "specifier_codon": 2.1492235485651316,
+          "trna_family": 2.0857574994959887
+        },
+        "total": 0.32884396277348965
+      },
+      {
+        "binary_accuracy": 0.9971014492753624,
+        "epoch": 1,
+        "n_batches": 259,
+        "n_records": 2070,
+        "per_term": {
+          "binary": 0.011242930223660724,
+          "boundary": 0.053489682517430436,
+          "cognate_aa": 0.16292969517870068,
+          "regulatory_mode": 0.006650496596285289,
+          "specifier_codon": 0.28969383166390955,
+          "trna_family": 0.22533232666206865
+        },
+        "total": 0.05349670142484676
+      },
+      {
+        "binary_accuracy": 0.9966183574879227,
+        "epoch": 2,
+        "n_batches": 259,
+        "n_records": 2070,
+        "per_term": {
+          "binary": 0.015252763313291813,
+          "boundary": 0.051281090987566794,
+          "cognate_aa": 0.13470118116537058,
+          "regulatory_mode": 0.01025154664537161,
+          "specifier_codon": 0.15967058346329913,
+          "trna_family": 0.16373003720985474
+        },
+        "total": 0.04636259461956544
+      },
+      {
+        "binary_accuracy": 0.9975845410628019,
+        "epoch": 3,
+        "n_batches": 259,
+        "n_records": 2070,
+        "per_term": {
+          "binary": 0.008254160070409994,
+          "boundary": 0.045225849834992886,
+          "cognate_aa": 0.12989210593064665,
+          "regulatory_mode": 0.005675961388096134,
+          "specifier_codon": 0.1374993662162896,
+          "trna_family": 0.15339038145196224
+        },
+        "total": 0.03636092923680212
+      },
+      {
+        "binary_accuracy": 1.0,
+        "epoch": 4,
+        "n_batches": 259,
+        "n_records": 2070,
+        "per_term": {
+          "binary": 0.0004452151664638563,
+          "boundary": 0.035251290121117024,
+          "cognate_aa": 0.11109656287432723,
+          "regulatory_mode": 0.007989402446431974,
+          "specifier_codon": 0.13452899035940155,
+          "trna_family": 0.14628005309954545
+        },
+        "total": 0.02572765987113394
+      },
+      {
+        "binary_accuracy": 0.9995169082125603,
+        "epoch": 5,
+        "n_batches": 259,
+        "n_records": 2070,
+        "per_term": {
+          "binary": 0.0036565307127261583,
+          "boundary": 0.03117836573670795,
+          "cognate_aa": 0.11216991611048004,
+          "regulatory_mode": 0.005559706098681431,
+          "specifier_codon": 0.10545479660695527,
+          "trna_family": 0.130602826519409
+        },
+        "total": 0.0260226484541272
+      },
+      {
+        "binary_accuracy": 1.0,
+        "epoch": 6,
+        "n_batches": 259,
+        "n_records": 2070,
+        "per_term": {
+          "binary": 0.0001473001536821193,
+          "boundary": 0.033758564009295104,
+          "cognate_aa": 0.11815297333559589,
+          "regulatory_mode": 0.0047542653104278455,
+          "specifier_codon": 0.12031093823119395,
+          "trna_family": 0.12932819214876037
+        },
+        "total": 0.023838403623388713
+      },
+      {
+        "binary_accuracy": 0.9995169082125603,
+        "epoch": 7,
+        "n_batches": 259,
+        "n_records": 2070,
+        "per_term": {
+          "binary": 0.0014184698118463093,
+          "boundary": 0.030200395202969996,
+          "cognate_aa": 0.09122453898265166,
+          "regulatory_mode": 0.005756781638094717,
+          "specifier_codon": 0.10111565408647477,
+          "trna_family": 0.11069016356846412
+        },
+        "total": 0.021387886384467064
+      },
+      {
+        "binary_accuracy": 1.0,
+        "epoch": 8,
+        "n_batches": 259,
+        "n_records": 2070,
+        "per_term": {
+          "binary": 8.334172904901224e-05,
+          "boundary": 0.025069588719221467,
+          "cognate_aa": 0.11054816930986308,
+          "regulatory_mode": 0.005544553966673619,
+          "specifier_codon": 0.1151622415299556,
+          "trna_family": 0.12597204792011227
+        },
+        "total": 0.021705131079500554
+      },
+      {
+        "binary_accuracy": 0.9985507246376811,
+        "epoch": 9,
+        "n_batches": 259,
+        "n_records": 2070,
+        "per_term": {
+          "binary": 0.0036321749833191867,
+          "boundary": 0.028707316933552066,
+          "cognate_aa": 0.09676207674738707,
+          "regulatory_mode": 0.005814110851604141,
+          "specifier_codon": 0.09862289590510255,
+          "trna_family": 0.10991756374854235
+        },
+        "total": 0.023494105328508555
+      }
+    ]
+  },
+  "wrap": {
+    "applied_lora": {
+      "all_linear_fully_covered": true,
+      "lora_alpha": 32,
+      "lora_dropout": 0.05,
+      "n_eligible_linear_modules": 231,
+      "n_modules_adapted": 231,
+      "r": 16,
+      "target_modules_after_injection": [
+        "dense",
+        "key",
+        "linear",
+        "linear_gate",
+        "query",
+        "value"
+      ],
+      "target_modules_selector": "all-linear",
+      "target_modules_suffix_minimised": true,
+      "uncovered_linear_modules": []
+    },
+    "attn_implementation": "flash_attention_2",
+    "attn_implementation_requested": "flash_attention_2",
+    "base_frozen": true,
+    "checkpoint_use_reentrant": null,
+    "dtype": "bfloat16",
+    "gradient_checkpointing": false,
+    "n_adapter_sites": 231,
+    "n_base_trainable_params": 0,
+    "n_modules_with_checkpointing": 0,
+    "stage2_heads": {
+      "all_heads_trainable": true,
+      "d_model": 1280,
+      "head_sizes": {
+        "cognate_aa": 20,
+        "label_string": 8,
+        "regulatory_mode": 2,
+        "specifier_codon": 64,
+        "trna_family": 61
+      },
+      "heads_frozen": [],
+      "heads_lora_adapted": [],
+      "heads_outside_peft_wrapper": true,
+      "n_head_modules": 6,
+      "n_head_parameters": 199836,
+      "output_keys": [
+        "tbox_logit",
+        "boundary_logits",
+        "regulatory_mode_logits",
+        "specifier_codon_logits",
+        "cognate_aa_logits",
+        "trna_family_logits",
+        "nucleotide_mask"
+      ],
+      "structure_head": false
+    },
+    "targeted_module_leaf_names": [
+      "dense",
+      "key",
+      "linear",
+      "linear_gate",
+      "query",
+      "value"
+    ],
+    "total_params": 662079483,
+    "trainable_params": 12840432,
+    "trainable_pct": 1.9394
+  },
+  "written_at": "2026-08-03T16:52:51.915204+00:00"
+}

@@ -36,7 +36,26 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from tbox_finder.provenance import write_provenance  # noqa: E402
-from tbox_finder.stage2 import train as T  # noqa: E402
+
+#: This script must run against the checkout the RUN used — the git_sha guard below refuses
+#: otherwise — and that checkout PREDATES `train.checkpoint_output_files`. So the enumeration
+#: is defined here rather than imported: a repair script cannot depend on code newer than the
+#: tree it exists to repair. `tests/unit/test_backfill_provenance.py` asserts this agrees with
+#: `train.checkpoint_output_files` on identical input, so the two cannot drift apart.
+STEP = "P3-06"
+ENTRYPOINT = "tbox_finder.stage2.train"
+
+
+def checkpoint_output_files(checkpoint_dir: str | Path) -> list[str]:
+    """Every FILE under a checkpoint, sorted — never the adapter DIRECTORY (the job-1064 bug)."""
+    root = Path(checkpoint_dir)
+    if not root.is_dir():
+        raise NotADirectoryError(f"{root} is not a checkpoint directory")
+    files = sorted(str(f) for f in root.rglob("*") if f.is_file())
+    if not files:
+        raise FileNotFoundError(f"{root} contains no files to record as outputs")
+    return files
+
 
 SWEEP_DIR = Path("reports/p3/sweep")
 CKPT_ROOT = Path("data/processed/checkpoints/stage2_rinalmo")
@@ -60,7 +79,7 @@ def _sidecar(key: str, ckpt: Path, report: dict[str, Any]) -> dict[str, Any]:
     loss = config.get("loss") or {}
     return {
         "out_path": str(ckpt / SIDECAR),
-        "rule": f"slurm/p3/stage2_lora_finetune.sbatch :: {T.ENTRYPOINT} (P3-06 point {key})",
+        "rule": f"slurm/p3/stage2_lora_finetune.sbatch :: {ENTRYPOINT} (P3-06 point {key})",
         "script": "src/tbox_finder/stage2/train.py",
         "seed": prov.get("seed"),
         "inputs": [
@@ -68,11 +87,11 @@ def _sidecar(key: str, ckpt: Path, report: dict[str, Any]) -> dict[str, Any]:
             "src/tbox_finder/stage2/head_vocab.json",
         ],
         # The defect that caused this backfill, fixed via the shared enumerator.
-        "outputs": T.checkpoint_output_files(ckpt),
+        "outputs": checkpoint_output_files(ckpt),
         "env_lock": prov.get("env_lock"),
         "adr": "ADR-0002; ADR-0004 D5; ADR-0005 D16",
         "extra": {
-            "step": T.STEP,
+            "step": STEP,
             "point": key,
             "report": str(SWEEP_DIR / f"{key}.json"),
             # Copied from the RUN's report, never re-read here: re-reading git would record

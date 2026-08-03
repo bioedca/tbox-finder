@@ -1,0 +1,6 @@
+outs:
+- md5: b3d1c09cca77b54b064662aa2f2e5984.dir
+  size: 313437285
+  nfiles: 30
+  hash: md5
+  path: stage2_rinalmo
