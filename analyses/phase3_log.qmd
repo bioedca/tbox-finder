@@ -1631,3 +1631,87 @@ result, and a reasonable place to stop reviewing rather than a claim that nothin
 **Validation.** Trainer **121 pass**, sizing 20, overrides 22, backfill 4; ruff + black clean.
 
 **Commit.** Feature branch `p3-06-stage2-lora`; squash SHA derived at the phase-exit gate.
+
+## Step P3-07 — 2026-08-03: the recalibration stack, and two numbers it refuses to invent
+
+**Inputs.** `calib/temperature.py::{fit_temperature, apply_temperature, STACK_ORDER}` (P2-13,
+the exact convex β = 1/T bisection); the P3-02 `calib` column contract (859 positives + 230
+decoys, every one on the `fold_random == "train"` rung, asserted disjoint from val/test at
+build time); the Stage-2 binary-head contract `Stage2Model.forward -> "tbox_logit"`, shape
+`(B,)`, one raw logit. **Process.** `src/tbox_finder/calib/recalibrate.py` ships the ADR-0005
+D11 stack for the Stage-2 head: `temperature_scale` fits T, `prior_shift` applies the
+Saerens/Elkan log-odds correction, and `calibrated_posterior` returns **both** the named
+posterior (temperature-scaled, pre-shift — the GATE-2-gated object) and the prior-shifted one,
+with `gated_posterior_key` naming the former inside the payload. **Outputs.** One module, one
+test module (108 tests), no data artifact and no fitted T — see the last paragraph.
+
+**There is one temperature fit in this repo, and this is not a second one.** Stage 2's head is
+a single logit; stacking it as `[0, z]` makes P2-13's multi-class fit *identically* the binary
+one, because `softmax([0, βz])[1] = σ(βz)`, so its NLL is exactly the binary cross-entropy at
+`βz` — the same reduction `stage2/losses.py` already uses to route the binary term through the
+audited focal-CE kernel. The adapter therefore touches the *inputs* and never the arithmetic,
+and P2-13's two degenerate-limit refusals (perfect separation ⇒ β → ∞; worse-than-uniform ⇒
+β → 0) carry through unchanged. The cost of delegating is that "A agrees with B" becomes a
+tautology, so the primary test is neither: for `z = [+a, +a, −a]`, `y = [1, 0, 0]` the
+stationarity condition `Σ z_i(σ(βz_i) − y_i) = 0` collapses to `3σ(βa) = 2`, giving
+**`β* = ln2/a` exactly**. A second case at a second scale (`4σ = 3` ⇒ `β* = ln3/a`), a ternary
+search in the *test* that minimises the value rather than rooting the derivative, and a
+manufactured-miscalibration draw that recovers `T ≈ 2.5` from 20,000 rows are the independent
+confirmations; the delegation check is present and labelled secondary.
+
+**"T fit only on `calib`, never test" is a property of the code, not a claim about the caller.**
+`temperature_scale` takes the whole table plus a per-row rung label and selects the `calib`
+rows itself, so there is no argument through which a graded row can reach the fit. Three
+refusals surround that: an **empty** selection raises with the full census (the all-`False`
+calib column filters clean and fits on nothing, which reads exactly like a working filter); an
+**unrecognised rung token** raises rather than being skipped (a row that silently vanishes
+shrinks the calibration set while every count still looks fine); and a **single-class** calib
+rung raises. `assign_rung` re-derives the P3-02 invariant — a calib row lives in the `train`
+rung — at the point of use, and tests missingness with `masking.is_missing`, because
+`bool(float("nan")) is True` and under the training env's pandas 3 a null cell arrives as NaN,
+so the naive guard would promote a row with **no** calibration flag straight into the fit.
+
+**The fixtures are asymmetric on purpose.** The rung arms are 7 calib / 4 train / 3 val / 5
+test, and both the calib and test arms are independently fittable, so the inversion test can
+run both ways round: swapping the two senses is asserted to change `n_fitted` *and* to produce
+exactly the T of the test arm fitted alone. Balanced arms with count-only assertions would
+refuse the right number of the wrong rows and pass.
+
+**Two numbers this step declines to produce, and why that is the deliverable rather than a
+gap.** (1) **No deployment prior is pinned.** PRD.md:188 and ADR-0005:80 give the genome-scale
+prevalence only as prose, `~10³–10⁴:1` (negatives per positive); nothing in the repo encodes a
+value. Pinning a scalar would be a new blinded-frozen default needing ADR sign-off, and
+defaulting one silently would put a fabricated quantity into every downstream posterior. So
+both priors are required keyword arguments with no defaults, a half-specified shift raises, and
+`DEPLOYMENT_PRIOR_RANGE` exists only as the band a supplied prior is *reported* against — a
+predicate shown to discriminate, since ADR-0005 D7's own `100:1` benchmark prevalence must fall
+outside it. (2) **No T is fitted here.** Nothing in the repo reads a Stage-2 checkpoint back —
+`stage2_heads.pt` and `lora_adapter/` have write sites and no readers, and `train.py::evaluate`
+discards per-row logits — so real `calib`-split logits do not yet exist. This step ships and
+certifies the machinery; producing the scores, and with them the first real T, belongs to the
+step that first needs a calibrated posterior (P3-08/P3-10). A T invented to fill the gap would
+look exactly like a measured one.
+
+**Path drift, recorded not silently taken.** imp.md names
+`src/tbox_finder/calibration/recalibrate.py`; the module lands at
+`src/tbox_finder/calib/recalibrate.py` because a `calib/` package already exists and two
+near-homonymous calibration namespaces is a permanent confusion. imp.md's `calibration/` paths
+have drifted once already on their own — `calibration/ece.py::binned_ece` shipped as
+`metrics.py::binned_ece` at P0-31 — and P3-02 carries an identically-shaped recorded
+correction. The P3-07 block in imp.md now records this one.
+
+**Validation.** `test_recalibrate` **108 pass**, `test_temperature` 81 pass (unchanged), full
+unit tier 3,125 pass with the same 12 failures the untouched `main` shows in this runner (a
+py3.11/numpy-2.4.2 local env, not the pinned CI stack); ruff 0.15.15 + black 25.11.0 clean.
+**15 source sabotages, each RED against its NAMED test, each restored byte-identically** (fold
+sense inverted, emptiness guard removed, unknown-token refusal removed, `is_missing` weakened
+to `is None`, P3-02 invariant dropped, shift direction inverted, `+` flipped to `−`, gated key
+repointed at the shifted posterior, a deployment prior given a default, the half-specified
+guard removed, the PRD band widened to swallow D7's `100:1`, the branch-wise sigmoid replaced
+by the overflowing one, single-class guard removed, priors of exactly 0/1 admitted,
+`prior_from_odds_ratio` inverted).
+
+**Decisions.** No new ADR and no §7 item-2 sign-off: D11 pins the stack order and the named
+posterior, both of which this implements verbatim, and the one value that would have needed a
+pin is the one the module refuses to supply. **Commit.** Feature branch
+`p3-07-calibration-stack`; squash SHA derived at the phase-exit gate.

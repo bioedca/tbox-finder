@@ -14,8 +14,17 @@ Modules
     (per-class one-vs-rest binned ECE through the frozen ``metrics.binned_ece``, with
     cluster-blocked CIs). GATE-2's gated ECE is P3-exit business on the P3-02 ``calib``
     carve — nothing here is a calibration claim, and no ``T`` fitted here is shipped.
+``recalibrate``
+    The P3-07 stack for the **Stage-2 binary head**: ``T`` fitted on the P3-02 ``calib``
+    rung (and structurally on nothing else), then the Saerens/Elkan log-odds prior-shift,
+    then a producer exposing **both** the D11 named posterior (temperature-scaled,
+    pre-prior-shift — the GATE-2-gated object) and the prior-shifted one (reported,
+    non-gated). It **reuses** ``temperature.fit_temperature`` rather than carrying a second
+    temperature fit: Stage 2's one logit stacked as ``[0, z]`` makes that multi-class fit
+    identically the binary one. No deployment prior is pinned here — the PRD gives it only
+    as prose, so both priors are required arguments with no defaults.
 """
 
 from __future__ import annotations
 
-__all__ = ["temperature"]
+__all__ = ["recalibrate", "temperature"]
