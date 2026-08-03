@@ -608,9 +608,13 @@ def test_the_sbatch_requests_a_whole_gpu_node_and_pins_nothing() -> None:
     # `--exclude=two` is a DATED, temporary carve-out for a measured node fault (job 1036).
     # If it is present it must carry its removal condition, so it cannot quietly outlive the
     # reboot that fixes the node and silently halve the cluster.
+    # `--exclude` is a dated carve-out. It must carry BOTH a stated removal condition and a
+    # rationale, so it cannot outlive its reason — the first version cited a node fault that
+    # has since been fixed, and the file would have gone on asserting it.
     if any("--exclude" in ln for ln in directives):
-        assert "REMOVE once node `two` has been rebooted" in text
-        assert "Driver/library version mismatch" in text
+        assert "EXCLUDE RATIONALE" in text
+        assert "REMOVE THIS" in text
+        assert "2026-" in text  # dated, so a reader can tell how stale the reason is
 
 
 def test_the_sbatch_activates_the_rna_env_not_the_dna_one() -> None:
@@ -1023,3 +1027,65 @@ def test_the_committed_report_validates_and_passes_its_gate() -> None:
     report = json.loads(report_path.read_text())
     assert T.validate_report(report) == []
     assert report["gate"]["overall_pass"] is True, report["gate"]["failed"]
+
+
+def test_the_gate_is_scoped_to_the_rank_that_holds_its_evidence() -> None:
+    """Job 1053's finish-line failure: rank-0-only evidence graded on every rank.
+
+    `checkpoint_written` and `provenance_recorded` read artifacts only the primary rank
+    produces. On ranks 1..N-1 those clauses are correctly False and were being raised on,
+    which killed a run whose rank-0 report said `overall_pass: true` — and cost the
+    checkpoint, because the sbatch's `rc` check gates the copy out of node-local scratch.
+
+    Asserted on the CLAUSES, not by reading the source: a non-primary rank's report — the
+    one with no checkpoint and no git snapshot — must derive exactly those two as False,
+    which is why the verdict cannot be taken on it. The positive control is the same report
+    WITH the evidence, where both hold.
+    """
+    cfg = T.Stage2TrainConfig()
+    base = _passing_report()
+
+    non_primary = json.loads(json.dumps(base))
+    non_primary["checkpoint"] = {
+        "adapter_dir": None,
+        "adapter_bytes": 0,
+        "heads_bytes": 0,
+        "n_saved_parameters": 0,
+    }
+    non_primary["provenance"] = {
+        k: v for k, v in base["provenance"].items() if k not in {"git_sha", "git_branch"}
+    }
+    clauses = T.derive_clauses(non_primary)
+    assert clauses["checkpoint_written"] is False
+    assert clauses["provenance_recorded"] is False
+    # …and every OTHER clause still holds, which is what makes these two rank-scoped rather
+    # than simply broken: the run itself was fine.
+    others = {
+        k: v for k, v in clauses.items() if k not in {"checkpoint_written", "provenance_recorded"}
+    }
+    assert all(others.values()), sorted(k for k, v in others.items() if not v)
+
+    # Positive control: with rank 0's evidence present, both hold.
+    assert T.derive_clauses(base)["checkpoint_written"] is True
+    assert T.derive_clauses(base)["provenance_recorded"] is True
+    assert cfg.save_checkpoint is True
+
+
+def test_train_stage2_returns_without_judging_on_a_non_primary_rank() -> None:
+    """The scoping is in the shipped control flow, not just in a comment.
+
+    Located by `ast` so a refactor that re-broadens the gate is caught: the early return for
+    a non-primary rank must sit BEFORE `validate_report` is called.
+    """
+    import ast
+    import inspect
+
+    source = inspect.getsource(T.train_stage2)
+    tree = ast.parse(inspect.cleandoc(source.split("\n", 1)[1]) if False else source.lstrip())
+    text = ast.dump(tree)
+    assert "validate_report" in text
+    body = source[source.index("if not primary:") :]
+    assert body.index("return report") < body.index("validate_report"), (
+        "the non-primary early return must precede validate_report, or ranks without the "
+        "evidence will judge rank 0's artifacts again"
+    )

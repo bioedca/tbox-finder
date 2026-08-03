@@ -1341,6 +1341,27 @@ def train_stage2(
         if run is not None:
             run.finish()
 
+    # ── The gate is RANK 0's, because the evidence it grades is rank 0's ──────────────
+    # `checkpoint_written` and `provenance_recorded` read artifacts only the primary rank
+    # produces — it alone saves the adapter and alone takes the git snapshot. Every rank
+    # nonetheless BUILDS the report (harmless, and it keeps `diagnostics`/`components`
+    # identical across ranks), so a naive "every rank validates" turns two clauses that were
+    # never applicable into a hard failure on ranks 1..N-1.
+    #
+    # That is not hypothetical: it is what happened to job 1053. Point 0 trained all ten
+    # epochs, rank 0 wrote a report with `overall_pass: true` and a 51.4 MB adapter — and
+    # ranks 1-7 raised on `checkpoint_written, provenance_recorded`, torchrun turned that
+    # into a non-zero exit, the sbatch's `rc` check skipped the `cp` out of node-local
+    # scratch, and the EXIT trap deleted the checkpoint. ~45 GPU-minutes destroyed at the
+    # finish line by a gate asking the wrong ranks the right question.
+    #
+    # Non-primary ranks still raise on their OWN failures — an OOM, a NaN, a collate error
+    # — because those propagate out of the loop above and never reach this line. What is
+    # scoped here is only the verdict on rank 0's artifacts. No collective is involved, so
+    # there is no barrier to get wrong.
+    if not primary:
+        return report
+
     problems = validate_report(report)
     if problems:
         raise RuntimeError(f"P3-06 report is malformed: {problems}")

@@ -109,20 +109,23 @@
 # Serialised, each task's placement is an independent draw and the health check above
 # turns a bad draw into a 5-second exit. Restore 0-5 once both nodes are healthy.
 #SBATCH --exclude=two
-# ⚠ TEMPORARY, DATED 2026-08-03 — REMOVE once node `two` has been rebooted.
-# `two` boots kernel 6.8.0-110-generic (up since 2026-07-14) while the 2026-07-31 upgrade
-# to nvidia 595.84 built its DKMS module ONLY for kernels 6.8.0-134/-136 and removed the
-# 595.71.05 build. So userspace NVML 595.84 talks to a resident 595.71.05 kernel module and
-# every CUDA call fails: "Driver/library version mismatch". Job 1036 lost three points to it
-# inside init_process_group. A reboot fixes it (GRUB_DEFAULT=0 will select -136, which has
-# the matching 595.84 module).
+# ⚠ EXCLUDE RATIONALE — RESTATED 2026-08-03, and the original reason is now SPENT.
+# It was added because `two` had a broken driver stack. That is FIXED: it rebooted into
+# kernel 6.8.0-134-generic with a resident nvidia 595.84 matching userspace 595.84, and
+# nvidia-smi lists all 8 A4000s (verified 2026-08-03). Leaving the old wording in place
+# would have made this file assert a condition that no longer holds.
 #
-# This is `--exclude`, NOT the `--nodelist` CLAUDE.md §13 forbids, and the distinction is
-# the point: §13 bans pinning TO a preferred node because `one` is often down. This excludes
-# a node MEASURED to be broken and leaves `one` as an ordinary scheduler choice. It does
-# carry §13's risk in mirror image — if `one` also goes down this array starves instead of
-# queueing — which is why it is dated, scoped to this one fault, and removed on the reboot.
-# User-approved 2026-08-03 after the job-1036 post-mortem.
+# It is retained for a DIFFERENT and weaker reason: the two nodes now run DIFFERENT driver
+# versions — `one` on 590.48.01, `two` on 595.84 — because only `two` was rebooted into the
+# 595 series. This sweep's six points exist to be compared against each other across
+# `loss.aux_weight` and `optim.lr`, so holding the driver constant across them removes a
+# variable no one wants to have to argue about later. The cost is wall-clock: serialised on
+# one node the sweep takes ~4.5 h instead of ~2.5 h across both.
+#
+# REMOVE THIS (and the %1 below) once the two nodes are on the SAME driver series. At that
+# point both flags are pure cost. This is `--exclude`, not the `--nodelist` CLAUDE.md §13
+# forbids: §13 bans pinning TO a preferred node, and this leaves `one` an ordinary scheduler
+# choice while excluding a node whose difference is measured, not assumed.
 #SBATCH --output=reports/p3/sweep/slurm_%A_%a.out
 #SBATCH --error=reports/p3/sweep/slurm_%A_%a.err
 # No --account / --qos (accounting disabled), no --nodelist (never pin; `one` is often down).

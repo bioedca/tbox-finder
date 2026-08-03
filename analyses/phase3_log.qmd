@@ -1185,3 +1185,57 @@ error as a report naming a backend the model never loaded.
 `test_sbatch_overrides` **22 pass**; `ruff` + `black` clean; `bash -n` clean.
 
 **Commit.** Feature branch `p3-06-stage2-lora`; squash SHA derived at the phase-exit gate.
+
+## Step P3-06 (addendum 4) — 2026-08-03: the run worked; the gate asked the wrong ranks
+
+**Result.** Job 1053 point 0 (`aux0.0_lr1e-4`) **trained successfully** — all 10 epochs, best
+val 0.001677 at epoch 4, rank 0's report `overall_pass: true` with a 51.4 MB LoRA adapter,
+804 KB of heads, 13,040,268 saved parameters. And it wrote **no `.OK`**, because ranks 1–7
+raised `gate FAILED (clauses: checkpoint_written, provenance_recorded)`. Job cancelled at the
+user's decision after point 1 confirmed the same path; the remaining four points would have
+spent ~3.5 GPU-h to reach the identical ending.
+
+**⚠ THE DEFECT: rank-0-only evidence graded on every rank.** `train_stage2` gates the
+*evidence* on the primary rank — only rank 0 saves the adapter, only rank 0 takes the git
+snapshot — while every rank built the report **and judged it**. So on ranks 1–7 the two
+clauses that read those artifacts were correctly `False`, and raising on them turned a healthy
+run into a non-zero exit. torchrun propagated it, the sbatch's `rc` check skipped the `cp` out
+of node-local scratch, and the EXIT trap deleted the checkpoint. **~45 GPU-minutes destroyed
+at the finish line by a gate asking the wrong ranks the right question.**
+
+This is the third variant of one theme in this step, and worth naming as such: a clause is only
+as good as the *scope* it is evaluated in. P2-10d′-c was a gate reading state the run itself
+mutated; the checkpointing clause counted a flag instead of measuring an effect; this one
+grades artifacts on processes that were never meant to produce them. Each passed its own unit
+tests, because each was tested where its evidence existed.
+
+**Fix.** The verdict is scoped to the rank that holds the evidence: non-primary ranks build the
+report (harmless, and it keeps diagnostics identical across ranks) and **return without
+judging**. Every rank still raises on its *own* failures — OOM, NaN, a collate error — because
+those propagate out of the loop and never reach the gate; that path is what caught jobs 1036
+and 1044 and is untouched. No collective is involved, so there is no barrier to get wrong.
+Guarded two ways: a clause-level test asserting a non-primary report derives exactly those two
+as `False` **while every other clause still holds** (which is what makes them rank-scoped
+rather than simply broken), and an `ast`/source check that the early return precedes
+`validate_report`. Sabotage-bitten by deleting the early return.
+
+**The checkpoint-copy behaviour is left as it is, deliberately.** Writing to node-local scratch
+and copying out only after a passing `rc` is *correct*: a run that fails its gate must not
+leave a checkpoint behind. The bug was the gate, not the copy — and with the verdict scoped to
+rank 0, rank 0's own success now governs whether the artifact survives.
+
+**Node `two` is fixed, verified not assumed.** It rebooted into kernel `6.8.0-134-generic`
+with a resident nvidia **595.84** matching userspace **595.84**, and `nvidia-smi` lists all 8
+A4000s. (The writeup predicted `-136` on `GRUB_DEFAULT=0`; it came up on `-134`, which also
+carried the 595.84 DKMS build. The fix landed; the kernel prediction was wrong.) The cluster is
+now **heterogeneous** — `one` on 590.48.01, `two` on 595.84 — so `--exclude=two` is **retained
+for a different and weaker reason**: holding the driver constant across six points that exist
+to be compared with each other. Its rationale in the sbatch was **rewritten rather than left**,
+since the fault it originally cited no longer exists and the file would have gone on asserting
+it; the guarding test now requires a dated rationale plus a stated removal condition rather
+than one specific sentence.
+
+**Validation.** Trainer suite **94 pass**, sizing **18 pass**, `test_sbatch_overrides` **22
+pass**; `ruff` + `black` clean; `bash -n` clean. **17 sabotages across the step.**
+
+**Commit.** Feature branch `p3-06-stage2-lora`; squash SHA derived at the phase-exit gate.
