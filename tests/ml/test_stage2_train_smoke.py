@@ -616,6 +616,36 @@ def test_the_sbatch_scratch_var_is_not_named_BUILD() -> None:
     assert "\nBUILD=" not in text
 
 
+def test_every_inline_python_block_in_every_sbatch_actually_compiles() -> None:
+    """`python -c '...'` bodies are Python, and nothing was checking that they parse.
+
+    Found the hard way at P3-06: the first draft of this step's HF-warm probe wrote
+    ``f"attn={getattr(cfg, \\"_attn\\", None)}"`` inside a single-quoted shell string, so the
+    backslash survived into the Python source and the block was a SyntaxError. It would have
+    died seconds into the job — after the queue wait — which is job 789's failure shape
+    exactly. Repo-wide rather than scoped to this file's sbatch, because the defect is a
+    property of the quoting pattern and not of this step.
+    """
+    import re
+
+    blocks = [
+        (path, match.group(1))
+        for path in sorted((_REPO / "slurm").rglob("*.sbatch"))
+        for match in re.finditer(
+            r"^PYTHONPATH=\S* python -c '\n(.*?)\n'$", path.read_text(), re.S | re.M
+        )
+    ]
+    # Emptiness guard: a regex that matched nothing would make this vacuously green.
+    assert blocks, "no inline `python -c` blocks discovered in any sbatch at all"
+    broken = []
+    for path, body in blocks:
+        try:
+            compile(body, str(path), "exec")
+        except SyntaxError as exc:
+            broken.append(f"{path.relative_to(_REPO)}: line {exc.lineno}: {exc.msg}")
+    assert not broken, broken
+
+
 def test_the_sweep_grid_is_the_six_points_the_header_claims() -> None:
     text = _SBATCH.read_text()
     assert "AUX=(0.0  0.0  0.5  0.5  1.0  1.0)" in text

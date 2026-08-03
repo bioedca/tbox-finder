@@ -932,6 +932,17 @@ report — and failed its own gate on **exactly one clause, `full_population`**.
 rule-shaped clause survives truncation, which is why completeness is asserted beside
 correctness rather than assumed from them.
 
+**⚠ The shipped probe was a SyntaxError, and only executing its own bytes found it.** The
+HF-warm block wrote `f"attn={getattr(model.config, \\"_attn_implementation\\", None)}"` inside a
+single-quoted shell string, so the backslash survived into the Python source and the block
+did not parse. `bash -n` passes it (the shell string is well-formed), every local test passed,
+and the job would have died seconds in — after the queue wait — which is job 789's failure
+shape exactly. It surfaced because the pre-ack check extracted the command's **own bytes**
+from the sbatch and ran them on the cluster instead of a retyped equivalent. Fixed by binding
+`attn` to a name first, and a new repo-wide test now `compile()`s every inline
+`python -c '...'` block in every sbatch (7 found, all parse) with an emptiness guard so a
+regex that matched nothing could not pass vacuously.
+
 **⚠ The rm-target gate caught the sbatch before CI did.** The first draft cleared stale
 outputs with `rm -rf "${CKPT_DIR:?}/provenance.json"`. `tests/unit/test_sbatch_rm_targets.py`
 cannot resolve the `${VAR:?}` form, so it scored the target as a bare wildcard and matched 12

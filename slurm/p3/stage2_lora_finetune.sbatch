@@ -211,13 +211,18 @@ export WANDB_DIR="$JOB_SCRATCH"     # offline W&B curves stay node-local; the JS
 # against torch's libs. This also pre-warms the HF cache ONCE — torchrun's 8 ranks each call
 # from_pretrained with no cache_dir, and without a warm cache they race on 8 concurrent
 # downloads of the same 2.5 GB pinned revision into one HF_HOME.
+# ⚠ NO BACKSLASH-ESCAPED QUOTES INSIDE THIS BLOCK. The body is a single-quoted shell string,
+# so a `\"` survives into the Python source and an f-string expression containing one is a
+# SyntaxError — the job dies seconds in, after the queue wait, exactly like job 789. The
+# first draft of this probe had that defect and it was caught only by executing these bytes
+# on the cluster before the ack. Bind to a name first; do not inline the getattr.
 PYTHONPATH=src python -c '
 import torch
 from tbox_finder.eval.rinalmo_parity import REPO_ID, REVISION
 from tbox_finder.train.lora_harness import load_rinalmo_backbone
 model = load_rinalmo_backbone()
-print(f"hf cache warm {REPO_ID} {REVISION} torch={torch.__version__} "
-      f"attn={getattr(model.config, \"_attn_implementation\", None)}")
+attn = getattr(model.config, "_attn_implementation", None)
+print(f"hf cache warm {REPO_ID} {REVISION} torch={torch.__version__} attn={attn}")
 '
 
 # ── Train this point (DDP×8) ─────────────────────────────────────────────────
