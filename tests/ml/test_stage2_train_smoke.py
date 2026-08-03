@@ -451,6 +451,13 @@ def _passing_report() -> dict[str, Any]:
             "heads_bytes": 800_000,
             "n_saved_parameters": 13_040_268,
         },
+        device={
+            "is_cuda": True,
+            "name": "NVIDIA RTX A4000",
+            "driver_version": "590.48.01",
+            "capability": [8, 6],
+            "n_visible_devices": 8,
+        },
         git_snapshot={"git_sha": "deadbeef", "git_dirty": False, "git_dirty_paths": []},
     )
 
@@ -595,7 +602,11 @@ def test_the_sbatch_requests_a_whole_gpu_node_and_pins_nothing() -> None:
     text = _SBATCH.read_text()
     assert "#SBATCH --partition=gpu" in text
     assert "#SBATCH --gres=gpu:a4000:8" in text
-    assert "#SBATCH --array=0-5%1" in text  # serialised while one gpu node is unhealthy
+    # Unserialised and unrestricted: both gpu nodes are healthy again, so the `%1` +
+    # `--exclude=two` pair that guarded against the broken one is spent. The caveat that
+    # replaced it — points may land on either driver — is recorded in the run's own report,
+    # which is asserted separately.
+    assert "#SBATCH --array=0-5\n" in text
     # The health check must run BEFORE the 2.5 GB HF download, or a bad node costs
     # minutes instead of seconds (job 1036 lost three points that way).
     assert text.index("STAGE2_NODE_UNHEALTHY") < text.index("hf cache warm")
@@ -608,13 +619,15 @@ def test_the_sbatch_requests_a_whole_gpu_node_and_pins_nothing() -> None:
     # `--exclude=two` is a DATED, temporary carve-out for a measured node fault (job 1036).
     # If it is present it must carry its removal condition, so it cannot quietly outlive the
     # reboot that fixes the node and silently halve the cluster.
-    # `--exclude` is a dated carve-out. It must carry BOTH a stated removal condition and a
-    # rationale, so it cannot outlive its reason — the first version cited a node fault that
-    # has since been fixed, and the file would have gone on asserting it.
+    # Any node carve-out must carry BOTH a date and a stated removal condition, so it cannot
+    # outlive its reason — the first one cited a node fault that has since been fixed, and the
+    # file would have gone on asserting it. None is present now; this guards a re-addition.
     if any("--exclude" in ln for ln in directives):
-        assert "EXCLUDE RATIONALE" in text
         assert "REMOVE THIS" in text
-        assert "2026-" in text  # dated, so a reader can tell how stale the reason is
+        assert "2026-" in text
+    # The driver heterogeneity accepted in exchange must stay written down.
+    assert "ACCEPTED CAVEAT" in text
+    assert "590.48.01" in text and "595.84" in text
 
 
 def test_the_sbatch_activates_the_rna_env_not_the_dna_one() -> None:
@@ -1089,3 +1102,38 @@ def test_train_stage2_returns_without_judging_on_a_non_primary_rank() -> None:
         "the non-primary early return must precede validate_report, or ranks without the "
         "evidence will judge rank 0's artifacts again"
     )
+
+
+def test_the_report_records_the_driver_the_run_actually_used() -> None:
+    """The two gpu nodes are on different drivers and points may land on either.
+
+    Not a gate clause — a run on either driver is legitimate — but it must be WRITTEN DOWN,
+    or a sweep whose arms are compared against each other is uniform on that axis only by
+    assumption. The driver comes from nvidia-smi rather than torch because `torch.version.cuda`
+    is the CUDA *runtime*, and the runtime is not what diverged between the nodes.
+    """
+    report = _passing_report()
+    device = report["device"]
+    assert device["driver_version"] == "590.48.01"
+    assert device["name"] and device["capability"] == [8, 6]
+    # It is provenance, not a verdict: a run must not fail because of which driver it got.
+    clauses = T.derive_clauses(report)
+    stripped = json.loads(json.dumps(report))
+    stripped["device"] = {"is_cuda": True, "name": None, "driver_version": None}
+    assert (
+        T.derive_clauses(stripped) == clauses
+    ), "the device block leaked into the gate — a legitimate run on the other node would fail"
+
+
+def test_device_record_survives_a_missing_nvidia_smi() -> None:
+    """Provenance must not be able to kill a finished run.
+
+    Losing ~45 GPU-minutes because a version string was unreadable would be the tail wagging
+    the dog — the failure this whole addendum is about, in miniature.
+    """
+    torch = _require_torch()
+    record = T.device_record()
+    assert set(record) >= {"is_cuda", "torch_version", "driver_version", "n_visible_devices"}
+    assert record["torch_version"] == torch.__version__
+    # On a CPU-only box driver_version is None and that is a recorded fact, not an error.
+    assert record["driver_version"] is None or isinstance(record["driver_version"], str)

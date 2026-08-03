@@ -102,30 +102,20 @@
 #SBATCH --cpus-per-task=16
 #SBATCH --mem=64G
 #SBATCH --time=02:00:00
-#SBATCH --array=0-5%1
-# %1 = one task at a time. Not a throughput choice: with one of the two gpu nodes
-# carrying a broken driver stack (job 1036), running six whole-node tasks at once
-# risks burning the whole array on the bad node before a single point completes.
-# Serialised, each task's placement is an independent draw and the health check above
-# turns a bad draw into a 5-second exit. Restore 0-5 once both nodes are healthy.
-#SBATCH --exclude=two
-# ⚠ EXCLUDE RATIONALE — RESTATED 2026-08-03, and the original reason is now SPENT.
-# It was added because `two` had a broken driver stack. That is FIXED: it rebooted into
-# kernel 6.8.0-134-generic with a resident nvidia 595.84 matching userspace 595.84, and
-# nvidia-smi lists all 8 A4000s (verified 2026-08-03). Leaving the old wording in place
-# would have made this file assert a condition that no longer holds.
+#SBATCH --array=0-5
+# Unserialised and unrestricted as of 2026-08-03: BOTH gpu nodes are healthy again (`two`
+# rebooted into kernel 6.8.0-134-generic with a resident nvidia 595.84 matching userspace,
+# verified), so the `%1` + `--exclude=two` pair that guarded against the broken node is spent.
 #
-# It is retained for a DIFFERENT and weaker reason: the two nodes now run DIFFERENT driver
+# ⚠ ACCEPTED CAVEAT (user decision 2026-08-03): the two nodes now run DIFFERENT driver
 # versions — `one` on 590.48.01, `two` on 595.84 — because only `two` was rebooted into the
-# 595 series. This sweep's six points exist to be compared against each other across
-# `loss.aux_weight` and `optim.lr`, so holding the driver constant across them removes a
-# variable no one wants to have to argue about later. The cost is wall-clock: serialised on
-# one node the sweep takes ~4.5 h instead of ~2.5 h across both.
-#
-# REMOVE THIS (and the %1 below) once the two nodes are on the SAME driver series. At that
-# point both flags are pure cost. This is `--exclude`, not the `--nodelist` CLAUDE.md §13
-# forbids: §13 bans pinning TO a preferred node, and this leaves `one` an ordinary scheduler
-# choice while excluding a node whose difference is measured, not assumed.
+# 595 series. Points may therefore land on either driver. This was chosen deliberately over
+# an open-ended queue wait: cryosparc holds 2 of 8 GPUs on each node, so a whole-node request
+# cannot start on either until those clear (P2-06 waited ~4 h in exactly this situation), and
+# excluding a node halved the chance of a whole node freeing up. The difference is expected to
+# be immaterial — same CUDA 12.x, same torch build, same pinned wheels — but it is NOT
+# controlled, so each run records the driver it actually used in its report's `device` block
+# and the sweep can be audited on that axis rather than assumed uniform.
 #SBATCH --output=reports/p3/sweep/slurm_%A_%a.out
 #SBATCH --error=reports/p3/sweep/slurm_%A_%a.err
 # No --account / --qos (accounting disabled), no --nodelist (never pin; `one` is often down).

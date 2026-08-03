@@ -101,6 +101,7 @@ __all__ = [
     "Stage2TrainConfig",
     "build_report",
     "derive_clauses",
+    "device_record",
     "diagnostics",
     "forward_backward",
     "lr_scale",
@@ -694,6 +695,7 @@ def build_report(
     cfg: Stage2TrainConfig,
     *,
     data: Mapping[str, Any],
+    device: Mapping[str, Any],
     steps: Mapping[str, Any],
     wrap: Mapping[str, Any],
     objective: Mapping[str, Any],
@@ -722,6 +724,9 @@ def build_report(
         "save_checkpoint": bool(cfg.save_checkpoint),
         "config": diagnostics(cfg),
         "data": _sanitize(data),
+        # The hardware this run actually used. Not a gate clause — a run on either driver is
+        # legitimate — but recorded so the sweep can be audited on an axis that really varies.
+        "device": _sanitize(device),
         "steps": _sanitize(steps),
         "wrap": _sanitize(wrap),
         "objective": _sanitize(objective),
@@ -977,6 +982,52 @@ def build_model(cfg: Stage2TrainConfig, *, base_model: Any = None):
         "checkpoint_use_reentrant": use_reentrant,
     }
     return model, info
+
+
+def device_record() -> dict[str, Any]:
+    """The GPU this rank actually ran on — name, capability, and DRIVER VERSION.
+
+    Recorded because the two cluster nodes are no longer on the same driver (`one` 590.48.01,
+    `two` 595.84 after only `two` was rebooted into the 595 series on 2026-08-03), and the
+    sweep is allowed to place points on either. The difference is expected to be immaterial —
+    same CUDA 12.x, same torch build, same pinned wheels — but "expected" is not "controlled",
+    and a sweep whose arms are compared against each other should be auditable on every axis
+    that actually varied rather than assumed uniform on the ones nobody wrote down.
+
+    The driver version comes from ``nvidia-smi`` because torch exposes the CUDA *runtime*
+    (``torch.version.cuda``), not the kernel driver — the two are exactly what diverged.
+    """
+    import torch
+
+    record: dict[str, Any] = {
+        "is_cuda": bool(torch.cuda.is_available()),
+        "torch_version": torch.__version__,
+        "cuda_runtime": torch.version.cuda,
+        "name": None,
+        "capability": None,
+        "n_visible_devices": 0,
+        "driver_version": None,
+    }
+    if torch.cuda.is_available():
+        record["name"] = torch.cuda.get_device_name(0)
+        record["capability"] = list(torch.cuda.get_device_capability(0))
+        record["n_visible_devices"] = torch.cuda.device_count()
+    try:
+        out = subprocess.run(
+            ["nvidia-smi", "--query-gpu=driver_version", "--format=csv,noheader"],
+            capture_output=True,
+            text=True,
+            timeout=20,
+            check=False,
+        )
+        if out.returncode == 0 and out.stdout.strip():
+            record["driver_version"] = out.stdout.strip().splitlines()[0].strip()
+    except (OSError, subprocess.SubprocessError):
+        # A missing/failing nvidia-smi is recorded as None rather than raised: this is
+        # provenance, and losing a finished run over an unreadable version string would be
+        # the tail wagging the dog.
+        pass
+    return record
 
 
 def _trainable_parameters(model: Any) -> list[Any]:
@@ -1299,6 +1350,7 @@ def train_stage2(
             "val_census": val_census or None,
             "n_train_val_row_id_overlap": overlap,
         },
+        device=device_record(),
         steps={
             "n_steps": n_steps,
             "expected_n_steps": per_epoch * cfg.epochs,

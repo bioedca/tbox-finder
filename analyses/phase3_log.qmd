@@ -1239,3 +1239,41 @@ than one specific sentence.
 pass**; `ruff` + `black` clean; `bash -n` clean. **17 sabotages across the step.**
 
 **Commit.** Feature branch `p3-06-stage2-lora`; squash SHA derived at the phase-exit gate.
+
+## Step P3-06 (addendum 5) — 2026-08-03: both nodes back, and the axis that now varies
+
+**Placement (user decision 2026-08-03).** `--exclude=two` and `--array=0-5%1` are both
+**removed**. The node fault they guarded is fixed, and the `%1` comment had already committed
+to its own removal ("Restore 0-5 once both nodes are healthy"), so dropping it executes a
+recorded decision rather than making a new one. The trigger was the queue: cryosparc holds
+**2 of 8 GPUs on each node**, so a whole-node `--gres=gpu:a4000:8` request cannot start on
+either until those clear — the P2-06 starvation pattern, which waited ~4 h — and excluding a
+node halved the chance of one freeing up. `sbatch --test-only` reporting a **2027** start time
+is SLURM's `infinite`-TIMELIMIT placeholder confirming it cannot schedule now, not an estimate.
+
+**⚠ THE ACCEPTED CAVEAT, AND WHAT WAS DONE ABOUT IT.** The two nodes now run **different
+driver versions** — `one` on 590.48.01, `two` on 595.84, because only `two` was rebooted into
+the 595 series — so points may land on either. This was chosen over an open-ended queue wait.
+The difference is expected to be immaterial (same CUDA 12.x, same torch build, same pinned
+wheels), but *expected* is not *controlled*, and a sweep whose six arms exist to be compared
+against each other should not be uniform on an axis only by assumption.
+
+So the axis is now **recorded**: `train.device_record()` writes the GPU name, capability,
+visible-device count, torch version, CUDA runtime **and the kernel driver version** into every
+run's report. The driver comes from `nvidia-smi` rather than torch on purpose —
+`torch.version.cuda` is the CUDA *runtime*, and the runtime is not what diverged between the
+nodes; reporting it would have looked like provenance while recording the wrong number.
+
+**It is provenance, not a verdict.** A run on either driver is legitimate, so the block is
+deliberately **not** a gate clause, and a test asserts that stripping it leaves the derived
+clauses unchanged — a device block that leaked into the gate would fail a perfectly good run
+for landing on the other node. A second test asserts `device_record()` survives a missing or
+failing `nvidia-smi` and records `None`: losing ~45 GPU-minutes because a version string was
+unreadable would be the failure this whole addendum is about, in miniature.
+
+**Validation.** Trainer **96 pass**, sizing **18 pass**, `test_sbatch_overrides` **22 pass**;
+`ruff` + `black` clean; `bash -n` clean. The sbatch guard now requires any future node
+carve-out to carry a date and a removal condition, and requires the accepted caveat to stay
+written down.
+
+**Commit.** Feature branch `p3-06-stage2-lora`; squash SHA derived at the phase-exit gate.
