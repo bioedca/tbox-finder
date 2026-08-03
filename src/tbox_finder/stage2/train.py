@@ -114,7 +114,16 @@ __all__ = [
 # --------------------------------------------------------------------------------------
 # Provenance constants (CLAUDE.md §11). Single-sourced here; conf/ echoes them.
 # --------------------------------------------------------------------------------------
-SCHEMA_VERSION = "1"
+#: Bumped 1 -> 2 when the CLAUSE SET changed after job 1064 (CodeRabbit r2): `steps_ran` gained
+#: the optimiser-step domain, and `gradient_checkpointing_verified` became
+#: `gradient_checkpointing_flag_consistent`. A clause set is part of a report's shape, so
+#: adding one makes every earlier report a different schema — not a corrupt one. Job 1064's six
+#: reports are schema 1 and are KEPT as written: they are the run's own record, and
+#: `tests/ml/test_stage2_train_smoke.py` pins the fact that they fail the schema-2 gate on
+#: `steps_ran` for the real reason that those runs carried the scheduler-domain defect.
+#: Excusing that clause on an older schema would hide a genuine defect, which is the one thing
+#: a version bump must not be used for.
+SCHEMA_VERSION = "2"
 STEP = "P3-06"
 ENTRYPOINT = "tbox_finder.stage2.train"
 #: ADR-0002 A4 — Stage-2 is the RNA closure, NOT ml-dna's.

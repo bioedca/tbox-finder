@@ -1508,3 +1508,42 @@ read `pass` while the body was only the Fair-Usage notice.
 `bash -n` clean.
 
 **Commit.** Feature branch `p3-06-stage2-lora`; squash SHA derived at the phase-exit gate.
+
+## Step P3-06 (schema) — 2026-08-03: the corrected gate refuses job 1064, and that is recorded
+
+**All seven committed reports failed their own validators** once r2/r3 strengthened the clause
+sets — found by running the validators against the committed artifacts rather than assuming
+they still applied. `SCHEMA_VERSION` is bumped **1 → 2** on both modules, because a clause set
+is part of a report's shape: adding one makes every earlier report a *different* schema, not a
+corrupt one.
+
+**⚠ The two failures are categorically different, and conflating them would have laundered a
+defect.**
+
+* **`steps_ran` — a real defect.** Job 1064's arms sized the cosine in micro-batches, so the
+  optimiser advanced 1,415 of 2,830 scheduled steps. Schema 2 compares the two domains and
+  refuses those runs, correctly. The standing habit on a version bump is to excuse a clause the
+  older schema lacks; that is right only when the old report would re-derive **TRUE**. Here it
+  re-derives **FALSE for a real reason**, so excusing it would push a known defect through a
+  compatibility shim. It is **asserted as failing** instead.
+* **`losses_finite` — not a defect, an absence.** Schema 1 predates `n_nonfinite_grad_steps`
+  (added for Greptile's NaN-gradient finding), so the post-all-reduce check was never measured.
+  *Unmeasured* is neither passed nor failed; excusing it into TRUE would assert those runs had
+  finite gradients when nobody looked. It also stays False, and the reason is written down.
+
+`tests/ml/test_stage2_train_smoke.py` now pins all of it: six reports present (emptiness guard
+first, so a glob matching nothing cannot make the rest vacuous), all schema 1, failing
+**exactly** `["losses_finite", "steps_ran"]` — a new entry means a second defect surfaced, a
+missing one means a clause stopped biting or the reports were regenerated. The distinction is
+checked rather than described: the scheduler clause has its evidence and fails on it
+(`n_optimizer_steps != n_steps`), the gradient clause has no evidence at all
+(`"n_nonfinite_grad_steps" not in losses`), and what schema 1 *did* measure was clean
+(`n_nonfinite_steps == 0`).
+
+**The reports are kept as written.** They are job 1064's own record, and the user's decision was
+to keep the checkpoints and record the defect — regenerating the reports to make them pass
+would be the precise opposite.
+
+**Validation.** Trainer **116 pass**, sizing 20, overrides 22, backfill 4; ruff + black clean.
+
+**Commit.** Feature branch `p3-06-stage2-lora`; squash SHA derived at the phase-exit gate.

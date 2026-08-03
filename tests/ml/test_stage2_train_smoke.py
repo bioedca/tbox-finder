@@ -1419,3 +1419,79 @@ def test_the_tri_state_helper_names_the_column_it_actually_read() -> None:
 
     source = inspect.getsource(T.row_eligibility)
     assert 'field="calib"' in source and 'field="nested_train"' in source
+
+
+# --------------------------------------------------------------------------------------
+# The job-1064 reports vs the schema-2 gate — the defect PINNED, not excused
+# --------------------------------------------------------------------------------------
+_SWEEP_REPORTS = sorted((_REPO / "reports" / "p3" / "sweep").glob("aux*.json"))
+
+
+def test_the_committed_sweep_reports_are_all_present_and_schema_1() -> None:
+    """Six arms, all written by job 1064 before the clause set changed.
+
+    An emptiness guard first: a glob that matched nothing would make every assertion below
+    vacuously true, which is exactly how a "the artifacts are fine" claim gets made about no
+    artifacts at all.
+    """
+    assert len(_SWEEP_REPORTS) == 6, [p.name for p in _SWEEP_REPORTS]
+    for path in _SWEEP_REPORTS:
+        report = json.loads(path.read_text())
+        assert report["schema_version"] == "1", (
+            f"{path.name} is no longer schema 1 — if it was regenerated, the pinned "
+            "scheduler-defect expectation below is stale and must be re-derived"
+        )
+        assert report["step"] == T.STEP
+
+
+def test_the_committed_reports_FAIL_the_corrected_gate_on_the_scheduler_defect() -> None:
+    """This is the point of the whole exercise: the defect is recorded, not excused.
+
+    Job 1064's arms trained with the LR schedule sized in micro-batches, so the optimiser
+    advanced 1,415 of 2,830 scheduled steps and the cosine stopped at 0.5501x base. Schema 2's
+    `steps_ran` compares the two domains and therefore refuses those runs — correctly.
+
+    The temptation on a version bump is to excuse a clause the older schema lacks. That is
+    right when the old report would re-derive TRUE, and WRONG here: this clause re-derives
+    FALSE for a real reason, and excusing it would launder a known defect through a
+    compatibility shim. So the failure is asserted instead. If these reports ever start
+    passing, someone regenerated or edited them and this test says so.
+    """
+    for path in _SWEEP_REPORTS:
+        report = json.loads(path.read_text())
+        clauses = T.derive_clauses(report)
+        failing = sorted(k for k, v in clauses.items() if not v)
+
+        # EXACTLY two, for two DIFFERENT reasons that must not be conflated:
+        #
+        #  • `steps_ran` — a REAL defect. Those runs sized the cosine in micro-batches, so the
+        #    optimiser advanced half the scheduled steps. Schema 2 refuses them correctly, and
+        #    that refusal is the thing being pinned.
+        #
+        #  • `losses_finite` — NOT a defect: schema 1 predates `n_nonfinite_grad_steps`, so the
+        #    post-all-reduce gradient check simply was not measured. "Unmeasured" is not
+        #    "passed" and it is not "failed" either; the clause cannot be satisfied by a report
+        #    that lacks its evidence, and excusing it into TRUE would assert those runs had
+        #    finite gradients when nobody looked. It stays False, and it stays documented here.
+        assert failing == ["losses_finite", "steps_ran"], (
+            f"{path.name} fails {failing}; expected exactly the scheduler defect plus the "
+            "unmeasured gradient check. A new entry means a second defect surfaced; a missing "
+            "one means a clause stopped biting or the report was regenerated"
+        )
+        # And the distinction is checked, not just asserted: one has its evidence and fails on
+        # it, the other has no evidence at all.
+        assert report["steps"]["n_optimizer_steps"] != report["steps"]["n_steps"]
+        assert "n_nonfinite_grad_steps" not in report["losses"]
+        assert report["losses"]["n_nonfinite_steps"] == 0  # what schema 1 DID measure: clean
+
+
+def test_the_recorded_step_counts_show_exactly_the_defect_that_was_diagnosed() -> None:
+    """Not "it failed" but "it failed by half" — the number that made this diagnosable."""
+    for path in _SWEEP_REPORTS:
+        steps = json.loads(path.read_text())["steps"]
+        # Schema 1 wrote the scheduler's domain under the micro-batch name.
+        assert steps["total_scheduled_steps"] == steps["n_steps"]
+        assert steps["n_optimizer_steps"] * 2 == steps["n_steps"], (
+            "gradient_accumulation_steps was 2, so the optimiser took exactly half the "
+            "micro-batch count — the ratio that made the cosine stop at 50%"
+        )

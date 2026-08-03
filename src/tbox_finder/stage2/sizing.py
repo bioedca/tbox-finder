@@ -61,7 +61,11 @@ __all__ = [
     "validate_report",
 ]
 
-SCHEMA_VERSION = "1"
+#: Bumped 1 -> 2 with the clause set (CodeRabbit r2): `measured_the_requested_batch` was added
+#: and `recommendation` became validator-re-derived. Job 1051's committed report is schema 1;
+#: its numbers stand, but it does not carry the schema-2 clause and its recommendation predates
+#: the computed-headroom shape.
+SCHEMA_VERSION = "2"
 STEP = "P3-06-sizing"
 DEFAULT_OUT = "reports/p3/stage2_sizing.json"
 
