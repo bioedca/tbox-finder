@@ -216,13 +216,29 @@ export WANDB_DIR="$JOB_SCRATCH"     # offline W&B curves stay node-local; the JS
 # SyntaxError — the job dies seconds in, after the queue wait, exactly like job 789. The
 # first draft of this probe had that defect and it was caught only by executing these bytes
 # on the cluster before the ack. Bind to a name first; do not inline the getattr.
+#
+# ⚠ The warm-load's OWN attention backend is NOT the run's. `load_rinalmo_backbone()` called
+# bare passes attn_implementation=None straight to from_pretrained, so transformers picks its
+# default (eager here) — whereas the training run goes through `build_peft_model`, which
+# SELECTS the backend from the measured sm_86 evidence in reports/p1/kernel_smoke.json. The
+# first draft printed the warm-load's value and would have written "attn=eager" into the job
+# log for a run that uses FA-2. Both are printed, labelled, so the log cannot mislead.
 PYTHONPATH=src python -c '
 import torch
 from tbox_finder.eval.rinalmo_parity import REPO_ID, REVISION
-from tbox_finder.train.lora_harness import load_rinalmo_backbone
-model = load_rinalmo_backbone()
-attn = getattr(model.config, "_attn_implementation", None)
-print(f"hf cache warm {REPO_ID} {REVISION} torch={torch.__version__} attn={attn}")
+from tbox_finder.train import lora_harness as LH
+model = LH.load_rinalmo_backbone()
+warm_attn = getattr(model.config, "_attn_implementation", None)
+evidence = LH.read_sm86_flash_attn_evidence()
+selected, reason = LH.select_attention_backend(
+    flash_attn_importable=evidence["flash_attn_importable"],
+    sm86_confirmed=evidence["is_sm86"],
+    model_supports_flash_attn=LH.model_supports_flash_attn(),
+    dtype=LH.TRAIN_DTYPE,
+)
+print(f"hf cache warm {REPO_ID} {REVISION} torch={torch.__version__}")
+print(f"warm-load attn (NOT the run backend)={warm_attn}")
+print(f"run will select attn={selected} :: {reason}")
 '
 
 # ── Train this point (DDP×8) ─────────────────────────────────────────────────
