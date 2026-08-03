@@ -1823,3 +1823,58 @@ real (so `0.5` reads `True`) turns the refusal test red — a one-sided sabotage
 the second, which is the failure that actually matters here.
 
 **Commit.** Feature branch `p3-07-calibration-stack`; squash SHA derived at the phase-exit gate.
+
+## Step P3-08 — 2026-08-03: with/without-aux ablation on the calibrated Stage-2 binary head
+
+**Inputs.** The six P3-06 LoRA checkpoints under `data/processed/checkpoints/stage2_rinalmo/`
+(the ablation pair is the shipped-config production arm `aux1.0_lr1e-4` and its
+learning-rate-matched control `aux0.0_lr1e-4`); `data/processed/stage2_dataset.parquet`
+(30,542 rows; calib 1,089 / val 3,067 / test 3,045); the P3-07 calibration stack; and
+`metrics.binned_ece` / `average_precision` / `block_bootstrap_ci`.
+
+**Process.** This step had to build the thing it was specified to consume. Nothing in the
+repo read a Stage-2 checkpoint back — `stage2_heads.pt` and `lora_adapter/` had write sites
+and zero readers, and `stage2/train.py::evaluate` thresholds `tbox_logit` at zero and keeps
+only a scalar accuracy — so the per-row binary logits the calibration stack eats did not
+exist. `src/tbox_finder/stage2/eval.py` therefore ships the **score producer**
+(`load_stage2_checkpoint`, `score_rows`) alongside the ablation entry
+(`aux_ablation_check`). Both arms were scored forward-only on the laptop RTX 4060 over all
+7,201 calib+val+test rows, 12 min 33 s wall for the pair, and the per-row logits are written
+to `reports/p3/stage2_scores.json` because P3-09 and P3-10 need exactly that table and it
+costs GPU minutes to regenerate. Temperature is fitted on `calib` and nowhere else, and the
+grading rung is `test` per ADR-0004 A7.
+
+**Outputs.** `src/tbox_finder/stage2/eval.py`; `reports/stage2_aux_ablation.json`;
+`reports/p3/stage2_scores.json` (7,201 rows x 2 arms); `tests/unit/test_aux_ablation_check.py`
+(62 pass, no torch); `tests/ml/test_stage2_eval_smoke.py` (12 pass on the pinned ml-rna stack).
+
+**Validation.** `gate.overall_pass` is **false**, and that is the result rather than a
+failure to deliver. The with-aux production arm fits `T = 1.140627` and grades an
+in-distribution ECE of **0.005662** on the named (temperature-scaled, pre-prior-shift)
+posterior — 8.8x under the ADR-0005 D11 gate of 0.05 — while the **no-aux arm has no
+temperature at all**: its calib carve is *perfectly separated* (0 of 1,089 rows on the wrong
+side of zero), so the exact minimiser is the beta to infinity limit and `fit_temperature`
+refuses it. Two clauses are false in consequence
+(`in_distribution_ece_is_computable`, `temperature_positive_and_converged`) and no number was
+put where the missing ECE would have gone. On the axis that survives, test AUPRC is 0.999824
+with-aux against 0.999897 no-aux, a difference of 7.4e-5.
+
+**Decisions.** Three, all recorded rather than taken. (1) The imp.md gate grades degradation
+"beyond a pre-registered tolerance" and **no such tolerance exists** anywhere in `PRD.md`, the
+ADRs, `conf/` or `src/`; ADR-0005 D16's own sentence admits an absolute reading (with-aux must
+still hold the D11 grade — it does) and a delta reading (tau undefined). Both are computed,
+neither is resolved, and `ablation.verdict` is `requires_signoff`. (2) AUPRC is graded on
+logits, not on the posterior: `z -> z/T` is strictly monotone so it cannot move average
+precision, but sigma() saturates to exactly 1.0 at these margins and would tie the ranking
+away. (3) The adapter load is *measured* — every adapter and head tensor is compared
+bit-exactly against the file and non-zero `lora_B` blocks are counted — because PEFT only
+*warns* on missing keys and initialises `lora_B` to zero, so a silently-unloaded adapter is
+the untuned backbone producing a complete and meaningless report.
+
+**Caveat carried forward.** The with-aux fit rests on **exactly one** misclassified calib row
+of 1,089. That single record is the entire signal for beta; without it the production arm
+would be unfittable too, and P3-10's GATE-2 grade currently hangs on it. Median absolute
+logit is 8.26 with-aux against 14.45 no-aux, which is the mechanism: the aux terms shrink the
+head's margins and are what keep it calibratable at all.
+
+**Commit.** Feature branch `p3-08-aux-ablation`; squash SHA derived at the phase-exit gate.

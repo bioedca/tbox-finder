@@ -1,0 +1,889 @@
+{
+ "ablation": {
+  "delta_auprc": -7.3543781755947e-05,
+  "delta_ece": null,
+  "divergence": {
+   "note": "no ECE exists for at least one arm, so BOTH readings of D16 are unanswerable on the calibration axis; only the ranking axis is decidable",
+   "readings_disagree_for_auprc_tolerance_below": 7.3543781755947e-05,
+   "readings_disagree_for_ece_tolerance_below": null
+  },
+  "ece_comparison_available": false,
+  "graded_object": "named_posterior (temperature-scaled, PRE prior-shift) \u2014 ADR-0005 D11",
+  "graded_on_rung": "test",
+  "matched_lr": true,
+  "no_aux": {
+   "auprc": 0.9998972539458512,
+   "auprc_ci": {
+    "ci_level": 0.95,
+    "lower": 0.9996740916055659,
+    "n_blocks": 2275,
+    "n_boot": 2000,
+    "point": 0.9998972539458512,
+    "upper": 0.9999979826329899
+   },
+   "ece": null,
+   "ece_ci": null
+  },
+  "no_aux_arm": "aux0.0_lr1e-4",
+  "reading_absolute": {
+   "gate": 0.05,
+   "observed_ece": 0.005661656399710311,
+   "passes": null,
+   "rule": "with-aux still holds the D11 GATE-2 grade: in-distribution ECE <= gate",
+   "source": "ADR-0005 D16 read against D11; needs no new number",
+   "unavailable_reason": null
+  },
+  "reading_delta": {
+   "ece_axis_decidable": false,
+   "observed_auprc_degradation": 7.3543781755947e-05,
+   "observed_ece_degradation": null,
+   "rule": "with-aux is not worse than no-aux by more than tolerance tau",
+   "source": "imp.md P3-08 validation gate ('beyond a pre-registered tolerance')",
+   "tolerance": null,
+   "tolerance_status": "NEVER PRE-REGISTERED \u2014 not in PRD.md, any ADR, conf/ or src/",
+   "verdict": "unpinned"
+  },
+  "reference_margins_not_governing": {
+   "auprc": 0.03,
+   "ece": 0.02,
+   "source": "ADR-0005 D17 \u2014 RiNALMo\u2192RNA-FM backbone-swap trigger; NOT the D16 aux-ablation bar",
+   "would_pass_auprc": true,
+   "would_pass_ece": null
+  },
+  "verdict": "requires_signoff",
+  "with_aux": {
+   "auprc": 0.9998237101640952,
+   "auprc_ci": {
+    "ci_level": 0.95,
+    "lower": 0.9995841365141453,
+    "n_blocks": 2275,
+    "n_boot": 2000,
+    "point": 0.9998237101640952,
+    "upper": 0.9999749142687517
+   },
+   "ece": 0.005661656399710311,
+   "ece_ci": {
+    "ci_level": 0.95,
+    "lower": 0.002803826176821646,
+    "n_blocks": 2275,
+    "n_boot": 2000,
+    "point": 0.005661656399710311,
+    "upper": 0.009409179841518555
+   }
+  },
+  "with_aux_arm": "aux1.0_lr1e-4"
+ },
+ "adr": [
+  "ADR-0005 D11 (named posterior; 15 equal-mass debiased bins; ECE <= 0.05)",
+  "ADR-0005 D16 (aux weighting + the with/without-aux check)",
+  "ADR-0004 A7 (test is GATE-2's split; calib is where T is fitted)"
+ ],
+ "arms": {
+  "aux0.0_lr1e-4": {
+   "arm": "aux0.0_lr1e-4",
+   "aux_weight": 0.0,
+   "calibration": {
+    "calib_separation": {
+     "accuracy_at_zero": 1.0,
+     "is_perfectly_separated": true,
+     "max_abs_logit": 15.634926795959473,
+     "max_logit": 15.634926795959473,
+     "median_abs_logit": 14.381101608276367,
+     "min_abs_logit": 6.129150390625,
+     "min_logit": -14.880120277404785,
+     "n": 1089,
+     "n_misclassified_at_zero": 0,
+     "n_positive": 859
+    },
+    "fitted": false,
+    "fitted_on": "calib",
+    "refusal": {
+     "classification": "perfect_separation_beta_to_infinity",
+     "error_type": "TemperatureFitError",
+     "fitted": false,
+     "message": "every one of the 1089 positions is already its own arg-max, so NLL(beta) decreases monotonically and the minimiser is the near-perfect-accuracy limit beta -> inf (T -> 0). There is no temperature to fit on this set."
+    },
+    "temperature": null
+   },
+   "checkpoint_dir": "/home/bioedca/tbox-phylogeny/tbox-finder/data/processed/checkpoints/stage2_rinalmo/aux0.0_lr1e-4",
+   "grades": {
+    "test": {
+     "auprc": 0.9998972539458512,
+     "auprc_baseline_prevalence": 0.7727422003284072,
+     "auprc_ci": {
+      "ci_level": 0.95,
+      "lower": 0.9996740916055659,
+      "n_blocks": 2275,
+      "n_boot": 2000,
+      "point": 0.9998972539458512,
+      "upper": 0.9999979826329899
+     },
+     "auprc_on_posterior": null,
+     "auprc_rank_invariant": true,
+     "auprc_scaled_logits": 0.9998972539458512,
+     "block_census": {
+      "n_blocks": 2275,
+      "n_rows": 3045
+     },
+     "ece": null,
+     "ece_binning": "equal_mass",
+     "ece_debiased": true,
+     "ece_gate": 0.05,
+     "ece_gate_pass": null,
+     "ece_n_bins": 15,
+     "ece_unavailable_reason": "no temperature could be fitted on the calib rung, so the ADR-0005 D11 named posterior (temperature-scaled, pre-prior-shift) does not exist for this arm",
+     "graded_on": "RAW logits \u2014 the named posterior does not exist for this arm",
+     "n": 3045,
+     "n_negative": 692,
+     "n_positive": 2353,
+     "prevalence": 0.7727422003284072,
+     "separation": {
+      "accuracy_at_zero": 0.9954022988505747,
+      "is_perfectly_separated": false,
+      "max_abs_logit": 15.744148254394531,
+      "max_logit": 15.744148254394531,
+      "median_abs_logit": 14.44896125793457,
+      "min_abs_logit": 0.5868290066719055,
+      "min_logit": -14.903823852539062,
+      "n": 3045,
+      "n_misclassified_at_zero": 14,
+      "n_positive": 2353
+     },
+     "uncalibrated_diagnostic": {
+      "ece_at_T1": 0.0019573286170194875,
+      "note": "sigma(z) at T=1. NOT the GATE-2 object and NOT comparable to the 0.05 gate; recorded so the miscalibration that the missing T would have corrected is at least visible.",
+      "posterior_saturation": {
+       "n_at_one": 0,
+       "n_at_zero": 0
+      }
+     }
+    },
+    "val": {
+     "auprc": 0.9999787216771793,
+     "auprc_baseline_prevalence": 0.7675252689925008,
+     "auprc_ci": {
+      "ci_level": 0.95,
+      "lower": 0.9999541658122184,
+      "n_blocks": 2164,
+      "n_boot": 2000,
+      "point": 0.9999787216771793,
+      "upper": 0.9999960183302996
+     },
+     "auprc_on_posterior": null,
+     "auprc_rank_invariant": true,
+     "auprc_scaled_logits": 0.9999787216771793,
+     "block_census": {
+      "n_blocks": 2164,
+      "n_rows": 3067
+     },
+     "ece": null,
+     "ece_binning": "equal_mass",
+     "ece_debiased": true,
+     "ece_gate": 0.05,
+     "ece_gate_pass": null,
+     "ece_n_bins": 15,
+     "ece_unavailable_reason": "no temperature could be fitted on the calib rung, so the ADR-0005 D11 named posterior (temperature-scaled, pre-prior-shift) does not exist for this arm",
+     "graded_on": "RAW logits \u2014 the named posterior does not exist for this arm",
+     "n": 3067,
+     "n_negative": 713,
+     "n_positive": 2354,
+     "prevalence": 0.7675252689925008,
+     "separation": {
+      "accuracy_at_zero": 0.993478969677209,
+      "is_perfectly_separated": false,
+      "max_abs_logit": 15.57082462310791,
+      "max_logit": 15.57082462310791,
+      "median_abs_logit": 14.482701301574707,
+      "min_abs_logit": 0.3546372056007385,
+      "min_logit": -14.962584495544434,
+      "n": 3067,
+      "n_misclassified_at_zero": 20,
+      "n_positive": 2354
+     },
+     "uncalibrated_diagnostic": {
+      "ece_at_T1": 0.0030732747589102094,
+      "note": "sigma(z) at T=1. NOT the GATE-2 object and NOT comparable to the 0.05 gate; recorded so the miscalibration that the missing T would have corrected is at least visible.",
+      "posterior_saturation": {
+       "n_at_one": 0,
+       "n_at_zero": 0
+      }
+     }
+    }
+   },
+   "load": {
+    "adapter_config": {
+     "bias": "none",
+     "lora_alpha": 32,
+     "lora_dropout": 0.05,
+     "peft_type": "LORA",
+     "r": 16,
+     "target_modules": [
+      "key",
+      "query",
+      "linear",
+      "dense",
+      "value",
+      "linear_gate"
+     ]
+    },
+    "adapter_dir": "/home/bioedca/tbox-phylogeny/tbox-finder/data/processed/checkpoints/stage2_rinalmo/aux0.0_lr1e-4/lora_adapter",
+    "adapter_keys_absent_from_file": [],
+    "adapter_mismatched_keys": [],
+    "adapter_missing_keys": [],
+    "adapter_sha256": "a91b26db429e289fe34b161066bb0c3bf1edf6f6314821fa31ea773f4c5de69c",
+    "attn_implementation": "flash_attention_2",
+    "attn_implementation_matches_training": true,
+    "attn_implementation_trained_under": "flash_attention_2",
+    "base_model_name_or_path": "multimolecule/rinalmo-giga",
+    "checkpoint_dir": "/home/bioedca/tbox-phylogeny/tbox-finder/data/processed/checkpoints/stage2_rinalmo/aux0.0_lr1e-4",
+    "dtype": "bfloat16",
+    "head_mismatched_keys": [],
+    "heads_path": "/home/bioedca/tbox-phylogeny/tbox-finder/data/processed/checkpoints/stage2_rinalmo/aux0.0_lr1e-4/stage2_heads.pt",
+    "heads_sha256": "9218ce28d6c7387a283673d0d7917dd7281567c971ea97d230dde9804048704d",
+    "n_adapter_tensors_in_file": 462,
+    "n_adapter_tensors_matched": 462,
+    "n_adapter_tensors_mismatched": 0,
+    "n_adapter_tensors_missing_from_module": 0,
+    "n_head_tensors_in_file": 12,
+    "n_head_tensors_matched": 12,
+    "n_lora_b_nonzero": 231,
+    "n_lora_b_tensors": 231,
+    "n_module_adapter_tensors": 462,
+    "n_module_adapter_tensors_absent_from_file": 0,
+    "pairing_proj_dim": 64,
+    "revision": "2a71f6f98fb41dd2e6542a5e131d3778111d1468",
+    "structure_head": false
+   },
+   "lr": 0.0001,
+   "saved_from_epoch": 9,
+   "saved_val_total": 0.008840586557142035,
+   "scored_census": {
+    "calib": 1089,
+    "test": 3045,
+    "train": 0,
+    "val": 3067
+   },
+   "stack": {
+    "gated_posterior_key": "named_posterior",
+    "named_posterior_exists": false,
+    "prior_shift_applied": false,
+    "stack_applied": [
+     "train"
+    ],
+    "stack_order": [
+     "train",
+     "temperature_scale",
+     "prior_shift"
+    ]
+   }
+  },
+  "aux1.0_lr1e-4": {
+   "arm": "aux1.0_lr1e-4",
+   "aux_weight": 1.0,
+   "calibration": {
+    "beta": 0.876710565328598,
+    "calib_separation": {
+     "accuracy_at_zero": 0.9990817263544536,
+     "is_perfectly_separated": false,
+     "max_abs_logit": 14.341629981994629,
+     "max_logit": 10.231158256530762,
+     "median_abs_logit": 8.286476135253906,
+     "min_abs_logit": 5.215817451477051,
+     "min_logit": -14.341629981994629,
+     "n": 1089,
+     "n_misclassified_at_zero": 1,
+     "n_positive": 859
+    },
+    "converged": true,
+    "fitted": true,
+    "fitted_on": "calib",
+    "n_by_rung": {
+     "calib": 1089,
+     "test": 3045,
+     "train": 0,
+     "val": 3067
+    },
+    "n_fitted": 1089,
+    "n_iterations": 22,
+    "n_total": 7201,
+    "nll_per_position_final": 0.007131142492645936,
+    "nll_per_position_initial": 0.007428616986386666,
+    "temperature": 1.140627294282911
+   },
+   "checkpoint_dir": "/home/bioedca/tbox-phylogeny/tbox-finder/data/processed/checkpoints/stage2_rinalmo/aux1.0_lr1e-4",
+   "grades": {
+    "test": {
+     "auprc": 0.9998237101640952,
+     "auprc_baseline_prevalence": 0.7727422003284072,
+     "auprc_ci": {
+      "ci_level": 0.95,
+      "lower": 0.9995841365141453,
+      "n_blocks": 2275,
+      "n_boot": 2000,
+      "point": 0.9998237101640952,
+      "upper": 0.9999749142687517
+     },
+     "auprc_on_posterior": 0.9998237101640952,
+     "auprc_rank_invariant": true,
+     "auprc_scaled_logits": 0.9998237101640952,
+     "block_census": {
+      "n_blocks": 2275,
+      "n_rows": 3045
+     },
+     "ece": 0.005661656399710311,
+     "ece_binning": "equal_mass",
+     "ece_ci": {
+      "ci_level": 0.95,
+      "lower": 0.002803826176821646,
+      "n_blocks": 2275,
+      "n_boot": 2000,
+      "point": 0.005661656399710311,
+      "upper": 0.009409179841518555
+     },
+     "ece_debiased": true,
+     "ece_gate": 0.05,
+     "ece_gate_pass": true,
+     "ece_n_bins": 15,
+     "ece_plugin": 0.008378386471764655,
+     "graded_on": "named_posterior (temperature-scaled, PRE prior-shift)",
+     "n": 3045,
+     "n_negative": 692,
+     "n_positive": 2353,
+     "posterior_saturation": {
+      "n_at_one": 0,
+      "n_at_zero": 0
+     },
+     "prevalence": 0.7727422003284072,
+     "reliability": [
+      {
+       "acc": 0.0049261083743842365,
+       "conf": 3.852771408572489e-06,
+       "debiased_gap": 0.004812335322700019,
+       "gap": 0.004922255602975664,
+       "n": 203,
+       "p_max": 4.371982354851603e-06,
+       "p_min": 3.3597804308706118e-06,
+       "weight": 0.06666666666666667
+      },
+      {
+       "acc": 0.0,
+       "conf": 8.286428611844853e-06,
+       "debiased_gap": 0.0,
+       "gap": 8.286428611844853e-06,
+       "n": 203,
+       "p_max": 1.4205834106203602e-05,
+       "p_min": 4.3754563477170354e-06,
+       "weight": 0.06666666666666667
+      },
+      {
+       "acc": 0.009852216748768473,
+       "conf": 2.499603388602123e-05,
+       "debiased_gap": 0.009547243836513671,
+       "gap": 0.009827220714882451,
+       "n": 203,
+       "p_max": 4.5296529712926e-05,
+       "p_min": 1.4288000272820953e-05,
+       "weight": 0.06666666666666667
+      },
+      {
+       "acc": 0.5763546798029556,
+       "conf": 0.47781672537399006,
+       "debiased_gap": 0.07056526683644097,
+       "gap": 0.09853795442896557,
+       "n": 203,
+       "p_max": 0.9956386183026448,
+       "p_min": 4.537271350542189e-05,
+       "weight": 0.06666666666666667
+      },
+      {
+       "acc": 1.0,
+       "conf": 0.9969511672622108,
+       "debiased_gap": 0.0,
+       "gap": 0.00304883273778922,
+       "n": 203,
+       "p_max": 0.997592489869701,
+       "p_min": 0.995653404452284,
+       "weight": 0.06666666666666667
+      },
+      {
+       "acc": 1.0,
+       "conf": 0.9979021099509503,
+       "debiased_gap": 0.0,
+       "gap": 0.0020978900490497,
+       "n": 203,
+       "p_max": 0.9981669069239754,
+       "p_min": 0.9975934696061682,
+       "weight": 0.06666666666666667
+      },
+      {
+       "acc": 1.0,
+       "conf": 0.9984131802887426,
+       "debiased_gap": 0.0,
+       "gap": 0.0015868197112574034,
+       "n": 203,
+       "p_max": 0.9986086226364166,
+       "p_min": 0.9981682404539105,
+       "weight": 0.06666666666666667
+      },
+      {
+       "acc": 1.0,
+       "conf": 0.9987408467954311,
+       "debiased_gap": 0.0,
+       "gap": 0.0012591532045689302,
+       "n": 203,
+       "p_max": 0.9988566162039738,
+       "p_min": 0.9986120008440802,
+       "weight": 0.06666666666666667
+      },
+      {
+       "acc": 1.0,
+       "conf": 0.9989405523547429,
+       "debiased_gap": 0.0,
+       "gap": 0.0010594476452571167,
+       "n": 203,
+       "p_max": 0.9990200115216221,
+       "p_min": 0.998858168272835,
+       "weight": 0.06666666666666667
+      },
+      {
+       "acc": 1.0,
+       "conf": 0.999087059461222,
+       "debiased_gap": 0.0,
+       "gap": 0.0009129405387779954,
+       "n": 203,
+       "p_max": 0.9991555663651904,
+       "p_min": 0.9990200733210929,
+       "weight": 0.06666666666666667
+      },
+      {
+       "acc": 1.0,
+       "conf": 0.999226764895876,
+       "debiased_gap": 0.0,
+       "gap": 0.0007732351041239705,
+       "n": 203,
+       "p_max": 0.9992997350284065,
+       "p_min": 0.9991556975652991,
+       "weight": 0.06666666666666667
+      },
+      {
+       "acc": 1.0,
+       "conf": 0.9993849258643162,
+       "debiased_gap": 0.0,
+       "gap": 0.0006150741356838463,
+       "n": 203,
+       "p_max": 0.9994597645008666,
+       "p_min": 0.9993010087565225,
+       "weight": 0.06666666666666667
+      },
+      {
+       "acc": 1.0,
+       "conf": 0.9995494697529089,
+       "debiased_gap": 0.0,
+       "gap": 0.00045053024709107437,
+       "n": 203,
+       "p_max": 0.9996190841632199,
+       "p_min": 0.9994598353730707,
+       "weight": 0.06666666666666667
+      },
+      {
+       "acc": 1.0,
+       "conf": 0.9996724587188975,
+       "debiased_gap": 0.0,
+       "gap": 0.0003275412811024614,
+       "n": 203,
+       "p_max": 0.999715030846799,
+       "p_min": 0.9996203643661314,
+       "weight": 0.06666666666666667
+      },
+      {
+       "acc": 1.0,
+       "conf": 0.9997513847536674,
+       "debiased_gap": 0.0,
+       "gap": 0.00024861524633257304,
+       "n": 203,
+       "p_max": 0.999896285200178,
+       "p_min": 0.9997157340787053,
+       "weight": 0.06666666666666667
+      }
+     ],
+     "separation": {
+      "accuracy_at_zero": 0.9921182266009853,
+      "is_perfectly_separated": false,
+      "max_abs_logit": 14.376046180725098,
+      "max_logit": 10.46384334564209,
+      "median_abs_logit": 8.255751609802246,
+      "min_abs_logit": 0.4445835053920746,
+      "min_logit": -14.376046180725098,
+      "n": 3045,
+      "n_misclassified_at_zero": 24,
+      "n_positive": 2353
+     }
+    },
+    "val": {
+     "auprc": 0.9982906741611046,
+     "auprc_baseline_prevalence": 0.7675252689925008,
+     "auprc_ci": {
+      "ci_level": 0.95,
+      "lower": 0.9946128192283006,
+      "n_blocks": 2164,
+      "n_boot": 2000,
+      "point": 0.9982906741611046,
+      "upper": 0.9999754063269709
+     },
+     "auprc_on_posterior": 0.9982906741611046,
+     "auprc_rank_invariant": true,
+     "auprc_scaled_logits": 0.9982906741611046,
+     "block_census": {
+      "n_blocks": 2164,
+      "n_rows": 3067
+     },
+     "ece": 0.00731715513820754,
+     "ece_binning": "equal_mass",
+     "ece_ci": {
+      "ci_level": 0.95,
+      "lower": 0.003429689126996062,
+      "n_blocks": 2164,
+      "n_boot": 2000,
+      "point": 0.00731715513820754,
+      "upper": 0.012643532681200366
+     },
+     "ece_debiased": true,
+     "ece_gate": 0.05,
+     "ece_gate_pass": true,
+     "ece_n_bins": 15,
+     "ece_plugin": 0.010028052515041186,
+     "graded_on": "named_posterior (temperature-scaled, PRE prior-shift)",
+     "n": 3067,
+     "n_negative": 713,
+     "n_positive": 2354,
+     "posterior_saturation": {
+      "n_at_one": 0,
+      "n_at_zero": 0
+     },
+     "prevalence": 0.7675252689925008,
+     "reliability": [
+      {
+       "acc": 0.0,
+       "conf": 3.87297583788589e-06,
+       "debiased_gap": 0.0,
+       "gap": 3.87297583788589e-06,
+       "n": 205,
+       "p_max": 4.471553350018806e-06,
+       "p_min": 3.404441439766987e-06,
+       "weight": 0.06684056080860776
+      },
+      {
+       "acc": 0.0,
+       "conf": 9.134296530067681e-06,
+       "debiased_gap": 0.0,
+       "gap": 9.134296530067681e-06,
+       "n": 205,
+       "p_max": 1.573806342799062e-05,
+       "p_min": 4.490165505133843e-06,
+       "weight": 0.06684056080860776
+      },
+      {
+       "acc": 0.0,
+       "conf": 2.729668450738402e-05,
+       "debiased_gap": 0.0,
+       "gap": 2.729668450738402e-05,
+       "n": 205,
+       "p_max": 5.19092749061106e-05,
+       "p_min": 1.586026310794636e-05,
+       "weight": 0.06684056080860776
+      },
+      {
+       "acc": 0.526829268292683,
+       "conf": 0.39383981410428326,
+       "debiased_gap": 0.10576139766106551,
+       "gap": 0.1329894541883997,
+       "n": 205,
+       "p_max": 0.9958626738302017,
+       "p_min": 5.238098125100806e-05,
+       "weight": 0.06684056080860776
+      },
+      {
+       "acc": 1.0,
+       "conf": 0.9970279550224916,
+       "debiased_gap": 0.0,
+       "gap": 0.002972044977508359,
+       "n": 205,
+       "p_max": 0.9975614836546028,
+       "p_min": 0.9959116108208745,
+       "weight": 0.06684056080860776
+      },
+      {
+       "acc": 1.0,
+       "conf": 0.9978824411504403,
+       "debiased_gap": 0.0,
+       "gap": 0.0021175588495596642,
+       "n": 205,
+       "p_max": 0.9981383345432981,
+       "p_min": 0.997565025092873,
+       "weight": 0.06684056080860776
+      },
+      {
+       "acc": 1.0,
+       "conf": 0.9983282575187429,
+       "debiased_gap": 0.0,
+       "gap": 0.0016717424812571213,
+       "n": 205,
+       "p_max": 0.998521024306322,
+       "p_min": 0.9981409451500675,
+       "weight": 0.06684056080860776
+      },
+      {
+       "acc": 1.0,
+       "conf": 0.9986892342914487,
+       "debiased_gap": 0.0,
+       "gap": 0.0013107657085512647,
+       "n": 204,
+       "p_max": 0.9988129292971735,
+       "p_min": 0.9985215995821707,
+       "weight": 0.06651450929246822
+      },
+      {
+       "acc": 1.0,
+       "conf": 0.9989104581120932,
+       "debiased_gap": 0.0,
+       "gap": 0.0010895418879067753,
+       "n": 204,
+       "p_max": 0.9989957366763821,
+       "p_min": 0.9988133351763835,
+       "weight": 0.06651450929246822
+      },
+      {
+       "acc": 1.0,
+       "conf": 0.9990701785067623,
+       "debiased_gap": 0.0,
+       "gap": 0.0009298214932377258,
+       "n": 204,
+       "p_max": 0.999134938016493,
+       "p_min": 0.9989971168413557,
+       "weight": 0.06651450929246822
+      },
+      {
+       "acc": 1.0,
+       "conf": 0.999203382258782,
+       "debiased_gap": 0.0,
+       "gap": 0.0007966177412179754,
+       "n": 204,
+       "p_max": 0.9992695531479351,
+       "p_min": 0.9991351872946744,
+       "weight": 0.06651450929246822
+      },
+      {
+       "acc": 1.0,
+       "conf": 0.9993487913573073,
+       "debiased_gap": 0.0,
+       "gap": 0.0006512086426927466,
+       "n": 204,
+       "p_max": 0.999426486673258,
+       "p_min": 0.9992712666275425,
+       "weight": 0.06651450929246822
+      },
+      {
+       "acc": 1.0,
+       "conf": 0.9995027590465777,
+       "debiased_gap": 0.0,
+       "gap": 0.0004972409534222955,
+       "n": 204,
+       "p_max": 0.9995705499049404,
+       "p_min": 0.9994272768703928,
+       "weight": 0.06651450929246822
+      },
+      {
+       "acc": 1.0,
+       "conf": 0.9996239464559306,
+       "debiased_gap": 0.0,
+       "gap": 0.00037605354406944347,
+       "n": 204,
+       "p_max": 0.9996748681528294,
+       "p_min": 0.9995716700280353,
+       "weight": 0.06651450929246822
+      },
+      {
+       "acc": 0.9950980392156863,
+       "conf": 0.9997353218457806,
+       "debiased_gap": 0.003728570041000458,
+       "gap": 0.00463728263009433,
+       "n": 204,
+       "p_max": 0.9999615886076418,
+       "p_min": 0.9996752497420003,
+       "weight": 0.06651450929246822
+      }
+     ],
+     "separation": {
+      "accuracy_at_zero": 0.9908705575480926,
+      "is_perfectly_separated": false,
+      "max_abs_logit": 14.360983848571777,
+      "max_logit": 11.596892356872559,
+      "median_abs_logit": 8.229351997375488,
+      "min_abs_logit": 0.4768950641155243,
+      "min_logit": -14.360983848571777,
+      "n": 3067,
+      "n_misclassified_at_zero": 28,
+      "n_positive": 2354
+     }
+    }
+   },
+   "load": {
+    "adapter_config": {
+     "bias": "none",
+     "lora_alpha": 32,
+     "lora_dropout": 0.05,
+     "peft_type": "LORA",
+     "r": 16,
+     "target_modules": [
+      "key",
+      "query",
+      "linear",
+      "dense",
+      "value",
+      "linear_gate"
+     ]
+    },
+    "adapter_dir": "/home/bioedca/tbox-phylogeny/tbox-finder/data/processed/checkpoints/stage2_rinalmo/aux1.0_lr1e-4/lora_adapter",
+    "adapter_keys_absent_from_file": [],
+    "adapter_mismatched_keys": [],
+    "adapter_missing_keys": [],
+    "adapter_sha256": "b629704d52582288efc1f433055bff72bf029f329379113553927e815a3ed995",
+    "attn_implementation": "flash_attention_2",
+    "attn_implementation_matches_training": true,
+    "attn_implementation_trained_under": "flash_attention_2",
+    "base_model_name_or_path": "multimolecule/rinalmo-giga",
+    "checkpoint_dir": "/home/bioedca/tbox-phylogeny/tbox-finder/data/processed/checkpoints/stage2_rinalmo/aux1.0_lr1e-4",
+    "dtype": "bfloat16",
+    "head_mismatched_keys": [],
+    "heads_path": "/home/bioedca/tbox-phylogeny/tbox-finder/data/processed/checkpoints/stage2_rinalmo/aux1.0_lr1e-4/stage2_heads.pt",
+    "heads_sha256": "12294f08ab51ec378b24fcb7efdd562ae20d3eafa23abdc6547dae0c27195207",
+    "n_adapter_tensors_in_file": 462,
+    "n_adapter_tensors_matched": 462,
+    "n_adapter_tensors_mismatched": 0,
+    "n_adapter_tensors_missing_from_module": 0,
+    "n_head_tensors_in_file": 12,
+    "n_head_tensors_matched": 12,
+    "n_lora_b_nonzero": 231,
+    "n_lora_b_tensors": 231,
+    "n_module_adapter_tensors": 462,
+    "n_module_adapter_tensors_absent_from_file": 0,
+    "pairing_proj_dim": 64,
+    "revision": "2a71f6f98fb41dd2e6542a5e131d3778111d1468",
+    "structure_head": false
+   },
+   "lr": 0.0001,
+   "saved_from_epoch": 9,
+   "saved_val_total": 0.03995415618032279,
+   "scored_census": {
+    "calib": 1089,
+    "test": 3045,
+    "train": 0,
+    "val": 3067
+   },
+   "stack": {
+    "gated_posterior_key": "named_posterior",
+    "named_posterior_exists": true,
+    "prior_shift_applied": false,
+    "stack_applied": [
+     "train",
+     "temperature_scale"
+    ],
+    "stack_order": [
+     "train",
+     "temperature_scale",
+     "prior_shift"
+    ]
+   }
+  }
+ },
+ "dataset": {
+  "block_census": {
+   "n_blocks": 5038,
+   "n_blocks_from_clusters": 3891,
+   "n_rows": 7201,
+   "n_rows_with_cluster": 6054,
+   "n_rows_without_cluster": 1147,
+   "n_singleton_blocks": 1147
+  },
+  "full_rung_census": {
+   "calib": 1089,
+   "test": 3045,
+   "train": 23341,
+   "val": 3067
+  },
+  "n_rows_scored": 7201,
+  "n_rows_total": 30542,
+  "path": "/home/bioedca/tbox-phylogeny/tbox-finder/data/processed/stage2_dataset.parquet",
+  "rung_census": {
+   "calib": 1089,
+   "test": 3045,
+   "val": 3067
+  },
+  "scored_rungs": [
+   "calib",
+   "val",
+   "test"
+  ],
+  "sha256": "376ad12bd6462686cc7467a5c3e34e63977ccca0c06465e24ec8345224a45f65"
+ },
+ "device": {
+  "capability": [
+   8,
+   9
+  ],
+  "cuda_runtime": "12.8",
+  "driver_version": "595.59",
+  "is_cuda": true,
+  "n_visible_devices": 1,
+  "name": "NVIDIA GeForce RTX 4060 Laptop GPU",
+  "torch_version": "2.7.1+cu128"
+ },
+ "entrypoint": "tbox_finder.stage2.eval",
+ "gate": {
+  "clauses": {
+   "ablation_arms_are_lr_matched": true,
+   "ablation_contrast_is_aux_weight": true,
+   "adapter_is_live_not_identity": true,
+   "adapter_weights_verified_against_file": true,
+   "auprc_is_rank_invariant_under_scaling": true,
+   "both_ablation_arms_present": true,
+   "ece_estimator_matches_adr_d11": true,
+   "graded_object_is_pre_prior_shift": false,
+   "graded_rung_is_the_gate2_split": true,
+   "head_weights_verified_against_file": true,
+   "in_distribution_ece_is_computable": false,
+   "scored_every_row_of_every_scored_rung": true,
+   "scored_under_the_training_attention_backend": true,
+   "temperature_fitted_on_calib_only": false,
+   "temperature_positive_and_converged": false
+  },
+  "note": "these clauses grade the MACHINERY \u2014 that the trained weights really loaded, that T was fitted on calib alone, that the graded object is the pre-prior-shift named posterior, and that nothing was truncated. The ablation VERDICT is not a clause: its tolerance was never pre-registered (see ablation.reading_delta).",
+  "overall_pass": false
+ },
+ "generated_by": "tbox_finder.stage2.eval::aux_ablation_check",
+ "prd": [
+  "\u00a711 with/without-aux check",
+  "\u00a712 calibration (named posterior, pre-prior-shift)",
+  "\u00a72.3 GATE-2"
+ ],
+ "provenance": {
+  "entrypoint": "tbox_finder.stage2.eval",
+  "env_lock": "envs/ml-rna.conda-lock.yml",
+  "env_lock_hash": "60f966a8f009abfa3900357ffd0ac7c685d8b55b713da4498306480720bcf3b3",
+  "git_sha": "a4c075b2dc695222b6dd0a88762a2e7d177c8c4b"
+ },
+ "schema_version": "1",
+ "scoring": {
+  "arms_scored": [
+   "aux1.0_lr1e-4",
+   "aux0.0_lr1e-4"
+  ],
+  "batch_size": 4,
+  "bootstrap_seed": 20260803,
+  "device": "cuda",
+  "inference_mode": true,
+  "n_boot": 2000
+ },
+ "step": "P3-08",
+ "written_at": "2026-08-03T23:04:42+00:00"
+}
