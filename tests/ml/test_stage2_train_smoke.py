@@ -1184,3 +1184,119 @@ def test_checkpoint_outputs_are_files_never_the_adapter_DIRECTORY(tmp_path=None)
         T.checkpoint_output_files(empty)
     with pytest.raises(NotADirectoryError):
         T.checkpoint_output_files(Path(__file__))
+
+
+# --------------------------------------------------------------------------------------
+# CodeRabbit r1 — the scheduler domain, the accumulation flush, the optim-key guard
+# --------------------------------------------------------------------------------------
+def test_the_lr_schedule_is_sized_in_OPTIMISER_steps_not_micro_batches() -> None:
+    """Job 1064's cosine traversed exactly 50% of its domain, ending at 0.5501x base.
+
+    `scheduler.step()` fires once per optimiser step, so sizing the schedule in micro-batches
+    makes it cover `1 / gradient_accumulation_steps` of its range. The run reported
+    total_scheduled_steps 2830 against n_optimizer_steps 1415 — the two domains conflated in
+    one field. This asserts the arithmetic the fix restores.
+    """
+    micro_per_epoch, epochs, accum = 283, 10, 2
+    opt_per_epoch = (micro_per_epoch + accum - 1) // accum
+    total_opt = opt_per_epoch * epochs
+    warmup = int(round(0.06 * total_opt))
+
+    # The LR must actually reach ~0 by the LAST optimiser step, which is the whole point.
+    assert T.lr_scale(total_opt, warmup_steps=warmup, total_steps=total_opt) == pytest.approx(0.0)
+    # …and under the OLD (micro-batch) domain it would still be more than half-way up.
+    stale_total = micro_per_epoch * epochs
+    stale_warmup = int(round(0.06 * stale_total))
+    assert T.lr_scale(total_opt, warmup_steps=stale_warmup, total_steps=stale_total) > 0.5
+
+    # ⚠ The arithmetic above is necessary and NOT sufficient: a first version of this test
+    # stopped there, and reverting the trainer to the micro-batch domain left it green — a
+    # test named for a bug that could not see it. So assert the SHIPPED WIRING too: the
+    # scheduler must be constructed over the optimiser-step domain, and the report must carry
+    # both counts under names that cannot be confused.
+    import inspect
+
+    source = inspect.getsource(T.train_stage2)
+    assert "total_opt_steps = opt_per_epoch * cfg.epochs" in source
+    assert "warmup_steps = int(round(cfg.warmup_ratio * total_opt_steps))" in source
+    assert "total_steps=total_opt_steps" in source, (
+        "the LambdaLR is sized in micro-batches again; the cosine will traverse only "
+        "1/gradient_accumulation_steps of its domain, as it did in job 1064"
+    )
+    assert '"total_scheduled_optimizer_steps": total_opt_steps' in source
+    assert '"expected_n_optimizer_steps": total_opt_steps' in source
+
+
+def test_gradient_accumulation_flushes_a_trailing_partial_group_each_epoch() -> None:
+    """283 micro-batches against accumulation 2 ends every epoch mid-group.
+
+    With a cumulative `n_steps % accum` the phase also shifts between epochs, so which batches
+    get dropped changes epoch to epoch — and the next `zero_grad` discards them. Asserted on
+    the shipped source: the loop must count per-epoch and flush after it.
+    """
+    import inspect
+
+    source = inspect.getsource(T.train_stage2)
+    assert "micro_in_group = 0" in source
+    assert "if micro_in_group == cfg.gradient_accumulation_steps:" in source
+    assert (
+        "n_steps % cfg.gradient_accumulation_steps" not in source
+    ), "the cumulative-phase form is back; a trailing partial group is silently discarded"
+    # The flush must precede the val pass, or the epoch's last gradients never land.
+    tail = source[source.index("if micro_in_group:") :]
+    assert tail.index("optimizer.step()") < tail.index("if cfg.eval_val")
+
+
+def test_an_unknown_optim_key_is_refused_exactly_as_an_unknown_loss_key_is() -> None:
+    """A misspelled `optim.lr` would otherwise train the default and report the swept value.
+
+    This is the same failure the /loss guard exists to stop; /optim had no equivalent.
+    """
+    with pytest.raises(ValueError, match="optim"):
+        T._cfg_from_mapping({"optim": {"learning_rate": 3e-4}})
+    with pytest.raises(ValueError, match="optim"):
+        T._cfg_from_mapping({"optim": {"lr": 3e-4, "wieght_decay": 0.01}})
+    # Positive control: every key the trainer really consumes composes.
+    built = T._cfg_from_mapping(
+        {
+            "optim": {
+                "name": "adamw",
+                "lr": 3e-4,
+                "weight_decay": 0.01,
+                "warmup_ratio": 0.06,
+                "grad_clip": 1.0,
+            }
+        }
+    )
+    assert built.lr == pytest.approx(3e-4)
+
+
+def test_world_size_zero_raises_rather_than_becoming_one() -> None:
+    """Unset means "not under torchrun"; zero means a launcher computed it and got it wrong."""
+    import os as _os
+
+    from tbox_finder.train import ddp
+
+    old = _os.environ.get("WORLD_SIZE")
+    try:
+        _os.environ["WORLD_SIZE"] = "0"
+        with pytest.raises(ValueError, match="WORLD_SIZE=0"):
+            ddp.ddp_world_size()
+        _os.environ["WORLD_SIZE"] = "8"
+        assert ddp.ddp_world_size() == 8
+        _os.environ.pop("WORLD_SIZE")
+        assert ddp.ddp_world_size() == 1  # unset is still the local-smoke default
+    finally:
+        if old is None:
+            _os.environ.pop("WORLD_SIZE", None)
+        else:
+            _os.environ["WORLD_SIZE"] = old
+
+
+def test_the_sbatch_clears_the_checkpoint_only_after_the_node_is_known_good() -> None:
+    """A task landing on a bad node used to rm the last good checkpoint, then exit 2."""
+    text = _SBATCH.read_text()
+    assert text.index("STAGE2_NODE_UNHEALTHY") < text.index('rm -rf "$CKPT_DIR"'), (
+        "the checkpoint clear precedes the health check — a bad node destroys a good artifact "
+        "on its way out"
+    )

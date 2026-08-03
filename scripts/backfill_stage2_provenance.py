@@ -77,13 +77,28 @@ def _sidecar(key: str, ckpt: Path, report: dict[str, Any]) -> dict[str, Any]:
     prov = report.get("provenance") or {}
     config = report.get("config") or {}
     loss = config.get("loss") or {}
+    parquet = (report.get("data") or {}).get("dataset_parquet")
+    # A sidecar with a null seed / env_lock / input path would assert provenance over nothing.
+    # Refuse the point instead of writing a record that looks complete and is not.
+    missing = [
+        name
+        for name, value in (
+            ("provenance.seed", prov.get("seed")),
+            ("provenance.env_lock", prov.get("env_lock")),
+            ("provenance.git_sha", prov.get("git_sha")),
+            ("data.dataset_parquet", parquet),
+        )
+        if value is None
+    ]
+    if missing:
+        raise ValueError(f"report is missing required field(s): {', '.join(missing)}")
     return {
         "out_path": str(ckpt / SIDECAR),
         "rule": f"slurm/p3/stage2_lora_finetune.sbatch :: {ENTRYPOINT} (P3-06 point {key})",
         "script": "src/tbox_finder/stage2/train.py",
         "seed": prov.get("seed"),
         "inputs": [
-            report.get("data", {}).get("dataset_parquet"),
+            parquet,
             "src/tbox_finder/stage2/head_vocab.json",
         ],
         # The defect that caused this backfill, fixed via the shared enumerator.
@@ -102,7 +117,7 @@ def _sidecar(key: str, ckpt: Path, report: dict[str, Any]) -> dict[str, Any]:
             "world_size": (report.get("steps") or {}).get("world_size"),
             "device": report.get("device"),
             "loss_aux_weight": loss.get("aux_weight"),
-            "optim_lr": config.get("lr"),
+            "optim_lr": (config.get("optim") or {}).get("lr", config.get("lr")),
             "gate_overall_pass": (report.get("gate") or {}).get("overall_pass"),
             "best_val_total": (report.get("val") or {}).get("best_total"),
             "best_val_epoch": (report.get("val") or {}).get("best_epoch"),
@@ -153,7 +168,7 @@ def main(argv: list[str] | None = None) -> int:
             continue
         try:
             payload = _sidecar(key, ckpt, report)
-        except (FileNotFoundError, NotADirectoryError) as exc:
+        except (FileNotFoundError, NotADirectoryError, ValueError) as exc:
             problems.append(f"{key}: {exc}")
             continue
         planned.append(payload)

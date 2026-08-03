@@ -164,7 +164,15 @@ def measure_batch(
         record["padded_tokens"] = int(batch["input_ids"].shape[1])
         batch = T._to_device(batch, target)
 
+        # ⚠ Reset the peak counter per step, or the series is a RUNNING MAXIMUM and monotonic
+        # by construction — which is what job 1051 actually recorded ([8.0847, 8.1827, 8.1827,
+        # …]). A cumulative max can still reveal a leak, so that run's "no growth" conclusion
+        # survives; but it cannot show a per-step footprint, and `growth_ratio` over it means
+        # something weaker than its name suggests. The overall peak is tracked separately.
+        overall_peak = 0
         for _ in range(steps):
+            if torch.cuda.is_available():
+                torch.cuda.reset_peak_memory_stats()
             started = time.perf_counter()
             T.forward_backward(model, loss_fn, batch)
             torch.nn.utils.clip_grad_norm_(trainable, 1.0)
@@ -174,11 +182,13 @@ def measure_batch(
             optimizer.zero_grad(set_to_none=True)
             if torch.cuda.is_available():
                 torch.cuda.synchronize()
-                record["peak_vram_gib_per_step"].append(_gib(torch.cuda.max_memory_allocated()))
+                step_peak = torch.cuda.max_memory_allocated()
+                overall_peak = max(overall_peak, step_peak)
+                record["peak_vram_gib_per_step"].append(_gib(step_peak))
             record["step_ms"].append(round(1000.0 * (time.perf_counter() - started), 2))
             record["n_steps"] += 1
         if torch.cuda.is_available():
-            record["peak_vram_gib"] = _gib(torch.cuda.max_memory_allocated())
+            record["peak_vram_gib"] = _gib(overall_peak)
     except Exception as exc:  # noqa: BLE001 - an OOM here is a RESULT, not a crash
         is_oom = "OutOfMemoryError" in type(exc).__name__ or "out of memory" in str(exc).lower()
         record["oom"] = bool(is_oom)
@@ -274,6 +284,38 @@ def validate_report(report: Mapping[str, Any]) -> list[str]:
     return problems
 
 
+def _recommend(
+    fitting: Sequence[Mapping[str, Any]], largest: int | None, device: Mapping[str, Any]
+) -> dict[str, Any] | None:
+    """The recommended batch size, with headroom COMPUTED rather than asserted.
+
+    An earlier version said "fits with headroom" without ever calculating any — the same
+    species of claim as a gate clause that reads a flag instead of measuring an effect. If the
+    numbers needed are absent the fields are ``None`` and the basis states only what was
+    observed: that the batch ran without OOM.
+    """
+    if largest is None:
+        return None
+    peak = next((m.get("peak_vram_gib") for m in fitting if m.get("batch_size") == largest), None)
+    total = device.get("total_memory_gib")
+    headroom = (
+        round(float(total) - float(peak), 4)
+        if isinstance(peak, (int, float)) and isinstance(total, (int, float))
+        else None
+    )
+    return {
+        "batch_size": largest,
+        "worst_case_peak_gib": peak,
+        "device_total_gib": total,
+        "headroom_gib": headroom,
+        "basis": (
+            "largest worst-case batch observed to run without OOM; headroom is measured and "
+            "EXCLUDES DDP gradient buckets and NCCL buffers, which a single-GPU measurement "
+            "does not exercise"
+        ),
+    }
+
+
 def build_report(
     *,
     measurements: Sequence[Mapping[str, Any]],
@@ -302,14 +344,7 @@ def build_report(
         "gradient_checkpointing": dict(checkpointing),
         "measurements": [dict(m) for m in measurements],
         "largest_fitting_batch_worst_case": largest,
-        "recommendation": (
-            None
-            if largest is None
-            else {
-                "batch_size": largest,
-                "basis": "largest worst-case batch that fits with headroom on this card",
-            }
-        ),
+        "recommendation": _recommend(fitting, largest, device),
         "provenance": {"env_lock": T.ENV_LOCK, "entrypoint": "tbox_finder.stage2.sizing"},
     }
     clauses = derive_clauses(report)

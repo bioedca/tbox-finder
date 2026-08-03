@@ -1239,10 +1239,19 @@ def train_stage2(
         EpochShuffleSampler(len(train_ds), seed=cfg.seed), rank=rank, world_size=world_size
     )
     per_epoch = _n_batches(len(sampler), cfg.batch_size)
-    total_steps = per_epoch * cfg.epochs
-    warmup_steps = int(round(cfg.warmup_ratio * total_steps))
+    total_micro_steps = per_epoch * cfg.epochs
+    # ⚠ The scheduler's domain is OPTIMISER steps, not micro-batches. `scheduler.step()` fires
+    # once per optimiser step, so sizing the cosine in micro-batches makes it traverse only
+    # `1 / gradient_accumulation_steps` of its domain. Job 1064 ran with accumulation 2 and
+    # advanced 1,415 of 2,830 scheduled steps — exactly 50% — finishing at an LR multiplier of
+    # 0.5501 instead of annealing to ~0. Both counts are reported so the two domains can never
+    # be confused again by a reader of the report.
+    opt_per_epoch = _n_batches(per_epoch, cfg.gradient_accumulation_steps)
+    total_opt_steps = opt_per_epoch * cfg.epochs
+    warmup_steps = int(round(cfg.warmup_ratio * total_opt_steps))
     scheduler = torch.optim.lr_scheduler.LambdaLR(
-        optimizer, lambda s: lr_scale(s, warmup_steps=warmup_steps, total_steps=total_steps)
+        optimizer,
+        lambda s: lr_scale(s, warmup_steps=warmup_steps, total_steps=total_opt_steps),
     )
 
     ddp_model = model
@@ -1274,6 +1283,11 @@ def train_stage2(
     for epoch in range(cfg.epochs):
         sampler.set_epoch(epoch)
         optimizer.zero_grad(set_to_none=True)
+        # Per-EPOCH, not `n_steps % accum`: with 283 micro-batches per rank per epoch against
+        # accumulation 2, the cumulative phase shifts every epoch and the trailing half-group's
+        # gradients are silently discarded by the zero_grad above. Counted here and flushed
+        # after the loop instead.
+        micro_in_group = 0
         for i, batch in enumerate(
             _batched(
                 train_ds,
@@ -1290,13 +1304,15 @@ def train_stage2(
             if not math.isfinite(value):
                 n_nonfinite += 1
             n_steps += 1
-            if n_steps % cfg.gradient_accumulation_steps == 0:
+            micro_in_group += 1
+            if micro_in_group == cfg.gradient_accumulation_steps:
                 if cfg.grad_clip > 0:
                     torch.nn.utils.clip_grad_norm_(trainable, cfg.grad_clip)
                 optimizer.step()
                 scheduler.step()
                 optimizer.zero_grad(set_to_none=True)
                 n_optimizer_steps += 1
+                micro_in_group = 0
             final_total = value
             per_term_final = {
                 term: float(t.detach()) for term, t in (components.get("terms") or {}).items()
@@ -1312,6 +1328,17 @@ def train_stage2(
                         },
                         step=n_steps,
                     )
+
+        # Flush a trailing partial group so its gradients reach the weights instead of being
+        # discarded by the next epoch's zero_grad.
+        if micro_in_group:
+            if cfg.grad_clip > 0:
+                torch.nn.utils.clip_grad_norm_(trainable, cfg.grad_clip)
+            optimizer.step()
+            scheduler.step()
+            optimizer.zero_grad(set_to_none=True)
+            n_optimizer_steps += 1
+            micro_in_group = 0
 
         if cfg.eval_val and val_ds is not None:
             metrics = evaluate(model, loss_fn, val_ds, cfg=cfg, device=device)
@@ -1378,12 +1405,17 @@ def train_stage2(
         device=device_record(),
         steps={
             "n_steps": n_steps,
-            "expected_n_steps": per_epoch * cfg.epochs,
+            "expected_n_steps": total_micro_steps,
             "n_optimizer_steps": n_optimizer_steps,
+            "expected_n_optimizer_steps": total_opt_steps,
             "batches_per_epoch_per_rank": per_epoch,
+            "optimizer_steps_per_epoch_per_rank": opt_per_epoch,
+            "gradient_accumulation_steps": cfg.gradient_accumulation_steps,
             "world_size": world_size,
             "warmup_steps": warmup_steps,
-            "total_scheduled_steps": total_steps,
+            # The scheduler's own domain — optimiser steps. Named unambiguously because
+            # confusing it with the micro-batch count is what made job 1064's cosine stop at 50%.
+            "total_scheduled_optimizer_steps": total_opt_steps,
             "elapsed_seconds": round(elapsed, 3),
         },
         wrap=wrap,
@@ -1455,6 +1487,9 @@ def train_stage2(
 # Hydra entry
 # --------------------------------------------------------------------------------------
 _LOSS_FIELDS = frozenset(f.name for f in fields(L.Stage2LossConfig))
+#: Everything `_cfg_from_mapping` actually reads out of the /optim group, plus the `name`
+#: metadata key. Anything else is a typo that would silently change nothing.
+_OPTIM_KEYS = frozenset({"name", "lr", "weight_decay", "warmup_ratio", "grad_clip"})
 
 
 def _cfg_from_mapping(cfg: Mapping[str, Any]) -> Stage2TrainConfig:
@@ -1486,6 +1521,17 @@ def _cfg_from_mapping(cfg: Mapping[str, Any]) -> Stage2TrainConfig:
                 "identity, not an input — a value only this file carries would name a "
                 "checkpoint the run never loaded."
             )
+
+    # Unknown keys in the /optim group raise for the same reason /loss ones do: a misspelled
+    # `optim.lr` on a sweep line would train at the default while the run faithfully reported
+    # the value it was handed. `name` is documented metadata, not an override.
+    unknown_optim = sorted(set(optim) - _OPTIM_KEYS)
+    if unknown_optim:
+        raise ValueError(
+            f"conf/optim/stage2.yaml carries keys this trainer does not consume: "
+            f"{unknown_optim}. Known: {sorted(_OPTIM_KEYS)}. A mis-keyed optim override "
+            "changes nothing while the run reports it as set."
+        )
 
     unknown_loss = sorted(set(loss_block) - _LOSS_FIELDS)
     if unknown_loss:

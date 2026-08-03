@@ -1335,3 +1335,65 @@ sidecar crash preceded them. The §9.3 verification above stands on the reports,
 (`cfb8971`) writes both natively, so the next run needs no backfill.
 
 **Commit.** Feature branch `p3-06-stage2-lora`; squash SHA derived at the phase-exit gate.
+
+## Step P3-06 (review) — 2026-08-03: CodeRabbit r1, and a schedule defect in the shipped run
+
+**The review gate, and how it was reached.** The GitHub CodeRabbit app returned only its
+fair-usage notice ("next review available in 22 minutes") and Copilot returned "quota limit
+reached" — both absences, not passes. **Greptile was invoked and stayed silent for a third
+consecutive time** (PR #98 twice, PR #99 once), burning a credit for nothing; §5.1a's
+"configured but unproven" is now, on the evidence, *not working*. The gate was met by the
+**CodeRabbit CLI** route — the first rung of §5.1's ladder, which should have been tried before
+Greptile. **11 findings.** Each was verified by execution before being accepted or refused.
+
+**⚠ THE FINDING THAT REACHES THE SHIPPED CHECKPOINTS.** The LR scheduler's domain was computed
+in **micro-batches** while `scheduler.step()` fires once per **optimiser** step. With
+`gradient_accumulation_steps=2`, job 1064's cosine traversed exactly **50 %** of its range:
+`total_scheduled_steps` 2,830 against `n_optimizer_steps` 1,415, finishing at an LR multiplier
+of **0.5501** instead of annealing to ~0. All six arms trained under a schedule that is not the
+one their config describes.
+
+**User decision (2026-08-03): fix the code, keep the checkpoints, record the defect.** Nothing
+downstream is invalidated — P3-07 calibrates whatever checkpoint it is handed, and P3-08
+compares arms that *all* shared the defect, so the comparison stays internally consistent. The
+honest caveat is that these are **not optimally-annealed models**: absolute quality is likely a
+little below what a correct schedule would give, and any absolute number derived from them
+carries that. The alternative (retrain six arms, ~36 GPU-h) was offered and declined.
+
+**⚠ A CLAIM I MADE TO THE USER WAS WRONG, AND THE REVIEW CAUGHT IT.** I reported the sizing
+smoke's `growth_ratio` of 1.01–1.04 as proof of a *flat per-step footprint*.
+`reset_peak_memory_stats()` was called **once before** the step loop, never inside it — so
+`peak_vram_gib_per_step` was a **running maximum**, monotonic by construction
+(`[8.0847, 8.1827, 8.1827, 8.1827, 8.1827, 8.1827]`). The conclusion survives, because a real
+leak would still have driven that maximum upward — but it is a cumulative-max probe, not the
+per-step quantity the field name asserts, and I presented it as stronger than it was. Fixed
+(reset per step, overall peak tracked separately); the sbatch header that repeated the claim is
+corrected rather than left standing.
+
+**Also fixed, each sabotage-bitten:** unknown `optim.*` keys now raise exactly as `loss.*` ones
+do (a misspelled `optim.lr` would otherwise train the default while the run reported the swept
+value — the same failure the loss guard exists for); gradient accumulation counts **per epoch**
+and flushes the trailing partial group, instead of a cumulative `n_steps % accum` whose phase
+shifts every epoch across 283 odd micro-batches; the sbatch clears the checkpoint dir **only
+after** the node health check, so a task landing on a bad node can no longer destroy a good
+artifact on its way out; `WORLD_SIZE=0` raises rather than being promoted to 1; the backfill
+reads `optim.lr` from the group where it actually lives and refuses a report with a null seed,
+env-lock or input path; and the sizing `recommendation` now **computes** headroom instead of
+asserting it — the same species of claim as a clause that reads a flag instead of measuring.
+
+**⚠ TWO OF MY OWN NEW TESTS WERE VACUOUS, AND ONLY SABOTAGE FOUND IT.** The LR-domain test
+asserted `lr_scale` arithmetic on hand-computed numbers and never touched `train_stage2`'s
+wiring — reverting the trainer to the micro-batch domain left it **green**, a test named for a
+bug it could not see. It now asserts the shipped construction as well. (The sbatch-ordering
+test did bite; my *sabotage* for it was wrong, inserting the deletion at a point still after
+the health check — a reminder that a non-bite indicts the probe as often as the test.)
+
+**Refused, with reasons.** `device_record()` using index 0 is correct as written: every rank
+calls `torch.cuda.set_device(local_rank)` first, so index 0 resolves to that rank's own device.
+The `conf/train/stage2.yaml` comment nit about "best-checkpoint signal" is fair and was folded
+into the schedule correction rather than taken verbatim.
+
+**Validation.** Trainer **102 pass**, sizing 18, overrides 22, backfill 3; ruff + black clean;
+`bash -n` clean. **23 sabotages across the step**, each RED against its NAMED test.
+
+**Commit.** Feature branch `p3-06-stage2-lora`; squash SHA derived at the phase-exit gate.

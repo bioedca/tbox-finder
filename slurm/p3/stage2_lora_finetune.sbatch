@@ -43,10 +43,15 @@
 #       2  worst_case     551   no      4.8775     335
 #       1  worst_case     551   no      3.1640     202
 #
-# => batch_size=4 (worst case 8.18 of 15.60 GiB, ~47% headroom for DDP buckets + NCCL).
+# => batch_size=4 (worst case 8.18 of 15.60 GiB, so ~7.4 GiB unused — which must also absorb
+# DDP gradient buckets and NCCL buffers, neither of which a single-GPU measurement exercises).
 # Batch 8 *typical* fits and batch 8 *worst case* does not — which is precisely why job 1044
-# trained ~16 min and then OOM'd the first time a long-sequence batch came up. growth_ratio
-# is 1.01-1.04 across six steps, i.e. FLAT: the footprint is per-step, not accumulating.
+# trained ~16 min and then OOM'd the first time a long-sequence batch came up.
+# ⚠ growth_ratio read 1.01-1.04 across six steps, but job 1051's harness reset the peak counter
+# only ONCE before the loop, so that series was a RUNNING MAXIMUM, monotonic by construction.
+# A leak would still have driven it upward, so "no growth detected" stands — but it is a
+# cumulative-max probe, not the per-step footprint the field name implies. Fixed in sizing.py
+# (reset per step); a re-measurement would report the stronger quantity.
 #
 # ⚠ THE PREVIOUS SIZING WAS WRONG BECAUSE IT ANSWERED A DIFFERENT QUESTION. Jobs 1036/1044
 # were sized from reports/p1/lora_vram_smoke.json (P1-16: batch 8 -> 2.014 GiB), whose own
@@ -219,8 +224,6 @@ rm -f "$OK"   # untracked marker only — see the fingerprint below
 # Absent file -> empty string, which no md5 can equal, so "was missing" and "was replaced"
 # both read as fresh and only "unchanged bytes" reads as stale.
 REPORT_BEFORE="$(md5sum "$REPORT" 2>/dev/null | awk '{print $1}' || true)"
-rm -rf "$CKPT_DIR"
-mkdir -p "$CKPT_DIR"
 
 CONDA_SH=/exports/people/mondragonlab/ecc1695/miniconda3/etc/profile.d/conda.sh
 source "$CONDA_SH"
@@ -313,6 +316,19 @@ print(f"run will select attn={selected} :: {reason}")
 # reporting its swept value.
 # The checkpoint is built in node-local scratch and moved below (§9.2: build in /tmp, move
 # only the final artifact).
+# ── Stale-checkpoint clear — ONLY now that the node is known good ────────────
+# Deferred past the health check on purpose: a task landing on a node with a broken driver
+# stack used to `rm -rf` the previous point's checkpoint and THEN exit 2, destroying a good
+# artifact to produce nothing. Same shape as the P2-09 ruling that a failed staging check must
+# not delete a last-good checkpoint. Every path here is untracked (DVC/scratch), so no
+# deletion can dirty a git-tracked path.
+if [ -z "$KEY" ]; then
+  echo "FATAL: the sweep KEY resolved empty; refusing to touch $CKPT_DIR." >&2
+  exit 2
+fi
+rm -rf "$CKPT_DIR"
+mkdir -p "$CKPT_DIR"
+
 SCRATCH_CKPT="$JOB_SCRATCH/checkpoint"
 echo "── training point $KEY (aux_weight=$AUX_WEIGHT lr=$LR, DDP×8, bf16 LoRA) ──"
 set +e

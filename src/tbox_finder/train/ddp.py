@@ -55,8 +55,19 @@ def _env_int(name: str, default: int) -> int:
 
 
 def ddp_world_size() -> int:
-    """Number of DDP ranks (torchrun's ``WORLD_SIZE``); 1 when unset (the local smoke)."""
-    return max(1, _env_int(WORLD_SIZE_ENV, 1))
+    """Number of DDP ranks (torchrun's ``WORLD_SIZE``); 1 when unset (the local smoke).
+
+    An explicit ``WORLD_SIZE=0`` RAISES rather than being promoted to 1: unset means "not
+    under torchrun", but zero means a launcher computed a world size and got it wrong, and
+    silently training single-process on 1/N of the data would look exactly like success.
+    """
+    value = _env_int(WORLD_SIZE_ENV, 1)
+    if value == 0:
+        raise ValueError(
+            f"{WORLD_SIZE_ENV}=0 is invalid; world size must be >= 1. Unset it for a "
+            "single-process run — 0 means a launcher miscomputed it."
+        )
+    return value
 
 
 def ddp_rank() -> int:
