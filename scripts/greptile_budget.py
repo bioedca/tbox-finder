@@ -337,10 +337,28 @@ def render(report: dict) -> str:
     return "\n".join(lines)
 
 
+def _positive_int(value: str) -> int:
+    """An argparse type for `--limit`, so a nonsensical cap is a usage error.
+
+    Without this, `--limit 0` makes `used >= limit` true on an empty period and the script
+    reports exit 2 — "this month's budget is spent" — when nothing was spent and the
+    argument was simply wrong. Same conflation the argparse-exit-2 remap fixes.
+    """
+    try:
+        parsed = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(f"{value!r} is not an integer") from exc
+    if parsed < 1:
+        raise argparse.ArgumentTypeError(f"--limit must be >= 1, got {parsed}")
+    return parsed
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="Greptile monthly review-budget counter.")
     ap.add_argument("--repo", default=DEFAULT_REPO, help=f"owner/name (default {DEFAULT_REPO})")
-    ap.add_argument("--limit", type=int, default=DEFAULT_LIMIT, help="reviews per period")
+    ap.add_argument(
+        "--limit", type=_positive_int, default=DEFAULT_LIMIT, help="reviews per period (>0)"
+    )
     ap.add_argument("--anchor", default=DEFAULT_ANCHOR, help="YYYY-MM-DD period anchor")
     ap.add_argument("--now", help="override 'now' as YYYY-MM-DDTHH:MM:SSZ (testing)")
     ap.add_argument("--json", metavar="PATH", help="also write the JSON report to PATH")

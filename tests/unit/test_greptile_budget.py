@@ -426,6 +426,15 @@ def test_http_error_is_not_swallowed_by_the_oserror_catch(monkeypatch):
     assert code == 404, "a real HTTP status must survive, not be flattened to 0"
 
 
+@pytest.mark.parametrize("bad", ["0", "-1", "notanint"])
+def test_a_nonsensical_limit_is_a_usage_error_not_a_spent_budget(bad, monkeypatch):
+    """`--limit 0` must not report exit 2 ("the month's budget is spent") on an empty period."""
+    monkeypatch.setattr(mod, "fetch_issue_comments", lambda *a, **k: [])
+    assert mod.main(["--limit", bad]) == mod.USAGE_ERROR_EXIT
+    # Positive control: a sane limit on the same empty period is "available", not an error.
+    assert mod.main(["--limit", "16"]) == 0
+
+
 @pytest.mark.parametrize("argv", [["--bogus-flag"], ["--limit", "notanint"]])
 def test_usage_errors_do_not_masquerade_as_budget_exhausted(argv, capsys):
     """argparse exits 2 on a usage error — the same code this script means by "exhausted".
