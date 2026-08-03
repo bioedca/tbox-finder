@@ -1,0 +1,11 @@
+{
+  "skipReview": "AUTOMATIC",
+  "triggerOnUpdates": false,
+  "statusCheck": false,
+  "statusCommentsEnabled": false,
+  "fileChangeLimit": 50,
+  "autoApprove": {
+    "enabled": false
+  },
+  "ignorePatterns": ".greptile/\ngreptile.json\n*.md\n*.qmd\ndocs/decisions/\nfigures/\ndata/\n*.cm\n*.lock\nconda-lock.yml\n*.conda-lock.yml\n*.gitkeep\n"
+}
