@@ -277,12 +277,24 @@ def summarise(
         if not created_raw:
             raise BudgetError(f"comment {c.get('id')!r} has no created_at; cannot place it")
         created = _parse_ts(created_raw)
-        if not (period_start <= created < period_end):
-            continue
+        created_in_period = period_start <= created < period_end
         thread = c.get("issue_url") or ""
         if _is_greptile_bot(user):
+            # Greptile EDITS one sticky <!-- greptile-status --> comment in place across
+            # re-reviews rather than posting a new one, so a run that happened in THIS
+            # period can carry a created_at from a PREVIOUS one. Placing bot comments by
+            # created_at alone would make an auto-fired re-review on an older PR invisible
+            # — an undercount, permissive in the direction that overruns the cap. `since=`
+            # filters on updated_at, so such a comment is already in the fetched page.
+            updated = _parse_ts(c.get("updated_at") or created_raw)
+            if not (created_in_period or period_start <= updated < period_end):
+                continue
             observed_bot_logins.add(user.get("login", ""))
             bot_threads.setdefault(thread, c.get("html_url", ""))
+        elif not created_in_period:
+            # A trigger is placed by creation only: editing an old comment does not
+            # re-trigger a review, so its edit must not spend budget.
+            continue
         elif user.get("type") != "Bot" and _TRIGGER_RE.search(c.get("body") or ""):
             triggers.append(
                 {

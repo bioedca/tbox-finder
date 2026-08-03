@@ -229,6 +229,40 @@ def test_triggered_thread_is_not_flagged_as_auto_fire():
     assert report["used"] == 1, "trigger + its own response is ONE review, not two"
 
 
+def test_an_edited_sticky_comment_from_a_previous_period_still_charges_this_one():
+    """Greptile edits its sticky comment in place, so a re-review keeps the old created_at.
+
+    A run in THIS period on a PR first touched LAST period leaves created_at out of range.
+    Placing bot comments by created_at alone would miss it entirely — an undercount, in the
+    direction that overruns the cap.
+    """
+    stale = _bot(THREAD_B, at="2026-07-20T10:00:00Z", cid=7)  # created in the prior period
+    stale["updated_at"] = "2026-08-14T10:00:00Z"  # re-reviewed inside this one
+    report = _summarise([stale])
+    assert report["auto_fire_count"] == 1
+    assert report["used"] == 1
+
+
+def test_a_sticky_comment_untouched_this_period_does_not_charge_it():
+    """Positive control: without an in-period edit the same comment must NOT be charged.
+
+    Without this, the previous test would also pass a rule that charged every bot comment
+    regardless of when it was written.
+    """
+    stale = _bot(THREAD_B, at="2026-07-20T10:00:00Z", cid=7)
+    stale["updated_at"] = "2026-07-21T10:00:00Z"  # last touched in the prior period
+    report = _summarise([stale])
+    assert report["auto_fire_count"] == 0
+    assert report["used"] == 0
+
+
+def test_editing_an_old_trigger_comment_does_not_spend_budget():
+    """Only bot comments are placed by updated_at — editing a trigger does not re-trigger."""
+    stale = _trigger(THREAD_A, at="2026-07-20T10:00:00Z", cid=6)
+    stale["updated_at"] = "2026-08-14T10:00:00Z"
+    assert _summarise([stale])["used"] == 0
+
+
 def test_both_greptile_bot_identities_are_recognised():
     """Pinning a single login would silently return 0 forever if the other one posts."""
     for login in ("greptile-apps[bot]", "greptile[bot]"):
