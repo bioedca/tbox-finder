@@ -502,7 +502,29 @@ def test_a_stringified_true_calib_flag_is_still_the_calib_rung(token):
     assert R.assign_rung(calib=token, fold_random="train") == "calib"
 
 
-@pytest.mark.parametrize("bad", ["yes", "no", "maybe", "0.5", [0], (0,), 0.5, -1, 2])
+@pytest.mark.parametrize(
+    "flag,expected",
+    [
+        (1.0, "calib"),
+        (0.0, "train"),
+        (np.float64(1.0), "calib"),
+        (np.float64(0.0), "train"),
+        (1, "calib"),
+        (0, "train"),
+    ],
+)
+def test_a_float_widened_boolean_column_is_read_not_refused(flag, expected):
+    """A nullable boolean column that went through float64 delivers ``1.0 / nan / 0.0``.
+
+    That is what ``pd.Series([True, None, False]).astype(float)`` and a ``boolean``-dtype
+    cast both produce, and it is a well-formed column, not a schema fault. The NaN is
+    already the missing case; refusing the ``1.0``/``0.0`` beside it would abort a
+    legitimate run. Exactly 0 and 1 only — the neighbours below still raise (review r2).
+    """
+    assert R.assign_rung(calib=flag, fold_random="train") == expected
+
+
+@pytest.mark.parametrize("bad", ["yes", "no", "maybe", "0.5", [0], (0,), 0.5, -1, 2, 1.5, -0.5])
 def test_a_non_boolean_calib_flag_raises_rather_than_being_coerced(bad):
     """Anything outside the boolean vocabulary is an error, never a silent ``True``.
 

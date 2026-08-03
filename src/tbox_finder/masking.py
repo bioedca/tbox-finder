@@ -31,9 +31,11 @@ exercises it without pandas/numpy; the parquet loaders (lazy pandas) are below.
 
 from __future__ import annotations
 
+import math
 import re
 from bisect import bisect_right
 from collections.abc import Iterable, Mapping, Sequence
+from numbers import Real
 from pathlib import Path
 from typing import Any
 
@@ -322,6 +324,14 @@ def bool_or_none(value: Any, *, field: str = "value") -> bool | None:
         return None
     if isinstance(value, bool):
         return value
+    if isinstance(value, Real) and math.isfinite(value) and (value == 0 or value == 1):
+        # A nullable boolean column that has been through a float widening — which is what
+        # `pd.Series([True, None, False]).astype(float)` and a `boolean`-dtype cast to
+        # float64 both produce — delivers `1.0 / nan / 0.0`. The NaN is caught above; the
+        # 1.0 and 0.0 would otherwise stringify to "1.0"/"0.0", match no spelling, and raise
+        # on a column that is perfectly well-formed. Exactly 0 and 1 only: 0.5, 2.0 and -1.0
+        # are still schema faults and still raise (P3-07 review r2).
+        return bool(value)
     # numpy.bool_ / 0 / 1 / "True" all arrive here from parquet round-trips.
     text = row_text(value).strip().lower()
     if text in {"true", "1"}:

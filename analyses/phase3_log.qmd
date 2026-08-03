@@ -1788,3 +1788,38 @@ boolean parse, all three label-domain branches, both halves of the single-class 
 `GRADED_RUNGS`, the payload prior swap, the payload provenance, and the 1-D logits guard).
 
 **Commit.** Feature branch `p3-07-calibration-stack`; squash SHA derived at the phase-exit gate.
+
+## Step P3-07 (review r2) — 2026-08-03: one finding, and the GitHub check that lied about it
+
+**The gate check said `pass`; no review had run.** After the r1 push, the `CodeRabbit` PR check
+went green with the body *"Review rate limited"*, and `pulls/100/reviews` showed exactly one
+review, on the **step** commit — `a721d06` was unreviewed. This is the CLAUDE.md §5.1 trap
+verbatim: a rate-limit notice is an **absence**, not a pass. Rung 1 of the ladder — the
+CodeRabbit **CLI**, a separate path from the throttled GitHub app — ran the round instead,
+scoped with `--committed --base-commit 88879fd` to the six files r1 actually touched.
+
+**One minor finding, and it is right.** `masking.bool_or_none` — the parse r1 had just promoted
+— stringifies before matching, so a **float** flag becomes `"1.0"`/`"0.0"`, matches no spelling,
+and raises. That looked at first like correct fail-closed behaviour on a schema fault, until the
+shape was checked: `pd.Series([True, None, False]).astype(float)` and a `boolean`-dtype cast to
+float64 **both** produce `1.0 / nan / 0.0`. The NaN was already the missing case; the `1.0` and
+`0.0` beside it are a well-formed nullable-boolean column, and refusing them aborts a legitimate
+run. So the parse now accepts a **finite Real equal to exactly 0 or 1** before the text path.
+`0.5`, `1.5`, `-0.5`, `2` and `-1` still raise — they are schema faults and nothing about this
+widening touches them.
+
+**Note the inherited-behaviour point.** This was not introduced by P3-07: it is the behaviour
+`stage2/train.py::_bool_or_none` has had since P3-06, now visible because the parse moved to a
+shared home and got read by a reviewer. Fixing it once fixes it for the fold readers too, which
+is the whole argument for having promoted it rather than forked it.
+
+**Validation.** `test_recalibrate` **146 pass**; `test_masking` + `test_stage2_heads` +
+`test_stage2_dataset` + `test_stage2_train_smoke` + `test_temperature` + `test_no_leakage` = 502
+pass beside it. Full `unit+golden+ml`: **14 failures, still a strict subset of `main`'s 31** in
+this runner — `comm -13` over the two `^FAILED` sets is empty, so zero new failures, asserted
+rather than eyeballed. ruff + black clean. **Two more sabotages, both bitten and both
+directions**: removing the acceptance turns the float test red, and widening it to *any* finite
+real (so `0.5` reads `True`) turns the refusal test red — a one-sided sabotage would have missed
+the second, which is the failure that actually matters here.
+
+**Commit.** Feature branch `p3-07-calibration-stack`; squash SHA derived at the phase-exit gate.
