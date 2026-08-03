@@ -1009,3 +1009,81 @@ def test_the_absolute_reading_answers_when_only_the_CONTROL_lacks_an_ece() -> No
     assert out["reading_absolute"]["observed_ece"] == with_aux["grades"]["test"]["ece"]
     assert out["reading_absolute"]["unavailable_reason"] is None
     assert out["reading_absolute"]["depends_only_on_the_with_aux_arm"] is True
+
+
+# --------------------------------------------------------------------------- #
+# reconcile_cached_scores — the shortcut that must not silently re-grade
+# --------------------------------------------------------------------------- #
+def _cache_and_rows() -> tuple[dict[str, Any], list[dict[str, Any]], dict[str, Any]]:
+    rows = [
+        {"row_id": f"r{i}", "is_tbox": i % 2 == 0, "_rung": "test", "_block": f"cluster:{i // 2}"}
+        for i in range(6)
+    ]
+    cache = {
+        "dataset_sha256": "abc123",
+        "row_ids": [r["row_id"] for r in rows],
+        "device": "cuda",
+        "batch_size": 4,
+        "arms": {"a": {"logits": [1.0, -1.0, 2.0, -2.0, 0.5, -0.5], "load": {"n": 1}}},
+    }
+    return cache, rows, {"sha256": "abc123"}
+
+
+def test_a_matching_cache_reconciles() -> None:
+    """Positive control for every refusal below."""
+    cache, rows, meta = _cache_and_rows()
+    scores, loads, scoring = E.reconcile_cached_scores(
+        cache, rows=rows, dataset_meta=meta, wanted=["a"]
+    )
+    assert scores["a"].row_ids == tuple(r["row_id"] for r in rows)
+    assert loads["a"] == {"n": 1}
+    assert scoring["batch_size"] == 4 and scoring["regraded_from_cached_scores"] is True
+
+
+def test_the_recorded_batch_size_is_the_cached_run_s_not_this_invocation_s() -> None:
+    """CodeRabbit r2: batch composition perturbs the bf16 reductions.
+
+    Recording the flag this process was invoked with, rather than the batching that
+    actually produced the logits, documents a run that never happened. The failure is
+    invisible in the numbers and permanent in the artifact.
+    """
+    cache, rows, meta = _cache_and_rows()
+    cache["batch_size"] = 16
+    _, _, scoring = E.reconcile_cached_scores(cache, rows=rows, dataset_meta=meta, wanted=["a"])
+    assert scoring["batch_size"] == 16
+
+
+def test_a_cache_from_a_different_dataset_is_refused() -> None:
+    cache, rows, meta = _cache_and_rows()
+    cache["dataset_sha256"] = "a-different-digest"
+    with pytest.raises(ValueError, match="dataset sha256"):
+        E.reconcile_cached_scores(cache, rows=rows, dataset_meta=meta, wanted=["a"])
+
+
+def test_a_cache_over_a_different_row_set_is_refused() -> None:
+    """Same count, different rows: the shortcut's most dangerous near-miss."""
+    cache, rows, meta = _cache_and_rows()
+    cache["row_ids"] = list(reversed(cache["row_ids"]))
+    with pytest.raises(ValueError, match="not the same rows in the same order"):
+        E.reconcile_cached_scores(cache, rows=rows, dataset_meta=meta, wanted=["a"])
+
+
+def test_a_cache_missing_a_requested_arm_is_refused() -> None:
+    cache, rows, meta = _cache_and_rows()
+    with pytest.raises(KeyError, match="nothing for arm"):
+        E.reconcile_cached_scores(cache, rows=rows, dataset_meta=meta, wanted=["a", "b"])
+
+
+def test_validate_report_is_self_consistency_not_a_pass() -> None:
+    """CodeRabbit r2: the docstring claimed "and passing", which the shipped run refutes.
+
+    A report whose gate is honestly false is fully valid; conflating validity with
+    passing would make a truthful failing artifact look malformed.
+    """
+    report = _report()
+    report["arms"]["aux1.0_lr1e-4"]["load"]["n_lora_b_nonzero"] = 0
+    report["gate"]["clauses"] = E.derive_clauses(report)
+    report["gate"]["overall_pass"] = all(report["gate"]["clauses"].values())
+    assert report["gate"]["overall_pass"] is False
+    assert E.validate_report(report) == [], "a truthfully-failing report must still validate"
+    assert "self-consistent" in (E.validate_report.__doc__ or "")

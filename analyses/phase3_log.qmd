@@ -1927,3 +1927,33 @@ the length-sorted deterministic batching is for.
 unit+golden+ml **3,758 passed** with the 14 failures still a strict subset of main's 31
 (`comm -13` empty). ruff + black clean. Artifacts carry **zero** absolute paths;
 `validate_report` returns clean.
+
+### P3-08 review round 2 (CodeRabbit CLI) — 2 findings, both real, both fixed
+
+**A provenance bug in the fast path.** `scoring.batch_size` recorded the flag *this process*
+was invoked with, even when `--scores-from` re-graded logits produced under a different
+batching. Batch composition perturbs the bf16 reductions — which is exactly why `score_rows`
+sorts deterministically — so the artifact could have documented a batching that never touched
+those numbers. It now takes the cached run's own value, and the report says plainly that it
+was regraded (`regraded_from_cached_scores`) and from which sidecar.
+
+**A docstring that overclaimed.** `validate_report` said an empty problem list meant the
+report was "well-formed **and** passing". It is not: it checks that the recorded clauses match
+the re-derived ones and that `overall_pass` agrees with them. The shipped report is honestly
+failing *and* fully valid, and conflating the two would invite someone to "fix" a truthful
+artifact. Now "well-formed and self-consistent", with a test asserting a deliberately-failing
+report still validates.
+
+**The fix was taken as an opportunity to make the shortcut's refusals testable.** The
+`--scores-from` reconciliation lived inside `main`, so its guards needed a GPU to reach and had
+none of their own tests. It is now `reconcile_cached_scores`, graded in the numpy tier:
+mismatched dataset digest, a different row set at the *same count*, and a missing arm are each
+refused by name. Re-grading a stale cache is the one failure this shortcut can introduce and
+the one that would look most like success — seconds instead of minutes, a complete report, and
+numbers belonging to different rows.
+
+**Validation after r2.** `test_aux_ablation_check` **78 pass**; ml tier **12 pass**;
+unit+golden+ml **3,766 passed**, the 14 failures still a strict subset of main's 31
+(`comm -13` empty). ruff + black clean. Artifact regenerated: 0 absolute paths,
+`validate_report` clean, headline numbers unchanged. **3 further sabotages**, each RED against
+its named test, each restored byte-identically.

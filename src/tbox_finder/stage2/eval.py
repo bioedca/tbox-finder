@@ -76,6 +76,7 @@ __all__ = [
     "production_arm_config",
     "repo_relative",
     "ranking_preserved",
+    "reconcile_cached_scores",
     "rungs_for_rows",
     "score_rows",
     "select_arm_pair",
@@ -1070,7 +1071,14 @@ def derive_clauses(report: Mapping[str, Any]) -> dict[str, bool]:
 
 
 def validate_report(report: Mapping[str, Any]) -> list[str]:
-    """Structural problems with ``report``; empty means well-formed **and** passing."""
+    """Structural problems with ``report``; empty means well-formed and **self-consistent**.
+
+    Deliberately *not* "and passing" (review r2): this checks that the recorded clauses
+    match the ones re-derived from the report's own evidence and that ``overall_pass``
+    agrees with them. A report whose gate is honestly ``false`` — as the shipped one is
+    — is fully valid. Conflating the two would make a truthful failing report look
+    malformed and invite someone to "fix" it.
+    """
     problems: list[str] = []
     if report.get("schema_version") != SCHEMA_VERSION:
         problems.append(f"schema_version {report.get('schema_version')!r} != {SCHEMA_VERSION!r}")
@@ -1526,6 +1534,61 @@ def score_rows(
     return [out[str(row[_ROW_ID])] for row in rows]
 
 
+def reconcile_cached_scores(
+    cached: Mapping[str, Any],
+    *,
+    rows: Sequence[Mapping[str, Any]],
+    dataset_meta: Mapping[str, Any],
+    wanted: Sequence[str],
+) -> tuple[dict[str, ArmScores], dict[str, Any], dict[str, Any]]:
+    """Previously-written per-row logits -> :class:`ArmScores`, or a refusal.
+
+    Extracted from ``main`` so its refusals are reachable without a GPU. Re-grading a
+    stale cache is the one failure this shortcut can introduce and the one that would
+    look most like success: seconds instead of minutes, a complete report, and numbers
+    belonging to a different row set. So the cache must agree with this run on the
+    dataset digest *and* on the exact row-id sequence, and must hold every arm asked
+    for; each disagreement is refused by name rather than reconciled.
+    """
+    if cached.get("dataset_sha256") != dataset_meta["sha256"]:
+        raise ValueError(
+            f"the cached scores were produced from dataset sha256 "
+            f"{cached.get('dataset_sha256')!r}, but this run reads "
+            f"{dataset_meta['sha256']!r}"
+        )
+    cached_ids = [str(v) for v in cached.get("row_ids") or []]
+    current_ids = [str(row[_ROW_ID]) for row in rows]
+    if cached_ids != current_ids:
+        raise ValueError(
+            f"the cached scores cover {len(cached_ids)} rows and this run covers "
+            f"{len(current_ids)}, or they are not the same rows in the same order"
+        )
+    arm_scores: dict[str, ArmScores] = {}
+    load_records: dict[str, Any] = {}
+    labels = np.asarray([int(bool(row[_LABEL])) for row in rows], dtype=np.int64)
+    rungs = tuple(row["_rung"] for row in rows)
+    blocks = tuple(row["_block"] for row in rows)
+    for name in wanted:
+        arm = (cached.get("arms") or {}).get(name)
+        if arm is None:
+            raise KeyError(f"the cached scores hold nothing for arm {name!r}")
+        arm_scores[name] = ArmScores(
+            arm=name,
+            row_ids=tuple(cached_ids),
+            logits=np.asarray(arm["logits"], dtype=np.float64),
+            labels=labels,
+            rungs=rungs,
+            blocks=blocks,
+        )
+        load_records[name] = arm.get("load") or {}
+    scoring = {
+        "device": cached.get("device"),
+        "batch_size": cached.get("batch_size"),
+        "regraded_from_cached_scores": True,
+    }
+    return arm_scores, load_records, scoring
+
+
 def scored_rows(
     dataset: str | Path = DEFAULT_DATASET,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
@@ -1615,31 +1678,16 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.scores_from:
         cached = json.loads(Path(args.scores_from).read_text(encoding="utf-8"))
-        # Refuse a cache built from a different row set. Silently re-grading yesterday's
-        # logits against today's rows is the one failure this shortcut could introduce,
-        # and it would look like a fast, clean run.
-        if cached.get("dataset_sha256") != dataset_meta["sha256"]:
-            raise ValueError(
-                f"{args.scores_from} was produced from dataset sha256 "
-                f"{cached.get('dataset_sha256')!r}, but this run reads "
-                f"{dataset_meta['sha256']!r}"
-            )
-        cached_ids = list(cached["row_ids"])
-        if cached_ids != [str(row[_ROW_ID]) for row in rows]:
-            raise ValueError(f"{args.scores_from} was produced from a different row set")
-        for name in wanted:
-            if name not in cached["arms"]:
-                raise KeyError(f"{args.scores_from} holds no scores for arm {name!r}")
-            arm_scores[name] = ArmScores(
-                arm=name,
-                row_ids=tuple(cached_ids),
-                logits=np.asarray(cached["arms"][name]["logits"], dtype=np.float64),
-                labels=np.asarray([int(bool(row[_LABEL])) for row in rows], dtype=np.int64),
-                rungs=tuple(row["_rung"] for row in rows),
-                blocks=tuple(row["_block"] for row in rows),
-            )
-            load_records[name] = cached["arms"][name]["load"]
-        device = cached.get("device", device)
+        arm_scores, load_records, cached_scoring = reconcile_cached_scores(
+            cached, rows=rows, dataset_meta=dataset_meta, wanted=wanted
+        )
+        device = cached_scoring.get("device") or device
+        # The recorded batch size must describe the run that PRODUCED these logits, not
+        # the flag this process happened to be invoked with. Batch composition perturbs
+        # the bf16 reductions (see `score_rows`), so a mismatched number would document
+        # a batching that never touched them.
+        if cached_scoring.get("batch_size") is not None:
+            args.batch_size = int(cached_scoring["batch_size"])
     for name in [] if args.scores_from else wanted:
         trained_under = arms[name].get("attn_implementation")
         backend = args.attn_implementation or trained_under
@@ -1709,6 +1757,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         device=T.device_record(),
         scoring={
             "batch_size": args.batch_size,
+            "regraded_from_cached_scores": bool(args.scores_from),
+            "scores_sidecar": repo_relative(args.scores_from or args.scores),
             "device": device,
             "inference_mode": True,
             "n_boot": args.n_boot,
