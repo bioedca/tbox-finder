@@ -667,6 +667,12 @@ def test_the_sweep_grid_is_the_six_points_the_header_claims() -> None:
     # The no-aux arm P3-08 consumes must exist, and the LR must go through the group.
     assert 'loss.aux_weight="$AUX_WEIGHT"' in text
     assert 'optim.lr="$LR"' in text
+    # The batch size is the one reports/p3/stage2_sizing.json measured as the largest
+    # WORST-CASE fit; batch 8 OOM'd there and in job 1044. If this ever reads 8 again it
+    # must be because a fresh measurement said so.
+    assert "batch_size=4" in text
+    # Claiming checkpointing on this backbone would be claiming a no-op (saving ratio 0.9986).
+    assert "gradient_checkpointing=false" in text
     assert " lr=" not in text.split("-m tbox_finder.stage2.train")[1].split("\n")[1]
 
 

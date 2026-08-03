@@ -30,19 +30,32 @@
 # those four as module constants with a drift-guard test asserting config == code, so varying
 # r means editing that frozen contract, which is an ADR-0002 question and not a sweep value.
 #
-# ── SIZING (derived from MEASURED numbers, not guessed) ─────────────────────
-# P1-16 (reports/p1/lora_vram_smoke.json) measured this exact stack on a real A4000
-# (sm_86, bf16, gradient checkpointing, seq 350 nt): batch 8 → 985.8 ms/step, 2.014 GiB peak;
-# batch 16 → 1910.6 ms/step, 2.647 GiB; device total 15.602 GiB; largest fitting batch 16.
-# Training population (see the eligibility note below): 9,059 rows. At batch_size=8 over
-# DDP×8 that is 142 steps/epoch/rank. Scaling the measured step time by the corpus's real
-# token length (289 mean / 475 p95 / 552 max vs the smoke's 350) gives ≈1.35 s/step ⇒
-# ≈3.2 min/epoch + ≈0.3 min for the 2,070-row val rung ⇒ ≈35 min for 10 epochs. --time=02:00:00
-# is ≈3.4× that. Estimated cost: 6 points × 8 GPUs × ~0.6 h ≈ 29 GPU-h.
-# ⚠ NO FRESH GPU SMOKE WAS RUN before the ack: a GPU smoke on this cluster is itself a §9.3
-# submit, and the login node `two` is also a gpu compute node (running training off-scheduler
-# there is not a thing this project does). The estimate above is an extrapolation from P1-16's
-# measurement on the same stack and the same card — stated as such, not as a measurement.
+# ── SIZING — MEASURED on this card, not extrapolated ────────────────────────
+# reports/p3/stage2_sizing.json (job 1051, ONE A4000, real rows, real objective, the
+# trainer's own forward_backward). Worst case = the longest rows, which the collator pads
+# everything up to; typical = a median-length window:
+#
+#   batch  regime      tokens   OOM   peak GiB   step ms
+#       8  worst_case     551  YES          --      --
+#       8  typical        417   no     11.6641     857
+#       4  worst_case     551   no      8.1827     596
+#       4  typical        410   no      6.4790     462
+#       2  worst_case     551   no      4.8775     335
+#       1  worst_case     551   no      3.1640     202
+#
+# => batch_size=4 (worst case 8.18 of 15.60 GiB, ~47% headroom for DDP buckets + NCCL).
+# Batch 8 *typical* fits and batch 8 *worst case* does not — which is precisely why job 1044
+# trained ~16 min and then OOM'd the first time a long-sequence batch came up. growth_ratio
+# is 1.01-1.04 across six steps, i.e. FLAT: the footprint is per-step, not accumulating.
+#
+# ⚠ THE PREVIOUS SIZING WAS WRONG BECAUSE IT ANSWERED A DIFFERENT QUESTION. Jobs 1036/1044
+# were sized from reports/p1/lora_vram_smoke.json (P1-16: batch 8 -> 2.014 GiB), whose own
+# config block says `loss_is_placeholder: true`, `data_is_synthetic: true`, `seq_len_nt: 350`,
+# 5 steps — a bare backbone with no heads and no objective. The real seven-head step needs
+# ~5x that. imp.md's Compute line had asked for this smoke; skipping it cost two submits.
+#
+# Wall: 9,059 rows / (8 GPUs x 4) = 283 steps/epoch/rank at ~500 ms => ~2.4 min/epoch, so
+# ~25-30 min for 10 epochs + the 2,070-row val rung. --time=02:00:00 is ~4x that.
 #
 # ── THE TRAINING POPULATION (user decision, AskUserQuestion 2026-08-03) ─────
 #   admit iff  fold_random == train  AND  NOT calib  AND
@@ -302,7 +315,7 @@ set +e
 PYTHONHASHSEED=0 PYTHONPATH=src torchrun --standalone --nproc_per_node=8 \
   -m tbox_finder.stage2.train \
   loss.aux_weight="$AUX_WEIGHT" optim.lr="$LR" \
-  epochs=10 batch_size=8 gradient_checkpointing=true \
+  epochs=10 batch_size=4 gradient_accumulation_steps=2 gradient_checkpointing=false \
   eval_val=true save_checkpoint=true \
   report_path="$REPORT" checkpoint_dir="$SCRATCH_CKPT" \
   tracking.mode=offline

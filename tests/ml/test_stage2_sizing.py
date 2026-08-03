@@ -296,3 +296,36 @@ def test_the_real_corpus_has_the_length_spread_that_makes_worst_case_matter() ->
     worst = S._worst_case_rows(rows, batch_size=8)
     typical = S._typical_rows(rows, batch_size=8)
     assert min(r["n_tokens"] for r in worst) >= max(r["n_tokens"] for r in typical)
+
+
+def test_the_pinned_rinalmo_still_does_not_implement_gradient_checkpointing() -> None:
+    """A drift guard on a no-op we now depend on knowing about.
+
+    multimolecule 0.0.9's RiNALMo advertises ``supports_gradient_checkpointing = True`` and
+    stores ``self.gradient_checkpointing``, but its encoder loop never calls
+    ``_gradient_checkpointing_func`` — so enabling it sets an attribute nothing reads.
+    Measured at job 1051: 3.1640 GiB on vs 3.1595 GiB off, a saving ratio of 0.9986 across
+    36 modules carrying the flag. `conf/train/stage2.yaml` therefore ships it FALSE rather
+    than claiming a setting with no effect.
+
+    This asserts the *source*, so that if a future multimolecule implements the hook the test
+    fails and the config is revisited — rather than the project quietly running without a
+    memory optimisation it could have had. It is the counterpart to the lesson that a flag
+    which no-ops looks exactly like one that works: here the no-op is known, and the guard is
+    against it silently ceasing to be one.
+    """
+    _require_stack()
+    import inspect
+
+    from multimolecule.models.rinalmo import modeling_rinalmo
+
+    source = inspect.getsource(modeling_rinalmo)
+    assert "supports_gradient_checkpointing = True" in source, (
+        "the port no longer advertises checkpointing support — re-read it before trusting "
+        "either setting"
+    )
+    assert "_gradient_checkpointing_func" not in source, (
+        "multimolecule's RiNALMo now CALLS the checkpointing hook. Enabling "
+        "gradient_checkpointing would finally save memory and admit a larger batch — "
+        "re-run slurm/p3/stage2_sizing_smoke.sbatch and re-size conf/train/stage2.yaml."
+    )

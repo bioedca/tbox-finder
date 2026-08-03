@@ -71,16 +71,23 @@ eval_max_records: null
 num_workers: 2
 
 # ── Optimisation ─────────────────────────────────────────────────────────────────────────
-# Nothing here is ADR-pinned. epochs/batch_size are implementer choices on the P2-09
-# precedent (epochs=10, batch_size=8); batch_size=8 sits inside the MEASURED A4000 envelope
-# from P1-16 (reports/p1/lora_vram_smoke.json: 2.014 GiB peak, 985.8 ms/step at 350 nt,
-# bf16 + gradient checkpointing, largest fitting batch 16 at 2.647 GiB against a 15.602 GiB
-# device). Sequence lengths here are longer than that smoke's — the corpus is 289 tokens
-# mean / 475 p95 / 552 max — so 8 keeps headroom rather than spending the measurement.
+# Nothing here is ADR-pinned; epochs=10 follows the P2-09 precedent. The batch size is
+# MEASURED — see below. ⚠ An earlier version of this block cited P1-16's
+# reports/p1/lora_vram_smoke.json (2.014 GiB at batch 8) as the envelope. That report
+# measured a bare backbone under a PLACEHOLDER loss on synthetic 350-nt data
+# (`loss_is_placeholder: true`, `data_is_synthetic: true`), not this seven-head objective,
+# and the extrapolation cost two OOM'd submits. It is superseded here by
+# reports/p3/stage2_sizing.json, which measures the trainer's own step on real rows.
 epochs: 10
-batch_size: 8
-eval_batch_size: 16
-gradient_accumulation_steps: 1
+# batch_size 4 is MEASURED, not chosen: reports/p3/stage2_sizing.json (job 1051, one A4000)
+# puts the WORST-CASE batch — the longest rows, which the collator pads everything up to —
+# at 8.18 GiB of 15.60 at batch 4, while batch 8 worst-case OOMs outright. Batch 8 *typical*
+# fits at 11.66 GiB, which is exactly why job 1044 trained for ~16 minutes and then died the
+# first time a long-sequence batch came up. Sizing on the typical case is the trap.
+batch_size: 4
+eval_batch_size: 8
+# Keeps the effective batch at the 8 the previous config used, without the VRAM of 8 at once.
+gradient_accumulation_steps: 2
 
 # ── Model (PRD §10.3) ────────────────────────────────────────────────────────────────────
 # revision / dtype / attn_implementation are null = "use the pinned defaults": the immutable
@@ -92,7 +99,20 @@ gradient_accumulation_steps: 1
 revision: null
 dtype: null
 attn_implementation: null
-gradient_checkpointing: true
+
+# ⚠ FALSE because on THIS backbone the flag does nothing, and claiming it would be a lie the
+# reports repeat. multimolecule 0.0.9's RiNALMo advertises `supports_gradient_checkpointing =
+# True` (modeling_rinalmo.py:82) and stores `self.gradient_checkpointing` (:118), but its
+# encoder loop (:704, `for layer_module in self.layer:`) never calls
+# `_gradient_checkpointing_func` — so enabling it sets an attribute nothing reads. Measured
+# rather than assumed: reports/p3/stage2_sizing.json records peak 3.1640 GiB with it ON vs
+# 3.1595 GiB OFF at batch 1 worst-case, a saving ratio of 0.9986 across 36 modules carrying
+# the flag. PRD §10.3 names gradient checkpointing as part of the LoRA default; it is not
+# available on this port, and the honest response is to record that rather than assert a
+# setting with no effect. Hand-wiring `torch.utils.checkpoint` around the layers would make
+# larger batches possible and is a real optimisation — it is a code change to a pinned model
+# path, deferred, not silently assumed.
+gradient_checkpointing: false
 dropout: 0.1
 
 # The P3-03 hand-off, decided here: the boundary CRF is OFF and `true` is REFUSED at

@@ -1124,3 +1124,64 @@ shortest rows; `real_objective` no longer reading the placeholder flags; the opt
 clause hardwired true; the growth ratio always reporting flat. **16 sabotages across the step.**
 
 **Commit.** Feature branch `p3-06-stage2-lora`; squash SHA derived at the phase-exit gate.
+
+## Step P3-06 (addendum 3) — 2026-08-03: the sizing measurement, and a no-op the gates could not see
+
+**Result.** Job 1051 GREEN — `stage2_sizing.DONE`, report validates, gate passes, `.err` carries
+only HF load chatter. Measured on one A4000 (sm_86, 15.60 GiB) over 200 real admitted rows
+(247–551 tokens), through the trainer's own `forward_backward`:
+
+| batch | regime | tokens | OOM | peak GiB | growth | step ms |
+|---:|---|---:|---|---:|---:|---:|
+| 8 | worst_case | 551 | **yes** | — | — | — |
+| 8 | typical | 417 | no | 11.6641 | 1.009 | 857 |
+| 4 | worst_case | 551 | no | **8.1827** | 1.012 | 596 |
+| 4 | typical | 410 | no | 6.4790 | 1.014 | 462 |
+| 2 | worst_case | 551 | no | 4.8775 | 1.022 | 335 |
+| 1 | worst_case | 551 | no | 3.1640 | 1.027 | 202 |
+
+**Job 1044 is fully explained.** Batch 8 *typical* fits at 11.66 GiB; batch 8 *worst case*
+does not fit at all. That is precisely a run that trains for ~16 minutes and then dies the
+first time a long-sequence batch comes up — and it is why the harness measures both regimes.
+Sizing on the median would have reproduced the failure at a lower batch size.
+
+**`growth_ratio` is 1.01–1.04 across six steps — flat.** The 13.97 GiB was a per-step
+footprint, not an accumulation, so there is no leak to chase and the batch size is the whole
+fix. That question was worth asking explicitly rather than assuming: a growing footprint would
+have made *any* batch size a delayed failure.
+
+**⚠ THE FINDING THE GATES COULD NOT SEE: gradient checkpointing is a no-op on this backbone.**
+Measured 3.1640 GiB **on** vs 3.1595 GiB **off** — a saving ratio of **0.9986**, across **36
+modules carrying the flag**. The source confirms the measurement:
+`multimolecule/models/rinalmo/modeling_rinalmo.py` sets `supports_gradient_checkpointing =
+True` (:82) and stores `self.gradient_checkpointing` (:118), but its encoder loop
+(:704, `for layer_module in self.layer:`) **never calls `_gradient_checkpointing_func`**.
+Enabling it sets an attribute nothing reads.
+
+This is the same defect class as Caduceus having no checkpointing hook, and it had been sitting
+under a green gate on both sides. P1-16's `lora_vram_smoke.json` records
+`bf16_and_gradient_checkpointing: true` as a **passing gate clause**; this step's own
+`gradient_checkpointing_verified` clause counts modules carrying the flag and `build_model`
+*raises* if the count is zero. All three are satisfied by an attribute with no effect —
+flag-counting where only effect-measuring would do. **The sizing harness caught it because it
+measured a difference rather than read a setting**, which is the entire argument for its
+existence. Response: `gradient_checkpointing: false` is now the shipped default with the
+measurement and the source lines recorded, plus a drift-guard test asserting the port still
+does not implement the hook — so if a future `multimolecule` adds it, the test fails and the
+config is revisited rather than the project quietly foregoing a memory optimisation it could
+have had. Hand-wiring `torch.utils.checkpoint` is a real option for larger batches; it is a
+code change to a pinned model path and is deferred, not assumed.
+
+**Re-sized from this and nothing else:** `batch_size=4` (worst case 8.18 of 15.60 GiB, ~47 %
+headroom for DDP buckets and NCCL, which the single-GPU measurement does not include),
+`gradient_accumulation_steps=2` to hold the effective batch at the 8 the previous config used,
+`eval_batch_size=8`, `gradient_checkpointing=false`. Expected wall: 9,059 rows / (8 × 4) = 283
+steps/epoch/rank at ~500 ms ⇒ ~2.4 min/epoch ⇒ **~25–30 min per point**, against a 2 h limit.
+The stale P1-16 rationale was **deleted** from `conf/train/stage2.yaml` rather than left
+beside the new one — a config that documents a number it no longer uses is the same species of
+error as a report naming a backend the model never loaded.
+
+**Validation.** `test_stage2_sizing` **18 pass**, trainer suite **92 pass**,
+`test_sbatch_overrides` **22 pass**; `ruff` + `black` clean; `bash -n` clean.
+
+**Commit.** Feature branch `p3-06-stage2-lora`; squash SHA derived at the phase-exit gate.
