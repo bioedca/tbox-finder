@@ -117,6 +117,11 @@ def _decoy(**over: Any) -> dict[str, Any]:
         "cognate_aa": None,
         "trna_family": None,
     }
+    # `label_string` is None for ALL 7,007 real decoys — a decoy carries no T-box element
+    # annotation. The first version of this fixture inherited a 16-char label_string from
+    # `_row()`, which no real decoy has, and that unfaithfulness is exactly what let job
+    # 1036 reach the cluster with an unconditional alignment guard.
+    fields["label_string"] = None
     fields.update(over)
     return _row(**fields)
 
@@ -590,7 +595,10 @@ def test_the_sbatch_requests_a_whole_gpu_node_and_pins_nothing() -> None:
     text = _SBATCH.read_text()
     assert "#SBATCH --partition=gpu" in text
     assert "#SBATCH --gres=gpu:a4000:8" in text
-    assert "#SBATCH --array=0-5" in text
+    assert "#SBATCH --array=0-5%1" in text  # serialised while one gpu node is unhealthy
+    # The health check must run BEFORE the 2.5 GB HF download, or a bad node costs
+    # minutes instead of seconds (job 1036 lost three points that way).
+    assert text.index("STAGE2_NODE_UNHEALTHY") < text.index("hf cache warm")
     # Scan the DIRECTIVES, not the prose: the header explains at length why `--nodelist` is
     # never used, and a whole-file substring search would read that explanation as the flag.
     directives = [ln for ln in text.splitlines() if ln.startswith("#SBATCH ")]
@@ -888,6 +896,106 @@ def test_the_real_corpus_yields_a_population_with_both_routes_and_both_classes()
     assert census["refused"][T.REFUSE_CALIB] > 0
     _, val_census = T.select_rows(rows, rung="val")
     assert val_census["n_admitted"] > 0
+
+
+@pytest.mark.skipif(
+    os.environ.get("TBOX_REQUIRE_STAGE2_DATA") != "1",
+    reason="reads the DVC-tracked Stage-2 dataset; local/cluster only",
+)
+def test_a_real_row_of_every_pool_builds_an_item_with_an_aligned_boundary_target() -> None:
+    """The gap that let job 1036 die on the cluster: counting rows is not building items.
+
+    The old real-data tier only ran `select_rows` and checked counts, so nothing ever
+    constructed a dataset item from a real row — and the hand-written decoy fixture carried
+    a `label_string` no real decoy has. One real row per pool, put through `__getitem__`,
+    would have caught it locally in seconds. Parametrised over the pools rather than a
+    sample, so a new pool with a different labelling convention cannot slip in unexercised.
+    """
+    _require_torch()
+    from tbox_finder.stage2 import heads as H
+
+    rows = T.load_rows(_DATASET)
+    spec = H.load_head_spec()
+    background = spec.encode_boundary_string(
+        __import__("tbox_finder.labels", fromlist=["CLASS_CODE"]).CLASS_CODE["background"]
+    )[0]
+
+    by_pool: dict[str, Any] = {}
+    for row in rows:
+        by_pool.setdefault(str(row.get("pool")), row)
+    assert set(by_pool) == {
+        "corpus",
+        "dinuc_shuffled",
+        "gc_background",
+        "leader_decoy",
+        "structured_rna",
+    }, sorted(by_pool)
+
+    for pool, row in sorted(by_pool.items()):
+        ds = T.Stage2SequenceDataset([row], spec, loss_config=L.Stage2LossConfig())
+        item = ds[0]
+        n_nt = len(item["input_ids"]) - 2
+        assert len(item["boundary"]) == n_nt, pool
+        assert n_nt == int(row["seq_length"]), pool
+        if pool == "corpus":
+            # A positive keeps its real annotation, and it is not all-background.
+            assert item["boundary"] == spec.encode_boundary_string(row["label_string"]), pool
+            assert set(item["boundary"]) != {background}, pool
+            assert item[L.BINARY_TERM] == 1, pool
+        else:
+            # A decoy is supervised as all-background — NOT ignored (the Stage-1
+            # convention in data/negatives.py), and not left empty.
+            assert item["boundary"] == [background] * n_nt, pool
+            assert H.IGNORE_INDEX not in item["boundary"], pool
+            assert item[L.BINARY_TERM] == 0, pool
+
+
+@pytest.mark.skipif(
+    os.environ.get("TBOX_REQUIRE_STAGE2_DATA") != "1",
+    reason="reads the DVC-tracked Stage-2 dataset; local/cluster only",
+)
+def test_every_admitted_row_builds_an_item_without_raising() -> None:
+    """The whole admitted population, not a sample — this is what the run actually iterates.
+
+    Job 1036 reached the cluster because nothing had ever walked the training set. It costs
+    a few seconds and it is the difference between a guard that is right about the corpus
+    and a guard that is right about the fixture.
+    """
+    _require_torch()
+    from tbox_finder.stage2 import heads as H
+
+    rows = T.load_rows(_DATASET)
+    admitted, _ = T.select_rows(rows, rung="train")
+    ds = T.Stage2SequenceDataset(
+        [rows[i] for i in admitted], H.load_head_spec(), loss_config=L.Stage2LossConfig()
+    )
+    for index in range(len(ds)):
+        item = ds[index]
+        assert len(item["boundary"]) == len(item["input_ids"]) - 2
+
+
+def test_an_unlabelled_POSITIVE_still_hits_the_alignment_guard() -> None:
+    """The all-background branch is for decoys only, and it is fail-closed.
+
+    A corpus row with an empty `label_string` is a data defect, not a negative; handing it a
+    fabricated all-background target would train the segmenter on 141 nucleotides of
+    invented annotation while every loss stayed finite.
+    """
+    _require_torch()
+    from tbox_finder.stage2 import heads as H
+
+    spec = H.load_head_spec()
+    for bad in (
+        _row(label_string=None),  # corpus, no label
+        _row(label_string=None, source="decoy"),  # decoy-sourced but marked positive
+        _decoy(is_tbox=True),  # decoy pool, marked positive
+    ):
+        ds = T.Stage2SequenceDataset([bad], spec, loss_config=L.Stage2LossConfig())
+        with pytest.raises(ValueError, match="label_string is 0 long"):
+            _ = ds[0]
+    # Positive control: the genuine decoy, unmodified, builds cleanly.
+    ok = T.Stage2SequenceDataset([_decoy()], spec, loss_config=L.Stage2LossConfig())[0]
+    assert len(ok["boundary"]) == 16
 
 
 # --------------------------------------------------------------------------------------

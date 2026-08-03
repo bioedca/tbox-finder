@@ -79,7 +79,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from tbox_finder import masking
+from tbox_finder import labels, masking
 from tbox_finder.stage2 import heads as H
 from tbox_finder.stage2 import losses as L
 from tbox_finder.stage2 import tokenizer as tok
@@ -778,6 +778,23 @@ class Stage2SequenceDataset:
         self._spec = spec
         self._cfg = loss_config
         self._terms = loss_config.active_terms()
+        # Derived through the shipped mapping, never hardcoded as 0: `CLASS_CODE` →
+        # `CODE_TO_CLASS` → this spec's own boundary vocabulary. A literal index would go
+        # stale the moment ADR-0004 D1's class order changed, with nothing failing.
+        self._background_index = spec.encode_boundary_string(labels.CLASS_CODE["background"])[0]
+
+    @staticmethod
+    def _is_unlabelled_negative(row: Mapping[str, Any]) -> bool:
+        """A decoy, which by construction carries no per-nucleotide element annotation.
+
+        Both conditions are required, and the check is fail-closed on purpose: a *corpus*
+        row with an empty ``label_string``, or a row marked positive, must still hit the
+        alignment guard rather than be quietly handed a fabricated all-background target.
+        """
+        return (
+            masking.row_text(row.get("source")) == SOURCE_DECOY
+            and _bool_or_none(row.get("is_tbox")) is False
+        )
 
     def __len__(self) -> int:
         return len(self._rows)
@@ -800,6 +817,17 @@ class Stage2SequenceDataset:
 
         if "boundary" in self._terms:
             boundary = self._spec.encode_boundary_string(row.get(L.TERM_TO_FIELD["boundary"]))
+            if not boundary and self._is_unlabelled_negative(row):
+                # All 7,007 decoys carry `label_string = None` — a decoy has no T-box
+                # element annotation, and none of the four pools ever did. They are
+                # supervised as **all-background**, not ignored, following the Stage-1
+                # convention this shares a SegmentationHead with: `data/negatives.py`
+                # builds a negative with "every real nucleotide labelled `background`, with
+                # no IGNORE_INDEX … That is not a trick". So head (b) learns that a
+                # structured non-T-box RNA contains no T-box element anywhere — real
+                # anti-mimicry signal, and the dense-background regime PRD §11's γ=2 focal
+                # loss is written for. (User decision, 2026-08-03, after job 1036 died here.)
+                boundary = [self._background_index] * n_nt
             if len(boundary) != n_nt:
                 # Silent misalignment would train every position against its neighbour's
                 # label while the loss stayed finite; that is the failure this catches.

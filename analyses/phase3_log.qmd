@@ -983,3 +983,61 @@ xfailed**, `ruff` + `black`, `snakemake` lint + dry-run.
 **Commit.** Feature branch `p3-06-stage2-lora`, three commits (the step, the probe parse fix +
 its compile gate, the probe backend-label fix); the squash SHA is not knowable from this
 branch and is derived at the phase-exit gate.
+
+## Step P3-06 (addendum) — 2026-08-03: submit #1 (job 1036) failed; the decoy boundary target + the test gap that hid it
+
+**Result.** All six points of job 1036 died within ~12 minutes. Zero `.OK` markers, zero
+reports, zero checkpoints, ≈2.4 GPU-h burned. §9.3 step-8 stop; no auto-resubmit. Three
+distinct causes, splitting cleanly by node.
+
+**(A) A real defect, mine.** All **7,007 decoy rows carry `label_string = None`** — verified
+across all four decoy pools, against 0 of 23,535 corpus rows, every one of which has
+`len(label_string) == seq_length` exactly. A decoy has no T-box element annotation because
+there is none to have. `Stage2SequenceDataset.__getitem__` applied its alignment guard
+unconditionally and raised on the first decoy it met. Fixed by supervising a decoy as
+**all-background**, following the Stage-1 convention this shares a `SegmentationHead` with:
+`data/negatives.py` builds a negative with *"every real nucleotide labelled `background`,
+with **no** `IGNORE_INDEX` … That is not a trick"*. So head (b) learns that a structured
+non-T-box RNA contains no T-box element anywhere — anti-mimicry signal from 7,007 rows, and
+the dense-background regime PRD §11's γ=2 focal loss is written for. The background index is
+**derived** through `labels.CLASS_CODE` → `CODE_TO_CLASS` → this spec's own vocabulary, never
+written as a literal 0 that would go stale if ADR-0004 D1's class order moved. The branch is
+**fail-closed**: it requires `source == decoy` **and** `is_tbox is False`, so an unlabelled
+*corpus* row, or one marked positive, still hits the guard rather than being handed a
+fabricated target. (User decision, 2026-08-03: all-background over all-ignore.)
+
+**⚠ Why the local suite was green — the fixture contradicted the data.** `_decoy()` was built
+on `_row()` and so **inherited a 16-character `label_string` that no real decoy has**. And the
+real-corpus tier only *counted* eligibility; nothing had ever constructed a dataset **item**
+from a real row. That is the whole gap: the guard was right about the corpus and wrong about
+the fixture, and only the fixture was ever tested. Closed with three tests — one real row of
+**every** pool through `__getitem__` (asserting corpus rows keep their annotation and are not
+all-background, decoys are all-background and contain no `IGNORE_INDEX`), a walk of the
+**entire 9,059-row admitted population** (which is what the run iterates, and takes seconds),
+and a fail-closed check that an unlabelled *positive* still raises. Both new branches are
+sabotage-bitten.
+
+**(B) A cluster fault, not a code fault.** Node `two` returns *"Failed to initialize NVML:
+Driver/library version mismatch. NVML library version: 595.84"* — userspace has moved past the
+loaded kernel module. All three points that landed there died inside `init_process_group` with
+`ncclSystemError`, **before any of this step's code ran**. Node `one` is still on 590.48.01 and
+works. The signal was already visible and was read past: the pre-ack probe on `two` printed
+`UserWarning: Can't initialize NVML`. The sbatch now **fails fast on an unhealthy node** —
+`nvidia-smi` plus a real `torch.cuda` allocation, both **before** the 2.5 GB download, turning
+a two-minute opaque NCCL death into a five-second `STAGE2_NODE_UNHEALTHY` exit. It asks the
+node whether it works rather than assuming which node is good, so CLAUDE.md §13's never-pin
+rule is untouched. The array is serialised (`%1`) while one of two nodes is unusable.
+
+**(C) Unattributed.** Point 0 (node `one`, the `aux_weight=0.0` arm) took `SIGSEGV` on rank 4
+with **zero** ValueError lines, so it is neither (A) nor (B). It is the arm where all six aux
+heads go gradient-free and `find_unused_parameters=True` does the most work — but points 2 and
+4 also built DDP and got further, so that is a hypothesis and is recorded as one. If it
+recurs it will now recur on a run that reaches training, with (A) and (B) removed.
+
+**Validation.** 92 pass / 0 fail with every tier armed (`tbox-ml-rna`); `test_sbatch_overrides`
+22 pass; `ruff` + `black` clean; `bash -n` clean. **12 source sabotages total**, each RED
+against its NAMED test, each restored byte-identically. The CPU end-to-end run now completes
+16/16 steps over decoy-containing batches with a finite loss and all six terms contributing,
+failing its own gate on **only** `full_population`.
+
+**Commit.** Feature branch `p3-06-stage2-lora`; squash SHA derived at the phase-exit gate.

@@ -89,7 +89,12 @@
 #SBATCH --cpus-per-task=16
 #SBATCH --mem=64G
 #SBATCH --time=02:00:00
-#SBATCH --array=0-5
+#SBATCH --array=0-5%1
+# %1 = one task at a time. Not a throughput choice: with one of the two gpu nodes
+# carrying a broken driver stack (job 1036), running six whole-node tasks at once
+# risks burning the whole array on the bad node before a single point completes.
+# Serialised, each task's placement is an independent draw and the health check above
+# turns a bad draw into a 5-second exit. Restore 0-5 once both nodes are healthy.
 #SBATCH --output=reports/p3/sweep/slurm_%A_%a.out
 #SBATCH --error=reports/p3/sweep/slurm_%A_%a.err
 # No --account / --qos (accounting disabled), no --nodelist (never pin; `one` is often down).
@@ -196,7 +201,33 @@ export TOKENIZERS_PARALLELISM=false
 export OMP_NUM_THREADS=2                   # 16 cpus / 8 ranks; torchrun warns and defaults to 1.
 
 echo "host=$(hostname) job=${SLURM_JOB_ID:-none} task=$IDX key=$KEY sha=$(git rev-parse --short HEAD 2>/dev/null || echo NA)"
-nvidia-smi --query-gpu=name,driver_version,memory.total --format=csv,noheader || true
+
+# ── Node GPU health check — FAIL FAST, before the 2.5 GB download ────────────
+# Job 1036 lost three points on a node whose userspace NVML had moved past its loaded
+# kernel module ("Failed to initialize NVML: Driver/library version mismatch, NVML library
+# version: 595.84"). SLURM still called the node idle and still granted 8 GPUs; the tasks
+# died ~2 min in inside init_process_group with an opaque `ncclSystemError`. This turns that
+# into a 5-second exit with the actual reason, and it is node-agnostic — it asks the node
+# whether it works rather than assuming which node is good (CLAUDE.md §13: never pin).
+if ! nvidia-smi --query-gpu=name,driver_version,memory.total --format=csv,noheader; then
+  echo "STAGE2_NODE_UNHEALTHY $(hostname): nvidia-smi failed — the GPU driver stack on this" >&2
+  echo "  node is unusable (a driver/library version mismatch needs a reboot or module" >&2
+  echo "  reload by the admin). Exiting before the HF download; §9.3 sees the missing .OK." >&2
+  exit 2
+fi
+# nvidia-smi can succeed while CUDA itself cannot initialise, so ask torch directly — this
+# is the call that must work, and it is the one NCCL builds on.
+if ! PYTHONPATH=src python -c '
+import sys, torch
+if not torch.cuda.is_available():
+    sys.exit("torch.cuda.is_available() is False")
+n = torch.cuda.device_count()
+torch.zeros(1, device="cuda:0")
+print(f"cuda ok: {n} device(s), capability {torch.cuda.get_device_capability(0)}")
+'; then
+  echo "STAGE2_NODE_UNHEALTHY $(hostname): CUDA will not initialise under torch." >&2
+  exit 2
+fi
 
 # ⚠ NOT named BUILD: `conda activate` exports BUILD=x86_64-conda-linux-gnu from the compiler
 # toolchain hook, which clobbered the scratch var and killed job 789 six seconds in.
