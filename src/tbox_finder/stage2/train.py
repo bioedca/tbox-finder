@@ -193,27 +193,15 @@ def _bool_or_none(value: Any, *, field: str = "value") -> bool | None:
     pandas the string form of a missing cell is ``"nan"``, which is truthy, and that exact
     difference once deleted 60% of a training mix while every clause stayed green
     ([[pandas-3-nan-truthy-in-training-env]]).
+
+    **Promoted to** :func:`tbox_finder.masking.bool_or_none` **at P3-07** and delegated to
+    here, unchanged in behaviour: the calibration-rung reader needs the identical parse and
+    cannot import this module (it is torch-adjacent), so the parse moved down to the
+    stdlib-only layer rather than being copied
+    ([[promote-dont-duplicate-is-a-correctness-rule]]). This name stays as the in-module
+    spelling its call sites already use.
     """
-    if masking.is_missing(value):
-        return None
-    if isinstance(value, bool):
-        return value
-    # numpy.bool_ / 0 / 1 / "True" all arrive here from parquet round-trips.
-    text = masking.row_text(value).strip().lower()
-    if text in {"true", "1"}:
-        return True
-    if text in {"false", "0"}:
-        return False
-    if not text or text in H.NULL_TOKENS:
-        # An empty cell, or one whose STRING form is a null token, carries no fold
-        # assignment — so it is missing, and routes to the fail-closed refusal rather than
-        # raising. The literal `"nan"` matters here and is not hypothetical: it is what a
-        # missing cell stringifies to under the ml-rna env's pandas, which is exactly how a
-        # missingness check that only knew about `None` once deleted 60% of a training mix
-        # ([[pandas-3-nan-truthy-in-training-env]]). `H.NULL_TOKENS` is reused rather than
-        # respelled so the two null vocabularies cannot drift apart.
-        return None
-    raise ValueError(f"{field}={value!r} is neither missing nor boolean")
+    return masking.bool_or_none(value, field=field)
 
 
 def row_eligibility(row: Mapping[str, Any], *, rung: str, admit_parentless_decoys: bool) -> str:

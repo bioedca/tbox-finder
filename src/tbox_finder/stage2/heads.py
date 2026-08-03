@@ -139,7 +139,11 @@ HEAD_VOCAB_PATH = Path(__file__).with_name("head_vocab.json")
 #: Spellings a *stringified* null arrives as. :func:`tbox_finder.masking.is_missing`
 #: catches the real sentinels (``None`` / NaN / pandas-NA); these are what is left after
 #: something upstream has already rendered one into text.
-NULL_TOKENS: frozenset[str] = frozenset({"none", "nan", "na", "<na>", "null", "n/a"})
+#:
+#: **Re-exported, not redefined** (P3-07): the vocabulary lives in
+#: :data:`tbox_finder.masking.NULL_TOKENS`, beside the missing test it completes, so the
+#: label readers here and the boolean readers in ``masking.bool_or_none`` cannot drift apart.
+NULL_TOKENS: frozenset[str] = masking.NULL_TOKENS
 
 
 def _clean(value: Any) -> str:
