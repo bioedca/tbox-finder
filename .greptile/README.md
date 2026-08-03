@@ -57,7 +57,13 @@ Both are transition effects, not steady state. In a repo that has carried
 
 Both are *detected* rather than trusted: `scripts/greptile_budget.py` flags any Greptile
 activity on a thread with no manual trigger as `auto_fire_suspected`, and charges it to the
-monthly budget.
+monthly budget. Both were observed on the PR that introduced this config (#98): Greptile
+auto-reviewed it, and the counter caught and charged it.
+
+**This config only takes effect once it is on `main`.** Greptile reads it from the default
+branch, not from a PR head — on #98 it kept applying the dashboard's `fileChangeLimit: 1`
+and refused a 4-file PR even after the file existed on the branch. So expect dashboard
+behaviour, not this file's behaviour, on any PR opened before it merged.
 
 ## The 16/month cap
 

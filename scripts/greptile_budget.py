@@ -38,6 +38,15 @@ nobody asked for — i.e. ``skipReview`` is not in force (dashboard/org override
 on the default branch, malformed JSON). Those are counted as consumed budget *and* raised
 as a loud warning, so the budget gate doubles as the breach detector for the config.
 
+Known limitation
+----------------
+Auto-fire matching is per-thread, not per-event: if Greptile auto-fires on a PR and that
+same PR is *later* triggered manually in the same period, the bot's activity is attributed
+to the trigger and the pair counts as **one**, not two. Charging both would double-count
+the ordinary trigger-then-response case, which is far more common. The residual undercount
+is bounded by the number of auto-fires — and an auto-fire on an untriggered thread is still
+caught, charged, and reported, so the condition never goes unnoticed.
+
 Fail-closed
 -----------
 Every non-200, transport failure, or truncated pagination raises ``BudgetError`` and exits
