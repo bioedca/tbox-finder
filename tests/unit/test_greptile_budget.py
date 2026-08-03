@@ -171,6 +171,30 @@ def test_a_bot_quoting_the_trigger_does_not_consume_budget():
     assert report["used"] == 0
 
 
+@pytest.mark.parametrize(
+    "body",
+    [
+        "@greptileai",
+        "@greptileai review",
+        "@greptile-apps",  # the handle Greptile offers to bypass fileChangeLimit
+        "@greptile-apps review with strictness 1",
+        "please take a look @GreptileAI",  # case-insensitive, mid-sentence
+    ],
+)
+def test_both_trigger_handles_consume_budget(body):
+    """Counting only @greptileai would miss a real invocation made via @greptile-apps."""
+    report = _summarise([_comment(thread=THREAD_A, login="bioedca", kind="User", body=body)])
+    assert report["used"] == 1, body
+
+
+@pytest.mark.parametrize("body", ["@greptileaifoo", "@greptile-appsfoo", "@greptile", "greptileai"])
+def test_near_miss_mentions_do_not_consume_budget(body):
+    assert (
+        _summarise([_comment(thread=THREAD_A, login="bioedca", kind="User", body=body)])["used"]
+        == 0
+    ), body
+
+
 def test_trigger_must_be_the_whole_mention():
     assert (
         _summarise(
@@ -286,14 +310,61 @@ def test_transport_and_http_failures_refuse_rather_than_reporting_zero(monkeypat
     assert mod.fetch_issue_comments("o/r", P_START, None) == []
 
 
-def test_non_array_payload_refuses():
-    """A 200 carrying an error object must not be iterated as if it were comments."""
+def test_next_link_follows_only_rel_next():
+    """Link parsing must select rel="next" and ignore every other relation."""
     assert mod._next_link({}) is None
     assert mod._next_link({"Link": '<https://x/2>; rel="next", <https://x/9>; rel="last"'}) == (
         "https://x/2"
     )
     # rel="last" alone must NOT be followed as if it were the next page.
     assert mod._next_link({"Link": '<https://x/9>; rel="last"'}) is None
+
+
+def test_non_array_payload_refuses(monkeypatch):
+    """A 200 carrying an error object must not be iterated as if it were comments."""
+    monkeypatch.setattr(mod, "_get", lambda url, token: (200, b'{"message":"Not Found"}', {}))
+    with pytest.raises(mod.BudgetError, match="JSON array"):
+        mod.fetch_issue_comments("o/r", P_START, None)
+    # Positive control: a real array on the same path returns normally.
+    monkeypatch.setattr(mod, "_get", lambda url, token: (200, b"[]", {}))
+    assert mod.fetch_issue_comments("o/r", P_START, None) == []
+
+
+def test_unparseable_json_refuses(monkeypatch):
+    monkeypatch.setattr(mod, "_get", lambda url, token: (200, b"not json at all", {}))
+    with pytest.raises(mod.BudgetError, match="unparseable JSON"):
+        mod.fetch_issue_comments("o/r", P_START, None)
+
+
+@pytest.mark.parametrize("bad", ["not-a-date", "2026-13-01", "", "2026/08/03"])
+def test_malformed_anchor_fails_closed_rather_than_crashing(bad):
+    """Must raise BudgetError, not ValueError: a bare ValueError exits 1, off-contract."""
+    with pytest.raises(mod.BudgetError):
+        mod.parse_anchor(bad)
+    # Positive control: the real anchor still parses.
+    assert mod.parse_anchor("2026-08-03").day == 3
+
+
+@pytest.mark.parametrize("bad", ["garbage", "2026-08-03", "2026-08-03T00:00:00+00:00", None])
+def test_malformed_timestamp_fails_closed_rather_than_crashing(bad):
+    with pytest.raises(mod.BudgetError):
+        mod._parse_ts(bad)
+    # Positive control: the GitHub wire format still parses.
+    assert mod._parse_ts("2026-08-03T00:00:00Z").day == 3
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["--anchor", "not-a-date"],
+        ["--now", "garbage"],
+    ],
+)
+def test_main_maps_bad_arguments_onto_the_fail_closed_exit_code(monkeypatch, capsys, argv):
+    """Bad CLI input must exit 3 (could-not-measure), never 1 (uncaught traceback)."""
+    monkeypatch.setattr(mod, "fetch_issue_comments", lambda *a, **k: [])
+    assert mod.main(argv) == 3
+    assert "COULD NOT MEASURE" in capsys.readouterr().err
 
 
 def test_counts_via_the_repo_wide_comment_feed_not_a_pr_enumeration(monkeypatch):

@@ -78,9 +78,14 @@ DEFAULT_REPO = "bioedca/tbox-finder"
 DEFAULT_LIMIT = 16
 DEFAULT_ANCHOR = "2026-08-03"  # the day the Greptile fallback was configured
 
-# Greptile's manual trigger. Matched case-insensitively and required to be followed by a
-# non-word character (or end of string) so `@greptileaifoo` does not count.
-_TRIGGER_RE = re.compile(r"@greptileai(?!\w)", re.IGNORECASE)
+# Greptile's manual triggers. BOTH handles must be matched: `@greptileai` is the documented
+# one, and `@greptile-apps` is the one Greptile itself offers to bypass `fileChangeLimit`
+# ("Bypass the limit by tagging `@greptile-apps` to review." — observed verbatim on PR #98).
+# Counting only the documented handle would miss a real invocation, and an uncounted review
+# is permissive in exactly the direction that overruns the cap.
+# Matched case-insensitively and required to be followed by a non-word character (or end of
+# string) so `@greptileaifoo` does not count.
+_TRIGGER_RE = re.compile(r"@greptile(?:ai|-apps)(?!\w)", re.IGNORECASE)
 
 # Greptile owns >1 bot identity; match the family by prefix rather than pinning one login.
 _BOT_LOGIN_PREFIX = "greptile"
@@ -119,7 +124,12 @@ def parse_anchor(anchor: str) -> datetime:
     Rejects days 29-31: those do not exist in every month, so monthly stepping would need
     a clamping rule, and a clamped boundary silently changes period lengths.
     """
-    dt = datetime.strptime(anchor, "%Y-%m-%d").replace(tzinfo=UTC)
+    try:
+        dt = datetime.strptime(anchor, "%Y-%m-%d").replace(tzinfo=UTC)
+    except ValueError as exc:
+        # Escaping as a bare ValueError would exit 1 — outside the 0/2/3 contract, so a
+        # caller keying on those codes could not tell it apart from a crash.
+        raise BudgetError(f"unparseable anchor {anchor!r} (want YYYY-MM-DD): {exc}") from exc
     if dt.day > 28:
         raise BudgetError(
             f"anchor day {dt.day} is not present in every month; "
@@ -213,7 +223,17 @@ def fetch_issue_comments(repo: str, since: datetime, token: str | None) -> list[
 
 
 def _parse_ts(value: str) -> datetime:
-    return datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC)
+    """Parse a GitHub UTC timestamp, failing closed on anything unexpected.
+
+    Raises `BudgetError`, not `ValueError`: a comment whose `created_at` GitHub renders in
+    an unexpected shape must route through the fail-closed path (exit 3) rather than
+    crashing out of the 0/2/3 exit contract, and must never be silently skipped — a
+    skipped comment is an uncounted review.
+    """
+    try:
+        return datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC)
+    except (ValueError, TypeError) as exc:
+        raise BudgetError(f"unparseable UTC timestamp {value!r}: {exc}") from exc
 
 
 def _is_greptile_bot(user: dict) -> bool:

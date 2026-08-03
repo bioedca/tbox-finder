@@ -16,6 +16,7 @@ part of that schema — it is here so the config's rationale sits next to the co
 | `triggerOnUpdates` | `false` | Belt-and-braces. `true` re-reviews on **every push**, which would burn the monthly cap in a single PR. |
 | `statusCheck` | `false` | Greptile will normally never run, so a status check it posts would be a check that never arrives. `main` is currently unprotected, so this cannot block a merge today — pinned so that enabling branch protection later can't turn it into one. |
 | `statusCommentsEnabled` | `false` | No progress chatter on PRs it was not asked to review. |
+| `fileChangeLimit` | `50` | **Load-bearing.** The Greptile dashboard has this set to **1**, which was observed refusing an ordinary 4-file PR outright (`Too many files changed for review. (4 files found, 1 file limit)`). 11 of the last 12 PRs here touch more than one file (median ~9, max 32), so at the dashboard's value Greptile could not review essentially anything and would be useless as a fallback. 50 covers the observed distribution with headroom. |
 | `autoApprove.enabled` | `false` | A fallback reviewer must never approve a PR by itself; approval authority stays with the CLAUDE.md §5.1 gate. |
 | `ignorePatterns` | see file | Mirrors `.coderabbit.yaml`'s `path_filters` so the fallback reviews the *same* scope as the primary — prose (`*.md`, `*.qmd`, ADRs), figures, data, covariance models and lockfiles are excluded. Also self-excludes `.greptile/` and `greptile.json`. |
 
@@ -75,3 +76,9 @@ Run it **before** commenting `@greptileai`. The count is re-derived from the Git
 every call rather than read from a ledger this repo writes about itself, so an invocation that
 went unlogged cannot inflate the remaining budget. See that script's module docstring for why
 the *trigger* is the counting unit and Greptile's own output is not.
+
+**Both trigger handles count.** `@greptileai` is the documented one; `@greptile-apps` is the
+one Greptile itself offers when a PR trips `fileChangeLimit` ("Bypass the limit by tagging
+`@greptile-apps` to review."). The counter matches both — counting only the documented handle
+would let a real invocation go unbilled, which is permissive in exactly the direction that
+overruns the cap.

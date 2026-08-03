@@ -3,6 +3,7 @@
   "triggerOnUpdates": false,
   "statusCheck": false,
   "statusCommentsEnabled": false,
+  "fileChangeLimit": 50,
   "autoApprove": {
     "enabled": false
   },
