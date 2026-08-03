@@ -176,7 +176,10 @@ def test_an_all_zero_lora_b_is_refused_because_it_is_the_untuned_backbone(
 
     adapter_file = ckpt / E.ADAPTER_SUBDIR / "adapter_model.safetensors"
     state = load_file(str(adapter_file))
-    zeroed = {k: (torch.zeros_like(v) if ".lora_B." in k else v) for k, v in state.items()}
+    # `.clone()` is not defensive habit: load_file can return tensors backed by a
+    # memory-map of the very file save_file is about to overwrite, so writing through
+    # them can corrupt the weights being written.
+    zeroed = {k: (torch.zeros_like(v) if ".lora_B." in k else v.clone()) for k, v in state.items()}
     save_file(zeroed, str(adapter_file), metadata={"format": "pt"})
 
     with pytest.raises(RuntimeError, match="every lora_B block is zero"):
@@ -198,7 +201,7 @@ def test_an_adapter_tensor_missing_from_the_file_is_refused(tmp_path: Path) -> N
     state = load_file(str(adapter_file))
     victim = next(k for k in state if ".lora_A." in k)
     save_file(
-        {k: v for k, v in state.items() if k != victim},
+        {k: v.clone() for k, v in state.items() if k != victim},  # see the clone note above
         str(adapter_file),
         metadata={"format": "pt"},
     )

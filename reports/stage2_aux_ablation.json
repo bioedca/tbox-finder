@@ -26,9 +26,10 @@
   },
   "no_aux_arm": "aux0.0_lr1e-4",
   "reading_absolute": {
+   "depends_only_on_the_with_aux_arm": true,
    "gate": 0.05,
    "observed_ece": 0.005661656399710311,
-   "passes": null,
+   "passes": true,
    "rule": "with-aux still holds the D11 GATE-2 grade: in-distribution ECE <= gate",
    "source": "ADR-0005 D16 read against D11; needs no new number",
    "unavailable_reason": null
@@ -105,7 +106,7 @@
     },
     "temperature": null
    },
-   "checkpoint_dir": "/home/bioedca/tbox-phylogeny/tbox-finder/data/processed/checkpoints/stage2_rinalmo/aux0.0_lr1e-4",
+   "checkpoint_dir": "data/processed/checkpoints/stage2_rinalmo/aux0.0_lr1e-4",
    "grades": {
     "test": {
      "auprc": 0.9998972539458512,
@@ -121,6 +122,7 @@
      "auprc_on_posterior": null,
      "auprc_rank_invariant": true,
      "auprc_scaled_logits": 0.9998972539458512,
+     "auprc_scaling_abs_delta": 0.0,
      "block_census": {
       "n_blocks": 2275,
       "n_rows": 3045
@@ -136,6 +138,8 @@
      "n": 3045,
      "n_negative": 692,
      "n_positive": 2353,
+     "n_ties_created_by_scaling": 0,
+     "no_scaling_applied": true,
      "prevalence": 0.7727422003284072,
      "separation": {
       "accuracy_at_zero": 0.9954022988505747,
@@ -172,6 +176,7 @@
      "auprc_on_posterior": null,
      "auprc_rank_invariant": true,
      "auprc_scaled_logits": 0.9999787216771793,
+     "auprc_scaling_abs_delta": 0.0,
      "block_census": {
       "n_blocks": 2164,
       "n_rows": 3067
@@ -187,6 +192,8 @@
      "n": 3067,
      "n_negative": 713,
      "n_positive": 2354,
+     "n_ties_created_by_scaling": 0,
+     "no_scaling_applied": true,
      "prevalence": 0.7675252689925008,
      "separation": {
       "accuracy_at_zero": 0.993478969677209,
@@ -226,7 +233,7 @@
       "linear_gate"
      ]
     },
-    "adapter_dir": "/home/bioedca/tbox-phylogeny/tbox-finder/data/processed/checkpoints/stage2_rinalmo/aux0.0_lr1e-4/lora_adapter",
+    "adapter_dir": "data/processed/checkpoints/stage2_rinalmo/aux0.0_lr1e-4/lora_adapter",
     "adapter_keys_absent_from_file": [],
     "adapter_mismatched_keys": [],
     "adapter_missing_keys": [],
@@ -235,10 +242,10 @@
     "attn_implementation_matches_training": true,
     "attn_implementation_trained_under": "flash_attention_2",
     "base_model_name_or_path": "multimolecule/rinalmo-giga",
-    "checkpoint_dir": "/home/bioedca/tbox-phylogeny/tbox-finder/data/processed/checkpoints/stage2_rinalmo/aux0.0_lr1e-4",
+    "checkpoint_dir": "data/processed/checkpoints/stage2_rinalmo/aux0.0_lr1e-4",
     "dtype": "bfloat16",
     "head_mismatched_keys": [],
-    "heads_path": "/home/bioedca/tbox-phylogeny/tbox-finder/data/processed/checkpoints/stage2_rinalmo/aux0.0_lr1e-4/stage2_heads.pt",
+    "heads_path": "data/processed/checkpoints/stage2_rinalmo/aux0.0_lr1e-4/stage2_heads.pt",
     "heads_sha256": "9218ce28d6c7387a283673d0d7917dd7281567c971ea97d230dde9804048704d",
     "n_adapter_tensors_in_file": 462,
     "n_adapter_tensors_matched": 462,
@@ -310,7 +317,7 @@
     "nll_per_position_initial": 0.007428616986386666,
     "temperature": 1.140627294282911
    },
-   "checkpoint_dir": "/home/bioedca/tbox-phylogeny/tbox-finder/data/processed/checkpoints/stage2_rinalmo/aux1.0_lr1e-4",
+   "checkpoint_dir": "data/processed/checkpoints/stage2_rinalmo/aux1.0_lr1e-4",
    "grades": {
     "test": {
      "auprc": 0.9998237101640952,
@@ -326,6 +333,7 @@
      "auprc_on_posterior": 0.9998237101640952,
      "auprc_rank_invariant": true,
      "auprc_scaled_logits": 0.9998237101640952,
+     "auprc_scaling_abs_delta": 0.0,
      "block_census": {
       "n_blocks": 2275,
       "n_rows": 3045
@@ -349,6 +357,7 @@
      "n": 3045,
      "n_negative": 692,
      "n_positive": 2353,
+     "n_ties_created_by_scaling": 0,
      "posterior_saturation": {
       "n_at_one": 0,
       "n_at_zero": 0
@@ -533,6 +542,7 @@
      "auprc_on_posterior": 0.9982906741611046,
      "auprc_rank_invariant": true,
      "auprc_scaled_logits": 0.9982906741611046,
+     "auprc_scaling_abs_delta": 0.0,
      "block_census": {
       "n_blocks": 2164,
       "n_rows": 3067
@@ -556,6 +566,7 @@
      "n": 3067,
      "n_negative": 713,
      "n_positive": 2354,
+     "n_ties_created_by_scaling": 0,
      "posterior_saturation": {
       "n_at_one": 0,
       "n_at_zero": 0
@@ -743,7 +754,7 @@
       "linear_gate"
      ]
     },
-    "adapter_dir": "/home/bioedca/tbox-phylogeny/tbox-finder/data/processed/checkpoints/stage2_rinalmo/aux1.0_lr1e-4/lora_adapter",
+    "adapter_dir": "data/processed/checkpoints/stage2_rinalmo/aux1.0_lr1e-4/lora_adapter",
     "adapter_keys_absent_from_file": [],
     "adapter_mismatched_keys": [],
     "adapter_missing_keys": [],
@@ -752,10 +763,10 @@
     "attn_implementation_matches_training": true,
     "attn_implementation_trained_under": "flash_attention_2",
     "base_model_name_or_path": "multimolecule/rinalmo-giga",
-    "checkpoint_dir": "/home/bioedca/tbox-phylogeny/tbox-finder/data/processed/checkpoints/stage2_rinalmo/aux1.0_lr1e-4",
+    "checkpoint_dir": "data/processed/checkpoints/stage2_rinalmo/aux1.0_lr1e-4",
     "dtype": "bfloat16",
     "head_mismatched_keys": [],
-    "heads_path": "/home/bioedca/tbox-phylogeny/tbox-finder/data/processed/checkpoints/stage2_rinalmo/aux1.0_lr1e-4/stage2_heads.pt",
+    "heads_path": "data/processed/checkpoints/stage2_rinalmo/aux1.0_lr1e-4/stage2_heads.pt",
     "heads_sha256": "12294f08ab51ec378b24fcb7efdd562ae20d3eafa23abdc6547dae0c27195207",
     "n_adapter_tensors_in_file": 462,
     "n_adapter_tensors_matched": 462,
@@ -813,7 +824,7 @@
   },
   "n_rows_scored": 7201,
   "n_rows_total": 30542,
-  "path": "/home/bioedca/tbox-phylogeny/tbox-finder/data/processed/stage2_dataset.parquet",
+  "path": "data/processed/stage2_dataset.parquet",
   "rung_census": {
    "calib": 1089,
    "test": 3045,
@@ -870,7 +881,7 @@
   "entrypoint": "tbox_finder.stage2.eval",
   "env_lock": "envs/ml-rna.conda-lock.yml",
   "env_lock_hash": "60f966a8f009abfa3900357ffd0ac7c685d8b55b713da4498306480720bcf3b3",
-  "git_sha": "a4c075b2dc695222b6dd0a88762a2e7d177c8c4b"
+  "git_sha": "193fb8748e7c14cfecd08a8252c49e2c95772b6f"
  },
  "schema_version": "1",
  "scoring": {
@@ -885,5 +896,5 @@
   "n_boot": 2000
  },
  "step": "P3-08",
- "written_at": "2026-08-03T23:04:42+00:00"
+ "written_at": "2026-08-03T23:43:49+00:00"
 }

@@ -541,6 +541,23 @@ def _sweep(tmp_path: Path) -> tuple[Path, Path]:
     return root, sweep
 
 
+def test_discover_arms_keeps_an_openable_path_beside_the_recordable_one(
+    tmp_path: Path,
+) -> None:
+    """CodeRabbit r1 follow-on: relativising the path the LOADER opens broke the run.
+
+    `checkpoint_dir` is written into a committed public artifact and must be
+    repo-relative; `checkpoint_path` is what `load_stage2_checkpoint` opens and must
+    resolve from wherever the process runs. Collapsing them into one field made the
+    report clean and the scoring step raise FileNotFoundError.
+    """
+    root, sweep = _sweep(tmp_path)
+    arms = E.discover_arms(root, sweep_dir=sweep)
+    for arm in arms.values():
+        assert Path(arm["checkpoint_path"]).is_dir(), "the openable path does not resolve"
+        assert Path(arm["checkpoint_path"]).is_absolute()
+
+
 def test_discover_arms_reads_each_arms_own_run_report(tmp_path: Path) -> None:
     root, sweep = _sweep(tmp_path)
     arms = E.discover_arms(root, sweep_dir=sweep)
@@ -843,3 +860,152 @@ def test_module_constants_are_borrowed_not_retyped() -> None:
     assert E.HEADS_STATE_NAME is T.HEADS_STATE_NAME
     assert E.ECE_N_BINS == M.ECE_N_BINS
     assert math.isclose(E.ECE_GATE, 0.05)
+
+
+def test_a_float32_nan_cluster_id_is_still_no_cluster() -> None:
+    """CodeRabbit r1: the guard was `isinstance(raw, float)`, which np.float32 fails.
+
+    `np.float64` is a subclass of Python `float` and today's column happens to be
+    float64, so the old reading worked *by accident of dtype*. Under float32 every
+    cluster-less row would key `cluster:nan` and collapse into one block — the exact
+    failure `block_keys` is written to prevent, reintroduced by a type check.
+    """
+    rows = [{"row_id": f"d{i}", "cluster_id": np.float32("nan")} for i in range(6)]
+    rows.append({"row_id": "c0", "cluster_id": np.float32(7.0)})
+    keys, census = E.block_keys(rows)
+    assert census["n_rows_without_cluster"] == 6
+    assert census["n_blocks"] == 7, "the float32 NaNs collapsed into one block"
+    assert keys[-1] == "cluster:7"
+
+
+def test_a_non_numeric_cluster_id_is_refused_by_name() -> None:
+    """A garbage id is a schema fault, not a silent promotion to 'no cluster'."""
+    with pytest.raises(ValueError, match="neither a number nor absent"):
+        E.block_keys([{"row_id": "x", "cluster_id": "not-a-cluster"}])
+    # Positive control: the identical row with a numeric id is accepted.
+    assert E.block_keys([{"row_id": "x", "cluster_id": 3}])[0] == ["cluster:3"]
+
+
+def test_scaling_that_creates_a_tie_is_detected_not_tolerated() -> None:
+    """CodeRabbit r1: exact AP equality could flip the clause on float rounding.
+
+    The invariant is stated directly now — scaling created no ties — with the tie count
+    and the AP delta recorded beside it. This drives a case where ``z/T`` genuinely
+    collapses two distinct logits onto one float64 value and asserts the report *says
+    so* rather than either silently tolerating it or going red without a reason.
+    """
+    graded = E.grade_arm(_arm(seed=17), n_boot=10)
+    block = graded["grades"]["test"]
+    assert block["n_ties_created_by_scaling"] == 0
+    assert block["auprc_scaling_abs_delta"] == 0.0
+    assert block["auprc_rank_invariant"] is True
+
+    # The hazard is real, not hypothetical, and this pair was FOUND rather than assumed:
+    # two ADJACENT float64 logits that `z / T` maps onto a single value. It needs T < 1,
+    # so the quotient crosses into a coarser binade (here the one above 2.0) — and T < 1
+    # is an ordinary fit result: P2-13's Stage-1 temperature was 0.9896.
+    z = np.array([1.9999999000000002, 1.9999999000000004], dtype=np.float64)
+    assert len(set(z.tolist())) == 2, "the two logits are not distinct to begin with"
+    assert len({float(v) for v in z / 0.6}) == 1, (
+        "this pair no longer demonstrates a scaling-induced tie, so the clause's "
+        "exact-equality hazard would be undocumented"
+    )
+
+
+def test_recorded_paths_are_repo_relative_not_developer_absolute() -> None:
+    """CodeRabbit r1: the committed artifact leaked the OS user name and local layout.
+
+    This is a **public** repo and reports are committed, so an absolute path is
+    permanent history that resolves on exactly one machine. The sha256 beside each path
+    is the identity evidence; the string is only a locator
+    ([[committing-real-tool-output-fixtures]]).
+    """
+    inside = REPO_ROOT / "src" / "tbox_finder" / "stage2" / "eval.py"
+    assert E.repo_relative(inside) == "src/tbox_finder/stage2/eval.py"
+    assert E.repo_relative(str(inside)) == "src/tbox_finder/stage2/eval.py"
+
+
+def test_paths_in_the_main_checkout_relativise_from_a_linked_worktree() -> None:
+    """The first fix missed this and left every INPUT path absolute.
+
+    Development happens in a worktree under `.claude/worktrees/`, but the DVC-materialised
+    inputs live in the main checkout — a different root. Relativising against only this
+    file's own root silently passed them through unchanged, which is precisely the leak
+    the fix was for.
+    """
+    roots = E._candidate_roots()
+    assert REPO_ROOT.resolve() in roots
+    for root in roots:
+        probe = root / "data" / "processed" / "stage2_dataset.parquet"
+        assert E.repo_relative(probe) == "data/processed/stage2_dataset.parquet"
+
+
+def test_a_path_outside_every_root_is_passed_through_not_mangled() -> None:
+    """Better an honest absolute path than a `../../..` that resolves nowhere."""
+    assert E.repo_relative("/definitely/not/in/this/repo.txt") == "/definitely/not/in/this/repo.txt"
+
+
+def test_the_committed_report_carries_no_developer_absolute_paths() -> None:
+    """The end-to-end assertion: grep the shipped artifacts, not just the helper."""
+    for name in (E.DEFAULT_REPORT, E.DEFAULT_SCORES):
+        path = REPO_ROOT / name
+        if not path.is_file():
+            pytest.skip(f"{name} has not been produced yet")
+        blob = path.read_text(encoding="utf-8")
+        assert "/home/" not in blob, f"{name} embeds an absolute developer path"
+
+
+def test_ranking_preserved_catches_a_tie_that_leaves_average_precision_unmoved() -> None:
+    """The case `grade_arm` alone cannot reach — and the one an AP-only check misses.
+
+    Sabotaging the clause back to `auprc == auprc_scaled` left the whole suite green,
+    which meant the tie half of the fix was untested. It matters because two logits can
+    collide under `z / T` *without* moving AP at all (here the colliding rows share a
+    label), and an AP-only check calls that "ranking preserved" when ranking information
+    was in fact destroyed.
+    """
+    # A found collision: these two adjacent float64 values divide onto one under T=0.6.
+    a, b = 1.9999999000000002, 1.9999999000000004
+    z_raw = np.array([a, b, -1.0], dtype=np.float64)
+    z_scaled = z_raw / 0.6
+    assert len(set(z_raw.tolist())) == 3
+    assert len(set(z_scaled.tolist())) == 2, "the fixture no longer collides"
+
+    # Same AP either way (the collided pair shares a label), so AP alone sees nothing.
+    ap = M.average_precision([1, 1, 0], [float(v) for v in z_raw])
+    ap_scaled = M.average_precision([1, 1, 0], [float(v) for v in z_scaled])
+    assert ap == ap_scaled
+
+    preserved, n_ties, ap_delta = E.ranking_preserved(z_raw, z_scaled, ap, ap_scaled)
+    assert n_ties == 1
+    assert ap_delta == 0.0
+    assert preserved is False, "an AP-only check would have called this preserved"
+
+    # Positive control: no collision -> preserved.
+    clean = np.array([3.0, 1.0, -1.0], dtype=np.float64)
+    ap_c = M.average_precision([1, 1, 0], [float(v) for v in clean])
+    ap_cs = M.average_precision([1, 1, 0], [float(v) for v in clean / 1.14])
+    assert E.ranking_preserved(clean, clean / 1.14, ap_c, ap_cs) == (True, 0, 0.0)
+
+
+def test_the_absolute_reading_answers_when_only_the_CONTROL_lacks_an_ece() -> None:
+    """The shipped run's exact configuration — and the r1 finding that fixed it.
+
+    D16's absolute reading asks only whether the with-aux arm still holds the D11
+    grade, so it is answerable whenever *that* arm has an ECE. Gating it on the
+    comparison's availability returned `None` for a run that has a definite verdict.
+    Sabotaging the fix left the suite green until this test existed, because every
+    other unfittable-arm case put the missing ECE on the with-aux side.
+    """
+    with_aux = E.grade_arm(_separated_arm(flip_one_calib_row=True), n_boot=10)
+    no_aux = E.grade_arm(_separated_arm(flip_one_calib_row=False), n_boot=10)
+    with_aux["arm"], no_aux["arm"] = "aux1.0_lr1e-4", "aux0.0_lr1e-4"
+    out = E.compare_arms(with_aux, no_aux)
+
+    assert out["ece_comparison_available"] is False, "the control must be the unfittable one"
+    assert out["delta_ece"] is None
+    # ...and yet the absolute reading HAS an answer, because it never needed the control.
+    assert out["reading_absolute"]["passes"] is True
+    assert out["reading_absolute"]["observed_ece"] == with_aux["grades"]["test"]["ece"]
+    assert out["reading_absolute"]["unavailable_reason"] is None
+    assert out["reading_absolute"]["depends_only_on_the_with_aux_arm"] is True

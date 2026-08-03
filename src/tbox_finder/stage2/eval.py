@@ -74,6 +74,8 @@ __all__ = [
     "grade_arm",
     "load_stage2_checkpoint",
     "production_arm_config",
+    "repo_relative",
+    "ranking_preserved",
     "rungs_for_rows",
     "score_rows",
     "select_arm_pair",
@@ -143,6 +145,56 @@ _FOLD_RANDOM = "fold_random"
 # --------------------------------------------------------------------------- #
 # Row-side derivations (pure)
 # --------------------------------------------------------------------------- #
+
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+
+
+def _candidate_roots() -> tuple[Path, ...]:
+    """This checkout, and the main checkout when this one is a linked worktree.
+
+    Both are needed because a worktree under ``.claude/worktrees/`` has its own root
+    while the DVC-materialised inputs (checkpoints, the dataset parquet) live in the
+    main checkout — so relativising against only ``__file__``'s root silently leaves
+    every input path absolute, which is how the developer-path leak survived its first
+    fix.
+    """
+    roots = [_REPO_ROOT]
+    try:
+        import subprocess
+
+        common = subprocess.run(
+            ["git", "rev-parse", "--path-format=absolute", "--git-common-dir"],
+            capture_output=True,
+            text=True,
+            cwd=_REPO_ROOT,
+            check=False,
+        ).stdout.strip()
+        if common:
+            roots.append(Path(common).resolve().parent)
+    except OSError:  # pragma: no cover - git absent
+        pass
+    return tuple(dict.fromkeys(roots))
+
+
+def repo_relative(path: str | Path) -> str:
+    """A path as the repository sees it — never as this laptop does.
+
+    Every path this module records lands in a committed artifact in a **public** repo,
+    where an absolute path contributes nothing a reader can use and permanently
+    publishes the OS user name and the local directory layout
+    ([[committing-real-tool-output-fixtures]]). The sha256 beside each path is the
+    identity evidence; the string is only a locator. A path outside the repo is
+    returned unchanged rather than mangled into `../../..`.
+    """
+    resolved = Path(path).resolve()
+    for root in _candidate_roots():
+        try:
+            return str(resolved.relative_to(root))
+        except ValueError:
+            continue
+    return str(path)
+
+
 def rungs_for_rows(rows: Sequence[Mapping[str, Any]]) -> list[str]:
     """Per-row rung, re-derived through P3-07's own :func:`recalibrate.rung_labels`.
 
@@ -176,9 +228,25 @@ def block_keys(rows: Sequence[Mapping[str, Any]]) -> tuple[list[str], dict[str, 
     n_singleton = 0
     for row in rows:
         raw = row.get(_CLUSTER)
-        cluster_is_present = raw is not None and not (isinstance(raw, float) and math.isnan(raw))
-        if cluster_is_present:
-            keys.append(f"cluster:{int(raw) if float(raw).is_integer() else raw}")
+        # Normalise FIRST, then branch. `isinstance(raw, float)` is true for np.float64
+        # (which this column happens to be today) and false for np.float32 — and under
+        # that reading a float32 NaN is "clustered", keyed `cluster:nan`, and every
+        # unrelated decoy collapses into one block: precisely the failure the docstring
+        # above is about. A non-numeric id is a schema fault and is refused by name
+        # rather than quietly taking the cluster-less path.
+        numeric: float | None = None
+        if raw is not None:
+            try:
+                numeric = float(raw)
+            except (TypeError, ValueError) as exc:
+                raise ValueError(
+                    f"row {row.get(_ROW_ID)!r}: {_CLUSTER} is {raw!r}, which is neither a "
+                    "number nor absent, so it can be neither a block key nor a singleton"
+                ) from exc
+            if math.isnan(numeric):
+                numeric = None
+        if numeric is not None:
+            keys.append(f"cluster:{int(numeric) if numeric.is_integer() else numeric}")
             n_clustered += 1
         else:
             row_id = row.get(_ROW_ID)
@@ -257,6 +325,24 @@ def _saturation(posterior: np.ndarray) -> dict[str, int]:
 # --------------------------------------------------------------------------- #
 # Grading one arm (pure)
 # --------------------------------------------------------------------------- #
+
+
+def ranking_preserved(
+    z_raw: Any, z_scaled: Any, auprc: float, auprc_scaled: float
+) -> tuple[bool, int, float]:
+    """Did ``z -> z/T`` preserve the ranking? Returns ``(preserved, n_ties, ap_delta)``.
+
+    A free function, and unit-tested as one, because the interesting case cannot be
+    reached through :func:`grade_arm`: scaling can collapse two distinct logits onto one
+    float64 **without** moving average precision at all (when the two rows share a
+    label). Comparing only the AP values calls that preserved; it is not — ranking
+    information was destroyed, and the next arm it happens to could lose real ordering.
+    Both conditions are required, and both counts are returned so a False verdict says
+    *which* one fired.
+    """
+    n_ties = int(len(set(np.asarray(z_raw).tolist())) - len(set(np.asarray(z_scaled).tolist())))
+    ap_delta = float(abs(auprc - auprc_scaled))
+    return (n_ties == 0 and ap_delta == 0.0), n_ties, ap_delta
 
 
 def separation_census(scores: ArmScores, rung: str) -> dict[str, Any]:
@@ -356,7 +442,13 @@ def _uncalibrated_grade(
         "auprc": auprc,
         "auprc_scaled_logits": auprc,
         "auprc_on_posterior": None,
+        # No temperature exists, so no scaling was applied and no tie could be created
+        # by one. Recorded explicitly, with the same keys as the fitted path, so a
+        # consumer reads a number rather than a missing key it has to interpret.
         "auprc_rank_invariant": True,
+        "n_ties_created_by_scaling": 0,
+        "auprc_scaling_abs_delta": 0.0,
+        "no_scaling_applied": True,
         "auprc_baseline_prevalence": n_pos / int(idx.size),
         "auprc_ci": auprc_ci,
         "graded_on": "RAW logits — the named posterior does not exist for this arm",
@@ -456,6 +548,16 @@ def grade_arm(
         auprc = M.average_precision(y, [float(v) for v in z_raw])
         auprc_scaled = M.average_precision(y, [float(v) for v in z_scaled])
         auprc_posterior = M.average_precision(y, [float(v) for v in p])
+        # `z -> z/T` is strictly monotone in exact arithmetic but only NON-decreasing in
+        # float64: two distinct logits can round onto one scaled value, and a new tie
+        # changes average precision's tie handling in the last bits. Comparing the two AP
+        # values alone would therefore let a rounding artifact flip a gate clause. State
+        # the invariant directly instead — scaling created no ties — and record both the
+        # tie count and the AP difference, so if it ever does fire it is diagnosable
+        # rather than merely red.
+        rank_ok, n_ties_created, auprc_scaling_abs_delta = ranking_preserved(
+            z_raw, z_scaled, auprc, auprc_scaled
+        )
 
         ece = M.binned_ece(y, [float(v) for v in p], n_bins, debias=True)
         ece_plugin = M.binned_ece(y, [float(v) for v in p], n_bins, debias=False)
@@ -494,7 +596,9 @@ def grade_arm(
             "auprc": auprc,
             "auprc_scaled_logits": auprc_scaled,
             "auprc_on_posterior": auprc_posterior,
-            "auprc_rank_invariant": bool(auprc == auprc_scaled),
+            "auprc_rank_invariant": rank_ok,
+            "n_ties_created_by_scaling": n_ties_created,
+            "auprc_scaling_abs_delta": auprc_scaling_abs_delta,
             "auprc_baseline_prevalence": n_pos / int(idx.size),
             "auprc_ci": auprc_ci,
             "posterior_saturation": _saturation(p),
@@ -566,11 +670,17 @@ def compare_arms(
     # The ECE half of the comparison exists only if BOTH arms have a named posterior.
     # When either fit refused there is no calibrated object to difference, and the
     # honest delta is `None` — not zero, which would read as "the arms agree".
-    ece_available = w.get("ece") is not None and n.get("ece") is not None
+    # The two readings have DIFFERENT evidence requirements, and conflating them was a
+    # review finding worth the name: the absolute reading asks only whether the with-aux
+    # arm still holds the D11 grade, so it is answerable whenever *that* arm has an ECE —
+    # even when the control has none and the delta is undefined. Gating it on the
+    # comparison's availability threw away a verdict this run actually has.
+    with_aux_ece_available = w.get("ece") is not None
+    ece_available = with_aux_ece_available and n.get("ece") is not None
     delta_ece = (w["ece"] - n["ece"]) if ece_available else None
     delta_auprc = w["auprc"] - n["auprc"]  # < 0 ⇒ with-aux RANKS worse
 
-    absolute_passes = bool(w["ece_gate_pass"]) if ece_available else None
+    absolute_passes = bool(w["ece_gate_pass"]) if with_aux_ece_available else None
     # A degradation is only a degradation if with-aux is the worse arm; a with-aux arm
     # that is better makes every non-negative τ pass, so the divergence window is empty.
     ece_degradation = max(0.0, delta_ece) if ece_available else None
@@ -607,7 +717,10 @@ def compare_arms(
             "observed_ece": w.get("ece"),
             "gate": ECE_GATE,
             "passes": absolute_passes,
-            "unavailable_reason": None if ece_available else w.get("ece_unavailable_reason"),
+            "depends_only_on_the_with_aux_arm": True,
+            "unavailable_reason": (
+                None if with_aux_ece_available else w.get("ece_unavailable_reason")
+            ),
         },
         "reading_delta": {
             "rule": "with-aux is not worse than no-aux by more than tolerance tau",
@@ -744,8 +857,15 @@ def discover_arms(
         wrap = report.get("wrap") or {}
         arms[arm_dir.name] = {
             "arm": arm_dir.name,
-            "checkpoint_dir": str(arm_dir),
-            "run_report": str(report_path),
+            # Two fields, because they have two jobs. `checkpoint_path` is what gets
+            # OPENED and must stay usable from wherever this runs (the DVC-materialised
+            # checkpoints live in the main checkout, not in a linked worktree);
+            # `checkpoint_dir` is what gets RECORDED into a committed, public artifact
+            # and must not carry a developer's absolute path. Relativising the one the
+            # loader opens is how the first version of this fix broke the run outright.
+            "checkpoint_path": str(Path(arm_dir).resolve()),
+            "checkpoint_dir": repo_relative(arm_dir),
+            "run_report": repo_relative(report_path),
             "aux_weight": float(loss["aux_weight"]),
             "lr": float(config["lr"]),
             # The attention backend the arm was TRAINED under. Scoring reproduces it
@@ -1296,9 +1416,9 @@ def load_stage2_checkpoint(
         model = model.to(device)
 
     record = {
-        "checkpoint_dir": str(ckpt),
-        "adapter_dir": str(adapter_dir),
-        "heads_path": str(heads_path),
+        "checkpoint_dir": repo_relative(ckpt),
+        "adapter_dir": repo_relative(adapter_dir),
+        "heads_path": repo_relative(heads_path),
         "adapter_sha256": PROV.sha256_file(adapter_file),
         "heads_sha256": PROV.sha256_file(heads_path),
         "adapter_config": {
@@ -1422,7 +1542,7 @@ def scored_rows(
     census = {rung: sum(1 for r in all_rungs if r == rung) for rung in R.RUNG_VOCABULARY}
     blocks, block_census = block_keys(rows)
     meta = {
-        "path": str(dataset),
+        "path": repo_relative(dataset),
         "sha256": PROV.sha256_file(dataset),
         "n_rows_total": len(all_rows),
         "n_rows_scored": len(rows),
@@ -1530,7 +1650,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "explicitly and say so in the dev-log"
             )
         model, record = load_stage2_checkpoint(
-            arms[name]["checkpoint_dir"],
+            arms[name]["checkpoint_path"],
             attn_implementation=backend,
             device=device,
         )
