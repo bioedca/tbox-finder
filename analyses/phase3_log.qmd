@@ -943,6 +943,17 @@ from the sbatch and ran them on the cluster instead of a retyped equivalent. Fix
 `python -c '...'` block in every sbatch (7 found, all parse) with an emptiness guard so a
 regex that matched nothing could not pass vacuously.
 
+**⚠ And the same probe then advertised a backend the run does not use.** With the parse
+fixed, executing the shipped bytes printed `attn=eager` — correct for what the probe loads
+and wrong as a description of the run. `load_rinalmo_backbone()` called bare passes
+`attn_implementation=None` to `from_pretrained`, so transformers picks its default, whereas
+training goes through `build_peft_model`, which *selects* the backend from the measured sm_86
+evidence. Verified on the cluster: `flash_attn_importable=True`, `is_sm86=True`,
+`model_supports_flash_attn=True` ⇒ the run selects **`flash_attention_2`**. Left alone, every
+job log would have recorded eager attention for an FA-2 run — the "names a backend the model
+never used" defect P1-15 wrote its own read-back guard against. The probe now prints both,
+labelled.
+
 **⚠ The rm-target gate caught the sbatch before CI did.** The first draft cleared stale
 outputs with `rm -rf "${CKPT_DIR:?}/provenance.json"`. `tests/unit/test_sbatch_rm_targets.py`
 cannot resolve the `${VAR:?}` form, so it scored the target as a bare wildcard and matched 12
@@ -966,5 +977,9 @@ and the fold is ADR-0004 D5. **LoRA rank is not swept** even though PRD §11 nam
 §10.3 pins `r=16` and `lora_harness` holds it as a drift-guarded constant, so varying it is an
 ADR-0002 question; named in the sbatch header rather than silently dropped.
 
-**Commit.** Feature branch `p3-06-stage2-lora`; the squash SHA is not knowable from this
+**CI (feature branch).** Green on every push: `pytest` **3,285 passed / 347 skipped / 8
+xfailed**, `ruff` + `black`, `snakemake` lint + dry-run.
+
+**Commit.** Feature branch `p3-06-stage2-lora`, three commits (the step, the probe parse fix +
+its compile gate, the probe backend-label fix); the squash SHA is not knowable from this
 branch and is derived at the phase-exit gate.
