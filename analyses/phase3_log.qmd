@@ -825,3 +825,809 @@ locked alongside `forward`, and `PairingHead.forward` is locked too, all in the 
 so CI checks them on every push.
 
 **Commit.** `cbbbf3ac2e487b64a8be9dce15b7a3604dbb6854`
+
+## Step P3-06 — 2026-08-03: the SLURM LoRA fine-tune entrypoint + the PRD §11 sweep (ENCODE; the submit-ack is open)
+
+**Inputs.** `data/processed/stage2_dataset.parquet` (30,542 rows, P3-01);
+`src/tbox_finder/stage2/{model,losses,heads,tokenizer}.py` (P3-03/04/05);
+`src/tbox_finder/train/lora_harness.py` (P1-15's pinned §10.3 LoRA contract + the measured
+attention-backend selection); `reports/p1/lora_vram_smoke.json` (P1-16, for sizing);
+`conf/{model/rinalmo_stage2,loss/stage2,tracking/wandb}.yaml`.
+
+**Process.** `src/tbox_finder/stage2/train.py` is the Hydra entrypoint the P1-15 harness
+config was waiting for — it composes the new primary `conf/train/stage2.yaml`, selects the
+training population, builds the P3-03 model through `build_stage2_model`, drives DDP×8 with
+`MultitaskLoss`, and writes a self-validating JSON report next to a LoRA adapter + head
+state-dict. `conf/optim/stage2.yaml` is the one home for `optim.*`.
+`slurm/p3/stage2_lora_finetune.sbatch` runs the sweep as a **SLURM `--array`**, not a literal
+Hydra `--multirun`: each point wants the whole 8-GPU node and Hydra's basic launcher iterates
+points in one process, so an OOM or a NaN-grad in point *k* would poison every later point —
+the same reasoning P2-06 settled for Stage-1, restated here because imp.md's Outputs line
+says "`--multirun`". Six points: `loss.aux_weight` {0.0, 0.5, 1.0} × `optim.lr` {1e-4, 3e-4};
+`aux_weight=0` is the no-aux arm P3-08 consumes and `aux1.0_lr1e-4` is the production arm
+(exactly the shipped defaults). **No point is promoted here** — that is the validation
+ladder's job. `tbox_finder/train/ddp.py` was created by **promoting** the rank helpers, the
+`PYTHONHASHSEED` verifier and `ShardedSampler` out of `train_stage1.py`, which now imports
+them: the two trainers run in different conda envs (ADR-0002 A4), so a forked copy would let a
+fix land in one and the bug keep shipping in the other.
+
+**Outputs.** `src/tbox_finder/stage2/train.py` · `src/tbox_finder/train/ddp.py` ·
+`conf/train/stage2.yaml` · `conf/optim/stage2.yaml` ·
+`slurm/p3/stage2_lora_finetune.sbatch` · `tests/ml/test_stage2_train_smoke.py`. **No
+checkpoint and no `dvc add`** — nothing has been trained; the §9.3 submit-ack is open.
+
+**The §7 stop this step existed to settle.** `imp.md` hands the Stage-2 train-eligibility
+policy here, and both halves went to the user (AskUserQuestion, 2026-08-03; both
+recommendations taken). The rule is now one function, `row_eligibility`:
+
+> admit **iff** `fold_random == "train"` **and not** `calib` **and**
+> (`nested_train is True` **or** `fold_basis == decoy_pool_random`)
+
+*Why the D5 fold at all.* PRD §12 grades leave-one-order-out recall on the **two-stage**
+system, so a Stage-2 that saw a held-out order contaminates the headline exactly as a Stage-1
+that did would. *Why also intersect the scheme-A `train` rung* rather than take the whole D5
+fold as P2-09 did for Stage-1: it leaves the in-distribution `val`/`test` rungs untrained, so
+P3-07 fits its temperature on the disjoint `calib` split and P3-10 grades GATE-2's
+in-distribution ECE on **this** checkpoint instead of on an ADR-0004 A6-style eval twin. For
+GATE-4 (segmentation quality) a twin was acceptable; for a **calibration** gate it is much
+weaker, because calibration is a property of the model that ships. The measured cost of the
+restriction is 8 records across 5 tiny orders (Diptera 3, Spirochaetales 2,
+Hymenoptera/Funariales/Caryophyllales 1 each) and 3 rare phyla (Arthropoda 4, Spirochaetes 2,
+Streptophyta 2) — 8,084 → 5,199 corpus rows. *Why the parentless decoys are admitted:* the
+5,007 `structured_rna` / `gc_background` / `leader_decoy` rows carry `nested_train = NULL`
+because they were **built, not carved**, so they have no corpus parent and no order to hold
+out; the ADR-0004 A4/A5 `require_parent_nested_train` rule governs the *mined genomic-window*
+substrate and has nothing to key on here. Refusing them fail-closed would have left 404
+negatives against 4,795 positives, with the binary head seeing only the null PRD §12 itself
+calls the optimistic lower bound.
+
+**Measured population** (`select_rows` over the committed parquet): **9,059 train rows**
+(5,199 D5-corpus + 3,860 parentless decoy; 4,795 positive / 4,264 negative) and **2,070 val**
+(1,581 + 489), row-id overlap **0**. Refusals: 14,282 D5 holdout/excluded (heldout 7,718,
+clade-crossing 5,778, dropped 786), 6,112 other-rung, 1,089 calib, 0 unplaceable. The
+partition is exact: 9,059 + 21,483 = 30,542.
+
+**Two hand-offs resolved rather than deferred again.** `boundary_use_crf` is **False and
+`True` is refused at construction** — `multitask_loss` already raises on any `boundary_crf`
+because computing the plain cross-entropy instead would leave the CRF's transitions with no
+gradient at all, and refusing in `__post_init__` moves that refusal to the login node, ahead
+of the queue wait. Sequence pooling stays **masked-mean** (the checkpoint carries no pooler
+and `add_pooling_layer=False` keeps PEFT from adapting a randomly-initialised module);
+recorded in `diagnostics`, not exposed as a knob.
+
+**⚠ `find_unused_parameters=True` is required, not tuned — and `static_graph=True` would be
+a false statement.** `multitask_loss` drops a term with no supervision in the batch, so a
+pure-decoy batch leaves the four record-level heads without a gradient, and the whole no-aux
+arm leaves them without one for the entire run. PyTorch documents "activation checkpointing
+when model has unused parameters" as unsupported for the *reentrant* checkpoint variant
+outside `static_graph=True`; `static_graph` is wrong here because the used/unused set really
+does change batch to batch. So gradient checkpointing is re-enabled with
+`use_reentrant=False` and the **module count carrying the flag is measured** — a checkpointing
+flag that no-ops looks exactly like one that works.
+
+**⚠ The gate's `objective_terms_match` clause nearly failed the no-aux arm by construction.**
+`active_terms()` still lists all six terms at `aux_weight=0` (a zero-weighted term is present
+and supervised, merely not counted), so a clause demanding `terms_seen == active_terms` would
+have failed two of the six points on every step of the run. It re-derives the expectation
+from the recorded **effective weights** instead, which both admits the no-aux arm and still
+refuses an aux head that never once found supervision.
+
+**Validation.** `tests/ml/test_stage2_train_smoke.py`, four fail-closed tiers, each with its
+own env var (folding them was the P1-16 landmine): **80 pass / 0 fail** torch-free under
+`tbox-finder-data` with the hydra and real-corpus tiers armed; **87 pass** under `tbox-ml-rna`
+with the torch tier armed, including a real LoRA wrap + backward through a tiny
+same-architecture RiNALMo. The shipped `tests/unit/test_sbatch_overrides.py` composes all ten
+of this sbatch's override tokens for real (**22 pass**), and
+`tests/unit/test_sbatch_rm_targets.py` clears the new file. `ruff@0.15.15` + `black@25.11.0`
+clean; `bash -n` clean. **10 source sabotages, each RED against its NAMED test, each restored
+byte-identically** (sha256, `python -B`, `__pycache__` cleared): LOO-holdout admitted;
+calib check dropped; the parentless-branch guard removed; `"nan"` read as `True`;
+`full_population` hardwired true; the must-fire clause weakened to a presence check; the
+objective clause demanding the active set; the LR schedule collapsed to a constant;
+`ShardedSampler` striding before truncating; the collator padding with class 0.
+
+**End-to-end proof that the gate bites where it should.** A CPU run of `train_stage2` with
+`max_records=32` completed the whole loop — model, objective, backward, val, checkpoint,
+report — and failed its own gate on **exactly one clause, `full_population`**. Every
+rule-shaped clause survives truncation, which is why completeness is asserted beside
+correctness rather than assumed from them.
+
+**⚠ The shipped probe was a SyntaxError, and only executing its own bytes found it.** The
+HF-warm block wrote `f"attn={getattr(model.config, \\"_attn_implementation\\", None)}"` inside a
+single-quoted shell string, so the backslash survived into the Python source and the block
+did not parse. `bash -n` passes it (the shell string is well-formed), every local test passed,
+and the job would have died seconds in — after the queue wait — which is job 789's failure
+shape exactly. It surfaced because the pre-ack check extracted the command's **own bytes**
+from the sbatch and ran them on the cluster instead of a retyped equivalent. Fixed by binding
+`attn` to a name first, and a new repo-wide test now `compile()`s every inline
+`python -c '...'` block in every sbatch (7 found, all parse) with an emptiness guard so a
+regex that matched nothing could not pass vacuously.
+
+**⚠ And the same probe then advertised a backend the run does not use.** With the parse
+fixed, executing the shipped bytes printed `attn=eager` — correct for what the probe loads
+and wrong as a description of the run. `load_rinalmo_backbone()` called bare passes
+`attn_implementation=None` to `from_pretrained`, so transformers picks its default, whereas
+training goes through `build_peft_model`, which *selects* the backend from the measured sm_86
+evidence. Verified on the cluster: `flash_attn_importable=True`, `is_sm86=True`,
+`model_supports_flash_attn=True` ⇒ the run selects **`flash_attention_2`**. Left alone, every
+job log would have recorded eager attention for an FA-2 run — the "names a backend the model
+never used" defect P1-15 wrote its own read-back guard against. The probe now prints both,
+labelled.
+
+**⚠ The rm-target gate caught the sbatch before CI did.** The first draft cleared stale
+outputs with `rm -rf "${CKPT_DIR:?}/provenance.json"`. `tests/unit/test_sbatch_rm_targets.py`
+cannot resolve the `${VAR:?}` form, so it scored the target as a bare wildcard and matched 12
+tracked `provenance.json` paths — red CI, from a guard added *for* safety. It is now a plain
+`rm -rf "$CKPT_DIR"` behind an explicit `[ -z "$KEY" ]` check: the same protection, in a form
+the gate can read.
+
+**Sizing — an extrapolation, and labelled as one.** No fresh GPU smoke was run before the
+ack, because a GPU smoke on this cluster is itself a §9.3 submit. The estimate comes from
+P1-16's measurement of this exact stack on a real A4000 (batch 8 → 985.8 ms/step, 2.014 GiB
+peak at 350 nt; largest fitting batch 16 at 2.647 GiB against 15.602 GiB): 9,059 rows at
+batch 8 over DDP×8 = 142 steps/epoch/rank; scaling the step time by the corpus's real token
+length (289 mean / 475 p95 / 552 max) gives ≈1.35 s/step ⇒ ≈35 min for 10 epochs + the
+2,070-row val rung. `--time=02:00:00` per array task is ≈3.4× that; estimated total ≈29 GPU-h
+over the six points.
+
+**Decisions.** The eligibility policy above (user sign-off, no ADR — it realises ADR-0004 D5
+and PRD §12 rather than amending either). No ADR was written or amended: the LoRA contract is
+PRD §10.3 via P1-15's frozen constants, the objective is ADR-0005 D16 via `conf/loss/stage2.yaml`,
+and the fold is ADR-0004 D5. **LoRA rank is not swept** even though PRD §11 names it an axis —
+§10.3 pins `r=16` and `lora_harness` holds it as a drift-guarded constant, so varying it is an
+ADR-0002 question; named in the sbatch header rather than silently dropped.
+
+**CI (feature branch).** Green on every push: `pytest` **3,285 passed / 347 skipped / 8
+xfailed**, `ruff` + `black`, `snakemake` lint + dry-run.
+
+**Commit.** Feature branch `p3-06-stage2-lora`, three commits (the step, the probe parse fix +
+its compile gate, the probe backend-label fix); the squash SHA is not knowable from this
+branch and is derived at the phase-exit gate.
+
+## Step P3-06 (addendum) — 2026-08-03: submit #1 (job 1036) failed; the decoy boundary target + the test gap that hid it
+
+**Result.** All six points of job 1036 died within ~12 minutes. Zero `.OK` markers, zero
+reports, zero checkpoints, ≈2.4 GPU-h burned. §9.3 step-8 stop; no auto-resubmit. Three
+distinct causes, splitting cleanly by node.
+
+**(A) A real defect, mine.** All **7,007 decoy rows carry `label_string = None`** — verified
+across all four decoy pools, against 0 of 23,535 corpus rows, every one of which has
+`len(label_string) == seq_length` exactly. A decoy has no T-box element annotation because
+there is none to have. `Stage2SequenceDataset.__getitem__` applied its alignment guard
+unconditionally and raised on the first decoy it met. Fixed by supervising a decoy as
+**all-background**, following the Stage-1 convention this shares a `SegmentationHead` with:
+`data/negatives.py` builds a negative with *"every real nucleotide labelled `background`,
+with **no** `IGNORE_INDEX` … That is not a trick"*. So head (b) learns that a structured
+non-T-box RNA contains no T-box element anywhere — anti-mimicry signal from 7,007 rows, and
+the dense-background regime PRD §11's γ=2 focal loss is written for. The background index is
+**derived** through `labels.CLASS_CODE` → `CODE_TO_CLASS` → this spec's own vocabulary, never
+written as a literal 0 that would go stale if ADR-0004 D1's class order moved. The branch is
+**fail-closed**: it requires `source == decoy` **and** `is_tbox is False`, so an unlabelled
+*corpus* row, or one marked positive, still hits the guard rather than being handed a
+fabricated target. (User decision, 2026-08-03: all-background over all-ignore.)
+
+**⚠ Why the local suite was green — the fixture contradicted the data.** `_decoy()` was built
+on `_row()` and so **inherited a 16-character `label_string` that no real decoy has**. And the
+real-corpus tier only *counted* eligibility; nothing had ever constructed a dataset **item**
+from a real row. That is the whole gap: the guard was right about the corpus and wrong about
+the fixture, and only the fixture was ever tested. Closed with three tests — one real row of
+**every** pool through `__getitem__` (asserting corpus rows keep their annotation and are not
+all-background, decoys are all-background and contain no `IGNORE_INDEX`), a walk of the
+**entire 9,059-row admitted population** (which is what the run iterates, and takes seconds),
+and a fail-closed check that an unlabelled *positive* still raises. Both new branches are
+sabotage-bitten.
+
+**(B) A cluster fault, not a code fault.** Node `two` returns *"Failed to initialize NVML:
+Driver/library version mismatch. NVML library version: 595.84"* — userspace has moved past the
+loaded kernel module. All three points that landed there died inside `init_process_group` with
+`ncclSystemError`, **before any of this step's code ran**. Node `one` is still on 590.48.01 and
+works. The signal was already visible and was read past: the pre-ack probe on `two` printed
+`UserWarning: Can't initialize NVML`. The sbatch now **fails fast on an unhealthy node** —
+`nvidia-smi` plus a real `torch.cuda` allocation, both **before** the 2.5 GB download, turning
+a two-minute opaque NCCL death into a five-second `STAGE2_NODE_UNHEALTHY` exit. It asks the
+node whether it works rather than assuming which node is good, so CLAUDE.md §13's never-pin
+rule is untouched. The array is serialised (`%1`) while one of two nodes is unusable.
+
+**(C) Unattributed.** Point 0 (node `one`, the `aux_weight=0.0` arm) took `SIGSEGV` on rank 4
+with **zero** ValueError lines, so it is neither (A) nor (B). It is the arm where all six aux
+heads go gradient-free and `find_unused_parameters=True` does the most work — but points 2 and
+4 also built DDP and got further, so that is a hypothesis and is recorded as one. If it
+recurs it will now recur on a run that reaches training, with (A) and (B) removed.
+
+**Validation.** 92 pass / 0 fail with every tier armed (`tbox-ml-rna`); `test_sbatch_overrides`
+22 pass; `ruff` + `black` clean; `bash -n` clean. **12 source sabotages total**, each RED
+against its NAMED test, each restored byte-identically. The CPU end-to-end run now completes
+16/16 steps over decoy-containing batches with a finite loss and all six terms contributing,
+failing its own gate on **only** `full_population`.
+
+**Root cause of (B), traced.** Node `two` runs kernel `6.8.0-110-generic` (booted
+2026-07-14) with a **resident** nvidia module of `595.71.05`, while userspace is
+`libnvidia-ml.so.595.84`. `/var/log/dpkg.log` dates it exactly: the 595 series was installed
+2026-07-14 14:52 (47 min before that boot), then upgraded **595.71.05 → 595.84** on
+**2026-07-31 06:26**. DKMS built 595.84 for kernels `-134`/`-136` only — not for the running
+`-110`, whose `nvidia.ko.zst` no longer exists — and removed the old build, while the already
+loaded module stayed resident. So the node has been GPU-dead since 2026-07-31 06:27, three
+days before this run. **A reboot fixes it** (`GRUB_DEFAULT=0` selects `-136`, which has the
+matching 595.84 module); a module reload cannot, because `-110` has nothing to reload. Written
+up for the admin, along with the two deeper issues: after the reboot `two` will be on 595.84
+while `one` is on 590.48.01 — a heterogeneous driver estate under a scheduler that picks
+either — and three driver series (550, 590-open, 595-open) are installed at once despite a
+`nvidia-driver-pinning-590` package saying 590 is intended.
+
+**⚠ This does NOT explain (C), and the tidy story is the wrong one.** The 595.84 upgrade
+landed on 2026-07-31, not during job 1036, so "a driver upgrade rolled across the cluster
+mid-run" is refuted by its own timestamp rather than merely unsupported. Point 0's SIGSEGV on
+node `one` stays unattributed.
+
+**Placement.** `--exclude=two` is added, **dated and scoped** to this fault, with a test that
+refuses it unless the sbatch also carries its removal condition — so the carve-out cannot
+quietly outlive the reboot and silently halve the cluster. This is `--exclude`, not the
+`--nodelist` CLAUDE.md §13 forbids: §13 bans pinning *to* a preferred node because `one` is
+often down, whereas this excludes a node *measured* broken and leaves `one` an ordinary
+scheduler choice. It carries §13's risk in mirror image (if `one` also goes down the array
+starves), which is why it is dated and removed on the reboot. User-approved 2026-08-03.
+
+**Commit.** Feature branch `p3-06-stage2-lora`; squash SHA derived at the phase-exit gate.
+
+## Step P3-06 (addendum 2) — 2026-08-03: submit #2 OOM'd; the sizing smoke imp.md asked for
+
+**Result.** Job 1044: all six points `torch.OutOfMemoryError` in the backbone forward
+(`model.py:483`), ~16 min in, 0 checkpoints. **The three job-1036 causes are gone** — every
+point reached training and iterated decoy batches (A fixed), all six placed on `one` after
+`cuda ok: 8 device(s), capability (8, 6)` (B neutralised), and **no SIGSEGV recurred**, on any
+point including the `aux_weight=0.0` arm (C did not reproduce). One uniform new failure:
+GPU 6 held **13.97 GiB allocated** of 15.60 GiB and failed a 56 MiB request, without printing
+a single `log_every=20` line — so it did not survive 20 optimiser steps.
+
+**⚠ Root cause of the mis-sizing, and it is methodological.** Both submits were sized from
+`reports/p1/lora_vram_smoke.json` (P1-16: batch 8 → **2.014 GiB**, 985.8 ms/step). That
+report's own config block states what it measured: **`loss_is_placeholder: true`,
+`data_is_synthetic: true`, `is_science: false`, `seq_len_nt: 350`, five timed steps** — a bare
+LoRA-wrapped **backbone** under `placeholder_loss(hidden_states)`, no heads, no objective. It
+was extrapolated to a **seven-head multi-task objective on real sequences up to 552 tokens for
+1,420 steps**. The *wall-clock* was labelled an extrapolation in the ack; the **VRAM headroom
+was never questioned at all**, and that is the miss. P1-16's number was not wrong — it
+answered a different question. imp.md's Compute line had asked for exactly the thing that was
+skipped: *"re-confirm est via a 100-record smoke before submit."*
+
+**The correction: `src/tbox_finder/stage2/sizing.py` + `slurm/p3/stage2_sizing_smoke.sbatch`.**
+One GPU, no DDP, real rows from the real admitted population, and — the load-bearing
+part — it measures **the shipped step**: `train.forward_backward` was extracted from the
+trainer's loop so both call one implementation. A harness that reimplemented the step would be
+free to drift from it in precisely the way P1-16 did, so `real_objective` is a gate clause that
+reads `step_function == "tbox_finder.stage2.train.forward_backward"` alongside
+`data_is_synthetic: false` / `loss_is_placeholder: false` — the three flags whose values are
+the whole difference. A test asserts by **interception** that `measure_batch` really calls the
+trainer's function, so a future inlining is caught rather than merely discouraged.
+
+**Four things it measures that the old smoke did not.** A **descending batch sweep** (8, 4, 2,
+1) with OOM caught per point, so one failure does not end the sweep. Both a **worst-case** and
+a **typical** batch — sequences run 59–552 tokens and the collator pads to the batch maximum,
+so sizing on the median would reproduce this failure at a lower batch size. **Six optimiser
+steps** per point, because AdamW allocates `exp_avg`/`exp_avg_sq` lazily on the first `.step()`
+and because a footprint that *grows* across steps — the open question job 1044 left — is only
+visible as a per-step series, reported with an explicit `growth_ratio`. And **gradient-
+checkpointing effectiveness** as an on/off comparison, since a flag that is "enabled" and saves
+nothing looks exactly like one that works.
+
+**⚠ The gate grades the measurement, not the answer.** "Batch 8 does not fit" is a *successful*
+sizing run and exits 0. A first draft of the `swept` clause required at least one point to have
+run steps, which failed an all-OOM sweep — a gate that pressures the harness toward a
+convenient number, which is the exact failure being corrected. It now requires every point to
+reach a **definite** outcome (ran, or OOM'd), refusing only a point that silently did neither.
+
+**Validation.** `tests/ml/test_stage2_sizing.py` **17 pass / 0 fail** with the torch and
+real-corpus tiers armed; the trainer's own suite still **92 pass** after the `forward_backward`
+extraction; `ruff` + `black` clean; `bash -n` clean. **4 further source sabotages**, each RED
+against its NAMED test, each restored byte-identically: the worst-case picker taking the
+shortest rows; `real_objective` no longer reading the placeholder flags; the optimiser-state
+clause hardwired true; the growth ratio always reporting flat. **16 sabotages across the step.**
+
+**Commit.** Feature branch `p3-06-stage2-lora`; squash SHA derived at the phase-exit gate.
+
+## Step P3-06 (addendum 3) — 2026-08-03: the sizing measurement, and a no-op the gates could not see
+
+**Result.** Job 1051 GREEN — `stage2_sizing.DONE`, report validates, gate passes, `.err` carries
+only HF load chatter. Measured on one A4000 (sm_86, 15.60 GiB) over 200 real admitted rows
+(247–551 tokens), through the trainer's own `forward_backward`:
+
+| batch | regime | tokens | OOM | peak GiB | growth | step ms |
+|---:|---|---:|---|---:|---:|---:|
+| 8 | worst_case | 551 | **yes** | — | — | — |
+| 8 | typical | 417 | no | 11.6641 | 1.009 | 857 |
+| 4 | worst_case | 551 | no | **8.1827** | 1.012 | 596 |
+| 4 | typical | 410 | no | 6.4790 | 1.014 | 462 |
+| 2 | worst_case | 551 | no | 4.8775 | 1.022 | 335 |
+| 1 | worst_case | 551 | no | 3.1640 | 1.027 | 202 |
+
+**Job 1044 is fully explained.** Batch 8 *typical* fits at 11.66 GiB; batch 8 *worst case*
+does not fit at all. That is precisely a run that trains for ~16 minutes and then dies the
+first time a long-sequence batch comes up — and it is why the harness measures both regimes.
+Sizing on the median would have reproduced the failure at a lower batch size.
+
+**`growth_ratio` is 1.01–1.04 across six steps — flat.** The 13.97 GiB was a per-step
+footprint, not an accumulation, so there is no leak to chase and the batch size is the whole
+fix. That question was worth asking explicitly rather than assuming: a growing footprint would
+have made *any* batch size a delayed failure.
+
+**⚠ THE FINDING THE GATES COULD NOT SEE: gradient checkpointing is a no-op on this backbone.**
+Measured 3.1640 GiB **on** vs 3.1595 GiB **off** — a saving ratio of **0.9986**, across **36
+modules carrying the flag**. The source confirms the measurement:
+`multimolecule/models/rinalmo/modeling_rinalmo.py` sets `supports_gradient_checkpointing =
+True` (:82) and stores `self.gradient_checkpointing` (:118), but its encoder loop
+(:704, `for layer_module in self.layer:`) **never calls `_gradient_checkpointing_func`**.
+Enabling it sets an attribute nothing reads.
+
+This is the same defect class as Caduceus having no checkpointing hook, and it had been sitting
+under a green gate on both sides. P1-16's `lora_vram_smoke.json` records
+`bf16_and_gradient_checkpointing: true` as a **passing gate clause**; this step's own
+`gradient_checkpointing_verified` clause counts modules carrying the flag and `build_model`
+*raises* if the count is zero. All three are satisfied by an attribute with no effect —
+flag-counting where only effect-measuring would do. **The sizing harness caught it because it
+measured a difference rather than read a setting**, which is the entire argument for its
+existence. Response: `gradient_checkpointing: false` is now the shipped default with the
+measurement and the source lines recorded, plus a drift-guard test asserting the port still
+does not implement the hook — so if a future `multimolecule` adds it, the test fails and the
+config is revisited rather than the project quietly foregoing a memory optimisation it could
+have had. Hand-wiring `torch.utils.checkpoint` is a real option for larger batches; it is a
+code change to a pinned model path and is deferred, not assumed.
+
+**Re-sized from this and nothing else:** `batch_size=4` (worst case 8.18 of 15.60 GiB, ~47 %
+headroom for DDP buckets and NCCL, which the single-GPU measurement does not include),
+`gradient_accumulation_steps=2` to hold the effective batch at the 8 the previous config used,
+`eval_batch_size=8`, `gradient_checkpointing=false`. Expected wall: 9,059 rows / (8 × 4) = 283
+steps/epoch/rank at ~500 ms ⇒ ~2.4 min/epoch ⇒ **~25–30 min per point**, against a 2 h limit.
+The stale P1-16 rationale was **deleted** from `conf/train/stage2.yaml` rather than left
+beside the new one — a config that documents a number it no longer uses is the same species of
+error as a report naming a backend the model never loaded.
+
+**Validation.** `test_stage2_sizing` **18 pass**, trainer suite **92 pass**,
+`test_sbatch_overrides` **22 pass**; `ruff` + `black` clean; `bash -n` clean.
+
+**Commit.** Feature branch `p3-06-stage2-lora`; squash SHA derived at the phase-exit gate.
+
+## Step P3-06 (addendum 4) — 2026-08-03: the run worked; the gate asked the wrong ranks
+
+**Result.** Job 1053 point 0 (`aux0.0_lr1e-4`) **trained successfully** — all 10 epochs, best
+val 0.001677 at epoch 4, rank 0's report `overall_pass: true` with a 51.4 MB LoRA adapter,
+804 KB of heads, 13,040,268 saved parameters. And it wrote **no `.OK`**, because ranks 1–7
+raised `gate FAILED (clauses: checkpoint_written, provenance_recorded)`. Job cancelled at the
+user's decision after point 1 confirmed the same path; the remaining four points would have
+spent ~3.5 GPU-h to reach the identical ending.
+
+**⚠ THE DEFECT: rank-0-only evidence graded on every rank.** `train_stage2` gates the
+*evidence* on the primary rank — only rank 0 saves the adapter, only rank 0 takes the git
+snapshot — while every rank built the report **and judged it**. So on ranks 1–7 the two
+clauses that read those artifacts were correctly `False`, and raising on them turned a healthy
+run into a non-zero exit. torchrun propagated it, the sbatch's `rc` check skipped the `cp` out
+of node-local scratch, and the EXIT trap deleted the checkpoint. **~45 GPU-minutes destroyed
+at the finish line by a gate asking the wrong ranks the right question.**
+
+This is the third variant of one theme in this step, and worth naming as such: a clause is only
+as good as the *scope* it is evaluated in. P2-10d′-c was a gate reading state the run itself
+mutated; the checkpointing clause counted a flag instead of measuring an effect; this one
+grades artifacts on processes that were never meant to produce them. Each passed its own unit
+tests, because each was tested where its evidence existed.
+
+**Fix.** The verdict is scoped to the rank that holds the evidence: non-primary ranks build the
+report (harmless, and it keeps diagnostics identical across ranks) and **return without
+judging**. Every rank still raises on its *own* failures — OOM, NaN, a collate error — because
+those propagate out of the loop and never reach the gate; that path is what caught jobs 1036
+and 1044 and is untouched. No collective is involved, so there is no barrier to get wrong.
+Guarded two ways: a clause-level test asserting a non-primary report derives exactly those two
+as `False` **while every other clause still holds** (which is what makes them rank-scoped
+rather than simply broken), and an `ast`/source check that the early return precedes
+`validate_report`. Sabotage-bitten by deleting the early return.
+
+**The checkpoint-copy behaviour is left as it is, deliberately.** Writing to node-local scratch
+and copying out only after a passing `rc` is *correct*: a run that fails its gate must not
+leave a checkpoint behind. The bug was the gate, not the copy — and with the verdict scoped to
+rank 0, rank 0's own success now governs whether the artifact survives.
+
+**Node `two` is fixed, verified not assumed.** It rebooted into kernel `6.8.0-134-generic`
+with a resident nvidia **595.84** matching userspace **595.84**, and `nvidia-smi` lists all 8
+A4000s. (The writeup predicted `-136` on `GRUB_DEFAULT=0`; it came up on `-134`, which also
+carried the 595.84 DKMS build. The fix landed; the kernel prediction was wrong.) The cluster is
+now **heterogeneous** — `one` on 590.48.01, `two` on 595.84 — so `--exclude=two` is **retained
+for a different and weaker reason**: holding the driver constant across six points that exist
+to be compared with each other. Its rationale in the sbatch was **rewritten rather than left**,
+since the fault it originally cited no longer exists and the file would have gone on asserting
+it; the guarding test now requires a dated rationale plus a stated removal condition rather
+than one specific sentence.
+
+**Validation.** Trainer suite **94 pass**, sizing **18 pass**, `test_sbatch_overrides` **22
+pass**; `ruff` + `black` clean; `bash -n` clean. **17 sabotages across the step.**
+
+**Commit.** Feature branch `p3-06-stage2-lora`; squash SHA derived at the phase-exit gate.
+
+## Step P3-06 (addendum 5) — 2026-08-03: both nodes back, and the axis that now varies
+
+**Placement (user decision 2026-08-03).** `--exclude=two` and `--array=0-5%1` are both
+**removed**. The node fault they guarded is fixed, and the `%1` comment had already committed
+to its own removal ("Restore 0-5 once both nodes are healthy"), so dropping it executes a
+recorded decision rather than making a new one. The trigger was the queue: cryosparc holds
+**2 of 8 GPUs on each node**, so a whole-node `--gres=gpu:a4000:8` request cannot start on
+either until those clear — the P2-06 starvation pattern, which waited ~4 h — and excluding a
+node halved the chance of one freeing up. `sbatch --test-only` reporting a **2027** start time
+is SLURM's `infinite`-TIMELIMIT placeholder confirming it cannot schedule now, not an estimate.
+
+**⚠ THE ACCEPTED CAVEAT, AND WHAT WAS DONE ABOUT IT.** The two nodes now run **different
+driver versions** — `one` on 590.48.01, `two` on 595.84, because only `two` was rebooted into
+the 595 series — so points may land on either. This was chosen over an open-ended queue wait.
+The difference is expected to be immaterial (same CUDA 12.x, same torch build, same pinned
+wheels), but *expected* is not *controlled*, and a sweep whose six arms exist to be compared
+against each other should not be uniform on an axis only by assumption.
+
+So the axis is now **recorded**: `train.device_record()` writes the GPU name, capability,
+visible-device count, torch version, CUDA runtime **and the kernel driver version** into every
+run's report. The driver comes from `nvidia-smi` rather than torch on purpose —
+`torch.version.cuda` is the CUDA *runtime*, and the runtime is not what diverged between the
+nodes; reporting it would have looked like provenance while recording the wrong number.
+
+**It is provenance, not a verdict.** A run on either driver is legitimate, so the block is
+deliberately **not** a gate clause, and a test asserts that stripping it leaves the derived
+clauses unchanged — a device block that leaked into the gate would fail a perfectly good run
+for landing on the other node. A second test asserts `device_record()` survives a missing or
+failing `nvidia-smi` and records `None`: losing ~45 GPU-minutes because a version string was
+unreadable would be the failure this whole addendum is about, in miniature.
+
+**Validation.** Trainer **96 pass**, sizing **18 pass**, `test_sbatch_overrides` **22 pass**;
+`ruff` + `black` clean; `bash -n` clean. The sbatch guard now requires any future node
+carve-out to carry a date and a removal condition, and requires the accepted caveat to stay
+written down.
+
+**Commit.** Feature branch `p3-06-stage2-lora`; squash SHA derived at the phase-exit gate.
+
+## Step P3-06 (RESULT) — 2026-08-03: the sweep landed — six checkpoints, six passing gates
+
+**Job 1064 completed all six points.** Verification is artifact-based (`sacct` off): array gone
+from `squeue` (its terminal signal is `Invalid job id specified`, not empty output — the poll
+branches on the text), **six reports**, **six 48 MB checkpoints** of four files each with
+`stage2_heads.pt` present, and **zero real failures** — no OOM, no SIGSEGV, no node fault. The
+only error in any `.err` was 6 × `IsADirectoryError`, uniformly the known sidecar defect.
+
+| point | aux_weight | lr | best val | epoch | driver |
+|---|---:|---|---:|---:|---|
+| aux0.0_lr1e-4 | 0.0 | 1e-4 | 0.000380 | 6 | 595.84 |
+| aux0.0_lr3e-4 | 0.0 | 3e-4 | 0.000599 | 8 | 590.48.01 |
+| aux0.5_lr1e-4 | 0.5 | 1e-4 | 0.023589 | 8 | 590.48.01 |
+
+**⚠ These totals are NOT comparable across arms, and nothing downstream may treat them as if
+they were.** At `aux_weight=0` the objective *is* the binary term alone; at 0.5 it is the
+binary term plus five weighted aux terms. The jump from 0.00038 to 0.0236 is a change of
+*quantity*, not of quality. Comparing arms means comparing the **calibrated binary head on
+matched metrics**, which is exactly what P3-08's with/without-aux check exists to do — and the
+`.json` reports carry the per-term breakdown it needs.
+
+**The driver split is 3/3**, as the accepted caveat allowed: `aux0.0_lr1e-4`, `aux0.5_lr3e-4`
+and `aux1.0_lr3e-4` on **595.84**; the other three on **590.48.01**. Recorded per point in each
+report's `device` block, so the axis is auditable rather than assumed uniform — which is the
+whole reason that block was added an hour before the run that needed it.
+
+**Provenance: reconstructed, and labelled as such.** All six sidecars were lost to the
+`IsADirectoryError`, so they were rebuilt by `scripts/backfill_stage2_provenance.py` from each
+run's own report. Every field is either copied from that report or computed by hashing the
+artifact; nothing is invented. Each carries `reconstructed: true`, the reason, the source
+report and an explicit limitation: written after the fact, so it cannot attest the node's tree
+was unchanged between the run and the write.
+
+**⚠ Two guards in that script earned their place, and one of them exposed a constraint on
+itself.** (1) `build_provenance` derives the top-level `git_sha` from whatever tree it runs in
+and offers no override — so a backfill from a moved checkout would misattribute the run in the
+very field CLAUDE.md §11 names. It is now verified, and on mismatch the sidecar is **deleted**
+and the point refused. (2) That guard then refused the first cluster attempt for a reason worth
+recording: the script imported `train.checkpoint_output_files`, added *after* the run's commit,
+while the guard requires running *at* the run's commit. A repair script cannot depend on code
+newer than the tree it repairs. The enumeration is therefore defined in the script, with
+`tests/unit/test_backfill_provenance.py` pinning it to the shared helper on identical input —
+including both refusal paths — so the deliberate fork cannot drift.
+
+**Retrieval verified against the recorded hashes.** All 24 output files rsync'd down (300 MB)
+and **every one matches its sidecar sha256** — the backfilled hashes doing precisely the job
+claimed for them. `dvc add` → `data/processed/checkpoints/stage2_rinalmo.dvc`
+(md5 `b3d1c09cca77b54b064662aa2f2e5984.dir`, 313,437,285 bytes, 30 files), into the **shared**
+main-repo cache via `.dvc/config.local`, because a worktree's own `.dvc/` is empty and the
+object would otherwise land somewhere the phase-exit `dvc push` will never look.
+
+**Still owed, and not papered over:** the six `.OK` markers were never written, since the
+sidecar crash preceded them. The §9.3 verification above stands on the reports, checkpoints and
+`.err` scan instead — a weaker signal than the marker, stated as such. The corrected sbatch
+(`cfb8971`) writes both natively, so the next run needs no backfill.
+
+**Commit.** Feature branch `p3-06-stage2-lora`; squash SHA derived at the phase-exit gate.
+
+## Step P3-06 (review) — 2026-08-03: CodeRabbit r1, and a schedule defect in the shipped run
+
+**The review gate, and how it was reached.** The GitHub CodeRabbit app returned only its
+fair-usage notice ("next review available in 22 minutes") and Copilot returned "quota limit
+reached" — both absences, not passes. **Greptile was invoked and stayed silent for a third
+consecutive time** (PR #98 twice, PR #99 once), burning a credit for nothing; §5.1a's
+"configured but unproven" is now, on the evidence, *not working*. The gate was met by the
+**CodeRabbit CLI** route — the first rung of §5.1's ladder, which should have been tried before
+Greptile. **11 findings.** Each was verified by execution before being accepted or refused.
+
+**⚠ THE FINDING THAT REACHES THE SHIPPED CHECKPOINTS.** The LR scheduler's domain was computed
+in **micro-batches** while `scheduler.step()` fires once per **optimiser** step. With
+`gradient_accumulation_steps=2`, job 1064's cosine traversed exactly **50 %** of its range:
+`total_scheduled_steps` 2,830 against `n_optimizer_steps` 1,415, finishing at an LR multiplier
+of **0.5501** instead of annealing to ~0. All six arms trained under a schedule that is not the
+one their config describes.
+
+**User decision (2026-08-03): fix the code, keep the checkpoints, record the defect.** Nothing
+downstream is invalidated — P3-07 calibrates whatever checkpoint it is handed, and P3-08
+compares arms that *all* shared the defect, so the comparison stays internally consistent. The
+honest caveat is that these are **not optimally-annealed models**: absolute quality is likely a
+little below what a correct schedule would give, and any absolute number derived from them
+carries that. The alternative (retrain six arms, ~36 GPU-h) was offered and declined.
+
+**⚠ A CLAIM I MADE TO THE USER WAS WRONG, AND THE REVIEW CAUGHT IT.** I reported the sizing
+smoke's `growth_ratio` of 1.01–1.04 as proof of a *flat per-step footprint*.
+`reset_peak_memory_stats()` was called **once before** the step loop, never inside it — so
+`peak_vram_gib_per_step` was a **running maximum**, monotonic by construction
+(`[8.0847, 8.1827, 8.1827, 8.1827, 8.1827, 8.1827]`). The conclusion survives, because a real
+leak would still have driven that maximum upward — but it is a cumulative-max probe, not the
+per-step quantity the field name asserts, and I presented it as stronger than it was. Fixed
+(reset per step, overall peak tracked separately); the sbatch header that repeated the claim is
+corrected rather than left standing.
+
+**Also fixed, each sabotage-bitten:** unknown `optim.*` keys now raise exactly as `loss.*` ones
+do (a misspelled `optim.lr` would otherwise train the default while the run reported the swept
+value — the same failure the loss guard exists for); gradient accumulation counts **per epoch**
+and flushes the trailing partial group, instead of a cumulative `n_steps % accum` whose phase
+shifts every epoch across 283 odd micro-batches; the sbatch clears the checkpoint dir **only
+after** the node health check, so a task landing on a bad node can no longer destroy a good
+artifact on its way out; `WORLD_SIZE=0` raises rather than being promoted to 1; the backfill
+reads `optim.lr` from the group where it actually lives and refuses a report with a null seed,
+env-lock or input path; and the sizing `recommendation` now **computes** headroom instead of
+asserting it — the same species of claim as a clause that reads a flag instead of measuring.
+
+**⚠ TWO OF MY OWN NEW TESTS WERE VACUOUS, AND ONLY SABOTAGE FOUND IT.** The LR-domain test
+asserted `lr_scale` arithmetic on hand-computed numbers and never touched `train_stage2`'s
+wiring — reverting the trainer to the micro-batch domain left it **green**, a test named for a
+bug it could not see. It now asserts the shipped construction as well. (The sbatch-ordering
+test did bite; my *sabotage* for it was wrong, inserting the deletion at a point still after
+the health check — a reminder that a non-bite indicts the probe as often as the test.)
+
+**Refused, with reasons.** `device_record()` using index 0 is correct as written: every rank
+calls `torch.cuda.set_device(local_rank)` first, so index 0 resolves to that rank's own device.
+The `conf/train/stage2.yaml` comment nit about "best-checkpoint signal" is fair and was folded
+into the schedule correction rather than taken verbatim.
+
+**Validation.** Trainer **102 pass**, sizing 18, overrides 22, backfill 3; ruff + black clean;
+`bash -n` clean. **23 sabotages across the step**, each RED against its NAMED test.
+
+**Commit.** Feature branch `p3-06-stage2-lora`; squash SHA derived at the phase-exit gate.
+
+## Step P3-06 (review r2) — 2026-08-03: the reported val numbers described discarded weights
+
+**r2 = 12 findings, and it was sharper than r1** because it reviewed the r1 fixes. Every one
+verified by execution before being accepted or refused.
+
+**⚠ THE FINDING THAT CORRECTS A NUMBER ALREADY REPORTED.** The `checkpoint` block advertised a
+`best_val_total` the saved weights do not achieve. There is **no best-checkpoint restore** in
+this trainer — `saved_from_epoch` is 9 in every arm — so `best_val_*` described epochs whose
+weights were thrown away:
+
+| point | saved | best | previously reported | what the SAVED weights score |
+|---|---:|---:|---:|---:|
+| aux0.0_lr1e-4 | 9 | 6 | 0.000380 | **0.008841** (23×) |
+| aux0.0_lr3e-4 | 9 | 8 | 0.000599 | **0.002500** (4×) |
+| aux0.5_lr1e-4 | 9 | 8 | 0.023589 | 0.024180 |
+| aux1.0_lr1e-4 | 9 | 9 | 0.039954 | 0.039954 |
+
+The dev-log's own RESULT table quoted the best-epoch column. **The corrected quantity is
+`saved_val_total`**, now written into the checkpoint block beside a `note` stating plainly that
+the saved weights are the final epoch's and that arms must be compared on it.
+
+**⚠ AND r1 HAD ALREADY POINTED AT THIS.** r1 raised the `conf/train/stage2.yaml` comment calling
+the val rung a "best-checkpoint signal" — a *minor*, filed as wording. It was folded into the
+schedule correction rather than followed to the artifact it described, and the misreported
+numbers survived a whole review round because a correct finding was classified as cosmetic.
+The lesson is not "read minors more carefully"; it is that a comment claiming behaviour the
+code does not have is a **defect report about the code**, and the cheap fix (edit the comment)
+is the wrong one whenever the comment describes what a reader would want to be true.
+
+**The other majors, each sabotage-bitten.** `steps_ran` graded only the micro-batch domain, so
+the scheduler-domain regression it was written for could return unseen — it now compares
+measured against expected optimiser steps *and* against the scheduler's own domain, with a
+test case that only the first comparison can catch so the two cannot cover for each other.
+`gradient_checkpointing_verified` is renamed **`gradient_checkpointing_flag_consistent`**,
+because counting an attribute on 36 modules while `_gradient_checkpointing_func` is never
+called is not verification, and the name asserted more than the evidence. The sizing
+`recommendation` — the single field a reader acts on, the one that chose `batch_size=4` — is
+now **re-derived by the validator**, not merely written. The sbatch's checkpoint clear moved
+again: past the health check was not enough, since an OOM between the two still ended a point
+with nothing and the previous arm already deleted; it now sits immediately before the copy that
+supersedes it. The backfill excludes its own sidecar from `outputs`, so `--write` is idempotent
+rather than self-referential. `num_workers` is **deleted** — no `DataLoader` exists, so every
+report claimed a setting the run never applied.
+
+**⚠ THREE MORE OF MY OWN TESTS WERE WEAKER THAN THEY LOOKED, and sabotage found all three.**
+The `steps_ran` test passed with either new comparison removed, because the other covered for
+it. The sbatch-ordering test asserted only "after the health check", which is not the property
+r2 actually established. And the backfill sabotage missed on a stale anchor. Across this step
+that is now **five** tests that looked adequate and were not — every one caught by mutating the
+source rather than by reading it.
+
+**Validation.** Trainer **110 pass**, sizing **20**, overrides 22, backfill 4; ruff + black
+clean; `bash -n` clean. **28 sabotages across the step**, each RED against its NAMED test.
+
+**Commit.** Feature branch `p3-06-stage2-lora`; squash SHA derived at the phase-exit gate.
+
+## Step P3-06 (review r3) — 2026-08-03: Greptile did review, and I had declared it dead
+
+**⚠ THE CORRECTION THAT MATTERS MOST HERE IS ABOUT MY OWN PROCESS.** Greptile was invoked on
+PR #99 and **replied ~18 minutes later** as `greptile-apps[bot]`, with three P2 findings. A
+6-minute poll had already concluded "silent", reported to the user that the credit was wasted,
+and **written into CLAUDE.md §5.1a that the trigger path was dead** — codifying a false
+conclusion drawn from impatience into the project's operating contract, where a future session
+would have obeyed it. §5.1a is corrected: *it works, budget ~25 minutes, and look in
+`pulls/<n>/reviews` for `greptile-apps[bot]` — the reply arrives as a **review**, not an issue
+comment, so a poll that only reads issue comments will miss it.* The two prior PR #98
+"silences" are now suspect for the same reason rather than being evidence of anything.
+
+Two general lessons, and the second is the one worth keeping. **A negative result needs its
+measurement stated as much as a positive one** — "silent" was really "silent for six minutes",
+and only the second version is a fact. And **the failure compounded**: the wrong conclusion did
+not stay in a message, it was promoted to documentation, where its wrongness would have
+outlived the session and cost someone else the same credit. Writing a finding down is exactly
+when it needs to be *most* certain, not least.
+
+**Greptile's three findings, all real, all fixed.**
+
+**(P2, the sharp one) `losses_finite` was blind to a NaN gradient on any non-primary rank.**
+`n_nonfinite` counts the **rank-0 forward loss**. Under DDP a NaN gradient produced on any
+other rank all-reduces into every rank's gradient tensor and poisons the weights, while rank
+0's loss value stays perfectly finite — so the clause could pass on a poisoned model. Fixed by
+reading `clip_grad_norm_`'s returned **pre-clip total norm**, which is computed *after* the
+all-reduce and is non-finite iff some gradient is; `n_nonfinite_grad_steps` is now a second
+term in the clause. Note the shape: this is the third gate in this step that measured the
+wrong side of the thing it named — after the checkpointing flag-count and the micro-batch-only
+step check.
+
+**(P2) `_bool_or_none` blamed the wrong column.** Written for `nested_train`, it is also called
+for `calib` and `is_tbox`; a schema migration putting `"yes"` into `calib` would have raised an
+error naming `nested_train`, sending the reader to a column that is fine. It now takes the
+field name and every call site passes its own.
+
+**(P2, advisory) Ternary precedence in three clauses** — `A and B if C else D` parses as
+`(A and B) if C else D`, which is the intended semantics; Greptile confirmed correctness and
+flagged readability only. Left as-is, recorded rather than silently ignored. (One of the three
+clauses it named, `gradient_checkpointing_verified`, has since been renamed
+`gradient_checkpointing_flag_consistent` for the separate reason that it counted an attribute
+rather than measuring an effect.)
+
+**Also corrected in §5.1: CodeRabbit is incremental and automatic.** `@coderabbitai review` on
+an already-reviewed commit is a **no-op** replying *"does not re-review already reviewed
+commits"*. Both rounds attributed to manual triggers were in fact the automatic reviews of the
+pushes — coverage must be read from each comment's `original_commit_id`, not from whether a
+command was sent. And a green `CodeRabbit` **check** does not mean a review ran: on this PR it
+read `pass` while the body was only the Fair-Usage notice.
+
+**Validation.** Trainer **113 pass**, sizing 20, overrides 22, backfill 4; ruff + black clean;
+`bash -n` clean.
+
+**Commit.** Feature branch `p3-06-stage2-lora`; squash SHA derived at the phase-exit gate.
+
+## Step P3-06 (schema) — 2026-08-03: the corrected gate refuses job 1064, and that is recorded
+
+**All seven committed reports failed their own validators** once r2/r3 strengthened the clause
+sets — found by running the validators against the committed artifacts rather than assuming
+they still applied. `SCHEMA_VERSION` is bumped **1 → 2** on both modules, because a clause set
+is part of a report's shape: adding one makes every earlier report a *different* schema, not a
+corrupt one.
+
+**⚠ The two failures are categorically different, and conflating them would have laundered a
+defect.**
+
+* **`steps_ran` — a real defect.** Job 1064's arms sized the cosine in micro-batches, so the
+  optimiser advanced 1,415 of 2,830 scheduled steps. Schema 2 compares the two domains and
+  refuses those runs, correctly. The standing habit on a version bump is to excuse a clause the
+  older schema lacks; that is right only when the old report would re-derive **TRUE**. Here it
+  re-derives **FALSE for a real reason**, so excusing it would push a known defect through a
+  compatibility shim. It is **asserted as failing** instead.
+* **`losses_finite` — not a defect, an absence.** Schema 1 predates `n_nonfinite_grad_steps`
+  (added for Greptile's NaN-gradient finding), so the post-all-reduce check was never measured.
+  *Unmeasured* is neither passed nor failed; excusing it into TRUE would assert those runs had
+  finite gradients when nobody looked. It also stays False, and the reason is written down.
+
+`tests/ml/test_stage2_train_smoke.py` now pins all of it: six reports present (emptiness guard
+first, so a glob matching nothing cannot make the rest vacuous), all schema 1, failing
+**exactly** `["losses_finite", "steps_ran"]` — a new entry means a second defect surfaced, a
+missing one means a clause stopped biting or the reports were regenerated. The distinction is
+checked rather than described: the scheduler clause has its evidence and fails on it
+(`n_optimizer_steps != n_steps`), the gradient clause has no evidence at all
+(`"n_nonfinite_grad_steps" not in losses`), and what schema 1 *did* measure was clean
+(`n_nonfinite_steps == 0`).
+
+**The reports are kept as written.** They are job 1064's own record, and the user's decision was
+to keep the checkpoints and record the defect — regenerating the reports to make them pass
+would be the precise opposite.
+
+**Validation.** Trainer **116 pass**, sizing 20, overrides 22, backfill 4; ruff + black clean.
+
+**Commit.** Feature branch `p3-06-stage2-lora`; squash SHA derived at the phase-exit gate.
+
+## Step P3-06 (review r4) — 2026-08-03: the producer schema was fixed; the artifacts were not
+
+**Manual `@coderabbitai review`** — automatic review on push is now disabled for this repo, so
+the manual comment is the live path (and only then; §5.1 records the conditional). Three
+findings, all real, and one of them answered a question I had asked it to check.
+
+**(High) The six committed reports still advertised values the saved weights do not achieve.**
+Fixing the *producer* schema left the *artifacts* misleading: a reader opening
+`aux0.0_lr1e-4.json` saw `best_val_total: 0.00037977` beside `saved_from_epoch: 9` and had to
+infer that those describe different weights. Four of six arms have a best epoch before 9 (the
+other two have best == final, so an annotation claiming a gap everywhere would itself be
+wrong). Each report now carries a **`legacy` block**: `saved_val_total` derived from that
+file's *own* `val.history`, an explicit statement that `best_val_*` describe discarded weights,
+and the two clauses it fails under schema 2. **Annotated, not rewritten — 84 insertions, 0
+deletions, no measured value touched.** They are job 1064's own record, and the standing
+decision was to keep the checkpoints and record the defect.
+
+**(Medium) `grad_clip == 0` was silently corrupting gradients.** I had written
+`clip_grad_norm_(params, float("inf"))` believing it equivalent to not clipping. It is not:
+PyTorch scales by `max_norm / (total_norm + 1e-6)`, and with both infinite that coefficient is
+`nan`, which is then multiplied through. **Verified on the pinned torch 2.7.1:** an
+`[inf, 1.0, 2.0]` gradient came back `[nan, nan, nan]` while the returned norm still read
+`inf` — so the detection signal was fine and the optimiser's input was not. A "disabled" clip
+that quietly edits gradients is precisely the no-op-shaped side effect this step keeps
+producing. `gradient_total_norm` now uses `get_total_norm` when clipping is off, which returns
+the same value and mutates nothing.
+
+**⚠ (Medium) Two of the regression tests written *for the previous round* were still vacuous.**
+The step-count test **reimplemented the loop** instead of running it — deleting
+`scheduler.step()` from the trailing flush left it green. The NaN-gradient test edited a report
+**fixture** — deleting the counter increment left it green. Both are now **producer** tests
+that call `train_stage2` on CPU with an odd micro-batch count and accumulation 2, spying on the
+real `optimizer.step`/`scheduler.step` and injecting a real `inf` into a live gradient after a
+real backward. Both of CodeRabbit's exact counterexamples now fail, verified by mutating the
+source. **That is seven vacuous tests across this step**, and the pattern is consistent enough
+to name: *I keep testing the predicate and calling it a test of the producer.*
+
+**Three assertions I wrote in this round were also wrong, each caught by running them.** That
+the forward loss stays finite when a gradient is poisoned — false, because stepping on an
+`inf` gradient poisons the weights and every later loss with them. That
+`n_nonfinite_grad_steps >= n_nonfinite_steps` — arithmetic nonsense, since the two counters
+have different denominators (micro-batches vs optimiser steps). And a sabotage that removed one
+of the counter's *two* increment sites and concluded the test was weak. The habit to correct is
+asserting relationships that sound right rather than ones derived from the mechanism.
+
+**Confirmed, not assumed:** CodeRabbit checked the DDP question I flagged as most load-bearing
+— `backward()` returns only after every bucket all-reduce completes, including with
+`find_unused_parameters=True`, so `clip_grad_norm_`/`get_total_norm` observes **synchronised**
+gradients and is a valid post-reduction signal.
+
+**Validation.** Trainer **121 pass**, sizing 20, overrides 22, backfill 4; ruff + black clean.
+
+**Commit.** Feature branch `p3-06-stage2-lora`; squash SHA derived at the phase-exit gate.
+
+## Step P3-06 (review r5) — 2026-08-03: one minor finding, and the rounds converge
+
+**r5 via the CodeRabbit CLI**, scoped with `--base-commit c6fc074` to the two genuinely
+unreviewed commits (529 insertions) rather than re-reviewing the whole branch — and via the CLI
+rather than a PR comment, so it consumed none of the GitHub review quota. **One finding,
+minor.** The series across the step: **11 → 12 → 3 → 3 → 1**.
+
+**The finding, and it is a self-inflicted inconsistency.** The legacy annotation hardcoded
+`best_val_total_is_NOT_the_saved_weights: True` on all six arms, while two of them
+(`aux1.0_lr1e-4`, `aux1.0_lr3e-4`) have best epoch **== 9 == saved**, so the flag was simply
+false for those. Worse, the test written in the *same commit*
+(`test_the_annotation_names_a_gap_that_is_real_in_four_of_six_arms`) asserts exactly that four
+of six differ — the annotation contradicted its own test file. The flag is now **derived** from
+the epoch comparison, and the note has two wordings: one saying `best_val_total` describes
+discarded weights, one saying the two agree and neither is misleading *and why that does not
+make the distinction moot*. Still annotation-only: **84 insertions, 0 deletions** against the
+pre-annotation commit.
+
+The test now asserts the flag equals the epoch comparison and that the note matches the case it
+describes. Verified non-tautological by sabotage: restoring the hardcoded `True` turns it red.
+
+**On stopping.** Four consecutive rounds found real defects in the *previous* round's fixes,
+which is why none of them was a safe place to stop. This one found a documentation-consistency
+nit in an annotation block — no behaviour, no gate, no artifact. That is a different kind of
+result, and a reasonable place to stop reviewing rather than a claim that nothing remains.
+
+**Validation.** Trainer **121 pass**, sizing 20, overrides 22, backfill 4; ruff + black clean.
+
+**Commit.** Feature branch `p3-06-stage2-lora`; squash SHA derived at the phase-exit gate.

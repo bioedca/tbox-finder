@@ -1,0 +1,288 @@
+{
+  "config": {
+    "batch_sweep": [
+      8,
+      4,
+      2,
+      1
+    ],
+    "dtype": "bfloat16 (lora_harness.TRAIN_DTYPE)",
+    "max_records": 200,
+    "optimizer": "AdamW",
+    "steps": 6,
+    "world_size": 1
+  },
+  "data_is_synthetic": false,
+  "device": {
+    "capability": [
+      8,
+      6
+    ],
+    "is_cuda": true,
+    "name": "NVIDIA RTX A4000",
+    "total_memory_gib": 15.6017
+  },
+  "gate": {
+    "clauses": {
+      "checkpointing_effect_measured": true,
+      "enough_steps_for_optimizer_state": true,
+      "measured_on_cuda": true,
+      "real_objective": true,
+      "swept": true,
+      "worst_case_measured": true
+    },
+    "failed": [],
+    "overall_pass": true
+  },
+  "gradient_checkpointing": {
+    "batch_size": 1,
+    "comparison_skipped_reason": null,
+    "effective": false,
+    "n_modules_with_flag": 36,
+    "off_oom": false,
+    "off_peak_gib": 3.1595,
+    "on_peak_gib": 3.164,
+    "saving_ratio": 0.9986
+  },
+  "largest_fitting_batch_worst_case": 4,
+  "loss_is_placeholder": false,
+  "measurements": [
+    {
+      "batch_size": 8,
+      "error": "OutOfMemoryError: CUDA out of memory. Tried to allocate 58.00 MiB. GPU 0 has a total capacity of 15.60 GiB of which 53.19 MiB is free. Including non-PyTorch memory, this process has 15.54 GiB memory in use. Of the allocated memory 14.86 GiB is allocated by PyTorch, and 483.81 MiB is reserved by PyTorch but unallocate",
+      "gradient_checkpointing": true,
+      "growth_ratio": null,
+      "n_modules_with_checkpointing": 36,
+      "n_steps": 1,
+      "oom": true,
+      "padded_tokens": 551,
+      "peak_vram_gib": null,
+      "peak_vram_gib_per_step": [
+        14.9686
+      ],
+      "regime": "worst_case",
+      "step_ms": [
+        2900.9
+      ]
+    },
+    {
+      "batch_size": 8,
+      "error": null,
+      "gradient_checkpointing": true,
+      "growth_ratio": 1.0094,
+      "n_modules_with_checkpointing": 36,
+      "n_steps": 6,
+      "oom": false,
+      "padded_tokens": 417,
+      "peak_vram_gib": 11.6641,
+      "peak_vram_gib_per_step": [
+        11.5553,
+        11.6641,
+        11.6641,
+        11.6641,
+        11.6641,
+        11.6641
+      ],
+      "regime": "typical",
+      "step_ms": [
+        886.21,
+        851.03,
+        850.55,
+        851.67,
+        849.37,
+        852.92
+      ]
+    },
+    {
+      "batch_size": 4,
+      "error": null,
+      "gradient_checkpointing": true,
+      "growth_ratio": 1.0121,
+      "n_modules_with_checkpointing": 36,
+      "n_steps": 6,
+      "oom": false,
+      "padded_tokens": 551,
+      "peak_vram_gib": 8.1827,
+      "peak_vram_gib_per_step": [
+        8.0847,
+        8.1827,
+        8.1827,
+        8.1827,
+        8.1827,
+        8.1827
+      ],
+      "regime": "worst_case",
+      "step_ms": [
+        619.89,
+        587.89,
+        594.36,
+        584.67,
+        596.33,
+        594.21
+      ]
+    },
+    {
+      "batch_size": 4,
+      "error": null,
+      "gradient_checkpointing": true,
+      "growth_ratio": 1.0138,
+      "n_modules_with_checkpointing": 36,
+      "n_steps": 6,
+      "oom": false,
+      "padded_tokens": 410,
+      "peak_vram_gib": 6.479,
+      "peak_vram_gib_per_step": [
+        6.391,
+        6.479,
+        6.479,
+        6.479,
+        6.479,
+        6.479
+      ],
+      "regime": "typical",
+      "step_ms": [
+        485.8,
+        459.83,
+        459.74,
+        453.95,
+        460.84,
+        454.4
+      ]
+    },
+    {
+      "batch_size": 2,
+      "error": null,
+      "gradient_checkpointing": true,
+      "growth_ratio": 1.0221,
+      "n_modules_with_checkpointing": 36,
+      "n_steps": 6,
+      "oom": false,
+      "padded_tokens": 551,
+      "peak_vram_gib": 4.8775,
+      "peak_vram_gib_per_step": [
+        4.772,
+        4.8741,
+        4.8775,
+        4.8775,
+        4.8775,
+        4.8775
+      ],
+      "regime": "worst_case",
+      "step_ms": [
+        374.21,
+        330.05,
+        325.3,
+        329.06,
+        321.39,
+        328.1
+      ]
+    },
+    {
+      "batch_size": 2,
+      "error": null,
+      "gradient_checkpointing": true,
+      "growth_ratio": 1.025,
+      "n_modules_with_checkpointing": 36,
+      "n_steps": 6,
+      "oom": false,
+      "padded_tokens": 409,
+      "peak_vram_gib": 3.9286,
+      "peak_vram_gib_per_step": [
+        3.8326,
+        3.9232,
+        3.9286,
+        3.9286,
+        3.9286,
+        3.9286
+      ],
+      "regime": "typical",
+      "step_ms": [
+        272.62,
+        233.32,
+        228.43,
+        233.04,
+        229.21,
+        229.21
+      ]
+    },
+    {
+      "batch_size": 1,
+      "error": null,
+      "gradient_checkpointing": true,
+      "growth_ratio": 1.0271,
+      "n_modules_with_checkpointing": 36,
+      "n_steps": 6,
+      "oom": false,
+      "padded_tokens": 551,
+      "peak_vram_gib": 3.164,
+      "peak_vram_gib_per_step": [
+        3.0805,
+        3.164,
+        3.164,
+        3.164,
+        3.164,
+        3.164
+      ],
+      "regime": "worst_case",
+      "step_ms": [
+        302.3,
+        185.93,
+        181.15,
+        183.34,
+        180.58,
+        180.17
+      ]
+    },
+    {
+      "batch_size": 1,
+      "error": null,
+      "gradient_checkpointing": true,
+      "growth_ratio": 1.0377,
+      "n_modules_with_checkpointing": 36,
+      "n_steps": 6,
+      "oom": false,
+      "padded_tokens": 409,
+      "peak_vram_gib": 2.6722,
+      "peak_vram_gib_per_step": [
+        2.575,
+        2.6722,
+        2.6722,
+        2.6722,
+        2.6722,
+        2.6722
+      ],
+      "regime": "typical",
+      "step_ms": [
+        249.68,
+        193.91,
+        179.64,
+        179.51,
+        178.11,
+        185.4
+      ]
+    }
+  ],
+  "population": {
+    "dataset_parquet": "data/processed/stage2_dataset.parquet",
+    "n_admitted_total": 9059,
+    "n_rows": 200,
+    "n_tokens_max": 551,
+    "n_tokens_median": 409,
+    "n_tokens_min": 247,
+    "rung": "train"
+  },
+  "prd": "PRD \u00a710.3 (the 16 GB A4000 budget)",
+  "provenance": {
+    "entrypoint": "tbox_finder.stage2.sizing",
+    "env_lock": "envs/ml-rna.conda-lock.yml"
+  },
+  "recommendation": {
+    "basis": "largest worst-case batch that fits with headroom on this card",
+    "batch_size": 4
+  },
+  "schema_version": "1",
+  "step": "P3-06-sizing",
+  "step_function": "tbox_finder.stage2.train.forward_backward",
+  "supersedes_for_stage2_sizing": "reports/p1/lora_vram_smoke.json (P1-16)",
+  "written_at": "2026-08-03T13:28:45.326929+00:00"
+}

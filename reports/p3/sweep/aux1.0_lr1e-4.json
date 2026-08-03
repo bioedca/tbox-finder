@@ -1,0 +1,544 @@
+{
+  "adr": "ADR-0002 (D2/D3/D5 backbone+kernels+LoRA); ADR-0004 D5 (fold); ADR-0005 D16",
+  "checkpoint": {
+    "adapter_bytes": 51432083,
+    "adapter_dir": "/tmp/ecc1695-1074-4/checkpoint/lora_adapter",
+    "best_val_epoch": 9,
+    "best_val_total": 0.03995415618032279,
+    "heads_bytes": 803929,
+    "heads_path": "/tmp/ecc1695-1074-4/checkpoint/stage2_heads.pt",
+    "n_saved_parameters": 13040268,
+    "saved_from_epoch": 9
+  },
+  "config": {
+    "admit_parentless_decoys": true,
+    "attn_implementation": null,
+    "batch_size": 4,
+    "boundary_use_crf": false,
+    "checkpoint_dir": "/tmp/ecc1695-1074-4/checkpoint",
+    "dataset_parquet": "data/processed/stage2_dataset.parquet",
+    "device": null,
+    "dropout": 0.1,
+    "dtype": null,
+    "epochs": 10,
+    "eval_batch_size": 8,
+    "eval_max_records": null,
+    "eval_val": true,
+    "grad_clip": 1.0,
+    "gradient_accumulation_steps": 2,
+    "gradient_checkpointing": false,
+    "log_every": 20,
+    "loss": {
+      "active_terms": [
+        "binary",
+        "boundary",
+        "regulatory_mode",
+        "specifier_codon",
+        "cognate_aa",
+        "trna_family"
+      ],
+      "aux_terms": [
+        "boundary",
+        "regulatory_mode",
+        "specifier_codon",
+        "cognate_aa",
+        "trna_family",
+        "structure"
+      ],
+      "aux_weight": 1.0,
+      "base_weights": {
+        "binary": 1.0,
+        "boundary": 0.3,
+        "cognate_aa": 0.1,
+        "regulatory_mode": 0.1,
+        "specifier_codon": 0.1,
+        "structure": 0.0,
+        "trna_family": 0.1
+      },
+      "class_weight_alpha": {
+        "binary": 0.0,
+        "boundary": 0.0,
+        "cognate_aa": 0.0,
+        "regulatory_mode": 0.0,
+        "specifier_codon": 0.0,
+        "structure": 0.0,
+        "trna_family": 0.0
+      },
+      "dominance": {
+        "aux_max": 0.3,
+        "aux_total": 0.7,
+        "binary": 1.0,
+        "holds": true,
+        "max_margin": 0.7,
+        "rule": "binary_weight >= sum(effective aux weights)",
+        "sum_margin": 0.30000000000000004
+      },
+      "effective_weights": {
+        "binary": 1.0,
+        "boundary": 0.3,
+        "cognate_aa": 0.1,
+        "regulatory_mode": 0.1,
+        "specifier_codon": 0.1,
+        "structure": 0.0,
+        "trna_family": 0.1
+      },
+      "gamma": {
+        "binary": 0.0,
+        "boundary": 2.0,
+        "cognate_aa": 0.0,
+        "regulatory_mode": 0.0,
+        "specifier_codon": 0.0,
+        "structure": 0.0,
+        "trna_family": 0.0
+      },
+      "ignore_index": -100,
+      "max_aux_weight": 1.4285714285714286,
+      "optional_terms": [
+        "structure"
+      ],
+      "pinned": {
+        "class_weight_alpha_values": false,
+        "dominance_rule": "ADR-0005 D16",
+        "gamma_values": false,
+        "structure_term": "PRD \u00a78/\u00a711 optional (not enumerated by ADR-0005 D16)",
+        "weight_values": false,
+        "weighting_method": "ADR-0005 D16"
+      },
+      "structure_enabled": false,
+      "terms": [
+        "binary",
+        "boundary",
+        "regulatory_mode",
+        "specifier_codon",
+        "cognate_aa",
+        "trna_family",
+        "structure"
+      ],
+      "weighting": "fixed",
+      "weighting_methods": [
+        "fixed",
+        "uncertainty"
+      ]
+    },
+    "lr": 0.0001,
+    "max_records": null,
+    "num_workers": 2,
+    "pairing_proj_dim": 64,
+    "pooling": "masked_mean",
+    "pythonhashseed": 0,
+    "report_path": "reports/p3/sweep/aux1.0_lr1e-4.json",
+    "revision": null,
+    "save_checkpoint": true,
+    "seed": 42,
+    "structure_head": false,
+    "train_rung": "train",
+    "val_rung": "val",
+    "wandb_dir": "wandb",
+    "wandb_entity": null,
+    "wandb_mode": "offline",
+    "wandb_project": "tbox-finder",
+    "warmup_ratio": 0.06,
+    "weight_decay": 0.01
+  },
+  "data": {
+    "dataset_parquet": "data/processed/stage2_dataset.parquet",
+    "n_dataset_rows": 30542,
+    "n_train_rows": 9059,
+    "n_train_val_row_id_overlap": 0,
+    "n_val_rows": 2070,
+    "train_census": {
+      "admit_parentless_decoys": true,
+      "admitted_by_route": {
+        "nested_train": 5199,
+        "parentless_decoy": 3860
+      },
+      "d5_refusal_roles": {
+        "dropped": 786,
+        "excluded_clade_crossing": 5778,
+        "heldout": 7718
+      },
+      "n_admitted": 9059,
+      "n_admitted_negative": 4264,
+      "n_admitted_positive": 4795,
+      "n_rows_scanned": 30542,
+      "refused": {
+        "calibration_split": 1089,
+        "d5_holdout_or_excluded": 14282,
+        "other_scheme_a_rung": 6112,
+        "unplaceable_missing_nested_train": 0
+      },
+      "rung": "train"
+    },
+    "val_census": {
+      "admit_parentless_decoys": true,
+      "admitted_by_route": {
+        "nested_train": 1581,
+        "parentless_decoy": 489
+      },
+      "d5_refusal_roles": {
+        "dropped": 79,
+        "excluded_clade_crossing": 63,
+        "heldout": 855
+      },
+      "n_admitted": 2070,
+      "n_admitted_negative": 625,
+      "n_admitted_positive": 1445,
+      "n_rows_scanned": 30542,
+      "refused": {
+        "calibration_split": 1089,
+        "d5_holdout_or_excluded": 997,
+        "other_scheme_a_rung": 26386,
+        "unplaceable_missing_nested_train": 0
+      },
+      "rung": "val"
+    }
+  },
+  "device": {
+    "capability": [
+      8,
+      6
+    ],
+    "cuda_runtime": "12.8",
+    "driver_version": "590.48.01",
+    "is_cuda": true,
+    "n_visible_devices": 8,
+    "name": "NVIDIA RTX A4000",
+    "torch_version": "2.7.1+cu128"
+  },
+  "eval_val": true,
+  "gate": {
+    "clauses": {
+      "both_admit_routes_fired": true,
+      "calib_refused": true,
+      "checkpoint_written": true,
+      "full_population": true,
+      "gradient_checkpointing_verified": true,
+      "heads_outside_wrapper": true,
+      "lora_contract_held": true,
+      "losses_finite": true,
+      "no_d5_holdout_trained": true,
+      "objective_terms_match": true,
+      "provenance_recorded": true,
+      "steps_ran": true,
+      "val_disjoint_from_train": true
+    },
+    "failed": [],
+    "overall_pass": true
+  },
+  "legacy": {
+    "annotation_only": "no measured value in this file was changed",
+    "best_val_epoch_observed_during_training": 9,
+    "best_val_total_is_NOT_the_saved_weights": false,
+    "best_val_total_observed_during_training": 0.03995415618032279,
+    "fails_current_gate_on": [
+      "losses_finite",
+      "steps_ran"
+    ],
+    "note": "LEGACY ANNOTATION added 2026-08-03 by the P3-06 review round; NO measured value in this file was altered. (1) This trainer has no best-checkpoint restore: the saved weights are `checkpoint.saved_from_epoch`'s, and the score they actually achieve is `legacy.saved_val_total`, derived from this file's own `val.history`. For THIS arm the best epoch IS the saved epoch, so `checkpoint.best_val_total` and `saved_val_total` agree and neither is misleading. The flag below is false for that reason, not because the distinction stopped mattering \u2014 four of the six arms do differ. (2) This report is schema_version 1 and FAILS the current (schema 2) gate on two clauses: `steps_ran`, because this run sized the LR cosine in micro-batches so the optimiser advanced half the scheduled steps; and `losses_finite`, because schema 1 predates `n_nonfinite_grad_steps` and the post-all-reduce gradient check was never measured \u2014 unmeasured, not failed. Both are pinned by tests/ml/test_stage2_train_smoke.py.",
+    "saved_from_epoch": 9,
+    "saved_val_total": 0.03995415618032279,
+    "schema_version_of_this_file": "1"
+  },
+  "losses": {
+    "final_train_total": 0.004161615390330553,
+    "n_nonfinite_steps": 0,
+    "per_term_final": {
+      "binary": 0.0001567924628034234,
+      "boundary": 0.006196688860654831,
+      "cognate_aa": 0.005243935156613588,
+      "regulatory_mode": 0.0003750092291738838,
+      "specifier_codon": 0.007675383239984512,
+      "trna_family": 0.008163832128047943
+    }
+  },
+  "objective": {
+    "active_terms": [
+      "binary",
+      "boundary",
+      "regulatory_mode",
+      "specifier_codon",
+      "cognate_aa",
+      "trna_family"
+    ],
+    "dominance": {
+      "aux_max": 0.3,
+      "aux_total": 0.7,
+      "binary": 1.0,
+      "holds": true,
+      "max_margin": 0.7,
+      "rule": "binary_weight >= sum(effective aux weights)",
+      "sum_margin": 0.30000000000000004
+    },
+    "effective_weights": {
+      "binary": 1.0,
+      "boundary": 0.3,
+      "cognate_aa": 0.1,
+      "regulatory_mode": 0.1,
+      "specifier_codon": 0.1,
+      "structure": 0.0,
+      "trna_family": 0.1
+    },
+    "max_aux_weight": 1.4285714285714286,
+    "terms_seen": [
+      "binary",
+      "boundary",
+      "regulatory_mode",
+      "specifier_codon",
+      "cognate_aa",
+      "trna_family"
+    ],
+    "weighting": "fixed"
+  },
+  "prd": "PRD \u00a710.2, \u00a710.3, \u00a711",
+  "provenance": {
+    "config_path": "conf/train/stage2.yaml",
+    "dataset_parquet": "data/processed/stage2_dataset.parquet",
+    "entrypoint": "tbox_finder.stage2.train",
+    "env_lock": "envs/ml-rna.conda-lock.yml",
+    "env_lock_sha256": "60f966a8f009abfa3900357ffd0ac7c685d8b55b713da4498306480720bcf3b3",
+    "git_branch": "p3-06-stage2-lora",
+    "git_dirty": false,
+    "git_dirty_paths": [],
+    "git_sha": "5a215d765a96dcdc4fe6673eb0a713b6d127295a",
+    "script": "src/tbox_finder/stage2/train.py",
+    "seed": 42,
+    "step": "P3-06"
+  },
+  "save_checkpoint": true,
+  "schema_version": "1",
+  "step": "P3-06",
+  "steps": {
+    "batches_per_epoch_per_rank": 283,
+    "elapsed_seconds": 2750.092,
+    "expected_n_steps": 2830,
+    "n_optimizer_steps": 1415,
+    "n_steps": 2830,
+    "total_scheduled_steps": 2830,
+    "warmup_steps": 170,
+    "world_size": 8
+  },
+  "val": {
+    "best_epoch": 9,
+    "best_total": 0.03995415618032279,
+    "history": [
+      {
+        "binary_accuracy": 0.993719806763285,
+        "epoch": 0,
+        "n_batches": 259,
+        "n_records": 2070,
+        "per_term": {
+          "binary": 0.022406250332921752,
+          "boundary": 0.08171616033500359,
+          "cognate_aa": 1.9162634781428747,
+          "regulatory_mode": 0.010126373219990593,
+          "specifier_codon": 2.303349001527293,
+          "trna_family": 2.23583544727458
+        },
+        "total": 0.6934785437035288
+      },
+      {
+        "binary_accuracy": 0.9980676328502416,
+        "epoch": 1,
+        "n_batches": 259,
+        "n_records": 2070,
+        "per_term": {
+          "binary": 0.01384354673906856,
+          "boundary": 0.07125555755619187,
+          "cognate_aa": 0.618773115417672,
+          "regulatory_mode": 0.010681153104270171,
+          "specifier_codon": 1.0178348101013877,
+          "trna_family": 0.8965186361640577
+        },
+        "total": 0.28960099092204417
+      },
+      {
+        "binary_accuracy": 0.9980676328502416,
+        "epoch": 2,
+        "n_batches": 259,
+        "n_records": 2070,
+        "per_term": {
+          "binary": 0.007129230730021624,
+          "boundary": 0.058166012514967794,
+          "cognate_aa": 0.18697052614756188,
+          "regulatory_mode": 0.00932783038898382,
+          "specifier_codon": 0.360772627704277,
+          "trna_family": 0.29880993168901754
+        },
+        "total": 0.11016712819623342
+      },
+      {
+        "binary_accuracy": 0.9990338164251208,
+        "epoch": 3,
+        "n_batches": 259,
+        "n_records": 2070,
+        "per_term": {
+          "binary": 0.005192046898679095,
+          "boundary": 0.047667688068111454,
+          "cognate_aa": 0.1313153367784435,
+          "regulatory_mode": 0.007230962539886387,
+          "specifier_codon": 0.20211710577334446,
+          "trna_family": 0.1942698745502871
+        },
+        "total": 0.0729856832200579
+      },
+      {
+        "binary_accuracy": 0.9995169082125603,
+        "epoch": 4,
+        "n_batches": 259,
+        "n_records": 2070,
+        "per_term": {
+          "binary": 0.002794717592374603,
+          "boundary": 0.039719344107672624,
+          "cognate_aa": 0.10129298479026579,
+          "regulatory_mode": 0.007450815502367194,
+          "specifier_codon": 0.1608587607317047,
+          "trna_family": 0.14193448678205603
+        },
+        "total": 0.055864226500456686
+      },
+      {
+        "binary_accuracy": 0.9990338164251208,
+        "epoch": 5,
+        "n_batches": 259,
+        "n_records": 2070,
+        "per_term": {
+          "binary": 0.0042591979692560115,
+          "boundary": 0.03691921028201717,
+          "cognate_aa": 0.09685380079308849,
+          "regulatory_mode": 0.006004116430961343,
+          "specifier_codon": 0.14171275851392262,
+          "trna_family": 0.13027226534028427
+        },
+        "total": 0.05281925643970168
+      },
+      {
+        "binary_accuracy": 0.9995169082125603,
+        "epoch": 6,
+        "n_batches": 259,
+        "n_records": 2070,
+        "per_term": {
+          "binary": 0.0014251789498465378,
+          "boundary": 0.03462162193823545,
+          "cognate_aa": 0.09600276735064692,
+          "regulatory_mode": 0.005457932737199266,
+          "specifier_codon": 0.11916206048758392,
+          "trna_family": 0.1215472690433868
+        },
+        "total": 0.046028669084727324
+      },
+      {
+        "binary_accuracy": 0.9995169082125603,
+        "epoch": 7,
+        "n_batches": 259,
+        "n_records": 2070,
+        "per_term": {
+          "binary": 0.0018995274787130256,
+          "boundary": 0.033155067461543744,
+          "cognate_aa": 0.09324575973671059,
+          "regulatory_mode": 0.005348330772658055,
+          "specifier_codon": 0.11591991290007808,
+          "trna_family": 0.11701192287997879
+        },
+        "total": 0.04499864139592991
+      },
+      {
+        "binary_accuracy": 0.9995169082125603,
+        "epoch": 8,
+        "n_batches": 259,
+        "n_records": 2070,
+        "per_term": {
+          "binary": 0.003890899934482469,
+          "boundary": 0.03096799040078427,
+          "cognate_aa": 0.10709409524585951,
+          "regulatory_mode": 0.0078001680579863515,
+          "specifier_codon": 0.1084507103626433,
+          "trna_family": 0.1299030827965163
+        },
+        "total": 0.048506103961251684
+      },
+      {
+        "binary_accuracy": 0.9995169082125603,
+        "epoch": 9,
+        "n_batches": 259,
+        "n_records": 2070,
+        "per_term": {
+          "binary": 0.0009927250898197997,
+          "boundary": 0.029872561015005586,
+          "cognate_aa": 0.08284639650290566,
+          "regulatory_mode": 0.005584246643990167,
+          "specifier_codon": 0.10342660233464711,
+          "trna_family": 0.10813937017300371
+        },
+        "total": 0.03995415618032279
+      }
+    ]
+  },
+  "wrap": {
+    "applied_lora": {
+      "all_linear_fully_covered": true,
+      "lora_alpha": 32,
+      "lora_dropout": 0.05,
+      "n_eligible_linear_modules": 231,
+      "n_modules_adapted": 231,
+      "r": 16,
+      "target_modules_after_injection": [
+        "dense",
+        "key",
+        "linear",
+        "linear_gate",
+        "query",
+        "value"
+      ],
+      "target_modules_selector": "all-linear",
+      "target_modules_suffix_minimised": true,
+      "uncovered_linear_modules": []
+    },
+    "attn_implementation": "flash_attention_2",
+    "attn_implementation_requested": "flash_attention_2",
+    "base_frozen": true,
+    "checkpoint_use_reentrant": null,
+    "dtype": "bfloat16",
+    "gradient_checkpointing": false,
+    "n_adapter_sites": 231,
+    "n_base_trainable_params": 0,
+    "n_modules_with_checkpointing": 0,
+    "stage2_heads": {
+      "all_heads_trainable": true,
+      "d_model": 1280,
+      "head_sizes": {
+        "cognate_aa": 20,
+        "label_string": 8,
+        "regulatory_mode": 2,
+        "specifier_codon": 64,
+        "trna_family": 61
+      },
+      "heads_frozen": [],
+      "heads_lora_adapted": [],
+      "heads_outside_peft_wrapper": true,
+      "n_head_modules": 6,
+      "n_head_parameters": 199836,
+      "output_keys": [
+        "tbox_logit",
+        "boundary_logits",
+        "regulatory_mode_logits",
+        "specifier_codon_logits",
+        "cognate_aa_logits",
+        "trna_family_logits",
+        "nucleotide_mask"
+      ],
+      "structure_head": false
+    },
+    "targeted_module_leaf_names": [
+      "dense",
+      "key",
+      "linear",
+      "linear_gate",
+      "query",
+      "value"
+    ],
+    "total_params": 662079483,
+    "trainable_params": 12840432,
+    "trainable_pct": 1.9394
+  },
+  "written_at": "2026-08-03T17:32:19.887324+00:00"
+}

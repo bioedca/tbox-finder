@@ -55,7 +55,6 @@ import time
 from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import asdict, dataclass, replace
 from datetime import UTC, datetime
-from itertools import islice
 from pathlib import Path
 from typing import Any
 
@@ -74,6 +73,7 @@ from tbox_finder.models.rc_combine import (
     is_directionality_preserving,
     normalize_rc_combine,
 )
+from tbox_finder.train import ddp as _ddp
 
 # --------------------------------------------------------------------------------------
 # Provenance constants (CLAUDE.md §11). Single-sourced here; the conf/ files echo them.
@@ -140,9 +140,11 @@ IGNORE_INDEX: int = -100
 _CKPT_MARKER = "_tbox_gradient_checkpointing"
 
 #: Env vars torchrun sets. Absent ⇒ single-process (the local smoke), world_size 1.
-_RANK_ENV = "RANK"
-_WORLD_SIZE_ENV = "WORLD_SIZE"
-_LOCAL_RANK_ENV = "LOCAL_RANK"
+#: Re-exported from :mod:`tbox_finder.train.ddp`, which owns them since P3-06 — the Stage-2
+#: trainer runs in a different conda env (ADR-0002 A4) and must not carry a second copy.
+_RANK_ENV = _ddp.RANK_ENV
+_WORLD_SIZE_ENV = _ddp.WORLD_SIZE_ENV
+_LOCAL_RANK_ENV = _ddp.LOCAL_RANK_ENV
 
 
 # --------------------------------------------------------------------------------------
@@ -597,56 +599,24 @@ def check_pythonhashseed(expected: int) -> None:
     determinism precondition that is merely logged is one nobody reads until a run fails to
     reproduce and the reason is a year old.
     """
-    raw = os.environ.get("PYTHONHASHSEED")
-    if raw is None:
-        raise RuntimeError(
-            f"PYTHONHASHSEED is not set. It must be exported BEFORE python starts — CPython "
-            f"fixes hash randomisation at interpreter startup, so this process cannot set it "
-            f"for itself (§8.3; PRD §11). Re-run as: PYTHONHASHSEED={expected} python -m "
-            f"tbox_finder.train.train_stage1 ..."
-        )
-    if raw != str(expected):
-        raise RuntimeError(
-            f"PYTHONHASHSEED={raw!r} but the config pins {expected!r}. The inherited value is "
-            f"the one in force (it cannot be changed in-process), so the run would not match "
-            f"its own recorded config (§8.3)."
-        )
+    # The implementation lives in `tbox_finder.train.ddp` since P3-06 (see the note on the
+    # DDP re-exports below); this wrapper only supplies Stage-1's own `python -m` target so
+    # the failure message quotes the entrypoint the operator actually ran.
+    _ddp.check_pythonhashseed(expected, entrypoint="tbox_finder.train.train_stage1")
 
 
 # --------------------------------------------------------------------------------------
 # DDP (PRD §10.3 "DDP×8 for throughput")
 # --------------------------------------------------------------------------------------
-def _env_int(name: str, default: int) -> int:
-    raw = os.environ.get(name)
-    if raw is None or raw == "":
-        return default
-    try:
-        value = int(raw)
-    except ValueError as exc:
-        raise ValueError(f"{name}={raw!r} is not an integer") from exc
-    if value < 0:
-        raise ValueError(f"{name}={value} must be >= 0")
-    return value
-
-
-def ddp_world_size() -> int:
-    """Number of DDP ranks (torchrun's ``WORLD_SIZE``); 1 when unset (the local smoke)."""
-    return max(1, _env_int(_WORLD_SIZE_ENV, 1))
-
-
-def ddp_rank() -> int:
-    """This process's global rank; 0 when unset."""
-    return _env_int(_RANK_ENV, 0)
-
-
-def ddp_local_rank() -> int:
-    """This process's node-local rank (selects the CUDA device); 0 when unset."""
-    return _env_int(_LOCAL_RANK_ENV, 0)
-
-
-def is_primary() -> bool:
-    """True on the one rank that writes artifacts / logs to W&B."""
-    return ddp_rank() == 0
+# Promoted to `tbox_finder.train.ddp` at P3-06 and re-exported here under their original
+# names, so every caller and test that reached them through this module still does. They are
+# NOT reimplemented: Stage-1 and Stage-2 run in different conda envs (ADR-0002 A4), and a
+# forked copy would let a fix land in one trainer while the other kept shipping the bug.
+_env_int = _ddp._env_int
+ddp_world_size = _ddp.ddp_world_size
+ddp_rank = _ddp.ddp_rank
+ddp_local_rank = _ddp.ddp_local_rank
+is_primary = _ddp.is_primary
 
 
 def _barrier_before_primary_write() -> None:
@@ -677,70 +647,11 @@ def _barrier_before_primary_write() -> None:
         dist.barrier()
 
 
-class ShardedSampler:
-    """A rank-disjoint, **equal-length** view of a :class:`WeightedIndexSampler` stream (DDP).
-
-    Every rank builds the *same* seeded draw stream and takes the ``rank::world_size`` slice,
-    so the curriculum weighting (P2-01) is preserved rather than re-derived per rank, and no
-    draw is seen twice in an epoch.
-
-    **Every rank must yield exactly the same number of draws, or DDP deadlocks.** The stream
-    is therefore truncated to ``(len // world_size) * world_size`` draws *before* striding.
-    Without that, a 23-draw stream over 4 ranks shards 6/6/6/5: the short rank runs one fewer
-    backward pass, stops joining the gradient all-reduce, and the other three block on a
-    collective that can never complete — the job hangs rather than fails, which is the worst
-    way for it to go wrong. The cost is dropping at most ``world_size - 1`` draws per epoch
-    (standard ``drop_last`` behaviour); which draws are dropped changes every epoch, because
-    ``set_epoch`` reshuffles the underlying stream.
-
-    Note the union over ranks is therefore a *subset* of the single-process stream, not equal
-    to it. An earlier draft asserted equality — which silently **required** the ragged shards
-    that deadlock, i.e. the test encoded the bug as the contract.
-
-    **The tuples are load-bearing.** ``WeightedIndexSampler`` yields ``(index, occurrence)``,
-    not bare ints, and the occurrence ordinal is part of the dataset's per-draw RNG key: it
-    is what makes a 9× oversampled class-II record emit nine *different* window phases /
-    strands instead of nine identical copies. This wrapper passes the tuples through
-    untouched. Swapping in ``torch.utils.data.DistributedSampler`` would drop them and
-    silently re-create the memorisation P2-01 measured and designed against.
-    """
-
-    def __init__(self, sampler: Any, *, rank: int, world_size: int) -> None:
-        if world_size < 1:
-            raise ValueError(f"world_size must be >= 1; got {world_size}")
-        if not 0 <= rank < world_size:
-            raise ValueError(f"rank must be in [0, {world_size}); got {rank}")
-        self._sampler = sampler
-        self._rank = rank
-        self._world_size = world_size
-
-    @property
-    def inner(self) -> Any:
-        """The wrapped sampler — the object that knows the draw stream's composition.
-
-        Exposed so the P2-10d negative-mix measurement reads it off the sampler that
-        *built* the stream instead of re-deriving the positive/negative boundary from a
-        second source that could drift.
-        """
-        return self._sampler
-
-    def set_epoch(self, epoch: int) -> None:
-        """Advance the underlying draw stream (must be called every epoch)."""
-        self._sampler.set_epoch(epoch)
-
-    def _usable(self) -> int:
-        """Draws kept before striding: the largest multiple of ``world_size`` that fits."""
-        return (len(self._sampler) // self._world_size) * self._world_size
-
-    def __len__(self) -> int:
-        return self._usable() // self._world_size
-
-    def __iter__(self) -> Iterator[Any]:
-        # Truncate globally FIRST, then stride — so every rank gets exactly _usable() //
-        # world_size draws. Striding first and truncating after would reintroduce the skew.
-        return islice(
-            islice(iter(self._sampler), self._usable()), self._rank, None, self._world_size
-        )
+# Promoted to `tbox_finder.train.ddp` at P3-06 alongside the rank helpers and re-exported
+# here under its original name. The equal-length-shard rule is a DDP-deadlock guard, not a
+# Stage-1 detail, and the Stage-2 trainer needs exactly the same one — see the class
+# docstring in that module for why a ragged shard hangs the job rather than failing it.
+ShardedSampler = _ddp.ShardedSampler
 
 
 # --------------------------------------------------------------------------------------
