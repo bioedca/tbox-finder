@@ -1547,3 +1547,57 @@ would be the precise opposite.
 **Validation.** Trainer **116 pass**, sizing 20, overrides 22, backfill 4; ruff + black clean.
 
 **Commit.** Feature branch `p3-06-stage2-lora`; squash SHA derived at the phase-exit gate.
+
+## Step P3-06 (review r4) — 2026-08-03: the producer schema was fixed; the artifacts were not
+
+**Manual `@coderabbitai review`** — automatic review on push is now disabled for this repo, so
+the manual comment is the live path (and only then; §5.1 records the conditional). Three
+findings, all real, and one of them answered a question I had asked it to check.
+
+**(High) The six committed reports still advertised values the saved weights do not achieve.**
+Fixing the *producer* schema left the *artifacts* misleading: a reader opening
+`aux0.0_lr1e-4.json` saw `best_val_total: 0.00037977` beside `saved_from_epoch: 9` and had to
+infer that those describe different weights. Four of six arms have a best epoch before 9 (the
+other two have best == final, so an annotation claiming a gap everywhere would itself be
+wrong). Each report now carries a **`legacy` block**: `saved_val_total` derived from that
+file's *own* `val.history`, an explicit statement that `best_val_*` describe discarded weights,
+and the two clauses it fails under schema 2. **Annotated, not rewritten — 84 insertions, 0
+deletions, no measured value touched.** They are job 1064's own record, and the standing
+decision was to keep the checkpoints and record the defect.
+
+**(Medium) `grad_clip == 0` was silently corrupting gradients.** I had written
+`clip_grad_norm_(params, float("inf"))` believing it equivalent to not clipping. It is not:
+PyTorch scales by `max_norm / (total_norm + 1e-6)`, and with both infinite that coefficient is
+`nan`, which is then multiplied through. **Verified on the pinned torch 2.7.1:** an
+`[inf, 1.0, 2.0]` gradient came back `[nan, nan, nan]` while the returned norm still read
+`inf` — so the detection signal was fine and the optimiser's input was not. A "disabled" clip
+that quietly edits gradients is precisely the no-op-shaped side effect this step keeps
+producing. `gradient_total_norm` now uses `get_total_norm` when clipping is off, which returns
+the same value and mutates nothing.
+
+**⚠ (Medium) Two of the regression tests written *for the previous round* were still vacuous.**
+The step-count test **reimplemented the loop** instead of running it — deleting
+`scheduler.step()` from the trailing flush left it green. The NaN-gradient test edited a report
+**fixture** — deleting the counter increment left it green. Both are now **producer** tests
+that call `train_stage2` on CPU with an odd micro-batch count and accumulation 2, spying on the
+real `optimizer.step`/`scheduler.step` and injecting a real `inf` into a live gradient after a
+real backward. Both of CodeRabbit's exact counterexamples now fail, verified by mutating the
+source. **That is seven vacuous tests across this step**, and the pattern is consistent enough
+to name: *I keep testing the predicate and calling it a test of the producer.*
+
+**Three assertions I wrote in this round were also wrong, each caught by running them.** That
+the forward loss stays finite when a gradient is poisoned — false, because stepping on an
+`inf` gradient poisons the weights and every later loss with them. That
+`n_nonfinite_grad_steps >= n_nonfinite_steps` — arithmetic nonsense, since the two counters
+have different denominators (micro-batches vs optimiser steps). And a sabotage that removed one
+of the counter's *two* increment sites and concluded the test was weak. The habit to correct is
+asserting relationships that sound right rather than ones derived from the mechanism.
+
+**Confirmed, not assumed:** CodeRabbit checked the DDP question I flagged as most load-bearing
+— `backward()` returns only after every bucket all-reduce completes, including with
+`find_unused_parameters=True`, so `clip_grad_norm_`/`get_total_norm` observes **synchronised**
+gradients and is a valid post-reduction signal.
+
+**Validation.** Trainer **121 pass**, sizing 20, overrides 22, backfill 4; ruff + black clean.
+
+**Commit.** Feature branch `p3-06-stage2-lora`; squash SHA derived at the phase-exit gate.

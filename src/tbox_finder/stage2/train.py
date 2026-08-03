@@ -104,6 +104,7 @@ __all__ = [
     "device_record",
     "diagnostics",
     "forward_backward",
+    "gradient_total_norm",
     "lr_scale",
     "row_eligibility",
     "select_rows",
@@ -1080,6 +1081,36 @@ def device_record() -> dict[str, Any]:
     return record
 
 
+def gradient_total_norm(trainable: Any, *, grad_clip: float) -> float:
+    """Total gradient norm, clipping only when asked — and never mutating otherwise.
+
+    ⚠ ``clip_grad_norm_(params, float("inf"))`` is **not** a no-op. PyTorch 2.7 scales by
+    ``max_norm / (total_norm + 1e-6)``; with both infinite that coefficient is ``nan``, and the
+    gradients are multiplied by it — so an ``inf`` gradient is silently converted to ``nan``
+    across the whole tensor. Verified on the pinned torch 2.7.1: an ``[inf, 1.0, 2.0]``
+    gradient comes back ``[nan, nan, nan]`` while the *returned* norm still reads ``inf``. The
+    detection signal survives, but the optimiser's input changed — a "disabled" clip that
+    quietly edits gradients is exactly the kind of no-op-shaped side effect this step keeps
+    finding.
+
+    So when ``grad_clip <= 0`` the norm is read with :func:`torch.nn.utils.get_total_norm`,
+    which returns the same value and leaves ``param.grad`` alone.
+
+    Called after ``backward()``, which under DDP returns only once every bucket all-reduce has
+    completed (true also with ``find_unused_parameters=True``, where unused parameters are
+    marked ready before backward returns) — so this observes the **synchronised** gradients and
+    is the post-reduction signal ``losses_finite`` needs.
+    """
+    import torch
+
+    params = [p for p in trainable if p.grad is not None]
+    if not params:
+        return 0.0
+    if grad_clip > 0:
+        return float(torch.nn.utils.clip_grad_norm_(params, grad_clip))
+    return float(torch.nn.utils.get_total_norm([p.grad for p in params]))
+
+
 def _trainable_parameters(model: Any) -> list[Any]:
     return [p for p in model.parameters() if p.requires_grad]
 
@@ -1338,10 +1369,7 @@ def train_stage2(
                 # loss counter alone cannot see it. `clip_grad_norm_` returns the PRE-clip
                 # total norm, computed after the all-reduce, so it is non-finite iff some
                 # gradient is; that is the post-reduction check the gate needs.
-                total_norm = torch.nn.utils.clip_grad_norm_(
-                    trainable, cfg.grad_clip if cfg.grad_clip > 0 else float("inf")
-                )
-                if not math.isfinite(float(total_norm)):
+                if not math.isfinite(gradient_total_norm(trainable, grad_clip=cfg.grad_clip)):
                     n_nonfinite_grads += 1
                 optimizer.step()
                 scheduler.step()
@@ -1367,10 +1395,7 @@ def train_stage2(
         # Flush a trailing partial group so its gradients reach the weights instead of being
         # discarded by the next epoch's zero_grad.
         if micro_in_group:
-            total_norm = torch.nn.utils.clip_grad_norm_(
-                trainable, cfg.grad_clip if cfg.grad_clip > 0 else float("inf")
-            )
-            if not math.isfinite(float(total_norm)):
+            if not math.isfinite(gradient_total_norm(trainable, grad_clip=cfg.grad_clip)):
                 n_nonfinite_grads += 1
             optimizer.step()
             scheduler.step()

@@ -20,6 +20,7 @@ variable was the P1-16 landmine: a tier that cannot run must skip loudly, and a 
 from __future__ import annotations
 
 import json
+import math
 import os
 from pathlib import Path
 from typing import Any
@@ -1495,3 +1496,230 @@ def test_the_recorded_step_counts_show_exactly_the_defect_that_was_diagnosed() -
             "gradient_accumulation_steps was 2, so the optimiser took exactly half the "
             "micro-batch count — the ratio that made the cosine stop at 50%"
         )
+
+
+# --------------------------------------------------------------------------------------
+# PRODUCER tests — these run train_stage2. The predicate tests above do not.
+# --------------------------------------------------------------------------------------
+def _tiny_run(tmp: Path, **over: Any):
+    """Run `train_stage2` on CPU through a tiny backbone; return (report, raised).
+
+    The gate fails on `full_population` by construction (a truncated run), so the caller gets
+    the written report rather than an exception it has to unpick.
+    """
+    from multimolecule import RiNALMoConfig, RiNALMoModel
+
+    cfg_kwargs: dict[str, Any] = dict(
+        epochs=2,
+        batch_size=1,
+        eval_batch_size=2,
+        max_records=9,  # ODD, so accumulation leaves a trailing partial group each epoch
+        eval_max_records=4,
+        gradient_accumulation_steps=2,
+        gradient_checkpointing=False,
+        device="cpu",
+        log_every=10_000,
+        report_path=str(tmp / "r.json"),
+        checkpoint_dir=str(tmp / "ckpt"),
+        wandb_dir=str(tmp / "wb"),
+    )
+    cfg_kwargs.update(over)
+    cfg = T.Stage2TrainConfig(**cfg_kwargs)
+    c = RiNALMoConfig(
+        hidden_size=32, num_hidden_layers=1, num_attention_heads=2, intermediate_size=64
+    )
+    c._attn_implementation = "sdpa"
+    raised = None
+    try:
+        T.train_stage2(
+            cfg, base_model=RiNALMoModel(c, add_pooling_layer=False), log=lambda *a: None
+        )
+    except RuntimeError as exc:  # the truncated-run gate failure
+        raised = exc
+    return json.loads(Path(cfg.report_path).read_text()), raised
+
+
+@pytest.mark.skipif(
+    os.environ.get("TBOX_REQUIRE_STAGE2_DATA") != "1",
+    reason="runs the real trainer over the DVC-tracked dataset; local/cluster only",
+)
+def test_the_TRAINER_takes_exactly_the_optimiser_steps_the_schedule_was_sized_for() -> None:
+    """CodeRabbit r3: the earlier version reimplemented the loop and never ran it.
+
+    Removing `scheduler.step()` from the trailing flush left that test green, because it was
+    asserting arithmetic it had written itself. This one spies on the real `optimizer.step`
+    and `scheduler.step` through an actual `train_stage2` call, with an ODD micro-batch count
+    and accumulation 2 so the trailing partial group is exercised on every epoch.
+    """
+    _require_stack()
+    import tempfile
+
+    import torch
+
+    opt_calls, sched_calls = [], []
+    real_opt, real_sched = torch.optim.AdamW.step, torch.optim.lr_scheduler.LambdaLR.step
+    torch.optim.AdamW.step = lambda self, *a, **k: (opt_calls.append(1), real_opt(self, *a, **k))[1]
+    torch.optim.lr_scheduler.LambdaLR.step = lambda self, *a, **k: (
+        sched_calls.append(1),
+        real_sched(self, *a, **k),
+    )[1]
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            report, _ = _tiny_run(Path(tmp))
+    finally:
+        torch.optim.AdamW.step = real_opt
+        torch.optim.lr_scheduler.LambdaLR.step = real_sched
+
+    steps = report["steps"]
+    expected = steps["expected_n_optimizer_steps"]
+    assert steps["n_optimizer_steps"] == expected
+    assert (
+        len(opt_calls) == expected
+    ), f"optimizer.step called {len(opt_calls)}, expected {expected}"
+    # The one the old test could not see: LambdaLR is constructed with an initial step, so the
+    # loop's own calls are what must match the schedule's domain.
+    assert (
+        len(sched_calls) - 1 <= expected <= len(sched_calls)
+    ), f"scheduler.step called {len(sched_calls)} times against a domain of {expected}"
+    assert steps["total_scheduled_optimizer_steps"] == expected
+
+
+@pytest.mark.skipif(
+    os.environ.get("TBOX_REQUIRE_STAGE2_DATA") != "1",
+    reason="runs the real trainer over the DVC-tracked dataset; local/cluster only",
+)
+def test_the_TRAINER_records_a_non_finite_gradient_it_actually_encountered() -> None:
+    """CodeRabbit r3: the earlier version edited a report fixture, not the producer.
+
+    Removing the increment from `train_stage2` left it green. Here a real `inf` is injected
+    into a live gradient after the real backward, so the real `gradient_total_norm` observes
+    it, the real counter increments, and the real report carries it — and the gate refuses.
+    """
+    _require_stack()
+    import tempfile
+
+    real_fb = T.forward_backward
+
+    def poisoning(model, loss_fn, batch, *, scale=1.0):
+        out = real_fb(model, loss_fn, batch, scale=scale)
+        for prm in model.parameters():
+            if prm.requires_grad and prm.grad is not None:
+                prm.grad[0] = float("inf")
+                break
+        return out
+
+    T.forward_backward = poisoning
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            report, raised = _tiny_run(Path(tmp))
+    finally:
+        T.forward_backward = real_fb
+
+    assert (
+        report["losses"]["n_nonfinite_grad_steps"] > 0
+    ), "the trainer did not record the non-finite gradient it was handed"
+    assert T.derive_clauses(report)["losses_finite"] is False
+    assert raised is not None and "losses_finite" in str(raised)
+    # ⚠ NOT asserting the forward loss stayed finite. A first draft did, and it failed —
+    # correctly. Injecting `inf` into a live gradient and then stepping poisons the WEIGHTS,
+    # so later forward passes produce non-finite losses too. What this clause exists for is
+    # that the gradient signal fires on the step the gradient goes bad, before the loss
+    # counter could have seen anything — so it necessarily fires at least as often. The
+    # "finite loss, poisoned gradient" case is exercised directly on the predicate by
+    # test_a_nan_GRADIENT_fails_the_gate_even_when_the_rank0_loss_is_finite.
+    # ⚠ And NOT comparing the two counters. They have different denominators: the loss counter
+    # increments per MICRO-BATCH, the gradient counter only per OPTIMISER step (one per
+    # `gradient_accumulation_steps`). A first draft asserted grad >= loss, which is arithmetic
+    # nonsense once accumulation > 1 — the third assertion in this test that sounded right and
+    # was not derived from the mechanism. What is actually true, and enough:
+    assert report["losses"]["n_nonfinite_grad_steps"] <= report["steps"]["n_optimizer_steps"]
+
+
+def test_grad_clip_zero_reads_the_norm_without_touching_the_gradients() -> None:
+    """CodeRabbit r3: `clip_grad_norm_(..., inf)` is NOT a no-op — it writes `nan`.
+
+    PyTorch scales by `max_norm / (total_norm + 1e-6)`; with both infinite that is `nan`, and
+    the gradients are multiplied by it. Verified on the pinned torch: `[inf, 1, 2]` came back
+    `[nan, nan, nan]` while the returned norm still read `inf`, so the detection signal was
+    fine and the optimiser's input was not.
+    """
+    torch = _require_torch()
+
+    for grads, clip, expect_finite in (
+        ([float("inf"), 1.0, 2.0], 0.0, False),
+        ([float("nan"), 1.0], 0.0, False),
+        ([3.0, 4.0], 0.0, True),
+    ):
+        prm = torch.nn.Parameter(torch.zeros(len(grads)))
+        prm.grad = torch.tensor(grads)
+        norm = T.gradient_total_norm([prm], grad_clip=clip)
+        assert math.isfinite(norm) is expect_finite
+        # …and the gradients are untouched, which is the whole point. Compared elementwise
+        # with NaN treated as equal to itself, since `nan == nan` is False.
+        after = prm.grad.tolist()
+        assert len(after) == len(grads)
+        assert all(
+            (a != a and b != b) or a == b for a, b in zip(after, grads, strict=True)
+        ), f"gradients were mutated: {grads} -> {after}"
+    # A finite norm is also correct, not merely finite.
+    prm = torch.nn.Parameter(torch.zeros(2))
+    prm.grad = torch.tensor([3.0, 4.0])
+    assert T.gradient_total_norm([prm], grad_clip=0.0) == pytest.approx(5.0)
+
+
+def test_every_committed_report_carries_its_legacy_annotation() -> None:
+    """CodeRabbit r3 (High): the producer schema was fixed; the ARTIFACTS stayed misleading.
+
+    A reader opening `aux0.0_lr1e-4.json` saw `best_val_total: 0.00037977` beside
+    `saved_from_epoch: 9` and had to infer that the two describe different weights. The
+    annotation states it, and derives `saved_val_total` from the file's own `val.history`
+    rather than from anywhere else.
+
+    The reports are ANNOTATED, not rewritten — they are job 1064's own record, and the
+    decision was to keep the checkpoints and record the defect. This asserts both halves: the
+    annotation is present and correct, and the original measurements are still there.
+    """
+    assert len(_SWEEP_REPORTS) == 6
+    for path in _SWEEP_REPORTS:
+        report = json.loads(path.read_text())
+        legacy = report.get("legacy")
+        assert legacy, f"{path.name} lost its legacy annotation"
+
+        # Derived from this file's own history, not restated from elsewhere.
+        history = {h["epoch"]: h["total"] for h in report["val"]["history"]}
+        saved_epoch = report["checkpoint"]["saved_from_epoch"]
+        assert legacy["saved_from_epoch"] == saved_epoch
+        assert legacy["saved_val_total"] == pytest.approx(history[saved_epoch])
+
+        # The original measurements survive untouched — annotation, not rewrite.
+        assert report["checkpoint"]["best_val_total"] == pytest.approx(
+            legacy["best_val_total_observed_during_training"]
+        )
+        assert report["schema_version"] == "1" == legacy["schema_version_of_this_file"]
+        assert legacy["fails_current_gate_on"] == ["losses_finite", "steps_ran"]
+        # …and that list must still be the truth, not a stale copy.
+        assert (
+            sorted(k for k, v in T.derive_clauses(report).items() if not v)
+            == legacy["fails_current_gate_on"]
+        )
+
+
+def test_the_annotation_names_a_gap_that_is_real_in_four_of_six_arms() -> None:
+    """Two arms had best == final, so an annotation asserting a gap everywhere would be wrong.
+
+    The point is not that every checkpoint underperforms its best — it is that the report must
+    not *claim* a score its weights do not achieve. Where best == epoch 9 the two agree, and
+    the annotation still correctly reports them as equal.
+    """
+    gaps = 0
+    for path in _SWEEP_REPORTS:
+        report = json.loads(path.read_text())
+        legacy = report["legacy"]
+        best = legacy["best_val_total_observed_during_training"]
+        saved = legacy["saved_val_total"]
+        if legacy["best_val_epoch_observed_during_training"] == legacy["saved_from_epoch"]:
+            assert saved == pytest.approx(best), path.name
+        else:
+            assert saved > best, f"{path.name}: best epoch should beat the saved epoch"
+            gaps += 1
+    assert gaps == 4, f"expected 4 arms whose best epoch precedes epoch 9, found {gaps}"
