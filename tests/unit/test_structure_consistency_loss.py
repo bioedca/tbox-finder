@@ -607,11 +607,51 @@ class TestTheTermFailsClosed:
         with pytest.raises(ValueError, match=r"\(B, L, 1 \+ L\)"):
             L.structure_consistency_loss(logits[0], target[0], mask[0])
 
-    def test_a_narrow_integer_target_cannot_wrap_a_partner_index(self):
-        """int8 admits class indices only to 127; a 200-nt partner would wrap silently."""
+    @pytest.mark.parametrize("dtype_name", ["int8", "int16", "int32"])
+    def test_a_narrow_integer_target_is_promoted_before_the_partner_arithmetic(self, dtype_name):
+        """``_check_supervised_targets`` admits int8/16/32, but ``j + 1`` and the gathers
+        must not run in them: this term promotes to int64 first.
+
+        The witness that the promotion is doing work rather than decorating a no-op is
+        torch's own wrapping arithmetic in the narrow dtype, asserted below — ``-128 - 1``
+        is ``127`` in int8, so a partner index computed in that dtype is not merely
+        imprecise, it is a *different, valid-looking* position.
+        """
+        wrapped = torch.tensor([-128], dtype=torch.int8) - 1
+        assert int(wrapped) == 127, "int8 wraps — that is what makes the promotion load-bearing"
+
         logits, target, mask = _fixture_batch()
-        value = L.structure_consistency_loss(logits, target.to(torch.int32), mask)
+        narrow = target.to(getattr(torch, dtype_name))
+        value = L.structure_consistency_loss(logits, narrow, mask)
         assert torch.allclose(value, L.structure_consistency_loss(logits, target, mask))
+
+    def test_promotion_reaches_a_partner_index_no_int8_could_hold(self):
+        """L = 200, so the largest class (200) is outside int8 entirely.
+
+        int16 can hold it; the arithmetic must be done after the promotion, or ``gather``
+        would be handed a non-int64 index and the ``- 1`` a narrow accumulator.
+        """
+        torch.manual_seed(0)
+        length = 200
+        logits = torch.randn(1, length, length + 1, dtype=torch.float64)
+        mask = torch.ones(1, length, dtype=torch.bool)
+        text = "(" * 60 + "." * 80 + ")" * 60
+        encoded = L.encode_pairing_target(text, length=length)
+        assert max(encoded) == length, "the fixture must exercise the top of the class axis"
+        assert max(encoded) > 127, "…and a value int8 cannot represent"
+        target = torch.tensor([encoded], dtype=torch.long)
+        value = L.structure_consistency_loss(logits, target.to(torch.int16), mask)
+        assert torch.allclose(value, L.structure_consistency_loss(logits, target, mask))
+        assert bool(torch.isfinite(value))
+
+    def test_a_target_that_wrapped_upstream_is_caught_not_absorbed(self):
+        """Promotion cannot undo a wrap that already happened in the collator — but the
+        range and symmetry checks run *after* it, so the corruption still fails closed."""
+        logits, target, mask = _fixture_batch()
+        corrupt = target.clone()
+        corrupt[0, 0] = -56  # what a wrapped narrow index looks like
+        with pytest.raises(ValueError, match=r"outside \[0, 6\]"):
+            L.structure_consistency_loss(logits, corrupt, mask)
 
 
 # ====================================================================================== #
