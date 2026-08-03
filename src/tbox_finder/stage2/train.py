@@ -171,8 +171,13 @@ ADMIT_PARENTLESS_DECOY = "parentless_decoy"
 ADMIT_ROUTES: tuple[str, ...] = (ADMIT_NESTED_TRAIN, ADMIT_PARENTLESS_DECOY)
 
 
-def _bool_or_none(value: Any) -> bool | None:
-    """``nested_train`` as a tri-state, with pandas' several spellings of missing.
+def _bool_or_none(value: Any, *, field: str = "value") -> bool | None:
+    """A tri-state boolean, with pandas' several spellings of missing.
+
+    ``field`` names the column in the failure message. It is a parameter rather than the
+    hard-coded ``nested_train`` this was written for, because it also reads ``calib`` and
+    ``is_tbox`` — a schema migration putting ``"yes"`` in ``calib`` would otherwise raise an
+    error blaming a column that is perfectly fine, sending the reader to the wrong place.
 
     ``masking.is_missing`` rather than ``value or None``: under the ``ml-rna`` env's
     pandas the string form of a missing cell is ``"nan"``, which is truthy, and that exact
@@ -198,7 +203,7 @@ def _bool_or_none(value: Any) -> bool | None:
         # ([[pandas-3-nan-truthy-in-training-env]]). `H.NULL_TOKENS` is reused rather than
         # respelled so the two null vocabularies cannot drift apart.
         return None
-    raise ValueError(f"nested_train={value!r} is neither missing nor boolean")
+    raise ValueError(f"{field}={value!r} is neither missing nor boolean")
 
 
 def row_eligibility(row: Mapping[str, Any], *, rung: str, admit_parentless_decoys: bool) -> str:
@@ -215,7 +220,7 @@ def row_eligibility(row: Mapping[str, Any], *, rung: str, admit_parentless_decoy
             function could leak a held-out clade into training.
     """
     fold_basis = masking.row_text(row.get("fold_basis"))
-    nested = _bool_or_none(row.get("nested_train"))
+    nested = _bool_or_none(row.get("nested_train"), field="nested_train")
     source = masking.row_text(row.get("source"))
 
     if fold_basis == FOLD_BASIS_DECOY_RANDOM and not (nested is None and source == SOURCE_DECOY):
@@ -226,7 +231,7 @@ def row_eligibility(row: Mapping[str, Any], *, rung: str, admit_parentless_decoy
             "with a fold assignment must be placed by that assignment, not by this branch."
         )
 
-    if _bool_or_none(row.get("calib")) is True:
+    if _bool_or_none(row.get("calib"), field="calib") is True:
         return REFUSE_CALIB
     if masking.row_text(row.get("fold_random")) != rung:
         return REFUSE_OTHER_RUNG
@@ -243,7 +248,7 @@ def row_eligibility(row: Mapping[str, Any], *, rung: str, admit_parentless_decoy
 def _admit_route(row: Mapping[str, Any]) -> str:
     return (
         ADMIT_NESTED_TRAIN
-        if _bool_or_none(row.get("nested_train")) is True
+        if _bool_or_none(row.get("nested_train"), field="nested_train") is True
         else ADMIT_PARENTLESS_DECOY
     )
 
@@ -271,7 +276,7 @@ def select_rows(
         if verdict == ADMITTED:
             admitted.append(i)
             by_route[_admit_route(row)] += 1
-            if _bool_or_none(row.get("is_tbox")) is True:
+            if _bool_or_none(row.get("is_tbox"), field="is_tbox") is True:
                 n_positive += 1
             continue
         refused[verdict] += 1
@@ -593,6 +598,8 @@ def derive_clauses(report: Mapping[str, Any]) -> dict[str, bool]:
         and bool(losses.get("per_term_final"))
         and all(_finite(v) for v in (losses.get("per_term_final") or {}).values())
         and losses.get("n_nonfinite_steps") == 0
+        # Both, because a finite rank-0 loss and a poisoned all-reduced gradient co-occur.
+        and losses.get("n_nonfinite_grad_steps") == 0
     )
 
     # -- the §10.3 LoRA contract, read back off the model --------------------------- #
@@ -808,7 +815,7 @@ class Stage2SequenceDataset:
         """
         return (
             masking.row_text(row.get("source")) == SOURCE_DECOY
-            and _bool_or_none(row.get("is_tbox")) is False
+            and _bool_or_none(row.get("is_tbox"), field="is_tbox") is False
         )
 
     def __len__(self) -> int:
@@ -828,7 +835,7 @@ class Stage2SequenceDataset:
         n_nt = len(input_ids) - tok.N_FLANKING_SPECIAL_TOKENS
 
         item: dict[str, Any] = {"input_ids": input_ids, "row_id": row.get("row_id")}
-        item[L.BINARY_TERM] = 1 if _bool_or_none(row.get("is_tbox")) is True else 0
+        item[L.BINARY_TERM] = 1 if _bool_or_none(row.get("is_tbox"), field="is_tbox") is True else 0
 
         if "boundary" in self._terms:
             boundary = self._spec.encode_boundary_string(row.get(L.TERM_TO_FIELD["boundary"]))
@@ -1281,6 +1288,7 @@ def train_stage2(
     n_steps = 0
     n_optimizer_steps = 0
     n_nonfinite = 0
+    n_nonfinite_grads = 0
     terms_seen: set[str] = set()
     per_term_final: dict[str, float] = {}
     final_total = float("nan")
@@ -1315,8 +1323,17 @@ def train_stage2(
             n_steps += 1
             micro_in_group += 1
             if micro_in_group == cfg.gradient_accumulation_steps:
-                if cfg.grad_clip > 0:
-                    torch.nn.utils.clip_grad_norm_(trainable, cfg.grad_clip)
+                # ⚠ `n_nonfinite` above counts the rank-0 forward LOSS. A NaN gradient
+                # produced on any other rank all-reduces into every rank's gradient tensor and
+                # poisons the weights while rank 0's loss value stays perfectly finite — so the
+                # loss counter alone cannot see it. `clip_grad_norm_` returns the PRE-clip
+                # total norm, computed after the all-reduce, so it is non-finite iff some
+                # gradient is; that is the post-reduction check the gate needs.
+                total_norm = torch.nn.utils.clip_grad_norm_(
+                    trainable, cfg.grad_clip if cfg.grad_clip > 0 else float("inf")
+                )
+                if not math.isfinite(float(total_norm)):
+                    n_nonfinite_grads += 1
                 optimizer.step()
                 scheduler.step()
                 optimizer.zero_grad(set_to_none=True)
@@ -1341,8 +1358,11 @@ def train_stage2(
         # Flush a trailing partial group so its gradients reach the weights instead of being
         # discarded by the next epoch's zero_grad.
         if micro_in_group:
-            if cfg.grad_clip > 0:
-                torch.nn.utils.clip_grad_norm_(trainable, cfg.grad_clip)
+            total_norm = torch.nn.utils.clip_grad_norm_(
+                trainable, cfg.grad_clip if cfg.grad_clip > 0 else float("inf")
+            )
+            if not math.isfinite(float(total_norm)):
+                n_nonfinite_grads += 1
             optimizer.step()
             scheduler.step()
             optimizer.zero_grad(set_to_none=True)
@@ -1456,6 +1476,9 @@ def train_stage2(
             "final_train_total": final_total,
             "per_term_final": per_term_final,
             "n_nonfinite_steps": n_nonfinite,
+            # Post-all-reduce: catches a NaN gradient contributed by ANY rank, which the
+            # rank-0 loss counter above is structurally blind to.
+            "n_nonfinite_grad_steps": n_nonfinite_grads,
         },
         val=(
             {"history": val_history, "best_total": best_val, "best_epoch": best_epoch}

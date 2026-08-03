@@ -1453,3 +1453,58 @@ source rather than by reading it.
 clean; `bash -n` clean. **28 sabotages across the step**, each RED against its NAMED test.
 
 **Commit.** Feature branch `p3-06-stage2-lora`; squash SHA derived at the phase-exit gate.
+
+## Step P3-06 (review r3) — 2026-08-03: Greptile did review, and I had declared it dead
+
+**⚠ THE CORRECTION THAT MATTERS MOST HERE IS ABOUT MY OWN PROCESS.** Greptile was invoked on
+PR #99 and **replied ~18 minutes later** as `greptile-apps[bot]`, with three P2 findings. A
+6-minute poll had already concluded "silent", reported to the user that the credit was wasted,
+and **written into CLAUDE.md §5.1a that the trigger path was dead** — codifying a false
+conclusion drawn from impatience into the project's operating contract, where a future session
+would have obeyed it. §5.1a is corrected: *it works, budget ~25 minutes, and look in
+`pulls/<n>/reviews` for `greptile-apps[bot]` — the reply arrives as a **review**, not an issue
+comment, so a poll that only reads issue comments will miss it.* The two prior PR #98
+"silences" are now suspect for the same reason rather than being evidence of anything.
+
+Two general lessons, and the second is the one worth keeping. **A negative result needs its
+measurement stated as much as a positive one** — "silent" was really "silent for six minutes",
+and only the second version is a fact. And **the failure compounded**: the wrong conclusion did
+not stay in a message, it was promoted to documentation, where its wrongness would have
+outlived the session and cost someone else the same credit. Writing a finding down is exactly
+when it needs to be *most* certain, not least.
+
+**Greptile's three findings, all real, all fixed.**
+
+**(P2, the sharp one) `losses_finite` was blind to a NaN gradient on any non-primary rank.**
+`n_nonfinite` counts the **rank-0 forward loss**. Under DDP a NaN gradient produced on any
+other rank all-reduces into every rank's gradient tensor and poisons the weights, while rank
+0's loss value stays perfectly finite — so the clause could pass on a poisoned model. Fixed by
+reading `clip_grad_norm_`'s returned **pre-clip total norm**, which is computed *after* the
+all-reduce and is non-finite iff some gradient is; `n_nonfinite_grad_steps` is now a second
+term in the clause. Note the shape: this is the third gate in this step that measured the
+wrong side of the thing it named — after the checkpointing flag-count and the micro-batch-only
+step check.
+
+**(P2) `_bool_or_none` blamed the wrong column.** Written for `nested_train`, it is also called
+for `calib` and `is_tbox`; a schema migration putting `"yes"` into `calib` would have raised an
+error naming `nested_train`, sending the reader to a column that is fine. It now takes the
+field name and every call site passes its own.
+
+**(P2, advisory) Ternary precedence in three clauses** — `A and B if C else D` parses as
+`(A and B) if C else D`, which is the intended semantics; Greptile confirmed correctness and
+flagged readability only. Left as-is, recorded rather than silently ignored. (One of the three
+clauses it named, `gradient_checkpointing_verified`, has since been renamed
+`gradient_checkpointing_flag_consistent` for the separate reason that it counted an attribute
+rather than measuring an effect.)
+
+**Also corrected in §5.1: CodeRabbit is incremental and automatic.** `@coderabbitai review` on
+an already-reviewed commit is a **no-op** replying *"does not re-review already reviewed
+commits"*. Both rounds attributed to manual triggers were in fact the automatic reviews of the
+pushes — coverage must be read from each comment's `original_commit_id`, not from whether a
+command was sent. And a green `CodeRabbit` **check** does not mean a review ran: on this PR it
+read `pass` while the body was only the Fair-Usage notice.
+
+**Validation.** Trainer **113 pass**, sizing 20, overrides 22, backfill 4; ruff + black clean;
+`bash -n` clean.
+
+**Commit.** Feature branch `p3-06-stage2-lora`; squash SHA derived at the phase-exit gate.

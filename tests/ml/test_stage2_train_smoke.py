@@ -449,6 +449,7 @@ def _passing_report() -> dict[str, Any]:
             "final_train_total": 0.31,
             "per_term_final": {"binary": 0.1, "boundary": 0.2},
             "n_nonfinite_steps": 0,
+            "n_nonfinite_grad_steps": 0,
         },
         val={"history": [], "best_total": 0.4, "best_epoch": 7},
         checkpoint={
@@ -1383,3 +1384,38 @@ def test_the_gate_grades_BOTH_step_domains() -> None:
     under["steps"]["expected_n_optimizer_steps"] = 1500
     assert under["steps"]["total_scheduled_optimizer_steps"] == under["steps"]["n_optimizer_steps"]
     assert T.derive_clauses(under)["steps_ran"] is False
+
+
+def test_a_nan_GRADIENT_fails_the_gate_even_when_the_rank0_loss_is_finite() -> None:
+    """Greptile P2: `n_nonfinite_steps` counts the rank-0 forward loss and nothing else.
+
+    Under DDP a NaN gradient produced on any other rank all-reduces into every rank's gradient
+    tensor and poisons the weights, while rank 0's loss value stays finite — so the loss
+    counter is structurally blind to it. The post-all-reduce `clip_grad_norm_` total norm is
+    the quantity that sees it, and the gate now reads both.
+    """
+    report = _passing_report()
+    assert T.derive_clauses(report)["losses_finite"] is True
+    poisoned = json.loads(json.dumps(report))
+    poisoned["losses"]["n_nonfinite_grad_steps"] = 1
+    assert poisoned["losses"]["final_train_total"] == report["losses"]["final_train_total"]
+    assert poisoned["losses"]["n_nonfinite_steps"] == 0, "the rank-0 loss is still finite"
+    assert (
+        T.derive_clauses(poisoned)["losses_finite"] is False
+    ), "a NaN gradient from a non-primary rank passed the gate"
+
+
+def test_the_tri_state_helper_names_the_column_it_actually_read() -> None:
+    """Greptile P2: it was written for `nested_train` and is also called for `calib`/`is_tbox`.
+
+    A schema migration putting "yes" into `calib` would otherwise raise an error blaming
+    `nested_train`, sending the reader to a column that is perfectly fine.
+    """
+    for field in ("nested_train", "calib", "is_tbox"):
+        with pytest.raises(ValueError, match=f"{field}='yes'"):
+            T._bool_or_none("yes", field=field)
+    # And the call sites pass their own column name rather than defaulting.
+    import inspect
+
+    source = inspect.getsource(T.row_eligibility)
+    assert 'field="calib"' in source and 'field="nested_train"' in source
