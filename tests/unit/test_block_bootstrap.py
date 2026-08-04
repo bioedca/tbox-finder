@@ -163,23 +163,40 @@ def test_replicates_draw_whole_blocks_never_records() -> None:
     """The load-bearing property (ADR-0005 D5): a replicate is a multiset of *whole* blocks.
 
     Checked two ways, because "the CI looked plausible" is not evidence of block granularity:
-    every replicate must consist of complete block copies, and the replicate *lengths* must
-    fall in the enumerable set of three-block sums — which excludes the constant length a
+    every replicate must consist of complete block copies, and every replicate *length* must
+    lie in the enumerable set of three-block sums — which excludes the constant length a
     record-level bootstrap would always produce.
+
+    The length check is on the **observed replicates**, not on the CI endpoints. An earlier
+    version asserted ``lengths["lower"] in attainable``, which conflated a percentile with a
+    replicate: ``percentile`` interpolates linearly, so a perfectly valid run can put an
+    endpoint *between* two attainable lengths. That is not hypothetical — measured across 40
+    seeds it fails at seed 7 (``upper = 13.575``, in the unreachable 12–15 gap), so the
+    assertion was brittle in a way that had nothing to do with the property under test
+    (CodeRabbit CLI r4). Collecting the replicate values themselves is both immune to that
+    and *stronger* than bounding the interval, because it keeps the "10, 13, 14 are
+    unreachable" bite.
     """
     out = resample.block_bootstrap(_TAGGED_BLOCKS, _all_blocks_whole, n_boot=300, seed=1)
     assert (out["point"], out["lower"], out["upper"]) == (1.0, 1.0, 1.0)
 
-    lengths = resample.block_bootstrap(
-        _TAGGED_BLOCKS, lambda rows: float(len(rows)), n_boot=300, seed=1
-    )
     attainable = {
         float(x + y + z) for x in (1, 2, 5) for y in (1, 2, 5) for z in (1, 2, 5)
     }  # {3,4,5,6,7,8,9,11,12,15} — note 10, 13, 14 are unreachable
-    assert lengths["lower"] in attainable and lengths["upper"] in attainable
-    assert (
-        lengths["lower"] < 8.0 < lengths["upper"]
-    ), "replicate size never varies — that is what a record-level bootstrap looks like"
+    observed: set[float] = set()
+
+    def record_length(rows: list) -> float:
+        observed.add(float(len(rows)))
+        return float(len(rows))
+
+    lengths = resample.block_bootstrap(_TAGGED_BLOCKS, record_length, n_boot=300, seed=1)
+    assert observed <= attainable, f"unreachable replicate size(s): {observed - attainable}"
+    assert not observed & {10.0, 13.0, 14.0}
+    assert observed - {
+        8.0
+    }, "replicate size never varies — that is what a record-level bootstrap looks like"
+    # The interval is still bounded by the attainable range; it just need not land on it.
+    assert min(attainable) <= lengths["lower"] <= lengths["upper"] <= max(attainable)
 
 
 def test_the_whole_block_control_bites_on_a_record_level_draw() -> None:
