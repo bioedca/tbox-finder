@@ -435,6 +435,23 @@ def test_the_two_estimators_are_not_the_same_function() -> None:
     assert out["ood_ece"] != pytest.approx(M.binned_ece(y, p), abs=1e-6)
 
 
+def test_the_reported_point_and_the_ci_point_are_the_same_number() -> None:
+    """One number, not two that agree to a few ulps. ``ood_ece`` computes ``ĝ`` in the
+    resampler's own row order (the concatenation of the sorted blocks), so the reported
+    estimate and ``ci["point"]`` are **bit-identical** rather than two float summations of
+    the same multiset — which is what a reviewer asking "which of these is authoritative?"
+    would otherwise be looking at."""
+    y, p, b = _varied()
+    out = ece.ood_ece(y, p, b, n_boot=10)
+    assert out["ood_ece"] == out["ci"]["point"]
+    # And the estimate itself does not depend on the caller's row order.
+    order = sorted(range(len(y)), key=lambda i: (b[i], -p[i]))
+    shuffled = ece.ood_ece(
+        [y[i] for i in order], [p[i] for i in order], [b[i] for i in order], n_boot=10
+    )
+    assert shuffled["ood_ece"] == pytest.approx(out["ood_ece"], abs=1e-12)
+
+
 def test_the_payload_records_the_choices_that_are_not_adr_pinned() -> None:
     y, p, b = _rows(25, 25)
     out = ece.ood_ece(y, p, b, n_boot=10)

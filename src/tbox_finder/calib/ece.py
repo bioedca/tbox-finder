@@ -377,6 +377,19 @@ def brier_decomposition(
     }
 
 
+def _mean_abs_gap(p_pos: Sequence[float], g_hat: Sequence[float]) -> float:
+    """``mean_i |ĝ_i − p_i|``. The **one** place this arithmetic lives: ``ood_ece`` reads it
+    off a ``ĝ`` it has already computed while the bootstrap statistic recomputes ``ĝ`` per
+    replicate, and a second copy would let the reported point estimate drift from the
+    interval's ([[promote-dont-duplicate-is-a-correctness-rule]]). NaN if any ``ĝ`` is."""
+    total = 0.0
+    for p_i, g_i in zip(p_pos, g_hat, strict=True):
+        if math.isnan(g_i):
+            return float("nan")
+        total += abs(g_i - p_i)
+    return total / len(p_pos) if len(p_pos) else float("nan")
+
+
 def _l1_calibration_error(
     y_true: Sequence[Any],
     p_pos: Sequence[Any],
@@ -384,15 +397,10 @@ def _l1_calibration_error(
     *,
     uids: Sequence[Hashable] | None = None,
 ) -> float:
-    """``mean_i |ĝ_{-i}(p_i) − p_i|`` — the reported OOD statistic. NaN if any ``ĝ`` is."""
+    """``mean_i |ĝ_{-i}(p_i) − p_i|`` — the reported OOD statistic, and the function
+    :func:`tbox_finder.eval.resample.block_bootstrap` resamples. NaN if any ``ĝ`` is."""
     _, p = _check_inputs(y_true, p_pos)
-    g = kernel_conditional_mean(y_true, p_pos, bandwidth, uids=uids)
-    total = 0.0
-    for p_i, g_i in zip(p, g, strict=True):
-        if math.isnan(g_i):
-            return float("nan")
-        total += abs(g_i - p_i)
-    return total / len(p) if p else float("nan")
+    return _mean_abs_gap(p, kernel_conditional_mean(y_true, p_pos, bandwidth, uids=uids))
 
 
 # --------------------------------------------------------------------------- #
@@ -446,9 +454,15 @@ def ood_ece(
     if n < 2:
         raise ValueError(f"ood_ece needs at least 2 rows for a leave-one-out estimate, got {n}")
 
-    uids = list(range(n))
-    rows = [(y[i], p[i], uids[i]) for i in range(n)]
-    blocks = blocks_by_key(rows, block_labels, key_name=block_key)
+    blocks = blocks_by_key([(y[i], p[i], i) for i in range(n)], block_labels, key_name=block_key)
+    # Everything below is computed in the resampler's own row order — the concatenation of
+    # the sorted blocks — so the reported point estimate and ``ci["point"]`` are the same
+    # number by construction, not two float summations of the same set that agree to within
+    # a few ulps and invite a reviewer to ask which one is authoritative.
+    flat = [r for blk in blocks for r in blk]
+    y = [r[0] for r in flat]
+    p = [r[1] for r in flat]
+    uids = [r[2] for r in flat]
 
     if bandwidth is None:
         h, h_ll = select_bandwidth(y, p, uids=uids)
@@ -461,7 +475,7 @@ def ood_ece(
         selected = False
 
     g_hat = kernel_conditional_mean(y, p, h, uids=uids)
-    point = _l1_calibration_error(y, p, h, uids=uids)
+    point = _mean_abs_gap(p, g_hat)
     n_positives = sum(y)
     admissible = n_positives >= OOD_ECE_MIN_N
 
