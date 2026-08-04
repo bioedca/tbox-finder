@@ -121,13 +121,42 @@ def test_point_estimate_is_the_statistic_over_all_records() -> None:
 _TAGGED_BLOCKS = [[("a", 0)], [("b", 0), ("b", 1)], [("c", i) for i in range(5)]]
 
 
+#: Block sizes, keyed by tag — the shape `_all_blocks_whole` checks against.
+_BLOCK_SIZES = {"a": 1, "b": 2, "c": 5}
+
+
 def _all_blocks_whole(rows: list) -> float:
-    """1.0 iff every tag present appears a whole number of *complete* block copies."""
-    sizes = {"a": 1, "b": 2, "c": 5}
-    counts: dict[str, int] = {}
-    for tag, _ in rows:
-        counts[tag] = counts.get(tag, 0) + 1
-    return float(all(n % sizes[tag] == 0 for tag, n in counts.items()))
+    """1.0 iff every original row appears in **complete block copies**.
+
+    Checked as equal multiplicity across each block's own rows, not as a tag count
+    divisible by the block size (CodeRabbit CLI r2, major). The count form accepted
+    ``[("b", 0), ("b", 0)]`` — two copies of one row, with ``("b", 1)`` missing — because
+    the tag occurs twice and 2 % 2 == 0. That is a draw the predicate exists to reject, so
+    the count form made the control weaker than its own docstring claimed.
+    """
+    counts: dict[tuple[str, int], int] = {}
+    for row in rows:
+        counts[row] = counts.get(row, 0) + 1
+    return float(
+        all(
+            len({counts.get((tag, index), 0) for index in range(size)}) == 1
+            for tag, size in _BLOCK_SIZES.items()
+        )
+    )
+
+
+def test_the_whole_block_predicate_rejects_a_partial_block_copy() -> None:
+    """The predicate's own unit test, because the two tests below both rest on it.
+
+    Each case is a draw the count-based form scored as whole: the multiplicities within a
+    block are unequal, so a row is missing or over-represented relative to its blockmates.
+    """
+    assert _all_blocks_whole([("b", 0), ("b", 1)]) == 1.0  # one whole copy of block b
+    assert _all_blocks_whole([("b", 0), ("b", 1), ("b", 0), ("b", 1)]) == 1.0  # two copies
+    assert _all_blocks_whole([]) == 1.0  # no blocks drawn is vacuously whole
+    assert _all_blocks_whole([("b", 0), ("b", 0)]) == 0.0  # 2x row 0, row 1 absent
+    assert _all_blocks_whole([("c", 0)] * 5) == 0.0  # 5 copies of one row, not one block
+    assert _all_blocks_whole([("a", 0), ("b", 0)]) == 0.0  # half of block b
 
 
 def test_replicates_draw_whole_blocks_never_records() -> None:
@@ -167,10 +196,12 @@ def test_the_whole_block_control_bites_on_a_record_level_draw() -> None:
         _all_blocks_whole([rows[rng.randrange(len(rows))] for _ in range(len(rows))]) == 0.0
         for _ in range(200)
     )
-    # Measured 174/200 at this seed. Block-level draws violate 0/300 in the test above, so
-    # the two regimes are separated by a wide margin; the bar is set well below the measured
-    # rate so it pins the *contrast*, not this seed's exact count.
-    assert violations >= 120, f"record-level draws must usually violate; got {violations}/200"
+    # Measured **199/200** at this seed with the complete-block-copy predicate (it was
+    # 174/200 with the weaker tag-count form r2 replaced — the sharpening is itself evidence
+    # the finding was material). Block-level draws violate 0/300 in the test above, so the
+    # two regimes are separated by essentially the whole range; the bar sits below the
+    # measured rate so it pins the *contrast*, not this seed's exact count.
+    assert violations >= 180, f"record-level draws must almost always violate; got {violations}/200"
 
 
 def test_seeded_reproducibility_and_seed_sensitivity() -> None:
@@ -269,6 +300,7 @@ def test_metrics_entry_point_delegates_to_this_module() -> None:
     )
     # The above is a tautology *if* the delegation holds, so pin the delegation itself:
     # a re-implementation under the old name would keep the agreement test green.
+    assert M.block_bootstrap is resample.block_bootstrap  # identity, not just provenance
     assert M.block_bootstrap.__module__ == "tbox_finder.eval.resample"
     assert M.DEFAULT_N_BOOT == resample.DEFAULT_N_BOOT == 2000
     src = __import__("inspect").getsource(M.block_bootstrap_ci)
