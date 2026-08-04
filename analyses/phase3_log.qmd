@@ -1823,3 +1823,219 @@ real (so `0.5` reads `True`) turns the refusal test red — a one-sided sabotage
 the second, which is the failure that actually matters here.
 
 **Commit.** Feature branch `p3-07-calibration-stack`; squash SHA derived at the phase-exit gate.
+
+## Step P3-08 — 2026-08-03: with/without-aux ablation on the calibrated Stage-2 binary head
+
+**Inputs.** The six P3-06 LoRA checkpoints under `data/processed/checkpoints/stage2_rinalmo/`
+(the ablation pair is the shipped-config production arm `aux1.0_lr1e-4` and its
+learning-rate-matched control `aux0.0_lr1e-4`); `data/processed/stage2_dataset.parquet`
+(30,542 rows; calib 1,089 / val 3,067 / test 3,045); the P3-07 calibration stack; and
+`metrics.binned_ece` / `average_precision` / `block_bootstrap_ci`.
+
+**Process.** This step had to build the thing it was specified to consume. Nothing in the
+repo read a Stage-2 checkpoint back — `stage2_heads.pt` and `lora_adapter/` had write sites
+and zero readers, and `stage2/train.py::evaluate` thresholds `tbox_logit` at zero and keeps
+only a scalar accuracy — so the per-row binary logits the calibration stack eats did not
+exist. `src/tbox_finder/stage2/eval.py` therefore ships the **score producer**
+(`load_stage2_checkpoint`, `score_rows`) alongside the ablation entry
+(`aux_ablation_check`). Both arms were scored forward-only on the laptop RTX 4060 over all
+7,201 calib+val+test rows, 12 min 33 s wall for the pair, and the per-row logits are written
+to `reports/p3/stage2_scores.json` because P3-09 and P3-10 need exactly that table and it
+costs GPU minutes to regenerate. Temperature is fitted on `calib` and nowhere else, and the
+grading rung is `test` per ADR-0004 A7.
+
+**Outputs.** `src/tbox_finder/stage2/eval.py`; `reports/stage2_aux_ablation.json`;
+`reports/p3/stage2_scores.json` (7,201 rows x 2 arms); `tests/unit/test_aux_ablation_check.py`
+(62 pass, no torch); `tests/ml/test_stage2_eval_smoke.py` (12 pass on the pinned ml-rna stack).
+
+**Validation.** `gate.overall_pass` is **false**, and that is the result rather than a
+failure to deliver. The with-aux production arm fits `T = 1.140627` and grades an
+in-distribution ECE of **0.005662** on the named (temperature-scaled, pre-prior-shift)
+posterior — 8.8x under the ADR-0005 D11 gate of 0.05 — while the **no-aux arm has no
+temperature at all**: its calib carve is *perfectly separated* (0 of 1,089 rows on the wrong
+side of zero), so the exact minimiser is the beta to infinity limit and `fit_temperature`
+refuses it. Two clauses are false in consequence
+(`in_distribution_ece_is_computable`, `temperature_positive_and_converged`) and no number was
+put where the missing ECE would have gone. On the axis that survives, test AUPRC is 0.999824
+with-aux against 0.999897 no-aux, a difference of 7.4e-5.
+
+**Decisions.** Three, all recorded rather than taken. (1) The imp.md gate grades degradation
+"beyond a pre-registered tolerance" and **no such tolerance exists** anywhere in `PRD.md`, the
+ADRs, `conf/` or `src/`; ADR-0005 D16's own sentence admits an absolute reading (with-aux must
+still hold the D11 grade — it does) and a delta reading (tau undefined). Both are computed,
+neither is resolved, and `ablation.verdict` is `requires_signoff`. (2) AUPRC is graded on
+logits, not on the posterior: `z -> z/T` is strictly monotone so it cannot move average
+precision, but sigma() saturates to exactly 1.0 at these margins and would tie the ranking
+away. (3) The adapter load is *measured* — every adapter and head tensor is compared
+bit-exactly against the file and non-zero `lora_B` blocks are counted — because PEFT only
+*warns* on missing keys and initialises `lora_B` to zero, so a silently-unloaded adapter is
+the untuned backbone producing a complete and meaningless report.
+
+**Caveat carried forward.** The with-aux fit rests on **exactly one** misclassified calib row
+of 1,089. That single record is the entire signal for beta; without it the production arm
+would be unfittable too, and P3-10's GATE-2 grade currently hangs on it. Median absolute
+logit is 8.26 with-aux against 14.45 no-aux, which is the mechanism: the aux terms shrink the
+head's margins and are what keep it calibratable at all.
+
+**Commit.** Feature branch `p3-08-aux-ablation`; squash SHA derived at the phase-exit gate.
+
+### P3-08 review round 1 (CodeRabbit CLI) — 5 findings, all real, all fixed
+
+The GitHub app's `CodeRabbit` check went **green carrying only a "Review rate limited" notice**,
+which is an absence rather than a pass (CLAUDE.md §5.1); the gate was met instead by the
+**CLI** path, `coderabbit review --committed --base main`. Note for future sessions: `--plain`
+was removed in CLI 0.7.1 and now exits 1 with a usage dump, which reads exactly like a dead
+path — CLAUDE.md's documented invocation was stale and has been corrected.
+
+**The finding that changed a reported result.** `reading_absolute.passes` was set to `None`
+whenever *either* arm lacked an ECE — but the absolute reading of D16 asks only whether the
+**with-aux** arm still holds the D11 grade, and that arm has an ECE. The run therefore had a
+definite verdict all along: **the absolute reading PASSES** (0.005662 vs the 0.05 gate). The
+delta reading remains undecidable, which is a property of the control, not of the production arm.
+
+**Two guards that were only accidentally correct.** (1) The cluster-presence test was
+`isinstance(raw, float)`; `np.float64` satisfies it and today's column happens to be float64,
+but a float32 NaN would have been read as *clustered*, keyed `cluster:nan`, and collapsed
+every unrelated decoy into one bootstrap block — the exact failure `block_keys` exists to
+prevent, reintroduced by a type check. The value is now normalised before the NaN test and a
+non-numeric id is refused by name. (2) `auprc_rank_invariant` compared two floats for exact
+equality. `z / T` is strictly monotone in exact arithmetic but only *non-decreasing* in
+float64, so a rounding collision could flip a gate clause with no ranking loss behind it. The
+invariant is now stated directly — scaling created no ties — with the tie count and the AP
+delta recorded beside it.
+
+**A leak, in a public repo.** The committed artifacts embedded absolute developer paths
+(`/home/...`), permanently publishing the OS user name and local layout for paths that resolve
+on exactly one machine. Now repo-relative, with the sha256 beside each path carrying the
+identity. The first version of that fix **broke the run**: relativising the path the loader
+*opens* is not the same job as relativising the path the report *records*, and the two are now
+separate fields.
+
+**Two of the five fixes were initially UNTESTED, and sabotage is what said so.** Reverting the
+absolute-reading fix and reverting the tie-count fix both left all 70 tests green. The
+absolute-reading case needed a fixture where only the **control** lacks an ECE — the shipped
+run's own configuration, which every existing fixture had on the other side. The tie case is
+unreachable through `grade_arm` at all, so the check was extracted as `ranking_preserved` and
+tested directly on a *found* float64 collision where scaling destroys ranking information
+while leaving average precision exactly unchanged. Both sabotages now bite their named test.
+
+**Reproducibility, measured rather than assumed.** Three independent scoring runs of the two
+arms produced **bit-identical** logits for all 7,201 rows (`max |delta| = 0`), which is what
+the length-sorted deterministic batching is for.
+
+**Validation after r1.** `test_aux_ablation_check` **72 pass**; ml tier **12 pass**;
+unit+golden+ml **3,758 passed** with the 14 failures still a strict subset of main's 31
+(`comm -13` empty). ruff + black clean. Artifacts carry **zero** absolute paths;
+`validate_report` returns clean.
+
+### P3-08 review round 2 (CodeRabbit CLI) — 2 findings, both real, both fixed
+
+**A provenance bug in the fast path.** `scoring.batch_size` recorded the flag *this process*
+was invoked with, even when `--scores-from` re-graded logits produced under a different
+batching. Batch composition perturbs the bf16 reductions — which is exactly why `score_rows`
+sorts deterministically — so the artifact could have documented a batching that never touched
+those numbers. It now takes the cached run's own value, and the report says plainly that it
+was regraded (`regraded_from_cached_scores`) and from which sidecar.
+
+**A docstring that overclaimed.** `validate_report` said an empty problem list meant the
+report was "well-formed **and** passing". It is not: it checks that the recorded clauses match
+the re-derived ones and that `overall_pass` agrees with them. The shipped report is honestly
+failing *and* fully valid, and conflating the two would invite someone to "fix" a truthful
+artifact. Now "well-formed and self-consistent", with a test asserting a deliberately-failing
+report still validates.
+
+**The fix was taken as an opportunity to make the shortcut's refusals testable.** The
+`--scores-from` reconciliation lived inside `main`, so its guards needed a GPU to reach and had
+none of their own tests. It is now `reconcile_cached_scores`, graded in the numpy tier:
+mismatched dataset digest, a different row set at the *same count*, and a missing arm are each
+refused by name. Re-grading a stale cache is the one failure this shortcut can introduce and
+the one that would look most like success — seconds instead of minutes, a complete report, and
+numbers belonging to different rows.
+
+**Validation after r2.** `test_aux_ablation_check` **78 pass**; ml tier **12 pass**;
+unit+golden+ml **3,766 passed**, the 14 failures still a strict subset of main's 31
+(`comm -13` empty). ruff + black clean. Artifact regenerated: 0 absolute paths,
+`validate_report` clean, headline numbers unchanged. **3 further sabotages**, each RED against
+its named test, each restored byte-identically.
+
+### P3-08 review round 3 (CodeRabbit CLI) — 2 findings, both real, both fixed
+
+**A docstring pointing at a key that does not exist.** The module docstring told a reader to
+look for `ablation.verdict_delta_reading`; the report writes `ablation.reading_delta.verdict`.
+A pointer that does not grep is worse than none, because it reads as authoritative.
+
+**The leak guard was Linux-only.** The end-to-end check greped for `/home/`, so an artifact
+regenerated on macOS (`/Users/...`) or Windows (`C:\Users\...`) would have passed it while
+leaking exactly what the guard exists to catch. It now walks the JSON and asserts that **no
+string value is absolute at all** — structural rather than a list of prefixes, since what makes
+a path a leak is that it is absolute, not which OS produced it. The detector carries its own
+non-vacuity test (planted paths of all three shapes must be found, a relative path must not),
+and the widened check was verified by planting a `/Users/...` path in the real artifact: it
+goes red, where the previous `/home/` grep would have stayed green.
+
+**Validation after r3.** `test_aux_ablation_check` **79 pass**; unit+golden+ml unchanged at
+3,766+ with zero regressions; ruff + black clean; artifact regenerated and clean.
+
+### P3-08 review round 4 (CodeRabbit CLI) — 1 finding, real, fixed
+
+**An operator-precedence bug in the refusal classifier.** `_classify_refusal` read
+`"no rows" in text or "zero" in text and "calib" in text`; Python binds `and` tighter than
+`or`, so the first disjunct stood alone and **any** "no rows" refusal was labelled
+`empty_calib_rung` — including one raised about a *graded* rung, which has nothing to do with
+calib. The branch name claims calib under both readings, so both readings must require it.
+Now parenthesised, with a table-driven test over all five refusal shapes plus a control, and
+sabotage-verified: reverting the parentheses turns exactly the `'test'`-rung case red.
+
+**Validation after r4.** `test_aux_ablation_check` **85 pass**; unit+golden+ml **3,773
+passed**, the 14 failures still a strict subset of main's 31 (`comm -13` empty). ruff + black
+clean. CI green on the pinned stack across all three jobs.
+
+### P3-08 §7 stops — SETTLED by user sign-off (AskUserQuestion, 2026-08-03)
+
+**Decision 1 — the absolute reading of D16 governs.** D16 asks whether the aux heads degrade
+"the calibrated primary head's GATE-2 grade", and that grade (D11) is a pass/fail: ECE ≤ 0.05.
+The check is therefore whether the with-aux arm still *holds* it — which it does, at 0.005662.
+**No tau is pinned and no ADR is amended.** The delta against the no-aux arm stays reported,
+not gated; `reading_delta.tolerance` remains `None` and `validate_report` still refuses any
+report that pins one. Both readings are still computed and the tau-window on which they would
+disagree is still published, because a decision is only auditable beside the alternative it
+rejected. `ablation.verdict` is now **derived** from the governing reading's own evidence by
+`verdict_from_absolute_reading` and re-derived by the validator, so a report cannot carry a
+verdict its numbers contradict.
+
+**The ablation's answer: `aux_does_not_degrade_the_gate2_grade`.**
+
+**Decision 2 — accept and record the uncalibratable control now; pin the degenerate-limit rule
+at the phase-exit gate.** The no-aux arm's perfectly-separated calib carve is reported as
+measured, with no temperature invented. `gate.overall_pass` stays **false**, and the report now
+says explicitly what that does *not* mean: it is not evidence that the aux heads degraded
+anything, it is the recorded consequence of the *control* being uncalibratable. ADR-0005 D11
+gains a degenerate-limit rule at P3 exit, because P3-10 grades GATE-2 and will meet the same
+fact — and the option of enlarging or re-stratifying the calib carve until a misclassified row
+appears was rejected as choosing the measurement to obtain the answer.
+
+**Validation after the sign-off.** `test_aux_ablation_check` **86 pass**; ml tier **12 pass**;
+unit+golden+ml **3,774 passed**, the 14 failures a strict subset of main's 31 (`comm -13`
+empty). ruff + black clean. Artifact regenerated: `validate_report` clean, 0 absolute paths,
+headline numbers unchanged.
+
+### P3-08 review round 5 (CodeRabbit CLI) — 2 findings, both real, both fixed
+
+**A census that returned a fake zero.** `separation_census` returned 2 keys on an empty rung
+and 10 on a populated one, so a consumer reading `is_perfectly_separated` off the committed
+report would hit a `KeyError` — and the empty path is *reachable*, because `grade_arm` records
+`calib_separation` even when the fit refused **because the calib rung was empty**. Worse,
+`n_misclassified_at_zero: 0` on an unmeasured rung reads exactly like a measured result, which
+is the same substitution this module refuses to make for `ece`. Both paths now return the same
+key set, with `None` for everything that was not measured.
+
+**No validation at the boundary where JSON becomes numbers.** `ArmScores` is built from an
+external file by `reconcile_cached_scores`, and a nested list satisfies the length check (an
+`(n, k)` array has `len n`) while a NaN or Infinity would flow all the way to the fit before
+anything objected — far from the file that carried it. Shape and finiteness are now checked
+where the data enters.
+
+**Validation after r5.** `test_aux_ablation_check` **91 pass**; ml tier **12 pass**;
+unit+golden+ml **3,779 passed**, the 14 failures a strict subset of main's 31 (`comm -13`
+empty). ruff + black clean. **2 further sabotages**, each RED against its named test, each
+restored byte-identically.
