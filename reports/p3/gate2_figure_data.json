@@ -1,6 +1,6 @@
 {
   "gate": 0.05,
-  "generated_at_utc": "2026-08-04T21:30:41+00:00",
+  "generated_at_utc": "2026-08-04T22:27:19+00:00",
   "generated_by": "src/tbox_finder/calib/gate2.py",
   "in_distribution": {
     "bin_concentration": {
@@ -139,6 +139,8 @@
       ]
     }
   },
+  "ood_by_phylum_is": "the admissible units' OOD ECEs grouped by the phylum of the held-out order \u2014 PRD \u00a712's ECE-vs-phylogenetic-distance read, REPORTED and not gated. Descriptive only: these are the same per-unit numbers regrouped, not a separate estimate, and no phylum-level bound is pinned anywhere",
+  "ood_gated": false,
   "ood_macro_average": {
     "ci_level": 0.95,
     "lower": 0.09837384969040015,
@@ -147,6 +149,7 @@
     "point": 0.21131708166715119,
     "upper": 0.32501193734362815
   },
+  "ood_macro_average_is": "unweighted mean of the admissible units' OOD ECEs, block-resampled with the held-out order as the block (PRD \u00a712 macro-average, not micro)",
   "ood_min_n": 20,
   "ood_units": [
     {
@@ -660,6 +663,7 @@
       "unit": "Veillonellales"
     }
   ],
+  "ood_why_not_gated": "ADR-0005 D13: an OOD / leave-clade-out ECE <= 0.05 is likely infeasible under clade shift, so it is reported and adjudicated by the drift decision rule, never gated. GATE-2 grades the D11 in-distribution number only.",
   "reliability": [
     {
       "acc": 0.0049261083743842365,

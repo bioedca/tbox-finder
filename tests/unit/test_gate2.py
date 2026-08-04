@@ -208,53 +208,45 @@ def _report() -> dict:
     )
 
 
-def _ood_block(*, n_units: int) -> dict:
-    """A minimal OOD block whose per-unit payloads are real ``ood_ece`` returns."""
-    rng = __import__("random").Random(11)
-    units = {}
-    for u in range(n_units):
-        n = 60 + 7 * u
-        y = [1 if i % 4 else 0 for i in range(n)]
-        p = [min(0.999, max(0.001, 0.75 + 0.1 * rng.gauss(0, 1))) for _ in range(n)]
-        blocks = [f"cluster:{u}:{i // 3}" for i in range(n)]
-        out = ECE.ood_ece(y, p, blocks, block_key=G.OOD_BLOCK_KEY, n_boot=8, seed=3)
-        out["unit"] = f"Order{u}"
-        out["unit_key"] = G.OOD_UNIT_KEY
-        out["admissibility_class"] = COV.classify_order(out["n_positives"])
-        units[f"Order{u}"] = out
-    admissible = [u for u in units.values() if u["admissible"]]
-    values = [(u["unit"], float(u["ood_ece"])) for u in admissible]
-    macro = RS.block_bootstrap(
-        RS.blocks_by_key(values, [v[0] for v in values], key_name=G.OOD_UNIT_KEY),
-        lambda sample: sum(v for _, v in sample) / len(sample),
-        n_boot=8,
-        seed=3,
-    )
-    return {
-        "gated": False,
-        "estimator": ECE.ESTIMATOR,
-        "distinct_from": ECE.IN_DISTRIBUTION_ESTIMATOR,
-        "unit_key": G.OOD_UNIT_KEY,
-        "block_key": G.OOD_BLOCK_KEY,
-        "min_n": COV.OOD_ECE_MIN_N,
-        "n_units": len(units),
-        "n_units_admissible": len(admissible),
-        "macro_average": macro,
-        "truncated_to_n_units": None,
-        "d13_adjudication": {
-            "condition_i_drift_bound": {
-                "pinned": False,
-                "bound": None,
-                "verdict": None,
-                "reason": "unpinned",
-            },
-            "condition_ii_min_n": {"pinned": True, "floor": COV.OOD_ECE_MIN_N},
-            "condition_iii_detection_power_floor": {"pinned": False, "verdict": None},
-            "calibrated_negative_pass": None,
-            "calibrated_negative_pass_reason": "two of three conditions have no value",
-        },
-        "units": units,
+def _phylum_scores(plan):
+    """Units with per-unit sizes and phyla from ``plan`` — asymmetric on purpose."""
+    rng = __import__("random").Random(17)
+    row_ids, labels, logits, rows_by_id = [], [], [], {}
+    for unit, phylum, count, centre in plan:
+        for i in range(count):
+            rid = f"{unit}-{i}"
+            row_ids.append(rid)
+            labels.append(1 if i % 6 else 0)
+            logits.append(centre + 0.4 * rng.gauss(0.0, 1.0))
+            rows_by_id[rid] = {"_unit": unit, "_phylum": phylum, "_block": f"c:{unit}:{i // 3}"}
+    scores = {
+        "row_ids": row_ids,
+        "logits": logits,
+        "labels": labels,
+        "rungs": None,
+        "meta": {},
+        "load": None,
     }
+    return scores, rows_by_id
+
+
+def _ood_block(*, n_units: int) -> dict:
+    """The OOD block, built by the SHIPPED producer rather than by hand.
+
+    An earlier version assembled this dict literally and drifted: it was missing
+    ``why_not_gated``, ``by_phylum``, ``adjudicable_fraction``, ``n_boot``, ``bootstrap_seed``
+    and ``n_units_sub_min_n``, so no test resting on it could have been checking those. A
+    fixture that stands in for a producer has to come from that producer — otherwise every
+    new field the producer grows is a field the whole suite silently stops covering.
+    """
+    plan = [
+        (f"Order{chr(65 + i)}", f"Phylum{'One' if i % 2 else 'Two'}", 40 + 7 * i, 2.6 - 0.3 * i)
+        for i in range(n_units)
+    ]
+    scores, rows_by_id = _phylum_scores(plan)
+    return G.grade_ood_units(
+        scores=scores, rows_by_id=rows_by_id, temperature=1.0, n_boot=8, seed=3
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -621,28 +613,6 @@ def test_the_ood_bootstrap_blocks_are_split_columns_never_record_ids() -> None:
         assert G.derive_clauses(mutated)["ood_resampled_at_block_granularity"] is False
         with pytest.raises(ValueError, match="identifies a record, not a block"):
             RS.blocks_by_key([1, 2], ["a", "b"], key_name=column)
-
-
-def _phylum_scores(plan):
-    """Units with per-unit sizes and phyla from ``plan`` — asymmetric on purpose."""
-    rng = __import__("random").Random(17)
-    row_ids, labels, logits, rows_by_id = [], [], [], {}
-    for unit, phylum, count, centre in plan:
-        for i in range(count):
-            rid = f"{unit}-{i}"
-            row_ids.append(rid)
-            labels.append(1 if i % 6 else 0)
-            logits.append(centre + 0.4 * rng.gauss(0.0, 1.0))
-            rows_by_id[rid] = {"_unit": unit, "_phylum": phylum, "_block": f"c:{unit}:{i // 3}"}
-    scores = {
-        "row_ids": row_ids,
-        "logits": logits,
-        "labels": labels,
-        "rungs": None,
-        "meta": {},
-        "load": None,
-    }
-    return scores, rows_by_id
 
 
 def test_the_ood_units_carry_their_phylum_and_are_regrouped_by_it() -> None:
@@ -1053,6 +1023,137 @@ def test_the_bin_size_label_never_claims_a_count_some_bins_lack() -> None:
     counts = {int(r["n"]) for r in rows}
     label = G._bin_size_label(rows)
     assert ("each" in label) is (len(counts) == 1)
+
+
+def test_truncation_is_recorded_only_when_the_list_was_really_cut() -> None:
+    """`--max-units 60` on a 30-unit holdout truncates nothing (CodeRabbit r2).
+
+    Recording it anyway turns `graded_every_loo_holdout_unit` FALSE on a run that graded
+    every unit — a completeness clause failing on a complete run.
+    """
+    plan = [("OrderA", "PhylumOne", 40, 2.6), ("OrderB", "PhylumOne", 31, 1.4)]
+    scores, rows_by_id = _phylum_scores(plan)
+    call = dict(scores=scores, rows_by_id=rows_by_id, temperature=1.0, n_boot=4)
+
+    for max_units in (None, 2, 5, 99):
+        out = G.grade_ood_units(**call, max_units=max_units)
+        assert out["n_units"] == 2, max_units
+        assert out["truncated_to_n_units"] is None, (
+            f"--max-units {max_units} recorded a truncation of a 2-unit holdout that did "
+            "not happen"
+        )
+    cut = G.grade_ood_units(**call, max_units=1)
+    assert cut["n_units"] == 1 and cut["truncated_to_n_units"] == 1
+    assert set(cut["units"]) == {"OrderA"}
+
+
+def test_the_concentration_indices_break_ties_the_way_the_report_reads_them() -> None:
+    """First maximum wins — `(value, index)` tuples would pick the LAST (CodeRabbit r2).
+
+    A near-separated posterior makes ties at the maximum reachable: 11 of the real report's
+    15 bins carry a debiased gap of exactly 0.0.
+    """
+    tied = [
+        {"n": 1, "weight": 0.5, "debiased_gap": 0.2, "acc": 0.5, "p_min": 0.0, "p_max": 0.4},
+        {"n": 1, "weight": 0.5, "debiased_gap": 0.2, "acc": 0.5, "p_min": 0.6, "p_max": 1.0},
+    ]
+    conc = G._bin_concentration(tied, 0.2)
+    assert conc["top_bin_index"] == 0, "a tie at the maximum contribution picked the last bin"
+    assert conc["widest_bin_index"] == 0, "a tie at the widest span picked the last bin"
+    # and the unambiguous case still selects the real maximum, not merely index 0
+    clear = [
+        {"n": 1, "weight": 0.5, "debiased_gap": 0.0, "acc": 1.0, "p_min": 0.0, "p_max": 0.1},
+        {"n": 1, "weight": 0.5, "debiased_gap": 0.4, "acc": 0.5, "p_min": 0.1, "p_max": 1.0},
+    ]
+    sharp = G._bin_concentration(clear, 0.2)
+    assert sharp["top_bin_index"] == 1 and sharp["widest_bin_index"] == 1
+
+
+def test_the_figure_projection_carries_the_not_gated_markers() -> None:
+    """The figure data holds `gate: 0.05` and the OOD ECEs in one document (CodeRabbit r2).
+
+    A script reading only that file must still be able to tell that the OOD numbers are not
+    graded against the in-distribution threshold sitting beside them.
+    """
+    report = _report()
+    fig = G.figure_data(report)
+    assert fig["gate"] == G.ECE_GATE
+    assert fig["in_distribution"]["passes"] is report["gate"]["passes"]
+    assert fig["ood_gated"] is False
+    for key in ("ood_why_not_gated", "ood_by_phylum_is", "ood_macro_average_is"):
+        assert fig[key] == report["ood"][key.removeprefix("ood_")], key
+        assert fig[key], f"{key} is empty, so the guard says nothing"
+    assert "not gated" in fig["ood_why_not_gated"] or "never gated" in fig["ood_why_not_gated"]
+
+
+def test_a_shortfall_in_replicates_says_why_it_happened() -> None:
+    """A unit whose CI used fewer replicates than requested must explain it (CodeRabbit r2).
+
+    `block_bootstrap` drops replicates whose statistic is non-finite; with few blocks a draw
+    can repeat one block until the leave-one-out kernel is undefined. Recorded so an auditor
+    can tell rejected resamples from a truncated bootstrap.
+    """
+    # A SINGLETON block is what makes a replicate degenerate: the kernel leaves out by row,
+    # so only a draw taken entirely from a one-row block leaves nothing to compare against.
+    # The real report's `Pseudonocardiales` has block sizes [1, 2, 49] and lost 7 of 200 —
+    # exactly 1/27, the chance of drawing its singleton three times. A fixture without a
+    # singleton drops nothing, `requested == survived`, and this test would pass while
+    # recording the survived count instead of the requested one.
+    rng = __import__("random").Random(3)
+    n = 30
+    labels = [1] * 25 + [0] * 5
+    row_ids = [f"OrderA-{i}" for i in range(n)]
+    logits = [2.4 + 0.5 * rng.gauss(0.0, 1.0) for _ in range(n)]
+    block_of = ["c0"] * (n - 1) + ["c1"]  # one singleton
+    rows_by_id = {
+        rid: {"_unit": "OrderA", "_phylum": "PhylumOne", "_block": blk}
+        for rid, blk in zip(row_ids, block_of, strict=True)
+    }
+    scores = {
+        "row_ids": row_ids,
+        "logits": logits,
+        "labels": labels,
+        "rungs": None,
+        "meta": {},
+        "load": None,
+    }
+    out = G.grade_ood_units(
+        scores=scores, rows_by_id=rows_by_id, temperature=1.0, n_boot=40, seed=3
+    )
+    unit = out["units"]["OrderA"]
+    survived = unit["ci"]["n_boot"]
+    assert survived < 40, "the fixture must actually LOSE replicates or this tests nothing"
+    assert unit["n_boot_requested"] == 40, "the requested count was replaced by the survivors"
+    assert unit["n_boot_dropped"] == 40 - survived
+    assert survived + unit["n_boot_dropped"] == 40, "the accounting must close"
+    assert "singleton block" in unit["n_boot_drop_reason"]
+
+
+def test_the_two_schema_versions_are_declared_to_be_different_schemas() -> None:
+    """`schema_version` and `provenance.schema_version` version different things (r2)."""
+    from tbox_finder import provenance as PROV
+
+    report = _report()
+    scope = report["schema_version_scope"]
+    assert "report" in scope.lower() and "provenance" in scope.lower()
+    assert repr(PROV.SCHEMA_VERSION) in scope, "the scope note must quote the actual envelope"
+    assert report["schema_version"] == G.SCHEMA_VERSION
+
+
+def test_the_figure_data_subcommand_reproduces_what_grade_writes(tmp_path) -> None:
+    """Re-deriving the projection from a committed report must be byte-identical.
+
+    That equality is what lets a metadata-only fix regenerate the figure data in seconds
+    instead of re-running a 40-minute leave-one-out bootstrap — so it is pinned, not assumed.
+    """
+    report = _report()
+    rp, fp = tmp_path / "gate2_p3_ece.json", tmp_path / "gate2_figure_data.json"
+    G.write_outputs(report, report_path=rp, figure_data_path=fp, valid=True)
+    from_grade = fp.read_text()
+
+    out = tmp_path / "re-derived.json"
+    assert G.main(["figure-data", "--report", str(rp), "--out", str(out)]) == 0
+    assert out.read_text() == from_grade, "the subcommand and `grade` disagree on the projection"
 
 
 def test_the_report_identifies_its_step_adr_and_prd_sections() -> None:

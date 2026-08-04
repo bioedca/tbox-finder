@@ -519,14 +519,18 @@ def _bin_concentration(reliability: Sequence[Mapping[str, Any]], ece: float) -> 
     gate passes honestly, and a reader must still be able to see how concentrated the
     evidence is. Reported, never gated — no threshold is pinned on any of these.
     """
-    contributions = sorted(
-        (float(b["weight"]) * float(b["debiased_gap"]), int(i)) for i, b in enumerate(reliability)
+    # `max` over the VALUES, then `.index()` — the FIRST maximum wins. Comparing
+    # `(value, index)` tuples would break ties by the largest index instead, and a
+    # near-separated posterior makes ties at the maximum reachable (11 of 15 bins here carry
+    # a debiased gap of exactly 0.0), so the two orders genuinely disagree.
+    contributions = [float(b["weight"]) * float(b["debiased_gap"]) for b in reliability]
+    spans = [float(b["p_max"]) - float(b["p_min"]) for b in reliability]
+    top = (
+        (max(contributions), contributions.index(max(contributions)))
+        if contributions
+        else (0.0, -1)
     )
-    top = contributions[-1] if contributions else (0.0, -1)
-    widest = max(
-        ((float(b["p_max"]) - float(b["p_min"]), int(i)) for i, b in enumerate(reliability)),
-        default=(0.0, -1),
-    )
+    widest = (max(spans), spans.index(max(spans))) if spans else (0.0, -1)
     return {
         "n_bins": len(reliability),
         "top_bin_index": top[1],
@@ -665,7 +669,10 @@ def grade_ood_units(
 
     unit_names = sorted(by_unit)
     truncated_to = None
-    if max_units is not None:
+    # Only when the list was REALLY cut: `--max-units 60` on a 30-unit holdout truncates
+    # nothing, and recording it anyway turns `graded_every_loo_holdout_unit` FALSE on a run
+    # that graded every unit.
+    if max_units is not None and int(max_units) < len(unit_names):
         truncated_to = int(max_units)
         unit_names = unit_names[:truncated_to]
 
@@ -682,6 +689,23 @@ def grade_ood_units(
         )
         out["unit"] = name
         out["unit_key"] = OOD_UNIT_KEY
+        # `ci.n_boot` counts the replicates that SURVIVED; `block_bootstrap` drops any whose
+        # statistic is non-finite. The leave-one-out kernel excludes by ROW, so a replicate
+        # is undefined exactly when every row in it shares one uid — i.e. when the draw came
+        # entirely from a SINGLETON block. That is reachable whenever a unit has both few
+        # blocks and a singleton: `Pseudonocardiales` has sizes [1, 2, 49] and lost 7 of 200,
+        # which is 1/27 = the chance of drawing its singleton three times. A shortfall here
+        # is therefore rejected resamples, not a truncated bootstrap, and an auditor must be
+        # able to tell those apart without inferring it from a count.
+        out["n_boot_requested"] = int(n_boot)
+        survived = (out.get("ci") or {}).get("n_boot")
+        out["n_boot_dropped"] = None if survived is None else max(0, int(n_boot) - int(survived))
+        out["n_boot_drop_reason"] = (
+            "replicates whose leave-one-out statistic was non-finite were dropped by "
+            "eval.resample.block_bootstrap: the kernel leaves out by row, so a replicate "
+            "drawn entirely from a singleton block leaves no row with a distinct-uid "
+            "neighbour. Rejected resamples, not a truncated bootstrap."
+        )
         out["admissibility_class"] = COV.classify_order(out["n_positives"])
         phyla = sorted(bucket["phyla"])
         if len(phyla) > 1:
@@ -1049,6 +1073,12 @@ def build_report(
     """Assemble the GATE-2 report; every number is passed in already measured."""
     report: dict[str, Any] = {
         "schema_version": SCHEMA_VERSION,
+        "schema_version_scope": (
+            "`schema_version` versions THIS REPORT'S BODY; `provenance.schema_version` "
+            f"versions the provenance-record envelope (tbox_finder.provenance."
+            f"SCHEMA_VERSION = {PROV.SCHEMA_VERSION!r}) and moves independently. They are "
+            "different schemas and are not expected to match."
+        ),
         "step": STEP,
         "generated_by": GENERATED_BY,
         "prd": PRD,
@@ -1173,6 +1203,14 @@ def figure_data(report: Mapping[str, Any]) -> dict[str, Any]:
         "ood_macro_average": ood.get("macro_average"),
         "ood_by_phylum": ood.get("by_phylum"),
         "ood_min_n": ood.get("min_n"),
+        # A figure script that reads only this file otherwise has NO field saying the OOD
+        # numbers are ungated, while `gate` (0.05) and `in_distribution.passes` sit in the
+        # same document — so it could draw the in-distribution threshold across an OOD panel
+        # and render a reported quantity as a gate failure. The guards travel with the data.
+        "ood_gated": ood.get("gated"),
+        "ood_why_not_gated": ood.get("why_not_gated"),
+        "ood_by_phylum_is": ood.get("by_phylum_is"),
+        "ood_macro_average_is": ood.get("macro_average_is"),
     }
 
 
@@ -1329,8 +1367,6 @@ def plot_figures(
             linestyle=":",
             label=f"macro-average {macro['point']:.4f} (admissible units)",
         )
-    # Below the axes, not "best": the units are sorted by drift, so the largest values sit
-    # in the upper right and any in-axes legend lands on top of them.
     # ABOVE the axes: the units are sorted by drift, so the largest values sit in the upper
     # right and an in-axes legend lands on them, while below the axes it lands on the label.
     ax2.legend(
@@ -1469,6 +1505,12 @@ def build_parser() -> Any:
         help="SMOKE ONLY — truncates the held-out orders; the completeness clause then fails",
     )
 
+    project = sub.add_parser(
+        "figure-data", help="re-derive the figure-data JSON from a committed report"
+    )
+    project.add_argument("--report", default=DEFAULT_REPORT)
+    project.add_argument("--out", default=DEFAULT_FIGURE_DATA)
+
     plot = sub.add_parser("plot-figures", help="render the figures from the figure-data JSON")
     plot.add_argument("--figure-data", default=DEFAULT_FIGURE_DATA)
     plot.add_argument("--figures-dir", default=FIGURES_DIR)
@@ -1530,6 +1572,19 @@ def main(argv: Sequence[str] | None = None) -> int:
             device=args.device,
             attn_implementation=args.attn_implementation,
         )
+        return 0
+
+    if args.command == "figure-data":
+        # `figure_data` is a pure projection of the report, so re-deriving it from a
+        # committed report is byte-identical to what `grade` wrote — and costs seconds
+        # instead of re-running the leave-one-out bootstrap. A test pins that equality.
+        source = json.loads(Path(args.report).read_text(encoding="utf-8"))
+        out = Path(args.out)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(
+            json.dumps(figure_data(source), indent=2, sort_keys=True) + "\n", encoding="utf-8"
+        )
+        print(f"wrote {out} (re-derived from {_recorded_path(args.report)})")
         return 0
 
     if args.command == "plot-figures":

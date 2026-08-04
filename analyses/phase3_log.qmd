@@ -2278,3 +2278,68 @@ held-out positives (**10.0 %**) sit at non-positive logits, which is the leave-c
 a blinded-frozen default requiring ADR sign-off (CLAUDE.md §7 item 2) — so it is recorded here
 and not invented in a calibration step. GATE-2's Phase-3 half grades the D11 in-distribution
 ECE on the 3,045 test rows, and nothing else.
+
+### P3-10 review round 2 — CodeRabbit CLI, 6 findings (1 major, 5 minor), all real, all fixed
+
+**The GitHub app did not review this round, and its check went green anyway.** `gh pr checks`
+reported `CodeRabbit  pass` with the body *"Review rate limited"* — CLAUDE.md §5.1's trap
+verbatim: a rate-limit notice is an **absence**, not a pass. Round 2's gate was carried entirely
+by the CLI, the path independent of the throttled app. Across the two rounds the app reviewed
+once and the CLI twice, which is the argument for running both rather than either.
+
+**(major) The figure projection dropped the not-gated markers.** `gate2_figure_data.json` holds
+`gate: 0.05` and `in_distribution.passes` beside the OOD ECEs, but none of the guards the source
+report attaches to those same numbers (`ood.gated`, `why_not_gated`, `by_phylum_is`,
+`macro_average_is`). A figure script reading only that file had no field telling it the
+leave-clade-out numbers are ungated, so it could draw the 0.05 threshold across a panel where
+Actinobacteria's mean is 0.68 and render a **reported** quantity as a gate failure. The guards
+now travel with the data.
+
+**(minor, real logic bug) `--max-units` recorded a truncation that did not happen.**
+`truncated_to` was set whenever `max_units` was not `None`, so `--max-units 60` on a 30-unit
+holdout turned `graded_every_loo_holdout_unit` FALSE while every unit had in fact been graded —
+a completeness clause failing on a complete run. Now recorded only when the list was really cut.
+
+**(minor, real inconsistency) The concentration indices broke ties the opposite way from the
+test.** `_bin_concentration` compared `(value, index)` tuples, so `sorted(...)[-1]`/`max(...)`
+resolved ties toward the **largest** index, while the test asserted `.index(max(...))` — the
+**first**. A tie at the maximum is reachable precisely here: 11 of the 15 bins carry a debiased
+gap of exactly 0.0. Selection is now by value with `.index()`, so both agree, and a dedicated
+tie fixture pins it.
+
+**(minor) A replicate shortfall was recorded without a reason — and chasing it explained the
+mechanism exactly.** Two units reported fewer than the requested 200 replicates:
+`Desulfuromonadales` 181 and `Pseudonocardiales` 193, both with 3 blocks. The kernel leaves out
+by **row**, so a replicate is undefined only when every row shares one uid — i.e. when the draw
+came entirely from a **singleton** block. Measured block sizes: `Desulfuromonadales` **[1, 1,
+31]**, `Pseudonocardiales` **[1, 2, 49]**. For one singleton in three blocks the chance of
+drawing it three times is 1/27 = 3.7 %, i.e. **7.4 of 200 — and Pseudonocardiales lost exactly
+7**. Each unit now carries `n_boot_requested`, `n_boot_dropped` and the reason, so an auditor can
+tell rejected resamples from a truncated bootstrap.
+
+**A sabotage of that fix did not bite, and the gap was real** — the second time this session.
+Replacing `n_boot_requested` with the *survived* count left the suite green, because the fixture
+had no singleton block and so never dropped a replicate: `requested == survived` made the two
+indistinguishable. The test now builds a 30-row unit with a deliberate singleton (10 of 40
+replicates dropped) and asserts the shortfall is non-zero *before* asserting the accounting
+closes.
+
+**(minor) The two `schema_version` fields version different schemas.** The report body carries
+`"1"` and the nested provenance envelope `"1.0"` (`provenance.SCHEMA_VERSION`); a consumer
+comparing them would read a mismatch. They are now declared as different scopes in the artifact
+itself rather than left to be inferred.
+
+**(minor) A contradictory legend comment** — one half said "Below the axes", the other "ABOVE";
+the code places it above. Stale half removed.
+
+**The OOD test fixture was hand-built, and it had drifted.** Adding a shape check against the
+shipped `grade_ood_units` immediately found **six** keys the fixture lacked (`why_not_gated`,
+`by_phylum`, `adjudicable_fraction`, `n_boot`, `bootstrap_seed`, `n_units_sub_min_n`) — every
+one a field no test resting on that fixture could have been covering. The fixture now *is* the
+producer's output, so it cannot drift; the shape check was then dropped as a tautology
+([[promote-dont-duplicate-is-a-correctness-rule]]).
+
+**A `figure-data` subcommand was added** so the projection can be re-derived from a committed
+report in seconds rather than by re-running the 40-minute leave-one-out bootstrap. It is the
+same pure `figure_data(report)` call `grade` makes, and a test pins the two to be
+byte-identical.
