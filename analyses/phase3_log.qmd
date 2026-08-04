@@ -2212,7 +2212,7 @@ The two sets **do not overlap**, and every high-drift order is Actinobacteria (9
 
 **`is_science` is derived, not asserted.** GATE-4's report can hardcode it because its incomplete path raises and writes no file; this one always writes, so `--max-units` would otherwise land a truncated grade at the phase-exit path flagged as real science. It is now the conjunction of the three completeness clauses, re-derived by `validate_report`, and two sabotages (hardcoding it; reading only one of the three) are caught.
 
-**Validation.** `reports/gate2_p3_ece.json` re-validates **clean** under the shipped code with all 19 clauses re-deriving identically and `overall_pass = true`. 64 `test_gate2` + the extended eval-gate tier; full unit+golden+ml **3,910 passed / 14 failed**, the 14 **exactly** a matched baseline worktree's set at `main` (`comm` empty both ways — the main checkout gives a different count because it holds the LFS/DVC data a fresh worktree lacks, so the baseline had to be a second worktree). ruff 0.15.0 + black 25.11.0 + `snakemake --lint` clean; `snakemake -n gate2_ece` resolves `stage2_dataset → stage2_scores_loo → gate2_ece`. **61 sabotages, each RED against its NAMED test, each restored byte-identically.** Two did not bite on the first pass and both gaps were real: an all-TRUE fixture made `overall_pass = all(clauses)` and `overall_pass = True` indistinguishable (now checked on a report with one clause deliberately FALSE), and the disclosure test matched a phrase that survived deleting the clause that introduced it (now matched on provenance marker *and* substance).
+**Validation.** `reports/gate2_p3_ece.json` re-validates **clean** under the shipped code with all 19 clauses re-deriving identically and `overall_pass = true`. 65 `test_gate2` + the extended eval-gate tier; full unit+golden+ml **3,911 passed / 14 failed**, the 14 **exactly** a matched baseline worktree's set at `main` (`comm` empty both ways — the main checkout gives a different count because it holds the LFS/DVC data a fresh worktree lacks, so the baseline had to be a second worktree). ruff 0.15.0 + black 25.11.0 + `snakemake --lint` clean; `snakemake -n gate2_ece` resolves `stage2_dataset → stage2_scores_loo → gate2_ece`. **62 sabotages, each RED against its NAMED test, each restored byte-identically.** Two did not bite on the first pass and both gaps were real: an all-TRUE fixture made `overall_pass = all(clauses)` and `overall_pass = True` indistinguishable (now checked on a report with one clause deliberately FALSE), and the disclosure test matched a phrase that survived deleting the clause that introduced it (now matched on provenance marker *and* substance).
 
 **Decisions.** Path drift, recorded not taken silently: the module lands at `src/tbox_finder/calib/gate2.py`, not imp.md's `calibration/gate2.py` — the same correction as P3-07 and P3-09, since two near-homonymous calibration namespaces is a permanent import confusion. No ADR amended and no §7 sign-off sought: nothing pinned changed. **Three items now stand for the P3-exit ADR round** — D11's missing degenerate-limit rule (P3-08), the D11 debias term's measured saturation (P3-09), and D13's unpinned drift bound (this step).
 
@@ -2390,3 +2390,26 @@ bin claim in the prose was then re-derived against the artifact rather than re-r
 
 **This is the fourth round and the first with nothing behavioural in it** — a documentation
 correction with no code path touched and no artifact regenerated.
+
+### P3-10 review round 5 — CodeRabbit CLI, 1 minor finding: a falsy zero erased a real outcome
+
+**`or 0.0` treated an OOD ECE of exactly 0.0 as absent.** `plot_figures` selected each unit's
+plotted value with `(u["ood_ece"] if admissible else u["inadmissible_point"]) or 0.0` for the
+sort key and `... or float("nan")` for the value. A **perfectly calibrated held-out order is a
+real outcome**, and 0.0 is falsy: its marker would vanish from the panel, its error bar become
+NaN, and its sort key collapse onto that of a genuinely missing value. Now tested against
+`None`.
+
+**A sabotage of the fix did not bite — the third time this session — and the gap was the same
+one twice over.** The first version put the selector in a closure inside `plot_figures` and the
+test re-implemented it locally, so inverting the shipped logic left the suite green. The
+selector is now the module-level `ood_point`, and the test calls **it** rather than a copy;
+inverting it now turns the named test red. A test that re-implements the thing it is checking
+verifies the re-implementation ([[promote-dont-duplicate-is-a-correctness-rule]]).
+
+Verified by hand under the `viz` env (§8.5 manual gate): `plot_figures` renders both PNGs, rc 0,
+on a figure-data carrying a 0.0-ECE unit with no CI.
+
+**Five rounds, 19 findings, all real, all fixed.** Rounds 4 and 5 each carried a single minor
+finding, and neither moved a reported number — the artifact has been byte-stable since the
+round-2 regeneration.

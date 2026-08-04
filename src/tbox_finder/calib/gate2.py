@@ -108,6 +108,7 @@ __all__ = [
     "grade_ood_units",
     "holdout_from_rows",
     "loo_holdout_rows",
+    "ood_point",
     "main",
     "plot_figures",
     "prior_shift_band_sweep",
@@ -1215,6 +1216,26 @@ def figure_data(report: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+def ood_point(unit: Mapping[str, Any]) -> float | None:
+    """The value to plot for one held-out order, or ``None`` when there is none.
+
+    Module-level and not a closure so a test can exercise the SHIPPED selection rather than
+    re-implement it — a re-implementation stays green when the real one regresses.
+
+    ``or 0.0`` would be wrong here: an OOD ECE of **exactly 0.0** is falsy, and a perfectly
+    calibrated held-out order is a real outcome. Coalescing it would drop that unit's marker
+    from the panel and collapse its sort key onto a genuinely missing value's.
+    """
+    raw = unit["ood_ece"] if unit["admissible"] else unit["inadmissible_point"]
+    return None if raw is None else float(raw)
+
+
+def _ood_sort_key(unit: Mapping[str, Any]) -> float:
+    """Descending by drift; a unit with no value sorts as 0.0 rather than vanishing."""
+    value = ood_point(unit)
+    return -(value if value is not None else 0.0)
+
+
 def _fmt(value: Any, spec: str = ".4f") -> str:
     """Format a number for a figure caption, or say it is absent — never raise mid-render.
 
@@ -1326,16 +1347,10 @@ def plot_figures(
     plt.close(fig)
     print(f"wrote {out}")
 
-    units = sorted(
-        data["ood_units"],
-        key=lambda u: -((u["ood_ece"] if u["admissible"] else u["inadmissible_point"]) or 0.0),
-    )
+    units = sorted(data["ood_units"], key=_ood_sort_key)
     fig2, ax2 = plt.subplots(figsize=(6.8, max(3.6, 0.24 * len(units) + 2.6)))
     ypos = list(range(len(units)))
-    values = [
-        (u["ood_ece"] if u["admissible"] else u["inadmissible_point"]) or float("nan")
-        for u in units
-    ]
+    values = [ood_point(u) if ood_point(u) is not None else float("nan") for u in units]
     lower, upper = [], []
     for u, value in zip(units, values, strict=True):
         ci_u = u.get("ci") or {}

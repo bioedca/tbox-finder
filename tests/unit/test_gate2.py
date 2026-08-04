@@ -1064,6 +1064,34 @@ def test_the_figure_caption_formatter_never_raises_on_an_absent_number() -> None
     assert G._fmt(fig["in_distribution"]["temperature"]) == "n/a"
 
 
+def test_a_perfectly_calibrated_unit_is_not_treated_as_absent(tmp_path) -> None:
+    """An OOD ECE of exactly 0.0 is falsy (CodeRabbit r5).
+
+    `or 0.0` / `or float("nan")` would erase a perfectly calibrated unit from the panel and
+    collapse its sort key onto that of a genuinely missing value — a real outcome rendered as
+    no outcome. Only the projection and the ordering are checked here; the render itself
+    needs matplotlib (see the formatter test).
+    """
+    report = _report()
+    fig = G.figure_data(report)
+    zero, missing = dict(fig["ood_units"][0]), dict(fig["ood_units"][0])
+    zero.update(unit="OrderZero", ood_ece=0.0, admissible=True, inadmissible_point=None)
+    missing.update(unit="OrderNone", ood_ece=None, admissible=False, inadmissible_point=None)
+    fig["ood_units"] = [zero, missing] + fig["ood_units"]
+
+    # the SHIPPED selector, not a re-implementation — a local copy stays green when the real
+    # one regresses, which is exactly what a sabotage of this fix demonstrated.
+    assert G.ood_point(zero) == 0.0, "a perfectly calibrated unit has a value, not an absence"
+    assert G.ood_point(missing) is None
+    assert G.ood_point(zero) is not None and G.ood_point(missing) is None
+    ordered = sorted(fig["ood_units"], key=G._ood_sort_key)
+    assert {u["unit"] for u in ordered} == {u["unit"] for u in fig["ood_units"]}
+    assert "OrderZero" in {u["unit"] for u in ordered}
+    # and an inadmissible unit still plots its inadmissible_point
+    inadm = dict(zero, unit="OrderInadm", admissible=False, ood_ece=None, inadmissible_point=0.0)
+    assert G.ood_point(inadm) == 0.0
+
+
 def test_the_bin_size_label_never_claims_a_count_some_bins_lack() -> None:
     """Equal-MASS bins differ in size when n is not divisible by the bin count."""
     assert G._bin_size_label([{"n": 203}, {"n": 203}]) == "203 rows each"
