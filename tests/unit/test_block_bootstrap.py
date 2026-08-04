@@ -278,6 +278,32 @@ def test_ci_level_widens_the_interval() -> None:
     assert narrow["ci_level"] == 0.50 and wide["ci_level"] == 0.99
 
 
+def test_public_arguments_are_validated_before_sampling() -> None:
+    """``ci_level`` and ``n_boot`` are checked up front (CodeRabbit CLI r2).
+
+    A negative ``ci_level`` inverts ``alpha`` and yields ``lower > upper`` — an
+    interval-shaped object that is not an interval — and a negative ``n_boot`` reports zero
+    replicates exactly as an always-undefined statistic would. Each refusal is paired with
+    the same call at a valid value succeeding, so the guards are shown to be selective and
+    not simply raising on everything ([[raises-test-needs-a-positive-control]]).
+    """
+    blocks = [[1.0], [2.0], [3.0]]
+    for bad_level in (-0.95, 1.5, float("nan"), float("inf")):
+        with pytest.raises(ValueError, match="ci_level"):
+            resample.block_bootstrap(blocks, _mean, n_boot=10, ci_level=bad_level)
+    with pytest.raises(ValueError, match="n_boot"):
+        resample.block_bootstrap(blocks, _mean, n_boot=-1)
+    ok = resample.block_bootstrap(blocks, _mean, n_boot=10, ci_level=0.9)
+    assert ok["ci_level"] == 0.9 and ok["lower"] <= ok["upper"]
+    # n_boot=0 is a legitimate "no replicates requested", not an error.
+    assert resample.block_bootstrap(blocks, _mean, n_boot=0)["n_boot"] == 0
+
+    for bad_q in (-0.1, 1.1, float("nan"), float("inf")):
+        with pytest.raises(ValueError, match="q="):
+            resample.percentile([0.0, 1.0], bad_q)
+    assert resample.percentile([0.0, 1.0], 0.5) == pytest.approx(0.5)
+
+
 def test_percentile_is_linear_interpolation() -> None:
     # Hand-computed against numpy's default 'linear' method on [0, 1, 2, 3]:
     # q=0.5 -> pos 1.5 -> 1.5 ; q=0.25 -> pos 0.75 -> 0.75 ; q=0 -> 0 ; q=1 -> 3.

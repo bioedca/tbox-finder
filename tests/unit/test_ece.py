@@ -329,20 +329,52 @@ def test_a_pinned_bandwidth_is_recorded_as_not_selected() -> None:
 # The proper-scoring-rule (Brier) decomposition — D13's other admissible form
 # ========================================================================== #
 def test_brier_total_is_exact_and_the_decomposition_closes_when_ghat_is_right() -> None:
-    """``brier`` itself needs no estimator: with p ≡ 0.5 it is exactly 0.25. The
-    decomposition identity ``Brier = calibration + refinement`` is exact for the *true*
-    conditional mean, and the constant-posterior construction gives ``ĝ`` essentially
-    exactly, so the residual must vanish here — while remaining a *reported* diagnostic on
-    real data, where it does not."""
+    """``brier`` needs no estimator: with ``p ≡ 0.5`` it is exactly 0.25. The Bregman
+    identity ``Brier = calibration + refinement`` is exact for the *true* conditional mean,
+    and on a constant posterior the LOO estimate satisfies the one property that makes it
+    close — so the residual vanishes here while remaining a *reported* diagnostic on real
+    data, where it does not.
+
+    The mechanism, not just the consequence, is asserted below. Write ``S = Σy``. Then
+
+        cal + ref = mean[(p−ĝ)² + ĝ(1−ĝ)] = p² − 2p·mean(ĝ) + mean(ĝ)
+        brier     = mean(p−y)²            = p² − 2p·(S/n)    + (S/n)      (since y² = y)
+
+    so the two agree **iff ``mean(ĝ) = S/n``** — which leave-one-out with uniform weights
+    satisfies exactly, because ``Σ_i (S − y_i)/(n−1) = (nS − S)/(n−1) = S``. That identity
+    is pinned directly, and the closure is checked at three posteriors so it cannot be an
+    artifact of ``p = 0.5``.
+
+    **CodeRabbit CLI r2 (major) claimed this assertion "will reject a correct
+    decomposition", putting the residual at ≈ −0.003265, and proposed replacing the
+    estimator's output with the constant ``[k/n]*n``. Refuted** — by execution (residual
+    3.6e-16, 5.6e-16, 5.0e-16 at p = 0.5 / 0.2 / 0.9) and by the derivation above. The
+    proposed change would also have removed the estimator from its own test, leaving the
+    identity checked against a hand-supplied ``ĝ``. The near-miss number is close to this
+    fixture's LOO floor, ``2k(n−k)/(n²(n−1)) = 0.003232``, which is a different quantity.
+    """
     n, k = 100, 80
     y = [1] * k + [0] * (n - k)
-    p = [0.5] * n
-    g = ece.kernel_conditional_mean(y, p, 0.05)
-    d = ece.brier_decomposition(y, p, g)
-    assert d["brier"] == pytest.approx(0.25, abs=1e-12)
-    assert d["residual"] == pytest.approx(0.0, abs=1e-9)
-    assert d["calibration"] + d["refinement"] == pytest.approx(d["brier"], abs=1e-9)
-    assert 0.0 < d["calibration"] < d["brier"] and 0.0 < d["refinement"] < d["brier"]
+
+    for p_val in (0.2, 0.5, 0.9):
+        p = [p_val] * n
+        g = ece.kernel_conditional_mean(y, p, 0.05)
+        # The two distinct LOO values, and the mean identity that makes the closure exact.
+        assert sorted({round(v, 12) for v in g}) == [
+            round((k - 1) / (n - 1), 12),
+            round(k / (n - 1), 12),
+        ]
+        assert sum(g) / n == pytest.approx(k / n, abs=1e-12)
+
+        d = ece.brier_decomposition(y, p, g)
+        assert d["residual"] == pytest.approx(0.0, abs=1e-9)
+        assert d["calibration"] + d["refinement"] == pytest.approx(d["brier"], abs=1e-9)
+        assert d["calibration"] > 0.0 and d["refinement"] > 0.0
+
+    # brier itself is exact and estimator-free at p = 0.5.
+    assert ece.brier_decomposition(y, [0.5] * n, [0.5] * n)["brier"] == pytest.approx(
+        0.25, abs=1e-12
+    )
 
 
 def test_brier_decomposition_rejects_a_mismatched_ghat() -> None:

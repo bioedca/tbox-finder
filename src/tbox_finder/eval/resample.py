@@ -151,6 +151,11 @@ def block_bootstrap(
     ``{point, lower, upper, ci_level, n_boot, n_blocks}`` over the finite replicates;
     fewer than 2 blocks → not block-resamplable (NaN CI, ADR-0005 Amendment A1).
 
+    ``ci_level`` and ``n_boot`` are validated before any sampling: a negative ``ci_level``
+    inverts ``alpha`` and returns ``lower > upper`` — an interval-shaped object that is not
+    an interval — and a negative ``n_boot`` silently reports zero replicates as though the
+    statistic had been undefined on every draw (CodeRabbit CLI r2).
+
     ``n_boot`` in the return value is the number of replicates that actually produced a
     **finite** statistic, which is ``<=`` the requested count when the statistic is
     undefined on some draws. ``point`` is deliberately *not* filtered: it is whatever the
@@ -165,6 +170,10 @@ def block_bootstrap(
     ``binned_ece``, ``ood_ece``, AUPRC, per-element F1 — is bounded, so the two filters
     agree on all of them.
     """
+    if n_boot < 0:
+        raise ValueError(f"n_boot={n_boot!r} must be non-negative")
+    if not math.isfinite(ci_level) or not 0.0 <= ci_level <= 1.0:
+        raise ValueError(f"ci_level={ci_level!r} must be finite and within [0, 1]")
     blocks = list(blocks)
     n_blocks = len(blocks)
     point = statistic([x for blk in blocks for x in blk]) if n_blocks else float("nan")
@@ -200,7 +209,13 @@ def block_bootstrap(
 
 def percentile(sorted_vals: list[float], q: float) -> float:
     """Linear-interpolation percentile (numpy default ``'linear'``) over a pre-sorted
-    list. NaN on empty; the single value when there is one."""
+    list. NaN on empty; the single value when there is one.
+
+    ``q`` outside ``[0, 1]`` is a caller error, not a clamp: it indexes off the ends of the
+    list and returns an extrapolated number that looks like a quantile (CodeRabbit CLI r2).
+    """
+    if not math.isfinite(q) or not 0.0 <= q <= 1.0:
+        raise ValueError(f"q={q!r} must be finite and within [0, 1]")
     if not sorted_vals:
         return float("nan")
     if len(sorted_vals) == 1:
