@@ -2303,7 +2303,7 @@ a completeness clause failing on a complete run. Now recorded only when the list
 **(minor, real inconsistency) The concentration indices broke ties the opposite way from the
 test.** `_bin_concentration` compared `(value, index)` tuples, so `sorted(...)[-1]`/`max(...)`
 resolved ties toward the **largest** index, while the test asserted `.index(max(...))` — the
-**first**. A tie at the maximum is reachable precisely here: 11 of the 15 bins carry a debiased
+**first**. A tie at the maximum is reachable precisely here: 12 of the 15 bins carry a debiased
 gap of exactly 0.0. Selection is now by value with `.index()`, so both agree, and a dedicated
 tie fixture pins it.
 
@@ -2370,3 +2370,23 @@ columns_never_record_ids` put its whole check inside `for column in RS.RECORD_LE
 an empty allowlist would make it pass while checking nothing — item 1 of this module's own
 docstring, in the module that names it. Both allowlists are now asserted non-empty first, and
 the sabotage that empties `RECORD_LEVEL_COLUMNS` turns it red.
+
+### P3-10 review round 4 — CodeRabbit CLI, 1 minor finding: stale bin counts in my own comments
+
+**The counts in `_bin_concentration`'s docstring and comment contradicted the report they
+describe.** The docstring said "14 bins had nothing to get wrong" and the tie-break comment said
+"11 of 15 bins carry a debiased gap of exactly 0.0"; the committed report records
+`n_bins_with_zero_debiased_gap: 12` and `n_bins_with_saturated_accuracy: 12`. Re-derived from
+the report's own reliability table: **12** bins (indices 1, 4–14) sit at accuracy exactly 0 or 1
+with a zero debiased gap, and **three** bins carry a non-zero gap — 0 (0.004812), 2 (0.009547)
+and the transition bin 3 (0.070565). So 14 was the count of everything-but-the-transition-bin,
+and 11 was an undercount that missed the single all-negative bin. The tie-break rationale is
+unaffected — 12 identical values still make a tie reachable — and only the numbers were wrong.
+
+Corrected in the source and in the two local roadmap files; `paper/manuscript.qmd` and this log
+already said **12 of the 15**, which is the correct figure, so no reported result moved. Every
+bin claim in the prose was then re-derived against the artifact rather than re-read: `n_bins`
+15, saturated 12, zero-gap 12, top-bin share 0.8309, widest span 0.9956.
+
+**This is the fourth round and the first with nothing behavioural in it** — a documentation
+correction with no code path touched and no artifact regenerated.

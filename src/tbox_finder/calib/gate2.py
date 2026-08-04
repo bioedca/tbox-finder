@@ -514,14 +514,15 @@ def _bin_concentration(reliability: Sequence[Mapping[str, Any]], ece: float) -> 
     A near-separated posterior puts almost every row at p ~= 0 or p ~= 1, where an
     equal-mass binning produces bins that are trivially correct (accuracy exactly 0 or 1,
     zero gap) while ONE bin absorbs the entire transition region. The headline ECE is then
-    small largely because 14 bins had nothing to get wrong, and its whole magnitude rests on
-    the remaining one. That is the same shape as P3-08's single misclassified calib row: the
-    gate passes honestly, and a reader must still be able to see how concentrated the
-    evidence is. Reported, never gated — no threshold is pinned on any of these.
+    small largely because most bins had nothing to get wrong — 12 of the 15 sit at accuracy
+    exactly 0 or 1 — and its whole magnitude rests on one of them. That is the same shape as
+    P3-08's single misclassified calib row: the gate passes honestly, and a reader must still
+    be able to see how concentrated the evidence is. Reported, never gated — no threshold is
+    pinned on any of these.
     """
     # `max` over the VALUES, then `.index()` — the FIRST maximum wins. Comparing
     # `(value, index)` tuples would break ties by the largest index instead, and a
-    # near-separated posterior makes ties at the maximum reachable (11 of 15 bins here carry
+    # near-separated posterior makes ties at the maximum reachable (12 of 15 bins here carry
     # a debiased gap of exactly 0.0), so the two orders genuinely disagree.
     contributions = [float(b["weight"]) * float(b["debiased_gap"]) for b in reliability]
     spans = [float(b["p_max"]) - float(b["p_min"]) for b in reliability]
