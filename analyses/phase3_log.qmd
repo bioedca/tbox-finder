@@ -2212,7 +2212,7 @@ The two sets **do not overlap**, and every high-drift order is Actinobacteria (9
 
 **`is_science` is derived, not asserted.** GATE-4's report can hardcode it because its incomplete path raises and writes no file; this one always writes, so `--max-units` would otherwise land a truncated grade at the phase-exit path flagged as real science. It is now the conjunction of the three completeness clauses, re-derived by `validate_report`, and two sabotages (hardcoding it; reading only one of the three) are caught.
 
-**Validation.** `reports/gate2_p3_ece.json` re-validates **clean** under the shipped code with all 19 clauses re-deriving identically and `overall_pass = true`. 65 `test_gate2` + the extended eval-gate tier; full unit+golden+ml **3,911 passed / 14 failed**, the 14 **exactly** a matched baseline worktree's set at `main` (`comm` empty both ways — the main checkout gives a different count because it holds the LFS/DVC data a fresh worktree lacks, so the baseline had to be a second worktree). ruff 0.15.0 + black 25.11.0 + `snakemake --lint` clean; `snakemake -n gate2_ece` resolves `stage2_dataset → stage2_scores_loo → gate2_ece`. **62 sabotages, each RED against its NAMED test, each restored byte-identically.** Two did not bite on the first pass and both gaps were real: an all-TRUE fixture made `overall_pass = all(clauses)` and `overall_pass = True` indistinguishable (now checked on a report with one clause deliberately FALSE), and the disclosure test matched a phrase that survived deleting the clause that introduced it (now matched on provenance marker *and* substance).
+**Validation.** `reports/gate2_p3_ece.json` re-validates **clean** under the shipped code with all 19 clauses re-deriving identically and `overall_pass = true`. 65 `test_gate2` + the extended eval-gate tier; full unit+golden+ml **3,911 passed / 14 failed**, the 14 **exactly** a matched baseline worktree's set at `main` (`comm` empty both ways — the main checkout gives a different count because it holds the LFS/DVC data a fresh worktree lacks, so the baseline had to be a second worktree). ruff 0.15.0 + black 25.11.0 + `snakemake --lint` clean; `snakemake -n gate2_ece` resolves `stage2_dataset → stage2_scores_loo → gate2_ece`. **63 sabotages, each RED against its NAMED test, each restored byte-identically.** Two did not bite on the first pass and both gaps were real: an all-TRUE fixture made `overall_pass = all(clauses)` and `overall_pass = True` indistinguishable (now checked on a report with one clause deliberately FALSE), and the disclosure test matched a phrase that survived deleting the clause that introduced it (now matched on provenance marker *and* substance).
 
 **Decisions.** Path drift, recorded not taken silently: the module lands at `src/tbox_finder/calib/gate2.py`, not imp.md's `calibration/gate2.py` — the same correction as P3-07 and P3-09, since two near-homonymous calibration namespaces is a permanent import confusion. No ADR amended and no §7 sign-off sought: nothing pinned changed. **Three items now stand for the P3-exit ADR round** — D11's missing degenerate-limit rule (P3-08), the D11 debias term's measured saturation (P3-09), and D13's unpinned drift bound (this step).
 
@@ -2413,3 +2413,29 @@ on a figure-data carrying a 0.0-ECE unit with no CI.
 **Five rounds, 19 findings, all real, all fixed.** Rounds 4 and 5 each carried a single minor
 finding, and neither moved a reported number — the artifact has been byte-stable since the
 round-2 regeneration.
+
+### P3-10 review round 6 — CodeRabbit CLI, 1 minor finding: two fields named "singleton", meaning different things
+
+**Both readings of the census were correct, and that was the problem.** The scores file records
+`block_census.n_singleton_blocks: 0` while **3,424 of its 4,332 blocks contain exactly one row**.
+The field is P3-08's, and under its own definition 0 is right: it counts rows with *no cluster
+at all* (`n_rows_without_cluster`, also 0 — every leave-clade-out row is clustered). Under the
+natural reading of the name it is wrong by 3,424.
+
+That collision matters here specifically. Round 2 established that a bootstrap replicate is
+undefined exactly when it is drawn entirely from a **one-row block**, and recorded
+`n_boot_dropped: 19` for `Desulfuromonadales` and `7` for `Pseudonocardiales` on that basis. A
+reader cross-referencing the two artifacts would see "0 singleton blocks" beside a non-zero drop
+whose stated cause is singleton blocks, and reasonably conclude one of them is wrong.
+
+**Fixed where it bites, not where it originated.** Renaming P3-08's field would touch a
+committed report schema and its shape-lock test for a naming issue; instead each unit now
+carries `n_blocks_of_size_one` — the count that actually governs its own drop — beside
+`n_boot_dropped`, and the drop reason names the field it is *not*. The regenerated report confirms the mechanism across the whole range: `Pseudonocardiales`
+**1** one-row block of 3 → 1/27 = 3.7 % → **7** dropped of 200; `Desulfuromonadales` **2**
+of 3 → 2/27 = 7.4 % → **19**; and `Lactobacillales`, which has **2,366** one-row blocks but
+**2,948** in total, drops **0** — the ratio governs, not the count, which is exactly why a
+bare repo-wide singleton total explains nothing on its own.
+
+**Six rounds, 20 findings, all real, all fixed.** The gated number has not moved once: ECE
+0.005662 in every regeneration.

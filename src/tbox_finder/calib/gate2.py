@@ -700,13 +700,25 @@ def grade_ood_units(
         # is therefore rejected resamples, not a truncated bootstrap, and an auditor must be
         # able to tell those apart without inferring it from a count.
         out["n_boot_requested"] = int(n_boot)
+        # The count that actually explains the line above, recorded beside it. NOTE the
+        # inherited `block_census.n_singleton_blocks` in the scores file means something
+        # ELSE — it counts rows with no cluster at all (0 here, every holdout row is
+        # clustered), not blocks holding one row. Reading that field as "no singletons" and
+        # this unit's `n_boot_dropped` as non-zero looks like a contradiction; it is a name
+        # collision, and this field is the one that governs the drop.
+        sizes: dict[Any, int] = {}
+        for label in bucket["blocks"]:
+            sizes[label] = sizes.get(label, 0) + 1
+        out["n_blocks_of_size_one"] = sum(1 for count in sizes.values() if count == 1)
         survived = (out.get("ci") or {}).get("n_boot")
         out["n_boot_dropped"] = None if survived is None else max(0, int(n_boot) - int(survived))
         out["n_boot_drop_reason"] = (
             "replicates whose leave-one-out statistic was non-finite were dropped by "
             "eval.resample.block_bootstrap: the kernel leaves out by row, so a replicate "
-            "drawn entirely from a singleton block leaves no row with a distinct-uid "
-            "neighbour. Rejected resamples, not a truncated bootstrap."
+            "drawn entirely from a one-row block leaves no row with a distinct-uid "
+            "neighbour. See n_blocks_of_size_one — NOT the scores file's "
+            "block_census.n_singleton_blocks, which counts rows with no cluster at all. "
+            "Rejected resamples, not a truncated bootstrap."
         )
         out["admissibility_class"] = COV.classify_order(out["n_positives"])
         phyla = sorted(bucket["phyla"])

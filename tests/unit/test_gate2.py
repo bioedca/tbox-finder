@@ -1205,7 +1205,15 @@ def test_a_shortfall_in_replicates_says_why_it_happened() -> None:
     assert unit["n_boot_requested"] == 40, "the requested count was replaced by the survivors"
     assert unit["n_boot_dropped"] == 40 - survived
     assert survived + unit["n_boot_dropped"] == 40, "the accounting must close"
-    assert "singleton block" in unit["n_boot_drop_reason"]
+    assert "one-row block" in unit["n_boot_drop_reason"]
+    # the count that explains the drop is recorded beside it, and it is NOT the inherited
+    # `block_census.n_singleton_blocks` (which counts cluster-less rows, a different thing)
+    assert unit["n_blocks_of_size_one"] == 1, "the fixture's one singleton must be counted"
+    assert unit["n_blocks"] == 2
+    assert "n_singleton_blocks" in unit["n_boot_drop_reason"], (
+        "the reason must name the field it is NOT, or a reader cross-referencing the scores "
+        "file reads 0 singletons beside a non-zero drop and sees a contradiction"
+    )
 
 
 def test_the_two_schema_versions_are_declared_to_be_different_schemas() -> None:
