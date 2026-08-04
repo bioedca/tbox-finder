@@ -385,7 +385,11 @@ def _classify_refusal(exc: Exception) -> str:
         return "perfect_separation_beta_to_infinity"
     if "single-class" in text:
         return "single_class_calib_rung"
-    if "no rows" in text or "zero" in text and "calib" in text:
+    # Parenthesised deliberately (r4): `and` binds tighter than `or`, so the unbracketed
+    # form reads as `"no rows" in text or (...)` and would label ANY "no rows" refusal —
+    # including one about a graded rung — as an empty *calib* rung. The branch name
+    # claims calib in both readings, so both readings must require it.
+    if ("no rows" in text or "zero" in text) and "calib" in text:
         return "empty_calib_rung"
     return "other"
 

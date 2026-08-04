@@ -1975,3 +1975,17 @@ goes red, where the previous `/home/` grep would have stayed green.
 
 **Validation after r3.** `test_aux_ablation_check` **79 pass**; unit+golden+ml unchanged at
 3,766+ with zero regressions; ruff + black clean; artifact regenerated and clean.
+
+### P3-08 review round 4 (CodeRabbit CLI) — 1 finding, real, fixed
+
+**An operator-precedence bug in the refusal classifier.** `_classify_refusal` read
+`"no rows" in text or "zero" in text and "calib" in text`; Python binds `and` tighter than
+`or`, so the first disjunct stood alone and **any** "no rows" refusal was labelled
+`empty_calib_rung` — including one raised about a *graded* rung, which has nothing to do with
+calib. The branch name claims calib under both readings, so both readings must require it.
+Now parenthesised, with a table-driven test over all five refusal shapes plus a control, and
+sabotage-verified: reverting the parentheses turns exactly the `'test'`-rung case red.
+
+**Validation after r4.** `test_aux_ablation_check` **85 pass**; unit+golden+ml **3,773
+passed**, the 14 failures still a strict subset of main's 31 (`comm -13` empty). ruff + black
+clean. CI green on the pinned stack across all three jobs.

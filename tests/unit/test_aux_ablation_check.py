@@ -1125,3 +1125,24 @@ def test_validate_report_is_self_consistency_not_a_pass() -> None:
     assert report["gate"]["overall_pass"] is False
     assert E.validate_report(report) == [], "a truthfully-failing report must still validate"
     assert "self-consistent" in (E.validate_report.__doc__ or "")
+
+
+@pytest.mark.parametrize(
+    ("message", "expected"),
+    [
+        (
+            "every one of the 1089 positions is already its own arg-max",
+            "perfect_separation_beta_to_infinity",
+        ),
+        ("the 'calib' rung is single-class (8 positive of 8)", "single_class_calib_rung"),
+        ("no rows on the 'calib' rung: census ...", "empty_calib_rung"),
+        ("zero rows carry the 'calib' flag", "empty_calib_rung"),
+        # r4: `and` binds tighter than `or`, so the unbracketed form labelled ANY
+        # "no rows" refusal an empty CALIB rung — including this one, about a graded rung.
+        ("no rows on the 'test' rung", "other"),
+        ("logits carry a non-finite value", "other"),
+    ],
+)
+def test_refusals_are_classified_by_what_they_actually_say(message: str, expected: str) -> None:
+    """The classification names the cause, so a message about another rung must not borrow it."""
+    assert E._classify_refusal(ValueError(message)) == expected
