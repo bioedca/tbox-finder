@@ -25,7 +25,7 @@ than no-aux by more than τ: τ undefined). :func:`compare_arms` computes both a
 reports the exact τ-window on which they disagree. Picking τ is a new
 blinded-frozen default amending ADR-0005 D16 — CLAUDE.md §7 item 2, a user
 decision, not a config value. ``ablation.tolerance`` is therefore ``None`` and
-``ablation.verdict_delta_reading`` is ``"unpinned"``; nothing here fabricates a pass.
+``ablation.reading_delta.verdict`` is ``"unpinned"``; nothing here fabricates a pass.
 
 **2. AUPRC is rank-based, so temperature scaling cannot move it — but the
 posterior can still lose the ranking.** ``z ↦ z/T`` is strictly monotone for

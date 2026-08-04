@@ -1957,3 +1957,21 @@ unit+golden+ml **3,766 passed**, the 14 failures still a strict subset of main's
 (`comm -13` empty). ruff + black clean. Artifact regenerated: 0 absolute paths,
 `validate_report` clean, headline numbers unchanged. **3 further sabotages**, each RED against
 its named test, each restored byte-identically.
+
+### P3-08 review round 3 (CodeRabbit CLI) — 2 findings, both real, both fixed
+
+**A docstring pointing at a key that does not exist.** The module docstring told a reader to
+look for `ablation.verdict_delta_reading`; the report writes `ablation.reading_delta.verdict`.
+A pointer that does not grep is worse than none, because it reads as authoritative.
+
+**The leak guard was Linux-only.** The end-to-end check greped for `/home/`, so an artifact
+regenerated on macOS (`/Users/...`) or Windows (`C:\Users\...`) would have passed it while
+leaking exactly what the guard exists to catch. It now walks the JSON and asserts that **no
+string value is absolute at all** — structural rather than a list of prefixes, since what makes
+a path a leak is that it is absolute, not which OS produced it. The detector carries its own
+non-vacuity test (planted paths of all three shapes must be found, a relative path must not),
+and the widened check was verified by planting a `/Users/...` path in the real artifact: it
+goes red, where the previous `/home/` grep would have stayed green.
+
+**Validation after r3.** `test_aux_ablation_check` **79 pass**; unit+golden+ml unchanged at
+3,766+ with zero regressions; ruff + black clean; artifact regenerated and clean.

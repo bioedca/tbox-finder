@@ -881,7 +881,7 @@
   "entrypoint": "tbox_finder.stage2.eval",
   "env_lock": "envs/ml-rna.conda-lock.yml",
   "env_lock_hash": "60f966a8f009abfa3900357ffd0ac7c685d8b55b713da4498306480720bcf3b3",
-  "git_sha": "7ecd4e70c1e81de6c268aaab6d25ff22e6e2962a"
+  "git_sha": "8b325b32b0a73b9c6e6a796df8c8ef99817c7cda"
  },
  "schema_version": "1",
  "scoring": {
@@ -898,5 +898,5 @@
   "scores_sidecar": "reports/p3/stage2_scores.json"
  },
  "step": "P3-08",
- "written_at": "2026-08-03T23:50:08+00:00"
+ "written_at": "2026-08-03T23:59:53+00:00"
 }

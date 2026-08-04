@@ -945,14 +945,52 @@ def test_a_path_outside_every_root_is_passed_through_not_mangled() -> None:
     assert E.repo_relative("/definitely/not/in/this/repo.txt") == "/definitely/not/in/this/repo.txt"
 
 
-def test_the_committed_report_carries_no_developer_absolute_paths() -> None:
-    """The end-to-end assertion: grep the shipped artifacts, not just the helper."""
+def _absolute_path_strings(node: Any, trail: str = "") -> list[tuple[str, str]]:
+    """Every string in a JSON tree that is shaped like an absolute filesystem path.
+
+    Structural rather than a list of substrings to grep for (r3): `/home/` is Linux
+    only, so a contributor regenerating the artifact on macOS would leak `/Users/...`
+    and on Windows `C:\\Users\\...`, and both would sail past a `/home/` check. What
+    makes a path a leak is that it is *absolute*, not which OS produced it.
+    """
+    hits: list[tuple[str, str]] = []
+    if isinstance(node, str):
+        looks_absolute = node.startswith(("/", "\\\\")) or bool(
+            re.match(r"^[A-Za-z]:[\\\\/]", node)
+        )
+        if looks_absolute:
+            hits.append((trail, node))
+    elif isinstance(node, dict):
+        for key, value in node.items():
+            hits.extend(_absolute_path_strings(value, f"{trail}.{key}"))
+    elif isinstance(node, list):
+        for i, value in enumerate(node):
+            hits.extend(_absolute_path_strings(value, f"{trail}[{i}]"))
+    return hits
+
+
+def test_the_committed_artifacts_carry_no_absolute_paths_at_all() -> None:
+    """The end-to-end assertion: walk the shipped artifacts, not just the helper.
+
+    Checks every string value for absoluteness rather than grepping for one OS's home
+    prefix, so the guard does not silently weaken the first time somebody regenerates
+    these files on a different platform.
+    """
     for name in (E.DEFAULT_REPORT, E.DEFAULT_SCORES):
         path = REPO_ROOT / name
         if not path.is_file():
             pytest.skip(f"{name} has not been produced yet")
-        blob = path.read_text(encoding="utf-8")
-        assert "/home/" not in blob, f"{name} embeds an absolute developer path"
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        hits = _absolute_path_strings(payload)
+        assert hits == [], f"{name} embeds absolute path(s): {hits[:5]}"
+
+
+def test_the_absolute_path_detector_is_not_vacuous() -> None:
+    """A detector that finds nothing is indistinguishable from one that looks nowhere."""
+    planted = {"a": {"b": "/home/someone/x"}, "c": ["ok", "/Users/someone/y", "C:\\Users\\z"]}
+    trails = {t for t, _ in _absolute_path_strings(planted)}
+    assert trails == {".a.b", ".c[1]", ".c[2]"}
+    assert _absolute_path_strings({"rel": "data/processed/x.parquet", "n": 3}) == []
 
 
 def test_ranking_preserved_catches_a_tie_that_leaves_average_precision_unmoved() -> None:
