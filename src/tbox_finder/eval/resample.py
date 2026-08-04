@@ -148,12 +148,22 @@ def block_bootstrap(
     exchangeability unit. Each ``blocks[i]`` is one block's data; a bootstrap replicate
     draws ``len(blocks)`` blocks with replacement (seeded, so reproducible —
     CLAUDE.md §8.3), concatenates them, and applies ``statistic``. Returns
-    ``{point, lower, upper, ci_level, n_boot, n_blocks}`` over the non-NaN replicates;
+    ``{point, lower, upper, ci_level, n_boot, n_blocks}`` over the finite replicates;
     fewer than 2 blocks → not block-resamplable (NaN CI, ADR-0005 Amendment A1).
 
     ``n_boot`` in the return value is the number of replicates that actually produced a
-    finite statistic, which is ``<=`` the requested count when the statistic is undefined
-    on some draws.
+    **finite** statistic, which is ``<=`` the requested count when the statistic is
+    undefined on some draws. ``point`` is deliberately *not* filtered: it is whatever the
+    statistic returns on the full sample, so an undefined point estimate stays visible
+    rather than being replaced by a percentile of the replicates.
+
+    Non-finite replicates are dropped, not only NaN ones. The P0-31 version this moved from
+    tested ``isnan`` alone, so a statistic that could return ``±inf`` on a degenerate draw
+    put an infinity into the replicate list and carried it straight through to ``lower`` or
+    ``upper`` while ``n_boot`` still counted it (CodeRabbit CLI r1, reproduced by
+    execution). No committed CI moves: every statistic resampled in this repo today —
+    ``binned_ece``, ``ood_ece``, AUPRC, per-element F1 — is bounded, so the two filters
+    agree on all of them.
     """
     blocks = list(blocks)
     n_blocks = len(blocks)
@@ -172,7 +182,7 @@ def block_bootstrap(
     for _ in range(n_boot):
         drawn = [blocks[rng.randrange(n_blocks)] for _ in range(n_blocks)]
         val = statistic([x for blk in drawn for x in blk])
-        if not math.isnan(val):
+        if math.isfinite(val):
             reps.append(val)
     reps.sort()
     alpha = (1.0 - ci_level) / 2.0

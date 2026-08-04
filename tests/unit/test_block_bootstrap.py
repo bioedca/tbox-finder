@@ -208,6 +208,37 @@ def test_nan_replicates_are_dropped_and_reported_in_n_boot() -> None:
     assert out["lower"] == pytest.approx(1.5) and out["upper"] == pytest.approx(1.5)
 
 
+def test_non_finite_replicates_are_dropped_not_only_nan_ones() -> None:
+    """The filter is ``isfinite``, not ``not isnan`` (CodeRabbit CLI r1, reproduced by
+    execution before the fix was accepted).
+
+    ``math.isnan(inf)`` is False, so the P0-31 filter this moved from let an ``inf``
+    replicate into the list, where a single one drags ``upper`` to infinity *and* is still
+    counted in ``n_boot`` — which the docstring says counts finite replicates. Both signs
+    are checked, and the NaN behaviour is asserted unchanged alongside so the fix is a
+    widening, not a swap.
+    """
+
+    def inf_on_degenerate(xs: list) -> float:
+        return float("inf") if len(set(xs)) == 1 else _mean(xs)
+
+    def neg_inf_on_degenerate(xs: list) -> float:
+        return float("-inf") if len(set(xs)) == 1 else _mean(xs)
+
+    blocks = [[1.0], [2.0], [3.0]]
+    up = resample.block_bootstrap(blocks, inf_on_degenerate, n_boot=50, seed=1)
+    assert math.isfinite(up["upper"]) and up["n_boot"] < 50
+    down = resample.block_bootstrap(blocks, neg_inf_on_degenerate, n_boot=50, seed=1)
+    assert math.isfinite(down["lower"]) and down["n_boot"] < 50
+    # Positive control: a bounded statistic keeps every replicate, so the filter is not
+    # discarding good draws.
+    plain = resample.block_bootstrap(blocks, _mean, n_boot=50, seed=1)
+    assert plain["n_boot"] == 50 and math.isfinite(plain["lower"])
+    # `point` is NOT filtered — an undefined point estimate must stay visible.
+    degenerate = resample.block_bootstrap([[1.0], [1.0]], inf_on_degenerate, n_boot=10, seed=1)
+    assert math.isinf(degenerate["point"]) and degenerate["n_boot"] == 0
+
+
 def test_ci_level_widens_the_interval() -> None:
     blocks = [[float(i)] for i in range(20)]
     narrow = resample.block_bootstrap(blocks, _mean, n_boot=300, seed=5, ci_level=0.50)
