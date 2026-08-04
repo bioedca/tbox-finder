@@ -298,6 +298,23 @@ def row_text(value: Any) -> str:
 NULL_TOKENS: frozenset[str] = frozenset({"none", "nan", "na", "<na>", "null", "n/a"})
 
 
+def is_null_token(value: Any) -> bool:
+    """True when ``value``'s text is a :data:`NULL_TOKENS` spelling — a null that something
+    upstream has already rendered into a string.
+
+    The **normalisation** matters as much as the vocabulary: the tokens are stored lower-case
+    and unpadded, so a raw ``in NULL_TOKENS`` test passes ``"None"``, ``"NaN"`` and ``" na "``
+    straight through as if they were real values ([[stringified-null-survives-missing-checks]]).
+    Promoted here (P3-09) so the three readers that need it — this module's
+    :func:`bool_or_none`, ``stage2.heads._is_null_token`` and ``eval.resample.blocks_by_key``
+    — share one vocabulary *and* one normalisation
+    ([[promote-dont-duplicate-is-a-correctness-rule]]). A real ``None``/NaN sentinel is
+    :func:`is_missing`'s job; this is the text-shaped complement, so callers guarding a cell
+    generally need both.
+    """
+    return row_text(value).strip().lower() in NULL_TOKENS
+
+
 def bool_or_none(value: Any, *, field: str = "value") -> bool | None:
     """A tri-state boolean read of a parquet cell, with pandas' several spellings of missing.
 
@@ -338,7 +355,7 @@ def bool_or_none(value: Any, *, field: str = "value") -> bool | None:
         return True
     if text in {"false", "0"}:
         return False
-    if not text or text in NULL_TOKENS:
+    if not text or is_null_token(text):
         # An empty cell, or one whose STRING form is a null token, carries no assignment — so
         # it is missing, and routes to the caller's fail-closed refusal rather than raising.
         return None

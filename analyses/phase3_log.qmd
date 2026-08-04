@@ -2039,3 +2039,100 @@ where the data enters.
 unit+golden+ml **3,779 passed**, the 14 failures a strict subset of main's 31 (`comm -13`
 empty). ruff + black clean. **2 further sabotages**, each RED against its named test, each
 restored byte-identically.
+
+## Step P3-09 — 2026-08-04: the binned-ECE certification + the small-N-robust OOD-ECE estimator with block-bootstrap CIs
+
+**Inputs.** `metrics.{reliability_bins, binned_ece, block_bootstrap_ci}` (P0-31);
+`coverage.OOD_ECE_MIN_N = 20` (P0-27 / ADR-0005 Amendment A2); `masking.{is_missing,
+NULL_TOKENS}`; `splits.{FOLD_SCHEME_COLUMNS, COMMITTED_TABLE_COLUMNS}` (drift-guard only).
+**Process.** ADR-0005 D13 asks for a small-N-robust OOD estimator **distinct** from D11's
+binned one, and imp.md asks for the shared block resampler at
+`eval/resample.py::block_bootstrap`. Both roadmap symbols already existed under other names:
+`binned_ece` shipped at P0-31 and `block_bootstrap` shipped as `metrics.block_bootstrap_ci`.
+Neither was re-implemented. The resampler was **moved** to its roadmap home
+(`src/tbox_finder/eval/resample.py`) with `metrics.block_bootstrap_ci` left as a one-line
+delegation, and `binned_ece` is **re-exported** from the new `src/tbox_finder/calib/ece.py`,
+so imp.md's `{binned_ece, ood_ece}` pair is importable from one place with one implementation
+behind it. The genuinely new code is `ood_ece` — a leave-one-out **Beta-kernel**
+Nadaraya–Watson estimate of `ĝ(p) = E[y|p]`, from which both of D13's admissible forms are
+read off the same `ĝ`: the smoothed/kernel `L1` calibration error (the reported number) and
+the proper-scoring-rule Brier/Bregman decomposition (reported beside it with its residual).
+The disjunction D13 states is therefore satisfied without choosing one branch on the ADR's
+behalf. Also new: `blocks_by_key`, which builds resampling blocks from a **named** split
+column and refuses the record-identifier columns by name — before this, "resamples at block
+granularity" was a property of each call site, and nothing in the repo could refuse a
+record-keyed grouping.
+**Outputs.** `src/tbox_finder/eval/resample.py` (`block_bootstrap`, `blocks_by_key`,
+`BLOCK_GRANULARITY_COLUMNS`, `RECORD_LEVEL_COLUMNS`); `src/tbox_finder/calib/ece.py`
+(`ood_ece`, `kernel_conditional_mean`, `select_bandwidth`, `brier_decomposition`);
+`masking.is_null_token` (promoted; `stage2.heads._is_null_token` now delegates);
+`tests/unit/test_ece.py` (42), `tests/unit/test_block_bootstrap.py` (21),
+`tests/ml/test_eval_gate.py` (+2). No report artifact and no DVC object — P3-09 ships
+estimators; the graded artifact is P3-10's.
+
+**The measurement that decided the design.** Nothing is unbiased at N = 20, so the direction
+of each candidate's bias was measured (40 seeded replicates per cell, uniform posteriors,
+against a known truth) rather than assumed:
+
+| estimator | calibrated, truth 0.000 | | | squashed T=2.5, truth 0.123 | | |
+|---|---:|---:|---:|---:|---:|---:|
+| | n=20 | n=50 | n=200 | n=20 | n=50 | n=200 |
+| kernel plug-in | 0.132 | 0.098 | 0.051 | 0.153 | 0.106 | 0.100 |
+| kernel + debias | 0.053 | 0.039 | 0.017 | 0.077 | 0.051 | 0.063 |
+| binned + debias (D11) | 0.068 | 0.048 | 0.024 | 0.065 | 0.062 | 0.060 |
+| binned plug-in | 0.280 | 0.175 | 0.085 | 0.337 | 0.220 | 0.146 |
+
+Two things follow. **A binned estimator cannot be used at the D13 unit**: 15 equal-mass bins
+over 20 rows read **0.280 on perfectly calibrated data**, 5.6× the GATE-2 threshold, purely
+from binning noise — the concrete form of the published result and the reason A2 specifies an
+estimator that needs no per-bin fills. And **debiasing buys a lower floor by destroying the
+magnitude**: on genuinely miscalibrated data both debiased columns saturate at ~0.06
+regardless of N against a truth of 0.123, i.e. they converge to about half the real drift.
+Since D13 compares the reported OOD ECE against a *pinned drift bound*, the magnitude is the
+quantity — so `ood_ece` reports the **plug-in**, whose bias is upward, decays with N, and is
+conservative in the direction that matters (over-stating drift makes a "calibrated-negative
+PASS" harder to earn, never easier).
+
+**A finding this step records but does not resolve.** The same table shows the *gated* D11
+estimator saturating at ~0.060 against a truth of 0.123. `metrics.binned_ece`'s docstring
+already flags "final certification of the debiasing term is a P3-exit / ADR concern"; this is
+measured evidence for that pending decision, not a change to it. **No D11 behaviour moved
+here** and GATE-2 is still graded at P3-10 on the estimator as it stands.
+
+**Validation.** `test_ece` 42 + `test_block_bootstrap` 21 + `test_eval_gate` 12 = **72 pass**;
+`test_masking` + `test_stage2_heads` + `test_gate4_metrics` + `test_recalibrate` +
+`test_coverage_sim` pass alongside, so the `masking` promotion and the resampler move are
+behaviour-preserving on both sides. Full unit+golden+ml in the worktree: **3,841 passed / 14
+failed**, and the 14 are **exactly** the failures a matched baseline worktree at `main`
+produces (`comm -13` empty, `comm -23` empty — a like-for-like comparison in a second
+worktree, because the main checkout's data state differs and gives 31). ruff 0.15.0 + black
+25.11.0 clean; `snakemake --lint` clean. **20 source sabotages, each RED against its NAMED
+test, each restored byte-identically with `__pycache__` cleared both ways.**
+
+**Decisions.** (1) *Path drift, recorded not silently taken* — imp.md names
+`calibration/ece.py`; the module lands at **`calib/ece.py`**, inside the package P2-13
+created, on the P3-07 precedent (two near-homonymous calibration namespaces is a permanent
+import confusion). (2) *Promote, don't fork* — the resampler moved rather than being copied,
+which makes any "metrics agrees with resample" test a tautology, so every check is a
+hand-computed value or a structural property of the draw. (3) *The min-N floor has no
+override* — `ood_ece` reads `coverage.OOD_ECE_MIN_N` directly and exposes **no** keyword for
+it, because A2 froze it in code precisely so no committed report could contradict the pin; a
+test flips the constant to prove the boundary tracks it. (4) *Below the floor the estimate is
+withheld from the graded key* — `ood_ece` is `None`, the value is recorded under
+`inadmissible_point`, and no CI is computed, so a consumer cannot grade a number the ADR says
+supports no verdict. (5) *No estimator hyperparameter is claimed as ADR-pinned* — bandwidth,
+its selection rule, the L1 exponent and the plug-in choice are recorded in the payload and
+flagged as implementer choices, the same standing as `binned_ece`'s debias term
+(cross-ref ADR-0005 D11/D13/A2).
+
+**One sabotage did not bite, and the gap was real.** Deleting `ood_ece`'s own `n < 2` raise
+left `test_length_and_size_guards` green: the call fell through to `kernel_conditional_mean`,
+whose guard raises a message containing the same words, and `pytest.raises` is satisfied by
+*any* matching raise. Both guards are now matched on the message that names their own
+function.
+
+**Evidence gate (CLAUDE.md §10.1).** Binned-ECE small-sample bias [arXiv:2012.08668]; binning
+sample-inefficiency [arXiv:1909.10155]; kernel calibration-error estimators applicable to
+small samples [arXiv:2210.07810]; the proper-calibration-error decomposition [arXiv:2312.08589];
+boundary-bias-free Beta kernels on the unit interval [DOI:10.1016/S0167-9473(99)00010-9]. All
+accessed 2026-08-04. **Commit.** see PR.

@@ -152,7 +152,9 @@ def _clean(value: Any) -> str:
 
 
 def _is_null_token(text: str) -> bool:
-    return text.strip().lower() in NULL_TOKENS
+    """Delegates to :func:`tbox_finder.masking.is_null_token` (P3-09) — one vocabulary AND
+    one normalisation, so this reader cannot drift from ``masking.bool_or_none``'s."""
+    return masking.is_null_token(text)
 
 
 def is_admissible_label(field: str, text: str) -> bool:

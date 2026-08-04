@@ -1,0 +1,244 @@
+"""P3-09 — the shared block resampler (:mod:`tbox_finder.eval.resample`).
+
+Two things are under test and they need different kinds of evidence.
+
+``block_bootstrap`` was **moved** here from ``metrics.block_bootstrap_ci``, which now
+delegates. That makes "the two agree" a tautology
+([[promote-dont-duplicate-is-a-correctness-rule]]),
+so every check below is a **hand-computed** value or a structural property of the draw —
+never a cross-module comparison. The one comparison that *is* worth making is the opposite
+one: that the delegation is real (same object identity), because a delegation that quietly
+forked would pass an agreement test on the day it was written and drift afterwards.
+
+``blocks_by_key`` is new. Its whole job is refusing groupings that would silently become a
+record-level bootstrap, so each refusal is paired with the corresponding clean input
+succeeding ([[raises-test-needs-a-positive-control]]): a guard that raised on *everything*
+would satisfy a bare ``pytest.raises`` just as well.
+
+Pure stdlib — runs in the bare CI env.
+"""
+
+from __future__ import annotations
+
+import math
+
+import pytest
+
+from tbox_finder import metrics as M
+from tbox_finder.eval import resample
+
+
+# ========================================================================== #
+# blocks_by_key — grouping, and the refusals that keep it block-level
+# ========================================================================== #
+def test_blocks_by_key_groups_and_orders_deterministically() -> None:
+    items = ["a", "b", "c", "d", "e"]
+    labels = [7, 3, 7, 3, 11]
+    blocks = resample.blocks_by_key(items, labels, key_name="cluster_id")
+    # Sorted by label: 3 -> [b, d], 7 -> [a, c], 11 -> [e].
+    assert blocks == [["b", "d"], ["a", "c"], ["e"]]
+    # Every item lands in exactly one block; nothing is dropped or duplicated.
+    assert sorted(x for blk in blocks for x in blk) == sorted(items)
+
+
+def test_blocks_by_key_orders_mixed_type_labels_without_raising() -> None:
+    # Mixed int/str labels are not mutually comparable, so the natural sort raises and the
+    # function must fall back to a str sort rather than propagate a TypeError.
+    blocks = resample.blocks_by_key([1, 2, 3], ["b", 10, "a"], key_name="loo_order_unit")
+    assert blocks == [[2], [3], [1]]  # "10" < "a" < "b"
+
+
+def test_blocks_by_key_refuses_record_level_keys_but_accepts_block_keys() -> None:
+    items, labels = [1, 2], ["x", "y"]
+    # Positive control: the same call with a block-granularity key succeeds.
+    assert resample.blocks_by_key(items, labels, key_name="cluster_id") == [[1], [2]]
+    for record_key in resample.RECORD_LEVEL_COLUMNS:
+        with pytest.raises(ValueError, match="identifies a record, not a block"):
+            resample.blocks_by_key(items, labels, key_name=record_key)
+
+
+def test_blocks_by_key_fails_closed_on_an_unknown_key() -> None:
+    with pytest.raises(ValueError, match="not a known block-granularity column"):
+        resample.blocks_by_key([1, 2], ["x", "y"], key_name="resolved_genus")
+
+
+@pytest.mark.parametrize("bad", [None, float("nan"), "None", "nan", " NA ", "<NA>"])
+def test_blocks_by_key_refuses_missing_and_stringified_null_labels(bad: object) -> None:
+    # The stringified spellings are the dangerous half: they survive an `is None` test and
+    # would collapse every unlabelled record into one giant pseudo-block.
+    with pytest.raises(ValueError, match="is missing"):
+        resample.blocks_by_key([1, 2], ["c1", bad], key_name="cluster_id")
+    # Positive control: a real label in that slot is accepted.
+    assert resample.blocks_by_key([1, 2], ["c1", "c2"], key_name="cluster_id") == [[1], [2]]
+
+
+def test_blocks_by_key_refuses_a_length_mismatch() -> None:
+    with pytest.raises(ValueError, match="same length"):
+        resample.blocks_by_key([1, 2, 3], ["c1", "c2"], key_name="cluster_id")
+
+
+def test_block_granularity_columns_track_the_split_schema() -> None:
+    """Drift guard for the allowlist, which is a literal here because this module must stay
+    stdlib-only (``metrics`` imports it) while ``splits`` is a heavy CLI module.
+
+    If §9.2 gains another held-out-unit column, the allowlist must gain it too — otherwise
+    the new scheme's CIs quietly fail closed at the first ``blocks_by_key`` call.
+    """
+    from tbox_finder import splits
+
+    upstream_units = {c for c in splits.FOLD_SCHEME_COLUMNS if c.endswith("_unit")}
+    assert upstream_units, "no *_unit columns found — has FOLD_SCHEME_COLUMNS been renamed?"
+    assert upstream_units <= set(resample.BLOCK_GRANULARITY_COLUMNS)
+    # cluster_id is the homology block and is not a fold column, so it is pinned separately.
+    assert "cluster_id" in resample.BLOCK_GRANULARITY_COLUMNS
+    assert "cluster_id" in splits.COMMITTED_TABLE_COLUMNS
+    # The refused names must be real record identifiers in the committed table, not strawmen.
+    for col in resample.RECORD_LEVEL_COLUMNS:
+        assert col in splits.COMMITTED_TABLE_COLUMNS
+    assert not set(resample.RECORD_LEVEL_COLUMNS) & set(resample.BLOCK_GRANULARITY_COLUMNS)
+
+
+# ========================================================================== #
+# block_bootstrap — hand-computed point, block-granularity draws, guards
+# ========================================================================== #
+def _mean(xs: list) -> float:
+    return sum(xs) / len(xs) if xs else float("nan")
+
+
+def test_point_estimate_is_the_statistic_over_all_records() -> None:
+    blocks = [[1.0, 2.0], [6.0], [3.0, 4.0, 5.0]]
+    out = resample.block_bootstrap(blocks, _mean, n_boot=10)
+    # Hand-computed: (1+2+6+3+4+5)/6 = 3.5 — pooled over records, NOT a mean of block means
+    # (which would be (1.5 + 6 + 4)/3 = 3.833...).
+    assert out["point"] == pytest.approx(3.5)
+    assert out["n_blocks"] == 3
+
+
+#: Blocks of **unequal** size, each record tagged with its block. Unequal sizes are the
+#: point: with equal sizes a record-level draw and a block-level draw produce replicates of
+#: the same length, and the two are indistinguishable from the outside
+#: ([[symmetric-count-fixture-blind-to-inversion]]).
+_TAGGED_BLOCKS = [[("a", 0)], [("b", 0), ("b", 1)], [("c", i) for i in range(5)]]
+
+
+def _all_blocks_whole(rows: list) -> float:
+    """1.0 iff every tag present appears a whole number of *complete* block copies."""
+    sizes = {"a": 1, "b": 2, "c": 5}
+    counts: dict[str, int] = {}
+    for tag, _ in rows:
+        counts[tag] = counts.get(tag, 0) + 1
+    return float(all(n % sizes[tag] == 0 for tag, n in counts.items()))
+
+
+def test_replicates_draw_whole_blocks_never_records() -> None:
+    """The load-bearing property (ADR-0005 D5): a replicate is a multiset of *whole* blocks.
+
+    Checked two ways, because "the CI looked plausible" is not evidence of block granularity:
+    every replicate must consist of complete block copies, and the replicate *lengths* must
+    fall in the enumerable set of three-block sums — which excludes the constant length a
+    record-level bootstrap would always produce.
+    """
+    out = resample.block_bootstrap(_TAGGED_BLOCKS, _all_blocks_whole, n_boot=300, seed=1)
+    assert (out["point"], out["lower"], out["upper"]) == (1.0, 1.0, 1.0)
+
+    lengths = resample.block_bootstrap(
+        _TAGGED_BLOCKS, lambda rows: float(len(rows)), n_boot=300, seed=1
+    )
+    attainable = {
+        float(x + y + z) for x in (1, 2, 5) for y in (1, 2, 5) for z in (1, 2, 5)
+    }  # {3,4,5,6,7,8,9,11,12,15} — note 10, 13, 14 are unreachable
+    assert lengths["lower"] in attainable and lengths["upper"] in attainable
+    assert (
+        lengths["lower"] < 8.0 < lengths["upper"]
+    ), "replicate size never varies — that is what a record-level bootstrap looks like"
+
+
+def test_the_whole_block_control_bites_on_a_record_level_draw() -> None:
+    """Matched control for the test above ([[matched-control-before-certifying]]).
+
+    The same statistic applied to a hand-built **record-level** resample must fail it —
+    otherwise `_all_blocks_whole` is measuring nothing and the test above is vacuous.
+    """
+    import random
+
+    rows = [r for blk in _TAGGED_BLOCKS for r in blk]
+    rng = random.Random(0)
+    violations = sum(
+        _all_blocks_whole([rows[rng.randrange(len(rows))] for _ in range(len(rows))]) == 0.0
+        for _ in range(200)
+    )
+    # Measured 174/200 at this seed. Block-level draws violate 0/300 in the test above, so
+    # the two regimes are separated by a wide margin; the bar is set well below the measured
+    # rate so it pins the *contrast*, not this seed's exact count.
+    assert violations >= 120, f"record-level draws must usually violate; got {violations}/200"
+
+
+def test_seeded_reproducibility_and_seed_sensitivity() -> None:
+    blocks = [[float(i), float(i) + 0.5] for i in range(8)]
+    a = resample.block_bootstrap(blocks, _mean, n_boot=200, seed=7)
+    b = resample.block_bootstrap(blocks, _mean, n_boot=200, seed=7)
+    assert a == b  # CLAUDE.md §8.3 — same seed, identical interval
+    c = resample.block_bootstrap(blocks, _mean, n_boot=200, seed=8)
+    assert (c["lower"], c["upper"]) != (a["lower"], a["upper"])  # the seed is actually used
+
+
+def test_fewer_than_two_blocks_is_not_resamplable() -> None:
+    one = resample.block_bootstrap([[1.0, 3.0]], _mean, n_boot=100)
+    assert one["point"] == pytest.approx(2.0)  # the point is still defined
+    assert math.isnan(one["lower"]) and math.isnan(one["upper"])
+    assert one["n_boot"] == 0 and one["n_blocks"] == 1
+    empty = resample.block_bootstrap([], _mean, n_boot=100)
+    assert math.isnan(empty["point"]) and empty["n_blocks"] == 0
+    # Positive control: two blocks *are* resamplable, so the guard is about block count.
+    two = resample.block_bootstrap([[1.0], [3.0]], _mean, n_boot=100)
+    assert two["n_boot"] == 100 and not math.isnan(two["lower"])
+
+
+def test_nan_replicates_are_dropped_and_reported_in_n_boot() -> None:
+    """``n_boot`` is the number of replicates that produced a finite statistic — not the
+    number requested. A statistic that is undefined on some draws must shrink the count
+    rather than poison the percentiles."""
+
+    def only_if_mixed(xs: list) -> float:
+        return _mean(xs) if len(set(xs)) > 1 else float("nan")
+
+    out = resample.block_bootstrap([[1.0], [2.0]], only_if_mixed, n_boot=100, seed=3)
+    # All-same draws (both blocks identical) are NaN and dropped; mixed draws survive.
+    assert 0 < out["n_boot"] < 100
+    assert out["lower"] == pytest.approx(1.5) and out["upper"] == pytest.approx(1.5)
+
+
+def test_ci_level_widens_the_interval() -> None:
+    blocks = [[float(i)] for i in range(20)]
+    narrow = resample.block_bootstrap(blocks, _mean, n_boot=300, seed=5, ci_level=0.50)
+    wide = resample.block_bootstrap(blocks, _mean, n_boot=300, seed=5, ci_level=0.99)
+    assert wide["lower"] < narrow["lower"] <= narrow["upper"] < wide["upper"]
+    assert narrow["ci_level"] == 0.50 and wide["ci_level"] == 0.99
+
+
+def test_percentile_is_linear_interpolation() -> None:
+    # Hand-computed against numpy's default 'linear' method on [0, 1, 2, 3]:
+    # q=0.5 -> pos 1.5 -> 1.5 ; q=0.25 -> pos 0.75 -> 0.75 ; q=0 -> 0 ; q=1 -> 3.
+    vals = [0.0, 1.0, 2.0, 3.0]
+    assert resample.percentile(vals, 0.5) == pytest.approx(1.5)
+    assert resample.percentile(vals, 0.25) == pytest.approx(0.75)
+    assert resample.percentile(vals, 0.0) == pytest.approx(0.0)
+    assert resample.percentile(vals, 1.0) == pytest.approx(3.0)
+    assert math.isnan(resample.percentile([], 0.5))
+    assert resample.percentile([2.5], 0.9) == pytest.approx(2.5)
+
+
+# ========================================================================== #
+# The delegation is real — not a fork that happens to agree today
+# ========================================================================== #
+def test_metrics_entry_point_delegates_to_this_module() -> None:
+    blocks = [[1.0, 2.0], [3.0], [4.0, 5.0]]
+    assert M.block_bootstrap_ci(blocks, _mean, n_boot=50, seed=4) == resample.block_bootstrap(
+        blocks, _mean, n_boot=50, seed=4
+    )
+    # The above is a tautology *if* the delegation holds, so pin the delegation itself:
+    # a re-implementation under the old name would keep the agreement test green.
+    assert M.block_bootstrap.__module__ == "tbox_finder.eval.resample"
+    assert M.DEFAULT_N_BOOT == resample.DEFAULT_N_BOOT == 2000
+    src = __import__("inspect").getsource(M.block_bootstrap_ci)
+    assert "return block_bootstrap(" in src, "metrics must forward, not re-implement"

@@ -43,9 +43,9 @@ concern (CLAUDE.md §7), not a P0-31 assertion.
 from __future__ import annotations
 
 import math
-import random
 from collections.abc import Callable, Sequence
 
+from tbox_finder.eval.resample import DEFAULT_N_BOOT, block_bootstrap
 from tbox_finder.labels import CLASS_INDEX, CLASS_ORDER, CORE_ELEMENTS
 from tbox_finder.power import (
     ECE_GATE,
@@ -605,60 +605,19 @@ def block_bootstrap_ci(
     blocks: Sequence,
     statistic: Callable[[list], float],
     *,
-    n_boot: int = 2000,
+    n_boot: int = DEFAULT_N_BOOT,
     ci_level: float = 0.95,
     seed: int = 42,
 ) -> dict:
     """Percentile CI for ``statistic`` resampled at the **block** (homology-cluster /
-    held-out-order) level, never per-record (ADR-0005 D5) — the phylogenetic exchangeability
-    unit. Each ``blocks[i]`` is one block's data; a bootstrap replicate draws ``len(blocks)``
-    blocks with replacement (seeded, so reproducible — CLAUDE.md §8.3), concatenates them,
-    and applies ``statistic``. Returns ``{point, lower, upper, ci_level, n_boot, n_blocks}``
-    over the non-NaN replicates; fewer than 2 blocks → not block-resamplable (NaN CI,
-    ADR-0005 Amendment A1)."""
-    blocks = list(blocks)
-    n_blocks = len(blocks)
-    point = statistic([x for blk in blocks for x in blk]) if n_blocks else float("nan")
-    if n_blocks < 2:
-        return {
-            "point": point,
-            "lower": float("nan"),
-            "upper": float("nan"),
-            "ci_level": ci_level,
-            "n_boot": 0,
-            "n_blocks": n_blocks,
-        }
-    rng = random.Random(seed)
-    reps: list[float] = []
-    for _ in range(n_boot):
-        drawn = [blocks[rng.randrange(n_blocks)] for _ in range(n_blocks)]
-        val = statistic([x for blk in drawn for x in blk])
-        if not math.isnan(val):
-            reps.append(val)
-    reps.sort()
-    alpha = (1.0 - ci_level) / 2.0
-    lower = _percentile(reps, alpha)
-    upper = _percentile(reps, 1.0 - alpha)
-    return {
-        "point": point,
-        "lower": lower,
-        "upper": upper,
-        "ci_level": ci_level,
-        "n_boot": len(reps),
-        "n_blocks": n_blocks,
-    }
+    held-out-order) level, never per-record (ADR-0005 D5).
 
-
-def _percentile(sorted_vals: list[float], q: float) -> float:
-    """Linear-interpolation percentile (numpy default ``'linear'``) over a pre-sorted list."""
-    if not sorted_vals:
-        return float("nan")
-    if len(sorted_vals) == 1:
-        return sorted_vals[0]
-    pos = q * (len(sorted_vals) - 1)
-    lo = math.floor(pos)
-    hi = math.ceil(pos)
-    if lo == hi:
-        return sorted_vals[int(pos)]
-    frac = pos - lo
-    return sorted_vals[lo] * (1.0 - frac) + sorted_vals[hi] * frac
+    **Delegates to** :func:`tbox_finder.eval.resample.block_bootstrap`, which P3-09 made
+    the single home for the resampler (imp.md names ``eval/resample.py::block_bootstrap``
+    as the shared one built once and imported by P4 GATE-1, P5 FDR CI and P6). This entry
+    point is kept because ~10 call sites and several committed report schemas are written
+    against the name; it forwards rather than re-implements, so there is exactly one
+    resampler to fix ([[promote-dont-duplicate-is-a-correctness-rule]]). Behaviour,
+    defaults and return shape are unchanged, so no committed CI moves.
+    """
+    return block_bootstrap(blocks, statistic, n_boot=n_boot, ci_level=ci_level, seed=seed)

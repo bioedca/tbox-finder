@@ -184,6 +184,62 @@ def test_macro_average_and_block_bootstrap() -> None:
     assert one["n_boot"] == 0 and one["lower"] != one["lower"]  # NaN CI
 
 
+# -------------------------------------------------------------------------- #
+# P3-09 — the second, OOD calibration estimator (ADR-0005 D13 + Amendment A2).
+#
+# The harness now computes TWO calibration errors and they are graded differently:
+# D11's binned ECE is the GATE-2 quantity, D13's OOD ECE is reported and never gated.
+# Wiring them the wrong way round — grading the OOD number, or reporting an
+# inadmissible one — is exactly the harness failure this file exists to catch (§8.4),
+# so the distinction is pinned here and not only in tests/unit/test_ece.py.
+#
+# Deliberately NOT added to the heavy tier's committed expectation: the smoke fixture
+# is 100 real positives plus corpus-derived decoys and carries **no homology-cluster
+# structure** (clustering happens downstream, in the splits pipeline). `ood_ece`
+# requires block labels, and inventing a blocking for the fixture would fabricate the
+# very structure the estimator exists to respect (§10.2/§10.3). Its committed golden
+# belongs to the step that has real clusters to give it (P3-10).
+# -------------------------------------------------------------------------- #
+def test_ood_ece_is_a_second_estimator_wired_to_the_ungated_path() -> None:
+    from tbox_finder import coverage
+    from tbox_finder.calib import ece
+
+    # Hand-computed, exactly as for every other kernel in this file. With a constant
+    # posterior all kernel weights are equal, so g_hat_{-i} = (S - y_i)/(n-1) and the mean
+    # gap collapses to S/n - p = 0.8 - 0.5 = 0.30, for ANY bandwidth.
+    y, p = [1] * 80 + [0] * 20, [0.5] * 100
+    blocks = [f"c{i % 5}" for i in range(100)]
+    out = ece.ood_ece(y, p, blocks, n_boot=25)
+    assert out["ood_ece"] == pytest.approx(0.30, abs=1e-12)
+
+    # The two estimators are distinct functions and disagree on this input, so a harness
+    # that silently swapped one for the other would be caught.
+    assert out["ood_ece"] != pytest.approx(M.binned_ece(y, p), abs=1e-6)
+    assert ece.binned_ece is M.binned_ece  # D11's estimator is re-exported, not re-written
+
+    # The OOD number is reported, never gated: it carries no pass/fail and the GATE-2
+    # predicate is not applied to it anywhere.
+    assert out["gated"] is False
+    assert "gate_pass" not in out and "ece_gate" not in out
+
+    # The A2 admissibility floor is enforced on the way out, on POSITIVES not rows.
+    assert out["min_n"] == coverage.OOD_ECE_MIN_N == 20
+    thin = ece.ood_ece([1] * 19 + [0] * 200, [0.5] * 219, [f"c{i % 5}" for i in range(219)])
+    assert thin["admissible"] is False and thin["ood_ece"] is None and thin["ci"] is None
+
+
+def test_gate2_predicate_still_grades_only_the_binned_in_distribution_ece() -> None:
+    """GATE-2's threshold belongs to D11's estimator. Guard against the harness ever
+    routing the (larger, small-N-biased) OOD number through the 0.05 bar."""
+    from tbox_finder.calib import ece
+
+    assert not hasattr(ece, "gate2_ood_pass")
+    assert "ECE_GATE" not in ece.__all__
+    # The gate predicate is unchanged and still keyed to the D11 pin.
+    assert M.gate2_ece_pass(M.ECE_GATE - 1e-9) is True
+    assert M.gate2_ece_pass(M.ECE_GATE + 1e-9) is False
+
+
 # ========================================================================== #
 # Heavy tier — real smoke fixture + committed expectation + library cross-check.
 # ========================================================================== #
