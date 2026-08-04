@@ -2217,3 +2217,64 @@ The two sets **do not overlap**, and every high-drift order is Actinobacteria (9
 **Decisions.** Path drift, recorded not taken silently: the module lands at `src/tbox_finder/calib/gate2.py`, not imp.md's `calibration/gate2.py` — the same correction as P3-07 and P3-09, since two near-homonymous calibration namespaces is a permanent import confusion. No ADR amended and no §7 sign-off sought: nothing pinned changed. **Three items now stand for the P3-exit ADR round** — D11's missing degenerate-limit rule (P3-08), the D11 debias term's measured saturation (P3-09), and D13's unpinned drift bound (this step).
 
 **Commit.** see PR [#103](https://github.com/bioedca/tbox-finder/pull/103).
+
+### P3-10 review round 1 — CodeRabbit CLI (3 findings) **and** the GitHub app (5), only one in common
+
+Both paths ran: the CLI (`coderabbit review --committed --base main`) and — unsolicited — the
+GitHub app, which means automatic review is **enabled** again after being off on 2026-08-03.
+The overlap was a single finding, so running both was additive rather than redundant.
+
+**(both, major) The committed report carried this machine's filesystem layout.** Four fields —
+two `provenance.extra.declared_outputs`, the `provenance.inputs` key for the LOO scores, and
+`scoring.loo_scores` — held absolute paths including the OS user name and a
+`.claude/worktrees/p3-10-gate2-ece` checkout, in a **public** repo. The sibling entries beside
+them were repo-relative, so the artifact was also un-diffable across machines: a re-run
+elsewhere changes an `inputs` *key* without any content changing. Root cause is running from
+the main checkout with absolute paths into a linked worktree. Fixed by routing every recorded
+path through P3-08's `stage2.eval.repo_relative`, which already relativises against **both**
+roots — the repo has three forks of that helper and this step deliberately added no fourth.
+`provenance.inputs` keys are normalised *after* hashing, because `build_provenance` must be
+handed a path it can actually open. **The report was regenerated, not hand-edited.**
+
+**(app, major) Diverting an invalid report was not enough on a RE-run.** `_output_path` sends a
+rejected report to `<name>.invalid.json` but did not remove the canonical path, so a previously
+accepted report stayed there with older numbers and older provenance — a stale grade reading as
+current, beside a fresh `.invalid.json`. The figure data was worse: written unconditionally to
+the path `plot_gate2_figures` consumes, so the two committed artifacts could disagree. Both now
+go through one `write_outputs`, divert together, and **unlink the canonical file** when
+diverting, so its absence is the signal. Snakemake deletes a failed job's outputs and had been
+masking this entirely; only a direct CLI run exposes it.
+
+**A sabotage of the first fix did not bite, and the gap was real.** Reverting `main`'s call site
+(`_output_path(args.figure_data, …)` → `Path(args.figure_data)`) left the suite **green**: the
+test exercised `_output_path` but never that `main` *used* it. The write is now one
+`write_outputs` function so the **pairing** is what is tested, and the sabotage bites.
+
+**(app, minor) The reliability legend claimed one bin's count for every bin.** It read
+`rows[0]["n"]` and said "rows each"; equal-**mass** binning only gives equal counts when `n`
+divides by 15, which 3,045 happens to do — exactly the coincidence a label should not rest on.
+`_bin_size_label` now reports a range unless every bin really matches.
+
+**(app, minor) The eval-gate golden's three detection vectors were never asserted aligned.**
+`det_labels` is sized from `len(prod_codes)` and `det_units` from `len(names)` plus the decoys;
+one shared index reads all three, and `ood_ece`'s own length check cannot see a misalignment
+because `y` and `block_labels` are both derived from the same `keep`. Asserted where the
+vectors meet. The reviewer also noted that `n_excluded_no_block == 53` decomposes as 50 + 3
+only while none of the 40 sampled dinucleotide sources is one of the 3 null-`order` records —
+a property of the decoy **seed**, not of the construction. That decomposition is now asserted
+explicitly, so a seed change fails with a readable cause instead of shifting a golden.
+
+**(app, minor) `pytest.importorskip("numpy")` sat below the imports it guarded.** The
+`tbox_finder` imports above it already pull numpy, so collection would fail before the guard
+could run — it was inert. Removed rather than moved: the module's numpy dependency is hard and
+its docstring already says the tier runs in CI's stack rather than skipping itself green.
+
+**(CLI, minor) An observation recorded, NOT acted on.** The reviewer noted that 4 of the 704
+leave-clade-out dinucleotide decoys carry positive logits (indices 8763, 8809, 9153, 9332 —
+verified), a **0.57 %** decoy false-positive rate at threshold 0, and suggested a dedicated
+negative-control FPR criterion. Measured and true; also true is that **864 of the 8,641**
+held-out positives (**10.0 %**) sit at non-positive logits, which is the leave-clade-out
+*recall* story and belongs to GATE-1 at P4. Adding an FPR criterion would be a **new gate** —
+a blinded-frozen default requiring ADR sign-off (CLAUDE.md §7 item 2) — so it is recorded here
+and not invented in a calibration step. GATE-2's Phase-3 half grades the D11 in-distribution
+ECE on the 3,045 test rows, and nothing else.

@@ -1,6 +1,6 @@
 {
   "gate": 0.05,
-  "generated_at_utc": "2026-08-04T20:37:52+00:00",
+  "generated_at_utc": "2026-08-04T21:30:41+00:00",
   "generated_by": "src/tbox_finder/calib/gate2.py",
   "in_distribution": {
     "bin_concentration": {

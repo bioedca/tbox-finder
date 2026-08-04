@@ -452,6 +452,16 @@ def _smoke_ood_ece(det_labels, det_scores, det_units):
     """
     from tbox_finder.calib import ece as ECE
 
+    # The three vectors are indexed by ONE shared index below, and they are built from
+    # different sources — `det_labels` is sized from `len(prod_codes)`, `det_units` from
+    # `len(names)` plus the decoys. If those ever diverged, every unit after the gap would
+    # attach to the wrong label and `ood_ece`'s own length check could not see it (`y` and
+    # `block_labels` are both derived from `keep`, so they always agree with each other).
+    if not (len(det_labels) == len(det_scores) == len(det_units)):
+        raise AssertionError(
+            "detection vectors are misaligned: labels="
+            f"{len(det_labels)}, scores={len(det_scores)}, units={len(det_units)}"
+        )
     keep = [i for i, unit in enumerate(det_units) if unit is not None]
     out = ECE.ood_ece(
         [det_labels[i] for i in keep],
@@ -585,7 +595,17 @@ def test_the_ood_golden_is_blocked_by_a_real_taxon_and_not_by_record() -> None:
 
     # 2. The unblockable rows were dropped, not defaulted. 50 GC-background decoys have no
     #    source record at all; 3 of the 100 catalogue records carry no order.
+    #    ⚠ 53 = 50 + 3 holds only while none of the 40 sampled dinucleotide source records
+    #    is one of those 3 null-order records — a property of the decoy SEED, not of the
+    #    construction. The decomposition is asserted explicitly so a seed change fails here
+    #    with a readable cause instead of silently shifting a committed golden.
     assert got["n_excluded_no_block"] == 53
+    assert got["n_positives"] == 100 - 3, "3 catalogue records carry no order"
+    n_dinuc = _DECOY["n_dinuc_sources"] * _DECOY["dinuc_per_source"]
+    assert got["n_records"] - got["n_positives"] == n_dinuc, (
+        "every dinucleotide decoy inherited an order; if a sampled source record had a null "
+        "order this would drop below 80 and the 53 above would no longer decompose as 50 + 3"
+    )
     assert got["n_records"] + got["n_excluded_no_block"] == 100 + _DECOY["n_gc"] + (
         _DECOY["n_dinuc_sources"] * _DECOY["dinuc_per_source"]
     )

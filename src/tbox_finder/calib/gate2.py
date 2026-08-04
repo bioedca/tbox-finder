@@ -113,6 +113,7 @@ __all__ = [
     "prior_shift_band_sweep",
     "score_loo_holdout",
     "validate_report",
+    "write_outputs",
 ]
 
 SCHEMA_VERSION = "1"
@@ -198,6 +199,22 @@ _UNPINNED_DEPLOYMENT_PRIOR = (
 # --------------------------------------------------------------------------- #
 # Split-table joins — the scores files carry no taxonomy and no clustering
 # --------------------------------------------------------------------------- #
+def _recorded_path(path: str | Path) -> str:
+    """A path as the repository sees it — never as this machine does.
+
+    Every path here lands in a committed artifact in a **public** repo, where an absolute
+    path publishes the OS user name and the local directory layout and contributes nothing
+    a reader can use; the sha256 beside it is the identity evidence, the string is only a
+    locator. It bites hardest under a linked worktree, where the inputs are reached by
+    absolute path from the main checkout — exactly how this ran. Delegates to P3-08's
+    :func:`stage2.eval.repo_relative`, which already relativises against **both** roots,
+    rather than adding a fourth copy of that logic to the repo.
+    """
+    from tbox_finder.stage2 import eval as E
+
+    return E.repo_relative(path)
+
+
 def _is_true(value: Any) -> bool:
     """``True`` only for a genuine boolean truth, never for ``nan`` or ``"False"``.
 
@@ -258,7 +275,7 @@ def _read_split_table(
     for row in rows:
         row[_ROW_ID] = str(row[_ROW_ID])
     meta = {
-        "path": path.as_posix(),
+        "path": _recorded_path(path),
         "sha256": PROV.sha256_file(path),
         "n_rows": len(rows),
     }
@@ -475,6 +492,20 @@ def grade_in_distribution(
             "n_fit_rows_also_graded": len(calib_ids & graded_ids),
         },
     }
+
+
+def _bin_size_label(rows: Sequence[Mapping[str, Any]]) -> str:
+    """ "N rows each" only when every bin really has N.
+
+    Equal-**mass** binning splits n rows into :data:`ECE_N_BINS` groups; when n is not
+    divisible by the bin count the groups differ in size, so quoting one bin's count for all
+    of them states a number some bins do not have. (n = 3,045 happens to divide by 15 today —
+    which is exactly the kind of coincidence a label should not depend on.)
+    """
+    counts = sorted({int(row["n"]) for row in rows})
+    if not counts:
+        return "no rows"
+    return f"{counts[0]} rows each" if len(counts) == 1 else f"{counts[0]}-{counts[-1]} rows"
 
 
 def _bin_concentration(reliability: Sequence[Mapping[str, Any]], ece: float) -> dict[str, Any]:
@@ -1179,7 +1210,7 @@ def plot_figures(
                 linewidth=1.6,
                 solid_capstyle="butt",
                 alpha=0.85,
-                label=f"bin (span of p, {rows[0]['n']} rows each)" if i == 0 else None,
+                label=f"bin (span of p, {_bin_size_label(rows)})" if i == 0 else None,
             )
         ax.scatter(
             [row["conf"] for row in rows],
@@ -1444,6 +1475,42 @@ def build_parser() -> Any:
     return parser
 
 
+def write_outputs(
+    report: Mapping[str, Any],
+    *,
+    report_path: str | Path,
+    figure_data_path: str | Path,
+    valid: bool,
+) -> tuple[Path, Path]:
+    """Write the report and its figure data, diverting **both** when the report is invalid.
+
+    They divert together on purpose. ``plot_gate2_figures`` consumes exactly
+    ``figure_data_path``, so writing figure data derived from a *rejected* report to that
+    path would publish figures for a grade nothing accepted — beside a report that was
+    correctly diverted, which reads as a rendering bug rather than a refused result. Inside
+    the workflow Snakemake deletes a failed job's outputs and masks it; a direct CLI run
+    does not. Kept as one function so the *pairing* is testable: checking ``_output_path``
+    alone passes even when a call site stops using it.
+    """
+    written: list[Path] = []
+    for canonical, payload in (
+        (Path(report_path), dict(report)),
+        (Path(figure_data_path), figure_data(report)),
+    ):
+        target = _output_path(canonical, valid=valid)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        if not valid and canonical.exists():
+            # Diverting is not enough on a RE-run. A previously accepted artifact would stay
+            # at the consumer path with older numbers and older provenance, so a reader of
+            # `DEFAULT_REPORT` gets a stale grade sitting beside a fresh `.invalid.json` —
+            # the exact outcome "never written to the path a consumer reads" exists to
+            # prevent. Remove the canonical file so the absence is the signal.
+            canonical.unlink()
+        written.append(target)
+    return written[0], written[1]
+
+
 def _output_path(report_path: str | Path, *, valid: bool) -> Path:
     """An invalid report is diverted, never written to the path a consumer reads."""
     path = Path(report_path)
@@ -1535,8 +1602,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     }
     scoring = {
         "arm": arm,
-        "in_distribution_scores": str(args.scores),
-        "loo_scores": str(args.loo_scores),
+        "in_distribution_scores": _recorded_path(args.scores),
+        "loo_scores": _recorded_path(args.loo_scores),
         "in_distribution_device": in_dist["meta"].get("device"),
         "loo_device": loo["meta"].get("device"),
         "batch_size": loo["meta"].get("batch_size"),
@@ -1556,21 +1623,20 @@ def main(argv: Sequence[str] | None = None) -> int:
         inputs=[args.dataset, args.scores, args.loo_scores],
         env_lock=ENV_LOCK,
         adr=ADR,
-        extra={"declared_outputs": [str(args.report), str(args.figure_data)]},
+        extra={"declared_outputs": [_recorded_path(args.report), _recorded_path(args.figure_data)]},
     )
+    # `build_provenance` keys `inputs` by the string it was handed, and it must be handed a
+    # path it can actually OPEN — which under a linked worktree means an absolute one. So the
+    # keys are normalised here, AFTER hashing: the sha256 stays the file's own, only the
+    # locator loses this machine's home directory and checkout layout.
+    prov["inputs"] = {_recorded_path(k): v for k, v in prov["inputs"].items()}
 
     report = build_report(
         gate=gate, prior_shift=shift, ood=ood, scope=scope, scoring=scoring, provenance=prov
     )
     problems = validate_report(report)
-    out = _output_path(args.report, valid=not problems)
-    out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-
-    fig_path = Path(args.figure_data)
-    fig_path.parent.mkdir(parents=True, exist_ok=True)
-    fig_path.write_text(
-        json.dumps(figure_data(report), indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    out, _ = write_outputs(
+        report, report_path=args.report, figure_data_path=args.figure_data, valid=not problems
     )
 
     print(f"wrote {out}")

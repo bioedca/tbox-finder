@@ -21,7 +21,9 @@ What this file is trying to catch, in order of how badly it would hurt:
 
 from __future__ import annotations
 
+import json
 import math
+from pathlib import Path
 
 import pytest
 
@@ -33,7 +35,11 @@ from tbox_finder.calib import gate2 as G
 from tbox_finder.calib import recalibrate as R
 from tbox_finder.eval import resample as RS
 
-pytest.importorskip("numpy")
+# No `pytest.importorskip("numpy")` here: the `tbox_finder` imports above already pull
+# numpy, so collection would fail in that block and a guard below it could never run.
+# This module's dependency on numpy is hard, and the file docstring says so.
+
+_REPO = Path(__file__).resolve().parents[2]
 
 
 # --------------------------------------------------------------------------- #
@@ -955,6 +961,98 @@ def test_the_disclosures_carry_the_two_inherited_caveats() -> None:
     assert "SATURATE" in p3_09[0], "the P3-09 debias-saturation caveat must travel with it too"
     assert "0.123" in p3_09[0], "the measured truth the estimator saturated against"
     assert "P5" in joined, "the FDR half of GATE-2 is not represented here and must say so"
+
+
+def test_no_recorded_path_publishes_this_machines_layout(tmp_path) -> None:
+    """Every path the report records must be repo-relative (CodeRabbit r1, major).
+
+    The step ran from the main checkout with absolute paths into a linked worktree, so the
+    committed artifact carried an OS user name and a `.claude/worktrees/...` layout into a
+    **public** repo — and two reports generated on different machines would differ in their
+    `inputs` key set without differing in content.
+    """
+    inside = _REPO / "reports" / "p3" / "stage2_scores.json"
+    assert not G._recorded_path(inside).startswith("/"), G._recorded_path(inside)
+    assert G._recorded_path(inside) == "reports/p3/stage2_scores.json"
+    # the same file reached by an absolute path must normalise identically
+    assert G._recorded_path(str(inside.resolve())) == G._recorded_path(inside)
+    # a path genuinely outside the repo is returned unchanged rather than mangled
+    outside = tmp_path / "elsewhere.json"
+    assert G._recorded_path(outside) == str(outside)
+
+
+def test_an_invalid_report_diverts_its_figure_data_too(tmp_path) -> None:
+    """The figure-data path is what `plot_gate2_figures` consumes (CodeRabbit r1, minor).
+
+    Leaving figure data derived from a *rejected* report at the consumer path publishes
+    figures for a grade nothing accepted. Both artifacts must divert together.
+    """
+    report_path = tmp_path / "gate2_p3_ece.json"
+    figure_path = tmp_path / "gate2_figure_data.json"
+    assert G._output_path(report_path, valid=True) == report_path
+    assert G._output_path(figure_path, valid=True) == figure_path
+    bad_report = G._output_path(report_path, valid=False)
+    bad_figure = G._output_path(figure_path, valid=False)
+    assert bad_report.name.endswith(".invalid.json") and bad_report != report_path
+    assert bad_figure.name.endswith(".invalid.json") and bad_figure != figure_path
+    # and the two must divert IN STEP through the shipped writer, not merely be capable of
+    # it — checking `_output_path` alone stays green when a call site stops using it, which
+    # is exactly what a sabotage of the call site proved.
+    report = _report()
+    for valid in (True, False):
+        out_dir = tmp_path / ("valid" if valid else "invalid")
+        rp, fp = out_dir / "gate2_p3_ece.json", out_dir / "p3" / "gate2_figure_data.json"
+        wrote_report, wrote_figure = G.write_outputs(
+            report, report_path=rp, figure_data_path=fp, valid=valid
+        )
+        assert wrote_report.is_file() and wrote_figure.is_file()
+        assert (wrote_report == rp) is valid, "report diverted out of step"
+        assert (wrote_figure == fp) is valid, "figure data diverted out of step"
+        assert not rp.is_file() or valid, "a rejected grade was left at the consumer path"
+        assert not fp.is_file() or valid, "figure data for a rejected grade reached consumers"
+        assert (
+            json.loads(wrote_figure.read_text())["in_distribution"]["ece"] == report["gate"]["ece"]
+        )
+
+
+def test_a_diverted_rerun_removes_the_stale_canonical_artifacts(tmp_path) -> None:
+    """Diverting is not enough on a RE-run (CodeRabbit app r1, major).
+
+    A previously accepted report left at the consumer path is a *stale grade* that reads as
+    current, sitting beside a fresh ``.invalid.json``. The absence of the canonical file is
+    what tells a consumer the latest run was refused.
+    """
+    report = _report()
+    rp, fp = tmp_path / "gate2_p3_ece.json", tmp_path / "gate2_figure_data.json"
+
+    good_report, good_figure = G.write_outputs(
+        report, report_path=rp, figure_data_path=fp, valid=True
+    )
+    assert (good_report, good_figure) == (rp, fp) and rp.is_file() and fp.is_file()
+    first = json.loads(rp.read_text())["gate"]["ece"]
+
+    stale = dict(report)
+    stale["gate"] = dict(report["gate"], ece=0.999)
+    bad_report, bad_figure = G.write_outputs(
+        stale, report_path=rp, figure_data_path=fp, valid=False
+    )
+    assert bad_report.name.endswith(".invalid.json") and bad_report.is_file()
+    assert bad_figure.name.endswith(".invalid.json") and bad_figure.is_file()
+    assert not rp.exists(), f"a stale grade (ece={first}) survived a refused re-run at {rp}"
+    assert not fp.exists(), "figure data for a superseded grade survived a refused re-run"
+    assert json.loads(bad_report.read_text())["gate"]["ece"] == 0.999
+
+
+def test_the_bin_size_label_never_claims_a_count_some_bins_lack() -> None:
+    """Equal-MASS bins differ in size when n is not divisible by the bin count."""
+    assert G._bin_size_label([{"n": 203}, {"n": 203}]) == "203 rows each"
+    assert G._bin_size_label([{"n": 203}, {"n": 202}, {"n": 203}]) == "202-203 rows"
+    assert G._bin_size_label([]) == "no rows"
+    # the real report's own bins, whichever shape they have, must describe themselves
+    rows = _report()["gate"]["reliability"]
+    counts = {int(r["n"]) for r in rows}
+    label = G._bin_size_label(rows)
+    assert ("each" in label) is (len(counts) == 1)
 
 
 def test_the_report_identifies_its_step_adr_and_prd_sections() -> None:

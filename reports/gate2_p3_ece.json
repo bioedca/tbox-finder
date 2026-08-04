@@ -255,7 +255,7 @@
     ]
   },
   "gated": true,
-  "generated_at_utc": "2026-08-04T20:37:52+00:00",
+  "generated_at_utc": "2026-08-04T21:30:41+00:00",
   "generated_by": "src/tbox_finder/calib/gate2.py",
   "is_science": true,
   "note": "`gate.passes` is GATE-2's P3 half: the ADR-0005 D11 in-distribution ECE of the named posterior against the blinded-frozen 0.05 default. `overall_pass` is stricter \u2014 it is `gate.passes` AND every machinery, completeness and non-gated-ness clause. The FDR half of GATE-2 is graded at P5 (D12) and is not represented here.",
@@ -1938,16 +1938,16 @@
     "env_lock_hash": "60f966a8f009abfa3900357ffd0ac7c685d8b55b713da4498306480720bcf3b3",
     "extra": {
       "declared_outputs": [
-        "/home/bioedca/tbox-phylogeny/tbox-finder/.claude/worktrees/p3-10-gate2-ece/reports/gate2_p3_ece.json",
-        "/home/bioedca/tbox-phylogeny/tbox-finder/.claude/worktrees/p3-10-gate2-ece/reports/p3/gate2_figure_data.json"
+        "reports/gate2_p3_ece.json",
+        "reports/p3/gate2_figure_data.json"
       ]
     },
-    "generated_at_utc": "2026-08-04T20:37:52.542199+00:00",
+    "generated_at_utc": "2026-08-04T21:30:41.775866+00:00",
     "git_sha": "8301e0c4b00d407cb732905c3a9fc736c209ef84",
     "inputs": {
-      "/home/bioedca/tbox-phylogeny/tbox-finder/.claude/worktrees/p3-10-gate2-ece/reports/p3/stage2_scores_loo.json": "ecb16fb4c5bca9df383598ced00fa00ae8d336e980db286fcbcc9e7d907f08cb",
       "data/processed/stage2_dataset.parquet": "376ad12bd6462686cc7467a5c3e34e63977ccca0c06465e24ec8345224a45f65",
-      "reports/p3/stage2_scores.json": "a8d9bb413afb14b153430d5bfc70e570b50b1f85f3e599102ecc9b906e9f5575"
+      "reports/p3/stage2_scores.json": "a8d9bb413afb14b153430d5bfc70e570b50b1f85f3e599102ecc9b906e9f5575",
+      "reports/p3/stage2_scores_loo.json": "ecb16fb4c5bca9df383598ced00fa00ae8d336e980db286fcbcc9e7d907f08cb"
     },
     "outputs": {},
     "rule": "workflow/rules/calibration.smk :: gate2_ece",
@@ -2031,7 +2031,7 @@
       "structure_head": false
     },
     "loo_device": "cuda",
-    "loo_scores": "/home/bioedca/tbox-phylogeny/tbox-finder/.claude/worktrees/p3-10-gate2-ece/reports/p3/stage2_scores_loo.json",
+    "loo_scores": "reports/p3/stage2_scores_loo.json",
     "n_boot": 2000,
     "ood_n_boot": 200
   },
