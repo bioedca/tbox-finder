@@ -2212,7 +2212,7 @@ The two sets **do not overlap**, and every high-drift order is Actinobacteria (9
 
 **`is_science` is derived, not asserted.** GATE-4's report can hardcode it because its incomplete path raises and writes no file; this one always writes, so `--max-units` would otherwise land a truncated grade at the phase-exit path flagged as real science. It is now the conjunction of the three completeness clauses, re-derived by `validate_report`, and two sabotages (hardcoding it; reading only one of the three) are caught.
 
-**Validation.** `reports/gate2_p3_ece.json` re-validates **clean** under the shipped code with all 19 clauses re-deriving identically and `overall_pass = true`. 52 `test_gate2` + the extended eval-gate tier; full unit+golden+ml **3,898 passed / 14 failed**, the 14 **exactly** a matched baseline worktree's set at `main` (`comm` empty both ways — the main checkout gives a different count because it holds the LFS/DVC data a fresh worktree lacks, so the baseline had to be a second worktree). ruff 0.15.0 + black 25.11.0 + `snakemake --lint` clean; `snakemake -n gate2_ece` resolves `stage2_dataset → stage2_scores_loo → gate2_ece`. **47 sabotages, each RED against its NAMED test, each restored byte-identically.** Two did not bite on the first pass and both gaps were real: an all-TRUE fixture made `overall_pass = all(clauses)` and `overall_pass = True` indistinguishable (now checked on a report with one clause deliberately FALSE), and the disclosure test matched a phrase that survived deleting the clause that introduced it (now matched on provenance marker *and* substance).
+**Validation.** `reports/gate2_p3_ece.json` re-validates **clean** under the shipped code with all 19 clauses re-deriving identically and `overall_pass = true`. 64 `test_gate2` + the extended eval-gate tier; full unit+golden+ml **3,910 passed / 14 failed**, the 14 **exactly** a matched baseline worktree's set at `main` (`comm` empty both ways — the main checkout gives a different count because it holds the LFS/DVC data a fresh worktree lacks, so the baseline had to be a second worktree). ruff 0.15.0 + black 25.11.0 + `snakemake --lint` clean; `snakemake -n gate2_ece` resolves `stage2_dataset → stage2_scores_loo → gate2_ece`. **61 sabotages, each RED against its NAMED test, each restored byte-identically.** Two did not bite on the first pass and both gaps were real: an all-TRUE fixture made `overall_pass = all(clauses)` and `overall_pass = True` indistinguishable (now checked on a report with one clause deliberately FALSE), and the disclosure test matched a phrase that survived deleting the clause that introduced it (now matched on provenance marker *and* substance).
 
 **Decisions.** Path drift, recorded not taken silently: the module lands at `src/tbox_finder/calib/gate2.py`, not imp.md's `calibration/gate2.py` — the same correction as P3-07 and P3-09, since two near-homonymous calibration namespaces is a permanent import confusion. No ADR amended and no §7 sign-off sought: nothing pinned changed. **Three items now stand for the P3-exit ADR round** — D11's missing degenerate-limit rule (P3-08), the D11 debias term's measured saturation (P3-09), and D13's unpinned drift bound (this step).
 
@@ -2343,3 +2343,30 @@ producer's output, so it cannot drift; the shape check was then dropped as a tau
 report in seconds rather than by re-running the 40-minute leave-one-out bootstrap. It is the
 same pure `figure_data(report)` call `grade` makes, and a test pins the two to be
 byte-identical.
+
+### P3-10 review round 3 — CodeRabbit CLI, 3 findings (all minor), all real, all fixed
+
+None touched the report, so no regeneration was needed.
+
+**(minor) The divert was one-directional.** Round 2 made a rejected run remove the canonical
+artifact so its absence is the signal; the mirror case was unhandled. A rejected run followed by
+an accepted one left `gate2_p3_ece.invalid.json` on disk beside the fresh accepted report — a
+rejected grade with older numbers sitting next to an accepted one, the same ambiguity the first
+unlink exists to prevent. `write_outputs` now clears whichever of the pair it is not writing.
+
+**(minor) The figure subtitle formatted optional fields without the guards used two lines
+below it.** `figure_data` derives `ece`, `ece_plugin` and `temperature` through `.get(...)`
+chains, so all three can be `None` — and a run that could not fit a temperature is exactly the
+one whose figure someone wants to look at. `f"{None:.4f}"` raises, turning a diagnostic into a
+crash. The CI guard was also asymmetric: it tested `lower` and then formatted both ends. A
+`_fmt` helper now returns `"n/a"` for anything non-finite or non-numeric, and both CI ends are
+checked. Verified by hand under the `viz` env (a §8.5 manual gate — matplotlib is in neither the
+local pytest env nor CI's pinned install list, so an `importorskip` would skip everywhere):
+`plot_figures` renders both PNGs, rc 0, on a figure-data with no ECE, no temperature, no
+concentration block and a half-missing CI.
+
+**(minor) A loop-only test could grade nothing.** `test_the_ood_bootstrap_blocks_are_split_
+columns_never_record_ids` put its whole check inside `for column in RS.RECORD_LEVEL_COLUMNS`, so
+an empty allowlist would make it pass while checking nothing — item 1 of this module's own
+docstring, in the module that names it. Both allowlists are now asserted non-empty first, and
+the sabotage that empties `RECORD_LEVEL_COLUMNS` turns it red.

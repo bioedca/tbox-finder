@@ -607,6 +607,11 @@ def test_the_ood_bootstrap_blocks_are_split_columns_never_record_ids() -> None:
     assert G.OOD_UNIT_KEY in RS.BLOCK_GRANULARITY_COLUMNS
     report = _report()
     assert G.derive_clauses(report)["ood_resampled_at_block_granularity"] is True
+    assert RS.RECORD_LEVEL_COLUMNS, (
+        "no record-level column to sabotage, so the loop below grades nothing — the exact "
+        "pass-on-absent-evidence shape this module exists to catch"
+    )
+    assert RS.BLOCK_GRANULARITY_COLUMNS, "no block-granularity column to accept either"
     for column in RS.RECORD_LEVEL_COLUMNS:
         mutated = _report()
         mutated["ood"]["unit_key"] = column
@@ -1011,6 +1016,52 @@ def test_a_diverted_rerun_removes_the_stale_canonical_artifacts(tmp_path) -> Non
     assert not rp.exists(), f"a stale grade (ece={first}) survived a refused re-run at {rp}"
     assert not fp.exists(), "figure data for a superseded grade survived a refused re-run"
     assert json.loads(bad_report.read_text())["gate"]["ece"] == 0.999
+
+
+def test_an_accepted_rerun_removes_the_stale_diverted_artifacts(tmp_path) -> None:
+    """The mirror of the divert (CodeRabbit r3): a rejected run's `.invalid.json` must not
+    survive a later accepted one, or a reader sees a rejected grade with older numbers
+    sitting beside the accepted report."""
+    report = _report()
+    rp, fp = tmp_path / "gate2_p3_ece.json", tmp_path / "gate2_figure_data.json"
+
+    rejected = dict(report)
+    rejected["gate"] = dict(report["gate"], ece=0.999)
+    bad_report, bad_figure = G.write_outputs(
+        rejected, report_path=rp, figure_data_path=fp, valid=False
+    )
+    assert bad_report.is_file() and bad_figure.is_file() and not rp.exists()
+
+    good_report, good_figure = G.write_outputs(
+        report, report_path=rp, figure_data_path=fp, valid=True
+    )
+    assert (good_report, good_figure) == (rp, fp) and rp.is_file() and fp.is_file()
+    assert not bad_report.exists(), "a rejected grade survived beside the accepted report"
+    assert not bad_figure.exists(), "rejected figure data survived beside the accepted one"
+    assert json.loads(rp.read_text())["gate"]["ece"] == report["gate"]["ece"]
+
+
+def test_the_figure_caption_formatter_never_raises_on_an_absent_number() -> None:
+    """A run that could not fit a temperature is exactly the one whose figure is wanted (r3).
+
+    `figure_data` derives `ece`, `ece_plugin` and `temperature` through `.get(...)` chains, so
+    all three can be `None`, and `f"{None:.4f}"` raises mid-render. Only the formatter is
+    exercised here: `plot_figures` itself needs matplotlib, which is in neither the local
+    pytest env nor CI's pinned install list, so an `importorskip` would skip everywhere. The
+    render is verified by hand under the `viz` env as a CLAUDE.md §8.5 manual gate.
+    """
+    assert G._fmt(0.005661656) == "0.0057"
+    assert G._fmt(0) == "0.0000"
+    assert G._fmt(1.140627, ".2f") == "1.14"
+    for absent in (None, float("nan"), float("inf"), float("-inf"), True, False, "0.5", [1]):
+        assert G._fmt(absent) == "n/a", absent
+
+    # the fields it guards really can be absent: a report with no calibration block
+    stripped = _report()
+    stripped["gate"] = {k: v for k, v in stripped["gate"].items() if k != "calibration"}
+    fig = G.figure_data(stripped)
+    assert fig["in_distribution"]["temperature"] is None
+    assert G._fmt(fig["in_distribution"]["temperature"]) == "n/a"
 
 
 def test_the_bin_size_label_never_claims_a_count_some_bins_lack() -> None:

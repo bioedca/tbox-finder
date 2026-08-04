@@ -1214,6 +1214,18 @@ def figure_data(report: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+def _fmt(value: Any, spec: str = ".4f") -> str:
+    """Format a number for a figure caption, or say it is absent — never raise mid-render.
+
+    A report that could not fit a temperature carries ``None`` here, and that is precisely
+    the run whose figure someone wants to look at; a ``TypeError`` at render time turns a
+    diagnostic into a crash.
+    """
+    if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value):
+        return format(float(value), spec)
+    return "n/a"
+
+
 def plot_figures(
     *,
     figure_data_path: str | Path = DEFAULT_FIGURE_DATA,
@@ -1283,9 +1295,12 @@ def plot_figures(
     ax.set_ylim(0.0, 1.0)
     ax.legend(loc="upper left", fontsize=7.5)
     ci = ind.get("ece_ci") or {}
+    # `figure_data` derives these from `.get(...)` chains, so any of them can be None on a
+    # report that failed to fit — exactly the run whose figure someone would want to look at.
+    # The reads below already guard with `isinstance`; these now match.
     subtitle = (
-        f"ECE = {ind['ece']:.4f} (gate {data['gate']}) · plug-in {ind['ece_plugin']:.4f} · "
-        f"T = {ind['temperature']:.4f}"
+        f"ECE = {_fmt(ind.get('ece'))} (gate {data['gate']}) · "
+        f"plug-in {_fmt(ind.get('ece_plugin'))} · T = {_fmt(ind.get('temperature'))}"
     )
     conc = ind.get("bin_concentration") or {}
     if isinstance(conc.get("top_bin_share_of_ece"), (int, float)):
@@ -1294,7 +1309,11 @@ def plot_figures(
             f"{conc.get('n_bins')} bins · {conc.get('n_bins_with_saturated_accuracy')} bins "
             "at accuracy 0 or 1 (near-separated posterior)"
         )
-    if isinstance(ci.get("lower"), (int, float)) and math.isfinite(float(ci["lower"])):
+    # Both ends, not just `lower`: the guard was asymmetric and the format string reads both.
+    if all(
+        isinstance(ci.get(end), (int, float)) and math.isfinite(float(ci[end]))
+        for end in ("lower", "upper")
+    ):
         subtitle += f"\nblock-bootstrap 95% CI [{ci['lower']:.4f}, {ci['upper']:.4f}]"
     fig.suptitle(
         f"GATE-2 in-distribution reliability — {ECE_N_BINS} equal-mass bins, debiased\n{subtitle}",
@@ -1549,6 +1568,11 @@ def write_outputs(
             # the exact outcome "never written to the path a consumer reads" exists to
             # prevent. Remove the canonical file so the absence is the signal.
             canonical.unlink()
+        if valid:
+            # The mirror case, and the same ambiguity in the other direction: a previous
+            # run's diverted artifact left beside a freshly accepted one shows a reader a
+            # rejected grade with older numbers next to the accepted report.
+            _output_path(canonical, valid=False).unlink(missing_ok=True)
         written.append(target)
     return written[0], written[1]
 
