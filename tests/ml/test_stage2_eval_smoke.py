@@ -344,8 +344,14 @@ def test_the_committed_ablation_report_validates() -> None:
     report = json.loads(_REPORT.read_text(encoding="utf-8"))
     assert E.validate_report(report) == []
     assert report["step"] == E.STEP
-    # The verdict is the user's, not the run's — see the module docstring of eval.py.
-    assert report["ablation"]["verdict"] == "requires_signoff"
+    # The §7 stop is settled (user sign-off 2026-08-03): the ABSOLUTE reading of D16
+    # governs, so the verdict is derived from the with-aux arm's own ECE. The delta
+    # tolerance stays unpinned, and `validate_report` still refuses a report that pins one.
+    assert report["ablation"]["governing_reading"] == E.GOVERNING_READING
+    assert report["ablation"]["verdict"] == E.verdict_from_absolute_reading(
+        report["ablation"]["reading_absolute"]["passes"]
+    )
+    assert report["ablation"]["verdict"] in E.VERDICTS
     assert report["ablation"]["reading_delta"]["tolerance"] is None
 
     # NOT `overall_pass is True`. The committed run does not pass its own machinery

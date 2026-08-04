@@ -16,7 +16,7 @@ is that producer; everything above it is pure numpy and grades in bare CI.
 
 Three things about this file are load-bearing and easy to get wrong:
 
-**1. The gate's threshold does not exist, and this module does not invent one.**
+**1. The gate's threshold never existed, and the §7 stop it raised is SETTLED.**
 ``imp.md`` grades "beyond a pre-registered tolerance"; no such tolerance is pinned
 in ``PRD.md``, in any ADR, in ``conf/`` or in ``src/``. D16's own sentence admits
 two readings — an *absolute* one (the with-aux arm must still clear the D11 gate,
@@ -25,7 +25,13 @@ than no-aux by more than τ: τ undefined). :func:`compare_arms` computes both a
 reports the exact τ-window on which they disagree. Picking τ is a new
 blinded-frozen default amending ADR-0005 D16 — CLAUDE.md §7 item 2, a user
 decision, not a config value. ``ablation.tolerance`` is therefore ``None`` and
-``ablation.reading_delta.verdict`` is ``"unpinned"``; nothing here fabricates a pass.
+**User sign-off (AskUserQuestion, 2026-08-03) settled it on the absolute
+reading**, so no τ is pinned and no ADR is amended. Both readings are still
+computed and the τ-window on which they would disagree is still published, because
+a decision is only auditable beside the alternative it rejected.
+``ablation.reading_delta.tolerance`` stays ``None`` and the validator **refuses** any
+report that pins one; ``ablation.verdict`` is *derived* from the governing reading's
+evidence by :func:`verdict_from_absolute_reading`, never assigned.
 
 **2. AUPRC is rank-based, so temperature scaling cannot move it — but the
 posterior can still lose the ranking.** ``z ↦ z/T`` is strictly monotone for
@@ -77,6 +83,7 @@ __all__ = [
     "repo_relative",
     "ranking_preserved",
     "reconcile_cached_scores",
+    "verdict_from_absolute_reading",
     "rungs_for_rows",
     "score_rows",
     "select_arm_pair",
@@ -131,6 +138,24 @@ BOOTSTRAP_SEED = 20260803
 #: never applied. `tests/unit/test_aux_ablation_check.py` re-reads them out of the ADR
 #: so this copy cannot drift away from the decision it quotes.
 D17_REFERENCE_MARGINS: dict[str, float] = {"ece": 0.02, "auprc": 0.03}
+#: **The governing reading of ADR-0005 D16, settled by user sign-off (AskUserQuestion,
+#: 2026-08-03).** D16 says the aux heads must not degrade "the calibrated primary head's
+#: GATE-2 grade", and the GATE-2 grade (D11) is a pass/fail: ECE <= 0.05. So the check is
+#: whether the with-aux arm still HOLDS that grade — which needs no new number and no ADR
+#: amendment. The delta against the no-aux arm stays **reported, not gated**; the
+#: never-pre-registered tau is therefore not needed and is still refused by the validator.
+GOVERNING_READING = "absolute"
+GOVERNING_READING_SOURCE = (
+    "ADR-0005 D16 read against D11; user sign-off (AskUserQuestion, 2026-08-03) — "
+    "the absolute reading governs, the delta is reported not gated, no tolerance is pinned"
+)
+#: Verdicts `compare_arms` may emit. Each is DERIVED from the governing reading's own
+#: evidence; none is assignable by a caller.
+VERDICT_HOLDS = "aux_does_not_degrade_the_gate2_grade"
+VERDICT_DEGRADES = "aux_degrades_the_gate2_grade"
+VERDICT_UNDECIDABLE = "undecidable_with_aux_arm_has_no_ece"
+VERDICTS = (VERDICT_HOLDS, VERDICT_DEGRADES, VERDICT_UNDECIDABLE)
+
 D17_REFERENCE_SOURCE = (
     "ADR-0005 D17 — RiNALMo→RNA-FM backbone-swap trigger; NOT the D16 aux-ablation bar"
 )
@@ -756,8 +781,25 @@ def compare_arms(
             ),
             "would_pass_auprc": auprc_degradation <= D17_REFERENCE_MARGINS["auprc"],
         },
-        "verdict": "requires_signoff",
+        "governing_reading": GOVERNING_READING,
+        "governing_reading_source": GOVERNING_READING_SOURCE,
+        # Derived, never assigned. The verdict is a function of the governing reading's
+        # own recorded evidence, so a report cannot carry a verdict its numbers do not
+        # support — and `validate_report` re-derives it rather than trusting it.
+        "verdict": verdict_from_absolute_reading(absolute_passes),
     }
+
+
+def verdict_from_absolute_reading(absolute_passes: bool | None) -> str:
+    """The D16 verdict, derived from the governing (absolute) reading and nothing else.
+
+    A free function so :func:`validate_report` can re-derive it instead of believing the
+    string in the file ([[gate-clauses-need-re-derivation]]). ``None`` means the with-aux
+    arm has no ECE at all, which is genuinely undecidable — not a failure and not a pass.
+    """
+    if absolute_passes is None:
+        return VERDICT_UNDECIDABLE
+    return VERDICT_HOLDS if absolute_passes else VERDICT_DEGRADES
 
 
 def _divergence_note(
@@ -1098,10 +1140,19 @@ def validate_report(report: Mapping[str, Any]) -> list[str]:
                 "ablation.reading_delta.tolerance is set, but no tolerance is pre-registered "
                 "in PRD.md, any ADR, conf/ or src/ — pinning one needs CLAUDE.md §7 sign-off"
             )
-        if ablation.get("verdict") != "requires_signoff":
+        expected = verdict_from_absolute_reading(
+            (ablation.get("reading_absolute") or {}).get("passes")
+        )
+        if ablation.get("verdict") != expected:
             problems.append(
-                f"ablation.verdict {ablation.get('verdict')!r} != 'requires_signoff'; this "
-                "step may not self-certify a gate whose threshold does not exist"
+                f"ablation.verdict {ablation.get('verdict')!r} but the governing "
+                f"(absolute) reading's own evidence gives {expected!r}; the verdict is "
+                "derived, not assignable"
+            )
+        if ablation.get("governing_reading") != GOVERNING_READING:
+            problems.append(
+                f"ablation.governing_reading {ablation.get('governing_reading')!r} != "
+                f"{GOVERNING_READING!r} (ADR-0005 D16, user sign-off 2026-08-03)"
             )
     gate = report.get("gate")
     if not isinstance(gate, Mapping):
@@ -1167,8 +1218,14 @@ def build_report(
         "note": (
             "these clauses grade the MACHINERY — that the trained weights really loaded, "
             "that T was fitted on calib alone, that the graded object is the pre-prior-shift "
-            "named posterior, and that nothing was truncated. The ablation VERDICT is not a "
-            "clause: its tolerance was never pre-registered (see ablation.reading_delta)."
+            "named posterior, and that nothing was truncated. The ablation VERDICT is "
+            "separate and lives in `ablation.verdict`: it is derived from the governing "
+            "(absolute) reading of ADR-0005 D16, which asks only whether the with-aux arm "
+            "still holds the D11 grade. A false overall_pass here therefore does NOT mean "
+            "the aux heads degraded anything — on this run it means the no-aux CONTROL is "
+            "uncalibratable (its calib carve is perfectly separated), an accepted and "
+            "recorded outcome (user sign-off, 2026-08-03), with the degenerate-limit rule "
+            "to be pinned in ADR-0005 D11 at the P3-exit gate."
         ),
     }
     return report

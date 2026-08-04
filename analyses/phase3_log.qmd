@@ -1989,3 +1989,32 @@ sabotage-verified: reverting the parentheses turns exactly the `'test'`-rung cas
 **Validation after r4.** `test_aux_ablation_check` **85 pass**; unit+golden+ml **3,773
 passed**, the 14 failures still a strict subset of main's 31 (`comm -13` empty). ruff + black
 clean. CI green on the pinned stack across all three jobs.
+
+### P3-08 §7 stops — SETTLED by user sign-off (AskUserQuestion, 2026-08-03)
+
+**Decision 1 — the absolute reading of D16 governs.** D16 asks whether the aux heads degrade
+"the calibrated primary head's GATE-2 grade", and that grade (D11) is a pass/fail: ECE ≤ 0.05.
+The check is therefore whether the with-aux arm still *holds* it — which it does, at 0.005662.
+**No tau is pinned and no ADR is amended.** The delta against the no-aux arm stays reported,
+not gated; `reading_delta.tolerance` remains `None` and `validate_report` still refuses any
+report that pins one. Both readings are still computed and the tau-window on which they would
+disagree is still published, because a decision is only auditable beside the alternative it
+rejected. `ablation.verdict` is now **derived** from the governing reading's own evidence by
+`verdict_from_absolute_reading` and re-derived by the validator, so a report cannot carry a
+verdict its numbers contradict.
+
+**The ablation's answer: `aux_does_not_degrade_the_gate2_grade`.**
+
+**Decision 2 — accept and record the uncalibratable control now; pin the degenerate-limit rule
+at the phase-exit gate.** The no-aux arm's perfectly-separated calib carve is reported as
+measured, with no temperature invented. `gate.overall_pass` stays **false**, and the report now
+says explicitly what that does *not* mean: it is not evidence that the aux heads degraded
+anything, it is the recorded consequence of the *control* being uncalibratable. ADR-0005 D11
+gains a degenerate-limit rule at P3 exit, because P3-10 grades GATE-2 and will meet the same
+fact — and the option of enlarging or re-stratifying the calib carve until a misclassified row
+appears was rejected as choosing the measurement to obtain the answer.
+
+**Validation after the sign-off.** `test_aux_ablation_check` **86 pass**; ml tier **12 pass**;
+unit+golden+ml **3,774 passed**, the 14 failures a strict subset of main's 31 (`comm -13`
+empty). ruff + black clean. Artifact regenerated: `validate_report` clean, 0 absolute paths,
+headline numbers unchanged.

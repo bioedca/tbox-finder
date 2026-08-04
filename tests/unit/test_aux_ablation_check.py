@@ -443,7 +443,9 @@ def test_the_delta_reading_emits_no_verdict_because_no_tolerance_exists() -> Non
     )
     assert out["reading_delta"]["tolerance"] is None
     assert out["reading_delta"]["verdict"] == "unpinned"
-    assert out["verdict"] == "requires_signoff"
+    # The DELTA reading stays unpinned; the governing ABSOLUTE reading decides.
+    assert out["governing_reading"] == E.GOVERNING_READING == "absolute"
+    assert out["verdict"] == E.VERDICT_HOLDS
 
 
 def test_the_divergence_window_is_the_observed_degradation() -> None:
@@ -689,7 +691,7 @@ def test_the_verdict_is_not_a_gate_clause() -> None:
     """The machinery is graded; the ablation verdict is not — its threshold is missing."""
     report = _report()
     assert all("verdict" not in name for name in report["gate"]["clauses"])
-    assert report["ablation"]["verdict"] == "requires_signoff"
+    assert report["ablation"]["verdict"] in E.VERDICTS
     assert report["ablation"]["reading_delta"]["tolerance"] is None
 
 
@@ -701,10 +703,39 @@ def test_the_validator_refuses_a_report_that_pinned_a_tolerance() -> None:
     assert any("no tolerance is pre-registered" in p for p in problems)
 
 
-def test_the_validator_refuses_a_self_certified_verdict() -> None:
+def test_the_validator_refuses_a_verdict_the_evidence_does_not_support() -> None:
+    """The verdict is DERIVED. A report may not carry one its own numbers contradict."""
     report = _report()
-    report["ablation"]["verdict"] = "pass"
-    assert any("may not self-certify" in p for p in E.validate_report(report))
+    assert E.validate_report(report) == []
+    # Pick whichever verdict the report's OWN evidence does not support, rather than a
+    # hard-coded one: the synthetic fixture's ECE can land either side of the gate, and
+    # a fixed "wrong" verdict was silently the RIGHT one the first time this was written.
+    honest = report["ablation"]["verdict"]
+    dishonest = next(v for v in E.VERDICTS if v != honest)
+    report["ablation"]["verdict"] = dishonest
+    assert any("derived, not assignable" in p for p in E.validate_report(report))
+
+    report = _report()
+    report["ablation"]["governing_reading"] = "delta"
+    assert any("governing_reading" in p for p in E.validate_report(report))
+
+
+def test_the_verdict_tracks_the_absolute_reading_in_both_directions() -> None:
+    """Sabotage-shaped: a one-sided check would pass for a function that always holds."""
+    assert E.verdict_from_absolute_reading(True) == E.VERDICT_HOLDS
+    assert E.verdict_from_absolute_reading(False) == E.VERDICT_DEGRADES
+    assert E.verdict_from_absolute_reading(None) == E.VERDICT_UNDECIDABLE
+
+    passing = E.compare_arms(
+        _fake_grade(arm="w", ece=0.01, auprc=0.9, passes=True),
+        _fake_grade(arm="n", ece=0.02, auprc=0.9, passes=True),
+    )
+    failing = E.compare_arms(
+        _fake_grade(arm="w", ece=0.30, auprc=0.9, passes=False),
+        _fake_grade(arm="n", ece=0.02, auprc=0.9, passes=True),
+    )
+    assert passing["verdict"] == E.VERDICT_HOLDS
+    assert failing["verdict"] == E.VERDICT_DEGRADES
 
 
 def test_the_validator_catches_a_fabricated_clause() -> None:
