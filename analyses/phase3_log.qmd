@@ -2135,4 +2135,50 @@ function.
 sample-inefficiency [arXiv:1909.10155]; kernel calibration-error estimators applicable to
 small samples [arXiv:2210.07810]; the proper-calibration-error decomposition [arXiv:2312.08589];
 boundary-bias-free Beta kernels on the unit interval [DOI:10.1016/S0167-9473(99)00010-9]. All
-accessed 2026-08-04. **Commit.** see PR.
+accessed 2026-08-04.
+
+### P3-09 review rounds (CodeRabbit CLI) — the GitHub check was green and empty
+
+The GitHub `CodeRabbit` check read **pass** carrying only the Fair-Usage *"Review rate
+limited"* notice, which CLAUDE.md §5.1 classes as an **absence**, not a pass. The gate was
+carried by the CLI (`coderabbit review --committed --base main`), the path independent of
+the throttled app. No Greptile credit spent.
+
+**r1 — 1 finding, real.** `block_bootstrap` filtered replicates with `not isnan`, so an
+`inf` replicate entered the list, dragged `upper` to infinity, and was still counted in
+`n_boot` — which the docstring says counts *finite* replicates. Reproduced by execution
+before accepting (`{'point': 2.0, 'upper': inf, 'n_boot': 50}`) and fixed to `isfinite`. No
+committed CI moves: every statistic resampled in this repo is bounded. This was inherited
+P0-31 behaviour; making the contract explicit is what exposed it.
+
+**r2 — 4 findings.** ⚠ *Two were read late*: the CLI output was inspected while it was still
+being written, and the first read showed only 2. **Read the CLI file only after `Review
+complete`.** (1, major) The block-granularity control was weaker than its own docstring:
+`_all_blocks_whole` counted *tags* and tested `count % block_size == 0`, so
+`[("b",0),("b",0)]` scored as whole — two copies of one row with the other missing. Now
+equal multiplicity across each block's own rows, with its own unit test; the record-level
+matched control sharpens from **174/200 to 199/200** violations, which is itself evidence
+the finding was material. (2) `__module__` does not prove object identity — added an `is`
+assertion, sabotage-isolated by rebuilding a distinct `FunctionType` from the same code
+object. (3) `ci_level`/`n_boot`/`q` were unvalidated public arguments. (4, major)
+**REFUTED:** the review claimed the Brier-closure assertion "will reject a correct
+decomposition" at a residual of −0.003265 and proposed replacing the estimator's output
+with a constant. Residual measured **3.6e-16 / 5.6e-16 / 5.0e-16** at p = 0.5/0.2/0.9, and
+the identity closes *exactly* because `cal + ref = p² − 2p·mean(ĝ) + mean(ĝ)` while
+`brier = p² − 2p·(S/n) + S/n`, which agree iff `mean(ĝ) = S/n` — true for LOO with uniform
+weights since the sum of `(S − yᵢ)/(n−1)` over i is `S`. The proposed change would also have
+removed the estimator from its own test. The test now pins that *mechanism* and checks three
+posteriors.
+
+**r3 — 2 findings, both real, and one invalidated a guarantee this step claimed.** (1) The
+r2 validation was too loose; `ci_level` is now an open `(0, 1)` fraction (the percentage form
+`95` is a real way to land outside) and `n_boot` at least 1, so a reported `n_boot: 0` has
+exactly one meaning. (2) The min-N pin was checked with
+`ece.OOD_ECE_MIN_N is coverage.OOD_ECE_MIN_N` — **vacuous**, because CPython caches small
+integers and a hand-typed `OOD_ECE_MIN_N = 20` satisfies `is` too (verified). It was
+therefore blind to precisely the failure it existed to catch, and would have broken for the
+*wrong* reason if an amendment moved the pin above 256. Replaced with an AST pin: the name
+must be imported from `tbox_finder.coverage` and never re-assigned. Sabotage 25 substitutes
+the literal and is now caught.
+
+**Commit.** see PR [#102](https://github.com/bioedca/tbox-finder/pull/102).
