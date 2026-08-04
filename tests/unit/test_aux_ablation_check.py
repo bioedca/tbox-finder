@@ -1177,3 +1177,65 @@ def test_validate_report_is_self_consistency_not_a_pass() -> None:
 def test_refusals_are_classified_by_what_they_actually_say(message: str, expected: str) -> None:
     """The classification names the cause, so a message about another rung must not borrow it."""
     assert E._classify_refusal(ValueError(message)) == expected
+
+
+def test_separation_census_of_an_empty_rung_has_the_same_keys_and_no_fake_zeros() -> None:
+    """CodeRabbit r5: an unmeasured count of 0 reads exactly like a measured one.
+
+    The empty path is reachable — `grade_arm` records `calib_separation` even when the
+    fit refused *because the calib rung was empty* — so a consumer reading
+    `is_perfectly_separated` off the committed report must not hit a KeyError, and
+    `n_misclassified_at_zero: 0` must not claim a measurement that never happened.
+    """
+    scores = _arm()
+    populated = E.separation_census(scores, "test")
+    empty = E.separation_census(scores, "train")  # this fixture has no train rows
+    assert empty["n"] == 0
+    assert set(empty) == set(populated), "the two paths return different key sets"
+    for key in set(empty) - {"n", "n_positive"}:
+        assert empty[key] is None, f"{key} claims a value on an empty rung"
+    assert populated["n_misclassified_at_zero"] is not None
+
+
+@pytest.mark.parametrize(
+    ("logits", "message"),
+    [
+        ([[1.0, 2.0]] * 68, "must be 1-D"),
+        ([float("nan")] + [1.0] * 67, "not finite"),
+        ([float("inf")] + [1.0] * 67, "not finite"),
+    ],
+)
+def test_arm_scores_refuses_malformed_logits_at_the_boundary(logits: Any, message: str) -> None:
+    """These arrive from external JSON via `reconcile_cached_scores`, not from memory.
+
+    A nested list satisfies the length check (an (n, k) array has len n), and a NaN
+    would flow all the way to the fit before anything objected — far from the file that
+    carried it.
+    """
+    base = _arm()
+    with pytest.raises(ValueError, match=message):
+        E.ArmScores(
+            arm="bad",
+            row_ids=base.row_ids,
+            logits=np.asarray(logits, dtype=np.float64),
+            labels=base.labels,
+            rungs=base.rungs,
+            blocks=base.blocks,
+        )
+    # Positive control: the same construction with well-formed logits succeeds.
+    assert E.ArmScores(
+        arm="ok",
+        row_ids=base.row_ids,
+        logits=base.logits,
+        labels=base.labels,
+        rungs=base.rungs,
+        blocks=base.blocks,
+    )
+
+
+def test_a_cache_carrying_a_nan_logit_is_refused() -> None:
+    """The end-to-end path the boundary check exists for."""
+    cache, rows, meta = _cache_and_rows()
+    cache["arms"]["a"]["logits"][2] = float("nan")
+    with pytest.raises(ValueError, match="not finite"):
+        E.reconcile_cached_scores(cache, rows=rows, dataset_meta=meta, wanted=["a"])

@@ -2018,3 +2018,24 @@ appears was rejected as choosing the measurement to obtain the answer.
 unit+golden+ml **3,774 passed**, the 14 failures a strict subset of main's 31 (`comm -13`
 empty). ruff + black clean. Artifact regenerated: `validate_report` clean, 0 absolute paths,
 headline numbers unchanged.
+
+### P3-08 review round 5 (CodeRabbit CLI) — 2 findings, both real, both fixed
+
+**A census that returned a fake zero.** `separation_census` returned 2 keys on an empty rung
+and 10 on a populated one, so a consumer reading `is_perfectly_separated` off the committed
+report would hit a `KeyError` — and the empty path is *reachable*, because `grade_arm` records
+`calib_separation` even when the fit refused **because the calib rung was empty**. Worse,
+`n_misclassified_at_zero: 0` on an unmeasured rung reads exactly like a measured result, which
+is the same substitution this module refuses to make for `ece`. Both paths now return the same
+key set, with `None` for everything that was not measured.
+
+**No validation at the boundary where JSON becomes numbers.** `ArmScores` is built from an
+external file by `reconcile_cached_scores`, and a nested list satisfies the length check (an
+`(n, k)` array has `len n`) while a NaN or Infinity would flow all the way to the fit before
+anything objected — far from the file that carried it. Shape and finiteness are now checked
+where the data enters.
+
+**Validation after r5.** `test_aux_ablation_check` **91 pass**; ml tier **12 pass**;
+unit+golden+ml **3,779 passed**, the 14 failures a strict subset of main's 31 (`comm -13`
+empty). ruff + black clean. **2 further sabotages**, each RED against its named test, each
+restored byte-identically.

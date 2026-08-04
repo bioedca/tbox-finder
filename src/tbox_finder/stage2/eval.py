@@ -325,6 +325,19 @@ class ArmScores:
         unknown = sorted(set(self.rungs) - set(R.RUNG_VOCABULARY))
         if unknown:
             raise ValueError(f"{self.arm}: unknown rung token(s) {unknown}")
+        # These are constructed from external JSON by `reconcile_cached_scores`, so the
+        # logits are only as well-formed as the file. A nested list still satisfies the
+        # length check above (a (n, k) array has len n), and NaN/Infinity would flow
+        # straight into the fit — where `temperature_scale` would refuse them, but far
+        # from the file that carried them.
+        logits = np.asarray(self.logits)
+        if logits.ndim != 1:
+            raise ValueError(
+                f"{self.arm}: logits must be 1-D per-row values, got shape {logits.shape}"
+            )
+        if not np.all(np.isfinite(logits)):
+            n_bad = int(np.count_nonzero(~np.isfinite(logits)))
+            raise ValueError(f"{self.arm}: {n_bad} of {logits.size} logits are not finite")
 
     def index_of(self, rung: str) -> np.ndarray:
         return np.asarray([i for i, r in enumerate(self.rungs) if r == rung], dtype=np.int64)
@@ -383,7 +396,24 @@ def separation_census(scores: ArmScores, rung: str) -> dict[str, Any]:
     """
     idx = scores.index_of(rung)
     if idx.size == 0:
-        return {"n": 0, "n_misclassified_at_zero": 0}
+        # Uniform key set, with `None` — not 0 — for everything that was not measured.
+        # An empty rung is reachable (grade_arm records calib_separation even when the
+        # fit refused for an EMPTY calib rung), so a consumer reading
+        # `is_perfectly_separated` must not hit a KeyError; and
+        # `n_misclassified_at_zero: 0` would read as a measured result, which is the
+        # exact substitution this module refuses to make for `ece`.
+        return {
+            "n": 0,
+            "n_positive": 0,
+            "n_misclassified_at_zero": None,
+            "accuracy_at_zero": None,
+            "is_perfectly_separated": None,
+            "min_abs_logit": None,
+            "median_abs_logit": None,
+            "max_abs_logit": None,
+            "min_logit": None,
+            "max_logit": None,
+        }
     z = np.asarray(scores.logits, dtype=np.float64)[idx]
     y = np.asarray(scores.labels)[idx]
     predicted = (z > 0).astype(np.int64)
