@@ -256,10 +256,104 @@ pre-registered — a ceiling estimated from N ≤ 9 must not be allowed to lower
 bar in one direction only. All figures above are computed on the uncalibrated
 posterior.
 
-*[Placeholder — GATE-2 (Phase 3), GATE-1 (Phase 4), the genome-scale scan + FDR
-(Phase 5), and orthogonal validation / GATE-3 (Phase 6) paragraphs are added at
-each phase-exit gate. Phase 1 contributes no Results paragraph and no figure: it
-validated backbones and retired transfer risk, and its smoke runs are
+## The re-ranker is well calibrated in distribution, and its calibration drift across held-out clades is phylum-structured {#sec-gate2}
+
+The pre-registered calibration gate (GATE-2, Phase-3 half) is graded on the
+**named posterior** — the Stage-2 binary head's logit divided by a single
+temperature fitted on a disjoint calibration split, *before* any shift to the
+deployment prior — at the in-distribution test split's own prevalence. On 3,045
+held-out test loci (2,353 positives, prevalence 0.773, 2,275 homology clusters)
+the fitted temperature is $T = 1.1406$ and the expected calibration error, over
+15 equal-mass bins with the pre-registered debiasing correction, is **0.0057**
+(homology-cluster-blocked bootstrap 95% CI [0.0027, 0.0094], 2,000 resamples)
+against a blinded-frozen ceiling of **0.05**. **GATE-2's Phase-3 half passes**, by
+a factor of 8.8, with the interval's upper bound also a factor of five clear. The
+undebiased plug-in estimator reads 0.0084 on the same rows; since the debiasing
+correction can only lower the estimate and both readings sit an order of
+magnitude below the ceiling, the verdict does not depend on which is taken.
+
+Three caveats travel in the artifact rather than in a footnote, and together they
+say that the pass is honest but its evidence base is narrow. The temperature
+exists only because **one** of the 1,089 calibration rows is misclassified at the
+decision boundary: the Stage-2 discrimination against the pre-registered decoy
+mix is near-saturated, and a perfectly separated calibration split has no finite
+temperature at all — exactly the state of the no-auxiliary-loss ablation control.
+That same near-separation shapes the gated statistic itself. Under equal-mass
+binning, **12 of the 15 bins carry accuracy exactly 0 or 1** — they contain only
+rows the model places at $p < 10^{-4}$ or $p > 0.995$, where there is nothing to
+get wrong — while a **single bin spans $p = 4.5\times10^{-5}$ to $0.996$**,
+absorbing the entire transition region. That one bin has a raw calibration gap of
+0.099, twice the gate threshold, and at its 1/15 weight contributes **83.1% of the
+reported ECE**. The headline number is therefore small in large part because most
+bins had nothing to measure. Finally, the debiasing term in the pinned estimator
+was separately measured, against a known truth, to *under*-state calibration error
+at small sample sizes; that is why the plug-in value is reported beside the gated
+one.
+
+Calibration established in distribution does not transfer uniformly across the
+tree, and the way it fails is informative. Applying the same temperature to the
+9,345 loci of the 30 taxonomic orders the production checkpoint never trained on
+— a partition carrying zero row overlap **and** zero *order* overlap against the
+9,059 training rows — the leave-one-order-out calibration error, estimated with a
+distinct small-sample-robust leave-one-out beta-kernel estimator and resampled at
+the homology-cluster level, macro-averages **0.211** (95% CI [0.098, 0.325]).
+Every one of the 30 orders clears the pre-registered 20-positive admissibility
+floor, so the entire *ex ante* calibration footprint is adjudicable. That
+macro-average, however, conceals a clean bimodality (@fig-gate2): the nine
+held-out **Actinobacteria** orders carry calibration errors of 0.59–0.80, while
+all twenty-one non-Actinobacteria orders — spanning Firmicutes, Tenericutes,
+Chloroflexi, Deinococcus-Thermus, Synergistetes and Proteobacteria — fall between
+0.0007 and 0.115. The two groups do not overlap. Against a training corpus that
+is ~90% Firmicutes, calibration degrades at the phylum boundary rather than
+gradually with taxonomic rank, and the degradation is concentrated in the one
+well-powered distant phylum. This is also why orders are macro- rather than
+micro-averaged: *Lactobacillales* alone supplies 61.6% of the held-out positives
+and is itself calibrated to 0.0034, so a row-weighted summary would report near-
+perfect transfer while nine orders were mis-calibrated by two orders of magnitude.
+
+Both leave-clade-out quantities are **reported, not gated**. The pre-registration
+states that in-distribution-grade calibration is not expected to survive clade
+shift, and the decision rule that consumes these numbers compares them to a drift
+bound that is not yet pinned; no per-corpus calibrated-negative verdict is
+therefore derived here. The deployment-prevalence posterior is likewise reported
+and not gated: shifted to the stated genome-scale prior band of $10^3$–$10^4$
+negatives per positive, its calibration error is 0.56–0.74 — miscalibrated by
+construction at benchmark prevalence, which is precisely why the gate is placed
+on the pre-shift object.
+
+::: {#fig-gate2}
+*[Figure — GATE-2 calibration. Placeholder image inserted at render time.]*
+
+**Figure 3. The Stage-2 posterior is calibrated in distribution, and its drift
+across held-out orders is phylum-structured.** *Left*, reliability of the named
+posterior (temperature-scaled, pre-prior-shift) on the in-distribution test
+split: 3,045 loci, 2,353 positives, 2,275 homology clusters, 15 equal-mass bins,
+$T = 1.1406$. The gated statistic — debiased expected calibration error
+**0.0057**, cluster-blocked bootstrap 95% CI [0.0027, 0.0094] — is shown against
+the pre-registered 0.05 ceiling, with the undebiased plug-in reading (0.0084)
+alongside because the debiasing correction is one-directional. Each bin is drawn
+as a horizontal segment over the probability range it actually spans, and the
+bins are deliberately **not** joined: the posterior is near-separated, so 12 of
+15 bins sit at accuracy exactly 0 or 1 in two piles at the axis ends while one
+bin bridges $p = 4.5\times10^{-5}$ to $0.996$ and supplies 83.1% of the reported
+error. Connecting the bin centres would draw a smooth curve through probability
+ranges where nothing was measured. *Right*,
+leave-one-order-out calibration error for each of the 30 orders excluded from
+Stage-2 training (9,345 loci, 8,641 positives), estimated with the
+small-sample-robust beta-kernel estimator that the pre-registration requires to
+be *distinct* from the binned in-distribution one, with cluster-blocked bootstrap
+intervals; orders are sorted by drift and labelled with their phylum. Every order
+clears the 20-positive admissibility floor. The nine Actinobacteria orders
+(0.59–0.80) separate completely from the twenty-one non-Actinobacteria orders
+(0.0007–0.115); the macro-average across orders (0.211, dotted) sits between the
+two modes and describes neither. The right panel is **not** gated and is not
+comparable to the left panel's ceiling.
+:::
+
+*[Placeholder — GATE-1 (Phase 4), the genome-scale scan + FDR (Phase 5), and
+orthogonal validation / GATE-3 (Phase 6) paragraphs are added at each phase-exit
+gate. Phase 1 contributes no Results paragraph and no figure: it validated
+backbones and retired transfer risk, and its smoke runs are
 mechanics/expressivity probes — reporting them as results would present a
 learnability measurement as a generalization finding.]*
 

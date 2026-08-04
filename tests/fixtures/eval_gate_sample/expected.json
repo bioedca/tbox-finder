@@ -18,6 +18,23 @@
   "n_decoys": 130,
   "n_positives": 100,
   "n_seg_positions": 41513,
+  "ood_ece": {
+    "admissible": true,
+    "bandwidth": 0.02,
+    "bandwidth_loo_log_likelihood": -30.317529865850425,
+    "brier": 0.08598215254181789,
+    "brier_calibration": 0.03127251626241176,
+    "brier_refinement": 0.058907329118551066,
+    "ci_lower": 0.15173680423515706,
+    "ci_upper": 0.20998037444852852,
+    "gated": false,
+    "min_n": 20,
+    "n_blocks": 13,
+    "n_excluded_no_block": 53,
+    "n_positives": 97,
+    "n_records": 177,
+    "ood_ece": 0.1568564832535165
+  },
   "recall_at_matched_precision": 0.95,
   "recall_gap_pp": 13.0,
   "specifier_exact_codon": {
