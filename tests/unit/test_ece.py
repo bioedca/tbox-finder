@@ -182,10 +182,44 @@ def test_at_the_floor_the_estimate_is_admitted() -> None:
     assert out["ci"]["lower"] <= out["ci"]["point"] <= out["ci"]["upper"]
 
 
-def test_the_floor_is_the_frozen_constant_not_a_local_copy(monkeypatch) -> None:
-    """Flip the pin and the boundary must move with it. A hand-typed 20 in this module
-    would keep both tests above green while silently ignoring an ADR amendment."""
-    assert ece.OOD_ECE_MIN_N is coverage.OOD_ECE_MIN_N == 20
+def test_the_floor_is_imported_from_coverage_not_retyped() -> None:
+    """Structural pin on the *source* of the constant.
+
+    ``ece.OOD_ECE_MIN_N is coverage.OOD_ECE_MIN_N`` proves nothing: CPython caches small
+    integers, so a hand-typed ``OOD_ECE_MIN_N = 20`` in this module satisfies ``is`` just as
+    well (verified — CodeRabbit CLI r3), and the assertion would break for the *wrong*
+    reason if an ADR amendment ever moved the pin above 256. So the import itself is
+    asserted, by reading the module's AST: A2 froze the value in
+    ``coverage.py`` specifically so no second copy could drift from it
+    ([[pinned-constant-that-nothing-reads]]).
+    """
+    import ast
+    from pathlib import Path
+
+    tree = ast.parse(Path(ece.__file__).read_text())
+    imported_from = {
+        node.module
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom) and any(a.name == "OOD_ECE_MIN_N" for a in node.names)
+    }
+    assert imported_from == {"tbox_finder.coverage"}, (
+        f"OOD_ECE_MIN_N must be imported from tbox_finder.coverage, got {imported_from} — "
+        "a re-typed literal would pass every value assertion in this file"
+    )
+    # …and never re-assigned, which would shadow the import with a local copy. Checked on
+    # the AST, not by substring, so the prose that mentions the pin does not trip it.
+    assert not [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Assign)
+        and any(isinstance(t, ast.Name) and t.id == "OOD_ECE_MIN_N" for t in node.targets)
+    ], "the pin must not be re-assigned in this module"
+
+
+def test_the_floor_is_read_at_call_time_not_baked_in(monkeypatch) -> None:
+    """Flip the pin and the boundary must move with it — the proof that ``ood_ece`` reads
+    the module attribute rather than a value captured at import."""
+    assert ece.OOD_ECE_MIN_N == coverage.OOD_ECE_MIN_N == 20
     monkeypatch.setattr(ece, "OOD_ECE_MIN_N", 40)
     y, p, b = _rows(30, 30)  # comfortably over the real pin, under the flipped one
     assert ece.ood_ece(y, p, b, n_boot=10)["admissible"] is False

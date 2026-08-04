@@ -288,15 +288,19 @@ def test_public_arguments_are_validated_before_sampling() -> None:
     not simply raising on everything ([[raises-test-needs-a-positive-control]]).
     """
     blocks = [[1.0], [2.0], [3.0]]
-    for bad_level in (-0.95, 1.5, float("nan"), float("inf")):
+    # 95 is the percentage form — a real way for a caller to land outside (0, 1).
+    for bad_level in (-0.95, 1.5, 95, 0.0, 1.0, float("nan"), float("inf")):
         with pytest.raises(ValueError, match="ci_level"):
             resample.block_bootstrap(blocks, _mean, n_boot=10, ci_level=bad_level)
-    with pytest.raises(ValueError, match="n_boot"):
-        resample.block_bootstrap(blocks, _mean, n_boot=-1)
+    for bad_boot in (-1, 0):
+        with pytest.raises(ValueError, match="n_boot"):
+            resample.block_bootstrap(blocks, _mean, n_boot=bad_boot)
     ok = resample.block_bootstrap(blocks, _mean, n_boot=10, ci_level=0.9)
     assert ok["ci_level"] == 0.9 and ok["lower"] <= ok["upper"]
-    # n_boot=0 is a legitimate "no replicates requested", not an error.
-    assert resample.block_bootstrap(blocks, _mean, n_boot=0)["n_boot"] == 0
+    # n_boot=0 is refused so that a REPORTED n_boot of 0 has exactly one meaning: every
+    # replicate was undefined. The <2-blocks path still reports 0, distinguishable by
+    # n_blocks.
+    assert resample.block_bootstrap([[1.0]], _mean, n_boot=10)["n_boot"] == 0
 
     for bad_q in (-0.1, 1.1, float("nan"), float("inf")):
         with pytest.raises(ValueError, match="q="):

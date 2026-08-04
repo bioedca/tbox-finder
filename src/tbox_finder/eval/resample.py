@@ -151,10 +151,14 @@ def block_bootstrap(
     ``{point, lower, upper, ci_level, n_boot, n_blocks}`` over the finite replicates;
     fewer than 2 blocks → not block-resamplable (NaN CI, ADR-0005 Amendment A1).
 
-    ``ci_level`` and ``n_boot`` are validated before any sampling: a negative ``ci_level``
-    inverts ``alpha`` and returns ``lower > upper`` — an interval-shaped object that is not
-    an interval — and a negative ``n_boot`` silently reports zero replicates as though the
-    statistic had been undefined on every draw (CodeRabbit CLI r2).
+    ``ci_level`` and ``n_boot`` are validated before any sampling (CodeRabbit CLI r2/r3).
+    ``ci_level`` must be a fraction in the **open** interval ``(0, 1)``: outside it ``alpha``
+    goes negative and ``lower > upper`` — an interval-shaped object that is not an interval —
+    and a caller passing a percentage (``ci_level=95``) is a real way to land there. The
+    endpoints are refused too, because a 0 % or 100 % "confidence interval" is a degenerate
+    request rather than a measurement. ``n_boot`` must be ``>= 1`` so that a reported
+    ``n_boot: 0`` has exactly **one** meaning — every replicate was undefined — instead of
+    also covering "the caller asked for none", which is indistinguishable in the payload.
 
     ``n_boot`` in the return value is the number of replicates that actually produced a
     **finite** statistic, which is ``<=`` the requested count when the statistic is
@@ -170,10 +174,10 @@ def block_bootstrap(
     ``binned_ece``, ``ood_ece``, AUPRC, per-element F1 — is bounded, so the two filters
     agree on all of them.
     """
-    if n_boot < 0:
-        raise ValueError(f"n_boot={n_boot!r} must be non-negative")
-    if not math.isfinite(ci_level) or not 0.0 <= ci_level <= 1.0:
-        raise ValueError(f"ci_level={ci_level!r} must be finite and within [0, 1]")
+    if n_boot < 1:
+        raise ValueError(f"n_boot={n_boot!r} must be >= 1")
+    if not math.isfinite(ci_level) or not 0.0 < ci_level < 1.0:
+        raise ValueError(f"ci_level={ci_level!r} must be a fraction in (0, 1)")
     blocks = list(blocks)
     n_blocks = len(blocks)
     point = statistic([x for blk in blocks for x in blk]) if n_blocks else float("nan")
