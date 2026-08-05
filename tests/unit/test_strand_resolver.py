@@ -241,6 +241,52 @@ def test_derive_order_refuses_anything_short_of_a_strict_total_order():
         derive_order(report([pair("A", "B", 10, 0), pair("B", "C", 10, 0), pair("A", "C", 0, 10)]))
 
 
+def test_derive_order_refuses_an_incomplete_or_double_counted_tournament():
+    """Copeland scores rank only if every element met every other, exactly once.
+
+    The dangerous case is not a malformed file but a **plausible** one: duplicate the A-vs-B
+    entry and drop A-vs-C, and the scores come out 2 / 1 / 0 — all distinct, so the
+    strict-total-order check passes and an order is returned for a pair nobody measured. The
+    function decides the constant that orients every reported locus, and it reads a committed
+    file that a future edit to the producing script could regenerate.
+    """
+    derive_order = _load_order_script().derive_order
+
+    def report(pairs):
+        return {"elements": [{"element": n} for n in ("A", "B", "C")], "pairs": pairs}
+
+    def pair(a, b, ab, ba):
+        return {"A": a, "B": b, "n_both": ab + ba, "n_a_before_b": ab, "n_b_before_a": ba}
+
+    # The exact scenario: A vs C never measured, A vs B counted twice. Scores 2/1/0, distinct.
+    duplicated = report([pair("A", "B", 10, 0), pair("A", "B", 10, 0), pair("B", "C", 10, 0)])
+    with pytest.raises(ValueError, match="appears more than once"):
+        derive_order(duplicated)
+
+    # And with the duplicate removed it is simply incomplete, which must also be refused.
+    with pytest.raises(ValueError, match="incomplete"):
+        derive_order(report([pair("A", "B", 10, 0), pair("B", "C", 10, 0)]))
+
+    with pytest.raises(ValueError, match="paired with itself"):
+        derive_order(report([pair("A", "A", 10, 0), pair("A", "C", 10, 0), pair("B", "C", 10, 0)]))
+
+    with pytest.raises(ValueError, match="absent from elements"):
+        derive_order(report([pair("A", "Z", 10, 0), pair("A", "C", 10, 0), pair("B", "C", 10, 0)]))
+
+    # Positive control: the complete, single-counted tournament still resolves.
+    complete = report([pair("A", "B", 10, 0), pair("A", "C", 10, 0), pair("B", "C", 10, 0)])
+    assert derive_order(complete) == ("A", "B", "C")
+
+
+def test_the_committed_measurement_is_a_complete_tournament():
+    """…and the artifact the shipped constant is derived from satisfies all of that."""
+    report = json.loads(_MEASUREMENT.read_text())
+    n = len(report["elements"])
+    assert len(report["pairs"]) == n * (n - 1) // 2 == 21
+    keys = [frozenset((p["A"], p["B"])) for p in report["pairs"]]
+    assert len(set(keys)) == len(keys)
+
+
 def test_canonical_order_is_not_class_order_and_differs_at_the_discriminator():
     """``labels.CLASS_ORDER`` is a softmax index order — borrowing it mis-ranks one element.
 

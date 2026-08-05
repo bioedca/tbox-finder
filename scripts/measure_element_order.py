@@ -180,8 +180,26 @@ def derive_order(report: dict) -> tuple[str, ...]:
     """
     names = [e["element"] for e in report["elements"]]
     wins = dict.fromkeys(names, 0)
+
+    # The pair set must be the COMPLETE tournament, each pair exactly once. Copeland scores are
+    # only a ranking if every element met every other: with a duplicated A-vs-B and no A-vs-C,
+    # A scores 2, B 1, C 0 — all distinct, so the strict-total-order check below passes and an
+    # order is returned for a pair that was never measured. Cheap to state, and this function
+    # decides the constant that orients every reported locus.
+    expected_pairs = {frozenset(pair) for pair in itertools.combinations(names, 2)}
+    seen_pairs: set[frozenset] = set()
+
     for pair in report["pairs"]:
         a, b, n_both = pair["A"], pair["B"], pair["n_both"]
+        if a not in wins or b not in wins:
+            unknown = sorted({a, b} - set(wins))
+            raise ValueError(f"pair names an element absent from elements[]: {unknown}")
+        if a == b:
+            raise ValueError(f"{a} is paired with itself; that is not a comparison")
+        key = frozenset((a, b))
+        if key in seen_pairs:
+            raise ValueError(f"{a} vs {b} appears more than once; it would be counted twice")
+        seen_pairs.add(key)
         if n_both <= 0:
             raise ValueError(
                 f"{a} vs {b}: no record annotates both, so their 5′→3′ order is unmeasured"
@@ -192,6 +210,9 @@ def derive_order(report: dict) -> tuple[str, ...]:
             wins[b] += 1
         else:
             raise ValueError(f"{a} vs {b}: exactly tied over {n_both} records — order undecided")
+    if seen_pairs != expected_pairs:
+        missing = sorted(tuple(sorted(p)) for p in expected_pairs - seen_pairs)
+        raise ValueError(f"the pairwise matrix is incomplete; unmeasured pair(s): {missing}")
     if len(set(wins.values())) != len(names):
         raise ValueError(f"pairwise scores do not give a strict total order: {wins}")
     return tuple(sorted(names, key=lambda n: -wins[n]))
