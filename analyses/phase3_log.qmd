@@ -2630,3 +2630,92 @@ The test asserts more than the refusal: for each knob it also shows the integral
 **⚠ A REFACTOR INVALIDATED A SABOTAGE ANCHOR FOR THE SECOND TIME THIS STEP.** `black` reformatting `strand.py` staled none, but the r1 fix and the app's `require_iupac` extraction each staled one, both reported as **misses** rather than passes — the harness asserts every anchor matches **exactly once**. A campaign re-run after a fix is not optional.
 
 **Validation at the reviewed head.** 57 tests in the file. **42 sabotages, 42 RED against their NAMED test**, one declared no-op control held. Full unit+golden+ml **4,549 passed / 16 failed** against the matched baseline worktree at `0048b6a` at **4,492 / 16** — failure sets **identical**, `comm` empty both ways. ruff 0.15.15 + black 25.11.0 clean; CI green. **Commit.** <SHA>
+
+## Step P3-13-fixup — 2026-08-05: the two post-merge review findings on `5637e91`
+
+**Inputs.** `scripts/measure_element_order.py::derive_order`;
+`src/tbox_finder/infer/handoff.py::handoff_loci`; the committed 23,535-record measurement
+`tests/fixtures/element_order/element_order_prevalence.json`; `tests/unit/test_strand_resolver.py`.
+**Process.** Two CodeRabbit-CLI findings arrived **after** PR #106 was squash-merged, from a
+review round that was still running while three later probes returned *"Review limit reached"* —
+so the escalation to Greptile was made on an inference about capacity, not a fact about the round
+in flight. Both are on merged code; neither moves a shipped number. **(1)** `derive_order` awarded
+a pairwise win on `n_a_before_b > n_b_before_a` — a **plurality** — while its docstring claimed a
+**strict majority**. **(2)** `handoff_loci`'s `Raises` block promised refusal on "a sequence
+carrying characters outside the IUPAC alphabet", but validation ran per *emitted span* only, so
+`handoff_loci("X", [], [])` returned `[]`.
+**Outputs.** `derive_order` awards on `2 * n_a_before_b > n_both`, refuses with *"no strict
+majority"* quoting the support it refused on, and now validates the denominator it divides by
+(`n_a_before_b + n_b_before_a <= n_both`, neither negative) — a consistency `n_both` did not need
+while it was only a presence check. `handoff_loci` returns a `HandoffResult`
+(`payloads`, `n_outside_alphabet`, `n_outside_alphabet_in_spans`) instead of a bare list;
+`count_outside_alphabet` and `_merge_spans` are new. 11 new tests (57 → 68 in the file).
+**Validation.** `tests/unit/test_strand_resolver.py` **68 passed**; 713 across the affected suites
+(`test_infer_call`, `test_reconcile`, `test_infer_scan`, `test_construct_loci`).
+Full unit+golden+ml **4,560 passed / 16 failed** against a matched baseline worktree at `5637e91`
+at **4,549 / 16** — failure sets **identical**, `comm` empty both ways, and the +11 is exactly the
+new tests. **28 sabotages, 27 RED against their NAMED test**; the one non-bite is the harness's
+declared no-op control. ruff 0.15.0 + black 25.11.0 clean; no `.smk` touched.
+**Decisions.** The handoff fork was a **§7 stop, not a silent pick** (ADR-0005 D15 unamended,
+no value pinned).
+
+::: {.callout-important}
+## The rule was a plurality, and both rules agree on all 21 committed pairs
+
+On 40 / 39 / 21 the plurality rule awards A the pair on **40 %** support — an adjacency in the
+rank that orients every reported locus, attested by a minority of the records that measured it.
+Ties are not hypothetical here: one element is routinely a short annotation centred inside
+another, and the committed measurement records **13** ties for `Stem_I`/`Specifier` (of 23,122)
+and **1** for `Antiterminator_Tbox_seq`/`Discriminator` (of 23,208). Verified by execution that
+**every one of the 21 committed pairs is decided by more than half** of its co-annotating records,
+so re-deriving under the corrected rule reproduces `CANONICAL_ELEMENT_ORDER` exactly and
+`element_order_prevalence.json` is untouched. The exposure was a **re-measurement** — a different
+GTDB release, the P5 scan's own calls — deriving a rank the stated rule does not support, with
+nothing failing. The two award branches are sabotaged **separately** (S01–S04): a `>=` slip or a
+plurality revert on one branch alone survives a fixture that only exercises the other.
+:::
+
+::: {.callout-important}
+## Validating the whole contig was the wrong fix, and the review's one-liner was it
+
+CodeRabbit proposed `text = require_iupac(sequence)`. It makes the documented contract literally
+true, and it is **anti-recall on exactly the MAG contigs PRD §6 targets**: one stray byte anywhere
+on a megabase contig then refuses **every** locus called on it, and the caller has no way at this
+layer to ask for the clean ones. Every byte that reaches Stage 2 was already validated. So the
+resolution keeps the per-span refusal, makes the `Raises` block say precisely that, and **counts**
+the out-of-alphabet characters the payloads do not carry — a filthy contig becomes visible without
+becoming fatal. Judge the finding and the fix separately: the finding was real, the patch was not.
+:::
+
+::: {.callout-warning}
+## `n_outside_alphabet_in_spans` is 0 on every successful return — so it is measured, not written
+
+The per-span refusal fires first, which makes a literal `0` indistinguishable from a real
+measurement and useless as a check — a quantity whose legitimate value is always zero is the shape
+that lets a mask run clean while masking nothing. It is computed over the **union** of the emitted
+spans (`flank` can push two loci into overlap, and per-span counting would double-count a shared
+position and break `n_outside_alphabet_in_spans <= n_outside_alphabet`). Its test is the designed
+control that **must** fire: substituting the transcriber removes the refusal and the field reports
+the junk it now carries (S14/S15 RED).
+:::
+
+::: {.callout-warning}
+## Three sabotages did not bite first time; two were real gaps
+
+**(1)** *"exactly half is not a majority"* was exercised on the **A** branch only (50/49/1), so a
+`>=` slip on the **B** branch passed — the mirrored 49/50/1 case now ships. **(2)** The
+empty-handoff test asserted `payloads == ()` on an empty locus list, which reads identically to
+*emits nothing, ever*: replacing `payloads=tuple(payloads)` with `payloads=()` left it green. It
+now carries a populated positive control ([[raises-test-needs-a-positive-control]] one level up —
+asserting an emptiness needs the non-empty case beside it). **(3)** The third was badly aimed, not
+a gap: `test_the_committed_measurement_supports_the_order_by_strict_majority` reads the committed
+**artifact** and never calls the script, so mutating the script cannot touch it — re-aimed at the
+fixture (S11/S11b/S11c), where all three bite.
+:::
+
+**Process.** ⚠ **Never merge with a review process still running.** Three CLI probes returning
+*"Review limit reached"* answered *"is a new round available now"*, not *"is the round I already
+launched finished"* — a delayed round completed after the merge with 1 major + 1 minor. Check for
+in-flight background reviews before merging, not just the last probe's answer.
+
+**Commit.** one atomic commit on `p3-13-fixup-order-and-handoff-scope`, parent `5637e91`.

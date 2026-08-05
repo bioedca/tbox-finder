@@ -47,6 +47,21 @@ travels with the payload as ``n_soft_masked`` rather than being lost at the uppe
 non-ACGTU characters travel as ``n_ambiguous`` — the same recall-favouring "keep and flag"
 discipline :mod:`tbox_finder.infer.locus` applies to zero-flanked and singly-covered positions.
 
+Validation is per **emitted span**; the rest of the contig is counted
+---------------------------------------------------------------------
+:func:`handoff_loci` refuses an emitted span that carries a character outside the IUPAC
+alphabet — every byte that reaches Stage 2 has been through :func:`require_iupac`. It does
+**not** refuse the scanned sequence as a whole, and that asymmetry is deliberate: a contig is
+megabases long and a locus is ~200 nt, so validating the whole contig would let one stray
+character anywhere veto every locus called on it. That is anti-recall on exactly the MAG
+contigs PRD §6 targets, and unrecoverable at this layer — the caller has no way to say "keep
+the clean loci". So the out-of-alphabet characters outside every emitted span are **counted**
+and reported on :class:`HandoffResult` rather than raised on: a filthy contig becomes visible
+without becoming fatal. ``n_outside_alphabet_in_spans`` is the same count restricted to the
+union of the emitted spans and is therefore ``0`` on every successful return — it is
+*measured*, not asserted, so it is the tripwire that goes non-zero the moment the per-span
+refusal stops firing.
+
 ``str``-only and torch-free; imports on the bare CI Tier-1 path.
 PRD §6, §13.1; ADR-0005 D15.
 """
@@ -108,6 +123,39 @@ _UNAMBIGUOUS = frozenset("ACGTUacgtu")
 
 class HandoffError(ValueError):
     """Raised on a sequence this module refuses to transcribe, or a malformed span."""
+
+
+def count_outside_alphabet(sequence: str) -> int:
+    """Characters in ``sequence`` outside the IUPAC nucleotide alphabet — counted, not refused.
+
+    The measurement half of :func:`require_iupac`, sharing its alphabet (``IUPAC_COMPLEMENT``)
+    so the two can never disagree about what "outside" means. Used on the parts of a scanned
+    contig that no payload carries, where refusing would cost every locus on the contig.
+
+    Counted through the distinct out-of-alphabet characters rather than per position: this runs
+    over whole contigs at P5 scan scale, and ``set`` + ``str.count`` stay in C where a
+    per-character Python loop would not.
+    """
+    text = str(sequence)
+    unknown = set(text) - set(IUPAC_COMPLEMENT)
+    return sum(text.count(ch) for ch in unknown)
+
+
+def _merge_spans(spans: Sequence[tuple[int, int]]) -> list[tuple[int, int]]:
+    """Half-open ``[start, end)`` spans, sorted and unioned.
+
+    Loci are disjoint as :func:`tbox_finder.infer.locus.construct_loci` emits them, but a
+    non-zero ``flank`` can push two neighbours into overlap. Counting per span would then
+    double-count a shared position and ``n_outside_alphabet_in_spans <= n_outside_alphabet``
+    — the invariant that makes the pair a partition — would stop holding.
+    """
+    merged: list[tuple[int, int]] = []
+    for start, end in sorted(spans):
+        if merged and start <= merged[-1][1]:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], end))
+        else:
+            merged.append((start, end))
+    return merged
 
 
 def require_iupac(sequence: str) -> str:
@@ -209,11 +257,38 @@ class Handoff:
     n_ambiguous: int
 
 
+@dataclass(frozen=True)
+class HandoffResult:
+    """The payloads of one :func:`handoff_loci` call, plus what the rest of the contig was.
+
+    Attributes
+    ----------
+    payloads:
+        One :class:`Handoff` per (locus, carried strand), in locus order then ``+`` before
+        ``-``. The only thing that reaches Stage 2.
+    n_outside_alphabet:
+        Characters in the **whole scanned sequence** outside the IUPAC nucleotide alphabet.
+        A fact about the contig, reported rather than raised on (see the module docstring):
+        one stray byte must not veto the clean loci around it. A large count is a reason to
+        distrust what was called on this contig.
+    n_outside_alphabet_in_spans:
+        The same count restricted to the **union** of the emitted spans, so
+        ``n_outside_alphabet - n_outside_alphabet_in_spans`` is the part no payload carries.
+        ``0`` on every successful return, because a span carrying one raises instead — and it
+        is *measured* rather than hardcoded, so it is the tripwire that goes non-zero if the
+        per-span refusal ever stops firing.
+    """
+
+    payloads: tuple[Handoff, ...]
+    n_outside_alphabet: int
+    n_outside_alphabet_in_spans: int
+
+
 def handoff_loci(
     sequence: str,
     loci: Sequence[Locus],
     calls: Sequence[StrandCall],
-) -> list[Handoff]:
+) -> HandoffResult:
     """Every locus × every strand it carries → the Stage-2 RNA payloads.
 
     A resolved locus yields one payload; an ambiguous one yields two (``+`` then ``-``), which
@@ -222,12 +297,19 @@ def handoff_loci(
 
     ``sequence`` is the DNA that was scanned, in the same frame the loci's coordinates are in.
 
+    Returns a :class:`HandoffResult`, **not** a bare list: the out-of-alphabet content of the
+    parts of ``sequence`` that no payload carries is a property of this call and has nowhere
+    else to live.
+
     Raises
     ------
     HandoffError
         On a ``loci``/``calls`` length mismatch (which would silently pair a locus with another
-        locus's strand call), a span running past the end of ``sequence``, or a sequence
-        carrying characters outside the IUPAC alphabet.
+        locus's strand call), a span running past the end of ``sequence``, or an **emitted
+        span** carrying characters outside the IUPAC alphabet. Out-of-alphabet characters
+        outside every emitted span are **counted**, not refused — refusing a whole contig for
+        one stray byte would drop every locus on it, which is anti-recall on exactly the MAG
+        contigs this path targets. See ``n_outside_alphabet`` on the result.
     """
     if len(loci) != len(calls):
         raise HandoffError(
@@ -236,6 +318,7 @@ def handoff_loci(
         )
     text = str(sequence)
     payloads: list[Handoff] = []
+    emitted_spans: list[tuple[int, int]] = []
     for index, (locus, call) in enumerate(zip(loci, calls, strict=True)):
         if not (0 <= locus.start <= locus.end <= len(text)):
             raise HandoffError(
@@ -254,6 +337,7 @@ def handoff_loci(
             )
         n_soft_masked = sum(1 for ch in span if ch.islower())
         n_ambiguous = sum(1 for ch in span if ch not in _UNAMBIGUOUS)
+        emitted_spans.append((locus.start, locus.end))
         for strand in call.strands:
             payloads.append(
                 Handoff(
@@ -268,7 +352,15 @@ def handoff_loci(
                     n_ambiguous=n_ambiguous,
                 )
             )
-    return payloads
+    # Reached only once every emitted span has been through ``require_iupac``, so the in-span
+    # count below is 0 — measured that way rather than written that way.
+    return HandoffResult(
+        payloads=tuple(payloads),
+        n_outside_alphabet=count_outside_alphabet(text),
+        n_outside_alphabet_in_spans=sum(
+            count_outside_alphabet(text[start:end]) for start, end in _merge_spans(emitted_spans)
+        ),
+    )
 
 
 def handoff_is_sequence_only(record: type = Handoff) -> bool:
@@ -292,6 +384,8 @@ __all__ = [
     "STEP",
     "Handoff",
     "HandoffError",
+    "HandoffResult",
+    "count_outside_alphabet",
     "handoff_is_sequence_only",
     "handoff_loci",
     "require_iupac",
