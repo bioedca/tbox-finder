@@ -52,7 +52,7 @@ merged run contains at least one masked position, and every masked position is a
 element class, so ``n_distinct_elements >= 1`` always. Under ``threshold_scope="global"`` the
 mask is bit-identical to ``call_candidates``'s, so the cores are the *same spans* — the
 Stage-1 per-locus recall floor D3 defines is preserved **exactly**, not approximately
-(``test_global_scope_at_k1_loses_nothing_the_caller_found``). Every value above 1 trades
+(``test_global_scope_at_k_le_1_loses_nothing_the_caller_found``). Every value above 1 trades
 recall for specificity and is therefore a phase-gate quantity, not a default.
 
 Pin discipline: this module pins NO value

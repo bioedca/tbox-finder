@@ -118,7 +118,12 @@ _ROWS = _rows(_SPEC)
 _LP = _log_probs(_ROWS)
 _SEQ_LEN = 140
 
-#: The three raw element runs at any τ in (0.05, 0.893]; the numbers the whole file rests on.
+#: The three raw element runs — the numbers the whole file rests on. Each scope selects exactly
+#: these over its own useful range, and the two ranges are **not** the same, which is the point
+#: of the scope being a knob: global for τ in (0.05, 0.95], because an element position carries
+#: ``1 − P(background) = 0.95`` whatever its class; per-class (uniform map) for τ in (0.00714,
+#: 0.893), because the own-class posterior 0.94 × 0.95 round-trips to 0.8929999999999999 and so
+#: never attains 0.893. Both boundaries measured, not reasoned about.
 _RUNS = ((10, 40), (45, 70), (110, 122))
 _TAU = 0.5
 _STEM_I = CLASS_INDEX["Stem_I"]
@@ -670,13 +675,16 @@ def test_per_class_scope_reproduces_global_when_the_thresholds_are_equivalent():
 def test_per_class_scope_expresses_a_mask_no_global_threshold_can():
     """Raising one class's τ removes that class's positions and leaves every other alone.
 
-    The global scope cannot do this at any τ: below 0.893 it keeps the Specifier run, above it
-    it loses all three. That is what makes the scope a real D3 knob rather than a
-    re-parameterisation — and why the choice is frozen at the phase gate.
+    The global scope cannot do this at **any** τ, and the reason is that it never sees a class:
+    every element position carries ``1 − P(background) = 0.95`` whatever class it belongs to,
+    so τ ≤ 0.95 keeps the Specifier run along with the other two and τ > 0.95 loses all three
+    together. Both sides of that boundary are swept below, so "cannot" is asserted rather than
+    argued. That is what makes the scope a real D3 knob rather than a re-parameterisation — and
+    why the choice is frozen at the phase gate.
     """
     suppress = dict(_TAU_MAP_EQUIV) | {"Specifier": 0.95}
     assert _cores(_shipped("per_class", suppress, 1, 5, 1, 0)) == [(10, 40), (110, 122)]
-    for tau in (0.05, 0.5, 0.89, 0.9, 0.95):
+    for tau in (0.05, 0.5, 0.89, 0.893, 0.9, 0.95, 0.96, 1.0):
         assert _cores(_shipped("global", tau, 1, 5, 1, 0)) != [(10, 40), (110, 122)]
 
 
