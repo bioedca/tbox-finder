@@ -3178,3 +3178,41 @@ policy, so it is recorded here rather than relitigated. It does not affect this 
 (b) and (c) block the yield on their own.
 
 **Commit.** _(see the squash-merge SHA in `TODO.md`)_
+
+## Step P3-15′-a (review r1) — 2026-08-05: a guard that reported after the side effect it prevents
+
+**CodeRabbit CLI r1: `No findings ✔`** across all six files. **The GitHub app, reviewing the same
+commit, returned one — major, and right.** Two independent paths, one finding between them, found
+by the path the CLI missed: run both.
+
+**The finding.** `_cmd_plan` wrote `--out` and printed the plan, *then* returned 4. So on a
+checkout that cannot evidence the supply, `reports/p2/mine_round_plan.json` was left on disk saying
+`ready: true, msa_supply_available: true` — and the §9.3 artifact verify gates on **exactly that
+key**. The job exits non-zero and writes no `DONE`, but the stale artifact reads as a good plan.
+This is [[guard-runs-after-what-it-guards]] in my own new code, one step after writing a derivation
+whose entire purpose is that a declaration cannot outrun its evidence. **Reproduced by execution
+before fixing** (rc 4, file present, `ready` `True`).
+
+**The fix is not the one proposed, and the difference is load-bearing.** CodeRabbit suggested
+moving the gate above the write, i.e. *not writing at all* on the refusal. That leaves the worse
+half of the same hole: a plan from an **earlier, good** run sitting at that path survives untouched
+and still reads `ready: true`. The artifact is therefore still written, but with the top-level
+`ready` forced `False` and `ready_overridden_by:
+"msa_supply_declaration_unevidenced"` naming what overrode it — while the nested `readiness` object
+keeps the readiness gate's own untouched verdict (`ready: true`, `refusal_reason: null`). Nothing
+is misreported: the top-level key means *"may this round proceed"*, and it may not.
+[[review-finding-right-fix-wrong]], fourth occurrence in this repo — judge the finding and the fix
+separately. The proposed fix is shipped **as a sabotage** (S29) and is RED against the same test,
+which is what "the difference is load-bearing" means operationally.
+
+**One more, self-found before the gate, of the same family.** `certification_green` read the
+matched-control flags off the evidence record's **own key set**, so an emptied
+`matched_control: {}` had nothing left to be unmatched and certified green — a clause vacuously
+satisfied exactly when the evidence is missing. `REQUIRED_MATCHED_CONTROL_FLAGS` names the four
+dimensions; a missing key now counts as unmatched. Re-aiming the sabotage this fix staled is how
+it stayed honest: the harness reported the stale anchor as a **MISS**, not a pass.
+
+**Validation.** 60 tests (56 → 60); full unit+golden **4,276 passed / 15 failed** vs the matched
+baseline worktree at `0b9ad0c` (**4,248 / 15**) — failure sets identical, `comm` empty both ways.
+**29 sabotages, 28 RED against their NAMED test**, the 29th the declared no-op control. ruff
+0.15.15 + black 25.11.0 clean.

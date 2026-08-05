@@ -1100,14 +1100,28 @@ def _cmd_plan(args: argparse.Namespace) -> int:
         relaxed_arch_available=bool(args.relaxed_arch_available),
         synteny_available=bool(args.synteny_available),
     )
+    unevidenced = msa_supply_declaration_unevidenced(plan)
+    if unevidenced:
+        # The artifact must not be able to read as a good plan. The §9.3 artifact verify gates
+        # on `ready == true` in this very file, so returning 4 *after* writing a plan that says
+        # `ready: true` would leave the stale artifact to pass a check the run just failed — a
+        # guard reporting after the side effect it exists to prevent. The write is kept (rather
+        # than skipped) so a plan from an EARLIER run cannot survive at this path either, and
+        # `readiness` keeps the readiness gate's own untouched verdict: nothing is misreported,
+        # the top-level "may this round proceed" is simply False, and it names what overrode it.
+        plan = {
+            **plan,
+            "ready": False,
+            "ready_overridden_by": "msa_supply_declaration_unevidenced",
+        }
     text = json.dumps(plan, indent=2, sort_keys=True)
     if args.out:
         Path(args.out).write_text(text + "\n", encoding="utf-8")
     print(text)
-    if msa_supply_declaration_unevidenced(plan):
-        # Checked BEFORE readiness, and with its own exit code: 3 is the *expected* refusal
-        # the sbatch converts to a clean exit, so routing this through 3 would turn a
-        # misconfigured checkout into a silent "no round today". This is a staging fault.
+    if unevidenced:
+        # Its own exit code: 3 is the *expected* refusal the sbatch converts to a clean exit,
+        # so routing this through 3 would turn a misconfigured checkout into a silent
+        # "no round today". This is a staging fault.
         print(
             "FATAL: this round declares the covariation MSA supply available, but this "
             "checkout cannot evidence it — "

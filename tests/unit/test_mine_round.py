@@ -261,6 +261,43 @@ def test_cli_plan_unevidenced_is_not_fatal_when_nothing_is_declared(monkeypatch,
     capsys.readouterr()
 
 
+def test_cli_plan_artifact_cannot_read_as_a_good_plan_when_unevidenced(
+    monkeypatch, capsys, tmp_path
+):
+    # CodeRabbit r1 (major), reproduced before fixing: `_cmd_plan` wrote --out and THEN
+    # returned 4, leaving reports/p2/mine_round_plan.json saying `ready: true` on a checkout
+    # that cannot evidence the supply — and the §9.3 artifact verify gates on exactly that key.
+    # A guard reporting after the side effect it exists to prevent.
+    monkeypatch.setattr(mr, "REPO_ROOT", tmp_path / "empty")
+    out = tmp_path / "plan.json"
+    # A plan from an EARLIER, good run sits at this path: the fix must not leave it either,
+    # which is why the artifact is overwritten rather than simply not written.
+    out.write_text(json.dumps({"ready": True, "step": "stale"}), encoding="utf-8")
+
+    assert mr.main(["plan", "--rscape-installed", "true", "--out", str(out)]) == 4
+    capsys.readouterr()
+
+    doc = json.loads(out.read_text())
+    assert doc["step"] != "stale"  # the stale artifact did not survive
+    assert doc["ready"] is False  # a `ready == true` verify now correctly refuses it
+    assert doc["ready_overridden_by"] == "msa_supply_declaration_unevidenced"
+    # …and nothing is misreported: the readiness gate's own verdict is preserved untouched.
+    assert doc["readiness"]["ready"] is True
+    assert doc["readiness"]["refusal_reason"] is None
+    assert doc["msa_supply_derivation"]["available"] is False
+
+
+def test_cli_plan_artifact_is_untouched_when_the_declaration_is_evidenced(capsys, tmp_path):
+    # The positive control: on the real tree the override must NOT appear, or the guard would
+    # be refusing every run and the test above would pass for the wrong reason.
+    out = tmp_path / "plan.json"
+    assert mr.main(["plan", "--rscape-installed", "true", "--out", str(out)]) == 0
+    capsys.readouterr()
+    doc = json.loads(out.read_text())
+    assert doc["ready"] is True
+    assert "ready_overridden_by" not in doc
+
+
 def test_cli_plan_staging_fault_outranks_a_readiness_refusal(monkeypatch, capsys, tmp_path):
     # ORDER, not just the code: with R-scape absent the round is ALSO refused at readiness (3),
     # which mine_round.sbatch converts to `exit 0`. A checkout that declares a supply it cannot
