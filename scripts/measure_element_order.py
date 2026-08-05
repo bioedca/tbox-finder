@@ -166,17 +166,29 @@ def derive_order(report: dict) -> tuple[str, ...]:
     """5′→3′ element order derived from a report's **pairwise** matrix.
 
     Each element is ranked by how many of its pairwise comparisons it wins — A precedes B
-    when a strict majority of the records annotating both put A's midpoint first. That is a
-    Copeland score over the measured tournament, so the order follows the per-pair evidence
-    rather than the medians (which are aggregated across records with different origins and
-    are reported for orientation only).
+    when a **strict majority** of the records annotating both put A's midpoint first, i.e.
+    ``2 * n_a_before_b > n_both``. That is a Copeland score over the measured tournament, so
+    the order follows the per-pair evidence rather than the medians (which are aggregated
+    across records with different origins and are reported for orientation only).
 
-    Refuses to return an order that is not a strict total one: a tied score, or a pair with no
-    co-annotating record, leaves the rank of at least two elements undetermined and a
-    silently-arbitrary tie-break would put an unmeasured ordering into the strand-resolver.
-    This is also the check that the constant in :mod:`tbox_finder.infer.strand` is re-derived
-    from, so a corpus that stopped supporting a total order would fail the unit test rather
-    than quietly re-order one element.
+    A majority, **not a plurality**, and the difference is only invisible while ties are rare.
+    ``n_a_before_b > n_b_before_a`` is the same test whenever ``n_tied == 0``, but the third
+    outcome is real here — two elements share a midpoint whenever one is a single-nucleotide
+    annotation centred in the other, and the committed corpus does record ties (13 for
+    ``Stem_I``/``Specifier``, 1 for ``Antiterminator_Tbox_seq``/``Discriminator``). On a
+    40 / 39 / 21 split the plurality rule awards A a pairwise win on **40 %** support and the
+    order that comes out is one most co-annotating records do not attest. The two rules agree
+    on all 21 pairs of the committed measurement, so nothing shipped moves; the exposure is a
+    re-measurement on a different corpus — a different GTDB release, the P5 scan's own calls —
+    silently deriving a rank the stated rule does not support.
+
+    Refuses to return an order that is not a strict total one: a pair with no strict majority
+    (a tie, or a three-way split where the leader is short of half), a pair with no
+    co-annotating record, or a tied Copeland score leaves the rank of at least two elements
+    undetermined, and a silently-arbitrary tie-break would put an unmeasured ordering into the
+    strand-resolver. This is also the check that the constant in
+    :mod:`tbox_finder.infer.strand` is re-derived from, so a corpus that stopped supporting a
+    total order would fail the unit test rather than quietly re-order one element.
     """
     names = [e["element"] for e in report["elements"]]
     wins = dict.fromkeys(names, 0)
@@ -204,12 +216,26 @@ def derive_order(report: dict) -> tuple[str, ...]:
             raise ValueError(
                 f"{a} vs {b}: no record annotates both, so their 5′→3′ order is unmeasured"
             )
-        if pair["n_a_before_b"] > pair["n_b_before_a"]:
+        n_ab, n_ba = pair["n_a_before_b"], pair["n_b_before_a"]
+        # ``n_both`` is now the DENOMINATOR of the award, not just a presence check, so it has
+        # to be a real one. A report where the directional counts overrun it (or go negative)
+        # would make ``2 * n_ab > n_both`` true on arithmetic rather than on evidence.
+        if n_ab < 0 or n_ba < 0 or n_ab + n_ba > n_both:
+            raise ValueError(
+                f"{a} vs {b}: {n_ab} + {n_ba} directional records do not fit in {n_both} "
+                "co-annotating ones, so the majority denominator is not the one measured"
+            )
+        if 2 * n_ab > n_both:
             wins[a] += 1
-        elif pair["n_b_before_a"] > pair["n_a_before_b"]:
+        elif 2 * n_ba > n_both:
             wins[b] += 1
         else:
-            raise ValueError(f"{a} vs {b}: exactly tied over {n_both} records — order undecided")
+            raise ValueError(
+                f"{a} vs {b}: no strict majority over {n_both} co-annotating records "
+                f"({n_ab} before, {n_ba} after, {n_both - n_ab - n_ba} tied) — order undecided. "
+                "A plurality is not a majority: the leader here is attested by "
+                f"{100.0 * max(n_ab, n_ba) / n_both:.1f} % of the records that saw both"
+            )
     if seen_pairs != expected_pairs:
         missing = sorted(tuple(sorted(p)) for p in expected_pairs - seen_pairs)
         raise ValueError(f"the pairwise matrix is incomplete; unmeasured pair(s): {missing}")

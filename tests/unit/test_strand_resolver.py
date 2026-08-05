@@ -32,6 +32,7 @@ import inspect
 import json
 import sys
 from dataclasses import dataclass
+from dataclasses import fields as dataclasses_fields
 from pathlib import Path
 
 import numpy as np
@@ -43,8 +44,11 @@ from tbox_finder.infer.handoff import (
     IUPAC_COMPLEMENT_UPPER,
     Handoff,
     HandoffError,
+    HandoffResult,
+    count_outside_alphabet,
     handoff_is_sequence_only,
     handoff_loci,
+    require_iupac,
     reverse_complement,
     transcribe_to_rna,
 )
@@ -243,7 +247,7 @@ def test_derive_order_refuses_anything_short_of_a_strict_total_order():
     clean = report([pair("A", "B", 10, 0), pair("A", "C", 10, 0), pair("B", "C", 10, 0)])
     assert derive_order(clean) == ("A", "B", "C")
 
-    with pytest.raises(ValueError, match="exactly tied"):
+    with pytest.raises(ValueError, match="no strict majority"):
         derive_order(report([pair("A", "B", 5, 5), pair("A", "C", 10, 0), pair("B", "C", 10, 0)]))
 
     with pytest.raises(ValueError, match="no record annotates both"):
@@ -289,6 +293,153 @@ def test_derive_order_refuses_an_incomplete_or_double_counted_tournament():
     # Positive control: the complete, single-counted tournament still resolves.
     complete = report([pair("A", "B", 10, 0), pair("A", "C", 10, 0), pair("B", "C", 10, 0)])
     assert derive_order(complete) == ("A", "B", "C")
+
+
+def test_derive_order_refuses_a_plurality_that_is_not_a_majority():
+    """A pairwise win needs **half** the co-annotating records, not merely the most of three.
+
+    The docstring has always claimed a strict majority; the code compared ``n_a_before_b`` to
+    ``n_b_before_a``, which is only the same test when nothing is tied. Ties are real on this
+    corpus — one element is routinely a short annotation centred inside another — and the
+    committed measurement records 13 for ``Stem_I``/``Specifier`` and 1 for
+    ``Antiterminator_Tbox_seq``/``Discriminator``.
+
+    On 40 / 39 / 21 the plurality rule awards A the pair on **40 %** support: an adjacency in
+    the rank that orients every reported locus, attested by a minority of the records that
+    measured it. Both rules agree on all 21 committed pairs, so no shipped value moves — the
+    exposure is a re-measurement (a different GTDB release, the P5 scan's own calls) deriving
+    a rank the stated rule does not support, with nothing failing.
+    """
+    derive_order = _load_order_script().derive_order
+
+    def report(pairs):
+        return {"elements": [{"element": n} for n in ("A", "B", "C")], "pairs": pairs}
+
+    def pair(a, b, ab, ba, tied=0):
+        return {
+            "A": a,
+            "B": b,
+            "n_both": ab + ba + tied,
+            "n_a_before_b": ab,
+            "n_b_before_a": ba,
+        }
+
+    plurality_only = pair("A", "B", 40, 39, tied=21)
+    # The fixture's discriminating power, stated about the fixture rather than by
+    # re-implementing the ranking: the OLD comparison awards A, the new one awards nobody.
+    assert plurality_only["n_a_before_b"] > plurality_only["n_b_before_a"]
+    assert 2 * plurality_only["n_a_before_b"] <= plurality_only["n_both"]
+
+    with pytest.raises(ValueError, match="no strict majority") as excinfo:
+        derive_order(report([plurality_only, pair("A", "C", 10, 0), pair("B", "C", 10, 0)]))
+    # The refusal quotes the support it refused on, so a reader sees 40 %, not "undecided".
+    assert "40.0 %" in str(excinfo.value)
+
+    # Positive control: the identical tournament with the ties resolved into a real majority
+    # returns the same order the plurality rule would have. The refusal is about the evidence,
+    # not about the shape of the fixture.
+    resolved = report([pair("A", "B", 61, 39), pair("A", "C", 10, 0), pair("B", "C", 10, 0)])
+    assert derive_order(resolved) == ("A", "B", "C")
+
+    # …and one record short of half is still short of half: 50 / 49 / 1 over 100 is refused.
+    # Exactly half is not a majority, so the comparison must be ``>`` and not ``>=`` — checked
+    # on BOTH branches, since a ``>=`` slip on one of them alone would otherwise survive.
+    with pytest.raises(ValueError, match="no strict majority"):
+        derive_order(
+            report([pair("A", "B", 50, 49, tied=1), pair("A", "C", 10, 0), pair("B", "C", 10, 0)])
+        )
+    with pytest.raises(ValueError, match="no strict majority"):
+        derive_order(
+            report([pair("A", "B", 49, 50, tied=1), pair("A", "C", 10, 0), pair("B", "C", 10, 0)])
+        )
+    # 51 / 49 / 0 is the smallest majority on the same denominator, and it resolves.
+    assert derive_order(
+        report([pair("A", "B", 51, 49), pair("A", "C", 10, 0), pair("B", "C", 10, 0)])
+    ) == ("A", "B", "C")
+
+    # The award is a two-branch disjunct and the branches are checked separately: the mirrored
+    # 39 / 40 / 21 gives **B** the plurality, so a fix applied to only one branch is caught.
+    # Sabotaging a compound predicate as a whole is what lets half of it stay wrong.
+    mirrored = pair("A", "B", 39, 40, tied=21)
+    assert mirrored["n_b_before_a"] > mirrored["n_a_before_b"]
+    assert 2 * mirrored["n_b_before_a"] <= mirrored["n_both"]
+    with pytest.raises(ValueError, match="no strict majority"):
+        derive_order(report([mirrored, pair("A", "C", 10, 0), pair("B", "C", 10, 0)]))
+    # Its own positive control: B by a real majority puts B first.
+    assert derive_order(
+        report([pair("A", "B", 39, 61), pair("A", "C", 10, 0), pair("B", "C", 10, 0)])
+    ) == ("B", "A", "C")
+
+
+def test_derive_order_refuses_a_denominator_the_directional_counts_overrun():
+    """``n_both`` became the majority denominator, so it has to be a real one.
+
+    Under the old plurality comparison ``n_both`` was only a presence check and an inflated or
+    inconsistent one changed no award. It now divides: with ``n_both`` understated,
+    ``2 * n_a_before_b > n_both`` is satisfied by arithmetic rather than by evidence, and the
+    pair is awarded on a majority of a population that was never measured.
+    """
+    derive_order = _load_order_script().derive_order
+
+    def report(pairs):
+        return {"elements": [{"element": n} for n in ("A", "B", "C")], "pairs": pairs}
+
+    def pair(a, b, ab, ba, n_both):
+        return {"A": a, "B": b, "n_both": n_both, "n_a_before_b": ab, "n_b_before_a": ba}
+
+    with pytest.raises(ValueError, match="do not fit in"):
+        derive_order(
+            report(
+                [
+                    pair("A", "B", 40, 39, n_both=50),  # 79 directional records in 50
+                    pair("A", "C", 10, 0, n_both=10),
+                    pair("B", "C", 10, 0, n_both=10),
+                ]
+            )
+        )
+
+    with pytest.raises(ValueError, match="do not fit in"):
+        derive_order(
+            report(
+                [
+                    pair("A", "B", -1, 5, n_both=10),
+                    pair("A", "C", 10, 0, n_both=10),
+                    pair("B", "C", 10, 0, n_both=10),
+                ]
+            )
+        )
+
+    # Positive control: consistent counts with room for ties resolve.
+    assert derive_order(
+        report(
+            [
+                pair("A", "B", 40, 9, n_both=50),
+                pair("A", "C", 10, 0, n_both=10),
+                pair("B", "C", 10, 0, n_both=10),
+            ]
+        )
+    ) == ("A", "B", "C")
+
+
+def test_the_committed_measurement_supports_the_order_by_strict_majority():
+    """The shipped constant is safe under the corrected rule, pair by pair.
+
+    ``test_canonical_order_is_the_measured_order`` re-derives the order and would catch a
+    change; this states the stronger property the correction rests on — **every** one of the 21
+    committed pairs is decided by more than half of its co-annotating records, so plurality and
+    majority cannot disagree on this artifact and the fix moves nothing.
+    """
+    report = json.loads(_MEASUREMENT.read_text())
+    # The count first: a ``for`` over an empty or truncated ``pairs`` list asserts nothing, so
+    # a partially-written measurement would satisfy the loop below in silence — and the claim
+    # this test makes is about **every** one of the 21 pairs, which is a statement about the
+    # count as much as about each pair.
+    n_elements = len(report["elements"])
+    assert len(report["pairs"]) == n_elements * (n_elements - 1) // 2 == 21
+    for p in report["pairs"]:
+        n_both, n_ab, n_ba = p["n_both"], p["n_a_before_b"], p["n_b_before_a"]
+        assert n_ab + n_ba <= n_both
+        assert max(n_ab, n_ba) * 2 > n_both, f"{p['A']} vs {p['B']} decided on a plurality only"
 
 
 def test_the_committed_measurement_is_a_complete_tournament():
@@ -904,7 +1055,7 @@ def test_a_resolved_locus_yields_one_payload_on_its_own_strand():
     loci, calls = _loci_and_calls(log_probs, flank=10)
     sequence = _canonical_sequence()
 
-    payloads = handoff_loci(sequence, loci, calls)
+    payloads = handoff_loci(sequence, loci, calls).payloads
     assert len(payloads) == 1
     payload = payloads[0]
     assert payload.strand == STRAND_PLUS
@@ -926,7 +1077,7 @@ def test_an_ambiguous_locus_yields_a_payload_on_each_strand():
     loci, calls = _loci_and_calls(log_probs, flank=5)
     sequence = "".join(np.random.default_rng(1).choice(list("ACGT"), size=100))
 
-    payloads = handoff_loci(sequence, loci, calls)
+    payloads = handoff_loci(sequence, loci, calls).payloads
     assert [p.strand for p in payloads] == list(BOTH_STRANDS)
     assert all(p.low_order_confidence for p in payloads)
     assert all(p.locus_index == 0 for p in payloads)
@@ -951,12 +1102,12 @@ def test_payload_counts_soft_masked_and_ambiguous_positions():
     for i in range(start + 10, start + 13):
         sequence[i] = "N"
     sequence[start + 20] = "R"
-    payloads = handoff_loci("".join(sequence), loci, calls)
+    payloads = handoff_loci("".join(sequence), loci, calls).payloads
 
     assert payloads[0].n_soft_masked == 4
     assert payloads[0].n_ambiguous == 4  # three N + one R
     # A span with neither reports zero rather than None — this one is measured.
-    clean = handoff_loci("A" * 60, loci, calls)
+    clean = handoff_loci("A" * 60, loci, calls).payloads
     assert (clean[0].n_soft_masked, clean[0].n_ambiguous) == (0, 0)
 
 
@@ -986,7 +1137,7 @@ def test_handoff_refuses_a_locus_call_length_mismatch():
     with pytest.raises(HandoffError, match="paired by position"):
         handoff_loci(sequence, loci, [])
     # Positive control: the matched pair succeeds on the identical inputs.
-    assert handoff_loci(sequence, loci, calls)
+    assert handoff_loci(sequence, loci, calls).payloads
 
 
 def test_handoff_refuses_malformed_locus_coordinates():
@@ -1005,7 +1156,7 @@ def test_handoff_refuses_malformed_locus_coordinates():
     sequence = _canonical_sequence(3)
 
     # Positive control: the well-formed locus succeeds on this exact sequence.
-    assert handoff_loci(sequence, loci, calls)
+    assert handoff_loci(sequence, loci, calls).payloads
 
     negative = replace(loci[0], start=-5, length=loci[0].end + 5)
     assert sequence[negative.start : negative.end] != sequence[loci[0].start : loci[0].end]
@@ -1025,7 +1176,7 @@ def test_payload_length_is_the_sequence_it_actually_carries():
     """``length`` is taken from the emitted span, so it cannot disagree with ``rna``."""
     log_probs = _log_probs_from_layout(CANONICAL_SEQ_LEN, CANONICAL_LAYOUT)
     loci, calls = _loci_and_calls(log_probs, flank=5)
-    for payload in handoff_loci(_canonical_sequence(4), loci, calls):
+    for payload in handoff_loci(_canonical_sequence(4), loci, calls).payloads:
         assert payload.length == len(payload.rna) == payload.end - payload.start
 
 
@@ -1047,10 +1198,213 @@ def test_end_to_end_minus_strand_locus_hands_over_the_forward_reading():
     loci, calls = _loci_and_calls(log_probs, flank=8)
     sequence = _canonical_sequence(7)
 
-    payloads = handoff_loci(sequence, loci, calls)
+    payloads = handoff_loci(sequence, loci, calls).payloads
     assert len(payloads) == 1
     assert calls[0].strand == STRAND_MINUS
     span = sequence[loci[0].start : loci[0].end]
     assert payloads[0].rna == rna_tokenizer.transcribe(reverse_complement(span))
     assert payloads[0].rna != rna_tokenizer.transcribe(span)
     assert len(payloads[0].rna) == loci[0].length
+
+
+# --------------------------------------------------------------------------- #
+# 8. validation scope: the emitted spans are REFUSED on, the contig is COUNTED
+# --------------------------------------------------------------------------- #
+def test_count_outside_alphabet_shares_its_alphabet_with_require_iupac():
+    """The counter and the refuser must never disagree about what "outside" means.
+
+    Two independently-written character sets would let a byte be refused in a span and not
+    counted outside one (or the reverse), so the two halves of the contract would describe
+    different alphabets. Checked over the whole printable range rather than a sample.
+    """
+    for code in range(32, 127):
+        ch = chr(code)
+        refused = False
+        try:
+            require_iupac(ch)
+        except HandoffError:
+            refused = True
+        assert refused == (count_outside_alphabet(ch) == 1), ch
+    assert count_outside_alphabet("") == 0
+    assert count_outside_alphabet("ACGTacgtRYSWKMBDHVN-") == 0
+    # Counted per occurrence, not per distinct character.
+    assert count_outside_alphabet("XXXQ") == 4
+
+
+def test_an_empty_handoff_still_reports_the_scanned_sequence():
+    """``handoff_loci("X", [], [])`` emits nothing and says the contig was not DNA.
+
+    The reported defect: this returned a bare ``[]``, which reads identically to "a clean
+    contig with no loci on it". The scanned sequence is now described whether or not anything
+    was called on it.
+    """
+    result = handoff_loci("X", [], [])
+    assert isinstance(result, HandoffResult)
+    assert result.payloads == ()
+    assert result.n_outside_alphabet == 1
+    assert result.n_outside_alphabet_in_spans == 0
+
+    clean = handoff_loci("ACGTN", [], [])
+    assert (clean.payloads, clean.n_outside_alphabet) == ((), 0)
+
+    # Positive control, and it is load-bearing: "emits nothing on an empty locus list" reads
+    # exactly like "emits nothing, ever". The same wrapper on a real locus must carry payloads,
+    # or a result that dropped every payload would satisfy the assertions above.
+    log_probs = _log_probs_from_layout(CANONICAL_SEQ_LEN, CANONICAL_LAYOUT)
+    loci, calls = _loci_and_calls(log_probs, flank=0)
+    populated = handoff_loci(_canonical_sequence(11), loci, calls)
+    assert isinstance(populated, HandoffResult)
+    assert len(populated.payloads) == 1
+    assert populated.payloads[0].rna
+
+
+def test_out_of_alphabet_characters_outside_every_span_are_counted_not_refused():
+    """PRD §6 recall: one stray byte on a MAG contig must not veto the loci around it.
+
+    The rejected alternative (``text = require_iupac(sequence)``) makes the whole call raise,
+    losing every clean locus, and the caller has no way at this layer to ask for the clean ones
+    — the refusal is unrecoverable. The junk is instead described.
+    """
+    log_probs = _log_probs_from_layout(CANONICAL_SEQ_LEN, CANONICAL_LAYOUT)
+    loci, calls = _loci_and_calls(log_probs, flank=0)
+    assert len(loci) == 1
+    start, end = loci[0].start, loci[0].end
+    outside = [i for i in range(CANONICAL_SEQ_LEN) if not (start <= i < end)]
+    assert len(outside) >= 3, "the fixture must leave room outside the locus"
+
+    sequence = list("A" * CANONICAL_SEQ_LEN)
+    for i in outside[:3]:
+        sequence[i] = "X"
+    result = handoff_loci("".join(sequence), loci, calls)
+
+    # The locus survives, and its RNA is exactly the clean span.
+    assert len(result.payloads) == 1
+    assert result.payloads[0].rna == rna_tokenizer.transcribe("A" * (end - start))
+    assert result.n_outside_alphabet == 3
+    assert result.n_outside_alphabet_in_spans == 0
+    # The part no payload carries is the difference — the two counts are a partition.
+    assert result.n_outside_alphabet - result.n_outside_alphabet_in_spans == 3
+
+
+def test_an_out_of_alphabet_character_inside_an_emitted_span_is_still_refused():
+    """The half of the contract that did not change, asserted beside the half that did.
+
+    Every byte handed to Stage-2 goes through ``require_iupac``; loosening the *scope* of
+    validation must not loosen the validation. Paired with the identical clean input
+    succeeding, so a guard that refused everything would fail this too.
+    """
+    log_probs = _log_probs_from_layout(CANONICAL_SEQ_LEN, CANONICAL_LAYOUT)
+    loci, calls = _loci_and_calls(log_probs, flank=0)
+    start, end = loci[0].start, loci[0].end
+
+    # Positive control: the identical sequence with a legal base at that position succeeds.
+    clean = list("A" * CANONICAL_SEQ_LEN)
+    assert handoff_loci("".join(clean), loci, calls).payloads
+
+    dirty = list(clean)
+    dirty[(start + end) // 2] = "X"
+    with pytest.raises(HandoffError, match="outside the IUPAC nucleotide alphabet"):
+        handoff_loci("".join(dirty), loci, calls)
+
+    # …and one position past the span, the same character is counted rather than refused.
+    #
+    # Stated as a fixture PRECONDITION, not as an ``if``: this is the only assertion that shows
+    # the boundary is where the refusal stops, and a guarded one disappears silently when the
+    # guard is false. It was originally written against ``start - 1`` under ``if start > 0`` —
+    # and ``CANONICAL_LAYOUT`` begins at 0, so the locus starts at 0 and that assertion never
+    # ran at all. The 5′ side has no room at this tiling; the 3′ side does.
+    assert end < CANONICAL_SEQ_LEN, "the fixture must leave a position past the span"
+    just_outside = list(clean)
+    just_outside[end] = "X"
+    outside_result = handoff_loci("".join(just_outside), loci, calls)
+    assert outside_result.n_outside_alphabet == 1
+    assert outside_result.n_outside_alphabet_in_spans == 0
+    assert outside_result.payloads, "the locus must survive a stray byte one position away"
+
+
+def test_the_in_span_count_is_measured_and_goes_non_zero_when_the_refusal_stops(monkeypatch):
+    """``n_outside_alphabet_in_spans`` is a tripwire, not a hardcoded ``0``.
+
+    It is 0 on every successful return *because* the per-span refusal fires first — which makes
+    a literal ``0`` indistinguishable from a real measurement, and useless as a check. Removing
+    the refusal (by substituting the transcriber) must make it report the junk it now carries.
+    A field whose legitimate value is always zero is indistinguishable from a field nothing
+    writes to; this is the designed control that must fire.
+    """
+    from tbox_finder.infer import handoff as handoff_module
+
+    log_probs = _log_probs_from_layout(CANONICAL_SEQ_LEN, CANONICAL_LAYOUT)
+    loci, calls = _loci_and_calls(log_probs, flank=0)
+    start = loci[0].start
+    sequence = list("A" * CANONICAL_SEQ_LEN)
+    for i in range(start, start + 2):
+        sequence[i] = "X"
+    text = "".join(sequence)
+
+    # With the refusal in place this raises, so no result exists to inspect.
+    with pytest.raises(HandoffError):
+        handoff_loci(text, loci, calls)
+
+    monkeypatch.setattr(handoff_module, "transcribe_to_rna", lambda span, *, strand: span)
+    result = handoff_loci(text, loci, calls)
+    assert result.n_outside_alphabet == 2
+    assert result.n_outside_alphabet_in_spans == 2, "the in-span count must be measured"
+    assert 0 <= result.n_outside_alphabet_in_spans <= result.n_outside_alphabet
+
+
+def test_overlapping_flanked_spans_are_counted_over_their_union(monkeypatch):
+    """A non-zero flank can push two loci into overlap; the union must not double-count.
+
+    ``construct_loci`` emits disjoint loci, but ``flank`` widens each one independently, so two
+    neighbours closer than ``2 * flank`` overlap. Counting per span would report a shared
+    position twice and break ``n_outside_alphabet_in_spans <= n_outside_alphabet``, the
+    invariant that makes the two counts a partition rather than two unrelated numbers.
+    """
+    from tbox_finder.infer import handoff as handoff_module
+
+    layout = [("Stem_I", 10, 30), ("Terminator", 50, 70)]
+    log_probs = _log_probs_from_layout(100, layout)
+    _assert_layout_realised(log_probs, layout)
+    loci, calls = _loci_and_calls(log_probs, flank=12, gap_merge=4)
+    assert len(loci) == 2, "the 20-nt gap must survive gap_merge=4 as two loci"
+    spans = [(locus.start, locus.end) for locus in loci]
+    assert spans[0][1] > spans[1][0], f"the fixture's flanked spans must overlap: {spans}"
+
+    overlap = range(spans[1][0], spans[0][1])
+    assert len(overlap) >= 2
+
+    sequence = list("A" * 100)
+    for i in list(overlap)[:2]:
+        sequence[i] = "X"
+    text = "".join(sequence)
+
+    monkeypatch.setattr(handoff_module, "transcribe_to_rna", lambda span, *, strand: span)
+    result = handoff_loci(text, loci, calls)
+    # Two junk positions, each covered by BOTH spans: the union counts them once each.
+    assert result.n_outside_alphabet == 2
+    assert result.n_outside_alphabet_in_spans == 2
+    assert result.n_outside_alphabet_in_spans <= result.n_outside_alphabet
+
+
+def test_merge_spans_unions_overlapping_and_touching_intervals():
+    """The union arithmetic itself, since the partition invariant rests on it."""
+    from tbox_finder.infer.handoff import _merge_spans
+
+    assert _merge_spans([]) == []
+    assert _merge_spans([(5, 10)]) == [(5, 10)]
+    assert _merge_spans([(0, 5), (10, 15)]) == [(0, 5), (10, 15)]
+    assert _merge_spans([(0, 10), (5, 15)]) == [(0, 15)]
+    assert _merge_spans([(5, 15), (0, 10)]) == [(0, 15)], "unsorted input must still union"
+    assert _merge_spans([(0, 5), (5, 10)]) == [(0, 10)], "touching intervals share no position"
+    assert _merge_spans([(0, 20), (5, 10)]) == [(0, 20)], "a contained span must not extend it"
+    assert _merge_spans([(0, 5), (2, 8), (7, 12)]) == [(0, 12)]
+
+
+def test_handoff_result_is_sequence_only_and_carries_no_second_payload_channel():
+    """PRD §6 again, one level up: the wrapper must not become a structure carrier either."""
+    assert handoff_is_sequence_only(HandoffResult) is True
+    assert {f.name for f in dataclasses_fields(HandoffResult)} == {
+        "payloads",
+        "n_outside_alphabet",
+        "n_outside_alphabet_in_spans",
+    }
