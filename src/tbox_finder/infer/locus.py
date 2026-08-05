@@ -105,6 +105,7 @@ from tbox_finder.infer.call import (
     CandidateError,
     candidates_from_mask,
     element_posterior,
+    require_integer,
     zero_flanked_array,
 )
 from tbox_finder.labels import CLASS_ORDER
@@ -417,15 +418,17 @@ def construct_loci(
     assignment = element_assignment(log_probs, threshold_scope=threshold_scope, threshold=threshold)
     seq_len = int(assignment.shape[0])
 
-    if int(min_distinct_elements) < 0 or int(min_distinct_elements) > NUM_ELEMENT_CLASSES:
+    min_distinct_elements = require_integer(
+        "min_distinct_elements", min_distinct_elements, LocusError
+    )
+    flank = require_integer("flank", flank, LocusError)
+    if min_distinct_elements < 0 or min_distinct_elements > NUM_ELEMENT_CLASSES:
         raise LocusError(
             f"min_distinct_elements must be in [0, {NUM_ELEMENT_CLASSES}], got "
             f"{min_distinct_elements}"
         )
-    if int(flank) < 0:
+    if flank < 0:
         raise LocusError(f"flank must be >= 0, got {flank}")
-    min_distinct_elements = int(min_distinct_elements)
-    flank = int(flank)
 
     zf = zero_flanked_array(zero_flanked, seq_len)
     cov = _coverage_array(coverage, seq_len)

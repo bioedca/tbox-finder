@@ -1049,3 +1049,64 @@ def test_a_locus_in_the_singly_covered_terminus_is_kept_and_flagged():
     assert (locus.start, locus.end) == (36, 324)
     assert locus.n_single_covered_span == 288  # the whole flanked span is singly covered
     assert locus.n_zero_flanked_span == 0
+
+
+# ══════════════════════════════════════════════════════════════════════════════════════════
+# 13. A conversion that changes the value is not a conversion
+# ══════════════════════════════════════════════════════════════════════════════════════════
+
+
+# (knob, the fractional value, what int() would truncate it to, a base under which the
+# truncation genuinely changes the answer). The base is chosen per knob for exactly that
+# reason: a case where truncated and intended agree would prove nothing.
+_TRUNCATION_CASES = [
+    ("min_distinct_elements", 1.9, 1, {"gap_merge": 5}),
+    ("flank", 8.9, 8, {"gap_merge": 5, "min_distinct_elements": 1}),
+    ("min_span", 25.9, 25, {"gap_merge": 0}),
+    ("gap_merge", 4.9, 4, {"min_span": 1}),
+]
+
+
+@pytest.mark.parametrize(("knob", "fractional", "truncated_to", "base"), _TRUNCATION_CASES)
+def test_a_fractional_rule_value_is_refused_not_truncated(knob, fractional, truncated_to, base):
+    """`int(25.9) == 25` is a **value change disguised as a conversion**, and it runs clean.
+
+    Every one of these is an ADR-0005 D3 locus-rule value. Measured before the guard existed:
+    `min_distinct_elements=1.9` kept a single-class locus the caller excluded (co-occurrence
+    silently loosened), `min_span=25.9` kept a 25-nt run the caller excluded, `gap_merge=4.9`
+    stopped bridging the fixture's 5-nt gap, `flank=8.9` narrowed the context handed to
+    Stage-2. Each reported the parameter the caller asked for while acting on a different one.
+
+    Both entry points are covered: `min_span` / `gap_merge` are refused by the **shared** merge
+    (`CandidateError`), so `call_candidates` gained the guard too; the other two by the rule
+    (`LocusError`). One helper, two attributable error types.
+    """
+    with pytest.raises((lc.LocusError, cl.CandidateError), match="must be a whole number"):
+        lc.construct_loci(_LP, **_kw(**base, **{knob: fractional}))
+
+    intended = truncated_to + 1
+    as_float = lc.construct_loci(_LP, **_kw(**base, **{knob: float(intended)}))
+    as_int = lc.construct_loci(_LP, **_kw(**base, **{knob: intended}))
+    truncated = lc.construct_loci(_LP, **_kw(**base, **{knob: truncated_to}))
+    # An integral float cannot change under conversion, so it is accepted and agrees exactly…
+    assert _spans(as_float) == _spans(as_int) and _cores(as_float) == _cores(as_int)
+    # …and the truncated value really does give a different answer, which is what makes the
+    # refusal above worth having rather than pedantry about types.
+    assert (_cores(as_int), _spans(as_int)) != (_cores(truncated), _spans(truncated))
+
+
+@pytest.mark.parametrize("knob", ["min_distinct_elements", "flank", "min_span", "gap_merge"])
+def test_a_boolean_is_refused_as_an_integer_knob(knob):
+    """`bool` is an `int` subclass, so `flank=True` would silently be a flank of 1."""
+    with pytest.raises((lc.LocusError, cl.CandidateError), match="got the boolean"):
+        lc.construct_loci(_LP, **_kw(**{knob: True}))
+    assert lc.construct_loci(_LP, **_kw(**{knob: 1}))  # positive control
+
+
+def test_the_caller_gained_the_same_guard_from_the_shared_helper():
+    """`call_candidates` is stricter now too, and by composition rather than a second copy."""
+    with pytest.raises(cl.CandidateError, match="must be a whole number"):
+        cl.call_candidates(_LP, None, threshold=_TAU, min_span=25.9, gap_merge=0)
+    assert len(cl.call_candidates(_LP, None, threshold=_TAU, min_span=26, gap_merge=0)) == 1
+    assert cl.require_integer("n", np.int32(7)) == 7
+    assert cl.require_integer("n", 7.0) == 7

@@ -169,6 +169,36 @@ def element_posterior(log_probs: Any) -> np.ndarray:
     return np.clip(1.0 - p_bg, 0.0, 1.0)
 
 
+def require_integer(name: str, value: Any, exc: type[Exception] = None) -> int:
+    """Return ``value`` as an ``int``, refusing anything ``int()`` would silently *change*.
+
+    ``int(25.9) == 25`` is a **value change disguised as a conversion**, and every knob it
+    reaches is a locus-rule parameter ADR-0005 D3 freezes at the phase gate: a truncated
+    ``min_span`` keeps a run the caller excluded, a truncated ``min_distinct_elements``
+    loosens the co-occurrence gate, a truncated ``flank`` narrows the context handed to
+    Stage-2. All three run clean and report the parameter the caller asked for.
+
+    Accepted: ``int`` / ``numpy`` integers, and a float that is exactly integral (a YAML or
+    JSON config legitimately yields ``50.0``) — neither can change under conversion. Refused:
+    a fractional float, and ``bool``, which is an ``int`` subclass and would make ``flank=True``
+    a flank of 1.
+
+    ``exc`` selects the raising type so the layer that refused is attributable —
+    :class:`CandidateError` here, :class:`tbox_finder.infer.locus.LocusError` there.
+    """
+    err = CandidateError if exc is None else exc
+    if isinstance(value, bool | np.bool_):
+        raise err(f"{name} must be an integer, got the boolean {value!r}")
+    if isinstance(value, int | np.integer):
+        return int(value)
+    if isinstance(value, float | np.floating) and float(value).is_integer():
+        return int(value)
+    raise err(
+        f"{name} must be a whole number, got {value!r}; int() would silently change it "
+        "rather than convert it, and this is a locus-rule value"
+    )
+
+
 def zero_flanked_array(zero_flanked: Any, seq_len: int) -> np.ndarray:
     """Normalise an optional ``Reconciled.zero_flanked`` to a ``(seq_len,)`` bool array.
 
@@ -279,12 +309,12 @@ def candidates_from_mask(
     p_elem = element_posterior(log_probs)
     seq_len = p_elem.shape[0]
 
-    if int(min_span) < 1:
+    min_span = require_integer("min_span", min_span)
+    gap_merge = require_integer("gap_merge", gap_merge)
+    if min_span < 1:
         raise CandidateError(f"min_span must be >= 1, got {min_span}")
-    if int(gap_merge) < 0:
+    if gap_merge < 0:
         raise CandidateError(f"gap_merge must be >= 0, got {gap_merge}")
-    min_span = int(min_span)
-    gap_merge = int(gap_merge)
 
     mask = np.asarray(element_mask)
     if mask.dtype != np.bool_:
@@ -441,6 +471,7 @@ __all__ = [
     "call_candidates",
     "candidates_from_mask",
     "element_posterior",
+    "require_integer",
     "sweep_candidate_counts",
     "zero_flanked_array",
 ]

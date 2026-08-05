@@ -2544,3 +2544,26 @@ whoever next regenerates it. Recorded so it is not rediscovered as new.
 Two tests now ship the composition: a tail-anchored 1024/512 tiling of a 3,072-nt contig with one 160-nt Stem_I locus planted at an interior position (core and flanked span both exact through the real operator), and the same locus planted in the **singly-covered terminus**. The second is the one that matters. It measures `coverage == 1` on **1,024 of 3,072** positions — P3-11's number, reproduced — asserts `zero_flanked` is `False` **everywhere** (tail-anchored tiling never runs a window off a contig longer than one window, so that flag cannot mark the terminus), and asserts the locus is **kept** with `n_single_covered_span = 288`, the whole flanked span. That is the P3-11 inheritance closed at the only place it was cheap to close: a `Locus` field, no `Candidate` schema change, and a *non-zero* assertion rather than a field only ever tested at zero.
 
 **Validation.** 506 tests green. **31 sabotages, 30 RED against their NAMED test** (the two new ones: inverting the coverage dtype contract to `"f"` reddens 7 tests including the real-operator one; counting single coverage over the core rather than the flanked span gives 160 where 288 is right). One declared no-op control held. ruff 0.15.0 + black 25.11.0 clean.
+
+## Step P3-12 (review r2) — 2026-08-05: a conversion that changes the value is not a conversion
+
+**CLI only again**; the app's `CodeRabbit` check stayed `pass` on the Fair-Usage *"Review rate limited"* notice. **1 minor finding, real, fixed — and it was worse than reported.**
+
+**`int()` silently truncates a locus-rule value, and every truncation runs clean.** CodeRabbit named `min_distinct_elements` and `flank`. Reproducing it by execution found the same defect on **all four** integer knobs, two of which live in the *shared* merge and therefore reached `call_candidates` too. Measured on the fixture, before any guard existed:
+
+| knob | passed | acted on | consequence |
+|---|---|---|---|
+| `min_distinct_elements` | 1.9 | 1 | kept `(110, 122)`, a **single-class** locus the caller excluded — the co-occurrence gate silently loosened |
+| `min_span` | 25.9 | 25 | kept `(45, 70)`, a 25-nt run the caller excluded — the span cut silently loosened |
+| `gap_merge` | 4.9 | 4 | stopped bridging the fixture's 5-nt gap — three cores where two were asked for |
+| `flank` | 8.9 | 8 | one nucleotide of context less on each side than requested |
+
+Each reports the parameter the caller *asked for* while acting on a different one, and these are precisely the values ADR-0005 D3 freezes at the §13.1 phase gate — the class of defect this module's whole no-default pin discipline exists to prevent, arriving through the type system instead of through a default.
+
+**Fixed at the shared boundary, not in two places.** One `call.require_integer(name, value, exc)` — accepts `int` / `numpy` integers and an **integral** float (a YAML or JSON config legitimately yields `50.0`, and neither can change under conversion), refuses a fractional float and refuses `bool` (an `int` subclass, so `flank=True` would have been a flank of 1). `candidates_from_mask` and `construct_loci` both call it; the `exc` argument keeps the raising type attributable to the layer that refused (`CandidateError` vs `LocusError`). `call_candidates` gains the guard **by composition**, which is the second time this step the promotion has paid a dividend the fork would not have.
+
+The test asserts more than the refusal: for each knob it also shows the integral float is accepted and agrees exactly with the int, **and** that the truncated value genuinely gives a different answer — a per-knob base chosen so that it does, because a case where truncated and intended agree would prove nothing.
+
+**Validation.** 512 tests in this file, 746 across the affected suites. **34 sabotages, 33 RED against their NAMED test**, one declared no-op control held. Full unit+golden+ml **4,492 passed / 16 failed** against a matched baseline at `c255382` at **3,977 / 16** — failure sets **identical**, `comm` empty both ways. ruff 0.15.0 + black 25.11.0 clean.
+
+⚠ Two sabotage anchors went stale in the same edit that fixed the finding (`if int(flank) < 0:` became `if flank < 0:`) and the harness reported them as **misses**. The harness asserts its anchor matches exactly once, so a stale anchor is loud rather than silent — but it is worth recording that a refactor invalidates a sabotage suite the way it invalidates a test, and a campaign re-run after a fix is not optional.
