@@ -30,6 +30,7 @@ from __future__ import annotations
 import importlib.util
 import inspect
 import json
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -174,6 +175,24 @@ def test_canonical_order_is_the_measured_order():
     derived = _load_order_script().derive_order(report)
     assert derived == CANONICAL_ELEMENT_ORDER
     assert tuple(report["derived_order_5p_to_3p"]) == CANONICAL_ELEMENT_ORDER
+
+
+def test_the_measurement_script_resolves_its_own_imports():
+    """The documented command must run from a bare checkout, with no editable install.
+
+    ``measure()`` reads ``tbox_finder.labels.ELEMENT_COORDS``, and the env that actually holds
+    this corpus (``tbox-finder-data``) has **no** editable install — so without the ``src``
+    insert the usage line in the module docstring dies with ``ModuleNotFoundError`` *after* the
+    argument parse.
+
+    Checked by **position**, not membership. Importability would pass in CI, which installs the
+    package; and mere membership is satisfied by an editable install's own path entry, so that
+    assertion stays green with the insert deleted — verified, it did not bite the sabotage that
+    removes it. Prepending is the one thing only this script does.
+    """
+    _load_order_script()
+    assert sys.path[0] == str(_REPO / "src"), "the script must prepend its own src/"
+    assert sys.path[1] == str(_REPO / "scripts"), "…then scripts/, for element_intervals"
 
 
 def test_measurement_covers_the_whole_corpus_and_every_element():

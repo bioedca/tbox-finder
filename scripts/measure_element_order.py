@@ -65,7 +65,14 @@ import json
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+# Both inserts exist so the documented command works **as written**, from a bare checkout with
+# no editable install: `scripts/` for the sibling import below, and `src/` because
+# :func:`measure` reads ``tbox_finder.labels.ELEMENT_COORDS``. The env that actually holds this
+# corpus (``tbox-finder-data``) has no editable install, so without the second insert the usage
+# line above dies with ModuleNotFoundError after the argument parse — verified, not assumed.
+_SCRIPTS_DIR = Path(__file__).resolve().parent
+sys.path.insert(0, str(_SCRIPTS_DIR))
+sys.path.insert(0, str(_SCRIPTS_DIR.parent / "src"))
 
 from measure_overlap_prevalence import element_intervals  # noqa: E402
 
@@ -78,7 +85,7 @@ STEP = "P3-13"
 #: and make the artifact un-diffable across machines — the exact defect a P3-10 review caught
 #: in a committed report. A path outside the repo is recorded as given rather than as a pile of
 #: ``..`` segments.
-_REPO_ROOT = Path(__file__).resolve().parent.parent
+_REPO_ROOT = _SCRIPTS_DIR.parent
 
 
 def _repo_relative(path: Path) -> str:
