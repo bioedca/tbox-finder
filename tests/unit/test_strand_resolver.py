@@ -976,6 +976,46 @@ def test_handoff_refuses_a_locus_call_length_mismatch():
     assert handoff_loci(sequence, loci, calls)
 
 
+def test_handoff_refuses_malformed_locus_coordinates():
+    """Slicing is silent on bad coordinates, so they are refused before the slice.
+
+    ``Locus`` is a plain frozen dataclass with no runtime validation — one round-tripped
+    through JSON, or built by a future caller, can carry anything. Python then makes the damage
+    quiet: a **negative** start wraps from the far end of the string and a **reversed** span
+    yields the empty string, so Stage-2 would receive a sequence that is not the one the
+    payload's coordinates name, with nothing raising.
+    """
+    from dataclasses import replace
+
+    log_probs = _log_probs_from_layout(CANONICAL_SEQ_LEN, CANONICAL_LAYOUT)
+    loci, calls = _loci_and_calls(log_probs, flank=5)
+    sequence = _canonical_sequence(3)
+
+    # Positive control: the well-formed locus succeeds on this exact sequence.
+    assert handoff_loci(sequence, loci, calls)
+
+    negative = replace(loci[0], start=-5, length=loci[0].end + 5)
+    assert sequence[negative.start : negative.end] != sequence[loci[0].start : loci[0].end]
+    with pytest.raises(HandoffError, match="negative start silently wraps"):
+        handoff_loci(sequence, [negative], calls)
+
+    reversed_span = replace(loci[0], start=loci[0].end, end=loci[0].start, length=0)
+    with pytest.raises(HandoffError, match="not the sequence the locus was called from"):
+        handoff_loci(sequence, [reversed_span], calls)
+
+    lying_length = replace(loci[0], length=loci[0].length + 7)
+    with pytest.raises(HandoffError, match="declares length"):
+        handoff_loci(sequence, [lying_length], calls)
+
+
+def test_payload_length_is_the_sequence_it_actually_carries():
+    """``length`` is taken from the emitted span, so it cannot disagree with ``rna``."""
+    log_probs = _log_probs_from_layout(CANONICAL_SEQ_LEN, CANONICAL_LAYOUT)
+    loci, calls = _loci_and_calls(log_probs, flank=5)
+    for payload in handoff_loci(_canonical_sequence(4), loci, calls):
+        assert payload.length == len(payload.rna) == payload.end - payload.start
+
+
 def test_handoff_refuses_a_sequence_the_loci_do_not_fit():
     log_probs = _log_probs_from_layout(CANONICAL_SEQ_LEN, CANONICAL_LAYOUT)
     loci, calls = _loci_and_calls(log_probs)

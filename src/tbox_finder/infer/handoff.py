@@ -231,12 +231,21 @@ def handoff_loci(
     text = str(sequence)
     payloads: list[Handoff] = []
     for index, (locus, call) in enumerate(zip(loci, calls, strict=True)):
-        if locus.end > len(text):
+        if not (0 <= locus.start <= locus.end <= len(text)):
             raise HandoffError(
                 f"locus {index} spans [{locus.start}, {locus.end}) but the sequence is "
-                f"{len(text)} nt; this is not the sequence the locus was called from"
+                f"{len(text)} nt; this is not the sequence the locus was called from. "
+                "Refused rather than sliced: a negative start silently wraps from the far end "
+                "of the string and a reversed span silently yields nothing, so either would "
+                "hand Stage-2 a sequence that is not the one the coordinates name"
             )
         span = text[locus.start : locus.end]
+        if len(span) != locus.length:
+            raise HandoffError(
+                f"locus {index} declares length {locus.length} but spans "
+                f"{len(span)} nt over [{locus.start}, {locus.end}); the payload's coordinates "
+                "and its sequence would disagree, which downstream reads as a real candidate"
+            )
         n_soft_masked = sum(1 for ch in span if ch.islower())
         n_ambiguous = sum(1 for ch in span if ch not in _UNAMBIGUOUS)
         for strand in call.strands:
@@ -247,7 +256,7 @@ def handoff_loci(
                     low_order_confidence=call.low_order_confidence,
                     start=locus.start,
                     end=locus.end,
-                    length=locus.length,
+                    length=len(span),
                     rna=transcribe_to_rna(span, strand=strand),
                     n_soft_masked=n_soft_masked,
                     n_ambiguous=n_ambiguous,
