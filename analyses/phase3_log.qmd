@@ -2765,19 +2765,19 @@ runs that leg. `scripts/mint_two_stage_fixture.py` builds the contig set.
 
 **Outputs.** `reports/strand_robustness.json` · `reports/p3/two_stage_candidates.json` (27 rows) ·
 `tests/fixtures/two_stage/{contigs.json, stage1_window_logits.npz, stage2_logits.json, expected.sha256}` ·
-`tests/golden/test_two_stage_golden.py` (23) · `tests/unit/test_two_stage.py` (80). Candidate-table
+`tests/golden/test_two_stage_golden.py` (23) · `tests/unit/test_two_stage.py` (83). Candidate-table
 digest `04bc8a557a1883e2aa4814b4c816c030c7c44e630cd25e71184c6670a9748648`. No DVC object; no
 checkpoint; no W&B run. `infer/call.py` gains `rule_parameters_have_no_default` and `locus.py` /
 `strand.py` now delegate to it (promotion, behaviour unchanged).
 
 **Validation.** Golden green — the torch-free replay reproduces the committed digest exactly;
 `strand_robustness_problems` returns `[]` on the committed report. Full unit+golden+ml
-**4,665 passed / 14 failed** against a matched baseline worktree at `81b6cd1` at **4,562 / 14** —
-failure sets **identical** (`comm` empty both ways), and the +103 is exactly the new tests.
-**38 sabotages, 35 RED against their NAMED test**; the three non-bites are the declared no-op
+**4,668 passed / 14 failed** against a matched baseline worktree at `81b6cd1` at **4,562 / 14** —
+failure sets **identical** (`comm` empty both ways), and the +106 is exactly the new tests.
+**39 sabotages, 36 RED against their NAMED test**; the three non-bites are the declared no-op
 control and two mutations inside the **torch-only** mint legs, which no CI-runnable test can
-execute and which were verified by execution instead. ⚠ The campaign was re-run after **each**
-review round, and twice an anchor went stale — once because a fix rewrote the line, once because
+execute and which were verified by execution instead. ⚠ The campaign was re-run after **each** of the
+three review rounds, and twice an anchor went stale — once because a fix rewrote the line, once because
 `black` reflowed a dict comprehension onto one line. Both surfaced as **misses** rather than
 passes only because the harness asserts each anchor matches exactly once. ruff 0.15.15 + black
 25.11.0 + `snakemake --lint` clean.
@@ -2900,6 +2900,22 @@ only a float, which made D3's `per_class` **scope unreachable from the CLI** (no
 `payload_manifest` claimed a `(contig, locus, strand)` order it did not enforce for contigs;
 `--context`/`--splits` refused an absolute path but not `..`; and a docstring said 320 nt where
 the gap is 340.
+
+::: {.callout-important}
+## Review round 3 found the one composition failure that produced a NUMBER instead of an error
+
+`run_two_stage` accepted a **duplicate `contig_id`** and silently merged the two contigs.
+`contig_id` keys three things — the payload hash, the diagnostic's per-locus posterior map, and
+the Stage-1 lookup — so a duplicate does not collide loudly, it **overwrites**: both contigs
+reconcile against one contig's window logits, and the diagnostic reads one contig's posteriors
+while attributing them to both. And nothing downstream could see it: `n_loci` and
+`n_scored_payloads` are both summed per run, so `n_scored == 2 × n_loci` still held and
+`strand_robustness_problems` returned `[]`. **Reproduced before fixing** — two records sharing an
+id gave two rows, an empty problem list and an entirely plausible report. The mint script had an
+id-uniqueness guard, which protected the *committed fixture* and nothing else; the guard now lives
+in a set-level `normalise_contigs` that `run_two_stage`, `read_contigs` and the `payloads` leg all
+route through. Table digest unchanged.
+:::
 
 **Sabotage found two real gaps.** The invariance denominator (`/n_confirmed` vs `/n_loci`) was
 untestable while every fixture locus was confirmed, and the wrong-strand-only counter's `and`

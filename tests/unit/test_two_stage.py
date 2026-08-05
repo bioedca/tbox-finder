@@ -1195,3 +1195,48 @@ def test_the_manifest_is_ordered_by_contig_regardless_of_input_order() -> None:
         **{**_RULE, **_CALIBRATION},
     )
     assert [row["contig_id"] for row in result.rows] == ["a", "b"]
+
+
+# ══════════════════════════════════════════════════════════════════════════════════════
+# Review round 3 — the one composition failure that produced a number instead of an error
+# ══════════════════════════════════════════════════════════════════════════════════════
+def test_a_duplicate_contig_id_is_refused() -> None:
+    """Reproduced before it was fixed: two records sharing an id merged, silently.
+
+    ``contig_id`` keys the payload hash, the diagnostic's per-locus map and the Stage-1 lookup,
+    so a duplicate does not collide loudly — it overwrites. And nothing downstream sees it:
+    ``n_loci`` and ``n_scored_payloads`` are both summed per run, so ``n_scored == 2 × n_loci``
+    still held and ``strand_robustness_problems`` returned ``[]`` on the merged result.
+    """
+    windows, starts, sequence = _plant(_canonical_spans())
+    contigs = [_contig("dup", sequence), _contig("dup", sequence[::-1])]
+    stage1 = {"dup": {"logits": windows, "starts": starts}}
+    with pytest.raises(T.TwoStageError, match="appears more than once"):
+        T.normalise_contigs(contigs)
+    with pytest.raises(T.TwoStageError, match="appears more than once"):
+        T.run_two_stage(contigs, stage1, {}, **{**_RULE, **_CALIBRATION})
+
+
+def test_distinct_contig_ids_are_accepted() -> None:
+    """Positive control: the identical call with distinct ids runs and yields two rows."""
+    windows, starts, sequence = _plant(_canonical_spans())
+    contigs = [_contig("a", sequence), _contig("b", sequence)]
+    stage1 = {
+        "a": {"logits": windows, "starts": starts},
+        "b": {"logits": windows, "starts": starts},
+    }
+    assert [c["contig_id"] for c in T.normalise_contigs(contigs)] == ["a", "b"]
+    runs = [
+        T.run_contig(c, T.reconcile_contig(stage1[c["contig_id"]], len(sequence)), **_RULE)
+        for c in contigs
+    ]
+    result = T.run_two_stage(contigs, stage1, _scores(runs), **{**_RULE, **_CALIBRATION})
+    assert len(result.rows) == 2
+    assert len({row["payload_key"] for row in result.rows}) == 2
+
+
+def test_the_committed_fixture_has_unique_contig_ids() -> None:
+    root = Path(__file__).resolve().parents[2]
+    contigs = T.read_contigs(root / "tests/fixtures/two_stage/contigs.json")
+    ids = [c["contig_id"] for c in contigs]
+    assert len(set(ids)) == len(ids) == 20

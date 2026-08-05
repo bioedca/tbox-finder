@@ -371,6 +371,39 @@ def normalise_contig(record: Mapping[str, Any]) -> dict[str, Any]:
     return out
 
 
+def normalise_contigs(records: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    """Validate a whole contig **set** — each record, and the uniqueness of their ids.
+
+    ``contig_id`` is a key three times over: :func:`payload_key` hashes it, the diagnostic keys
+    its per-locus posteriors on ``"<contig_id>\x00<locus_index>"``, and the Stage-1 archive is
+    looked up by it. A duplicate therefore does not fail — it **merges**. Two contigs are
+    reconciled against one contig's window logits, one contig's locus 0 overwrites the other's,
+    and ``strand_robustness`` reads one contig's posteriors while attributing them to both.
+
+    Nothing downstream can catch it, which is why the guard is here: ``n_loci`` and
+    ``n_scored_payloads`` are both summed per run, so ``n_scored == 2 × n_loci`` still holds and
+    :func:`strand_robustness_problems` returns clean. Reproduced before fixing — two records
+    sharing an id produced two rows, an empty problem list and a plausible report. That is the
+    one composition failure that yielded a number instead of a :class:`TwoStageError`, which is
+    exactly what this module's replay contract says must not happen (CodeRabbit r3).
+
+    The mint script has its own id-uniqueness guard, but that only protects the *committed*
+    fixture; every other contig set reaches the harness through here.
+    """
+    contigs = [normalise_contig(record) for record in records]
+    seen: set[str] = set()
+    for contig in contigs:
+        contig_id = contig["contig_id"]
+        if contig_id in seen:
+            raise TwoStageError(
+                f"contig_id {contig_id!r} appears more than once; it keys the payload hash, the "
+                "diagnostic's per-locus map and the Stage-1 lookup, so a duplicate silently "
+                "merges two contigs rather than scoring each"
+            )
+        seen.add(contig_id)
+    return contigs
+
+
 def reconcile_contig(entry: Mapping[str, Any], seq_len: int) -> Reconciled:
     """A committed ``{"logits", "starts"}`` entry → :class:`Reconciled`, via the pinned operator.
 
@@ -1104,8 +1137,7 @@ def run_two_stage(
     ``None``, never an omission.
     """
     runs: list[ContigRun] = []
-    for contig in contigs:
-        record = normalise_contig(contig)
+    for record in normalise_contigs(contigs):
         contig_id = record["contig_id"]
         if contig_id not in stage1:
             raise TwoStageError(f"no Stage-1 window logits for contig {contig_id!r}")
@@ -1171,7 +1203,7 @@ def read_contigs(path: str | Path) -> list[dict[str, Any]]:
     with open(path, encoding="utf-8") as handle:
         payload = json.load(handle)
     contigs = payload["contigs"] if isinstance(payload, Mapping) else payload
-    return [normalise_contig(record) for record in contigs]
+    return normalise_contigs(contigs)
 
 
 def read_stage1(path: str | Path) -> dict[str, dict[str, Any]]:
@@ -1631,6 +1663,7 @@ __all__ = [
     "main",
     "no_rule_parameter_has_a_default",
     "normalise_contig",
+    "normalise_contigs",
     "parse_threshold",
     "payload_key",
     "payload_manifest",

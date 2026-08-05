@@ -66,7 +66,7 @@
   ],
   "env_lock": "envs/data.conda-lock.yml",
   "gated": false,
-  "generated_at_utc": "2026-08-05T18:52:03+00:00",
+  "generated_at_utc": "2026-08-05T19:04:59+00:00",
   "generated_by": "src/tbox_finder/integration/two_stage.py",
   "handoff": {
     "n_contigs_with_outside_alphabet": 0,
