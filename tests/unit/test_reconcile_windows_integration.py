@@ -308,11 +308,17 @@ def _function_def(module, name: str) -> ast.FunctionDef | ast.AsyncFunctionDef:
 def test_the_integration_path_hands_its_logits_to_the_P2_operator():
     """`scan_encoded_windows` must END in the P2 operator — the one line this tier stubs past.
 
-    Pinned by AST rather than by calling it, because calling it needs torch. The assertion is
-    deliberately narrow and structural: the last statement returns ``reconcile_windows(...)``
-    with three positional arguments whose last is ``seq_len``. That is what makes the
-    hand-assembled path in this file the shipped arithmetic instead of a plausible copy of it
-    — the failure mode that shipped a dead SLURM job once already.
+    Pinned by AST rather than by calling it, because calling it needs torch. That is what
+    makes the hand-assembled path in this file the shipped arithmetic instead of a plausible
+    copy of it — the failure mode that shipped a dead SLURM job once already.
+
+    **All three arguments are pinned, not just the callable.** Checking only the shape and the
+    third argument leaves `reconcile_windows(other_logits, stale_starts, seq_len)` passing —
+    a wiring regression that reconciles the wrong tensor against the wrong offsets while this
+    test stays green (CodeRabbit, r2). The expression is compared as `ast.unparse` output, so
+    it is insensitive to formatting but sensitive to every name in it. Renaming a local in
+    `scan_encoded_windows` is a real change to the line this tier stubs past, so updating this
+    string is meant to be a deliberate act rather than a silent one.
     """
     fn = _function_def(scan_mod, "scan_encoded_windows")
     last = fn.body[-1]
@@ -321,13 +327,10 @@ def test_the_integration_path_hands_its_logits_to_the_P2_operator():
         "after it would be arithmetic this tier never sees"
     )
     assert isinstance(last.value, ast.Call)
-    assert isinstance(last.value.func, ast.Name)
-    assert last.value.func.id == "reconcile_windows"
-    assert len(last.value.args) == 3 and not last.value.keywords
-    assert isinstance(last.value.args[2], ast.Name)
-    assert last.value.args[2].id == "seq_len", (
-        "the third argument is the sequence length that decides which positions are pad; "
-        "handing the operator a window length here is how a pad reaches the reduction"
+    assert ast.unparse(last.value) == "reconcile_windows(logits, np.asarray(starts), seq_len)", (
+        "the scanner's reduction line moved. The third argument in particular is the sequence "
+        "length that decides which positions are pad — handing the operator a window length "
+        f"there is how a pad reaches the reduction. Found: {ast.unparse(last.value)}"
     )
 
 
@@ -374,11 +377,24 @@ def test_the_caller_consumes_a_reconciled_distribution_and_derives_none_of_its_o
     D3 orders the two operations — reconciliation *"before along-sequence element merging"*.
     The ordering is structural here (the caller takes ``log_probs`` and has no window axis to
     reduce), and it stays structural only while the caller owns no reduction of its own.
+
+    **Definitions are not enough — calls count too.** A check that looked only for local
+    ``def``s is satisfied by `scipy.special.logsumexp(...)` or any other imported reduction
+    (CodeRabbit, r2): the caller would be re-deriving a distribution while the guard reported
+    it owned none. Both the names it *defines* and the names it *calls* — bare or qualified —
+    are collected.
     """
-    defined = {
-        node.name for node in ast.walk(_module_ast(call_mod)) if isinstance(node, _FUNC_NODES)
+    tree = _module_ast(call_mod)
+    defined = {node.name for node in ast.walk(tree) if isinstance(node, _FUNC_NODES)}
+    called = {
+        node.func.id if isinstance(node.func, ast.Name) else node.func.attr
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call) and isinstance(node.func, (ast.Name, ast.Attribute))
     }
-    assert not defined & {"logsumexp", "log_softmax", "softmax", "reconcile_windows"}
+    forbidden = {"logsumexp", "log_softmax", "softmax", "reconcile_windows"}
+    assert (
+        not (defined | called) & forbidden
+    ), f"infer/call.py reduces per-window logits itself: {sorted((defined | called) & forbidden)}"
 
 
 # ═════════════════════════════════════════════════════════════════════════════
