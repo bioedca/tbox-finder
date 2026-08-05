@@ -335,6 +335,24 @@ def load_admissible_accessions(
     return sorted(acc for acc, (admissible, _reason) in verdicts.items() if admissible)
 
 
+def load_union_mask(
+    *,
+    union_prior: str | Path = "data/processed/priors/union_prior.parquet",
+    corpus_parquet: str | Path = "data/processed/master_clean_v0.parquet",
+) -> Any:
+    """The PRD §9.1 mining mask: the full union prior **plus** the run's own positives.
+
+    Promoted out of :func:`apply_spare_rule` at P3-15 so the P2 round and the P3
+    re-mining round build the mask with one arithmetic. Two copies of a masking rule
+    are free to drift, and a drift here puts a known T-box into the negative pool.
+    """
+    from tbox_finder import masking
+
+    union_loci, _n_union, _n_dropped = masking.load_union_loci(union_prior)
+    own_loci = masking.load_own_positive_loci(corpus_parquet)
+    return masking.LocusIndex.from_records(list(union_loci) + list(own_loci))
+
+
 def apply_spare_rule(
     fp_manifest: str | Path,
     status_table: str | Path,
@@ -358,7 +376,6 @@ def apply_spare_rule(
     status must agree. Returns the round report (``mined_ids``/``spared_ids``/``per_pool``); the
     mined ids are the hard negatives the DDP retrain then trains against.
     """
-    from tbox_finder import masking
     from tbox_finder.mining.covariation_producer import load_status_map
     from tbox_finder.mining.hard_negative import mine_round as run_mine_round
 
@@ -370,9 +387,7 @@ def apply_spare_rule(
         relaxed_arch_available=relaxed_arch_available,
         synteny_available=synteny_available,
     )
-    union_loci, _n_union, _n_dropped = masking.load_union_loci(union_prior)
-    own_loci = masking.load_own_positive_loci(corpus_parquet)
-    mask = masking.LocusIndex.from_records(list(union_loci) + list(own_loci))
+    mask = load_union_mask(union_prior=union_prior, corpus_parquet=corpus_parquet)
     report = run_mine_round(candidates, mask, availability)
     report["schema_version"] = SCHEMA_VERSION
     report["step"] = STEP

@@ -36,6 +36,7 @@ from tbox_finder import masking
 from tbox_finder.masking import DEFAULT_FLANK_NT, LocusIndex
 from tbox_finder.mining.spare_rule import (
     MODEL_INDEPENDENT_DISJUNCTS,
+    STAGE2_DISJUNCT,
     STATUS_UNAVAILABLE,
     SpareRuleEvidence,
     is_mining_excluded,
@@ -196,6 +197,32 @@ def mine_round(
                     f"candidate {candidate.candidate_id!r} carries {status!r} evidence for "
                     f"{disjunct!r}, but that backend is unavailable this round"
                 )
+        # The same cross-check for the fourth disjunct (P3-15). A round declares
+        # Stage-2 live by supplying ``stage2_threshold``; a candidate carrying a
+        # posterior when it did not is evidence for a backend nobody declared, and
+        # it would be silently ignored — the shape where a filter runs clean while
+        # filtering nothing. Raise instead of dropping it on the floor.
+        if candidate.evidence.stage2_posterior is None:
+            continue
+        if stage2_threshold is None:
+            raise HardNegativeMiningError(
+                f"candidate {candidate.candidate_id!r} carries a stage2_posterior "
+                f"({candidate.evidence.stage2_posterior}) but this round declared no "
+                "stage2_threshold, so the Stage-2 disjunct is not in play (ADR-0005 D14 "
+                "phase-conditioning); pass a threshold or strip the posterior"
+            )
+        # ...and the reverse direction, which is the fail-OPEN one. A round that
+        # declares a threshold but no Stage-2 backend would otherwise resolve a low
+        # posterior to ``failed`` — so the candidate counts as "every disjunct ran and
+        # failed" and is mined on evidence for a backend the round said was absent.
+        # Reproduced before this guard existed: the candidate was mined and the reason
+        # read "no disjunct passed and every disjunct was evaluated".
+        if not backend_availability.get(STAGE2_DISJUNCT, False):
+            raise HardNegativeMiningError(
+                f"candidate {candidate.candidate_id!r} carries a stage2_posterior "
+                f"({candidate.evidence.stage2_posterior}), but the {STAGE2_DISJUNCT!r} "
+                "backend is unavailable this round"
+            )
 
     outcomes: dict[str, list[str]] = {
         OUTCOME_MINED: [],

@@ -2951,3 +2951,140 @@ both were verified by **execution** instead — the tolerance check was forced t
 they are reported as uncovered-by-test rather than counted as bites.
 
 **Commit.** one atomic commit on `p3-14-two-stage`, parent `81b6cd1`.
+
+## Step P3-15 (ENCODE) — 2026-08-05: the fourth spare-rule disjunct, and the refusal that replaces a no-op round
+
+**Inputs.** `mining/spare_rule.py` + `mining/hard_negative.py` + `mining/mine_round.py` (the P2
+round, P2-07/P2-10e), `data/processed/mining/round0_fp_manifest.json` (941 FPs), the P2 production
+scanner, `eval/tier2n_probe.py`, ADR-0005 D14/A9/A10, ADR-0006 D9 row 5 / D11 / A2, PRD §9.1.
+
+**Process.** ADR-0005 D14 phase-conditions the mining spare rule: three model-independent
+disjuncts at P2, **plus a high Stage-2 posterior at the P3 re-mining round**. The pinned predicate
+`masking.spare_rule_excludes_from_mining` has carried `stage2_posterior`/`stage2_threshold` since
+P2-07 — but *two*-valued. Measured by execution before touching anything: with all three
+model-independent disjuncts `failed` and `stage2_threshold=0.9`, a candidate carrying
+`stage2_posterior=None` came back **`minable`**. Three of four disjuncts consulted, the answer
+called complete. `spare_rule.stage2_status` + `unavailable_disjuncts` close that (unscored ⇒
+`unavailable` ⇒ spared — ADR-0005 A10 Pin 3's direction, verbatim), and both `is_mining_excluded`
+and `spare_reason` now read the **one** derivation so decision and attribution cannot diverge.
+`hard_negative.mine_round` gains the mirror cross-check (a posterior with no declared threshold
+raises). `mining/remine.py` is the P3 round driver; `mine_round.load_union_mask` was **promoted**
+so both rounds mask through one arithmetic.
+
+**The structural finding, measured.** Sparing is a disjunction; **mining is a conjunction** — a
+candidate is mined only when *every* disjunct ran and failed. `relaxed_architecture` and
+`downstream_aaRS_synteny` have no backend, so one unavailable disjunct caps the round's yield at
+**0** for every candidate, whatever Stage-2 scores. Adding a fourth disjunct cannot relieve this;
+it adds a conjunct. The shipped readiness gate still returns `ready=True` (covariation is
+protective), which is the "no-op that reports success" state ADR-0005 A10's Phase-2 §7 deferral
+recorded at P2. `remine.max_possible_yield` turns it into a computed refusal, and
+`plan_remine_round`'s `may_run = readiness ∧ yield` is what `slurm/p3/stage1_remine.sbatch` exits
+on — before any GPU time. Executing the sbatch's own `plan` invocation returns **rc=1** with
+`max_mined: 0` and all four disjuncts named. The zero is enforced **twice over**: even with the
+availability flags forced on, `candidate_evidence` has no path that sets a relaxed-architecture or
+synteny status, so the evidence stays `unavailable` and `mine_round` raises on the contradiction.
+
+**Outputs.** `src/tbox_finder/mining/remine.py` (`max_possible_yield`, `plan_remine_round`,
+`apply_remine_spare_rule`, `remine_candidate_evidence`, `load_stage2_posteriors`,
+`exclude_probe_members`, `remine_problems`, CLI `plan`/`apply-spare-rule`);
+`slurm/p3/stage1_remine.sbatch`; `spare_rule.stage2_status`/`unavailable_disjuncts`/
+`STAGE2_DISJUNCT`/`ALL_DISJUNCTS`; `mine_round.load_union_mask`; `tests/unit/test_mining_spare_rule.py`.
+
+**Nothing pinned.** The Stage-2 operating point is keyword-only with **no default** and
+`argparse required=True`; `no_remine_parameter_has_a_default` re-derives that from the live
+signature. `STAGE2_DISJUNCT` is deliberately **outside** `MODEL_INDEPENDENT_DISJUNCTS` and outside
+`TIER2N_PROTECTIVE_DISJUNCTS` — folding the project's own model into either would let a P3 round
+go green on its own posterior with no model-independent evidence at all.
+
+**Validation.** 44 tests in the new file; full unit+golden **4,240 passed / 13 failed** vs a
+**matched baseline worktree** at `96fcbc7` at **4,195 / 13** — failure sets **identical**, `comm`
+empty both ways; the +45 is the 44 new tests plus one, and that one is explained: the shipped
+`test_sbatch_rm_targets.py` parametrizes over the sbatch inventory and collected the new file
+(47 vs 46), passing its tracked-path gate. **21 sabotages, 20 RED against their NAMED test**, the
+21st the declared no-op control; each restored by rewriting the original bytes + sha256-verified,
+`__pycache__` cleared. ⚠ **One sabotage did not bite first time and the gap was real:** `>=` → `>`
+in `stage2_status` left the boundary test green, because that test asserted the *delegated* verdict
+— which `masking.py`'s own comparison decides — so this module's comparison was never read. The
+test now reads `stage2_status` directly and cross-checks it against the pinned predicate at three
+points around the threshold. The campaign was re-run after `black` reformatted `remine.py`.
+ruff 0.15.15 + black 25.11.0 clean; no `.smk` touched.
+
+**Decisions.** The RUN is **not** submitted: it is a CLAUDE.md §7 stop (structural-0 yield +
+SLURM submit-ack), the P3 inheritance of the ADR-0005 A10 Phase-2 deferral. Cross-link ADR-0005
+D14/A9/A10, ADR-0006 A2.
+
+**Commit.** one atomic commit on `p3-15-remine`, parent `96fcbc7`.
+
+## Step P3-15 (review r1) — 2026-08-05: two real findings, one refuted, and a sabotage that had to be re-aimed
+
+**Review r1 (CodeRabbit CLI, 3 findings: 2 major + 1 minor).** The `CodeRabbit` PR check read
+`pass` on a *"Review rate limited"* notice — §5.1's trap for the **eighth** step running — so the
+CLI carried the gate; no Greptile credit spent.
+
+**Finding 1 (major, real, and worse than reported) — the reverse Stage-2 cross-check was missing,
+and it was the fail-OPEN direction.** The first draft guarded only "a posterior with no declared
+threshold". The opposite contradiction — a round that *declares* `stage2_threshold` while the
+Stage-2 backend is unavailable — left a low posterior resolving to `failed`, so the candidate
+counted as *"every disjunct ran and failed"* and was **mined on evidence for a backend the round
+said was absent**. Reproduced by execution before fixing: `n_mined = 1`, and the published reason
+read *"no disjunct passed and every disjunct was evaluated"* — the attribution asserting the very
+thing that was false. The per-disjunct loop iterates `MODEL_INDEPENDENT_DISJUNCTS`, which the
+Stage-2 key is deliberately not in, so nothing else covered it. Guard added; the test that had
+accepted the shape was rewritten, and both directions now carry a positive control.
+
+**Finding 2 (major, real) — the shipped CLI leg never excluded Tier-2N probe members.**
+`probe_set` was optional and `_cmd_apply_spare_rule` never passed one, so `exclude_probe_members`
+did not run on the path `stage1_remine.sbatch` invokes, and the report's
+`n_excluded_probe_members: 0` read as *"no probe member was in the substrate"* rather than *"no
+exclusion happened"* — [[namespace-mismatch-invisible-noop]] again, in my own new code. Both ends
+are now unrepresentable: the parameter has **no default**, the CLI flag is `required=True`, the
+report carries `n_probe_members_considered` as the denominator a 0 is read against, and
+`remine_problems` flags a run round whose denominator is 0. `load_probe_set` additionally
+**refuses an empty probe set**, because the committed `reports/p2/tier2n_probe.json` carries
+*counts, not member ids* — a loader pointed at it would build an empty set and the exclusion would
+report 0 while excluding nothing.
+
+**Finding 3 (minor) — REFUTED by inspection.** *"Confirm `reports/p3` exists before submission"*:
+`reports/p3/` is git-tracked (`gate2_figure_data.json`, `stage2_scores.json`, `stage2_sizing.json`,
+`sweep/`), so it is present in any checkout including the cluster's, exactly as `slurm/p2/*`
+already relies on `reports/p2/`. No change. **Judge the finding and the fix separately** — here the
+finding itself did not survive.
+
+**⚠ A sabotage had to be re-aimed, and the gap was real.** Removing the `exclude_probe_members`
+call from the shipped round leg left the end-to-end test **green**: its probe set was disjoint
+from the substrate, so *"excluded nothing"* and *"never excluded"* were indistinguishable — the
+same defect finding 2 named, one level down. The fixture now plants a probe member **in** the
+substrate and asserts its **identity** (absent from `reasons`, named in
+`excluded_probe_member_ids`, `n_probe_members_considered == 2`), not a count.
+
+**Validation.** 51 tests in the file (44 → 51); full unit+golden **4,247 passed / 13 failed** vs
+the matched baseline at `96fcbc7` (**4,195 / 13**) — failure sets identical, `comm` empty both
+ways. **26 sabotages, 25 RED against their NAMED test**, the 26th the declared no-op control;
+campaign re-run after the fixes and after `black`. ruff 0.15.15 + black 25.11.0 clean.
+
+## Step P3-15 (review r2) — 2026-08-05: three more, all real, all in the guards themselves
+
+**r2-1 (major) — the no-default pin had a hole exactly the shape it exists to catch.**
+`no_remine_parameter_has_a_default` treated `None` as *"no default"*, so
+`stage2_threshold: float | None = None` would have **passed the pin while giving the operating
+point a default**. Confirmed by execution before fixing. The only parameter legitimately needing a
+`None` sentinel is `stage2_supply_available`, already exempt by name, so the tightening keeps the
+shipped signature green — asserted as the positive control beside the new refusal. Same shape as
+[[pinned-constant-that-nothing-reads]]: a pin that cannot fail is decoration.
+
+**r2-2 (minor) — `load_stage2_posteriors` raised a bare `KeyError` on a flat mapping.** Both a
+wrapper object and a flat `candidate_id → posterior` map are plausible producer output; the module's
+contract is a named refusal carrying the path. Both shapes now load, and a genuinely wrong shape
+refuses by name.
+
+**r2-3 (major) — the top-level exclusion fields were never compared to the round's.**
+`build_remine_report`'s `excluded_probe_ids` **defaults to `()`**, so a caller that omits it
+publishes `n_excluded_probe_members: 0` beside a non-empty round-level list — the same unreadable 0
+r1's finding 2 was about, one layer up, and no clause compared them. Reproduced by execution
+(top-level `0 / []` beside round-level `['syn1']`, `problems == []`). Clause added, with the
+forwarded case as its positive control.
+
+**Validation.** 54 tests in the file (51 → 54); full unit+golden **4,250 passed / 13 failed** vs
+the matched baseline at `96fcbc7` (**4,195 / 13**) — failure sets identical, `comm` empty both
+ways. **29 sabotages, 28 RED against their NAMED test**, the 29th the declared no-op control.
+ruff 0.15.15 + black 25.11.0 clean.
