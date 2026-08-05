@@ -18,20 +18,24 @@
 #       negative_fraction=0.9090909090909091 (§9.1 10:1) — then the Tier-2N gate:
 #       scan_probe_variants → evaluate_probe_round (round_decision + degenerate guard).
 #
-# ⛔ RUN BLOCKED AT P2 (recorded honestly — this sbatch is correct fail-closed machinery).
-#   The round-level readiness gate (spare_rule.mining_round_readiness) refuses a round with
-#   no PROTECTIVE spare-rule backend available (covariation-(a) or synteny-(c); relaxed-
-#   architecture-(b) alone is False on every Tier-2N locus, ADR-0006 D9 row 5). At P2:
-#     • covariation-(a) needs the per-candidate homolog-search + CM-free de-novo MSA supply
-#       (ADR-0006 D7/A1). The homolog-search TARGET DB exists (P2-10c′-homologdb, PR #82) but
-#       the per-candidate search+alignment does NOT (mine_round.MSA_SUPPLY_AVAILABLE=False);
-#     • synteny-(c) has no backend.
-#   So `mine_round plan` REFUSES below and this job exits BEFORE any GPU time. The legs (a)–(d)
-#   above are wired at the MSA-supply unblock step (a new imp.md step). Do NOT submit this
-#   sbatch until then — at P2 it only proves the readiness refusal, which is cheaper to check
-#   locally. (This is the ADR-0006 A2 scope-guard correction: the covariation pins do not
-#   block a *submit*, but the round-level readiness gate does block the *round* until a
-#   protective backend is MSA-producible — not merely R-scape-installed.)
+# ⛔ STILL DO NOT SUBMIT — BUT THE REASON CHANGED AT P3-15′-a (2026-08-05). READ THIS.
+#   Until P3-15′-a the readiness gate (spare_rule.mining_round_readiness) refused this round
+#   outright — no PROTECTIVE backend was available (covariation-(a) or synteny-(c); relaxed-
+#   architecture-(b) alone is False on every Tier-2N locus, ADR-0006 D9 row 5) — so leg 0
+#   below exited BEFORE any GPU time and the job was self-limiting.
+#   THAT IS NO LONGER TRUE. The covariation-(a) supply landed (target DB job 741 + certified
+#   producer job 766; mine_round.MSA_SUPPLY_AVAILABLE=True), so readiness now PASSES and leg 0
+#   returns 0 — this job WILL fall through to the 8-GPU scan legs if submitted.
+#   And it would mine NOTHING. Sparing is a disjunction, so mining is its negation, a
+#   CONJUNCTION: a candidate is mined only when EVERY disjunct ran and failed. Relaxed-
+#   architecture-(b) and synteny-(c) still have no backend, so every candidate is spared
+#   fail-closed and the round's maximum yield is exactly 0 — decidable before a single window
+#   is scanned. The authority is tbox_finder.mining.remine.max_possible_yield (P3-15), which
+#   slurm/p3/stage1_remine.sbatch enforces at ITS leg 0; this P2 driver predates that gate and
+#   requires the STRUCTURAL_YIELD_ACK below instead, so the no-op cannot be submitted by
+#   accident. It unblocks when P3-15′-c (synteny) and P3-15′-d (relaxed architecture) land.
+#   (ADR-0006 A2's scope-guard correction still holds: covariation-(a) availability is gated on
+#   MSA-PRODUCIBILITY, not on R-scape being installed. What changed is that it is now producible.)
 #
 # WHERE.   partition=gpu, 8× A4000 (the DDP retrain leg wants the whole node); node `two`.
 # INPUT (ready-path; staged by rsync — the ml env has no dvc, a checkout carries no DVC data):
@@ -87,9 +91,11 @@ export TOKENIZERS_PARALLELISM=false
 echo "host=$(hostname) job=${SLURM_JOB_ID:-none} sha=$(git rev-parse --short HEAD 2>/dev/null || echo NA)"
 
 # ── LEG 0: readiness preflight (cheap, no GPU) — the honest gate ──────────────
-# `mine_round plan` probes covariation.backend_available() for R-scape presence and gates
-# the covariation leg on the per-candidate MSA supply (MSA_SUPPLY_AVAILABLE, False at P2).
-# It exits 3 when the round is refused (no protective backend) — the expected P2 outcome.
+# `mine_round plan` probes covariation.backend_available() for R-scape presence and gates the
+# covariation leg on the per-candidate MSA supply (MSA_SUPPLY_AVAILABLE, True since P3-15′-a).
+# Exit codes: 3 = the round is REFUSED at readiness (no protective backend); 4 = this checkout
+# DECLARES the MSA supply but cannot evidence it (derive_msa_supply_available) — a staging
+# fault, not a clean refusal, so it must NOT be swallowed as "no round today".
 set +e
 PYTHONPATH=src python -m tbox_finder.mining.mine_round plan --out "$PLAN"
 plan_rc=$?
@@ -97,27 +103,33 @@ set -e
 
 if [ "$plan_rc" -eq 3 ]; then
   echo "MINE_ROUND_REFUSED job=${SLURM_JOB_ID:-none} plan=$PLAN" >&2
-  echo "The P2-10e mining round is blocked at the readiness gate: no protective spare-rule" >&2
-  echo "backend (covariation-(a) MSA supply / synteny-(c)) is available. This is the honest," >&2
-  echo "expected P2 outcome (ADR-0006 A2 scope-guard correction). The RUN unblocks when the" >&2
-  echo "ADR-0006 D7/A1 per-candidate homolog-search + de-novo MSA supply lands. No round was" >&2
-  echo "run and no checkpoint was produced — by design. Exiting 0 (readiness check succeeded)." >&2
+  echo "The mining round is blocked at the readiness gate: no protective spare-rule backend" >&2
+  echo "(covariation-(a) MSA supply / synteny-(c)) is available on this run. Since P3-15′-a the" >&2
+  echo "(a) supply exists, so reaching this branch means it was declared unavailable here" >&2
+  echo "(--no-msa-supply-available, or the DB was not staged). No round was run and no" >&2
+  echo "checkpoint was produced — by design. Exiting 0 (readiness check succeeded)." >&2
   # Exit 0: the job correctly determined the round cannot run. It did NOT complete a round —
   # the ABSENCE of $DONE is the signal to the §9.3 artifact-verify that no round landed.
   exit 0
 elif [ "$plan_rc" -ne 0 ]; then
-  echo "FATAL: mine_round plan failed rc=$plan_rc (not a clean refusal)." >&2
+  echo "FATAL: mine_round plan failed rc=$plan_rc (not a clean refusal; 4 = declared-but-unevidenced MSA supply)." >&2
   exit "$plan_rc"
 fi
 
-# ── LEGS (a)–(b): the ready-path — reached only once a protective backend is MSA-producible ──
-# Unreachable at P2 (the plan refuses above; MSA_SUPPLY_AVAILABLE=False). This job runs the GPU
+# ── LEGS (a)–(b): the ready-path — reached once a protective backend is MSA-producible ──
+# REACHABLE since P3-15′-a (readiness passes on covariation-(a)). This job runs the GPU
 # legs (a)+(b) inline, then SUBMITS the decoupled CPU producer array (leg c) and the GPU retrain
 # (leg d, dependent on the array) and EXITS — releasing its 8-GPU allocation so the CPU producer
 # does not hold 8 idle GPUs (A10 Pin 2 decoupling). The array WIDTH is the A10 Phase-2 pin
 # (measured by mine_round_measure.sbatch); ARRAY_WIDTH is passed in, no silent default guess.
 ROUND="${ROUND:-0}"
 ARRAY_WIDTH="${ARRAY_WIDTH:?set ARRAY_WIDTH (the A10 Phase-2-pinned producer array width) via --export}"
+# The structural-yield ack (header ⛔). Readiness passing is NOT permission to mine: with (b)
+# and (c) unbacked, mining's conjunction cannot be satisfied by any candidate and this round's
+# yield is provably 0 — ~8 GPU × 6 h to change nothing. Required, no default, so the no-op
+# cannot be submitted by accident; drop it once P3-15′-c/-d land.
+STRUCTURAL_YIELD_ACK="${STRUCTURAL_YIELD_ACK:?refusing: relaxed_architecture and downstream_aaRS_synteny have no backend, so remine.max_possible_yield bounds this round at 0 mined. Set STRUCTURAL_YIELD_ACK=1 via --export only if you intend to spend the GPU legs on a knowingly 0-yield round}"
+[ "$STRUCTURAL_YIELD_ACK" = "1" ] || { echo "FATAL: STRUCTURAL_YIELD_ACK must be exactly 1 (got '$STRUCTURAL_YIELD_ACK')" >&2; exit 2; }
 ROUND_DIR="data/processed/mining/round_${ROUND}"
 FP_MANIFEST="$ROUND_DIR/fp_manifest.json"
 SHARD_DIR="$ROUND_DIR/shards"

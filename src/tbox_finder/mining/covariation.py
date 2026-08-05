@@ -11,10 +11,13 @@ What this module is **not**
 It is not the whole disjunct. R-scape scores an **alignment**, never a single
 sequence, and ADR-0006 D2→D7 require that alignment to be the *model-independent*
 one: a homolog set assembled by nhmmer / BLAST / cmsearch-from-candidate, aligned
-by a CM-free de-novo structure-aware aligner. As of P2-10c the repo has **no
-homolog-search target database** (``data/external`` is T-box-specific reference
-FASTA, not RefSeq/GTDB/nt) and no ``hmmer``/``blast`` in any ``envs/*.yml``. That
-half — the per-candidate MSA supply — is **P2-10c′**, sequenced with P6-01.
+by a CM-free de-novo structure-aware aligner. That half — the per-candidate MSA
+supply — landed after this module: the homolog-search **target database** was built
+over the 2,500 GTDB R232 reps (P2-10c′-homologdb, job 741; ``hmmer``/``blast`` live
+in ``envs/homology.yml``) and :mod:`tbox_finder.mining.covariation_producer` turns a
+candidate into an MSA (search → mlocarna → R-scape, certified job 766). A first
+draft of this paragraph, written at P2-10c, said the repo had *no* target database
+and no ``hmmer``/``blast`` in any env; both were true then and are false now.
 
 The consequence is load-bearing and deliberate: :func:`backend_available` reports
 on the *binary*, and :func:`covariation_verdict` requires an alignment the caller

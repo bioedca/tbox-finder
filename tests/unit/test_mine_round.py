@@ -89,19 +89,21 @@ def test_plan_relaxed_architecture_alone_is_not_enough():
     assert plan["ready"] is False
 
 
-def test_msa_supply_default_is_unavailable_at_p2():
-    # The recorded RUN-blocker state: the per-candidate MSA supply is not built yet.
-    assert mr.MSA_SUPPLY_AVAILABLE is False
+def test_msa_supply_default_is_available_since_p3_15a():
+    # P3-15′-a: the supply landed (target DB job 741 + certified producer job 766), so the
+    # default plan is READY on the protective covariation-(a) backend alone.
+    assert mr.MSA_SUPPLY_AVAILABLE is True
     plan = mr.plan_round(rscape_installed=True)  # msa default = MSA_SUPPLY_AVAILABLE
-    assert plan["ready"] is False
+    assert plan["ready"] is True
 
 
 def test_plan_round_default_resolves_msa_flag_at_call_time(monkeypatch):
-    # The default is a None sentinel resolved at call time (not bound at import), so flipping
-    # MSA_SUPPLY_AVAILABLE at the unblock step reaches direct plan_round callers, not only the CLI.
-    assert mr.plan_round(rscape_installed=True)["ready"] is False
-    monkeypatch.setattr(mr, "MSA_SUPPLY_AVAILABLE", True)
+    # The default is a None sentinel resolved at call time (not bound at import), so the flag's
+    # value reaches direct plan_round callers, not only the CLI. Asserted in BOTH directions:
+    # with the flag forced False the same call refuses, so this cannot pass on a hardcoded True.
     assert mr.plan_round(rscape_installed=True)["ready"] is True
+    monkeypatch.setattr(mr, "MSA_SUPPLY_AVAILABLE", False)
+    assert mr.plan_round(rscape_installed=True)["ready"] is False
 
 
 # --------------------------------------------------------------------------- #
@@ -203,13 +205,91 @@ def test_later_round_does_not_run_degenerate_guard():
 # CLI — the unblock contract + strict bool parsing.
 # --------------------------------------------------------------------------- #
 def test_cli_default_tracks_msa_supply_flag(monkeypatch, capsys):
-    # Absent --msa-supply-available, the CLI default is MSA_SUPPLY_AVAILABLE, so flipping that
-    # one module flag at the unblock step unblocks the preflight WITHOUT a CLI change. If the
-    # CLI hardcoded False, the documented unblock switch would be a dead letter.
-    assert mr.main(["plan", "--rscape-installed", "true"]) == 3  # refused at P2 (flag False)
-    monkeypatch.setattr(mr, "MSA_SUPPLY_AVAILABLE", True)
-    assert mr.main(["plan", "--rscape-installed", "true"]) == 0  # ready now, no CLI change
+    # Absent a declaration, the CLI default is MSA_SUPPLY_AVAILABLE, so the one module flag
+    # drives the preflight WITHOUT a CLI change. If the CLI hardcoded either value, the
+    # documented unblock switch would be a dead letter — asserted in both directions.
+    assert mr.main(["plan", "--rscape-installed", "true"]) == 0  # ready (flag True)
+    monkeypatch.setattr(mr, "MSA_SUPPLY_AVAILABLE", False)
+    assert mr.main(["plan", "--rscape-installed", "true"]) == 3  # refused, no CLI change
     capsys.readouterr()
+
+
+def test_cli_can_declare_the_supply_unavailable(capsys):
+    # The flip made the store_true declaration one-way: with the default True, a machine that
+    # has NOT staged the homolog DB had no way to say so and would discover the gap in the
+    # producer array, after the GPU legs. --no-msa-supply-available is that way out, and the
+    # positive control beside it is the default run, which must still be ready.
+    assert mr.main(["plan", "--rscape-installed", "true"]) == 0
+    assert mr.main(["plan", "--rscape-installed", "true", "--no-msa-supply-available"]) == 3
+    out = capsys.readouterr()
+    assert "REFUSED at readiness" in out.err
+
+
+def test_cli_refuses_both_msa_declarations_at_once(capsys):
+    # Mutually exclusive: a script cannot assert available AND unavailable and silently get
+    # whichever argparse saw last.
+    with pytest.raises(SystemExit):
+        mr.main(
+            [
+                "plan",
+                "--rscape-installed",
+                "true",
+                "--msa-supply-available",
+                "--no-msa-supply-available",
+            ]
+        )
+    capsys.readouterr()
+
+
+def test_cli_plan_is_fatal_when_the_declaration_is_unevidenced(monkeypatch, capsys, tmp_path):
+    # Declared available + no evidence is a STAGING FAULT, and its exit code must differ from
+    # the clean readiness refusal (3): mine_round.sbatch converts 3 into `exit 0`, so routing
+    # this through 3 would turn a misconfigured checkout into a silent "no round today".
+    monkeypatch.setattr(mr, "REPO_ROOT", tmp_path)  # an empty tree evidences nothing
+    rc = mr.main(["plan", "--rscape-installed", "true"])
+    assert rc == 4
+    err = capsys.readouterr().err
+    assert "cannot evidence it" in err
+    assert "target_db_versioned" in err  # the refusal names the clause that failed
+
+
+def test_cli_plan_unevidenced_is_not_fatal_when_nothing_is_declared(monkeypatch, capsys, tmp_path):
+    # The asymmetry: declaring the supply UNAVAILABLE on an unevidenced checkout is the
+    # conservative direction and must stay a clean refusal (3), not the staging fault (4).
+    monkeypatch.setattr(mr, "REPO_ROOT", tmp_path)
+    assert mr.main(["plan", "--rscape-installed", "true", "--no-msa-supply-available"]) == 3
+    capsys.readouterr()
+
+
+def test_cli_plan_staging_fault_outranks_a_readiness_refusal(monkeypatch, capsys, tmp_path):
+    # ORDER, not just the code: with R-scape absent the round is ALSO refused at readiness (3),
+    # which mine_round.sbatch converts to `exit 0`. A checkout that declares a supply it cannot
+    # evidence must not be able to leave through that door, so the evidence check runs FIRST.
+    monkeypatch.setattr(mr, "REPO_ROOT", tmp_path)
+    assert mr.main(["plan", "--rscape-installed", "false"]) == 4
+    capsys.readouterr()
+
+
+def test_cli_apply_spare_rule_refuses_before_reading_anything(monkeypatch, capsys, tmp_path):
+    # The gate at the leg that actually MINES. It runs on a different job from `plan`, so it
+    # cannot inherit the preflight's verdict. Paths that do not exist prove it refuses BEFORE
+    # touching the manifest: a gate placed after the read would raise, not return 4.
+    monkeypatch.setattr(mr, "REPO_ROOT", tmp_path)
+    rc = mr.main(
+        [
+            "apply-spare-rule",
+            "--manifest",
+            str(tmp_path / "nope.json"),
+            "--status-table",
+            str(tmp_path / "nope_status.json"),
+            "--out",
+            str(tmp_path / "out.json"),
+            "--rscape-installed",
+            "true",
+        ]
+    )
+    assert rc == 4
+    assert "cannot evidence" in capsys.readouterr().err
 
 
 def test_cli_rejects_invalid_rscape_override(capsys):
@@ -224,10 +304,213 @@ def test_cli_rejects_invalid_rscape_override(capsys):
 # status onto any_helix_rscape; an absent id is fail-closed to 'unavailable' (⇒ spared),
 # and the flag stays False until the Phase-2 pin flips it.
 # --------------------------------------------------------------------------- #
-def test_msa_supply_flag_stays_false_this_step():
-    # The producer + wiring land now; MSA_SUPPLY_AVAILABLE is flipped only at the A10 Phase-2 pin,
-    # after the measurement. If this reads True, a round is silently unblocked without the budget.
-    assert mr.MSA_SUPPLY_AVAILABLE is False
+def test_msa_supply_flag_agrees_with_the_derived_supply():
+    # THE PIN (P3-15′-a, strengthened from a hard `is False`). The constant is a declaration;
+    # this asserts it against an INDEPENDENT re-derivation from the shipped evidence, so it
+    # cannot drift from reality in either direction: a supply that disappears fails here, and
+    # so does a constant left behind after the supply lands. A bare `is True` would only have
+    # caught the first.
+    derived = mr.derive_msa_supply_available()
+    assert derived["available"] is True, derived["reasons"]
+    assert mr.MSA_SUPPLY_AVAILABLE is derived["available"]
+    # All six clauses, named — so a future clause added to the conjunction cannot be satisfied
+    # silently by the five that already hold ([[all-true-fixture-cannot-test-a-conjunction]]).
+    assert derived["clauses"] == {
+        "target_db_versioned": True,
+        "producer_present": True,
+        "producer_status_wired": True,
+        "certification_green": True,
+        "certification_matches_versioned_db": True,
+        "certified_msa_intact": True,
+    }
+    assert derived["reasons"] == []
+
+
+# --------------------------------------------------------------------------- #
+# derive_msa_supply_available — the validator half of the constant. Every clause is
+# broken ALONE (the all-TRUE real tree above is the positive control): a conjunction
+# whose members are never individually falsified is satisfied by a hardcoded True.
+# --------------------------------------------------------------------------- #
+@pytest.fixture
+def evidence_root(tmp_path):
+    """A writable copy of the shipped supply evidence, so one clause can be broken alone."""
+    for rel in (mr.HOMOLOG_DB_DVC, mr.HOMOLOG_MSA_PROVENANCE, mr.CERTIFIED_MSA):
+        dst = tmp_path / rel
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        dst.write_bytes((mr.REPO_ROOT / rel).read_bytes())
+    return tmp_path
+
+
+def _derive(root):
+    return mr.derive_msa_supply_available(repo_root=root)
+
+
+def _assert_only_failed(derived, clause):
+    """`clause` is the ONLY False clause, and the verdict followed it."""
+    assert derived["available"] is False
+    assert derived["clauses"][clause] is False
+    others = {k: v for k, v in derived["clauses"].items() if k != clause}
+    assert all(others.values()), others
+    assert any(r.startswith(f"{clause}:") for r in derived["reasons"]), derived["reasons"]
+
+
+def test_evidence_root_fixture_is_the_all_true_positive_control(evidence_root):
+    # Without this, every "broken" case below could be passing for the wrong reason (a
+    # mis-copied fixture that never evidences anything).
+    assert _derive(evidence_root)["available"] is True
+
+
+def test_missing_evidence_fails_closed(tmp_path):
+    derived = _derive(tmp_path)  # an empty tree: nothing readable
+    assert derived["available"] is False
+    assert derived["clauses"]["target_db_versioned"] is False
+    assert derived["clauses"]["certification_green"] is False
+    assert derived["clauses"]["certified_msa_intact"] is False
+
+
+def test_clause_target_db_versioned_breaks_alone(evidence_root):
+    # An EMPTY pointer (nfiles 0) rather than a deleted file: the md5 survives, so this
+    # breaks the "DB is built" clause without also breaking the certification cross-check.
+    pointer = evidence_root / mr.HOMOLOG_DB_DVC
+    pointer.write_text(pointer.read_text().replace("nfiles: 10", "nfiles: 0"), encoding="utf-8")
+    _assert_only_failed(_derive(evidence_root), "target_db_versioned")
+
+
+def test_clause_target_db_versioned_rejects_a_non_dir_pointer(evidence_root):
+    # A file pointer (no `.dir` suffix) is not a built directory DB — and the reader must
+    # fail closed rather than accept the hash it can still see.
+    pointer = evidence_root / mr.HOMOLOG_DB_DVC
+    pointer.write_text(pointer.read_text().replace(".dir", ""), encoding="utf-8")
+    assert mr.read_dvc_dir_pointer(pointer) is None
+    assert _derive(evidence_root)["clauses"]["target_db_versioned"] is False
+
+
+def test_read_dvc_dir_pointer_rejects_an_ambiguous_multi_output_file(evidence_root):
+    # Two outputs in one pointer: there is no single DB version to cross-check the
+    # certification against, so the reader must fail closed rather than pick the first.
+    pointer = evidence_root / mr.HOMOLOG_DB_DVC
+    pointer.write_text(pointer.read_text() * 2, encoding="utf-8")
+    assert mr.read_dvc_dir_pointer(pointer) is None
+    derived = _derive(evidence_root)
+    assert derived["available"] is False
+    assert derived["clauses"]["target_db_versioned"] is False
+
+
+def test_clause_certification_matches_versioned_db_breaks_alone(evidence_root):
+    # The DB rebuilt after certification: the pointer is fine, the certification is fine,
+    # but the green was earned against a DIFFERENT database.
+    path = evidence_root / mr.HOMOLOG_MSA_PROVENANCE
+    doc = json.loads(path.read_text())
+    key = next(k for k in doc["inputs"] if k.startswith("data/interim/homolog_db"))
+    doc["inputs"][key] = "0" * 32 + ".dir"
+    path.write_text(json.dumps(doc, indent=2, sort_keys=True), encoding="utf-8")
+    _assert_only_failed(_derive(evidence_root), "certification_matches_versioned_db")
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        pytest.param(lambda e: e.update(positive_status="failed"), id="positive_did_not_pass"),
+        pytest.param(lambda e: e.update(shuffled_status="unavailable"), id="control_had_no_power"),
+        pytest.param(
+            lambda e: e["matched_control"].update(composition_matched=False), id="unmatched"
+        ),
+        pytest.param(lambda e: e.update(min_sequences_floor=5), id="floor_below_pin"),
+        pytest.param(lambda e: e.update(n_records=3), id="depth_below_floor"),
+    ],
+)
+def test_clause_certification_green_breaks_alone(evidence_root, mutate):
+    # The must-fire matched control, re-derived. `control_had_no_power` is the one that
+    # matters most: a shuffled twin reported `unavailable` means the detector had no power,
+    # which reads identically to "no signal" and certifies NOTHING — it must not pass.
+    path = evidence_root / mr.HOMOLOG_MSA_PROVENANCE
+    doc = json.loads(path.read_text())
+    mutate(doc["extra"])
+    path.write_text(json.dumps(doc, indent=2, sort_keys=True), encoding="utf-8")
+    _assert_only_failed(_derive(evidence_root), "certification_green")
+
+
+def test_certification_floor_is_read_from_the_pinned_constant(evidence_root):
+    # ADR-0006 A2 Pin 2 is MIN_REAL_HOMOLOG_N, imported — not a 20 re-typed here. Raising the
+    # constant above the certified floor must break the clause, which a hardcoded 20 could not.
+    from tbox_finder import power
+
+    assert _derive(evidence_root)["clauses"]["certification_green"] is True
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(power, "MIN_REAL_HOMOLOG_N", 999)
+        _assert_only_failed(_derive(evidence_root), "certification_green")
+
+
+def test_clause_certified_msa_intact_breaks_alone(evidence_root):
+    # The certified alignment must still be the bytes the certifying run hashed.
+    msa = evidence_root / mr.CERTIFIED_MSA
+    msa.write_bytes(msa.read_bytes() + b"\n")
+    _assert_only_failed(_derive(evidence_root), "certified_msa_intact")
+
+
+def test_clause_producer_present_breaks_alone(evidence_root, monkeypatch):
+    from tbox_finder.mining import covariation_producer as cp
+
+    monkeypatch.delattr(cp, "align_shard")  # the CM-free de-novo alignment leg
+    derived = _derive(evidence_root)
+    _assert_only_failed(derived, "producer_present")
+    assert "align_shard" in " ".join(derived["reasons"])
+
+
+def test_clause_producer_status_wired_breaks_alone(evidence_root, monkeypatch):
+    # The claim the superseded provenance note made — a certified producer whose output the
+    # round drops on the floor. Measured by CALLING the builder, not by reading a signature:
+    # this fixture returns default-unavailable evidence exactly as the pre-producer code did.
+    from tbox_finder.mining.spare_rule import SpareRuleEvidence
+
+    monkeypatch.setattr(mr, "candidate_evidence", lambda cid, status: SpareRuleEvidence())
+    _assert_only_failed(_derive(evidence_root), "producer_status_wired")
+
+
+def test_plan_round_publishes_the_derivation_beside_the_claim(evidence_root):
+    plan = mr.plan_round(rscape_installed=True, repo_root=evidence_root)
+    assert plan["msa_supply_derivation"]["available"] is True
+    assert plan["msa_supply_available"] is True
+    assert mr.msa_supply_declaration_unevidenced(plan) is False
+
+
+def test_declaration_unevidenced_is_asymmetric(tmp_path):
+    # Declared available with no evidence = the fail-open direction, flagged.
+    bad = mr.plan_round(rscape_installed=True, msa_supply_available=True, repo_root=tmp_path)
+    assert mr.msa_supply_declaration_unevidenced(bad) is True
+    # Declared UNavailable with no evidence = a conservative under-claim, not a fault.
+    ok = mr.plan_round(rscape_installed=True, msa_supply_available=False, repo_root=tmp_path)
+    assert mr.msa_supply_declaration_unevidenced(ok) is False
+
+
+# --------------------------------------------------------------------------- #
+# The two gates disagree, and that is the CORRECT state until (b)+(c) land.
+# --------------------------------------------------------------------------- #
+def test_ready_does_not_mean_minable_until_the_other_backends_land():
+    # imp.md P3-15′-a's validation: readiness passes on covariation-(a) alone, while the P3
+    # structural-yield gate still bounds the round at 0 mined because mining is a CONJUNCTION
+    # and (b)+(c) have no backend. A future change that makes these two agree by accident —
+    # in either direction — is a real regression, so both halves are asserted together.
+    from tbox_finder.mining.remine import build_remine_availability, max_possible_yield
+
+    plan = mr.plan_round(rscape_installed=True)
+    assert plan["ready"] is True
+    assert plan["availability"]["any_helix_rscape"] is True
+    assert plan["availability"]["relaxed_architecture"] is False
+    assert plan["availability"]["downstream_aaRS_synteny"] is False
+
+    gate = max_possible_yield(
+        build_remine_availability(
+            rscape_installed=True,
+            msa_supply_available=mr.MSA_SUPPLY_AVAILABLE,
+            stage2_supply_available=False,
+        ),
+        stage2_threshold=0.9,
+    )
+    assert gate["yield_producible"] is False
+    assert gate["max_mined"] == 0
+    assert "relaxed_architecture" in gate["blocking_disjuncts"]
+    assert "downstream_aaRS_synteny" in gate["blocking_disjuncts"]
 
 
 def test_window_candidates_default_evidence_is_all_unavailable():
