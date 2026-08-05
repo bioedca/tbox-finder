@@ -274,8 +274,17 @@ def test_build_element_rank_refuses_an_unknown_class():
 
 
 def test_build_element_rank_refuses_a_repeated_class():
-    repeated = ("Stem_I", *CANONICAL_ELEMENT_ORDER[1:-1], "Stem_I")
-    with pytest.raises(StrandError):
+    """The duplicate check, reached — which needs the element set to be otherwise complete.
+
+    An order that *also* drops a class raises on the missing-class branch first and never
+    reaches this one, so the test would pass while the refusal it names stayed unexercised.
+    Matching the message is what makes the branch identifiable rather than merely raising.
+    """
+    repeated = (*CANONICAL_ELEMENT_ORDER, "Stem_I")
+    assert set(repeated) == set(
+        ELEMENT_CLASS_NAMES
+    ), "no class may be missing, or the wrong branch fires"
+    with pytest.raises(StrandError, match="repeats a class"):
         build_element_rank(repeated)
 
 

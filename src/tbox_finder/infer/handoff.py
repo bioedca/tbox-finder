@@ -163,7 +163,7 @@ class Handoff:
     """One RNA payload handed to Stage-2 — a locus on one carried strand.
 
     **Sequence-only by construction** (PRD §6): the record has an ``rna`` string and no
-    structure, dot-bracket or pairing field, and ``test_handoff_carries_no_structure`` asserts
+    structure, dot-bracket or pairing field, and ``test_handoff_is_sequence_only`` asserts
     that over the live field set rather than by reading.
 
     Attributes
