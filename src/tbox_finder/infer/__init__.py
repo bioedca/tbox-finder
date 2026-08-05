@@ -20,7 +20,16 @@ Modules
     P2-10c′-c — the along-sequence candidate-caller ``scan`` names as "a later step":
     threshold ``1 − P(background)``, gap-merge, minimum span → called Stage-1 candidate loci.
     The minimal, recall-favouring form the ρ-pilot (ADR-0003 D6) needs; pins no ADR value
-    (ADR-0005 D3 freezes production locus values at the phase gate).
+    (ADR-0005 D3 freezes production locus values at the phase gate). Owns
+    ``candidates_from_mask`` — the single mask → gap-merge → min-span → ``Candidate`` site,
+    which ``locus`` also calls.
+
+``locus``
+    P3-12 — ADR-0005 D3's **full** locus-construction rule, layered on ``call``: the
+    per-class-vs-global threshold scope and the recall-favouring required-element
+    co-occurrence (a *count* of distinct elements, never a named canonical set — PRD
+    §5/§13.3), then the flank. ``call_candidates`` is its global-scope, no-co-occurrence,
+    no-flank special case; the merge itself is shared, not forked. Pins no ADR value.
 
 ``rho_pilot``
     P2-10c′-c-ii — the ρ-pilot scan driver: scan the 100 divergent-clade pilot genomes with
@@ -38,4 +47,4 @@ converts through ``numpy.asarray``).
 
 from __future__ import annotations
 
-__all__ = ["call", "reconcile", "rho_pilot", "scan"]
+__all__ = ["call", "locus", "reconcile", "rho_pilot", "scan"]
