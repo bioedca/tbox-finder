@@ -45,6 +45,17 @@ T-box elements, :data:`tbox_finder.labels.CLASS_ORDER`):
 
 Each surviving run is one :class:`Candidate`. ``ρ = (Σ candidates over all genomes) / T[Mbp]``.
 
+What P3-12 added on top, and where the merge now lives
+------------------------------------------------------
+D3's locus-construction rule has five knobs; steps 2–4 above are three of them (global
+threshold scope, gap-merge, minimum span). :mod:`tbox_finder.infer.locus` (P3-12) adds the
+other two — the **per-class-vs-global threshold scope** and the **recall-favouring
+required-element co-occurrence** — plus the **flank**, and it does so by *composing* this
+module rather than forking it: the mask → gap-merge → min-span → :class:`Candidate` step was
+promoted here into :func:`candidates_from_mask`, which both entry points call. This module's
+own operator is unchanged; ``call_candidates`` is now the global-scope, no-co-occurrence,
+no-flank special case of the D3 rule, which is exactly what the ρ-pilot wants.
+
 Contig ends are flagged, not dropped
 ------------------------------------
 PRD §6 / ADR-0005 D3: contig ends are zero-flanked *and flagged*. A short replicon (the pilot
@@ -81,7 +92,13 @@ BACKGROUND_INDEX = CLASS_INDEX["background"]
 #: The element-class indices (everything but ``background``), in ascending order. Derived
 #: from :data:`BACKGROUND_INDEX` so ``dominant_class`` selection is robust to a re-ordering of
 #: ``CLASS_ORDER`` — never a hardcoded ``1:`` slice that assumes background sits at index 0.
-_ELEMENT_INDICES = np.array([i for i in range(NUM_CLASSES) if i != BACKGROUND_INDEX])
+#: **Public** because :mod:`tbox_finder.infer.locus` orders its per-class thresholds against
+#: it (P3-12); a re-derived copy there would be a hand-typed duplicate free to go stale.
+ELEMENT_INDICES = np.array([i for i in range(NUM_CLASSES) if i != BACKGROUND_INDEX])
+
+#: Number of element classes — :data:`NUM_CLASSES` less ``background``. The upper bound on
+#: ADR-0005 D3's required-element-co-occurrence *count* (:mod:`tbox_finder.infer.locus`).
+NUM_ELEMENT_CLASSES = int(ELEMENT_INDICES.size)
 
 #: Provisional ρ-pilot sweep grids (user decision 2026-07-22: "sweep ρ(τ), pin nothing").
 #: These bind **no** ADR value — ADR-0005 D3 freezes the production Stage-1 threshold and the
@@ -152,6 +169,24 @@ def element_posterior(log_probs: Any) -> np.ndarray:
     return np.clip(1.0 - p_bg, 0.0, 1.0)
 
 
+def zero_flanked_array(zero_flanked: Any, seq_len: int) -> np.ndarray:
+    """Normalise an optional ``Reconciled.zero_flanked`` to a ``(seq_len,)`` bool array.
+
+    ``None`` means "no contig-end padding" (the interior-sequence case) and becomes all-False.
+    One shared normaliser — and so one error message — for every consumer of the contig-end
+    flag: this module's caller/sweep and :mod:`tbox_finder.infer.locus`, which counts the flag
+    over the *flanked* span rather than the element run.
+    """
+    if zero_flanked is None:
+        return np.zeros(seq_len, dtype=bool)
+    zf = np.asarray(zero_flanked, dtype=bool)
+    if zf.shape != (seq_len,):
+        raise CandidateError(
+            f"zero_flanked must be (seq_len,)=({seq_len},)-shaped, got shape={zf.shape}"
+        )
+    return zf
+
+
 def _merge_runs(runs: list[tuple[int, int]], gap_merge: int) -> list[tuple[int, int]]:
     """Merge consecutive ``[start, end)`` runs separated by ``<= gap_merge`` positions.
 
@@ -188,6 +223,110 @@ def _true_runs(mask: np.ndarray) -> list[tuple[int, int]]:
     return list(zip(starts.tolist(), ends.tolist(), strict=True))
 
 
+def candidates_from_mask(
+    log_probs: Any,
+    element_mask: Any,
+    zero_flanked: Any = None,
+    *,
+    min_span: int,
+    gap_merge: int,
+) -> list[Candidate]:
+    """Gap-merge and span-filter a per-position element mask into :class:`Candidate` loci.
+
+    **This is the single mask → gap-merge → min-span → :class:`Candidate` site in the repo.**
+    :func:`call_candidates` supplies the global-scope mask ``1 − P(background) >= τ``;
+    :func:`tbox_finder.infer.locus.construct_loci` (P3-12) supplies the ADR-0005 D3
+    *threshold-scope* mask — global **or** per-class — and layers required-element
+    co-occurrence and flank on top. Neither re-derives the merge: D3 pins **one**
+    locus-construction operator, and a forked second copy is precisely the defect that copy
+    would ship (the promote-don't-duplicate rule :mod:`tbox_finder.eval.mining_criterion`
+    already observes for the caller as a whole).
+
+    Selection is **entirely** ``element_mask``'s: this function reads ``log_probs`` only to
+    *describe* the surviving runs (``peak_p_elem`` / ``mean_p_elem`` from
+    :func:`element_posterior`, ``dominant_class`` from the per-class means). Nothing here is
+    gated on a strength value — P3-11 measured ``mean_p_elem`` swinging 0.6453 → 0.9997 with
+    the 512-window phase while the per-position call stayed exactly invariant, so a rule that
+    thresholded on it would re-import the grid dependence D3's operator exists to remove.
+
+    Parameters
+    ----------
+    log_probs:
+        Reconciled ``(seq_len, NUM_CLASSES)`` log-posterior — ``Reconciled.log_probs``.
+    element_mask:
+        ``(seq_len,)`` **bool** — True where the position is element-like under whatever
+        threshold scope the caller applied. A non-bool array is **refused, not coerced**:
+        ``np.asarray(p_elem, dtype=bool)`` maps every non-zero posterior to True, so handing
+        this the *scores* in place of the *decision* would silently call almost every
+        position — a wrong answer that runs clean.
+    zero_flanked:
+        Optional ``(seq_len,)`` bool — ``Reconciled.zero_flanked``. ``None`` is all-False.
+    min_span:
+        Minimum merged-run length in nucleotides (``>= 1``); shorter runs are not candidates.
+    gap_merge:
+        Maximum background gap in nucleotides to bridge between element runs (``>= 0``).
+
+    Returns
+    -------
+    list[Candidate]
+        Called loci in ascending ``start`` order; empty if none clear the operator.
+
+    Notes
+    -----
+    Order is **merge-then-span-filter**: a sub-``min_span`` run can be rescued by gap-merging
+    into a neighbour, which is the recall-favouring direction.
+    """
+    p_elem = element_posterior(log_probs)
+    seq_len = p_elem.shape[0]
+
+    if int(min_span) < 1:
+        raise CandidateError(f"min_span must be >= 1, got {min_span}")
+    if int(gap_merge) < 0:
+        raise CandidateError(f"gap_merge must be >= 0, got {gap_merge}")
+    min_span = int(min_span)
+    gap_merge = int(gap_merge)
+
+    mask = np.asarray(element_mask)
+    if mask.dtype != np.bool_:
+        raise CandidateError(
+            "element_mask must be a boolean array — the thresholding *decision*, not the "
+            f"score — got dtype={mask.dtype}; coercing a float array would call every "
+            "position whose posterior is merely non-zero"
+        )
+    if mask.shape != (seq_len,):
+        raise CandidateError(
+            f"element_mask must be (seq_len,)=({seq_len},)-shaped, got shape={mask.shape}"
+        )
+
+    zf = zero_flanked_array(zero_flanked, seq_len)
+
+    lp = np.asarray(log_probs, dtype=np.float64)
+    runs = _merge_runs(_true_runs(mask), gap_merge)
+
+    candidates: list[Candidate] = []
+    for start, end in runs:
+        if end - start < min_span:
+            continue
+        run_p = p_elem[start:end]
+        # Mean posterior per class over the run; argmax among the element classes (all but
+        # background) names the driving element, mapped back to its real class index.
+        # Descriptive only — nothing is gated on it.
+        run_class_post = np.exp(lp[start:end]).mean(axis=0)
+        dominant = int(ELEMENT_INDICES[np.argmax(run_class_post[ELEMENT_INDICES])])
+        candidates.append(
+            Candidate(
+                start=int(start),
+                end=int(end),
+                length=int(end - start),
+                peak_p_elem=float(run_p.max()),
+                mean_p_elem=float(run_p.mean()),
+                n_zero_flanked=int(np.count_nonzero(zf[start:end])),
+                dominant_class=dominant,
+            )
+        )
+    return candidates
+
+
 def call_candidates(
     log_probs: Any,
     zero_flanked: Any = None,
@@ -197,6 +336,11 @@ def call_candidates(
     gap_merge: int,
 ) -> list[Candidate]:
     """Call Stage-1 candidate loci from reconciled per-position posteriors (the D3 operator).
+
+    The **global**-scope entry point: it builds the mask ``1 − P(background) >= τ`` and hands
+    it to :func:`candidates_from_mask`, which owns the merge. Behaviour, signature and output
+    are unchanged from P2-10c′-c-i — the merge simply moved to the one site
+    :mod:`tbox_finder.infer.locus` also calls, so the two cannot drift apart.
 
     Parameters
     ----------
@@ -220,52 +364,17 @@ def call_candidates(
         Called loci in ascending ``start`` order; empty if none clear the operator.
     """
     p_elem = element_posterior(log_probs)
-    seq_len = p_elem.shape[0]
 
     if not (0.0 <= float(threshold) <= 1.0):
         raise CandidateError(f"threshold must be in [0, 1], got {threshold}")
-    if int(min_span) < 1:
-        raise CandidateError(f"min_span must be >= 1, got {min_span}")
-    if int(gap_merge) < 0:
-        raise CandidateError(f"gap_merge must be >= 0, got {gap_merge}")
-    min_span = int(min_span)
-    gap_merge = int(gap_merge)
 
-    if zero_flanked is None:
-        zf = np.zeros(seq_len, dtype=bool)
-    else:
-        zf = np.asarray(zero_flanked, dtype=bool)
-        if zf.shape != (seq_len,):
-            raise CandidateError(
-                f"zero_flanked must be (seq_len,)=({seq_len},)-shaped, got shape={zf.shape}"
-            )
-
-    lp = np.asarray(log_probs, dtype=np.float64)
-    elem = p_elem >= float(threshold)
-    runs = _merge_runs(_true_runs(elem), gap_merge)
-
-    candidates: list[Candidate] = []
-    for start, end in runs:
-        if end - start < min_span:
-            continue
-        run_p = p_elem[start:end]
-        # Mean posterior per class over the run; argmax among the element classes (all but
-        # background) names the driving element, mapped back to its real class index.
-        # Descriptive only — nothing is gated on it.
-        run_class_post = np.exp(lp[start:end]).mean(axis=0)
-        dominant = int(_ELEMENT_INDICES[np.argmax(run_class_post[_ELEMENT_INDICES])])
-        candidates.append(
-            Candidate(
-                start=int(start),
-                end=int(end),
-                length=int(end - start),
-                peak_p_elem=float(run_p.max()),
-                mean_p_elem=float(run_p.mean()),
-                n_zero_flanked=int(np.count_nonzero(zf[start:end])),
-                dominant_class=dominant,
-            )
-        )
-    return candidates
+    return candidates_from_mask(
+        log_probs,
+        p_elem >= float(threshold),
+        zero_flanked,
+        min_span=min_span,
+        gap_merge=gap_merge,
+    )
 
 
 def sweep_candidate_counts(
@@ -293,15 +402,7 @@ def sweep_candidate_counts(
     innermost point. The counts are identical to :func:`call_candidates` at each grid point.
     """
     p_elem = element_posterior(log_probs)
-    seq_len = p_elem.shape[0]
-    if zero_flanked is None:
-        zf = np.zeros(seq_len, dtype=bool)
-    else:
-        zf = np.asarray(zero_flanked, dtype=bool)
-        if zf.shape != (seq_len,):
-            raise CandidateError(
-                f"zero_flanked must be (seq_len,)=({seq_len},)-shaped, got shape={zf.shape}"
-            )
+    zf = zero_flanked_array(zero_flanked, p_elem.shape[0])
 
     rows: list[dict[str, Any]] = []
     for threshold in thresholds:
@@ -327,15 +428,19 @@ def sweep_candidate_counts(
 
 __all__ = [
     "BACKGROUND_INDEX",
+    "ELEMENT_INDICES",
     "PROVISIONAL_GAP_MERGE_GRID",
     "PROVISIONAL_MIN_SPAN_GRID",
     "PROVISIONAL_THRESHOLD_GRID",
     "Candidate",
     "CandidateError",
     "NUM_CLASSES",
+    "NUM_ELEMENT_CLASSES",
     "SCHEMA_VERSION",
     "STEP",
     "call_candidates",
+    "candidates_from_mask",
     "element_posterior",
     "sweep_candidate_counts",
+    "zero_flanked_array",
 ]
