@@ -2212,7 +2212,7 @@ The two sets **do not overlap**, and every high-drift order is Actinobacteria (9
 
 **`is_science` is derived, not asserted.** GATE-4's report can hardcode it because its incomplete path raises and writes no file; this one always writes, so `--max-units` would otherwise land a truncated grade at the phase-exit path flagged as real science. It is now the conjunction of the three completeness clauses, re-derived by `validate_report`, and two sabotages (hardcoding it; reading only one of the three) are caught.
 
-**Validation.** `reports/gate2_p3_ece.json` re-validates **clean** under the shipped code with all 19 clauses re-deriving identically and `overall_pass = true`. 65 `test_gate2` + the extended eval-gate tier; full unit+golden+ml **3,911 passed / 14 failed**, the 14 **exactly** a matched baseline worktree's set at `main` (`comm` empty both ways — the main checkout gives a different count because it holds the LFS/DVC data a fresh worktree lacks, so the baseline had to be a second worktree). ruff 0.15.0 + black 25.11.0 + `snakemake --lint` clean; `snakemake -n gate2_ece` resolves `stage2_dataset → stage2_scores_loo → gate2_ece`. **63 sabotages, each RED against its NAMED test, each restored byte-identically.** Two did not bite on the first pass and both gaps were real: an all-TRUE fixture made `overall_pass = all(clauses)` and `overall_pass = True` indistinguishable (now checked on a report with one clause deliberately FALSE), and the disclosure test matched a phrase that survived deleting the clause that introduced it (now matched on provenance marker *and* substance).
+**Validation.** `reports/gate2_p3_ece.json` re-validates **clean** under the shipped code with all 19 clauses re-deriving identically and `overall_pass = true`. 66 `test_gate2` + the extended eval-gate tier; full unit+golden+ml **3,912 passed / 14 failed**, the 14 **exactly** a matched baseline worktree's set at `main` (`comm` empty both ways — the main checkout gives a different count because it holds the LFS/DVC data a fresh worktree lacks, so the baseline had to be a second worktree). ruff 0.15.0 + black 25.11.0 + `snakemake --lint` clean; `snakemake -n gate2_ece` resolves `stage2_dataset → stage2_scores_loo → gate2_ece`. **64 sabotages, each RED against its NAMED test, each restored byte-identically.** Two did not bite on the first pass and both gaps were real: an all-TRUE fixture made `overall_pass = all(clauses)` and `overall_pass = True` indistinguishable (now checked on a report with one clause deliberately FALSE), and the disclosure test matched a phrase that survived deleting the clause that introduced it (now matched on provenance marker *and* substance).
 
 **Decisions.** Path drift, recorded not taken silently: the module lands at `src/tbox_finder/calib/gate2.py`, not imp.md's `calibration/gate2.py` — the same correction as P3-07 and P3-09, since two near-homonymous calibration namespaces is a permanent import confusion. No ADR amended and no §7 sign-off sought: nothing pinned changed. **Three items now stand for the P3-exit ADR round** — D11's missing degenerate-limit rule (P3-08), the D11 debias term's measured saturation (P3-09), and D13's unpinned drift bound (this step).
 
@@ -2439,3 +2439,23 @@ bare repo-wide singleton total explains nothing on its own.
 
 **Six rounds, 20 findings, all real, all fixed.** The gated number has not moved once: ECE
 0.005662 in every regeneration.
+
+### P3-10 review round 7 — CodeRabbit CLI, 1 minor finding: a cache hint could discard a 28-minute run
+
+**`if target != "cpu": torch.cuda.empty_cache()`.** `--device` accepts any string torch
+accepts, so `mps` (or `xpu`) is reachable, and on a build without CUDA that call raises. The
+raise lands **after** `score_rows` and **before** the payload is written, so the entire ~28
+minute leave-clade-out scoring run would be lost to a cache hint. Now gated on
+`torch.cuda.is_available() and str(target).startswith("cuda")`, factored into
+`_should_release_cuda` so the predicate is testable without a GPU.
+
+This is the same shape as the round-1 provenance defect — an incidental call at the tail of an
+expensive function, positioned so its failure discards everything the function just produced.
+Two of the three most costly defects this step found were of that kind, and neither is visible
+from reading the happy path.
+
+**The same pattern exists in `stage2/eval.py:1809` (P3-08).** Not changed here: it is another
+step's module with a committed artifact and a shape-locked report, and the fix belongs with
+whoever next regenerates it. Recorded so it is not rediscovered as new.
+
+**Seven rounds, 21 findings, all real, all fixed.** ECE 0.005662 in every regeneration.

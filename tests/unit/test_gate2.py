@@ -1092,6 +1092,21 @@ def test_a_perfectly_calibrated_unit_is_not_treated_as_absent(tmp_path) -> None:
     assert G.ood_point(inadm) == 0.0
 
 
+def test_the_cuda_cache_release_is_gated_on_a_cuda_device_that_exists() -> None:
+    """`--device mps` must not lose a 28-minute scoring run to a cache hint (r7).
+
+    The release sits after `score_rows` and before the payload is written, so a raise there
+    discards everything the GPU just produced — the same shape as the provenance defect that
+    would have discarded the leave-one-out bootstrap.
+    """
+    for target in ("cuda", "cuda:0", "cuda:3"):
+        assert G._should_release_cuda(target, True) is True, target
+        assert G._should_release_cuda(target, False) is False, target
+    for target in ("cpu", "mps", "xpu", "meta", "", None):
+        assert G._should_release_cuda(target, True) is False, target
+        assert G._should_release_cuda(target, False) is False, target
+
+
 def test_the_bin_size_label_never_claims_a_count_some_bins_lack() -> None:
     """Equal-MASS bins differ in size when n is not divisible by the bin count."""
     assert G._bin_size_label([{"n": 203}, {"n": 203}]) == "203 rows each"

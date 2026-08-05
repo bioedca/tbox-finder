@@ -1440,6 +1440,18 @@ def plot_figures(
 # --------------------------------------------------------------------------- #
 # TORCH TIER — scoring the leave-clade-out holdout (lazy; nothing above needs it)
 # --------------------------------------------------------------------------- #
+def _should_release_cuda(target: Any, cuda_available: bool) -> bool:
+    """Release the CUDA cache only on a CUDA device that exists.
+
+    ``--device`` takes any string torch accepts, so ``"mps"`` (or ``"xpu"``) is reachable and
+    ``target != "cpu"`` would call ``torch.cuda.empty_cache()`` on a build without CUDA. The
+    raise would land AFTER ``score_rows`` and BEFORE the payload is written — losing a ~28
+    minute scoring run to a cache hint, which is the same shape as the provenance defect that
+    would have discarded a 40-minute bootstrap.
+    """
+    return bool(cuda_available) and str(target).startswith("cuda")
+
+
 def score_loo_holdout(
     *,
     dataset: str | Path = DEFAULT_DATASET,
@@ -1491,7 +1503,7 @@ def score_loo_holdout(
     record["attn_implementation_matches_training"] = bool(backend == trained_under)
     scored = E.score_rows(model, rows, batch_size=batch_size, device=target)
     del model
-    if target != "cpu":
+    if _should_release_cuda(target, torch.cuda.is_available()):
         torch.cuda.empty_cache()
 
     payload = {
