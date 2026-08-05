@@ -262,7 +262,29 @@ def _core_assignment(locus: Locus, assignment: Any) -> np.ndarray:
             f"locus core [{start}, {end}) runs past the assignment ({arr.shape[0]} positions); "
             "this assignment is not the one the locus was called from"
         )
-    return arr[start:end]
+    core = arr[start:end]
+
+    # Every label must be a ranked element class or NOT_ELEMENT. Both failure modes here are
+    # fail-OPEN without this: an unknown label mixed with a known one reaches ``ELEMENT_RANK[...]``
+    # and raises a bare ``KeyError`` from inside the vote, while a core carrying *only* unknown
+    # labels never looks a rank up at all and returns a ``StrandCall`` naming a class that does
+    # not exist — silently, as an ordinary ambiguous locus.
+    #
+    # The realistic way to get here is not a corrupt array but a plausible substitution:
+    # ``Reconciled.prediction`` is the arg-max over all NUM_CLASSES (the quantity ``eval/gate4``
+    # grades boundary IoU on), so it carries ``background`` as 0 — which is not an element and
+    # has no rank. Passing it instead of ``element_assignment``'s output currently dies with
+    # ``KeyError: 0``. Named explicitly, because the two arrays are the same shape and dtype.
+    unknown = sorted({int(c) for c in np.unique(core)} - set(ELEMENT_RANK) - {NOT_ELEMENT})
+    if unknown:
+        raise StrandError(
+            f"assignment carries label(s) {unknown} that are neither NOT_ELEMENT "
+            f"({NOT_ELEMENT}) nor a ranked element class {sorted(ELEMENT_RANK)}. If "
+            f"{CLASS_INDEX['background']} appears, this is most likely Reconciled.prediction "
+            "(the arg-max over all classes, which encodes background) where "
+            "element_assignment's output was wanted — the two are the same shape and dtype"
+        )
+    return core
 
 
 def resolve_strand(locus: Locus, assignment: Any, *, min_order_margin: int) -> StrandCall:

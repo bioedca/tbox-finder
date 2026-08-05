@@ -647,6 +647,42 @@ def test_a_mismatched_assignment_is_refused():
         resolve_strand(loci[0], np.zeros(90, dtype=np.float64), min_order_margin=1)
 
 
+def test_an_unranked_class_label_is_refused_rather_than_voted_on():
+    """Both unknown-label paths are fail-OPEN without the guard, and one is silent.
+
+    Mixed with a known class, an unknown label reaches ``ELEMENT_RANK[...]`` and raises a bare
+    ``KeyError`` from inside the vote; *alone*, it never looks a rank up and comes back as an
+    ordinary ambiguous ``StrandCall`` naming a class that does not exist.
+
+    The realistic trigger is a substitution, not corruption: ``Reconciled.prediction`` is the
+    arg-max over **all** classes — the quantity ``eval/gate4`` grades boundary IoU on — so it
+    encodes ``background`` as a label, which is not an element and has no rank. It is the same
+    shape and dtype as ``element_assignment``'s output, so nothing else would catch the swap.
+    """
+    layout = [("Stem_I", 10, 40), ("Terminator", 50, 70)]
+    log_probs = _log_probs_from_layout(90, layout)
+    loci, _ = _loci_and_calls(log_probs)
+    assignment = element_assignment(log_probs, threshold_scope=_SCOPE, threshold=_TAU)
+
+    # Positive control: the correct array resolves.
+    assert resolve_strand(loci[0], assignment, min_order_margin=1).strand == STRAND_PLUS
+
+    prediction = np.argmax(log_probs, axis=1).astype(np.int64)
+    assert prediction.shape == assignment.shape and prediction.dtype == assignment.dtype
+    assert CLASS_INDEX["background"] in set(prediction.tolist()), "the swap must be exercised"
+    with pytest.raises(StrandError, match="Reconciled.prediction"):
+        resolve_strand(loci[0], prediction, min_order_margin=1)
+
+    mixed = assignment.copy()
+    mixed[12:20] = 99
+    with pytest.raises(StrandError, match=r"label\(s\) \[99\]"):
+        resolve_strand(loci[0], mixed, min_order_margin=1)
+
+    alone = np.full(90, 99, dtype=np.int64)
+    with pytest.raises(StrandError, match=r"label\(s\) \[99\]"):
+        resolve_strand(loci[0], alone, min_order_margin=1)
+
+
 # --------------------------------------------------------------------------- #
 # 5. the reverse complement — IUPAC-complete and fail-closed
 # --------------------------------------------------------------------------- #
