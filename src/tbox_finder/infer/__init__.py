@@ -31,6 +31,19 @@ Modules
     §5/§13.3), then the flank. ``call_candidates`` is its global-scope, no-co-occurrence,
     no-flank special case; the merge itself is shared, not forked. Pins no ADR value.
 
+``strand``
+    P3-13 — the ADR-0005 D15 strand-resolver: Caduceus-PS is RC-equivariant, so orientation is
+    read off the **predicted element order** against a 5′→3′ rank measured on the corpus (not
+    borrowed from ``labels.CLASS_ORDER``, which disagrees at ``Discriminator``). A locus whose
+    order is under-determined is flagged ``low_order_confidence`` and carried on **both**
+    strands. Pins no ADR value (``min_order_margin`` is keyword-only, no default).
+
+``handoff``
+    P3-13 — the PRD §6 alphabet handoff: a resolved locus ± flank is oriented, then transcribed
+    T→U into the RNA Stage-2 ingests **sequence-only**. T→U delegates to the shipped
+    ``stage2.tokenizer.transcribe``; the reverse complement is IUPAC-complete and fail-closed,
+    unlike the five ``ACGTN``-only forks elsewhere in the repo.
+
 ``rho_pilot``
     P2-10c′-c-ii — the ρ-pilot scan driver: scan the 100 divergent-clade pilot genomes with
     the production Stage-1 checkpoint (``scan-shard`` per GPU, then ``reduce``) and sum
@@ -47,4 +60,4 @@ converts through ``numpy.asarray``).
 
 from __future__ import annotations
 
-__all__ = ["call", "locus", "reconcile", "rho_pilot", "scan"]
+__all__ = ["call", "handoff", "locus", "reconcile", "rho_pilot", "scan", "strand"]

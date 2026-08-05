@@ -1,0 +1,284 @@
+{
+ "schema_version": "1.0",
+ "step": "P3-13",
+ "prd": "\u00a76 (strand resolution), \u00a78 (label derivation)",
+ "adr": "ADR-0005 D15 (strand resolver)",
+ "corpus": "data/processed/master_clean_v0.parquet",
+ "corpus_sha256": "1eb76591d0e481019dd7acf72a439f157fec9f2aeecb8cc5c37ba80a7b062dd2",
+ "element_columns": {
+  "Stem_I": [
+   "s1_start",
+   "s1_end"
+  ],
+  "Specifier": [
+   "codon_start",
+   "codon_end"
+  ],
+  "Stem_II": [
+   "stem2_region_start",
+   "stem2_region_end"
+  ],
+  "Stem_III": [
+   "stem3_start",
+   "stem3_end"
+  ],
+  "Antiterminator_Tbox_seq": [
+   "antiterm_start",
+   "antiterm_end"
+  ],
+  "Terminator": [
+   "term_start",
+   "term_end"
+  ],
+  "Discriminator": [
+   "discrim_start",
+   "discrim_end"
+  ]
+ },
+ "statistic": "median of (start + end) / 2 per record; pairwise comparison within record",
+ "n_records": 23535,
+ "elements": [
+  {
+   "element": "Stem_I",
+   "n_annotated": 23475,
+   "pct_annotated": 99.75,
+   "median_midpoint": 55.0
+  },
+  {
+   "element": "Specifier",
+   "n_annotated": 23142,
+   "pct_annotated": 98.33,
+   "median_midpoint": 92.0
+  },
+  {
+   "element": "Stem_II",
+   "n_annotated": 21767,
+   "pct_annotated": 92.49,
+   "median_midpoint": 127.0
+  },
+  {
+   "element": "Stem_III",
+   "n_annotated": 23384,
+   "pct_annotated": 99.36,
+   "median_midpoint": 188.0
+  },
+  {
+   "element": "Antiterminator_Tbox_seq",
+   "n_annotated": 23534,
+   "pct_annotated": 100.0,
+   "median_midpoint": 219.0
+  },
+  {
+   "element": "Terminator",
+   "n_annotated": 23439,
+   "pct_annotated": 99.59,
+   "median_midpoint": 244.0
+  },
+  {
+   "element": "Discriminator",
+   "n_annotated": 23208,
+   "pct_annotated": 98.61,
+   "median_midpoint": 210.5
+  }
+ ],
+ "pairs": [
+  {
+   "A": "Stem_I",
+   "B": "Specifier",
+   "n_both": 23122,
+   "n_a_before_b": 23058,
+   "n_b_before_a": 51,
+   "n_tied": 13,
+   "frac_a_before_b": 0.997232
+  },
+  {
+   "A": "Stem_I",
+   "B": "Stem_II",
+   "n_both": 21760,
+   "n_a_before_b": 21760,
+   "n_b_before_a": 0,
+   "n_tied": 0,
+   "frac_a_before_b": 1.0
+  },
+  {
+   "A": "Stem_I",
+   "B": "Stem_III",
+   "n_both": 23375,
+   "n_a_before_b": 23375,
+   "n_b_before_a": 0,
+   "n_tied": 0,
+   "frac_a_before_b": 1.0
+  },
+  {
+   "A": "Stem_I",
+   "B": "Antiterminator_Tbox_seq",
+   "n_both": 23475,
+   "n_a_before_b": 23456,
+   "n_b_before_a": 19,
+   "n_tied": 0,
+   "frac_a_before_b": 0.999191
+  },
+  {
+   "A": "Stem_I",
+   "B": "Terminator",
+   "n_both": 23421,
+   "n_a_before_b": 23420,
+   "n_b_before_a": 1,
+   "n_tied": 0,
+   "frac_a_before_b": 0.999957
+  },
+  {
+   "A": "Stem_I",
+   "B": "Discriminator",
+   "n_both": 23192,
+   "n_a_before_b": 23192,
+   "n_b_before_a": 0,
+   "n_tied": 0,
+   "frac_a_before_b": 1.0
+  },
+  {
+   "A": "Specifier",
+   "B": "Stem_II",
+   "n_both": 21474,
+   "n_a_before_b": 21474,
+   "n_b_before_a": 0,
+   "n_tied": 0,
+   "frac_a_before_b": 1.0
+  },
+  {
+   "A": "Specifier",
+   "B": "Stem_III",
+   "n_both": 23069,
+   "n_a_before_b": 23068,
+   "n_b_before_a": 1,
+   "n_tied": 0,
+   "frac_a_before_b": 0.999957
+  },
+  {
+   "A": "Specifier",
+   "B": "Antiterminator_Tbox_seq",
+   "n_both": 23142,
+   "n_a_before_b": 23112,
+   "n_b_before_a": 30,
+   "n_tied": 0,
+   "frac_a_before_b": 0.998704
+  },
+  {
+   "A": "Specifier",
+   "B": "Terminator",
+   "n_both": 23078,
+   "n_a_before_b": 23077,
+   "n_b_before_a": 1,
+   "n_tied": 0,
+   "frac_a_before_b": 0.999957
+  },
+  {
+   "A": "Specifier",
+   "B": "Discriminator",
+   "n_both": 22853,
+   "n_a_before_b": 22853,
+   "n_b_before_a": 0,
+   "n_tied": 0,
+   "frac_a_before_b": 1.0
+  },
+  {
+   "A": "Stem_II",
+   "B": "Stem_III",
+   "n_both": 21767,
+   "n_a_before_b": 21767,
+   "n_b_before_a": 0,
+   "n_tied": 0,
+   "frac_a_before_b": 1.0
+  },
+  {
+   "A": "Stem_II",
+   "B": "Antiterminator_Tbox_seq",
+   "n_both": 21767,
+   "n_a_before_b": 21767,
+   "n_b_before_a": 0,
+   "n_tied": 0,
+   "frac_a_before_b": 1.0
+  },
+  {
+   "A": "Stem_II",
+   "B": "Terminator",
+   "n_both": 21733,
+   "n_a_before_b": 21733,
+   "n_b_before_a": 0,
+   "n_tied": 0,
+   "frac_a_before_b": 1.0
+  },
+  {
+   "A": "Stem_II",
+   "B": "Discriminator",
+   "n_both": 21721,
+   "n_a_before_b": 21721,
+   "n_b_before_a": 0,
+   "n_tied": 0,
+   "frac_a_before_b": 1.0
+  },
+  {
+   "A": "Stem_III",
+   "B": "Antiterminator_Tbox_seq",
+   "n_both": 23384,
+   "n_a_before_b": 23384,
+   "n_b_before_a": 0,
+   "n_tied": 0,
+   "frac_a_before_b": 1.0
+  },
+  {
+   "A": "Stem_III",
+   "B": "Terminator",
+   "n_both": 23349,
+   "n_a_before_b": 23349,
+   "n_b_before_a": 0,
+   "n_tied": 0,
+   "frac_a_before_b": 1.0
+  },
+  {
+   "A": "Stem_III",
+   "B": "Discriminator",
+   "n_both": 23127,
+   "n_a_before_b": 23122,
+   "n_b_before_a": 5,
+   "n_tied": 0,
+   "frac_a_before_b": 0.999784
+  },
+  {
+   "A": "Antiterminator_Tbox_seq",
+   "B": "Terminator",
+   "n_both": 23439,
+   "n_a_before_b": 23437,
+   "n_b_before_a": 2,
+   "n_tied": 0,
+   "frac_a_before_b": 0.999915
+  },
+  {
+   "A": "Antiterminator_Tbox_seq",
+   "B": "Discriminator",
+   "n_both": 23208,
+   "n_a_before_b": 3,
+   "n_b_before_a": 23204,
+   "n_tied": 1,
+   "frac_a_before_b": 0.000129
+  },
+  {
+   "A": "Terminator",
+   "B": "Discriminator",
+   "n_both": 23173,
+   "n_a_before_b": 1,
+   "n_b_before_a": 23172,
+   "n_tied": 0,
+   "frac_a_before_b": 4.3e-05
+  }
+ ],
+ "derived_order_5p_to_3p": [
+  "Stem_I",
+  "Specifier",
+  "Stem_II",
+  "Stem_III",
+  "Discriminator",
+  "Antiterminator_Tbox_seq",
+  "Terminator"
+ ]
+}

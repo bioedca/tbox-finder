@@ -68,6 +68,42 @@ def _sha256(path: Path) -> str:
     return h.hexdigest()
 
 
+def element_intervals(df, columns: dict[str, tuple[str, str]] | None = None) -> dict:
+    """``{element: (lo, hi, present)}`` — the shared reader for this corpus's extents.
+
+    One definition of *absent* for every measurement taken off these columns: a null or
+    **negative** coordinate on either end (the corpus uses NaN and ``-1`` sentinels for an
+    unannotated element). Present extents are normalised to ``(min, max)`` so a reversed
+    annotation is an interval rather than a negative-length one; absent extents carry
+    ``NaN`` on both ends, so arithmetic on them propagates instead of silently reading a
+    ``-1`` sentinel as position -1 — which, for an *ordering* measurement, would sort that
+    element to the 5′ end of every record it is missing from.
+
+    Extracted at P3-13 rather than duplicated: ``scripts/measure_element_order.py``
+    measures the 5′→3′ **rank** off the same columns of the same parquet, and two copies
+    of this rule are free to drift. A divergence would move an ADR-pinned table — the
+    ADR-0004 precedence prevalences here, the strand-resolver's canonical element order
+    there — with nothing failing. ``columns`` defaults to :data:`ELEMENT_COLUMNS`; a
+    caller keyed on ``tbox_finder.labels.ELEMENT_COORDS`` passes its own map.
+    """
+    import numpy as np  # noqa: PLC0415 (lazy — keep module bare-importable)
+
+    cols = ELEMENT_COLUMNS if columns is None else columns
+    out: dict[str, tuple] = {}
+    for name, (s_col, e_col) in cols.items():
+        if s_col not in df.columns or e_col not in df.columns:
+            raise KeyError(f"{name}: missing coordinate column {s_col!r}/{e_col!r}")
+        a = df[s_col].to_numpy(dtype=float)
+        b = df[e_col].to_numpy(dtype=float)
+        bad = np.isnan(a) | np.isnan(b) | (a < 0) | (b < 0)
+        lo = np.minimum(a, b)
+        hi = np.maximum(a, b)
+        lo[bad] = np.nan
+        hi[bad] = np.nan
+        out[name] = (lo, hi, ~bad)
+    return out
+
+
 def compute_overlaps(df) -> dict:
     """Pure core: per-element presence + all-pairs overlap/containment stats.
 
@@ -80,20 +116,9 @@ def compute_overlaps(df) -> dict:
 
     n_records = int(len(df))
 
-    intervals: dict[str, tuple] = {}
-    present: dict[str, object] = {}
-    for name, (s_col, e_col) in ELEMENT_COLUMNS.items():
-        if s_col not in df.columns or e_col not in df.columns:
-            raise KeyError(f"{name}: missing coordinate column {s_col!r}/{e_col!r}")
-        a = df[s_col].to_numpy(dtype=float)
-        b = df[e_col].to_numpy(dtype=float)
-        bad = np.isnan(a) | np.isnan(b) | (a < 0) | (b < 0)
-        lo = np.minimum(a, b)
-        hi = np.maximum(a, b)
-        lo[bad] = np.nan
-        hi[bad] = np.nan
-        intervals[name] = (lo, hi)
-        present[name] = ~bad
+    extents = element_intervals(df)
+    intervals = {name: (lo, hi) for name, (lo, hi, _) in extents.items()}
+    present = {name: mask for name, (_, _, mask) in extents.items()}
 
     presence = {
         name: {
