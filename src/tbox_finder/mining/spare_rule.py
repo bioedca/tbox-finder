@@ -30,6 +30,17 @@ implementation; a forked copy means fixing one and shipping the bug in the other
    Each disjunct carries ``passed`` / ``failed`` / ``unavailable``. The decision is
    Kleene strong three-valued OR with ``unknown`` resolved *toward sparing*:
 
+   At the **P3 re-mining round** the same three-valued treatment extends to the
+   fourth disjunct (:data:`STAGE2_DISJUNCT`), which P3-15 added. A round declares
+   Stage-2 live by supplying a ``stage2_threshold``; from that point a candidate
+   the Stage-2 producer never scored (``stage2_posterior is None``) reads
+   ``unavailable`` ⇒ **spared**, not ``failed`` ⇒ mined. Before P3-15 the numeric
+   field was two-valued — a ``None`` posterior contributed nothing to the OR, so a
+   candidate whose three model-independent disjuncts all failed was **mined with
+   Stage-2 never consulted**, the exact conflation this module exists to prevent,
+   one disjunct later. ADR-0005 A10 Pin 3 pins the correct direction verbatim
+   (*"unscored / None-MSA → unavailable → spared, never mined"*).
+
    ==========================  ==================================
    evidence                    verdict
    ==========================  ==================================
@@ -84,6 +95,19 @@ MODEL_INDEPENDENT_DISJUNCTS: tuple[str, ...] = (
     "any_helix_rscape",
     "downstream_aaRS_synteny",
 )
+
+#: The **fourth** disjunct, added at the P3 re-mining round once Stage-2 exists
+#: (ADR-0005 D14; ADR-0006 D11; PRD §9.1). Deliberately kept **out** of
+#: :data:`MODEL_INDEPENDENT_DISJUNCTS`: D14 calls the first three *"the three
+#: model-independent disjuncts"* and this one is the project's own model. The
+#: distinction is load-bearing for anti-circularity accounting, so the two sets
+#: are named separately rather than merged.
+STAGE2_DISJUNCT = "high_stage2_posterior"
+
+#: Every disjunct of the P3 spare rule. Mining a candidate requires **all** of
+#: these to have run and failed; sparing requires only one to pass (or any to be
+#: unevaluated).
+ALL_DISJUNCTS: tuple[str, ...] = MODEL_INDEPENDENT_DISJUNCTS + (STAGE2_DISJUNCT,)
 
 #: The subset of disjuncts that can actually spare a **Tier-2N** candidate.
 #:
@@ -161,6 +185,53 @@ class SpareRuleEvidence:
         )
 
 
+def stage2_status(
+    evidence: SpareRuleEvidence,
+    *,
+    stage2_threshold: float | None = None,
+) -> str | None:
+    """Three-valued status of the P3 :data:`STAGE2_DISJUNCT`, or ``None`` at P2.
+
+    ``None`` means *the round declared no Stage-2* — D14's phase-conditioning, and
+    the P2 loop's exact prior behaviour: with no ``stage2_threshold`` the fourth
+    disjunct is not in play and contributes to neither the OR nor the fail-closed
+    arm. Supplying a threshold **is** the declaration that Stage-2 is live, so from
+    that point the disjunct is accounted like the other three:
+
+    * ``stage2_posterior is None`` → :data:`STATUS_UNAVAILABLE` (the producer never
+      scored this candidate — a dropped shard cannot fail *open*);
+    * ``stage2_posterior >= stage2_threshold`` → :data:`STATUS_PASSED`;
+    * otherwise → :data:`STATUS_FAILED`.
+
+    The comparison itself is the pinned predicate's (``>=``, ADR-0005 D14); this
+    function adds only the unevaluated arm.
+    """
+    if stage2_threshold is None:
+        return None
+    posterior = evidence.stage2_posterior
+    if posterior is None:
+        return STATUS_UNAVAILABLE
+    return STATUS_PASSED if float(posterior) >= float(stage2_threshold) else STATUS_FAILED
+
+
+def unavailable_disjuncts(
+    evidence: SpareRuleEvidence,
+    *,
+    stage2_threshold: float | None = None,
+) -> tuple[str, ...]:
+    """Every disjunct that was **never evaluated** for this candidate, this round.
+
+    The single derivation both :func:`is_mining_excluded` and :func:`spare_reason`
+    read, so the decision and its published attribution cannot disagree — a
+    forked copy would let a report name a different cause than the one that
+    actually fired.
+    """
+    missing = list(evidence.unavailable())
+    if stage2_status(evidence, stage2_threshold=stage2_threshold) == STATUS_UNAVAILABLE:
+        missing.append(STAGE2_DISJUNCT)
+    return tuple(missing)
+
+
 def is_mining_excluded(
     evidence: SpareRuleEvidence,
     *,
@@ -187,8 +258,9 @@ def is_mining_excluded(
     if decided:
         return True
     # No disjunct passed. Only "every disjunct actually ran and failed" licenses
-    # mining; an unrun backend leaves the OR undetermined → fail closed.
-    return bool(evidence.unavailable())
+    # mining; an unrun backend leaves the OR undetermined → fail closed. At a P3
+    # round that accounting includes the Stage-2 disjunct.
+    return bool(unavailable_disjuncts(evidence, stage2_threshold=stage2_threshold))
 
 
 def spare_reason(
@@ -205,13 +277,9 @@ def spare_reason(
     passed = evidence.passed()
     if passed:
         return "passed:" + ",".join(passed)
-    if (
-        evidence.stage2_posterior is not None
-        and stage2_threshold is not None
-        and float(evidence.stage2_posterior) >= float(stage2_threshold)
-    ):
-        return "passed:stage2_posterior"
-    missing = evidence.unavailable()
+    if stage2_status(evidence, stage2_threshold=stage2_threshold) == STATUS_PASSED:
+        return f"passed:{STAGE2_DISJUNCT}"
+    missing = unavailable_disjuncts(evidence, stage2_threshold=stage2_threshold)
     if missing:
         return "unavailable_backend:" + ",".join(missing)
     return "minable"

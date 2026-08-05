@@ -196,6 +196,18 @@ def mine_round(
                     f"candidate {candidate.candidate_id!r} carries {status!r} evidence for "
                     f"{disjunct!r}, but that backend is unavailable this round"
                 )
+        # The same cross-check for the fourth disjunct (P3-15). A round declares
+        # Stage-2 live by supplying ``stage2_threshold``; a candidate carrying a
+        # posterior when it did not is evidence for a backend nobody declared, and
+        # it would be silently ignored — the shape where a filter runs clean while
+        # filtering nothing. Raise instead of dropping it on the floor.
+        if stage2_threshold is None and candidate.evidence.stage2_posterior is not None:
+            raise HardNegativeMiningError(
+                f"candidate {candidate.candidate_id!r} carries a stage2_posterior "
+                f"({candidate.evidence.stage2_posterior}) but this round declared no "
+                "stage2_threshold, so the Stage-2 disjunct is not in play (ADR-0005 D14 "
+                "phase-conditioning); pass a threshold or strip the posterior"
+            )
 
     outcomes: dict[str, list[str]] = {
         OUTCOME_MINED: [],
