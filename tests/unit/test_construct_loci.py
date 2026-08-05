@@ -43,6 +43,7 @@ import pytest
 
 from tbox_finder.infer import call as cl
 from tbox_finder.infer import locus as lc
+from tbox_finder.infer import reconcile as rc
 from tbox_finder.labels import CLASS_INDEX
 
 # ══════════════════════════════════════════════════════════════════════════════════════════
@@ -972,3 +973,79 @@ def test_each_reference_variant_disagrees_somewhere_on_the_grid(flip):
         != _spans(_shipped(*point))
     ]
     assert disagreements, flip
+
+
+# ══════════════════════════════════════════════════════════════════════════════════════════
+# 12. The real upstream operator, not a synthetic stand-in for it
+# ══════════════════════════════════════════════════════════════════════════════════════════
+
+_W, _S, _CONTIG = 1024, 512, 3072
+
+
+def _tiled(locus_span: tuple[int, int]) -> rc.Reconciled:
+    """Run the **real** `reconcile_windows` over a tail-anchored 1024/512 tiling of a contig.
+
+    Everything above feeds `construct_loci` log-posteriors this file built itself. That leaves
+    the actual upstream contract untested: `Reconciled` hands over `float64` log-probs, a
+    `bool` `zero_flanked` and an **`int32`** `coverage`, and `construct_loci` refuses a
+    non-integer coverage — a dtype the synthetic fixtures never produce. Verify the line that
+    ships, not a retyped equivalent of it.
+    """
+    starts = list(range(0, _CONTIG - _W + 1, _S))
+    if starts[-1] != _CONTIG - _W:
+        starts.append(_CONTIG - _W)
+    lo, hi = locus_span
+    logits = np.zeros((len(starts), _W, cl.NUM_CLASSES))
+    for w, st in enumerate(starts):
+        for p in range(_W):
+            logits[w, p, _STEM_I if lo <= st + p < hi else cl.BACKGROUND_INDEX] = 8.0
+    return rc.reconcile_windows(logits, np.asarray(starts), _CONTIG)
+
+
+def test_the_rule_consumes_the_real_reconciliation_operators_output():
+    """An interior locus survives the real operator end to end, span-exact."""
+    r = _tiled((1400, 1560))
+    assert (r.log_probs.dtype, r.zero_flanked.dtype, r.coverage.dtype) == (
+        np.dtype("float64"),
+        np.dtype("bool"),
+        np.dtype("int32"),
+    )
+    (locus,) = lc.construct_loci(
+        r.log_probs,
+        r.zero_flanked,
+        r.coverage,
+        **_kw(threshold=0.5, min_span=50, gap_merge=10, min_distinct_elements=1, flank=64),
+    )
+    assert (locus.candidate.start, locus.candidate.end) == (1400, 1560)
+    assert (locus.start, locus.end) == (1336, 1624)
+    assert locus.element_classes == (_STEM_I,)
+    assert (locus.flank_short_left, locus.flank_short_right) == (0, 0)
+    # Tail-anchored tiling never runs a window off a contig longer than one window, so the
+    # contig-end flag is identically False here — P3-11 measured exactly this, and it is why
+    # `zero_flanked` alone cannot mark the singly-covered terminus.
+    assert locus.n_zero_flanked_span == 0
+    assert locus.n_single_covered_span == 0
+
+
+def test_a_locus_in_the_singly_covered_terminus_is_kept_and_flagged():
+    """The P3-11 inheritance, rendered visible downstream instead of only measurable upstream.
+
+    At this tiling the first and last window of a contig sit at coverage 1 — 1,024 of 3,072
+    positions here — and that is the one region P3-11 measured as phase-dependent. The locus is
+    **kept** (recall-favouring), and `n_single_covered_span` is what tells a downstream consumer
+    its evidence came from one window rather than two. `zero_flanked` cannot: it is False
+    everywhere on this contig.
+    """
+    r = _tiled((100, 260))
+    assert int(np.count_nonzero(r.coverage == 1)) == 1024
+    assert not r.zero_flanked.any()
+    (locus,) = lc.construct_loci(
+        r.log_probs,
+        r.zero_flanked,
+        r.coverage,
+        **_kw(threshold=0.5, min_span=50, gap_merge=10, min_distinct_elements=1, flank=64),
+    )
+    assert (locus.candidate.start, locus.candidate.end) == (100, 260)
+    assert (locus.start, locus.end) == (36, 324)
+    assert locus.n_single_covered_span == 288  # the whole flanked span is singly covered
+    assert locus.n_zero_flanked_span == 0
