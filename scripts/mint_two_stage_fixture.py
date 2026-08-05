@@ -38,7 +38,12 @@ Run (LOCAL, ``tbox-finder-data``)::
     PYTHONPATH=src python scripts/mint_two_stage_fixture.py \\
         --context data/interim/flank_context/context_v0.parquet \\
         --splits data/processed/splits/split_assignments.parquet \\
-        --out tests/fixtures/two_stage/contigs.json
+        --out tests/fixtures/two_stage/contigs.json \\
+        [--data-root /path/to/the/checkout/holding/data]
+
+``--context`` / ``--splits`` are **repo-relative by contract** — they are recorded verbatim in
+the committed fixture, so an absolute one would leak this machine's layout — and ``--data-root``
+says which checkout to read them from (a worktree has no ``data/`` of its own).
 """
 
 from __future__ import annotations
@@ -61,6 +66,12 @@ CONTIG_NT = 1536
 #: reversed null. Kept small because each contig costs 2 × 1024 × 8 committed logits.
 N_LOCUS_RECORDS = 8
 N_NULL_RECORDS = 4
+
+#: How many characters of a record_id become a contig_id. Short ids keep the committed table
+#: readable; :func:`build` refuses a collision rather than letting two contigs share a key,
+#: which would silently overwrite one of them in the Stage-1 archive and in every lookup keyed
+#: on it (CodeRabbit r1).
+ID_PREFIX_NT = 12
 
 #: Phase jitter applied to the crop, in nt, cycled over the selected records. Spreads the locus
 #: across the 512-nt window period instead of pinning every fixture locus to one offset.
@@ -132,7 +143,7 @@ def build(selected: pd.DataFrame) -> list[dict[str, object]]:
         if index < N_LOCUS_RECORDS:
             contigs.append(
                 {
-                    "contig_id": f"{record_id[:12]}_fwd",
+                    "contig_id": f"{record_id[:ID_PREFIX_NT]}_fwd",
                     "sequence": sequence,
                     "truth_strand": "+",
                     "truth_start": start,
@@ -145,7 +156,7 @@ def build(selected: pd.DataFrame) -> list[dict[str, object]]:
                 {
                     # The reverse complement of a real slab is a real slab read the other way:
                     # the locus is unchanged, its coordinates mirror, and its strand flips.
-                    "contig_id": f"{record_id[:12]}_rc",
+                    "contig_id": f"{record_id[:ID_PREFIX_NT]}_rc",
                     "sequence": reverse_complement(sequence),
                     "truth_strand": "-",
                     "truth_start": CONTIG_NT - end,
@@ -160,7 +171,7 @@ def build(selected: pd.DataFrame) -> list[dict[str, object]]:
                     # PRD §12's composition-exact null. Reverse, NOT reverse-complement: an RC
                     # is useless against an RC-equivariant scanner, which would score it as the
                     # positive it is.
-                    "contig_id": f"{record_id[:12]}_rev",
+                    "contig_id": f"{record_id[:ID_PREFIX_NT]}_rev",
                     "sequence": sequence[::-1],
                     "truth_strand": None,
                     "truth_start": None,
@@ -169,25 +180,60 @@ def build(selected: pd.DataFrame) -> list[dict[str, object]]:
                     "truth_transform": "reverse",
                 }
             )
+    seen: set[str] = set()
+    for contig in contigs:
+        contig_id = contig["contig_id"]
+        if contig_id in seen:
+            raise SystemExit(
+                f"contig_id {contig_id!r} is not unique — two record_ids share their first "
+                f"{ID_PREFIX_NT} characters. Every downstream lookup is keyed on it, so a "
+                "collision would silently drop one contig; widen ID_PREFIX_NT"
+            )
+        seen.add(contig_id)
     return contigs
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--context", required=True)
-    parser.add_argument("--splits", required=True)
+    parser.add_argument("--context", required=True, help="repo-relative path")
+    parser.add_argument("--splits", required=True, help="repo-relative path")
     parser.add_argument("--out", required=True)
+    parser.add_argument(
+        "--data-root",
+        default=None,
+        help=(
+            "checkout holding the DVC-tracked inputs; defaults to this script's own repo root. "
+            "A worktree has no data/ of its own, so minting from one points this at the main "
+            "checkout while the recorded provenance stays repo-relative"
+        ),
+    )
     args = parser.parse_args()
 
-    selected = select_records(pd.read_parquet(args.context), pd.read_parquet(args.splits))
+    # --context/--splits are repo-relative BY CONTRACT, so what lands in the committed fixture's
+    # provenance is portable by construction rather than by a rewrite that could silently
+    # mis-resolve. --data-root says which checkout to read them from.
+    for name in ("context", "splits"):
+        if Path(getattr(args, name)).is_absolute():
+            raise SystemExit(
+                f"--{name} must be repo-relative (got {getattr(args, name)!r}); it is recorded "
+                "verbatim in a committed fixture and an absolute path leaks this machine's "
+                "layout. Use --data-root to point at the checkout that holds the data."
+            )
+    root = Path(args.data_root) if args.data_root else Path(__file__).resolve().parents[1]
+    selected = select_records(
+        pd.read_parquet(root / args.context), pd.read_parquet(root / args.splits)
+    )
     contigs = build(selected)
     payload = {
         "schema_version": "1.0",
         "step": "P3-14",
         "generated_by": "scripts/mint_two_stage_fixture.py",
         "source": {
-            "context": str(args.context),
-            "splits": str(args.splits),
+            # Recorded exactly as given, and given repo-relative by contract (see --data-root):
+            # a committed fixture that names this machine's home directory leaks a username and
+            # resolves for nobody else (CodeRabbit r1).
+            "context": args.context,
+            "splits": args.splits,
             "rung": "fold_random == 'test' and not calib",
             "contig_nt": CONTIG_NT,
             "n_locus_records": N_LOCUS_RECORDS,

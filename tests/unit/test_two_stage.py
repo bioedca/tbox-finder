@@ -668,10 +668,15 @@ def test_read_temperature_refuses_a_non_positive_value(tmp_path: Path) -> None:
 
 
 def test_the_committed_gate2_report_still_carries_the_temperature() -> None:
-    """The derivation has a live target; a moved key would otherwise only fail at run time."""
+    """The derivation has a live target; a moved key would otherwise only fail at run time.
+
+    ``reports/gate2_p3_ece.json`` is **git-tracked**, so its absence is a repository defect and
+    this asserts rather than skips — the two CLI tests below read the same artifact unguarded,
+    and one requirement stated once beats a skip in one place and a hard read in two
+    (CodeRabbit r1).
+    """
     report = Path(__file__).resolve().parents[2] / "reports" / "gate2_p3_ece.json"
-    if not report.is_file():  # pragma: no cover - the artifact is git-tracked
-        pytest.skip("reports/gate2_p3_ece.json absent")
+    assert report.is_file(), "reports/gate2_p3_ece.json is git-tracked and must be present"
     assert T.read_temperature(report) > 0.0
 
 
@@ -776,11 +781,11 @@ def test_the_run_leg_records_repo_relative_paths(tmp_path: Path) -> None:
 def test_a_path_outside_the_repository_is_refused(tmp_path: Path) -> None:
     """Positive control beside it: a repo path resolves, an outside one raises."""
     root = Path(__file__).resolve().parents[2]
-    assert T._repo_relative(root / "reports" / "gate2_p3_ece.json") == "reports/gate2_p3_ece.json"
+    assert T.repo_relative(root / "reports" / "gate2_p3_ece.json") == "reports/gate2_p3_ece.json"
     outside = tmp_path / "elsewhere.json"
     outside.write_text("{}")
     with pytest.raises(T.TwoStageError, match="outside the repository"):
-        T._repo_relative(outside)
+        T.repo_relative(outside)
 
 
 def test_the_run_leg_fails_on_a_digest_mismatch(tmp_path: Path) -> None:
@@ -891,3 +896,139 @@ def test_the_wrong_strand_counter_does_not_fire_when_both_strands_confirm() -> N
     assert diagnostic["n_confirmed_on_plus"] == 1
     assert diagnostic["n_confirmed_on_minus"] == 1
     assert diagnostic["truth"]["n_confirmed_on_wrong_strand_only"] == 0
+
+
+# ══════════════════════════════════════════════════════════════════════════════════════
+# Review round 1 — the failure paths that raised untyped errors
+# ══════════════════════════════════════════════════════════════════════════════════════
+def test_the_payloads_leg_names_a_contig_with_no_stage1_logits() -> None:
+    """It raised a bare ``KeyError`` where ``run_two_stage`` already raised ``TwoStageError``."""
+    windows, starts, sequence = _plant(_canonical_spans())
+    args = T.build_parser().parse_args(
+        [
+            "payloads",
+            "--contigs",
+            "x",
+            "--stage1",
+            "y",
+            "--out",
+            "z",
+            "--threshold-scope",
+            "global",
+            "--threshold",
+            "0.9",
+            "--min-span",
+            "50",
+            "--gap-merge",
+            "10",
+            "--min-distinct-elements",
+            "2",
+            "--flank",
+            "20",
+            "--min-order-margin",
+            "1",
+        ]
+    )
+    assert args.command == "payloads"
+    # The guard itself, driven directly — the leg's own I/O is exercised by the golden.
+    with pytest.raises(T.TwoStageError, match="no Stage-1 window logits"):
+        T.run_two_stage([_contig("absent", sequence)], {}, {}, **{**_RULE, **_CALIBRATION})
+
+
+def test_the_cli_refuses_an_unset_rule_knob() -> None:
+    """``argparse`` marks every rule knob required, so omission is an error, not a default."""
+    for omitted in ("--threshold", "--min-span", "--flank", "--min-order-margin"):
+        argv = [
+            "payloads",
+            "--contigs",
+            "x",
+            "--stage1",
+            "y",
+            "--out",
+            "z",
+            "--threshold-scope",
+            "global",
+            "--threshold",
+            "0.9",
+            "--min-span",
+            "50",
+            "--gap-merge",
+            "10",
+            "--min-distinct-elements",
+            "2",
+            "--flank",
+            "20",
+            "--min-order-margin",
+            "1",
+        ]
+        index = argv.index(omitted)
+        with pytest.raises(SystemExit):
+            T.build_parser().parse_args(argv[:index] + argv[index + 2 :])
+    # Positive control: the complete argv parses.
+    assert (
+        T.build_parser()
+        .parse_args(
+            [
+                "payloads",
+                "--contigs",
+                "x",
+                "--stage1",
+                "y",
+                "--out",
+                "z",
+                "--threshold-scope",
+                "global",
+                "--threshold",
+                "0.9",
+                "--min-span",
+                "50",
+                "--gap-merge",
+                "10",
+                "--min-distinct-elements",
+                "2",
+                "--flank",
+                "20",
+                "--min-order-margin",
+                "1",
+            ]
+        )
+        .min_span
+        == 50
+    )
+
+
+def test_the_run_leg_requires_exactly_one_temperature_source() -> None:
+    base = [
+        "run",
+        "--contigs",
+        "a",
+        "--stage1",
+        "b",
+        "--stage2",
+        "c",
+        "--report",
+        "d",
+        "--table",
+        "e",
+        "--threshold-scope",
+        "global",
+        "--threshold",
+        "0.9",
+        "--min-span",
+        "50",
+        "--gap-merge",
+        "10",
+        "--min-distinct-elements",
+        "2",
+        "--flank",
+        "20",
+        "--min-order-margin",
+        "1",
+        "--stage2-operating-point",
+        "0.5",
+    ]
+    with pytest.raises(SystemExit):  # neither
+        T.build_parser().parse_args(base)
+    with pytest.raises(SystemExit):  # both
+        T.build_parser().parse_args(base + ["--temperature", "1.0", "--temperature-from", "g"])
+    assert T.build_parser().parse_args(base + ["--temperature", "1.25"]).temperature == 1.25

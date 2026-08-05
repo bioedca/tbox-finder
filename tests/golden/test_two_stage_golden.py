@@ -14,11 +14,13 @@ No number in this fixture was invented.
 CI installs no torch, so the regression **replays** those artifacts through the torch-free part
 of the harness — reconcile → construct_loci → resolve_strands → handoff → calibrate → table —
 and diffs the whole-table digest. That is not a weaker test than re-running the models; it is a
-*different and stricter* one. Re-running Stage-2 could not produce a stable digest at all:
-``determinism.max_abs_duplicate_logit_delta`` in the committed report measures **0.0292** of
-logit spread between two scorings of byte-identical RNA (bf16 + flash-attention + length-sorted
-batching), so a golden that re-scored would be flaky by construction. Replaying pins the
-harness's arithmetic exactly, which is the thing this step ships.
+*different and stricter* one, and the reason is **measured, not assumed**: re-running the
+``stage1`` leg on the identical contigs moves **91 of 327,680** logits (up to 3.91e-3), so a
+golden that re-scanned would be flaky by construction. Stage-2 is the narrower case — its
+artifact regenerates byte-identically for a fixed work list, but the same RNA scored at a
+different position in ``score_rows``' length-sorted batching differs by up to **0.0292**
+(``determinism.max_abs_duplicate_logit_delta``). Replaying pins the harness's arithmetic
+exactly, which is the thing this step ships.
 
 Anti-tautology
 --------------
@@ -51,7 +53,7 @@ _TABLE = _ROOT / "reports" / "p3" / "two_stage_candidates.json"
 #: Byte-pins on the fixture inputs. Without these, an edit to a fixture could be laundered by
 #: re-deriving ``expected.sha256`` from the edited input and the golden would go green on a
 #: changed measurement. Same guard as ``test_reconcile_golden.py``'s ``geometry.csv`` pin.
-_CONTIGS_SHA256 = "e28f6a8f976eac4b9d0e9a377b41bbf97a5c4fdc4cc24710ee50fc0693f36e97"
+_CONTIGS_SHA256 = "0f30f155e06b38ff6b5afc13730cf286dfadaf8908fa6531de2d5f4fb4cb9c4a"
 _STAGE1_SHA256 = "f6f8f758c5a8e879a10c2c33fb899a0b0553a7ee6689f2b5032a4b4991a038c1"
 _STAGE2_SHA256 = "1ea8deaedde77cebacbcc5e30419ef5b343151c3fc6d4ecfecf030581de58389"
 
@@ -77,9 +79,15 @@ def _replay(**overrides):
     """Replay the committed fixture through the harness, with optional surgical overrides."""
     from tbox_finder.integration import two_stage as T
 
-    contigs = overrides.pop("contigs", None) or T.read_contigs(_CONTIGS)
-    stage1 = overrides.pop("stage1", None) or T.read_stage1(_STAGE1)
-    stage2 = overrides.pop("stage2", None) or T.read_stage2(_STAGE2)
+    # Explicit `is None`, not `or`: an empty override is a legitimate thing for a future test
+    # to pass, and under `or` it would fall through to the full committed fixture and assert
+    # against the wrong input while passing (CodeRabbit r1).
+    contigs = overrides.pop("contigs", None)
+    stage1 = overrides.pop("stage1", None)
+    stage2 = overrides.pop("stage2", None)
+    contigs = T.read_contigs(_CONTIGS) if contigs is None else contigs
+    stage1 = T.read_stage1(_STAGE1) if stage1 is None else stage1
+    stage2 = T.read_stage2(_STAGE2) if stage2 is None else stage2
     kwargs = {
         **_RULE,
         "temperature": _TEMPERATURE,
@@ -344,13 +352,16 @@ def test_the_null_contigs_yield_no_locus() -> None:
     assert all(len(run.loci) == 0 for run in nulls)
 
 
-def test_scoring_the_identical_rna_twice_is_not_bit_identical() -> None:
-    """The measured reason this golden replays instead of re-scoring.
+def test_the_same_rna_scored_at_two_batch_positions_does_not_agree() -> None:
+    """Stage-2's measured *batch-position* sensitivity — narrower than run-to-run drift.
 
     A contig and its reverse complement hand Stage-2 byte-identical RNA, so the same sequence is
-    scored from two batch positions. bf16 + flash-attention + length-sorted batching make that a
-    ~0.03-logit difference rather than none — which is precisely why re-running the model inside
-    a hash-diffing regression would be flaky, and why the *committed logits* are the fixture.
+    scored twice at different places in ``score_rows``' length-sorted batching. bf16 +
+    flash-attention make that a ~0.03-logit difference rather than none. Note what this is
+    **not**: re-running the whole leg over the same work list reproduces its artifact
+    byte-identically (measured), so this bounds re-*batched* scoring, not re-running. Stage-1 is
+    the leg that is genuinely run-to-run unstable, and either one alone justifies committing the
+    model output rather than re-deriving it inside a hash-diffing regression.
     """
     pytest.importorskip("numpy")
 

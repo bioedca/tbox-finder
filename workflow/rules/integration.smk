@@ -38,11 +38,18 @@ rule two_stage_eval:
     strand-robustness diagnostic by re-scoring every locus on the strand the resolver did
     *not* choose.
 
-    Every rule value is passed explicitly and none is defaulted here or in the module: ADR-0005
-    D3 freezes the locus knobs and the Stage-2 operating point at the §13.1 phase gate (P5-01)
-    and D15 freezes ``min_order_margin`` there, so a Snakemake ``config.get(key, default)``
-    would install a frozen value nobody signed off. The temperature is **derived** from the
-    GATE-2 report rather than restated, so a re-fit moves both together.
+    On the rule values, precisely — because an earlier draft of this docstring claimed a
+    discipline the ``params`` block does not apply, and CodeRabbit r1 was right to catch it.
+    The **module** defaults nothing: every knob on ``run_two_stage`` is keyword-only with no
+    default and the CLI marks each ``required=True``, so no caller can take a value by omission.
+    This rule then supplies, via overridable ``config.get`` defaults, **the values the committed
+    fixture was minted under** — because its job is to reproduce that artifact, and requiring a
+    config file to do so would make the regression unrunnable on a fresh clone. That is safe
+    only because ``--expect-digest`` is passed: a changed value that changes the outcome fails
+    the rule rather than quietly writing a different table. None of these is an ADR freeze;
+    ADR-0005 D3/D15 freeze the production values at the §13.1 phase gate (P5-01) and the written
+    report carries ``rule.pinned: false``. The temperature is **derived** from the GATE-2 report
+    rather than restated, so a re-fit moves both together.
 
     ``--expect-digest`` makes the rule fail on a drift the golden test would also catch, so a
     pipeline run and CI cannot disagree about whether the harness still reproduces its fixture.

@@ -184,7 +184,7 @@
   "generated_by": "scripts/mint_two_stage_fixture.py",
   "schema_version": "1.0",
   "source": {
-    "context": "/home/bioedca/tbox-phylogeny/tbox-finder/data/interim/flank_context/context_v0.parquet",
+    "context": "data/interim/flank_context/context_v0.parquet",
     "contig_nt": 1536,
     "n_locus_records": 8,
     "n_null_records": 4,
@@ -217,7 +217,7 @@
       "0f4c38b3b1ea548ea60f3285d5de87b6fbbdf1f9e4ff838dfd21872f393839bd"
     ],
     "rung": "fold_random == 'test' and not calib",
-    "splits": "/home/bioedca/tbox-phylogeny/tbox-finder/data/processed/splits/split_assignments.parquet"
+    "splits": "data/processed/splits/split_assignments.parquet"
   },
   "step": "P3-14"
 }

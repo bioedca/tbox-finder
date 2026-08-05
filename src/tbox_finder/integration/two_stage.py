@@ -193,9 +193,35 @@ CANDIDATE_COLUMNS: tuple[str, ...] = (
 #: inputs, and the last ulp of those is a property of the host's libm, not of the harness. Two
 #: machines must agree on the committed hash or the golden is a machine-identity test. The cost
 #: is a stated tolerance — a change below 1e-6 does not move the digest — and
-#: ``test_digest_moves_on_a_one_ulp_above_quantum_shift`` pins that the tolerance is not wider
-#: than advertised.
+#: ``test_digest_moves_on_a_shift_just_above_the_stated_tolerance`` pins that the tolerance is
+#: not wider than advertised.
 DIGEST_QUANTUM = 1_000_000
+
+#: Log-probability tolerance the ``stage1`` mint leg holds its stored logits to, against what
+#: ``scan_encoded_windows`` returns for the same contig. It is **not** zero and cannot be: the
+#: fixture stores float16 to keep the committed archive at ~510 kB, so the reconciled posterior
+#: differs in the last few digits by construction. **Measured over all 20 fixture contigs: max
+#: |Δ log-prob| = 4.11e-3, with 0 per-position prediction mismatches** — the posterior moves, the
+#: *call* does not. This bound sits ~12× above that and far below anything a locus threshold can
+#: see, so it catches a real divergence (a wrong checkpoint, a wrong tiling) while tolerating the
+#: quantisation. An earlier docstring claimed the check was "bit-identical"; it was not, and
+#: CodeRabbit r1 was right to say so.
+#:
+#: **Stage-1 is not run-to-run bit-identical, and it was measured.** Re-running the ``stage1``
+#: leg on the identical contigs changes **91 of 327,680** stored logits by up to 3.91e-3
+#: (0.028 %) — while moving **zero** per-position predictions, so the *call* is stable and the
+#: posterior is not. That alone is why the model output is committed and replayed rather than
+#: re-run: a golden that re-ran Stage-1 would be flaky by construction.
+#:
+#: **Stage-2 is a different and narrower story, and the distinction matters.** Re-running the
+#: ``stage2`` leg over the same manifest reproduces its artifact **byte-identically** (measured,
+#: twice). What is *not* invariant is batch position: the same RNA reached
+#: ``eval.score_rows`` from two contigs, landed at two places in its length-sorted batching, and
+#: differed by up to 0.0292 of logit — which is what
+#: ``determinism.max_abs_duplicate_logit_delta`` records. So Stage-2 is reproducible for a fixed
+#: work list and sensitive to how that work list is batched, and a re-batched scoring of the
+#: same sequences is not guaranteed to agree with this fixture.
+MAX_MINT_LOG_PROB_DELTA = 0.05
 
 #: Contig-record keys. ``truth_*`` are optional and present only because the committed fixture
 #: was minted from records of known orientation; production scanning has none, and every read
@@ -891,6 +917,15 @@ def build_report(
             "max_abs_posterior_delta and n_verdict_disagreements are the diagnostic's liveness "
             "controls: a strand-blind Stage-2 would report a perfect 1.0 invariance while "
             "measuring nothing, and both of these read zero in that case.",
+            "Stage-1 is not run-to-run bit-identical: re-running its leg on the identical "
+            "contigs moves 91 of 327,680 stored logits by up to 3.91e-3, changing no "
+            "per-position prediction. That is why the model output is committed and replayed "
+            "rather than re-run.",
+            "Stage-2 IS run-to-run reproducible for a fixed work list (its artifact regenerates "
+            "byte-identically), but it is batch-position-sensitive: "
+            "determinism.max_abs_duplicate_logit_delta records 0.0292 between two scorings of "
+            "byte-identical RNA that landed at different places in the length-sorted batching. "
+            "A re-batched scoring of the same sequences need not agree with this fixture.",
             "The truth block is available only because the fixture contigs were minted from "
             "corpus records of known orientation; no truth reaches any harness decision.",
             "ambiguity_path_exercised says whether D15's both-strand carry-through emitted "
@@ -1215,9 +1250,12 @@ def _cmd_stage1(args: argparse.Namespace) -> int:
     :func:`tbox_finder.infer.scan.scan_encoded_windows` returns a *reconciled* posterior and the
     fixture needs the logits that go **into** the operator — storing its output instead would
     put the pinned operator outside the regression it exists to protect. To keep that from
-    becoming an unchecked second copy, the leg reconciles its own logits and asserts the result
-    is bit-identical to what ``scan_encoded_windows`` returns for the same contig; a divergence
-    raises here rather than being minted into a fixture.
+    becoming an unchecked second copy, the leg reconciles its own stored logits and compares the
+    result to what ``scan_encoded_windows`` returns for the same contig, on **two** counts: the
+    per-position prediction must match **exactly**, and the posterior must agree to within
+    :data:`MAX_MINT_LOG_PROB_DELTA`. Not "bit-identical" — the stored logits are float16, so the
+    posterior cannot be, and saying so would have been an unmeasured claim in the one place that
+    exists to check one.
     """
     import torch  # lazy: this leg only
 
@@ -1227,6 +1265,7 @@ def _cmd_stage1(args: argparse.Namespace) -> int:
     device = args.device or ("cuda" if torch.cuda.is_available() else "cpu")
     model = scan.load_stage1_checkpoint(args.checkpoint, device=device)
     arrays: dict[str, np.ndarray] = {}
+    worst_delta = 0.0
     for contig in contigs:
         sequence = contig["sequence"]
         window_ids, starts = scan.scan_window_ids(sequence)
@@ -1252,11 +1291,24 @@ def _cmd_stage1(args: argparse.Namespace) -> int:
                 "reproduce scan_encoded_windows' prediction — the stored fixture would not be "
                 "the shipped scanner's output"
             )
+        delta = float(np.max(np.abs(mine.log_probs - reference.log_probs)))
+        worst_delta = max(worst_delta, delta)
+        if delta > args.max_log_prob_delta:
+            raise TwoStageError(
+                f"contig {contig['contig_id']!r}: the stored logits reconcile to a posterior "
+                f"{delta:.3e} from scan_encoded_windows', above the "
+                f"{args.max_log_prob_delta} tolerance; that is more than {args.dtype} "
+                "quantisation and the fixture would not be the scanner's output"
+            )
         arrays[f"{contig['contig_id']}/logits"] = logits
         arrays[f"{contig['contig_id']}/starts"] = np.asarray(starts, dtype=np.int32)
     Path(args.out).parent.mkdir(parents=True, exist_ok=True)
     np.savez_compressed(args.out, **arrays)
-    print(f"wrote {args.out}: {len(contigs)} contigs, dtype={args.dtype}")
+    print(
+        f"wrote {args.out}: {len(contigs)} contigs, dtype={args.dtype}, "
+        f"max |delta log-prob| vs scan_encoded_windows = {worst_delta:.3e} "
+        f"(tolerance {args.max_log_prob_delta}), prediction mismatches = 0"
+    )
     return 0
 
 
@@ -1266,7 +1318,10 @@ def _cmd_payloads(args: argparse.Namespace) -> int:
     stage1 = read_stage1(args.stage1)
     runs = []
     for contig in contigs:
-        reconciled = reconcile_contig(stage1[contig["contig_id"]], len(contig["sequence"]))
+        contig_id = contig["contig_id"]
+        if contig_id not in stage1:
+            raise TwoStageError(f"no Stage-1 window logits for contig {contig_id!r}")
+        reconciled = reconcile_contig(stage1[contig_id], len(contig["sequence"]))
         runs.append(
             run_contig(
                 contig,
@@ -1308,13 +1363,26 @@ def _cmd_stage2(args: argparse.Namespace) -> int:
         manifest = json.load(handle)["payloads"]
     arms = stage2_eval.discover_arms(checkpoint_root=args.checkpoint_root, sweep_dir=args.sweep_dir)
     production = stage2_eval.production_arm_config()
-    arm_name = args.arm or next(
+    matching = [
         name
         for name, spec in sorted(arms.items())
         if spec["aux_weight"] == production["aux_weight"] and spec["lr"] == production["lr"]
-    )
+    ]
+    arm_name = args.arm or (matching[0] if matching else None)
+    if arm_name is None or arm_name not in arms:
+        raise TwoStageError(
+            f"no discovered arm matches the production config {production!r}; "
+            f"found {sorted(arms)}"
+            if args.arm is None
+            else f"--arm {args.arm!r} is not among the discovered arms {sorted(arms)}"
+        )
     spec = arms[arm_name]
     trained_under = spec.get("attn_implementation")
+    if trained_under is None:
+        raise TwoStageError(
+            f"arm {arm_name} records no attn_implementation; the committed logits must state the "
+            "backend the checkpoint was trained under rather than leave it to be assumed"
+        )
     device = args.device or ("cuda" if torch.cuda.is_available() else "cpu")
     if trained_under == "flash_attention_2" and not str(device).startswith("cuda"):
         raise TwoStageError(
@@ -1337,7 +1405,9 @@ def _cmd_stage2(args: argparse.Namespace) -> int:
             "adapter_sha256": record.get("adapter_sha256"),
             "n_lora_b_nonzero": record.get("n_lora_b_nonzero"),
             "attn_implementation": trained_under,
-            "attn_implementation_matches_training": True,
+            "attn_implementation_matches_training": (
+                record.get("attn_implementation") == trained_under
+            ),
             "device": str(device),
             "env_lock": "envs/ml-rna.conda-lock.yml",
             "n_payloads": len(manifest),
@@ -1349,13 +1419,15 @@ def _cmd_stage2(args: argparse.Namespace) -> int:
     return 0
 
 
-def _repo_relative(path: str | Path) -> str:
+def repo_relative(path: str | Path) -> str:
     """A committed artifact records repo-relative paths, never a machine's absolute ones.
 
     An absolute path in a public report leaks the author's username and directory layout and
-    means nothing to anyone else — the exact finding CodeRabbit raised on PR #103. Refused
-    rather than trimmed when the path is outside the repo: silently rewriting it would put a
-    path in the report that does not resolve from the repo root.
+    means nothing to anyone else — the exact finding CodeRabbit raised on PR #103, and again on
+    #108 for ``scripts/mint_two_stage_fixture.py``, which is why this is public and shared
+    rather than copied there. Refused rather than trimmed when the path is outside the repo:
+    silently rewriting it would put a path in the report that does not resolve from the repo
+    root.
     """
     resolved = Path(path).resolve()
     root = Path(__file__).resolve().parents[3]
@@ -1393,11 +1465,11 @@ def _cmd_run(args: argparse.Namespace) -> int:
     )
     report = dict(result.report)
     report["scope"] = dict(report["scope"])
-    report["scope"]["stage1_source"] = _repo_relative(args.stage1)
-    report["scope"]["stage2_source"] = _repo_relative(args.stage2)
+    report["scope"]["stage1_source"] = repo_relative(args.stage1)
+    report["scope"]["stage2_source"] = repo_relative(args.stage2)
     report["rule"] = dict(report["rule"])
     report["rule"]["temperature_source"] = (
-        _repo_relative(args.temperature_from) if args.temperature_from is not None else "cli"
+        repo_relative(args.temperature_from) if args.temperature_from is not None else "cli"
     )
     problems = strand_robustness_problems(report)
     if problems:
@@ -1434,6 +1506,7 @@ def build_parser() -> argparse.ArgumentParser:
     one.add_argument("--device", default=None)
     one.add_argument("--batch-size", type=int, default=8)
     one.add_argument("--dtype", default="float16", choices=["float16", "float32"])
+    one.add_argument("--max-log-prob-delta", type=float, default=MAX_MINT_LOG_PROB_DELTA)
     one.set_defaults(func=_cmd_stage1)
 
     two = sub.add_parser("payloads", help="torch-free: contigs + logits -> Stage-2 work list")
@@ -1492,6 +1565,7 @@ __all__ = [
     "DIGEST_QUANTUM",
     "ENV_LOCK",
     "GENERATED_BY",
+    "MAX_MINT_LOG_PROB_DELTA",
     "PRD",
     "RULE_PARAMETERS",
     "SCHEMA_VERSION",
@@ -1515,6 +1589,7 @@ __all__ = [
     "read_stage1",
     "read_stage2",
     "read_temperature",
+    "repo_relative",
     "reconcile_contig",
     "run_contig",
     "run_two_stage",

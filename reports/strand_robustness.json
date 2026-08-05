@@ -59,12 +59,14 @@
     "tier_invariance is null \u2014 \u00a713.3 tiers are a P6 object; the reported number is two-stage-confirmation invariance, the measurable analogue.",
     "Every rule value is provisional (pinned=false); ADR-0005 D3/D15 freeze them at the \u00a713.1 phase gate (P5-01).",
     "max_abs_posterior_delta and n_verdict_disagreements are the diagnostic's liveness controls: a strand-blind Stage-2 would report a perfect 1.0 invariance while measuring nothing, and both of these read zero in that case.",
+    "Stage-1 is not run-to-run bit-identical: re-running its leg on the identical contigs moves 91 of 327,680 stored logits by up to 3.91e-3, changing no per-position prediction. That is why the model output is committed and replayed rather than re-run.",
+    "Stage-2 IS run-to-run reproducible for a fixed work list (its artifact regenerates byte-identically), but it is batch-position-sensitive: determinism.max_abs_duplicate_logit_delta records 0.0292 between two scorings of byte-identical RNA that landed at different places in the length-sorted batching. A re-batched scoring of the same sequences need not agree with this fixture.",
     "The truth block is available only because the fixture contigs were minted from corpus records of known orientation; no truth reaches any harness decision.",
     "ambiguity_path_exercised says whether D15's both-strand carry-through emitted anything on this input. When it is false, low_order_confidence_fraction=0.0 is a property of the input and not evidence the branch works."
   ],
   "env_lock": "envs/data.conda-lock.yml",
   "gated": false,
-  "generated_at_utc": "2026-08-05T18:04:17+00:00",
+  "generated_at_utc": "2026-08-05T18:41:30+00:00",
   "generated_by": "src/tbox_finder/integration/two_stage.py",
   "handoff": {
     "n_contigs_with_outside_alphabet": 0,
