@@ -3014,3 +3014,50 @@ SLURM submit-ack), the P3 inheritance of the ADR-0005 A10 Phase-2 deferral. Cros
 D14/A9/A10, ADR-0006 A2.
 
 **Commit.** one atomic commit on `p3-15-remine`, parent `96fcbc7`.
+
+## Step P3-15 (review r1) — 2026-08-05: two real findings, one refuted, and a sabotage that had to be re-aimed
+
+**Review r1 (CodeRabbit CLI, 3 findings: 2 major + 1 minor).** The `CodeRabbit` PR check read
+`pass` on a *"Review rate limited"* notice — §5.1's trap for the **eighth** step running — so the
+CLI carried the gate; no Greptile credit spent.
+
+**Finding 1 (major, real, and worse than reported) — the reverse Stage-2 cross-check was missing,
+and it was the fail-OPEN direction.** The first draft guarded only "a posterior with no declared
+threshold". The opposite contradiction — a round that *declares* `stage2_threshold` while the
+Stage-2 backend is unavailable — left a low posterior resolving to `failed`, so the candidate
+counted as *"every disjunct ran and failed"* and was **mined on evidence for a backend the round
+said was absent**. Reproduced by execution before fixing: `n_mined = 1`, and the published reason
+read *"no disjunct passed and every disjunct was evaluated"* — the attribution asserting the very
+thing that was false. The per-disjunct loop iterates `MODEL_INDEPENDENT_DISJUNCTS`, which the
+Stage-2 key is deliberately not in, so nothing else covered it. Guard added; the test that had
+accepted the shape was rewritten, and both directions now carry a positive control.
+
+**Finding 2 (major, real) — the shipped CLI leg never excluded Tier-2N probe members.**
+`probe_set` was optional and `_cmd_apply_spare_rule` never passed one, so `exclude_probe_members`
+did not run on the path `stage1_remine.sbatch` invokes, and the report's
+`n_excluded_probe_members: 0` read as *"no probe member was in the substrate"* rather than *"no
+exclusion happened"* — [[namespace-mismatch-invisible-noop]] again, in my own new code. Both ends
+are now unrepresentable: the parameter has **no default**, the CLI flag is `required=True`, the
+report carries `n_probe_members_considered` as the denominator a 0 is read against, and
+`remine_problems` flags a run round whose denominator is 0. `load_probe_set` additionally
+**refuses an empty probe set**, because the committed `reports/p2/tier2n_probe.json` carries
+*counts, not member ids* — a loader pointed at it would build an empty set and the exclusion would
+report 0 while excluding nothing.
+
+**Finding 3 (minor) — REFUTED by inspection.** *"Confirm `reports/p3` exists before submission"*:
+`reports/p3/` is git-tracked (`gate2_figure_data.json`, `stage2_scores.json`, `stage2_sizing.json`,
+`sweep/`), so it is present in any checkout including the cluster's, exactly as `slurm/p2/*`
+already relies on `reports/p2/`. No change. **Judge the finding and the fix separately** — here the
+finding itself did not survive.
+
+**⚠ A sabotage had to be re-aimed, and the gap was real.** Removing the `exclude_probe_members`
+call from the shipped round leg left the end-to-end test **green**: its probe set was disjoint
+from the substrate, so *"excluded nothing"* and *"never excluded"* were indistinguishable — the
+same defect finding 2 named, one level down. The fixture now plants a probe member **in** the
+substrate and asserts its **identity** (absent from `reasons`, named in
+`excluded_probe_member_ids`, `n_probe_members_considered == 2`), not a count.
+
+**Validation.** 51 tests in the file (44 → 51); full unit+golden **4,247 passed / 13 failed** vs
+the matched baseline at `96fcbc7` (**4,195 / 13**) — failure sets identical, `comm` empty both
+ways. **26 sabotages, 25 RED against their NAMED test**, the 26th the declared no-op control;
+campaign re-run after the fixes and after `black`. ruff 0.15.15 + black 25.11.0 clean.

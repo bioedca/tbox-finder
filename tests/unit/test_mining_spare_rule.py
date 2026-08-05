@@ -50,6 +50,7 @@ from tbox_finder.mining.remine import (
     build_remine_availability,
     build_remine_report,
     exclude_probe_members,
+    load_probe_set,
     load_stage2_posteriors,
     max_possible_yield,
     no_remine_parameter_has_a_default,
@@ -467,7 +468,12 @@ def test_the_round_leg_runs_end_to_end_and_measures_the_structural_zero(
                         "score": 0.9,
                         "pool": "genomic_window",
                     }
-                    for cid, s in (("spared-high", 100), ("mined-low", 300), ("unscored", 500))
+                    for cid, s in (
+                        ("spared-high", 100),
+                        ("mined-low", 300),
+                        ("unscored", 500),
+                        ("probe-member", 700),
+                    )
                 ]
             }
         ),
@@ -475,12 +481,19 @@ def test_the_round_leg_runs_end_to_end_and_measures_the_structural_zero(
     )
     status = tmp_path / "status.json"
     status.write_text(
-        json.dumps({"status": dict.fromkeys(("spared-high", "mined-low", "unscored"), "failed")}),
+        json.dumps(
+            {
+                "status": dict.fromkeys(
+                    ("spared-high", "mined-low", "unscored", "probe-member"), "failed"
+                )
+            }
+        ),
         encoding="utf-8",
     )
     posteriors = tmp_path / "post.json"
     posteriors.write_text(
-        json.dumps({"posteriors": {"spared-high": 0.99, "mined-low": 0.01}}), encoding="utf-8"
+        json.dumps({"posteriors": {"spared-high": 0.99, "mined-low": 0.01, "probe-member": 0.01}}),
+        encoding="utf-8",
     )
     monkeypatch.setattr(mine_round_module, "load_union_mask", lambda **_kw: EMPTY_MASK)
 
@@ -492,8 +505,16 @@ def test_the_round_leg_runs_end_to_end_and_measures_the_structural_zero(
         rscape_installed=True,
         msa_supply_available=True,
         stage2_supply_available=True,
-        probe_set=ProbeSet(natural=(), synthetic=("unrelated-probe",)),
+        probe_set=ProbeSet(natural=(), synthetic=("probe-member", "not-in-substrate")),
     )
+    # The probe member is gone from the outcome entirely — not spared, ABSENT. Asserting
+    # its identity (rather than a count) is what distinguishes "excluded nothing" from
+    # "never excluded": a disjoint probe set makes those two indistinguishable, measured
+    # by sabotage (removing the exclusion call left an earlier fixture green).
+    assert "probe-member" not in report["reasons"]
+    assert report["excluded_probe_member_ids"] == ["probe-member"]
+    assert report["n_excluded_probe_members"] == 1
+    assert report["n_probe_members_considered"] == 2
     assert report["n_mined"] == 0
     assert report["mined_ids"] == []
     assert sorted(report["spared_ids"]) == ["mined-low", "spared-high", "unscored"]
@@ -505,7 +526,6 @@ def test_the_round_leg_runs_end_to_end_and_measures_the_structural_zero(
     assert report["reasons"]["unscored"] == (
         f"unavailable_backend:relaxed_architecture,downstream_aaRS_synteny,{STAGE2_DISJUNCT}"
     )
-    assert report["n_excluded_probe_members"] == 0
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -518,13 +538,38 @@ def test_a_posterior_without_a_declared_threshold_raises() -> None:
         mine_round([_candidate(stage2_posterior=0.99)], EMPTY_MASK, availability)
 
 
-def test_the_same_round_is_accepted_once_the_threshold_is_declared() -> None:
-    """Positive control: the guard above refuses a contradiction, not every round."""
+def test_a_posterior_with_no_declared_stage2_backend_raises() -> None:
+    """The reverse contradiction — and the FAIL-OPEN one, found by review r1.
+
+    A round that declares a threshold but no Stage-2 backend resolves a low posterior
+    to ``failed``, so the candidate counts as "every disjunct ran and failed" and is
+    mined on evidence for a backend the round said was absent. Reproduced before the
+    guard existed: it was mined, and the reason read *"no disjunct passed and every
+    disjunct was evaluated"* — the attribution asserting the very thing that was false.
+    """
     availability = dict.fromkeys(MODEL_INDEPENDENT_DISJUNCTS, True)
+    availability[STAGE2_DISJUNCT] = False
+    with pytest.raises(HardNegativeMiningError, match="backend is unavailable this round"):
+        mine_round(
+            [_candidate(stage2_posterior=0.01)],
+            EMPTY_MASK,
+            availability,
+            stage2_threshold=THRESHOLD,
+        )
+
+
+def test_the_same_round_is_accepted_once_both_are_declared() -> None:
+    """Positive control for both guards: they refuse contradictions, not every round."""
+    availability = dict.fromkeys(MODEL_INDEPENDENT_DISJUNCTS, True)
+    availability[STAGE2_DISJUNCT] = True
     report = mine_round(
         [_candidate(stage2_posterior=0.99)], EMPTY_MASK, availability, stage2_threshold=THRESHOLD
     )
     assert report["n_spared"] == 1 and report["n_mined"] == 0
+    mined = mine_round(
+        [_candidate(stage2_posterior=0.01)], EMPTY_MASK, availability, stage2_threshold=THRESHOLD
+    )
+    assert mined["n_mined"] == 1
 
 
 def test_classify_candidate_mines_only_when_all_four_disjuncts_failed() -> None:
@@ -650,6 +695,8 @@ def test_the_apply_leg_writes_no_mining_outcome_on_a_refused_round(tmp_path: Pat
             str(tmp_path / "absent-status.json"),
             "--posteriors",
             str(tmp_path / "absent-post.json"),
+            "--probe-set",
+            str(tmp_path / "absent-probe.json"),
             "--out",
             str(out),
         ]
@@ -695,6 +742,129 @@ def test_the_union_mask_has_one_builder() -> None:
     assert "load_union_mask" in source
     assert "LocusIndex.from_records" not in source
     assert "load_union_mask" in inspect.getsource(apply_remine_spare_rule)
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# The Tier-2N probe set must reach the round the sbatch actually invokes (review r1)
+# ═════════════════════════════════════════════════════════════════════════════
+def test_the_apply_leg_requires_a_probe_set() -> None:
+    """Review r1: the first draft's optional ``probe_set`` was never wired to the CLI.
+
+    So the exclusion never ran, and ``n_excluded_probe_members: 0`` read as *"no probe
+    member was in the substrate"* rather than *"no exclusion happened"*. Both ends are
+    now unrepresentable — the CLI flag is required and the function parameter has no
+    default.
+    """
+    with pytest.raises(SystemExit):
+        build_parser().parse_args(
+            [
+                "apply-spare-rule",
+                "--stage2-threshold",
+                "0.9",
+                "--manifest",
+                "m.json",
+                "--status-table",
+                "s.json",
+                "--posteriors",
+                "p.json",
+                "--out",
+                "o.json",
+            ]
+        )
+    params = inspect.signature(apply_remine_spare_rule).parameters
+    assert params["probe_set"].default is inspect.Parameter.empty
+
+
+def test_an_empty_probe_set_is_refused_rather_than_silently_excluding_nothing(
+    tmp_path: Path,
+) -> None:
+    """``reports/p2/tier2n_probe.json`` carries counts, not ids — a loader pointed at it
+    would build an empty set and the exclusion would report 0 while excluding nothing."""
+    path = tmp_path / "probe.json"
+    path.write_text(json.dumps({"probe_set_size": 45, "n_synthetic": 45}), encoding="utf-8")
+    with pytest.raises(RemineError, match="probe set is empty"):
+        load_probe_set(path)
+
+
+def test_a_probe_set_with_ids_loads_both_arms(tmp_path: Path) -> None:
+    """Positive control for the refusal above, on the same reader."""
+    path = tmp_path / "probe.json"
+    path.write_text(json.dumps({"natural": ["n1"], "synthetic": ["s1", "s2"]}), encoding="utf-8")
+    loaded = load_probe_set(path)
+    assert probe_member_ids(loaded) == frozenset({"n1", "s1", "s2"})
+
+
+def test_a_run_round_that_excluded_against_an_empty_probe_set_is_caught() -> None:
+    """The 0-with-no-denominator state the review named, as a report clause."""
+    plan = plan_remine_round(
+        rscape_installed=True,
+        msa_supply_available=True,
+        stage2_supply_available=True,
+        relaxed_arch_available=True,
+        synteny_available=True,
+        stage2_threshold=THRESHOLD,
+    )
+    assert plan["may_run"] is True
+    report = build_remine_report(
+        plan=plan,
+        round_report={
+            "n_mined": 3,
+            "n_probe_members_considered": 0,
+            "n_excluded_probe_members": 0,
+            "excluded_probe_member_ids": [],
+        },
+        probe_trace=None,
+        stage2_threshold=THRESHOLD,
+    )
+    assert any("did not run against a non-empty probe set" in p for p in remine_problems(report))
+
+
+def test_a_run_round_with_a_real_probe_denominator_self_checks_clean() -> None:
+    """Positive control: the clause fires on a missing denominator, not on every round."""
+    plan = plan_remine_round(
+        rscape_installed=True,
+        msa_supply_available=True,
+        stage2_supply_available=True,
+        relaxed_arch_available=True,
+        synteny_available=True,
+        stage2_threshold=THRESHOLD,
+    )
+    report = build_remine_report(
+        plan=plan,
+        round_report={
+            "n_mined": 3,
+            "n_probe_members_considered": 45,
+            "n_excluded_probe_members": 1,
+            "excluded_probe_member_ids": ["syn1"],
+        },
+        probe_trace=None,
+        excluded_probe_ids=["syn1"],
+        stage2_threshold=THRESHOLD,
+    )
+    assert remine_problems(report) == []
+
+
+def test_a_mismatched_exclusion_count_is_caught() -> None:
+    plan = plan_remine_round(
+        rscape_installed=True,
+        msa_supply_available=True,
+        stage2_supply_available=True,
+        relaxed_arch_available=True,
+        synteny_available=True,
+        stage2_threshold=THRESHOLD,
+    )
+    report = build_remine_report(
+        plan=plan,
+        round_report={
+            "n_mined": 3,
+            "n_probe_members_considered": 45,
+            "n_excluded_probe_members": 2,
+            "excluded_probe_member_ids": ["syn1"],
+        },
+        probe_trace=None,
+        stage2_threshold=THRESHOLD,
+    )
+    assert any("disagrees with the excluded id list" in p for p in remine_problems(report))
 
 
 def test_no_remine_parameter_carries_a_default() -> None:

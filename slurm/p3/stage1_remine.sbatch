@@ -52,6 +52,10 @@ STAGE2_THRESHOLD="${STAGE2_THRESHOLD:?set STAGE2_THRESHOLD via --export (no defa
 PLAN_REPORT="$ROUND_DIR/remine_plan.json"
 STATUS_TABLE="$ROUND_DIR/covariation_status.json"
 POSTERIORS="$ROUND_DIR/stage2_posteriors.json"
+# The round's Tier-2N probe ids ({"natural": [...], "synthetic": [...]}). No default: the committed
+# reports/p2/tier2n_probe.json carries COUNTS, not member ids, so pointing at it would build an
+# empty probe set and the exclusion would report 0 while excluding nothing.
+PROBE_SET="${PROBE_SET:?set PROBE_SET via --export (Tier-2N probe ids; counts-only artifacts are refused)}"
 ROUND_REPORT="$ROUND_DIR/remine_round_report.json"
 MINED_POOL="$ROUND_DIR/mined_pool.parquet"
 DONE="$ROUND_DIR/stage1_remine.DONE"
@@ -95,8 +99,10 @@ fi
 # ── LEG (1) apply the four-disjunct spare rule to the round's false positives ──────────────────────
 [ -s "$STATUS_TABLE" ] || { echo "FATAL: covariation status table $STATUS_TABLE missing." >&2; exit 3; }
 [ -s "$POSTERIORS" ]   || { echo "FATAL: Stage-2 posterior table $POSTERIORS missing." >&2; exit 3; }
+[ -s "$PROBE_SET" ]    || { echo "FATAL: Tier-2N probe id list $PROBE_SET missing." >&2; exit 3; }
 PYTHONPATH=src python -m tbox_finder.mining.remine apply-spare-rule \
   --manifest "$FP_MANIFEST" --status-table "$STATUS_TABLE" --posteriors "$POSTERIORS" \
+  --probe-set "$PROBE_SET" \
   --stage2-threshold "$STAGE2_THRESHOLD" $PLAN_FLAGS --out "$ROUND_REPORT"
 N_MINED="$(PYTHONPATH=src python -c "import json;print(json.load(open('$ROUND_REPORT'))['round']['n_mined'])")"
 echo "spare rule applied → $ROUND_REPORT ; n_mined=$N_MINED"

@@ -331,6 +331,34 @@ def probe_member_ids(probe_set: ProbeSet) -> frozenset[str]:
     return frozenset(probe_set.natural) | frozenset(probe_set.synthetic)
 
 
+def load_probe_set(path: str | Path) -> ProbeSet:
+    """Read the round's Tier-2N probe set from an explicit ``natural``/``synthetic`` id list.
+
+    Deliberately **not** read from ``reports/p2/tier2n_probe.json``: that artifact
+    carries counts (``probe_set_size``, ``n_synthetic``), not member ids, so a loader
+    pointed at it would build an **empty** :class:`ProbeSet` and the exclusion below
+    would run clean while excluding nothing — a filter that reports success and
+    filters nothing is the shape this module exists to refuse.
+
+    An empty probe set is therefore refused outright rather than accepted: with no
+    members, ``exclude_probe_members`` is a guaranteed no-op and its ``0`` becomes
+    indistinguishable from a real measurement.
+    """
+    payload = json.loads(Path(path).read_text(encoding="utf-8"))
+    if not isinstance(payload, Mapping):
+        raise RemineError(f"{path}: expected an object with 'natural'/'synthetic' id lists")
+    natural = tuple(str(x) for x in payload.get("natural", ()))
+    synthetic = tuple(str(x) for x in payload.get("synthetic", ()))
+    probe_set = ProbeSet(natural=natural, synthetic=synthetic)
+    if probe_set.size == 0:
+        raise RemineError(
+            f"{path}: the probe set is empty, so excluding its members from the mining "
+            "substrate would be a guaranteed no-op reporting 0 exclusions; supply the "
+            "round's real Tier-2N probe ids (ADR-0005 D14 per-round probe)"
+        )
+    return probe_set
+
+
 def exclude_probe_members(
     candidates: Sequence[MiningCandidate], probe_set: ProbeSet
 ) -> tuple[list[MiningCandidate], list[str]]:
@@ -363,9 +391,9 @@ def apply_remine_spare_rule(
     rscape_installed: bool,
     msa_supply_available: bool,
     stage2_supply_available: bool,
+    probe_set: ProbeSet,
     relaxed_arch_available: bool = False,
     synteny_available: bool = False,
-    probe_set: ProbeSet | None = None,
     union_prior: str | Path = "data/processed/priors/union_prior.parquet",
     corpus_parquet: str | Path = "data/processed/master_clean_v0.parquet",
 ) -> dict[str, Any]:
@@ -376,6 +404,13 @@ def apply_remine_spare_rule(
     from the substrate before the rule runs. The union-prior mask is built by the
     **promoted** :func:`~tbox_finder.mining.mine_round.load_union_mask`, so both rounds
     mask against one arithmetic.
+
+    ``probe_set`` is **required, not optional**. Review found the first draft's optional
+    parameter unwired from the CLI the sbatch actually invokes, so the exclusion never
+    ran and the report's ``n_excluded_probe_members: 0`` read as *"no probe member was in
+    the substrate"* rather than *"no exclusion happened"*. Making it required makes that
+    state unrepresentable, and the report carries ``n_probe_members_considered`` beside
+    the exclusion count so a 0 is readable against a non-zero denominator.
 
     :func:`~tbox_finder.mining.hard_negative.mine_round` still owns the refusal and the
     evidence↔availability cross-check; this function never decides mineability itself.
@@ -396,9 +431,7 @@ def apply_remine_spare_rule(
         covariation_status=load_status_map(status_table),
         stage2_posteriors=load_stage2_posteriors(posteriors),
     )
-    excluded: list[str] = []
-    if probe_set is not None:
-        candidates, excluded = exclude_probe_members(candidates, probe_set)
+    candidates, excluded = exclude_probe_members(candidates, probe_set)
 
     mask = load_union_mask(union_prior=union_prior, corpus_parquet=corpus_parquet)
     report = run_mine_round(
@@ -407,6 +440,10 @@ def apply_remine_spare_rule(
     report["schema_version"] = SCHEMA_VERSION
     report["step"] = STEP
     report["n_excluded_probe_members"] = len(excluded)
+    report["excluded_probe_member_ids"] = list(excluded)
+    # The denominator: a 0 exclusion against a non-zero considered count is a
+    # measurement; a 0 against a 0 would be a no-op wearing the same number.
+    report["n_probe_members_considered"] = len(probe_member_ids(probe_set))
     return report
 
 
@@ -486,6 +523,27 @@ def remine_problems(report: Mapping[str, Any]) -> list[str]:
             problems.append("a refused round carries a mining outcome")
         if report.get("tier2n_probe") is not None:
             problems.append("a refused round carries a Tier-2N probe trace")
+        return problems
+
+    # A round that ran must show the Tier-2N exclusion actually ran. Without the
+    # denominator, `n_excluded_probe_members: 0` reads as "no probe member was in the
+    # substrate" when it may mean "no exclusion happened" — the state review found in
+    # this module's first draft, where the CLI never passed a probe set at all.
+    round_report = report.get("round")
+    if not isinstance(round_report, Mapping):
+        problems.append("a round that may run carries no mining outcome")
+        return problems
+    considered = round_report.get("n_probe_members_considered")
+    if not isinstance(considered, int) or considered <= 0:
+        problems.append(
+            f"n_probe_members_considered={considered!r} — the Tier-2N exclusion did not run "
+            "against a non-empty probe set, so its exclusion count measures nothing"
+        )
+    excluded_ids = round_report.get("excluded_probe_member_ids")
+    if not isinstance(excluded_ids, list) or len(excluded_ids) != round_report.get(
+        "n_excluded_probe_members"
+    ):
+        problems.append("n_excluded_probe_members disagrees with the excluded id list")
     return problems
 
 
@@ -560,6 +618,11 @@ def build_parser() -> argparse.ArgumentParser:
     apply_.add_argument("--manifest", required=True, help="the round's FP manifest")
     apply_.add_argument("--status-table", required=True, help="merged covariation-status table")
     apply_.add_argument("--posteriors", required=True, help="candidate_id → Stage-2 posterior")
+    apply_.add_argument(
+        "--probe-set",
+        required=True,
+        help="Tier-2N probe ids ({natural, synthetic}); its members are removed from the substrate",
+    )
     apply_.add_argument("--union-prior", default="data/processed/priors/union_prior.parquet")
     apply_.add_argument("--corpus", default="data/processed/master_clean_v0.parquet")
     return parser
@@ -619,11 +682,13 @@ def _cmd_apply_spare_rule(args: argparse.Namespace) -> int:
         write_json(args.out, report)
         print("re-mining round REFUSED at the preflight — no mining outcome written")
         return 1
+    probe_set = load_probe_set(args.probe_set)
     round_report = apply_remine_spare_rule(
         args.manifest,
         args.status_table,
         args.posteriors,
         stage2_threshold=float(args.stage2_threshold),
+        probe_set=probe_set,
         rscape_installed=bool(args.rscape_installed),
         msa_supply_available=bool(args.msa_supply_available),
         stage2_supply_available=bool(args.stage2_supply_available),
@@ -636,6 +701,7 @@ def _cmd_apply_spare_rule(args: argparse.Namespace) -> int:
         plan=plan,
         round_report=round_report,
         probe_trace=None,
+        excluded_probe_ids=round_report["excluded_probe_member_ids"],
         stage2_threshold=float(args.stage2_threshold),
     )
     problems = remine_problems(report)
