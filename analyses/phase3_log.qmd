@@ -2651,11 +2651,16 @@ while it was only a presence check. `handoff_loci` returns a `HandoffResult`
 (`payloads`, `n_outside_alphabet`, `n_outside_alphabet_in_spans`) instead of a bare list;
 `count_outside_alphabet` and `_merge_spans` are new. 11 new tests (57 → 68 in the file).
 **Validation.** `tests/unit/test_strand_resolver.py` **68 passed**; 713 across the affected suites
-(`test_infer_call`, `test_reconcile`, `test_infer_scan`, `test_construct_loci`).
+(`test_infer_call`, `test_reconcile`, `test_infer_scan`, `test_construct_loci`). The corrected
+script was re-run against the real corpus (`data/processed/master_clean_v0.parquet`, 23,535
+records, `tbox-finder-data`) and **regenerates `element_order_prevalence.json` byte-identically**
+— the strongest available statement that the rule change moved nothing, and stronger than the
+in-test re-derivation, which reads the artifact rather than producing it.
 Full unit+golden+ml **4,560 passed / 16 failed** against a matched baseline worktree at `5637e91`
 at **4,549 / 16** — failure sets **identical**, `comm` empty both ways, and the +11 is exactly the
-new tests. **28 sabotages, 27 RED against their NAMED test**; the one non-bite is the harness's
-declared no-op control. ruff 0.15.0 + black 25.11.0 clean; no `.smk` touched.
+new tests. **30 sabotages, 29 RED against their NAMED test** (re-run in full after the review fixes —
+a fix stales an anchor the way a refactor does); the one non-bite is the harness's declared
+no-op control. ruff 0.15.0 + black 25.11.0 clean; no `.smk` touched.
 **Decisions.** The handoff fork was a **§7 stop, not a silent pick** (ADR-0005 D15 unamended,
 no value pinned).
 
@@ -2711,6 +2716,25 @@ asserting an emptiness needs the non-empty case beside it). **(3)** The third wa
 a gap: `test_the_committed_measurement_supports_the_order_by_strict_majority` reads the committed
 **artifact** and never calls the script, so mutating the script cannot touch it — re-aimed at the
 fixture (S11/S11b/S11c), where all three bite.
+:::
+
+::: {.callout-warning}
+## Review r1 (CLI, 2 minor, both real) — and one was dead code, not a hypothetical
+
+**(a) A conditional assertion is a vacuous one when its guard is false, and this guard always
+was.** The boundary check "the same character one position outside the span is counted, not
+refused" ran under `if start > 0:` — and `CANONICAL_LAYOUT` begins at 0, so with `flank=0` the
+locus starts at 0 and **that assertion never executed**. The review framed it as a future risk
+("if the fixture ever produces `start == 0`"); measured, it was already dead. Its **proposed fix
+(`assert start > 0`) would have failed** — the 5′ side has no room at this tiling. Re-aimed at
+the 3′ side (`end` = 130 of 160) with the room stated as a **precondition**, so a fixture change
+fails loudly instead of silently deleting the check. Judge the finding and the fix separately.
+
+**(b) A `for` loop over an empty list asserts nothing.** The strict-majority check over the
+committed measurement made a claim about **every one of the 21 pairs**, which is a statement
+about the count as much as about each pair; a truncated or partially-written artifact satisfied
+it in silence. The count now leads the test (sabotage S27 removes one pair from the fixture and
+turns it RED).
 :::
 
 **Process.** ⚠ **Never merge with a review process still running.** Three CLI probes returning

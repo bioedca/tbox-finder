@@ -430,6 +430,12 @@ def test_the_committed_measurement_supports_the_order_by_strict_majority():
     majority cannot disagree on this artifact and the fix moves nothing.
     """
     report = json.loads(_MEASUREMENT.read_text())
+    # The count first: a ``for`` over an empty or truncated ``pairs`` list asserts nothing, so
+    # a partially-written measurement would satisfy the loop below in silence — and the claim
+    # this test makes is about **every** one of the 21 pairs, which is a statement about the
+    # count as much as about each pair.
+    n_elements = len(report["elements"])
+    assert len(report["pairs"]) == n_elements * (n_elements - 1) // 2 == 21
     for p in report["pairs"]:
         n_both, n_ab, n_ba = p["n_both"], p["n_a_before_b"], p["n_b_before_a"]
         assert n_ab + n_ba <= n_both
@@ -1300,11 +1306,20 @@ def test_an_out_of_alphabet_character_inside_an_emitted_span_is_still_refused():
     with pytest.raises(HandoffError, match="outside the IUPAC nucleotide alphabet"):
         handoff_loci("".join(dirty), loci, calls)
 
-    # …and one position earlier, just outside the span, the same character is fine.
-    if start > 0:
-        just_outside = list(clean)
-        just_outside[start - 1] = "X"
-        assert handoff_loci("".join(just_outside), loci, calls).n_outside_alphabet == 1
+    # …and one position past the span, the same character is counted rather than refused.
+    #
+    # Stated as a fixture PRECONDITION, not as an ``if``: this is the only assertion that shows
+    # the boundary is where the refusal stops, and a guarded one disappears silently when the
+    # guard is false. It was originally written against ``start - 1`` under ``if start > 0`` —
+    # and ``CANONICAL_LAYOUT`` begins at 0, so the locus starts at 0 and that assertion never
+    # ran at all. The 5′ side has no room at this tiling; the 3′ side does.
+    assert end < CANONICAL_SEQ_LEN, "the fixture must leave a position past the span"
+    just_outside = list(clean)
+    just_outside[end] = "X"
+    outside_result = handoff_loci("".join(just_outside), loci, calls)
+    assert outside_result.n_outside_alphabet == 1
+    assert outside_result.n_outside_alphabet_in_spans == 0
+    assert outside_result.payloads, "the locus must survive a stray byte one position away"
 
 
 def test_the_in_span_count_is_measured_and_goes_non_zero_when_the_refusal_stops(monkeypatch):
