@@ -337,12 +337,49 @@ def test_confirmation_invariance_is_none_when_nothing_is_confirmed() -> None:
     assert diagnostic["confirmation_invariance"] is None
 
 
+def _reversed_spans() -> list[tuple[int, int, str]]:
+    """Canonical elements laid out **backwards**, so the resolver calls ``-``.
+
+    Medians run Terminator 650 < Specifier 740 < Stem_I 830, the exact reverse of
+    ``CANONICAL_ELEMENT_ORDER``, so every pair votes discordant and ``order_margin`` is negative.
+    """
+    return [(600, 700, "Terminator"), (700, 780, "Specifier"), (780, 880, "Stem_I")]
+
+
+def test_the_reversed_oracle_really_makes_the_resolver_call_minus() -> None:
+    """Without this the wrong-strand test below would be measuring the wrong thing."""
+    _, _, run = _run(_reversed_spans())
+    assert run.calls[0].strand == "-"
+    assert run.calls[0].strands == ("-",)
+
+
 def test_a_locus_confirmed_only_on_the_wrong_strand_is_counted() -> None:
     """The one outcome D15 forbids: a mis-resolution that becomes a false novelty claim.
 
-    Built deliberately — the resolver calls ``+`` (canonical order), truth says ``+``, and
-    Stage-2 is then handed a score that confirms only ``-``. The counter must fire; if it never
-    could, a real occurrence would be invisible.
+    Built deliberately, and built to match the *emitted* reading (CodeRabbit r2): the elements
+    are laid out in reverse so the resolver calls ``-`` while truth says ``+``, and Stage-2 then
+    confirms the ``-`` payload the harness actually emits. That is a candidate reaching a table
+    on the wrong strand — which is what the counter must catch. A locus whose merely
+    *counterfactual* opposite strand scored well is **not** one, and an earlier version of this
+    test asserted exactly that weaker thing.
+    """
+    contigs, stage1, run = _run(_reversed_spans(), truth_strand="+", truth_start=600, truth_end=880)
+    manifest = T.payload_manifest([run])
+    plus = next(e["row_id"] for e in manifest if e["strand"] == "+")
+    minus = next(e["row_id"] for e in manifest if e["strand"] == "-")
+    result = T.run_two_stage(contigs, stage1, {plus: -8.0, minus: 8.0}, **{**_RULE, **_CALIBRATION})
+    truth = result.report["strand_robustness"]["truth"]
+    assert truth["n_loci_overlapping_truth"] == 1
+    assert truth["n_strand_calls_incorrect"] == 1
+    assert truth["n_confirmed_on_wrong_strand_only"] == 1
+
+
+def test_an_unemitted_counterfactual_is_not_a_wrong_strand_confirmation() -> None:
+    """The distinction r2 drew, as its own test.
+
+    The resolver calls ``+`` and truth agrees, so ``-`` is **never emitted**. Scoring that
+    unemitted counterfactual high and the emitted ``+`` low is a locus the harness simply does
+    not confirm — a bounded false negative — and must NOT be counted as a false novelty.
     """
     contigs, stage1, run = _run(
         _canonical_spans(), truth_strand="+", truth_start=600, truth_end=880
@@ -351,10 +388,9 @@ def test_a_locus_confirmed_only_on_the_wrong_strand_is_counted() -> None:
     plus = next(e["row_id"] for e in manifest if e["strand"] == "+")
     minus = next(e["row_id"] for e in manifest if e["strand"] == "-")
     result = T.run_two_stage(contigs, stage1, {plus: -8.0, minus: 8.0}, **{**_RULE, **_CALIBRATION})
-    truth = result.report["strand_robustness"]["truth"]
-    assert truth["n_loci_overlapping_truth"] == 1
-    assert truth["n_strand_calls_correct"] == 1
-    assert truth["n_confirmed_on_wrong_strand_only"] == 1
+    diagnostic = result.report["strand_robustness"]
+    assert diagnostic["n_confirmed_loci"] == 0, "the emitted strand did not confirm"
+    assert diagnostic["truth"]["n_confirmed_on_wrong_strand_only"] == 0
 
 
 def test_the_wrong_strand_counter_stays_zero_when_the_right_strand_confirms() -> None:
@@ -849,7 +885,7 @@ def test_confirmed_reads_the_named_posterior_at_the_operating_point() -> None:
 # Two gaps the sabotage campaign found — both invisible on a one-locus, all-confirmed fixture
 # ══════════════════════════════════════════════════════════════════════════════════════
 def _two_canonical_loci() -> list[tuple[int, int, str]]:
-    """Two separated canonical loci — the gap of 320 nt far exceeds ``gap_merge=10``."""
+    """Two separated canonical loci — the gap of 340 nt far exceeds ``gap_merge=10``."""
     return [
         (300, 380, "Stem_I"),
         (380, 460, "Specifier"),
@@ -1032,3 +1068,130 @@ def test_the_run_leg_requires_exactly_one_temperature_source() -> None:
     with pytest.raises(SystemExit):  # both
         T.build_parser().parse_args(base + ["--temperature", "1.0", "--temperature-from", "g"])
     assert T.build_parser().parse_args(base + ["--temperature", "1.25"]).temperature == 1.25
+
+
+# ══════════════════════════════════════════════════════════════════════════════════════
+# Review round 2
+# ══════════════════════════════════════════════════════════════════════════════════════
+def test_a_digest_mismatch_refuses_to_write(tmp_path: Path) -> None:
+    """The guard must not destroy the artifact it guards.
+
+    ``--expect-digest`` exists to protect the committed golden. Writing first and comparing
+    second overwrote it and *then* reported the mismatch, so the one run the guard is for was
+    the one that clobbered the file (CodeRabbit r2).
+    """
+    root = Path(__file__).resolve().parents[2]
+    report, table = tmp_path / "r.json", tmp_path / "t.json"
+    argv = [
+        "run",
+        "--contigs",
+        str(root / "tests/fixtures/two_stage/contigs.json"),
+        "--stage1",
+        str(root / "tests/fixtures/two_stage/stage1_window_logits.npz"),
+        "--stage2",
+        str(root / "tests/fixtures/two_stage/stage2_logits.json"),
+        "--report",
+        str(report),
+        "--table",
+        str(table),
+        "--threshold-scope",
+        "global",
+        "--threshold",
+        "0.9",
+        "--min-span",
+        "50",
+        "--gap-merge",
+        "10",
+        "--min-distinct-elements",
+        "2",
+        "--flank",
+        "50",
+        "--min-order-margin",
+        "1",
+        "--temperature-from",
+        str(root / "reports/gate2_p3_ece.json"),
+        "--stage2-operating-point",
+        "0.5",
+    ]
+    assert T.main(argv + ["--expect-digest", "0" * 64]) == 1
+    assert not report.exists(), "a mismatching run must leave the artifacts untouched"
+    assert not table.exists()
+    # Positive control: the same call with the right digest writes both.
+    expected = (root / "tests/fixtures/two_stage/expected.sha256").read_text().strip()
+    assert T.main(argv + ["--expect-digest", expected]) == 0
+    assert report.is_file() and table.is_file()
+
+
+def test_parse_threshold_accepts_a_scalar_and_a_per_class_mapping() -> None:
+    assert T.parse_threshold("0.9") == 0.9
+    assert T.parse_threshold(' {"Stem_I": 0.5, "Specifier": 0.7} ') == {
+        "Stem_I": 0.5,
+        "Specifier": 0.7,
+    }
+    for bad in ("[1,2]", "{not json}", "abc"):
+        with pytest.raises(Exception):  # noqa: B017 - argparse.ArgumentTypeError or ValueError
+            T.parse_threshold(bad)
+
+
+def test_the_cli_can_express_the_per_class_scope() -> None:
+    """``per_class`` was unreachable from the CLI: ``--threshold`` parsed only a float."""
+    from tbox_finder.infer.locus import ELEMENT_CLASS_NAMES
+
+    mapping = json.dumps(dict.fromkeys(ELEMENT_CLASS_NAMES, 0.9))
+    args = T.build_parser().parse_args(
+        [
+            "payloads",
+            "--contigs",
+            "x",
+            "--stage1",
+            "y",
+            "--out",
+            "z",
+            "--threshold-scope",
+            "per_class",
+            "--threshold",
+            mapping,
+            "--min-span",
+            "50",
+            "--gap-merge",
+            "10",
+            "--min-distinct-elements",
+            "2",
+            "--flank",
+            "20",
+            "--min-order-margin",
+            "1",
+        ]
+    )
+    assert args.threshold == dict.fromkeys(ELEMENT_CLASS_NAMES, 0.9)
+    # ...and it runs end to end, which a float would not have.
+    contigs, stage1, run = _run(_canonical_spans())
+    result = T.run_two_stage(
+        contigs,
+        stage1,
+        _scores([run]),
+        **{**_RULE, "threshold_scope": "per_class", "threshold": args.threshold},
+        **_CALIBRATION,
+    )
+    assert len(result.rows) == 1
+
+
+def test_the_manifest_is_ordered_by_contig_regardless_of_input_order() -> None:
+    """``handoff_loci`` fixes locus and strand order; nothing fixed contig order (r2)."""
+    windows, starts, sequence = _plant(_canonical_spans())
+    stage1 = {name: {"logits": windows, "starts": starts} for name in ("b", "a")}
+    runs = [
+        T.run_contig(
+            _contig(name, sequence), T.reconcile_contig(stage1[name], len(sequence)), **_RULE
+        )
+        for name in ("b", "a")
+    ]
+    contigs = [entry["contig_id"] for entry in T.payload_manifest(runs)]
+    assert contigs == sorted(contigs)
+    result = T.run_two_stage(
+        [_contig("b", sequence), _contig("a", sequence)],
+        stage1,
+        _scores(runs),
+        **{**_RULE, **_CALIBRATION},
+    )
+    assert [row["contig_id"] for row in result.rows] == ["a", "b"]

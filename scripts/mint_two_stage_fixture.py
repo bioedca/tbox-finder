@@ -213,7 +213,11 @@ def main() -> int:
     # provenance is portable by construction rather than by a rewrite that could silently
     # mis-resolve. --data-root says which checkout to read them from.
     for name in ("context", "splits"):
-        if Path(getattr(args, name)).is_absolute():
+        candidate = Path(getattr(args, name))
+        # `..` is refused alongside an absolute path: `../other-checkout/data/x.parquet` clears
+        # an is_absolute() check, resolves outside the root, and is then recorded verbatim —
+        # which is the exact property this guard exists to hold (CodeRabbit r2).
+        if candidate.is_absolute() or ".." in candidate.parts:
             raise SystemExit(
                 f"--{name} must be repo-relative (got {getattr(args, name)!r}); it is recorded "
                 "verbatim in a committed fixture and an absolute path leaks this machine's "

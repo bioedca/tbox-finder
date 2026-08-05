@@ -448,10 +448,13 @@ def payload_manifest(runs: Sequence[ContigRun]) -> list[dict[str, Any]]:
 
     Emitted over ``both`` rather than ``emitted`` so one Stage-2 pass serves both the candidate
     table and the counterfactual half of the diagnostic. Ordered by (contig, locus, strand) so
-    the manifest — and therefore the batches the scorer forms from it — is deterministic.
+    the manifest — and therefore the batches the scorer forms from it — is deterministic. The
+    contig sort is applied **here** rather than assumed of the caller: ``handoff_loci`` fixes
+    locus and strand order, but nothing fixed contig order, so an unsorted input produced a
+    manifest and a digest that did not match the ordering this docstring claims (CodeRabbit r2).
     """
     manifest: list[dict[str, Any]] = []
-    for run in runs:
+    for run in sorted(runs, key=lambda run: run.contig_id):
         for payload in run.both.payloads:
             manifest.append(
                 {
@@ -595,7 +598,7 @@ def build_rows(
         both_posteriors.setdefault(locus_id, {})[entry["strand"]] = float(named[position])
 
     rows: list[dict[str, Any]] = []
-    for run in runs:
+    for run in sorted(runs, key=lambda run: run.contig_id):
         for handoff in run.emitted.payloads:
             key = payload_key(run.contig_id, handoff)
             scored = by_key[key]  # emitted ⊂ both by content, so this cannot miss
@@ -716,8 +719,12 @@ def strand_robustness(
             deltas.append(abs(plus - minus))
             if confirmed_plus != confirmed_minus:
                 n_disagreements += 1
-            carried = {STRAND_PLUS: confirmed_plus, STRAND_MINUS: confirmed_minus}
-            confirmed = any(carried[strand] for strand in call.strands)
+            confirmed_by_strand = {STRAND_PLUS: confirmed_plus, STRAND_MINUS: confirmed_minus}
+            # What the harness would actually hand on: a resolved locus emits one strand, an
+            # ambiguous one emits both. The counterfactual verdicts above exist for the
+            # invariance read; only these reach a candidate table.
+            emitted_confirmed = {strand: confirmed_by_strand[strand] for strand in call.strands}
+            confirmed = any(emitted_confirmed.values())
             if confirmed:
                 n_confirmed += 1
                 if confirmed_plus == confirmed_minus:
@@ -735,7 +742,14 @@ def strand_robustness(
                 else:
                     n_strand_incorrect += 1
                 other = STRAND_MINUS if truth_strand == STRAND_PLUS else STRAND_PLUS
-                if carried[other] and not carried[truth_strand]:
+                # Restricted to the EMITTED strands, not to both counterfactuals. A false
+                # novelty needs the wrong strand to actually reach Stage-2 as a candidate; a
+                # locus whose *unemitted* counterfactual happens to score well is not one, and
+                # counting it would overstate the outcome D15 says must never happen
+                # (CodeRabbit r2).
+                if emitted_confirmed.get(other, False) and not emitted_confirmed.get(
+                    truth_strand, False
+                ):
                     n_wrong_strand_only += 1
 
     return {
@@ -1227,6 +1241,29 @@ def write_json(path: str | Path, payload: Any) -> None:
 # ══════════════════════════════════════════════════════════════════════════════════════
 # CLI
 # ══════════════════════════════════════════════════════════════════════════════════════
+def parse_threshold(text: str) -> float | dict[str, float]:
+    """``--threshold`` as either a scalar or a per-class JSON mapping.
+
+    ``element_assignment`` refuses a scalar under ``threshold_scope="per_class"`` and refuses a
+    mapping under ``"global"``, so a CLI that could only parse a float made one of D3's two
+    declared scopes unreachable — every ``per_class`` invocation failed after parsing
+    (CodeRabbit r2). The scope choice is a §13.1 phase-gate freeze, so both must be expressible.
+    """
+    stripped = text.strip()
+    if stripped.startswith("{"):
+        try:
+            mapping = json.loads(stripped)
+        except json.JSONDecodeError as error:
+            raise argparse.ArgumentTypeError(f"--threshold is not valid JSON: {error}") from error
+        if not isinstance(mapping, dict):
+            raise argparse.ArgumentTypeError("--threshold JSON must be an object")
+        return {str(key): float(value) for key, value in mapping.items()}
+    try:
+        return float(stripped)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError(f"--threshold is not a number: {text!r}") from error
+
+
 def _rule_args(parser: argparse.ArgumentParser) -> None:
     """The rule knobs, every one ``required=True``.
 
@@ -1235,7 +1272,15 @@ def _rule_args(parser: argparse.ArgumentParser) -> None:
     discipline as the keyword-only-no-default signature, one layer out.
     """
     parser.add_argument("--threshold-scope", required=True, choices=["global", "per_class"])
-    parser.add_argument("--threshold", type=float, required=True)
+    parser.add_argument(
+        "--threshold",
+        type=parse_threshold,
+        required=True,
+        help=(
+            "a scalar for threshold_scope=global, or a JSON object of "
+            "element-class name -> tau for threshold_scope=per_class"
+        ),
+    )
     parser.add_argument("--min-span", type=int, required=True)
     parser.add_argument("--gap-merge", type=int, required=True)
     parser.add_argument("--min-distinct-elements", type=int, required=True)
@@ -1476,6 +1521,14 @@ def _cmd_run(args: argparse.Namespace) -> int:
         for problem in problems:
             print(f"REPORT PROBLEM: {problem}")
         return 1
+    print(f"candidate_table digest: {result.digest}")
+    # Compared BEFORE anything is written. The expectation exists to protect the committed
+    # golden, and the earlier ordering wrote over it and then reported the mismatch — the guard
+    # destroying the artifact it guards (CodeRabbit r2).
+    if args.expect_digest and args.expect_digest != result.digest:
+        print(f"DIGEST MISMATCH: expected {args.expect_digest}")
+        print("refused to write; the committed artifacts are untouched")
+        return 1
     write_json(args.report, report)
     write_json(
         args.table,
@@ -1488,10 +1541,6 @@ def _cmd_run(args: argparse.Namespace) -> int:
         },
     )
     print(f"wrote {args.report} and {args.table}")
-    print(f"candidate_table digest: {result.digest}")
-    if args.expect_digest and args.expect_digest != result.digest:
-        print(f"DIGEST MISMATCH: expected {args.expect_digest}")
-        return 1
     return 0
 
 
@@ -1582,6 +1631,7 @@ __all__ = [
     "main",
     "no_rule_parameter_has_a_default",
     "normalise_contig",
+    "parse_threshold",
     "payload_key",
     "payload_manifest",
     "posteriors_for",

@@ -2765,17 +2765,22 @@ runs that leg. `scripts/mint_two_stage_fixture.py` builds the contig set.
 
 **Outputs.** `reports/strand_robustness.json` · `reports/p3/two_stage_candidates.json` (27 rows) ·
 `tests/fixtures/two_stage/{contigs.json, stage1_window_logits.npz, stage2_logits.json, expected.sha256}` ·
-`tests/golden/test_two_stage_golden.py` (20) · `tests/unit/test_two_stage.py` (74). Candidate-table
+`tests/golden/test_two_stage_golden.py` (23) · `tests/unit/test_two_stage.py` (80). Candidate-table
 digest `04bc8a557a1883e2aa4814b4c816c030c7c44e630cd25e71184c6670a9748648`. No DVC object; no
 checkpoint; no W&B run. `infer/call.py` gains `rule_parameters_have_no_default` and `locus.py` /
 `strand.py` now delegate to it (promotion, behaviour unchanged).
 
 **Validation.** Golden green — the torch-free replay reproduces the committed digest exactly;
 `strand_robustness_problems` returns `[]` on the committed report. Full unit+golden+ml
-**4,650 passed / 14 failed** against a matched baseline worktree at `81b6cd1` at **4,562 / 14** —
-failure sets **identical** (`comm` empty both ways), and the +88 is exactly the new tests.
-**32 sabotages, 31 RED against their NAMED test**; the one non-bite is the declared no-op control.
-ruff 0.15.15 + black 25.11.0 + `snakemake --lint` clean.
+**4,665 passed / 14 failed** against a matched baseline worktree at `81b6cd1` at **4,562 / 14** —
+failure sets **identical** (`comm` empty both ways), and the +103 is exactly the new tests.
+**38 sabotages, 35 RED against their NAMED test**; the three non-bites are the declared no-op
+control and two mutations inside the **torch-only** mint legs, which no CI-runnable test can
+execute and which were verified by execution instead. ⚠ The campaign was re-run after **each**
+review round, and twice an anchor went stale — once because a fix rewrote the line, once because
+`black` reflowed a dict comprehension onto one line. Both surfaced as **misses** rather than
+passes only because the harness asserts each anchor matches exactly once. ruff 0.15.15 + black
+25.11.0 + `snakemake --lint` clean.
 
 ::: {.callout-important}
 ## The diagnostic D15 asks for cannot be computed at P3, and the substitution is reported, not renamed
@@ -2879,6 +2884,22 @@ posterior check added and shown to bite at a forced tolerance of 0. The `integra
 docstring likewise described a no-defaults discipline its own `params` block does not apply;
 the module defaults nothing, the rule supplies the fixture's provisional values, and
 `--expect-digest` is what makes that safe — now stated accurately rather than aspirationally.
+
+**Review round 2 (CodeRabbit CLI): 6 findings, all minor by label, all real, all fixed — and one
+of them was a destructive bug.** `--expect-digest` compared **after** writing, so the single run
+the guard exists for — a drift that changes the table — overwrote the committed golden and *then*
+reported the mismatch. It now compares first and refuses to write. A second is a definition
+correction that leaves the number unchanged and the meaning right:
+`n_confirmed_on_wrong_strand_only` read **both** counterfactual verdicts, so a locus whose
+*unemitted* opposite strand happened to score well counted as a false novelty — but a false
+novelty needs the wrong strand to actually reach a candidate table. Restricted to the **emitted**
+strands, and the test that covered it was rewritten, because it had asserted the weaker property:
+it now lays the elements out in **reverse** so the resolver genuinely calls `-` against a truth of
+`+`, with the unemitted-counterfactual case as its own separate test. Also: `--threshold` parsed
+only a float, which made D3's `per_class` **scope unreachable from the CLI** (now a JSON mapping);
+`payload_manifest` claimed a `(contig, locus, strand)` order it did not enforce for contigs;
+`--context`/`--splits` refused an absolute path but not `..`; and a docstring said 320 nt where
+the gap is 340.
 
 **Sabotage found two real gaps.** The invariance denominator (`/n_confirmed` vs `/n_loci`) was
 untestable while every fixture locus was confirmed, and the wrong-strand-only counter's `and`
