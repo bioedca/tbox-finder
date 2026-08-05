@@ -3061,3 +3061,30 @@ substrate and asserts its **identity** (absent from `reasons`, named in
 the matched baseline at `96fcbc7` (**4,195 / 13**) — failure sets identical, `comm` empty both
 ways. **26 sabotages, 25 RED against their NAMED test**, the 26th the declared no-op control;
 campaign re-run after the fixes and after `black`. ruff 0.15.15 + black 25.11.0 clean.
+
+## Step P3-15 (review r2) — 2026-08-05: three more, all real, all in the guards themselves
+
+**r2-1 (major) — the no-default pin had a hole exactly the shape it exists to catch.**
+`no_remine_parameter_has_a_default` treated `None` as *"no default"*, so
+`stage2_threshold: float | None = None` would have **passed the pin while giving the operating
+point a default**. Confirmed by execution before fixing. The only parameter legitimately needing a
+`None` sentinel is `stage2_supply_available`, already exempt by name, so the tightening keeps the
+shipped signature green — asserted as the positive control beside the new refusal. Same shape as
+[[pinned-constant-that-nothing-reads]]: a pin that cannot fail is decoration.
+
+**r2-2 (minor) — `load_stage2_posteriors` raised a bare `KeyError` on a flat mapping.** Both a
+wrapper object and a flat `candidate_id → posterior` map are plausible producer output; the module's
+contract is a named refusal carrying the path. Both shapes now load, and a genuinely wrong shape
+refuses by name.
+
+**r2-3 (major) — the top-level exclusion fields were never compared to the round's.**
+`build_remine_report`'s `excluded_probe_ids` **defaults to `()`**, so a caller that omits it
+publishes `n_excluded_probe_members: 0` beside a non-empty round-level list — the same unreadable 0
+r1's finding 2 was about, one layer up, and no clause compared them. Reproduced by execution
+(top-level `0 / []` beside round-level `['syn1']`, `problems == []`). Clause added, with the
+forwarded case as its positive control.
+
+**Validation.** 54 tests in the file (51 → 54); full unit+golden **4,250 passed / 13 failed** vs
+the matched baseline at `96fcbc7` (**4,195 / 13**) — failure sets identical, `comm` empty both
+ways. **29 sabotages, 28 RED against their NAMED test**, the 29th the declared no-op control.
+ruff 0.15.15 + black 25.11.0 clean.

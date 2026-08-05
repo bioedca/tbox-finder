@@ -875,3 +875,74 @@ def test_no_remine_parameter_carries_a_default() -> None:
         """A stand-in for the mistake: the operating point acquiring a default."""
 
     assert no_remine_parameter_has_a_default(with_a_default) is False
+
+
+def test_a_none_default_does_not_slip_past_the_pin() -> None:
+    """Review r2: ``None`` was treated as "no default", which was the hole itself.
+
+    ``stage2_threshold: float | None = None`` gives the operating point a default while
+    looking like an absent one — exactly what this pin exists to catch. The only
+    parameter that legitimately needs a ``None`` sentinel is ``stage2_supply_available``,
+    exempt by name, and the shipped signature stays green (the positive control).
+    """
+
+    def with_a_none_default(*, stage2_threshold: float | None = None) -> None:  # pragma: no cover
+        """The operating point acquiring a default that reads as absent."""
+
+    assert no_remine_parameter_has_a_default(with_a_none_default) is False
+    assert no_remine_parameter_has_a_default() is True
+
+
+def test_a_flat_posterior_mapping_is_accepted_and_a_bad_one_refused_by_name(
+    tmp_path: Path,
+) -> None:
+    """Review r2: a flat mapping raised a bare ``KeyError``, not this module's refusal."""
+    flat = tmp_path / "flat.json"
+    flat.write_text(json.dumps({"c1": 0.5}), encoding="utf-8")
+    assert load_stage2_posteriors(flat) == {"c1": 0.5}
+
+    wrapped = tmp_path / "wrapped.json"
+    wrapped.write_text(json.dumps({"posteriors": {"c1": 0.5}}), encoding="utf-8")
+    assert load_stage2_posteriors(wrapped) == {"c1": 0.5}
+
+    bad = tmp_path / "bad.json"
+    bad.write_text(json.dumps([1, 2, 3]), encoding="utf-8")
+    with pytest.raises(RemineError, match="expected a candidate_id"):
+        load_stage2_posteriors(bad)
+
+
+def test_a_top_level_exclusion_count_that_contradicts_the_round_is_caught() -> None:
+    """Review r2: ``build_remine_report``'s ``excluded_probe_ids`` defaults to ``()``.
+
+    A caller that omits it publishes ``n_excluded_probe_members: 0`` at the top level
+    beside a non-empty round-level list — the same unreadable 0 the module refuses
+    everywhere else, and nothing compared the two.
+    """
+    plan = plan_remine_round(
+        rscape_installed=True,
+        msa_supply_available=True,
+        stage2_supply_available=True,
+        relaxed_arch_available=True,
+        synteny_available=True,
+        stage2_threshold=THRESHOLD,
+    )
+    round_report = {
+        "n_mined": 3,
+        "n_probe_members_considered": 45,
+        "n_excluded_probe_members": 1,
+        "excluded_probe_member_ids": ["syn1"],
+    }
+    forgotten = build_remine_report(
+        plan=plan, round_report=round_report, probe_trace=None, stage2_threshold=THRESHOLD
+    )
+    assert any("disagree with the round" in p for p in remine_problems(forgotten))
+
+    # Positive control: the same report with the ids forwarded self-checks clean.
+    passed_through = build_remine_report(
+        plan=plan,
+        round_report=round_report,
+        probe_trace=None,
+        excluded_probe_ids=["syn1"],
+        stage2_threshold=THRESHOLD,
+    )
+    assert remine_problems(passed_through) == []

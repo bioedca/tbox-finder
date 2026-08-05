@@ -280,7 +280,14 @@ def load_stage2_posteriors(path: str | Path) -> dict[str, float]:
     candidates it was supposed to spare.
     """
     payload = json.loads(Path(path).read_text(encoding="utf-8"))
-    rows = payload["posteriors"] if isinstance(payload, dict) else payload
+    # Both shapes are plausible producer output: a wrapper object with a "posteriors"
+    # key, or a flat candidate_id → posterior mapping. Indexing unconditionally raised a
+    # bare KeyError on the flat form (review r2), which is not this module's contract —
+    # every refusal here names the path.
+    if isinstance(payload, Mapping) and "posteriors" in payload:
+        rows = payload["posteriors"]
+    else:
+        rows = payload
     if not isinstance(rows, Mapping):
         raise RemineError(f"{path}: expected a candidate_id → posterior mapping, got {type(rows)}")
     out: dict[str, float] = {}
@@ -544,6 +551,17 @@ def remine_problems(report: Mapping[str, Any]) -> list[str]:
         "n_excluded_probe_members"
     ):
         problems.append("n_excluded_probe_members disagrees with the excluded id list")
+    # ...and the top-level fields against the round's. ``build_remine_report`` writes
+    # them from an argument that DEFAULTS to (), so a caller that forgets it publishes
+    # `n_excluded_probe_members: 0` beside a non-empty round-level list — the same
+    # unreadable 0 this module refuses everywhere else (review r2).
+    if isinstance(excluded_ids, list) and sorted(map(str, excluded_ids)) != sorted(
+        str(x) for x in report.get("excluded_probe_member_ids", [])
+    ):
+        problems.append(
+            "the report's excluded_probe_member_ids disagree with the round's; a top-level "
+            "0 would read as 'no probe member was in the substrate'"
+        )
     return problems
 
 
@@ -555,13 +573,19 @@ def no_remine_parameter_has_a_default(func: Any = None) -> bool:
     from the live signature so adding a default fails this rather than passing a
     hand-maintained list. ``*_available`` flags are backend-presence facts, not rule
     parameters, and are exempt by name.
+
+    ``None`` is **not** treated as "no default" (review r2). It was, and that left the
+    hole this function exists to close: ``stage2_threshold: float | None = None`` would
+    have passed the pin while giving the operating point a default. The only parameter
+    that legitimately needs a ``None`` sentinel is ``stage2_supply_available``, which is
+    already exempt by name.
     """
     target = plan_remine_round if func is None else func
     exempt = {"stage2_supply_available", "relaxed_arch_available", "synteny_available"}
     for name, param in inspect.signature(target).parameters.items():
         if param.kind is not inspect.Parameter.KEYWORD_ONLY or name in exempt:
             continue
-        if param.default is not inspect.Parameter.empty and param.default is not None:
+        if param.default is not inspect.Parameter.empty:
             return False
     return True
 
