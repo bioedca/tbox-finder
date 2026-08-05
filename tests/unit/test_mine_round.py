@@ -8,6 +8,7 @@ window→genome coordinate adapter (identity), and the per-round decision + dege
 from __future__ import annotations
 
 import json
+import sys
 
 import pytest
 
@@ -499,6 +500,32 @@ def test_clause_producer_present_breaks_alone(evidence_root, monkeypatch):
     derived = _derive(evidence_root)
     _assert_only_failed(derived, "producer_present")
     assert "align_shard" in " ".join(derived["reasons"])
+
+
+def test_clause_producer_present_survives_a_non_import_error(evidence_root, monkeypatch):
+    # CodeRabbit CLI r2 (minor), reproduced by execution before fixing: the handler caught only
+    # ImportError, so a module-level RuntimeError/OSError/AttributeError anywhere in the
+    # producer or its transitive imports propagated OUT of a function documented as fail-closed
+    # on every clause — aborting `plan` with a traceback instead of the exit-4 refusal.
+    import importlib.abc
+
+    class _Boom(importlib.abc.MetaPathFinder):
+        def find_spec(self, name, path=None, target=None):
+            if name == "tbox_finder.mining.covariation_producer":
+                raise RuntimeError("module-level boom in a transitive import")
+            return None
+
+    monkeypatch.delitem(sys.modules, "tbox_finder.mining.covariation_producer", raising=False)
+    # …and off the PARENT PACKAGE too. `from pkg import sub` skips the submodule import entirely
+    # when `hasattr(pkg, "sub")` (CPython `_handle_fromlist`), and an earlier test in this file
+    # imports the producer, which sets that attribute. Without this the finder never fires and
+    # the test passes vacuously — green in isolation, meaningless in the full run. Measured.
+    monkeypatch.delattr(sys.modules["tbox_finder.mining"], "covariation_producer", raising=False)
+    monkeypatch.setattr(sys, "meta_path", [_Boom(), *sys.meta_path])
+
+    derived = _derive(evidence_root)  # must RETURN, not raise
+    _assert_only_failed(derived, "producer_present")
+    assert "RuntimeError" in " ".join(derived["reasons"])
 
 
 def test_clause_producer_status_wired_breaks_alone(evidence_root, monkeypatch):

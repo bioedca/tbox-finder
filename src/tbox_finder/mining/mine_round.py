@@ -257,9 +257,15 @@ def derive_msa_supply_available(*, repo_root: str | Path | None = None) -> dict[
     # ── clause 2: the producer ships ─────────────────────────────────────────
     try:
         from tbox_finder.mining import covariation_producer
-    except ImportError as exc:  # pragma: no cover - the module is in-tree
+    except Exception as exc:  # noqa: BLE001 - a broken producer is a FAILED clause, not a crash
+        # Deliberately broader than ImportError (CodeRabbit CLI r2, reproduced by execution):
+        # a module-level failure anywhere in the producer or its transitive imports —
+        # RuntimeError, OSError, AttributeError — would otherwise propagate out of a function
+        # documented as fail-closed on every clause, aborting `plan` with a traceback instead
+        # of the exit-4 refusal. A producer that cannot even import is exactly the state this
+        # clause exists to report.
         covariation_producer = None
-        clauses["producer_present"] = _fail("producer_present", f"import failed: {exc}")
+        clauses["producer_present"] = _fail("producer_present", f"import failed: {exc!r}")
     if covariation_producer is not None:
         missing = [e for e in PRODUCER_ENTRY_POINTS if not hasattr(covariation_producer, e)]
         clauses["producer_present"] = (

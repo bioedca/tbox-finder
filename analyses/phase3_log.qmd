@@ -3216,3 +3216,28 @@ it stayed honest: the harness reported the stale anchor as a **MISS**, not a pas
 baseline worktree at `0b9ad0c` (**4,248 / 15**) — failure sets identical, `comm` empty both ways.
 **29 sabotages, 28 RED against their NAMED test**, the 29th the declared no-op control. ruff
 0.15.15 + black 25.11.0 clean.
+
+## Step P3-15′-a (review r2) — 2026-08-05: a fail-closed function that could still crash, and a test that was green for nothing
+
+**CodeRabbit CLI r2 (minor), and it is right.** `derive_msa_supply_available` is documented as
+fail-closed on *every* clause, but the producer-import handler caught only `ImportError` — a
+module-level `RuntimeError` / `OSError` / `AttributeError` anywhere in
+`covariation_producer` or its transitive imports would propagate straight out, so `plan` and
+`apply-spare-rule` would abort with a **traceback** instead of the exit-4 refusal. A producer too
+broken to import is exactly the state the clause exists to report. **Reproduced by execution**
+(a `MetaPathFinder` raising `RuntimeError` for that module name) before broadening the handler.
+
+**⚠ AND THE TEST FOR IT WAS VACUOUS ON THE FIRST TRY — GREEN ALONE, MEANINGLESS IN THE FILE.**
+It passed in isolation and **failed in the full run**, which is the good direction to fail in.
+Cause: `from pkg import sub` **skips the submodule import entirely** when `hasattr(pkg, "sub")`
+(CPython's `_handle_fromlist`), and an earlier test in the same file imports the producer, which
+sets that attribute on `tbox_finder.mining`. Deleting the `sys.modules` entry is therefore not
+enough — the finder never fires and the fixture measures nothing. The attribute is deleted off the
+**parent package** too. Had the ordering been the other way round, this would have shipped as a
+test that asserts a refusal it never triggers — the [[raises-test-needs-a-positive-control]] family,
+reached through an import-system detail rather than an assertion.
+
+**Validation.** 61 tests (60 → 61); full unit+golden **4,277 passed / 15 failed** vs the matched
+baseline worktree at `0b9ad0c` (**4,248 / 15**) — failure sets identical. **30 sabotages, 29 RED
+against their NAMED test**, the 30th the declared no-op control; S30 restores exactly this
+finding (`except Exception` → `except ImportError`) and is RED. ruff 0.15.15 + black 25.11.0 clean.
