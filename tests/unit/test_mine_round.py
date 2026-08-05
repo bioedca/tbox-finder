@@ -415,6 +415,13 @@ def test_clause_certification_matches_versioned_db_breaks_alone(evidence_root):
         pytest.param(
             lambda e: e["matched_control"].update(composition_matched=False), id="unmatched"
         ),
+        # The vacuity case, and the reason the flags are named rather than iterated: a clause
+        # read off the evidence's OWN key set is satisfied exactly when the evidence is gone —
+        # an emptied matched_control has nothing left to be unmatched.
+        pytest.param(lambda e: e.update(matched_control={}), id="matched_control_emptied"),
+        pytest.param(
+            lambda e: e["matched_control"].pop("ss_cons_matched"), id="one_dimension_dropped"
+        ),
         pytest.param(lambda e: e.update(min_sequences_floor=5), id="floor_below_pin"),
         pytest.param(lambda e: e.update(n_records=3), id="depth_below_floor"),
     ],

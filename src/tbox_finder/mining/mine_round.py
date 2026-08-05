@@ -140,6 +140,17 @@ PRODUCER_ENTRY_POINTS = (
     "load_status_map",
 )
 
+#: The matched-control dimensions the certification must report as matched, **named** rather
+#: than iterated off whatever keys the record happens to carry: a clause read from the
+#: evidence's own key set is vacuously satisfied exactly when the evidence is missing, so an
+#: emptied ``matched_control`` would certify "all matched" by having nothing to be unmatched.
+REQUIRED_MATCHED_CONTROL_FLAGS = (
+    "composition_matched",
+    "depth_matched",
+    "ss_cons_matched",
+    "width_matched",
+)
+
 
 def read_dvc_dir_pointer(path: str | Path) -> dict[str, Any] | None:
     """A DVC **directory** pointer → ``{md5, path, nfiles, size}``, or ``None`` if malformed.
@@ -297,9 +308,9 @@ def derive_msa_supply_available(*, repo_root: str | Path | None = None) -> dict[
                 f"shuffled_status={extra.get('shuffled_status')!r} (want 'failed' — an "
                 "'unavailable' twin is no power, which certifies nothing)"
             )
-        unmatched = sorted(k for k, v in control.items() if not v)
-        if not control or unmatched:
-            failures.append(f"matched_control unmet: {unmatched or 'absent'}")
+        unmatched = [k for k in REQUIRED_MATCHED_CONTROL_FLAGS if not control.get(k)]
+        if unmatched:
+            failures.append(f"matched_control unmet (missing counts as unmatched): {unmatched}")
         if not isinstance(floor, int) or floor < MIN_REAL_HOMOLOG_N:
             failures.append(f"min_sequences_floor={floor!r} below MIN_REAL_HOMOLOG_N")
         if not isinstance(depth, int) or not isinstance(floor, int) or depth < floor:
@@ -1345,6 +1356,7 @@ __all__ = [
     "MSA_SUPPLY_AVAILABLE",
     "MineRoundError",
     "PRODUCER_ENTRY_POINTS",
+    "REQUIRED_MATCHED_CONTROL_FLAGS",
     "REPO_ROOT",
     "SCHEMA_VERSION",
     "STEP",
