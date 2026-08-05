@@ -91,7 +91,6 @@ PRD §6, §13.1, §5/§13.3; ADR-0005 D3 + A3 + A9 Pin 3.
 
 from __future__ import annotations
 
-import inspect
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Literal
@@ -106,6 +105,7 @@ from tbox_finder.infer.call import (
     candidates_from_mask,
     element_posterior,
     require_integer,
+    rule_parameters_have_no_default,
     zero_flanked_array,
 )
 from tbox_finder.labels import CLASS_ORDER
@@ -501,16 +501,15 @@ def no_rule_parameter_has_a_default(func: Any = None) -> bool:
     ``func`` exists so the predicate can be pointed at a stub that *does* carry a default and
     shown to return False — a check that only ever ran against the compliant signature would
     be satisfied by a predicate hardcoded to True.
+
+    The set comparison and the no-default walk are
+    :func:`tbox_finder.infer.call.rule_parameters_have_no_default`, which D15's strand rule and
+    the P3-14 harness enforce the same way; this entry keeps the D3-specific default target and
+    docstring (P3-14 promotion, behaviour unchanged).
     """
-    params = inspect.signature(construct_loci if func is None else func).parameters
-    keyword_only = {
-        name: p for name, p in params.items() if p.kind is inspect.Parameter.KEYWORD_ONLY
-    }
-    # Compared as a set, not a subset: a knob added later without a matching entry here would
-    # otherwise be waved through unchecked, which is how a default slips in unnoticed.
-    if set(keyword_only) != set(RULE_PARAMETERS):
-        return False
-    return all(p.default is inspect.Parameter.empty for p in keyword_only.values())
+    return rule_parameters_have_no_default(
+        construct_loci if func is None else func, RULE_PARAMETERS
+    )
 
 
 __all__ = [

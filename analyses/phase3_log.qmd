@@ -2743,3 +2743,119 @@ launched finished"* — a delayed round completed after the merge with 1 major +
 in-flight background reviews before merging, not just the last probe's answer.
 
 **Commit.** one atomic commit on `p3-13-fixup-order-and-handoff-scope`, parent `5637e91`.
+
+## Step P3-14 — 2026-08-05: the end-to-end two-stage harness + the D15 strand-robustness diagnostic
+
+**Inputs.** `data/processed/checkpoints/stage1_production/stage1.pt` (P2, DVC) ·
+`data/processed/checkpoints/stage2_rinalmo/aux1.0_lr1e-4` (P3-06, DVC — the arm
+`stage2.eval.production_arm_config()` names) · `reports/gate2_p3_ece.json` for the P3-10 fitted
+`T = 1.140627294282911` · `data/interim/flank_context/context_v0.parquet` + the committed split
+table for the fixture contigs · the P2-03/P3-11/P3-12/P3-13 inference operators.
+
+**Process.** `src/tbox_finder/integration/two_stage.py` composes the PRD §6 path — reconcile →
+`construct_loci` → `resolve_strands` → `handoff_loci` → Stage-2 binary logit → the P3-07
+calibration stack → the §13.1 candidate table — and measures the diagnostic by re-scoring every
+locus on the strand the resolver did *not* choose. It re-derives nothing: the counterfactual
+payloads come from `dataclasses.replace(call, strands=BOTH_STRANDS)` fed back through the shipped
+`handoff_loci`, and the posteriors from `recalibrate.calibrated_posterior`, whose own
+`gated_posterior_key` names the column the table calls `stage2_named_posterior`. Four CLI legs:
+`stage1` (torch, `ml-dna`) and `stage2` (torch, `ml-rna`) mint committed fixtures; `payloads` and
+`run` are torch-free, and `run` is the only leg CI executes. `workflow/rules/integration.smk::two_stage_eval`
+runs that leg. `scripts/mint_two_stage_fixture.py` builds the contig set.
+
+**Outputs.** `reports/strand_robustness.json` · `reports/p3/two_stage_candidates.json` (27 rows) ·
+`tests/fixtures/two_stage/{contigs.json, stage1_window_logits.npz, stage2_logits.json, expected.sha256}` ·
+`tests/golden/test_two_stage_golden.py` (20) · `tests/unit/test_two_stage.py` (74). Candidate-table
+digest `04bc8a557a1883e2aa4814b4c816c030c7c44e630cd25e71184c6670a9748648`. No DVC object; no
+checkpoint; no W&B run. `infer/call.py` gains `rule_parameters_have_no_default` and `locus.py` /
+`strand.py` now delegate to it (promotion, behaviour unchanged).
+
+**Validation.** Golden green — the torch-free replay reproduces the committed digest exactly;
+`strand_robustness_problems` returns `[]` on the committed report. Full unit+golden+ml
+**4,650 passed / 14 failed** against a matched baseline worktree at `81b6cd1` at **4,562 / 14** —
+failure sets **identical** (`comm` empty both ways), and the +88 is exactly the new tests.
+**32 sabotages, 31 RED against their NAMED test**; the one non-bite is the declared no-op control.
+ruff 0.15.15 + black 25.11.0 + `snakemake --lint` clean.
+
+::: {.callout-important}
+## The diagnostic D15 asks for cannot be computed at P3, and the substitution is reported, not renamed
+
+D15 defines the diagnostic as the "fraction of confirmed loci **tier**-invariant to strand
+re-resolution". §13.3's tiers are assigned by the orthogonal-validation pipeline, which is **P6** —
+there is nothing at P3 to be tier-invariant *of*. The report therefore carries
+`tier_invariance: null` with the reason beside it and computes **two-stage-confirmation**
+invariance in its place. Re-reading it against real tiers is owed at P6.
+:::
+
+::: {.callout-important}
+## Measured: `confirmation_invariance = 0.0`, and that is D15 working, not failing
+
+All 26 confirmed loci flip verdict under strand re-resolution (median |Δposterior| **0.9987**).
+Read alone that number looks alarming; read with the truth block it is the opposite. The resolver
+called **27 of 27** loci correctly, and `n_confirmed_on_wrong_strand_only` is **0** — the one
+outcome D15 forbids. So the reading is: Stage-2 is almost perfectly strand-discriminative, which
+makes the resolver *load-bearing* for every confirmed locus — a mis-resolution costs the locus
+(a bounded false negative) and can never manufacture one (a false novelty). That is exactly the
+degradation D15 specifies.
+:::
+
+::: {.callout-warning}
+## An invariance of 1.0 and a strand-blind scorer are the same number, so two liveness controls ship beside it
+
+Had Stage-2 ignored orientation it would have agreed with itself everywhere and reported *perfect*
+robustness while measuring nothing — the shape that let a mask run clean while masking nothing.
+`max_abs_posterior_delta` and `n_verdict_disagreements` are reported alongside and asserted
+non-zero by the golden: a designed control that **must** fire.
+:::
+
+::: {.callout-warning}
+## Stage-2 is NOT bit-deterministic across batch composition — measured at 0.029 logits
+
+A contig and its reverse complement hand Stage-2 **byte-identical** RNA (26 of 28 distinct payload
+sequences were scored twice this way — itself a check that the resolver + RC handoff round-trips).
+The two scorings disagree in **14 of 26** cases, by up to **0.0292** of logit: bf16 +
+flash-attention + `score_rows`' length-sorted batching put the same sequence in different batch
+positions. This is why the golden **replays committed logits** rather than re-running the model —
+a hash-diffing regression that re-scored would be flaky by construction — and it is a standing
+caveat on any Stage-2 number near an operating point.
+:::
+
+::: {.callout-note}
+## The fixture had to be built to *break* two degeneracies, and a third bit anyway
+
+(1) `flank_context` reverse-complements minus-strand rows on fetch, so `context_seq` is **always**
+in the locus's own sense and every locus in it is on `+`. A fixture built straight from it could
+not distinguish a working resolver from one hardcoded to `"+"`, so each record contributes the
+slab **and** its reverse complement. (2) Four contigs are the **reverse** (PRD §12's
+composition-exact null, not the RC — an RC is useless against an RC-equivariant scanner); Stage-1
+finds **zero** loci in all four. (3) The unit file's synthetic carrier was `"ACGT"` repeated, which
+is **its own reverse complement** — the `+` and `−` payloads came out byte-identical and two tests
+failed on it. `_CARRIER` is now non-palindromic and a test asserts it.
+:::
+
+::: {.callout-note}
+## What the committed fixture does NOT exercise, said out loud
+
+Every one of its 27 loci **resolves**, so D15's ambiguous / both-strand-carry-through branch — the
+recall-favouring half of the rule — emits nothing there. `low_order_confidence_fraction: 0.0` is
+therefore a property of the input, not evidence the branch works. The report carries
+`ambiguity_path_exercised: false` as its own boolean rather than leaving that to be inferred from
+a zero, the golden asserts it, and the branch is covered synthetically in the unit tier.
+:::
+
+**Decisions.** No ADR amendment and no §7 sign-off: D3 and D15 are implemented, not changed, and
+**no value is pinned** — all eleven knobs on `run_two_stage` are keyword-only with **no default**
+(`source_prior`/`target_prior` included, so declining the §11 prior-shift is an explicit `None`),
+the `argparse` layer marks each one `required=True`, and `rule.pinned` is `false` in the report.
+The Stage-2 operating point used, **0.5**, is the neutral decision boundary of a calibrated
+posterior, explicitly *not* D3's "most-liberal posterior with FDP ≤ 10 %", which needs the P5 FDR
+machinery. `is_science: false` / `gated: false`: this is a harness regression on a 20-contig
+fixture, and P3-16 is the precision comparison.
+
+**Sabotage found two real gaps.** The invariance denominator (`/n_confirmed` vs `/n_loci`) was
+untestable while every fixture locus was confirmed, and the wrong-strand-only counter's `and`
+could be relaxed to an `or` while no fixture ever confirmed *both* strands. Two tests now separate
+each pair. Two further sabotages were badly aimed rather than gaps — they mutated the source while
+their named test read the **committed** JSON, which no source edit can reach.
+
+**Commit.** one atomic commit on `p3-14-two-stage`, parent `81b6cd1`.

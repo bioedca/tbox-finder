@@ -83,7 +83,6 @@ PRD §6, §13.1; ADR-0005 D15.
 
 from __future__ import annotations
 
-import inspect
 import itertools
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -91,7 +90,7 @@ from typing import Any
 
 import numpy as np
 
-from tbox_finder.infer.call import require_integer
+from tbox_finder.infer.call import require_integer, rule_parameters_have_no_default
 from tbox_finder.infer.locus import (
     ELEMENT_CLASS_NAMES,
     NOT_ELEMENT,
@@ -408,14 +407,14 @@ def no_rule_parameter_has_a_default(func: Any = None) -> bool:
 
     ``func`` exists so the predicate can be pointed at a stub that *does* carry a default and
     shown to return False.
+
+    The set comparison and the no-default walk are
+    :func:`tbox_finder.infer.call.rule_parameters_have_no_default` (P3-14 promotion, behaviour
+    unchanged); this entry keeps the D15-specific default target and docstring.
     """
-    params = inspect.signature(resolve_strand if func is None else func).parameters
-    keyword_only = {
-        name: p for name, p in params.items() if p.kind is inspect.Parameter.KEYWORD_ONLY
-    }
-    if set(keyword_only) != set(RULE_PARAMETERS):
-        return False
-    return all(p.default is inspect.Parameter.empty for p in keyword_only.values())
+    return rule_parameters_have_no_default(
+        resolve_strand if func is None else func, RULE_PARAMETERS
+    )
 
 
 __all__ = [
