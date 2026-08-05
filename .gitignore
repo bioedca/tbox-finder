@@ -220,6 +220,12 @@ secrets.y*ml
 # Carve-out: the tiny committed P1-01 kernel-smoke DNA token fixture (1 KB, reproducible
 # from manifest.json seed) is a test input, not a data blob.
 !tests/fixtures/kernel_smoke_dna/dna_tokens.npy
+# Carve-out: the P3-14 two-stage golden's Stage-1 per-window logits (~510 KB fp16) — the real
+# production scanner's output for 20 fixture contigs. CI installs no torch, so the golden must
+# replay these rather than re-run the model; without them the regression cannot exist at all.
+# NOT git-LFS on purpose: a checkout without git-lfs leaves a 132-byte pointer that every
+# existence check passes, which has bitten this repo in CI and on the cluster alike.
+!tests/fixtures/two_stage/stage1_window_logits.npz
 *.pt
 *.pth
 *.ckpt

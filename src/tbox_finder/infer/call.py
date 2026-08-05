@@ -70,6 +70,7 @@ like :mod:`tbox_finder.infer.reconcile`. PRD §6, §13.1; ADR-0005 D3 + A3; ADR-
 
 from __future__ import annotations
 
+import inspect
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
@@ -197,6 +198,31 @@ def require_integer(name: str, value: Any, exc: type[Exception] = None) -> int:
         f"{name} must be a whole number, got {value!r}; int() would silently change it "
         "rather than convert it, and this is a locus-rule value"
     )
+
+
+def rule_parameters_have_no_default(func: Any, expected: Sequence[str]) -> bool:
+    """True iff ``func``'s keyword-only parameters are exactly ``expected``, none defaulted.
+
+    The shared implementation behind :func:`tbox_finder.infer.locus.no_rule_parameter_has_a_default`
+    (ADR-0005 D3), :func:`tbox_finder.infer.strand.no_rule_parameter_has_a_default` (D15) and
+    :func:`tbox_finder.integration.two_stage.no_rule_parameter_has_a_default` (the composed
+    harness). Each of those pins a different rule whose *values* ADR-0005 freezes at the §13.1
+    phase gate, and each enforces the same two things: a knob may not carry a default (which
+    would be a de-facto frozen value no ADR signed off and a caller could take by accident),
+    and the inventory is compared as a **set** so a knob added later without a matching
+    ``RULE_PARAMETERS`` entry fails rather than being waved through.
+
+    It lives here, once, because three copies of a *behavioural* predicate are three places to
+    fix a defect and two places to ship it. The callers keep their own names, docstrings and
+    ``func`` override — this is a promotion, not a rename.
+    """
+    params = inspect.signature(func).parameters
+    keyword_only = {
+        name: p for name, p in params.items() if p.kind is inspect.Parameter.KEYWORD_ONLY
+    }
+    if set(keyword_only) != set(expected):
+        return False
+    return all(p.default is inspect.Parameter.empty for p in keyword_only.values())
 
 
 def zero_flanked_array(zero_flanked: Any, seq_len: int) -> np.ndarray:
@@ -472,6 +498,7 @@ __all__ = [
     "candidates_from_mask",
     "element_posterior",
     "require_integer",
+    "rule_parameters_have_no_default",
     "sweep_candidate_counts",
     "zero_flanked_array",
 ]
