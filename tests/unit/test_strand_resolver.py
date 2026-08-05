@@ -79,6 +79,19 @@ _SCOPE = "global"
 _TAU = 0.5
 
 
+@pytest.fixture(autouse=True)
+def _restore_sys_path():
+    """The script under test mutates ``sys.path`` at import, and four tests import it.
+
+    Without this the entries accumulate for the rest of the session, so a module the script
+    shadows could resolve differently in an unrelated test file. Restored after each test
+    rather than never, since the assertions that read ``sys.path`` run *inside* the test.
+    """
+    saved = list(sys.path)
+    yield
+    sys.path[:] = saved
+
+
 def _load_order_script():
     spec = importlib.util.spec_from_file_location("measure_element_order", _ORDER_SCRIPT)
     mod = importlib.util.module_from_spec(spec)

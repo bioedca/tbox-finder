@@ -110,13 +110,14 @@ class HandoffError(ValueError):
     """Raised on a sequence this module refuses to transcribe, or a malformed span."""
 
 
-def reverse_complement(sequence: str) -> str:
-    """Reverse complement over the full IUPAC alphabet, case-preserving, **fail-closed**.
+def require_iupac(sequence: str) -> str:
+    """Return ``sequence`` as ``str``, refusing any character outside the IUPAC DNA alphabet.
 
-    Raises :class:`HandoffError` listing the offending characters rather than passing them
-    through or folding them to ``N``. Both silent behaviours exist elsewhere in this repo and
-    both produce a wrong minus-strand sequence that looks completely ordinary downstream — see
-    the module docstring.
+    The single allowlist check for this module, so the two call sites cannot drift into
+    different messages — or, worse, into different alphabets. Refuses rather than passing the
+    character through or folding it to ``N``: both silent behaviours exist elsewhere in this
+    repo and both produce a wrong strand that looks completely ordinary downstream (see the
+    module docstring).
     """
     text = str(sequence)
     bad = sorted({ch for ch in text if ch not in IUPAC_COMPLEMENT})
@@ -124,9 +125,18 @@ def reverse_complement(sequence: str) -> str:
         raise HandoffError(
             f"sequence carries {len(bad)} character(s) outside the IUPAC nucleotide alphabet: "
             f"{bad}. Refused rather than complemented to itself or to N — either would put a "
-            "silently wrong base on the minus strand handed to Stage-2"
+            "silently wrong base on the strand handed to Stage-2"
         )
-    return text.translate(_COMPLEMENT_TABLE)[::-1]
+    return text
+
+
+def reverse_complement(sequence: str) -> str:
+    """Reverse complement over the full IUPAC alphabet, case-preserving, **fail-closed**.
+
+    Validates through :func:`require_iupac`, so a direct caller gets the same refusal the
+    handoff does.
+    """
+    return require_iupac(sequence).translate(_COMPLEMENT_TABLE)[::-1]
 
 
 def transcribe_to_rna(sequence: str, *, strand: str) -> str:
@@ -137,21 +147,17 @@ def transcribe_to_rna(sequence: str, *, strand: str) -> str:
     are delegated to :func:`tbox_finder.stage2.tokenizer.transcribe`, the same function the
     Stage-2 training table was built with.
     """
-    if strand == STRAND_MINUS:
-        sequence = reverse_complement(sequence)
-    elif strand != STRAND_PLUS:
+    if strand not in (STRAND_PLUS, STRAND_MINUS):
         raise HandoffError(
             f"strand must be {STRAND_PLUS!r} or {STRAND_MINUS!r}, got {strand!r}; "
             "an ambiguous locus carries both, one payload each — it has no third value"
         )
-    # Validate the alphabet on the plus strand too: a caller must not be able to get an
-    # unchecked sequence into a Stage-2 payload just by resolving to '+'.
-    bad = sorted({ch for ch in sequence if ch not in IUPAC_COMPLEMENT})
-    if bad:
-        raise HandoffError(
-            f"sequence carries {len(bad)} character(s) outside the IUPAC nucleotide alphabet: "
-            f"{bad}"
-        )
+    # Checked on BOTH strands: a caller must not be able to get an unchecked sequence into a
+    # Stage-2 payload just by resolving to '+'. One helper, so the plus and minus paths cannot
+    # drift into different alphabets or different messages.
+    sequence = require_iupac(sequence)
+    if strand == STRAND_MINUS:
+        sequence = reverse_complement(sequence)
     # Attribute call, not a ``from`` import: the delegation is then observable — a test can
     # substitute ``rna_tokenizer.transcribe`` and assert this path used it, so "does not
     # fork T→U" is checked rather than asserted in prose.
@@ -288,6 +294,7 @@ __all__ = [
     "HandoffError",
     "handoff_is_sequence_only",
     "handoff_loci",
+    "require_iupac",
     "reverse_complement",
     "transcribe_to_rna",
 ]
