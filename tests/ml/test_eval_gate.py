@@ -303,10 +303,16 @@ def _build_smoke():
             seg_pred.append(t)
 
     # --- detection task: 100 positives vs real decoys; seeded overlapping scores ---
+    # `record_ids` links each dinucleotide decoy to the positive it was shuffled from. It
+    # does NOT enter the golden digest (which covers `(pool, decoy_id, sequence)`) and is
+    # read, never sampled, so supplying it cannot perturb any committed value above — it is
+    # what lets the P3-10 OOD block below be keyed on a REAL taxon instead of a row index.
+    names = clean["Name"].astype(str).tolist()
     decoy_records = decoys.build_corpus_pools(
         clean[decoys.GC_COL].astype(float).tolist(),
         clean[decoys.LEN_COL].astype(int).tolist(),
         clean[decoys.SEQ_COL].astype(str).tolist(),
+        record_ids=names,
         **_DECOY,
     )
     n_pos = len(prod_codes)
@@ -320,7 +326,53 @@ def _build_smoke():
     # synthetic "cmsearch" baseline: independent seeded hit mask (a fixed operating point)
     brng = random.Random(_SEED + 2)
     baseline_hit = [1 if (brng.random() < (0.80 if y == 1 else 0.05)) else 0 for y in det_labels]
-    return seg_true, seg_pred, seg_lengths, det_labels, det_scores, baseline_hit, n_pos, n_dec
+    det_units = _detection_block_units(clean, names, decoy_records)
+    return (
+        seg_true,
+        seg_pred,
+        seg_lengths,
+        det_labels,
+        det_scores,
+        baseline_hit,
+        n_pos,
+        n_dec,
+        det_units,
+    )
+
+
+def _detection_block_units(clean, names, decoy_records):
+    """One block label per detection row: its REAL taxonomic order, or ``None``.
+
+    P3-09 left the OOD-ECE golden to P3-10 because the smoke fixture "carries no homology-
+    cluster structure", and inventing one would fabricate the very structure the estimator
+    exists to respect (§10.2/§10.3). It does, however, carry each record's real ``order``
+    — which is exactly the granularity of ADR-0004 D5's leave-one-order-out unit, and one
+    of ``resample.BLOCK_GRANULARITY_COLUMNS``. So:
+
+    * a **positive** blocks on its own order;
+    * a **dinucleotide-shuffled decoy** blocks on the order of the record it was shuffled
+      from — real provenance, carried by ``source_record_id``, and the same construction the
+      real leave-clade-out units have (their negatives are dinuc decoys carved from the same
+      held-out records);
+    * a **GC-background decoy** has no source record at all, so it gets ``None`` and is
+      excluded downstream. Assigning it an order would be the fabrication this avoids.
+
+    Records whose ``order`` is null in the source catalogue (3 of 100) are ``None`` too.
+    """
+    order_by_name: dict[str, str] = {}
+    for name, order in zip(names, clean["order"].tolist(), strict=True):
+        if order is None or order != order or str(order).strip() == "":  # NaN-safe
+            continue
+        previous = order_by_name.setdefault(str(name), str(order))
+        assert previous == str(order), (
+            f"record name {name!r} maps to two orders ({previous!r}, {order!r}); the "
+            "name→order map would not be single-valued and the block key would be ambiguous"
+        )
+    units: list[str | None] = [order_by_name.get(str(n)) for n in names]
+    for record in decoy_records:
+        parent = record.get("source_record_id")
+        units.append(order_by_name.get(str(parent)) if parent is not None else None)
+    return units
 
 
 def _per_record_pairs(seg_true, seg_pred, seg_lengths):
@@ -336,9 +388,17 @@ def _per_record_pairs(seg_true, seg_pred, seg_lengths):
 def _compute_smoke_metrics() -> dict:
     """Compute every PRD §2 gate metric on the smoke fixture (the committed-expectation
     payload). Deterministic — the source of ``expected.json``."""
-    seg_true, seg_pred, seg_lengths, det_labels, det_scores, baseline_hit, n_pos, n_dec = (
-        _build_smoke()
-    )
+    (
+        seg_true,
+        seg_pred,
+        seg_lengths,
+        det_labels,
+        det_scores,
+        baseline_hit,
+        n_pos,
+        n_dec,
+        det_units,
+    ) = _build_smoke()
     gate4 = M.gate4_core_min_f1(seg_true, seg_pred)
     base_p, base_r = M.baseline_operating_point(det_labels, baseline_hit)
     matched = M.recall_at_matched_precision(det_labels, det_scores, base_p)
@@ -369,6 +429,64 @@ def _compute_smoke_metrics() -> dict:
         "baseline_recall": base_r,
         "recall_at_matched_precision": matched["recall"],
         "recall_gap_pp": M.recall_gap_pp(matched["recall"], base_r),
+        # GATE-2's OTHER estimator (ADR-0005 D13 / Amendment A2) — reported, never gated.
+        # P3-09 built it and deferred this golden to P3-10 (imp.md:1477).
+        "ood_ece": _smoke_ood_ece(det_labels, det_scores, det_units),
+    }
+
+
+#: The OOD golden's bootstrap size. Small on purpose: the leave-one-out beta kernel is
+#: O(n^2) per replicate in pure Python, and this tier has a CI wall-clock budget (§8.6).
+#: It is a *golden*, so the number only has to be reproducible, not tight.
+_OOD_N_BOOT = 60
+_OOD_SEED = 42
+
+
+def _smoke_ood_ece(det_labels, det_scores, det_units):
+    """The D13 estimator over the fixture rows that have a real taxonomic block.
+
+    Excludes the 50 GC-background decoys and the 3 records with no ``order`` — they have no
+    block, and ``resample.blocks_by_key`` refuses a missing label rather than collapsing
+    them into one giant pseudo-block. The exclusion count is part of the golden, so silently
+    dropping more rows changes a committed number instead of passing quietly.
+    """
+    from tbox_finder.calib import ece as ECE
+
+    # The three vectors are indexed by ONE shared index below, and they are built from
+    # different sources — `det_labels` is sized from `len(prod_codes)`, `det_units` from
+    # `len(names)` plus the decoys. If those ever diverged, every unit after the gap would
+    # attach to the wrong label and `ood_ece`'s own length check could not see it (`y` and
+    # `block_labels` are both derived from `keep`, so they always agree with each other).
+    if not (len(det_labels) == len(det_scores) == len(det_units)):
+        raise AssertionError(
+            "detection vectors are misaligned: labels="
+            f"{len(det_labels)}, scores={len(det_scores)}, units={len(det_units)}"
+        )
+    keep = [i for i, unit in enumerate(det_units) if unit is not None]
+    out = ECE.ood_ece(
+        [det_labels[i] for i in keep],
+        [det_scores[i] for i in keep],
+        [det_units[i] for i in keep],
+        block_key="loo_order_unit",
+        n_boot=_OOD_N_BOOT,
+        seed=_OOD_SEED,
+    )
+    return {
+        "n_records": out["n_records"],
+        "n_positives": out["n_positives"],
+        "n_blocks": out["n_blocks"],
+        "n_excluded_no_block": len(det_units) - len(keep),
+        "admissible": out["admissible"],
+        "min_n": out["min_n"],
+        "ood_ece": out["ood_ece"],
+        "bandwidth": out["bandwidth"],
+        "bandwidth_loo_log_likelihood": out["bandwidth_loo_log_likelihood"],
+        "brier": out["brier_decomposition"]["brier"],
+        "brier_calibration": out["brier_decomposition"]["calibration"],
+        "brier_refinement": out["brier_decomposition"]["refinement"],
+        "ci_lower": out["ci"]["lower"],
+        "ci_upper": out["ci"]["upper"],
+        "gated": out["gated"],
     }
 
 
@@ -417,6 +535,25 @@ def test_eval_gate_matches_committed_expectation() -> None:
     assert got["n_decoys"] == expected["n_decoys"]
     assert got["n_seg_positions"] == expected["n_seg_positions"]
 
+    # GATE-2's OOD half (ADR-0005 D13 / A2) — the golden P3-09 deferred to P3-10.
+    ood_got, ood_exp = got["ood_ece"], expected["ood_ece"]
+    assert set(ood_got) == set(ood_exp)
+    for key in ("n_records", "n_positives", "n_blocks", "n_excluded_no_block", "min_n"):
+        assert ood_got[key] == ood_exp[key], key
+    assert ood_got["admissible"] is ood_exp["admissible"]
+    assert ood_got["gated"] is False is ood_exp["gated"]
+    for key in (
+        "ood_ece",
+        "bandwidth",
+        "bandwidth_loo_log_likelihood",
+        "brier",
+        "brier_calibration",
+        "brier_refinement",
+        "ci_lower",
+        "ci_upper",
+    ):
+        _close(ood_got[key], ood_exp[key])
+
     # GATE-4's non-gated exact-codon check (P2-14). Counts are exact; the rate is float.
     codon_got, codon_exp = got["specifier_exact_codon"], expected["specifier_exact_codon"]
     assert set(codon_got) == set(codon_exp)
@@ -429,6 +566,63 @@ def test_eval_gate_matches_committed_expectation() -> None:
     # coincided would be measuring nothing (§8.4).
     assert codon_got["n_overlapping"] > codon_got["n_exact"]
     assert 0 < codon_got["n_scorable"] <= expected["n_positives"]
+
+
+def test_the_ood_golden_is_blocked_by_a_real_taxon_and_not_by_record() -> None:
+    """The OOD golden must DISCRIMINATE, not merely run (P3-10).
+
+    Four things it would still produce a number without, and therefore has to be pinned on:
+    the blocking is a taxon and not a row; the block key is one ``resample`` accepts; the
+    unblockable rows were excluded rather than folded into one pseudo-block; and the D11
+    gate predicate is not applied to it.
+    """
+    _require_stack()
+    from tbox_finder.calib import ece as ECE
+    from tbox_finder.eval import resample as RS
+
+    got = _compute_smoke_metrics()["ood_ece"]
+
+    # 1. Block granularity is real: 13 orders standing for 177 rows. A record-level key
+    #    would make these equal, which is exactly the bootstrap PRD §12 forbids.
+    assert got["n_blocks"] < got["n_records"] // 5, (
+        f"{got['n_blocks']} blocks over {got['n_records']} rows is not a taxon-level "
+        "grouping — a record-keyed bootstrap gives an interval far narrower than the data"
+    )
+    assert "loo_order_unit" in RS.BLOCK_GRANULARITY_COLUMNS
+    for column in RS.RECORD_LEVEL_COLUMNS:
+        with pytest.raises(ValueError, match="identifies a record, not a block"):
+            RS.blocks_by_key([1, 2], ["a", "b"], key_name=column)
+
+    # 2. The unblockable rows were dropped, not defaulted. 50 GC-background decoys have no
+    #    source record at all; 3 of the 100 catalogue records carry no order.
+    #    ⚠ 53 = 50 + 3 holds only while none of the 40 sampled dinucleotide source records
+    #    is one of those 3 null-order records — a property of the decoy SEED, not of the
+    #    construction. The decomposition is asserted explicitly so a seed change fails here
+    #    with a readable cause instead of silently shifting a committed golden.
+    assert got["n_excluded_no_block"] == 53
+    assert got["n_positives"] == 100 - 3, "3 catalogue records carry no order"
+    n_dinuc = _DECOY["n_dinuc_sources"] * _DECOY["dinuc_per_source"]
+    assert got["n_records"] - got["n_positives"] == n_dinuc, (
+        "every dinucleotide decoy inherited an order; if a sampled source record had a null "
+        "order this would drop below 80 and the 53 above would no longer decompose as 50 + 3"
+    )
+    assert got["n_records"] + got["n_excluded_no_block"] == 100 + _DECOY["n_gc"] + (
+        _DECOY["n_dinuc_sources"] * _DECOY["dinuc_per_source"]
+    )
+    assert got["n_positives"] == 97
+
+    # 3. It clears the A2 floor, so the number is admissible rather than withheld — and the
+    #    floor it cleared is the pinned one.
+    assert got["min_n"] == 20 and got["admissible"] is True
+
+    # 4. GATE-2's predicate belongs to the D11 in-distribution estimator ONLY. This OOD
+    #    value would FAIL it, and nothing may apply it — D13 reports, never gates.
+    assert got["gated"] is False
+    assert M.gate2_ece_pass(got["ood_ece"]) is False, (
+        "the OOD value happens to sit above 0.05; if a future fixture moved it below, this "
+        "assertion would stop demonstrating that the two estimators are not interchangeable"
+    )
+    assert not hasattr(ECE, "gate2_ood_pass")
 
 
 def test_stdlib_kernels_match_sklearn_and_numpy() -> None:
