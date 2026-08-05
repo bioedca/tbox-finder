@@ -369,3 +369,63 @@ def test_the_same_rna_scored_at_two_batch_positions_does_not_agree() -> None:
     assert determinism["n_rna_scored_more_than_once"] > 0
     assert determinism["n_duplicate_groups_disagreeing"] > 0
     assert 0.0 < determinism["max_abs_duplicate_logit_delta"] < 0.1
+
+
+def test_the_one_reverse_complement_asymmetry_is_a_min_span_boundary_effect() -> None:
+    """Contig ``039baea1d6be`` yields 2 loci forward and 1 reverse-complemented. Measured why.
+
+    Caduceus-PS is RC-**equivariant**, so the two orientations should agree — and they nearly
+    do: mapping the RC posterior back into the forward frame, ``max |Δ(1 − P(bg))|`` is 2.5e-2
+    with a mean of 9.0e-4. Equivariance is approximate in floating point, not exact, and **16 of
+    1,536 positions** land on opposite sides of τ = 0.9 because of it.
+
+    One of those 16 decided a locus. In the forward frame the 5′-most position clearing τ in
+    that cluster is **536**, so gap-merge yields ``[536, 586)`` — **exactly 50 nt**, exactly
+    ``min_span``, kept by a single position. Reverse-complemented, 536 (and 540–542) fall below
+    τ, the 5′-most becomes **546**, the merged run is ``[546, 586)`` = 40 nt, and ``min_span``
+    drops it. The second locus ``[602, 673)`` is 71 nt and is recovered identically in both
+    orientations.
+
+    So this is **not** a harness defect and not a Stage-2 effect (the operating point only sets
+    ``confirmed``, it removes no rows): it is a locus sitting *on* the ``min_span`` floor being
+    decided by one position, and an RC residual of ~1e-3 being enough to move it.
+
+    **This is an inheritance for P5-01**, which freezes τ and ``min_span``: a locus at the floor
+    is not orientation-stable, so a scan of one strand is not interchangeable with a scan of the
+    other for such loci. Pinned here so the property is recorded rather than rediscovered.
+    """
+    pytest.importorskip("numpy")
+    import numpy as np
+
+    from tbox_finder.infer import call as C
+    from tbox_finder.integration import two_stage as T
+
+    contigs = {contig["contig_id"]: contig for contig in T.read_contigs(_CONTIGS)}
+    stage1 = T.read_stage1(_STAGE1)
+    forward, rc = contigs["039baea1d6be_fwd"], contigs["039baea1d6be_rc"]
+    length = len(forward["sequence"])
+
+    reconciled_f = T.reconcile_contig(stage1[forward["contig_id"]], length)
+    reconciled_r = T.reconcile_contig(stage1[rc["contig_id"]], length)
+    p_forward = C.element_posterior(reconciled_f.log_probs)
+    p_rc = C.element_posterior(reconciled_r.log_probs)[::-1]  # back into the forward frame
+
+    # Equivariance is close but not exact, and that residual is the whole story.
+    assert float(np.max(np.abs(p_forward - p_rc))) < 0.05
+    disagreeing = np.flatnonzero((p_forward >= _RULE["threshold"]) != (p_rc >= _RULE["threshold"]))
+    assert 0 < disagreeing.size < 0.02 * length
+
+    # The position that decided it, named.
+    assert p_forward[536] >= _RULE["threshold"]
+    assert p_rc[536] < _RULE["threshold"]
+
+    result = _replay()
+    cores = {
+        run.contig_id: [(x.candidate.start, x.candidate.end) for x in run.loci]
+        for run in result.runs
+    }
+    assert cores["039baea1d6be_fwd"] == [(536, 586), (602, 673)]
+    assert cores["039baea1d6be_rc"] == [(length - 673, length - 602)]
+    # The kept run is exactly at the floor; the dropped one is 10 nt short of it.
+    assert _RULE["min_span"] == 586 - 536
+    assert _RULE["min_span"] < 673 - 602

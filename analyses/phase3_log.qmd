@@ -2765,15 +2765,15 @@ runs that leg. `scripts/mint_two_stage_fixture.py` builds the contig set.
 
 **Outputs.** `reports/strand_robustness.json` · `reports/p3/two_stage_candidates.json` (27 rows) ·
 `tests/fixtures/two_stage/{contigs.json, stage1_window_logits.npz, stage2_logits.json, expected.sha256}` ·
-`tests/golden/test_two_stage_golden.py` (23) · `tests/unit/test_two_stage.py` (83). Candidate-table
+`tests/golden/test_two_stage_golden.py` (24) · `tests/unit/test_two_stage.py` (83). Candidate-table
 digest `04bc8a557a1883e2aa4814b4c816c030c7c44e630cd25e71184c6670a9748648`. No DVC object; no
 checkpoint; no W&B run. `infer/call.py` gains `rule_parameters_have_no_default` and `locus.py` /
 `strand.py` now delegate to it (promotion, behaviour unchanged).
 
 **Validation.** Golden green — the torch-free replay reproduces the committed digest exactly;
 `strand_robustness_problems` returns `[]` on the committed report. Full unit+golden+ml
-**4,668 passed / 14 failed** against a matched baseline worktree at `81b6cd1` at **4,562 / 14** —
-failure sets **identical** (`comm` empty both ways), and the +106 is exactly the new tests.
+**4,669 passed / 14 failed** against a matched baseline worktree at `81b6cd1` at **4,562 / 14** —
+failure sets **identical** (`comm` empty both ways), and the +107 is exactly the new tests.
 **39 sabotages, 36 RED against their NAMED test**; the three non-bites are the declared no-op
 control and two mutations inside the **torch-only** mint legs, which no CI-runnable test can
 execute and which were verified by execution instead. ⚠ The campaign was re-run after **each** of the
@@ -2855,6 +2855,29 @@ recall-favouring half of the rule — emits nothing there. `low_order_confidence
 therefore a property of the input, not evidence the branch works. The report carries
 `ambiguity_path_exercised: false` as its own boolean rather than leaving that to be inferred from
 a zero, the golden asserts it, and the branch is covered synthetically in the unit tier.
+:::
+
+::: {.callout-important}
+## An inheritance for P5-01: a locus sitting ON the `min_span` floor is not orientation-stable
+
+Review round 4 asked why contig `039baea1d6be` yields **2** loci forward and **1**
+reverse-complemented. Measured, not guessed. Caduceus-PS is RC-*equivariant*, and the two
+orientations very nearly agree — mapping the RC posterior back into the forward frame,
+`max |Δ(1 − P(bg))|` is **2.5e-2**, mean **9.0e-4**. But equivariance is approximate in floating
+point, and **16 of 1,536 positions** land on opposite sides of τ = 0.9 because of it.
+
+One of those 16 decided a locus. Forward, the 5′-most position clearing τ in that cluster is
+**536**, so gap-merge yields `[536, 586)` — **exactly 50 nt, exactly `min_span`**, kept by a
+single position. Reverse-complemented, 536 (and 540–542) fall below τ, the 5′-most becomes 546,
+the run is `[546, 586)` = 40 nt, and `min_span` drops it. The sibling locus `[602, 673)` is 71 nt
+and is recovered identically in both orientations.
+
+Not a harness defect, and not a Stage-2 effect — the operating point only sets `confirmed`, it
+removes no rows. **P5-01 freezes τ and `min_span`**, and this says a locus at the floor is decided
+by one position that an RC residual of ~1e-3 can move, so scanning one strand is not
+interchangeable with scanning the other for such loci. Pinned by
+`test_the_one_reverse_complement_asymmetry_is_a_min_span_boundary_effect` so the property is
+recorded rather than rediscovered.
 :::
 
 **Decisions.** No ADR amendment and no §7 sign-off: D3 and D15 are implemented, not changed, and
