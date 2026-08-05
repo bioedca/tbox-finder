@@ -188,7 +188,11 @@ def _oracle_logits(window_ids: np.ndarray, quality: str, *, pads: str = "zero") 
     logits = np.zeros((n_windows, window, NUM_CLASSES), dtype=np.float64)
     logits[..., _BG] = _BACKGROUND_LOGIT
 
-    rows, cols = np.nonzero(cls > _BG)
+    # Select "is an element class" explicitly rather than as `cls > _BG`: the latter is only
+    # equivalent while `background` holds the LOWEST class index. Were `CLASS_ORDER` reordered,
+    # every class below it would silently stop receiving `_ELEMENT_LOGIT` and be scored as
+    # background — the whole file would then measure a weaker fixture without failing.
+    rows, cols = np.nonzero((cls >= 0) & (cls != _BG))
     logits[rows, cols, cls[rows, cols]] = _ELEMENT_LOGIT * q[cols]
 
     logits[cls < 0] = _PAD_FILL[pads]
@@ -238,10 +242,18 @@ def _stitched(seq: str, quality: str) -> np.ndarray:
     This is the classic overlapping-scan stitch — tile ``[512k, 512(k+1))`` is read off the
     window starting at ``512k`` — and it is the *matched* control, not a straw man: same
     sequence, same encoder, same oracle, same caller parameters. The only difference is that
-    it picks one covering window instead of averaging them, so every position lands in the
-    **left half** of its window and the first ``_EDGE_NT`` nt of every 512-nt tile are scored
-    from truncated context. A locus whose 5′ end falls on a 512 boundary loses exactly that
-    band — the artifact.
+    it picks one covering window instead of averaging them, so a position lands in the **left
+    half** of its window and the first ``_EDGE_NT`` nt of every 512-nt tile are scored from
+    truncated context. A locus whose 5′ end falls on a 512 boundary loses exactly that band —
+    the artifact.
+
+    **The tail is the exception**, and it is not the left half. ``tile_windows`` is
+    tail-anchored, so on this file's 3,072-nt sequence there is no window starting at 2560:
+    positions 2560–3071 fall back to owner 2048 at in-window offsets 512–1023, i.e. the
+    **right** half, where the truncated band sits at the 3′ end instead. Measured — 2,560
+    left-half positions and exactly the last 512 right-half. The phase sweep lives in
+    ``[1024, 1696)``, entirely left-half, so no assertion here depends on the tail; the case
+    is stated only so a later reader does not read "left half" as an invariant of the tiling.
 
     A control has to be able to produce the right answer, or "it disagrees" says nothing;
     :func:`test_the_stitch_control_agrees_wherever_the_grid_happens_to_be_kind` is that leg.
@@ -275,14 +287,20 @@ def _stitch_call(seq: str, quality: str, *, threshold: float = _TAU) -> list[Can
 # ═════════════════════════════════════════════════════════════════════════════
 _SRC_ROOT = Path(reconcile_mod.__file__).resolve().parents[1]
 
+#: Both node types, always. A guard that matches only ``ast.FunctionDef`` is evaded by a
+#: single keyword: an ``async def reconcile_windows`` would be an unreported fork, and an
+#: ``async def scan_encoded_windows`` would report as *missing* rather than as unwired. A
+#: refusal that one keyword walks past is not a refusal. CodeRabbit, r1.
+_FUNC_NODES = (ast.FunctionDef, ast.AsyncFunctionDef)
+
 
 def _module_ast(module) -> ast.Module:
     return ast.parse(Path(module.__file__).read_text(encoding="utf-8"))
 
 
-def _function_def(module, name: str) -> ast.FunctionDef:
+def _function_def(module, name: str) -> ast.FunctionDef | ast.AsyncFunctionDef:
     for node in ast.walk(_module_ast(module)):
-        if isinstance(node, ast.FunctionDef) and node.name == name:
+        if isinstance(node, _FUNC_NODES) and node.name == name:
             return node
     raise AssertionError(f"{module.__name__} defines no function {name!r}")
 
@@ -333,12 +351,17 @@ def test_exactly_one_module_in_the_tree_defines_the_operator():
     copy be fixed while the other keeps shipping — and `calib/temperature.py` legitimately
     needs to re-reconcile after applying T, which is exactly the pressure that produces one.
     It calls the P2 function; this test is what keeps that true.
+
+    Scope: this collects the *modules* that define the name, so it owns the **cross-module**
+    fork. A second definition inside `infer/reconcile.py` itself is a different failure —
+    plain shadowing — and `ruff` F811 rejects it as a CI-blocking error (verified by
+    execution, not assumed), so it is covered rather than missed.
     """
     definers = sorted(
         path.relative_to(_SRC_ROOT).as_posix()
         for path in _SRC_ROOT.rglob("*.py")
         if any(
-            isinstance(node, ast.FunctionDef) and node.name == "reconcile_windows"
+            isinstance(node, _FUNC_NODES) and node.name == "reconcile_windows"
             for node in ast.walk(ast.parse(path.read_text(encoding="utf-8")))
         )
     )
@@ -353,7 +376,7 @@ def test_the_caller_consumes_a_reconciled_distribution_and_derives_none_of_its_o
     reduce), and it stays structural only while the caller owns no reduction of its own.
     """
     defined = {
-        node.name for node in ast.walk(_module_ast(call_mod)) if isinstance(node, ast.FunctionDef)
+        node.name for node in ast.walk(_module_ast(call_mod)) if isinstance(node, _FUNC_NODES)
     }
     assert not defined & {"logsumexp", "log_softmax", "softmax", "reconcile_windows"}
 
@@ -768,3 +791,31 @@ def test_the_geometry_under_test_is_the_pinned_one():
         "at or below 2x, the ramp's midpoint offset ties element against background and "
         "np.argmax resolves the tie to background — a fixture artifact, not an operator one"
     )
+
+
+def test_the_element_mask_does_not_assume_background_is_the_lowest_class_index(monkeypatch):
+    """Make the CodeRabbit r1 class-ordering fix non-vacuous.
+
+    Under the shipped `CLASS_ORDER`, `background` is index 0, so ``cls > _BG`` and "is an
+    element class" happen to coincide and the fix is a no-op — which is exactly the shape of
+    change that gets reverted later because nothing shows it mattered. Re-point the oracle at
+    a table where `background` sits mid-order and the coincidence breaks: a class *below* it
+    must still receive ``_ELEMENT_LOGIT`` rather than being scored as carrier.
+    """
+    fake_bg = 3
+    table = np.full_like(_TOKEN_CLASS, -1)
+    table[BASE_TO_ID["A"]] = fake_bg
+    table[BASE_TO_ID["N"]] = fake_bg
+    table[BASE_TO_ID["C"]] = 1  # deliberately BELOW the background index
+    table[BASE_TO_ID["G"]] = 5
+    table[BASE_TO_ID["T"]] = 6
+    monkeypatch.setitem(globals(), "_TOKEN_CLASS", table)
+    monkeypatch.setitem(globals(), "_BG", fake_bg)
+
+    window_ids = np.full((1, WINDOW_NT), BASE_TO_ID["A"], dtype=np.int16)
+    window_ids[0, STRIDE_NT] = BASE_TO_ID["C"]
+    logits = _oracle_logits(window_ids, "step")
+
+    assert logits[0, STRIDE_NT, 1] == _ELEMENT_LOGIT
+    assert logits[0, STRIDE_NT, fake_bg] == _BACKGROUND_LOGIT
+    assert logits[0, 0, 1] == 0.0
