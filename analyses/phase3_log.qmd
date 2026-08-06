@@ -3324,9 +3324,11 @@ green because their node ids named a *parametrized* test without its parameter a
 **zero** tests — the harness now refuses a run that collects nothing, which is the same
 "absence reads as a pass" failure the campaign exists to catch. ruff 0.15.15 + black 25.11.0 clean.
 
-**Review.** Two CodeRabbit-CLI rounds, **13 findings, all 13 real** (4 major); a third round is
-**unmet** ("Review limit reached", 41-minute reset), so the gate is not satisfied and the PR is not
-merged. Every major was a hole in a guard rather than in the science. r1: the supply derivation
+**Review.** **Ten CodeRabbit-CLI rounds; 27 findings, all 27 real** (6 major), then r10 returned
+**"No new findings"** and the gate closed. Sequence: 9, 4, 3, 1, 2, 2, 1, 2, 5, 0 — note that it did
+**not** decay monotonically; r9 carried two majors after four quiet rounds, so "the last round was
+small" was never evidence of convergence. Every major was a hole in a guard rather than in the
+science. r1: the supply derivation
 could return `available: True` **with a clause missing** — set in the `except` branch *or* the `if`
 branch, and with `production_arm_config()` returning `None` while `sweep_fingerprint` succeeded
 neither ran, so `all(...)` skipped an absent key (reproduced: 5 of 6 clauses, `available=True`);
@@ -3338,6 +3340,24 @@ re-check), and a control record made of **booleans** certified, because `isinsta
 True so `true`/`false` clears both floors and the margin. ⚠ The `CodeRabbit` **check read `pass` on
 a rate-limit notice** throughout — §5.1's trap for the tenth step running; no Greptile credit spent
 (budget 4/16 used, `available`), since the CLI resets shortly and is free.
+
+**The later rounds kept finding ONE recurring shape, in four different places:** a malformed field
+escaping as a traceback instead of the named refusal + `exit 3` (`posteriors` non-mapping at r2;
+**coerce-before-validate** at r3, where `true` merged as `1.0` and `"0.5"` as `0.5` and both
+*certified*; `strand_posteriors` and `unresolved` at r5). Two more were the emptiness pattern this
+repo keeps meeting: the supply derivation could return `available: True` with a clause **missing**
+(`all({})` is True), and a duplicate `candidate_id` **inside one shard** collapsed silently while the
+cross-shard guard could not see it. r9's two majors were the sharpest: **the control never asserted
+the context window**, so an over-length tbdb positive would have certified against *bytes the model
+never scored* (the record hashes the full sequence; `score_rows` calls the bare `encode`); and **the
+merge never checked that a merged id belongs to this round**, so a foreign shard table could lift
+coverage past the very floor the function exists to enforce. ⚠ Also r9: `--min-coverage 0` disabled
+the floor outright.
+
+**⚠ The Fair-Usage limit blocked three separate rounds** (41, 37 and 33 minutes) — for a change this
+size, budget review in **hours**. And the `CodeRabbit` PR check read `pass` on every one of those
+notices, §5.1's trap for the tenth step running; only on the final round did it read
+*"Review completed"*.
 
 **Also worth recording: `sbatch --test-only` was green on a job that could not run.** The cluster's
 `tbox-ml-rna` has no editable install and the sbatch lacked `PYTHONPATH=src`. The preflight
