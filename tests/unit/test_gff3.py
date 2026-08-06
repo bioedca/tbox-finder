@@ -233,6 +233,63 @@ def test_attribute_first_collapses_absent_and_empty():
 
 
 # --------------------------------------------------------------------------- #
+# Immutability — ``frozen=True`` stops at the field, the mapping needed its own
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize("model", ["GffFeature", "CdsFeature"])
+def test_parsed_attributes_cannot_be_mutated_through_the_frozen_model(model):
+    """``frozen=True`` blocks field *reassignment*; the dict it holds was still writable.
+
+    That is not a style point: ``is_pseudo`` and ``gene_identity_text`` are pure reads of this
+    mapping, so a caller writing ``attributes["pseudo"] = ("true",)`` changes what a model
+    documented as immutable answers, with no copy and no trace.
+    """
+    feature = _feature(CDS_PLUS) if model == "GffFeature" else _cds(CDS_PLUS)[0]
+    with pytest.raises(TypeError):
+        feature.attributes["product"] = ("something else",)  # type: ignore[index]
+    # The positive control: the read path is untouched, so the guard is refusing writes rather
+    # than the mapping being empty or of the wrong shape.
+    assert gff3.attribute_first(feature.attributes, "product") == "alanine--tRNA ligase"
+
+
+def test_a_model_copies_the_mapping_it_was_handed():
+    """Freezing the *view* is not enough if the caller keeps the underlying dict."""
+    attrs = {"product": ("p",)}
+    feature = gff3.GffFeature(
+        seqid="ctg1",
+        source="x",
+        type="CDS",
+        start=1,
+        end=9,
+        score=None,
+        strand="+",
+        phase=0,
+        attributes=attrs,
+    )
+    attrs["product"] = ("mutated",)
+    assert gff3.attribute_first(feature.attributes, "product") == "p"
+
+
+def test_features_survive_pickle_and_deepcopy_and_come_back_frozen():
+    """A ``mappingproxy`` is neither picklable nor deep-copyable on its own.
+
+    Without ``__getstate__``/``__setstate__`` the freeze would trade a latent mutation for a
+    hard failure at a process boundary — and P3-15′-c-ii fans the (c) predicate out per host.
+    The unpickled feature must also still be frozen, or the round trip is a laundering step.
+    """
+    import copy
+    import pickle
+
+    (cds,) = _cds(CDS_PLUS)
+    for clone in (pickle.loads(pickle.dumps(cds)), copy.deepcopy(cds)):
+        assert clone == cds
+        assert gff3.attribute_first(clone.attributes, "product") == "alanine--tRNA ligase"
+        with pytest.raises(TypeError):
+            clone.attributes["product"] = ("x",)  # type: ignore[index]
+
+
+# --------------------------------------------------------------------------- #
 # ##FASTA, comments, blank lines
 # --------------------------------------------------------------------------- #
 
@@ -250,9 +307,38 @@ def test_fasta_directive_terminates_the_feature_section():
     assert [c.feature_id for c in got] == ["cds-A"]
 
 
-def test_fasta_directive_is_matched_case_insensitively_and_with_surrounding_space():
-    lines = ["##gff-version 3", CDS_PLUS, "  ##fasta  ", ">c", "ACGT"]
-    assert len(gff3.parse_gff3_cds(lines)) == 1
+def test_only_the_EXACT_fasta_directive_terminates_the_feature_section():
+    """A near-miss must not end the feature section — that is a *silent truncation*.
+
+    ``##fasta`` and ``##FASTA `` are comment lines under GFF3's own rules, and an indented
+    ``##FASTA`` is not a directive at all. Reading any of them as the terminator drops every CDS
+    below that line with nothing recorded anywhere, so (c) reads ``unavailable`` for a host
+    whose annotation was complete. Asserted by putting a **real CDS after** the near-miss: the
+    exact-match reader still finds it, and a case-folding one silently returns half the file.
+    """
+    for variant in ("##fasta", "##FASTA ", "##Fasta"):
+        got = gff3.parse_gff3_cds(["##gff-version 3", CDS_PLUS, variant, CDS_MINUS])
+        assert [c.feature_id for c in got] == ["cds-A", "cds-B"], variant
+
+
+def test_an_INDENTED_fasta_directive_is_a_refusal_rather_than_a_quiet_stop():
+    """The other half: a leading space makes it neither a directive nor a comment.
+
+    Under the loose rule this returned one CDS and said nothing. Refusing is the right failure —
+    a nine-column refusal is an artifact a reader can act on; a short census looks exactly like
+    a short genome.
+    """
+    with pytest.raises(gff3.Gff3Error, match="tab-separated columns"):
+        gff3.parse_gff3_cds(["##gff-version 3", CDS_PLUS, "  ##FASTA  ", CDS_MINUS])
+
+
+def test_is_fasta_directive_accepts_the_directive_and_nothing_else():
+    """The predicate itself, with the positive control an assertion-deletion cannot fake."""
+    assert gff3.is_fasta_directive("##FASTA") is True
+    assert gff3.is_fasta_directive("##FASTA\n") is True
+    assert gff3.is_fasta_directive("##FASTA\r\n") is True
+    for variant in ("##fasta", "##Fasta", " ##FASTA", "##FASTA ", "###FASTA", "##FASTAX", ""):
+        assert gff3.is_fasta_directive(variant) is False, variant
 
 
 def test_comments_directives_and_blank_lines_are_skipped():
@@ -370,6 +456,25 @@ def test_declared_ids_still_group_across_rows_after_the_id_less_fix():
     ]
     (c,) = gff3.parse_gff3_cds(lines)
     assert c.segments == ((10, 20), (30, 40)) and c.feature_id == "cds-A"
+
+
+def test_a_declared_ID_that_READS_LIKE_the_anonymous_key_does_not_merge():
+    """The two key spaces must not be comparable, or a declared ID can name an ID-less row.
+
+    ``ctg1:10-20:+:CDS#0`` is a perfectly legal GFF3 ``ID``, and it is *exactly* the fallback
+    key row 0 at those coordinates gets. Under a shared string keyspace the declared CDS at
+    500–600 and the ID-less one at 10–20 collapse into a single 10–600 feature whose attributes
+    are the union of both — a merge, not a crash, and the third distinct instance of
+    [[duplicate-key-merges-instead-of-colliding]] in this module alone.
+    """
+    lines = [
+        "ctg1\tx\tCDS\t10\t20\t.\t+\t0\tproduct=anonymous",
+        "ctg1\tx\tCDS\t500\t600\t.\t+\t0\tID=ctg1:10-20:+:CDS#0;product=declared",
+    ]
+    got = gff3.parse_gff3_cds(lines)
+    assert len(got) == 2
+    assert [gff3.attribute_first(c.attributes, "product") for c in got] == ["anonymous", "declared"]
+    assert [(c.start, c.end) for c in got] == [(10, 20), (500, 600)]
 
 
 def test_an_empty_ID_attribute_is_treated_as_undeclared():

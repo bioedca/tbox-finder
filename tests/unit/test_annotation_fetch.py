@@ -32,6 +32,10 @@ FIXTURE_GFF = REPO / "tests" / "fixtures" / "annotation" / "GCA_002790315.1.gff.
 ACC = "GCA_000296795.1"
 BASE = "https://ftp.ncbi.nlm.nih.gov/genomes/all/GCA/000/296/795/GCA_000296795.1_ASM29679v1"
 URL = f"{BASE}/GCA_000296795.1_ASM29679v1_genomic.gff.gz"
+#: a second, equally well-formed assembly — the corpus a report can describe *instead*.
+OTHER_ACC = "GCA_002790315.1"
+OTHER_BASE = "https://ftp.ncbi.nlm.nih.gov/genomes/all/GCA/002/790/315/GCA_002790315.1_ASM279031v1"
+OTHER_URL = f"{OTHER_BASE}/GCA_002790315.1_ASM279031v1_genomic.gff.gz"
 PAYLOAD = b"##gff-version 3\nctg1\tx\tCDS\t10\t20\t.\t+\t0\tID=cds-A;product=p\n"
 PAYLOAD_MD5 = hashlib.md5(PAYLOAD, usedforsecurity=False).hexdigest()
 N_PAYLOAD = len(PAYLOAD)
@@ -659,23 +663,28 @@ def test_a_missing_annotation_directory_has_no_orphans(tmp_path):
 # --------------------------------------------------------------------------- #
 
 
-def _clean_report(tmp_path):
+def _clean_report(tmp_path, *, accession: str = ACC, url: str = URL):
+    """A report that passes every clause — optionally about a *different* assembly.
+
+    The accession/URL are parameters because the interesting failure is a report that is
+    internally flawless and simply describes another corpus: nothing inside it can say so.
+    """
     rows = [
         {
-            "accession": ACC,
+            "accession": accession,
             "status": af.STATUS_OK,
-            "gff_url": URL,
+            "gff_url": url,
             "expected_md5": PAYLOAD_MD5,
             "observed_md5": PAYLOAD_MD5,
             "n_bytes": len(PAYLOAD),
-            "path": str(tmp_path / "GCA_000296795.1.gff.gz"),
+            "path": str(tmp_path / f"{accession}.gff.gz"),
             "from_cache": False,
             "note": "",
         }
     ]
     return af.build_fetch_report(
         rows,
-        targets=[_target()],
+        targets=[_target(accession, url)],
         control=af.verification_control(PAYLOAD, PAYLOAD_MD5),
         orphans=[],
         n_annotated_in_supply=1,
@@ -685,7 +694,7 @@ def _clean_report(tmp_path):
 
 
 def test_a_clean_report_validates(tmp_path):
-    assert af.validate_fetch_report(_clean_report(tmp_path)) == []
+    assert af.validate_fetch_report(_clean_report(tmp_path), targets=[_target()]) == []
 
 
 @pytest.mark.parametrize(
@@ -712,13 +721,18 @@ def test_a_clean_report_validates(tmp_path):
         ),
         ("control_powered", lambda r: r["control"].update(corrupt_payload_fails=False)),
         ("no_orphans", lambda r: r.update(orphans=["GCA_111111111.1.gff.gz"])),
+        ("clause_schema_current", lambda r: r.update(clause_schema_version="1")),
+        (
+            "rows_bind_to_targets",
+            lambda r: r["per_assembly"][0].update(gff_url=OTHER_URL),
+        ),
     ],
 )
 def test_each_clause_fails_alone(tmp_path, clause, mutate):
     """One clause broken at a time — an all-TRUE fixture cannot test a conjunction."""
     report = _clean_report(tmp_path)
     mutate(report)
-    problems = af.validate_fetch_report(report)
+    problems = af.validate_fetch_report(report, targets=[_target()])
     assert any(clause in p for p in problems), f"{clause} did not fail: {problems}"
 
 
@@ -733,7 +747,7 @@ def test_validation_evaluates_exactly_the_declared_clause_set(tmp_path):
     report = _clean_report(tmp_path)
     for key in ("sweep_complete", "n_targets", "control", "orphans"):
         report.pop(key, None)
-    problems = af.validate_fetch_report(report)
+    problems = af.validate_fetch_report(report, targets=[_target()])
     named = {c for c in af.REQUIRED_CLAUSES if any(c in p for p in problems)}
     assert named == {
         "sweep_complete",
@@ -753,7 +767,7 @@ def test_a_clause_computed_but_never_declared_is_reported(monkeypatch, tmp_path)
     evaluated to. The gate test's docstring claimed this was covered; it now is.
     """
     monkeypatch.setattr(af, "REQUIRED_CLAUSES", af.REQUIRED_CLAUSES - {"no_orphans"})
-    problems = af.validate_fetch_report(_clean_report(tmp_path))
+    problems = af.validate_fetch_report(_clean_report(tmp_path), targets=[_target()])
     assert problems == ["clause(s) computed but never declared: ['no_orphans']"]
 
 
@@ -800,21 +814,108 @@ def test_the_supply_report_is_read_exactly_once_per_fetch(tmp_path, monkeypatch)
 
 def test_a_missing_clause_key_is_reported_as_never_evaluated(monkeypatch, tmp_path):
     monkeypatch.setattr(af, "REQUIRED_CLAUSES", af.REQUIRED_CLAUSES | {"a_clause_nothing_computes"})
-    problems = af.validate_fetch_report(_clean_report(tmp_path))
+    problems = af.validate_fetch_report(_clean_report(tmp_path), targets=[_target()])
     assert problems == ["clause(s) never evaluated: ['a_clause_nothing_computes']"]
 
 
 def test_validation_refuses_a_non_list_per_assembly():
-    assert af.validate_fetch_report({"per_assembly": {}}) == [
+    assert af.validate_fetch_report({"per_assembly": {}}, targets=[_target()]) == [
         "per_assembly is not a list of objects"
     ]
+
+
+def test_a_FLAWLESS_report_about_a_DIFFERENT_CORPUS_is_refused(tmp_path):
+    """Every numeric clause is satisfiable by a report about assemblies nobody asked for.
+
+    The counts, the status tally, the byte total and the per-row md5 equality are all *internal*
+    — they compare the report with itself, or with numbers its own writer copied in from the
+    supply report. Swap the assembly and every one of them still passes. Asserted as an exact
+    equality on the problem list, so this test says "only the identity clause can see it"
+    rather than "something failed".
+    """
+    report = _clean_report(tmp_path, accession=OTHER_ACC, url=OTHER_URL)
+    assert af.validate_fetch_report(report, targets=[_target(OTHER_ACC, OTHER_URL)]) == []
+    assert af.validate_fetch_report(report, targets=[_target()]) == [
+        "clause failed: rows_bind_to_targets"
+    ]
+
+
+def test_a_row_whose_URL_names_another_assembly_fails_the_binding_clause(tmp_path):
+    """The row is *labelled* with the accession but the bytes came from the URL's directory."""
+    report = _clean_report(tmp_path)
+    report["per_assembly"][0]["gff_url"] = OTHER_URL
+    assert af.validate_fetch_report(report, targets=[_target()]) == [
+        "clause failed: rows_bind_to_targets"
+    ]
+
+
+def test_a_row_whose_EXPECTED_md5_was_rewritten_fails_only_the_binding_clause(tmp_path):
+    """A row that agrees with itself passes every digest clause in the report.
+
+    ``every_ok_row_md5_matches`` compares ``observed`` against ``expected`` — both fields of the
+    same row — so rewriting the pair to any 32-hex value keeps it green. Only a comparison
+    against the *supply report's* md5 catches an expectation that was moved to fit the bytes.
+    """
+    report = _clean_report(tmp_path)
+    forged = "b" * 32
+    report["per_assembly"][0].update(expected_md5=forged, observed_md5=forged)
+    # Re-derive the digest too, so the forgery is *complete*: this is the strongest version of
+    # the report a tamperer can write, and it is the only one worth testing against.
+    report["corpus_digest"] = af.corpus_digest([(ACC, forged)])
+    problems = af.validate_fetch_report(report, targets=[_target()])
+    assert not any("every_ok_row_md5_matches" in p for p in problems)
+    assert not any("corpus_digest_rederives" in p for p in problems)
+    assert problems == ["clause failed: rows_bind_to_targets"]
+
+
+def test_an_EMPTY_target_list_does_not_vacuously_satisfy_the_binding_clause(tmp_path):
+    """Absent evidence must fail the clause it was evidence for.
+
+    [[clauses-must-guard-emptiness]] — a clause read from a missing input is vacuously TRUE
+    exactly when there is nothing to check it against.
+    """
+    problems = af.validate_fetch_report(_clean_report(tmp_path), targets=[])
+    assert any("rows_bind_to_targets" in p for p in problems)
+
+
+def test_a_report_written_under_an_OLDER_clause_set_does_not_read_as_a_pass(tmp_path):
+    """Its ``validation_problems: []`` came from a weaker gate, and nothing else says so."""
+    report = _clean_report(tmp_path)
+    assert report["clause_schema_version"] == af.CLAUSE_SCHEMA_VERSION
+    report["clause_schema_version"] = "1"
+    assert af.validate_fetch_report(report, targets=[_target()]) == [
+        "clause failed: clause_schema_current"
+    ]
+
+
+def test_the_committed_clause_set_and_its_version_are_declared_together():
+    """A clause added without bumping the version leaves old reports looking current."""
+    assert af.CLAUSE_SCHEMA_VERSION == "2"
+    assert {"rows_bind_to_targets", "clause_schema_current"} <= af.REQUIRED_CLAUSES
+
+
+def test_validate_fetch_report_has_NO_DEFAULT_for_targets():
+    """A default would re-open the hole at every call site, silently.
+
+    ``targets=None``/``()`` makes the identity clause unevaluable exactly where a caller forgot
+    the evidence — and a clause with no evidence is the shape that reads as a pass. The pin is on
+    the *signature*, because that is what a future caller inherits.
+    """
+    import inspect
+
+    param = inspect.signature(af.validate_fetch_report).parameters["targets"]
+    assert param.default is inspect.Parameter.empty
+    assert param.kind is inspect.Parameter.KEYWORD_ONLY
 
 
 def test_an_md5_that_is_empty_on_both_sides_does_not_satisfy_the_match_clause(tmp_path):
     """``"" == ""`` is True; the clause must require a real 32-hex digest as well."""
     report = _clean_report(tmp_path)
     report["per_assembly"][0].update(observed_md5="", expected_md5="")
-    assert any("every_ok_row_md5_matches" in p for p in af.validate_fetch_report(report))
+    assert any(
+        "every_ok_row_md5_matches" in p
+        for p in af.validate_fetch_report(report, targets=[_target()])
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -850,7 +951,7 @@ def test_a_complete_single_target_run_validates(tmp_path):
         opener=_opener({url: payload}),
         workers=1,
     )
-    assert af.validate_fetch_report(report) == []
+    assert af.validate_fetch_report(report, targets=af.load_annotation_targets(path)) == []
     assert report["n_ok"] == 1 and report["n_downloaded"] == 1 and report["n_cached"] == 0
     assert report["bytes_total"] == len(payload)
 
@@ -866,7 +967,10 @@ def test_limit_sets_sweep_complete_false_and_the_validation_refuses(tmp_path):
         limit=1,
     )
     assert report["sweep_complete"] is False
-    assert any("sweep_complete" in p for p in af.validate_fetch_report(report))
+    assert any(
+        "sweep_complete" in p
+        for p in af.validate_fetch_report(report, targets=af.load_annotation_targets(path))
+    )
 
 
 def test_a_limit_of_zero_leaves_the_control_unacquired_and_unpowered(tmp_path):
@@ -879,7 +983,38 @@ def test_a_limit_of_zero_leaves_the_control_unacquired_and_unpowered(tmp_path):
         limit=0,
     )
     assert af.control_is_powered(report["control"]) is False
-    assert any("control_powered" in p for p in af.validate_fetch_report(report))
+    assert any(
+        "control_powered" in p
+        for p in af.validate_fetch_report(report, targets=af.load_annotation_targets(path))
+    )
+
+
+def test_an_UNREADABLE_control_file_is_an_unpowered_control_not_a_traceback(tmp_path, monkeypatch):
+    """A filesystem fault between writing the control and hashing it must not abort the run.
+
+    Uncaught, the ``OSError`` escapes ``main``'s refusal handler as exit 1 **and no report is
+    written at all** — so the one artifact that would have said "this acquisition cannot be
+    trusted" is the thing the failure destroys. Fail-closed instead: the three legs stay False,
+    ``control_powered`` fails, and the CLI exits 3 with a report that names the reason.
+    """
+    path, url, payload = _control_supply(tmp_path)
+    ann = tmp_path / "ann"
+    control_path = ann / af.destination_name(af.CONTROL_ACCESSION)
+    real_read = Path.read_bytes
+
+    def _refuse(self):
+        if self == control_path:
+            raise PermissionError(13, "Permission denied")
+        return real_read(self)
+
+    monkeypatch.setattr(Path, "read_bytes", _refuse)
+    report = af.fetch_annotations(
+        supply_report=path, annotation_dir=ann, opener=_opener({url: payload}), workers=1
+    )
+    assert af.control_is_powered(report["control"]) is False
+    assert "unreadable" in report["control"]["note"]
+    problems = af.validate_fetch_report(report, targets=af.load_annotation_targets(path))
+    assert any("control_powered" in p for p in problems)
 
 
 def test_a_failed_run_does_not_validate(tmp_path):
@@ -891,7 +1026,7 @@ def test_a_failed_run_does_not_validate(tmp_path):
         workers=1,
         sleep=lambda _s: None,
     )
-    problems = af.validate_fetch_report(report)
+    problems = af.validate_fetch_report(report, targets=af.load_annotation_targets(path))
     assert any("all_targets_ok" in p for p in problems)
     assert any("control_powered" in p for p in problems)
 
@@ -961,6 +1096,28 @@ def test_parse_census_reports_a_missing_file(tmp_path):
     assert census["n_failed"] == 1 and census["failures"][0]["note"] == "missing"
 
 
+def test_an_UNREADABLE_annotation_file_is_ONE_failure_row_not_a_dead_census(tmp_path, monkeypatch):
+    """The read sat above the ``except OSError`` that was written for it.
+
+    One unreadable file among 339 therefore aborted the whole census with a traceback and exit 1
+    — losing the 338 verdicts that had nothing wrong with them — where the module's contract is
+    a failure row and exit 3.
+    """
+    path, ann, fetch_path, _payload = _acquire(tmp_path)
+    target = ann / af.destination_name(af.CONTROL_ACCESSION)
+    real_read = Path.read_bytes
+
+    def _refuse(self):
+        if self == target:
+            raise PermissionError(13, "Permission denied")
+        return real_read(self)
+
+    monkeypatch.setattr(Path, "read_bytes", _refuse)
+    census = af.parse_census(supply_report=path, annotation_dir=ann, fetch_report=fetch_path)
+    assert census["n_failed"] == 1
+    assert "PermissionError" in census["failures"][0]["note"]
+
+
 def test_parse_census_reports_a_tampered_file_rather_than_parsing_it(tmp_path):
     path, ann, fetch_path, payload = _acquire(tmp_path)
     (ann / af.destination_name(af.CONTROL_ACCESSION)).write_bytes(payload + b"\x00")
@@ -968,16 +1125,18 @@ def test_parse_census_reports_a_tampered_file_rather_than_parsing_it(tmp_path):
     assert census["n_failed"] == 1 and "md5" in census["failures"][0]["note"]
 
 
-def test_a_census_of_a_DIFFERENT_corpus_than_the_fetch_certified_is_refused(tmp_path):
-    """The r2 defect: a census generated before its fetch describes a previous state.
+def test_a_SELF_CONSISTENT_fetch_report_about_other_bytes_is_caught_by_the_binding_clause(
+    tmp_path,
+):
+    """The r2 forgery, re-asserted against the layer that now catches it FIRST.
 
-    Timestamps cannot distinguish that from a census run after; a digest over the actual
-    (accession, md5) pairs can, and it is compared rather than assumed.
+    A fetch report whose md5s were all rewritten together used to reach the corpus-digest
+    comparison as a *validating* report; with ``rows_bind_to_targets`` it no longer validates at
+    all, because its expectations no longer equal the supply report's. The refusal must name the
+    clause, not collapse into the digest's generic "different corpus" — a reader has to be able
+    to tell "this report is about other assemblies" from "the files on disk moved".
     """
     path, ann, fetch_path, _payload = _acquire(tmp_path)
-    # A *self-consistent* fetch report describing other bytes: its digest still re-derives
-    # from its own rows, so it passes validation and the mismatch is the only thing left to
-    # catch it. Tampering with corpus_digest ALONE is caught one layer earlier — see below.
     other = json.loads(fetch_path.read_text(encoding="utf-8"))
     other_md5 = "a" * 32
     for row in other["per_assembly"]:
@@ -988,6 +1147,21 @@ def test_a_census_of_a_DIFFERENT_corpus_than_the_fetch_certified_is_refused(tmp_
     fetch_path.write_text(json.dumps(other), encoding="utf-8")
     census = af.parse_census(supply_report=path, annotation_dir=ann, fetch_report=fetch_path)
     assert census["n_failed"] == 0
+    assert census["corpus_matches_fetch_report"] is False
+    assert "rows_bind_to_targets" in census["corpus_check_reason"]
+
+
+def test_the_corpus_digest_still_fires_when_the_FILES_moved_under_an_honest_report(tmp_path):
+    """The digest's own remaining job: the disk state, not the report, is what changed.
+
+    This is the r2 ordering defect in its real form — a census that describes a different set of
+    bytes than the acquisition certified. The fetch report here is untouched and validates; only
+    the corpus it describes is no longer the corpus on disk.
+    """
+    path, ann, fetch_path, payload = _acquire(tmp_path)
+    (ann / af.destination_name(af.CONTROL_ACCESSION)).write_bytes(payload + b"\x00")
+    census = af.parse_census(supply_report=path, annotation_dir=ann, fetch_report=fetch_path)
+    assert census["n_failed"] == 1
     assert census["corpus_matches_fetch_report"] is False
     assert census["corpus_check_reason"] == "the fetch report certifies a different corpus"
 
@@ -1091,6 +1265,42 @@ def test_parse_census_refuses_a_file_that_never_declares_itself_gff3(tmp_path):
     assert census["n_failed"] == 1 and "##gff-version" in census["failures"][0]["note"]
 
 
+def test_the_census_uses_the_PARSERS_fasta_rule_and_not_a_looser_one_of_its_own(tmp_path):
+    """``has_fasta_section`` must answer about the file the reader actually read.
+
+    A census recognising ``##FASTA`` more loosely than :func:`gff3.iter_gff3_features` would
+    report a FASTA section on a file the parser read straight through — and the corpus total
+    ``n_with_fasta_section`` would then describe neither the parse nor the file. Driven with a
+    lowercase near-miss followed by a real CDS: the shared rule says "no FASTA section, two CDS",
+    and any looser census rule says "FASTA section" while the parse says otherwise.
+    """
+    import gzip as _gz
+
+    doc = (
+        b"##gff-version 3\n"
+        b"ctg1\tx\tCDS\t10\t20\t.\t+\t0\tID=a;product=p\n"
+        b"##fasta\n"
+        b"ctg1\tx\tCDS\t30\t40\t.\t+\t0\tID=b;product=q\n"
+    )
+    payload = _gz.compress(doc)
+    md5 = hashlib.md5(payload, usedforsecurity=False).hexdigest()
+    row = _annotated_row(
+        accession=af.CONTROL_ACCESSION, url=OTHER_URL, md5=md5, n_bytes=len(payload)
+    )
+    path = _write_supply(tmp_path, _minimal_supply([row], bytes_total=len(payload)))
+    ann = tmp_path / "ann"
+    ann.mkdir()
+    (ann / af.destination_name(af.CONTROL_ACCESSION)).write_bytes(payload)
+
+    census = af.parse_census(
+        supply_report=path, annotation_dir=ann, fetch_report=tmp_path / "absent.json"
+    )
+    assert census["n_failed"] == 0
+    assert census["per_assembly"][0]["n_cds"] == 2
+    assert census["per_assembly"][0]["has_fasta_section"] is False
+    assert census["totals"]["n_with_fasta_section"] == 0
+
+
 def test_parse_census_reports_a_file_that_parses_to_zero_cds(tmp_path):
     """Hashing correctly is not the same as being usable by (c)."""
     import gzip as _gz
@@ -1121,6 +1331,28 @@ def test_parse_census_reports_a_file_that_parses_to_zero_cds(tmp_path):
 def test_cli_requires_a_subcommand(capsys):
     with pytest.raises(SystemExit):
         af.main([])
+
+
+def test_cli_fetch_validates_against_the_REAL_targets_and_exits_0(tmp_path):
+    """The CLI must hand the validator the supply report's own targets, not a placeholder.
+
+    ``targets=[]`` or a hand-built stand-in at this call site would make the identity clause
+    unfalsifiable for every production run while every unit test — which passes its own targets —
+    stayed green. Driven through ``main`` with the file already cached, so the acquisition is
+    entirely offline and the autouse no-network guard stays armed.
+    """
+    path, _url, payload = _control_supply(tmp_path)
+    ann = tmp_path / "ann"
+    ann.mkdir()
+    (ann / af.destination_name(af.CONTROL_ACCESSION)).write_bytes(payload)
+    out = tmp_path / "fetch.json"
+    code = af.main(
+        ["fetch", "--supply-report", str(path), "--annotation-dir", str(ann), "--out", str(out)]
+    )
+    assert code == 0
+    written = json.loads(out.read_text(encoding="utf-8"))
+    assert written["validation_problems"] == []
+    assert written["n_cached"] == 1 and written["n_downloaded"] == 0
 
 
 def test_cli_verify_exits_0_on_a_clean_corpus(tmp_path, capsys):

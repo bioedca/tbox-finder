@@ -47,6 +47,11 @@ alone is not enough:
 * ``n_ok`` must equal the full target count **and** the target count must equal the supply
   report's own ``admissible_status_counts["annotated"]``. A report describing 8 flawless
   downloads must not be distinguishable from a complete one only by reading the numbers.
+* Those two are still only *counts*, so a third clause checks **identity**: every row's
+  accession, URL and expected md5 must equal the supply report's own
+  (:func:`validate_fetch_report` takes the targets as a required argument for exactly this).
+  Without it a self-consistent report about a different 339-assembly corpus passes every
+  numeric clause and the acquisition exits 0 having certified bytes nobody asked for.
 
 The verification control is powered, and the negative legs are what make it so. A run where
 the md5 comparison silently never happened would otherwise report 339 clean files; so on a
@@ -122,13 +127,23 @@ _MD5_RE = re.compile(r"^[0-9a-f]{32}$")
 _BACKOFF_BASE_S = 1.5
 _TRANSIENT_4XX = frozenset({401, 403, 408, 429})
 
+#: the version of the clause *set* below, written into every report and re-checked when one is
+#: read back. A report validated under an older set carries ``validation_problems: []`` from a
+#: weaker gate, and nothing else in the file says so ([[new-gate-clause-invalidates-old-reports]]).
+#: ``"1"`` was the set before ``rows_bind_to_targets`` existed — a report could then describe a
+#: *different* 339-assembly corpus and still pass, because every cross-check compared numbers
+#: the writer had copied into the report rather than the supply report's own rows.
+CLAUSE_SCHEMA_VERSION = "2"
+
 #: every clause :func:`validate_fetch_report` must have *evaluated*. Compared as a set before
 #: ``all(...)`` runs, because a clause that is simply absent contributes nothing to an ``all``
 #: and passes ([[clauses-must-guard-emptiness]] — the P3-15′-b r1 major was exactly this).
 REQUIRED_CLAUSES: frozenset[str] = frozenset(
     {
         "sweep_complete",
+        "clause_schema_current",
         "targets_match_supply_report",
+        "rows_bind_to_targets",
         "rows_match_targets",
         "no_duplicate_accessions",
         "status_counts_rederive",
@@ -418,6 +433,7 @@ def build_fetch_report(
     ok_rows = [r for r in rows if r.get("status") == STATUS_OK]
     return {
         "schema_version": SCHEMA_VERSION,
+        "clause_schema_version": CLAUSE_SCHEMA_VERSION,
         "step": STEP,
         "sweep_complete": bool(sweep_complete),
         "n_targets": len(targets),
@@ -444,11 +460,51 @@ def build_fetch_report(
     }
 
 
-def validate_fetch_report(report: Mapping[str, Any]) -> list[str]:
+def _rows_bind_to_targets(
+    rows: Sequence[Mapping[str, Any]], targets: Sequence[Mapping[str, Any]]
+) -> bool:
+    """Every report row is *the same assembly* the supply report asked for — identity, not count.
+
+    Three things must agree per row, because each is separately load-bearing: the **accession**
+    set (a report about another corpus is not this acquisition), the **URL** (the row is
+    labelled with an accession but the bytes came from whatever directory the URL names — a
+    mis-join files a real GFF under the wrong assembly and never surfaces as a failure,
+    [[namespace-mismatch-invisible-noop]]), and the **expected md5** (a row whose expectation
+    was rewritten to match what it downloaded passes every digest clause in the report).
+
+    An empty target list returns False rather than vacuously True: a run with no targets is a
+    run whose evidence is missing, which is the state this clause exists to catch.
+    """
+    if not targets:
+        return False
+    target_map = {str(t.get("accession", "")): t for t in targets}
+    row_map = {str(r.get("accession", "")): r for r in rows}
+    if set(row_map) != set(target_map) or len(row_map) != len(rows):
+        return False
+    return all(
+        str(row.get("gff_url", "")) == str(target_map[accession].get("gff_url", ""))
+        and str(row.get("expected_md5", "")).strip().lower()
+        == str(target_map[accession].get("gff_md5", "")).strip().lower()
+        for accession, row in row_map.items()
+    )
+
+
+def validate_fetch_report(
+    report: Mapping[str, Any], *, targets: Sequence[Mapping[str, Any]]
+) -> list[str]:
     """Re-derive every clause from ``per_assembly``; return the problems, empty on a clean run.
 
     Nothing here trusts a headline the writer put in the report — each clause recomputes its
     fact from the rows, so a hand-edited or truncated report fails rather than certifying.
+
+    ``targets`` is **required and has no default**, because every clause that used to reach
+    outside the report compared a number the *writer* had copied into it: ``n_targets`` against
+    ``n_annotated_in_supply_report``, ``bytes_total`` against ``bytes_total_in_supply_report``.
+    All of those are satisfiable by a self-consistent report about a completely different
+    339-assembly corpus, which then exits 0 — the acquisition certifies bytes nobody asked for
+    and only ``verify``, later, notices. A defaulted ``targets=None`` would restore exactly that
+    hole in the shape that is hardest to see: a clause read from absent evidence is vacuously
+    TRUE precisely when the evidence is missing ([[clauses-must-guard-emptiness]]).
     """
     rows = report.get("per_assembly")
     if not isinstance(rows, list) or not all(isinstance(r, Mapping) for r in rows):
@@ -461,6 +517,8 @@ def validate_fetch_report(report: Mapping[str, Any]) -> list[str]:
 
     clauses: dict[str, bool] = {}
     clauses["sweep_complete"] = report.get("sweep_complete") is True
+    clauses["clause_schema_current"] = report.get("clause_schema_version") == CLAUSE_SCHEMA_VERSION
+    clauses["rows_bind_to_targets"] = _rows_bind_to_targets(rows, targets)
     clauses["targets_match_supply_report"] = (
         isinstance(n_targets, int)
         and not isinstance(n_targets, bool)
@@ -747,9 +805,23 @@ def fetch_annotations(
             "note": "control assembly was not acquired in this run",
         }
     else:
-        control = verification_control(
-            Path(control_row["path"]).read_bytes(), str(control_row["expected_md5"])
-        )
+        try:
+            control_payload = Path(control_row["path"]).read_bytes()
+        except OSError as exc:
+            # An unreadable control file is an **unpowered control**, not a crash. Uncaught, the
+            # ``OSError`` escapes ``main``'s refusal handler as a traceback and exit 1, and the
+            # report — the only artifact that would have said the run cannot be trusted — is
+            # never written at all. Fail-closed: the three legs stay False, so
+            # ``control_powered`` fails and the CLI exits 3 with a report that names why.
+            control = {
+                "accession": CONTROL_ACCESSION,
+                "positive_matches": False,
+                "corrupt_expectation_fails": False,
+                "corrupt_payload_fails": False,
+                "note": f"control file is unreadable: {type(exc).__name__}: {exc}"[:200],
+            }
+        else:
+            control = verification_control(control_payload, str(control_row["expected_md5"]))
 
     return build_fetch_report(
         rows,
@@ -791,11 +863,17 @@ def parse_census(
         if not path.exists():
             rows.append({**row, "ok": False, "note": "missing"})
             continue
-        raw = path.read_bytes()
-        if not digest_matches(raw, str(target["gff_md5"])):
-            rows.append({**row, "ok": False, "note": f"md5 {md5_hex(raw)} != {target['gff_md5']}"})
-            continue
         try:
+            # The read is INSIDE the try: a file that exists but cannot be read (permissions, a
+            # disappearing mount, an I/O error) raised out of ``parse_census`` past ``main``'s
+            # refusal handler, so one unreadable file among 339 aborted the whole census with a
+            # traceback and exit 1 instead of one failure row and exit 3.
+            raw = path.read_bytes()
+            if not digest_matches(raw, str(target["gff_md5"])):
+                rows.append(
+                    {**row, "ok": False, "note": f"md5 {md5_hex(raw)} != {target['gff_md5']}"}
+                )
+                continue
             # ``raw`` — the snapshot that was just hashed — not a second read of ``path``:
             # between the two the file can change, and the census would then report an md5 and
             # a corpus digest for one set of bytes while deriving CDS metrics from another.
@@ -816,8 +894,12 @@ def parse_census(
                 "n_cds_resolved_strand": sum(1 for c in cds if c.strand in gff3.STRANDS_RESOLVED),
                 "n_cds_with_identity_text": sum(1 for c in cds if gff3.gene_identity_text(c)),
                 "n_seqids": len({c.seqid for c in cds}),
+                # The parser's own rule, called rather than re-implemented: a census that
+                # recognised ``##FASTA`` more loosely than the reader does would report a FASTA
+                # section on a file the reader read straight through (or the reverse), and the
+                # ``n_with_fasta_section`` total would describe neither.
                 "has_fasta_section": any(
-                    line.strip().upper() == gff3.FASTA_DIRECTIVE for line in text.splitlines()
+                    gff3.is_fasta_directive(line) for line in text.splitlines()
                 ),
                 "note": "" if cds else "parsed to zero CDS",
             }
@@ -827,6 +909,11 @@ def parse_census(
     # The corpus this census actually read, and the corpus the acquisition certified. Compared
     # rather than assumed: a census run BEFORE its fetch parses a previous state of the
     # directory and, on timestamps alone, looks indistinguishable from one run after.
+    #
+    # Since ``rows_bind_to_targets`` landed, a *validating* fetch report can no longer describe
+    # other assemblies — every ok row's md5 must equal the supply report's, so its digest is
+    # determined. What this comparison still catches is the other direction, which no clause
+    # inside the report can see: the **files on disk** moved out from under an honest report.
     observed = corpus_digest((str(r["accession"]), str(r.get("observed_md5", ""))) for r in ok_rows)
     # Validate the fetch report before trusting anything in it. Reading ``corpus_digest``
     # alone lets a hand-edited report declare whatever the census just computed, and the
@@ -841,7 +928,7 @@ def parse_census(
         # Every clause, not just the digest field. Reading ``corpus_digest`` out of an
         # unvalidated report lets a hand-edited one declare whatever the census just computed,
         # and the binding then certifies itself.
-        problems = validate_fetch_report(fetch_payload)
+        problems = validate_fetch_report(fetch_payload, targets=targets)
         if problems:
             reason = f"the fetch report does not validate: {'; '.join(problems)}"
         else:
@@ -896,7 +983,11 @@ def _cmd_fetch(args: argparse.Namespace) -> int:
         limit=args.limit,
         force=args.force,
     )
-    problems = validate_fetch_report(report)
+    # The targets are re-read from the supply report on purpose, rather than handed out of the
+    # run that just used them: validating the written report against the *file* means a supply
+    # report that changed under the acquisition is a refusal instead of a report that agrees
+    # with a list only this process ever saw.
+    problems = validate_fetch_report(report, targets=load_annotation_targets(args.supply_report))
     report["provenance"] = provenance.build_provenance(
         rule="src/tbox_finder/mining/annotation_fetch.py :: fetch",
         script="src/tbox_finder/mining/annotation_fetch.py",
@@ -1004,6 +1095,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 __all__ = [
     "ADR",
+    "CLAUSE_SCHEMA_VERSION",
     "CONTROL_ACCESSION",
     "DEFAULT_ANNOTATION_DIR",
     "DEFAULT_FETCH_REPORT",

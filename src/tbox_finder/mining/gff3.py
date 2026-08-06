@@ -41,9 +41,12 @@ What the real data actually contains (measured on the fetched corpus, not assume
 * **Pseudogenes are already here.** 38 of 455 CDS rows in ``GCA_002790315.1`` carry
   ``pseudo=true``. D4 routes exactly those to its Pfam/KO fallback, so the flag is surfaced
   (:func:`is_pseudo`) rather than left for a caller to re-derive from a raw attribute.
-* **``##FASTA`` must terminate the feature section.** NCBI does not emit one, but the
-  annotator arm commissioned at P3-15′-c (bakta/prokka) does, and its FASTA payload contains
-  lines that a 9-column split would happily mangle into features.
+* **``##FASTA`` must terminate the feature section — and only the exact directive may.** NCBI
+  does not emit one, but the annotator arm commissioned at P3-15′-c (bakta/prokka) does, and
+  its FASTA payload contains lines that a 9-column split would happily mangle into features.
+  The match is case-sensitive and whitespace-exact (:func:`is_fasta_directive`): reading
+  ``##fasta`` or an indented ``##FASTA`` as the directive would end the feature section early
+  and drop every CDS after it **silently**, which is the one failure this file refuses to have.
 
 Failures are refusals, never degraded rows: a 7-column line, a non-integer coordinate, a
 ``start > end``, or one CDS ``ID`` appearing on two different contigs raises :class:`Gff3Error`.
@@ -59,6 +62,8 @@ import urllib.parse
 from collections.abc import Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from types import MappingProxyType
+from typing import Any
 
 __all__ = [
     "CDS_TYPE",
@@ -75,6 +80,7 @@ __all__ = [
     "decode_gff3_bytes",
     "gene_identity_text",
     "group_cds",
+    "is_fasta_directive",
     "is_pseudo",
     "iter_gff3_features",
     "parse_attributes",
@@ -135,8 +141,52 @@ _TRUEISH: frozenset[str] = frozenset({"true", "yes", "1"})
 _BAD_ESCAPE_RE = re.compile(r"%(?![0-9A-Fa-f]{2})")
 
 
+def _frozen_attributes(
+    attributes: Mapping[str, Sequence[str]],
+) -> Mapping[str, tuple[str, ...]]:
+    """A read-only copy of an attribute mapping, every value normalised to a tuple."""
+    return MappingProxyType({str(key): tuple(values) for key, values in attributes.items()})
+
+
+class _FrozenAttributes:
+    """Deep immutability for the ``attributes`` field of a frozen feature model.
+
+    ``@dataclass(frozen=True)`` blocks **field reassignment** and nothing else: the mapping it
+    holds is the plain ``dict`` the parser built, so ``feature.attributes["pseudo"] = ("true",)``
+    succeeds and silently changes what :func:`is_pseudo` and :func:`gene_identity_text` answer
+    — on a model whose own docstring says it is immutable. Copying into a ``MappingProxyType``
+    at construction closes that, and the values are already tuples, so the whole structure is
+    read-only rather than one layer of it.
+
+    ``__getstate__``/``__setstate__`` exist because a ``mappingproxy`` is neither picklable nor
+    deep-copyable: without them the freeze would trade a latent mutation for a hard failure at
+    a process boundary (P3-15′-c-ii fans the (c) predicate out over hosts), which is a worse
+    bug than the one being fixed. They round-trip through a plain dict and re-freeze on the way
+    back in, so an unpickled feature is exactly as immutable as a parsed one.
+    """
+
+    __slots__ = ()
+
+    #: declared for readers and type-checkers only — the field itself belongs to the dataclass
+    #: that inherits this mixin (a non-dataclass base contributes no fields).
+    attributes: Mapping[str, tuple[str, ...]]
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "attributes", _frozen_attributes(self.attributes))
+
+    def __getstate__(self) -> dict[str, Any]:
+        state = dict(self.__dict__)
+        state["attributes"] = dict(state["attributes"])
+        return state
+
+    def __setstate__(self, state: Mapping[str, Any]) -> None:
+        for key, value in state.items():
+            object.__setattr__(self, key, value)
+        object.__setattr__(self, "attributes", _frozen_attributes(self.attributes))
+
+
 @dataclass(frozen=True)
-class GffFeature:
+class GffFeature(_FrozenAttributes):
     """One 9-column GFF3 feature line, unescaped, with 1-based inclusive coordinates."""
 
     seqid: str
@@ -165,7 +215,7 @@ class GffFeature:
 
 
 @dataclass(frozen=True)
-class CdsFeature:
+class CdsFeature(_FrozenAttributes):
     """One coding sequence — all rows sharing a CDS ``ID``, merged.
 
     ``start``/``end`` are the **span** (min/max over segments), 1-based inclusive, as they
@@ -318,6 +368,19 @@ def parse_gff3_line(line: str, *, line_no: int = 0) -> GffFeature:
     )
 
 
+def is_fasta_directive(line: str) -> bool:
+    """True iff ``line`` **is** the ``##FASTA`` directive — exactly, not case-folded or trimmed.
+
+    ``##fasta``, ``  ##FASTA`` and ``##FASTA `` are not the directive the GFF3 spec defines, and
+    accepting them is not lenience — it is a **silent truncation**: every CDS after that line
+    disappears from the census with nothing recorded anywhere, and (c) then reads
+    ``unavailable`` for a host whose annotation was complete. Under the exact rule those
+    variants are a comment (skipped) or a column-count refusal instead. A refusal is an
+    artifact a reader can act on; a short census is indistinguishable from a short genome.
+    """
+    return str(line).rstrip("\r\n") == FASTA_DIRECTIVE
+
+
 def iter_gff3_features(
     lines: Iterable[str], *, types: Iterable[str] | None = None
 ) -> Iterator[GffFeature]:
@@ -334,7 +397,7 @@ def iter_gff3_features(
         stripped = line.strip()
         if not stripped:
             continue
-        if stripped.upper() == FASTA_DIRECTIVE:
+        if is_fasta_directive(line):
             return
         if line.startswith("#"):
             continue
@@ -351,33 +414,46 @@ def group_cds(features: Iterable[GffFeature]) -> list[CdsFeature]:
     neither contig. Order is first-appearance, so the output tracks the file rather than a
     dict's iteration order.
     """
-    order: list[str] = []
-    rows: dict[str, list[GffFeature]] = {}
+    order: list[tuple[str, object]] = []
+    rows: dict[tuple[str, object], list[GffFeature]] = {}
+    display: dict[tuple[str, object], str] = {}
     for index, feature in enumerate(features):
         # Group by a **declared** ``ID`` only. The coordinate-derived fallback is a display
         # name, not an identity: two ID-less CDS rows sharing contig, coordinates, strand and
         # type collapse into one, and the later row's attributes are lost — a merge, which is
         # the silent shape ([[duplicate-key-merges-instead-of-colliding]]), not a crash. The
         # row index makes an undeclared key unique without changing anything for declared ones.
+        #
+        # The key is a ``(namespace, value)`` PAIR rather than a string, because the two spaces
+        # are otherwise comparable: ``ID=ctg1:10-20:+:CDS#3`` is a legal declared ID and is
+        # exactly the string the anonymous key for row 3 at those coordinates would be, so the
+        # declared CDS and the ID-less one would merge — the same silent shape, now at the level
+        # of the identity itself. Namespaced, no declared ID can collide with an anonymous row.
         declared = attribute_first(feature.attributes, "ID")
-        key = declared if declared else f"{feature.feature_id}#{index}"
+        key: tuple[str, object] = ("id", declared) if declared else ("row", index)
         if key not in rows:
             rows[key] = []
             order.append(key)
+            # The display name keeps the ``#index`` suffix for an anonymous row: it is what the
+            # emitted ``feature_id`` has always been, and dropping it would make two ID-less CDS
+            # at identical coordinates share a ``feature_id`` — re-creating the merge one layer
+            # downstream in any consumer that keys on it.
+            display[key] = declared or f"{feature.feature_id}#{index}"
         rows[key].append(feature)
 
     out: list[CdsFeature] = []
     for key in order:
         group = rows[key]
         head = group[0]
+        name = display[key]
         for other in group[1:]:
             if other.seqid != head.seqid:
                 raise Gff3Error(
-                    f"CDS {key!r} spans two contigs: {head.seqid!r} and {other.seqid!r}"
+                    f"CDS {name!r} spans two contigs: {head.seqid!r} and {other.seqid!r}"
                 )
             if other.strand != head.strand:
                 raise Gff3Error(
-                    f"CDS {key!r} carries two strands: {head.strand!r} and {other.strand!r}"
+                    f"CDS {name!r} carries two strands: {head.strand!r} and {other.strand!r}"
                 )
         segments = tuple((f.start, f.end) for f in group)
         # Append, never first-wins: a ``pseudo=true`` or a ``product=`` written only on the
@@ -390,7 +466,7 @@ def group_cds(features: Iterable[GffFeature]) -> list[CdsFeature]:
         out.append(
             CdsFeature(
                 seqid=head.seqid,
-                feature_id=key,
+                feature_id=name,
                 start=min(s for s, _ in segments),
                 end=max(e for _, e in segments),
                 strand=head.strand,

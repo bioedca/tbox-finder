@@ -3793,3 +3793,53 @@ controls. Full unit+golden **4,458 passed / 13 failed** vs the matched baseline 
 tests. The corpus census is **unchanged under every tightening** (897,096 CDS / 11,671 pseudo /
 273 multi-segment / 44,291 contigs), so the stricter reader accepts precisely the same real
 corpus the lenient one did. ruff 0.15.15 + black 25.11.0 clean.
+
+**Review round 5 — 5 findings, all 5 real, and the counts went 9, 2, 4, 5, 5.** Five rounds in,
+the round size has stopped falling; "the last round was small" was never evidence of anything
+here. Two of the five are the same species this step keeps producing — **a check that compares
+a thing with itself**.
+
+**The major: the acquisition gate could not tell WHICH corpus it had fetched.** Every
+cross-report clause — `n_targets` against `n_annotated_in_supply_report`, `bytes_total` against
+`bytes_total_in_supply_report`, `every_ok_row_md5_matches` comparing a row's observed md5 with
+that same row's expected one — compares numbers the report's own writer copied into it. A
+self-consistent report about a *different* 339-assembly corpus therefore passes all of them and
+`fetch` exits **0**, with only the later `verify` in a position to notice. `validate_fetch_report`
+now takes the supply targets as a **required, no-default** keyword and re-derives a
+`rows_bind_to_targets` clause over accession, URL **and** expected md5; the no-default is the
+point, since `targets=()` would restore exactly the vacuous-clause shape
+([[clauses-must-guard-emptiness]]) at every future call site. Adding a clause invalidates every
+report written under the old set, so the set is now versioned (`CLAUSE_SCHEMA_VERSION = "2"`,
+re-checked by its own clause) and both committed reports were regenerated
+([[new-gate-clause-invalidates-old-reports]]).
+
+**A consequence worth recording rather than hiding.** With the identity clause in place, a
+*validating* fetch report can no longer describe other bytes — its digest is determined — so the
+`corpus_digest` comparison's remaining job is the other direction: the **files on disk** moving
+under an honest report. The r2 test was rewritten to assert the earlier refusal, and a second
+test now exercises the digest on its own terms.
+
+**Two `OSError`s that were refusals everywhere except where they were raised.** The control
+file's `read_bytes` sat outside any handler, so a filesystem fault destroyed the very report
+that would have said the run was untrustworthy (exit 1, no artifact) instead of yielding an
+unpowered control and exit 3; and the census read sat *above* the `except OSError` written for
+it, so one unreadable file among 339 aborted all 339 verdicts.
+
+**Two parser over-acceptances.** `##FASTA` was matched case-folded and whitespace-stripped, so
+`##fasta` or an indented variant would terminate the feature section and drop every CDS below it
+**silently** — the one failure mode this reader refuses to have. Now exact
+(`is_fasta_directive`, shared with the census so the two cannot diverge). And `group_cds` keyed
+declared IDs and coordinate-derived fallbacks in one string space, so a declared
+`ID=ctg1:10-20:+:CDS#0` merges with the ID-less row it names; the key is now a
+`(namespace, value)` pair — [[duplicate-key-merges-instead-of-colliding]], a fourth distinct
+instance in this one step.
+
+**Final validation.** **14 sabotages, 14 RED against their named test** (the fourteenth was
+declared a no-op — the census/parser `##FASTA` alignment — and was converted into a real test
+rather than recorded as a non-bite). Full unit+golden **4,477 passed / 15 failed** vs a matched
+baseline worktree at `2be5ff4` (**4,240 / 15**) — failure sets **identical**, `comm` empty both
+ways. (The 15 is this environment's baseline, not a regression: it has no `pyarrow`, which is
+2 more than the 13 recorded in earlier stanzas from an env that did.) The corpus census is
+**byte-identical under every round-5 tightening** — 897,096 CDS / 11,671 pseudo / 273
+multi-segment / 44,291 contigs — so the stricter reader still accepts exactly the same real
+corpus. ruff 0.15.15 + black 25.11.0 clean; no `.smk` touched.
