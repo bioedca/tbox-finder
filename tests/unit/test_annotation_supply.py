@@ -701,7 +701,7 @@ def test_route_refuses_a_report_that_omits_the_candidate_coverage_field() -> Non
     assert out["route"] == ROUTE_REFUSED
     # …and it must say the field is missing, not invent "77 hosts were not probed" from a
     # -1 sentinel. A refusal reason is read by whoever has to act on it.
-    assert any("carries no n_candidate_hosts_probed" in r for r in out["reasons"])
+    assert any("carries no integer n_candidate_hosts_probed" in r for r in out["reasons"])
     assert not any("!= n_candidate_hosts" in r for r in out["reasons"])
 
 
@@ -730,6 +730,44 @@ def test_route_refuses_when_the_candidate_counts_do_not_sum_to_the_denominator()
     out = derive_acquisition_route(rep)
     assert out["route"] == ROUTE_REFUSED
     assert any("wrong denominator" in r for r in out["reasons"])
+
+
+@pytest.mark.parametrize(
+    "field,bad",
+    [
+        ("n_candidate_hosts", "76"),
+        ("n_candidate_hosts", 76.0),
+        ("n_candidate_hosts", True),
+        ("n_candidate_hosts", None),
+    ],
+)
+def test_route_refuses_a_non_integer_count(field: str, bad: object) -> None:
+    """This gate is handed an arbitrary report. A bare ``int()`` on a non-numeric field escapes
+    as a traceback and **exit 1** instead of the documented refusal and **exit 3**; and coercing
+    ``"76"`` or ``76.0`` into a count is the coerce-before-validate mistake P3-15′-b shipped,
+    where ``"0.5"`` merged as ``0.5`` and *certified*. A count that is not an ``int`` means the
+    report is malformed."""
+    rep = _report(annotated=48, unannotated=28)
+    rep[field] = bad
+    out = derive_acquisition_route(rep)
+    assert out["route"] == ROUTE_REFUSED
+    assert any("non-integer count field" in r for r in out["reasons"])
+
+
+def test_route_refuses_a_non_integer_status_count() -> None:
+    rep = _report(annotated=48, unannotated=28)
+    rep["candidate_host_status_counts"][STATUS_ANNOTATED] = "48"
+    out = derive_acquisition_route(rep)
+    assert out["route"] == ROUTE_REFUSED
+    assert any("candidate_host_status_counts" in r for r in out["reasons"])
+
+
+def test_route_refuses_a_non_integer_probed_count() -> None:
+    rep = _report(annotated=48, unannotated=28)
+    rep["n_candidate_hosts_probed"] = "76"
+    out = derive_acquisition_route(rep)
+    assert out["route"] == ROUTE_REFUSED
+    assert any("no integer n_candidate_hosts_probed" in r for r in out["reasons"])
 
 
 def test_route_refuses_on_zero_candidate_hosts() -> None:

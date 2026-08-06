@@ -558,6 +558,19 @@ def control_is_powered(control: Mapping[str, Any]) -> bool:
 # --------------------------------------------------------------------------- #
 
 
+def _as_count(value: Any) -> int | None:
+    """``value`` as a count, or ``None`` when it does not carry one.
+
+    Deliberately **strict**: a real ``int`` only. ``bool`` is excluded (``isinstance(True, int)``
+    is True, and a boolean count is a malformed report, not the number 1), and so are ``float``
+    and ``str`` — coercing ``"76"`` or ``76.0`` into a count is the same
+    coerce-before-validate mistake P3-15'-b shipped and had to fix, where ``"0.5"`` merged as
+    ``0.5`` and *certified*. A count that is not an int means the report is malformed, and the
+    honest answer is a refusal.
+    """
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+
 def derive_acquisition_route(report: Mapping[str, Any]) -> dict[str, Any]:
     """The measured supply → the acquisition route, by the rule pinned in this module.
 
@@ -587,35 +600,54 @@ def derive_acquisition_route(report: Mapping[str, Any]) -> dict[str, Any]:
         )
     if not bool(report.get("sweep_complete")):
         reasons.append("sweep incomplete — not every requested assembly was probed")
-    n_cand = int(report.get("n_candidate_hosts", 0))
+    # Every count is read through _as_count and a non-int refuses instead of raising: this
+    # function is handed an arbitrary report, and a bare int() would escape as a traceback and
+    # exit 1 rather than the documented refusal and exit 3.
+    malformed = [
+        name
+        for name, value in (
+            ("n_candidate_hosts", report.get("n_candidate_hosts", 0)),
+            *((f"admissible_status_counts[{k}]", all_counts.get(k, 0)) for k in STATUS_VALUES),
+            *((f"candidate_host_status_counts[{k}]", counts.get(k, 0)) for k in STATUS_VALUES),
+        )
+        if _as_count(value) is None
+    ]
+    if malformed:
+        return {
+            "route": ROUTE_REFUSED,
+            "reasons": [f"non-integer count field(s): {malformed}"],
+        }
+    n_cand = _as_count(report.get("n_candidate_hosts", 0)) or 0
     # Report the mismatch, not a count derived from a sentinel: with the field absent a
     # `-1` default produced "n_cand + 1 hosts were not probed", and a probed count above
     # n_cand produced a negative one. The refusal was right either way, but a refusal that
     # records a wrong number is a number some later reader will trust.
     raw_probed = report.get("n_candidate_hosts_probed")
-    if raw_probed is None:
+    n_probed = _as_count(raw_probed)
+    if n_probed is None:
         reasons.append(
-            "report carries no n_candidate_hosts_probed — the sweep coverage is unestablished"
+            "report carries no integer n_candidate_hosts_probed — the sweep coverage is "
+            "unestablished"
         )
-    elif int(raw_probed) != n_cand:
+    elif n_probed != n_cand:
         reasons.append(
-            f"candidate-carrying hosts probed ({int(raw_probed)}) != n_candidate_hosts "
+            f"candidate-carrying hosts probed ({n_probed}) != n_candidate_hosts "
             f"({n_cand}) — an unprobed host is not an unannotated host"
         )
-    n_unknown = int(all_counts.get(STATUS_UNKNOWN, 0))
+    n_unknown = _as_count(all_counts.get(STATUS_UNKNOWN, 0)) or 0
     if n_unknown:
         reasons.append(f"{n_unknown} admissible host(s) unresolved — unknown is not unannotated")
     # The candidate counts get their OWN unknown check and their own total reconciliation. In a
     # report this module wrote, the candidate rows are a subset of the probed rows, so a
     # candidate `unknown` implies an admissible `unknown` — but this gate is handed a report,
     # and a gate that leans on an invariant enforced somewhere else is not a gate.
-    n_cand_unknown = int(counts.get(STATUS_UNKNOWN, 0))
+    n_cand_unknown = _as_count(counts.get(STATUS_UNKNOWN, 0)) or 0
     if n_cand_unknown:
         reasons.append(
             f"{n_cand_unknown} candidate-carrying host(s) unresolved — "
             "unknown is not unannotated"
         )
-    n_total = sum(int(counts.get(k, 0)) for k in STATUS_VALUES)
+    n_total = sum(_as_count(counts.get(k, 0)) or 0 for k in STATUS_VALUES)
     if n_total != n_cand:
         reasons.append(
             f"candidate-host status counts sum to {n_total} but n_candidate_hosts is "
@@ -624,7 +656,7 @@ def derive_acquisition_route(report: Mapping[str, Any]) -> dict[str, Any]:
     if reasons:
         return {"route": ROUTE_REFUSED, "reasons": reasons}
 
-    n_annotated = int(counts.get(STATUS_ANNOTATED, 0))
+    n_annotated = _as_count(counts.get(STATUS_ANNOTATED, 0)) or 0
     if n_total <= 0:
         return {"route": ROUTE_REFUSED, "reasons": ["zero candidate-carrying hosts"]}
     if n_annotated == n_total:

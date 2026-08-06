@@ -3435,7 +3435,7 @@ plus that same directory with its accession corrupted, which must not resolve.
 
 **Outputs.** `reports/p3/annotation_supply.json` (216 KB, git-tracked, no DVC object) —
 per-assembly status, GFF URL, GFF md5, GFF `Content-Length`, `_protein.faa.gz` presence, plus the
-counts, the control and the derived route. 91 unit tests. No ADR amendment, no value pinned, no
+counts, the control and the derived route. 97 unit tests. No ADR amendment, no value pinned, no
 SLURM job, LOCAL only.
 
 **Measured, all 660, zero unknown, control powered** (positive `GCF_000007185.1` → 16 files,
@@ -3599,7 +3599,17 @@ Round 6 also applied the app's round-4 nitpick: the mixed end-to-end test assert
 `n_candidate_hosts == 2` while claiming a 1-annotated / 1-unannotated split, so a regression in
 candidate classification could hide behind the full admissible sweep.
 
-**Validation.** 91 unit tests; **42 sabotages, 41 RED against their named test**, the 42nd a
+**Review round 7 — the refusal contract had a hole in its own arithmetic.** `derive_acquisition_route`
+is handed an arbitrary report, and every count was read with a bare `int()`, which raises on a
+non-numeric field and so escapes as a traceback and **exit 1** instead of the documented refusal
+and **exit 3** — the shape this suite already treats as a defect two files over. Fixed with a
+single `_as_count`, and **stricter than the reviewer proposed**: a real `int` only, `bool`
+excluded (`isinstance(True, int)` is True), `float` and `str` excluded, because coercing `"76"`
+or `76.0` into a count is precisely the coerce-before-validate mistake P3-15′-b shipped, where
+`"0.5"` merged as `0.5` and *certified*. A count that is not an int means the report is
+malformed, and the honest answer is a refusal naming the field.
+
+**Validation.** 97 unit tests; **44 sabotages, 43 RED against their named test**, the 44th a
 declared no-op control. The measurement was **re-run end-to-end on the reviewed code** and
 reproduced byte-identically — 339/321, 48/28, 68,855,450 B — on an independent second sweep of
 999 requests. Two of the original 23 did not bite first time and neither was noise: the
@@ -3609,8 +3619,8 @@ crash rather than on the named refusal (test now matches the message,
 [[raises-test-needs-a-positive-control]]); and the "never HEAD an unannotated host" property is
 defended **twice** (the annotated filter *and* `head_content_length`'s empty-URL early return), so
 neither edit alone could falsify it and the sabotage is declared compound. Full unit+golden
-**4,464 passed / 13 failed** against a matched baseline worktree at `8a82425` (**4,373 / 13**) —
-failure sets **identical**, `comm` empty both ways, and the +91 is exactly the new tests. ruff
+**4,470 passed / 13 failed** against a matched baseline worktree at `8a82425` (**4,373 / 13**) —
+failure sets **identical**, `comm` empty both ways, and the +97 is exactly the new tests. ruff
 0.15.15 + black 25.11.0 clean; no `.smk` touched. §6.4 fires on nothing (no README,
 `paper/manuscript.qmd` or ADR reference to the new API). The shipped refusal path was executed,
 not inferred: `measure --limit 5` exits **3** with `route=refused`, and the report it writes
