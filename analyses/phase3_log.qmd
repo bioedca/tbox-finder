@@ -3435,7 +3435,7 @@ plus that same directory with its accession corrupted, which must not resolve.
 
 **Outputs.** `reports/p3/annotation_supply.json` (216 KB, git-tracked, no DVC object) —
 per-assembly status, GFF URL, GFF md5, GFF `Content-Length`, `_protein.faa.gz` presence, plus the
-counts, the control and the derived route. 58 unit tests. No ADR amendment, no value pinned, no
+counts, the control and the derived route. 80 unit tests. No ADR amendment, no value pinned, no
 SLURM job, LOCAL only.
 
 **Measured, all 660, zero unknown, control powered** (positive `GCF_000007185.1` → 16 files,
@@ -3478,16 +3478,53 @@ hosts: **68,855,450 B = 68.9 MB** total (min 33,003 / median 177,764 / max 898,2
 wall on the laptop — LOCAL by §9.1 — so the "SLURM acquisition ack" this block was gated on does
 not apply to the NCBI route.
 
-**Validation.** 58 unit tests; **23 sabotages, 22 RED against their named test**, the 23rd a
-declared no-op control. Two sabotages did not bite first time and neither was noise: the
+**Review (two paths, and they overlapped by one).** The CodeRabbit **CLI** returned **3
+majors** and the GitHub **app** returned **2**, on the same commit, with **one in common** —
+running both was worth it rather than redundant, the P3-15′-a lesson recurring. All five are
+real and all five are fixed. (i) *Shape assumed before validated*, twice: a list-rooted fetch
+report makes `payload.get` an `AttributeError`, and a non-Mapping candidate row makes
+`row["accession"]` a `TypeError` — both escape as a traceback and **exit 1** instead of the
+documented refusal and **exit 3**, the same shape P3-15′-b hit four times. (ii) *A route
+certified from an understated candidate denominator*: `cand_rows` silently drops a candidate
+host absent from the probed set, and `sweep_complete` compares only the **admissible**
+denominator — the guard that already existed for the admissible set had no counterpart for the
+candidate set. Found by **both** paths, at different layers: the CLI at the derivation, the app
+at the API input. Both are now guarded. (iii) *`urlopen` reachable with an arbitrary scheme and
+host*: `source_url` flows from a committed report into `urlopen`, so a `file://` or third-party
+value would be a local-file read or an off-host request. An allowlist on **scheme and host**
+(not a substring — `https://evil.test/?x=ftp.ncbi.nlm.nih.gov` defeats that, and
+`ftp.ncbi.nlm.nih.gov.evil.test` defeats a prefix test) is enforced where URLs are built **and
+at the transport boundary**, because `fetch_file_manifest`/`head_content_length` are public and
+take a URL directly — guarding only the builders leaves the actual boundary open. (iv) *The
+`(accession, source_url)` pair was never checked to agree*: the row is **labelled** with the
+accession but **classified** from whatever directory the URL names, so a mis-joined pair yields
+well-formed evidence filed under the wrong assembly, never surfaces as `unknown`, and moves the
+counts the route is read from ([[namespace-mismatch-invisible-noop]]). The app's committable
+suggestion raised while its agent prompt said to return `unknown`; **raising is right** — a
+mis-join is a join error, not a per-host unknown, and degrading it to `unknown` would hide a
+systematically mis-joined mapping behind 660 uninformative rows
+([[review-finding-right-fix-wrong]], judged separately again). Verified on the real data before
+committing: **0 binding violations across all 2,500 `ok` rows** and 0 host-allowlist violations.
+
+**One defect found without a reviewer.** The retry loop had **no backoff** — `pilot_fetch` waits
+`1.5 * (attempt + 1)`, and the rate limiter is not a substitute: it meters the steady state at
+3 req/s, so a 429 would have been re-sent four times inside ~1.3 s, which is precisely what the
+limiter exists to prevent. Added, with the schedule asserted and a companion test that a
+*permanent* failure does **not** sleep (660 pointless waits is the difference between a
+two-minute sweep and a twenty-minute one).
+
+**Validation.** 80 unit tests; **32 sabotages, 31 RED against their named test**, the 32nd a
+declared no-op control. The measurement was **re-run end-to-end on the reviewed code** and
+reproduced byte-identically — 339/321, 48/28, 68,855,450 B — on an independent second sweep of
+999 requests. Two of the original 23 did not bite first time and neither was noise: the
 `run_control` refusal was satisfied by *any* `AnnotationSupplyError` — deleting the guard still
 raised, one frame down, from `assembly_basename("")` — so a bare `pytest.raises` was passing on a
 crash rather than on the named refusal (test now matches the message,
 [[raises-test-needs-a-positive-control]]); and the "never HEAD an unannotated host" property is
 defended **twice** (the annotated filter *and* `head_content_length`'s empty-URL early return), so
 neither edit alone could falsify it and the sabotage is declared compound. Full unit+golden
-**4,431 passed / 13 failed** against a matched baseline worktree at `8a82425` (**4,373 / 13**) —
-failure sets **identical**, `comm` empty both ways, and the +58 is exactly the new tests. ruff
+**4,453 passed / 13 failed** against a matched baseline worktree at `8a82425` (**4,373 / 13**) —
+failure sets **identical**, `comm` empty both ways, and the +80 is exactly the new tests. ruff
 0.15.15 + black 25.11.0 clean; no `.smk` touched. §6.4 fires on nothing (no README,
 `paper/manuscript.qmd` or ADR reference to the new API). The shipped refusal path was executed,
 not inferred: `measure --limit 5` exits **3** with `route=refused`, and the report it writes

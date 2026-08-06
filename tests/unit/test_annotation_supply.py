@@ -65,6 +65,12 @@ from tbox_finder.mining.annotation_supply import (
 BASE = "https://ftp.ncbi.nlm.nih.gov/genomes/all/GCA/000/296/795/GCA_000296795.1_ASM29679v1"
 FNA_URL = f"{BASE}/GCA_000296795.1_ASM29679v1_genomic.fna.gz"
 BASENAME = "GCA_000296795.1_ASM29679v1"
+GFF_URL = f"{BASE}/{BASENAME}_genomic.gff.gz"
+# The control positive's URL must belong to the control positive's accession — probe_assembly
+# now refuses a mis-joined (accession, source_url) pair.
+CTRL_BASENAME = f"{asup.CONTROL_POSITIVE_ACCESSION}_ASM718v1"
+CTRL_BASE = f"https://ftp.ncbi.nlm.nih.gov/genomes/all/GCF/000/007/185/{CTRL_BASENAME}"
+CTRL_FNA_URL = f"{CTRL_BASE}/{CTRL_BASENAME}_genomic.fna.gz"
 MD5 = "0" * 32
 
 
@@ -115,6 +121,38 @@ def test_sibling_url_refuses_a_url_it_cannot_anchor(bad: str) -> None:
     sweep reports a uniformly unannotated corpus."""
     with pytest.raises(AnnotationSupplyError):
         sibling_url(bad, GFF_SUFFIX)
+
+
+@pytest.mark.parametrize(
+    "hostile",
+    [
+        "file:///etc/passwd/x_genomic.fna.gz",
+        "ftp://ftp.ncbi.nlm.nih.gov/x/x_genomic.fna.gz",
+        "http://ftp.ncbi.nlm.nih.gov/x/x_genomic.fna.gz",
+        "https://evil.test/x/x_genomic.fna.gz",
+        "https://evil.test/?x=ftp.ncbi.nlm.nih.gov/x_genomic.fna.gz",
+        "https://ftp.ncbi.nlm.nih.gov.evil.test/x/x_genomic.fna.gz",
+    ],
+)
+def test_url_helpers_refuse_a_scheme_or_host_outside_the_allowlist(hostile: str) -> None:
+    """Both builders feed ``urlopen``. A ``file://`` or third-party ``source_url`` would become
+    a local-file read or an off-host request, so the allowlist is enforced on **scheme and
+    host** — not on a substring, which ``https://evil.test/?x=ftp.ncbi.nlm.nih.gov`` defeats,
+    and not on a prefix, which ``ftp.ncbi.nlm.nih.gov.evil.test`` defeats.
+    """
+    with pytest.raises(AnnotationSupplyError, match="allowed NCBI URL"):
+        sibling_url(hostile, GFF_SUFFIX)
+    with pytest.raises(AnnotationSupplyError, match="allowed NCBI URL"):
+        assembly_dir_url(hostile)
+
+
+def test_transport_refuses_a_disallowed_url_it_was_handed_directly() -> None:
+    """``fetch_file_manifest`` and ``head_content_length`` are public and take a URL, so
+    guarding only the builders leaves the actual ``urlopen`` boundary open."""
+    with pytest.raises(AnnotationSupplyError, match="allowed NCBI URL"):
+        fetch_file_manifest("file:///etc", opener=lambda _u: "")
+    with pytest.raises(AnnotationSupplyError, match="allowed NCBI URL"):
+        asup.head_content_length("https://evil.test/a.gz", header=lambda _u: 1)
 
 
 def test_assembly_dir_and_basename() -> None:
@@ -252,6 +290,29 @@ def test_load_source_urls_refuses_a_report_with_no_per_genome(tmp_path: Path) ->
         load_source_urls(p)
 
 
+@pytest.mark.parametrize("payload", ["[]", '"a string"', "null", "42"])
+def test_load_source_urls_refuses_a_non_object_root(tmp_path: Path, payload: str) -> None:
+    """A shape assumed before it is validated escapes as an ``AttributeError`` traceback and
+    exit 1, not as the documented refusal and exit 3 — ``main`` catches only
+    ``AnnotationSupplyError``."""
+    p = tmp_path / "rep.json"
+    p.write_text(payload)
+    with pytest.raises(AnnotationSupplyError):
+        load_source_urls(p)
+
+
+@pytest.mark.parametrize("row", ["not-a-mapping", 7, None, {"score": 1.0}])
+def test_candidate_host_accessions_refuses_a_row_with_no_accession(
+    tmp_path: Path, row: object
+) -> None:
+    """Same shape one file over: ``row["accession"]`` raises ``TypeError``/``KeyError``, which
+    escapes the refusal contract."""
+    p = tmp_path / "fp.json"
+    p.write_text(json.dumps({"candidates": [row]}))
+    with pytest.raises(AnnotationSupplyError):
+        candidate_host_accessions(p)
+
+
 # --------------------------------------------------------------------------- #
 # Transport — driven by a fake opener, never the network
 # --------------------------------------------------------------------------- #
@@ -289,9 +350,37 @@ def test_fetch_file_manifest_returns_none_on_a_permanent_404_without_retrying() 
 
 def test_fetch_file_manifest_retries_a_transient_failure() -> None:
     op = _Opener({}, code=429)
-    manifest, note = fetch_file_manifest(BASE, retries=3, opener=op)
+    manifest, note = fetch_file_manifest(BASE, retries=3, opener=op, sleep=lambda _s: None)
     assert manifest is None and note
     assert len(op.calls) == 3, "a 429 is transient and must be retried"
+
+
+def test_fetch_file_manifest_backs_off_between_transient_retries() -> None:
+    """The rate limiter is not backoff — it meters the steady state at 3 req/s, so without an
+    explicit wait a 429 would be re-sent four times inside ~1.3 s, which is exactly what the
+    limiter exists to prevent. ``pilot_fetch`` uses ``1.5 * (attempt + 1)``; so does this."""
+    slept: list[float] = []
+    op = _Opener({}, code=429)
+    fetch_file_manifest(BASE, retries=3, opener=op, sleep=slept.append)
+    assert slept == [1.5, 3.0], f"backoff schedule was {slept}"
+
+
+def test_fetch_file_manifest_does_not_back_off_on_a_permanent_failure() -> None:
+    """A 404 is not retried, so it must not sleep either — 660 hosts × a pointless wait is the
+    difference between a two-minute sweep and a twenty-minute one."""
+    slept: list[float] = []
+    fetch_file_manifest(BASE, retries=3, opener=_Opener({}), sleep=slept.append)
+    assert slept == []
+
+
+def test_head_content_length_backs_off_between_transient_retries() -> None:
+    slept: list[float] = []
+
+    def _busy(_url: str) -> int:
+        raise urllib.error.HTTPError(_url, 429, "busy", None, None)  # type: ignore[arg-type]
+
+    assert asup.head_content_length(GFF_URL, header=_busy, sleep=slept.append) is None
+    assert slept == [1.5, 3.0], f"backoff schedule was {slept}"
 
 
 def test_fetch_file_manifest_returns_none_on_an_unparseable_body() -> None:
@@ -309,6 +398,15 @@ def test_probe_assembly_unreachable_is_unknown_not_unannotated() -> None:
     assert row["status"] == STATUS_UNKNOWN
     assert row["status"] != STATUS_UNANNOTATED
     assert row["gff_url"] == "" and row["n_files"] == 0
+
+
+def test_probe_assembly_refuses_a_url_belonging_to_another_assembly() -> None:
+    """The row is *labelled* with ``accession`` but *classified* from whatever directory
+    ``source_url`` names. A mis-joined pair therefore produces well-formed evidence filed under
+    the wrong assembly — it never shows up as ``unknown``, and it moves the very counts the
+    route is derived from ([[namespace-mismatch-invisible-noop]])."""
+    with pytest.raises(AnnotationSupplyError, match="does not belong to accession"):
+        probe_assembly("GCF_000007185.1", FNA_URL, opener=_Opener({}))
 
 
 def test_probe_assembly_annotated_carries_the_gff_url_and_md5() -> None:
@@ -333,11 +431,13 @@ def test_probe_assembly_unannotated_publishes_no_gff_url() -> None:
 
 
 def _control_urls() -> dict[str, str]:
-    return {asup.CONTROL_POSITIVE_ACCESSION: FNA_URL}
+    return {asup.CONTROL_POSITIVE_ACCESSION: CTRL_FNA_URL}
 
 
 def test_run_control_is_powered_when_both_legs_behave() -> None:
-    op = _Opener({f"{BASE}/{asup.MD5_MANIFEST_NAME}": _manifest_text(_annotated_names())})
+    op = _Opener(
+        {f"{CTRL_BASE}/{asup.MD5_MANIFEST_NAME}": _manifest_text(_annotated_names(CTRL_BASENAME))}
+    )
     control = run_control(_control_urls(), opener=op)
     assert control["positive_status"] == STATUS_ANNOTATED
     assert control["negative"]["resolved"] is False
@@ -360,7 +460,7 @@ def test_control_is_unpowered_when_the_negative_leg_alone_breaks() -> None:
 
     class _AlwaysOpen:
         def __call__(self, url: str) -> str:
-            return _manifest_text(_annotated_names())
+            return _manifest_text(_annotated_names(CTRL_BASENAME))
 
     control = run_control(_control_urls(), opener=_AlwaysOpen())
     assert control["positive_status"] == STATUS_ANNOTATED, "the positive leg still 'passes'"
@@ -371,7 +471,9 @@ def test_control_is_unpowered_when_the_negative_leg_alone_breaks() -> None:
 def test_control_is_unpowered_when_the_positive_resolves_but_is_unannotated() -> None:
     """The exact degenerate run the control exists for: everything parses, nothing has a GFF.
     Without the positive leg this reports 660 ``unannotated`` and certifies the gene caller."""
-    op = _Opener({f"{BASE}/{asup.MD5_MANIFEST_NAME}": _manifest_text(_unannotated_names())})
+    op = _Opener(
+        {f"{CTRL_BASE}/{asup.MD5_MANIFEST_NAME}": _manifest_text(_unannotated_names(CTRL_BASENAME))}
+    )
     control = run_control(_control_urls(), opener=op)
     assert control["positive_status"] == STATUS_UNANNOTATED
     assert control_is_powered(control) is False
@@ -402,8 +504,11 @@ def _report(
     powered: bool = True,
     complete: bool = True,
 ) -> dict[str, object]:
+    n_cand = annotated + unannotated
     return {
         "sweep_complete": complete,
+        "n_candidate_hosts": n_cand,
+        "n_candidate_hosts_probed": n_cand,
         "control": {
             "positive_status": STATUS_ANNOTATED if powered else STATUS_UNANNOTATED,
             "negative": {"resolved": False},
@@ -459,6 +564,27 @@ def test_route_refuses_on_an_incomplete_sweep() -> None:
     assert any("sweep incomplete" in r for r in out["reasons"])
 
 
+def test_route_refuses_when_a_candidate_host_was_not_probed() -> None:
+    """``measure_annotation_supply`` drops a candidate host absent from the probed set, and
+    ``sweep_complete`` only compares the *admissible* denominator — so without this clause a
+    route is certified from an understated candidate denominator. The guard that already
+    exists for the admissible set had no counterpart for the candidate set."""
+    rep = _report(annotated=48, unannotated=28)
+    rep["n_candidate_hosts"] = 76
+    rep["n_candidate_hosts_probed"] = 70
+    out = derive_acquisition_route(rep)
+    assert out["route"] == ROUTE_REFUSED
+    assert any("were not probed" in r for r in out["reasons"])
+
+
+def test_route_refuses_a_report_that_omits_the_candidate_coverage_field() -> None:
+    """A missing clause input must refuse, not be read as satisfied — an older report has no
+    business certifying against a rule it was not measured under."""
+    rep = _report(annotated=48, unannotated=28)
+    del rep["n_candidate_hosts_probed"]
+    assert derive_acquisition_route(rep)["route"] == ROUTE_REFUSED
+
+
 def test_route_refuses_on_zero_candidate_hosts() -> None:
     out = derive_acquisition_route(_report(annotated=0))
     assert out["route"] == ROUTE_REFUSED
@@ -475,9 +601,9 @@ def test_route_refuses_a_report_with_no_counts() -> None:
 
 def _corpus(n_annotated: int, n_unannotated: int) -> tuple[dict[str, str], dict[str, str]]:
     """Build ``(source_urls, bodies)`` for a synthetic corpus + the control positive."""
-    urls: dict[str, str] = {asup.CONTROL_POSITIVE_ACCESSION: FNA_URL}
+    urls: dict[str, str] = {asup.CONTROL_POSITIVE_ACCESSION: CTRL_FNA_URL}
     bodies: dict[str, str] = {
-        f"{BASE}/{asup.MD5_MANIFEST_NAME}": _manifest_text(_annotated_names())
+        f"{CTRL_BASE}/{asup.MD5_MANIFEST_NAME}": _manifest_text(_annotated_names(CTRL_BASENAME))
     }
     for i in range(n_annotated + n_unannotated):
         acc = f"GCA_{i:09d}.1"
@@ -554,6 +680,22 @@ def test_measure_refuses_an_admissible_host_with_no_source_url() -> None:
         )
 
 
+def test_measure_refuses_a_candidate_host_outside_the_admissible_set() -> None:
+    """The CLI checked this; the exported API did not — so a direct caller could get
+    ``sweep_complete=True`` and a certified route derived from a *subset* of the candidate
+    hosts, the silently-understated denominator the admissible-set guard already prevents."""
+    urls, bodies = _corpus(2, 0)
+    admissible = sorted(a for a in urls if a != asup.CONTROL_POSITIVE_ACCESSION)
+    with pytest.raises(AnnotationSupplyError, match="not in the admissible set"):
+        measure_annotation_supply(
+            admissible=admissible,
+            candidate_hosts=[*admissible, "GCA_888888888.8"],
+            source_urls=urls,
+            workers=1,
+            opener=_Opener(bodies),
+        )
+
+
 def test_measure_end_to_end_unreachable_corpus_refuses_rather_than_certifying_prodigal() -> None:
     """The whole point. Every request fails; the report must NOT read ``prodigal_required``."""
     urls, _bodies = _corpus(3, 0)
@@ -576,7 +718,7 @@ def test_measure_end_to_end_unreachable_corpus_refuses_rather_than_certifying_pr
 
 
 def test_head_content_length_reads_a_size() -> None:
-    assert asup.head_content_length("http://x/y.gz", header=lambda _u: 4096) == 4096
+    assert asup.head_content_length(GFF_URL, header=lambda _u: 4096) == 4096
 
 
 def test_head_content_length_returns_none_rather_than_zero_on_failure() -> None:
@@ -585,12 +727,12 @@ def test_head_content_length_returns_none_rather_than_zero_on_failure() -> None:
     def _boom(_url: str) -> int:
         raise urllib.error.HTTPError("u", 404, "no", None, None)  # type: ignore[arg-type]
 
-    assert asup.head_content_length("http://x/y.gz", header=_boom) is None
+    assert asup.head_content_length(GFF_URL, header=_boom) is None
 
 
 def test_head_content_length_returns_none_on_a_missing_header() -> None:
     """``Content-Length`` absent → the transport reports -1; that is unknown, not zero."""
-    assert asup.head_content_length("http://x/y.gz", header=lambda _u: -1) is None
+    assert asup.head_content_length(GFF_URL, header=lambda _u: -1) is None
 
 
 def test_head_content_length_is_none_for_an_empty_url() -> None:

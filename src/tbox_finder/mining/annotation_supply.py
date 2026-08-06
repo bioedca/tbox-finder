@@ -53,7 +53,9 @@ import argparse
 import json
 import re
 import sys
+import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from collections.abc import Iterable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
@@ -135,6 +137,19 @@ ACCESSION_RE = re.compile(r"^GC[AF]_\d{9}\.\d+$")
 CONTROL_POSITIVE_ACCESSION = "GCF_000007185.1"
 CONTROL_NEGATIVE_SUFFIX = "__tbox_finder_control_must_not_exist"
 
+#: transient-retry backoff base, in seconds — the same ``1.5 * (attempt + 1)`` schedule
+#: ``pilot_fetch`` uses. Operational, not scientific; private so the public surface stays
+#: free of numbers (see ``test_module_pins_no_scientific_value``).
+_BACKOFF_BASE_S = 1.5
+
+#: the only host this module may contact, and the only schemes it may use. Every probe URL
+#: is *derived* from a committed ``source_url``, so a ``file://`` or third-party value in
+#: that report would otherwise become a local-file read or an off-host request the moment it
+#: reached ``urlopen``. Enforced both where a URL is built and at the transport boundary,
+#: because ``fetch_file_manifest``/``head_content_length`` are public and take a URL directly.
+ALLOWED_URL_HOSTS: frozenset[str] = frozenset({"ftp.ncbi.nlm.nih.gov"})
+ALLOWED_URL_SCHEMES: frozenset[str] = frozenset({"https"})
+
 #: HTTP identification. NCBI asks that automated clients identify themselves.
 USER_AGENT = "tbox-finder/P3-15c-i annotation-supply probe (https://github.com/bioedca/tbox-finder)"
 
@@ -148,6 +163,18 @@ class AnnotationSupplyError(RuntimeError):
 # --------------------------------------------------------------------------- #
 
 
+def require_allowed_url(url: str) -> str:
+    """``url`` if it is an allowed NCBI URL, else a refusal.
+
+    The guard is on *scheme and host*, not on a substring: ``"ftp.ncbi.nlm.nih.gov" in url``
+    would accept ``https://evil.test/?x=ftp.ncbi.nlm.nih.gov``.
+    """
+    parsed = urllib.parse.urlsplit(str(url))
+    if parsed.scheme not in ALLOWED_URL_SCHEMES or parsed.hostname not in ALLOWED_URL_HOSTS:
+        raise AnnotationSupplyError(f"not an allowed NCBI URL: {url!r}")
+    return str(url)
+
+
 def sibling_url(source_url: str, suffix: str) -> str:
     """``…/<basename>_genomic.fna.gz`` → ``…/<basename><suffix>``.
 
@@ -159,7 +186,7 @@ def sibling_url(source_url: str, suffix: str) -> str:
     url = str(source_url).strip()
     if not url.endswith(GENOMIC_FNA_SUFFIX):
         raise AnnotationSupplyError(f"source_url does not end in {GENOMIC_FNA_SUFFIX!r}: {url!r}")
-    return url[: -len(GENOMIC_FNA_SUFFIX)] + suffix
+    return require_allowed_url(url)[: -len(GENOMIC_FNA_SUFFIX)] + suffix
 
 
 def assembly_dir_url(source_url: str) -> str:
@@ -167,7 +194,7 @@ def assembly_dir_url(source_url: str) -> str:
     url = str(source_url).strip()
     if "/" not in url:
         raise AnnotationSupplyError(f"source_url is not a URL: {url!r}")
-    return url.rsplit("/", 1)[0]
+    return require_allowed_url(url).rsplit("/", 1)[0]
 
 
 def assembly_basename(source_url: str) -> str:
@@ -239,6 +266,8 @@ def load_source_urls(
     the mapping, so a caller asking for it gets a ``KeyError``, never a silent empty URL.
     """
     payload = json.loads(Path(fetch_report).read_text(encoding="utf-8"))
+    if not isinstance(payload, Mapping):
+        raise AnnotationSupplyError(f"{fetch_report}: top-level JSON is not an object")
     rows = payload.get("per_genome")
     if not isinstance(rows, list) or not rows:
         raise AnnotationSupplyError(
@@ -274,6 +303,8 @@ def candidate_host_accessions(fp_manifest: str | Path) -> list[str]:
         raise AnnotationSupplyError(f"{fp_manifest}: no candidates")
     out: set[str] = set()
     for row in rows:
+        if not isinstance(row, Mapping) or "accession" not in row:
+            raise AnnotationSupplyError(f"{fp_manifest}: candidate row carries no accession")
         acc = str(row["accession"]).split(":", 1)[0]
         if not ACCESSION_RE.fullmatch(acc):
             raise AnnotationSupplyError(f"{fp_manifest}: malformed host accession {acc!r}")
@@ -298,15 +329,22 @@ def fetch_file_manifest(
     limiter: RateLimiter | None = None,
     retries: int = 4,
     opener: Any = None,
+    sleep: Any = None,
 ) -> tuple[dict[str, str] | None, str]:
     """GET ``<dir_url>/md5checksums.txt`` → ``({filename: md5} | None, note)``.
 
     ``None`` means **unknown**, not empty: a 404 on the manifest is returned as ``None`` with
     a note, because an assembly directory that serves no manifest tells us nothing about
     whether it serves a GFF. Only a manifest that *parsed* licenses a classification.
+
+    A *transient* failure (429 / 5xx / socket) backs off before the retry, on the same
+    ``1.5 * (attempt + 1)`` schedule ``pilot_fetch`` uses. The rate limiter alone is not
+    backoff — it meters the steady state at 3 req/s, so without this a 429 would be re-sent
+    four times inside ~1.3 s, which is the behaviour the limiter exists to prevent.
     """
-    url = f"{dir_url.rstrip('/')}/{MD5_MANIFEST_NAME}"
+    url = require_allowed_url(f"{dir_url.rstrip('/')}/{MD5_MANIFEST_NAME}")
     get = opener if opener is not None else _urlopen_text
+    wait = sleep if sleep is not None else time.sleep
     last = ""
     for attempt in range(retries):
         if limiter is not None:
@@ -319,6 +357,7 @@ def fetch_file_manifest(
                 return None, last
             if attempt == retries - 1:
                 break
+            wait(_BACKOFF_BASE_S * (attempt + 1))
             continue
         try:
             return parse_md5_manifest(text), ""
@@ -345,16 +384,22 @@ def head_content_length(
     limiter: RateLimiter | None = None,
     retries: int = 3,
     header: Any = None,
+    sleep: Any = None,
 ) -> int | None:
     """``Content-Length`` of ``url``, or ``None`` when it could not be established.
 
     Feeds the acquisition cost estimate only. ``None`` is reported as
     ``n_gff_size_unknown`` and never silently counted as zero — an understated download
     budget is how a SLURM acquisition gets sized against a number nobody measured.
+
+    Backs off between transient retries on the same schedule as
+    :func:`fetch_file_manifest`.
     """
     if not url:
         return None
+    require_allowed_url(url)
     get = header if header is not None else _urlhead_length
+    wait = sleep if sleep is not None else time.sleep
     for attempt in range(retries):
         if limiter is not None:
             limiter.acquire()
@@ -363,6 +408,7 @@ def head_content_length(
         except Exception as exc:  # noqa: BLE001 - network/HTTP: retry then give up
             if _permanent(exc) or attempt == retries - 1:
                 return None
+            wait(_BACKOFF_BASE_S * (attempt + 1))
             continue
         return n if n >= 0 else None
     return None
@@ -374,11 +420,23 @@ def probe_assembly(
     *,
     limiter: RateLimiter | None = None,
     opener: Any = None,
+    sleep: Any = None,
 ) -> dict[str, Any]:
-    """One assembly → its annotation-supply evidence row."""
+    """One assembly → its annotation-supply evidence row.
+
+    The pair ``(accession, source_url)`` is checked to agree before anything is fetched. The
+    row is *labelled* with ``accession`` but *classified* from whatever directory ``source_url``
+    names, so a mis-joined pair yields well-formed evidence filed under the wrong assembly —
+    it never surfaces as ``unknown`` and it moves the counts the route is derived from. A
+    mismatch is a join error, not a per-host unknown, so it refuses.
+    """
     basename = assembly_basename(source_url)
+    if not basename.startswith(f"{accession}_"):
+        raise AnnotationSupplyError(
+            f"source_url basename {basename!r} does not belong to accession {accession!r}"
+        )
     manifest, note = fetch_file_manifest(
-        assembly_dir_url(source_url), limiter=limiter, opener=opener
+        assembly_dir_url(source_url), limiter=limiter, opener=opener, sleep=sleep
     )
     if manifest is None:
         return {
@@ -417,6 +475,7 @@ def run_control(
     *,
     limiter: RateLimiter | None = None,
     opener: Any = None,
+    sleep: Any = None,
 ) -> dict[str, Any]:
     """Probe one URL that must resolve-and-be-annotated and one that must not resolve.
 
@@ -495,6 +554,13 @@ def derive_acquisition_route(report: Mapping[str, Any]) -> dict[str, Any]:
         )
     if not bool(report.get("sweep_complete")):
         reasons.append("sweep incomplete — not every requested assembly was probed")
+    n_cand = int(report.get("n_candidate_hosts", 0))
+    n_cand_probed = int(report.get("n_candidate_hosts_probed", -1))
+    if n_cand_probed != n_cand:
+        reasons.append(
+            f"{n_cand - n_cand_probed} candidate-carrying host(s) were not probed — "
+            "an unprobed host is not an unannotated host"
+        )
     n_unknown = int(all_counts.get(STATUS_UNKNOWN, 0))
     if n_unknown:
         reasons.append(f"{n_unknown} admissible host(s) unresolved — unknown is not unannotated")
@@ -541,6 +607,7 @@ def measure_annotation_supply(
     workers: int = 4,
     opener: Any = None,
     header: Any = None,
+    sleep: Any = None,
     limit: int | None = None,
     measure_sizes: bool = True,
 ) -> dict[str, Any]:
@@ -555,6 +622,13 @@ def measure_annotation_supply(
     cannot be established is reported as ``n_gff_size_unknown`` and changes no route.
     """
     requested = list(admissible)
+    not_admissible = sorted(set(candidate_hosts) - set(requested))
+    if not_admissible:
+        raise AnnotationSupplyError(
+            f"{len(not_admissible)} candidate-carrying host(s) are not in the admissible set "
+            f"(first: {not_admissible[:3]}) — they would be dropped from the candidate "
+            "denominator the route is read against"
+        )
     targets = requested[:limit] if limit is not None else requested
     missing = [a for a in targets if a not in source_urls]
     if missing:
@@ -563,10 +637,10 @@ def measure_annotation_supply(
             f"(first: {missing[:3]}) — the sweep would silently understate its denominator"
         )
 
-    control = run_control(source_urls, limiter=limiter, opener=opener)
+    control = run_control(source_urls, limiter=limiter, opener=opener, sleep=sleep)
 
     def _one(acc: str) -> dict[str, Any]:
-        return probe_assembly(acc, source_urls[acc], limiter=limiter, opener=opener)
+        return probe_assembly(acc, source_urls[acc], limiter=limiter, opener=opener, sleep=sleep)
 
     if workers > 1:
         with ThreadPoolExecutor(max_workers=workers) as pool:
@@ -578,7 +652,9 @@ def measure_annotation_supply(
     if measure_sizes and annotated:
 
         def _size(row: dict[str, Any]) -> int | None:
-            return head_content_length(str(row["gff_url"]), limiter=limiter, header=header)
+            return head_content_length(
+                str(row["gff_url"]), limiter=limiter, header=header, sleep=sleep
+            )
 
         if workers > 1:
             with ThreadPoolExecutor(max_workers=workers) as pool:
