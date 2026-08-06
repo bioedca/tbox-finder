@@ -321,6 +321,73 @@ def test_merge_refuses_a_file_that_is_not_a_producer_table(tmp_path: Path) -> No
         SP.merge_posterior_tables([path], n_candidates=1)
 
 
+@pytest.mark.parametrize("payload", [[{"c0": 0.5}], "c0=0.5", None, 7])
+def test_merge_refuses_a_non_mapping_posteriors_payload(tmp_path: Path, payload: object) -> None:
+    """The named refusal, not an AttributeError.
+
+    Checking only that the key EXISTS let a list/str/null reach ``.items()``. ``_cmd_merge``
+    catches only ``Stage2ProducerError``, so the operator got a traceback and a generic exit
+    code instead of the refusal and **exit 3** the sbatch branches on.
+    """
+    path = tmp_path / "bad.json"
+    table = _table({"c0": 0.5})
+    table[SP.POSTERIORS_KEY] = payload
+    path.write_text(json.dumps(table), encoding="utf-8")
+    with pytest.raises(SP.Stage2ProducerError, match="not a\\s+candidate_id"):
+        SP.merge_posterior_tables([path], n_candidates=1)
+
+
+def test_merge_reports_the_non_mapping_refusal_as_exit_3(tmp_path: Path) -> None:
+    """End-to-end through the CLI: the exit code is what the sbatch actually reads."""
+    path = tmp_path / "bad.json"
+    table = _table({"c0": 0.5})
+    table[SP.POSTERIORS_KEY] = ["not", "a", "mapping"]
+    path.write_text(json.dumps(table), encoding="utf-8")
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "candidates": [
+                    {
+                        "candidate_id": "c0",
+                        "accession": "GCA_1.1:c0",
+                        "locus_start": 0,
+                        "locus_end": 10,
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    rc = SP.main(
+        [
+            "merge",
+            "--tables",
+            str(path),
+            "--out",
+            str(tmp_path / "out.json"),
+            "--manifest",
+            str(manifest),
+        ]
+    )
+    assert rc == 3
+
+
+def test_a_control_certified_on_BOOLEANS_does_not_pass(tmp_path: Path) -> None:
+    """``isinstance(True, int)`` is True, so booleans clear both floors AND the margin.
+
+    ``True``/``False`` gives 1.0 and 0.0 — a perfect separation made of no measurement at
+    all. ``validate_posteriors`` already excluded bool by name; the control clause did not,
+    so the two readers of the same quantity disagreed about what counts as a number.
+    """
+    _stage_evidence(
+        tmp_path, control_overrides={"positive_posterior": True, "shuffle_posterior": False}
+    )
+    derived = SP.derive_stage2_supply_available(repo_root=tmp_path)
+    assert derived["clauses"]["control_green"] is False
+    assert derived["available"] is False
+
+
 def test_the_merged_table_round_trips_through_the_real_consumer(tmp_path: Path) -> None:
     """The wrapper form is used because the FLAT form refuses metadata by name.
 
@@ -569,6 +636,7 @@ def test_a_missing_control_report_fails_closed(tmp_path: Path, clause: str) -> N
     # Only the control clauses fail: the other four are unaffected, which is what makes
     # each one independently breakable rather than a single all-or-nothing read.
     assert derived["clauses"]["gate2_calibration_wellformed"] is True
+    assert derived["clauses"]["production_arm_on_record"] is True
     assert derived["clauses"]["producer_present"] is True
     assert derived["clauses"]["producer_posterior_wired"] is True
 

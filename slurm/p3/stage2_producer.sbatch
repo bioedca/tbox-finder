@@ -245,9 +245,16 @@ echo "== shard $TASK3 done -> $POST_OUT"
 # ── leg 3: the merge, run by whichever task finishes last ───────────────────
 # The flock serialises the check-then-merge so two tasks finishing together cannot both
 # pass the completeness test and race on the same output.
+# BLOCKING, not `flock -n`. With a non-blocking lock this interleaving leaves NOBODY
+# merging: task A takes the lock and counts 1 marker (B has not written yet); B writes
+# its marker, fails to take the lock, and exits; A then finds its count already short and
+# exits too. Both markers exist and no merge ever ran. Waiting instead means the second
+# task counts the complete set. MERGE_OK is re-checked after acquisition so the wait
+# cannot turn into a double merge.
 exec 9>"$MARKER_DIR/.merge.lock"
-if ! flock -n 9; then
-  echo "== another task holds the merge lock; this task's share is complete."
+flock 9
+if [ -f "$MARKER_DIR/MERGE_OK" ]; then
+  echo "== another task already merged this round."
   exit 0
 fi
 N_DONE="$(ls "$MARKER_DIR"/shard_*.SHARD_OK 2>/dev/null | wc -l)"

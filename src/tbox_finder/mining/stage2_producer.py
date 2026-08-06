@@ -480,7 +480,17 @@ def merge_posterior_tables(
         table = json.loads(Path(path).read_text(encoding="utf-8"))
         if not isinstance(table, Mapping) or POSTERIORS_KEY not in table:
             raise Stage2ProducerError(f"{path}: not a producer table (no {POSTERIORS_KEY!r} key)")
-        for cid, value in table[POSTERIORS_KEY].items():
+        rows = table[POSTERIORS_KEY]
+        if not isinstance(rows, Mapping):
+            # Checking only that the key EXISTS let a list/str/null reach `.items()`,
+            # raising AttributeError/TypeError — which `_cmd_merge` does not catch, so the
+            # operator got a traceback and a generic exit code instead of the named refusal
+            # and exit 3 the sbatch branches on.
+            raise Stage2ProducerError(
+                f"{path}: {POSTERIORS_KEY!r} is {type(rows).__name__}, not a "
+                "candidate_id → posterior mapping"
+            )
+        for cid, value in rows.items():
             if cid in merged:
                 raise Stage2ProducerError(
                     f"candidate_id {cid!r} appears in more than one shard table — shards "
@@ -839,13 +849,13 @@ def derive_stage2_supply_available(*, repo_root: str | Path | None = None) -> di
         control_failures: list[str] = []
         positive = control.get("positive_posterior")
         shuffle = control.get("shuffle_posterior")
-        if not isinstance(positive, (int, float)) or float(positive) < CONTROL_MIN_POSITIVE:
+        if not _is_real_number(positive) or float(positive) < CONTROL_MIN_POSITIVE:
             control_failures.append(f"positive_posterior={positive!r} below {CONTROL_MIN_POSITIVE}")
-        if not isinstance(shuffle, (int, float)) or float(shuffle) > CONTROL_MAX_SHUFFLE:
+        if not _is_real_number(shuffle) or float(shuffle) > CONTROL_MAX_SHUFFLE:
             control_failures.append(f"shuffle_posterior={shuffle!r} above {CONTROL_MAX_SHUFFLE}")
         if (
-            isinstance(positive, (int, float))
-            and isinstance(shuffle, (int, float))
+            _is_real_number(positive)
+            and _is_real_number(shuffle)
             and (float(positive) - float(shuffle)) < CONTROL_MIN_MARGIN
         ):
             control_failures.append(
@@ -902,6 +912,17 @@ def derive_stage2_supply_available(*, repo_root: str | Path | None = None) -> di
         "reasons": reasons,
         "repo_root": str(root),
     }
+
+
+def _is_real_number(value: Any) -> bool:
+    """A real number, ``bool`` excluded — the same rule :func:`validate_posteriors` uses.
+
+    ``isinstance(True, int)`` is True, so a control record carrying
+    ``"positive_posterior": true`` / ``"shuffle_posterior": false`` clears both thresholds
+    AND the margin (1.0 - 0.0) and certifies a supply on two booleans. The two readers of
+    this same quantity must not disagree about what counts as a number.
+    """
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
 
 
 def _read_json_or_none(path: str | Path) -> Any:
