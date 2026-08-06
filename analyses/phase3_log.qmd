@@ -3266,3 +3266,62 @@ baseline worktree at `0b9ad0c` (**4,248 / 15**) — failure sets identical, `com
 0.15.15 + black 25.11.0 clean. CI green on every head so far (`2e2a97a`, `378974f`, `02d178d`,
 `7982cc6`) — which also settles the one environment question the derivation raised: `REPO_ROOT`
 resolves correctly under CI's editable install, so the evidence-derived pin holds there too.
+
+## Step P3-15′-b — 2026-08-05: the per-candidate Stage-2 posterior producer
+
+**Inputs.** `data/processed/mining/round0_fp_manifest.json` (941 coordinate-only candidates,
+git-tracked); `data/interim/production_genomes/*.fna` (2,500, DVC); the P3-06 production arm
+`aux1.0_lr1e-4`; `reports/gate2_p3_ece.json` → `gate.calibration.temperature`
+= 1.140627294282911, **read, never re-typed**.
+
+**Process.** `src/tbox_finder/mining/stage2_producer.py` composes the shipped primitives and
+re-derives none of them: `homolog_msa.resolve_candidate_sequence` → `infer.handoff.transcribe_to_rna`
+→ `stage2.eval.score_rows` → `calib.recalibrate.calibrated_posterior`, with the calibrated array
+read back through `payload[payload["gated_posterior_key"]]` rather than a literal, so the ADR-0005
+D11 indirection has one implementation. `calibrated_posterior` is called with **no priors**, so what
+is published is the D11 *named* (temperature-scaled, PRE-prior-shift) object. The span is the **bare
+locus**: `stage2/dataset.py` raises on a non-zero flank, so the head was trained and its temperature
+fitted on bare loci and there is deliberately no flank knob to decalibrate them with. Four
+subcommands (`make-shards` / `score-shard` / `merge` / `control`) reuse `covariation_producer`'s
+partition skeleton **by import**; `slurm/p3/stage2_producer.sbatch` runs a 2-task GPU array whose
+last-finishing task takes an flock and merges.
+
+**Outputs.** `$ROUND_DIR/stage2_posteriors.json` in the wrapper form `load_stage2_posteriors`
+unwraps (the flat form validates every top-level key as a posterior, so no metadata could ride
+along); `reports/p3/stage2_producer_control.json`; `remine.STAGE2_SUPPLY_AVAILABLE = True` plus the
+two-way `--stage2-supply-available` / `--no-…` flag pair and an exit-4 unevidenced preflight.
+
+**Measured, on all 941 (laptop RTX 4060).** 941/941 resolved, **coverage 1.0000**, 0 unresolved.
+2.0 s resolve + 18.9 s load + 38.7 s scoring for 1,882 rows (0.0206 s/row), **1.33 GiB peak VRAM**.
+The designed control fires: positive **0.999420**, dinucleotide shuffle **0.000036**, margin
+**0.999384**, against floors of 0.90 / 0.10 / 0.50 fixed *before* the measurement.
+
+**Decisions.** (1) **Strand — a §7 fork, resolved on measurement (bioedca, 2026-08-05:
+`max_over_strands`).** The manifest carries no strand and Stage-1 is RC-equivariant, so a Stage-1
+window asserts no orientation. Scoring both strands of all 941: the minus strand is higher on
+**458/941**, and at a 0.9 operating point **119 candidates (12.6 %) pass only on the minus strand** —
+`+ = 7e-6` vs `− = 0.9997`. A plus-only reading returns `failed` on those, i.e. a *satisfied mining
+conjunct*, on loci Stage-2 calls near-certain T-boxes — exactly what D14 exists to prevent.
+`--strand-policy` ships `required=True` with **no default** (D14 pins the rule, the round supplies
+the value, as with `--stage2-threshold`), both per-strand posteriors ride in the report, and
+`posterior_kind` states in the artifact that a max of two draws is a **selection** on the object
+GATE-2 graded. (2) **`STAGE2_THRESHOLD` stays unpinned** — a §13.1 phase-gate value.
+(3) The supply derivation reads **only git-tracked, non-DVC evidence**, so CI, laptop and cluster
+answer identically; that rules out a "checkpoint on disk" clause and replaces it with a control tied
+to the arm's own committed run report.
+
+**⚠ This step does not move the yield.** Mining is a conjunction: `relaxed_architecture` and
+`downstream_aaRS_synteny` still have no backend, so `plan_remine_round` reports `ready=True`,
+`may_run=False`, `blocking_disjuncts = [relaxed_architecture, downstream_aaRS_synteny]`,
+`max_mined = 0`. A change that makes those two gates agree is a regression, and the test says so.
+
+**Validation.** 58 unit + 8 ml-tier tests; full unit+golden+ml **4,818 passed / 14 failed** vs a
+matched baseline worktree at `028e508` (**4,755 / 14**) — failure sets identical, `comm` empty both
+ways. **39 sabotages, 38 RED against their NAMED test**, the 39th the declared no-op control; a 40th
+(`run_control` fabricating its matchedness flags) targets the torch-only tier and was verified by
+execution against the real checkpoint, restore sha256-verified. ⚠ Three sabotages initially read
+green because their node ids named a *parametrized* test without its parameter and so selected
+**zero** tests — the harness now refuses a run that collects nothing, which is the same
+"absence reads as a pass" failure the campaign exists to catch. ruff 0.15.15 + black 25.11.0 clean.
+
+**Commit.** <SHA>

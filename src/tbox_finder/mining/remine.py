@@ -60,6 +60,7 @@ import argparse
 import dataclasses
 import inspect
 import json
+import sys
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
@@ -67,6 +68,7 @@ from typing import Any
 from tbox_finder.eval.tier2n_probe import ProbeSet
 from tbox_finder.mining.hard_negative import MiningCandidate
 from tbox_finder.mining.mine_round import (
+    MSA_SUPPLY_AVAILABLE,
     build_round_availability,
     candidate_evidence,
     read_fp_manifest,
@@ -82,14 +84,20 @@ from tbox_finder.mining.spare_rule import (
 SCHEMA_VERSION = "1.0"
 STEP = "P3-15"
 
-#: Whether the per-candidate **Stage-2 posterior supply** exists yet — the leg that
+#: Whether the per-candidate **Stage-2 posterior supply** exists — the leg that
 #: resolves a coordinate-only mining candidate to nucleotides, transcribes it, and
-#: scores it through the calibrated Stage-2 re-ranker. It does not: P3-14 shipped
-#: the contig-keyed two-stage harness, not a candidate-keyed producer. This is the
-#: single flag the unblock step flips, the mirror of
-#: ``mine_round.MSA_SUPPLY_AVAILABLE``. Recorded as data so a reader can see the
-#: RUN blocker without reading prose.
-STAGE2_SUPPLY_AVAILABLE = False
+#: scores it through the calibrated Stage-2 re-ranker. It does, since **P3-15′-b**:
+#: :mod:`tbox_finder.mining.stage2_producer` composes
+#: ``resolve_candidate_sequence → transcribe_to_rna → score_rows →
+#: calibrated_posterior`` and writes the ``candidate_id → posterior`` table
+#: :func:`load_stage2_posteriors` consumes. The mirror of
+#: ``mine_round.MSA_SUPPLY_AVAILABLE``, and kept **honest** the same way: by
+#: :func:`~tbox_finder.mining.stage2_producer.derive_stage2_supply_available`, which
+#: re-derives the same fact from the shipped git-tracked evidence and is what the unit
+#: pin and the CLI preflight compare it against. Kept as an explicit constant rather
+#: than a filesystem probe at import so it stays greppable, import-cheap and
+#: overridable per run.
+STAGE2_SUPPLY_AVAILABLE = True
 
 
 class RemineError(ValueError):
@@ -603,6 +611,94 @@ def _bool_flag(parser: argparse.ArgumentParser, name: str, help_text: str) -> No
     parser.add_argument(f"--{name}", action="store_true", help=help_text)
 
 
+def _supply_flag_pair(
+    parser: argparse.ArgumentParser, name: str, *, default: bool, help_text: str
+) -> None:
+    """A supply declaration in **both** directions, defaulted from its module constant.
+
+    A bare ``store_true`` is a one-way declaration: once the module constant is ``True``
+    it can never be reached (the CLI passed a hard ``False``), and once it is honoured as
+    a default nothing can say "unavailable on *this* machine". Both halves matter here —
+    the flip is worthless without the first and unsafe without the second, since a
+    checkout that has not staged the checkpoints or the genomes would otherwise discover
+    the gap in the producer array, after the GPU legs. Mutually exclusive, so a script
+    cannot assert both and silently get whichever argparse saw last.
+
+    The default is read at parser-build (i.e. ``main()``) time, so flipping the constant
+    reaches the CLI without a CLI change.
+    """
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument(
+        f"--{name}",
+        dest=name.replace("-", "_"),
+        action="store_true",
+        default=default,
+        help=f"{help_text}; absent ⇒ the module default (currently {default})",
+    )
+    group.add_argument(
+        f"--no-{name}",
+        dest=name.replace("-", "_"),
+        action="store_false",
+        default=argparse.SUPPRESS,
+        help=(
+            "declare it UNAVAILABLE on this machine — the conservative direction: the "
+            "round refuses instead of mining on a leg that cannot run"
+        ),
+    )
+
+
+def supply_declaration_unevidenced(*, declared: bool, derivation: Mapping[str, Any] | None) -> bool:
+    """Does a run declare a supply its own checkout cannot evidence?
+
+    The asymmetry is deliberate and matches ``mine_round``'s. Declaring a supply
+    **unavailable** while the evidence says otherwise is a conservative under-claim (the
+    round refuses; nothing is mined). Declaring it **available** without the evidence is
+    the fail-open direction — it is what would let a round pass its gates, spend the GPU
+    legs and then mine on a Stage-2 posterior table that was never produced.
+    """
+    return bool(declared) and not bool((derivation or {}).get("available"))
+
+
+def _supply_derivations(args: argparse.Namespace) -> dict[str, Any]:
+    """Both supply derivations, re-derived here rather than inherited from a prior leg.
+
+    ``plan`` and ``apply-spare-rule`` run on different jobs, so the second cannot trust
+    the first's verdict — this is the same evidence gate applied at the leg that actually
+    turns candidates into hard negatives.
+    """
+    from tbox_finder.mining.mine_round import derive_msa_supply_available
+    from tbox_finder.mining.stage2_producer import derive_stage2_supply_available
+
+    return {
+        "msa_supply_derivation": derive_msa_supply_available(),
+        "stage2_supply_derivation": derive_stage2_supply_available(),
+    }
+
+
+def _refuse_unevidenced(args: argparse.Namespace, derivations: Mapping[str, Any]) -> int | None:
+    """``4`` when a declared supply is unevidenced, else ``None``.
+
+    Its own exit code: ``1``/``2`` are the round's own honest outcomes and the sbatch
+    branches on them, so routing a misconfigured checkout through either would turn a
+    staging fault into a silent "no round today".
+    """
+    for flag, key, label in (
+        ("msa_supply_available", "msa_supply_derivation", "covariation MSA"),
+        ("stage2_supply_available", "stage2_supply_derivation", "Stage-2 posterior"),
+    ):
+        derivation = derivations[key]
+        if supply_declaration_unevidenced(
+            declared=bool(getattr(args, flag)), derivation=derivation
+        ):
+            print(
+                f"FATAL: this round declares the {label} supply available, but this checkout "
+                f"cannot evidence it — {'; '.join(derivation['reasons'])}",
+                file=sys.stderr,
+            )
+            return 4
+    return None
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="python -m tbox_finder.mining.remine",
@@ -622,11 +718,21 @@ def build_parser() -> argparse.ArgumentParser:
             ),
         )
         _bool_flag(p, "rscape-installed", "the pinned R-scape build is present")
-        _bool_flag(
-            p, "msa-supply-available", "the per-candidate MSA supply exists (ADR-0006 D7/A1)"
+        # Both supplies now have a producer and a module constant, so both need the
+        # two-way declaration: a bare `store_true` could not express the `True` default
+        # at all, which would have made the P3-15′-a and P3-15′-b flips unreachable from
+        # the CLI the round actually invokes ([[pinned-constant-that-nothing-reads]]).
+        _supply_flag_pair(
+            p,
+            "msa-supply-available",
+            default=MSA_SUPPLY_AVAILABLE,
+            help_text="the per-candidate MSA supply exists (ADR-0006 D7/A1)",
         )
-        _bool_flag(
-            p, "stage2-supply-available", "the per-candidate Stage-2 posterior supply exists"
+        _supply_flag_pair(
+            p,
+            "stage2-supply-available",
+            default=STAGE2_SUPPLY_AVAILABLE,
+            help_text="the per-candidate Stage-2 posterior supply exists (P3-15′-b)",
         )
         _bool_flag(p, "relaxed-arch-available", "a relaxed-architecture backend exists")
         _bool_flag(p, "synteny-available", "a downstream-aaRS synteny backend exists")
@@ -661,6 +767,19 @@ def _cmd_plan(args: argparse.Namespace) -> int:
         relaxed_arch_available=bool(args.relaxed_arch_available),
         synteny_available=bool(args.synteny_available),
     )
+    derivations = _supply_derivations(args)
+    unevidenced = _refuse_unevidenced(args, derivations)
+    plan = {**plan, **derivations}
+    if unevidenced is not None:
+        # Still WRITE, with `may_run` forced False and the override named. Not writing
+        # would leave an EARLIER good run's report at this path reading `may_run: true`
+        # — nothing clears it — and that key is what the §9.3 artifact verify reads. The
+        # nested `plan` keeps the gates' own untouched verdicts.
+        plan = {
+            **plan,
+            "may_run": False,
+            "may_run_overridden_by": "supply_declaration_unevidenced",
+        }
     report = build_remine_report(
         plan=plan,
         round_report=None,
@@ -670,6 +789,8 @@ def _cmd_plan(args: argparse.Namespace) -> int:
     problems = remine_problems(report)
     report["problems"] = problems
     write_json(args.out, report)
+    if unevidenced is not None:
+        return unevidenced
     if problems:
         print(f"remine report self-check FAILED: {problems}")
         return 2
@@ -685,6 +806,12 @@ def _cmd_plan(args: argparse.Namespace) -> int:
 
 
 def _cmd_apply_spare_rule(args: argparse.Namespace) -> int:
+    # The same evidence gate the preflight applies, at the leg that actually mines.
+    # `plan` and `apply-spare-rule` run on different jobs, so this cannot inherit the
+    # preflight's verdict; and this is the call that turns candidates into hard negatives.
+    unevidenced = _refuse_unevidenced(args, _supply_derivations(args))
+    if unevidenced is not None:
+        return unevidenced
     plan = plan_remine_round(
         rscape_installed=bool(args.rscape_installed),
         msa_supply_available=bool(args.msa_supply_available),

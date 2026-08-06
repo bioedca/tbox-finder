@@ -277,3 +277,12 @@ Thumbs.db
 *~
 .idea/
 .vscode/
+
+# P3-15′-b — the Stage-2 posterior producer's SLURM run signals. The array writes its
+# stdout/stderr into reports/p3/ (SLURM creates the file, not the directory, so the
+# --output path must live somewhere that already exists). These are per-job logs, not
+# measured artifacts: reports/p3/stage2_producer_control.json IS committed and is the
+# step's evidence. Without these rules an operator's `git add -A` on the sacrificial
+# cluster checkout commits a job's console output.
+/reports/p3/stage2_producer_*.out
+/reports/p3/stage2_producer_*.err

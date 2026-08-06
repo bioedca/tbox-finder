@@ -314,19 +314,41 @@ def test_a_fully_backed_round_may_run() -> None:
     assert plan["may_run"] is True
 
 
-def test_the_stage2_supply_flag_is_false_and_resolves_at_call_time() -> None:
-    """The RUN blocker is data, and flipping it must reach a caller that omits it."""
-    assert STAGE2_SUPPLY_AVAILABLE is False
+def test_the_stage2_supply_flag_agrees_with_its_derivation_and_resolves_at_call_time() -> None:
+    """The RUN blocker is data, and flipping it must reach a caller that omits it.
+
+    Strengthened at P3-15′-b rather than inverted: the old ``is False`` could only catch
+    drift in one direction, so a stale ``True`` (or, now, a stale ``False`` on a checkout
+    that *can* evidence the supply) would pass. Pinning the constant against its own
+    re-derivation catches both, and is the P3-15′-a discipline applied to the second flag.
+    """
+    from tbox_finder.mining.stage2_producer import derive_stage2_supply_available
+
+    derived = derive_stage2_supply_available()
+    assert STAGE2_SUPPLY_AVAILABLE is derived["available"], derived["reasons"]
+    # The real backend state: `relaxed_arch_available`/`synteny_available` are left at
+    # their False defaults because P3-15′-c and P3-15′-d have not landed. Forcing them
+    # True (as this test did while the Stage-2 flag was the only blocker) would assert a
+    # world in which every disjunct has a backend, which is not the one that ships.
     plan = plan_remine_round(
         rscape_installed=True,
         msa_supply_available=True,
-        relaxed_arch_available=True,
-        synteny_available=True,
         stage2_threshold=THRESHOLD,
     )
-    assert plan["stage2_supply_available"] is False
+    # Omitted by the caller ⇒ resolved from the module constant at CALL time, which is the
+    # property that makes the flip reach every caller without a signature change.
+    assert plan["stage2_supply_available"] is STAGE2_SUPPLY_AVAILABLE
+    assert plan["ready"] is True
+    assert STAGE2_DISJUNCT not in plan["yield"]["blocking_disjuncts"]
+    # Still refused — by the two backends that genuinely do not exist. P3-15′-b supplies a
+    # posterior; it does not supply relaxed-architecture or synteny, and mining is a
+    # conjunction. A change that makes this round `may_run` is a regression, not progress.
     assert plan["may_run"] is False
-    assert plan["yield"]["blocking_disjuncts"] == [STAGE2_DISJUNCT]
+    assert plan["yield"]["blocking_disjuncts"] == [
+        "relaxed_architecture",
+        "downstream_aaRS_synteny",
+    ]
+    assert plan["yield"]["max_mined"] == 0
 
 
 def test_availability_delegates_the_msa_producibility_rule() -> None:
