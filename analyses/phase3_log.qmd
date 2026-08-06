@@ -3346,3 +3346,50 @@ that a job will start doing work — executing the entry point on the login node
 
 **Commit.** `8d67169` (step) + `002f235` (PYTHONPATH) + `9594362` (review r1) + `1a4ba52` (review r2),
 PR [#111](https://github.com/bioedca/tbox-finder/pull/111)
+
+### Step P3-15′-b RUN — 2026-08-06: SLURM job 1163 (submit-ack given 2026-08-06)
+
+**Submitted** `slurm/p3/stage2_producer.sbatch` at `dbba68f`, `--array=0-1`, one A4000 per task,
+`ROUND_DIR=$HOME/tbox-scratch/round_p3_15b`, `STRAND_POLICY=max_over_strands`. Elapsed ≈ 5 min.
+
+**Verification — artifact-based (`sacct` off, CLAUDE.md §9.3 step 8).** `squeue -j 1163` terminal;
+`markers_1163/` carries `shard_000.SHARD_OK`, `shard_001.SHARD_OK` **and** `MERGE_OK`; `.owner`
+reads `1163`; both shard tables written; `stage2_posteriors.json` reports **941/941, coverage
+1.0000, 0 unresolved**, and the in-job readback through `remine.load_stage2_posteriors` accepted
+**941 posteriors, range [3.99e-06, 0.999673]`. The two `.err` files are 1,177 B each and carry no
+traceback (non-empty on success is expected here and is declared in the header).
+
+**The merge leg behaved as designed under the round-2 fix.** Task 0 finished first, took the
+blocking lock, counted `1/2` and deferred; task 1 counted the complete set and merged. That is
+precisely the interleaving the pre-fix `flock -n` turned into "nobody merges".
+
+**⚠ MEASURED: the produced posterior is NOT bit-reproducible across device + sharding, and the
+spare/mine verdict is sensitive to it only at the boundary.** The cluster table (A4000, 2 shards)
+vs the laptop table (RTX 4060, 4 shards) over the same 941 candidates and the same policy — the two
+runs differ in **both** device and batch composition, so neither cause is isolated here, and P3-14
+already recorded that `score_rows` is batch-position sensitive:
+
+| quantity | value |
+|---|---|
+| identical values | **0 / 941** |
+| median \|Δposterior\| | 1.25e-06 |
+| p90 / p99 / max | 1.17e-03 / 1.10e-02 / **3.79e-02** |
+| \|Δ\| > 1e-2 | 12 / 941 |
+| in the ambiguous band (0.01, 0.99) | 149 / 941 (the rest saturate) |
+
+Verdict flips, cluster vs laptop, by candidate operating point: **0 at 0.5, 0.7, 0.9, 0.95 and
+0.999; 3 at 0.99** — and all three sit *on* the threshold (`0.990143` vs `0.989780`, Δ = 3.6e-04;
+`0.990059` vs `0.989734`, Δ = 3.3e-04). All three flip in the **spared-on-laptop / mined-on-cluster**
+direction, i.e. the fail-open one for those candidates.
+
+**Why this is worth carrying to the §13.1 gate.** `STAGE2_THRESHOLD` is deliberately unpinned, and
+this says something about where it may be put: an operating point at **0.99 lands in a region where
+3 of 941 candidates are decided by numerics rather than by evidence**, whereas 0.9 decides the same
+236 candidates on either machine with a wide margin. The disjunct is a *sparing* one, so a boundary
+flip costs at most one spared hard negative — but it is a reproducibility property of the published
+column, not of the rule, and a future round that re-runs the producer on different hardware will not
+reproduce this table byte-for-byte. The report records `device`, `arm`, `batch_size` and the loader's
+`adapter_sha256`/`heads_sha256` so a re-run is comparable rather than merely different.
+
+**Not committed, deliberately.** `$ROUND_DIR` is scratch (`stage1_remine.sbatch:63-64`), so the
+table is a run artifact; it was retrieved by `rsync` for this comparison and stays out of git.
