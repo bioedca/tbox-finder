@@ -1,0 +1,6 @@
+outs:
+- md5: 8fe382680893cba0e045c0017749cee2.dir
+  size: 68855450
+  nfiles: 339
+  hash: md5
+  path: production_annotations

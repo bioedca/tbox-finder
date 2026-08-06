@@ -3627,3 +3627,79 @@ not inferred: `measure --limit 5` exits **3** with `route=refused`, and the repo
 carries the refusal inside it rather than a verdict a later reader could mistake for a pass.
 
 **Commit.** see `TODO.md` for the squash SHA on `main` (PR #112).
+
+## Step P3-15′-c-i (acquisition) — 2026-08-06: fetch the 339 annotated hosts' GFF, and read a coordinate
+
+**Inputs.** `reports/p3/annotation_supply.json` — the committed measurement half of this step,
+which already carries every annotated host's `gff_url` **and** the `gff_md5` NCBI publishes for
+it. **Process.** Two new pure-stdlib modules. `src/tbox_finder/mining/annotation_fetch.py`
+downloads each of the 339 annotated hosts' `*_genomic.gff.gz`, verifies it against the committed
+md5, and stores it **byte-identical to what NCBI served** (never decompressed, never rewritten) so
+`md5(file) == report.gff_md5` stays checkable forever; `src/tbox_finder/mining/gff3.py` parses
+GFF3 into CDS features. There is **no URL discovery at all** — no `esearch`, no `esummary`, not
+even a directory listing — so the acquisition adds no transport. `annotation_supply`'s redirect
+allowlist was **promoted** to a public `build_allowlisted_opener()` rather than copied, so "both
+modules re-check every redirect hop" stays one claim instead of two that can drift.
+**Outputs.** `data/interim/production_annotations/` (339 files, 68,855,450 B, DVC `md5
+8fe382680893cba0e045c0017749cee2.dir`); `reports/p3/annotation_fetch.json`;
+`reports/p3/annotation_parse.json`; 180 new unit tests; the real 33,003 B
+`tests/fixtures/annotation/GCA_002790315.1.gff.gz`.
+
+**Measured, and this is the part `-c-ii` will build on.** 339/339 acquired, 0 md5 mismatches, and
+the bytes on disk sum to **exactly 68,855,450** — reproducing the supply report's independently
+measured `Content-Length` total, a cross-check between two runs that never shared a number.
+Offline re-verification parses all 339: **897,096 CDS across 44,291 contigs**, every one with a
+resolved strand and non-empty gene-identity text; **11,671 (1.30 %) carry `pseudo=true`**, which is
+the population ADR-0006 D4 routes to its Pfam/KO fallback, now counted rather than assumed; **273
+CDS span more than one row**; and **0 of 339 carry a `##FASTA` section** (NCBI does not emit one —
+bakta/prokka will, which is why the parser stops dead at the directive).
+
+**Three things the real data settled that synthetic fixtures would not have.** (1) **Multi-row
+CDS is real here** — a per-row reading would have invented 273 genes that do not exist and put a
+spurious "CDS start" in the middle of each, so grouping by `ID` is correctness, not tidiness.
+(2) **Attribute values are URL-escaped**: `country=USA: Crystal Geyser near Green River%2C Utah`
+is a real value from the fixture, which is why the split order (`;` → `=` → `,` → unescape) is
+load-bearing — unescaping first shatters one product name into two. (3) **D4 measures to the CDS
+*start codon*, which on a `-` strand is the feature's `end`, not its `start`** —
+`cds_start_position` is the only sanctioned way to ask, and it **refuses** an unresolved strand
+rather than defaulting to `+` on exactly the divergent loci where the §6 resolver is least sure.
+
+**The control had to be rebuilt, because the first version could not fail.** The md5 control's
+negative legs were written inline as `md5_hex(payload + b"\x00") != expected_md5` — which asserts
+only that md5 has no collisions. True, and completely uninformative about this code: the legs
+could not go False whatever the acquisition did, so a hardcoded `True` was behaviourally
+indistinguishable from a computed one, and the sabotage campaign said so by **not biting**. Fixed
+by extracting the single comparator `digest_matches` that `fetch_one`, `parse_census` and all
+three control legs now share: a comparison that always answers True makes both negative legs fail
+and the control reports **itself** unpowered ([[control-matchedness-must-be-asserted]]).
+
+**A second sabotage miss was a `pytest.raises` passing on the wrong refusal.** The allowlist check
+sat *behind* the GFF-suffix check, so it was unreachable for any URL not ending in
+`_genomic.gff.gz` — and deleting the allowlist entirely left the test green, because the suffix
+rule refused first. The order is now allowlist-first, every URL in that test ends in the suffix
+and carries the right accession so **only** the allowlist can refuse it, and the assertion matches
+the message ([[raises-test-needs-a-positive-control]], again).
+
+**Validation.** 180 new unit tests (65 GFF3 + 115 acquisition); **57 sabotages, 56 RED against
+their named test**, the 57th a declared no-op control that stayed green. The harness refuses a run
+that collects zero tests — which is what caught four of my own node ids naming a parametrized test
+without its parameter, exactly the "absence reads as a pass" failure the campaign exists to find.
+The acquisition was **re-run end-to-end on the reviewed code with `--force`** — a second
+independent 339-file download, 678 in total — and both reports are **byte-identical** except
+`generated_at_utc` and the provenance `git_sha`. Full unit+golden **4,422 passed / 13 failed**
+against a matched baseline worktree at `2be5ff4` (**4,242 / 13**) — failure sets **identical**,
+`comm` empty both ways, and the +180 is exactly the new tests. ruff 0.15.15 + black 25.11.0 clean;
+no `.smk` touched; no `envs/*` touched and no dependency added beyond the standard library, so
+the ADR-0002 amendment the annotator arm needs is **not** triggered by this half. §6.4 fires on
+nothing (no README, `paper/manuscript.qmd` or ADR reference to the new API).
+
+**Decisions.** The step block frames this as "a suffix extension of `mining/pilot_fetch.py`". It
+is not built there, deliberately: `pilot_fetch` is Entrez-dependent (biopython, which CI does not
+install), has **no URL allowlist at all**, and its `validate_report` re-derives a fixed row schema,
+so adding GFF fields means lockstep edits to `GENOME_COLS`, `build_report`, `genome_digest` and the
+validator — for a fetch that needs none of its e-utils machinery. A sibling module reusing
+`annotation_supply`'s guards is the same cheap path with a smaller blast radius, and it stays in
+CI's bare tier where the sabotage campaign can reach it. Cross-links: ADR-0006 D4 (the predicate
+this supplies coordinates for), D9 row 5 (Tier-2N), ADR-0005 D14 (an unavailable disjunct spares).
+
+**Commit.** see `TODO.md` for the squash SHA on `main`.

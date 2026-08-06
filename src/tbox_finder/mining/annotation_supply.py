@@ -387,8 +387,20 @@ class _AllowlistRedirectHandler(urllib.request.HTTPRedirectHandler):
         return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
+def build_allowlisted_opener() -> urllib.request.OpenerDirector:
+    """An opener whose every redirect hop is re-checked against the allowlist.
+
+    Public because P3-15′-c-i's acquisition (``mining/annotation_fetch``) needs the *same*
+    guard for a **binary** GET, and the alternative is a second copy of the handler — at which
+    point "both modules validate redirects" is two claims that can drift apart instead of one
+    ([[promote-dont-duplicate-is-a-correctness-rule]]). A fresh instance per call: an
+    ``OpenerDirector`` is not documented thread-safe, and the acquisition runs a pool.
+    """
+    return urllib.request.build_opener(_AllowlistRedirectHandler())
+
+
 #: the single opener both transport helpers use, so neither can bypass the redirect guard.
-_OPENER = urllib.request.build_opener(_AllowlistRedirectHandler())
+_OPENER = build_allowlisted_opener()
 
 
 def _urlopen_text(url: str) -> str:
@@ -899,9 +911,11 @@ __all__ = [
     "STATUS_UNANNOTATED",
     "STATUS_UNKNOWN",
     "STATUS_VALUES",
+    "USER_AGENT",
     "accession_prefix_tally",
     "assembly_basename",
     "assembly_dir_url",
+    "build_allowlisted_opener",
     "candidate_host_accessions",
     "classify_assembly",
     "control_is_powered",
@@ -912,6 +926,7 @@ __all__ = [
     "measure_annotation_supply",
     "parse_md5_manifest",
     "probe_assembly",
+    "require_allowed_url",
     "run_control",
     "sibling_url",
 ]
