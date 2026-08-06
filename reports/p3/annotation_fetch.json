@@ -10,6 +10,7 @@
     "observed_md5": "3afa0aff910cfd08f9f0163981656308",
     "positive_matches": true
   },
+  "corpus_digest": "0d8f0a3cbab0fdc49fc5f032efa4a8010fbb99a1365870eaaa3296119e6fb7fd",
   "n_annotated_in_supply_report": 339,
   "n_cached": 0,
   "n_downloaded": 339,
@@ -3757,8 +3758,8 @@
       "control_accession": "GCA_002790315.1",
       "gff_suffix": "_genomic.gff.gz"
     },
-    "generated_at_utc": "2026-08-06T21:28:21.452149+00:00",
-    "git_sha": "76e686ff37d1e450e22d9996a21467b4d2e37eca",
+    "generated_at_utc": "2026-08-06T21:42:41.238776+00:00",
+    "git_sha": "65a817b577d870e8399dd9fabb7f230b1fce3309",
     "inputs": {
       "reports/p3/annotation_supply.json": "73390dc509e0fde41758c63d69d2c2bd1d9a3a1ba01285e953c4d6c53a96b539"
     },

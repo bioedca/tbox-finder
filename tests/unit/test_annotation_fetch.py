@@ -853,13 +853,27 @@ def test_a_failed_run_does_not_validate(tmp_path):
 # --------------------------------------------------------------------------- #
 
 
-def test_parse_census_re_hashes_and_parses_the_real_fixture(tmp_path):
-    path, _url, payload = _control_supply(tmp_path)
-    ann = tmp_path / "ann"
-    ann.mkdir()
-    (ann / af.destination_name(af.CONTROL_ACCESSION)).write_bytes(payload)
+def _acquire(tmp_path):
+    """Run a real single-target acquisition, then hand back what `verify` needs.
 
-    census = af.parse_census(supply_report=path, annotation_dir=ann)
+    The census tests go through the acquisition rather than dropping bytes on disk, because
+    the ordering (`fetch` then `verify`) is now part of what is under test.
+    """
+    path, url, payload = _control_supply(tmp_path)
+    ann = tmp_path / "ann"
+    report = af.fetch_annotations(
+        supply_report=path, annotation_dir=ann, opener=_opener({url: payload}), workers=1
+    )
+    fetch_path = tmp_path / "fetch.json"
+    fetch_path.write_text(json.dumps(report), encoding="utf-8")
+    return path, ann, fetch_path, payload
+
+
+def test_parse_census_re_hashes_and_parses_the_real_fixture(tmp_path):
+    path, ann, fetch_path, _payload = _acquire(tmp_path)
+    census = af.parse_census(supply_report=path, annotation_dir=ann, fetch_report=fetch_path)
+    assert census["corpus_matches_fetch_report"] is True
+    assert census["corpus_check_reason"] == "ok"
     assert census["n_ok"] == 1 and census["n_failed"] == 0 and census["failures"] == []
     assert census["totals"]["n_cds"] == 455
     assert census["totals"]["n_cds_pseudo"] == 38
@@ -868,18 +882,74 @@ def test_parse_census_re_hashes_and_parses_the_real_fixture(tmp_path):
 
 
 def test_parse_census_reports_a_missing_file(tmp_path):
-    path, _url, _payload = _control_supply(tmp_path)
-    census = af.parse_census(supply_report=path, annotation_dir=tmp_path / "empty")
+    path, ann, fetch_path, _payload = _acquire(tmp_path)
+    (ann / af.destination_name(af.CONTROL_ACCESSION)).unlink()
+    census = af.parse_census(supply_report=path, annotation_dir=ann, fetch_report=fetch_path)
     assert census["n_failed"] == 1 and census["failures"][0]["note"] == "missing"
 
 
 def test_parse_census_reports_a_tampered_file_rather_than_parsing_it(tmp_path):
-    path, _url, payload = _control_supply(tmp_path)
-    ann = tmp_path / "ann"
-    ann.mkdir()
+    path, ann, fetch_path, payload = _acquire(tmp_path)
     (ann / af.destination_name(af.CONTROL_ACCESSION)).write_bytes(payload + b"\x00")
-    census = af.parse_census(supply_report=path, annotation_dir=ann)
+    census = af.parse_census(supply_report=path, annotation_dir=ann, fetch_report=fetch_path)
     assert census["n_failed"] == 1 and "md5" in census["failures"][0]["note"]
+
+
+def test_a_census_of_a_DIFFERENT_corpus_than_the_fetch_certified_is_refused(tmp_path):
+    """The r2 defect: a census generated before its fetch describes a previous state.
+
+    Timestamps cannot distinguish that from a census run after; a digest over the actual
+    (accession, md5) pairs can, and it is compared rather than assumed.
+    """
+    path, ann, fetch_path, _payload = _acquire(tmp_path)
+    stale = json.loads(fetch_path.read_text(encoding="utf-8"))
+    stale["corpus_digest"] = "0" * 64
+    fetch_path.write_text(json.dumps(stale), encoding="utf-8")
+    census = af.parse_census(supply_report=path, annotation_dir=ann, fetch_report=fetch_path)
+    assert census["n_failed"] == 0
+    assert census["corpus_matches_fetch_report"] is False
+    assert census["corpus_check_reason"] == "the fetch report certifies a different corpus"
+
+
+def test_an_ABSENT_fetch_report_does_not_silently_satisfy_the_corpus_check(tmp_path):
+    """Empty must not equal empty — the [[clauses-must-guard-emptiness]] shape."""
+    path, ann, _fetch_path, _payload = _acquire(tmp_path)
+    census = af.parse_census(
+        supply_report=path, annotation_dir=ann, fetch_report=tmp_path / "absent.json"
+    )
+    assert census["fetch_report_corpus_digest"] == ""
+    assert census["corpus_matches_fetch_report"] is False
+    # The reason must name the ABSENCE, not a mismatch: collapsing the two makes the
+    # "is there a digest at all" half of the check unable to change any outcome.
+    assert census["corpus_check_reason"] == "the fetch report declares no corpus_digest"
+
+
+def test_cli_verify_exits_3_when_the_corpus_does_not_match_the_fetch_report(tmp_path):
+    path, ann, fetch_path, _payload = _acquire(tmp_path)
+    stale = json.loads(fetch_path.read_text(encoding="utf-8"))
+    stale["corpus_digest"] = "0" * 64
+    fetch_path.write_text(json.dumps(stale), encoding="utf-8")
+    code = af.main(
+        [
+            "verify",
+            "--supply-report",
+            str(path),
+            "--annotation-dir",
+            str(ann),
+            "--fetch-report",
+            str(fetch_path),
+            "--out",
+            str(tmp_path / "parse.json"),
+        ]
+    )
+    assert code == 3
+
+
+def test_corpus_digest_is_order_independent_and_content_sensitive():
+    a = af.corpus_digest([("GCA_1", "aa"), ("GCA_2", "bb")])
+    assert a == af.corpus_digest([("GCA_2", "BB"), ("GCA_1", "AA")])
+    assert a != af.corpus_digest([("GCA_1", "aa"), ("GCA_2", "cc")])
+    assert a != af.corpus_digest([("GCA_1", "aa")])
 
 
 def test_parse_census_reports_an_unparseable_file(tmp_path):
@@ -897,7 +967,9 @@ def test_parse_census_reports_an_unparseable_file(tmp_path):
     ann.mkdir()
     (ann / af.destination_name(af.CONTROL_ACCESSION)).write_bytes(broken)
 
-    census = af.parse_census(supply_report=path, annotation_dir=ann)
+    census = af.parse_census(
+        supply_report=path, annotation_dir=ann, fetch_report=tmp_path / "absent.json"
+    )
     assert census["n_failed"] == 1 and "Gff3Error" in census["failures"][0]["note"]
 
 
@@ -917,7 +989,9 @@ def test_parse_census_reports_a_file_that_parses_to_zero_cds(tmp_path):
     ann.mkdir()
     (ann / af.destination_name(af.CONTROL_ACCESSION)).write_bytes(empty)
 
-    census = af.parse_census(supply_report=path, annotation_dir=ann)
+    census = af.parse_census(
+        supply_report=path, annotation_dir=ann, fetch_report=tmp_path / "absent.json"
+    )
     assert census["n_failed"] == 1 and census["failures"][0]["note"] == "parsed to zero CDS"
 
 
@@ -932,10 +1006,7 @@ def test_cli_requires_a_subcommand(capsys):
 
 
 def test_cli_verify_exits_0_on_a_clean_corpus(tmp_path, capsys):
-    path, _url, payload = _control_supply(tmp_path)
-    ann = tmp_path / "ann"
-    ann.mkdir()
-    (ann / af.destination_name(af.CONTROL_ACCESSION)).write_bytes(payload)
+    path, ann, fetch_path, _payload = _acquire(tmp_path)
     code = af.main(
         [
             "verify",
@@ -943,12 +1014,15 @@ def test_cli_verify_exits_0_on_a_clean_corpus(tmp_path, capsys):
             str(path),
             "--annotation-dir",
             str(ann),
+            "--fetch-report",
+            str(fetch_path),
             "--out",
             str(tmp_path / "parse.json"),
         ]
     )
     assert code == 0
-    assert json.loads((tmp_path / "parse.json").read_text(encoding="utf-8"))["n_ok"] == 1
+    written = json.loads((tmp_path / "parse.json").read_text(encoding="utf-8"))
+    assert written["n_ok"] == 1 and written["corpus_matches_fetch_report"] is True
 
 
 def test_cli_verify_exits_3_when_a_file_is_missing(tmp_path):
@@ -1021,6 +1095,27 @@ def test_the_acquisition_opener_carries_the_redirect_allowlist():
 
 def test_build_allowlisted_opener_returns_a_fresh_instance_each_call():
     assert asup.build_allowlisted_opener() is not asup.build_allowlisted_opener()
+
+
+def test_the_committed_fixture_is_intact_gzip_of_the_expected_size(monkeypatch):
+    """Raised three times as `major` by a reviewer whose sandbox reported 59,693 bytes with a
+    `1f ef` header — `1f ef` is `1f 8b` after a lossy text round-trip, i.e. a mangled binary.
+    A clean clone has the real bytes; this asserts all three properties so any environment
+    that *does* mangle it says which one broke instead of failing on a downstream digest."""
+    raw = FIXTURE_GFF.read_bytes()
+    assert raw[:2] == b"\x1f\x8b", "fixture is not gzip — a text filter has mangled it"
+    assert len(raw) == 33003
+    assert hashlib.md5(raw, usedforsecurity=False).hexdigest() == "3afa0aff910cfd08f9f0163981656308"
+
+    # Positive control. Deleting an assertion can never fail its own test, so the guard's power
+    # is shown against an input that SHOULD trip it: the fixture put through the lossy text
+    # round-trip that produces the reviewer's `1f ef` header and inflated size.
+    mangled = raw.decode("utf-8", "replace").encode("utf-8")
+    assert mangled[:2] != b"\x1f\x8b"
+    assert len(mangled) != 33003
+    assert hashlib.md5(mangled, usedforsecurity=False).hexdigest() != (
+        "3afa0aff910cfd08f9f0163981656308"
+    )
 
 
 def test_the_binary_GET_actually_uses_the_allowlisted_opener(monkeypatch):

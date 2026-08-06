@@ -175,6 +175,19 @@ def digest_matches(payload: bytes, expected_md5: str) -> bool:
     return md5_hex(payload) == str(expected_md5).strip().lower()
 
 
+def corpus_digest(pairs: Iterable[tuple[str, str]]) -> str:
+    """A stable identity for "which bytes this report is about".
+
+    sha256 over sorted ``accession:md5`` lines. Both the acquisition report and the offline
+    census emit one, so a reader can tell **by comparison** that the census parsed the files
+    the acquisition validated — rather than inferring it from two timestamps that happened to
+    be close. Without it a census generated *before* its fetch (the ordering defect this fixes)
+    describes a previous corpus state and nothing in either artifact says so.
+    """
+    lines = sorted(f"{accession}:{str(md5).strip().lower()}" for accession, md5 in pairs)
+    return hashlib.sha256("\n".join(lines).encode("utf-8")).hexdigest()
+
+
 def destination_name(accession: str) -> str:
     """``GCA_000296795.1`` → ``GCA_000296795.1.gff.gz``.
 
@@ -409,6 +422,9 @@ def build_fetch_report(
         "n_cached": sum(1 for r in ok_rows if r.get("from_cache") is True),
         "status_counts": counts,
         "bytes_total": sum(int(r.get("n_bytes") or 0) for r in ok_rows),
+        "corpus_digest": corpus_digest(
+            (str(r.get("accession", "")), str(r.get("observed_md5", ""))) for r in ok_rows
+        ),
         "bytes_total_in_supply_report": int(bytes_total_in_supply),
         "control": dict(control),
         "orphans": sorted(orphans),
@@ -704,6 +720,7 @@ def parse_census(
     *,
     supply_report: str | Path = DEFAULT_SUPPLY_REPORT,
     annotation_dir: str | Path = DEFAULT_ANNOTATION_DIR,
+    fetch_report: str | Path = DEFAULT_FETCH_REPORT,
 ) -> dict[str, Any]:
     """Re-verify every acquired file offline **and** parse it — the report ``verify`` writes.
 
@@ -737,6 +754,7 @@ def parse_census(
             {
                 **row,
                 "ok": len(cds) > 0,
+                "observed_md5": md5_hex(raw),
                 "n_bytes": len(raw),
                 "n_cds": len(cds),
                 "n_cds_pseudo": sum(1 for c in cds if gff3.is_pseudo(c)),
@@ -752,9 +770,31 @@ def parse_census(
         )
 
     ok_rows = [r for r in rows if r.get("ok") is True]
+    # The corpus this census actually read, and the corpus the acquisition certified. Compared
+    # rather than assumed: a census run BEFORE its fetch parses a previous state of the
+    # directory and, on timestamps alone, looks indistinguishable from one run after.
+    observed = corpus_digest((str(r["accession"]), str(r.get("observed_md5", ""))) for r in ok_rows)
+    try:
+        declared = str(read_supply_report(fetch_report).get("corpus_digest", ""))
+    except AnnotationFetchError:
+        declared = ""
+    # The *reason* is reported, not just the verdict. Without it, "no fetch report was found"
+    # and "the corpora differ" collapse into one False and the `bool(declared)` half of the
+    # check becomes unfalsifiable — a clause that cannot change any outcome, which is the shape
+    # this module's own control had to be rebuilt to escape.
+    if not declared:
+        reason = "the fetch report declares no corpus_digest"
+    elif declared != observed:
+        reason = "the fetch report certifies a different corpus"
+    else:
+        reason = "ok"
     return {
         "schema_version": SCHEMA_VERSION,
         "step": STEP,
+        "corpus_digest": observed,
+        "fetch_report_corpus_digest": declared,
+        "corpus_matches_fetch_report": reason == "ok",
+        "corpus_check_reason": reason,
         "n_targets": len(targets),
         "n_ok": len(ok_rows),
         "n_failed": len(rows) - len(ok_rows),
@@ -822,11 +862,15 @@ def _cmd_fetch(args: argparse.Namespace) -> int:
 
 
 def _cmd_verify(args: argparse.Namespace) -> int:
-    report = parse_census(supply_report=args.supply_report, annotation_dir=args.annotation_dir)
+    report = parse_census(
+        supply_report=args.supply_report,
+        annotation_dir=args.annotation_dir,
+        fetch_report=args.fetch_report,
+    )
     report["provenance"] = provenance.build_provenance(
         rule="src/tbox_finder/mining/annotation_fetch.py :: verify",
         script="src/tbox_finder/mining/annotation_fetch.py",
-        inputs=[args.supply_report],
+        inputs=[args.supply_report, args.fetch_report],
         adr=ADR,
         extra={"annotation_dir": str(args.annotation_dir)},
     )
@@ -839,6 +883,15 @@ def _cmd_verify(args: argparse.Namespace) -> int:
     )
     if report["n_failed"]:
         print(f"REFUSED: {report['n_failed']} assemblies failed re-verification", file=sys.stderr)
+        return 3
+    if not report["corpus_matches_fetch_report"]:
+        print(
+            f"REFUSED: {report['corpus_check_reason']} "
+            f"({report['corpus_digest'][:12]} vs "
+            f"{report['fetch_report_corpus_digest'][:12] or '<absent>'})"
+            " — run `verify` AFTER `fetch`",
+            file=sys.stderr,
+        )
         return 3
     return 0
 
@@ -872,6 +925,7 @@ def build_parser() -> argparse.ArgumentParser:
     v = sub.add_parser("verify", help="offline: re-hash every acquired GFF and parse it")
     v.add_argument("--supply-report", default=DEFAULT_SUPPLY_REPORT)
     v.add_argument("--annotation-dir", default=DEFAULT_ANNOTATION_DIR)
+    v.add_argument("--fetch-report", default=DEFAULT_FETCH_REPORT)
     v.add_argument("--out", default=DEFAULT_PARSE_REPORT)
     v.set_defaults(func=_cmd_verify)
 
@@ -908,6 +962,7 @@ __all__ = [
     "build_parser",
     "check_url_binds_to_accession",
     "control_is_powered",
+    "corpus_digest",
     "derive_status_counts",
     "destination_name",
     "download_gff",

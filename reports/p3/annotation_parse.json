@@ -1,5 +1,9 @@
 {
+  "corpus_check_reason": "ok",
+  "corpus_digest": "0d8f0a3cbab0fdc49fc5f032efa4a8010fbb99a1365870eaaa3296119e6fb7fd",
+  "corpus_matches_fetch_report": true,
   "failures": [],
+  "fetch_report_corpus_digest": "0d8f0a3cbab0fdc49fc5f032efa4a8010fbb99a1365870eaaa3296119e6fb7fd",
   "n_failed": 0,
   "n_ok": 339,
   "n_targets": 339,
@@ -15,6 +19,7 @@
       "n_cds_with_identity_text": 3600,
       "n_seqids": 4,
       "note": "",
+      "observed_md5": "3b05bf440cc818d80a86024d45745d71",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_000296795.1.gff.gz"
     },
@@ -29,6 +34,7 @@
       "n_cds_with_identity_text": 8438,
       "n_seqids": 835,
       "note": "",
+      "observed_md5": "85bdbe64f5435ee4b617cace74e7df78",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_000522425.1.gff.gz"
     },
@@ -43,6 +49,7 @@
       "n_cds_with_identity_text": 5966,
       "n_seqids": 8,
       "note": "",
+      "observed_md5": "cc5fbe2f1f0639547f4db43b62897b95",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_000739515.1.gff.gz"
     },
@@ -57,6 +64,7 @@
       "n_cds_with_identity_text": 7048,
       "n_seqids": 21,
       "note": "",
+      "observed_md5": "b2357a87e40f3344845cf4a38a56069a",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_000739535.1.gff.gz"
     },
@@ -71,6 +79,7 @@
       "n_cds_with_identity_text": 8136,
       "n_seqids": 61,
       "note": "",
+      "observed_md5": "de3759a036926c9d238948ec2d049ab6",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_000828075.3.gff.gz"
     },
@@ -85,6 +94,7 @@
       "n_cds_with_identity_text": 1585,
       "n_seqids": 63,
       "note": "",
+      "observed_md5": "1bf718c994ffb25be4178c46ca6980fe",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_001587635.1.gff.gz"
     },
@@ -99,6 +109,7 @@
       "n_cds_with_identity_text": 4070,
       "n_seqids": 263,
       "note": "",
+      "observed_md5": "db7d9b40c47002d80ff47844b6abf40a",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_001799365.1.gff.gz"
     },
@@ -113,6 +124,7 @@
       "n_cds_with_identity_text": 1519,
       "n_seqids": 152,
       "note": "",
+      "observed_md5": "73d8a50d7936c191fbf67972ac281bbf",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_001873345.1.gff.gz"
     },
@@ -127,6 +139,7 @@
       "n_cds_with_identity_text": 1478,
       "n_seqids": 122,
       "note": "",
+      "observed_md5": "c10188a7e8bf45fab1d48c207b9a618a",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_002050035.1.gff.gz"
     },
@@ -141,6 +154,7 @@
       "n_cds_with_identity_text": 1020,
       "n_seqids": 65,
       "note": "",
+      "observed_md5": "1245cc645aae0703249f15f481e4b338",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_002254405.1.gff.gz"
     },
@@ -155,6 +169,7 @@
       "n_cds_with_identity_text": 1503,
       "n_seqids": 53,
       "note": "",
+      "observed_md5": "021a2a9897d29bcccc0ce26e01c8c17a",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_002254565.1.gff.gz"
     },
@@ -169,6 +184,7 @@
       "n_cds_with_identity_text": 7916,
       "n_seqids": 2,
       "note": "",
+      "observed_md5": "bf92815b1e5a7986995301100936eb69",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_002368195.1.gff.gz"
     },
@@ -183,6 +199,7 @@
       "n_cds_with_identity_text": 1598,
       "n_seqids": 53,
       "note": "",
+      "observed_md5": "84dda30765778501cc29e27cca0cade7",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_002690645.1.gff.gz"
     },
@@ -197,6 +214,7 @@
       "n_cds_with_identity_text": 4861,
       "n_seqids": 33,
       "note": "",
+      "observed_md5": "0a2e863ef5143bab7380cf3d1d278989",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_002720865.1.gff.gz"
     },
@@ -211,6 +229,7 @@
       "n_cds_with_identity_text": 455,
       "n_seqids": 41,
       "note": "",
+      "observed_md5": "3afa0aff910cfd08f9f0163981656308",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_002790315.1.gff.gz"
     },
@@ -225,6 +244,7 @@
       "n_cds_with_identity_text": 2446,
       "n_seqids": 27,
       "note": "",
+      "observed_md5": "63027418769cdcabfae47ee1f4eb09eb",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_002839705.1.gff.gz"
     },
@@ -239,6 +259,7 @@
       "n_cds_with_identity_text": 2633,
       "n_seqids": 13,
       "note": "",
+      "observed_md5": "c0941d208209cc11a2a063ed3d184a89",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_002869185.1.gff.gz"
     },
@@ -253,6 +274,7 @@
       "n_cds_with_identity_text": 1920,
       "n_seqids": 34,
       "note": "",
+      "observed_md5": "3b6f1bcb7bd01c299016737c6a4dd9bf",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_002878375.1.gff.gz"
     },
@@ -267,6 +289,7 @@
       "n_cds_with_identity_text": 2893,
       "n_seqids": 28,
       "note": "",
+      "observed_md5": "a226bbe8b619ba779f61e5ae0c509cde",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_003020965.1.gff.gz"
     },
@@ -281,6 +304,7 @@
       "n_cds_with_identity_text": 2851,
       "n_seqids": 1,
       "note": "",
+      "observed_md5": "0d1850c819ad1da916b7d4eaef3db721",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_003290465.1.gff.gz"
     },
@@ -295,6 +319,7 @@
       "n_cds_with_identity_text": 1331,
       "n_seqids": 163,
       "note": "",
+      "observed_md5": "a228f99a71f8b2a6772c0753e87ec506",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_003476705.1.gff.gz"
     },
@@ -309,6 +334,7 @@
       "n_cds_with_identity_text": 1519,
       "n_seqids": 146,
       "note": "",
+      "observed_md5": "95c86b217d80ba52b062e7b327993350",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_003602635.1.gff.gz"
     },
@@ -323,6 +349,7 @@
       "n_cds_with_identity_text": 1804,
       "n_seqids": 362,
       "note": "",
+      "observed_md5": "68d6cf3283906a5a2cda168cbd091c3e",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_003641555.1.gff.gz"
     },
@@ -337,6 +364,7 @@
       "n_cds_with_identity_text": 1282,
       "n_seqids": 165,
       "note": "",
+      "observed_md5": "24b7274cddfe4b7f91be5eb505054683",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_003663115.1.gff.gz"
     },
@@ -351,6 +379,7 @@
       "n_cds_with_identity_text": 1664,
       "n_seqids": 188,
       "note": "",
+      "observed_md5": "7837dc86787eb90bd0e80d50c8a33ffe",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_003978675.1.gff.gz"
     },
@@ -365,6 +394,7 @@
       "n_cds_with_identity_text": 1103,
       "n_seqids": 168,
       "note": "",
+      "observed_md5": "0cb6c6c63a4f055644fa80327fadb54c",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_003978805.1.gff.gz"
     },
@@ -379,6 +409,7 @@
       "n_cds_with_identity_text": 1785,
       "n_seqids": 7,
       "note": "",
+      "observed_md5": "1137ba265fc6bf9dd44fd9cd3b8dd787",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_004195035.1.gff.gz"
     },
@@ -393,6 +424,7 @@
       "n_cds_with_identity_text": 1973,
       "n_seqids": 186,
       "note": "",
+      "observed_md5": "66a31b7b1670580080e14ab8c22efc1c",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_004357365.1.gff.gz"
     },
@@ -407,6 +439,7 @@
       "n_cds_with_identity_text": 3259,
       "n_seqids": 34,
       "note": "",
+      "observed_md5": "bf2e3b07b3685da6f21e8f0047761b0b",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_005116895.1.gff.gz"
     },
@@ -421,6 +454,7 @@
       "n_cds_with_identity_text": 2025,
       "n_seqids": 170,
       "note": "",
+      "observed_md5": "75b4b7185c84a6aab0f78d4a3b0594f5",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_008086245.1.gff.gz"
     },
@@ -435,6 +469,7 @@
       "n_cds_with_identity_text": 1387,
       "n_seqids": 321,
       "note": "",
+      "observed_md5": "169d3eb56013e8cefa6658ca1cd887ef",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_009776495.1.gff.gz"
     },
@@ -449,6 +484,7 @@
       "n_cds_with_identity_text": 2082,
       "n_seqids": 241,
       "note": "",
+      "observed_md5": "1d13cef19f6afc580cc8d4271dee6438",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_009788135.1.gff.gz"
     },
@@ -463,6 +499,7 @@
       "n_cds_with_identity_text": 1420,
       "n_seqids": 216,
       "note": "",
+      "observed_md5": "d0817ed3f511f41295a2268e8341d470",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_011050175.1.gff.gz"
     },
@@ -477,6 +514,7 @@
       "n_cds_with_identity_text": 2060,
       "n_seqids": 231,
       "note": "",
+      "observed_md5": "5d1088733d497b3a8127bc7ff17331b3",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_011056645.1.gff.gz"
     },
@@ -491,6 +529,7 @@
       "n_cds_with_identity_text": 1099,
       "n_seqids": 123,
       "note": "",
+      "observed_md5": "07fc6db399de69b6a64fef505a8ec501",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_011380095.1.gff.gz"
     },
@@ -505,6 +544,7 @@
       "n_cds_with_identity_text": 4304,
       "n_seqids": 134,
       "note": "",
+      "observed_md5": "64ab5afa75fd9463cff51693384078c9",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_012517325.1.gff.gz"
     },
@@ -519,6 +559,7 @@
       "n_cds_with_identity_text": 2599,
       "n_seqids": 488,
       "note": "",
+      "observed_md5": "b56768afc6dc1dd83a64b937a32b280a",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_012517635.1.gff.gz"
     },
@@ -533,6 +574,7 @@
       "n_cds_with_identity_text": 3488,
       "n_seqids": 260,
       "note": "",
+      "observed_md5": "8b767f81e8392f5acabe5110be165627",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_012523595.1.gff.gz"
     },
@@ -547,6 +589,7 @@
       "n_cds_with_identity_text": 879,
       "n_seqids": 88,
       "note": "",
+      "observed_md5": "448d566e605cf55220f89cf656c18b28",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_012842545.1.gff.gz"
     },
@@ -561,6 +604,7 @@
       "n_cds_with_identity_text": 1608,
       "n_seqids": 299,
       "note": "",
+      "observed_md5": "25eaa13e576b05ed94ab303c2982ba97",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_012961055.1.gff.gz"
     },
@@ -575,6 +619,7 @@
       "n_cds_with_identity_text": 2173,
       "n_seqids": 229,
       "note": "",
+      "observed_md5": "d8ab0dc2c15ef9acabe4a87add25040e",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_013114715.1.gff.gz"
     },
@@ -589,6 +634,7 @@
       "n_cds_with_identity_text": 1258,
       "n_seqids": 4,
       "note": "",
+      "observed_md5": "1fa7b1d2dc9a0ee8693eb022337a37e1",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_013178255.1.gff.gz"
     },
@@ -603,6 +649,7 @@
       "n_cds_with_identity_text": 2341,
       "n_seqids": 101,
       "note": "",
+      "observed_md5": "3374453cf9a9a98e47748c54a353cbf2",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_013178285.1.gff.gz"
     },
@@ -617,6 +664,7 @@
       "n_cds_with_identity_text": 1874,
       "n_seqids": 172,
       "note": "",
+      "observed_md5": "7fffd0258671c204417cbe4c640b337f",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_013215525.1.gff.gz"
     },
@@ -631,6 +679,7 @@
       "n_cds_with_identity_text": 2411,
       "n_seqids": 363,
       "note": "",
+      "observed_md5": "1bbfb5149965c87cefe8c870e8cf0f34",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_013822585.1.gff.gz"
     },
@@ -645,6 +694,7 @@
       "n_cds_with_identity_text": 2068,
       "n_seqids": 103,
       "note": "",
+      "observed_md5": "bfdb13971920fd4868d8d57028c97d3d",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_013824755.1.gff.gz"
     },
@@ -659,6 +709,7 @@
       "n_cds_with_identity_text": 726,
       "n_seqids": 39,
       "note": "",
+      "observed_md5": "a121a7e5cf18e51aff92b732bd72e8f5",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_014189675.1.gff.gz"
     },
@@ -673,6 +724,7 @@
       "n_cds_with_identity_text": 1103,
       "n_seqids": 52,
       "note": "",
+      "observed_md5": "9ad9cf4eb2769c978f4c8153df9f4944",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_014189685.1.gff.gz"
     },
@@ -687,6 +739,7 @@
       "n_cds_with_identity_text": 2519,
       "n_seqids": 46,
       "note": "",
+      "observed_md5": "f605b89ae7b777d63f08a2a307276702",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_014324045.1.gff.gz"
     },
@@ -701,6 +754,7 @@
       "n_cds_with_identity_text": 1867,
       "n_seqids": 13,
       "note": "",
+      "observed_md5": "1cc4669fe961c232e62ee3cf3ce323e1",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_014727915.1.gff.gz"
     },
@@ -715,6 +769,7 @@
       "n_cds_with_identity_text": 3484,
       "n_seqids": 398,
       "note": "",
+      "observed_md5": "3123e4a67ebd38d3f78547738fb447f2",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_014730185.1.gff.gz"
     },
@@ -729,6 +784,7 @@
       "n_cds_with_identity_text": 3056,
       "n_seqids": 1,
       "note": "",
+      "observed_md5": "ff9305303b8139d33d64a0dedca551cc",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_015200025.1.gff.gz"
     },
@@ -743,6 +799,7 @@
       "n_cds_with_identity_text": 3835,
       "n_seqids": 229,
       "note": "",
+      "observed_md5": "f96e146d80dd37101aa93d9109a32f9f",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_015478585.1.gff.gz"
     },
@@ -757,6 +814,7 @@
       "n_cds_with_identity_text": 1170,
       "n_seqids": 243,
       "note": "",
+      "observed_md5": "9c35a3fb33f3972e165d3b066752dcce",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_015661585.1.gff.gz"
     },
@@ -771,6 +829,7 @@
       "n_cds_with_identity_text": 1150,
       "n_seqids": 90,
       "note": "",
+      "observed_md5": "3e67c0e8ff10995d6dae80ba2de81596",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_015662355.1.gff.gz"
     },
@@ -785,6 +844,7 @@
       "n_cds_with_identity_text": 1040,
       "n_seqids": 99,
       "note": "",
+      "observed_md5": "bbfd5a19a0c1cb381af2e6ac536ddd3c",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_015663075.1.gff.gz"
     },
@@ -799,6 +859,7 @@
       "n_cds_with_identity_text": 1258,
       "n_seqids": 11,
       "note": "",
+      "observed_md5": "86becb78db93969fbf93da2a5572c6ac",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_016000045.1.gff.gz"
     },
@@ -813,6 +874,7 @@
       "n_cds_with_identity_text": 7951,
       "n_seqids": 45,
       "note": "",
+      "observed_md5": "82f3786fcb553245215d570d157d9791",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_016719945.1.gff.gz"
     },
@@ -827,6 +889,7 @@
       "n_cds_with_identity_text": 1266,
       "n_seqids": 215,
       "note": "",
+      "observed_md5": "f95d2b39316eacfca19efdfad8874495",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_016867655.1.gff.gz"
     },
@@ -841,6 +904,7 @@
       "n_cds_with_identity_text": 3204,
       "n_seqids": 157,
       "note": "",
+      "observed_md5": "45ca1ae85946679772dfd321c7cdad8b",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_016932835.1.gff.gz"
     },
@@ -855,6 +919,7 @@
       "n_cds_with_identity_text": 5161,
       "n_seqids": 634,
       "note": "",
+      "observed_md5": "2edb09eca2dc5a08241d868b66885a58",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_016934255.1.gff.gz"
     },
@@ -869,6 +934,7 @@
       "n_cds_with_identity_text": 976,
       "n_seqids": 56,
       "note": "",
+      "observed_md5": "03b33bc23ad20b06f66c1cbe1bde998f",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_016939415.1.gff.gz"
     },
@@ -883,6 +949,7 @@
       "n_cds_with_identity_text": 985,
       "n_seqids": 154,
       "note": "",
+      "observed_md5": "8a17910c53c3f9e12128739abe6860f7",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_017458885.1.gff.gz"
     },
@@ -897,6 +964,7 @@
       "n_cds_with_identity_text": 1657,
       "n_seqids": 30,
       "note": "",
+      "observed_md5": "b675edc1799c91776b7d79c7ffb7a332",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_017475405.1.gff.gz"
     },
@@ -911,6 +979,7 @@
       "n_cds_with_identity_text": 2158,
       "n_seqids": 130,
       "note": "",
+      "observed_md5": "579cbd2183e4313eb0c39d57682d30e0",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_017959225.1.gff.gz"
     },
@@ -925,6 +994,7 @@
       "n_cds_with_identity_text": 2302,
       "n_seqids": 79,
       "note": "",
+      "observed_md5": "8c006dd2e3fb6914365292da9828726b",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_017965445.1.gff.gz"
     },
@@ -939,6 +1009,7 @@
       "n_cds_with_identity_text": 2348,
       "n_seqids": 168,
       "note": "",
+      "observed_md5": "09eb1ff4aadffa039eec2a3daf2a686e",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_017994915.1.gff.gz"
     },
@@ -953,6 +1024,7 @@
       "n_cds_with_identity_text": 2621,
       "n_seqids": 421,
       "note": "",
+      "observed_md5": "0c7d60c79d86f4766d7fbb3d2aa72eb6",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_017998195.1.gff.gz"
     },
@@ -967,6 +1039,7 @@
       "n_cds_with_identity_text": 3283,
       "n_seqids": 296,
       "note": "",
+      "observed_md5": "1406bbc3cf97032023b08e4c98c01f29",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_018060625.1.gff.gz"
     },
@@ -981,6 +1054,7 @@
       "n_cds_with_identity_text": 1878,
       "n_seqids": 125,
       "note": "",
+      "observed_md5": "2975da9e1a31e04eb142454272b52822",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_018065615.1.gff.gz"
     },
@@ -995,6 +1069,7 @@
       "n_cds_with_identity_text": 2974,
       "n_seqids": 78,
       "note": "",
+      "observed_md5": "055f51a247d171c51488c5d667bf6976",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_018653085.1.gff.gz"
     },
@@ -1009,6 +1084,7 @@
       "n_cds_with_identity_text": 3760,
       "n_seqids": 131,
       "note": "",
+      "observed_md5": "e9d95fa91d675117e29787f4f18df9f3",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_018669005.1.gff.gz"
     },
@@ -1023,6 +1099,7 @@
       "n_cds_with_identity_text": 1474,
       "n_seqids": 122,
       "note": "",
+      "observed_md5": "3a36a77fd9ea1606518e8969e4b5bc4c",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_018714045.1.gff.gz"
     },
@@ -1037,6 +1114,7 @@
       "n_cds_with_identity_text": 2061,
       "n_seqids": 230,
       "note": "",
+      "observed_md5": "71858cb9151d10da58bdbfd917a2e036",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_019038705.1.gff.gz"
     },
@@ -1051,6 +1129,7 @@
       "n_cds_with_identity_text": 3238,
       "n_seqids": 20,
       "note": "",
+      "observed_md5": "8d48672594d525461ff47864ba7399b6",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_019186945.1.gff.gz"
     },
@@ -1065,6 +1144,7 @@
       "n_cds_with_identity_text": 5030,
       "n_seqids": 92,
       "note": "",
+      "observed_md5": "78700b48e6cc51ec161e2f332d9533cb",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_019359155.1.gff.gz"
     },
@@ -1079,6 +1159,7 @@
       "n_cds_with_identity_text": 885,
       "n_seqids": 98,
       "note": "",
+      "observed_md5": "008aea18fe59482e1779ed5604ad3018",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_019561565.1.gff.gz"
     },
@@ -1093,6 +1174,7 @@
       "n_cds_with_identity_text": 1157,
       "n_seqids": 51,
       "note": "",
+      "observed_md5": "c393c9fc0dc3ca516c38ff79a74cf1b6",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_019561615.1.gff.gz"
     },
@@ -1107,6 +1189,7 @@
       "n_cds_with_identity_text": 3862,
       "n_seqids": 143,
       "note": "",
+      "observed_md5": "1d799ddd46960eac005935055172eb63",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_019636815.1.gff.gz"
     },
@@ -1121,6 +1204,7 @@
       "n_cds_with_identity_text": 1790,
       "n_seqids": 42,
       "note": "",
+      "observed_md5": "00a854831a0d93328e4efb24e17ab671",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_019752555.1.gff.gz"
     },
@@ -1135,6 +1219,7 @@
       "n_cds_with_identity_text": 2603,
       "n_seqids": 167,
       "note": "",
+      "observed_md5": "0fd556b349c55e4dc496eabab3cbfa05",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_019912425.1.gff.gz"
     },
@@ -1149,6 +1234,7 @@
       "n_cds_with_identity_text": 1868,
       "n_seqids": 171,
       "note": "",
+      "observed_md5": "44f14cf968ab81187f4576b0df793004",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_020217115.1.gff.gz"
     },
@@ -1163,6 +1249,7 @@
       "n_cds_with_identity_text": 3678,
       "n_seqids": 291,
       "note": "",
+      "observed_md5": "25ffa1107c05f35d9472c6603b3e7649",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_020247005.1.gff.gz"
     },
@@ -1177,6 +1264,7 @@
       "n_cds_with_identity_text": 2502,
       "n_seqids": 1,
       "note": "",
+      "observed_md5": "981daadbdfd36bbfa961e75fa80b438b",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_020354155.1.gff.gz"
     },
@@ -1191,6 +1279,7 @@
       "n_cds_with_identity_text": 3138,
       "n_seqids": 248,
       "note": "",
+      "observed_md5": "9063ec524eef2ea5eed957ad1166a034",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_020430445.1.gff.gz"
     },
@@ -1205,6 +1294,7 @@
       "n_cds_with_identity_text": 1790,
       "n_seqids": 142,
       "note": "",
+      "observed_md5": "a3f1fb4a50789e79ac2ceb60485997c8",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_020434345.1.gff.gz"
     },
@@ -1219,6 +1309,7 @@
       "n_cds_with_identity_text": 2032,
       "n_seqids": 196,
       "note": "",
+      "observed_md5": "6b89be94f9cd1a5d1fa90f86dd86a615",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_020434365.1.gff.gz"
     },
@@ -1233,6 +1324,7 @@
       "n_cds_with_identity_text": 1862,
       "n_seqids": 264,
       "note": "",
+      "observed_md5": "fc0e5f3406c767c8b7a9438414c63403",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_020434375.1.gff.gz"
     },
@@ -1247,6 +1339,7 @@
       "n_cds_with_identity_text": 3848,
       "n_seqids": 738,
       "note": "",
+      "observed_md5": "bdd771bad2de357c2563ec9c94795dda",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_020434495.1.gff.gz"
     },
@@ -1261,6 +1354,7 @@
       "n_cds_with_identity_text": 2339,
       "n_seqids": 407,
       "note": "",
+      "observed_md5": "d8e4807918d69a5fd7b1771aa5569b43",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_020434645.1.gff.gz"
     },
@@ -1275,6 +1369,7 @@
       "n_cds_with_identity_text": 3550,
       "n_seqids": 23,
       "note": "",
+      "observed_md5": "7ca79d6fcecba1ebb417f4a6dd6b8f16",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_020632975.1.gff.gz"
     },
@@ -1289,6 +1384,7 @@
       "n_cds_with_identity_text": 7711,
       "n_seqids": 138,
       "note": "",
+      "observed_md5": "6bdc8ecd5ebe9b86ae63e27fedf69bf7",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_020633195.1.gff.gz"
     },
@@ -1303,6 +1399,7 @@
       "n_cds_with_identity_text": 1496,
       "n_seqids": 25,
       "note": "",
+      "observed_md5": "1f32fe54123a6a54211a90f382b25c69",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_020833055.1.gff.gz"
     },
@@ -1317,6 +1414,7 @@
       "n_cds_with_identity_text": 1448,
       "n_seqids": 51,
       "note": "",
+      "observed_md5": "f1f2bbd85bc0d47ad17627e324c1a9be",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_020833645.1.gff.gz"
     },
@@ -1331,6 +1429,7 @@
       "n_cds_with_identity_text": 1079,
       "n_seqids": 40,
       "note": "",
+      "observed_md5": "aec243b8770dd8983086bb31b24e55c7",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_021161465.1.gff.gz"
     },
@@ -1345,6 +1444,7 @@
       "n_cds_with_identity_text": 1522,
       "n_seqids": 231,
       "note": "",
+      "observed_md5": "3f6d5ed11390dbde0d53d25bfbd12559",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_021161495.1.gff.gz"
     },
@@ -1359,6 +1459,7 @@
       "n_cds_with_identity_text": 2663,
       "n_seqids": 347,
       "note": "",
+      "observed_md5": "7abeeee32b0c9ceed771cabe383636f3",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_021162285.1.gff.gz"
     },
@@ -1373,6 +1474,7 @@
       "n_cds_with_identity_text": 1268,
       "n_seqids": 45,
       "note": "",
+      "observed_md5": "95b6795c9e01ce12d6abced41a4957a3",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_021162685.1.gff.gz"
     },
@@ -1387,6 +1489,7 @@
       "n_cds_with_identity_text": 1772,
       "n_seqids": 21,
       "note": "",
+      "observed_md5": "b71735b4375f0d1fe3e0f01d6be28166",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_021166685.1.gff.gz"
     },
@@ -1401,6 +1504,7 @@
       "n_cds_with_identity_text": 3269,
       "n_seqids": 1,
       "note": "",
+      "observed_md5": "12e2be000326edb4a18090558f2e2cca",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_022646745.1.gff.gz"
     },
@@ -1415,6 +1519,7 @@
       "n_cds_with_identity_text": 1633,
       "n_seqids": 161,
       "note": "",
+      "observed_md5": "d85435dc0fafb0208df9e9fbc812a08f",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_022759145.1.gff.gz"
     },
@@ -1429,6 +1534,7 @@
       "n_cds_with_identity_text": 1387,
       "n_seqids": 225,
       "note": "",
+      "observed_md5": "e9c399809086f43b7459e75f40d392a4",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_023128455.1.gff.gz"
     },
@@ -1443,6 +1549,7 @@
       "n_cds_with_identity_text": 1369,
       "n_seqids": 19,
       "note": "",
+      "observed_md5": "eaa8cab9019371ccb87e27c14a832d1b",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_023129115.1.gff.gz"
     },
@@ -1457,6 +1564,7 @@
       "n_cds_with_identity_text": 1677,
       "n_seqids": 189,
       "note": "",
+      "observed_md5": "14ff29a72c6f2f0d55bf2021bdce91c6",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_023136155.1.gff.gz"
     },
@@ -1471,6 +1579,7 @@
       "n_cds_with_identity_text": 1577,
       "n_seqids": 282,
       "note": "",
+      "observed_md5": "f32a61a77cb6df4f1ff5c1f3c07dce73",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_023145315.1.gff.gz"
     },
@@ -1485,6 +1594,7 @@
       "n_cds_with_identity_text": 1539,
       "n_seqids": 53,
       "note": "",
+      "observed_md5": "d21c27f6f418f918f5cfe029f6fabebe",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_023663235.1.gff.gz"
     },
@@ -1499,6 +1609,7 @@
       "n_cds_with_identity_text": 2818,
       "n_seqids": 30,
       "note": "",
+      "observed_md5": "e2f9541e89bab5d9a2bd3902de3572c1",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_023954415.1.gff.gz"
     },
@@ -1513,6 +1624,7 @@
       "n_cds_with_identity_text": 1599,
       "n_seqids": 65,
       "note": "",
+      "observed_md5": "444300400e60de51cf96e431a99df272",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_025057455.1.gff.gz"
     },
@@ -1527,6 +1639,7 @@
       "n_cds_with_identity_text": 1668,
       "n_seqids": 44,
       "note": "",
+      "observed_md5": "5134ef3b37ca8e9f81016e58d6bf3e11",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_025060475.1.gff.gz"
     },
@@ -1541,6 +1654,7 @@
       "n_cds_with_identity_text": 1353,
       "n_seqids": 200,
       "note": "",
+      "observed_md5": "eadbf02aa41863cba078ef42db9e6f78",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_025997275.1.gff.gz"
     },
@@ -1555,6 +1669,7 @@
       "n_cds_with_identity_text": 1762,
       "n_seqids": 60,
       "note": "",
+      "observed_md5": "53f9cf9be7eac76e2f2727fef67dd523",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_026394605.1.gff.gz"
     },
@@ -1569,6 +1684,7 @@
       "n_cds_with_identity_text": 1486,
       "n_seqids": 188,
       "note": "",
+      "observed_md5": "9d3c36dac515f32aaca1986ac4f58cb8",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_026397035.1.gff.gz"
     },
@@ -1583,6 +1699,7 @@
       "n_cds_with_identity_text": 974,
       "n_seqids": 20,
       "note": "",
+      "observed_md5": "d2b02e77f6c488d2fd230b64fa908070",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_026413945.1.gff.gz"
     },
@@ -1597,6 +1714,7 @@
       "n_cds_with_identity_text": 1855,
       "n_seqids": 40,
       "note": "",
+      "observed_md5": "8961277b57ba843bc46e8a59d1e740d0",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_026419195.1.gff.gz"
     },
@@ -1611,6 +1729,7 @@
       "n_cds_with_identity_text": 2287,
       "n_seqids": 235,
       "note": "",
+      "observed_md5": "87814a27464165a353ca508ffab140bd",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_026713835.1.gff.gz"
     },
@@ -1625,6 +1744,7 @@
       "n_cds_with_identity_text": 3419,
       "n_seqids": 560,
       "note": "",
+      "observed_md5": "de727207a0abf149873073da282ccd22",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_026786155.1.gff.gz"
     },
@@ -1639,6 +1759,7 @@
       "n_cds_with_identity_text": 1912,
       "n_seqids": 217,
       "note": "",
+      "observed_md5": "4ac550ceef82f2cec487e246c12affc6",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_028684695.1.gff.gz"
     },
@@ -1653,6 +1774,7 @@
       "n_cds_with_identity_text": 2393,
       "n_seqids": 25,
       "note": "",
+      "observed_md5": "7fbbe78e27c8295e75afe67d70f487e7",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_028715605.1.gff.gz"
     },
@@ -1667,6 +1789,7 @@
       "n_cds_with_identity_text": 955,
       "n_seqids": 50,
       "note": "",
+      "observed_md5": "ffa801b3f13035fcad52f03cb2b9296b",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_029986255.1.gff.gz"
     },
@@ -1681,6 +1804,7 @@
       "n_cds_with_identity_text": 1229,
       "n_seqids": 140,
       "note": "",
+      "observed_md5": "7752dbf99d2859b05d68ee6085b54309",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_030266405.1.gff.gz"
     },
@@ -1695,6 +1819,7 @@
       "n_cds_with_identity_text": 2277,
       "n_seqids": 12,
       "note": "",
+      "observed_md5": "f48c353f6d03f0f3467a1617386c98ea",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_030656015.1.gff.gz"
     },
@@ -1709,6 +1834,7 @@
       "n_cds_with_identity_text": 2103,
       "n_seqids": 22,
       "note": "",
+      "observed_md5": "4b28ffe1440b93fe78a1fc5f8465458c",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_030673965.1.gff.gz"
     },
@@ -1723,6 +1849,7 @@
       "n_cds_with_identity_text": 1189,
       "n_seqids": 46,
       "note": "",
+      "observed_md5": "ba5a1f5db226282c0593878986db2b47",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_030749075.1.gff.gz"
     },
@@ -1737,6 +1864,7 @@
       "n_cds_with_identity_text": 3461,
       "n_seqids": 116,
       "note": "",
+      "observed_md5": "712bee3a407d7c6f002976734451e923",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_030753015.1.gff.gz"
     },
@@ -1751,6 +1879,7 @@
       "n_cds_with_identity_text": 2620,
       "n_seqids": 334,
       "note": "",
+      "observed_md5": "55a739a88d45e354745fae8ef397fa21",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_030765365.1.gff.gz"
     },
@@ -1765,6 +1894,7 @@
       "n_cds_with_identity_text": 4315,
       "n_seqids": 47,
       "note": "",
+      "observed_md5": "1c84c535b967881d8576b7dd42defdd6",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_030765525.1.gff.gz"
     },
@@ -1779,6 +1909,7 @@
       "n_cds_with_identity_text": 3704,
       "n_seqids": 157,
       "note": "",
+      "observed_md5": "46b694c65c1615aeaf05c0c15aaabcef",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_030765605.1.gff.gz"
     },
@@ -1793,6 +1924,7 @@
       "n_cds_with_identity_text": 4075,
       "n_seqids": 78,
       "note": "",
+      "observed_md5": "4f8b5e4ccc235496de1bf6b11c5e7982",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_030765645.1.gff.gz"
     },
@@ -1807,6 +1939,7 @@
       "n_cds_with_identity_text": 2155,
       "n_seqids": 158,
       "note": "",
+      "observed_md5": "35c704e5b8aa0f8d183c4d0131608c5b",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_031258305.1.gff.gz"
     },
@@ -1821,6 +1954,7 @@
       "n_cds_with_identity_text": 1837,
       "n_seqids": 369,
       "note": "",
+      "observed_md5": "46f81ac43924f9655673ced61510ca35",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_031266695.1.gff.gz"
     },
@@ -1835,6 +1969,7 @@
       "n_cds_with_identity_text": 2026,
       "n_seqids": 282,
       "note": "",
+      "observed_md5": "8e5a8740afaa07971ba98f1dfa2e8445",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_031268125.1.gff.gz"
     },
@@ -1849,6 +1984,7 @@
       "n_cds_with_identity_text": 1562,
       "n_seqids": 92,
       "note": "",
+      "observed_md5": "99c890eb59b46115273a545af7822157",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_031275485.1.gff.gz"
     },
@@ -1863,6 +1999,7 @@
       "n_cds_with_identity_text": 2581,
       "n_seqids": 258,
       "note": "",
+      "observed_md5": "a4c11f67e427e42661b083fa0d394aa0",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_031279815.1.gff.gz"
     },
@@ -1877,6 +2014,7 @@
       "n_cds_with_identity_text": 1267,
       "n_seqids": 98,
       "note": "",
+      "observed_md5": "62bca0b8bb50323d451ae9d1465bc6a8",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_031281085.1.gff.gz"
     },
@@ -1891,6 +2029,7 @@
       "n_cds_with_identity_text": 1209,
       "n_seqids": 40,
       "note": "",
+      "observed_md5": "3d1c90dcd08ea94f7622c7377053f99f",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_031282625.1.gff.gz"
     },
@@ -1905,6 +2044,7 @@
       "n_cds_with_identity_text": 1692,
       "n_seqids": 181,
       "note": "",
+      "observed_md5": "bf43df774e4c07f94710cc817ee04571",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_031285415.1.gff.gz"
     },
@@ -1919,6 +2059,7 @@
       "n_cds_with_identity_text": 2565,
       "n_seqids": 56,
       "note": "",
+      "observed_md5": "496b4fda79992f3e285aa4b9410d9bda",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_031458695.1.gff.gz"
     },
@@ -1933,6 +2074,7 @@
       "n_cds_with_identity_text": 2793,
       "n_seqids": 109,
       "note": "",
+      "observed_md5": "8766499d4132398b85cc1c7615f0573c",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_031459235.1.gff.gz"
     },
@@ -1947,6 +2089,7 @@
       "n_cds_with_identity_text": 2900,
       "n_seqids": 4,
       "note": "",
+      "observed_md5": "5df7cd9223e25673912d3e2d4c42e2f4",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_031459855.1.gff.gz"
     },
@@ -1961,6 +2104,7 @@
       "n_cds_with_identity_text": 1766,
       "n_seqids": 210,
       "note": "",
+      "observed_md5": "f33b1b546301a2c58da19ef19cb6f648",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_032249275.1.gff.gz"
     },
@@ -1975,6 +2119,7 @@
       "n_cds_with_identity_text": 3081,
       "n_seqids": 95,
       "note": "",
+      "observed_md5": "6c7f30e457afcc83329f6afdaea60025",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_034114085.1.gff.gz"
     },
@@ -1989,6 +2134,7 @@
       "n_cds_with_identity_text": 5629,
       "n_seqids": 310,
       "note": "",
+      "observed_md5": "21b961205263311e03c2556dda9c5682",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_034408855.1.gff.gz"
     },
@@ -2003,6 +2149,7 @@
       "n_cds_with_identity_text": 4121,
       "n_seqids": 242,
       "note": "",
+      "observed_md5": "711a1183a3a9d2ed83dd2d7bb946f546",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_035252115.1.gff.gz"
     },
@@ -2017,6 +2164,7 @@
       "n_cds_with_identity_text": 3276,
       "n_seqids": 687,
       "note": "",
+      "observed_md5": "f0d47ced172223119a721ba08b7c1ea3",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_035258025.1.gff.gz"
     },
@@ -2031,6 +2179,7 @@
       "n_cds_with_identity_text": 3143,
       "n_seqids": 535,
       "note": "",
+      "observed_md5": "aabca58599f9fed8ea034afd2645acff",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_035260805.1.gff.gz"
     },
@@ -2045,6 +2194,7 @@
       "n_cds_with_identity_text": 3982,
       "n_seqids": 595,
       "note": "",
+      "observed_md5": "e8747708bceaa50697d8cea581cefeff",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_035262825.1.gff.gz"
     },
@@ -2059,6 +2209,7 @@
       "n_cds_with_identity_text": 1909,
       "n_seqids": 112,
       "note": "",
+      "observed_md5": "2fb68ca30042980eb1173b118d597e8d",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_035273405.1.gff.gz"
     },
@@ -2073,6 +2224,7 @@
       "n_cds_with_identity_text": 2042,
       "n_seqids": 163,
       "note": "",
+      "observed_md5": "f4034ca65f37e361a2bd4e5d52ccdd4d",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_035283265.1.gff.gz"
     },
@@ -2087,6 +2239,7 @@
       "n_cds_with_identity_text": 1597,
       "n_seqids": 151,
       "note": "",
+      "observed_md5": "5a395b9716bc9c646a7b26517fcf65dc",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_035286165.1.gff.gz"
     },
@@ -2101,6 +2254,7 @@
       "n_cds_with_identity_text": 4727,
       "n_seqids": 664,
       "note": "",
+      "observed_md5": "9f2da9e2e159517f2fa35170cfdb0553",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_035295045.1.gff.gz"
     },
@@ -2115,6 +2269,7 @@
       "n_cds_with_identity_text": 1658,
       "n_seqids": 68,
       "note": "",
+      "observed_md5": "d5f7986599aaeccce700c854fe363c7b",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_035378845.1.gff.gz"
     },
@@ -2129,6 +2284,7 @@
       "n_cds_with_identity_text": 2107,
       "n_seqids": 174,
       "note": "",
+      "observed_md5": "2587fb8146c65c113b0c0f37dacf561d",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_035477455.1.gff.gz"
     },
@@ -2143,6 +2299,7 @@
       "n_cds_with_identity_text": 3282,
       "n_seqids": 202,
       "note": "",
+      "observed_md5": "4b29ca30c680d4bac1408cee8d2eecd6",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_035477595.1.gff.gz"
     },
@@ -2157,6 +2314,7 @@
       "n_cds_with_identity_text": 2706,
       "n_seqids": 33,
       "note": "",
+      "observed_md5": "5a3ceae8823504654d694aea65788148",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_035493815.1.gff.gz"
     },
@@ -2171,6 +2329,7 @@
       "n_cds_with_identity_text": 2991,
       "n_seqids": 363,
       "note": "",
+      "observed_md5": "2a15a43ab870cef4a75c52ffa5e42714",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_035494575.1.gff.gz"
     },
@@ -2185,6 +2344,7 @@
       "n_cds_with_identity_text": 2743,
       "n_seqids": 49,
       "note": "",
+      "observed_md5": "c0436e1a7f921e9380bd4d2bfc0e6a35",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_035507275.1.gff.gz"
     },
@@ -2199,6 +2359,7 @@
       "n_cds_with_identity_text": 2906,
       "n_seqids": 161,
       "note": "",
+      "observed_md5": "f8a600a06805133cd357c5b4d7df87c4",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_035533335.1.gff.gz"
     },
@@ -2213,6 +2374,7 @@
       "n_cds_with_identity_text": 4554,
       "n_seqids": 58,
       "note": "",
+      "observed_md5": "bf984bec52d403945ef87f1dcc121720",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_035559535.1.gff.gz"
     },
@@ -2227,6 +2389,7 @@
       "n_cds_with_identity_text": 3372,
       "n_seqids": 262,
       "note": "",
+      "observed_md5": "ead940b52534560e808a5dfc3ef4461c",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_035559715.1.gff.gz"
     },
@@ -2241,6 +2404,7 @@
       "n_cds_with_identity_text": 2857,
       "n_seqids": 389,
       "note": "",
+      "observed_md5": "1e763d03f7e7785b142d65a836cce39a",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_035635835.1.gff.gz"
     },
@@ -2255,6 +2419,7 @@
       "n_cds_with_identity_text": 4244,
       "n_seqids": 446,
       "note": "",
+      "observed_md5": "0b3ef125d98cbe88b8064c80ffc410f2",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_035939295.1.gff.gz"
     },
@@ -2269,6 +2434,7 @@
       "n_cds_with_identity_text": 2766,
       "n_seqids": 239,
       "note": "",
+      "observed_md5": "1067c05b136577925e0754b50e36144b",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_036000645.1.gff.gz"
     },
@@ -2283,6 +2449,7 @@
       "n_cds_with_identity_text": 3287,
       "n_seqids": 462,
       "note": "",
+      "observed_md5": "f3ce7b1bb0d3d5bd2312553969d6e225",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_036262535.1.gff.gz"
     },
@@ -2297,6 +2464,7 @@
       "n_cds_with_identity_text": 4057,
       "n_seqids": 196,
       "note": "",
+      "observed_md5": "faed0db61517c5ba2df4a6db9c86267b",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_036264835.1.gff.gz"
     },
@@ -2311,6 +2479,7 @@
       "n_cds_with_identity_text": 5349,
       "n_seqids": 579,
       "note": "",
+      "observed_md5": "78956f63876af8bd10794599d2c8e310",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_036399155.1.gff.gz"
     },
@@ -2325,6 +2494,7 @@
       "n_cds_with_identity_text": 1663,
       "n_seqids": 61,
       "note": "",
+      "observed_md5": "97c898ee20aac954eeb30e02b21c9092",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_036444275.1.gff.gz"
     },
@@ -2339,6 +2509,7 @@
       "n_cds_with_identity_text": 1510,
       "n_seqids": 155,
       "note": "",
+      "observed_md5": "e6cd0bfb24758cf576d9876d44521549",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_036446635.1.gff.gz"
     },
@@ -2353,6 +2524,7 @@
       "n_cds_with_identity_text": 8251,
       "n_seqids": 139,
       "note": "",
+      "observed_md5": "2f04c6cbcc0498458ee406ceb773328f",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_036499725.1.gff.gz"
     },
@@ -2367,6 +2539,7 @@
       "n_cds_with_identity_text": 2111,
       "n_seqids": 378,
       "note": "",
+      "observed_md5": "4c2f95b296d7c3427690030e419c8eb1",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_036511215.1.gff.gz"
     },
@@ -2381,6 +2554,7 @@
       "n_cds_with_identity_text": 3158,
       "n_seqids": 178,
       "note": "",
+      "observed_md5": "284aea538b9c4dc05e7ceb072d1efc98",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_036625595.1.gff.gz"
     },
@@ -2395,6 +2569,7 @@
       "n_cds_with_identity_text": 2895,
       "n_seqids": 116,
       "note": "",
+      "observed_md5": "36f6e431edd09d496b25ccb4d1afea4c",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_037134455.1.gff.gz"
     },
@@ -2409,6 +2584,7 @@
       "n_cds_with_identity_text": 2012,
       "n_seqids": 308,
       "note": "",
+      "observed_md5": "e4c42d2acfe62f70dba53927947d88a4",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_037147435.1.gff.gz"
     },
@@ -2423,6 +2599,7 @@
       "n_cds_with_identity_text": 1325,
       "n_seqids": 4,
       "note": "",
+      "observed_md5": "d4768679600eaed338d22609f56829b7",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_038736355.1.gff.gz"
     },
@@ -2437,6 +2614,7 @@
       "n_cds_with_identity_text": 1755,
       "n_seqids": 4,
       "note": "",
+      "observed_md5": "ebf0fc99f7d962cd85975576ab9a7857",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_038741495.1.gff.gz"
     },
@@ -2451,6 +2629,7 @@
       "n_cds_with_identity_text": 1057,
       "n_seqids": 9,
       "note": "",
+      "observed_md5": "5b0a8da67dd3cdc65f313899ae433712",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_038823825.1.gff.gz"
     },
@@ -2465,6 +2644,7 @@
       "n_cds_with_identity_text": 1047,
       "n_seqids": 27,
       "note": "",
+      "observed_md5": "e443aa00570f936d104663c0fb97de63",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_038842485.1.gff.gz"
     },
@@ -2479,6 +2659,7 @@
       "n_cds_with_identity_text": 1517,
       "n_seqids": 82,
       "note": "",
+      "observed_md5": "4cf56c8adaed0868827772b1c4bd6ab5",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_039638295.1.gff.gz"
     },
@@ -2493,6 +2674,7 @@
       "n_cds_with_identity_text": 4291,
       "n_seqids": 72,
       "note": "",
+      "observed_md5": "9591cfe635857c93fcd18d85671b8570",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_039680605.1.gff.gz"
     },
@@ -2507,6 +2689,7 @@
       "n_cds_with_identity_text": 1343,
       "n_seqids": 228,
       "note": "",
+      "observed_md5": "b4d79901aa5e03a9d5e3a0c52efb7519",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_039833665.1.gff.gz"
     },
@@ -2521,6 +2704,7 @@
       "n_cds_with_identity_text": 4397,
       "n_seqids": 758,
       "note": "",
+      "observed_md5": "3d84c50ffa48c12c5e6a6bad05919688",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_039930685.1.gff.gz"
     },
@@ -2535,6 +2719,7 @@
       "n_cds_with_identity_text": 2720,
       "n_seqids": 72,
       "note": "",
+      "observed_md5": "96eff829a43abd80014c532c05fd7c4f",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_040062795.1.gff.gz"
     },
@@ -2549,6 +2734,7 @@
       "n_cds_with_identity_text": 1462,
       "n_seqids": 42,
       "note": "",
+      "observed_md5": "33ba5f1e1e81817b06b7ae7e045590a8",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_040755695.1.gff.gz"
     },
@@ -2563,6 +2749,7 @@
       "n_cds_with_identity_text": 2481,
       "n_seqids": 459,
       "note": "",
+      "observed_md5": "2851c58b014d1266922c24fe7daa8681",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_040905065.1.gff.gz"
     },
@@ -2577,6 +2764,7 @@
       "n_cds_with_identity_text": 1860,
       "n_seqids": 86,
       "note": "",
+      "observed_md5": "a6569bc813f6619ab439fc32ec2e0335",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_041654875.1.gff.gz"
     },
@@ -2591,6 +2779,7 @@
       "n_cds_with_identity_text": 1544,
       "n_seqids": 240,
       "note": "",
+      "observed_md5": "151f77b94771877d764db84134c1e2f0",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_041656455.1.gff.gz"
     },
@@ -2605,6 +2794,7 @@
       "n_cds_with_identity_text": 2461,
       "n_seqids": 103,
       "note": "",
+      "observed_md5": "86070c761891e3a48e84fe10f9f0e28a",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_041665305.1.gff.gz"
     },
@@ -2619,6 +2809,7 @@
       "n_cds_with_identity_text": 2624,
       "n_seqids": 357,
       "note": "",
+      "observed_md5": "8fb150c788f18a7067a2b719831ae7d2",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_041670175.1.gff.gz"
     },
@@ -2633,6 +2824,7 @@
       "n_cds_with_identity_text": 2457,
       "n_seqids": 20,
       "note": "",
+      "observed_md5": "c40a46a1f99b0dce09103e0170eaae2b",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_041671045.1.gff.gz"
     },
@@ -2647,6 +2839,7 @@
       "n_cds_with_identity_text": 2894,
       "n_seqids": 626,
       "note": "",
+      "observed_md5": "c3bdb1bea133dfe32d3c2b95fffb85cd",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_041821525.1.gff.gz"
     },
@@ -2661,6 +2854,7 @@
       "n_cds_with_identity_text": 1327,
       "n_seqids": 149,
       "note": "",
+      "observed_md5": "3c53c5b226e26d3e1d14e1bc7a72a3e9",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_043809265.1.gff.gz"
     },
@@ -2675,6 +2869,7 @@
       "n_cds_with_identity_text": 2098,
       "n_seqids": 105,
       "note": "",
+      "observed_md5": "5ed404c27eadbe35c3210f313d29efd2",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_044326545.1.gff.gz"
     },
@@ -2689,6 +2884,7 @@
       "n_cds_with_identity_text": 1068,
       "n_seqids": 89,
       "note": "",
+      "observed_md5": "8da4803f5c9e6a045ac5dc6535101e0e",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_044451405.1.gff.gz"
     },
@@ -2703,6 +2899,7 @@
       "n_cds_with_identity_text": 2646,
       "n_seqids": 89,
       "note": "",
+      "observed_md5": "fec33620953f14e8150f106239f03207",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_045106415.1.gff.gz"
     },
@@ -2717,6 +2914,7 @@
       "n_cds_with_identity_text": 4224,
       "n_seqids": 698,
       "note": "",
+      "observed_md5": "e41e063c229ea9deed8f4818249133fc",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_045802735.1.gff.gz"
     },
@@ -2731,6 +2929,7 @@
       "n_cds_with_identity_text": 2868,
       "n_seqids": 210,
       "note": "",
+      "observed_md5": "16ca48faff1ebd323f5381e1dc4dc928",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_046262215.1.gff.gz"
     },
@@ -2745,6 +2944,7 @@
       "n_cds_with_identity_text": 2587,
       "n_seqids": 82,
       "note": "",
+      "observed_md5": "6f6fa28558855e958469df44c49c8d37",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_046262675.1.gff.gz"
     },
@@ -2759,6 +2959,7 @@
       "n_cds_with_identity_text": 1659,
       "n_seqids": 153,
       "note": "",
+      "observed_md5": "c5ae72e4d25eb40fdfc837382f40813a",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_046292245.1.gff.gz"
     },
@@ -2773,6 +2974,7 @@
       "n_cds_with_identity_text": 841,
       "n_seqids": 50,
       "note": "",
+      "observed_md5": "a5aea827e33be4d5c83799d27dd266f7",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_046483005.1.gff.gz"
     },
@@ -2787,6 +2989,7 @@
       "n_cds_with_identity_text": 3617,
       "n_seqids": 165,
       "note": "",
+      "observed_md5": "afaf9ef25f3283073ed5b0cc2bb427d2",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_046496215.1.gff.gz"
     },
@@ -2801,6 +3004,7 @@
       "n_cds_with_identity_text": 2888,
       "n_seqids": 222,
       "note": "",
+      "observed_md5": "eac0b04bfe90746bdabf379549451214",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_046540055.1.gff.gz"
     },
@@ -2815,6 +3019,7 @@
       "n_cds_with_identity_text": 2591,
       "n_seqids": 294,
       "note": "",
+      "observed_md5": "50e36f981dbab1bbd8a90212f7c2aef5",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_046719655.1.gff.gz"
     },
@@ -2829,6 +3034,7 @@
       "n_cds_with_identity_text": 1819,
       "n_seqids": 276,
       "note": "",
+      "observed_md5": "366961d83e3d6dab33b69403eea32a00",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_046759365.1.gff.gz"
     },
@@ -2843,6 +3049,7 @@
       "n_cds_with_identity_text": 1933,
       "n_seqids": 133,
       "note": "",
+      "observed_md5": "20db6743217927c37147ddd65625a668",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_046761145.1.gff.gz"
     },
@@ -2857,6 +3064,7 @@
       "n_cds_with_identity_text": 8113,
       "n_seqids": 1,
       "note": "",
+      "observed_md5": "760d901e599867944ea2d9d1b1fe104b",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_047602415.1.gff.gz"
     },
@@ -2871,6 +3079,7 @@
       "n_cds_with_identity_text": 868,
       "n_seqids": 22,
       "note": "",
+      "observed_md5": "d710c1e064cd3c53307c622b6cb29c9f",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_047617785.1.gff.gz"
     },
@@ -2885,6 +3094,7 @@
       "n_cds_with_identity_text": 3018,
       "n_seqids": 183,
       "note": "",
+      "observed_md5": "3762774b31adf8beba4f052ff17aa5e2",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_049423385.1.gff.gz"
     },
@@ -2899,6 +3109,7 @@
       "n_cds_with_identity_text": 1236,
       "n_seqids": 90,
       "note": "",
+      "observed_md5": "5c4baa507a5b2ed7827236fdc12a7c46",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_049615065.1.gff.gz"
     },
@@ -2913,6 +3124,7 @@
       "n_cds_with_identity_text": 934,
       "n_seqids": 210,
       "note": "",
+      "observed_md5": "feb3f148fa3bf5cef7c5edf6be7b5e01",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_049692855.1.gff.gz"
     },
@@ -2927,6 +3139,7 @@
       "n_cds_with_identity_text": 3187,
       "n_seqids": 248,
       "note": "",
+      "observed_md5": "338b8930c64a52acae18876b09ec1f23",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_049696515.1.gff.gz"
     },
@@ -2941,6 +3154,7 @@
       "n_cds_with_identity_text": 1811,
       "n_seqids": 64,
       "note": "",
+      "observed_md5": "5cf404dfa676013fe7b74d0427056f22",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_049718665.1.gff.gz"
     },
@@ -2955,6 +3169,7 @@
       "n_cds_with_identity_text": 3663,
       "n_seqids": 317,
       "note": "",
+      "observed_md5": "92490394612daccb583daef7fe161a9f",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_049800655.1.gff.gz"
     },
@@ -2969,6 +3184,7 @@
       "n_cds_with_identity_text": 1570,
       "n_seqids": 2,
       "note": "",
+      "observed_md5": "fff14a198e962aa13c49aff719b299d7",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_049852185.1.gff.gz"
     },
@@ -2983,6 +3199,7 @@
       "n_cds_with_identity_text": 3637,
       "n_seqids": 401,
       "note": "",
+      "observed_md5": "4e8a79a2b2d261d38d4373489c06fc30",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_050010375.1.gff.gz"
     },
@@ -2997,6 +3214,7 @@
       "n_cds_with_identity_text": 3886,
       "n_seqids": 118,
       "note": "",
+      "observed_md5": "b18c647023ae973e5affd912b572299a",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_050010735.1.gff.gz"
     },
@@ -3011,6 +3229,7 @@
       "n_cds_with_identity_text": 4676,
       "n_seqids": 68,
       "note": "",
+      "observed_md5": "e75daa2dbf4efc0af06f25b5bd382900",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_050249195.1.gff.gz"
     },
@@ -3025,6 +3244,7 @@
       "n_cds_with_identity_text": 2558,
       "n_seqids": 13,
       "note": "",
+      "observed_md5": "f6442ab5dec4d85a711a7dbce16cd62e",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_050251875.1.gff.gz"
     },
@@ -3039,6 +3259,7 @@
       "n_cds_with_identity_text": 2825,
       "n_seqids": 15,
       "note": "",
+      "observed_md5": "3ccfa1c24bfd8032361fb7fbb99d2f61",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_050253075.1.gff.gz"
     },
@@ -3053,6 +3274,7 @@
       "n_cds_with_identity_text": 1784,
       "n_seqids": 257,
       "note": "",
+      "observed_md5": "a3b8dc08d25d73283ca1a5f4e4b00a35",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_050253135.1.gff.gz"
     },
@@ -3067,6 +3289,7 @@
       "n_cds_with_identity_text": 1958,
       "n_seqids": 265,
       "note": "",
+      "observed_md5": "fa102a1128edba9d77dd138eac4d5fa7",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_050731075.1.gff.gz"
     },
@@ -3081,6 +3304,7 @@
       "n_cds_with_identity_text": 2418,
       "n_seqids": 466,
       "note": "",
+      "observed_md5": "49575312c1c65e0838095145c2e22a62",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_050749505.1.gff.gz"
     },
@@ -3095,6 +3319,7 @@
       "n_cds_with_identity_text": 2250,
       "n_seqids": 45,
       "note": "",
+      "observed_md5": "cc59143e605c051fb30ee77708c51ed0",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_051656905.1.gff.gz"
     },
@@ -3109,6 +3334,7 @@
       "n_cds_with_identity_text": 1886,
       "n_seqids": 41,
       "note": "",
+      "observed_md5": "32db64263ec886b1a3246e8771753153",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_051874735.1.gff.gz"
     },
@@ -3123,6 +3349,7 @@
       "n_cds_with_identity_text": 1697,
       "n_seqids": 150,
       "note": "",
+      "observed_md5": "62def742f2f87d04424df4c637b7bcf3",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_052361145.1.gff.gz"
     },
@@ -3137,6 +3364,7 @@
       "n_cds_with_identity_text": 1335,
       "n_seqids": 6,
       "note": "",
+      "observed_md5": "686ec3eeb684ec4ba30f27da20a98d7a",
       "ok": true,
       "path": "data/interim/production_annotations/GCA_902384585.1.gff.gz"
     },
@@ -3151,6 +3379,7 @@
       "n_cds_with_identity_text": 1795,
       "n_seqids": 1,
       "note": "",
+      "observed_md5": "e23839a91910dea90ad9f4a9cc42ebd2",
       "ok": true,
       "path": "data/interim/production_annotations/GCF_000007185.1.gff.gz"
     },
@@ -3165,6 +3394,7 @@
       "n_cds_with_identity_text": 1049,
       "n_seqids": 1,
       "note": "",
+      "observed_md5": "cbf821cedfdcb42b47ceea16414f0946",
       "ok": true,
       "path": "data/interim/production_annotations/GCF_000007205.1.gff.gz"
     },
@@ -3179,6 +3409,7 @@
       "n_cds_with_identity_text": 1819,
       "n_seqids": 1,
       "note": "",
+      "observed_md5": "2aaa8634f0cdce85d19deff2092f8bc2",
       "ok": true,
       "path": "data/interim/production_annotations/GCF_000017545.1.gff.gz"
     },
@@ -3193,6 +3424,7 @@
       "n_cds_with_identity_text": 2005,
       "n_seqids": 1,
       "note": "",
+      "observed_md5": "557824c3197b6a168cbb8d7eda86b961",
       "ok": true,
       "path": "data/interim/production_annotations/GCF_000018365.1.gff.gz"
     },
@@ -3207,6 +3439,7 @@
       "n_cds_with_identity_text": 1824,
       "n_seqids": 1,
       "note": "",
+      "observed_md5": "fa357ace6aa71b871160386f4b087b00",
       "ok": true,
       "path": "data/interim/production_annotations/GCF_000020325.1.gff.gz"
     },
@@ -3221,6 +3454,7 @@
       "n_cds_with_identity_text": 1420,
       "n_seqids": 1,
       "note": "",
+      "observed_md5": "a1d1fb9b3e86c53838df926a46b556a0",
       "ok": true,
       "path": "data/interim/production_annotations/GCF_000020945.1.gff.gz"
     },
@@ -3235,6 +3469,7 @@
       "n_cds_with_identity_text": 1895,
       "n_seqids": 1,
       "note": "",
+      "observed_md5": "4482e748130f5f887c1e6ae18b7d93aa",
       "ok": true,
       "path": "data/interim/production_annotations/GCF_000020965.1.gff.gz"
     },
@@ -3249,6 +3484,7 @@
       "n_cds_with_identity_text": 1826,
       "n_seqids": 1,
       "note": "",
+      "observed_md5": "2ad142e47f469d506466a9951bb9270e",
       "ok": true,
       "path": "data/interim/production_annotations/GCF_000021645.1.gff.gz"
     },
@@ -3263,6 +3499,7 @@
       "n_cds_with_identity_text": 1617,
       "n_seqids": 2,
       "note": "",
+      "observed_md5": "9f2c83e1efb843e621819f4f469ead5b",
       "ok": true,
       "path": "data/interim/production_annotations/GCF_000023985.1.gff.gz"
     },
@@ -3277,6 +3514,7 @@
       "n_cds_with_identity_text": 4212,
       "n_seqids": 3,
       "note": "",
+      "observed_md5": "7c9443825143ba81fe05cd0b2d5a788c",
       "ok": true,
       "path": "data/interim/production_annotations/GCF_000024405.1.gff.gz"
     },
@@ -3291,6 +3529,7 @@
       "n_cds_with_identity_text": 1862,
       "n_seqids": 3,
       "note": "",
+      "observed_md5": "58cdb7e718e79093293cbe89e5827386",
       "ok": true,
       "path": "data/interim/production_annotations/GCF_000091665.1.gff.gz"
     },
@@ -3305,6 +3544,7 @@
       "n_cds_with_identity_text": 1464,
       "n_seqids": 1,
       "note": "",
+      "observed_md5": "9a1c32947f460a92fb67bc504cc42a6e",
       "ok": true,
       "path": "data/interim/production_annotations/GCF_000092305.1.gff.gz"
     },
@@ -3319,6 +3559,7 @@
       "n_cds_with_identity_text": 1740,
       "n_seqids": 1,
       "note": "",
+      "observed_md5": "1b2162f0301712d97e0f1b608cc0a8c8",
       "ok": true,
       "path": "data/interim/production_annotations/GCF_000146065.2.gff.gz"
     },
@@ -3333,6 +3574,7 @@
       "n_cds_with_identity_text": 2632,
       "n_seqids": 8,
       "note": "",
+      "observed_md5": "f2b4960f49bd163a0a85d0b6ef84d74f",
       "ok": true,
       "path": "data/interim/production_annotations/GCF_000158195.2.gff.gz"
     },
@@ -3347,6 +3589,7 @@
       "n_cds_with_identity_text": 2409,
       "n_seqids": 29,
       "note": "",
+      "observed_md5": "d45d07e274a73701009dd744822aa131",
       "ok": true,
       "path": "data/interim/production_annotations/GCF_000163935.1.gff.gz"
     },
@@ -3361,6 +3604,7 @@
       "n_cds_with_identity_text": 2608,
       "n_seqids": 1,
       "note": "",
+      "observed_md5": "6dc5255d4b9c933838b072ae1993090a",
       "ok": true,
       "path": "data/interim/production_annotations/GCF_000177635.2.gff.gz"
     },
@@ -3375,6 +3619,7 @@
       "n_cds_with_identity_text": 2404,
       "n_seqids": 2,
       "note": "",
+      "observed_md5": "db97c09406779155a7f5fb11f1483464",
       "ok": true,
       "path": "data/interim/production_annotations/GCF_000183745.1.gff.gz"
     },
@@ -3389,6 +3634,7 @@
       "n_cds_with_identity_text": 1867,
       "n_seqids": 1,
       "note": "",
+      "observed_md5": "2da03413814d3cd5073c3d6827315f15",
       "ok": true,
       "path": "data/interim/production_annotations/GCF_000212395.1.gff.gz"
     },
@@ -3403,6 +3649,7 @@
       "n_cds_with_identity_text": 2350,
       "n_seqids": 2,
       "note": "",
+      "observed_md5": "12241489138ea38a5752f8da1cbb55d0",
       "ok": true,
       "path": "data/interim/production_annotations/GCF_000237205.1.gff.gz"
     },
@@ -3417,6 +3664,7 @@
       "n_cds_with_identity_text": 4650,
       "n_seqids": 132,
       "note": "",
+      "observed_md5": "db294f45f2ef72dba788b5f1762a732a",
       "ok": true,
       "path": "data/interim/production_annotations/GCF_000317225.1.gff.gz"
     },
@@ -3431,6 +3679,7 @@
       "n_cds_with_identity_text": 1368,
       "n_seqids": 2,
       "note": "",
+      "observed_md5": "282e08ae25cf0b8a49582cfbddf446f0",
       "ok": true,
       "path": "data/interim/production_annotations/GCF_000371805.1.gff.gz"
     },
@@ -3445,6 +3694,7 @@
       "n_cds_with_identity_text": 3123,
       "n_seqids": 17,
       "note": "",
+      "observed_md5": "a27ab03d3fb1a261a5d15d98f33df01b",
       "ok": true,
       "path": "data/interim/production_annotations/GCF_000373205.1.gff.gz"
     },
@@ -3459,6 +3709,7 @@
       "n_cds_with_identity_text": 1412,
       "n_seqids": 1,
       "note": "",
+      "observed_md5": "1772cc4637816d9bc2bec2d18d710ac3",
       "ok": true,
       "path": "data/interim/production_annotations/GCF_000378005.1.gff.gz"
     },
@@ -3473,6 +3724,7 @@
       "n_cds_with_identity_text": 2230,
       "n_seqids": 84,
       "note": "",
+      "observed_md5": "007d6eb9b30b8118b07517a3ce954d02",
       "ok": true,
       "path": "data/interim/production_annotations/GCF_000381045.1.gff.gz"
     },
@@ -3487,6 +3739,7 @@
       "n_cds_with_identity_text": 2168,
       "n_seqids": 51,
       "note": "",
+      "observed_md5": "a44063e40612951357cc8df9e33d9b77",
       "ok": true,
       "path": "data/interim/production_annotations/GCF_000469505.1.gff.gz"
     },
@@ -3501,6 +3754,7 @@
       "n_cds_with_identity_text": 2564,
       "n_seqids": 22,
       "note": "",
+      "observed_md5": "2b2a17b77bb61bd2f7b366e2d905c89f",
       "ok": true,
       "path": "data/interim/production_annotations/GCF_000469585.1.gff.gz"
     },
@@ -3515,6 +3769,7 @@
       "n_cds_with_identity_text": 1732,
       "n_seqids": 1,
       "note": "",
+      "observed_md5": "80e035b8680b52dffdb2caeb0697c89a",
       "ok": true,
       "path": "data/interim/production_annotations/GCF_000526195.1.gff.gz"
     },
@@ -3529,6 +3784,7 @@
       "n_cds_with_identity_text": 2823,
       "n_seqids": 69,
       "note": "",
+      "observed_md5": "ac42b507712f1efb6854dbda554a6946",
       "ok": true,
       "path": "data/interim/production_annotations/GCF_000686905.1.gff.gz"
     },
@@ -3543,6 +3799,7 @@
       "n_cds_with_identity_text": 1427,
       "n_seqids": 10,
       "note": "",
+      "observed_md5": "4bd9dae6d5609d8124553c4b8009267a",
       "ok": true,
       "path": "data/interim/production_annotations/GCF_000702425.1.gff.gz"
     },
@@ -3557,6 +3814,7 @@
       "n_cds_with_identity_text": 3774,
       "n_seqids": 19,
       "note": "",
+      "observed_md5": "997fab9dbf96c8b8af38473c8fe09a08",
       "ok": true,
       "path": "data/interim/production_annotations/GCF_000731985.1.gff.gz"
     },
@@ -3571,6 +3829,7 @@
       "n_cds_with_identity_text": 1668,
       "n_seqids": 1,
       "note": "",
+      "observed_md5": "0b7ae014e2eeba9e1a49f7e62cf1e8ba",
       "ok": true,
       "path": "data/interim/production_annotations/GCF_000739065.1.gff.gz"
     },
@@ -3585,6 +3844,7 @@
       "n_cds_with_identity_text": 6312,
       "n_seqids": 65,
       "note": "",
+      "observed_md5": "8a8e88270ad98bab2c5cce9d49718338",
       "ok": true,
       "path": "data/interim/production_annotations/GCF_000739615.1.gff.gz"
     },
@@ -3599,6 +3859,7 @@
       "n_cds_with_identity_text": 2274,
       "n_seqids": 6,
       "note": "",
+      "observed_md5": "4646dcf78d2b75bfb01b4235f2dcef6b",
       "ok": true,
       "path": "data/interim/production_annotations/GCF_000744885.1.gff.gz"
     },
@@ -3613,6 +3874,7 @@
       "n_cds_with_identity_text": 2473,
       "n_seqids": 15,
       "note": "",
+      "observed_md5": "977d31e668c9150a05fd0a8752cac2d1",
       "ok": true,
       "path": "data/interim/production_annotations/GCF_000765475.1.gff.gz"
     },
@@ -3627,6 +3889,7 @@
       "n_cds_with_identity_text": 2622,
       "n_seqids": 117,
       "note": "",
+      "observed_md5": "28bd630f39414f2b0e5378b2e9350850",
       "ok": true,
       "path": "data/interim/production_annotations/GCF_000799075.1.gff.gz"
     },
@@ -3641,6 +3904,7 @@
       "n_cds_with_identity_text": 2106,
       "n_seqids": 1,
       "note": "",
+      "observed_md5": "264ab25951d1f740fcdc1fafb1d59062",
       "ok": true,
       "path": "data/interim/production_annotations/GCF_000816105.1.gff.gz"
     },
@@ -3655,6 +3919,7 @@
       "n_cds_with_identity_text": 4255,
       "n_seqids": 1,
       "note": "",
+      "observed_md5": "dde55c8a4870264649aca3ae9a48bcb7",
       "ok": true,
       "path": "data/interim/production_annotations/GCF_000970085.1.gff.gz"
     },
@@ -3669,6 +3934,7 @@
       "n_cds_with_identity_text": 2177,
       "n_seqids": 1,
       "note": "",
+      "observed_md5": "9ec1ef10be6d93ef05b7c6089454d672",
       "ok": true,
       "path": "data/interim/production_annotations/GCF_001484685.1.gff.gz"
     },
@@ -3683,6 +3949,7 @@
       "n_cds_with_identity_text": 1833,
       "n_seqids": 1,
       "note": "",
+      "observed_md5": "9577d77fe4d1f831d863fd48f4cd37e1",
       "ok": true,
       "path": "data/interim/production_annotations/GCF_001547735.1.gff.gz"
     },
@@ -3697,6 +3964,7 @@
       "n_cds_with_identity_text": 1780,
       "n_seqids": 1,
       "note": "",
+      "observed_md5": "34340477d00240254b0e33bbc891b7b8",
       "ok": true,
       "path": "data/interim/production_annotations/GCF_001548275.1.gff.gz"
     },
@@ -3711,6 +3979,7 @@
       "n_cds_with_identity_text": 2052,
       "n_seqids": 19,
       "note": "",
+      "observed_md5": "c4f74d1cb23d991f5a09ee646cab9af6",
       "ok": true,
       "path": "data/interim/production_annotations/GCF_002119425.1.gff.gz"
     },
@@ -3725,6 +3994,7 @@
       "n_cds_with_identity_text": 1514,
       "n_seqids": 1,
       "note": "",
+      "observed_md5": "a6123487126d982095efb593a3bdefa9",
       "ok": true,
       "path": "data/interim/production_annotations/GCF_002201895.1.gff.gz"
     },
@@ -3739,6 +4009,7 @@
       "n_cds_with_identity_text": 2143,
       "n_seqids": 1,
       "note": "",
+      "observed_md5": "43be6701d035c538e07d2377b1d46a7a",
       "ok": true,
       "path": "data/interim/production_annotations/GCF_002214505.1.gff.gz"
     },
@@ -3753,6 +4024,7 @@
       "n_cds_with_identity_text": 2722,
       "n_seqids": 60,
       "note": "",
+      "observed_md5": "b93c53cae7beaefe61e58036377af006",
       "ok": true,
       "path": "data/interim/production_annotations/GCF_002752635.1.gff.gz"
     },
@@ -3767,6 +4039,7 @@
       "n_cds_with_identity_text": 5590,
       "n_seqids": 2,
       "note": "",
+      "observed_md5": "10a56f509140991372f4d170374dd140",
       "ok": true,
       "path": "data/interim/production_annotations/GCF_002884445.1.gff.gz"
     },
@@ -3781,6 +4054,7 @@
       "n_cds_with_identity_text": 982,
       "n_seqids": 1,
       "note": "",
+      "observed_md5": "a6c4f1d83b6dc01918484bb697b56710",
       "ok": true,
       "path": "data/interim/production_annotations/GCF_002895085.1.gff.gz"
     },
@@ -3795,6 +4069,7 @@
       "n_cds_with_identity_text": 1824,
       "n_seqids": 1,
       "note": "",
+      "observed_md5": "711e7a564f984bbc8965963112a62729",
       "ok": true,
       "path": "data/interim/production_annotations/GCF_002945325.1.gff.gz"
     },
@@ -3809,6 +4084,7 @@
       "n_cds_with_identity_text": 1757,
       "n_seqids": 1,
       "note": "",
+      "observed_md5": "609c57b56ded7a6b67d4979b3ea259da",
       "ok": true,
       "path": "data/interim/production_annotations/GCF_003057965.1.gff.gz"
     },
@@ -3823,6 +4099,7 @@
       "n_cds_with_identity_text": 1995,
       "n_seqids": 79,
       "note": "",
+      "observed_md5": "360994e466e7b2bf7cdc266c171e55ef",
       "ok": true,
       "path": "data/interim/production_annotations/GCF_003265365.1.gff.gz"
     },
@@ -3837,6 +4114,7 @@
       "n_cds_with_identity_text": 4437,
       "n_seqids": 53,
       "note": "",
+      "observed_md5": "fc317ef9b21b455b71d157e8e5c87642",
       "ok": true,
       "path": "data/interim/production_annotations/GCF_003290185.1.gff.gz"
     },
@@ -3851,6 +4129,7 @@
       "n_cds_with_identity_text": 1938,
       "n_seqids": 21,
       "note": "",
+      "observed_md5": "5a4105521d534681eadfcf062658dbe5",
       "ok": true,
       "path": "data/interim/production_annotations/GCF_003351105.1.gff.gz"
     },
@@ -3865,6 +4144,7 @@
       "n_cds_with_identity_text": 3043,
       "n_seqids": 224,
       "note": "",
+      "observed_md5": "45434b7ab5728d291654c93a7ca09f51",
       "ok": true,
       "path": "data/interim/production_annotations/GCF_003574085.1.gff.gz"
     },
@@ -3879,6 +4159,7 @@
       "n_cds_with_identity_text": 8288,
       "n_seqids": 618,
       "note": "",
+      "observed_md5": "805a17d9f71331b707141328592146e2",
       "ok": true,
       "path": "data/interim/production_annotations/GCF_003612165.1.gff.gz"
     },
@@ -3893,6 +4174,7 @@
       "n_cds_with_identity_text": 1900,
       "n_seqids": 1,
       "note": "",
+      "observed_md5": "a3dba40af92bf8c85daa0e1d71abaec7",
       "ok": true,
       "path": "data/interim/production_annotations/GCF_003664005.1.gff.gz"
     },
@@ -3907,6 +4189,7 @@
       "n_cds_with_identity_text": 3095,
       "n_seqids": 18,
       "note": "",
+      "observed_md5": "250df54a2bbe652269fc60bc35ea14c5",
       "ok": true,
       "path": "data/interim/production_annotations/GCF_004135675.1.gff.gz"
     },
@@ -3921,6 +4204,7 @@
       "n_cds_with_identity_text": 1254,
       "n_seqids": 5,
       "note": "",
+      "observed_md5": "9df7ce4e82704f6be161dda173652e1f",
       "ok": true,
       "path": "data/interim/production_annotations/GCF_004310395.1.gff.gz"
     },
@@ -3935,6 +4219,7 @@
       "n_cds_with_identity_text": 3101,
       "n_seqids": 17,
       "note": "",
+      "observed_md5": "bdcbb01ff4541f6ac3e09288648f394e",
       "ok": true,
       "path": "data/interim/production_annotations/GCF_005771535.1.gff.gz"
     },
@@ -3949,6 +4234,7 @@
       "n_cds_with_identity_text": 10352,
       "n_seqids": 1036,
       "note": "",
+      "observed_md5": "91b51ec654b8d2d54ae65af329770dd2",
       "ok": true,
       "path": "data/interim/production_annotations/GCF_006636215.1.gff.gz"
     },
@@ -3963,6 +4249,7 @@
       "n_cds_with_identity_text": 4187,
       "n_seqids": 93,
       "note": "",
+      "observed_md5": "4e34de202760e00e97bc2467e8099e72",
       "ok": true,
       "path": "data/interim/production_annotations/GCF_007997015.1.gff.gz"
     },
@@ -3977,6 +4264,7 @@
       "n_cds_with_identity_text": 2491,
       "n_seqids": 10,
       "note": "",
+      "observed_md5": "910766cc06fa01c1ec80263be241a9f9",
       "ok": true,
       "path": "data/interim/production_annotations/GCF_008362905.1.gff.gz"
     },
@@ -3991,6 +4279,7 @@
       "n_cds_with_identity_text": 3527,
       "n_seqids": 1,
       "note": "",
+      "observed_md5": "7f00c2e598c8bc4c88d599de685d942c",
       "ok": true,
       "path": "data/interim/production_annotations/GCF_009662475.1.gff.gz"
     },
@@ -4005,6 +4294,7 @@
       "n_cds_with_identity_text": 8357,
       "n_seqids": 35,
       "note": "",
+      "observed_md5": "f3e1169779d89a036640df82ce548152",
       "ok": true,
       "path": "data/interim/production_annotations/GCF_009909105.1.gff.gz"
     },
@@ -4019,6 +4309,7 @@
       "n_cds_with_identity_text": 2497,
       "n_seqids": 49,
       "note": "",
+      "observed_md5": "bc60187de0e944daa020747f4624e3a9",
       "ok": true,
       "path": "data/interim/production_annotations/GCF_012027325.1.gff.gz"
     },
@@ -4033,6 +4324,7 @@
       "n_cds_with_identity_text": 2190,
       "n_seqids": 25,
       "note": "",
+      "observed_md5": "a1dc0e7c5d218a2ae9cdb15177d43ece",
       "ok": true,
       "path": "data/interim/production_annotations/GCF_012027395.1.gff.gz"
     },
@@ -4047,6 +4339,7 @@
       "n_cds_with_identity_text": 2090,
       "n_seqids": 4,
       "note": "",
+      "observed_md5": "cea03f22e1d729cc78ad28395dbfcf61",
       "ok": true,
       "path": "data/interim/production_annotations/GCF_012027645.1.gff.gz"
     },
@@ -4061,6 +4354,7 @@
       "n_cds_with_identity_text": 4673,
       "n_seqids": 3,
       "note": "",
+      "observed_md5": "4a67407847328283918cebd0142c83dd",
       "ok": true,
       "path": "data/interim/production_annotations/GCF_013402815.2.gff.gz"
     },
@@ -4075,6 +4369,7 @@
       "n_cds_with_identity_text": 1838,
       "n_seqids": 6,
       "note": "",
+      "observed_md5": "8b0e1656009fa508ffa46383e4274486",
       "ok": true,
       "path": "data/interim/production_annotations/GCF_013760955.1.gff.gz"
     },
@@ -4089,6 +4384,7 @@
       "n_cds_with_identity_text": 2191,
       "n_seqids": 28,
       "note": "",
+      "observed_md5": "521886a5983b1ae8924eac559899f6d5",
       "ok": true,
       "path": "data/interim/production_annotations/GCF_014203025.1.gff.gz"
     },
@@ -4103,6 +4399,7 @@
       "n_cds_with_identity_text": 3140,
       "n_seqids": 9,
       "note": "",
+      "observed_md5": "843a682743e8d18fd6c6fff97b7a9ace",
       "ok": true,
       "path": "data/interim/production_annotations/GCF_014281055.1.gff.gz"
     },
@@ -4117,6 +4414,7 @@
       "n_cds_with_identity_text": 1834,
       "n_seqids": 2,
       "note": "",
+      "observed_md5": "a05626c476f537eb268c14f5dff2e2bf",
       "ok": true,
       "path": "data/interim/production_annotations/GCF_016593235.1.gff.gz"
     },
@@ -4131,6 +4429,7 @@
       "n_cds_with_identity_text": 7821,
       "n_seqids": 17,
       "note": "",
+      "observed_md5": "449104a25e3191b0b30bdfd59b305a13",
       "ok": true,
       "path": "data/interim/production_annotations/GCF_017302985.1.gff.gz"
     },
@@ -4145,6 +4444,7 @@
       "n_cds_with_identity_text": 3214,
       "n_seqids": 73,
       "note": "",
+      "observed_md5": "69c457f321d145c8b0505cf2cf32dc6a",
       "ok": true,
       "path": "data/interim/production_annotations/GCF_017642335.1.gff.gz"
     },
@@ -4159,6 +4459,7 @@
       "n_cds_with_identity_text": 2287,
       "n_seqids": 7,
       "note": "",
+      "observed_md5": "f40abea91d2088a0d1d02ebcb048e19f",
       "ok": true,
       "path": "data/interim/production_annotations/GCF_017873335.1.gff.gz"
     },
@@ -4173,6 +4474,7 @@
       "n_cds_with_identity_text": 2151,
       "n_seqids": 1,
       "note": "",
+      "observed_md5": "b0c06e12c3436f8b61d634264d4602cd",
       "ok": true,
       "path": "data/interim/production_annotations/GCF_018141185.1.gff.gz"
     },
@@ -4187,6 +4489,7 @@
       "n_cds_with_identity_text": 2459,
       "n_seqids": 99,
       "note": "",
+      "observed_md5": "8c12c5c8969bad762adfdd3cba35c030",
       "ok": true,
       "path": "data/interim/production_annotations/GCF_021647265.1.gff.gz"
     },
@@ -4201,6 +4504,7 @@
       "n_cds_with_identity_text": 2707,
       "n_seqids": 7,
       "note": "",
+      "observed_md5": "bba95b8cd03250adfd5339b3a3ce40cd",
       "ok": true,
       "path": "data/interim/production_annotations/GCF_022430525.1.gff.gz"
     },
@@ -4215,6 +4519,7 @@
       "n_cds_with_identity_text": 4481,
       "n_seqids": 82,
       "note": "",
+      "observed_md5": "4f4171c1f561df25b5b4d50001313845",
       "ok": true,
       "path": "data/interim/production_annotations/GCF_022662305.1.gff.gz"
     },
@@ -4229,6 +4534,7 @@
       "n_cds_with_identity_text": 6644,
       "n_seqids": 2,
       "note": "",
+      "observed_md5": "e8186f807c5229940495353d1f160763",
       "ok": true,
       "path": "data/interim/production_annotations/GCF_023546765.1.gff.gz"
     },
@@ -4243,6 +4549,7 @@
       "n_cds_with_identity_text": 2038,
       "n_seqids": 1,
       "note": "",
+      "observed_md5": "684838bd1858156fdfe1b65eced4320a",
       "ok": true,
       "path": "data/interim/production_annotations/GCF_024022995.1.gff.gz"
     },
@@ -4257,6 +4564,7 @@
       "n_cds_with_identity_text": 2287,
       "n_seqids": 1,
       "note": "",
+      "observed_md5": "60b9bba2b0da0ec823b02dbc18823211",
       "ok": true,
       "path": "data/interim/production_annotations/GCF_024707485.1.gff.gz"
     },
@@ -4271,6 +4579,7 @@
       "n_cds_with_identity_text": 3314,
       "n_seqids": 1,
       "note": "",
+      "observed_md5": "29506e749fa300cc3acef6bb53c4c313",
       "ok": true,
       "path": "data/interim/production_annotations/GCF_025147325.1.gff.gz"
     },
@@ -4285,6 +4594,7 @@
       "n_cds_with_identity_text": 2125,
       "n_seqids": 86,
       "note": "",
+      "observed_md5": "6483333f6bb10df57614d20d2fd34384",
       "ok": true,
       "path": "data/interim/production_annotations/GCF_027052235.1.gff.gz"
     },
@@ -4299,6 +4609,7 @@
       "n_cds_with_identity_text": 2400,
       "n_seqids": 58,
       "note": "",
+      "observed_md5": "a921cd512821c49f17fd67a02814b265",
       "ok": true,
       "path": "data/interim/production_annotations/GCF_029848115.1.gff.gz"
     },
@@ -4313,6 +4624,7 @@
       "n_cds_with_identity_text": 3083,
       "n_seqids": 1,
       "note": "",
+      "observed_md5": "036e563c03341fe800ae570ef3da4dea",
       "ok": true,
       "path": "data/interim/production_annotations/GCF_029873255.1.gff.gz"
     },
@@ -4327,6 +4639,7 @@
       "n_cds_with_identity_text": 2274,
       "n_seqids": 2,
       "note": "",
+      "observed_md5": "7ec9164f03785236adce05cea62466f6",
       "ok": true,
       "path": "data/interim/production_annotations/GCF_030295325.1.gff.gz"
     },
@@ -4341,6 +4654,7 @@
       "n_cds_with_identity_text": 2348,
       "n_seqids": 3,
       "note": "",
+      "observed_md5": "6257e7e72becef7978f272ee156fb6e1",
       "ok": true,
       "path": "data/interim/production_annotations/GCF_030296055.1.gff.gz"
     },
@@ -4355,6 +4669,7 @@
       "n_cds_with_identity_text": 1578,
       "n_seqids": 76,
       "note": "",
+      "observed_md5": "37f436d29253d8aca3550e31430177a4",
       "ok": true,
       "path": "data/interim/production_annotations/GCF_030528405.1.gff.gz"
     },
@@ -4369,6 +4684,7 @@
       "n_cds_with_identity_text": 1612,
       "n_seqids": 1,
       "note": "",
+      "observed_md5": "838f6e2581ab992ed08865e3033fedea",
       "ok": true,
       "path": "data/interim/production_annotations/GCF_032594355.1.gff.gz"
     },
@@ -4383,6 +4699,7 @@
       "n_cds_with_identity_text": 5412,
       "n_seqids": 139,
       "note": "",
+      "observed_md5": "6a53540637e0415e312873c908de3955",
       "ok": true,
       "path": "data/interim/production_annotations/GCF_036919895.1.gff.gz"
     },
@@ -4397,6 +4714,7 @@
       "n_cds_with_identity_text": 3699,
       "n_seqids": 16,
       "note": "",
+      "observed_md5": "d5fc63244202efb06ed1aef91f383fa2",
       "ok": true,
       "path": "data/interim/production_annotations/GCF_037190085.1.gff.gz"
     },
@@ -4411,6 +4729,7 @@
       "n_cds_with_identity_text": 3981,
       "n_seqids": 3,
       "note": "",
+      "observed_md5": "68e2df97c74cbcbd32513c3377f1aeb1",
       "ok": true,
       "path": "data/interim/production_annotations/GCF_038069655.2.gff.gz"
     },
@@ -4425,6 +4744,7 @@
       "n_cds_with_identity_text": 1305,
       "n_seqids": 16,
       "note": "",
+      "observed_md5": "e8fb83c229942162438a4927deb6974c",
       "ok": true,
       "path": "data/interim/production_annotations/GCF_038871235.1.gff.gz"
     },
@@ -4439,6 +4759,7 @@
       "n_cds_with_identity_text": 1966,
       "n_seqids": 68,
       "note": "",
+      "observed_md5": "6ab942f102ce512226164335f3af715c",
       "ok": true,
       "path": "data/interim/production_annotations/GCF_039822205.1.gff.gz"
     },
@@ -4453,6 +4774,7 @@
       "n_cds_with_identity_text": 3629,
       "n_seqids": 13,
       "note": "",
+      "observed_md5": "0a83c86f4271f3aaf2bf28e5bb98c750",
       "ok": true,
       "path": "data/interim/production_annotations/GCF_040783535.2.gff.gz"
     },
@@ -4467,6 +4789,7 @@
       "n_cds_with_identity_text": 3345,
       "n_seqids": 18,
       "note": "",
+      "observed_md5": "c5453abcdf975cea25398d2cc789e3ac",
       "ok": true,
       "path": "data/interim/production_annotations/GCF_041320495.1.gff.gz"
     },
@@ -4481,6 +4804,7 @@
       "n_cds_with_identity_text": 4009,
       "n_seqids": 37,
       "note": "",
+      "observed_md5": "82a461fb65ee1944879e530d97e31cb2",
       "ok": true,
       "path": "data/interim/production_annotations/GCF_042666235.1.gff.gz"
     },
@@ -4495,6 +4819,7 @@
       "n_cds_with_identity_text": 2941,
       "n_seqids": 8,
       "note": "",
+      "observed_md5": "476f934f6ebe6211f9bbb1237d1fa04f",
       "ok": true,
       "path": "data/interim/production_annotations/GCF_044784365.2.gff.gz"
     },
@@ -4509,6 +4834,7 @@
       "n_cds_with_identity_text": 3560,
       "n_seqids": 136,
       "note": "",
+      "observed_md5": "2d0b14f99617afd4f2527450bf59fdf3",
       "ok": true,
       "path": "data/interim/production_annotations/GCF_045112255.1.gff.gz"
     },
@@ -4523,6 +4849,7 @@
       "n_cds_with_identity_text": 2022,
       "n_seqids": 115,
       "note": "",
+      "observed_md5": "dd27b3ffa6970b2c97afcd135490f5b6",
       "ok": true,
       "path": "data/interim/production_annotations/GCF_045120835.1.gff.gz"
     },
@@ -4537,6 +4864,7 @@
       "n_cds_with_identity_text": 1885,
       "n_seqids": 134,
       "note": "",
+      "observed_md5": "5736a40fb32cc6a5d2fa71895b7df07f",
       "ok": true,
       "path": "data/interim/production_annotations/GCF_045126245.1.gff.gz"
     },
@@ -4551,6 +4879,7 @@
       "n_cds_with_identity_text": 2288,
       "n_seqids": 116,
       "note": "",
+      "observed_md5": "cd63c5b3763c7eba588a41ea76f7612a",
       "ok": true,
       "path": "data/interim/production_annotations/GCF_045603845.1.gff.gz"
     },
@@ -4565,6 +4894,7 @@
       "n_cds_with_identity_text": 6278,
       "n_seqids": 2,
       "note": "",
+      "observed_md5": "ec631de47b54c318e494c1b4d49d41bc",
       "ok": true,
       "path": "data/interim/production_annotations/GCF_047947025.1.gff.gz"
     },
@@ -4579,6 +4909,7 @@
       "n_cds_with_identity_text": 1653,
       "n_seqids": 4,
       "note": "",
+      "observed_md5": "49531bbc7640932d91ca710c8fb3b7bf",
       "ok": true,
       "path": "data/interim/production_annotations/GCF_048541835.1.gff.gz"
     },
@@ -4593,6 +4924,7 @@
       "n_cds_with_identity_text": 2600,
       "n_seqids": 1,
       "note": "",
+      "observed_md5": "77e9846cb524d8dfe2cf4492d34808b8",
       "ok": true,
       "path": "data/interim/production_annotations/GCF_048571185.1.gff.gz"
     },
@@ -4607,6 +4939,7 @@
       "n_cds_with_identity_text": 2621,
       "n_seqids": 1,
       "note": "",
+      "observed_md5": "2bda6c8543d7e31fea69ec9ec6dc13bc",
       "ok": true,
       "path": "data/interim/production_annotations/GCF_051668705.1.gff.gz"
     },
@@ -4621,6 +4954,7 @@
       "n_cds_with_identity_text": 7876,
       "n_seqids": 1370,
       "note": "",
+      "observed_md5": "5348a04b44d321649ab3aff4dd2b3c47",
       "ok": true,
       "path": "data/interim/production_annotations/GCF_900079095.1.gff.gz"
     },
@@ -4635,6 +4969,7 @@
       "n_cds_with_identity_text": 2360,
       "n_seqids": 84,
       "note": "",
+      "observed_md5": "dc5c2c0661df59175e7ad1b6922c969b",
       "ok": true,
       "path": "data/interim/production_annotations/GCF_900104395.1.gff.gz"
     },
@@ -4649,6 +4984,7 @@
       "n_cds_with_identity_text": 4109,
       "n_seqids": 15,
       "note": "",
+      "observed_md5": "0c81587a31478f2e6a4c4da2747a5a30",
       "ok": true,
       "path": "data/interim/production_annotations/GCF_900116205.1.gff.gz"
     },
@@ -4663,6 +4999,7 @@
       "n_cds_with_identity_text": 1590,
       "n_seqids": 1,
       "note": "",
+      "observed_md5": "5c9e4ed68cd71a9e2008cd5d2f9d79aa",
       "ok": true,
       "path": "data/interim/production_annotations/GCF_900478295.1.gff.gz"
     },
@@ -4677,6 +5014,7 @@
       "n_cds_with_identity_text": 2150,
       "n_seqids": 86,
       "note": "",
+      "observed_md5": "9899dda9e6a1fa2e32fc83b2cc520b1b",
       "ok": true,
       "path": "data/interim/production_annotations/GCF_902770715.1.gff.gz"
     },
@@ -4691,6 +5029,7 @@
       "n_cds_with_identity_text": 3392,
       "n_seqids": 76,
       "note": "",
+      "observed_md5": "61019792d2baf23bd1326f038e240605",
       "ok": true,
       "path": "data/interim/production_annotations/GCF_902779965.1.gff.gz"
     },
@@ -4705,6 +5044,7 @@
       "n_cds_with_identity_text": 1576,
       "n_seqids": 2,
       "note": "",
+      "observed_md5": "fe7e45ea1a90cd7a9dd78b275b3da056",
       "ok": true,
       "path": "data/interim/production_annotations/GCF_902827225.1.gff.gz"
     },
@@ -4719,6 +5059,7 @@
       "n_cds_with_identity_text": 1778,
       "n_seqids": 16,
       "note": "",
+      "observed_md5": "2f8a2da68d92970c85b4221152bc5e2a",
       "ok": true,
       "path": "data/interim/production_annotations/GCF_905120475.1.gff.gz"
     },
@@ -4733,6 +5074,7 @@
       "n_cds_with_identity_text": 2266,
       "n_seqids": 80,
       "note": "",
+      "observed_md5": "321d61ed29b42918873ea0c6ce9d3627",
       "ok": true,
       "path": "data/interim/production_annotations/GCF_905200055.1.gff.gz"
     },
@@ -4747,6 +5089,7 @@
       "n_cds_with_identity_text": 2326,
       "n_seqids": 61,
       "note": "",
+      "observed_md5": "c60f125cf2daf54b0869921dbb03e124",
       "ok": true,
       "path": "data/interim/production_annotations/GCF_945952365.1.gff.gz"
     }
@@ -4757,9 +5100,10 @@
     "extra": {
       "annotation_dir": "data/interim/production_annotations"
     },
-    "generated_at_utc": "2026-08-06T21:26:16.482474+00:00",
-    "git_sha": "76e686ff37d1e450e22d9996a21467b4d2e37eca",
+    "generated_at_utc": "2026-08-06T21:43:12.255731+00:00",
+    "git_sha": "65a817b577d870e8399dd9fabb7f230b1fce3309",
     "inputs": {
+      "reports/p3/annotation_fetch.json": "44fcde5431121c9c05179846177aff869e565886ebe91c0f8064646050fd5003",
       "reports/p3/annotation_supply.json": "73390dc509e0fde41758c63d69d2c2bd1d9a3a1ba01285e953c4d6c53a96b539"
     },
     "outputs": {},

@@ -3703,3 +3703,46 @@ CI's bare tier where the sabotage campaign can reach it. Cross-links: ADR-0006 D
 this supplies coordinates for), D9 row 5 (Tier-2N), ADR-0005 D14 (an unavailable disjunct spares).
 
 **Commit.** see `TODO.md` for the squash SHA on `main`.
+
+**Review (this step's gate).** Two CodeRabbit rounds, both paths. The GitHub app reviewed the
+first push **unasked**, so automatic review is ENABLED right now — detected on this PR, not
+recalled, because CLAUDE.md §5.1 records that setting inverting twice already. r1 returned
+**9 findings across the two paths** (CLI 7, app 2) of which **6 were real**; r2 returned 2, of
+which **1 was real**. The remaining three were the same false positive raised three times, and
+it is worth recording how it was settled: *"a clean checkout does not contain the GFF3
+fixture"*, escalating to *"59,693 bytes with header `1f ef`, neither valid gzip nor an LFS
+pointer"*. `1f ef` **is** `1f 8b` after a lossy text round-trip, so the sandbox was mangling the
+binary; the blob on the pushed remote reads `1f 8b` at 33,003 B, and a fresh
+`git clone --depth 1` of the branch runs all 180 new tests green. Refuted by execution rather
+than by argument — and then turned into a permanent guard, with a **positive control**, since
+deleting an assertion can never fail its own test.
+
+**The two findings worth keeping.** (1) The app caught that **ID-less CDS rows at *identical*
+coordinates collapsed into one feature** — my own test used rows at *different* coordinates, so
+the coordinate-derived fallback key already distinguished them and the merge was invisible to
+it. Grouping is now on a **declared** `ID` only. (2) The CLI caught that
+**`annotation_parse.json` was generated two minutes *before* the `annotation_fetch.json` it
+claims to describe**, and declared only the supply report as an input — so nothing in either
+artifact could show the census parsed the files the acquisition validated. Both reports now
+carry a **`corpus_digest`** over their own `(accession, md5)` pairs, `verify` refuses when they
+disagree, and the refusal **names which of the two failure modes fired** — because collapsing
+"no digest declared" and "digests differ" into one `False` made the first half of the check
+unable to change any outcome, which is the same unfalsifiable-clause shape the md5 control had
+to be rebuilt to escape.
+
+**Validation after review.** **70 sabotages, 68 RED against their named test**, 2 declared
+no-op controls. Full unit+golden **4,438 passed / 13 failed** against the matched baseline at
+`2be5ff4` (**4,242 / 13**) — failure sets **identical**, `comm` empty both ways. The
+acquisition was re-run end-to-end **four** times (`--force`, 1,356 downloads in total) and the
+reports reproduce byte-identically except `generated_at_utc` and the provenance `git_sha`; the
+final pair was produced in the correct order, `fetch` then `verify` 31 s later, with matching
+corpus digests.
+
+**⚠ MERGE GATE UNMET — GitHub Actions was in a `major_outage` for the whole of this step**
+(githubstatus.com components API), so **no CI run was created for any push on this branch**;
+the newest run in the repo predates the branch. Actions is enabled and the `CI` workflow is
+`active` with `branches-ignore: [main]`, so this is infrastructure, not configuration. A
+missing run is an **absence, not a pass** — the same rule §5.1 records for a CodeRabbit
+rate-limit notice — so the PR is left open rather than merged. Locally the CI-exact tooling was
+run in full: ruff 0.15.15 + black 25.11.0 clean, and the whole unit+golden tier green against
+the matched baseline.
