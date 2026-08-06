@@ -3767,3 +3767,29 @@ so the stricter reader accepts exactly the same real corpus.
 controls. Full unit+golden **4,447 passed / 13 failed** vs the matched baseline at `2be5ff4`
 (**4,242 / 13**) — failure sets **identical**, `comm` empty both ways. ruff 0.15.15 + black
 25.11.0 clean.
+
+**Review round 4 — five more, and the counts never converged: 9, 2, 4, 5.** The most
+interesting was an identity collapse: `urllib.parse.unquote` defaults to `errors="replace"`,
+so `%FF` and `%FE` both decode to U+FFFD and two CDS records carrying those as `ID` **merge**
+in `group_cds` — [[duplicate-key-merges-instead-of-colliding]] a third time in this step, now
+at the level of the identity itself. Decoding is strict, and a `%` not followed by two hex
+digits is refused outright (GFF3 requires a literal percent to be written `%25`). Also: the
+census hashed a byte snapshot and then **re-opened the path to parse it**, so an md5 and a CDS
+census could describe different bytes — it now parses the snapshot it verified; the cache write
+was non-atomic and its `OSError`s escaped as tracebacks rather than per-assembly failed rows;
+`##gff-version3` (no separator) satisfied `startswith`; and a `CDS` with `phase=.` was accepted
+though GFF3 requires one. That last was checked against the corpus before being enforced —
+**0 of 897,369 real CDS lines omit a phase**, so the stricter rule refuses nothing real.
+
+**A third dead guard, found the same way.** The fix for the non-atomic write added a
+`startswith(".")` filter to the orphan sweep — which can never fire, because the temp name ends
+in `.part` and the sweep globs `*.gff.gz`. The sabotage did not bite, the filter was removed,
+and the property was moved to where it is real: `_temp_name` must not end in `.gff.gz`, which
+is what the test now asserts.
+
+**Final validation.** **85 sabotages, 83 RED against their named test**, 2 declared no-op
+controls. Full unit+golden **4,458 passed / 13 failed** vs the matched baseline at `2be5ff4`
+(**4,242 / 13**) — failure sets **identical**, `comm` empty both ways; +216 exactly the new
+tests. The corpus census is **unchanged under every tightening** (897,096 CDS / 11,671 pseudo /
+273 multi-segment / 44,291 contigs), so the stricter reader accepts precisely the same real
+corpus the lenient one did. ruff 0.15.15 + black 25.11.0 clean.

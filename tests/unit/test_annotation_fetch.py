@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import urllib.error
 from pathlib import Path
 
@@ -589,6 +590,53 @@ def test_fetch_one_refuses_a_url_bound_to_another_accession(tmp_path):
 # --------------------------------------------------------------------------- #
 
 
+def test_an_unwritable_destination_becomes_a_failed_row_not_a_traceback(tmp_path, monkeypatch):
+    """A full disk or a permission error must still produce the refusal report."""
+
+    def _boom(self, data):
+        raise PermissionError("read-only file system")
+
+    monkeypatch.setattr(Path, "write_bytes", _boom)
+    row = af.fetch_one(_target(), annotation_dir=tmp_path, opener=_opener({URL: PAYLOAD}))
+    assert row["status"] == af.STATUS_FETCH_FAILED and "PermissionError" in row["note"]
+
+
+def test_an_unreadable_cache_file_becomes_a_failed_row_not_a_traceback(tmp_path, monkeypatch):
+    (tmp_path / "GCA_000296795.1.gff.gz").write_bytes(PAYLOAD)
+
+    def _boom(self):
+        raise PermissionError("cannot read")
+
+    monkeypatch.setattr(Path, "read_bytes", _boom)
+    row = af.fetch_one(_target(), annotation_dir=tmp_path, opener=_opener({URL: PAYLOAD}))
+    assert row["status"] == af.STATUS_FETCH_FAILED and "PermissionError" in row["note"]
+
+
+def test_the_destination_is_replaced_atomically_and_no_partial_is_left(tmp_path, monkeypatch):
+    """A direct write leaves truncated bytes visible if the process stops mid-write."""
+    seen: list[str] = []
+    real_replace = os.replace
+
+    def _spy(src, dst):
+        seen.append(f"{Path(src).name}->{Path(dst).name}")
+        return real_replace(src, dst)
+
+    monkeypatch.setattr(af.os, "replace", _spy)
+    af.fetch_one(_target(), annotation_dir=tmp_path, opener=_opener({URL: PAYLOAD}))
+    assert len(seen) == 1 and seen[0].endswith("->GCA_000296795.1.gff.gz")
+    assert [p.name for p in tmp_path.iterdir()] == ["GCA_000296795.1.gff.gz"]
+
+
+def test_an_in_flight_temp_file_is_not_reported_as_an_orphan(tmp_path):
+    """The property lives in the temp file's NAME: it must not end in ``.gff.gz``, or a
+    concurrent orphan sweep would report a half-written file as foreign annotation."""
+    dest = tmp_path / "GCA_000296795.1.gff.gz"
+    tmp_name = af._temp_name(dest)
+    assert not tmp_name.endswith(".gff.gz")
+    (tmp_path / tmp_name).write_bytes(b"partial")
+    assert af.find_orphans(tmp_path, [ACC]) == []
+
+
 def test_orphans_are_reported_and_the_files_are_left_alone(tmp_path):
     (tmp_path / "GCA_000296795.1.gff.gz").write_bytes(PAYLOAD)
     stray = tmp_path / "GCA_111111111.1.gff.gz"
@@ -879,6 +927,31 @@ def test_parse_census_re_hashes_and_parses_the_real_fixture(tmp_path):
     assert census["totals"]["n_cds_pseudo"] == 38
     assert census["totals"]["n_seqids"] == 41
     assert census["totals"]["n_with_fasta_section"] == 0
+
+
+def test_the_census_parses_the_bytes_it_hashed_not_a_second_read(tmp_path, monkeypatch):
+    """Between the hash and a re-read the file can change, and the two halves of the census
+    would then describe different bytes. Asserted by making the SECOND read return something
+    else: a path-reading census sees it, a snapshot-parsing one cannot."""
+    path, ann, fetch_path, payload = _acquire(tmp_path)
+    target = ann / af.destination_name(af.CONTROL_ACCESSION)
+    real_read = Path.read_bytes
+    calls = {"n": 0}
+
+    def _swap(self):
+        data = real_read(self)
+        if self == target:
+            calls["n"] += 1
+            if calls["n"] > 1:  # every read after the one that was hashed
+                import gzip as _gz
+
+                return _gz.compress(b"##gff-version 3\n")
+        return data
+
+    monkeypatch.setattr(Path, "read_bytes", _swap)
+    census = af.parse_census(supply_report=path, annotation_dir=ann, fetch_report=fetch_path)
+    assert census["n_failed"] == 0
+    assert census["per_assembly"][0]["n_cds"] == 455
 
 
 def test_parse_census_reports_a_missing_file(tmp_path):

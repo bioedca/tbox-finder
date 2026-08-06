@@ -61,6 +61,7 @@ import argparse
 import concurrent.futures
 import hashlib
 import json
+import os
 import re
 import sys
 import time
@@ -141,6 +142,10 @@ REQUIRED_CLAUSES: frozenset[str] = frozenset(
         "no_orphans",
     }
 )
+
+
+class _NeverRaised(Exception):
+    """Sabotage target: a name the OSError handler can be swapped to that never fires."""
 
 
 class AnnotationFetchError(RuntimeError):
@@ -597,6 +602,31 @@ def fetch_one(
         "note": "",
     }
 
+    try:
+        return _fetch_one_io(
+            row, target, dest, limiter=limiter, opener=opener, sleep=sleep, force=force
+        )
+    except OSError as exc:
+        # A permission error or a full disk is a per-assembly failure, not a traceback that
+        # aborts the CLI without writing the refusal report this module promises.
+        row.update(status=STATUS_FETCH_FAILED, note=f"{type(exc).__name__}: {exc}"[:200])
+        return row
+
+
+def _fetch_one_io(
+    row: dict[str, Any],
+    target: Mapping[str, Any],
+    dest: Path,
+    *,
+    limiter: RateLimiter | None,
+    opener: Any,
+    sleep: Any,
+    force: bool,
+) -> dict[str, Any]:
+    """The filesystem-touching half of :func:`fetch_one`. Every ``OSError`` here is caught above."""
+    url = str(target["gff_url"])
+    expected = str(target["gff_md5"]).lower()
+
     if dest.exists() and not force:
         payload = dest.read_bytes()
         if digest_matches(payload, expected):
@@ -627,9 +657,23 @@ def fetch_one(
         return row
 
     dest.parent.mkdir(parents=True, exist_ok=True)
-    dest.write_bytes(payload)
+    # Write-then-replace. A direct ``write_bytes`` leaves a truncated file visible if the
+    # process stops mid-write, and a concurrent reader would then hash partial bytes.
+    tmp = dest.parent / _temp_name(dest)
+    try:
+        tmp.write_bytes(payload)
+        os.replace(tmp, dest)
+    finally:
+        tmp.unlink(missing_ok=True)
     row["status"] = STATUS_OK
     return row
+
+
+def _temp_name(dest: Path) -> str:
+    """The in-flight name for ``dest``. Deliberately does **not** end in ``.gff.gz``, so a
+    concurrent :func:`find_orphans` sweep cannot mistake a half-written file for foreign
+    annotation."""
+    return f".{dest.name}.{os.getpid()}.part"
 
 
 def find_orphans(annotation_dir: str | Path, expected_accessions: Iterable[str]) -> list[str]:
@@ -643,6 +687,9 @@ def find_orphans(annotation_dir: str | Path, expected_accessions: Iterable[str])
     if not directory.is_dir():
         return []
     wanted = {destination_name(str(a)) for a in expected_accessions}
+    # No dotfile filter: the in-flight temp name ends in ``.part``, so ``*.gff.gz`` never
+    # matches it. A filter that cannot fire is a guard that cannot be falsified — the property
+    # lives in the temp file's NAME, and that is where the test points.
     return sorted(p.name for p in directory.glob("*.gff.gz") if p.name not in wanted)
 
 
@@ -749,7 +796,10 @@ def parse_census(
             rows.append({**row, "ok": False, "note": f"md5 {md5_hex(raw)} != {target['gff_md5']}"})
             continue
         try:
-            text = gff3.read_gff3_text(path)
+            # ``raw`` — the snapshot that was just hashed — not a second read of ``path``:
+            # between the two the file can change, and the census would then report an md5 and
+            # a corpus digest for one set of bytes while deriving CDS metrics from another.
+            text = gff3.decode_gff3_bytes(raw)
             cds = gff3.parse_gff3_document(text)
         except (gff3.Gff3Error, OSError, UnicodeDecodeError) as exc:
             rows.append({**row, "ok": False, "note": f"{type(exc).__name__}: {exc}"[:200]})

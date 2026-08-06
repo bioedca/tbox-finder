@@ -3758,8 +3758,8 @@
       "control_accession": "GCA_002790315.1",
       "gff_suffix": "_genomic.gff.gz"
     },
-    "generated_at_utc": "2026-08-06T21:49:30.044420+00:00",
-    "git_sha": "6bf4f205429b7b5b00f9481faf40640ba9210f1b",
+    "generated_at_utc": "2026-08-06T22:30:33.483953+00:00",
+    "git_sha": "a3c3419b212f1aa865334d518e4850ee631ce174",
     "inputs": {
       "reports/p3/annotation_supply.json": "73390dc509e0fde41758c63d69d2c2bd1d9a3a1ba01285e953c4d6c53a96b539"
     },

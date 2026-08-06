@@ -72,6 +72,7 @@ __all__ = [
     "GffFeature",
     "attribute_first",
     "cds_start_position",
+    "decode_gff3_bytes",
     "gene_identity_text",
     "group_cds",
     "is_pseudo",
@@ -129,6 +130,9 @@ GENE_IDENTITY_KEYS: tuple[str, ...] = (
 )
 
 _TRUEISH: frozenset[str] = frozenset({"true", "yes", "1"})
+
+#: a ``%`` not followed by two hex digits — a stray percent, which GFF3 requires to be ``%25``.
+_BAD_ESCAPE_RE = re.compile(r"%(?![0-9A-Fa-f]{2})")
 
 
 @dataclass(frozen=True)
@@ -189,8 +193,22 @@ def unescape(value: str) -> str:
 
     ``urllib.parse.unquote``, **not** ``unquote_plus``: GFF3 does not use ``+`` for space, and
     a product name like ``NAD(P)+ transhydrogenase`` must keep its plus sign.
+
+    Decoded **strictly**. The default ``errors="replace"`` turns every invalid byte into
+    U+FFFD, so ``%FF`` and ``%FE`` decode to the *same* string — and two CDS records carrying
+    those as ``ID`` then merge in :func:`group_cds`, losing one of them
+    ([[duplicate-key-merges-instead-of-colliding]]). A ``%`` not followed by two hex digits is
+    malformed input too: GFF3 requires a literal percent to be written ``%25``.
     """
-    return urllib.parse.unquote(str(value))
+    text = str(value)
+    if _BAD_ESCAPE_RE.search(text):
+        raise Gff3Error(f"malformed percent-escape in attribute text: {text[:80]!r}")
+    try:
+        return urllib.parse.unquote(text, errors="strict")
+    except UnicodeDecodeError as exc:
+        raise Gff3Error(
+            f"attribute text is not valid UTF-8 after unescaping: {text[:80]!r}"
+        ) from exc
 
 
 def parse_attributes(column9: str) -> dict[str, tuple[str, ...]]:
@@ -282,6 +300,10 @@ def parse_gff3_line(line: str, *, line_no: int = 0) -> GffFeature:
         if raw_phase.strip() not in ("0", "1", "2"):
             raise Gff3Error(f"line {line_no}: phase is neither '.' nor 0/1/2: {raw_phase!r}")
         phase = int(raw_phase)
+    elif ftype == CDS_TYPE:
+        # Required by the spec for CDS specifically, and measured to hold on every one of the
+        # 897,369 CDS lines in the acquired corpus — so enforcing it refuses nothing real.
+        raise Gff3Error(f"line {line_no}: a CDS must carry a phase (column 8 is '.')")
 
     return GffFeature(
         seqid=unescape(seqid),
@@ -395,9 +417,12 @@ def require_gff3_version(lines: Sequence[str]) -> str:
         line = raw.strip()
         if not line:
             continue
-        if not line.startswith(GFF_VERSION_DIRECTIVE):
+        # Exactly two fields: ``##gff-version3`` (no separator) satisfies ``startswith`` and
+        # would be read as version 3 while not being the directive the spec requires.
+        fields = line.split()
+        if len(fields) != 2 or fields[0] != GFF_VERSION_DIRECTIVE:
             raise Gff3Error(f"first non-blank line is not {GFF_VERSION_DIRECTIVE!r}: {line[:80]!r}")
-        version = line[len(GFF_VERSION_DIRECTIVE) :].strip()
+        version = fields[1]
         major = version.split(".", 1)[0]
         if major != "3":
             raise Gff3Error(f"unsupported GFF version {version!r}; this reader parses GFF3")
@@ -417,6 +442,19 @@ def parse_gff3_document(text: str) -> list[CdsFeature]:
     return parse_gff3_cds(lines)
 
 
+def decode_gff3_bytes(raw: bytes) -> str:
+    """Bytes → GFF3 text, gunzipping when the gzip magic is present.
+
+    Split out from :func:`read_gff3_text` so a caller that has already **hashed** a byte
+    snapshot can parse *that* snapshot rather than re-opening the path: between the hash and a
+    second read the file can change, and the census would then report an md5 for one set of
+    bytes and CDS metrics for another.
+    """
+    if raw[:2] == b"\x1f\x8b":
+        raw = gzip.decompress(raw)
+    return raw.decode("utf-8")
+
+
 def read_gff3_text(path: str | Path) -> str:
     """Read a ``.gff`` or ``.gff.gz`` as text.
 
@@ -425,10 +463,7 @@ def read_gff3_text(path: str | Path) -> str:
     corrupt download. Decoded as UTF-8: NCBI product names carry non-ASCII (Greek letters in
     enzyme names), and ``latin-1`` would mangle them into plausible mojibake rather than fail.
     """
-    raw = Path(path).read_bytes()
-    if raw[:2] == b"\x1f\x8b":
-        raw = gzip.decompress(raw)
-    return raw.decode("utf-8")
+    return decode_gff3_bytes(Path(path).read_bytes())
 
 
 def cds_start_position(cds: CdsFeature) -> int:

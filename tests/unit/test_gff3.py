@@ -151,9 +151,15 @@ def test_refuses_an_out_of_range_phase(phase):
         _feature(f"ctg1\tx\tCDS\t10\t20\t.\t+\t{phase}\tID=a")
 
 
-def test_accepts_a_dot_phase_and_a_dot_score_as_absent():
-    f = _feature("ctg1\tx\tCDS\t10\t20\t.\t+\t.\tID=a")
+def test_a_non_cds_feature_may_omit_its_phase():
+    f = _feature("ctg1\tx\tgene\t10\t20\t.\t+\t.\tID=a")
     assert f.phase is None and f.score is None
+
+
+def test_a_CDS_MUST_carry_a_phase():
+    """GFF3 requires it for CDS specifically; 0 of the corpus's 897,369 CDS lines omit it."""
+    with pytest.raises(gff3.Gff3Error, match="must carry a phase"):
+        _feature("ctg1\tx\tCDS\t10\t20\t.\t+\t.\tID=a")
 
 
 def test_refuses_a_score_that_is_neither_dot_nor_a_float():
@@ -379,6 +385,35 @@ def test_parse_gff3_document_requires_the_version_directive():
     """Any nine-column TSV would otherwise reach the annotation census as GFF3."""
     with pytest.raises(gff3.Gff3Error, match="not '##gff-version'"):
         gff3.parse_gff3_document(CDS_PLUS + "\n")
+
+
+def test_parse_gff3_document_refuses_a_directive_with_no_separator():
+    """``##gff-version3`` satisfies ``startswith`` and is not the required directive."""
+    with pytest.raises(gff3.Gff3Error, match="not '##gff-version'"):
+        gff3.parse_gff3_document("##gff-version3\n" + CDS_PLUS + "\n")
+
+
+def test_two_distinct_invalid_utf8_ids_do_not_decode_to_the_same_string():
+    """``errors="replace"`` maps both to U+FFFD, and ``group_cds`` then merges them."""
+    for escape in ("%FF", "%FE"):
+        with pytest.raises(gff3.Gff3Error, match="not valid UTF-8"):
+            gff3.unescape(escape)
+
+
+def test_a_stray_percent_is_refused_because_gff3_requires_it_escaped():
+    with pytest.raises(gff3.Gff3Error, match="malformed percent-escape"):
+        gff3.unescape("50% identity")
+    assert gff3.unescape("50%25 identity") == "50% identity"
+
+
+def test_valid_multibyte_percent_escapes_still_decode():
+    assert gff3.unescape("%CE%B2-lactamase") == "β-lactamase"
+
+
+def test_decode_gff3_bytes_handles_both_plain_and_gzipped_snapshots():
+    text = "##gff-version 3\n" + CDS_PLUS + "\n"
+    assert gff3.decode_gff3_bytes(text.encode("utf-8")) == text
+    assert gff3.decode_gff3_bytes(gzip.compress(text.encode("utf-8"))) == text
 
 
 def test_parse_gff3_document_refuses_a_non_gff3_version():
