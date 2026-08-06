@@ -684,6 +684,14 @@ def run_control(
     )
     scored = score_rows(model, rows, batch_size=batch_size, device=device)
     logits = np.asarray([r["tbox_logit"] for r in scored], dtype=np.float64)
+    if logits.size != len(rows):
+        # The same length guard `score_to_posteriors` applies before its join. Without it
+        # the indexing below raises IndexError, which `_cmd_control` does not convert into
+        # the named refusal — a traceback instead of a control that failed.
+        raise Stage2ProducerError(
+            f"scored {logits.size} rows for {len(rows)} control payloads — a control needs "
+            "both arms, and a short return would silently compare something else"
+        )
     payload = calibrated_posterior(logits, temperature=float(temperature))
     named = payload[payload["gated_posterior_key"]]
     positive_posterior, shuffle_posterior = float(named[0]), float(named[1])

@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import random
+import sys
 from pathlib import Path
 
 import numpy as np
@@ -644,6 +645,26 @@ def test_the_control_shuffle_is_matched_and_is_not_the_identity() -> None:
     )
 
 
+def test_run_control_refuses_a_short_scorer_return(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A control needs BOTH arms; a short return must not be indexed into.
+
+    Without the guard `named[1]` raises IndexError, which `_cmd_control` does not convert
+    into the named refusal — the operator gets a traceback rather than a control that
+    failed. Driven with a stub scorer so the check is exercised on the bare CI path.
+    """
+    monkeypatch.setattr(
+        SP,
+        "resolve_production_arm",
+        lambda **kwargs: {"arm": "a", "attn_implementation": None, "checkpoint_path": "unused"},
+    )
+    fake = type(sys)("tbox_finder.stage2.eval")
+    fake.load_stage2_checkpoint = lambda *a, **k: (object(), {})
+    fake.score_rows = lambda *a, **k: [{"row_id": "control_positive", "tbox_logit": 1.0}]
+    monkeypatch.setitem(sys.modules, "tbox_finder.stage2.eval", fake)
+    with pytest.raises(SP.Stage2ProducerError, match="a control needs both arms"):
+        SP.run_control(_CARRIER * 3, temperature=1.0, seed=1)
+
+
 def test_read_control_positive_selects_by_name_and_returns_the_recorded_sequence() -> None:
     """Never a ``Name``-derived coordinate slice ([[tbdb-name-coords-untrustworthy]])."""
     csv_path = SP.REPO_ROOT / "tests/fixtures/ingest_sample/Master_tboxes_sample.csv"
@@ -776,7 +797,9 @@ def test_a_control_certified_against_a_retrained_arm_does_not_inherit_green(
     tmp_path: Path,
 ) -> None:
     """The checkpoint bytes are DVC-tracked and absent in CI; the run report is not."""
-    fingerprint = dict(SP.sweep_fingerprint("aux1.0_lr1e-4"))
+    fingerprint = dict(
+        SP.sweep_fingerprint("aux1.0_lr1e-4", sweep_dir=SP.REPO_ROOT / SP.DEFAULT_SWEEP_DIR)
+    )
     fingerprint["saved_val_total"] = 0.123456
     _stage_evidence(tmp_path, control_overrides={"sweep_fingerprint": fingerprint})
     derived = SP.derive_stage2_supply_available(repo_root=tmp_path)
