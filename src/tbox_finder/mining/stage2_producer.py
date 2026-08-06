@@ -540,6 +540,15 @@ def merge_posterior_tables(
                     f"{path}: strand_posteriors[{cid!r}] is {type(per).__name__}, not a "
                     "strand → posterior mapping"
                 )
+            if cid in strand_posteriors:
+                # The `posteriors` loop refuses a cross-shard duplicate; this one silently
+                # replaced. The per-strand values are the AUDIT TRAIL for the emitted
+                # posterior (they are what makes `emitted == max(+, -)` checkable), so a
+                # silent replacement leaves the published number unverifiable.
+                raise Stage2ProducerError(
+                    f"candidate_id {cid!r} carries strand_posteriors in more than one shard "
+                    "table — one shard's per-strand audit record would be discarded"
+                )
             strand_posteriors[cid] = dict(per)
 
         shard_unresolved = table.get("unresolved") or []

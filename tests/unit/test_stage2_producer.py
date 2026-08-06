@@ -373,6 +373,20 @@ def test_a_config_naming_a_different_arm_than_gate2_fails_clause_2(tmp_path: Pat
     assert derived["available"] is False
 
 
+def test_merge_refuses_a_cross_shard_strand_posteriors_duplicate(tmp_path: Path) -> None:
+    """The per-strand map is the audit trail; a silent replace makes the emitted value
+    unverifiable."""
+    first = tmp_path / "a.json"
+    second = tmp_path / "b.json"
+    ta = _table({"c0": 0.5})
+    tb = _table({"c1": 0.5})
+    tb["strand_posteriors"] = {"c0": {"+": 0.1, "-": 0.9}}  # c0 belongs to shard A
+    first.write_text(json.dumps(ta), encoding="utf-8")
+    second.write_text(json.dumps(tb), encoding="utf-8")
+    with pytest.raises(SP.Stage2ProducerError, match="strand_posteriors in more than one shard"):
+        SP.merge_posterior_tables([first, second], n_candidates=2)
+
+
 def test_merge_refuses_a_candidate_claimed_by_two_shards(tmp_path: Path) -> None:
     tables = _write_tables(tmp_path, [{"c0": 0.5, "c1": 0.5}, {"c1": 0.9}])
     with pytest.raises(SP.Stage2ProducerError, match="appears in more than one shard"):
@@ -553,6 +567,13 @@ def test_no_module_in_src_hardcodes_the_fitted_temperature() -> None:
     # Guard against the pin becoming vacuous if the report is ever re-fitted to 1.0.
     assert fitted != 1.0
     needle = repr(float(fitted))[:10]
+    # …and against it becoming NON-SPECIFIC. A re-fit to a short value like 1.5 makes the
+    # needle "1.5", which matches unrelated digits all over src/ and fails the pin for a
+    # reason that has nothing to do with a hardcoded temperature.
+    assert len(needle) >= 8, (
+        f"the fitted temperature {fitted!r} is too short to search for specifically; "
+        "this pin would report unrelated files"
+    )
     offenders = [
         str(path.relative_to(SP.REPO_ROOT))
         for path in (SP.REPO_ROOT / "src").rglob("*.py")
