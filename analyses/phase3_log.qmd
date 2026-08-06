@@ -3435,7 +3435,7 @@ plus that same directory with its accession corrupted, which must not resolve.
 
 **Outputs.** `reports/p3/annotation_supply.json` (216 KB, git-tracked, no DVC object) —
 per-assembly status, GFF URL, GFF md5, GFF `Content-Length`, `_protein.faa.gz` presence, plus the
-counts, the control and the derived route. 86 unit tests. No ADR amendment, no value pinned, no
+counts, the control and the derived route. 89 unit tests. No ADR amendment, no value pinned, no
 SLURM job, LOCAL only.
 
 **Measured, all 660, zero unknown, control powered** (positive `GCF_000007185.1` → 16 files,
@@ -3558,7 +3558,30 @@ round — three independent 999-request sweeps on three different code versions 
 measured rows are byte-identical** every time. The only fields that move between runs are
 `generated_at_utc` and the provenance `git_sha`.
 
-**Validation.** 86 unit tests; **37 sabotages, 36 RED against their named test**, the 37th a
+**Review round 4 — and the worst finding in the whole step was in my own tests.** Three
+end-to-end tests **were making real HTTP requests to live NCBI**, directly contradicting this
+file's own docstring claim of *"no network"*: they passed `opener=` but not `header=`, and
+`measure_sizes` defaults on, so the size pass fell through to the real `_urlhead_length`.
+Nothing went red — a failed HEAD yields `None` and no assertion reads a size — so the cost was
+hidden runtime and offline flakiness behind a docstring asserting the opposite. **Verified by
+execution before fixing: 30 real requests, 45 s.** Two further minors, both the
+already-familiar shape: `payload["candidates"]` raises `KeyError` on an object lacking the key
+(exit 1 + traceback instead of exit 3 + the refusal), and a *conflicting* duplicate accession in
+`per_genome` silently overwrote the first, so the sweep would report whichever directory
+survived as that accession's evidence with no record a conflict existed — the mirror, at the
+load boundary, of the duplicate guard round 3 added one layer up.
+
+**⚠ The structural fix for the network leak was itself a no-op on the first attempt.** Patching
+the three call sites is not enough — the docstring's claim needs *enforcing*, so an autouse
+fixture now replaces both transport primitives with a raising stub. The first version raised
+`AssertionError` and **the suite still went to the network and still reported 89 passed**, in
+**22.66 s** instead of 0.17 s: the transport wraps its calls in `except Exception`, converts the
+failure to a retry and then to `None`, and so **swallowed the guard's own signal**. The stub now
+raises a `BaseException` subclass, which `except Exception` cannot absorb. Verified both ways by
+execution — with the guard armed and one `header=` injection removed, the suite goes RED in
+0.21 s naming the leaked URL. *A guard whose signal the subject can absorb is not a guard.*
+
+**Validation.** 89 unit tests; **39 sabotages, 38 RED against their named test**, the 39th a
 declared no-op control. The measurement was **re-run end-to-end on the reviewed code** and
 reproduced byte-identically — 339/321, 48/28, 68,855,450 B — on an independent second sweep of
 999 requests. Two of the original 23 did not bite first time and neither was noise: the
@@ -3568,8 +3591,8 @@ crash rather than on the named refusal (test now matches the message,
 [[raises-test-needs-a-positive-control]]); and the "never HEAD an unannotated host" property is
 defended **twice** (the annotated filter *and* `head_content_length`'s empty-URL early return), so
 neither edit alone could falsify it and the sabotage is declared compound. Full unit+golden
-**4,459 passed / 13 failed** against a matched baseline worktree at `8a82425` (**4,373 / 13**) —
-failure sets **identical**, `comm` empty both ways, and the +86 is exactly the new tests. ruff
+**4,462 passed / 13 failed** against a matched baseline worktree at `8a82425` (**4,373 / 13**) —
+failure sets **identical**, `comm` empty both ways, and the +89 is exactly the new tests. ruff
 0.15.15 + black 25.11.0 clean; no `.smk` touched. §6.4 fires on nothing (no README,
 `paper/manuscript.qmd` or ADR reference to the new API). The shipped refusal path was executed,
 not inferred: `measure --limit 5` exits **3** with `route=refused`, and the report it writes

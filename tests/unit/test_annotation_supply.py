@@ -62,6 +62,37 @@ from tbox_finder.mining.annotation_supply import (
     sibling_url,
 )
 
+
+class _NetworkAccess(BaseException):
+    """Raised when a test reaches the live network.
+
+    Deliberately a **BaseException**, not an ``Exception``. The transport helpers wrap their
+    calls in ``except Exception`` and convert a failure into a retry and then ``None``, so a
+    guard that raised ``AssertionError`` would be *swallowed by the very code it is guarding* —
+    measured: the suite still went to the network and still reported 89 passed, in 22.66 s
+    instead of 0.17 s. A guard whose signal the subject can absorb is not a guard.
+    """
+
+
+@pytest.fixture(autouse=True)
+def _no_network(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make this file's "no network" claim enforced rather than asserted.
+
+    Three end-to-end tests here *were* reaching live NCBI: they passed ``opener=`` but not
+    ``header=``, and ``measure_sizes`` defaults on, so the size pass fell through to the real
+    ``_urlhead_length``. Measured before fixing: **30 real requests, 45 s**. Nothing went red —
+    a failed HEAD yields ``None`` and no assertion reads a size — so the cost was hidden
+    runtime and offline flakiness behind a docstring that said the opposite. A prose claim that
+    nothing enforces is exactly the shape this suite exists to refuse.
+    """
+
+    def _forbidden(url: str) -> object:
+        raise _NetworkAccess(f"test reached the live network: {url}")
+
+    monkeypatch.setattr(asup, "_urlhead_length", _forbidden)
+    monkeypatch.setattr(asup, "_urlopen_text", _forbidden)
+
+
 BASE = "https://ftp.ncbi.nlm.nih.gov/genomes/all/GCA/000/296/795/GCA_000296795.1_ASM29679v1"
 FNA_URL = f"{BASE}/GCA_000296795.1_ASM29679v1_genomic.fna.gz"
 BASENAME = "GCA_000296795.1_ASM29679v1"
@@ -330,6 +361,43 @@ def test_load_source_urls_refuses_a_non_object_root(tmp_path: Path, payload: str
     p.write_text(payload)
     with pytest.raises(AnnotationSupplyError):
         load_source_urls(p)
+
+
+def test_candidate_host_accessions_refuses_a_mapping_without_candidates(tmp_path: Path) -> None:
+    """``payload["candidates"]`` on an object that lacks the key is a ``KeyError`` — exit 1 with
+    a traceback, not exit 3 with the refusal. ``load_source_urls`` already uses ``.get`` for
+    exactly this reason."""
+    p = tmp_path / "fp.json"
+    p.write_text(json.dumps({"n_candidates": 0, "schema_version": "1.0"}))
+    with pytest.raises(AnnotationSupplyError):
+        candidate_host_accessions(p)
+
+
+def test_load_source_urls_refuses_a_conflicting_duplicate_accession(tmp_path: Path) -> None:
+    """Two ``ok`` rows for one accession with different URLs: the last silently wins, and the
+    sweep then reports whichever directory survived as that accession's evidence with no record
+    a conflict existed. ``probe_assembly``'s basename check cannot catch it — both rows share
+    the accession prefix and differ only in the assembly-name part."""
+    rows = [
+        {"assembly_accession": "GCA_000296795.1", "status": "ok", "source_url": FNA_URL},
+        {
+            "assembly_accession": "GCA_000296795.1",
+            "status": "ok",
+            "source_url": FNA_URL.replace("ASM29679v1", "ASM29679v2"),
+        },
+    ]
+    p = tmp_path / "rep.json"
+    p.write_text(json.dumps({"per_genome": rows}))
+    with pytest.raises(AnnotationSupplyError, match="conflicting source_url"):
+        load_source_urls(p)
+
+
+def test_load_source_urls_tolerates_an_identical_repeat(tmp_path: Path) -> None:
+    """A byte-identical repeat discards nothing, so it is not a conflict."""
+    row = {"assembly_accession": "GCA_000296795.1", "status": "ok", "source_url": FNA_URL}
+    p = tmp_path / "rep.json"
+    p.write_text(json.dumps({"per_genome": [row, dict(row)]}))
+    assert load_source_urls(p) == {"GCA_000296795.1": FNA_URL}
 
 
 @pytest.mark.parametrize("row", ["not-a-mapping", 7, None, {"score": 1.0}])
@@ -669,6 +737,7 @@ def test_measure_end_to_end_all_annotated_routes_to_ncbi_gff() -> None:
         source_urls=urls,
         workers=1,
         opener=_Opener(bodies),
+        header=lambda _u: 1000,
     )
     assert rep["sweep_complete"] is True
     assert rep["admissible_status_counts"][STATUS_ANNOTATED] == 5
@@ -687,6 +756,7 @@ def test_measure_end_to_end_mixed_reports_both_denominators() -> None:
         source_urls=urls,
         workers=1,
         opener=_Opener(bodies),
+        header=lambda _u: 1000,
     )
     assert rep["admissible_status_counts"] == {
         STATUS_ANNOTATED: 3,
@@ -706,6 +776,7 @@ def test_measure_with_limit_cannot_certify() -> None:
         source_urls=urls,
         workers=1,
         opener=_Opener(bodies),
+        header=lambda _u: 1000,
         limit=2,
     )
     assert rep["n_probed"] == 2 and rep["sweep_complete"] is False

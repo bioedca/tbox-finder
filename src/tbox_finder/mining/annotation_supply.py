@@ -283,6 +283,12 @@ def load_source_urls(
             continue
         if not ACCESSION_RE.fullmatch(acc):
             raise AnnotationSupplyError(f"{fetch_report}: malformed accession {acc!r}")
+        if acc in out and out[acc] != url:
+            raise AnnotationSupplyError(
+                f"{fetch_report}: accession {acc} carries conflicting source_url values — "
+                "one would be silently discarded and the sweep would report the surviving "
+                "directory as this accession's evidence with no record of the conflict"
+            )
         out[acc] = url
     if not out:
         raise AnnotationSupplyError(f"{fetch_report}: no ok row carries a source_url")
@@ -298,7 +304,7 @@ def candidate_host_accessions(fp_manifest: str | Path) -> list[str]:
     to make impossible: it inflates the host count from 76 to 228.
     """
     payload = json.loads(Path(fp_manifest).read_text(encoding="utf-8"))
-    rows = payload["candidates"] if isinstance(payload, Mapping) else payload
+    rows = payload.get("candidates") if isinstance(payload, Mapping) else payload
     if not isinstance(rows, list) or not rows:
         raise AnnotationSupplyError(f"{fp_manifest}: no candidates")
     out: set[str] = set()
