@@ -665,6 +665,33 @@ def test_run_control_refuses_a_short_scorer_return(monkeypatch: pytest.MonkeyPat
         SP.run_control(_CARRIER * 3, temperature=1.0, seed=1)
 
 
+@pytest.mark.parametrize("record", [None, {}, {"adapter_sha256": "abc"}, {"heads_sha256": "abc"}])
+def test_run_control_refuses_a_loader_that_named_no_checkpoint(
+    monkeypatch: pytest.MonkeyPatch, record: object
+) -> None:
+    """A control with no checkpoint hashes is not evidence for any checkpoint.
+
+    `control_matches_this_calibration` reads exactly those two fields, so writing them as
+    nulls would defer the failure a layer and report it with a vaguer cause — and an
+    unguarded `.get` on a `None` record raises AttributeError, which `_cmd_control` turns
+    into a traceback rather than a control that failed.
+    """
+    monkeypatch.setattr(
+        SP,
+        "resolve_production_arm",
+        lambda **kwargs: {"arm": "a", "attn_implementation": None, "checkpoint_path": "unused"},
+    )
+    fake = type(sys)("tbox_finder.stage2.eval")
+    fake.load_stage2_checkpoint = lambda *a, **k: (object(), record)
+    fake.score_rows = lambda *a, rows=None, **k: [
+        {"row_id": "control_positive", "tbox_logit": 9.0},
+        {"row_id": "control_shuffle", "tbox_logit": -9.0},
+    ]
+    monkeypatch.setitem(sys.modules, "tbox_finder.stage2.eval", fake)
+    with pytest.raises(SP.Stage2ProducerError, match="cannot name the bytes"):
+        SP.run_control(_CARRIER * 3, temperature=1.0, seed=1)
+
+
 def test_read_control_positive_selects_by_name_and_returns_the_recorded_sequence() -> None:
     """Never a ``Name``-derived coordinate slice ([[tbdb-name-coords-untrustworthy]])."""
     csv_path = SP.REPO_ROOT / "tests/fixtures/ingest_sample/Master_tboxes_sample.csv"

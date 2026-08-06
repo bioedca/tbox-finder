@@ -696,6 +696,20 @@ def run_control(
     named = payload[payload["gated_posterior_key"]]
     positive_posterior, shuffle_posterior = float(named[0]), float(named[1])
 
+    # `build_table` types the load record as optional, so this must not assume otherwise —
+    # an unguarded `.get` raises AttributeError, which `_cmd_control` turns into a
+    # traceback rather than a control that failed. And a control with no checkpoint hashes
+    # cannot be tied to the bytes it was earned against, which is exactly what
+    # `control_matches_this_calibration` reads, so it is refused by name rather than
+    # written as a null that would fail that clause one layer later with a vaguer reason.
+    record = load_record or {}
+    missing_hashes = [k for k in ("adapter_sha256", "heads_sha256") if not record.get(k)]
+    if missing_hashes:
+        raise Stage2ProducerError(
+            f"the checkpoint loader reported no {missing_hashes} — a control that cannot "
+            "name the bytes it was earned against is not evidence for any checkpoint"
+        )
+
     flags = control_flags(positive_sequence, shuffled)
     green = (
         positive_posterior >= CONTROL_MIN_POSITIVE
@@ -725,8 +739,8 @@ def run_control(
             "min_margin": CONTROL_MIN_MARGIN,
         },
         "flags": flags,
-        "adapter_sha256": load_record.get("adapter_sha256"),
-        "heads_sha256": load_record.get("heads_sha256"),
+        "adapter_sha256": record["adapter_sha256"],
+        "heads_sha256": record["heads_sha256"],
         "green": green,
     }
 
