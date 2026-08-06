@@ -82,6 +82,22 @@ def _skip_or_fail(message: str) -> None:
 _STACK = ("torch", "peft", "safetensors", "multimolecule")
 
 
+def _ckpt_root() -> Path | str:
+    """Where the DVC-materialised checkpoints actually are.
+
+    ⚠ Deliberately NOT ``_REPO / DEFAULT_CKPT_ROOT``, unlike the sweep reports. The sweep
+    reports are git-tracked and ride every checkout, so anchoring them on this file's repo
+    is what makes them CWD-independent. The checkpoints are **DVC-tracked**: they are
+    materialised in the main checkout and are absent from a linked worktree — which
+    ``eval.discover_arms`` records in its own comment ("the DVC-materialised checkpoints
+    live in the main checkout, not in a linked worktree"). Anchoring them on ``_REPO``
+    therefore turns a runnable gate into four hard failures when the tests are run from a
+    worktree. ``TBOX_STAGE2_CKPT_ROOT`` overrides; the default stays CWD-relative, which is
+    how the run is actually invoked from the main checkout.
+    """
+    return os.environ.get("TBOX_STAGE2_CKPT_ROOT") or SP.DEFAULT_CKPT_ROOT
+
+
 def _need_stack() -> dict:
     """The whole GPU stack and the checkpoint, or a skip/fail. Never a silent pass."""
     import importlib.util
@@ -90,7 +106,10 @@ def _need_stack() -> dict:
     if missing:
         _skip_or_fail(f"the Stage-2 stack is incomplete here: {missing} not importable")
     try:
-        return SP.resolve_production_arm()
+        return SP.resolve_production_arm(
+            checkpoint_root=_ckpt_root(),
+            sweep_dir=_REPO / SP.DEFAULT_SWEEP_DIR,
+        )
     except (FileNotFoundError, ValueError) as exc:
         _skip_or_fail(f"the Stage-2 production arm is not resolvable here: {exc}")
         raise  # pragma: no cover - _skip_or_fail always raises
@@ -147,7 +166,9 @@ def test_the_committed_control_names_the_calibration_that_ships_today() -> None:
     """A re-fit temperature or a re-trained arm must not inherit this green."""
     record = _committed()
     assert record["temperature"] == read_temperature(_GATE2_REPORT)
-    assert record["sweep_fingerprint"] == SP.sweep_fingerprint(record["arm"])
+    assert record["sweep_fingerprint"] == SP.sweep_fingerprint(
+        record["arm"], sweep_dir=_REPO / SP.DEFAULT_SWEEP_DIR
+    )
     assert json.loads(_GATE2_REPORT.read_text(encoding="utf-8"))["scoring"]["arm"] == record["arm"]
 
 
@@ -187,6 +208,8 @@ def test_gate_designed_control_fires_on_the_checkpoint_on_disk() -> None:
         temperature=read_temperature(_GATE2_REPORT),
         seed=committed["seed"],
         device=_device(),
+        checkpoint_root=_ckpt_root(),
+        sweep_dir=_REPO / SP.DEFAULT_SWEEP_DIR,
     )
 
     # (1) it fires
@@ -229,6 +252,8 @@ def test_run_control_reports_a_POWERLESS_null_as_powerless() -> None:
         temperature=read_temperature(_GATE2_REPORT),
         seed=1,
         device=_device(),
+        checkpoint_root=_ckpt_root(),
+        sweep_dir=_REPO / SP.DEFAULT_SWEEP_DIR,
     )
     assert degenerate["flags"]["shuffle_differs_from_positive"] is False
     assert degenerate["green"] is False, "a null identical to its positive certified anyway"
@@ -244,6 +269,8 @@ def test_the_committed_record_reproduces_on_this_checkpoint() -> None:
         temperature=read_temperature(_GATE2_REPORT),
         seed=committed["seed"],
         device=_device(),
+        checkpoint_root=_ckpt_root(),
+        sweep_dir=_REPO / SP.DEFAULT_SWEEP_DIR,
     )
     for key in ("positive_posterior", "shuffle_posterior"):
         assert fresh[key] == pytest.approx(committed[key], abs=_POSTERIOR_TOL), key
@@ -268,7 +295,10 @@ def test_the_producer_scores_both_strands_of_a_real_locus_and_the_policy_picks_o
     from tbox_finder.stage2.eval import load_stage2_checkpoint, score_rows
 
     device = _device()
-    arm = SP.resolve_production_arm()
+    arm = SP.resolve_production_arm(
+        checkpoint_root=_ckpt_root(),
+        sweep_dir=_REPO / SP.DEFAULT_SWEEP_DIR,
+    )
     model, _record = load_stage2_checkpoint(
         arm["checkpoint_path"],
         device=device,

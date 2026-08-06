@@ -289,6 +289,66 @@ def test_merge_refuses_a_truncated_run_and_accepts_a_complete_one(tmp_path: Path
     assert merged["n_shards"] == 2
 
 
+@pytest.mark.parametrize(
+    ("value", "label"), [(True, "bool"), ("0.5", "str"), (None, "null"), ([0.5], "list")]
+)
+def test_merge_validates_the_RAW_value_before_coercing(
+    tmp_path: Path, value: object, label: str
+) -> None:
+    """Coercing first launders exactly the types the validator rejects by name.
+
+    Reproduced before the fix: ``true`` merged as ``1.0`` and ``"0.5"`` as ``0.5`` — both
+    certified, because ``validate_posteriors`` only ever saw the coerced map. ``None``
+    raised a bare ``TypeError``, which ``_cmd_merge`` does not catch, so the operator got
+    a traceback and a generic exit code instead of the named refusal and exit 3.
+    """
+    path = tmp_path / f"{label}.json"
+    path.write_text(json.dumps(_table({"c0": value})), encoding="utf-8")
+    with pytest.raises(SP.Stage2ProducerError, match="not a real number"):
+        SP.merge_posterior_tables([path], n_candidates=1)
+
+
+def test_the_config_and_the_graded_arm_must_name_the_SAME_checkpoint() -> None:
+    """Clause 2 enforces the identity its docstring claims, not just the (aux, lr) pair.
+
+    Comparing the pair of the arm GATE-2 names against that same arm's report is nearly a
+    tautology: it cannot notice that ``conf/`` would select a *different* arm than the one
+    graded. The arm NAME is resolved from the sweep reports and must match.
+    """
+    from tbox_finder.stage2.eval import production_arm_config
+
+    selected = SP.arms_matching_config(
+        production_arm_config(), sweep_dir=SP.REPO_ROOT / SP.DEFAULT_SWEEP_DIR
+    )
+    assert selected == ["aux1.0_lr1e-4"], selected
+    graded = json.loads((SP.REPO_ROOT / SP.DEFAULT_GATE2_REPORT).read_text(encoding="utf-8"))[
+        "scoring"
+    ]["arm"]
+    assert selected == [graded]
+    # A config matching NO arm must come back empty rather than resolving to something.
+    assert (
+        SP.arms_matching_config(
+            {"aux_weight": 0.25, "lr": 7e-4}, sweep_dir=SP.REPO_ROOT / SP.DEFAULT_SWEEP_DIR
+        )
+        == []
+    )
+
+
+def test_a_config_naming_a_different_arm_than_gate2_fails_clause_2(tmp_path: Path) -> None:
+    """The graded arm and the shipped configuration must not name different checkpoints."""
+    _stage_evidence(tmp_path)
+    gate2 = json.loads((tmp_path / SP.DEFAULT_GATE2_REPORT).read_text(encoding="utf-8"))
+    gate2["scoring"] = {**gate2["scoring"], "arm": "aux0.0_lr1e-4"}
+    (tmp_path / SP.DEFAULT_GATE2_REPORT).write_text(json.dumps(gate2), encoding="utf-8")
+    for arm in ("aux0.0_lr1e-4",):
+        (tmp_path / "reports/p3/sweep" / f"{arm}.json").write_bytes(
+            (SP.REPO_ROOT / "reports/p3/sweep" / f"{arm}.json").read_bytes()
+        )
+    derived = SP.derive_stage2_supply_available(repo_root=tmp_path)
+    assert derived["clauses"]["production_arm_on_record"] is False
+    assert derived["available"] is False
+
+
 def test_merge_refuses_a_candidate_claimed_by_two_shards(tmp_path: Path) -> None:
     tables = _write_tables(tmp_path, [{"c0": 0.5, "c1": 0.5}, {"c1": 0.9}])
     with pytest.raises(SP.Stage2ProducerError, match="appears in more than one shard"):
@@ -584,16 +644,27 @@ def test_a_clause_that_never_reports_a_verdict_refuses(
     """An ABSENT clause must not read as a passing one.
 
     ``all(...)`` skips what is not in the map, so a branch that never runs is a silently
-    satisfied clause. Reproduced by execution before the fix: with
-    ``production_arm_config()`` returning ``None`` while ``sweep_fingerprint`` succeeded,
-    neither branch set ``production_arm_on_record`` and the derivation returned
-    ``available: True`` on five of six clauses ([[clauses-must-guard-emptiness]]).
+    satisfied clause ([[clauses-must-guard-emptiness]]). Exercised on the BACKSTOP itself
+    — a clause name the body never sets — rather than through a specific code path: the
+    route that originally produced this (``production_arm_config()`` returning ``None``)
+    has since been closed at its source, and a test aimed at a path that can no longer be
+    reached measures nothing.
     """
+    monkeypatch.setattr(SP, "SUPPLY_CLAUSES", (*SP.SUPPLY_CLAUSES, "a_clause_nothing_sets"))
+    derived = SP.derive_stage2_supply_available()
+    assert derived["clauses"]["a_clause_nothing_sets"] is False
+    assert any("did not report a verdict" in reason for reason in derived["reasons"])
+    assert derived["available"] is False
+
+
+def test_an_unresolvable_production_arm_fails_its_clause(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The route that used to skip the clause entirely now refuses through it."""
     monkeypatch.setattr(SP, "production_arm_config", lambda **kwargs: None)
     derived = SP.derive_stage2_supply_available()
     assert set(derived["clauses"]) == set(_CLAUSES), "a clause vanished from the map"
     assert derived["clauses"]["production_arm_on_record"] is False
-    assert any("did not report a verdict" in reason for reason in derived["reasons"])
     assert derived["available"] is False
 
 

@@ -496,6 +496,16 @@ def merge_posterior_tables(
                     f"candidate_id {cid!r} appears in more than one shard table — shards "
                     "must partition the manifest, so one of the two values would be lost"
                 )
+            if not _is_real_number(value):
+                # Validated BEFORE coercion. `validate_posteriors` runs on the merged map,
+                # so coercing first launders the very types it rejects by name: `true`
+                # becomes 1.0 and "0.5" becomes 0.5, both certifying. And `float(None)` /
+                # `float("abc")` raise TypeError/ValueError, which `_cmd_merge` does not
+                # catch — a traceback and a generic exit code instead of the named refusal
+                # and exit 3 the sbatch branches on.
+                raise Stage2ProducerError(
+                    f"{path}: posterior for {cid!r} is not a real number ({value!r})"
+                )
             merged[cid] = float(value)
         strand_posteriors.update(
             {k: dict(v) for k, v in (table.get("strand_posteriors") or {}).items()}
@@ -668,6 +678,27 @@ def run_control(
     }
 
 
+def arms_matching_config(
+    production: Mapping[str, float], *, sweep_dir: str | Path = DEFAULT_SWEEP_DIR
+) -> list[str]:
+    """Every arm whose own run report matches ``production``'s ``(aux_weight, lr)``.
+
+    Reads the git-tracked sweep reports directly rather than through
+    ``eval.discover_arms``, which requires the DVC-tracked checkpoint ROOT to exist and is
+    therefore False-in-CI. Returned as a list so a configuration matching two arms (or
+    none) is visible to the caller instead of silently resolving to one.
+    """
+    matches = []
+    for path in sorted(Path(sweep_dir).glob("*.json")):
+        report = json.loads(path.read_text(encoding="utf-8"))
+        config = report.get("config") or {}
+        if (config.get("loss") or {}).get("aux_weight") == production.get(
+            "aux_weight"
+        ) and config.get("lr") == production.get("lr"):
+            matches.append(path.stem)
+    return matches
+
+
 def sweep_fingerprint(arm: str, *, sweep_dir: str | Path = DEFAULT_SWEEP_DIR) -> dict[str, Any]:
     """The git-tracked identity of an arm's training run.
 
@@ -772,9 +803,14 @@ def derive_stage2_supply_available(*, repo_root: str | Path | None = None) -> di
     try:
         production = production_arm_config()
         fingerprint = sweep_fingerprint(str(scored_arm), sweep_dir=root / DEFAULT_SWEEP_DIR)
+        # The arm NAME conf/ would select, not merely the (aux_weight, lr) of the arm
+        # GATE-2 happens to name: without this the clause compared a pair to itself and
+        # could not notice that conf/ selects a *different* arm than the one graded.
+        selected = arms_matching_config(production, sweep_dir=root / DEFAULT_SWEEP_DIR)
     except Exception as exc:  # noqa: BLE001 - unreadable evidence is a FAILED clause
         fingerprint = None
         production = None
+        selected = None
         clauses["production_arm_on_record"] = _fail(
             "production_arm_on_record", f"could not read the arm's own run report: {exc!r}"
         )
@@ -784,14 +820,19 @@ def derive_stage2_supply_available(*, repo_root: str | Path | None = None) -> di
             for key in ("aux_weight", "lr")
             if fingerprint.get(key) != production.get(key)
         ]
-        clauses["production_arm_on_record"] = (
-            True
-            if not mismatched
-            else _fail(
+        if mismatched:
+            clauses["production_arm_on_record"] = _fail(
                 "production_arm_on_record",
                 f"arm {scored_arm!r} disagrees with conf/: {'; '.join(mismatched)}",
             )
-        )
+        elif selected != [scored_arm]:
+            clauses["production_arm_on_record"] = _fail(
+                "production_arm_on_record",
+                f"conf/ selects {selected!r} but GATE-2 scored {scored_arm!r} — the graded "
+                "arm and the shipped configuration name different checkpoints",
+            )
+        else:
+            clauses["production_arm_on_record"] = True
 
     # ── clause 3: the producer ships ─────────────────────────────────────────
     try:
