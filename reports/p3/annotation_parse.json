@@ -5100,10 +5100,10 @@
     "extra": {
       "annotation_dir": "data/interim/production_annotations"
     },
-    "generated_at_utc": "2026-08-06T21:43:12.255731+00:00",
-    "git_sha": "65a817b577d870e8399dd9fabb7f230b1fce3309",
+    "generated_at_utc": "2026-08-06T21:50:02.147415+00:00",
+    "git_sha": "6bf4f205429b7b5b00f9481faf40640ba9210f1b",
     "inputs": {
-      "reports/p3/annotation_fetch.json": "44fcde5431121c9c05179846177aff869e565886ebe91c0f8064646050fd5003",
+      "reports/p3/annotation_fetch.json": "3ea3c38a10bca8bb69422a5639a39c3f3f4900179f38eb73cb511f3277bbff19",
       "reports/p3/annotation_supply.json": "73390dc509e0fde41758c63d69d2c2bd1d9a3a1ba01285e953c4d6c53a96b539"
     },
     "outputs": {},

@@ -137,6 +137,7 @@ REQUIRED_CLAUSES: frozenset[str] = frozenset(
         "bytes_total_matches_supply_report",
         "path_binds_to_accession",
         "control_powered",
+        "corpus_digest_rederives",
         "no_orphans",
     }
 )
@@ -489,6 +490,9 @@ def validate_fetch_report(report: Mapping[str, Any]) -> list[str]:
     except AnnotationFetchError:
         clauses["path_binds_to_accession"] = False
     control = report.get("control")
+    clauses["corpus_digest_rederives"] = report.get("corpus_digest") == corpus_digest(
+        (str(r.get("accession", "")), str(r.get("observed_md5", ""))) for r in ok_rows
+    )
     clauses["control_powered"] = isinstance(control, Mapping) and control_is_powered(control)
     clauses["no_orphans"] = report.get("orphans") == []
 
@@ -746,7 +750,7 @@ def parse_census(
             continue
         try:
             text = gff3.read_gff3_text(path)
-            cds = gff3.parse_gff3_cds(text.splitlines())
+            cds = gff3.parse_gff3_document(text)
         except (gff3.Gff3Error, OSError, UnicodeDecodeError) as exc:
             rows.append({**row, "ok": False, "note": f"{type(exc).__name__}: {exc}"[:200]})
             continue
@@ -774,20 +778,27 @@ def parse_census(
     # rather than assumed: a census run BEFORE its fetch parses a previous state of the
     # directory and, on timestamps alone, looks indistinguishable from one run after.
     observed = corpus_digest((str(r["accession"]), str(r.get("observed_md5", ""))) for r in ok_rows)
+    # Validate the fetch report before trusting anything in it. Reading ``corpus_digest``
+    # alone lets a hand-edited report declare whatever the census just computed, and the
+    # binding then certifies itself — the digest has to be re-derived from the rows, which is
+    # what ``validate_fetch_report``'s ``corpus_digest_rederives`` clause does.
+    declared = ""
     try:
-        declared = str(read_supply_report(fetch_report).get("corpus_digest", ""))
-    except AnnotationFetchError:
-        declared = ""
-    # The *reason* is reported, not just the verdict. Without it, "no fetch report was found"
-    # and "the corpora differ" collapse into one False and the `bool(declared)` half of the
-    # check becomes unfalsifiable — a clause that cannot change any outcome, which is the shape
-    # this module's own control had to be rebuilt to escape.
-    if not declared:
-        reason = "the fetch report declares no corpus_digest"
-    elif declared != observed:
-        reason = "the fetch report certifies a different corpus"
+        fetch_payload = read_supply_report(fetch_report)
+    except AnnotationFetchError as exc:
+        reason = f"the fetch report is unreadable: {exc}"
     else:
-        reason = "ok"
+        # Every clause, not just the digest field. Reading ``corpus_digest`` out of an
+        # unvalidated report lets a hand-edited one declare whatever the census just computed,
+        # and the binding then certifies itself.
+        problems = validate_fetch_report(fetch_payload)
+        if problems:
+            reason = f"the fetch report does not validate: {'; '.join(problems)}"
+        else:
+            declared = str(fetch_payload.get("corpus_digest", ""))
+            reason = (
+                "ok" if declared == observed else "the fetch report certifies a different corpus"
+            )
     return {
         "schema_version": SCHEMA_VERSION,
         "step": STEP,

@@ -78,8 +78,10 @@ __all__ = [
     "iter_gff3_features",
     "parse_attributes",
     "parse_gff3_cds",
+    "parse_gff3_document",
     "parse_gff3_line",
     "read_gff3_text",
+    "require_gff3_version",
     "unescape",
 ]
 
@@ -356,11 +358,13 @@ def group_cds(features: Iterable[GffFeature]) -> list[CdsFeature]:
                     f"CDS {key!r} carries two strands: {head.strand!r} and {other.strand!r}"
                 )
         segments = tuple((f.start, f.end) for f in group)
+        # Append, never first-wins: a ``pseudo=true`` or a ``product=`` written only on the
+        # SECOND row of a frameshifted CDS would otherwise be discarded here — which would
+        # silently undo ``is_pseudo``'s read-every-value fix one layer up.
         merged: dict[str, tuple[str, ...]] = {}
         for feature in group:
             for attr_key, values in feature.attributes.items():
-                if attr_key not in merged:
-                    merged[attr_key] = values
+                merged[attr_key] = merged.get(attr_key, ()) + values
         out.append(
             CdsFeature(
                 seqid=head.seqid,
@@ -378,6 +382,39 @@ def group_cds(features: Iterable[GffFeature]) -> list[CdsFeature]:
 def parse_gff3_cds(lines: Iterable[str]) -> list[CdsFeature]:
     """GFF3 lines → the file's CDS features, multi-row IDs merged. The module's entry point."""
     return group_cds(iter_gff3_features(lines, types={CDS_TYPE}))
+
+
+def require_gff3_version(lines: Sequence[str]) -> str:
+    """The declared GFF3 version, or a refusal. ``##gff-version 3`` must come first.
+
+    The spec makes this line mandatory and first. Without the check, any nine-column TSV
+    parses as GFF3 and reaches the annotation census — which matters more once the commissioned
+    bakta/prokka arm starts feeding files this repo did not fetch from NCBI.
+    """
+    for raw in lines:
+        line = raw.strip()
+        if not line:
+            continue
+        if not line.startswith(GFF_VERSION_DIRECTIVE):
+            raise Gff3Error(f"first non-blank line is not {GFF_VERSION_DIRECTIVE!r}: {line[:80]!r}")
+        version = line[len(GFF_VERSION_DIRECTIVE) :].strip()
+        major = version.split(".", 1)[0]
+        if major != "3":
+            raise Gff3Error(f"unsupported GFF version {version!r}; this reader parses GFF3")
+        return version
+    raise Gff3Error(f"empty document: no {GFF_VERSION_DIRECTIVE!r} line")
+
+
+def parse_gff3_document(text: str) -> list[CdsFeature]:
+    """The **strict** entry point: require ``##gff-version 3``, then return the CDS features.
+
+    :func:`parse_gff3_cds` stays line-level and lenient — it is what the unit tests drive with
+    bare feature lines. Anything reading a *file* goes through here, so an undeclared document
+    is refused rather than parsed on the strength of having nine columns.
+    """
+    lines = text.splitlines()
+    require_gff3_version(lines)
+    return parse_gff3_cds(lines)
 
 
 def read_gff3_text(path: str | Path) -> str:

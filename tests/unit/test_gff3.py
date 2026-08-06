@@ -375,6 +375,53 @@ def test_an_empty_ID_attribute_is_treated_as_undeclared():
     assert len(gff3.parse_gff3_cds(lines)) == 2
 
 
+def test_parse_gff3_document_requires_the_version_directive():
+    """Any nine-column TSV would otherwise reach the annotation census as GFF3."""
+    with pytest.raises(gff3.Gff3Error, match="not '##gff-version'"):
+        gff3.parse_gff3_document(CDS_PLUS + "\n")
+
+
+def test_parse_gff3_document_refuses_a_non_gff3_version():
+    with pytest.raises(gff3.Gff3Error, match="unsupported GFF version"):
+        gff3.parse_gff3_document("##gff-version 2\n" + CDS_PLUS + "\n")
+
+
+def test_parse_gff3_document_refuses_an_empty_document():
+    with pytest.raises(gff3.Gff3Error, match="empty document"):
+        gff3.parse_gff3_document("\n  \n")
+
+
+def test_parse_gff3_document_accepts_a_declared_document_and_a_minor_version():
+    assert len(gff3.parse_gff3_document("##gff-version 3\n" + CDS_PLUS + "\n")) == 1
+    assert len(gff3.parse_gff3_document("##gff-version 3.1.26\n" + CDS_PLUS + "\n")) == 1
+
+
+def test_parse_gff3_document_refuses_a_directive_that_is_not_first():
+    with pytest.raises(gff3.Gff3Error, match="not '##gff-version'"):
+        gff3.parse_gff3_document(CDS_PLUS + "\n##gff-version 3\n")
+
+
+def test_the_real_fixture_is_a_declared_gff3_document():
+    assert gff3.require_gff3_version(gff3.read_gff3_text(FIXTURE).splitlines()) == "3"
+    assert len(gff3.parse_gff3_document(gff3.read_gff3_text(FIXTURE))) == 455
+
+
+def test_attributes_from_EVERY_segment_survive_the_merge():
+    """A flag written only on the second row of a frameshifted CDS must not be discarded.
+
+    First-wins merging would silently undo ``is_pseudo``'s read-every-value contract one
+    layer up: the CDS would carry no ``pseudo`` at all and be read as a normal gene.
+    """
+    lines = [
+        "ctg1\tx\tCDS\t10\t20\t.\t+\t0\tID=cds-A;product=first",
+        "ctg1\tx\tCDS\t30\t40\t.\t+\t0\tID=cds-A;product=second;pseudo=true",
+    ]
+    (c,) = gff3.parse_gff3_cds(lines)
+    assert c.attributes["product"] == ("first", "second")
+    assert gff3.is_pseudo(c) is True
+    assert gff3.attribute_first(c.attributes, "product") == "first"
+
+
 def test_merged_attributes_keep_the_first_rows_value():
     lines = [
         "ctg1\tx\tCDS\t10\t20\t.\t+\t0\tID=cds-A;product=first",

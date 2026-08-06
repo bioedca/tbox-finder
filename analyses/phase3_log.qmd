@@ -3746,3 +3746,24 @@ missing run is an **absence, not a pass** — the same rule §5.1 records for a 
 rate-limit notice — so the PR is left open rather than merged. Locally the CI-exact tooling was
 run in full: ruff 0.15.15 + black 25.11.0 clean, and the whole unit+golden tier green against
 the matched baseline.
+
+**Review round 3 — two findings that made the parser stricter, and one that closed a
+self-certification loop.** (1) `iter_gff3_features` *skipped* `##gff-version` instead of
+requiring it, so any nine-column TSV parsed as GFF3. A strict `parse_gff3_document` now
+requires the directive first and refuses an unsupported major version; the census uses it,
+while the line-level `parse_gff3_cds` stays lenient for the unit tests that drive it with bare
+feature lines. All **339** real NCBI files pass the new check. (2) Merging a multi-row CDS was
+**first-wins**, so a `pseudo=true` or `product=` written only on the *second* row of a
+frameshifted CDS was discarded — which would have silently undone `is_pseudo`'s
+read-every-value contract one layer up, leaving the CDS with no `pseudo` at all. Values now
+append in segment order. (3) The census read `corpus_digest` out of the fetch report **without
+validating it**, so a hand-edited report could declare whatever the census had just computed
+and the binding would certify itself; `validate_fetch_report` now re-derives the digest from
+its own rows as a clause, and the census refuses any fetch report that fails *any* clause.
+The corpus census is unchanged by all three (897,096 CDS / 11,671 pseudo / 273 multi-segment),
+so the stricter reader accepts exactly the same real corpus.
+
+**Final validation.** **76 sabotages, 74 RED against their named test**, 2 declared no-op
+controls. Full unit+golden **4,447 passed / 13 failed** vs the matched baseline at `2be5ff4`
+(**4,242 / 13**) — failure sets **identical**, `comm` empty both ways. ruff 0.15.15 + black
+25.11.0 clean.

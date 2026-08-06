@@ -902,13 +902,32 @@ def test_a_census_of_a_DIFFERENT_corpus_than_the_fetch_certified_is_refused(tmp_
     (accession, md5) pairs can, and it is compared rather than assumed.
     """
     path, ann, fetch_path, _payload = _acquire(tmp_path)
-    stale = json.loads(fetch_path.read_text(encoding="utf-8"))
-    stale["corpus_digest"] = "0" * 64
-    fetch_path.write_text(json.dumps(stale), encoding="utf-8")
+    # A *self-consistent* fetch report describing other bytes: its digest still re-derives
+    # from its own rows, so it passes validation and the mismatch is the only thing left to
+    # catch it. Tampering with corpus_digest ALONE is caught one layer earlier — see below.
+    other = json.loads(fetch_path.read_text(encoding="utf-8"))
+    other_md5 = "a" * 32
+    for row in other["per_assembly"]:
+        row["observed_md5"] = row["expected_md5"] = other_md5
+    other["corpus_digest"] = af.corpus_digest(
+        (r["accession"], other_md5) for r in other["per_assembly"]
+    )
+    fetch_path.write_text(json.dumps(other), encoding="utf-8")
     census = af.parse_census(supply_report=path, annotation_dir=ann, fetch_report=fetch_path)
     assert census["n_failed"] == 0
     assert census["corpus_matches_fetch_report"] is False
     assert census["corpus_check_reason"] == "the fetch report certifies a different corpus"
+
+
+def test_a_fetch_report_with_a_HAND_EDITED_corpus_digest_does_not_certify_itself(tmp_path):
+    """Reading ``corpus_digest`` out of an unvalidated report lets it declare anything."""
+    path, ann, fetch_path, _payload = _acquire(tmp_path)
+    forged = json.loads(fetch_path.read_text(encoding="utf-8"))
+    forged["corpus_digest"] = "0" * 64
+    fetch_path.write_text(json.dumps(forged), encoding="utf-8")
+    census = af.parse_census(supply_report=path, annotation_dir=ann, fetch_report=fetch_path)
+    assert census["corpus_matches_fetch_report"] is False
+    assert "corpus_digest_rederives" in census["corpus_check_reason"]
 
 
 def test_an_ABSENT_fetch_report_does_not_silently_satisfy_the_corpus_check(tmp_path):
@@ -919,9 +938,9 @@ def test_an_ABSENT_fetch_report_does_not_silently_satisfy_the_corpus_check(tmp_p
     )
     assert census["fetch_report_corpus_digest"] == ""
     assert census["corpus_matches_fetch_report"] is False
-    # The reason must name the ABSENCE, not a mismatch: collapsing the two makes the
-    # "is there a digest at all" half of the check unable to change any outcome.
-    assert census["corpus_check_reason"] == "the fetch report declares no corpus_digest"
+    # The reason must name the ABSENCE, not a mismatch: collapsing the failure modes would
+    # make each of them unable to change an outcome on its own.
+    assert census["corpus_check_reason"].startswith("the fetch report is unreadable")
 
 
 def test_cli_verify_exits_3_when_the_corpus_does_not_match_the_fetch_report(tmp_path):
@@ -971,6 +990,32 @@ def test_parse_census_reports_an_unparseable_file(tmp_path):
         supply_report=path, annotation_dir=ann, fetch_report=tmp_path / "absent.json"
     )
     assert census["n_failed"] == 1 and "Gff3Error" in census["failures"][0]["note"]
+
+
+def test_parse_census_refuses_a_file_that_never_declares_itself_gff3(tmp_path):
+    """The census must go through the STRICT entry point, not the lenient line parser.
+
+    These nine columns parse perfectly well as feature lines; what they lack is any claim to
+    be GFF3 at all — which is what stops an arbitrary TSV entering the annotation corpus.
+    """
+    import gzip as _gz
+
+    undeclared = _gz.compress(b"ctg1\tx\tCDS\t10\t20\t.\t+\t0\tID=a;product=p\n")
+    md5 = hashlib.md5(undeclared, usedforsecurity=False).hexdigest()
+    url = (
+        "https://ftp.ncbi.nlm.nih.gov/genomes/all/GCA/002/790/315/"
+        "GCA_002790315.1_ASM279031v1/GCA_002790315.1_ASM279031v1_genomic.gff.gz"
+    )
+    row = _annotated_row(accession=af.CONTROL_ACCESSION, url=url, md5=md5, n_bytes=len(undeclared))
+    path = _write_supply(tmp_path, _minimal_supply([row], bytes_total=len(undeclared)))
+    ann = tmp_path / "ann"
+    ann.mkdir()
+    (ann / af.destination_name(af.CONTROL_ACCESSION)).write_bytes(undeclared)
+
+    census = af.parse_census(
+        supply_report=path, annotation_dir=ann, fetch_report=tmp_path / "absent.json"
+    )
+    assert census["n_failed"] == 1 and "##gff-version" in census["failures"][0]["note"]
 
 
 def test_parse_census_reports_a_file_that_parses_to_zero_cds(tmp_path):
