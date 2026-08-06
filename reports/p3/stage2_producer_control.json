@@ -1,0 +1,39 @@
+{
+  "adapter_sha256": "b629704d52582288efc1f433055bff72bf029f329379113553927e815a3ed995",
+  "adr": "ADR-0005 D14 (the P3 Stage-2 disjunct); D11/A11 (the named posterior)",
+  "arm": "aux1.0_lr1e-4",
+  "flags": {
+    "dinucleotide_composition_matched": true,
+    "length_matched": true,
+    "shuffle_differs_from_positive": true
+  },
+  "green": true,
+  "heads_sha256": "12294f08ab51ec378b24fcb7efdd562ae20d3eafa23abdc6547dae0c27195207",
+  "margin": 0.9993842028230112,
+  "n_control_rows": 2,
+  "n_nt": 407,
+  "positive_csv": "tests/fixtures/ingest_sample/Master_tboxes_sample.csv",
+  "positive_name": "CP020815.1:1322846-1323252",
+  "positive_posterior": 0.9994197302161673,
+  "positive_sequence_sha256": "5f3039917213bd696e1f6974caeb188a416e31493923293797846dbd0267496c",
+  "schema_version": "1.0",
+  "seed": 20260805,
+  "shuffle_posterior": 3.5527393156031074e-05,
+  "shuffle_sequence_sha256": "541bc74d695aa999bd632032581834e93b6455a1f942b7db7b7b4c9706af6f18",
+  "step": "P3-15'-b",
+  "sweep_fingerprint": {
+    "arm": "aux1.0_lr1e-4",
+    "attn_implementation": "flash_attention_2",
+    "aux_weight": 1.0,
+    "lr": 0.0001,
+    "saved_from_epoch": 9,
+    "saved_val_total": 0.03995415618032279
+  },
+  "temperature": 1.140627294282911,
+  "temperature_source": "reports/gate2_p3_ece.json",
+  "thresholds": {
+    "max_shuffle": 0.1,
+    "min_margin": 0.5,
+    "min_positive": 0.9
+  }
+}
