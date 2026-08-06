@@ -687,7 +687,9 @@ def test_route_refuses_when_a_candidate_host_was_not_probed() -> None:
     rep["n_candidate_hosts_probed"] = 70
     out = derive_acquisition_route(rep)
     assert out["route"] == ROUTE_REFUSED
-    assert any("were not probed" in r for r in out["reasons"])
+    # the reason must state the measured pair, not a count derived from a sentinel
+    assert any("probed (70) != n_candidate_hosts (76)" in r for r in out["reasons"])
+    assert any("an unprobed host is not an unannotated host" in r for r in out["reasons"])
 
 
 def test_route_refuses_a_report_that_omits_the_candidate_coverage_field() -> None:
@@ -695,7 +697,12 @@ def test_route_refuses_a_report_that_omits_the_candidate_coverage_field() -> Non
     business certifying against a rule it was not measured under."""
     rep = _report(annotated=48, unannotated=28)
     del rep["n_candidate_hosts_probed"]
-    assert derive_acquisition_route(rep)["route"] == ROUTE_REFUSED
+    out = derive_acquisition_route(rep)
+    assert out["route"] == ROUTE_REFUSED
+    # …and it must say the field is missing, not invent "77 hosts were not probed" from a
+    # -1 sentinel. A refusal reason is read by whoever has to act on it.
+    assert any("carries no n_candidate_hosts_probed" in r for r in out["reasons"])
+    assert not any("!= n_candidate_hosts" in r for r in out["reasons"])
 
 
 def test_route_refuses_on_an_unresolved_candidate_host() -> None:
@@ -792,6 +799,14 @@ def test_measure_end_to_end_mixed_reports_both_denominators() -> None:
     }
     assert rep["route"]["route"] == ROUTE_MIXED
     assert rep["n_candidate_hosts"] == 2
+    # assert the split this test's fixture actually builds, not just its size: the route is
+    # derived from the candidate counts, and a regression in candidate classification would
+    # otherwise hide behind the full admissible sweep.
+    assert rep["candidate_host_status_counts"] == {
+        STATUS_ANNOTATED: 1,
+        STATUS_UNANNOTATED: 1,
+        STATUS_UNKNOWN: 0,
+    }
 
 
 def test_measure_with_limit_cannot_certify() -> None:

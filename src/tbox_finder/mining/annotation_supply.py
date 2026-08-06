@@ -588,11 +588,19 @@ def derive_acquisition_route(report: Mapping[str, Any]) -> dict[str, Any]:
     if not bool(report.get("sweep_complete")):
         reasons.append("sweep incomplete — not every requested assembly was probed")
     n_cand = int(report.get("n_candidate_hosts", 0))
-    n_cand_probed = int(report.get("n_candidate_hosts_probed", -1))
-    if n_cand_probed != n_cand:
+    # Report the mismatch, not a count derived from a sentinel: with the field absent a
+    # `-1` default produced "n_cand + 1 hosts were not probed", and a probed count above
+    # n_cand produced a negative one. The refusal was right either way, but a refusal that
+    # records a wrong number is a number some later reader will trust.
+    raw_probed = report.get("n_candidate_hosts_probed")
+    if raw_probed is None:
         reasons.append(
-            f"{n_cand - n_cand_probed} candidate-carrying host(s) were not probed — "
-            "an unprobed host is not an unannotated host"
+            "report carries no n_candidate_hosts_probed — the sweep coverage is unestablished"
+        )
+    elif int(raw_probed) != n_cand:
+        reasons.append(
+            f"candidate-carrying hosts probed ({int(raw_probed)}) != n_candidate_hosts "
+            f"({n_cand}) — an unprobed host is not an unannotated host"
         )
     n_unknown = int(all_counts.get(STATUS_UNKNOWN, 0))
     if n_unknown:

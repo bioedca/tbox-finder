@@ -3590,7 +3590,16 @@ of candidate hosts. In a report this module writes neither can happen, because t
 rows are a subset of the probed rows; that is precisely the point
 ([[gate-clauses-need-re-derivation]]). Both clauses added, both sabotaged.
 
-**Validation.** 91 unit tests; **41 sabotages, 40 RED against their named test**, the 41st a
+**Review round 6 — a refusal that recorded a wrong number.** The unprobed-candidate reason was
+built from a `-1` sentinel, so with the field *absent* it announced `n_cand + 1` hosts unprobed,
+and with a probed count above `n_cand` it announced a negative one. The refusal was correct
+either way; the number in it was not, and a number in a recorded reason is one a later reader
+acts on. It now states the measured pair, and a missing field gets its own distinct reason.
+Round 6 also applied the app's round-4 nitpick: the mixed end-to-end test asserted only
+`n_candidate_hosts == 2` while claiming a 1-annotated / 1-unannotated split, so a regression in
+candidate classification could hide behind the full admissible sweep.
+
+**Validation.** 91 unit tests; **42 sabotages, 41 RED against their named test**, the 42nd a
 declared no-op control. The measurement was **re-run end-to-end on the reviewed code** and
 reproduced byte-identically — 339/321, 48/28, 68,855,450 B — on an independent second sweep of
 999 requests. Two of the original 23 did not bite first time and neither was noise: the
