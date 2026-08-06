@@ -209,6 +209,22 @@ def build_rows(
     turn an un-materialised DVC pull into a whole shard of ``unavailable``, which is
     silently spared and reads exactly like a clean run.
     """
+    # A duplicate WITHIN one shard is invisible to `merge_posterior_tables`, which only
+    # refuses a candidate claimed by two shards. Left unchecked the two rows share a
+    # `row_id`, `score_rows` keys its output on `str(row_id)`, and both resolve to the
+    # last-scored logit — with `len(scored) == len(rows)` still holding, so the shear is
+    # silent ([[duplicate-key-merges-instead-of-colliding]]). Coverage would eventually
+    # drop below the floor and refuse, but it would name the wrong cause, and only while
+    # `--min-coverage` is 1.0.
+    seen: set[str] = set()
+    for spec in specs:
+        if spec.candidate_id in seen:
+            raise Stage2ProducerError(
+                f"candidate_id {spec.candidate_id!r} appears twice in one shard — the two "
+                "rows would share a row_id and collapse to a single logit"
+            )
+        seen.add(spec.candidate_id)
+
     rows: list[dict[str, Any]] = []
     unresolved: list[dict[str, str]] = []
     for spec in specs:

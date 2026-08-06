@@ -147,6 +147,29 @@ def test_build_rows_emits_both_strands_with_distinct_ids_and_payloads(tmp_path: 
         assert "T" not in plus["rna_sequence"]
 
 
+def test_build_rows_refuses_a_candidate_id_repeated_inside_one_shard(tmp_path: Path) -> None:
+    """A duplicate within a shard collapses silently; only a cross-shard one was caught.
+
+    Both rows would share a ``row_id``, ``score_rows`` keys its output on ``str(row_id)``,
+    and the two resolve to the last-scored logit — with the list length still matching, so
+    every summed invariant holds ([[duplicate-key-merges-instead-of-colliding]]).
+    """
+    genome_dir = _write_genome(tmp_path)
+    spec = _spec(0, 4, 40)
+    with pytest.raises(SP.Stage2ProducerError, match="appears twice in one shard"):
+        SP.build_rows([spec, spec], genome_dir=genome_dir)
+    # Positive control: two DISTINCT candidates over the same span are fine — the guard
+    # must key on the id, not on the coordinates.
+    other = CandidateSpec(
+        candidate_id=spec.candidate_id + "#dup",
+        accession=spec.accession,
+        locus_start=spec.locus_start,
+        locus_end=spec.locus_end,
+    )
+    rows, _ = SP.build_rows([spec, other], genome_dir=genome_dir)
+    assert len({r["row_id"] for r in rows}) == 4
+
+
 def test_build_rows_omits_an_unresolvable_candidate_instead_of_zeroing_it(
     tmp_path: Path,
 ) -> None:
