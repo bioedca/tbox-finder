@@ -140,6 +140,25 @@ PRODUCER_ENTRY_POINTS = (
     "run_control",
 )
 
+#: Every clause :func:`derive_stage2_supply_available` must report a verdict for.
+#:
+#: ``all(clauses.values())`` is True over an **empty** map, and a clause whose branch never
+#: ran is simply absent — so a clause that disappears reads exactly like a clause that
+#: passed. Reproduced by execution before this existed: with ``production_arm_config()``
+#: returning ``None`` while ``sweep_fingerprint`` succeeded, neither the ``except`` branch
+#: nor the ``if`` branch set ``production_arm_on_record``, and the derivation returned
+#: ``available: True`` on five of six clauses. Naming the set exhaustively — the same
+#: discipline :data:`REQUIRED_CONTROL_FLAGS` already applies one level down — turns a
+#: silently-skipped clause into a refusal ([[clauses-must-guard-emptiness]]).
+SUPPLY_CLAUSES = (
+    "gate2_calibration_wellformed",
+    "production_arm_on_record",
+    "producer_present",
+    "producer_posterior_wired",
+    "control_green",
+    "control_matches_this_calibration",
+)
+
 #: The designed control's floors. **Measured first on the real checkpoint, then frozen**
 #: (CLAUDE.md §10.3) — never chosen to make a run pass. They are gate-control thresholds,
 #: not a science operating point: ``STAGE2_THRESHOLD`` itself stays unpinned until the
@@ -780,22 +799,31 @@ def derive_stage2_supply_available(*, repo_root: str | Path | None = None) -> di
         )
 
     # ── clause 4: a produced posterior reaches the candidate ─────────────────
-    from tbox_finder.mining.remine import remine_candidate_evidence
-
     probe_id = "__stage2_supply_probe__"
     probe_value = 0.875
-    stamped = remine_candidate_evidence(
-        probe_id, covariation_status=None, stage2_posteriors={probe_id: probe_value}
-    ).stage2_posterior
-    clauses["producer_posterior_wired"] = (
-        True
-        if stamped == probe_value
-        else _fail(
-            "producer_posterior_wired",
-            f"a produced posterior of {probe_value} reached the candidate as {stamped!r} — "
-            "the producer's output is not composed into the round",
+    try:
+        from tbox_finder.mining.remine import remine_candidate_evidence
+
+        stamped = remine_candidate_evidence(
+            probe_id, covariation_status=None, stage2_posteriors={probe_id: probe_value}
+        ).stage2_posterior
+    except Exception as exc:  # noqa: BLE001 - an unreachable consumer is a FAILED clause
+        # Same rule as clauses 2 and 3: a consumer that cannot even be imported is the
+        # state this clause exists to report, not a traceback out of a function whose
+        # contract is "fail-closed on every clause".
+        clauses["producer_posterior_wired"] = _fail(
+            "producer_posterior_wired", f"the round's evidence builder is unreachable: {exc!r}"
         )
-    )
+    else:
+        clauses["producer_posterior_wired"] = (
+            True
+            if stamped == probe_value
+            else _fail(
+                "producer_posterior_wired",
+                f"a produced posterior of {probe_value} reached the candidate as "
+                f"{stamped!r} — the producer's output is not composed into the round",
+            )
+        )
 
     # ── clauses 5-6: the must-fire control, and that it names this calibration ─
     control = _read_json_or_none(root / CONTROL_REPORT)
@@ -861,9 +889,16 @@ def derive_stage2_supply_available(*, repo_root: str | Path | None = None) -> di
             else _fail("control_matches_this_calibration", "; ".join(tie_failures))
         )
 
+    # A clause whose branch never ran is ABSENT, and `all(...)` skips what is not there,
+    # so an unreported clause would read as a passing one. Filled from the named set rather
+    # than from whatever the body happened to write.
+    for clause in SUPPLY_CLAUSES:
+        if clause not in clauses:
+            clauses[clause] = _fail(clause, "the clause did not report a verdict")
+
     return {
         "available": all(clauses.values()),
-        "clauses": clauses,
+        "clauses": {name: clauses[name] for name in SUPPLY_CLAUSES},
         "reasons": reasons,
         "repo_root": str(root),
     }

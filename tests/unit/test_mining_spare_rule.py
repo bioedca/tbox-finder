@@ -335,8 +335,6 @@ def test_the_stage2_supply_flag_agrees_with_its_derivation_and_resolves_at_call_
         msa_supply_available=True,
         stage2_threshold=THRESHOLD,
     )
-    # Omitted by the caller ⇒ resolved from the module constant at CALL time, which is the
-    # property that makes the flip reach every caller without a signature change.
     assert plan["stage2_supply_available"] is STAGE2_SUPPLY_AVAILABLE
     assert plan["ready"] is True
     assert STAGE2_DISJUNCT not in plan["yield"]["blocking_disjuncts"]
@@ -349,6 +347,29 @@ def test_the_stage2_supply_flag_agrees_with_its_derivation_and_resolves_at_call_
         "downstream_aaRS_synteny",
     ]
     assert plan["yield"]["max_mined"] == 0
+
+
+def test_the_stage2_supply_flag_is_resolved_at_CALL_time_not_bound_at_import(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Flipping the module constant must reach a caller that omits the argument.
+
+    Asserting ``plan[...] is STAGE2_SUPPLY_AVAILABLE`` cannot show this: with both sides
+    True, a value bound at *definition* time satisfies it just as well. The property is
+    only visible when the constant is CHANGED — and it must be changed on the module
+    object, because this file's ``from`` import is a separate binding that a monkeypatch
+    of the module attribute does not touch ([[pinned-constant-has-two-read-paths]]).
+    """
+    import tbox_finder.mining.remine as remine
+
+    overridden = not remine.STAGE2_SUPPLY_AVAILABLE
+    monkeypatch.setattr(remine, "STAGE2_SUPPLY_AVAILABLE", overridden)
+    plan = remine.plan_remine_round(
+        rscape_installed=True,
+        msa_supply_available=True,
+        stage2_threshold=THRESHOLD,
+    )
+    assert plan["stage2_supply_available"] is overridden
 
 
 def test_availability_delegates_the_msa_producibility_rule() -> None:

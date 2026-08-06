@@ -135,7 +135,12 @@ def test_build_rows_emits_both_strands_with_distinct_ids_and_payloads(tmp_path: 
     for spec in specs:
         pair = [r for r in rows if r["candidate_id"] == spec.candidate_id]
         assert {r["strand"] for r in pair} == {"+", "-"}
-        plus, minus = (r for r in sorted(pair, key=lambda r: r["strand"], reverse=True))
+        # Selected BY VALUE, not by sort order: ord("+")==43 < ord("-")==45, so a
+        # reverse sort yields ("-", "+") and binds both names to the wrong row. The
+        # assertions below happen to be symmetric, so it passed while being wrong —
+        # and any asymmetric assertion added later would have tested the other strand.
+        plus = next(r for r in pair if r["strand"] == "+")
+        minus = next(r for r in pair if r["strand"] == "-")
         assert plus["rna_sequence"] != minus["rna_sequence"]
         assert len(plus["rna_sequence"]) == len(minus["rna_sequence"]) == 36
         assert set(plus["rna_sequence"]) <= set("ACGU")
@@ -495,10 +500,55 @@ def test_the_supply_derivation_is_green_and_names_every_clause() -> None:
     ([[all-true-fixture-cannot-test-a-conjunction]]).
     """
     derived = SP.derive_stage2_supply_available()
+    # Compared against this file's OWN literal tuple, never against SP.SUPPLY_CLAUSES:
+    # the function now fills any unreported clause from that constant, so asserting
+    # against it would be a tautology — dropping a clause from both would stay green
+    # ([[promote-dont-duplicate-is-a-correctness-rule]]).
     assert set(derived["clauses"]) == set(_CLAUSES)
+    assert set(SP.SUPPLY_CLAUSES) == set(_CLAUSES)
     assert derived["reasons"] == []
     assert all(derived["clauses"].values())
     assert derived["available"] is True
+
+
+def test_a_clause_that_never_reports_a_verdict_refuses(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An ABSENT clause must not read as a passing one.
+
+    ``all(...)`` skips what is not in the map, so a branch that never runs is a silently
+    satisfied clause. Reproduced by execution before the fix: with
+    ``production_arm_config()`` returning ``None`` while ``sweep_fingerprint`` succeeded,
+    neither branch set ``production_arm_on_record`` and the derivation returned
+    ``available: True`` on five of six clauses ([[clauses-must-guard-emptiness]]).
+    """
+    monkeypatch.setattr(SP, "production_arm_config", lambda **kwargs: None)
+    derived = SP.derive_stage2_supply_available()
+    assert set(derived["clauses"]) == set(_CLAUSES), "a clause vanished from the map"
+    assert derived["clauses"]["production_arm_on_record"] is False
+    assert any("did not report a verdict" in reason for reason in derived["reasons"])
+    assert derived["available"] is False
+
+
+def test_an_unreachable_consumer_is_a_failed_clause_not_a_crash(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Clause 4 is documented fail-closed, so it must not propagate an import error."""
+    import builtins
+
+    real_import = builtins.__import__
+
+    def _explode(name, globals=None, locals=None, fromlist=(), level=0):
+        if "remine_candidate_evidence" in (fromlist or ()):
+            raise RuntimeError("the consumer is unreachable")
+        return real_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr(builtins, "__import__", _explode)
+    derived = SP.derive_stage2_supply_available()
+    monkeypatch.undo()
+    assert derived["clauses"]["producer_posterior_wired"] is False
+    assert any("unreachable" in reason for reason in derived["reasons"])
+    assert derived["available"] is False
 
 
 def test_the_constant_and_its_derivation_cannot_drift_in_either_direction() -> None:
@@ -696,12 +746,16 @@ def _stage_evidence(
     )
     gate2 = json.loads((SP.REPO_ROOT / SP.DEFAULT_GATE2_REPORT).read_text(encoding="utf-8"))
     for key, patch in (gate2_mutation or {}).items():
+        # The original nested dict must be captured BEFORE the shallow merge: that merge
+        # replaces `gate.calibration` wholesale with the patch, so re-reading it afterwards
+        # gave `{**patch, **patch}` and silently dropped beta/calib_prevalence/fitted_on.
+        # The clause then failed partly because required keys were missing rather than
+        # only because of the one value under test — the opposite of the
+        # one-mutation-at-a-time discipline this helper exists to provide.
+        original_nested = gate2.get(key, {}).get("calibration", {}) if key == "gate" else {}
         gate2[key] = {**gate2.get(key, {}), **patch} if isinstance(patch, dict) else patch
         if key == "gate" and isinstance(patch, dict) and "calibration" in patch:
-            gate2["gate"]["calibration"] = {
-                **gate2["gate"]["calibration"],
-                **patch["calibration"],
-            }
+            gate2["gate"]["calibration"] = {**original_nested, **patch["calibration"]}
     (tmp_path / SP.DEFAULT_GATE2_REPORT).parent.mkdir(parents=True, exist_ok=True)
     (tmp_path / SP.DEFAULT_GATE2_REPORT).write_text(json.dumps(gate2), encoding="utf-8")
 

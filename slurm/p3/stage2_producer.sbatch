@@ -99,7 +99,10 @@ cd "$REPO"
 # assumed: `python -c "import tbox_finder"` there is a ModuleNotFoundError. Every other
 # sbatch in this repo prefixes `PYTHONPATH=src` for the same reason. Exported once here
 # so it covers the inline heredoc leg as well as the three `python -m` calls.
-export PYTHONPATH="${PYTHONPATH:+$PYTHONPATH:}src"
+# `src` FIRST: the script runs from $REPO, so an inherited PYTHONPATH pointing at
+# another checkout would otherwise take precedence and the job would score with a
+# different revision of this module than the one it was submitted from.
+export PYTHONPATH="src${PYTHONPATH:+:$PYTHONPATH}"
 
 TASK="${SLURM_ARRAY_TASK_ID:-0}"
 N_SHARDS="${N_SHARDS:-2}"
@@ -118,17 +121,62 @@ if [ -z "$ROUND_DIR" ]; then
   echo "FATAL: ROUND_DIR resolved empty; refusing to write anywhere." >&2
   exit 2
 fi
+# CANONICALISED, not pattern-matched. A lexical `case` accepted a bare relative value
+# (`ROUND_DIR=round-output`), `$REPO` itself, and anything reachable via `..` or a
+# symlink — all of which land inside the repo once the script has cd'd there, which is
+# exactly what this refuses. `realpath -m` resolves a path that does not exist yet.
+ROUND_DIR="$(realpath -m -- "$ROUND_DIR")"
+REPO_REAL="$(realpath -m -- "$REPO")"
 case "$ROUND_DIR" in
-  "$REPO"/*|./*|data/*|reports/*|src/*)
-    echo "FATAL: ROUND_DIR=$ROUND_DIR is inside the repo. It must be scratch (§9.2)." >&2
-    exit 2 ;;
+  /*) : ;;
+  *)  echo "FATAL: ROUND_DIR must be absolute, got $ROUND_DIR" >&2; exit 2 ;;
 esac
-
-if [ "$TASK" -ge "$N_SHARDS" ]; then
-  echo "FATAL: array index $TASK exceeds N_SHARDS=$N_SHARDS — the --array width and" >&2
-  echo "       N_SHARDS must agree, or a slice of the manifest is never scored and the" >&2
-  echo "       merge would refuse on coverage after paying for every other task." >&2
+if [ "$ROUND_DIR" = "$REPO_REAL" ] || case "$ROUND_DIR" in "$REPO_REAL"/*) true ;; *) false ;; esac; then
+  echo "FATAL: ROUND_DIR=$ROUND_DIR resolves inside the repo ($REPO_REAL)." >&2
+  echo "       The round's tables are run artifacts and must live on scratch (§9.2)." >&2
   exit 2
+fi
+
+# The COMPLETE array shape, not just this task's index. `N_SHARDS=3` with `--array=0-1`
+# passes a per-task bound check: both tasks succeed, N_DONE stays 2, the completeness
+# test never fires and NOBODY merges — a silent no-round that costs the full GPU spend.
+# The three SLURM variables are checked when present, with a local-execution fallback.
+if [ "$TASK" -ge "$N_SHARDS" ]; then
+  echo "FATAL: array index $TASK exceeds N_SHARDS=$N_SHARDS." >&2
+  exit 2
+fi
+if [ -n "${SLURM_ARRAY_TASK_COUNT:-}" ]; then
+  if [ "${SLURM_ARRAY_TASK_MIN:-0}" -ne 0 ] \
+     || [ "${SLURM_ARRAY_TASK_MAX:-0}" -ne "$((N_SHARDS - 1))" ] \
+     || [ "$SLURM_ARRAY_TASK_COUNT" -ne "$N_SHARDS" ]; then
+    echo "FATAL: the --array shape and N_SHARDS disagree." >&2
+    echo "       array min=${SLURM_ARRAY_TASK_MIN:-?} max=${SLURM_ARRAY_TASK_MAX:-?}" \
+         "count=$SLURM_ARRAY_TASK_COUNT, N_SHARDS=$N_SHARDS (want 0..$((N_SHARDS - 1)))." >&2
+    echo "       A short array leaves a slice of the manifest unscored; a sparse or" >&2
+    echo "       offset one leaves the merge waiting for a marker nothing will write." >&2
+    exit 2
+  fi
+fi
+
+MARKER_DIR="$ROUND_DIR/markers_$ARRAY_ID"
+POST_DIR="$ROUND_DIR/posteriors_$ARRAY_ID"
+mkdir -p "$MARKER_DIR" "$POST_DIR"
+
+# ── one round directory, one array job ──────────────────────────────────────
+# The markers and shard tables are per-ARRAY_ID, and so is the merge lock — but the
+# PUBLISHED table is not: two array jobs sharing a ROUND_DIR would each pass their own
+# completeness test, take their own lock, and both write "$ROUND_DIR/stage2_posteriors.json".
+# The second would silently replace the first, possibly with a different strand policy.
+# Ownership is claimed here, BEFORE any GPU time, with an atomic noclobber create.
+OWNER_FILE="$ROUND_DIR/.owner"
+if ! ( set -o noclobber; echo "$ARRAY_ID" > "$OWNER_FILE" ) 2>/dev/null; then
+  OWNER="$(cat "$OWNER_FILE" 2>/dev/null || true)"
+  if [ "$OWNER" != "$ARRAY_ID" ]; then
+    echo "FATAL: $ROUND_DIR is already owned by array job ${OWNER:-<unreadable>}," >&2
+    echo "       and this is array job $ARRAY_ID. Two jobs publishing one round table" >&2
+    echo "       would overwrite each other. Submit with a fresh ROUND_DIR." >&2
+    exit 2
+  fi
 fi
 
 # ── staged-input assertions (fail loud, before any GPU time) ─────────────────
@@ -170,9 +218,6 @@ export PYTHONHASHSEED=0
 export OMP_NUM_THREADS=2
 export WANDB_MODE=offline
 
-MARKER_DIR="$ROUND_DIR/markers_$ARRAY_ID"
-POST_DIR="$ROUND_DIR/posteriors_$ARRAY_ID"
-mkdir -p "$MARKER_DIR" "$POST_DIR"
 SHARD_DIR="$JOB_SCRATCH/shards"
 POST_OUT="$POST_DIR/posteriors_$TASK3.json"
 
