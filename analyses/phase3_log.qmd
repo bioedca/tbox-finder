@@ -3413,3 +3413,217 @@ reproduce this table byte-for-byte. The report records `device`, `arm`, `batch_s
 
 **Not committed, deliberately.** `$ROUND_DIR` is scratch (`stage1_remine.sbatch:63-64`), so the
 table is a run artifact; it was retrieved by `rsync` for this comparison and stays out of git.
+
+## Step P3-15′-c-i — 2026-08-06: is the (c) synteny backend supplyable from NCBI annotation?
+
+**Inputs.** `data/processed/audits/production_fetch_report.json` (git-tracked, 2,500
+`per_genome` rows written by `mining/pilot_fetch.py` at P2-10c′-fetch — each carrying the
+`source_url` its `_genomic.fna.gz` was fetched from); `data/processed/mining/round0_fp_manifest.json`
+(941 candidates); `mine_round.load_admissible_accessions()` → the 660 a2 hosts.
+
+**Process.** `src/tbox_finder/mining/annotation_supply.py` measures whether ADR-0006 **D4** can
+be supplied without a gene caller. It introduces **no transport**: the annotation lives in the
+same NCBI directory as the genome this repo already fetched, so the probe is a *sibling lookup
+on a committed URL* and `esearch`/`esummary` are never called. One GET of each assembly's
+`md5checksums.txt` returns that directory's complete file list plus checksums, so one request
+answers every suffix at once. An assembly is `annotated` **iff** it serves
+`<basename>_genomic.gff.gz`; the outcome is three-valued (`annotated` / `unannotated` /
+`unknown`) and a transport failure is `unknown`, never folded into `unannotated`. The route rule
+is **pre-registered in the module above the measurement** (§10.3) and is a function of counts
+alone. A control runs beside every sweep: a fixed assembly that must resolve *and* be annotated,
+plus that same directory with its accession corrupted, which must not resolve.
+
+**Outputs.** `reports/p3/annotation_supply.json` (216 KB, git-tracked, no DVC object) —
+per-assembly status, GFF URL, GFF md5, GFF `Content-Length`, `_protein.faa.gz` presence, plus the
+counts, the control and the derived route. 97 unit tests. No ADR amendment, no value pinned, no
+SLURM job, LOCAL only.
+
+**Measured, all 660, zero unknown, control powered** (positive `GCF_000007185.1` → 16 files,
+annotated; negative → 404):
+
+| set | annotated | unannotated | unknown |
+|---|---|---|---|
+| 660 admissible hosts | **339** (51.4 %) | 321 | 0 |
+| 76 candidate-carrying assemblies | **48** (63.2 %) | 28 | 0 |
+| 941 candidates, by their host | **655** (69.6 %) | 286 | 0 |
+
+Cross-tabulated against the accession prefix — the proxy `imp.md` framed the question with:
+
+| | annotated | unannotated |
+|---|---|---|
+| `GCF_` (115) | **115 (100 %)** | 0 |
+| `GCA_` (545) | **224 (41.1 %)** | 321 |
+
+**Decisions.** (1) **The prefix proxy is sound in one direction only, and the route it implied is
+wrong.** `imp.md` P3-15′-c-i pre-committed that *"if the GCA share is large, `prodigal` is
+required after all ⇒ an ADR-0002 env amendment"*. The GCA share **is** large — 545 of 660,
+82.6 % — but **224 of those 545 GenBank assemblies already ship a GFF**, so the implication does
+not hold: acting on the proxy would have commissioned an env amendment while 41 % of the
+GenBank hosts were already supplied. Every `GCF_` is annotated (115/115), which is why the proxy
+looked plausible. (2) **The route is `mixed`, and `mixed` does not block the round.** Mining is a
+conjunction, so a host with no annotation makes (c) `unavailable`, and an unavailable disjunct
+*spares* its candidates under ADR-0005 D14 — it never mines them. The NCBI-GFF route therefore
+supplies (c) for 655 of 941 candidates outright; `prodigal` would raise that ceiling to 941
+rather than make the round possible. Whether to pay for the remaining 30.4 % is a CLAUDE.md §7
+call, not an implementation detail, and it is left open here. (3) **`_genomic.gbff.gz` is not
+evidence of annotation** — NCBI serves one for unannotated assemblies too (measured on the real
+`GCA_000372225.1`: a gbff and a wgsmaster gbff, no gff). Keying on it would have called all 660
+annotated. A unit test pins the distinction. (4) **D4's Pfam/KO fallback has its protein input
+exactly where the GFF is** — `_protein.faa.gz` is present on 339 assemblies and absent on 321,
+matching the GFF partition one-for-one, so no separate acquisition is needed for the
+hypothetical/pseudogene arm. The profile database itself is still absent and remains owed.
+(5) **The acquisition is not a SLURM job.** Measured `Content-Length` over all 339 annotated
+hosts: **68,855,450 B = 68.9 MB** total (min 33,003 / median 177,764 / max 898,247), of which
+**9.5 MB** covers the 48 candidate-carrying hosts. At the shipped 3 req/s that is minutes of
+wall on the laptop — LOCAL by §9.1 — so the "SLURM acquisition ack" this block was gated on does
+not apply to the NCBI route.
+
+**Review (two paths, and they overlapped by one).** The CodeRabbit **CLI** returned **3
+majors** and the GitHub **app** returned **2**, on the same commit, with **one in common** —
+running both was worth it rather than redundant, the P3-15′-a lesson recurring. All five are
+real and all five are fixed. (i) *Shape assumed before validated*, twice: a list-rooted fetch
+report makes `payload.get` an `AttributeError`, and a non-Mapping candidate row makes
+`row["accession"]` a `TypeError` — both escape as a traceback and **exit 1** instead of the
+documented refusal and **exit 3**, the same shape P3-15′-b hit four times. (ii) *A route
+certified from an understated candidate denominator*: `cand_rows` silently drops a candidate
+host absent from the probed set, and `sweep_complete` compares only the **admissible**
+denominator — the guard that already existed for the admissible set had no counterpart for the
+candidate set. Found by **both** paths, at different layers: the CLI at the derivation, the app
+at the API input. Both are now guarded. (iii) *`urlopen` reachable with an arbitrary scheme and
+host*: `source_url` flows from a committed report into `urlopen`, so a `file://` or third-party
+value would be a local-file read or an off-host request. An allowlist on **scheme and host**
+(not a substring — `https://evil.test/?x=ftp.ncbi.nlm.nih.gov` defeats that, and
+`ftp.ncbi.nlm.nih.gov.evil.test` defeats a prefix test) is enforced where URLs are built **and
+at the transport boundary**, because `fetch_file_manifest`/`head_content_length` are public and
+take a URL directly — guarding only the builders leaves the actual boundary open. (iv) *The
+`(accession, source_url)` pair was never checked to agree*: the row is **labelled** with the
+accession but **classified** from whatever directory the URL names, so a mis-joined pair yields
+well-formed evidence filed under the wrong assembly, never surfaces as `unknown`, and moves the
+counts the route is read from ([[namespace-mismatch-invisible-noop]]). The app's committable
+suggestion raised while its agent prompt said to return `unknown`; **raising is right** — a
+mis-join is a join error, not a per-host unknown, and degrading it to `unknown` would hide a
+systematically mis-joined mapping behind 660 uninformative rows
+([[review-finding-right-fix-wrong]], judged separately again). Verified on the real data before
+committing: **0 binding violations across all 2,500 `ok` rows** and 0 host-allowlist violations.
+
+**One defect found without a reviewer.** The retry loop had **no backoff** — `pilot_fetch` waits
+`1.5 * (attempt + 1)`, and the rate limiter is not a substitute: it meters the steady state at
+3 req/s, so a 429 would have been re-sent four times inside ~1.3 s, which is precisely what the
+limiter exists to prevent. Added, with the schedule asserted and a companion test that a
+*permanent* failure does **not** sleep (660 pointless waits is the difference between a
+two-minute sweep and a twenty-minute one).
+
+**Review round 2 — both paths converged on ONE defect, and it was mine.** `run_control`
+declared a `sleep` parameter and forwarded it to neither control leg, so a caller injecting a
+fake clock still blocked on the real `time.sleep` — and **no test observed it**, because none
+made the control retry ([[pinned-constant-that-nothing-reads]]: a parameter a function accepts
+and never reads is a parameter nothing tests). It was introduced by my own backoff fix, whose
+threading patch had silently not applied at those two call sites because `black` had already
+collapsed them to one line — a `.replace` that matched nothing and said nothing. The CLI graded
+it **minor**, the app **major**. ⚠ The app also prescribed the assertion `[1.5, 3.0]`; the real
+schedule is `[1.5, 3.0, 4.5]` **per leg** (`retries=4` ⇒ three waits, 9.0 s, which is the very
+number its own prose quoted), so the finding was right and the value wrong again — derived here
+by execution rather than transcribed.
+
+**Measured, and it is the number the §7 call turns on: annotation coverage is strongly
+clade-structured.** Joining the per-assembly status to `production_host_orders_v0.parquet`
+(`resolved_phylum`), the annotated fraction across the 660 ranges from **0.10 in Calditrichota
+(1/10)** and 0.21 in Bacteroidetes (4/19), 0.25 in Nitrospinota, 0.30 in Campylobacterota, up to
+**0.75 in Methanobacteriota (56/75)** and 0.79 in Fusobacteria. So the annotation-driven recall
+cap the NCBI route implies is **not uniform** — it falls hardest on exactly the under-annotated
+lineages the discovery aim lives in. ADR-0006 **D4** already requires a *"false-FAIL rate +
+per-clade (c)-exclusion + pseudogene diagnostic … symmetric with the false-pass rate"*, so this
+is that diagnostic's first data point rather than a new obligation; the full version is a
+`-c-ii` deliverable. It is deliberately **not** folded into
+`reports/p3/annotation_supply.json`: reading the parquet needs pandas, and the module is a
+bare-CI-tier, pure-stdlib probe.
+
+**Review round 3 — the two paths disagreed about whether there was anything left.** The GitHub
+app reviewed `69cde0b→35712d1` and returned *"No actionable comments"*; the **CLI, on the same
+head, returned two more — one of them a major**. A clean round on one path is not convergence.
+(i) **`urlopen` follows redirects, and the allowlist checked only the initial URL**, so a 302
+moves the request off-host one hop past the guard. Fixed with a redirect handler that
+re-validates every hop, installed on a single shared opener both transport helpers use — and an
+allowlist violation now *propagates* instead of being caught by the transient-retry arm, because
+retrying it four times and reporting the host `unknown` would read as "NCBI was flaky" rather
+than "this run was pointed somewhere it must never go". (ii) **A duplicate accession was not
+refused** — it is probed twice, `by_acc` collapses it, `len(rows)` counts it, so it inflates
+`n_probed`, the prefix tally and the status counts, i.e. every denominator the route is read
+against, while doubling that host's request cost. It is the exact mirror of the silently-dropped
+accession the module already refuses, and it now refuses the same way, for both the admissible
+and the candidate sequence.
+
+**Reproducibility, measured three times.** The sweep was re-run end-to-end after each fixing
+round — three independent 999-request sweeps on three different code versions — and **all 660
+measured rows are byte-identical** every time. The only fields that move between runs are
+`generated_at_utc` and the provenance `git_sha`.
+
+**Review round 4 — and the worst finding in the whole step was in my own tests.** Three
+end-to-end tests **were making real HTTP requests to live NCBI**, directly contradicting this
+file's own docstring claim of *"no network"*: they passed `opener=` but not `header=`, and
+`measure_sizes` defaults on, so the size pass fell through to the real `_urlhead_length`.
+Nothing went red — a failed HEAD yields `None` and no assertion reads a size — so the cost was
+hidden runtime and offline flakiness behind a docstring asserting the opposite. **Verified by
+execution before fixing: 30 real requests, 45 s.** Two further minors, both the
+already-familiar shape: `payload["candidates"]` raises `KeyError` on an object lacking the key
+(exit 1 + traceback instead of exit 3 + the refusal), and a *conflicting* duplicate accession in
+`per_genome` silently overwrote the first, so the sweep would report whichever directory
+survived as that accession's evidence with no record a conflict existed — the mirror, at the
+load boundary, of the duplicate guard round 3 added one layer up.
+
+**⚠ The structural fix for the network leak was itself a no-op on the first attempt.** Patching
+the three call sites is not enough — the docstring's claim needs *enforcing*, so an autouse
+fixture now replaces both transport primitives with a raising stub. The first version raised
+`AssertionError` and **the suite still went to the network and still reported 89 passed**, in
+**22.66 s** instead of 0.17 s: the transport wraps its calls in `except Exception`, converts the
+failure to a retry and then to `None`, and so **swallowed the guard's own signal**. The stub now
+raises a `BaseException` subclass, which `except Exception` cannot absorb. Verified both ways by
+execution — with the guard armed and one `header=` injection removed, the suite goes RED in
+0.21 s naming the leaked URL. *A guard whose signal the subject can absorb is not a guard.*
+
+**Review round 5 — a gate leaning on an invariant enforced somewhere else.** The route
+derivation checked only the **admissible** unknown count, and took its denominator from a sum it
+never reconciled with `n_candidate_hosts`. So a report declaring 76 candidate hosts, 76 probed
+and zero admissible-unknown could still carry an unknown *candidate* host and come back `mixed`
+with no refusal — and an annotated fraction could be read against a base that is not the number
+of candidate hosts. In a report this module writes neither can happen, because the candidate
+rows are a subset of the probed rows; that is precisely the point
+([[gate-clauses-need-re-derivation]]). Both clauses added, both sabotaged.
+
+**Review round 6 — a refusal that recorded a wrong number.** The unprobed-candidate reason was
+built from a `-1` sentinel, so with the field *absent* it announced `n_cand + 1` hosts unprobed,
+and with a probed count above `n_cand` it announced a negative one. The refusal was correct
+either way; the number in it was not, and a number in a recorded reason is one a later reader
+acts on. It now states the measured pair, and a missing field gets its own distinct reason.
+Round 6 also applied the app's round-4 nitpick: the mixed end-to-end test asserted only
+`n_candidate_hosts == 2` while claiming a 1-annotated / 1-unannotated split, so a regression in
+candidate classification could hide behind the full admissible sweep.
+
+**Review round 7 — the refusal contract had a hole in its own arithmetic.** `derive_acquisition_route`
+is handed an arbitrary report, and every count was read with a bare `int()`, which raises on a
+non-numeric field and so escapes as a traceback and **exit 1** instead of the documented refusal
+and **exit 3** — the shape this suite already treats as a defect two files over. Fixed with a
+single `_as_count`, and **stricter than the reviewer proposed**: a real `int` only, `bool`
+excluded (`isinstance(True, int)` is True), `float` and `str` excluded, because coercing `"76"`
+or `76.0` into a count is precisely the coerce-before-validate mistake P3-15′-b shipped, where
+`"0.5"` merged as `0.5` and *certified*. A count that is not an int means the report is
+malformed, and the honest answer is a refusal naming the field.
+
+**Validation.** 97 unit tests; **44 sabotages, 43 RED against their named test**, the 44th a
+declared no-op control. The measurement was **re-run end-to-end on the reviewed code** and
+reproduced byte-identically — 339/321, 48/28, 68,855,450 B — on an independent second sweep of
+999 requests. Two of the original 23 did not bite first time and neither was noise: the
+`run_control` refusal was satisfied by *any* `AnnotationSupplyError` — deleting the guard still
+raised, one frame down, from `assembly_basename("")` — so a bare `pytest.raises` was passing on a
+crash rather than on the named refusal (test now matches the message,
+[[raises-test-needs-a-positive-control]]); and the "never HEAD an unannotated host" property is
+defended **twice** (the annotated filter *and* `head_content_length`'s empty-URL early return), so
+neither edit alone could falsify it and the sabotage is declared compound. Full unit+golden
+**4,470 passed / 13 failed** against a matched baseline worktree at `8a82425` (**4,373 / 13**) —
+failure sets **identical**, `comm` empty both ways, and the +97 is exactly the new tests. ruff
+0.15.15 + black 25.11.0 clean; no `.smk` touched. §6.4 fires on nothing (no README,
+`paper/manuscript.qmd` or ADR reference to the new API). The shipped refusal path was executed,
+not inferred: `measure --limit 5` exits **3** with `route=refused`, and the report it writes
+carries the refusal inside it rather than a verdict a later reader could mistake for a pass.
+
+**Commit.** see `TODO.md` for the squash SHA on `main` (PR #112).
