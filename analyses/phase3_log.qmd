@@ -3088,3 +3088,181 @@ forwarded case as its positive control.
 the matched baseline at `96fcbc7` (**4,195 / 13**) — failure sets identical, `comm` empty both
 ways. **29 sabotages, 28 RED against their NAMED test**, the 29th the declared no-op control.
 ruff 0.15.15 + black 25.11.0 clean.
+
+## Step P3-15′-a — 2026-08-05: the covariation-(a) unblock, and a constant that now has to prove itself
+
+**Inputs.** `data/interim/homolog_db.dvc` (md5 `db1ff864…dir`, 10 files, 18.4 GB — the D7/A1
+homolog-search target DB, SLURM job 741) · `data/interim/homolog_msa/{provenance.json,
+certified_positive.sto}` (the must-fire matched-control certification, job 766) ·
+`src/tbox_finder/mining/covariation_producer.py` · `src/tbox_finder/mining/mine_round.py`.
+
+**Process.** Executing the §7 decision of 2026-08-05 (option **b**), and with it two consequences
+already signed — ADR-0002's covariation-env amendment (*"a green certification flips
+`mine_round.MSA_SUPPLY_AVAILABLE → True`"*) and ADR-0006 **A3**'s cross-reference (*"this supply
+flips `msa_supply_available` TRUE, unblocking the round-readiness gate"*) —
+`MSA_SUPPLY_AVAILABLE` is now `True`. **No ADR was amended, no threshold moved and no value was
+pinned:** the flip performs a decision, it does not make one.
+
+**The flag is a declaration, so it is now checked rather than trusted.**
+`derive_msa_supply_available()` re-derives the same fact from the shipped evidence in six
+fail-closed clauses — the DB pointer is a well-formed non-empty directory pointer; the producer
+imports and exposes its search → align → score chain; a produced status actually *reaches* the
+candidate (measured by calling `candidate_evidence`, not by reading a signature); the
+certification is green **as a control** (real seed `passed`, shuffled twin `failed`, composition/
+depth/width/`SS_cons` matched, depth ≥ `MIN_REAL_HOMOLOG_N` **imported**, not a re-typed 20); that
+certification names the DB version the pointer names *today*; and the certified MSA still hashes
+to what the run recorded. The unit pin asserts `MSA_SUPPLY_AVAILABLE is derived["available"]`, so
+the constant cannot drift from reality in **either** direction — the old `assert … is False` could
+only ever have caught one. All three evidence files are git-tracked and neither DVC- nor
+LFS-shaped, so the derivation answers identically in CI, on the laptop and on the cluster (it runs
+green in this worktree, which has **no** materialised 18 GB DB — repo-level evidence is the claim,
+materialisation is separately guarded by `mine_round_producer.sbatch`'s `[ -s "$FM_INDEX" ]`).
+
+**⚠ The flip has two consequences that a flag flip does not look like it has.**
+(1) `store_true` with a `True` default is a **one-way** declaration: after the flip nothing could
+declare the supply *unavailable*, so a checkout that had not staged the DB would have discovered
+the gap in the producer array — after the 8-GPU scan legs. `--no-msa-supply-available` is added
+(mutually exclusive with its positive twin). (2) `slurm/p2/mine_round.sbatch` was **self-limiting
+because the round was refused**: leg 0 exited before any GPU time. Readiness now *passes*, so that
+job would fall through to the scan legs and mine **nothing** — mining is a conjunction and (b)+(c)
+still have no backend. Its ⛔ header is rewritten to say so and a required `STRUCTURAL_YIELD_ACK`
+turns "do not submit" from prose into a failure.
+
+**Outputs.** `MSA_SUPPLY_AVAILABLE = True`; `derive_msa_supply_available` / `read_dvc_dir_pointer`
+/ `msa_supply_declaration_unevidenced`; `plan_round` publishes the derivation beside the claim and
+takes `repo_root`; the `plan` and `apply-spare-rule` CLIs **refuse with a distinct exit 4** when a
+run declares a supply its own checkout cannot evidence — distinct because `mine_round.sbatch`
+converts the clean refusal (3) into `exit 0`, so sharing the code would have turned a staging
+fault into a silent "no round today".
+
+**Four stale disclosures corrected, two more than `imp.md` named.** Named: `mine_round.py`'s
+docstring and the flag comment; `data/interim/homolog_msa/provenance.json`'s `extra.note` (whose
+three claims — producer not composed, legs stubbed, flag False — are all now false; corrected in
+place with the superseded text quoted, and **no measured field, input, output or hash touched**).
+Not named but falsified by the flip: `slurm/p2/mine_round.sbatch`'s ⛔ header, which told an
+operator `MSA_SUPPLY_AVAILABLE=False … Do NOT submit`, and `covariation.py`'s *"the repo has **no**
+homolog-search target database … and no `hmmer`/`blast` in any `envs/*.yml`"* — true at P2-10c,
+false since job 741 / `envs/homology.yml`.
+
+**Validation.** The gate `imp.md` specifies, asserted as one test: `plan_round(rscape_installed=
+True)["ready"] is True` **and** `remine.max_possible_yield` still refuses with `max_mined: 0`,
+naming `relaxed_architecture` + `downstream_aaRS_synteny`. **The two gates disagreeing is the
+correct state until P3-15′-c/-d land**, so a change that makes them agree in either direction is a
+regression and the test says so. 56 tests in `tests/unit/test_mine_round.py` (32 → 56); full
+unit+golden **4,272 passed / 15 failed** vs a **matched baseline worktree** at `0b9ad0c`
+(**4,248 / 15**) — failure sets **identical**, `comm` empty both ways, and the **+24 is exactly the
+new tests**. **25 sabotages, 24 RED against their NAMED test**, the 25th the declared no-op
+control; each restored by rewriting the original bytes + sha256-verified, `__pycache__` cleared.
+ruff 0.15.15 + black 25.11.0 clean; no `.smk` touched.
+
+**⚠ Two sabotages did not bite first time, and neither was a gap.** (i) Swapping one entry of
+`PRODUCER_ENTRY_POINTS` left `align_shard` — the entry the test deletes — still in the tuple, so
+the mutation never removed what the test measures; emptying the tuple bites. (ii) *Renaming*
+`--no-msa-supply-available` stayed green because **argparse accepts unambiguous prefixes**, so the
+old name still parsed against the renamed option — a rename is invisible to any argparse test.
+Deleting the argument bites. Both were badly aimed mutations, not missing coverage — but a
+campaign that had stopped at "2 misses, close enough" would have recorded the opposite.
+
+**Decisions.** No ADR amendment and no §7 sign-off: this executes ADR-0002's and ADR-0006 A3's
+already-signed consequence. ADR-0006 **A2**'s scope-guard correction still reads *"At P2 neither
+protective backend exists"* — left untouched, since it is a dated record of the P2 state, not a
+current-state claim, and amending signed ADR prose needs sign-off. `slurm/p3/stage1_remine.sbatch`
+still gates its `--msa-supply-available` on an operator env var defaulting to `0`; left as is —
+stale in the **fail-closed** direction (it can only cause a refusal, never a false ready), and the
+P3 RUN's flags belong to P3-15′-b/-d.
+
+**Observed, not changed.** `remine.max_possible_yield` treats *no* `stage2_threshold` as a hard
+0, while `spare_rule.unavailable_disjuncts` does **not** count the Stage-2 disjunct as unavailable
+when the threshold is `None` — the conservative direction, and its docstring declares it as
+policy, so it is recorded here rather than relitigated. It does not affect this step's verdict:
+(b) and (c) block the yield on their own.
+
+**Commit.** _(see the squash-merge SHA in `TODO.md`)_
+
+## Step P3-15′-a (review r1) — 2026-08-05: a guard that reported after the side effect it prevents
+
+**CodeRabbit CLI r1: `No findings ✔`** across all six files. **The GitHub app, reviewing the same
+commit, returned one — major, and right.** Two independent paths, one finding between them, found
+by the path the CLI missed: run both.
+
+**The finding.** `_cmd_plan` wrote `--out` and printed the plan, *then* returned 4. So on a
+checkout that cannot evidence the supply, `reports/p2/mine_round_plan.json` was left on disk saying
+`ready: true, msa_supply_available: true` — and the §9.3 artifact verify gates on **exactly that
+key**. The job exits non-zero and writes no `DONE`, but the stale artifact reads as a good plan.
+This is [[guard-runs-after-what-it-guards]] in my own new code, one step after writing a derivation
+whose entire purpose is that a declaration cannot outrun its evidence. **Reproduced by execution
+before fixing** (rc 4, file present, `ready` `True`).
+
+**The fix is not the one proposed, and the difference is load-bearing.** CodeRabbit suggested
+moving the gate above the write, i.e. *not writing at all* on the refusal. That leaves the worse
+half of the same hole: a plan from an **earlier, good** run sitting at that path survives untouched
+and still reads `ready: true`. The artifact is therefore still written, but with the top-level
+`ready` forced `False` and `ready_overridden_by:
+"msa_supply_declaration_unevidenced"` naming what overrode it — while the nested `readiness` object
+keeps the readiness gate's own untouched verdict (`ready: true`, `refusal_reason: null`). Nothing
+is misreported: the top-level key means *"may this round proceed"*, and it may not.
+[[review-finding-right-fix-wrong]], fourth occurrence in this repo — judge the finding and the fix
+separately. The proposed fix is shipped **as a sabotage** (S29) and is RED against the same test,
+which is what "the difference is load-bearing" means operationally.
+
+**One more, self-found before the gate, of the same family.** `certification_green` read the
+matched-control flags off the evidence record's **own key set**, so an emptied
+`matched_control: {}` had nothing left to be unmatched and certified green — a clause vacuously
+satisfied exactly when the evidence is missing. `REQUIRED_MATCHED_CONTROL_FLAGS` names the four
+dimensions; a missing key now counts as unmatched. Re-aiming the sabotage this fix staled is how
+it stayed honest: the harness reported the stale anchor as a **MISS**, not a pass.
+
+**Validation.** 60 tests (56 → 60); full unit+golden **4,276 passed / 15 failed** vs the matched
+baseline worktree at `0b9ad0c` (**4,248 / 15**) — failure sets identical, `comm` empty both ways.
+**29 sabotages, 28 RED against their NAMED test**, the 29th the declared no-op control. ruff
+0.15.15 + black 25.11.0 clean.
+
+## Step P3-15′-a (review r2) — 2026-08-05: a fail-closed function that could still crash, and a test that was green for nothing
+
+**CodeRabbit CLI r2 (minor), and it is right.** `derive_msa_supply_available` is documented as
+fail-closed on *every* clause, but the producer-import handler caught only `ImportError` — a
+module-level `RuntimeError` / `OSError` / `AttributeError` anywhere in
+`covariation_producer` or its transitive imports would propagate straight out, so `plan` and
+`apply-spare-rule` would abort with a **traceback** instead of the exit-4 refusal. A producer too
+broken to import is exactly the state the clause exists to report. **Reproduced by execution**
+(a `MetaPathFinder` raising `RuntimeError` for that module name) before broadening the handler.
+
+**⚠ AND THE TEST FOR IT WAS VACUOUS ON THE FIRST TRY — GREEN ALONE, MEANINGLESS IN THE FILE.**
+It passed in isolation and **failed in the full run**, which is the good direction to fail in.
+Cause: `from pkg import sub` **skips the submodule import entirely** when `hasattr(pkg, "sub")`
+(CPython's `_handle_fromlist`), and an earlier test in the same file imports the producer, which
+sets that attribute on `tbox_finder.mining`. Deleting the `sys.modules` entry is therefore not
+enough — the finder never fires and the fixture measures nothing. The attribute is deleted off the
+**parent package** too. Had the ordering been the other way round, this would have shipped as a
+test that asserts a refusal it never triggers — the [[raises-test-needs-a-positive-control]] family,
+reached through an import-system detail rather than an assertion.
+
+**Validation.** 61 tests (60 → 61); full unit+golden **4,277 passed / 15 failed** vs the matched
+baseline worktree at `0b9ad0c` (**4,248 / 15**) — failure sets identical. **30 sabotages, 29 RED
+against their NAMED test**, the 30th the declared no-op control; S30 restores exactly this
+finding (`except Exception` → `except ImportError`) and is RED. ruff 0.15.15 + black 25.11.0 clean.
+
+## Step P3-15′-a (review r3) — 2026-08-05: two more fail-closed holes, both reachable, both measured
+
+**r3-1 (minor) — the DVC-pointer reader could raise instead of returning `None`, twice.** Its
+contract is *"`None` on anything unexpected"*, but `read_text(encoding="utf-8")` raises
+**`UnicodeDecodeError`** (not an `OSError`) on non-UTF-8 bytes, and `int()` raises **`ValueError`**
+past CPython's 4300-digit `str`→`int` cap — `\d+` guarantees *digits*, not that `int` accepts them.
+Either escapes `derive_msa_supply_available` and crashes the exit-4 refusal path. **Both reproduced
+by execution** before fixing (`UnicodeDecodeError`; `ValueError: Exceeds the limit (4300 digits)`),
+and both ship as sabotages (S31, S32) RED against their own parametrised case.
+
+**r3-2 (minor) — a mutation that could silently become a no-op.** The `target_db_versioned` test
+mutated the fixture with a literal `replace("nfiles: 10", "nfiles: 0")`, matching only the value
+`data/interim/homolog_db.dvc` happens to carry today. A regenerated DB with a different file count
+turns that into a no-op: the pointer stays well-formed, the clause stays `True`, and the test fails
+with an unrelated message instead of measuring what it names. The count is now **read through the
+production reader** and the mutation is asserted to have taken effect — which is what the two
+neighbouring pointer tests already did, so this was an inconsistency as much as a latent bug.
+
+**Validation.** 63 tests (61 → 63); full unit+golden **4,279 passed / 15 failed** vs the matched
+baseline worktree at `0b9ad0c` (**4,248 / 15**) — failure sets identical, `comm` empty both ways.
+**32 sabotages, 31 RED against their NAMED test**, the 32nd the declared no-op control. ruff
+0.15.15 + black 25.11.0 clean. CI green on every head so far (`2e2a97a`, `378974f`, `02d178d`,
+`7982cc6`) — which also settles the one environment question the derivation raised: `REPO_ROOT`
+resolves correctly under CI's editable install, so the evidence-derived pin holds there too.

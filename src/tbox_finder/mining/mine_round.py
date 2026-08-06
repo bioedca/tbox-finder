@@ -31,12 +31,28 @@ success, the exact degradation the readiness gate exists to prevent (but does no
 because it keys on ``backend_available``). So :func:`build_round_availability` gates
 ``any_helix_rscape`` on **MSA-producibility**, not on R-scape being installed.
 
-The consequence, recorded honestly: at P2 the per-candidate homolog-search MSA supply
-(ADR-0006 D7 / A1) is **not built**, and no synteny backend exists, so
-:data:`MSA_SUPPLY_AVAILABLE` is ``False``, no protective backend is available, and every
-round is **refused** at readiness. The N=4 RUN is therefore blocked until that supply lands
-(a downstream step); this driver is the correct fail-closed machinery, and
-``slurm/p2/mine_round.sbatch`` exits at the readiness preflight before spending any GPU time.
+Where the supply actually stands (P3-15′-a, 2026-08-05)
+------------------------------------------------------
+The covariation-(a) supply **exists**, so :data:`MSA_SUPPLY_AVAILABLE` is ``True``: the
+D7/A1 homolog-search target DB is built and DVC-versioned (SLURM job 741); the per-candidate
+search → mlocarna alignment → R-scape leg is :mod:`tbox_finder.mining.covariation_producer`
+and is certified covariation-*producible* — not merely R-scape-installed — by a must-fire
+matched control on a real divergent class-II T-box (job 766; ADR-0002's certification gate,
+ADR-0006 A3); and :func:`apply_spare_rule` routes the produced status onto each candidate's
+evidence. Readiness therefore passes on the protective (a)-backend alone.
+
+That does **not** mean a round can mine anything. Sparing is a disjunction, so mining is a
+conjunction: relaxed-architecture-(b) and synteny-(c) still have no backend, so
+:func:`tbox_finder.mining.remine.max_possible_yield` bounds every round's yield at 0 and
+refuses. The two gates answering differently — ``ready`` ``True``, ``yield_producible``
+``False`` — is the **correct** state until (b) and (c) land, not an inconsistency.
+
+The constant is a *declaration*, so it is checked rather than trusted:
+:func:`derive_msa_supply_available` re-derives the same fact from the shipped evidence and
+:func:`plan_round` publishes the derivation beside the claim, so the constant cannot drift
+from reality in either direction — a checkout missing the DB pointer or the certification
+makes the CLI **refuse** (exit 4), and a constant left ``False`` while the supply exists
+fails the unit pin.
 
 ``numpy``-tier (via :mod:`tbox_finder.eval.mining_criterion` → ``infer.call``) but
 **torch-free at import**: the checkpoint scan imports torch lazily inside the two scan
@@ -47,8 +63,10 @@ ADR-0005 D3 + D14 + A9; ADR-0006 D9 / D11 + A2.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
+import re
 import signal
 import sys
 import time
@@ -73,17 +91,299 @@ STEP = "P2-10e"
 GENOMIC_WINDOW_POOL = "genomic_window"
 
 #: Whether the per-candidate covariation MSA supply (ADR-0006 D7 / A1: homolog-DB search +
-#: CM-free de-novo alignment) exists **yet**. It does not — the homolog-search *target DB*
-#: was built (P2-10c′-homologdb) but the per-candidate search + alignment that turns a
-#: candidate into an MSA is downstream infrastructure. This is the single flag the MSA-supply
-#: unblock step flips to ``True``; until then no covariation verdict is producible and — with
-#: no synteny backend either — every round is refused at readiness. Recorded as data so the
-#: RUN blocker is inspectable, not buried in prose.
-MSA_SUPPLY_AVAILABLE = False
+#: CM-free de-novo alignment) exists. It does, since **P3-15′-a**: target DB built and
+#: versioned (job 741), producer certified covariation-producible (job 766), producer wired
+#: into the round. Kept as an explicit constant rather than a filesystem probe at import so
+#: it stays greppable, import-cheap and overridable per run — and kept **honest** by
+#: :func:`derive_msa_supply_available`, which re-derives the same fact from the shipped
+#: evidence and is what the unit pin and the CLI preflight compare it against.
+MSA_SUPPLY_AVAILABLE = True
+
+#: The git-tracked evidence :func:`derive_msa_supply_available` re-derives the supply from.
+#: All three ride any checkout (including the cluster's and CI's) — none is DVC- or
+#: LFS-shaped — so the derivation answers the same in every environment.
+HOMOLOG_DB_DVC = "data/interim/homolog_db.dvc"
+HOMOLOG_MSA_PROVENANCE = "data/interim/homolog_msa/provenance.json"
+CERTIFIED_MSA = "data/interim/homolog_msa/certified_positive.sto"
+
+#: ``src/tbox_finder/mining/mine_round.py`` → the repo root (the project runs from a checkout
+#: with ``PYTHONPATH=src`` or an editable install; both keep this file inside the tree).
+REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
 class MineRoundError(ValueError):
     """Raised on malformed round-driver input (bad window id, empty probe set)."""
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# The validator half of MSA_SUPPLY_AVAILABLE — re-derive the supply from evidence
+# ═════════════════════════════════════════════════════════════════════════════
+#: The DVC directory-pointer shape (``dvc add`` writes exactly this). Read with strict
+#: regexes rather than a YAML parse: no ``envs/*.yml`` puts ``pyyaml`` in the CI tier, and a
+#: pointer that does not match this shape exactly must fail **closed** rather than be
+#: interpreted generously — the whole point of the clause is that a missing/rewritten DB
+#: cannot read as a present one.
+_DVC_MD5 = re.compile(r"^\s*-\s*md5:\s*([0-9a-f]{32}\.dir)\s*$", re.MULTILINE)
+_DVC_PATH = re.compile(r"^\s*path:\s*(\S+)\s*$", re.MULTILINE)
+_DVC_NFILES = re.compile(r"^\s*nfiles:\s*(\d+)\s*$", re.MULTILINE)
+_DVC_SIZE = re.compile(r"^\s*size:\s*(\d+)\s*$", re.MULTILINE)
+
+#: The producer entry points a round's covariation leg actually calls — the per-candidate
+#: homolog search, the CM-free de-novo alignment, the R-scape scoring, and the two the round
+#: driver itself imports (:func:`apply_spare_rule`). Checked by attribute on the imported
+#: module, so a producer reduced to a stub file cannot satisfy the clause.
+PRODUCER_ENTRY_POINTS = (
+    "search_shard",
+    "align_shard",
+    "score_shard",
+    "merge_status_tables",
+    "load_status_map",
+)
+
+#: The matched-control dimensions the certification must report as matched, **named** rather
+#: than iterated off whatever keys the record happens to carry: a clause read from the
+#: evidence's own key set is vacuously satisfied exactly when the evidence is missing, so an
+#: emptied ``matched_control`` would certify "all matched" by having nothing to be unmatched.
+REQUIRED_MATCHED_CONTROL_FLAGS = (
+    "composition_matched",
+    "depth_matched",
+    "ss_cons_matched",
+    "width_matched",
+)
+
+
+def read_dvc_dir_pointer(path: str | Path) -> dict[str, Any] | None:
+    """A DVC **directory** pointer → ``{md5, path, nfiles, size}``, or ``None`` if malformed.
+
+    ``None`` on anything unexpected — unreadable file, no/multiple ``md5`` lines, a
+    non-``.dir`` hash, a missing field. Callers treat ``None`` as "not versioned".
+    """
+    try:
+        text = Path(path).read_text(encoding="utf-8")
+    except (OSError, UnicodeError):
+        # UnicodeDecodeError as well as OSError (CodeRabbit CLI r3, both reproduced by
+        # execution): a pointer carrying non-UTF-8 bytes is malformed, not a crash.
+        return None
+    md5s = _DVC_MD5.findall(text)
+    paths = _DVC_PATH.findall(text)
+    nfiles = _DVC_NFILES.findall(text)
+    sizes = _DVC_SIZE.findall(text)
+    if not (len(md5s) == len(paths) == len(nfiles) == len(sizes) == 1):
+        return None
+    try:
+        # `\d+` guarantees digits, not that ``int`` accepts them: CPython caps str→int at
+        # 4300 digits and raises ValueError past it (measured). Malformed ⇒ ``None``.
+        n_files, size = int(nfiles[0]), int(sizes[0])
+    except ValueError:
+        return None
+    return {
+        "md5": md5s[0],
+        "path": paths[0],
+        "nfiles": n_files,
+        "size": size,
+    }
+
+
+def _read_json_or_none(path: str | Path) -> Any:
+    try:
+        return json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+
+
+def _sha256(path: str | Path) -> str | None:
+    try:
+        return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+    except OSError:
+        return None
+
+
+def derive_msa_supply_available(*, repo_root: str | Path | None = None) -> dict[str, Any]:
+    """Re-derive, from the shipped evidence, whether the covariation-(a) MSA supply exists.
+
+    :data:`MSA_SUPPLY_AVAILABLE` is a hand-written declaration; this is the independent
+    re-derivation the declaration is checked against, so the constant cannot drift from
+    reality in **either** direction (a stale ``False`` fails the unit pin; a ``True`` on a
+    checkout that cannot evidence it refuses the CLI preflight). It is deliberately *not*
+    what :func:`build_round_availability` reads — a run must be able to declare the supply
+    unavailable on a machine that has not staged it, which is a strictly narrower claim.
+
+    Six clauses, every one fail-closed on a missing or malformed artifact, and each
+    independently breakable (that is what makes ``all(...)`` testable at all):
+
+    ``target_db_versioned``
+        ``data/interim/homolog_db.dvc`` is a well-formed non-empty directory pointer — the
+        D7/A1 homolog-search target DB is built and version-pinned (job 741).
+    ``producer_present``
+        :mod:`tbox_finder.mining.covariation_producer` imports and exposes every entry in
+        :data:`PRODUCER_ENTRY_POINTS` — the per-candidate search → align → score chain.
+    ``producer_status_wired``
+        :func:`candidate_evidence` actually **stamps** a produced status onto the candidate's
+        ``any_helix_rscape`` instead of defaulting it to ``unavailable``. Measured by calling
+        it, not by reading a signature: a producer that ships but whose output the round drops
+        on the floor is the no-op this whole gate exists to refuse.
+    ``certification_green``
+        the job-766 provenance records the must-fire matched control passing *as a control*:
+        the real class-II seed ``passed``, its column-shuffled twin ``failed`` (an
+        ``unavailable`` twin is "no power", which certifies nothing), the alignment
+        composition/depth/width/SS_cons matched, and the depth at or above the ADR-0006 A2
+        Pin 2 floor read from :data:`~tbox_finder.power.MIN_REAL_HOMOLOG_N` rather than
+        re-typed.
+    ``certification_matches_versioned_db``
+        that certification was produced against the **same** DB version the pointer names
+        today — a DB rebuilt after certification would otherwise inherit a green it never
+        earned.
+    ``certified_msa_intact``
+        the committed certified MSA still hashes to what the run recorded.
+    """
+    root = Path(repo_root) if repo_root is not None else REPO_ROOT
+    clauses: dict[str, bool] = {}
+    reasons: list[str] = []
+
+    def _fail(clause: str, why: str) -> bool:
+        reasons.append(f"{clause}: {why}")
+        return False
+
+    # ── clause 1: the target DB is built and version-pinned ──────────────────
+    pointer = read_dvc_dir_pointer(root / HOMOLOG_DB_DVC)
+    if pointer is None:
+        clauses["target_db_versioned"] = _fail(
+            "target_db_versioned", f"{HOMOLOG_DB_DVC} is missing or not a DVC directory pointer"
+        )
+    elif pointer["path"] != "homolog_db":
+        clauses["target_db_versioned"] = _fail(
+            "target_db_versioned", f"pointer names {pointer['path']!r}, expected 'homolog_db'"
+        )
+    elif pointer["nfiles"] < 1 or pointer["size"] < 1:
+        clauses["target_db_versioned"] = _fail(
+            "target_db_versioned",
+            f"pointer is empty (nfiles={pointer['nfiles']}, size={pointer['size']})",
+        )
+    else:
+        clauses["target_db_versioned"] = True
+
+    # ── clause 2: the producer ships ─────────────────────────────────────────
+    try:
+        from tbox_finder.mining import covariation_producer
+    except Exception as exc:  # noqa: BLE001 - a broken producer is a FAILED clause, not a crash
+        # Deliberately broader than ImportError (CodeRabbit CLI r2, reproduced by execution):
+        # a module-level failure anywhere in the producer or its transitive imports —
+        # RuntimeError, OSError, AttributeError — would otherwise propagate out of a function
+        # documented as fail-closed on every clause, aborting `plan` with a traceback instead
+        # of the exit-4 refusal. A producer that cannot even import is exactly the state this
+        # clause exists to report.
+        covariation_producer = None
+        clauses["producer_present"] = _fail("producer_present", f"import failed: {exc!r}")
+    if covariation_producer is not None:
+        missing = [e for e in PRODUCER_ENTRY_POINTS if not hasattr(covariation_producer, e)]
+        clauses["producer_present"] = (
+            True
+            if not missing
+            else _fail("producer_present", f"covariation_producer lacks {missing}")
+        )
+
+    # ── clause 3: the round stamps what the producer produced ────────────────
+    from tbox_finder.mining.spare_rule import STATUS_PASSED
+
+    probe_id = "__msa_supply_probe__"
+    stamped = candidate_evidence(probe_id, {probe_id: STATUS_PASSED}).any_helix_rscape
+    clauses["producer_status_wired"] = (
+        True
+        if stamped == STATUS_PASSED
+        else _fail(
+            "producer_status_wired",
+            f"a produced {STATUS_PASSED!r} status reached the candidate as {stamped!r} — "
+            "the producer's output is not composed into the round",
+        )
+    )
+
+    # ── clauses 4-5: the must-fire certification, and that it names this DB ──
+    provenance = _read_json_or_none(root / HOMOLOG_MSA_PROVENANCE)
+    extra = provenance.get("extra", {}) if isinstance(provenance, Mapping) else {}
+    if not isinstance(extra, Mapping) or not extra:
+        clauses["certification_green"] = _fail(
+            "certification_green", f"{HOMOLOG_MSA_PROVENANCE} is missing or malformed"
+        )
+        clauses["certification_matches_versioned_db"] = _fail(
+            "certification_matches_versioned_db", f"{HOMOLOG_MSA_PROVENANCE} carries no inputs"
+        )
+    else:
+        from tbox_finder.power import MIN_REAL_HOMOLOG_N
+
+        control = extra.get("matched_control")
+        control = control if isinstance(control, Mapping) else {}
+        floor = extra.get("min_sequences_floor")
+        depth = extra.get("n_records")
+        failures: list[str] = []
+        if extra.get("positive_status") != "passed":
+            failures.append(f"positive_status={extra.get('positive_status')!r} (want 'passed')")
+        if extra.get("shuffled_status") != "failed":
+            failures.append(
+                f"shuffled_status={extra.get('shuffled_status')!r} (want 'failed' — an "
+                "'unavailable' twin is no power, which certifies nothing)"
+            )
+        unmatched = [k for k in REQUIRED_MATCHED_CONTROL_FLAGS if not control.get(k)]
+        if unmatched:
+            failures.append(f"matched_control unmet (missing counts as unmatched): {unmatched}")
+        if not isinstance(floor, int) or floor < MIN_REAL_HOMOLOG_N:
+            failures.append(f"min_sequences_floor={floor!r} below MIN_REAL_HOMOLOG_N")
+        if not isinstance(depth, int) or not isinstance(floor, int) or depth < floor:
+            failures.append(f"certified depth n_records={depth!r} below the floor {floor!r}")
+        clauses["certification_green"] = (
+            True if not failures else _fail("certification_green", "; ".join(failures))
+        )
+
+        inputs = provenance.get("inputs") if isinstance(provenance, Mapping) else None
+        inputs = inputs if isinstance(inputs, Mapping) else {}
+        certified_against = next(
+            (v for k, v in inputs.items() if str(k).startswith("data/interim/homolog_db")), None
+        )
+        if pointer is None:
+            clauses["certification_matches_versioned_db"] = _fail(
+                "certification_matches_versioned_db", "no readable DB pointer to compare against"
+            )
+        elif certified_against != pointer["md5"]:
+            clauses["certification_matches_versioned_db"] = _fail(
+                "certification_matches_versioned_db",
+                f"certified against {certified_against!r}, pointer names {pointer['md5']!r} — "
+                "the target DB changed after certification",
+            )
+        else:
+            clauses["certification_matches_versioned_db"] = True
+
+    # ── clause 6: the certified MSA is the one that was certified ────────────
+    outputs = provenance.get("outputs") if isinstance(provenance, Mapping) else None
+    outputs = outputs if isinstance(outputs, Mapping) else {}
+    recorded = outputs.get(CERTIFIED_MSA)
+    observed = _sha256(root / CERTIFIED_MSA)
+    if observed is None:
+        clauses["certified_msa_intact"] = _fail("certified_msa_intact", f"{CERTIFIED_MSA} missing")
+    elif not recorded or recorded != observed:
+        clauses["certified_msa_intact"] = _fail(
+            "certified_msa_intact", f"sha256 {observed} != recorded {recorded!r}"
+        )
+    else:
+        clauses["certified_msa_intact"] = True
+
+    return {
+        "available": all(clauses.values()),
+        "clauses": clauses,
+        "reasons": reasons,
+        "repo_root": str(root),
+    }
+
+
+def msa_supply_declaration_unevidenced(plan: Mapping[str, Any]) -> bool:
+    """Does this plan declare a supply its own checkout cannot evidence?
+
+    The asymmetry is deliberate. Declaring the supply **unavailable** while the evidence
+    says otherwise is a conservative under-claim (the round refuses; nothing is mined on a
+    machine that may not have staged the DB). Declaring it **available** without the
+    evidence is the fail-open direction — it is what would let a round pass readiness,
+    spend the GPU legs and mine on a covariation leg that cannot run.
+    """
+    derivation = plan.get("msa_supply_derivation") or {}
+    return bool(plan.get("msa_supply_available")) and not bool(derivation.get("available"))
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -118,16 +418,24 @@ def plan_round(
     msa_supply_available: bool | None = None,
     relaxed_arch_available: bool = False,
     synteny_available: bool = False,
+    repo_root: str | Path | None = None,
 ) -> dict[str, Any]:
     """Decide whether a round may run, and record why not — before any GPU time.
 
-    Returns ``{availability, readiness, ready, ...}``. ``ready`` is ``False`` at P2 (no
-    protective backend), and the driver's caller (``mine_round.sbatch``) exits on it rather
-    than scanning 3.63M windows only to have :func:`hard_negative.mine_round` refuse.
+    Returns ``{availability, readiness, ready, msa_supply_derivation, ...}``. Since P3-15′-a
+    ``ready`` is ``True`` on the covariation-(a) backend alone; the driver's caller
+    (``mine_round.sbatch``) exits on it rather than scanning 3.63M windows only to have
+    :func:`hard_negative.mine_round` refuse. **Readiness is not permission to mine** — see
+    :func:`tbox_finder.mining.remine.max_possible_yield`, which still bounds the round's
+    yield at 0 while (b) and (c) have no backend.
 
     ``msa_supply_available`` defaults to the module flag :data:`MSA_SUPPLY_AVAILABLE`, resolved
     via a ``None`` sentinel at **call** time (not bound at import) so that flipping the flag at
     the unblock step reaches every caller, including direct ones.
+
+    The plan carries :func:`derive_msa_supply_available`'s clause-by-clause re-derivation
+    beside the declaration, so the artifact a round is verified from records the *evidence*
+    for its availability claim rather than only the claim.
     """
     if msa_supply_available is None:
         msa_supply_available = MSA_SUPPLY_AVAILABLE
@@ -143,6 +451,7 @@ def plan_round(
         "readiness": readiness,
         "ready": bool(readiness["ready"]),
         "msa_supply_available": bool(msa_supply_available),
+        "msa_supply_derivation": derive_msa_supply_available(repo_root=repo_root),
         "rscape_installed": bool(rscape_installed),
         "schema_version": SCHEMA_VERSION,
         "step": STEP,
@@ -805,10 +1114,35 @@ def _cmd_plan(args: argparse.Namespace) -> int:
         relaxed_arch_available=bool(args.relaxed_arch_available),
         synteny_available=bool(args.synteny_available),
     )
+    unevidenced = msa_supply_declaration_unevidenced(plan)
+    if unevidenced:
+        # The artifact must not be able to read as a good plan. The §9.3 artifact verify gates
+        # on `ready == true` in this very file, so returning 4 *after* writing a plan that says
+        # `ready: true` would leave the stale artifact to pass a check the run just failed — a
+        # guard reporting after the side effect it exists to prevent. The write is kept (rather
+        # than skipped) so a plan from an EARLIER run cannot survive at this path either, and
+        # `readiness` keeps the readiness gate's own untouched verdict: nothing is misreported,
+        # the top-level "may this round proceed" is simply False, and it names what overrode it.
+        plan = {
+            **plan,
+            "ready": False,
+            "ready_overridden_by": "msa_supply_declaration_unevidenced",
+        }
     text = json.dumps(plan, indent=2, sort_keys=True)
     if args.out:
         Path(args.out).write_text(text + "\n", encoding="utf-8")
     print(text)
+    if unevidenced:
+        # Its own exit code: 3 is the *expected* refusal the sbatch converts to a clean exit,
+        # so routing this through 3 would turn a misconfigured checkout into a silent
+        # "no round today". This is a staging fault.
+        print(
+            "FATAL: this round declares the covariation MSA supply available, but this "
+            "checkout cannot evidence it — "
+            f"{'; '.join(plan['msa_supply_derivation']['reasons'])}",
+            file=sys.stderr,
+        )
+        return 4
     if not plan["ready"]:
         # A refused round is not an error in the crash sense — it is the honest,
         # expected P2 outcome. Exit code 3 lets the sbatch branch on it explicitly
@@ -899,6 +1233,20 @@ def _cmd_apply_spare_rule(args: argparse.Namespace) -> int:
     rscape_installed = (
         args.rscape_installed if args.rscape_installed is not None else backend_available()
     )
+    # The same evidence gate the preflight applies, at the leg that actually mines: this is
+    # the call that turns candidates into hard negatives, and it is reached on a different
+    # job (mine_round_retrain.sbatch) from the one that ran `plan`, so it cannot inherit the
+    # preflight's verdict. Declared-available + unevidenced is fatal (4), never a quiet round.
+    derivation = derive_msa_supply_available()
+    if msa_supply_declaration_unevidenced(
+        {"msa_supply_available": args.msa_supply_available, "msa_supply_derivation": derivation}
+    ):
+        print(
+            "FATAL: --msa-supply-available declared, but this checkout cannot evidence the "
+            f"covariation MSA supply — {'; '.join(derivation['reasons'])}",
+            file=sys.stderr,
+        )
+        return 4
     report = apply_spare_rule(
         args.manifest,
         args.status_table,
@@ -918,6 +1266,40 @@ def _cmd_apply_spare_rule(args: argparse.Namespace) -> int:
     return 0
 
 
+def _add_msa_supply_flags(parser: argparse.ArgumentParser) -> None:
+    """The MSA-supply declaration, in **both** directions.
+
+    The default is the module flag, read at parser-build (i.e. ``main()``) time so flipping
+    :data:`MSA_SUPPLY_AVAILABLE` reaches the CLI without a CLI change. Since P3-15′-a that
+    default is ``True``, which is exactly why the negative flag exists: a bare ``store_true``
+    would leave the declaration one-way and give a checkout that has **not** staged the
+    homolog DB no way to say so — it would have to discover the gap the expensive way, in the
+    producer array, after the GPU scan legs. Mutually exclusive, so a script cannot assert
+    both and silently get whichever argparse saw last.
+    """
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument(
+        "--msa-supply-available",
+        dest="msa_supply_available",
+        action="store_true",
+        default=MSA_SUPPLY_AVAILABLE,
+        help=(
+            "declare the ADR-0006 D7/A1 per-candidate MSA supply available; absent ⇒ the "
+            f"module default MSA_SUPPLY_AVAILABLE (currently {MSA_SUPPLY_AVAILABLE})"
+        ),
+    )
+    group.add_argument(
+        "--no-msa-supply-available",
+        dest="msa_supply_available",
+        action="store_false",
+        default=argparse.SUPPRESS,
+        help=(
+            "declare it UNAVAILABLE on this machine (e.g. the homolog DB is not staged here) "
+            "— the conservative direction: the round refuses instead of mining"
+        ),
+    )
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="tbox_finder.mining.mine_round")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -929,16 +1311,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         default=None,
         help="override R-scape presence (default: probe covariation.backend_available())",
     )
-    plan.add_argument(
-        "--msa-supply-available",
-        action="store_true",
-        default=MSA_SUPPLY_AVAILABLE,
-        help=(
-            "declare the ADR-0006 D7/A1 per-candidate MSA supply available; absent ⇒ the "
-            "module default MSA_SUPPLY_AVAILABLE, so flipping that flag at the unblock step "
-            "unblocks the preflight without a CLI change"
-        ),
-    )
+    _add_msa_supply_flags(plan)
     plan.add_argument("--relaxed-arch-available", action="store_true")
     plan.add_argument("--synteny-available", action="store_true")
     plan.add_argument("--out", default=None, help="write the plan JSON here")
@@ -992,7 +1365,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     apply.add_argument("--status-table", required=True, help="the merged covariation status table")
     apply.add_argument("--out", required=True)
     apply.add_argument("--rscape-installed", type=_parse_bool, default=None)
-    apply.add_argument("--msa-supply-available", action="store_true", default=MSA_SUPPLY_AVAILABLE)
+    _add_msa_supply_flags(apply)
     apply.add_argument("--relaxed-arch-available", action="store_true")
     apply.add_argument("--synteny-available", action="store_true")
     apply.add_argument("--union-prior", default="data/processed/priors/union_prior.parquet")
@@ -1004,20 +1377,29 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 
 __all__ = [
+    "CERTIFIED_MSA",
     "GENOMIC_WINDOW_POOL",
+    "HOMOLOG_DB_DVC",
+    "HOMOLOG_MSA_PROVENANCE",
     "MSA_SUPPLY_AVAILABLE",
     "MineRoundError",
+    "PRODUCER_ENTRY_POINTS",
+    "REQUIRED_MATCHED_CONTROL_FLAGS",
+    "REPO_ROOT",
     "SCHEMA_VERSION",
     "STEP",
     "ScanThroughputLog",
     "apply_spare_rule",
     "build_round_availability",
     "candidate_evidence",
+    "derive_msa_supply_available",
     "evaluate_probe_round",
     "load_admissible_accessions",
     "main",
+    "msa_supply_declaration_unevidenced",
     "parse_window_name",
     "plan_round",
+    "read_dvc_dir_pointer",
     "read_fp_manifest",
     "run_measured_scan",
     "scan_admissible_genomes",
