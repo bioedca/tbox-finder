@@ -3324,4 +3324,25 @@ green because their node ids named a *parametrized* test without its parameter a
 **zero** tests — the harness now refuses a run that collects nothing, which is the same
 "absence reads as a pass" failure the campaign exists to catch. ruff 0.15.15 + black 25.11.0 clean.
 
-**Commit.** <SHA>
+**Review.** Two CodeRabbit-CLI rounds, **13 findings, all 13 real** (4 major); a third round is
+**unmet** ("Review limit reached", 41-minute reset), so the gate is not satisfied and the PR is not
+merged. Every major was a hole in a guard rather than in the science. r1: the supply derivation
+could return `available: True` **with a clause missing** — set in the `except` branch *or* the `if`
+branch, and with `production_arm_config()` returning `None` while `sweep_fingerprint` succeeded
+neither ran, so `all(...)` skipped an absent key (reproduced: 5 of 6 clauses, `available=True`);
+two array jobs sharing a `ROUND_DIR` both published to it; and `N_SHARDS=3` with `--array=0-1`
+passed the per-task bound check while **nobody merged**. r2: `flock -n` could leave **nobody
+merging** even with a matched array (A counts 1 of 2 under the lock, B fails the lock and exits, A
+exits on the stale count — reproduced on a harness, fixed by a blocking lock plus a `MERGE_OK`
+re-check), and a control record made of **booleans** certified, because `isinstance(True, int)` is
+True so `true`/`false` clears both floors and the margin. ⚠ The `CodeRabbit` **check read `pass` on
+a rate-limit notice** throughout — §5.1's trap for the tenth step running; no Greptile credit spent
+(budget 4/16 used, `available`), since the CLI resets shortly and is free.
+
+**Also worth recording: `sbatch --test-only` was green on a job that could not run.** The cluster's
+`tbox-ml-rna` has no editable install and the sbatch lacked `PYTHONPATH=src`. The preflight
+validates partition/gres/time and nothing about the body, so the §9.3 preflight is **not** evidence
+that a job will start doing work — executing the entry point on the login node is.
+
+**Commit.** `8d67169` (step) + `002f235` (PYTHONPATH) + `9594362` (review r1) + `1a4ba52` (review r2),
+PR [#111](https://github.com/bioedca/tbox-finder/pull/111)
