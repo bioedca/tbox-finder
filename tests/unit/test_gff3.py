@@ -338,6 +338,43 @@ def test_id_less_rows_do_not_merge_into_one_giant_pseudo_gene():
     assert got[0].end == 20 and got[1].start == 3000
 
 
+def test_two_ID_LESS_rows_at_IDENTICAL_coordinates_do_not_collapse():
+    """The case the *different*-coordinates test above cannot reach.
+
+    The coordinate-derived fallback is a display name, not an identity: two ID-less rows
+    sharing contig/coordinates/strand/type produce the same fallback key and merge, losing the
+    second row's attributes entirely. A merge, not a crash — so it is asserted as a count AND
+    as the surviving attributes ([[duplicate-key-merges-instead-of-colliding]]).
+    """
+    lines = [
+        "ctg1\tx\tCDS\t10\t20\t.\t+\t0\tproduct=first;locus_tag=A",
+        "ctg1\tx\tCDS\t10\t20\t.\t+\t0\tproduct=second;locus_tag=B",
+    ]
+    got = gff3.parse_gff3_cds(lines)
+    assert len(got) == 2
+    assert [gff3.attribute_first(c.attributes, "product") for c in got] == ["first", "second"]
+    assert got[0].feature_id != got[1].feature_id
+
+
+def test_declared_ids_still_group_across_rows_after_the_id_less_fix():
+    """The fix must not turn every row into its own feature — declared IDs still merge."""
+    lines = [
+        "ctg1\tx\tCDS\t10\t20\t.\t+\t0\tID=cds-A",
+        "ctg1\tx\tCDS\t30\t40\t.\t+\t0\tID=cds-A",
+    ]
+    (c,) = gff3.parse_gff3_cds(lines)
+    assert c.segments == ((10, 20), (30, 40)) and c.feature_id == "cds-A"
+
+
+def test_an_empty_ID_attribute_is_treated_as_undeclared():
+    """``ID=`` is no identity at all; grouping on ``""`` would merge every such row."""
+    lines = [
+        "ctg1\tx\tCDS\t10\t20\t.\t+\t0\tID=;product=first",
+        "ctg1\tx\tCDS\t10\t20\t.\t+\t0\tID=;product=second",
+    ]
+    assert len(gff3.parse_gff3_cds(lines)) == 2
+
+
 def test_merged_attributes_keep_the_first_rows_value():
     lines = [
         "ctg1\tx\tCDS\t10\t20\t.\t+\t0\tID=cds-A;product=first",
@@ -362,6 +399,11 @@ def test_merged_attributes_keep_the_first_rows_value():
         ("ID=a;pseudo=false", False),
         ("ID=a;pseudo=no", False),
         ("ID=a", False),
+        # Repeated keys merge (parse_attributes preserves both), so reading values[0] alone
+        # calls these normal genes — and undercounts n_cds_pseudo in the offline census.
+        ("ID=a;pseudo=false;pseudo=true", True),
+        ("ID=a;pseudo=;pseudo=false", True),
+        ("ID=a;pseudo=false;pseudo=no", False),
     ],
 )
 def test_is_pseudo_reads_the_flag_not_its_presence_alone(col9, expected):

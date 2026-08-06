@@ -53,6 +53,12 @@ def _no_network(monkeypatch):
     monkeypatch.setattr(
         asup, "_urlopen_text", lambda url: (_ for _ in ()).throw(_NetworkAccess(url))
     )
+    # The THIRD transport helper. Leaving it unguarded means any future test reaching a supply
+    # code path that HEADs would issue a live request while this file's docstring still claims
+    # it does not — the PR #112 shape the docstring itself cites.
+    monkeypatch.setattr(
+        asup, "_urlhead_length", lambda url: (_ for _ in ()).throw(_NetworkAccess(url))
+    )
 
 
 def _target(accession: str = ACC, url: str = URL, md5: str = PAYLOAD_MD5, n: int = N_PAYLOAD):
@@ -510,10 +516,37 @@ def test_a_cached_file_is_re_hashed_and_not_re_downloaded(tmp_path):
     (tmp_path / "GCA_000296795.1.gff.gz").write_bytes(PAYLOAD)
 
     def _must_not_run(url):
-        raise AssertionError(f"downloaded {url} despite a valid cache hit")
+        # _NetworkAccess, not AssertionError: ``download_gff`` catches ``Exception`` and
+        # retries, so an AssertionError signal is absorbed by the very loop it is watching —
+        # the test would then sleep the real 1.5/3.0/4.5 s schedule and fail on a status
+        # assertion instead of this message ([[guard-exception-swallowed-by-subject]]).
+        raise _NetworkAccess(f"downloaded {url} despite a valid cache hit")
 
     row = af.fetch_one(_target(), annotation_dir=tmp_path, opener=_must_not_run)
     assert row["status"] == af.STATUS_OK and row["from_cache"] is True
+
+
+def test_the_cache_hit_guard_propagates_rather_than_being_retried(tmp_path):
+    """Why the guard above must be a ``BaseException``, asserted where it is falsifiable.
+
+    The cache-hit test alone cannot see the difference: when the cache path is correct the
+    guard is never called, and when it regresses an ``AssertionError`` is swallowed by
+    ``download_gff``'s ``except Exception`` and the test still goes red — just 9 s later, on a
+    status assertion, with the wrong message. Here the guard is *reached* (``force=True``), so
+    the exception type is load-bearing: an ``Exception`` subclass would be retried and this
+    would return a row instead of raising.
+    """
+    (tmp_path / "GCA_000296795.1.gff.gz").write_bytes(PAYLOAD)
+    slept: list[float] = []
+
+    def _guard(url):
+        raise _NetworkAccess(f"downloaded {url}")
+
+    with pytest.raises(_NetworkAccess):
+        af.fetch_one(
+            _target(), annotation_dir=tmp_path, opener=_guard, sleep=slept.append, force=True
+        )
+    assert slept == []
 
 
 def test_a_corrupted_cached_file_is_re_downloaded_not_trusted(tmp_path):
@@ -644,7 +677,10 @@ def test_each_clause_fails_alone(tmp_path, clause, mutate):
 def test_validation_evaluates_exactly_the_declared_clause_set(tmp_path):
     """A clause that is never evaluated contributes nothing to the ``all`` and passes.
 
-    Asserted as set equality, so *adding* a clause without declaring it is caught too.
+    Asserted as set equality over the *declared* set. The opposite direction — a clause
+    computed but never declared — cannot be seen from here, because ``named`` is built by
+    iterating ``REQUIRED_CLAUSES``; it is asserted separately against the check
+    ``validate_fetch_report`` now makes for it.
     """
     report = _clean_report(tmp_path)
     for key in ("sweep_complete", "n_targets", "control", "orphans"):
@@ -659,6 +695,59 @@ def test_validation_evaluates_exactly_the_declared_clause_set(tmp_path):
         "control_powered",
         "no_orphans",
     }
+
+
+def test_a_clause_computed_but_never_declared_is_reported(monkeypatch, tmp_path):
+    """The direction the set-equality test above cannot assert.
+
+    ``validate_fetch_report``'s final comprehension iterates ``REQUIRED_CLAUSES``, so a clause
+    the function computes but nobody declared is never read — it would be ignored whatever it
+    evaluated to. The gate test's docstring claimed this was covered; it now is.
+    """
+    monkeypatch.setattr(af, "REQUIRED_CLAUSES", af.REQUIRED_CLAUSES - {"no_orphans"})
+    problems = af.validate_fetch_report(_clean_report(tmp_path))
+    assert problems == ["clause(s) computed but never declared: ['no_orphans']"]
+
+
+def test_strict_count_refuses_what_int_would_have_coerced():
+    """``int("339")`` succeeds and ``int(None)`` raises — both are wrong answers here."""
+    assert af.strict_count({"n": 339}, "n") == 339
+    for bad in ("339", 339.0, True, None, [339], {}):
+        with pytest.raises(af.AnnotationFetchError, match="expected an int"):
+            af.strict_count({"n": bad}, "n")
+
+
+def test_a_malformed_byte_total_refuses_instead_of_raising_a_traceback(tmp_path):
+    """A non-numeric headline must exit 3 with the named refusal, not 1 with a ValueError."""
+    path, url, payload = _control_supply(tmp_path)
+    doc = json.loads(path.read_text(encoding="utf-8"))
+    doc["gff_bytes_total_known"] = "68855450"
+    path.write_text(json.dumps(doc), encoding="utf-8")
+    with pytest.raises(af.AnnotationFetchError, match="gff_bytes_total_known"):
+        af.fetch_annotations(
+            supply_report=path, annotation_dir=tmp_path / "ann", opener=_opener({url: payload})
+        )
+
+
+def test_the_supply_report_is_read_exactly_once_per_fetch(tmp_path, monkeypatch):
+    """Two reads of one path can see different bytes, so the targets and the count they are
+    checked against could describe different payloads."""
+    path, url, payload = _control_supply(tmp_path)
+    reads: list[str] = []
+    real = af.read_supply_report
+
+    def _spy(supply_report=af.DEFAULT_SUPPLY_REPORT):
+        reads.append(str(supply_report))
+        return real(supply_report)
+
+    monkeypatch.setattr(af, "read_supply_report", _spy)
+    af.fetch_annotations(
+        supply_report=path,
+        annotation_dir=tmp_path / "ann",
+        opener=_opener({url: payload}),
+        workers=1,
+    )
+    assert reads == [str(path)]
 
 
 def test_a_missing_clause_key_is_reported_as_never_evaluated(monkeypatch, tmp_path):

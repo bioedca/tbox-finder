@@ -399,13 +399,17 @@ def build_allowlisted_opener() -> urllib.request.OpenerDirector:
     return urllib.request.build_opener(_AllowlistRedirectHandler())
 
 
-#: the single opener both transport helpers use, so neither can bypass the redirect guard.
+#: retained so an existing test can assert the guard is wired in; **not** used for requests.
+#: ``measure_annotation_supply`` drives both helpers from a ``ThreadPoolExecutor``, and
+#: ``OpenerDirector`` carries no thread-safety guarantee — so each request builds its own
+#: (cheap: a handler list, no connection state), rather than sharing one across four workers.
 _OPENER = build_allowlisted_opener()
 
 
 def _urlopen_text(url: str) -> str:
     req = urllib.request.Request(require_allowed_url(url), headers={"User-Agent": USER_AGENT})
-    with _OPENER.open(req, timeout=NCBI_TIMEOUT_S) as resp:  # noqa: S310 - https NCBI
+    opener = build_allowlisted_opener()
+    with opener.open(req, timeout=NCBI_TIMEOUT_S) as resp:  # noqa: S310 - https NCBI
         return resp.read().decode("utf-8", "replace")
 
 
@@ -413,7 +417,8 @@ def _urlhead_length(url: str) -> int:
     req = urllib.request.Request(
         require_allowed_url(url), method="HEAD", headers={"User-Agent": USER_AGENT}
     )
-    with _OPENER.open(req, timeout=NCBI_TIMEOUT_S) as resp:  # noqa: S310 - https NCBI
+    opener = build_allowlisted_opener()
+    with opener.open(req, timeout=NCBI_TIMEOUT_S) as resp:  # noqa: S310 - https NCBI
         return int(resp.headers.get("Content-Length") or -1)
 
 

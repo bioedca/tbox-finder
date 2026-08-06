@@ -329,8 +329,14 @@ def group_cds(features: Iterable[GffFeature]) -> list[CdsFeature]:
     """
     order: list[str] = []
     rows: dict[str, list[GffFeature]] = {}
-    for feature in features:
-        key = feature.feature_id
+    for index, feature in enumerate(features):
+        # Group by a **declared** ``ID`` only. The coordinate-derived fallback is a display
+        # name, not an identity: two ID-less CDS rows sharing contig, coordinates, strand and
+        # type collapse into one, and the later row's attributes are lost — a merge, which is
+        # the silent shape ([[duplicate-key-merges-instead-of-colliding]]), not a crash. The
+        # row index makes an undeclared key unique without changing anything for declared ones.
+        declared = attribute_first(feature.attributes, "ID")
+        key = declared if declared else f"{feature.feature_id}#{index}"
         if key not in rows:
             rows[key] = []
             order.append(key)
@@ -416,9 +422,12 @@ def is_pseudo(cds: CdsFeature) -> bool:
     values = cds.attributes.get("pseudo")
     if values is None:
         return False
-    if not values or values == ("",):
+    if not values:
         return True
-    return str(values[0]).strip().lower() in _TRUEISH
+    # EVERY value, not just the first: ``parse_attributes`` preserves repeated keys, so
+    # ``pseudo=false;pseudo=true`` arrives as a two-tuple and reading ``values[0]`` alone
+    # would call it a normal gene — and undercount ``n_cds_pseudo`` in the census.
+    return any(not str(v).strip() or str(v).strip().lower() in _TRUEISH for v in values)
 
 
 def gene_identity_text(cds: CdsFeature) -> tuple[str, ...]:

@@ -216,6 +216,16 @@ def load_annotation_targets(
     row count that disagrees with the report's own headline tally, a URL outside the NCBI
     allowlist, or a URL that names a different assembly than its row.
     """
+    return annotation_targets(read_supply_report(supply_report))
+
+
+def read_supply_report(supply_report: str | Path = DEFAULT_SUPPLY_REPORT) -> Mapping[str, Any]:
+    """Parse the committed supply report **once**, with its envelope checks.
+
+    Split out because a caller needing both the target list and a headline count used to parse
+    the same file twice, and two reads of one path are not guaranteed to see the same bytes —
+    the targets and the number they are checked against could describe different payloads.
+    """
     path = Path(supply_report)
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
@@ -227,7 +237,26 @@ def load_annotation_targets(
         raise AnnotationFetchError(
             f"supply report root is {type(payload).__name__}, expected an object"
         )
+    return payload
 
+
+def strict_count(payload: Mapping[str, Any], key: str) -> int:
+    """A headline count read as a **real** ``int`` or refused.
+
+    ``int(payload.get(key) or 0)`` raises ``ValueError``/``TypeError`` on a malformed field, so
+    it escapes as a traceback and exit 1 instead of the refusal and exit 3 this module
+    promises; and it would coerce ``"339"`` or ``339.7`` into a count, the coerce-before-
+    validate mistake P3-15′-b shipped where ``"0.5"`` merged as ``0.5`` and *certified*.
+    ``bool`` is excluded explicitly — ``isinstance(True, int)`` is True.
+    """
+    value = payload.get(key)
+    if not isinstance(value, int) or isinstance(value, bool):
+        raise AnnotationFetchError(f"supply report {key} is {value!r}, expected an int")
+    return value
+
+
+def annotation_targets(payload: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """An already-parsed supply report → the target list, or a refusal. Pure; no I/O."""
     if payload.get("sweep_complete") is not True:
         raise AnnotationFetchError(
             "supply report has sweep_complete != True — a partial sweep cannot enumerate the "
@@ -450,6 +479,12 @@ def validate_fetch_report(report: Mapping[str, Any]) -> list[str]:
     missing = REQUIRED_CLAUSES - set(clauses)
     if missing:
         return [f"clause(s) never evaluated: {sorted(missing)}"]
+    # The other direction, which the set-equality test alone could not assert: a clause this
+    # function computes but nobody declared is never read by the comprehension below, so it
+    # would be silently ignored no matter what it evaluated to.
+    undeclared = set(clauses) - REQUIRED_CLAUSES
+    if undeclared:
+        return [f"clause(s) computed but never declared: {sorted(undeclared)}"]
     return [f"clause failed: {name}" for name in sorted(REQUIRED_CLAUSES) if not clauses[name]]
 
 
@@ -603,10 +638,10 @@ def fetch_annotations(
     force: bool = False,
 ) -> dict[str, Any]:
     """Acquire every annotated host's GFF and return the acquisition report."""
-    targets = load_annotation_targets(supply_report)
-    payload = json.loads(Path(supply_report).read_text(encoding="utf-8"))
-    n_annotated = int(payload["admissible_status_counts"][STATUS_ANNOTATED])
-    bytes_total_in_supply = int(payload.get("gff_bytes_total_known") or 0)
+    payload = read_supply_report(supply_report)
+    targets = annotation_targets(payload)
+    n_annotated = strict_count(payload["admissible_status_counts"], STATUS_ANNOTATED)
+    bytes_total_in_supply = strict_count(payload, "gff_bytes_total_known")
 
     if not any(t["accession"] == CONTROL_ACCESSION for t in targets):
         raise AnnotationFetchError(
@@ -879,10 +914,13 @@ __all__ = [
     "fetch_annotations",
     "fetch_one",
     "find_orphans",
+    "annotation_targets",
     "load_annotation_targets",
     "main",
     "md5_hex",
     "parse_census",
+    "read_supply_report",
+    "strict_count",
     "validate_fetch_report",
     "verification_control",
 ]

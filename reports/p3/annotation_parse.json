@@ -4757,8 +4757,8 @@
     "extra": {
       "annotation_dir": "data/interim/production_annotations"
     },
-    "generated_at_utc": "2026-08-06T21:09:36.967862+00:00",
-    "git_sha": "2be5ff4d604a91947b583f12a8a18661ecc19f96",
+    "generated_at_utc": "2026-08-06T21:26:16.482474+00:00",
+    "git_sha": "76e686ff37d1e450e22d9996a21467b4d2e37eca",
     "inputs": {
       "reports/p3/annotation_supply.json": "73390dc509e0fde41758c63d69d2c2bd1d9a3a1ba01285e953c4d6c53a96b539"
     },
