@@ -928,7 +928,7 @@ def parse_census(
                 # section on a file the reader read straight through (or the reverse), and the
                 # ``n_with_fasta_section`` total would describe neither.
                 "has_fasta_section": any(
-                    gff3.is_fasta_directive(line) for line in text.splitlines()
+                    gff3.implies_fasta_section(line) for line in text.splitlines()
                 ),
                 "note": "" if cds else "parsed to zero CDS",
             }

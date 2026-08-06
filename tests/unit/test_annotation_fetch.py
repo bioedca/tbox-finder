@@ -1362,6 +1362,30 @@ def test_the_census_uses_the_PARSERS_fasta_rule_and_not_a_looser_one_of_its_own(
     assert census["totals"]["n_with_fasta_section"] == 0
 
 
+def test_the_census_reports_a_fasta_section_declared_in_the_IMPLIED_form(tmp_path):
+    """The census and the parser must agree on the *widened* rule too, not just the narrow one."""
+    import gzip as _gz
+
+    doc = b"##gff-version 3\nctg1\tx\tCDS\t10\t20\t.\t+\t0\tID=a;product=p\n>ctg1\nACGT\n"
+    payload = _gz.compress(doc)
+    md5 = hashlib.md5(payload, usedforsecurity=False).hexdigest()
+    row = _annotated_row(
+        accession=af.CONTROL_ACCESSION, url=OTHER_URL, md5=md5, n_bytes=len(payload)
+    )
+    path = _write_supply(tmp_path, _minimal_supply([row], bytes_total=len(payload)))
+    ann = tmp_path / "ann"
+    ann.mkdir()
+    (ann / af.destination_name(af.CONTROL_ACCESSION)).write_bytes(payload)
+
+    census = af.parse_census(
+        supply_report=path, annotation_dir=ann, fetch_report=tmp_path / "absent.json"
+    )
+    assert census["n_failed"] == 0
+    assert census["per_assembly"][0]["n_cds"] == 1
+    assert census["per_assembly"][0]["has_fasta_section"] is True
+    assert census["totals"]["n_with_fasta_section"] == 1
+
+
 def test_parse_census_reports_a_file_that_parses_to_zero_cds(tmp_path):
     """Hashing correctly is not the same as being usable by (c)."""
     import gzip as _gz

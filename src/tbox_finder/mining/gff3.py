@@ -47,6 +47,9 @@ What the real data actually contains (measured on the fetched corpus, not assume
   The match is case-sensitive and whitespace-exact (:func:`is_fasta_directive`): reading
   ``##fasta`` or an indented ``##FASTA`` as the directive would end the feature section early
   and drop every CDS after it **silently**, which is the one failure this file refuses to have.
+  A line beginning with ``>`` is the spec's *implied* directive and terminates too
+  (:func:`implies_fasta_section`) — the spec forbids a seqid from beginning with an unescaped
+  ``>``, so that form can never be a feature line.
 
 Failures are refusals, never degraded rows: a 7-column line, a non-integer coordinate, a
 ``start > end``, or one CDS ``ID`` appearing on two different contigs raises :class:`Gff3Error`.
@@ -80,6 +83,7 @@ __all__ = [
     "decode_gff3_bytes",
     "gene_identity_text",
     "group_cds",
+    "implies_fasta_section",
     "is_fasta_directive",
     "is_pseudo",
     "iter_gff3_features",
@@ -389,6 +393,24 @@ def is_fasta_directive(line: str) -> bool:
     return str(line).rstrip("\r\n") == FASTA_DIRECTIVE
 
 
+def implies_fasta_section(line: str) -> bool:
+    """True iff ``line`` starts the sequence section — ``##FASTA``, or the spec's implied form.
+
+    *"For backward-compatibility with the GFF version output by the Artemis tool, a GFF line that
+    begins with the character ``>`` creates an implied ``##FASTA`` directive"* (Sequence Ontology
+    GFF3 spec, https://github.com/The-Sequence-Ontology/Specifications/blob/master/gff3.md,
+    accessed 2026-08-06).
+
+    This is a *widening* of the terminator, which round 5 narrowed — the two are consistent
+    because the spec settles both. A ``##fasta`` variant is not a directive at all, whereas a
+    ``>`` line is one; and the same spec says a seqid *"must not begin with an unescaped '>'"*, so
+    a line in that form can never be a feature line. Refusing it would mean refusing valid GFF3
+    and losing nothing in exchange. ``>`` must be at position 0, exactly as the directive must:
+    an indented one is neither, and stays a column-count refusal.
+    """
+    return is_fasta_directive(line) or str(line).startswith(">")
+
+
 def iter_gff3_features(
     lines: Iterable[str], *, types: Iterable[str] | None = None
 ) -> Iterator[GffFeature]:
@@ -405,7 +427,7 @@ def iter_gff3_features(
         stripped = line.strip()
         if not stripped:
             continue
-        if is_fasta_directive(line):
+        if implies_fasta_section(line):
             return
         if line.startswith("#"):
             continue

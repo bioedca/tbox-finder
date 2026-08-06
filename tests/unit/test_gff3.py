@@ -332,6 +332,30 @@ def test_an_INDENTED_fasta_directive_is_a_refusal_rather_than_a_quiet_stop():
         gff3.parse_gff3_cds(["##gff-version 3", CDS_PLUS, "  ##FASTA  ", CDS_MINUS])
 
 
+def test_a_BARE_GT_line_is_the_specs_IMPLIED_fasta_directive_and_terminates():
+    """*"a GFF line that begins with the character `>` creates an implied `##FASTA` directive"*.
+
+    (Sequence Ontology GFF3 spec, accessed 2026-08-06.) Refusing it — which is what a
+    column-count error did — means refusing valid GFF3, and the same spec forbids a seqid from
+    beginning with an unescaped ``>``, so nothing that *is* a feature line can be lost here.
+    """
+    lines = ["##gff-version 3", CDS_PLUS, ">ctg1 whole contig", "ACGTACGT", CDS_MINUS]
+    assert [c.feature_id for c in gff3.parse_gff3_cds(lines)] == ["cds-A"]
+
+
+def test_an_INDENTED_gt_line_is_still_a_refusal():
+    """``>`` must be at position 0, exactly as the explicit directive must be."""
+    with pytest.raises(gff3.Gff3Error, match="tab-separated columns"):
+        gff3.parse_gff3_cds(["##gff-version 3", CDS_PLUS, "  >ctg1", "ACGT"])
+
+
+def test_implies_fasta_section_covers_both_forms_and_nothing_more():
+    for terminator in ("##FASTA", "##FASTA\n", ">c", ">"):
+        assert gff3.implies_fasta_section(terminator) is True, terminator
+    for other in ("##fasta", " >c", "a>c", "##gff-version 3", CDS_PLUS, ""):
+        assert gff3.implies_fasta_section(other) is False, other
+
+
 def test_is_fasta_directive_accepts_the_directive_and_nothing_else():
     """The predicate itself, with the positive control an assertion-deletion cannot fake."""
     assert gff3.is_fasta_directive("##FASTA") is True

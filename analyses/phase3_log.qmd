@@ -3880,3 +3880,22 @@ identical, `comm` empty both ways. Both committed reports were re-derived from t
 into a scratch path and compared field-by-field against the committed ones: **identical apart
 from `provenance` and `source.accessed`**, so none of these tightenings moves the corpus
 (897,096 CDS / 11,671 pseudo / 273 multi-segment / 44,291 contigs). ruff + black clean.
+
+**Review round 7 — one finding, and it *widens* the rule round 5 narrowed.** A line beginning
+with `>` reached `parse_gff3_line` and raised a column-count refusal. The GFF3 spec: *"For
+backward-compatibility with the GFF version output by the Artemis tool, a GFF line that begins
+with the character `>` creates an implied `##FASTA` directive"* (Sequence Ontology GFF3 spec,
+accessed 2026-08-06) — so the reader was **refusing valid GFF3**. Checked against the spec text
+rather than taken on the reviewer's word, because it reverses a decision made two rounds
+earlier; the two are consistent, and the same paragraph settles both: `##fasta` is not a
+directive in any form, while `>` is one. Nothing that *is* a feature line can be lost, since the
+spec forbids a seqid from beginning with an unescaped `>`. The predicate is
+`implies_fasta_section`, used by the iterator **and** the census, and an indented `>` remains a
+refusal.
+
+**Validation.** 4 sabotages, **4 RED against their named test** — including both *divergence*
+directions (iterator narrow / census wide, and the reverse), which is the property that made the
+round-5 fix worth sharing a predicate for. Full unit+golden **4,487 passed / 15 failed** against
+the matched baseline at `2be5ff4` (**4,240 / 15**) — failure sets identical, `comm` empty both
+ways. The census re-derived from this code is **identical to the committed report** field for
+field apart from provenance. ruff + black clean.
