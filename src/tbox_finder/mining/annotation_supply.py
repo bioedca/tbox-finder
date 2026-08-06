@@ -351,6 +351,8 @@ def fetch_file_manifest(
             limiter.acquire()
         try:
             text = get(url)
+        except AnnotationSupplyError:
+            raise  # an allowlist violation is a refusal, not a transient network failure
         except Exception as exc:  # noqa: BLE001 - network/HTTP: retry then give up
             last = f"{type(exc).__name__}: {exc}"[:200]
             if _permanent(exc):
@@ -366,15 +368,34 @@ def fetch_file_manifest(
     return None, last or "exhausted retries"
 
 
+class _AllowlistRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Re-check the allowlist on every redirect hop.
+
+    ``urlopen`` follows redirects, so validating only the URL we hand it leaves the guard one
+    hop deep: a 302 can move the request to another host or scheme after the check has passed.
+    Every hop is re-validated here, and a violation raises rather than being followed.
+    """
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):  # type: ignore[override]
+        require_allowed_url(newurl)
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+#: the single opener both transport helpers use, so neither can bypass the redirect guard.
+_OPENER = urllib.request.build_opener(_AllowlistRedirectHandler())
+
+
 def _urlopen_text(url: str) -> str:
-    req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
-    with urllib.request.urlopen(req, timeout=NCBI_TIMEOUT_S) as resp:  # noqa: S310 - https NCBI
+    req = urllib.request.Request(require_allowed_url(url), headers={"User-Agent": USER_AGENT})
+    with _OPENER.open(req, timeout=NCBI_TIMEOUT_S) as resp:  # noqa: S310 - https NCBI
         return resp.read().decode("utf-8", "replace")
 
 
 def _urlhead_length(url: str) -> int:
-    req = urllib.request.Request(url, method="HEAD", headers={"User-Agent": USER_AGENT})
-    with urllib.request.urlopen(req, timeout=NCBI_TIMEOUT_S) as resp:  # noqa: S310 - https NCBI
+    req = urllib.request.Request(
+        require_allowed_url(url), method="HEAD", headers={"User-Agent": USER_AGENT}
+    )
+    with _OPENER.open(req, timeout=NCBI_TIMEOUT_S) as resp:  # noqa: S310 - https NCBI
         return int(resp.headers.get("Content-Length") or -1)
 
 
@@ -405,6 +426,8 @@ def head_content_length(
             limiter.acquire()
         try:
             n = int(get(url))
+        except AnnotationSupplyError:
+            raise  # an allowlist violation is a refusal, not a transient network failure
         except Exception as exc:  # noqa: BLE001 - network/HTTP: retry then give up
             if _permanent(exc) or attempt == retries - 1:
                 return None
@@ -626,6 +649,13 @@ def measure_annotation_supply(
     cannot be established is reported as ``n_gff_size_unknown`` and changes no route.
     """
     requested = list(admissible)
+    for label, seq in (("admissible", requested), ("candidate_hosts", list(candidate_hosts))):
+        if len(set(seq)) != len(seq):
+            raise AnnotationSupplyError(
+                f"the {label} set carries duplicate accessions — a duplicate is probed twice "
+                "and inflates every denominator the route is read against (the mirror of the "
+                "silently-dropped accession this module already refuses)"
+            )
     not_admissible = sorted(set(candidate_hosts) - set(requested))
     if not_admissible:
         raise AnnotationSupplyError(

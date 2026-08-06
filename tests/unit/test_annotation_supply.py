@@ -155,6 +155,37 @@ def test_transport_refuses_a_disallowed_url_it_was_handed_directly() -> None:
         asup.head_content_length("https://evil.test/a.gz", header=lambda _u: 1)
 
 
+def test_redirect_handler_revalidates_every_hop() -> None:
+    """``urlopen`` follows redirects, so validating only the URL handed to it leaves the guard
+    one hop deep — a 302 moves the request off-host *after* the check passed."""
+    handler = asup._AllowlistRedirectHandler()
+    with pytest.raises(AnnotationSupplyError, match="allowed NCBI URL"):
+        handler.redirect_request(None, None, 302, "Found", {}, "https://evil.test/x.gz")
+
+
+def test_the_transport_opener_installs_the_redirect_guard() -> None:
+    """A second opener, or a bare ``urlopen``, would bypass the handler entirely — so the
+    guard's presence on the shared opener is what makes it load-bearing."""
+    assert any(
+        isinstance(h, asup._AllowlistRedirectHandler) for h in asup._OPENER.handlers
+    ), "the shared opener does not carry the allowlist redirect handler"
+
+
+def test_an_allowlist_violation_is_not_retried_into_unknown() -> None:
+    """A disallowed URL is a refusal, not a transient network failure. Swallowing it would
+    retry four times and then report the host as ``unknown``, which reads as 'NCBI was flaky'
+    rather than 'this run was pointed somewhere it must never go'."""
+    calls: list[str] = []
+
+    def _bad(url: str) -> str:
+        calls.append(url)
+        raise AnnotationSupplyError("not an allowed NCBI URL: pretend-redirect")
+
+    with pytest.raises(AnnotationSupplyError, match="allowed NCBI URL"):
+        fetch_file_manifest(BASE, opener=_bad, sleep=lambda _s: None)
+    assert len(calls) == 1, "an allowlist violation must not be retried"
+
+
 def test_assembly_dir_and_basename() -> None:
     assert assembly_dir_url(FNA_URL) == BASE
     assert assembly_basename(FNA_URL) == BASENAME
@@ -704,6 +735,29 @@ def test_measure_refuses_a_candidate_host_outside_the_admissible_set() -> None:
         measure_annotation_supply(
             admissible=admissible,
             candidate_hosts=[*admissible, "GCA_888888888.8"],
+            source_urls=urls,
+            workers=1,
+            opener=_Opener(bodies),
+        )
+
+
+@pytest.mark.parametrize("which", ["admissible", "candidate_hosts"])
+def test_measure_refuses_duplicate_accessions(which: str) -> None:
+    """The mirror of the silently-dropped accession this module already refuses: a duplicate is
+    probed twice, ``by_acc`` collapses it, and ``len(rows)`` counts it — so it inflates
+    ``n_probed``, the prefix tally and the status counts, i.e. every denominator the route is
+    read against, while doubling that host's request cost."""
+    urls, bodies = _corpus(3, 0)
+    admissible = sorted(a for a in urls if a != asup.CONTROL_POSITIVE_ACCESSION)
+    cand = admissible[:2]
+    if which == "admissible":
+        admissible = [*admissible, admissible[0]]
+    else:
+        cand = [*cand, cand[0]]
+    with pytest.raises(AnnotationSupplyError, match="duplicate accessions"):
+        measure_annotation_supply(
+            admissible=admissible,
+            candidate_hosts=cand,
             source_urls=urls,
             workers=1,
             opener=_Opener(bodies),

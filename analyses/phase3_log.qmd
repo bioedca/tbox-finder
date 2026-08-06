@@ -3435,7 +3435,7 @@ plus that same directory with its accession corrupted, which must not resolve.
 
 **Outputs.** `reports/p3/annotation_supply.json` (216 KB, git-tracked, no DVC object) —
 per-assembly status, GFF URL, GFF md5, GFF `Content-Length`, `_protein.faa.gz` presence, plus the
-counts, the control and the derived route. 81 unit tests. No ADR amendment, no value pinned, no
+counts, the control and the derived route. 86 unit tests. No ADR amendment, no value pinned, no
 SLURM job, LOCAL only.
 
 **Measured, all 660, zero unknown, control powered** (positive `GCF_000007185.1` → 16 files,
@@ -3538,7 +3538,27 @@ is that diagnostic's first data point rather than a new obligation; the full ver
 `reports/p3/annotation_supply.json`: reading the parquet needs pandas, and the module is a
 bare-CI-tier, pure-stdlib probe.
 
-**Validation.** 81 unit tests; **33 sabotages, 32 RED against their named test**, the 33rd a
+**Review round 3 — the two paths disagreed about whether there was anything left.** The GitHub
+app reviewed `69cde0b→35712d1` and returned *"No actionable comments"*; the **CLI, on the same
+head, returned two more — one of them a major**. A clean round on one path is not convergence.
+(i) **`urlopen` follows redirects, and the allowlist checked only the initial URL**, so a 302
+moves the request off-host one hop past the guard. Fixed with a redirect handler that
+re-validates every hop, installed on a single shared opener both transport helpers use — and an
+allowlist violation now *propagates* instead of being caught by the transient-retry arm, because
+retrying it four times and reporting the host `unknown` would read as "NCBI was flaky" rather
+than "this run was pointed somewhere it must never go". (ii) **A duplicate accession was not
+refused** — it is probed twice, `by_acc` collapses it, `len(rows)` counts it, so it inflates
+`n_probed`, the prefix tally and the status counts, i.e. every denominator the route is read
+against, while doubling that host's request cost. It is the exact mirror of the silently-dropped
+accession the module already refuses, and it now refuses the same way, for both the admissible
+and the candidate sequence.
+
+**Reproducibility, measured three times.** The sweep was re-run end-to-end after each fixing
+round — three independent 999-request sweeps on three different code versions — and **all 660
+measured rows are byte-identical** every time. The only fields that move between runs are
+`generated_at_utc` and the provenance `git_sha`.
+
+**Validation.** 86 unit tests; **37 sabotages, 36 RED against their named test**, the 37th a
 declared no-op control. The measurement was **re-run end-to-end on the reviewed code** and
 reproduced byte-identically — 339/321, 48/28, 68,855,450 B — on an independent second sweep of
 999 requests. Two of the original 23 did not bite first time and neither was noise: the
@@ -3548,8 +3568,8 @@ crash rather than on the named refusal (test now matches the message,
 [[raises-test-needs-a-positive-control]]); and the "never HEAD an unannotated host" property is
 defended **twice** (the annotated filter *and* `head_content_length`'s empty-URL early return), so
 neither edit alone could falsify it and the sabotage is declared compound. Full unit+golden
-**4,454 passed / 13 failed** against a matched baseline worktree at `8a82425` (**4,373 / 13**) —
-failure sets **identical**, `comm` empty both ways, and the +81 is exactly the new tests. ruff
+**4,459 passed / 13 failed** against a matched baseline worktree at `8a82425` (**4,373 / 13**) —
+failure sets **identical**, `comm` empty both ways, and the +86 is exactly the new tests. ruff
 0.15.15 + black 25.11.0 clean; no `.smk` touched. §6.4 fires on nothing (no README,
 `paper/manuscript.qmd` or ADR reference to the new API). The shipped refusal path was executed,
 not inferred: `measure --limit 5` exits **3** with `route=refused`, and the report it writes

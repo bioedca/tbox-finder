@@ -7306,8 +7306,8 @@
       "gff_suffix": "_genomic.gff.gz",
       "manifest_name": "md5checksums.txt"
     },
-    "generated_at_utc": "2026-08-06T15:38:52.470235+00:00",
-    "git_sha": "8b2fd9fa237c1cb8372e30260ae01bd902d02fdf",
+    "generated_at_utc": "2026-08-06T16:11:33.951436+00:00",
+    "git_sha": "35712d131061a4fc8dabf8cc6b46cd6c40907ad0",
     "inputs": {
       "data/processed/audits/production_fetch_report.json": "b2bbcb02ef77cae83f9373fcf8022640392a3504659afc3c8ab9bb04e9edd77b",
       "data/processed/mining/round0_fp_manifest.json": "e8aff87d395b3cb70a25c1f1d4ac348daf3da9323baa4c04a32fd3e4060d4b95"
