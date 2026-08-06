@@ -232,6 +232,14 @@ class CdsFeature(_FrozenAttributes):
     segments: tuple[tuple[int, int], ...]
     attributes: Mapping[str, tuple[str, ...]]
 
+    def __post_init__(self) -> None:
+        # ``segments`` needs the same treatment as ``attributes``: the annotation is
+        # ``tuple[tuple[int, int], ...]`` but ``frozen=True`` polices reassignment, not content,
+        # so a caller constructing one with a **list** keeps a mutable handle on the coordinates
+        # D4 measures from — and the model is unhashable into the bargain.
+        super().__post_init__()
+        object.__setattr__(self, "segments", tuple((start, end) for start, end in self.segments))
+
     @property
     def length_bp(self) -> int:
         """Span length in bp, inclusive of both endpoints (so a 1-bp feature is 1, not 0)."""
@@ -488,11 +496,16 @@ def require_gff3_version(lines: Sequence[str]) -> str:
     The spec makes this line mandatory and first. Without the check, any nine-column TSV
     parses as GFF3 and reaches the annotation census — which matters more once the commissioned
     bakta/prokka arm starts feeding files this repo did not fetch from NCBI.
+
+    **First** means the first *physical* line: a leading blank line used to be skipped, which
+    accepted a document the docstring said it refused. Measured before tightening, as with the
+    CDS-phase rule — all **339** acquired files carry ``##gff-version 3`` as line 1, so the
+    strict reading refuses nothing real.
     """
     for raw in lines:
         line = raw.strip()
         if not line:
-            continue
+            raise Gff3Error(f"first line is not {GFF_VERSION_DIRECTIVE!r}: {raw[:80]!r} (blank)")
         # Exactly two fields: ``##gff-version3`` (no separator) satisfies ``startswith`` and
         # would be read as version 3 while not being the directive the spec requires.
         fields = line.split()

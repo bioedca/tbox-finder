@@ -486,6 +486,40 @@ def test_an_empty_ID_attribute_is_treated_as_undeclared():
     assert len(gff3.parse_gff3_cds(lines)) == 2
 
 
+def test_the_version_directive_must_be_the_FIRST_PHYSICAL_line():
+    """A leading blank line used to be skipped, accepting what the docstring refused.
+
+    Measured before tightening: all 339 acquired files carry ``##gff-version 3`` as line 1, so
+    the strict reading refuses nothing real — the same discipline the CDS-phase rule was held to.
+    """
+    with pytest.raises(gff3.Gff3Error, match="first line is not"):
+        gff3.parse_gff3_document("\n##gff-version 3\n" + CDS_PLUS + "\n")
+    # Positive control: the identical document WITHOUT the leading blank still parses, so the
+    # refusal is about position rather than about the reader having stopped working.
+    assert len(gff3.parse_gff3_document("##gff-version 3\n" + CDS_PLUS + "\n")) == 1
+
+
+def test_segments_are_frozen_even_when_constructed_from_a_list():
+    """``frozen=True`` polices reassignment, not the list's contents.
+
+    The coordinates D4 measures from would otherwise stay mutable through any caller that
+    happened to build a ``CdsFeature`` by hand.
+    """
+    cds = gff3.CdsFeature(
+        seqid="ctg1",
+        feature_id="cds-A",
+        start=10,
+        end=40,
+        strand="+",
+        segments=[[10, 20], [30, 40]],
+        attributes={},
+    )
+    assert cds.segments == ((10, 20), (30, 40))
+    with pytest.raises(TypeError):
+        cds.segments[0] = (1, 2)  # type: ignore[index]
+    assert gff3.cds_start_position(cds) == 10
+
+
 def test_parse_gff3_document_requires_the_version_directive():
     """Any nine-column TSV would otherwise reach the annotation census as GFF3."""
     with pytest.raises(gff3.Gff3Error, match="not '##gff-version'"):
@@ -527,7 +561,16 @@ def test_parse_gff3_document_refuses_a_non_gff3_version():
 
 
 def test_parse_gff3_document_refuses_an_empty_document():
+    """Two distinct refusals, and each must keep naming its own cause.
+
+    A document with *no lines at all* has no first line to report; one whose first line is blank
+    does, and since the version directive must be the first **physical** line that is the more
+    specific message. Collapsing them would leave one of the two branches unable to change an
+    outcome on its own.
+    """
     with pytest.raises(gff3.Gff3Error, match="empty document"):
+        gff3.parse_gff3_document("")
+    with pytest.raises(gff3.Gff3Error, match=r"first line is not .*\(blank\)"):
         gff3.parse_gff3_document("\n  \n")
 
 

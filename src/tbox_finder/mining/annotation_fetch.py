@@ -265,6 +265,18 @@ def read_supply_report(supply_report: str | Path = DEFAULT_SUPPLY_REPORT) -> Map
         payload = json.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError as exc:
         raise AnnotationFetchError(f"supply report not found: {path}") from exc
+    except UnicodeDecodeError as exc:
+        raise AnnotationFetchError(f"supply report is not UTF-8 text: {path} ({exc})") from exc
+    except OSError as exc:
+        # ``FileNotFoundError`` was the only OSError converted, so a directory path, a
+        # permission error or an I/O fault escaped ``main``'s handler as a traceback and exit 1
+        # — the same shape fixed one layer down for the control file and the annotation files.
+        # ``parse_census`` inherits the fix: it reads the fetch report through here and catches
+        # ``AnnotationFetchError``, so an unreadable report now becomes a refusal *reason*
+        # inside the census instead of aborting it.
+        raise AnnotationFetchError(
+            f"supply report is unreadable: {path} ({type(exc).__name__}: {exc})"
+        ) from exc
     except json.JSONDecodeError as exc:
         raise AnnotationFetchError(f"supply report is not valid JSON: {path} ({exc})") from exc
     if not isinstance(payload, Mapping):
@@ -383,7 +395,14 @@ def verification_control(payload: bytes, expected_md5: str) -> dict[str, Any]:
     Each leg is broken alone in the tests, because either negative alone is satisfied by a
     degenerate comparison.
     """
-    flipped = ("b" if expected_md5[0] != "b" else "c") + expected_md5[1:]
+    # Normalised before flipping. ``digest_matches`` lowercases the expectation, so on an
+    # UPPERCASE digest ``"B3F…"`` the flip produces ``"b3F…"`` — the *same* value once
+    # lowercased — and ``corrupt_expectation_fails`` reads False on correct bytes, i.e. the
+    # control reports itself unpowered for a reason that has nothing to do with the
+    # acquisition. ``[:1]`` rather than ``[0]`` so an empty digest is an unpowered control
+    # rather than an ``IndexError``.
+    normalized = str(expected_md5).strip().lower()
+    flipped = ("b" if normalized[:1] != "b" else "c") + normalized[1:]
     return {
         "accession": CONTROL_ACCESSION,
         "n_bytes": len(payload),
@@ -540,9 +559,19 @@ def validate_fetch_report(
         and str(r.get("observed_md5")) == str(r.get("expected_md5"))
         for r in ok_rows
     )
-    rederived_bytes = sum(int(r.get("n_bytes") or 0) for r in ok_rows)
-    clauses["bytes_total_rederives"] = rederived_bytes == report.get("bytes_total")
-    clauses["bytes_total_matches_supply_report"] = rederived_bytes == report.get(
+    # Validated, never coerced. ``int(r.get("n_bytes") or 0)`` raises ``ValueError``/``TypeError``
+    # on ``"abc"`` or ``{}`` — and this function reads an **on-disk** report (``parse_census``
+    # validates the committed one), so a hand-edited or truncated file aborted ``verify`` with a
+    # traceback and exit 1 instead of returning the refusal it exists to return. It would also
+    # have silently accepted ``"12"`` as 12, the coerce-before-validate mistake ``strict_count``
+    # was written for one function above.
+    byte_counts = [r.get("n_bytes") for r in ok_rows]
+    bytes_are_ints = all(isinstance(n, int) and not isinstance(n, bool) for n in byte_counts)
+    rederived_bytes = sum(byte_counts) if bytes_are_ints else None
+    clauses["bytes_total_rederives"] = bytes_are_ints and rederived_bytes == report.get(
+        "bytes_total"
+    )
+    clauses["bytes_total_matches_supply_report"] = bytes_are_ints and rederived_bytes == report.get(
         "bytes_total_in_supply_report"
     )
     try:

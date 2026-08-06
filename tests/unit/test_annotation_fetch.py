@@ -771,6 +771,67 @@ def test_a_clause_computed_but_never_declared_is_reported(monkeypatch, tmp_path)
     assert problems == ["clause(s) computed but never declared: ['no_orphans']"]
 
 
+def test_a_MALFORMED_n_bytes_fails_a_clause_instead_of_raising_a_traceback(tmp_path):
+    """``int(r.get("n_bytes") or 0)`` coerced, and this function reads an ON-DISK report.
+
+    ``parse_census`` validates the committed fetch report, so a hand-edited or truncated
+    ``n_bytes`` aborted ``verify`` with a ``ValueError`` and exit 1 rather than returning the
+    refusal the module promises — and ``"12"`` would have been accepted as 12, the
+    coerce-before-validate shape ``strict_count`` exists to refuse.
+    """
+    for bad in ("68855450", 68855450.0, True, None, [1], {}):
+        report = _clean_report(tmp_path)
+        report["per_assembly"][0]["n_bytes"] = bad
+        problems = af.validate_fetch_report(report, targets=[_target()])
+        assert any("bytes_total_rederives" in p for p in problems), bad
+
+
+def test_an_UNREADABLE_supply_report_is_a_refusal_not_a_traceback(tmp_path):
+    """``FileNotFoundError`` was the only ``OSError`` converted to the documented refusal."""
+    a_directory = tmp_path / "not-a-file"
+    a_directory.mkdir()
+    with pytest.raises(af.AnnotationFetchError, match="unreadable"):
+        af.read_supply_report(a_directory)
+    assert (
+        af.main(
+            [
+                "verify",
+                "--supply-report",
+                str(a_directory),
+                "--annotation-dir",
+                str(tmp_path),
+                "--out",
+                str(tmp_path / "parse.json"),
+            ]
+        )
+        == 3
+    )
+
+
+def test_a_NON_UTF8_supply_report_is_a_refusal_not_a_traceback(tmp_path):
+    """``UnicodeDecodeError`` is a ``ValueError``, so no ``OSError`` clause would catch it."""
+    path = tmp_path / "supply.json"
+    path.write_bytes(b"\xff\xfe{}")
+    with pytest.raises(af.AnnotationFetchError, match="not UTF-8"):
+        af.read_supply_report(path)
+
+
+def test_the_control_flip_survives_an_UPPERCASE_expectation(tmp_path):
+    """``digest_matches`` lowercases; the flip did not, so the "corrupted" md5 compared EQUAL.
+
+    The result was a control reporting itself unpowered on correct bytes — a control whose
+    verdict is decided by the caller's capitalisation is not measuring the acquisition at all.
+    """
+    control = af.verification_control(PAYLOAD, PAYLOAD_MD5.upper())
+    assert af.control_is_powered(control) is True
+    # Both cases must agree leg-for-leg, or the control's answer depends on the input's case.
+    assert {k: control[k] for k in ("positive_matches", "corrupt_expectation_fails")} == {
+        "positive_matches": True,
+        "corrupt_expectation_fails": True,
+    }
+    assert af.control_is_powered(af.verification_control(PAYLOAD, "")) is False
+
+
 def test_strict_count_refuses_what_int_would_have_coerced():
     """``int("339")`` succeeds and ``int(None)`` raises — both are wrong answers here."""
     assert af.strict_count({"n": 339}, "n") == 339

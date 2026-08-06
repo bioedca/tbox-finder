@@ -3843,3 +3843,40 @@ ways. (The 15 is this environment's baseline, not a regression: it has no `pyarr
 **byte-identical under every round-5 tightening** — 897,096 CDS / 11,671 pseudo / 273
 multi-segment / 44,291 contigs — so the stricter reader still accepts exactly the same real
 corpus. ruff 0.15.15 + black 25.11.0 clean; no `.smk` touched.
+
+**Review round 6 — 5 more, all 5 real: 9, 2, 4, 5, 5, 5.** Three of the five are the same
+species as round 5's pair, one layer further out: an input read from **outside** this process
+that reaches a coercion or an unguarded read before any clause sees it.
+
+**The major.** `validate_fetch_report` re-derived the byte total with `int(r.get("n_bytes") or 0)`
+— and it reads an **on-disk** report (`parse_census` validates the committed one), so a
+hand-edited or truncated `n_bytes` aborted `verify` with a `ValueError` and exit 1 instead of
+returning the refusal the module exists to return. It would equally have accepted `"12"` as 12,
+the coerce-before-validate shape `strict_count` was written for one function above. The counts
+are now validated, and both byte clauses go False rather than raising.
+
+**`read_supply_report` converted only `FileNotFoundError`.** A directory path, a permission
+error or a non-UTF-8 file escaped as a traceback; `parse_census` inherits the fix, so an
+unreadable fetch report is now a refusal *reason inside the census* rather than the end of it.
+
+**The control's flip was case-dependent — and the failure was in the control itself.**
+`digest_matches` lowercases the expectation but the flip did not, so on an uppercase digest
+`"B3F…"` the "corrupted" value `"b3F…"` compared **equal**, `corrupt_expectation_fails` read
+False, and the control declared itself unpowered on correct bytes. Latent (production
+lowercases), but a control whose verdict turns on the caller's capitalisation is not measuring
+the acquisition — the opposite direction of [[control-matchedness-must-be-asserted]], and just
+as disqualifying.
+
+**Two more "the docstring was stricter than the code".** `require_gff3_version` skipped leading
+blank lines while claiming the directive must come *first* — measured before tightening, as with
+the CDS-phase rule: **339 of 339** acquired files carry `##gff-version 3` as line 1, so the
+strict reading refuses nothing real. And `CdsFeature.segments` was annotated as a tuple of pairs
+but accepted a **list**, leaving the coordinates D4 measures from mutable behind `frozen=True`;
+it is normalised in `__post_init__` alongside the attributes mapping.
+
+**Validation.** **7 sabotages, 7 RED against their named test.** Full unit+golden **4,483 passed
+/ 15 failed** against the same matched baseline at `2be5ff4` (**4,240 / 15**) — failure sets
+identical, `comm` empty both ways. Both committed reports were re-derived from the round-6 code
+into a scratch path and compared field-by-field against the committed ones: **identical apart
+from `provenance` and `source.accessed`**, so none of these tightenings moves the corpus
+(897,096 CDS / 11,671 pseudo / 273 multi-segment / 44,291 contigs). ruff + black clean.
