@@ -94,6 +94,12 @@ cd "$REPO"
 # Every default path in the producer is repo-relative, so the `cd` above is load-bearing:
 # run from anywhere else and GENOME_DIR/DEFAULT_CKPT_ROOT resolve to nothing and every
 # candidate raises.
+#
+# The cluster's tbox-ml-rna carries NO editable install of this package — measured, not
+# assumed: `python -c "import tbox_finder"` there is a ModuleNotFoundError. Every other
+# sbatch in this repo prefixes `PYTHONPATH=src` for the same reason. Exported once here
+# so it covers the inline heredoc leg as well as the three `python -m` calls.
+export PYTHONPATH="${PYTHONPATH:+$PYTHONPATH:}src"
 
 TASK="${SLURM_ARRAY_TASK_ID:-0}"
 N_SHARDS="${N_SHARDS:-2}"
