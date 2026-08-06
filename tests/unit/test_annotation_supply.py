@@ -698,6 +698,33 @@ def test_route_refuses_a_report_that_omits_the_candidate_coverage_field() -> Non
     assert derive_acquisition_route(rep)["route"] == ROUTE_REFUSED
 
 
+def test_route_refuses_on_an_unresolved_candidate_host() -> None:
+    """The gate checked only the *admissible* unknown count. A report can declare 76 candidate
+    hosts, 76 probed, zero admissible-unknown, and still carry an unknown candidate host — and
+    the route came back ``mixed`` with no refusal. In a report this module writes that cannot
+    happen (candidates are a subset of the probed rows), which is exactly the point: a gate that
+    leans on an invariant enforced somewhere else is not a gate
+    ([[gate-clauses-need-re-derivation]])."""
+    rep = _report(annotated=48, unannotated=27)
+    rep["candidate_host_status_counts"][STATUS_UNKNOWN] = 1
+    rep["n_candidate_hosts"] = 76
+    rep["n_candidate_hosts_probed"] = 76
+    out = derive_acquisition_route(rep)
+    assert out["route"] == ROUTE_REFUSED
+    assert any("candidate-carrying host(s) unresolved" in r for r in out["reasons"])
+
+
+def test_route_refuses_when_the_candidate_counts_do_not_sum_to_the_denominator() -> None:
+    """``n_total`` is the base the annotated fraction is read against. If it disagrees with
+    ``n_candidate_hosts``, "48 of 76 annotated" is being computed against a different 76."""
+    rep = _report(annotated=48, unannotated=20)
+    rep["n_candidate_hosts"] = 76
+    rep["n_candidate_hosts_probed"] = 76
+    out = derive_acquisition_route(rep)
+    assert out["route"] == ROUTE_REFUSED
+    assert any("wrong denominator" in r for r in out["reasons"])
+
+
 def test_route_refuses_on_zero_candidate_hosts() -> None:
     out = derive_acquisition_route(_report(annotated=0))
     assert out["route"] == ROUTE_REFUSED

@@ -597,11 +597,26 @@ def derive_acquisition_route(report: Mapping[str, Any]) -> dict[str, Any]:
     n_unknown = int(all_counts.get(STATUS_UNKNOWN, 0))
     if n_unknown:
         reasons.append(f"{n_unknown} admissible host(s) unresolved — unknown is not unannotated")
+    # The candidate counts get their OWN unknown check and their own total reconciliation. In a
+    # report this module wrote, the candidate rows are a subset of the probed rows, so a
+    # candidate `unknown` implies an admissible `unknown` — but this gate is handed a report,
+    # and a gate that leans on an invariant enforced somewhere else is not a gate.
+    n_cand_unknown = int(counts.get(STATUS_UNKNOWN, 0))
+    if n_cand_unknown:
+        reasons.append(
+            f"{n_cand_unknown} candidate-carrying host(s) unresolved — "
+            "unknown is not unannotated"
+        )
+    n_total = sum(int(counts.get(k, 0)) for k in STATUS_VALUES)
+    if n_total != n_cand:
+        reasons.append(
+            f"candidate-host status counts sum to {n_total} but n_candidate_hosts is "
+            f"{n_cand} — the annotated fraction would be read against the wrong denominator"
+        )
     if reasons:
         return {"route": ROUTE_REFUSED, "reasons": reasons}
 
     n_annotated = int(counts.get(STATUS_ANNOTATED, 0))
-    n_total = sum(int(counts.get(k, 0)) for k in STATUS_VALUES)
     if n_total <= 0:
         return {"route": ROUTE_REFUSED, "reasons": ["zero candidate-carrying hosts"]}
     if n_annotated == n_total:

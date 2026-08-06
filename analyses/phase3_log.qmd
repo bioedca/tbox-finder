@@ -3435,7 +3435,7 @@ plus that same directory with its accession corrupted, which must not resolve.
 
 **Outputs.** `reports/p3/annotation_supply.json` (216 KB, git-tracked, no DVC object) —
 per-assembly status, GFF URL, GFF md5, GFF `Content-Length`, `_protein.faa.gz` presence, plus the
-counts, the control and the derived route. 89 unit tests. No ADR amendment, no value pinned, no
+counts, the control and the derived route. 91 unit tests. No ADR amendment, no value pinned, no
 SLURM job, LOCAL only.
 
 **Measured, all 660, zero unknown, control powered** (positive `GCF_000007185.1` → 16 files,
@@ -3581,7 +3581,16 @@ raises a `BaseException` subclass, which `except Exception` cannot absorb. Verif
 execution — with the guard armed and one `header=` injection removed, the suite goes RED in
 0.21 s naming the leaked URL. *A guard whose signal the subject can absorb is not a guard.*
 
-**Validation.** 89 unit tests; **39 sabotages, 38 RED against their named test**, the 39th a
+**Review round 5 — a gate leaning on an invariant enforced somewhere else.** The route
+derivation checked only the **admissible** unknown count, and took its denominator from a sum it
+never reconciled with `n_candidate_hosts`. So a report declaring 76 candidate hosts, 76 probed
+and zero admissible-unknown could still carry an unknown *candidate* host and come back `mixed`
+with no refusal — and an annotated fraction could be read against a base that is not the number
+of candidate hosts. In a report this module writes neither can happen, because the candidate
+rows are a subset of the probed rows; that is precisely the point
+([[gate-clauses-need-re-derivation]]). Both clauses added, both sabotaged.
+
+**Validation.** 91 unit tests; **41 sabotages, 40 RED against their named test**, the 41st a
 declared no-op control. The measurement was **re-run end-to-end on the reviewed code** and
 reproduced byte-identically — 339/321, 48/28, 68,855,450 B — on an independent second sweep of
 999 requests. Two of the original 23 did not bite first time and neither was noise: the
@@ -3591,8 +3600,8 @@ crash rather than on the named refusal (test now matches the message,
 [[raises-test-needs-a-positive-control]]); and the "never HEAD an unannotated host" property is
 defended **twice** (the annotated filter *and* `head_content_length`'s empty-URL early return), so
 neither edit alone could falsify it and the sabotage is declared compound. Full unit+golden
-**4,462 passed / 13 failed** against a matched baseline worktree at `8a82425` (**4,373 / 13**) —
-failure sets **identical**, `comm` empty both ways, and the +89 is exactly the new tests. ruff
+**4,464 passed / 13 failed** against a matched baseline worktree at `8a82425` (**4,373 / 13**) —
+failure sets **identical**, `comm` empty both ways, and the +91 is exactly the new tests. ruff
 0.15.15 + black 25.11.0 clean; no `.smk` touched. §6.4 fires on nothing (no README,
 `paper/manuscript.qmd` or ADR reference to the new API). The shipped refusal path was executed,
 not inferred: `measure --limit 5` exits **3** with `route=refused`, and the report it writes
