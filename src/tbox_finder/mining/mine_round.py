@@ -160,7 +160,9 @@ def read_dvc_dir_pointer(path: str | Path) -> dict[str, Any] | None:
     """
     try:
         text = Path(path).read_text(encoding="utf-8")
-    except OSError:
+    except (OSError, UnicodeError):
+        # UnicodeDecodeError as well as OSError (CodeRabbit CLI r3, both reproduced by
+        # execution): a pointer carrying non-UTF-8 bytes is malformed, not a crash.
         return None
     md5s = _DVC_MD5.findall(text)
     paths = _DVC_PATH.findall(text)
@@ -168,11 +170,17 @@ def read_dvc_dir_pointer(path: str | Path) -> dict[str, Any] | None:
     sizes = _DVC_SIZE.findall(text)
     if not (len(md5s) == len(paths) == len(nfiles) == len(sizes) == 1):
         return None
+    try:
+        # `\d+` guarantees digits, not that ``int`` accepts them: CPython caps str→int at
+        # 4300 digits and raises ValueError past it (measured). Malformed ⇒ ``None``.
+        n_files, size = int(nfiles[0]), int(sizes[0])
+    except ValueError:
+        return None
     return {
         "md5": md5s[0],
         "path": paths[0],
-        "nfiles": int(nfiles[0]),
-        "size": int(sizes[0]),
+        "nfiles": n_files,
+        "size": size,
     }
 
 

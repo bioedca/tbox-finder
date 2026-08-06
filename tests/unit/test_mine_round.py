@@ -8,6 +8,7 @@ window→genome coordinate adapter (identity), and the per-round decision + dege
 from __future__ import annotations
 
 import json
+import re
 import sys
 
 import pytest
@@ -409,9 +410,41 @@ def test_missing_evidence_fails_closed(tmp_path):
 def test_clause_target_db_versioned_breaks_alone(evidence_root):
     # An EMPTY pointer (nfiles 0) rather than a deleted file: the md5 survives, so this
     # breaks the "DB is built" clause without also breaking the certification cross-check.
+    # The count is READ through the production reader, not hardcoded (CodeRabbit CLI r3): a
+    # regenerated DB with a different file count would make a literal replace a silent no-op,
+    # and the test would then fail for an unrelated reason instead of measuring this clause.
     pointer = evidence_root / mr.HOMOLOG_DB_DVC
-    pointer.write_text(pointer.read_text().replace("nfiles: 10", "nfiles: 0"), encoding="utf-8")
+    n_files = mr.read_dvc_dir_pointer(pointer)["nfiles"]
+    pointer.write_text(
+        pointer.read_text().replace(f"nfiles: {n_files}", "nfiles: 0"), encoding="utf-8"
+    )
+    assert mr.read_dvc_dir_pointer(pointer)["nfiles"] == 0  # the mutation took effect
     _assert_only_failed(_derive(evidence_root), "target_db_versioned")
+
+
+@pytest.mark.parametrize(
+    "corrupt",
+    [
+        pytest.param(lambda p: p.write_bytes(p.read_bytes() + b"\n# \xff\xfe\n"), id="not_utf8"),
+        pytest.param(
+            lambda p: p.write_text(
+                re.sub(r"size: \d+", "size: " + "1" * 5000, p.read_text()), encoding="utf-8"
+            ),
+            id="int_past_cpython_digit_limit",
+        ),
+    ],
+)
+def test_read_dvc_dir_pointer_fails_closed_on_unreadable_content(evidence_root, corrupt):
+    # CodeRabbit CLI r3, both reproduced by execution first: `read_text(encoding="utf-8")`
+    # raises UnicodeDecodeError (not an OSError) on non-UTF-8 bytes, and `int()` raises
+    # ValueError past CPython's 4300-digit str→int cap — either would escape a reader whose
+    # documented contract is `None` on anything unexpected, crashing the exit-4 refusal path.
+    pointer = evidence_root / mr.HOMOLOG_DB_DVC
+    corrupt(pointer)
+    assert mr.read_dvc_dir_pointer(pointer) is None  # returns, never raises
+    derived = _derive(evidence_root)  # and the clause reports it
+    assert derived["available"] is False
+    assert derived["clauses"]["target_db_versioned"] is False
 
 
 def test_clause_target_db_versioned_rejects_a_non_dir_pointer(evidence_root):

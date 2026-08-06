@@ -3241,3 +3241,28 @@ reached through an import-system detail rather than an assertion.
 baseline worktree at `0b9ad0c` (**4,248 / 15**) — failure sets identical. **30 sabotages, 29 RED
 against their NAMED test**, the 30th the declared no-op control; S30 restores exactly this
 finding (`except Exception` → `except ImportError`) and is RED. ruff 0.15.15 + black 25.11.0 clean.
+
+## Step P3-15′-a (review r3) — 2026-08-05: two more fail-closed holes, both reachable, both measured
+
+**r3-1 (minor) — the DVC-pointer reader could raise instead of returning `None`, twice.** Its
+contract is *"`None` on anything unexpected"*, but `read_text(encoding="utf-8")` raises
+**`UnicodeDecodeError`** (not an `OSError`) on non-UTF-8 bytes, and `int()` raises **`ValueError`**
+past CPython's 4300-digit `str`→`int` cap — `\d+` guarantees *digits*, not that `int` accepts them.
+Either escapes `derive_msa_supply_available` and crashes the exit-4 refusal path. **Both reproduced
+by execution** before fixing (`UnicodeDecodeError`; `ValueError: Exceeds the limit (4300 digits)`),
+and both ship as sabotages (S31, S32) RED against their own parametrised case.
+
+**r3-2 (minor) — a mutation that could silently become a no-op.** The `target_db_versioned` test
+mutated the fixture with a literal `replace("nfiles: 10", "nfiles: 0")`, matching only the value
+`data/interim/homolog_db.dvc` happens to carry today. A regenerated DB with a different file count
+turns that into a no-op: the pointer stays well-formed, the clause stays `True`, and the test fails
+with an unrelated message instead of measuring what it names. The count is now **read through the
+production reader** and the mutation is asserted to have taken effect — which is what the two
+neighbouring pointer tests already did, so this was an inconsistency as much as a latent bug.
+
+**Validation.** 63 tests (61 → 63); full unit+golden **4,279 passed / 15 failed** vs the matched
+baseline worktree at `0b9ad0c` (**4,248 / 15**) — failure sets identical, `comm` empty both ways.
+**32 sabotages, 31 RED against their NAMED test**, the 32nd the declared no-op control. ruff
+0.15.15 + black 25.11.0 clean. CI green on every head so far (`2e2a97a`, `378974f`, `02d178d`,
+`7982cc6`) — which also settles the one environment question the derivation raised: `REPO_ROOT`
+resolves correctly under CI's editable install, so the evidence-derived pin holds there too.
