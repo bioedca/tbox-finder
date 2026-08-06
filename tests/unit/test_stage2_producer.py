@@ -397,6 +397,32 @@ def test_merge_refuses_shards_from_different_runs(tmp_path: Path, key: str) -> N
         SP.merge_posterior_tables([first, second], n_candidates=2)
 
 
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("strand_posteriors", [{"c0": {"+": 0.5}}]),
+        ("strand_posteriors", "c0"),
+        ("unresolved", {"c0": "boom"}),
+        ("unresolved", ["a string, not a record"]),
+    ],
+)
+def test_merge_refuses_a_malformed_sibling_field_by_NAME(
+    tmp_path: Path, field: str, value: object
+) -> None:
+    """`posteriors` was guarded; its two siblings were not.
+
+    `.items()` on a list and `dict(u)` on a string raise AttributeError/ValueError, neither
+    of which `_cmd_merge` catches — a traceback and a generic exit code instead of the
+    exit 3 the sbatch branches on.
+    """
+    path = tmp_path / "bad.json"
+    table = _table({"c0": 0.5})
+    table[field] = value
+    path.write_text(json.dumps(table), encoding="utf-8")
+    with pytest.raises(SP.Stage2ProducerError, match=field):
+        SP.merge_posterior_tables([path], n_candidates=1)
+
+
 def test_merge_refuses_a_file_that_is_not_a_producer_table(tmp_path: Path) -> None:
     path = tmp_path / "other.json"
     path.write_text(json.dumps({"something": "else"}), encoding="utf-8")

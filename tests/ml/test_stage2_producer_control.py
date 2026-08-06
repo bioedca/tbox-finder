@@ -323,8 +323,21 @@ def test_the_producer_scores_both_strands_of_a_real_locus_and_the_policy_picks_o
 
 
 def test_the_supply_derivation_is_green_on_a_machine_that_has_the_model() -> None:
-    """The derivation reads only git-tracked evidence, so it must agree here too."""
+    """The derivation reads only git-tracked evidence — so assert it ON the real machine.
+
+    ``_need_stack()`` is what makes the test name true. Without it the body ran identically
+    in CI and merely duplicated the unit tier; with it, this is the one place the
+    git-tracked derivation and the actual checkpoint are checked to agree on the same box.
+    """
     from tbox_finder.mining.remine import STAGE2_SUPPLY_AVAILABLE
+    from tbox_finder.stage2.eval import production_arm_config
+
+    arm = _need_stack()
+    derived_arm = SP.arms_matching_config(
+        production_arm_config(), sweep_dir=_REPO / SP.DEFAULT_SWEEP_DIR
+    )
+    # The arm the loader would OPEN is the arm the git-tracked evidence names.
+    assert derived_arm == [arm["arm"]], (derived_arm, arm["arm"])
 
     derived = SP.derive_stage2_supply_available()
     assert derived["available"] is True, derived["reasons"]

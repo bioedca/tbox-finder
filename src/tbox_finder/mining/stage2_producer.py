@@ -523,10 +523,39 @@ def merge_posterior_tables(
                     f"{path}: posterior for {cid!r} is not a real number ({value!r})"
                 )
             merged[cid] = float(value)
-        strand_posteriors.update(
-            {k: dict(v) for k, v in (table.get("strand_posteriors") or {}).items()}
-        )
-        unresolved.extend(dict(u) for u in (table.get("unresolved") or []))
+        # The same named refusal the `posteriors` payload gets. Without it a shard
+        # carrying `"strand_posteriors": [...]` raises AttributeError on `.items()`, and
+        # `"unresolved": {...}` (or a list of strings) raises ValueError in `dict(u)` —
+        # neither is a Stage2ProducerError, so `_cmd_merge` lets it out as a traceback
+        # with a generic exit code instead of exit 3.
+        shard_strands = table.get("strand_posteriors") or {}
+        if not isinstance(shard_strands, Mapping):
+            raise Stage2ProducerError(
+                f"{path}: 'strand_posteriors' is {type(shard_strands).__name__}, not a "
+                "candidate_id → per-strand mapping"
+            )
+        for cid, per in shard_strands.items():
+            if not isinstance(per, Mapping):
+                raise Stage2ProducerError(
+                    f"{path}: strand_posteriors[{cid!r}] is {type(per).__name__}, not a "
+                    "strand → posterior mapping"
+                )
+            strand_posteriors[cid] = dict(per)
+
+        shard_unresolved = table.get("unresolved") or []
+        if isinstance(shard_unresolved, (str, bytes, Mapping)) or not isinstance(
+            shard_unresolved, Sequence
+        ):
+            raise Stage2ProducerError(
+                f"{path}: 'unresolved' is {type(shard_unresolved).__name__}, not a list of "
+                "records"
+            )
+        for entry in shard_unresolved:
+            if not isinstance(entry, Mapping):
+                raise Stage2ProducerError(
+                    f"{path}: an 'unresolved' entry is {type(entry).__name__}, not a record"
+                )
+            unresolved.append(dict(entry))
         heads.append(table)
 
     _require_uniform(heads, "temperature")
