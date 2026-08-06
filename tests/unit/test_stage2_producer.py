@@ -393,6 +393,43 @@ def test_merge_refuses_a_candidate_claimed_by_two_shards(tmp_path: Path) -> None
         SP.merge_posterior_tables(tables, n_candidates=2)
 
 
+def test_merge_refuses_ids_that_are_not_in_this_rounds_manifest(tmp_path: Path) -> None:
+    """A foreign shard table would inflate coverage past the floor it exists to enforce."""
+    tables = _write_tables(tmp_path, [{"c0": 0.5}, {"from_another_round": 0.5}])
+    with pytest.raises(SP.Stage2ProducerError, match="not in this round's manifest"):
+        SP.merge_posterior_tables(tables, n_candidates=2, manifest_ids=["c0", "c1"])
+    # POSITIVE CONTROL: the same call with ids that DO belong must pass, or the guard is
+    # indistinguishable from one that refuses every merge.
+    ok = _write_tables(tmp_path / "ok", [{"c0": 0.5}, {"c1": 0.5}])
+    assert (
+        SP.merge_posterior_tables(ok, n_candidates=2, manifest_ids=["c0", "c1"])["coverage"] == 1.0
+    )
+
+
+def test_merge_refuses_more_posteriors_than_candidates_without_an_id_set(
+    tmp_path: Path,
+) -> None:
+    """The count-only backstop for callers that cannot supply the manifest ids."""
+    tables = _write_tables(tmp_path, [{"c0": 0.5, "c1": 0.5, "c2": 0.5}])
+    with pytest.raises(SP.Stage2ProducerError, match="more scored than exist"):
+        SP.merge_posterior_tables(tables, n_candidates=2)
+
+
+@pytest.mark.parametrize("bad", ["0", "0.0", "-0.5", "1.5"])
+def test_the_coverage_floor_cannot_be_disabled(bad: str) -> None:
+    """`--min-coverage 0` publishes a round that scored almost nothing as a clean one."""
+    with pytest.raises(SystemExit):
+        SP.build_parser().parse_args(
+            ["merge", "--tables", "t.json", "--out", "o.json", "--min-coverage", bad]
+        )
+    assert (
+        SP.build_parser()
+        .parse_args(["merge", "--tables", "t.json", "--out", "o.json", "--min-coverage", "0.95"])
+        .min_coverage
+        == 0.95
+    )
+
+
 def test_merge_refuses_without_a_denominator(tmp_path: Path) -> None:
     tables = _write_tables(tmp_path, [{"c0": 0.5}])
     with pytest.raises(SP.Stage2ProducerError, match="n_candidates must be positive"):
@@ -1020,6 +1057,11 @@ def _stage_evidence(
 
     control = json.loads((SP.REPO_ROOT / SP.CONTROL_REPORT).read_text(encoding="utf-8"))
     control.update(control_overrides or {})
+    # Explicit, not incidental: this write currently succeeds only because the sweep mkdir
+    # above happens to create the control report's parent. Move CONTROL_REPORT and every
+    # test routed through this helper would fail with FileNotFoundError instead of
+    # exercising the clause it names.
+    (tmp_path / SP.CONTROL_REPORT).parent.mkdir(parents=True, exist_ok=True)
     (tmp_path / SP.CONTROL_REPORT).write_text(json.dumps(control), encoding="utf-8")
 
 
@@ -1136,4 +1178,8 @@ def test_declaring_a_supply_unavailable_is_never_the_staging_fault(
             "--no-stage2-supply-available",
         ]
     )
-    assert rc != 4
+    # The EXACT code, not `!= 4`: that is satisfied by almost any outcome, including a
+    # crash returning 1 for the wrong reason, and — worse — by the monkeypatch above
+    # missing its target and the real derivation running. 1 is what a round refuses with
+    # when it may not run.
+    assert rc == 1

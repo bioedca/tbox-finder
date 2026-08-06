@@ -467,6 +467,7 @@ def merge_posterior_tables(
     *,
     n_candidates: int,
     min_coverage: float = 1.0,
+    manifest_ids: Sequence[str] | None = None,
 ) -> dict[str, Any]:
     """Merge per-shard tables into the round's single table, or refuse.
 
@@ -572,6 +573,26 @@ def merge_posterior_tables(
     _require_uniform(heads, "arm")
     validate_posteriors(merged)
 
+    # Coverage is only meaningful against THIS round's candidate set. Given only a count,
+    # a stale or foreign shard table passed in `--tables` contributes ids that are not in
+    # the manifest, `len(merged)` rises, the floor passes — and the truncated-run refusal
+    # this whole function exists to make is defeated by exactly the argument its docstring
+    # makes. The id set refuses by name; the count is the backstop when it is unavailable.
+    if manifest_ids is not None:
+        known = set(manifest_ids)
+        foreign = sorted(set(merged) - known)
+        if foreign:
+            raise Stage2ProducerError(
+                f"{len(foreign)} merged candidate_id(s) are not in this round's manifest "
+                f"(first: {foreign[:3]}) — a shard table from another round or sharding run "
+                "was included, and coverage would certify against the wrong denominator"
+            )
+    if len(merged) > n_candidates:
+        raise Stage2ProducerError(
+            f"merged {len(merged)} posteriors for a manifest of {n_candidates} candidates — "
+            "more scored than exist, so a foreign shard table was included"
+        )
+
     head = heads[0]
     coverage = len(merged) / n_candidates
     table = {
@@ -675,6 +696,14 @@ def run_control(
     from tbox_finder.stage2.eval import load_stage2_checkpoint, score_rows
 
     shuffled = dinucleotide_shuffle(positive_sequence, random.Random(seed))
+    # The same guard `build_rows` applies, for the same reason: `score_rows` calls the
+    # tokenizer's bare `encode`, which does NOT enforce the context window, so an
+    # over-length payload is silently truncated into a different sequence than the one
+    # named — while the record below hashes the FULL sequence. The control would then
+    # certify against bytes the model never scored, and `control_matches_this_calibration`
+    # would still pass. tbdb `FASTA_sequence` has no length bound, so this is reachable.
+    TOK.assert_within_context(positive_sequence, row_id="control_positive")
+    TOK.assert_within_context(shuffled, row_id="control_shuffle")
     rows = [
         {
             "row_id": "control_positive",
@@ -1078,6 +1107,23 @@ def _add_strand_policy(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def _coverage_fraction(text: str) -> float:
+    """``--min-coverage`` in (0, 1].
+
+    ``0`` disables the floor entirely, which publishes a table that scored 3 of 941 as a
+    clean round — the exact outcome the floor exists to refuse. The chosen value is
+    recorded in the merged table, so the record would show it was lowered; nothing
+    refused it.
+    """
+    value = float(text)
+    if not 0.0 < value <= 1.0:
+        raise argparse.ArgumentTypeError(
+            f"--min-coverage must be in (0, 1], got {value} — a floor of 0 certifies a "
+            "round that scored nothing, which is what the floor exists to refuse"
+        )
+    return value
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="python -m tbox_finder.mining.stage2_producer",
@@ -1107,7 +1153,7 @@ def build_parser() -> argparse.ArgumentParser:
     merge.add_argument("--manifest", default=DEFAULT_FP_MANIFEST)
     merge.add_argument(
         "--min-coverage",
-        type=float,
+        type=_coverage_fraction,
         default=1.0,
         help=(
             "refuse below this scored fraction (default 1.0 — every candidate resolved; "
@@ -1155,10 +1201,13 @@ def _cmd_score_shard(args: argparse.Namespace) -> int:
 
 
 def _cmd_merge(args: argparse.Namespace) -> int:
-    n_candidates = len(read_candidate_manifest(args.manifest))
+    specs = read_candidate_manifest(args.manifest)
     try:
         table = merge_posterior_tables(
-            args.tables, n_candidates=n_candidates, min_coverage=args.min_coverage
+            args.tables,
+            n_candidates=len(specs),
+            min_coverage=args.min_coverage,
+            manifest_ids=[spec.candidate_id for spec in specs],
         )
     except Stage2ProducerError as exc:
         print(f"FATAL: {exc}", file=sys.stderr)
@@ -1166,7 +1215,7 @@ def _cmd_merge(args: argparse.Namespace) -> int:
     write_json(args.out, table)
     _write_provenance(args.out, table, tables=args.tables, manifest=args.manifest)
     print(
-        f"merged {table['n_shards']} shards → {table['n_scored']}/{n_candidates} "
+        f"merged {table['n_shards']} shards → {table['n_scored']}/{len(specs)} "
         f"(coverage {table['coverage']:.4f}) → {args.out}"
     )
     return 0
