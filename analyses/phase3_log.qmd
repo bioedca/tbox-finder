@@ -3413,3 +3413,84 @@ reproduce this table byte-for-byte. The report records `device`, `arm`, `batch_s
 
 **Not committed, deliberately.** `$ROUND_DIR` is scratch (`stage1_remine.sbatch:63-64`), so the
 table is a run artifact; it was retrieved by `rsync` for this comparison and stays out of git.
+
+## Step P3-15′-c-i — 2026-08-06: is the (c) synteny backend supplyable from NCBI annotation?
+
+**Inputs.** `data/processed/audits/production_fetch_report.json` (git-tracked, 2,500
+`per_genome` rows written by `mining/pilot_fetch.py` at P2-10c′-fetch — each carrying the
+`source_url` its `_genomic.fna.gz` was fetched from); `data/processed/mining/round0_fp_manifest.json`
+(941 candidates); `mine_round.load_admissible_accessions()` → the 660 a2 hosts.
+
+**Process.** `src/tbox_finder/mining/annotation_supply.py` measures whether ADR-0006 **D4** can
+be supplied without a gene caller. It introduces **no transport**: the annotation lives in the
+same NCBI directory as the genome this repo already fetched, so the probe is a *sibling lookup
+on a committed URL* and `esearch`/`esummary` are never called. One GET of each assembly's
+`md5checksums.txt` returns that directory's complete file list plus checksums, so one request
+answers every suffix at once. An assembly is `annotated` **iff** it serves
+`<basename>_genomic.gff.gz`; the outcome is three-valued (`annotated` / `unannotated` /
+`unknown`) and a transport failure is `unknown`, never folded into `unannotated`. The route rule
+is **pre-registered in the module above the measurement** (§10.3) and is a function of counts
+alone. A control runs beside every sweep: a fixed assembly that must resolve *and* be annotated,
+plus that same directory with its accession corrupted, which must not resolve.
+
+**Outputs.** `reports/p3/annotation_supply.json` (216 KB, git-tracked, no DVC object) —
+per-assembly status, GFF URL, GFF md5, GFF `Content-Length`, `_protein.faa.gz` presence, plus the
+counts, the control and the derived route. 58 unit tests. No ADR amendment, no value pinned, no
+SLURM job, LOCAL only.
+
+**Measured, all 660, zero unknown, control powered** (positive `GCF_000007185.1` → 16 files,
+annotated; negative → 404):
+
+| set | annotated | unannotated | unknown |
+|---|---|---|---|
+| 660 admissible hosts | **339** (51.4 %) | 321 | 0 |
+| 76 candidate-carrying assemblies | **48** (63.2 %) | 28 | 0 |
+| 941 candidates, by their host | **655** (69.6 %) | 286 | 0 |
+
+Cross-tabulated against the accession prefix — the proxy `imp.md` framed the question with:
+
+| | annotated | unannotated |
+|---|---|---|
+| `GCF_` (115) | **115 (100 %)** | 0 |
+| `GCA_` (545) | **224 (41.1 %)** | 321 |
+
+**Decisions.** (1) **The prefix proxy is sound in one direction only, and the route it implied is
+wrong.** `imp.md` P3-15′-c-i pre-committed that *"if the GCA share is large, `prodigal` is
+required after all ⇒ an ADR-0002 env amendment"*. The GCA share **is** large — 545 of 660,
+82.6 % — but **224 of those 545 GenBank assemblies already ship a GFF**, so the implication does
+not hold: acting on the proxy would have commissioned an env amendment while 41 % of the
+GenBank hosts were already supplied. Every `GCF_` is annotated (115/115), which is why the proxy
+looked plausible. (2) **The route is `mixed`, and `mixed` does not block the round.** Mining is a
+conjunction, so a host with no annotation makes (c) `unavailable`, and an unavailable disjunct
+*spares* its candidates under ADR-0005 D14 — it never mines them. The NCBI-GFF route therefore
+supplies (c) for 655 of 941 candidates outright; `prodigal` would raise that ceiling to 941
+rather than make the round possible. Whether to pay for the remaining 30.4 % is a CLAUDE.md §7
+call, not an implementation detail, and it is left open here. (3) **`_genomic.gbff.gz` is not
+evidence of annotation** — NCBI serves one for unannotated assemblies too (measured on the real
+`GCA_000372225.1`: a gbff and a wgsmaster gbff, no gff). Keying on it would have called all 660
+annotated. A unit test pins the distinction. (4) **D4's Pfam/KO fallback has its protein input
+exactly where the GFF is** — `_protein.faa.gz` is present on 339 assemblies and absent on 321,
+matching the GFF partition one-for-one, so no separate acquisition is needed for the
+hypothetical/pseudogene arm. The profile database itself is still absent and remains owed.
+(5) **The acquisition is not a SLURM job.** Measured `Content-Length` over all 339 annotated
+hosts: **68,855,450 B = 68.9 MB** total (min 33,003 / median 177,764 / max 898,247), of which
+**9.5 MB** covers the 48 candidate-carrying hosts. At the shipped 3 req/s that is minutes of
+wall on the laptop — LOCAL by §9.1 — so the "SLURM acquisition ack" this block was gated on does
+not apply to the NCBI route.
+
+**Validation.** 58 unit tests; **23 sabotages, 22 RED against their named test**, the 23rd a
+declared no-op control. Two sabotages did not bite first time and neither was noise: the
+`run_control` refusal was satisfied by *any* `AnnotationSupplyError` — deleting the guard still
+raised, one frame down, from `assembly_basename("")` — so a bare `pytest.raises` was passing on a
+crash rather than on the named refusal (test now matches the message,
+[[raises-test-needs-a-positive-control]]); and the "never HEAD an unannotated host" property is
+defended **twice** (the annotated filter *and* `head_content_length`'s empty-URL early return), so
+neither edit alone could falsify it and the sabotage is declared compound. Full unit+golden
+**4,431 passed / 13 failed** against a matched baseline worktree at `8a82425` (**4,373 / 13**) —
+failure sets **identical**, `comm` empty both ways, and the +58 is exactly the new tests. ruff
+0.15.15 + black 25.11.0 clean; no `.smk` touched. §6.4 fires on nothing (no README,
+`paper/manuscript.qmd` or ADR reference to the new API). The shipped refusal path was executed,
+not inferred: `measure --limit 5` exits **3** with `route=refused`, and the report it writes
+carries the refusal inside it rather than a verdict a later reader could mistake for a pass.
+
+**Commit.** see `TODO.md` for the squash SHA on `main` (PR #112).
