@@ -491,9 +491,13 @@ def run_control(
             f"control positive {CONTROL_POSITIVE_ACCESSION} is absent from the fetch report — "
             "the control cannot run, so no route may be certified"
         )
-    positive = probe_assembly(CONTROL_POSITIVE_ACCESSION, pos_url, limiter=limiter, opener=opener)
+    positive = probe_assembly(
+        CONTROL_POSITIVE_ACCESSION, pos_url, limiter=limiter, opener=opener, sleep=sleep
+    )
     neg_dir = assembly_dir_url(pos_url) + CONTROL_NEGATIVE_SUFFIX
-    neg_manifest, neg_note = fetch_file_manifest(neg_dir, limiter=limiter, opener=opener)
+    neg_manifest, neg_note = fetch_file_manifest(
+        neg_dir, limiter=limiter, opener=opener, sleep=sleep
+    )
     negative = {
         "url": f"{neg_dir}/{MD5_MANIFEST_NAME}",
         "resolved": neg_manifest is not None,

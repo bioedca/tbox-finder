@@ -479,6 +479,20 @@ def test_control_is_unpowered_when_the_positive_resolves_but_is_unannotated() ->
     assert control_is_powered(control) is False
 
 
+def test_run_control_forwards_the_injected_clock_to_both_legs() -> None:
+    """A parameter a function accepts and never reads is a parameter nothing tests. Both
+    control legs retry, so a caller injecting a fake clock would still block on the real
+    ``time.sleep`` — 9 s per leg on a transient failure — and no existing test noticed, because
+    none of them made the control retry ([[pinned-constant-that-nothing-reads]])."""
+    slept: list[float] = []
+    control = run_control(_control_urls(), opener=_Opener({}, code=429), sleep=slept.append)
+    assert control["positive_status"] == STATUS_UNKNOWN
+    # Both legs retried and every wait went to the injected clock. Four attempts ⇒ three waits
+    # per leg, 1.5 + 3.0 + 4.5 = 9.0 s of real time each if the clock is not forwarded.
+    assert slept == [1.5, 3.0, 4.5, 1.5, 3.0, 4.5], f"waits were {slept}"
+    assert sum(slept) == 18.0
+
+
 def test_run_control_refuses_when_the_positive_accession_is_absent() -> None:
     """The message must name the control, not merely be *an* ``AnnotationSupplyError``.
 

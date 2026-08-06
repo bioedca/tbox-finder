@@ -3435,7 +3435,7 @@ plus that same directory with its accession corrupted, which must not resolve.
 
 **Outputs.** `reports/p3/annotation_supply.json` (216 KB, git-tracked, no DVC object) —
 per-assembly status, GFF URL, GFF md5, GFF `Content-Length`, `_protein.faa.gz` presence, plus the
-counts, the control and the derived route. 80 unit tests. No ADR amendment, no value pinned, no
+counts, the control and the derived route. 81 unit tests. No ADR amendment, no value pinned, no
 SLURM job, LOCAL only.
 
 **Measured, all 660, zero unknown, control powered** (positive `GCF_000007185.1` → 16 files,
@@ -3513,7 +3513,32 @@ limiter exists to prevent. Added, with the schedule asserted and a companion tes
 *permanent* failure does **not** sleep (660 pointless waits is the difference between a
 two-minute sweep and a twenty-minute one).
 
-**Validation.** 80 unit tests; **32 sabotages, 31 RED against their named test**, the 32nd a
+**Review round 2 — both paths converged on ONE defect, and it was mine.** `run_control`
+declared a `sleep` parameter and forwarded it to neither control leg, so a caller injecting a
+fake clock still blocked on the real `time.sleep` — and **no test observed it**, because none
+made the control retry ([[pinned-constant-that-nothing-reads]]: a parameter a function accepts
+and never reads is a parameter nothing tests). It was introduced by my own backoff fix, whose
+threading patch had silently not applied at those two call sites because `black` had already
+collapsed them to one line — a `.replace` that matched nothing and said nothing. The CLI graded
+it **minor**, the app **major**. ⚠ The app also prescribed the assertion `[1.5, 3.0]`; the real
+schedule is `[1.5, 3.0, 4.5]` **per leg** (`retries=4` ⇒ three waits, 9.0 s, which is the very
+number its own prose quoted), so the finding was right and the value wrong again — derived here
+by execution rather than transcribed.
+
+**Measured, and it is the number the §7 call turns on: annotation coverage is strongly
+clade-structured.** Joining the per-assembly status to `production_host_orders_v0.parquet`
+(`resolved_phylum`), the annotated fraction across the 660 ranges from **0.10 in Calditrichota
+(1/10)** and 0.21 in Bacteroidetes (4/19), 0.25 in Nitrospinota, 0.30 in Campylobacterota, up to
+**0.75 in Methanobacteriota (56/75)** and 0.79 in Fusobacteria. So the annotation-driven recall
+cap the NCBI route implies is **not uniform** — it falls hardest on exactly the under-annotated
+lineages the discovery aim lives in. ADR-0006 **D4** already requires a *"false-FAIL rate +
+per-clade (c)-exclusion + pseudogene diagnostic … symmetric with the false-pass rate"*, so this
+is that diagnostic's first data point rather than a new obligation; the full version is a
+`-c-ii` deliverable. It is deliberately **not** folded into
+`reports/p3/annotation_supply.json`: reading the parquet needs pandas, and the module is a
+bare-CI-tier, pure-stdlib probe.
+
+**Validation.** 81 unit tests; **33 sabotages, 32 RED against their named test**, the 33rd a
 declared no-op control. The measurement was **re-run end-to-end on the reviewed code** and
 reproduced byte-identically — 339/321, 48/28, 68,855,450 B — on an independent second sweep of
 999 requests. Two of the original 23 did not bite first time and neither was noise: the
@@ -3523,8 +3548,8 @@ crash rather than on the named refusal (test now matches the message,
 [[raises-test-needs-a-positive-control]]); and the "never HEAD an unannotated host" property is
 defended **twice** (the annotated filter *and* `head_content_length`'s empty-URL early return), so
 neither edit alone could falsify it and the sabotage is declared compound. Full unit+golden
-**4,453 passed / 13 failed** against a matched baseline worktree at `8a82425` (**4,373 / 13**) —
-failure sets **identical**, `comm` empty both ways, and the +80 is exactly the new tests. ruff
+**4,454 passed / 13 failed** against a matched baseline worktree at `8a82425` (**4,373 / 13**) —
+failure sets **identical**, `comm` empty both ways, and the +81 is exactly the new tests. ruff
 0.15.15 + black 25.11.0 clean; no `.smk` touched. §6.4 fires on nothing (no README,
 `paper/manuscript.qmd` or ADR reference to the new API). The shipped refusal path was executed,
 not inferred: `measure --limit 5` exits **3** with `route=refused`, and the report it writes
