@@ -1256,13 +1256,19 @@ def derive_synteny_supply_available(*, repo_root: str | Path | None = None) -> d
     clauses = {name: (root / rel).exists() for name, rel in SUPPLY_CLAUSES}
 
     fetch = _json_or_none(root / annotation_fetch.DEFAULT_FETCH_REPORT)
-    counts = (fetch or {}).get("status_counts") or {}
-    n_ok = int(counts.get(annotation_fetch.STATUS_OK, 0)) if isinstance(counts, Mapping) else 0
+    counts = fetch.get("status_counts") if isinstance(fetch, Mapping) else None
+    counts = counts if isinstance(counts, Mapping) else {}
+    raw_ok = counts.get(annotation_fetch.STATUS_OK, 0)
+    n_ok = raw_ok if isinstance(raw_ok, int) and not isinstance(raw_ok, bool) else 0
     clauses["acquisition_report_records_a_corpus"] = n_ok > 0
 
     false_pass = _json_or_none(root / FALSE_PASS_REPORT)
+    # ``_json_or_none`` can return a list or a scalar for a malformed report, and a
+    # fail-closed derivation that raises is not fail-closed — it takes the whole preflight
+    # down instead of answering False.
+    control = false_pass.get("control") if isinstance(false_pass, Mapping) else None
     clauses["false_pass_control_powered"] = bool(
-        ((false_pass or {}).get("control") or {}).get("powered") is True
+        isinstance(control, Mapping) and control.get("powered") is True
     )
 
     annotated = _annotated_set(str(root / DEFAULT_ANNOTATION_DIR))

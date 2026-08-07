@@ -600,3 +600,50 @@ class TestReanchorIsClamped:
             sub_threshold_orf_nt=0,
         )
         assert got.function_class == synteny.CLASS_AARS
+
+
+class TestRoundElevenBoundaries:
+    def test_a_bare_gene_symbol_does_not_suppress_the_symbol_route(self) -> None:
+        """⚠ ``gene_identity_text`` collects ``Name``/``gene`` alongside ``product``, so a
+        ``hypothetical protein`` carrying ``Name=alaS`` made ``informative`` non-empty and the
+        classifier returned "no D4 class" **before** the symbol route that would have used
+        ``alaS`` ever ran."""
+        assert (
+            synteny.classify_gene_identity(("hypothetical protein", "alaS"), gene_symbols=("alaS",))
+            == synteny.CLASS_AARS
+        )
+
+    def test_positive_control_a_real_product_still_outranks_the_symbol(self) -> None:
+        """A symbol-shaped filter that swallowed descriptions too would break precedence."""
+        assert (
+            synteny.classify_gene_identity(("DNA gyrase subunit A", "gyrA"), gene_symbols=("gyrA",))
+            is None
+        ), "the curated product decides, and it names no D4 class"
+
+    def test_the_overlap_bound_starts_at_the_elements_5_prime_edge(self) -> None:
+        """0-based half-open [900, 1000) → 1-based 901..1000.  A CDS starting exactly on the
+        5′ edge (901) is -99 away; one starting at 900 began before the element did."""
+        on_edge = cds(start=901, end=1600, product="alanine--tRNA ligase")
+        before = cds(start=900, end=1600, product="alanine--tRNA ligase")
+        kept = synteny.downstream_cds_on_strand(
+            [on_edge, before], seqid="c1", strand="+", three_prime=1000, element_span_nt=100
+        )
+        assert [f.feature_id for _d, f in kept] == [on_edge.feature_id]
+        assert kept[0][0] == -99
+
+    def test_after_a_carve_out_a_backward_cds_is_not_downstream(self) -> None:
+        """D4's overlap allowance is about the ELEMENT.  Once the walk re-anchors, a CDS
+        starting behind that anchor is not downstream of it — and criterion_c would read the
+        negative distance as comfortably in-window."""
+        leader = cds(start=1010, end=1400, product="hypothetical protein")
+        behind = cds(start=1100, end=1380, product="alanine--tRNA ligase")
+        got = synteny.resolve_downstream_gene(
+            [leader, behind],
+            seqid="c1",
+            strand="+",
+            three_prime=1000,
+            element_span_nt=100,
+            max_intervening_orfs=1,
+            sub_threshold_orf_nt=0,
+        )
+        assert got.function_class is None, "the aaRS starts behind the re-anchor at 1400"

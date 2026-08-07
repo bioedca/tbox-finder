@@ -4372,3 +4372,35 @@ than one hop allowed it could not catch a move behind an anchor the walk had alr
 RED against their named test.** Candidate verdicts unchanged (546 / 96 / 299). ruff + black clean.
 ⚠ Two clade-join tests `skip` in this environment (no `pyarrow`); both were verified by direct
 execution in `tbox-finder-data`, which has it, and CI installs it.
+
+**Review round 11 — 6 CLI findings, all real, 1 major.** Counts across eleven rounds:
+**20, 7, 4, 2, 1, 8, 1, 4, 3, 6, 6**.
+
+**⚠ A BARE GENE SYMBOL SUPPRESSED THE SYMBOL ROUTE IT WOULD HAVE FED.** `gene_identity_text`
+collects `Name` and `gene` alongside `product`, and a symbol like `alaS` is neither boilerplate
+nor identifier-shaped — so a `hypothetical protein` carrying `Name=alaS` made `informative`
+non-empty, and the classifier returned *"no D4 class"* **before** reaching the symbol fallback
+that exists for exactly that record. Reproduced before fixing (`→ None`, expected `aars`), fixed
+by treating a single ≤8-character whitespace-free token as a *name* rather than a description,
+and pinned with a positive control (`DNA gyrase subunit A` + `gyrA` must still decide `None`, or
+a filter that swallowed descriptions would pass the first test alone).
+
+**⚠ THE CLASS-II OVERLAP BOUND WAS OFF BY ONE, AND THE ALLOWANCE LEAKED PAST THE CARVE-OUT.**
+The element's 5′ edge is `locus_start + 1` in 1-based coordinates, so a CDS starting exactly on
+it is `-(span - 1)` away; `distance >= -span` admitted one coordinate *before the element began*,
+on both strands. Separately, D4's overlap allowance is about the **element** — once the walk has
+re-anchored past an intervening ORF, a CDS starting *behind* that anchor is not downstream of it,
+and `criterion_c` would have read the negative distance as comfortably in-window.
+
+**Also fixed.** The fail-closed supply derivation could **crash** on a malformed report root (a
+list or scalar where a mapping was expected) — a derivation that raises is not fail-closed, it
+takes the preflight down instead of answering `False`; `status_counts` values are now type-checked
+the same way (`isinstance(True, int)` again); and `test_the_reported_rate_matches_its_own_counts`
+guarded `n` rather than `n_decided`, so an arm that drew windows and decided none would raise
+`TypeError` instead of failing an assertion.
+
+**Validation (round 11).** Full unit+golden **4,667 passed / 13 failed** vs the matched baseline at
+`95d0149` (**4,492 / 13**) — failure sets identical, `comm` empty both ways. **48 sabotages / 48
+RED against their named test.** Candidate verdicts unchanged (546 / 96 / 299) — all three boundary
+corrections moved **0** of them on this corpus, so all three are latent correctness the new tests
+pin. ruff + black clean.

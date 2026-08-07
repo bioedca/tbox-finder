@@ -751,9 +751,13 @@ class TestStrictArmReusesTheSameWindows:
             # ⚠ The denominator is the DECIDED windows, not every drawn one: a window whose
             # (c) is unavailable is one the rule was never asked, not one it declined to
             # false-pass.  This assertion caught that contract change when it landed.
+            # Guard n_decided, not n: an arm can draw windows and decide none of them, and
+            # _arm then reports ``None`` rather than 0.0 — comparing that raises TypeError.
             if arm["n_decided"]:
                 expected = arm["status_counts"].get(STATUS_PASSED, 0) / arm["n_decided"]
                 assert arm["false_pass_rate"] == pytest.approx(expected), name
+            else:
+                assert arm["false_pass_rate"] is None, name
         control = false_pass["positive_context_control"]
         assert "false_pass_rate" not in control, (
             "the control arm's rate is a PASS rate; publishing it under false_pass_rate "

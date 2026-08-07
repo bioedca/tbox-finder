@@ -509,6 +509,14 @@ _UNINFORMATIVE = re.compile(
 #: GO terms are included here deliberately: ``GO:0004812`` *is* functional information, but
 #: this step resolves no GO table, so calling it readable would be claiming a judgement that
 #: was never made.
+#: A bare gene symbol (``alaS``, ``gatB``) is a *name*, not a description of function.  It
+#: arrives here because ``gene_identity_text`` collects ``Name`` and ``gene`` alongside
+#: ``product``, and counting it as readable identity text made ``classify_gene_identity``
+#: return ``None`` *before* the symbol route it would have fed ever ran — so a
+#: ``hypothetical protein`` carrying ``Name=alaS`` resolved to "no D4 class" rather than aaRS.
+#: Symbol-shaped means: a single token, no whitespace, at most 8 characters.
+_SYMBOL_SHAPED = re.compile(r"^\S{1,8}$")
+
 _IDENTIFIER_LIKE = re.compile(
     r"^(?:Genbank|RefSeq|Protein|UniProtKB(?:/\w+)?|NCBI_GP|InterPro|GeneID|EnsemblGenomes[-\w]*|"
     r"GO|SO|EC|KEGG|COG|Pfam|TIGRFAM|HAMAP)[:_]"
@@ -558,7 +566,9 @@ def classify_gene_identity(
     informative = [
         t
         for t in texts
-        if not _UNINFORMATIVE.match(t.strip()) and not _IDENTIFIER_LIKE.match(t.strip())
+        if not _UNINFORMATIVE.match(t.strip())
+        and not _IDENTIFIER_LIKE.match(t.strip())
+        and not _SYMBOL_SHAPED.match(t.strip())
     ]
     for text in informative:
         if any(pattern.search(text) for pattern, _why in _EXCLUSION_RES):
@@ -757,7 +767,10 @@ def downstream_cds_on_strand(
             continue
         start = gff3.cds_start_position(cds)
         distance = start - three_prime if strand == gff3.STRAND_PLUS else three_prime - start
-        if distance < -element_span_nt:
+        # The element's 5′ edge is ``locus_start + 1`` in 1-based coordinates, so a CDS whose
+        # start sits exactly on it is ``-(span - 1)`` away.  ``>= -span`` admitted one
+        # coordinate *before* the element began, on both strands.
+        if distance < -(element_span_nt - 1):
             continue
         out.append((distance, cds))
     out.sort(key=lambda item: (item[0], item[1].feature_id))
@@ -809,6 +822,11 @@ def resolve_downstream_gene(
     for distance_from_locus, cds in ordered:
         start = gff3.cds_start_position(cds)
         distance = start - anchor if strand == gff3.STRAND_PLUS else anchor - start
+        if n_intervening and distance < 0:
+            # D4's class-II overlap allowance is about the ELEMENT, not about an intervening
+            # ORF: once the walk has re-anchored, a CDS starting behind that anchor is not
+            # downstream of it, and criterion_c would read the negative distance as in-window.
+            continue
         if distance > window_bp:
             return DownstreamGene(
                 function_class=None,
