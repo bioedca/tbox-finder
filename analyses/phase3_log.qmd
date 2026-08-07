@@ -3941,3 +3941,104 @@ shared predicate, since breaking only the predicate would leave a per-clause rep
 Full unit+golden **4,490 passed / 15 failed** vs the matched baseline at `2be5ff4`
 (**4,240 / 15**) — failure sets identical, `comm` empty both ways. Counts across nine rounds:
 **9, 2, 4, 5, 5, 5, 1, 2, 1**.
+
+## Step P3-15′-c-ii — 2026-08-07: the criterion (c) predicate, its per-candidate producer, and D4's two symmetric diagnostics
+
+**Inputs.** `data/processed/mining/round0_fp_manifest.json` (941 candidates / 76 hosts);
+`data/interim/production_annotations/*.gff.gz` (339, md5-verified at `-c-i`);
+`data/interim/production_genomes/*.fna` (the contig-id bridge);
+`data/processed/mining/production_genomes_v0.parquet` (GTDB clade);
+`data/processed/negatives/{decoys,mining_pool}_v0.parquet` (the §9.1 arm).
+**Process.** `mining/synteny.py` implements ADR-0006 D4's frozen `criterion_c` verbatim plus
+the downstream walk, the tandem carve-out and the gene-identity vocabulary D4 delegates here;
+`mining/synteny_producer.py` writes `$ROUND_DIR/synteny_status.json` (`candidate_id → status`,
+the (a)-producer's shape) and the two committed diagnostic reports. `SYNTENY_SUPPLY_AVAILABLE`
+was added beside `MSA_SUPPLY_AVAILABLE`, `candidate_evidence` / `remine_candidate_evidence`
+gained the synteny status map with the same fail-closed absent-id rule, and `--synteny-available`
+was promoted from a one-way `store_true` to the two-way pair with an exit-4 unevidenced preflight.
+**Outputs.** `src/tbox_finder/mining/{synteny,synteny_producer}.py`;
+`reports/p3/synteny_false_pass.json`; `reports/p3/synteny_exclusion_diagnostic.json`;
+`tests/unit/test_synteny{,_producer}.py` (+112 tests).
+**Validation.** 941/941 statuses (541 passed / 101 failed / 299 unavailable); the false-pass
+control is **powered** (margin 0.975 ≥ 0.20); full unit+golden **4,604 passed / 13 failed**
+against a matched baseline worktree at `95d0149` (**4,492 / 13**) — failure sets identical,
+`comm` empty both ways; **19 sabotages / 19 RED against their named test**.
+**Decisions.** ADR-0006 D4 (vocabulary delegated here, §10.1-verified); ADR-0005 D14 (fail-closed
+`unavailable` ⇒ spared), D15 (both-strand carry-through).
+**Commit.** see below.
+
+**The criterion discriminates, and by a wide margin.** Candidates pass at **57.5 %** against a
+clade-matched random-leader background of **1.67 %** and a §9.1 5′UTR-decoy background of
+**4.52 %** — a 13–34× enrichment, with a positive-context arm at **99.20 %** proving the control
+is powered rather than merely quiet. The reading is not that the criterion is loose: the
+round-0 pool is Stage-1 *false positives* drawn from a masked negative substrate, and a 96-nt
+element scoring 0.9977 that sits 19 bp upstream of an `alanine--tRNA ligase` is most plausibly
+an uncatalogued T-box. ADR-0005 D14's spare rule exists precisely so those are spared rather
+than trained against, and 541 of them now are.
+
+**⚠ THE BIGGEST DEFECT WAS FOUND BY DISBELIEVING A NUMBER, NOT BY A TEST.** The first run
+returned **541 of 941 passing** and the per-CDS background density of D4's four classes is
+**4.14 %** — an irreconcilable gap. The cause was that the downstream walk bounded the distance
+only from above: a bacterial genome is ~88 % coding, so a window buried inside a long gene found
+that gene as its "downstream" gene and inherited its identity. D4's class-II case genuinely
+needs a *negative* distance (a translational T-box abuts/overlaps the start codon), so the fix
+could not be "reject overlap"; it is that the CDS start must lie at or after the **element's own
+5′ end**, which pins no new number. The corpus-level counts barely moved because Stage-1
+candidates land in leader regions rather than inside genes — so the number that exposed the bug
+was not the number the bug corrupted.
+
+**⚠ TWO DEFECTS THE DIAGNOSTIC FOUND IN ITSELF, AND BOTH WERE SILENT ZEROS.** (1) The pseudogene
+diagnostic reported **0** pseudogenized first-downstream ORFs corpus-wide, because the tandem
+carve-out hops exactly the population the diagnostic exists to size; the counts now accumulate
+across the whole walk (15 pseudogenized, 88 unjudgeable). (2) D4's hypothetical/pseudogene route
+was **entirely unreachable**: `gff3.gene_identity_text` collects `Dbxref`/`Name` as well as
+`product`, and on NCBI CDS those are accessions (`Dbxref` is present on 29,852 of 30,273
+measured CDS), so every `hypothetical protein` still had non-empty "identity text", never
+resolved to unjudgeable, and was scored a *decided* `failed` instead of being routed to the
+fallback. Identifier-shaped values are now filtered, with a positive control asserting the
+filter removes identifiers rather than removing judgement.
+
+**⚠ THE VOCABULARY IS PRECISION-FIRST BECAUSE THE PERMISSIVE VERSION WAS MEASURED FIRST.** An
+"amino-acid word + enzyme word" rule looks reasonable and swallows `HAMP domain-containing
+histidine kinase` (38 CDS over 12 hosts, two-component signalling), `serine/threonine protein
+kinase`, `glutamine amidotransferase` (purine/His/Trp — **not** tRNA-dependent transamidation),
+`methylated-DNA--[protein]-cysteine S-methyltransferase` (DNA repair) and `peptide-methionine
+(S)-S-oxide reductase` (protein repair). Every `EXCLUSIONS` entry was observed on this corpus
+before it was written down, exclusions are applied **before** every include rule, and the
+transamidation rules all require the literal `tRNA`. Two ordering corrections came out of the
+audit: the curated product name outranks the gene symbol (`hisJ` is the histidine transporter's
+binding protein in the enterics and **histidinol phosphatase** in Firmicutes), and the symbol
+route fires only when the product name says nothing at all — consulting it otherwise put `PTS
+galactitol transporter subunit IIB` into the transamidation class via `gatB`, `cytochrome C-552`
+into transport via `cycA`, and `homocitrate synthase` into aaRS via `lysS`. 24 of 4,991 matches
+came from that route and 3 of the 24 were wrong.
+
+**⚠ THE CONTIG BRIDGE IS BY IDENTITY, AND AN INDEX JOIN WOULD HAVE BEEN WRONG ON HALF THE
+CORPUS.** A candidate's contig is `:c<ci>`, an index into the genomic FASTA's record order; a
+GFF's `seqid` is the NCBI contig accession. **23 of the 48** candidate-carrying annotated hosts
+serve their GFF seqids in a different order than their FASTA records, so `records[ci]` ↔
+`seqids[ci]` would silently read the wrong contig on ~48 % of hosts. The id join resolves
+**134 of 134** needed (host, contig) pairs.
+
+**Three gaps reported rather than papered over.** (1) The **shipped §9.1 decoy rows carry
+coordinates on 0 annotated production hosts** — `decoys_v0`'s three non-structured pools have no
+accession at all, its 2,999 `structured_rna` accessions are Rfam source contigs, and
+`mining_pool_v0`'s 45,988 leader/trail windows sit on the TBDB source genomes — so that arm is
+`available: false` **with its counts**, and the §9.1 leader class is re-instantiated inside the
+annotated corpus instead (5′UTR and tRNA-adjacent windows). (2) The **false-FAIL arm has almost
+no positive denominator**: only **2 TBDB records on 1 assembly** intersect the 339, because the
+production substrate is by construction a negative one. (3) The **joint a ∧ b ∧ c arm is
+structurally unavailable** — (b) has no backend until P3-15′-d — and is withheld, never computed
+from two unavailable disjuncts.
+
+**Per-clade exclusion is the clade-structured cap D4 commissioned, and it is large.** 31.8 %
+of candidates are `unavailable` (286 host-unannotated, 11 unjudgeable, 2 contig-absent), with
+five phyla at **100 %** exclusion (Chloroflexota, Desulfobacterota, Fibrobacterota, Thermotogota,
+Bdellovibrionota_C), Bacillota at 38.5 %, and Atribacterota / Sysuimicrobiota / Fusobacteriota at
+0 %. That is the recall cap the commissioned bakta/prokka arm exists to lift. Empirical passing
+distances: p50 117 bp, p95 269 bp, p99 364 bp, max 454 bp — all inside D4's 500 bp pad, which is
+the sensitivity check D4 asks for.
+
+**⚠ `n_mined` IS STILL STRUCTURALLY 0.** Sparing is a disjunction so mining is a conjunction:
+`relaxed_architecture` remains the one unavailable backend, so `max_possible_yield` still caps
+the round at 0 until P3-15′-d lands. This step removes one of the two blockers, not both.

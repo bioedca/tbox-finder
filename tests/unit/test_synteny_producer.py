@@ -1,0 +1,357 @@
+"""The criterion-(c) producer: the status table, the supply derivation, and the round wiring.
+
+The committed diagnostic reports are treated as **evidence**, so their shape and their own
+self-grading verdict are pinned here — a report that graded itself unpowered must not be able
+to sit in the tree while the supply constant says the backend is live.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+from pathlib import Path
+
+import pytest
+
+from tbox_finder.mining import mine_round, remine, synteny, synteny_producer
+from tbox_finder.mining.spare_rule import STATUS_FAILED, STATUS_PASSED, STATUS_UNAVAILABLE
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+
+CONFIG = synteny_producer.SyntenyRunConfig(
+    strand_policy="both", max_intervening_orfs=1, sub_threshold_orf_nt=150
+)
+
+
+def row(candidate_id: str, status: str, **extra) -> dict:
+    base = {
+        "candidate_id": candidate_id,
+        "accession": "GCA_000000001.1:c0",
+        "assembly": "GCA_000000001.1",
+        "contig_index": 0,
+        "seqid": "c0",
+        "locus_start": 100,
+        "locus_end": 200,
+        "status": status,
+        "reason": "",
+        "per_strand": {},
+        "note": "",
+    }
+    base.update(extra)
+    return base
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# The status table
+# ═════════════════════════════════════════════════════════════════════════════
+class TestStatusTable:
+    def test_status_map_and_rows_are_written_from_one_list(self) -> None:
+        table = synteny_producer.build_status_table(
+            [row("a", STATUS_PASSED), row("b", STATUS_FAILED)], config=CONFIG
+        )
+        assert table["status"] == {"a": STATUS_PASSED, "b": STATUS_FAILED}
+        assert table["status_counts"] == {STATUS_FAILED: 1, STATUS_PASSED: 1}
+        assert table["config"]["strand_policy"] == "both"
+
+    def test_a_duplicate_candidate_id_raises_instead_of_merging(self) -> None:
+        """[[duplicate-key-merges-instead-of-colliding]] — a silent overwrite loses a verdict
+        while leaving every summed invariant satisfied."""
+        with pytest.raises(synteny_producer.ProducerError, match="duplicate"):
+            synteny_producer.build_status_table(
+                [row("a", STATUS_PASSED), row("a", STATUS_FAILED)], config=CONFIG
+            )
+
+    def test_load_refuses_a_table_that_disagrees_with_itself(self, tmp_path: Path) -> None:
+        table = synteny_producer.build_status_table([row("a", STATUS_PASSED)], config=CONFIG)
+        table["status"]["a"] = STATUS_FAILED  # the map now contradicts the row
+        path = tmp_path / "t.json"
+        path.write_text(json.dumps(table), encoding="utf-8")
+        with pytest.raises(synteny_producer.ProducerError, match="disagrees"):
+            synteny_producer.load_status_map(path)
+
+    def test_positive_control_an_agreeing_table_loads(self, tmp_path: Path) -> None:
+        """Without this, a loader that raised on *everything* would satisfy the test above."""
+        table = synteny_producer.build_status_table([row("a", STATUS_PASSED)], config=CONFIG)
+        path = tmp_path / "t.json"
+        path.write_text(json.dumps(table), encoding="utf-8")
+        assert synteny_producer.load_status_map(path) == {"a": STATUS_PASSED}
+
+    def test_load_refuses_an_unknown_status_value(self, tmp_path: Path) -> None:
+        table = synteny_producer.build_status_table([row("a", STATUS_PASSED)], config=CONFIG)
+        table["rows"][0]["status"] = "probably"
+        table["status"]["a"] = "probably"
+        path = tmp_path / "t.json"
+        path.write_text(json.dumps(table), encoding="utf-8")
+        with pytest.raises(synteny_producer.ProducerError, match="unknown status"):
+            synteny_producer.load_status_map(path)
+
+    def test_merge_refuses_shards_that_disagree_on_the_run_config(self, tmp_path: Path) -> None:
+        """Two shards run under different carve-out settings do not describe one round."""
+        other = synteny_producer.SyntenyRunConfig(
+            strand_policy="both", max_intervening_orfs=3, sub_threshold_orf_nt=150
+        )
+        paths = []
+        for name, cfg, cid in (("a", CONFIG, "x"), ("b", other, "y")):
+            p = tmp_path / f"{name}.json"
+            p.write_text(
+                json.dumps(
+                    synteny_producer.build_status_table([row(cid, STATUS_PASSED)], config=cfg)
+                ),
+                encoding="utf-8",
+            )
+            paths.append(p)
+        with pytest.raises(synteny_producer.ProducerError, match="disagree on the run config"):
+            synteny_producer.merge_status_tables(paths)
+
+    def test_merge_positive_control_matching_configs_merge(self, tmp_path: Path) -> None:
+        paths = []
+        for name, cid in (("a", "x"), ("b", "y")):
+            p = tmp_path / f"{name}.json"
+            p.write_text(
+                json.dumps(
+                    synteny_producer.build_status_table([row(cid, STATUS_PASSED)], config=CONFIG)
+                ),
+                encoding="utf-8",
+            )
+            paths.append(p)
+        merged = synteny_producer.merge_status_tables(paths)
+        assert set(merged["status"]) == {"x", "y"}
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# The round wiring — an absent id must SPARE, never mine
+# ═════════════════════════════════════════════════════════════════════════════
+class TestRoundWiring:
+    def test_a_produced_status_reaches_the_disjunct(self) -> None:
+        evidence = mine_round.candidate_evidence("x", None, {"x": STATUS_PASSED})
+        assert evidence.downstream_aaRS_synteny == STATUS_PASSED
+
+    def test_an_id_absent_from_the_map_is_unavailable_not_failed(self) -> None:
+        """A dropped shard must cost sensitivity, never mine a real T-box."""
+        evidence = mine_round.candidate_evidence("x", None, {"other": STATUS_PASSED})
+        assert evidence.downstream_aaRS_synteny == STATUS_UNAVAILABLE
+
+    def test_no_map_at_all_is_unavailable(self) -> None:
+        assert mine_round.candidate_evidence("x", None).downstream_aaRS_synteny == (
+            STATUS_UNAVAILABLE
+        )
+
+    def test_the_covariation_disjunct_is_unchanged_by_the_new_parameter(self) -> None:
+        """Asserted by identity: a builder that wrote the synteny status into BOTH fields
+        would still satisfy a test that only checked the synteny one."""
+        evidence = mine_round.candidate_evidence("x", {"x": STATUS_FAILED}, {"x": STATUS_PASSED})
+        assert evidence.any_helix_rscape == STATUS_FAILED
+        assert evidence.downstream_aaRS_synteny == STATUS_PASSED
+        assert evidence.relaxed_architecture == STATUS_UNAVAILABLE
+
+    def test_the_p3_builder_threads_it_too(self) -> None:
+        evidence = remine.remine_candidate_evidence(
+            "x",
+            covariation_status=None,
+            stage2_posteriors=None,
+            synteny_status={"x": STATUS_PASSED},
+        )
+        assert evidence.downstream_aaRS_synteny == STATUS_PASSED
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# The supply derivation — the constant has to prove itself, in BOTH directions
+# ═════════════════════════════════════════════════════════════════════════════
+class TestSupplyDerivation:
+    def test_the_constant_agrees_with_the_live_derivation(self) -> None:
+        derived = synteny_producer.derive_synteny_supply_available(repo_root=REPO_ROOT)
+        assert derived["available"] == mine_round.SYNTENY_SUPPLY_AVAILABLE, derived["reasons"]
+
+    def test_every_clause_is_true_in_this_checkout(self) -> None:
+        derived = synteny_producer.derive_synteny_supply_available(repo_root=REPO_ROOT)
+        assert derived["reasons"] == []
+        assert set(derived["clauses"]) >= {name for name, _ in synteny_producer.SUPPLY_CLAUSES}
+
+    def test_no_clause_reads_dvc_tracked_data(self) -> None:
+        """⚠ The trap ``derive_stage2_supply_available`` already hit.
+
+        A clause over ``data/interim/production_annotations`` is ``False`` in CI and in any
+        fresh clone, so the derivation would contradict the constant in exactly the
+        environments that must agree.  Proven by deriving against a root where the DVC data
+        cannot exist but the git-tracked evidence does.
+        """
+        derived = synteny_producer.derive_synteny_supply_available(repo_root=REPO_ROOT)
+        assert derived["n_annotated_hosts_in_acquisition_report"] > 0
+        assert derived["available"] is True
+
+    @pytest.mark.parametrize("clause", [name for name, _ in synteny_producer.SUPPLY_CLAUSES])
+    def test_breaking_ONE_clause_alone_flips_the_verdict(self, clause: str, tmp_path: Path) -> None:
+        """[[all-true-fixture-cannot-test-a-conjunction]] — every clause is TRUE here, so a
+        hardcoded ``True`` is behaviourally identical to ``all(clauses)`` unless each member
+        is broken **on its own**."""
+        rel = dict(synteny_producer.SUPPLY_CLAUSES)[clause]
+        for name, source in synteny_producer.SUPPLY_CLAUSES:
+            target = tmp_path / source
+            target.parent.mkdir(parents=True, exist_ok=True)
+            if name != clause:
+                target.write_bytes((REPO_ROOT / source).read_bytes())
+        assert not (tmp_path / rel).exists()
+        derived = synteny_producer.derive_synteny_supply_available(repo_root=tmp_path)
+        assert derived["available"] is False
+        assert any(clause in reason for reason in derived["reasons"])
+
+    def test_an_unpowered_false_pass_report_withdraws_the_supply(self, tmp_path: Path) -> None:
+        """A measurement that graded ITSELF uninterpretable is not evidence of a backend."""
+        for _name, source in synteny_producer.SUPPLY_CLAUSES:
+            target = tmp_path / source
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes((REPO_ROOT / source).read_bytes())
+        report = json.loads((tmp_path / synteny_producer.FALSE_PASS_REPORT).read_text())
+        report["control"]["powered"] = False
+        (tmp_path / synteny_producer.FALSE_PASS_REPORT).write_text(json.dumps(report))
+        derived = synteny_producer.derive_synteny_supply_available(repo_root=tmp_path)
+        assert derived["available"] is False
+        assert any("false_pass_control_powered" in r for r in derived["reasons"])
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# CLI contracts
+# ═════════════════════════════════════════════════════════════════════════════
+class TestCli:
+    @pytest.mark.parametrize(
+        "flag", ["--strand-policy", "--max-intervening-orfs", "--sub-threshold-orf-nt"]
+    )
+    def test_the_undelegated_values_are_required_with_no_default(self, flag: str) -> None:
+        """ADR-0006 pins none of these, so the round supplies them or the run refuses."""
+        parser = synteny_producer.build_parser()
+        with pytest.raises(SystemExit):
+            parser.parse_args(["run-shard", "--out", "x.json"])
+        action = next(
+            a
+            for sub in parser._subparsers._group_actions  # type: ignore[union-attr]
+            for p in sub.choices.values()
+            for a in p._actions
+            if flag in a.option_strings
+        )
+        assert action.required is True
+        assert action.default is None or action.default is argparse.SUPPRESS
+
+    def test_the_window_default_is_d4s_pinned_500(self) -> None:
+        parser = synteny_producer.build_parser()
+        args = parser.parse_args(
+            [
+                "run-shard",
+                "--strand-policy",
+                "both",
+                "--max-intervening-orfs",
+                "1",
+                "--sub-threshold-orf-nt",
+                "150",
+                "--out",
+                "x.json",
+            ]
+        )
+        assert args.window_bp == 500
+
+    def test_remine_carries_the_two_way_synteny_declaration(self) -> None:
+        """A bare ``store_true`` cannot express a ``True`` default, so a checkout that cannot
+        run the backend would have no way to say so (the hole P3-15′-a/-b each closed)."""
+        parser = remine.build_parser()
+        plan = parser._subparsers._group_actions[0].choices["plan"]  # type: ignore[union-attr]
+        options = {opt for action in plan._actions for opt in action.option_strings}
+        assert {"--synteny-available", "--no-synteny-available"} <= options
+        positive = next(a for a in plan._actions if "--synteny-available" in a.option_strings)
+        assert positive.default is mine_round.SYNTENY_SUPPLY_AVAILABLE
+
+    def test_the_unevidenced_preflight_covers_the_synteny_declaration(self) -> None:
+        """Declaring a supply this checkout cannot evidence must exit 4, not mine."""
+        derivations = {
+            "msa_supply_derivation": {"available": True},
+            "stage2_supply_derivation": {"available": True},
+            "synteny_supply_derivation": {"available": False, "reasons": ["no backend"]},
+        }
+        args = argparse.Namespace(
+            msa_supply_available=True, stage2_supply_available=True, synteny_available=True
+        )
+        assert remine._refuse_unevidenced(args, derivations) == 4
+
+    def test_positive_control_an_evidenced_declaration_does_not_refuse(self) -> None:
+        derivations = {
+            "msa_supply_derivation": {"available": True},
+            "stage2_supply_derivation": {"available": True},
+            "synteny_supply_derivation": {"available": True},
+        }
+        args = argparse.Namespace(
+            msa_supply_available=True, stage2_supply_available=True, synteny_available=True
+        )
+        assert remine._refuse_unevidenced(args, derivations) is None
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# The committed diagnostic reports are evidence — pin their shape and verdicts
+# ═════════════════════════════════════════════════════════════════════════════
+@pytest.fixture(scope="module")
+def false_pass() -> dict:
+    return json.loads((REPO_ROOT / synteny_producer.FALSE_PASS_REPORT).read_text(encoding="utf-8"))
+
+
+@pytest.fixture(scope="module")
+def exclusion() -> dict:
+    return json.loads((REPO_ROOT / synteny_producer.EXCLUSION_REPORT).read_text(encoding="utf-8"))
+
+
+class TestCommittedDiagnostics:
+    def test_d4s_named_false_pass_arms_are_all_present(self, false_pass: dict) -> None:
+        assert set(false_pass["arms"]) == {
+            "clade_matched_random_leaders",
+            "nine_one_five_prime_utr_decoys",
+            "nine_one_trna_adjacent_decoys",
+            "shipped_nine_one_decoy_rows",
+        }
+
+    def test_the_control_is_powered_and_says_why(self, false_pass: dict) -> None:
+        control = false_pass["control"]
+        assert control["powered"] is True
+        assert control["margin"] >= synteny_producer.CONTROL_MIN_MARGIN
+
+    def test_the_positive_context_arm_separates_from_the_background(self, false_pass: dict) -> None:
+        """Without separation the false-pass rates measure nothing
+        ([[control-matchedness-must-be-asserted]])."""
+        background = false_pass["arms"]["clade_matched_random_leaders"]["false_pass_rate"]
+        positive = false_pass["positive_context_control"]["false_pass_rate"]
+        assert background is not None and positive is not None
+        assert positive - background >= synteny_producer.CONTROL_MIN_MARGIN
+
+    def test_an_unavailable_arm_carries_its_counts_not_just_a_flag(self, false_pass: dict) -> None:
+        """[[clauses-must-guard-emptiness]] — an arm that silently vanishes reads as an arm
+        that found nothing."""
+        shipped = false_pass["arms"]["shipped_nine_one_decoy_rows"]
+        assert shipped["available"] is False
+        assert shipped["reason"]
+        assert shipped["detail"]
+
+    def test_the_joint_abc_arm_is_withheld_rather_than_computed(self, false_pass: dict) -> None:
+        assert false_pass["joint_abc"]["available"] is False
+        assert "P3-15" in false_pass["joint_abc"]["reason"]
+
+    def test_the_exclusion_report_breaks_down_by_clade_and_reason(self, exclusion: dict) -> None:
+        assert exclusion["per_clade"]
+        for clade, block in exclusion["per_clade"].items():
+            assert block["n"] == sum(block["status_counts"].values()), clade
+            assert set(block["reasons"]) <= set(synteny_producer.EXCLUSION_REASONS), clade
+
+    def test_the_pseudogene_diagnostic_is_not_vacuously_zero(self, exclusion: dict) -> None:
+        """It reported 0 corpus-wide while the carve-out was consuming the population it sizes."""
+        block = exclusion["pseudogene_diagnostic"]
+        assert block["hmm_fallback_available"] is False
+        assert block["n_unjudgeable_orfs_encountered"] > 0
+
+    def test_the_exclusion_rate_reconciles_with_its_reason_totals(self, exclusion: dict) -> None:
+        assert sum(exclusion["exclusion_reason_totals"].values()) == exclusion["n_unavailable"]
+        assert exclusion["exclusion_rate"] == pytest.approx(
+            exclusion["n_unavailable"] / exclusion["n_candidates"]
+        )
+
+    def test_both_reports_describe_the_same_run_config(
+        self, false_pass: dict, exclusion: dict
+    ) -> None:
+        """Two reports about different runs would let a reader draw a false-pass rate and an
+        exclusion rate from incompatible corpora."""
+        assert false_pass["config"] == exclusion["config"]
+        assert false_pass["config"]["window_bp"] == synteny.DEFAULT_WINDOW_BP
+        assert false_pass["config"]["hmm_fallback_available"] is False

@@ -69,6 +69,7 @@ from tbox_finder.eval.tier2n_probe import ProbeSet
 from tbox_finder.mining.hard_negative import MiningCandidate
 from tbox_finder.mining.mine_round import (
     MSA_SUPPLY_AVAILABLE,
+    SYNTENY_SUPPLY_AVAILABLE,
     build_round_availability,
     candidate_evidence,
     read_fp_manifest,
@@ -253,6 +254,7 @@ def remine_candidate_evidence(
     *,
     covariation_status: Mapping[str, str] | None,
     stage2_posteriors: Mapping[str, float] | None,
+    synteny_status: Mapping[str, str] | None = None,
 ) -> SpareRuleEvidence:
     """The candidate's P3 evidence: the P2 builder's result **plus** its posterior.
 
@@ -268,7 +270,7 @@ def remine_candidate_evidence(
     the candidate is **spared**. A dropped producer shard therefore costs
     sensitivity, never a mined true T-box.
     """
-    base = candidate_evidence(candidate_id, covariation_status)
+    base = candidate_evidence(candidate_id, covariation_status, synteny_status)
     if stage2_posteriors is None:
         return base
     posterior = stage2_posteriors.get(candidate_id)
@@ -316,6 +318,7 @@ def read_remine_manifest(
     *,
     covariation_status: Mapping[str, str] | None = None,
     stage2_posteriors: Mapping[str, float] | None = None,
+    synteny_status: Mapping[str, str] | None = None,
 ) -> list[MiningCandidate]:
     """The round's false positives, stamped with **both** produced evidence sources.
 
@@ -324,7 +327,9 @@ def read_remine_manifest(
     candidate's evidence through :func:`remine_candidate_evidence`, so the P2 reader
     stays the single parser of the manifest shape.
     """
-    candidates = read_fp_manifest(path, covariation_status=covariation_status)
+    candidates = read_fp_manifest(
+        path, covariation_status=covariation_status, synteny_status=synteny_status
+    )
     return [
         dataclasses.replace(
             c,
@@ -332,6 +337,7 @@ def read_remine_manifest(
                 c.candidate_id,
                 covariation_status=covariation_status,
                 stage2_posteriors=stage2_posteriors,
+                synteny_status=synteny_status,
             ),
         )
         for c in candidates
@@ -668,10 +674,12 @@ def _supply_derivations(args: argparse.Namespace) -> dict[str, Any]:
     """
     from tbox_finder.mining.mine_round import derive_msa_supply_available
     from tbox_finder.mining.stage2_producer import derive_stage2_supply_available
+    from tbox_finder.mining.synteny_producer import derive_synteny_supply_available
 
     return {
         "msa_supply_derivation": derive_msa_supply_available(),
         "stage2_supply_derivation": derive_stage2_supply_available(),
+        "synteny_supply_derivation": derive_synteny_supply_available(),
     }
 
 
@@ -685,6 +693,7 @@ def _refuse_unevidenced(args: argparse.Namespace, derivations: Mapping[str, Any]
     for flag, key, label in (
         ("msa_supply_available", "msa_supply_derivation", "covariation MSA"),
         ("stage2_supply_available", "stage2_supply_derivation", "Stage-2 posterior"),
+        ("synteny_available", "synteny_supply_derivation", "downstream-aaRS synteny"),
     ):
         derivation = derivations[key]
         if supply_declaration_unevidenced(
@@ -735,7 +744,12 @@ def build_parser() -> argparse.ArgumentParser:
             help_text="the per-candidate Stage-2 posterior supply exists (P3-15′-b)",
         )
         _bool_flag(p, "relaxed-arch-available", "a relaxed-architecture backend exists")
-        _bool_flag(p, "synteny-available", "a downstream-aaRS synteny backend exists")
+        _supply_flag_pair(
+            p,
+            "synteny-available",
+            default=SYNTENY_SUPPLY_AVAILABLE,
+            help_text="a downstream-aaRS synteny backend exists (ADR-0006 D4)",
+        )
         p.add_argument("--out", required=True, help="where to write the round report")
 
     plan = sub.add_parser("plan", help="decide whether the round may run, and write the reason")

@@ -99,6 +99,23 @@ GENOMIC_WINDOW_POOL = "genomic_window"
 #: evidence and is what the unit pin and the CLI preflight compare it against.
 MSA_SUPPLY_AVAILABLE = True
 
+#: The **criterion-(c)** analogue, flipped by P3-15′-c-ii: the 339 md5-verified NCBI GFFs are
+#: on disk (P3-15′-c-i), ``mining/synteny.py`` implements ADR-0006 D4's predicate and
+#: ``mining/synteny_producer.py`` writes the per-candidate ``candidate_id → status`` table the
+#: round reads.  Kept honest the same way ``MSA_SUPPLY_AVAILABLE`` is — by
+#: :func:`tbox_finder.mining.synteny_producer.derive_synteny_supply_available`, which
+#: re-derives the fact from disk and is what the unit pin and the CLI preflight compare it
+#: against, so the constant cannot drift from reality in **either** direction.
+#:
+#: ⚠ **This module's own P2 CLI does not read it, and that asymmetry is deliberate.** The P3
+#: round (``remine``) carries the two-way ``--synteny-available`` / ``--no-synteny-available``
+#: pair defaulted from this constant plus the exit-4 unevidenced preflight; the P2 CLI keeps
+#: its bare ``store_true``, so a P2 round declares the backend only when explicitly asked.
+#: The drift is one-directional — P2 can under-declare (refuse / spare more) but never
+#: over-declare — which is the same fail-closed shape recorded for
+#: ``slurm/p3/stage1_remine.sbatch``'s ``MSA_SUPPLY_AVAILABLE`` env var at P3-15′-a.
+SYNTENY_SUPPLY_AVAILABLE = True
+
 #: The git-tracked evidence :func:`derive_msa_supply_available` re-derives the supply from.
 #: All three ride any checkout (including the cluster's and CI's) — none is DVC- or
 #: LFS-shaped — so the derivation answers the same in every environment.
@@ -489,7 +506,9 @@ def parse_window_name(window_name: str) -> tuple[str, int, int]:
 
 
 def candidate_evidence(
-    candidate_id: str, covariation_status: Mapping[str, str] | None
+    candidate_id: str,
+    covariation_status: Mapping[str, str] | None,
+    synteny_status: Mapping[str, str] | None = None,
 ) -> SpareRuleEvidence:
     """The candidate's :class:`SpareRuleEvidence`, given the round's covariation status table.
 
@@ -506,10 +525,17 @@ def candidate_evidence(
       relaxed-architecture / synteny backend exists at P2); :class:`SpareRuleEvidence` validates
       the status string, so a corrupt value raises rather than reading as "not passed".
     """
-    if covariation_status is None:
-        return SpareRuleEvidence()
     return SpareRuleEvidence(
-        any_helix_rscape=str(covariation_status.get(candidate_id, STATUS_UNAVAILABLE))
+        any_helix_rscape=(
+            STATUS_UNAVAILABLE
+            if covariation_status is None
+            else str(covariation_status.get(candidate_id, STATUS_UNAVAILABLE))
+        ),
+        downstream_aaRS_synteny=(
+            STATUS_UNAVAILABLE
+            if synteny_status is None
+            else str(synteny_status.get(candidate_id, STATUS_UNAVAILABLE))
+        ),
     )
 
 
@@ -595,7 +621,10 @@ def write_fp_manifest(candidates: Sequence[MiningCandidate], path: str | Path) -
 
 
 def read_fp_manifest(
-    path: str | Path, *, covariation_status: Mapping[str, str] | None = None
+    path: str | Path,
+    *,
+    covariation_status: Mapping[str, str] | None = None,
+    synteny_status: Mapping[str, str] | None = None,
 ) -> list[MiningCandidate]:
     """Reconstitute the leg-(b) false positives, stamping each with its produced covariation status.
 
@@ -617,7 +646,7 @@ def read_fp_manifest(
                 locus_start=int(r["locus_start"]),
                 locus_end=int(r["locus_end"]),
                 score=float(r.get("score", 0.0)),
-                evidence=candidate_evidence(cid, covariation_status),
+                evidence=candidate_evidence(cid, covariation_status, synteny_status),
             )
         )
     return out

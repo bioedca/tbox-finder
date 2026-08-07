@@ -1,0 +1,245 @@
+{
+  "adr": "ADR-0006 D4 (criterion (c)); ADR-0005 D14 (spare rule), D15 (strand)",
+  "arms": {
+    "clade_matched_random_leaders": {
+      "false_pass_rate": 0.016666666666666666,
+      "n": 9600,
+      "status_counts": {
+        "failed": 9175,
+        "passed": 160,
+        "unavailable": 265
+      }
+    },
+    "nine_one_five_prime_utr_decoys": {
+      "false_pass_rate": 0.04515922888486527,
+      "n": 9389,
+      "status_counts": {
+        "failed": 8457,
+        "passed": 424,
+        "unavailable": 508
+      }
+    },
+    "nine_one_trna_adjacent_decoys": {
+      "false_pass_rate": 0.02476780185758514,
+      "n": 1938,
+      "status_counts": {
+        "failed": 1842,
+        "passed": 48,
+        "unavailable": 48
+      }
+    },
+    "shipped_nine_one_decoy_rows": {
+      "available": false,
+      "detail": {
+        "decoys_v0": {
+          "n_on_annotated_production_host": 0,
+          "n_rows": 7008,
+          "n_with_accession": 2999,
+          "present": true
+        },
+        "mining_pool_v0": {
+          "n_on_annotated_production_host": 0,
+          "n_rows": 45988,
+          "n_with_accession": 45988,
+          "present": true
+        }
+      },
+      "n_usable_rows": 0,
+      "reason": "no shipped \u00a79.1 decoy row carries coordinates on one of the 339 annotated production assemblies, so criterion (c) has no genomic context to evaluate"
+    }
+  },
+  "config": {
+    "hmm_fallback_available": false,
+    "max_intervening_orfs": 1,
+    "strand_policy": "both",
+    "sub_threshold_orf_nt": 150,
+    "window_bp": 500
+  },
+  "control": {
+    "margin": 0.975354609929078,
+    "min_margin": 0.2,
+    "powered": true,
+    "verdict": "positive-context and random-leader arms separate; the false-pass rates below are interpretable"
+  },
+  "joint_abc": {
+    "available": false,
+    "reason": "criterion (b) has no backend until P3-15\u2032-d, and criterion (a)'s producer was not run over this control corpus in this step; the joint a\u2227b\u2227c false-pass rate D4 also asks for is therefore withheld rather than computed from two unavailable disjuncts"
+  },
+  "n_hosts": 48,
+  "n_per_host": 200,
+  "per_clade_random_leader": {
+    "Armatimonadota": {
+      "false_pass_rate": 0.005,
+      "n": 400,
+      "status_counts": {
+        "failed": 391,
+        "passed": 2,
+        "unavailable": 7
+      }
+    },
+    "Atribacterota": {
+      "false_pass_rate": 0.018,
+      "n": 1000,
+      "status_counts": {
+        "failed": 939,
+        "passed": 18,
+        "unavailable": 43
+      }
+    },
+    "Bacillota": {
+      "false_pass_rate": 0.013333333333333334,
+      "n": 1200,
+      "status_counts": {
+        "failed": 1167,
+        "passed": 16,
+        "unavailable": 17
+      }
+    },
+    "Bacillota_I": {
+      "false_pass_rate": 0.0,
+      "n": 200,
+      "status_counts": {
+        "failed": 192,
+        "unavailable": 8
+      }
+    },
+    "Bdellovibrionota_C": {
+      "false_pass_rate": 0.01,
+      "n": 200,
+      "status_counts": {
+        "failed": 191,
+        "passed": 2,
+        "unavailable": 7
+      }
+    },
+    "Deinococcota": {
+      "false_pass_rate": 0.010714285714285714,
+      "n": 1400,
+      "status_counts": {
+        "failed": 1317,
+        "passed": 15,
+        "unavailable": 68
+      }
+    },
+    "Dictyoglomota": {
+      "false_pass_rate": 0.023333333333333334,
+      "n": 1200,
+      "status_counts": {
+        "failed": 1151,
+        "passed": 28,
+        "unavailable": 21
+      }
+    },
+    "Fusobacteriota": {
+      "false_pass_rate": 0.016666666666666666,
+      "n": 600,
+      "status_counts": {
+        "failed": 568,
+        "passed": 10,
+        "unavailable": 22
+      }
+    },
+    "Hadarchaeota": {
+      "false_pass_rate": 0.065,
+      "n": 200,
+      "status_counts": {
+        "failed": 182,
+        "passed": 13,
+        "unavailable": 5
+      }
+    },
+    "Hinthialibacterota": {
+      "false_pass_rate": 0.02,
+      "n": 200,
+      "status_counts": {
+        "failed": 185,
+        "passed": 4,
+        "unavailable": 11
+      }
+    },
+    "Nitrospirota": {
+      "false_pass_rate": 0.01,
+      "n": 600,
+      "status_counts": {
+        "failed": 580,
+        "passed": 6,
+        "unavailable": 14
+      }
+    },
+    "Spirochaetota": {
+      "false_pass_rate": 0.015,
+      "n": 1000,
+      "status_counts": {
+        "failed": 968,
+        "passed": 15,
+        "unavailable": 17
+      }
+    },
+    "Sumerlaeota": {
+      "false_pass_rate": 0.005,
+      "n": 200,
+      "status_counts": {
+        "failed": 188,
+        "passed": 1,
+        "unavailable": 11
+      }
+    },
+    "Sysuimicrobiota": {
+      "false_pass_rate": 0.021666666666666667,
+      "n": 600,
+      "status_counts": {
+        "failed": 580,
+        "passed": 13,
+        "unavailable": 7
+      }
+    },
+    "Thermodesulfobiota": {
+      "false_pass_rate": 0.028333333333333332,
+      "n": 600,
+      "status_counts": {
+        "failed": 576,
+        "passed": 17,
+        "unavailable": 7
+      }
+    }
+  },
+  "positive_context_control": {
+    "false_pass_rate": 0.9920212765957447,
+    "n": 4888,
+    "status_counts": {
+      "failed": 34,
+      "passed": 4849,
+      "unavailable": 5
+    }
+  },
+  "provenance": {
+    "adr": "ADR-0006 D4 (criterion (c)); ADR-0005 D14 (spare rule), D15 (strand)",
+    "env_lock_hash": null,
+    "extra": {
+      "hmm_fallback_available": false,
+      "max_intervening_orfs": 1,
+      "n_per_host": 200,
+      "seed": 42,
+      "step": "P3-15'-c-ii",
+      "strand_policy": "both",
+      "sub_threshold_orf_nt": 150,
+      "window_bp": 500
+    },
+    "generated_at_utc": "2026-08-07T02:32:38.002904+00:00",
+    "git_sha": "95d0149449458d793cec31018aab650c5d1ed063",
+    "inputs": {
+      "data/processed/mining/production_genomes_v0.parquet": "e52b34b79256d16a8cf9986cdc8e1d0d5de229ee43562b5a6ddb9528e7109f22",
+      "data/processed/mining/round0_fp_manifest.json": "e8aff87d395b3cb70a25c1f1d4ac348daf3da9323baa4c04a32fd3e4060d4b95",
+      "data/processed/negatives/decoys_v0.parquet": "e19da2a959bcf597be0760310e04f3b4b44984c5a86bb1c946afc55b99d09636",
+      "data/processed/negatives/mining_pool_v0.parquet": "e57181e1b321c457e4e1b156645e9d668ef6ada4ea1a419f1cc1b6062e4dc84f"
+    },
+    "outputs": {},
+    "rule": "synteny_producer::diagnostics.false_pass",
+    "schema_version": "1.0",
+    "script": "src/tbox_finder/mining/synteny_producer.py",
+    "seed": 42
+  },
+  "schema_version": "1.0",
+  "seed": 42,
+  "step": "P3-15'-c-ii"
+}
