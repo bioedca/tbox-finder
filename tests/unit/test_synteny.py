@@ -372,6 +372,19 @@ class TestTandemCarveOut:
         assert got.function_class is None
         assert got.n_intervening == 0 and got.carve_out_applied is False
 
+    def test_a_sub_threshold_orf_that_ALREADY_satisfies_the_criterion_is_not_hopped(self) -> None:
+        """⚠ The carve-out must fire only on an ORF that cannot carry the criterion either way.
+
+        A short CDS naming one of D4's four classes *decides* (c); hopping past it discards a
+        real pass in favour of whatever sits further downstream — here a gyrase, which fails.
+        """
+        tiny_aars = cds(start=1050, end=1120, product="alanine--tRNA ligase")  # 71 bp < 150
+        later = cds(start=1200, end=2000, product="DNA gyrase subunit A")
+        got = self._walk([tiny_aars, later])
+        assert got.function_class == synteny.CLASS_AARS
+        assert got.n_intervening == 0 and got.feature_id == tiny_aars.feature_id
+        assert synteny.synteny_status(got) == STATUS_PASSED
+
     def test_a_sub_threshold_orf_is_hopped_even_when_judgeable(self) -> None:
         tiny = cds(start=1050, end=1120, product="DNA gyrase subunit A")  # 71 bp < 150
         target = cds(start=1200, end=2000, product="alanine--tRNA ligase")

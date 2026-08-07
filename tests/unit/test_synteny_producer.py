@@ -309,9 +309,28 @@ class TestCommittedDiagnostics:
         assert set(false_pass["arms"]) == {
             "clade_matched_random_leaders",
             "nine_one_five_prime_utr_decoys",
+            "nine_one_five_prime_utr_decoys_excluding_d4_classes",
             "nine_one_trna_adjacent_decoys",
             "shipped_nine_one_decoy_rows",
         }
+
+    def test_the_utr_arm_is_reported_under_BOTH_readings(self, false_pass: dict) -> None:
+        """A 5′UTR upstream of an aaRS may itself be a T-box, so counting it as a *false*
+        pass inflates the rate; excluding it stops the arm being a random leader.  Reporting
+        one reading only would be a choice disguised as a measurement."""
+        wide = false_pass["arms"]["nine_one_five_prime_utr_decoys"]
+        strict = false_pass["arms"]["nine_one_five_prime_utr_decoys_excluding_d4_classes"]
+        assert strict["n"] > 0 and wide["n"] > 0
+        assert strict["false_pass_rate"] <= wide["false_pass_rate"], (strict, wide)
+        assert strict["note"]
+
+    def test_every_arm_carries_the_same_shape(self, false_pass: dict) -> None:
+        """Including the unavailable one — a reader must not special-case an arm."""
+        for name, arm in false_pass["arms"].items():
+            if "available" in arm:
+                assert {"available", "n_usable_rows", "reason", "detail"} <= set(arm), name
+            else:
+                assert {"n", "status_counts", "false_pass_rate"} <= set(arm), name
 
     def test_the_control_is_powered_and_says_why(self, false_pass: dict) -> None:
         control = false_pass["control"]
@@ -366,6 +385,7 @@ class TestCommittedDiagnostics:
         assert decision["max_bp"] <= block["window_bp"], decision
         assert decision["p99_bp"] <= block["window_bp"]
         # The element-relative series may exceed the pad, but ONLY via the tandem carve-out.
+        assert block["max_bp"] is not None
         if block["max_bp"] > block["window_bp"]:
             assert block["n_passed_via_tandem_carve_out"] > 0, block
 
@@ -383,6 +403,12 @@ class TestCommittedDiagnostics:
         assert false_pass["config"] == exclusion["config"]
         assert false_pass["config"]["window_bp"] == synteny.DEFAULT_WINDOW_BP
         assert false_pass["config"]["hmm_fallback_available"] is False
+
+
+def _apply_leg_options(module) -> set[str]:
+    """Every option string on a module's ``apply-spare-rule`` subparser."""
+    sub = module.build_parser()._subparsers._group_actions[0].choices["apply-spare-rule"]
+    return {opt for action in sub._actions for opt in action.option_strings}
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -436,24 +462,24 @@ class TestSyntenyTableIsWired:
                     **kwargs,
                 )
 
-    def test_both_cli_legs_expose_the_status_table(self) -> None:
+    @pytest.mark.parametrize("module", [mine_round, remine])
+    def test_both_cli_legs_expose_the_status_table(self, module) -> None:
         """A parameter unwired from the CLI the sbatch invokes is a parameter that never runs.
 
-        ``mine_round`` builds its parser inside ``main``, so the P2 leg is probed by parsing
-        the flag rather than by reaching into the parser object.
+        ⚠ Asserted **structurally**.  The first version probed the P2 leg by parsing
+        ``[..., "--synteny-status", "t.json", "--help"]`` and asserting exit 0 — but argparse
+        handles ``--help`` before it rejects an unknown option, so that exits 0 even for a
+        flag the parser has never heard of (verified by execution on a parser carrying no
+        such option).  It passed whether or not the option existed;
+        ``mine_round.build_parser`` was extracted so this one cannot.
         """
-        sub = (
-            remine.build_parser()
-            ._subparsers._group_actions[0]
-            .choices["apply-spare-rule"]  # type: ignore[union-attr]
-        )
-        options = {opt for action in sub._actions for opt in action.option_strings}
+        options = _apply_leg_options(module)
         assert "--synteny-status" in options
 
-        # P2: an unknown option exits 2; a known one gets far enough to fail on the round.
-        with pytest.raises(SystemExit) as exc:
-            mine_round.main(["apply-spare-rule", "--synteny-status", "t.json", "--help"])
-        assert exc.value.code == 0, "the P2 leg does not accept --synteny-status"
+    @pytest.mark.parametrize("module", [mine_round, remine])
+    def test_negative_control_the_option_set_is_not_universal(self, module) -> None:
+        """The control the vacuous version lacked: membership must be able to answer False."""
+        assert "--synteny-status-typo" not in _apply_leg_options(module)
 
 
 class TestDiagnosticsComputedNotJustCommitted:
@@ -571,3 +597,50 @@ class TestProducerHardening:
             for external in provenance.get("extra", {}).get("external_inputs", []):
                 assert "/" not in external["name"], external
                 assert len(external["sha256"]) == 64, external
+
+
+class TestReviewRoundTwo:
+    def test_an_unknown_exclusion_reason_refuses(self) -> None:
+        """The totals and the per-clade breakdown read ONE derivation, so the closed
+        vocabulary cannot hold in one and be broken in the other."""
+        with pytest.raises(synteny_producer.ProducerError, match="unknown exclusion reason"):
+            synteny_producer.exclusion_report(
+                [row("c1", STATUS_UNAVAILABLE, reason="something-invented")],
+                clades={"GCA_000000001.1": "Bacillota"},
+                config=CONFIG,
+                annotation_dir="unused",
+                genome_dir="unused",
+            )
+
+    def test_positive_control_a_known_reason_is_accepted(self) -> None:
+        report = synteny_producer.exclusion_report(
+            [row("c1", STATUS_UNAVAILABLE, reason=synteny_producer.REASON_PSEUDOGENE)],
+            clades={"GCA_000000001.1": "Bacillota"},
+            config=CONFIG,
+            annotation_dir="unused",
+            genome_dir="unused",
+        )
+        assert report["exclusion_reason_totals"] == {synteny_producer.REASON_PSEUDOGENE: 1}
+
+    def test_the_totals_and_the_per_clade_reasons_use_the_same_key(self) -> None:
+        """They disagreed: an empty reason fell back to "" in one and host_unannotated in the
+        other, so the same row was counted under two different keys."""
+        report = synteny_producer.exclusion_report(
+            [row("c1", STATUS_UNAVAILABLE, reason="")],
+            clades={"GCA_000000001.1": "Bacillota"},
+            config=CONFIG,
+            annotation_dir="unused",
+            genome_dir="unused",
+        )
+        assert report["exclusion_reason_totals"] == report["per_clade"]["Bacillota"]["reasons"]
+
+    def test_merge_preserves_the_shard_recorded_fallback_flag(self, tmp_path: Path) -> None:
+        """``config.as_dict()`` re-reads the LIVE module constant, so a merge on a checkout
+        where ``HMM_FALLBACK_AVAILABLE`` had flipped would rewrite what the shards ran under."""
+        path = tmp_path / "a.json"
+        payload = synteny_producer.build_status_table([row("x", STATUS_PASSED)], config=CONFIG)
+        payload["config"]["hmm_fallback_available"] = True  # what this shard actually ran under
+        path.write_text(json.dumps(payload))
+        merged = synteny_producer.merge_status_tables([path])
+        assert merged["config"]["hmm_fallback_available"] is True
+        assert synteny.HMM_FALLBACK_AVAILABLE is False, "the live constant differs, on purpose"

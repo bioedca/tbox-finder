@@ -393,7 +393,13 @@ def merge_status_tables(
     """
     rows: list[dict[str, Any]] = []
     configs: list[dict[str, Any]] = []
-    required = {"strand_policy", "max_intervening_orfs", "sub_threshold_orf_nt", "window_bp"}
+    required = {
+        "strand_policy",
+        "max_intervening_orfs",
+        "sub_threshold_orf_nt",
+        "window_bp",
+        "hmm_fallback_available",
+    }
     for path in table_paths:
         payload = json.loads(Path(path).read_text(encoding="utf-8"))
         if not isinstance(payload, Mapping):
@@ -423,6 +429,13 @@ def merge_status_tables(
         window_bp=configs[0]["window_bp"],
     )
     table = build_status_table(rows, config=config)
+    # ⚠ ``config.as_dict()`` re-reads the LIVE module constant, so a merge run on a checkout
+    # where ``HMM_FALLBACK_AVAILABLE`` had flipped would silently rewrite what the shards
+    # actually ran under.  The shard-recorded value wins, and a shard disagreeing with its
+    # siblings has already been refused above.
+    recorded = configs[0].get("hmm_fallback_available")
+    if recorded is not None:
+        table["config"]["hmm_fallback_available"] = recorded
     if out_path is not None:
         _write(out_path, table)
     return table
@@ -471,6 +484,20 @@ def load_clades(table: str | Path = DEFAULT_CLADE_TABLE) -> dict[str, str]:
     frame = pd.read_parquet(table, columns=["assembly_accession", "phylum"])
     pairs = zip(frame["assembly_accession"], frame["phylum"], strict=True)
     return {str(a): str(p) for a, p in pairs}
+
+
+def _exclusion_reason(row: Mapping[str, Any]) -> str:
+    """The one derivation both exclusion breakdowns read.
+
+    ⚠ They used to disagree: the totals fell back to ``""`` and the per-clade breakdown to
+    ``host_unannotated`` for the *same* row, so a row with an empty reason was counted under
+    two different keys and the closed :data:`EXCLUSION_REASONS` vocabulary — which the
+    per-clade assertion checks against — was broken in the totals only.
+    """
+    reason = str(row.get("reason") or "") or REASON_HOST_UNANNOTATED
+    if reason not in EXCLUSION_REASONS:
+        raise ProducerError(f"unknown exclusion reason {reason!r}; expected {EXCLUSION_REASONS}")
+    return reason
 
 
 def _rate(numerator: int, denominator: int) -> float | None:
@@ -620,7 +647,14 @@ def shipped_decoy_availability(
     try:
         import pandas as pd
     except ImportError as exc:  # pragma: no cover - environment-dependent
-        return {"available": False, "reason": f"pandas unavailable: {exc}"}
+        # The same keys every other return path carries: a reader (or a shape assertion)
+        # must not have to special-case the environment this ran in.
+        return {
+            "available": False,
+            "n_usable_rows": 0,
+            "reason": f"pandas unavailable, so the shipped decoy rows were not read: {exc}",
+            "detail": {},
+        }
     detail: dict[str, Any] = {}
     usable = 0
     for label, path in (("decoys_v0", decoys_parquet), ("mining_pool_v0", mining_pool_parquet)):
@@ -685,6 +719,7 @@ def false_pass_report(
     }
     random_leaders: Counter = Counter()
     utr_decoys: Counter = Counter()
+    strict_utr_decoys: Counter = Counter()
     trna_decoys: Counter = Counter()
     positive_context: Counter = Counter()
     per_clade: dict[str, Counter] = defaultdict(Counter)
@@ -709,7 +744,23 @@ def false_pass_report(
         per_clade[clades.get(assembly, "unassigned")] += counts
 
         # §9.1 leader class, re-instantiated: 5′UTR windows upstream of annotated CDS.
+        # ⚠ Two readings of the §9.1 5′UTR class, and reporting only one would be a choice
+        # disguised as a measurement.  Drawn over ALL CDS, the arm's pass rate is the
+        # per-clade density of D4's gene classes — but a 5′UTR sitting upstream of an aaRS in
+        # a real genome may well BE a T-box leader, so counting it as a *false* pass inflates
+        # the rate.  Drawn over the CDS that name no D4 class, every pass is unambiguously
+        # false, but the arm no longer represents a random leader.  Both are reported; the
+        # gap between them is exactly the ambiguity, and it is not this step's to resolve.
         sample = host.cds if len(host.cds) <= n_per_host else rng.sample(host.cds, n_per_host)
+        non_d4 = [
+            c
+            for c in host.cds
+            if synteny.classify_gene_identity(
+                gff3.gene_identity_text(c), gene_symbols=synteny.gene_symbols(c)
+            )
+            not in synteny.PASSING_CLASSES
+        ]
+        strict_sample = non_d4 if len(non_d4) <= n_per_host else rng.sample(non_d4, n_per_host)
         extents = {sid: max(c.end for c in feats) for sid, feats in host.by_seqid.items()}
         utr_windows = [
             w
@@ -720,6 +771,15 @@ def false_pass_report(
             if w
         ]
         utr_decoys += _evaluate_oriented(host, utr_windows, config=config)
+        strict_windows = [
+            w
+            for w in (
+                _upstream_window(c, span=rng.choice(lengths), contig_extent=extents.get(c.seqid))
+                for c in strict_sample
+            )
+            if w
+        ]
+        strict_utr_decoys += _evaluate_oriented(host, strict_windows, config=config)
 
         # …and windows upstream of annotated tRNA genes — §9.1's tRNA-adjacent sub-class.
         trna_features = list(
@@ -793,6 +853,15 @@ def false_pass_report(
         "arms": {
             "clade_matched_random_leaders": background,
             "nine_one_five_prime_utr_decoys": _arm(utr_decoys),
+            "nine_one_five_prime_utr_decoys_excluding_d4_classes": dict(
+                _arm(strict_utr_decoys),
+                note=(
+                    "the same arm drawn only over CDS that name none of D4's four classes, "
+                    "so every pass is unambiguously false; the arm above includes 5′UTRs of "
+                    "aaRS/biosynthesis genes, which in a real genome may themselves be T-box "
+                    "leaders"
+                ),
+            ),
             "nine_one_trna_adjacent_decoys": _arm(trna_decoys),
             "shipped_nine_one_decoy_rows": shipped_decoy_availability(
                 decoys_parquet, mining_pool_parquet, set(clades) & _annotated_set(annotation_dir)
@@ -873,7 +942,7 @@ def exclusion_report(
         clade = clades.get(str(row.get("assembly", "")), "unassigned")
         by_clade[clade][str(row["status"])] += 1
         if row["status"] == STATUS_UNAVAILABLE:
-            reasons[clade][str(row.get("reason") or REASON_HOST_UNANNOTATED)] += 1
+            reasons[clade][_exclusion_reason(row)] += 1
         for detail in (row.get("per_strand") or {}).values():
             pseudo_seen += int(detail.get("n_pseudo_seen") or 0)
             unjudgeable_seen += int(detail.get("n_unjudgeable_seen") or 0)
@@ -916,7 +985,7 @@ def exclusion_report(
         "exclusion_reason_totals": dict(
             sorted(
                 Counter(
-                    str(r.get("reason") or "") for r in rows if r["status"] == STATUS_UNAVAILABLE
+                    _exclusion_reason(r) for r in rows if r["status"] == STATUS_UNAVAILABLE
                 ).items()
             )
         ),

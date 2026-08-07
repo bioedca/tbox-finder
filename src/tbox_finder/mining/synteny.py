@@ -833,7 +833,12 @@ def resolve_downstream_gene(
         unjudgeable = function == FN_UNJUDGEABLE
         n_pseudo_seen += int(pseudo)
         n_unjudgeable_seen += int(unjudgeable)
-        sub_threshold = cds.length_bp < sub_threshold_orf_nt
+        # ⚠ The carve-out fires only on an ORF that **cannot carry the criterion either
+        # way**, and the length branch has to enforce that too: a short CDS that already
+        # names one of D4's four classes decides the criterion, so hopping past it would
+        # discard a real pass in favour of whatever sits further downstream.
+        carryable = function in PASSING_CLASSES
+        sub_threshold = cds.length_bp < sub_threshold_orf_nt and not carryable
         if (unjudgeable or sub_threshold) and n_intervening < max_intervening_orfs:
             n_intervening += 1
             anchor = cds.end if strand == gff3.STRAND_PLUS else cds.start

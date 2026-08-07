@@ -1355,7 +1355,15 @@ def _add_msa_supply_flags(parser: argparse.ArgumentParser) -> None:
     )
 
 
-def main(argv: Sequence[str] | None = None) -> int:
+def build_parser() -> argparse.ArgumentParser:
+    """The P2 CLI parser, extracted so it can be inspected without running a round.
+
+    ⚠ Review found the test that checked ``--synteny-status`` was reachable doing so by
+    parsing ``[..., "--synteny-status", "t.json", "--help"]`` and asserting exit 0.  argparse
+    handles ``--help`` **before** it rejects an unknown option, so that exits 0 even for a
+    flag that does not exist — verified by execution on a parser with no such option at all.
+    The assertion was vacuous; a structural check needs the parser object.
+    """
     parser = argparse.ArgumentParser(prog="tbox_finder.mining.mine_round")
     sub = parser.add_subparsers(dest="command", required=True)
 
@@ -1434,8 +1442,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     apply.add_argument("--union-prior", default="data/processed/priors/union_prior.parquet")
     apply.add_argument("--corpus", default="data/processed/master_clean_v0.parquet")
     apply.set_defaults(func=_cmd_apply_spare_rule)
+    return parser
 
-    args = parser.parse_args(argv)
+
+def main(argv: Sequence[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
     return int(args.func(args))
 
 

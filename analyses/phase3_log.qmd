@@ -4101,3 +4101,41 @@ while the producer's control arm depended on it (now `synteny.gene_symbols`); th
 `95d0149` (**4,492 / 13**) — failure sets identical, `comm` empty both ways. **28 sabotages / 28
 RED against their named test.** Both reports re-derive byte-identically from the final code apart
 from `provenance`. ruff 0.15.15 + black 25.11.0 clean.
+
+**Review round 2 — 7 findings (app 1, CLI 6), all real, 5 major.** Counts across two rounds:
+**20, 7**.
+
+**⚠ THE FALSE-PASS ARM THAT CONTAINED ITS OWN POSITIVE CLASS, AND THE NUMBER THAT CHANGED BY AN
+ORDER OF MAGNITUDE.** The §9.1 5′UTR arm sampled *every* CDS, including the aaRS /
+amino-acid-biosynthesis genes the positive-context arm is built from — and a 5′UTR sitting
+upstream of an aaRS in a real genome may itself **be** a T-box leader, so counting it as a
+*false* pass inflates the rate. Reporting one reading only would have been a choice disguised as
+a measurement, so both now ship: drawn over all CDS the arm reads **5.28 %**; drawn over the CDS
+naming none of D4's four classes — where every pass is unambiguously false — it reads **0.35 %**.
+The gap *is* the ambiguity, and resolving it is not this step's to do.
+
+**⚠ THE SUB-THRESHOLD HOP COULD SKIP A CDS THAT ALREADY SATISFIED THE CRITERION.** The docstring
+already claimed the carve-out fires only on an ORF *"that cannot carry the criterion either
+way"*; the length branch did not enforce it, so a short CDS naming a D4 class would be hopped in
+favour of whatever sat further downstream. **No candidate verdict changed on this corpus** — the
+case does not occur here — so this is latent correctness the new test pins rather than a numbers
+movement, and it is recorded as such rather than dressed up as a fix that moved something.
+
+**⚠ MY CLI-REACHABILITY TEST WAS VACUOUS, AND `argparse` IS WHY.** It probed the P2 leg by
+parsing `[..., "--synteny-status", "t.json", "--help"]` and asserting exit 0 — but argparse
+handles `--help` **before** it rejects an unknown option, so that exits 0 even for a flag the
+parser has never heard of (verified by execution against a parser carrying no such option). The
+test passed whether or not the option existed. `mine_round.build_parser` was extracted so the
+assertion can be structural, and a negative control now checks the option set can answer False.
+
+**Two more integrity findings.** `exclusion_reason_totals` fell back to `""` while the per-clade
+breakdown fell back to `host_unannotated` for the **same row**, so one row was counted under two
+keys and the closed `EXCLUSION_REASONS` vocabulary held in one place and not the other — both now
+read one derivation, which *raises* on an unknown reason. And `merge_status_tables` wrote
+`config.as_dict()`, which re-reads the **live** `HMM_FALLBACK_AVAILABLE`, so a merge on a checkout
+where the flag had flipped would silently rewrite what the shards actually ran under; the
+shard-recorded value now wins.
+
+**Validation (round 2).** Full unit+golden **4,627 passed / 13 failed** vs the matched baseline at
+`95d0149` (**4,492 / 13**) — failure sets identical, `comm` empty both ways. **32 sabotages / 32
+RED against their named test.** ruff + black clean.
