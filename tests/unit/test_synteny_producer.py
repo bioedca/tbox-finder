@@ -1045,3 +1045,54 @@ class TestControlArmIsRekeyedNotCopied:
         arm = synteny_producer._arm(Counter({STATUS_PASSED: 1, STATUS_FAILED: 1}))
         synteny_producer.as_control_arm(arm)
         assert "false_pass_rate" in arm, "the decoy arms must keep their own key"
+
+
+class TestOneBadFileDoesNotAbortTheRun:
+    """⚠ `-c-i` recorded this exact defect: a read sitting above the handler written for it
+    aborted all 339 verdicts on one bad file.  Here it would abort all 941."""
+
+    def _host(self, tmp_path: Path, payload: bytes) -> synteny_producer.HostAnnotation:
+        from tbox_finder.mining import annotation_fetch
+
+        accession = "GCA_000296795.1"
+        (tmp_path / annotation_fetch.destination_name(accession)).write_bytes(payload)
+        genomes = tmp_path / "genomes"
+        genomes.mkdir(exist_ok=True)
+        (genomes / f"{accession}.fna").write_text(">c1 x\nACGT\n", encoding="utf-8")
+        return synteny_producer.HostAnnotation(
+            accession, annotation_dir=str(tmp_path), genome_dir=str(genomes)
+        )
+
+    def test_a_corrupt_gff_makes_that_host_unavailable(self, tmp_path: Path) -> None:
+        host = self._host(tmp_path, b"this is not a gff and has no version directive\n")
+        assert host.available is False
+        assert host.reason == synteny_producer.REASON_ANNOTATION_UNREADABLE
+        assert host.note, "the refusal must say which file and why"
+
+    def test_positive_control_a_valid_gff_is_available(self, tmp_path: Path) -> None:
+        """Without this, an __init__ that marked EVERY host unreadable would pass above."""
+        gff = b"##gff-version 3\nc1\ts\tCDS\t10\t99\t.\t+\t0\tID=a;product=alanine--tRNA ligase\n"
+        host = self._host(tmp_path, gff)
+        assert host.available is True and host.reason == ""
+        assert len(host.cds) == 1
+
+    def test_the_reason_is_in_the_closed_vocabulary(self) -> None:
+        assert synteny_producer.REASON_ANNOTATION_UNREADABLE in synteny_producer.EXCLUSION_REASONS
+
+    def test_a_corrupt_host_is_counted_apart_from_an_unannotated_one(self) -> None:
+        """A corrupt corpus must not hide inside a missing one — the per-clade exclusion rate
+        would read identically either way."""
+        report = synteny_producer.exclusion_report(
+            [
+                row("a", STATUS_UNAVAILABLE, reason=synteny_producer.REASON_ANNOTATION_UNREADABLE),
+                row("b", STATUS_UNAVAILABLE, reason=synteny_producer.REASON_HOST_UNANNOTATED),
+            ],
+            clades={"GCA_000000001.1": "Bacillota"},
+            config=CONFIG,
+            annotation_dir="unused",
+            genome_dir="unused",
+        )
+        assert report["exclusion_reason_totals"] == {
+            synteny_producer.REASON_ANNOTATION_UNREADABLE: 1,
+            synteny_producer.REASON_HOST_UNANNOTATED: 1,
+        }

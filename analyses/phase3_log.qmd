@@ -4404,3 +4404,27 @@ guarded `n` rather than `n_decided`, so an arm that drew windows and decided non
 RED against their named test.** Candidate verdicts unchanged (546 / 96 / 299) — all three boundary
 corrections moved **0** of them on this corpus, so all three are latent correctness the new tests
 pin. ruff + black clean.
+
+**Review round 12 — 3 CLI findings, all real, 1 major.** Counts across twelve rounds:
+**20, 7, 4, 2, 1, 8, 1, 4, 3, 6, 6, 3**. ⚠ The CLI's first round-12 invocation returned
+*"Review limit reached"* (its third of this PR); waited out, no Greptile credit spent.
+
+**⚠ ONE BAD FILE AMONG 339 WOULD HAVE ABORTED ALL 941 VERDICTS — THE DEFECT `-c-i` ALREADY
+RECORDED, IN A NEW PLACE.** `HostAnnotation.__init__` called `read_gff3_text` /
+`parse_gff3_document` unguarded, so a truncated, undeclared or unreadable GFF took the whole run
+down instead of making **that host** unavailable. It is a per-host unavailability — which
+ADR-0005 D14 spares — and it now carries its **own** exclusion reason
+(`host_annotation_unreadable`) rather than folding into `host_unannotated`, because a corrupt
+corpus and a missing one produce an identical per-clade exclusion rate and must not be
+indistinguishable in the diagnostic. Measured on the real corpus: **0 hosts unreadable**, so the
+counts are unchanged — the value is that a future corrupt file now costs one host, not the round.
+
+**Also fixed.** The control margin subtracted two rates without checking either for `None`, so an
+arm that drew windows and decided none of them raised `TypeError` instead of leaving the control
+honestly ungraded; and the carve-out docstring stated two rules that read as contradictory for a
+*short but judgeable* ORF — the length test is about whether the call is trustworthy, not about
+what it says, and the prose now says so.
+
+**Validation (round 12).** Full unit+golden **4,671 passed / 13 failed** vs the matched baseline at
+`95d0149` (**4,492 / 13**) — failure sets identical, `comm` empty both ways. **50 sabotages / 50
+RED against their named test.** Candidate verdicts unchanged (546 / 96 / 299). ruff + black clean.

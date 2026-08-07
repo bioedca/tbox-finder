@@ -114,12 +114,16 @@ REASON_CONTIG_ABSENT = "contig_absent_from_gff"
 REASON_PSEUDOGENE = "first_downstream_orf_pseudogenized"
 REASON_HYPOTHETICAL = "first_downstream_orf_unjudgeable"
 REASON_GENOME_ABSENT = "genome_fasta_absent"
+#: A host whose GFF is present but truncated / undeclared / unreadable.  Distinct from
+#: ``host_unannotated`` on purpose: a corrupt corpus must not hide inside a missing one.
+REASON_ANNOTATION_UNREADABLE = "host_annotation_unreadable"
 EXCLUSION_REASONS: tuple[str, ...] = (
     REASON_HOST_UNANNOTATED,
     REASON_CONTIG_ABSENT,
     REASON_PSEUDOGENE,
     REASON_HYPOTHETICAL,
     REASON_GENOME_ABSENT,
+    REASON_ANNOTATION_UNREADABLE,
 )
 
 
@@ -166,8 +170,21 @@ class HostAnnotation:
         self.by_seqid: dict[str, list[gff3.CdsFeature]] = defaultdict(list)
         self.contig_ids: list[str] = []
         self.reason = "" if self.available else REASON_HOST_UNANNOTATED
+        self.note = ""
         if self.available:
-            self.cds = gff3.parse_gff3_document(gff3.read_gff3_text(gff_path))
+            # ⚠ One truncated, undeclared or unreadable GFF among the 339 would otherwise
+            # abort all 941 verdicts.  It is a per-HOST unavailability — which ADR-0005 D14
+            # spares — not a run-level fault, and the exclusion diagnostic counts it under its
+            # own reason so a corrupt corpus cannot hide inside `host_unannotated`.
+            # (`-c-i` recorded the same defect: a census read sitting above the `except
+            # OSError` written for it aborted all 339 on one bad file.)
+            try:
+                self.cds = gff3.parse_gff3_document(gff3.read_gff3_text(gff_path))
+            except (gff3.Gff3Error, OSError, ValueError) as exc:
+                self.available = False
+                self.reason = REASON_ANNOTATION_UNREADABLE
+                self.note = f"{gff_path.name}: {exc}"
+                return
             for cds in self.cds:
                 self.by_seqid[cds.seqid].append(cds)
         fasta = Path(genome_dir) / f"{assembly}.fna"
@@ -260,6 +277,7 @@ def evaluate_locus(
             "reason": host.reason or REASON_HOST_UNANNOTATED,
             "seqid": None,
             "per_strand": {},
+            "note": host.note,
         }
     try:
         seqid = synteny.contig_seqid(host.contig_ids, contig_index)
@@ -956,6 +974,9 @@ def false_pass_report(
     # ``false_pass_rate`` would report a 99.5 % false-pass rate to any consumer that reads
     # every ``false_pass_rate`` in this file.  The key is renamed here and only here.
     positive = as_control_arm(positive)
+    # ``_arm`` reports ``None`` (not 0.0) when an arm decided nothing, so both operands are
+    # checked before the subtraction — otherwise an all-unavailable arm raises TypeError
+    # instead of leaving the control honestly ungraded.
     margin = (
         None
         if background["false_pass_rate"] is None or positive["pass_rate"] is None

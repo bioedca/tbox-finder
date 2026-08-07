@@ -800,8 +800,11 @@ def resolve_downstream_gene(
     shorter than ``sub_threshold_orf_nt``.  When it fires, the window is re-anchored at that
     ORF's own 3′ end and the walk continues — the tandem-locus reading of D4 (*"extends the
     window past a downstream leader or sub-threshold ORF"*), not a blanket window widening.
-    A CDS that is judgeable and simply not in one of D4's classes **stops the walk**: that is
-    a real downstream gene of another function, i.e. an honest criterion failure.
+    A CDS that is judgeable, at or above ``sub_threshold_orf_nt``, and simply not in one of
+    D4's classes **stops the walk**: that is a real downstream gene of another function, i.e.
+    an honest criterion failure.  (The two conditions are independent — a *short* judgeable
+    ORF is still hopped, because "sub-threshold" is about whether the call is trustworthy, not
+    about what it says.)
     """
     if max_intervening_orfs < 0:
         raise SyntenyError(f"max_intervening_orfs must be >= 0, got {max_intervening_orfs}")
