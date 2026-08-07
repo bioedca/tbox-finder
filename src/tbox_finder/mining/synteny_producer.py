@@ -70,6 +70,7 @@ __all__ = [
     "STEP",
     "ProducerError",
     "SyntenyRunConfig",
+    "as_control_arm",
     "build_status_table",
     "derive_synteny_supply_available",
     "evaluate_candidate",
@@ -77,6 +78,7 @@ __all__ = [
     "exclusion_report",
     "load_clades",
     "load_status_map",
+    "validate_status_payload",
     "strict_subsample",
     "utr_arm_windows",
     "main",
@@ -455,10 +457,25 @@ def load_status_map(table_path: str | Path) -> dict[str, str]:
     disjunct that decides whether a locus is mined is not a place to let that pass.
     """
     payload = json.loads(Path(table_path).read_text(encoding="utf-8"))
-    stored = payload.get("status")
-    rows = payload.get("rows")
+    return validate_status_payload(payload, label=str(table_path))
+
+
+def validate_status_payload(payload: Any, *, label: str) -> dict[str, str]:
+    """Validate an already-parsed status table and return its ``candidate_id → status`` map.
+
+    Split out from :func:`load_status_map` so a caller that has the payload in hand does not
+    have to re-read the file: validating one snapshot and then building a report from a second
+    read leaves a window for the two to differ.
+    """
+    stored = payload.get("status") if isinstance(payload, Mapping) else None
+    rows = payload.get("rows") if isinstance(payload, Mapping) else None
     if not isinstance(stored, Mapping) or not isinstance(rows, list):
-        raise ProducerError(f"{table_path}: expected 'status' mapping and 'rows' list")
+        raise ProducerError(f"{label}: expected 'status' mapping and 'rows' list")
+    for index, r in enumerate(rows):
+        if not isinstance(r, Mapping) or "candidate_id" not in r or "status" not in r:
+            # A bare KeyError here is not this function's contract; every other malformed
+            # table shape refuses as a ProducerError naming the file.
+            raise ProducerError(f"{label}: row {index} lacks 'candidate_id' or 'status'")
     # ⚠ A dict comprehension COLLAPSES a repeated candidate_id to its last occurrence, so two
     # rows saying ``passed`` and ``failed`` for one candidate would silently pick one and the
     # status↔rows cross-check below would still agree with itself.  ``build_status_table``
@@ -468,18 +485,18 @@ def load_status_map(table_path: str | Path) -> dict[str, str]:
     ids = [str(r["candidate_id"]) for r in rows]
     repeated = sorted({cid for cid, n in Counter(ids).items() if n > 1})
     if repeated:
-        raise ProducerError(f"{table_path}: duplicate candidate_id in 'rows': {repeated[:5]}")
+        raise ProducerError(f"{label}: duplicate candidate_id in 'rows': {repeated[:5]}")
     derived = {cid: str(r["status"]) for cid, r in zip(ids, rows, strict=True)}
     if derived != {str(k): str(v) for k, v in stored.items()}:
         only_stored = sorted(set(stored) - set(derived))[:5]
         only_rows = sorted(set(derived) - set(stored))[:5]
         raise ProducerError(
-            f"{table_path}: 'status' disagrees with 'rows' "
+            f"{label}: 'status' disagrees with 'rows' "
             f"(stored-only {only_stored}, rows-only {only_rows})"
         )
     bad = sorted({v for v in derived.values()} - {STATUS_PASSED, STATUS_FAILED, STATUS_UNAVAILABLE})
     if bad:
-        raise ProducerError(f"{table_path}: unknown status value(s) {bad}")
+        raise ProducerError(f"{label}: unknown status value(s) {bad}")
     return derived
 
 
@@ -498,7 +515,14 @@ def load_clades(table: str | Path = DEFAULT_CLADE_TABLE) -> dict[str, str]:
     except ImportError as exc:  # pragma: no cover - environment-dependent
         raise ProducerError(f"the clade join needs pandas: {exc}") from exc
     frame = pd.read_parquet(table, columns=["assembly_accession", "phylum"])
-    pairs = zip(frame["assembly_accession"], frame["phylum"], strict=True)
+    pairs = list(zip(frame["assembly_accession"], frame["phylum"], strict=True))
+    # ⚠ Same duplicate-key rule this module applies to the status table.  A repeated
+    # ``assembly_accession`` collapses to its last row, and a repeat carrying a *different*
+    # phylum silently reassigns every candidate on that host — and the per-clade exclusion
+    # rate is the headline of the whole exclusion diagnostic.
+    repeated = sorted({str(a) for a, n in Counter(str(a) for a, _p in pairs).items() if n > 1})
+    if repeated:
+        raise ProducerError(f"{table}: duplicate assembly_accession: {repeated[:5]}")
     return {str(a): str(p) for a, p in pairs}
 
 
@@ -688,6 +712,22 @@ def _evaluate_oriented(
         )
         counts[detail["status"]] += 1
     return counts
+
+
+def as_control_arm(arm: Mapping[str, Any]) -> dict[str, Any]:
+    """Re-key a decoy-shaped arm as the **positive control**: a pass rate, not a false-pass one.
+
+    Windows drawn upstream of a CDS already in a D4 class are *supposed* to pass, so this arm's
+    ~99.5 % is the control working — but published under ``false_pass_rate`` it tells any
+    consumer that reads every such key in the file that criterion (c) false-passes almost
+    always.  A named function because the property is *"the key is renamed, not copied"*, and
+    an assertion that reads the committed report cannot see a producer that copies it.
+    """
+    out = dict(arm)
+    out["pass_rate"] = out.pop("false_pass_rate", None)
+    out.pop("false_pass_rate_denominator", None)
+    out["pass_rate_denominator"] = "decided_windows"
+    return out
 
 
 def _arm(counts: Counter) -> dict[str, Any]:
@@ -911,10 +951,15 @@ def false_pass_report(
 
     background = _arm(random_leaders)
     positive = _arm(positive_context)
+    # ⚠ The control arm's rate is a **pass** rate — windows drawn upstream of a CDS that is
+    # already in a D4 class are *supposed* to pass.  Publishing 99.5 % under the key
+    # ``false_pass_rate`` would report a 99.5 % false-pass rate to any consumer that reads
+    # every ``false_pass_rate`` in this file.  The key is renamed here and only here.
+    positive = as_control_arm(positive)
     margin = (
         None
-        if background["false_pass_rate"] is None or positive["false_pass_rate"] is None
-        else positive["false_pass_rate"] - background["false_pass_rate"]
+        if background["false_pass_rate"] is None or positive["pass_rate"] is None
+        else positive["pass_rate"] - background["false_pass_rate"]
     )
     powered = margin is not None and margin >= CONTROL_MIN_MARGIN
 
@@ -1386,8 +1431,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             config = _config_from(args)
             # Validate first: reading ``rows`` out of a table that contradicts its own status
             # map would build both diagnostics on evidence the loader is about to reject.
-            load_status_map(args.status_table)
-            rows = json.loads(Path(args.status_table).read_text(encoding="utf-8"))["rows"]
+            # Parsed ONCE: reading the file twice validates one snapshot and then builds the
+            # diagnostics from another, so a concurrent write lands between the two.
+            payload = json.loads(Path(args.status_table).read_text(encoding="utf-8"))
+            validate_status_payload(payload, label=str(args.status_table))
+            rows = payload["rows"]
             clades = load_clades(args.clade_table)
             candidates = read_manifest(args.manifest)
             fp = false_pass_report(

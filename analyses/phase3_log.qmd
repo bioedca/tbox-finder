@@ -4336,3 +4336,39 @@ may explain the verdict now.
 `95d0149` (**4,492 / 13**) — failure sets identical, `comm` empty both ways. **42 sabotages / 42
 RED against their named test.** Candidate verdicts unchanged (546 / 96 / 299); the re-anchor clamp
 moved **0** of them on this corpus. ruff + black clean.
+
+**Review round 10 — 6 CLI findings, all real, 1 major.** Counts across ten rounds:
+**20, 7, 4, 2, 1, 8, 1, 4, 3, 6**.
+
+**⚠ THE POSITIVE CONTROL PUBLISHED A *PASS* RATE UNDER A `false_pass_rate` KEY.** Windows drawn
+upstream of a CDS already in a D4 class are **supposed** to pass, so the arm's 99.52 % is the
+control working — but under that key, any consumer reading every `false_pass_rate` in the file
+learns that criterion (c) false-passes almost always. The control now emits `pass_rate` +
+`pass_rate_denominator`, and the decoy arms keep theirs.
+
+**⚠ THE SIXTH ARTIFACT-PINNING MISS, AND THE SHARPEST OF THEM.** The sabotage for that rename was
+`positive.get(...)` instead of `positive.pop(...)` — i.e. **copy** the key rather than move it —
+and the committed-report assertion stayed green, because the report it reads was written by the
+fixed code. The rename is now `as_control_arm`, tested for the three things that actually matter:
+the old key is *removed* (not duplicated), the counts survive, and the source arm is not mutated.
+Six occurrences in one step, all the same shape: **an assertion over a committed artifact cannot
+see a producer that writes the artifact correctly for the wrong reason.**
+
+**⚠ THE DUPLICATE-KEY RULE HAD TO BE APPLIED A THIRD TIME — NOW TO THE CLADE JOIN.**
+`load_clades` built `assembly_accession → phylum` with a dict comprehension, so a repeated
+accession collapsed to its last row and a repeat carrying a *different* phylum would silently
+reassign every candidate on that host — and the per-clade exclusion rate is the **headline** of
+the exclusion diagnostic. Verified against the real table: 2,500 assemblies still load.
+
+**Also fixed.** The status table was parsed **twice** in the `diagnostics` branch (validate one
+snapshot, build the report from another, with a window for the two to differ) — now parsed once
+through a new `validate_status_payload`; a row missing `candidate_id` or `status` raised a bare
+`KeyError` rather than the `ProducerError` every other malformed shape raises; and the re-anchor
+clamp compared against the fixed `three_prime` rather than the **current** anchor, so with more
+than one hop allowed it could not catch a move behind an anchor the walk had already advanced.
+
+**Validation (round 10).** Full unit+golden **4,663 passed / 13 failed** vs the matched baseline at
+`95d0149` (**4,492 / 13**) — failure sets identical, `comm` empty both ways. **44 sabotages / 44
+RED against their named test.** Candidate verdicts unchanged (546 / 96 / 299). ruff + black clean.
+⚠ Two clade-join tests `skip` in this environment (no `pyarrow`); both were verified by direct
+execution in `tbox-finder-data`, which has it, and CI installs it.

@@ -849,9 +849,10 @@ def resolve_downstream_gene(
             # the anchor upstream and judging the next CDS against a window WIDER than the
             # 500 bp D4 pins.  The carve-out may extend the window forward, never backward.
             moved = cds.end if strand == gff3.STRAND_PLUS else cds.start
-            anchor = (
-                max(moved, three_prime) if strand == gff3.STRAND_PLUS else min(moved, three_prime)
-            )
+            # Clamped against the CURRENT anchor, not the fixed element 3′ end: with more than
+            # one hop allowed, a later ORF can also lie behind an anchor the walk already
+            # advanced, and comparing to ``three_prime`` would not catch that.
+            anchor = max(moved, anchor) if strand == gff3.STRAND_PLUS else min(moved, anchor)
             continue
         return DownstreamGene(
             function_class=function,

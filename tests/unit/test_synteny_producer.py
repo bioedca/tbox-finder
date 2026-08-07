@@ -364,7 +364,7 @@ class TestCommittedDiagnostics:
         """Without separation the false-pass rates measure nothing
         ([[control-matchedness-must-be-asserted]])."""
         background = false_pass["arms"]["clade_matched_random_leaders"]["false_pass_rate"]
-        positive = false_pass["positive_context_control"]["false_pass_rate"]
+        positive = false_pass["positive_context_control"]["pass_rate"]
         assert background is not None and positive is not None
         assert positive - background >= synteny_producer.CONTROL_MIN_MARGIN
 
@@ -755,13 +755,15 @@ class TestStrictArmReusesTheSameWindows:
                 expected = arm["status_counts"].get(STATUS_PASSED, 0) / arm["n_decided"]
                 assert arm["false_pass_rate"] == pytest.approx(expected), name
         control = false_pass["positive_context_control"]
-        assert control["false_pass_rate"] == pytest.approx(
+        assert "false_pass_rate" not in control, (
+            "the control arm's rate is a PASS rate; publishing it under false_pass_rate "
+            "reports a 99.5% false-pass rate to anything that reads every such key"
+        )
+        assert control["pass_rate"] == pytest.approx(
             control["status_counts"].get(STATUS_PASSED, 0) / control["n_decided"]
         )
         background = false_pass["arms"]["clade_matched_random_leaders"]["false_pass_rate"]
-        assert false_pass["control"]["margin"] == pytest.approx(
-            control["false_pass_rate"] - background
-        )
+        assert false_pass["control"]["margin"] == pytest.approx(control["pass_rate"] - background)
 
 
 class TestUtrArmWindowsAreOneDraw:
@@ -960,3 +962,82 @@ class TestFalsePassDenominator:
                 assert arm["false_pass_rate"] == pytest.approx(
                     arm["status_counts"].get(STATUS_PASSED, 0) / arm["n_decided"]
                 ), name
+
+
+class TestRoundTenHardening:
+    def test_the_control_arm_publishes_a_pass_rate_not_a_false_pass_rate(
+        self, false_pass: dict
+    ) -> None:
+        """⚠ Windows drawn upstream of a CDS already in a D4 class are SUPPOSED to pass.  At
+        99.5 % under the key ``false_pass_rate``, any consumer that reads every such key in
+        this file learns that criterion (c) false-passes almost always."""
+        control = false_pass["positive_context_control"]
+        assert "pass_rate" in control and "false_pass_rate" not in control
+        assert control["pass_rate"] > 0.9
+        for name, arm in false_pass["arms"].items():
+            if "n" in arm:
+                assert "pass_rate" not in arm, f"{name} is a decoy arm, not a control"
+
+    def test_a_row_missing_its_keys_refuses_as_a_producer_error(self, tmp_path: Path) -> None:
+        table = synteny_producer.build_status_table([row("a", STATUS_PASSED)], config=CONFIG)
+        table["rows"][0].pop("status")
+        path = tmp_path / "t.json"
+        path.write_text(json.dumps(table), encoding="utf-8")
+        with pytest.raises(
+            synteny_producer.ProducerError, match="lacks 'candidate_id' or 'status'"
+        ):
+            synteny_producer.load_status_map(path)
+
+    def test_the_clade_join_refuses_a_duplicate_assembly(self, tmp_path: Path) -> None:
+        """A repeat carrying a different phylum silently reassigns every candidate on that
+        host — and the per-clade exclusion rate is the headline of the whole diagnostic."""
+        pytest.importorskip("pyarrow")  # to_parquet needs an engine, absent in some envs
+        pd = pytest.importorskip("pandas")
+        path = tmp_path / "clades.parquet"
+        pd.DataFrame(
+            {
+                "assembly_accession": ["GCA_1", "GCA_1", "GCA_2"],
+                "phylum": ["Bacillota", "Chloroflexota", "Spirochaetota"],
+            }
+        ).to_parquet(path)
+        with pytest.raises(synteny_producer.ProducerError, match="duplicate assembly_accession"):
+            synteny_producer.load_clades(path)
+
+    def test_positive_control_distinct_assemblies_join(self, tmp_path: Path) -> None:
+        pytest.importorskip("pyarrow")  # to_parquet needs an engine, absent in some envs
+        pd = pytest.importorskip("pandas")
+        path = tmp_path / "clades.parquet"
+        pd.DataFrame(
+            {"assembly_accession": ["GCA_1", "GCA_2"], "phylum": ["Bacillota", "Spirochaetota"]}
+        ).to_parquet(path)
+        assert synteny_producer.load_clades(path) == {
+            "GCA_1": "Bacillota",
+            "GCA_2": "Spirochaetota",
+        }
+
+
+class TestControlArmIsRekeyedNotCopied:
+    """⚠ The sixth artifact-pinning miss of this step: the committed-report assertion stayed
+    green when the producer *copied* the key instead of renaming it, because the report it
+    reads was written by the fixed code."""
+
+    def test_the_false_pass_key_is_removed_not_duplicated(self) -> None:
+        arm = synteny_producer._arm(Counter({STATUS_PASSED: 99, STATUS_FAILED: 1}))
+        control = synteny_producer.as_control_arm(arm)
+        assert control["pass_rate"] == pytest.approx(0.99)
+        assert "false_pass_rate" not in control
+        assert "false_pass_rate_denominator" not in control
+        assert control["pass_rate_denominator"] == "decided_windows"
+
+    def test_the_counts_survive_the_rekey(self) -> None:
+        """Only the rate keys move; a re-key that dropped the evidence would pass the test
+        above just as well."""
+        arm = synteny_producer._arm(Counter({STATUS_PASSED: 99, STATUS_FAILED: 1}))
+        control = synteny_producer.as_control_arm(arm)
+        for key in ("n", "n_decided", "n_unavailable", "status_counts"):
+            assert control[key] == arm[key], key
+
+    def test_the_source_arm_is_not_mutated(self) -> None:
+        arm = synteny_producer._arm(Counter({STATUS_PASSED: 1, STATUS_FAILED: 1}))
+        synteny_producer.as_control_arm(arm)
+        assert "false_pass_rate" in arm, "the decoy arms must keep their own key"
