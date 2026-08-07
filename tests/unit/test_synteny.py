@@ -137,8 +137,13 @@ class TestClassifyGeneIdentity:
 
         D4's class is the **tRNA-dependent** transamidation pathway; a bare
         ``amidotransferase`` rule would sweep these in and inflate the criterion.
+
+        ⚠ Asserted against the whole passing set, not just ``CLASS_TRANSAMIDATION``: the risk
+        the docstring names is *inflating criterion (c)*, and a classifier that routed these
+        into ``aa_biosynthesis`` instead would inflate it exactly as much while satisfying a
+        one-class assertion.
         """
-        assert synteny.classify_gene_identity((product,)) != synteny.CLASS_TRANSAMIDATION
+        assert synteny.classify_gene_identity((product,)) not in synteny.PASSING_CLASSES
 
     @pytest.mark.parametrize(
         "product",

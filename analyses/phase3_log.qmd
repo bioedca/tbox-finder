@@ -4456,3 +4456,18 @@ existing assertions still hold and the type is merely tightened).
 **Validation (round 13).** Full unit+golden **4,675 passed / 13 failed** vs the matched baseline at
 `95d0149` (**4,492 / 13**) — failure sets identical, `comm` empty both ways. **53 sabotages / 53
 RED against their named test.** Candidate verdicts unchanged (546 / 96 / 299). ruff + black clean.
+
+**Review round 14 — 1 CLI finding, real, minor.** Counts across fourteen rounds:
+**20, 7, 4, 2, 1, 8, 1, 4, 3, 6, 6, 3, 4, 1**.
+
+**⚠ A ONE-CLASS ASSERTION GUARDING A FOUR-CLASS RISK.** `test_a_bare_glutamine_amidotransferase_
+is_NOT_transamidation` asserted `!= CLASS_TRANSAMIDATION`, but the risk its own docstring names is
+*inflating criterion (c)* — and a classifier that routed `type 1 glutamine amidotransferase` into
+`aa_biosynthesis` instead would inflate it exactly as much while satisfying the assertion. Now
+`not in PASSING_CLASSES`, and sabotaged by a **cross-class** mis-route (adding `amidotransferase`
+to the *biosynthesis* pattern) rather than by breaking the transamidation rule — the shape the old
+assertion was blind to.
+
+**Validation (round 14).** Full unit+golden **4,675 passed / 13 failed** vs the matched baseline at
+`95d0149` (**4,492 / 13**) — failure sets identical, `comm` empty both ways. **54 sabotages / 54
+RED against their named test.** No source change, so no report regenerated. ruff + black clean.
