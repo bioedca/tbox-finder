@@ -721,6 +721,7 @@ def apply_spare_rule(
     """
     from tbox_finder.mining.covariation_producer import load_status_map
     from tbox_finder.mining.hard_negative import mine_round as run_mine_round
+    from tbox_finder.mining.synteny_producer import ProducerError as SyntenyProducerError
     from tbox_finder.mining.synteny_producer import load_status_map as load_synteny_status_map
 
     # Declaring the (c) backend available with no status table is the SILENT form of a
@@ -737,10 +738,18 @@ def apply_spare_rule(
             "hard_negative.mine_round refuses produced evidence for an undeclared backend"
         )
 
+    try:
+        synteny_status_map = (
+            load_synteny_status_map(synteny_status_table)
+            if synteny_status_table is not None
+            else None
+        )
+    except SyntenyProducerError as exc:
+        # A data fault this round must REPORT: the caller branches on the return code, and an
+        # unhandled ProducerError bypasses that path entirely.
+        raise ValueError(f"synteny status table unusable: {exc}") from exc
+
     status_map = load_status_map(status_table)
-    synteny_status_map = (
-        load_synteny_status_map(synteny_status_table) if synteny_status_table is not None else None
-    )
     candidates = read_fp_manifest(
         fp_manifest, covariation_status=status_map, synteny_status=synteny_status_map
     )

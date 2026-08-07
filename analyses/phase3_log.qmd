@@ -4228,3 +4228,37 @@ test; [[verify-the-line-you-ship]] applies to the sabotage as much as to the cod
 **Validation (round 5).** Full unit+golden **4,640 passed / 13 failed** vs the matched baseline at
 `95d0149` (**4,492 / 13**) — failure sets identical, `comm` empty both ways. **35 sabotages / 35
 RED against their named test.** ruff + black clean; no report regenerated (test-only change).
+
+**Review round 6 — 8 CLI findings, 7 real, 2 major (one refuted).** Counts across six rounds:
+**20, 7, 4, 2, 1, 8**. The round-6 spike is the CLI's first clean pass since round 3 — its
+round-4 invocation returned *"Review limit reached"*, an **absence** that was waited out rather
+than counted, so these findings are the accumulated ones the CLI had not yet seen.
+
+**⚠ THE SUB-THRESHOLD TEST USED A GENOMIC SPAN, NOT A CODING LENGTH.** `CdsFeature.length_bp` is
+`end - start + 1` over the **span**, so a frameshifted CDS whose two segments sit far apart reads
+as long even when it codes for very little — measured: a two-segment CDS spanning 901 bp carrying
+152 coding nucleotides. There are **273** multi-segment CDS in this corpus, and §7.1's tandem loci
+are exactly where the carve-out has to fire. `gff3.CdsFeature.coding_length_bp` (summed segments)
+now drives the test. **No candidate verdict changed on this corpus**, so it is recorded as latent
+correctness the new test pins.
+
+**⚠ ONE MAJOR WAS REFUTED BY EXECUTION.** *"The sort tiebreak can raise `TypeError` when
+`feature_id` is None."* It cannot: `gff3.CdsFeature.feature_id` is annotated `str` and is always
+populated (the dataclass falls back to `<seqid>:<start>-<end>:<strand>:<type>`). The finding
+reasoned from **`DownstreamGene.feature_id: str | None`** — a different type, whose `None` case is
+the *no-gene-found* result and never reaches a sort. Checked against the declaration rather than
+the review's word.
+
+**Also fixed.** The `diagnostics` branch converted only three exception types while three calls in
+it raise others (a malformed input aborted with a traceback instead of a refusal); the tRNA arm's
+contig extents were built from a **CDS-only** map, so a tRNA on a CDS-free contig skipped the
+minus-strand upper bound and could cut a window past the contig end; the strict-arm note had two
+sentences welded together in a **committed** artifact; and `ProducerError` escaped both mining
+boundaries as an unhandled `RuntimeError`, bypassing the return-code path the callers branch on —
+the (c) table is now loaded **first**, so a malformed one is refused before any other input is
+read.
+
+**Validation (round 6).** Full unit+golden **4,644 passed / 13 failed** vs the matched baseline at
+`95d0149` (**4,492 / 13**) — failure sets identical, `comm` empty both ways. **37 sabotages / 37
+RED against their named test.** Both reports regenerated; status counts unchanged
+(546 / 96 / 299). ruff + black clean.

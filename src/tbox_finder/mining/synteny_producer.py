@@ -832,6 +832,12 @@ def false_pass_report(
                 types={"tRNA"},
             )
         )
+        # ⚠ ``extents`` is built from ``by_seqid``, which holds **CDS only**.  A tRNA on a
+        # contig carrying no CDS has no entry, so the minus-strand upper bound was skipped and
+        # the window could run past the end of the contig.  Extend the map with the tRNA spans
+        # before the windows are cut.
+        for feature in trna_features:
+            extents[feature.seqid] = max(extents.get(feature.seqid, 0), feature.end)
         if trna_features:
             picked = (
                 trna_features
@@ -900,10 +906,10 @@ def false_pass_report(
                 note=(
                     "the SAME window objects as the arm above — one draw, then filtered to "
                     "the windows whose own CDS names none of D4's four classes, so this arm "
-                    "is a strict subset of it rather than a second draw. "
-                    "so every pass is unambiguously false; the arm above includes 5′UTRs of "
+                    "is a strict subset of it rather than a second draw.  Every pass here is "
+                    "therefore unambiguously false, whereas the arm above includes 5′UTRs of "
                     "aaRS/biosynthesis genes, which in a real genome may themselves be T-box "
-                    "leaders"
+                    "leaders."
                 ),
             ),
             "nine_one_trna_adjacent_decoys": _arm(trna_decoys),
@@ -1394,7 +1400,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.command == "derive-supply":
             print(json.dumps(derive_synteny_supply_available(), indent=2, sort_keys=True))
             return 0
-    except (ProducerError, synteny.SyntenyError, gff3.Gff3Error) as exc:
+    except (
+        ProducerError,
+        synteny.SyntenyError,
+        gff3.Gff3Error,
+        OSError,
+        ValueError,
+        KeyError,
+    ) as exc:
         print(f"FATAL: {exc}", file=sys.stderr)
         return 1
     raise AssertionError(f"unhandled command {args.command!r}")  # pragma: no cover

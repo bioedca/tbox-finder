@@ -795,3 +795,40 @@ def utr_windows_for(sample):
     return synteny_producer.utr_arm_windows(
         sample, spans=[120] * len(sample), extents={"c1": 999_999}
     )
+
+
+class TestErrorsAreTranslatedAtTheMiningBoundary:
+    """A contradictory status table is a fault the round must REPORT, not crash on."""
+
+    def _bad_table(self, tmp_path: Path) -> Path:
+        table = synteny_producer.build_status_table([row("a", STATUS_PASSED)], config=CONFIG)
+        table["status"]["a"] = STATUS_FAILED  # contradicts its own rows
+        path = tmp_path / "synteny_status.json"
+        path.write_text(json.dumps(table), encoding="utf-8")
+        return path
+
+    def test_the_p2_round_raises_its_own_error_type(self, tmp_path: Path) -> None:
+        with pytest.raises(ValueError, match="synteny status table unusable"):
+            mine_round.apply_spare_rule(
+                "m.json",
+                "s.json",
+                rscape_installed=True,
+                msa_supply_available=True,
+                synteny_status_table=self._bad_table(tmp_path),
+                synteny_available=True,
+            )
+
+    def test_the_p3_round_raises_its_own_error_type(self, tmp_path: Path) -> None:
+        with pytest.raises(remine.RemineError, match="synteny status table unusable"):
+            remine.apply_remine_spare_rule(
+                "m.json",
+                "s.json",
+                "p.json",
+                stage2_threshold=0.9,
+                rscape_installed=True,
+                msa_supply_available=True,
+                stage2_supply_available=True,
+                probe_set=None,
+                synteny_status_table=self._bad_table(tmp_path),
+                synteny_available=True,
+            )

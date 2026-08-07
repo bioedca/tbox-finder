@@ -502,3 +502,50 @@ class TestStrandFold:
     def test_an_unknown_policy_refuses(self) -> None:
         with pytest.raises(synteny.SyntenyError):
             synteny.combine_strand_statuses({"+": STATUS_PASSED, "-": STATUS_PASSED}, policy="max")
+
+
+class TestSubThresholdUsesCodingLength:
+    def test_a_frameshifted_short_orf_is_still_sub_threshold(self) -> None:
+        """⚠ ``length_bp`` is the genomic SPAN.  A two-segment CDS whose halves sit far apart
+        spans far more than it codes, so a span-based test reads a short frameshifted ORF as
+        long and skips D4's carve-out on exactly the loci §7.1 calls out.  273 such CDS are in
+        the production corpus.
+        """
+        frameshifted = gff3.CdsFeature(
+            seqid="c1",
+            feature_id="fs",
+            start=1050,
+            end=1400,
+            strand="+",
+            segments=((1050, 1100), (1350, 1400)),  # 102 coding nt across a 351 bp span
+            attributes={"product": ("DNA gyrase subunit A",)},
+        )
+        target = cds(start=1450, end=2100, product="alanine--tRNA ligase")
+        assert frameshifted.length_bp == 351
+        assert frameshifted.coding_length_bp == 102
+        got = synteny.resolve_downstream_gene(
+            [frameshifted, target],
+            seqid="c1",
+            strand="+",
+            three_prime=1000,
+            element_span_nt=100,
+            max_intervening_orfs=1,
+            sub_threshold_orf_nt=150,
+        )
+        assert got.function_class == synteny.CLASS_AARS, "the short ORF must be hopped"
+        assert got.n_intervening == 1
+
+    def test_positive_control_a_genuinely_long_orf_is_not_hopped(self) -> None:
+        """A hop rule that fired on everything would satisfy the test above equally well."""
+        long_orf = cds(start=1050, end=1400, product="DNA gyrase subunit A")  # 351 coding nt
+        target = cds(start=1450, end=2100, product="alanine--tRNA ligase")
+        got = synteny.resolve_downstream_gene(
+            [long_orf, target],
+            seqid="c1",
+            strand="+",
+            three_prime=1000,
+            element_span_nt=100,
+            max_intervening_orfs=1,
+            sub_threshold_orf_nt=150,
+        )
+        assert got.function_class is None and got.n_intervening == 0

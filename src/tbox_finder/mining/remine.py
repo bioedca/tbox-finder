@@ -403,6 +403,24 @@ def exclude_probe_members(
 # ═════════════════════════════════════════════════════════════════════════════
 # The round itself — four-disjunct evidence → mined/spared outcome
 # ═════════════════════════════════════════════════════════════════════════════
+def _load_synteny_status(table: str | Path | None) -> dict[str, str] | None:
+    """Load the (c) status table, translating a data fault into this module's error.
+
+    A contradictory or malformed table is something the round must **report** — the caller
+    branches on the return code — so a ``ProducerError`` escaping as an unhandled
+    ``RuntimeError`` would bypass the refusal path entirely.
+    """
+    if table is None:
+        return None
+    from tbox_finder.mining.synteny_producer import ProducerError
+    from tbox_finder.mining.synteny_producer import load_status_map as load_synteny_status_map
+
+    try:
+        return load_synteny_status_map(table)
+    except ProducerError as exc:
+        raise RemineError(f"synteny status table unusable: {exc}") from exc
+
+
 def apply_remine_spare_rule(
     fp_manifest: str | Path,
     status_table: str | Path,
@@ -440,7 +458,6 @@ def apply_remine_spare_rule(
     from tbox_finder.mining.covariation_producer import load_status_map
     from tbox_finder.mining.hard_negative import mine_round as run_mine_round
     from tbox_finder.mining.mine_round import load_union_mask
-    from tbox_finder.mining.synteny_producer import load_status_map as load_synteny_status_map
 
     # ⚠ Declaring the (c) backend available while handing the round no status table is the
     # SILENT version of a refusal: every candidate's synteny disjunct would read
@@ -466,15 +483,13 @@ def apply_remine_spare_rule(
         relaxed_arch_available=relaxed_arch_available,
         synteny_available=synteny_available,
     )
+    # Loaded FIRST so a malformed (c) table is refused before any other input is read.
+    synteny_status = _load_synteny_status(synteny_status_table)
     candidates = read_remine_manifest(
         fp_manifest,
         covariation_status=load_status_map(status_table),
         stage2_posteriors=load_stage2_posteriors(posteriors),
-        synteny_status=(
-            load_synteny_status_map(synteny_status_table)
-            if synteny_status_table is not None
-            else None
-        ),
+        synteny_status=synteny_status,
     )
     candidates, excluded = exclude_probe_members(candidates, probe_set)
 

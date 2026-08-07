@@ -22,7 +22,7 @@
     "nine_one_five_prime_utr_decoys_excluding_d4_classes": {
       "false_pass_rate": 0.0034510525710341653,
       "n": 8693,
-      "note": "the SAME window objects as the arm above \u2014 one draw, then filtered to the windows whose own CDS names none of D4's four classes, so this arm is a strict subset of it rather than a second draw. so every pass is unambiguously false; the arm above includes 5\u2032UTRs of aaRS/biosynthesis genes, which in a real genome may themselves be T-box leaders",
+      "note": "the SAME window objects as the arm above \u2014 one draw, then filtered to the windows whose own CDS names none of D4's four classes, so this arm is a strict subset of it rather than a second draw.  Every pass here is therefore unambiguously false, whereas the arm above includes 5\u2032UTRs of aaRS/biosynthesis genes, which in a real genome may themselves be T-box leaders.",
       "status_counts": {
         "failed": 8178,
         "passed": 30,
@@ -30,11 +30,11 @@
       }
     },
     "nine_one_trna_adjacent_decoys": {
-      "false_pass_rate": 0.026881720430107527,
-      "n": 1860,
+      "false_pass_rate": 0.02694136291600634,
+      "n": 1893,
       "status_counts": {
-        "failed": 1762,
-        "passed": 50,
+        "failed": 1794,
+        "passed": 51,
         "unavailable": 48
       }
     },
@@ -73,7 +73,7 @@
     "window_bp": 500
   },
   "control": {
-    "margin": 0.9758064741174829,
+    "margin": 0.9758089260808926,
     "min_margin": 0.2,
     "powered": true,
     "verdict": "positive-context and random-leader arms separate; the false-pass rates below are interpretable"
@@ -221,11 +221,11 @@
     }
   },
   "positive_context_control": {
-    "false_pass_rate": 0.9941398074508162,
-    "n": 4778,
+    "false_pass_rate": 0.994142259414226,
+    "n": 4780,
     "status_counts": {
       "failed": 23,
-      "passed": 4750,
+      "passed": 4752,
       "unavailable": 5
     }
   },
@@ -260,7 +260,7 @@
       "sub_threshold_orf_nt": 150,
       "window_bp": 500
     },
-    "generated_at_utc": "2026-08-07T03:30:52.873092+00:00",
+    "generated_at_utc": "2026-08-07T04:12:21.197116+00:00",
     "git_sha": "95d0149449458d793cec31018aab650c5d1ed063",
     "inputs": {},
     "outputs": {},
