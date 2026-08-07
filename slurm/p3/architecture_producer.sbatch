@@ -55,8 +55,20 @@
 # SUBMIT:  from the repo root so the relative --output/--error resolve. SYNC, THEN SUBMIT.
 #            ssh two 'bash -lc "cd ~/tbox-finder && git fetch origin && \
 #              git checkout p3-15-prime-d && git reset --hard origin/p3-15-prime-d"'
-#            ssh two 'bash -lc "cd ~/tbox-finder && sbatch --export=ALL,ROUND_DIR=<dir> slurm/p3/architecture_producer.sbatch"'
-# PREFLIGHT: ssh two 'bash -lc "cd ~/tbox-finder && sbatch --test-only slurm/p3/architecture_producer.sbatch"'
+#          ⚠ ALL SIX RULE PARAMETERS MUST BE EXPORTED TOO — each is `${VAR:?}` below, so a
+#          submit that omits any of them exits before producing a single shard. There is
+#          deliberately no default: ADR-0006 A4 ships them keyword-required so the round
+#          chooses them and provenance records the choice. Consult
+#          reports/p3/architecture_freeze.json before choosing; the placeholders below are
+#          NOT a pin.
+#            ssh two 'bash -lc "cd ~/tbox-finder && sbatch --export=ALL,ROUND_DIR=<dir>,\
+#          STEM_I_NT_THRESHOLD=<nt>,MIN_NAMED_HELICES=<n>,MIN_HELIX_PAIRS=<n>,\
+#          BULGE_MIN_NT=<nt>,BULGE_MAX_NT=<nt>,NCCA_PAIRING_NT=<n> \
+#          slurm/p3/architecture_producer.sbatch"'
+# PREFLIGHT: `sbatch --test-only` validates the SLURM HEADERS ONLY — it does not run the
+#          script body, so it will NOT catch a missing rule parameter. Run both:
+#            ssh two 'bash -lc "cd ~/tbox-finder && sbatch --test-only slurm/p3/architecture_producer.sbatch"'
+#            ssh two 'bash -lc "cd ~/tbox-finder && bash -n slurm/p3/architecture_producer.sbatch"'
 # VERIFY (artifact-based; sacct off, §9.3): (a) `squeue -j <jobid>` empty, (b) every
 #          "$ROUND_DIR/markers_<arrayjobid>/shard_NNN.SHARD_OK" present, (c) every `.err`
 #          zero bytes (this job has no chatty downloads, unlike the Stage-2 producer), (d)
