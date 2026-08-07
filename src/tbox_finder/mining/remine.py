@@ -69,6 +69,7 @@ from tbox_finder.eval.tier2n_probe import ProbeSet
 from tbox_finder.mining.hard_negative import MiningCandidate
 from tbox_finder.mining.mine_round import (
     MSA_SUPPLY_AVAILABLE,
+    RELAXED_ARCH_SUPPLY_AVAILABLE,
     SYNTENY_SUPPLY_AVAILABLE,
     build_round_availability,
     candidate_evidence,
@@ -716,6 +717,9 @@ def _supply_derivations(args: argparse.Namespace) -> dict[str, Any]:
     the first's verdict — this is the same evidence gate applied at the leg that actually
     turns candidates into hard negatives.
     """
+    from tbox_finder.mining.architecture_producer import (
+        derive_relaxed_arch_supply_available,
+    )
     from tbox_finder.mining.mine_round import derive_msa_supply_available
     from tbox_finder.mining.stage2_producer import derive_stage2_supply_available
     from tbox_finder.mining.synteny_producer import derive_synteny_supply_available
@@ -724,6 +728,7 @@ def _supply_derivations(args: argparse.Namespace) -> dict[str, Any]:
         "msa_supply_derivation": derive_msa_supply_available(),
         "stage2_supply_derivation": derive_stage2_supply_available(),
         "synteny_supply_derivation": derive_synteny_supply_available(),
+        "relaxed_arch_supply_derivation": derive_relaxed_arch_supply_available(),
     }
 
 
@@ -738,14 +743,21 @@ def _refuse_unevidenced(args: argparse.Namespace, derivations: Mapping[str, Any]
         ("msa_supply_available", "msa_supply_derivation", "covariation MSA"),
         ("stage2_supply_available", "stage2_supply_derivation", "Stage-2 posterior"),
         ("synteny_available", "synteny_supply_derivation", "downstream-aaRS synteny"),
+        ("relaxed_arch_available", "relaxed_arch_supply_derivation", "relaxed-architecture"),
     ):
-        derivation = derivations[key]
+        # ``.get``, not ``[...]``: a missing derivation means this loop and
+        # ``_supply_derivations`` have drifted apart, and a KeyError raised out of a
+        # function documented as returning an exit code would bypass ``_cmd_plan``'s
+        # report-writing path entirely. ``None`` reads as unevidenced ⇒ refuse (4),
+        # which is the fail-closed direction and names the gap in the message.
+        derivation = derivations.get(key)
         if supply_declaration_unevidenced(
             declared=bool(getattr(args, flag)), derivation=derivation
         ):
+            why = (derivation or {}).get("reasons") or [f"no {key} was produced"]
             print(
                 f"FATAL: this round declares the {label} supply available, but this checkout "
-                f"cannot evidence it — {'; '.join(derivation['reasons'])}",
+                f"cannot evidence it — {'; '.join(why)}",
                 file=sys.stderr,
             )
             return 4
@@ -787,7 +799,12 @@ def build_parser() -> argparse.ArgumentParser:
             default=STAGE2_SUPPLY_AVAILABLE,
             help_text="the per-candidate Stage-2 posterior supply exists (P3-15′-b)",
         )
-        _bool_flag(p, "relaxed-arch-available", "a relaxed-architecture backend exists")
+        _supply_flag_pair(
+            p,
+            "relaxed-arch-available",
+            default=RELAXED_ARCH_SUPPLY_AVAILABLE,
+            help_text="a relaxed-architecture (b) backend exists (ADR-0006 D3/A4)",
+        )
         _supply_flag_pair(
             p,
             "synteny-available",

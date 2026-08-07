@@ -84,6 +84,25 @@ mlocarna --version 2>&1 | grep -q "LocARNA 2.0.1" || { echo "FATAL: mlocarna != 
 PYTHONHASHSEED=0 PYTHONPATH=src python -m tbox_finder.mining.covariation_producer align-shard \
   --shard "$SHARD" --workroot "$BUILD/work" --cpu 2
 
+# ── PROMOTE the per-candidate #=GC SS_cons consensus OUT of node-local scratch ────────────────────
+# ADR-0006 A4 makes this artifact load-bearing for criterion (b) as well as (a): (b)'s
+# named_elements_present / ncca_bulge_detected are localized from THIS file. Until P3-15'-d it was
+# written under $BUILD/work and destroyed by the EXIT trap below, so the only CM-free structure the
+# repo produces did not survive the job that produced it. Copy runs BEFORE stage 3 so a scoring
+# failure cannot take the consensus down with it. Per-candidate subdirectory names are the (a)
+# producer's own slugs, which is exactly what architecture_producer.candidate_msa_path() rebuilds.
+MSA_OUT="$ROUND_DIR/msa"
+mkdir -p "$MSA_OUT"
+n_promoted=0
+for d in "$BUILD"/work/*/; do
+  [ -s "$d/msa.sto" ] || continue                       # not producible (< min_sequences, align failed)
+  slug=$(basename "$d")
+  mkdir -p "$MSA_OUT/$slug"
+  cp -p "$d/msa.sto" "$MSA_OUT/$slug/msa.sto"
+  n_promoted=$((n_promoted + 1))
+done
+echo "promoted $n_promoted per-candidate msa.sto → $MSA_OUT"
+
 # ── STAGE 3: SCORE (tbox-rscape) → the shard status table ────────────────────────────────────────
 conda activate tbox-rscape
 command -v R-scape >/dev/null || { echo "FATAL: R-scape not on PATH — tbox-rscape not created?" >&2; exit 2; }

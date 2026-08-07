@@ -1077,10 +1077,12 @@ def false_pass_report(
         "joint_abc": {
             "available": False,
             "reason": (
-                "criterion (b) has no backend until P3-15′-d, and criterion (a)'s producer was "
-                "not run over this control corpus in this step; the joint a∧b∧c false-pass "
-                "rate D4 also asks for is therefore withheld rather than computed from two "
-                "unavailable disjuncts"
+                "criterion (b) HAS a backend since P3-15′-d (mining/architecture.py), but both "
+                "(a) and (b) read the same per-candidate de-novo consensus (ADR-0006 A4), and "
+                "that consensus has not been produced over this control corpus; the joint "
+                "a∧b∧c false-pass rate D4 also asks for is therefore still withheld rather "
+                "than computed from two unavailable disjuncts. It becomes computable once the "
+                "full-corpus (a)/(b) supply run has happened — one run now unblocks both."
             ),
         },
     }
