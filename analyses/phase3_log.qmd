@@ -4517,7 +4517,15 @@ and calling the class of defect closed is the mistake worth naming.**
 `C:\Users\alice\report.json` reads as *relative* and a home-directory leak slips past the
 assertion written to catch it. Both `PurePosixPath` and `PureWindowsPath` are checked now.
 
-**Validation (round 16).** Full unit+golden **4,687 passed / 13 failed** vs the matched baseline
+**Validation (round 16).** Full unit+golden **4,683 passed / 13 failed** vs the matched baseline
 at `95d0149` (**4,492 / 13**) — failure sets identical, `comm` empty both ways. **58 sabotages /
 58 RED against their named test.** Candidate verdicts unchanged (546 / 96 / 299). ruff + black
 clean.
+
+⚠ **A FOURTH HAND-COPIED NUMBER DRIFTED, AND IT WAS CAUGHT IN THE SAME BREATH.** The round-16
+stanza first said **4,687 passed**; the run printed **4,683**. Four occurrences in this step — the
+distance percentiles (twice), the positive-control rate, and now a pass count — every one from
+transcribing a number instead of reading it back from the thing that produced it. The committed
+*reports* are protected against this by `test_the_reported_rate_matches_its_own_counts`, which
+recomputes every rate from the counts beside it; the **dev-log prose is not**, and that is the
+remaining hole.
