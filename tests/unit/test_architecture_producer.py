@@ -649,3 +649,109 @@ class TestFreezeIsComputedNotJustCommitted:
             {"corpus_record_sha256": [digest], "source": ["corpus"], "nested_role": ["heldout"]}
         ).to_parquet(splits)
         assert len(architecture_producer.heldout_canonical(corpus=corpus, split_table=splits)) == 1
+
+
+class TestTheP3RoundCarriesBToo:
+    """The gap CLI round 2 found: `mine_round` had the (b) status table and `remine` did not.
+
+    Two apply paths, one fix — the P3 round would have declared the backend available and
+    still read `unavailable` for every candidate, reporting a clean zero yield
+    indistinguishable from an honest one. Each assertion below names the specific link in
+    that chain rather than only the end state, so a partial re-break is attributable.
+    """
+
+    def test_remine_evidence_carries_a_produced_b_status(self) -> None:
+        evidence = remine.remine_candidate_evidence(
+            "x",
+            covariation_status=None,
+            stage2_posteriors=None,
+            relaxed_arch_status={"x": STATUS_PASSED},
+        )
+        assert evidence.relaxed_architecture == STATUS_PASSED
+
+    def test_remine_evidence_keeps_the_fail_closed_absent_id_rule(self) -> None:
+        evidence = remine.remine_candidate_evidence(
+            "x",
+            covariation_status=None,
+            stage2_posteriors=None,
+            relaxed_arch_status={"other": STATUS_PASSED},
+        )
+        assert evidence.relaxed_architecture == STATUS_UNAVAILABLE
+
+    def test_the_b_status_survives_alongside_a_stage2_posterior(self) -> None:
+        """`dataclasses.replace` for the posterior must not drop the (b) status."""
+        evidence = remine.remine_candidate_evidence(
+            "x",
+            covariation_status={"x": STATUS_FAILED},
+            stage2_posteriors={"x": 0.99},
+            synteny_status={"x": STATUS_UNAVAILABLE},
+            relaxed_arch_status={"x": STATUS_PASSED},
+        )
+        assert evidence.relaxed_architecture == STATUS_PASSED
+        assert evidence.any_helix_rscape == STATUS_FAILED
+        assert evidence.downstream_aaRS_synteny == STATUS_UNAVAILABLE
+        assert evidence.stage2_posterior == pytest.approx(0.99)
+
+    def test_the_apply_parser_exposes_the_b_status_table(self) -> None:
+        args = remine.build_parser().parse_args(
+            [
+                "apply-spare-rule",
+                "--stage2-threshold",
+                "0.9",
+                "--out",
+                "o",
+                "--manifest",
+                "m",
+                "--status-table",
+                "s",
+                "--posteriors",
+                "p",
+                "--probe-set",
+                "pr",
+                "--relaxed-arch-status",
+                "t.json",
+            ]
+        )
+        assert args.relaxed_arch_status == "t.json"
+
+    def test_read_remine_manifest_stamps_the_b_status(self, tmp_path: Path) -> None:
+        """End to end through the manifest reader, not just the evidence builder."""
+        path = tmp_path / "m.json"
+        path.write_text(
+            json.dumps(
+                {
+                    "candidates": [
+                        {
+                            "candidate_id": "c1",
+                            "accession": "GCA_1:c0",
+                            "locus_start": 0,
+                            "locus_end": 100,
+                        }
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
+        candidates = remine.read_remine_manifest(path, relaxed_arch_status={"c1": STATUS_PASSED})
+        assert [c.evidence.relaxed_architecture for c in candidates] == [STATUS_PASSED]
+
+    def test_a_malformed_b_table_is_a_reported_round_fault_not_a_traceback(
+        self, tmp_path: Path
+    ) -> None:
+        bad = tmp_path / "bad.json"
+        bad.write_text("{not json", encoding="utf-8")
+        with pytest.raises(remine.RemineError, match="relaxed-architecture status table"):
+            remine._load_relaxed_arch_status(bad)
+
+    def test_positive_control_a_well_formed_b_table_loads(self, tmp_path: Path) -> None:
+        good = tmp_path / "good.json"
+        good.write_text(
+            json.dumps(
+                architecture_producer.build_status_table([row("c1", STATUS_PASSED)], config=CONFIG)
+            ),
+            encoding="utf-8",
+        )
+        assert remine._load_relaxed_arch_status(good) == {"c1": "passed"}
+
+    def test_no_table_at_all_is_None_not_an_error(self) -> None:
+        assert remine._load_relaxed_arch_status(None) is None

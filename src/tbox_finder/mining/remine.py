@@ -256,6 +256,7 @@ def remine_candidate_evidence(
     covariation_status: Mapping[str, str] | None,
     stage2_posteriors: Mapping[str, float] | None,
     synteny_status: Mapping[str, str] | None = None,
+    relaxed_arch_status: Mapping[str, str] | None = None,
 ) -> SpareRuleEvidence:
     """The candidate's P3 evidence: the P2 builder's result **plus** its posterior.
 
@@ -271,7 +272,7 @@ def remine_candidate_evidence(
     the candidate is **spared**. A dropped producer shard therefore costs
     sensitivity, never a mined true T-box.
     """
-    base = candidate_evidence(candidate_id, covariation_status, synteny_status)
+    base = candidate_evidence(candidate_id, covariation_status, synteny_status, relaxed_arch_status)
     if stage2_posteriors is None:
         return base
     posterior = stage2_posteriors.get(candidate_id)
@@ -320,6 +321,7 @@ def read_remine_manifest(
     covariation_status: Mapping[str, str] | None = None,
     stage2_posteriors: Mapping[str, float] | None = None,
     synteny_status: Mapping[str, str] | None = None,
+    relaxed_arch_status: Mapping[str, str] | None = None,
 ) -> list[MiningCandidate]:
     """The round's false positives, stamped with **both** produced evidence sources.
 
@@ -329,7 +331,10 @@ def read_remine_manifest(
     stays the single parser of the manifest shape.
     """
     candidates = read_fp_manifest(
-        path, covariation_status=covariation_status, synteny_status=synteny_status
+        path,
+        covariation_status=covariation_status,
+        synteny_status=synteny_status,
+        relaxed_arch_status=relaxed_arch_status,
     )
     return [
         dataclasses.replace(
@@ -339,6 +344,7 @@ def read_remine_manifest(
                 covariation_status=covariation_status,
                 stage2_posteriors=stage2_posteriors,
                 synteny_status=synteny_status,
+                relaxed_arch_status=relaxed_arch_status,
             ),
         )
         for c in candidates
@@ -404,6 +410,23 @@ def exclude_probe_members(
 # ═════════════════════════════════════════════════════════════════════════════
 # The round itself — four-disjunct evidence → mined/spared outcome
 # ═════════════════════════════════════════════════════════════════════════════
+def _load_relaxed_arch_status(table: str | Path | None) -> dict[str, str] | None:
+    """Load the (b) status table, translating a data fault into this module's error.
+
+    Same contract and same broad except-list as :func:`_load_synteny_status` — see its
+    docstring for why ``ProducerError`` alone is not the failure surface.
+    """
+    if table is None:
+        return None
+    from tbox_finder.mining.architecture_producer import ProducerError
+    from tbox_finder.mining.architecture_producer import load_status_map as load_arch_status_map
+
+    try:
+        return load_arch_status_map(table)
+    except (ProducerError, OSError, ValueError, AttributeError, KeyError, TypeError) as exc:
+        raise RemineError(f"relaxed-architecture status table unusable: {exc}") from exc
+
+
 def _load_synteny_status(table: str | Path | None) -> dict[str, str] | None:
     """Load the (c) status table, translating a data fault into this module's error.
 
@@ -438,6 +461,7 @@ def apply_remine_spare_rule(
     stage2_supply_available: bool,
     probe_set: ProbeSet,
     synteny_status_table: str | Path | None = None,
+    relaxed_arch_status_table: str | Path | None = None,
     relaxed_arch_available: bool = False,
     synteny_available: bool = False,
     union_prior: str | Path = "data/processed/priors/union_prior.parquet",
@@ -481,6 +505,22 @@ def apply_remine_spare_rule(
             "a synteny status table was supplied but synteny_available=False; "
             "hard_negative.mine_round refuses produced evidence for an undeclared backend"
         )
+    # The identical pair for (b). Without it a P3 round could declare the backend
+    # available and still read `unavailable` for every candidate — a clean-looking zero
+    # yield indistinguishable from an honest one, which is exactly what these refusals
+    # exist to make unrepresentable.
+    if relaxed_arch_available and relaxed_arch_status_table is None:
+        raise RemineError(
+            "relaxed_arch_available=True but no relaxed-architecture status table was "
+            "supplied; the (b) disjunct would read 'unavailable' for every candidate and "
+            "spare them all"
+        )
+    if not relaxed_arch_available and relaxed_arch_status_table is not None:
+        raise RemineError(
+            "a relaxed-architecture status table was supplied but relaxed_arch_available"
+            "=False; hard_negative.mine_round refuses produced evidence for an undeclared "
+            "backend"
+        )
 
     availability = build_remine_availability(
         rscape_installed=rscape_installed,
@@ -491,11 +531,13 @@ def apply_remine_spare_rule(
     )
     # Loaded FIRST so a malformed (c) table is refused before any other input is read.
     synteny_status = _load_synteny_status(synteny_status_table)
+    relaxed_arch_status = _load_relaxed_arch_status(relaxed_arch_status_table)
     candidates = read_remine_manifest(
         fp_manifest,
         covariation_status=load_status_map(status_table),
         stage2_posteriors=load_stage2_posteriors(posteriors),
         synteny_status=synteny_status,
+        relaxed_arch_status=relaxed_arch_status,
     )
     candidates, excluded = exclude_probe_members(candidates, probe_set)
 
@@ -824,6 +866,15 @@ def build_parser() -> argparse.ArgumentParser:
     apply_.add_argument("--status-table", required=True, help="merged covariation-status table")
     apply_.add_argument("--posteriors", required=True, help="candidate_id → Stage-2 posterior")
     apply_.add_argument(
+        "--relaxed-arch-status",
+        default=None,
+        help=(
+            "candidate_id → criterion-(b) status (architecture_producer merge output); "
+            "REQUIRED whenever the round declares --relaxed-arch-available, and refused "
+            "when it does not"
+        ),
+    )
+    apply_.add_argument(
         "--synteny-status",
         default=None,
         help=(
@@ -925,6 +976,7 @@ def _cmd_apply_spare_rule(args: argparse.Namespace) -> int:
         stage2_threshold=float(args.stage2_threshold),
         probe_set=probe_set,
         synteny_status_table=args.synteny_status,
+        relaxed_arch_status_table=args.relaxed_arch_status,
         rscape_installed=bool(args.rscape_installed),
         msa_supply_available=bool(args.msa_supply_available),
         stage2_supply_available=bool(args.stage2_supply_available),
