@@ -24,6 +24,7 @@
     "aars": 332,
     "transamidation": 2
   },
+  "passing_class_counts_unit": "strand_evaluations",
   "passing_distance_sensitivity": {
     "decision_distance": {
       "max_bp": 454,
@@ -34,11 +35,14 @@
     },
     "max_bp": 1652,
     "n": 554,
+    "n_candidates_passing": 546,
+    "n_candidates_passing_on_both_strands": 8,
     "n_passed_via_tandem_carve_out": 5,
     "note": "D4 asks for the empirical p95/p99 as a sensitivity check on the 500 bp pad; measured over the strand evaluations that PASSED in THIS corpus, not on catalogued Firmicutes T-boxes.  Two series: the element-relative distance (the reportable quantity) and the re-anchored decision distance criterion_c actually judged.  They differ only where D4's tandem carve-out fired, which is why the element-relative max may exceed window_bp while every decision distance is inside it.",
     "p50_bp": 117,
     "p95_bp": 272,
     "p99_bp": 389,
+    "unit": "strand_evaluations",
     "window_bp": 500
   },
   "per_clade": {
@@ -264,7 +268,7 @@
       "sub_threshold_orf_nt": 150,
       "window_bp": 500
     },
-    "generated_at_utc": "2026-08-07T03:07:26.312411+00:00",
+    "generated_at_utc": "2026-08-07T03:18:38.761774+00:00",
     "git_sha": "95d0149449458d793cec31018aab650c5d1ed063",
     "inputs": {},
     "outputs": {},

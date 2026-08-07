@@ -4139,3 +4139,43 @@ shard-recorded value now wins.
 **Validation (round 2).** Full unit+golden **4,627 passed / 13 failed** vs the matched baseline at
 `95d0149` (**4,492 / 13**) — failure sets identical, `comm` empty both ways. **32 sabotages / 32
 RED against their named test.** ruff + black clean.
+
+**Review round 3 — 4 findings (app 1, CLI 3), all real, 2 major.** Counts across three rounds:
+**20, 7, 4**.
+
+**⚠ A FILTERED SUBSET THAT OUTNUMBERED ITS SOURCE.** The strict 5′UTR arm reported **9,087**
+rows against the wide arm's **9,065** — impossible for a subset, and the giveaway that the two
+arms were **independent draws** each capped at `n_per_host` rather than a population and its
+filter. The strict arm is now derived from the wide arm's own sample (`strict_subsample`), so
+the nesting holds by construction: **8,662 ≤ 9,090**, and the rates are **4.96 %** wide against
+**0.29 %** strict. The report's own wording had claimed the nesting all along.
+
+**⚠ A THIRD ARTIFACT-PINNING TEST WENT GREEN UNDER SABOTAGE.** `test_the_utr_arm_is_reported_
+under_BOTH_readings` reads the committed report, so breaking the derivation could not reach it —
+the same species as rounds 1 and 2. The filter is now a named function (`strict_subsample`) and
+tested directly for the subset property, the identity of what it removes, and the all-D4 edge
+case. Three occurrences in one step is a pattern worth carrying forward: **a test that reads a
+committed artifact validates the artifact, never the code that made it.**
+
+**⚠ TWO UNITS IN ONE REPORT, UNLABELLED.** The per-clade block sums to **941 candidates**
+(546 + 96 + 299) while the distance block reported **554** — not a discrepancy, since a
+candidate passing on **both** strands contributes two strand evaluations, but a reader
+subtracting one from the other would conclude something was missing. Both blocks now carry an
+explicit `unit`, and the report states the reconciliation: `554 = 546 + 8`.
+
+**Also fixed.** `test_the_control_is_powered_and_says_why` asserted `powered` and `margin` but
+not `verdict` — the field a reader actually consumes and the one that would go stale silently,
+so the name was writing a cheque the body did not honour. And a `decoys_v0.parquet` missing its
+`accession` column raised a non-`ProducerError`, aborting the whole sweep **after** every arm
+had been computed, over a schema change in a file this arm only reports the *absence* of.
+
+**Validation (round 3).** Full unit+golden **4,635 passed / 13 failed** vs the matched baseline at
+`95d0149` (**4,492 / 13**) — failure sets identical, `comm` empty both ways. **33 sabotages / 33
+RED against their named test.** Both reports re-derive identically from the final code apart from
+`provenance`. ruff + black clean.
+
+⚠ **A CLI review round that read `main → main` is an ABSENCE, not a pass.** Round 3's first CLI
+invocation ran from the main checkout because the backgrounded `cd` did not apply to the session
+cwd, and reported *"No committed changes detected — nothing to review"*. That is exactly §5.1's
+rate-limit trap in a different costume: it was re-run from the worktree before the round was
+counted.

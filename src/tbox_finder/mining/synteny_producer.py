@@ -77,6 +77,7 @@ __all__ = [
     "exclusion_report",
     "load_clades",
     "load_status_map",
+    "strict_subsample",
     "main",
     "merge_status_tables",
 ]
@@ -579,6 +580,25 @@ def _upstream_window(
     return None
 
 
+def strict_subsample(sample: Sequence[gff3.CdsFeature]) -> list[gff3.CdsFeature]:
+    """The §9.1 5′UTR arm's strict reading: ``sample`` minus the CDS naming a D4 class.
+
+    ⚠ A **filter of the given sample**, never a second draw from the population.  Drawing the
+    two arms independently — each capped at ``n_per_host`` — made the "subset" larger than its
+    source (9,087 rows against 9,065), and a subset that outnumbers its population is not a
+    second reading of one arm, it is a second arm.  Kept as a named function so the subset
+    property is testable without regenerating a report.
+    """
+    return [
+        cds
+        for cds in sample
+        if synteny.classify_gene_identity(
+            gff3.gene_identity_text(cds), gene_symbols=synteny.gene_symbols(cds)
+        )
+        not in synteny.PASSING_CLASSES
+    ]
+
+
 def _evaluate_windows(
     host: HostAnnotation,
     windows: Iterable[tuple[str, int, int]],
@@ -661,7 +681,13 @@ def shipped_decoy_availability(
         if not Path(path).exists():
             detail[label] = {"present": False}
             continue
-        frame = pd.read_parquet(path, columns=["accession"])
+        try:
+            frame = pd.read_parquet(path, columns=["accession"])
+        except (ValueError, KeyError) as exc:
+            # The abort would happen AFTER the whole false-pass sweep, losing every arm to a
+            # schema change in a file this arm only reports the *absence* of.
+            detail[label] = {"present": True, "readable": False, "reason": str(exc)}
+            continue
         with_coords = int(frame["accession"].notna().sum())
         hosts = frame["accession"].dropna().astype(str).str.split(":").str[0]
         on_annotated = int(hosts.isin(annotated).sum())
@@ -752,15 +778,11 @@ def false_pass_report(
         # false, but the arm no longer represents a random leader.  Both are reported; the
         # gap between them is exactly the ambiguity, and it is not this step's to resolve.
         sample = host.cds if len(host.cds) <= n_per_host else rng.sample(host.cds, n_per_host)
-        non_d4 = [
-            c
-            for c in host.cds
-            if synteny.classify_gene_identity(
-                gff3.gene_identity_text(c), gene_symbols=synteny.gene_symbols(c)
-            )
-            not in synteny.PASSING_CLASSES
-        ]
-        strict_sample = non_d4 if len(non_d4) <= n_per_host else rng.sample(non_d4, n_per_host)
+        # ⚠ The strict arm is a FILTER OF THIS SAMPLE, not a second independent draw.  Drawing
+        # separately made the "subset" larger than its source (9,087 vs 9,065 rows), because
+        # two draws each capped at ``n_per_host`` are not nested — and a filtered subset that
+        # outnumbers its population is not a second reading of one arm, it is a second arm.
+        strict_sample = strict_subsample(sample)
         extents = {sid: max(c.end for c in feats) for sid, feats in host.by_seqid.items()}
         utr_windows = [
             w
@@ -856,7 +878,8 @@ def false_pass_report(
             "nine_one_five_prime_utr_decoys_excluding_d4_classes": dict(
                 _arm(strict_utr_decoys),
                 note=(
-                    "the same arm drawn only over CDS that name none of D4's four classes, "
+                    "the SAME sampled windows as the arm above, filtered to those whose "
+                    "downstream CDS names none of D4's four classes, "
                     "so every pass is unambiguously false; the arm above includes 5′UTRs of "
                     "aaRS/biosynthesis genes, which in a real genome may themselves be T-box "
                     "leaders"
@@ -966,6 +989,14 @@ def exclusion_report(
 
     total = len(rows)
     unavailable = sum(1 for r in rows if r["status"] == STATUS_UNAVAILABLE)
+    passing_candidates = sum(1 for r in rows if r["status"] == STATUS_PASSED)
+    both_strand_passes = sum(
+        1
+        for r in rows
+        if r["status"] == STATUS_PASSED
+        and sum(1 for d in (r.get("per_strand") or {}).values() if d.get("status") == STATUS_PASSED)
+        == 2
+    )
     distances.sort()
     decision_distances.sort()
 
@@ -1016,7 +1047,15 @@ def exclusion_report(
             "sub_threshold_orf_nt": config.sub_threshold_orf_nt,
         },
         "passing_distance_sensitivity": {
+            # ⚠ Two different units live in this report and the difference is not a
+            # discrepancy: the per-clade block counts CANDIDATES (546 + 96 + 299 = 941),
+            # while this block counts STRAND EVALUATIONS, and a candidate that passes on
+            # both strands contributes two.  Both are named so a reader cannot subtract one
+            # from the other and conclude something is missing.
+            "unit": "strand_evaluations",
             "n": len(distances),
+            "n_candidates_passing": passing_candidates,
+            "n_candidates_passing_on_both_strands": both_strand_passes,
             "p50_bp": _pct(distances, 0.50),
             "p95_bp": _pct(distances, 0.95),
             "p99_bp": _pct(distances, 0.99),
@@ -1041,6 +1080,7 @@ def exclusion_report(
             ),
         },
         "passing_class_counts": dict(sorted(class_counts.items())),
+        "passing_class_counts_unit": "strand_evaluations",
         "false_fail_probe": false_fail_probe
         or {
             "available": False,
