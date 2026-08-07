@@ -10,7 +10,7 @@ from __future__ import annotations
 import argparse
 import json
 from collections import Counter
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 
 import pytest
 
@@ -627,8 +627,16 @@ class TestProducerHardening:
             )
             for section in ("inputs", "outputs"):
                 for key in provenance[section]:
-                    assert not Path(key).is_absolute(), (report_path, section, key)
-                    assert "/home/" not in key, (report_path, section, key)
+                    # ⚠ ``Path(key).is_absolute()`` uses PurePosixPath semantics on a POSIX
+                    # runner, so a Windows-style ``C:\Users\alice\...`` reads as *relative*
+                    # and slips through — and a home-directory leak is the thing being caught.
+                    assert not PurePosixPath(key).is_absolute(), (report_path, section, key)
+                    assert not PureWindowsPath(key).is_absolute(), (report_path, section, key)
+                    assert "/home/" not in key and "\\Users\\" not in key, (
+                        report_path,
+                        section,
+                        key,
+                    )
             for entry in external:
                 assert "/" not in entry["name"], entry
                 assert not Path(entry["name"]).is_absolute(), entry
@@ -1173,3 +1181,40 @@ class TestRoundFifteenGuards:
 
         params = set(inspect.signature(synteny_producer.exclusion_report).parameters)
         assert "annotation_dir" not in params and "genome_dir" not in params
+
+
+class TestOneBadFastaDoesNotAbortTheRunEither:
+    """Round 12 guarded the annotation read; the genome read beside it was still bare."""
+
+    def _host(self, tmp_path: Path, fasta: bytes) -> synteny_producer.HostAnnotation:
+        from tbox_finder.mining import annotation_fetch
+
+        accession = "GCA_000296795.1"
+        (tmp_path / annotation_fetch.destination_name(accession)).write_bytes(
+            b"##gff-version 3\nc1\ts\tCDS\t10\t99\t.\t+\t0\tID=a;product=alanine--tRNA ligase\n"
+        )
+        genomes = tmp_path / "g"
+        genomes.mkdir(exist_ok=True)
+        (genomes / f"{accession}.fna").write_bytes(fasta)
+        return synteny_producer.HostAnnotation(
+            accession, annotation_dir=str(tmp_path), genome_dir=str(genomes)
+        )
+
+    def test_an_empty_fasta_makes_that_host_unavailable(self, tmp_path: Path) -> None:
+        host = self._host(tmp_path, b"")
+        assert host.available is False
+        assert host.reason == synteny_producer.REASON_GENOME_UNREADABLE
+        assert host.note
+
+    def test_a_header_with_no_record_id_makes_that_host_unavailable(self, tmp_path: Path) -> None:
+        host = self._host(tmp_path, b">\nACGT\n")
+        assert host.reason == synteny_producer.REASON_GENOME_UNREADABLE
+
+    def test_positive_control_a_valid_fasta_is_available(self, tmp_path: Path) -> None:
+        host = self._host(tmp_path, b">c1 desc\nACGT\n")
+        assert host.available is True and host.contig_ids == ["c1"]
+
+    def test_unreadable_is_counted_apart_from_absent(self) -> None:
+        """A corrupt genome and a missing one must not be indistinguishable in the diagnostic."""
+        assert synteny_producer.REASON_GENOME_UNREADABLE != synteny_producer.REASON_GENOME_ABSENT
+        assert synteny_producer.REASON_GENOME_UNREADABLE in synteny_producer.EXCLUSION_REASONS

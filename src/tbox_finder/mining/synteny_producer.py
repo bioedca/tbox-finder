@@ -117,6 +117,10 @@ REASON_GENOME_ABSENT = "genome_fasta_absent"
 #: A host whose GFF is present but truncated / undeclared / unreadable.  Distinct from
 #: ``host_unannotated`` on purpose: a corrupt corpus must not hide inside a missing one.
 REASON_ANNOTATION_UNREADABLE = "host_annotation_unreadable"
+#: A host whose genome FASTA is present but empty / unreadable / has a header with no id.
+#: Distinct from ``genome_fasta_absent`` for the same reason the annotation pair is split:
+#: a corrupt file and a missing one must not be indistinguishable in the diagnostic.
+REASON_GENOME_UNREADABLE = "genome_fasta_unreadable"
 EXCLUSION_REASONS: tuple[str, ...] = (
     REASON_HOST_UNANNOTATED,
     REASON_CONTIG_ABSENT,
@@ -124,6 +128,7 @@ EXCLUSION_REASONS: tuple[str, ...] = (
     REASON_HYPOTHETICAL,
     REASON_GENOME_ABSENT,
     REASON_ANNOTATION_UNREADABLE,
+    REASON_GENOME_UNREADABLE,
 )
 
 
@@ -196,7 +201,18 @@ class HostAnnotation:
                 self.by_seqid[cds.seqid].append(cds)
         fasta = Path(genome_dir) / f"{assembly}.fna"
         if fasta.exists():
-            self.contig_ids = synteny.load_contig_ids(str(fasta))
+            # ⚠ Guarded exactly as the GFF read above is.  ``load_contig_ids`` raises
+            # ``SyntenyError`` for an empty FASTA or a header with no record id, and ``open``
+            # raises ``OSError`` for an unreadable file — so one bad ``.fna`` among the 660
+            # would take the whole round down instead of costing its own host.  Same defect,
+            # sibling read; round 12 fixed only the annotation half.
+            try:
+                self.contig_ids = synteny.load_contig_ids(str(fasta))
+            except (synteny.SyntenyError, OSError, UnicodeDecodeError) as exc:
+                self.available = False
+                self.reason = REASON_GENOME_UNREADABLE
+                self.note = f"{fasta.name}: {exc}"
+                return
         elif self.available:
             # An annotated host whose genome FASTA is missing cannot have its ``:c<ci>``
             # resolved at all; that is an unavailability, not a failure.

@@ -4500,3 +4500,24 @@ producer no longer raises, having been tightened to `ProducerError` in earlier r
 `95d0149` (**4,492 / 13**) — failure sets identical, `comm` empty both ways. **56 sabotages / 56
 RED against their named test.** Both reports re-derived; candidate verdicts unchanged
 (546 / 96 / 299). ruff + black clean.
+
+**Review round 16 — 2 CLI findings, both real, 1 major.** Counts across sixteen rounds:
+**20, 7, 4, 2, 1, 8, 1, 4, 3, 6, 6, 3, 4, 1, 6, 2**.
+
+**⚠ ROUND 12 GUARDED ONE OF TWO SIBLING READS.** `HostAnnotation.__init__` reads a GFF *and* a
+genome FASTA; round 12 wrapped the first and left the second bare, so one empty or unreadable
+`.fna` — or a header with no record id — still took the whole round down instead of costing its
+own host. Fixed with its own reason (`genome_fasta_unreadable`), kept distinct from
+`genome_fasta_absent` for the same reason the annotation pair is split: a corrupt file and a
+missing one must not be indistinguishable in the diagnostic. **Fixing one of two identical reads
+and calling the class of defect closed is the mistake worth naming.**
+
+**⚠ A PATH CHECK THAT ONLY UNDERSTOOD ONE OS.** The provenance guard used
+`Path(key).is_absolute()`, which selects `PurePosixPath` semantics on a POSIX runner — so
+`C:\Users\alice\report.json` reads as *relative* and a home-directory leak slips past the
+assertion written to catch it. Both `PurePosixPath` and `PureWindowsPath` are checked now.
+
+**Validation (round 16).** Full unit+golden **4,687 passed / 13 failed** vs the matched baseline
+at `95d0149` (**4,492 / 13**) — failure sets identical, `comm` empty both ways. **58 sabotages /
+58 RED against their named test.** Candidate verdicts unchanged (546 / 96 / 299). ruff + black
+clean.
