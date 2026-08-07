@@ -4210,3 +4210,21 @@ control margin from the counts beside them.
 RED against their named test.** ruff + black clean. ⚠ The CLI's round-4 invocation returned
 *"Review limit reached — wait 18 minutes"*; that is an **absence, not a pass**, and it is being
 waited out rather than escalated (waiting is free, so no Greptile credit was spent).
+
+**Review round 5 — 1 finding (app), real, minor.** Counts across five rounds: **20, 7, 4, 2, 1**.
+
+**⚠ VALUE EQUALITY IS NOT THE CONTRACT.** The round-4 test asserted `strict == [wide[1], wide[3]]`
+and `all(w in wide for w in strict)` — but windows are plain tuples, so a producer that *draws a
+second time and lands on the same span* satisfies value equality while breaking the one-draw
+contract the test exists to pin. The assertions are now `is`.
+
+**⚠ AND THE FIRST SABOTAGE OF THAT FIX WAS ITSELF A NO-OP.** Replacing the returned windows with
+`tuple(w)` left the test green — because CPython returns the *same object* for `tuple(t)` when
+`t` is already a tuple, so the mutation changed nothing. Checked by execution
+(`tuple(t) is t → True`, `tuple(list(t)) is t → False`) and re-run with a genuinely
+reconstructing sabotage, which bites. A sabotage that does not mutate proves nothing about the
+test; [[verify-the-line-you-ship]] applies to the sabotage as much as to the code.
+
+**Validation (round 5).** Full unit+golden **4,640 passed / 13 failed** vs the matched baseline at
+`95d0149` (**4,492 / 13**) — failure sets identical, `comm` empty both ways. **35 sabotages / 35
+RED against their named test.** ruff + black clean; no report regenerated (test-only change).

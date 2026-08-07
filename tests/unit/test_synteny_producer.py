@@ -769,15 +769,21 @@ class TestUtrArmWindowsAreOneDraw:
         ]
         wide, strict = utr_windows_for(sample)
         assert len(strict) < len(wide), "the D4-class members must actually be removed"
-        assert all(w in wide for w in strict), "the same window objects, not a second draw"
-        # …and asserted by IDENTITY, so a filter that dropped the wrong two would still fail.
-        assert strict == [wide[1], wide[3]]
+        # ⚠ ``is``, not ``==``.  Windows are plain tuples, so a producer that RECONSTRUCTS an
+        # equal tuple — i.e. draws a second time and happens to land on the same span —
+        # satisfies value equality while violating the "one draw" contract this test exists
+        # to pin.  Object identity is the only assertion that distinguishes them.
+        assert all(any(w is x for x in wide) for w in strict), "same objects, not equal ones"
+        assert strict[0] is wide[1]
+        assert strict[1] is wide[3]
+        assert len(strict) == 2
 
     def test_an_all_non_d4_sample_keeps_every_window(self) -> None:
         """The positive control: a filter that removed everything would satisfy the test above."""
         sample = [self._cds("DNA gyrase subunit A", 1000), self._cds("hypothetical protein", 2000)]
         wide, strict = utr_windows_for(sample)
-        assert strict == wide
+        assert len(strict) == len(wide)
+        assert all(a is b for a, b in zip(strict, wide, strict=True))
 
     def test_a_span_count_mismatch_refuses(self) -> None:
         sample = [self._cds("DNA gyrase subunit A", 1000)]
