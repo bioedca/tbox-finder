@@ -521,9 +521,13 @@ def candidate_evidence(
       covariation-status table) → the candidate's ``any_helix_rscape`` disjunct is set to its
       **produced** status. A ``candidate_id`` **absent** from the map resolves to
       :data:`STATUS_UNAVAILABLE` — a dropped shard, a candidate the producer never scored, cannot
-      fail *open* (it is spared, not mined). The other two disjuncts stay ``unavailable`` (no
-      relaxed-architecture / synteny backend exists at P2); :class:`SpareRuleEvidence` validates
-      the status string, so a corrupt value raises rather than reading as "not passed".
+      fail *open* (it is spared, not mined).
+
+    ``synteny_status`` is the criterion-(c) analogue P3-15′-c-ii added
+    (:func:`tbox_finder.mining.synteny_producer.load_status_map`), read under the **same**
+    fail-closed absent-id rule.  ``relaxed_architecture`` is the one disjunct still without a
+    backend (P3-15′-d), so it stays ``unavailable``.  :class:`SpareRuleEvidence` validates
+    every status string, so a corrupt value raises rather than reading as "not passed".
     """
     return SpareRuleEvidence(
         any_helix_rscape=(
@@ -697,6 +701,7 @@ def apply_spare_rule(
     *,
     rscape_installed: bool,
     msa_supply_available: bool,
+    synteny_status_table: str | Path | None = None,
     relaxed_arch_available: bool = False,
     synteny_available: bool = False,
     union_prior: str | Path = "data/processed/priors/union_prior.parquet",
@@ -716,9 +721,29 @@ def apply_spare_rule(
     """
     from tbox_finder.mining.covariation_producer import load_status_map
     from tbox_finder.mining.hard_negative import mine_round as run_mine_round
+    from tbox_finder.mining.synteny_producer import load_status_map as load_synteny_status_map
+
+    # Declaring the (c) backend available with no status table is the SILENT form of a
+    # refusal: every candidate's synteny disjunct reads ``unavailable``, all are spared, and
+    # the round reports a zero yield indistinguishable from an honest one.
+    if synteny_available and synteny_status_table is None:
+        raise ValueError(
+            "synteny_available=True but no synteny status table was supplied; the (c) "
+            "disjunct would read 'unavailable' for every candidate and spare them all"
+        )
+    if not synteny_available and synteny_status_table is not None:
+        raise ValueError(
+            "a synteny status table was supplied but synteny_available=False; "
+            "hard_negative.mine_round refuses produced evidence for an undeclared backend"
+        )
 
     status_map = load_status_map(status_table)
-    candidates = read_fp_manifest(fp_manifest, covariation_status=status_map)
+    synteny_status_map = (
+        load_synteny_status_map(synteny_status_table) if synteny_status_table is not None else None
+    )
+    candidates = read_fp_manifest(
+        fp_manifest, covariation_status=status_map, synteny_status=synteny_status_map
+    )
     availability = build_round_availability(
         rscape_installed=rscape_installed,
         msa_supply_available=msa_supply_available,
@@ -1281,6 +1306,7 @@ def _cmd_apply_spare_rule(args: argparse.Namespace) -> int:
         args.status_table,
         rscape_installed=bool(rscape_installed),
         msa_supply_available=bool(args.msa_supply_available),
+        synteny_status_table=args.synteny_status,
         relaxed_arch_available=bool(args.relaxed_arch_available),
         synteny_available=bool(args.synteny_available),
         union_prior=args.union_prior,
@@ -1397,6 +1423,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     _add_msa_supply_flags(apply)
     apply.add_argument("--relaxed-arch-available", action="store_true")
     apply.add_argument("--synteny-available", action="store_true")
+    apply.add_argument(
+        "--synteny-status",
+        default=None,
+        help=(
+            "candidate_id → criterion-(c) status (synteny_producer merge output); "
+            "REQUIRED whenever the round declares --synteny-available"
+        ),
+    )
     apply.add_argument("--union-prior", default="data/processed/priors/union_prior.parquet")
     apply.add_argument("--corpus", default="data/processed/master_clean_v0.parquet")
     apply.set_defaults(func=_cmd_apply_spare_rule)

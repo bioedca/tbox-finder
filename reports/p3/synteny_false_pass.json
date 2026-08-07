@@ -2,29 +2,29 @@
   "adr": "ADR-0006 D4 (criterion (c)); ADR-0005 D14 (spare rule), D15 (strand)",
   "arms": {
     "clade_matched_random_leaders": {
-      "false_pass_rate": 0.016666666666666666,
+      "false_pass_rate": 0.018229166666666668,
       "n": 9600,
       "status_counts": {
-        "failed": 9175,
-        "passed": 160,
+        "failed": 9160,
+        "passed": 175,
         "unavailable": 265
       }
     },
     "nine_one_five_prime_utr_decoys": {
-      "false_pass_rate": 0.04515922888486527,
-      "n": 9389,
+      "false_pass_rate": 0.047378256568099374,
+      "n": 9097,
       "status_counts": {
-        "failed": 8457,
-        "passed": 424,
-        "unavailable": 508
+        "failed": 8181,
+        "passed": 431,
+        "unavailable": 485
       }
     },
     "nine_one_trna_adjacent_decoys": {
-      "false_pass_rate": 0.02476780185758514,
-      "n": 1938,
+      "false_pass_rate": 0.026881720430107527,
+      "n": 1860,
       "status_counts": {
-        "failed": 1842,
-        "passed": 48,
+        "failed": 1762,
+        "passed": 50,
         "unavailable": 48
       }
     },
@@ -48,6 +48,13 @@
       "reason": "no shipped \u00a79.1 decoy row carries coordinates on one of the 339 annotated production assemblies, so criterion (c) has no genomic context to evaluate"
     }
   },
+  "clades_of_candidate_hosts_not_sampled": [
+    "Chloroflexota",
+    "Desulfobacterota",
+    "Fibrobacterota",
+    "Thermotogota"
+  ],
+  "clades_with_no_background_windows": [],
   "config": {
     "hmm_fallback_available": false,
     "max_intervening_orfs": 1,
@@ -56,7 +63,7 @@
     "window_bp": 500
   },
   "control": {
-    "margin": 0.975354609929078,
+    "margin": 0.9752827630110228,
     "min_margin": 0.2,
     "powered": true,
     "verdict": "positive-context and random-leader arms separate; the false-pass rates below are interpretable"
@@ -69,29 +76,29 @@
   "n_per_host": 200,
   "per_clade_random_leader": {
     "Armatimonadota": {
-      "false_pass_rate": 0.005,
+      "false_pass_rate": 0.0075,
       "n": 400,
       "status_counts": {
-        "failed": 391,
-        "passed": 2,
+        "failed": 390,
+        "passed": 3,
         "unavailable": 7
       }
     },
     "Atribacterota": {
-      "false_pass_rate": 0.018,
+      "false_pass_rate": 0.024,
       "n": 1000,
       "status_counts": {
-        "failed": 939,
-        "passed": 18,
+        "failed": 933,
+        "passed": 24,
         "unavailable": 43
       }
     },
     "Bacillota": {
-      "false_pass_rate": 0.013333333333333334,
+      "false_pass_rate": 0.015,
       "n": 1200,
       "status_counts": {
-        "failed": 1167,
-        "passed": 16,
+        "failed": 1165,
+        "passed": 18,
         "unavailable": 17
       }
     },
@@ -113,11 +120,11 @@
       }
     },
     "Deinococcota": {
-      "false_pass_rate": 0.010714285714285714,
+      "false_pass_rate": 0.011428571428571429,
       "n": 1400,
       "status_counts": {
-        "failed": 1317,
-        "passed": 15,
+        "failed": 1316,
+        "passed": 16,
         "unavailable": 68
       }
     },
@@ -167,29 +174,29 @@
       }
     },
     "Spirochaetota": {
-      "false_pass_rate": 0.015,
+      "false_pass_rate": 0.017,
       "n": 1000,
       "status_counts": {
-        "failed": 968,
-        "passed": 15,
+        "failed": 966,
+        "passed": 17,
         "unavailable": 17
       }
     },
     "Sumerlaeota": {
-      "false_pass_rate": 0.005,
+      "false_pass_rate": 0.01,
       "n": 200,
       "status_counts": {
-        "failed": 188,
-        "passed": 1,
+        "failed": 187,
+        "passed": 2,
         "unavailable": 11
       }
     },
     "Sysuimicrobiota": {
-      "false_pass_rate": 0.021666666666666667,
+      "false_pass_rate": 0.025,
       "n": 600,
       "status_counts": {
-        "failed": 580,
-        "passed": 13,
+        "failed": 578,
+        "passed": 15,
         "unavailable": 7
       }
     },
@@ -204,11 +211,11 @@
     }
   },
   "positive_context_control": {
-    "false_pass_rate": 0.9920212765957447,
-    "n": 4888,
+    "false_pass_rate": 0.9935119296776894,
+    "n": 4778,
     "status_counts": {
-      "failed": 34,
-      "passed": 4849,
+      "failed": 26,
+      "passed": 4747,
       "unavailable": 5
     }
   },
@@ -216,6 +223,24 @@
     "adr": "ADR-0006 D4 (criterion (c)); ADR-0005 D14 (spare rule), D15 (strand)",
     "env_lock_hash": null,
     "extra": {
+      "external_inputs": [
+        {
+          "name": "round0_fp_manifest.json",
+          "sha256": "e8aff87d395b3cb70a25c1f1d4ac348daf3da9323baa4c04a32fd3e4060d4b95"
+        },
+        {
+          "name": "production_genomes_v0.parquet",
+          "sha256": "e52b34b79256d16a8cf9986cdc8e1d0d5de229ee43562b5a6ddb9528e7109f22"
+        },
+        {
+          "name": "decoys_v0.parquet",
+          "sha256": "e19da2a959bcf597be0760310e04f3b4b44984c5a86bb1c946afc55b99d09636"
+        },
+        {
+          "name": "mining_pool_v0.parquet",
+          "sha256": "e57181e1b321c457e4e1b156645e9d668ef6ada4ea1a419f1cc1b6062e4dc84f"
+        }
+      ],
       "hmm_fallback_available": false,
       "max_intervening_orfs": 1,
       "n_per_host": 200,
@@ -225,14 +250,9 @@
       "sub_threshold_orf_nt": 150,
       "window_bp": 500
     },
-    "generated_at_utc": "2026-08-07T02:32:38.002904+00:00",
+    "generated_at_utc": "2026-08-07T02:51:17.739217+00:00",
     "git_sha": "95d0149449458d793cec31018aab650c5d1ed063",
-    "inputs": {
-      "data/processed/mining/production_genomes_v0.parquet": "e52b34b79256d16a8cf9986cdc8e1d0d5de229ee43562b5a6ddb9528e7109f22",
-      "data/processed/mining/round0_fp_manifest.json": "e8aff87d395b3cb70a25c1f1d4ac348daf3da9323baa4c04a32fd3e4060d4b95",
-      "data/processed/negatives/decoys_v0.parquet": "e19da2a959bcf597be0760310e04f3b4b44984c5a86bb1c946afc55b99d09636",
-      "data/processed/negatives/mining_pool_v0.parquet": "e57181e1b321c457e4e1b156645e9d668ef6ada4ea1a419f1cc1b6062e4dc84f"
-    },
+    "inputs": {},
     "outputs": {},
     "rule": "synteny_producer::diagnostics.false_pass",
     "schema_version": "1.0",

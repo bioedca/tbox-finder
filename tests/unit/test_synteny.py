@@ -326,6 +326,35 @@ class TestTandemCarveOut:
         # The reported distance stays measured from the ELEMENT, not the re-anchored window.
         assert got.distance_bp == 400
 
+    def test_a_carve_out_target_past_the_window_PASSES_at_the_status_level(self) -> None:
+        """⚠ The carve-out has to reach the *decision*, not only the search.
+
+        ``resolve_downstream_gene`` selected the target with the re-anchored window but
+        returned its **element-relative** distance, and ``synteny_status`` then judged that
+        against the 500 bp pad — so the carve-out fired only when it was not needed, and
+        turned exactly the tandem loci D4 built it for into false FAILs.  The class-level
+        assertion below could not see it: the search was always right.
+        """
+        leader = cds(start=1300, end=1480, product="hypothetical protein")
+        target = cds(start=1600, end=2400, product="alanine--tRNA ligase")
+        got = self._walk([leader, target])
+        assert got.function_class == synteny.CLASS_AARS
+        assert got.distance_bp == 600, "element-relative, and outside the 500 bp pad"
+        assert got.decision_distance_bp == 120, "re-anchored at the intervening ORF's 3′ end"
+        assert synteny.synteny_status(got) == STATUS_PASSED
+
+    def test_without_the_carve_out_the_same_target_is_a_failure(self) -> None:
+        """The positive control for the test above: the pad still binds when nothing hopped."""
+        target = cds(start=1600, end=2400, product="alanine--tRNA ligase")
+        got = self._walk([target], max_intervening_orfs=0)
+        assert got.function_class is None
+        assert synteny.synteny_status(got) == STATUS_FAILED
+
+    def test_the_two_distances_agree_when_no_carve_out_fires(self) -> None:
+        target = cds(start=1200, end=2000, product="alanine--tRNA ligase")
+        got = self._walk([target])
+        assert got.distance_bp == got.decision_distance_bp == 200
+
     def test_the_reanchoring_is_real_a_target_past_the_original_window_is_reached(self) -> None:
         leader = cds(start=1050, end=1450, product="hypothetical protein")
         target = cds(start=1520, end=2200, product="alanine--tRNA ligase")
@@ -393,10 +422,11 @@ class TestTandemCarveOut:
 # Status mapping + the strand fold
 # ═════════════════════════════════════════════════════════════════════════════
 class TestSyntenyStatus:
-    def _resolved(self, function_class, distance):
+    def _resolved(self, function_class, distance, decision_distance=...):
         return synteny.DownstreamGene(
             function_class=function_class,
             distance_bp=distance,
+            decision_distance_bp=distance if decision_distance is ... else decision_distance,
             feature_id="f",
             identity_text=(),
             is_pseudo=False,
@@ -444,6 +474,17 @@ class TestStrandFold:
         per_strand = {"+": STATUS_PASSED, "-": STATUS_FAILED}
         assert synteny.combine_strand_statuses(per_strand, policy="plus") == STATUS_PASSED
         assert synteny.combine_strand_statuses(per_strand, policy="minus") == STATUS_FAILED
+
+    def test_a_missing_strand_key_refuses(self) -> None:
+        """A half-populated per-strand map must name the problem, not raise a bare KeyError."""
+        with pytest.raises(synteny.SyntenyError, match="missing"):
+            synteny.combine_strand_statuses({"+": STATUS_PASSED}, policy="both")
+
+    def test_positive_control_a_complete_map_folds(self) -> None:
+        assert (
+            synteny.combine_strand_statuses({"+": STATUS_PASSED, "-": STATUS_FAILED}, policy="both")
+            == STATUS_PASSED
+        )
 
     def test_an_unknown_policy_refuses(self) -> None:
         with pytest.raises(synteny.SyntenyError):

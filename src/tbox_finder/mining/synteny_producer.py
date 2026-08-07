@@ -61,6 +61,7 @@ __all__ = [
     "ADR",
     "CONTROL_MIN_MARGIN",
     "DEFAULT_FP_MANIFEST",
+    "DEFAULT_ANNOTATION_DIR",
     "DEFAULT_GENOME_DIR",
     "DEFAULT_STATUS_TABLE",
     "EXCLUSION_REPORT",
@@ -224,6 +225,7 @@ def _strand_detail(
         "status": status,
         "function_class": resolved.function_class,
         "distance_bp": resolved.distance_bp,
+        "decision_distance_bp": resolved.decision_distance_bp,
         "feature_id": resolved.feature_id,
         "is_pseudo": resolved.is_pseudo,
         "n_pseudo_seen": resolved.n_pseudo_seen,
@@ -290,7 +292,15 @@ def evaluate_locus(
     )
     reason = ""
     if status == STATUS_UNAVAILABLE:
-        pseudo = any(d["is_pseudo"] for d in per_strand.values())
+        # Only the strand(s) the policy actually folded may explain the verdict.  Scanning
+        # both under ``plus``/``minus`` lets the strand that decided nothing supply the
+        # reason, and the per-clade exclusion diagnostic is a breakdown *by* that field.
+        if config.strand_policy == "both":
+            deciding = list(per_strand.values())
+        else:
+            selected = gff3.STRAND_PLUS if config.strand_policy == "plus" else gff3.STRAND_MINUS
+            deciding = [per_strand[selected]]
+        pseudo = any(d["is_pseudo"] for d in deciding)
         reason = REASON_PSEUDOGENE if pseudo else REASON_HYPOTHETICAL
     return {"status": status, "reason": reason, "seqid": seqid, "per_strand": per_strand}
 
@@ -383,10 +393,25 @@ def merge_status_tables(
     """
     rows: list[dict[str, Any]] = []
     configs: list[dict[str, Any]] = []
+    required = {"strand_policy", "max_intervening_orfs", "sub_threshold_orf_nt", "window_bp"}
     for path in table_paths:
         payload = json.loads(Path(path).read_text(encoding="utf-8"))
-        configs.append(payload.get("config", {}))
-        rows.extend(payload.get("rows", []))
+        if not isinstance(payload, Mapping):
+            raise ProducerError(f"{path}: expected a shard table object")
+        config_block = payload.get("config")
+        shard_rows = payload.get("rows")
+        if not isinstance(config_block, Mapping):
+            raise ProducerError(f"{path}: shard table has no 'config' block")
+        missing = sorted(required - set(config_block))
+        if missing:
+            raise ProducerError(f"{path}: shard config is missing {missing}")
+        if not isinstance(shard_rows, list) or not shard_rows:
+            # A shard that contributes nothing is the silent version of a dropped shard: the
+            # merge would succeed, the coverage would be short, and every absent candidate
+            # would read ``unavailable`` — spared rather than mined, but for the wrong reason.
+            raise ProducerError(f"{path}: shard table contributes no rows")
+        configs.append(dict(config_block))
+        rows.extend(shard_rows)
     if not configs:
         raise ProducerError("no shard tables to merge")
     if any(c != configs[0] for c in configs[1:]):
@@ -501,7 +526,10 @@ def _draw_random_leaders(
 
 
 def _upstream_window(
-    feature: gff3.GffFeature | gff3.CdsFeature, *, span: int
+    feature: gff3.GffFeature | gff3.CdsFeature,
+    *,
+    span: int,
+    contig_extent: int | None = None,
 ) -> tuple[str, int, int, str] | None:
     """The window immediately 5′ of a feature, as a 0-based half-open contig span.
 
@@ -518,6 +546,8 @@ def _upstream_window(
         return (feature.seqid, start0, end0, gff3.STRAND_PLUS)
     if feature.strand == gff3.STRAND_MINUS:
         start0 = feature.end  # 0-based half-open start just past the 1-based inclusive end
+        if contig_extent is not None and start0 + span > contig_extent:
+            return None
         return (feature.seqid, start0, start0 + span, gff3.STRAND_MINUS)
     return None
 
@@ -597,7 +627,7 @@ def shipped_decoy_availability(
         if not Path(path).exists():
             detail[label] = {"present": False}
             continue
-        frame = pd.read_parquet(path, columns=["accession", "locus_start"])
+        frame = pd.read_parquet(path, columns=["accession"])
         with_coords = int(frame["accession"].notna().sum())
         hosts = frame["accession"].dropna().astype(str).str.split(":").str[0]
         on_annotated = int(hosts.isin(annotated).sum())
@@ -650,6 +680,9 @@ def false_pass_report(
         assembly, _, ci = str(row["accession"]).partition(":c")
         spans_by_host[assembly].append((int(ci), int(row["locus_start"]), int(row["locus_end"])))
 
+    candidate_clades = {
+        clades.get(str(r["accession"]).partition(":c")[0], "unassigned") for r in candidates
+    }
     random_leaders: Counter = Counter()
     utr_decoys: Counter = Counter()
     trna_decoys: Counter = Counter()
@@ -677,8 +710,14 @@ def false_pass_report(
 
         # §9.1 leader class, re-instantiated: 5′UTR windows upstream of annotated CDS.
         sample = host.cds if len(host.cds) <= n_per_host else rng.sample(host.cds, n_per_host)
+        extents = {sid: max(c.end for c in feats) for sid, feats in host.by_seqid.items()}
         utr_windows = [
-            w for w in (_upstream_window(c, span=rng.choice(lengths)) for c in sample) if w
+            w
+            for w in (
+                _upstream_window(c, span=rng.choice(lengths), contig_extent=extents.get(c.seqid))
+                for c in sample
+            )
+            if w
         ]
         utr_decoys += _evaluate_oriented(host, utr_windows, config=config)
 
@@ -698,7 +737,14 @@ def false_pass_report(
                 else rng.sample(trna_features, n_per_host)
             )
             trna_windows = [
-                w for w in (_upstream_window(t, span=rng.choice(lengths)) for t in picked) if w
+                w
+                for w in (
+                    _upstream_window(
+                        t, span=rng.choice(lengths), contig_extent=extents.get(t.seqid)
+                    )
+                    for t in picked
+                )
+                if w
             ]
             trna_decoys += _evaluate_oriented(host, trna_windows, config=config)
 
@@ -707,7 +753,7 @@ def false_pass_report(
             c
             for c in host.cds
             if synteny.classify_gene_identity(
-                gff3.gene_identity_text(c), gene_symbols=synteny._gene_symbols(c)
+                gff3.gene_identity_text(c), gene_symbols=synteny.gene_symbols(c)
             )
             in synteny.PASSING_CLASSES
         ]
@@ -716,7 +762,14 @@ def false_pass_report(
                 positives if len(positives) <= n_per_host else rng.sample(positives, n_per_host)
             )
             pos_windows = [
-                w for w in (_upstream_window(c, span=rng.choice(lengths)) for c in picked_pos) if w
+                w
+                for w in (
+                    _upstream_window(
+                        c, span=rng.choice(lengths), contig_extent=extents.get(c.seqid)
+                    )
+                    for c in picked_pos
+                )
+                if w
             ]
             positive_context += _evaluate_oriented(host, pos_windows, config=config)
 
@@ -761,6 +814,12 @@ def false_pass_report(
         "per_clade_random_leader": {
             clade: _arm(counts) for clade, counts in sorted(per_clade.items())
         },
+        # [[clauses-must-guard-emptiness]] — a clade with no drawn windows is absent from the
+        # breakdown above and reads as "not measured" only if it is named somewhere.
+        "clades_with_no_background_windows": sorted(
+            clade for clade, counts in per_clade.items() if sum(counts.values()) == 0
+        ),
+        "clades_of_candidate_hosts_not_sampled": sorted(candidate_clades - set(per_clade)),
         "joint_abc": {
             "available": False,
             "reason": (
@@ -806,6 +865,8 @@ def exclusion_report(
     unjudgeable_seen = 0
     carve_out_used = 0
     distances: list[int] = []
+    decision_distances: list[int] = []
+    passed_via_carve_out = 0
     class_counts: Counter = Counter()
 
     for row in rows:
@@ -818,19 +879,31 @@ def exclusion_report(
             unjudgeable_seen += int(detail.get("n_unjudgeable_seen") or 0)
             if detail.get("carve_out_applied"):
                 carve_out_used += 1
+            # ⚠ Filter on the strand detail's OWN status, not on its function class.  A
+            # carve-out target whose element-relative distance exceeds the window is a real
+            # pass, but an out-of-window hit that FAILED is not — and collecting by class
+            # alone put 554 entries (max 1,652 bp) into a statistic documented as "measured
+            # on the passing candidates" against 541 passed candidates.
+            if detail.get("status") != STATUS_PASSED:
+                continue
             if detail.get("function_class") in synteny.PASSING_CLASSES:
                 class_counts[detail["function_class"]] += 1
                 if detail.get("distance_bp") is not None:
                     distances.append(int(detail["distance_bp"]))
+                if detail.get("decision_distance_bp") is not None:
+                    decision_distances.append(int(detail["decision_distance_bp"]))
+                if detail.get("carve_out_applied"):
+                    passed_via_carve_out += 1
 
     total = len(rows)
     unavailable = sum(1 for r in rows if r["status"] == STATUS_UNAVAILABLE)
     distances.sort()
+    decision_distances.sort()
 
-    def _pct(p: float) -> int | None:
-        if not distances:
+    def _pct(values: list[int], p: float) -> int | None:
+        if not values:
             return None
-        return distances[min(len(distances) - 1, int(round(p * (len(distances) - 1))))]
+        return values[min(len(values) - 1, int(round(p * (len(values) - 1))))]
 
     return {
         "schema_version": SCHEMA_VERSION,
@@ -875,15 +948,27 @@ def exclusion_report(
         },
         "passing_distance_sensitivity": {
             "n": len(distances),
-            "p50_bp": _pct(0.50),
-            "p95_bp": _pct(0.95),
-            "p99_bp": _pct(0.99),
+            "p50_bp": _pct(distances, 0.50),
+            "p95_bp": _pct(distances, 0.95),
+            "p99_bp": _pct(distances, 0.99),
             "max_bp": distances[-1] if distances else None,
             "window_bp": config.window_bp,
+            "n_passed_via_tandem_carve_out": passed_via_carve_out,
+            "decision_distance": {
+                "n": len(decision_distances),
+                "p50_bp": _pct(decision_distances, 0.50),
+                "p95_bp": _pct(decision_distances, 0.95),
+                "p99_bp": _pct(decision_distances, 0.99),
+                "max_bp": decision_distances[-1] if decision_distances else None,
+            },
             "note": (
                 "D4 asks for the empirical p95/p99 as a sensitivity check on the 500 bp pad; "
-                "these are measured on the passing candidates of THIS corpus, not on "
-                "catalogued Firmicutes T-boxes"
+                "measured over the strand evaluations that PASSED in THIS corpus, not on "
+                "catalogued Firmicutes T-boxes.  Two series: the element-relative distance "
+                "(the reportable quantity) and the re-anchored decision distance criterion_c "
+                "actually judged.  They differ only where D4's tandem carve-out fired, which "
+                "is why the element-relative max may exceed window_bp while every decision "
+                "distance is inside it."
             ),
         },
         "passing_class_counts": dict(sorted(class_counts.items())),
@@ -974,6 +1059,29 @@ def derive_synteny_supply_available(*, repo_root: str | Path | None = None) -> d
 # ═════════════════════════════════════════════════════════════════════════════
 # CLI
 # ═════════════════════════════════════════════════════════════════════════════
+def _split_inputs(inputs: Sequence[str | Path]) -> tuple[list[str], list[dict[str, str]]]:
+    """In-repo inputs (hashed by ``build_provenance``) vs external ones (hashed here).
+
+    ⚠ A committed provenance record must never carry an absolute local path: it leaks a
+    username and names a machine-specific location no reader can resolve.  ``$ROUND_DIR``
+    genuinely lives outside the repo, so its status table cannot become a repo-relative
+    path — but it also must not simply vanish from the record.  It is therefore hashed
+    here and recorded as ``{name, sha256}``, which is *more* traceable than the path was:
+    a reader can verify the bytes without knowing where they sat.
+    """
+    from tbox_finder.provenance import sha256_file
+
+    inside: list[str] = []
+    external: list[dict[str, str]] = []
+    for item in inputs:
+        resolved = Path(item).resolve()
+        try:
+            inside.append(str(resolved.relative_to(REPO_ROOT)))
+        except ValueError:
+            external.append({"name": resolved.name, "sha256": sha256_file(resolved)})
+    return inside, external
+
+
 def _provenance(entry: str, inputs: Sequence[str | Path], extra: Mapping[str, Any]) -> dict:
     """CLAUDE.md §11 provenance for a committed report.
 
@@ -983,12 +1091,16 @@ def _provenance(entry: str, inputs: Sequence[str | Path], extra: Mapping[str, An
     """
     from tbox_finder.provenance import build_provenance
 
+    inside, external = _split_inputs([i for i in inputs if Path(i).exists()])
+    payload = dict(extra)
+    if external:
+        payload["external_inputs"] = external
     return build_provenance(
         rule=f"synteny_producer::{entry}",
         script="src/tbox_finder/mining/synteny_producer.py",
-        inputs=[str(i) for i in inputs if Path(i).exists()],
+        inputs=inside,
         adr=ADR,
-        extra=dict(extra),
+        extra=payload,
     )
 
 
@@ -1096,8 +1208,10 @@ def main(argv: Sequence[str] | None = None) -> int:
 
         if args.command == "diagnostics":
             config = _config_from(args)
+            # Validate first: reading ``rows`` out of a table that contradicts its own status
+            # map would build both diagnostics on evidence the loader is about to reject.
+            load_status_map(args.status_table)
             rows = json.loads(Path(args.status_table).read_text(encoding="utf-8"))["rows"]
-            load_status_map(args.status_table)  # refuse a table that disagrees with itself
             clades = load_clades(args.clade_table)
             candidates = read_manifest(args.manifest)
             fp = false_pass_report(

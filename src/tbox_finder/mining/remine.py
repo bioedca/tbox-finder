@@ -413,6 +413,7 @@ def apply_remine_spare_rule(
     msa_supply_available: bool,
     stage2_supply_available: bool,
     probe_set: ProbeSet,
+    synteny_status_table: str | Path | None = None,
     relaxed_arch_available: bool = False,
     synteny_available: bool = False,
     union_prior: str | Path = "data/processed/priors/union_prior.parquet",
@@ -439,6 +440,24 @@ def apply_remine_spare_rule(
     from tbox_finder.mining.covariation_producer import load_status_map
     from tbox_finder.mining.hard_negative import mine_round as run_mine_round
     from tbox_finder.mining.mine_round import load_union_mask
+    from tbox_finder.mining.synteny_producer import load_status_map as load_synteny_status_map
+
+    # ⚠ Declaring the (c) backend available while handing the round no status table is the
+    # SILENT version of a refusal: every candidate's synteny disjunct would read
+    # ``unavailable``, every candidate would be spared, and the round would report a clean
+    # zero yield that looks exactly like an honest one.  It is the same hole review found in
+    # this function's ``probe_set`` parameter, so it gets the same answer — make the state
+    # unrepresentable rather than document it.
+    if synteny_available and synteny_status_table is None:
+        raise RemineError(
+            "synteny_available=True but no synteny status table was supplied; the (c) "
+            "disjunct would read 'unavailable' for every candidate and spare them all"
+        )
+    if not synteny_available and synteny_status_table is not None:
+        raise RemineError(
+            "a synteny status table was supplied but synteny_available=False; "
+            "hard_negative.mine_round refuses produced evidence for an undeclared backend"
+        )
 
     availability = build_remine_availability(
         rscape_installed=rscape_installed,
@@ -451,6 +470,11 @@ def apply_remine_spare_rule(
         fp_manifest,
         covariation_status=load_status_map(status_table),
         stage2_posteriors=load_stage2_posteriors(posteriors),
+        synteny_status=(
+            load_synteny_status_map(synteny_status_table)
+            if synteny_status_table is not None
+            else None
+        ),
     )
     candidates, excluded = exclude_probe_members(candidates, probe_set)
 
@@ -763,6 +787,15 @@ def build_parser() -> argparse.ArgumentParser:
     apply_.add_argument("--status-table", required=True, help="merged covariation-status table")
     apply_.add_argument("--posteriors", required=True, help="candidate_id → Stage-2 posterior")
     apply_.add_argument(
+        "--synteny-status",
+        default=None,
+        help=(
+            "candidate_id → criterion-(c) status (synteny_producer merge output); "
+            "REQUIRED whenever the round declares --synteny-available, and refused when it "
+            "does not"
+        ),
+    )
+    apply_.add_argument(
         "--probe-set",
         required=True,
         help="Tier-2N probe ids ({natural, synthetic}); its members are removed from the substrate",
@@ -854,6 +887,7 @@ def _cmd_apply_spare_rule(args: argparse.Namespace) -> int:
         args.posteriors,
         stage2_threshold=float(args.stage2_threshold),
         probe_set=probe_set,
+        synteny_status_table=args.synteny_status,
         rscape_installed=bool(args.rscape_installed),
         msa_supply_available=bool(args.msa_supply_available),
         stage2_supply_available=bool(args.stage2_supply_available),

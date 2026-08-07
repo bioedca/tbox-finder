@@ -167,17 +167,26 @@ class TestSupplyDerivation:
         assert derived["reasons"] == []
         assert set(derived["clauses"]) >= {name for name, _ in synteny_producer.SUPPLY_CLAUSES}
 
-    def test_no_clause_reads_dvc_tracked_data(self) -> None:
-        """⚠ The trap ``derive_stage2_supply_available`` already hit.
+    def test_no_clause_reads_dvc_tracked_data(self, tmp_path: Path) -> None:
+        """⚠ The trap ``derive_stage2_supply_available`` already hit — and the first version of
+        this test could not have caught it.
 
         A clause over ``data/interim/production_annotations`` is ``False`` in CI and in any
         fresh clone, so the derivation would contradict the constant in exactly the
-        environments that must agree.  Proven by deriving against a root where the DVC data
-        cannot exist but the git-tracked evidence does.
+        environments that must agree.  The proof has to be a root where the DVC data **cannot**
+        exist while the git-tracked evidence does; deriving against ``REPO_ROOT`` instead
+        passes on any laptop that has run ``dvc pull``, i.e. it asserts nothing about the
+        environment it names.
         """
-        derived = synteny_producer.derive_synteny_supply_available(repo_root=REPO_ROOT)
+        for _name, source in synteny_producer.SUPPLY_CLAUSES:
+            target = tmp_path / source
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes((REPO_ROOT / source).read_bytes())
+        assert not (tmp_path / synteny_producer.DEFAULT_ANNOTATION_DIR).exists()
+        derived = synteny_producer.derive_synteny_supply_available(repo_root=tmp_path)
+        assert derived["n_annotated_hosts_on_disk"] == 0, "the DVC corpus is absent by design"
         assert derived["n_annotated_hosts_in_acquisition_report"] > 0
-        assert derived["available"] is True
+        assert derived["available"] is True, derived["reasons"]
 
     @pytest.mark.parametrize("clause", [name for name, _ in synteny_producer.SUPPLY_CLAUSES])
     def test_breaking_ONE_clause_alone_flips_the_verdict(self, clause: str, tmp_path: Path) -> None:
@@ -347,6 +356,25 @@ class TestCommittedDiagnostics:
             exclusion["n_unavailable"] / exclusion["n_candidates"]
         )
 
+    def test_the_distance_statistic_counts_only_passed_evaluations(self, exclusion: dict) -> None:
+        """⚠ Collecting by function class alone put 554 entries with a 1,652 bp max into a
+        block documented as "measured on the passing candidates" — including out-of-window
+        hits that FAILED.  Every *decision* distance must sit inside the pad."""
+        block = exclusion["passing_distance_sensitivity"]
+        decision = block["decision_distance"]
+        assert decision["max_bp"] is not None
+        assert decision["max_bp"] <= block["window_bp"], decision
+        assert decision["p99_bp"] <= block["window_bp"]
+        # The element-relative series may exceed the pad, but ONLY via the tandem carve-out.
+        if block["max_bp"] > block["window_bp"]:
+            assert block["n_passed_via_tandem_carve_out"] > 0, block
+
+    def test_the_report_names_candidate_clades_it_could_not_sample(self, false_pass: dict) -> None:
+        """A clade absent from the breakdown reads as "measured, found nothing"
+        ([[clauses-must-guard-emptiness]])."""
+        assert "clades_of_candidate_hosts_not_sampled" in false_pass
+        assert "clades_with_no_background_windows" in false_pass
+
     def test_both_reports_describe_the_same_run_config(
         self, false_pass: dict, exclusion: dict
     ) -> None:
@@ -355,3 +383,191 @@ class TestCommittedDiagnostics:
         assert false_pass["config"] == exclusion["config"]
         assert false_pass["config"]["window_bp"] == synteny.DEFAULT_WINDOW_BP
         assert false_pass["config"]["hmm_fallback_available"] is False
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# Review round 1 — the produced table must actually reach the round
+# ═════════════════════════════════════════════════════════════════════════════
+class TestSyntenyTableIsWired:
+    def test_declaring_the_backend_without_a_table_refuses(self) -> None:
+        """The silent form of a refusal: every candidate would read ``unavailable``, all would
+        be spared, and the round would report a zero yield indistinguishable from an honest
+        one — the same hole review found in ``apply_remine_spare_rule``'s ``probe_set``."""
+        with pytest.raises(ValueError, match="no synteny status table"):
+            mine_round.apply_spare_rule(
+                "m.json",
+                "s.json",
+                rscape_installed=True,
+                msa_supply_available=True,
+                synteny_available=True,
+            )
+
+    def test_supplying_a_table_without_declaring_the_backend_refuses(self) -> None:
+        """The opposite direction: `hard_negative.mine_round` raises on produced evidence for
+        an undeclared backend, so catching it here names the cause instead."""
+        with pytest.raises(ValueError, match="synteny_available=False"):
+            mine_round.apply_spare_rule(
+                "m.json",
+                "s.json",
+                rscape_installed=True,
+                msa_supply_available=True,
+                synteny_status_table="t.json",
+                synteny_available=False,
+            )
+
+    def test_the_p3_round_carries_the_same_pair_of_guards(self) -> None:
+        for kwargs, pattern in (
+            ({"synteny_available": True}, "no synteny status table"),
+            (
+                {"synteny_available": False, "synteny_status_table": "t.json"},
+                "synteny_available=False",
+            ),
+        ):
+            with pytest.raises(remine.RemineError, match=pattern):
+                remine.apply_remine_spare_rule(
+                    "m.json",
+                    "s.json",
+                    "p.json",
+                    stage2_threshold=0.9,
+                    rscape_installed=True,
+                    msa_supply_available=True,
+                    stage2_supply_available=True,
+                    probe_set=None,
+                    **kwargs,
+                )
+
+    def test_both_cli_legs_expose_the_status_table(self) -> None:
+        """A parameter unwired from the CLI the sbatch invokes is a parameter that never runs.
+
+        ``mine_round`` builds its parser inside ``main``, so the P2 leg is probed by parsing
+        the flag rather than by reaching into the parser object.
+        """
+        sub = (
+            remine.build_parser()
+            ._subparsers._group_actions[0]
+            .choices["apply-spare-rule"]  # type: ignore[union-attr]
+        )
+        options = {opt for action in sub._actions for opt in action.option_strings}
+        assert "--synteny-status" in options
+
+        # P2: an unknown option exits 2; a known one gets far enough to fail on the round.
+        with pytest.raises(SystemExit) as exc:
+            mine_round.main(["apply-spare-rule", "--synteny-status", "t.json", "--help"])
+        assert exc.value.code == 0, "the P2 leg does not accept --synteny-status"
+
+
+class TestDiagnosticsComputedNotJustCommitted:
+    """⚠ The committed-artifact assertions above cannot see a source regression.
+
+    Sabotaging the filter left them GREEN, because they read a report generated by the
+    *fixed* code.  These call the report builders directly, so the rule itself is under test
+    rather than one frozen output of it.
+    """
+
+    def _row(self, row_status: str, **detail) -> dict:
+        base = {
+            "status": STATUS_PASSED,
+            "function_class": synteny.CLASS_AARS,
+            "distance_bp": 40,
+            "decision_distance_bp": 40,
+            "is_pseudo": False,
+            "n_pseudo_seen": 0,
+            "n_unjudgeable_seen": 0,
+            "n_intervening": 0,
+            "carve_out_applied": False,
+        }
+        base.update(detail)
+        return row(
+            "c1",
+            row_status,
+            per_strand={
+                "+": base,
+                "-": dict(
+                    base,
+                    status=STATUS_FAILED,
+                    function_class=None,
+                    distance_bp=None,
+                    decision_distance_bp=None,
+                ),
+            },
+        )
+
+    def test_a_passing_class_detail_that_FAILED_is_excluded_from_the_distance_series(self) -> None:
+        failed_far = self._row(
+            STATUS_FAILED,
+            status=STATUS_FAILED,  # the strand detail's own status
+            function_class=synteny.CLASS_AARS,
+            distance_bp=1652,
+            decision_distance_bp=1652,
+        )
+        report = synteny_producer.exclusion_report(
+            [failed_far],
+            clades={"GCA_000000001.1": "Bacillota"},
+            config=CONFIG,
+            annotation_dir="unused",
+            genome_dir="unused",
+        )
+        block = report["passing_distance_sensitivity"]
+        assert block["n"] == 0, "an out-of-window aaRS hit that FAILED is not a passing distance"
+        assert block["max_bp"] is None
+
+    def test_a_passing_detail_IS_counted(self) -> None:
+        """The positive control: a filter that dropped everything would satisfy the test above."""
+        report = synteny_producer.exclusion_report(
+            [self._row(STATUS_PASSED)],
+            clades={"GCA_000000001.1": "Bacillota"},
+            config=CONFIG,
+            annotation_dir="unused",
+            genome_dir="unused",
+        )
+        block = report["passing_distance_sensitivity"]
+        assert block["n"] == 1 and block["max_bp"] == 40
+        assert block["decision_distance"]["max_bp"] == 40
+
+    def test_an_out_of_repo_input_is_hashed_rather_than_named(self, tmp_path: Path) -> None:
+        external = tmp_path / "round0" / "synteny_status.json"
+        external.parent.mkdir(parents=True)
+        external.write_text("{}", encoding="utf-8")
+        inside, outside = synteny_producer._split_inputs(
+            [external, REPO_ROOT / synteny_producer.FALSE_PASS_REPORT]
+        )
+        assert inside == [synteny_producer.FALSE_PASS_REPORT]
+        assert [e["name"] for e in outside] == ["synteny_status.json"]
+        assert len(outside[0]["sha256"]) == 64
+        assert not any(str(tmp_path) in str(x) for x in inside + outside)
+
+
+class TestProducerHardening:
+    def test_merge_refuses_a_shard_that_contributes_no_rows(self, tmp_path: Path) -> None:
+        """A dropped shard that merges cleanly costs coverage silently."""
+        good = tmp_path / "a.json"
+        good.write_text(
+            json.dumps(
+                synteny_producer.build_status_table([row("x", STATUS_PASSED)], config=CONFIG)
+            )
+        )
+        empty = tmp_path / "b.json"
+        payload = synteny_producer.build_status_table([row("y", STATUS_PASSED)], config=CONFIG)
+        payload["rows"] = []
+        empty.write_text(json.dumps(payload))
+        with pytest.raises(synteny_producer.ProducerError, match="contributes no rows"):
+            synteny_producer.merge_status_tables([good, empty])
+
+    def test_merge_refuses_a_shard_with_an_incomplete_config(self, tmp_path: Path) -> None:
+        path = tmp_path / "a.json"
+        payload = synteny_producer.build_status_table([row("x", STATUS_PASSED)], config=CONFIG)
+        del payload["config"]["window_bp"]
+        path.write_text(json.dumps(payload))
+        with pytest.raises(synteny_producer.ProducerError, match="missing"):
+            synteny_producer.merge_status_tables([path])
+
+    def test_provenance_never_records_an_absolute_local_path(self) -> None:
+        """A committed record naming /home/<user>/… leaks a username and resolves for nobody."""
+        for report_path in (synteny_producer.FALSE_PASS_REPORT, synteny_producer.EXCLUSION_REPORT):
+            provenance = json.loads((REPO_ROOT / report_path).read_text())["provenance"]
+            for key in provenance["inputs"]:
+                assert not Path(key).is_absolute(), (report_path, key)
+                assert "/home/" not in key, (report_path, key)
+            for external in provenance.get("extra", {}).get("external_inputs", []):
+                assert "/" not in external["name"], external
+                assert len(external["sha256"]) == 64, external

@@ -88,6 +88,7 @@ __all__ = [
     "DownstreamGene",
     "SyntenyError",
     "classify_gene_identity",
+    "gene_symbols",
     "contig_seqid",
     "criterion_c",
     "downstream_cds_on_strand",
@@ -517,7 +518,7 @@ _IDENTIFIER_LIKE = re.compile(
 )
 
 
-def _gene_symbols(cds: gff3.CdsFeature) -> frozenset[str]:
+def gene_symbols(cds: gff3.CdsFeature) -> frozenset[str]:
     """Lower-cased ``gene`` / ``Name`` symbols, for the exact-match symbol routes."""
     out: set[str] = set()
     for key in ("gene", "Name", "gene_synonym"):
@@ -662,9 +663,13 @@ def load_contig_ids(genome_fasta: str) -> list[str]:
     """
     ids: list[str] = []
     with open(genome_fasta, encoding="utf-8") as handle:
-        for line in handle:
-            if line.startswith(">"):
-                ids.append(line[1:].split()[0])
+        for line_no, line in enumerate(handle, start=1):
+            if not line.startswith(">"):
+                continue
+            token = line[1:].split()
+            if not token:
+                raise SyntenyError(f"{genome_fasta}:{line_no}: FASTA header has no record id")
+            ids.append(token[0])
     if not ids:
         raise SyntenyError(f"{genome_fasta}: no FASTA records")
     return ids
@@ -689,7 +694,16 @@ class DownstreamGene:
     """What the downstream walk found, and how it got there."""
 
     function_class: str | None
+    #: Distance from the **element's** 3′ end — the reportable quantity, and the one D4's
+    #: p95/p99 sensitivity check is about.
     distance_bp: int | None
+    #: Distance from the **anchor the walk actually judged against** — identical to
+    #: ``distance_bp`` when no carve-out fired, and measured from the last intervening ORF's
+    #: 3′ end when one did.  ⚠ This is what :func:`criterion_c` must see: D4 says the tandem
+    #: carve-out *"extends the window past a downstream leader or sub-threshold ORF"*, so a
+    #: carve-out that re-anchors the search but not the decision fires only when it was not
+    #: needed, and turns exactly the tandem loci it exists for into false FAILs.
+    decision_distance_bp: int | None
     feature_id: str | None
     identity_text: tuple[str, ...]
     is_pseudo: bool
@@ -799,6 +813,7 @@ def resolve_downstream_gene(
             return DownstreamGene(
                 function_class=None,
                 distance_bp=None,
+                decision_distance_bp=None,
                 feature_id=None,
                 identity_text=(),
                 is_pseudo=False,
@@ -813,7 +828,7 @@ def resolve_downstream_gene(
         function = (
             FN_UNJUDGEABLE
             if pseudo
-            else classify_gene_identity(texts, gene_symbols=_gene_symbols(cds))
+            else classify_gene_identity(texts, gene_symbols=gene_symbols(cds))
         )
         unjudgeable = function == FN_UNJUDGEABLE
         n_pseudo_seen += int(pseudo)
@@ -826,6 +841,7 @@ def resolve_downstream_gene(
         return DownstreamGene(
             function_class=function,
             distance_bp=distance_from_locus,
+            decision_distance_bp=distance,
             feature_id=cds.feature_id,
             identity_text=texts,
             is_pseudo=pseudo,
@@ -838,6 +854,7 @@ def resolve_downstream_gene(
     return DownstreamGene(
         function_class=None,
         distance_bp=None,
+        decision_distance_bp=None,
         feature_id=None,
         identity_text=(),
         is_pseudo=False,
@@ -866,7 +883,12 @@ def synteny_status(resolved: DownstreamGene, *, window_bp: int = DEFAULT_WINDOW_
                 "declaring the fallback available without it is the fail-open direction"
             )
         return STATUS_UNAVAILABLE
-    passed = criterion_c(resolved.function_class, resolved.distance_bp, True, window_bp=window_bp)
+    # ⚠ ``decision_distance_bp``, NOT ``distance_bp``.  With no carve-out the two are equal;
+    # with one, the element-relative distance can exceed the window while the re-anchored one
+    # does not — and D4's carve-out exists precisely to admit that case.
+    passed = criterion_c(
+        resolved.function_class, resolved.decision_distance_bp, True, window_bp=window_bp
+    )
     return STATUS_PASSED if passed else STATUS_FAILED
 
 
@@ -881,6 +903,9 @@ def combine_strand_statuses(per_strand: Mapping[str, str], *, policy: str) -> st
     """
     if policy not in STRAND_POLICIES:
         raise SyntenyError(f"unknown strand policy {policy!r}; expected {list(STRAND_POLICIES)}")
+    missing = [s for s in (gff3.STRAND_PLUS, gff3.STRAND_MINUS) if s not in per_strand]
+    if missing:
+        raise SyntenyError(f"per-strand statuses missing {missing}; both strands are required")
     if policy == "plus":
         return per_strand[gff3.STRAND_PLUS]
     if policy == "minus":

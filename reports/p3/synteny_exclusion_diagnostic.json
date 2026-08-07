@@ -25,9 +25,17 @@
     "transamidation": 2
   },
   "passing_distance_sensitivity": {
+    "decision_distance": {
+      "max_bp": 454,
+      "n": 554,
+      "p50_bp": 117,
+      "p95_bp": 266,
+      "p99_bp": 356
+    },
     "max_bp": 1652,
     "n": 554,
-    "note": "D4 asks for the empirical p95/p99 as a sensitivity check on the 500 bp pad; these are measured on the passing candidates of THIS corpus, not on catalogued Firmicutes T-boxes",
+    "n_passed_via_tandem_carve_out": 5,
+    "note": "D4 asks for the empirical p95/p99 as a sensitivity check on the 500 bp pad; measured over the strand evaluations that PASSED in THIS corpus, not on catalogued Firmicutes T-boxes.  Two series: the element-relative distance (the reportable quantity) and the re-anchored decision distance criterion_c actually judged.  They differ only where D4's tandem carve-out fired, which is why the element-relative max may exceed window_bp while every decision distance is inside it.",
     "p50_bp": 117,
     "p95_bp": 272,
     "p99_bp": 389,
@@ -52,8 +60,8 @@
         "first_downstream_orf_unjudgeable": 6
       },
       "status_counts": {
-        "failed": 48,
-        "passed": 72,
+        "failed": 46,
+        "passed": 74,
         "unavailable": 6
       }
     },
@@ -77,8 +85,8 @@
         "host_unannotated": 22
       },
       "status_counts": {
-        "failed": 13,
-        "passed": 17,
+        "failed": 10,
+        "passed": 20,
         "unavailable": 24
       }
     },
@@ -239,6 +247,16 @@
     "adr": "ADR-0006 D4 (criterion (c)); ADR-0005 D14 (spare rule), D15 (strand)",
     "env_lock_hash": null,
     "extra": {
+      "external_inputs": [
+        {
+          "name": "synteny_status.json",
+          "sha256": "44d72436b18f3b663d1e439ffaf912fdf2d256f487ed2ec1732792ac3834cf44"
+        },
+        {
+          "name": "production_genomes_v0.parquet",
+          "sha256": "e52b34b79256d16a8cf9986cdc8e1d0d5de229ee43562b5a6ddb9528e7109f22"
+        }
+      ],
       "hmm_fallback_available": false,
       "max_intervening_orfs": 1,
       "step": "P3-15'-c-ii",
@@ -246,12 +264,9 @@
       "sub_threshold_orf_nt": 150,
       "window_bp": 500
     },
-    "generated_at_utc": "2026-08-07T02:32:38.019777+00:00",
+    "generated_at_utc": "2026-08-07T02:51:17.747754+00:00",
     "git_sha": "95d0149449458d793cec31018aab650c5d1ed063",
-    "inputs": {
-      "/home/bioedca/.claude/jobs/b0674bf6/tmp/round0/synteny_status.json": "fcd2ce0a841dd9d67bdc4a72d3bab1cd06773e9bcaa147380e6596eb781e1b93",
-      "data/processed/mining/production_genomes_v0.parquet": "e52b34b79256d16a8cf9986cdc8e1d0d5de229ee43562b5a6ddb9528e7109f22"
-    },
+    "inputs": {},
     "outputs": {},
     "rule": "synteny_producer::diagnostics.exclusion",
     "schema_version": "1.0",
