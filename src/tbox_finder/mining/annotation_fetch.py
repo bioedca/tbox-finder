@@ -253,20 +253,28 @@ def load_annotation_targets(
     return annotation_targets(read_supply_report(supply_report))
 
 
-def read_supply_report(supply_report: str | Path = DEFAULT_SUPPLY_REPORT) -> Mapping[str, Any]:
-    """Parse the committed supply report **once**, with its envelope checks.
+def read_supply_report(
+    supply_report: str | Path = DEFAULT_SUPPLY_REPORT, *, label: str = "supply report"
+) -> Mapping[str, Any]:
+    """Parse a committed JSON report **once**, with its envelope checks.
 
     Split out because a caller needing both the target list and a headline count used to parse
     the same file twice, and two reads of one path are not guaranteed to see the same bytes —
     the targets and the number they are checked against could describe different payloads.
+
+    ``label`` names the artifact in every refusal. :func:`parse_census` reads the **fetch**
+    report through here, and its refusal text is copied verbatim into the committed census's
+    ``corpus_check_reason`` — so without it a published artifact says *"supply report not
+    found"* while quoting the path of the fetch report, which is a durable wrong statement
+    about which file is missing.
     """
     path = Path(supply_report)
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError as exc:
-        raise AnnotationFetchError(f"supply report not found: {path}") from exc
+        raise AnnotationFetchError(f"{label} not found: {path}") from exc
     except UnicodeDecodeError as exc:
-        raise AnnotationFetchError(f"supply report is not UTF-8 text: {path} ({exc})") from exc
+        raise AnnotationFetchError(f"{label} is not UTF-8 text: {path} ({exc})") from exc
     except OSError as exc:
         # ``FileNotFoundError`` was the only OSError converted, so a directory path, a
         # permission error or an I/O fault escaped ``main``'s handler as a traceback and exit 1
@@ -275,14 +283,12 @@ def read_supply_report(supply_report: str | Path = DEFAULT_SUPPLY_REPORT) -> Map
         # ``AnnotationFetchError``, so an unreadable report now becomes a refusal *reason*
         # inside the census instead of aborting it.
         raise AnnotationFetchError(
-            f"supply report is unreadable: {path} ({type(exc).__name__}: {exc})"
+            f"{label} is unreadable: {path} ({type(exc).__name__}: {exc})"
         ) from exc
     except json.JSONDecodeError as exc:
-        raise AnnotationFetchError(f"supply report is not valid JSON: {path} ({exc})") from exc
+        raise AnnotationFetchError(f"{label} is not valid JSON: {path} ({exc})") from exc
     if not isinstance(payload, Mapping):
-        raise AnnotationFetchError(
-            f"supply report root is {type(payload).__name__}, expected an object"
-        )
+        raise AnnotationFetchError(f"{label} root is {type(payload).__name__}, expected an object")
     return payload
 
 
@@ -950,7 +956,7 @@ def parse_census(
     # what ``validate_fetch_report``'s ``corpus_digest_rederives`` clause does.
     declared = ""
     try:
-        fetch_payload = read_supply_report(fetch_report)
+        fetch_payload = read_supply_report(fetch_report, label="fetch report")
     except AnnotationFetchError as exc:
         reason = f"the fetch report is unreadable: {exc}"
     else:
@@ -998,8 +1004,17 @@ def parse_census(
 
 def _write(path: str | Path, payload: Mapping[str, Any]) -> Path:
     out = Path(path)
-    out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    try:
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    except OSError as exc:
+        # The last OSError in the module that still escaped ``main``'s handler. A read-only
+        # output directory or a full disk aborted BOTH subcommands with a traceback and exit 1 —
+        # and the run that produced the numbers is exactly the one whose refusal has to be
+        # legible, since nothing was written down to look at afterwards.
+        raise AnnotationFetchError(
+            f"report is unwritable: {out} ({type(exc).__name__}: {exc})"
+        ) from exc
     return out
 
 

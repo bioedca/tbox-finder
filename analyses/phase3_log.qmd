@@ -3899,3 +3899,30 @@ round-5 fix worth sharing a predicate for. Full unit+golden **4,487 passed / 15 
 the matched baseline at `2be5ff4` (**4,240 / 15**) — failure sets identical, `comm` empty both
 ways. The census re-derived from this code is **identical to the committed report** field for
 field apart from provenance. ruff + black clean.
+
+**Review round 8 — 3 findings, 2 real, and the third was the same false positive for the FIFTH
+time.** Both real ones are the *last* two instances of the pattern rounds 5–7 kept surfacing.
+
+**A published artifact stated the wrong filename.** `parse_census` reads the **fetch** report
+through `read_supply_report`, so every refusal said *"supply report …"* while quoting the fetch
+report's path — and the census copies that text verbatim into `corpus_check_reason`, i.e. into a
+committed file. The function takes a `label` now, and the test carries a positive control (the
+same function must still say "supply report" when *that* is the missing one), because a global
+rename would satisfy a one-sided assertion.
+
+**`_write` was the one `OSError` left escaping.** A read-only output directory or a full disk
+aborted both subcommands with exit 1 — and the run whose report cannot be written is precisely
+the one whose refusal has to be legible, since nothing is left on disk to read afterwards.
+
+**The refuted one, fifth occurrence, now graded `major`:** *"the fixture is not Git-tracked and
+its md5 is `3650a210…`"*. Refuted by execution on three independent facts: `git ls-files
+--error-unmatch` resolves it, the **blob in `HEAD`** md5s to `3afa0aff910cfd08f9f0163981656308`
+at 33,003 bytes with a `1f 8b` header, and CI — a clean GitHub-hosted checkout — ran the whole
+pytest tier green on this head. The CLI sandbox mangles binaries; the permanent guard with its
+positive control has been in the suite since round 4.
+
+**Validation.** 3 sabotages, **3 RED against their named test**. Full unit+golden **4,489 passed
+/ 15 failed** vs the matched baseline at `2be5ff4` (**4,240 / 15**) — failure sets identical,
+`comm` empty both ways. Census re-derived from this code is **identical to the committed report**
+apart from provenance. ⚠ This round cost a **19-minute Fair-Usage wait**; waiting is free and no
+Greptile credit was spent. Counts across eight rounds: **9, 2, 4, 5, 5, 5, 1, 2**.

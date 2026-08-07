@@ -1251,6 +1251,52 @@ def test_an_ABSENT_fetch_report_does_not_silently_satisfy_the_corpus_check(tmp_p
     assert census["corpus_check_reason"].startswith("the fetch report is unreadable")
 
 
+def test_a_refusal_about_the_FETCH_report_does_not_call_it_the_supply_report(tmp_path):
+    """The census copies this text verbatim into a COMMITTED artifact.
+
+    ``parse_census`` reads the fetch report through ``read_supply_report``, so every refusal said
+    *"supply report ..."* while quoting the fetch report's path — a durable, published statement
+    about which file is missing, and the wrong one.
+    """
+    path, ann, _fetch_path, _payload = _acquire(tmp_path)
+    census = af.parse_census(
+        supply_report=path, annotation_dir=ann, fetch_report=tmp_path / "absent.json"
+    )
+    reason = census["corpus_check_reason"]
+    assert "fetch report not found" in reason
+    assert "supply report" not in reason
+    # Positive control: the same function still names the SUPPLY report when it is the one
+    # missing, so the label is being *passed*, not globally renamed.
+    with pytest.raises(af.AnnotationFetchError, match="supply report not found"):
+        af.read_supply_report(tmp_path / "also-absent.json")
+
+
+def test_an_UNWRITABLE_output_path_is_a_refusal_not_a_traceback(tmp_path):
+    """The last ``OSError`` in the module that still escaped ``main``'s handler.
+
+    A read-only output directory or a full disk aborted both subcommands with exit 1 — and the
+    run whose report cannot be written is exactly the one whose refusal has to be legible,
+    because nothing is left on disk to read afterwards.
+    """
+    path, ann, fetch_path, _payload = _acquire(tmp_path)
+    blocker = tmp_path / "a-file"
+    blocker.write_text("not a directory", encoding="utf-8")
+    code = af.main(
+        [
+            "verify",
+            "--supply-report",
+            str(path),
+            "--annotation-dir",
+            str(ann),
+            "--fetch-report",
+            str(fetch_path),
+            "--out",
+            str(blocker / "parse.json"),
+        ]
+    )
+    assert code == 3
+
+
 def test_cli_verify_exits_3_when_the_corpus_does_not_match_the_fetch_report(tmp_path):
     path, ann, fetch_path, _payload = _acquire(tmp_path)
     stale = json.loads(fetch_path.read_text(encoding="utf-8"))
