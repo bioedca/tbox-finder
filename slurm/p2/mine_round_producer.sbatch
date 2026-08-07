@@ -91,17 +91,30 @@ PYTHONHASHSEED=0 PYTHONPATH=src python -m tbox_finder.mining.covariation_produce
 # repo produces did not survive the job that produced it. Copy runs BEFORE stage 3 so a scoring
 # failure cannot take the consensus down with it. Per-candidate subdirectory names are the (a)
 # producer's own slugs, which is exactly what architecture_producer.candidate_msa_path() rebuilds.
-MSA_OUT="$ROUND_DIR/msa"
+#
+# ⚠ EACH CANDIDATE'S PROMOTED DIRECTORY IS CLEARED FIRST, whether or not this run produced
+# an msa.sto for it. Copying only on success would leave a PREVIOUS run's alignment in place
+# for a candidate that is not producible this time, and the (b) producer would then score a
+# stale consensus instead of resolving `unavailable` ⇒ spared. The loop iterates this
+# shard's own workroot, so the cleared set is exactly the candidates this task owns — no
+# other task's output is touched, and there is no cross-shard race.
+MSA_OUT="${ROUND_DIR:?}/msa"
 mkdir -p "$MSA_OUT"
 n_promoted=0
+n_cleared=0
 for d in "$BUILD"/work/*/; do
-  [ -s "$d/msa.sto" ] || continue                       # not producible (< min_sequences, align failed)
   slug=$(basename "$d")
+  [ -n "$slug" ] && [ "$slug" != "*" ] || continue     # the glob matched nothing
+  if [ -e "$MSA_OUT/$slug/msa.sto" ]; then
+    rm -f "$MSA_OUT/$slug/msa.sto"                     # a stale promotion from an earlier run
+    n_cleared=$((n_cleared + 1))
+  fi
+  [ -s "$d/msa.sto" ] || continue                      # not producible (< min_sequences, align failed)
   mkdir -p "$MSA_OUT/$slug"
   cp -p "$d/msa.sto" "$MSA_OUT/$slug/msa.sto"
   n_promoted=$((n_promoted + 1))
 done
-echo "promoted $n_promoted per-candidate msa.sto → $MSA_OUT"
+echo "promoted $n_promoted per-candidate msa.sto → $MSA_OUT (cleared $n_cleared stale)"
 
 # ── STAGE 3: SCORE (tbox-rscape) → the shard status table ────────────────────────────────────────
 conda activate tbox-rscape

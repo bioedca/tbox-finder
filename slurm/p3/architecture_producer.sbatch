@@ -167,8 +167,25 @@ touch "$MARKER_DIR/shard_$TASK3.SHARD_OK"
 echo "shard $TASK scored -> $STATUS_OUT ; SHARD_OK written"
 
 # ── MERGE LEG: whichever task finishes last sees a full marker set and merges ────────
-# Deterministic without a second submit and without a dependency job. A task that does
-# not see every marker exits 0 having done its own share.
+# Deterministic without a second submit and without a dependency job.
+#
+# The flock serialises the check-then-merge so two tasks finishing together cannot both
+# pass the completeness test and race on the same output — `_write` uses `Path.write_text`,
+# which is not an atomic replace, so a concurrent second writer can interleave and leave a
+# truncated table that still parses. Same idiom as slurm/p3/stage2_producer.sbatch.
+#
+# BLOCKING, not `flock -n`. With a non-blocking lock this interleaving leaves NOBODY
+# merging: task A takes the lock and counts 1 marker (B has not written its yet); B writes
+# its marker, fails the lock, and exits; A then finds its own count short and exits too.
+# Both markers exist and no merge ever ran. Waiting instead means the second task counts
+# the complete set. MERGE_OK is re-checked after acquisition so the wait cannot become a
+# double merge.
+exec 9>"$MARKER_DIR/.merge.lock"
+flock 9
+if [ -f "$MARKER_DIR/MERGE_OK" ]; then
+  echo "another task already merged this round."
+  exit 0
+fi
 n_ok=$(find "$MARKER_DIR" -name 'shard_*.SHARD_OK' -type f | wc -l)
 if [ "$n_ok" -ne "$N_SHARDS" ]; then
   echo "shard $TASK done; $n_ok/$N_SHARDS markers present, not the merger"
@@ -187,4 +204,15 @@ done
 
 PYTHONHASHSEED=0 python -m tbox_finder.mining.architecture_producer merge \
   "${TABLE_ARGS[@]}" --out "$MERGED_OUT"
+
+# Read the artifact back through the CONSUMER, not the writer: the table is only useful if
+# the round accepts it, and `load_status_map` re-derives `status` from `rows` — a different
+# validator from the one that wrote it.
+PYTHONHASHSEED=0 python -c "
+import sys
+from tbox_finder.mining.architecture_producer import load_status_map
+print('merged table accepted by the round consumer:', len(load_status_map(sys.argv[1])), 'candidates')
+" "$MERGED_OUT"
+
+touch "$MARKER_DIR/MERGE_OK"
 echo "merged -> $MERGED_OUT"
