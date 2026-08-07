@@ -4303,3 +4303,36 @@ looking like a smaller corpus rather than a bug — the day `destination_name` c
 **Validation (round 8).** Full unit+golden **4,650 passed / 13 failed** vs the matched baseline at
 `95d0149` (**4,492 / 13**) — failure sets identical, `comm` empty both ways. **40 sabotages / 40
 RED against their named test.** ruff + black clean.
+
+**Review round 9 — 3 CLI findings, all real, 1 major.** Counts across nine rounds:
+**20, 7, 4, 2, 1, 8, 1, 4, 3**. ⚠ The **GitHub app has been silent since `b6234ec`** — five heads
+with no app review — so from round 5 on **the CLI has carried the gate alone**, the documented
+§5.1 fallback and the same pattern `-c-i` recorded. The CLI's own round-9 invocation first
+returned *"Review limit reached"*; waiting it out cost nothing and spent no Greptile credit.
+
+**⚠ THE FALSE-PASS RATE DIVIDED BY WINDOWS THE RULE WAS NEVER ASKED ABOUT.** `_arm` computed
+`passed / (passed + failed + unavailable)`. A window whose (c) disjunct is `unavailable` is not
+one where the rule declined to false-pass — it is one where the rule never ran, and folding it
+into the denominator dilutes the headline number by exactly the annotation gaps the *other*
+diagnostic exists to report. Every arm now carries `n`, `n_decided`, `n_unavailable` and an
+explicit `false_pass_rate_denominator`, so the dilution is visible rather than assumed away.
+Corrected rates: random leaders **1.89 %**, §9.1 5′UTR wide **5.00 %** / strict **0.37 %**,
+tRNA-adjacent **2.76 %**, positive-context **99.52 %** (margin 0.976, still powered).
+
+**⚠ THE FIX I WROTE FIRST FOR THE RE-ANCHOR WAS RIGHT; THE TEST FOR IT WAS NOT.** The finding was
+that a carve-out ORF lying entirely behind the element's 3′ end re-anchors the window backward.
+My first test asserted the wrong *direction* — it picked a target where clamped and unclamped
+both fail, so the sabotage stayed green. Measured at the boundary instead: with the anchor
+clamped to the element, a target at 1490 bp is **490** away and passes; unclamped (anchor at the
+ORF's end, 980) the same target is **510** away and fails. The clamp is therefore
+recall-favouring here, and the test now pins both directions — 1490 passes, 1520 still fails.
+**A test that asserts the wrong direction of a correct fix is indistinguishable from no test.**
+
+**Also fixed.** Under the `both` strand policy the exclusion reason could be taken from a strand
+whose own status was `passed` or `failed`; only the strands that actually resolved `unavailable`
+may explain the verdict now.
+
+**Validation (round 9).** Full unit+golden **4,657 passed / 13 failed** vs the matched baseline at
+`95d0149` (**4,492 / 13**) — failure sets identical, `comm` empty both ways. **42 sabotages / 42
+RED against their named test.** Candidate verdicts unchanged (546 / 96 / 299); the re-anchor clamp
+moved **0** of them on this corpus. ruff + black clean.

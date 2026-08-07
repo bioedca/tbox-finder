@@ -843,7 +843,15 @@ def resolve_downstream_gene(
         sub_threshold = cds.coding_length_bp < sub_threshold_orf_nt and not carryable
         if (unjudgeable or sub_threshold) and n_intervening < max_intervening_orfs:
             n_intervening += 1
-            anchor = cds.end if strand == gff3.STRAND_PLUS else cds.start
+            # ⚠ Clamped to the element's own 3′ end.  The walk admits a CDS starting up to
+            # ``element_span_nt`` BEHIND ``three_prime`` (D4's class-II overlap), and if such a
+            # CDS triggers the carve-out its far edge can also lie behind the element — moving
+            # the anchor upstream and judging the next CDS against a window WIDER than the
+            # 500 bp D4 pins.  The carve-out may extend the window forward, never backward.
+            moved = cds.end if strand == gff3.STRAND_PLUS else cds.start
+            anchor = (
+                max(moved, three_prime) if strand == gff3.STRAND_PLUS else min(moved, three_prime)
+            )
             continue
         return DownstreamGene(
             function_class=function,

@@ -298,7 +298,11 @@ def evaluate_locus(
         # both under ``plus``/``minus`` lets the strand that decided nothing supply the
         # reason, and the per-clade exclusion diagnostic is a breakdown *by* that field.
         if config.strand_policy == "both":
-            deciding = list(per_strand.values())
+            # Only the strands whose OWN status is unavailable caused this verdict; a strand
+            # that passed or failed cannot explain why the fold came out unavailable.
+            deciding = [
+                d for d in per_strand.values() if d["status"] == STATUS_UNAVAILABLE
+            ] or list(per_strand.values())
         else:
             selected = gff3.STRAND_PLUS if config.strand_policy == "plus" else gff3.STRAND_MINUS
             deciding = [per_strand[selected]]
@@ -687,11 +691,23 @@ def _evaluate_oriented(
 
 
 def _arm(counts: Counter) -> dict[str, Any]:
+    """One control arm's counts and its false-pass rate.
+
+    ⚠ The rate divides by the **decided** windows, not by every drawn one.  A window whose (c)
+    disjunct is ``unavailable`` is not a window where the rule declined to false-pass — it is
+    one where the rule was never asked, and folding it into the denominator dilutes the rate
+    by exactly the annotation gaps the *other* diagnostic exists to report.  Both denominators
+    ride in the arm so the dilution is visible rather than assumed away.
+    """
     total = sum(counts.values())
+    decided = counts.get(STATUS_PASSED, 0) + counts.get(STATUS_FAILED, 0)
     return {
         "n": total,
+        "n_decided": decided,
+        "n_unavailable": counts.get(STATUS_UNAVAILABLE, 0),
         "status_counts": dict(sorted(counts.items())),
-        "false_pass_rate": _rate(counts.get(STATUS_PASSED, 0), total),
+        "false_pass_rate": _rate(counts.get(STATUS_PASSED, 0), decided),
+        "false_pass_rate_denominator": "decided_windows",
     }
 
 

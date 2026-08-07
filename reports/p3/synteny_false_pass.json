@@ -2,8 +2,11 @@
   "adr": "ADR-0006 D4 (criterion (c)); ADR-0005 D14 (spare rule), D15 (strand)",
   "arms": {
     "clade_matched_random_leaders": {
-      "false_pass_rate": 0.018333333333333333,
+      "false_pass_rate": 0.018853776111408677,
+      "false_pass_rate_denominator": "decided_windows",
       "n": 9600,
+      "n_decided": 9335,
+      "n_unavailable": 265,
       "status_counts": {
         "failed": 9159,
         "passed": 176,
@@ -11,8 +14,11 @@
       }
     },
     "nine_one_five_prime_utr_decoys": {
-      "false_pass_rate": 0.047378256568099374,
+      "false_pass_rate": 0.05004644681839294,
+      "false_pass_rate_denominator": "decided_windows",
       "n": 9097,
+      "n_decided": 8612,
+      "n_unavailable": 485,
       "status_counts": {
         "failed": 8181,
         "passed": 431,
@@ -20,8 +26,11 @@
       }
     },
     "nine_one_five_prime_utr_decoys_excluding_d4_classes": {
-      "false_pass_rate": 0.0034510525710341653,
+      "false_pass_rate": 0.003654970760233918,
+      "false_pass_rate_denominator": "decided_windows",
       "n": 8693,
+      "n_decided": 8208,
+      "n_unavailable": 485,
       "note": "the SAME window objects as the arm above \u2014 one draw, then filtered to the windows whose own CDS names none of D4's four classes, so this arm is a strict subset of it rather than a second draw.  Every pass here is therefore unambiguously false, whereas the arm above includes 5\u2032UTRs of aaRS/biosynthesis genes, which in a real genome may themselves be T-box leaders.",
       "status_counts": {
         "failed": 8178,
@@ -30,8 +39,11 @@
       }
     },
     "nine_one_trna_adjacent_decoys": {
-      "false_pass_rate": 0.02694136291600634,
+      "false_pass_rate": 0.027642276422764227,
+      "false_pass_rate_denominator": "decided_windows",
       "n": 1893,
+      "n_decided": 1845,
+      "n_unavailable": 48,
       "status_counts": {
         "failed": 1794,
         "passed": 51,
@@ -73,7 +85,7 @@
     "window_bp": 500
   },
   "control": {
-    "margin": 0.9758089260808926,
+    "margin": 0.9763294699618897,
     "min_margin": 0.2,
     "powered": true,
     "verdict": "positive-context and random-leader arms separate; the false-pass rates below are interpretable"
@@ -86,8 +98,11 @@
   "n_per_host": 200,
   "per_clade_random_leader": {
     "Armatimonadota": {
-      "false_pass_rate": 0.0075,
+      "false_pass_rate": 0.007633587786259542,
+      "false_pass_rate_denominator": "decided_windows",
       "n": 400,
+      "n_decided": 393,
+      "n_unavailable": 7,
       "status_counts": {
         "failed": 390,
         "passed": 3,
@@ -95,8 +110,11 @@
       }
     },
     "Atribacterota": {
-      "false_pass_rate": 0.024,
+      "false_pass_rate": 0.025078369905956112,
+      "false_pass_rate_denominator": "decided_windows",
       "n": 1000,
+      "n_decided": 957,
+      "n_unavailable": 43,
       "status_counts": {
         "failed": 933,
         "passed": 24,
@@ -104,8 +122,11 @@
       }
     },
     "Bacillota": {
-      "false_pass_rate": 0.015,
+      "false_pass_rate": 0.015215553677092139,
+      "false_pass_rate_denominator": "decided_windows",
       "n": 1200,
+      "n_decided": 1183,
+      "n_unavailable": 17,
       "status_counts": {
         "failed": 1165,
         "passed": 18,
@@ -114,15 +135,21 @@
     },
     "Bacillota_I": {
       "false_pass_rate": 0.0,
+      "false_pass_rate_denominator": "decided_windows",
       "n": 200,
+      "n_decided": 192,
+      "n_unavailable": 8,
       "status_counts": {
         "failed": 192,
         "unavailable": 8
       }
     },
     "Bdellovibrionota_C": {
-      "false_pass_rate": 0.01,
+      "false_pass_rate": 0.010362694300518135,
+      "false_pass_rate_denominator": "decided_windows",
       "n": 200,
+      "n_decided": 193,
+      "n_unavailable": 7,
       "status_counts": {
         "failed": 191,
         "passed": 2,
@@ -130,8 +157,11 @@
       }
     },
     "Deinococcota": {
-      "false_pass_rate": 0.011428571428571429,
+      "false_pass_rate": 0.012012012012012012,
+      "false_pass_rate_denominator": "decided_windows",
       "n": 1400,
+      "n_decided": 1332,
+      "n_unavailable": 68,
       "status_counts": {
         "failed": 1316,
         "passed": 16,
@@ -139,8 +169,11 @@
       }
     },
     "Dictyoglomota": {
-      "false_pass_rate": 0.023333333333333334,
+      "false_pass_rate": 0.02374893977947413,
+      "false_pass_rate_denominator": "decided_windows",
       "n": 1200,
+      "n_decided": 1179,
+      "n_unavailable": 21,
       "status_counts": {
         "failed": 1151,
         "passed": 28,
@@ -148,8 +181,11 @@
       }
     },
     "Fusobacteriota": {
-      "false_pass_rate": 0.016666666666666666,
+      "false_pass_rate": 0.01730103806228374,
+      "false_pass_rate_denominator": "decided_windows",
       "n": 600,
+      "n_decided": 578,
+      "n_unavailable": 22,
       "status_counts": {
         "failed": 568,
         "passed": 10,
@@ -157,8 +193,11 @@
       }
     },
     "Hadarchaeota": {
-      "false_pass_rate": 0.065,
+      "false_pass_rate": 0.06666666666666667,
+      "false_pass_rate_denominator": "decided_windows",
       "n": 200,
+      "n_decided": 195,
+      "n_unavailable": 5,
       "status_counts": {
         "failed": 182,
         "passed": 13,
@@ -166,8 +205,11 @@
       }
     },
     "Hinthialibacterota": {
-      "false_pass_rate": 0.02,
+      "false_pass_rate": 0.021164021164021163,
+      "false_pass_rate_denominator": "decided_windows",
       "n": 200,
+      "n_decided": 189,
+      "n_unavailable": 11,
       "status_counts": {
         "failed": 185,
         "passed": 4,
@@ -175,8 +217,11 @@
       }
     },
     "Nitrospirota": {
-      "false_pass_rate": 0.01,
+      "false_pass_rate": 0.010238907849829351,
+      "false_pass_rate_denominator": "decided_windows",
       "n": 600,
+      "n_decided": 586,
+      "n_unavailable": 14,
       "status_counts": {
         "failed": 580,
         "passed": 6,
@@ -184,8 +229,11 @@
       }
     },
     "Spirochaetota": {
-      "false_pass_rate": 0.018,
+      "false_pass_rate": 0.018311291963377416,
+      "false_pass_rate_denominator": "decided_windows",
       "n": 1000,
+      "n_decided": 983,
+      "n_unavailable": 17,
       "status_counts": {
         "failed": 965,
         "passed": 18,
@@ -193,8 +241,11 @@
       }
     },
     "Sumerlaeota": {
-      "false_pass_rate": 0.01,
+      "false_pass_rate": 0.010582010582010581,
+      "false_pass_rate_denominator": "decided_windows",
       "n": 200,
+      "n_decided": 189,
+      "n_unavailable": 11,
       "status_counts": {
         "failed": 187,
         "passed": 2,
@@ -202,8 +253,11 @@
       }
     },
     "Sysuimicrobiota": {
-      "false_pass_rate": 0.025,
+      "false_pass_rate": 0.025295109612141653,
+      "false_pass_rate_denominator": "decided_windows",
       "n": 600,
+      "n_decided": 593,
+      "n_unavailable": 7,
       "status_counts": {
         "failed": 578,
         "passed": 15,
@@ -211,8 +265,11 @@
       }
     },
     "Thermodesulfobiota": {
-      "false_pass_rate": 0.028333333333333332,
+      "false_pass_rate": 0.02866779089376054,
+      "false_pass_rate_denominator": "decided_windows",
       "n": 600,
+      "n_decided": 593,
+      "n_unavailable": 7,
       "status_counts": {
         "failed": 576,
         "passed": 17,
@@ -221,8 +278,11 @@
     }
   },
   "positive_context_control": {
-    "false_pass_rate": 0.994142259414226,
+    "false_pass_rate": 0.9951832460732984,
+    "false_pass_rate_denominator": "decided_windows",
     "n": 4780,
+    "n_decided": 4775,
+    "n_unavailable": 5,
     "status_counts": {
       "failed": 23,
       "passed": 4752,
@@ -260,7 +320,7 @@
       "sub_threshold_orf_nt": 150,
       "window_bp": 500
     },
-    "generated_at_utc": "2026-08-07T04:12:21.197116+00:00",
+    "generated_at_utc": "2026-08-07T05:29:18.143216+00:00",
     "git_sha": "95d0149449458d793cec31018aab650c5d1ed063",
     "inputs": {},
     "outputs": {},

@@ -549,3 +549,54 @@ class TestSubThresholdUsesCodingLength:
             sub_threshold_orf_nt=150,
         )
         assert got.function_class is None and got.n_intervening == 0
+
+
+class TestReanchorIsClamped:
+    def _walk_over_a_behind_element_orf(self, target_start: int):
+        # An unjudgeable ORF admitted by D4's class-II overlap allowance whose far edge (980)
+        # lies BEHIND the element's 3′ end (1000).
+        overlapping = cds(start=940, end=980, product="hypothetical protein")
+        target = cds(start=target_start, end=target_start + 600, product="alanine--tRNA ligase")
+        return synteny.resolve_downstream_gene(
+            [overlapping, target],
+            seqid="c1",
+            strand="+",
+            three_prime=1000,
+            element_span_nt=100,
+            max_intervening_orfs=1,
+            sub_threshold_orf_nt=0,
+        )
+
+    def test_the_carve_out_never_re_anchors_behind_the_element(self) -> None:
+        """⚠ An ORF lying entirely behind the element's 3′ end is not *intervening* between the
+        element and anything downstream, so re-anchoring on it is meaningless — and it silently
+        SHIFTS the 500 bp window backward.  Measured at the boundary: with the anchor clamped
+        to the element the target at 1490 is 490 bp away and passes; an unclamped anchor at the
+        ORF's end (980) makes the same target 510 bp away and it fails.
+        """
+        got = self._walk_over_a_behind_element_orf(1490)
+        assert got.function_class == synteny.CLASS_AARS
+        assert got.decision_distance_bp == 490, "measured from the element, not from the ORF"
+        assert synteny.synteny_status(got) == STATUS_PASSED
+
+    def test_the_clamp_does_not_widen_the_window_either(self) -> None:
+        """The control for the direction above: 520 bp is out of the pad from the element too,
+        so the clamp must not reach it.  A clamp that simply ignored the window would."""
+        got = self._walk_over_a_behind_element_orf(1520)
+        assert got.function_class is None
+        assert synteny.synteny_status(got) == STATUS_FAILED
+
+    def test_positive_control_a_forward_reanchor_still_extends(self) -> None:
+        """The clamp must bound the backward direction only; a hop that moves forward works."""
+        leader = cds(start=1050, end=1450, product="hypothetical protein")
+        target = cds(start=1520, end=2200, product="alanine--tRNA ligase")
+        got = synteny.resolve_downstream_gene(
+            [leader, target],
+            seqid="c1",
+            strand="+",
+            three_prime=1000,
+            element_span_nt=100,
+            max_intervening_orfs=1,
+            sub_threshold_orf_nt=0,
+        )
+        assert got.function_class == synteny.CLASS_AARS

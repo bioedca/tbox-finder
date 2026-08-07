@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import json
+from collections import Counter
 from pathlib import Path
 
 import pytest
@@ -747,12 +748,15 @@ class TestStrictArmReusesTheSameWindows:
             if "n" not in arm:
                 continue
             assert arm["n"] == sum(arm["status_counts"].values()), name
-            if arm["n"]:
-                expected = arm["status_counts"].get(STATUS_PASSED, 0) / arm["n"]
+            # ⚠ The denominator is the DECIDED windows, not every drawn one: a window whose
+            # (c) is unavailable is one the rule was never asked, not one it declined to
+            # false-pass.  This assertion caught that contract change when it landed.
+            if arm["n_decided"]:
+                expected = arm["status_counts"].get(STATUS_PASSED, 0) / arm["n_decided"]
                 assert arm["false_pass_rate"] == pytest.approx(expected), name
         control = false_pass["positive_context_control"]
         assert control["false_pass_rate"] == pytest.approx(
-            control["status_counts"].get(STATUS_PASSED, 0) / control["n"]
+            control["status_counts"].get(STATUS_PASSED, 0) / control["n_decided"]
         )
         background = false_pass["arms"]["clade_matched_random_leaders"]["false_pass_rate"]
         assert false_pass["control"]["margin"] == pytest.approx(
@@ -925,3 +929,34 @@ class TestAnnotatedSetUsesTheSharedContract:
 
     def test_a_missing_directory_is_empty_not_an_error(self, tmp_path: Path) -> None:
         assert synteny_producer._annotated_set(str(tmp_path / "absent")) == set()
+
+
+class TestFalsePassDenominator:
+    def test_undecided_windows_are_excluded_from_the_denominator(self) -> None:
+        """⚠ A window whose (c) is ``unavailable`` is not one where the rule declined to
+        false-pass — it is one where the rule was never asked.  Counting it dilutes the rate
+        by exactly the annotation gaps the *other* diagnostic exists to report."""
+        arm = synteny_producer._arm(
+            Counter({STATUS_PASSED: 1, STATUS_FAILED: 1, STATUS_UNAVAILABLE: 8})
+        )
+        assert arm["n"] == 10 and arm["n_decided"] == 2 and arm["n_unavailable"] == 8
+        assert arm["false_pass_rate"] == pytest.approx(0.5), "1 of 2 DECIDED, not 1 of 10"
+
+    def test_an_arm_with_nothing_decided_reports_None_not_zero(self) -> None:
+        """[[clauses-must-guard-emptiness]] — 0.0 would read as "measured, found nothing"."""
+        arm = synteny_producer._arm(Counter({STATUS_UNAVAILABLE: 5}))
+        assert arm["false_pass_rate"] is None
+
+    def test_the_committed_arms_reconcile_against_the_decided_denominator(
+        self, false_pass: dict
+    ) -> None:
+        for name, arm in false_pass["arms"].items():
+            if "n" not in arm:
+                continue
+            assert arm["n_decided"] == arm["status_counts"].get(STATUS_PASSED, 0) + arm[
+                "status_counts"
+            ].get(STATUS_FAILED, 0), name
+            if arm["n_decided"]:
+                assert arm["false_pass_rate"] == pytest.approx(
+                    arm["status_counts"].get(STATUS_PASSED, 0) / arm["n_decided"]
+                ), name
