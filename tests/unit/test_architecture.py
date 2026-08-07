@@ -673,3 +673,102 @@ class TestNoCmalignOnThisPath:
             "ultrashort_relax",
             "class_ii_relax",
         }
+
+
+class TestRoundTwoGuards:
+    """CodeRabbit r2's predicate-side findings, one test per finding."""
+
+    def test_an_unrecognized_bulge_state_refuses_at_construction(self) -> None:
+        """`architecture_status` tests two states by equality, so anything else would fall
+        through to a DECIDED NEGATIVE (failed ⇒ minable) rather than a refusal."""
+        with pytest.raises(architecture.ArchitectureError, match="bulge_state"):
+            architecture.Localization(
+                candidate_id="c1",
+                named_elements_present=True,
+                bulge_state="detceted",  # typo
+                ultrashort_relax=False,
+                class_ii_relax=False,
+                n_sequences=24,
+            )
+
+    @pytest.mark.parametrize("state", architecture.BULGE_STATES)
+    def test_positive_control_every_real_state_constructs(self, state: str) -> None:
+        assert localization(bulge_state=state).bulge_state == state
+
+    def test_a_target_restricts_the_scan_to_ONE_bulge(self) -> None:
+        """Two bulges, only the second carries the motif. Targeting the first must report
+        ABSENT — scanning both would report DETECTED and credit the wrong bulge."""
+        # Two copies of the real antiterminator shape: an unpaired run flanked by two
+        # DIFFERENT helices. (A run whose flanks close each other is a hairpin loop, which
+        # `find_bulges` correctly refuses — the first draft of this fixture made that
+        # mistake and produced zero bulges.)
+        blank = ANTITERM_SEQ[:4] + "AAACAAA" + ANTITERM_SEQ[11:]
+        seq = blank + ANTITERM_SEQ
+        ss = ANTITERM_SS + ANTITERM_SS
+        pairs = architecture.pair_table(ss)
+        bulges = architecture.find_bulges(pairs)
+        assert len(bulges) == 2
+        first, second = bulges
+        scan_all, _ = architecture.ncca_bulge_status(
+            seq, pairs, bulge_size_range=(7, 7), ncca_pairing_nt=4
+        )
+        only_first, _ = architecture.ncca_bulge_status(
+            seq, pairs, bulge_size_range=(7, 7), ncca_pairing_nt=4, target=first
+        )
+        only_second, detail = architecture.ncca_bulge_status(
+            seq, pairs, bulge_size_range=(7, 7), ncca_pairing_nt=4, target=second
+        )
+        assert scan_all == architecture.BULGE_DETECTED
+        assert only_first == architecture.BULGE_ABSENT
+        assert only_second == architecture.BULGE_DETECTED
+        assert detail["scanned"] == "one located bulge"
+
+    def test_the_default_still_scans_every_bulge(self) -> None:
+        """Production does not know which bulge is the antiterminator's — finding out is
+        the job — so `target=None` must keep the full scan."""
+        _, detail = architecture.ncca_bulge_status(
+            ANTITERM_SEQ,
+            architecture.pair_table(ANTITERM_SS),
+            bulge_size_range=(5, 9),
+            ncca_pairing_nt=4,
+        )
+        assert detail["scanned"] == "every flanked bulge"
+
+
+class TestReadErrorsBecomeArchitectureErrors:
+    """The upstream conversion that keeps one bad file from losing a whole shard.
+
+    ⚠ Located here, not in the producer, because sabotage showed the producer's widened
+    ``except`` is redundant: narrowing it back left the behaviour green, since
+    ``parse_stockholm`` had already converted. The test belongs on the line that carries
+    the guarantee, not the line that merely restates it.
+    """
+
+    def test_non_utf8_bytes_convert(self, tmp_path) -> None:
+        path = tmp_path / "bad.sto"
+        path.write_bytes(b"# STOCKHOLM 1.0\n\xff\xfe not utf-8\n")
+        with pytest.raises(architecture.ArchitectureError, match="cannot read"):
+            architecture.parse_stockholm(path)
+
+    def test_a_missing_file_converts(self, tmp_path) -> None:
+        with pytest.raises(architecture.ArchitectureError, match="cannot read"):
+            architecture.parse_stockholm(tmp_path / "absent.sto")
+
+    def test_an_unreadable_file_converts(self, tmp_path) -> None:
+        import os
+
+        path = tmp_path / "locked.sto"
+        path.write_text("# STOCKHOLM 1.0\n", encoding="utf-8")
+        os.chmod(path, 0o000)
+        try:
+            if os.access(path, os.R_OK):  # pragma: no cover - running as root
+                pytest.skip("cannot make a file unreadable as this user")
+            with pytest.raises(architecture.ArchitectureError, match="cannot read"):
+                architecture.parse_stockholm(path)
+        finally:
+            os.chmod(path, 0o644)
+
+    def test_positive_control_a_readable_file_parses(self, tmp_path) -> None:
+        path = tmp_path / "ok.sto"
+        path.write_text(sto([("s1", ANTITERM_SEQ)], ANTITERM_SS), encoding="utf-8")
+        assert architecture.parse_stockholm(path).n_sequences == 1

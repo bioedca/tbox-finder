@@ -52,6 +52,7 @@ from pathlib import Path
 from typing import Any
 
 from tbox_finder.mining import architecture
+from tbox_finder.mining.covariation_producer import MSA_FILENAME as _MSA_FILENAME
 from tbox_finder.mining.spare_rule import (
     STATUS_FAILED,
     STATUS_PASSED,
@@ -99,10 +100,12 @@ FREEZE_REPORT = "reports/p3/architecture_freeze.json"
 #: The status-table filename the round's ``--relaxed-arch-status`` expects.
 DEFAULT_STATUS_TABLE = "architecture_status.json"
 
-#: The per-candidate consensus ``covariation_producer.align_shard`` writes.  Named
-#: here rather than re-typed as a literal so a rename in the (a) producer surfaces as
-#: an import error instead of an empty status table.
-MSA_FILENAME = "msa.sto"
+#: The per-candidate consensus ``covariation_producer.align_shard`` writes — **imported**
+#: from the module that writes it, not re-typed.  A second literal would let a rename in
+#: the (a) producer make every (b) candidate silently ``unavailable``: the shard tables
+#: would still merge, the round would still run, and the yield would read as an honest
+#: zero.  Importing it means a rename surfaces as an ImportError instead.
+MSA_FILENAME = _MSA_FILENAME
 
 
 class ProducerError(RuntimeError):
@@ -133,6 +136,35 @@ class ArchitectureRunConfig:
     ncca_pairing_nt: int
     allow_wobble: bool = False
     min_sequences: int = MIN_REAL_HOMOLOG_N
+
+    def __post_init__(self) -> None:
+        """Refuse a mis-specified round rather than mining the corpus under it.
+
+        An inverted bulge range (``--bulge-min-nt 9 --bulge-max-nt 5``) is empty, so **no**
+        bulge satisfies it, every scored candidate resolves to ``failed`` ⇒ **mined**, and
+        the round reports a full sweep it never actually evaluated.  That is the fail-OPEN
+        direction this module exists to refuse, and it is reachable from the CLI because
+        none of these values has a default.  The same holds for a non-positive count.
+        """
+        if self.bulge_min_nt > self.bulge_max_nt:
+            raise ProducerError(
+                f"bulge range is empty: min {self.bulge_min_nt} > max {self.bulge_max_nt} — "
+                "no bulge could satisfy it and every candidate would resolve to 'failed' "
+                "⇒ mined"
+            )
+        non_positive = {
+            name: value
+            for name, value in (
+                ("min_named_helices", self.min_named_helices),
+                ("min_helix_pairs", self.min_helix_pairs),
+                ("ncca_pairing_nt", self.ncca_pairing_nt),
+                ("bulge_min_nt", self.bulge_min_nt),
+                ("min_sequences", self.min_sequences),
+            )
+            if int(value) < 1
+        }
+        if non_positive:
+            raise ProducerError(f"these must each be >= 1: {dict(sorted(non_positive.items()))}")
 
     @property
     def bulge_size_range(self) -> tuple[int, int]:
@@ -221,7 +253,17 @@ def evaluate_candidate(
             ncca_pairing_nt=config.ncca_pairing_nt,
             allow_wobble=config.allow_wobble,
         )
-    except architecture.ArchitectureError as exc:
+    except (architecture.ArchitectureError, OSError, ValueError) as exc:
+        # The load-bearing conversion is UPSTREAM: `parse_stockholm` already catches
+        # OSError/UnicodeError/ValueError from the read and re-raises ArchitectureError, so
+        # a permission fault, an I/O error, a file removed between the `is_file()` check
+        # above and the open, or non-UTF-8 bytes all arrive here as ArchitectureError and
+        # resolve ONE candidate to `unavailable` rather than losing the whole shard to
+        # `main`'s exit 1. Review asked for the wider clause here; it is kept as defence for
+        # any future caller that reaches `localize` without going through `parse_stockholm`,
+        # but it is NOT what provides the guarantee — `test_parse_stockholm_converts_read_
+        # errors` pins the line that does, and narrowing THIS clause alone does not regress
+        # the behaviour (verified by sabotage: it stayed green, which is why the test moved).
         row.update({"status": STATUS_UNAVAILABLE, "reason": f"consensus unusable: {exc}"})
         return row
 
@@ -299,9 +341,32 @@ def merge_status_tables(
             raise ProducerError(f"{path}: cannot read shard table ({exc})") from exc
         if not isinstance(payload, Mapping):
             raise ProducerError(f"{path}: shard table is not an object")
-        configs.append(dict(payload.get("config") or {}))
+        # ⚠ These tables are written by OTHER processes, so their shape is an input, not an
+        # invariant. Three separate faults, each named rather than left to surface as the
+        # wrong error somewhere downstream:
+        #   (1) a missing/empty `config` coerced to {} makes every shard compare EQUAL, so
+        #       the mismatch guard passes and the merge publishes an empty config into
+        #       provenance over rows that were scored under real parameters;
+        #   (2) a non-Mapping row makes `.get` raise AttributeError, which `main` does not
+        #       catch — the merge leg exits with a traceback instead of FATAL/exit 1;
+        #   (3) a row missing `candidate_id` read via `.get(..., "")` passes the duplicate
+        #       check as "" and then raises KeyError later; a SECOND such row reports
+        #       "appears in more than one shard table", naming the wrong fault entirely.
+        cfg = payload.get("config")
+        if not isinstance(cfg, Mapping) or not cfg:
+            raise ProducerError(
+                f"{path}: shard table carries no 'config'; merging it would publish an "
+                "empty config over rows scored under real parameters"
+            )
+        configs.append(dict(cfg))
         for row in payload.get("rows") or []:
-            cid = str(row.get("candidate_id", ""))
+            if not isinstance(row, Mapping):
+                raise ProducerError(f"{path}: a row is {type(row).__name__}, not an object")
+            cid = row.get("candidate_id")
+            if not isinstance(cid, str) or not cid:
+                raise ProducerError(f"{path}: a row carries no usable candidate_id ({cid!r})")
+            if not row.get("status"):
+                raise ProducerError(f"{path}: row {cid!r} carries no status")
             if cid in seen:
                 raise ProducerError(f"candidate_id {cid!r} appears in more than one shard table")
             seen.add(cid)
@@ -343,9 +408,18 @@ def validate_status_payload(payload: Any, *, label: str) -> dict[str, str]:
     if rederived != declared:
         only_declared = sorted(set(declared) - set(rederived))[:5]
         only_rows = sorted(set(rederived) - set(declared))[:5]
+        # The COMMON disagreement is same-key/different-value drift, and on that path both
+        # key-set lists are empty — the operator would read "(declared-only [], rows-only
+        # [])", which names no fault at all.
+        conflicting = sorted(
+            f"{k}: status says {declared[k]!r} but its row says {rederived[k]!r}"
+            for k in set(declared) & set(rederived)
+            if declared[k] != rederived[k]
+        )[:5]
         raise ProducerError(
             f"{label}: 'status' disagrees with 'rows' "
-            f"(declared-only {only_declared}, rows-only {only_rows})"
+            f"(declared-only {only_declared}, rows-only {only_rows}, "
+            f"conflicting {conflicting})"
         )
     known = {STATUS_PASSED, STATUS_FAILED, STATUS_UNAVAILABLE}
     bad = sorted(set(declared.values()) - known)
@@ -469,22 +543,31 @@ def freeze_report(
         if not isinstance(discrim, str) or len(discrim) != len(architecture.TRNA_ACCEPTOR_3PRIME):
             continue
         # Anchor by exact subsequence — the coordinates do not index this frame.
+        containing_bulge = None
         containing = None
         for bulge in architecture.find_bulges(pairs):
             residues = architecture.degapped_span(seq, bulge.start, bulge.end)
             if discrim.upper() in residues:
-                containing = residues
+                containing_bulge, containing = bulge, residues
                 break
-        if containing is None:
+        if containing is None or containing_bulge is None:
             continue
         n_discriminator_in_a_bulge += 1
         sizes[len(containing)] += 1
         for k in range(1, int(max_ncca_pairing_nt) + 1):
+            # ⚠ Scored on the LOCATED bulge only (`target=`). Scanning every flanked bulge —
+            # what an earlier version did, with a range of (1, max(len, 64)) — let an
+            # UNRELATED bulge satisfy the motif and increment this numerator, while the
+            # denominator counted only records whose discriminator-bearing bulge was found.
+            # A size range cannot substitute: two bulges of equal length are equally
+            # admissible. The recovery rate is a claim about the antiterminator's own bulge,
+            # so it must be measured on that bulge.
             state, _ = architecture.ncca_bulge_status(
                 seq,
                 pairs,
-                bulge_size_range=(1, max(len(containing), 64)),
+                bulge_size_range=(len(containing), len(containing)),
                 ncca_pairing_nt=k,
+                target=containing_bulge,
             )
             if state == architecture.BULGE_DETECTED:
                 ncca_hits[k] += 1

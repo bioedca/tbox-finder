@@ -524,6 +524,7 @@ def ncca_bulge_status(
     ncca_pairing_nt: int,
     allow_wobble: bool = False,
     acceptor_3prime: str = TRNA_ACCEPTOR_3PRIME,
+    target: Bulge | None = None,
 ) -> tuple[str, dict[str, Any]]:
     """Is an NCCA-pairing bulge present in this row's consensus architecture?
 
@@ -543,6 +544,14 @@ def ncca_bulge_status(
     from ``absent`` (there were bulges; none pairs the acceptor end).  Collapsing the
     two is precisely what would make ``class_ii_relax`` vacuous — see the module
     docstring.
+
+    ``target`` restricts the scan to **one** already-located bulge.  Production leaves it
+    ``None`` — the producer does not know which bulge is the antiterminator's, and finding
+    out is the whole job.  The **freeze** supplies it, and must: it reports recovery over
+    records where the *curated discriminator's own* bulge was located, so scanning every
+    bulge would let an unrelated one satisfy the motif and inflate the numerator against a
+    denominator that counted only the located one.  A size range cannot substitute for
+    this — two bulges of the same length are equally admissible.
     """
     want = int(ncca_pairing_nt)
     motif = acceptor_pairing_motif(acceptor_3prime)
@@ -562,9 +571,10 @@ def ncca_bulge_status(
             "could ever hold the motif, so every candidate would read 'undetectable'"
         )
     # Size in the candidate's OWN residues, not alignment columns — see `find_bulges`.
+    considered = [target] if target is not None else find_bulges(pairs)
     sized = [
         (b, res)
-        for b, res in ((b, degapped_span(row, b.start, b.end)) for b in find_bulges(pairs))
+        for b, res in ((b, degapped_span(row, b.start, b.end)) for b in considered)
         if low <= len(res) <= high
     ]
     detail: dict[str, Any] = {
@@ -573,6 +583,7 @@ def ncca_bulge_status(
         "n_bulges_considered": len(sized),
         "bulge_size_range": [low, high],
         "allow_wobble": bool(allow_wobble),
+        "scanned": "one located bulge" if target is not None else "every flanked bulge",
     }
     if not sized:
         return BULGE_UNDETECTABLE, detail
@@ -749,7 +760,16 @@ def criterion_b(
 
 @dataclass(frozen=True)
 class Localization:
-    """Everything the consensus said about one candidate, before the verdict."""
+    """Everything the consensus said about one candidate, before the verdict.
+
+    ``bulge_state`` is validated on construction against :data:`BULGE_STATES`.
+    :func:`architecture_status` tests ``detected`` and ``undetectable`` by equality, so an
+    unrecognised string — a typo, or a state round-tripped through a serialized shard
+    payload — would otherwise fall through to a **decided negative** (``failed`` ⇒ minable)
+    rather than a refusal.  This layer feeds the spare decision, so a silent ``failed`` is
+    the unsafe direction.  Checked here rather than only in ``architecture_status`` so the
+    producer path is covered by the same guard.
+    """
 
     candidate_id: str
     named_elements_present: bool
@@ -758,6 +778,13 @@ class Localization:
     class_ii_relax: bool
     n_sequences: int
     detail: dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if self.bulge_state not in BULGE_STATES:
+            raise ArchitectureError(
+                f"bulge_state {self.bulge_state!r} is not one of {BULGE_STATES}; an "
+                "unrecognised state would read as a decided negative (failed ⇒ minable)"
+            )
 
 
 def localize(

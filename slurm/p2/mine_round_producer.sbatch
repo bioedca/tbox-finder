@@ -111,7 +111,16 @@ for d in "$BUILD"/work/*/; do
   fi
   [ -s "$d/msa.sto" ] || continue                      # not producible (< min_sequences, align failed)
   mkdir -p "$MSA_OUT/$slug"
-  cp -p "$d/msa.sto" "$MSA_OUT/$slug/msa.sto"
+  # ⚠ ATOMIC: copy to a temporary name in the DESTINATION directory, then rename. `mv`
+  # within one filesystem is atomic, so a task killed mid-copy (wall limit, preemption,
+  # node failure) cannot leave a partial consensus at the path the (b) producer reads.
+  # A truncation is NOT reliably self-announcing: one that drops trailing sequence rows but
+  # keeps `#=GC SS_cons` parses as a perfectly valid alignment of REDUCED DEPTH, and (b)
+  # would score it as real evidence at the wrong depth against the A2 floor. The
+  # stale-promotion guard above does not cover this — that one is about an OLD file, this
+  # is about a HALF-WRITTEN one.
+  cp -p "$d/msa.sto" "$MSA_OUT/$slug/.msa.sto.$$.tmp"
+  mv -f "$MSA_OUT/$slug/.msa.sto.$$.tmp" "$MSA_OUT/$slug/msa.sto"
   n_promoted=$((n_promoted + 1))
 done
 echo "promoted $n_promoted per-candidate msa.sto → $MSA_OUT (cleared $n_cleared stale)"

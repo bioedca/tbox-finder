@@ -817,3 +817,138 @@ class TestBothApplyPathsPreflightTheBDeclaration:
                     "--no-msa-supply-available",
                 ]
             )
+
+
+class TestRoundTwoProducerGuards:
+    """CodeRabbit r2's producer-side findings, one test per finding."""
+
+    def test_an_inverted_bulge_range_refuses_at_construction(self) -> None:
+        """An empty range means NO bulge satisfies it, so every candidate resolves to
+        `failed` ⇒ MINED — the fail-open direction, reachable because nothing is defaulted."""
+        with pytest.raises(architecture_producer.ProducerError, match="bulge range is empty"):
+            architecture_producer.ArchitectureRunConfig(
+                stem_i_nt_threshold=60,
+                min_named_helices=2,
+                min_helix_pairs=1,
+                bulge_min_nt=9,
+                bulge_max_nt=5,
+                ncca_pairing_nt=4,
+            )
+
+    @pytest.mark.parametrize(
+        "field", ["min_named_helices", "min_helix_pairs", "ncca_pairing_nt", "bulge_min_nt"]
+    )
+    def test_a_non_positive_count_refuses(self, field: str) -> None:
+        kwargs = {
+            "stem_i_nt_threshold": 60,
+            "min_named_helices": 2,
+            "min_helix_pairs": 1,
+            "bulge_min_nt": 5,
+            "bulge_max_nt": 9,
+            "ncca_pairing_nt": 4,
+            field: 0,
+        }
+        with pytest.raises(architecture_producer.ProducerError, match=">= 1"):
+            architecture_producer.ArchitectureRunConfig(**kwargs)
+
+    def test_positive_control_a_well_formed_config_constructs(self) -> None:
+        assert architecture_producer.ArchitectureRunConfig(
+            stem_i_nt_threshold=60,
+            min_named_helices=2,
+            min_helix_pairs=1,
+            bulge_min_nt=5,
+            bulge_max_nt=9,
+            ncca_pairing_nt=4,
+        ).bulge_size_range == (5, 9)
+
+    def test_an_unreadable_consensus_loses_ONE_candidate_not_the_shard(
+        self, tmp_path: Path
+    ) -> None:
+        """OSError / UnicodeDecodeError from the open must not propagate: `main` would
+        return 1 and the whole shard would produce no table at all."""
+        from tbox_finder.mining.covariation_producer import candidate_slug
+
+        target = tmp_path / candidate_slug("c1") / "msa.sto"
+        target.parent.mkdir(parents=True)
+        target.write_bytes(b"# STOCKHOLM 1.0\n\xff\xfe not utf-8\n")
+        result = architecture_producer.evaluate_candidate(
+            {"candidate_id": "c1"}, msa_dir=tmp_path, config=CONFIG
+        )
+        assert result["status"] == STATUS_UNAVAILABLE
+        assert "unusable" in result["reason"]
+
+    def test_a_shard_of_two_survives_one_unreadable_file(self, tmp_path: Path) -> None:
+        """The point of the widened except: the OTHER candidate must still be scored."""
+        from tbox_finder.mining.covariation_producer import candidate_slug
+
+        bad = tmp_path / candidate_slug("bad") / "msa.sto"
+        bad.parent.mkdir(parents=True)
+        bad.write_bytes(b"\xff\xfe")
+        write_msa(tmp_path, "good", ANTITERM_SEQ, ANTITERM_SS)
+        rows = architecture_producer.run_shard(
+            [{"candidate_id": "bad"}, {"candidate_id": "good"}], msa_dir=tmp_path, config=CONFIG
+        )
+        assert [r["status"] for r in rows] == [STATUS_UNAVAILABLE, STATUS_PASSED]
+
+    def test_the_msa_filename_is_imported_from_the_producer_that_writes_it(self) -> None:
+        """A second literal would let a rename in the (a) producer make every (b) candidate
+        silently `unavailable` while the shard tables still merged cleanly."""
+        from tbox_finder.mining import covariation_producer
+
+        assert architecture_producer.MSA_FILENAME is covariation_producer.MSA_FILENAME
+
+    def test_a_shard_table_without_a_config_refuses(self, tmp_path: Path) -> None:
+        """Coerced to {}, every shard compares EQUAL and the merge publishes an empty
+        config into provenance over rows scored under real parameters."""
+        path = tmp_path / "a.json"
+        path.write_text(
+            json.dumps({"rows": [row("a", STATUS_PASSED)], "status": {"a": "passed"}}),
+            encoding="utf-8",
+        )
+        with pytest.raises(architecture_producer.ProducerError, match="no 'config'"):
+            architecture_producer.merge_status_tables([path])
+
+    def test_a_non_mapping_row_refuses_rather_than_raising_AttributeError(
+        self, tmp_path: Path
+    ) -> None:
+        """`main` does not catch AttributeError, so the merge leg would exit with a
+        traceback instead of FATAL/exit 1."""
+        path = tmp_path / "a.json"
+        path.write_text(
+            json.dumps({"config": CONFIG.as_dict(), "rows": ["not-an-object"]}), encoding="utf-8"
+        )
+        with pytest.raises(architecture_producer.ProducerError, match="not an object"):
+            architecture_producer.merge_status_tables([path])
+
+    def test_a_row_without_a_candidate_id_names_ITS_OWN_fault(self, tmp_path: Path) -> None:
+        """Read via .get(..., ''), two such rows reported 'appears in more than one shard
+        table' — the wrong fault entirely."""
+        path = tmp_path / "a.json"
+        path.write_text(
+            json.dumps({"config": CONFIG.as_dict(), "rows": [{"status": "passed"}]}),
+            encoding="utf-8",
+        )
+        with pytest.raises(architecture_producer.ProducerError, match="no usable candidate_id"):
+            architecture_producer.merge_status_tables([path])
+
+    def test_a_row_without_a_status_refuses(self, tmp_path: Path) -> None:
+        path = tmp_path / "a.json"
+        path.write_text(
+            json.dumps({"config": CONFIG.as_dict(), "rows": [{"candidate_id": "a"}]}),
+            encoding="utf-8",
+        )
+        with pytest.raises(architecture_producer.ProducerError, match="no status"):
+            architecture_producer.merge_status_tables([path])
+
+    def test_a_value_mismatch_names_the_CONFLICTING_VALUES_not_only_keys(
+        self, tmp_path: Path
+    ) -> None:
+        """On same-key/different-value drift both key-set lists are empty, so the operator
+        would read '(declared-only [], rows-only [])' — which names no fault."""
+        table = architecture_producer.build_status_table([row("a", STATUS_PASSED)], config=CONFIG)
+        table["status"]["a"] = STATUS_FAILED
+        with pytest.raises(architecture_producer.ProducerError) as exc:
+            architecture_producer.validate_status_payload(table, label="t")
+        message = str(exc.value)
+        assert "conflicting" in message
+        assert "status says 'failed' but its row says 'passed'" in message

@@ -219,6 +219,13 @@ def candidate_slug(candidate_id: str) -> str:
     return f"{safe}_{digest}"
 
 
+#: The per-candidate CM-free consensus this producer writes and BOTH the (a) scorer and the
+#: criterion-(b) producer read (ADR-0006 A3/A4).  Defined HERE, beside the writer, and
+#: imported by ``architecture_producer`` — a second literal would let a rename here make
+#: every (b) candidate silently ``unavailable`` while the (a) leg kept working.
+MSA_FILENAME = "msa.sto"
+
+
 def candidate_workdir(workroot: str | Path, candidate_id: str) -> Path:
     return Path(workroot) / candidate_slug(candidate_id)
 
@@ -328,7 +335,7 @@ def align_shard(
             align_candidate(
                 candidate_fasta=wd / "candidate.fa",
                 homologs_fasta=wd / "homologs.fa",
-                out_sto=wd / "msa.sto",
+                out_sto=wd / MSA_FILENAME,
                 work_dir=wd / "align",
                 cpu=cpu,
             )
@@ -375,7 +382,7 @@ def score_shard(
     rows: list[dict[str, Any]] = []
     for spec in specs:
         wd = candidate_workdir(workroot, spec.candidate_id)
-        msa = wd / "msa.sto"
+        msa = wd / MSA_FILENAME
         search = _read_json(wd / "search.json")
         align = _read_json(wd / "align.json")
         t0 = time.perf_counter()

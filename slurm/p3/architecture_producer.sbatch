@@ -38,6 +38,7 @@
 #                        run is 8 residues and a 37-column run is 11, so a column-width
 #                        filter rejects real bulges. Measured, not assumed.
 #   NCCA_PAIRING_NT      how many tRNA-acceptor-end contacts must be evidenced.
+#   ALLOW_WOBBLE         0 or 1 — whether a G·U wobble counts at the acceptor interface.
 #
 # ── NO STALE-MARKER DELETION, DELIBERATELY ───────────────────────────────────────────
 # Markers live under a per-ARRAY-job directory ($SLURM_ARRAY_JOB_ID), so a fresh submit
@@ -55,7 +56,7 @@
 # SUBMIT:  from the repo root so the relative --output/--error resolve. SYNC, THEN SUBMIT.
 #            ssh two 'bash -lc "cd ~/tbox-finder && git fetch origin && \
 #              git checkout p3-15-prime-d && git reset --hard origin/p3-15-prime-d"'
-#          ⚠ ALL SIX RULE PARAMETERS MUST BE EXPORTED TOO — each is `${VAR:?}` below, so a
+#          ⚠ ALL SEVEN RULE PARAMETERS MUST BE EXPORTED TOO — each is `${VAR:?}` below, so a
 #          submit that omits any of them exits before producing a single shard. There is
 #          deliberately no default: ADR-0006 A4 ships them keyword-required so the round
 #          chooses them and provenance records the choice. Consult
@@ -63,7 +64,7 @@
 #          NOT a pin.
 #            ssh two 'bash -lc "cd ~/tbox-finder && sbatch --export=ALL,ROUND_DIR=<dir>,\
 #          STEM_I_NT_THRESHOLD=<nt>,MIN_NAMED_HELICES=<n>,MIN_HELIX_PAIRS=<n>,\
-#          BULGE_MIN_NT=<nt>,BULGE_MAX_NT=<nt>,NCCA_PAIRING_NT=<n> \
+#          BULGE_MIN_NT=<nt>,BULGE_MAX_NT=<nt>,NCCA_PAIRING_NT=<n>,ALLOW_WOBBLE=<0|1> \
 #          slurm/p3/architecture_producer.sbatch"'
 # PREFLIGHT: `sbatch --test-only` validates the SLURM HEADERS ONLY — it does not run the
 #          script body, so it will NOT catch a missing rule parameter. Run both:
@@ -112,6 +113,16 @@ MIN_HELIX_PAIRS="${MIN_HELIX_PAIRS:?set the minimum stacked pairs per helix for 
 BULGE_MIN_NT="${BULGE_MIN_NT:?set the minimum bulge length (residues) for this round}"
 BULGE_MAX_NT="${BULGE_MAX_NT:?set the maximum bulge length (residues) for this round}"
 NCCA_PAIRING_NT="${NCCA_PAIRING_NT:?set how many acceptor-end contacts must be evidenced}"
+# ⚠ ALSO REQUIRED, and it was missed: without this the round's G·U policy is decided by
+# ArchitectureRunConfig.allow_wobble's code default (False) — exactly the outcome the
+# producer docstring says must not happen. `--min-sequences` is deliberately NOT here: it
+# is the ADR-0006 A2 Pin 2 floor, a pin rather than a round choice.
+ALLOW_WOBBLE="${ALLOW_WOBBLE:?set 0 or 1 — whether G-U counts at the acceptor interface}"
+case "$ALLOW_WOBBLE" in
+  0) WOBBLE_FLAG=() ;;
+  1) WOBBLE_FLAG=(--allow-wobble) ;;
+  *) echo "FATAL: ALLOW_WOBBLE must be 0 or 1, got '$ALLOW_WOBBLE'" >&2; exit 2 ;;
+esac
 
 # ROUND_DIR is SCRATCH and must never be a git-tracked path: the round's tables are run
 # artifacts, and an operator pointing this at data/processed/mining/ would leave untracked
@@ -173,6 +184,7 @@ PYTHONHASHSEED=0 python -m tbox_finder.mining.architecture_producer run-shard \
   --bulge-min-nt "$BULGE_MIN_NT" \
   --bulge-max-nt "$BULGE_MAX_NT" \
   --ncca-pairing-nt "$NCCA_PAIRING_NT" \
+  "${WOBBLE_FLAG[@]}" \
   --out "$STATUS_OUT"
 
 touch "$MARKER_DIR/shard_$TASK3.SHARD_OK"
