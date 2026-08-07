@@ -4529,3 +4529,38 @@ transcribing a number instead of reading it back from the thing that produced it
 *reports* are protected against this by `test_the_reported_rate_matches_its_own_counts`, which
 recomputes every rate from the counts beside it; the **dev-log prose is not**, and that is the
 remaining hole.
+
+**Review round 17 — 2 CLI findings, both real, 1 major.** Counts across seventeen rounds:
+**20, 7, 4, 2, 1, 8, 1, 4, 3, 6, 6, 3, 4, 1, 6, 2, 2**.
+
+**⚠ STRIDED SHARDING DEFEATED THE CACHE THE MODULE IS BUILT AROUND.** `run-shard` sliced the
+manifest with `candidates[i::n]`, which **interleaves** — so one host's candidates scattered
+across every shard, and since `_host_cache` is created per `run_shard` call, each shard re-parsed
+almost every host's GFF. With 941 candidates over 76 hosts that turns one parse per host into
+`n_shards` parses per host, defeating the exact cache whose docstring says it is why the round
+takes seconds. `shard_by_host` now assigns whole hosts round-robin over their sorted order, so
+the partition is deterministic and independent of manifest order.
+
+**✅ AND THE SHARD → MERGE PATH IS NOW PROVEN END-TO-END, WHICH IT HAD NEVER BEEN.** Three shards
+run separately and merged reproduce the single-shard table **exactly** — 941 verdicts,
+546 / 96 / 299, `status` maps identical. The contract had only ever been exercised on synthetic
+two-row tables before this.
+
+**⚠ THE DISTANCE SERIES IGNORED `strand_policy`.** It collected a distance from any strand detail
+whose own status was `passed`, without checking whether the configured policy folded that strand
+into the candidate's verdict — so under `plus` or `minus` the *other* strand could contribute a
+distance describing a decision the round never made. (The committed reports run under `both`, so
+no published number moves; it is the single-strand policies that were wrong.)
+
+**Validation (round 17).** Full unit+golden **4,687 passed / 13 failed** vs the matched baseline
+at `95d0149` (**4,492 / 13**) — failure sets identical, `comm` empty both ways. **59 sabotages /
+59 RED against their named test**, including a control proving a strided slice *does* scatter
+hosts, so the new assertion has teeth. Candidate verdicts unchanged (546 / 96 / 299). ruff +
+black clean.
+
+⚠ **A PROCESS NOTE WORTH KEEPING.** This stanza was dropped from its own commit: the shell line
+began `cd <worktree> && cat >> …`, the `cd` failed because the session was **already** in the
+worktree, and `&&` short-circuited the append while the newline-separated `git commit` that
+followed ran anyway. Third occurrence in this step. A compound whose first element is a
+redundant `cd` silently drops everything after it — and the commit still succeeds, so nothing
+looks wrong.
