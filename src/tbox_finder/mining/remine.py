@@ -69,6 +69,7 @@ from tbox_finder.eval.tier2n_probe import ProbeSet
 from tbox_finder.mining.hard_negative import MiningCandidate
 from tbox_finder.mining.mine_round import (
     MSA_SUPPLY_AVAILABLE,
+    SYNTENY_SUPPLY_AVAILABLE,
     build_round_availability,
     candidate_evidence,
     read_fp_manifest,
@@ -253,6 +254,7 @@ def remine_candidate_evidence(
     *,
     covariation_status: Mapping[str, str] | None,
     stage2_posteriors: Mapping[str, float] | None,
+    synteny_status: Mapping[str, str] | None = None,
 ) -> SpareRuleEvidence:
     """The candidate's P3 evidence: the P2 builder's result **plus** its posterior.
 
@@ -268,7 +270,7 @@ def remine_candidate_evidence(
     the candidate is **spared**. A dropped producer shard therefore costs
     sensitivity, never a mined true T-box.
     """
-    base = candidate_evidence(candidate_id, covariation_status)
+    base = candidate_evidence(candidate_id, covariation_status, synteny_status)
     if stage2_posteriors is None:
         return base
     posterior = stage2_posteriors.get(candidate_id)
@@ -316,6 +318,7 @@ def read_remine_manifest(
     *,
     covariation_status: Mapping[str, str] | None = None,
     stage2_posteriors: Mapping[str, float] | None = None,
+    synteny_status: Mapping[str, str] | None = None,
 ) -> list[MiningCandidate]:
     """The round's false positives, stamped with **both** produced evidence sources.
 
@@ -324,7 +327,9 @@ def read_remine_manifest(
     candidate's evidence through :func:`remine_candidate_evidence`, so the P2 reader
     stays the single parser of the manifest shape.
     """
-    candidates = read_fp_manifest(path, covariation_status=covariation_status)
+    candidates = read_fp_manifest(
+        path, covariation_status=covariation_status, synteny_status=synteny_status
+    )
     return [
         dataclasses.replace(
             c,
@@ -332,6 +337,7 @@ def read_remine_manifest(
                 c.candidate_id,
                 covariation_status=covariation_status,
                 stage2_posteriors=stage2_posteriors,
+                synteny_status=synteny_status,
             ),
         )
         for c in candidates
@@ -397,6 +403,29 @@ def exclude_probe_members(
 # ═════════════════════════════════════════════════════════════════════════════
 # The round itself — four-disjunct evidence → mined/spared outcome
 # ═════════════════════════════════════════════════════════════════════════════
+def _load_synteny_status(table: str | Path | None) -> dict[str, str] | None:
+    """Load the (c) status table, translating a data fault into this module's error.
+
+    A contradictory or malformed table is something the round must **report** — the caller
+    branches on the return code — so a ``ProducerError`` escaping as an unhandled
+    ``RuntimeError`` would bypass the refusal path entirely.
+    """
+    if table is None:
+        return None
+    from tbox_finder.mining.synteny_producer import ProducerError
+    from tbox_finder.mining.synteny_producer import load_status_map as load_synteny_status_map
+
+    try:
+        return load_synteny_status_map(table)
+    except (ProducerError, OSError, ValueError, AttributeError, KeyError, TypeError) as exc:
+        # ⚠ ``ProducerError`` alone is not the failure surface.  ``load_status_map`` reads
+        # arbitrary JSON, so a truncated file raises ``json.JSONDecodeError``, a non-object
+        # root raises ``AttributeError``, and a malformed row raises ``KeyError``/
+        # ``TypeError`` — all of them input faults that would bypass the documented refusal
+        # path and surface as an unhandled traceback.
+        raise RemineError(f"synteny status table unusable: {exc}") from exc
+
+
 def apply_remine_spare_rule(
     fp_manifest: str | Path,
     status_table: str | Path,
@@ -407,6 +436,7 @@ def apply_remine_spare_rule(
     msa_supply_available: bool,
     stage2_supply_available: bool,
     probe_set: ProbeSet,
+    synteny_status_table: str | Path | None = None,
     relaxed_arch_available: bool = False,
     synteny_available: bool = False,
     union_prior: str | Path = "data/processed/priors/union_prior.parquet",
@@ -434,6 +464,23 @@ def apply_remine_spare_rule(
     from tbox_finder.mining.hard_negative import mine_round as run_mine_round
     from tbox_finder.mining.mine_round import load_union_mask
 
+    # ⚠ Declaring the (c) backend available while handing the round no status table is the
+    # SILENT version of a refusal: every candidate's synteny disjunct would read
+    # ``unavailable``, every candidate would be spared, and the round would report a clean
+    # zero yield that looks exactly like an honest one.  It is the same hole review found in
+    # this function's ``probe_set`` parameter, so it gets the same answer — make the state
+    # unrepresentable rather than document it.
+    if synteny_available and synteny_status_table is None:
+        raise RemineError(
+            "synteny_available=True but no synteny status table was supplied; the (c) "
+            "disjunct would read 'unavailable' for every candidate and spare them all"
+        )
+    if not synteny_available and synteny_status_table is not None:
+        raise RemineError(
+            "a synteny status table was supplied but synteny_available=False; "
+            "hard_negative.mine_round refuses produced evidence for an undeclared backend"
+        )
+
     availability = build_remine_availability(
         rscape_installed=rscape_installed,
         msa_supply_available=msa_supply_available,
@@ -441,10 +488,13 @@ def apply_remine_spare_rule(
         relaxed_arch_available=relaxed_arch_available,
         synteny_available=synteny_available,
     )
+    # Loaded FIRST so a malformed (c) table is refused before any other input is read.
+    synteny_status = _load_synteny_status(synteny_status_table)
     candidates = read_remine_manifest(
         fp_manifest,
         covariation_status=load_status_map(status_table),
         stage2_posteriors=load_stage2_posteriors(posteriors),
+        synteny_status=synteny_status,
     )
     candidates, excluded = exclude_probe_members(candidates, probe_set)
 
@@ -668,10 +718,12 @@ def _supply_derivations(args: argparse.Namespace) -> dict[str, Any]:
     """
     from tbox_finder.mining.mine_round import derive_msa_supply_available
     from tbox_finder.mining.stage2_producer import derive_stage2_supply_available
+    from tbox_finder.mining.synteny_producer import derive_synteny_supply_available
 
     return {
         "msa_supply_derivation": derive_msa_supply_available(),
         "stage2_supply_derivation": derive_stage2_supply_available(),
+        "synteny_supply_derivation": derive_synteny_supply_available(),
     }
 
 
@@ -685,6 +737,7 @@ def _refuse_unevidenced(args: argparse.Namespace, derivations: Mapping[str, Any]
     for flag, key, label in (
         ("msa_supply_available", "msa_supply_derivation", "covariation MSA"),
         ("stage2_supply_available", "stage2_supply_derivation", "Stage-2 posterior"),
+        ("synteny_available", "synteny_supply_derivation", "downstream-aaRS synteny"),
     ):
         derivation = derivations[key]
         if supply_declaration_unevidenced(
@@ -735,7 +788,12 @@ def build_parser() -> argparse.ArgumentParser:
             help_text="the per-candidate Stage-2 posterior supply exists (P3-15′-b)",
         )
         _bool_flag(p, "relaxed-arch-available", "a relaxed-architecture backend exists")
-        _bool_flag(p, "synteny-available", "a downstream-aaRS synteny backend exists")
+        _supply_flag_pair(
+            p,
+            "synteny-available",
+            default=SYNTENY_SUPPLY_AVAILABLE,
+            help_text="a downstream-aaRS synteny backend exists (ADR-0006 D4)",
+        )
         p.add_argument("--out", required=True, help="where to write the round report")
 
     plan = sub.add_parser("plan", help="decide whether the round may run, and write the reason")
@@ -748,6 +806,15 @@ def build_parser() -> argparse.ArgumentParser:
     apply_.add_argument("--manifest", required=True, help="the round's FP manifest")
     apply_.add_argument("--status-table", required=True, help="merged covariation-status table")
     apply_.add_argument("--posteriors", required=True, help="candidate_id → Stage-2 posterior")
+    apply_.add_argument(
+        "--synteny-status",
+        default=None,
+        help=(
+            "candidate_id → criterion-(c) status (synteny_producer merge output); "
+            "REQUIRED whenever the round declares --synteny-available, and refused when it "
+            "does not"
+        ),
+    )
     apply_.add_argument(
         "--probe-set",
         required=True,
@@ -840,6 +907,7 @@ def _cmd_apply_spare_rule(args: argparse.Namespace) -> int:
         args.posteriors,
         stage2_threshold=float(args.stage2_threshold),
         probe_set=probe_set,
+        synteny_status_table=args.synteny_status,
         rscape_installed=bool(args.rscape_installed),
         msa_supply_available=bool(args.msa_supply_available),
         stage2_supply_available=bool(args.stage2_supply_available),

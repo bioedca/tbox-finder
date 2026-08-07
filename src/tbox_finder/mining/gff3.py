@@ -249,6 +249,19 @@ class CdsFeature(_FrozenAttributes):
         """Span length in bp, inclusive of both endpoints (so a 1-bp feature is 1, not 0)."""
         return self.end - self.start + 1
 
+    @property
+    def coding_length_bp(self) -> int:
+        """Summed **segment** length — the coding nucleotides, not the genomic span.
+
+        For a single-segment CDS this equals :attr:`length_bp`.  For one of the 273
+        multi-segment CDS in the production corpus (programmed frameshifts) the span includes
+        the gap between segments, so the two differ substantially: a two-segment CDS spanning
+        901 bp may carry only 152 coding nucleotides.  Any "is this ORF too short to judge"
+        test must use **this**, or a frameshifted gene reads as long merely because its two
+        halves sit far apart.
+        """
+        return sum(end - start + 1 for start, end in self.segments)
+
 
 def unescape(value: str) -> str:
     """Decode GFF3 column-9 ``%XX`` escaping.

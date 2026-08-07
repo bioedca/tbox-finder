@@ -3941,3 +3941,685 @@ shared predicate, since breaking only the predicate would leave a per-clause rep
 Full unit+golden **4,490 passed / 15 failed** vs the matched baseline at `2be5ff4`
 (**4,240 / 15**) — failure sets identical, `comm` empty both ways. Counts across nine rounds:
 **9, 2, 4, 5, 5, 5, 1, 2, 1**.
+
+## Step P3-15′-c-ii — 2026-08-07: the criterion (c) predicate, its per-candidate producer, and D4's two symmetric diagnostics
+
+**Inputs.** `data/processed/mining/round0_fp_manifest.json` (941 candidates / 76 hosts);
+`data/interim/production_annotations/*.gff.gz` (339, md5-verified at `-c-i`);
+`data/interim/production_genomes/*.fna` (the contig-id bridge);
+`data/processed/mining/production_genomes_v0.parquet` (GTDB clade);
+`data/processed/negatives/{decoys,mining_pool}_v0.parquet` (the §9.1 arm).
+**Process.** `mining/synteny.py` implements ADR-0006 D4's frozen `criterion_c` verbatim plus
+the downstream walk, the tandem carve-out and the gene-identity vocabulary D4 delegates here;
+`mining/synteny_producer.py` writes `$ROUND_DIR/synteny_status.json` (`candidate_id → status`,
+the (a)-producer's shape) and the two committed diagnostic reports. `SYNTENY_SUPPLY_AVAILABLE`
+was added beside `MSA_SUPPLY_AVAILABLE`, `candidate_evidence` / `remine_candidate_evidence`
+gained the synteny status map with the same fail-closed absent-id rule, and `--synteny-available`
+was promoted from a one-way `store_true` to the two-way pair with an exit-4 unevidenced preflight.
+**Outputs.** `src/tbox_finder/mining/{synteny,synteny_producer}.py`;
+`reports/p3/synteny_false_pass.json`; `reports/p3/synteny_exclusion_diagnostic.json`;
+`tests/unit/test_synteny{,_producer}.py` (+112 tests).
+**Validation.** 941/941 statuses (541 passed / 101 failed / 299 unavailable); the false-pass
+control is **powered** (margin 0.975 ≥ 0.20); full unit+golden **4,604 passed / 13 failed**
+against a matched baseline worktree at `95d0149` (**4,492 / 13**) — failure sets identical,
+`comm` empty both ways; **19 sabotages / 19 RED against their named test**.
+**Decisions.** ADR-0006 D4 (vocabulary delegated here, §10.1-verified); ADR-0005 D14 (fail-closed
+`unavailable` ⇒ spared), D15 (both-strand carry-through).
+**Commit.** see below.
+
+**The criterion discriminates, and by a wide margin.** Candidates pass at **57.5 %** against a
+clade-matched random-leader background of **1.67 %** and a §9.1 5′UTR-decoy background of
+**4.52 %** — a 13–34× enrichment, with a positive-context arm at **99.20 %** proving the control
+is powered rather than merely quiet. The reading is not that the criterion is loose: the
+round-0 pool is Stage-1 *false positives* drawn from a masked negative substrate, and a 96-nt
+element scoring 0.9977 that sits 19 bp upstream of an `alanine--tRNA ligase` is most plausibly
+an uncatalogued T-box. ADR-0005 D14's spare rule exists precisely so those are spared rather
+than trained against, and 541 of them now are.
+
+**⚠ THE BIGGEST DEFECT WAS FOUND BY DISBELIEVING A NUMBER, NOT BY A TEST.** The first run
+returned **541 of 941 passing** and the per-CDS background density of D4's four classes is
+**4.14 %** — an irreconcilable gap. The cause was that the downstream walk bounded the distance
+only from above: a bacterial genome is ~88 % coding, so a window buried inside a long gene found
+that gene as its "downstream" gene and inherited its identity. D4's class-II case genuinely
+needs a *negative* distance (a translational T-box abuts/overlaps the start codon), so the fix
+could not be "reject overlap"; it is that the CDS start must lie at or after the **element's own
+5′ end**, which pins no new number. The corpus-level counts barely moved because Stage-1
+candidates land in leader regions rather than inside genes — so the number that exposed the bug
+was not the number the bug corrupted.
+
+**⚠ TWO DEFECTS THE DIAGNOSTIC FOUND IN ITSELF, AND BOTH WERE SILENT ZEROS.** (1) The pseudogene
+diagnostic reported **0** pseudogenized first-downstream ORFs corpus-wide, because the tandem
+carve-out hops exactly the population the diagnostic exists to size; the counts now accumulate
+across the whole walk (15 pseudogenized, 88 unjudgeable). (2) D4's hypothetical/pseudogene route
+was **entirely unreachable**: `gff3.gene_identity_text` collects `Dbxref`/`Name` as well as
+`product`, and on NCBI CDS those are accessions (`Dbxref` is present on 29,852 of 30,273
+measured CDS), so every `hypothetical protein` still had non-empty "identity text", never
+resolved to unjudgeable, and was scored a *decided* `failed` instead of being routed to the
+fallback. Identifier-shaped values are now filtered, with a positive control asserting the
+filter removes identifiers rather than removing judgement.
+
+**⚠ THE VOCABULARY IS PRECISION-FIRST BECAUSE THE PERMISSIVE VERSION WAS MEASURED FIRST.** An
+"amino-acid word + enzyme word" rule looks reasonable and swallows `HAMP domain-containing
+histidine kinase` (38 CDS over 12 hosts, two-component signalling), `serine/threonine protein
+kinase`, `glutamine amidotransferase` (purine/His/Trp — **not** tRNA-dependent transamidation),
+`methylated-DNA--[protein]-cysteine S-methyltransferase` (DNA repair) and `peptide-methionine
+(S)-S-oxide reductase` (protein repair). Every `EXCLUSIONS` entry was observed on this corpus
+before it was written down, exclusions are applied **before** every include rule, and the
+transamidation rules all require the literal `tRNA`. Two ordering corrections came out of the
+audit: the curated product name outranks the gene symbol (`hisJ` is the histidine transporter's
+binding protein in the enterics and **histidinol phosphatase** in Firmicutes), and the symbol
+route fires only when the product name says nothing at all — consulting it otherwise put `PTS
+galactitol transporter subunit IIB` into the transamidation class via `gatB`, `cytochrome C-552`
+into transport via `cycA`, and `homocitrate synthase` into aaRS via `lysS`. 24 of 4,991 matches
+came from that route and 3 of the 24 were wrong.
+
+**⚠ THE CONTIG BRIDGE IS BY IDENTITY, AND AN INDEX JOIN WOULD HAVE BEEN WRONG ON HALF THE
+CORPUS.** A candidate's contig is `:c<ci>`, an index into the genomic FASTA's record order; a
+GFF's `seqid` is the NCBI contig accession. **23 of the 48** candidate-carrying annotated hosts
+serve their GFF seqids in a different order than their FASTA records, so `records[ci]` ↔
+`seqids[ci]` would silently read the wrong contig on ~48 % of hosts. The id join resolves
+**134 of 134** needed (host, contig) pairs.
+
+**Three gaps reported rather than papered over.** (1) The **shipped §9.1 decoy rows carry
+coordinates on 0 annotated production hosts** — `decoys_v0`'s three non-structured pools have no
+accession at all, its 2,999 `structured_rna` accessions are Rfam source contigs, and
+`mining_pool_v0`'s 45,988 leader/trail windows sit on the TBDB source genomes — so that arm is
+`available: false` **with its counts**, and the §9.1 leader class is re-instantiated inside the
+annotated corpus instead (5′UTR and tRNA-adjacent windows). (2) The **false-FAIL arm has almost
+no positive denominator**: only **2 TBDB records on 1 assembly** intersect the 339, because the
+production substrate is by construction a negative one. (3) The **joint a ∧ b ∧ c arm is
+structurally unavailable** — (b) has no backend until P3-15′-d — and is withheld, never computed
+from two unavailable disjuncts.
+
+**Per-clade exclusion is the clade-structured cap D4 commissioned, and it is large.** 31.8 %
+of candidates are `unavailable` (286 host-unannotated, 11 unjudgeable, 2 contig-absent), with
+five phyla at **100 %** exclusion (Chloroflexota, Desulfobacterota, Fibrobacterota, Thermotogota,
+Bdellovibrionota_C), Bacillota at 38.5 %, and Atribacterota / Sysuimicrobiota / Fusobacteriota at
+0 %. That is the recall cap the commissioned bakta/prokka arm exists to lift. Empirical passing
+distances: p50 117 bp, p95 269 bp, p99 364 bp, max 454 bp — all inside D4's 500 bp pad, which is
+the sensitivity check D4 asks for.
+
+**⚠ `n_mined` IS STILL STRUCTURALLY 0.** Sparing is a disjunction so mining is a conjunction:
+`relaxed_architecture` remains the one unavailable backend, so `max_possible_yield` still caps
+the round at 0 until P3-15′-d lands. This step removes one of the two blockers, not both.
+
+**Review round 1 — 20 findings (app 5, CLI 15), all real, 8 major; only one in common.** The app
+and the CLI overlapped on exactly the CLI-wiring finding, so running both was worth it rather
+than redundant, as it was at `-c-i`.
+
+**⚠ THE MAJOR ONE: THE TANDEM CARVE-OUT REACHED THE SEARCH BUT NOT THE DECISION.**
+`resolve_downstream_gene` selected its target with the **re-anchored** window and then returned
+that target's **element-relative** distance, which `synteny_status` judged against the 500 bp
+pad — so the carve-out fired only where it was not needed, and turned exactly the tandem loci D4
+built it for into **false FAILs**. `DownstreamGene` now carries both distances and `criterion_c`
+sees `decision_distance_bp`. **Five candidates move `failed` → `passed`** (541 → 546), and the
+decision-distance series is now p50 117 / p95 266 / p99 356 / **max 454 bp**, entirely inside the
+pad, with the element-relative max of 1,652 bp explained by `n_passed_via_tandem_carve_out: 5`.
+⚠ **My own test could not see this**: it asserted the walk reached the right *gene*, which was
+always true. The search was never wrong; the decision was.
+
+**⚠ A NUMBER I REPORTED WAS FROM A SUPERSEDED RUN.** The PR body, commit message, dev-log and
+`TODO.md` all quoted "p95 269 / p99 364 / max 454, n 549" while the committed artifact said
+"p95 272 / p99 389 / **max 1652**, n 554" — I read the field before the identifier-filter fix and
+never re-read it after regenerating. The gap was also the symptom of the real bug: the statistic
+collected every strand detail whose *class* was passing without checking its *status*, so
+out-of-window hits that FAILED were counted (554 entries against 541 passed candidates). It now
+filters on the detail's own status and reports both series.
+
+**⚠ TWO ARTIFACT-PINNING TESTS WENT GREEN UNDER SABOTAGE, AND THAT IS THE CAMPAIGN'S BEST
+OUTPUT.** `test_the_distance_statistic_counts_only_passed_evaluations` and
+`test_provenance_never_records_an_absolute_local_path` both read the **committed report**, which
+was generated by the fixed code — so breaking the source could not reach them. They still earn
+their place as guards on the committed evidence, but `TestDiagnosticsComputedNotJustCommitted`
+now calls the report builders directly so the *rule* is under test, not one frozen output of it.
+Both new tests bite.
+
+**⚠ A TEST THAT COULD NOT CATCH THE TRAP IT NAMED.** `test_no_clause_reads_dvc_tracked_data`
+derived against `REPO_ROOT` — so on any laptop that has run `dvc pull`, a DVC-path clause would
+read True and the test would still pass. It now derives against a `tmp_path` root holding only
+the `SUPPLY_CLAUSES` files and asserts `n_annotated_hosts_on_disk == 0`, which is the environment
+the clause set actually has to survive.
+
+**⚠ THE PRODUCED TABLE WAS NEVER READ BY EITHER ROUND.** Both reviewers found it independently:
+`candidate_evidence` accepted a synteny map but no CLI leg supplied one, so declaring the backend
+available would have left every candidate `unavailable` — spared, with a zero yield
+indistinguishable from an honest one. `--synteny-status` is wired into **both**
+`apply-spare-rule` legs, and declaring the backend without a table (or supplying one without
+declaring it) now raises rather than proceeding — the same answer this function's `probe_set`
+parameter already got for the same reason.
+
+**Also fixed.** A committed provenance record named an absolute `/home/<user>/…` path (out-of-repo
+inputs are now hashed and recorded as `{name, sha256}`, which is *more* traceable than the path);
+the unavailability reason scanned both strands under a single-strand policy; `merge_status_tables`
+passed two inputs through unvalidated and accepted a shard contributing no rows; `_upstream_window`
+bounded the plus arm but not the minus; `combine_strand_statuses` raised a bare `KeyError`;
+`load_contig_ids` raised `IndexError` on a bare `>` header; `synteny._gene_symbols` was private
+while the producer's control arm depended on it (now `synteny.gene_symbols`); the
+`candidate_evidence` docstring still said no synteny backend exists.
+
+**Validation (round 1).** Full unit+golden **4,621 passed / 13 failed** vs the matched baseline at
+`95d0149` (**4,492 / 13**) — failure sets identical, `comm` empty both ways. **28 sabotages / 28
+RED against their named test.** Both reports re-derive byte-identically from the final code apart
+from `provenance`. ruff 0.15.15 + black 25.11.0 clean.
+
+**Review round 2 — 7 findings (app 1, CLI 6), all real, 5 major.** Counts across two rounds:
+**20, 7**.
+
+**⚠ THE FALSE-PASS ARM THAT CONTAINED ITS OWN POSITIVE CLASS, AND THE NUMBER THAT CHANGED BY AN
+ORDER OF MAGNITUDE.** The §9.1 5′UTR arm sampled *every* CDS, including the aaRS /
+amino-acid-biosynthesis genes the positive-context arm is built from — and a 5′UTR sitting
+upstream of an aaRS in a real genome may itself **be** a T-box leader, so counting it as a
+*false* pass inflates the rate. Reporting one reading only would have been a choice disguised as
+a measurement, so both now ship: drawn over all CDS the arm reads **5.28 %**; drawn over the CDS
+naming none of D4's four classes — where every pass is unambiguously false — it reads **0.35 %**.
+The gap *is* the ambiguity, and resolving it is not this step's to do.
+
+**⚠ THE SUB-THRESHOLD HOP COULD SKIP A CDS THAT ALREADY SATISFIED THE CRITERION.** The docstring
+already claimed the carve-out fires only on an ORF *"that cannot carry the criterion either
+way"*; the length branch did not enforce it, so a short CDS naming a D4 class would be hopped in
+favour of whatever sat further downstream. **No candidate verdict changed on this corpus** — the
+case does not occur here — so this is latent correctness the new test pins rather than a numbers
+movement, and it is recorded as such rather than dressed up as a fix that moved something.
+
+**⚠ MY CLI-REACHABILITY TEST WAS VACUOUS, AND `argparse` IS WHY.** It probed the P2 leg by
+parsing `[..., "--synteny-status", "t.json", "--help"]` and asserting exit 0 — but argparse
+handles `--help` **before** it rejects an unknown option, so that exits 0 even for a flag the
+parser has never heard of (verified by execution against a parser carrying no such option). The
+test passed whether or not the option existed. `mine_round.build_parser` was extracted so the
+assertion can be structural, and a negative control now checks the option set can answer False.
+
+**Two more integrity findings.** `exclusion_reason_totals` fell back to `""` while the per-clade
+breakdown fell back to `host_unannotated` for the **same row**, so one row was counted under two
+keys and the closed `EXCLUSION_REASONS` vocabulary held in one place and not the other — both now
+read one derivation, which *raises* on an unknown reason. And `merge_status_tables` wrote
+`config.as_dict()`, which re-reads the **live** `HMM_FALLBACK_AVAILABLE`, so a merge on a checkout
+where the flag had flipped would silently rewrite what the shards actually ran under; the
+shard-recorded value now wins.
+
+**Validation (round 2).** Full unit+golden **4,627 passed / 13 failed** vs the matched baseline at
+`95d0149` (**4,492 / 13**) — failure sets identical, `comm` empty both ways. **32 sabotages / 32
+RED against their named test.** ruff + black clean.
+
+**Review round 3 — 4 findings (app 1, CLI 3), all real, 2 major.** Counts across three rounds:
+**20, 7, 4**.
+
+**⚠ A FILTERED SUBSET THAT OUTNUMBERED ITS SOURCE.** The strict 5′UTR arm reported **9,087**
+rows against the wide arm's **9,065** — impossible for a subset, and the giveaway that the two
+arms were **independent draws** each capped at `n_per_host` rather than a population and its
+filter. The strict arm is now derived from the wide arm's own sample (`strict_subsample`), so
+the nesting holds by construction: **8,662 ≤ 9,090**, and the rates are **4.96 %** wide against
+**0.29 %** strict. The report's own wording had claimed the nesting all along.
+
+**⚠ A THIRD ARTIFACT-PINNING TEST WENT GREEN UNDER SABOTAGE.** `test_the_utr_arm_is_reported_
+under_BOTH_readings` reads the committed report, so breaking the derivation could not reach it —
+the same species as rounds 1 and 2. The filter is now a named function (`strict_subsample`) and
+tested directly for the subset property, the identity of what it removes, and the all-D4 edge
+case. Three occurrences in one step is a pattern worth carrying forward: **a test that reads a
+committed artifact validates the artifact, never the code that made it.**
+
+**⚠ TWO UNITS IN ONE REPORT, UNLABELLED.** The per-clade block sums to **941 candidates**
+(546 + 96 + 299) while the distance block reported **554** — not a discrepancy, since a
+candidate passing on **both** strands contributes two strand evaluations, but a reader
+subtracting one from the other would conclude something was missing. Both blocks now carry an
+explicit `unit`, and the report states the reconciliation: `554 = 546 + 8`.
+
+**Also fixed.** `test_the_control_is_powered_and_says_why` asserted `powered` and `margin` but
+not `verdict` — the field a reader actually consumes and the one that would go stale silently,
+so the name was writing a cheque the body did not honour. And a `decoys_v0.parquet` missing its
+`accession` column raised a non-`ProducerError`, aborting the whole sweep **after** every arm
+had been computed, over a schema change in a file this arm only reports the *absence* of.
+
+**Validation (round 3).** Full unit+golden **4,635 passed / 13 failed** vs the matched baseline at
+`95d0149` (**4,492 / 13**) — failure sets identical, `comm` empty both ways. **33 sabotages / 33
+RED against their named test.** Both reports re-derive identically from the final code apart from
+`provenance`. ruff + black clean.
+
+⚠ **A CLI review round that read `main → main` is an ABSENCE, not a pass.** Round 3's first CLI
+invocation ran from the main checkout because the backgrounded `cd` did not apply to the session
+cwd, and reported *"No committed changes detected — nothing to review"*. That is exactly §5.1's
+rate-limit trap in a different costume: it was re-run from the worktree before the round was
+counted.
+
+**Review round 4 — 2 findings (app 2), both real, both major.** Counts across four rounds:
+**20, 7, 4, 2**.
+
+**⚠ "THE SAME WINDOWS, FILTERED" WAS STILL NOT TRUE.** Round 3 made the strict 5′UTR arm's *CDS
+population* a subset of the wide arm's, but each arm still drew its own spans with a fresh
+`rng.choice(lengths)` — so the windows were never the same windows, only the genes were. The two
+lists now come from **one** draw (`utr_arm_windows` returns `(wide, strict)` where `strict` is a
+sublist of `wide`), and the note says what the code does. Final rates: wide **4.74 %**, strict
+**0.35 %**, over 9,097 and 8,693 windows.
+
+**⚠ A FOURTH ARTIFACT-PINNING TEST WENT GREEN UNDER SABOTAGE, AND THIS TIME THE FIX WAS TO MOVE
+THE RELATION INTO A FUNCTION.** `strict_subsample` was already tested directly, but the sabotage
+targeted the **call site** — which no test could see, because the only assertion on the wide↔strict
+relation read the committed report. `utr_arm_windows` now owns that relation and is tested for it
+by identity (`strict == [wide[1], wide[3]]`, not by count), with a positive control for an
+all-non-D4 sample and a refusal for a span-count mismatch. **Four occurrences in one step**; the
+lesson is not "add another artifact assertion" but *"if the property is a relation, give the
+relation a name."*
+
+**⚠ THE PR DESCRIPTION DRIFTED FROM THE ARTIFACT A SECOND TIME.** It quoted a 99.35 % positive-
+context rate while the report's own counts give **99.414 %**. Both drifts in this step came from
+hand-copying a number that a later regeneration moved; the reconciliation is now asserted in
+`test_the_reported_rate_matches_its_own_counts`, which recomputes every arm's rate and the
+control margin from the counts beside them.
+
+**Validation (round 4).** Full unit+golden **4,637 passed / 13 failed** vs the matched baseline at
+`95d0149` (**4,492 / 13**) — failure sets identical, `comm` empty both ways. **34 sabotages / 34
+RED against their named test.** ruff + black clean. ⚠ The CLI's round-4 invocation returned
+*"Review limit reached — wait 18 minutes"*; that is an **absence, not a pass**, and it is being
+waited out rather than escalated (waiting is free, so no Greptile credit was spent).
+
+**Review round 5 — 1 finding (app), real, minor.** Counts across five rounds: **20, 7, 4, 2, 1**.
+
+**⚠ VALUE EQUALITY IS NOT THE CONTRACT.** The round-4 test asserted `strict == [wide[1], wide[3]]`
+and `all(w in wide for w in strict)` — but windows are plain tuples, so a producer that *draws a
+second time and lands on the same span* satisfies value equality while breaking the one-draw
+contract the test exists to pin. The assertions are now `is`.
+
+**⚠ AND THE FIRST SABOTAGE OF THAT FIX WAS ITSELF A NO-OP.** Replacing the returned windows with
+`tuple(w)` left the test green — because CPython returns the *same object* for `tuple(t)` when
+`t` is already a tuple, so the mutation changed nothing. Checked by execution
+(`tuple(t) is t → True`, `tuple(list(t)) is t → False`) and re-run with a genuinely
+reconstructing sabotage, which bites. A sabotage that does not mutate proves nothing about the
+test; [[verify-the-line-you-ship]] applies to the sabotage as much as to the code.
+
+**Validation (round 5).** Full unit+golden **4,640 passed / 13 failed** vs the matched baseline at
+`95d0149` (**4,492 / 13**) — failure sets identical, `comm` empty both ways. **35 sabotages / 35
+RED against their named test.** ruff + black clean; no report regenerated (test-only change).
+
+**Review round 6 — 8 CLI findings, 7 real, 2 major (one refuted).** Counts across six rounds:
+**20, 7, 4, 2, 1, 8**. The round-6 spike is the CLI's first clean pass since round 3 — its
+round-4 invocation returned *"Review limit reached"*, an **absence** that was waited out rather
+than counted, so these findings are the accumulated ones the CLI had not yet seen.
+
+**⚠ THE SUB-THRESHOLD TEST USED A GENOMIC SPAN, NOT A CODING LENGTH.** `CdsFeature.length_bp` is
+`end - start + 1` over the **span**, so a frameshifted CDS whose two segments sit far apart reads
+as long even when it codes for very little — measured: a two-segment CDS spanning 901 bp carrying
+152 coding nucleotides. There are **273** multi-segment CDS in this corpus, and §7.1's tandem loci
+are exactly where the carve-out has to fire. `gff3.CdsFeature.coding_length_bp` (summed segments)
+now drives the test. **No candidate verdict changed on this corpus**, so it is recorded as latent
+correctness the new test pins.
+
+**⚠ ONE MAJOR WAS REFUTED BY EXECUTION.** *"The sort tiebreak can raise `TypeError` when
+`feature_id` is None."* It cannot: `gff3.CdsFeature.feature_id` is annotated `str` and is always
+populated (the dataclass falls back to `<seqid>:<start>-<end>:<strand>:<type>`). The finding
+reasoned from **`DownstreamGene.feature_id: str | None`** — a different type, whose `None` case is
+the *no-gene-found* result and never reaches a sort. Checked against the declaration rather than
+the review's word.
+
+**Also fixed.** The `diagnostics` branch converted only three exception types while three calls in
+it raise others (a malformed input aborted with a traceback instead of a refusal); the tRNA arm's
+contig extents were built from a **CDS-only** map, so a tRNA on a CDS-free contig skipped the
+minus-strand upper bound and could cut a window past the contig end; the strict-arm note had two
+sentences welded together in a **committed** artifact; and `ProducerError` escaped both mining
+boundaries as an unhandled `RuntimeError`, bypassing the return-code path the callers branch on —
+the (c) table is now loaded **first**, so a malformed one is refused before any other input is
+read.
+
+**Validation (round 6).** Full unit+golden **4,644 passed / 13 failed** vs the matched baseline at
+`95d0149` (**4,492 / 13**) — failure sets identical, `comm` empty both ways. **37 sabotages / 37
+RED against their named test.** Both reports regenerated; status counts unchanged
+(546 / 96 / 299). ruff + black clean.
+
+**Review round 7 — 1 CLI finding, real, major.** Counts across seven rounds:
+**20, 7, 4, 2, 1, 8, 1**.
+
+**⚠ `ProducerError` WAS NOT THE FAILURE SURFACE.** Round 6 translated it at both mining
+boundaries, but `load_status_map` reads **arbitrary JSON**, so a truncated file raises
+`json.JSONDecodeError`, a non-object root raises `AttributeError`, and a malformed row raises
+`KeyError`/`TypeError` — every one an input fault that bypassed the documented refusal path and
+would have surfaced as an unhandled traceback on the leg that decides what gets mined. The catch
+now covers all of them, and the test is parametrized over four *distinct* fault shapes rather
+than the one the previous round happened to construct.
+
+**Validation (round 7).** Full unit+golden **4,648 passed / 13 failed** vs the matched baseline at
+`95d0149` (**4,492 / 13**) — failure sets identical, `comm` empty both ways. **38 sabotages / 38
+RED against their named test.** ruff + black clean; no report regenerated (error-path change only).
+
+**Review round 8 — 4 CLI findings, all real, 1 major.** Counts across eight rounds:
+**20, 7, 4, 2, 1, 8, 1, 4**.
+
+**⚠ [[duplicate-key-merges-instead-of-colliding]], NOW ON THE READ PATH.** `build_status_table`
+refuses a repeated `candidate_id` at **write** time, but `load_status_map` rebuilt the map with a
+dict comprehension — which collapses a duplicate to its **last** occurrence — and the
+status↔rows cross-check then compared two maps built the same wrong way, so it agreed with
+itself. Two rows saying `passed` and `failed` for one candidate would have picked one silently.
+A table can reach the reader without having been written by the writer, so both ends refuse now.
+
+**⚠ THE FIFTH VACUOUS TEST OF THIS STEP, AND ALL FIVE WERE MINE.**
+`test_provenance_never_records_an_absolute_local_path` iterates `provenance["inputs"]` — and both
+committed reports carry `"inputs": {}` (every input resolved outside the repo root at generation
+time), so **the loop never executed** and `outputs` was never inspected at all. It now asserts the
+evidence exists *somewhere* before checking its shape. Running tally of vacuous-test species in
+this step: an artifact-pinning assertion (×4) and an empty-collection loop (×1).
+
+**Also fixed.** `pyarrow.lib.ArrowIOError` subclasses `OSError`, so a present-but-unreadable
+parquet aborted `false_pass_report` before it wrote anything; and `_annotated_set` carried a
+second copy of the `accession → filename` contract, which would have undercounted every host —
+looking like a smaller corpus rather than a bug — the day `destination_name` changed.
+
+**Validation (round 8).** Full unit+golden **4,650 passed / 13 failed** vs the matched baseline at
+`95d0149` (**4,492 / 13**) — failure sets identical, `comm` empty both ways. **40 sabotages / 40
+RED against their named test.** ruff + black clean.
+
+**Review round 9 — 3 CLI findings, all real, 1 major.** Counts across nine rounds:
+**20, 7, 4, 2, 1, 8, 1, 4, 3**. ⚠ The **GitHub app has been silent since `b6234ec`** — five heads
+with no app review — so from round 5 on **the CLI has carried the gate alone**, the documented
+§5.1 fallback and the same pattern `-c-i` recorded. The CLI's own round-9 invocation first
+returned *"Review limit reached"*; waiting it out cost nothing and spent no Greptile credit.
+
+**⚠ THE FALSE-PASS RATE DIVIDED BY WINDOWS THE RULE WAS NEVER ASKED ABOUT.** `_arm` computed
+`passed / (passed + failed + unavailable)`. A window whose (c) disjunct is `unavailable` is not
+one where the rule declined to false-pass — it is one where the rule never ran, and folding it
+into the denominator dilutes the headline number by exactly the annotation gaps the *other*
+diagnostic exists to report. Every arm now carries `n`, `n_decided`, `n_unavailable` and an
+explicit `false_pass_rate_denominator`, so the dilution is visible rather than assumed away.
+Corrected rates: random leaders **1.89 %**, §9.1 5′UTR wide **5.00 %** / strict **0.37 %**,
+tRNA-adjacent **2.76 %**, positive-context **99.52 %** (margin 0.976, still powered).
+
+**⚠ THE FIX I WROTE FIRST FOR THE RE-ANCHOR WAS RIGHT; THE TEST FOR IT WAS NOT.** The finding was
+that a carve-out ORF lying entirely behind the element's 3′ end re-anchors the window backward.
+My first test asserted the wrong *direction* — it picked a target where clamped and unclamped
+both fail, so the sabotage stayed green. Measured at the boundary instead: with the anchor
+clamped to the element, a target at 1490 bp is **490** away and passes; unclamped (anchor at the
+ORF's end, 980) the same target is **510** away and fails. The clamp is therefore
+recall-favouring here, and the test now pins both directions — 1490 passes, 1520 still fails.
+**A test that asserts the wrong direction of a correct fix is indistinguishable from no test.**
+
+**Also fixed.** Under the `both` strand policy the exclusion reason could be taken from a strand
+whose own status was `passed` or `failed`; only the strands that actually resolved `unavailable`
+may explain the verdict now.
+
+**Validation (round 9).** Full unit+golden **4,657 passed / 13 failed** vs the matched baseline at
+`95d0149` (**4,492 / 13**) — failure sets identical, `comm` empty both ways. **42 sabotages / 42
+RED against their named test.** Candidate verdicts unchanged (546 / 96 / 299); the re-anchor clamp
+moved **0** of them on this corpus. ruff + black clean.
+
+**Review round 10 — 6 CLI findings, all real, 1 major.** Counts across ten rounds:
+**20, 7, 4, 2, 1, 8, 1, 4, 3, 6**.
+
+**⚠ THE POSITIVE CONTROL PUBLISHED A *PASS* RATE UNDER A `false_pass_rate` KEY.** Windows drawn
+upstream of a CDS already in a D4 class are **supposed** to pass, so the arm's 99.52 % is the
+control working — but under that key, any consumer reading every `false_pass_rate` in the file
+learns that criterion (c) false-passes almost always. The control now emits `pass_rate` +
+`pass_rate_denominator`, and the decoy arms keep theirs.
+
+**⚠ THE SIXTH ARTIFACT-PINNING MISS, AND THE SHARPEST OF THEM.** The sabotage for that rename was
+`positive.get(...)` instead of `positive.pop(...)` — i.e. **copy** the key rather than move it —
+and the committed-report assertion stayed green, because the report it reads was written by the
+fixed code. The rename is now `as_control_arm`, tested for the three things that actually matter:
+the old key is *removed* (not duplicated), the counts survive, and the source arm is not mutated.
+Six occurrences in one step, all the same shape: **an assertion over a committed artifact cannot
+see a producer that writes the artifact correctly for the wrong reason.**
+
+**⚠ THE DUPLICATE-KEY RULE HAD TO BE APPLIED A THIRD TIME — NOW TO THE CLADE JOIN.**
+`load_clades` built `assembly_accession → phylum` with a dict comprehension, so a repeated
+accession collapsed to its last row and a repeat carrying a *different* phylum would silently
+reassign every candidate on that host — and the per-clade exclusion rate is the **headline** of
+the exclusion diagnostic. Verified against the real table: 2,500 assemblies still load.
+
+**Also fixed.** The status table was parsed **twice** in the `diagnostics` branch (validate one
+snapshot, build the report from another, with a window for the two to differ) — now parsed once
+through a new `validate_status_payload`; a row missing `candidate_id` or `status` raised a bare
+`KeyError` rather than the `ProducerError` every other malformed shape raises; and the re-anchor
+clamp compared against the fixed `three_prime` rather than the **current** anchor, so with more
+than one hop allowed it could not catch a move behind an anchor the walk had already advanced.
+
+**Validation (round 10).** Full unit+golden **4,663 passed / 13 failed** vs the matched baseline at
+`95d0149` (**4,492 / 13**) — failure sets identical, `comm` empty both ways. **44 sabotages / 44
+RED against their named test.** Candidate verdicts unchanged (546 / 96 / 299). ruff + black clean.
+⚠ Two clade-join tests `skip` in this environment (no `pyarrow`); both were verified by direct
+execution in `tbox-finder-data`, which has it, and CI installs it.
+
+**Review round 11 — 6 CLI findings, all real, 1 major.** Counts across eleven rounds:
+**20, 7, 4, 2, 1, 8, 1, 4, 3, 6, 6**.
+
+**⚠ A BARE GENE SYMBOL SUPPRESSED THE SYMBOL ROUTE IT WOULD HAVE FED.** `gene_identity_text`
+collects `Name` and `gene` alongside `product`, and a symbol like `alaS` is neither boilerplate
+nor identifier-shaped — so a `hypothetical protein` carrying `Name=alaS` made `informative`
+non-empty, and the classifier returned *"no D4 class"* **before** reaching the symbol fallback
+that exists for exactly that record. Reproduced before fixing (`→ None`, expected `aars`), fixed
+by treating a single ≤8-character whitespace-free token as a *name* rather than a description,
+and pinned with a positive control (`DNA gyrase subunit A` + `gyrA` must still decide `None`, or
+a filter that swallowed descriptions would pass the first test alone).
+
+**⚠ THE CLASS-II OVERLAP BOUND WAS OFF BY ONE, AND THE ALLOWANCE LEAKED PAST THE CARVE-OUT.**
+The element's 5′ edge is `locus_start + 1` in 1-based coordinates, so a CDS starting exactly on
+it is `-(span - 1)` away; `distance >= -span` admitted one coordinate *before the element began*,
+on both strands. Separately, D4's overlap allowance is about the **element** — once the walk has
+re-anchored past an intervening ORF, a CDS starting *behind* that anchor is not downstream of it,
+and `criterion_c` would have read the negative distance as comfortably in-window.
+
+**Also fixed.** The fail-closed supply derivation could **crash** on a malformed report root (a
+list or scalar where a mapping was expected) — a derivation that raises is not fail-closed, it
+takes the preflight down instead of answering `False`; `status_counts` values are now type-checked
+the same way (`isinstance(True, int)` again); and `test_the_reported_rate_matches_its_own_counts`
+guarded `n` rather than `n_decided`, so an arm that drew windows and decided none would raise
+`TypeError` instead of failing an assertion.
+
+**Validation (round 11).** Full unit+golden **4,667 passed / 13 failed** vs the matched baseline at
+`95d0149` (**4,492 / 13**) — failure sets identical, `comm` empty both ways. **48 sabotages / 48
+RED against their named test.** Candidate verdicts unchanged (546 / 96 / 299) — all three boundary
+corrections moved **0** of them on this corpus, so all three are latent correctness the new tests
+pin. ruff + black clean.
+
+**Review round 12 — 3 CLI findings, all real, 1 major.** Counts across twelve rounds:
+**20, 7, 4, 2, 1, 8, 1, 4, 3, 6, 6, 3**. ⚠ The CLI's first round-12 invocation returned
+*"Review limit reached"* (its third of this PR); waited out, no Greptile credit spent.
+
+**⚠ ONE BAD FILE AMONG 339 WOULD HAVE ABORTED ALL 941 VERDICTS — THE DEFECT `-c-i` ALREADY
+RECORDED, IN A NEW PLACE.** `HostAnnotation.__init__` called `read_gff3_text` /
+`parse_gff3_document` unguarded, so a truncated, undeclared or unreadable GFF took the whole run
+down instead of making **that host** unavailable. It is a per-host unavailability — which
+ADR-0005 D14 spares — and it now carries its **own** exclusion reason
+(`host_annotation_unreadable`) rather than folding into `host_unannotated`, because a corrupt
+corpus and a missing one produce an identical per-clade exclusion rate and must not be
+indistinguishable in the diagnostic. Measured on the real corpus: **0 hosts unreadable**, so the
+counts are unchanged — the value is that a future corrupt file now costs one host, not the round.
+
+**Also fixed.** The control margin subtracted two rates without checking either for `None`, so an
+arm that drew windows and decided none of them raised `TypeError` instead of leaving the control
+honestly ungraded; and the carve-out docstring stated two rules that read as contradictory for a
+*short but judgeable* ORF — the length test is about whether the call is trustworthy, not about
+what it says, and the prose now says so.
+
+**Validation (round 12).** Full unit+golden **4,671 passed / 13 failed** vs the matched baseline at
+`95d0149` (**4,492 / 13**) — failure sets identical, `comm` empty both ways. **50 sabotages / 50
+RED against their named test.** Candidate verdicts unchanged (546 / 96 / 299). ruff + black clean.
+
+**Review round 13 — 4 CLI findings, all real, 2 major.** Counts across thirteen rounds:
+**20, 7, 4, 2, 1, 8, 1, 4, 3, 6, 6, 3, 4**.
+
+**⚠ THE ROUND-11 GUARD KEYED ON THE WRONG THING, AND WOULD HAVE DISCARDED WHAT IT WAS BUILT TO
+PROTECT.** Round 11 added *"after a carve-out, a CDS starting behind the anchor is not
+downstream"* and keyed it on `n_intervening`. But round 10's clamp can leave the anchor **exactly
+at the element's 3′ end** after a hop — and the guard then rejected the element's own legitimate
+class-II overlap, a gene criterion (c) is *supposed* to see. It keys on the anchor having actually
+**moved** now. Two consecutive rounds' fixes interacting is the failure mode; neither was wrong
+alone.
+
+**⚠ A ZERO-LENGTH ELEMENT INVERTED THE OVERLAP BOUND.** `-(span - 1)` evaluates to `+1` at
+`span == 0`, so `distance < 1` discarded the `distance == 0` case — D4's class-II *abutting*
+locus precisely. Reproduced before fixing (`span=0 → []`, `span=1 → [0]`), floored at 0.
+
+**⚠ THE tRNA ARM RE-READ AND RE-PARSED EVERY HOST'S GFF.** `HostAnnotation` exists to parse each
+host **once** — its docstring says that cache is why the round takes seconds — and the tRNA arm
+went around it with a fresh `read_gff3_text`, taking a *second* snapshot of a file the CDS arm had
+already committed to. Both arms now read one parse; the diagnostics run in **28 s**.
+
+**Also fixed.** The P2 path wrapped malformed status tables in a bare `ValueError` while P3 used
+its own `RemineError`; it now raises `MineRoundError` (which subclasses `ValueError`, so the
+existing assertions still hold and the type is merely tightened).
+
+**Validation (round 13).** Full unit+golden **4,675 passed / 13 failed** vs the matched baseline at
+`95d0149` (**4,492 / 13**) — failure sets identical, `comm` empty both ways. **53 sabotages / 53
+RED against their named test.** Candidate verdicts unchanged (546 / 96 / 299). ruff + black clean.
+
+**Review round 14 — 1 CLI finding, real, minor.** Counts across fourteen rounds:
+**20, 7, 4, 2, 1, 8, 1, 4, 3, 6, 6, 3, 4, 1**.
+
+**⚠ A ONE-CLASS ASSERTION GUARDING A FOUR-CLASS RISK.** `test_a_bare_glutamine_amidotransferase_
+is_NOT_transamidation` asserted `!= CLASS_TRANSAMIDATION`, but the risk its own docstring names is
+*inflating criterion (c)* — and a classifier that routed `type 1 glutamine amidotransferase` into
+`aa_biosynthesis` instead would inflate it exactly as much while satisfying the assertion. Now
+`not in PASSING_CLASSES`, and sabotaged by a **cross-class** mis-route (adding `amidotransferase`
+to the *biosynthesis* pattern) rather than by breaking the transamidation rule — the shape the old
+assertion was blind to.
+
+**Validation (round 14).** Full unit+golden **4,675 passed / 13 failed** vs the matched baseline at
+`95d0149` (**4,492 / 13**) — failure sets identical, `comm` empty both ways. **54 sabotages / 54
+RED against their named test.** No source change, so no report regenerated. ruff + black clean.
+
+**Review round 15 — 6 CLI findings, all real, 1 major (maintainability).** Counts across fifteen
+rounds: **20, 7, 4, 2, 1, 8, 1, 4, 3, 6, 6, 3, 4, 1, 6**.
+
+**⚠ THE COUNT BOUNCED BACK, BUT THE *KIND* DID NOT.** The last finding that could change a
+verdict was round 13's guard interaction; rounds 14–15 are API hygiene and defensive
+hardening — a required parameter with no effect, write-ordering of two reports, refusals for
+inputs the corpus does not contain. That is a meaningful convergence signal even though the
+count is not monotone, and it is recorded as such rather than as "still finding bugs".
+
+**⚠ A REQUIRED PARAMETER THAT NOTHING READ.** `exclusion_report` took `annotation_dir` and
+`genome_dir` as **required** keyword arguments and read neither — six test call sites passed
+`"unused"` for both, which is a test asserting something false about the API. Removed.
+
+**⚠ THE TWO REPORTS COULD LAND OUT OF STEP.** The false-pass report was written **before** the
+exclusion report was built, so a failure in between left a committed false-pass report beside a
+**stale** exclusion report — and `test_both_reports_describe_the_same_run_config` asserts the pair
+describes one run. Both are now built before either is written.
+
+**Also fixed.** An empty candidate list left `lengths` empty and every `rng.choice` in the three
+control arms raised `IndexError` (uncaught by the CLI); a scalar manifest row raised `TypeError`
+from `dict(row)` rather than a `ProducerError`; the strict/wide comparison guarded `n` rather than
+`n_decided`, where `None <= float` raises; and two parametrized test labels named exceptions the
+producer no longer raises, having been tightened to `ProducerError` in earlier rounds.
+
+**Validation (round 15).** Full unit+golden **4,679 passed / 13 failed** vs the matched baseline at
+`95d0149` (**4,492 / 13**) — failure sets identical, `comm` empty both ways. **56 sabotages / 56
+RED against their named test.** Both reports re-derived; candidate verdicts unchanged
+(546 / 96 / 299). ruff + black clean.
+
+**Review round 16 — 2 CLI findings, both real, 1 major.** Counts across sixteen rounds:
+**20, 7, 4, 2, 1, 8, 1, 4, 3, 6, 6, 3, 4, 1, 6, 2**.
+
+**⚠ ROUND 12 GUARDED ONE OF TWO SIBLING READS.** `HostAnnotation.__init__` reads a GFF *and* a
+genome FASTA; round 12 wrapped the first and left the second bare, so one empty or unreadable
+`.fna` — or a header with no record id — still took the whole round down instead of costing its
+own host. Fixed with its own reason (`genome_fasta_unreadable`), kept distinct from
+`genome_fasta_absent` for the same reason the annotation pair is split: a corrupt file and a
+missing one must not be indistinguishable in the diagnostic. **Fixing one of two identical reads
+and calling the class of defect closed is the mistake worth naming.**
+
+**⚠ A PATH CHECK THAT ONLY UNDERSTOOD ONE OS.** The provenance guard used
+`Path(key).is_absolute()`, which selects `PurePosixPath` semantics on a POSIX runner — so
+`C:\Users\alice\report.json` reads as *relative* and a home-directory leak slips past the
+assertion written to catch it. Both `PurePosixPath` and `PureWindowsPath` are checked now.
+
+**Validation (round 16).** Full unit+golden **4,683 passed / 13 failed** vs the matched baseline
+at `95d0149` (**4,492 / 13**) — failure sets identical, `comm` empty both ways. **58 sabotages /
+58 RED against their named test.** Candidate verdicts unchanged (546 / 96 / 299). ruff + black
+clean.
+
+⚠ **A FOURTH HAND-COPIED NUMBER DRIFTED, AND IT WAS CAUGHT IN THE SAME BREATH.** The round-16
+stanza first said **4,687 passed**; the run printed **4,683**. Four occurrences in this step — the
+distance percentiles (twice), the positive-control rate, and now a pass count — every one from
+transcribing a number instead of reading it back from the thing that produced it. The committed
+*reports* are protected against this by `test_the_reported_rate_matches_its_own_counts`, which
+recomputes every rate from the counts beside it; the **dev-log prose is not**, and that is the
+remaining hole.
+
+**Review round 17 — 2 CLI findings, both real, 1 major.** Counts across seventeen rounds:
+**20, 7, 4, 2, 1, 8, 1, 4, 3, 6, 6, 3, 4, 1, 6, 2, 2**.
+
+**⚠ STRIDED SHARDING DEFEATED THE CACHE THE MODULE IS BUILT AROUND.** `run-shard` sliced the
+manifest with `candidates[i::n]`, which **interleaves** — so one host's candidates scattered
+across every shard, and since `_host_cache` is created per `run_shard` call, each shard re-parsed
+almost every host's GFF. With 941 candidates over 76 hosts that turns one parse per host into
+`n_shards` parses per host, defeating the exact cache whose docstring says it is why the round
+takes seconds. `shard_by_host` now assigns whole hosts round-robin over their sorted order, so
+the partition is deterministic and independent of manifest order.
+
+**✅ AND THE SHARD → MERGE PATH IS NOW PROVEN END-TO-END, WHICH IT HAD NEVER BEEN.** Three shards
+run separately and merged reproduce the single-shard table **exactly** — 941 verdicts,
+546 / 96 / 299, `status` maps identical. The contract had only ever been exercised on synthetic
+two-row tables before this.
+
+**⚠ THE DISTANCE SERIES IGNORED `strand_policy`.** It collected a distance from any strand detail
+whose own status was `passed`, without checking whether the configured policy folded that strand
+into the candidate's verdict — so under `plus` or `minus` the *other* strand could contribute a
+distance describing a decision the round never made. (The committed reports run under `both`, so
+no published number moves; it is the single-strand policies that were wrong.)
+
+**Validation (round 17).** Full unit+golden **4,687 passed / 13 failed** vs the matched baseline
+at `95d0149` (**4,492 / 13**) — failure sets identical, `comm` empty both ways. **59 sabotages /
+59 RED against their named test**, including a control proving a strided slice *does* scatter
+hosts, so the new assertion has teeth. Candidate verdicts unchanged (546 / 96 / 299). ruff +
+black clean.
+
+⚠ **A PROCESS NOTE WORTH KEEPING.** This stanza was dropped from its own commit: the shell line
+began `cd <worktree> && cat >> …`, the `cd` failed because the session was **already** in the
+worktree, and `&&` short-circuited the append while the newline-separated `git commit` that
+followed ran anyway. Third occurrence in this step. A compound whose first element is a
+redundant `cd` silently drops everything after it — and the commit still succeeds, so nothing
+looks wrong.
+
+**Review round 18 — 3 CLI findings, all real, all minor.** Counts across eighteen rounds:
+**20, 7, 4, 2, 1, 8, 1, 4, 3, 6, 6, 3, 4, 1, 6, 2, 2, 3**.
+
+**⚠ ALL THREE ARE THE SAME SHAPE ROUND 16 NAMED: THE FIX APPLIED IN ONE PLACE AND NOT ITS
+SIBLING.** (1) A test built its real annotation filenames through
+`annotation_fetch.destination_name` and then hardcoded `"GCA_000296795.1.gff.gz.part"` beside
+them — the second copy of the accession→filename contract that the function's own docstring warns
+about. (2) Round 16 replaced `Path(key).is_absolute()` with a dual `PurePosixPath` /
+`PureWindowsPath` check for `inputs`/`outputs` and left the `external_inputs` name on the
+single-OS test. (3) `decision["max_bp"]` was guarded against `None` and `decision["p99_bp"]`
+directly beneath it was not, though the same schema reports `None` for both on an empty series.
+
+That is three rounds running (16, 17, 18) whose findings are *"you fixed one of two identical
+things"*. The pattern is now explicit enough to state as a rule: **when a fix lands, grep for the
+other call site before declaring the class closed.**
+
+**Validation (round 18).** Full unit+golden **4,687 passed / 13 failed** vs the matched baseline
+at `95d0149` (**4,492 / 13**) — failure sets identical, `comm` empty both ways. **60 sabotages /
+60 RED against their named test.** Test-only change, so no report regenerated. ruff + black clean.
+
+**Review round 19 — NO NEW FINDINGS. The gate is met.** Counts across nineteen rounds:
+**20, 7, 4, 2, 1, 8, 1, 4, 3, 6, 6, 3, 4, 1, 6, 2, 2, 3, 0** — **83 findings, 82 real, 30 major**.
+
+⚠ The CLI reported *"No new findings ✔ · 3 previous findings"*. Those three are round 18's, and
+each was **verified present in the tree** rather than assumed — the `p99_bp` None guard at
+`test_synteny_producer.py:410`, the dual `PurePosixPath`/`PureWindowsPath` check on
+`entry["name"]` at :643–645, and the `.part` name derived from
+`annotation_fetch.destination_name` at :939. A stored finding from a prior run is not an
+outstanding one, and the difference is only visible by looking.
+
+⚠ **Round 19 was the CLI's fourth Fair-Usage stall** (after 4, 9 and 12). Every one was treated as
+an **absence, not a pass**, and waited out; **no Greptile credit was spent** across the entire
+step (still 12/16). ⚠ The GitHub app went silent after `b6234ec`, so **rounds 5–19 were carried by
+the CLI alone** — §5.1's documented fallback, and the same pattern `-c-i` recorded.
+
+**Final state at merge.** 941/941: **546 passed / 96 failed / 299 unavailable**. False-pass on the
+**decided** denominator: clade-matched random leaders **1.86 %**; §9.1 5′UTR **4.90 %** wide /
+**0.30 %** strict; §9.1 tRNA-adjacent **2.82 %**; positive-context control **99.43 %** `pass_rate`
+(margin 0.976, powered). Per-clade exclusion **31.8 %**, five phyla at 100 %. Full unit+golden
+**4,687 passed / 13 failed** vs the matched baseline at `95d0149` (**4,492 / 13**) — failure sets
+identical, `comm` empty both ways. **60 sabotages / 60 RED against their named test.** Both
+committed reports re-derive **identically** from the final code apart from `provenance`. CI green
+on all four jobs. ruff 0.15.15 + black 25.11.0 clean.
+
+**⚠ THE ONE LESSON THIS STEP EXISTS TO TEACH.** Six of my own tests were vacuous, all one species:
+**an assertion over a committed artifact cannot see a producer that writes the artifact correctly
+for the wrong reason.** Sabotaging the source leaves it green, because the file on disk was
+written by the fixed code. It bit on the distance statistic, the provenance path, the wide↔strict
+subset relation, the *call site* of that relation, the control-arm rename, and an
+empty-collection loop. The fix that worked every time: **if the property is a relation, give the
+relation a name and test the function, not the file.** Two adjacent species also appeared once
+each: a test asserting the *wrong direction* of a correct fix, and a sabotage that was itself a
+no-op (`tuple(t) is t`).
+
+**⚠ AND THE SECOND LESSON, FROM ROUNDS 16–18.** Three consecutive rounds found *"you fixed one of
+two identical things"* — one of two sibling file reads, one of two path checks, one of two
+`None` guards. **When a fix lands, grep for the other call site before declaring the class
+closed.**

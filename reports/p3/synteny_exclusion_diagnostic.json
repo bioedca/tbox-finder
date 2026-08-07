@@ -1,0 +1,293 @@
+{
+  "adr": "ADR-0006 D4 (criterion (c)); ADR-0005 D14 (spare rule), D15 (strand)",
+  "config": {
+    "hmm_fallback_available": false,
+    "max_intervening_orfs": 1,
+    "strand_policy": "both",
+    "sub_threshold_orf_nt": 150,
+    "window_bp": 500
+  },
+  "exclusion_rate": 0.3177470775770457,
+  "exclusion_reason_totals": {
+    "contig_absent_from_gff": 2,
+    "first_downstream_orf_unjudgeable": 11,
+    "host_unannotated": 286
+  },
+  "false_fail_probe": {
+    "available": false,
+    "reason": "the production substrate is a NEGATIVE substrate (host-order-admissible windows masked of known T-boxes), so it carries essentially no catalogued T-box loci to measure a false-FAIL RATE on; the annotation-driven failure mode is carried by the positive-context arm of the false-pass report"
+  },
+  "n_candidates": 941,
+  "n_unavailable": 299,
+  "passing_class_counts": {
+    "aa_biosynthesis": 220,
+    "aars": 332,
+    "transamidation": 2
+  },
+  "passing_class_counts_unit": "strand_evaluations",
+  "passing_distance_sensitivity": {
+    "decision_distance": {
+      "max_bp": 454,
+      "n": 554,
+      "p50_bp": 117,
+      "p95_bp": 266,
+      "p99_bp": 356
+    },
+    "max_bp": 1652,
+    "n": 554,
+    "n_candidates_passing": 546,
+    "n_candidates_passing_on_both_strands": 8,
+    "n_passed_via_tandem_carve_out": 5,
+    "note": "D4 asks for the empirical p95/p99 as a sensitivity check on the 500 bp pad; measured over the strand evaluations that PASSED in THIS corpus, not on catalogued Firmicutes T-boxes.  Two series: the element-relative distance (the reportable quantity) and the re-anchored decision distance criterion_c actually judged.  They differ only where D4's tandem carve-out fired, which is why the element-relative max may exceed window_bp while every decision distance is inside it.",
+    "p50_bp": 117,
+    "p95_bp": 272,
+    "p99_bp": 389,
+    "unit": "strand_evaluations",
+    "window_bp": 500
+  },
+  "per_clade": {
+    "Armatimonadota": {
+      "exclusion_rate": 0.6571428571428571,
+      "n": 35,
+      "reasons": {
+        "host_unannotated": 23
+      },
+      "status_counts": {
+        "passed": 12,
+        "unavailable": 23
+      }
+    },
+    "Atribacterota": {
+      "exclusion_rate": 0.047619047619047616,
+      "n": 126,
+      "reasons": {
+        "first_downstream_orf_unjudgeable": 6
+      },
+      "status_counts": {
+        "failed": 46,
+        "passed": 74,
+        "unavailable": 6
+      }
+    },
+    "Bacillota": {
+      "exclusion_rate": 0.3848396501457726,
+      "n": 343,
+      "reasons": {
+        "host_unannotated": 132
+      },
+      "status_counts": {
+        "failed": 23,
+        "passed": 188,
+        "unavailable": 132
+      }
+    },
+    "Bacillota_I": {
+      "exclusion_rate": 0.4444444444444444,
+      "n": 54,
+      "reasons": {
+        "first_downstream_orf_unjudgeable": 2,
+        "host_unannotated": 22
+      },
+      "status_counts": {
+        "failed": 10,
+        "passed": 20,
+        "unavailable": 24
+      }
+    },
+    "Bdellovibrionota_C": {
+      "exclusion_rate": 1.0,
+      "n": 2,
+      "reasons": {
+        "contig_absent_from_gff": 2
+      },
+      "status_counts": {
+        "unavailable": 2
+      }
+    },
+    "Chloroflexota": {
+      "exclusion_rate": 1.0,
+      "n": 38,
+      "reasons": {
+        "host_unannotated": 38
+      },
+      "status_counts": {
+        "unavailable": 38
+      }
+    },
+    "Deinococcota": {
+      "exclusion_rate": 0.2857142857142857,
+      "n": 42,
+      "reasons": {
+        "host_unannotated": 12
+      },
+      "status_counts": {
+        "failed": 3,
+        "passed": 27,
+        "unavailable": 12
+      }
+    },
+    "Desulfobacterota": {
+      "exclusion_rate": 1.0,
+      "n": 7,
+      "reasons": {
+        "host_unannotated": 7
+      },
+      "status_counts": {
+        "unavailable": 7
+      }
+    },
+    "Dictyoglomota": {
+      "exclusion_rate": 0.2549019607843137,
+      "n": 102,
+      "reasons": {
+        "host_unannotated": 26
+      },
+      "status_counts": {
+        "failed": 4,
+        "passed": 72,
+        "unavailable": 26
+      }
+    },
+    "Fibrobacterota": {
+      "exclusion_rate": 1.0,
+      "n": 1,
+      "reasons": {
+        "host_unannotated": 1
+      },
+      "status_counts": {
+        "unavailable": 1
+      }
+    },
+    "Fusobacteriota": {
+      "exclusion_rate": 0.0,
+      "n": 6,
+      "reasons": {},
+      "status_counts": {
+        "failed": 1,
+        "passed": 5
+      }
+    },
+    "Hadarchaeota": {
+      "exclusion_rate": 0.0,
+      "n": 1,
+      "reasons": {},
+      "status_counts": {
+        "failed": 1
+      }
+    },
+    "Hinthialibacterota": {
+      "exclusion_rate": 0.0,
+      "n": 4,
+      "reasons": {},
+      "status_counts": {
+        "passed": 4
+      }
+    },
+    "Nitrospirota": {
+      "exclusion_rate": 0.4444444444444444,
+      "n": 18,
+      "reasons": {
+        "host_unannotated": 8
+      },
+      "status_counts": {
+        "passed": 10,
+        "unavailable": 8
+      }
+    },
+    "Spirochaetota": {
+      "exclusion_rate": 0.39285714285714285,
+      "n": 28,
+      "reasons": {
+        "host_unannotated": 11
+      },
+      "status_counts": {
+        "passed": 17,
+        "unavailable": 11
+      }
+    },
+    "Sumerlaeota": {
+      "exclusion_rate": 0.3333333333333333,
+      "n": 6,
+      "reasons": {
+        "host_unannotated": 2
+      },
+      "status_counts": {
+        "passed": 4,
+        "unavailable": 2
+      }
+    },
+    "Sysuimicrobiota": {
+      "exclusion_rate": 0.02586206896551724,
+      "n": 116,
+      "reasons": {
+        "first_downstream_orf_unjudgeable": 3
+      },
+      "status_counts": {
+        "failed": 8,
+        "passed": 105,
+        "unavailable": 3
+      }
+    },
+    "Thermodesulfobiota": {
+      "exclusion_rate": 0.0,
+      "n": 8,
+      "reasons": {},
+      "status_counts": {
+        "passed": 8
+      }
+    },
+    "Thermotogota": {
+      "exclusion_rate": 1.0,
+      "n": 4,
+      "reasons": {
+        "host_unannotated": 4
+      },
+      "status_counts": {
+        "unavailable": 4
+      }
+    }
+  },
+  "provenance": {
+    "adr": "ADR-0006 D4 (criterion (c)); ADR-0005 D14 (spare rule), D15 (strand)",
+    "env_lock_hash": null,
+    "extra": {
+      "external_inputs": [
+        {
+          "name": "synteny_status.json",
+          "sha256": "3c8ac8e31b9e7cde6dee50328ca3efa7ac798b54def17885f92c930b8b04a464"
+        },
+        {
+          "name": "production_genomes_v0.parquet",
+          "sha256": "e52b34b79256d16a8cf9986cdc8e1d0d5de229ee43562b5a6ddb9528e7109f22"
+        }
+      ],
+      "hmm_fallback_available": false,
+      "max_intervening_orfs": 1,
+      "step": "P3-15'-c-ii",
+      "strand_policy": "both",
+      "sub_threshold_orf_nt": 150,
+      "window_bp": 500
+    },
+    "generated_at_utc": "2026-08-07T14:24:21.103772+00:00",
+    "git_sha": "95d0149449458d793cec31018aab650c5d1ed063",
+    "inputs": {},
+    "outputs": {},
+    "rule": "synteny_producer::diagnostics.exclusion",
+    "schema_version": "1.0",
+    "script": "src/tbox_finder/mining/synteny_producer.py",
+    "seed": 42
+  },
+  "pseudogene_diagnostic": {
+    "consequence": "D4 routes a pseudogenized or hypothetical first-downstream ORF to targeted Pfam/KO profiles.  That profile database is an unmet \u00a710.2 acquisition, so these loci resolve 'unavailable' and ADR-0005 D14 SPARES them \u2014 the fail-closed direction.  The count above is the size of the recall the missing fallback costs.",
+    "hmm_fallback_available": false,
+    "n_pseudogenized_orfs_encountered": 15,
+    "n_unjudgeable_orfs_encountered": 98
+  },
+  "schema_version": "1.0",
+  "step": "P3-15'-c-ii",
+  "tandem_carve_out": {
+    "max_intervening_orfs": 1,
+    "n_strand_evaluations_using_carve_out": 83,
+    "sub_threshold_orf_nt": 150
+  }
+}

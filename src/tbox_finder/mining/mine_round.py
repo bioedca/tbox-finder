@@ -99,6 +99,23 @@ GENOMIC_WINDOW_POOL = "genomic_window"
 #: evidence and is what the unit pin and the CLI preflight compare it against.
 MSA_SUPPLY_AVAILABLE = True
 
+#: The **criterion-(c)** analogue, flipped by P3-15′-c-ii: the 339 md5-verified NCBI GFFs are
+#: on disk (P3-15′-c-i), ``mining/synteny.py`` implements ADR-0006 D4's predicate and
+#: ``mining/synteny_producer.py`` writes the per-candidate ``candidate_id → status`` table the
+#: round reads.  Kept honest the same way ``MSA_SUPPLY_AVAILABLE`` is — by
+#: :func:`tbox_finder.mining.synteny_producer.derive_synteny_supply_available`, which
+#: re-derives the fact from disk and is what the unit pin and the CLI preflight compare it
+#: against, so the constant cannot drift from reality in **either** direction.
+#:
+#: ⚠ **This module's own P2 CLI does not read it, and that asymmetry is deliberate.** The P3
+#: round (``remine``) carries the two-way ``--synteny-available`` / ``--no-synteny-available``
+#: pair defaulted from this constant plus the exit-4 unevidenced preflight; the P2 CLI keeps
+#: its bare ``store_true``, so a P2 round declares the backend only when explicitly asked.
+#: The drift is one-directional — P2 can under-declare (refuse / spare more) but never
+#: over-declare — which is the same fail-closed shape recorded for
+#: ``slurm/p3/stage1_remine.sbatch``'s ``MSA_SUPPLY_AVAILABLE`` env var at P3-15′-a.
+SYNTENY_SUPPLY_AVAILABLE = True
+
 #: The git-tracked evidence :func:`derive_msa_supply_available` re-derives the supply from.
 #: All three ride any checkout (including the cluster's and CI's) — none is DVC- or
 #: LFS-shaped — so the derivation answers the same in every environment.
@@ -489,7 +506,9 @@ def parse_window_name(window_name: str) -> tuple[str, int, int]:
 
 
 def candidate_evidence(
-    candidate_id: str, covariation_status: Mapping[str, str] | None
+    candidate_id: str,
+    covariation_status: Mapping[str, str] | None,
+    synteny_status: Mapping[str, str] | None = None,
 ) -> SpareRuleEvidence:
     """The candidate's :class:`SpareRuleEvidence`, given the round's covariation status table.
 
@@ -502,14 +521,25 @@ def candidate_evidence(
       covariation-status table) → the candidate's ``any_helix_rscape`` disjunct is set to its
       **produced** status. A ``candidate_id`` **absent** from the map resolves to
       :data:`STATUS_UNAVAILABLE` — a dropped shard, a candidate the producer never scored, cannot
-      fail *open* (it is spared, not mined). The other two disjuncts stay ``unavailable`` (no
-      relaxed-architecture / synteny backend exists at P2); :class:`SpareRuleEvidence` validates
-      the status string, so a corrupt value raises rather than reading as "not passed".
+      fail *open* (it is spared, not mined).
+
+    ``synteny_status`` is the criterion-(c) analogue P3-15′-c-ii added
+    (:func:`tbox_finder.mining.synteny_producer.load_status_map`), read under the **same**
+    fail-closed absent-id rule.  ``relaxed_architecture`` is the one disjunct still without a
+    backend (P3-15′-d), so it stays ``unavailable``.  :class:`SpareRuleEvidence` validates
+    every status string, so a corrupt value raises rather than reading as "not passed".
     """
-    if covariation_status is None:
-        return SpareRuleEvidence()
     return SpareRuleEvidence(
-        any_helix_rscape=str(covariation_status.get(candidate_id, STATUS_UNAVAILABLE))
+        any_helix_rscape=(
+            STATUS_UNAVAILABLE
+            if covariation_status is None
+            else str(covariation_status.get(candidate_id, STATUS_UNAVAILABLE))
+        ),
+        downstream_aaRS_synteny=(
+            STATUS_UNAVAILABLE
+            if synteny_status is None
+            else str(synteny_status.get(candidate_id, STATUS_UNAVAILABLE))
+        ),
     )
 
 
@@ -595,7 +625,10 @@ def write_fp_manifest(candidates: Sequence[MiningCandidate], path: str | Path) -
 
 
 def read_fp_manifest(
-    path: str | Path, *, covariation_status: Mapping[str, str] | None = None
+    path: str | Path,
+    *,
+    covariation_status: Mapping[str, str] | None = None,
+    synteny_status: Mapping[str, str] | None = None,
 ) -> list[MiningCandidate]:
     """Reconstitute the leg-(b) false positives, stamping each with its produced covariation status.
 
@@ -617,7 +650,7 @@ def read_fp_manifest(
                 locus_start=int(r["locus_start"]),
                 locus_end=int(r["locus_end"]),
                 score=float(r.get("score", 0.0)),
-                evidence=candidate_evidence(cid, covariation_status),
+                evidence=candidate_evidence(cid, covariation_status, synteny_status),
             )
         )
     return out
@@ -668,6 +701,7 @@ def apply_spare_rule(
     *,
     rscape_installed: bool,
     msa_supply_available: bool,
+    synteny_status_table: str | Path | None = None,
     relaxed_arch_available: bool = False,
     synteny_available: bool = False,
     union_prior: str | Path = "data/processed/priors/union_prior.parquet",
@@ -687,9 +721,45 @@ def apply_spare_rule(
     """
     from tbox_finder.mining.covariation_producer import load_status_map
     from tbox_finder.mining.hard_negative import mine_round as run_mine_round
+    from tbox_finder.mining.synteny_producer import ProducerError as SyntenyProducerError
+    from tbox_finder.mining.synteny_producer import load_status_map as load_synteny_status_map
+
+    # Declaring the (c) backend available with no status table is the SILENT form of a
+    # refusal: every candidate's synteny disjunct reads ``unavailable``, all are spared, and
+    # the round reports a zero yield indistinguishable from an honest one.
+    if synteny_available and synteny_status_table is None:
+        raise MineRoundError(
+            "synteny_available=True but no synteny status table was supplied; the (c) "
+            "disjunct would read 'unavailable' for every candidate and spare them all"
+        )
+    if not synteny_available and synteny_status_table is not None:
+        raise MineRoundError(
+            "a synteny status table was supplied but synteny_available=False; "
+            "hard_negative.mine_round refuses produced evidence for an undeclared backend"
+        )
+
+    try:
+        synteny_status_map = (
+            load_synteny_status_map(synteny_status_table)
+            if synteny_status_table is not None
+            else None
+        )
+    except (
+        SyntenyProducerError,
+        OSError,
+        ValueError,
+        AttributeError,
+        KeyError,
+        TypeError,
+    ) as exc:
+        # A data fault this round must REPORT: the caller branches on the return code, and an
+        # unhandled ProducerError bypasses that path entirely.
+        raise MineRoundError(f"synteny status table unusable: {exc}") from exc
 
     status_map = load_status_map(status_table)
-    candidates = read_fp_manifest(fp_manifest, covariation_status=status_map)
+    candidates = read_fp_manifest(
+        fp_manifest, covariation_status=status_map, synteny_status=synteny_status_map
+    )
     availability = build_round_availability(
         rscape_installed=rscape_installed,
         msa_supply_available=msa_supply_available,
@@ -1252,6 +1322,7 @@ def _cmd_apply_spare_rule(args: argparse.Namespace) -> int:
         args.status_table,
         rscape_installed=bool(rscape_installed),
         msa_supply_available=bool(args.msa_supply_available),
+        synteny_status_table=args.synteny_status,
         relaxed_arch_available=bool(args.relaxed_arch_available),
         synteny_available=bool(args.synteny_available),
         union_prior=args.union_prior,
@@ -1300,7 +1371,15 @@ def _add_msa_supply_flags(parser: argparse.ArgumentParser) -> None:
     )
 
 
-def main(argv: Sequence[str] | None = None) -> int:
+def build_parser() -> argparse.ArgumentParser:
+    """The P2 CLI parser, extracted so it can be inspected without running a round.
+
+    ⚠ Review found the test that checked ``--synteny-status`` was reachable doing so by
+    parsing ``[..., "--synteny-status", "t.json", "--help"]`` and asserting exit 0.  argparse
+    handles ``--help`` **before** it rejects an unknown option, so that exits 0 even for a
+    flag that does not exist — verified by execution on a parser with no such option at all.
+    The assertion was vacuous; a structural check needs the parser object.
+    """
     parser = argparse.ArgumentParser(prog="tbox_finder.mining.mine_round")
     sub = parser.add_subparsers(dest="command", required=True)
 
@@ -1368,11 +1447,22 @@ def main(argv: Sequence[str] | None = None) -> int:
     _add_msa_supply_flags(apply)
     apply.add_argument("--relaxed-arch-available", action="store_true")
     apply.add_argument("--synteny-available", action="store_true")
+    apply.add_argument(
+        "--synteny-status",
+        default=None,
+        help=(
+            "candidate_id → criterion-(c) status (synteny_producer merge output); "
+            "REQUIRED whenever the round declares --synteny-available"
+        ),
+    )
     apply.add_argument("--union-prior", default="data/processed/priors/union_prior.parquet")
     apply.add_argument("--corpus", default="data/processed/master_clean_v0.parquet")
     apply.set_defaults(func=_cmd_apply_spare_rule)
+    return parser
 
-    args = parser.parse_args(argv)
+
+def main(argv: Sequence[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
     return int(args.func(args))
 
 
