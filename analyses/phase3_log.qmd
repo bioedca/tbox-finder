@@ -4584,3 +4584,42 @@ other call site before declaring the class closed.**
 **Validation (round 18).** Full unit+golden **4,687 passed / 13 failed** vs the matched baseline
 at `95d0149` (**4,492 / 13**) — failure sets identical, `comm` empty both ways. **60 sabotages /
 60 RED against their named test.** Test-only change, so no report regenerated. ruff + black clean.
+
+**Review round 19 — NO NEW FINDINGS. The gate is met.** Counts across nineteen rounds:
+**20, 7, 4, 2, 1, 8, 1, 4, 3, 6, 6, 3, 4, 1, 6, 2, 2, 3, 0** — **83 findings, 82 real, 30 major**.
+
+⚠ The CLI reported *"No new findings ✔ · 3 previous findings"*. Those three are round 18's, and
+each was **verified present in the tree** rather than assumed — the `p99_bp` None guard at
+`test_synteny_producer.py:410`, the dual `PurePosixPath`/`PureWindowsPath` check on
+`entry["name"]` at :643–645, and the `.part` name derived from
+`annotation_fetch.destination_name` at :939. A stored finding from a prior run is not an
+outstanding one, and the difference is only visible by looking.
+
+⚠ **Round 19 was the CLI's fourth Fair-Usage stall** (after 4, 9 and 12). Every one was treated as
+an **absence, not a pass**, and waited out; **no Greptile credit was spent** across the entire
+step (still 12/16). ⚠ The GitHub app went silent after `b6234ec`, so **rounds 5–19 were carried by
+the CLI alone** — §5.1's documented fallback, and the same pattern `-c-i` recorded.
+
+**Final state at merge.** 941/941: **546 passed / 96 failed / 299 unavailable**. False-pass on the
+**decided** denominator: clade-matched random leaders **1.86 %**; §9.1 5′UTR **4.90 %** wide /
+**0.30 %** strict; §9.1 tRNA-adjacent **2.82 %**; positive-context control **99.43 %** `pass_rate`
+(margin 0.976, powered). Per-clade exclusion **31.8 %**, five phyla at 100 %. Full unit+golden
+**4,687 passed / 13 failed** vs the matched baseline at `95d0149` (**4,492 / 13**) — failure sets
+identical, `comm` empty both ways. **60 sabotages / 60 RED against their named test.** Both
+committed reports re-derive **identically** from the final code apart from `provenance`. CI green
+on all four jobs. ruff 0.15.15 + black 25.11.0 clean.
+
+**⚠ THE ONE LESSON THIS STEP EXISTS TO TEACH.** Six of my own tests were vacuous, all one species:
+**an assertion over a committed artifact cannot see a producer that writes the artifact correctly
+for the wrong reason.** Sabotaging the source leaves it green, because the file on disk was
+written by the fixed code. It bit on the distance statistic, the provenance path, the wide↔strict
+subset relation, the *call site* of that relation, the control-arm rename, and an
+empty-collection loop. The fix that worked every time: **if the property is a relation, give the
+relation a name and test the function, not the file.** Two adjacent species also appeared once
+each: a test asserting the *wrong direction* of a correct fix, and a sabotage that was itself a
+no-op (`tuple(t) is t`).
+
+**⚠ AND THE SECOND LESSON, FROM ROUNDS 16–18.** Three consecutive rounds found *"you fixed one of
+two identical things"* — one of two sibling file reads, one of two path checks, one of two
+`None` guards. **When a fix lands, grep for the other call site before declaring the class
+closed.**
