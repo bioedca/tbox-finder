@@ -710,3 +710,82 @@ class TestStrictSubsampleIsASubset:
     def test_an_all_d4_sample_yields_nothing_rather_than_everything(self) -> None:
         sample = [self._cds("alanine--tRNA ligase", 100), self._cds("threonine synthase", 500)]
         assert synteny_producer.strict_subsample(sample) == []
+
+
+class TestStrictArmReusesTheSameWindows:
+    def test_the_two_utr_arms_share_a_single_draw(self, false_pass: dict) -> None:
+        """⚠ The report claimed "the same windows, filtered" while the strict arm re-drew its
+        spans with a fresh ``rng.choice(lengths)`` — that is a second draw over a nested CDS
+        population, not a subset of one draw.  Both arms now read the same window objects."""
+        wide = false_pass["arms"]["nine_one_five_prime_utr_decoys"]
+        strict = false_pass["arms"]["nine_one_five_prime_utr_decoys_excluding_d4_classes"]
+        assert strict["n"] <= wide["n"]
+        # Every status bucket of the subset is bounded by its source's.
+        for status, count in strict["status_counts"].items():
+            assert count <= wide["status_counts"].get(status, 0), status
+        assert "SAME window objects" in strict["note"]
+        assert "strict subset" in strict["note"]
+
+    def test_the_reported_rate_matches_its_own_counts(self, false_pass: dict) -> None:
+        """A rate that does not reconcile with the counts beside it is a number nobody can
+        check — and the PR description had already drifted from it once."""
+        for name, arm in false_pass["arms"].items():
+            if "n" not in arm:
+                continue
+            assert arm["n"] == sum(arm["status_counts"].values()), name
+            if arm["n"]:
+                expected = arm["status_counts"].get(STATUS_PASSED, 0) / arm["n"]
+                assert arm["false_pass_rate"] == pytest.approx(expected), name
+        control = false_pass["positive_context_control"]
+        assert control["false_pass_rate"] == pytest.approx(
+            control["status_counts"].get(STATUS_PASSED, 0) / control["n"]
+        )
+        background = false_pass["arms"]["clade_matched_random_leaders"]["false_pass_rate"]
+        assert false_pass["control"]["margin"] == pytest.approx(
+            control["false_pass_rate"] - background
+        )
+
+
+class TestUtrArmWindowsAreOneDraw:
+    """The relation the committed-report assertion could not guard: strict ⊆ wide, by identity."""
+
+    def _cds(self, product: str, start: int, strand: str = "+") -> gff3.CdsFeature:
+        return gff3.CdsFeature(
+            seqid="c1",
+            feature_id=f"f{start}",
+            start=start,
+            end=start + 300,
+            strand=strand,
+            segments=((start, start + 300),),
+            attributes={"product": (product,)},
+        )
+
+    def test_the_strict_list_is_a_sublist_of_the_wide_one(self) -> None:
+        sample = [
+            self._cds("alanine--tRNA ligase", 1000),
+            self._cds("DNA gyrase subunit A", 2000),
+            self._cds("threonine synthase", 3000),
+            self._cds("hypothetical protein", 4000),
+        ]
+        wide, strict = utr_windows_for(sample)
+        assert len(strict) < len(wide), "the D4-class members must actually be removed"
+        assert all(w in wide for w in strict), "the same window objects, not a second draw"
+        # …and asserted by IDENTITY, so a filter that dropped the wrong two would still fail.
+        assert strict == [wide[1], wide[3]]
+
+    def test_an_all_non_d4_sample_keeps_every_window(self) -> None:
+        """The positive control: a filter that removed everything would satisfy the test above."""
+        sample = [self._cds("DNA gyrase subunit A", 1000), self._cds("hypothetical protein", 2000)]
+        wide, strict = utr_windows_for(sample)
+        assert strict == wide
+
+    def test_a_span_count_mismatch_refuses(self) -> None:
+        sample = [self._cds("DNA gyrase subunit A", 1000)]
+        with pytest.raises(synteny_producer.ProducerError, match="one span per CDS"):
+            synteny_producer.utr_arm_windows(sample, spans=[100, 200], extents={"c1": 99999})
+
+
+def utr_windows_for(sample):
+    return synteny_producer.utr_arm_windows(
+        sample, spans=[120] * len(sample), extents={"c1": 999_999}
+    )

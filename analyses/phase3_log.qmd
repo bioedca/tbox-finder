@@ -4179,3 +4179,34 @@ invocation ran from the main checkout because the backgrounded `cd` did not appl
 cwd, and reported *"No committed changes detected — nothing to review"*. That is exactly §5.1's
 rate-limit trap in a different costume: it was re-run from the worktree before the round was
 counted.
+
+**Review round 4 — 2 findings (app 2), both real, both major.** Counts across four rounds:
+**20, 7, 4, 2**.
+
+**⚠ "THE SAME WINDOWS, FILTERED" WAS STILL NOT TRUE.** Round 3 made the strict 5′UTR arm's *CDS
+population* a subset of the wide arm's, but each arm still drew its own spans with a fresh
+`rng.choice(lengths)` — so the windows were never the same windows, only the genes were. The two
+lists now come from **one** draw (`utr_arm_windows` returns `(wide, strict)` where `strict` is a
+sublist of `wide`), and the note says what the code does. Final rates: wide **4.74 %**, strict
+**0.35 %**, over 9,097 and 8,693 windows.
+
+**⚠ A FOURTH ARTIFACT-PINNING TEST WENT GREEN UNDER SABOTAGE, AND THIS TIME THE FIX WAS TO MOVE
+THE RELATION INTO A FUNCTION.** `strict_subsample` was already tested directly, but the sabotage
+targeted the **call site** — which no test could see, because the only assertion on the wide↔strict
+relation read the committed report. `utr_arm_windows` now owns that relation and is tested for it
+by identity (`strict == [wide[1], wide[3]]`, not by count), with a positive control for an
+all-non-D4 sample and a refusal for a span-count mismatch. **Four occurrences in one step**; the
+lesson is not "add another artifact assertion" but *"if the property is a relation, give the
+relation a name."*
+
+**⚠ THE PR DESCRIPTION DRIFTED FROM THE ARTIFACT A SECOND TIME.** It quoted a 99.35 % positive-
+context rate while the report's own counts give **99.414 %**. Both drifts in this step came from
+hand-copying a number that a later regeneration moved; the reconciliation is now asserted in
+`test_the_reported_rate_matches_its_own_counts`, which recomputes every arm's rate and the
+control margin from the counts beside them.
+
+**Validation (round 4).** Full unit+golden **4,637 passed / 13 failed** vs the matched baseline at
+`95d0149` (**4,492 / 13**) — failure sets identical, `comm` empty both ways. **34 sabotages / 34
+RED against their named test.** ruff + black clean. ⚠ The CLI's round-4 invocation returned
+*"Review limit reached — wait 18 minutes"*; that is an **absence, not a pass**, and it is being
+waited out rather than escalated (waiting is free, so no Greptile credit was spent).

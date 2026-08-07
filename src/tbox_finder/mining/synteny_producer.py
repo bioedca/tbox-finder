@@ -78,6 +78,7 @@ __all__ = [
     "load_clades",
     "load_status_map",
     "strict_subsample",
+    "utr_arm_windows",
     "main",
     "merge_status_tables",
 ]
@@ -599,6 +600,34 @@ def strict_subsample(sample: Sequence[gff3.CdsFeature]) -> list[gff3.CdsFeature]
     ]
 
 
+def utr_arm_windows(
+    sample: Sequence[gff3.CdsFeature],
+    *,
+    spans: Sequence[int],
+    extents: Mapping[str, int],
+) -> tuple[list[tuple[str, int, int, str]], list[tuple[str, int, int, str]]]:
+    """The §9.1 5′UTR arm's wide and strict window lists, from **one** draw.
+
+    Returns ``(wide, strict)`` where ``strict`` is a sublist of ``wide`` — the same window
+    objects, filtered to those whose own CDS names none of D4's classes.  Extracted as a named
+    function because the property that matters is a relation *between* the two lists, and the
+    committed-report assertion that was supposed to guard it stayed green under sabotage: a
+    test that reads a committed artifact validates the artifact, never the code that made it.
+    """
+    if len(spans) != len(sample):
+        raise ProducerError(f"need one span per CDS, got {len(spans)} for {len(sample)}")
+    pairs = [
+        (cds, window)
+        for cds, window in (
+            (cds, _upstream_window(cds, span=span, contig_extent=extents.get(cds.seqid)))
+            for cds, span in zip(sample, spans, strict=True)
+        )
+        if window
+    ]
+    keep = {id(cds) for cds in strict_subsample(sample)}
+    return [w for _c, w in pairs], [w for c, w in pairs if id(c) in keep]
+
+
 def _evaluate_windows(
     host: HostAnnotation,
     windows: Iterable[tuple[str, int, int]],
@@ -782,25 +811,16 @@ def false_pass_report(
         # separately made the "subset" larger than its source (9,087 vs 9,065 rows), because
         # two draws each capped at ``n_per_host`` are not nested — and a filtered subset that
         # outnumbers its population is not a second reading of one arm, it is a second arm.
-        strict_sample = strict_subsample(sample)
+
         extents = {sid: max(c.end for c in feats) for sid, feats in host.by_seqid.items()}
-        utr_windows = [
-            w
-            for w in (
-                _upstream_window(c, span=rng.choice(lengths), contig_extent=extents.get(c.seqid))
-                for c in sample
-            )
-            if w
-        ]
-        utr_decoys += _evaluate_oriented(host, utr_windows, config=config)
-        strict_windows = [
-            w
-            for w in (
-                _upstream_window(c, span=rng.choice(lengths), contig_extent=extents.get(c.seqid))
-                for c in strict_sample
-            )
-            if w
-        ]
+        # ⚠ Build the (CDS, window) pairs ONCE.  The strict arm reads these very window
+        # objects — re-drawing spans with a fresh ``rng.choice(lengths)`` would make it a
+        # second draw over a nested CDS population, and the report said "the same windows,
+        # filtered" while doing exactly that.
+        wide_windows, strict_windows = utr_arm_windows(
+            sample, spans=[rng.choice(lengths) for _ in sample], extents=extents
+        )
+        utr_decoys += _evaluate_oriented(host, wide_windows, config=config)
         strict_utr_decoys += _evaluate_oriented(host, strict_windows, config=config)
 
         # …and windows upstream of annotated tRNA genes — §9.1's tRNA-adjacent sub-class.
@@ -878,8 +898,9 @@ def false_pass_report(
             "nine_one_five_prime_utr_decoys_excluding_d4_classes": dict(
                 _arm(strict_utr_decoys),
                 note=(
-                    "the SAME sampled windows as the arm above, filtered to those whose "
-                    "downstream CDS names none of D4's four classes, "
+                    "the SAME window objects as the arm above — one draw, then filtered to "
+                    "the windows whose own CDS names none of D4's four classes, so this arm "
+                    "is a strict subset of it rather than a second draw. "
                     "so every pass is unambiguously false; the arm above includes 5′UTRs of "
                     "aaRS/biosynthesis genes, which in a real genome may themselves be T-box "
                     "leaders"
