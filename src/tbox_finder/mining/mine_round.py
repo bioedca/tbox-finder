@@ -1366,6 +1366,10 @@ def _cmd_apply_spare_rule(args: argparse.Namespace) -> int:
     # the call that turns candidates into hard negatives, and it is reached on a different
     # job (mine_round_retrain.sbatch) from the one that ran `plan`, so it cannot inherit the
     # preflight's verdict. Declared-available + unevidenced is fatal (4), never a quiet round.
+    from tbox_finder.mining.architecture_producer import (
+        derive_relaxed_arch_supply_available,
+    )
+
     derivation = derive_msa_supply_available()
     if msa_supply_declaration_unevidenced(
         {"msa_supply_available": args.msa_supply_available, "msa_supply_derivation": derivation}
@@ -1373,6 +1377,18 @@ def _cmd_apply_spare_rule(args: argparse.Namespace) -> int:
         print(
             "FATAL: --msa-supply-available declared, but this checkout cannot evidence the "
             f"covariation MSA supply — {'; '.join(derivation['reasons'])}",
+            file=sys.stderr,
+        )
+        return 4
+    # The SAME gate for the (b) declaration. Without it this command accepts
+    # --relaxed-arch-available on a checkout that cannot evidence the architecture freeze
+    # or its supply clauses — the fail-OPEN direction, and the one `remine` already
+    # refuses. Two apply paths again: they must agree about what "declared" costs.
+    arch_derivation = derive_relaxed_arch_supply_available()
+    if bool(args.relaxed_arch_available) and not bool(arch_derivation.get("available")):
+        print(
+            "FATAL: --relaxed-arch-available declared, but this checkout cannot evidence "
+            f"the criterion-(b) supply — {'; '.join(arch_derivation['reasons'])}",
             file=sys.stderr,
         )
         return 4

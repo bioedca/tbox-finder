@@ -101,6 +101,25 @@ class TestStockholmParsing:
         with pytest.raises(architecture.ArchitectureError, match="SS_cons"):
             architecture.parse_stockholm(text)
 
+    def test_duplicate_row_names_refuse_rather_than_collapsing(self) -> None:
+        """`names` keeps both while the dict merges, so n_sequences would OVERSTATE the
+        depth the ADR-0006 A2 floor is checked against."""
+        text = sto([("s1", ANTITERM_SEQ), ("s1", ANTITERM_SEQ)], ANTITERM_SS)
+        # The delegate accumulates rows BY NAME, so two rows sharing one concatenate into a
+        # double-width row and the ragged guard fires first. Either refusal is correct; what
+        # must never happen is a ConsensusStructure whose n_sequences exceeds its real rows.
+        with pytest.raises(architecture.ArchitectureError, match="duplicate row names|ragged"):
+            architecture.parse_stockholm(text)
+
+    def test_n_sequences_cannot_exceed_the_rows_actually_present(self) -> None:
+        """The invariant behind the A2 depth floor: `n_sequences` is `len(sequences)` by
+        construction, so a duplicate row name cannot inflate the depth
+        `architecture_status` gates on. Rows sharing a name concatenate into ONE entry."""
+        text = "# STOCKHOLM 1.0\ns1 ACGU\ns1 ACGU\n#=GC SS_cons ((((((((\n//\n"
+        parsed = architecture.parse_stockholm(text)
+        assert parsed.n_sequences == len(parsed.sequences) == 1
+        assert parsed.row("s1") == "ACGUACGU"
+
     def test_a_ragged_alignment_refuses(self) -> None:
         text = sto([("s1", ANTITERM_SEQ), ("s2", ANTITERM_SEQ[:-4])], ANTITERM_SS)
         with pytest.raises(architecture.ArchitectureError, match="ragged"):
@@ -242,17 +261,100 @@ class TestNccaBulgeIsThreeValued:
         )
         assert state == architecture.BULGE_DETECTED and detail["matched_offset"] == 3
 
-    def test_wobble_is_off_unless_asked_for(self) -> None:
-        seq = ANTITERM_SEQ[:4] + "UGUCACC" + ANTITERM_SEQ[11:]
+    def test_wobble_is_off_unless_asked_for_and_tests_the_REAL_interface(self) -> None:
+        """⚠ The first version of this test locked in an inverted rule.
+
+        ``motif_base`` is already the Watson-Crick complement of the acceptor base, so
+        comparing the candidate base against *it* is not a pairing question. The wobble is
+        between the bulge base and the **acceptor** base.
+
+        Concretely: motif position 1 is ``U`` (it pairs acceptor ``A76``). A real wobble
+        there is bulge ``G`` against acceptor ``A``... which is not a wobble either — so
+        take position 2, motif ``G``, acceptor ``C75``: no wobble. The reachable case on
+        this motif is a wildcard-free position whose acceptor base is ``U`` or ``G``. With
+        acceptor ``CCA`` reversed to motif ``UGG``, position 0's acceptor base is ``A``.
+        So the honest test uses an acceptor that *has* a wobble-capable partner: acceptor
+        ``G`` -> motif ``C`` -> a bulge ``U`` wobble-pairs the acceptor ``G``.
+        """
         pairs = architecture.pair_table(ANTITERM_SS)
+        # acceptor "GG" -> motif "CC"; bulge "UU" wobble-pairs acceptor "GG", and must NOT
+        # be accepted as a plain Watson-Crick match.
+        seq = ANTITERM_SEQ[:4] + "UUAGAUG" + ANTITERM_SEQ[11:]
         strict, _ = architecture.ncca_bulge_status(
-            seq, pairs, bulge_size_range=(5, 9), ncca_pairing_nt=3
+            seq, pairs, bulge_size_range=(5, 9), ncca_pairing_nt=2, acceptor_3prime="GG"
         )
         loose, _ = architecture.ncca_bulge_status(
-            seq, pairs, bulge_size_range=(5, 9), ncca_pairing_nt=3, allow_wobble=True
+            seq,
+            pairs,
+            bulge_size_range=(5, 9),
+            ncca_pairing_nt=2,
+            acceptor_3prime="GG",
+            allow_wobble=True,
         )
         assert strict == architecture.BULGE_ABSENT
         assert loose == architecture.BULGE_DETECTED
+
+    def test_the_wobble_arm_compares_against_the_ACCEPTOR_base(self) -> None:
+        """Unit-level pin on the direction, independent of any bulge geometry."""
+        # motif "C" <- acceptor "G". A bulge U wobble-pairs the acceptor G.
+        assert architecture._pairs_with("U", "C", allow_wobble=True) is True
+        assert architecture._pairs_with("U", "C", allow_wobble=False) is False
+        # motif "G" <- acceptor "C". A bulge U does NOT pair C, by wobble or otherwise.
+        assert architecture._pairs_with("U", "G", allow_wobble=True) is False
+
+    def test_the_all_wildcard_register_is_dropped_not_matched(self) -> None:
+        """At ncca_pairing_nt=1 the motif UGGN yields registers U, G, G and **N**. Keeping
+        N would make every admissibly-sized bulge read `detected` regardless of sequence —
+        a vacuous detector. A bulge of only C/A residues must therefore still be ABSENT."""
+        seq = ANTITERM_SEQ[:4] + "CACACAC" + ANTITERM_SEQ[11:]
+        state, _ = architecture.ncca_bulge_status(
+            seq,
+            architecture.pair_table(ANTITERM_SS),
+            bulge_size_range=(5, 9),
+            ncca_pairing_nt=1,
+        )
+        assert state == architecture.BULGE_ABSENT
+
+    def test_a_motif_with_ONLY_wildcards_refuses_outright(self) -> None:
+        with pytest.raises(architecture.ArchitectureError, match="all-wildcard"):
+            architecture.ncca_bulge_status(
+                ANTITERM_SEQ,
+                architecture.pair_table(ANTITERM_SS),
+                bulge_size_range=(5, 9),
+                ncca_pairing_nt=1,
+                acceptor_3prime="N",
+            )
+
+    def test_positive_control_a_constrained_register_still_matches_at_one(self) -> None:
+        state, _ = architecture.ncca_bulge_status(
+            ANTITERM_SEQ,
+            architecture.pair_table(ANTITERM_SS),
+            bulge_size_range=(5, 9),
+            ncca_pairing_nt=1,
+        )
+        assert state == architecture.BULGE_DETECTED
+
+    def test_an_ambiguity_code_breaks_contiguity_rather_than_vanishing(self) -> None:
+        """Deleting IUPAC codes as if they were gaps FABRICATES a contiguous match — a
+        false positive, the one direction this module must not get wrong."""
+        seq = ANTITERM_SEQ[:4] + "UGNGCAC" + ANTITERM_SEQ[11:]
+        state, _ = architecture.ncca_bulge_status(
+            seq,
+            architecture.pair_table(ANTITERM_SS),
+            bulge_size_range=(5, 9),
+            ncca_pairing_nt=3,
+        )
+        assert state == architecture.BULGE_ABSENT
+
+    def test_positive_control_a_gap_DOES_vanish(self) -> None:
+        gapped_seq = ANTITERM_SEQ[:4] + "UG-GCAC" + ANTITERM_SEQ[11:]
+        state, _ = architecture.ncca_bulge_status(
+            gapped_seq,
+            architecture.pair_table(ANTITERM_SS),
+            bulge_size_range=(5, 9),
+            ncca_pairing_nt=3,
+        )
+        assert state == architecture.BULGE_DETECTED
 
     def test_a_range_that_cannot_hold_the_motif_refuses(self) -> None:
         """Silently reading 'undetectable' for every candidate would spare the whole corpus."""

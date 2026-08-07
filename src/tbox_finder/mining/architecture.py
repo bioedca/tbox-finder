@@ -182,6 +182,10 @@ TRNA_ACCEPTOR_3PRIME = "NCCA"
 #: The wildcard symbol, in both the acceptor string and the derived motif.
 ANY_BASE = "N"
 
+#: Alignment gap characters. Everything else — including IUPAC ambiguity codes — is a
+#: residue, so it occupies a column and breaks contiguity rather than vanishing.
+GAP_SYMBOLS: frozenset[str] = frozenset(".-~_")
+
 #: Watson–Crick complements, RNA alphabet.  ``T`` is folded to ``U`` on input rather
 #: than given an entry here, so a DNA-alphabet sequence cannot quietly take a
 #: different code path from an RNA one.
@@ -215,12 +219,25 @@ def acceptor_pairing_motif(acceptor_3prime: str = TRNA_ACCEPTOR_3PRIME) -> str:
 
 
 def _pairs_with(base: str, motif_base: str, *, allow_wobble: bool) -> bool:
-    """Does ``base`` satisfy ``motif_base`` of an :func:`acceptor_pairing_motif` motif?"""
+    """Does ``base`` satisfy ``motif_base`` of an :func:`acceptor_pairing_motif` motif?
+
+    ⚠ The wobble arm compares ``base`` to the **acceptor** base, not to ``motif_base``.
+    ``motif_base`` is *already* the Watson–Crick complement of the acceptor base, so
+    comparing against it asks whether the bulge base wobble-pairs with its own required
+    partner's complement — which is not a pairing question at all. Recovering the acceptor
+    base with ``WATSON_CRICK[motif_base]`` puts the test back on the real interface.
+    Measured consequence of the inverted form on the default ``NCCA``/``UGGN``: it admitted
+    only NON-pairing bases and could never admit a real G·U wobble, because ``UGGN`` carries
+    no ``A`` or ``C`` motif position for the (G,U)/(U,G) pairs to match against.
+    """
     if motif_base == ANY_BASE:
         return base in WATSON_CRICK
     if base == motif_base:
         return True
-    return allow_wobble and (base, motif_base) in WOBBLE_PAIRS
+    if not allow_wobble:
+        return False
+    acceptor_base = WATSON_CRICK[motif_base]
+    return (base, acceptor_base) in WOBBLE_PAIRS
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -277,6 +294,14 @@ def parse_stockholm(source: str | Path) -> ConsensusStructure:
         raise ArchitectureError(f"alignment carries no '#=GC {SS_CONS_TAG}' line")
     if not seqs:
         raise ArchitectureError("alignment carries no sequence rows")
+    # ⚠ Review raised that a duplicate row name could let ``n_sequences`` overstate the real
+    # depth the ADR-0006 A2 Pin 2 floor is checked against. It cannot, and the reason is
+    # worth stating rather than guarding: ``names`` is derived FROM ``seqs``, which the
+    # delegate has already accumulated by name — two rows sharing a name concatenate into
+    # ONE entry (and are then caught by the ragged check, since the merged row is wider than
+    # the consensus). ``n_sequences`` is therefore ``len(sequences)`` by construction, which
+    # ``test_n_sequences_cannot_exceed_the_rows_actually_present`` pins. A guard here would
+    # be unreachable code asserting an invariant the construction already provides.
     ragged = {name: len(row) for name, row in seqs if len(row) != len(ss_cons)}
     if ragged:
         raise ArchitectureError(
@@ -472,13 +497,23 @@ BULGE_STATES: tuple[str, ...] = (BULGE_DETECTED, BULGE_ABSENT, BULGE_UNDETECTABL
 
 
 def degapped_span(row: str, start: int, end: int) -> str:
-    """Residues of ``row`` in inclusive columns ``[start, end]``, gaps removed, RNA alphabet.
+    """Residues of ``row`` in inclusive columns ``[start, end]``, **gaps only** removed.
 
     Public because the freeze reads spans the same way the producer does; two copies of
-    this three-line rule would be two chances to disagree about what a gap is.
+    this rule would be two chances to disagree about what a gap is.
+
+    ⚠ **Only gap characters are dropped.** An earlier form kept solely ``ACGU``, which
+    deleted every IUPAC ambiguity code (``N``, ``R``, ``Y``, ``S``, ``W``, …) as though it
+    were a gap. That understated the residue count the bulge-size test reads *and* made
+    residues either side of an ambiguity code adjacent in the scanned window — so a
+    contiguous motif match could be reported where the sequence carries none. That is a
+    **false positive**, which does not err toward sparing, so it is the one direction this
+    module must not get wrong. Ambiguity codes now survive as opaque residues;
+    :func:`_pairs_with` already rejects them (a constrained motif position requires
+    equality, a wildcard one requires membership in :data:`WATSON_CRICK`).
     """
     chunk = row[start : end + 1].upper().replace("T", "U")
-    return "".join(c for c in chunk if c in WATSON_CRICK)
+    return "".join(c for c in chunk if c not in GAP_SYMBOLS)
 
 
 def ncca_bulge_status(
@@ -544,7 +579,20 @@ def ncca_bulge_status(
 
     # Any contiguous `want`-mer of the motif is an acceptable register: requiring the
     # motif's own 5' prefix would re-impose the register Fauzi 2008 measured as free.
-    registers = [motif[s : s + want] for s in range(len(motif) - want + 1)]
+    # ⚠ A register with NO constrained position matches any residue, so it would report
+    # BULGE_DETECTED on every admissibly-sized bulge regardless of sequence — a vacuous
+    # detector that spares nothing and evidences nothing. `ncca_pairing_nt` has no default
+    # and the round supplies it, so `1` (whose "N" register is all-wildcard) is reachable.
+    registers = [
+        reg
+        for reg in (motif[s : s + want] for s in range(len(motif) - want + 1))
+        if any(c != ANY_BASE for c in reg)
+    ]
+    if not registers:
+        raise ArchitectureError(
+            f"ncca_pairing_nt={want} admits only all-wildcard registers of motif {motif!r}; "
+            "every admissibly-sized bulge would read 'detected' regardless of its sequence"
+        )
     for bulge, residues in sized:
         for offset in range(0, max(0, len(residues) - want + 1)):
             window = residues[offset : offset + want]

@@ -755,3 +755,65 @@ class TestTheP3RoundCarriesBToo:
 
     def test_no_table_at_all_is_None_not_an_error(self) -> None:
         assert remine._load_relaxed_arch_status(None) is None
+
+
+class TestBothApplyPathsPreflightTheBDeclaration:
+    """`remine` refused an unevidenced (b) declaration; `mine_round`'s apply path did not.
+
+    Two apply paths must agree about what "declared" costs, or the weaker one is simply the
+    way around the gate.
+    """
+
+    def test_mine_round_apply_refuses_an_unevidenced_b_declaration_with_exit_4(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(
+            architecture_producer,
+            "derive_relaxed_arch_supply_available",
+            lambda **_: {"available": False, "reasons": ["staged nowhere"]},
+        )
+        rc = mine_round.main(
+            [
+                "apply-spare-rule",
+                "--manifest",
+                str(tmp_path / "m.json"),
+                "--status-table",
+                str(tmp_path / "s.json"),
+                "--out",
+                str(tmp_path / "o.json"),
+                "--rscape-installed",
+                "false",
+                "--relaxed-arch-available",
+                "--relaxed-arch-status",
+                str(tmp_path / "t.json"),
+            ]
+        )
+        assert rc == 4
+
+    def test_positive_control_not_declaring_it_does_not_hit_the_b_gate(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A guard that refuses on EVERYTHING also satisfies an exit-4 assertion."""
+        monkeypatch.setattr(
+            architecture_producer,
+            "derive_relaxed_arch_supply_available",
+            lambda **_: {"available": False, "reasons": ["staged nowhere"]},
+        )
+        # Getting as far as the missing manifest PROVES the (b) gate was not hit: the gate
+        # returns 4 before any file is opened. Asserting `rc != 4` alone would also pass if
+        # the command failed for an unrelated reason before reaching either.
+        with pytest.raises(FileNotFoundError):
+            mine_round.main(
+                [
+                    "apply-spare-rule",
+                    "--manifest",
+                    str(tmp_path / "m.json"),
+                    "--status-table",
+                    str(tmp_path / "s.json"),
+                    "--out",
+                    str(tmp_path / "o.json"),
+                    "--rscape-installed",
+                    "false",
+                    "--no-msa-supply-available",
+                ]
+            )
