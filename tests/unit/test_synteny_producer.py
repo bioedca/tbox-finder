@@ -326,6 +326,9 @@ class TestCommittedDiagnostics:
         # 9,065 — because the two arms were independent draws each capped at n_per_host,
         # which are not nested.  The strict arm is now a filter of the wide arm's own sample.
         assert strict["n"] <= wide["n"], (strict["n"], wide["n"])
+        # Guard on n_decided, not n: _arm reports None (not 0.0) for an arm that drew windows
+        # and decided none of them, and `None <= float` raises in Python 3.
+        assert strict["n_decided"] and wide["n_decided"], (strict, wide)
         assert strict["false_pass_rate"] <= wide["false_pass_rate"], (strict, wide)
         assert strict["note"]
 
@@ -553,8 +556,6 @@ class TestDiagnosticsComputedNotJustCommitted:
             [failed_far],
             clades={"GCA_000000001.1": "Bacillota"},
             config=CONFIG,
-            annotation_dir="unused",
-            genome_dir="unused",
         )
         block = report["passing_distance_sensitivity"]
         assert block["n"] == 0, "an out-of-window aaRS hit that FAILED is not a passing distance"
@@ -566,8 +567,6 @@ class TestDiagnosticsComputedNotJustCommitted:
             [self._row(STATUS_PASSED)],
             clades={"GCA_000000001.1": "Bacillota"},
             config=CONFIG,
-            annotation_dir="unused",
-            genome_dir="unused",
         )
         block = report["passing_distance_sensitivity"]
         assert block["n"] == 1 and block["max_bp"] == 40
@@ -645,8 +644,6 @@ class TestReviewRoundTwo:
                 [row("c1", STATUS_UNAVAILABLE, reason="something-invented")],
                 clades={"GCA_000000001.1": "Bacillota"},
                 config=CONFIG,
-                annotation_dir="unused",
-                genome_dir="unused",
             )
 
     def test_positive_control_a_known_reason_is_accepted(self) -> None:
@@ -654,8 +651,6 @@ class TestReviewRoundTwo:
             [row("c1", STATUS_UNAVAILABLE, reason=synteny_producer.REASON_PSEUDOGENE)],
             clades={"GCA_000000001.1": "Bacillota"},
             config=CONFIG,
-            annotation_dir="unused",
-            genome_dir="unused",
         )
         assert report["exclusion_reason_totals"] == {synteny_producer.REASON_PSEUDOGENE: 1}
 
@@ -666,8 +661,6 @@ class TestReviewRoundTwo:
             [row("c1", STATUS_UNAVAILABLE, reason="")],
             clades={"GCA_000000001.1": "Bacillota"},
             config=CONFIG,
-            annotation_dir="unused",
-            genome_dir="unused",
         )
         assert report["exclusion_reason_totals"] == report["per_clade"]["Bacillota"]["reasons"]
 
@@ -835,8 +828,11 @@ class TestErrorsAreTranslatedAtTheMiningBoundary:
         ("payload", "label"),
         [
             ("{ truncated", "JSONDecodeError"),
-            ("[1, 2, 3]", "non-object root -> AttributeError"),
-            ('{"status": {"a": "passed"}, "rows": [{"no_id": 1}]}', "malformed row -> KeyError"),
+            ("[1, 2, 3]", "non-object root -> ProducerError"),
+            (
+                '{"status": {"a": "passed"}, "rows": [{"no_id": 1}]}',
+                "row missing keys -> ProducerError",
+            ),
             ('{"status": {"a": "passed"}, "rows": "not-a-list"}', "wrong rows type"),
         ],
     )
@@ -1089,8 +1085,6 @@ class TestOneBadFileDoesNotAbortTheRun:
             ],
             clades={"GCA_000000001.1": "Bacillota"},
             config=CONFIG,
-            annotation_dir="unused",
-            genome_dir="unused",
         )
         assert report["exclusion_reason_totals"] == {
             synteny_producer.REASON_ANNOTATION_UNREADABLE: 1,
@@ -1127,3 +1121,55 @@ class TestOneParsePerHostCoversBothArms:
             "GCA_000296795.1", annotation_dir=str(tmp_path), genome_dir=str(tmp_path)
         )
         assert host.available is False and host.trna == []
+
+
+class TestRoundFifteenGuards:
+    def test_an_empty_candidate_list_refuses(self) -> None:
+        """Without candidates there is no length distribution to match, and every
+        ``rng.choice(lengths)`` in the three control arms raises ``IndexError`` — which the CLI
+        does not convert, so the run aborts with a traceback."""
+        with pytest.raises(synteny_producer.ProducerError, match="no candidates"):
+            synteny_producer.false_pass_report(
+                [],
+                annotation_dir="unused",
+                genome_dir="unused",
+                config=CONFIG,
+                clades={},
+                n_per_host=1,
+                seed=1,
+                decoys_parquet="absent.parquet",
+                mining_pool_parquet="absent.parquet",
+            )
+
+    def test_a_scalar_manifest_row_refuses_as_a_producer_error(self, tmp_path: Path) -> None:
+        """``dict(row)`` on a scalar raises ``TypeError``, which is not this module's contract."""
+        path = tmp_path / "m.json"
+        path.write_text(json.dumps({"candidates": ["not-an-object"]}), encoding="utf-8")
+        with pytest.raises(synteny_producer.ProducerError, match="not an object"):
+            synteny_producer.read_manifest(path)
+
+    def test_positive_control_a_well_formed_manifest_reads(self, tmp_path: Path) -> None:
+        path = tmp_path / "m.json"
+        path.write_text(
+            json.dumps(
+                {
+                    "candidates": [
+                        {
+                            "candidate_id": "x",
+                            "accession": "GCA_000000001.1:c0",
+                            "locus_start": 1,
+                            "locus_end": 2,
+                        }
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
+        assert synteny_producer.read_manifest(path)[0]["candidate_id"] == "x"
+
+    def test_exclusion_report_takes_no_parameter_it_does_not_read(self) -> None:
+        """A required parameter with no effect makes every call site assert something false."""
+        import inspect
+
+        params = set(inspect.signature(synteny_producer.exclusion_report).parameters)
+        assert "annotation_dir" not in params and "genome_dir" not in params

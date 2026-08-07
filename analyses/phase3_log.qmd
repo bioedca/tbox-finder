@@ -4471,3 +4471,32 @@ assertion was blind to.
 **Validation (round 14).** Full unit+golden **4,675 passed / 13 failed** vs the matched baseline at
 `95d0149` (**4,492 / 13**) — failure sets identical, `comm` empty both ways. **54 sabotages / 54
 RED against their named test.** No source change, so no report regenerated. ruff + black clean.
+
+**Review round 15 — 6 CLI findings, all real, 1 major (maintainability).** Counts across fifteen
+rounds: **20, 7, 4, 2, 1, 8, 1, 4, 3, 6, 6, 3, 4, 1, 6**.
+
+**⚠ THE COUNT BOUNCED BACK, BUT THE *KIND* DID NOT.** The last finding that could change a
+verdict was round 13's guard interaction; rounds 14–15 are API hygiene and defensive
+hardening — a required parameter with no effect, write-ordering of two reports, refusals for
+inputs the corpus does not contain. That is a meaningful convergence signal even though the
+count is not monotone, and it is recorded as such rather than as "still finding bugs".
+
+**⚠ A REQUIRED PARAMETER THAT NOTHING READ.** `exclusion_report` took `annotation_dir` and
+`genome_dir` as **required** keyword arguments and read neither — six test call sites passed
+`"unused"` for both, which is a test asserting something false about the API. Removed.
+
+**⚠ THE TWO REPORTS COULD LAND OUT OF STEP.** The false-pass report was written **before** the
+exclusion report was built, so a failure in between left a committed false-pass report beside a
+**stale** exclusion report — and `test_both_reports_describe_the_same_run_config` asserts the pair
+describes one run. Both are now built before either is written.
+
+**Also fixed.** An empty candidate list left `lengths` empty and every `rng.choice` in the three
+control arms raised `IndexError` (uncaught by the CLI); a scalar manifest row raised `TypeError`
+from `dict(row)` rather than a `ProducerError`; the strict/wide comparison guarded `n` rather than
+`n_decided`, where `None <= float` raises; and two parametrized test labels named exceptions the
+producer no longer raises, having been tightened to `ProducerError` in earlier rounds.
+
+**Validation (round 15).** Full unit+golden **4,679 passed / 13 failed** vs the matched baseline at
+`95d0149` (**4,492 / 13**) — failure sets identical, `comm` empty both ways. **56 sabotages / 56
+RED against their named test.** Both reports re-derived; candidate verdicts unchanged
+(546 / 96 / 299). ruff + black clean.

@@ -373,6 +373,9 @@ def read_manifest(path: str | Path) -> list[dict[str, Any]]:
     rows = payload.get("candidates") if isinstance(payload, Mapping) else payload
     if not isinstance(rows, list) or not rows:
         raise ProducerError(f"{path}: expected a non-empty 'candidates' list")
+    for index, row in enumerate(rows):
+        if not isinstance(row, Mapping):
+            raise ProducerError(f"{path}: candidate {index} is {type(row).__name__}, not an object")
     return [dict(row) for row in rows]
 
 
@@ -854,6 +857,8 @@ def false_pass_report(
     ([[control-matchedness-must-be-asserted]]).
     """
     rng = random.Random(seed)
+    if not candidates:
+        raise ProducerError("no candidates: the control arms have no length distribution to match")
     lengths = _window_lengths(candidates)
     get_host = _host_cache(annotation_dir, genome_dir)
 
@@ -1072,8 +1077,6 @@ def exclusion_report(
     *,
     clades: Mapping[str, str],
     config: SyntenyRunConfig,
-    annotation_dir: str,
-    genome_dir: str,
     false_fail_probe: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """D4's symmetric arm: what (c) *cannot decide*, and where that falls by clade.
@@ -1486,19 +1489,16 @@ def main(argv: Sequence[str] | None = None) -> int:
                     **config.as_dict(),
                 },
             )
-            _write(args.false_pass_out, fp)
-            ex = exclusion_report(
-                rows,
-                clades=clades,
-                config=config,
-                annotation_dir=args.annotation_dir,
-                genome_dir=args.genome_dir,
-            )
+            # Built before either is written: a failure between the two would otherwise
+            # leave a committed false-pass report beside a stale exclusion report, and the
+            # pair is asserted to describe the same run.
+            ex = exclusion_report(rows, clades=clades, config=config)
             ex["provenance"] = _provenance(
                 "diagnostics.exclusion",
                 [args.status_table, args.clade_table],
                 {"step": STEP, **config.as_dict()},
             )
+            _write(args.false_pass_out, fp)
             _write(args.exclusion_out, ex)
             print(
                 json.dumps(
