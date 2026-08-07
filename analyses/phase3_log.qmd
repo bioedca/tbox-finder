@@ -3926,3 +3926,18 @@ positive control has been in the suite since round 4.
 `comm` empty both ways. Census re-derived from this code is **identical to the committed report**
 apart from provenance. ⚠ This round cost a **19-minute Fair-Usage wait**; waiting is free and no
 Greptile credit was spent. Counts across eight rounds: **9, 2, 4, 5, 5, 5, 1, 2**.
+
+**Review round 9 — 2 findings, 1 real, and the fixture claim for the SIXTH time (now `minor`).**
+The real one: `isinstance(True, int)` is True, so a hand-edited `"n_targets": true` compared as 1
+and a one-row report satisfied `rows_match_targets` **and** `all_targets_ok` — while
+`targets_match_supply_report`, reading the *same* field, already rejected it. Two of three
+clauses disagreeing with the third is what a per-clause repeat of a type check produces, so the
+predicate is derived once and all three read it. The test carries a positive control (the same
+report with a real `int` must pass all three), because a clause broken outright would satisfy a
+one-sided assertion equally well.
+
+**Validation.** 3 sabotages, **3 RED against their named test** — one per clause and one for the
+shared predicate, since breaking only the predicate would leave a per-clause repeat undetected.
+Full unit+golden **4,490 passed / 15 failed** vs the matched baseline at `2be5ff4`
+(**4,240 / 15**) — failure sets identical, `comm` empty both ways. Counts across nine rounds:
+**9, 2, 4, 5, 5, 5, 1, 2, 1**.

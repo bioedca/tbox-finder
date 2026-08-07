@@ -771,6 +771,24 @@ def test_a_clause_computed_but_never_declared_is_reported(monkeypatch, tmp_path)
     assert problems == ["clause(s) computed but never declared: ['no_orphans']"]
 
 
+def test_a_BOOLEAN_n_targets_fails_EVERY_clause_that_reads_it(tmp_path):
+    """``isinstance(True, int)`` is True, so ``"n_targets": true`` compared as 1.
+
+    Two of the three clauses that read ``n_targets`` accepted a bool while the third rejected it,
+    and a one-row report satisfies ``len(rows) == True``. The predicate is derived **once** now:
+    a per-clause repeat is exactly how two of them came to disagree with the third.
+    """
+    report = _clean_report(tmp_path)
+    report["n_targets"] = True
+    problems = af.validate_fetch_report(report, targets=[_target()])
+    for clause in ("targets_match_supply_report", "rows_match_targets", "all_targets_ok"):
+        assert any(clause in p for p in problems), f"{clause} accepted a bool: {problems}"
+    # Positive control: the same report with a real int passes all three, so the clauses are
+    # refusing the *type* rather than having been broken outright.
+    report["n_targets"] = 1
+    assert af.validate_fetch_report(report, targets=[_target()]) == []
+
+
 def test_a_MALFORMED_n_bytes_fails_a_clause_instead_of_raising_a_traceback(tmp_path):
     """``int(r.get("n_bytes") or 0)`` coerced, and this function reads an ON-DISK report.
 

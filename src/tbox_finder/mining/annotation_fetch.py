@@ -544,14 +544,18 @@ def validate_fetch_report(
     clauses["sweep_complete"] = report.get("sweep_complete") is True
     clauses["clause_schema_current"] = report.get("clause_schema_version") == CLAUSE_SCHEMA_VERSION
     clauses["rows_bind_to_targets"] = _rows_bind_to_targets(rows, targets)
+    # ``bool`` is excluded once, for every clause that reads ``n_targets`` — two of the three
+    # accepted it, and ``isinstance(True, int)`` is True, so a hand-edited ``"n_targets": true``
+    # compared as 1 and a one-row report satisfied both. Deriving the predicate once is the fix:
+    # a per-clause repeat is how two of them came to disagree with the third in the first place.
+    n_targets_is_int = isinstance(n_targets, int) and not isinstance(n_targets, bool)
     clauses["targets_match_supply_report"] = (
-        isinstance(n_targets, int)
-        and not isinstance(n_targets, bool)
+        n_targets_is_int
         and isinstance(n_supply, int)
         and not isinstance(n_supply, bool)
         and n_targets == n_supply
     )
-    clauses["rows_match_targets"] = isinstance(n_targets, int) and len(rows) == n_targets
+    clauses["rows_match_targets"] = n_targets_is_int and len(rows) == n_targets
     clauses["no_duplicate_accessions"] = len(set(accessions)) == len(accessions)
     try:
         clauses["status_counts_rederive"] = derive_status_counts(rows) == report.get(
@@ -559,7 +563,7 @@ def validate_fetch_report(
         )
     except AnnotationFetchError:
         clauses["status_counts_rederive"] = False
-    clauses["all_targets_ok"] = isinstance(n_targets, int) and len(ok_rows) == n_targets
+    clauses["all_targets_ok"] = n_targets_is_int and len(ok_rows) == n_targets
     clauses["every_ok_row_md5_matches"] = all(
         _MD5_RE.fullmatch(str(r.get("observed_md5", "")))
         and str(r.get("observed_md5")) == str(r.get("expected_md5"))
