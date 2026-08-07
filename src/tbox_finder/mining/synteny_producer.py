@@ -79,6 +79,7 @@ __all__ = [
     "load_clades",
     "load_status_map",
     "validate_status_payload",
+    "shard_by_host",
     "strict_subsample",
     "utr_arm_windows",
     "main",
@@ -408,6 +409,25 @@ def run_shard(
         evaluate_candidate(row, get_host(str(row["accession"]).partition(":c")[0]), config=config)
         for row in candidates
     ]
+
+
+def shard_by_host(
+    candidates: Sequence[Mapping[str, Any]], shard_index: int, n_shards: int
+) -> list[Mapping[str, Any]]:
+    """Partition candidates so every host lands entirely in **one** shard.
+
+    ⚠ A strided slice (``candidates[i::n]``) interleaves, so one host's candidates scatter
+    across every shard — and ``_host_cache`` is built per ``run_shard`` call, so each shard
+    would re-parse almost every host's GFF.  With 941 candidates over 76 hosts that turns one
+    parse per host into ``n_shards`` parses per host, defeating the cache the module documents
+    as the reason the round takes seconds.  Hosts are assigned round-robin over their sorted
+    order, so the partition is deterministic and independent of manifest order.
+    """
+    if n_shards < 1 or not 0 <= shard_index < n_shards:
+        raise ProducerError(f"shard {shard_index} of {n_shards} is out of range")
+    hosts = sorted({str(row["accession"]).partition(":c")[0] for row in candidates})
+    mine = {host for i, host in enumerate(hosts) if i % n_shards == shard_index}
+    return [row for row in candidates if str(row["accession"]).partition(":c")[0] in mine]
 
 
 def build_status_table(rows: Sequence[Mapping[str, Any]], *, config: SyntenyRunConfig) -> dict:
@@ -1118,7 +1138,17 @@ def exclusion_report(
         by_clade[clade][str(row["status"])] += 1
         if row["status"] == STATUS_UNAVAILABLE:
             reasons[clade][_exclusion_reason(row)] += 1
-        for detail in (row.get("per_strand") or {}).values():
+        deciding_strands = (
+            (gff3.STRAND_PLUS, gff3.STRAND_MINUS)
+            if config.strand_policy == "both"
+            else (gff3.STRAND_PLUS if config.strand_policy == "plus" else gff3.STRAND_MINUS,)
+        )
+        for strand, detail in (row.get("per_strand") or {}).items():
+            # ⚠ Under a single-strand policy the OTHER strand's detail never folded into the
+            # candidate's verdict, so a distance taken from it describes a decision the round
+            # did not make.
+            if strand not in deciding_strands:
+                continue
             pseudo_seen += int(detail.get("n_pseudo_seen") or 0)
             unjudgeable_seen += int(detail.get("n_unjudgeable_seen") or 0)
             if detail.get("carve_out_applied"):
@@ -1456,7 +1486,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             candidates = read_manifest(args.manifest)
             if args.n_shards < 1 or not 0 <= args.shard_index < args.n_shards:
                 raise ProducerError(f"shard {args.shard_index} of {args.n_shards} is out of range")
-            shard = candidates[args.shard_index :: args.n_shards]
+            shard = shard_by_host(candidates, args.shard_index, args.n_shards)
             rows = run_shard(
                 shard,
                 annotation_dir=args.annotation_dir,

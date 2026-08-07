@@ -1218,3 +1218,54 @@ class TestOneBadFastaDoesNotAbortTheRunEither:
         """A corrupt genome and a missing one must not be indistinguishable in the diagnostic."""
         assert synteny_producer.REASON_GENOME_UNREADABLE != synteny_producer.REASON_GENOME_ABSENT
         assert synteny_producer.REASON_GENOME_UNREADABLE in synteny_producer.EXCLUSION_REASONS
+
+
+class TestShardingKeepsHostsWhole:
+    """⚠ A strided slice scatters one host across every shard, and `_host_cache` is built per
+    ``run_shard`` call — so each shard re-parses almost every GFF, defeating the cache the
+    module documents as the reason the round takes seconds."""
+
+    def _rows(self, n_hosts: int, per_host: int) -> list[dict]:
+        return [
+            {"accession": f"GCA_{h:03d}.1:c0", "candidate_id": f"{h}-{k}"}
+            for h in range(n_hosts)
+            for k in range(per_host)
+        ]
+
+    def test_every_host_lands_in_exactly_one_shard(self) -> None:
+        rows = self._rows(7, 4)
+        shards = [synteny_producer.shard_by_host(rows, i, 3) for i in range(3)]
+        seen: dict[str, int] = {}
+        for index, shard in enumerate(shards):
+            for row in shard:
+                host = row["accession"].partition(":c")[0]
+                assert seen.setdefault(host, index) == index, f"{host} spans shards"
+        assert len(seen) == 7
+
+    def test_the_partition_is_complete_and_disjoint(self) -> None:
+        """A partition that dropped or duplicated candidates would still keep hosts whole."""
+        rows = self._rows(7, 4)
+        shards = [synteny_producer.shard_by_host(rows, i, 3) for i in range(3)]
+        ids = [r["candidate_id"] for shard in shards for r in shard]
+        assert sorted(ids) == sorted(r["candidate_id"] for r in rows)
+        assert len(ids) == len(set(ids))
+
+    def test_a_strided_slice_would_fail_the_first_assertion(self) -> None:
+        """The control that shows the assertion has teeth: the old behaviour scatters hosts."""
+        rows = self._rows(7, 4)
+        strided = [rows[i::3] for i in range(3)]
+        spanning = {
+            r["accession"].partition(":c")[0]
+            for index, shard in enumerate(strided)
+            for r in shard
+            if any(
+                any(o["accession"] == r["accession"] for o in other)
+                for j, other in enumerate(strided)
+                if j != index
+            )
+        }
+        assert spanning, "a strided slice must scatter at least one host"
+
+    def test_an_out_of_range_shard_refuses(self) -> None:
+        with pytest.raises(synteny_producer.ProducerError, match="out of range"):
+            synteny_producer.shard_by_host(self._rows(2, 1), 3, 3)
