@@ -647,3 +647,35 @@ class TestRoundElevenBoundaries:
             sub_threshold_orf_nt=0,
         )
         assert got.function_class is None, "the aaRS starts behind the re-anchor at 1400"
+
+
+class TestRoundThirteenBoundaries:
+    def test_a_zero_length_element_still_admits_the_class_ii_abutting_case(self) -> None:
+        """⚠ ``-(span - 1)`` becomes ``+1`` at span 0, which INVERTS the test and discards the
+        ``distance == 0`` case — D4's class-II abutting locus exactly."""
+        abutting = cds(start=1000, end=1600, product="alanine--tRNA ligase")
+        kept = synteny.downstream_cds_on_strand(
+            [abutting], seqid="c1", strand="+", three_prime=1000, element_span_nt=0
+        )
+        assert [d for d, _f in kept] == [0]
+
+    def test_the_backward_guard_keys_on_the_anchor_moving_not_on_the_hop_count(self) -> None:
+        """⚠ The clamp can leave the anchor exactly at the element's 3′ end after a hop.
+        Keying the backward-CDS guard on ``n_intervening`` would then discard the element's own
+        legitimate class-II overlap — a gene the criterion is *supposed* to see.
+        """
+        # Hops on an ORF lying entirely behind the element, so the clamp holds the anchor at
+        # 1000; the aaRS then overlaps the element and must survive.
+        behind = cds(start=940, end=980, product="hypothetical protein")
+        overlapping_aars = cds(start=960, end=1600, product="alanine--tRNA ligase")
+        got = synteny.resolve_downstream_gene(
+            [behind, overlapping_aars],
+            seqid="c1",
+            strand="+",
+            three_prime=1000,
+            element_span_nt=100,
+            max_intervening_orfs=1,
+            sub_threshold_orf_nt=0,
+        )
+        assert got.function_class == synteny.CLASS_AARS
+        assert synteny.synteny_status(got) == STATUS_PASSED

@@ -728,12 +728,12 @@ def apply_spare_rule(
     # refusal: every candidate's synteny disjunct reads ``unavailable``, all are spared, and
     # the round reports a zero yield indistinguishable from an honest one.
     if synteny_available and synteny_status_table is None:
-        raise ValueError(
+        raise MineRoundError(
             "synteny_available=True but no synteny status table was supplied; the (c) "
             "disjunct would read 'unavailable' for every candidate and spare them all"
         )
     if not synteny_available and synteny_status_table is not None:
-        raise ValueError(
+        raise MineRoundError(
             "a synteny status table was supplied but synteny_available=False; "
             "hard_negative.mine_round refuses produced evidence for an undeclared backend"
         )
@@ -754,7 +754,7 @@ def apply_spare_rule(
     ) as exc:
         # A data fault this round must REPORT: the caller branches on the return code, and an
         # unhandled ProducerError bypasses that path entirely.
-        raise ValueError(f"synteny status table unusable: {exc}") from exc
+        raise MineRoundError(f"synteny status table unusable: {exc}") from exc
 
     status_map = load_status_map(status_table)
     candidates = read_fp_manifest(

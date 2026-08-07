@@ -769,8 +769,10 @@ def downstream_cds_on_strand(
         distance = start - three_prime if strand == gff3.STRAND_PLUS else three_prime - start
         # The element's 5′ edge is ``locus_start + 1`` in 1-based coordinates, so a CDS whose
         # start sits exactly on it is ``-(span - 1)`` away.  ``>= -span`` admitted one
-        # coordinate *before* the element began, on both strands.
-        if distance < -(element_span_nt - 1):
+        # coordinate *before* the element began, on both strands.  ⚠ Floored at 0: a
+        # zero-length element makes ``-(span - 1)`` equal ``+1``, which INVERTS the test and
+        # discards the ``distance == 0`` case — D4's class-II abutting locus exactly.
+        if distance < -max(element_span_nt - 1, 0):
             continue
         out.append((distance, cds))
     out.sort(key=lambda item: (item[0], item[1].feature_id))
@@ -825,10 +827,13 @@ def resolve_downstream_gene(
     for distance_from_locus, cds in ordered:
         start = gff3.cds_start_position(cds)
         distance = start - anchor if strand == gff3.STRAND_PLUS else anchor - start
-        if n_intervening and distance < 0:
+        if anchor != three_prime and distance < 0:
             # D4's class-II overlap allowance is about the ELEMENT, not about an intervening
             # ORF: once the walk has re-anchored, a CDS starting behind that anchor is not
             # downstream of it, and criterion_c would read the negative distance as in-window.
+            # ⚠ Keyed on the anchor having actually MOVED, not on ``n_intervening``: the clamp
+            # can leave the anchor exactly at ``three_prime`` after a hop, and keying on the
+            # hop count would then discard the element's own legitimate class-II overlap.
             continue
         if distance > window_bp:
             return DownstreamGene(

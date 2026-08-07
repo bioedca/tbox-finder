@@ -4428,3 +4428,31 @@ what it says, and the prose now says so.
 **Validation (round 12).** Full unit+golden **4,671 passed / 13 failed** vs the matched baseline at
 `95d0149` (**4,492 / 13**) — failure sets identical, `comm` empty both ways. **50 sabotages / 50
 RED against their named test.** Candidate verdicts unchanged (546 / 96 / 299). ruff + black clean.
+
+**Review round 13 — 4 CLI findings, all real, 2 major.** Counts across thirteen rounds:
+**20, 7, 4, 2, 1, 8, 1, 4, 3, 6, 6, 3, 4**.
+
+**⚠ THE ROUND-11 GUARD KEYED ON THE WRONG THING, AND WOULD HAVE DISCARDED WHAT IT WAS BUILT TO
+PROTECT.** Round 11 added *"after a carve-out, a CDS starting behind the anchor is not
+downstream"* and keyed it on `n_intervening`. But round 10's clamp can leave the anchor **exactly
+at the element's 3′ end** after a hop — and the guard then rejected the element's own legitimate
+class-II overlap, a gene criterion (c) is *supposed* to see. It keys on the anchor having actually
+**moved** now. Two consecutive rounds' fixes interacting is the failure mode; neither was wrong
+alone.
+
+**⚠ A ZERO-LENGTH ELEMENT INVERTED THE OVERLAP BOUND.** `-(span - 1)` evaluates to `+1` at
+`span == 0`, so `distance < 1` discarded the `distance == 0` case — D4's class-II *abutting*
+locus precisely. Reproduced before fixing (`span=0 → []`, `span=1 → [0]`), floored at 0.
+
+**⚠ THE tRNA ARM RE-READ AND RE-PARSED EVERY HOST'S GFF.** `HostAnnotation` exists to parse each
+host **once** — its docstring says that cache is why the round takes seconds — and the tRNA arm
+went around it with a fresh `read_gff3_text`, taking a *second* snapshot of a file the CDS arm had
+already committed to. Both arms now read one parse; the diagnostics run in **28 s**.
+
+**Also fixed.** The P2 path wrapped malformed status tables in a bare `ValueError` while P3 used
+its own `RemineError`; it now raises `MineRoundError` (which subclasses `ValueError`, so the
+existing assertions still hold and the type is merely tightened).
+
+**Validation (round 13).** Full unit+golden **4,675 passed / 13 failed** vs the matched baseline at
+`95d0149` (**4,492 / 13**) — failure sets identical, `comm` empty both ways. **53 sabotages / 53
+RED against their named test.** Candidate verdicts unchanged (546 / 96 / 299). ruff + black clean.

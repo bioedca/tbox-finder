@@ -167,6 +167,7 @@ class HostAnnotation:
         gff_path = Path(annotation_dir) / annotation_fetch.destination_name(assembly)
         self.available = gff_path.exists()
         self.cds: list[gff3.CdsFeature] = []
+        self.trna: list[gff3.GffFeature] = []
         self.by_seqid: dict[str, list[gff3.CdsFeature]] = defaultdict(list)
         self.contig_ids: list[str] = []
         self.reason = "" if self.available else REASON_HOST_UNANNOTATED
@@ -179,7 +180,13 @@ class HostAnnotation:
             # (`-c-i` recorded the same defect: a census read sitting above the `except
             # OSError` written for it aborted all 339 on one bad file.)
             try:
-                self.cds = gff3.parse_gff3_document(gff3.read_gff3_text(gff_path))
+                text = gff3.read_gff3_text(gff_path)
+                self.cds = gff3.parse_gff3_document(text)
+                # One parse per host covers BOTH arms.  Re-reading the file for the tRNA
+                # windows defeated the cache that is the whole reason the round runs in
+                # seconds — and read a *second* snapshot of a file the CDS arm had already
+                # committed to.
+                self.trna = list(gff3.iter_gff3_features(text.splitlines(), types={"tRNA"}))
             except (gff3.Gff3Error, OSError, ValueError) as exc:
                 self.available = False
                 self.reason = REASON_ANNOTATION_UNREADABLE
@@ -910,14 +917,7 @@ def false_pass_report(
         strict_utr_decoys += _evaluate_oriented(host, strict_windows, config=config)
 
         # …and windows upstream of annotated tRNA genes — §9.1's tRNA-adjacent sub-class.
-        trna_features = list(
-            gff3.iter_gff3_features(
-                gff3.read_gff3_text(
-                    Path(annotation_dir) / annotation_fetch.destination_name(assembly)
-                ).splitlines(),
-                types={"tRNA"},
-            )
-        )
+        trna_features = host.trna
         # ⚠ ``extents`` is built from ``by_seqid``, which holds **CDS only**.  A tRNA on a
         # contig carrying no CDS has no entry, so the minus-strand upper bound was skipped and
         # the window could run past the end of the contig.  Extend the map with the tRNA spans

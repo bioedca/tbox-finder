@@ -1096,3 +1096,34 @@ class TestOneBadFileDoesNotAbortTheRun:
             synteny_producer.REASON_ANNOTATION_UNREADABLE: 1,
             synteny_producer.REASON_HOST_UNANNOTATED: 1,
         }
+
+
+class TestOneParsePerHostCoversBothArms:
+    def test_the_host_caches_its_trna_features_too(self, tmp_path: Path) -> None:
+        """⚠ Re-reading the file for the tRNA arm defeated the cache that is the reason the
+        round takes seconds — and read a SECOND snapshot of a file the CDS arm had already
+        committed to."""
+        from tbox_finder.mining import annotation_fetch
+
+        accession = "GCA_000296795.1"
+        (tmp_path / annotation_fetch.destination_name(accession)).write_bytes(
+            b"##gff-version 3\n"
+            b"c1\ts\tCDS\t10\t99\t.\t+\t0\tID=a;product=alanine--tRNA ligase\n"
+            b"c1\ts\ttRNA\t200\t280\t.\t+\t.\tID=t1\n"
+            b"c1\ts\ttRNA\t400\t480\t.\t-\t.\tID=t2\n"
+        )
+        genomes = tmp_path / "g"
+        genomes.mkdir()
+        (genomes / f"{accession}.fna").write_text(">c1 x\nACGT\n", encoding="utf-8")
+        host = synteny_producer.HostAnnotation(
+            accession, annotation_dir=str(tmp_path), genome_dir=str(genomes)
+        )
+        assert [f.feature_id for f in host.trna] == ["t1", "t2"]
+        assert len(host.cds) == 1, "the CDS arm is unchanged by the tRNA caching"
+
+    def test_an_unavailable_host_exposes_an_empty_trna_list(self, tmp_path: Path) -> None:
+        """The attribute must exist either way, or the tRNA arm raises on a skipped host."""
+        host = synteny_producer.HostAnnotation(
+            "GCA_000296795.1", annotation_dir=str(tmp_path), genome_dir=str(tmp_path)
+        )
+        assert host.available is False and host.trna == []
