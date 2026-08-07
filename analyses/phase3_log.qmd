@@ -3627,3 +3627,317 @@ not inferred: `measure --limit 5` exits **3** with `route=refused`, and the repo
 carries the refusal inside it rather than a verdict a later reader could mistake for a pass.
 
 **Commit.** see `TODO.md` for the squash SHA on `main` (PR #112).
+
+## Step P3-15′-c-i (acquisition) — 2026-08-06: fetch the 339 annotated hosts' GFF, and read a coordinate
+
+**Inputs.** `reports/p3/annotation_supply.json` — the committed measurement half of this step,
+which already carries every annotated host's `gff_url` **and** the `gff_md5` NCBI publishes for
+it. **Process.** Two new pure-stdlib modules. `src/tbox_finder/mining/annotation_fetch.py`
+downloads each of the 339 annotated hosts' `*_genomic.gff.gz`, verifies it against the committed
+md5, and stores it **byte-identical to what NCBI served** (never decompressed, never rewritten) so
+`md5(file) == report.gff_md5` stays checkable forever; `src/tbox_finder/mining/gff3.py` parses
+GFF3 into CDS features. There is **no URL discovery at all** — no `esearch`, no `esummary`, not
+even a directory listing — so the acquisition adds no transport. `annotation_supply`'s redirect
+allowlist was **promoted** to a public `build_allowlisted_opener()` rather than copied, so "both
+modules re-check every redirect hop" stays one claim instead of two that can drift.
+**Outputs.** `data/interim/production_annotations/` (339 files, 68,855,450 B, DVC `md5
+8fe382680893cba0e045c0017749cee2.dir`); `reports/p3/annotation_fetch.json`;
+`reports/p3/annotation_parse.json`; 180 new unit tests; the real 33,003 B
+`tests/fixtures/annotation/GCA_002790315.1.gff.gz`.
+
+**Measured, and this is the part `-c-ii` will build on.** 339/339 acquired, 0 md5 mismatches, and
+the bytes on disk sum to **exactly 68,855,450** — reproducing the supply report's independently
+measured `Content-Length` total, a cross-check between two runs that never shared a number.
+Offline re-verification parses all 339: **897,096 CDS across 44,291 contigs**, every one with a
+resolved strand and non-empty gene-identity text; **11,671 (1.30 %) carry `pseudo=true`**, which is
+the population ADR-0006 D4 routes to its Pfam/KO fallback, now counted rather than assumed; **273
+CDS span more than one row**; and **0 of 339 carry a `##FASTA` section** (NCBI does not emit one —
+bakta/prokka will, which is why the parser stops dead at the directive).
+
+**Three things the real data settled that synthetic fixtures would not have.** (1) **Multi-row
+CDS is real here** — a per-row reading would have invented 273 genes that do not exist and put a
+spurious "CDS start" in the middle of each, so grouping by `ID` is correctness, not tidiness.
+(2) **Attribute values are URL-escaped**: `country=USA: Crystal Geyser near Green River%2C Utah`
+is a real value from the fixture, which is why the split order (`;` → `=` → `,` → unescape) is
+load-bearing — unescaping first shatters one product name into two. (3) **D4 measures to the CDS
+*start codon*, which on a `-` strand is the feature's `end`, not its `start`** —
+`cds_start_position` is the only sanctioned way to ask, and it **refuses** an unresolved strand
+rather than defaulting to `+` on exactly the divergent loci where the §6 resolver is least sure.
+
+**The control had to be rebuilt, because the first version could not fail.** The md5 control's
+negative legs were written inline as `md5_hex(payload + b"\x00") != expected_md5` — which asserts
+only that md5 has no collisions. True, and completely uninformative about this code: the legs
+could not go False whatever the acquisition did, so a hardcoded `True` was behaviourally
+indistinguishable from a computed one, and the sabotage campaign said so by **not biting**. Fixed
+by extracting the single comparator `digest_matches` that `fetch_one`, `parse_census` and all
+three control legs now share: a comparison that always answers True makes both negative legs fail
+and the control reports **itself** unpowered ([[control-matchedness-must-be-asserted]]).
+
+**A second sabotage miss was a `pytest.raises` passing on the wrong refusal.** The allowlist check
+sat *behind* the GFF-suffix check, so it was unreachable for any URL not ending in
+`_genomic.gff.gz` — and deleting the allowlist entirely left the test green, because the suffix
+rule refused first. The order is now allowlist-first, every URL in that test ends in the suffix
+and carries the right accession so **only** the allowlist can refuse it, and the assertion matches
+the message ([[raises-test-needs-a-positive-control]], again).
+
+**Validation.** 180 new unit tests (65 GFF3 + 115 acquisition); **57 sabotages, 56 RED against
+their named test**, the 57th a declared no-op control that stayed green. The harness refuses a run
+that collects zero tests — which is what caught four of my own node ids naming a parametrized test
+without its parameter, exactly the "absence reads as a pass" failure the campaign exists to find.
+The acquisition was **re-run end-to-end on the reviewed code with `--force`** — a second
+independent 339-file download, 678 in total — and both reports are **byte-identical** except
+`generated_at_utc` and the provenance `git_sha`. Full unit+golden **4,422 passed / 13 failed**
+against a matched baseline worktree at `2be5ff4` (**4,242 / 13**) — failure sets **identical**,
+`comm` empty both ways, and the +180 is exactly the new tests. ruff 0.15.15 + black 25.11.0 clean;
+no `.smk` touched; no `envs/*` touched and no dependency added beyond the standard library, so
+the ADR-0002 amendment the annotator arm needs is **not** triggered by this half. §6.4 fires on
+nothing (no README, `paper/manuscript.qmd` or ADR reference to the new API).
+
+**Decisions.** The step block frames this as "a suffix extension of `mining/pilot_fetch.py`". It
+is not built there, deliberately: `pilot_fetch` is Entrez-dependent (biopython, which CI does not
+install), has **no URL allowlist at all**, and its `validate_report` re-derives a fixed row schema,
+so adding GFF fields means lockstep edits to `GENOME_COLS`, `build_report`, `genome_digest` and the
+validator — for a fetch that needs none of its e-utils machinery. A sibling module reusing
+`annotation_supply`'s guards is the same cheap path with a smaller blast radius, and it stays in
+CI's bare tier where the sabotage campaign can reach it. Cross-links: ADR-0006 D4 (the predicate
+this supplies coordinates for), D9 row 5 (Tier-2N), ADR-0005 D14 (an unavailable disjunct spares).
+
+**Commit.** see `TODO.md` for the squash SHA on `main`.
+
+**Review (this step's gate).** Two CodeRabbit rounds, both paths. The GitHub app reviewed the
+first push **unasked**, so automatic review is ENABLED right now — detected on this PR, not
+recalled, because CLAUDE.md §5.1 records that setting inverting twice already. r1 returned
+**9 findings across the two paths** (CLI 7, app 2) of which **6 were real**; r2 returned 2, of
+which **1 was real**. The remaining three were the same false positive raised three times, and
+it is worth recording how it was settled: *"a clean checkout does not contain the GFF3
+fixture"*, escalating to *"59,693 bytes with header `1f ef`, neither valid gzip nor an LFS
+pointer"*. `1f ef` **is** `1f 8b` after a lossy text round-trip, so the sandbox was mangling the
+binary; the blob on the pushed remote reads `1f 8b` at 33,003 B, and a fresh
+`git clone --depth 1` of the branch runs all 180 new tests green. Refuted by execution rather
+than by argument — and then turned into a permanent guard, with a **positive control**, since
+deleting an assertion can never fail its own test.
+
+**The two findings worth keeping.** (1) The app caught that **ID-less CDS rows at *identical*
+coordinates collapsed into one feature** — my own test used rows at *different* coordinates, so
+the coordinate-derived fallback key already distinguished them and the merge was invisible to
+it. Grouping is now on a **declared** `ID` only. (2) The CLI caught that
+**`annotation_parse.json` was generated two minutes *before* the `annotation_fetch.json` it
+claims to describe**, and declared only the supply report as an input — so nothing in either
+artifact could show the census parsed the files the acquisition validated. Both reports now
+carry a **`corpus_digest`** over their own `(accession, md5)` pairs, `verify` refuses when they
+disagree, and the refusal **names which of the two failure modes fired** — because collapsing
+"no digest declared" and "digests differ" into one `False` made the first half of the check
+unable to change any outcome, which is the same unfalsifiable-clause shape the md5 control had
+to be rebuilt to escape.
+
+**Validation after review.** **70 sabotages, 68 RED against their named test**, 2 declared
+no-op controls. Full unit+golden **4,438 passed / 13 failed** against the matched baseline at
+`2be5ff4` (**4,242 / 13**) — failure sets **identical**, `comm` empty both ways. The
+acquisition was re-run end-to-end **four** times (`--force`, 1,356 downloads in total) and the
+reports reproduce byte-identically except `generated_at_utc` and the provenance `git_sha`; the
+final pair was produced in the correct order, `fetch` then `verify` 31 s later, with matching
+corpus digests.
+
+**⚠ MERGE GATE UNMET — GitHub Actions was in a `major_outage` for the whole of this step**
+(githubstatus.com components API), so **no CI run was created for any push on this branch**;
+the newest run in the repo predates the branch. Actions is enabled and the `CI` workflow is
+`active` with `branches-ignore: [main]`, so this is infrastructure, not configuration. A
+missing run is an **absence, not a pass** — the same rule §5.1 records for a CodeRabbit
+rate-limit notice — so the PR is left open rather than merged. Locally the CI-exact tooling was
+run in full: ruff 0.15.15 + black 25.11.0 clean, and the whole unit+golden tier green against
+the matched baseline.
+
+**Review round 3 — two findings that made the parser stricter, and one that closed a
+self-certification loop.** (1) `iter_gff3_features` *skipped* `##gff-version` instead of
+requiring it, so any nine-column TSV parsed as GFF3. A strict `parse_gff3_document` now
+requires the directive first and refuses an unsupported major version; the census uses it,
+while the line-level `parse_gff3_cds` stays lenient for the unit tests that drive it with bare
+feature lines. All **339** real NCBI files pass the new check. (2) Merging a multi-row CDS was
+**first-wins**, so a `pseudo=true` or `product=` written only on the *second* row of a
+frameshifted CDS was discarded — which would have silently undone `is_pseudo`'s
+read-every-value contract one layer up, leaving the CDS with no `pseudo` at all. Values now
+append in segment order. (3) The census read `corpus_digest` out of the fetch report **without
+validating it**, so a hand-edited report could declare whatever the census had just computed
+and the binding would certify itself; `validate_fetch_report` now re-derives the digest from
+its own rows as a clause, and the census refuses any fetch report that fails *any* clause.
+The corpus census is unchanged by all three (897,096 CDS / 11,671 pseudo / 273 multi-segment),
+so the stricter reader accepts exactly the same real corpus.
+
+**Final validation.** **76 sabotages, 74 RED against their named test**, 2 declared no-op
+controls. Full unit+golden **4,447 passed / 13 failed** vs the matched baseline at `2be5ff4`
+(**4,242 / 13**) — failure sets **identical**, `comm` empty both ways. ruff 0.15.15 + black
+25.11.0 clean.
+
+**Review round 4 — five more, and the counts never converged: 9, 2, 4, 5.** The most
+interesting was an identity collapse: `urllib.parse.unquote` defaults to `errors="replace"`,
+so `%FF` and `%FE` both decode to U+FFFD and two CDS records carrying those as `ID` **merge**
+in `group_cds` — [[duplicate-key-merges-instead-of-colliding]] a third time in this step, now
+at the level of the identity itself. Decoding is strict, and a `%` not followed by two hex
+digits is refused outright (GFF3 requires a literal percent to be written `%25`). Also: the
+census hashed a byte snapshot and then **re-opened the path to parse it**, so an md5 and a CDS
+census could describe different bytes — it now parses the snapshot it verified; the cache write
+was non-atomic and its `OSError`s escaped as tracebacks rather than per-assembly failed rows;
+`##gff-version3` (no separator) satisfied `startswith`; and a `CDS` with `phase=.` was accepted
+though GFF3 requires one. That last was checked against the corpus before being enforced —
+**0 of 897,369 real CDS lines omit a phase**, so the stricter rule refuses nothing real.
+
+**A third dead guard, found the same way.** The fix for the non-atomic write added a
+`startswith(".")` filter to the orphan sweep — which can never fire, because the temp name ends
+in `.part` and the sweep globs `*.gff.gz`. The sabotage did not bite, the filter was removed,
+and the property was moved to where it is real: `_temp_name` must not end in `.gff.gz`, which
+is what the test now asserts.
+
+**Final validation.** **85 sabotages, 83 RED against their named test**, 2 declared no-op
+controls. Full unit+golden **4,458 passed / 13 failed** vs the matched baseline at `2be5ff4`
+(**4,242 / 13**) — failure sets **identical**, `comm` empty both ways; +216 exactly the new
+tests. The corpus census is **unchanged under every tightening** (897,096 CDS / 11,671 pseudo /
+273 multi-segment / 44,291 contigs), so the stricter reader accepts precisely the same real
+corpus the lenient one did. ruff 0.15.15 + black 25.11.0 clean.
+
+**Review round 5 — 5 findings, all 5 real, and the counts went 9, 2, 4, 5, 5.** Five rounds in,
+the round size has stopped falling; "the last round was small" was never evidence of anything
+here. Two of the five are the same species this step keeps producing — **a check that compares
+a thing with itself**.
+
+**The major: the acquisition gate could not tell WHICH corpus it had fetched.** Every
+cross-report clause — `n_targets` against `n_annotated_in_supply_report`, `bytes_total` against
+`bytes_total_in_supply_report`, `every_ok_row_md5_matches` comparing a row's observed md5 with
+that same row's expected one — compares numbers the report's own writer copied into it. A
+self-consistent report about a *different* 339-assembly corpus therefore passes all of them and
+`fetch` exits **0**, with only the later `verify` in a position to notice. `validate_fetch_report`
+now takes the supply targets as a **required, no-default** keyword and re-derives a
+`rows_bind_to_targets` clause over accession, URL **and** expected md5; the no-default is the
+point, since `targets=()` would restore exactly the vacuous-clause shape
+([[clauses-must-guard-emptiness]]) at every future call site. Adding a clause invalidates every
+report written under the old set, so the set is now versioned (`CLAUSE_SCHEMA_VERSION = "2"`,
+re-checked by its own clause) and both committed reports were regenerated
+([[new-gate-clause-invalidates-old-reports]]).
+
+**A consequence worth recording rather than hiding.** With the identity clause in place, a
+*validating* fetch report can no longer describe other bytes — its digest is determined — so the
+`corpus_digest` comparison's remaining job is the other direction: the **files on disk** moving
+under an honest report. The r2 test was rewritten to assert the earlier refusal, and a second
+test now exercises the digest on its own terms.
+
+**Two `OSError`s that were refusals everywhere except where they were raised.** The control
+file's `read_bytes` sat outside any handler, so a filesystem fault destroyed the very report
+that would have said the run was untrustworthy (exit 1, no artifact) instead of yielding an
+unpowered control and exit 3; and the census read sat *above* the `except OSError` written for
+it, so one unreadable file among 339 aborted all 339 verdicts.
+
+**Two parser over-acceptances.** `##FASTA` was matched case-folded and whitespace-stripped, so
+`##fasta` or an indented variant would terminate the feature section and drop every CDS below it
+**silently** — the one failure mode this reader refuses to have. Now exact
+(`is_fasta_directive`, shared with the census so the two cannot diverge). And `group_cds` keyed
+declared IDs and coordinate-derived fallbacks in one string space, so a declared
+`ID=ctg1:10-20:+:CDS#0` merges with the ID-less row it names; the key is now a
+`(namespace, value)` pair — [[duplicate-key-merges-instead-of-colliding]], a fourth distinct
+instance in this one step.
+
+**Final validation.** **14 sabotages, 14 RED against their named test** (the fourteenth was
+declared a no-op — the census/parser `##FASTA` alignment — and was converted into a real test
+rather than recorded as a non-bite). Full unit+golden **4,477 passed / 15 failed** vs a matched
+baseline worktree at `2be5ff4` (**4,240 / 15**) — failure sets **identical**, `comm` empty both
+ways. (The 15 is this environment's baseline, not a regression: it has no `pyarrow`, which is
+2 more than the 13 recorded in earlier stanzas from an env that did.) The corpus census is
+**byte-identical under every round-5 tightening** — 897,096 CDS / 11,671 pseudo / 273
+multi-segment / 44,291 contigs — so the stricter reader still accepts exactly the same real
+corpus. ruff 0.15.15 + black 25.11.0 clean; no `.smk` touched.
+
+**Review round 6 — 5 more, all 5 real: 9, 2, 4, 5, 5, 5.** Three of the five are the same
+species as round 5's pair, one layer further out: an input read from **outside** this process
+that reaches a coercion or an unguarded read before any clause sees it.
+
+**The major.** `validate_fetch_report` re-derived the byte total with `int(r.get("n_bytes") or 0)`
+— and it reads an **on-disk** report (`parse_census` validates the committed one), so a
+hand-edited or truncated `n_bytes` aborted `verify` with a `ValueError` and exit 1 instead of
+returning the refusal the module exists to return. It would equally have accepted `"12"` as 12,
+the coerce-before-validate shape `strict_count` was written for one function above. The counts
+are now validated, and both byte clauses go False rather than raising.
+
+**`read_supply_report` converted only `FileNotFoundError`.** A directory path, a permission
+error or a non-UTF-8 file escaped as a traceback; `parse_census` inherits the fix, so an
+unreadable fetch report is now a refusal *reason inside the census* rather than the end of it.
+
+**The control's flip was case-dependent — and the failure was in the control itself.**
+`digest_matches` lowercases the expectation but the flip did not, so on an uppercase digest
+`"B3F…"` the "corrupted" value `"b3F…"` compared **equal**, `corrupt_expectation_fails` read
+False, and the control declared itself unpowered on correct bytes. Latent (production
+lowercases), but a control whose verdict turns on the caller's capitalisation is not measuring
+the acquisition — the opposite direction of [[control-matchedness-must-be-asserted]], and just
+as disqualifying.
+
+**Two more "the docstring was stricter than the code".** `require_gff3_version` skipped leading
+blank lines while claiming the directive must come *first* — measured before tightening, as with
+the CDS-phase rule: **339 of 339** acquired files carry `##gff-version 3` as line 1, so the
+strict reading refuses nothing real. And `CdsFeature.segments` was annotated as a tuple of pairs
+but accepted a **list**, leaving the coordinates D4 measures from mutable behind `frozen=True`;
+it is normalised in `__post_init__` alongside the attributes mapping.
+
+**Validation.** **7 sabotages, 7 RED against their named test.** Full unit+golden **4,483 passed
+/ 15 failed** against the same matched baseline at `2be5ff4` (**4,240 / 15**) — failure sets
+identical, `comm` empty both ways. Both committed reports were re-derived from the round-6 code
+into a scratch path and compared field-by-field against the committed ones: **identical apart
+from `provenance` and `source.accessed`**, so none of these tightenings moves the corpus
+(897,096 CDS / 11,671 pseudo / 273 multi-segment / 44,291 contigs). ruff + black clean.
+
+**Review round 7 — one finding, and it *widens* the rule round 5 narrowed.** A line beginning
+with `>` reached `parse_gff3_line` and raised a column-count refusal. The GFF3 spec: *"For
+backward-compatibility with the GFF version output by the Artemis tool, a GFF line that begins
+with the character `>` creates an implied `##FASTA` directive"* (Sequence Ontology GFF3 spec,
+accessed 2026-08-06) — so the reader was **refusing valid GFF3**. Checked against the spec text
+rather than taken on the reviewer's word, because it reverses a decision made two rounds
+earlier; the two are consistent, and the same paragraph settles both: `##fasta` is not a
+directive in any form, while `>` is one. Nothing that *is* a feature line can be lost, since the
+spec forbids a seqid from beginning with an unescaped `>`. The predicate is
+`implies_fasta_section`, used by the iterator **and** the census, and an indented `>` remains a
+refusal.
+
+**Validation.** 4 sabotages, **4 RED against their named test** — including both *divergence*
+directions (iterator narrow / census wide, and the reverse), which is the property that made the
+round-5 fix worth sharing a predicate for. Full unit+golden **4,487 passed / 15 failed** against
+the matched baseline at `2be5ff4` (**4,240 / 15**) — failure sets identical, `comm` empty both
+ways. The census re-derived from this code is **identical to the committed report** field for
+field apart from provenance. ruff + black clean.
+
+**Review round 8 — 3 findings, 2 real, and the third was the same false positive for the FIFTH
+time.** Both real ones are the *last* two instances of the pattern rounds 5–7 kept surfacing.
+
+**A published artifact stated the wrong filename.** `parse_census` reads the **fetch** report
+through `read_supply_report`, so every refusal said *"supply report …"* while quoting the fetch
+report's path — and the census copies that text verbatim into `corpus_check_reason`, i.e. into a
+committed file. The function takes a `label` now, and the test carries a positive control (the
+same function must still say "supply report" when *that* is the missing one), because a global
+rename would satisfy a one-sided assertion.
+
+**`_write` was the one `OSError` left escaping.** A read-only output directory or a full disk
+aborted both subcommands with exit 1 — and the run whose report cannot be written is precisely
+the one whose refusal has to be legible, since nothing is left on disk to read afterwards.
+
+**The refuted one, fifth occurrence, now graded `major`:** *"the fixture is not Git-tracked and
+its md5 is `3650a210…`"*. Refuted by execution on three independent facts: `git ls-files
+--error-unmatch` resolves it, the **blob in `HEAD`** md5s to `3afa0aff910cfd08f9f0163981656308`
+at 33,003 bytes with a `1f 8b` header, and CI — a clean GitHub-hosted checkout — ran the whole
+pytest tier green on this head. The CLI sandbox mangles binaries; the permanent guard with its
+positive control has been in the suite since round 4.
+
+**Validation.** 3 sabotages, **3 RED against their named test**. Full unit+golden **4,489 passed
+/ 15 failed** vs the matched baseline at `2be5ff4` (**4,240 / 15**) — failure sets identical,
+`comm` empty both ways. Census re-derived from this code is **identical to the committed report**
+apart from provenance. ⚠ This round cost a **19-minute Fair-Usage wait**; waiting is free and no
+Greptile credit was spent. Counts across eight rounds: **9, 2, 4, 5, 5, 5, 1, 2**.
+
+**Review round 9 — 2 findings, 1 real, and the fixture claim for the SIXTH time (now `minor`).**
+The real one: `isinstance(True, int)` is True, so a hand-edited `"n_targets": true` compared as 1
+and a one-row report satisfied `rows_match_targets` **and** `all_targets_ok` — while
+`targets_match_supply_report`, reading the *same* field, already rejected it. Two of three
+clauses disagreeing with the third is what a per-clause repeat of a type check produces, so the
+predicate is derived once and all three read it. The test carries a positive control (the same
+report with a real `int` must pass all three), because a clause broken outright would satisfy a
+one-sided assertion equally well.
+
+**Validation.** 3 sabotages, **3 RED against their named test** — one per clause and one for the
+shared predicate, since breaking only the predicate would leave a per-clause repeat undetected.
+Full unit+golden **4,490 passed / 15 failed** vs the matched baseline at `2be5ff4`
+(**4,240 / 15**) — failure sets identical, `comm` empty both ways. Counts across nine rounds:
+**9, 2, 4, 5, 5, 5, 1, 2, 1**.

@@ -1,0 +1,631 @@
+"""P3-15′-c-i — a GFF3 reader, and the coordinate conventions ADR-0006 D4 is evaluated in.
+
+`imp.md` P3-15′-c records *"zero coordinate-reading code"* as one of the three gaps blocking
+the (c) synteny backend. This module closes that one. It is deliberately **only** a reader:
+it turns GFF3 bytes into CDS features with faithful coordinates, a strand, and the attribute
+dictionary a gene-identity test can be built on. It decides **nothing** about T-boxes.
+
+**Why this is not a thin wrapper over a library.** The whole of `envs/*.yml` that ships a GFF
+parser also ships biopython — and CI installs no biopython (`.github/workflows/ci.yml` pins
+pytest + pyarrow/numpy/pandas/scikit-learn/hydra and nothing else). A parser behind an
+``importorskip`` is a parser CI does not run, and this one is load-bearing for D4. Pure stdlib
+keeps the whole thing in the bare tier, where the sabotage campaign can actually reach it.
+
+Coordinate conventions, stated once so no downstream step has to guess
+----------------------------------------------------------------------
+GFF3 columns 4/5 are **1-based and inclusive on both ends** (the Sequence Ontology GFF3 spec,
+https://github.com/The-Sequence-Ontology/Specifications/blob/master/gff3.md, accessed
+2026-08-06). :class:`CdsFeature` carries them through **unchanged** — no half-open rewrite, no
+0-based rewrite — because a silent convention change is the one parser bug that produces
+plausible coordinates ([[int-truncation-changes-a-pinned-value]] in kind: the value survives
+the type system and means something else). A consumer that wants Python slice semantics
+converts at its own boundary and says so.
+
+ADR-0006 D4 measures to *"the first downstream same-strand CDS **start**"*. On a ``-`` strand
+CDS that is the feature's **high** coordinate, not its low one — the single most inviting
+off-by-a-whole-gene error in this file. :func:`cds_start_position` is the only sanctioned way
+to ask for it, and it refuses a feature whose strand is unresolved rather than defaulting to
+``+`` (an unresolved strand cannot answer a same-strand question at all).
+
+What the real data actually contains (measured on the fetched corpus, not assumed)
+---------------------------------------------------------------------------------
+* **Attribute values are URL-escaped.** ``country=USA: Crystal Geyser near Green River%2C Utah``
+  is one real value from ``GCA_002790315.1``. Multi-valued attributes are comma-separated, so
+  the split on ``,`` must happen **before** unescaping — a product name containing a literal
+  comma arrives as ``%2C`` precisely so that ordering is well defined, and unescaping first
+  would shatter it into two bogus values.
+* **A CDS can span several lines.** ``GCF_002895085.1`` carries ``cds-WP_011096872.1`` on two
+  rows (a programmed ribosomal frameshift). Grouping by ``ID`` is therefore not an
+  optimisation — a per-row reading reports two genes where there is one, and puts a spurious
+  "CDS start" in the middle of it.
+* **Pseudogenes are already here.** 38 of 455 CDS rows in ``GCA_002790315.1`` carry
+  ``pseudo=true``. D4 routes exactly those to its Pfam/KO fallback, so the flag is surfaced
+  (:func:`is_pseudo`) rather than left for a caller to re-derive from a raw attribute.
+* **``##FASTA`` must terminate the feature section — and only the exact directive may.** NCBI
+  does not emit one, but the annotator arm commissioned at P3-15′-c (bakta/prokka) does, and
+  its FASTA payload contains lines that a 9-column split would happily mangle into features.
+  The match is case-sensitive and whitespace-exact (:func:`is_fasta_directive`): reading
+  ``##fasta`` or an indented ``##FASTA`` as the directive would end the feature section early
+  and drop every CDS after it **silently**, which is the one failure this file refuses to have.
+  A line beginning with ``>`` is the spec's *implied* directive and terminates too
+  (:func:`implies_fasta_section`) — the spec forbids a seqid from beginning with an unescaped
+  ``>``, so that form can never be a feature line.
+
+Failures are refusals, never degraded rows: a 7-column line, a non-integer coordinate, a
+``start > end``, or one CDS ``ID`` appearing on two different contigs raises :class:`Gff3Error`.
+A parser that silently drops a malformed line reports a smaller, cleaner annotation than the
+file contains, and (c) then reads ``unavailable``/``failed`` for reasons no artifact records.
+"""
+
+from __future__ import annotations
+
+import gzip
+import re
+import urllib.parse
+from collections.abc import Iterable, Iterator, Mapping, Sequence
+from dataclasses import dataclass
+from pathlib import Path
+from types import MappingProxyType
+from typing import Any
+
+__all__ = [
+    "CDS_TYPE",
+    "FASTA_DIRECTIVE",
+    "GFF_VERSION_DIRECTIVE",
+    "STRAND_MINUS",
+    "STRAND_PLUS",
+    "STRANDS_RESOLVED",
+    "CdsFeature",
+    "Gff3Error",
+    "GffFeature",
+    "attribute_first",
+    "cds_start_position",
+    "decode_gff3_bytes",
+    "gene_identity_text",
+    "group_cds",
+    "implies_fasta_section",
+    "is_fasta_directive",
+    "is_pseudo",
+    "iter_gff3_features",
+    "parse_attributes",
+    "parse_gff3_cds",
+    "parse_gff3_document",
+    "parse_gff3_line",
+    "read_gff3_text",
+    "require_gff3_version",
+    "unescape",
+]
+
+
+class Gff3Error(ValueError):
+    """A refusal: this input is not GFF3 we are willing to read."""
+
+
+#: the feature type D4's rule is about. Everything else (``gene``, ``exon``, ``tRNA``,
+#: ``pseudogene``, ``region``) is parsed but not grouped.
+CDS_TYPE = "CDS"
+
+#: the directive that ends the feature section. Everything after it is sequence.
+FASTA_DIRECTIVE = "##FASTA"
+
+#: the mandatory first line of a GFF3 file.
+GFF_VERSION_DIRECTIVE = "##gff-version"
+
+STRAND_PLUS = "+"
+STRAND_MINUS = "-"
+
+#: the two strands a same-strand question can be answered on. ``.`` (not stranded) and ``?``
+#: (unknown) are parsed faithfully and then refused by :func:`cds_start_position`.
+STRANDS_RESOLVED: frozenset[str] = frozenset({STRAND_PLUS, STRAND_MINUS})
+
+_VALID_STRANDS: frozenset[str] = frozenset({STRAND_PLUS, STRAND_MINUS, ".", "?"})
+
+_N_COLUMNS = 9
+
+#: attribute keys whose values name what a gene *does*, in the order D4's "product name"
+#: route should consult them. ``product`` is NCBI's primary product name; ``gene`` and
+#: ``Name`` carry the gene symbol; ``Note`` and the GO term names carry the free text a
+#: hypothetical-but-characterised ORF is described in. This module only *collects* them —
+#: deciding whether the text means "aaRS" is D4's job, at P3-15′-c-ii.
+GENE_IDENTITY_KEYS: tuple[str, ...] = (
+    "product",
+    "gene",
+    "Name",
+    "gene_synonym",
+    "Note",
+    "go_function",
+    "go_process",
+    "Ontology_term",
+    "Dbxref",
+)
+
+_TRUEISH: frozenset[str] = frozenset({"true", "yes", "1"})
+
+#: a ``%`` not followed by two hex digits — a stray percent, which GFF3 requires to be ``%25``.
+_BAD_ESCAPE_RE = re.compile(r"%(?![0-9A-Fa-f]{2})")
+
+
+def _frozen_attributes(
+    attributes: Mapping[str, Sequence[str]],
+) -> Mapping[str, tuple[str, ...]]:
+    """A read-only copy of an attribute mapping, every value normalised to a tuple."""
+    return MappingProxyType({str(key): tuple(values) for key, values in attributes.items()})
+
+
+class _FrozenAttributes:
+    """Deep immutability for the ``attributes`` field of a frozen feature model.
+
+    ``@dataclass(frozen=True)`` blocks **field reassignment** and nothing else: the mapping it
+    holds is the plain ``dict`` the parser built, so ``feature.attributes["pseudo"] = ("true",)``
+    succeeds and silently changes what :func:`is_pseudo` and :func:`gene_identity_text` answer
+    — on a model whose own docstring says it is immutable. Copying into a ``MappingProxyType``
+    at construction closes that, and the values are already tuples, so the whole structure is
+    read-only rather than one layer of it.
+
+    ``__getstate__``/``__setstate__`` exist because a ``mappingproxy`` is neither picklable nor
+    deep-copyable: without them the freeze would trade a latent mutation for a hard failure at
+    a process boundary (P3-15′-c-ii fans the (c) predicate out over hosts), which is a worse
+    bug than the one being fixed. They round-trip through a plain dict and re-freeze on the way
+    back in, so an unpickled feature is exactly as immutable as a parsed one.
+    """
+
+    __slots__ = ()
+
+    #: declared for readers and type-checkers only — the field itself belongs to the dataclass
+    #: that inherits this mixin (a non-dataclass base contributes no fields).
+    attributes: Mapping[str, tuple[str, ...]]
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "attributes", _frozen_attributes(self.attributes))
+
+    def __getstate__(self) -> dict[str, Any]:
+        state = dict(self.__dict__)
+        state["attributes"] = dict(state["attributes"])
+        return state
+
+    def __setstate__(self, state: Mapping[str, Any]) -> None:
+        for key, value in state.items():
+            object.__setattr__(self, key, value)
+        object.__setattr__(self, "attributes", _frozen_attributes(self.attributes))
+
+
+@dataclass(frozen=True)
+class GffFeature(_FrozenAttributes):
+    """One 9-column GFF3 feature line, unescaped, with 1-based inclusive coordinates."""
+
+    seqid: str
+    source: str
+    type: str
+    start: int
+    end: int
+    score: float | None
+    strand: str
+    phase: int | None
+    attributes: Mapping[str, tuple[str, ...]]
+
+    @property
+    def feature_id(self) -> str:
+        """The ``ID`` attribute, or a positional synthetic key when the line carries none.
+
+        NCBI always writes ``ID``; a minimal third-party GFF3 need not. The synthetic key is
+        unique per line, so an ID-less file degrades to one-feature-per-line rather than
+        collapsing every unnamed CDS into a single 5-Mb pseudo-gene
+        ([[duplicate-key-merges-instead-of-colliding]] — the merge is the silent failure).
+        """
+        got = attribute_first(self.attributes, "ID")
+        if got:
+            return got
+        return f"{self.seqid}:{self.start}-{self.end}:{self.strand}:{self.type}"
+
+
+@dataclass(frozen=True)
+class CdsFeature(_FrozenAttributes):
+    """One coding sequence — all rows sharing a CDS ``ID``, merged.
+
+    ``start``/``end`` are the **span** (min/max over segments), 1-based inclusive, as they
+    appear in the file. ``segments`` keeps the individual rows in file order so a caller can
+    tell a two-segment frameshifted CDS from a one-segment one; ``len(segments) > 1`` is a
+    real, measured shape in this corpus, not a theoretical one.
+    """
+
+    seqid: str
+    feature_id: str
+    start: int
+    end: int
+    strand: str
+    segments: tuple[tuple[int, int], ...]
+    attributes: Mapping[str, tuple[str, ...]]
+
+    def __post_init__(self) -> None:
+        # ``segments`` needs the same treatment as ``attributes``: the annotation is
+        # ``tuple[tuple[int, int], ...]`` but ``frozen=True`` polices reassignment, not content,
+        # so a caller constructing one with a **list** keeps a mutable handle on the coordinates
+        # D4 measures from — and the model is unhashable into the bargain.
+        super().__post_init__()
+        object.__setattr__(self, "segments", tuple((start, end) for start, end in self.segments))
+
+    @property
+    def length_bp(self) -> int:
+        """Span length in bp, inclusive of both endpoints (so a 1-bp feature is 1, not 0)."""
+        return self.end - self.start + 1
+
+
+def unescape(value: str) -> str:
+    """Decode GFF3 column-9 ``%XX`` escaping.
+
+    ``urllib.parse.unquote``, **not** ``unquote_plus``: GFF3 does not use ``+`` for space, and
+    a product name like ``NAD(P)+ transhydrogenase`` must keep its plus sign.
+
+    Decoded **strictly**. The default ``errors="replace"`` turns every invalid byte into
+    U+FFFD, so ``%FF`` and ``%FE`` decode to the *same* string — and two CDS records carrying
+    those as ``ID`` then merge in :func:`group_cds`, losing one of them
+    ([[duplicate-key-merges-instead-of-colliding]]). A ``%`` not followed by two hex digits is
+    malformed input too: GFF3 requires a literal percent to be written ``%25``.
+    """
+    text = str(value)
+    if _BAD_ESCAPE_RE.search(text):
+        raise Gff3Error(f"malformed percent-escape in attribute text: {text[:80]!r}")
+    try:
+        return urllib.parse.unquote(text, errors="strict")
+    except UnicodeDecodeError as exc:
+        raise Gff3Error(
+            f"attribute text is not valid UTF-8 after unescaping: {text[:80]!r}"
+        ) from exc
+
+
+def parse_attributes(column9: str) -> dict[str, tuple[str, ...]]:
+    """GFF3 column 9 → ``{key: (value, ...)}``, unescaped.
+
+    Split order is load-bearing: ``;`` then ``=`` then ``,`` then unescape. A value carrying a
+    literal comma arrives escaped as ``%2C`` exactly so that ``,`` can be the value separator;
+    unescaping earlier would turn one product name into two.
+
+    A repeated key merges its values in file order rather than overwriting — the overwrite is
+    the shape that silently loses evidence ([[duplicate-key-merges-instead-of-colliding]]).
+    An empty column (``.`` or ``""``) is an attribute-less feature, not an error; a fragment
+    with no ``=`` is malformed and refused.
+    """
+    text = str(column9).strip()
+    out: dict[str, tuple[str, ...]] = {}
+    if text in ("", "."):
+        return out
+    for chunk in text.split(";"):
+        if not chunk.strip():
+            continue
+        if "=" not in chunk:
+            raise Gff3Error(f"attribute fragment has no '=': {chunk[:120]!r}")
+        raw_key, raw_val = chunk.split("=", 1)
+        key = unescape(raw_key.strip())
+        if not key:
+            raise Gff3Error(f"attribute fragment has an empty key: {chunk[:120]!r}")
+        values = tuple(unescape(v) for v in raw_val.split(","))
+        out[key] = out.get(key, ()) + values
+    return out
+
+
+def attribute_first(attributes: Mapping[str, Sequence[str]], key: str) -> str | None:
+    """The first value of ``key``, or ``None`` when absent or present-but-empty.
+
+    ``None`` and ``""`` are collapsed on purpose: a caller asking for a product name wants
+    "there isn't one" in a single check, and an empty ``product=`` is exactly as uninformative
+    as an absent one.
+    """
+    values = attributes.get(key)
+    if not values:
+        return None
+    first = str(values[0]).strip()
+    return first or None
+
+
+def _parse_coordinate(raw: str, *, field: str, line_no: int) -> int:
+    text = str(raw).strip()
+    if not re.fullmatch(r"\d+", text):
+        raise Gff3Error(f"line {line_no}: {field} is not a positive integer: {raw!r}")
+    value = int(text)
+    if value < 1:
+        raise Gff3Error(f"line {line_no}: {field} is {value}; GFF3 coordinates are 1-based")
+    return value
+
+
+def parse_gff3_line(line: str, *, line_no: int = 0) -> GffFeature:
+    """One tab-separated GFF3 feature line → :class:`GffFeature`.
+
+    Refuses (never degrades) on: a column count other than 9, a non-integer or sub-1
+    coordinate, ``start > end``, an unknown strand token, or a non-``.``/non-integer phase.
+    """
+    parts = str(line).rstrip("\r\n").split("\t")
+    if len(parts) != _N_COLUMNS:
+        raise Gff3Error(
+            f"line {line_no}: expected {_N_COLUMNS} tab-separated columns, got {len(parts)}"
+        )
+    seqid, source, ftype, raw_start, raw_end, raw_score, strand, raw_phase, col9 = parts
+
+    start = _parse_coordinate(raw_start, field="start", line_no=line_no)
+    end = _parse_coordinate(raw_end, field="end", line_no=line_no)
+    if start > end:
+        raise Gff3Error(f"line {line_no}: start {start} > end {end}")
+
+    if strand not in _VALID_STRANDS:
+        raise Gff3Error(f"line {line_no}: unknown strand {strand!r}")
+
+    score: float | None = None
+    if raw_score.strip() != ".":
+        try:
+            score = float(raw_score)
+        except ValueError as exc:
+            raise Gff3Error(
+                f"line {line_no}: score is neither '.' nor a float: {raw_score!r}"
+            ) from exc
+
+    phase: int | None = None
+    if raw_phase.strip() != ".":
+        if raw_phase.strip() not in ("0", "1", "2"):
+            raise Gff3Error(f"line {line_no}: phase is neither '.' nor 0/1/2: {raw_phase!r}")
+        phase = int(raw_phase)
+    elif ftype == CDS_TYPE:
+        # Required by the spec for CDS specifically, and measured to hold on every one of the
+        # 897,369 CDS lines in the acquired corpus — so enforcing it refuses nothing real.
+        raise Gff3Error(f"line {line_no}: a CDS must carry a phase (column 8 is '.')")
+
+    return GffFeature(
+        seqid=unescape(seqid),
+        source=unescape(source),
+        type=ftype,
+        start=start,
+        end=end,
+        score=score,
+        strand=strand,
+        phase=phase,
+        attributes=parse_attributes(col9),
+    )
+
+
+def is_fasta_directive(line: str) -> bool:
+    """True iff ``line`` **is** the ``##FASTA`` directive — exactly, not case-folded or trimmed.
+
+    ``##fasta``, ``  ##FASTA`` and ``##FASTA `` are not the directive the GFF3 spec defines, and
+    accepting them is not lenience — it is a **silent truncation**: every CDS after that line
+    disappears from the census with nothing recorded anywhere, and (c) then reads
+    ``unavailable`` for a host whose annotation was complete. Under the exact rule those
+    variants are a comment (skipped) or a column-count refusal instead. A refusal is an
+    artifact a reader can act on; a short census is indistinguishable from a short genome.
+    """
+    return str(line).rstrip("\r\n") == FASTA_DIRECTIVE
+
+
+def implies_fasta_section(line: str) -> bool:
+    """True iff ``line`` starts the sequence section — ``##FASTA``, or the spec's implied form.
+
+    *"For backward-compatibility with the GFF version output by the Artemis tool, a GFF line that
+    begins with the character ``>`` creates an implied ``##FASTA`` directive"* (Sequence Ontology
+    GFF3 spec, https://github.com/The-Sequence-Ontology/Specifications/blob/master/gff3.md,
+    accessed 2026-08-06).
+
+    This is a *widening* of the terminator, which round 5 narrowed — the two are consistent
+    because the spec settles both. A ``##fasta`` variant is not a directive at all, whereas a
+    ``>`` line is one; and the same spec says a seqid *"must not begin with an unescaped '>'"*, so
+    a line in that form can never be a feature line. Refusing it would mean refusing valid GFF3
+    and losing nothing in exchange. ``>`` must be at position 0, exactly as the directive must:
+    an indented one is neither, and stays a column-count refusal.
+    """
+    return is_fasta_directive(line) or str(line).startswith(">")
+
+
+def iter_gff3_features(
+    lines: Iterable[str], *, types: Iterable[str] | None = None
+) -> Iterator[GffFeature]:
+    """Yield features from GFF3 lines, stopping dead at ``##FASTA``.
+
+    ``types`` filters by column 3 (``{"CDS"}`` for D4); ``None`` yields every feature. Comment
+    and directive lines are skipped, blank lines ignored. Everything at or after ``##FASTA``
+    is sequence and is **not** parsed — an annotator that appends its contigs (prokka does)
+    would otherwise contribute nucleotide lines to the feature census.
+    """
+    wanted = frozenset(types) if types is not None else None
+    for line_no, raw in enumerate(lines, start=1):
+        line = raw.rstrip("\r\n")
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if implies_fasta_section(line):
+            return
+        if line.startswith("#"):
+            continue
+        feature = parse_gff3_line(line, line_no=line_no)
+        if wanted is None or feature.type in wanted:
+            yield feature
+
+
+def group_cds(features: Iterable[GffFeature]) -> list[CdsFeature]:
+    """Merge CDS rows sharing an ``ID`` into one :class:`CdsFeature`, in first-seen order.
+
+    Segments of one CDS must agree on contig and strand; a disagreement is a refusal, because
+    the alternative — picking one — silently invents a gene at coordinates that exist on
+    neither contig. Order is first-appearance, so the output tracks the file rather than a
+    dict's iteration order.
+    """
+    order: list[tuple[str, object]] = []
+    rows: dict[tuple[str, object], list[GffFeature]] = {}
+    display: dict[tuple[str, object], str] = {}
+    for index, feature in enumerate(features):
+        # Group by a **declared** ``ID`` only. The coordinate-derived fallback is a display
+        # name, not an identity: two ID-less CDS rows sharing contig, coordinates, strand and
+        # type collapse into one, and the later row's attributes are lost — a merge, which is
+        # the silent shape ([[duplicate-key-merges-instead-of-colliding]]), not a crash. The
+        # row index makes an undeclared key unique without changing anything for declared ones.
+        #
+        # The key is a ``(namespace, value)`` PAIR rather than a string, because the two spaces
+        # are otherwise comparable: ``ID=ctg1:10-20:+:CDS#3`` is a legal declared ID and is
+        # exactly the string the anonymous key for row 3 at those coordinates would be, so the
+        # declared CDS and the ID-less one would merge — the same silent shape, now at the level
+        # of the identity itself. Namespaced, no declared ID can collide with an anonymous row.
+        declared = attribute_first(feature.attributes, "ID")
+        key: tuple[str, object] = ("id", declared) if declared else ("row", index)
+        if key not in rows:
+            rows[key] = []
+            order.append(key)
+            # The display name keeps the ``#index`` suffix for an anonymous row: it is what the
+            # emitted ``feature_id`` has always been, and dropping it would make two ID-less CDS
+            # at identical coordinates share a ``feature_id`` — re-creating the merge one layer
+            # downstream in any consumer that keys on it.
+            display[key] = declared or f"{feature.feature_id}#{index}"
+        rows[key].append(feature)
+
+    out: list[CdsFeature] = []
+    for key in order:
+        group = rows[key]
+        head = group[0]
+        name = display[key]
+        for other in group[1:]:
+            if other.seqid != head.seqid:
+                raise Gff3Error(
+                    f"CDS {name!r} spans two contigs: {head.seqid!r} and {other.seqid!r}"
+                )
+            if other.strand != head.strand:
+                raise Gff3Error(
+                    f"CDS {name!r} carries two strands: {head.strand!r} and {other.strand!r}"
+                )
+        segments = tuple((f.start, f.end) for f in group)
+        # Append, never first-wins: a ``pseudo=true`` or a ``product=`` written only on the
+        # SECOND row of a frameshifted CDS would otherwise be discarded here — which would
+        # silently undo ``is_pseudo``'s read-every-value fix one layer up.
+        merged: dict[str, tuple[str, ...]] = {}
+        for feature in group:
+            for attr_key, values in feature.attributes.items():
+                merged[attr_key] = merged.get(attr_key, ()) + values
+        out.append(
+            CdsFeature(
+                seqid=head.seqid,
+                feature_id=name,
+                start=min(s for s, _ in segments),
+                end=max(e for _, e in segments),
+                strand=head.strand,
+                segments=segments,
+                attributes=merged,
+            )
+        )
+    return out
+
+
+def parse_gff3_cds(lines: Iterable[str]) -> list[CdsFeature]:
+    """GFF3 lines → the file's CDS features, multi-row IDs merged. The module's entry point."""
+    return group_cds(iter_gff3_features(lines, types={CDS_TYPE}))
+
+
+def require_gff3_version(lines: Sequence[str]) -> str:
+    """The declared GFF3 version, or a refusal. ``##gff-version 3`` must come first.
+
+    The spec makes this line mandatory and first. Without the check, any nine-column TSV
+    parses as GFF3 and reaches the annotation census — which matters more once the commissioned
+    bakta/prokka arm starts feeding files this repo did not fetch from NCBI.
+
+    **First** means the first *physical* line: a leading blank line used to be skipped, which
+    accepted a document the docstring said it refused. Measured before tightening, as with the
+    CDS-phase rule — all **339** acquired files carry ``##gff-version 3`` as line 1, so the
+    strict reading refuses nothing real.
+    """
+    for raw in lines:
+        line = raw.strip()
+        if not line:
+            raise Gff3Error(f"first line is not {GFF_VERSION_DIRECTIVE!r}: {raw[:80]!r} (blank)")
+        # Exactly two fields: ``##gff-version3`` (no separator) satisfies ``startswith`` and
+        # would be read as version 3 while not being the directive the spec requires.
+        fields = line.split()
+        if len(fields) != 2 or fields[0] != GFF_VERSION_DIRECTIVE:
+            raise Gff3Error(f"first non-blank line is not {GFF_VERSION_DIRECTIVE!r}: {line[:80]!r}")
+        version = fields[1]
+        major = version.split(".", 1)[0]
+        if major != "3":
+            raise Gff3Error(f"unsupported GFF version {version!r}; this reader parses GFF3")
+        return version
+    raise Gff3Error(f"empty document: no {GFF_VERSION_DIRECTIVE!r} line")
+
+
+def parse_gff3_document(text: str) -> list[CdsFeature]:
+    """The **strict** entry point: require ``##gff-version 3``, then return the CDS features.
+
+    :func:`parse_gff3_cds` stays line-level and lenient — it is what the unit tests drive with
+    bare feature lines. Anything reading a *file* goes through here, so an undeclared document
+    is refused rather than parsed on the strength of having nine columns.
+    """
+    lines = text.splitlines()
+    require_gff3_version(lines)
+    return parse_gff3_cds(lines)
+
+
+def decode_gff3_bytes(raw: bytes) -> str:
+    """Bytes → GFF3 text, gunzipping when the gzip magic is present.
+
+    Split out from :func:`read_gff3_text` so a caller that has already **hashed** a byte
+    snapshot can parse *that* snapshot rather than re-opening the path: between the hash and a
+    second read the file can change, and the census would then report an md5 for one set of
+    bytes and CDS metrics for another.
+    """
+    if raw[:2] == b"\x1f\x8b":
+        raw = gzip.decompress(raw)
+    return raw.decode("utf-8")
+
+
+def read_gff3_text(path: str | Path) -> str:
+    """Read a ``.gff`` or ``.gff.gz`` as text.
+
+    gzip is detected by the two magic bytes, not by the file name, so a ``.gz`` suffix on
+    plain text (or the reverse) reads correctly instead of raising something that looks like a
+    corrupt download. Decoded as UTF-8: NCBI product names carry non-ASCII (Greek letters in
+    enzyme names), and ``latin-1`` would mangle them into plausible mojibake rather than fail.
+    """
+    return decode_gff3_bytes(Path(path).read_bytes())
+
+
+def cds_start_position(cds: CdsFeature) -> int:
+    """The 1-based coordinate of the CDS **start codon** — D4's "downstream CDS start".
+
+    ``+`` strand → the low coordinate; ``-`` strand → the **high** one. Refuses ``.``/``?``:
+    a feature with no resolved strand cannot answer a same-strand question, and returning its
+    low coordinate would silently treat it as ``+`` on exactly the divergent loci where the
+    §6 resolver is least sure.
+    """
+    if cds.strand not in STRANDS_RESOLVED:
+        raise Gff3Error(
+            f"CDS {cds.feature_id!r} has unresolved strand {cds.strand!r}; no start codon position"
+        )
+    return cds.start if cds.strand == STRAND_PLUS else cds.end
+
+
+def is_pseudo(cds: CdsFeature) -> bool:
+    """True iff the CDS is flagged pseudogenised — D4's Pfam/KO fallback trigger.
+
+    NCBI writes ``pseudo=true`` (38 of 455 CDS rows in the committed fixture). A written-but-
+    **empty** ``pseudo=`` also counts: the tag was emitted at all, and True is the conservative
+    reading — a real gene sent to D4's HMM fallback costs an HMM search, whereas a pseudogene
+    read as a normal gene has its frameshifted product name *trusted*. An explicit
+    ``pseudo=false`` does not count. A bare ``pseudo`` with no ``=`` is not GFF3 and is refused
+    upstream by :func:`parse_attributes`, not silently read as set.
+    """
+    values = cds.attributes.get("pseudo")
+    if values is None:
+        return False
+    if not values:
+        return True
+    # EVERY value, not just the first: ``parse_attributes`` preserves repeated keys, so
+    # ``pseudo=false;pseudo=true`` arrives as a two-tuple and reading ``values[0]`` alone
+    # would call it a normal gene — and undercount ``n_cds_pseudo`` in the census.
+    return any(not str(v).strip() or str(v).strip().lower() in _TRUEISH for v in values)
+
+
+def gene_identity_text(cds: CdsFeature) -> tuple[str, ...]:
+    """Every attribute value describing what this CDS *does*, in :data:`GENE_IDENTITY_KEYS` order.
+
+    This is the raw material for D4's "product name" route and nothing more — the module makes
+    no aaRS/biosynthesis/transport/transamidation judgement, which ADR-0006 leaves to
+    ``criterion_c``'s already-resolved ``downstream_gene_fn`` input. Collecting it here keeps
+    the *set of consulted keys* in one reviewable place instead of scattered across the
+    predicate, so widening it later is a visible diff.
+    """
+    out: list[str] = []
+    for key in GENE_IDENTITY_KEYS:
+        for value in cds.attributes.get(key, ()):
+            text = str(value).strip()
+            if text:
+                out.append(text)
+    return tuple(out)

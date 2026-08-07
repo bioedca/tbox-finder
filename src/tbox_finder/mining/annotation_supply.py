@@ -387,13 +387,29 @@ class _AllowlistRedirectHandler(urllib.request.HTTPRedirectHandler):
         return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
-#: the single opener both transport helpers use, so neither can bypass the redirect guard.
-_OPENER = urllib.request.build_opener(_AllowlistRedirectHandler())
+def build_allowlisted_opener() -> urllib.request.OpenerDirector:
+    """An opener whose every redirect hop is re-checked against the allowlist.
+
+    Public because P3-15′-c-i's acquisition (``mining/annotation_fetch``) needs the *same*
+    guard for a **binary** GET, and the alternative is a second copy of the handler — at which
+    point "both modules validate redirects" is two claims that can drift apart instead of one
+    ([[promote-dont-duplicate-is-a-correctness-rule]]). A fresh instance per call: an
+    ``OpenerDirector`` is not documented thread-safe, and the acquisition runs a pool.
+    """
+    return urllib.request.build_opener(_AllowlistRedirectHandler())
+
+
+#: retained so an existing test can assert the guard is wired in; **not** used for requests.
+#: ``measure_annotation_supply`` drives both helpers from a ``ThreadPoolExecutor``, and
+#: ``OpenerDirector`` carries no thread-safety guarantee — so each request builds its own
+#: (cheap: a handler list, no connection state), rather than sharing one across four workers.
+_OPENER = build_allowlisted_opener()
 
 
 def _urlopen_text(url: str) -> str:
     req = urllib.request.Request(require_allowed_url(url), headers={"User-Agent": USER_AGENT})
-    with _OPENER.open(req, timeout=NCBI_TIMEOUT_S) as resp:  # noqa: S310 - https NCBI
+    opener = build_allowlisted_opener()
+    with opener.open(req, timeout=NCBI_TIMEOUT_S) as resp:  # noqa: S310 - https NCBI
         return resp.read().decode("utf-8", "replace")
 
 
@@ -401,7 +417,8 @@ def _urlhead_length(url: str) -> int:
     req = urllib.request.Request(
         require_allowed_url(url), method="HEAD", headers={"User-Agent": USER_AGENT}
     )
-    with _OPENER.open(req, timeout=NCBI_TIMEOUT_S) as resp:  # noqa: S310 - https NCBI
+    opener = build_allowlisted_opener()
+    with opener.open(req, timeout=NCBI_TIMEOUT_S) as resp:  # noqa: S310 - https NCBI
         return int(resp.headers.get("Content-Length") or -1)
 
 
@@ -899,9 +916,11 @@ __all__ = [
     "STATUS_UNANNOTATED",
     "STATUS_UNKNOWN",
     "STATUS_VALUES",
+    "USER_AGENT",
     "accession_prefix_tally",
     "assembly_basename",
     "assembly_dir_url",
+    "build_allowlisted_opener",
     "candidate_host_accessions",
     "classify_assembly",
     "control_is_powered",
@@ -912,6 +931,7 @@ __all__ = [
     "measure_annotation_supply",
     "parse_md5_manifest",
     "probe_assembly",
+    "require_allowed_url",
     "run_control",
     "sibling_url",
 ]
