@@ -455,7 +455,17 @@ def load_status_map(table_path: str | Path) -> dict[str, str]:
     rows = payload.get("rows")
     if not isinstance(stored, Mapping) or not isinstance(rows, list):
         raise ProducerError(f"{table_path}: expected 'status' mapping and 'rows' list")
-    derived = {str(r["candidate_id"]): str(r["status"]) for r in rows}
+    # ⚠ A dict comprehension COLLAPSES a repeated candidate_id to its last occurrence, so two
+    # rows saying ``passed`` and ``failed`` for one candidate would silently pick one and the
+    # status↔rows cross-check below would still agree with itself.  ``build_status_table``
+    # refuses duplicates at write time; the reader has to as well, because a table can reach
+    # this function without having been written by it
+    # ([[duplicate-key-merges-instead-of-colliding]], on the read path this time).
+    ids = [str(r["candidate_id"]) for r in rows]
+    repeated = sorted({cid for cid, n in Counter(ids).items() if n > 1})
+    if repeated:
+        raise ProducerError(f"{table_path}: duplicate candidate_id in 'rows': {repeated[:5]}")
+    derived = {cid: str(r["status"]) for cid, r in zip(ids, rows, strict=True)}
     if derived != {str(k): str(v) for k, v in stored.items()}:
         only_stored = sorted(set(stored) - set(derived))[:5]
         only_rows = sorted(set(derived) - set(stored))[:5]
@@ -712,7 +722,9 @@ def shipped_decoy_availability(
             continue
         try:
             frame = pd.read_parquet(path, columns=["accession"])
-        except (ValueError, KeyError) as exc:
+        except (ValueError, KeyError, OSError) as exc:
+            # ``pyarrow.lib.ArrowIOError`` subclasses ``OSError``: a present-but-unreadable
+            # file would otherwise abort the whole sweep before the report is written.
             # The abort would happen AFTER the whole false-pass sweep, losing every arm to a
             # schema change in a file this arm only reports the *absence* of.
             detail[label] = {"present": True, "readable": False, "reason": str(exc)}
@@ -952,10 +964,22 @@ def false_pass_report(
 
 
 def _annotated_set(annotation_dir: str) -> set[str]:
+    """Accessions whose GFF is materialized, derived through the acquisition module's own
+    filename contract rather than a second copy of the suffix.
+
+    ``destination_name`` is the single definition of ``accession -> filename``; matching on a
+    hardcoded ``*.gff.gz`` here would silently undercount every host the day that contract
+    changes, and the undercount would look like a smaller corpus rather than a bug.
+    """
     directory = Path(annotation_dir)
     if not directory.is_dir():
         return set()
-    return {p.name.replace(".gff.gz", "") for p in directory.glob("*.gff.gz")}
+    by_filename = {}
+    for path in directory.iterdir():
+        accession = path.name.split(".gff")[0] if ".gff" in path.name else None
+        if accession and path.name == annotation_fetch.destination_name(accession):
+            by_filename[path.name] = accession
+    return set(by_filename.values())
 
 
 # ═════════════════════════════════════════════════════════════════════════════

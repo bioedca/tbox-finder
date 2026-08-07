@@ -4277,3 +4277,29 @@ than the one the previous round happened to construct.
 **Validation (round 7).** Full unit+golden **4,648 passed / 13 failed** vs the matched baseline at
 `95d0149` (**4,492 / 13**) — failure sets identical, `comm` empty both ways. **38 sabotages / 38
 RED against their named test.** ruff + black clean; no report regenerated (error-path change only).
+
+**Review round 8 — 4 CLI findings, all real, 1 major.** Counts across eight rounds:
+**20, 7, 4, 2, 1, 8, 1, 4**.
+
+**⚠ [[duplicate-key-merges-instead-of-colliding]], NOW ON THE READ PATH.** `build_status_table`
+refuses a repeated `candidate_id` at **write** time, but `load_status_map` rebuilt the map with a
+dict comprehension — which collapses a duplicate to its **last** occurrence — and the
+status↔rows cross-check then compared two maps built the same wrong way, so it agreed with
+itself. Two rows saying `passed` and `failed` for one candidate would have picked one silently.
+A table can reach the reader without having been written by the writer, so both ends refuse now.
+
+**⚠ THE FIFTH VACUOUS TEST OF THIS STEP, AND ALL FIVE WERE MINE.**
+`test_provenance_never_records_an_absolute_local_path` iterates `provenance["inputs"]` — and both
+committed reports carry `"inputs": {}` (every input resolved outside the repo root at generation
+time), so **the loop never executed** and `outputs` was never inspected at all. It now asserts the
+evidence exists *somewhere* before checking its shape. Running tally of vacuous-test species in
+this step: an artifact-pinning assertion (×4) and an empty-collection loop (×1).
+
+**Also fixed.** `pyarrow.lib.ArrowIOError` subclasses `OSError`, so a present-but-unreadable
+parquet aborted `false_pass_report` before it wrote anything; and `_annotated_set` carried a
+second copy of the `accession → filename` contract, which would have undercounted every host —
+looking like a smaller corpus rather than a bug — the day `destination_name` changed.
+
+**Validation (round 8).** Full unit+golden **4,650 passed / 13 failed** vs the matched baseline at
+`95d0149` (**4,492 / 13**) — failure sets identical, `comm` empty both ways. **40 sabotages / 40
+RED against their named test.** ruff + black clean.

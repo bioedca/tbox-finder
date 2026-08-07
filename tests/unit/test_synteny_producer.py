@@ -610,15 +610,29 @@ class TestProducerHardening:
             synteny_producer.merge_status_tables([path])
 
     def test_provenance_never_records_an_absolute_local_path(self) -> None:
-        """A committed record naming /home/<user>/… leaks a username and resolves for nobody."""
+        """A committed record naming /home/<user>/… leaks a username and resolves for nobody.
+
+        ⚠ The first version of this test was **vacuous on the very report it was written for**:
+        both committed reports carry ``"inputs": {}`` (every input resolved outside the repo
+        root at generation time), so the loop never executed and ``outputs`` was never looked
+        at.  It now asserts the evidence is *somewhere* before checking its shape — the fifth
+        vacuous-test finding in this step, and the fifth that was mine.
+        """
         for report_path in (synteny_producer.FALSE_PASS_REPORT, synteny_producer.EXCLUSION_REPORT):
             provenance = json.loads((REPO_ROOT / report_path).read_text())["provenance"]
-            for key in provenance["inputs"]:
-                assert not Path(key).is_absolute(), (report_path, key)
-                assert "/home/" not in key, (report_path, key)
-            for external in provenance.get("extra", {}).get("external_inputs", []):
-                assert "/" not in external["name"], external
-                assert len(external["sha256"]) == 64, external
+            external = provenance.get("extra", {}).get("external_inputs", [])
+            assert provenance["inputs"] or external, (
+                f"{report_path}: provenance records no input at all, so a path-shape "
+                "assertion over it proves nothing"
+            )
+            for section in ("inputs", "outputs"):
+                for key in provenance[section]:
+                    assert not Path(key).is_absolute(), (report_path, section, key)
+                    assert "/home/" not in key, (report_path, section, key)
+            for entry in external:
+                assert "/" not in entry["name"], entry
+                assert not Path(entry["name"]).is_absolute(), entry
+                assert len(entry["sha256"]) == 64, entry
 
 
 class TestReviewRoundTwo:
@@ -873,3 +887,41 @@ class TestErrorsAreTranslatedAtTheMiningBoundary:
                 synteny_status_table=self._bad_table(tmp_path),
                 synteny_available=True,
             )
+
+
+class TestReaderRefusesDuplicates:
+    def test_a_duplicate_candidate_id_in_rows_is_refused_at_READ_time(self, tmp_path: Path) -> None:
+        """⚠ A dict comprehension collapses a repeated id to its last occurrence, and the
+        status↔rows cross-check would then agree with itself.  The writer refuses duplicates,
+        but a table can reach the reader without having been written by it."""
+        table = synteny_producer.build_status_table([row("a", STATUS_PASSED)], config=CONFIG)
+        table["rows"].append(dict(table["rows"][0], status=STATUS_FAILED))
+        path = tmp_path / "t.json"
+        path.write_text(json.dumps(table), encoding="utf-8")
+        with pytest.raises(synteny_producer.ProducerError, match="duplicate candidate_id"):
+            synteny_producer.load_status_map(path)
+
+    def test_positive_control_distinct_ids_load(self, tmp_path: Path) -> None:
+        table = synteny_producer.build_status_table(
+            [row("a", STATUS_PASSED), row("b", STATUS_FAILED)], config=CONFIG
+        )
+        path = tmp_path / "t.json"
+        path.write_text(json.dumps(table), encoding="utf-8")
+        assert synteny_producer.load_status_map(path) == {"a": STATUS_PASSED, "b": STATUS_FAILED}
+
+
+class TestAnnotatedSetUsesTheSharedContract:
+    """The accession→filename contract has one definition; a second copy undercounts silently."""
+
+    def test_it_counts_the_materialized_hosts(self, tmp_path: Path) -> None:
+        from tbox_finder.mining import annotation_fetch
+
+        for accession in ("GCA_000296795.1", "GCF_000005845.2"):
+            (tmp_path / annotation_fetch.destination_name(accession)).write_bytes(b"\x1f\x8b")
+        (tmp_path / "README.md").write_text("not an annotation", encoding="utf-8")
+        (tmp_path / "GCA_000296795.1.gff.gz.part").write_bytes(b"partial")
+        found = synteny_producer._annotated_set(str(tmp_path))
+        assert found == {"GCA_000296795.1", "GCF_000005845.2"}
+
+    def test_a_missing_directory_is_empty_not_an_error(self, tmp_path: Path) -> None:
+        assert synteny_producer._annotated_set(str(tmp_path / "absent")) == set()
