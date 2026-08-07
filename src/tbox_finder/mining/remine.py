@@ -417,7 +417,12 @@ def _load_synteny_status(table: str | Path | None) -> dict[str, str] | None:
 
     try:
         return load_synteny_status_map(table)
-    except ProducerError as exc:
+    except (ProducerError, OSError, ValueError, AttributeError, KeyError, TypeError) as exc:
+        # ⚠ ``ProducerError`` alone is not the failure surface.  ``load_status_map`` reads
+        # arbitrary JSON, so a truncated file raises ``json.JSONDecodeError``, a non-object
+        # root raises ``AttributeError``, and a malformed row raises ``KeyError``/
+        # ``TypeError`` — all of them input faults that would bypass the documented refusal
+        # path and surface as an unhandled traceback.
         raise RemineError(f"synteny status table unusable: {exc}") from exc
 
 

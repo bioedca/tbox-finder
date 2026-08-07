@@ -4262,3 +4262,18 @@ read.
 `95d0149` (**4,492 / 13**) — failure sets identical, `comm` empty both ways. **37 sabotages / 37
 RED against their named test.** Both reports regenerated; status counts unchanged
 (546 / 96 / 299). ruff + black clean.
+
+**Review round 7 — 1 CLI finding, real, major.** Counts across seven rounds:
+**20, 7, 4, 2, 1, 8, 1**.
+
+**⚠ `ProducerError` WAS NOT THE FAILURE SURFACE.** Round 6 translated it at both mining
+boundaries, but `load_status_map` reads **arbitrary JSON**, so a truncated file raises
+`json.JSONDecodeError`, a non-object root raises `AttributeError`, and a malformed row raises
+`KeyError`/`TypeError` — every one an input fault that bypassed the documented refusal path and
+would have surfaced as an unhandled traceback on the leg that decides what gets mined. The catch
+now covers all of them, and the test is parametrized over four *distinct* fault shapes rather
+than the one the previous round happened to construct.
+
+**Validation (round 7).** Full unit+golden **4,648 passed / 13 failed** vs the matched baseline at
+`95d0149` (**4,492 / 13**) — failure sets identical, `comm` empty both ways. **38 sabotages / 38
+RED against their named test.** ruff + black clean; no report regenerated (error-path change only).

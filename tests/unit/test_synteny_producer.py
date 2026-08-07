@@ -807,6 +807,47 @@ class TestErrorsAreTranslatedAtTheMiningBoundary:
         path.write_text(json.dumps(table), encoding="utf-8")
         return path
 
+    @pytest.mark.parametrize(
+        ("payload", "label"),
+        [
+            ("{ truncated", "JSONDecodeError"),
+            ("[1, 2, 3]", "non-object root -> AttributeError"),
+            ('{"status": {"a": "passed"}, "rows": [{"no_id": 1}]}', "malformed row -> KeyError"),
+            ('{"status": {"a": "passed"}, "rows": "not-a-list"}', "wrong rows type"),
+        ],
+    )
+    def test_every_input_fault_becomes_the_rounds_own_error(
+        self, tmp_path: Path, payload: str, label: str
+    ) -> None:
+        """⚠ ``ProducerError`` is not the whole failure surface: ``load_status_map`` reads
+        arbitrary JSON, so a truncated file, a non-object root and a malformed row each raise
+        a *different* builtin — and every one of them would bypass the documented refusal path
+        and surface as an unhandled traceback."""
+        path = tmp_path / "synteny_status.json"
+        path.write_text(payload, encoding="utf-8")
+        with pytest.raises(ValueError, match="synteny status table unusable"):
+            mine_round.apply_spare_rule(
+                "m.json",
+                "s.json",
+                rscape_installed=True,
+                msa_supply_available=True,
+                synteny_status_table=path,
+                synteny_available=True,
+            )
+        with pytest.raises(remine.RemineError, match="synteny status table unusable"):
+            remine.apply_remine_spare_rule(
+                "m.json",
+                "s.json",
+                "p.json",
+                stage2_threshold=0.9,
+                rscape_installed=True,
+                msa_supply_available=True,
+                stage2_supply_available=True,
+                probe_set=None,
+                synteny_status_table=path,
+                synteny_available=True,
+            )
+
     def test_the_p2_round_raises_its_own_error_type(self, tmp_path: Path) -> None:
         with pytest.raises(ValueError, match="synteny status table unusable"):
             mine_round.apply_spare_rule(

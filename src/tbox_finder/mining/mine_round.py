@@ -744,7 +744,14 @@ def apply_spare_rule(
             if synteny_status_table is not None
             else None
         )
-    except SyntenyProducerError as exc:
+    except (
+        SyntenyProducerError,
+        OSError,
+        ValueError,
+        AttributeError,
+        KeyError,
+        TypeError,
+    ) as exc:
         # A data fault this round must REPORT: the caller branches on the return code, and an
         # unhandled ProducerError bypasses that path entirely.
         raise ValueError(f"synteny status table unusable: {exc}") from exc
