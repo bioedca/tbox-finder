@@ -407,7 +407,7 @@ class TestCommittedDiagnostics:
         hits that FAILED.  Every *decision* distance must sit inside the pad."""
         block = exclusion["passing_distance_sensitivity"]
         decision = block["decision_distance"]
-        assert decision["max_bp"] is not None
+        assert decision["max_bp"] is not None and decision["p99_bp"] is not None, decision
         assert decision["max_bp"] <= block["window_bp"], decision
         assert decision["p99_bp"] <= block["window_bp"]
         # The element-relative series may exceed the pad, but ONLY via the tandem carve-out.
@@ -638,8 +638,11 @@ class TestProducerHardening:
                         key,
                     )
             for entry in external:
-                assert "/" not in entry["name"], entry
-                assert not Path(entry["name"]).is_absolute(), entry
+                # Same dual check as the ``inputs``/``outputs`` loop above — applying it to
+                # one of two sibling assertions is how the last three rounds' findings arose.
+                assert "/" not in entry["name"] and "\\" not in entry["name"], entry
+                assert not PurePosixPath(entry["name"]).is_absolute(), entry
+                assert not PureWindowsPath(entry["name"]).is_absolute(), entry
                 assert len(entry["sha256"]) == 64, entry
 
 
@@ -933,7 +936,8 @@ class TestAnnotatedSetUsesTheSharedContract:
         for accession in ("GCA_000296795.1", "GCF_000005845.2"):
             (tmp_path / annotation_fetch.destination_name(accession)).write_bytes(b"\x1f\x8b")
         (tmp_path / "README.md").write_text("not an annotation", encoding="utf-8")
-        (tmp_path / "GCA_000296795.1.gff.gz.part").write_bytes(b"partial")
+        partial = f"{annotation_fetch.destination_name('GCA_000296795.1')}.part"
+        (tmp_path / partial).write_bytes(b"partial")
         found = synteny_producer._annotated_set(str(tmp_path))
         assert found == {"GCA_000296795.1", "GCF_000005845.2"}
 

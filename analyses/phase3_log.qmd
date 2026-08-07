@@ -4564,3 +4564,23 @@ worktree, and `&&` short-circuited the append while the newline-separated `git c
 followed ran anyway. Third occurrence in this step. A compound whose first element is a
 redundant `cd` silently drops everything after it — and the commit still succeeds, so nothing
 looks wrong.
+
+**Review round 18 — 3 CLI findings, all real, all minor.** Counts across eighteen rounds:
+**20, 7, 4, 2, 1, 8, 1, 4, 3, 6, 6, 3, 4, 1, 6, 2, 2, 3**.
+
+**⚠ ALL THREE ARE THE SAME SHAPE ROUND 16 NAMED: THE FIX APPLIED IN ONE PLACE AND NOT ITS
+SIBLING.** (1) A test built its real annotation filenames through
+`annotation_fetch.destination_name` and then hardcoded `"GCA_000296795.1.gff.gz.part"` beside
+them — the second copy of the accession→filename contract that the function's own docstring warns
+about. (2) Round 16 replaced `Path(key).is_absolute()` with a dual `PurePosixPath` /
+`PureWindowsPath` check for `inputs`/`outputs` and left the `external_inputs` name on the
+single-OS test. (3) `decision["max_bp"]` was guarded against `None` and `decision["p99_bp"]`
+directly beneath it was not, though the same schema reports `None` for both on an empty series.
+
+That is three rounds running (16, 17, 18) whose findings are *"you fixed one of two identical
+things"*. The pattern is now explicit enough to state as a rule: **when a fix lands, grep for the
+other call site before declaring the class closed.**
+
+**Validation (round 18).** Full unit+golden **4,687 passed / 13 failed** vs the matched baseline
+at `95d0149` (**4,492 / 13**) — failure sets identical, `comm` empty both ways. **60 sabotages /
+60 RED against their named test.** Test-only change, so no report regenerated. ruff + black clean.
