@@ -1051,6 +1051,16 @@ def build_parser() -> argparse.ArgumentParser:
     freeze.add_argument("--corpus", default=DEFAULT_CORPUS)
     freeze.add_argument("--split-table", default=DEFAULT_SPLIT_TABLE)
     freeze.add_argument("--out", default=FREEZE_REPORT)
+    freeze.add_argument(
+        "--max-ncca-pairing-nt",
+        type=int,
+        default=len(architecture.TRNA_ACCEPTOR_3PRIME),
+        help=(
+            "report recovery arms 1..N. Defaults to the acceptor motif's full width; a "
+            "round that chooses a larger --ncca-pairing-nt for run-shard must raise this "
+            "or the freeze will not measure the arm it actually uses"
+        ),
+    )
 
     sub.add_parser("derive-supply", help="print the supply derivation for this checkout")
     return parser
@@ -1092,7 +1102,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 0
 
         if args.command == "freeze":
-            report = freeze_report(corpus=args.corpus, split_table=args.split_table)
+            report = freeze_report(
+                corpus=args.corpus,
+                split_table=args.split_table,
+                max_ncca_pairing_nt=args.max_ncca_pairing_nt,
+            )
             report["provenance"] = _provenance(
                 "freeze", [args.corpus, args.split_table], {"pins_nothing": True}
             )

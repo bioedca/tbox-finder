@@ -870,8 +870,21 @@ def architecture_status(
     :data:`BULGE_UNDETECTABLE`.  A bulge that is :data:`BULGE_ABSENT` was detectable
     and is not there — a real failure D3's confidence-relaxation does not excuse.
     """
+    # ⚠ The ONE outcome-deciding number in this module that was not range-checked. A floor
+    # below 1 makes `n_sequences < min_sequences` always false, silently DISABLING the
+    # ADR-0006 A2 Pin 2 depth check, so a candidate reaches `criterion_b` on an alignment of
+    # any depth — the fail-open direction. `min_pairs`, `min_named_helices`,
+    # `ncca_pairing_nt` and `bulge_size_range` are all already guarded.
+    if int(min_sequences) < 1:
+        raise ArchitectureError(
+            f"min_sequences must be >= 1, got {min_sequences}; a floor below 1 disables the "
+            "ADR-0006 A2 Pin 2 depth check"
+        )
     if localization is None:
-        return STATUS_UNAVAILABLE, {"reason": "no per-candidate consensus was produced"}
+        return STATUS_UNAVAILABLE, {
+            "reason": "no per-candidate consensus was produced",
+            "min_sequences": int(min_sequences),
+        }
     if int(localization.n_sequences) < int(min_sequences):
         return STATUS_UNAVAILABLE, {
             "reason": (
@@ -909,6 +922,8 @@ def architecture_status(
         class_ii_relax=effective_class_ii_relax,
     )
     detail = {
+        # Recorded so provenance shows WHICH floor was applied, not merely that one was.
+        "min_sequences": int(min_sequences),
         "named_elements_present": localization.named_elements_present,
         "bulge_state": localization.bulge_state,
         "ultrashort_relax": localization.ultrashort_relax,

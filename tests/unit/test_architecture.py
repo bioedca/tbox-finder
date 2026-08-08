@@ -810,3 +810,30 @@ class TestRoundNineGuards:
         for name in ("named_elements_status", "ncca_bulge_status"):
             assert f":func:`{name}`" in doc
         assert ":func:`named_elements_present`" not in doc
+
+
+class TestRoundTenGuards:
+    """CodeRabbit r10 — the last unguarded outcome-deciding number."""
+
+    def test_a_depth_floor_below_one_refuses(self) -> None:
+        """`n_sequences < 0` is always false, so the ADR-0006 A2 Pin 2 check is silently
+        DISABLED and a candidate reaches criterion_b on an alignment of any depth."""
+        with pytest.raises(architecture.ArchitectureError, match="min_sequences"):
+            architecture.architecture_status(localization(n_sequences=1), min_sequences=0)
+
+    def test_positive_control_a_floor_of_one_is_accepted(self) -> None:
+        status, detail = architecture.architecture_status(
+            localization(n_sequences=1), min_sequences=1
+        )
+        assert status == STATUS_PASSED
+        assert detail["min_sequences"] == 1
+
+    def test_the_applied_floor_is_recorded_on_every_arm(self) -> None:
+        """Provenance must show WHICH floor was applied, not merely that one was."""
+        _, absent = architecture.architecture_status(None, min_sequences=20)
+        _, shallow = architecture.architecture_status(localization(n_sequences=3), min_sequences=20)
+        _, decided = architecture.architecture_status(localization(), min_sequences=20)
+        assert absent["min_sequences"] == 20
+        assert shallow["reason"].startswith("alignment depth")
+        assert shallow["n_sequences"] == 3
+        assert decided["min_sequences"] == 20

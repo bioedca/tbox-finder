@@ -236,6 +236,12 @@ class TestSupplyDerivation:
         return tmp_path
 
     def test_the_real_checkout_evidences_the_supply(self) -> None:
+        # Gated on the constant: the agreement test below permits a legitimate `False`
+        # state, and without this gate the two tests encode CONFLICTING contracts — a
+        # deliberate "unavailable on this machine" declaration would fail this one for a
+        # reason that is not a defect.
+        if not mine_round.RELAXED_ARCH_SUPPLY_AVAILABLE:
+            pytest.skip("the round declares the (b) supply unavailable; see the agreement test")
         derivation = architecture_producer.derive_relaxed_arch_supply_available(repo_root=REPO_ROOT)
         assert derivation["available"] is True, derivation["reasons"]
         assert derivation["n_heldout_canonical_measured"] > 0
@@ -617,7 +623,8 @@ class TestFreezeIsComputedNotJustCommitted:
     def test_an_empty_heldout_carve_refuses_rather_than_reporting_zero(
         self, tmp_path: Path
     ) -> None:
-        import pandas as pd
+        pd = pytest.importorskip("pandas")
+        pytest.importorskip("pyarrow")
 
         corpus = tmp_path / "c.parquet"
         splits = tmp_path / "s.parquet"
@@ -632,7 +639,8 @@ class TestFreezeIsComputedNotJustCommitted:
         self, tmp_path: Path
     ) -> None:
         """A silent empty join would publish a freeze over 0 records that still looks green."""
-        import pandas as pd
+        pd = pytest.importorskip("pandas")
+        pytest.importorskip("pyarrow")
 
         corpus = tmp_path / "c.parquet"
         splits = tmp_path / "s.parquet"
@@ -648,7 +656,8 @@ class TestFreezeIsComputedNotJustCommitted:
             architecture_producer.heldout_canonical(corpus=corpus, split_table=splits)
 
     def test_positive_control_a_real_hash_join_carves(self, tmp_path: Path) -> None:
-        import pandas as pd
+        pd = pytest.importorskip("pandas")
+        pytest.importorskip("pyarrow")
 
         from tbox_finder.ingest import record_hash
 
@@ -1501,3 +1510,89 @@ class TestRoundNineProducerGuards:
             if not line.rstrip().endswith("\\"):
                 break
         assert "--manifest" not in "\n".join(merge_lines)
+
+
+class TestRoundTenProducerGuards:
+    def test_the_freeze_cli_exposes_the_recovery_arm_width(self) -> None:
+        """`run-shard` accepts any --ncca-pairing-nt; a freeze fixed at arms 1..4 would not
+        measure the arm a round with a wider motif actually uses."""
+        parser = architecture_producer.build_parser()
+        freeze = parser._subparsers._group_actions[0].choices["freeze"]  # type: ignore[union-attr]
+        options = {o for a in freeze._actions for o in a.option_strings}
+        assert "--max-ncca-pairing-nt" in options
+        args = parser.parse_args(["freeze", "--max-ncca-pairing-nt", "3"])
+        assert args.max_ncca_pairing_nt == 3
+
+    def test_the_default_arm_width_tracks_the_motif_not_a_literal(self) -> None:
+        args = architecture_producer.build_parser().parse_args(["freeze"])
+        assert args.max_ncca_pairing_nt == len(architecture.TRNA_ACCEPTOR_3PRIME)
+
+    def test_the_arm_width_reaches_the_REPORT_through_the_CLI(self, tmp_path: Path) -> None:
+        """⚠ Checking that the parser EXPOSES the option is not enough — sabotaging the
+        `main` call to a hardcoded 4 left that green. This drives the CLI end to end and
+        reads the written report."""
+        pd = pytest.importorskip("pandas")
+        pytest.importorskip("pyarrow")
+
+        from tbox_finder.ingest import record_hash
+
+        frame = pd.DataFrame(
+            {
+                "Sequence": ["GCGGUGGCACCGCGAGUUCCCUUCUCGCCCGC"],
+                "Structure": ["((((.......(((((.......)))))))))"],
+                "discriminator": ["UGGC"],
+                "type": ["Transcriptional"],
+                "stem1_length": [96],
+            }
+        )
+        corpus, splits = tmp_path / "c.parquet", tmp_path / "s.parquet"
+        frame.to_parquet(corpus)
+        digest = record_hash(next(frame.itertuples(index=False, name=None)))
+        pd.DataFrame(
+            {"corpus_record_sha256": [digest], "source": ["corpus"], "nested_role": ["heldout"]}
+        ).to_parquet(splits)
+        out = tmp_path / "freeze.json"
+        assert (
+            architecture_producer.main(
+                [
+                    "freeze",
+                    "--corpus",
+                    str(corpus),
+                    "--split-table",
+                    str(splits),
+                    "--max-ncca-pairing-nt",
+                    "2",
+                    "--out",
+                    str(out),
+                ]
+            )
+            == 0
+        )
+        written = json.loads(out.read_text(encoding="utf-8"))
+        assert sorted(written["ncca_recovery"]) == ["1", "2"]
+
+    def test_the_arm_width_reaches_freeze_report(self, tmp_path: Path) -> None:
+        pd = pytest.importorskip("pandas")
+        pytest.importorskip("pyarrow")
+
+        from tbox_finder.ingest import record_hash
+
+        frame = pd.DataFrame(
+            {
+                "Sequence": ["GCGGUGGCACCGCGAGUUCCCUUCUCGCCCGC"],
+                "Structure": ["((((.......(((((.......)))))))))"],
+                "discriminator": ["UGGC"],
+                "type": ["Transcriptional"],
+                "stem1_length": [96],
+            }
+        )
+        corpus, splits = tmp_path / "c.parquet", tmp_path / "s.parquet"
+        frame.to_parquet(corpus)
+        digest = record_hash(next(frame.itertuples(index=False, name=None)))
+        pd.DataFrame(
+            {"corpus_record_sha256": [digest], "source": ["corpus"], "nested_role": ["heldout"]}
+        ).to_parquet(splits)
+        report = architecture_producer.freeze_report(
+            corpus=corpus, split_table=splits, max_ncca_pairing_nt=2
+        )
+        assert sorted(report["ncca_recovery"]) == ["1", "2"]
