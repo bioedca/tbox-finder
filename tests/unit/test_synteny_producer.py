@@ -274,9 +274,13 @@ class TestCli:
             "msa_supply_derivation": {"available": True},
             "stage2_supply_derivation": {"available": True},
             "synteny_supply_derivation": {"available": False, "reasons": ["no backend"]},
+            "relaxed_arch_supply_derivation": {"available": True},
         }
         args = argparse.Namespace(
-            msa_supply_available=True, stage2_supply_available=True, synteny_available=True
+            msa_supply_available=True,
+            stage2_supply_available=True,
+            synteny_available=True,
+            relaxed_arch_available=True,
         )
         assert remine._refuse_unevidenced(args, derivations) == 4
 
@@ -285,9 +289,13 @@ class TestCli:
             "msa_supply_derivation": {"available": True},
             "stage2_supply_derivation": {"available": True},
             "synteny_supply_derivation": {"available": True},
+            "relaxed_arch_supply_derivation": {"available": True},
         }
         args = argparse.Namespace(
-            msa_supply_available=True, stage2_supply_available=True, synteny_available=True
+            msa_supply_available=True,
+            stage2_supply_available=True,
+            synteny_available=True,
+            relaxed_arch_available=True,
         )
         assert remine._refuse_unevidenced(args, derivations) is None
 

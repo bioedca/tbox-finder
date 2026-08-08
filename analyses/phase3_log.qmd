@@ -4623,3 +4623,110 @@ no-op (`tuple(t) is t`).
 two identical things"* — one of two sibling file reads, one of two path checks, one of two
 `None` guards. **When a fix lands, grep for the other call site before declaring the class
 closed.**
+
+## Step P3-15′-d — 2026-08-07: the relaxed-architecture (b) backend
+
+**Inputs.** `data/interim/homolog_msa/certified_positive.sto` (the real job-766 `mlocarna`
+consensus: 24 rows, 289 columns, three `#=GC SS_cons` blocks) · `data/processed/master_clean_v0.parquet`
+(curated `Structure` / `antiterm_*` / `discriminator`) · `data/processed/splits/split_assignments.parquet`
+(the ADR-0004 held-out carve) · `mining/{spare_rule,mine_round,remine,synteny_producer,covariation_producer,msa_shuffle}.py`.
+
+**Process.** `mining/architecture.py` implements ADR-0006 **D3**'s `criterion_b` verbatim and
+localizes its two inputs from the **A3/A4 de-novo comparative consensus** — Stockholm parse
+(delegated to the existing `msa_shuffle.read_pfam_alignment`, not forked), WUSS/dot-bracket pair
+table, maximal-helix and flanked-bulge decomposition, and an NCCA-pairing test.
+`mining/architecture_producer.py` adds the per-candidate `run-shard`/`merge` status table, the D3
+`freeze`, and `derive_relaxed_arch_supply_available`. `mine_round.RELAXED_ARCH_SUPPLY_AVAILABLE`
+plus a `--relaxed-arch-status` table, the `remine` two-way `--relaxed-arch-available` /
+`--no-…` pair and its exit-4 unevidenced preflight complete the wiring.
+`slurm/p2/mine_round_producer.sbatch` now **promotes each `msa.sto` out of `$BUILD/work`** before
+the EXIT trap destroys it; `slurm/p3/architecture_producer.sbatch` runs the (b) leg CPU-only.
+
+**Outputs.** `reports/p3/architecture_freeze.json` — the D3 measurement on the **8,715**
+held-out canonical records (`source=='corpus' ∧ nested_role=='heldout'`, joined by
+`ingest.record_hash`, **not** positionally): the flanked unpaired run containing the curated
+discriminator is **7 nt in 7,983 of 8,605 (92.8 %)** — the literature's 7-nt antiterminator bulge,
+recovered independently from structure — and the derived `UGGN` acceptor motif is present in
+**99.87 %** at 4 nt of pairing (99.93 % at 3 nt). ⚠ **It pins nothing**; every rule parameter
+ships keyword-required-with-no-default and the round supplies it.
+
+**Validation.** unit+golden **5,032 passed**; failure set identical to a matched `main` baseline
+apart from three parquet-only tests the local env cannot run (CI installs `pyarrow==24.0.0`;
+their logic was executed directly in `tbox-finder-data` and all three hold). **19 sabotages /
+19 RED against their NAMED test.** ruff 0.15.15 + black 25.11.0 clean; `snakemake --lint` OK.
+
+**Decisions.** Two that were mine to make and are disclosed rather than absorbed.
+(1) **D3's two relaxations are not symmetric.** Read as a plain requirement-drop they fire
+*together* on every translational locus, making `criterion_b` unconditionally `True` across the
+class-II corpus — and by **D9 row 5** that makes **Tier-2N unreachable**, the flagship class
+defined out of existence by its own predicate. `criterion_b` keeps the ADR's literal text (so the
+P6 freeze tests D3, not my fix); the three-valued localizer resolves *"required only where
+detectable"* by distinguishing `absent` (detectable, not there — a real failure) from
+`undetectable` (nothing to judge — the only state the relaxation excuses), and
+`architecture_status` refuses `passed` when both relaxations are active with neither element
+observed, routing to `unavailable` ⇒ spared.
+(2) **The NCCA motif is derived, not transcribed** (§10.3): `acceptor_pairing_motif` computes it
+from the tRNA 3′ terminus `N73-C74-C75-A76` and antiparallel Watson–Crick pairing, yielding
+`UGGN`. Four agreeing peer-reviewed sources back the underlying fact [PMID:12547201;
+DOI:10.1016/j.bbagrm.2008.09.001; PMID:15879350; DOI:10.1016/j.bpj.2009.12.2831], and the repo's
+own curated corpus agrees: the TBDB `discriminator` is 4 nt in all 23,208 records carrying one and
+matches `UGGN` in **99.79 %**. Cross-links ADR-0006 **A4**.
+
+**⚠ THE DEFECT THE FIXTURE CAUGHT THAT NO UNIT TEST WOULD HAVE.** The first bulge finder sized
+runs in **alignment columns**. On the real certified consensus that returned **zero bulges** —
+because a 16-column run is only **8 residues** in the candidate's own row and a 37-column run is
+11. Sizing moved to the degapped residues of the candidate's own sequence. A hand-built fixture
+with no gaps would have passed either way; smoke-testing on the real artifact is what exposed it.
+
+**⚠ THIS DOES NOT MOVE `n_mined` OFF 0, AND SAYS SO.** Per A4, (b) reads the *same* consensus (a)
+does, so its supply derivation **delegates** to `derive_msa_supply_available` rather than probing
+twice. Until the full-corpus (a)/(b) producer array has run, every `msa.sto` is absent and the
+producer reports `unavailable` ⇒ **spared** — fail-closed and honest. `relaxed_architecture` also
+remains absent from `TIER2N_PROTECTIVE_DISJUNCTS` (D9 row 5), so a (b)-only round is still
+refused at readiness; a test pins that building the backend did not change it.
+
+**Commit.** see PR.
+
+### P3-15′-d review addendum — 2026-08-08
+
+**Six rounds, 27 findings, every one real.** CLI r1 (2 major) · app r1 (**7** line comments) ·
+CLI r2 (**15** — 10 major, 5 minor) · CLI r3 (3) · CLI r4 (4 minor) · app r4 (1 minor) ·
+CLI r5 (2 minor). r6 was **rate-limited on both paths**, which is an *absence, not a pass*;
+Greptile was invoked as the §5.1a capacity fallback (budget 4 → 5 of 16).
+
+**⚠ The process error, twice, both mine: I judged a round from a truncated buffer.** On the
+r2 CLI I read the output *while it was still streaming*, saw one finding in the tail, and
+reported the round as handled — it had **15**. On the r1 app review I piped through
+`head -120` and read **3 of 7**. *Wait for the process to exit, then read the trailer's own
+count; never `head` a review, never judge one mid-stream.* Both were caught only by
+re-reading later, and both are recorded here because the cost was a false "handled".
+
+**⚠ The two paths disagreed, which is the whole argument for running both.** The app found
+two things the CLI never raised — the documented submit line that was unrunnable (six
+`${VAR:?}` parameters, one exported), and the best finding of the step: a shard table with
+**zero rows merged cleanly**, so a dropped shard is invisible — its candidates are simply
+absent, each absent candidate reads `unavailable` ⇒ **spared**, and every count still
+reconciles against every other. The CLI in turn found the vacuous supply clause and the
+inverted wobble test that the app's later rounds never repeated.
+
+**⚠ Four of my own tests were vacuous or wrong, and sabotage — not review — caught two.**
+`test_wobble_is_off_unless_asked_for` **asserted the inverted rule**; the recovery-share
+loop iterated a mapping that could be empty and would pass having checked nothing (the exact
+species this file names elsewhere, *in this file*); `test_the_committed_freeze_names_its_env
+_lock` read the **committed artifact**, so dropping `env_lock=` from the writer left it
+**green**; and one test name promised an exit code its body never exercised. One sabotage
+was itself malformed — it removed the guard *and* emptied the data, so its "leak" proved
+nothing. *A sabotage that breaks two things at once tests neither.*
+
+**⚠ "You fixed one of two identical things" fired five times** — `--relaxed-arch-status` in
+`mine_round` but not `remine`; the exit-4 preflight in `remine` but not `mine_round`; the
+row-shape guard in `merge_status_tables` but not `validate_status_payload`; the fail-closed
+probe locally but not through the `derive_msa_supply_available` delegation; and the
+`derivations[key]` lookup versus its hand-built test fixtures.
+
+**✅ The published numbers survived.** `ncca_recovery` was found scanning *every* bulge
+against a denominator counting only the located one. Re-derived with `target=`: only k=3
+moved (99.930 % → 99.884 %, 4 records). **k=4 = 99.87 %, modal bulge 7 nt, stem-I n = 8,578
+unchanged**, and the committed freeze re-derives byte-identically from the merged code apart
+from `provenance`. Final suite **5,097 passed**; sabotage totals 19/19 + 10/11 (the
+documented leak, relocated) + 3/3 + 5/5 + 2/2 + 1/1.

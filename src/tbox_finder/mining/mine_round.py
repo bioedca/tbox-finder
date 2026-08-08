@@ -116,6 +116,22 @@ MSA_SUPPLY_AVAILABLE = True
 #: ``slurm/p3/stage1_remine.sbatch``'s ``MSA_SUPPLY_AVAILABLE`` env var at P3-15′-a.
 SYNTENY_SUPPLY_AVAILABLE = True
 
+#: The **criterion-(b)** analogue, flipped by P3-15′-d: ``mining/architecture.py`` implements
+#: ADR-0006 D3's predicate off the A3/A4 de-novo comparative consensus,
+#: ``mining/architecture_producer.py`` writes the per-candidate ``candidate_id → status`` table
+#: the round reads, and D3's *"frozen on the held-out canonical set"* requirement is discharged
+#: by the committed ``reports/p3/architecture_freeze.json``.  Kept honest by
+#: :func:`tbox_finder.mining.architecture_producer.derive_relaxed_arch_supply_available`.
+#:
+#: ⚠ **This is a backend-presence fact, not an artifact-presence one**, exactly as its two
+#: siblings are.  ADR-0006 A4 disclosed that (b) reads the *same* per-candidate consensus (a)
+#: does, so its derivation **delegates** to ``derive_msa_supply_available`` rather than probing
+#: a second time — a checkout that cannot evidence the MSA supply cannot evidence (b) either.
+#: Until the full-corpus (a)/(b) producer array has actually run, every candidate's ``msa.sto``
+#: is absent and the producer reports ``unavailable`` ⇒ **spared**: the fail-closed direction,
+#: and the reason this flip does **not** by itself move ``n_mined`` off 0.
+RELAXED_ARCH_SUPPLY_AVAILABLE = True
+
 #: The git-tracked evidence :func:`derive_msa_supply_available` re-derives the supply from.
 #: All three ride any checkout (including the cluster's and CI's) — none is DVC- or
 #: LFS-shaped — so the derivation answers the same in every environment.
@@ -509,6 +525,7 @@ def candidate_evidence(
     candidate_id: str,
     covariation_status: Mapping[str, str] | None,
     synteny_status: Mapping[str, str] | None = None,
+    relaxed_arch_status: Mapping[str, str] | None = None,
 ) -> SpareRuleEvidence:
     """The candidate's :class:`SpareRuleEvidence`, given the round's covariation status table.
 
@@ -525,11 +542,18 @@ def candidate_evidence(
 
     ``synteny_status`` is the criterion-(c) analogue P3-15′-c-ii added
     (:func:`tbox_finder.mining.synteny_producer.load_status_map`), read under the **same**
-    fail-closed absent-id rule.  ``relaxed_architecture`` is the one disjunct still without a
-    backend (P3-15′-d), so it stays ``unavailable``.  :class:`SpareRuleEvidence` validates
-    every status string, so a corrupt value raises rather than reading as "not passed".
+    fail-closed absent-id rule, and ``relaxed_arch_status`` is the criterion-(b) analogue
+    P3-15′-d added (:func:`tbox_finder.mining.architecture_producer.load_status_map`), read the
+    same way — so all three model-independent disjuncts now have a backend and the same
+    absent-id rule.  :class:`SpareRuleEvidence` validates every status string, so a corrupt
+    value raises rather than reading as "not passed".
     """
     return SpareRuleEvidence(
+        relaxed_architecture=(
+            STATUS_UNAVAILABLE
+            if relaxed_arch_status is None
+            else str(relaxed_arch_status.get(candidate_id, STATUS_UNAVAILABLE))
+        ),
         any_helix_rscape=(
             STATUS_UNAVAILABLE
             if covariation_status is None
@@ -629,6 +653,7 @@ def read_fp_manifest(
     *,
     covariation_status: Mapping[str, str] | None = None,
     synteny_status: Mapping[str, str] | None = None,
+    relaxed_arch_status: Mapping[str, str] | None = None,
 ) -> list[MiningCandidate]:
     """Reconstitute the leg-(b) false positives, stamping each with its produced covariation status.
 
@@ -650,7 +675,9 @@ def read_fp_manifest(
                 locus_start=int(r["locus_start"]),
                 locus_end=int(r["locus_end"]),
                 score=float(r.get("score", 0.0)),
-                evidence=candidate_evidence(cid, covariation_status, synteny_status),
+                evidence=candidate_evidence(
+                    cid, covariation_status, synteny_status, relaxed_arch_status
+                ),
             )
         )
     return out
@@ -702,6 +729,7 @@ def apply_spare_rule(
     rscape_installed: bool,
     msa_supply_available: bool,
     synteny_status_table: str | Path | None = None,
+    relaxed_arch_status_table: str | Path | None = None,
     relaxed_arch_available: bool = False,
     synteny_available: bool = False,
     union_prior: str | Path = "data/processed/priors/union_prior.parquet",
@@ -719,6 +747,10 @@ def apply_spare_rule(
     status must agree. Returns the round report (``mined_ids``/``spared_ids``/``per_pool``); the
     mined ids are the hard negatives the DDP retrain then trains against.
     """
+    from tbox_finder.mining.architecture_producer import ProducerError as ArchProducerError
+    from tbox_finder.mining.architecture_producer import (
+        load_status_map as load_relaxed_arch_status_map,
+    )
     from tbox_finder.mining.covariation_producer import load_status_map
     from tbox_finder.mining.hard_negative import mine_round as run_mine_round
     from tbox_finder.mining.synteny_producer import ProducerError as SyntenyProducerError
@@ -736,6 +768,21 @@ def apply_spare_rule(
         raise MineRoundError(
             "a synteny status table was supplied but synteny_available=False; "
             "hard_negative.mine_round refuses produced evidence for an undeclared backend"
+        )
+    # The identical pair for (b).  Both halves matter, and the second is not symmetry for
+    # its own sake: ``hard_negative.mine_round`` raises on evidence for an undeclared
+    # backend, so supplying the table without the declaration would fail late and opaquely.
+    if relaxed_arch_available and relaxed_arch_status_table is None:
+        raise MineRoundError(
+            "relaxed_arch_available=True but no relaxed-architecture status table was "
+            "supplied; the (b) disjunct would read 'unavailable' for every candidate and "
+            "spare them all"
+        )
+    if not relaxed_arch_available and relaxed_arch_status_table is not None:
+        raise MineRoundError(
+            "a relaxed-architecture status table was supplied but relaxed_arch_available"
+            "=False; hard_negative.mine_round refuses produced evidence for an undeclared "
+            "backend"
         )
 
     try:
@@ -756,9 +803,21 @@ def apply_spare_rule(
         # unhandled ProducerError bypasses that path entirely.
         raise MineRoundError(f"synteny status table unusable: {exc}") from exc
 
+    try:
+        relaxed_arch_status_map = (
+            load_relaxed_arch_status_map(relaxed_arch_status_table)
+            if relaxed_arch_status_table is not None
+            else None
+        )
+    except (ArchProducerError, OSError, ValueError, AttributeError, KeyError, TypeError) as exc:
+        raise MineRoundError(f"relaxed-architecture status table unusable: {exc}") from exc
+
     status_map = load_status_map(status_table)
     candidates = read_fp_manifest(
-        fp_manifest, covariation_status=status_map, synteny_status=synteny_status_map
+        fp_manifest,
+        covariation_status=status_map,
+        synteny_status=synteny_status_map,
+        relaxed_arch_status=relaxed_arch_status_map,
     )
     availability = build_round_availability(
         rscape_installed=rscape_installed,
@@ -1307,6 +1366,10 @@ def _cmd_apply_spare_rule(args: argparse.Namespace) -> int:
     # the call that turns candidates into hard negatives, and it is reached on a different
     # job (mine_round_retrain.sbatch) from the one that ran `plan`, so it cannot inherit the
     # preflight's verdict. Declared-available + unevidenced is fatal (4), never a quiet round.
+    from tbox_finder.mining.architecture_producer import (
+        derive_relaxed_arch_supply_available,
+    )
+
     derivation = derive_msa_supply_available()
     if msa_supply_declaration_unevidenced(
         {"msa_supply_available": args.msa_supply_available, "msa_supply_derivation": derivation}
@@ -1317,12 +1380,25 @@ def _cmd_apply_spare_rule(args: argparse.Namespace) -> int:
             file=sys.stderr,
         )
         return 4
+    # The SAME gate for the (b) declaration. Without it this command accepts
+    # --relaxed-arch-available on a checkout that cannot evidence the architecture freeze
+    # or its supply clauses — the fail-OPEN direction, and the one `remine` already
+    # refuses. Two apply paths again: they must agree about what "declared" costs.
+    arch_derivation = derive_relaxed_arch_supply_available()
+    if bool(args.relaxed_arch_available) and not bool(arch_derivation.get("available")):
+        print(
+            "FATAL: --relaxed-arch-available declared, but this checkout cannot evidence "
+            f"the criterion-(b) supply — {'; '.join(arch_derivation['reasons'])}",
+            file=sys.stderr,
+        )
+        return 4
     report = apply_spare_rule(
         args.manifest,
         args.status_table,
         rscape_installed=bool(rscape_installed),
         msa_supply_available=bool(args.msa_supply_available),
         synteny_status_table=args.synteny_status,
+        relaxed_arch_status_table=args.relaxed_arch_status,
         relaxed_arch_available=bool(args.relaxed_arch_available),
         synteny_available=bool(args.synteny_available),
         union_prior=args.union_prior,
@@ -1455,6 +1531,15 @@ def build_parser() -> argparse.ArgumentParser:
             "REQUIRED whenever the round declares --synteny-available"
         ),
     )
+    apply.add_argument(
+        "--relaxed-arch-status",
+        default=None,
+        help=(
+            "candidate_id → criterion-(b) status (architecture_producer merge output); "
+            "REQUIRED whenever the round declares --relaxed-arch-available, and refused "
+            "when it does not"
+        ),
+    )
     apply.add_argument("--union-prior", default="data/processed/priors/union_prior.parquet")
     apply.add_argument("--corpus", default="data/processed/master_clean_v0.parquet")
     apply.set_defaults(func=_cmd_apply_spare_rule)
@@ -1472,6 +1557,7 @@ __all__ = [
     "HOMOLOG_DB_DVC",
     "HOMOLOG_MSA_PROVENANCE",
     "MSA_SUPPLY_AVAILABLE",
+    "RELAXED_ARCH_SUPPLY_AVAILABLE",
     "MineRoundError",
     "PRODUCER_ENTRY_POINTS",
     "REQUIRED_MATCHED_CONTROL_FLAGS",

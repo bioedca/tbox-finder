@@ -84,6 +84,47 @@ mlocarna --version 2>&1 | grep -q "LocARNA 2.0.1" || { echo "FATAL: mlocarna != 
 PYTHONHASHSEED=0 PYTHONPATH=src python -m tbox_finder.mining.covariation_producer align-shard \
   --shard "$SHARD" --workroot "$BUILD/work" --cpu 2
 
+# ── PROMOTE the per-candidate #=GC SS_cons consensus OUT of node-local scratch ────────────────────
+# ADR-0006 A4 makes this artifact load-bearing for criterion (b) as well as (a): (b)'s
+# named_elements_present / ncca_bulge_detected are localized from THIS file. Until P3-15'-d it was
+# written under $BUILD/work and destroyed by the EXIT trap below, so the only CM-free structure the
+# repo produces did not survive the job that produced it. Copy runs BEFORE stage 3 so a scoring
+# failure cannot take the consensus down with it. Per-candidate subdirectory names are the (a)
+# producer's own slugs, which is exactly what architecture_producer.candidate_msa_path() rebuilds.
+#
+# ⚠ EACH CANDIDATE'S PROMOTED DIRECTORY IS CLEARED FIRST, whether or not this run produced
+# an msa.sto for it. Copying only on success would leave a PREVIOUS run's alignment in place
+# for a candidate that is not producible this time, and the (b) producer would then score a
+# stale consensus instead of resolving `unavailable` ⇒ spared. The loop iterates this
+# shard's own workroot, so the cleared set is exactly the candidates this task owns — no
+# other task's output is touched, and there is no cross-shard race.
+MSA_OUT="${ROUND_DIR:?}/msa"
+mkdir -p "$MSA_OUT"
+n_promoted=0
+n_cleared=0
+for d in "$BUILD"/work/*/; do
+  slug=$(basename "$d")
+  [ -n "$slug" ] && [ "$slug" != "*" ] || continue     # the glob matched nothing
+  if [ -e "$MSA_OUT/$slug/msa.sto" ]; then
+    rm -f "$MSA_OUT/$slug/msa.sto"                     # a stale promotion from an earlier run
+    n_cleared=$((n_cleared + 1))
+  fi
+  [ -s "$d/msa.sto" ] || continue                      # not producible (< min_sequences, align failed)
+  mkdir -p "$MSA_OUT/$slug"
+  # ⚠ ATOMIC: copy to a temporary name in the DESTINATION directory, then rename. `mv`
+  # within one filesystem is atomic, so a task killed mid-copy (wall limit, preemption,
+  # node failure) cannot leave a partial consensus at the path the (b) producer reads.
+  # A truncation is NOT reliably self-announcing: one that drops trailing sequence rows but
+  # keeps `#=GC SS_cons` parses as a perfectly valid alignment of REDUCED DEPTH, and (b)
+  # would score it as real evidence at the wrong depth against the A2 floor. The
+  # stale-promotion guard above does not cover this — that one is about an OLD file, this
+  # is about a HALF-WRITTEN one.
+  cp -p "$d/msa.sto" "$MSA_OUT/$slug/.msa.sto.$$.tmp"
+  mv -f "$MSA_OUT/$slug/.msa.sto.$$.tmp" "$MSA_OUT/$slug/msa.sto"
+  n_promoted=$((n_promoted + 1))
+done
+echo "promoted $n_promoted per-candidate msa.sto → $MSA_OUT (cleared $n_cleared stale)"
+
 # ── STAGE 3: SCORE (tbox-rscape) → the shard status table ────────────────────────────────────────
 conda activate tbox-rscape
 command -v R-scape >/dev/null || { echo "FATAL: R-scape not on PATH — tbox-rscape not created?" >&2; exit 2; }
