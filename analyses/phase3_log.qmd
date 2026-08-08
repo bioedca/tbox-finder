@@ -4814,4 +4814,32 @@ ran a *single* task at `--mem=128G`), and lowering it on a guess risks an OOM mi
 `STRUCTURAL_YIELD_ACK=1`. The supply run needs leg (c) alone, which the producer sbatch's own
 header documents as a standalone submit.
 
+**Review.** Rounds are counted from each review's own trailer, never from a partial
+buffer. **r1 — 6 findings (CLI 4: 3 major / 1 minor; GitHub app 2 minor), all real.** One
+suggested fix was **declined on its merits and replaced**: the CLI's major *"assert the
+ADR-pinned array width"* correctly observed that `pinned_width` was parsed and discarded,
+but its remedy (require 48 in the header's `--array`) contradicts the design — `#SBATCH
+--array=0` is a deliberate placeholder and `mine_round.sbatch` builds the width from a
+required `${ARRAY_WIDTH:?}` export. The width is instead checked against **the reason it was
+pinned**: A10's own *"All 48 tasks run concurrently (48 × 2 = 96 cores, no queueing)"* must
+name the same numbers as the pin bullet **and** multiply out. The app's `_directives`
+finding was confirmed by execution — `re.findall` yields `""` for a non-participating group,
+so a bare `#SBATCH --cpus-per-task` reached `int()` as a **ValueError** instead of the
+intended assertion. **r2 — 2 findings, both minor, both real**: submit-line checks were
+scanning the whole orchestrator rather than leg (c)'s own command, and the submit patterns
+read only sbatch's long spellings while `-c` / `-p` / `-w` / `-A` override just as well.
+⚠ **That second one is "you fixed one of two identical things"** — r1 taught the *header*
+parser to see short flags and left the *submit-line* patterns long-only. ⚠ **Automatic
+CodeRabbit reviews are ENABLED** (the app reviewed the first push unasked; a manual
+`@coderabbitai review` would be a no-op) — detected per §5.1, never recalled. ⚠ The
+`CodeRabbit` PR check read **`pass` while its body was only *"Review rate limited"***, and
+the app never reviewed a head newer than the first — §5.1's trap, an **absence**, not a pass.
+
+**Process note worth carrying.** A `git checkout --` restoring a sabotaged file also reverts
+**uncommitted step work** in that same file. It silently reverted the `cpus-per-task=2` fix,
+and later the align-shard comment fix — the second time the commit still reported *"1 file
+changed"*, so nothing announced the loss. Snapshot the bytes to a scratch directory and
+restore by `cp`; never restore a sabotage with `git checkout` while the step's own edits are
+uncommitted.
+
 **Commit.** *(this stanza's commit; squash SHA recorded at merge)*
