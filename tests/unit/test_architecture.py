@@ -777,3 +777,36 @@ class TestReadErrorsBecomeArchitectureErrors:
         path = tmp_path / "ok.sto"
         path.write_text(sto([("s1", ANTITERM_SEQ)], ANTITERM_SS), encoding="utf-8")
         assert architecture.parse_stockholm(path).n_sequences == 1
+
+
+class TestRoundNineGuards:
+    """CodeRabbit r9 — the size-range minimum was a fail-OPEN gap."""
+
+    def test_a_range_whose_MINIMUM_cannot_hold_the_motif_refuses(self) -> None:
+        """A bulge of low..want-1 residues PASSES the size filter, so it is considered,
+        cannot hold the motif, and reads ABSENT — a decided negative ⇒ MINABLE — rather
+        than UNDETECTABLE ⇒ spared. Guarding only the maximum left that open."""
+        with pytest.raises(architecture.ArchitectureError, match="shorter than"):
+            architecture.ncca_bulge_status(
+                ANTITERM_SEQ,
+                architecture.pair_table(ANTITERM_SS),
+                bulge_size_range=(2, 9),  # max is fine; MIN cannot hold a 4-nt motif
+                ncca_pairing_nt=4,
+            )
+
+    def test_positive_control_a_minimum_equal_to_the_motif_is_accepted(self) -> None:
+        state, _ = architecture.ncca_bulge_status(
+            ANTITERM_SEQ,
+            architecture.pair_table(ANTITERM_SS),
+            bulge_size_range=(4, 9),
+            ncca_pairing_nt=4,
+        )
+        assert state == architecture.BULGE_DETECTED
+
+    def test_the_docstring_names_a_function_that_exists(self) -> None:
+        """The module docstring pointed at `named_elements_present`, which is a parameter
+        and a field but not a function here."""
+        doc = architecture.__doc__ or ""
+        for name in ("named_elements_status", "ncca_bulge_status"):
+            assert f":func:`{name}`" in doc
+        assert ":func:`named_elements_present`" not in doc

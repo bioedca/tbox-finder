@@ -494,6 +494,18 @@ def validate_status_payload(payload: Any, *, label: str) -> dict[str, str]:
     bad_rows = [i for i, r in enumerate(rows) if not isinstance(r, Mapping)]
     if bad_rows:
         raise ProducerError(f"{label}: rows {bad_rows[:5]} are not objects")
+    # ⚠ A dict comprehension MERGES duplicate keys instead of colliding: two rows with the
+    # same candidate_id collapse to the last, and if they carry the SAME status `rederived`
+    # still equals `declared` and the table passes. `merge_status_tables` refuses
+    # duplicates, but `load_status_map` reads tables written by other processes and reaches
+    # here WITHOUT that guard.
+    seen_ids = [str(r.get("candidate_id", "")) for r in rows]
+    dupes = sorted({i for i in seen_ids if seen_ids.count(i) > 1})
+    if dupes:
+        raise ProducerError(
+            f"{label}: candidate_id(s) {dupes[:5]} appear on more than one row; the "
+            "status map would silently keep only the last"
+        )
     rederived = {str(r.get("candidate_id", "")): str(r.get("status", "")) for r in rows}
     declared = {str(k): str(v) for k, v in status.items()}
     if rederived != declared:

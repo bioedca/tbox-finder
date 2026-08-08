@@ -58,7 +58,7 @@ Every value the round must choose, and why none of them is defaulted
 D3 requires the predicate be *"frozen on the held-out canonical set and unit-tested"*,
 and A4 ships D6's short-Stem-I threshold **keyword-required with no default** rather
 than consuming D17's P6 freeze.  The same discipline covers every number here:
-:func:`named_elements_present`'s ``min_named_helices``, :func:`ncca_bulge_status`'s
+:func:`named_elements_status`'s ``min_named_helices``, :func:`ncca_bulge_status`'s
 ``ncca_pairing_nt`` and ``bulge_size_range``, and
 :func:`~tbox_finder.mining.architecture_producer` 's ``stem_i_nt_threshold`` are all
 required keywords.  ``architecture_producer freeze`` **measures** their behaviour on
@@ -565,10 +565,17 @@ def ncca_bulge_status(
         raise ArchitectureError(
             f"bulge_size_range must be 1 <= min <= max, got {bulge_size_range!r}"
         )
-    if high < want:
+    if low < want:
+        # ⚠ The MINIMUM, not just the maximum. Guarding only `high` left a fail-OPEN gap:
+        # a bulge of low..want-1 residues PASSES the size filter, so it is "considered",
+        # cannot possibly hold the motif, and therefore reads BULGE_ABSENT — a decided
+        # negative ⇒ minable — rather than BULGE_UNDETECTABLE ⇒ spared. Since high >= low
+        # is already enforced above, this subsumes the old `high < want` check.
         raise ArchitectureError(
-            f"bulge_size_range max {high} is shorter than ncca_pairing_nt {want}: no bulge "
-            "could ever hold the motif, so every candidate would read 'undetectable'"
+            f"bulge_size_range min {low} is shorter than ncca_pairing_nt {want}: a bulge of "
+            f"{low}..{want - 1} residues passes the size filter but cannot hold the motif, "
+            "so it would read 'absent' (a decided negative ⇒ minable) rather than "
+            "'undetectable' (⇒ spared)"
         )
     # Size in the candidate's OWN residues, not alignment columns — see `find_bulges`.
     considered = [target] if target is not None else find_bulges(pairs)

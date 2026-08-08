@@ -1370,7 +1370,16 @@ class TestRoundSevenGuards:
         # rather than an arbitrary 200 chars, or a longer invocation fails for the wrong
         # reason.
         assert marker in sbatch, f"the sbatch never invokes `{marker}`"
-        merge_call = sbatch.split(marker, 1)[1].split("\n\n", 1)[0]
+        # A BLANK LINE is not a shell command boundary. Slicing there let a `--manifest`
+        # belonging to a *following* command satisfy both assertions, so a merge leg that
+        # dropped the manifest could still read green. A command ends at the first line
+        # that does not end in a backslash continuation.
+        merge_lines: list[str] = []
+        for line in sbatch.split(marker, 1)[1].splitlines():
+            merge_lines.append(line)
+            if not line.rstrip().endswith("\\"):
+                break
+        merge_call = "\n".join(merge_lines)
         assert "--manifest" in merge_call, "the merge leg does not pass --manifest"
         assert "$FP_MANIFEST" in merge_call, "the merge leg does not pass the manifest variable"
 
@@ -1454,3 +1463,41 @@ class TestRoundEightGuards:
         assert carve["n_with_discriminator_in_a_flanked_bulge"] == 1
         assert carve["n_skipped_no_usable_discriminator"] == 1
         assert carve["n_skipped_discriminator_not_in_a_bulge"] == 1
+
+
+class TestRoundNineProducerGuards:
+    def test_duplicate_ids_sharing_a_status_do_not_pass_validation(self) -> None:
+        """A dict comprehension MERGES duplicate keys. With the SAME status on both rows,
+        `rederived` still equals `declared` and the table passed — `merge_status_tables`
+        refuses duplicates but `load_status_map` reaches here without that guard."""
+        payload = {
+            "status": {"a": "passed"},
+            "rows": [row("a", STATUS_PASSED), row("a", STATUS_PASSED)],
+        }
+        with pytest.raises(architecture_producer.ProducerError, match="more than one row"):
+            architecture_producer.validate_status_payload(payload, label="t")
+
+    def test_positive_control_distinct_ids_validate(self) -> None:
+        payload = {
+            "status": {"a": "passed", "b": "failed"},
+            "rows": [row("a", STATUS_PASSED), row("b", STATUS_FAILED)],
+        }
+        assert architecture_producer.validate_status_payload(payload, label="t") == {
+            "a": "passed",
+            "b": "failed",
+        }
+
+    def test_the_sbatch_slice_stops_at_the_real_command_boundary(self) -> None:
+        """A blank line is not a shell boundary; slicing there let a `--manifest` from a
+        FOLLOWING command satisfy the assertion."""
+        fake = (
+            "architecture_producer merge \\\n"
+            '  "${TABLE_ARGS[@]}" --out "$MERGED_OUT"\n'
+            'echo "something else --manifest $FP_MANIFEST"\n'
+        )
+        merge_lines: list[str] = []
+        for line in fake.split("architecture_producer merge", 1)[1].splitlines():
+            merge_lines.append(line)
+            if not line.rstrip().endswith("\\"):
+                break
+        assert "--manifest" not in "\n".join(merge_lines)
