@@ -172,7 +172,7 @@
   "pins_nothing": true,
   "provenance": {
     "adr": "ADR-0006 D3/D6 (criterion (b)), A3/A4 (the de-novo consensus instrument); ADR-0005 D14",
-    "env_lock_hash": null,
+    "env_lock_hash": "a4a6715d411d7218432c4c670d35475f6c9aa7dd6397fd5d906ca7e21293dc34",
     "extra": {
       "external_inputs": [
         {
@@ -186,8 +186,8 @@
       ],
       "pins_nothing": true
     },
-    "generated_at_utc": "2026-08-07T22:42:27.993452+00:00",
-    "git_sha": "cf1cfc769c453deb26727230d14c3ac9b56d6aa6",
+    "generated_at_utc": "2026-08-08T02:58:07.806230+00:00",
+    "git_sha": "0f39ced66187503450d24bd46e8d7c2e04d51fc8",
     "inputs": {},
     "outputs": {},
     "rule": "architecture_producer::freeze",

@@ -502,8 +502,15 @@ class TestRemineCliCarriesTheTwoWayPair:
                 ]
             )
 
-    def test_an_unevidenced_b_declaration_is_refused_with_exit_4(self) -> None:
-        """Declaring a supply this checkout cannot evidence is the fail-OPEN direction."""
+    def test_an_unevidenced_b_declaration_is_detected_by_the_predicate(self) -> None:
+        """Declaring a supply this checkout cannot evidence is the fail-OPEN direction.
+
+        ⚠ Named for the PREDICATE, not for exit 4: this body exercises only
+        ``supply_declaration_unevidenced``. The exit code is asserted by
+        ``test_a_derivation_the_collector_never_produced_refuses_rather_than_raising``.
+        A failure here would otherwise point an operator at the exit-4 gate instead of at
+        the predicate that feeds it.
+        """
         assert (
             remine.supply_declaration_unevidenced(declared=True, derivation={"available": False})
             is True
@@ -591,6 +598,11 @@ class TestTheCommittedFreeze:
         """Every published rate is checked against the counts beside it — four numbers have
         drifted in this project from hand-copying a regenerated value."""
         denominator = freeze["carve"]["n_with_discriminator_in_a_flanked_bulge"]
+        # ⚠ Without this the loop body never runs on an empty mapping and the test passes
+        # having checked nothing — the vacuous-assertion species this file names elsewhere,
+        # in this file's own test. Assert the arm set exists before iterating it.
+        assert freeze["ncca_recovery"], "no recovery arms to reconcile"
+        assert denominator > 0, "an empty denominator makes every share vacuously checkable"
         for k, arm in freeze["ncca_recovery"].items():
             assert arm["share"] == pytest.approx(arm["n"] / denominator, abs=1e-6), k
             assert 0 <= arm["n"] <= denominator, k
@@ -1009,3 +1021,82 @@ class TestRoundThreeGuards:
     def test_positive_control_object_rows_validate(self) -> None:
         payload = {"status": {"a": "passed"}, "rows": [row("a", STATUS_PASSED)]}
         assert architecture_producer.validate_status_payload(payload, label="t") == {"a": "passed"}
+
+
+class TestRoundFourGuards:
+    """CodeRabbit r4 — four minors, no majors for the first time this step."""
+
+    def test_the_freeze_provenance_clause_is_breakable(self, tmp_path: Path) -> None:
+        """The freeze is EVIDENCE, so how it was produced is part of the claim.
+        `build_provenance` permits an empty `inputs` and a null env lock."""
+        for _, rel in architecture_producer.SUPPLY_CLAUSES:
+            target = tmp_path / rel
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text("x", encoding="utf-8")
+        (tmp_path / architecture_producer.FREEZE_REPORT).write_text(
+            json.dumps(
+                {
+                    "carve": {"n_with_discriminator_in_a_flanked_bulge": 8605},
+                    "provenance": {"inputs": {}, "env_lock_hash": None, "git_sha": "abc"},
+                }
+            ),
+            encoding="utf-8",
+        )
+        derivation = architecture_producer.derive_relaxed_arch_supply_available(repo_root=tmp_path)
+        assert derivation["clauses"]["freeze_provenance_names_its_inputs"] is False
+
+    def test_sha256d_external_inputs_satisfy_the_clause(self, tmp_path: Path) -> None:
+        """The corpus is DVC-tracked and absent from a worktree, so it is recorded as a
+        hashed external input — MORE traceable than a path, and it must count."""
+        for _, rel in architecture_producer.SUPPLY_CLAUSES:
+            target = tmp_path / rel
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text("x", encoding="utf-8")
+        (tmp_path / architecture_producer.FREEZE_REPORT).write_text(
+            json.dumps(
+                {
+                    "carve": {"n_with_discriminator_in_a_flanked_bulge": 8605},
+                    "provenance": {
+                        "inputs": {},
+                        "env_lock_hash": "deadbeef",
+                        "git_sha": "abc",
+                        "extra": {"external_inputs": [{"name": "x.parquet", "sha256": "aa"}]},
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+        derivation = architecture_producer.derive_relaxed_arch_supply_available(repo_root=tmp_path)
+        assert derivation["clauses"]["freeze_provenance_names_its_inputs"] is True
+
+    def test_the_PRODUCER_stamps_an_env_lock_hash(self, tmp_path: Path) -> None:
+        """⚠ The first version of this read the COMMITTED report and stayed green under
+        sabotage — the bytes on disk were written by the fixed code. An assertion over an
+        artifact cannot see the producer that wrote it. Call the writer instead."""
+        probe = tmp_path / "probe.txt"
+        probe.write_text("x", encoding="utf-8")
+        block = architecture_producer._provenance("freeze", [probe], {"pins_nothing": True})
+        assert block["env_lock_hash"], "the provenance block names no environment"
+        assert block["rule"] == "architecture_producer::freeze"
+
+    def test_the_committed_freeze_carries_what_the_producer_stamps(self) -> None:
+        """The artifact-side half: cheap, and it catches a report regenerated by older code."""
+        freeze = json.loads(
+            (REPO_ROOT / architecture_producer.FREEZE_REPORT).read_text(encoding="utf-8")
+        )
+        assert freeze["provenance"]["env_lock_hash"]
+        assert freeze["provenance"]["extra"]["external_inputs"]
+
+    def test_a_broken_round_import_is_a_FAILED_clause_not_a_traceback(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """`derive-supply` follows the FATAL / exit 1 contract; a module-level failure in
+        `mine_round` must not abort the leg with a traceback."""
+
+        def boom(*_a, **_k):
+            raise RuntimeError("mine_round is broken")
+
+        monkeypatch.setattr(mine_round, "candidate_evidence", boom)
+        derivation = architecture_producer.derive_relaxed_arch_supply_available(repo_root=REPO_ROOT)
+        assert derivation["clauses"]["producer_status_wired"] is False
+        assert derivation["available"] is False

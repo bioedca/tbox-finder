@@ -97,6 +97,11 @@ DEFAULT_CORPUS = "data/processed/master_clean_v0.parquet"
 DEFAULT_SPLIT_TABLE = "data/processed/splits/split_assignments.parquet"
 FREEZE_REPORT = "reports/p3/architecture_freeze.json"
 
+#: The env this producer's legs run in (CLAUDE.md §3.2 rule = env). Recorded in every
+#: provenance block so a report names the environment that produced it — ``stage2_producer``
+#: sets this and it is the better precedent; ``synteny_producer`` leaves it ``None``.
+ENV_LOCK = "envs/data.conda-lock.yml"
+
 #: The status-table filename the round's ``--relaxed-arch-status`` expects.
 DEFAULT_STATUS_TABLE = "architecture_status.json"
 
@@ -681,12 +686,21 @@ def derive_relaxed_arch_supply_available(*, repo_root: str | Path | None = None)
     # status onto the candidate, by calling the wiring rather than by reading a signature.
     # A producer that ships but whose output the round drops on the floor is the silent
     # no-op the whole gate exists to refuse.
-    from tbox_finder.mining.mine_round import candidate_evidence
-
     probe_id = "__relaxed_arch_supply_probe__"
-    stamped = candidate_evidence(
-        probe_id, None, None, {probe_id: STATUS_PASSED}
-    ).relaxed_architecture
+    try:
+        from tbox_finder.mining.mine_round import candidate_evidence
+
+        stamped: Any = candidate_evidence(
+            probe_id, None, None, {probe_id: STATUS_PASSED}
+        ).relaxed_architecture
+    except Exception as exc:  # noqa: BLE001 - a broken round is a FAILED clause, not a crash
+        # Deliberately broader than ImportError: a module-level failure anywhere in
+        # `mine_round` or its transitive imports (RuntimeError, OSError, AttributeError)
+        # would otherwise propagate out of a function documented as fail-closed on every
+        # clause, aborting `derive-supply` with a traceback instead of the FATAL / exit 1
+        # contract every other leg follows. `derive_msa_supply_available` already treats a
+        # broken producer import this way, for the same reason.
+        stamped = f"probe failed: {exc!r}"
     clauses["producer_status_wired"] = stamped == STATUS_PASSED
     wiring_reason = (
         ""
@@ -708,9 +722,35 @@ def derive_relaxed_arch_supply_available(*, repo_root: str | Path | None = None)
         isinstance(n_measured, int) and not isinstance(n_measured, bool) and n_measured > 0
     )
 
-    from tbox_finder.mining.mine_round import derive_msa_supply_available
+    # The freeze is EVIDENCE, so the record of how it was produced is part of the claim.
+    # `build_provenance` permits an empty `inputs` and a null env lock, so a report written
+    # by a run that hashed nothing would otherwise satisfy every other clause here.
+    provenance = freeze.get("provenance") if isinstance(freeze, Mapping) else None
+    provenance = provenance if isinstance(provenance, Mapping) else {}
+    extra = provenance.get("extra")
+    extra = extra if isinstance(extra, Mapping) else {}
+    # ⚠ The corpus and the split table are DVC-tracked and are NOT materialized in a
+    # worktree, so the freeze reads them by absolute path from the main checkout and
+    # `_split_inputs` records them as sha256'd ``external_inputs`` rather than as
+    # repo-relative ``inputs``. Either form satisfies the contract — the hashed form is
+    # strictly MORE traceable, since a reader can verify the bytes without knowing where
+    # they sat. What must never pass is a report that names NEITHER.
+    named_inputs = len(provenance.get("inputs") or ()) + len(extra.get("external_inputs") or ())
+    clauses["freeze_provenance_names_its_inputs"] = bool(
+        named_inputs > 0 and provenance.get("env_lock_hash") and provenance.get("git_sha")
+    )
 
-    msa = derive_msa_supply_available(repo_root=root)
+    # The delegation needs the SAME fail-closed handling as the probe above, and for the
+    # same reason: `derive_msa_supply_available` runs its own unwrapped `candidate_evidence`
+    # probe, so a broken round takes THIS function down through the delegation even when the
+    # local probe is guarded. Found by the test for the local guard failing here instead —
+    # one of two call sites again.
+    try:
+        from tbox_finder.mining.mine_round import derive_msa_supply_available
+
+        msa = derive_msa_supply_available(repo_root=root)
+    except Exception as exc:  # noqa: BLE001 - a broken (a) derivation is a FAILED clause
+        msa = {"available": False, "reasons": [f"(a) derivation raised: {exc!r}"]}
     clauses["msa_supply_backs_it"] = bool(msa.get("available"))
 
     reasons = [f"{name} is missing or false" for name, ok in sorted(clauses.items()) if not ok]
@@ -774,6 +814,7 @@ def _provenance(entry: str, inputs: Sequence[str | Path], extra: Mapping[str, An
         script="src/tbox_finder/mining/architecture_producer.py",
         inputs=inside,
         adr=ADR,
+        env_lock=ENV_LOCK,
         extra=payload,
     )
 
