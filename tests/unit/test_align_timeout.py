@@ -134,14 +134,25 @@ def test_the_killed_group_is_actually_reaped(tmp_path: Path):
     """A kill that leaves the process alive-but-unwaited is a zombie, and the shard's task would
     still hold it. Assert the pid is gone, not merely signalled."""
     pidfile = tmp_path / "pid.txt"
+    staging = tmp_path / "pid.txt.tmp"
+    # Written atomically: `open(...).write(...)` CREATES the file and then fills it, so a timeout
+    # landing between those two steps leaves an empty pid.txt and `int("")` fails the test for a
+    # reason that has nothing to do with reaping.
     cmd = [
         sys.executable,
         "-c",
-        f"import os, time; open(r'{pidfile}', 'w').write(str(os.getpid())); time.sleep(60)",
+        (
+            "import os, time\n"
+            f"open(r'{staging}', 'w').write(str(os.getpid()))\n"
+            f"os.replace(r'{staging}', r'{pidfile}')\n"
+            "time.sleep(60)\n"
+        ),
     ]
     with pytest.raises(ToolTimeoutError):
         hdb._run(cmd, timeout_s=BOUND)
-    pid = int(pidfile.read_text())
+    raw = pidfile.read_text().strip()
+    assert raw, "the child never recorded its pid — the test cannot say anything about reaping"
+    pid = int(raw)
     time.sleep(0.5)
     with pytest.raises(OSError) as exc:  # ESRCH once reaped; a zombie would still answer signal 0
         os.kill(pid, 0)
@@ -474,16 +485,18 @@ def _align_shard_invocation(sbatch: Path) -> str:
 def test_every_sbatch_that_aligns_requires_the_bound(sbatch: Path):
     """`${ALIGN_TIMEOUT_S:?…}` — not `:-`, which would restore the silent unbounded default that
     `--test-only` cannot catch (it validates headers only)."""
+    # BOTH assertions read the comment-stripped body. These headers DISCUSS the flags at length, so
+    # a positive check against the raw text passes on a header that merely QUOTES
+    # `${ALIGN_TIMEOUT_S:?…}` while the executable body declares nothing, and the negative check
+    # fails on a header documenting the anti-pattern. Splitting them was itself an instance of
+    # [[fixed-one-of-two-identical-things]] — twice over: the raw-text positive survived the round
+    # that fixed the negative.
     text = _read(sbatch)
-    assert re.search(r'ALIGN_TIMEOUT_S="\$\{ALIGN_TIMEOUT_S:\?', text), (
+    code = "\n".join(ln for ln in text.splitlines() if not ln.lstrip().startswith("#"))
+    assert re.search(r'ALIGN_TIMEOUT_S="\$\{ALIGN_TIMEOUT_S:\?', code), (
         f"{sbatch.name} must declare ALIGN_TIMEOUT_S as a REQUIRED export (:?), so a submit that "
         f"omits it aborts instead of aligning unbounded"
     )
-    # Comments filtered for the same reason the invocation extractor filters them, and this is the
-    # sibling I missed the first time: these headers DISCUSS the flags, so documenting the
-    # anti-pattern (`# never use ${ALIGN_TIMEOUT_S:-600}`) would fail this assertion on prose while
-    # the real configuration stayed correct ([[fixed-one-of-two-identical-things]]).
-    code = "\n".join(ln for ln in text.splitlines() if not ln.lstrip().startswith("#"))
     assert not re.search(
         r"ALIGN_TIMEOUT_S:-", code
     ), f"{sbatch.name} supplies a default bound — the round must name it explicitly"
