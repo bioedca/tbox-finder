@@ -150,8 +150,11 @@ def test_the_killed_group_is_actually_reaped(tmp_path: Path):
     ]
     with pytest.raises(ToolTimeoutError):
         hdb._run(cmd, timeout_s=BOUND)
+    assert (
+        pidfile.exists()
+    ), "the child never recorded its pid — the test cannot say anything about reaping"
     raw = pidfile.read_text().strip()
-    assert raw, "the child never recorded its pid — the test cannot say anything about reaping"
+    assert raw, "the child recorded an empty pid — the atomic write did not hold"
     pid = int(raw)
     time.sleep(0.5)
     with pytest.raises(OSError) as exc:  # ESRCH once reaped; a zombie would still answer signal 0
@@ -671,6 +674,38 @@ def test_the_post_kill_drain_is_bounded(monkeypatch: pytest.MonkeyPatch):
     )
 
 
+#: `sbatch` used as a COMMAND — preceded by a command boundary (start, whitespace, `&&`, a
+#: backtick, `(`) and followed by a flag, a line continuation, or a script path. Crucially this
+#: does NOT match the `sbatch` inside `mine_round.sbatch`, which is preceded by a dot: 9 of the 12
+#: comment blocks mentioning a .sbatch path in these files are prose ABOUT another script.
+_SBATCH_INVOCATION = re.compile(r"(?:^|[\s&`(;])sbatch\s+(?:[-\\]|\S*\.sbatch)", re.M)
+
+
+def _documented_submits(sbatch: Path) -> list[str]:
+    """The header comment blocks that document submitting **this** file, continuations included.
+
+    Two conditions, both load-bearing: the block must contain a real `sbatch` *invocation* (not a
+    sentence naming a script), and it must name **this** sbatch (so the producer's header comment
+    about how `mine_round.sbatch` calls it is not mistaken for its own submit line). Preflight
+    (`--test-only`) lines are excluded — they validate headers and need no exports.
+    """
+    lines = _read(sbatch).splitlines()
+    blocks: list[str] = []
+    for i, ln in enumerate(lines):
+        if not (ln.lstrip().startswith("#") and "sbatch" in ln and "--test-only" not in ln):
+            continue
+        block, j = [ln], i
+        # The command spans backslash continuations; a per-line search would see
+        # `# ssh two ... sbatch \` alone and never reach the --export on the next comment line.
+        while lines[j].rstrip().endswith("\\") and j + 1 < len(lines):
+            j += 1
+            block.append(lines[j])
+        text = "\n".join(block)
+        if _SBATCH_INVOCATION.search(text) and sbatch.name in text:
+            blocks.append(text)
+    return blocks
+
+
 @pytest.mark.parametrize(
     "sbatch", [PRODUCER_SBATCH, ORCHESTRATOR_SBATCH, MEASURE_SBATCH], ids=lambda p: p.name
 )
@@ -678,22 +713,14 @@ def test_the_documented_submit_line_exports_the_bound(sbatch: Path):
     """An operator follows the header's SUBMIT line. If it omits a `:?` export, the documented
     command aborts the job it documents — and for mine_round.sbatch that abort happens only after
     leg (a) has already spent 8 GPUs on the scan."""
-    lines = _read(sbatch).splitlines()
-    # The documented command spans backslash continuations, so a per-line search would look at
-    # `# ssh two ... sbatch \\` alone and never see the --export on the next comment line.
-    blocks: list[str] = []
-    for i, ln in enumerate(lines):
-        stripped = ln.lstrip()
-        if not (stripped.startswith("#") and "sbatch" in ln and "--test-only" not in ln):
-            continue
-        block, j = [ln], i
-        while lines[j].rstrip().endswith("\\") and j + 1 < len(lines):
-            j += 1
-            block.append(lines[j])
-        blocks.append("\n".join(block))
-    joined = "\n".join(blocks)
-    assert blocks, f"no documented sbatch submit command found in {sbatch.name}"
-    assert "ALIGN_TIMEOUT_S=" in joined, (
-        f"{sbatch.name}'s documented submit command does not export ALIGN_TIMEOUT_S, which the "
-        f"file itself declares required"
-    )
+    blocks = _documented_submits(sbatch)
+    assert blocks, f"no documented submit command for {sbatch.name} found in its own header"
+    # Asserted PER COMMAND, not on the concatenation. Concatenating let a header sentence
+    # mentioning `sbatch` somewhere and `ALIGN_TIMEOUT_S=` somewhere else satisfy the check while
+    # the real documented command omitted the export — the third instance in this PR of a test
+    # that could pass on prose (see `_align_shard_invocation` and the `:?`/`:-` pair).
+    for block in blocks:
+        assert "ALIGN_TIMEOUT_S=" in block, (
+            f"a documented submit command in {sbatch.name} does not export ALIGN_TIMEOUT_S, "
+            f"which the file itself declares required:\n{block}"
+        )
