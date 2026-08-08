@@ -125,6 +125,18 @@ K_SAMPLE="50"          # A10 Pin 1 bounded sample (K >= 50); accession-sorted, d
 # 8500 s alignment (depth 844) — 69 % of all align wall-clock in one candidate. Read any report
 # this job writes as "≥", and re-derive the envelope from a completed full run, not from here.
 ALIGN_TIMEOUT_S="${ALIGN_TIMEOUT_S:?set ALIGN_TIMEOUT_S (per-candidate mlocarna bound, s) via --export — it censors this measurement; see the note above}"
+# ⚠ `:?` REJECTS ONLY AN ABSENT OR EMPTY VALUE, NOT A MALFORMED ONE. Without this, `60o` or `abc`
+# travels all the way into the producer task and is caught by argparse only AFTER that task has
+# spent its ~37 min search stage — and, from the orchestrator, after the 8-GPU scan legs. Shape
+# first (digits with at most one dot), then reject a numeric zero: a zero bound times out EVERY
+# alignment, and because a timeout SPARES rather than fails that would read as a clean,
+# producible-nothing round. Stripping `0` and `.` leaves nothing iff the value is zero.
+case "$ALIGN_TIMEOUT_S" in
+  ''|*[!0-9.]*|.|*.*.*) echo "FATAL: ALIGN_TIMEOUT_S must be a positive number of seconds (got '$ALIGN_TIMEOUT_S')" >&2; exit 2 ;;
+esac
+if [ -z "${ALIGN_TIMEOUT_S//[0.]/}" ]; then
+  echo "FATAL: ALIGN_TIMEOUT_S must be > 0 (got '$ALIGN_TIMEOUT_S'); a zero bound spares every candidate" >&2; exit 2
+fi
 
 # NOTE: name this JOB_SCRATCH, never BUILD/HOST — `conda activate tbox-ml-dna` (the compiler
 # toolchain) exports BUILD=HOST=x86_64-conda-linux-gnu, which would clobber a $BUILD scratch path

@@ -724,3 +724,99 @@ def test_the_documented_submit_line_exports_the_bound(sbatch: Path):
             f"a documented submit command in {sbatch.name} does not export ALIGN_TIMEOUT_S, "
             f"which the file itself declares required:\n{block}"
         )
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# Review round 4 (CodeRabbit app) — `:?` rejects an ABSENT value, not a bad one
+# ═════════════════════════════════════════════════════════════════════════════
+def _extract_guard(sbatch: Path) -> str:
+    """The ALIGN_TIMEOUT_S declaration + its value guard, lifted verbatim from the sbatch.
+
+    Executed as its own bytes rather than retyped: a retyped equivalent proves only that this test
+    agrees with itself, and the shipped line is the one that runs on the cluster
+    ([[verify-the-line-you-ship]]).
+    """
+    lines = _read(sbatch).splitlines()
+    start = next(i for i, ln in enumerate(lines) if ln.startswith("ALIGN_TIMEOUT_S="))
+    end = next(i for i in range(start + 1, len(lines)) if lines[i].startswith("fi"))
+    return "\n".join(lines[start : end + 1])
+
+
+@pytest.mark.parametrize(
+    "value,ok",
+    [
+        ("600", True),
+        ("0.5", True),
+        ("1", True),
+        ("60o", False),  # the review's example: `:?` alone waves this through
+        ("abc", False),
+        ("nan", False),
+        ("inf", False),
+        ("-5", False),
+        ("1.2.3", False),
+        (".", False),
+        ("0", False),  # a zero bound spares EVERY candidate — silently, because a timeout spares
+        ("0.0", False),
+        ("00", False),
+        ("600 ", False),  # a stray space would reach argparse as a malformed token
+    ],
+)
+@pytest.mark.parametrize(
+    "sbatch", [PRODUCER_SBATCH, ORCHESTRATOR_SBATCH, MEASURE_SBATCH], ids=lambda p: p.name
+)
+def test_the_sbatch_value_guard_accepts_only_a_usable_bound(sbatch: Path, value: str, ok: bool):
+    """`${VAR:?}` rejects an ABSENT or EMPTY value only. Without a value guard, `60o` reaches the
+    producer task and dies in argparse AFTER its ~37 min search stage — and from the orchestrator,
+    after the 8-GPU scan legs have already run."""
+    script = _extract_guard(sbatch)
+    proc = subprocess.run(
+        ["bash", "-c", script],
+        env={"ALIGN_TIMEOUT_S": value, "PATH": os.environ["PATH"]},
+        capture_output=True,
+        text=True,
+    )
+    if ok:
+        assert proc.returncode == 0, f"{value!r} is a usable bound but was rejected: {proc.stderr}"
+    else:
+        assert (
+            proc.returncode == 2
+        ), f"{value!r} must be refused by {sbatch.name}, got rc={proc.returncode}"
+        assert "ALIGN_TIMEOUT_S" in proc.stderr
+
+
+#: The FIRST EXPENSIVE thing each script does, named per file rather than guessed from a proxy.
+#: `conda activate` is not it — mine_round.sbatch activates its env at line 90 purely to run the
+#: cheap no-GPU readiness preflight, and asserting against that marker failed on a correct tree.
+#: What the finding is actually about is failing before the work that costs GPU-hours or a search
+#: stage, so that is what is named.
+_FIRST_EXPENSIVE_LEG = {
+    "mine_round_producer.sbatch": "covariation_producer search-shard",  # the ~37 min search
+    "mine_round.sbatch": "mine_round scan-shard",  # LEG a, the 8-GPU scan
+    "mine_round_measure.sbatch": "mine_round scan-shard",  # LEG a, the 8-GPU scan
+}
+
+
+@pytest.mark.parametrize(
+    "sbatch", [PRODUCER_SBATCH, ORCHESTRATOR_SBATCH, MEASURE_SBATCH], ids=lambda p: p.name
+)
+def test_the_value_guard_runs_before_any_expensive_leg(sbatch: Path):
+    """Position is the whole point of the finding: a guard after the scan legs would report the
+    same error having already spent them. Assert it precedes the first conda activation."""
+    # The `conda activate` COMMAND, anchored at line start — not the string. These files both
+    # document it in their env-creation instructions AND carry it in a trailing comment
+    # (`set -eo pipefail   # NOT -u: conda activate hooks read unset vars.`), so a substring search
+    # lands on line 61 instead of line 118 and this test fails on correct code. Third variant of
+    # the same prose-matching trap in this file, and the first one to bite a passing tree.
+    code = [
+        (i, ln)
+        for i, ln in enumerate(_read(sbatch).splitlines())
+        if not ln.lstrip().startswith("#")
+    ]
+    guard = next(i for i, ln in code if "ALIGN_TIMEOUT_S must be a positive number" in ln)
+    marker = _FIRST_EXPENSIVE_LEG[sbatch.name]
+    expensive = next(i for i, ln in code if marker in ln)
+    assert guard < expensive, (
+        f"{sbatch.name} validates ALIGN_TIMEOUT_S at line {guard + 1}, AFTER its first expensive "
+        f"leg ({marker}) at line {expensive + 1} — the whole point of the guard is to fail before "
+        f"that work is spent, not after it"
+    )

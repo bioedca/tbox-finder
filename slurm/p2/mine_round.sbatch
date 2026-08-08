@@ -134,6 +134,18 @@ ARRAY_WIDTH="${ARRAY_WIDTH:?set ARRAY_WIDTH (the A10 Phase-2-pinned producer arr
 # array whose every task aborts on the first line of its own config — a 48-task no-op that reports
 # nothing. Exceeding the bound ⇒ no MSA ⇒ `unavailable` ⇒ SPARED (D14), never a mined negative.
 ALIGN_TIMEOUT_S="${ALIGN_TIMEOUT_S:?set ALIGN_TIMEOUT_S (per-candidate mlocarna bound, s) via --export}"
+# ⚠ `:?` REJECTS ONLY AN ABSENT OR EMPTY VALUE, NOT A MALFORMED ONE. Without this, `60o` or `abc`
+# travels all the way into the producer task and is caught by argparse only AFTER that task has
+# spent its ~37 min search stage — and, from the orchestrator, after the 8-GPU scan legs. Shape
+# first (digits with at most one dot), then reject a numeric zero: a zero bound times out EVERY
+# alignment, and because a timeout SPARES rather than fails that would read as a clean,
+# producible-nothing round. Stripping `0` and `.` leaves nothing iff the value is zero.
+case "$ALIGN_TIMEOUT_S" in
+  ''|*[!0-9.]*|.|*.*.*) echo "FATAL: ALIGN_TIMEOUT_S must be a positive number of seconds (got '$ALIGN_TIMEOUT_S')" >&2; exit 2 ;;
+esac
+if [ -z "${ALIGN_TIMEOUT_S//[0.]/}" ]; then
+  echo "FATAL: ALIGN_TIMEOUT_S must be > 0 (got '$ALIGN_TIMEOUT_S'); a zero bound spares every candidate" >&2; exit 2
+fi
 # The structural-yield ack (header ⛔). Readiness passing is NOT permission to mine: with (b)
 # and (c) unbacked, mining's conjunction cannot be satisfied by any candidate and this round's
 # yield is provably 0 — ~8 GPU × 6 h to change nothing. Required, no default, so the no-op

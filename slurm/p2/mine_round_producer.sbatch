@@ -70,6 +70,18 @@ ROUND_DIR="${ROUND_DIR:?set ROUND_DIR via --export}"
 # Required, no default: it decides which candidates yield a consensus, so the round names it and
 # `--test-only` cannot catch its absence (headers only) — the `:?` is what actually catches it.
 ALIGN_TIMEOUT_S="${ALIGN_TIMEOUT_S:?set ALIGN_TIMEOUT_S (per-candidate mlocarna bound, s) via --export}"
+# ⚠ `:?` REJECTS ONLY AN ABSENT OR EMPTY VALUE, NOT A MALFORMED ONE. Without this, `60o` or `abc`
+# travels all the way into the producer task and is caught by argparse only AFTER that task has
+# spent its ~37 min search stage — and, from the orchestrator, after the 8-GPU scan legs. Shape
+# first (digits with at most one dot), then reject a numeric zero: a zero bound times out EVERY
+# alignment, and because a timeout SPARES rather than fails that would read as a clean,
+# producible-nothing round. Stripping `0` and `.` leaves nothing iff the value is zero.
+case "$ALIGN_TIMEOUT_S" in
+  ''|*[!0-9.]*|.|*.*.*) echo "FATAL: ALIGN_TIMEOUT_S must be a positive number of seconds (got '$ALIGN_TIMEOUT_S')" >&2; exit 2 ;;
+esac
+if [ -z "${ALIGN_TIMEOUT_S//[0.]/}" ]; then
+  echo "FATAL: ALIGN_TIMEOUT_S must be > 0 (got '$ALIGN_TIMEOUT_S'); a zero bound spares every candidate" >&2; exit 2
+fi
 # Zero-pad the task id to match make-shards' `shard_{i:03d}.json` (covariation_producer.py:199).
 # Build these paths with plain interpolation, NOT `$(printf …)`: the tracked-path gate
 # (tests/unit/test_sbatch_rm_targets.py) cannot resolve a command substitution, so a `rm` on a
