@@ -10,8 +10,25 @@
 # ── SHAPE: a CPU-only --array on the `gpu` partition, NO --gres (CPU tasks on node `two`'s 96 cores) ─
 #   task t reads $SHARD_DIR/shard_<t>.json (from mine_round.sbatch make-shards) and runs the three
 #   env stages over its candidates → $ROUND_DIR/status/status_<t>.json + a per-shard SHARD_OK marker.
-# §9.2 forbids `compute`(=zero) and pinning a node. The array WIDTH + --time are the A10 Phase-2 pin
-# (mine_round.sbatch submits with `--array=0-(W-1)`; W chosen so a shard's wall fits --time).
+# §9.2 forbids `compute`(=zero) and pinning a node. The array WIDTH + --cpus-per-task + --time are
+# the A10 Phase-2 pin (mine_round.sbatch submits with `--array=0-(W-1)`; W chosen so a shard's wall
+# fits --time).
+#
+# ⚠ --cpus-per-task IS PART OF THE PIN, AND SHIPPED WRONG UNTIL P3-15'-e. ADR-0005 A10 Phase-2 pins
+# "Array width = 48, cpus-per-task = 2 … All 48 tasks run concurrently (48 × 2 = 96 cores, no
+# queueing)". This header read 4, and mine_round.sbatch's leg (c) submits WITHOUT a --cpus-per-task
+# override, so the header won: 48 × 4 = 192 cores requested on a 96-core node, i.e. the pinned
+# no-queueing property could not hold. 2 is also what the code actually consumes — `align-shard`
+# is called with `--cpu 2` (line ~85) and `homolog_msa.nhmmer_argv` passes no `--cpu` at all, so
+# nhmmer runs at HMMER's 2-thread default. tests/unit/test_sbatch_producer_envelope.py re-derives
+# the pinned numbers from the ADR's own text and compares them to these bytes.
+#
+# ⚠ MEMORY, NOT CPU, BINDS CONCURRENCY — and A10 did not price it. At --mem=16G a 256 GB node holds
+# ~16 co-resident tasks, so a 48-wide array runs in ~3 waves and the wall is ~15-25 min, NOT A10's
+# "~7 min". The PINNED COST is unaffected (≈4.42 CPU-core-h sum-faithful, 0 GPU-h) because total
+# core-hours do not depend on how the waves pack. --mem is left at 16G: no per-task RSS has ever
+# been measured (the K=50 Phase-1 job ran ONE task at --mem=128G), and lowering it on a guess would
+# risk an OOM mid-array. Quote the wall from the run, never from A10's CPU-only arithmetic.
 #
 # ── SUBMITTED BY mine_round.sbatch (leg c) with --export ROUND/SHARD_DIR/ROUND_DIR and --array=0-(W-1).
 # Standalone (debug) submit: `sbatch --array=0-0 --export=ALL,SHARD_DIR=…,ROUND_DIR=… mine_round_producer.sbatch`
@@ -21,7 +38,7 @@
 #SBATCH --job-name=tbox-p2-10e-producer
 #SBATCH --partition=gpu
 #SBATCH --array=0
-#SBATCH --cpus-per-task=4
+#SBATCH --cpus-per-task=2
 #SBATCH --mem=16G
 #SBATCH --time=12:00:00
 #SBATCH --output=reports/p2/mine_round_producer_%A_%a.out

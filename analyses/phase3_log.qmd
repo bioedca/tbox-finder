@@ -4730,3 +4730,88 @@ moved (99.930 % → 99.884 %, 4 records). **k=4 = 99.87 %, modal bulge 7 nt, ste
 unchanged**, and the committed freeze re-derives byte-identically from the merged code apart
 from `provenance`. Final suite **5,097 passed**; sabotage totals 19/19 + 10/11 (the
 documented leak, relocated) + 3/3 + 5/5 + 2/2 + 1/1.
+
+## Step P3-15′-e — 2026-08-08: the covariation-(a) full-corpus supply run — envelope correction + submit preparation
+
+**Inputs.** `data/processed/mining/round0_fp_manifest.json` (941 candidates, git-tracked);
+`data/interim/homolog_db/` (9.3 GB FM-index + BLAST DB, staged on `two`);
+`data/interim/production_genomes/` (2,500 `.fna`, staged); envs `tbox-homology`,
+`tbox-locarna` (LocARNA 2.0.1), `tbox-rscape`, all present on `two`;
+ADR-0005 A10 Phase-2 (the pinned producer envelope); ADR-0006 A2/A3/A4.
+
+**Process.** This step prepares the run that turns 941 candidates into the per-candidate
+`#=GC SS_cons` consensuses criterion (b) reads, and it opens with a conflict rather than a
+submit. **ADR-0005 A10 Phase-2 pins `cpus-per-task = 2` for
+`slurm/p2/mine_round_producer.sbatch`; the shipped header read `4`.** Leg (c) of
+`slurm/p2/mine_round.sbatch:184` submits the array with no `--cpus-per-task` override, so the
+header was authoritative and a 48-wide submit would have requested 48 × 4 = 192 cores on a
+96-core node — the pin's own "all 48 tasks run concurrently, no queueing" property could not
+hold as shipped. The ADR outranks the sbatch (CLAUDE.md precedence), so the header is
+corrected to `2` rather than papered over with a submit-line override that would leave the
+next caller of leg (c) broken. **2 is also what the body consumes**: `align-shard` is invoked
+`--cpu 2` and `homolog_msa.nhmmer_argv` passes no `--cpu` at all, so nhmmer runs at HMMER's
+2-thread default — the `4` was unbacked slack, not a measured need.
+
+`tests/unit/test_sbatch_producer_envelope.py` (11 tests) is the gate that was missing: the
+envelope lived in ADR prose on one side and in `#SBATCH` bytes on the other with nothing
+between them. It **re-derives the pinned numbers from the ADR's own text** rather than
+retyping them, so a future amendment moves the test with it instead of pinning a stale value;
+`test_the_adr_pin_is_actually_parsed` is the positive control that stops a reworded ADR from
+making every comparison vacuous, and the ADR's two independent statements of the envelope
+(the Phase-2 pin bullet and the Phase-2 sign-off line) are parsed separately and required to
+agree.
+
+**Outputs.** `slurm/p2/mine_round_producer.sbatch` (`--cpus-per-task` 4 → 2, plus the two
+disclosures below in its header) · `tests/unit/test_sbatch_producer_envelope.py` (new, 11
+tests, pure stdlib). No data artifact, no DVC object, no ADR amendment, no value pinned —
+the correction *restores* a pinned value, it does not set one. **The run is NOT submitted:
+the §9.3 submit-ack is an open stop.**
+
+**Validation.** Full `tests/unit` + `tests/golden` **4,902 passed / 15 failed** against a
+matched `main` baseline at `be86c1f` (**28 failed**); the failure sets diff to **zero new
+failures** — the 13-test delta is `test_coverage_sim.py` + `test_selection_val.py` *skipping*
+in the worktree ("DVC/LFS corpus inputs not materialised locally"), not passing. **10
+sabotages, 10 RED against their NAMED test**, plus a **negative control that must stay
+green**: leg (c) gaining an override that carries the *pinned* value 2 leaves the suite at
+11 passed, so `test_the_orchestrator_does_not_contradict_the_pin` discriminates on the value
+rather than on the mere presence of an override. `ruff@0.15.15` + `black@25.11.0` clean;
+`bash -n` clean.
+
+**Decisions.** ⚠ **Two measured facts split this step from the (b) run, and both were
+established by execution, not by reading.**
+
+1. **`STEM_I_NT_THRESHOLD` — one of `architecture_producer.sbatch`'s seven required
+   parameters — is inert on this manifest.** The 941 rows carry only
+   `accession, candidate_id, locus_start, locus_end, pool, score`: no `stem_i_extent_nt`,
+   no `regulatory_mode`, no `class_ii`. Both arms of D6's `short_stem_i_or_class_ii` therefore
+   miss and `ultrashort_relax` is `False` on every candidate. Verified by running
+   `evaluate_candidate` on a real manifest row against the certified consensus at thresholds
+   1 and 10,000: **byte-identical status rows**. The consequence is not cosmetic — ADR-0006
+   A4 argues an imperfect threshold "errs safe" *because* the relaxation only ever makes (b)
+   more likely to pass ⇒ more sparing. With the relaxation structurally off, that safety
+   margin is absent and (b) runs as its strict base predicate.
+2. **The curated freeze distribution is the wrong instrument for choosing
+   `MIN_NAMED_HELICES`, and `reports/p3/architecture_freeze.json` says so itself** — its
+   `disclosure` field reads *"measured on CURATED structure, which is CM-derived … NOT the
+   rate at which a de-novo consensus resolves one. The second number needs the full-corpus
+   (a)/(b) supply run."* On curated structure ≥ 4 helices holds for **99.2 %**; on the one
+   real de-novo `mlocarna` consensus the repo has (`certified_positive.sto`, 24 rows × 289
+   columns, job 766) the pair table resolves **3 helices** (5, 8, 11 stacked pairs) at every
+   `min_helix_pairs` from 1 to 5, and `min_named_helices = 4` flips it from `passed` to
+   `failed` ⇒ **mined**. Choosing (b)'s parameters off the curated histogram would set them
+   on a proxy that disagrees with the instrument at exactly the decision boundary. So **(a)
+   runs first and (b) is parameterised on its output** — recorded as `P3-15′-f`.
+
+⚠ **A10's wall estimate does not survive contact with memory.** At `--mem=16G` a 256 GB node
+holds ~16 co-resident tasks, so a 48-wide array runs in ~3 waves and the wall is **~15–25 min,
+not A10's "~7 min"** (that figure is CPU-only arithmetic). The **pinned cost is unaffected** —
+≈ 4.42 CPU-core-h sum-faithful, 0 GPU-h — because total core-hours do not depend on wave
+packing. `--mem` is left at 16G: no per-task RSS has ever been measured (the K=50 Phase-1 job
+ran a *single* task at `--mem=128G`), and lowering it on a guess risks an OOM mid-array.
+
+⚠ **`mine_round.sbatch` is deliberately not on this path.** It would add the 8-GPU scan legs
+(a)+(b), re-derive an FP manifest the repo already has committed, and require
+`STRUCTURAL_YIELD_ACK=1`. The supply run needs leg (c) alone, which the producer sbatch's own
+header documents as a standalone submit.
+
+**Commit.** *(this stanza's commit; squash SHA recorded at merge)*
