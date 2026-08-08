@@ -62,6 +62,7 @@ from tbox_finder.mining.spare_rule import (
 from tbox_finder.power import MIN_REAL_HOMOLOG_N
 
 __all__ = [
+    "candidate_id_of",
     "assert_covers_manifest",
     "ArchitectureRunConfig",
     "DEFAULT_CORPUS",
@@ -181,6 +182,10 @@ class ArchitectureRunConfig:
                 ("ncca_pairing_nt", self.ncca_pairing_nt),
                 ("bulge_min_nt", self.bulge_min_nt),
                 ("min_sequences", self.min_sequences),
+                # A non-positive D6 threshold silently DISABLES the short-Stem-I
+                # relaxation for every non-translational candidate (no extent is < 0), so
+                # candidates that depend on it resolve `failed` ⇒ MINED — fail-open.
+                ("stem_i_nt_threshold", self.stem_i_nt_threshold),
             )
             if int(value) < 1
         }
@@ -223,6 +228,21 @@ def read_manifest(path: str | Path) -> list[dict[str, Any]]:
     return [dict(r) for r in rows if isinstance(r, Mapping)]
 
 
+def candidate_id_of(row: Mapping[str, Any]) -> str:
+    """The candidate's id, read the SAME way everywhere.
+
+    ``evaluate_candidate`` accepted ``candidate_id`` or ``id``; ``assert_covers_manifest``
+    read ``candidate_id`` only. A manifest carrying just ``id`` therefore produced status
+    rows fine and then raised ``KeyError('candidate_id')`` at the coverage check — which
+    ``main`` catches and reports as ``FATAL: 'candidate_id'``, naming no fault at all. One
+    reader, so the two cannot drift.
+    """
+    cid = str(row.get("candidate_id") or row.get("id") or "")
+    if not cid:
+        raise ProducerError(f"manifest row carries no candidate_id: {dict(row)!r}")
+    return cid
+
+
 def candidate_msa_path(msa_dir: str | Path, candidate_id: str) -> Path:
     """Where the (a) producer's promoted consensus for ``candidate_id`` lives.
 
@@ -248,9 +268,7 @@ def evaluate_candidate(
     ``SS_cons``, unbalanced structure, depth below the A2 Pin 2 floor — resolves to
     ``unavailable`` ⇒ **spared** under ADR-0005 D14, never to ``failed`` ⇒ mined.
     """
-    candidate_id = str(candidate.get("candidate_id") or candidate.get("id") or "")
-    if not candidate_id:
-        raise ProducerError(f"manifest row carries no candidate_id: {dict(candidate)!r}")
+    candidate_id = candidate_id_of(candidate)
 
     msa = candidate_msa_path(msa_dir, candidate_id)
     row: dict[str, Any] = {"candidate_id": candidate_id, "msa_present": msa.is_file()}
@@ -357,7 +375,7 @@ def assert_covers_manifest(merged: Mapping[str, Any], manifest_path: str | Path)
     Exact equality, not coverage ≥ some fraction: an EXTRA candidate is as wrong as a
     missing one — it means the merge consumed a table from a different manifest.
     """
-    expected = {str(r["candidate_id"]) for r in read_manifest(manifest_path)}
+    expected = {candidate_id_of(r) for r in read_manifest(manifest_path)}
     produced = {str(k) for k in merged.get("status", {})}
     missing = sorted(expected - produced)
     extra = sorted(produced - expected)
@@ -592,6 +610,12 @@ def freeze_report(
     n_considered = 0
     n_discriminator_in_a_bulge = 0
     n_unparseable = 0
+    # Two different skips shrink the recovery denominator and they mean different things:
+    # a missing/ill-formed curated discriminator is a CURATION gap, while a discriminator
+    # that no flanked bulge contains is a LOCALIZER miss. Reported separately so the freeze
+    # states why its denominator is what it is rather than only what it is.
+    n_no_usable_discriminator = 0
+    n_discriminator_not_in_a_bulge = 0
     stem1: list[int] = []
 
     for rec in carved.itertuples(index=False):
@@ -624,6 +648,7 @@ def freeze_report(
             stem1.append(int(s1))
 
         if not isinstance(discrim, str) or len(discrim) != len(architecture.TRNA_ACCEPTOR_3PRIME):
+            n_no_usable_discriminator += 1
             continue
         # Anchor by exact subsequence — the coordinates do not index this frame.
         containing_bulge = None
@@ -641,6 +666,7 @@ def freeze_report(
                 containing_bulge, containing = bulge, residues
                 break
         if containing is None or containing_bulge is None:
+            n_discriminator_not_in_a_bulge += 1
             continue
         n_discriminator_in_a_bulge += 1
         sizes[len(containing)] += 1
@@ -676,6 +702,12 @@ def freeze_report(
             "n_structure_parseable": n_considered,
             "n_unparseable": n_unparseable,
             "n_with_discriminator_in_a_flanked_bulge": n_discriminator_in_a_bulge,
+            "n_skipped_no_usable_discriminator": n_no_usable_discriminator,
+            "n_skipped_discriminator_not_in_a_bulge": n_discriminator_not_in_a_bulge,
+            "skip_note": (
+                "the two skips are different facts: no usable discriminator is a CURATION "
+                "gap, a discriminator in no flanked bulge is a LOCALIZER miss"
+            ),
         },
         "bulge_size_nt": {
             "counts": {str(k): v for k, v in sorted(sizes.items())},
@@ -768,8 +800,14 @@ def derive_relaxed_arch_supply_available(*, repo_root: str | Path | None = None)
     try:
         from tbox_finder.mining.mine_round import candidate_evidence
 
+        # By KEYWORD: the broad `except` below would swallow the TypeError from a
+        # parameter reorder, so a positional call could make this clause fail closed for
+        # a reason that has nothing to do with the wiring it is meant to measure.
         stamped: Any = candidate_evidence(
-            probe_id, None, None, {probe_id: STATUS_PASSED}
+            probe_id,
+            covariation_status=None,
+            synteny_status=None,
+            relaxed_arch_status={probe_id: STATUS_PASSED},
         ).relaxed_architecture
     except Exception as exc:  # noqa: BLE001 - a broken round is a FAILED clause, not a crash
         # Deliberately broader than ImportError: a module-level failure anywhere in

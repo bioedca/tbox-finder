@@ -104,9 +104,12 @@
     "definition": "source == 'corpus' AND nested_role == 'heldout'",
     "join": "ingest.record_hash(master_clean row) == split.corpus_record_sha256",
     "n_records": 8715,
+    "n_skipped_discriminator_not_in_a_bulge": 18,
+    "n_skipped_no_usable_discriminator": 92,
     "n_structure_parseable": 8715,
     "n_unparseable": 0,
-    "n_with_discriminator_in_a_flanked_bulge": 8605
+    "n_with_discriminator_in_a_flanked_bulge": 8605,
+    "skip_note": "the two skips are different facts: no usable discriminator is a CURATION gap, a discriminator in no flanked bulge is a LOCALIZER miss"
   },
   "disclosure": "measured on CURATED structure, which is CM-derived: this is the localizer's sensitivity on known architecture, NOT the rate at which a de-novo consensus resolves one. The second number needs the full-corpus (a)/(b) supply run and is not claimed here.",
   "n_helices": {
@@ -186,8 +189,8 @@
       ],
       "pins_nothing": true
     },
-    "generated_at_utc": "2026-08-08T02:58:07.806230+00:00",
-    "git_sha": "0f39ced66187503450d24bd46e8d7c2e04d51fc8",
+    "generated_at_utc": "2026-08-08T04:16:58.487875+00:00",
+    "git_sha": "801d15293878516103f789a8c7b14990d150c765",
     "inputs": {},
     "outputs": {},
     "rule": "architecture_producer::freeze",

@@ -1364,5 +1364,93 @@ class TestRoundSevenGuards:
     def test_the_sbatch_merge_leg_passes_the_manifest(self) -> None:
         """The guard is worthless if the production leg does not invoke it."""
         sbatch = (REPO_ROOT / "slurm/p3/architecture_producer.sbatch").read_text(encoding="utf-8")
-        merge_call = sbatch.split("architecture_producer merge")[1][:200]
-        assert "--manifest" in merge_call and "$FP_MANIFEST" in merge_call
+        marker = "architecture_producer merge"
+        # Assert the marker FIRST: `split(...)[1]` raises IndexError when the leg is absent,
+        # which reports the wrong fault entirely. And slice to the next command boundary
+        # rather than an arbitrary 200 chars, or a longer invocation fails for the wrong
+        # reason.
+        assert marker in sbatch, f"the sbatch never invokes `{marker}`"
+        merge_call = sbatch.split(marker, 1)[1].split("\n\n", 1)[0]
+        assert "--manifest" in merge_call, "the merge leg does not pass --manifest"
+        assert "$FP_MANIFEST" in merge_call, "the merge leg does not pass the manifest variable"
+
+
+class TestRoundEightGuards:
+    """CodeRabbit r8 — five findings, all real."""
+
+    def test_one_candidate_id_reader_serves_both_call_sites(self, tmp_path: Path) -> None:
+        """A manifest carrying only `id` produced status rows fine and then raised
+        KeyError('candidate_id') at the coverage check — reported as `FATAL: 'candidate_id'`,
+        which names no fault."""
+        manifest = tmp_path / "m.json"
+        manifest.write_text(json.dumps({"candidates": [{"id": "c1"}]}), encoding="utf-8")
+        merged = architecture_producer.build_status_table([row("c1", STATUS_PASSED)], config=CONFIG)
+        # Both readers must agree that this manifest names "c1".
+        assert architecture_producer.candidate_id_of({"id": "c1"}) == "c1"
+        assert architecture_producer.candidate_id_of({"candidate_id": "c1"}) == "c1"
+        result = architecture_producer.assert_covers_manifest(merged, manifest)
+        assert result["covers_manifest"] is True
+
+    def test_a_row_with_neither_key_names_its_own_fault(self) -> None:
+        with pytest.raises(architecture_producer.ProducerError, match="no candidate_id"):
+            architecture_producer.candidate_id_of({"status": "passed"})
+
+    def test_a_non_positive_D6_threshold_refuses(self) -> None:
+        """It silently disables the short-Stem-I relaxation for every non-translational
+        candidate, so candidates depending on it resolve `failed` ⇒ MINED — fail-open."""
+        with pytest.raises(architecture_producer.ProducerError, match="stem_i_nt_threshold"):
+            architecture_producer.ArchitectureRunConfig(
+                stem_i_nt_threshold=0,
+                min_named_helices=2,
+                min_helix_pairs=1,
+                bulge_min_nt=5,
+                bulge_max_nt=9,
+                ncca_pairing_nt=4,
+            )
+
+    def test_the_wiring_probe_binds_its_status_maps_by_keyword(self) -> None:
+        """A positional call would mis-bind under a parameter reorder, and the broad
+        `except` would swallow the TypeError — the clause would fail closed for a reason
+        unrelated to the wiring it measures."""
+        import inspect
+
+        source = inspect.getsource(architecture_producer.derive_relaxed_arch_supply_available)
+        probe = source.split("candidate_evidence(", 1)[1].split(")", 1)[0]
+        assert "relaxed_arch_status=" in probe
+        assert "covariation_status=" in probe
+
+    def test_the_freeze_separates_its_two_skip_reasons(self, tmp_path: Path) -> None:
+        """A curation gap and a localizer miss both shrink the denominator and used to look
+        identical in the report."""
+        pd = pytest.importorskip("pandas")
+        pytest.importorskip("pyarrow")
+
+        from tbox_finder.ingest import record_hash
+
+        seq = "GCGGUGGCACCGCGAGUUCCCUUCUCGCCCGC"
+        ss = "((((.......(((((.......)))))))))"
+        frame = pd.DataFrame(
+            {
+                "Sequence": [seq, seq, seq],
+                "Structure": [ss, ss, ss],
+                # counted | curation gap (no discriminator) | localizer miss (not in a bulge)
+                "discriminator": ["UGGC", None, "AAAA"],
+                "type": ["Transcriptional"] * 3,
+                "stem1_length": [96, 96, 96],
+            }
+        )
+        corpus, splits = tmp_path / "c.parquet", tmp_path / "s.parquet"
+        frame.to_parquet(corpus)
+        digests = [record_hash(r) for r in frame.itertuples(index=False, name=None)]
+        pd.DataFrame(
+            {
+                "corpus_record_sha256": digests,
+                "source": ["corpus"] * 3,
+                "nested_role": ["heldout"] * 3,
+            }
+        ).to_parquet(splits)
+
+        carve = architecture_producer.freeze_report(corpus=corpus, split_table=splits)["carve"]
+        assert carve["n_with_discriminator_in_a_flanked_bulge"] == 1
+        assert carve["n_skipped_no_usable_discriminator"] == 1
+        assert carve["n_skipped_discriminator_not_in_a_bulge"] == 1
