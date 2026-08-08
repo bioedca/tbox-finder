@@ -102,8 +102,13 @@ class TestStockholmParsing:
             architecture.parse_stockholm(text)
 
     def test_duplicate_row_names_refuse_rather_than_collapsing(self) -> None:
-        """`names` keeps both while the dict merges, so n_sequences would OVERSTATE the
-        depth the ADR-0006 A2 floor is checked against."""
+        """⚠ This docstring used to claim `names` keeps both rows while the dict merges.
+        That is NOT the behaviour, and the inline comment below already said so — the two
+        contradicted each other. `read_pfam_alignment` accumulates by name, so two rows
+        sharing one CONCATENATE into a single entry and `names` carries one. The overstated
+        `n_sequences` it described cannot occur; see
+        `test_n_sequences_cannot_exceed_the_rows_actually_present` for the real invariant.
+        What this test pins is that the concatenation is REFUSED rather than accepted."""
         text = sto([("s1", ANTITERM_SEQ), ("s1", ANTITERM_SEQ)], ANTITERM_SS)
         # The delegate accumulates rows BY NAME, so two rows sharing one concatenate into a
         # double-width row and the ragged guard fires first. Either refusal is correct; what

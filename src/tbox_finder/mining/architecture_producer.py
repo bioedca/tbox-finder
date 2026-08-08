@@ -68,6 +68,7 @@ __all__ = [
     "DEFAULT_SPLIT_TABLE",
     "FREEZE_REPORT",
     "ProducerError",
+    "REQUIRED_CONFIG_KEYS",
     "SUPPLY_CLAUSES",
     "build_parser",
     "build_status_table",
@@ -111,6 +112,19 @@ DEFAULT_STATUS_TABLE = "architecture_status.json"
 #: would still merge, the round would still run, and the yield would read as an honest
 #: zero.  Importing it means a rename surfaces as an ImportError instead.
 MSA_FILENAME = _MSA_FILENAME
+
+
+#: The rule parameters every shard table's ``config`` must name.  Listed explicitly rather
+#: than derived from whatever keys a payload happens to carry: a required-key set read from
+#: its own evidence is vacuously satisfied exactly when the evidence is missing.
+REQUIRED_CONFIG_KEYS: tuple[str, ...] = (
+    "stem_i_nt_threshold",
+    "min_named_helices",
+    "min_helix_pairs",
+    "bulge_min_nt",
+    "bulge_max_nt",
+    "ncca_pairing_nt",
+)
 
 
 class ProducerError(RuntimeError):
@@ -358,13 +372,30 @@ def merge_status_tables(
         #       check as "" and then raises KeyError later; a SECOND such row reports
         #       "appears in more than one shard table", naming the wrong fault entirely.
         cfg = payload.get("config")
-        if not isinstance(cfg, Mapping) or not cfg:
+        missing_keys = (
+            [k for k in REQUIRED_CONFIG_KEYS if k not in cfg]
+            if isinstance(cfg, Mapping)
+            else list(REQUIRED_CONFIG_KEYS)
+        )
+        if not isinstance(cfg, Mapping) or not cfg or missing_keys:
             raise ProducerError(
-                f"{path}: shard table carries no 'config'; merging it would publish an "
-                "empty config over rows scored under real parameters"
+                f"{path}: shard table's 'config' is missing {missing_keys or 'entirely'}; "
+                "merging it would publish an incomplete config over rows scored under real "
+                "parameters, and an all-empty set would compare equal across shards"
             )
         configs.append(dict(cfg))
-        for row in payload.get("rows") or []:
+        shard_rows = payload.get("rows")
+        if not isinstance(shard_rows, list) or not shard_rows:
+            # ⚠ An EMPTY shard is the invisible loss. A dropped or truncated shard merges
+            # cleanly, every candidate it should have carried is simply absent from the
+            # merged table, and `mine_round` reads each absent candidate as `unavailable`
+            # ⇒ spared. The counts still reconcile against each other, so nothing in the
+            # report looks wrong — the round just quietly decided less than it claims.
+            raise ProducerError(
+                f"{path}: shard table carries no rows; a dropped shard would merge cleanly "
+                "and its candidates would silently read 'unavailable' ⇒ spared"
+            )
+        for row in shard_rows:
             if not isinstance(row, Mapping):
                 raise ProducerError(f"{path}: a row is {type(row).__name__}, not an object")
             cid = row.get("candidate_id")

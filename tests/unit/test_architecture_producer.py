@@ -917,7 +917,7 @@ class TestRoundTwoProducerGuards:
             json.dumps({"rows": [row("a", STATUS_PASSED)], "status": {"a": "passed"}}),
             encoding="utf-8",
         )
-        with pytest.raises(architecture_producer.ProducerError, match="no 'config'"):
+        with pytest.raises(architecture_producer.ProducerError, match="'config' is missing"):
             architecture_producer.merge_status_tables([path])
 
     def test_a_non_mapping_row_refuses_rather_than_raising_AttributeError(
@@ -1100,3 +1100,58 @@ class TestRoundFourGuards:
         derivation = architecture_producer.derive_relaxed_arch_supply_available(repo_root=REPO_ROOT)
         assert derivation["clauses"]["producer_status_wired"] is False
         assert derivation["available"] is False
+
+
+class TestAppReviewGuards:
+    """Findings the GitHub app raised that the CLI did not — the reason both paths run."""
+
+    def _table(self, tmp_path: Path, name: str, payload: dict) -> Path:
+        path = tmp_path / name
+        path.write_text(json.dumps(payload), encoding="utf-8")
+        return path
+
+    def test_a_shard_with_ZERO_ROWS_refuses_rather_than_merging_invisibly(
+        self, tmp_path: Path
+    ) -> None:
+        """The invisible loss: a dropped shard merges cleanly, its candidates are simply
+        absent, and each absent candidate reads `unavailable` ⇒ SPARED. Every count still
+        reconciles, so nothing in the report looks wrong."""
+        good = self._table(
+            tmp_path,
+            "a.json",
+            architecture_producer.build_status_table([row("a", STATUS_PASSED)], config=CONFIG),
+        )
+        empty = self._table(
+            tmp_path, "b.json", {"config": CONFIG.as_dict(), "rows": [], "status": {}}
+        )
+        with pytest.raises(architecture_producer.ProducerError, match="carries no rows"):
+            architecture_producer.merge_status_tables([good, empty])
+
+    def test_positive_control_two_non_empty_shards_merge(self, tmp_path: Path) -> None:
+        a = self._table(
+            tmp_path,
+            "a.json",
+            architecture_producer.build_status_table([row("a", STATUS_PASSED)], config=CONFIG),
+        )
+        b = self._table(
+            tmp_path,
+            "b.json",
+            architecture_producer.build_status_table([row("b", STATUS_FAILED)], config=CONFIG),
+        )
+        assert architecture_producer.merge_status_tables([a, b])["n_candidates"] == 2
+
+    @pytest.mark.parametrize("key", architecture_producer.REQUIRED_CONFIG_KEYS)
+    def test_a_config_missing_ONE_rule_key_refuses(self, tmp_path: Path, key: str) -> None:
+        """A non-empty but incomplete config would publish partial rule parameters over
+        rows scored under real ones. Each key broken ALONE."""
+        cfg = {k: v for k, v in CONFIG.as_dict().items() if k != key}
+        path = self._table(tmp_path, "a.json", {"config": cfg, "rows": [row("a", STATUS_PASSED)]})
+        with pytest.raises(architecture_producer.ProducerError, match=key):
+            architecture_producer.merge_status_tables([path])
+
+    def test_the_required_config_keys_are_all_really_produced(self) -> None:
+        """A required-key list naming something the producer never emits would refuse every
+        real shard; one naming nothing would be vacuous."""
+        emitted = set(CONFIG.as_dict())
+        assert set(architecture_producer.REQUIRED_CONFIG_KEYS) <= emitted
+        assert architecture_producer.REQUIRED_CONFIG_KEYS
