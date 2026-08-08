@@ -226,8 +226,11 @@ for i in $(seq 0 $((N_SHARDS - 1))); do
   TABLE_ARGS+=(--table "$SHARD_DIR/status_$i3.json")
 done
 
+# --manifest is REQUIRED here, not optional: without it a partial or substituted candidate
+# set merges cleanly and every absent candidate classifies `unavailable` => spared, so the
+# round decides less than it reports while every count still reconciles.
 PYTHONHASHSEED=0 python -m tbox_finder.mining.architecture_producer merge \
-  "${TABLE_ARGS[@]}" --out "$MERGED_OUT"
+  "${TABLE_ARGS[@]}" --manifest "$FP_MANIFEST" --out "$MERGED_OUT"
 
 # Read the artifact back through the CONSUMER, not the writer: the table is only useful if
 # the round accepts it, and `load_status_map` re-derives `status` from `rows` — a different

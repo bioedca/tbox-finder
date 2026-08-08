@@ -1291,3 +1291,78 @@ class TestRoundSixGuards:
         assert report["stem_i_extent_nt"]["max"] == 96
         # and the record was genuinely measured, not merely counted
         assert report["carve"]["n_with_discriminator_in_a_flanked_bulge"] == 1
+
+
+class TestRoundSevenGuards:
+    """CodeRabbit r7 — the corpus-level counterpart of the empty-shard refusal."""
+
+    def _manifest(self, tmp_path: Path, ids: list[str]) -> Path:
+        path = tmp_path / "m.json"
+        path.write_text(
+            json.dumps({"candidates": [{"candidate_id": i} for i in ids]}), encoding="utf-8"
+        )
+        return path
+
+    def _merged(self, ids: list[str]) -> dict:
+        return architecture_producer.build_status_table(
+            [row(i, STATUS_PASSED) for i in ids], config=CONFIG
+        )
+
+    def test_a_partial_merge_refuses(self, tmp_path: Path) -> None:
+        """Absent candidates classify `unavailable` ⇒ SPARED, so a partial merge decides
+        less than it reports — and every count still reconciles."""
+        manifest = self._manifest(tmp_path, ["a", "b", "c"])
+        with pytest.raises(architecture_producer.ProducerError, match="absent"):
+            architecture_producer.assert_covers_manifest(self._merged(["a", "b"]), manifest)
+
+    def test_an_EXTRA_candidate_refuses_too(self, tmp_path: Path) -> None:
+        """An extra id means the merge consumed a table from a different manifest, which
+        is as wrong as a missing one — hence exact equality, not coverage >= a fraction."""
+        manifest = self._manifest(tmp_path, ["a"])
+        with pytest.raises(architecture_producer.ProducerError, match="unexpected"):
+            architecture_producer.assert_covers_manifest(self._merged(["a", "z"]), manifest)
+
+    def test_positive_control_an_exact_cover_passes(self, tmp_path: Path) -> None:
+        manifest = self._manifest(tmp_path, ["a", "b"])
+        result = architecture_producer.assert_covers_manifest(self._merged(["a", "b"]), manifest)
+        assert result == {"n_expected": 2, "n_produced": 2, "covers_manifest": True}
+
+    def test_the_merge_cli_accepts_and_records_the_manifest_check(self, tmp_path: Path) -> None:
+        shard = tmp_path / "s.json"
+        shard.write_text(json.dumps(self._merged(["a"])), encoding="utf-8")
+        manifest = self._manifest(tmp_path, ["a"])
+        out = tmp_path / "merged.json"
+        assert (
+            architecture_producer.main(
+                ["merge", "--table", str(shard), "--manifest", str(manifest), "--out", str(out)]
+            )
+            == 0
+        )
+        payload = json.loads(out.read_text(encoding="utf-8"))
+        assert payload["coverage"]["covers_manifest"] is True
+        assert payload["provenance"]["extra"]["manifest_checked"] is True
+
+    def test_the_merge_cli_returns_one_on_a_partial_cover(self, tmp_path: Path) -> None:
+        shard = tmp_path / "s.json"
+        shard.write_text(json.dumps(self._merged(["a"])), encoding="utf-8")
+        manifest = self._manifest(tmp_path, ["a", "b"])
+        assert (
+            architecture_producer.main(
+                [
+                    "merge",
+                    "--table",
+                    str(shard),
+                    "--manifest",
+                    str(manifest),
+                    "--out",
+                    str(tmp_path / "o.json"),
+                ]
+            )
+            == 1
+        )
+
+    def test_the_sbatch_merge_leg_passes_the_manifest(self) -> None:
+        """The guard is worthless if the production leg does not invoke it."""
+        sbatch = (REPO_ROOT / "slurm/p3/architecture_producer.sbatch").read_text(encoding="utf-8")
+        merge_call = sbatch.split("architecture_producer merge")[1][:200]
+        assert "--manifest" in merge_call and "$FP_MANIFEST" in merge_call

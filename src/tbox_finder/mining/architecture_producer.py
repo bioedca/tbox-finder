@@ -62,6 +62,7 @@ from tbox_finder.mining.spare_rule import (
 from tbox_finder.power import MIN_REAL_HOMOLOG_N
 
 __all__ = [
+    "assert_covers_manifest",
     "ArchitectureRunConfig",
     "DEFAULT_CORPUS",
     "DEFAULT_FP_MANIFEST",
@@ -340,6 +341,34 @@ def build_status_table(
         "status": status,
         "rows": [dict(r) for r in rows],
     }
+
+
+def assert_covers_manifest(merged: Mapping[str, Any], manifest_path: str | Path) -> dict[str, Any]:
+    """Refuse a merged table whose candidate set is not EXACTLY the manifest's.
+
+    ``merge_status_tables`` checks each shard's internal consistency and refuses an empty
+    or duplicated shard, but nothing there compares the *result* against the corpus it was
+    supposed to cover. A partial or substituted candidate set therefore merges cleanly, and
+    every candidate that is absent classifies as ``unavailable`` ⇒ **spared** — the round
+    decides less than it claims while every count reconciles. This is the corpus-level
+    counterpart of the empty-shard refusal, and it is what ``stage2_producer``'s
+    ``--min-coverage`` does for the (a) leg.
+
+    Exact equality, not coverage ≥ some fraction: an EXTRA candidate is as wrong as a
+    missing one — it means the merge consumed a table from a different manifest.
+    """
+    expected = {str(r["candidate_id"]) for r in read_manifest(manifest_path)}
+    produced = {str(k) for k in merged.get("status", {})}
+    missing = sorted(expected - produced)
+    extra = sorted(produced - expected)
+    if missing or extra:
+        raise ProducerError(
+            f"the merged table does not cover {manifest_path}: "
+            f"{len(missing)} manifest candidate(s) absent (e.g. {missing[:5]}), "
+            f"{len(extra)} unexpected (e.g. {extra[:5]}). Absent candidates would classify "
+            "as 'unavailable' ⇒ spared, so a partial merge decides less than it reports"
+        )
+    return {"n_expected": len(expected), "n_produced": len(produced), "covers_manifest": True}
 
 
 def merge_status_tables(
@@ -958,6 +987,15 @@ def build_parser() -> argparse.ArgumentParser:
     merge = sub.add_parser("merge", help="concatenate shard tables into the status table")
     merge.add_argument("--table", action="append", required=True)
     merge.add_argument("--out", required=True)
+    merge.add_argument(
+        "--manifest",
+        default=None,
+        help=(
+            "refuse unless the merged candidate set is EXACTLY this manifest's; absent "
+            "candidates would classify 'unavailable' ⇒ spared and the round would decide "
+            "less than it reports"
+        ),
+    )
 
     freeze = sub.add_parser("freeze", help="D3's held-out-canonical measurement (pins nothing)")
     freeze.add_argument("--corpus", default=DEFAULT_CORPUS)
@@ -991,7 +1029,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.command == "merge":
             merged = merge_status_tables(args.table)
             validate_status_payload(merged, label="merged")
-            merged["provenance"] = _provenance("merge", args.table, merged["config"])
+            coverage = assert_covers_manifest(merged, args.manifest) if args.manifest else None
+            if coverage is not None:
+                merged["coverage"] = coverage
+            merged["provenance"] = _provenance(
+                "merge",
+                [*args.table, *([args.manifest] if args.manifest else [])],
+                {**merged["config"], "manifest_checked": bool(args.manifest)},
+            )
             _write(args.out, merged)
             print(f"{args.out}: {merged['n_candidates']} candidates {merged['status_counts']}")
             return 0
