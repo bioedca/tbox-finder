@@ -4686,3 +4686,47 @@ remains absent from `TIER2N_PROTECTIVE_DISJUNCTS` (D9 row 5), so a (b)-only roun
 refused at readiness; a test pins that building the backend did not change it.
 
 **Commit.** see PR.
+
+### P3-15′-d review addendum — 2026-08-08
+
+**Six rounds, 27 findings, every one real.** CLI r1 (2 major) · app r1 (**7** line comments) ·
+CLI r2 (**15** — 10 major, 5 minor) · CLI r3 (3) · CLI r4 (4 minor) · app r4 (1 minor) ·
+CLI r5 (2 minor). r6 was **rate-limited on both paths**, which is an *absence, not a pass*;
+Greptile was invoked as the §5.1a capacity fallback (budget 4 → 5 of 16).
+
+**⚠ The process error, twice, both mine: I judged a round from a truncated buffer.** On the
+r2 CLI I read the output *while it was still streaming*, saw one finding in the tail, and
+reported the round as handled — it had **15**. On the r1 app review I piped through
+`head -120` and read **3 of 7**. *Wait for the process to exit, then read the trailer's own
+count; never `head` a review, never judge one mid-stream.* Both were caught only by
+re-reading later, and both are recorded here because the cost was a false "handled".
+
+**⚠ The two paths disagreed, which is the whole argument for running both.** The app found
+two things the CLI never raised — the documented submit line that was unrunnable (six
+`${VAR:?}` parameters, one exported), and the best finding of the step: a shard table with
+**zero rows merged cleanly**, so a dropped shard is invisible — its candidates are simply
+absent, each absent candidate reads `unavailable` ⇒ **spared**, and every count still
+reconciles against every other. The CLI in turn found the vacuous supply clause and the
+inverted wobble test that the app's later rounds never repeated.
+
+**⚠ Four of my own tests were vacuous or wrong, and sabotage — not review — caught two.**
+`test_wobble_is_off_unless_asked_for` **asserted the inverted rule**; the recovery-share
+loop iterated a mapping that could be empty and would pass having checked nothing (the exact
+species this file names elsewhere, *in this file*); `test_the_committed_freeze_names_its_env
+_lock` read the **committed artifact**, so dropping `env_lock=` from the writer left it
+**green**; and one test name promised an exit code its body never exercised. One sabotage
+was itself malformed — it removed the guard *and* emptied the data, so its "leak" proved
+nothing. *A sabotage that breaks two things at once tests neither.*
+
+**⚠ "You fixed one of two identical things" fired five times** — `--relaxed-arch-status` in
+`mine_round` but not `remine`; the exit-4 preflight in `remine` but not `mine_round`; the
+row-shape guard in `merge_status_tables` but not `validate_status_payload`; the fail-closed
+probe locally but not through the `derive_msa_supply_available` delegation; and the
+`derivations[key]` lookup versus its hand-built test fixtures.
+
+**✅ The published numbers survived.** `ncca_recovery` was found scanning *every* bulge
+against a denominator counting only the located one. Re-derived with `target=`: only k=3
+moved (99.930 % → 99.884 %, 4 records). **k=4 = 99.87 %, modal bulge 7 nt, stem-I n = 8,578
+unchanged**, and the committed freeze re-derives byte-identically from the merged code apart
+from `provenance`. Final suite **5,097 passed**; sabotage totals 19/19 + 10/11 (the
+documented leak, relocated) + 3/3 + 5/5 + 2/2 + 1/1.
