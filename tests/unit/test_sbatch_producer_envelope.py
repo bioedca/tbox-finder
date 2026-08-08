@@ -68,11 +68,16 @@ _PIN_SIGNOFF = re.compile(
     r"\*\*Sign-off \(A10 Phase-2\):\*\*[^\n]*?"
     r"array width\s*(?P<width>\d+)\s*×\s*cpus-per-task\s*(?P<cpus>\d+)"
 )
-#: The ADR's own arithmetic for *why* the width is 48: "48 x 2 = 96 cores, no queueing" on
+#: The ADR's own arithmetic for *why* the width is 48: "48 × 2 = 96 cores, no queueing" on
 #: "one 96-core gpu-partition node".  Parsed so the pinned width is checked against the
 #: reason it was pinned rather than merely read and discarded.
+#:
+#: The ADR writes U+00D7; ASCII ``x`` is accepted too so a later prose normalisation is a
+#: non-event.  Either way the failure is fail-CLOSED — an unparseable sentence trips
+#: :func:`test_the_pinned_width_is_checked_against_the_reason_it_was_pinned`'s own
+#: not-None assertion rather than passing vacuously.
 _PIN_ARITHMETIC = re.compile(
-    r"All (?P<width>\d+) tasks run concurrently \((?P<w2>\d+)\s*×\s*(?P<cpus>\d+)\s*=\s*"
+    r"All (?P<width>\d+) tasks run concurrently \((?P<w2>\d+)\s*[x×]\s*(?P<cpus>\d+)\s*=\s*"
     r"(?P<cores>\d+) cores, no queueing\)"
 )
 #: An ``#SBATCH`` directive.  Short flags are matched too: ``#SBATCH -G 1`` is a GPU
@@ -144,24 +149,52 @@ def _leg_c_submit() -> str:
     width.
     """
     text = _read(ORCHESTRATOR)
-    leg_c = re.search(r"sbatch[^\n]*(?:\\\s*\n[^\n]*)*mine_round_producer\.sbatch", text)
-    assert leg_c is not None, (
-        "leg (c)'s submit of mine_round_producer.sbatch was not found in "
-        "mine_round.sbatch — every submit-line check would be vacuous"
+    # Comment lines are excluded rather than anchoring on "the line starts with sbatch":
+    # the real command starts `PRODUCER_JOB="$(sbatch …`, so a start-of-line anchor would
+    # match nothing and the "exactly one" assertion would fail on correct code.  This
+    # file's sibling sbatch documents a standalone submit *in a comment*, so a commented
+    # command is a realistic thing to accidentally validate instead of the executed one.
+    matches = [
+        m.group(0)
+        for m in re.finditer(r"sbatch[^\n]*(?:\\\s*\n[^\n]*)*?mine_round_producer\.sbatch", text)
+        if not text[text.rfind("\n", 0, m.start()) + 1 : m.start()].lstrip().startswith("#")
+    ]
+    assert len(matches) == 1, (
+        f"expected exactly one executable `sbatch … mine_round_producer.sbatch` in "
+        f"mine_round.sbatch, found {len(matches)}; with none every submit-line check is "
+        f"vacuous, and with several this file would certify only the first"
     )
-    return leg_c.group(0)
+    return matches[0]
 
 
 def _allocated_cpus(text: str) -> int:
-    """The producer's declared ``--cpus-per-task``, refusing an absent or bare directive.
+    """The producer's declared CPU allocation — one declaration, either spelling, valued.
 
     Both the pin check and the thread-headroom check need this number, and reading it
     twice by hand is how one of the two ends up without the guard.
+
+    Three things this cannot do, each of which would let the pin go unenforced:
+
+    * **read only the long spelling.**  :data:`_SBATCH` sees ``-c`` — a lookup keyed on
+      ``--cpus-per-task`` alone would call ``#SBATCH -c 2`` *missing*.
+    * **read through a dict.**  Two declarations of the same flag collapse to one key, so
+      a duplicate is invisible; sbatch applies the *later* one, which need not be the one
+      that matched the pin.
+    * **tolerate a mix of spellings.**  ``--cpus-per-task=2`` next to ``-c 4`` would
+      satisfy a long-form check while the job actually runs at 4.
     """
-    value = _directives(text).get("--cpus-per-task")
-    assert value is not None, (
-        "the producer array declares no --cpus-per-task value, so the cluster default "
-        "decides how many cores each nhmmer/mlocarna shard gets and the pin is unenforced"
+    declarations = [
+        (flag, value) for flag, value in _SBATCH.findall(text) if flag in ("--cpus-per-task", "-c")
+    ]
+    assert len(declarations) == 1, (
+        f"the producer array declares the CPU allocation {len(declarations)} times "
+        f"({declarations or 'not at all'}); none leaves the cluster default deciding, "
+        f"and several means sbatch applies the last one, not the one checked here"
+    )
+    flag, value = declarations[0]
+    assert value, (
+        f"{flag} is declared with no value; sbatch would reject the job and the pin "
+        f"would be unenforced"
     )
     return int(value)
 
@@ -372,6 +405,44 @@ def test_the_submit_line_patterns_see_short_flags():
             f"a partition pattern matched inside {embedded!r}; it would fire on "
             f"arguments that are not a partition"
         )
+
+
+def test_the_cpu_allocation_reader_handles_aliases_and_duplicates():
+    """Positive control for :func:`_allocated_cpus`'s three refusals.
+
+    Each leg is a *fabricated* header rather than the real file, so the control keeps
+    working when the real file is correct — which is exactly when a broken reader is
+    invisible.  Review r3 raised all three: ``-c`` read as missing, duplicates hidden by
+    a dict, and mixed spellings satisfying a long-form check while sbatch runs the other.
+    """
+    assert _allocated_cpus("#SBATCH -c 2\n") == 2, "the short alias must be read, not skipped"
+    assert _allocated_cpus("#SBATCH --cpus-per-task=2\n") == 2
+
+    for header, why in (
+        ("#SBATCH --mem=8G\n", "no declaration at all"),
+        ("#SBATCH --cpus-per-task=2\n#SBATCH --cpus-per-task=4\n", "a duplicate long form"),
+        ("#SBATCH --cpus-per-task=2\n#SBATCH -c 4\n", "mixed spellings; sbatch takes the last"),
+    ):
+        with pytest.raises(AssertionError):
+            _allocated_cpus(header)
+        assert why  # named for the failure message, not asserted on
+
+
+def test_the_leg_c_extractor_ignores_a_commented_submit():
+    """A commented command must not be certified in place of the executed one.
+
+    The sibling producer sbatch documents a standalone submit *in a comment*, so this is
+    a realistic mistake rather than a hypothetical.  The real leg (c) line begins
+    ``PRODUCER_JOB="$(sbatch …``, which is why the extractor filters comments instead of
+    anchoring on a line that starts with ``sbatch``.
+    """
+    submit = _leg_c_submit()
+    assert not submit.lstrip().startswith("#")
+    assert "mine_round_producer.sbatch" in submit
+    assert "ARRAY_WIDTH" in submit, (
+        "the extracted span is not leg (c)'s real command — it does not even mention the "
+        "width export the submit builds its --array from"
+    )
 
 
 def test_the_producer_array_runs_on_the_gpu_partition():
