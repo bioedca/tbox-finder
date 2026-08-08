@@ -79,10 +79,12 @@ _PIN_ARITHMETIC = re.compile(
 #: request that a ``--``-only pattern does not see at all, so the forbidden-directive
 #: check below would pass on a leg that had quietly acquired a GPU.
 _SBATCH = re.compile(r"^#SBATCH\s+(--?[A-Za-z0-9-]+)(?:[=\s]+(\S+))?\s*$", re.M)
-#: A ``--cpus-per-task`` passed on a ``sbatch`` command line inside another script.
-_SUBMIT_CPUS = re.compile(r"--cpus-per-task[=\s]+(\S+)")
-#: A ``--partition`` passed on a ``sbatch`` command line inside another script.
-_SUBMIT_PARTITION = re.compile(r"--partition[=\s]+(\S+)")
+#: ``--cpus-per-task`` **or its short form ``-c``** on an ``sbatch`` command line.  sbatch
+#: accepts both, so a pattern that reads only the long form certifies a submit line that
+#: can override the pin in one character.
+_SUBMIT_CPUS = re.compile(r"(?<![\w-])(?:--cpus-per-task|-c)[=\s]+(\S+)")
+#: ``--partition`` or its short form ``-p`` on an ``sbatch`` command line.
+_SUBMIT_PARTITION = re.compile(r"(?<![\w-])(?:--partition|-p)[=\s]+(\S+)")
 #: Every way an sbatch line can ask for a GPU.  ``--gres`` is only the one this repo
 #: happens to use; a submit line or header carrying any of the others would take an A4000
 #: for a CPU-only leg just as effectively.
@@ -93,6 +95,19 @@ _GPU_REQUEST_FLAGS: tuple[str, ...] = (
     "--gpus-per-socket",
     "--gpus-per-task",
     "-G",
+)
+#: Directives the producer array must never carry, **long and short spelling both**.
+#: sbatch's short forms are not aliases this file may ignore: ``-w`` pins a node just as
+#: ``--nodelist`` does, and ``-A``/``-q`` name an account/QOS that does not exist here.
+#: Listing only the long forms is the same blind spot ``-G`` had one round ago.
+_FORBIDDEN_DIRECTIVES: tuple[str, ...] = (
+    *_GPU_REQUEST_FLAGS,
+    "--nodelist",
+    "-w",
+    "--account",
+    "-A",
+    "--qos",
+    "-q",
 )
 
 
@@ -117,6 +132,24 @@ def _directives(text: str) -> dict[str, str | None]:
     reporting which directive is malformed.
     """
     return {flag: (value or None) for flag, value in _SBATCH.findall(text)}
+
+
+def _leg_c_submit() -> str:
+    """The single ``sbatch … mine_round_producer.sbatch`` command in the orchestrator.
+
+    Every check about how the producer is *submitted* must read this one span.  Scanning
+    the whole file instead lets an unrelated line elsewhere satisfy a check while leg (c)
+    itself does something else — which is exactly how a required ``ARRAY_WIDTH`` and a
+    dynamic ``--array`` can both be present while the producer is submitted with a literal
+    width.
+    """
+    text = _read(ORCHESTRATOR)
+    leg_c = re.search(r"sbatch[^\n]*(?:\\\s*\n[^\n]*)*mine_round_producer\.sbatch", text)
+    assert leg_c is not None, (
+        "leg (c)'s submit of mine_round_producer.sbatch was not found in "
+        "mine_round.sbatch — every submit-line check would be vacuous"
+    )
+    return leg_c.group(0)
 
 
 def _allocated_cpus(text: str) -> int:
@@ -208,14 +241,19 @@ def test_the_array_width_reaches_the_producer_only_through_a_required_export():
     tables, and every unprocessed candidate would resolve ``unavailable`` => spared:
     the round would decide less than it reports while every count still reconciled.
     """
-    text = _read(ORCHESTRATOR)
-    assert re.search(r'ARRAY_WIDTH="?\$\{ARRAY_WIDTH:\?', text), (
+    assert re.search(r'ARRAY_WIDTH="?\$\{ARRAY_WIDTH:\?', _read(ORCHESTRATOR)), (
         "mine_round.sbatch no longer requires ARRAY_WIDTH with no default; a defaulted "
         "width can silently under-run the array"
     )
-    assert re.search(r'--array="0-\$\(\(ARRAY_WIDTH - 1\)\)"', text), (
-        "leg (c) no longer builds its --array from ARRAY_WIDTH — the export and the "
-        "submitted width could then disagree"
+    # Read from leg (c)'s OWN command, not from the file at large: a dynamic --array
+    # somewhere else in the script would otherwise satisfy this while the producer is
+    # submitted with a literal or defaulted width.
+    submit = _leg_c_submit()
+    array = re.search(r"(?<![\w-])(?:--array|-a)[=\s]+(\S+)", submit)
+    assert array is not None, "leg (c) submits the producer array with no --array at all"
+    assert "ARRAY_WIDTH" in array.group(1), (
+        f"leg (c) submits --array={array.group(1)}, which does not derive from "
+        f"ARRAY_WIDTH — the required export and the submitted width could then disagree"
     )
 
 
@@ -263,13 +301,7 @@ def test_the_orchestrator_does_not_contradict_the_pin():
     value, not a fresh one.
     """
     _, pinned_cpus = _pin(_PIN_BULLET)
-    text = _read(ORCHESTRATOR)
-    leg_c = re.search(r"sbatch[^\n]*(?:\\\s*\n[^\n]*)*mine_round_producer\.sbatch", text)
-    assert leg_c is not None, (
-        "leg (c)'s submit of mine_round_producer.sbatch was not found in "
-        "mine_round.sbatch — this check would be vacuous"
-    )
-    submit = leg_c.group(0)
+    submit = _leg_c_submit()
     override = _SUBMIT_CPUS.search(submit)
     if override is not None:
         assert int(override.group(1)) == pinned_cpus, (
@@ -285,16 +317,16 @@ def test_the_orchestrator_does_not_contradict_the_pin():
             f"leg (c) submits the producer array with --partition={partition.group(1)}, "
             f"overriding the header; §9.2 forbids `compute` (= node `zero`, no GPU)"
         )
-    for flag in _GPU_REQUEST_FLAGS:
+    for flag in _FORBIDDEN_DIRECTIVES:
         assert not re.search(rf"(?<![\w-]){re.escape(flag)}[=\s]", submit), (
-            f"leg (c) submits the CPU-only producer array with {flag}, taking a scarce "
-            f"A4000 for a leg ADR-0005 A10 pins as CPU-only"
+            f"leg (c) submits the producer array with {flag}, overriding the header on a "
+            f"directive ADR-0005 A10 / CLAUDE.md §9.2 forbid for this leg"
         )
 
 
 #: ``--nodelist`` pins a node (§9.2: `one` is often down); ``--account``/``--qos`` do not
 #: exist here (accounting disabled); the GPU forms all take an A4000 A10 says not to take.
-@pytest.mark.parametrize("flag", (*_GPU_REQUEST_FLAGS, "--nodelist", "--account", "--qos"))
+@pytest.mark.parametrize("flag", _FORBIDDEN_DIRECTIVES)
 def test_the_producer_array_declares_no_forbidden_directive(flag: str):
     """A10: CPU-only (**no `--gres`**). CLAUDE.md §9.2/§13: never pin a node, no account/QOS.
 
@@ -320,6 +352,26 @@ def test_the_directive_parser_sees_short_flags():
         f"_SBATCH does not parse short flags; got {parsed}. The forbidden-directive "
         f"check would then be blind to `#SBATCH -G 1`."
     )
+
+
+def test_the_submit_line_patterns_see_short_flags():
+    """Positive control for the submit-line checks: ``-c 4`` overrides the pin too.
+
+    Without this, narrowing :data:`_SUBMIT_CPUS` / :data:`_SUBMIT_PARTITION` back to the
+    long spellings would leave a one-character override unassertable while the suite
+    stayed green — the same blind spot ``-G`` had in the headers.  The negative legs are
+    what make it a control rather than a restatement: a flag *embedded* in a longer token
+    must not match, or the checks would fire on unrelated arguments.
+    """
+    line = "sbatch --parsable -p compute -c 4 -a 0-7 x.sbatch"
+    assert _SUBMIT_CPUS.search(line).group(1) == "4"
+    assert _SUBMIT_PARTITION.search(line).group(1) == "compute"
+    for embedded in ("sbatch --export=ALL,MY-c=1 x.sbatch", "sbatch --no-p=2 x.sbatch"):
+        assert _SUBMIT_CPUS.search(embedded) is None or "-c" not in embedded.split()[1]
+        assert _SUBMIT_PARTITION.search(embedded) is None, (
+            f"a partition pattern matched inside {embedded!r}; it would fire on "
+            f"arguments that are not a partition"
+        )
 
 
 def test_the_producer_array_runs_on_the_gpu_partition():
