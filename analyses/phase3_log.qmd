@@ -4867,6 +4867,80 @@ changed"*, so nothing announced the loss. Snapshot the bytes to a scratch direct
 restore by `cp`; never restore a sabotage with `git checkout` while the step's own edits are
 uncommitted.
 
+**Commit.** *(this stanza's commit; squash SHA recorded at merge)*
+
+## Step P3-15′-e-ii — 2026-08-08: bound each mlocarna alignment so a pathological candidate is spared, not fatal
+
+**Inputs.** SLURM job 1205's surviving output on cluster scratch
+(`$HOME/tbox-scratch/round_p3_15_supply/status/status_{000..047}.json`, 47 shards ×
+20 rows, each row carrying `align_wall_s`, `aligned`, `msa_depth`, `n_homologs`) —
+read as the measurement that sizes the bound; `shards/shard_016.json`, the 20
+candidates the run never scored.
+
+**Process.** Job 1205 lost `shard_016` to the 12 h wall having completed **1 of its 8
+alignable candidates**: one `mlocarna` ran **6h11m of continuous CPU without
+finishing**. §9.3 step 8 recorded that as a stop-and-ask, and the chosen remedy was a
+**per-alignment bound**, not a longer wall. `homolog_db._run` gained a keyword
+`timeout_s` (`None` = the pre-existing unbounded behaviour, so the certified job-741 /
+job-766 search and index paths run byte-identically); its bounded arm runs the child
+via `Popen(start_new_session=True)` and `SIGKILL`s the **whole process group** on
+expiry. That last detail is the load-bearing one: `subprocess.run(timeout=…)` reaps
+only the process it spawned, and `mlocarna` is a Perl driver that dispatches `locarna`
+workers (`--threads` is a real parallelism knob, LocARNA docs via `context7`), so a
+plain timeout would orphan those workers and leave the node's cores burning — bounded
+on paper, unbounded in fact. `_kill_process_group` refuses to signal its **own** group,
+so a future edit dropping `start_new_session` degrades to killing the child rather than
+`SIGKILL`ing the SLURM array task itself. The bound threads
+`align_candidate(timeout_s=)` → `align_shard(align_timeout_s=)` **keyword-required with
+no default** (the ADR-0006 A4 rule-parameter shape) → CLI `--align-timeout-s
+required=True` → `${ALIGN_TIMEOUT_S:?}` in all three sbatch files that align. A
+timed-out alignment is recorded `reason="align_timeout"` — distinct from `align_failed`
+and `insufficient_homologs`, because all three spare but only this one is a consequence
+of a knob this run chose — and `_discard_msa` makes "a failed align leaves no MSA" true
+**by construction**: the promote block tests `[ -s …/msa.sto ]`, not this run's verdict,
+so a stale consensus under a re-used workdir would be promoted and scored as de-novo
+output this run never produced (§10.3).
+
+**Outputs.** `src/tbox_finder/mining/homolog_db.py` (`ToolTimeoutError`, `_run(timeout_s=)`,
+`_run_bounded`, `_kill_process_group`) · `homolog_msa.align_candidate(timeout_s=)` ·
+`covariation_producer.align_shard(align_timeout_s=)` + `_discard_msa` + the CLI flag ·
+`slurm/p2/mine_round_producer.sbatch`, `mine_round.sbatch` (leg (c) export **and**
+forward), `mine_round_measure.sbatch` · `tests/unit/test_align_timeout.py` (33 tests).
+
+**Validation.** `tests/unit` + `tests/golden` under deterministic ordering
+(`-p no:randomly`): **zero new failures** vs a matched `main` baseline at `0a57017`
+(worktree 13 FAILED, main 26, worktree ⊂ main); the 13-test delta is `test_coverage_sim`
++ `test_selection_val` **skipping** on unmaterialised DVC inputs in the worktree, the
+same delta P3-15′-e recorded. **18 sabotages, all RED against their named test** after
+one was strengthened (below). `bash -n` clean on all three sbatch files; ruff + black
+clean.
+
+**Decisions.** **The bound is 600 s, derived from the run's own distribution rather than
+guessed.** Across the 272 alignments that succeeded in the 47 surviving shards: median
+**8.5 s**, p95 **35.4 s**, p99 **165.2 s**, second-largest **352.7 s** (depth 232), largest
+**8500.2 s** (depth 844). The distribution has a **24× gap** between the second-slowest and
+the slowest, so *any* bound in [353 s, 8500 s) admits exactly the same 271 alignments and
+rejects exactly the same one — 600 s is 1.7× the slowest alignment that ever finished
+cleanly and caps a 20-candidate shard at 3.3 h against a 12 h wall. Runtime tracks MSA
+depth, which is ADR-0005 A10 Pin 2's own *"LocARNA scaling caveat"* made quantitative.
+⚠ **That one 8500 s alignment is 69 % of all align wall-clock in the corpus** (3.41 h
+total across 47 shards) — the tail is not a nuisance, it is the cost. ⚠ **The re-run
+therefore scores `shard_016` under a stricter producibility bar than the other 47
+shards.** That asymmetry is disclosed, not hidden: a bound can only turn `passed`/`failed`
+into `unavailable` ⇒ **spared**, and mining is a conjunction, so it costs yield and never
+correctness. ⚠ **`mine_round_measure.sbatch` is now right-censored at the bound** — the job
+that exists to *measure* the wall distribution can no longer observe a tail beyond it, so
+any envelope derived from it is a **lower bound**. Documented in that file; this is
+precisely how A10 Pin 2 came to price a round from a K=50 sample whose max align was
+47.5 s. Amending A10's envelope remains a §7 item-2 sign-off, **not taken**.
+
+**Sabotage note — one of my own tests could not tell threading from a constant.** S14
+(the CLI parses `--align-timeout-s` and then passes a hardcoded `600.0`) stayed **green**,
+because the test asserted `600.0` — the same value the sabotage hardcodes. Re-written to
+assert two distinct non-round values (`137.5`, `911`), it goes red. A pass-through test
+must vary its input; equality against a plausible constant proves nothing
+([[pinned-constant-that-nothing-reads]]).
+
 **Review — four rounds, 11 findings, every one real; two of my own tests were wrong.**
 Counts **6 (3 major) → 2 → 2 → 1**, across the CodeRabbit CLI (r1–r3) and the GitHub
 app, which reviewed unasked, so §5.1's automatic-review setting is **ENABLED** — a
@@ -4905,4 +4979,4 @@ document their own commands at length, so any byte-level check on them must firs
 what a *command* is. Related: [[fixed-one-of-two-identical-things]],
 [[artifact-pinning-test-cannot-see-the-code]].
 
-**Commit.** *(this stanza's commit; squash SHA recorded at merge)*
+**Commit.** `squash 2f7849a on main (PR #117)` — plus this stanza's own follow-up commit.
