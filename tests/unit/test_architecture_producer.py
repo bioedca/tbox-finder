@@ -1181,17 +1181,113 @@ class TestRoundFiveGuards:
         assert derivation["clauses"]["freeze_provenance_names_its_inputs"] is False
         assert derivation["available"] is False
 
-    def test_a_numpy_integer_stem1_length_is_counted(self) -> None:
-        """On an integer-dtype column `itertuples` yields np.int64, which is not a Python
-        `int` — the narrower check silently dropped every value."""
+    def test_a_numpy_integer_would_also_be_accepted(self) -> None:
+        """Not the active path — `itertuples` yields a Python int here, measured — but the
+        numpy-scalar behaviour is version-dependent and `Real` is correct under either.
+        This asserts only that the WIDER predicate admits it and still rejects bool."""
         np = pytest.importorskip("numpy")
         from numbers import Real
 
-        value = np.int64(96)
-        assert not isinstance(value, int)
-        assert isinstance(value, Real) and not isinstance(value, bool)
+        assert isinstance(np.int64(96), Real)
+        assert isinstance(True, Real)  # which is exactly why bool is excluded explicitly
 
-    def test_a_bool_is_still_excluded(self) -> None:
-        from numbers import Real
 
-        assert isinstance(True, Real)  # which is exactly why bool must be excluded
+class TestRoundSixGuards:
+    """CodeRabbit r6 — the last round's findings, all exercising a REAL path."""
+
+    def test_a_DNA_spelled_discriminator_is_still_counted_by_the_freeze(
+        self, tmp_path: Path
+    ) -> None:
+        """⚠ The first version of this asserted string properties in ISOLATION and stayed
+        green under sabotage of the producer — the anti-pattern this whole step is about.
+        It now goes through `freeze_report`, so un-normalising the needle drops the record
+        from the carve and the assertion fails.
+
+        `degapped_span` maps T→U on the haystack; a DNA-spelled discriminator that is not
+        normalised the same way silently fails the substring test, the record is skipped,
+        and the freeze's DENOMINATOR shrinks with nothing raising.
+        """
+        pd = pytest.importorskip("pandas")
+        pytest.importorskip("pyarrow")
+
+        from tbox_finder.ingest import record_hash
+
+        frame = pd.DataFrame(
+            {
+                "Sequence": ["GCGGUGGCACCGCGAGUUCCCUUCUCGCCCGC"],
+                "Structure": ["((((.......(((((.......)))))))))"],
+                "discriminator": ["TGGC"],  # DNA spelling of the same element
+                "type": ["Transcriptional"],
+                "stem1_length": [96],
+            }
+        )
+        corpus, splits = tmp_path / "c.parquet", tmp_path / "s.parquet"
+        frame.to_parquet(corpus)
+        digest = record_hash(next(frame.itertuples(index=False, name=None)))
+        pd.DataFrame(
+            {
+                "corpus_record_sha256": [digest],
+                "source": ["corpus"],
+                "nested_role": ["heldout"],
+            }
+        ).to_parquet(splits)
+
+        report = architecture_producer.freeze_report(corpus=corpus, split_table=splits)
+        assert report["carve"]["n_with_discriminator_in_a_flanked_bulge"] == 1
+
+    def test_the_none_derivation_branch_of_the_predicate(self) -> None:
+        """`(derivation or {})` handles a null derivation; replacing it with
+        `derivation.get(...)` would raise AttributeError and no test would turn red."""
+        assert remine.supply_declaration_unevidenced(declared=True, derivation=None) is True
+        assert remine.supply_declaration_unevidenced(declared=False, derivation=None) is False
+
+    def test_derive_supply_exits_zero_even_when_the_supply_is_unavailable(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+    ) -> None:
+        """`derive-supply` REPORTS; it does not gate. Exit 1 is reserved for handled
+        exceptions, so an honest `available: false` must still exit 0."""
+        monkeypatch.setattr(
+            architecture_producer,
+            "derive_relaxed_arch_supply_available",
+            lambda **_: {"available": False, "clauses": {}, "reasons": ["nothing staged"]},
+        )
+        assert architecture_producer.main(["derive-supply"]) == 0
+        assert '"available": false' in capsys.readouterr().out
+
+    def test_freeze_report_counts_an_INTEGER_DTYPE_stem1_length_column(
+        self, tmp_path: Path
+    ) -> None:
+        """Exercises the freeze_report loop itself, not just np.int64/Real semantics.
+        ⚠ The review claimed `itertuples` yields np.int64 here and that the narrower check
+        dropped values. MEASURED: it yields a plain Python `int`, so that claim is FALSE and
+        the committed report was never wrong. This test is kept because it pins the real
+        contract — an integer-dtype column IS counted — which holds under either type."""
+        pd = pytest.importorskip("pandas")
+        pytest.importorskip("pyarrow")
+
+        from tbox_finder.ingest import record_hash
+
+        frame = pd.DataFrame(
+            {
+                "Sequence": ["GCGGUGGCACCGCGAGUUCCCUUCUCGCCCGC"],
+                "Structure": ["((((.......(((((.......)))))))))"],
+                "discriminator": ["UGGC"],
+                "type": ["Transcriptional"],
+                "stem1_length": pd.Series([96], dtype="int64"),
+            }
+        )
+        assert frame["stem1_length"].dtype == "int64"
+        corpus = tmp_path / "c.parquet"
+        splits = tmp_path / "s.parquet"
+        frame.to_parquet(corpus)
+        digest = record_hash(next(frame.itertuples(index=False, name=None)))
+        pd.DataFrame(
+            {"corpus_record_sha256": [digest], "source": ["corpus"], "nested_role": ["heldout"]}
+        ).to_parquet(splits)
+
+        report = architecture_producer.freeze_report(corpus=corpus, split_table=splits)
+        assert report["stem_i_extent_nt"]["n"] == 1
+        assert report["stem_i_extent_nt"]["min"] == 96
+        assert report["stem_i_extent_nt"]["max"] == 96
+        # and the record was genuinely measured, not merely counted
+        assert report["carve"]["n_with_discriminator_in_a_flanked_bulge"] == 1

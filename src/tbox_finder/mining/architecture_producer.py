@@ -581,11 +581,16 @@ def freeze_report(
         for k in helix_counts:
             helix_counts[k][len(architecture.find_helices(pairs, min_pairs=k))] += 1
         s1 = getattr(rec, "stem1_length", None)
-        # `numbers.Real`, not `(int, float)`: on an integer-dtype column `itertuples`
-        # yields `np.int64`, which is NOT a Python `int`, so the narrower check silently
-        # DROPPED every value and the extent range would read as if the column were empty.
-        # The current corpus happens to yield floats (the column carries NaN), which is why
-        # the committed report has 8,578 values — a latent fault, not an active one.
+        # `numbers.Real` rather than `(int, float)`.
+        # ⚠ THE REVIEW'S STATED REASON FOR THIS WAS WRONG, and the correction is recorded
+        # here rather than quietly kept. The claim was that `itertuples` yields `np.int64`
+        # on an integer-dtype column, so the narrower check would silently drop every
+        # value. MEASURED on this pandas: `itertuples` yields a plain Python `int` for both
+        # mixed- and homogeneous-dtype frames, so `(int, float)` was never dropping
+        # anything and the committed report was never wrong.
+        # It is kept anyway because it is strictly more permissive and costs nothing: the
+        # numpy-scalar behaviour IS version-dependent, and `Real` is correct under either.
+        # `bool` must be excluded explicitly — `bool` IS a `Real`.
         if isinstance(s1, Real) and not isinstance(s1, bool) and not pd.isna(s1) and int(s1) > 0:
             stem1.append(int(s1))
 
@@ -594,9 +599,16 @@ def freeze_report(
         # Anchor by exact subsequence — the coordinates do not index this frame.
         containing_bulge = None
         containing = None
+        # ⚠ Normalise the needle the SAME way `degapped_span` normalises the haystack.
+        # Review flagged a one-sided `.upper()`; that specific claim is wrong — the helper
+        # already upper-cases — but the asymmetry is real in the other dimension: the helper
+        # also maps T→U, and the discriminator did not. A DNA-alphabet discriminator would
+        # therefore never match, the record would be skipped silently, and the freeze's
+        # DENOMINATOR would quietly shrink rather than anything raising.
+        needle = discrim.upper().replace("T", "U")
         for bulge in architecture.find_bulges(pairs):
             residues = architecture.degapped_span(seq, bulge.start, bulge.end)
-            if discrim.upper() in residues:
+            if needle in residues:
                 containing_bulge, containing = bulge, residues
                 break
         if containing is None or containing_bulge is None:
