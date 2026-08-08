@@ -1155,3 +1155,43 @@ class TestAppReviewGuards:
         emitted = set(CONFIG.as_dict())
         assert set(architecture_producer.REQUIRED_CONFIG_KEYS) <= emitted
         assert architecture_producer.REQUIRED_CONFIG_KEYS
+
+
+class TestRoundFiveGuards:
+    """CodeRabbit r5 — two minors, both about a shape being an INPUT rather than an
+    invariant."""
+
+    def test_a_scalar_provenance_inputs_fails_closed_not_TypeError(self, tmp_path: Path) -> None:
+        """`len()` on a number raises TypeError, which `main` does not catch — the leg
+        would exit with a traceback instead of the FATAL / exit 1 contract."""
+        for _, rel in architecture_producer.SUPPLY_CLAUSES:
+            target = tmp_path / rel
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text("x", encoding="utf-8")
+        (tmp_path / architecture_producer.FREEZE_REPORT).write_text(
+            json.dumps(
+                {
+                    "carve": {"n_with_discriminator_in_a_flanked_bulge": 8605},
+                    "provenance": {"inputs": 5, "env_lock_hash": "aa", "git_sha": "bb"},
+                }
+            ),
+            encoding="utf-8",
+        )
+        derivation = architecture_producer.derive_relaxed_arch_supply_available(repo_root=tmp_path)
+        assert derivation["clauses"]["freeze_provenance_names_its_inputs"] is False
+        assert derivation["available"] is False
+
+    def test_a_numpy_integer_stem1_length_is_counted(self) -> None:
+        """On an integer-dtype column `itertuples` yields np.int64, which is not a Python
+        `int` — the narrower check silently dropped every value."""
+        np = pytest.importorskip("numpy")
+        from numbers import Real
+
+        value = np.int64(96)
+        assert not isinstance(value, int)
+        assert isinstance(value, Real) and not isinstance(value, bool)
+
+    def test_a_bool_is_still_excluded(self) -> None:
+        from numbers import Real
+
+        assert isinstance(True, Real)  # which is exactly why bool must be excluded

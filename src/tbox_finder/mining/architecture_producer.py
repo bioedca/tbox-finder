@@ -48,6 +48,7 @@ import sys
 from collections import Counter
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from numbers import Real
 from pathlib import Path
 from typing import Any
 
@@ -580,7 +581,12 @@ def freeze_report(
         for k in helix_counts:
             helix_counts[k][len(architecture.find_helices(pairs, min_pairs=k))] += 1
         s1 = getattr(rec, "stem1_length", None)
-        if isinstance(s1, (int, float)) and not pd.isna(s1) and int(s1) > 0:
+        # `numbers.Real`, not `(int, float)`: on an integer-dtype column `itertuples`
+        # yields `np.int64`, which is NOT a Python `int`, so the narrower check silently
+        # DROPPED every value and the extent range would read as if the column were empty.
+        # The current corpus happens to yield floats (the column carries NaN), which is why
+        # the committed report has 8,578 values — a latent fault, not an active one.
+        if isinstance(s1, Real) and not isinstance(s1, bool) and not pd.isna(s1) and int(s1) > 0:
             stem1.append(int(s1))
 
         if not isinstance(discrim, str) or len(discrim) != len(architecture.TRNA_ACCEPTOR_3PRIME):
@@ -760,13 +766,22 @@ def derive_relaxed_arch_supply_available(*, repo_root: str | Path | None = None)
     provenance = provenance if isinstance(provenance, Mapping) else {}
     extra = provenance.get("extra")
     extra = extra if isinstance(extra, Mapping) else {}
+
     # ⚠ The corpus and the split table are DVC-tracked and are NOT materialized in a
     # worktree, so the freeze reads them by absolute path from the main checkout and
     # `_split_inputs` records them as sha256'd ``external_inputs`` rather than as
     # repo-relative ``inputs``. Either form satisfies the contract — the hashed form is
     # strictly MORE traceable, since a reader can verify the bytes without knowing where
     # they sat. What must never pass is a report that names NEITHER.
-    named_inputs = len(provenance.get("inputs") or ()) + len(extra.get("external_inputs") or ())
+    # ⚠ `len()` accepts only sized objects, and the freeze report is an on-disk artifact
+    # written by another process — its shape is an INPUT, not an invariant, the same
+    # reasoning `merge_status_tables` states. A scalar `inputs` would raise TypeError out
+    # of a function documented as fail-closed on every clause, and `main` does not catch
+    # TypeError, so `derive-supply` would exit with a traceback instead of FATAL / exit 1.
+    def _n_named(value: Any) -> int:
+        return len(value) if isinstance(value, (Mapping, list, tuple)) else 0
+
+    named_inputs = _n_named(provenance.get("inputs")) + _n_named(extra.get("external_inputs"))
     clauses["freeze_provenance_names_its_inputs"] = bool(
         named_inputs > 0 and provenance.get("env_lock_hash") and provenance.get("git_sha")
     )
