@@ -56,7 +56,10 @@
 #   #   REAL split table by rsync from the laptop AFTER the reset (which reverts it to the pointer):
 #   #     rsync -avzP data/processed/splits/split_assignments.parquet two:~/tbox-finder/data/processed/splits/
 #   # …create the two envs (above); stage the checkpoint + genome dirs + homolog DB (see INPUT)…
-#   ssh two 'bash -lc "cd ~/tbox-finder && sbatch slurm/p2/mine_round_measure.sbatch"'
+#   # ⚠ ALIGN_TIMEOUT_S is REQUIRED (`:?` below) and `--test-only` validates headers only, so it
+#   #   catches nothing here. It also CENSORS this measurement — see the note at its declaration.
+#   ssh two 'bash -lc "cd ~/tbox-finder && sbatch \
+#     --export=ALL,ALIGN_TIMEOUT_S=600 slurm/p2/mine_round_measure.sbatch"'
 # PREFLIGHT: ssh two 'bash -lc "cd ~/tbox-finder && sbatch --test-only slurm/p2/mine_round_measure.sbatch"'
 # INPUT (staged by rsync — the ml/cluster checkout carries no DVC data):
 #   rsync -avzP data/processed/checkpoints/stage1_production/ two:~/tbox-finder/data/processed/checkpoints/stage1_production/
@@ -112,6 +115,28 @@ CTRL_MAX_TARGET_SEQS="500"
 CTRL_MIN_PIDENT="40"   # ignored on the nhmmer path; kept for the CLI-required arg
 CTRL_MIN_COV="0.5"
 K_SAMPLE="50"          # A10 Pin 1 bounded sample (K >= 50); accession-sorted, deterministic
+
+# ⚠ THE ALIGN BOUND CENSORS THE MEASUREMENT THIS JOB EXISTS TO MAKE — required, no default, so the
+# operator names the censoring point rather than inheriting one. `align-shard` bounds each mlocarna
+# call (P3-15'-e-ii); any candidate exceeding ALIGN_TIMEOUT_S is recorded `align_timeout` with no
+# MSA, so its true align wall is *right-censored* and every envelope derived downstream (core-h,
+# wall/round) is a LOWER BOUND, not an estimate. This is not hypothetical: A10 Pin 2 priced the
+# round from a K=50 sample whose max align was 47.5 s, and the full corpus then produced a single
+# 8500 s alignment (depth 844) — 69 % of all align wall-clock in one candidate. Read any report
+# this job writes as "≥", and re-derive the envelope from a completed full run, not from here.
+ALIGN_TIMEOUT_S="${ALIGN_TIMEOUT_S:?set ALIGN_TIMEOUT_S (per-candidate mlocarna bound, s) via --export — it censors this measurement; see the note above}"
+# ⚠ `:?` REJECTS ONLY AN ABSENT OR EMPTY VALUE, NOT A MALFORMED ONE. Without this, `60o` or `abc`
+# travels all the way into the producer task and is caught by argparse only AFTER that task has
+# spent its ~37 min search stage — and, from the orchestrator, after the 8-GPU scan legs. Shape
+# first (digits with at most one dot), then reject a numeric zero: a zero bound times out EVERY
+# alignment, and because a timeout SPARES rather than fails that would read as a clean,
+# producible-nothing round. Stripping `0` and `.` leaves nothing iff the value is zero.
+case "$ALIGN_TIMEOUT_S" in
+  ''|*[!0-9.]*|.|*.*.*) echo "FATAL: ALIGN_TIMEOUT_S must be a positive number of seconds (got '$ALIGN_TIMEOUT_S')" >&2; exit 2 ;;
+esac
+if [ -z "${ALIGN_TIMEOUT_S//[0.]/}" ]; then
+  echo "FATAL: ALIGN_TIMEOUT_S must be > 0 (got '$ALIGN_TIMEOUT_S'); a zero bound spares every candidate" >&2; exit 2
+fi
 
 # NOTE: name this JOB_SCRATCH, never BUILD/HOST — `conda activate tbox-ml-dna` (the compiler
 # toolchain) exports BUILD=HOST=x86_64-conda-linux-gnu, which would clobber a $BUILD scratch path
@@ -196,7 +221,8 @@ command -v mlocarna >/dev/null || { echo "FATAL: mlocarna not on PATH — tbox-l
 MLOCARNA_VERSION="$(mlocarna --version 2>&1 || true)"
 echo "$MLOCARNA_VERSION" | grep -q "LocARNA 2.0.1" || { echo "FATAL: mlocarna != LocARNA 2.0.1 (ADR-0002 A13): $MLOCARNA_VERSION" >&2; exit 2; }
 PYTHONHASHSEED=0 PYTHONPATH=src python -m tbox_finder.mining.covariation_producer align-shard \
-  --shard "$JOB_SCRATCH/sample.json" --workroot "$JOB_SCRATCH/work" --cpu 2
+  --shard "$JOB_SCRATCH/sample.json" --workroot "$JOB_SCRATCH/work" --cpu 2 \
+  --align-timeout-s "$ALIGN_TIMEOUT_S"
 
 # ── PRODUCE Stage 3: SCORE (tbox-rscape) ──────────────────────────────────────────────────────────
 conda activate tbox-rscape

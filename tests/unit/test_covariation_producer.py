@@ -195,7 +195,7 @@ def test_align_shard_skips_insufficient_homologs(tmp_path: Path):
     wd.mkdir(parents=True, exist_ok=True)
     # The search stage found too few homologs → align_shard skips WITHOUT calling mlocarna.
     (wd / "search.json").write_text('{"sufficient": false}', encoding="utf-8")
-    rows = cp.align_shard([spec], workroot=tmp_path / "work")
+    rows = cp.align_shard([spec], workroot=tmp_path / "work", align_timeout_s=600.0)
     assert rows[0]["aligned"] is False and rows[0]["reason"] == "insufficient_homologs"
     assert not (wd / "msa.sto").exists()  # no MSA ⇒ the score stage reads unavailable ⇒ spared
 
@@ -214,7 +214,7 @@ def test_align_shard_records_align_failure_without_raising(
     # A per-candidate alignment failure is RECORDED aligned=False, never raised — the same
     # fail-closed reason the score stage then reads as unavailable (⇒ spared), never mined.
     monkeypatch.setattr(cp, "align_candidate", _boom)
-    rows = cp.align_shard([spec], workroot=tmp_path / "work")
+    rows = cp.align_shard([spec], workroot=tmp_path / "work", align_timeout_s=600.0)
     assert rows[0]["aligned"] is False and rows[0]["reason"] == "align_failed"
     assert not (wd / "msa.sto").exists()
 

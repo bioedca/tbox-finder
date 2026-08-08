@@ -4867,4 +4867,42 @@ changed"*, so nothing announced the loss. Snapshot the bytes to a scratch direct
 restore by `cp`; never restore a sabotage with `git checkout` while the step's own edits are
 uncommitted.
 
+**Review — four rounds, 11 findings, every one real; two of my own tests were wrong.**
+Counts **6 (3 major) → 2 → 2 → 1**, across the CodeRabbit CLI (r1–r3) and the GitHub
+app, which reviewed unasked, so §5.1's automatic-review setting is **ENABLED** — a
+detected value, not a remembered one. ⚠ The `CodeRabbit` PR check read **`pass` with a
+body of only *"Review limit reached"*** throughout: §5.1's trap, an **absence, not a
+pass**. Three findings changed shipped behaviour: a **`nan` bound** slipped past the
+`timeout_s <= 0` guard (every comparison against `nan` is False), so the bound would
+have been *declared, recorded in provenance, and inert* — the unbounded behaviour that
+lost shard 016, wearing the fix's clothes; the **`insufficient_homologs` branch** never
+discarded a stale MSA, so I had fixed **two of three** spare branches; and the
+**post-kill pipe drain was unbounded**, meaning a grandchild that escaped the killed
+group could hang `communicate()` forever — an unbounded wait inside the code path whose
+job is to bound one. The app's round added the one the shell owed: **`${VAR:?}` rejects
+an absent value, not a malformed one**, so `60o` reached argparse only after the search
+stage (and, from the orchestrator, after the 8-GPU scan legs); all three sbatch files now
+check shape and reject a numeric zero, tested by **executing the shipped bytes** rather
+than a retyped equivalent.
+
+**⚠ ONE REVIEW-SUGGESTED FIX WAS WRONG, AND SAYING SO MATTERED.** r3's finding — that
+the documented-submit check asserted against a *concatenation* and so could pass on prose
+— was correct, and verified by counterfactual (the sabotage is RED now and was **GREEN**
+before). Its proposed remedy, "require the export in every block containing `.sbatch`",
+would have **failed on the correct tree**: 9 of the 12 such blocks across these three
+files are prose *about* another script. The extractor instead requires a real `sbatch`
+**invocation** — a command boundary before the token and a flag or path after it, which
+excludes the `sbatch` inside `mine_round.sbatch` because it is preceded by a dot — and
+that the block names *this* file. It selects exactly one command per file, verified by
+enumeration.
+
+**⚠ THE SAME DEFECT CLASS FOUR TIMES IN ONE PR: A CHECK THAT MATCHES PROSE.** The
+invocation extractor matched a header *sentence* about `align-shard`; the `:?` positive
+assertion read raw text while its `:-` sibling read stripped code (an asymmetry my own r1
+fix introduced); the submit check concatenated blocks; and the guard-position test matched
+`conda activate` inside a **trailing** comment, failing twice on correct code. These files
+document their own commands at length, so any byte-level check on them must first decide
+what a *command* is. Related: [[fixed-one-of-two-identical-things]],
+[[artifact-pinning-test-cannot-see-the-code]].
+
 **Commit.** *(this stanza's commit; squash SHA recorded at merge)*

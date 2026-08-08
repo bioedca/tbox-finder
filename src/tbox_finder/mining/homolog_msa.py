@@ -643,6 +643,7 @@ def align_candidate(
     out_sto: str | Path,
     work_dir: str | Path,
     cpu: int = 2,
+    timeout_s: float | None = None,
 ) -> Path:
     """``mlocarna``(candidate+homologs) → a Pfam Stockholm MSA with an RNAalifold ``#=GC SS_cons``
     **comparative** consensus (ADR-0006 A3 / ADR-0002 A13).
@@ -654,6 +655,14 @@ def align_candidate(
     ``#=GC SS_cons``; both R-scape/Easel and ``msa_shuffle.read_pfam_alignment`` (which merges the
     wrapped blocks per row) parse it. ``cpu`` is passed as ``--threads`` and kept small (LocARNA
     does not scale past ~2–3).
+
+    ``timeout_s`` bounds the ``mlocarna`` call and raises :class:`ToolTimeoutError` (a
+    ``HomologDbError``) if exceeded; ``None`` keeps the unbounded behaviour that job 766 certified
+    on. **The bound is a real scientific knob, not just an ops one**: it converts a candidate that
+    *would* have produced a consensus into one that produces none, i.e. ``unavailable`` ⇒ spared.
+    Measured over the 272 alignments that succeeded in the full-corpus run (job 1205), 271 finished
+    within 353 s and one took 8500 s at depth 844 — LocARNA's cost climbs steeply in MSA depth, so
+    the bound is what stops one candidate from consuming a whole shard's wall.
     """
     assert_mlocarna_version()
     _assert_candidate_in_homologs(candidate_fasta, homologs_fasta)
@@ -664,7 +673,7 @@ def align_candidate(
     if tgt.exists():
         shutil.rmtree(tgt)  # mlocarna writes into a fresh tgtdir; ours to clear (under work_dir)
 
-    _run(mlocarna_argv(homologs_fasta, tgt, threads=cpu))
+    _run(mlocarna_argv(homologs_fasta, tgt, threads=cpu), timeout_s=timeout_s)
 
     result_stk = tgt / "results" / "result.stk"
     if not result_stk.is_file():

@@ -47,7 +47,12 @@
 # SUBMIT (per round — each is one CLAUDE.md §9.3 submit-ack; SYNC FIRST, STAGE SECOND, SUBMIT THIRD):
 #   ssh two 'bash -lc "cd ~/tbox-finder && git fetch origin && git checkout p2-10e && git reset --hard origin/p2-10e"'
 #   # …stage the checkpoint + genome dirs (see INPUT)…
-#   ssh two 'bash -lc "cd ~/tbox-finder && sbatch slurm/p2/mine_round.sbatch"'
+#   # ⚠ THREE REQUIRED EXPORTS — all `:?` below, and `sbatch --test-only` validates HEADERS ONLY,
+#   #   so it catches none of them. ALIGN_TIMEOUT_S is forwarded to leg (c); a value absent here
+#   #   cannot be recovered downstream, and the producer array would abort every one of its tasks.
+#   ssh two 'bash -lc "cd ~/tbox-finder && sbatch \
+#     --export=ALL,ARRAY_WIDTH=48,ALIGN_TIMEOUT_S=600,STRUCTURAL_YIELD_ACK=1 \
+#     slurm/p2/mine_round.sbatch"'
 # PREFLIGHT:  ssh two 'bash -lc "sbatch --test-only slurm/p2/mine_round.sbatch"'
 # VERIFY (artifact-based; sacct off): the torch legs write stderr on success, so the per-round
 #   .err is NOT gated on zero bytes — gate on the DONE marker + the self-validating round report
@@ -124,6 +129,23 @@ fi
 # (measured by mine_round_measure.sbatch); ARRAY_WIDTH is passed in, no silent default guess.
 ROUND="${ROUND:-0}"
 ARRAY_WIDTH="${ARRAY_WIDTH:?set ARRAY_WIDTH (the A10 Phase-2-pinned producer array width) via --export}"
+# The producer array's per-candidate mlocarna bound. Required here too, and forwarded to leg (c)
+# below: mine_round_producer.sbatch declares it `:?`, so a round that omitted it would submit an
+# array whose every task aborts on the first line of its own config — a 48-task no-op that reports
+# nothing. Exceeding the bound ⇒ no MSA ⇒ `unavailable` ⇒ SPARED (D14), never a mined negative.
+ALIGN_TIMEOUT_S="${ALIGN_TIMEOUT_S:?set ALIGN_TIMEOUT_S (per-candidate mlocarna bound, s) via --export}"
+# ⚠ `:?` REJECTS ONLY AN ABSENT OR EMPTY VALUE, NOT A MALFORMED ONE. Without this, `60o` or `abc`
+# travels all the way into the producer task and is caught by argparse only AFTER that task has
+# spent its ~37 min search stage — and, from the orchestrator, after the 8-GPU scan legs. Shape
+# first (digits with at most one dot), then reject a numeric zero: a zero bound times out EVERY
+# alignment, and because a timeout SPARES rather than fails that would read as a clean,
+# producible-nothing round. Stripping `0` and `.` leaves nothing iff the value is zero.
+case "$ALIGN_TIMEOUT_S" in
+  ''|*[!0-9.]*|.|*.*.*) echo "FATAL: ALIGN_TIMEOUT_S must be a positive number of seconds (got '$ALIGN_TIMEOUT_S')" >&2; exit 2 ;;
+esac
+if [ -z "${ALIGN_TIMEOUT_S//[0.]/}" ]; then
+  echo "FATAL: ALIGN_TIMEOUT_S must be > 0 (got '$ALIGN_TIMEOUT_S'); a zero bound spares every candidate" >&2; exit 2
+fi
 # The structural-yield ack (header ⛔). Readiness passing is NOT permission to mine: with (b)
 # and (c) unbacked, mining's conjunction cannot be satisfied by any candidate and this round's
 # yield is provably 0 — ~8 GPU × 6 h to change nothing. Required, no default, so the no-op
@@ -182,7 +204,7 @@ PYTHONPATH=src python -m tbox_finder.mining.covariation_producer make-shards \
 # LEG c: submit the decoupled producer array (CPU-only, partition=gpu no --gres); LEG d: the retrain,
 # afterok-dependent on the whole array. Each is its own §9.3 artifact-verified job.
 PRODUCER_JOB="$(sbatch --parsable --array="0-$((ARRAY_WIDTH - 1))" \
-  --export=ALL,ROUND="$ROUND",SHARD_DIR="$SHARD_DIR",ROUND_DIR="$ROUND_DIR" \
+  --export=ALL,ROUND="$ROUND",SHARD_DIR="$SHARD_DIR",ROUND_DIR="$ROUND_DIR",ALIGN_TIMEOUT_S="$ALIGN_TIMEOUT_S" \
   slurm/p2/mine_round_producer.sbatch)"
 echo "LEG c: submitted producer array job $PRODUCER_JOB (width $ARRAY_WIDTH)"
 RETRAIN_JOB="$(sbatch --parsable --dependency="afterok:$PRODUCER_JOB" \
