@@ -4835,6 +4835,31 @@ CodeRabbit reviews are ENABLED** (the app reviewed the first push unasked; a man
 `CodeRabbit` PR check read **`pass` while its body was only *"Review rate limited"***, and
 the app never reviewed a head newer than the first — §5.1's trap, an **absence**, not a pass.
 
+**r3 — 3 findings, all major, all substantively real; two of the three proposed fixes were
+wrong and were replaced.** (i) *"accept the documented arithmetic operator"* — **premise
+measured false**: the ADR byte is U+00D7 and the regex matched it, which the passing test
+already showed; the reviewer read the ASCII `x` in this module's own docstring and took it
+for the parsed source. Accepted anyway as free robustness, and the docstring corrected.
+(ii) *"match only an executable producer submit command"* — right finding, wrong fix: the
+proposed `^[ \t]*sbatch` anchor matches **zero** here, because the real line begins
+`PRODUCER_JOB="$(sbatch`. Fixed by excluding comment lines instead; **measured** — with a
+commented submit present the raw pattern yields 2 matches and the filter yields 1, and
+deleting the filter turns three tests red. (iii) the CPU-alias finding was fully real and is
+the **third** instance of *"you fixed one of two identical things"* in this PR: r1 taught the
+header parser to see short flags, r2 taught the submit-line patterns, and `_allocated_cpus`
+was still keyed on the long form alone.
+
+**r4 and r5 — zero findings in this PR's three files, two rounds running.** Both rounds
+compared against a base **older than `be86c1f`** and so re-reviewed **14 files** instead of
+3; their six findings all land in P3-15′-d's already-merged code and are recorded in
+`TODO.md` as an off-roadmap fix-up rather than folded in here, which would have made this
+step's commit non-atomic. ⚠ The most serious of them is itself a *"fixed one of two
+identical things"*: `derive_relaxed_arch_supply_available` calls `candidate_evidence` with
+no guard, while the (a) sibling `derive_msa_supply_available` wraps the same probe in a
+broad `except Exception` added by an earlier review. ⚠ One r5 finding **repeats a claim
+P3-15′-d already measured false** (`itertuples` returning `np.int64`); a reviewer restating
+a refuted premise is not new evidence.
+
 **Process note worth carrying.** A `git checkout --` restoring a sabotaged file also reverts
 **uncommitted step work** in that same file. It silently reverted the `cpus-per-task=2` fix,
 and later the align-shard comment fix — the second time the commit still reported *"1 file
