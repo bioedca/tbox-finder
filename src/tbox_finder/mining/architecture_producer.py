@@ -403,6 +403,13 @@ def validate_status_payload(payload: Any, *, label: str) -> dict[str, str]:
     rows = payload.get("rows")
     if not isinstance(status, Mapping) or not isinstance(rows, list):
         raise ProducerError(f"{label}: status table lacks 'status' / 'rows'")
+    # Same input-not-invariant reasoning as `merge_status_tables`: these tables are written
+    # by other processes. A row that is a string or a number makes `.get` raise
+    # AttributeError, which `main` does not catch, so the leg exits with a traceback
+    # instead of FATAL / exit 1.
+    bad_rows = [i for i, r in enumerate(rows) if not isinstance(r, Mapping)]
+    if bad_rows:
+        raise ProducerError(f"{label}: rows {bad_rows[:5]} are not objects")
     rederived = {str(r.get("candidate_id", "")): str(r.get("status", "")) for r in rows}
     declared = {str(k): str(v) for k, v in status.items()}
     if rederived != declared:
@@ -633,10 +640,6 @@ SUPPLY_CLAUSES: tuple[tuple[str, str], ...] = (
     ("freeze_report_present", FREEZE_REPORT),
 )
 
-#: The producer entry points the round's (b) leg actually calls.  Checked by attribute
-#: on the imported module, so a producer reduced to a stub cannot satisfy the clause.
-PRODUCER_ENTRY_POINTS = ("run_shard", "merge_status_tables", "load_status_map")
-
 
 def _json_or_none(path: Path) -> Any:
     try:
@@ -666,15 +669,33 @@ def derive_relaxed_arch_supply_available(*, repo_root: str | Path | None = None)
     root = Path(repo_root) if repo_root is not None else REPO_ROOT
     clauses = {name: (root / rel).is_file() for name, rel in SUPPLY_CLAUSES}
 
-    try:
-        from tbox_finder.mining import architecture_producer as _self
-    except Exception as exc:  # noqa: BLE001 - a broken producer is a FAILED clause, not a crash
-        clauses["producer_entry_points_present"] = False
-        entry_reason = f"import failed: {exc!r}"
-    else:
-        missing = [e for e in PRODUCER_ENTRY_POINTS if not hasattr(_self, e)]
-        clauses["producer_entry_points_present"] = not missing
-        entry_reason = f"producer lacks {missing}" if missing else ""
+    # ⚠ There was a ``producer_entry_points_present`` clause here and it was **vacuous**:
+    # it imported the module that was already executing, so neither the import nor the
+    # ``hasattr`` could ever fail, and ``all(clauses.values())`` was being handed a
+    # hardcoded True. That is the precise failure mode this function's own docstring warns
+    # about — and the parametrized clause test never caught it, because it iterates
+    # SUPPLY_CLAUSES and this clause was not in that tuple.
+    #
+    # It is replaced by the clause that ``derive_msa_supply_available`` uses for the same
+    # job and which IS breakable: measure that the round actually **stamps** a produced (b)
+    # status onto the candidate, by calling the wiring rather than by reading a signature.
+    # A producer that ships but whose output the round drops on the floor is the silent
+    # no-op the whole gate exists to refuse.
+    from tbox_finder.mining.mine_round import candidate_evidence
+
+    probe_id = "__relaxed_arch_supply_probe__"
+    stamped = candidate_evidence(
+        probe_id, None, None, {probe_id: STATUS_PASSED}
+    ).relaxed_architecture
+    clauses["producer_status_wired"] = stamped == STATUS_PASSED
+    wiring_reason = (
+        ""
+        if clauses["producer_status_wired"]
+        else (
+            f"a produced {STATUS_PASSED!r} status reached the candidate as {stamped!r} — "
+            "the producer's output is not composed into the round"
+        )
+    )
 
     # The freeze must have MEASURED something, not merely exist: a report whose carve
     # is empty certifies the predicate against nothing.
@@ -693,8 +714,8 @@ def derive_relaxed_arch_supply_available(*, repo_root: str | Path | None = None)
     clauses["msa_supply_backs_it"] = bool(msa.get("available"))
 
     reasons = [f"{name} is missing or false" for name, ok in sorted(clauses.items()) if not ok]
-    if entry_reason and not clauses.get("producer_entry_points_present", True):
-        reasons.append(f"producer_entry_points_present: {entry_reason}")
+    if wiring_reason:
+        reasons.append(f"producer_status_wired: {wiring_reason}")
     if not clauses["msa_supply_backs_it"]:
         reasons.append(
             "msa_supply_backs_it: (b) reads the same consensus (a) does (ADR-0006 A4), so "
@@ -703,7 +724,12 @@ def derive_relaxed_arch_supply_available(*, repo_root: str | Path | None = None)
     return {
         "available": all(clauses.values()),
         "clauses": dict(sorted(clauses.items())),
-        "n_heldout_canonical_measured": n_measured if isinstance(n_measured, int) else 0,
+        # Reuse the CLAUSE's verdict rather than re-testing: `isinstance(True, int)` is
+        # True, so a report carrying `true` here would have made the clause read False
+        # while this field reported `true` — two fields disagreeing inside one payload.
+        "n_heldout_canonical_measured": (
+            n_measured if clauses["freeze_measured_a_nonempty_carve"] else 0
+        ),
         "reasons": reasons,
         "repo_root": str(root),
     }

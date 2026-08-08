@@ -952,3 +952,60 @@ class TestRoundTwoProducerGuards:
         message = str(exc.value)
         assert "conflicting" in message
         assert "status says 'failed' but its row says 'passed'" in message
+
+
+class TestRoundThreeGuards:
+    """CodeRabbit r3. The first is the best finding of the review: a clause that could
+    not fail, handing `all(clauses.values())` a hardcoded True."""
+
+    def test_the_wiring_clause_is_BREAKABLE_not_vacuous(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The clause it replaced imported the module already executing, so neither the
+        import nor the hasattr could fail. This one measures the round's actual wiring, so
+        breaking the wiring must flip it."""
+        monkeypatch.setattr(
+            mine_round,
+            "candidate_evidence",
+            lambda *a, **k: mine_round.SpareRuleEvidence(),  # never stamps (b)
+        )
+        derivation = architecture_producer.derive_relaxed_arch_supply_available(repo_root=REPO_ROOT)
+        assert derivation["clauses"]["producer_status_wired"] is False
+        assert derivation["available"] is False
+        assert any("producer_status_wired" in r for r in derivation["reasons"])
+
+    def test_positive_control_the_real_wiring_satisfies_it(self) -> None:
+        derivation = architecture_producer.derive_relaxed_arch_supply_available(repo_root=REPO_ROOT)
+        assert derivation["clauses"]["producer_status_wired"] is True
+
+    def test_the_vacuous_clause_is_gone(self) -> None:
+        """A clause that cannot fail must not be re-added: it inflates the conjunction."""
+        derivation = architecture_producer.derive_relaxed_arch_supply_available(repo_root=REPO_ROOT)
+        assert "producer_entry_points_present" not in derivation["clauses"]
+        assert not hasattr(architecture_producer, "PRODUCER_ENTRY_POINTS")
+
+    def test_a_bool_count_cannot_disagree_with_its_own_clause(self, tmp_path: Path) -> None:
+        """`isinstance(True, int)` is True, so `true` in the report made the clause read
+        False while the reported count read `true` — two fields disagreeing in one payload."""
+        for _, rel in architecture_producer.SUPPLY_CLAUSES:
+            target = tmp_path / rel
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text("x", encoding="utf-8")
+        (tmp_path / architecture_producer.FREEZE_REPORT).write_text(
+            json.dumps({"carve": {"n_with_discriminator_in_a_flanked_bulge": True}}),
+            encoding="utf-8",
+        )
+        derivation = architecture_producer.derive_relaxed_arch_supply_available(repo_root=tmp_path)
+        assert derivation["clauses"]["freeze_measured_a_nonempty_carve"] is False
+        assert derivation["n_heldout_canonical_measured"] == 0
+
+    def test_a_non_mapping_row_refuses_in_validate_too_not_only_in_merge(self) -> None:
+        """`load_status_map` reads tables written by other processes, so the row shape is
+        an input. AttributeError here escapes `main` as a traceback, not FATAL/exit 1."""
+        payload = {"status": {"a": "passed"}, "rows": ["not-an-object"]}
+        with pytest.raises(architecture_producer.ProducerError, match="are not objects"):
+            architecture_producer.validate_status_payload(payload, label="t")
+
+    def test_positive_control_object_rows_validate(self) -> None:
+        payload = {"status": {"a": "passed"}, "rows": [row("a", STATUS_PASSED)]}
+        assert architecture_producer.validate_status_payload(payload, label="t") == {"a": "passed"}
