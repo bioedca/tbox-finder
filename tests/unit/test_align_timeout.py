@@ -148,7 +148,7 @@ def test_the_killed_group_is_actually_reaped(tmp_path: Path):
     assert exc.value.errno == errno.ESRCH, f"pid {pid} still exists after the timeout"
 
 
-@pytest.mark.parametrize("bad", [0, 0.0, -1, -600.0])
+@pytest.mark.parametrize("bad", [0, 0.0, -1, -600.0, float("nan"), float("inf")])
 def test_a_non_positive_bound_is_refused(bad: float):
     """A 0/negative bound times out EVERY alignment. Because a timeout spares rather than fails,
     that would be silent: a full round would report `unavailable` on all 941 candidates and look
@@ -479,8 +479,13 @@ def test_every_sbatch_that_aligns_requires_the_bound(sbatch: Path):
         f"{sbatch.name} must declare ALIGN_TIMEOUT_S as a REQUIRED export (:?), so a submit that "
         f"omits it aborts instead of aligning unbounded"
     )
+    # Comments filtered for the same reason the invocation extractor filters them, and this is the
+    # sibling I missed the first time: these headers DISCUSS the flags, so documenting the
+    # anti-pattern (`# never use ${ALIGN_TIMEOUT_S:-600}`) would fail this assertion on prose while
+    # the real configuration stayed correct ([[fixed-one-of-two-identical-things]]).
+    code = "\n".join(ln for ln in text.splitlines() if not ln.lstrip().startswith("#"))
     assert not re.search(
-        r"ALIGN_TIMEOUT_S:-", text
+        r"ALIGN_TIMEOUT_S:-", code
     ), f"{sbatch.name} supplies a default bound — the round must name it explicitly"
 
 
@@ -553,3 +558,129 @@ def test_a_bounded_run_captures_stdout_and_stderr():
     assert proc.stdout.strip() == "out"
     assert proc.stderr.strip() == "err"
     assert isinstance(proc, subprocess.CompletedProcess)
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# Review round 1 (CodeRabbit CLI) — the four behaviours those findings named
+# ═════════════════════════════════════════════════════════════════════════════
+def test_a_nan_bound_cannot_masquerade_as_a_bound():
+    """THE ONE A `<= 0` CHECK LETS THROUGH. Every comparison against `nan` is False, so
+    `nan <= 0` is False and a naive guard waves it past; `communicate(timeout=nan)` then never
+    fires. The bound would be *declared, recorded in the round's provenance, and inert* — the
+    unbounded behaviour that lost shard 016, wearing the fix's clothes."""
+    assert not (float("nan") <= 0), "premise: nan slips past a <=0 guard, which is why isfinite"
+    with pytest.raises(ValueError, match="finite"):
+        hdb.assert_usable_timeout(float("nan"))
+
+
+def test_a_stale_msa_is_discarded_when_the_homolog_set_is_insufficient(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """THE THIRD SPARE BRANCH — I had fixed two of three. `insufficient_homologs` `continue`s
+    before the try/except, so a stale msa.sto under a re-used workdir survived it and would be
+    promoted and scored ([[fixed-one-of-two-identical-things]])."""
+    spec = cp.CandidateSpec(
+        candidate_id="GCA_000000001.1:c0:0:10-20",
+        accession="GCA_000000001.1:c0",
+        locus_start=10,
+        locus_end=20,
+    )
+    wd = cp.candidate_workdir(tmp_path, spec.candidate_id)
+    wd.mkdir(parents=True, exist_ok=True)
+    (wd / "search.json").write_text('{"sufficient": false, "n_homologs": 3}\n', encoding="utf-8")
+    stale = wd / cp.MSA_FILENAME
+    stale.write_text("# STOCKHOLM 1.0\n#=GC SS_cons <<>>\n//\n", encoding="utf-8")
+
+    def _must_not_align(**_kwargs: object) -> None:  # pragma: no cover - the failure case
+        raise AssertionError("an insufficient homolog set must not be aligned")
+
+    monkeypatch.setattr(cp, "align_candidate", _must_not_align)
+    (row,) = cp.align_shard([spec], workroot=tmp_path, align_timeout_s=600.0)
+
+    assert row["reason"] == "insufficient_homologs"
+    assert not stale.exists(), "the stale MSA survived an insufficient-homologs skip"
+
+
+def test_an_unusable_bound_is_refused_before_any_candidate_is_touched(tmp_path: Path):
+    """Validated once up front, not on the first sufficient candidate — otherwise a shard would
+    align an arbitrary number of candidates before discovering its bound is unusable."""
+    spec = cp.CandidateSpec(
+        candidate_id="GCA_000000001.1:c0:0:10-20",
+        accession="GCA_000000001.1:c0",
+        locus_start=10,
+        locus_end=20,
+    )
+    # No workdir, no search.json: reaching the loop at all would raise something OTHER than this.
+    with pytest.raises(ValueError, match="finite"):
+        cp.align_shard([spec], workroot=tmp_path, align_timeout_s=float("nan"))
+
+
+@pytest.mark.parametrize("bad", ["0", "-5", "nan", "inf", "abc"])
+def test_the_cli_refuses_an_unusable_bound(bad: str, capsys: pytest.CaptureFixture[str]):
+    """argparse `type=float` alone accepts nan/inf. Refusing at the parser kills the shard before
+    the ~37 min search stage rather than after it."""
+    with pytest.raises(SystemExit) as exc:
+        cp.main(["align-shard", "--shard", "s.json", "--workroot", "w", "--align-timeout-s", bad])
+    assert exc.value.code == 2
+    assert "--align-timeout-s" in capsys.readouterr().err
+
+
+def test_the_post_kill_drain_is_bounded(monkeypatch: pytest.MonkeyPatch):
+    """A grandchild that escaped the process group (e.g. it called setsid itself) still holds the
+    inherited stdout/stderr write ends, so an unbounded `communicate()` would read toward an EOF
+    that never arrives — an unbounded wait INSIDE the code path whose job is to bound one."""
+    calls: list[float | None] = []
+
+    class _Popen:
+        returncode = -9
+
+        def __init__(self, *a: object, **k: object) -> None:
+            pass
+
+        def __enter__(self) -> _Popen:
+            return self
+
+        def __exit__(self, *a: object) -> None:
+            return None
+
+        def communicate(self, timeout: float | None = None) -> tuple[str, str]:
+            calls.append(timeout)
+            raise subprocess.TimeoutExpired(cmd="x", timeout=timeout or 0)
+
+    monkeypatch.setattr(hdb.subprocess, "Popen", _Popen)
+    monkeypatch.setattr(hdb, "_kill_process_group", lambda popen: None)
+    with pytest.raises(ToolTimeoutError):
+        hdb._run_bounded(["x"], 1.0)
+
+    assert calls == [1.0, hdb.DRAIN_TIMEOUT_S], (
+        "the post-kill drain must carry a bound of its own; an unbounded second communicate() "
+        "can hang forever on a pipe held open by a process that escaped the killed group"
+    )
+
+
+@pytest.mark.parametrize(
+    "sbatch", [PRODUCER_SBATCH, ORCHESTRATOR_SBATCH, MEASURE_SBATCH], ids=lambda p: p.name
+)
+def test_the_documented_submit_line_exports_the_bound(sbatch: Path):
+    """An operator follows the header's SUBMIT line. If it omits a `:?` export, the documented
+    command aborts the job it documents — and for mine_round.sbatch that abort happens only after
+    leg (a) has already spent 8 GPUs on the scan."""
+    lines = _read(sbatch).splitlines()
+    # The documented command spans backslash continuations, so a per-line search would look at
+    # `# ssh two ... sbatch \\` alone and never see the --export on the next comment line.
+    blocks: list[str] = []
+    for i, ln in enumerate(lines):
+        stripped = ln.lstrip()
+        if not (stripped.startswith("#") and "sbatch" in ln and "--test-only" not in ln):
+            continue
+        block, j = [ln], i
+        while lines[j].rstrip().endswith("\\") and j + 1 < len(lines):
+            j += 1
+            block.append(lines[j])
+        blocks.append("\n".join(block))
+    joined = "\n".join(blocks)
+    assert blocks, f"no documented sbatch submit command found in {sbatch.name}"
+    assert "ALIGN_TIMEOUT_S=" in joined, (
+        f"{sbatch.name}'s documented submit command does not export ALIGN_TIMEOUT_S, which the "
+        f"file itself declares required"
+    )

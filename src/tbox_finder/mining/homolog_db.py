@@ -47,7 +47,9 @@ baseline are read from the stdlib-JSON ``production_windows_report.json`` — ne
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
+import math
 import os
 import shutil
 import signal
@@ -444,6 +446,31 @@ def tool_path(name: str) -> str:
     return path
 
 
+#: Bound on the post-kill pipe drain. The killed group is already dead; this guards only the case
+#: where a grandchild escaped the group (e.g. it called ``setsid`` itself) and still holds the
+#: inherited stdout/stderr write ends open, which would keep ``communicate()`` reading to an EOF
+#: that never arrives — an unbounded wait *inside* the code path whose job is to bound one.
+DRAIN_TIMEOUT_S = 5.0
+
+
+def assert_usable_timeout(timeout_s: float) -> None:
+    """Refuse a bound that cannot bound anything. Positive **and finite**, both load-bearing:
+
+    * ``0``/negative would time out *every* invocation, and because a timeout is spared rather than
+      fatal (ADR-0005 D14) that failure is **silent** — a full round would report ``unavailable``
+      for all 941 candidates and read as a clean, producible-nothing result.
+    * ``nan`` is the mirror image and is worse, because it looks like a number: every comparison
+      against it is ``False``, so a ``<= 0`` check waves it through and ``communicate(timeout=nan)``
+      never fires. The bound would be *declared, recorded in the round's provenance, and inert* —
+      the unbounded behaviour that lost shard 016, wearing the fix's clothes. ``inf`` is the same
+      thing said explicitly.
+    """
+    if not math.isfinite(timeout_s) or timeout_s <= 0:
+        raise ValueError(
+            f"timeout_s must be a positive, finite number of seconds, got {timeout_s!r}"
+        )
+
+
 def _run(cmd: Sequence[str], *, timeout_s: float | None = None) -> subprocess.CompletedProcess[str]:
     """Run a checked subprocess, capturing text output; raise HomologDbError on non-zero exit.
 
@@ -452,11 +479,8 @@ def _run(cmd: Sequence[str], *, timeout_s: float | None = None) -> subprocess.Co
     P3-15'-e-ii, so the certified search/index paths run byte-identically — only the align stage
     passes a bound, and it passes one explicitly.
     """
-    if timeout_s is not None and timeout_s <= 0:
-        # A 0/negative bound would time out *every* invocation, and because a timeout is spared
-        # rather than fatal (ADR-0005 D14) that failure is silent: a full round would report
-        # `unavailable` for all 941 candidates and look like a clean, producible-nothing run.
-        raise ValueError(f"timeout_s must be a positive number of seconds, got {timeout_s!r}")
+    if timeout_s is not None:
+        assert_usable_timeout(timeout_s)
     if timeout_s is None:
         proc = subprocess.run(
             cmd, capture_output=True, text=True
@@ -490,7 +514,11 @@ def _run_bounded(cmd: Sequence[str], timeout_s: float) -> subprocess.CompletedPr
             stdout, stderr = popen.communicate(timeout=timeout_s)
         except subprocess.TimeoutExpired:
             _kill_process_group(popen)
-            stdout, stderr = popen.communicate()  # drain the pipes of the now-dead group
+            # Drain the now-dead group's pipes, bounded: a grandchild that escaped the group
+            # still holds the inherited write ends, so an unbounded read waits for an EOF that
+            # never comes. Suppressed because we raise ToolTimeoutError either way.
+            with contextlib.suppress(subprocess.TimeoutExpired):
+                popen.communicate(timeout=DRAIN_TIMEOUT_S)
             raise ToolTimeoutError(
                 f"command exceeded its {timeout_s:g}s bound and was killed: {' '.join(cmd)}"
             ) from None

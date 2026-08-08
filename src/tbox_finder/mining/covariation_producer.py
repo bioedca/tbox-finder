@@ -62,7 +62,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from tbox_finder.mining.homolog_db import ToolTimeoutError
+from tbox_finder.mining.homolog_db import ToolTimeoutError, assert_usable_timeout
 from tbox_finder.mining.homolog_msa import (
     BLAST_PREFIX,
     FM_INDEX,
@@ -338,16 +338,21 @@ def align_shard(
     ``align_timeout_s`` is **keyword-required with no default** (the ADR-0006 A4 rule-parameter
     shape): it decides which candidates get a consensus at all, so every caller must name it and
     the round must record it. A candidate whose mlocarna exceeds it is recorded
-    ``reason="align_timeout"`` and, like the other two branches, leaves no MSA behind ⇒
+    ``reason="align_timeout"`` and, like the other two spare branches, leaves no MSA behind ⇒
     ``unavailable`` ⇒ **spared**. This is the branch that exists because one candidate in job 1205
     ran 6h11m without finishing and took its whole 20-candidate shard down with the 12 h wall.
     """
+    # Validate the bound ONCE, up front — not on the first sufficient candidate. A shard whose
+    # bound is unusable must die before the run, not after however many alignments happened to
+    # precede the first one that would have used it.
+    assert_usable_timeout(align_timeout_s)
     rows: list[dict[str, Any]] = []
     for spec in specs:
         wd = candidate_workdir(workroot, spec.candidate_id)
         search = _read_json(wd / "search.json")
         row: dict[str, Any] = {CANDIDATE_ID_KEY: spec.candidate_id}
         if not search.get("sufficient"):
+            _discard_msa(wd / MSA_FILENAME)  # the THIRD spare branch — same absence, same reason
             row.update(aligned=False, reason="insufficient_homologs", align_wall_s=0.0)
             (wd / "align.json").write_text(
                 json.dumps(row, indent=2, sort_keys=True) + "\n", encoding="utf-8"
@@ -629,6 +634,26 @@ def _cmd_search_shard(args: argparse.Namespace) -> int:
     return 0
 
 
+def _usable_timeout_arg(text: str) -> float:
+    """argparse type for ``--align-timeout-s``: a positive, FINITE number of seconds.
+
+    ``type=float`` alone accepts ``nan`` and ``inf``. ``nan`` is the dangerous one — every
+    comparison against it is False, so it slips past a ``<= 0`` check and
+    ``communicate(timeout=nan)`` never fires: the bound would be declared, recorded in the round's
+    provenance, and completely inert. Refusing it here means the shard dies at argparse, before the
+    ~37 min search stage, rather than after it.
+    """
+    try:
+        value = float(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"not a number: {text!r}") from None
+    try:
+        assert_usable_timeout(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(str(exc)) from None
+    return value
+
+
 def _cmd_align_shard(args: argparse.Namespace) -> int:
     specs = read_candidate_manifest(args.shard)
     rows = align_shard(
@@ -710,7 +735,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     # rather than silently inherit an unbounded align and re-run job 1205's 12 h shard death.
     p_align.add_argument(
         "--align-timeout-s",
-        type=float,
+        type=_usable_timeout_arg,
         required=True,
         help="per-candidate mlocarna wall-clock bound in seconds; exceeding it ⇒ unavailable "
         "⇒ spared (ADR-0005 D14). No default — the round must name it.",

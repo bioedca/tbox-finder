@@ -56,7 +56,10 @@
 #   #   REAL split table by rsync from the laptop AFTER the reset (which reverts it to the pointer):
 #   #     rsync -avzP data/processed/splits/split_assignments.parquet two:~/tbox-finder/data/processed/splits/
 #   # …create the two envs (above); stage the checkpoint + genome dirs + homolog DB (see INPUT)…
-#   ssh two 'bash -lc "cd ~/tbox-finder && sbatch slurm/p2/mine_round_measure.sbatch"'
+#   # ⚠ ALIGN_TIMEOUT_S is REQUIRED (`:?` below) and `--test-only` validates headers only, so it
+#   #   catches nothing here. It also CENSORS this measurement — see the note at its declaration.
+#   ssh two 'bash -lc "cd ~/tbox-finder && sbatch \
+#     --export=ALL,ALIGN_TIMEOUT_S=600 slurm/p2/mine_round_measure.sbatch"'
 # PREFLIGHT: ssh two 'bash -lc "cd ~/tbox-finder && sbatch --test-only slurm/p2/mine_round_measure.sbatch"'
 # INPUT (staged by rsync — the ml/cluster checkout carries no DVC data):
 #   rsync -avzP data/processed/checkpoints/stage1_production/ two:~/tbox-finder/data/processed/checkpoints/stage1_production/

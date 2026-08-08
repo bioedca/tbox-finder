@@ -47,7 +47,12 @@
 # SUBMIT (per round — each is one CLAUDE.md §9.3 submit-ack; SYNC FIRST, STAGE SECOND, SUBMIT THIRD):
 #   ssh two 'bash -lc "cd ~/tbox-finder && git fetch origin && git checkout p2-10e && git reset --hard origin/p2-10e"'
 #   # …stage the checkpoint + genome dirs (see INPUT)…
-#   ssh two 'bash -lc "cd ~/tbox-finder && sbatch slurm/p2/mine_round.sbatch"'
+#   # ⚠ THREE REQUIRED EXPORTS — all `:?` below, and `sbatch --test-only` validates HEADERS ONLY,
+#   #   so it catches none of them. ALIGN_TIMEOUT_S is forwarded to leg (c); a value absent here
+#   #   cannot be recovered downstream, and the producer array would abort every one of its tasks.
+#   ssh two 'bash -lc "cd ~/tbox-finder && sbatch \
+#     --export=ALL,ARRAY_WIDTH=48,ALIGN_TIMEOUT_S=600,STRUCTURAL_YIELD_ACK=1 \
+#     slurm/p2/mine_round.sbatch"'
 # PREFLIGHT:  ssh two 'bash -lc "sbatch --test-only slurm/p2/mine_round.sbatch"'
 # VERIFY (artifact-based; sacct off): the torch legs write stderr on success, so the per-round
 #   .err is NOT gated on zero bytes — gate on the DONE marker + the self-validating round report
