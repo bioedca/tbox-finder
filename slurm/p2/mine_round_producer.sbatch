@@ -19,7 +19,9 @@
 # queueing)". This header read 4, and mine_round.sbatch's leg (c) submits WITHOUT a --cpus-per-task
 # override, so the header won: 48 × 4 = 192 cores requested on a 96-core node, i.e. the pinned
 # no-queueing property could not hold. 2 is also what the code actually consumes — `align-shard`
-# is called with `--cpu 2` (line ~85) and `homolog_msa.nhmmer_argv` passes no `--cpu` at all, so
+# is called with `--cpu 2` (STAGE 2 below; named rather than numbered, because a line reference in
+# a comment goes stale the next time the comment above it grows) and `homolog_msa.nhmmer_argv`
+# passes no `--cpu` at all, so
 # nhmmer runs at HMMER's 2-thread default. tests/unit/test_sbatch_producer_envelope.py re-derives
 # the pinned numbers from the ADR's own text and compares them to these bytes.
 #
