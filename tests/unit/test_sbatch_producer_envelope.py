@@ -59,11 +59,41 @@ _PIN_BULLET = re.compile(
 )
 #: The A10 Phase-2 sign-off restatement: "array width 48 x cpus-per-task 2".  Written as
 #: its own sentence in the sign-off line, so it is an independent witness of the pin.
-_PIN_SIGNOFF = re.compile(r"array width\s*(?P<width>\d+)\s*×\s*cpus-per-task\s*(?P<cpus>\d+)")
-#: An ``#SBATCH --flag=value`` / ``#SBATCH --flag value`` directive.
-_SBATCH = re.compile(r"^#SBATCH\s+(--[A-Za-z0-9-]+)(?:[=\s]+(\S+))?\s*$", re.M)
+#:
+#: **Anchored on the sign-off's own label.** Unanchored, this phrase would match the same
+#: wording in *any* later amendment's sign-off — a sizing decision about some other array
+#: could then be read as agreeing, or disagreeing, with A10's producer envelope, and the
+#: two-witness cross-check below would be comparing two different pins.
+_PIN_SIGNOFF = re.compile(
+    r"\*\*Sign-off \(A10 Phase-2\):\*\*[^\n]*?"
+    r"array width\s*(?P<width>\d+)\s*×\s*cpus-per-task\s*(?P<cpus>\d+)"
+)
+#: The ADR's own arithmetic for *why* the width is 48: "48 x 2 = 96 cores, no queueing" on
+#: "one 96-core gpu-partition node".  Parsed so the pinned width is checked against the
+#: reason it was pinned rather than merely read and discarded.
+_PIN_ARITHMETIC = re.compile(
+    r"All (?P<width>\d+) tasks run concurrently \((?P<w2>\d+)\s*×\s*(?P<cpus>\d+)\s*=\s*"
+    r"(?P<cores>\d+) cores, no queueing\)"
+)
+#: An ``#SBATCH`` directive.  Short flags are matched too: ``#SBATCH -G 1`` is a GPU
+#: request that a ``--``-only pattern does not see at all, so the forbidden-directive
+#: check below would pass on a leg that had quietly acquired a GPU.
+_SBATCH = re.compile(r"^#SBATCH\s+(--?[A-Za-z0-9-]+)(?:[=\s]+(\S+))?\s*$", re.M)
 #: A ``--cpus-per-task`` passed on a ``sbatch`` command line inside another script.
 _SUBMIT_CPUS = re.compile(r"--cpus-per-task[=\s]+(\S+)")
+#: A ``--partition`` passed on a ``sbatch`` command line inside another script.
+_SUBMIT_PARTITION = re.compile(r"--partition[=\s]+(\S+)")
+#: Every way an sbatch line can ask for a GPU.  ``--gres`` is only the one this repo
+#: happens to use; a submit line or header carrying any of the others would take an A4000
+#: for a CPU-only leg just as effectively.
+_GPU_REQUEST_FLAGS: tuple[str, ...] = (
+    "--gres",
+    "--gpus",
+    "--gpus-per-node",
+    "--gpus-per-socket",
+    "--gpus-per-task",
+    "-G",
+)
 
 
 def _read(path: Path) -> str:
@@ -79,8 +109,28 @@ def _pin(pattern: re.Pattern[str]) -> tuple[int, int] | None:
 
 
 def _directives(text: str) -> dict[str, str | None]:
-    """``#SBATCH`` directives as ``{flag: value}``; a bare flag maps to ``None``."""
-    return {flag: value for flag, value in _SBATCH.findall(text)}
+    """``#SBATCH`` directives as ``{flag: value}``; a bare flag maps to ``None``.
+
+    ``re.findall`` yields ``""`` for a group that did not participate, so the ``or None``
+    is what makes the annotation true.  Without it a bare ``#SBATCH --cpus-per-task``
+    reaches :func:`int` as ``""`` and the value check dies on ``ValueError`` instead of
+    reporting which directive is malformed.
+    """
+    return {flag: (value or None) for flag, value in _SBATCH.findall(text)}
+
+
+def _allocated_cpus(text: str) -> int:
+    """The producer's declared ``--cpus-per-task``, refusing an absent or bare directive.
+
+    Both the pin check and the thread-headroom check need this number, and reading it
+    twice by hand is how one of the two ends up without the guard.
+    """
+    value = _directives(text).get("--cpus-per-task")
+    assert value is not None, (
+        "the producer array declares no --cpus-per-task value, so the cluster default "
+        "decides how many cores each nhmmer/mlocarna shard gets and the pin is unenforced"
+    )
+    return int(value)
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -117,21 +167,69 @@ def test_the_producer_sbatch_is_the_file_the_adr_names():
     assert PRODUCER.is_file(), "the ADR pins an envelope for a file that does not exist"
 
 
+def test_the_pinned_width_is_checked_against_the_reason_it_was_pinned():
+    """The width must decide something here, or parsing it is decoration.
+
+    It cannot be asserted against the sbatch header: ``#SBATCH --array=0`` is a
+    deliberate one-task placeholder that the submit overrides
+    (``mine_round.sbatch`` builds ``0-$((ARRAY_WIDTH - 1))`` from a required
+    ``${ARRAY_WIDTH:?}`` export), so requiring 48 in the header would enforce a width
+    the design keeps out of the file on purpose.
+
+    What the width *does* decide is A10's own justification — ``48 x 2 = 96 cores, no
+    queueing`` on ``one 96-core gpu-partition node``.  Checking the pin against that
+    arithmetic means an amendment that moves the width to 24 while leaving the
+    "no queueing" sentence standing fails here instead of shipping a pin whose stated
+    reason no longer holds.
+    """
+    pinned_width, pinned_cpus = _pin(_PIN_BULLET)
+    match = _PIN_ARITHMETIC.search(_read(ADR))
+    assert match is not None, (
+        "A10 Phase-2's concurrency arithmetic did not parse — the width would then be "
+        "read from the ADR and never checked against anything"
+    )
+    width, w2, cpus, cores = (int(match.group(k)) for k in ("width", "w2", "cpus", "cores"))
+    assert (width, cpus) == (pinned_width, pinned_cpus), (
+        f"A10's concurrency sentence describes {width} x {cpus} but the pin bullet says "
+        f"{pinned_width} x {pinned_cpus}"
+    )
+    assert width == w2, f"A10's own sentence names {width} tasks then multiplies {w2}"
+    assert width * cpus == cores, (
+        f"A10's no-queueing claim does not multiply out: {width} x {cpus} = "
+        f"{width * cpus}, not the {cores} cores it states"
+    )
+
+
+def test_the_array_width_reaches_the_producer_only_through_a_required_export():
+    """Nothing may supply the width silently — the operator must state it.
+
+    The producer header's ``--array=0`` is a placeholder, so if leg (c) could fall back
+    to a default width a short array would run, write a complete-looking set of shard
+    tables, and every unprocessed candidate would resolve ``unavailable`` => spared:
+    the round would decide less than it reports while every count still reconciled.
+    """
+    text = _read(ORCHESTRATOR)
+    assert re.search(r'ARRAY_WIDTH="?\$\{ARRAY_WIDTH:\?', text), (
+        "mine_round.sbatch no longer requires ARRAY_WIDTH with no default; a defaulted "
+        "width can silently under-run the array"
+    )
+    assert re.search(r'--array="0-\$\(\(ARRAY_WIDTH - 1\)\)"', text), (
+        "leg (c) no longer builds its --array from ARRAY_WIDTH — the export and the "
+        "submitted width could then disagree"
+    )
+
+
 # ═════════════════════════════════════════════════════════════════════════════
 # The envelope itself
 # ═════════════════════════════════════════════════════════════════════════════
 def test_cpus_per_task_equals_the_adr_pin():
     """The regression P3-15'-e fixed: the header read 4 against a pinned 2."""
     _, pinned_cpus = _pin(_PIN_BULLET)
-    directives = _directives(_read(PRODUCER))
-    assert "--cpus-per-task" in directives, (
-        "the producer array declares no --cpus-per-task, so the cluster default decides "
-        "how many cores each nhmmer/mlocarna shard gets"
-    )
-    assert int(directives["--cpus-per-task"]) == pinned_cpus, (
-        f"--cpus-per-task={directives['--cpus-per-task']} contradicts ADR-0005 A10's "
-        f"pinned {pinned_cpus}; at the pinned array width that changes how many tasks "
-        f"co-schedule on a 96-core node"
+    allocated = _allocated_cpus(_read(PRODUCER))
+    assert allocated == pinned_cpus, (
+        f"--cpus-per-task={allocated} contradicts ADR-0005 A10's pinned {pinned_cpus}; "
+        f"at the pinned array width that changes how many tasks co-schedule on a "
+        f"96-core node"
     )
 
 
@@ -144,7 +242,7 @@ def test_the_allocation_covers_the_threads_the_body_actually_asks_for():
     it is meant to size.
     """
     text = _read(PRODUCER)
-    allocated = int(_directives(text)["--cpus-per-task"])
+    allocated = _allocated_cpus(text)
     align_cpu = re.search(r"align-shard\b[^\n]*(?:\\\s*\n[^\n]*)*?--cpu\s+(\d+)", text)
     assert align_cpu is not None, (
         "no `align-shard … --cpu N` found in the producer sbatch — either the align "
@@ -171,26 +269,57 @@ def test_the_orchestrator_does_not_contradict_the_pin():
         "leg (c)'s submit of mine_round_producer.sbatch was not found in "
         "mine_round.sbatch — this check would be vacuous"
     )
-    override = _SUBMIT_CPUS.search(leg_c.group(0))
+    submit = leg_c.group(0)
+    override = _SUBMIT_CPUS.search(submit)
     if override is not None:
         assert int(override.group(1)) == pinned_cpus, (
             f"leg (c) submits the producer array with --cpus-per-task="
             f"{override.group(1)}, overriding the header and contradicting ADR-0005 "
             f"A10's pinned {pinned_cpus}"
         )
+    # Every header directive this file certifies is overridable on the submit line, so
+    # checking the header alone certifies a file the orchestrator can contradict.
+    partition = _SUBMIT_PARTITION.search(submit)
+    if partition is not None:
+        assert partition.group(1) == "gpu", (
+            f"leg (c) submits the producer array with --partition={partition.group(1)}, "
+            f"overriding the header; §9.2 forbids `compute` (= node `zero`, no GPU)"
+        )
+    for flag in _GPU_REQUEST_FLAGS:
+        assert not re.search(rf"(?<![\w-]){re.escape(flag)}[=\s]", submit), (
+            f"leg (c) submits the CPU-only producer array with {flag}, taking a scarce "
+            f"A4000 for a leg ADR-0005 A10 pins as CPU-only"
+        )
 
 
-@pytest.mark.parametrize("flag", ["--gres", "--nodelist", "--account", "--qos"])
+#: ``--nodelist`` pins a node (§9.2: `one` is often down); ``--account``/``--qos`` do not
+#: exist here (accounting disabled); the GPU forms all take an A4000 A10 says not to take.
+@pytest.mark.parametrize("flag", (*_GPU_REQUEST_FLAGS, "--nodelist", "--account", "--qos"))
 def test_the_producer_array_declares_no_forbidden_directive(flag: str):
     """A10: CPU-only (**no `--gres`**). CLAUDE.md §9.2/§13: never pin a node, no account/QOS.
 
-    ``--gres`` is the one that costs science rather than tidiness: a GPU allocation on a
+    The GPU forms are the ones that cost science rather than tidiness: an allocation on a
     CPU-only leg idles a scarce A4000 for the whole array while cryosparc already keeps
-    both nodes fragmented.
+    both nodes fragmented.  ``--gres`` is only the spelling this repo happens to use —
+    ``-G 1`` requests a GPU just as effectively, and is invisible to a ``--``-only
+    directive pattern, so :data:`_SBATCH` matches short flags too.
     """
     assert flag not in _directives(
         _read(PRODUCER)
     ), f"{flag} is declared in slurm/p2/mine_round_producer.sbatch"
+
+
+def test_the_directive_parser_sees_short_flags():
+    """Positive control for the check above: a pattern that cannot see ``-G`` passes it.
+
+    Without this, narrowing :data:`_SBATCH` back to ``--``-only flags would leave every
+    short-form GPU request silently unassertable while the suite stayed green.
+    """
+    parsed = _directives("#SBATCH -G 1\n#SBATCH --mem=8G\n")
+    assert parsed == {"-G": "1", "--mem": "8G"}, (
+        f"_SBATCH does not parse short flags; got {parsed}. The forbidden-directive "
+        f"check would then be blind to `#SBATCH -G 1`."
+    )
 
 
 def test_the_producer_array_runs_on_the_gpu_partition():
