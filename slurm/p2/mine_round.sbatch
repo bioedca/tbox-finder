@@ -124,6 +124,11 @@ fi
 # (measured by mine_round_measure.sbatch); ARRAY_WIDTH is passed in, no silent default guess.
 ROUND="${ROUND:-0}"
 ARRAY_WIDTH="${ARRAY_WIDTH:?set ARRAY_WIDTH (the A10 Phase-2-pinned producer array width) via --export}"
+# The producer array's per-candidate mlocarna bound. Required here too, and forwarded to leg (c)
+# below: mine_round_producer.sbatch declares it `:?`, so a round that omitted it would submit an
+# array whose every task aborts on the first line of its own config — a 48-task no-op that reports
+# nothing. Exceeding the bound ⇒ no MSA ⇒ `unavailable` ⇒ SPARED (D14), never a mined negative.
+ALIGN_TIMEOUT_S="${ALIGN_TIMEOUT_S:?set ALIGN_TIMEOUT_S (per-candidate mlocarna bound, s) via --export}"
 # The structural-yield ack (header ⛔). Readiness passing is NOT permission to mine: with (b)
 # and (c) unbacked, mining's conjunction cannot be satisfied by any candidate and this round's
 # yield is provably 0 — ~8 GPU × 6 h to change nothing. Required, no default, so the no-op
@@ -182,7 +187,7 @@ PYTHONPATH=src python -m tbox_finder.mining.covariation_producer make-shards \
 # LEG c: submit the decoupled producer array (CPU-only, partition=gpu no --gres); LEG d: the retrain,
 # afterok-dependent on the whole array. Each is its own §9.3 artifact-verified job.
 PRODUCER_JOB="$(sbatch --parsable --array="0-$((ARRAY_WIDTH - 1))" \
-  --export=ALL,ROUND="$ROUND",SHARD_DIR="$SHARD_DIR",ROUND_DIR="$ROUND_DIR" \
+  --export=ALL,ROUND="$ROUND",SHARD_DIR="$SHARD_DIR",ROUND_DIR="$ROUND_DIR",ALIGN_TIMEOUT_S="$ALIGN_TIMEOUT_S" \
   slurm/p2/mine_round_producer.sbatch)"
 echo "LEG c: submitted producer array job $PRODUCER_JOB (width $ARRAY_WIDTH)"
 RETRAIN_JOB="$(sbatch --parsable --dependency="afterok:$PRODUCER_JOB" \

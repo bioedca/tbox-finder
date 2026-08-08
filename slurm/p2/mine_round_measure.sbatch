@@ -113,6 +113,16 @@ CTRL_MIN_PIDENT="40"   # ignored on the nhmmer path; kept for the CLI-required a
 CTRL_MIN_COV="0.5"
 K_SAMPLE="50"          # A10 Pin 1 bounded sample (K >= 50); accession-sorted, deterministic
 
+# ⚠ THE ALIGN BOUND CENSORS THE MEASUREMENT THIS JOB EXISTS TO MAKE — required, no default, so the
+# operator names the censoring point rather than inheriting one. `align-shard` bounds each mlocarna
+# call (P3-15'-e-ii); any candidate exceeding ALIGN_TIMEOUT_S is recorded `align_timeout` with no
+# MSA, so its true align wall is *right-censored* and every envelope derived downstream (core-h,
+# wall/round) is a LOWER BOUND, not an estimate. This is not hypothetical: A10 Pin 2 priced the
+# round from a K=50 sample whose max align was 47.5 s, and the full corpus then produced a single
+# 8500 s alignment (depth 844) — 69 % of all align wall-clock in one candidate. Read any report
+# this job writes as "≥", and re-derive the envelope from a completed full run, not from here.
+ALIGN_TIMEOUT_S="${ALIGN_TIMEOUT_S:?set ALIGN_TIMEOUT_S (per-candidate mlocarna bound, s) via --export — it censors this measurement; see the note above}"
+
 # NOTE: name this JOB_SCRATCH, never BUILD/HOST — `conda activate tbox-ml-dna` (the compiler
 # toolchain) exports BUILD=HOST=x86_64-conda-linux-gnu, which would clobber a $BUILD scratch path
 # the instant LEG a's env activates (job 789 died here: $BUILD/accessions.txt → a bad relative path).
@@ -196,7 +206,8 @@ command -v mlocarna >/dev/null || { echo "FATAL: mlocarna not on PATH — tbox-l
 MLOCARNA_VERSION="$(mlocarna --version 2>&1 || true)"
 echo "$MLOCARNA_VERSION" | grep -q "LocARNA 2.0.1" || { echo "FATAL: mlocarna != LocARNA 2.0.1 (ADR-0002 A13): $MLOCARNA_VERSION" >&2; exit 2; }
 PYTHONHASHSEED=0 PYTHONPATH=src python -m tbox_finder.mining.covariation_producer align-shard \
-  --shard "$JOB_SCRATCH/sample.json" --workroot "$JOB_SCRATCH/work" --cpu 2
+  --shard "$JOB_SCRATCH/sample.json" --workroot "$JOB_SCRATCH/work" --cpu 2 \
+  --align-timeout-s "$ALIGN_TIMEOUT_S"
 
 # ── PRODUCE Stage 3: SCORE (tbox-rscape) ──────────────────────────────────────────────────────────
 conda activate tbox-rscape

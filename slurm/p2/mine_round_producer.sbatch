@@ -32,8 +32,19 @@
 # been measured (the K=50 Phase-1 job ran ONE task at --mem=128G), and lowering it on a guess would
 # risk an OOM mid-array. Quote the wall from the run, never from A10's CPU-only arithmetic.
 #
-# ── SUBMITTED BY mine_round.sbatch (leg c) with --export ROUND/SHARD_DIR/ROUND_DIR and --array=0-(W-1).
-# Standalone (debug) submit: `sbatch --array=0-0 --export=ALL,SHARD_DIR=…,ROUND_DIR=… mine_round_producer.sbatch`
+# ⚠ ONE CANDIDATE CAN CONSUME THE WHOLE SHARD'S WALL — HENCE ALIGN_TIMEOUT_S (P3-15'-e-ii).
+# Job 1205 (the full-corpus run) lost shard 016 to the 12 h wall having completed 1 of its 8
+# alignable candidates: a single mlocarna ran 6h11m without finishing. Across the 47 shards that
+# DID finish, 271 of 272 successful alignments took ≤ 353 s and one took 8500 s at depth 844 — that
+# one candidate is 69 % of all align wall-clock in the corpus. LocARNA's cost climbs steeply in MSA
+# depth (A10 Pin 2's own "scaling caveat"), so the distribution has no useful tail bound and a
+# longer --time is not a fix. ALIGN_TIMEOUT_S bounds each alignment; exceeding it leaves no MSA ⇒
+# `unavailable` ⇒ SPARED (ADR-0005 D14), which costs yield and never correctness.
+#
+# ── SUBMITTED BY mine_round.sbatch (leg c) with --export ROUND/SHARD_DIR/ROUND_DIR/ALIGN_TIMEOUT_S
+# and --array=0-(W-1).
+# Standalone (debug) submit:
+#   `sbatch --array=0-0 --export=ALL,SHARD_DIR=…,ROUND_DIR=…,ALIGN_TIMEOUT_S=600 mine_round_producer.sbatch`
 # VERIFY (artifact-based, §9.3): every task's $ROUND_DIR/status/shard_<t>.SHARD_OK present + its .err
 #   zero bytes; the retrain leg (d) merges the per-shard status tables and fails loud on a gap.
 
@@ -55,6 +66,10 @@ cd "$REPO"
 TASK="${SLURM_ARRAY_TASK_ID:-0}"
 SHARD_DIR="${SHARD_DIR:?set SHARD_DIR (the make-shards output dir) via --export}"
 ROUND_DIR="${ROUND_DIR:?set ROUND_DIR via --export}"
+# Per-candidate mlocarna wall-clock bound; exceeding it ⇒ no MSA ⇒ `unavailable` ⇒ SPARED (D14).
+# Required, no default: it decides which candidates yield a consensus, so the round names it and
+# `--test-only` cannot catch its absence (headers only) — the `:?` is what actually catches it.
+ALIGN_TIMEOUT_S="${ALIGN_TIMEOUT_S:?set ALIGN_TIMEOUT_S (per-candidate mlocarna bound, s) via --export}"
 # Zero-pad the task id to match make-shards' `shard_{i:03d}.json` (covariation_producer.py:199).
 # Build these paths with plain interpolation, NOT `$(printf …)`: the tracked-path gate
 # (tests/unit/test_sbatch_rm_targets.py) cannot resolve a command substitution, so a `rm` on a
@@ -101,7 +116,7 @@ conda activate tbox-locarna
 command -v mlocarna >/dev/null || { echo "FATAL: mlocarna not on PATH — tbox-locarna not created?" >&2; exit 2; }
 mlocarna --version 2>&1 | grep -q "LocARNA 2.0.1" || { echo "FATAL: mlocarna != LocARNA 2.0.1 (ADR-0002 A13)" >&2; exit 2; }
 PYTHONHASHSEED=0 PYTHONPATH=src python -m tbox_finder.mining.covariation_producer align-shard \
-  --shard "$SHARD" --workroot "$BUILD/work" --cpu 2
+  --shard "$SHARD" --workroot "$BUILD/work" --cpu 2 --align-timeout-s "$ALIGN_TIMEOUT_S"
 
 # ── PROMOTE the per-candidate #=GC SS_cons consensus OUT of node-local scratch ────────────────────
 # ADR-0006 A4 makes this artifact load-bearing for criterion (b) as well as (a): (b)'s

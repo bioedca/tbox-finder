@@ -48,7 +48,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
+import signal
 import subprocess
 import sys
 from collections.abc import Sequence
@@ -119,6 +121,16 @@ NOTES = (
 class HomologDbError(RuntimeError):
     """Raised on a malformed genome, a broken integrity invariant, a version drift, or a failed
     round-trip self-recovery — every path that must refuse to certify the DB."""
+
+
+class ToolTimeoutError(HomologDbError):
+    """Raised by :func:`_run` when a tool exceeds its caller-supplied wall-clock bound.
+
+    A distinct type, not a bare :class:`HomologDbError`, because the two mean different things to a
+    fail-closed caller: a non-zero exit is *the tool answering "no"*, while a timeout is *no answer
+    at all*. `covariation_producer.align_shard` maps this one to ``reason="align_timeout"`` and
+    writes no MSA, so the score stage reads ``unavailable`` ⇒ **spared** (ADR-0005 D14).
+    """
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -432,14 +444,80 @@ def tool_path(name: str) -> str:
     return path
 
 
-def _run(cmd: Sequence[str]) -> subprocess.CompletedProcess[str]:
-    """Run a checked subprocess, capturing text output; raise HomologDbError on non-zero exit."""
-    proc = subprocess.run(
-        cmd, capture_output=True, text=True
-    )  # noqa: S603 (tool_path-resolved argv)
+def _run(cmd: Sequence[str], *, timeout_s: float | None = None) -> subprocess.CompletedProcess[str]:
+    """Run a checked subprocess, capturing text output; raise HomologDbError on non-zero exit.
+
+    ``timeout_s`` bounds the call's wall clock; :class:`ToolTimeoutError` is raised if it is
+    exceeded. ``None`` (the default) is the unbounded behaviour every caller had before
+    P3-15'-e-ii, so the certified search/index paths run byte-identically — only the align stage
+    passes a bound, and it passes one explicitly.
+    """
+    if timeout_s is not None and timeout_s <= 0:
+        # A 0/negative bound would time out *every* invocation, and because a timeout is spared
+        # rather than fatal (ADR-0005 D14) that failure is silent: a full round would report
+        # `unavailable` for all 941 candidates and look like a clean, producible-nothing run.
+        raise ValueError(f"timeout_s must be a positive number of seconds, got {timeout_s!r}")
+    if timeout_s is None:
+        proc = subprocess.run(
+            cmd, capture_output=True, text=True
+        )  # noqa: S603 (tool_path-resolved argv)
+    else:
+        proc = _run_bounded(cmd, timeout_s)
     if proc.returncode != 0:
         raise HomologDbError(f"command failed ({proc.returncode}): {' '.join(cmd)}\n{proc.stderr}")
     return proc
+
+
+def _run_bounded(cmd: Sequence[str], timeout_s: float) -> subprocess.CompletedProcess[str]:
+    """:func:`_run`'s bounded arm — the child runs in **its own process group** and a timeout
+    ``SIGKILL``s the whole group.
+
+    ``subprocess.run(timeout=...)`` reaps only the process it spawned. That is not enough here:
+    ``mlocarna`` is a Perl driver that dispatches work to ``locarna`` children (``--threads`` is a
+    real parallelism knob), so killing the driver alone would orphan those children and leave them
+    burning the node's cores — the exact cost this bound exists to stop, minus the process holding
+    the shard open. ``start_new_session=True`` makes the child a session/group leader so
+    :func:`os.killpg` can take the whole tree down (POSIX; this pipeline is Linux-only, §9.2).
+    """
+    with subprocess.Popen(  # noqa: S603 (tool_path-resolved argv, no shell)
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        start_new_session=True,
+    ) as popen:
+        try:
+            stdout, stderr = popen.communicate(timeout=timeout_s)
+        except subprocess.TimeoutExpired:
+            _kill_process_group(popen)
+            stdout, stderr = popen.communicate()  # drain the pipes of the now-dead group
+            raise ToolTimeoutError(
+                f"command exceeded its {timeout_s:g}s bound and was killed: {' '.join(cmd)}"
+            ) from None
+    return subprocess.CompletedProcess(list(cmd), popen.returncode, stdout, stderr)
+
+
+def _kill_process_group(popen: subprocess.Popen[str]) -> None:
+    """``SIGKILL`` the timed-out child's whole process group, falling back to the child alone.
+
+    The self-group check is a **safety interlock, not defensive noise**: this only kills a group
+    because :func:`_run_bounded` put the child in a fresh one. If ``start_new_session=True`` were
+    ever dropped, the child would share *our* process group and this ``killpg`` would SIGKILL the
+    array task that called it — turning a spared candidate into a dead shard, the precise failure
+    the bound exists to prevent. Refuse that and kill only the child.
+    """
+    try:
+        pgid = os.getpgid(popen.pid)
+    except (ProcessLookupError, PermissionError):
+        popen.kill()  # already gone (or not ours) — the direct child is still ours to reap
+        return
+    if pgid == os.getpgrp():
+        popen.kill()
+        return
+    try:
+        os.killpg(pgid, signal.SIGKILL)
+    except (ProcessLookupError, PermissionError):
+        popen.kill()
 
 
 def run_makeblastdb(target_fasta: str | Path, prefix: str | Path, title: str) -> None:
