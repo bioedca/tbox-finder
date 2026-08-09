@@ -459,22 +459,39 @@ def stem_i_threshold_inertness(
         )
         for c in candidates
     )
+    # ⚠ Every row, not row 0: heterogeneous rows would make the published census
+    # under-report the fields present. (The counts above already scan every row, so the
+    # inertness verdict was sound — only the field list was.)
+    field_union: set[str] = set()
+    for c in candidates:
+        field_union.update(c)
+    supplies_neither = not with_extent and not with_mode
     return {
         "n_candidates": len(candidates),
         "n_with_stem_i_extent_nt": len(with_extent),
         "n_with_regulatory_mode": len(with_mode),
-        "manifest_row_fields": sorted(candidates[0]) if candidates else [],
+        "manifest_row_fields": sorted(field_union),
         "thresholds_compared": [low, high],
         "n_rows_that_differ": len(disagreements),
         "n_ultrashort_relax_true_at_either_threshold": n_relaxed,
         "inert": not disagreements and n_relaxed == 0,
+        # ⚠ CONDITIONAL on the counts beside it. As a fixed string it asserted "this
+        # manifest supplies neither field" even on a manifest that supplies one — a
+        # narrative contradicting its own adjacent numbers, which is exactly the shape
+        # a reader trusts and cannot check ([[gate-clauses-need-re-derivation]]).
         "why": (
             "short_stem_i_or_class_ii returns False for a None extent and only the "
             "'translational' regulatory_mode fires the other arm; this manifest supplies "
-            "neither field, so ultrashort_relax is False at every threshold. ADR-0006 A4's "
-            "'an imperfect value errs safe' argument rests on the relaxation firing, so "
-            "that safety margin is structurally absent here and (b) runs as its strict base "
-            "predicate."
+            + (
+                "neither field, so ultrashort_relax is False at every threshold. "
+                if supplies_neither
+                else f"{len(with_extent)} row(s) with stem_i_extent_nt and "
+                f"{len(with_mode)} row(s) with regulatory_mode, so the threshold is not "
+                "inert by absence of the fields. "
+            )
+            + "ADR-0006 A4's 'an imperfect value errs safe' argument rests on the "
+            "relaxation firing, so where it does not fire that safety margin is "
+            "structurally absent and (b) runs as its strict base predicate."
         ),
     }
 
@@ -656,9 +673,17 @@ def positive_control(
     choice in one direction only: a parameter value that fails *this* consensus is
     a value that mines a known T-box.
     """
-    consensus = parse_stockholm(path)
-    pairs = pair_table(consensus.ss_cons)
-    row = consensus.row(0)
+    # ⚠ Same refusal convention as `read_supply`: the caller checks only that the path
+    # is a file, so a malformed one reaches these three calls unguarded and `main` (which
+    # does not catch IndexError) would exit 1 with a traceback.
+    try:
+        consensus = parse_stockholm(path)
+        pairs = pair_table(consensus.ss_cons)
+        row = consensus.row(0)
+    except (ArchitectureError, OSError, ValueError, IndexError) as exc:
+        raise MeasureError(
+            f"positive control {portable_path(path)} could not be parsed: {exc}"
+        ) from exc
     named: dict[str, Any] = {}
     for mhp in min_helix_pairs_values:
         for mnh in min_named_helices_values:
@@ -862,6 +887,23 @@ def measure(
                 f"{non_strings[:2]}; the (a) stratification cannot read them"
             )
         decided = {cid for cid, s in cov_status.items() if s in ("passed", "failed")}
+        # ⚠ The SIBLING of the manifest check above, and it was missing. The covariation
+        # table is a separate operator-supplied input keyed by the same slug: two ids
+        # collapsing onto one slug means last-write-wins, so a candidate is attributed to
+        # the wrong criterion-(a) arm. That shifts `by_covariation_status`,
+        # `control_and_consequence` and `helix_arm_on_covariation_passed` — and every
+        # count still reconciles, so nothing in the report shows it
+        # ([[fixed-one-of-two-identical-things]]).
+        cov_slug_owners: dict[str, list[str]] = {}
+        for cid in sorted(cov_status):
+            cov_slug_owners.setdefault(candidate_slug(cid), []).append(str(cid))
+        cov_collisions = {s: ids for s, ids in cov_slug_owners.items() if len(ids) > 1}
+        if cov_collisions:
+            raise MeasureError(
+                f"{len(cov_collisions)} candidate slug collision(s) in the covariation "
+                f"status, e.g. {sorted(cov_collisions.items())[:2]}; one arm would stand "
+                "for two candidates and the (a) stratification would be misattributed"
+            )
         covariation_by_slug = {candidate_slug(cid): str(state) for cid, state in cov_status.items()}
         supply["covariation"] = {
             "path": portable_path(covariation_status_path),
@@ -1057,8 +1099,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         adr=ADR,
         extra={"schema_version": SCHEMA_VERSION, "external_inputs": external},
     )
-    out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(json.dumps(body, indent=2, sort_keys=True) + "\n")
+    # ⚠ `--out` is operator-supplied and unvalidated too: a read-only directory or an
+    # invalid path component otherwise exits 1 with a traceback while every *input* path
+    # refuses with exit 3. One convention, both directions.
+    try:
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(json.dumps(body, indent=2, sort_keys=True) + "\n")
+    except OSError as exc:
+        print(f"refused: cannot write report to {portable_path(out)}: {exc}", file=sys.stderr)
+        return 3
     print(
         f"measured {body['supply']['n_consensuses_measured']} de-novo consensuses "
         f"over {body['supply']['n_candidates_in_manifest']} candidates -> {out}"

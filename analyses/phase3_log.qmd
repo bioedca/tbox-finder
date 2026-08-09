@@ -5169,3 +5169,34 @@ shape of a file another process wrote is an input, not an invariant** — the th
 where that was the finding, and the second time the *guard I had just added* checked one level less
 deeply than the failure. Post-fix: **50 tests**, **48 sabotages all RED against their NAMED test** +
 2 green negative controls, zero new failures, report re-derived with every number unchanged.
+
+**⚠ REVIEW ROUND 4 — 5 findings (1 major), all real. The count went 5 → 9 → 2 → 5, so no round in
+this step was ever evidence of convergence.** ⚠ Both CodeRabbit paths hit the Fair-Usage limit before
+this round; the `CodeRabbit` PR check read **`pass` with a body of only the rate-limit notice**
+throughout — §5.1's trap, and the gate was carried by completed **CLI** reviews, this one run after
+waiting the limit out rather than escalating to Greptile. (1) **major, and it is
+[[fixed-one-of-two-identical-things]] again** — round 2 added a slug-injectivity guard on the
+manifest and **left its sibling on the covariation table unguarded**. That table is a separate
+operator-supplied input keyed by the same slug, so two ids collapsing is last-write-wins and a
+candidate is attributed to the **wrong criterion-(a) arm**, shifting `by_covariation_status`,
+`control_and_consequence` and `helix_arm_on_covariation_passed` — **with every count still
+reconciling**. (2) `evaluate_tuple`'s "consensus-less candidates are counted, not dropped" test used
+`>=`, so an implementation that marked **every** measured consensus `unavailable` would pass it, and
+the total and sum assertions beside it stay satisfied under exactly that misclassification — a weak
+assertion of mine, now exact. (3) the positive control's parse was unguarded, and `main` does not
+catch `IndexError`. (4) `--out` is operator-supplied too, and the report **write** sat outside the
+refusal convention every *input* path already followed. (5) the inertness block's `why` was a
+**fixed string** asserting "this manifest supplies neither field" even when the counts beside it said
+otherwise — a narrative contradicting its own numbers is the shape a reader trusts and cannot check
+([[gate-clauses-need-re-derivation]]) — and its `manifest_row_fields` census read **row 0 only**.
+Post-fix: **55 tests**, **54 sabotages all RED against their NAMED test** + 2 green negative
+controls, zero new failures, report re-derived with every measured number unchanged.
+
+**⛔ THE §7 DECISION — TAKEN BY THE USER, AND IT IS NOT ONE OF THE PARAMETER SETTINGS.** Presented
+with the four options, the user chose **"measure a matched control first"**: do **not** pin (b)'s
+seven parameters on `n = 1` plus criterion (a) as a proxy. The powered instrument is the **same
+`nhmmer` + `mlocarna` pipeline run on a sample of curated positives**, giving (b)'s sensitivity on
+**known** T-boxes as a rate at every point of this same sweep. It is its own step: curated TBDB
+records carry sequence, not genomic context, so the homolog search needs a host-genome join built
+first. **`P3-15′-f`'s producer run stays blocked**, and the parameter choice is deferred until that
+control exists. This measurement stands as the corpus-side half of the evidence.

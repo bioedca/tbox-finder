@@ -311,7 +311,11 @@ def test_candidates_without_a_consensus_are_counted_unavailable_not_dropped(supp
     root, _ = supply
     items = apm.read_supply(root)
     out = apm.evaluate_tuple(items, _tuple(), n_without_consensus=97)
-    assert out["counts"]["unavailable"] >= 97
+    # EXACT, not `>=`: with `>=` an implementation that wrongly marked every measured
+    # consensus unavailable would report 101 and still pass, and the total and the sum
+    # below both stay satisfied under that misclassification.
+    assert out["counts"]["unavailable"] == 97
+    assert out["counts"]["passed"] + out["counts"]["failed"] == len(items)
     assert out["n_candidates"] == len(items) + 97
     assert sum(out["counts"].values()) == out["n_candidates"]
 
@@ -964,3 +968,93 @@ def test_a_well_formed_covariation_map_is_not_refused(tmp_path, supply):
         positive_control_path=None,
     )
     assert body["supply"]["covariation"]["n_decided"] == 4
+
+
+def test_a_candidate_slug_collision_in_the_covariation_table_is_refused(
+    tmp_path, supply, monkeypatch
+):
+    """The sibling of the manifest check — the covariation table is a separate input.
+
+    Two ids collapsing onto one slug is last-write-wins, so a candidate is attributed
+    to the wrong criterion-(a) arm; ``by_covariation_status``,
+    ``control_and_consequence`` and ``helix_arm_on_covariation_passed`` all shift, and
+    every count still reconciles.
+    """
+    root, ids = supply
+    # The colliding pair appears ONLY in the covariation table, so the manifest's own
+    # (already-tested) guard cannot be what fires.
+    extra = ["EXTRA.1:c1:0:1-2", "EXTRA.2:c1:0:1-2"]
+    cov = tmp_path / "cov.json"
+    cov.write_text(
+        json.dumps(
+            {"status": {**{cid: "passed" for cid in ids}, **{e: "unavailable" for e in extra}}}
+        )
+    )
+    manifest = manifest_for(tmp_path, ids)
+    real_slug = apm.candidate_slug
+    monkeypatch.setattr(
+        apm, "candidate_slug", lambda cid: "collide" if cid in extra else real_slug(cid)
+    )
+    with pytest.raises(apm.MeasureError, match="collision.*in the covariation"):
+        apm.measure(
+            msa_root=root,
+            manifest_path=manifest,
+            covariation_status_path=cov,
+            positive_control_path=None,
+        )
+
+
+def test_a_malformed_positive_control_is_refused_not_traced_back(tmp_path, supply):
+    """``main`` does not catch ``IndexError``, so an unguarded parse exits 1."""
+    root, ids = supply
+    bad = tmp_path / "ctrl.sto"
+    bad.write_text("# STOCKHOLM 1.0\n#=GC SS_cons          ((((....)))\n//\n")
+    with pytest.raises(apm.MeasureError, match="positive control .* could not be parsed"):
+        apm.measure(
+            msa_root=root,
+            manifest_path=manifest_for(tmp_path, ids),
+            covariation_status_path=None,
+            positive_control_path=bad,
+        )
+
+
+def test_an_unwritable_report_path_refuses_with_exit_3(tmp_path, supply):
+    """``--out`` is operator-supplied too; the input paths already follow this rule."""
+    root, ids = supply
+    blocker = tmp_path / "blocker"
+    blocker.write_text("not a directory\n")
+    assert (
+        apm.main(
+            [
+                "measure",
+                "--msa-root",
+                str(root),
+                "--manifest",
+                str(manifest_for(tmp_path, ids)),
+                "--positive-control",
+                str(tmp_path / "absent.sto"),
+                "--out",
+                str(blocker / "report.json"),
+            ]
+        )
+        == 3
+    )
+
+
+def test_the_inertness_narrative_follows_the_counts_beside_it(tmp_path):
+    """As a fixed string it asserted "neither field" on a manifest that supplies one."""
+    neither = apm.stem_i_threshold_inertness([{"candidate_id": "a"}])
+    assert "neither field" in neither["why"]
+    supplied = apm.stem_i_threshold_inertness(
+        [{"candidate_id": "a", "stem_i_extent_nt": 40}, {"candidate_id": "b"}]
+    )
+    assert "neither field" not in supplied["why"]
+    assert "1 row(s) with stem_i_extent_nt" in supplied["why"]
+
+
+def test_the_field_census_sees_every_row_not_only_the_first():
+    """Heterogeneous rows would make the published field list under-report."""
+    out = apm.stem_i_threshold_inertness(
+        [{"candidate_id": "a"}, {"candidate_id": "b", "pool": "x", "score": 1}]
+    )
+    assert out["manifest_row_fields"] == ["candidate_id", "pool", "score"]
