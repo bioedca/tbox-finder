@@ -1,0 +1,2015 @@
+{
+  "adr": "ADR-0006 D3/D6 (criterion (b)), A4 (rule parameters supplied per round), D17 (P6 freeze map); ADR-0005 D14 (unavailable spares)",
+  "bulge_arm": {
+    "acceptor_motif": "UGGN",
+    "bulge_residue_size": {
+      "counts": {
+        "0": 180,
+        "1": 256,
+        "10": 16,
+        "11": 21,
+        "12": 5,
+        "13": 1,
+        "14": 2,
+        "15": 1,
+        "16": 5,
+        "2": 133,
+        "22": 2,
+        "23": 2,
+        "3": 87,
+        "4": 69,
+        "5": 47,
+        "6": 33,
+        "7": 78,
+        "8": 61,
+        "9": 31
+      },
+      "max": 23,
+      "median": 2.0,
+      "min": 0,
+      "n": 1030,
+      "percentiles": {
+        "p50": 2,
+        "p90": 8,
+        "p95": 10,
+        "p99": 14
+      }
+    },
+    "bulge_state_grid": {
+      "ncca=1;range=1-10": {
+        "allow_wobble=false": {
+          "absent": 7,
+          "detected": 231,
+          "undetectable": 40
+        },
+        "allow_wobble=true": {
+          "absent": 7,
+          "detected": 231,
+          "undetectable": 40
+        }
+      },
+      "ncca=1;range=1-10000": {
+        "allow_wobble=false": {
+          "absent": 5,
+          "detected": 253,
+          "undetectable": 20
+        },
+        "allow_wobble=true": {
+          "absent": 5,
+          "detected": 253,
+          "undetectable": 20
+        }
+      },
+      "ncca=1;range=1-20": {
+        "allow_wobble=false": {
+          "absent": 5,
+          "detected": 251,
+          "undetectable": 22
+        },
+        "allow_wobble=true": {
+          "absent": 5,
+          "detected": 251,
+          "undetectable": 22
+        }
+      },
+      "ncca=1;range=1-50": {
+        "allow_wobble=false": {
+          "absent": 5,
+          "detected": 253,
+          "undetectable": 20
+        },
+        "allow_wobble=true": {
+          "absent": 5,
+          "detected": 253,
+          "undetectable": 20
+        }
+      },
+      "ncca=1;range=2-10": {
+        "allow_wobble=false": {
+          "absent": 3,
+          "detected": 218,
+          "undetectable": 57
+        },
+        "allow_wobble=true": {
+          "absent": 3,
+          "detected": 218,
+          "undetectable": 57
+        }
+      },
+      "ncca=1;range=2-10000": {
+        "allow_wobble=false": {
+          "absent": 3,
+          "detected": 245,
+          "undetectable": 30
+        },
+        "allow_wobble=true": {
+          "absent": 3,
+          "detected": 245,
+          "undetectable": 30
+        }
+      },
+      "ncca=1;range=2-20": {
+        "allow_wobble=false": {
+          "absent": 3,
+          "detected": 243,
+          "undetectable": 32
+        },
+        "allow_wobble=true": {
+          "absent": 3,
+          "detected": 243,
+          "undetectable": 32
+        }
+      },
+      "ncca=1;range=2-50": {
+        "allow_wobble=false": {
+          "absent": 3,
+          "detected": 245,
+          "undetectable": 30
+        },
+        "allow_wobble=true": {
+          "absent": 3,
+          "detected": 245,
+          "undetectable": 30
+        }
+      },
+      "ncca=1;range=3-10": {
+        "allow_wobble=false": {
+          "absent": 2,
+          "detected": 203,
+          "undetectable": 73
+        },
+        "allow_wobble=true": {
+          "absent": 2,
+          "detected": 203,
+          "undetectable": 73
+        }
+      },
+      "ncca=1;range=3-10000": {
+        "allow_wobble=false": {
+          "absent": 2,
+          "detected": 232,
+          "undetectable": 44
+        },
+        "allow_wobble=true": {
+          "absent": 2,
+          "detected": 232,
+          "undetectable": 44
+        }
+      },
+      "ncca=1;range=3-20": {
+        "allow_wobble=false": {
+          "absent": 2,
+          "detected": 230,
+          "undetectable": 46
+        },
+        "allow_wobble=true": {
+          "absent": 2,
+          "detected": 230,
+          "undetectable": 46
+        }
+      },
+      "ncca=1;range=3-50": {
+        "allow_wobble=false": {
+          "absent": 2,
+          "detected": 232,
+          "undetectable": 44
+        },
+        "allow_wobble=true": {
+          "absent": 2,
+          "detected": 232,
+          "undetectable": 44
+        }
+      },
+      "ncca=1;range=4-10": {
+        "allow_wobble=false": {
+          "absent": 0,
+          "detected": 189,
+          "undetectable": 89
+        },
+        "allow_wobble=true": {
+          "absent": 0,
+          "detected": 189,
+          "undetectable": 89
+        }
+      },
+      "ncca=1;range=4-10000": {
+        "allow_wobble=false": {
+          "absent": 0,
+          "detected": 220,
+          "undetectable": 58
+        },
+        "allow_wobble=true": {
+          "absent": 0,
+          "detected": 220,
+          "undetectable": 58
+        }
+      },
+      "ncca=1;range=4-20": {
+        "allow_wobble=false": {
+          "absent": 0,
+          "detected": 216,
+          "undetectable": 62
+        },
+        "allow_wobble=true": {
+          "absent": 0,
+          "detected": 216,
+          "undetectable": 62
+        }
+      },
+      "ncca=1;range=4-50": {
+        "allow_wobble=false": {
+          "absent": 0,
+          "detected": 220,
+          "undetectable": 58
+        },
+        "allow_wobble=true": {
+          "absent": 0,
+          "detected": 220,
+          "undetectable": 58
+        }
+      },
+      "ncca=1;range=5-10": {
+        "allow_wobble=false": {
+          "absent": 0,
+          "detected": 173,
+          "undetectable": 105
+        },
+        "allow_wobble=true": {
+          "absent": 0,
+          "detected": 173,
+          "undetectable": 105
+        }
+      },
+      "ncca=1;range=5-10000": {
+        "allow_wobble=false": {
+          "absent": 0,
+          "detected": 207,
+          "undetectable": 71
+        },
+        "allow_wobble=true": {
+          "absent": 0,
+          "detected": 207,
+          "undetectable": 71
+        }
+      },
+      "ncca=1;range=5-20": {
+        "allow_wobble=false": {
+          "absent": 0,
+          "detected": 203,
+          "undetectable": 75
+        },
+        "allow_wobble=true": {
+          "absent": 0,
+          "detected": 203,
+          "undetectable": 75
+        }
+      },
+      "ncca=1;range=5-50": {
+        "allow_wobble=false": {
+          "absent": 0,
+          "detected": 207,
+          "undetectable": 71
+        },
+        "allow_wobble=true": {
+          "absent": 0,
+          "detected": 207,
+          "undetectable": 71
+        }
+      },
+      "ncca=1;range=7-10": {
+        "allow_wobble=false": {
+          "absent": 0,
+          "detected": 134,
+          "undetectable": 144
+        },
+        "allow_wobble=true": {
+          "absent": 0,
+          "detected": 134,
+          "undetectable": 144
+        }
+      },
+      "ncca=1;range=7-10000": {
+        "allow_wobble=false": {
+          "absent": 0,
+          "detected": 168,
+          "undetectable": 110
+        },
+        "allow_wobble=true": {
+          "absent": 0,
+          "detected": 168,
+          "undetectable": 110
+        }
+      },
+      "ncca=1;range=7-20": {
+        "allow_wobble=false": {
+          "absent": 0,
+          "detected": 164,
+          "undetectable": 114
+        },
+        "allow_wobble=true": {
+          "absent": 0,
+          "detected": 164,
+          "undetectable": 114
+        }
+      },
+      "ncca=1;range=7-50": {
+        "allow_wobble=false": {
+          "absent": 0,
+          "detected": 168,
+          "undetectable": 110
+        },
+        "allow_wobble=true": {
+          "absent": 0,
+          "detected": 168,
+          "undetectable": 110
+        }
+      },
+      "ncca=2;range=1-10": {
+        "refused": "bulge_min_nt 1 < ncca_pairing_nt 2: a bulge of 1..1 residues would read 'absent' (minable) rather than 'undetectable' (spared)"
+      },
+      "ncca=2;range=1-10000": {
+        "refused": "bulge_min_nt 1 < ncca_pairing_nt 2: a bulge of 1..1 residues would read 'absent' (minable) rather than 'undetectable' (spared)"
+      },
+      "ncca=2;range=1-20": {
+        "refused": "bulge_min_nt 1 < ncca_pairing_nt 2: a bulge of 1..1 residues would read 'absent' (minable) rather than 'undetectable' (spared)"
+      },
+      "ncca=2;range=1-50": {
+        "refused": "bulge_min_nt 1 < ncca_pairing_nt 2: a bulge of 1..1 residues would read 'absent' (minable) rather than 'undetectable' (spared)"
+      },
+      "ncca=2;range=2-10": {
+        "allow_wobble=false": {
+          "absent": 25,
+          "detected": 196,
+          "undetectable": 57
+        },
+        "allow_wobble=true": {
+          "absent": 25,
+          "detected": 196,
+          "undetectable": 57
+        }
+      },
+      "ncca=2;range=2-10000": {
+        "allow_wobble=false": {
+          "absent": 22,
+          "detected": 226,
+          "undetectable": 30
+        },
+        "allow_wobble=true": {
+          "absent": 22,
+          "detected": 226,
+          "undetectable": 30
+        }
+      },
+      "ncca=2;range=2-20": {
+        "allow_wobble=false": {
+          "absent": 24,
+          "detected": 222,
+          "undetectable": 32
+        },
+        "allow_wobble=true": {
+          "absent": 24,
+          "detected": 222,
+          "undetectable": 32
+        }
+      },
+      "ncca=2;range=2-50": {
+        "allow_wobble=false": {
+          "absent": 22,
+          "detected": 226,
+          "undetectable": 30
+        },
+        "allow_wobble=true": {
+          "absent": 22,
+          "detected": 226,
+          "undetectable": 30
+        }
+      },
+      "ncca=2;range=3-10": {
+        "allow_wobble=false": {
+          "absent": 21,
+          "detected": 184,
+          "undetectable": 73
+        },
+        "allow_wobble=true": {
+          "absent": 21,
+          "detected": 184,
+          "undetectable": 73
+        }
+      },
+      "ncca=2;range=3-10000": {
+        "allow_wobble=false": {
+          "absent": 19,
+          "detected": 215,
+          "undetectable": 44
+        },
+        "allow_wobble=true": {
+          "absent": 19,
+          "detected": 215,
+          "undetectable": 44
+        }
+      },
+      "ncca=2;range=3-20": {
+        "allow_wobble=false": {
+          "absent": 21,
+          "detected": 211,
+          "undetectable": 46
+        },
+        "allow_wobble=true": {
+          "absent": 21,
+          "detected": 211,
+          "undetectable": 46
+        }
+      },
+      "ncca=2;range=3-50": {
+        "allow_wobble=false": {
+          "absent": 19,
+          "detected": 215,
+          "undetectable": 44
+        },
+        "allow_wobble=true": {
+          "absent": 19,
+          "detected": 215,
+          "undetectable": 44
+        }
+      },
+      "ncca=2;range=4-10": {
+        "allow_wobble=false": {
+          "absent": 15,
+          "detected": 174,
+          "undetectable": 89
+        },
+        "allow_wobble=true": {
+          "absent": 15,
+          "detected": 174,
+          "undetectable": 89
+        }
+      },
+      "ncca=2;range=4-10000": {
+        "allow_wobble=false": {
+          "absent": 15,
+          "detected": 205,
+          "undetectable": 58
+        },
+        "allow_wobble=true": {
+          "absent": 15,
+          "detected": 205,
+          "undetectable": 58
+        }
+      },
+      "ncca=2;range=4-20": {
+        "allow_wobble=false": {
+          "absent": 15,
+          "detected": 201,
+          "undetectable": 62
+        },
+        "allow_wobble=true": {
+          "absent": 15,
+          "detected": 201,
+          "undetectable": 62
+        }
+      },
+      "ncca=2;range=4-50": {
+        "allow_wobble=false": {
+          "absent": 15,
+          "detected": 205,
+          "undetectable": 58
+        },
+        "allow_wobble=true": {
+          "absent": 15,
+          "detected": 205,
+          "undetectable": 58
+        }
+      },
+      "ncca=2;range=5-10": {
+        "allow_wobble=false": {
+          "absent": 14,
+          "detected": 159,
+          "undetectable": 105
+        },
+        "allow_wobble=true": {
+          "absent": 14,
+          "detected": 159,
+          "undetectable": 105
+        }
+      },
+      "ncca=2;range=5-10000": {
+        "allow_wobble=false": {
+          "absent": 14,
+          "detected": 193,
+          "undetectable": 71
+        },
+        "allow_wobble=true": {
+          "absent": 14,
+          "detected": 193,
+          "undetectable": 71
+        }
+      },
+      "ncca=2;range=5-20": {
+        "allow_wobble=false": {
+          "absent": 14,
+          "detected": 189,
+          "undetectable": 75
+        },
+        "allow_wobble=true": {
+          "absent": 14,
+          "detected": 189,
+          "undetectable": 75
+        }
+      },
+      "ncca=2;range=5-50": {
+        "allow_wobble=false": {
+          "absent": 14,
+          "detected": 193,
+          "undetectable": 71
+        },
+        "allow_wobble=true": {
+          "absent": 14,
+          "detected": 193,
+          "undetectable": 71
+        }
+      },
+      "ncca=2;range=7-10": {
+        "allow_wobble=false": {
+          "absent": 9,
+          "detected": 125,
+          "undetectable": 144
+        },
+        "allow_wobble=true": {
+          "absent": 9,
+          "detected": 125,
+          "undetectable": 144
+        }
+      },
+      "ncca=2;range=7-10000": {
+        "allow_wobble=false": {
+          "absent": 9,
+          "detected": 159,
+          "undetectable": 110
+        },
+        "allow_wobble=true": {
+          "absent": 9,
+          "detected": 159,
+          "undetectable": 110
+        }
+      },
+      "ncca=2;range=7-20": {
+        "allow_wobble=false": {
+          "absent": 9,
+          "detected": 155,
+          "undetectable": 114
+        },
+        "allow_wobble=true": {
+          "absent": 9,
+          "detected": 155,
+          "undetectable": 114
+        }
+      },
+      "ncca=2;range=7-50": {
+        "allow_wobble=false": {
+          "absent": 9,
+          "detected": 159,
+          "undetectable": 110
+        },
+        "allow_wobble=true": {
+          "absent": 9,
+          "detected": 159,
+          "undetectable": 110
+        }
+      },
+      "ncca=3;range=1-10": {
+        "refused": "bulge_min_nt 1 < ncca_pairing_nt 3: a bulge of 1..2 residues would read 'absent' (minable) rather than 'undetectable' (spared)"
+      },
+      "ncca=3;range=1-10000": {
+        "refused": "bulge_min_nt 1 < ncca_pairing_nt 3: a bulge of 1..2 residues would read 'absent' (minable) rather than 'undetectable' (spared)"
+      },
+      "ncca=3;range=1-20": {
+        "refused": "bulge_min_nt 1 < ncca_pairing_nt 3: a bulge of 1..2 residues would read 'absent' (minable) rather than 'undetectable' (spared)"
+      },
+      "ncca=3;range=1-50": {
+        "refused": "bulge_min_nt 1 < ncca_pairing_nt 3: a bulge of 1..2 residues would read 'absent' (minable) rather than 'undetectable' (spared)"
+      },
+      "ncca=3;range=2-10": {
+        "refused": "bulge_min_nt 2 < ncca_pairing_nt 3: a bulge of 2..2 residues would read 'absent' (minable) rather than 'undetectable' (spared)"
+      },
+      "ncca=3;range=2-10000": {
+        "refused": "bulge_min_nt 2 < ncca_pairing_nt 3: a bulge of 2..2 residues would read 'absent' (minable) rather than 'undetectable' (spared)"
+      },
+      "ncca=3;range=2-20": {
+        "refused": "bulge_min_nt 2 < ncca_pairing_nt 3: a bulge of 2..2 residues would read 'absent' (minable) rather than 'undetectable' (spared)"
+      },
+      "ncca=3;range=2-50": {
+        "refused": "bulge_min_nt 2 < ncca_pairing_nt 3: a bulge of 2..2 residues would read 'absent' (minable) rather than 'undetectable' (spared)"
+      },
+      "ncca=3;range=3-10": {
+        "allow_wobble=false": {
+          "absent": 122,
+          "detected": 83,
+          "undetectable": 73
+        },
+        "allow_wobble=true": {
+          "absent": 122,
+          "detected": 83,
+          "undetectable": 73
+        }
+      },
+      "ncca=3;range=3-10000": {
+        "allow_wobble=false": {
+          "absent": 138,
+          "detected": 96,
+          "undetectable": 44
+        },
+        "allow_wobble=true": {
+          "absent": 138,
+          "detected": 96,
+          "undetectable": 44
+        }
+      },
+      "ncca=3;range=3-20": {
+        "allow_wobble=false": {
+          "absent": 140,
+          "detected": 92,
+          "undetectable": 46
+        },
+        "allow_wobble=true": {
+          "absent": 140,
+          "detected": 92,
+          "undetectable": 46
+        }
+      },
+      "ncca=3;range=3-50": {
+        "allow_wobble=false": {
+          "absent": 138,
+          "detected": 96,
+          "undetectable": 44
+        },
+        "allow_wobble=true": {
+          "absent": 138,
+          "detected": 96,
+          "undetectable": 44
+        }
+      },
+      "ncca=3;range=4-10": {
+        "allow_wobble=false": {
+          "absent": 106,
+          "detected": 83,
+          "undetectable": 89
+        },
+        "allow_wobble=true": {
+          "absent": 106,
+          "detected": 83,
+          "undetectable": 89
+        }
+      },
+      "ncca=3;range=4-10000": {
+        "allow_wobble=false": {
+          "absent": 124,
+          "detected": 96,
+          "undetectable": 58
+        },
+        "allow_wobble=true": {
+          "absent": 124,
+          "detected": 96,
+          "undetectable": 58
+        }
+      },
+      "ncca=3;range=4-20": {
+        "allow_wobble=false": {
+          "absent": 124,
+          "detected": 92,
+          "undetectable": 62
+        },
+        "allow_wobble=true": {
+          "absent": 124,
+          "detected": 92,
+          "undetectable": 62
+        }
+      },
+      "ncca=3;range=4-50": {
+        "allow_wobble=false": {
+          "absent": 124,
+          "detected": 96,
+          "undetectable": 58
+        },
+        "allow_wobble=true": {
+          "absent": 124,
+          "detected": 96,
+          "undetectable": 58
+        }
+      },
+      "ncca=3;range=5-10": {
+        "allow_wobble=false": {
+          "absent": 98,
+          "detected": 75,
+          "undetectable": 105
+        },
+        "allow_wobble=true": {
+          "absent": 98,
+          "detected": 75,
+          "undetectable": 105
+        }
+      },
+      "ncca=3;range=5-10000": {
+        "allow_wobble=false": {
+          "absent": 119,
+          "detected": 88,
+          "undetectable": 71
+        },
+        "allow_wobble=true": {
+          "absent": 119,
+          "detected": 88,
+          "undetectable": 71
+        }
+      },
+      "ncca=3;range=5-20": {
+        "allow_wobble=false": {
+          "absent": 119,
+          "detected": 84,
+          "undetectable": 75
+        },
+        "allow_wobble=true": {
+          "absent": 119,
+          "detected": 84,
+          "undetectable": 75
+        }
+      },
+      "ncca=3;range=5-50": {
+        "allow_wobble=false": {
+          "absent": 119,
+          "detected": 88,
+          "undetectable": 71
+        },
+        "allow_wobble=true": {
+          "absent": 119,
+          "detected": 88,
+          "undetectable": 71
+        }
+      },
+      "ncca=3;range=7-10": {
+        "allow_wobble=false": {
+          "absent": 85,
+          "detected": 49,
+          "undetectable": 144
+        },
+        "allow_wobble=true": {
+          "absent": 85,
+          "detected": 49,
+          "undetectable": 144
+        }
+      },
+      "ncca=3;range=7-10000": {
+        "allow_wobble=false": {
+          "absent": 106,
+          "detected": 62,
+          "undetectable": 110
+        },
+        "allow_wobble=true": {
+          "absent": 106,
+          "detected": 62,
+          "undetectable": 110
+        }
+      },
+      "ncca=3;range=7-20": {
+        "allow_wobble=false": {
+          "absent": 106,
+          "detected": 58,
+          "undetectable": 114
+        },
+        "allow_wobble=true": {
+          "absent": 106,
+          "detected": 58,
+          "undetectable": 114
+        }
+      },
+      "ncca=3;range=7-50": {
+        "allow_wobble=false": {
+          "absent": 106,
+          "detected": 62,
+          "undetectable": 110
+        },
+        "allow_wobble=true": {
+          "absent": 106,
+          "detected": 62,
+          "undetectable": 110
+        }
+      },
+      "ncca=4;range=1-10": {
+        "refused": "bulge_min_nt 1 < ncca_pairing_nt 4: a bulge of 1..3 residues would read 'absent' (minable) rather than 'undetectable' (spared)"
+      },
+      "ncca=4;range=1-10000": {
+        "refused": "bulge_min_nt 1 < ncca_pairing_nt 4: a bulge of 1..3 residues would read 'absent' (minable) rather than 'undetectable' (spared)"
+      },
+      "ncca=4;range=1-20": {
+        "refused": "bulge_min_nt 1 < ncca_pairing_nt 4: a bulge of 1..3 residues would read 'absent' (minable) rather than 'undetectable' (spared)"
+      },
+      "ncca=4;range=1-50": {
+        "refused": "bulge_min_nt 1 < ncca_pairing_nt 4: a bulge of 1..3 residues would read 'absent' (minable) rather than 'undetectable' (spared)"
+      },
+      "ncca=4;range=2-10": {
+        "refused": "bulge_min_nt 2 < ncca_pairing_nt 4: a bulge of 2..3 residues would read 'absent' (minable) rather than 'undetectable' (spared)"
+      },
+      "ncca=4;range=2-10000": {
+        "refused": "bulge_min_nt 2 < ncca_pairing_nt 4: a bulge of 2..3 residues would read 'absent' (minable) rather than 'undetectable' (spared)"
+      },
+      "ncca=4;range=2-20": {
+        "refused": "bulge_min_nt 2 < ncca_pairing_nt 4: a bulge of 2..3 residues would read 'absent' (minable) rather than 'undetectable' (spared)"
+      },
+      "ncca=4;range=2-50": {
+        "refused": "bulge_min_nt 2 < ncca_pairing_nt 4: a bulge of 2..3 residues would read 'absent' (minable) rather than 'undetectable' (spared)"
+      },
+      "ncca=4;range=3-10": {
+        "refused": "bulge_min_nt 3 < ncca_pairing_nt 4: a bulge of 3..3 residues would read 'absent' (minable) rather than 'undetectable' (spared)"
+      },
+      "ncca=4;range=3-10000": {
+        "refused": "bulge_min_nt 3 < ncca_pairing_nt 4: a bulge of 3..3 residues would read 'absent' (minable) rather than 'undetectable' (spared)"
+      },
+      "ncca=4;range=3-20": {
+        "refused": "bulge_min_nt 3 < ncca_pairing_nt 4: a bulge of 3..3 residues would read 'absent' (minable) rather than 'undetectable' (spared)"
+      },
+      "ncca=4;range=3-50": {
+        "refused": "bulge_min_nt 3 < ncca_pairing_nt 4: a bulge of 3..3 residues would read 'absent' (minable) rather than 'undetectable' (spared)"
+      },
+      "ncca=4;range=4-10": {
+        "allow_wobble=false": {
+          "absent": 167,
+          "detected": 22,
+          "undetectable": 89
+        },
+        "allow_wobble=true": {
+          "absent": 167,
+          "detected": 22,
+          "undetectable": 89
+        }
+      },
+      "ncca=4;range=4-10000": {
+        "allow_wobble=false": {
+          "absent": 196,
+          "detected": 24,
+          "undetectable": 58
+        },
+        "allow_wobble=true": {
+          "absent": 196,
+          "detected": 24,
+          "undetectable": 58
+        }
+      },
+      "ncca=4;range=4-20": {
+        "allow_wobble=false": {
+          "absent": 192,
+          "detected": 24,
+          "undetectable": 62
+        },
+        "allow_wobble=true": {
+          "absent": 192,
+          "detected": 24,
+          "undetectable": 62
+        }
+      },
+      "ncca=4;range=4-50": {
+        "allow_wobble=false": {
+          "absent": 196,
+          "detected": 24,
+          "undetectable": 58
+        },
+        "allow_wobble=true": {
+          "absent": 196,
+          "detected": 24,
+          "undetectable": 58
+        }
+      },
+      "ncca=4;range=5-10": {
+        "allow_wobble=false": {
+          "absent": 151,
+          "detected": 22,
+          "undetectable": 105
+        },
+        "allow_wobble=true": {
+          "absent": 151,
+          "detected": 22,
+          "undetectable": 105
+        }
+      },
+      "ncca=4;range=5-10000": {
+        "allow_wobble=false": {
+          "absent": 183,
+          "detected": 24,
+          "undetectable": 71
+        },
+        "allow_wobble=true": {
+          "absent": 183,
+          "detected": 24,
+          "undetectable": 71
+        }
+      },
+      "ncca=4;range=5-20": {
+        "allow_wobble=false": {
+          "absent": 179,
+          "detected": 24,
+          "undetectable": 75
+        },
+        "allow_wobble=true": {
+          "absent": 179,
+          "detected": 24,
+          "undetectable": 75
+        }
+      },
+      "ncca=4;range=5-50": {
+        "allow_wobble=false": {
+          "absent": 183,
+          "detected": 24,
+          "undetectable": 71
+        },
+        "allow_wobble=true": {
+          "absent": 183,
+          "detected": 24,
+          "undetectable": 71
+        }
+      },
+      "ncca=4;range=7-10": {
+        "allow_wobble=false": {
+          "absent": 113,
+          "detected": 21,
+          "undetectable": 144
+        },
+        "allow_wobble=true": {
+          "absent": 113,
+          "detected": 21,
+          "undetectable": 144
+        }
+      },
+      "ncca=4;range=7-10000": {
+        "allow_wobble=false": {
+          "absent": 145,
+          "detected": 23,
+          "undetectable": 110
+        },
+        "allow_wobble=true": {
+          "absent": 145,
+          "detected": 23,
+          "undetectable": 110
+        }
+      },
+      "ncca=4;range=7-20": {
+        "allow_wobble=false": {
+          "absent": 141,
+          "detected": 23,
+          "undetectable": 114
+        },
+        "allow_wobble=true": {
+          "absent": 141,
+          "detected": 23,
+          "undetectable": 114
+        }
+      },
+      "ncca=4;range=7-50": {
+        "allow_wobble=false": {
+          "absent": 145,
+          "detected": 23,
+          "undetectable": 110
+        },
+        "allow_wobble=true": {
+          "absent": 145,
+          "detected": 23,
+          "undetectable": 110
+        }
+      }
+    },
+    "n_consensuses": 278,
+    "n_flanked_bulges_per_consensus": {
+      "counts": {
+        "0": 14,
+        "1": 84,
+        "10": 6,
+        "11": 3,
+        "12": 7,
+        "13": 3,
+        "2": 33,
+        "3": 52,
+        "4": 11,
+        "5": 14,
+        "6": 5,
+        "7": 15,
+        "8": 20,
+        "9": 11
+      },
+      "max": 13,
+      "median": 3.0,
+      "min": 0,
+      "n": 278,
+      "percentiles": {
+        "p50": 3,
+        "p90": 9,
+        "p95": 10,
+        "p99": 12
+      }
+    }
+  },
+  "disclosure": "de-novo A3/A4 mlocarna consensuses of round-0 false-positive-manifest candidates. This is what the de-novo instrument RESOLVES, not what a curated CM-derived structure shows; reports/p3/architecture_freeze.json measures the latter and disclaims itself for this purpose.",
+  "helix_arm": {
+    "expected_helix_elements": [
+      "Stem_I",
+      "Stem_II",
+      "Stem_III",
+      "Antiterminator_Tbox_seq"
+    ],
+    "helix_stack_depth": {
+      "counts": {
+        "10": 12,
+        "11": 15,
+        "12": 11,
+        "13": 25,
+        "14": 9,
+        "15": 5,
+        "2": 144,
+        "3": 299,
+        "4": 160,
+        "5": 114,
+        "6": 131,
+        "7": 46,
+        "8": 18,
+        "9": 13
+      },
+      "max": 15,
+      "median": 4.0,
+      "min": 2,
+      "n": 1002,
+      "percentiles": {
+        "p50": 4,
+        "p90": 8,
+        "p95": 11,
+        "p99": 14
+      }
+    },
+    "max_named_helices": 4,
+    "n_consensuses": 278,
+    "n_helices_by_min_helix_pairs": {
+      "1": {
+        "1": 10,
+        "10": 3,
+        "2": 89,
+        "3": 78,
+        "4": 22,
+        "5": 33,
+        "6": 24,
+        "7": 6,
+        "8": 6,
+        "9": 7
+      },
+      "2": {
+        "1": 10,
+        "10": 3,
+        "2": 89,
+        "3": 78,
+        "4": 22,
+        "5": 33,
+        "6": 24,
+        "7": 6,
+        "8": 6,
+        "9": 7
+      },
+      "3": {
+        "1": 11,
+        "2": 112,
+        "3": 77,
+        "4": 38,
+        "5": 19,
+        "6": 5,
+        "7": 13,
+        "8": 3
+      },
+      "4": {
+        "0": 8,
+        "1": 123,
+        "2": 76,
+        "3": 24,
+        "4": 31,
+        "5": 8,
+        "6": 8
+      },
+      "5": {
+        "0": 23,
+        "1": 156,
+        "2": 65,
+        "3": 23,
+        "4": 11
+      }
+    },
+    "named_elements_present_by_min_helix_pairs_then_min_named_helices": {
+      "1": {
+        "1": {
+          "n_fail": 0,
+          "n_pass": 278,
+          "share_pass": 1.0
+        },
+        "2": {
+          "n_fail": 10,
+          "n_pass": 268,
+          "share_pass": 0.964029
+        },
+        "3": {
+          "n_fail": 99,
+          "n_pass": 179,
+          "share_pass": 0.643885
+        },
+        "4": {
+          "n_fail": 177,
+          "n_pass": 101,
+          "share_pass": 0.363309
+        }
+      },
+      "2": {
+        "1": {
+          "n_fail": 0,
+          "n_pass": 278,
+          "share_pass": 1.0
+        },
+        "2": {
+          "n_fail": 10,
+          "n_pass": 268,
+          "share_pass": 0.964029
+        },
+        "3": {
+          "n_fail": 99,
+          "n_pass": 179,
+          "share_pass": 0.643885
+        },
+        "4": {
+          "n_fail": 177,
+          "n_pass": 101,
+          "share_pass": 0.363309
+        }
+      },
+      "3": {
+        "1": {
+          "n_fail": 0,
+          "n_pass": 278,
+          "share_pass": 1.0
+        },
+        "2": {
+          "n_fail": 11,
+          "n_pass": 267,
+          "share_pass": 0.960432
+        },
+        "3": {
+          "n_fail": 123,
+          "n_pass": 155,
+          "share_pass": 0.557554
+        },
+        "4": {
+          "n_fail": 200,
+          "n_pass": 78,
+          "share_pass": 0.280576
+        }
+      },
+      "4": {
+        "1": {
+          "n_fail": 8,
+          "n_pass": 270,
+          "share_pass": 0.971223
+        },
+        "2": {
+          "n_fail": 131,
+          "n_pass": 147,
+          "share_pass": 0.528777
+        },
+        "3": {
+          "n_fail": 207,
+          "n_pass": 71,
+          "share_pass": 0.255396
+        },
+        "4": {
+          "n_fail": 231,
+          "n_pass": 47,
+          "share_pass": 0.169065
+        }
+      },
+      "5": {
+        "1": {
+          "n_fail": 23,
+          "n_pass": 255,
+          "share_pass": 0.917266
+        },
+        "2": {
+          "n_fail": 179,
+          "n_pass": 99,
+          "share_pass": 0.356115
+        },
+        "3": {
+          "n_fail": 244,
+          "n_pass": 34,
+          "share_pass": 0.122302
+        },
+        "4": {
+          "n_fail": 267,
+          "n_pass": 11,
+          "share_pass": 0.039568
+        }
+      }
+    }
+  },
+  "helix_arm_on_covariation_passed": {
+    "expected_helix_elements": [
+      "Stem_I",
+      "Stem_II",
+      "Stem_III",
+      "Antiterminator_Tbox_seq"
+    ],
+    "helix_stack_depth": {
+      "counts": {
+        "10": 6,
+        "11": 11,
+        "12": 10,
+        "13": 18,
+        "14": 8,
+        "15": 4,
+        "2": 95,
+        "3": 173,
+        "4": 97,
+        "5": 65,
+        "6": 85,
+        "7": 37,
+        "8": 11,
+        "9": 7
+      },
+      "max": 15,
+      "median": 4,
+      "min": 2,
+      "n": 627,
+      "percentiles": {
+        "p50": 4,
+        "p90": 9,
+        "p95": 12,
+        "p99": 14
+      }
+    },
+    "max_named_helices": 4,
+    "n_consensuses": 167,
+    "n_helices_by_min_helix_pairs": {
+      "1": {
+        "10": 2,
+        "2": 46,
+        "3": 53,
+        "4": 13,
+        "5": 30,
+        "6": 15,
+        "7": 3,
+        "8": 2,
+        "9": 3
+      },
+      "2": {
+        "10": 2,
+        "2": 46,
+        "3": 53,
+        "4": 13,
+        "5": 30,
+        "6": 15,
+        "7": 3,
+        "8": 2,
+        "9": 3
+      },
+      "3": {
+        "2": 60,
+        "3": 57,
+        "4": 24,
+        "5": 16,
+        "6": 5,
+        "7": 5
+      },
+      "4": {
+        "1": 61,
+        "2": 58,
+        "3": 16,
+        "4": 27,
+        "5": 4,
+        "6": 1
+      },
+      "5": {
+        "0": 1,
+        "1": 96,
+        "2": 47,
+        "3": 20,
+        "4": 3
+      }
+    },
+    "named_elements_present_by_min_helix_pairs_then_min_named_helices": {
+      "1": {
+        "1": {
+          "n_fail": 0,
+          "n_pass": 167,
+          "share_pass": 1.0
+        },
+        "2": {
+          "n_fail": 0,
+          "n_pass": 167,
+          "share_pass": 1.0
+        },
+        "3": {
+          "n_fail": 46,
+          "n_pass": 121,
+          "share_pass": 0.724551
+        },
+        "4": {
+          "n_fail": 99,
+          "n_pass": 68,
+          "share_pass": 0.407186
+        }
+      },
+      "2": {
+        "1": {
+          "n_fail": 0,
+          "n_pass": 167,
+          "share_pass": 1.0
+        },
+        "2": {
+          "n_fail": 0,
+          "n_pass": 167,
+          "share_pass": 1.0
+        },
+        "3": {
+          "n_fail": 46,
+          "n_pass": 121,
+          "share_pass": 0.724551
+        },
+        "4": {
+          "n_fail": 99,
+          "n_pass": 68,
+          "share_pass": 0.407186
+        }
+      },
+      "3": {
+        "1": {
+          "n_fail": 0,
+          "n_pass": 167,
+          "share_pass": 1.0
+        },
+        "2": {
+          "n_fail": 0,
+          "n_pass": 167,
+          "share_pass": 1.0
+        },
+        "3": {
+          "n_fail": 60,
+          "n_pass": 107,
+          "share_pass": 0.640719
+        },
+        "4": {
+          "n_fail": 117,
+          "n_pass": 50,
+          "share_pass": 0.299401
+        }
+      },
+      "4": {
+        "1": {
+          "n_fail": 0,
+          "n_pass": 167,
+          "share_pass": 1.0
+        },
+        "2": {
+          "n_fail": 61,
+          "n_pass": 106,
+          "share_pass": 0.634731
+        },
+        "3": {
+          "n_fail": 119,
+          "n_pass": 48,
+          "share_pass": 0.287425
+        },
+        "4": {
+          "n_fail": 135,
+          "n_pass": 32,
+          "share_pass": 0.191617
+        }
+      },
+      "5": {
+        "1": {
+          "n_fail": 1,
+          "n_pass": 166,
+          "share_pass": 0.994012
+        },
+        "2": {
+          "n_fail": 97,
+          "n_pass": 70,
+          "share_pass": 0.419162
+        },
+        "3": {
+          "n_fail": 144,
+          "n_pass": 23,
+          "share_pass": 0.137725
+        },
+        "4": {
+          "n_fail": 164,
+          "n_pass": 3,
+          "share_pass": 0.017964
+        }
+      }
+    }
+  },
+  "inert_parameters": {
+    "allow_wobble": {
+      "acceptor_3prime": "NCCA",
+      "inert": true,
+      "motif": "UGGN",
+      "positions_where_wobble_can_fire": [],
+      "why": "allow_wobble is compared against the ACCEPTOR base (WATSON_CRICK[motif_base]); no constrained position of this motif has an acceptor base in WOBBLE_PAIRS, so the flag cannot change any decision for this acceptor end",
+      "wobble_pairs": [
+        "GU",
+        "UG"
+      ]
+    },
+    "stem_i_nt_threshold": {
+      "inert": true,
+      "manifest_row_fields": [
+        "accession",
+        "candidate_id",
+        "locus_end",
+        "locus_start",
+        "pool",
+        "score"
+      ],
+      "n_candidates": 941,
+      "n_rows_that_differ": 0,
+      "n_ultrashort_relax_true_at_either_threshold": 0,
+      "n_with_regulatory_mode": 0,
+      "n_with_stem_i_extent_nt": 0,
+      "thresholds_compared": [
+        1,
+        10000
+      ],
+      "why": "short_stem_i_or_class_ii returns False for a None extent and only the 'translational' regulatory_mode fires the other arm; this manifest supplies neither field, so ultrashort_relax is False at every threshold. ADR-0006 A4's 'an imperfect value errs safe' argument rests on the relaxation firing, so that safety margin is structurally absent here and (b) runs as its strict base predicate."
+    }
+  },
+  "joint": [
+    {
+      "by_covariation_status": {
+        "failed": {
+          "failed": 20,
+          "n": 111,
+          "passed": 91,
+          "share_failed": 0.18018,
+          "unavailable": 0
+        },
+        "passed": {
+          "failed": 5,
+          "n": 167,
+          "passed": 162,
+          "share_failed": 0.02994,
+          "unavailable": 0
+        }
+      },
+      "control_and_consequence": {
+        "n_a_failed": 111,
+        "n_a_passed": 167,
+        "n_b_agrees_with_a_passed": 162,
+        "n_failing_both_a_and_b": 20,
+        "note": "n_failing_both_a_and_b is the largest set (b) can hand to mining: every other candidate is already spared by (a) or has no consensus at all. share_b_agrees_with_a_passed is (b)'s sensitivity against D3's own model-independent anchor and changes no outcome.",
+        "share_b_agrees_with_a_passed": 0.97006
+      },
+      "counts": {
+        "failed": 25,
+        "passed": 253,
+        "unavailable": 663
+      },
+      "label": "loosest_nonvacuous",
+      "n_candidates": 941,
+      "params": {
+        "allow_wobble": false,
+        "bulge_max_nt": 10000,
+        "bulge_min_nt": 1,
+        "min_helix_pairs": 2,
+        "min_named_helices": 1,
+        "ncca_pairing_nt": 1,
+        "stem_i_nt_threshold": 1
+      },
+      "share_failed": 0.026567,
+      "share_failed_of_decided": 0.089928
+    },
+    {
+      "by_covariation_status": {
+        "failed": {
+          "failed": 32,
+          "n": 111,
+          "passed": 79,
+          "share_failed": 0.288288,
+          "unavailable": 0
+        },
+        "passed": {
+          "failed": 20,
+          "n": 167,
+          "passed": 147,
+          "share_failed": 0.11976,
+          "unavailable": 0
+        }
+      },
+      "control_and_consequence": {
+        "n_a_failed": 111,
+        "n_a_passed": 167,
+        "n_b_agrees_with_a_passed": 147,
+        "n_failing_both_a_and_b": 32,
+        "note": "n_failing_both_a_and_b is the largest set (b) can hand to mining: every other candidate is already spared by (a) or has no consensus at all. share_b_agrees_with_a_passed is (b)'s sensitivity against D3's own model-independent anchor and changes no outcome.",
+        "share_b_agrees_with_a_passed": 0.88024
+      },
+      "counts": {
+        "failed": 52,
+        "passed": 226,
+        "unavailable": 663
+      },
+      "label": "sensitive_core",
+      "n_candidates": 941,
+      "params": {
+        "allow_wobble": false,
+        "bulge_max_nt": 50,
+        "bulge_min_nt": 2,
+        "min_helix_pairs": 2,
+        "min_named_helices": 2,
+        "ncca_pairing_nt": 2,
+        "stem_i_nt_threshold": 1
+      },
+      "share_failed": 0.05526,
+      "share_failed_of_decided": 0.18705
+    },
+    {
+      "by_covariation_status": {
+        "failed": {
+          "failed": 66,
+          "n": 111,
+          "passed": 45,
+          "share_failed": 0.594595,
+          "unavailable": 0
+        },
+        "passed": {
+          "failed": 75,
+          "n": 167,
+          "passed": 92,
+          "share_failed": 0.449102,
+          "unavailable": 0
+        }
+      },
+      "control_and_consequence": {
+        "n_a_failed": 111,
+        "n_a_passed": 167,
+        "n_b_agrees_with_a_passed": 92,
+        "n_failing_both_a_and_b": 66,
+        "note": "n_failing_both_a_and_b is the largest set (b) can hand to mining: every other candidate is already spared by (a) or has no consensus at all. share_b_agrees_with_a_passed is (b)'s sensitivity against D3's own model-independent anchor and changes no outcome.",
+        "share_b_agrees_with_a_passed": 0.550898
+      },
+      "counts": {
+        "failed": 141,
+        "passed": 137,
+        "unavailable": 663
+      },
+      "label": "canonical_core_3helix",
+      "n_candidates": 941,
+      "params": {
+        "allow_wobble": false,
+        "bulge_max_nt": 50,
+        "bulge_min_nt": 4,
+        "min_helix_pairs": 2,
+        "min_named_helices": 3,
+        "ncca_pairing_nt": 2,
+        "stem_i_nt_threshold": 1
+      },
+      "share_failed": 0.149841,
+      "share_failed_of_decided": 0.507194
+    },
+    {
+      "by_covariation_status": {
+        "failed": {
+          "failed": 89,
+          "n": 111,
+          "passed": 22,
+          "share_failed": 0.801802,
+          "unavailable": 0
+        },
+        "passed": {
+          "failed": 131,
+          "n": 167,
+          "passed": 36,
+          "share_failed": 0.784431,
+          "unavailable": 0
+        }
+      },
+      "control_and_consequence": {
+        "n_a_failed": 111,
+        "n_a_passed": 167,
+        "n_b_agrees_with_a_passed": 36,
+        "n_failing_both_a_and_b": 89,
+        "note": "n_failing_both_a_and_b is the largest set (b) can hand to mining: every other candidate is already spared by (a) or has no consensus at all. share_b_agrees_with_a_passed is (b)'s sensitivity against D3's own model-independent anchor and changes no outcome.",
+        "share_b_agrees_with_a_passed": 0.215569
+      },
+      "counts": {
+        "failed": 220,
+        "passed": 58,
+        "unavailable": 663
+      },
+      "label": "canonical_core_3helix_ncca3",
+      "n_candidates": 941,
+      "params": {
+        "allow_wobble": false,
+        "bulge_max_nt": 50,
+        "bulge_min_nt": 4,
+        "min_helix_pairs": 2,
+        "min_named_helices": 3,
+        "ncca_pairing_nt": 3,
+        "stem_i_nt_threshold": 1
+      },
+      "share_failed": 0.233794,
+      "share_failed_of_decided": 0.791367
+    },
+    {
+      "by_covariation_status": {
+        "failed": {
+          "failed": 104,
+          "n": 111,
+          "passed": 7,
+          "share_failed": 0.936937,
+          "unavailable": 0
+        },
+        "passed": {
+          "failed": 161,
+          "n": 167,
+          "passed": 6,
+          "share_failed": 0.964072,
+          "unavailable": 0
+        }
+      },
+      "control_and_consequence": {
+        "n_a_failed": 111,
+        "n_a_passed": 167,
+        "n_b_agrees_with_a_passed": 6,
+        "n_failing_both_a_and_b": 104,
+        "note": "n_failing_both_a_and_b is the largest set (b) can hand to mining: every other candidate is already spared by (a) or has no consensus at all. share_b_agrees_with_a_passed is (b)'s sensitivity against D3's own model-independent anchor and changes no outcome.",
+        "share_b_agrees_with_a_passed": 0.035928
+      },
+      "counts": {
+        "failed": 265,
+        "passed": 13,
+        "unavailable": 663
+      },
+      "label": "curated_freeze_transplant",
+      "n_candidates": 941,
+      "params": {
+        "allow_wobble": false,
+        "bulge_max_nt": 50,
+        "bulge_min_nt": 4,
+        "min_helix_pairs": 3,
+        "min_named_helices": 4,
+        "ncca_pairing_nt": 4,
+        "stem_i_nt_threshold": 1
+      },
+      "share_failed": 0.281615,
+      "share_failed_of_decided": 0.953237
+    },
+    {
+      "by_covariation_status": {
+        "failed": {
+          "failed": 107,
+          "n": 111,
+          "passed": 4,
+          "share_failed": 0.963964,
+          "unavailable": 0
+        },
+        "passed": {
+          "failed": 164,
+          "n": 167,
+          "passed": 3,
+          "share_failed": 0.982036,
+          "unavailable": 0
+        }
+      },
+      "control_and_consequence": {
+        "n_a_failed": 111,
+        "n_a_passed": 167,
+        "n_b_agrees_with_a_passed": 3,
+        "n_failing_both_a_and_b": 107,
+        "note": "n_failing_both_a_and_b is the largest set (b) can hand to mining: every other candidate is already spared by (a) or has no consensus at all. share_b_agrees_with_a_passed is (b)'s sensitivity against D3's own model-independent anchor and changes no outcome.",
+        "share_b_agrees_with_a_passed": 0.017964
+      },
+      "counts": {
+        "failed": 271,
+        "passed": 7,
+        "unavailable": 663
+      },
+      "label": "strictest",
+      "n_candidates": 941,
+      "params": {
+        "allow_wobble": false,
+        "bulge_max_nt": 20,
+        "bulge_min_nt": 7,
+        "min_helix_pairs": 5,
+        "min_named_helices": 4,
+        "ncca_pairing_nt": 4,
+        "stem_i_nt_threshold": 1
+      },
+      "share_failed": 0.287991,
+      "share_failed_of_decided": 0.97482
+    }
+  ],
+  "pins_nothing": true,
+  "positive_control": {
+    "bulge_max_nt_used": 50,
+    "bulge_residue_sizes": [
+      8,
+      11
+    ],
+    "bulge_state": {
+      "ncca_pairing_nt=1": "detected",
+      "ncca_pairing_nt=2": "detected",
+      "ncca_pairing_nt=3": "detected",
+      "ncca_pairing_nt=4": "absent"
+    },
+    "caveat": "a single de-novo positive control; it bounds the choice in one direction (a value that fails it mines a known T-box) and supports no rate",
+    "depth": 24,
+    "helix_stack_depths": [
+      5,
+      8,
+      11
+    ],
+    "n": 1,
+    "named_elements_present": {
+      "min_helix_pairs=1;min_named_helices=1": true,
+      "min_helix_pairs=1;min_named_helices=2": true,
+      "min_helix_pairs=1;min_named_helices=3": true,
+      "min_helix_pairs=1;min_named_helices=4": false,
+      "min_helix_pairs=2;min_named_helices=1": true,
+      "min_helix_pairs=2;min_named_helices=2": true,
+      "min_helix_pairs=2;min_named_helices=3": true,
+      "min_helix_pairs=2;min_named_helices=4": false,
+      "min_helix_pairs=3;min_named_helices=1": true,
+      "min_helix_pairs=3;min_named_helices=2": true,
+      "min_helix_pairs=3;min_named_helices=3": true,
+      "min_helix_pairs=3;min_named_helices=4": false,
+      "min_helix_pairs=4;min_named_helices=1": true,
+      "min_helix_pairs=4;min_named_helices=2": true,
+      "min_helix_pairs=4;min_named_helices=3": true,
+      "min_helix_pairs=4;min_named_helices=4": false,
+      "min_helix_pairs=5;min_named_helices=1": true,
+      "min_helix_pairs=5;min_named_helices=2": true,
+      "min_helix_pairs=5;min_named_helices=3": true,
+      "min_helix_pairs=5;min_named_helices=4": false
+    },
+    "path": "data/interim/homolog_msa/certified_positive.sto",
+    "width": 289
+  },
+  "provenance": {
+    "adr": "ADR-0006 D3/D6 (criterion (b)), A4 (rule parameters supplied per round), D17 (P6 freeze map); ADR-0005 D14 (unavailable spares)",
+    "env_lock_hash": null,
+    "extra": {
+      "external_inputs": {
+        "msa_root": "/home/bioedca/.claude/jobs/b0674bf6/tmp/msa_supply",
+        "n_consensuses": 278,
+        "supply_digest_sha256": "90b2fe1b532f2851bbade2884e8498e2ab58a11c418cc00b314840f041c0f862",
+        "supply_origin": "two.amlab:$HOME/tbox-scratch/round_p3_15_supply/msa (SLURM jobs 1205 array 0-47 + 1254 array 16-16, main @ 4d30ea3); retrieved by rsync per slurm/p2/mine_round_producer.sbatch"
+      },
+      "schema_version": "1.0"
+    },
+    "generated_at_utc": "2026-08-09T07:29:10.866570+00:00",
+    "git_sha": "95ebbb4b43bf3ab20c1404e18adba67dd8ee84b7",
+    "inputs": {
+      "/home/bioedca/.claude/jobs/b0674bf6/tmp/covariation_status.json": "3215f0340b9b85bc49a862b66ecc1b7367485d22650277a83894e2e1ef3d8167",
+      "data/interim/homolog_msa/certified_positive.sto": "387b1cac795ec7898eed2c35acbb1429d50949eaaf026899dca124f86c2648a0",
+      "data/processed/mining/round0_fp_manifest.json": "e8aff87d395b3cb70a25c1f1d4ac348daf3da9323baa4c04a32fd3e4060d4b95"
+    },
+    "outputs": {},
+    "rule": "P3-15'-f parameter measurement",
+    "schema_version": "1.0",
+    "script": "/home/bioedca/tbox-phylogeny/tbox-finder/.claude/worktrees/p3-15f-architecture-params/src/tbox_finder/mining/architecture_param_measure.py",
+    "seed": 42
+  },
+  "schema_version": "1.0",
+  "step": "P3-15'-f",
+  "supply": {
+    "alignment_depth": {
+      "counts": {
+        "146": 1,
+        "173": 1,
+        "20": 14,
+        "21": 3,
+        "213": 1,
+        "22": 8,
+        "23": 21,
+        "232": 1,
+        "24": 8,
+        "25": 7,
+        "26": 11,
+        "27": 8,
+        "28": 15,
+        "29": 13,
+        "30": 8,
+        "31": 5,
+        "32": 9,
+        "33": 7,
+        "34": 10,
+        "35": 7,
+        "36": 8,
+        "37": 2,
+        "38": 8,
+        "39": 2,
+        "40": 4,
+        "41": 5,
+        "42": 5,
+        "43": 5,
+        "44": 1,
+        "45": 2,
+        "46": 6,
+        "47": 2,
+        "48": 3,
+        "49": 6,
+        "50": 7,
+        "51": 3,
+        "52": 4,
+        "53": 1,
+        "54": 2,
+        "56": 5,
+        "57": 3,
+        "58": 6,
+        "59": 6,
+        "60": 5,
+        "61": 1,
+        "62": 1,
+        "63": 1,
+        "64": 1,
+        "66": 1,
+        "67": 1,
+        "70": 2,
+        "73": 2,
+        "78": 2,
+        "83": 2,
+        "84": 2,
+        "844": 1,
+        "86": 1,
+        "92": 1
+      },
+      "max": 844,
+      "median": 34.0,
+      "min": 20,
+      "n": 278,
+      "percentiles": {
+        "p50": 34,
+        "p90": 59,
+        "p95": 73,
+        "p99": 173
+      }
+    },
+    "consensus_width": {
+      "counts": {
+        "100": 7,
+        "101": 3,
+        "102": 9,
+        "103": 3,
+        "104": 2,
+        "105": 4,
+        "106": 7,
+        "107": 4,
+        "108": 2,
+        "109": 4,
+        "110": 2,
+        "111": 4,
+        "112": 3,
+        "113": 1,
+        "114": 1,
+        "116": 4,
+        "117": 2,
+        "118": 2,
+        "119": 1,
+        "120": 2,
+        "121": 1,
+        "122": 3,
+        "124": 4,
+        "127": 1,
+        "130": 5,
+        "131": 2,
+        "132": 1,
+        "133": 2,
+        "134": 2,
+        "137": 3,
+        "139": 1,
+        "141": 3,
+        "142": 3,
+        "143": 1,
+        "144": 5,
+        "145": 1,
+        "146": 3,
+        "148": 1,
+        "151": 2,
+        "152": 4,
+        "154": 5,
+        "155": 1,
+        "156": 1,
+        "158": 4,
+        "160": 2,
+        "161": 2,
+        "162": 4,
+        "163": 5,
+        "164": 2,
+        "165": 5,
+        "166": 5,
+        "168": 3,
+        "172": 2,
+        "174": 2,
+        "181": 2,
+        "185": 4,
+        "191": 2,
+        "193": 2,
+        "205": 1,
+        "206": 1,
+        "207": 2,
+        "234": 1,
+        "58": 1,
+        "69": 2,
+        "72": 2,
+        "74": 3,
+        "75": 2,
+        "76": 2,
+        "77": 4,
+        "78": 4,
+        "80": 5,
+        "81": 5,
+        "82": 5,
+        "83": 3,
+        "84": 1,
+        "85": 5,
+        "86": 9,
+        "87": 2,
+        "88": 3,
+        "89": 8,
+        "90": 3,
+        "91": 3,
+        "92": 1,
+        "93": 6,
+        "94": 5,
+        "95": 5,
+        "96": 7,
+        "97": 1,
+        "98": 6,
+        "99": 2
+      },
+      "max": 234,
+      "median": 106.0,
+      "min": 58,
+      "n": 278,
+      "percentiles": {
+        "p50": 106,
+        "p90": 165,
+        "p95": 181,
+        "p99": 206
+      }
+    },
+    "covariation": {
+      "control_note": "criterion (a) R-scape covariation on the same alignment is D3's own model-independent structural anchor; the share of (a)-passed candidates that (b) fails is the share it stops protecting despite independent covariation support. A control, not ground truth: (a) and (b) share their supply.",
+      "counts": {
+        "failed": 111,
+        "passed": 167,
+        "unavailable": 663
+      },
+      "decided_set_equals_supply": true,
+      "n_decided": 278,
+      "path": "/home/bioedca/.claude/jobs/b0674bf6/tmp/covariation_status.json"
+    },
+    "min_sequences_floor": 20,
+    "msa_root": "/home/bioedca/.claude/jobs/b0674bf6/tmp/msa_supply",
+    "n_below_depth_floor": 0,
+    "n_candidates_in_manifest": 941,
+    "n_candidates_without_consensus": 663,
+    "n_consensuses_measured": 278,
+    "supply_digest_sha256": "90b2fe1b532f2851bbade2884e8498e2ab58a11c418cc00b314840f041c0f862",
+    "supply_origin": "two.amlab:$HOME/tbox-scratch/round_p3_15_supply/msa (SLURM jobs 1205 array 0-47 + 1254 array 16-16, main @ 4d30ea3); retrieved by rsync per slurm/p2/mine_round_producer.sbatch"
+  },
+  "sweep": {
+    "allow_wobble": [
+      false,
+      true
+    ],
+    "bulge_max_nt": [
+      10,
+      20,
+      50,
+      10000
+    ],
+    "bulge_min_nt": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      7
+    ],
+    "min_helix_pairs": [
+      1,
+      2,
+      3,
+      4,
+      5
+    ],
+    "min_named_helices": [
+      1,
+      2,
+      3,
+      4
+    ],
+    "ncca_pairing_nt": [
+      1,
+      2,
+      3,
+      4
+    ]
+  }
+}

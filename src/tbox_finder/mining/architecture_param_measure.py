@@ -1,0 +1,883 @@
+"""Measure criterion (b)'s seven rule parameters on the **real de-novo consensuses**.
+
+`P3-15′-f` must supply seven ADR-0006 A4 rule parameters to
+``architecture_producer run-shard``.  Six of them
+(``min_named_helices``, ``min_helix_pairs``, ``bulge_min_nt``, ``bulge_max_nt``,
+``ncca_pairing_nt``, ``allow_wobble``) decide which candidates the round mines;
+the seventh (``stem_i_nt_threshold``) is D6's, supplied per round under A4.
+**No value may be chosen from the curated freeze.**
+``reports/p3/architecture_freeze.json`` disclaims itself for exactly this purpose:
+
+    "measured on CURATED structure, which is CM-derived: this is the localizer's
+    sensitivity on known architecture, NOT the rate at which a de-novo consensus
+    resolves one.  The second number needs the full-corpus (a)/(b) supply run."
+
+That run has now happened (SLURM jobs 1205 + 1254), so this module reads its
+output — the ``msa/<slug>/msa.sto`` A3/A4 comparative consensuses — and reports
+what the **de-novo** instrument actually resolves, at every parameter value in an
+explicit sweep.
+
+Three disciplines this module holds to, each learned the hard way in this repo:
+
+* **It calls the shipped localizer, never a copy.**  Every number here comes out
+  of :mod:`tbox_finder.mining.architecture` — ``parse_stockholm``,
+  ``find_helices``, ``find_bulges``, ``degapped_span``, ``named_elements_status``,
+  ``ncca_bulge_status``, ``localize``, ``architecture_status``.  A second
+  implementation of "what a helix is" would let the measurement and the producer
+  disagree about the very thing the measurement exists to parameterise.
+* **It pins nothing.**  ``pins_nothing: true``, as in the freeze.  It reports
+  distributions; the §7 choice is the user's and lands in the round's provenance.
+* **It reports what a parameter *cannot* decide.**  Two of the seven are inert
+  here, and inertness that is not disclosed reads as a value that was chosen
+  ([[pinned-constant-that-nothing-reads]]).  Both inertness claims below are
+  proved from the shipped code's own semantics, not inferred from a sample.
+
+Run::
+
+    PYTHONPATH=src python -m tbox_finder.mining.architecture_param_measure measure \\
+        --msa-root <dir of <slug>/msa.sto> \\
+        --manifest data/processed/mining/round0_fp_manifest.json \\
+        --covariation-status <covariation_status.json> \\
+        --out reports/p3/architecture_parameter_measurement.json
+"""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import statistics
+import sys
+from collections import Counter
+from collections.abc import Iterable, Mapping, Sequence
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+
+from tbox_finder.mining import architecture as arch
+from tbox_finder.mining.architecture import (
+    ArchitectureError,
+    ConsensusStructure,
+    Localization,
+    acceptor_pairing_motif,
+    architecture_status,
+    degapped_span,
+    find_bulges,
+    find_helices,
+    named_elements_status,
+    ncca_bulge_status,
+    pair_table,
+    parse_stockholm,
+)
+from tbox_finder.mining.covariation_producer import candidate_slug
+from tbox_finder.power import MIN_REAL_HOMOLOG_N
+from tbox_finder.provenance import build_provenance
+
+SCHEMA_VERSION = "1.0"
+STEP = "P3-15'-f"
+ADR = (
+    "ADR-0006 D3/D6 (criterion (b)), A4 (rule parameters supplied per round), "
+    "D17 (P6 freeze map); ADR-0005 D14 (unavailable spares)"
+)
+
+#: The sweep axes.  These are **not** pins and **not** defaults — they are the
+#: values the report tabulates so a reader can see the whole admissible surface.
+#: ``min_named_helices`` is capped by the module's own
+#: :data:`~tbox_finder.mining.architecture.MAX_NAMED_HELICES`, which refuses larger
+#: values rather than making (b) unsatisfiable (D9 row 5 would route the entire
+#: corpus to Tier-2N).
+MIN_HELIX_PAIRS_SWEEP: tuple[int, ...] = (1, 2, 3, 4, 5)
+MIN_NAMED_HELICES_SWEEP: tuple[int, ...] = tuple(range(1, arch.MAX_NAMED_HELICES + 1))
+BULGE_MIN_NT_SWEEP: tuple[int, ...] = (1, 2, 3, 4, 5, 7)
+BULGE_MAX_NT_SWEEP: tuple[int, ...] = (10, 20, 50, 10_000)
+#: Bounded by the acceptor motif's own length — ``ncca_bulge_status`` raises above it.
+NCCA_PAIRING_NT_SWEEP: tuple[int, ...] = tuple(range(1, len(acceptor_pairing_motif()) + 1))
+
+#: Percentiles reported for every size distribution.  Written once so the bulge and
+#: helix blocks cannot drift apart.
+PERCENTILES: tuple[int, ...] = (50, 90, 95, 99)
+
+
+class MeasureError(ValueError):
+    """A measurement could not be made from the supply as given."""
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# Reading the supply
+# ═════════════════════════════════════════════════════════════════════════════
+@dataclass(frozen=True)
+class SupplyItem:
+    """One de-novo consensus, parsed once and reused across the whole sweep.
+
+    ``pairs`` and ``row`` are derived here so a 400-cell sweep re-parses nothing;
+    both come from the shipped primitives, so the sweep sees exactly what
+    ``localize`` would see.
+    """
+
+    slug: str
+    path: Path
+    consensus: ConsensusStructure
+    pairs: tuple[int, ...]
+    row: str
+
+    @property
+    def depth(self) -> int:
+        return self.consensus.n_sequences
+
+
+def read_supply(msa_root: str | Path) -> list[SupplyItem]:
+    """Every ``<slug>/msa.sto`` under ``msa_root``, parsed, in slug order.
+
+    A file that cannot be parsed is **not** skipped silently: the producer would
+    score that candidate ``unavailable`` (⇒ spared), which is a different fact from
+    "the measurement did not look at it", and a measurement that quietly drops rows
+    understates its own denominator.
+    """
+    root = Path(msa_root)
+    if not root.is_dir():
+        raise MeasureError(f"msa root {root} is not a directory")
+    items: list[SupplyItem] = []
+    unreadable: list[tuple[str, str]] = []
+    for sub in sorted(p for p in root.iterdir() if p.is_dir()):
+        sto = sub / "msa.sto"
+        if not sto.is_file():
+            continue
+        try:
+            consensus = parse_stockholm(sto)
+        except (ArchitectureError, OSError, ValueError) as exc:  # pragma: no cover - guard
+            unreadable.append((sub.name, str(exc)))
+            continue
+        items.append(
+            SupplyItem(
+                slug=sub.name,
+                path=sto,
+                consensus=consensus,
+                pairs=tuple(pair_table(consensus.ss_cons)),
+                # The covariation producer writes the candidate's own row first; the
+                # bulge test is a statement about *this* locus, not about the alignment.
+                row=consensus.row(0),
+            )
+        )
+    if unreadable:
+        raise MeasureError(
+            f"{len(unreadable)} consensus file(s) could not be parsed, e.g. {unreadable[:2]}; "
+            "the producer would score these 'unavailable' — measure them, do not drop them"
+        )
+    if not items:
+        raise MeasureError(f"no <slug>/msa.sto found under {root}")
+    return items
+
+
+def supply_digest(items: Sequence[SupplyItem]) -> str:
+    """A single sha256 over ``slug + sha256(bytes)`` of every consensus read.
+
+    The 278 consensuses live on cluster scratch, not in git, so the report must
+    carry something that says *which* supply it measured.  A count is not that: a
+    re-run against a different round directory with the same cardinality would look
+    identical ([[gate-must-bind-to-upstream-evidence]]).
+    """
+    outer = hashlib.sha256()
+    for item in sorted(items, key=lambda i: i.slug):
+        inner = hashlib.sha256(item.path.read_bytes()).hexdigest()
+        outer.update(f"{item.slug}\t{inner}\n".encode())
+    return outer.hexdigest()
+
+
+def _distribution(values: Iterable[int]) -> dict[str, Any]:
+    """Counts + min/max/percentiles for an integer distribution.
+
+    Empty input is reported as ``n: 0`` with null statistics rather than raising —
+    "there were none" is a measurement, and an empty helix or bulge set is a real
+    outcome of a de-novo consensus.
+    """
+    ordered = sorted(values)
+    if not ordered:
+        return {"n": 0, "counts": {}, "min": None, "max": None, "percentiles": {}}
+    return {
+        "n": len(ordered),
+        "counts": {str(k): v for k, v in sorted(Counter(ordered).items())},
+        "min": ordered[0],
+        "max": ordered[-1],
+        "percentiles": {
+            f"p{p}": ordered[min(len(ordered) - 1, int(round((p / 100) * (len(ordered) - 1))))]
+            for p in PERCENTILES
+        },
+        "median": statistics.median(ordered),
+    }
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# The helix arm — D3's `named_elements_present`
+# ═════════════════════════════════════════════════════════════════════════════
+def helix_marginals(
+    items: Sequence[SupplyItem],
+    *,
+    min_helix_pairs_values: Sequence[int],
+    min_named_helices_values: Sequence[int],
+) -> dict[str, Any]:
+    """What the de-novo instrument resolves on the helix arm, at every sweep value.
+
+    ``helix_stack_depth`` is the distribution of ``Helix.n_pairs`` over every helix
+    in every consensus at ``min_pairs=1`` — i.e. before any threshold is applied. It
+    is what says whether ``min_helix_pairs`` has anything to bite on.
+    """
+    stack_depths: list[int] = []
+    for item in items:
+        stack_depths.extend(h.n_pairs for h in find_helices(item.pairs, min_pairs=1))
+
+    n_helices_by_mhp: dict[str, Any] = {}
+    for mhp in min_helix_pairs_values:
+        counts = Counter(len(find_helices(item.pairs, min_pairs=mhp)) for item in items)
+        n_helices_by_mhp[str(mhp)] = {str(k): v for k, v in sorted(counts.items())}
+
+    grid: dict[str, Any] = {}
+    for mhp in min_helix_pairs_values:
+        row: dict[str, Any] = {}
+        for mnh in min_named_helices_values:
+            n_pass = sum(
+                named_elements_status(item.pairs, min_named_helices=mnh, min_helix_pairs=mhp)[0]
+                for item in items
+            )
+            row[str(mnh)] = {
+                "n_pass": n_pass,
+                "n_fail": len(items) - n_pass,
+                "share_pass": round(n_pass / len(items), 6),
+            }
+        grid[str(mhp)] = row
+
+    return {
+        "n_consensuses": len(items),
+        "helix_stack_depth": _distribution(stack_depths),
+        "n_helices_by_min_helix_pairs": n_helices_by_mhp,
+        "named_elements_present_by_min_helix_pairs_then_min_named_helices": grid,
+        "max_named_helices": arch.MAX_NAMED_HELICES,
+        "expected_helix_elements": list(arch.EXPECTED_HELIX_ELEMENTS),
+    }
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# The bulge arm — D3's `ncca_bulge_detected`
+# ═════════════════════════════════════════════════════════════════════════════
+def bulge_marginals(
+    items: Sequence[SupplyItem],
+    *,
+    bulge_min_nt_values: Sequence[int],
+    bulge_max_nt_values: Sequence[int],
+    ncca_pairing_nt_values: Sequence[int],
+    allow_wobble_values: Sequence[bool],
+) -> dict[str, Any]:
+    """The bulge-size distribution, and the three-valued bulge state over the sweep.
+
+    ``bulge_residue_size`` is measured in the **candidate's own degapped residues**,
+    not alignment columns — the same reading ``ncca_bulge_status`` applies, and the
+    reason ``find_bulges`` carries no size filter of its own.
+
+    Cells where ``bulge_min_nt < ncca_pairing_nt`` are **not** silently skipped:
+    ``ncca_bulge_status`` refuses them (a bulge too short to hold the motif would
+    read ``absent`` ⇒ minable rather than ``undetectable`` ⇒ spared), so the report
+    records them as refused with the reason.
+    """
+    residue_sizes: list[int] = []
+    n_bulges_per_consensus: list[int] = []
+    for item in items:
+        bulges = find_bulges(item.pairs)
+        n_bulges_per_consensus.append(len(bulges))
+        residue_sizes.extend(len(degapped_span(item.row, b.start, b.end)) for b in bulges)
+
+    grid: dict[str, Any] = {}
+    for ncca in ncca_pairing_nt_values:
+        for low in bulge_min_nt_values:
+            for high in bulge_max_nt_values:
+                key = f"ncca={ncca};range={low}-{high}"
+                if high < low:
+                    grid[key] = {"refused": "bulge_max_nt < bulge_min_nt"}
+                    continue
+                if low < ncca:
+                    grid[key] = {
+                        "refused": (
+                            f"bulge_min_nt {low} < ncca_pairing_nt {ncca}: a bulge of "
+                            f"{low}..{ncca - 1} residues would read 'absent' (minable) "
+                            "rather than 'undetectable' (spared)"
+                        )
+                    }
+                    continue
+                for wobble in allow_wobble_values:
+                    counts: Counter[str] = Counter()
+                    for item in items:
+                        state, _ = ncca_bulge_status(
+                            item.row,
+                            item.pairs,
+                            bulge_size_range=(low, high),
+                            ncca_pairing_nt=ncca,
+                            allow_wobble=wobble,
+                        )
+                        counts[state] += 1
+                    grid.setdefault(key, {})[f"allow_wobble={str(bool(wobble)).lower()}"] = {
+                        state: counts.get(state, 0) for state in arch.BULGE_STATES
+                    }
+
+    return {
+        "n_consensuses": len(items),
+        "acceptor_motif": acceptor_pairing_motif(),
+        "n_flanked_bulges_per_consensus": _distribution(n_bulges_per_consensus),
+        "bulge_residue_size": _distribution(residue_sizes),
+        "bulge_state_grid": grid,
+    }
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# The two inert parameters, proved rather than sampled
+# ═════════════════════════════════════════════════════════════════════════════
+def wobble_inertness(acceptor_3prime: str = arch.TRNA_ACCEPTOR_3PRIME) -> dict[str, Any]:
+    """Can ``allow_wobble`` change **any** decision for this acceptor end?
+
+    Proved from the module's own constants rather than measured on a sample, because
+    the answer is a property of the motif, not of the corpus.  ``_pairs_with``'s
+    wobble arm asks whether the bulge base wobble-pairs with the **acceptor** base
+    (``WATSON_CRICK[motif_base]``).  So the flag can only ever matter at a motif
+    position whose acceptor base participates in a wobble pair.  For the default
+    ``NCCA`` the constrained motif positions are ``U`` and ``G``, whose acceptor
+    bases are ``A`` and ``C`` — and ``WOBBLE_PAIRS`` is ``{(G,U), (U,G)}``, which
+    contains neither.  ``allow_wobble`` is therefore **structurally inert** here:
+    ``0`` and ``1`` cannot produce different output on any input whatsoever.
+
+    A sample-based version of this claim would be weaker *and* misleading — it would
+    say "no difference was observed", which is what a broken sweep also says
+    ([[namespace-mismatch-invisible-noop]]).
+    """
+    motif = acceptor_pairing_motif(acceptor_3prime)
+    wobble_partners = {partner for _, partner in arch.WOBBLE_PAIRS}
+    live_positions = [
+        {"index": i, "motif_base": base, "acceptor_base": arch.WATSON_CRICK[base]}
+        for i, base in enumerate(motif)
+        if base != arch.ANY_BASE and arch.WATSON_CRICK[base] in wobble_partners
+    ]
+    return {
+        "acceptor_3prime": str(acceptor_3prime),
+        "motif": motif,
+        "wobble_pairs": sorted("".join(p) for p in arch.WOBBLE_PAIRS),
+        "positions_where_wobble_can_fire": live_positions,
+        "inert": not live_positions,
+        "why": (
+            "allow_wobble is compared against the ACCEPTOR base (WATSON_CRICK[motif_base]); "
+            "no constrained position of this motif has an acceptor base in WOBBLE_PAIRS, so "
+            "the flag cannot change any decision for this acceptor end"
+        ),
+    }
+
+
+def stem_i_threshold_inertness(
+    candidates: Sequence[Mapping[str, Any]],
+) -> dict[str, Any]:
+    """Can ``stem_i_nt_threshold`` change **any** decision on this manifest?
+
+    D6 is ``stem_i_extent_nt < stem_i_nt_threshold OR regulatory_mode ==
+    "translational"``, and ``short_stem_i_or_class_ii`` returns ``False`` for a
+    ``None`` extent ("absence of a measurement is not evidence of shortness").  So
+    the threshold is inert on any manifest that supplies neither field — which is a
+    property of the *manifest*, checked here against the real one rather than
+    assumed, because it is the manifest that could change.
+
+    Reported both ways: the field census (why it is inert) **and** an execution
+    control (``short_stem_i_or_class_ii`` evaluated at both ends of the sweep on
+    every row, asserted identical).  The census alone would be a clause read from
+    the requested config; the control alone would not say *why*.
+    """
+    with_extent = [c for c in candidates if c.get("stem_i_extent_nt") is not None]
+    with_mode = [c for c in candidates if c.get("regulatory_mode") is not None]
+    low, high = 1, 10_000
+    disagreements = [
+        str(c.get("candidate_id", c.get("id")))
+        for c in candidates
+        if arch.short_stem_i_or_class_ii(
+            c.get("stem_i_extent_nt"), c.get("regulatory_mode"), stem_i_nt_threshold=low
+        )
+        != arch.short_stem_i_or_class_ii(
+            c.get("stem_i_extent_nt"), c.get("regulatory_mode"), stem_i_nt_threshold=high
+        )
+    ]
+    n_relaxed = sum(
+        arch.short_stem_i_or_class_ii(
+            c.get("stem_i_extent_nt"), c.get("regulatory_mode"), stem_i_nt_threshold=high
+        )
+        for c in candidates
+    )
+    return {
+        "n_candidates": len(candidates),
+        "n_with_stem_i_extent_nt": len(with_extent),
+        "n_with_regulatory_mode": len(with_mode),
+        "manifest_row_fields": sorted(candidates[0]) if candidates else [],
+        "thresholds_compared": [low, high],
+        "n_rows_that_differ": len(disagreements),
+        "n_ultrashort_relax_true_at_either_threshold": n_relaxed,
+        "inert": not disagreements and n_relaxed == 0,
+        "why": (
+            "short_stem_i_or_class_ii returns False for a None extent and only the "
+            "'translational' regulatory_mode fires the other arm; this manifest supplies "
+            "neither field, so ultrashort_relax is False at every threshold. ADR-0006 A4's "
+            "'an imperfect value errs safe' argument rests on the relaxation firing, so "
+            "that safety margin is structurally absent here and (b) runs as its strict base "
+            "predicate."
+        ),
+    }
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# The joint (b) outcome — through the real decision path
+# ═════════════════════════════════════════════════════════════════════════════
+@dataclass(frozen=True)
+class ParamTuple:
+    """One full seven-parameter setting, named so the report is readable."""
+
+    label: str
+    stem_i_nt_threshold: int
+    min_named_helices: int
+    min_helix_pairs: int
+    bulge_min_nt: int
+    bulge_max_nt: int
+    ncca_pairing_nt: int
+    allow_wobble: bool
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "stem_i_nt_threshold": self.stem_i_nt_threshold,
+            "min_named_helices": self.min_named_helices,
+            "min_helix_pairs": self.min_helix_pairs,
+            "bulge_min_nt": self.bulge_min_nt,
+            "bulge_max_nt": self.bulge_max_nt,
+            "ncca_pairing_nt": self.ncca_pairing_nt,
+            "allow_wobble": self.allow_wobble,
+        }
+
+
+def evaluate_tuple(
+    items: Sequence[SupplyItem],
+    params: ParamTuple,
+    *,
+    n_without_consensus: int,
+    covariation_by_slug: Mapping[str, str] | None = None,
+    min_sequences: int = MIN_REAL_HOMOLOG_N,
+) -> dict[str, Any]:
+    """``passed`` / ``failed`` / ``unavailable`` over the whole corpus at ``params``.
+
+    Routed through the shipped ``localize`` → ``architecture_status`` path, not
+    through a re-derived conjunction: the vacuous-pass guard, the A2 Pin 2 depth
+    floor and the ``class_ii_relax``-only-where-undetectable rule all live in
+    ``architecture_status``, and a measurement that reproduced only ``named AND
+    detected`` would be measuring a predicate the producer does not run.
+
+    ``n_without_consensus`` is added as ``unavailable`` — those candidates have no
+    ``msa.sto`` on disk, which ``evaluate_candidate`` scores ``unavailable`` ⇒
+    spared (ADR-0005 D14) before it ever reaches the localizer.
+
+    ``covariation_by_slug`` stratifies the outcome by **criterion (a)**'s own
+    verdict — see :func:`covariation_stratified_note` for why that is the strongest
+    control this corpus can offer.
+    """
+    counts: Counter[str] = Counter()
+    by_cov: dict[str, Counter[str]] = {}
+    for item in items:
+        localization: Localization = arch.localize(
+            item.slug,
+            item.consensus,
+            row=0,
+            # The manifest supplies neither field; passing them explicitly keeps the
+            # measurement's inputs identical to the producer's on this manifest.
+            stem_i_extent_nt=None,
+            regulatory_mode=None,
+            stem_i_nt_threshold=params.stem_i_nt_threshold,
+            class_ii=False,
+            min_named_helices=params.min_named_helices,
+            min_helix_pairs=params.min_helix_pairs,
+            bulge_size_range=(params.bulge_min_nt, params.bulge_max_nt),
+            ncca_pairing_nt=params.ncca_pairing_nt,
+            allow_wobble=params.allow_wobble,
+        )
+        state, _ = architecture_status(localization, min_sequences=min_sequences)
+        counts[state] += 1
+        if covariation_by_slug is not None:
+            arm = covariation_by_slug.get(item.slug, "unknown")
+            by_cov.setdefault(arm, Counter())[state] += 1
+    counts[arch.STATUS_UNAVAILABLE] += int(n_without_consensus)
+    total = sum(counts.values())
+    out: dict[str, Any] = {
+        "params": params.as_dict(),
+        "counts": {k: counts.get(k, 0) for k in ("passed", "failed", "unavailable")},
+        "n_candidates": total,
+        # `failed` is the only minable state: `passed` and `unavailable` both spare
+        # under ADR-0005 D14, so this is the share of the corpus (b) stops protecting.
+        "share_failed": round(counts["failed"] / total, 6) if total else None,
+        "share_failed_of_decided": (
+            round(counts["failed"] / (counts["passed"] + counts["failed"]), 6)
+            if (counts["passed"] + counts["failed"])
+            else None
+        ),
+    }
+    if covariation_by_slug is not None:
+        out["by_covariation_status"] = {
+            arm: {
+                **{k: c.get(k, 0) for k in ("passed", "failed", "unavailable")},
+                "n": sum(c.values()),
+                "share_failed": (
+                    round(c["failed"] / sum(c.values()), 6) if sum(c.values()) else None
+                ),
+            }
+            for arm, c in sorted(by_cov.items())
+        }
+        a_passed = by_cov.get("passed", Counter())
+        a_failed = by_cov.get("failed", Counter())
+        n_a_passed = sum(a_passed.values())
+        out["control_and_consequence"] = {
+            # Sparing is a DISJUNCTION (ADR-0005 D14): a candidate criterion (a) spared
+            # is spared whatever (b) says. So (b)'s verdict changes an outcome on exactly
+            # one stratum — the candidates (a) decided against — and the (a)-passed
+            # stratum is a free sensitivity control that costs no yield either way.
+            "n_a_passed": n_a_passed,
+            "n_b_agrees_with_a_passed": a_passed.get("passed", 0),
+            "share_b_agrees_with_a_passed": (
+                round(a_passed.get("passed", 0) / n_a_passed, 6) if n_a_passed else None
+            ),
+            "n_a_failed": sum(a_failed.values()),
+            "n_failing_both_a_and_b": a_failed.get("failed", 0),
+            "note": (
+                "n_failing_both_a_and_b is the largest set (b) can hand to mining: every "
+                "other candidate is already spared by (a) or has no consensus at all. "
+                "share_b_agrees_with_a_passed is (b)'s sensitivity against D3's own "
+                "model-independent anchor and changes no outcome."
+            ),
+        }
+    return out
+
+
+def covariation_stratified_note() -> str:
+    """Why criterion (a)'s verdict is the strongest control this corpus offers.
+
+    Every consensus measured here belongs to a round-0 **false-positive-manifest**
+    candidate, so none of them is a known positive and the corpus supplies no
+    ground truth of its own.  What it does supply is a *second, independent*
+    structural instrument: criterion (a), R-scape covariation on the very same
+    alignment.  ADR-0006 D3 calls (a) "the model-independent structural anchor
+    [that] remains … even under both (b) relaxations", so a candidate that (a)
+    scored ``passed`` carries statistically-supported covariation — the best
+    available evidence that a real structured RNA is there.
+
+    The diagnostic is therefore: **at a given parameter setting, what share of the
+    (a)-``passed`` candidates does (b) ``fail``?**  Those are the candidates (b)
+    would stop protecting *despite* independent covariation support, and each one
+    is a plausible real T-box entering the training set as a hard negative.
+
+    ⚠ It is a control, not ground truth: (a) ``passed`` is evidence of structure,
+    not of T-box identity, and the two criteria read the same MSA (ADR-0006 A4), so
+    they are **not** independent in their supply — only in what they test on it.
+    """
+    return (
+        "criterion (a) R-scape covariation on the same alignment is D3's own "
+        "model-independent structural anchor; the share of (a)-passed candidates that "
+        "(b) fails is the share it stops protecting despite independent covariation "
+        "support. A control, not ground truth: (a) and (b) share their supply."
+    )
+
+
+def positive_control(
+    path: str | Path,
+    *,
+    min_named_helices_values: Sequence[int],
+    min_helix_pairs_values: Sequence[int],
+    ncca_pairing_nt_values: Sequence[int],
+    bulge_max_nt: int,
+) -> dict[str, Any]:
+    """The one **de-novo** positive control the repo owns, swept the same way.
+
+    ``data/interim/homolog_msa/certified_positive.sto`` is a real ``mlocarna``
+    consensus of a **known** T-box's own homolog set (the A3/A4 instrument, job
+    766) — the only place in this repo where the de-novo instrument has been run on
+    something already believed positive.  Every other consensus measured here is a
+    round-0 **false-positive-manifest** candidate of unknown status, so nothing else
+    in the supply can say where the instrument's sensitivity limit is.
+
+    ⚠ **n = 1.**  This is a single record and cannot support a rate.  It bounds the
+    choice in one direction only: a parameter value that fails *this* consensus is
+    a value that mines a known T-box.
+    """
+    consensus = parse_stockholm(path)
+    pairs = pair_table(consensus.ss_cons)
+    row = consensus.row(0)
+    named: dict[str, Any] = {}
+    for mhp in min_helix_pairs_values:
+        for mnh in min_named_helices_values:
+            ok, _ = named_elements_status(pairs, min_named_helices=mnh, min_helix_pairs=mhp)
+            named[f"min_helix_pairs={mhp};min_named_helices={mnh}"] = bool(ok)
+    bulge: dict[str, Any] = {}
+    for ncca in ncca_pairing_nt_values:
+        state, _ = ncca_bulge_status(
+            row,
+            pairs,
+            bulge_size_range=(ncca, bulge_max_nt),
+            ncca_pairing_nt=ncca,
+            allow_wobble=False,
+        )
+        bulge[f"ncca_pairing_nt={ncca}"] = state
+    return {
+        "path": str(path),
+        "n": 1,
+        "caveat": (
+            "a single de-novo positive control; it bounds the choice in one direction "
+            "(a value that fails it mines a known T-box) and supports no rate"
+        ),
+        "depth": consensus.n_sequences,
+        "width": consensus.width,
+        "helix_stack_depths": [h.n_pairs for h in find_helices(pairs, min_pairs=1)],
+        "bulge_residue_sizes": sorted(
+            len(degapped_span(row, b.start, b.end)) for b in find_bulges(pairs)
+        ),
+        "named_elements_present": named,
+        "bulge_state": bulge,
+        "bulge_max_nt_used": int(bulge_max_nt),
+    }
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# The report
+# ═════════════════════════════════════════════════════════════════════════════
+def default_tuples() -> tuple[ParamTuple, ...]:
+    """The named joint settings the report scores over the whole corpus.
+
+    Spread deliberately across the admissible surface — the loosest non-vacuous
+    corner, the strictest, and the biologically-argued middle — so the §7 reader can
+    see the yield/sparing trade rather than one recommended point.  ``label`` is
+    descriptive only; nothing here is a pin.
+    """
+    return (
+        ParamTuple("loosest_nonvacuous", 1, 1, 2, 1, 10_000, 1, False),
+        ParamTuple("sensitive_core", 1, 2, 2, 2, 50, 2, False),
+        ParamTuple("canonical_core_3helix", 1, 3, 2, 4, 50, 2, False),
+        ParamTuple("canonical_core_3helix_ncca3", 1, 3, 2, 4, 50, 3, False),
+        ParamTuple("curated_freeze_transplant", 1, 4, 3, 4, 50, 4, False),
+        ParamTuple("strictest", 1, 4, 5, 7, 20, 4, False),
+    )
+
+
+def measure(
+    *,
+    msa_root: str | Path,
+    manifest_path: str | Path,
+    covariation_status_path: str | Path | None,
+    positive_control_path: str | Path | None,
+    supply_origin: str | None = None,
+    tuples: Sequence[ParamTuple] | None = None,
+) -> dict[str, Any]:
+    """The whole measurement, as the report body (no provenance — ``main`` adds it)."""
+    items = read_supply(msa_root)
+    manifest = json.loads(Path(manifest_path).read_text())
+    candidates = manifest["candidates"] if isinstance(manifest, Mapping) else manifest
+    if not isinstance(candidates, list) or not candidates:
+        raise MeasureError(f"manifest {manifest_path} carries no candidate rows")
+
+    manifest_ids = {str(c.get("candidate_id", c.get("id"))) for c in candidates}
+    slugs_present = {item.slug for item in items}
+    slugs_expected = {candidate_slug(cid) for cid in manifest_ids}
+    if not slugs_present <= slugs_expected:
+        raise MeasureError(
+            f"{len(slugs_present - slugs_expected)} consensus dir(s) do not correspond to "
+            "any manifest candidate — the supply and the manifest are not the same corpus"
+        )
+
+    supply: dict[str, Any] = {
+        # ⚠ `msa_root` is wherever the consensuses were staged when this ran, which on a
+        # laptop is a scratch path that will not exist later. `supply_origin` names where
+        # they were PRODUCED and `supply_digest_sha256` says which bytes were read; the
+        # path alone identifies nothing.
+        "msa_root": str(msa_root),
+        "supply_origin": supply_origin,
+        "n_candidates_in_manifest": len(manifest_ids),
+        "n_consensuses_measured": len(items),
+        "n_candidates_without_consensus": len(manifest_ids) - len(items),
+        "supply_digest_sha256": supply_digest(items),
+        "alignment_depth": _distribution([item.depth for item in items]),
+        "min_sequences_floor": MIN_REAL_HOMOLOG_N,
+        "n_below_depth_floor": sum(item.depth < MIN_REAL_HOMOLOG_N for item in items),
+        "consensus_width": _distribution([item.consensus.width for item in items]),
+    }
+
+    covariation_by_slug: dict[str, str] | None = None
+    if covariation_status_path is not None:
+        cov = json.loads(Path(covariation_status_path).read_text())
+        cov_status = cov["status"] if isinstance(cov, Mapping) and "status" in cov else {}
+        decided = {cid for cid, s in cov_status.items() if s in ("passed", "failed")}
+        covariation_by_slug = {candidate_slug(cid): str(state) for cid, state in cov_status.items()}
+        supply["covariation"] = {
+            "path": str(covariation_status_path),
+            "counts": {k: v for k, v in sorted(Counter(cov_status.values()).items())},
+            "n_decided": len(decided),
+            # (b) reads the same MSA (a) does (ADR-0006 A4), so the set of candidates
+            # with a consensus must be exactly (a)'s decided set. If it is not, the two
+            # disjuncts are reading different corpora.
+            "decided_set_equals_supply": {candidate_slug(c) for c in decided} == slugs_present,
+            "control_note": covariation_stratified_note(),
+        }
+
+    body: dict[str, Any] = {
+        "schema_version": SCHEMA_VERSION,
+        "step": STEP,
+        "adr": ADR,
+        "pins_nothing": True,
+        "disclosure": (
+            "de-novo A3/A4 mlocarna consensuses of round-0 false-positive-manifest "
+            "candidates. This is what the de-novo instrument RESOLVES, not what a "
+            "curated CM-derived structure shows; reports/p3/architecture_freeze.json "
+            "measures the latter and disclaims itself for this purpose."
+        ),
+        "supply": supply,
+        "sweep": {
+            "min_helix_pairs": list(MIN_HELIX_PAIRS_SWEEP),
+            "min_named_helices": list(MIN_NAMED_HELICES_SWEEP),
+            "bulge_min_nt": list(BULGE_MIN_NT_SWEEP),
+            "bulge_max_nt": list(BULGE_MAX_NT_SWEEP),
+            "ncca_pairing_nt": list(NCCA_PAIRING_NT_SWEEP),
+            "allow_wobble": [False, True],
+        },
+        "helix_arm": helix_marginals(
+            items,
+            min_helix_pairs_values=MIN_HELIX_PAIRS_SWEEP,
+            min_named_helices_values=MIN_NAMED_HELICES_SWEEP,
+        ),
+        "helix_arm_on_covariation_passed": (
+            helix_marginals(
+                [i for i in items if covariation_by_slug.get(i.slug) == "passed"],
+                min_helix_pairs_values=MIN_HELIX_PAIRS_SWEEP,
+                min_named_helices_values=MIN_NAMED_HELICES_SWEEP,
+            )
+            if covariation_by_slug
+            and any(covariation_by_slug.get(i.slug) == "passed" for i in items)
+            else None
+        ),
+        "bulge_arm": bulge_marginals(
+            items,
+            bulge_min_nt_values=BULGE_MIN_NT_SWEEP,
+            bulge_max_nt_values=BULGE_MAX_NT_SWEEP,
+            ncca_pairing_nt_values=NCCA_PAIRING_NT_SWEEP,
+            allow_wobble_values=(False, True),
+        ),
+        "inert_parameters": {
+            "allow_wobble": wobble_inertness(),
+            "stem_i_nt_threshold": stem_i_threshold_inertness(candidates),
+        },
+        "joint": [
+            {
+                "label": params.label,
+                **evaluate_tuple(
+                    items,
+                    params,
+                    n_without_consensus=len(manifest_ids) - len(items),
+                    covariation_by_slug=covariation_by_slug,
+                ),
+            }
+            for params in (tuples if tuples is not None else default_tuples())
+        ],
+    }
+
+    if positive_control_path is not None and Path(positive_control_path).is_file():
+        body["positive_control"] = positive_control(
+            positive_control_path,
+            min_named_helices_values=MIN_NAMED_HELICES_SWEEP,
+            min_helix_pairs_values=MIN_HELIX_PAIRS_SWEEP,
+            ncca_pairing_nt_values=NCCA_PAIRING_NT_SWEEP,
+            bulge_max_nt=50,
+        )
+    return body
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="architecture_param_measure",
+        description=(
+            "Measure criterion (b)'s seven rule parameters on the real de-novo "
+            "consensuses produced by the P3-15'-e/-e-ii supply run."
+        ),
+    )
+    sub = parser.add_subparsers(dest="command", required=True)
+    m = sub.add_parser("measure", help="write the parameter-measurement report")
+    m.add_argument(
+        "--msa-root",
+        required=True,
+        help="directory of <slug>/msa.sto (the supply run's $ROUND_DIR/msa)",
+    )
+    m.add_argument(
+        "--manifest",
+        default="data/processed/mining/round0_fp_manifest.json",
+        help="the FP manifest whose candidates the supply corresponds to",
+    )
+    m.add_argument(
+        "--covariation-status",
+        default=None,
+        help="optional covariation_status.json, cross-checked against the supply",
+    )
+    m.add_argument(
+        "--positive-control",
+        default="data/interim/homolog_msa/certified_positive.sto",
+        help="the one de-novo positive control (n=1); pass an absent path to skip",
+    )
+    m.add_argument(
+        "--supply-origin",
+        default=None,
+        help=(
+            "free text naming where the consensuses were PRODUCED (cluster path + SLURM "
+            "job ids); --msa-root is only where they were staged to read"
+        ),
+    )
+    m.add_argument(
+        "--out",
+        default="reports/p3/architecture_parameter_measurement.json",
+        help="report path",
+    )
+    return parser
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
+    if args.command != "measure":  # pragma: no cover - argparse enforces
+        raise MeasureError(f"unknown command {args.command!r}")
+    try:
+        body = measure(
+            msa_root=args.msa_root,
+            manifest_path=args.manifest,
+            covariation_status_path=args.covariation_status,
+            positive_control_path=args.positive_control,
+            supply_origin=args.supply_origin,
+        )
+    except (MeasureError, ArchitectureError) as exc:
+        print(f"refused: {exc}", file=sys.stderr)
+        return 3
+    out = Path(args.out)
+    inputs = [args.manifest]
+    if args.covariation_status:
+        inputs.append(args.covariation_status)
+    if Path(args.positive_control).is_file():
+        inputs.append(args.positive_control)
+    body["provenance"] = build_provenance(
+        rule="P3-15'-f parameter measurement",
+        script=__file__,
+        inputs=inputs,
+        outputs=[],
+        adr=ADR,
+        extra={
+            "schema_version": SCHEMA_VERSION,
+            "external_inputs": {
+                "msa_root": str(args.msa_root),
+                "supply_origin": args.supply_origin,
+                "supply_digest_sha256": body["supply"]["supply_digest_sha256"],
+                "n_consensuses": body["supply"]["n_consensuses_measured"],
+            },
+        },
+    )
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(body, indent=2, sort_keys=True) + "\n")
+    print(
+        f"measured {body['supply']['n_consensuses_measured']} de-novo consensuses "
+        f"over {body['supply']['n_candidates_in_manifest']} candidates -> {out}"
+    )
+    return 0
+
+
+if __name__ == "__main__":  # pragma: no cover
+    raise SystemExit(main())

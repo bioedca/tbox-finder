@@ -1,0 +1,558 @@
+"""Unit tests for the P3-15'-f criterion-(b) parameter measurement.
+
+Two properties carry this file, and both are about the measurement being *about*
+the producer rather than about a committed file:
+
+* every number must come out of the shipped
+  :mod:`tbox_finder.mining.architecture` localizer, so the values chosen from the
+  measurement are the values the producer will apply;
+* every "this parameter decides nothing" claim must have a **positive control** —
+  a case where the same function says it *does* decide something. A refusal that
+  refuses everything, and an inertness proof that finds everything inert, are the
+  same failure ([[raises-test-needs-a-positive-control]]).
+"""
+
+from __future__ import annotations
+
+import json
+
+import pytest
+
+from tbox_finder.mining import architecture as arch
+from tbox_finder.mining import architecture_param_measure as apm
+
+# ═════════════════════════════════════════════════════════════════════════════
+# Fixtures — synthetic Stockholm alignments with hand-checked structure
+# ═════════════════════════════════════════════════════════════════════════════
+#: Two 2-pair helices; flanked bulges at columns 2-3 and 12-13.  The first bulge's
+#: residues in the candidate row are ``UG`` — a register of the ``UGGN`` acceptor
+#: motif at ``ncca_pairing_nt=2``.
+SS_TWO_HELIX = "((..((....))..))"
+ROW_WITH_UG = "GGUGGGAAAACCCUGCC"[:16]
+#: The same structure with bulge residues that match no ``UGGN`` register.
+ROW_WITHOUT_MOTIF = "GGACGGAAAACCCCACC"[:16]
+#: One helix, no flanked bulge (its only unpaired run is a hairpin loop).
+SS_ONE_HELIX = "((((....))))"
+ROW_ONE_HELIX = "GGGGAAAACCCC"
+ROW_ONE_HELIX_ALT = "GGGGUUUUCCCC"
+
+
+def stockholm(ss_cons: str, rows: list[tuple[str, str]]) -> str:
+    """A minimal Stockholm alignment, in the layout ``parse_stockholm`` accepts."""
+    body = "".join(f"{name:20s} {seq}\n" for name, seq in rows)
+    return f"# STOCKHOLM 1.0\n{body}{'#=GC SS_cons':20s} {ss_cons}\n//\n"
+
+
+def write_supply(root, spec: dict[str, tuple[str, str, int]]) -> None:
+    """``{slug: (ss_cons, candidate_row, depth)}`` → ``<slug>/msa.sto`` under ``root``."""
+    for slug, (ss_cons, row, depth) in spec.items():
+        rows = [("candidate", row)] + [(f"h{i}", row) for i in range(depth - 1)]
+        d = root / slug
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "msa.sto").write_text(stockholm(ss_cons, rows))
+
+
+def manifest_for(tmp_path, candidate_ids, extra=None):
+    """A minimal FP-manifest file whose candidate ids slug to the supply's dirs."""
+    rows = [{"candidate_id": cid, **(extra or {})} for cid in candidate_ids]
+    path = tmp_path / "manifest.json"
+    path.write_text(json.dumps({"schema_version": "1.0", "candidates": rows}))
+    return path
+
+
+@pytest.fixture
+def supply(tmp_path):
+    """Four consensuses, all at the depth floor, deliberately **asymmetric**.
+
+    One passes (b), three fail it for two different reasons (no motif in the bulge;
+    no second helix and no flanked bulge at all).  The arm sizes are 1/1/2 rather
+    than balanced so that a test which reads a count off the *wrong* stratum gets a
+    different number instead of a coincidentally equal one
+    ([[symmetric-count-fixture-blind-to-inversion]] — the first version of this
+    fixture was 1/1/1 and a real inversion sabotage stayed green against it).
+    """
+    from tbox_finder.mining.covariation_producer import candidate_slug
+
+    ids = [
+        "ACC.1:c1:0:10-20",
+        "ACC.1:c2:0:10-20",
+        "ACC.1:c3:0:10-20",
+        "ACC.1:c4:0:10-20",
+    ]
+    root = tmp_path / "msa"
+    write_supply(
+        root,
+        {
+            candidate_slug(ids[0]): (SS_TWO_HELIX, ROW_WITH_UG, 20),
+            candidate_slug(ids[1]): (SS_TWO_HELIX, ROW_WITHOUT_MOTIF, 20),
+            candidate_slug(ids[2]): (SS_ONE_HELIX, ROW_ONE_HELIX, 20),
+            candidate_slug(ids[3]): (SS_ONE_HELIX, ROW_ONE_HELIX_ALT, 20),
+        },
+    )
+    return root, ids
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# The measurement reads the SHIPPED localizer, not a copy of it
+# ═════════════════════════════════════════════════════════════════════════════
+def test_the_localizer_primitives_are_the_shipped_objects_not_reimplementations():
+    """A second implementation of "what a helix is" is the whole failure mode.
+
+    Identity, not equality: a local ``def find_helices`` in the measurement module
+    would satisfy any behavioural check written against the same fixtures while
+    silently drifting from the producer the parameters are chosen for.
+    """
+    assert apm.find_helices is arch.find_helices
+    assert apm.find_bulges is arch.find_bulges
+    assert apm.degapped_span is arch.degapped_span
+    assert apm.named_elements_status is arch.named_elements_status
+    assert apm.ncca_bulge_status is arch.ncca_bulge_status
+    assert apm.parse_stockholm is arch.parse_stockholm
+    assert apm.architecture_status is arch.architecture_status
+
+
+def test_helix_marginals_agree_with_a_direct_call_to_named_elements_status(supply):
+    """The grid must be ``named_elements_status``' own answer, cell for cell."""
+    root, _ = supply
+    items = apm.read_supply(root)
+    out = apm.helix_marginals(items, min_helix_pairs_values=(1, 2), min_named_helices_values=(1, 2))
+    grid = out["named_elements_present_by_min_helix_pairs_then_min_named_helices"]
+    for mhp in (1, 2):
+        for mnh in (1, 2):
+            expected = sum(
+                arch.named_elements_status(item.pairs, min_named_helices=mnh, min_helix_pairs=mhp)[
+                    0
+                ]
+                for item in items
+            )
+            assert grid[str(mhp)][str(mnh)]["n_pass"] == expected
+
+
+def test_named_helices_of_two_separates_the_one_helix_consensus(supply):
+    """A behavioural anchor: the grid is not uniformly saturated.
+
+    Without this, a grid that returned "everything passes" would satisfy the
+    agreement test above only because both sides were equally wrong.
+    """
+    root, _ = supply
+    items = apm.read_supply(root)
+    grid = apm.helix_marginals(items, min_helix_pairs_values=(2,), min_named_helices_values=(1, 2))[
+        "named_elements_present_by_min_helix_pairs_then_min_named_helices"
+    ]["2"]
+    assert grid["1"]["n_pass"] == 4
+    assert grid["2"]["n_pass"] == 2  # the two one-helix consensuses drop out
+    assert grid["2"]["n_fail"] == 2
+
+
+def test_every_reported_share_reconciles_against_the_counts_beside_it(supply):
+    """Published rates drifted four times in P3-15'-c-ii by hand-copying."""
+    root, _ = supply
+    items = apm.read_supply(root)
+    grid = apm.helix_marginals(
+        items,
+        min_helix_pairs_values=apm.MIN_HELIX_PAIRS_SWEEP,
+        min_named_helices_values=apm.MIN_NAMED_HELICES_SWEEP,
+    )["named_elements_present_by_min_helix_pairs_then_min_named_helices"]
+    for row in grid.values():
+        for cell in row.values():
+            assert cell["n_pass"] + cell["n_fail"] == len(items)
+            assert cell["share_pass"] == pytest.approx(cell["n_pass"] / len(items), abs=1e-6)
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# The bulge arm
+# ═════════════════════════════════════════════════════════════════════════════
+def test_bulge_sizes_are_candidate_residues_not_alignment_columns(tmp_path):
+    """``find_bulges`` deliberately has no size filter; the size is degapped."""
+    root = tmp_path / "msa"
+    # The bulge spans two columns, one of which is a gap in the candidate's own row.
+    write_supply(root, {"slug": (SS_TWO_HELIX, "GG-GGGAAAACCCUGCC"[:16], 20)})
+    items = apm.read_supply(root)
+    sizes = apm.bulge_marginals(
+        items,
+        bulge_min_nt_values=(1,),
+        bulge_max_nt_values=(10,),
+        ncca_pairing_nt_values=(1,),
+        allow_wobble_values=(False,),
+    )["bulge_residue_size"]["counts"]
+    assert sizes.get("1") == 1, sizes  # two columns, one gap ⇒ one residue
+
+
+def test_an_illegal_bulge_floor_is_recorded_as_refused_not_skipped(supply):
+    """``bulge_min_nt < ncca_pairing_nt`` is a fail-OPEN gap the localizer refuses.
+
+    Skipping the cell silently would leave the reader unable to tell a refused
+    combination from one that was never swept.
+    """
+    root, _ = supply
+    items = apm.read_supply(root)
+    grid = apm.bulge_marginals(
+        items,
+        bulge_min_nt_values=(1,),
+        bulge_max_nt_values=(10,),
+        ncca_pairing_nt_values=(3,),
+        allow_wobble_values=(False,),
+    )["bulge_state_grid"]
+    assert "refused" in grid["ncca=3;range=1-10"]
+    assert "ncca_pairing_nt" in grid["ncca=3;range=1-10"]["refused"]
+
+
+def test_bulge_state_counts_are_three_valued_and_sum_to_the_supply(supply):
+    """``undetectable`` must stay distinct from ``absent`` — collapsing them is
+    exactly what makes ``class_ii_relax`` vacuous."""
+    root, _ = supply
+    items = apm.read_supply(root)
+    cell = apm.bulge_marginals(
+        items,
+        bulge_min_nt_values=(2,),
+        bulge_max_nt_values=(10,),
+        ncca_pairing_nt_values=(2,),
+        allow_wobble_values=(False,),
+    )["bulge_state_grid"]["ncca=2;range=2-10"]["allow_wobble=false"]
+    assert set(cell) == set(arch.BULGE_STATES)
+    assert sum(cell.values()) == len(items)
+    assert cell["detected"] == 1  # only the UG-bearing consensus
+    assert cell["absent"] == 1  # bulges present, none pairs the acceptor end
+    assert cell["undetectable"] == 2  # the one-helix consensuses have no flanked bulge
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# Inertness — each claim with a positive control
+# ═════════════════════════════════════════════════════════════════════════════
+def test_allow_wobble_is_structurally_inert_for_the_ncca_acceptor():
+    out = apm.wobble_inertness("NCCA")
+    assert out["motif"] == "UGGN"
+    assert out["inert"] is True
+    assert out["positions_where_wobble_can_fire"] == []
+
+
+def test_wobble_inertness_positive_control_an_acceptor_where_it_does_fire():
+    """Without this, a ``wobble_inertness`` hardwired to ``True`` passes.
+
+    ``CCG`` yields motif ``CGG``; the ``C`` position's acceptor base is ``G``,
+    which **is** in ``WOBBLE_PAIRS``, so the flag is live there.
+    """
+    out = apm.wobble_inertness("CCG")
+    assert out["motif"] == "CGG"
+    assert out["inert"] is False
+    assert [p["motif_base"] for p in out["positions_where_wobble_can_fire"]] == ["C"]
+
+
+def test_the_wobble_inertness_claim_is_confirmed_by_the_localizer_itself(supply):
+    """The structural proof and the shipped detector must agree, both ways.
+
+    On ``NCCA`` the flag changes nothing; on the ``CCG`` control it flips a real
+    verdict — so the proof is tracking the detector, not a coincidence.
+    """
+    root, _ = supply
+    items = apm.read_supply(root)
+    item = items[0]
+    kw = {"bulge_size_range": (2, 10), "ncca_pairing_nt": 2}
+    assert (
+        arch.ncca_bulge_status(item.row, item.pairs, allow_wobble=False, **kw)[0]
+        == arch.ncca_bulge_status(item.row, item.pairs, allow_wobble=True, **kw)[0]
+    )
+    ctrl = {**kw, "acceptor_3prime": "CCG"}
+    assert arch.ncca_bulge_status(item.row, item.pairs, allow_wobble=False, **ctrl)[0] == "absent"
+    assert arch.ncca_bulge_status(item.row, item.pairs, allow_wobble=True, **ctrl)[0] == "detected"
+
+
+def test_stem_i_threshold_is_inert_on_a_manifest_carrying_neither_field():
+    rows = [{"candidate_id": "a"}, {"candidate_id": "b"}]
+    out = apm.stem_i_threshold_inertness(rows)
+    assert out["inert"] is True
+    assert out["n_rows_that_differ"] == 0
+    assert out["n_ultrashort_relax_true_at_either_threshold"] == 0
+
+
+def test_stem_i_inertness_positive_control_a_row_that_carries_the_extent():
+    """A supplied extent makes the threshold decide, so ``inert`` must go False."""
+    rows = [{"candidate_id": "a", "stem_i_extent_nt": 40}]
+    out = apm.stem_i_threshold_inertness(rows)
+    assert out["inert"] is False
+    assert out["n_rows_that_differ"] == 1
+    assert out["n_with_stem_i_extent_nt"] == 1
+
+
+def test_stem_i_inertness_positive_control_a_translational_regulatory_mode():
+    """The mode arm fires regardless of the threshold — inert, but not *unused*.
+
+    The rows agree at both thresholds (so ``n_rows_that_differ`` is 0), yet the
+    relaxation is on, which is a different fact from "the relaxation never fired".
+    Reporting only the disagreement count would call this inert.
+    """
+    rows = [{"candidate_id": "a", "regulatory_mode": "translational"}]
+    out = apm.stem_i_threshold_inertness(rows)
+    assert out["n_rows_that_differ"] == 0
+    assert out["n_ultrashort_relax_true_at_either_threshold"] == 1
+    assert out["inert"] is False
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# The joint outcome
+# ═════════════════════════════════════════════════════════════════════════════
+def _tuple(**kw):
+    base = dict(
+        label="t",
+        stem_i_nt_threshold=1,
+        min_named_helices=2,
+        min_helix_pairs=2,
+        bulge_min_nt=2,
+        bulge_max_nt=10,
+        ncca_pairing_nt=2,
+        allow_wobble=False,
+    )
+    base.update(kw)
+    return apm.ParamTuple(**base)
+
+
+def test_candidates_without_a_consensus_are_counted_unavailable_not_dropped(supply):
+    root, _ = supply
+    items = apm.read_supply(root)
+    out = apm.evaluate_tuple(items, _tuple(), n_without_consensus=97)
+    assert out["counts"]["unavailable"] >= 97
+    assert out["n_candidates"] == len(items) + 97
+    assert sum(out["counts"].values()) == out["n_candidates"]
+
+
+def test_the_joint_outcome_goes_through_architecture_status_depth_floor(tmp_path):
+    """A shallow alignment must read ``unavailable`` (⇒ spared), never ``failed``.
+
+    This is the A2 Pin 2 floor, and it lives in ``architecture_status``. A joint
+    measurement that recomputed ``named AND detected`` would score this consensus
+    ``passed`` and never notice the floor exists.
+    """
+    root = tmp_path / "msa"
+    write_supply(root, {"slug": (SS_TWO_HELIX, ROW_WITH_UG, 3)})
+    items = apm.read_supply(root)
+    assert apm.evaluate_tuple(items, _tuple(), n_without_consensus=0)["counts"] == {
+        "passed": 0,
+        "failed": 0,
+        "unavailable": 1,
+    }
+    # Positive control: lower the floor and the same consensus is decided.
+    decided = apm.evaluate_tuple(items, _tuple(), n_without_consensus=0, min_sequences=1)
+    assert decided["counts"]["unavailable"] == 0
+    assert decided["counts"]["passed"] == 1
+
+
+def test_the_covariation_stratification_partitions_the_supply(supply):
+    """Every measured consensus lands in exactly one (a)-status arm."""
+    root, ids = supply
+    from tbox_finder.mining.covariation_producer import candidate_slug
+
+    by_slug = {
+        candidate_slug(ids[0]): "passed",
+        candidate_slug(ids[1]): "passed",
+        candidate_slug(ids[2]): "failed",
+        candidate_slug(ids[3]): "failed",
+    }
+    out = apm.evaluate_tuple(
+        apm.read_supply(root), _tuple(), n_without_consensus=0, covariation_by_slug=by_slug
+    )
+    arms = out["by_covariation_status"]
+    assert sum(a["n"] for a in arms.values()) == 4
+    cons = out["control_and_consequence"]
+    assert cons["n_a_passed"] == 2
+    assert cons["n_b_agrees_with_a_passed"] == 1  # only the UG-bearing one passes (b)
+    assert cons["share_b_agrees_with_a_passed"] == pytest.approx(0.5, abs=1e-6)
+    # Read off the (a)-FAILED arm: both one-helix consensuses. The (a)-passed arm has
+    # exactly ONE (b) failure, so a swap of the two arms changes this number.
+    assert cons["n_failing_both_a_and_b"] == 2
+    assert arms["passed"]["failed"] == 1
+
+
+def test_default_tuples_are_all_legal_for_the_localizer(supply):
+    """A default whose ``bulge_min_nt < ncca_pairing_nt`` would raise mid-report."""
+    root, _ = supply
+    items = apm.read_supply(root)
+    for params in apm.default_tuples():
+        assert params.bulge_min_nt >= params.ncca_pairing_nt, params.label
+        assert params.bulge_max_nt >= params.bulge_min_nt, params.label
+        assert 1 <= params.min_named_helices <= arch.MAX_NAMED_HELICES, params.label
+        apm.evaluate_tuple(items, params, n_without_consensus=0)
+
+
+def test_default_tuples_span_the_admissible_helix_range():
+    """The sweep must reach both ends, or the report cannot show the trade."""
+    helices = {p.min_named_helices for p in apm.default_tuples()}
+    assert min(helices) == 1
+    assert max(helices) == arch.MAX_NAMED_HELICES
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# Reading the supply
+# ═════════════════════════════════════════════════════════════════════════════
+def test_an_unparseable_consensus_is_refused_not_silently_dropped(tmp_path):
+    root = tmp_path / "msa"
+    write_supply(root, {"good": (SS_TWO_HELIX, ROW_WITH_UG, 20)})
+    (root / "bad").mkdir()
+    (root / "bad" / "msa.sto").write_text("# STOCKHOLM 1.0\nonly_a_row AAAA\n//\n")
+    with pytest.raises(apm.MeasureError, match="could not be parsed"):
+        apm.read_supply(root)
+
+
+def test_an_empty_supply_root_is_refused(tmp_path):
+    root = tmp_path / "msa"
+    root.mkdir()
+    with pytest.raises(apm.MeasureError, match="no <slug>/msa.sto"):
+        apm.read_supply(root)
+
+
+def test_supply_digest_binds_to_the_bytes_not_the_count(tmp_path):
+    """A different round directory of the same cardinality must not look identical."""
+    a, b = tmp_path / "a", tmp_path / "b"
+    write_supply(a, {"s": (SS_TWO_HELIX, ROW_WITH_UG, 20)})
+    write_supply(b, {"s": (SS_TWO_HELIX, ROW_WITHOUT_MOTIF, 20)})
+    assert apm.supply_digest(apm.read_supply(a)) != apm.supply_digest(apm.read_supply(b))
+    assert apm.supply_digest(apm.read_supply(a)) == apm.supply_digest(apm.read_supply(a))
+
+
+def test_a_supply_dir_outside_the_manifest_is_refused(tmp_path, supply):
+    """The supply and the manifest must be the same corpus.
+
+    An internally flawless report about the wrong corpus is the failure mode
+    [[gate-must-bind-to-upstream-evidence]] names.
+    """
+    root, ids = supply
+    path = manifest_for(tmp_path, ids[:2])  # the third consensus has no manifest row
+    with pytest.raises(apm.MeasureError, match="do not correspond to any manifest"):
+        apm.measure(
+            msa_root=root,
+            manifest_path=path,
+            covariation_status_path=None,
+            positive_control_path=None,
+        )
+
+
+def test_a_manifest_with_no_candidates_is_refused(tmp_path, supply):
+    root, _ = supply
+    path = tmp_path / "empty.json"
+    path.write_text(json.dumps({"candidates": []}))
+    with pytest.raises(apm.MeasureError, match="no candidate rows"):
+        apm.measure(
+            msa_root=root,
+            manifest_path=path,
+            covariation_status_path=None,
+            positive_control_path=None,
+        )
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# The report as a whole
+# ═════════════════════════════════════════════════════════════════════════════
+def test_measure_pins_nothing_and_reconciles_its_own_denominators(tmp_path, supply):
+    root, ids = supply
+    body = apm.measure(
+        msa_root=root,
+        manifest_path=manifest_for(tmp_path, ids + ["ACC.1:c9:0:10-20"]),
+        covariation_status_path=None,
+        positive_control_path=None,
+    )
+    assert body["pins_nothing"] is True
+    s = body["supply"]
+    assert s["n_consensuses_measured"] == 4
+    assert s["n_candidates_in_manifest"] == 5
+    assert s["n_candidates_without_consensus"] == 1
+    for entry in body["joint"]:
+        assert entry["n_candidates"] == s["n_candidates_in_manifest"]
+        assert sum(entry["counts"].values()) == s["n_candidates_in_manifest"]
+
+
+def test_measure_cross_checks_the_covariation_decided_set_against_the_supply(tmp_path, supply):
+    """(b) reads the same MSA (a) does, so the two sets must be equal."""
+    from tbox_finder.mining.covariation_producer import candidate_slug
+
+    root, ids = supply
+    cov = tmp_path / "cov.json"
+    decided = {cid: ("passed" if i % 2 == 0 else "failed") for i, cid in enumerate(ids)}
+    cov.write_text(json.dumps({"status": decided}))
+    body = apm.measure(
+        msa_root=root,
+        manifest_path=manifest_for(tmp_path, ids),
+        covariation_status_path=cov,
+        positive_control_path=None,
+    )
+    assert body["supply"]["covariation"]["decided_set_equals_supply"] is True
+    assert body["supply"]["covariation"]["n_decided"] == 4
+    assert candidate_slug(ids[0])  # the join is by slug, not by position
+
+    # Positive control: a decided candidate with no consensus breaks the equality.
+    cov.write_text(json.dumps({"status": {**decided, "ACC.1:c9:0:1-2": "passed"}}))
+    body = apm.measure(
+        msa_root=root,
+        manifest_path=manifest_for(tmp_path, ids + ["ACC.1:c9:0:1-2"]),
+        covariation_status_path=cov,
+        positive_control_path=None,
+    )
+    assert body["supply"]["covariation"]["decided_set_equals_supply"] is False
+
+
+def test_distribution_reports_an_empty_input_rather_than_raising():
+    out = apm._distribution([])
+    assert out["n"] == 0
+    assert out["min"] is None
+    assert out["percentiles"] == {}
+
+
+def test_the_cli_writes_a_report_with_provenance(tmp_path, supply, monkeypatch):
+    root, ids = supply
+    out = tmp_path / "report.json"
+    monkeypatch.chdir(tmp_path)
+    rc = apm.main(
+        [
+            "measure",
+            "--msa-root",
+            str(root),
+            "--manifest",
+            str(manifest_for(tmp_path, ids)),
+            "--positive-control",
+            str(tmp_path / "absent.sto"),
+            "--out",
+            str(out),
+        ]
+    )
+    assert rc == 0
+    body = json.loads(out.read_text())
+    assert body["provenance"]["inputs"], "provenance must hash the manifest it read"
+    assert body["provenance"]["extra"]["external_inputs"]["supply_digest_sha256"] == (
+        body["supply"]["supply_digest_sha256"]
+    )
+    assert "positive_control" not in body
+
+
+def test_the_cli_refuses_a_bad_supply_with_exit_3_not_a_traceback(tmp_path):
+    empty = tmp_path / "msa"
+    empty.mkdir()
+    assert (
+        apm.main(
+            [
+                "measure",
+                "--msa-root",
+                str(empty),
+                "--manifest",
+                str(manifest_for(tmp_path, ["ACC.1:c1:0:1-2"])),
+                "--out",
+                str(tmp_path / "x.json"),
+            ]
+        )
+        == 3
+    )
+
+
+def test_the_positive_control_declares_its_own_n_of_one(tmp_path):
+    """It bounds the choice in one direction and supports no rate — say so."""
+    sto = tmp_path / "ctrl.sto"
+    sto.write_text(stockholm(SS_TWO_HELIX, [("candidate", ROW_WITH_UG), ("h1", ROW_WITH_UG)]))
+    out = apm.positive_control(
+        sto,
+        min_named_helices_values=(1, 2),
+        min_helix_pairs_values=(2,),
+        ncca_pairing_nt_values=(1, 2),
+        bulge_max_nt=10,
+    )
+    assert out["n"] == 1
+    assert "supports no rate" in out["caveat"]
+    assert out["helix_stack_depths"] == [2, 2]
+    assert out["bulge_state"]["ncca_pairing_nt=2"] == "detected"
+    assert out["named_elements_present"]["min_helix_pairs=2;min_named_helices=2"] is True

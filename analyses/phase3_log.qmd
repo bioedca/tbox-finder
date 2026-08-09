@@ -5015,3 +5015,89 @@ rather than correctness.
 
 **Commit.** `squash 2f7849a on main (PR #117)`; the dev-log stanza and this result landed via
 PR #118 and its follow-up.
+
+## Step P3-15′-f — 2026-08-09: what the de-novo instrument actually resolves, and what criterion (b)'s seven parameters may therefore be
+
+**Inputs.** The 278 A3/A4 `mlocarna` comparative consensuses the supply run produced
+(`two.amlab:$HOME/tbox-scratch/round_p3_15_supply/msa/<slug>/msa.sto`, SLURM jobs 1205 + 1254),
+staged locally by `rsync` and bound into the report by a `supply_digest_sha256` over every file's
+bytes; `data/processed/mining/round0_fp_manifest.json` (941 candidates);
+`$ROUND_DIR/covariation_status.json` (941 rows, `passed` 167 / `failed` 111 / `unavailable` 663);
+and `reports/p3/architecture_freeze.json` as the *curated-side* contrast only.
+
+**Process.** `src/tbox_finder/mining/architecture_param_measure.py::measure` sweeps every
+admissible value of the six numeric localization parameters over the 278 real consensuses, calling
+the shipped localizer (`parse_stockholm`, `find_helices`, `find_bulges`, `degapped_span`,
+`named_elements_status`, `ncca_bulge_status`) and, for the joint outcome, the real decision path
+`localize` → `architecture_status`. Nothing is re-implemented: `test_the_localizer_primitives_are_
+the_shipped_objects_not_reimplementations` pins object **identity**, because a private copy of
+"what a helix is" would let the measurement and the producer disagree about the very thing the
+measurement exists to parameterise. The report `pins_nothing: true`.
+
+**Outputs.** `reports/p3/architecture_parameter_measurement.json` (33 KB;
+`supply_digest 90b2fe1b…`), `src/tbox_finder/mining/architecture_param_measure.py`,
+`tests/unit/test_architecture_param_measure.py` (29 tests).
+
+**Validation.** Full `tests/unit` + `tests/golden` under deterministic ordering against a matched
+`main` baseline at `95ebbb4`: **zero new failures**. **28 sabotages, every one RED against its
+NAMED test**, plus **2 negative controls that stay green**. The report re-derives **byte-identically
+apart from `provenance.generated_at_utc`**. `ruff` + `black` clean.
+
+**Decisions.**
+
+*The two instruments disagree by more than a threshold's worth, and that is the headline.*
+`architecture_freeze.json` measured the localizer on **curated, CM-derived** structure: ≥4 named
+helices in **99.3 %** of 8,715 held-out records, and NCCA recovery at all four acceptor contacts in
+**99.87 %**. On the **de-novo** consensuses the same localizer resolves ≥4 helices in **101 of 278
+(36.3 %)** and detects a 4-nt NCCA register in **24 of 278 (8.6 %)**. Transplanting the curated
+numbers onto the de-novo instrument is therefore not "a stricter standard" — it is a different
+instrument's calibration, and it would fail (b) on **265 of 278** consensuses.
+
+*The strongest available control is criterion (a) itself.* Every consensus here belongs to a
+round-0 **false-positive-manifest** candidate, so the corpus carries no ground truth. What it does
+carry is a second, independent structural reading of the same alignment: R-scape covariation, which
+ADR-0006 D3 names as "the model-independent structural anchor [that] remains … even under both (b)
+relaxations". Stratifying (b)'s verdict by (a)'s gives a sensitivity curve that costs nothing to
+measure, because sparing is a **disjunction** — an (a)-`passed` candidate is spared whatever (b)
+says. On the **167** (a)-`passed` candidates, (b) agrees at **97.0 %** (loosest non-vacuous),
+**88.0 %** (`min_named_helices=2`, `ncca_pairing_nt=2`), **55.1 %** (`min_named_helices=3`), and
+**3.6 %** (the curated transplant). ⚠ It is a control, not ground truth: (a) evidences *structure*,
+not T-box identity, and A4 makes the two criteria share their supply, so they are independent only
+in what they test on it.
+
+*Two of the seven parameters cannot decide anything, and both are proved rather than sampled.*
+`ALLOW_WOBBLE` is **structurally inert for the `NCCA` acceptor**: `_pairs_with`'s wobble arm
+compares the bulge base to the **acceptor** base (`WATSON_CRICK[motif_base]`), the `UGGN` motif's
+two constrained positions have acceptor bases `A` and `C`, and `WOBBLE_PAIRS` is `{(G,U),(U,G)}` —
+so no input whatsoever can distinguish `0` from `1`. `STEM_I_NT_THRESHOLD` is inert **on this
+manifest**: `short_stem_i_or_class_ii` returns `False` for a `None` extent, the 941 rows carry
+neither `stem_i_extent_nt` nor `regulatory_mode`, and 0 rows differ between thresholds 1 and
+10,000. Each claim ships with a **positive control** (`CCG` as an acceptor whose motif *is*
+wobble-live; a manifest row carrying an extent; a `translational` row that fires the mode arm while
+both thresholds agree) — an inertness proof that finds everything inert is the same defect as a
+guard that refuses everything. `MIN_HELIX_PAIRS` is a third, weaker case: values 1 and 2 are
+**empirically** indistinguishable here because no consensus contains an isolated pair (minimum
+observed stack depth is 2), but that is a property of the sample, not of the code.
+
+*The one de-novo positive control the repo owns sits exactly on two of the boundaries.*
+`data/interim/homolog_msa/certified_positive.sto` (job 766, 24 × 289) resolves **3** helices (5, 8,
+11 stacked pairs) at every `min_helix_pairs` 1–5, and its bulge reads `detected` at
+`ncca_pairing_nt` 1–3 but **`absent` at 4**. So `min_named_helices = 4` **or**
+`ncca_pairing_nt = 4` mines a known T-box. ⚠ **n = 1**: it bounds the choice in one direction and
+supports no rate. The properly powered instrument would be a matched de-novo control — the same
+`nhmmer` + `mlocarna` pipeline run on a sample of curated positives — which is a separate SLURM
+measurement this step did not take.
+
+**Stops.** The **§7 item-2 seven-parameter choice is OPEN** and is what this step hands to the
+user; the **§9.3 submit-ack** for `slurm/p3/architecture_producer.sbatch` follows it. ⚠ The
+producer's own `ROUND_DIR` default is `$HOME/tbox-scratch/round_p3_15d`, which is **not** where the
+supply lives — `ROUND_DIR=$HOME/tbox-scratch/round_p3_15_supply` must be exported explicitly, and
+`sbatch --test-only` validates headers only, so it would catch neither that nor a missing
+`${VAR:?}` export.
+
+**⚠ Disclosure.** The 278 consensuses this report measures are on **cluster scratch only** — no
+DVC object, no git object — so the committed report is verifiable (by digest) but not locally
+re-derivable. Their production is reproducible from jobs 1205 + 1254; tracking them is a decision
+for the producer-run leg, not something taken here.
+
+**Commit.** (this stanza's commit; squash SHA recorded at merge)
