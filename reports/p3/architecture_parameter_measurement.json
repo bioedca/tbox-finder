@@ -1231,7 +1231,7 @@
         "9": 7
       },
       "max": 15,
-      "median": 4,
+      "median": 4.0,
       "min": 2,
       "n": 627,
       "percentiles": {
@@ -1754,24 +1754,27 @@
     "env_lock_hash": null,
     "extra": {
       "external_inputs": {
-        "msa_root": "/home/bioedca/.claude/jobs/b0674bf6/tmp/msa_supply",
+        "covariation_status": {
+          "name": "covariation_status.json",
+          "sha256": "3215f0340b9b85bc49a862b66ecc1b7367485d22650277a83894e2e1ef3d8167"
+        },
+        "msa_root": "msa_supply",
         "n_consensuses": 278,
         "supply_digest_sha256": "90b2fe1b532f2851bbade2884e8498e2ab58a11c418cc00b314840f041c0f862",
         "supply_origin": "two.amlab:$HOME/tbox-scratch/round_p3_15_supply/msa (SLURM jobs 1205 array 0-47 + 1254 array 16-16, main @ 4d30ea3); retrieved by rsync per slurm/p2/mine_round_producer.sbatch"
       },
       "schema_version": "1.0"
     },
-    "generated_at_utc": "2026-08-09T07:29:10.866570+00:00",
-    "git_sha": "95ebbb4b43bf3ab20c1404e18adba67dd8ee84b7",
+    "generated_at_utc": "2026-08-09T07:43:37.400437+00:00",
+    "git_sha": "4f77bb70551e5ed08662d1f594054345f6e8f62e",
     "inputs": {
-      "/home/bioedca/.claude/jobs/b0674bf6/tmp/covariation_status.json": "3215f0340b9b85bc49a862b66ecc1b7367485d22650277a83894e2e1ef3d8167",
       "data/interim/homolog_msa/certified_positive.sto": "387b1cac795ec7898eed2c35acbb1429d50949eaaf026899dca124f86c2648a0",
       "data/processed/mining/round0_fp_manifest.json": "e8aff87d395b3cb70a25c1f1d4ac348daf3da9323baa4c04a32fd3e4060d4b95"
     },
     "outputs": {},
     "rule": "P3-15'-f parameter measurement",
     "schema_version": "1.0",
-    "script": "/home/bioedca/tbox-phylogeny/tbox-finder/.claude/worktrees/p3-15f-architecture-params/src/tbox_finder/mining/architecture_param_measure.py",
+    "script": "src/tbox_finder/mining/architecture_param_measure.py",
     "seed": 42
   },
   "schema_version": "1.0",
@@ -1962,10 +1965,11 @@
       },
       "decided_set_equals_supply": true,
       "n_decided": 278,
-      "path": "/home/bioedca/.claude/jobs/b0674bf6/tmp/covariation_status.json"
+      "path": "covariation_status.json",
+      "sha256": "3215f0340b9b85bc49a862b66ecc1b7367485d22650277a83894e2e1ef3d8167"
     },
     "min_sequences_floor": 20,
-    "msa_root": "/home/bioedca/.claude/jobs/b0674bf6/tmp/msa_supply",
+    "msa_root": "msa_supply",
     "n_below_depth_floor": 0,
     "n_candidates_in_manifest": 941,
     "n_candidates_without_consensus": 663,

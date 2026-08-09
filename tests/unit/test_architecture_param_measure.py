@@ -15,6 +15,7 @@ the producer rather than about a committed file:
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 
@@ -492,7 +493,25 @@ def test_distribution_reports_an_empty_input_rather_than_raising():
     out = apm._distribution([])
     assert out["n"] == 0
     assert out["min"] is None
+    assert out["median"] is None
     assert out["percentiles"] == {}
+
+
+def test_both_distribution_branches_emit_the_same_keys():
+    """A reader doing ``dist["median"]`` must not have to know which branch ran.
+
+    An empty helix or bulge set is reachable (a consensus with no flanked bulge), so
+    the two shapes would both appear in one report.
+    """
+    assert set(apm._distribution([])) == set(apm._distribution([1, 2, 3]))
+
+
+def test_median_is_the_same_json_type_whatever_the_parity_of_n():
+    """``statistics.median`` returns an int for odd n and a float for even n."""
+    odd = apm._distribution([1, 2, 3])["median"]
+    even = apm._distribution([1, 2, 3, 4])["median"]
+    assert isinstance(odd, float) and isinstance(even, float)
+    assert odd == 2.0 and even == 2.5
 
 
 def test_the_cli_writes_a_report_with_provenance(tmp_path, supply, monkeypatch):
@@ -538,6 +557,160 @@ def test_the_cli_refuses_a_bad_supply_with_exit_3_not_a_traceback(tmp_path):
         )
         == 3
     )
+
+
+def _string_values(node, trail="$"):
+    """Every string leaf of a JSON payload, with the path that reached it."""
+    if isinstance(node, dict):
+        for k, v in node.items():
+            yield from _string_values(v, f"{trail}.{k}")
+    elif isinstance(node, list):
+        for i, v in enumerate(node):
+            yield from _string_values(v, f"{trail}[{i}]")
+    elif isinstance(node, str):
+        yield trail, node
+
+
+def test_no_absolute_filesystem_path_reaches_the_committed_report(tmp_path, supply):
+    """This repo is PUBLIC — a verbatim path publishes a home directory and a username.
+
+    Scanned over the **whole payload** rather than at the four known sites, because
+    the failure mode is a *new* site added later ([[fixed-one-of-two-identical-things]]).
+    The supply, the covariation table and the positive control are all staged outside
+    the checkout here, which is exactly the case that leaked.
+    """
+    root, ids = supply
+    cov = tmp_path / "cov.json"
+    cov.write_text(json.dumps({"status": {cid: "passed" for cid in ids}}))
+    ctrl = tmp_path / "ctrl.sto"
+    ctrl.write_text(stockholm(SS_TWO_HELIX, [("candidate", ROW_WITH_UG), ("h1", ROW_WITH_UG)]))
+    out = tmp_path / "report.json"
+    manifest = manifest_for(tmp_path, ids)
+    assert (
+        apm.main(
+            [
+                "measure",
+                "--msa-root",
+                str(root),
+                "--manifest",
+                str(manifest),
+                "--covariation-status",
+                str(cov),
+                "--positive-control",
+                str(ctrl),
+                "--supply-origin",
+                "cluster:$HOME/tbox-scratch/round/msa",
+                "--out",
+                str(out),
+            ]
+        )
+        == 0
+    )
+    body = json.loads(out.read_text())
+    offenders = [(where, val) for where, val in _string_values(body) if val.startswith("/")]
+    assert offenders == [], offenders
+    # ...and the content binding survives the redaction, or the fix traded one defect
+    # for a report that identifies nothing.
+    assert body["supply"]["covariation"]["sha256"]
+    assert body["provenance"]["extra"]["external_inputs"]["supply_digest_sha256"]
+
+
+def test_an_input_outside_the_checkout_is_recorded_by_name_and_hash(tmp_path, supply):
+    """It cannot go in ``provenance.inputs``: that field records the path it hashed."""
+    root, ids = supply
+    cov = tmp_path / "cov.json"
+    cov.write_text(json.dumps({"status": {cid: "passed" for cid in ids}}))
+    out = tmp_path / "report.json"
+    apm.main(
+        [
+            "measure",
+            "--msa-root",
+            str(root),
+            "--manifest",
+            str(manifest_for(tmp_path, ids)),
+            "--covariation-status",
+            str(cov),
+            "--positive-control",
+            str(tmp_path / "absent.sto"),
+            "--out",
+            str(out),
+        ]
+    )
+    ext = json.loads(out.read_text())["provenance"]["extra"]["external_inputs"]
+    assert ext["covariation_status"]["name"] == "cov.json"
+    assert ext["covariation_status"]["sha256"] == apm._sha256_of(cov)
+
+
+def test_is_inside_repo_separates_a_basename_collision_from_a_real_repo_path(tmp_path):
+    """A basename that happens to exist in the checkout must not read as repo-relative.
+
+    Without the separate predicate, an external ``/somewhere/else/PRD.md`` would be
+    published as ``PRD.md`` *and* hashed as the checkout's own file.
+    """
+    outside = tmp_path / "conftest.py"
+    outside.write_text("# not this repo's\n")
+    assert apm.is_inside_repo(outside) is False
+    assert apm.portable_path(outside) == "conftest.py"
+    inside = Path("src/tbox_finder/mining/architecture_param_measure.py")
+    assert apm.is_inside_repo(inside) is True
+    assert apm.portable_path(inside) == inside.as_posix()
+
+
+def test_a_covariation_file_with_no_status_map_is_refused(tmp_path, supply):
+    """Degrading to ``{}`` leaves a report that still looks complete."""
+    root, ids = supply
+    bad = tmp_path / "cov.json"
+    bad.write_text(json.dumps({"rows": []}))
+    with pytest.raises(apm.MeasureError, match="no 'status' map"):
+        apm.measure(
+            msa_root=root,
+            manifest_path=manifest_for(tmp_path, ids),
+            covariation_status_path=bad,
+            positive_control_path=None,
+        )
+
+
+def test_an_empty_covariation_status_map_is_refused(tmp_path, supply):
+    root, ids = supply
+    bad = tmp_path / "cov.json"
+    bad.write_text(json.dumps({"status": {}}))
+    with pytest.raises(apm.MeasureError, match="is empty"):
+        apm.measure(
+            msa_root=root,
+            manifest_path=manifest_for(tmp_path, ids),
+            covariation_status_path=bad,
+            positive_control_path=None,
+        )
+
+
+def test_a_candidate_slug_collision_in_the_manifest_is_refused(tmp_path, supply, monkeypatch):
+    """The missing-consensus count assumes ``candidate_id -> slug`` is injective.
+
+    A collision makes one directory stand for two candidates, so
+    ``n_candidates_without_consensus`` counts a phantom missing consensus and every
+    joint row's ``unavailable`` inflates — while the arithmetic still reconciles.
+    """
+    root, ids = supply
+    monkeypatch.setattr(apm, "candidate_slug", lambda _cid: "one_slug_for_everything")
+    with pytest.raises(apm.MeasureError, match="slug collision"):
+        apm.measure(
+            msa_root=root,
+            manifest_path=manifest_for(tmp_path, ids),
+            covariation_status_path=None,
+            positive_control_path=None,
+        )
+
+
+def test_a_manifest_without_collisions_is_not_refused(tmp_path, supply):
+    """Positive control for the collision guard: it must not refuse everything."""
+    root, ids = supply
+    body = apm.measure(
+        msa_root=root,
+        manifest_path=manifest_for(tmp_path, ids),
+        covariation_status_path=None,
+        positive_control_path=None,
+    )
+    assert body["supply"]["n_candidates_without_consensus"] == 0
 
 
 def test_the_positive_control_declares_its_own_n_of_one(tmp_path):

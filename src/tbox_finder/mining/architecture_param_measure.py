@@ -102,6 +102,44 @@ class MeasureError(ValueError):
     """A measurement could not be made from the supply as given."""
 
 
+def is_inside_repo(path: str | Path) -> bool:
+    """Is ``path`` under the working directory (i.e. inside the checkout)?
+
+    Kept separate from :func:`portable_path` because "what do I publish" and "may
+    this be hashed by path" are different questions: a *basename* that happens to
+    exist in the checkout would look repo-relative and be recorded with the wrong
+    file's hash.
+    """
+    try:
+        Path(path).resolve().relative_to(Path.cwd().resolve())
+    except ValueError:
+        return False
+    return True
+
+
+def portable_path(path: str | Path) -> str:
+    """A path safe to publish: repo-relative if inside the repo, else the basename.
+
+    ⚠ **This repo is public.** A path recorded verbatim carries the developer's home
+    directory and account name into every clone, and the supply for this measurement
+    is staged outside the repo, so the naive form leaks four of them (the module's
+    own ``__file__``, the staged ``msa_root``, the covariation table, and the
+    provenance input list).  Content is bound by hash — ``supply_digest_sha256`` and
+    ``provenance.inputs`` — so the absolute path adds nothing a reader can use and
+    is dropped rather than sanitised in place.
+    """
+    p = Path(path)
+    try:
+        return p.resolve().relative_to(Path.cwd().resolve()).as_posix()
+    except ValueError:
+        return p.name
+
+
+def _sha256_of(path: str | Path) -> str:
+    """sha256 of one file, for an input recorded by name rather than by path."""
+    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+
 # ═════════════════════════════════════════════════════════════════════════════
 # Reading the supply
 # ═════════════════════════════════════════════════════════════════════════════
@@ -144,7 +182,7 @@ def read_supply(msa_root: str | Path) -> list[SupplyItem]:
             continue
         try:
             consensus = parse_stockholm(sto)
-        except (ArchitectureError, OSError, ValueError) as exc:  # pragma: no cover - guard
+        except (ArchitectureError, OSError, ValueError) as exc:
             unreadable.append((sub.name, str(exc)))
             continue
         items.append(
@@ -188,11 +226,23 @@ def _distribution(values: Iterable[int]) -> dict[str, Any]:
 
     Empty input is reported as ``n: 0`` with null statistics rather than raising —
     "there were none" is a measurement, and an empty helix or bulge set is a real
-    outcome of a de-novo consensus.
+    outcome of a de-novo consensus.  ⚠ Both branches emit **the same keys**: a reader
+    doing ``dist["median"]`` must not have to know which branch produced the block.
+
+    ``median`` is coerced to ``float`` because ``statistics.median`` returns an
+    ``int`` for an odd count and a ``float`` for an even one — the same JSON field
+    would otherwise change type with the parity of ``n``.
     """
     ordered = sorted(values)
     if not ordered:
-        return {"n": 0, "counts": {}, "min": None, "max": None, "percentiles": {}}
+        return {
+            "n": 0,
+            "counts": {},
+            "min": None,
+            "max": None,
+            "percentiles": {},
+            "median": None,
+        }
     return {
         "n": len(ordered),
         "counts": {str(k): v for k, v in sorted(Counter(ordered).items())},
@@ -202,7 +252,7 @@ def _distribution(values: Iterable[int]) -> dict[str, Any]:
             f"p{p}": ordered[min(len(ordered) - 1, int(round((p / 100) * (len(ordered) - 1))))]
             for p in PERCENTILES
         },
-        "median": statistics.median(ordered),
+        "median": float(statistics.median(ordered)),
     }
 
 
@@ -618,7 +668,7 @@ def positive_control(
         )
         bulge[f"ncca_pairing_nt={ncca}"] = state
     return {
-        "path": str(path),
+        "path": portable_path(path),
         "n": 1,
         "caveat": (
             "a single de-novo positive control; it bounds the choice in one direction "
@@ -675,7 +725,22 @@ def measure(
 
     manifest_ids = {str(c.get("candidate_id", c.get("id"))) for c in candidates}
     slugs_present = {item.slug for item in items}
-    slugs_expected = {candidate_slug(cid) for cid in manifest_ids}
+    # ⚠ Every count below assumes candidate_id → slug is INJECTIVE on this manifest, and
+    # the slug is only a 64-char sanitised prefix plus 12 hex of sha1. Two ids sharing a
+    # slug would share one directory, so `n_candidates_without_consensus` would count the
+    # collision as a missing consensus and inflate `unavailable` in every joint row —
+    # silently, because the arithmetic still reconciles. Checked, not assumed.
+    slug_owners: dict[str, list[str]] = {}
+    for cid in sorted(manifest_ids):
+        slug_owners.setdefault(candidate_slug(cid), []).append(cid)
+    collisions = {slug: ids for slug, ids in slug_owners.items() if len(ids) > 1}
+    if collisions:
+        raise MeasureError(
+            f"{len(collisions)} candidate slug collision(s) in the manifest, e.g. "
+            f"{sorted(collisions.items())[:2]}; one directory would stand for two "
+            "candidates and the missing-consensus count would be wrong"
+        )
+    slugs_expected = set(slug_owners)
     if not slugs_present <= slugs_expected:
         raise MeasureError(
             f"{len(slugs_present - slugs_expected)} consensus dir(s) do not correspond to "
@@ -684,10 +749,11 @@ def measure(
 
     supply: dict[str, Any] = {
         # ⚠ `msa_root` is wherever the consensuses were staged when this ran, which on a
-        # laptop is a scratch path that will not exist later. `supply_origin` names where
-        # they were PRODUCED and `supply_digest_sha256` says which bytes were read; the
-        # path alone identifies nothing.
-        "msa_root": str(msa_root),
+        # laptop is a scratch path that will not exist later, and this repo is PUBLIC so
+        # the verbatim path would publish a home directory and an account name.
+        # `supply_origin` names where they were PRODUCED and `supply_digest_sha256` says
+        # which bytes were read; the path alone identifies nothing.
+        "msa_root": portable_path(msa_root),
         "supply_origin": supply_origin,
         "n_candidates_in_manifest": len(manifest_ids),
         "n_consensuses_measured": len(items),
@@ -702,11 +768,27 @@ def measure(
     covariation_by_slug: dict[str, str] | None = None
     if covariation_status_path is not None:
         cov = json.loads(Path(covariation_status_path).read_text())
-        cov_status = cov["status"] if isinstance(cov, Mapping) and "status" in cov else {}
+        # ⚠ A missing or empty `status` map must REFUSE, not degrade. Defaulting it to
+        # `{}` leaves a report that still looks complete — every joint row keeps its
+        # `by_covariation_status` key, `control_and_consequence` reports `n_a_passed: 0`,
+        # and the (a) control silently measures nothing. `read_supply` sets the
+        # precedent: refuse an input you cannot read rather than measure a smaller
+        # corpus ([[clauses-must-guard-emptiness]]).
+        if not isinstance(cov, Mapping) or not isinstance(cov.get("status"), Mapping):
+            raise MeasureError(
+                f"covariation status {portable_path(covariation_status_path)} carries no "
+                "'status' map; the (a) stratification would be silently empty"
+            )
+        cov_status = cov["status"]
+        if not cov_status:
+            raise MeasureError(
+                f"covariation status {portable_path(covariation_status_path)} is empty"
+            )
         decided = {cid for cid, s in cov_status.items() if s in ("passed", "failed")}
         covariation_by_slug = {candidate_slug(cid): str(state) for cid, state in cov_status.items()}
         supply["covariation"] = {
-            "path": str(covariation_status_path),
+            "path": portable_path(covariation_status_path),
+            "sha256": _sha256_of(covariation_status_path),
             "counts": {k: v for k, v in sorted(Counter(cov_status.values()).items())},
             "n_decided": len(decided),
             # (b) reads the same MSA (a) does (ADR-0006 A4), so the set of candidates
@@ -849,26 +931,35 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"refused: {exc}", file=sys.stderr)
         return 3
     out = Path(args.out)
-    inputs = [args.manifest]
-    if args.covariation_status:
-        inputs.append(args.covariation_status)
-    if Path(args.positive_control).is_file():
-        inputs.append(args.positive_control)
+    # ⚠ `provenance.inputs` records the path it hashed, so an input staged OUTSIDE the
+    # repo would publish an absolute home path in a public repo. Inputs inside the repo
+    # are hashed by `build_provenance`; anything outside is hashed here and recorded by
+    # BASENAME + sha256, which is what a reader can actually check.
+    repo_inputs: list[str] = []
+    external: dict[str, Any] = {
+        "msa_root": portable_path(args.msa_root),
+        "supply_origin": args.supply_origin,
+        "supply_digest_sha256": body["supply"]["supply_digest_sha256"],
+        "n_consensuses": body["supply"]["n_consensuses_measured"],
+    }
+    for label, candidate in (
+        ("manifest", args.manifest),
+        ("covariation_status", args.covariation_status),
+        ("positive_control", args.positive_control),
+    ):
+        if not candidate or not Path(candidate).is_file():
+            continue
+        if is_inside_repo(candidate):
+            repo_inputs.append(portable_path(candidate))
+        else:
+            external[label] = {"name": Path(candidate).name, "sha256": _sha256_of(candidate)}
     body["provenance"] = build_provenance(
         rule="P3-15'-f parameter measurement",
-        script=__file__,
-        inputs=inputs,
+        script=portable_path(__file__),
+        inputs=repo_inputs,
         outputs=[],
         adr=ADR,
-        extra={
-            "schema_version": SCHEMA_VERSION,
-            "external_inputs": {
-                "msa_root": str(args.msa_root),
-                "supply_origin": args.supply_origin,
-                "supply_digest_sha256": body["supply"]["supply_digest_sha256"],
-                "n_consensuses": body["supply"]["n_consensuses_measured"],
-            },
-        },
+        extra={"schema_version": SCHEMA_VERSION, "external_inputs": external},
     )
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(body, indent=2, sort_keys=True) + "\n")

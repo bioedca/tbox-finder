@@ -5101,3 +5101,29 @@ re-derivable. Their production is reproducible from jobs 1205 + 1254; tracking t
 for the producer-run leg, not something taken here.
 
 **Commit.** (this stanza's commit; squash SHA recorded at merge)
+
+**⚠ REVIEW ADDENDUM (P3-15′-f, round 1 — 5 findings, 2 major, ALL FIVE REAL).** The `CodeRabbit`
+GitHub check read **`pass` with a body of only a Fair-Usage notice** ("Next review available in: 10
+minutes") — §5.1's trap, **an absence, not a pass**; the gate was met by a completed **CLI** review
+of the current head, whose own trailer counts the findings. (1) **major** — `_distribution`'s empty
+branch omitted `median`, so the same block had two shapes and `dist["median"]` raised `KeyError` on
+a consensus with no flanked bulge, which is reachable. (2) **major** — a covariation file carrying
+no `status` map degraded to `{}` and the run continued: every joint row kept its
+`by_covariation_status` key while `control_and_consequence` reported `n_a_passed: 0`, i.e. the (a)
+control **silently measured nothing** ([[clauses-must-guard-emptiness]]). (3) **minor, and the one
+that mattered most for a PUBLIC repo** — `provenance.script`, `provenance.inputs`,
+`extra.external_inputs.msa_root` and `supply.covariation.path` all carried **absolute paths under a
+developer home directory, account name included**, and the report is tracked in git. Fixed with one
+`portable_path` helper at every seam plus a test that walks the **whole payload** and refuses any
+string beginning with `/` — the four known sites were not the risk, a fifth added later was
+([[fixed-one-of-two-identical-things]]). ⚠ `provenance.inputs` records *the path it hashed*, so an
+input staged outside the checkout cannot simply be relativised: those are now hashed separately and
+recorded by **basename + sha256**, and `is_inside_repo` is a **separate predicate** from
+`portable_path` so a basename that happens to exist in the checkout cannot be published as
+repo-relative *and* hashed as the wrong file. (4) **minor** — `median` changed JSON type with the
+parity of `n` (`statistics.median` returns `int` for odd, `float` for even). (5) **minor** — the
+missing-consensus count assumed `candidate_id → slug` is injective; a collision would make one
+directory stand for two candidates and inflate `unavailable` in every joint row **while the
+arithmetic still reconciled**. Guarded, with a positive control that the guard does not refuse a
+clean manifest. Post-fix: **38 tests**, **35 sabotages all RED against their NAMED test** + 2 green
+negative controls, report re-derived (numbers unchanged), `ruff` + `black` clean.
