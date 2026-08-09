@@ -4979,4 +4979,39 @@ document their own commands at length, so any byte-level check on them must firs
 what a *command* is. Related: [[fixed-one-of-two-identical-things]],
 [[artifact-pinning-test-cannot-see-the-code]].
 
-**Commit.** `squash 2f7849a on main (PR #117)` — plus this stanza's own follow-up commit.
+**RESULT — SLURM job 1254 (2026-08-08, `--array=16-16`, `ALIGN_TIMEOUT_S=600`, `main` @ `4d30ea3`).**
+Completed in **~31 min** against a 12 h wall. §9.3 step 8, all three clauses: (a) `squeue -j 1254`
+→ *"Invalid job id specified"*, the terminal signal; (b) **48/48 `SHARD_OK`**, `shard_016`
+present; (c) `mine_round_producer_1254_16.err` **0 bytes**. The only non-zero producer `.err` in
+the tree is `1205_16.err` (119 B) — the record of the shard this run replaces, not a failure of
+this one.
+
+**The bound fired exactly twice, and on exactly the right candidates.** `align-shard: 6/20
+candidates aligned (2 timed out ⇒ spared)`. Shard 016 held 20 candidates, **8 with a sufficient
+homolog set**: six aligned in **6.3–13.5 s** at depths 31–41, and two stopped at **600.4 s and
+600.5 s** — the bound, to a tenth of a second. Those two carry **`n_homologs = 2445`**, roughly
+**3× the depth-844 candidate that consumed 8500 s in job 1205** and ~60× the depth of the six that
+finished. That is the whole story of the 12 h wall death: not a slow shard, two candidates whose
+Sankoff alignment is intractable at that depth. **Both resolve `unavailable` ⇒ SPARED — verified,
+not assumed: no candidate that hit the bound was decided `passed` or `failed`, and `aligned` ⟺
+`msa_depth > 0` with zero mismatches.**
+
+**941/941, reconciled four ways.** Merged table (`$ROUND_DIR/covariation_status.json`, cluster
+scratch): **`passed` 167 (17.7 %) · `failed` 111 (11.8 %) · `unavailable` 663 (70.5 %)**, **278
+promoted `msa.sto`**. (i) 941 rows, 941 unique ids, **set-equal to the committed FP manifest**;
+(ii) job 1205's 921 + shard 016's 20 == 941 with each status class adding exactly
+(161+6, 111+0, 649+14); (iii) `passed + failed == 278 == promoted consensuses`; (iv) every
+`unavailable` candidate has no consensus. **`P3-15′-f` now has 278 real de-novo consensuses to
+parameterise (b) on, up from 272.**
+
+**⚠ A FINDING THIS RUN HANDED US, AND IT IS NOT MINE TO ACT ON.** `n_homologs = 2445` is far above
+the producer's `CTRL_MAX_TARGET_SEQS=500`, confirming that `--max-target-seqs` is **ignored on the
+nhmmer path** — the same way `min_pident` is (recorded at certification, job 766). So the
+pathological alignments have a *source*: an uncapped homolog set. Capping it would prevent the
+cost rather than bound it, but it changes **what criterion (a) measures** on every candidate, so it
+is an **ADR-0006 D17 threshold question and a §7 item-2 sign-off — flagged, not taken.** The bound
+shipped here is the honest interim: it spares what it cannot afford to compute, and it costs yield
+rather than correctness.
+
+**Commit.** `squash 2f7849a on main (PR #117)`; the dev-log stanza and this result landed via
+PR #118 and its follow-up.
