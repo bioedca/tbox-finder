@@ -5200,3 +5200,13 @@ seven parameters on `n = 1` plus criterion (a) as a proxy. The powered instrumen
 records carry sequence, not genomic context, so the homolog search needs a host-genome join built
 first. **`P3-15′-f`'s producer run stays blocked**, and the parameter choice is deferred until that
 control exists. This measurement stands as the corpus-side half of the evidence.
+
+**✅ REVIEW ROUND 5 — *No new findings*, and the gate is met.** Counts across the step: **5, 9, 2, 5,
+0 — 21 findings, all 21 real, 6 major.** ⚠ The zero came with *"5 previous findings"*; each was
+**verified present in the tree by grep + its own green named test**, not assumed stale — the CLI's
+stored-findings cache replays the last local review's list by design, so "previous findings" is never
+evidence of anything still being there. All five were round 4's, fixed in `4e049aa`. ⚠ The
+`CodeRabbit` **GitHub check read `pass` with a body of only a Fair-Usage notice for the entire step**
+(§5.1's trap, the thirteenth step running); the gate was carried by the **CLI** throughout, and the
+one rate-limit stall was **waited out** rather than escalated to Greptile — **no Greptile credit
+spent this step**.
