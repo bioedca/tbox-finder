@@ -5127,3 +5127,33 @@ directory stand for two candidates and inflate `unavailable` in every joint row 
 arithmetic still reconciled**. Guarded, with a positive control that the guard does not refuse a
 clean manifest. Post-fix: **38 tests**, **35 sabotages all RED against their NAMED test** + 2 green
 negative controls, report re-derived (numbers unchanged), `ruff` + `black` clean.
+
+**⚠ REVIEW ROUND 2 — 9 findings (2 major), and the count went UP, so round 1's five were no
+evidence of convergence.** All nine real; one carried a fix that named a field the report does not
+have. (1) **major, and the sharpest** — the slug-collision guard round 1 added **could not see the
+two defects that actually happen**: `manifest_ids` was built as a *set comprehension*, so a repeated
+`candidate_id`, or a row carrying neither `candidate_id` nor `id` (which stringifies to `"None"`),
+collapses **before** anything can look. The comment I had written said "silently, because the
+arithmetic still reconciles… Checked, not assumed" — and the check did not cover it. Now the ids are
+collected as a **list** and both defects refuse before the set is taken
+([[duplicate-key-merges-instead-of-colliding]]). (2) **major** — the payload-wide absolute-path test
+passed `--supply-origin cluster:$HOME/…`, which **cannot start with `/`**, so that input could never
+exercise the filter the test exists to prove: a control that cannot fail. `supply_origin` is the one
+path-shaped field kept **verbatim** (it is operator-authored provenance naming the cluster), so it is
+now **refused** if it looks like a local absolute path — redacting would destroy the `$HOME` path the
+field exists to carry — and the test asserts both arms. (3) the empty `_distribution` branch matched
+on **top-level** keys but returned `percentiles: {}` while the populated branch returns `p50…p99`, so
+`dist["percentiles"]["p50"]` still raised — **my own round-1 fix, one level too shallow**. (4) the
+CLI caught only `MeasureError`/`ArchitectureError`, so a missing or malformed `--manifest` exited 1
+with a traceback while `read_supply` refused its own bad input with exit 3. (5) `pair_table` sat
+**outside** `read_supply`'s `try`, so an unbalanced consensus escaped the refusal that names every
+offending file. (6) the positive control's bulge low bound **tracks `ncca_pairing_nt`** and was not
+recorded, so no reader could say which `bulge_state_grid` cell each entry matched. (7) an **absent**
+positive control was omitted entirely rather than recorded as absent. (8) `assert
+candidate_slug(ids[0])` asserted **nothing** — no implementation fails it — one of mine, and
+[[review-finding-right-fix-wrong]] for the eighth time: the proposed replacement read a
+`decided_slugs` field that does not exist, so the real fix asserts that no candidate id equals its own
+slug, which is what makes the join necessarily by slug. (9) a stale inline comment said "the third
+consensus" after the fixture grew to four. Post-fix: **46 tests**, **44 sabotages all RED against
+their NAMED test** + 2 green negative controls, zero new failures vs the same `main` baseline, report
+re-derived with every measured number unchanged.

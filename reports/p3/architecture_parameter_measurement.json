@@ -1705,16 +1705,18 @@
   ],
   "pins_nothing": true,
   "positive_control": {
+    "available": true,
     "bulge_max_nt_used": 50,
+    "bulge_min_nt_used": "bulge_min_nt tracks ncca_pairing_nt at every entry \u2014 the loosest low bound ncca_bulge_status admits, and the most sparing one",
     "bulge_residue_sizes": [
       8,
       11
     ],
     "bulge_state": {
-      "ncca_pairing_nt=1": "detected",
-      "ncca_pairing_nt=2": "detected",
-      "ncca_pairing_nt=3": "detected",
-      "ncca_pairing_nt=4": "absent"
+      "ncca=1;range=1-50": "detected",
+      "ncca=2;range=2-50": "detected",
+      "ncca=3;range=3-50": "detected",
+      "ncca=4;range=4-50": "absent"
     },
     "caveat": "a single de-novo positive control; it bounds the choice in one direction (a value that fails it mines a known T-box) and supports no rate",
     "depth": 24,
@@ -1765,8 +1767,8 @@
       },
       "schema_version": "1.0"
     },
-    "generated_at_utc": "2026-08-09T07:43:37.400437+00:00",
-    "git_sha": "4f77bb70551e5ed08662d1f594054345f6e8f62e",
+    "generated_at_utc": "2026-08-09T07:56:18.421064+00:00",
+    "git_sha": "d1cb3c9529e50db548db57f28494453cb3064ecb",
     "inputs": {
       "data/interim/homolog_msa/certified_positive.sto": "387b1cac795ec7898eed2c35acbb1429d50949eaaf026899dca124f86c2648a0",
       "data/processed/mining/round0_fp_manifest.json": "e8aff87d395b3cb70a25c1f1d4ac348daf3da9323baa4c04a32fd3e4060d4b95"

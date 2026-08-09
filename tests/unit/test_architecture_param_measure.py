@@ -416,7 +416,7 @@ def test_a_supply_dir_outside_the_manifest_is_refused(tmp_path, supply):
     [[gate-must-bind-to-upstream-evidence]] names.
     """
     root, ids = supply
-    path = manifest_for(tmp_path, ids[:2])  # the third consensus has no manifest row
+    path = manifest_for(tmp_path, ids[:2])  # the last two consensuses have no manifest row
     with pytest.raises(apm.MeasureError, match="do not correspond to any manifest"):
         apm.measure(
             msa_root=root,
@@ -476,7 +476,10 @@ def test_measure_cross_checks_the_covariation_decided_set_against_the_supply(tmp
     )
     assert body["supply"]["covariation"]["decided_set_equals_supply"] is True
     assert body["supply"]["covariation"]["n_decided"] == 4
-    assert candidate_slug(ids[0])  # the join is by slug, not by position
+    # The join really is by slug, and could not have been by raw id: no candidate id
+    # equals its own directory name. (The previous form here asserted only that
+    # `candidate_slug(...)` returns a non-empty string, which no implementation fails.)
+    assert all(candidate_slug(cid) != cid for cid in ids)
 
     # Positive control: a decided candidate with no consensus breaks the equality.
     cov.write_text(json.dumps({"status": {**decided, "ACC.1:c9:0:1-2": "passed"}}))
@@ -494,16 +497,22 @@ def test_distribution_reports_an_empty_input_rather_than_raising():
     assert out["n"] == 0
     assert out["min"] is None
     assert out["median"] is None
-    assert out["percentiles"] == {}
+    assert out["percentiles"] == {f"p{p}": None for p in apm.PERCENTILES}
 
 
 def test_both_distribution_branches_emit_the_same_keys():
     """A reader doing ``dist["median"]`` must not have to know which branch ran.
 
     An empty helix or bulge set is reachable (a consensus with no flanked bulge), so
-    the two shapes would both appear in one report.
+    the two shapes would both appear in one report. ⚠ The **nested** percentile keys
+    count too: ``dist["percentiles"]["p50"]`` is as broken by a missing inner key as
+    by a missing outer one, and the first version of this test only compared the
+    top level.
     """
-    assert set(apm._distribution([])) == set(apm._distribution([1, 2, 3]))
+    empty, full = apm._distribution([]), apm._distribution([1, 2, 3])
+    assert set(empty) == set(full)
+    assert set(empty["percentiles"]) == set(full["percentiles"])
+    assert all(v is None for v in empty["percentiles"].values())
 
 
 def test_median_is_the_same_json_type_whatever_the_parity_of_n():
@@ -537,7 +546,10 @@ def test_the_cli_writes_a_report_with_provenance(tmp_path, supply, monkeypatch):
     assert body["provenance"]["extra"]["external_inputs"]["supply_digest_sha256"] == (
         body["supply"]["supply_digest_sha256"]
     )
-    assert "positive_control" not in body
+    # An absent control is RECORDED, not omitted: a report with no key reads as one
+    # that was never meant to have a control.
+    assert body["positive_control"]["available"] is False
+    assert body["positive_control"]["reason"]
 
 
 def test_the_cli_refuses_a_bad_supply_with_exit_3_not_a_traceback(tmp_path):
@@ -599,7 +611,7 @@ def test_no_absolute_filesystem_path_reaches_the_committed_report(tmp_path, supp
                 "--positive-control",
                 str(ctrl),
                 "--supply-origin",
-                "cluster:$HOME/tbox-scratch/round/msa",
+                "two.amlab:$HOME/tbox-scratch/round/msa",
                 "--out",
                 str(out),
             ]
@@ -613,6 +625,9 @@ def test_no_absolute_filesystem_path_reaches_the_committed_report(tmp_path, supp
     # for a report that identifies nothing.
     assert body["supply"]["covariation"]["sha256"]
     assert body["provenance"]["extra"]["external_inputs"]["supply_digest_sha256"]
+    # `supply_origin` is the one path-shaped field kept VERBATIM (it is operator-authored
+    # provenance naming the cluster), so the scan above cannot be what protects it.
+    assert body["supply"]["supply_origin"] == "two.amlab:$HOME/tbox-scratch/round/msa"
 
 
 def test_an_input_outside_the_checkout_is_recorded_by_name_and_hash(tmp_path, supply):
@@ -727,5 +742,151 @@ def test_the_positive_control_declares_its_own_n_of_one(tmp_path):
     assert out["n"] == 1
     assert "supports no rate" in out["caveat"]
     assert out["helix_stack_depths"] == [2, 2]
-    assert out["bulge_state"]["ncca_pairing_nt=2"] == "detected"
+    assert out["bulge_state"]["ncca=2;range=2-10"] == "detected"
     assert out["named_elements_present"]["min_helix_pairs=2;min_named_helices=2"] is True
+
+
+def test_an_absolute_supply_origin_is_refused_rather_than_redacted(tmp_path, supply):
+    """``supply_origin`` is the one path-shaped field recorded verbatim.
+
+    That makes it the one place a local absolute path could still reach a public
+    report, so it is refused — redacting it would destroy the cluster path the field
+    exists to carry, and silently keeping it would publish a home directory.
+    """
+    root, ids = supply
+    with pytest.raises(apm.MeasureError, match="local absolute path"):
+        apm.measure(
+            msa_root=root,
+            manifest_path=manifest_for(tmp_path, ids),
+            covariation_status_path=None,
+            positive_control_path=None,
+            supply_origin="/home/someuser/tbox-scratch/round/msa",
+        )
+    # Positive control: the host-qualified form the field is for is accepted.
+    body = apm.measure(
+        msa_root=root,
+        manifest_path=manifest_for(tmp_path, ids),
+        covariation_status_path=None,
+        positive_control_path=None,
+        supply_origin="two.amlab:$HOME/tbox-scratch/round/msa",
+    )
+    assert body["supply"]["supply_origin"] == "two.amlab:$HOME/tbox-scratch/round/msa"
+
+
+def test_a_repeated_candidate_id_in_the_manifest_is_refused(tmp_path, supply):
+    """A set comprehension deduplicates *before* anything can look.
+
+    The collapsed count flows into ``n_candidates_without_consensus`` and then into
+    ``unavailable`` in every joint row — and the arithmetic still reconciles, which
+    is what makes it invisible.
+    """
+    root, ids = supply
+    path = tmp_path / "manifest.json"
+    rows = [{"candidate_id": cid} for cid in ids] + [{"candidate_id": ids[0]}]
+    path.write_text(json.dumps({"candidates": rows}))
+    with pytest.raises(apm.MeasureError, match="duplicate candidate id"):
+        apm.measure(
+            msa_root=root,
+            manifest_path=path,
+            covariation_status_path=None,
+            positive_control_path=None,
+        )
+
+
+def test_a_manifest_row_carrying_no_identifier_is_refused(tmp_path, supply):
+    """Such a row stringifies to ``"None"`` and every one of them collapses to one."""
+    root, ids = supply
+    path = tmp_path / "manifest.json"
+    rows = [{"candidate_id": cid} for cid in ids] + [{"accession": "X"}, {"accession": "Y"}]
+    path.write_text(json.dumps({"candidates": rows}))
+    with pytest.raises(apm.MeasureError, match="neither 'candidate_id' nor 'id'"):
+        apm.measure(
+            msa_root=root,
+            manifest_path=path,
+            covariation_status_path=None,
+            positive_control_path=None,
+        )
+
+
+def test_an_id_only_manifest_row_is_accepted(tmp_path, supply):
+    """Positive control: the ``id`` fallback must still work, or the guard over-refuses."""
+    root, ids = supply
+    path = tmp_path / "manifest.json"
+    path.write_text(json.dumps({"candidates": [{"id": cid} for cid in ids]}))
+    body = apm.measure(
+        msa_root=root,
+        manifest_path=path,
+        covariation_status_path=None,
+        positive_control_path=None,
+    )
+    assert body["supply"]["n_candidates_in_manifest"] == 4
+
+
+def test_an_unbalanced_consensus_joins_the_refusal_instead_of_escaping_it(tmp_path):
+    """``pair_table`` raises on unbalanced brackets — the same "unusable file" class.
+
+    Outside the ``try`` it escaped ``read_supply``'s own refusal, so the operator got
+    a bare traceback instead of the message that names every offending file.
+    """
+    root = tmp_path / "msa"
+    write_supply(root, {"good": (SS_TWO_HELIX, ROW_WITH_UG, 20)})
+    (root / "bad").mkdir()
+    (root / "bad" / "msa.sto").write_text(
+        stockholm("((((....)))", [("candidate", ROW_ONE_HELIX[:11]), ("h1", ROW_ONE_HELIX[:11])])
+    )
+    with pytest.raises(apm.MeasureError, match="could not be parsed"):
+        apm.read_supply(root)
+
+
+def test_the_cli_refuses_a_missing_manifest_with_exit_3_not_a_traceback(tmp_path, supply):
+    """``--manifest`` is read directly, so an OSError otherwise exits 1 with a trace."""
+    root, _ = supply
+    assert (
+        apm.main(
+            [
+                "measure",
+                "--msa-root",
+                str(root),
+                "--manifest",
+                str(tmp_path / "does-not-exist.json"),
+                "--out",
+                str(tmp_path / "x.json"),
+            ]
+        )
+        == 3
+    )
+
+
+def test_the_cli_refuses_a_malformed_manifest_with_exit_3(tmp_path, supply):
+    root, _ = supply
+    bad = tmp_path / "manifest.json"
+    bad.write_text("{not json")
+    assert (
+        apm.main(
+            [
+                "measure",
+                "--msa-root",
+                str(root),
+                "--manifest",
+                str(bad),
+                "--out",
+                str(tmp_path / "x.json"),
+            ]
+        )
+        == 3
+    )
+
+
+def test_the_positive_control_names_the_bulge_range_each_state_was_read_at(tmp_path):
+    """Its low bound tracks ``ncca_pairing_nt``, so a bare ncca key is ambiguous."""
+    sto = tmp_path / "ctrl.sto"
+    sto.write_text(stockholm(SS_TWO_HELIX, [("candidate", ROW_WITH_UG), ("h1", ROW_WITH_UG)]))
+    out = apm.positive_control(
+        sto,
+        min_named_helices_values=(2,),
+        min_helix_pairs_values=(2,),
+        ncca_pairing_nt_values=(1, 2),
+        bulge_max_nt=10,
+    )
+    assert set(out["bulge_state"]) == {"ncca=1;range=1-10", "ncca=2;range=2-10"}
+    assert "tracks ncca_pairing_nt" in out["bulge_min_nt_used"]

@@ -182,6 +182,11 @@ def read_supply(msa_root: str | Path) -> list[SupplyItem]:
             continue
         try:
             consensus = parse_stockholm(sto)
+            # ⚠ Inside the try with the parse. `pair_table` raises on unbalanced
+            # brackets, which is the *same* class of "this file is not usable" as a
+            # missing SS_cons — leaving it outside meant the first such file aborted
+            # with a bare traceback instead of joining the refusal that names them all.
+            pairs = tuple(pair_table(consensus.ss_cons))
         except (ArchitectureError, OSError, ValueError) as exc:
             unreadable.append((sub.name, str(exc)))
             continue
@@ -190,7 +195,7 @@ def read_supply(msa_root: str | Path) -> list[SupplyItem]:
                 slug=sub.name,
                 path=sto,
                 consensus=consensus,
-                pairs=tuple(pair_table(consensus.ss_cons)),
+                pairs=pairs,
                 # The covariation producer writes the candidate's own row first; the
                 # bulge test is a statement about *this* locus, not about the alignment.
                 row=consensus.row(0),
@@ -240,7 +245,9 @@ def _distribution(values: Iterable[int]) -> dict[str, Any]:
             "counts": {},
             "min": None,
             "max": None,
-            "percentiles": {},
+            # ⚠ The NESTED keys too, not just the top-level ones: a consumer reading
+            # dist["percentiles"]["p50"] is exactly as broken by a missing inner key.
+            "percentiles": {f"p{p}": None for p in PERCENTILES},
             "median": None,
         }
     return {
@@ -666,7 +673,11 @@ def positive_control(
             ncca_pairing_nt=ncca,
             allow_wobble=False,
         )
-        bulge[f"ncca_pairing_nt={ncca}"] = state
+        # Keyed with the range actually used: the low bound TRACKS ncca_pairing_nt
+        # here (the loosest bound `ncca_bulge_status` admits), so it is never a fixed
+        # member of BULGE_MIN_NT_SWEEP and a reader could not otherwise say which
+        # `bulge_state_grid` cell each entry corresponds to.
+        bulge[f"ncca={ncca};range={ncca}-{int(bulge_max_nt)}"] = state
     return {
         "path": portable_path(path),
         "n": 1,
@@ -682,6 +693,10 @@ def positive_control(
         ),
         "named_elements_present": named,
         "bulge_state": bulge,
+        "bulge_min_nt_used": (
+            "bulge_min_nt tracks ncca_pairing_nt at every entry — the loosest low bound "
+            "ncca_bulge_status admits, and the most sparing one"
+        ),
         "bulge_max_nt_used": int(bulge_max_nt),
     }
 
@@ -717,13 +732,54 @@ def measure(
     tuples: Sequence[ParamTuple] | None = None,
 ) -> dict[str, Any]:
     """The whole measurement, as the report body (no provenance — ``main`` adds it)."""
+    # ⚠ `supply_origin` is the one path-shaped field recorded VERBATIM, because it is
+    # operator-authored provenance naming the cluster (`two.amlab:$HOME/...`) rather
+    # than a path this process discovered. That makes it the one place a local absolute
+    # path could still reach a PUBLIC report, so it is refused rather than redacted —
+    # redacting would destroy the cluster path that is the whole point of the field.
+    if supply_origin is not None and str(supply_origin).startswith("/"):
+        raise MeasureError(
+            f"supply_origin {supply_origin!r} is a local absolute path; it is recorded "
+            "verbatim in a public report — name the host and use $HOME, e.g. "
+            "'two.amlab:$HOME/tbox-scratch/<round>/msa'"
+        )
     items = read_supply(msa_root)
     manifest = json.loads(Path(manifest_path).read_text())
     candidates = manifest["candidates"] if isinstance(manifest, Mapping) else manifest
     if not isinstance(candidates, list) or not candidates:
         raise MeasureError(f"manifest {manifest_path} carries no candidate rows")
 
-    manifest_ids = {str(c.get("candidate_id", c.get("id"))) for c in candidates}
+    # ⚠ Built as a LIST first, and the set taken only after both defects below are
+    # refused. A set comprehension deduplicates *before* anything can look, so a
+    # repeated `candidate_id` — or a row carrying neither key, which stringifies to
+    # "None" and collapses every such row onto one element — silently shrinks
+    # `n_candidates_in_manifest`, which flows into `n_candidates_without_consensus`
+    # and then into `unavailable` in every joint row. The arithmetic still reconciles,
+    # which is exactly what makes it invisible ([[duplicate-key-merges-instead-of-colliding]]).
+    raw_ids: list[str] = []
+    n_rows_without_an_id = 0
+    for row in candidates:
+        cid = row.get("candidate_id")
+        if cid is None:
+            cid = row.get("id")
+        if cid is None:
+            n_rows_without_an_id += 1
+            continue
+        raw_ids.append(str(cid))
+    if n_rows_without_an_id:
+        raise MeasureError(
+            f"{n_rows_without_an_id} manifest row(s) carry neither 'candidate_id' nor "
+            "'id'; they would collapse onto one identifier and understate "
+            "n_candidates_without_consensus in every joint row"
+        )
+    manifest_ids = set(raw_ids)
+    if len(manifest_ids) != len(raw_ids):
+        repeated = sorted({i for i in raw_ids if raw_ids.count(i) > 1})
+        raise MeasureError(
+            f"{len(raw_ids) - len(manifest_ids)} duplicate candidate id(s) in the "
+            f"manifest, e.g. {repeated[:2]}; the deduplicated count would understate "
+            "n_candidates_without_consensus in every joint row"
+        )
     slugs_present = {item.slug for item in items}
     # ⚠ Every count below assumes candidate_id → slug is INJECTIVE on this manifest, and
     # the slug is only a 64-char sanitised prefix plus 12 hex of sha1. Two ids sharing a
@@ -858,14 +914,30 @@ def measure(
         ],
     }
 
+    # ⚠ An ABSENT control is recorded, never omitted. The CLI default points into the
+    # repo, so a missing file is far more likely a staging mistake than a deliberate
+    # skip — and a report with no `positive_control` key reads as a report that was
+    # never meant to have one.
     if positive_control_path is not None and Path(positive_control_path).is_file():
-        body["positive_control"] = positive_control(
-            positive_control_path,
-            min_named_helices_values=MIN_NAMED_HELICES_SWEEP,
-            min_helix_pairs_values=MIN_HELIX_PAIRS_SWEEP,
-            ncca_pairing_nt_values=NCCA_PAIRING_NT_SWEEP,
-            bulge_max_nt=50,
-        )
+        body["positive_control"] = {
+            "available": True,
+            **positive_control(
+                positive_control_path,
+                min_named_helices_values=MIN_NAMED_HELICES_SWEEP,
+                min_helix_pairs_values=MIN_HELIX_PAIRS_SWEEP,
+                ncca_pairing_nt_values=NCCA_PAIRING_NT_SWEEP,
+                bulge_max_nt=50,
+            ),
+        }
+    else:
+        body["positive_control"] = {
+            "available": False,
+            "reason": (
+                "no de-novo positive control was supplied or the path did not exist; the "
+                "parameter choice below is bounded by the corpus and by criterion (a) alone"
+            ),
+            "path": portable_path(positive_control_path) if positive_control_path else None,
+        }
     return body
 
 
@@ -927,7 +999,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             positive_control_path=args.positive_control,
             supply_origin=args.supply_origin,
         )
-    except (MeasureError, ArchitectureError) as exc:
+    # ⚠ OSError and JSONDecodeError too: `--manifest` and `--covariation-status` are
+    # read directly, so a missing or malformed file otherwise exits 1 with a traceback
+    # while `read_supply` refuses its own bad input with exit 3. One convention.
+    except (MeasureError, ArchitectureError, OSError, json.JSONDecodeError) as exc:
         print(f"refused: {exc}", file=sys.stderr)
         return 3
     out = Path(args.out)
