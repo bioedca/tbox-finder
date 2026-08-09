@@ -745,9 +745,21 @@ def measure(
         )
     items = read_supply(msa_root)
     manifest = json.loads(Path(manifest_path).read_text())
-    candidates = manifest["candidates"] if isinstance(manifest, Mapping) else manifest
+    # ⚠ `.get`, not `[...]`: a JSON object without a `candidates` key would raise
+    # KeyError, which `main` does not catch, so the CLI would exit 1 with a traceback
+    # instead of 3 with a refusal — and `--manifest` accepts any path.
+    candidates = manifest.get("candidates") if isinstance(manifest, Mapping) else manifest
     if not isinstance(candidates, list) or not candidates:
-        raise MeasureError(f"manifest {manifest_path} carries no candidate rows")
+        raise MeasureError(f"manifest {portable_path(manifest_path)} carries no candidate rows")
+    # ⚠ And the ROW shape before `row.get(...)`: a bare string entry raises
+    # AttributeError, same escape. The shape of a file another process wrote is an
+    # input, not an invariant.
+    n_non_rows = sum(1 for row in candidates if not isinstance(row, Mapping))
+    if n_non_rows:
+        raise MeasureError(
+            f"{n_non_rows} manifest row(s) are not objects; a candidate row must carry "
+            "'candidate_id' or 'id'"
+        )
 
     # ⚠ Built as a LIST first, and the set taken only after both defects below are
     # refused. A set comprehension deduplicates *before* anything can look, so a
@@ -839,6 +851,15 @@ def measure(
         if not cov_status:
             raise MeasureError(
                 f"covariation status {portable_path(covariation_status_path)} is empty"
+            )
+        # ⚠ The VALUES too, not just the map. An unhashable value (a list) makes
+        # `Counter(cov_status.values())` raise TypeError, which `main` does not catch —
+        # the same traceback-instead-of-refusal escape, through an operator-supplied path.
+        non_strings = sorted(str(cid) for cid, s in cov_status.items() if not isinstance(s, str))
+        if non_strings:
+            raise MeasureError(
+                f"{len(non_strings)} covariation status value(s) are not strings, e.g. "
+                f"{non_strings[:2]}; the (a) stratification cannot read them"
             )
         decided = {cid for cid, s in cov_status.items() if s in ("passed", "failed")}
         covariation_by_slug = {candidate_slug(cid): str(state) for cid, state in cov_status.items()}

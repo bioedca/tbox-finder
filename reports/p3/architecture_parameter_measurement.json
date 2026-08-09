@@ -1767,8 +1767,8 @@
       },
       "schema_version": "1.0"
     },
-    "generated_at_utc": "2026-08-09T07:56:18.421064+00:00",
-    "git_sha": "d1cb3c9529e50db548db57f28494453cb3064ecb",
+    "generated_at_utc": "2026-08-09T08:03:58.720465+00:00",
+    "git_sha": "f80e54bb70e4a37e0e3fd2db787d97189256ba48",
     "inputs": {
       "data/interim/homolog_msa/certified_positive.sto": "387b1cac795ec7898eed2c35acbb1429d50949eaaf026899dca124f86c2648a0",
       "data/processed/mining/round0_fp_manifest.json": "e8aff87d395b3cb70a25c1f1d4ac348daf3da9323baa4c04a32fd3e4060d4b95"

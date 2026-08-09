@@ -890,3 +890,77 @@ def test_the_positive_control_names_the_bulge_range_each_state_was_read_at(tmp_p
     )
     assert set(out["bulge_state"]) == {"ncca=1;range=1-10", "ncca=2;range=2-10"}
     assert "tracks ncca_pairing_nt" in out["bulge_min_nt_used"]
+
+
+def test_a_manifest_object_without_a_candidates_key_is_refused(tmp_path, supply):
+    """``manifest["candidates"]`` would raise ``KeyError``, which ``main`` does not catch."""
+    root, _ = supply
+    bad = tmp_path / "manifest.json"
+    bad.write_text(json.dumps({"schema_version": "1.0"}))
+    with pytest.raises(apm.MeasureError, match="no candidate rows"):
+        apm.measure(
+            msa_root=root,
+            manifest_path=bad,
+            covariation_status_path=None,
+            positive_control_path=None,
+        )
+    assert (
+        apm.main(
+            [
+                "measure",
+                "--msa-root",
+                str(root),
+                "--manifest",
+                str(bad),
+                "--out",
+                str(tmp_path / "x.json"),
+            ]
+        )
+        == 3
+    )
+
+
+def test_a_manifest_row_that_is_not_an_object_is_refused(tmp_path, supply):
+    """``row.get(...)`` on a bare string raises ``AttributeError`` — same escape."""
+    root, ids = supply
+    bad = tmp_path / "manifest.json"
+    bad.write_text(json.dumps({"candidates": [{"candidate_id": ids[0]}, ids[1]]}))
+    with pytest.raises(apm.MeasureError, match="not objects"):
+        apm.measure(
+            msa_root=root,
+            manifest_path=bad,
+            covariation_status_path=None,
+            positive_control_path=None,
+        )
+
+
+def test_a_non_string_covariation_status_value_is_refused(tmp_path, supply):
+    """An unhashable value makes ``Counter(values())`` raise ``TypeError``.
+
+    ``main`` does not catch ``TypeError``, so the CLI would exit 1 with a traceback
+    through an operator-supplied path.
+    """
+    root, ids = supply
+    bad = tmp_path / "cov.json"
+    bad.write_text(json.dumps({"status": {ids[0]: ["passed"], ids[1]: "failed"}}))
+    with pytest.raises(apm.MeasureError, match="not strings"):
+        apm.measure(
+            msa_root=root,
+            manifest_path=manifest_for(tmp_path, ids),
+            covariation_status_path=bad,
+            positive_control_path=None,
+        )
+
+
+def test_a_well_formed_covariation_map_is_not_refused(tmp_path, supply):
+    """Positive control for the value-type guard: it must not refuse every map."""
+    root, ids = supply
+    good = tmp_path / "cov.json"
+    good.write_text(json.dumps({"status": {cid: "passed" for cid in ids}}))
+    body = apm.measure(
+        msa_root=root,
+        manifest_path=manifest_for(tmp_path, ids),
+        covariation_status_path=good,
+        positive_control_path=None,
+    )
+    assert body["supply"]["covariation"]["n_decided"] == 4

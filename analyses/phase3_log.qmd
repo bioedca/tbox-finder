@@ -5157,3 +5157,15 @@ slug, which is what makes the join necessarily by slug. (9) a stale inline comme
 consensus" after the fixture grew to four. Post-fix: **46 tests**, **44 sabotages all RED against
 their NAMED test** + 2 green negative controls, zero new failures vs the same `main` baseline, report
 re-derived with every measured number unchanged.
+
+**⚠ REVIEW ROUND 3 — 2 findings (1 major), both real, both the SAME CLASS as round 2's: a shape
+assumed before it was validated, escaping the module's own exit-3 convention.** (1) **major** —
+`manifest["candidates"]` raises `KeyError` on a JSON object without that key, and `row.get(...)`
+raises `AttributeError` on a bare-string row; neither is caught by `main`, so the CLI exits **1 with
+a traceback** where every other bad input exits **3 with a refusal** — through `--manifest`, which
+accepts any path. (2) `cov["status"]` was checked to be a `Mapping` but its **values** were not: an
+unhashable value makes `Counter(cov_status.values())` raise `TypeError`, the same escape. **The
+shape of a file another process wrote is an input, not an invariant** — the third round in a row
+where that was the finding, and the second time the *guard I had just added* checked one level less
+deeply than the failure. Post-fix: **50 tests**, **48 sabotages all RED against their NAMED test** +
+2 green negative controls, zero new failures, report re-derived with every number unchanged.
