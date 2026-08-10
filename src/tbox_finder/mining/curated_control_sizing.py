@@ -52,7 +52,7 @@ import math
 import statistics
 import sys
 from collections import Counter
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -325,20 +325,15 @@ def records_from_joined(rows: Sequence[Mapping[str, Any]]) -> list[dict[str, Any
         seq = row["context_seq"]
         offset, length = row["locus_offset"], row["locus_length"]
         locus_seq: str | None = None
+        coords_present = _finite(offset) and _finite(length)
+        coords_sane = coords_present and int(offset) >= 0 and int(length) > 0
         # ⚠ The bounds are checked BEFORE the slice, not inferred from its length
         # afterwards. Python reads a negative start as an offset from the end, so a
         # negative `locus_offset` with enough tail left yields a slice of exactly
         # `locus_length` characters — the wrong locus, at the right length, passing
         # `query_supply`'s truncation check and going on to be searched as though it
         # were this record. `>= 0` is the guard that check cannot supply.
-        if (
-            isinstance(seq, str)
-            and _finite(offset)
-            and _finite(length)
-            and int(offset) >= 0
-            and int(length) > 0
-            and int(offset) + int(length) <= len(seq)
-        ):
+        if isinstance(seq, str) and coords_sane and int(offset) + int(length) <= len(seq):
             locus_seq = seq[int(offset) : int(offset) + int(length)]
         records.append(
             {
@@ -346,6 +341,13 @@ def records_from_joined(rows: Sequence[Mapping[str, Any]]) -> list[dict[str, Any
                 "context_status": _or_none(row["status"]),
                 "locus_length": int(length) if _finite(length) else None,
                 "locus_seq": locus_seq,
+                # Three different facts, kept apart rather than collapsed into "no
+                # sequence": the context window was clipped at a replicon end (sane
+                # coordinates running past it), the coordinates are themselves
+                # unusable (negative offset, non-positive length), or there is no
+                # context at all. Each says something different about the supply.
+                "locus_clipped": locus_seq is None and isinstance(seq, str) and coords_sane,
+                "locus_coords_invalid": coords_present and not coords_sane,
                 "tbox_type": _or_none(row["type"]),
                 "phylum": _or_none(row["resolved_phylum"]),
                 "order": _or_none(row["resolved_order"]),
@@ -396,7 +398,13 @@ def query_supply(records: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
             reasons[f"context_status:{status}"] += 1
             continue
         if not isinstance(seq, str) or not seq:
-            reasons["no_locus_sequence"] += 1
+            if row.get("locus_coords_invalid"):
+                reason = "locus_coordinates_unusable"
+            elif row.get("locus_clipped"):
+                reason = "locus_truncated_by_context_clip"
+            else:
+                reason = "no_locus_sequence"
+            reasons[reason] += 1
             continue
         if declared is None or len(seq) != int(declared):
             # The context window is clipped at a replicon end for some records, so the
@@ -619,6 +627,13 @@ def power_table(
     return rows
 
 
+def _as_mapping(value: Any, label: str) -> dict[str, Any]:
+    """A measure-report sub-block as a dict, or a refusal naming which block it was."""
+    if not isinstance(value, Mapping):
+        raise SizingError(f"measure report's {label} block is not an object")
+    return dict(value)
+
+
 def compute_envelope(
     *,
     measure_report: Mapping[str, Any],
@@ -679,9 +694,12 @@ def compute_envelope(
         "measured_from": {
             "k_sample": measure_report.get("k_sample"),
             "corpus": "round-0 FP candidates (job 816)",
-            "per_candidate_wall_s": dict(wall["total_per_candidate"]),
-            "homolog_depth": dict(measure_report.get("homolog_depth", {})),
-            "status_counts": dict(measure_report.get("status_counts", {})),
+            # ⚠ `dict()` on a scalar or a list of scalars raises TypeError, which `main`
+            # does not catch — exit 1 with a traceback where every other malformed input
+            # in this module exits 3 with a refusal.
+            "per_candidate_wall_s": _as_mapping(wall["total_per_candidate"], "total_per_candidate"),
+            "homolog_depth": _as_mapping(measure_report.get("homolog_depth", {}), "homolog_depth"),
+            "status_counts": _as_mapping(measure_report.get("status_counts", {}), "status_counts"),
         },
         "align_timeout_s": align_timeout_s,
         "cpus_per_task": PRODUCER_CPUS_PER_TASK,
@@ -749,6 +767,7 @@ def fp_assemblies(manifest: Mapping[str, Any] | Sequence[Any]) -> list[str]:
 def existing_control_placement(
     records: Sequence[Mapping[str, Any]],
     seed_record_id: str | None,
+    corpus_record_ids: Collection[str] | None = None,
 ) -> dict[str, Any]:
     """Where the repo's only de-novo positive control sits relative to *this* frame.
 
@@ -757,6 +776,17 @@ def existing_control_placement(
     held-out carve decides whether a control drawn here would re-measure it or
     extend it — and a control that silently re-used its own precedent would report
     n = K while carrying K − 1 independent observations plus one already spent.
+
+    ⚠ **The membership test carries its own positive control.**  It compares a
+    Stockholm row label against ``ingest.record_hash`` digests, and those are only
+    the same identifier space because this fixture happens to be labelled by record
+    hash.  Given a differently-labelled alignment the comparison would be
+    ``False`` for every record and the report would publish "not in the held-out
+    carve" as a *measurement* when it was a type mismatch
+    ([[namespace-mismatch-invisible-noop]]).  So ``corpus_record_ids`` — the ids of
+    the **whole** corpus, not just the carve — is checked too: a seed in the corpus
+    but outside the carve is a real placement; a seed in neither is reported as
+    ``None`` with the mismatch named, never as a bare ``False``.
     """
     if seed_record_id is None:
         return {
@@ -765,19 +795,30 @@ def existing_control_placement(
             "note": "no seed alignment was supplied, so the placement is unmeasured",
         }
     in_frame = seed_record_id in {row.get("record_sha256") for row in records}
-    return {
+    in_corpus = None if corpus_record_ids is None else seed_record_id in set(corpus_record_ids)
+    body: dict[str, Any] = {
         "artifact": "data/interim/homolog_msa/certified_positive.sto (SLURM job 766, n = 1)",
         "seed_record_id": seed_record_id,
         "in_this_frame": in_frame,
-        "note": (
-            "the existing control's seed IS inside the held-out carve, so a draw from "
-            "this frame can re-select it"
-            if in_frame
-            else "the existing control's seed is NOT in the held-out carve — it comes "
-            "from the non-heldout side of the ADR-0004 split, so a draw from this "
-            "frame adds to it rather than re-measuring it"
-        ),
+        "in_full_corpus": in_corpus,
     }
+    if not in_frame and in_corpus is False:
+        body["in_this_frame"] = None
+        body["note"] = (
+            "the seed id matches NO record in the corpus, let alone the carve — the "
+            "seed alignment is labelled in a different identifier space from "
+            "ingest.record_hash, so this placement is unmeasured, not negative"
+        )
+        return body
+    body["note"] = (
+        "the existing control's seed IS inside the held-out carve, so a draw from "
+        "this frame can re-select it"
+        if in_frame
+        else "the existing control's seed is NOT in the held-out carve — it is a "
+        "corpus record on the non-heldout side of the ADR-0004 split, so a draw "
+        "from this frame adds to it rather than re-measuring it"
+    )
+    return body
 
 
 def size_report(
@@ -791,6 +832,7 @@ def size_report(
     shard_size: int,
     align_timeout_s: float,
     seed_record_id: str | None = None,
+    corpus_record_ids: Collection[str] | None = None,
 ) -> dict[str, Any]:
     """Assemble the whole sizing report body (no provenance — ``main`` adds it)."""
     if not records:
@@ -825,7 +867,9 @@ def size_report(
             ),
         },
         "query_supply": supply,
-        "existing_positive_control": existing_control_placement(records, seed_record_id),
+        "existing_positive_control": existing_control_placement(
+            records, seed_record_id, corpus_record_ids
+        ),
         "matchedness": span_matchedness(usable_lengths, fp_lengths),
         "substrate": {
             **substrate_overlap(
@@ -953,6 +997,22 @@ def partition_inputs(
     return repo_inputs, external
 
 
+def corpus_record_ids(corpus: str | Path = DEFAULT_CORPUS) -> set[str]:
+    """Every record id in the FULL corpus — the positive control for the seed's id space.
+
+    Same hash the carve joins on (:func:`tbox_finder.ingest.record_hash`), computed
+    over the whole table rather than the held-out subset, so
+    :func:`existing_control_placement` can tell "outside the carve" from "not this
+    kind of identifier at all".
+    """
+    import pandas as pd
+
+    from tbox_finder.ingest import record_hash
+
+    frame = pd.read_parquet(corpus)
+    return {record_hash(row) for row in frame.itertuples(index=False, name=None)}
+
+
 def _seed_record_id(path: str | Path | None) -> str | None:
     """Row 0's record name from the seed alignment, or ``None`` if it is not there."""
     if not path or not Path(path).is_file():
@@ -982,6 +1042,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             shard_size=args.shard_size,
             align_timeout_s=args.align_timeout_s,
             seed_record_id=_seed_record_id(args.control_seed_sto),
+            corpus_record_ids=corpus_record_ids(args.corpus),
         )
     # OSError/JSONDecodeError too: every input path is operator-supplied, so a missing
     # or malformed file exits 3 with a refusal rather than 1 with a traceback.

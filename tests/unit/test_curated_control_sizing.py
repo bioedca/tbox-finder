@@ -655,7 +655,9 @@ def test_a_negative_offset_is_refused_rather_than_slicing_from_the_end():
     row = _joined(context_seq="AAAACCCCGGGGTTTTAAAACCCC", locus_offset=-8, locus_length=8)
     record = records_from_joined([row])[0]
     assert record["locus_seq"] is None
-    assert query_supply([record])["refusal_reasons"] == {"no_locus_sequence": 1}
+    # And it is reported as a COORDINATE defect, not as a context clip: a negative
+    # offset is a broken row, not a window that ran off a replicon end.
+    assert query_supply([record])["refusal_reasons"] == {"locus_coordinates_unusable": 1}
 
 
 def test_a_slice_running_past_the_end_of_the_context_is_refused_at_the_boundary():
@@ -664,7 +666,8 @@ def test_a_slice_running_past_the_end_of_the_context_is_refused_at_the_boundary(
 
 
 def test_a_zero_length_locus_is_refused():
-    assert records_from_joined([_joined(locus_length=0)])[0]["locus_seq"] is None
+    record = records_from_joined([_joined(locus_length=0)])[0]
+    assert record["locus_seq"] is None and record["locus_coords_invalid"] is True
 
 
 # ── provenance input partitioning (the branch the report cannot reach) ───────
@@ -734,3 +737,57 @@ def test_an_unreadable_seed_alignment_exits_three_not_one(tmp_path, monkeypatch,
     assert code == 3
     assert "refused:" in capsys.readouterr().err
     assert not (tmp_path / "out.json").exists()
+
+
+# ── the seed's identifier space (a False that could mean "type mismatch") ────
+def test_a_seed_outside_the_carve_but_inside_the_corpus_is_a_real_placement():
+    records = [_record(record_sha256="a" * 64)]
+    placement = existing_control_placement(records, "b" * 64, corpus_record_ids={"b" * 64})
+    assert placement["in_this_frame"] is False
+    assert placement["in_full_corpus"] is True
+    assert "non-heldout side" in placement["note"]
+
+
+def test_a_seed_in_no_identifier_space_is_unmeasured_not_negative():
+    # A Stockholm labelled "ACC/start-end" matches no record hash, so a bare False
+    # would publish a TYPE MISMATCH as the measured result
+    # ([[namespace-mismatch-invisible-noop]]).
+    records = [_record(record_sha256="a" * 64)]
+    placement = existing_control_placement(
+        records, "CP000truncated/12-345", corpus_record_ids={"a" * 64}
+    )
+    assert placement["in_this_frame"] is None
+    assert placement["in_full_corpus"] is False
+    assert "different identifier space" in placement["note"]
+
+
+def test_without_the_corpus_control_the_placement_still_reports_its_absence():
+    placement = existing_control_placement([_record(record_sha256="a" * 64)], "b" * 64)
+    assert placement["in_full_corpus"] is None
+
+
+# ── the clipped-locus bucket (two facts that were reported as one) ───────────
+def test_a_clipped_locus_is_reported_as_clipped_not_as_missing_context():
+    record = records_from_joined([_joined(locus_offset=10, locus_length=8)])[0]
+    assert record["locus_clipped"] is True
+    assert query_supply([record])["refusal_reasons"] == {"locus_truncated_by_context_clip": 1}
+
+
+def test_a_record_with_no_context_at_all_is_reported_as_missing_context():
+    record = records_from_joined([_joined(context_seq=None)])[0]
+    assert record["locus_clipped"] is False
+    assert query_supply([record])["refusal_reasons"] == {"no_locus_sequence": 1}
+
+
+# ── malformed measure-report sub-blocks ─────────────────────────────────────
+@pytest.mark.parametrize("block", ["homolog_depth", "status_counts"])
+def test_a_scalar_measure_report_block_is_refused_not_dict_converted(block):
+    broken = {**MEASURE_REPORT, block: 3}
+    with pytest.raises(SizingError, match=block):
+        compute_envelope(measure_report=broken, ks=[20], shard_size=20, align_timeout_s=600)
+
+
+def test_a_scalar_per_candidate_wall_block_is_refused():
+    broken = {"wall_seconds": {**MEASURE_REPORT["wall_seconds"], "total_per_candidate": 5}}
+    with pytest.raises(SizingError):
+        compute_envelope(measure_report=broken, ks=[20], shard_size=20, align_timeout_s=600)
