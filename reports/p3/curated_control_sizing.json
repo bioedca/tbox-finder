@@ -229,15 +229,16 @@
       "external_inputs": {},
       "schema_version": "1.0"
     },
-    "generated_at_utc": "2026-08-10T19:48:58.712309+00:00",
-    "git_sha": "fed477b2aef9bd978276e99535fbdddd3089905c",
+    "generated_at_utc": "2026-08-10T19:58:19.176934+00:00",
+    "git_sha": "4ea50e34dc8f08ed371260b8ebb93a572bf38d50",
     "inputs": {
       "data/interim/flank_context/context_v0.parquet": "f35f25cda0f7ddc5714baeeece12146aa9e50f943ba9f4a121dbe3fdb3297742",
       "data/processed/master_clean_v0.parquet": "1eb76591d0e481019dd7acf72a439f157fec9f2aeecb8cc5c37ba80a7b062dd2",
       "data/processed/mining/production_host_orders_v0.parquet": "a543b3478041faaaa8fb7deb6a5967de0c87e532a658908417c6057ec5865889",
       "data/processed/mining/round0_fp_manifest.json": "e8aff87d395b3cb70a25c1f1d4ac348daf3da9323baa4c04a32fd3e4060d4b95",
       "data/processed/splits/split_assignments.parquet": "d51252ee8b2211603d672f0da2963b3364fe1acc48c542269da6eb63f0c6ebc3",
-      "reports/p2/mine_round_measure.json": "771c83d396164f8fcd578a0ff3424f81ff11d0be21117493603d8a9e121cfcf1"
+      "reports/p2/mine_round_measure.json": "771c83d396164f8fcd578a0ff3424f81ff11d0be21117493603d8a9e121cfcf1",
+      "tests/fixtures/rscape/classII_sub.sto": "6c8c2de15b9c017c27f7de33561837162ddb9102727e41cac1e18bcee4bc2c8b"
     },
     "outputs": {},
     "rule": "P3-15'-g curated-control sizing",

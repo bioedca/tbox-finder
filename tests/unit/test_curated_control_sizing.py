@@ -9,6 +9,7 @@ so a constant cannot pass ([[pinned-constant-that-nothing-reads]]).
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 from pathlib import Path
@@ -16,6 +17,13 @@ from pathlib import Path
 import pytest
 
 from tbox_finder.mining.curated_control_sizing import (
+    DEFAULT_CONTEXT,
+    DEFAULT_CONTROL_SEED,
+    DEFAULT_CORPUS,
+    DEFAULT_FP_MANIFEST,
+    DEFAULT_HOST_MANIFEST,
+    DEFAULT_MEASURE_REPORT,
+    DEFAULT_SPLIT_TABLE,
     ENV_LOCK,
     PRODUCIBILITY_ANCHORS,
     SizingError,
@@ -25,6 +33,7 @@ from tbox_finder.mining.curated_control_sizing import (
     fp_assemblies,
     fp_span_lengths,
     ks_statistic,
+    partition_inputs,
     percentiles,
     power_table,
     query_supply,
@@ -518,6 +527,28 @@ def test_the_committed_report_publishes_no_absolute_path():
 
 
 @pytest.mark.skipif(not COMMITTED_REPORT.is_file(), reason="report not generated in this tree")
+def test_the_committed_report_records_every_input_it_read():
+    provenance = json.loads(COMMITTED_REPORT.read_text())["provenance"]
+    recorded = set(provenance["inputs"]) | {
+        entry["name"] for entry in provenance["extra"]["external_inputs"].values()
+    }
+    # Every default input the CLI reads must leave a trace: a number in this report
+    # that traces back to no recorded file is a number a reader cannot check.
+    for path in (
+        DEFAULT_CORPUS,
+        DEFAULT_SPLIT_TABLE,
+        DEFAULT_CONTEXT,
+        DEFAULT_FP_MANIFEST,
+        DEFAULT_HOST_MANIFEST,
+        DEFAULT_MEASURE_REPORT,
+        DEFAULT_CONTROL_SEED,
+    ):
+        assert path in recorded or Path(path).name in recorded, path
+    assert all(len(digest) == 64 for digest in provenance["inputs"].values())
+    assert provenance["env_lock_hash"]
+
+
+@pytest.mark.skipif(not COMMITTED_REPORT.is_file(), reason="report not generated in this tree")
 def test_the_committed_report_is_internally_consistent():
     body = json.loads(COMMITTED_REPORT.read_text())
     supply = body["query_supply"]
@@ -601,3 +632,46 @@ def test_matchedness_refuses_a_zero_median_rather_than_dividing_by_it():
     # where every other malformed input exits 3 with a refusal.
     with pytest.raises(SizingError, match="median query length is not positive"):
         span_matchedness([100, 200], [0, 0, 0])
+
+
+# ── the slice boundary (a wrong locus at the right length) ───────────────────
+def test_a_negative_offset_is_refused_rather_than_slicing_from_the_end():
+    # seq[-4:-4+8] returns 4 characters here, but with a longer tail it returns
+    # exactly locus_length characters — a DIFFERENT locus that passes every
+    # downstream length check and gets searched as though it were this record.
+    row = _joined(context_seq="AAAACCCCGGGGTTTTAAAACCCC", locus_offset=-8, locus_length=8)
+    record = records_from_joined([row])[0]
+    assert record["locus_seq"] is None
+    assert query_supply([record])["refusal_reasons"] == {"no_locus_sequence": 1}
+
+
+def test_a_slice_running_past_the_end_of_the_context_is_refused_at_the_boundary():
+    record = records_from_joined([_joined(locus_offset=10, locus_length=8)])[0]
+    assert record["locus_seq"] is None
+
+
+def test_a_zero_length_locus_is_refused():
+    assert records_from_joined([_joined(locus_length=0)])[0]["locus_seq"] is None
+
+
+# ── provenance input partitioning (the branch the report cannot reach) ───────
+def test_a_repo_input_is_recorded_repo_relative():
+    repo_inputs, external = partition_inputs([("seed", REPO_ROOT / DEFAULT_CONTROL_SEED)])
+    assert repo_inputs == [DEFAULT_CONTROL_SEED] and external == {}
+
+
+def test_an_external_input_is_recorded_by_basename_AND_hash_never_by_path(tmp_path):
+    staged = tmp_path / "staged.sto"
+    staged.write_text("# STOCKHOLM 1.0\n", encoding="utf-8")
+    repo_inputs, external = partition_inputs([("seed", staged)])
+    assert repo_inputs == []
+    assert external["seed"]["name"] == "staged.sto"
+    # The hash is the point: a basename alone cannot be checked against anything.
+    assert external["seed"]["sha256"] == hashlib.sha256(staged.read_bytes()).hexdigest()
+    # And nothing in the entry may carry the absolute staging path.
+    assert not any(str(value).startswith("/") for value in external["seed"].values())
+
+
+def test_an_absent_input_is_skipped_rather_than_recorded_as_a_hashless_name(tmp_path):
+    repo_inputs, external = partition_inputs([("missing", tmp_path / "not-there.json")])
+    assert (repo_inputs, external) == ([], {})

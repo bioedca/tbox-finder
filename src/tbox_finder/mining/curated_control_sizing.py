@@ -57,6 +57,7 @@ from pathlib import Path
 from typing import Any
 
 from tbox_finder.mining.architecture_param_measure import (
+    _sha256_of,
     is_inside_repo,
     portable_path,
 )
@@ -323,7 +324,20 @@ def records_from_joined(rows: Sequence[Mapping[str, Any]]) -> list[dict[str, Any
         seq = row["context_seq"]
         offset, length = row["locus_offset"], row["locus_length"]
         locus_seq: str | None = None
-        if isinstance(seq, str) and _finite(offset) and _finite(length):
+        # ⚠ The bounds are checked BEFORE the slice, not inferred from its length
+        # afterwards. Python reads a negative start as an offset from the end, so a
+        # negative `locus_offset` with enough tail left yields a slice of exactly
+        # `locus_length` characters — the wrong locus, at the right length, passing
+        # `query_supply`'s truncation check and going on to be searched as though it
+        # were this record. `>= 0` is the guard that check cannot supply.
+        if (
+            isinstance(seq, str)
+            and _finite(offset)
+            and _finite(length)
+            and int(offset) >= 0
+            and int(length) > 0
+            and int(offset) + int(length) <= len(seq)
+        ):
             locus_seq = seq[int(offset) : int(offset) + int(length)]
         records.append(
             {
@@ -905,6 +919,33 @@ def _load_rep_columns(path: str | Path) -> tuple[list[int], list[str]]:
     return [int(v) for v in taxids], [str(v) for v in assemblies]
 
 
+def partition_inputs(
+    labelled: Sequence[tuple[str, str | Path | None]],
+) -> tuple[list[str], dict[str, Any]]:
+    """Split the inputs into repo-relative paths and hashed external entries.
+
+    ⚠ This repo is **public**: an input staged outside the checkout is recorded by
+    basename + sha256, never by its absolute path ([[verify-the-line-you-ship]]).
+    The hash is the load-bearing half — a basename alone is a provenance entry a
+    reader cannot check anything against.
+
+    Extracted from :func:`main` because the external branch is unreachable from the
+    committed report (every default input is inside the repo), so a test that reads
+    that report cannot exercise it — it would pass with the hashing deleted
+    ([[artifact-pinning-test-cannot-see-the-code]]).
+    """
+    repo_inputs: list[str] = []
+    external: dict[str, Any] = {}
+    for label, candidate in labelled:
+        if not candidate or not Path(candidate).is_file():
+            continue
+        if is_inside_repo(candidate):
+            repo_inputs.append(portable_path(candidate))
+        else:
+            external[label] = {"name": Path(candidate).name, "sha256": _sha256_of(candidate)}
+    return repo_inputs, external
+
+
 def _seed_record_id(path: str | Path | None) -> str | None:
     """Row 0's record name from the seed alignment, or ``None`` if it is not there."""
     if not path or not Path(path).is_file():
@@ -945,22 +986,20 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"refused: {exc}", file=sys.stderr)
         return 3
 
-    repo_inputs: list[str] = []
-    external: dict[str, Any] = {}
-    for label, candidate in (
-        ("corpus", args.corpus),
-        ("split_table", args.split_table),
-        ("context", args.context),
-        ("fp_manifest", args.fp_manifest),
-        ("host_manifest", args.host_manifest),
-        ("measure_report", args.measure_report),
-    ):
-        if is_inside_repo(candidate):
-            repo_inputs.append(portable_path(candidate))
-        else:
-            # ⚠ This repo is PUBLIC: an input staged outside the checkout is recorded by
-            # basename + hash, never by its absolute path ([[verify-the-line-you-ship]]).
-            external[label] = {"name": Path(candidate).name}
+    repo_inputs, external = partition_inputs(
+        (
+            ("corpus", args.corpus),
+            ("split_table", args.split_table),
+            ("context", args.context),
+            ("fp_manifest", args.fp_manifest),
+            ("host_manifest", args.host_manifest),
+            ("measure_report", args.measure_report),
+            # The seed alignment decides `existing_positive_control.seed_record_id`, so
+            # it is an input like any other; leaving it out let a reported record id
+            # trace back to nothing.
+            ("control_seed_sto", args.control_seed_sto),
+        )
+    )
     body["provenance"] = build_provenance(
         rule="P3-15'-g curated-control sizing",
         script=portable_path(__file__),
