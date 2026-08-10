@@ -1,0 +1,419 @@
+{
+  "adr": "ADR-0006 A2 (min_sequences floor) / A3 (mlocarna) / A4 (criterion (b)'s instrument), D3/D6/D7; ADR-0005 A10 (the covariation-producer envelope), D14 (unavailable spares)",
+  "envelope": {
+    "align_timeout_s": 600.0,
+    "caveat": "the expected_* columns extrapolate FP-candidate wall onto curated queries, which this report measures to be a different query population, so they inherit that difference; the worst_case_* columns do not \u2014 they are search_max + align_timeout_s + score_max, which bounds a candidate at any homolog depth, so a submit should be sized on those",
+    "cpus_per_task": 2,
+    "measured_from": {
+      "corpus": "round-0 FP candidates (job 816)",
+      "homolog_depth": {
+        "max": 73.0,
+        "mean": 21.44,
+        "median": 20.0,
+        "min": 0.0,
+        "n": 50,
+        "total": 1072.0
+      },
+      "k_sample": 50,
+      "per_candidate_wall_s": {
+        "max": 114.2273,
+        "mean": 16.9177,
+        "median": 9.0081,
+        "min": 4.7756,
+        "n": 50,
+        "total": 845.8855
+      },
+      "status_counts": {
+        "failed": 10,
+        "passed": 16,
+        "unavailable": 24
+      }
+    },
+    "per_k": [
+      {
+        "array_width": 3,
+        "expected_core_h": 0.47,
+        "expected_wall_h_per_task": 0.094,
+        "k": 50,
+        "shard_size": 20,
+        "worst_case_core_h": 19.85,
+        "worst_case_wall_h_per_task": 3.97
+      },
+      {
+        "array_width": 5,
+        "expected_core_h": 0.94,
+        "expected_wall_h_per_task": 0.094,
+        "k": 100,
+        "shard_size": 20,
+        "worst_case_core_h": 39.7,
+        "worst_case_wall_h_per_task": 3.97
+      },
+      {
+        "array_width": 10,
+        "expected_core_h": 1.88,
+        "expected_wall_h_per_task": 0.094,
+        "k": 200,
+        "shard_size": 20,
+        "worst_case_core_h": 79.4,
+        "worst_case_wall_h_per_task": 3.97
+      },
+      {
+        "array_width": 20,
+        "expected_core_h": 3.759,
+        "expected_wall_h_per_task": 0.094,
+        "k": 400,
+        "shard_size": 20,
+        "worst_case_core_h": 158.8,
+        "worst_case_wall_h_per_task": 3.97
+      }
+    ],
+    "worst_case_per_candidate_s": 714.6
+  },
+  "existing_positive_control": {
+    "artifact": "data/interim/homolog_msa/certified_positive.sto (SLURM job 766, n = 1)",
+    "in_full_corpus": true,
+    "in_this_frame": false,
+    "note": "the existing control's seed is NOT in the held-out carve \u2014 it is a corpus record on the non-heldout side of the ADR-0004 split, so a draw from this frame adds to it rather than re-measuring it",
+    "seed_record_id": "22fd8957c926e8701ac7df4a5d43fed209c0eeb03121608a92d5f08b436b1677"
+  },
+  "frame": {
+    "carve": "mining.architecture_producer.heldout_canonical (reused, not re-derived)",
+    "context_status": {
+      "multi_hit": 2,
+      "ok": 8712,
+      "unavailable": 1
+    },
+    "definition": "source == 'corpus' AND nested_role == 'heldout'",
+    "join": "ingest.record_hash(master_clean row) == split.corpus_record_sha256 == flank_context.record_id",
+    "locus_source": "flank_context context_seq[locus_offset : locus_offset + locus_length] \u2014 the NCBI-anchored genomic context, never the TBDB Name coordinates",
+    "n_records": 8715
+  },
+  "matchedness": {
+    "curated_length_nt": {
+      "max": 550,
+      "mean": 302.4,
+      "min": 104,
+      "n": 8709,
+      "p05": 202,
+      "p25": 243,
+      "p50": 279,
+      "p75": 341,
+      "p95": 491
+    },
+    "fp_length_nt": {
+      "max": 296,
+      "mean": 113.46,
+      "min": 50,
+      "n": 941,
+      "p05": 65,
+      "p25": 83,
+      "p50": 110,
+      "p75": 142,
+      "p95": 166
+    },
+    "fp_population": "every candidate in the round-0 FP manifest \u2014 the population ENTERING the pipeline, not the subset that produced a consensus; P3-15'-f measured 278 of these 941 and its report records only counts, so the measured subset cannot be identified from anything in this repo (the ids live in covariation_status.json on cluster scratch). If producibility correlates with span length, the measured subset's distribution differs from this one \u2014 a limitation of this comparison, to be measured by the control run",
+    "fp_span_range_nt": [
+      50,
+      296
+    ],
+    "ks_d": 0.9647,
+    "median_ratio_curated_over_fp": 2.536,
+    "n_curated_inside_fp_range": 5469,
+    "share_curated_inside_fp_range": 0.628
+  },
+  "pins_nothing": true,
+  "power": {
+    "min_sequences_floor": 20,
+    "note": "a record below the ADR-0006 A2 min_sequences floor, or whose alignment hits --align-timeout-s, resolves unavailable and leaves the DENOMINATOR; the producible share of curated queries is UNMEASURED and no value is asserted",
+    "rows": [
+      {
+        "effective_n": 26,
+        "k": 50,
+        "producibility_anchor": "job816_k50_fp_sample",
+        "producible_share": 0.52,
+        "wilson_width_95_at_p50": 0.3588,
+        "wilson_width_95_at_p90": 0.2386
+      },
+      {
+        "effective_n": 15,
+        "k": 50,
+        "producibility_anchor": "job1205_1254_full_fp_corpus",
+        "producible_share": 0.2954,
+        "wilson_width_95_at_p50": 0.4515,
+        "wilson_width_95_at_p90": 0.3162
+      },
+      {
+        "effective_n": 50,
+        "k": 50,
+        "producibility_anchor": "optimistic_all_producible",
+        "producible_share": 1.0,
+        "wilson_width_95_at_p50": 0.2671,
+        "wilson_width_95_at_p90": 0.1701
+      },
+      {
+        "effective_n": 52,
+        "k": 100,
+        "producibility_anchor": "job816_k50_fp_sample",
+        "producible_share": 0.52,
+        "wilson_width_95_at_p50": 0.2623,
+        "wilson_width_95_at_p90": 0.1667
+      },
+      {
+        "effective_n": 30,
+        "k": 100,
+        "producibility_anchor": "job1205_1254_full_fp_corpus",
+        "producible_share": 0.2954,
+        "wilson_width_95_at_p50": 0.3369,
+        "wilson_width_95_at_p90": 0.2216
+      },
+      {
+        "effective_n": 100,
+        "k": 100,
+        "producibility_anchor": "optimistic_all_producible",
+        "producible_share": 1.0,
+        "wilson_width_95_at_p50": 0.1923,
+        "wilson_width_95_at_p90": 0.1191
+      },
+      {
+        "effective_n": 104,
+        "k": 200,
+        "producibility_anchor": "job816_k50_fp_sample",
+        "producible_share": 0.52,
+        "wilson_width_95_at_p50": 0.1887,
+        "wilson_width_95_at_p90": 0.1168
+      },
+      {
+        "effective_n": 59,
+        "k": 200,
+        "producibility_anchor": "job1205_1254_full_fp_corpus",
+        "producible_share": 0.2954,
+        "wilson_width_95_at_p50": 0.2472,
+        "wilson_width_95_at_p90": 0.1562
+      },
+      {
+        "effective_n": 200,
+        "k": 200,
+        "producibility_anchor": "optimistic_all_producible",
+        "producible_share": 1.0,
+        "wilson_width_95_at_p50": 0.1373,
+        "wilson_width_95_at_p90": 0.0837
+      },
+      {
+        "effective_n": 208,
+        "k": 400,
+        "producibility_anchor": "job816_k50_fp_sample",
+        "producible_share": 0.52,
+        "wilson_width_95_at_p50": 0.1347,
+        "wilson_width_95_at_p90": 0.0821
+      },
+      {
+        "effective_n": 118,
+        "k": 400,
+        "producibility_anchor": "job1205_1254_full_fp_corpus",
+        "producible_share": 0.2954,
+        "wilson_width_95_at_p50": 0.1776,
+        "wilson_width_95_at_p90": 0.1095
+      },
+      {
+        "effective_n": 400,
+        "k": 400,
+        "producibility_anchor": "optimistic_all_producible",
+        "producible_share": 1.0,
+        "wilson_width_95_at_p50": 0.0975,
+        "wilson_width_95_at_p90": 0.059
+      }
+    ]
+  },
+  "provenance": {
+    "adr": "ADR-0006 A2 (min_sequences floor) / A3 (mlocarna) / A4 (criterion (b)'s instrument), D3/D6/D7; ADR-0005 A10 (the covariation-producer envelope), D14 (unavailable spares)",
+    "env_lock_hash": "a4a6715d411d7218432c4c670d35475f6c9aa7dd6397fd5d906ca7e21293dc34",
+    "extra": {
+      "external_inputs": {},
+      "schema_version": "1.0"
+    },
+    "generated_at_utc": "2026-08-10T21:13:50.545316+00:00",
+    "git_sha": "fcba0ac881a21d8abfda35e770148721cfb641aa",
+    "inputs": {
+      "data/interim/flank_context/context_v0.parquet": "f35f25cda0f7ddc5714baeeece12146aa9e50f943ba9f4a121dbe3fdb3297742",
+      "data/processed/master_clean_v0.parquet": "1eb76591d0e481019dd7acf72a439f157fec9f2aeecb8cc5c37ba80a7b062dd2",
+      "data/processed/mining/production_host_orders_v0.parquet": "a543b3478041faaaa8fb7deb6a5967de0c87e532a658908417c6057ec5865889",
+      "data/processed/mining/round0_fp_manifest.json": "e8aff87d395b3cb70a25c1f1d4ac348daf3da9323baa4c04a32fd3e4060d4b95",
+      "data/processed/splits/split_assignments.parquet": "d51252ee8b2211603d672f0da2963b3364fe1acc48c542269da6eb63f0c6ebc3",
+      "reports/p2/mine_round_measure.json": "771c83d396164f8fcd578a0ff3424f81ff11d0be21117493603d8a9e121cfcf1",
+      "tests/fixtures/rscape/classII_sub.sto": "6c8c2de15b9c017c27f7de33561837162ddb9102727e41cac1e18bcee4bc2c8b"
+    },
+    "outputs": {},
+    "rule": "P3-15'-g curated-control sizing",
+    "schema_version": "1.0",
+    "script": "src/tbox_finder/mining/curated_control_sizing.py",
+    "seed": 42
+  },
+  "query_supply": {
+    "gate": "homolog_msa.degap_to_dna + homolog_msa.is_clean_nucleotide \u2014 the same refusal search_homologs raises on a query it cannot search",
+    "n_records": 8715,
+    "n_refused": 6,
+    "n_usable": 8709,
+    "refusal_reasons": {
+      "ambiguous_alphabet": 3,
+      "context_status:multi_hit": 2,
+      "context_status:unavailable": 1
+    },
+    "usable_length_nt": {
+      "max": 550,
+      "mean": 302.4,
+      "min": 104,
+      "n": 8709,
+      "p05": 202,
+      "p25": 243,
+      "p50": 279,
+      "p75": 341,
+      "p95": 491
+    }
+  },
+  "schema_version": "1.0",
+  "step": "P3-15'-g",
+  "strata": {
+    "clusters": {
+      "largest_cluster_size": 812,
+      "n_clusters": 4378,
+      "n_orders_with_at_least_1_cluster": 43,
+      "n_orders_with_at_least_5_clusters": 31,
+      "n_records_without_cluster": 0,
+      "n_singleton_clusters": 3597
+    },
+    "draw": [
+      {
+        "equal_allocation_per_order": 1,
+        "expected_orders_hit_uniform": 12.32,
+        "expected_phyla_hit_uniform": 3.64,
+        "k": 50,
+        "one_per_cluster_feasible": true,
+        "orders_available": 43,
+        "orders_with_enough_clusters_for_quota": 43,
+        "phyla_available": 7
+      },
+      {
+        "equal_allocation_per_order": 2,
+        "expected_orders_hit_uniform": 17.23,
+        "expected_phyla_hit_uniform": 4.49,
+        "k": 100,
+        "one_per_cluster_feasible": true,
+        "orders_available": 43,
+        "orders_with_enough_clusters_for_quota": 39,
+        "phyla_available": 7
+      },
+      {
+        "equal_allocation_per_order": 4,
+        "expected_orders_hit_uniform": 22.83,
+        "expected_phyla_hit_uniform": 5.38,
+        "k": 200,
+        "one_per_cluster_feasible": true,
+        "orders_available": 43,
+        "orders_with_enough_clusters_for_quota": 31,
+        "phyla_available": 7
+      },
+      {
+        "equal_allocation_per_order": 9,
+        "expected_orders_hit_uniform": 28.68,
+        "expected_phyla_hit_uniform": 6.22,
+        "k": 400,
+        "one_per_cluster_feasible": true,
+        "orders_available": 43,
+        "orders_with_enough_clusters_for_quota": 27,
+        "phyla_available": 7
+      }
+    ],
+    "genus": {
+      "n_distinct": 302,
+      "n_records_without_genus": 117,
+      "n_singleton_genera": 58,
+      "top10": {
+        "Carnobacterium": 127,
+        "Corynebacterium": 138,
+        "Enterococcus": 808,
+        "Lactobacillus": 2378,
+        "Lactococcus": 123,
+        "Leuconostoc": 227,
+        "Pediococcus": 155,
+        "Streptococcus": 867,
+        "Streptomyces": 190,
+        "Weissella": 127
+      }
+    },
+    "n_records": 8715,
+    "order": {
+      "Acholeplasmatales": 52,
+      "Acidaminococcales": 52,
+      "Actinomycetales": 42,
+      "Actinopolysporales": 1,
+      "Anaerolineales": 41,
+      "Bifidobacteriales": 69,
+      "Candidatus Aquicultorales": 5,
+      "Candidatus Izemoplasmatales": 24,
+      "Candidatus Nanopelagicales": 12,
+      "Catenulisporales": 4,
+      "Chloroflexales": 20,
+      "Coriobacteriales": 18,
+      "Corynebacteriales": 370,
+      "Dehalococcoidales": 34,
+      "Deinococcales": 28,
+      "Desulfuromonadales": 31,
+      "Eggerthellales": 7,
+      "Entomoplasmatales": 68,
+      "Erysipelotrichales": 445,
+      "Frankiales": 9,
+      "Glycomycetales": 4,
+      "Halanaerobiales": 99,
+      "Haloplasmatales": 22,
+      "Jiangellales": 2,
+      "Kineosporiales": 1,
+      "Ktedonobacterales": 22,
+      "Lactobacillales": 5323,
+      "Micrococcales": 275,
+      "Micromonosporales": 65,
+      "Mycoplasmatales": 36,
+      "Nakamurellales": 4,
+      "Natranaerobiales": 23,
+      "Propionibacteriales": 66,
+      "Pseudonocardiales": 48,
+      "Rubrobacterales": 2,
+      "Selenomonadales": 224,
+      "Sporichthyales": 1,
+      "Streptomycetales": 197,
+      "Streptosporangiales": 24,
+      "Synergistales": 27,
+      "Thermoanaerobacterales": 271,
+      "Tissierellales": 420,
+      "Veillonellales": 223
+    },
+    "phylum": {
+      "Actinobacteria": 1230,
+      "Chloroflexi": 117,
+      "Deinococcus-Thermus": 28,
+      "Firmicutes": 7080,
+      "Proteobacteria": 31,
+      "Synergistetes": 27,
+      "Tenericutes": 202
+    },
+    "tbox_type": {
+      "Transcriptional": 7543,
+      "Translational": 1172
+    }
+  },
+  "substrate": {
+    "coordinate_route": "covariation_producer search-shard resolves a query from data/interim/production_genomes/<assembly>.fna at contig coordinates, so it needs a curated-record -> GTDB-rep-assembly join the repo does not hold",
+    "fp_self_hit": {
+      "n_fp_assemblies": 76,
+      "n_fp_assemblies_in_searched_db": 76,
+      "note": "an FP query is carved from a genome that is itself in the searched database, so it self-hits; a curated query self-hits only for the records counted above"
+    },
+    "n_distinct_curated_taxids": 2034,
+    "n_distinct_curated_taxids_in_reps": 7,
+    "n_production_genomes": 2500,
+    "n_records_whose_host_taxid_is_a_rep": 20,
+    "n_records_with_taxid": 8715,
+    "n_rep_taxids": 811,
+    "sequence_route": "homolog_msa seed/search/align takes a sequence directly \u2014 the route that produced the repo's only de-novo positive control (certified_positive.sto, SLURM job 766) \u2014 and needs no genome join",
+    "share_records_coordinate_routable_ceiling": 0.00229
+  }
+}
