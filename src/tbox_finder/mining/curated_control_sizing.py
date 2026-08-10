@@ -62,6 +62,7 @@ from tbox_finder.mining.architecture_param_measure import (
     portable_path,
 )
 from tbox_finder.mining.homolog_msa import (
+    HomologMsaError,
     degap_to_dna,
     is_clean_nucleotide,
     read_stockholm_sequence,
@@ -466,7 +467,6 @@ def substrate_overlap(
     records: Sequence[Mapping[str, Any]],
     rep_taxids: Sequence[int],
     *,
-    n_reps: int,
     fp_assemblies: Sequence[str],
     rep_assemblies: Sequence[str],
 ) -> dict[str, Any]:
@@ -494,7 +494,11 @@ def substrate_overlap(
     hit = [t for t in curated_taxids if t in reps]
     fp_set, rep_set = set(fp_assemblies), set(rep_assemblies)
     return {
-        "n_production_genomes": n_reps,
+        # ⚠ Derived from the SAME set the self-hit intersection uses, not from a
+        # separately-passed count: a manifest with two rows for one representative
+        # would otherwise publish a genome count larger than the population the
+        # intersection below was measured against.
+        "n_production_genomes": len(rep_set),
         "n_rep_taxids": len(reps),
         "n_records_with_taxid": len(curated_taxids),
         "n_distinct_curated_taxids": len(set(curated_taxids)),
@@ -827,7 +831,6 @@ def size_report(
             **substrate_overlap(
                 records,
                 rep_taxids,
-                n_reps=len(rep_assemblies),
                 fp_assemblies=fp_assemblies(fp_manifest),
                 rep_assemblies=rep_assemblies,
             ),
@@ -915,7 +918,11 @@ def _load_rep_columns(path: str | Path) -> tuple[list[int], list[str]]:
 
     frame = pd.read_parquet(path, columns=["ncbi_taxid", "assembly_accession"])
     taxids = pd.to_numeric(frame["ncbi_taxid"], errors="coerce").dropna().astype(int)
-    assemblies = frame["assembly_accession"].dropna().astype(str)
+    # ⚠ Deduplicated here, once: `n_production_genomes` is len(assemblies) while the
+    # self-hit count intersects a SET of them, so a manifest with two rows for one
+    # representative would publish a genome count larger than the population the
+    # other number was measured on.
+    assemblies = frame["assembly_accession"].dropna().astype(str).drop_duplicates()
     return [int(v) for v in taxids], [str(v) for v in assemblies]
 
 
@@ -978,11 +985,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
     # OSError/JSONDecodeError too: every input path is operator-supplied, so a missing
     # or malformed file exits 3 with a refusal rather than 1 with a traceback.
+    # HomologMsaError too: it subclasses RuntimeError, so an empty or out-of-range
+    # seed alignment would exit 1 with a traceback from `read_stockholm_sequence`.
     # KeyError is the backstop for a table whose schema drifted past
     # JOINED_REQUIRED_COLUMNS — pandas raises it from `read_parquet(columns=...)` and
     # from a merge key that is no longer there, both before this module can name it.
     # (`pyarrow.lib.ArrowInvalid` needs no separate arm: it subclasses ValueError.)
-    except (SizingError, ValueError, OSError, KeyError) as exc:
+    except (SizingError, ValueError, OSError, KeyError, HomologMsaError) as exc:
         print(f"refused: {exc}", file=sys.stderr)
         return 3
 

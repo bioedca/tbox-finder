@@ -229,8 +229,8 @@
       "external_inputs": {},
       "schema_version": "1.0"
     },
-    "generated_at_utc": "2026-08-10T19:58:19.176934+00:00",
-    "git_sha": "4ea50e34dc8f08ed371260b8ebb93a572bf38d50",
+    "generated_at_utc": "2026-08-10T20:06:13.346912+00:00",
+    "git_sha": "2b6c50556f6c2222cf1bd3c9a5c6360c87c2427d",
     "inputs": {
       "data/interim/flank_context/context_v0.parquet": "f35f25cda0f7ddc5714baeeece12146aa9e50f943ba9f4a121dbe3fdb3297742",
       "data/processed/master_clean_v0.parquet": "1eb76591d0e481019dd7acf72a439f157fec9f2aeecb8cc5c37ba80a7b062dd2",

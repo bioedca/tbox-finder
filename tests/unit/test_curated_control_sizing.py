@@ -12,6 +12,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import re
 from pathlib import Path
 
 import pytest
@@ -45,7 +46,7 @@ from tbox_finder.mining.curated_control_sizing import (
     wilson_interval,
     wilson_width,
 )
-from tbox_finder.mining.homolog_msa import is_clean_nucleotide
+from tbox_finder.mining.homolog_msa import HomologMsaError, is_clean_nucleotide
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 COMMITTED_REPORT = REPO_ROOT / "reports/p3/curated_control_sizing.json"
@@ -215,6 +216,12 @@ def test_the_gate_is_the_shipped_one():
     # predicate changes, this assertion changes with it rather than drifting.
     assert is_clean_nucleotide("ACGTN") and not is_clean_nucleotide("ACGU")
     assert not is_clean_nucleotide("") and not is_clean_nucleotide("acgt")
+    # ⚠ And the binding itself, through query_supply: calling the predicate here
+    # proves what the predicate does, NOT that the supply verdict consults it, so
+    # the two could diverge with this test still green.
+    for locus_seq in ("ACGTN", "ACGTR"):
+        supply = query_supply([_record(locus_seq=locus_seq, locus_length=len(locus_seq))])
+        assert (supply["n_usable"] == 1) is is_clean_nucleotide(locus_seq)
 
 
 # ── matchedness ──────────────────────────────────────────────────────────────
@@ -242,7 +249,7 @@ def test_matchedness_refuses_an_empty_population():
 def test_substrate_counts_records_and_distinct_taxids_separately():
     records = [_record(host_taxid=7), _record(host_taxid=7), _record(host_taxid=99)]
     out = substrate_overlap(
-        records, [7, 7, 5], n_reps=3, fp_assemblies=["GCA_1.1"], rep_assemblies=["GCA_1.1"]
+        records, [7, 7, 5], fp_assemblies=["GCA_1.1"], rep_assemblies=["GCA_1.1"]
     )
     assert out["n_records_whose_host_taxid_is_a_rep"] == 2
     assert out["n_distinct_curated_taxids_in_reps"] == 1
@@ -254,7 +261,6 @@ def test_self_hit_counts_the_intersection_not_the_fp_set():
     out = substrate_overlap(
         [_record()],
         [1301],
-        n_reps=2,
         fp_assemblies=["GCA_1.1", "GCA_2.1", "GCA_3.1"],
         rep_assemblies=["GCA_1.1", "GCA_9.1"],
     )
@@ -529,9 +535,10 @@ def test_the_committed_report_publishes_no_absolute_path():
 @pytest.mark.skipif(not COMMITTED_REPORT.is_file(), reason="report not generated in this tree")
 def test_the_committed_report_records_every_input_it_read():
     provenance = json.loads(COMMITTED_REPORT.read_text())["provenance"]
-    recorded = set(provenance["inputs"]) | {
-        entry["name"] for entry in provenance["extra"]["external_inputs"].values()
-    }
+    # ⚠ `inputs` ONLY. Merging in the external basenames would let an out-of-repo
+    # file with a colliding basename stand in for a missing repo default — the
+    # assertion would pass while the input it names was never read.
+    recorded = provenance["inputs"]
     # Every default input the CLI reads must leave a trace: a number in this report
     # that traces back to no recorded file is a number a reader cannot check.
     for path in (
@@ -543,9 +550,15 @@ def test_the_committed_report_records_every_input_it_read():
         DEFAULT_MEASURE_REPORT,
         DEFAULT_CONTROL_SEED,
     ):
-        assert path in recorded or Path(path).name in recorded, path
-    assert all(len(digest) == 64 for digest in provenance["inputs"].values())
-    assert provenance["env_lock_hash"]
+        assert path in recorded, path
+    # Hex, not merely 64 characters: "g" * 64 is the right length and no digest.
+    assert all(re.fullmatch(r"[0-9a-f]{64}", digest) for digest in recorded.values())
+    # And the env stamp compared against the lockfile it claims to be — a truthiness
+    # check passes on any hardcoded string ([[pinned-constant-that-nothing-reads]]).
+    assert (
+        provenance["env_lock_hash"]
+        == hashlib.sha256((REPO_ROOT / ENV_LOCK).read_bytes()).hexdigest()
+    )
 
 
 @pytest.mark.skipif(not COMMITTED_REPORT.is_file(), reason="report not generated in this tree")
@@ -675,3 +688,49 @@ def test_an_external_input_is_recorded_by_basename_AND_hash_never_by_path(tmp_pa
 def test_an_absent_input_is_skipped_rather_than_recorded_as_a_hashless_name(tmp_path):
     repo_inputs, external = partition_inputs([("missing", tmp_path / "not-there.json")])
     assert (repo_inputs, external) == ([], {})
+
+
+def test_a_duplicated_representative_is_counted_once_as_a_genome():
+    # `n_production_genomes` and the self-hit intersection must read ONE population:
+    # a manifest with two rows for a representative would otherwise publish a genome
+    # count larger than the set the other number was measured against.
+    out = substrate_overlap(
+        [_record()],
+        [1301],
+        fp_assemblies=["GCA_1.1"],
+        rep_assemblies=["GCA_1.1", "GCA_1.1", "GCA_2.1"],
+    )
+    assert out["n_production_genomes"] == 2
+    assert out["fp_self_hit"]["n_fp_assemblies_in_searched_db"] == 1
+
+
+def test_an_unreadable_seed_alignment_exits_three_not_one(tmp_path, monkeypatch, capsys):
+    # HomologMsaError subclasses RuntimeError, so without it in the except tuple an
+    # empty or out-of-range seed alignment leaves the CLI's exit-3 refusal convention
+    # for a traceback. Raised through the loader seam so the assertion is about the
+    # HANDLER and needs neither the DVC parquet nor a parquet engine.
+    import tbox_finder.mining.curated_control_sizing as mod
+
+    def _raise(**_kwargs):
+        raise HomologMsaError("no FASTA record found in the seed alignment")
+
+    # Both parquet seams are stubbed: the rep-manifest read happens first, and the
+    # local test env has no parquet engine — the point of this test is the HANDLER.
+    monkeypatch.setattr(mod, "_load_rep_columns", lambda _path: ([], []))
+    monkeypatch.setattr(mod, "load_frame", _raise)
+    code = mod.main(
+        [
+            "size",
+            "--k",
+            "10",
+            "--shard-size",
+            "5",
+            "--align-timeout-s",
+            "600",
+            "--out",
+            str(tmp_path / "out.json"),
+        ]
+    )
+    assert code == 3
+    assert "refused:" in capsys.readouterr().err
+    assert not (tmp_path / "out.json").exists()
