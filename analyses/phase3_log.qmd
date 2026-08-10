@@ -5293,4 +5293,107 @@ re-derives byte-identically apart from `provenance.generated_at_utc`. `ruff` + `
 (query construction, stratification, K) that `imp.md` names as this step's first Stop, and that
 choice is **not taken here**. Cross-links ADR-0006 A2/A3/A4 + D3/D6/D7 and ADR-0005 A10.
 
+**Commit.** `caabeb5` (PR #121; the SHA was not knowable when this stanza was written and `main`
+takes no direct commits, so it was corrected in the following step's PR — as P3-15′-e's stale
+stanza was corrected in P3-15′-f's).
+
+## Step P3-15′-g-ii — 2026-08-10: the matched control's query-construction leg — the draw, the re-detect, and whether the query is actually matched
+
+**Inputs.** `data/processed/master_clean_v0.parquet` + `data/processed/splits/split_assignments.parquet`
++ `data/interim/flank_context/context_v0.parquet` (the held-out curated frame, reached through the
+same `architecture_producer.heldout_canonical` carve P3-15′-g sized), the round-0 cold-start Stage-1
+checkpoint `data/processed/checkpoints/stage1_production/stage1.pt` (sha256 `09931a22…`), and
+`data/processed/mining/round0_fp_manifest.json` (the 941 FP candidates the control is read against).
+
+**Process.** `src/tbox_finder/mining/curated_control_sample.py` executes all three parts of the §7
+sample-design decision of 2026-08-10. `draw` takes one record per ADR-0004 cluster with equal
+allocation across orders, re-derives the leakage clauses from the committed split table, and emits
+one **unpadded** 1,024-nt scan window per drawn record via the shipped
+`window_dataset.window_lead_range` + `deterministic_lead`. `detect` scans those windows through
+`mine_round.scan_substrate_windows` — the *same* call site round 0 used, so the A9 Pin-3 triple
+(τ = 0.9 / min_span = 50 / gap_merge = 10) is read from `eval.mining_criterion` rather than re-typed
+— and slices each called span out of its own window as the query. `curated_control_sizing.load_frame`
+was refactored to delegate to a new `load_joined_frame` so the control's frame and the sizing's are
+the same join, not two spellings of it.
+
+**Outputs.** `reports/p3/curated_control_draw.json` · `reports/p3/curated_control_detect.json` ·
+`data/processed/mining/curated_control_windows_v0.jsonl` (200 windows) ·
+`curated_control_manifest_v0.json` (317 candidates, `covariation_producer` shape) ·
+`curated_control_queries_v0.fasta` (the producer leg's sequence-route input) ·
+`tests/unit/test_curated_control_sample.py` (64 tests). Both reports carry `pins_nothing: true`.
+
+**✅ THE HEADLINE: THE RE-DETECT MAKES THE QUERY MATCHED, AND THAT IS NOW MEASURED.** Against the
+same 941 FP candidates, raw curated elements sat at **KS *D* = 0.9647**, median ratio 2.536, with
+62.8 % inside the FP span range. The re-detected spans sit at **KS *D* = 0.0842**, median ratio
+**0.945**, and **100 %** inside the FP span range (317 queries, median 104 nt vs the FP median 110).
+The §7 decision's first part is vindicated on its own terms — this was the one option the sizing
+predicted could be matched, and it is.
+
+**⚠⚠ THE §7 DECISION'S "43/43 ORDERS" IS NOT ACHIEVABLE, AND THE CEILING IS 41.** One record per
+cluster means one *order* per cluster, and the frame's largest cluster (**9488**, 812 records) spans
+**11 orders**. Three orders — Actinopolysporales, Kineosporiales, Nakamurellales — exist **only**
+inside it, so at most one of the three can ever be represented. The draw computes an **exact maximum
+bipartite matching** of orders to clusters (Kuhn's augmenting paths) rather than an id tiebreak, and
+reaches **41 of 41 coverable orders** out of 43 present; a name-ordered greedy reached only 39. The
+sizing report's `n_orders_with_at_least_1_cluster = 43` counted a **shared** cluster once per order,
+so it measured a number the one-per-cluster rule cannot realise. The two lost orders are exactly the
+pseudo-replication the rule exists to prevent — their records are in the same near-identity cluster
+as other orders' — but the deviation from the signed number is disclosed, not absorbed.
+
+**⚠ THE DROPOUT IS 40 OF 200 (20 %), AND IT IS REPORTED, NOT EXCLUDED.** Stage-1 called no span on 40
+drawn records at the round-0 triple; every dropped `record_sha256` is listed in the report. The free
+by-product is the same number read the other way: **Stage-1's per-locus recall on held-out curated
+records is 0.800** (160/200), median best IoU **0.404** — legitimate only because the scanning
+checkpoint's fold is *re-derived* disjoint from this frame, not assumed.
+
+**✅ THE LEAKAGE QUESTION `imp.md` LEFT OPEN IS ANSWERED FROM THE SPLIT TABLE.** The checkpoint that
+must scan these records is the one that produced the 941 FP candidates (ADR-0005 A9's cold-start
+round-0 scanner); its own provenance records its fold as the full ADR-0004 **D5 `nested_train`**
+carve, and the frame is that fold's complement. `leakage_clauses` re-derives it on every run over
+**eight** versioned clauses — record ids, sequence digests **and** ADR-0004 **D3 cluster ids** —
+each with an emptiness guard, and refuses the draw if any fails. Measured: 0 shared record ids,
+0 shared digests, 0 shared clusters against 8,303 `nested_train` records / 4,775 of their clusters;
+all 200 drawn records resolve to `nested_role == 'heldout'`.
+
+**⚠ THE QUERY IS THE ELEMENT'S HIGH-CONFIDENCE CORE, NOT THE ELEMENT.** Median query 104 nt against
+a curated locus median of 279 nt (median best IoU 0.404), so the control's consensuses will be built
+from **partial** elements. That is not a defect of the control — it is precisely what the FP
+candidates are, which is why the two are now matched — but any statement of (b)'s pass rate on
+"known T-boxes" must say it is a rate on the *detector's call*, not on the curated element.
+
+**⚠ THE FRAME'S SKEW INVERTS UNDER ORDER-STRATIFICATION, BY DESIGN.** The frame is 81 % Firmicutes;
+the draw is Actinobacteria 81 / Firmicutes 51 / Tenericutes 30 / Chloroflexi 24 / Deinococcus-Thermus
+6 / Synergistetes 5 / Proteobacteria 3, because Firmicutes carries few orders and Actinobacteria many.
+Class I/II is reported as a stratum: 143 transcriptional / 57 translational drawn, yielding 276 / 41
+queries. Per-order allocation runs 1–6 records.
+
+**⚠ COORDINATES ARE IN THE RECORD'S OWN CONTEXT FRAME, NAMED RATHER THAN DISGUISED.** A drawn record's
+replicon is not among the 2,500 searched genomes, so candidates carry `accession =
+<record_sha256>:c0` and offsets into `context_seq`; the true replicon accession, strand and forward
+bounds ride along as per-record provenance. Minting an NCBI-looking coordinate would have been a
+*wrong* one on the minus strand, where `context_seq` is already reverse-complemented and the
+`window_start + span` arithmetic every consumer performs runs backwards.
+
+**Validation.** `tests/unit` + `tests/golden` under deterministic ordering (`-p no:randomly`) vs a
+matched `main` baseline at `caabeb5`: **zero new failures** — worktree **15** FAILED, main **28**,
+worktree a **strict subset**; the 13-test delta is `test_coverage_sim` + `test_selection_val` moving
+from FAILED on main to SKIPPED in the worktree (skips 87 → 100), the same delta P3-15′-e/-e-ii/-f/-g
+recorded, with both `^FAILED` sets **ANSI-stripped** and the extracted counts cross-checked against
+the summary line ([[ansi-codes-make-failed-extraction-vacuous]]). **64 unit tests; 45 sabotages, all
+RED against their NAMED test, plus 2 negative controls that stay green** — one sabotage initially
+stayed green and exposed a **vacuous fixture of mine** (the cluster it tested was *matched*, so the
+order-bearing-fallback branch it named never ran); the fixture was rebuilt, not the sabotage.
+`reports/p3/curated_control_sizing.json` **re-derives byte-identically** after the `load_frame`
+refactor, and both new reports re-derive byte-identically across runs apart from
+`provenance.generated_at_utc` — the posterior summary is rounded to 6 dp because a CUDA forward is
+not bit-reproducible (~1e-8 across runs), with the **measured** calling margin
+(`min(peak_p_elem) − τ = 0.028201`) recorded so the reader can check that no call turns on that
+noise. `ruff` + `black` clean.
+
+**Decisions.** None — the step pins nothing. It executes the §7 decision of 2026-08-10 and reports
+one deviation it cannot execute (43/43 orders, ceiling 41) for the user to rule on. The producer
+leg — `nhmmer` + `mlocarna` over these 317 queries via the **sequence route**, under
+`ALIGN_TIMEOUT_S = 600` — is the next step and still owes a §9.3 submit-ack. Cross-links ADR-0004
+D3/D5, ADR-0005 A7/A9 Pin 3, ADR-0006 A2/A4.
+
 **Commit.** `PENDING`
