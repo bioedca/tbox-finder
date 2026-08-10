@@ -229,27 +229,27 @@ RECORD_KEYS: tuple[str, ...] = (
 )
 
 
-def load_frame(
+def load_joined_frame(
     *,
     corpus: str | Path = DEFAULT_CORPUS,
     split_table: str | Path = DEFAULT_SPLIT_TABLE,
     context: str | Path = DEFAULT_CONTEXT,
 ) -> list[dict[str, Any]]:
-    """The held-out curated carve, joined to its genomic context, as plain records.
+    """The held-out curated carve joined to context + splits, as **wide** plain rows.
+
+    Split out of :func:`load_frame` so a second consumer can reach the columns this
+    module's own record shape drops (``context_seq``, ``accession``, ``strand``,
+    ``region_start``, ``clipped_start`` / ``clipped_end``) **through the same join**
+    rather than re-spelling it.  ``P3-15'-g-ii``'s control draw is that consumer: it
+    must emit a 1,024-nt scan window per record, which needs the whole context and its
+    replicon geometry, while every number this module reports is computed from the
+    narrow records :func:`records_from_joined` shapes.  Two spellings of one join is
+    exactly how "the control's frame and the sizing's frame are the same records"
+    stops being true by construction and starts being a claim nobody checks.
 
     The carve itself is :func:`architecture_producer.heldout_canonical` — the same
     ``source == 'corpus' ∧ nested_role == 'heldout'`` content-hash join
-    ``reports/p3/architecture_freeze.json`` was measured on, reused rather than
-    re-derived so the control's frame and the curated half of the P3-15'-f
-    comparison are the same 8,715 records by construction.
-
-    The locus nucleotides come from ``flank_context/context_v0.parquet``
-    (``context_seq[locus_offset : locus_offset + locus_length]``), which is the
-    NCBI-anchored genomic context P2-00 fetched — **not** the TBDB ``Name``
-    coordinates, which agree with the record's own length on only 61.7 % of rows.
-
-    Returns plain dicts, not a frame: every function below this one is pandas-free
-    so the unit tier can exercise it without the DVC artifacts.
+    ``reports/p3/architecture_freeze.json`` was measured on.
     """
     import pandas as pd  # lazy: CI's unit tier has pandas, but nothing else here needs it
 
@@ -277,7 +277,34 @@ def load_frame(
             "flank_context.record_id is not unique per curated record"
         )
 
-    return records_from_joined(joined.to_dict("records"))
+    return joined.to_dict("records")
+
+
+def load_frame(
+    *,
+    corpus: str | Path = DEFAULT_CORPUS,
+    split_table: str | Path = DEFAULT_SPLIT_TABLE,
+    context: str | Path = DEFAULT_CONTEXT,
+) -> list[dict[str, Any]]:
+    """The held-out curated carve, joined to its genomic context, as plain records.
+
+    The carve itself is :func:`architecture_producer.heldout_canonical` — the same
+    ``source == 'corpus' ∧ nested_role == 'heldout'`` content-hash join
+    ``reports/p3/architecture_freeze.json`` was measured on, reused rather than
+    re-derived so the control's frame and the curated half of the P3-15'-f
+    comparison are the same 8,715 records by construction.
+
+    The locus nucleotides come from ``flank_context/context_v0.parquet``
+    (``context_seq[locus_offset : locus_offset + locus_length]``), which is the
+    NCBI-anchored genomic context P2-00 fetched — **not** the TBDB ``Name``
+    coordinates, which agree with the record's own length on only 61.7 % of rows.
+
+    Returns plain dicts, not a frame: every function below this one is pandas-free
+    so the unit tier can exercise it without the DVC artifacts.
+    """
+    return records_from_joined(
+        load_joined_frame(corpus=corpus, split_table=split_table, context=context)
+    )
 
 
 #: The columns :func:`records_from_joined` indexes.  A join that silently loses one
