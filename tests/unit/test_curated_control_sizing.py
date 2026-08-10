@@ -353,13 +353,34 @@ def test_expected_core_hours_scale_with_k():
     assert large["expected_core_h"] == pytest.approx(2 * small["expected_core_h"], abs=2e-3)
 
 
-def test_worst_case_core_hours_scale_with_the_array_width():
+def test_worst_case_core_hours_are_priced_on_k_not_on_padded_shards():
+    # A --time request is per task, so the per-task wall is a FULL shard; a core-hour
+    # total is billed on runtime, so it must not charge candidates that do not exist.
     env = compute_envelope(
-        measure_report=MEASURE_REPORT, ks=[20, 40], shard_size=20, align_timeout_s=600
+        measure_report=MEASURE_REPORT, ks=[20, 21], shard_size=20, align_timeout_s=600
     )
-    small, large = env["per_k"]
-    assert (small["array_width"], large["array_width"]) == (1, 2)
-    assert large["worst_case_core_h"] == pytest.approx(2 * small["worst_case_core_h"], abs=2e-2)
+    full, padded = env["per_k"]
+    assert (full["array_width"], padded["array_width"]) == (1, 2)
+    # The padded form would DOUBLE here (two full shards for 21 candidates).
+    assert padded["worst_case_core_h"] == pytest.approx(
+        full["worst_case_core_h"] * 21 / 20, abs=2e-2
+    )
+    # …while the per-task wall stays a full shard, unchanged between the two.
+    assert padded["worst_case_wall_h_per_task"] == full["worst_case_wall_h_per_task"]
+
+
+def test_the_two_core_hour_columns_price_the_same_candidate_count():
+    env = compute_envelope(
+        measure_report=MEASURE_REPORT, ks=[50], shard_size=20, align_timeout_s=600
+    )
+    row = env["per_k"][0]
+    # Both are k * per-candidate * cpus / 3600, differing only in the per-candidate
+    # figure, so their ratio is exactly the ratio of those two figures.
+    assert row["worst_case_core_h"] / row["expected_core_h"] == pytest.approx(
+        env["worst_case_per_candidate_s"]
+        / MEASURE_REPORT["wall_seconds"]["total_per_candidate"]["mean"],
+        rel=1e-3,
+    )
 
 
 @pytest.mark.parametrize("bound", [float("nan"), float("inf"), 0.0, -1.0])

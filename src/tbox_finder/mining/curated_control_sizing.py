@@ -696,7 +696,15 @@ def compute_envelope(
                 "expected_wall_h_per_task": round(expected_task_h, 3),
                 "worst_case_wall_h_per_task": round(worst_task_h, 3),
                 "expected_core_h": round(k * per_candidate_mean / 3600 * PRODUCER_CPUS_PER_TASK, 3),
-                "worst_case_core_h": round(array_width * worst_task_h * PRODUCER_CPUS_PER_TASK, 2),
+                # ⚠ k candidates, NOT array_width full shards. A --time request is per
+                # task, so the padded full-shard wall above is right for it; a core-hour
+                # TOTAL is billed on actual runtime, and the padded form would charge up
+                # to shard_size - 1 candidates that do not exist (at k=50, shard 20 it
+                # prices 60) — leaving a reader to read shard padding as instrument
+                # spread when comparing this against expected_core_h.
+                "worst_case_core_h": round(
+                    k * worst_per_candidate / 3600 * PRODUCER_CPUS_PER_TASK, 2
+                ),
             }
         )
     return {
