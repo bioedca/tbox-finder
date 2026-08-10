@@ -23,8 +23,12 @@ module executes all three:
    hardest records overstates the instrument).
 2. **Sampling = one record per ADR-0004 cluster, order-stratified.**  The largest cluster
    holds 812 near-identical records, so one-per-cluster is what stops *n* from being
-   pseudo-replicated; equal allocation across the 43 orders reaches 43/43 against a
-   uniform draw's expected 22.8 ([[uniform-cluster-draw-collapses-on-skew]]).
+   pseudo-replicated.  ⚠ The decision's *"reaches 43/43 orders"* is **not achievable**, and
+   this module measures why rather than repeating it: one record per cluster means one
+   *order* per cluster, and that 812-record cluster spans **11 orders**, three of which
+   occur nowhere else.  :func:`maximum_order_coverage` computes the exact ceiling — **41**
+   of the 43 orders present — and equal allocation reaches all 41, against a uniform
+   draw's expected 22.8 ([[uniform-cluster-draw-collapses-on-skew]]).
 3. **K = 200.**
 
 **The leakage question this leg had to answer, answered by measurement.**  The frame is
@@ -66,7 +70,7 @@ import argparse
 import json
 import sys
 from collections import Counter
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -330,8 +334,9 @@ def order_stratified_draw(records: Sequence[Mapping[str, Any]], *, k: int) -> di
 
     Round-robin over the orders in name order: every order contributes its first
     representative before any order contributes a second.  That is what makes the draw
-    reach all 43 orders at K = 200 where a uniform draw reaches an expected 22.8 — the
-    frame is 81 % Firmicutes and its largest cluster holds 812 records, so uniformity
+    reach every **coverable** order at K = 200 — 41 of the 43 present, the ceiling
+    :func:`maximum_order_coverage` proves — where a uniform draw reaches an expected 22.8.
+    The frame is 81 % Firmicutes and its largest cluster holds 812 records, so uniformity
     buys pseudo-replication, not representativeness.
 
     Deterministic and seedless: representatives are fixed by
@@ -404,6 +409,23 @@ def order_stratified_draw(records: Sequence[Mapping[str, Any]], *, k: int) -> di
 # ═════════════════════════════════════════════════════════════════════════════
 # The leakage gate — re-derived from the split table, never read back from config
 # ═════════════════════════════════════════════════════════════════════════════
+def refuse_duplicate_digests(digests: Iterable[str]) -> None:
+    """Refuse a repeated ``corpus_record_sha256`` rather than letting the last row win.
+
+    Split out of :func:`load_split_index` so the rule is exercised without a parquet
+    engine (the local test env has pandas but no pyarrow; CI has both), and so a test can
+    show the *rule* biting rather than only that pandas can read a file.
+    """
+    counts = Counter(digests)
+    repeated = sorted(digest for digest, n in counts.items() if n > 1)
+    if repeated:
+        raise ControlSampleError(
+            f"the split table carries {len(repeated)} duplicated corpus_record_sha256 "
+            f"value(s) (e.g. {repeated[0]}); a duplicate would overwrite its own role and "
+            "the leakage clauses would read the surviving row as the whole truth"
+        )
+
+
 def load_split_index(split_table: str | Path = DEFAULT_SPLIT_TABLE) -> dict[str, Any]:
     """The ``nested_train`` / ``heldout`` sets the leakage clauses are derived from.
 
@@ -425,6 +447,18 @@ def load_split_index(split_table: str | Path = DEFAULT_SPLIT_TABLE) -> dict[str,
     trained = frame[frame["nested_role"] == "train"]
     flagged = frame[frame["nested_train"].astype(bool)]
     corpus_rows = frame.dropna(subset=["corpus_record_sha256"])
+    # Refused, not de-duplicated.  The digest→role and digest→record_id maps below are
+    # dict comprehensions, so a repeated digest silently keeps its LAST row: a digest
+    # carrying both a `train` row and a `heldout` row would resolve to whichever came
+    # last, and `every_drawn_record_is_heldout` would pass on a record that IS in the
+    # training fold.  `every_drawn_record_resolved` cannot see it — that clause detects
+    # two digests collapsing onto one record_id, not one digest collapsing two split rows.
+    # `load_joined_frame` calls `.drop_duplicates("corpus_record_sha256")` on this very
+    # column, so the join path already treats duplicates as possible; here the leakage
+    # gate reads them, and a silent overwrite leaves every summed count reconciling
+    # ([[duplicate-key-merges-instead-of-colliding]]).  Measured 2026-08-10: 23,535 rows,
+    # 23,535 distinct digests — this refusal does not fire on the committed table.
+    refuse_duplicate_digests(str(v) for v in corpus_rows["corpus_record_sha256"])
     return {
         "n_rows": int(len(frame)),
         "trained_record_ids": {str(v) for v in trained["record_id"]},
@@ -636,6 +670,13 @@ def _replicon_provenance(row: Mapping[str, Any], start: int, window: int) -> dic
     from tbox_finder.data.flank_context import forward_bounds
 
     accession = row.get("accession")
+    # Normalised at the pandas boundary: a missing accession arrives as float ``nan``,
+    # and ``str(nan)`` is the perfectly present-looking string ``"nan"`` — an accession
+    # that addresses no replicon, published with ``reason: None`` as though it were real
+    # ([[stringified-null-survives-missing-checks]]).  ``strand`` and ``region_start`` are
+    # already covered by ``_finite_int``; this column was the one unguarded seam.
+    if not isinstance(accession, str) or not accession.strip():
+        accession = None
     strand = _finite_int(row.get("strand"))
     region_start = _finite_int(row.get("region_start"))
     region_len = len(row["context_seq"])
@@ -821,7 +862,6 @@ def build_queries(
         if window is None:
             refused["candidate_window_unknown"] += 1
             continue
-        per_window[window_name] += 1
         start = int(window["window_start"])
         rel_start = int(candidate["locus_start"]) - start
         rel_end = int(candidate["locus_end"]) - start
@@ -834,6 +874,12 @@ def build_queries(
         if not is_clean_nucleotide(query):
             refused["ambiguous_alphabet"] += 1
             continue
+        # Counted only once the span has survived every refusal, so `spans_per_record`
+        # and `n_queries` describe the same population.  Counted earlier, a record whose
+        # only span is refused would contribute 1 span, 0 queries, and still appear in
+        # `dropped_record_ids` — three statements about one record that cannot all be read
+        # together.
+        per_window[window_name] += 1
         lead = int(window["lead"])
         locus_length = int(window["locus_length"])
         inter, iou = _overlap(rel_start, rel_end, lead, lead + locus_length)
@@ -886,7 +932,13 @@ def build_queries(
             "n_records": len(windows),
             "n_recovered": len(recovered),
             "recall": round(len(recovered) / len(windows), 4) if windows else None,
-            "best_iou_per_record": percentiles(sorted(best_iou.values())),
+            # A record only has a best IoU if it produced a span at all, so this summary's
+            # denominator is n_records_with_a_query, NOT n_records.  The key says so:
+            # sitting beside `n_records`, a bare `best_iou_per_record` invites reading the
+            # mean as an average over every drawn record, silently excluding the dropout
+            # from a statistic the dropout is the most interesting part of.
+            "n_records_with_a_best_iou": len(best_iou),
+            "best_iou_per_record_with_a_query": percentiles(sorted(best_iou.values())),
         },
         "spans_per_record": percentiles(
             sorted(float(per_window.get(str(w["window_name"]), 0)) for w in windows)
@@ -968,13 +1020,18 @@ def detect_report(
     fp_lengths: Sequence[int],
     checkpoint_sha256: str,
     window_nt: int,
+    checkpoint_path: str | Path = DEFAULT_CHECKPOINT,
 ) -> dict[str, Any]:
     queries = built["queries"]
     lengths = [int(q["query_nt"]) for q in queries]
     body = _header()
     body["design"] = {"window_nt": window_nt, "detection_triple": _detection_triple()}
     body["checkpoint"] = {
-        "path": DEFAULT_CHECKPOINT,
+        # The path that was actually scanned, not the module default: with `--checkpoint`
+        # pointed elsewhere the report would otherwise name one file beside the sha256 of
+        # another, while `provenance.inputs` recorded the real one — one report making two
+        # disagreeing statements about which checkpoint produced the queries.
+        "path": portable_path(checkpoint_path),
         "sha256": checkpoint_sha256,
         "fold": (
             "ADR-0004 D5 nested_train — the fold the draw report's leakage clauses "
@@ -1213,6 +1270,7 @@ def _run_detect(args: argparse.Namespace) -> tuple[dict[str, Any], str]:
         fp_lengths=fp_span_lengths(fp_manifest),
         checkpoint_sha256=_sha256_of(checkpoint),
         window_nt=int(windows[0]["window_nt"]),
+        checkpoint_path=checkpoint,
     )
     _attach_provenance(
         body,

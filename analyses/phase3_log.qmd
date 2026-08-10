@@ -5343,8 +5343,9 @@ as other orders' — but the deviation from the signed number is disclosed, not 
 **⚠ THE DROPOUT IS 40 OF 200 (20 %), AND IT IS REPORTED, NOT EXCLUDED.** Stage-1 called no span on 40
 drawn records at the round-0 triple; every dropped `record_sha256` is listed in the report. The free
 by-product is the same number read the other way: **Stage-1's per-locus recall on held-out curated
-records is 0.800** (160/200), median best IoU **0.404** — legitimate only because the scanning
-checkpoint's fold is *re-derived* disjoint from this frame, not assumed.
+records is 0.800** (160/200), median best IoU **0.404** *over the 160 records that fired* (the
+report names that denominator explicitly) — legitimate only because the scanning checkpoint's fold
+is *re-derived* disjoint from this frame, not assumed.
 
 **✅ THE LEAKAGE QUESTION `imp.md` LEFT OPEN IS ANSWERED FROM THE SPLIT TABLE.** The checkpoint that
 must scan these records is the one that produced the 941 FP candidates (ADR-0005 A9's cold-start

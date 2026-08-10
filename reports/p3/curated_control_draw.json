@@ -330,8 +330,8 @@
       "external_inputs": {},
       "schema_version": "1.0"
     },
-    "generated_at_utc": "2026-08-10T22:25:58.479777+00:00",
-    "git_sha": "caabeb54c9d468b9017ddf388619b2adad1b8e85",
+    "generated_at_utc": "2026-08-10T22:46:33.605274+00:00",
+    "git_sha": "687c6d208e431e081d3e14ebe8ac35a678a26819",
     "inputs": {
       "data/interim/flank_context/context_v0.parquet": "f35f25cda0f7ddc5714baeeece12146aa9e50f943ba9f4a121dbe3fdb3297742",
       "data/processed/master_clean_v0.parquet": "1eb76591d0e481019dd7acf72a439f157fec9f2aeecb8cc5c37ba80a7b062dd2",

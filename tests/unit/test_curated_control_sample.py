@@ -472,6 +472,20 @@ def test_replicon_provenance_names_missing_geometry_without_killing_the_window()
     assert out["replicon"]["reason"] == "replicon_geometry_missing"
 
 
+@pytest.mark.parametrize("absent", [float("nan"), None, "", "   "])
+def test_replicon_provenance_refuses_a_stringified_missing_accession(absent):
+    """``str(float('nan'))`` is ``"nan"`` — an accession that addresses no replicon but
+    reads as present, published with ``reason: None``
+    ([[stringified-null-survives-missing-checks]])."""
+    row = wide_row("R1")
+    row["accession"] = absent
+    out = ccs.emit_window(row)
+    assert out["ok"] is True
+    assert out["replicon"]["accession"] is None
+    assert out["replicon"]["reason"] == "replicon_geometry_missing"
+    assert out["replicon"]["forward_start"] is None
+
+
 # ═════════════════════════════════════════════════════════════════════════════
 # emit_windows / read_windows
 # ═════════════════════════════════════════════════════════════════════════════
@@ -599,10 +613,38 @@ def test_build_queries_refuses_a_candidate_whose_window_is_unknown():
     assert built["dropout"]["refusal_reasons"] == {"candidate_window_unknown": 1}
 
 
+def test_spans_per_record_counts_only_spans_that_became_queries():
+    """``spans_per_record`` and ``n_queries`` must describe one population.
+
+    Counted before the refusals, a record whose only span is refused contributes 1 span,
+    0 queries, and still appears in ``dropped_record_ids`` — three statements about one
+    record that cannot all be read together.
+    """
+    window = _window()
+    kept = vars(_candidate(window, 100, 200))
+    refused = vars(_candidate(window, 900, 1200))  # runs off the end of the window
+    built = ccs.build_queries([window], [kept, refused])
+    assert len(built["queries"]) == 1
+    assert built["dropout"]["refusal_reasons"] == {"span_outside_window": 1}
+    assert built["spans_per_record"]["max"] == 1.0
+
+
 def test_build_queries_refuses_two_windows_sharing_a_name():
     window = _window()
     with pytest.raises(ccs.ControlSampleError, match="share a window_name"):
         ccs.build_queries([window, dict(window)], [])
+
+
+def test_best_iou_summary_names_the_population_it_is_over():
+    """Its ``n`` is the records that FIRED, not the records drawn — the key says so."""
+    fired, silent = _window("R1"), _window("R2")
+    lead = fired["lead"]
+    built = ccs.build_queries([fired, silent], [vars(_candidate(fired, lead, lead + 40))])
+    recall = built["stage1_locus_recall"]
+    assert recall["n_records"] == 2
+    assert recall["n_records_with_a_best_iou"] == 1
+    assert recall["best_iou_per_record_with_a_query"]["n"] == 1
+    assert "best_iou_per_record" not in recall  # the ambiguous key name is gone
 
 
 def test_stage1_recall_counts_records_not_spans():
@@ -742,6 +784,62 @@ def test_cli_detect_refuses_an_absent_checkpoint(tmp_path, capsys):
     assert code == 3
     assert "is not on disk" in capsys.readouterr().err
     assert not (tmp_path / "r.json").exists()
+
+
+def test_detect_report_names_the_checkpoint_that_was_actually_scanned(tmp_path):
+    """A non-default ``--checkpoint`` must not be reported under the default's path."""
+    window = _window()
+    built = ccs.build_queries([window], [vars(_candidate(window, 100, 220))])
+    elsewhere = tmp_path / "other_stage1.pt"
+    body = ccs.detect_report(
+        built=built,
+        fp_lengths=[100],
+        checkpoint_sha256="deadbeef",
+        window_nt=ccs.WINDOW_NT,
+        checkpoint_path=elsewhere,
+    )
+    assert body["checkpoint"]["path"].endswith("other_stage1.pt")
+    assert body["checkpoint"]["path"] != ccs.DEFAULT_CHECKPOINT
+
+
+def test_duplicate_digest_rule_refuses_and_names_the_offender():
+    """A repeated digest would overwrite its own role, and the leakage clauses would read
+    the surviving row as the whole truth ([[duplicate-key-merges-instead-of-colliding]])."""
+    with pytest.raises(ccs.ControlSampleError, match="duplicated corpus_record_sha256"):
+        ccs.refuse_duplicate_digests(["D1", "DUP", "D2", "DUP"])
+
+
+def test_duplicate_digest_rule_does_not_fire_on_a_clean_table():
+    """The positive control — a guard that refuses everything also satisfies `raises`."""
+    assert ccs.refuse_duplicate_digests(["D1", "D2", "D3"]) is None
+
+
+def _split_parquet(tmp_path, digests: list[str]):
+    pytest.importorskip("pyarrow")  # present in CI; the local test env has pandas only
+    pd = pytest.importorskip("pandas")
+    path = tmp_path / "splits.parquet"
+    pd.DataFrame(
+        {
+            "record_id": [f"rid{i}" for i in range(len(digests))],
+            "corpus_record_sha256": digests,
+            "cluster_id": list(range(1, len(digests) + 1)),
+            "nested_role": ["heldout", "train"][: len(digests)],
+            "nested_train": [False, True][: len(digests)],
+        }
+    ).to_parquet(path)
+    return path
+
+
+def test_split_index_applies_the_duplicate_rule_to_the_real_table(tmp_path):
+    """The loader must CALL the rule — a rule nothing invokes protects nothing."""
+    with pytest.raises(ccs.ControlSampleError, match="duplicated corpus_record_sha256"):
+        ccs.load_split_index(_split_parquet(tmp_path, ["DUP", "DUP"]))
+
+
+def test_split_index_reads_a_clean_table(tmp_path):
+    index = ccs.load_split_index(_split_parquet(tmp_path, ["D1", "D2"]))
+    assert index["n_trained"] == 1
+    assert index["role_by_digest"] == {"D1": "heldout", "D2": "train"}
 
 
 def test_score_summary_rounds_and_reports_the_calling_margin():
