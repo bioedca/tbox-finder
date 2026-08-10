@@ -5398,3 +5398,25 @@ leg — `nhmmer` + `mlocarna` over these 317 queries via the **sequence route**,
 D3/D5, ADR-0005 A7/A9 Pin 3, ADR-0006 A2/A4.
 
 **Commit.** `PENDING`
+
+**Review addendum (P3-15′-g-ii).** The `CodeRabbit` GitHub check read **`pass` with a body of only
+a rate-limit notice** for the whole step — §5.1's trap, **an absence, not a pass**, fifteenth step
+running — so the **CLI carried the gate alone** (`coderabbit review --committed --base main`); no
+Greptile credit was spent. **Round 1 returned 6 findings, 3 major, and all 6 were real**; rounds
+2 **and 3** both closed on *No new findings*, and the replayed *"6 previous findings"* were
+**verified fixed in-tree by grep plus their own green named tests**, not assumed stale. A second
+clean round was run deliberately because the count went **up** twice during P3-15′-g, so one clean
+round is not evidence of convergence. The three majors were each a *number
+that would have looked right*: a missing `accession` arriving as float `nan` and published as the
+string `"nan"` with `reason: None` beside it; a duplicated `corpus_record_sha256` able to overwrite
+its own `nested_role`, so a record inside the training fold could satisfy
+`every_drawn_record_is_heldout` (measured: 23,535 rows / 23,535 distinct digests, so the new refusal
+does not fire today); and `detect_report` naming `DEFAULT_CHECKPOINT` while hashing `args.checkpoint`
+— one report making two disagreeing statements about which checkpoint produced the queries. The
+minors were `spans_per_record` counting a span before the refusals that would discard it,
+`best_iou_per_record` whose *n* is the 160 records that fired sitting unlabelled beside `n_records`
+200, and this module's own docstring still repeating the "43/43 orders" claim the module disproves.
+Every headline number survived the round unchanged. The duplicate-digest rule was extracted as a
+pure function because the local test env has pandas but **no pyarrow**: the rule is tested
+everywhere, its call site is a **CI-only** parquet test, and that call site was additionally
+verified by direct execution in `tbox-finder-data` — a skip is not a pass.
