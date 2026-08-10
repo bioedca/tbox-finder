@@ -5391,11 +5391,19 @@ not bit-reproducible (~1e-8 across runs), with the **measured** calling margin
 (`min(peak_p_elem) − τ = 0.028201`) recorded so the reader can check that no call turns on that
 noise. `ruff` + `black` clean.
 
-**Decisions.** None — the step pins nothing. It executes the §7 decision of 2026-08-10 and reports
-one deviation it cannot execute (43/43 orders, ceiling 41) for the user to rule on. The producer
-leg — `nhmmer` + `mlocarna` over these 317 queries via the **sequence route**, under
-`ALIGN_TIMEOUT_S = 600` — is the next step and still owes a §9.3 submit-ack. Cross-links ADR-0004
-D3/D5, ADR-0005 A7/A9 Pin 3, ADR-0006 A2/A4.
+**Decisions.** The step pins nothing itself, and the one deviation it could not execute went back to
+the lead. **§7 ruling, user, 2026-08-10 (AskUserQuestion), both parts:** (1) **accept 41/41 and
+record the ceiling** — the two unreachable orders are near-identical to already-drawn records inside
+cluster 9488, so admitting them would be exactly the pseudo-replication one-per-cluster exists to
+prevent; the signed "43/43" is superseded by the measured ceiling of 41, and both lost orders are
+named in the report with the cluster that swallows them. (2) **Do not enlarge the draw yet** — run
+the producer on the current 317 queries, measure the *curated* producible share (still UNMEASURED;
+the sizing carried only FP anchors), and top the draw up only if the record-level independent n
+proves too small. ⚠ That defers a real risk: the producer's unit is the query (317 entering) but
+independent observations are bounded by the **160** firing records, so any CI must be stated on the
+record-level n, not the query count. The producer leg — `nhmmer` + `mlocarna` over these 317 queries
+via the **sequence route**, under `ALIGN_TIMEOUT_S = 600` — is the next step and still owes a §9.3
+submit-ack. Cross-links ADR-0004 D3/D5, ADR-0005 A7/A9 Pin 3, ADR-0006 A2/A4.
 
 **Commit.** `PENDING`
 
