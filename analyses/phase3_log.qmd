@@ -5015,3 +5015,198 @@ rather than correctness.
 
 **Commit.** `squash 2f7849a on main (PR #117)`; the dev-log stanza and this result landed via
 PR #118 and its follow-up.
+
+## Step P3-15′-f — 2026-08-09: what the de-novo instrument actually resolves, and what criterion (b)'s seven parameters may therefore be
+
+**Inputs.** The 278 A3/A4 `mlocarna` comparative consensuses the supply run produced
+(`two.amlab:$HOME/tbox-scratch/round_p3_15_supply/msa/<slug>/msa.sto`, SLURM jobs 1205 + 1254),
+staged locally by `rsync` and bound into the report by a `supply_digest_sha256` over every file's
+bytes; `data/processed/mining/round0_fp_manifest.json` (941 candidates);
+`$ROUND_DIR/covariation_status.json` (941 rows, `passed` 167 / `failed` 111 / `unavailable` 663);
+and `reports/p3/architecture_freeze.json` as the *curated-side* contrast only.
+
+**Process.** `src/tbox_finder/mining/architecture_param_measure.py::measure` sweeps every
+admissible value of the six numeric localization parameters over the 278 real consensuses, calling
+the shipped localizer (`parse_stockholm`, `find_helices`, `find_bulges`, `degapped_span`,
+`named_elements_status`, `ncca_bulge_status`) and, for the joint outcome, the real decision path
+`localize` → `architecture_status`. Nothing is re-implemented: `test_the_localizer_primitives_are_
+the_shipped_objects_not_reimplementations` pins object **identity**, because a private copy of
+"what a helix is" would let the measurement and the producer disagree about the very thing the
+measurement exists to parameterise. The report `pins_nothing: true`.
+
+**Outputs.** `reports/p3/architecture_parameter_measurement.json` (33 KB;
+`supply_digest 90b2fe1b…`), `src/tbox_finder/mining/architecture_param_measure.py`,
+`tests/unit/test_architecture_param_measure.py` (29 tests).
+
+**Validation.** Full `tests/unit` + `tests/golden` under deterministic ordering against a matched
+`main` baseline at `95ebbb4`: **zero new failures**. **28 sabotages, every one RED against its
+NAMED test**, plus **2 negative controls that stay green**. The report re-derives **byte-identically
+apart from `provenance.generated_at_utc`**. `ruff` + `black` clean.
+
+**Decisions.**
+
+*The two instruments disagree by more than a threshold's worth, and that is the headline.*
+`architecture_freeze.json` measured the localizer on **curated, CM-derived** structure: ≥4 named
+helices in **99.3 %** of 8,715 held-out records, and NCCA recovery at all four acceptor contacts in
+**99.87 %**. On the **de-novo** consensuses the same localizer resolves ≥4 helices in **101 of 278
+(36.3 %)** and detects a 4-nt NCCA register in **24 of 278 (8.6 %)**. Transplanting the curated
+numbers onto the de-novo instrument is therefore not "a stricter standard" — it is a different
+instrument's calibration, and it would fail (b) on **265 of 278** consensuses.
+
+*The strongest available control is criterion (a) itself.* Every consensus here belongs to a
+round-0 **false-positive-manifest** candidate, so the corpus carries no ground truth. What it does
+carry is a second, independent structural reading of the same alignment: R-scape covariation, which
+ADR-0006 D3 names as "the model-independent structural anchor [that] remains … even under both (b)
+relaxations". Stratifying (b)'s verdict by (a)'s gives a sensitivity curve that costs nothing to
+measure, because sparing is a **disjunction** — an (a)-`passed` candidate is spared whatever (b)
+says. On the **167** (a)-`passed` candidates, (b) agrees at **97.0 %** (loosest non-vacuous),
+**88.0 %** (`min_named_helices=2`, `ncca_pairing_nt=2`), **55.1 %** (`min_named_helices=3`), and
+**3.6 %** (the curated transplant). ⚠ It is a control, not ground truth: (a) evidences *structure*,
+not T-box identity, and A4 makes the two criteria share their supply, so they are independent only
+in what they test on it.
+
+*Two of the seven parameters cannot decide anything, and both are proved rather than sampled.*
+`ALLOW_WOBBLE` is **structurally inert for the `NCCA` acceptor**: `_pairs_with`'s wobble arm
+compares the bulge base to the **acceptor** base (`WATSON_CRICK[motif_base]`), the `UGGN` motif's
+two constrained positions have acceptor bases `A` and `C`, and `WOBBLE_PAIRS` is `{(G,U),(U,G)}` —
+so no input whatsoever can distinguish `0` from `1`. `STEM_I_NT_THRESHOLD` is inert **on this
+manifest**: `short_stem_i_or_class_ii` returns `False` for a `None` extent, the 941 rows carry
+neither `stem_i_extent_nt` nor `regulatory_mode`, and 0 rows differ between thresholds 1 and
+10,000. Each claim ships with a **positive control** (`CCG` as an acceptor whose motif *is*
+wobble-live; a manifest row carrying an extent; a `translational` row that fires the mode arm while
+both thresholds agree) — an inertness proof that finds everything inert is the same defect as a
+guard that refuses everything. `MIN_HELIX_PAIRS` is a third, weaker case: values 1 and 2 are
+**empirically** indistinguishable here because no consensus contains an isolated pair (minimum
+observed stack depth is 2), but that is a property of the sample, not of the code.
+
+*The one de-novo positive control the repo owns sits exactly on two of the boundaries.*
+`data/interim/homolog_msa/certified_positive.sto` (job 766, 24 × 289) resolves **3** helices (5, 8,
+11 stacked pairs) at every `min_helix_pairs` 1–5, and its bulge reads `detected` at
+`ncca_pairing_nt` 1–3 but **`absent` at 4**. So `min_named_helices = 4` **or**
+`ncca_pairing_nt = 4` mines a known T-box. ⚠ **n = 1**: it bounds the choice in one direction and
+supports no rate. The properly powered instrument would be a matched de-novo control — the same
+`nhmmer` + `mlocarna` pipeline run on a sample of curated positives — which is a separate SLURM
+measurement this step did not take.
+
+**Stops.** The **§7 item-2 seven-parameter choice is OPEN** and is what this step hands to the
+user; the **§9.3 submit-ack** for `slurm/p3/architecture_producer.sbatch` follows it. ⚠ The
+producer's own `ROUND_DIR` default is `$HOME/tbox-scratch/round_p3_15d`, which is **not** where the
+supply lives — `ROUND_DIR=$HOME/tbox-scratch/round_p3_15_supply` must be exported explicitly, and
+`sbatch --test-only` validates headers only, so it would catch neither that nor a missing
+`${VAR:?}` export.
+
+**⚠ Disclosure.** The 278 consensuses this report measures are on **cluster scratch only** — no
+DVC object, no git object — so the committed report is verifiable (by digest) but not locally
+re-derivable. Their production is reproducible from jobs 1205 + 1254; tracking them is a decision
+for the producer-run leg, not something taken here.
+
+**Commit.** (this stanza's commit; squash SHA recorded at merge)
+
+**⚠ REVIEW ADDENDUM (P3-15′-f, round 1 — 5 findings, 2 major, ALL FIVE REAL).** The `CodeRabbit`
+GitHub check read **`pass` with a body of only a Fair-Usage notice** ("Next review available in: 10
+minutes") — §5.1's trap, **an absence, not a pass**; the gate was met by a completed **CLI** review
+of the current head, whose own trailer counts the findings. (1) **major** — `_distribution`'s empty
+branch omitted `median`, so the same block had two shapes and `dist["median"]` raised `KeyError` on
+a consensus with no flanked bulge, which is reachable. (2) **major** — a covariation file carrying
+no `status` map degraded to `{}` and the run continued: every joint row kept its
+`by_covariation_status` key while `control_and_consequence` reported `n_a_passed: 0`, i.e. the (a)
+control **silently measured nothing** ([[clauses-must-guard-emptiness]]). (3) **minor, and the one
+that mattered most for a PUBLIC repo** — `provenance.script`, `provenance.inputs`,
+`extra.external_inputs.msa_root` and `supply.covariation.path` all carried **absolute paths under a
+developer home directory, account name included**, and the report is tracked in git. Fixed with one
+`portable_path` helper at every seam plus a test that walks the **whole payload** and refuses any
+string beginning with `/` — the four known sites were not the risk, a fifth added later was
+([[fixed-one-of-two-identical-things]]). ⚠ `provenance.inputs` records *the path it hashed*, so an
+input staged outside the checkout cannot simply be relativised: those are now hashed separately and
+recorded by **basename + sha256**, and `is_inside_repo` is a **separate predicate** from
+`portable_path` so a basename that happens to exist in the checkout cannot be published as
+repo-relative *and* hashed as the wrong file. (4) **minor** — `median` changed JSON type with the
+parity of `n` (`statistics.median` returns `int` for odd, `float` for even). (5) **minor** — the
+missing-consensus count assumed `candidate_id → slug` is injective; a collision would make one
+directory stand for two candidates and inflate `unavailable` in every joint row **while the
+arithmetic still reconciled**. Guarded, with a positive control that the guard does not refuse a
+clean manifest. Post-fix: **38 tests**, **35 sabotages all RED against their NAMED test** + 2 green
+negative controls, report re-derived (numbers unchanged), `ruff` + `black` clean.
+
+**⚠ REVIEW ROUND 2 — 9 findings (2 major), and the count went UP, so round 1's five were no
+evidence of convergence.** All nine real; one carried a fix that named a field the report does not
+have. (1) **major, and the sharpest** — the slug-collision guard round 1 added **could not see the
+two defects that actually happen**: `manifest_ids` was built as a *set comprehension*, so a repeated
+`candidate_id`, or a row carrying neither `candidate_id` nor `id` (which stringifies to `"None"`),
+collapses **before** anything can look. The comment I had written said "silently, because the
+arithmetic still reconciles… Checked, not assumed" — and the check did not cover it. Now the ids are
+collected as a **list** and both defects refuse before the set is taken
+([[duplicate-key-merges-instead-of-colliding]]). (2) **major** — the payload-wide absolute-path test
+passed `--supply-origin cluster:$HOME/…`, which **cannot start with `/`**, so that input could never
+exercise the filter the test exists to prove: a control that cannot fail. `supply_origin` is the one
+path-shaped field kept **verbatim** (it is operator-authored provenance naming the cluster), so it is
+now **refused** if it looks like a local absolute path — redacting would destroy the `$HOME` path the
+field exists to carry — and the test asserts both arms. (3) the empty `_distribution` branch matched
+on **top-level** keys but returned `percentiles: {}` while the populated branch returns `p50…p99`, so
+`dist["percentiles"]["p50"]` still raised — **my own round-1 fix, one level too shallow**. (4) the
+CLI caught only `MeasureError`/`ArchitectureError`, so a missing or malformed `--manifest` exited 1
+with a traceback while `read_supply` refused its own bad input with exit 3. (5) `pair_table` sat
+**outside** `read_supply`'s `try`, so an unbalanced consensus escaped the refusal that names every
+offending file. (6) the positive control's bulge low bound **tracks `ncca_pairing_nt`** and was not
+recorded, so no reader could say which `bulge_state_grid` cell each entry matched. (7) an **absent**
+positive control was omitted entirely rather than recorded as absent. (8) `assert
+candidate_slug(ids[0])` asserted **nothing** — no implementation fails it — one of mine, and
+[[review-finding-right-fix-wrong]] for the eighth time: the proposed replacement read a
+`decided_slugs` field that does not exist, so the real fix asserts that no candidate id equals its own
+slug, which is what makes the join necessarily by slug. (9) a stale inline comment said "the third
+consensus" after the fixture grew to four. Post-fix: **46 tests**, **44 sabotages all RED against
+their NAMED test** + 2 green negative controls, zero new failures vs the same `main` baseline, report
+re-derived with every measured number unchanged.
+
+**⚠ REVIEW ROUND 3 — 2 findings (1 major), both real, both the SAME CLASS as round 2's: a shape
+assumed before it was validated, escaping the module's own exit-3 convention.** (1) **major** —
+`manifest["candidates"]` raises `KeyError` on a JSON object without that key, and `row.get(...)`
+raises `AttributeError` on a bare-string row; neither is caught by `main`, so the CLI exits **1 with
+a traceback** where every other bad input exits **3 with a refusal** — through `--manifest`, which
+accepts any path. (2) `cov["status"]` was checked to be a `Mapping` but its **values** were not: an
+unhashable value makes `Counter(cov_status.values())` raise `TypeError`, the same escape. **The
+shape of a file another process wrote is an input, not an invariant** — the third round in a row
+where that was the finding, and the second time the *guard I had just added* checked one level less
+deeply than the failure. Post-fix: **50 tests**, **48 sabotages all RED against their NAMED test** +
+2 green negative controls, zero new failures, report re-derived with every number unchanged.
+
+**⚠ REVIEW ROUND 4 — 5 findings (1 major), all real. The count went 5 → 9 → 2 → 5, so no round in
+this step was ever evidence of convergence.** ⚠ Both CodeRabbit paths hit the Fair-Usage limit before
+this round; the `CodeRabbit` PR check read **`pass` with a body of only the rate-limit notice**
+throughout — §5.1's trap, and the gate was carried by completed **CLI** reviews, this one run after
+waiting the limit out rather than escalating to Greptile. (1) **major, and it is
+[[fixed-one-of-two-identical-things]] again** — round 2 added a slug-injectivity guard on the
+manifest and **left its sibling on the covariation table unguarded**. That table is a separate
+operator-supplied input keyed by the same slug, so two ids collapsing is last-write-wins and a
+candidate is attributed to the **wrong criterion-(a) arm**, shifting `by_covariation_status`,
+`control_and_consequence` and `helix_arm_on_covariation_passed` — **with every count still
+reconciling**. (2) `evaluate_tuple`'s "consensus-less candidates are counted, not dropped" test used
+`>=`, so an implementation that marked **every** measured consensus `unavailable` would pass it, and
+the total and sum assertions beside it stay satisfied under exactly that misclassification — a weak
+assertion of mine, now exact. (3) the positive control's parse was unguarded, and `main` does not
+catch `IndexError`. (4) `--out` is operator-supplied too, and the report **write** sat outside the
+refusal convention every *input* path already followed. (5) the inertness block's `why` was a
+**fixed string** asserting "this manifest supplies neither field" even when the counts beside it said
+otherwise — a narrative contradicting its own numbers is the shape a reader trusts and cannot check
+([[gate-clauses-need-re-derivation]]) — and its `manifest_row_fields` census read **row 0 only**.
+Post-fix: **55 tests**, **54 sabotages all RED against their NAMED test** + 2 green negative
+controls, zero new failures, report re-derived with every measured number unchanged.
+
+**⛔ THE §7 DECISION — TAKEN BY THE USER, AND IT IS NOT ONE OF THE PARAMETER SETTINGS.** Presented
+with the four options, the user chose **"measure a matched control first"**: do **not** pin (b)'s
+seven parameters on `n = 1` plus criterion (a) as a proxy. The powered instrument is the **same
+`nhmmer` + `mlocarna` pipeline run on a sample of curated positives**, giving (b)'s sensitivity on
+**known** T-boxes as a rate at every point of this same sweep. It is its own step: curated TBDB
+records carry sequence, not genomic context, so the homolog search needs a host-genome join built
+first. **`P3-15′-f`'s producer run stays blocked**, and the parameter choice is deferred until that
+control exists. This measurement stands as the corpus-side half of the evidence.
+
+**✅ REVIEW ROUND 5 — *No new findings*, and the gate is met.** Counts across the step: **5, 9, 2, 5,
+0 — 21 findings, all 21 real, 6 major.** ⚠ The zero came with *"5 previous findings"*; each was
+**verified present in the tree by grep + its own green named test**, not assumed stale — the CLI's
+stored-findings cache replays the last local review's list by design, so "previous findings" is never
+evidence of anything still being there. All five were round 4's, fixed in `4e049aa`. ⚠ The
+`CodeRabbit` **GitHub check read `pass` with a body of only a Fair-Usage notice for the entire step**
+(§5.1's trap, the thirteenth step running); the gate was carried by the **CLI** throughout, and the
+one rate-limit stall was **waited out** rather than escalated to Greptile — **no Greptile credit
+spent this step**.
