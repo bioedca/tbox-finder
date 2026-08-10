@@ -2,7 +2,7 @@
   "adr": "ADR-0006 A2 (min_sequences floor) / A3 (mlocarna) / A4 (criterion (b)'s instrument), D3/D6/D7; ADR-0005 A10 (the covariation-producer envelope), D14 (unavailable spares)",
   "envelope": {
     "align_timeout_s": 600.0,
-    "caveat": "the expected column extrapolates FP-candidate wall onto curated queries, which this report measures to be a different query population; the worst_case column is bounded by --align-timeout-s and does not",
+    "caveat": "the expected_* columns extrapolate FP-candidate wall onto curated queries, which this report measures to be a different query population, so they inherit that difference; the worst_case_* columns do not \u2014 they are search_max + align_timeout_s + score_max, which bounds a candidate at any homolog depth, so a submit should be sized on those",
     "cpus_per_task": 2,
     "measured_from": {
       "corpus": "round-0 FP candidates (job 816)",
@@ -229,8 +229,8 @@
       "external_inputs": {},
       "schema_version": "1.0"
     },
-    "generated_at_utc": "2026-08-10T19:39:34.432948+00:00",
-    "git_sha": "ada5d9a4c9666fbb2647479bea6b503ba0158ccd",
+    "generated_at_utc": "2026-08-10T19:48:58.712309+00:00",
+    "git_sha": "fed477b2aef9bd978276e99535fbdddd3089905c",
     "inputs": {
       "data/interim/flank_context/context_v0.parquet": "f35f25cda0f7ddc5714baeeece12146aa9e50f943ba9f4a121dbe3fdb3297742",
       "data/processed/master_clean_v0.parquet": "1eb76591d0e481019dd7acf72a439f157fec9f2aeecb8cc5c37ba80a7b062dd2",

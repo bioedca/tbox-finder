@@ -28,6 +28,7 @@ from tbox_finder.mining.curated_control_sizing import (
     percentiles,
     power_table,
     query_supply,
+    records_from_joined,
     size_report,
     span_matchedness,
     stratum_census,
@@ -532,3 +533,71 @@ def test_the_committed_report_is_internally_consistent():
     for row in body["envelope"]["per_k"]:
         assert row["worst_case_wall_h_per_task"] >= row["expected_wall_h_per_task"]
         assert row["array_width"] == math.ceil(row["k"] / row["shard_size"])
+
+
+# ── the pandas boundary ──────────────────────────────────────────────────────
+def _joined(**overrides):
+    row = {
+        "_record_sha256": "b" * 64,
+        "status": "ok",
+        "context_seq": "TTTACGTACGTTTT",
+        "locus_offset": 3,
+        "locus_length": 8,
+        "type": "Transcriptional",
+        "TaxId": 1301,
+        "cluster_id": 7,
+        "resolved_phylum": "Firmicutes",
+        "resolved_order": "Lactobacillales",
+        "resolved_genus": "Lactobacillus",
+    }
+    row.update(overrides)
+    return row
+
+
+def test_the_locus_is_carved_out_of_the_context_at_its_offset():
+    record = records_from_joined([_joined()])[0]
+    assert record["locus_seq"] == "ACGTACGT"
+    assert (record["cluster_id"], record["host_taxid"]) == (7, 1301)
+
+
+def test_a_missing_column_is_refused_by_name_not_filled_with_none():
+    row = _joined()
+    del row["resolved_genus"]
+    with pytest.raises(SizingError, match="resolved_genus"):
+        records_from_joined([row])
+
+
+def test_the_column_check_reads_every_row_not_row_zero():
+    bad = _joined()
+    del bad["TaxId"]
+    with pytest.raises(SizingError, match="row 1"):
+        records_from_joined([_joined(), bad])
+
+
+def test_a_nan_stratum_becomes_none_rather_than_a_stratum_called_nan():
+    # pandas emits float('nan') for a missing object cell; nan is not None, so an
+    # un-normalised value would survive every `is not None` filter and be counted.
+    record = records_from_joined([_joined(resolved_genus=float("nan"))])[0]
+    assert record["genus"] is None
+    census = stratum_census([record], ks=[1])
+    assert census["genus"]["n_distinct"] == 0
+    assert census["genus"]["n_records_without_genus"] == 1
+
+
+def test_a_nan_coordinate_yields_no_locus_sequence_rather_than_a_slice():
+    record = records_from_joined([_joined(locus_offset=float("nan"))])[0]
+    assert record["locus_seq"] is None and record["locus_length"] == 8
+    assert query_supply([record])["refusal_reasons"] == {"no_locus_sequence": 1}
+
+
+# ── malformed spans (a zero median divides) ──────────────────────────────────
+def test_a_non_positive_fp_span_is_refused_at_the_reader():
+    with pytest.raises(SizingError, match="non-positive locus span"):
+        fp_span_lengths({"candidates": [{"locus_start": 40, "locus_end": 40, "accession": "x:c0"}]})
+
+
+def test_matchedness_refuses_a_zero_median_rather_than_dividing_by_it():
+    # ZeroDivisionError is not in `main`'s except tuple, so this would be a traceback
+    # where every other malformed input exits 3 with a refusal.
+    with pytest.raises(SizingError, match="median query length is not positive"):
+        span_matchedness([100, 200], [0, 0, 0])

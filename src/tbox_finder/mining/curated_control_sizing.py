@@ -275,28 +275,80 @@ def load_frame(
             "flank_context.record_id is not unique per curated record"
         )
 
+    return records_from_joined(joined.to_dict("records"))
+
+
+#: The columns :func:`records_from_joined` indexes.  A join that silently loses one
+#: of these would otherwise surface as a bare ``KeyError`` traceback (exit 1) instead
+#: of this module's exit-3 refusal — and a renamed upstream column is exactly the
+#: kind of drift a sizing report must refuse rather than fill with ``None``.
+JOINED_REQUIRED_COLUMNS: tuple[str, ...] = (
+    "_record_sha256",
+    "status",
+    "context_seq",
+    "locus_offset",
+    "locus_length",
+    "type",
+    "TaxId",
+    "cluster_id",
+    "resolved_phylum",
+    "resolved_order",
+    "resolved_genus",
+)
+
+
+def records_from_joined(rows: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    """Shape joined rows into the plain records the pure functions consume.
+
+    Split out of :func:`load_frame` so the shaping — including its refusal on a
+    missing column — is testable without the DVC artifacts.  The signature takes any
+    sequence of mappings, so the column check runs per row rather than on row 0: for
+    a frame every row carries the same keys and the check is a schema check, but for
+    the hand-built rows the tests (and any future caller) pass, row 0 says nothing
+    about row 5.
+
+    Missing *values* are normalised to ``None`` here, at the pandas boundary: a
+    float ``nan`` is not ``None``, so an un-normalised absent genus would survive
+    every ``is not None`` filter downstream and be counted as a stratum named
+    ``nan`` ([[nulls-inflate-block-counts]]).
+    """
     records: list[dict[str, Any]] = []
-    for row in joined.to_dict("records"):
-        seq = row.get("context_seq")
-        offset, length = row.get("locus_offset"), row.get("locus_length")
+    for i, row in enumerate(rows):
+        missing = [column for column in JOINED_REQUIRED_COLUMNS if column not in row]
+        if missing:
+            raise SizingError(
+                f"joined row {i} is missing required column(s) {', '.join(missing)}; "
+                "the corpus / context / split tables are not the expected schema"
+            )
+        seq = row["context_seq"]
+        offset, length = row["locus_offset"], row["locus_length"]
         locus_seq: str | None = None
         if isinstance(seq, str) and _finite(offset) and _finite(length):
             locus_seq = seq[int(offset) : int(offset) + int(length)]
         records.append(
             {
                 "record_sha256": row["_record_sha256"],
-                "context_status": row.get("status"),
+                "context_status": _or_none(row["status"]),
                 "locus_length": int(length) if _finite(length) else None,
                 "locus_seq": locus_seq,
-                "tbox_type": row.get("type"),
-                "phylum": row.get("resolved_phylum"),
-                "order": row.get("resolved_order"),
-                "genus": row.get("resolved_genus"),
-                "cluster_id": int(row["cluster_id"]) if _finite(row.get("cluster_id")) else None,
-                "host_taxid": int(row["TaxId"]) if _finite(row.get("TaxId")) else None,
+                "tbox_type": _or_none(row["type"]),
+                "phylum": _or_none(row["resolved_phylum"]),
+                "order": _or_none(row["resolved_order"]),
+                "genus": _or_none(row["resolved_genus"]),
+                "cluster_id": int(row["cluster_id"]) if _finite(row["cluster_id"]) else None,
+                "host_taxid": int(row["TaxId"]) if _finite(row["TaxId"]) else None,
             }
         )
     return records
+
+
+def _or_none(value: Any) -> Any:
+    """``None`` for a missing value — including pandas' float ``nan``, which is not ``None``."""
+    if value is None:
+        return None
+    if isinstance(value, float) and math.isnan(value):
+        return None
+    return value
 
 
 def _finite(value: Any) -> bool:
@@ -372,6 +424,17 @@ def span_matchedness(
     """
     if not curated_lengths or not fp_lengths:
         raise SizingError("matchedness needs both populations")
+    # ⚠ Guarded here as well as in `fp_span_lengths`: this function is public and takes
+    # two plain sequences, so it cannot assume its caller came through that reader. A
+    # zero median would otherwise raise ZeroDivisionError, which `main` does not catch
+    # — a traceback where every other malformed input exits 3 with a refusal.
+    fp_median = statistics.median(fp_lengths)
+    curated_median = statistics.median(curated_lengths)
+    if fp_median <= 0 or curated_median <= 0:
+        raise SizingError(
+            f"a median query length is not positive (curated {curated_median}, "
+            f"FP {fp_median}); these spans cannot be compared"
+        )
     lo, hi = min(fp_lengths), max(fp_lengths)
     inside = sum(1 for value in curated_lengths if lo <= value <= hi)
     return {
@@ -381,9 +444,7 @@ def span_matchedness(
         "n_curated_inside_fp_range": inside,
         "share_curated_inside_fp_range": round(inside / len(curated_lengths), 4),
         "ks_d": ks_statistic(curated_lengths, fp_lengths),
-        "median_ratio_curated_over_fp": round(
-            statistics.median(curated_lengths) / statistics.median(fp_lengths), 3
-        ),
+        "median_ratio_curated_over_fp": round(curated_median / fp_median, 3),
     }
 
 
@@ -608,9 +669,11 @@ def compute_envelope(
         "cpus_per_task": PRODUCER_CPUS_PER_TASK,
         "worst_case_per_candidate_s": round(worst_per_candidate, 2),
         "caveat": (
-            "the expected column extrapolates FP-candidate wall onto curated queries, "
-            "which this report measures to be a different query population; the "
-            "worst_case column is bounded by --align-timeout-s and does not"
+            "the expected_* columns extrapolate FP-candidate wall onto curated queries, "
+            "which this report measures to be a different query population, so they "
+            "inherit that difference; the worst_case_* columns do not — they are "
+            "search_max + align_timeout_s + score_max, which bounds a candidate at any "
+            "homolog depth, so a submit should be sized on those"
         ),
         "per_k": per_k,
     }
@@ -634,9 +697,18 @@ def fp_span_lengths(manifest: Mapping[str, Any] | Sequence[Any]) -> list[int]:
     lengths = []
     for row in _fp_rows(manifest):
         try:
-            lengths.append(int(row["locus_end"]) - int(row["locus_start"]))
+            span = int(row["locus_end"]) - int(row["locus_start"])
         except (KeyError, TypeError, ValueError) as exc:
             raise SizingError(f"an FP manifest row has no usable locus span: {exc}") from exc
+        # A candidate with end <= start is not a short query, it is a broken row: it
+        # would drag the minimum (and possibly the median) of the population this
+        # report compares against, and every matchedness number reads off that.
+        if span <= 0:
+            raise SizingError(
+                f"an FP manifest row has a non-positive locus span ({span} nt): "
+                f"{row.get('candidate_id') or row.get('accession')}"
+            )
+        lengths.append(span)
     return lengths
 
 
@@ -854,10 +926,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             records=load_frame(
                 corpus=args.corpus, split_table=args.split_table, context=args.context
             ),
-            fp_manifest=json.loads(Path(args.fp_manifest).read_text()),
+            fp_manifest=json.loads(Path(args.fp_manifest).read_text(encoding="utf-8")),
             rep_taxids=rep_taxids,
             rep_assemblies=rep_assemblies,
-            measure_report=json.loads(Path(args.measure_report).read_text()),
+            measure_report=json.loads(Path(args.measure_report).read_text(encoding="utf-8")),
             ks=ks,
             shard_size=args.shard_size,
             align_timeout_s=args.align_timeout_s,
@@ -865,7 +937,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
     # OSError/JSONDecodeError too: every input path is operator-supplied, so a missing
     # or malformed file exits 3 with a refusal rather than 1 with a traceback.
-    except (SizingError, ValueError, OSError) as exc:
+    # KeyError is the backstop for a table whose schema drifted past
+    # JOINED_REQUIRED_COLUMNS — pandas raises it from `read_parquet(columns=...)` and
+    # from a merge key that is no longer there, both before this module can name it.
+    # (`pyarrow.lib.ArrowInvalid` needs no separate arm: it subclasses ValueError.)
+    except (SizingError, ValueError, OSError, KeyError) as exc:
         print(f"refused: {exc}", file=sys.stderr)
         return 3
 
@@ -897,7 +973,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     out = Path(args.out)
     try:
         out.parent.mkdir(parents=True, exist_ok=True)
-        out.write_text(json.dumps(body, indent=2, sort_keys=True) + "\n")
+        out.write_text(json.dumps(body, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     except OSError as exc:
         print(f"refused: cannot write report to {portable_path(out)}: {exc}", file=sys.stderr)
         return 3
