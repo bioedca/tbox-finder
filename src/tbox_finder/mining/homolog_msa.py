@@ -125,6 +125,19 @@ def degap_to_dna(sequence: str) -> str:
     return sequence.replace("-", "").replace(".", "").upper().replace("U", "T")
 
 
+def is_clean_nucleotide(sequence: str) -> bool:
+    """Is ``sequence`` a query the search stage will accept — non-empty ACGT/N only?
+
+    The single spelling of the alphabet gate that both entry points enforce: the
+    coordinate route (:func:`resolve_candidate_sequence`) and the sequence route
+    (:func:`search_homologs`, the job-766 path) each refuse on it.  Extracted so a
+    caller that needs to know *in advance* whether a record is searchable — sizing a
+    control's query supply, for instance — asks this function rather than
+    re-spelling the rule and drifting from it.
+    """
+    return bool(sequence) and not (set(sequence) - _ACGT - {"N"})
+
+
 def read_single_sequence(fasta_source: str | Path) -> tuple[str, str]:
     """Return ``(header, sequence)`` of the first record of a FASTA file (path or text)."""
     text = (
@@ -537,7 +550,7 @@ def resolve_candidate_sequence(
             f"(contig len {len(seq)})"
         )
     sub = seq[locus_start:locus_end]
-    if not sub or set(sub) - _ACGT - {"N"}:
+    if not is_clean_nucleotide(sub):
         raise HomologMsaError(
             f"candidate span for {accession} is not clean nucleotides: {sub[:32]!r}"
         )
@@ -571,7 +584,7 @@ def search_homologs(
     """
     cand_name, cand_seq = read_single_sequence(candidate_fasta)
     cand_seq = degap_to_dna(cand_seq)
-    if not cand_seq or set(cand_seq) - _ACGT - {"N"}:
+    if not is_clean_nucleotide(cand_seq):
         raise HomologMsaError(f"candidate {cand_name!r} is not a clean nucleotide sequence")
     qlen = len(cand_seq)
 

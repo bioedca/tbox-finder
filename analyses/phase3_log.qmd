@@ -5210,3 +5210,87 @@ evidence of anything still being there. All five were round 4's, fixed in `4e049
 (§5.1's trap, the thirteenth step running); the gate was carried by the **CLI** throughout, and the
 one rate-limit stall was **waited out** rather than escalated to Greptile — **no Greptile credit
 spent this step**.
+
+## Step P3-15′-g — 2026-08-10: sizing the matched de-novo positive control — what a curated query is, and whether it is the same object the sweep read
+
+**Inputs.** The held-out curated carve (`source == 'corpus' ∧ nested_role == 'heldout'`, **8,715**
+records) reached through `mining.architecture_producer.heldout_canonical` — the *same* carve
+`reports/p3/architecture_freeze.json` was measured on, reused rather than re-derived — joined by
+record hash to `data/interim/flank_context/context_v0.parquet` (the P2-00 NCBI-anchored genomic
+context, `pad_nt = 1074`), plus `data/processed/mining/round0_fp_manifest.json` (the 941 FP
+candidates the P3-15′-f sweep read), `production_host_orders_v0.parquet` (the ADR-0006 A1
+2,500-genome substrate) and `reports/p2/mine_round_measure.json` (job 816's measured per-candidate
+wall).
+
+**Process.** `src/tbox_finder/mining/curated_control_sizing.py :: size` answers the three fields
+`imp.md` marks `UNKNOWN` before a sample may be drawn or a job submitted: whether the query supply
+exists and by which route, whether such a control would be *matched* to the population the sweep
+read, and what it would cost and resolve. Every supply verdict runs through the shipped gate —
+`homolog_msa.degap_to_dna` then `homolog_msa.is_clean_nucleotide`, the predicate extracted in this
+commit so `resolve_candidate_sequence`, `search_homologs` and this measurement cannot spell the
+alphabet rule three ways. Nothing is pinned (`pins_nothing: true`) and no sample is drawn.
+
+**Outputs.** `reports/p3/curated_control_sizing.json` (13 KB) + 63 unit tests. **The supply is
+there: 8,709 of 8,715 records yield a searchable query** (6 refused — 2 `multi_hit`, 1
+`unavailable`, 3 IUPAC ambiguity codes — each named, none dropped silently).
+
+**⚠ The headline is that the obvious control would not be matched.** The FP candidates the sweep
+read are Stage-1 spans (median **110** nt, p95 166); a curated element is median **279** nt (p05
+202, max 550). **KS D = 0.965** — the two query populations are all but disjoint, the medians differ
+**2.54×**, and only 62.8 % of curated loci even fall inside the FP span range. Query length drives
+`nhmmer` sensitivity and the `min_cov = 0.5` inclusion filter, hence homolog depth, hence what
+`mlocarna` and the localizer see — so handing the pipeline raw curated elements measures the
+instrument on a *different input*, and the difference would be a confound rather than a result.
+
+**⚠ The route `imp.md` feared is impossible, and the route that works needs no genome join.**
+`covariation_producer search-shard` resolves a query from `production_genomes/<assembly>.fna` at
+contig coordinates, so it needs a curated-record → GTDB-rep-assembly join the repo does not hold —
+and the ceiling on ever building one is **20 of 8,715 records** (0.23 %; 7 of 2,034 curated host
+taxids are among the 811 distinct taxids of the 2,500 reps). The **sequence route**
+(`homolog_msa seed/search/align`, the job-766 path) takes a query sequence directly and needs no
+join at all. So the "hard part upstream" is not a §10.2 acquisition; it is the **query-construction
+choice**, which is a §7 question.
+
+**⚠ A second asymmetry, measured not assumed.** All **76 of 76** assemblies the FP candidates were
+carved from are themselves in the searched database, so every FP query self-hits; a curated query
+self-hits only for the 20 records above. That is a one-sequence difference in depth, and it matters
+only against ADR-0006 A2's `min_sequences = 20` floor.
+
+**⚠ The frame is skewed, and a uniform draw collapses on it.** 8,715 records span 7 phyla / 43
+orders / 302 genera / **4,378 clusters** (largest cluster **812** records — pseudo-replication is
+real), 81 % Firmicutes, 7,543 transcriptional vs 1,172 translational. A **uniform** draw of K = 200
+reaches an expected **22.8 of 43 orders** (K = 50 → 12.3); one record per cluster is feasible at
+every K considered, and 31 of 43 orders hold ≥ 5 clusters ([[uniform-cluster-draw-collapses-on-skew]]).
+
+**⚠ Power is set by the producible share, not by K.** A record below the `min_sequences` floor, or
+whose alignment hits the bound, resolves `unavailable` and leaves the **denominator**. At the FP
+corpus's measured producibility (**29.5 %** full-corpus, 52 % in the K=50 sample — the two anchors
+disagree by 22 points, so both are carried) K = 200 yields an effective n of **59–104** and a 95 %
+Wilson width of **0.19–0.25**; K = 400 yields **118–208** and **0.13–0.18**. The producible share of
+*curated* queries is **UNMEASURED** and no value is asserted for it.
+
+**⚠ The envelope is cheap, and its bound does not depend on the extrapolation.** At shard size 20
+and `ALIGN_TIMEOUT_S = 600`: expected **0.09 h** per task, worst case **3.97 h** per task
+(`search_max 114.2 s + 600 s + score_max 0.4 s` per candidate) against a 12 h wall; K = 200 is a
+10-task array at ≤ **79 core-h** worst case, ~1.9 core-h expected. The *expected* column
+extrapolates FP-candidate wall onto curated queries — exactly the population difference measured
+above — so a submit should be sized on the bound.
+
+**✅ And the existing n = 1 control is outside this frame.** `certified_positive.sto` (job 766) was
+seeded from row 0 of `tests/fixtures/rscape/classII_sub.sto`, record
+`22fd8957c926e8701ac7df4a5d43fed209c0eeb03121608a92d5f08b436b1677`, which is **not** in the held-out
+carve — so a draw from this frame adds to it rather than re-measuring it.
+
+**Validation.** `tests/unit` + `tests/golden` under deterministic ordering (`-p no:randomly`) vs a
+matched `main` baseline at `ada5d9a`: **zero new failures** — worktree **13** FAILED, main **26**,
+worktree a strict subset; the 13-test delta is `test_coverage_sim` + `test_selection_val` skipping on
+unmaterialised DVC inputs, the same delta P3-15′-e/-e-ii/-f recorded, and the `^FAILED` sets were
+compared **ANSI-stripped** ([[ansi-codes-make-failed-extraction-vacuous]]). **63 unit tests; 36
+sabotages, all RED against their NAMED test, plus 2 negative controls that stay green.** The report
+re-derives byte-identically apart from `provenance.generated_at_utc`. `ruff` + `black` clean.
+
+**Decisions.** None — the step pins nothing. It supplies the inputs to the §7 sample-design choice
+(query construction, stratification, K) that `imp.md` names as this step's first Stop, and that
+choice is **not taken here**. Cross-links ADR-0006 A2/A3/A4 + D3/D6/D7 and ADR-0005 A10.
+
+**Commit.** `PENDING`
