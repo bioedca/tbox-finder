@@ -791,3 +791,67 @@ def test_a_scalar_per_candidate_wall_block_is_refused():
     broken = {"wall_seconds": {**MEASURE_REPORT["wall_seconds"], "total_per_candidate": 5}}
     with pytest.raises(SizingError):
         compute_envelope(measure_report=broken, ks=[20], shard_size=20, align_timeout_s=600)
+
+
+# ── the KS tail (a review claimed a defect here; it is measured, not argued) ──
+@pytest.mark.parametrize(
+    ("a", "b", "expected"),
+    [
+        ([1, 2, 3], [1], 0.6667),  # unequal maxima — the case round 5 raised
+        ([1], [1, 2, 3, 4], 0.75),
+        ([5, 6], [1, 2, 3], 1.0),
+        ([1, 1, 1], [1, 2], 0.5),
+    ],
+)
+def test_ks_matches_a_brute_force_ecdf_when_the_supports_end_differently(a, b, expected):
+    # When one sample is exhausted its ECDF is 1.0 and the other's only rises, so the
+    # tail gap shrinks monotonically from the value the loop already recorded at the
+    # exit point — the merge loop is complete, and these are the pinned values.
+    assert ks_statistic(a, b) == expected
+
+
+def test_ks_agrees_with_a_reference_implementation_on_the_whole_grid():
+    def reference(a, b):
+        points = sorted(set(a) | set(b))
+        return max(
+            abs(sum(1 for x in a if x <= t) / len(a) - sum(1 for x in b if x <= t) / len(b))
+            for t in points
+        )
+
+    for a in ([1], [1, 2], [1, 2, 3], [2, 2, 5], [4, 9]):
+        for b in ([1], [1, 4], [3], [1, 2, 3, 9], [2, 2]):
+            assert ks_statistic(a, b) == round(reference(a, b), 4), (a, b)
+
+
+def test_a_placement_without_the_corpus_control_does_not_claim_corpus_membership():
+    placement = existing_control_placement([_record(record_sha256="a" * 64)], "b" * 64)
+    assert placement["in_full_corpus"] is None
+    assert "UNMEASURED" in placement["note"]
+    assert "non-heldout side" not in placement["note"]
+
+
+def test_an_unserializable_report_body_is_refused_not_traced_back(tmp_path, monkeypatch, capsys):
+    import tbox_finder.mining.curated_control_sizing as mod
+
+    monkeypatch.setattr(mod, "_load_rep_columns", lambda _path: ([], []))
+    monkeypatch.setattr(mod, "load_frame", lambda **_kwargs: [])
+    monkeypatch.setattr(mod, "corpus_record_ids", lambda _path: set())
+    # A body carrying something json cannot encode (a set), reached after the whole
+    # measurement has run — the traceback would land at the very last step.
+    monkeypatch.setattr(mod, "size_report", lambda **_kwargs: {"strata": {"phylum": {1j: 2}}})
+    code = mod.main(
+        [
+            "size",
+            "--k",
+            "10",
+            "--shard-size",
+            "5",
+            "--align-timeout-s",
+            "600",
+            "--out",
+            str(tmp_path / "out.json"),
+        ]
+    )
+    assert code == 3
+    assert "not JSON-serializable" in capsys.readouterr().err
+    assert not (tmp_path / "out.json").exists()

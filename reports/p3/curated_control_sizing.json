@@ -111,6 +111,7 @@
       "p75": 142,
       "p95": 166
     },
+    "fp_population": "every candidate in the round-0 FP manifest \u2014 the population ENTERING the pipeline, not the subset that produced a consensus; P3-15'-f measured 278 of these 941 and its report records only counts, so the measured subset cannot be identified from anything in this repo (the ids live in covariation_status.json on cluster scratch). If producibility correlates with span length, the measured subset's distribution differs from this one \u2014 a limitation of this comparison, to be measured by the control run",
     "fp_span_range_nt": [
       50,
       296
@@ -230,8 +231,8 @@
       "external_inputs": {},
       "schema_version": "1.0"
     },
-    "generated_at_utc": "2026-08-10T20:51:26.716164+00:00",
-    "git_sha": "733500b49b3ce27f41ed963273bb25b5b3f03eda",
+    "generated_at_utc": "2026-08-10T21:06:25.812055+00:00",
+    "git_sha": "813ccf25db6d1c2461f89cffa2fddcfe6eaaa658",
     "inputs": {
       "data/interim/flank_context/context_v0.parquet": "f35f25cda0f7ddc5714baeeece12146aa9e50f943ba9f4a121dbe3fdb3297742",
       "data/processed/master_clean_v0.parquet": "1eb76591d0e481019dd7acf72a439f157fec9f2aeecb8cc5c37ba80a7b062dd2",

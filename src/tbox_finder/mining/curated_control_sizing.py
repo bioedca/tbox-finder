@@ -463,6 +463,15 @@ def span_matchedness(
     return {
         "curated_length_nt": percentiles(curated_lengths),
         "fp_length_nt": percentiles(fp_lengths),
+        "fp_population": (
+            "every candidate in the round-0 FP manifest — the population ENTERING the "
+            "pipeline, not the subset that produced a consensus; P3-15'-f measured 278 "
+            "of these 941 and its report records only counts, so the measured subset "
+            "cannot be identified from anything in this repo (the ids live in "
+            "covariation_status.json on cluster scratch). If producibility correlates "
+            "with span length, the measured subset's distribution differs from this one "
+            "— a limitation of this comparison, to be measured by the control run"
+        ),
         "fp_span_range_nt": [lo, hi],
         "n_curated_inside_fp_range": inside,
         "share_curated_inside_fp_range": round(inside / len(curated_lengths), 4),
@@ -810,14 +819,26 @@ def existing_control_placement(
             "ingest.record_hash, so this placement is unmeasured, not negative"
         )
         return body
-    body["note"] = (
-        "the existing control's seed IS inside the held-out carve, so a draw from "
-        "this frame can re-select it"
-        if in_frame
-        else "the existing control's seed is NOT in the held-out carve — it is a "
-        "corpus record on the non-heldout side of the ADR-0004 split, so a draw "
-        "from this frame adds to it rather than re-measuring it"
-    )
+    if in_frame:
+        body["note"] = (
+            "the existing control's seed IS inside the held-out carve, so a draw from "
+            "this frame can re-select it"
+        )
+    elif in_corpus:
+        body["note"] = (
+            "the existing control's seed is NOT in the held-out carve — it is a corpus "
+            "record on the non-heldout side of the ADR-0004 split, so a draw from this "
+            "frame adds to it rather than re-measuring it"
+        )
+    else:
+        # ⚠ in_corpus is None here: the caller skipped the positive control, so
+        # "non-heldout corpus record" would be an assertion about a membership that
+        # was never measured — the very failure this function's docstring names.
+        body["note"] = (
+            "the existing control's seed is NOT in the held-out carve; the full corpus "
+            "was not supplied, so whether it is a non-heldout corpus record or an "
+            "identifier-space mismatch is UNMEASURED"
+        )
     return body
 
 
@@ -1080,9 +1101,17 @@ def main(argv: Sequence[str] | None = None) -> int:
         extra={"schema_version": SCHEMA_VERSION, "external_inputs": external},
     )
     out = Path(args.out)
+    # ⚠ Serialization sits INSIDE the refusal convention: strata keys come straight
+    # from pandas cells, and a numpy scalar key makes `json.dumps` raise TypeError —
+    # exit 1 with a traceback after the whole measurement has already been computed.
+    try:
+        payload = json.dumps(body, indent=2, sort_keys=True) + "\n"
+    except TypeError as exc:
+        print(f"refused: the report body is not JSON-serializable: {exc}", file=sys.stderr)
+        return 3
     try:
         out.parent.mkdir(parents=True, exist_ok=True)
-        out.write_text(json.dumps(body, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        out.write_text(payload, encoding="utf-8")
     except OSError as exc:
         print(f"refused: cannot write report to {portable_path(out)}: {exc}", file=sys.stderr)
         return 3
