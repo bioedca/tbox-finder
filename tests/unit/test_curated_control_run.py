@@ -95,7 +95,18 @@ def _sbatch_facts() -> dict:
         },
         "has_query_fasta_guard": True,
         "passes_query_fasta_argument": True,
+        "cpus_per_task": 2,
+        "err_pattern": "reports/p2/mine_round_producer_%A_%a.err",
     }
+
+
+#: The three headers `read_sbatch` requires, so a fixture that drops ONE of them is testing
+#: that one rather than tripping over a neighbour.
+_HEADERS = (
+    "#SBATCH --time=12:00:00\n"
+    "#SBATCH --cpus-per-task=2\n"
+    "#SBATCH --error=reports/p2/mine_round_producer_%A_%a.err\n"
+)
 
 
 def _certified() -> dict:
@@ -114,6 +125,7 @@ def _good_clause_kwargs(tmp_path: Path, round_dir: str = ccr.DEFAULT_ROUND_DIR):
         query_fasta="data/q.fasta",
         query_fasta_sha256="0" * 64,
         sbatch="slurm/p2/mine_round_producer.sbatch",
+        err_pattern="reports/p2/mine_round_producer_%A_%a.err",
         round_dir=round_dir,
     )
     return specs, {
@@ -122,7 +134,7 @@ def _good_clause_kwargs(tmp_path: Path, round_dir: str = ccr.DEFAULT_ROUND_DIR):
         "sizing": sizing,
         "sbatch": _sbatch_facts(),
         "certified": _certified(),
-        "env": ccr.envelope(layout, sizing),
+        "env": ccr.envelope(layout, sizing, cpus_per_task=2),
         "submit": submit,
     }
 
@@ -173,7 +185,7 @@ def test_shard_layout_refuses_an_empty_manifest_and_a_zero_shard_size():
 # --------------------------------------------------------------------------- #
 def test_envelope_bounds_the_task_on_the_largest_real_shard():
     layout = ccr.shard_layout(_specs(5), shard_size=2)
-    env = ccr.envelope(layout, _sizing())
+    env = ccr.envelope(layout, _sizing(), cpus_per_task=2)
     # max_shard 2 x 7.5 s = 15 s = 0.0042 h/task; 3 tasks x 2 cpus.
     assert env["worst_case_wall_h_per_task"] == round(2 * 7.5 / 3600.0, 4)
     assert env["worst_case_core_h"] == round(2 * 7.5 / 3600.0 * 3 * 2, 2)
@@ -183,13 +195,13 @@ def test_envelope_bounds_the_task_on_the_largest_real_shard():
 
 def test_envelope_uses_the_real_max_shard_not_the_requested_size():
     """Same fixture as above: 4 at 3/shard packs 2+2, so the bound is 2 candidates, not 3."""
-    env = ccr.envelope(ccr.shard_layout(_specs(4), shard_size=3), _sizing())
+    env = ccr.envelope(ccr.shard_layout(_specs(4), shard_size=3), _sizing(), cpus_per_task=2)
     assert env["worst_case_wall_h_per_task"] == round(2 * 7.5 / 3600.0, 4)
     assert env["worst_case_wall_h_per_task"] != round(3 * 7.5 / 3600.0, 4)
 
 
 def test_envelope_carries_the_sizing_reports_own_caveat_verbatim():
-    env = ccr.envelope(ccr.shard_layout(_specs(4), shard_size=2), _sizing())
+    env = ccr.envelope(ccr.shard_layout(_specs(4), shard_size=2), _sizing(), cpus_per_task=2)
     assert env["expected_wall_caveat"] == _sizing()["expected_wall_caveat"]
 
 
@@ -197,8 +209,8 @@ def test_envelope_scales_with_the_number_of_tasks():
     # 1800 s/candidate x 2 per shard = exactly 1.0 h/task, so the scaling is checked on
     # whole numbers rather than on values the 2-dp rounding would blur.
     sizing = {**_sizing(), "worst_case_per_candidate_s": 1800.0}
-    small = ccr.envelope(ccr.shard_layout(_specs(4), shard_size=2), sizing)
-    big = ccr.envelope(ccr.shard_layout(_specs(8), shard_size=2), sizing)
+    small = ccr.envelope(ccr.shard_layout(_specs(4), shard_size=2), sizing, cpus_per_task=2)
+    big = ccr.envelope(ccr.shard_layout(_specs(8), shard_size=2), sizing, cpus_per_task=2)
     assert (small["worst_case_wall_h_per_task"], small["worst_case_core_h"]) == (1.0, 4.0)
     assert (big["worst_case_wall_h_per_task"], big["worst_case_core_h"]) == (1.0, 8.0)
 
@@ -219,6 +231,14 @@ def test_min_cov_reach_tracks_the_cutoff_not_a_constant():
     assert ccr.min_cov_reach(lengths, 0.25)["required_covered_nt_at_query_median"] == 26.0
 
 
+def test_min_cov_reach_derives_the_median_difference():
+    """An earlier draft typed "6 nt apart" into the note, where it would have gone stale."""
+    reach = ccr.min_cov_reach(
+        {"query_length_nt": {"p50": 90.0}, "fp_length_nt": {"p50": 110.0}}, 0.5
+    )
+    assert reach["median_difference_nt"] == 20.0
+
+
 # --------------------------------------------------------------------------- #
 # submit_plan — the token list the ack authorizes
 # --------------------------------------------------------------------------- #
@@ -232,6 +252,7 @@ def _submit(tmp_path: Path, round_dir="$HOME/tbox-scratch/round_p3_15g_control")
         query_fasta="data/q.fasta",
         query_fasta_sha256="0" * 64,
         sbatch="slurm/p2/mine_round_producer.sbatch",
+        err_pattern="reports/p2/mine_round_producer_%A_%a.err",
         round_dir=round_dir,
     )
 
@@ -242,6 +263,33 @@ def test_submit_plan_array_spec_and_shard_count_agree_with_the_layout(tmp_path: 
     assert "--n-shards" in plan["make_shards_argv"]
     assert plan["make_shards_argv"][plan["make_shards_argv"].index("--n-shards") + 1] == "3"
     assert plan["verification"]["expect_shard_ok_markers"] == 3
+
+
+def test_the_make_shards_command_carries_the_pythonpath_it_needs(tmp_path: Path):
+    """MEASURED on the cluster: the bare form exits 1 with ModuleNotFoundError in `tbox-homology`.
+
+    No env installs this package, so the one prep command the ack authorizes has to carry
+    `PYTHONPATH=src` inline — an argv list cannot hold an env assignment as a token.
+    """
+    plan = _submit(tmp_path)
+    assert plan["make_shards_command"].startswith("PYTHONHASHSEED=0 PYTHONPATH=src python -m ")
+    assert plan["make_shards_env"]["PYTHONPATH"] == "src"
+    assert "PYTHONPATH" not in " ".join(plan["make_shards_argv"])  # not smuggled into the argv
+
+
+def test_submit_plan_reports_the_error_path_the_sbatch_actually_writes(tmp_path: Path):
+    """The §9.3 step-8 zero-byte check must look where `#SBATCH --error=` points."""
+    plan = ccr.submit_plan(
+        ccr.shard_layout(_specs(5), shard_size=2),
+        _sizing(),
+        manifest="data/m.json",
+        query_fasta="data/q.fasta",
+        query_fasta_sha256="0" * 64,
+        sbatch="slurm/p2/mine_round_producer.sbatch",
+        err_pattern="reports/px/other_%A_%a.err",
+        round_dir=ccr.DEFAULT_ROUND_DIR,
+    )
+    assert plan["verification"]["expect_zero_byte_err"] == "reports/px/other_<jobid>_*.err"
 
 
 def test_submit_plan_exports_every_variable_the_sbatch_requires(tmp_path: Path):
@@ -347,6 +395,9 @@ def test_submit_plan_shard_dir_is_under_the_round_dir(tmp_path: Path):
 def test_read_sbatch_parses_the_real_producer():
     facts = ccr.read_sbatch(COMMITTED_SBATCH)
     assert facts["wall_limit_h"] == 12.0
+    # ADR-0005 A10 Phase-2 pins cpus-per-task = 2; read from the file that runs, not retyped.
+    assert facts["cpus_per_task"] == 2
+    assert facts["err_pattern"].endswith(".err") and "%A" in facts["err_pattern"]
     assert facts["cutoffs"]["engine"] == "nhmmer"
     assert facts["cutoffs"]["min_cov"] == 0.5
     assert facts["has_query_fasta_guard"] and facts["passes_query_fasta_argument"]
@@ -361,7 +412,7 @@ def test_read_sbatch_refuses_a_file_with_no_time_header(tmp_path: Path):
 
 def test_read_sbatch_refuses_a_file_whose_cutoffs_moved(tmp_path: Path):
     path = tmp_path / "no_cutoffs.sbatch"
-    path.write_text("#SBATCH --time=12:00:00\n", encoding="utf-8")
+    path.write_text(_HEADERS, encoding="utf-8")
     with pytest.raises(ccr.RunPlanError):
         ccr.read_sbatch(path)
 
@@ -375,7 +426,7 @@ def test_read_sbatch_refuses_when_any_single_cutoff_moves(tmp_path: Path, droppe
     """
     kept = [f'{k}="1"' for k in ccr.SBATCH_CUTOFF_KEYS if k != dropped]
     path = tmp_path / "partial.sbatch"
-    path.write_text("#SBATCH --time=12:00:00\n" + "; ".join(kept) + "\n", encoding="utf-8")
+    path.write_text(_HEADERS + "; ".join(kept) + "\n", encoding="utf-8")
     with pytest.raises(ccr.RunPlanError, match=dropped):
         ccr.read_sbatch(path)
 
@@ -384,8 +435,7 @@ def test_read_sbatch_sees_a_missing_sequence_route(tmp_path: Path):
     """An sbatch that predates the seam must report both halves absent, not be assumed ready."""
     path = tmp_path / "old.sbatch"
     path.write_text(
-        "#SBATCH --time=12:00:00\n"
-        'CTRL_ENGINE="nhmmer"; CTRL_EVALUE="100"; CTRL_MAX_TARGET_SEQS="500"; '
+        _HEADERS + 'CTRL_ENGINE="nhmmer"; CTRL_EVALUE="100"; CTRL_MAX_TARGET_SEQS="500"; '
         'CTRL_MIN_PIDENT="40"; CTRL_MIN_COV="0.5"\n'
         "python -m tbox_finder.mining.covariation_producer search-shard --shard x\n",
         encoding="utf-8",
@@ -398,8 +448,8 @@ def test_read_sbatch_sees_a_missing_sequence_route(tmp_path: Path):
 def test_read_sbatch_reads_the_wall_limit_it_is_given(tmp_path: Path):
     path = tmp_path / "short.sbatch"
     path.write_text(
-        "#SBATCH --time=01:30:00\n"
-        'CTRL_ENGINE="nhmmer"; CTRL_EVALUE="100"; CTRL_MAX_TARGET_SEQS="500"; '
+        _HEADERS.replace("--time=12:00:00", "--time=01:30:00")
+        + 'CTRL_ENGINE="nhmmer"; CTRL_EVALUE="100"; CTRL_MAX_TARGET_SEQS="500"; '
         'CTRL_MIN_PIDENT="40"; CTRL_MIN_COV="0.5"\n',
         encoding="utf-8",
     )
@@ -619,8 +669,13 @@ def test_an_empty_supply_cannot_pass_vacuously(tmp_path: Path):
     empty = tmp_path / "empty.fa"
     empty.write_text("", encoding="utf-8")
     kwargs["query_fasta"] = empty
-    with pytest.raises(ValueError):  # ProducerError: an empty query supply searches nothing
-        ccr.plan_clauses(specs, **kwargs)
+    # Refused as a CLAUSE, not as a traceback: letting the loader's exception escape made
+    # `query_fasta_nonempty` unfalsifiable — it could only be evaluated where it was true.
+    result = ccr.plan_clauses(specs, **kwargs)
+    assert result["clauses"]["query_fasta_nonempty"] is False
+    assert result["clauses"]["every_manifest_candidate_has_a_query"] is False
+    assert result["all_pass"] is False
+    assert result["measured"]["supply_error"]
     # And with no candidates at all the layout itself refuses, before any clause is computed.
     with pytest.raises(ccr.RunPlanError):
         ccr.shard_layout([], shard_size=2)
@@ -640,6 +695,38 @@ def test_clauses_do_not_pass_vacuously_over_an_empty_spec_list(tmp_path: Path):
     assert result["clauses"]["every_manifest_candidate_has_a_query"] is False
     assert result["clauses"]["every_query_length_matches_its_span"] is False
     assert result["all_pass"] is False
+
+
+def test_a_mis_partitioned_layout_breaks_its_own_clause(tmp_path: Path):
+    """`shards_partition_the_manifest` was enumerated but never driven FALSE by any test."""
+    specs, kwargs = _good_clause_kwargs(tmp_path)
+    layout = dict(kwargs["layout"])
+    layout["shards"] = [layout["shards"][0], layout["shards"][0]]  # a candidate in two shards
+    kwargs["layout"] = layout
+    result = ccr.plan_clauses(specs, **kwargs)
+    assert result["clauses"]["shards_partition_the_manifest"] is False
+    assert result["all_pass"] is False
+
+
+def test_an_array_token_that_does_not_cover_the_shards_is_refused(tmp_path: Path):
+    """The clause reads the `--array` TOKEN; comparing the layout to itself was vacuous."""
+    specs, kwargs = _good_clause_kwargs(tmp_path)
+    submit = dict(kwargs["submit"])
+    submit["sbatch_argv"] = [
+        "--array=0-99" if str(tok).startswith("--array=") else tok for tok in submit["sbatch_argv"]
+    ]
+    kwargs["submit"] = submit
+    result = ccr.plan_clauses(specs, **kwargs)
+    assert result["clauses"]["array_width_covers_every_shard"] is False
+    assert result["all_pass"] is False
+
+
+def test_a_cpus_per_task_disagreement_between_sbatch_and_sizing_is_refused(tmp_path: Path):
+    """The core-hour multiplier lives in two artifacts; a disagreement prices the wrong run."""
+    specs, kwargs = _good_clause_kwargs(tmp_path)
+    kwargs["sbatch"] = {**_sbatch_facts(), "cpus_per_task": 4}
+    result = ccr.plan_clauses(specs, **kwargs)
+    assert result["clauses"]["sbatch_cpus_match_the_sized_envelope"] is False
 
 
 def test_the_clause_set_is_enumerated_not_whatever_was_computed(tmp_path: Path):
@@ -688,9 +775,12 @@ def _plan_from_repo(**overrides):
 def test_plan_over_the_real_supply_reaches_the_committed_numbers(in_repo_root):
     body = _plan_from_repo()
     committed = json.loads(COMMITTED_PLAN.read_text(encoding="utf-8"))
-    assert body["array"] == committed["array"]
-    assert body["envelope"] == committed["envelope"]
-    assert body["submit"] == committed["submit"]
+    # EVERY block but provenance (whose git_sha and timestamp move by design): comparing three
+    # of seven left `supply` and `instrument` — every scientific number the control publishes —
+    # pinned by nothing at all.
+    assert set(body) == set(committed)
+    for block in sorted(set(body) - {"provenance"}):
+        assert body[block] == committed[block], f"{block} disagrees with the committed report"
     assert body["preflight"]["all_pass"] is True
 
 
@@ -844,6 +934,15 @@ def test_the_sbatch_export_guard_passes_expanded_paths():
     assert proc.returncode == 0, proc.stderr
 
 
+def test_the_sbatch_guard_refuses_a_query_fasta_that_is_a_directory(tmp_path: Path):
+    """`-s` is true for a directory, which would then reach `head -n 1` instead of a refusal."""
+    d = tmp_path / "queries.fa"
+    d.mkdir()
+    (d / "inner").write_text("x", encoding="utf-8")
+    proc = _run_guard(str(d))
+    assert proc.returncode == 2 and "regular file" in proc.stderr
+
+
 def test_the_sbatch_guard_refuses_a_git_lfs_pointer(tmp_path: Path):
     """The failure the §9.3 preflight actually found, refused by name.
 
@@ -857,7 +956,7 @@ def test_the_sbatch_guard_refuses_a_git_lfs_pointer(tmp_path: Path):
     )
     proc = _run_guard(str(pointer))
     assert proc.returncode == 2
-    assert "git lfs pull" in proc.stderr and "POINTER" in proc.stderr
+    assert "POINTER" in proc.stderr and "stage the real bytes" in proc.stderr
 
 
 # --------------------------------------------------------------------------- #

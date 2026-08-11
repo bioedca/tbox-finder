@@ -93,6 +93,12 @@ CERTIFIED_SEARCH_REPORT = "reports/p2/homolog_msa_search_report.json"
 DEFAULT_ROUND_DIR = "$HOME/tbox-scratch/round_p3_15g_control"
 
 #: The FP supply's round directory — named here only so the clause below can refuse it.
+#: ⚠ **Operator-authored, with no witness in this repo.**  Where the P3-15'-e/-e-ii supply run
+#: wrote is recorded in the roadmap and the dev-log, not in any committed artifact this module
+#: could read, so this literal cannot be re-derived and will go stale silently if a future
+#: supply run uses another directory.  The clause it feeds is therefore **one-sided**: it can
+#: refuse the collision it knows about, and cannot detect one it does not.  Stated rather than
+#: dressed up as a derivation.
 FP_SUPPLY_ROUND_DIR = "$HOME/tbox-scratch/round_p3_15_supply"
 
 #: Candidates per array task.  P3-15'-g's envelope is tabulated at this shard size and its
@@ -105,7 +111,7 @@ DEFAULT_SHARD_SIZE = 20
 #: missing key is a hard failure, and adding a clause bumps the version so an older report
 #: re-validates FALSE rather than silently skipping the new check
 #: ([[new-gate-clause-invalidates-old-reports]], [[gate-clauses-need-re-derivation]]).
-CLAUSE_SCHEMA_VERSION = "1.1"  # 1.1 adds query_fasta_export_is_the_staged_copy
+CLAUSE_SCHEMA_VERSION = "1.2"  # 1.1 the staged-copy export; 1.2 the cpus-per-task binding
 REQUIRED_PLAN_CLAUSES: tuple[str, ...] = (
     "manifest_nonempty",
     "query_fasta_nonempty",
@@ -119,6 +125,7 @@ REQUIRED_PLAN_CLAUSES: tuple[str, ...] = (
     "query_fasta_export_is_the_staged_copy",
     "sbatch_carries_the_sequence_route",
     "sbatch_cutoffs_match_the_certified_config",
+    "sbatch_cpus_match_the_sized_envelope",
     "worst_case_task_fits_the_wall_limit",
 )
 
@@ -249,6 +256,11 @@ def read_sizing(path: str | Path = DEFAULT_SIZING_REPORT) -> dict[str, Any]:
         "align_timeout_s": float(_require(envelope, "align_timeout_s")),
         "cpus_per_task": int(_require(envelope, "cpus_per_task")),
         "expected_wall_caveat": str(_require(envelope, "caveat")),
+        # The FP corpus's measured alignment depth — the floor disclosure below needs the
+        # number, not an adjective.
+        "fp_median_homolog_depth": float(
+            _require(envelope, "measured_from", "homolog_depth", "median")
+        ),
         "measured_from": str(_require(envelope, "measured_from", "corpus")),
     }
 
@@ -274,6 +286,10 @@ def read_query_lengths(path: str | Path = DEFAULT_DETECT_REPORT) -> dict[str, An
 _SBATCH_ASSIGNMENT = re.compile(r'(?m)(?:^|;)\s*(?P<name>[A-Z_][A-Z0-9_]*)="(?P<value>[^"]*)"')
 #: ``#SBATCH --time=HH:MM:SS`` (the only wall form this repo's sbatch files use).
 _SBATCH_TIME = re.compile(r"(?m)^#SBATCH\s+--time=(\d+):(\d{2}):(\d{2})\s*$")
+#: ``#SBATCH --cpus-per-task=N`` — the multiplier on every published core-hour.
+_SBATCH_CPUS = re.compile(r"(?m)^#SBATCH\s+--cpus-per-task=(\d+)\s*$")
+#: ``#SBATCH --error=…`` — where the §9.3 step-8 zero-byte check must look.
+_SBATCH_ERR = re.compile(r"(?m)^#SBATCH\s+--error=(\S+)\s*$")
 
 #: The five sbatch constants the D17 search cutoffs live in — ONE list, read by the guard
 #: and by the block that indexes them. Two spellings drift: a guard naming three of them
@@ -300,6 +316,13 @@ def read_sbatch(path: str | Path = DEFAULT_SBATCH) -> dict[str, Any]:
     if time_match is None:
         raise RunPlanError(f"{portable_path(path)}: no `#SBATCH --time=HH:MM:SS` header found")
     hours, minutes, seconds = (int(g) for g in time_match.groups())
+    cpus_match = _SBATCH_CPUS.search(text)
+    err_match = _SBATCH_ERR.search(text)
+    if cpus_match is None or err_match is None:
+        raise RunPlanError(
+            f"{portable_path(path)}: no `#SBATCH --cpus-per-task=` and/or `--error=` header — "
+            "the core-hour multiplier and the §9.3 step-8 evidence path are read from them"
+        )
     assigned = {m.group("name"): m.group("value") for m in _SBATCH_ASSIGNMENT.finditer(text)}
     missing = [k for k in SBATCH_CUTOFF_KEYS if k not in assigned]
     if missing:
@@ -310,6 +333,12 @@ def read_sbatch(path: str | Path = DEFAULT_SBATCH) -> dict[str, Any]:
     return {
         "path": portable_path(path),
         "wall_limit_h": round(hours + minutes / 60.0 + seconds / 3600.0, 4),
+        # From the file that RUNS, not from the sizing report that priced it: a header edited
+        # to 4 would double every core-hour this plan publishes while the report stayed green.
+        "cpus_per_task": int(cpus_match.group(1)),
+        # The §9.3 step-8 evidence path, likewise — a typed glob would keep naming
+        # `reports/p2/…` after someone moved the logs.
+        "err_pattern": err_match.group(1),
         "cutoffs": {
             "engine": assigned["CTRL_ENGINE"],
             "evalue": float(assigned["CTRL_EVALUE"]),
@@ -366,7 +395,9 @@ def shard_layout(specs: Sequence[CandidateSpec], *, shard_size: int) -> dict[str
     }
 
 
-def envelope(layout: Mapping[str, Any], sizing: Mapping[str, Any]) -> dict[str, Any]:
+def envelope(
+    layout: Mapping[str, Any], sizing: Mapping[str, Any], *, cpus_per_task: int
+) -> dict[str, Any]:
     """The per-task and whole-array cost, bounded and expected, on the sized per-candidate wall.
 
     The **bound** is what a submit is sized on: ``max_shard_size × worst_case_per_candidate_s``
@@ -377,7 +408,7 @@ def envelope(layout: Mapping[str, Any], sizing: Mapping[str, Any]) -> dict[str, 
     """
     max_shard = int(_require(layout, "shard_sizes", "max"))
     n_shards = int(_require(layout, "n_shards"))
-    cpus = int(_require(sizing, "cpus_per_task"))
+    cpus = int(cpus_per_task)
     worst_wall_h = max_shard * float(sizing["worst_case_per_candidate_s"]) / 3600.0
     expected_wall_h = max_shard * float(sizing["expected_per_candidate_s"]) / 3600.0
     return {
@@ -388,9 +419,13 @@ def envelope(layout: Mapping[str, Any], sizing: Mapping[str, Any]) -> dict[str, 
         "expected_core_h": round(expected_wall_h * n_shards * cpus, 2),
         "gpu_h": 0.0,
         "expected_wall_caveat": str(sizing["expected_wall_caveat"]),
-        "bound_is_extrapolation_free": (
-            "the worst case is max_shard_size x (search_max + ALIGN_TIMEOUT_S + score_max); "
-            "the ALIGN_TIMEOUT_S term is a bound this run enforces, not a measurement of it"
+        "what_the_bound_is": (
+            "max_shard_size x (search_max + ALIGN_TIMEOUT_S + score_max). Only the "
+            "ALIGN_TIMEOUT_S term is a bound this run ENFORCES; search_max and score_max are "
+            "MEASURED MAXIMA from the FP corpus (job 816, K=50) and are therefore extrapolated "
+            "onto a different query population exactly as the expected column is — they are "
+            "0.4-114.2 s against a 600 s enforced term, so the bound is dominated by the part "
+            "that cannot be exceeded, but it is not extrapolation-free and is not claimed to be"
         ),
     }
 
@@ -413,11 +448,15 @@ def min_cov_reach(lengths: Mapping[str, Any], min_cov: float) -> dict[str, Any]:
         "fp_median_nt": fp_median,
         "required_covered_nt_at_query_median": round(min_cov * query_median, 2),
         "required_covered_nt_at_fp_median": round(min_cov * fp_median, 2),
+        # Derived, not typed: an earlier draft wrote "6 nt apart" as a literal, which would have
+        # stayed in the artifact after either median moved.
+        "median_difference_nt": round(fp_median - query_median, 2),
         "note": (
             "min_cov is a fraction of QUERY length, so the absolute demand tracks the query "
-            "population; these two medians are 6 nt apart, which is what the P3-15'-g-ii "
-            "re-detect was for. The cutoff is left at the D17-frozen value: changing it for "
-            "the control would make it a different instrument from the corpus it calibrates."
+            "population; the two medians differ by median_difference_nt, which is what the "
+            "P3-15'-g-ii re-detect was for. The cutoff is left at the D17-frozen value: "
+            "changing it for the control would make it a different instrument from the "
+            "corpus it calibrates."
         ),
     }
 
@@ -433,6 +472,7 @@ def submit_plan(
     query_fasta: str,
     query_fasta_sha256: str,
     sbatch: str,
+    err_pattern: str,
     round_dir: str,
 ) -> dict[str, Any]:
     """The commands the run consists of, as argv lists derived from the layout.
@@ -465,6 +505,15 @@ def submit_plan(
         )
     shard_dir = f"{round_dir}/shards"
     staged_query_fasta = f"{round_dir}/{Path(query_fasta).name}"
+    # ⚠ `PYTHONPATH=src` IS LOAD-BEARING, AND ITS ABSENCE WAS MEASURED, NOT SUSPECTED. No env
+    # installs this package (`envs/homology.yml` carries no `pip: -e .`), so in the very env
+    # this plan names — `conda activate tbox-homology`, at the checkout root on `two` — the
+    # bare form exits 1 with `ModuleNotFoundError: No module named 'tbox_finder'`. It cannot
+    # ride in the argv list (an env assignment is not a token), so the argv carries the
+    # prefix as `make_shards_env` and the COMMAND STRING — the thing an operator pastes —
+    # carries it inline, exactly as `slurm/p2/mine_round.sbatch:201` runs this same
+    # subcommand. `PYTHONHASHSEED=0` for the same reason every other invocation sets it.
+    make_shards_env = {"PYTHONHASHSEED": "0", "PYTHONPATH": "src"}
     make_shards = [
         "python",
         "-m",
@@ -520,14 +569,17 @@ def submit_plan(
             ),
         },
         "make_shards_argv": make_shards,
+        "make_shards_env": make_shards_env,
         "sbatch_argv": sbatch_argv,
-        "make_shards_command": " ".join(make_shards),
+        "make_shards_command": " ".join(
+            [f"{k}={v}" for k, v in sorted(make_shards_env.items())] + make_shards
+        ),
         "sbatch_command": " ".join(sbatch_argv),
         "verification": {
             "note": "artifact-based (sacct off, CLAUDE.md §9.3 step 8)",
             "expect_shard_ok_markers": n_shards,
             "shard_ok_glob": f"{round_dir}/status/shard_*.SHARD_OK",
-            "expect_zero_byte_err": "reports/p2/mine_round_producer_<jobid>_*.err",
+            "expect_zero_byte_err": err_pattern.replace("%A", "<jobid>").replace("%a", "*"),
             "consensus_root": f"{round_dir}/msa/<candidate-slug>/msa.sto",
             "why_manual": (
                 "this is a STANDALONE producer array with no retrain leg (d), and leg (d) is "
@@ -564,6 +616,14 @@ def exported_value(submit: Mapping[str, Any], name: str) -> str | None:
     return None
 
 
+def array_token(submit: Mapping[str, Any]) -> str | None:
+    """The value of ``--array`` in the submit plan's argv — the width the run receives."""
+    for token in submit.get("sbatch_argv", []):
+        if str(token).startswith("--array="):
+            return str(token)[len("--array=") :]
+    return None
+
+
 def plan_clauses(
     specs: Sequence[CandidateSpec],
     *,
@@ -585,7 +645,14 @@ def plan_clauses(
     read their subject out of the ``--export`` token the run actually receives
     (:func:`exported_value`), not off the arguments that built it.
     """
-    available = load_query_fasta(query_fasta)
+    # Refused-as-a-clause, not raised: `load_query_fasta` rejects an empty or pointer supply,
+    # and letting that exception escape made `query_fasta_nonempty` unfalsifiable — the clause
+    # could only ever be evaluated in the case where it was already true.
+    supply_error: str | None = None
+    try:
+        available = load_query_fasta(query_fasta)
+    except ProducerError as exc:
+        available, supply_error = {}, str(exc)
     ids = [s.candidate_id for s in specs]
     with_query = [cid for cid in ids if cid in available]
     right_length = [
@@ -623,7 +690,10 @@ def plan_clauses(
         "shards_partition_the_manifest": bool(shards)
         and sorted(sharded_ids) == sorted(ids)
         and len(set(sharded_ids)) == len(ids),
-        "array_width_covers_every_shard": layout["array_spec"] == f"0-{len(shards) - 1}"
+        # Read off the `--array` TOKEN, not the layout that built it: comparing the layout to
+        # itself was true by construction, and the token is what sbatch receives.
+        "array_width_covers_every_shard": bool(shards)
+        and array_token(submit) == f"0-{len(shards) - 1}"
         and int(layout["n_shards"]) == len(shards),
         # Containment, compared SEGMENT-WISE on the EXPORTED value — that is the directory
         # the array writes into, and `<fp>/./x` is a different string naming the same place.
@@ -641,6 +711,10 @@ def plan_clauses(
         "sbatch_carries_the_sequence_route": bool(sbatch["has_query_fasta_guard"])
         and bool(sbatch["passes_query_fasta_argument"]),
         "sbatch_cutoffs_match_the_certified_config": dict(sbatch["cutoffs"]) == dict(certified),
+        # The core-hour multiplier appears in two artifacts; if they disagree the published
+        # cost is for a run that will not happen (ADR-0005 A10 Phase-2 pins cpus-per-task = 2).
+        "sbatch_cpus_match_the_sized_envelope": int(sbatch["cpus_per_task"])
+        == int(sizing["cpus_per_task"]),
         "worst_case_task_fits_the_wall_limit": float(env["worst_case_wall_h_per_task"])
         < float(sbatch["wall_limit_h"]),
     }
@@ -658,6 +732,7 @@ def plan_clauses(
             "n_with_matching_length": len(right_length),
             "n_shards": len(shards),
             "validator_error": validator_error,
+            "supply_error": supply_error,
         },
     }
 
@@ -683,7 +758,7 @@ def plan(
     sbatch_facts = read_sbatch(sbatch)
     certified = read_certified_cutoffs(certified_report)
     layout = shard_layout(specs, shard_size=shard_size)
-    env = envelope(layout, sizing)
+    env = envelope(layout, sizing, cpus_per_task=int(sbatch_facts["cpus_per_task"]))
     query_digest = _sha256_of(query_fasta)
     # Built BEFORE the clauses, because three of them read what the run actually receives
     # out of its `--export` token rather than off the arguments that produced it.
@@ -694,6 +769,7 @@ def plan(
         query_fasta=portable_path(query_fasta),
         query_fasta_sha256=query_digest,
         sbatch=sbatch_facts["path"],
+        err_pattern=str(sbatch_facts["err_pattern"]),
         round_dir=round_dir,
     )
     clauses = plan_clauses(
@@ -747,7 +823,15 @@ def plan(
             "min_sequences_floor_note": (
                 "ADR-0006 A2's min_sequences = 20 is unchanged; a curated query does not "
                 "self-hit the searched DB (P3-15'-g measured 76/76 FP assemblies in it), so "
-                "the control's depth is one sequence lower at the same homolog set"
+                "at the same true homolog set the control's alignment is ONE SEQUENCE "
+                "SHALLOWER than the FP arm's. ⚠ That one sequence is maximally consequential "
+                "here: the FP corpus's measured median depth is "
+                f"{sizing['fp_median_homolog_depth']} — exactly the floor — so the "
+                "control's producible share is biased DOWNWARD relative to the corpus it "
+                "calibrates, and the bias is "
+                "concentrated on the candidates nearest the floor. Not corrected for (the "
+                "floor is a pinned ADR value and correcting it would make this a different "
+                "instrument); disclosed so the rate is read as a lower bound."
             ),
         },
         "array": {k: v for k, v in layout.items() if k != "shards"},
@@ -860,6 +944,7 @@ __all__ = [
     "STEP",
     "envelope",
     "main",
+    "array_token",
     "min_cov_reach",
     "path_segments",
     "paths_overlap",

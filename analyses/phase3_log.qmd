@@ -5505,7 +5505,7 @@ strict subset; the delta is 13 tests moving from FAILED to **SKIPPED** on DVC/LF
 fresh worktree does not materialise (+1 more in `test_split_table_schema` for the same
 reason), with both `^FAILED` sets ANSI-stripped and cross-checked against the summary line,
 and a collection diff proving no existing test was dropped (15 → 27 in the producer's suite,
-45 new at that point). **110 tests added in total; 43 sabotages, all RED against their NAMED
+45 new at that point). **124 tests added in total; 51 sabotages, all RED against their NAMED
 test, plus 2 negative controls that stay green.** ⚠ One sabotage reported **green while
 running the original module**: `n_windows_scanned` → `n_records_scanned` is the same length,
 and a same-second write with an unchanged size leaves CPython's cached bytecode valid, so the
@@ -5566,7 +5566,38 @@ published `supply.n_records_scanned` from the detect report's `dropout.n_windows
 a **window** count. They coincide here (the draw emits one window per record) and that is
 exactly why the wrong name would never have been caught by its value; it is now published as
 `n_windows_scanned`, with the record-level `n_records_with_a_query` = 160 left as the number
-any CI must be stated on. CI green (lint · pytest · snakemake).
+any CI must be stated on.
+
+**⚠ AN INDEPENDENT ADVERSARIAL PASS WAS RUN WHILE CODERABBIT WAS RATE-LIMITED, AND ITS BEST
+FINDING WAS THAT THE ACK'S FIRST COMMAND COULD NOT RUN.** Five lenses over the branch diff,
+each finding refuted by a separate agent (25 raised, and the survivors were verified **by
+execution on the cluster**, not by argument). The one that mattered: `make_shards_command`
+was published without `PYTHONPATH=src`, and no env installs this package — in the very env
+the plan names (`tbox-homology`, at the checkout root on `two`) the published string exits 1
+with `ModuleNotFoundError`. **My own earlier cluster run of `make-shards` worked because I
+typed the prefix into the heredoc; the plan published the line I did not run**
+([[verify-the-line-you-ship]], again, and this time against my own artifact). Four more were
+real and are fixed: `array_width_covers_every_shard` compared the layout to itself (the r2
+class, a second instance); `query_fasta_nonempty` was structurally unfalsifiable because the
+loader raised three lines earlier, so the refusal is now a **clause** rather than a
+traceback; `cpus_per_task` — the multiplier on every published core-hour — came from the
+sizing report rather than from the `#SBATCH` header that runs, and now binds them with a new
+clause (set 1.2); and the `.err` glob and the "6 nt apart" difference were typed rather than
+derived. The **whole-body** report comparison replaced a three-block one that left `supply`
+and `instrument` — every scientific number the control publishes — pinned by nothing.
+
+**⚠ THE FLOOR DISCLOSURE IS NOW A NUMBER, AND IT CUTS AGAINST THE CONTROL.** A curated query
+does not self-hit the searched DB, so at the same true homolog set the control's alignment is
+**one sequence shallower** than the FP arm's — and the FP corpus's measured **median depth is
+20.0, exactly ADR-0006 A2's `min_sequences` floor**. The control's producible share is
+therefore biased **downward** relative to the corpus it calibrates, concentrated on the
+candidates nearest the floor. Not corrected (the floor is a pinned ADR value and moving it
+would make this a different instrument) — disclosed, so the rate is read as a lower bound.
+
+⚠ Two review agents **mutated the tree they were reviewing** (one introduced a sabotage, a
+second reverted it with `git checkout --`); the worktree was audited afterwards and is
+byte-identical to the pushed commit ([[review-agents-mutate-code-under-review]]).
+CI green (lint · pytest · snakemake).
 
 **Decisions.** ⚠ **The seam defaults off, and that default is the argument.** ADR-0005 A10
 Pin 2 says each `MiningCandidate` "is re-resolved to nucleotides from the A1 genome FASTA
