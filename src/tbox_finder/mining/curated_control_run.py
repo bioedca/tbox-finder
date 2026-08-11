@@ -43,6 +43,7 @@ import hashlib
 import json
 import math
 import re
+import shlex
 import sys
 from collections.abc import Mapping, Sequence
 from pathlib import Path, PurePosixPath
@@ -323,7 +324,13 @@ def read_sbatch(path: str | Path = DEFAULT_SBATCH) -> dict[str, Any]:
             f"{portable_path(path)}: no `#SBATCH --cpus-per-task=` and/or `--error=` header — "
             "the core-hour multiplier and the §9.3 step-8 evidence path are read from them"
         )
-    assigned = {m.group("name"): m.group("value") for m in _SBATCH_ASSIGNMENT.finditer(text)}
+    # ⚠ COMMENT LINES ARE DROPPED FIRST. The pattern also matches after a `;`, and a `;` can
+    # sit inside a comment — so a cutoff restated in prose ("…; CTRL_MIN_COV=\"0.9\"") would be
+    # scanned as an assignment and, being later in the file, would SHADOW the live value. This
+    # file is mostly prose, so that is a realistic edit, and the published cutoffs would then
+    # describe a run nobody configured (CodeRabbit CLI r9).
+    code = "\n".join(ln for ln in text.splitlines() if not ln.lstrip().startswith("#"))
+    assigned = {m.group("name"): m.group("value") for m in _SBATCH_ASSIGNMENT.finditer(code)}
     missing = [k for k in SBATCH_CUTOFF_KEYS if k not in assigned]
     if missing:
         raise RunPlanError(
@@ -563,9 +570,25 @@ def submit_plan(
             # the remote home, which is what the destination below uses; the `$HOME` spelling is
             # kept everywhere the value passes through a shell (the `--export` token, the verify
             # command), where it must NOT be expanded locally ([[verify-the-line-you-ship]]).
-            "copy_command": f"rsync -avz {query_fasta} two:{_home_relative(staged_query_fasta)}",
+            # Both operands are shell-quoted: these strings are meant to be PASTED, and a
+            # path carrying a space would otherwise become two rsync arguments. The remote
+            # operand keeps `two:` inside the quoting so it stays one argument (rsync parses
+            # the host prefix before word splitting), and it is HOME-RELATIVE, so it carries
+            # no `$` that the quoting would have to preserve.
+            # ⚠ UNREACHABLE TODAY, AND SAID SO RATHER THAN CLAIMED AS A FIX: the staged name
+            # derives from this basename, and `_export_item` refuses a space in it before any
+            # of these strings are built, so no input reaching here can carry one. The
+            # quoting costs nothing and survives a future relaxation of that guard; what the
+            # test pins is the reachable property — that the published string `shlex.split`s
+            # back into exactly the argv it names.
+            "copy_command": (
+                f"rsync -avz {shlex.quote(query_fasta)} "
+                f"{shlex.quote('two:' + _home_relative(staged_query_fasta))}"
+            ),
+            # DOUBLE quotes, not shlex.quote: this path carries `$HOME`, which the remote
+            # shell must expand — single quotes would make it a literal directory name.
             "verify_command": (
-                f"sha256sum {staged_query_fasta}  # must equal query_fasta_sha256 above"
+                f'sha256sum "{staged_query_fasta}"  # must equal query_fasta_sha256 above'
             ),
         },
         "make_shards_argv": make_shards,

@@ -378,6 +378,39 @@ def test_submit_plan_refuses_a_round_dir_the_export_parser_would_split(
         _submit(tmp_path, round_dir=round_dir)
 
 
+def test_the_staging_command_splits_back_into_the_argv_it_names(tmp_path: Path):
+    """The reachable property: the pasted string must parse to exactly three tokens.
+
+    A space in the FASTA name cannot reach here — `_export_item` refuses it first, because the
+    staged name derives from this basename and would break the `--export` token — so the
+    quoting is belt-and-braces and is documented as such rather than tested through a path
+    that cannot occur.
+    """
+    import shlex
+
+    plan = _submit(tmp_path)
+    argv = shlex.split(plan["staging"]["copy_command"])
+    assert argv[:2] == ["rsync", "-avz"]
+    assert argv[2] == "data/q.fasta"
+    assert argv[3] == "two:tbox-scratch/round_p3_15g_control/q.fasta"
+    assert len(argv) == 4
+
+
+def test_a_query_fasta_name_that_would_break_the_export_is_refused(tmp_path: Path):
+    """Where the space is ACTUALLY caught — before any command string is built."""
+    with pytest.raises(ccr.RunPlanError, match="truncated"):
+        ccr.submit_plan(
+            ccr.shard_layout(_specs(5), shard_size=2),
+            _sizing(),
+            manifest="data/m.json",
+            query_fasta="data/a query.fasta",
+            query_fasta_sha256="0" * 64,
+            sbatch="slurm/p2/mine_round_producer.sbatch",
+            err_pattern="reports/p2/x_%A_%a.err",
+            round_dir=ccr.DEFAULT_ROUND_DIR,
+        )
+
+
 def test_submit_plan_leaves_home_unexpanded(tmp_path: Path):
     plan = _submit(tmp_path)
     assert plan["round_dir"].startswith("$HOME/")
@@ -429,6 +462,22 @@ def test_read_sbatch_refuses_when_any_single_cutoff_moves(tmp_path: Path, droppe
     path.write_text(_HEADERS + "; ".join(kept) + "\n", encoding="utf-8")
     with pytest.raises(ccr.RunPlanError, match=dropped):
         ccr.read_sbatch(path)
+
+
+def test_read_sbatch_ignores_a_cutoff_restated_in_a_comment(tmp_path: Path):
+    """A `;` inside prose would otherwise be scanned as an assignment and SHADOW the live one.
+
+    The producer sbatch is mostly prose, so restating a cutoff in a comment is a realistic
+    edit — and the plan would then publish cutoffs describing a run nobody configured.
+    """
+    path = tmp_path / "commented.sbatch"
+    path.write_text(
+        _HEADERS + 'CTRL_ENGINE="nhmmer"; CTRL_EVALUE="100"; CTRL_MAX_TARGET_SEQS="500"; '
+        'CTRL_MIN_PIDENT="40"; CTRL_MIN_COV="0.5"\n'
+        '# was tried and rejected; CTRL_MIN_COV="0.9"\n',
+        encoding="utf-8",
+    )
+    assert ccr.read_sbatch(path)["cutoffs"]["min_cov"] == 0.5
 
 
 def test_read_sbatch_sees_a_missing_sequence_route(tmp_path: Path):

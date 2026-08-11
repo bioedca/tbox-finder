@@ -5505,7 +5505,7 @@ strict subset; the delta is 13 tests moving from FAILED to **SKIPPED** on DVC/LF
 fresh worktree does not materialise (+1 more in `test_split_table_schema` for the same
 reason), with both `^FAILED` sets ANSI-stripped and cross-checked against the summary line,
 and a collection diff proving no existing test was dropped (15 → 27 in the producer's suite,
-45 new at that point). **124 tests added in total; 51 sabotages, all RED against their NAMED
+45 new at that point). **128 tests added in total; 52 sabotages, all RED against their NAMED
 test, plus 2 negative controls that stay green.** ⚠ One sabotage reported **green while
 running the original module**: `n_windows_scanned` → `n_records_scanned` is the same length,
 and a same-second write with an unchanged size leaves CPython's cached bytecode valid, so the
@@ -5513,8 +5513,8 @@ harness now clears `__pycache__` and runs with `PYTHONDONTWRITEBYTECODE`
 ([[sabotage-restores-masked-by-pycache]]). The report **re-derives byte-identically**
 apart from `provenance.generated_at_utc` and `git_sha`. `ruff` + `black` + `bash -n` clean.
 
-**Review.** **Seven CodeRabbit CLI rounds — 1 / 1 / 0 / rate-limited / 1 / 1 / 2 findings
-(1 major), all six real**; the round-4 slot was a **Fair-Usage stall that
+**Review.** **Nine CodeRabbit CLI rounds — 1 / 1 / 0 / limit / 1 / 1 / 2 / limit / 2 findings
+(1 major), all eight real**, plus an independent five-lens adversarial pass; the round-4 slot was a **Fair-Usage stall that
 was waited out (41 min) rather than escalated**, and it was worth waiting for: round 5,
 after two clean-looking rounds, returned the sharpest finding of the step. ⚠ **No round
 before the last was evidence of convergence** — r3 read *No new findings* and r5 still had
@@ -5597,6 +5597,19 @@ would make this a different instrument) — disclosed, so the rate is read as a 
 ⚠ Two review agents **mutated the tree they were reviewing** (one introduced a sabotage, a
 second reverted it with `git checkout --`); the worktree was audited afterwards and is
 byte-identical to the pushed commit ([[review-agents-mutate-code-under-review]]).
+
+**⚠ r9's two, and the second one is a refusal to overclaim.** (1) The sbatch-constant scan
+matched inside **comment lines** — the pattern also anchors after a `;`, and this file is
+mostly prose, so a cutoff restated in a comment ("…; `CTRL_MIN_COV="0.9"`") would be read as
+an assignment and, being later in the file, would **shadow** the live value; comment lines are
+now dropped before the scan. (2) The published `rsync`/`sha256sum` strings embedded their
+paths unquoted, which a pasted command would split on a space — but a space **cannot reach
+there**: the staged name derives from that basename and `_export_item` refuses it first. The
+quoting was added anyway (it costs nothing and survives a future relaxation) and **labelled
+unreachable in the code**, with the test pinning the property that *is* reachable — the
+published string `shlex.split`s back into exactly the argv it names — rather than a scenario
+that cannot occur. Its sabotage was dropped for the same reason: with no space possible, the
+mutation changes nothing observable, and a sabotage that cannot bite is not evidence.
 CI green (lint · pytest · snakemake).
 
 **Decisions.** ⚠ **The seam defaults off, and that default is the argument.** ADR-0005 A10
