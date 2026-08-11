@@ -39,6 +39,7 @@ Run (LOCAL, sub-second)::
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
 import re
@@ -104,7 +105,7 @@ DEFAULT_SHARD_SIZE = 20
 #: missing key is a hard failure, and adding a clause bumps the version so an older report
 #: re-validates FALSE rather than silently skipping the new check
 #: ([[new-gate-clause-invalidates-old-reports]], [[gate-clauses-need-re-derivation]]).
-CLAUSE_SCHEMA_VERSION = "1.0"
+CLAUSE_SCHEMA_VERSION = "1.1"  # 1.1 adds query_fasta_export_is_the_staged_copy
 REQUIRED_PLAN_CLAUSES: tuple[str, ...] = (
     "manifest_nonempty",
     "query_fasta_nonempty",
@@ -115,6 +116,7 @@ REQUIRED_PLAN_CLAUSES: tuple[str, ...] = (
     "array_width_covers_every_shard",
     "round_dir_is_not_the_fp_supply",
     "align_timeout_matches_the_sized_bound",
+    "query_fasta_export_is_the_staged_copy",
     "sbatch_carries_the_sequence_route",
     "sbatch_cutoffs_match_the_certified_config",
     "worst_case_task_fits_the_wall_limit",
@@ -125,9 +127,30 @@ class RunPlanError(ValueError):
     """The run cannot be planned from the artifacts as given."""
 
 
+def _sha256_of(path: str | Path) -> str:
+    """sha256 of one file, chunked — the query FASTA is small but the helper is not sized to it."""
+    digest = hashlib.sha256()
+    with Path(path).open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1 << 20), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 # ═════════════════════════════════════════════════════════════════════════════
 # Reading the committed inputs (no number in this module is typed twice)
 # ═════════════════════════════════════════════════════════════════════════════
+def _float_or_none(text: str) -> float | None:
+    """``float(text)`` or ``None`` — an unparseable exported value must FAIL its clause.
+
+    ``float("600s")`` raises, and an exception here would abort the plan with a traceback
+    instead of a refused clause naming what disagreed.
+    """
+    try:
+        return float(text)
+    except (TypeError, ValueError):
+        return None
+
+
 def _require(payload: Mapping[str, Any], *keys: str) -> Any:
     """``payload[k0][k1]…`` or a refusal naming the path that is missing.
 
@@ -338,28 +361,34 @@ def submit_plan(
     *,
     manifest: str,
     query_fasta: str,
+    query_fasta_sha256: str,
     sbatch: str,
     round_dir: str,
 ) -> dict[str, Any]:
-    """The two commands the run consists of, as argv lists derived from the layout.
+    """The commands the run consists of, as argv lists derived from the layout.
 
-    ``git lfs pull`` runs **first** — the query FASTA is LFS-tracked and the cluster checkout
-    holds a pointer after the §9.3 sync — then ``make-shards`` on the login node (a 317-row
-    JSON partition, not compute); the array then reads ``$ROUND_DIR/shards/shard_NNN.json``.
-    The sbatch's own ``[ -s "$SHARD" ]`` guard is what catches a width/shard mismatch, per
-    task, before any search runs — so the two numbers below are not merely documentation.
+    **Staging comes first, and it is not a formality.**  ``*.fasta`` is git-LFS-tracked
+    (``.gitattributes``) and the cluster has **no git-lfs binary at all** (measured
+    2026-08-11: ``git lfs version`` is not a git command there), so the checkout holds a
+    ~130-byte pointer where the sequences should be — a non-empty file that passes every
+    ``-s`` test — and §9.3 step 3's ``git reset --hard`` restores that pointer on **every**
+    sync.  The sequences are therefore copied to the round's own scratch directory, outside
+    the checkout, where no later sync can revert them and where they cannot dirty the
+    ``git status`` a provenance gate reads.  The copy is verified by digest, because a
+    silently truncated or stale staged file is the one failure the sbatch's guards cannot
+    see ([[git-lfs-pointers-in-ci]]).
 
-    ``$HOME`` is left **unexpanded**: it is expanded by the remote shell, and expanding it
-    here would both bake a local path into a committed artifact in a public repo and name
-    the wrong home directory.
+    Then ``make-shards`` on the login node (a 317-row JSON partition, not compute); the array
+    reads ``$ROUND_DIR/shards/shard_NNN.json``, and the sbatch's own ``[ -s "$SHARD" ]``
+    guard catches a width/shard mismatch per task, before any search runs.
+
+    ``$HOME`` is left **unexpanded** and single-quoted in the rsync destination: it is the
+    *remote* shell that must expand it, and an unquoted ``$HOME`` would be expanded by the
+    local one — naming the laptop's home directory, which does not exist on the cluster.
     """
     n_shards = int(_require(layout, "n_shards"))
     shard_dir = f"{round_dir}/shards"
-    # ⚠ MEASURED on the cluster at preflight, not assumed: `*.fasta` is git-LFS-tracked
-    # (.gitattributes), the cluster checkout has no smudge filter, and §9.3 step 3's
-    # `git reset --hard` re-reverts the path to a ~130-byte pointer on every sync. So the
-    # materialisation is a step of the run, listed here, rather than a thing to remember.
-    lfs_pull = ["git", "lfs", "pull", f"--include={query_fasta}"]
+    staged_query_fasta = f"{round_dir}/{Path(query_fasta).name}"
     make_shards = [
         "python",
         "-m",
@@ -378,7 +407,7 @@ def submit_plan(
             f"SHARD_DIR={shard_dir}",
             f"ROUND_DIR={round_dir}",
             f"ALIGN_TIMEOUT_S={sizing['align_timeout_s']:g}",
-            f"QUERY_FASTA={query_fasta}",
+            f"QUERY_FASTA={staged_query_fasta}",
         ]
     )
     sbatch_argv = [
@@ -391,8 +420,22 @@ def submit_plan(
         "round_dir": round_dir,
         "shard_dir": shard_dir,
         "prep_env": "tbox-homology",
-        "lfs_pull_argv": lfs_pull,
-        "lfs_pull_command": " ".join(lfs_pull),
+        "staging": {
+            "why": (
+                "*.fasta is git-LFS-tracked and the cluster has NO git-lfs binary (measured "
+                "2026-08-11), so its checkout holds a ~130-byte pointer that passes every "
+                "non-empty check, and `git reset --hard` restores that pointer on every §9.3 "
+                "sync. The sequences are staged OUTSIDE the checkout so no later sync reverts "
+                "them and nothing dirties the repo's git status."
+            ),
+            "staged_query_fasta": staged_query_fasta,
+            "query_fasta_sha256": query_fasta_sha256,
+            "mkdir_command": f"mkdir -p {round_dir}",
+            "copy_command": f"rsync -avz {query_fasta} two:'{staged_query_fasta}'",
+            "verify_command": (
+                f"sha256sum {staged_query_fasta}  # must equal query_fasta_sha256 above"
+            ),
+        },
         "make_shards_argv": make_shards,
         "sbatch_argv": sbatch_argv,
         "make_shards_command": " ".join(make_shards),
@@ -420,6 +463,24 @@ def submit_plan(
 # ═════════════════════════════════════════════════════════════════════════════
 # The clause set — every one re-derived, every one emptiness-guarded
 # ═════════════════════════════════════════════════════════════════════════════
+def exported_value(submit: Mapping[str, Any], name: str) -> str | None:
+    """The value ``name`` carries in the submit plan's ``--export`` token, or ``None``.
+
+    Read back out of the token list rather than off the variable that built it: what the run
+    receives is the ``--export`` string, and a clause that consults the *request* instead is
+    true by construction on every real run — vacuous exactly where it is supposed to bite
+    ([[gate-clauses-need-re-derivation]]).
+    """
+    for token in submit.get("sbatch_argv", []):
+        if not str(token).startswith("--export="):
+            continue
+        for item in str(token)[len("--export=") :].split(","):
+            key, sep, value = item.partition("=")
+            if sep and key == name:
+                return value
+    return None
+
+
 def plan_clauses(
     specs: Sequence[CandidateSpec],
     *,
@@ -429,7 +490,7 @@ def plan_clauses(
     sbatch: Mapping[str, Any],
     certified: Mapping[str, Any],
     env: Mapping[str, Any],
-    round_dir: str,
+    submit: Mapping[str, Any],
 ) -> dict[str, Any]:
     """Re-derive every precondition of the run; ``all_pass`` is over the enumerated set.
 
@@ -437,7 +498,9 @@ def plan_clauses(
     requested it: a clause that consults the request is vacuously true exactly when the
     evidence is missing ([[clauses-must-guard-emptiness]]).  The two emptiness guards come
     first for that reason — with no candidates and no queries, every "for all" clause below
-    is trivially true and the plan would certify an empty run.
+    is trivially true and the plan would certify an empty run.  The three run-shape clauses
+    read their subject out of the ``--export`` token the run actually receives
+    (:func:`exported_value`), not off the arguments that built it.
     """
     available = load_query_fasta(query_fasta)
     ids = [s.candidate_id for s in specs]
@@ -463,6 +526,11 @@ def plan_clauses(
         validator_ok = False
         validator_error = str(exc)
 
+    exported_round_dir = exported_value(submit, "ROUND_DIR") or ""
+    exported_timeout = exported_value(submit, "ALIGN_TIMEOUT_S")
+    exported_query = exported_value(submit, "QUERY_FASTA")
+    staged_query = str(submit.get("staging", {}).get("staged_query_fasta", ""))
+
     clauses = {
         "manifest_nonempty": len(specs) > 0,
         "query_fasta_nonempty": len(available) > 0,
@@ -475,13 +543,19 @@ def plan_clauses(
         "array_width_covers_every_shard": layout["array_spec"] == f"0-{len(shards) - 1}"
         and int(layout["n_shards"]) == len(shards),
         # A prefix test, not equality: `<fp>/msa` is a different string and the same supply.
-        "round_dir_is_not_the_fp_supply": not (
-            round_dir == FP_SUPPLY_ROUND_DIR
-            or round_dir.startswith(FP_SUPPLY_ROUND_DIR.rstrip("/") + "/")
-            or FP_SUPPLY_ROUND_DIR.startswith(round_dir.rstrip("/") + "/")
+        # Read off the EXPORTED value — that is the directory the array writes into.
+        "round_dir_is_not_the_fp_supply": bool(exported_round_dir)
+        and not (
+            exported_round_dir == FP_SUPPLY_ROUND_DIR
+            or exported_round_dir.startswith(FP_SUPPLY_ROUND_DIR.rstrip("/") + "/")
+            or FP_SUPPLY_ROUND_DIR.startswith(exported_round_dir.rstrip("/") + "/")
         ),
-        "align_timeout_matches_the_sized_bound": float(env["align_timeout_s"])
-        == float(sizing["align_timeout_s"]),
+        "align_timeout_matches_the_sized_bound": exported_timeout is not None
+        and _float_or_none(exported_timeout) == float(sizing["align_timeout_s"]),
+        # The repo path is a git-LFS POINTER on the cluster; only the staged copy carries the
+        # sequences, so exporting the repo path would search 130 bytes of metadata.
+        "query_fasta_export_is_the_staged_copy": bool(staged_query)
+        and exported_query == staged_query,
         "sbatch_carries_the_sequence_route": bool(sbatch["has_query_fasta_guard"])
         and bool(sbatch["passes_query_fasta_argument"]),
         "sbatch_cutoffs_match_the_certified_config": dict(sbatch["cutoffs"]) == dict(certified),
@@ -528,6 +602,18 @@ def plan(
     certified = read_certified_cutoffs(certified_report)
     layout = shard_layout(specs, shard_size=shard_size)
     env = envelope(layout, sizing)
+    query_digest = _sha256_of(query_fasta)
+    # Built BEFORE the clauses, because three of them read what the run actually receives
+    # out of its `--export` token rather than off the arguments that produced it.
+    submit = submit_plan(
+        layout,
+        sizing,
+        manifest=portable_path(manifest),
+        query_fasta=portable_path(query_fasta),
+        query_fasta_sha256=query_digest,
+        sbatch=sbatch_facts["path"],
+        round_dir=round_dir,
+    )
     clauses = plan_clauses(
         specs,
         query_fasta=query_fasta,
@@ -535,8 +621,8 @@ def plan(
         sizing=sizing,
         sbatch=sbatch_facts,
         certified=certified,
-        env={**env, "align_timeout_s": sizing["align_timeout_s"]},
-        round_dir=round_dir,
+        env=env,
+        submit=submit,
     )
     if not clauses["all_pass"]:
         failed = sorted(n for n, ok in clauses["clauses"].items() if not ok)
@@ -585,14 +671,7 @@ def plan(
         "array": {k: v for k, v in layout.items() if k != "shards"},
         "envelope": env,
         "wall_limit_h": sbatch_facts["wall_limit_h"],
-        "submit": submit_plan(
-            layout,
-            sizing,
-            manifest=portable_path(manifest),
-            query_fasta=portable_path(query_fasta),
-            sbatch=sbatch_facts["path"],
-            round_dir=round_dir,
-        ),
+        "submit": submit,
         "preflight": clauses,
         "sized_from": {
             "sizing_report": portable_path(sizing_report),
@@ -619,6 +698,18 @@ def plan(
         adr=ADR,
         extra={"schema_version": SCHEMA_VERSION, "external_inputs": external},
     )
+    # The staged copy's digest and the provenance entry are computed independently, over the
+    # same file, and must agree: the staging block is what an operator checks the cluster copy
+    # against, so a plan that published one digest while recording another would authorize
+    # verifying the wrong bytes. Refused rather than reconciled.
+    recorded = body["provenance"]["inputs"].get(portable_path(query_fasta)) or (
+        external.get("query_fasta", {}).get("sha256")
+    )
+    if recorded != query_digest:
+        raise RunPlanError(
+            "the staged query FASTA digest and the provenance entry disagree "
+            f"({query_digest} vs {recorded}) — the plan cannot name the bytes to verify"
+        )
     return body
 
 

@@ -102,20 +102,28 @@ def _certified() -> dict:
     return dict(_sbatch_facts()["cutoffs"])
 
 
-def _good_clause_kwargs(tmp_path: Path):
+def _good_clause_kwargs(tmp_path: Path, round_dir: str = ccr.DEFAULT_ROUND_DIR):
     specs = _specs()
     fasta = _fasta(tmp_path, specs)
     layout = ccr.shard_layout(specs, shard_size=2)
     sizing = _sizing()
-    env = {**ccr.envelope(layout, sizing), "align_timeout_s": sizing["align_timeout_s"]}
+    submit = ccr.submit_plan(
+        layout,
+        sizing,
+        manifest="data/m.json",
+        query_fasta="data/q.fasta",
+        query_fasta_sha256="0" * 64,
+        sbatch="slurm/p2/mine_round_producer.sbatch",
+        round_dir=round_dir,
+    )
     return specs, {
         "query_fasta": fasta,
         "layout": layout,
         "sizing": sizing,
         "sbatch": _sbatch_facts(),
         "certified": _certified(),
-        "env": env,
-        "round_dir": "$HOME/tbox-scratch/round_p3_15g_control",
+        "env": ccr.envelope(layout, sizing),
+        "submit": submit,
     }
 
 
@@ -222,6 +230,7 @@ def _submit(tmp_path: Path, round_dir="$HOME/tbox-scratch/round_p3_15g_control")
         _sizing(),
         manifest="data/m.json",
         query_fasta="data/q.fasta",
+        query_fasta_sha256="0" * 64,
         sbatch="slurm/p2/mine_round_producer.sbatch",
         round_dir=round_dir,
     )
@@ -245,15 +254,23 @@ def test_submit_plan_exports_every_variable_the_sbatch_requires(tmp_path: Path):
     assert "ALIGN_TIMEOUT_S=600," in export or export.endswith("ALIGN_TIMEOUT_S=600")
 
 
-def test_submit_plan_materialises_the_lfs_query_fasta_before_anything_reads_it(tmp_path: Path):
+def test_submit_plan_stages_the_query_fasta_out_of_the_checkout(tmp_path: Path):
     """MEASURED at the §9.3 preflight: the cluster checkout holds a POINTER, not sequences.
 
-    `*.fasta` is git-LFS-tracked and the cluster has no smudge filter, so the file the array
-    would search is ~130 bytes of metadata that passes every non-empty check there is.
+    `*.fasta` is git-LFS-tracked and the cluster has **no git-lfs binary**, so the file the
+    array would search is ~130 bytes of metadata that passes every non-empty check there is.
+    The sequences are staged outside the checkout — where the next `git reset --hard` cannot
+    revert them — and the copy is bound by digest, which is the one failure the sbatch's own
+    guards cannot see.
     """
     plan = _submit(tmp_path)
-    assert plan["lfs_pull_argv"][:3] == ["git", "lfs", "pull"]
-    assert "data/q.fasta" in plan["lfs_pull_argv"][3]
+    staging = plan["staging"]
+    assert staging["staged_query_fasta"] == plan["round_dir"] + "/q.fasta"
+    assert staging["query_fasta_sha256"] == "0" * 64
+    assert "sha256sum" in staging["verify_command"]
+    # The remote path must be single-quoted or the LOCAL shell expands $HOME to the laptop's.
+    assert "two:'" in staging["copy_command"]
+    assert ccr.exported_value(plan, "QUERY_FASTA") == staging["staged_query_fasta"]
 
 
 def test_submit_plan_leaves_home_unexpanded(tmp_path: Path):
@@ -358,6 +375,20 @@ def test_read_query_lengths_reads_both_populations():
 # --------------------------------------------------------------------------- #
 # plan_clauses — one broken clause at a time
 # --------------------------------------------------------------------------- #
+def _submit_with_export(submit: dict, name: str, value: str) -> dict:
+    """The same submit plan with ONE export token rewritten — the run-shape mutation."""
+    argv = []
+    for token in submit["sbatch_argv"]:
+        if token.startswith("--export="):
+            items = [
+                f"{name}={value}" if item.split("=")[0] == name else item
+                for item in token[len("--export=") :].split(",")
+            ]
+            token = "--export=" + ",".join(items)
+        argv.append(token)
+    return {**submit, "sbatch_argv": argv}
+
+
 def test_plan_clauses_pass_on_a_valid_supply(tmp_path: Path):
     specs, kwargs = _good_clause_kwargs(tmp_path)
     result = ccr.plan_clauses(specs, **kwargs)
@@ -399,8 +430,7 @@ def test_a_length_disagreement_leaves_the_presence_clause_true(tmp_path: Path):
     ],
 )
 def test_a_round_dir_that_touches_the_fp_supply_is_refused(tmp_path: Path, round_dir: str):
-    specs, kwargs = _good_clause_kwargs(tmp_path)
-    kwargs["round_dir"] = round_dir
+    specs, kwargs = _good_clause_kwargs(tmp_path, round_dir=round_dir)
     result = ccr.plan_clauses(specs, **kwargs)
     assert result["clauses"]["round_dir_is_not_the_fp_supply"] is False
     assert result["all_pass"] is False
@@ -408,8 +438,7 @@ def test_a_round_dir_that_touches_the_fp_supply_is_refused(tmp_path: Path, round
 
 def test_a_sibling_round_dir_is_allowed(tmp_path: Path):
     """The refusal must be about CONTAINMENT, not about sharing a prefix string."""
-    specs, kwargs = _good_clause_kwargs(tmp_path)
-    kwargs["round_dir"] = ccr.FP_SUPPLY_ROUND_DIR + "_control"
+    specs, kwargs = _good_clause_kwargs(tmp_path, round_dir=ccr.FP_SUPPLY_ROUND_DIR + "_control")
     assert ccr.plan_clauses(specs, **kwargs)["clauses"]["round_dir_is_not_the_fp_supply"] is True
 
 
@@ -438,11 +467,38 @@ def test_a_task_that_cannot_finish_inside_the_wall_is_refused(tmp_path: Path):
     assert result["clauses"]["worst_case_task_fits_the_wall_limit"] is False
 
 
-def test_an_align_timeout_that_is_not_the_sized_one_is_refused(tmp_path: Path):
+@pytest.mark.parametrize("exported", ["300", "600s", ""])
+def test_an_exported_align_timeout_that_is_not_the_sized_one_is_refused(
+    tmp_path: Path, exported: str
+):
+    """The clause reads the `--export` token, not the argument that built it.
+
+    Comparing `sizing["align_timeout_s"]` against itself would be true by construction on
+    every real run — vacuous exactly where it is meant to bite (CodeRabbit CLI r2).
+    """
     specs, kwargs = _good_clause_kwargs(tmp_path)
-    kwargs["env"] = {**kwargs["env"], "align_timeout_s": 300.0}
+    kwargs["submit"] = _submit_with_export(kwargs["submit"], "ALIGN_TIMEOUT_S", exported)
     result = ccr.plan_clauses(specs, **kwargs)
     assert result["clauses"]["align_timeout_matches_the_sized_bound"] is False
+    assert result["all_pass"] is False
+
+
+def test_exporting_the_repo_query_fasta_instead_of_the_staged_copy_is_refused(tmp_path: Path):
+    """On the cluster the repo path is a git-LFS pointer; only the staged copy has sequences."""
+    specs, kwargs = _good_clause_kwargs(tmp_path)
+    kwargs["submit"] = _submit_with_export(
+        kwargs["submit"], "QUERY_FASTA", "data/processed/mining/curated_control_queries_v0.fasta"
+    )
+    result = ccr.plan_clauses(specs, **kwargs)
+    assert result["clauses"]["query_fasta_export_is_the_staged_copy"] is False
+    assert result["all_pass"] is False
+
+
+def test_exported_value_reads_the_token_the_run_receives(tmp_path: Path):
+    submit = _submit(tmp_path)
+    assert ccr.exported_value(submit, "ALIGN_TIMEOUT_S") == "600"
+    assert ccr.exported_value(submit, "ROUND_DIR") == submit["round_dir"]
+    assert ccr.exported_value(submit, "NOT_EXPORTED") is None
 
 
 def test_an_empty_supply_cannot_pass_vacuously(tmp_path: Path):
@@ -529,6 +585,21 @@ def test_plan_over_the_real_supply_reaches_the_committed_numbers(in_repo_root):
 def test_plan_refuses_when_a_clause_fails(in_repo_root):
     with pytest.raises(ccr.RunPlanError, match="round_dir_is_not_the_fp_supply"):
         _plan_from_repo(round_dir=ccr.FP_SUPPLY_ROUND_DIR)
+
+
+def test_the_staging_digest_agrees_with_the_provenance_entry(in_repo_root):
+    """One file, two independent hashes — the operator verifies the cluster copy against one
+    of them and the provenance records the other, so they must not be free to disagree."""
+    body = _plan_from_repo()
+    recorded = body["provenance"]["inputs"][ccr.DEFAULT_QUERY_FASTA]
+    assert body["submit"]["staging"]["query_fasta_sha256"] == recorded
+
+
+def test_a_staging_digest_that_disagrees_with_provenance_is_refused(in_repo_root, monkeypatch):
+    """The guard, exercised: without it the plan would name bytes nobody hashed."""
+    monkeypatch.setattr(ccr, "_sha256_of", lambda _path: "f" * 64)
+    with pytest.raises(ccr.RunPlanError, match="disagree"):
+        _plan_from_repo()
 
 
 def test_plan_publishes_no_absolute_path(in_repo_root):
