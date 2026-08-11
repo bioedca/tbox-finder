@@ -139,6 +139,28 @@ def _sha256_of(path: str | Path) -> str:
 # ═════════════════════════════════════════════════════════════════════════════
 # Reading the committed inputs (no number in this module is typed twice)
 # ═════════════════════════════════════════════════════════════════════════════
+def _export_item(name: str, value: str) -> str:
+    """One ``NAME=value`` item for ``sbatch --export``, refusing a value its parser would split.
+
+    ``sbatch --export`` splits the list on commas and each item on its first ``=``, so a value
+    containing either silently becomes a *different*, truncated variable list — and the run
+    would write into a directory nobody named.  The clause set cannot catch it:
+    :func:`exported_value` parses that same string the same way, so it reads back the same
+    truncation and every run-shape clause agrees with the corruption instead of refusing it
+    (CodeRabbit CLI r5).  Whitespace is refused for the neighbouring reason — the export list
+    is one shell token on the submit line.  Validated at construction, which is the only place
+    the un-truncated value still exists.
+    """
+    bad = sorted({c for c in value if c in ",=" or c.isspace()})
+    if bad:
+        raise RunPlanError(
+            f"the {name} export value {value!r} contains {bad} — sbatch splits --export on "
+            "commas and on the first '=', so the run would receive a truncated value that "
+            "reads back as valid"
+        )
+    return f"{name}={value}"
+
+
 def _home_relative(path: str) -> str:
     """``$HOME/x`` → ``x`` — the form an rsync remote destination needs.
 
@@ -417,10 +439,10 @@ def submit_plan(
     exports = ",".join(
         [
             "ALL",
-            f"SHARD_DIR={shard_dir}",
-            f"ROUND_DIR={round_dir}",
-            f"ALIGN_TIMEOUT_S={sizing['align_timeout_s']:g}",
-            f"QUERY_FASTA={staged_query_fasta}",
+            _export_item("SHARD_DIR", shard_dir),
+            _export_item("ROUND_DIR", round_dir),
+            _export_item("ALIGN_TIMEOUT_S", f"{sizing['align_timeout_s']:g}"),
+            _export_item("QUERY_FASTA", staged_query_fasta),
         ]
     )
     sbatch_argv = [

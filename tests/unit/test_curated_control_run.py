@@ -292,6 +292,44 @@ def test_home_relative_only_strips_a_leading_home(given: str, expected: str):
     assert ccr._home_relative(given) == expected
 
 
+@pytest.mark.parametrize("value", ["a,b", "a=b", "a b", "a\tb"])
+def test_export_item_refuses_a_value_the_parser_would_split(value: str):
+    """The guard itself, per character class — the integration test below cannot isolate it.
+
+    Every export value in the plan derives from `round_dir`, so a mutation that drops the
+    guard on ONE item is still caught by a sibling; only a direct call shows which characters
+    the rule actually covers.
+    """
+    with pytest.raises(ccr.RunPlanError, match="truncated"):
+        ccr._export_item("ROUND_DIR", value)
+
+
+def test_export_item_passes_a_clean_value():
+    """The positive control: a guard that refused everything would satisfy the test above."""
+    assert ccr._export_item("ROUND_DIR", "$HOME/tbox-scratch/x") == "ROUND_DIR=$HOME/tbox-scratch/x"
+
+
+@pytest.mark.parametrize(
+    "round_dir",
+    [
+        "$HOME/tbox,scratch/control",  # a comma ENDS the export item
+        "$HOME/tbox=scratch/control",  # an '=' starts a different variable
+        "$HOME/tbox scratch/control",  # whitespace ends the shell token
+    ],
+)
+def test_submit_plan_refuses_a_round_dir_the_export_parser_would_split(
+    tmp_path: Path, round_dir: str
+):
+    """The corruption the clause set CANNOT catch, so it is refused at construction.
+
+    `sbatch --export` splits on commas and on the first `=`; `exported_value` parses the same
+    string the same way, so it reads back the same truncated value and every run-shape clause
+    passes while the array writes into a directory nobody named (CodeRabbit CLI r5).
+    """
+    with pytest.raises(ccr.RunPlanError, match="truncated"):
+        _submit(tmp_path, round_dir=round_dir)
+
+
 def test_submit_plan_leaves_home_unexpanded(tmp_path: Path):
     plan = _submit(tmp_path)
     assert plan["round_dir"].startswith("$HOME/")

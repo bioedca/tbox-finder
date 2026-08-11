@@ -5505,12 +5505,16 @@ strict subset; the delta is 13 tests moving from FAILED to **SKIPPED** on DVC/LF
 fresh worktree does not materialise (+1 more in `test_split_table_schema` for the same
 reason), with both `^FAILED` sets ANSI-stripped and cross-checked against the summary line,
 and a collection diff proving no existing test was dropped (15 → 27 in the producer's suite,
-45 new at that point). **76 tests added in total; 37 sabotages, all RED against their NAMED
+45 new at that point). **87 tests added in total; 38 sabotages, all RED against their NAMED
 test, plus 2 negative controls that stay green.** The report **re-derives byte-identically**
 apart from `provenance.generated_at_utc` and `git_sha`. `ruff` + `black` + `bash -n` clean.
 
-**Review.** **Four CodeRabbit CLI rounds — 1 / 1 / 0 / 0 findings, both real, closing on
-*No new findings* twice**; the GitHub app reviewed the first commit automatically and
+**Review.** **Six CodeRabbit CLI rounds — 1 / 1 / 0 / rate-limited / 1 / 0 findings, all
+three real, closing on *No new findings***; the round-4 slot was a **Fair-Usage stall that
+was waited out (41 min) rather than escalated**, and it was worth waiting for: round 5,
+after two clean-looking rounds, returned the sharpest finding of the step. ⚠ **No round
+before the last was evidence of convergence** — r3 read *No new findings* and r5 still had
+one. the GitHub app reviewed the first commit automatically and
 returned **the same two findings independently**, then read `pass` with a body of only a
 rate-limit notice for the rest of the step (§5.1's trap, **an absence, not a pass**,
 sixteenth step running) — **no Greptile credit spent**. Round 3's replayed *"1 previous
@@ -5525,8 +5529,16 @@ itself**, true by construction on every real run — precisely the vacuity this 
 docstring claims the clause set avoids. The three run-shape clauses now read their subject
 out of the `--export` token the run actually receives, and a **new** clause requires the
 exported `QUERY_FASTA` to be the staged copy rather than the repo path (clause set 1.0 →
-1.1, so an older report re-validates FALSE instead of skipping the new check). CI green
-(lint · pytest · snakemake).
+1.1, so an older report re-validates FALSE instead of skipping the new check). r5 is the one
+**the clause set could not have caught**: `sbatch --export` splits its list on commas and
+each item on its first `=`, so a `round_dir` containing either would reach the array as a
+*truncated* variable list — and `exported_value` parses that same string the same way, so
+every run-shape clause would read back the truncation and **agree with it**. Refused at
+construction, where the un-truncated value still exists. ⚠ Its first sabotage **stayed
+green**, and the sabotage was right: every export value derives from `round_dir`, so
+dropping the guard on one item is still caught by a sibling. The guard is now tested by a
+direct call per character class **with a positive control**, and the sabotage drops the
+whole block. CI green (lint · pytest · snakemake).
 
 **Decisions.** ⚠ **The seam defaults off, and that default is the argument.** ADR-0005 A10
 Pin 2 says each `MiningCandidate` "is re-resolved to nucleotides from the A1 genome FASTA
