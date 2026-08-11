@@ -139,6 +139,19 @@ def _sha256_of(path: str | Path) -> str:
 # ═════════════════════════════════════════════════════════════════════════════
 # Reading the committed inputs (no number in this module is typed twice)
 # ═════════════════════════════════════════════════════════════════════════════
+def _home_relative(path: str) -> str:
+    """``$HOME/x`` → ``x`` — the form an rsync remote destination needs.
+
+    rsync resolves a relative remote path against the remote home; a ``$HOME`` inside the
+    remote path is passed through literally (measured 2026-08-11: rsync reported
+    ``change_dir … /$HOME/tbox-scratch/… No such file or directory``).  A path that does not
+    start with ``$HOME/`` is returned unchanged rather than mangled — an absolute or
+    already-relative destination is the caller's to get right.
+    """
+    prefix = "$HOME/"
+    return path[len(prefix) :] if path.startswith(prefix) else path
+
+
 def _float_or_none(text: str) -> float | None:
     """``float(text)`` or ``None`` — an unparseable exported value must FAIL its clause.
 
@@ -431,7 +444,14 @@ def submit_plan(
             "staged_query_fasta": staged_query_fasta,
             "query_fasta_sha256": query_fasta_sha256,
             "mkdir_command": f"mkdir -p {round_dir}",
-            "copy_command": f"rsync -avz {query_fasta} two:'{staged_query_fasta}'",
+            # ⚠ TWO SPELLINGS OF ONE PATH, AND THE DIFFERENCE IS MEASURED, NOT STYLISTIC.
+            # An rsync remote path is NOT run through a remote shell: `two:'$HOME/x'` sends the
+            # four literal characters `$HOME` and fails with "change_dir … No such file or
+            # directory" (observed 2026-08-11). rsync resolves a *relative* remote path against
+            # the remote home, which is what the destination below uses; the `$HOME` spelling is
+            # kept everywhere the value passes through a shell (the `--export` token, the verify
+            # command), where it must NOT be expanded locally ([[verify-the-line-you-ship]]).
+            "copy_command": f"rsync -avz {query_fasta} two:{_home_relative(staged_query_fasta)}",
             "verify_command": (
                 f"sha256sum {staged_query_fasta}  # must equal query_fasta_sha256 above"
             ),

@@ -268,9 +268,28 @@ def test_submit_plan_stages_the_query_fasta_out_of_the_checkout(tmp_path: Path):
     assert staging["staged_query_fasta"] == plan["round_dir"] + "/q.fasta"
     assert staging["query_fasta_sha256"] == "0" * 64
     assert "sha256sum" in staging["verify_command"]
-    # The remote path must be single-quoted or the LOCAL shell expands $HOME to the laptop's.
-    assert "two:'" in staging["copy_command"]
+    # ⚠ MEASURED 2026-08-11: an rsync remote path is not run through a remote shell, so a
+    # `two:'$HOME/…'` destination sends the four literal characters `$HOME` and fails with
+    # "change_dir … No such file or directory". rsync resolves a RELATIVE remote path against
+    # the remote home, so that is the form the copy command must carry — while the export and
+    # verify spellings, which do pass through a shell, keep `$HOME`.
+    assert "two:tbox-scratch/" in staging["copy_command"]
+    assert "$HOME" not in staging["copy_command"].split("two:", 1)[1]
+    assert staging["staged_query_fasta"].startswith("$HOME/")
+    assert "$HOME" in staging["verify_command"]
     assert ccr.exported_value(plan, "QUERY_FASTA") == staging["staged_query_fasta"]
+
+
+@pytest.mark.parametrize(
+    "given,expected",
+    [
+        ("$HOME/tbox-scratch/x", "tbox-scratch/x"),
+        ("/abs/tbox-scratch/x", "/abs/tbox-scratch/x"),  # absolute: the caller's to get right
+        ("rel/$HOME/x", "rel/$HOME/x"),  # only a LEADING $HOME/ is a home reference
+    ],
+)
+def test_home_relative_only_strips_a_leading_home(given: str, expected: str):
+    assert ccr._home_relative(given) == expected
 
 
 def test_submit_plan_leaves_home_unexpanded(tmp_path: Path):

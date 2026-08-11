@@ -78,8 +78,8 @@
       "external_inputs": {},
       "schema_version": "1.0"
     },
-    "generated_at_utc": "2026-08-11T15:33:00.340802+00:00",
-    "git_sha": "0bcdd1f212386bc07529d5fba3d52dd9d0045bef",
+    "generated_at_utc": "2026-08-11T15:40:26.395799+00:00",
+    "git_sha": "27b4d76da3854519929b78e22eeea7f71ddee69c",
     "inputs": {
       "data/processed/mining/curated_control_manifest_v0.json": "363795fba6cd4d1d85495ec62e6e62cd11f1bf37b0fdf739c48315777c4d2a83",
       "data/processed/mining/curated_control_queries_v0.fasta": "08a3d160e35efa36983002dd3776384d2b16feb19a182e0b0d2c2fbb36e6e0c0",
@@ -126,7 +126,7 @@
     "sbatch_command": "sbatch --array=0-15 --export=ALL,SHARD_DIR=$HOME/tbox-scratch/round_p3_15g_control/shards,ROUND_DIR=$HOME/tbox-scratch/round_p3_15g_control,ALIGN_TIMEOUT_S=600,QUERY_FASTA=$HOME/tbox-scratch/round_p3_15g_control/curated_control_queries_v0.fasta slurm/p2/mine_round_producer.sbatch",
     "shard_dir": "$HOME/tbox-scratch/round_p3_15g_control/shards",
     "staging": {
-      "copy_command": "rsync -avz data/processed/mining/curated_control_queries_v0.fasta two:'$HOME/tbox-scratch/round_p3_15g_control/curated_control_queries_v0.fasta'",
+      "copy_command": "rsync -avz data/processed/mining/curated_control_queries_v0.fasta two:tbox-scratch/round_p3_15g_control/curated_control_queries_v0.fasta",
       "mkdir_command": "mkdir -p $HOME/tbox-scratch/round_p3_15g_control",
       "query_fasta_sha256": "08a3d160e35efa36983002dd3776384d2b16feb19a182e0b0d2c2fbb36e6e0c0",
       "staged_query_fasta": "$HOME/tbox-scratch/round_p3_15g_control/curated_control_queries_v0.fasta",
