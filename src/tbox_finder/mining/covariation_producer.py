@@ -256,6 +256,14 @@ def _read_json(path: Path) -> dict[str, Any]:
 QUERY_ROUTE_GENOME = "genome"
 QUERY_ROUTE_FASTA = "query_fasta"
 
+#: The first line of a git-LFS pointer file. ``*.fasta`` is LFS-tracked in this repo
+#: (``.gitattributes``), so a checkout without the smudge filter — the cluster's, which
+#: ``git reset --hard`` re-reverts on every sync — holds a ~130-byte pointer where the
+#: sequences should be. It is a perfectly good non-empty file: it passes ``[ -s ]``, and
+#: without this it would surface as the bare "no FASTA records" refusal on all 16 array
+#: tasks, after the queue wait, naming the wrong problem.
+LFS_POINTER_PREFIX = "version https://git-lfs.github.com/spec/v1"
+
 
 def load_query_fasta(path: str | Path) -> dict[str, str]:
     """Read a sequence-route query FASTA into ``candidate_id -> nucleotides``.
@@ -271,8 +279,14 @@ def load_query_fasta(path: str | Path) -> dict[str, str]:
     """
     from tbox_finder.mining.pilot_fetch import iter_fasta_records
 
+    text = Path(path).read_text(encoding="utf-8")
+    if text.startswith(LFS_POINTER_PREFIX):
+        raise ProducerError(
+            f"{path} is a git-LFS POINTER, not sequences — `git lfs pull` it on this "
+            "checkout (`git reset --hard` re-reverts it on every sync)"
+        )
     queries: dict[str, str] = {}
-    for header, sequence in iter_fasta_records(Path(path).read_text(encoding="utf-8")):
+    for header, sequence in iter_fasta_records(text):
         token = header.split()
         if not token:
             raise ProducerError(f"{path}: a FASTA record has an empty defline")

@@ -182,6 +182,18 @@ _SBATCH_ASSIGNMENT = re.compile(r'(?m)(?:^|;)\s*(?P<name>[A-Z_][A-Z0-9_]*)="(?P<
 #: ``#SBATCH --time=HH:MM:SS`` (the only wall form this repo's sbatch files use).
 _SBATCH_TIME = re.compile(r"(?m)^#SBATCH\s+--time=(\d+):(\d{2}):(\d{2})\s*$")
 
+#: The five sbatch constants the D17 search cutoffs live in — ONE list, read by the guard
+#: and by the block that indexes them. Two spellings drift: a guard naming three of them
+#: lets the other two escape as a bare ``KeyError`` naming one key and no artifact, which
+#: is exactly the diagnostic :func:`_require` exists to prevent.
+SBATCH_CUTOFF_KEYS: tuple[str, ...] = (
+    "CTRL_ENGINE",
+    "CTRL_EVALUE",
+    "CTRL_MAX_TARGET_SEQS",
+    "CTRL_MIN_PIDENT",
+    "CTRL_MIN_COV",
+)
+
 
 def read_sbatch(path: str | Path = DEFAULT_SBATCH) -> dict[str, Any]:
     """The wall limit, the D17 search cutoffs and the sequence-route markers, from its bytes.
@@ -196,7 +208,7 @@ def read_sbatch(path: str | Path = DEFAULT_SBATCH) -> dict[str, Any]:
         raise RunPlanError(f"{portable_path(path)}: no `#SBATCH --time=HH:MM:SS` header found")
     hours, minutes, seconds = (int(g) for g in time_match.groups())
     assigned = {m.group("name"): m.group("value") for m in _SBATCH_ASSIGNMENT.finditer(text)}
-    missing = [k for k in ("CTRL_ENGINE", "CTRL_EVALUE", "CTRL_MIN_COV") if k not in assigned]
+    missing = [k for k in SBATCH_CUTOFF_KEYS if k not in assigned]
     if missing:
         raise RunPlanError(
             f"{portable_path(path)}: cutoffs {missing} not found — the producer's search "
@@ -331,10 +343,11 @@ def submit_plan(
 ) -> dict[str, Any]:
     """The two commands the run consists of, as argv lists derived from the layout.
 
-    ``make-shards`` runs **first** and on the login node (a 317-row JSON partition, not
-    compute); the array then reads ``$ROUND_DIR/shards/shard_NNN.json``.  The sbatch's own
-    ``[ -s "$SHARD" ]`` guard is what catches a width/shard mismatch, per task, before any
-    search runs — so the two numbers below are not merely documentation.
+    ``git lfs pull`` runs **first** — the query FASTA is LFS-tracked and the cluster checkout
+    holds a pointer after the §9.3 sync — then ``make-shards`` on the login node (a 317-row
+    JSON partition, not compute); the array then reads ``$ROUND_DIR/shards/shard_NNN.json``.
+    The sbatch's own ``[ -s "$SHARD" ]`` guard is what catches a width/shard mismatch, per
+    task, before any search runs — so the two numbers below are not merely documentation.
 
     ``$HOME`` is left **unexpanded**: it is expanded by the remote shell, and expanding it
     here would both bake a local path into a committed artifact in a public repo and name
@@ -342,6 +355,11 @@ def submit_plan(
     """
     n_shards = int(_require(layout, "n_shards"))
     shard_dir = f"{round_dir}/shards"
+    # ⚠ MEASURED on the cluster at preflight, not assumed: `*.fasta` is git-LFS-tracked
+    # (.gitattributes), the cluster checkout has no smudge filter, and §9.3 step 3's
+    # `git reset --hard` re-reverts the path to a ~130-byte pointer on every sync. So the
+    # materialisation is a step of the run, listed here, rather than a thing to remember.
+    lfs_pull = ["git", "lfs", "pull", f"--include={query_fasta}"]
     make_shards = [
         "python",
         "-m",
@@ -373,6 +391,8 @@ def submit_plan(
         "round_dir": round_dir,
         "shard_dir": shard_dir,
         "prep_env": "tbox-homology",
+        "lfs_pull_argv": lfs_pull,
+        "lfs_pull_command": " ".join(lfs_pull),
         "make_shards_argv": make_shards,
         "sbatch_argv": sbatch_argv,
         "make_shards_command": " ".join(make_shards),

@@ -213,6 +213,22 @@ def test_load_query_fasta_refuses_an_empty_supply(tmp_path: Path):
         cp.load_query_fasta(_query_fasta(tmp_path, []))
 
 
+def test_load_query_fasta_refuses_a_git_lfs_pointer(tmp_path: Path):
+    """MEASURED at the §9.3 preflight: the cluster checkout really does hold one.
+
+    `*.fasta` is LFS-tracked here, the cluster has no smudge filter, and `git reset --hard`
+    re-reverts the path on every sync. The pointer is a non-empty file with no `>` line, so
+    without this it refuses as "no FASTA records" — true, and about the wrong problem.
+    """
+    pointer = tmp_path / "pointer.fa"
+    pointer.write_text(
+        "version https://git-lfs.github.com/spec/v1\noid sha256:08a3d160e3\nsize 61373\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(cp.ProducerError, match="git lfs pull"):
+        cp.load_query_fasta(pointer)
+
+
 def test_resolve_shard_queries_refuses_a_candidate_with_no_query(tmp_path: Path):
     specs = [
         _spec("GCA_1.1:c0:0-4", "GCA_1.1:c0", 0, 4),

@@ -245,6 +245,17 @@ def test_submit_plan_exports_every_variable_the_sbatch_requires(tmp_path: Path):
     assert "ALIGN_TIMEOUT_S=600," in export or export.endswith("ALIGN_TIMEOUT_S=600")
 
 
+def test_submit_plan_materialises_the_lfs_query_fasta_before_anything_reads_it(tmp_path: Path):
+    """MEASURED at the §9.3 preflight: the cluster checkout holds a POINTER, not sequences.
+
+    `*.fasta` is git-LFS-tracked and the cluster has no smudge filter, so the file the array
+    would search is ~130 bytes of metadata that passes every non-empty check there is.
+    """
+    plan = _submit(tmp_path)
+    assert plan["lfs_pull_argv"][:3] == ["git", "lfs", "pull"]
+    assert "data/q.fasta" in plan["lfs_pull_argv"][3]
+
+
 def test_submit_plan_leaves_home_unexpanded(tmp_path: Path):
     plan = _submit(tmp_path)
     assert plan["round_dir"].startswith("$HOME/")
@@ -278,6 +289,20 @@ def test_read_sbatch_refuses_a_file_whose_cutoffs_moved(tmp_path: Path):
     path = tmp_path / "no_cutoffs.sbatch"
     path.write_text("#SBATCH --time=12:00:00\n", encoding="utf-8")
     with pytest.raises(ccr.RunPlanError):
+        ccr.read_sbatch(path)
+
+
+@pytest.mark.parametrize("dropped", ccr.SBATCH_CUTOFF_KEYS)
+def test_read_sbatch_refuses_when_any_single_cutoff_moves(tmp_path: Path, dropped: str):
+    """Each of the five, alone — a guard naming a subset lets the rest escape as a KeyError.
+
+    Parametrized over the shipped tuple rather than a retyped list, so a sixth cutoff is
+    covered the moment it is required.
+    """
+    kept = [f'{k}="1"' for k in ccr.SBATCH_CUTOFF_KEYS if k != dropped]
+    path = tmp_path / "partial.sbatch"
+    path.write_text("#SBATCH --time=12:00:00\n" + "; ".join(kept) + "\n", encoding="utf-8")
+    with pytest.raises(ccr.RunPlanError, match=dropped):
         ccr.read_sbatch(path)
 
 
@@ -578,6 +603,22 @@ def test_the_sbatch_guard_refuses_a_query_fasta_that_cannot_be_searched(tmp_path
     proc = _run_guard(str(path))
     assert proc.returncode == 2
     assert "QUERY_FASTA" in proc.stderr
+
+
+def test_the_sbatch_guard_refuses_a_git_lfs_pointer(tmp_path: Path):
+    """The failure the §9.3 preflight actually found, refused by name.
+
+    A pointer is ~130 non-empty bytes: `-s` passes it, the array activates three conda envs
+    and reaches the producer, and 16 tasks then die on a message about FASTA records.
+    """
+    pointer = tmp_path / "q.fa"
+    pointer.write_text(
+        "version https://git-lfs.github.com/spec/v1\noid sha256:08a3d160e3\nsize 61373\n",
+        encoding="utf-8",
+    )
+    proc = _run_guard(str(pointer))
+    assert proc.returncode == 2
+    assert "git lfs pull" in proc.stderr and "POINTER" in proc.stderr
 
 
 # --------------------------------------------------------------------------- #

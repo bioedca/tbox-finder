@@ -106,6 +106,13 @@ QUERY_FASTA="${QUERY_FASTA:-}"
 SEARCH_QUERY_ARGS=()
 if [ -n "$QUERY_FASTA" ]; then
   [ -s "$QUERY_FASTA" ] || { echo "FATAL: QUERY_FASTA='$QUERY_FASTA' is missing or empty (sequence route requested)" >&2; exit 2; }
+  # ⚠ `*.fasta` IS GIT-LFS-TRACKED (.gitattributes), and this checkout has no smudge filter:
+  # after the §9.3 step-3 `git reset --hard` the path holds a ~130-byte POINTER, which is a
+  # perfectly good non-empty file and sails past `-s`. Caught here by name so the operator is
+  # told `git lfs pull` rather than reading "no FASTA records" on all 16 tasks after the queue.
+  case "$(head -n 1 "$QUERY_FASTA")" in
+    version\ https://git-lfs.github.com/spec/v1*) echo "FATAL: QUERY_FASTA='$QUERY_FASTA' is a git-LFS POINTER, not sequences — run \`git lfs pull --include=$QUERY_FASTA\` on this checkout (\`git reset --hard\` re-reverts it every sync)" >&2; exit 2 ;;
+  esac
   SEARCH_QUERY_ARGS=(--query-fasta "$QUERY_FASTA")
 fi
 # Zero-pad the task id to match make-shards' `shard_{i:03d}.json` (covariation_producer.py:199).
