@@ -5505,12 +5505,12 @@ strict subset; the delta is 13 tests moving from FAILED to **SKIPPED** on DVC/LF
 fresh worktree does not materialise (+1 more in `test_split_table_schema` for the same
 reason), with both `^FAILED` sets ANSI-stripped and cross-checked against the summary line,
 and a collection diff proving no existing test was dropped (15 → 27 in the producer's suite,
-45 new at that point). **87 tests added in total; 38 sabotages, all RED against their NAMED
+45 new at that point). **103 tests added in total; 41 sabotages, all RED against their NAMED
 test, plus 2 negative controls that stay green.** The report **re-derives byte-identically**
 apart from `provenance.generated_at_utc` and `git_sha`. `ruff` + `black` + `bash -n` clean.
 
-**Review.** **Six CodeRabbit CLI rounds — 1 / 1 / 0 / rate-limited / 1 / 0 findings, all
-three real, closing on *No new findings***; the round-4 slot was a **Fair-Usage stall that
+**Review.** **Seven CodeRabbit CLI rounds — 1 / 1 / 0 / rate-limited / 1 / 1 / 0 findings,
+all four real, closing on *No new findings***; the round-4 slot was a **Fair-Usage stall that
 was waited out (41 min) rather than escalated**, and it was worth waiting for: round 5,
 after two clean-looking rounds, returned the sharpest finding of the step. ⚠ **No round
 before the last was evidence of convergence** — r3 read *No new findings* and r5 still had
@@ -5538,7 +5538,17 @@ construction, where the un-truncated value still exists. ⚠ Its first sabotage 
 green**, and the sabotage was right: every export value derives from `round_dir`, so
 dropping the guard on one item is still caught by a sibling. The guard is now tested by a
 direct call per character class **with a positive control**, and the sabotage drops the
-whole block. CI green (lint · pytest · snakemake).
+whole block. r6 then found the same class one level down: `round_dir_is_not_the_fp_supply`
+compared **raw strings**, so `$HOME/tbox-scratch/./round_p3_15_supply` — the FP supply, spelled
+with a dot — passed it, and the control's consensuses would have landed in exactly the
+directory the module documents as the thing to avoid. Now compared **segment-wise**
+(`PurePosixPath`), with `..` refused rather than resolved (its meaning depends on the
+cluster's filesystem, which this check cannot see) and the round dir required to be
+`$HOME`-rooted at construction, because the comparison is over **unexpanded** paths and two
+spellings of the home directory are two coordinate systems. ⚠ Its first sabotage also stayed
+green — `PurePosixPath` already drops `.`, so the defensive filter beside it was
+**unreachable**; it was deleted rather than kept as decoration, and the test now pins the
+behaviour (a hand-rolled `split("/")` fails it). CI green (lint · pytest · snakemake).
 
 **Decisions.** ⚠ **The seam defaults off, and that default is the argument.** ADR-0005 A10
 Pin 2 says each `MiningCandidate` "is re-resolved to nucleotides from the A1 genome FASTA

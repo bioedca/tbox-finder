@@ -45,7 +45,7 @@ import math
 import re
 import sys
 from collections.abc import Mapping, Sequence
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 from tbox_finder.mining.architecture_param_measure import portable_path
@@ -139,6 +139,37 @@ def _sha256_of(path: str | Path) -> str:
 # ═════════════════════════════════════════════════════════════════════════════
 # Reading the committed inputs (no number in this module is typed twice)
 # ═════════════════════════════════════════════════════════════════════════════
+#: The only root a round directory may have.  The comparison below is over UNEXPANDED
+#: paths — ``$HOME`` cannot be resolved from the laptop, since it is the *cluster's* home —
+#: so both sides must share one spelling or the containment test is comparing two different
+#: coordinate systems.  It also keeps the lab's absolute home directory out of a committed
+#: artifact in a public repo.
+ROUND_DIR_ROOT = "$HOME/"
+
+
+def path_segments(path: str) -> tuple[str, ...]:
+    """``$HOME/a/./b/`` → ``("$HOME", "a", "b")`` — POSIX segments, ``.`` and empties dropped.
+
+    Raw string prefixes are not a containment test: ``$HOME/tbox-scratch/./round_p3_15_supply``
+    and ``$HOME/tbox-scratch/x/../round_p3_15_supply`` both name the FP supply and neither
+    starts with its spelling (CodeRabbit CLI r6).
+
+    ``PurePosixPath`` already drops ``.`` and empty segments, so no second filter is applied
+    here — an unreachable one would read as a guard while doing nothing.  What the test pins
+    is the *behaviour*: a hand-rolled ``split("/")`` keeps both and would defeat the clause.
+    ``..`` is left in the tuple rather than resolved, because resolving it would silently
+    accept a path whose meaning depends on whether an intermediate segment exists on the
+    cluster; the callers refuse it outright.
+    """
+    return PurePosixPath(path).parts
+
+
+def paths_overlap(a: str, b: str) -> bool:
+    """Does one path contain the other (or equal it), compared segment-wise?"""
+    sa, sb = path_segments(a), path_segments(b)
+    return sa[: len(sb)] == sb or sb[: len(sa)] == sa
+
+
 def _export_item(name: str, value: str) -> str:
     """One ``NAME=value`` item for ``sbatch --export``, refusing a value its parser would split.
 
@@ -422,6 +453,12 @@ def submit_plan(
     local one — naming the laptop's home directory, which does not exist on the cluster.
     """
     n_shards = int(_require(layout, "n_shards"))
+    if not round_dir.startswith(ROUND_DIR_ROOT) or ".." in path_segments(round_dir):
+        raise RunPlanError(
+            f"round_dir {round_dir!r} must start with {ROUND_DIR_ROOT!r} and carry no '..' "
+            "segment — the FP-supply containment check compares UNEXPANDED paths, and a "
+            "path whose meaning depends on the cluster's filesystem cannot be checked here"
+        )
     shard_dir = f"{round_dir}/shards"
     staged_query_fasta = f"{round_dir}/{Path(query_fasta).name}"
     make_shards = [
@@ -584,14 +621,13 @@ def plan_clauses(
         and len(set(sharded_ids)) == len(ids),
         "array_width_covers_every_shard": layout["array_spec"] == f"0-{len(shards) - 1}"
         and int(layout["n_shards"]) == len(shards),
-        # A prefix test, not equality: `<fp>/msa` is a different string and the same supply.
-        # Read off the EXPORTED value — that is the directory the array writes into.
+        # Containment, compared SEGMENT-WISE on the EXPORTED value — that is the directory
+        # the array writes into, and `<fp>/./x` is a different string naming the same place.
+        # A `..` segment is refused rather than resolved: its meaning depends on the cluster's
+        # filesystem, which this check cannot see.
         "round_dir_is_not_the_fp_supply": bool(exported_round_dir)
-        and not (
-            exported_round_dir == FP_SUPPLY_ROUND_DIR
-            or exported_round_dir.startswith(FP_SUPPLY_ROUND_DIR.rstrip("/") + "/")
-            or FP_SUPPLY_ROUND_DIR.startswith(exported_round_dir.rstrip("/") + "/")
-        ),
+        and ".." not in path_segments(exported_round_dir)
+        and not paths_overlap(exported_round_dir, FP_SUPPLY_ROUND_DIR),
         "align_timeout_matches_the_sized_bound": exported_timeout is not None
         and _float_or_none(exported_timeout) == float(sizing["align_timeout_s"]),
         # The repo path is a git-LFS POINTER on the cluster; only the staged copy carries the
@@ -813,6 +849,7 @@ __all__ = [
     "DEFAULT_ROUND_DIR",
     "DEFAULT_SHARD_SIZE",
     "FP_SUPPLY_ROUND_DIR",
+    "ROUND_DIR_ROOT",
     "REQUIRED_PLAN_CLAUSES",
     "RunPlanError",
     "SCHEMA_VERSION",
@@ -820,6 +857,8 @@ __all__ = [
     "envelope",
     "main",
     "min_cov_reach",
+    "path_segments",
+    "paths_overlap",
     "plan",
     "plan_clauses",
     "read_certified_cutoffs",

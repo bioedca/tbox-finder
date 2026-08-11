@@ -493,6 +493,58 @@ def test_a_round_dir_that_touches_the_fp_supply_is_refused(tmp_path: Path, round
     assert result["all_pass"] is False
 
 
+@pytest.mark.parametrize(
+    "spelling",
+    [
+        "$HOME/tbox-scratch/./round_p3_15_supply",
+        "$HOME/tbox-scratch/round_p3_15_supply/./msa",
+        "$HOME/./tbox-scratch/round_p3_15_supply",
+    ],
+)
+def test_a_dot_spelled_fp_supply_is_still_the_fp_supply(tmp_path: Path, spelling: str):
+    """String prefixes are not containment: these all name the FP supply (CodeRabbit CLI r6).
+
+    Injected into the export token rather than passed to `submit_plan`, because construction
+    refuses them too — the clause has to be sound on its own, not because a sibling guard
+    happens to run first.
+    """
+    specs, kwargs = _good_clause_kwargs(tmp_path)
+    kwargs["submit"] = _submit_with_export(kwargs["submit"], "ROUND_DIR", spelling)
+    result = ccr.plan_clauses(specs, **kwargs)
+    assert result["clauses"]["round_dir_is_not_the_fp_supply"] is False
+    assert result["all_pass"] is False
+
+
+def test_a_dotdot_round_dir_is_refused_rather_than_resolved(tmp_path: Path):
+    """`..` resolves against the CLUSTER's filesystem, which this check cannot see."""
+    specs, kwargs = _good_clause_kwargs(tmp_path)
+    kwargs["submit"] = _submit_with_export(
+        kwargs["submit"], "ROUND_DIR", "$HOME/tbox-scratch/x/../round_p3_15g_control"
+    )
+    result = ccr.plan_clauses(specs, **kwargs)
+    assert result["clauses"]["round_dir_is_not_the_fp_supply"] is False
+
+
+@pytest.mark.parametrize(
+    "round_dir",
+    [
+        "$HOME/tbox-scratch/x/../round_p3_15g_control",  # meaning depends on the cluster
+        "/exports/people/x/tbox-scratch/control",  # absolute: a different coordinate system
+        "tbox-scratch/control",  # relative to what?
+    ],
+)
+def test_submit_plan_refuses_a_round_dir_it_cannot_compare(tmp_path: Path, round_dir: str):
+    with pytest.raises(ccr.RunPlanError, match="round_dir"):
+        _submit(tmp_path, round_dir=round_dir)
+
+
+def test_path_segments_and_overlap_are_symmetric_and_dot_insensitive():
+    assert ccr.path_segments("$HOME/a/./b/") == ("$HOME", "a", "b")
+    assert ccr.paths_overlap("$HOME/a/b", "$HOME/a") and ccr.paths_overlap("$HOME/a", "$HOME/a/b")
+    # The positive control: a sibling must NOT overlap, or the predicate refuses everything.
+    assert not ccr.paths_overlap("$HOME/a/b", "$HOME/a/c")
+
+
 def test_a_sibling_round_dir_is_allowed(tmp_path: Path):
     """The refusal must be about CONTAINMENT, not about sharing a prefix string."""
     specs, kwargs = _good_clause_kwargs(tmp_path, round_dir=ccr.FP_SUPPLY_ROUND_DIR + "_control")
