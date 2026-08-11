@@ -39,6 +39,18 @@ tool/subprocess/env failure (:class:`HomologDbError`) propagates and fails the w
 an env misconfiguration that silently marked every candidate ``unavailable`` would turn the round
 into the exact no-op the readiness gate exists to prevent.
 
+TWO QUERY ROUTES, ONE INSTRUMENT (P3-15'-g-iii)
+-----------------------------------------------
+:func:`search_shard` resolves a candidate's query nucleotides either from the A1 genome FASTAs at
+the manifest's coordinates (the default, A10 Pin 2's route, unchanged) or — when ``query_fasta`` is
+given — from a FASTA keyed by ``candidate_id``. Only the *query* differs: the homolog extraction,
+the D17 cutoffs, the mlocarna align, the R-scape score and the merge are the same code on both
+routes, which is what lets the matched de-novo positive control claim it ran the same instrument as
+the false-positive corpus it calibrates. The sequence route exists because a curated record's
+genomic context is not one of the 2,500 searched genomes: the coordinate route raises
+:class:`HomologDbError` on such an accession, and that exception is (deliberately) not caught
+per-candidate, so one of them would abort the entire array task.
+
 Transport is stdlib + the pandas/torch-free :mod:`homolog_msa` primitives (promote-don't-duplicate
 — this module composes them, it never re-derives a search/align/score). :mod:`covariation` (and its
 R-scape dependency) is reached only through :func:`homolog_msa.score_msa`, imported lazily inside
@@ -236,6 +248,93 @@ def _read_json(path: Path) -> dict[str, Any]:
 
 
 # ═════════════════════════════════════════════════════════════════════════════
+# The SEQUENCE route — a query FASTA instead of a genome carve (P3-15'-g-iii)
+# ═════════════════════════════════════════════════════════════════════════════
+#: ``search.json``'s record of where this run's query nucleotides came from. Written on
+#: **both** branches and on the error path: a report that cannot say which route produced
+#: its query is a report that cannot be read back.
+QUERY_ROUTE_GENOME = "genome"
+QUERY_ROUTE_FASTA = "query_fasta"
+
+
+def load_query_fasta(path: str | Path) -> dict[str, str]:
+    """Read a sequence-route query FASTA into ``candidate_id -> nucleotides``.
+
+    The defline's **first whitespace token** is the candidate id, matched **verbatim**
+    against the manifest's ``candidate_id`` — no sanitisation on either side. Sanitising to
+    match :func:`homolog_msa._safe_seq_name` would let two distinct ids (``a|b`` and
+    ``a_b``) collapse onto one key and hand one candidate the *other's* nucleotides, which
+    every downstream count would absorb silently; an id that does not match verbatim is
+    refused loudly by :func:`resolve_shard_queries` instead. A repeated id raises for the
+    same reason — a later record would otherwise overwrite an earlier one and the search
+    would run on the wrong sequence while the shard reported a full complement.
+    """
+    from tbox_finder.mining.pilot_fetch import iter_fasta_records
+
+    queries: dict[str, str] = {}
+    for header, sequence in iter_fasta_records(Path(path).read_text(encoding="utf-8")):
+        token = header.split()
+        if not token:
+            raise ProducerError(f"{path}: a FASTA record has an empty defline")
+        name = token[0]
+        if name in queries:
+            raise ProducerError(
+                f"{path}: query id {name!r} appears more than once — one record would "
+                "overwrite the other and its candidate would be searched with the wrong "
+                "sequence"
+            )
+        queries[name] = sequence
+    if not queries:
+        raise ProducerError(f"{path}: no FASTA records — an empty query supply searches nothing")
+    return queries
+
+
+def resolve_shard_queries(
+    specs: Sequence[CandidateSpec], query_fasta: str | Path
+) -> dict[str, str]:
+    """Validate this shard against the query FASTA **up front**; return its ``id -> seq`` map.
+
+    Checked once, before the first candidate's search stage, and refused as a shard-level
+    :class:`ProducerError` rather than absorbed as a per-candidate ``unavailable``, for two
+    reasons that the per-candidate branch cannot serve:
+
+    1. **A missing id is a pairing fault between two inputs, not a property of the record.**
+       The control this route exists for reads its ``unavailable`` count as *the instrument's*
+       producible share; a manifest/FASTA mismatch quietly recorded there would be published
+       as the instrument failing on records it never saw.
+    2. **A length disagreement means the query is not the locus the manifest records.** Every
+       consumer joins on ``candidate_id``/``locus_start``/``locus_end``, so a FASTA sequence
+       that is not ``locus_end - locus_start`` long is a *different* locus arriving under this
+       one's name — plausible at every downstream stage and detectable at none of them.
+
+    The alphabet gate is deliberately **not** re-spelled here: an unclean query is a property
+    of the record, and :func:`homolog_msa.search_homologs` already refuses it per candidate
+    (⇒ ``search_ok=False`` ⇒ ``unavailable`` ⇒ spared), exactly as the genome route does.
+    """
+    available = load_query_fasta(query_fasta)
+    missing = sorted({s.candidate_id for s in specs} - set(available))
+    if missing:
+        raise ProducerError(
+            f"{query_fasta}: {len(missing)} of {len(specs)} shard candidates have no query "
+            f"record (first: {missing[0]!r}) — the manifest and the query FASTA are not the "
+            "same draw"
+        )
+    mismatched = [
+        (s.candidate_id, len(available[s.candidate_id]), s.locus_end - s.locus_start)
+        for s in specs
+        if len(available[s.candidate_id]) != s.locus_end - s.locus_start
+    ]
+    if mismatched:
+        cid, got, want = mismatched[0]
+        raise ProducerError(
+            f"{query_fasta}: {len(mismatched)} query sequence(s) disagree with the manifest "
+            f"span (first: {cid!r} is {got} nt, span is {want} nt) — that query is a "
+            "different locus under this candidate's name"
+        )
+    return {s.candidate_id: available[s.candidate_id] for s in specs}
+
+
+# ═════════════════════════════════════════════════════════════════════════════
 # Stage 1 — SEARCH (runs in tbox-homology; never imports covariation/R-scape)
 # ═════════════════════════════════════════════════════════════════════════════
 def search_shard(
@@ -251,6 +350,7 @@ def search_shard(
     db_prefix: str | Path = BLAST_PREFIX,
     fm_index: str | Path = FM_INDEX,
     genome_dir: str | Path = GENOME_DIR,
+    query_fasta: str | Path | None = None,
 ) -> list[dict[str, Any]]:
     """Resolve each candidate's nucleotides, search the A1 target DB, write ``candidate``+homologs.
 
@@ -262,15 +362,33 @@ def search_shard(
     malformed candidate cannot abort the shard. A :class:`HomologDbError` (tool absent, subprocess
     crash) is an env fault affecting *every* candidate and propagates — failing loud beats marking a
     whole shard ``unavailable`` and mining nothing.
+
+    ``query_fasta`` (default ``None``) selects the **query route** and nothing else. ``None`` is the
+    coordinate route A10 Pin 2 describes: every query is re-resolved from ``genome_dir`` at its
+    manifest coordinates. A path is the **sequence route** (the job-766
+    :mod:`homolog_msa` ``seed/search/align`` path): the query nucleotides come from that FASTA,
+    keyed by ``candidate_id``, and the whole shard is validated against it before the first search
+    (:func:`resolve_shard_queries`). Everything after the query — the homolog extraction out of
+    ``genome_dir``, the cutoffs, the align, the promotion, the score, the merge — is the same code
+    on both routes, which is what lets a matched control claim it ran the same instrument. It exists
+    because a curated record's context is not one of the 2,500 searched genomes, so the coordinate
+    route raises :class:`HomologDbError` on it — an exception the per-candidate handler below does
+    **not** catch, so one such candidate would abort the whole array task.
     """
+    queries = None if query_fasta is None else resolve_shard_queries(specs, query_fasta)
+    route = QUERY_ROUTE_GENOME if queries is None else QUERY_ROUTE_FASTA
     rows: list[dict[str, Any]] = []
     for spec in specs:
         wd = candidate_workdir(workroot, spec.candidate_id)
         wd.mkdir(parents=True, exist_ok=True)
         t0 = time.perf_counter()
         try:
-            cand_seq = resolve_candidate_sequence(
-                genome_dir, spec.accession, spec.locus_start, spec.locus_end
+            cand_seq = (
+                queries[spec.candidate_id]
+                if queries is not None
+                else resolve_candidate_sequence(
+                    genome_dir, spec.accession, spec.locus_start, spec.locus_end
+                )
             )
             write_fasta_record(spec.candidate_id, cand_seq, wd / "candidate.fa")
             report = search_homologs(
@@ -297,6 +415,7 @@ def search_shard(
                 "error": str(exc),
             }
         report[CANDIDATE_ID_KEY] = spec.candidate_id
+        report["query_route"] = route
         report["search_wall_s"] = round(time.perf_counter() - t0, 4)
         (wd / "search.json").write_text(
             json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8"
@@ -628,9 +747,14 @@ def _cmd_search_shard(args: argparse.Namespace) -> int:
         db_prefix=args.db_prefix,
         fm_index=args.fm_index,
         genome_dir=args.genome_dir,
+        query_fasta=args.query_fasta,
     )
     n_ok = sum(1 for r in rows if r.get("sufficient"))
-    print(f"search-shard: {len(rows)} candidates, {n_ok} with a sufficient homolog set")
+    route = rows[0]["query_route"] if rows else QUERY_ROUTE_GENOME
+    print(
+        f"search-shard: {len(rows)} candidates, {n_ok} with a sufficient homolog set "
+        f"(query route: {route})"
+    )
     return 0
 
 
@@ -724,6 +848,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     p_search.add_argument("--db-prefix", default=BLAST_PREFIX)
     p_search.add_argument("--fm-index", default=FM_INDEX)
     p_search.add_argument("--genome-dir", default=GENOME_DIR)
+    p_search.add_argument(
+        "--query-fasta",
+        default=None,
+        help="SEQUENCE route: take each candidate's query nucleotides from this FASTA "
+        "(keyed by candidate_id) instead of carving them out of --genome-dir at the "
+        "manifest's coordinates. Omit for the coordinate route (unchanged). The homolog "
+        "extraction still reads --genome-dir on both routes.",
+    )
     p_search.set_defaults(func=_cmd_search_shard)
 
     p_align = sub.add_parser("align-shard", help="STAGE 2 (tbox-locarna): mlocarna align")
@@ -771,17 +903,21 @@ __all__ = [
     "CANDIDATE_ID_KEY",
     "CandidateSpec",
     "ProducerError",
+    "QUERY_ROUTE_FASTA",
+    "QUERY_ROUTE_GENOME",
     "SCHEMA_VERSION",
     "STEP",
     "align_shard",
     "candidate_slug",
     "candidate_workdir",
+    "load_query_fasta",
     "load_status_map",
     "main",
     "measure_report",
     "merge_status_tables",
     "partition_shards",
     "read_candidate_manifest",
+    "resolve_shard_queries",
     "score_shard",
     "search_shard",
     "select_sample",

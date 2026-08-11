@@ -5405,7 +5405,7 @@ record-level n, not the query count. The producer leg — `nhmmer` + `mlocarna` 
 via the **sequence route**, under `ALIGN_TIMEOUT_S = 600` — is the next step and still owes a §9.3
 submit-ack. Cross-links ADR-0004 D3/D5, ADR-0005 A7/A9 Pin 3, ADR-0006 A2/A4.
 
-**Commit.** `PENDING`
+**Commit.** `4b4674f`
 
 **Review addendum (P3-15′-g-ii).** The `CodeRabbit` GitHub check read **`pass` with a body of only
 a rate-limit notice** for the whole step — §5.1's trap, **an absence, not a pass**, fifteenth step
@@ -5428,3 +5428,83 @@ Every headline number survived the round unchanged. The duplicate-digest rule wa
 pure function because the local test env has pandas but **no pyarrow**: the rule is tested
 everywhere, its call site is a **CI-only** parquet test, and that call site was additionally
 verified by direct execution in `tbox-finder-data` — a skip is not a pass.
+
+## Step P3-15′-g-iii — 2026-08-11: the control's producer run — the sequence-route seam, the array sizing, and the submit it stops at
+
+**Inputs.** `data/processed/mining/curated_control_manifest_v0.json` (317 queries over 160
+held-out curated records, P3-15′-g-ii) · `curated_control_queries_v0.fasta` (the same 317) ·
+`reports/p3/curated_control_sizing.json` (P3-15′-g's envelope: `worst_case_per_candidate_s`
+714.6, shard 20, cpus 2, `ALIGN_TIMEOUT_S` 600) · `reports/p3/curated_control_detect.json`
+(query median 104 nt against the FP median 110) · `reports/p2/homolog_msa_search_report.json`
+(job 766's certified `nhmmer` config) · `slurm/p2/mine_round_producer.sbatch` (the array that
+ran the full-corpus FP supply, jobs 1205/1254) · ADR-0005 A10; ADR-0006 A2/A3/A4, D17.
+
+**Process.** The producer resolved every query from the A1 genome FASTAs at manifest
+coordinates, unconditionally, so a curated-frame accession raised `HomologDbError` — an
+exception the per-candidate handler deliberately does *not* catch, which would have aborted
+the whole array task. `covariation_producer.search_shard` now takes an optional
+`query_fasta` (`src/tbox_finder/mining/covariation_producer.py`): `None` is the coordinate
+route unchanged, a path is the **sequence route** (the job-766 `homolog_msa` seed/search/align
+path) with the query nucleotides keyed by `candidate_id`. Only the query moves — the homolog
+extraction still reads `--genome-dir`, and the cutoffs, `mlocarna` align, promotion, R-scape
+score and merge are the same code on both routes, which is the whole content of "the control
+ran the same instrument". `resolve_shard_queries` validates the **whole shard up front**,
+before the first candidate's search, and refuses as a shard-level error rather than absorbing
+a mismatch as a per-candidate `unavailable`. The sbatch gains an optional `QUERY_FASTA`
+export (empty ⇒ byte-identical behaviour) guarded beside the cheap `ALIGN_TIMEOUT_S` checks —
+a *sibling* script would have had to duplicate the promotion loop, the marker discipline and
+the D17 cutoffs, and "the same instrument" would then have meant "a copy of it".
+`src/tbox_finder/mining/curated_control_run.py::plan` derives the run: the array width from
+the manifest's own count through the **shipped** `partition_shards`, the worst case from the
+sizing report, the wall limit and cutoffs parsed out of the sbatch's own bytes, and the exact
+token list of the two commands the ack authorizes.
+
+**Outputs.** `covariation_producer.load_query_fasta` / `resolve_shard_queries` / the
+`query_fasta` seam + `--query-fasta` + a `query_route` field in every `search.json` row ·
+`slurm/p2/mine_round_producer.sbatch` (`QUERY_FASTA` route) ·
+`src/tbox_finder/mining/curated_control_run.py` ·
+`reports/p3/curated_control_run_plan.json` (`pins_nothing: true`) ·
+`tests/unit/test_curated_control_run.py` (45 tests) + 12 seam tests in
+`tests/unit/test_covariation_producer.py`. **The run is NOT submitted: the §9.3 ack is the
+open stop.** No DVC object; no ADR amendment.
+
+**The sizing, re-derived rather than quoted.** 317 queries at shard 20 ⇒ **16 tasks**
+(`--array=0-15`), shards of 20/19 — not `-g`'s 10, which was sized on K = 200 *records*
+before the queries existed. Worst case **3.97 h/task** (20 × (search_max 114.2 s +
+`ALIGN_TIMEOUT_S` 600 s + score_max 0.4 s)) against the 12 h wall, ⇒ **≤ 127.04 core-h**,
+expected ≈ **3.0 core-h**, **0 GPU-h**. The bound contains the align timeout by construction
+and extrapolates nothing; only the expectation carries P3-15′-g's own caveat about FP wall on
+a curated population, and it is carried verbatim rather than paraphrased.
+
+**Validation.** `tests/unit` + `tests/golden` under deterministic ordering against a matched
+`main` baseline at `4b4674f`: **ZERO new failures** — worktree **13** FAILED, main **26**, a
+strict subset; the delta is 13 tests moving from FAILED to **SKIPPED** on DVC/LFS inputs a
+fresh worktree does not materialise (+1 more in `test_split_table_schema` for the same
+reason), with both `^FAILED` sets ANSI-stripped and cross-checked against the summary line,
+and a collection diff proving no existing test was dropped (15 → 27 in the producer's suite,
+45 new). **57 tests added; 28 sabotages, all RED against their NAMED test, plus 2 negative
+controls that stay green.** The report **re-derives byte-identically** apart from
+`provenance.generated_at_utc`. `ruff` + `black` + `bash -n` clean.
+
+**Decisions.** ⚠ **The seam defaults off, and that default is the argument.** ADR-0005 A10
+Pin 2 says each `MiningCandidate` "is re-resolved to nucleotides from the A1 genome FASTA
+before search"; with `query_fasta=None` that stays literally true of every mining path, and
+the control is not a mining round — it scores nothing into a hard-negative pool. **No ADR is
+amended**, and the point is flagged here rather than absorbed. ⚠ **A missing or wrong-length
+query is refused loudly, not spared.** The fail-closed convention routes a *record's* defect
+to `unavailable` ⇒ spared; a manifest/FASTA mismatch is a **pairing fault between two
+inputs**, and this control reads its `unavailable` count as the instrument's producible
+share — so absorbing one would publish a plumbing error as a measurement. A sequence of the
+wrong length is the sharper half: it is a *different locus* arriving under this candidate's
+name, plausible at every downstream stage and detectable at none. ⚠ **A new `ROUND_DIR`, and
+a clause that enforces it.** The control's consensuses must not be promoted into
+`round_p3_15_supply`, which the P3-15′-f sweep reads whole; the clause refuses the FP dir, any
+subdirectory of it, and any parent of it, since each would merge the two supplies. ⚠
+**`--min-cov 0.5` is left where D17 froze it, and the re-check is recorded as nucleotides**:
+0.5 × 104 nt = **52 nt** demanded of a hit at the control's median query against **55 nt** at
+the FP median. The two populations are 6 nt apart — which is what the `-g-ii` re-detect was
+for — so moving the cutoff for the control is what would make it a different instrument.
+⚠ **Independent observations are the 160 records, not the 317 queries**, and the plan says so
+in the artifact rather than in prose alone. Cross-links ADR-0005 A10, ADR-0006 A2/A3/A4, D17.
+
+**Commit.** `PENDING`

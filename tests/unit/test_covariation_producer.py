@@ -187,6 +187,264 @@ def test_search_shard_propagates_env_fault(tmp_path: Path, monkeypatch: pytest.M
 
 
 # --------------------------------------------------------------------------- #
+# The SEQUENCE route (P3-15'-g-iii) — the query comes from a FASTA, nothing else moves
+# --------------------------------------------------------------------------- #
+def _query_fasta(tmp_path: Path, records: list[tuple[str, str]], name: str = "q.fa") -> Path:
+    path = tmp_path / name
+    path.write_text("".join(f">{h}\n{s}\n" for h, s in records), encoding="utf-8")
+    return path
+
+
+def test_load_query_fasta_keys_on_the_first_defline_token(tmp_path: Path):
+    fasta = _query_fasta(tmp_path, [("GCA_1.1:c0:0-4 some description", "ACGT")])
+    assert cp.load_query_fasta(fasta) == {"GCA_1.1:c0:0-4": "ACGT"}
+
+
+def test_load_query_fasta_refuses_a_repeated_id(tmp_path: Path):
+    # A dict build would take the LAST record and the shard would still look complete, so the
+    # candidate would be searched with another record's nucleotides and every count would agree.
+    fasta = _query_fasta(tmp_path, [("dup", "ACGT"), ("dup", "TTTT")])
+    with pytest.raises(cp.ProducerError, match="more than once"):
+        cp.load_query_fasta(fasta)
+
+
+def test_load_query_fasta_refuses_an_empty_supply(tmp_path: Path):
+    with pytest.raises(cp.ProducerError):
+        cp.load_query_fasta(_query_fasta(tmp_path, []))
+
+
+def test_resolve_shard_queries_refuses_a_candidate_with_no_query(tmp_path: Path):
+    specs = [
+        _spec("GCA_1.1:c0:0-4", "GCA_1.1:c0", 0, 4),
+        _spec("GCA_2.1:c0:0-4", "GCA_2.1:c0", 0, 4),
+    ]
+    fasta = _query_fasta(tmp_path, [("GCA_1.1:c0:0-4", "ACGT")])
+    with pytest.raises(cp.ProducerError, match="not the same draw"):
+        cp.resolve_shard_queries(specs, fasta)
+
+
+def test_resolve_shard_queries_refuses_a_length_disagreement(tmp_path: Path):
+    # The dangerous case: a plausible sequence of the WRONG length is a different locus
+    # arriving under this candidate's name, and nothing downstream can see it.
+    specs = [_spec("GCA_1.1:c0:0-4", "GCA_1.1:c0", 0, 4)]
+    fasta = _query_fasta(tmp_path, [("GCA_1.1:c0:0-4", "ACGTACGT")])
+    with pytest.raises(cp.ProducerError, match="different locus"):
+        cp.resolve_shard_queries(specs, fasta)
+
+
+def test_resolve_shard_queries_returns_only_this_shards_queries(tmp_path: Path):
+    specs = [_spec("GCA_1.1:c0:0-4", "GCA_1.1:c0", 0, 4)]
+    fasta = _query_fasta(tmp_path, [("GCA_1.1:c0:0-4", "ACGT"), ("GCA_9.1:c0:0-4", "TTTT")])
+    assert cp.resolve_shard_queries(specs, fasta) == {"GCA_1.1:c0:0-4": "ACGT"}
+
+
+def _capture_search(monkeypatch: pytest.MonkeyPatch, seen: list):
+    """Stand in for the nhmmer stage and record what query it was handed."""
+
+    def _fake(**kwargs):
+        from tbox_finder.mining.homolog_msa import read_single_sequence
+
+        name, seq = read_single_sequence(kwargs["candidate_fasta"])
+        seen.append((name, seq))
+        Path(kwargs["out_fasta"]).write_text(f">candidate\n{seq}\n", encoding="utf-8")
+        return {"sufficient": True, "n_homologs": 42, "n_records": 43}
+
+    monkeypatch.setattr(cp, "search_homologs", _fake)
+
+
+def test_search_shard_default_route_carves_the_query_out_of_the_genome(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """The positive control for the seam's default: `query_fasta=None` is unchanged behaviour."""
+    gdir = _genome(tmp_path)  # one 80-nt contig of ACGT repeats
+    seen: list = []
+    _capture_search(monkeypatch, seen)
+    rows = cp.search_shard(
+        [_spec("GCA_1.1:c0:0-8", "GCA_1.1:c0", 0, 8)],
+        workroot=tmp_path / "work",
+        engine="nhmmer",
+        evalue=100.0,
+        max_target_seqs=500,
+        min_pident=40.0,
+        min_cov=0.5,
+        genome_dir=gdir,
+    )
+    assert seen[0][1] == "ACGTACGT"  # the genome carve, not a FASTA
+    assert rows[0]["query_route"] == cp.QUERY_ROUTE_GENOME
+
+
+def test_search_shard_sequence_route_takes_the_query_from_the_fasta(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """The whole point: an accession that is NOT in the genome dir still searches.
+
+    The coordinate route raises on it — that is why a curated-frame candidate aborts the
+    array task today — so a green result here can only come from the FASTA.
+    """
+    gdir = _genome(tmp_path)
+    spec = cp.CandidateSpec(
+        candidate_id="abc123:c0:100-108", accession="abc123:c0", locus_start=100, locus_end=108
+    )
+    fasta = _query_fasta(tmp_path, [(spec.candidate_id, "TTTTGGGG")])
+    seen: list = []
+    _capture_search(monkeypatch, seen)
+    rows = cp.search_shard(
+        [spec],
+        workroot=tmp_path / "work",
+        engine="nhmmer",
+        evalue=100.0,
+        max_target_seqs=500,
+        min_pident=40.0,
+        min_cov=0.5,
+        genome_dir=gdir,
+        query_fasta=fasta,
+    )
+    assert seen[0] == (spec.candidate_id, "TTTTGGGG")
+    assert rows[0]["query_route"] == cp.QUERY_ROUTE_FASTA and rows[0]["search_ok"] is True
+    # The candidate FASTA the align stage reads carries the same query.
+    wd = cp.candidate_workdir(tmp_path / "work", spec.candidate_id)
+    assert "TTTTGGGG" in (wd / "candidate.fa").read_text()
+
+
+def test_search_shard_validates_the_whole_shard_before_the_first_search(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Position, not merely presence: the refusal must precede the ~2 min/candidate search.
+
+    A per-candidate check would spend the first candidates' search stages and then die — and
+    on the fail-closed path it would not die at all, it would record the missing ones as
+    `unavailable`, publishing a plumbing error as the instrument's producible share.
+    """
+    gdir = _genome(tmp_path)
+    good = cp.CandidateSpec(candidate_id="a:c0:0-4", accession="a:c0", locus_start=0, locus_end=4)
+    bad = cp.CandidateSpec(candidate_id="b:c0:0-4", accession="b:c0", locus_start=0, locus_end=4)
+    fasta = _query_fasta(tmp_path, [("a:c0:0-4", "ACGT")])  # `b` is absent
+    seen: list = []
+    _capture_search(monkeypatch, seen)
+    with pytest.raises(cp.ProducerError):
+        cp.search_shard(
+            [good, bad],
+            workroot=tmp_path / "work",
+            engine="nhmmer",
+            evalue=100.0,
+            max_target_seqs=500,
+            min_pident=40.0,
+            min_cov=0.5,
+            genome_dir=gdir,
+            query_fasta=fasta,
+        )
+    assert seen == [], "the shard searched a candidate before validating its query supply"
+
+
+def test_cli_search_shard_forwards_the_query_fasta(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """The sbatch passes `--query-fasta`; a CLI that dropped it would take the genome route.
+
+    That failure is silent in the only way that matters: on a curated-frame accession the
+    genome route raises `HomologDbError`, which aborts the array task — after the queue wait.
+    """
+    manifest = tmp_path / "shard.json"
+    cp.write_candidate_manifest([_spec("a:c0:0-4", "a:c0", 0, 4)], manifest)
+    seen: dict = {}
+
+    def _fake_search_shard(specs, **kwargs):
+        seen.update(kwargs)
+        # The real function's row shape — the CLI's summary line reads `query_route` off it.
+        return [
+            {
+                cp.CANDIDATE_ID_KEY: s.candidate_id,
+                "sufficient": True,
+                "query_route": cp.QUERY_ROUTE_FASTA,
+            }
+            for s in specs
+        ]
+
+    monkeypatch.setattr(cp, "search_shard", _fake_search_shard)
+    rc = cp.main(
+        [
+            "search-shard",
+            "--shard",
+            str(manifest),
+            "--workroot",
+            str(tmp_path / "work"),
+            "--engine",
+            "nhmmer",
+            "--evalue",
+            "100",
+            "--max-target-seqs",
+            "500",
+            "--min-pident",
+            "40",
+            "--min-cov",
+            "0.5",
+            "--query-fasta",
+            "queries.fa",
+        ]
+    )
+    assert rc == 0 and seen["query_fasta"] == "queries.fa"
+
+
+def test_cli_search_shard_defaults_the_query_fasta_to_none(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """The positive control for the seam's default — omitting it must mean the genome route."""
+    manifest = tmp_path / "shard.json"
+    cp.write_candidate_manifest([_spec("a:c0:0-4", "a:c0", 0, 4)], manifest)
+    seen: dict = {}
+
+    def _fake_search_shard(specs, **kwargs):
+        seen.update(kwargs)
+        return []
+
+    monkeypatch.setattr(cp, "search_shard", _fake_search_shard)
+    cp.main(
+        [
+            "search-shard",
+            "--shard",
+            str(manifest),
+            "--workroot",
+            str(tmp_path / "work"),
+            "--engine",
+            "nhmmer",
+            "--evalue",
+            "100",
+            "--max-target-seqs",
+            "500",
+            "--min-pident",
+            "40",
+            "--min-cov",
+            "0.5",
+        ]
+    )
+    assert seen["query_fasta"] is None
+
+
+def test_search_shard_records_the_route_on_the_fail_closed_branch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """A not-producible candidate still says which route produced (or failed to produce) it."""
+    gdir = _genome(tmp_path)
+    spec = cp.CandidateSpec(candidate_id="a:c0:0-4", accession="a:c0", locus_start=0, locus_end=4)
+    fasta = _query_fasta(tmp_path, [("a:c0:0-4", "ACGT")])
+
+    def _unclean(**_kwargs):
+        raise HomologMsaError("candidate is not a clean nucleotide sequence")
+
+    monkeypatch.setattr(cp, "search_homologs", _unclean)
+    rows = cp.search_shard(
+        [spec],
+        workroot=tmp_path / "work",
+        engine="nhmmer",
+        evalue=100.0,
+        max_target_seqs=500,
+        min_pident=40.0,
+        min_cov=0.5,
+        genome_dir=gdir,
+        query_fasta=fasta,
+    )
+    assert rows[0]["search_ok"] is False and rows[0]["query_route"] == cp.QUERY_ROUTE_FASTA
+
+
+# --------------------------------------------------------------------------- #
 # align_shard — both fail-closed branches (no MSA written ⇒ score reads unavailable ⇒ spared)
 # --------------------------------------------------------------------------- #
 def test_align_shard_skips_insufficient_homologs(tmp_path: Path):

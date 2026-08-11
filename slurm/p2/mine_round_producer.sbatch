@@ -41,12 +41,26 @@
 # longer --time is not a fix. ALIGN_TIMEOUT_S bounds each alignment; exceeding it leaves no MSA ⇒
 # `unavailable` ⇒ SPARED (ADR-0005 D14), which costs yield and never correctness.
 #
+# ⚠ OPTIONAL SEQUENCE ROUTE — `QUERY_FASTA` (P3-15'-g-iii). Unset or empty (every run so far) ⇒
+# nothing changes: each query is re-resolved from $GENOME_DIR at its manifest coordinates, A10
+# Pin 2's route. Set ⇒ the shard's queries come from that FASTA keyed by candidate_id and ONLY the
+# query changes — homolog extraction, cutoffs, align, promotion, score and merge are the same bytes,
+# which is what lets the matched positive control claim it ran this instrument rather than one like
+# it. It exists because a curated record's context is not one of the 2,500 searched genomes, so the
+# coordinate route raises HomologDbError on it and that exception aborts the whole array task.
+#
 # ── SUBMITTED BY mine_round.sbatch (leg c) with --export ROUND/SHARD_DIR/ROUND_DIR/ALIGN_TIMEOUT_S
 # and --array=0-(W-1).
 # Standalone (debug) submit:
 #   `sbatch --array=0-0 --export=ALL,SHARD_DIR=…,ROUND_DIR=…,ALIGN_TIMEOUT_S=600 mine_round_producer.sbatch`
+# Curated-control submit (P3-15'-g-iii; the token list is DERIVED, not typed — see
+#   `reports/p3/curated_control_run_plan.json`, which re-derives it from the committed manifest on
+#   every run, and `python -m tbox_finder.mining.curated_control_run plan` to regenerate it):
+#   make-shards first, into the control's OWN scratch ROUND_DIR (never the FP supply's — the
+#   control's consensuses must not be mixed into the supply the P3-15'-f sweep reads), then submit.
 # VERIFY (artifact-based, §9.3): every task's $ROUND_DIR/status/shard_<t>.SHARD_OK present + its .err
 #   zero bytes; the retrain leg (d) merges the per-shard status tables and fails loud on a gap.
+#   ⚠ A standalone run has NO leg (d): count the SHARD_OK markers against the shard files yourself.
 
 #SBATCH --job-name=tbox-p2-10e-producer
 #SBATCH --partition=gpu
@@ -81,6 +95,18 @@ case "$ALIGN_TIMEOUT_S" in
 esac
 if [ -z "${ALIGN_TIMEOUT_S//[0.]/}" ]; then
   echo "FATAL: ALIGN_TIMEOUT_S must be > 0 (got '$ALIGN_TIMEOUT_S'); a zero bound spares every candidate" >&2; exit 2
+fi
+# ⚠ OPTIONAL, AND ITS DEFAULT IS THE WHOLE POINT: empty ⇒ the coordinate route, byte-for-byte what
+# every previous run did. A non-empty value is checked HERE, beside the other cheap guards and
+# before the ~37 min search stage, because `--query-fasta` on a missing path would otherwise be
+# argparse-valid and die inside the producer only after that stage was spent — and because a shard
+# that silently searched nothing would resolve every candidate `unavailable`, which reads exactly
+# like an honest not-producible round. Validated as a NON-EMPTY FILE, not merely as present.
+QUERY_FASTA="${QUERY_FASTA:-}"
+SEARCH_QUERY_ARGS=()
+if [ -n "$QUERY_FASTA" ]; then
+  [ -s "$QUERY_FASTA" ] || { echo "FATAL: QUERY_FASTA='$QUERY_FASTA' is missing or empty (sequence route requested)" >&2; exit 2; }
+  SEARCH_QUERY_ARGS=(--query-fasta "$QUERY_FASTA")
 fi
 # Zero-pad the task id to match make-shards' `shard_{i:03d}.json` (covariation_producer.py:199).
 # Build these paths with plain interpolation, NOT `$(printf …)`: the tracked-path gate
@@ -121,7 +147,8 @@ PYTHONHASHSEED=0 PYTHONPATH=src python -m tbox_finder.mining.covariation_produce
   --shard "$SHARD" --workroot "$BUILD/work" --engine "$CTRL_ENGINE" \
   --evalue "$CTRL_EVALUE" --max-target-seqs "$CTRL_MAX_TARGET_SEQS" \
   --min-pident "$CTRL_MIN_PIDENT" --min-cov "$CTRL_MIN_COV" \
-  --db-prefix "$BLAST_PREFIX" --fm-index "$FM_INDEX" --genome-dir "$GENOME_DIR"
+  --db-prefix "$BLAST_PREFIX" --fm-index "$FM_INDEX" --genome-dir "$GENOME_DIR" \
+  "${SEARCH_QUERY_ARGS[@]}"
 
 # ── STAGE 2: ALIGN (tbox-locarna) ────────────────────────────────────────────────────────────────
 conda activate tbox-locarna
