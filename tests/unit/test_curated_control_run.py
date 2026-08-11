@@ -316,6 +316,10 @@ def test_submit_plan_stages_the_query_fasta_out_of_the_checkout(tmp_path: Path):
     assert staging["staged_query_fasta"] == plan["round_dir"] + "/q.fasta"
     assert staging["query_fasta_sha256"] == "0" * 64
     assert "sha256sum" in staging["verify_command"]
+    # ⚠ BOTH must run ON THE CLUSTER: as local commands they would create a local directory
+    # and hash a local file, reporting agreement about a file the run never reads.
+    assert staging["mkdir_command"].startswith("ssh two ")
+    assert staging["verify_command"].startswith("ssh two ")
     # ⚠ MEASURED 2026-08-11: an rsync remote path is not run through a remote shell, so a
     # `two:'$HOME/…'` destination sends the four literal characters `$HOME` and fails with
     # "change_dir … No such file or directory". rsync resolves a RELATIVE remote path against
@@ -505,6 +509,18 @@ def test_read_sbatch_ignores_a_cutoff_restated_in_a_comment(tmp_path: Path):
         encoding="utf-8",
     )
     assert ccr.read_sbatch(path)["cutoffs"]["min_cov"] == 0.5
+
+
+def test_read_sbatch_does_not_read_the_sequence_route_out_of_a_comment(tmp_path: Path):
+    """A comment mentioning the argument would otherwise certify a script that never passes it."""
+    path = tmp_path / "commented_route.sbatch"
+    path.write_text(
+        _HEADERS + 'CTRL_ENGINE="nhmmer"; CTRL_EVALUE="100"; CTRL_MAX_TARGET_SEQS="500"; '
+        'CTRL_MIN_PIDENT="40"; CTRL_MIN_COV="0.5"\n'
+        '# the search stage takes "${SEARCH_QUERY_ARGS[@]}" and --query-fasta\n',
+        encoding="utf-8",
+    )
+    assert ccr.read_sbatch(path)["passes_query_fasta_argument"] is False
 
 
 def test_read_sbatch_sees_a_missing_sequence_route(tmp_path: Path):

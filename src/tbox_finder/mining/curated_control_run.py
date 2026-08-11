@@ -353,10 +353,8 @@ def read_sbatch(path: str | Path = DEFAULT_SBATCH) -> dict[str, Any]:
     # The strip is QUOTE-AWARE rather than a `split("#")`: a `#` inside a quoted value is part
     # of the value, and truncating there would corrupt the very number this parse exists to
     # read. The `#SBATCH` headers are parsed from the RAW text above — they are comments.
-    assigned = {
-        m.group("name"): m.group("value")
-        for m in _SBATCH_ASSIGNMENT.finditer(strip_shell_comments(text))
-    }
+    stripped = strip_shell_comments(text)
+    assigned = {m.group("name"): m.group("value") for m in _SBATCH_ASSIGNMENT.finditer(stripped)}
     missing = [k for k in SBATCH_CUTOFF_KEYS if k not in assigned]
     if missing:
         raise RunPlanError(
@@ -383,7 +381,12 @@ def read_sbatch(path: str | Path = DEFAULT_SBATCH) -> dict[str, Any]:
         # the search stage, and the argument that actually reaches the producer. Either one
         # alone would let a plan be written against an sbatch that cannot run it.
         "has_query_fasta_guard": "QUERY_FASTA" in assigned,
-        "passes_query_fasta_argument": "SEARCH_QUERY_ARGS[@]" in text and "--query-fasta" in text,
+        # ⚠ The STRIPPED source, for the same reason the cutoffs use it: this file is mostly
+        # prose, and a comment mentioning `--query-fasta` would make the clause
+        # `sbatch_carries_the_sequence_route` pass for a script that never passes the argument
+        # (CodeRabbit CLI r11).
+        "passes_query_fasta_argument": "SEARCH_QUERY_ARGS[@]" in stripped
+        and "--query-fasta" in stripped,
     }
 
 
@@ -588,7 +591,12 @@ def submit_plan(
             ),
             "staged_query_fasta": staged_query_fasta,
             "query_fasta_sha256": query_fasta_sha256,
-            "mkdir_command": f"mkdir -p {round_dir}",
+            # ⚠ REMOTE, BOTH OF THEM. The directory must exist on `two` before rsync writes
+            # into it, and the digest must be taken of the STAGED file — as published without
+            # the `ssh`, `mkdir` would create a local directory and `sha256sum` would hash a
+            # local path, reporting agreement about a file the run will never read. `$HOME`
+            # stays inside single quotes so the REMOTE shell expands it (CodeRabbit CLI r11).
+            "mkdir_command": f"ssh two 'mkdir -p \"{round_dir}\"'",
             # ⚠ TWO SPELLINGS OF ONE PATH, AND THE DIFFERENCE IS MEASURED, NOT STYLISTIC.
             # An rsync remote path is NOT run through a remote shell: `two:'$HOME/x'` sends the
             # four literal characters `$HOME` and fails with "change_dir … No such file or
@@ -614,7 +622,8 @@ def submit_plan(
             # DOUBLE quotes, not shlex.quote: this path carries `$HOME`, which the remote
             # shell must expand — single quotes would make it a literal directory name.
             "verify_command": (
-                f'sha256sum "{staged_query_fasta}"  # must equal query_fasta_sha256 above'
+                f"ssh two 'sha256sum \"{staged_query_fasta}\"'"
+                "  # must equal query_fasta_sha256 above"
             ),
         },
         "make_shards_argv": make_shards,
