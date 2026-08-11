@@ -464,6 +464,33 @@ def test_read_sbatch_refuses_when_any_single_cutoff_moves(tmp_path: Path, droppe
         ccr.read_sbatch(path)
 
 
+def test_strip_shell_comments_is_quote_aware():
+    """A `#` inside a quoted value is part of the value; cutting there rewrites the cutoff."""
+    assert ccr.strip_shell_comments('A="1"  # note; B="2"').strip() == 'A="1"'
+    assert ccr.strip_shell_comments('A="a#b"  # tail').strip() == 'A="a#b"'
+    assert ccr.strip_shell_comments("# whole line").strip() == ""
+    # The positive control: a stripper that returned "" for everything would pass the above.
+    assert ccr.strip_shell_comments('A="1"; B="2"').strip() == 'A="1"; B="2"'
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        '# was tried and rejected; CTRL_MIN_COV="0.9"',  # a full-line comment
+        'CTRL_ENGINE="nhmmer"  # rejected; CTRL_MIN_COV="0.9"',  # a TRAILING one
+    ],
+)
+def test_read_sbatch_ignores_a_cutoff_restated_in_a_comment_line(tmp_path: Path, line: str):
+    """Either spelling would otherwise be scanned as a later assignment and SHADOW the live one."""
+    path = tmp_path / "commented.sbatch"
+    path.write_text(
+        _HEADERS + 'CTRL_ENGINE="nhmmer"; CTRL_EVALUE="100"; CTRL_MAX_TARGET_SEQS="500"; '
+        'CTRL_MIN_PIDENT="40"; CTRL_MIN_COV="0.5"\n' + line + "\n",
+        encoding="utf-8",
+    )
+    assert ccr.read_sbatch(path)["cutoffs"]["min_cov"] == 0.5
+
+
 def test_read_sbatch_ignores_a_cutoff_restated_in_a_comment(tmp_path: Path):
     """A `;` inside prose would otherwise be scanned as an assignment and SHADOW the live one.
 

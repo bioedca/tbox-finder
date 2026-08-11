@@ -213,6 +213,28 @@ def _home_relative(path: str) -> str:
     return path[len(prefix) :] if path.startswith(prefix) else path
 
 
+def strip_shell_comments(text: str) -> str:
+    """Drop `#`-comments from shell source, respecting double quotes.
+
+    A `#` inside `"…"` is part of a value, not a comment: cutting there would silently rewrite
+    the cutoff this module publishes. Single quotes are not tracked because the sbatch's
+    constants are double-quoted throughout, and a scan that pretended otherwise would be
+    claiming a generality it has not been tested for.
+    """
+    out: list[str] = []
+    for line in text.splitlines():
+        in_quote = False
+        cut = len(line)
+        for i, ch in enumerate(line):
+            if ch == '"':
+                in_quote = not in_quote
+            elif ch == "#" and not in_quote:
+                cut = i
+                break
+        out.append(line[:cut])
+    return "\n".join(out)
+
+
 def _float_or_none(text: str) -> float | None:
     """``float(text)`` or ``None`` — an unparseable exported value must FAIL its clause.
 
@@ -324,13 +346,17 @@ def read_sbatch(path: str | Path = DEFAULT_SBATCH) -> dict[str, Any]:
             f"{portable_path(path)}: no `#SBATCH --cpus-per-task=` and/or `--error=` header — "
             "the core-hour multiplier and the §9.3 step-8 evidence path are read from them"
         )
-    # ⚠ COMMENT LINES ARE DROPPED FIRST. The pattern also matches after a `;`, and a `;` can
-    # sit inside a comment — so a cutoff restated in prose ("…; CTRL_MIN_COV=\"0.9\"") would be
-    # scanned as an assignment and, being later in the file, would SHADOW the live value. This
-    # file is mostly prose, so that is a realistic edit, and the published cutoffs would then
-    # describe a run nobody configured (CodeRabbit CLI r9).
-    code = "\n".join(ln for ln in text.splitlines() if not ln.lstrip().startswith("#"))
-    assigned = {m.group("name"): m.group("value") for m in _SBATCH_ASSIGNMENT.finditer(code)}
+    # ⚠ COMMENTS ARE STRIPPED FIRST — FULL-LINE **AND** TRAILING. The assignment pattern also
+    # matches after a `;`, and this file is mostly prose, so `CTRL_MIN_COV="0.5"  # rejected;
+    # CTRL_MIN_COV="0.9"` would be scanned as a later assignment and SHADOW the live value,
+    # publishing cutoffs that describe a run nobody configured (CodeRabbit CLI r9, r10).
+    # The strip is QUOTE-AWARE rather than a `split("#")`: a `#` inside a quoted value is part
+    # of the value, and truncating there would corrupt the very number this parse exists to
+    # read. The `#SBATCH` headers are parsed from the RAW text above — they are comments.
+    assigned = {
+        m.group("name"): m.group("value")
+        for m in _SBATCH_ASSIGNMENT.finditer(strip_shell_comments(text))
+    }
     missing = [k for k in SBATCH_CUTOFF_KEYS if k not in assigned]
     if missing:
         raise RunPlanError(
@@ -977,6 +1003,7 @@ __all__ = [
     "read_query_lengths",
     "read_sbatch",
     "read_sizing",
+    "strip_shell_comments",
     "shard_layout",
     "submit_plan",
 ]
