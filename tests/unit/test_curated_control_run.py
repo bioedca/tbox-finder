@@ -426,7 +426,10 @@ def test_read_sizing_reads_the_committed_report():
 def test_read_query_lengths_reads_both_populations():
     lengths = ccr.read_query_lengths(REPO_ROOT / ccr.DEFAULT_DETECT_REPORT)
     assert lengths["query_length_nt"]["p50"] > 0 and lengths["fp_length_nt"]["p50"] > 0
-    assert 0 < lengths["n_records_with_a_query"] <= lengths["n_records_scanned"]
+    # The source counts WINDOWS; publishing that under a record-level name would assert a
+    # relation this report cannot see (CodeRabbit CLI r7).
+    assert 0 < lengths["n_records_with_a_query"] <= lengths["n_windows_scanned"]
+    assert "n_records_scanned" not in lengths
 
 
 # --------------------------------------------------------------------------- #
@@ -783,6 +786,62 @@ def test_the_sbatch_guard_refuses_a_query_fasta_that_cannot_be_searched(tmp_path
     proc = _run_guard(str(path))
     assert proc.returncode == 2
     assert "QUERY_FASTA" in proc.stderr
+
+
+def _extract_literal_dollar_guard(sbatch: Path = COMMITTED_SBATCH) -> str:
+    """The `--export`-expansion guard, lifted verbatim from the sbatch."""
+    lines = sbatch.read_text(encoding="utf-8").splitlines()
+    start = next(i for i, ln in enumerate(lines) if ln.startswith('for _p in "$SHARD_DIR"'))
+    end = next(i for i in range(start + 1, len(lines)) if lines[i] == "done")
+    return "\n".join(lines[start : end + 1])
+
+
+@pytest.mark.parametrize("var", ["SHARD_DIR", "ROUND_DIR", "QUERY_FASTA"])
+def test_the_sbatch_refuses_an_unexpanded_export_path(var: str):
+    """`--export` values are expanded by the SUBMITTING shell, not by the job (CodeRabbit r7).
+
+    A literal `$HOME` surviving into the job means the submit line was handed to something
+    that does no shell expansion, and every path would resolve against the CWD — on the
+    ROUND_DIR path, silently creating a scratch tree inside the repo checkout.
+    """
+    import os
+    import subprocess
+
+    env = {
+        "PATH": os.environ["PATH"],
+        "SHARD_DIR": "/scratch/shards",
+        "ROUND_DIR": "/scratch/round",
+        "QUERY_FASTA": "/scratch/q.fa",
+    }
+    env[var] = "$HOME/scratch/x"
+    proc = subprocess.run(
+        ["bash", "-c", _extract_literal_dollar_guard()],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert proc.returncode == 2 and "literal" in proc.stderr
+
+
+def test_the_sbatch_export_guard_passes_expanded_paths():
+    """The positive control: a guard refusing everything would satisfy the test above."""
+    import os
+    import subprocess
+
+    proc = subprocess.run(
+        ["bash", "-c", _extract_literal_dollar_guard()],
+        env={
+            "PATH": os.environ["PATH"],
+            "SHARD_DIR": "/exports/people/x/round/shards",
+            "ROUND_DIR": "/exports/people/x/round",
+            "QUERY_FASTA": "",  # the genome route leaves it empty
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert proc.returncode == 0, proc.stderr
 
 
 def test_the_sbatch_guard_refuses_a_git_lfs_pointer(tmp_path: Path):

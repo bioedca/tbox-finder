@@ -261,7 +261,11 @@ def read_query_lengths(path: str | Path = DEFAULT_DETECT_REPORT) -> dict[str, An
         "query_length_nt": dict(_require(matched, "curated_length_nt")),
         "fp_length_nt": dict(_require(matched, "fp_length_nt")),
         "n_records_with_a_query": int(_require(payload, "dropout", "n_records_with_a_query")),
-        "n_records_scanned": int(_require(payload, "dropout", "n_windows_scanned")),
+        # ⚠ The source counts WINDOWS, and the name here says so. The draw emits one window
+        # per record, so for this supply the two coincide — but publishing a window count
+        # under a record-level name would assert a relation this report cannot see, and the
+        # record-level n is the one every CI from this control must be stated on.
+        "n_windows_scanned": int(_require(payload, "dropout", "n_windows_scanned")),
     }
 
 
@@ -723,7 +727,7 @@ def plan(
             "query_fasta": portable_path(query_fasta),
             "n_queries": int(layout["n_candidates"]),
             "n_records_with_a_query": lengths["n_records_with_a_query"],
-            "n_records_scanned": lengths["n_records_scanned"],
+            "n_windows_scanned": lengths["n_windows_scanned"],
             "independent_observations_note": (
                 "the producer's unit is the QUERY, but independent observations are bounded "
                 "by the RECORDS behind them (one draw per ADR-0004 cluster); any CI from this "

@@ -115,6 +115,17 @@ if [ -n "$QUERY_FASTA" ]; then
   esac
   SEARCH_QUERY_ARGS=(--query-fasta "$QUERY_FASTA")
 fi
+# ⚠ THESE PATHS ARRIVE VIA `--export`, WHOSE VALUES ARE EXPANDED BY THE SUBMITTING SHELL, NOT
+# BY THIS ONE. A surviving literal `$` means the submit line reached sbatch without shell
+# expansion (an argv list handed to a non-shell exec, or a quoted `--export` token), so every
+# path below would resolve against the CWD instead of $HOME. It does fail closed — the next
+# guard reports `shard … missing` — but that message names the wrong problem, and on the
+# ROUND_DIR path it would silently create a scratch tree inside the repo checkout.
+for _p in "$SHARD_DIR" "$ROUND_DIR" "$QUERY_FASTA"; do
+  case "$_p" in
+    *'$'*) echo "FATAL: exported path '$_p' still contains a literal '\$' — run the submit line in a shell so --export values are expanded before sbatch sees them" >&2; exit 2 ;;
+  esac
+done
 # Zero-pad the task id to match make-shards' `shard_{i:03d}.json` (covariation_producer.py:199).
 # Build these paths with plain interpolation, NOT `$(printf …)`: the tracked-path gate
 # (tests/unit/test_sbatch_rm_targets.py) cannot resolve a command substitution, so a `rm` on a

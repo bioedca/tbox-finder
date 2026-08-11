@@ -5505,12 +5505,16 @@ strict subset; the delta is 13 tests moving from FAILED to **SKIPPED** on DVC/LF
 fresh worktree does not materialise (+1 more in `test_split_table_schema` for the same
 reason), with both `^FAILED` sets ANSI-stripped and cross-checked against the summary line,
 and a collection diff proving no existing test was dropped (15 → 27 in the producer's suite,
-45 new at that point). **103 tests added in total; 41 sabotages, all RED against their NAMED
-test, plus 2 negative controls that stay green.** The report **re-derives byte-identically**
+45 new at that point). **110 tests added in total; 43 sabotages, all RED against their NAMED
+test, plus 2 negative controls that stay green.** ⚠ One sabotage reported **green while
+running the original module**: `n_windows_scanned` → `n_records_scanned` is the same length,
+and a same-second write with an unchanged size leaves CPython's cached bytecode valid, so the
+harness now clears `__pycache__` and runs with `PYTHONDONTWRITEBYTECODE`
+([[sabotage-restores-masked-by-pycache]]). The report **re-derives byte-identically**
 apart from `provenance.generated_at_utc` and `git_sha`. `ruff` + `black` + `bash -n` clean.
 
-**Review.** **Seven CodeRabbit CLI rounds — 1 / 1 / 0 / rate-limited / 1 / 1 / 0 findings,
-all four real, closing on *No new findings***; the round-4 slot was a **Fair-Usage stall that
+**Review.** **Seven CodeRabbit CLI rounds — 1 / 1 / 0 / rate-limited / 1 / 1 / 2 findings
+(1 major), all six real**; the round-4 slot was a **Fair-Usage stall that
 was waited out (41 min) rather than escalated**, and it was worth waiting for: round 5,
 after two clean-looking rounds, returned the sharpest finding of the step. ⚠ **No round
 before the last was evidence of convergence** — r3 read *No new findings* and r5 still had
@@ -5548,7 +5552,21 @@ cluster's filesystem, which this check cannot see) and the round dir required to
 spellings of the home directory are two coordinate systems. ⚠ Its first sabotage also stayed
 green — `PurePosixPath` already drops `.`, so the defensive filter beside it was
 **unreachable**; it was deleted rather than kept as decoration, and the test now pins the
-behaviour (a hand-rolled `split("/")` fails it). CI green (lint · pytest · snakemake).
+behaviour (a hand-rolled `split("/")` fails it).
+
+**⚠ r7's major is the one a reader should carry: `--export` values are expanded by the
+SUBMITTING shell, not by the job.** The plan publishes `$HOME/…` unexpanded *by design* — it
+is the cluster's home, unknowable here — so the submit line must be run **in a shell**. Hand
+the argv list to something that execs without one and every path resolves against the CWD;
+it fails closed (`shard … missing`) but names the wrong problem, and on the `ROUND_DIR` path
+it would create a scratch tree inside the repo checkout. The sbatch now refuses a surviving
+literal `$` in `SHARD_DIR`/`ROUND_DIR`/`QUERY_FASTA` **by name**, with a positive control
+that expanded paths still pass. r7's minor was a naming defect of the same family: the plan
+published `supply.n_records_scanned` from the detect report's `dropout.n_windows_scanned` —
+a **window** count. They coincide here (the draw emits one window per record) and that is
+exactly why the wrong name would never have been caught by its value; it is now published as
+`n_windows_scanned`, with the record-level `n_records_with_a_query` = 160 left as the number
+any CI must be stated on. CI green (lint · pytest · snakemake).
 
 **Decisions.** ⚠ **The seam defaults off, and that default is the argument.** ADR-0005 A10
 Pin 2 says each `MiningCandidate` "is re-resolved to nucleotides from the A1 genome FASTA

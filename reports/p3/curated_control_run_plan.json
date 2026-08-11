@@ -78,15 +78,15 @@
       "external_inputs": {},
       "schema_version": "1.0"
     },
-    "generated_at_utc": "2026-08-11T16:36:18.496260+00:00",
-    "git_sha": "987970b0895eb1cbce16d1f5ac0713de33b17912",
+    "generated_at_utc": "2026-08-11T16:42:13.733106+00:00",
+    "git_sha": "a3dedf984a6bcf4e9be1e1ec71593ec962224b06",
     "inputs": {
       "data/processed/mining/curated_control_manifest_v0.json": "363795fba6cd4d1d85495ec62e6e62cd11f1bf37b0fdf739c48315777c4d2a83",
       "data/processed/mining/curated_control_queries_v0.fasta": "08a3d160e35efa36983002dd3776384d2b16feb19a182e0b0d2c2fbb36e6e0c0",
       "reports/p2/homolog_msa_search_report.json": "778236bd88be8f2d74ebb701714abd0ee181e0ad0b95817eef58dc2db1dd37f6",
       "reports/p3/curated_control_detect.json": "7e096b0df6c18ef09ec16248434a5a10f3046cfe0cbd04066355b51874707466",
       "reports/p3/curated_control_sizing.json": "9629b970d19e7692cf96459a3bbbd50bd05ab21c1ed21340bc95d6729f8ccd12",
-      "slurm/p2/mine_round_producer.sbatch": "bb5f4c68ea85d29831315651f00407170abe2fd88a2f677f6d2f3d37a1e679a6"
+      "slurm/p2/mine_round_producer.sbatch": "4703d3b6f17640b6e9ff2041a8a51549f505a99d2ce72e5e96333dc17408238d"
     },
     "outputs": {},
     "rule": "P3-15'-g-iii curated-control producer run plan",
@@ -158,8 +158,8 @@
     "independent_observations_note": "the producer's unit is the QUERY, but independent observations are bounded by the RECORDS behind them (one draw per ADR-0004 cluster); any CI from this control is stated on the record-level n, never on the query count (\u00a77 ruling, 2026-08-10)",
     "manifest": "data/processed/mining/curated_control_manifest_v0.json",
     "n_queries": 317,
-    "n_records_scanned": 200,
     "n_records_with_a_query": 160,
+    "n_windows_scanned": 200,
     "query_fasta": "data/processed/mining/curated_control_queries_v0.fasta",
     "query_length_nt": {
       "max": 190,
