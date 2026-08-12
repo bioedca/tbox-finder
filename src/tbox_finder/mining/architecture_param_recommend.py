@@ -185,9 +185,11 @@ DECISION_FLOORS: tuple[DecisionFloor, ...] = (
             "bulge_max_nt = 10000 is the axis's no-upper-bound sentinel: the size filter "
             "stops filtering and bulge_min_nt alone decides. A round may choose that, but "
             "it may not then describe (b) as testing a bulge SIZE. ⚠ This floor is "
-            "semantic, not decisive: on this supply the bounded value the rule selects "
-            "measures IDENTICALLY to the sentinel (verified, see "
-            "recommendation.floor_sensitivity)."
+            "semantic, not decisive, and the claim that it costs nothing is measured "
+            "rather than argued: see recommendation.bulge_sentinel_comparison, which puts "
+            "the chosen setting against its own sentinel twin. It is NOT readable off "
+            "floor_sensitivity, whose identity field is null here precisely because "
+            "dropping this floor does not move the selection."
         ),
         source="ADR-0006 D3; ADR-0006 A4 (the value is recorded and must mean what it says)",
     ),
@@ -497,6 +499,15 @@ def control_damage(
             for q, s in zip(producible, b_states, strict=True)
         ):
             n_records_ab_failed += 1
+    if not n_producible:
+        # wilson_interval raises SizingError below 1 and the shares divide by zero — both
+        # escape as something other than this module's refusal, and a caller catching
+        # RecommendError would see a traceback instead of a named cause.  anti_selectivity
+        # already guards its denominators; these two paths must agree.
+        raise RecommendError(
+            "no control record has a producible query: the control status table and the "
+            "supply describe no decided corpus, so there is no damage denominator"
+        )
     lo, hi = wilson_interval(n_records_ab_failed, n_producible)
     lo_b, hi_b = wilson_interval(n_records_b_failed, n_producible)
     return {
@@ -775,6 +786,53 @@ def frontier(
         }
         for n in sorted(best)
     ]
+
+
+def bulge_sentinel_comparison(
+    results: Sequence[PointResult],
+    chosen: PointResult,
+) -> dict[str, Any]:
+    """The chosen setting against its own ``bulge_max_nt = 10000`` twin, measured.
+
+    The bounded-bulge floor's rationale asserts that keeping the bound costs nothing.
+    That is a claim about two specific settings, and it was originally cross-referenced to
+    :func:`floor_sensitivity`, whose identity field is ``null`` exactly when the floor does
+    not move the selection — i.e. the citation pointed at the one case where the field
+    cannot carry it ([[pinned-constant-that-nothing-reads]]).  This function measures the
+    pair directly, so the rationale cites evidence that exists.
+    """
+    twin_params = {**chosen.params.as_dict(), "bulge_max_nt": BULGE_MAX_UNBOUNDED}
+    twin = next((r for r in results if r.params.as_dict() == twin_params), None)
+    if twin is None:
+        return {
+            "sentinel_twin_admissible": False,
+            "why": (
+                "the chosen setting's bulge_max_nt = 10000 twin is not an admissible grid "
+                "point, so the bounded value cannot be compared against it here"
+            ),
+        }
+    return {
+        "sentinel_twin_admissible": True,
+        "chosen_bulge_max_nt": chosen.params.bulge_max_nt,
+        "sentinel_bulge_max_nt": BULGE_MAX_UNBOUNDED,
+        "measures_identically": bool(
+            twin.fp_failed == chosen.fp_failed
+            and twin.mined == chosen.mined
+            and twin.control["n_records_losing_a_and_b"]
+            == chosen.control["n_records_losing_a_and_b"]
+            and twin.control["n_records_losing_b"] == chosen.control["n_records_losing_b"]
+        ),
+        "chosen": {
+            "fp_failed": chosen.fp_failed,
+            "n_mined": chosen.mined,
+            "control_records_losing_a_and_b": chosen.control["n_records_losing_a_and_b"],
+        },
+        "sentinel_twin": {
+            "fp_failed": twin.fp_failed,
+            "n_mined": twin.mined,
+            "control_records_losing_a_and_b": twin.control["n_records_losing_a_and_b"],
+        },
+    }
 
 
 def dominating_alternatives(
@@ -1100,6 +1158,7 @@ def recommend(
             "n_at_the_measured_minimum": decision["n_at_the_measured_minimum"],
             "tied_with": decision["tied_with"],
             "floor_sensitivity": floor_sensitivity(admissible, chosen),
+            "bulge_sentinel_comparison": bulge_sentinel_comparison(admissible, chosen),
             "dominating_alternatives": dominating_alternatives(admissible, chosen),
             "measured": chosen.as_dict(),
             "anti_selectivity": anti_selectivity(chosen, n_fp_decided=n_fp_decided),

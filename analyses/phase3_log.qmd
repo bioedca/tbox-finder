@@ -5942,10 +5942,13 @@ reason: they are argmins over 2,880 points against 68 records, the damage coordi
 **excludes criterion (c)** entirely (the control's hosts are unannotated), and A4 asks a round to
 supply a *chosen* value, not a tuned one.
 
-**⚠ A committed number in `TODO.md`/`imp.md` was wrong and is corrected here.** Criterion (c)'s
-status table is **546 passed / 96 failed / 299 unavailable**, not the 541/101/299 both files
-record; the committed `synteny_exclusion_diagnostic.json` says `n_candidates_passing: 546` and
-`n_unavailable: 299`. The ceiling of 15 is computed from the shipped table, not from the prose.
+**⚠ A number in `imp.md` was wrong and is corrected here — `TODO.md` had it right.** Criterion
+(c)'s status table is **546 passed / 96 failed / 299 unavailable**, which is what `TODO.md`'s
+P3-15′-c-ii entry and the committed `synteny_exclusion_diagnostic.json` both say
+(`n_candidates_passing: 546`, `n_unavailable: 299`). `imp.md`'s block carried **541 / 101 / 299**
+— the *pre-fix* count that appears two sentences later in that same block as the defect it
+describes; I briefed a subagent off that stale line and it flagged the disagreement. The ceiling
+of 15 is computed from the shipped table, never from either file's prose.
 
 **⚠ One column of the join is not anchored to any committed report, and is carried as a
 sensitivity only.** No committed artifact records the Stage-2 posteriors' digest, and a **second
@@ -5986,3 +5989,15 @@ remains **open and is the user's**; this step pins nothing and amends no ADR (A4
 delegates the value to the round). **Commit.** `PENDING` (the SHA is not knowable when this
 stanza is written; `main` takes no direct commits — corrected in the next step's PR, as this
 step corrects P3-15′-g-iv's).
+
+**Review round 1 (CodeRabbit CLI, 2 minor, both real, both fixed).** (1) The bounded-bulge
+floor's rationale cross-referenced `recommendation.floor_sensitivity` for the claim that the
+bound costs nothing — and that field is `null` in exactly this case, because dropping the floor
+does not move the selection. The citation pointed at the one place it could not be read. A
+`bulge_sentinel_comparison` block now measures the chosen setting against its own
+`bulge_max_nt = 10000` twin directly (identical on all four counts: fp_failed 52, mined 3,
+records losing (b) 9, records losing (a) ∧ (b) 8) and the rationale cites that.
+(2) `control_damage` divided by `n_producible` and called `wilson_interval` on it without a
+guard, so a control with no producible record raised `SizingError`/`ZeroDivisionError` rather
+than this module's own refusal — while `anti_selectivity` already guarded the same degenerate
+input. Both now refuse by name. Sabotage count 40 → **44**, all RED against their named test.

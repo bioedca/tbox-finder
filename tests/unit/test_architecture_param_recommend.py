@@ -81,6 +81,7 @@ def point(
         mined_by_threshold={"stage2_not_declared": mined},
         control={
             "n_records_losing_a_and_b": damage,
+            "n_records_losing_b": damage,
             "n_records_producible": producible,
             "n_queries_decided": 76,
             "n_queries_a_and_b_failed": damage,
@@ -423,6 +424,60 @@ def test_the_restricted_frontier_drops_points_below_the_floors():
     restricted = rec.frontier([inside, outside], only_floor_clearing=True)
     assert restricted[0]["fewest_control_records_losing_a_and_b"] == 20
     assert restricted[0]["n_admissible_points_at_this_yield"] == 1
+
+
+def test_an_empty_damage_denominator_is_refused_not_divided_by():
+    """A control with no producible record must name its cause, not raise an arithmetic error."""
+    status = {Q_A1: STATUS_UNAVAILABLE, Q_B1: STATUS_UNAVAILABLE}
+    with pytest.raises(rec.RecommendError, match="no decided corpus"):
+        rec.control_damage(status, rec.control_records(status), {})
+
+
+def test_one_producible_record_is_enough_for_a_denominator():
+    """Positive control: the refusal above is about emptiness, not about small n."""
+    status = {Q_A1: STATUS_FAILED, Q_B1: STATUS_UNAVAILABLE}
+    out = rec.control_damage(status, rec.control_records(status), {Q_A1: STATUS_FAILED})
+    assert out["n_records_producible"] == 1
+
+
+def test_the_bulge_floor_claim_is_measured_against_its_own_sentinel_twin():
+    """The rationale says keeping the bound costs nothing; that must be a measurement."""
+    chosen = point(params=CHOSEN, fp_failed=10, mined=3, damage=8)
+    twin = point(
+        params=apm.ParamTuple("twin", 1, 2, 2, 2, rec.BULGE_MAX_UNBOUNDED, 2, False),
+        fp_failed=10,
+        mined=3,
+        damage=8,
+    )
+    out = rec.bulge_sentinel_comparison([chosen, twin], chosen)
+    assert out["sentinel_twin_admissible"] is True
+    assert out["measures_identically"] is True
+
+
+def test_the_sentinel_comparison_reports_a_real_difference_as_one():
+    """Positive control: 'measures identically' must be able to come out False."""
+    chosen = point(params=CHOSEN, fp_failed=10, mined=3, damage=8)
+    twin = point(
+        params=apm.ParamTuple("twin", 1, 2, 2, 2, rec.BULGE_MAX_UNBOUNDED, 2, False),
+        fp_failed=11,
+        mined=4,
+        damage=9,
+    )
+    assert rec.bulge_sentinel_comparison([chosen, twin], chosen)["measures_identically"] is False
+
+
+def test_an_absent_sentinel_twin_is_reported_rather_than_assumed_identical():
+    chosen = point(params=CHOSEN, fp_failed=10)
+    out = rec.bulge_sentinel_comparison([chosen], chosen)
+    assert out["sentinel_twin_admissible"] is False
+    assert "measures_identically" not in out
+
+
+def test_the_bulge_floor_rationale_cites_a_field_the_report_actually_carries():
+    """The original rationale cited floor_sensitivity, whose field is null in exactly this case."""
+    floor = next(f for f in rec.DECISION_FLOORS if f.key == "bulge_max_nt is bounded")
+    assert "bulge_sentinel_comparison" in floor.rationale
+    assert "floor_sensitivity" not in floor.rationale.split("NOT readable off")[0]
 
 
 def test_dominating_alternatives_finds_a_strictly_better_floor_clearing_point():
