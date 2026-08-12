@@ -630,7 +630,12 @@ def yield_ceiling(
 # ═════════════════════════════════════════════════════════════════════════════
 # The control arm — record-level, because its queries are pseudo-replicated
 # ═════════════════════════════════════════════════════════════════════════════
-def control_records(status: Mapping[str, str], manifest_path: str | Path) -> dict[str, list[str]]:
+def control_records(
+    status: Mapping[str, str],
+    manifest_path: str | Path,
+    *,
+    status_path: str | Path | None = None,
+) -> dict[str, list[str]]:
     """``record -> its query ids``, read from the MANIFEST, not parsed out of the ids.
 
     ``record_of``'s own docstring forbids deriving the grouping from the id string, and
@@ -652,8 +657,13 @@ def control_records(status: Mapping[str, str], manifest_path: str | Path) -> dic
     # the SUPPLY, and it names a different cause.)
     if not isinstance(status, Mapping):
         raise RecommendError("the control status table must be a JSON object of id → status")
+    # ⚠ The STATUS table's path, not the manifest's: `checked_status` prints its first
+    # argument as where the bad value lives, and a refusal that sends the reader to the
+    # wrong file is a refusal they will disbelieve. `status_path` is optional because the
+    # caller may hold the table without a path (the tests do).
+    where = portable_path(status_path) if status_path is not None else "the control status table"
     for cid, value in status.items():
-        checked_status(str(manifest_path), str(cid), "control status", value)
+        checked_status(where, str(cid), "control status", value)
     by_record = load_control_records(manifest_path)
     manifest_ids = {cid for ids in by_record.values() for cid in ids}
     if manifest_ids != set(status):
@@ -1252,6 +1262,34 @@ def assert_supply_is_the_decided_set(
     )
 
 
+def index_by_slug(label: str, msa_root: str | Path, ids: Iterable[str]) -> dict[str, str]:
+    """``slug → candidate_id`` for one arm, built so a collision is REFUSED, not merged.
+
+    Written as a dict comprehension, two ids landing on one slug kept only the last: the
+    consensus measured for that slug would be attributed to one candidate and the other
+    would leave ``arch_by_id`` silently, with every yield count still reconciling — the
+    exact shape this module refuses for manifest ids and for supply ids
+    ([[duplicate-key-merges-instead-of-colliding]]).  The orphan check downstream cannot
+    see it: it only finds slugs with *no* candidate.
+
+    ⚠ Two DISTINCT ids cannot collide by construction — ``covariation_producer.
+    candidate_slug`` appends a 12-hex digest of the exact id for that reason — so the
+    reachable trigger is a repeated id, and that is what the test builds.
+    """
+    index: dict[str, str] = {}
+    for cid in ids:
+        slug = candidate_msa_path(msa_root, cid).parent.name
+        if slug in index:
+            raise RecommendError(
+                f"the {label} slug {slug!r} is claimed by two candidate ids "
+                f"({index[slug]!r} and {cid!r}); merging them would attribute one "
+                "consensus to one of the two and drop the other with every count "
+                "still reconciling"
+            )
+        index[slug] = cid
+    return index
+
+
 def assert_comparison_describes_these_supplies(
     comparison: Any,
     fp_digest: str,
@@ -1423,11 +1461,9 @@ def recommend(
     by_id: dict[str, Any] = inputs["by_id"]
     assert_covers_manifest(by_id, manifest_ids)
 
-    fp_id_by_slug = {candidate_msa_path(fp_msa_root, cid).parent.name: cid for cid in manifest_ids}
+    fp_id_by_slug = index_by_slug("FP", fp_msa_root, manifest_ids)
     control_status = json.loads(Path(control_status_path).read_text(encoding="utf-8"))["status"]
-    control_id_by_slug = {
-        candidate_msa_path(control_msa_root, cid).parent.name: cid for cid in control_status
-    }
+    control_id_by_slug = index_by_slug("control", control_msa_root, control_status)
     for label, items, index in (
         ("FP", fp_items, fp_id_by_slug),
         ("control", control_items, control_id_by_slug),
@@ -1439,7 +1475,9 @@ def recommend(
                 f"candidate, e.g. {orphans[:2]}; the supply and the manifest disagree"
             )
     ids_with_consensus = [fp_id_by_slug[i.slug] for i in fp_items]
-    control_record_index = control_records(control_status, control_manifest_path)
+    control_record_index = control_records(
+        control_status, control_manifest_path, status_path=control_status_path
+    )
     assert_supply_is_the_decided_set(
         "FP",
         ids_with_consensus,

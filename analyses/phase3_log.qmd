@@ -6212,3 +6212,24 @@ to `inf` instead and the range test already caught it — that is the branch's p
 (a status guard that refuses everything, and a grid whose points collide in *value* with the
 count preserved). Zero new failures vs the same `main` baseline; `ruff` + `black` clean; no
 committed artifact changes.
+
+**Review round 9 (CodeRabbit CLI, 3 findings — 1 major, 2 minor, all real, all fixed), two of
+them on code round 8 had just written.** (1) **The slug indexes merged a collision instead of
+refusing it.** `slug → candidate_id` was a dict comprehension for both arms, so two ids landing
+on one slug kept only the last: the consensus measured for that slug would be attributed to one
+candidate and the other would leave `arch_by_id` silently, every yield count still reconciling —
+the shape this module refuses for manifest ids and, since round 8, for supply ids. The orphan
+check downstream cannot see it, because it only finds slugs with *no* candidate. ⚠ Two DISTINCT
+ids cannot collide by construction — `covariation_producer.candidate_slug` appends a 12-hex
+digest of the exact id for exactly this reason — so the guard states a contract, and the test
+triggers it the one reachable way, with a repeated id. (2) Round 8's new status-value refusal
+printed the **manifest's** path as the location of a bad **status** value, sending a reader to a
+file whose contents are fine; `control_records` now takes the status path. ⚠ And the sabotage
+that mattered was not the helper's: dropping `status_path=` at the call site left the whole
+suite **green**, because a keyword-only argument with a default is droppable in silence — so the
+test that pins it asserts the refusal names `ctrl_status.json`, from `recommend`, not from the
+helper ([[artifact-pinning-test-cannot-see-the-code]]). (3) A `pytest.raises(Exception, …)` in an
+older test accepted an `AttributeError` or a `KeyError` as readily as the refusal it meant to
+pin; it names `RecommendError`/`CompareError` now. **139 tests, 92 sabotages, all RED against
+their NAMED test.** Zero new failures vs the same `main` baseline; `ruff` + `black` clean; no
+committed artifact changes.

@@ -26,6 +26,7 @@ import pytest
 
 from tbox_finder.mining import architecture_param_measure as apm
 from tbox_finder.mining import architecture_param_recommend as rec
+from tbox_finder.mining.architecture_param_control_compare import CompareError
 from tbox_finder.mining.spare_rule import (
     STATUS_FAILED,
     STATUS_PASSED,
@@ -300,10 +301,27 @@ def test_the_control_status_check_admits_every_shipped_state(tmp_path):
     }
 
 
+def test_control_records_names_the_status_table_not_the_manifest(tmp_path):
+    """A refusal that sends the reader to the wrong file is one they will disbelieve.
+
+    ``checked_status`` prints its first argument as where the bad value lives, and the bad
+    value here comes from the status table.
+    """
+    manifest = control_manifest(tmp_path, [Q_A1, Q_A2])
+    status_path = tmp_path / "ctrl_status_v0.json"
+    with pytest.raises(rec.RecommendError, match="ctrl_status_v0.json"):
+        rec.control_records({Q_A1: STATUS_FAILED, Q_A2: "faled"}, manifest, status_path=status_path)
+
+
 def test_control_records_refuses_a_manifest_row_that_contradicts_its_own_id(tmp_path):
-    """The shipped loader is the one that owns this refusal; delegating means inheriting it."""
+    """The shipped loader is the one that owns this refusal; delegating means inheriting it.
+
+    ⚠ The exception type is NAMED. ``pytest.raises(Exception)`` would accept an
+    ``AttributeError`` or a ``KeyError`` just as happily, so a regression turning the
+    refusal into a crash would keep this green.
+    """
     manifest = control_manifest(tmp_path, [Q_A1, Q_A2], accession_of=lambda q: "one:record")
-    with pytest.raises(Exception, match="record|accession"):
+    with pytest.raises((rec.RecommendError, CompareError), match="record|accession"):
         rec.control_records({Q_A1: STATUS_FAILED, Q_A2: STATUS_FAILED}, manifest)
 
 
@@ -799,6 +817,24 @@ def test_a_supply_naming_one_candidate_twice_is_refused():
         rec.assert_supply_is_the_decided_set("FP", ["a", "b", "b"], status)
 
 
+def test_two_candidates_claiming_one_slug_are_refused_not_merged(tmp_path):
+    """A dict comprehension kept the LAST id and dropped the other, counts reconciling.
+
+    The reachable trigger is a repeated id — `candidate_slug` appends a 12-hex digest of
+    the exact id, so two DISTINCT ids cannot collide — and a repeat exercises the same
+    merge branch the guard exists for ([[duplicate-key-merges-instead-of-colliding]]).
+    """
+    with pytest.raises(rec.RecommendError, match="claimed by two candidate ids"):
+        rec.index_by_slug("FP", tmp_path, [Q_A1, Q_A1])
+
+
+def test_the_slug_index_maps_distinct_candidates_to_distinct_slugs(tmp_path):
+    """Positive control, and the property the guard assumes: the slug is 1:1 on ids."""
+    index = rec.index_by_slug("FP", tmp_path, [Q_A1, Q_A2])
+    assert sorted(index.values()) == sorted([Q_A1, Q_A2])
+    assert len(index) == 2
+
+
 def test_the_duplicate_refusal_does_not_fire_on_a_distinct_supply():
     """Positive control — and the ids arrive as a GENERATOR at one of the two call sites,
     so materialising them must not consume the supply before the comparison."""
@@ -1126,6 +1162,21 @@ def test_recommend_refuses_a_supply_the_committed_report_does_not_describe(tiny_
     report = Path(tiny_corpus["fp_report_path"])
     report.write_text(json.dumps({"supply": {"supply_digest_sha256": "0" * 64}}))
     with pytest.raises(rec.RecommendError, match="different supply"):
+        rec.recommend(**tiny_corpus)
+
+
+def test_recommend_names_the_control_status_file_in_a_status_refusal(tiny_corpus):
+    """The WIRING of the path, not the helper: the kwarg is droppable in silence.
+
+    ``control_records`` takes ``status_path`` keyword-only with a default, so removing it
+    from the call site leaves the refusal firing — pointing at ``control_manifest.json``,
+    a file whose contents are fine ([[artifact-pinning-test-cannot-see-the-code]]).
+    """
+    p = Path(tiny_corpus["control_status_path"])
+    status = json.loads(p.read_text())["status"]
+    status[sorted(status)[0]] = "faled"
+    p.write_text(json.dumps({"status": status}))
+    with pytest.raises(rec.RecommendError, match="ctrl_status.json"):
         rec.recommend(**tiny_corpus)
 
 
