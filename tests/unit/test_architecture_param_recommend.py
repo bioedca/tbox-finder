@@ -1437,10 +1437,22 @@ def test_recommend_refuses_a_measurement_report_that_is_not_an_object(tiny_corpu
         rec.recommend(**tiny_corpus)
 
 
-def test_recommend_refuses_a_report_whose_supply_block_is_null(tiny_corpus):
-    """`.get("supply", {})` defaulted only for an ABSENT key; `null` reached `.get`."""
+def test_recommend_refuses_a_report_whose_supply_block_is_not_an_object(tiny_corpus):
+    """`.get("supply", {})` defaulted only for an ABSENT key; a truthy scalar reached `.get`."""
     Path(tiny_corpus["fp_report_path"]).write_text(json.dumps({"supply": "cluster"}))
     with pytest.raises(rec.RecommendError, match="'supply' is"):
+        rec.recommend(**tiny_corpus)
+
+
+def test_a_null_supply_block_is_refused_by_the_digest_gate_not_the_shape_gate(tiny_corpus):
+    """`null` takes `object_field`'s permissive branch, so the DIGEST guard is what refuses.
+
+    Named for the guard that actually fires: a report with no supply block records no
+    digest, `recorded` is None, and the binding gate says so. Asserting the shape message
+    here would have pinned a branch this input never reaches.
+    """
+    Path(tiny_corpus["fp_report_path"]).write_text(json.dumps({"supply": None}))
+    with pytest.raises(rec.RecommendError, match="different supply"):
         rec.recommend(**tiny_corpus)
 
 

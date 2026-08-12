@@ -6271,3 +6271,12 @@ estimate ([[symmetric-count-fixture-blind-to-inversion]]). Two guard **call site
 silence, and are now driven through `recommend` itself. **156 tests, 105 sabotages, all RED against
 their NAMED test.** No published number moves: the committed manifest still reads 941 ids and no
 artifact changed. Zero new failures vs the same `main` baseline; `ruff` + `black` clean.
+
+**Rounds 11 and 12 (CodeRabbit CLI, 1 minor each, both real, both fixed) — both on the tests the
+round above added, and both about a name.** (1) The asymmetric fixture's summary line was corrected
+to *4 decided queries of 5* when its expectation was fixed, while the record-B bullet still read
+*(3) of (4)*; four tests read that docstring as the statement of what they expect. (2) A test named
+for a `null` supply block supplied the string `"cluster"`. The two are not the same input: `null`
+takes `object_field`'s permissive branch, so the **digest** gate refuses it, not the shape gate.
+The scalar case keeps the shape assertion under a name that matches it, and the `null` case is
+added under the guard that actually fires. **157 tests.**
