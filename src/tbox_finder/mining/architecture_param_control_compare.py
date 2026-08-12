@@ -1028,34 +1028,43 @@ def main(argv: Sequence[str] | None = None) -> int:
     except (CompareError, ValueError, TypeError, OSError, KeyError) as exc:
         print(f"refused: {exc}", file=sys.stderr)
         return 3
-    repo_inputs: list[str] = []
-    external: dict[str, Any] = {
-        "control_msa_root": portable_path(args.control_msa_root),
-        "supply_origin": args.supply_origin,
-        "control_supply_digest_sha256": body["arms"]["control"]["supply_digest_sha256"],
-        "fp_supply_digest_sha256": body["arms"]["fp"]["supply_digest_sha256"],
-    }
-    for label, candidate in (
-        ("control_manifest", args.control_manifest),
-        ("control_status", args.control_status),
-        ("control_report", args.control_report),
-        ("fp_report", args.fp_report),
-        ("detect_report", args.detect_report),
-    ):
-        if not candidate or not Path(candidate).is_file():
-            continue
-        if is_inside_repo(candidate):
-            repo_inputs.append(portable_path(candidate))
-        else:
-            external[label] = {"name": Path(candidate).name, "sha256": sha256_of(candidate)}
-    body["provenance"] = build_provenance(
-        rule="P3-15'-g-iv matched-control comparison",
-        script=portable_path(__file__),
-        inputs=sorted(repo_inputs),
-        outputs=[],
-        adr=ADR,
-        extra={"schema_version": SCHEMA_VERSION, "external_inputs": external},
-    )
+    # ⚠ Inside a refusal too. `sha256_of` READS each external input and
+    # `build_provenance` hashes the repo-relative ones, and `Path(...).is_file()`
+    # above only proves the entry existed a moment ago — an unreadable file, or one
+    # removed between the check and the read, raises OSError here. Outside a `try`
+    # that exits 1 with a traceback, while every other bad input exits 3.
+    try:
+        repo_inputs: list[str] = []
+        external: dict[str, Any] = {
+            "control_msa_root": portable_path(args.control_msa_root),
+            "supply_origin": args.supply_origin,
+            "control_supply_digest_sha256": body["arms"]["control"]["supply_digest_sha256"],
+            "fp_supply_digest_sha256": body["arms"]["fp"]["supply_digest_sha256"],
+        }
+        for label, candidate in (
+            ("control_manifest", args.control_manifest),
+            ("control_status", args.control_status),
+            ("control_report", args.control_report),
+            ("fp_report", args.fp_report),
+            ("detect_report", args.detect_report),
+        ):
+            if not candidate or not Path(candidate).is_file():
+                continue
+            if is_inside_repo(candidate):
+                repo_inputs.append(portable_path(candidate))
+            else:
+                external[label] = {"name": Path(candidate).name, "sha256": sha256_of(candidate)}
+        body["provenance"] = build_provenance(
+            rule="P3-15'-g-iv matched-control comparison",
+            script=portable_path(__file__),
+            inputs=sorted(repo_inputs),
+            outputs=[],
+            adr=ADR,
+            extra={"schema_version": SCHEMA_VERSION, "external_inputs": external},
+        )
+    except (CompareError, ValueError, TypeError, OSError, KeyError) as exc:
+        print(f"refused: {exc}", file=sys.stderr)
+        return 3
     out = Path(args.out)
     try:
         out.parent.mkdir(parents=True, exist_ok=True)

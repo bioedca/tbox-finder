@@ -1209,8 +1209,16 @@ def test_no_supply_access_bypasses_the_validated_readers():
     ([[fixed-one-of-two-identical-things]]).
     """
     source = Path(cmp.__file__).read_text()
-    body = source.split("def supply_block", 1)[1]
-    assert '["supply"]' not in body
+    # ⚠ The WHOLE file, both quote styles. The first version of this scan sliced off
+    # everything before `def supply_block`, so an access placed above the reader was
+    # never looked at — a guard-test disarmed by a reorder. `supply_block` itself
+    # reads `report.get("supply")`, which matches neither pattern.
+    offenders = [
+        (n, line.strip())
+        for n, line in enumerate(source.splitlines(), 1)
+        if '["supply"]' in line or "['supply']" in line
+    ]
+    assert offenders == [], offenders
 
 
 @pytest.mark.parametrize("arm", ["control", "fp"])
@@ -1245,3 +1253,54 @@ def test_a_report_with_a_non_object_distribution_exits_three(
     args[args.index("--control-report") + 1] = str(path)
     assert cmp.main(args) == 3
     assert not out.exists()
+
+
+def test_the_source_scan_would_catch_an_access_placed_above_the_reader():
+    """Positive control for the scan: it must find both quote styles, anywhere.
+
+    Written against a synthetic source string rather than the module, because the
+    module is (and must stay) clean — a positive control that can only pass when the
+    subject is broken is no control at all.
+    """
+
+    def offenders(source: str) -> list[tuple[int, str]]:
+        return [
+            (n, line.strip())
+            for n, line in enumerate(source.splitlines(), 1)
+            if '["supply"]' in line or "['supply']" in line
+        ]
+
+    above_the_reader = 'x = report["supply"]\ndef supply_block():\n    pass\n'
+    single_quoted = "def supply_block():\n    pass\ny = report['supply']\n"
+    assert offenders(above_the_reader) == [(1, 'x = report["supply"]')]
+    assert offenders(single_quoted) == [(3, "y = report['supply']")]
+    assert offenders('supply = report.get("supply")\n') == []
+
+
+def test_an_oserror_from_the_provenance_hashing_exits_three(
+    control_files, reports, tmp_path, monkeypatch
+):
+    """`sha256_of` READS each external input, after `compare` has already returned.
+
+    ⚠ That read is not reachable by input alone: every path in the hashing loop is
+    also read INSIDE `compare`, so an unreadable file fails earlier and the earlier
+    refusal masks this one. The reachable case is a TOCTOU — the file goes away, or
+    loses its permissions, between the `is_file()` check and the read — so the
+    OSError is injected at exactly that boundary rather than simulated with a
+    scenario the CLI cannot actually reach.
+    """
+    out = tmp_path / "comparison.json"
+
+    def boom(_path):
+        raise OSError("Input/output error")
+
+    monkeypatch.setattr(cmp, "sha256_of", boom)
+    assert cmp.main(cli_args(control_files, reports, out)) == 3
+    assert not out.exists()
+
+
+def test_the_hashing_refusal_has_a_positive_control(control_files, reports, tmp_path):
+    """Without this, a `main` that returned 3 unconditionally would pass above."""
+    out = tmp_path / "comparison.json"
+    assert cmp.main(cli_args(control_files, reports, out)) == 0
+    assert out.is_file()
