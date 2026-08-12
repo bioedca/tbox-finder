@@ -372,7 +372,7 @@ def asymmetric_control(tmp_path):
         (b)-alone/(a)∧(b) are distinguishable in the same record;
     * record B — ``Q_B1`` fails both; ``Q_B2`` is UNAVAILABLE ⇒ not producible
       ⇒ B is damaged on its one decided query, and the query denominator must exclude the
-        other, so ``n_queries_decided`` (3) differs from the query total (4);
+        other, so ``n_queries_decided`` (4) differs from the query total (5);
     * record C — ``Q_C1`` fails (a) only, and PASSES (b) ⇒ C is producible and undamaged.
 
     Expected: 3 producible records · 1 losing (a)∧(b) · 2 losing (b) · 4 decided queries of
