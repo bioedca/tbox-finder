@@ -6141,3 +6141,14 @@ and `checked_posterior` — called by the writer **and** the reader, so the two 
 suggested patch would have added a second copy beside the first. Six tests added (**110**), two
 sabotages (**71**), and the committed table re-derives to the **identical sha256**, so nothing
 in the current artifact was affected.
+
+**Review round 6 (CodeRabbit GitHub app, 2 minor, both real, both fixed).** `locus_of` refused
+*fewer* than four colon-separated fields but accepted **more** — a five-field id would have
+dropped its middle fields and merged into another candidate's locus, shrinking every locus
+denominator with no refusal, which is exactly the failure `control_records` refuses for the
+record grouping. It now demands the shape exactly. And the tie refusal computed its "axes the
+tie-break cannot speak to" with a **symmetric** difference: today every `TIE_BREAK_ORDER` name is
+also a `ParamTuple` field so the two agree, but renaming or adding a non-parameter entry would
+put that name into `undecidable` and raise `KeyError` **inside the guard that exists to stop an
+undecided selection being published**. It is a plain set difference now. The report re-derives
+unchanged. **112 tests, 73 sabotages.**

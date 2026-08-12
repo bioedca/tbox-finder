@@ -1190,3 +1190,19 @@ def test_the_writer_and_the_reader_apply_the_same_functions():
     for fn in ("checked_status", "checked_posterior"):
         assert fn in writer, f"build_inputs must go through {fn}"
         assert fn in reader, f"load_spare_rule_inputs must go through {fn}"
+
+
+def test_an_id_with_a_fifth_field_is_refused_not_silently_merged():
+    """A fifth field would drop the middle ones and merge two loci into one."""
+    with pytest.raises(rec.RecommendError, match="not 4"):
+        rec.locus_of("GCA_1.1:c1:0:extra:10-20")
+
+
+def test_the_undecidable_axes_are_parameter_keys_only():
+    """`^` would admit a vocabulary name that is not a parameter and KeyError in the guard."""
+    rec_params = set(CHOSEN.as_dict())
+    assert set(rec.TIE_BREAK_VOCABULARY) <= rec_params, "today they are all parameters"
+    a = point(params=apm.ParamTuple("a", 1, 2, 2, 2, 50, 2, False), fp_failed=10)
+    b = point(params=apm.ParamTuple("b", 1, 2, 3, 2, 20, 2, False), fp_failed=10)
+    with pytest.raises(rec.RecommendError, match="min_helix_pairs"):
+        rec.apply_decision_rule([a, b])

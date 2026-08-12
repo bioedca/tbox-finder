@@ -135,10 +135,14 @@ def locus_of(candidate_id: str) -> str:
     arms must be treated alike or the comparison is rigged in the FP arm's favour.
     """
     parts = str(candidate_id).split(":")
-    if len(parts) < 4:
+    # EXACTLY four. A fifth field would silently drop the middle ones and merge this
+    # candidate into another locus, shrinking every locus denominator with no refusal —
+    # the same failure `control_records` refuses for the record grouping.
+    if len(parts) != 4:
         raise RecommendError(
-            f"candidate_id {candidate_id!r} is not accession:contig:window:start-end, so "
-            "its locus cannot be derived; refusing rather than treating the id as a locus"
+            f"candidate_id {candidate_id!r} is not accession:contig:window:start-end "
+            f"(it has {len(parts)} colon-separated fields, not 4), so its locus cannot be "
+            "derived; refusing rather than treating the id as a locus"
         )
     return ":".join([*parts[:2], parts[-1]])
 
@@ -825,7 +829,11 @@ def apply_decision_rule(
     # NOT "do their tie-break keys collide": two settings differing in BOTH min_helix_pairs
     # and bulge_max_nt have different keys, so a key comparison separates them by
     # bulge_max_nt alone and publishes a min_helix_pairs nobody chose.
-    undecidable = tuple(sorted(set(TIE_BREAK_VOCABULARY) ^ set(chosen.params.as_dict())))
+    # A DIFFERENCE, not a symmetric one: the set wanted is "parameter keys the tie-break
+    # vocabulary cannot speak to". `^` would also return vocabulary names that are not
+    # parameter keys, and the lookup below would then raise KeyError inside the very guard
+    # that exists to stop an undecided selection being published.
+    undecidable = tuple(sorted(set(chosen.params.as_dict()) - set(TIE_BREAK_VOCABULARY)))
     disagreeing = [
         r
         for r in ordered[1:]
