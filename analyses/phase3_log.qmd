@@ -6001,3 +6001,20 @@ records losing (b) 9, records losing (a) ∧ (b) 8) and the rationale cites that
 guard, so a control with no producible record raised `SizingError`/`ZeroDivisionError` rather
 than this module's own refusal — while `anti_selectivity` already guarded the same degenerate
 input. Both now refuse by name. Sabotage count 40 → **44**, all RED against their named test.
+
+**Review round 2 (CodeRabbit GitHub app, 5 findings — 2 duplicating the CLI's, 3 new, all
+real, all fixed).** (1) **The tie refusal covered three of the seven parameters.** It fired only
+when two argmin members shared a `_tie_break_key`, so two settings differing in *both*
+`min_helix_pairs` and `bulge_max_nt` had different keys and were separated by `bulge_max_nt`
+alone — publishing a `min_helix_pairs` the rule never chose, in direct contradiction of step (4)
+of its own stated statement. The refusal now tests whether the tied settings disagree on any
+parameter **outside** `TIE_BREAK_VOCABULARY`, which is derived from `TIE_BREAK_ORDER` rather
+than restated. ⚠ The recommendation, the ceiling and the frontier are **unchanged** — the only
+movement in the regenerated report is that `floor_sensitivity` now reports **3** and **7** tied
+settings where it had reported 2 and 4, i.e. the old check had been silently resolving ties it
+should have refused. (2) **A duplicated manifest `candidate_id` was never refused**: every
+corpus size here is a row count while every join is a set, so a duplicate inflates the
+denominator while the coverage check still reads as exact. Refused now at both sites. (3)
+**`stage2_posterior` accepted `bool`** — `bool` subclasses `int`, so `true` reads as 1.0 and
+*spares* the candidate at every threshold — **and accepted values outside [0, 1]**, so a
+mis-scaled column would clear every threshold silently. Both refused. Sabotages 44 → **49**.

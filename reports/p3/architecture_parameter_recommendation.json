@@ -940,8 +940,8 @@
       },
       "schema_version": "1.0"
     },
-    "generated_at_utc": "2026-08-12T17:51:17.033697+00:00",
-    "git_sha": "939278551132fe768d98260e7b20ed2230b4e762",
+    "generated_at_utc": "2026-08-12T17:57:32.144789+00:00",
+    "git_sha": "b480caf73d70086c9122342fe4dcbc5235271be7",
     "inputs": {
       "data/processed/mining/curated_control_status_v0.json": "8b5e8f4178cd63eb8664c1e63e519c5810223eb56ca3a1488ce8bfee9dbeb033",
       "data/processed/mining/round0_fp_manifest.json": "e8aff87d395b3cb70a25c1f1d4ac348daf3da9323baa4c04a32fd3e4060d4b95",
@@ -1046,13 +1046,13 @@
         "changes_the_selection": null,
         "measured_identically_to_the_chosen_setting": null,
         "selection_without_this_floor": null,
-        "the_rule_cannot_decide_without_it": "the decision rule left 2 settings tied after TIE_BREAK_ORDER: ['mnh2_mhp1_bulge2-50_ncca2_wob0', 'mnh2_mhp2_bulge2-50_ncca2_wob0']"
+        "the_rule_cannot_decide_without_it": "the decision rule left 3 settings tied at the measured minimum that TIE_BREAK_ORDER cannot separate \u2014 they disagree on ['min_helix_pairs']: ['mnh2_mhp1_bulge2-50_ncca2_wob0', 'mnh2_mhp2_bulge2-50_ncca2_wob0', 'mnh2_mhp2_bulge2-50_ncca2_wob1']"
       },
       "min_named_helices >= 2": {
         "changes_the_selection": null,
         "measured_identically_to_the_chosen_setting": null,
         "selection_without_this_floor": null,
-        "the_rule_cannot_decide_without_it": "the decision rule left 4 settings tied after TIE_BREAK_ORDER: ['mnh1_mhp2_bulge2-50_ncca2_wob0', 'mnh1_mhp3_bulge2-50_ncca2_wob0', 'mnh1_mhp4_bulge2-50_ncca2_wob0', 'mnh2_mhp2_bulge2-50_ncca2_wob0']"
+        "the_rule_cannot_decide_without_it": "the decision rule left 7 settings tied at the measured minimum that TIE_BREAK_ORDER cannot separate \u2014 they disagree on ['min_helix_pairs', 'min_named_helices']: ['mnh1_mhp2_bulge2-50_ncca2_wob0', 'mnh1_mhp3_bulge2-50_ncca2_wob0', 'mnh1_mhp4_bulge2-50_ncca2_wob0', 'mnh2_mhp2_bulge2-50_ncca2_wob0', 'mnh1_mhp3_bulge2-50_ncca2_wob1', 'mnh1_mhp4_bulge2-50_ncca2_wob1', 'mnh2_mhp2_bulge2-50_ncca2_wob1']"
       },
       "ncca_pairing_nt >= 2": {
         "changes_the_selection": true,

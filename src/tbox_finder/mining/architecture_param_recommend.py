@@ -216,6 +216,10 @@ TIE_BREAK_ORDER: tuple[tuple[str, str], ...] = (
     ),
 )
 
+#: The parameters TIE_BREAK_ORDER can speak to.  Derived from it rather than restated, so
+#: adding a tie-break entry cannot leave the refusal below guarding a stale vocabulary.
+TIE_BREAK_VOCABULARY: tuple[str, ...] = tuple(name for name, _ in TIE_BREAK_ORDER)
+
 DECISION_RULE_STATEMENT = (
     "Stated before any count was read. (1) Keep only points the SHIPPED localizer accepts "
     "on this supply — admissibility is measured by running it, not by re-encoding its "
@@ -328,16 +332,46 @@ def load_spare_rule_inputs(path: str | Path) -> dict[str, Any]:
                     f"expected one of {tuple(DISJUNCT_STATUSES)}"
                 )
         posterior = row.get("stage2_posterior")
-        if posterior is not None and not isinstance(posterior, (int, float)):
-            raise RecommendError(f"{path}: {cid} has a non-numeric stage2_posterior")
+        if posterior is not None:
+            # `bool` subclasses `int`, so a bare isinstance check admits `true`, which then
+            # behaves as 1.0 against every threshold in STAGE2_THRESHOLD_SENSITIVITY and
+            # SPARES the candidate — a silent change to the yield, in the fail-open
+            # direction, from a value that is not a posterior at all.
+            if isinstance(posterior, bool) or not isinstance(posterior, (int, float)):
+                raise RecommendError(f"{path}: {cid} has a non-numeric stage2_posterior")
+            if not 0.0 <= float(posterior) <= 1.0:
+                raise RecommendError(
+                    f"{path}: {cid} has stage2_posterior={posterior!r} outside [0, 1]; a "
+                    "mis-scaled column would clear every threshold without a refusal"
+                )
         by_id[cid] = dict(row)
     payload = dict(payload)
     payload["by_id"] = by_id
     return payload
 
 
+def assert_manifest_ids_distinct(manifest_ids: Sequence[str]) -> None:
+    """A manifest id appearing twice is refused rather than counted twice.
+
+    Every corpus size in this report — the 941 denominator, the ceiling, the yield — is
+    ``len(manifest_ids)``, while every join against it goes through a **set**.  A
+    duplicated id therefore inflates the denominator while the coverage check still reads
+    as exact, and each derived share is quietly computed against the wrong ``n``
+    ([[duplicate-key-merges-instead-of-colliding]]).
+    """
+    seen: set[str] = set()
+    dupes = sorted({cid for cid in manifest_ids if cid in seen or seen.add(cid)})
+    if dupes:
+        raise RecommendError(
+            f"the manifest carries {len(dupes)} duplicated candidate_id(s), e.g. "
+            f"{dupes[:2]}; every corpus size here is a row count and every join is a set, "
+            "so a duplicate would inflate one and not the other"
+        )
+
+
 def assert_covers_manifest(by_id: Mapping[str, Any], manifest_ids: Sequence[str]) -> None:
     """Exact set equality with the manifest — an extra id is as fatal as a missing one."""
+    assert_manifest_ids_distinct(manifest_ids)
     want, have = set(manifest_ids), set(by_id)
     if want == have:
         return
@@ -668,19 +702,30 @@ def apply_decision_rule(
     argmin = [r for r in survivors if r.fp_failed == fewest]
     ordered = sorted(argmin, key=_tie_break_key)
     chosen = ordered[0]
-    # A surviving tie among parameters NOT proved inert would mean the rule did not
-    # decide — refuse rather than let sort order pick a published parameter value.
-    still_tied = [
+    # A tie the TIE_BREAK_ORDER vocabulary cannot speak to means the rule did not decide.
+    # ⚠ The test is "do the tied settings disagree on a parameter OUTSIDE that vocabulary",
+    # NOT "do their tie-break keys collide": two settings differing in BOTH min_helix_pairs
+    # and bulge_max_nt have different keys, so a key comparison separates them by
+    # bulge_max_nt alone and publishes a min_helix_pairs nobody chose.
+    undecidable = tuple(sorted(set(TIE_BREAK_VOCABULARY) ^ set(chosen.params.as_dict())))
+    disagreeing = [
         r
         for r in ordered[1:]
-        if _tie_break_key(r) == _tie_break_key(chosen)
-        and r.params.as_dict() != chosen.params.as_dict()
+        if any(r.params.as_dict()[k] != chosen.params.as_dict()[k] for k in undecidable)
     ]
-    if still_tied:
+    if disagreeing:
+        axes = sorted(
+            {
+                k
+                for r in disagreeing
+                for k in undecidable
+                if r.params.as_dict()[k] != chosen.params.as_dict()[k]
+            }
+        )
         raise RecommendError(
-            "the decision rule left "
-            f"{len(still_tied) + 1} settings tied after TIE_BREAK_ORDER: "
-            f"{[r.params.label for r in [chosen, *still_tied]]}"
+            f"the decision rule left {len(disagreeing) + 1} settings tied at the measured "
+            f"minimum that TIE_BREAK_ORDER cannot separate — they disagree on {axes}: "
+            f"{[r.params.label for r in [chosen, *disagreeing]]}"
         )
     return {
         "n_admissible_points": len(results),
@@ -1209,6 +1254,7 @@ def build_inputs(
     """
     manifest = json.loads(Path(fp_manifest_path).read_text(encoding="utf-8"))
     manifest_ids = [candidate_id_of(r) for r in manifest.get("candidates", manifest)]
+    assert_manifest_ids_distinct(manifest_ids)
     cov = json.loads(Path(covariation_status_path).read_text(encoding="utf-8"))["status"]
     syn = json.loads(Path(synteny_status_path).read_text(encoding="utf-8"))["status"]
     post = json.loads(Path(stage2_posteriors_path).read_text(encoding="utf-8"))["posteriors"]

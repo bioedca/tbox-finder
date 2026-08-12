@@ -337,6 +337,31 @@ def test_a_tie_the_break_order_cannot_resolve_is_refused():
         rec.apply_decision_rule([a, b])
 
 
+def test_a_tie_differing_in_a_non_inert_axis_is_refused_even_when_the_keys_differ():
+    """The refusal must test the VOCABULARY, not a key collision.
+
+    These two differ in `min_helix_pairs` (which TIE_BREAK_ORDER cannot speak to) *and* in
+    `bulge_max_nt` (which it can). A key comparison separates them by `bulge_max_nt` alone
+    and publishes a `min_helix_pairs` the rule never chose.
+    """
+    a = point(params=apm.ParamTuple("a", 1, 2, 2, 2, 20, 2, False), fp_failed=10)
+    b = point(params=apm.ParamTuple("b", 1, 2, 3, 2, 50, 2, False), fp_failed=10)
+    with pytest.raises(rec.RecommendError, match="min_helix_pairs"):
+        rec.apply_decision_rule([a, b])
+
+
+def test_a_tie_only_inside_the_tie_break_vocabulary_is_resolved_not_refused():
+    """Positive control: differing ONLY in bulge_max_nt is exactly what the order exists for."""
+    a = point(params=apm.ParamTuple("a", 1, 2, 2, 2, 50, 2, False), fp_failed=10)
+    b = point(params=apm.ParamTuple("b", 1, 2, 2, 2, 20, 2, False), fp_failed=10)
+    out = rec.apply_decision_rule([a, b])
+    assert out["chosen"].params.bulge_max_nt == 20, "the narrower stated filter wins"
+
+
+def test_the_tie_break_vocabulary_is_derived_from_the_order_not_restated():
+    assert tuple(name for name, _ in rec.TIE_BREAK_ORDER) == rec.TIE_BREAK_VOCABULARY
+
+
 def test_the_tie_refusal_does_not_fire_on_a_single_winner():
     """Positive control: the refusal above is about the tie, not about every input."""
     out = rec.apply_decision_rule([point(params=CHOSEN, fp_failed=10)])
@@ -566,6 +591,17 @@ def test_a_consensus_for_an_undecided_candidate_is_refused():
         rec.assert_supply_is_the_decided_set("FP", ["a", "c"], status)
 
 
+def test_a_duplicated_manifest_id_is_refused_by_the_coverage_check():
+    """A set-equality check reads as exact while the row count is already wrong."""
+    with pytest.raises(rec.RecommendError, match="duplicated candidate_id"):
+        rec.assert_covers_manifest({"a": {}, "b": {}}, ["a", "b", "b"])
+
+
+def test_distinct_manifest_ids_pass():
+    """Positive control for the duplicate refusal."""
+    rec.assert_manifest_ids_distinct(["a", "b", "c"])
+
+
 def test_covering_the_manifest_refuses_both_directions():
     with pytest.raises(rec.RecommendError, match="missing"):
         rec.assert_covers_manifest({"a": {}}, ["a", "b"])
@@ -604,6 +640,25 @@ def test_a_duplicate_candidate_id_is_refused_rather_than_merged(tmp_path):
             "non-numeric",
         ),
         ({"covariation_status": "failed", "synteny_status": "failed"}, "no candidate_id"),
+        (
+            {
+                "candidate_id": "x",
+                "covariation_status": "failed",
+                "synteny_status": "failed",
+                # bool subclasses int, so it reads as 1.0 and SPARES at every threshold.
+                "stage2_posterior": True,
+            },
+            "non-numeric",
+        ),
+        (
+            {
+                "candidate_id": "x",
+                "covariation_status": "failed",
+                "synteny_status": "failed",
+                "stage2_posterior": 12.5,
+            },
+            r"outside \[0, 1\]",
+        ),
     ],
 )
 def test_a_malformed_spare_rule_input_row_is_refused(tmp_path, row, match):
