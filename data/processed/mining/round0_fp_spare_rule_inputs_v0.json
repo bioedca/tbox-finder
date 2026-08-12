@@ -1,0 +1,5675 @@
+{
+  "adr": "ADR-0006 D3 (criterion (b)'s named-element predicate), D6 (the short-Stem-I relaxation), A4 (the seven rule parameters supplied per round, no defaults); ADR-0005 D14 (the spare rule: sparing is a disjunction, so mining is a conjunction; unavailable spares); ADR-0004 D1 (the element vocabulary D3 reuses)",
+  "n_candidates": 941,
+  "rows": [
+    {
+      "candidate_id": "GCA_001873345.1:c106:15360:15821-15979",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9988352669252479,
+      "synteny_status": "failed"
+    },
+    {
+      "candidate_id": "GCA_001873345.1:c106:15360:16034-16111",
+      "covariation_status": "passed",
+      "stage2_posterior": 0.0005890783185097332,
+      "synteny_status": "failed"
+    },
+    {
+      "candidate_id": "GCA_001873345.1:c106:15872:16034-16091",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.013560228684075281,
+      "synteny_status": "failed"
+    },
+    {
+      "candidate_id": "GCA_001873345.1:c10:3072:3515-3599",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.006463578589177299,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_001873345.1:c10:3072:3623-3722",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 2.4995419238409126e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_001873345.1:c125:5632:6292-6383",
+      "covariation_status": "failed",
+      "stage2_posterior": 0.3893773616304835,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_001873345.1:c125:5632:6403-6539",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9196764235800321,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_001873345.1:c125:6144:6292-6383",
+      "covariation_status": "failed",
+      "stage2_posterior": 0.3893773616304835,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_001873345.1:c125:6144:6403-6539",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9196764235800321,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_001873345.1:c125:6301:6304-6383",
+      "covariation_status": "failed",
+      "stage2_posterior": 0.010432635629471807,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_001873345.1:c125:6301:6403-6533",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.0013165766977983077,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_001873345.1:c128:2048:2396-2475",
+      "covariation_status": "passed",
+      "stage2_posterior": 4.796485631172163e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_001873345.1:c128:2048:2535-2685",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9983134438970862,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_001873345.1:c15:6656:7091-7187",
+      "covariation_status": "passed",
+      "stage2_posterior": 0.011880178781418182,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_001873345.1:c41:14848:15379-15483",
+      "covariation_status": "failed",
+      "stage2_posterior": 0.843357625125464,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_001873345.1:c41:14848:15501-15645",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.0006075844882299791,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_001873345.1:c41:15360:15403-15483",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.49004723834182157,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_001873345.1:c41:15360:15501-15581",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 1.432105712634677e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_002391195.1:c82:10240:10696-10778",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 6.749076495888358e-06,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_002878375.1:c13:25088:25832-25986",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9991150800508758,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_002878375.1:c13:25088:26002-26072",
+      "covariation_status": "passed",
+      "stage2_posterior": 4.3190447588397665e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_002878375.1:c13:25600:25832-25986",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9991150800508758,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_002878375.1:c13:25600:26002-26072",
+      "covariation_status": "passed",
+      "stage2_posterior": 4.3190447588397665e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_002878375.1:c1:22528:23222-23375",
+      "covariation_status": "failed",
+      "stage2_posterior": 0.9980832441333141,
+      "synteny_status": "failed"
+    },
+    {
+      "candidate_id": "GCA_002878375.1:c1:22528:23425-23502",
+      "covariation_status": "passed",
+      "stage2_posterior": 5.489685684712592e-05,
+      "synteny_status": "failed"
+    },
+    {
+      "candidate_id": "GCA_002878375.1:c1:23040:23222-23375",
+      "covariation_status": "failed",
+      "stage2_posterior": 0.9980832441333141,
+      "synteny_status": "failed"
+    },
+    {
+      "candidate_id": "GCA_002878375.1:c1:23040:23425-23502",
+      "covariation_status": "passed",
+      "stage2_posterior": 5.489685684712592e-05,
+      "synteny_status": "failed"
+    },
+    {
+      "candidate_id": "GCA_002878375.1:c7:39936:40675-40840",
+      "covariation_status": "passed",
+      "stage2_posterior": 0.9985289872532181,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_002878375.1:c7:39936:40855-40936",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 1.2732973659741077e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_002878375.1:c7:40448:40675-40840",
+      "covariation_status": "passed",
+      "stage2_posterior": 0.9985289872532181,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_002878375.1:c7:40448:40855-40936",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 1.2732973659741077e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_003290465.1:c0:524800:525324-525429",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 1.2062293302824059e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_003290465.1:c0:524800:525446-525597",
+      "covariation_status": "passed",
+      "stage2_posterior": 0.9937335385485407,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_003290465.1:c0:525312:525324-525429",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 1.2062293302824059e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_003290465.1:c0:525312:525446-525597",
+      "covariation_status": "passed",
+      "stage2_posterior": 0.9937335385485407,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_003314535.1:c17:4608:5067-5144",
+      "covariation_status": "failed",
+      "stage2_posterior": 2.9262642493405787e-05,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_003314535.1:c17:4608:5160-5301",
+      "covariation_status": "passed",
+      "stage2_posterior": 0.9978527357598724,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_003314535.1:c17:5120:5160-5299",
+      "covariation_status": "passed",
+      "stage2_posterior": 0.997955780125689,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_005116895.1:c0:296960:297464-297551",
+      "covariation_status": "passed",
+      "stage2_posterior": 2.0947817897968463e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_005116895.1:c0:296960:297582-297736",
+      "covariation_status": "failed",
+      "stage2_posterior": 0.9969474304423277,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_005116895.1:c0:297472:297472-297551",
+      "covariation_status": "failed",
+      "stage2_posterior": 1.9217017606459634e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_005116895.1:c0:297472:297582-297736",
+      "covariation_status": "failed",
+      "stage2_posterior": 0.9969474304423277,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_011056645.1:c150:1536:2200-2347",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.8989390158933124,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_011056645.1:c150:1536:2370-2494",
+      "covariation_status": "passed",
+      "stage2_posterior": 0.9922862263956532,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_011056645.1:c150:2048:2200-2347",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.8989390158933124,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_011056645.1:c150:2048:2370-2494",
+      "covariation_status": "passed",
+      "stage2_posterior": 0.9922862263956532,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_011056645.1:c151:4096:4442-4512",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 1.705814656857024e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_011056645.1:c151:4096:4532-4624",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 2.7194617185569183e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_011056645.1:c181:7168:7792-7907",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 1.1893888576547399e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_011056645.1:c181:7168:7924-8012",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.10944754311502737,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_011056645.1:c181:7680:7792-7907",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 1.1893888576547399e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_011056645.1:c181:7680:7924-8012",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.10944754311502737,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_011056645.1:c183:6144:6428-6519",
+      "covariation_status": "failed",
+      "stage2_posterior": 1.9406588810226617e-05,
+      "synteny_status": "failed"
+    },
+    {
+      "candidate_id": "GCA_011056645.1:c183:6144:6540-6679",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9231220988124119,
+      "synteny_status": "failed"
+    },
+    {
+      "candidate_id": "GCA_011056645.1:c225:4608:5174-5333",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9935403988044491,
+      "synteny_status": "failed"
+    },
+    {
+      "candidate_id": "GCA_011056645.1:c225:4608:5379-5475",
+      "covariation_status": "failed",
+      "stage2_posterior": 4.447485969367135e-05,
+      "synteny_status": "failed"
+    },
+    {
+      "candidate_id": "GCA_011056645.1:c225:5120:5174-5333",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9935403988044491,
+      "synteny_status": "failed"
+    },
+    {
+      "candidate_id": "GCA_011056645.1:c225:5120:5384-5475",
+      "covariation_status": "failed",
+      "stage2_posterior": 0.0007388284950304073,
+      "synteny_status": "failed"
+    },
+    {
+      "candidate_id": "GCA_011056645.1:c228:8704:9216-9328",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.00011770953172040884,
+      "synteny_status": "failed"
+    },
+    {
+      "candidate_id": "GCA_011056645.1:c228:8704:9345-9438",
+      "covariation_status": "failed",
+      "stage2_posterior": 0.0002474818414832701,
+      "synteny_status": "failed"
+    },
+    {
+      "candidate_id": "GCA_011056645.1:c228:9216:9346-9400",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.0007184116554292655,
+      "synteny_status": "failed"
+    },
+    {
+      "candidate_id": "GCA_011056645.1:c34:13312:13824-13931",
+      "covariation_status": "failed",
+      "stage2_posterior": 0.2264065438840245,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_011056645.1:c34:13312:13947-14099",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.000858461299874876,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_011056645.1:c34:13822:13852-13931",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 7.590513153669362e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_011056645.1:c34:13822:14005-14098",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 5.3011160358324585e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_011056645.1:c34:9216:10045-10168",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 2.6029587073293754e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_011056645.1:c34:9216:9928-10027",
+      "covariation_status": "failed",
+      "stage2_posterior": 0.13929348920170498,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_011056645.1:c34:9728:10045-10168",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 2.6029587073293754e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_011056645.1:c34:9728:9928-10027",
+      "covariation_status": "failed",
+      "stage2_posterior": 0.13929348920170498,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_011056645.1:c71:2560:3260-3392",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 6.333603310226922e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_011056645.1:c71:2560:3442-3526",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 2.9566457693710187e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_011056645.1:c71:3072:3260-3392",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 6.333603310226922e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_011056645.1:c71:3072:3442-3526",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 2.9566457693710187e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_011056645.1:c84:2560:3261-3352",
+      "covariation_status": "failed",
+      "stage2_posterior": 0.20865620979271857,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_011056645.1:c84:2560:3402-3469",
+      "covariation_status": "failed",
+      "stage2_posterior": 3.21933810852117e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_011056645.1:c84:3072:3261-3335",
+      "covariation_status": "failed",
+      "stage2_posterior": 0.08865587225138848,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_011056645.1:c84:3072:3466-3610",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.029892649371396175,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_012517635.1:c118:2560:3053-3129",
+      "covariation_status": "passed",
+      "stage2_posterior": 5.698505569121462e-05,
+      "synteny_status": "failed"
+    },
+    {
+      "candidate_id": "GCA_012517635.1:c118:2560:3146-3292",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 4.900738994743685e-05,
+      "synteny_status": "failed"
+    },
+    {
+      "candidate_id": "GCA_012517635.1:c118:3072:3146-3285",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 2.10815774205771e-05,
+      "synteny_status": "failed"
+    },
+    {
+      "candidate_id": "GCA_012517635.1:c150:9216:9661-9803",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.995791087288344,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_012517635.1:c150:9216:9848-9927",
+      "covariation_status": "passed",
+      "stage2_posterior": 1.986131210445497e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_012517635.1:c192:1024:1207-1280",
+      "covariation_status": "passed",
+      "stage2_posterior": 0.00011174056519967742,
+      "synteny_status": "failed"
+    },
+    {
+      "candidate_id": "GCA_012517635.1:c192:1024:1292-1421",
+      "covariation_status": "passed",
+      "stage2_posterior": 0.8504770409109098,
+      "synteny_status": "failed"
+    },
+    {
+      "candidate_id": "GCA_012517635.1:c192:512:1207-1280",
+      "covariation_status": "passed",
+      "stage2_posterior": 0.00011174056519967742,
+      "synteny_status": "failed"
+    },
+    {
+      "candidate_id": "GCA_012517635.1:c192:512:1292-1421",
+      "covariation_status": "passed",
+      "stage2_posterior": 0.8504770409109098,
+      "synteny_status": "failed"
+    },
+    {
+      "candidate_id": "GCA_012517635.1:c230:11264:11739-11868",
+      "covariation_status": "passed",
+      "stage2_posterior": 0.9939151644316639,
+      "synteny_status": "failed"
+    },
+    {
+      "candidate_id": "GCA_012517635.1:c230:11264:11881-11953",
+      "covariation_status": "passed",
+      "stage2_posterior": 3.2987259807336683e-05,
+      "synteny_status": "failed"
+    },
+    {
+      "candidate_id": "GCA_012517635.1:c230:11511:11739-11868",
+      "covariation_status": "passed",
+      "stage2_posterior": 0.9939151644316639,
+      "synteny_status": "failed"
+    },
+    {
+      "candidate_id": "GCA_012517635.1:c230:11511:11881-11953",
+      "covariation_status": "passed",
+      "stage2_posterior": 3.2987259807336683e-05,
+      "synteny_status": "failed"
+    },
+    {
+      "candidate_id": "GCA_012517635.1:c308:0:205-287",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 3.1373248820398705e-05,
+      "synteny_status": "failed"
+    },
+    {
+      "candidate_id": "GCA_012517635.1:c308:0:306-454",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 8.027851783745902e-06,
+      "synteny_status": "failed"
+    },
+    {
+      "candidate_id": "GCA_012517635.1:c397:11264:11929-12066",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 8.450871592466849e-06,
+      "synteny_status": "failed"
+    },
+    {
+      "candidate_id": "GCA_012517635.1:c397:11264:12108-12188",
+      "covariation_status": "passed",
+      "stage2_posterior": 0.00042599272834977826,
+      "synteny_status": "failed"
+    },
+    {
+      "candidate_id": "GCA_012517635.1:c397:11776:11929-12066",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 8.450871592466849e-06,
+      "synteny_status": "failed"
+    },
+    {
+      "candidate_id": "GCA_012517635.1:c397:11776:12108-12188",
+      "covariation_status": "passed",
+      "stage2_posterior": 0.00042599272834977826,
+      "synteny_status": "failed"
+    },
+    {
+      "candidate_id": "GCA_012517635.1:c441:0:228-305",
+      "covariation_status": "passed",
+      "stage2_posterior": 0.0010476801200126938,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_012517635.1:c441:0:39-183",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9980908722534803,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_015478585.1:c26:4608:4903-5024",
+      "covariation_status": "passed",
+      "stage2_posterior": 0.0009703351058186599,
+      "synteny_status": "failed"
+    },
+    {
+      "candidate_id": "GCA_015478585.1:c26:4608:5040-5154",
+      "covariation_status": "failed",
+      "stage2_posterior": 5.169137786808996e-06,
+      "synteny_status": "failed"
+    },
+    {
+      "candidate_id": "GCA_015478585.1:c74:17408:18233-18319",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 1.3463382345813328e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_015478585.1:c74:17593:18228-18319",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 1.3434967114066567e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_017458885.1:c106:0:358-447",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 6.5749115232340495e-06,
+      "synteny_status": "failed"
+    },
+    {
+      "candidate_id": "GCA_017458885.1:c106:0:530-670",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9982724659656127,
+      "synteny_status": "failed"
+    },
+    {
+      "candidate_id": "GCA_017458885.1:c106:512:582-663",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.0006135515293427295,
+      "synteny_status": "failed"
+    },
+    {
+      "candidate_id": "GCA_017458885.1:c117:1024:1281-1429",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.7123814956010261,
+      "synteny_status": "failed"
+    },
+    {
+      "candidate_id": "GCA_017458885.1:c117:1024:1462-1540",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 9.99259505613185e-06,
+      "synteny_status": "failed"
+    },
+    {
+      "candidate_id": "GCA_017458885.1:c117:512:1281-1429",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.7123814956010261,
+      "synteny_status": "failed"
+    },
+    {
+      "candidate_id": "GCA_017458885.1:c44:3072:3406-3498",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 1.248986292779772e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_017458885.1:c44:3072:3525-3665",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9823767888104719,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_018714045.1:c102:4608:5151-5228",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 2.9265554053278017e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_018714045.1:c102:4608:5249-5369",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 1.59341364617264e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_018714045.1:c102:5120:5151-5228",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 2.9265554053278017e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_018714045.1:c102:5120:5249-5369",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 1.59341364617264e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_018714045.1:c19:4096:4875-5016",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 4.092794175123105e-06,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_018714045.1:c19:4096:5032-5089",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 7.069155211496247e-06,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_018714045.1:c19:4608:4875-5016",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 4.092794175123105e-06,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_018714045.1:c19:4608:5032-5115",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 1.159845472728438e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_018714045.1:c21:0:139-269",
+      "covariation_status": "passed",
+      "stage2_posterior": 0.9974434430697073,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_018714045.1:c21:0:284-400",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 1.709338155087609e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_018714045.1:c27:12199:12620-12693",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 1.0718965576065123e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_018714045.1:c27:12199:12709-12841",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 2.7637688192370685e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_019038705.1:c206:7168:7907-8090",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 1.325426726762147e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_019038705.1:c206:7168:8110-8192",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 6.313708685167443e-06,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_019038705.1:c206:7680:7907-8090",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 1.3213659769193396e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_019038705.1:c206:7680:8110-8252",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 7.535881948915905e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_019636815.1:c6:79872:80662-80816",
+      "covariation_status": "failed",
+      "stage2_posterior": 0.9822503694476163,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_019636815.1:c6:80384:80662-80816",
+      "covariation_status": "failed",
+      "stage2_posterior": 0.9822503694476163,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_019636815.1:c6:80384:80833-80936",
+      "covariation_status": "passed",
+      "stage2_posterior": 0.0001903039816269353,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_020434495.1:c711:0:158-286",
+      "covariation_status": "failed",
+      "stage2_posterior": 3.882226191698322e-05,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_020434495.1:c711:0:304-481",
+      "covariation_status": "passed",
+      "stage2_posterior": 0.00016460324923157153,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_023145315.1:c134:2560:2962-3039",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 7.673367586528003e-06,
+      "synteny_status": "failed"
+    },
+    {
+      "candidate_id": "GCA_023663235.1:c0:84480:85162-85275",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9797769452819095,
+      "synteny_status": "failed"
+    },
+    {
+      "candidate_id": "GCA_023663235.1:c0:84992:85162-85275",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9797769452819095,
+      "synteny_status": "failed"
+    },
+    {
+      "candidate_id": "GCA_023663235.1:c13:22528:23157-23220",
+      "covariation_status": "failed",
+      "stage2_posterior": 0.04683373950073355,
+      "synteny_status": "failed"
+    },
+    {
+      "candidate_id": "GCA_023663235.1:c13:22528:23234-23355",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9549001031449394,
+      "synteny_status": "failed"
+    },
+    {
+      "candidate_id": "GCA_023663235.1:c13:23040:23157-23220",
+      "covariation_status": "failed",
+      "stage2_posterior": 0.04683373950073355,
+      "synteny_status": "failed"
+    },
+    {
+      "candidate_id": "GCA_023663235.1:c13:23040:23233-23355",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9857231184388204,
+      "synteny_status": "failed"
+    },
+    {
+      "candidate_id": "GCA_023663235.1:c1:116736:117389-117460",
+      "covariation_status": "failed",
+      "stage2_posterior": 0.07149356081375949,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_023663235.1:c1:116736:117475-117603",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9943765027929348,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_023663235.1:c1:117248:117389-117460",
+      "covariation_status": "failed",
+      "stage2_posterior": 0.07149356081375949,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_023663235.1:c1:117248:117475-117603",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9943765027929348,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_023663235.1:c1:206848:207711-207804",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.0004993989610605448,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_023663235.1:c1:207360:207711-207804",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.0004993989610605448,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_023663235.1:c1:90624:91429-91539",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 4.906790326338765e-05,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_023663235.1:c1:91136:91429-91538",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 5.3949513813079074e-05,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_023663235.1:c2:128000:128588-128717",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9987480369925531,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_023663235.1:c2:128512:128588-128717",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9987480369925531,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_023663235.1:c2:70144:70657-70849",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.99917487162686,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_023663235.1:c2:70656:70657-70713",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 3.832843425131419e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_023663235.1:c2:70656:70726-70843",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.03657441556804956,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_023663235.1:c3:8192:8836-8899",
+      "covariation_status": "failed",
+      "stage2_posterior": 0.04324933326286089,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_023663235.1:c3:8192:8914-9024",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.0005034501114772379,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_023663235.1:c3:86016:86548-86624",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.00033886908210260786,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_023663235.1:c3:8704:8836-8899",
+      "covariation_status": "failed",
+      "stage2_posterior": 0.04324933326286089,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_023663235.1:c3:8704:8914-9024",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.0005034501114772379,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_023663235.1:c4:27136:27697-27764",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.015540257633813186,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_023663235.1:c4:27136:27779-27914",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 1.2027127431406033e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_023663235.1:c4:27648:27697-27764",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.015540257633813186,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_023663235.1:c4:27648:27779-27911",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 1.4513109023037983e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_023663235.1:c7:26112:26677-26802",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.00011844622314435581,
+      "synteny_status": "failed"
+    },
+    {
+      "candidate_id": "GCA_023663235.1:c7:26112:26818-26885",
+      "covariation_status": "failed",
+      "stage2_posterior": 0.00016750102612081902,
+      "synteny_status": "failed"
+    },
+    {
+      "candidate_id": "GCA_023663235.1:c7:26624:26677-26802",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.00011844622314435581,
+      "synteny_status": "failed"
+    },
+    {
+      "candidate_id": "GCA_023663235.1:c7:26624:26818-26885",
+      "covariation_status": "failed",
+      "stage2_posterior": 0.00016750102612081902,
+      "synteny_status": "failed"
+    },
+    {
+      "candidate_id": "GCA_024642575.1:c138:9216:9641-9821",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9897338785327502,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_024642575.1:c138:9216:9860-9940",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 1.0840946007012949e-05,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_024642575.1:c95:12288:12939-13026",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 6.120117918261828e-06,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_024642575.1:c95:12288:13048-13145",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 6.475900970307341e-06,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_024642575.1:c95:12800:12940-13026",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 6.00255804067351e-06,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_024642575.1:c95:12800:13044-13145",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 1.351508130078634e-05,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_025060475.1:c0:194048:194397-194550",
+      "covariation_status": "passed",
+      "stage2_posterior": 0.9973427211367044,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_025060475.1:c0:194048:194581-194682",
+      "covariation_status": "passed",
+      "stage2_posterior": 0.0001261410900462209,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_025060475.1:c1:16384:16728-16835",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 8.869560425226166e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_025060475.1:c1:16384:16850-17016",
+      "covariation_status": "passed",
+      "stage2_posterior": 0.9992913934468874,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_025060475.1:c1:41984:42685-42838",
+      "covariation_status": "failed",
+      "stage2_posterior": 0.9978175070954063,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_025060475.1:c1:41984:42887-42976",
+      "covariation_status": "passed",
+      "stage2_posterior": 0.000635703782945328,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_025060475.1:c1:42496:42685-42838",
+      "covariation_status": "failed",
+      "stage2_posterior": 0.9978175070954063,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_025060475.1:c1:42496:42869-42976",
+      "covariation_status": "passed",
+      "stage2_posterior": 8.011181517746709e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_025060475.1:c2:38912:39333-39480",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9993475146147314,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_025060475.1:c2:38912:39495-39593",
+      "covariation_status": "failed",
+      "stage2_posterior": 1.095196422346235e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_027450145.1:c31:18432:18779-18881",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 9.516982251577955e-06,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_027450145.1:c31:18432:18930-19075",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9965074604641607,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_027450145.1:c3:68608:69077-69165",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 4.860631749511369e-05,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_027450145.1:c3:68608:69183-69332",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9926871450815705,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_027450145.1:c3:69120:69183-69332",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9926871450815705,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_027450145.1:c69:14336:15013-15121",
+      "covariation_status": "passed",
+      "stage2_posterior": 0.00023346375119340676,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_027450145.1:c69:14336:15138-15280",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9977175628279211,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_027450145.1:c69:14848:15013-15121",
+      "covariation_status": "passed",
+      "stage2_posterior": 0.00023346375119340676,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_027450145.1:c69:14848:15138-15280",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9977175628279211,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_028276205.1:c24:0:612-752",
+      "covariation_status": "passed",
+      "stage2_posterior": 0.9982178368117228,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_028276205.1:c24:0:767-852",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 7.775974513192585e-05,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_028276205.1:c24:512:612-752",
+      "covariation_status": "passed",
+      "stage2_posterior": 0.9982178368117228,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_028276205.1:c24:512:767-852",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 7.775974513192585e-05,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_028276205.1:c27:2048:2724-2808",
+      "covariation_status": "failed",
+      "stage2_posterior": 0.688587600227556,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_028276205.1:c27:2048:2824-2979",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9980333620873393,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_028276205.1:c27:2560:2724-2808",
+      "covariation_status": "failed",
+      "stage2_posterior": 0.688587600227556,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_028276205.1:c27:2560:2824-2979",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9980333620873393,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_028276205.1:c3:1024:1201-1357",
+      "covariation_status": "passed",
+      "stage2_posterior": 0.9981225860479555,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_028276205.1:c3:1024:1412-1487",
+      "covariation_status": "passed",
+      "stage2_posterior": 3.92037187421924e-05,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_028276205.1:c3:512:1201-1357",
+      "covariation_status": "passed",
+      "stage2_posterior": 0.9981225860479555,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_028276205.1:c3:512:1413-1487",
+      "covariation_status": "passed",
+      "stage2_posterior": 3.471990074764447e-05,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_028276205.1:c7:6144:6744-6893",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.999368834746326,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_028276205.1:c7:6144:6909-6978",
+      "covariation_status": "passed",
+      "stage2_posterior": 8.017017236860795e-05,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_028276205.1:c7:6656:6744-6893",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.999368834746326,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_028276205.1:c7:6656:6909-6978",
+      "covariation_status": "passed",
+      "stage2_posterior": 8.017017236860795e-05,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_030673965.1:c1:399872:400517-400656",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9934432893452638,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_030673965.1:c1:400384:400517-400656",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9934432893452638,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_030765645.1:c55:21504:21980-22124",
+      "covariation_status": "passed",
+      "stage2_posterior": 0.9989749904098554,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_030765645.1:c55:21504:22145-22237",
+      "covariation_status": "passed",
+      "stage2_posterior": 1.5139043356632971e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_030765645.1:c55:22016:22016-22124",
+      "covariation_status": "failed",
+      "stage2_posterior": 4.916990829931683e-06,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_030765645.1:c55:22016:22145-22237",
+      "covariation_status": "passed",
+      "stage2_posterior": 1.5139043356632971e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_030834825.1:c38:10180:10677-10787",
+      "covariation_status": "failed",
+      "stage2_posterior": 2.0193549377201877e-05,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_030834825.1:c38:10180:10804-10992",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9924642597377871,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_030834825.1:c40:2560:3282-3484",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.00010632026261331643,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_030834825.1:c40:2560:3502-3579",
+      "covariation_status": "passed",
+      "stage2_posterior": 2.771511289889392e-05,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_030834825.1:c40:3072:3279-3484",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 6.56043891343969e-05,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_030834825.1:c40:3072:3502-3579",
+      "covariation_status": "passed",
+      "stage2_posterior": 2.771511289889392e-05,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_030834825.1:c460:14848:15219-15292",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 1.3829204787784885e-05,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_030834825.1:c460:14848:15310-15420",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 2.4009182486189327e-05,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_030834825.1:c791:6656:6945-7141",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.27063318682246584,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_030834825.1:c791:6656:7176-7255",
+      "covariation_status": "passed",
+      "stage2_posterior": 0.00018627473623597423,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_030834825.1:c861:11264:11722-11802",
+      "covariation_status": "passed",
+      "stage2_posterior": 1.1045827588809328e-05,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_030834825.1:c861:11264:11840-11983",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 6.863134635096676e-06,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_031266695.1:c173:6144:6792-6846",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 6.331856960150994e-06,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_031266695.1:c173:6144:6862-7063",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.998850769356434,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_031266695.1:c173:6287:6792-6846",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 6.331856960150994e-06,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_031266695.1:c173:6287:6862-7063",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.998850769356434,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_031268125.1:c279:1024:1151-1317",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9586061731330571,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_031268125.1:c279:1024:1338-1425",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 4.361051826269194e-06,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_031268125.1:c279:512:1151-1317",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9586061731330571,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_031268125.1:c279:512:1338-1401",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 5.762286116207591e-06,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_031275485.1:c16:7680:7999-8091",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 4.6018834542588815e-06,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_031275485.1:c16:7680:8106-8169",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 6.872184002854988e-06,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_031275485.1:c62:38912:39281-39342",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 6.352218623355867e-06,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_031275485.1:c62:38912:39475-39526",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 1.7294854571212636e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_031458695.1:c0:292864:293279-293435",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.8101331034524043,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_031458695.1:c0:320512:321063-321291",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9906787503448922,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_031458695.1:c0:320512:321311-321432",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.00013547507119792375,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_031458695.1:c0:321024:321063-321291",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9906787503448922,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_031458695.1:c0:321024:321311-321436",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.0008393592402167081,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_031458695.1:c12:26112:26834-26892",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 1.8553698170298223e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_031458695.1:c12:26624:26816-26892",
+      "covariation_status": "passed",
+      "stage2_posterior": 4.1837917943900815e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_031458695.1:c12:26624:26987-27146",
+      "covariation_status": "failed",
+      "stage2_posterior": 0.9979495098836898,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_031458695.1:c13:39936:40783-40842",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 1.514610789345312e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_031458695.1:c13:40448:40758-40873",
+      "covariation_status": "failed",
+      "stage2_posterior": 7.736044477417271e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_031458695.1:c13:40448:40890-41056",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.2274572264452178,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_031458695.1:c14:39936:40433-40558",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 7.800293289268214e-06,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_031458695.1:c14:39936:40574-40722",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9984700628367441,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_031458695.1:c14:40448:40451-40558",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 5.7839925378319155e-06,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_031458695.1:c14:40448:40574-40722",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9984700628367441,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_031458695.1:c16:39424:40088-40180",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.34007594662546964,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_031458695.1:c16:39936:40082-40319",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9974740300981185,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_031458695.1:c16:39936:40402-40486",
+      "covariation_status": "passed",
+      "stage2_posterior": 7.486496688550479e-06,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_031458695.1:c1:25088:25707-25834",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 1.2465513668512199e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_031458695.1:c1:25088:25883-26032",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 6.046865131460811e-06,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_031458695.1:c1:25600:25718-25834",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 2.358254220487647e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_031458695.1:c1:25600:25883-26040",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 6.6876867996600805e-06,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_031458695.1:c1:27648:28233-28406",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 1.4397195452727944e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_031458695.1:c1:27648:28424-28579",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 6.525528137101032e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_031458695.1:c1:28160:28289-28403",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 6.29872931109414e-06,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_031458695.1:c1:28160:28424-28524",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 5.641836320369192e-06,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_031458695.1:c25:18432:18961-19134",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.014816864310096236,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_031458695.1:c25:18432:19155-19292",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9996726222749988,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_031458695.1:c25:18944:18981-19134",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.008188541651378773,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_031458695.1:c25:18944:19155-19292",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9996726222749988,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_031458695.1:c40:12800:13477-13545",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 4.639659736872203e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_031458695.1:c40:12800:13562-13722",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9788176644562395,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_031458695.1:c40:13312:13453-13545",
+      "covariation_status": "passed",
+      "stage2_posterior": 2.8106488945534517e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_031458695.1:c40:13312:13562-13722",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9788176644562395,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_031458695.1:c45:1536:2447-2537",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.0002668701301831631,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_031458695.1:c45:2048:2442-2594",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9982137447414691,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_031458695.1:c45:2048:2611-2710",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 1.0847991005313543e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_031458695.1:c5:29184:29671-29755",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 5.169997911464705e-06,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_031458695.1:c5:29184:29771-29980",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9980019438660871,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_031458695.1:c5:29696:29771-29829",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 5.007818814356478e-06,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_031458695.1:c5:98304:99022-99105",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 2.4925883813047693e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_031458695.1:c5:98304:99164-99314",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.10567893147242778,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_031458695.1:c5:98760:99022-99105",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 2.4925883813047693e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_031458695.1:c5:98760:99164-99314",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.10567893147242778,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_031458695.1:c9:67072:67610-67719",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 6.0543522451178505e-06,
+      "synteny_status": "failed"
+    },
+    {
+      "candidate_id": "GCA_031458695.1:c9:67072:67736-67885",
+      "covariation_status": "passed",
+      "stage2_posterior": 0.999023366377241,
+      "synteny_status": "failed"
+    },
+    {
+      "candidate_id": "GCA_031458695.1:c9:67584:67610-67719",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 6.0543522451178505e-06,
+      "synteny_status": "failed"
+    },
+    {
+      "candidate_id": "GCA_031458695.1:c9:67584:67736-67885",
+      "covariation_status": "passed",
+      "stage2_posterior": 0.999023366377241,
+      "synteny_status": "failed"
+    },
+    {
+      "candidate_id": "GCA_031459235.1:c10:7168:7599-7738",
+      "covariation_status": "passed",
+      "stage2_posterior": 7.924447187160703e-06,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_031459235.1:c10:7168:7755-7877",
+      "covariation_status": "failed",
+      "stage2_posterior": 3.260037044982093e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_031459235.1:c14:13824:14324-14500",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 1.2782637372900714e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_031459235.1:c14:13824:14516-14631",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 9.344144710302496e-06,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_031459235.1:c14:14336:14370-14500",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 5.720006814731129e-06,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_031459235.1:c14:14336:14517-14631",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 8.800835508576821e-06,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_031459235.1:c19:31744:32008-32174",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 1.0979074370405153e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_031459235.1:c19:31744:32190-32351",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 9.246509529463255e-06,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_031459235.1:c24:23040:23853-23986",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.00034427874087833345,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_031459235.1:c24:23040:24001-24060",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 5.209296250089231e-06,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_031459235.1:c24:23552:23848-23986",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.0013672834703200897,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_031459235.1:c24:23552:24001-24091",
+      "covariation_status": "passed",
+      "stage2_posterior": 1.0115507093733817e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_031459235.1:c2:57856:58598-58673",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 6.832475246939838e-06,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_031459235.1:c2:57856:58689-58820",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.0005495725551319764,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_031459235.1:c2:58368:58598-58673",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 6.832475246939838e-06,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_031459235.1:c2:58368:58689-58820",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.0005495725551319764,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_031459235.1:c3:58880:59407-59550",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 1.1318986679800066e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_031459235.1:c3:58880:59567-59687",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 7.834018193462194e-06,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_031459235.1:c56:3584:3980-4118",
+      "covariation_status": "failed",
+      "stage2_posterior": 0.016308575273052052,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_031459235.1:c56:3584:4133-4209",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 5.5483438237819056e-06,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_031459235.1:c6:48640:49147-49269",
+      "covariation_status": "passed",
+      "stage2_posterior": 1.2542436881636944e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_031459235.1:c6:48640:49322-49460",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.0021582847916522103,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_031459235.1:c74:2560:3305-3396",
+      "covariation_status": "passed",
+      "stage2_posterior": 7.020755464608656e-06,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_031459235.1:c74:2560:3413-3524",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 5.570515675362691e-06,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_031459235.1:c74:3072:3305-3396",
+      "covariation_status": "passed",
+      "stage2_posterior": 7.020755464608656e-06,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_031459235.1:c74:3072:3413-3526",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 5.980406382416205e-06,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_031459235.1:c74:5120:5547-5636",
+      "covariation_status": "passed",
+      "stage2_posterior": 1.1504828901272575e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_031459235.1:c74:5120:5653-5834",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 7.879923163480872e-06,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_031459235.1:c82:6144:6758-6848",
+      "covariation_status": "passed",
+      "stage2_posterior": 7.463510029432117e-06,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_031459235.1:c82:6144:6865-7017",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 1.9823818789438834e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_031459235.1:c82:6656:6758-6848",
+      "covariation_status": "passed",
+      "stage2_posterior": 7.470090064202492e-06,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_031459235.1:c82:6656:6865-7017",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 1.9823818789438834e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_031459235.1:c86:6144:6438-6592",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.04251428740676404,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_031459855.1:c0:1113088:1113361-1113551",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 5.856865897950521e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_031459855.1:c0:1113088:1113568-1113678",
+      "covariation_status": "passed",
+      "stage2_posterior": 9.084673612135108e-06,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_031459855.1:c0:1156096:1156615-1156770",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9936217036464319,
+      "synteny_status": "failed"
+    },
+    {
+      "candidate_id": "GCA_031459855.1:c0:1156096:1156793-1156915",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 7.18224844178223e-06,
+      "synteny_status": "failed"
+    },
+    {
+      "candidate_id": "GCA_031459855.1:c0:1156608:1156671-1156769",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 5.048652706528666e-06,
+      "synteny_status": "failed"
+    },
+    {
+      "candidate_id": "GCA_031459855.1:c0:1156608:1156793-1156915",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 7.18224844178223e-06,
+      "synteny_status": "failed"
+    },
+    {
+      "candidate_id": "GCA_031459855.1:c0:2435584:2435926-2436092",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 1.896310060064867e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_031459855.1:c0:2435584:2436109-2436208",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 4.3378398467490974e-06,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_031459855.1:c0:245248:245717-245801",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 1.1384807773785598e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_031459855.1:c0:245248:245816-245970",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 2.0985085831183445e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_031459855.1:c0:2465792:2466316-2466469",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.46424761626154437,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_031459855.1:c0:2465792:2466487-2466563",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 1.2684489156431497e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_031459855.1:c0:2466304:2466316-2466469",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.46424761626154437,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_031459855.1:c0:2466304:2466487-2466563",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 1.2684489156431497e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_031459855.1:c0:2530816:2531481-2531623",
+      "covariation_status": "passed",
+      "stage2_posterior": 4.977531696231196e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_031459855.1:c0:2530816:2531640-2531804",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.0007834234441149147,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_031459855.1:c0:2531328:2531481-2531623",
+      "covariation_status": "passed",
+      "stage2_posterior": 4.977531696231196e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_031459855.1:c0:2531328:2531640-2531804",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.0007834234441149147,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_031459855.1:c0:2629120:2629876-2630019",
+      "covariation_status": "passed",
+      "stage2_posterior": 0.04443535055871909,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_031459855.1:c0:2629120:2630044-2630137",
+      "covariation_status": "passed",
+      "stage2_posterior": 8.466876369665076e-06,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_031459855.1:c0:2629632:2629876-2630018",
+      "covariation_status": "passed",
+      "stage2_posterior": 0.05287846734302923,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_031459855.1:c0:2629632:2630034-2630154",
+      "covariation_status": "passed",
+      "stage2_posterior": 9.587783456806405e-06,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_031459855.1:c0:2700288:2700752-2700920",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.0022001627574452834,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_031459855.1:c0:2700288:2700934-2701080",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.02382451053408264,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_031459855.1:c0:2700800:2700803-2700920",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 7.865231738757963e-06,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_031459855.1:c0:2700800:2700934-2701076",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.0009741275555215244,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_031459855.1:c0:2986496:2986889-2987002",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 5.473031772633129e-06,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_031459855.1:c0:2986496:2987017-2987187",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 6.552446947812323e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_031459855.1:c0:2987008:2987017-2987187",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 6.552446947812323e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_031459855.1:c0:524800:524997-525058",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 4.731959163800414e-06,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_031459855.1:c0:524800:525094-525235",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 3.649457068681161e-05,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_031459855.1:c0:892416:893161-893304",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.00019499573206033824,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_031459855.1:c0:892416:893319-893418",
+      "covariation_status": "passed",
+      "stage2_posterior": 4.862815858637801e-06,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_031459855.1:c0:892928:893161-893304",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.00019499573206033824,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_031459855.1:c0:892928:893319-893411",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 4.957104834835442e-06,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_035252115.1:c147:10240:10600-10695",
+      "covariation_status": "passed",
+      "stage2_posterior": 7.919380262868975e-06,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_035252115.1:c147:10240:10715-10850",
+      "covariation_status": "passed",
+      "stage2_posterior": 0.9335700345772517,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_035252115.1:c147:10752:10758-10850",
+      "covariation_status": "failed",
+      "stage2_posterior": 8.811710403896825e-06,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_035295045.1:c172:23478:23927-24038",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 5.0066926385259546e-06,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_035295045.1:c172:23478:24054-24173",
+      "covariation_status": "failed",
+      "stage2_posterior": 0.00511825054940481,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_035295045.1:c390:11264:11916-12075",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.997281629799138,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_035295045.1:c390:11264:12124-12259",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 1.0144557792712858e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_035295045.1:c390:11776:11916-12075",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.997281629799138,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_035295045.1:c390:11776:12124-12259",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 1.0144557792712858e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_035378845.1:c13:35328:35812-35898",
+      "covariation_status": "passed",
+      "stage2_posterior": 6.552030624070303e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_035378845.1:c13:35328:35913-36050",
+      "covariation_status": "passed",
+      "stage2_posterior": 0.9976310209443559,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_035378845.1:c13:35840:35913-36048",
+      "covariation_status": "passed",
+      "stage2_posterior": 0.9978992340538159,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_035378845.1:c1:89088:89859-89941",
+      "covariation_status": "passed",
+      "stage2_posterior": 0.00021233145421526526,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_035378845.1:c1:89088:90054-90112",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 8.502232040018746e-06,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_035378845.1:c1:89600:89859-89941",
+      "covariation_status": "passed",
+      "stage2_posterior": 0.00021233145421526526,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_035378845.1:c1:89600:89997-90150",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9980819392810067,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_035378845.1:c2:28160:28885-29038",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9996182290425545,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_035378845.1:c2:28160:29054-29123",
+      "covariation_status": "failed",
+      "stage2_posterior": 0.00019564474816757875,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_035378845.1:c2:28672:28885-29038",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9996182290425545,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_035378845.1:c2:28672:29054-29123",
+      "covariation_status": "failed",
+      "stage2_posterior": 0.00019564474816757875,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_035477455.1:c116:21504:21817-21960",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 6.974587862625266e-06,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_035477455.1:c116:21504:21979-22056",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 1.273028054270423e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_035477455.1:c123:10752:11401-11537",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.0003049690063752183,
+      "synteny_status": "failed"
+    },
+    {
+      "candidate_id": "GCA_035477455.1:c123:10752:11550-11618",
+      "covariation_status": "passed",
+      "stage2_posterior": 6.250348693812691e-05,
+      "synteny_status": "failed"
+    },
+    {
+      "candidate_id": "GCA_035477455.1:c123:11264:11401-11537",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.0003049690063752183,
+      "synteny_status": "failed"
+    },
+    {
+      "candidate_id": "GCA_035477455.1:c123:11264:11551-11618",
+      "covariation_status": "passed",
+      "stage2_posterior": 9.607648848449411e-05,
+      "synteny_status": "failed"
+    },
+    {
+      "candidate_id": "GCA_035477455.1:c158:12288:12982-13126",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 1.1327639767489235e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_035477455.1:c158:12288:13172-13252",
+      "covariation_status": "passed",
+      "stage2_posterior": 0.00014600882978173043,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_035477455.1:c158:12800:12982-13126",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 1.1327639767489235e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_035477455.1:c158:12800:13172-13252",
+      "covariation_status": "passed",
+      "stage2_posterior": 0.00014600882978173043,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_035477455.1:c25:5632:6003-6146",
+      "covariation_status": "passed",
+      "stage2_posterior": 0.9949781786495812,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_035477455.1:c25:5632:6190-6266",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 1.575508634860634e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_035477455.1:c2:9216:10043-10112",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.0003954817351227906,
+      "synteny_status": "failed"
+    },
+    {
+      "candidate_id": "GCA_035477455.1:c2:9216:10127-10240",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 6.127439571296198e-06,
+      "synteny_status": "failed"
+    },
+    {
+      "candidate_id": "GCA_035477455.1:c2:9728:10043-10112",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.0003954817351227906,
+      "synteny_status": "failed"
+    },
+    {
+      "candidate_id": "GCA_035477455.1:c2:9728:10127-10276",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.00018093149413498448,
+      "synteny_status": "failed"
+    },
+    {
+      "candidate_id": "GCA_035477595.1:c140:13312:13662-13808",
+      "covariation_status": "failed",
+      "stage2_posterior": 0.9948993854327781,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_035477595.1:c140:13312:13825-13942",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 9.235607659411139e-06,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_035477595.1:c175:34816:35339-35488",
+      "covariation_status": "passed",
+      "stage2_posterior": 0.9614224576604125,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_035477595.1:c175:34816:35504-35615",
+      "covariation_status": "passed",
+      "stage2_posterior": 1.9426523910791266e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_035477595.1:c175:35328:35339-35488",
+      "covariation_status": "passed",
+      "stage2_posterior": 0.9614224576604125,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_035477595.1:c175:35328:35504-35615",
+      "covariation_status": "passed",
+      "stage2_posterior": 1.9426523910791266e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_036675025.1:c237:512:896-978",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 7.077180247936106e-06,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_036675025.1:c237:512:994-1140",
+      "covariation_status": "passed",
+      "stage2_posterior": 0.9984162855923897,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_038842485.1:c4:10752:11392-11488",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 6.553671649701718e-06,
+      "synteny_status": "failed"
+    },
+    {
+      "candidate_id": "GCA_039638295.1:c10:0:153-238",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 7.664330101289276e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_039638295.1:c10:0:283-374",
+      "covariation_status": "failed",
+      "stage2_posterior": 0.0176762172634508,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_039638295.1:c17:11264:11948-12055",
+      "covariation_status": "failed",
+      "stage2_posterior": 0.8830442870728273,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_039638295.1:c17:11264:12073-12213",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 1.485420377254233e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_039638295.1:c17:11776:11948-12055",
+      "covariation_status": "failed",
+      "stage2_posterior": 0.8830442870728273,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_039638295.1:c17:11776:12073-12215",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 1.7913379154614466e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_039638295.1:c17:15360:15672-15782",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.8131505893395139,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_039638295.1:c17:15360:15801-15944",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9846324319824724,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_039638295.1:c17:19456:19923-19989",
+      "covariation_status": "failed",
+      "stage2_posterior": 0.17941454450731753,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_039638295.1:c17:19456:20129-20282",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9897803583297354,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_039638295.1:c17:19968:20129-20282",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9897803583297354,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_039638295.1:c1:62464:63112-63201",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 8.512007582091956e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_039638295.1:c1:62464:63255-63390",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.00031981758549421254,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_039638295.1:c1:62976:63112-63201",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 8.512007582091956e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_039638295.1:c1:62976:63255-63384",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 2.1759256811383295e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_039638295.1:c20:10752:11491-11609",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 1.855251926600017e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_039638295.1:c20:10752:11628-11713",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.005920009039083721,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_039638295.1:c20:11264:11491-11609",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 1.855251926600017e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_039638295.1:c20:11264:11628-11713",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.005920009039083721,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_039638295.1:c2:30720:31396-31503",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 1.299006650584846e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_039638295.1:c2:30720:31524-31629",
+      "covariation_status": "passed",
+      "stage2_posterior": 0.5171969449689338,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_039638295.1:c2:31232:31396-31503",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 1.299006650584846e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_039638295.1:c2:31232:31524-31629",
+      "covariation_status": "passed",
+      "stage2_posterior": 0.5171969449689338,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_039638295.1:c38:14477:15233-15353",
+      "covariation_status": "passed",
+      "stage2_posterior": 0.9837153499492078,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_039638295.1:c38:14477:15374-15478",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 5.656005359171372e-06,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_039638295.1:c5:38912:39654-39768",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 8.945939341937667e-06,
+      "synteny_status": "failed"
+    },
+    {
+      "candidate_id": "GCA_039638295.1:c5:38912:39795-39893",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.2350251899184107,
+      "synteny_status": "failed"
+    },
+    {
+      "candidate_id": "GCA_039638295.1:c5:39424:39652-39768",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 1.0796668505959581e-05,
+      "synteny_status": "failed"
+    },
+    {
+      "candidate_id": "GCA_039638295.1:c5:39424:39795-39893",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.2350251899184107,
+      "synteny_status": "failed"
+    },
+    {
+      "candidate_id": "GCA_039638295.1:c5:7168:7460-7600",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9989755638555372,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_039638295.1:c5:7168:7656-7745",
+      "covariation_status": "failed",
+      "stage2_posterior": 0.0031885609469382787,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_039638295.1:c67:3584:3891-3985",
+      "covariation_status": "failed",
+      "stage2_posterior": 0.8818906973154067,
+      "synteny_status": "failed"
+    },
+    {
+      "candidate_id": "GCA_039638295.1:c67:3584:4006-4137",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.4267666112295742,
+      "synteny_status": "failed"
+    },
+    {
+      "candidate_id": "GCA_039638295.1:c67:3924:3929-3985",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.0001546109349325143,
+      "synteny_status": "failed"
+    },
+    {
+      "candidate_id": "GCA_039638295.1:c67:3924:4006-4137",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.4267666112295742,
+      "synteny_status": "failed"
+    },
+    {
+      "candidate_id": "GCA_039638295.1:c72:0:75-164",
+      "covariation_status": "failed",
+      "stage2_posterior": 0.0017394016418320491,
+      "synteny_status": "failed"
+    },
+    {
+      "candidate_id": "GCA_040062795.1:c0:1121280:1121812-1121921",
+      "covariation_status": "passed",
+      "stage2_posterior": 0.2485902550474453,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_040062795.1:c0:1121280:1121949-1122035",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 2.7576568188583333e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_040062795.1:c0:1121792:1121812-1121921",
+      "covariation_status": "passed",
+      "stage2_posterior": 0.2485902550474453,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_040062795.1:c0:1121792:1121949-1122035",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 2.7576568188583333e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_040062795.1:c0:1135616:1136219-1136307",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 1.3442337836253656e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_040062795.1:c0:1135616:1136323-1136450",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.0003347083870332227,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_040062795.1:c0:1136128:1136219-1136307",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 1.3442337836253656e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_040062795.1:c0:1136128:1136323-1136449",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.0002599225123371283,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_040062795.1:c0:1162752:1163328-1163412",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.00022454425607486053,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_040062795.1:c0:1162752:1163431-1163586",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9990042916563202,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_040062795.1:c0:1163264:1163328-1163412",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.00022454425607486053,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_040062795.1:c0:1163264:1163431-1163586",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9990042916563202,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_040062795.1:c0:1182208:1182818-1182902",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.08405140849399803,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_040062795.1:c0:1182208:1182919-1183043",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 7.092265305513223e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_040062795.1:c0:1182720:1182818-1182902",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.08405140849399803,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_040062795.1:c0:1182720:1182919-1183043",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 7.092265305513223e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_040062795.1:c0:1240576:1241294-1241347",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.00011106080174058097,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_040062795.1:c0:1240576:1241371-1241494",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.1039865465856016,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_040062795.1:c0:1241088:1241294-1241347",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.00011084755096024724,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_040062795.1:c0:1241088:1241371-1241494",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.1039865465856016,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_040062795.1:c0:1273856:1274499-1274579",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.00018494379297421404,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_040062795.1:c0:1273856:1274597-1274714",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.1617702099284459,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_040062795.1:c0:1274368:1274499-1274579",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.00018494379297421404,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_040062795.1:c0:1274368:1274597-1274715",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.24334047444261186,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_040062795.1:c0:14848:15489-15617",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.0018769306711562182,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_040062795.1:c0:14848:15644-15722",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 1.7638184954730604e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_040062795.1:c0:15360:15489-15617",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.0018769306711562182,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_040062795.1:c0:15360:15643-15722",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 1.690068360290798e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_040062795.1:c0:585728:586376-586510",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 1.1480825626798234e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_040062795.1:c0:585728:586529-586603",
+      "covariation_status": "passed",
+      "stage2_posterior": 0.00042285286972515055,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_040062795.1:c0:586240:586376-586510",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 1.1480825626798234e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_040062795.1:c0:586240:586529-586603",
+      "covariation_status": "passed",
+      "stage2_posterior": 0.00042285286972515055,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_040062795.1:c0:634880:635599-635684",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 8.288617427442819e-06,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_040062795.1:c0:634880:635709-635783",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 8.254260464539054e-06,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_040062795.1:c0:635392:635597-635684",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 7.866112977457617e-06,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_040062795.1:c0:635392:635709-635783",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 8.254260464539054e-06,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_040062795.1:c0:849408:850177-850250",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.005003437779817687,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_040062795.1:c0:849920:850069-850148",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 6.095663691713896e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_040062795.1:c0:849920:850177-850265",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.00024275938083505855,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_040062795.1:c2:131584:132130-132220",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9930467054789056,
+      "synteny_status": "failed"
+    },
+    {
+      "candidate_id": "GCA_040062795.1:c2:221696:222062-222180",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.11553371465527398,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_040062795.1:c2:221696:222196-222270",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 1.0292926219204431e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_040905065.1:c256:4899:5781-5916",
+      "covariation_status": "failed",
+      "stage2_posterior": 5.8067516406086355e-06,
+      "synteny_status": "failed"
+    },
+    {
+      "candidate_id": "GCA_041616875.1:c30:15872:16518-16611",
+      "covariation_status": "passed",
+      "stage2_posterior": 1.047006006380883e-05,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_041616875.1:c30:15872:16630-16813",
+      "covariation_status": "failed",
+      "stage2_posterior": 0.9385332001482568,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_041616875.1:c30:16384:16518-16612",
+      "covariation_status": "passed",
+      "stage2_posterior": 8.998540338019942e-06,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_041616875.1:c30:16384:16630-16813",
+      "covariation_status": "failed",
+      "stage2_posterior": 0.9385332001482568,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_041656455.1:c158:0:219-327",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 1.4346439703894798e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_041656455.1:c158:0:61-201",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9987583044289611,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_041670175.1:c22:3584:3962-4091",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 1.71211581283958e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_041670175.1:c22:3584:4107-4249",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.8861112415075503,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_041670175.1:c22:4096:4162-4246",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 4.3848308805640365e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_045579125.1:c112:5632:6123-6200",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 2.4071108687179208e-05,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_045579125.1:c112:5632:6218-6360",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9974847615875165,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_045579125.1:c112:6144:6144-6200",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.0001533087012223498,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_045579125.1:c112:6144:6218-6360",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9974847615875165,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_045579125.1:c112:8704:9474-9614",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9410073340224211,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_045579125.1:c112:8704:9628-9690",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 6.7899750797229216e-06,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_045579125.1:c112:9216:9474-9614",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9410073340224211,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_045579125.1:c112:9216:9628-9704",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 9.233970785738407e-06,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_045579125.1:c161:7168:7906-8041",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9893100902864195,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_045579125.1:c161:7168:8072-8151",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 7.908018822960857e-05,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_045579125.1:c161:7680:7906-8041",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9893100902864195,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_045579125.1:c161:7680:8072-8151",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 7.908018822960857e-05,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_045579125.1:c204:3072:3917-3988",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 4.5883905018510285e-06,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_045579125.1:c204:3584:3843-3988",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9091378167895121,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_045579125.1:c204:3584:4022-4116",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 1.7446403905305532e-05,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_045579125.1:c216:1536:2367-2419",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 4.667629998605751e-05,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_045579125.1:c216:2048:2348-2420",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 6.563675743140519e-05,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_045579125.1:c216:2048:2456-2598",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9984102568963191,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_045579125.1:c51:2048:2600-2674",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 1.826356641955496e-05,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_045579125.1:c51:2048:2690-2824",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9995017927822671,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_045579125.1:c51:2560:2600-2674",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 1.826356641955496e-05,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_045579125.1:c51:2560:2690-2824",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9995017927822671,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_049718665.1:c4:71111:71678-71783",
+      "covariation_status": "passed",
+      "stage2_posterior": 0.9963170237970851,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_049718665.1:c4:71111:71837-71993",
+      "covariation_status": "failed",
+      "stage2_posterior": 0.9980064095542435,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_049718665.1:c7:35840:36428-36493",
+      "covariation_status": "failed",
+      "stage2_posterior": 1.718658645366294e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_049718665.1:c7:35840:36509-36660",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9974423192260875,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_049718665.1:c7:36352:36428-36493",
+      "covariation_status": "failed",
+      "stage2_posterior": 1.718658645366294e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_049718665.1:c7:36352:36509-36660",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9974423192260875,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_049718665.1:c8:16384:16837-16914",
+      "covariation_status": "failed",
+      "stage2_posterior": 4.202484264564449e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_049718665.1:c8:16384:16929-17096",
+      "covariation_status": "passed",
+      "stage2_posterior": 0.9989560923928538,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_049718665.1:c8:36864:37621-37776",
+      "covariation_status": "failed",
+      "stage2_posterior": 0.9979162542177762,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_049718665.1:c8:36864:37830-37886",
+      "covariation_status": "failed",
+      "stage2_posterior": 0.0014020008081043114,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_049718665.1:c8:37376:37620-37776",
+      "covariation_status": "failed",
+      "stage2_posterior": 0.9980064095542435,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_049718665.1:c8:37376:37830-37907",
+      "covariation_status": "passed",
+      "stage2_posterior": 0.0052767616563146585,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCA_900320995.1:c104:1024:1364-1434",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 2.0865942615671035e-05,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_900320995.1:c104:1024:1466-1597",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9991748785200071,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_900320995.1:c145:4096:4581-4656",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 2.8198473507935928e-05,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_900320995.1:c145:4096:4673-4793",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 6.226909178675489e-06,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_900320995.1:c145:4608:4673-4791",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 9.225412810358216e-06,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_900320995.1:c237:1024:1801-1890",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.00010940105608387507,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_900320995.1:c237:1536:1801-1890",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.00010940105608387507,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_900320995.1:c252:0:259-339",
+      "covariation_status": "failed",
+      "stage2_posterior": 5.011521738526062e-05,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_900320995.1:c252:0:31-223",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9960480416086671,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_900320995.1:c282:0:254-399",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 3.733225367552354e-05,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_900320995.1:c45:9216:9809-9893",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 5.035883053614053e-06,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_900320995.1:c45:9728:9809-9859",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 6.539068730250723e-06,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_900320995.1:c45:9799:9810-9861",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 6.0774027633275125e-06,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_900320995.1:c59:11264:11555-11641",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 3.467583493722234e-05,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_900320995.1:c59:11264:11745-11898",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9796447291827755,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_900320995.1:c59:7168:7931-7991",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 2.3610852810060955e-05,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_900320995.1:c59:7680:7899-7992",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 2.6522684373870845e-05,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_900320995.1:c59:7680:8094-8242",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.018109960440788764,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_900320995.1:c88:4608:5316-5394",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 5.463956031591022e-06,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_900320995.1:c88:5120:5291-5448",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.0021411515035463908,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_900320995.1:c88:5120:5465-5702",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9994621172622699,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_934527255.1:c109:4096:4745-4896",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9949452017087684,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_934527255.1:c109:4096:4929-5030",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 1.709778389031372e-05,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_934527255.1:c109:4608:4745-4896",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9949452017087684,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_934527255.1:c109:4608:4928-5032",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 1.6255700186782228e-05,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_934527255.1:c162:1024:1367-1520",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9950877870129453,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_934527255.1:c162:512:1367-1516",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9741793024342854,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_934527255.1:c17:22528:23175-23329",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9995702066523647,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_934527255.1:c17:22528:23347-23424",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 2.797702614144178e-05,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_934527255.1:c17:23040:23175-23329",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9995702066523647,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_934527255.1:c17:23040:23347-23424",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 2.797702614144178e-05,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_934527255.1:c204:1339:2033-2167",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 1.2987525325810358e-05,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_934527255.1:c204:1339:2184-2269",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 1.7864037968316798e-05,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_934527255.1:c231:0:507-601",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 1.717851275049225e-05,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_934527255.1:c231:0:633-777",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9907781712041599,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_934527255.1:c231:512:513-601",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 1.1798035783488383e-05,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_934527255.1:c231:512:633-777",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9907781712041599,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_934527255.1:c31:7680:8302-8385",
+      "covariation_status": "failed",
+      "stage2_posterior": 2.5492765109793968e-05,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_934527255.1:c31:7680:8404-8532",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 1.4410900383880064e-05,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_934527255.1:c31:8192:8302-8385",
+      "covariation_status": "failed",
+      "stage2_posterior": 2.5492765109793968e-05,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_934527255.1:c31:8192:8404-8532",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 1.4410900383880064e-05,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_934527255.1:c37:1024:1864-1956",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.0007319062607580898,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_934527255.1:c37:1536:1862-2009",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9933893031635508,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_934527255.1:c37:1536:2025-2124",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 1.9924264007666607e-05,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_934527255.1:c42:11776:12603-12685",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 7.247153849445613e-06,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_934527255.1:c42:12288:12597-12739",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9982347645219614,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_934527255.1:c42:12288:12777-12868",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 1.038010857029909e-05,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_934527255.1:c57:3584:3955-4071",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 1.6200925363426077e-05,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_934527255.1:c57:3584:4089-4190",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 1.335098487654468e-05,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_934527255.1:c59:5632:5929-6015",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 8.596679023142232e-06,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_934527255.1:c59:5632:6065-6207",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9943664231281049,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_937860145.1:c200:25088:25724-25860",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.0002565363229849966,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_937860145.1:c200:25088:25876-26008",
+      "covariation_status": "passed",
+      "stage2_posterior": 0.9863774816238554,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_937860145.1:c200:25600:25724-25860",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.0002565363229849966,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_937860145.1:c200:25600:25876-26008",
+      "covariation_status": "passed",
+      "stage2_posterior": 0.9863774816238554,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_937871925.1:c103:0:267-387",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 3.34416739977973e-05,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_937871925.1:c103:0:402-491",
+      "covariation_status": "passed",
+      "stage2_posterior": 0.3836398336233293,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_937871925.1:c103:126:267-387",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 3.34416739977973e-05,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_937871925.1:c103:126:402-491",
+      "covariation_status": "passed",
+      "stage2_posterior": 0.3836398336233293,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_938039765.1:c165:14336:14744-14892",
+      "covariation_status": "passed",
+      "stage2_posterior": 0.9993808756906332,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_938039765.1:c165:14336:14908-14979",
+      "covariation_status": "passed",
+      "stage2_posterior": 1.7327854619588576e-05,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_938039765.1:c207:10240:10890-10964",
+      "covariation_status": "passed",
+      "stage2_posterior": 8.280325440871366e-05,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_938039765.1:c207:10240:11021-11176",
+      "covariation_status": "failed",
+      "stage2_posterior": 0.9977457701372398,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_938039765.1:c207:10752:10890-10964",
+      "covariation_status": "passed",
+      "stage2_posterior": 8.280325440871366e-05,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_938039765.1:c207:10752:11021-11176",
+      "covariation_status": "failed",
+      "stage2_posterior": 0.9977457701372398,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_938039765.1:c242:1536:2202-2341",
+      "covariation_status": "passed",
+      "stage2_posterior": 0.9992276710092153,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_938039765.1:c242:1536:2356-2440",
+      "covariation_status": "passed",
+      "stage2_posterior": 2.041479408192533e-05,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_938039765.1:c242:2048:2202-2341",
+      "covariation_status": "passed",
+      "stage2_posterior": 0.9992276710092153,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_938039765.1:c242:2048:2356-2440",
+      "covariation_status": "passed",
+      "stage2_posterior": 2.041479408192533e-05,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_946403625.1:c108:3072:3784-3881",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 4.137617263844531e-05,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_946403625.1:c108:3072:3897-4050",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9969666390674308,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_946403625.1:c108:3584:3784-3881",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 4.137617263844531e-05,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_946403625.1:c108:3584:3897-4050",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9969666390674308,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_946403625.1:c139:4096:4652-4737",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 6.119524377720892e-06,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_946403625.1:c139:4096:4772-4933",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.272559835362412,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_946403625.1:c139:4608:4655-4737",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 5.922496648624559e-06,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_946403625.1:c139:4608:4772-4831",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 6.3983255844109735e-06,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_946403625.1:c15:36352:36873-37032",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.00012445217609403158,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_946403625.1:c15:36352:37050-37150",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 1.610555018812594e-05,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_946403625.1:c15:36864:36873-37032",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.00012445217609403158,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_946403625.1:c15:36864:37050-37150",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 1.610555018812594e-05,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_946403625.1:c54:4096:4542-4628",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 2.0032954771754517e-05,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_946403625.1:c54:4096:4666-4812",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9922499002434434,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_946403625.1:c54:4608:4666-4812",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9922499002434434,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_946403625.1:c57:2048:2420-2503",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 1.6434626131751555e-05,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_946403625.1:c57:2048:2526-2686",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.0006148951766460623,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_949300325.1:c1:42496:43132-43272",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.996918888163992,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_949300325.1:c1:42496:43287-43389",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 1.8660200505499957e-05,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_949300325.1:c1:43008:43132-43271",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.996626579082441,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_949300325.1:c1:43008:43287-43389",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 1.8660200505499957e-05,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_949740745.1:c12:2048:2760-2840",
+      "covariation_status": "passed",
+      "stage2_posterior": 1.908109201868969e-05,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_949740745.1:c12:2048:2858-3039",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9945398838403644,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_949740745.1:c12:2560:2760-2840",
+      "covariation_status": "passed",
+      "stage2_posterior": 1.908109201868969e-05,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_949740745.1:c12:2560:2858-3039",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9945398838403644,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_949740745.1:c132:0:451-543",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 4.401035052249248e-05,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_949740745.1:c132:0:564-714",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9972743737070239,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_949740745.1:c212:6656:7082-7160",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 2.539028145690011e-05,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_949740745.1:c212:6656:7202-7371",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9983848089298809,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_949740745.1:c212:7168:7252-7371",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9537745231638409,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_949740745.1:c238:0:713-788",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.00012559634041369336,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_949740745.1:c238:0:806-1004",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9992485139389216,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_949740745.1:c238:512:713-788",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.00012559634041369336,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_949740745.1:c238:512:806-1008",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9994206013760571,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_949740745.1:c256:512:1298-1353",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 5.572844893122977e-06,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_949740745.1:c306:1024:1459-1683",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9982757949665494,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_949740745.1:c306:1024:1745-1829",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 1.0449639676148108e-05,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_949740745.1:c306:1324:1459-1683",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9982757949665494,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_949740745.1:c306:1324:1745-1829",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 1.0449639676148108e-05,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_949740745.1:c308:1024:1354-1452",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 1.8912702248555362e-05,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_949740745.1:c308:1024:1467-1671",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9985211730846971,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_949740745.1:c9:0:361-459",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 4.517390532366589e-06,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_949740745.1:c9:0:486-664",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9986484764839108,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_963813295.1:c8:55808:56584-56638",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 6.223921500333338e-06,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_963813295.1:c8:56320:56584-56642",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 7.160315677073373e-06,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_963815215.1:c2:216576:217221-217280",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 4.681838353146428e-06,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_963815215.1:c2:216576:217337-217498",
+      "covariation_status": "failed",
+      "stage2_posterior": 2.394497305172284e-05,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_963815215.1:c2:217088:217215-217280",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 4.304043137620019e-06,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_963815215.1:c2:217088:217337-217498",
+      "covariation_status": "failed",
+      "stage2_posterior": 2.394497305172284e-05,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_963846575.1:c1:225280:225742-225884",
+      "covariation_status": "passed",
+      "stage2_posterior": 0.9948865240900676,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_963846575.1:c1:225280:225901-225995",
+      "covariation_status": "passed",
+      "stage2_posterior": 9.180170126197813e-06,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_964236795.1:c0:173056:173624-173740",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.0003657427007453742,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_964236795.1:c0:173056:173757-173861",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 1.0640896564097972e-05,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_964236795.1:c0:173568:173624-173740",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.0003657427007453742,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_964236795.1:c0:173568:173757-173861",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 1.0631639107709887e-05,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_964236795.1:c25:44032:44799-44942",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.037748719578970774,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_964236795.1:c25:44032:44959-45053",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 2.2510247517286445e-05,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_964236795.1:c25:44544:44799-44942",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.037748719578970774,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_964236795.1:c25:44544:44959-45077",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 4.289614872221419e-05,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_964236795.1:c7:40448:40865-41025",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9977896155816717,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_964236795.1:c7:40448:41082-41185",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 1.4913375375392358e-05,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_964236795.1:c9:69120:69712-69814",
+      "covariation_status": "failed",
+      "stage2_posterior": 6.042306395258616e-05,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_964236795.1:c9:69120:69832-69953",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 3.6338076193724754e-05,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_964236795.1:c9:69632:69712-69814",
+      "covariation_status": "failed",
+      "stage2_posterior": 6.042306395258616e-05,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_964236795.1:c9:69632:69832-69953",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 3.6338076193724754e-05,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_964293175.1:c117:1536:2026-2172",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9952996974167015,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_964293175.1:c117:1536:2190-2319",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 3.6311077493553985e-05,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_964293175.1:c117:2048:2058-2172",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 5.605017437298478e-06,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_964293175.1:c117:2048:2190-2319",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 3.6311077493553985e-05,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_964371705.1:c0:47104:47727-47845",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.0017449234988138255,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_964371705.1:c0:47104:47859-47931",
+      "covariation_status": "failed",
+      "stage2_posterior": 0.0030843018630844735,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_964371705.1:c0:47616:47728-47845",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.0065426176061919,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_964371705.1:c0:47616:47859-47931",
+      "covariation_status": "failed",
+      "stage2_posterior": 0.0030843018630844735,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_964371705.1:c12:9728:10234-10320",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.0034143868297448685,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_964371705.1:c12:9728:10335-10408",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.8593224324921156,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_964371705.1:c14:1024:1605-1715",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9988161062128275,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_964371705.1:c14:1024:1729-1796",
+      "covariation_status": "failed",
+      "stage2_posterior": 0.009400772351333919,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_964371705.1:c14:1536:1605-1712",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9984564682077522,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_964371705.1:c14:1536:1729-1796",
+      "covariation_status": "failed",
+      "stage2_posterior": 0.009400772351333919,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_964371705.1:c15:7168:7918-8030",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.019466649520167165,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_964371705.1:c15:7680:7918-8030",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.019466649520167165,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_964371705.1:c16:10240:10588-10693",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.0026512983927002775,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_964371705.1:c16:10240:10708-10780",
+      "covariation_status": "failed",
+      "stage2_posterior": 0.002984471420005381,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_964371705.1:c16:12800:13246-13339",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 9.131527482671555e-05,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_964371705.1:c16:12800:13355-13437",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 6.284092097983271e-05,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_964371705.1:c27:6656:7417-7528",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9962707552640458,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_964371705.1:c27:7168:7417-7529",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9945721380513208,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_964371705.1:c47:3072:3689-3795",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.2545716875903292,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_964371705.1:c47:3584:3689-3795",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.2545716875903292,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_964371705.1:c5:3584:3959-4042",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.001581591310185735,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_964371705.1:c6:14848:15313-15446",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9992263477754906,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_964396465.1:c114:2048:2550-2695",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 1.1311683094432184e-05,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_964396465.1:c114:2048:2716-2793",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 1.3370243007074254e-05,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_964396465.1:c158:1024:1821-1900",
+      "covariation_status": "failed",
+      "stage2_posterior": 6.766626872845188e-05,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_964396465.1:c158:1024:1926-1997",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 3.994607238511768e-06,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_964396465.1:c158:1536:1821-1900",
+      "covariation_status": "failed",
+      "stage2_posterior": 6.766626872845188e-05,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_964396465.1:c158:1536:1926-2066",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9446646668874465,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_964396465.1:c172:3072:3712-3857",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.6321349900722671,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_964396465.1:c172:3072:3874-3940",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 8.503284181573227e-06,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_964396465.1:c172:3559:3712-3857",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.6321349900722671,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_964396465.1:c172:3559:3874-3940",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 8.503284181573227e-06,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_964396465.1:c237:1024:1044-1117",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 9.93759765950304e-06,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_964396465.1:c237:512:1044-1144",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 1.5365273853474026e-05,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_964396465.1:c237:512:1159-1249",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 6.839213685935823e-06,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_964396465.1:c25:12922:13695-13772",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 5.932527472467087e-06,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_964396465.1:c25:12922:13788-13909",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 5.4049385333795585e-06,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_964396465.1:c51:2048:2367-2456",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 6.0105380336005655e-06,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_964396465.1:c51:2048:2483-2618",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.005717931080725248,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_964396465.1:c52:1536:1826-1878",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 2.2903984596547872e-05,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_964396465.1:c70:7472:8216-8300",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 6.486587057096813e-06,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_964396465.1:c70:7472:8329-8409",
+      "covariation_status": "failed",
+      "stage2_posterior": 9.135767998673428e-06,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_964452225.1:c293:0:449-501",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 1.1067431523639566e-05,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_964452225.1:c361:1024:1757-1926",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 1.0101139636541503e-05,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_964452225.1:c361:1024:1986-2045",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 1.6660244161777442e-05,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_964452225.1:c361:1374:1757-1926",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 1.0101139636541503e-05,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_964452225.1:c361:1374:1986-2095",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.00014900968998464423,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_964452225.1:c89:4608:5273-5437",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 1.7616652796724624e-05,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_964452225.1:c89:4608:5498-5561",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 5.826038433110267e-06,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_964452225.1:c89:5120:5282-5437",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 7.054329631727127e-06,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_964469045.1:c1:0:227-381",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.5363943570696171,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_964469045.1:c1:0:436-522",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 1.2128065576060054e-05,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_964469045.1:c4:49664:50316-50401",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 5.571586994597773e-06,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_964469045.1:c4:49664:50420-50514",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 5.429051449654895e-06,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_964469045.1:c4:50176:50316-50401",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 5.571586994597773e-06,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_964469045.1:c4:50176:50420-50514",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 5.429051449654895e-06,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_964469045.1:c4:79360:79984-80133",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 1.0486617989760777e-05,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_964469045.1:c4:79360:80167-80250",
+      "covariation_status": "passed",
+      "stage2_posterior": 3.6820726708479346e-05,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_964469045.1:c4:79872:79984-80133",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 1.0486617989760777e-05,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_964469045.1:c4:79872:80167-80250",
+      "covariation_status": "passed",
+      "stage2_posterior": 3.6820726708479346e-05,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_964469045.1:c94:2560:3198-3323",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.4477081009662876,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_964469045.1:c94:2560:3339-3423",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 1.6403436881934294e-05,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_964469045.1:c94:3072:3198-3323",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.4477081009662876,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_964469045.1:c94:3072:3339-3423",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 1.6403436881934294e-05,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_964469045.1:c97:1024:1699-1846",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.006115036751169255,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_964469045.1:c97:1024:1861-1936",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 6.761575660867164e-06,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_964469045.1:c97:1536:1699-1846",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.006115036751169255,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_964469045.1:c97:1536:1861-1936",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 6.761575660867164e-06,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_964472775.1:c275:1024:1431-1513",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 6.747615158522861e-06,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_964472775.1:c275:1024:1576-1772",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.000622289095535177,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_964472775.1:c275:1536:1624-1771",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 5.127595202911609e-06,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_965214405.1:c0:2088960:2089301-2089450",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.000498958030389321,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCA_965214405.1:c0:2088960:2089501-2089579",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 1.762421037361813e-05,
+      "synteny_status": "unavailable"
+    },
+    {
+      "candidate_id": "GCF_000020965.1:c0:1037312:1038082-1038221",
+      "covariation_status": "passed",
+      "stage2_posterior": 0.9992276710092153,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_000020965.1:c0:1037312:1038236-1038320",
+      "covariation_status": "passed",
+      "stage2_posterior": 2.041479408192533e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_000020965.1:c0:1037824:1038082-1038221",
+      "covariation_status": "passed",
+      "stage2_posterior": 0.9992276710092153,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_000020965.1:c0:1037824:1038236-1038320",
+      "covariation_status": "passed",
+      "stage2_posterior": 2.041479408192533e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_000020965.1:c0:1115648:1116415-1116496",
+      "covariation_status": "failed",
+      "stage2_posterior": 0.035936759707462136,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_000020965.1:c0:1115648:1116513-1116655",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.998771297732612,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_000020965.1:c0:1116160:1116415-1116496",
+      "covariation_status": "failed",
+      "stage2_posterior": 0.035936759707462136,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_000020965.1:c0:1116160:1116513-1116655",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.998771297732612,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_000020965.1:c0:529408:529990-530145",
+      "covariation_status": "passed",
+      "stage2_posterior": 0.9969705342375452,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_000020965.1:c0:529408:530202-530282",
+      "covariation_status": "passed",
+      "stage2_posterior": 0.00016381161070619485,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_000020965.1:c0:529920:529990-530145",
+      "covariation_status": "passed",
+      "stage2_posterior": 0.9969705342375452,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_000020965.1:c0:529920:530202-530282",
+      "covariation_status": "passed",
+      "stage2_posterior": 0.00016381161070619485,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_000020965.1:c0:875008:875778-875931",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9991378806916809,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_000020965.1:c0:875008:875947-876019",
+      "covariation_status": "passed",
+      "stage2_posterior": 0.0010955445176783153,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_000020965.1:c0:875520:875778-875931",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9991378806916809,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_000020965.1:c0:875520:875947-876019",
+      "covariation_status": "passed",
+      "stage2_posterior": 0.0010955445176783153,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_000021645.1:c0:1042432:1043159-1043309",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9992728479136682,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_000021645.1:c0:1042432:1043325-1043402",
+      "covariation_status": "passed",
+      "stage2_posterior": 0.002087777964622643,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_000021645.1:c0:1042944:1043159-1043309",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9992728479136682,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_000021645.1:c0:1042944:1043325-1043402",
+      "covariation_status": "passed",
+      "stage2_posterior": 0.002087777964622643,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_000021645.1:c0:1204224:1205048-1205182",
+      "covariation_status": "passed",
+      "stage2_posterior": 0.9989595819852981,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_000021645.1:c0:1204736:1205043-1205182",
+      "covariation_status": "passed",
+      "stage2_posterior": 0.9990593690513064,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_000021645.1:c0:1204736:1205197-1205280",
+      "covariation_status": "failed",
+      "stage2_posterior": 4.057008457338867e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_000021645.1:c0:1278976:1279734-1279815",
+      "covariation_status": "failed",
+      "stage2_posterior": 0.022450814641262085,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_000021645.1:c0:1278976:1279832-1279974",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9988398877728464,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_000021645.1:c0:1279488:1279734-1279815",
+      "covariation_status": "failed",
+      "stage2_posterior": 0.022450814641262085,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_000021645.1:c0:1279488:1279832-1279974",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9988398877728464,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_000021645.1:c0:700416:700923-701078",
+      "covariation_status": "failed",
+      "stage2_posterior": 0.9978204529717433,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_000021645.1:c0:700416:701135-701215",
+      "covariation_status": "passed",
+      "stage2_posterior": 5.6173162474769694e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_000021645.1:c0:700928:700931-701078",
+      "covariation_status": "failed",
+      "stage2_posterior": 0.9965990720086491,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_000021645.1:c0:700928:701136-701215",
+      "covariation_status": "passed",
+      "stage2_posterior": 6.099869549405531e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_000024405.1:c0:426496:427333-427387",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 5.447003456026524e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_000024405.1:c0:427008:427331-427478",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9990152071151926,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_000024405.1:c0:427008:427511-427611",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 9.422148498092787e-06,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_000183745.1:c1:1170944:1171671-1171745",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 4.638472615261016e-06,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_000183745.1:c1:1170944:1171775-1171899",
+      "covariation_status": "failed",
+      "stage2_posterior": 1.2956387437465801e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_000183745.1:c1:1171456:1171666-1171745",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 4.760061186768604e-06,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_000183745.1:c1:1171456:1171769-1171901",
+      "covariation_status": "passed",
+      "stage2_posterior": 1.4027274454117427e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_000212395.1:c0:548864:549565-549698",
+      "covariation_status": "passed",
+      "stage2_posterior": 0.993606586786443,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_000212395.1:c0:548864:549713-549789",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 4.692531095333409e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_000212395.1:c0:549376:549565-549698",
+      "covariation_status": "passed",
+      "stage2_posterior": 0.993606586786443,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_000212395.1:c0:549376:549713-549789",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 4.692531095333409e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_000373205.1:c16:29696:30446-30502",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 7.465594536218865e-06,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_000373205.1:c16:29696:30518-30640",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 1.890607795370761e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_000373205.1:c16:30208:30446-30502",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 7.465594536218865e-06,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_000373205.1:c16:30208:30518-30643",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 1.2936513953089271e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_000373205.1:c16:42496:42930-43018",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 1.5847021401412485e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_000373205.1:c16:42496:43092-43182",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 5.774430111825988e-06,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_000381045.1:c8:56832:57300-57385",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 6.759851627093838e-06,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_000381045.1:c8:56832:57404-57554",
+      "covariation_status": "failed",
+      "stage2_posterior": 0.31448361199940245,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_000381045.1:c8:57344:57404-57554",
+      "covariation_status": "failed",
+      "stage2_posterior": 0.31448361199940245,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_000744885.1:c2:1299968:1300450-1300597",
+      "covariation_status": "failed",
+      "stage2_posterior": 2.599203005156825e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_000744885.1:c2:1299968:1300614-1300698",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 1.0323159643730704e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_000744885.1:c2:1300480:1300511-1300597",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 7.710720156955151e-06,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_000744885.1:c2:1300480:1300614-1300698",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 1.0323159643730704e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_002884445.1:c0:1541632:1542174-1542329",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9958752218066772,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_002884445.1:c0:1541632:1542344-1542446",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 1.811927461547673e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_002884445.1:c0:1542144:1542174-1542329",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9958752218066772,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_002884445.1:c0:1542144:1542344-1542446",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 1.8148945837370034e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_002884445.1:c0:1655296:1655593-1655765",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9992589942615895,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_002884445.1:c0:1655296:1655782-1655883",
+      "covariation_status": "failed",
+      "stage2_posterior": 7.312604762698538e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_002884445.1:c0:2273280:2273813-2273972",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9739895569272788,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_002884445.1:c0:2273280:2273990-2274105",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 1.9160288698132796e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_002884445.1:c0:2273792:2273813-2273972",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9739895569272788,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_002884445.1:c0:2273792:2273990-2274105",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 1.9160288698132796e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_002884445.1:c0:2412544:2413292-2413447",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9991382450325877,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_002884445.1:c0:2412544:2413463-2413568",
+      "covariation_status": "passed",
+      "stage2_posterior": 6.942840029656037e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_002884445.1:c0:2413056:2413292-2413447",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9991382450325877,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_002884445.1:c0:2413056:2413463-2413568",
+      "covariation_status": "passed",
+      "stage2_posterior": 6.942840029656037e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_002884445.1:c0:2467840:2468475-2468575",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 2.440192664049452e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_002884445.1:c0:2467840:2468591-2468688",
+      "covariation_status": "failed",
+      "stage2_posterior": 0.010540453418679738,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_002884445.1:c0:2468352:2468475-2468575",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 2.440192664049452e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_002884445.1:c0:2468352:2468591-2468688",
+      "covariation_status": "failed",
+      "stage2_posterior": 0.010540453418679738,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_002884445.1:c0:2503680:2504241-2504537",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9973477961044462,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_002884445.1:c0:2504192:2504241-2504362",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.061787473835226224,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_002884445.1:c0:2504192:2504377-2504537",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.09380155403346968,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_002884445.1:c0:2712064:2712808-2712892",
+      "covariation_status": "passed",
+      "stage2_posterior": 0.000907220493023052,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_002884445.1:c0:2712064:2712908-2713039",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.01445201590412965,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_002884445.1:c0:2712576:2712808-2712892",
+      "covariation_status": "passed",
+      "stage2_posterior": 0.000907220493023052,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_002884445.1:c0:2712576:2712908-2713039",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.01445201590412965,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_002884445.1:c0:2871808:2872436-2872574",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9989160913017363,
+      "synteny_status": "failed"
+    },
+    {
+      "candidate_id": "GCF_002884445.1:c0:2871808:2872612-2872683",
+      "covariation_status": "passed",
+      "stage2_posterior": 0.00020675066720349174,
+      "synteny_status": "failed"
+    },
+    {
+      "candidate_id": "GCF_002884445.1:c0:2872320:2872436-2872574",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9989160913017363,
+      "synteny_status": "failed"
+    },
+    {
+      "candidate_id": "GCF_002884445.1:c0:2872320:2872612-2872683",
+      "covariation_status": "passed",
+      "stage2_posterior": 0.00020675066720349174,
+      "synteny_status": "failed"
+    },
+    {
+      "candidate_id": "GCF_002884445.1:c0:2873344:2873617-2873756",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9983430184217857,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_002884445.1:c0:2873344:2873801-2873877",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 6.1342929837613474e-06,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_002884445.1:c0:3105280:3105987-3106136",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9930416578834355,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_002884445.1:c0:3105280:3106184-3106275",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 1.3115601046557342e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_002884445.1:c0:3105792:3105987-3106136",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9930416578834355,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_002884445.1:c0:3105792:3106184-3106275",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 1.3115601046557342e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_002884445.1:c0:3516416:3516906-3516994",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.0001077022546722214,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_002884445.1:c0:3516416:3517009-3517160",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.8159236595318196,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_002884445.1:c0:3516928:3517009-3517150",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.0022366678035500493,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_002884445.1:c0:3821568:3822355-3822435",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 8.23789528197347e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_002884445.1:c0:3821568:3822449-3822592",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.00031112353243306965,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_002884445.1:c0:3822080:3822355-3822435",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 8.23789528197347e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_002884445.1:c0:3822080:3822449-3822598",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 7.398704097425515e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_002884445.1:c0:3899904:3900479-3900612",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.0007469348448927408,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_002884445.1:c0:3899904:3900650-3900800",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9985769952951035,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_002884445.1:c0:3900416:3900479-3900612",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.0007469348448927408,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_002884445.1:c0:3900416:3900650-3900800",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9985769952951035,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_002884445.1:c0:4380160:4380920-4381018",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 3.0424734367586722e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_002884445.1:c0:4380160:4381036-4381167",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 1.3959696895520036e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_002884445.1:c0:4380672:4380920-4381018",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 3.0424734367586722e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_002884445.1:c0:4380672:4381036-4381167",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 1.3959696895520036e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_002884445.1:c0:4627968:4628619-4628706",
+      "covariation_status": "failed",
+      "stage2_posterior": 2.392254134107287e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_002884445.1:c0:4627968:4628725-4628883",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 1.5379913159360264e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_002884445.1:c0:4628480:4628618-4628706",
+      "covariation_status": "passed",
+      "stage2_posterior": 2.732717586351324e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_002884445.1:c0:4628480:4628725-4628887",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 1.639008427102371e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_002884445.1:c0:4644864:4645676-4645743",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.00021052151662083875,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_002884445.1:c0:4644864:4645760-4645851",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 4.699851985713205e-06,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_002884445.1:c0:4645376:4645646-4645743",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.0003643614816457236,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_002884445.1:c0:4645376:4645760-4645939",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.987055219758166,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_002884445.1:c0:4695040:4695758-4695852",
+      "covariation_status": "passed",
+      "stage2_posterior": 0.0010023333814969352,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_002884445.1:c0:4695040:4695867-4696021",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9988936165211141,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_002884445.1:c0:4695552:4695758-4695852",
+      "covariation_status": "passed",
+      "stage2_posterior": 0.0010023333814969352,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_002884445.1:c0:4695552:4695867-4696021",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9988936165211141,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_002884445.1:c0:4868608:4869028-4869161",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.001989182023458161,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_002884445.1:c0:4868608:4869176-4869334",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9995075349435144,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_002884445.1:c0:4869120:4869243-4869334",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 3.204222742357763e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_002884445.1:c0:5002240:5002494-5002606",
+      "covariation_status": "passed",
+      "stage2_posterior": 0.022646247812540096,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_002884445.1:c0:5002240:5002657-5002820",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9949171617977226,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_002884445.1:c0:5395456:5396192-5396289",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 4.3274035057265795e-06,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_002884445.1:c0:5395456:5396313-5396369",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.00013853019241736982,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_002884445.1:c0:5395968:5396189-5396289",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 4.214032770750589e-06,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_002884445.1:c0:5691904:5692211-5692299",
+      "covariation_status": "passed",
+      "stage2_posterior": 0.05097360445439935,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_002884445.1:c0:5691904:5692344-5692492",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9976307848003143,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_002884445.1:c0:5818368:5819160-5819228",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 4.792455467220843e-06,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_002884445.1:c0:5818880:5819132-5819228",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 9.47226563660434e-06,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_002884445.1:c0:5818880:5819242-5819372",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 5.295348681053496e-06,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_002884445.1:c0:6083584:6084219-6084304",
+      "covariation_status": "failed",
+      "stage2_posterior": 9.20190924623476e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_002884445.1:c0:6083584:6084322-6084399",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 5.9788565318031384e-06,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_002884445.1:c0:6084096:6084219-6084304",
+      "covariation_status": "failed",
+      "stage2_posterior": 9.20190924623476e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_002884445.1:c0:6084096:6084322-6084399",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 5.9788565318031384e-06,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_002884445.1:c0:861696:862144-862282",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.999383850913975,
+      "synteny_status": "failed"
+    },
+    {
+      "candidate_id": "GCF_002884445.1:c0:861696:862318-862398",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 6.728610396727682e-05,
+      "synteny_status": "failed"
+    },
+    {
+      "candidate_id": "GCF_003057965.1:c0:505344:505805-505938",
+      "covariation_status": "passed",
+      "stage2_posterior": 0.9952236081332523,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_003057965.1:c0:505344:505953-506029",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 5.798846252144461e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_003574085.1:c109:4608:5361-5454",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 1.1119873743574286e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_003574085.1:c109:4608:5487-5565",
+      "covariation_status": "failed",
+      "stage2_posterior": 9.73402953632036e-06,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_003574085.1:c109:5120:5361-5454",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 1.1119873743574286e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_003574085.1:c109:5120:5487-5565",
+      "covariation_status": "failed",
+      "stage2_posterior": 9.73402953632036e-06,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_003574085.1:c56:12800:13238-13321",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 6.802151870861986e-06,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_003574085.1:c56:12800:13335-13391",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 5.881627927935983e-06,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_003574085.1:c69:3072:3417-3566",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9876985121268739,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_003574085.1:c69:3072:3585-3667",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 6.747152561677459e-06,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_039822205.1:c2:37888:38190-38323",
+      "covariation_status": "passed",
+      "stage2_posterior": 0.16203843643098634,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_039822205.1:c2:37888:38338-38415",
+      "covariation_status": "passed",
+      "stage2_posterior": 0.0006071079536912297,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_041320495.1:c10:6144:6656-6784",
+      "covariation_status": "passed",
+      "stage2_posterior": 0.985707372290681,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_041320495.1:c10:6144:6799-6878",
+      "covariation_status": "failed",
+      "stage2_posterior": 2.3134316224712955e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_041320495.1:c10:6656:6661-6784",
+      "covariation_status": "failed",
+      "stage2_posterior": 0.979686610041854,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_041320495.1:c10:6656:6799-6878",
+      "covariation_status": "failed",
+      "stage2_posterior": 2.3134316224712955e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_041320495.1:c18:205824:206461-206543",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 7.903042496598107e-06,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_041320495.1:c18:205824:206560-206644",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 1.786309703832072e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_041320495.1:c18:206336:206461-206543",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 7.903042496598107e-06,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_041320495.1:c18:206336:206560-206644",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 1.786309703832072e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_041320495.1:c18:250368:250816-250900",
+      "covariation_status": "passed",
+      "stage2_posterior": 0.004661559259963414,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_041320495.1:c18:250368:250916-251042",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 3.0840239660461056e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_041320495.1:c18:250880:250916-251038",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 7.362743807582142e-06,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_041320495.1:c18:262144:262595-262685",
+      "covariation_status": "passed",
+      "stage2_posterior": 1.968710693361178e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_041320495.1:c18:262144:262701-262856",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.998565756563166,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_041320495.1:c18:262656:262701-262856",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.998565756563166,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_041320495.1:c18:312832:313435-313519",
+      "covariation_status": "passed",
+      "stage2_posterior": 5.349681489617005e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_041320495.1:c18:312832:313535-313672",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9993970996033712,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_041320495.1:c18:313344:313435-313519",
+      "covariation_status": "passed",
+      "stage2_posterior": 5.349681489617005e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_041320495.1:c18:313344:313535-313672",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9993970996033712,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_041320495.1:c18:33792:34412-34540",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.2044233584933112,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_041320495.1:c18:33792:34556-34635",
+      "covariation_status": "failed",
+      "stage2_posterior": 0.00020903029483141722,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_041320495.1:c18:34304:34412-34540",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.2044233584933112,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_041320495.1:c18:34304:34555-34635",
+      "covariation_status": "failed",
+      "stage2_posterior": 0.000305971665236786,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_041320495.1:c18:358912:359382-359455",
+      "covariation_status": "passed",
+      "stage2_posterior": 8.245957138787838e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_041320495.1:c18:358912:359470-359622",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 4.57379355807383e-06,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_041320495.1:c18:359424:359470-359551",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 4.477823690686872e-06,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_041320495.1:c19:120832:121403-121532",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.998962140604069,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_041320495.1:c19:120832:121549-121634",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 1.865258855846239e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_041320495.1:c19:121344:121403-121532",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.998962140604069,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_041320495.1:c19:121344:121549-121634",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 1.865258855846239e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_041320495.1:c20:129024:129618-129708",
+      "covariation_status": "passed",
+      "stage2_posterior": 0.06232778741083055,
+      "synteny_status": "failed"
+    },
+    {
+      "candidate_id": "GCF_041320495.1:c20:129024:129728-129822",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 7.787286740341752e-06,
+      "synteny_status": "failed"
+    },
+    {
+      "candidate_id": "GCF_041320495.1:c20:129536:129618-129708",
+      "covariation_status": "passed",
+      "stage2_posterior": 0.06270269431060127,
+      "synteny_status": "failed"
+    },
+    {
+      "candidate_id": "GCF_041320495.1:c20:129536:129728-129821",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 6.342819744016622e-06,
+      "synteny_status": "failed"
+    },
+    {
+      "candidate_id": "GCF_041320495.1:c21:227328:227718-227802",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 2.428455228082361e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_041320495.1:c21:227328:227843-227980",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9989338554981368,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_041320495.1:c21:553984:554863-554927",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 4.8320019064614165e-06,
+      "synteny_status": "failed"
+    },
+    {
+      "candidate_id": "GCF_041320495.1:c21:554496:554791-554927",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.000896599134714468,
+      "synteny_status": "failed"
+    },
+    {
+      "candidate_id": "GCF_041320495.1:c21:554496:554947-555043",
+      "covariation_status": "failed",
+      "stage2_posterior": 0.00012631077216024972,
+      "synteny_status": "failed"
+    },
+    {
+      "candidate_id": "GCF_041320495.1:c21:879104:879427-879566",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9887378308196371,
+      "synteny_status": "failed"
+    },
+    {
+      "candidate_id": "GCF_041320495.1:c21:879104:879604-879693",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 1.045235717867862e-05,
+      "synteny_status": "failed"
+    },
+    {
+      "candidate_id": "GCF_041320495.1:c22:218624:219357-219494",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.994625975060847,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_041320495.1:c22:218624:219510-219578",
+      "covariation_status": "failed",
+      "stage2_posterior": 0.00014847289943723704,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_041320495.1:c22:219136:219357-219494",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.994625975060847,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_041320495.1:c22:219136:219510-219578",
+      "covariation_status": "failed",
+      "stage2_posterior": 0.00014847289943723704,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_041320495.1:c22:87040:87505-87592",
+      "covariation_status": "passed",
+      "stage2_posterior": 2.5491038745227333e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_041320495.1:c22:87040:87607-87745",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9988330782558764,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_041320495.1:c22:87552:87607-87738",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9985639394881783,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_041320495.1:c3:31232:31622-31696",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 1.4363158241062863e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_041320495.1:c3:31232:31725-31882",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9993315548464102,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_041320495.1:c3:53760:54229-54307",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 8.861477042484449e-06,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_041320495.1:c3:53760:54323-54460",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9887960889472542,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_041320495.1:c3:54272:54323-54460",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9887960889472542,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_041320495.1:c5:25088:25745-25866",
+      "covariation_status": "passed",
+      "stage2_posterior": 0.9791645431362702,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_041320495.1:c5:25088:25882-25955",
+      "covariation_status": "failed",
+      "stage2_posterior": 0.0005943638801800522,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_041320495.1:c5:25600:25745-25866",
+      "covariation_status": "passed",
+      "stage2_posterior": 0.9791645431362702,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_041320495.1:c5:25600:25882-25955",
+      "covariation_status": "failed",
+      "stage2_posterior": 0.0005943638801800522,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_041320495.1:c5:58880:59629-59750",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.16876822653797843,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_041320495.1:c5:58880:59763-59837",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 1.4621359333308135e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_041320495.1:c5:59392:59629-59837",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.989569547961435,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_041320495.1:c6:76800:77309-77392",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 6.6389395883462545e-06,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_041320495.1:c6:76800:77426-77564",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9988030100516855,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_041320495.1:c6:77312:77426-77564",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9988030100516855,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_041320495.1:c7:6144:6554-6640",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 2.0597573518802968e-05,
+      "synteny_status": "passed"
+    },
+    {
+      "candidate_id": "GCF_041320495.1:c7:6144:6655-6794",
+      "covariation_status": "unavailable",
+      "stage2_posterior": 0.9972693271245384,
+      "synteny_status": "failed"
+    }
+  ],
+  "schema_version": "1.0",
+  "sources": {
+    "covariation_status": {
+      "anchored_by": "reports/p3/architecture_parameter_measurement.json records this exact digest (verified on write)",
+      "origin": "two.amlab:$HOME/tbox-scratch/round_p3_15_supply/covariation_status.json",
+      "produced_by": "P3-15'-e / -e-ii (SLURM jobs 1205 + 1254)",
+      "sha256": "3215f0340b9b85bc49a862b66ecc1b7367485d22650277a83894e2e1ef3d8167"
+    },
+    "stage2_posteriors": {
+      "anchored_by": null,
+      "origin": "two.amlab:$HOME/tbox-scratch/round_p3_15b/stage2_posteriors.json",
+      "produced_by": "P3-15'-b",
+      "sha256": "54be6e6d0297558f7357d24a10940562c3691036f6e36435b3e6524be498adf8",
+      "warning": "\u26a0 NO committed report records this digest, and a second scoring of the same 941 candidates exists whose posteriors differ by up to 3.8e-2 (a CUDA forward is not bit-reproducible). The two agree on every candidate at thresholds 0.5 / 0.9 / 0.95 and disagree on 3 at 0.99. This column is therefore carried as a SENSITIVITY only; no headline number rests on it."
+    },
+    "synteny_status": {
+      "anchored_by": "reports/p3/synteny_exclusion_diagnostic.json records this exact digest (verified on write)",
+      "origin": "LOCAL \u2014 tbox_finder.mining.synteny_producer (P3-15'-c-ii)",
+      "produced_by": "P3-15'-c-ii",
+      "sha256": "3c8ac8e31b9e7cde6dee50328ca3efa7ac798b54def17885f92c930b8b04a464"
+    }
+  },
+  "step": "P3-15'-f"
+}

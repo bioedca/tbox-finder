@@ -1,0 +1,1475 @@
+{
+  "adr": "ADR-0006 D3 (criterion (b)'s named-element predicate), D6 (the short-Stem-I relaxation), A4 (the seven rule parameters supplied per round, no defaults); ADR-0005 D14 (the spare rule: sparing is a disjunction, so mining is a conjunction; unavailable spares); ADR-0004 D1 (the element vocabulary D3 reuses)",
+  "arms": {
+    "comparison_headline_carried_forward": "criterion (b)'s failure share on KNOWN T-boxes, as the de-novo instrument resolves them, is read against its failure share on round-0 FP-manifest candidates at the identical grid. Where the control's record-level interval contains the FP arm's point estimate, this control detects no separation between the two populations at that setting \u2014 (b) behaves there as a severity knob on both arms rather than as a discriminator.",
+    "control": {
+      "ground_truth": "believed positive \u2014 held-out curated TBDB records, Stage-1 re-detected",
+      "n_consensuses": 76,
+      "step": "P3-15'-g-iv",
+      "supply_digest_sha256": "0b5afbec0c8fd9af75a5c789d44f64e0b8db1c19ecce011eac6dd92e3393cb28",
+      "supply_origin": "two.amlab:$HOME/tbox-scratch/round_p3_15g_control/msa (SLURM job 1264 array 0-15, main @ c94f935); retrieved by rsync per slurm/p2/mine_round_producer.sbatch"
+    },
+    "fp": {
+      "ground_truth": "unknown \u2014 a round-0 false-positive MANIFEST, not verified negatives",
+      "n_consensuses": 278,
+      "step": "P3-15'-f",
+      "supply_digest_sha256": "90b2fe1b532f2851bbade2884e8498e2ab58a11c418cc00b314840f041c0f862",
+      "supply_origin": "two.amlab:$HOME/tbox-scratch/round_p3_15_supply/msa (SLURM jobs 1205 array 0-47 + 1254 array 16-16, main @ 4d30ea3); retrieved by rsync per slurm/p2/mine_round_producer.sbatch"
+    }
+  },
+  "decision_rule": {
+    "floors": [
+      {
+        "floor": "min_named_helices >= 2",
+        "rationale": "\u26a0 THIS FLOOR'S LEVEL IS A \u00a77 READING, NOT A DERIVATION, AND IT DECIDES THE HEADLINE. D3 says 'the expected helices are present' and assigns the value to the held-out canonical set at P6; it contains no number. Two readings are supported: PLURAL (>= 2, this floor) and CANONICAL CORE (>= 3, which architecture.named_elements_present's own docstring states). recommendation.selection_by_min_named_helices prices every level, and the level is put to the project lead rather than settled here. The floor is set at 2 only because a sparing disjunct's fail-closed direction is the more permissive one (ADR-0006 A4). \u26a0 Note also that min_named_helices counts RESOLVED helices of sufficient stacking depth, not identified D1 elements \u2014 the localizer has no element identity to check \u2014 so 'the expected helices are present' is operationalised as a count throughout.",
+        "source": "ADR-0006 D3 (no number; P6-delegated) + A4; the competing reading is in src/tbox_finder/mining/architecture.py::named_elements_present"
+      },
+      {
+        "floor": "min_helix_pairs >= 2",
+        "rationale": "min_helix_pairs is the number of stacked pairs at which a run of pairing counts as a helix at all. At 1 a single isolated base pair is a named structural element. \u26a0 ADR-0006 D3 contains NO concept of stacked-pair depth, so this floor is an ASSUMPTION about what the word 'helix' may denote, not a reading of the ADR; it is listed here so it can be rejected. Its empirical side is published beside it in helix_stack_depth_evidence, and on this supply the settings it excludes measure identically to the chosen one, so it costs nothing measurable either way.",
+        "source": "an ASSUMPTION of this module, not an ADR clause \u2014 see the rationale"
+      },
+      {
+        "floor": "ncca_pairing_nt >= 2",
+        "rationale": "D3 requires an 'NCCA-PAIRING bulge'. One satisfied contact in the acceptor register is a coincidence at these alignment widths, not a register; two is the weakest reading under which the word 'pairing' is doing work.",
+        "source": "ADR-0006 D3"
+      },
+      {
+        "floor": "bulge_max_nt is bounded",
+        "rationale": "bulge_max_nt = 10000 is the axis's no-upper-bound sentinel: the size filter stops filtering and bulge_min_nt alone decides. A round may choose that, but it may not then describe (b) as testing a bulge SIZE. \u26a0 This floor is semantic, not decisive, and the claim that it costs nothing is measured rather than argued: see recommendation.bulge_sentinel_comparison, which puts the chosen setting against its own sentinel twin. It is NOT readable off floor_sensitivity, whose identity field is null here precisely because dropping this floor does not move the selection.",
+        "source": "ADR-0006 D3; ADR-0006 A4 (the value is recorded and must mean what it says)"
+      }
+    ],
+    "statement": "Stated before any count was read. (1) Keep only points the SHIPPED localizer accepts on this supply \u2014 admissibility is measured by running it, not by re-encoding its guards. (2) Keep only points that clear every DECISION_FLOORS entry, each of which is a semantic requirement read off ADR-0006 D3's wording, not a tuned threshold. (3) Among the survivors choose the MOST PERMISSIVE as measured \u2014 the smallest number of FP-arm consensuses moved to 'failed'. Permissiveness is the fail-closed direction for a SPARING disjunct, and ADR-0006 A4 makes that argument itself: a relaxation 'only ever makes (b) more likely to pass => more sparing => the fail-closed direction, so an imperfect value errs safe'. (4) Break exact ties by TIE_BREAK_ORDER, and REFUSE if a tie survives among parameters not proved inert. \u26a0 What this rule deliberately does NOT do is maximise yield over the grid: with thousands of admissible points and a control of a few dozen producible records, the argmax is a fitted value, and A4 asks the round to supply a chosen one. Every count lives in the derived blocks (grid.n_admissible, control_arm.n_records_producible), never in this sentence, so the prose cannot go stale against its own run.",
+    "tie_break_order": [
+      {
+        "parameter": "allow_wobble",
+        "resolves_to": "False \u2014 the flag is proved structurally inert for the NCCA acceptor, so recording it as enabled would publish a relaxation that cannot fire"
+      },
+      {
+        "parameter": "stem_i_nt_threshold",
+        "resolves_to": "the smallest value on the axis \u2014 the D6 relaxation is proved inert on this manifest (neither stem_i_extent_nt nor regulatory_mode is supplied), and the smallest value is the one under which it demonstrably never fires"
+      },
+      {
+        "parameter": "bulge_max_nt",
+        "resolves_to": "the smallest bounded value among exact ties \u2014 a narrower stated filter, given the wider one measured identically"
+      }
+    ]
+  },
+  "disclosure": "This report RECOMMENDS criterion (b)'s seven ADR-0006 A4 rule parameters and pins none of them. The value is a CLAUDE.md \u00a77 decision for the project lead; it enters the round through the producer's seven required exports and is recorded in that round's provenance, per A4. D6/D17's P6 threshold freeze is untouched, and no ADR is amended by this step.",
+  "frontier_all_admissible": [
+    {
+      "ci95": [
+        0.050765,
+        0.197581
+      ],
+      "clears_every_decision_floor": false,
+      "example_params": {
+        "allow_wobble": false,
+        "bulge_max_nt": 20,
+        "bulge_min_nt": 1,
+        "min_helix_pairs": 1,
+        "min_named_helices": 1,
+        "ncca_pairing_nt": 1,
+        "stem_i_nt_threshold": 1
+      },
+      "fewest_control_records_losing_a_and_b": 7,
+      "n_admissible_points_at_this_yield": 96,
+      "n_mined": 1,
+      "of_n_producible_records": 68
+    },
+    {
+      "ci95": [
+        0.050765,
+        0.197581
+      ],
+      "clears_every_decision_floor": false,
+      "example_params": {
+        "allow_wobble": false,
+        "bulge_max_nt": 20,
+        "bulge_min_nt": 1,
+        "min_helix_pairs": 3,
+        "min_named_helices": 2,
+        "ncca_pairing_nt": 1,
+        "stem_i_nt_threshold": 1
+      },
+      "fewest_control_records_losing_a_and_b": 7,
+      "n_admissible_points_at_this_yield": 16,
+      "n_mined": 2,
+      "of_n_producible_records": 68
+    },
+    {
+      "ci95": [
+        0.060834,
+        0.215351
+      ],
+      "clears_every_decision_floor": false,
+      "example_params": {
+        "allow_wobble": false,
+        "bulge_max_nt": 20,
+        "bulge_min_nt": 2,
+        "min_helix_pairs": 1,
+        "min_named_helices": 1,
+        "ncca_pairing_nt": 2,
+        "stem_i_nt_threshold": 1
+      },
+      "fewest_control_records_losing_a_and_b": 8,
+      "n_admissible_points_at_this_yield": 48,
+      "n_mined": 3,
+      "of_n_producible_records": 68
+    },
+    {
+      "ci95": [
+        0.050765,
+        0.197581
+      ],
+      "clears_every_decision_floor": false,
+      "example_params": {
+        "allow_wobble": false,
+        "bulge_max_nt": 20,
+        "bulge_min_nt": 1,
+        "min_helix_pairs": 5,
+        "min_named_helices": 1,
+        "ncca_pairing_nt": 1,
+        "stem_i_nt_threshold": 1
+      },
+      "fewest_control_records_losing_a_and_b": 7,
+      "n_admissible_points_at_this_yield": 456,
+      "n_mined": 4,
+      "of_n_producible_records": 68
+    },
+    {
+      "ci95": [
+        0.060834,
+        0.215351
+      ],
+      "clears_every_decision_floor": false,
+      "example_params": {
+        "allow_wobble": false,
+        "bulge_max_nt": 50,
+        "bulge_min_nt": 3,
+        "min_helix_pairs": 3,
+        "min_named_helices": 2,
+        "ncca_pairing_nt": 1,
+        "stem_i_nt_threshold": 1
+      },
+      "fewest_control_records_losing_a_and_b": 8,
+      "n_admissible_points_at_this_yield": 72,
+      "n_mined": 5,
+      "of_n_producible_records": 68
+    },
+    {
+      "ci95": [
+        0.060834,
+        0.215351
+      ],
+      "clears_every_decision_floor": false,
+      "example_params": {
+        "allow_wobble": false,
+        "bulge_max_nt": 20,
+        "bulge_min_nt": 2,
+        "min_helix_pairs": 5,
+        "min_named_helices": 1,
+        "ncca_pairing_nt": 2,
+        "stem_i_nt_threshold": 1
+      },
+      "fewest_control_records_losing_a_and_b": 8,
+      "n_admissible_points_at_this_yield": 80,
+      "n_mined": 6,
+      "of_n_producible_records": 68
+    },
+    {
+      "ci95": [
+        0.115272,
+        0.300109
+      ],
+      "clears_every_decision_floor": false,
+      "example_params": {
+        "allow_wobble": false,
+        "bulge_max_nt": 50,
+        "bulge_min_nt": 7,
+        "min_helix_pairs": 1,
+        "min_named_helices": 1,
+        "ncca_pairing_nt": 1,
+        "stem_i_nt_threshold": 1
+      },
+      "fewest_control_records_losing_a_and_b": 13,
+      "n_admissible_points_at_this_yield": 168,
+      "n_mined": 7,
+      "of_n_producible_records": 68
+    },
+    {
+      "ci95": [
+        0.115272,
+        0.300109
+      ],
+      "clears_every_decision_floor": false,
+      "example_params": {
+        "allow_wobble": false,
+        "bulge_max_nt": 50,
+        "bulge_min_nt": 7,
+        "min_helix_pairs": 5,
+        "min_named_helices": 1,
+        "ncca_pairing_nt": 1,
+        "stem_i_nt_threshold": 1
+      },
+      "fewest_control_records_losing_a_and_b": 13,
+      "n_admissible_points_at_this_yield": 88,
+      "n_mined": 9,
+      "of_n_producible_records": 68
+    },
+    {
+      "ci95": [
+        0.276093,
+        0.501195
+      ],
+      "clears_every_decision_floor": false,
+      "example_params": {
+        "allow_wobble": false,
+        "bulge_max_nt": 10,
+        "bulge_min_nt": 1,
+        "min_helix_pairs": 3,
+        "min_named_helices": 3,
+        "ncca_pairing_nt": 1,
+        "stem_i_nt_threshold": 1
+      },
+      "fewest_control_records_losing_a_and_b": 26,
+      "n_admissible_points_at_this_yield": 16,
+      "n_mined": 10,
+      "of_n_producible_records": 68
+    },
+    {
+      "ci95": [
+        0.250018,
+        0.471592
+      ],
+      "clears_every_decision_floor": true,
+      "example_params": {
+        "allow_wobble": false,
+        "bulge_max_nt": 20,
+        "bulge_min_nt": 2,
+        "min_helix_pairs": 4,
+        "min_named_helices": 2,
+        "ncca_pairing_nt": 2,
+        "stem_i_nt_threshold": 1
+      },
+      "fewest_control_records_losing_a_and_b": 24,
+      "n_admissible_points_at_this_yield": 672,
+      "n_mined": 11,
+      "of_n_producible_records": 68
+    },
+    {
+      "ci95": [
+        0.289285,
+        0.515842
+      ],
+      "clears_every_decision_floor": true,
+      "example_params": {
+        "allow_wobble": false,
+        "bulge_max_nt": 10,
+        "bulge_min_nt": 2,
+        "min_helix_pairs": 3,
+        "min_named_helices": 3,
+        "ncca_pairing_nt": 2,
+        "stem_i_nt_threshold": 1
+      },
+      "fewest_control_records_losing_a_and_b": 27,
+      "n_admissible_points_at_this_yield": 120,
+      "n_mined": 12,
+      "of_n_producible_records": 68
+    },
+    {
+      "ci95": [
+        0.343047,
+        0.573436
+      ],
+      "clears_every_decision_floor": false,
+      "example_params": {
+        "allow_wobble": false,
+        "bulge_max_nt": 10,
+        "bulge_min_nt": 2,
+        "min_helix_pairs": 1,
+        "min_named_helices": 4,
+        "ncca_pairing_nt": 2,
+        "stem_i_nt_threshold": 1
+      },
+      "fewest_control_records_losing_a_and_b": 31,
+      "n_admissible_points_at_this_yield": 1048,
+      "n_mined": 13,
+      "of_n_producible_records": 68
+    }
+  ],
+  "frontier_clearing_every_floor": [
+    {
+      "ci95": [
+        0.060834,
+        0.215351
+      ],
+      "clears_every_decision_floor": true,
+      "example_params": {
+        "allow_wobble": false,
+        "bulge_max_nt": 20,
+        "bulge_min_nt": 2,
+        "min_helix_pairs": 2,
+        "min_named_helices": 2,
+        "ncca_pairing_nt": 2,
+        "stem_i_nt_threshold": 1
+      },
+      "fewest_control_records_losing_a_and_b": 8,
+      "n_admissible_points_at_this_yield": 6,
+      "n_mined": 3,
+      "of_n_producible_records": 68
+    },
+    {
+      "ci95": [
+        0.060834,
+        0.215351
+      ],
+      "clears_every_decision_floor": true,
+      "example_params": {
+        "allow_wobble": false,
+        "bulge_max_nt": 20,
+        "bulge_min_nt": 2,
+        "min_helix_pairs": 3,
+        "min_named_helices": 2,
+        "ncca_pairing_nt": 2,
+        "stem_i_nt_threshold": 1
+      },
+      "fewest_control_records_losing_a_and_b": 8,
+      "n_admissible_points_at_this_yield": 42,
+      "n_mined": 4,
+      "of_n_producible_records": 68
+    },
+    {
+      "ci95": [
+        0.060834,
+        0.215351
+      ],
+      "clears_every_decision_floor": true,
+      "example_params": {
+        "allow_wobble": false,
+        "bulge_max_nt": 50,
+        "bulge_min_nt": 3,
+        "min_helix_pairs": 3,
+        "min_named_helices": 2,
+        "ncca_pairing_nt": 2,
+        "stem_i_nt_threshold": 1
+      },
+      "fewest_control_records_losing_a_and_b": 8,
+      "n_admissible_points_at_this_yield": 36,
+      "n_mined": 5,
+      "of_n_producible_records": 68
+    },
+    {
+      "ci95": [
+        0.115272,
+        0.300109
+      ],
+      "clears_every_decision_floor": true,
+      "example_params": {
+        "allow_wobble": false,
+        "bulge_max_nt": 50,
+        "bulge_min_nt": 7,
+        "min_helix_pairs": 2,
+        "min_named_helices": 2,
+        "ncca_pairing_nt": 2,
+        "stem_i_nt_threshold": 1
+      },
+      "fewest_control_records_losing_a_and_b": 13,
+      "n_admissible_points_at_this_yield": 24,
+      "n_mined": 7,
+      "of_n_producible_records": 68
+    },
+    {
+      "ci95": [
+        0.250018,
+        0.471592
+      ],
+      "clears_every_decision_floor": true,
+      "example_params": {
+        "allow_wobble": false,
+        "bulge_max_nt": 20,
+        "bulge_min_nt": 2,
+        "min_helix_pairs": 4,
+        "min_named_helices": 2,
+        "ncca_pairing_nt": 2,
+        "stem_i_nt_threshold": 1
+      },
+      "fewest_control_records_losing_a_and_b": 24,
+      "n_admissible_points_at_this_yield": 198,
+      "n_mined": 11,
+      "of_n_producible_records": 68
+    },
+    {
+      "ci95": [
+        0.289285,
+        0.515842
+      ],
+      "clears_every_decision_floor": true,
+      "example_params": {
+        "allow_wobble": false,
+        "bulge_max_nt": 10,
+        "bulge_min_nt": 2,
+        "min_helix_pairs": 3,
+        "min_named_helices": 3,
+        "ncca_pairing_nt": 2,
+        "stem_i_nt_threshold": 1
+      },
+      "fewest_control_records_losing_a_and_b": 27,
+      "n_admissible_points_at_this_yield": 54,
+      "n_mined": 12,
+      "of_n_producible_records": 68
+    },
+    {
+      "ci95": [
+        0.343047,
+        0.573436
+      ],
+      "clears_every_decision_floor": true,
+      "example_params": {
+        "allow_wobble": false,
+        "bulge_max_nt": 10,
+        "bulge_min_nt": 2,
+        "min_helix_pairs": 2,
+        "min_named_helices": 4,
+        "ncca_pairing_nt": 2,
+        "stem_i_nt_threshold": 1
+      },
+      "fewest_control_records_losing_a_and_b": 31,
+      "n_admissible_points_at_this_yield": 504,
+      "n_mined": 13,
+      "of_n_producible_records": 68
+    }
+  ],
+  "grid": {
+    "axes": {
+      "allow_wobble": [
+        false,
+        true
+      ],
+      "bulge_max_nt": [
+        10,
+        20,
+        50,
+        10000
+      ],
+      "bulge_min_nt": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        7
+      ],
+      "min_helix_pairs": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "min_named_helices": [
+        1,
+        2,
+        3,
+        4
+      ],
+      "ncca_pairing_nt": [
+        1,
+        2,
+        3,
+        4
+      ]
+    },
+    "n_admissible": 2880,
+    "n_points_enumerated": 3840,
+    "n_refused_by_the_shipped_localizer": 960,
+    "note": "admissibility is MEASURED by running the shipped localizer, not by re-encoding its guards: it refuses any setting whose bulge size floor is shorter than its NCCA register.",
+    "refusal_reasons": {
+      "bulge_size_range min 1 is shorter than ncca_pairing_nt 2": 160,
+      "bulge_size_range min 1 is shorter than ncca_pairing_nt 3": 160,
+      "bulge_size_range min 1 is shorter than ncca_pairing_nt 4": 160,
+      "bulge_size_range min 2 is shorter than ncca_pairing_nt 3": 160,
+      "bulge_size_range min 2 is shorter than ncca_pairing_nt 4": 160,
+      "bulge_size_range min 3 is shorter than ncca_pairing_nt 4": 160
+    }
+  },
+  "limitations": {
+    "criterion_c_is_unmeasured_on_the_control": "the control's hosts carry no annotation, so every control damage figure omits the one criterion with measured discrimination and is an upper bound.",
+    "stage2_threshold_is_unpinned": "ADR-0005 D3/D14 freeze the Stage-2 threshold at the \u00a713.1 phase gate; none is pinned here. 'stage2_not_declared' is the P2 accounting (the disjunct is not in play) and is an UPPER bound: declaring Stage-2 at any threshold can only spare more.",
+    "the_control_is_68_records": "adjacent grid points differing by a few candidates are not distinguishable at this n; the frontier is reported as what the grid contains, not as a ranking.",
+    "the_fp_arm_is_not_a_verified_negative_set": "it is a false-positive MANIFEST of unknown status. If a material share of it is really T-box, the two arms are not two populations and the anti-selectivity reading weakens accordingly.",
+    "the_grid_is_not_the_parameter_space": "the axes are the two measurement reports' sweep; a value off those axes is unmeasured here, and stem_i_nt_threshold is swept at one value because it is proved inert on both manifests."
+  },
+  "named_settings": [
+    {
+      "anti_selectivity": {
+        "also_at_the_row_level_for_reference": {
+          "control_queries_failing_a_and_b": "7/76",
+          "fp_candidates_failing_a_and_b": "20/278",
+          "no_interval_because": "neither row unit is independent \u2014 control queries share records and FP candidates share loci \u2014 so these are point counts only"
+        },
+        "control_ci95": [
+          0.050765,
+          0.197581
+        ],
+        "control_falls_through_more": true,
+        "control_records_failing_a_and_b": "7/68",
+        "control_share": 0.102941,
+        "fp_ci95": [
+          0.046208,
+          0.120629
+        ],
+        "fp_loci_failing_a_and_b": "15/199",
+        "fp_minus_control_pp": -2.7564,
+        "fp_share": 0.075377,
+        "intervals_disjoint": false,
+        "unit": "control = producible RECORDS; FP arm = decided LOCI",
+        "what_disjointness_would_and_would_not_mean": "non-overlapping Wilson intervals are a CONSERVATIVE indication of a difference, not a test of one; overlapping intervals do not establish equality either. Read the direction and the size, not the flag."
+      },
+      "clears_every_decision_floor": false,
+      "control_arm": {
+        "criterion_c_not_in_this_conjunction": "the control's host genomes carry no GFF annotation, so criterion (c) is UNMEASURED on this arm and is absent from the conjunction. Real T-boxes are the population (c) is most likely to spare, so this damage figure is an UPPER bound; the FP arm's yield, by contrast, does include (c).",
+        "n_queries_a_and_b_failed": 7,
+        "n_queries_b_failed": 8,
+        "n_queries_decided": 76,
+        "n_records_losing_a_and_b": 7,
+        "n_records_losing_b": 7,
+        "n_records_producible": 68,
+        "query_level_ci95": null,
+        "share_records_losing_a_and_b": 0.102941,
+        "share_records_losing_a_and_b_ci95": [
+          0.050765,
+          0.197581
+        ],
+        "share_records_losing_b": 0.102941,
+        "share_records_losing_b_ci95": [
+          0.050765,
+          0.197581
+        ],
+        "why_no_query_ci": "the control's queries are pseudo-replicated \u2014 most records contribute more than one \u2014 so a binomial interval on them would be narrower than the data support. Every interval here is on the record level."
+      },
+      "floors_cleared": [
+        "min_helix_pairs >= 2"
+      ],
+      "fp_arm": {
+        "failed": 25,
+        "failed_with_criterion_a_failed": 20,
+        "loci_decided": 199,
+        "loci_failing_a_and_b": 15,
+        "passed": 253,
+        "share_failed_of_decided": 0.089928,
+        "unit_note": "the candidate counts are manifest rows; the LOCUS counts collapse candidates addressing the same span from overlapping tiling windows. Every FP interval in this report is on the locus."
+      },
+      "label": "loosest_nonvacuous",
+      "params": {
+        "allow_wobble": false,
+        "bulge_max_nt": 10000,
+        "bulge_min_nt": 1,
+        "min_helix_pairs": 2,
+        "min_named_helices": 1,
+        "ncca_pairing_nt": 1,
+        "stem_i_nt_threshold": 1
+      },
+      "round_yield_n_mined": {
+        "stage2_not_declared": 1,
+        "stage2_threshold_0.5": 1,
+        "stage2_threshold_0.9": 1,
+        "stage2_threshold_0.95": 1,
+        "stage2_threshold_0.99": 1
+      },
+      "round_yield_n_mined_loci": {
+        "stage2_not_declared": 1,
+        "stage2_threshold_0.5": 1,
+        "stage2_threshold_0.9": 1,
+        "stage2_threshold_0.95": 1,
+        "stage2_threshold_0.99": 1
+      }
+    },
+    {
+      "anti_selectivity": {
+        "also_at_the_row_level_for_reference": {
+          "control_queries_failing_a_and_b": "8/76",
+          "fp_candidates_failing_a_and_b": "32/278",
+          "no_interval_because": "neither row unit is independent \u2014 control queries share records and FP candidates share loci \u2014 so these are point counts only"
+        },
+        "control_ci95": [
+          0.060834,
+          0.215351
+        ],
+        "control_falls_through_more": false,
+        "control_records_failing_a_and_b": "8/68",
+        "control_share": 0.117647,
+        "fp_ci95": [
+          0.08656,
+          0.178877
+        ],
+        "fp_loci_failing_a_and_b": "25/199",
+        "fp_minus_control_pp": 0.7981,
+        "fp_share": 0.125628,
+        "intervals_disjoint": false,
+        "unit": "control = producible RECORDS; FP arm = decided LOCI",
+        "what_disjointness_would_and_would_not_mean": "non-overlapping Wilson intervals are a CONSERVATIVE indication of a difference, not a test of one; overlapping intervals do not establish equality either. Read the direction and the size, not the flag."
+      },
+      "clears_every_decision_floor": true,
+      "control_arm": {
+        "criterion_c_not_in_this_conjunction": "the control's host genomes carry no GFF annotation, so criterion (c) is UNMEASURED on this arm and is absent from the conjunction. Real T-boxes are the population (c) is most likely to spare, so this damage figure is an UPPER bound; the FP arm's yield, by contrast, does include (c).",
+        "n_queries_a_and_b_failed": 8,
+        "n_queries_b_failed": 11,
+        "n_queries_decided": 76,
+        "n_records_losing_a_and_b": 8,
+        "n_records_losing_b": 9,
+        "n_records_producible": 68,
+        "query_level_ci95": null,
+        "share_records_losing_a_and_b": 0.117647,
+        "share_records_losing_a_and_b_ci95": [
+          0.060834,
+          0.215351
+        ],
+        "share_records_losing_b": 0.132353,
+        "share_records_losing_b_ci95": [
+          0.071222,
+          0.232803
+        ],
+        "why_no_query_ci": "the control's queries are pseudo-replicated \u2014 most records contribute more than one \u2014 so a binomial interval on them would be narrower than the data support. Every interval here is on the record level."
+      },
+      "floors_cleared": [
+        "min_named_helices >= 2",
+        "min_helix_pairs >= 2",
+        "ncca_pairing_nt >= 2",
+        "bulge_max_nt is bounded"
+      ],
+      "fp_arm": {
+        "failed": 52,
+        "failed_with_criterion_a_failed": 32,
+        "loci_decided": 199,
+        "loci_failing_a_and_b": 25,
+        "passed": 226,
+        "share_failed_of_decided": 0.18705,
+        "unit_note": "the candidate counts are manifest rows; the LOCUS counts collapse candidates addressing the same span from overlapping tiling windows. Every FP interval in this report is on the locus."
+      },
+      "label": "sensitive_core",
+      "params": {
+        "allow_wobble": false,
+        "bulge_max_nt": 50,
+        "bulge_min_nt": 2,
+        "min_helix_pairs": 2,
+        "min_named_helices": 2,
+        "ncca_pairing_nt": 2,
+        "stem_i_nt_threshold": 1
+      },
+      "round_yield_n_mined": {
+        "stage2_not_declared": 3,
+        "stage2_threshold_0.5": 3,
+        "stage2_threshold_0.9": 3,
+        "stage2_threshold_0.95": 3,
+        "stage2_threshold_0.99": 3
+      },
+      "round_yield_n_mined_loci": {
+        "stage2_not_declared": 3,
+        "stage2_threshold_0.5": 3,
+        "stage2_threshold_0.9": 3,
+        "stage2_threshold_0.95": 3,
+        "stage2_threshold_0.99": 3
+      }
+    },
+    {
+      "anti_selectivity": {
+        "also_at_the_row_level_for_reference": {
+          "control_queries_failing_a_and_b": "29/76",
+          "fp_candidates_failing_a_and_b": "66/278",
+          "no_interval_because": "neither row unit is independent \u2014 control queries share records and FP candidates share loci \u2014 so these are point counts only"
+        },
+        "control_ci95": [
+          0.276093,
+          0.501195
+        ],
+        "control_falls_through_more": true,
+        "control_records_failing_a_and_b": "26/68",
+        "control_share": 0.382353,
+        "fp_ci95": [
+          0.187028,
+          0.305186
+        ],
+        "fp_loci_failing_a_and_b": "48/199",
+        "fp_minus_control_pp": -14.1147,
+        "fp_share": 0.241206,
+        "intervals_disjoint": false,
+        "unit": "control = producible RECORDS; FP arm = decided LOCI",
+        "what_disjointness_would_and_would_not_mean": "non-overlapping Wilson intervals are a CONSERVATIVE indication of a difference, not a test of one; overlapping intervals do not establish equality either. Read the direction and the size, not the flag."
+      },
+      "clears_every_decision_floor": true,
+      "control_arm": {
+        "criterion_c_not_in_this_conjunction": "the control's host genomes carry no GFF annotation, so criterion (c) is UNMEASURED on this arm and is absent from the conjunction. Real T-boxes are the population (c) is most likely to spare, so this damage figure is an UPPER bound; the FP arm's yield, by contrast, does include (c).",
+        "n_queries_a_and_b_failed": 29,
+        "n_queries_b_failed": 39,
+        "n_queries_decided": 76,
+        "n_records_losing_a_and_b": 26,
+        "n_records_losing_b": 33,
+        "n_records_producible": 68,
+        "query_level_ci95": null,
+        "share_records_losing_a_and_b": 0.382353,
+        "share_records_losing_a_and_b_ci95": [
+          0.276093,
+          0.501195
+        ],
+        "share_records_losing_b": 0.485294,
+        "share_records_losing_b_ci95": [
+          0.370506,
+          0.601655
+        ],
+        "why_no_query_ci": "the control's queries are pseudo-replicated \u2014 most records contribute more than one \u2014 so a binomial interval on them would be narrower than the data support. Every interval here is on the record level."
+      },
+      "floors_cleared": [
+        "min_named_helices >= 2",
+        "min_helix_pairs >= 2",
+        "ncca_pairing_nt >= 2",
+        "bulge_max_nt is bounded"
+      ],
+      "fp_arm": {
+        "failed": 141,
+        "failed_with_criterion_a_failed": 66,
+        "loci_decided": 199,
+        "loci_failing_a_and_b": 48,
+        "passed": 137,
+        "share_failed_of_decided": 0.507194,
+        "unit_note": "the candidate counts are manifest rows; the LOCUS counts collapse candidates addressing the same span from overlapping tiling windows. Every FP interval in this report is on the locus."
+      },
+      "label": "canonical_core_3helix",
+      "params": {
+        "allow_wobble": false,
+        "bulge_max_nt": 50,
+        "bulge_min_nt": 4,
+        "min_helix_pairs": 2,
+        "min_named_helices": 3,
+        "ncca_pairing_nt": 2,
+        "stem_i_nt_threshold": 1
+      },
+      "round_yield_n_mined": {
+        "stage2_not_declared": 11,
+        "stage2_threshold_0.5": 11,
+        "stage2_threshold_0.9": 11,
+        "stage2_threshold_0.95": 11,
+        "stage2_threshold_0.99": 11
+      },
+      "round_yield_n_mined_loci": {
+        "stage2_not_declared": 9,
+        "stage2_threshold_0.5": 9,
+        "stage2_threshold_0.9": 9,
+        "stage2_threshold_0.95": 9,
+        "stage2_threshold_0.99": 9
+      }
+    },
+    {
+      "anti_selectivity": {
+        "also_at_the_row_level_for_reference": {
+          "control_queries_failing_a_and_b": "33/76",
+          "fp_candidates_failing_a_and_b": "89/278",
+          "no_interval_because": "neither row unit is independent \u2014 control queries share records and FP candidates share loci \u2014 so these are point counts only"
+        },
+        "control_ci95": [
+          0.315971,
+          0.544834
+        ],
+        "control_falls_through_more": true,
+        "control_records_failing_a_and_b": "29/68",
+        "control_share": 0.426471,
+        "fp_ci95": [
+          0.260617,
+          0.389356
+        ],
+        "fp_loci_failing_a_and_b": "64/199",
+        "fp_minus_control_pp": -10.4863,
+        "fp_share": 0.321608,
+        "intervals_disjoint": false,
+        "unit": "control = producible RECORDS; FP arm = decided LOCI",
+        "what_disjointness_would_and_would_not_mean": "non-overlapping Wilson intervals are a CONSERVATIVE indication of a difference, not a test of one; overlapping intervals do not establish equality either. Read the direction and the size, not the flag."
+      },
+      "clears_every_decision_floor": true,
+      "control_arm": {
+        "criterion_c_not_in_this_conjunction": "the control's host genomes carry no GFF annotation, so criterion (c) is UNMEASURED on this arm and is absent from the conjunction. Real T-boxes are the population (c) is most likely to spare, so this damage figure is an UPPER bound; the FP arm's yield, by contrast, does include (c).",
+        "n_queries_a_and_b_failed": 33,
+        "n_queries_b_failed": 49,
+        "n_queries_decided": 76,
+        "n_records_losing_a_and_b": 29,
+        "n_records_losing_b": 41,
+        "n_records_producible": 68,
+        "query_level_ci95": null,
+        "share_records_losing_a_and_b": 0.426471,
+        "share_records_losing_a_and_b_ci95": [
+          0.315971,
+          0.544834
+        ],
+        "share_records_losing_b": 0.602941,
+        "share_records_losing_b_ci95": [
+          0.484158,
+          0.710715
+        ],
+        "why_no_query_ci": "the control's queries are pseudo-replicated \u2014 most records contribute more than one \u2014 so a binomial interval on them would be narrower than the data support. Every interval here is on the record level."
+      },
+      "floors_cleared": [
+        "min_named_helices >= 2",
+        "min_helix_pairs >= 2",
+        "ncca_pairing_nt >= 2",
+        "bulge_max_nt is bounded"
+      ],
+      "fp_arm": {
+        "failed": 220,
+        "failed_with_criterion_a_failed": 89,
+        "loci_decided": 199,
+        "loci_failing_a_and_b": 64,
+        "passed": 58,
+        "share_failed_of_decided": 0.791367,
+        "unit_note": "the candidate counts are manifest rows; the LOCUS counts collapse candidates addressing the same span from overlapping tiling windows. Every FP interval in this report is on the locus."
+      },
+      "label": "canonical_core_3helix_ncca3",
+      "params": {
+        "allow_wobble": false,
+        "bulge_max_nt": 50,
+        "bulge_min_nt": 4,
+        "min_helix_pairs": 2,
+        "min_named_helices": 3,
+        "ncca_pairing_nt": 3,
+        "stem_i_nt_threshold": 1
+      },
+      "round_yield_n_mined": {
+        "stage2_not_declared": 11,
+        "stage2_threshold_0.5": 11,
+        "stage2_threshold_0.9": 11,
+        "stage2_threshold_0.95": 11,
+        "stage2_threshold_0.99": 11
+      },
+      "round_yield_n_mined_loci": {
+        "stage2_not_declared": 9,
+        "stage2_threshold_0.5": 9,
+        "stage2_threshold_0.9": 9,
+        "stage2_threshold_0.95": 9,
+        "stage2_threshold_0.99": 9
+      }
+    },
+    {
+      "anti_selectivity": {
+        "also_at_the_row_level_for_reference": {
+          "control_queries_failing_a_and_b": "44/76",
+          "fp_candidates_failing_a_and_b": "104/278",
+          "no_interval_because": "neither row unit is independent \u2014 control queries share records and FP candidates share loci \u2014 so these are point counts only"
+        },
+        "control_ci95": [
+          0.440817,
+          0.67054
+        ],
+        "control_falls_through_more": true,
+        "control_records_failing_a_and_b": "38/68",
+        "control_share": 0.558824,
+        "fp_ci95": [
+          0.312485,
+          0.445948
+        ],
+        "fp_loci_failing_a_and_b": "75/199",
+        "fp_minus_control_pp": -18.1939,
+        "fp_share": 0.376884,
+        "intervals_disjoint": false,
+        "unit": "control = producible RECORDS; FP arm = decided LOCI",
+        "what_disjointness_would_and_would_not_mean": "non-overlapping Wilson intervals are a CONSERVATIVE indication of a difference, not a test of one; overlapping intervals do not establish equality either. Read the direction and the size, not the flag."
+      },
+      "clears_every_decision_floor": true,
+      "control_arm": {
+        "criterion_c_not_in_this_conjunction": "the control's host genomes carry no GFF annotation, so criterion (c) is UNMEASURED on this arm and is absent from the conjunction. Real T-boxes are the population (c) is most likely to spare, so this damage figure is an UPPER bound; the FP arm's yield, by contrast, does include (c).",
+        "n_queries_a_and_b_failed": 44,
+        "n_queries_b_failed": 72,
+        "n_queries_decided": 76,
+        "n_records_losing_a_and_b": 38,
+        "n_records_losing_b": 64,
+        "n_records_producible": 68,
+        "query_level_ci95": null,
+        "share_records_losing_a_and_b": 0.558824,
+        "share_records_losing_a_and_b_ci95": [
+          0.440817,
+          0.67054
+        ],
+        "share_records_losing_b": 0.941176,
+        "share_records_losing_b_ci95": [
+          0.858281,
+          0.97689
+        ],
+        "why_no_query_ci": "the control's queries are pseudo-replicated \u2014 most records contribute more than one \u2014 so a binomial interval on them would be narrower than the data support. Every interval here is on the record level."
+      },
+      "floors_cleared": [
+        "min_named_helices >= 2",
+        "min_helix_pairs >= 2",
+        "ncca_pairing_nt >= 2",
+        "bulge_max_nt is bounded"
+      ],
+      "fp_arm": {
+        "failed": 265,
+        "failed_with_criterion_a_failed": 104,
+        "loci_decided": 199,
+        "loci_failing_a_and_b": 75,
+        "passed": 13,
+        "share_failed_of_decided": 0.953237,
+        "unit_note": "the candidate counts are manifest rows; the LOCUS counts collapse candidates addressing the same span from overlapping tiling windows. Every FP interval in this report is on the locus."
+      },
+      "label": "curated_freeze_transplant",
+      "params": {
+        "allow_wobble": false,
+        "bulge_max_nt": 50,
+        "bulge_min_nt": 4,
+        "min_helix_pairs": 3,
+        "min_named_helices": 4,
+        "ncca_pairing_nt": 4,
+        "stem_i_nt_threshold": 1
+      },
+      "round_yield_n_mined": {
+        "stage2_not_declared": 13,
+        "stage2_threshold_0.5": 12,
+        "stage2_threshold_0.9": 13,
+        "stage2_threshold_0.95": 13,
+        "stage2_threshold_0.99": 13
+      },
+      "round_yield_n_mined_loci": {
+        "stage2_not_declared": 11,
+        "stage2_threshold_0.5": 10,
+        "stage2_threshold_0.9": 11,
+        "stage2_threshold_0.95": 11,
+        "stage2_threshold_0.99": 11
+      }
+    },
+    {
+      "anti_selectivity": {
+        "also_at_the_row_level_for_reference": {
+          "control_queries_failing_a_and_b": "45/76",
+          "fp_candidates_failing_a_and_b": "107/278",
+          "no_interval_because": "neither row unit is independent \u2014 control queries share records and FP candidates share loci \u2014 so these are point counts only"
+        },
+        "control_ci95": [
+          0.440817,
+          0.67054
+        ],
+        "control_falls_through_more": true,
+        "control_records_failing_a_and_b": "38/68",
+        "control_share": 0.558824,
+        "fp_ci95": [
+          0.326791,
+          0.461221
+        ],
+        "fp_loci_failing_a_and_b": "78/199",
+        "fp_minus_control_pp": -16.6864,
+        "fp_share": 0.39196,
+        "intervals_disjoint": false,
+        "unit": "control = producible RECORDS; FP arm = decided LOCI",
+        "what_disjointness_would_and_would_not_mean": "non-overlapping Wilson intervals are a CONSERVATIVE indication of a difference, not a test of one; overlapping intervals do not establish equality either. Read the direction and the size, not the flag."
+      },
+      "clears_every_decision_floor": true,
+      "control_arm": {
+        "criterion_c_not_in_this_conjunction": "the control's host genomes carry no GFF annotation, so criterion (c) is UNMEASURED on this arm and is absent from the conjunction. Real T-boxes are the population (c) is most likely to spare, so this damage figure is an UPPER bound; the FP arm's yield, by contrast, does include (c).",
+        "n_queries_a_and_b_failed": 45,
+        "n_queries_b_failed": 75,
+        "n_queries_decided": 76,
+        "n_records_losing_a_and_b": 38,
+        "n_records_losing_b": 67,
+        "n_records_producible": 68,
+        "query_level_ci95": null,
+        "share_records_losing_a_and_b": 0.558824,
+        "share_records_losing_a_and_b_ci95": [
+          0.440817,
+          0.67054
+        ],
+        "share_records_losing_b": 0.985294,
+        "share_records_losing_b_ci95": [
+          0.921288,
+          0.997399
+        ],
+        "why_no_query_ci": "the control's queries are pseudo-replicated \u2014 most records contribute more than one \u2014 so a binomial interval on them would be narrower than the data support. Every interval here is on the record level."
+      },
+      "floors_cleared": [
+        "min_named_helices >= 2",
+        "min_helix_pairs >= 2",
+        "ncca_pairing_nt >= 2",
+        "bulge_max_nt is bounded"
+      ],
+      "fp_arm": {
+        "failed": 271,
+        "failed_with_criterion_a_failed": 107,
+        "loci_decided": 199,
+        "loci_failing_a_and_b": 78,
+        "passed": 7,
+        "share_failed_of_decided": 0.97482,
+        "unit_note": "the candidate counts are manifest rows; the LOCUS counts collapse candidates addressing the same span from overlapping tiling windows. Every FP interval in this report is on the locus."
+      },
+      "label": "strictest",
+      "params": {
+        "allow_wobble": false,
+        "bulge_max_nt": 20,
+        "bulge_min_nt": 7,
+        "min_helix_pairs": 5,
+        "min_named_helices": 4,
+        "ncca_pairing_nt": 4,
+        "stem_i_nt_threshold": 1
+      },
+      "round_yield_n_mined": {
+        "stage2_not_declared": 13,
+        "stage2_threshold_0.5": 12,
+        "stage2_threshold_0.9": 13,
+        "stage2_threshold_0.95": 13,
+        "stage2_threshold_0.99": 13
+      },
+      "round_yield_n_mined_loci": {
+        "stage2_not_declared": 11,
+        "stage2_threshold_0.5": 10,
+        "stage2_threshold_0.9": 11,
+        "stage2_threshold_0.95": 11,
+        "stage2_threshold_0.99": 11
+      }
+    }
+  ],
+  "pins_nothing": true,
+  "provenance": {
+    "adr": "ADR-0006 D3 (criterion (b)'s named-element predicate), D6 (the short-Stem-I relaxation), A4 (the seven rule parameters supplied per round, no defaults); ADR-0005 D14 (the spare rule: sparing is a disjunction, so mining is a conjunction; unavailable spares); ADR-0004 D1 (the element vocabulary D3 reuses)",
+    "env_lock_hash": null,
+    "extra": {
+      "external_inputs": {
+        "control_msa_root": "msa_supply_control",
+        "control_supply_digest_sha256": "0b5afbec0c8fd9af75a5c789d44f64e0b8db1c19ecce011eac6dd92e3393cb28",
+        "fp_msa_root": "msa_supply",
+        "fp_supply_digest_sha256": "90b2fe1b532f2851bbade2884e8498e2ab58a11c418cc00b314840f041c0f862",
+        "supply_origin": "two.amlab:$HOME/tbox-scratch/round_p3_15_supply/msa (jobs 1205+1254) and round_p3_15g_control/msa (job 1264); retrieved by rsync"
+      },
+      "schema_version": "1.0"
+    },
+    "generated_at_utc": "2026-08-12T19:00:12.067100+00:00",
+    "git_sha": "9bf7e70eb1d8d270a21ca0bace0c5cdd30aec2d1",
+    "inputs": {
+      "data/processed/mining/curated_control_manifest_v0.json": "363795fba6cd4d1d85495ec62e6e62cd11f1bf37b0fdf739c48315777c4d2a83",
+      "data/processed/mining/curated_control_status_v0.json": "8b5e8f4178cd63eb8664c1e63e519c5810223eb56ca3a1488ce8bfee9dbeb033",
+      "data/processed/mining/round0_fp_manifest.json": "e8aff87d395b3cb70a25c1f1d4ac348daf3da9323baa4c04a32fd3e4060d4b95",
+      "data/processed/mining/round0_fp_spare_rule_inputs_v0.json": "65aedc885d96a4266ff02877a9f9ee02313c9f6c8e90013481675f43a59fca35",
+      "reports/p3/architecture_parameter_control_comparison.json": "f1ef8504b2464cc2bf93cd8002299269df61373cf7a4a53254f50aa7977b269f",
+      "reports/p3/architecture_parameter_measurement.json": "86e64af40f76d4291aeb3e8186eb9d48e8fd16191762cab32364ce05435f87ca",
+      "reports/p3/architecture_parameter_measurement_control.json": "c709ab9f906ebd4ffcaf22516888d18eff6ccfed3576fc5c92ecb37ab55798e3"
+    },
+    "outputs": {},
+    "rule": "P3-15'-f criterion-(b) parameter re-derivation",
+    "schema_version": "1.0",
+    "script": "src/tbox_finder/mining/architecture_param_recommend.py",
+    "seed": 42
+  },
+  "recommendation": {
+    "anti_selectivity": {
+      "also_at_the_row_level_for_reference": {
+        "control_queries_failing_a_and_b": "8/76",
+        "fp_candidates_failing_a_and_b": "32/278",
+        "no_interval_because": "neither row unit is independent \u2014 control queries share records and FP candidates share loci \u2014 so these are point counts only"
+      },
+      "control_ci95": [
+        0.060834,
+        0.215351
+      ],
+      "control_falls_through_more": false,
+      "control_records_failing_a_and_b": "8/68",
+      "control_share": 0.117647,
+      "fp_ci95": [
+        0.08656,
+        0.178877
+      ],
+      "fp_loci_failing_a_and_b": "25/199",
+      "fp_minus_control_pp": 0.7981,
+      "fp_share": 0.125628,
+      "intervals_disjoint": false,
+      "unit": "control = producible RECORDS; FP arm = decided LOCI",
+      "what_disjointness_would_and_would_not_mean": "non-overlapping Wilson intervals are a CONSERVATIVE indication of a difference, not a test of one; overlapping intervals do not establish equality either. Read the direction and the size, not the flag."
+    },
+    "bulge_sentinel_comparison": {
+      "chosen": {
+        "control_records_losing_a_and_b": 8,
+        "fp_failed": 52,
+        "n_mined": 3
+      },
+      "chosen_bulge_max_nt": 50,
+      "measures_identically": true,
+      "sentinel_bulge_max_nt": 10000,
+      "sentinel_twin": {
+        "control_records_losing_a_and_b": 8,
+        "fp_failed": 52,
+        "n_mined": 3
+      },
+      "sentinel_twin_admissible": true
+    },
+    "dominating_alternatives": {
+      "examples_by_yield": [
+        {
+          "control_records_losing_a_and_b": 8,
+          "n_extra_mined_vs_recommendation": 1,
+          "n_mined": 4,
+          "of_n_producible_records": 68,
+          "params": {
+            "allow_wobble": false,
+            "bulge_max_nt": 20,
+            "bulge_min_nt": 2,
+            "min_helix_pairs": 3,
+            "min_named_helices": 2,
+            "ncca_pairing_nt": 2,
+            "stem_i_nt_threshold": 1
+          }
+        },
+        {
+          "control_records_losing_a_and_b": 8,
+          "n_extra_mined_vs_recommendation": 2,
+          "n_mined": 5,
+          "of_n_producible_records": 68,
+          "params": {
+            "allow_wobble": false,
+            "bulge_max_nt": 50,
+            "bulge_min_nt": 3,
+            "min_helix_pairs": 3,
+            "min_named_helices": 2,
+            "ncca_pairing_nt": 2,
+            "stem_i_nt_threshold": 1
+          }
+        }
+      ],
+      "max_extra_mined": 2,
+      "n_settings": 8,
+      "why_the_rule_declines_them": "they are selected BY the two arms, on a few dozen control records, from thousands of grid points (the counts live in grid.n_admissible, yield_ceiling and control_arm.n_records_producible, never in this sentence); the extra yield is a handful of candidates; and the damage coordinate excludes (c), which is the only disjunct with measured discrimination. ADR-0006 A4 asks the round to supply a chosen value and record it \u2014 taking one of these would record a tuned one instead, and nothing downstream would say so."
+    },
+    "floor_sensitivity": {
+      "bulge_max_nt is bounded": {
+        "changes_the_selection": false,
+        "measured_identically_to_the_chosen_setting": null,
+        "selection_without_this_floor": {
+          "allow_wobble": false,
+          "bulge_max_nt": 50,
+          "bulge_min_nt": 2,
+          "min_helix_pairs": 2,
+          "min_named_helices": 2,
+          "ncca_pairing_nt": 2,
+          "stem_i_nt_threshold": 1
+        }
+      },
+      "min_helix_pairs >= 2": {
+        "changes_the_selection": null,
+        "measured_identically_to_the_chosen_setting": null,
+        "selection_without_this_floor": null,
+        "the_rule_cannot_decide_without_it": "the decision rule left 3 settings tied at the measured minimum that TIE_BREAK_ORDER cannot separate \u2014 they disagree on ['min_helix_pairs']: ['mnh2_mhp1_bulge2-50_ncca2_wob0', 'mnh2_mhp2_bulge2-50_ncca2_wob0', 'mnh2_mhp2_bulge2-50_ncca2_wob1']"
+      },
+      "min_named_helices >= 2": {
+        "changes_the_selection": null,
+        "measured_identically_to_the_chosen_setting": null,
+        "selection_without_this_floor": null,
+        "the_rule_cannot_decide_without_it": "the decision rule left 7 settings tied at the measured minimum that TIE_BREAK_ORDER cannot separate \u2014 they disagree on ['min_helix_pairs', 'min_named_helices']: ['mnh1_mhp2_bulge2-50_ncca2_wob0', 'mnh1_mhp3_bulge2-50_ncca2_wob0', 'mnh1_mhp4_bulge2-50_ncca2_wob0', 'mnh2_mhp2_bulge2-50_ncca2_wob0', 'mnh1_mhp3_bulge2-50_ncca2_wob1', 'mnh1_mhp4_bulge2-50_ncca2_wob1', 'mnh2_mhp2_bulge2-50_ncca2_wob1']"
+      },
+      "ncca_pairing_nt >= 2": {
+        "changes_the_selection": true,
+        "measured_identically_to_the_chosen_setting": false,
+        "selection_without_this_floor": {
+          "allow_wobble": false,
+          "bulge_max_nt": 50,
+          "bulge_min_nt": 1,
+          "min_helix_pairs": 2,
+          "min_named_helices": 2,
+          "ncca_pairing_nt": 1,
+          "stem_i_nt_threshold": 1
+        }
+      }
+    },
+    "helix_stack_depth_evidence": {
+      "control_arm": {
+        "counts": {
+          "10": 3,
+          "11": 5,
+          "12": 4,
+          "13": 2,
+          "14": 4,
+          "2": 29,
+          "3": 72,
+          "4": 28,
+          "5": 35,
+          "6": 32,
+          "7": 7,
+          "8": 12,
+          "9": 3
+        },
+        "max": 14,
+        "median": 4.0,
+        "min": 2,
+        "n": 236,
+        "percentiles": {
+          "p50": 4,
+          "p90": 8,
+          "p95": 11,
+          "p99": 14
+        }
+      },
+      "fp_arm": {
+        "counts": {
+          "10": 12,
+          "11": 15,
+          "12": 11,
+          "13": 25,
+          "14": 9,
+          "15": 5,
+          "2": 144,
+          "3": 299,
+          "4": 160,
+          "5": 114,
+          "6": 131,
+          "7": 46,
+          "8": 18,
+          "9": 13
+        },
+        "max": 15,
+        "median": 4.0,
+        "min": 2,
+        "n": 1002,
+        "percentiles": {
+          "p50": 4,
+          "p90": 8,
+          "p95": 11,
+          "p99": 14
+        }
+      },
+      "source": "helix_arm.helix_stack_depth of each arm's measurement report",
+      "why_it_is_here": "the min_helix_pairs floor's rationale makes an empirical claim about stack depth; the distribution it appeals to is carried here so the claim is checkable inside the artifact that makes it"
+    },
+    "matches_named_setting": "sensitive_core",
+    "measured": {
+      "control_arm": {
+        "criterion_c_not_in_this_conjunction": "the control's host genomes carry no GFF annotation, so criterion (c) is UNMEASURED on this arm and is absent from the conjunction. Real T-boxes are the population (c) is most likely to spare, so this damage figure is an UPPER bound; the FP arm's yield, by contrast, does include (c).",
+        "n_queries_a_and_b_failed": 8,
+        "n_queries_b_failed": 11,
+        "n_queries_decided": 76,
+        "n_records_losing_a_and_b": 8,
+        "n_records_losing_b": 9,
+        "n_records_producible": 68,
+        "query_level_ci95": null,
+        "share_records_losing_a_and_b": 0.117647,
+        "share_records_losing_a_and_b_ci95": [
+          0.060834,
+          0.215351
+        ],
+        "share_records_losing_b": 0.132353,
+        "share_records_losing_b_ci95": [
+          0.071222,
+          0.232803
+        ],
+        "why_no_query_ci": "the control's queries are pseudo-replicated \u2014 most records contribute more than one \u2014 so a binomial interval on them would be narrower than the data support. Every interval here is on the record level."
+      },
+      "fp_arm": {
+        "failed": 52,
+        "failed_with_criterion_a_failed": 32,
+        "loci_decided": 199,
+        "loci_failing_a_and_b": 25,
+        "passed": 226,
+        "share_failed_of_decided": 0.18705,
+        "unit_note": "the candidate counts are manifest rows; the LOCUS counts collapse candidates addressing the same span from overlapping tiling windows. Every FP interval in this report is on the locus."
+      },
+      "params": {
+        "allow_wobble": false,
+        "bulge_max_nt": 50,
+        "bulge_min_nt": 2,
+        "min_helix_pairs": 2,
+        "min_named_helices": 2,
+        "ncca_pairing_nt": 2,
+        "stem_i_nt_threshold": 1
+      },
+      "round_yield_n_mined": {
+        "stage2_not_declared": 3,
+        "stage2_threshold_0.5": 3,
+        "stage2_threshold_0.9": 3,
+        "stage2_threshold_0.95": 3,
+        "stage2_threshold_0.99": 3
+      },
+      "round_yield_n_mined_loci": {
+        "stage2_not_declared": 3,
+        "stage2_threshold_0.5": 3,
+        "stage2_threshold_0.9": 3,
+        "stage2_threshold_0.95": 3,
+        "stage2_threshold_0.99": 3
+      }
+    },
+    "mined_candidate_ids": [
+      "GCA_011056645.1:c228:8704:9345-9438",
+      "GCA_015478585.1:c26:4608:5040-5154",
+      "GCA_040905065.1:c256:4899:5781-5916"
+    ],
+    "n_admissible_points": 2880,
+    "n_at_the_measured_minimum": 2,
+    "n_clearing_every_floor": 864,
+    "params": {
+      "allow_wobble": false,
+      "bulge_max_nt": 50,
+      "bulge_min_nt": 2,
+      "min_helix_pairs": 2,
+      "min_named_helices": 2,
+      "ncca_pairing_nt": 2,
+      "stem_i_nt_threshold": 1
+    },
+    "selection_by_min_named_helices": {
+      "levels": [
+        {
+          "min_named_helices": 1,
+          "reading": null,
+          "selection": null,
+          "the_rule_cannot_decide_at_this_level": "the decision rule left 7 settings tied at the measured minimum that TIE_BREAK_ORDER cannot separate \u2014 they disagree on ['min_helix_pairs', 'min_named_helices']: ['mnh1_mhp2_bulge2-50_ncca2_wob0', 'mnh1_mhp3_bulge2-50_ncca2_wob0', 'mnh1_mhp4_bulge2-50_ncca2_wob0', 'mnh2_mhp2_bulge2-50_ncca2_wob0', 'mnh1_mhp3_bulge2-50_ncca2_wob1', 'mnh1_mhp4_bulge2-50_ncca2_wob1', 'mnh2_mhp2_bulge2-50_ncca2_wob1']"
+        },
+        {
+          "control_records_losing_a_and_b": 8,
+          "fp_arm_failed_of_decided": "52/278",
+          "matches_named_setting": "sensitive_core",
+          "min_named_helices": 2,
+          "of_n_producible_records": 68,
+          "reading": "the PLURAL reading: D3's pass condition is that 'the expected helices are present' \u2014 plural \u2014 so a setting satisfied by ONE resolved helix is a 'some helix is present' predicate. This is the weakest level at which the published sentence matches D3's wording.",
+          "round_yield_n_mined": 3,
+          "selection": {
+            "allow_wobble": false,
+            "bulge_max_nt": 50,
+            "bulge_min_nt": 2,
+            "min_helix_pairs": 2,
+            "min_named_helices": 2,
+            "ncca_pairing_nt": 2,
+            "stem_i_nt_threshold": 1
+          }
+        },
+        {
+          "control_records_losing_a_and_b": 24,
+          "fp_arm_failed_of_decided": "129/278",
+          "matches_named_setting": null,
+          "min_named_helices": 3,
+          "of_n_producible_records": 68,
+          "reading": "the CANONICAL-CORE reading, and it is stated by this repo's own localizer: architecture.named_elements_present's docstring reads D3 as 'the canonical class-I core is Stem I + Stem III + antiterminator (with Stem II in many lineages)' \u2014 three elements. It is at least as well supported as the plural reading and it prices very differently.",
+          "round_yield_n_mined": 11,
+          "selection": {
+            "allow_wobble": false,
+            "bulge_max_nt": 50,
+            "bulge_min_nt": 2,
+            "min_helix_pairs": 2,
+            "min_named_helices": 3,
+            "ncca_pairing_nt": 2,
+            "stem_i_nt_threshold": 1
+          }
+        },
+        {
+          "control_records_losing_a_and_b": 31,
+          "fp_arm_failed_of_decided": "192/278",
+          "matches_named_setting": null,
+          "min_named_helices": 4,
+          "of_n_producible_records": 68,
+          "reading": null,
+          "round_yield_n_mined": 13,
+          "selection": {
+            "allow_wobble": false,
+            "bulge_max_nt": 20,
+            "bulge_min_nt": 2,
+            "min_helix_pairs": 2,
+            "min_named_helices": 4,
+            "ncca_pairing_nt": 2,
+            "stem_i_nt_threshold": 1
+          }
+        }
+      ],
+      "why_this_block_exists": "the recommendation below is the level-2 row. ADR-0006 D3 assigns this value to the held-out canonical set at P6 and states no number, so choosing the level is a CLAUDE.md \u00a77 decision and every level is priced here rather than one being presented as derived."
+    },
+    "tie_break_exercised": {
+      "can_fire": {
+        "allow_wobble": true,
+        "bulge_max_nt": true,
+        "stem_i_nt_threshold": false
+      },
+      "note": "an entry over a single-valued axis is inert here by construction, not by measurement of the arms; it is kept so a supply that DID vary that axis would still be resolved by a stated preference rather than by sort order.",
+      "values_present_on_the_swept_grid": {
+        "allow_wobble": [
+          false,
+          true
+        ],
+        "bulge_max_nt": [
+          10,
+          20,
+          50,
+          10000
+        ],
+        "stem_i_nt_threshold": [
+          1
+        ]
+      }
+    },
+    "tied_with": [
+      {
+        "allow_wobble": true,
+        "bulge_max_nt": 50,
+        "bulge_min_nt": 2,
+        "min_helix_pairs": 2,
+        "min_named_helices": 2,
+        "ncca_pairing_nt": 2,
+        "stem_i_nt_threshold": 1
+      }
+    ],
+    "what_it_costs": "the frontier above shows what a higher-yield setting would buy and what it would cost in control records; the rule declines those because selecting them is fitting a value to a few dozen records, not choosing one."
+  },
+  "schema_version": "1.0",
+  "step": "P3-15'-f",
+  "yield_ceiling": {
+    "by_stage2_threshold": {
+      "stage2_not_declared": {
+        "max_mined_if_b_failed_everywhere": 15,
+        "max_mined_if_b_failed_everywhere_loci": 12,
+        "min_mined_if_b_passed_everywhere": 0
+      },
+      "stage2_threshold_0.5": {
+        "max_mined_if_b_failed_everywhere": 12,
+        "max_mined_if_b_failed_everywhere_loci": 10,
+        "min_mined_if_b_passed_everywhere": 0
+      },
+      "stage2_threshold_0.9": {
+        "max_mined_if_b_failed_everywhere": 13,
+        "max_mined_if_b_failed_everywhere_loci": 11,
+        "min_mined_if_b_passed_everywhere": 0
+      },
+      "stage2_threshold_0.95": {
+        "max_mined_if_b_failed_everywhere": 13,
+        "max_mined_if_b_failed_everywhere_loci": 11,
+        "min_mined_if_b_passed_everywhere": 0
+      },
+      "stage2_threshold_0.99": {
+        "max_mined_if_b_failed_everywhere": 13,
+        "max_mined_if_b_failed_everywhere_loci": 11,
+        "min_mined_if_b_passed_everywhere": 0
+      }
+    },
+    "candidate_ids_at_the_ceiling": [
+      "GCA_002878375.1:c1:22528:23222-23375",
+      "GCA_002878375.1:c1:23040:23222-23375",
+      "GCA_011056645.1:c183:6144:6428-6519",
+      "GCA_011056645.1:c225:4608:5379-5475",
+      "GCA_011056645.1:c225:5120:5384-5475",
+      "GCA_011056645.1:c228:8704:9345-9438",
+      "GCA_015478585.1:c26:4608:5040-5154",
+      "GCA_023663235.1:c13:22528:23157-23220",
+      "GCA_023663235.1:c13:23040:23157-23220",
+      "GCA_023663235.1:c7:26112:26818-26885",
+      "GCA_023663235.1:c7:26624:26818-26885",
+      "GCA_039638295.1:c67:3584:3891-3985",
+      "GCA_039638295.1:c72:0:75-164",
+      "GCA_040905065.1:c256:4899:5781-5916",
+      "GCF_041320495.1:c21:554496:554947-555043"
+    ],
+    "distinct_loci_at_the_ceiling": 12,
+    "n_candidates": 941,
+    "n_criterion_a_failed": 111,
+    "n_criterion_c_failed": 96,
+    "n_failing_both_a_and_c": 15,
+    "n_failing_both_a_and_c_with_a_consensus": 15,
+    "reading": "sparing is a disjunction (ADR-0005 D14), so mining is a conjunction: only a candidate every disjunct scored 'failed' is mined. Criterion (b) can therefore act at all only inside the (a)-failed AND (c)-failed intersection; outside it (b)'s verdict changes no outcome. max_mined_if_b_failed_everywhere is the ceiling the parameter choice is bounded by \u2014 no setting can exceed it \u2014 and min_mined_if_b_passed_everywhere is 0 by the structure of the rule, not by measurement \u2014 (b) passing everywhere spares everything \u2014 and is emitted only so the band has both ends. \u26a0 Read the LOCUS count beside the candidate count: the manifest tiles overlapping windows, so some of these rows are second calls on one piece of DNA.",
+    "stage2_threshold_note": "ADR-0005 D3/D14 freeze the Stage-2 threshold at the \u00a713.1 phase gate; none is pinned here. 'stage2_not_declared' is the P2 accounting (the disjunct is not in play) and is an UPPER bound: declaring Stage-2 at any threshold can only spare more.",
+    "status_counts": {
+      "criterion_a_covariation": {
+        "failed": 111,
+        "passed": 167,
+        "unavailable": 663
+      },
+      "criterion_c_synteny": {
+        "failed": 96,
+        "passed": 546,
+        "unavailable": 299
+      }
+    }
+  }
+}

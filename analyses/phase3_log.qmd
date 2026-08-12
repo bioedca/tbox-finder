@@ -5863,3 +5863,420 @@ largest threat to that reading is stated in the report itself — the FP arm is 
 are not two populations and equal failure shares are the expected result. **Commit.** `PENDING`
 (the SHA is not knowable when this stanza is written; `main` takes no direct commits — corrected in
 the next step's PR, as P3-15′-f corrected P3-15′-e's).
+
+## Step P3-15′-f — 2026-08-12: what criterion (b)'s seven parameters are actually worth, and the choice they present
+
+**Inputs.** Both de-novo supplies, retrieved fresh by `rsync` and bound to the committed
+reports by digest — the FP arm's 278 consensuses (`two.amlab:$HOME/tbox-scratch/round_p3_15_supply/msa`,
+jobs 1205 + 1254, `90b2fe1b…`) and the matched control's 76 (`round_p3_15g_control/msa`, job
+1264, `0b5afbec…`) — plus the three per-candidate spare-rule columns the round's conjunction
+reads: criterion (a) from job 1205's merged status table (`3215f034…`, the digest
+`architecture_parameter_measurement.json` already records), criterion (c) from P3-15′-c-ii
+(`3c8ac8e3…`, the digest `synteny_exclusion_diagnostic.json` records), and P3-15′-b's 941
+Stage-2 posteriors.
+
+**Process.** `P3-15′-f`'s block asked for its recommendation to be **re-derived, not
+re-quoted**, once the control landed. `mining/architecture_param_recommend.py` does that over
+the **whole grid** rather than the six named tuples the two measurement reports carry: 3,840
+enumerated points, of which **2,880 are admissible** — admissibility *measured* by running the
+shipped localizer and catching its refusal, not by re-encoding its guard, and the 960 refusals
+are all one rule (`bulge_min_nt` shorter than `ncca_pairing_nt`). Each point is evaluated on
+both arms through `candidate_state`, and its **round yield** through the shipped
+`spare_rule.is_mining_excluded` — the real four-disjunct conjunction, not a re-derived one. The
+three spare-rule columns are joined into a committed 941-row table so the arithmetic is
+auditable without cluster access, the same reason `-g-iv` committed the control's status table.
+
+**Outputs.** `src/tbox_finder/mining/architecture_param_recommend.py` ·
+`reports/p3/architecture_parameter_recommendation.json` (`pins_nothing: true`) ·
+`data/processed/mining/round0_fp_spare_rule_inputs_v0.json` ·
+`tests/unit/test_architecture_param_recommend.py` (69 tests).
+
+**⚠⚠ The headline is not about (b) at all: the round's yield ceiling is 15 of 941, and it is
+set before (b) is chosen.** Sparing is a disjunction, so mining is a conjunction. Criterion (a)
+fails on **111** of 941 and criterion (c) on **96**; their intersection is **15**, and all 15
+have a consensus, so (b) is decidable on every one of them. Declaring the Stage-2 disjunct
+lowers it further (**12** at threshold 0.5, **13** at 0.9/0.95/0.99). Over the entire admissible
+grid the round mines between **1 and 13** candidates. Criterion (b)'s seven parameters are
+therefore choosing among **single-digit differences in a re-mining round of 941 candidates** —
+a fact no committed report stated, and one that changes what the §7 question is about.
+
+**The decision rule is stated before the counts, and the counts are then allowed to check it.**
+Four floors are read off ADR-0006 D3's own wording and ADR-0004 D1's element vocabulary —
+`min_named_helices ≥ 2` (D3 says "the expected helices", plural, of four named elements),
+`min_helix_pairs ≥ 2` (one base pair is not a helix), `ncca_pairing_nt ≥ 2` (D3 says
+*pairing*), and a bounded `bulge_max_nt` (10,000 is the axis's no-filter sentinel). Among the
+**864** survivors the rule takes the **most permissive as measured**, which is ADR-0006 A4's own
+fail-closed argument for a sparing disjunct. That selects `stem_i_nt_threshold=1`,
+`min_named_helices=2`, `min_helix_pairs=2`, `bulge_min_nt=2`, `bulge_max_nt=50`,
+`ncca_pairing_nt=2`, `allow_wobble=0` — **exactly `sensitive_core`**, tied only with its
+`allow_wobble=1` twin, which is the inertness proof reappearing as a measurement.
+
+**Two of the four floors are load-bearing in the strongest sense.** Dropping
+`min_named_helices ≥ 2` or `min_helix_pairs ≥ 2` alone leaves the rule **unable to decide** (4
+and 2 settings respectively tie at the measured minimum and the tie-break cannot separate them),
+which is reported as a refusal rather than resolved by enumeration order. Dropping
+`ncca_pairing_nt ≥ 2` moves the selection to `ncca=1, bulge_min=1`. Dropping the bounded-bulge
+floor changes nothing — the tie-break already prefers the bounded value, and the two measure
+identically, so that floor is semantic only and the report says so.
+
+**⚠ The composite (a) ∧ (b) is ANTI-selective at the strict end, which the per-criterion
+comparison could not show.** `-g-iv` compared (b)'s own failure share and found no separation.
+The quantity that decides what is mined is the conjunction, and there the control falls through
+**more** often than the FP arm at five of the six named settings: 9.2 % vs 7.2 %
+(`loosest_nonvacuous`), 10.5 % vs 11.5 % (`sensitive_core` — the one setting favouring the FP
+arm), 38.2 % vs 23.7 %, 43.4 % vs 32.0 %, 57.9 % vs 37.4 %, 59.2 % vs 38.5 %. At
+`curated_freeze_transplant` and `strictest` the two 95 % Wilson intervals are **disjoint**. The
+mechanism is that criterion (a) passes 39.5 % of the control against 60.1 % of the FP arm, so
+tightening (b) removes protection from a population (a) was already protecting less.
+
+**The trade, in the units the choice is actually made in.** Round yield vs control records
+losing both (a) and (b), of 68 producible: `sensitive_core` **3 mined / 8 records**;
+`canonical_core_3helix` **11 / 26**; `canonical_core_3helix_ncca3` **11 / 29**;
+`curated_freeze_transplant` and `strictest` **13 / 38**. Buying ten more hard negatives costs
+thirty more known-T-box records their model-independent protection.
+
+**⚠ The report enumerates the settings that beat its own recommendation.** Eight floor-clearing
+points mine more at no greater measured control cost — at most **two** extra candidates (yield 5
+at the same 8/68). They are listed rather than left to be found, and declined for a stated
+reason: they are argmins over 2,880 points against 68 records, the damage coordinate they tie on
+**excludes criterion (c)** entirely (the control's hosts are unannotated), and A4 asks a round to
+supply a *chosen* value, not a tuned one.
+
+**⚠ A number in `imp.md` was wrong and is corrected here — `TODO.md` had it right.** Criterion
+(c)'s status table is **546 passed / 96 failed / 299 unavailable**, which is what `TODO.md`'s
+P3-15′-c-ii entry and the committed `synteny_exclusion_diagnostic.json` both say
+(`n_candidates_passing: 546`, `n_unavailable: 299`). `imp.md`'s block carried **541 / 101 / 299**
+— the *pre-fix* count that appears two sentences later in that same block as the defect it
+describes; I briefed a subagent off that stale line and it flagged the disagreement. The ceiling
+of 15 is computed from the shipped table, never from either file's prose.
+
+**⚠ One column of the join is not anchored to any committed report, and is carried as a
+sensitivity only.** No committed artifact records the Stage-2 posteriors' digest, and a **second
+scoring of the same 941 candidates exists** whose values differ by up to 3.8e-2 — a CUDA forward
+is not bit-reproducible. The two agree on every candidate at thresholds 0.5/0.9/0.95 and
+disagree on 3 at 0.99. No headline number rests on that column: the ceiling of 15 uses (a) and
+(c) alone, both digest-anchored.
+
+**⚠ A defect downstream of this step, verified not inferred.** `slurm/p3/stage1_remine.sbatch`
+builds `--relaxed-arch-available` / `--synteny-available` into `$PLAN_FLAGS` and passes them to
+`apply-spare-rule`, but **never passes `--relaxed-arch-status` or `--synteny-status`** (the
+strings do not occur in the file). `remine.py:512` raises on exactly that pair, so a round
+declaring either backend live dies at leg (1). The producer run this step gates would therefore
+produce a status table with no path into the round until that sbatch is fixed — off this step's
+roadmap, reported not patched.
+
+**Validation.** `tests/unit` + `tests/golden` vs a matched `main` baseline at `090547f`: **zero
+new failures** — worktree **13** FAILED, main **26**, a strict subset. The delta is the
+documented DVC/LFS one: 9 `test_selection_val` + 4 `test_coverage_sim` move FAILED → SKIPPED,
+and one further test (`test_committed_table_hash_link_resolves_to_the_live_corpus`) skips in the
+worktree because `master_clean_v0.parquet` is not materialised there; both `^FAILED` sets are
+ANSI-stripped and cross-checked against the summary line, and the skip-reason diff names the
+extra one rather than absorbing it into a count. **40 sabotages, all RED against their NAMED
+test, plus 2 negative controls that stay green**; the harness rewrites the original bytes (the
+module is untracked, so `git checkout --` would be a silent no-op), clears `__pycache__` around
+every run and re-reads `git status --porcelain` before and after each. Both artifacts re-derive
+byte-identically apart from `generated_at_utc`. `ruff` + `black` clean.
+
+**Decisions.** ⚠ **Two of this step's own defects were caught by its harness, not by review.**
+A sabotage of `clears_all_floors` stayed **green** because `apply_decision_rule` filtered with
+its own inline copy of the same condition — two spellings of "clears every floor" that could
+drift apart while the frontier and the recommendation disagreed
+([[fixed-one-of-two-identical-things]]); the selection now routes through the one function.
+And `floor_sensitivity` reported `measured_identically_to_the_chosen_setting: true` when the
+selection had not moved — comparing the chosen setting with itself, a TRUE that could not be
+FALSE ([[clauses-must-guard-emptiness]]); it is `null` now. The §7 seven-parameter choice
+remains **open and is the user's**; this step pins nothing and amends no ADR (A4 already
+delegates the value to the round). **Commit.** `PENDING` (the SHA is not knowable when this
+stanza is written; `main` takes no direct commits — corrected in the next step's PR, as this
+step corrects P3-15′-g-iv's).
+
+**Review round 1 (CodeRabbit CLI, 2 minor, both real, both fixed).** (1) The bounded-bulge
+floor's rationale cross-referenced `recommendation.floor_sensitivity` for the claim that the
+bound costs nothing — and that field is `null` in exactly this case, because dropping the floor
+does not move the selection. The citation pointed at the one place it could not be read. A
+`bulge_sentinel_comparison` block now measures the chosen setting against its own
+`bulge_max_nt = 10000` twin directly (identical on all four counts: fp_failed 52, mined 3,
+records losing (b) 9, records losing (a) ∧ (b) 8) and the rationale cites that.
+(2) `control_damage` divided by `n_producible` and called `wilson_interval` on it without a
+guard, so a control with no producible record raised `SizingError`/`ZeroDivisionError` rather
+than this module's own refusal — while `anti_selectivity` already guarded the same degenerate
+input. Both now refuse by name. Sabotage count 40 → **44**, all RED against their named test.
+
+**Review round 2 (CodeRabbit GitHub app, 5 findings — 2 duplicating the CLI's, 3 new, all
+real, all fixed).** (1) **The tie refusal covered three of the seven parameters.** It fired only
+when two argmin members shared a `_tie_break_key`, so two settings differing in *both*
+`min_helix_pairs` and `bulge_max_nt` had different keys and were separated by `bulge_max_nt`
+alone — publishing a `min_helix_pairs` the rule never chose, in direct contradiction of step (4)
+of its own stated statement. The refusal now tests whether the tied settings disagree on any
+parameter **outside** `TIE_BREAK_VOCABULARY`, which is derived from `TIE_BREAK_ORDER` rather
+than restated. ⚠ The recommendation, the ceiling and the frontier are **unchanged** — the only
+movement in the regenerated report is that `floor_sensitivity` now reports **3** and **7** tied
+settings where it had reported 2 and 4, i.e. the old check had been silently resolving ties it
+should have refused. (2) **A duplicated manifest `candidate_id` was never refused**: every
+corpus size here is a row count while every join is a set, so a duplicate inflates the
+denominator while the coverage check still reads as exact. Refused now at both sites. (3)
+**`stage2_posterior` accepted `bool`** — `bool` subclasses `int`, so `true` reads as 1.0 and
+*spares* the candidate at every threshold — **and accepted values outside [0, 1]**, so a
+mis-scaled column would clear every threshold silently. Both refused. Sabotages 44 → **49**.
+
+**⚠⚠ Review round 3 (a 5-lens adversarial workflow + Greptile + a second CodeRabbit pass) BROKE
+TWO OF THIS STEP'S OWN PUBLISHED CLAIMS.** Both are corrected above rather than hedged, and the
+corrections are the most important content of this step.
+
+**(1) The FP arm is pseudo-replicated too, and the report said the opposite.** Of the 278
+(a)-decided FP candidates only **199 are distinct loci**: 79 loci contribute two candidate ids
+differing solely in the tiling-window offset, and those pairs have **byte-identical `msa.sto`**,
+identical (a) status (230/230 concordant), identical (c) status, and identical (b) verdicts at
+every named setting — verified here, not taken on report. The old `unit_caveat` asserted the
+asymmetry backwards ("the control's unit is a QUERY (pseudo-replicated) and the FP arm's is a
+candidate"), so every FP interval was too narrow while the control was refused one for exactly
+the property the FP arm also had. `locus_of` now collapses the window offset and every FP
+interval is on **n = 199 loci**.
+
+**(2) "Disjoint 95 % Wilson intervals at the two strictest" does not survive the correction.**
+That claim was computed from a **query-level** control interval — the interval `control_damage`
+itself refuses to publish — against a candidate-level FP one. Restated on the units the module
+says it uses (control **records**, n = 68; FP **loci**, n = 199): `loosest_nonvacuous` 0.103
+[0.051, 0.198] vs 0.075 [0.046, 0.121] · `sensitive_core` 0.118 vs 0.126 · `canonical_core_3helix`
+0.382 [0.276, 0.501] vs 0.241 [0.187, 0.305] · `…_ncca3` 0.426 vs 0.322 · `curated_freeze_transplant`
+0.559 [0.441, 0.671] vs 0.377 [0.312, 0.446] · `strictest` 0.559 vs 0.392. The control still falls
+through **more** at five of the six settings — the direction is unchanged and it is the reading
+that matters — but **no setting has disjoint intervals**. The separation claim is withdrawn.
+
+**⚠⚠ AND THE LEVEL OF THE FIRST FLOOR WAS NEVER MINE TO SET.** The floor `min_named_helices >= 2`
+was justified as D3's "expected helices" being plural. A second reading is stated **by this
+repo's own localizer** — `architecture.named_elements_present`'s docstring reads D3 as *"the
+canonical class-I core is Stem I + Stem III + antiterminator (with Stem II in many lineages)"*,
+i.e. **three** — and D3 itself contains no number, assigning the value to the held-out canonical
+set at P6. Pricing the levels changes the headline four-fold, so the report now runs the entire
+rule at **every** level and publishes each answer: **≥1** the rule refuses to decide · **≥2** →
+`sensitive_core`, 3 mined / 8 of 68 records · **≥3** → `mnh3 · mhp2 · bulge 2–50 · ncca2`, **11
+mined / 24 of 68** · **≥4** → `mnh4 · mhp2 · bulge 2–20 · ncca2`, **13 mined / 31 of 68**. The
+level is a §7 choice and this step does not take it.
+
+**Three further real findings, fixed.** The `min_helix_pairs` floor cited ADR-0006 D3 for a
+concept D3 does not contain — its `source` now says it is an **assumption of this module**, and
+the stack-depth distribution its rationale appeals to is carried in the report so the claim is
+checkable where it is made. `control_records` derived the record grouping by splitting the
+candidate-id string, which `record_of`'s own docstring forbids; it now reads `accession` from the
+manifest through the shipped `load_control_records` and refuses a status table that is a
+different corpus. And a `supply_origin` copied out of either measurement report reached the
+public payload **without** the `is_local_path_shaped` guard the `--supply-origin` flag gets
+(Greptile P2) — the guard was on the argument, not on the field.
+
+**⚠ WHAT DID NOT CHANGE, AND WHY THAT MATTERS.** The **yield ceiling of 15**, the 1–13 range over
+the grid, the `sensitive_core` selection at level 2, and the whole frontier are **untouched** by
+all six corrections: they are counts of candidates and loci, not intervals, and none of them
+rested on the two broken claims.
+
+**Validation (final).** 98 unit tests; **62 sabotages, all RED against their NAMED test**, plus 2
+green negative controls. ⚠ Two sabotages initially stayed **green** and both were my test
+targeting, not the code: the locus-counting sabotage was pointed at an end-to-end test that
+asserts nothing about loci, and the `control_records` sabotage still tripped a *different*
+refusal in its named test. A dedicated locus test and a retarget fixed both — a sabotage that
+passes for the wrong reason is worth exactly nothing. Zero new failures vs the matched `main`
+baseline at `090547f` (worktree **13**, main **26**, a strict subset). The report re-derives
+byte-identically apart from `generated_at_utc`. `ruff` + `black` clean.
+
+**Review round 4 — the 5-lens workflow's full return (38 agents, 0 errors), and three more real
+corrections.** Its top confirmed finding was a **coverage** one and it landed on code this step
+had just written: `evaluate_point`'s `fp_with_a` — the entire FP numerator of the
+anti-selectivity reading — was reachable by only one fixture, and that fixture set criterion (a)
+to `failed` on **every** candidate, so dropping the (a) conjunct, or reading `synteny_status`
+instead, left the suite green while the published claim went from "5 of 6" to "1 of 6" or was
+silently *strengthened* to "6 of 6". The locus test now uses an **asymmetric** corpus — a third
+candidate that fails (b) but passes (a) — so all three implementations give different numbers,
+and both mutations are in the sabotage set.
+
+**⚠ THE CEILING IS 15 MANIFEST ROWS BUT 12 DISTINCT LOCI.** The same tiling duplication that
+broke the FP intervals also inflates the ceiling: three of the fifteen rows are second calls on a
+locus already counted. Every yield in the report now carries both units, and the recommendation's
+3 mined rows are 3 distinct loci.
+
+**`build_inputs` was asserting provenance it had not checked.** Its `anchored_by` strings —
+"report X records this digest" — were unconditional constants that would keep asserting the
+anchor after either file changed. `anchor_of` now reads the named report, compares the digest,
+and returns `None` when it does not match; on this run the (a) and (c) columns verify and the
+Stage-2 column stays honestly unanchored. Two more identities are relabelled rather than
+published as measurements: `min_mined_if_b_passed_everywhere` is 0 by the structure of the rule,
+not by measurement, and the report says so.
+
+**Validation (final).** 104 unit tests; **69 sabotages, all RED against their NAMED test**, plus
+2 green negative controls. Zero new failures vs the matched `main` baseline at `090547f`
+(worktree **13**, main **26**, a strict subset). The report re-derives byte-identically apart
+from `generated_at_utc`; `ruff` + `black` clean.
+
+**⚠ WHAT IS STILL OPEN FROM THE REVIEW, DISCLOSED NOT FIXED.** The workflow raised further items
+this step does not close: `frontier` attaches a nominal Wilson interval to a minimum selected
+over up to ~1,000 grid points (a selection effect, not a coverage statement); the control's
+damage share is conditioned on producibility and so is a rate on the 68 producible records, not
+on the 160 drawn; and the comparison report is carried into the payload as prose without a digest
+binding. None changes a number above; each is a caveat on how a number may be read, and they are
+listed here rather than left in a transcript.
+
+**⛔ THE §7 DECISION, TAKEN 2026-08-12 (user, AskUserQuestion): `min_named_helices` LEVEL 2 ⇒
+`sensitive_core`.** The round will supply `STEM_I_NT_THRESHOLD=1 · MIN_NAMED_HELICES=2 ·
+MIN_HELIX_PAIRS=2 · BULGE_MIN_NT=2 · BULGE_MAX_NT=50 · NCCA_PAIRING_NT=2 · ALLOW_WOBBLE=0`.
+Presented against the canonical-core reading (level 3: 11 mined / 24 of 68 records), level 4
+(13 / 31) and the option of not running the producer at all given the ceiling. The choice takes
+the **plural** reading of D3 and the most permissive non-vacuous setting on the grid, which is
+ADR-0006 A4's own fail-closed direction for a *sparing* disjunct: at a ceiling of ~12 distinct
+loci the yield forgone is a handful of candidates, while the protection kept is on the flagship
+class. **No ADR is amended** — A4 already delegates the value to the round, which records it in
+provenance, and D6/D17's P6 freeze is untouched. The expected round yield is **3 mined** and the
+measured cost is **8 of 68** control records losing both model-independent protections. ⏭ The
+**§9.3 submit-ack** is now the only thing between this step and the `architecture_producer` run,
+and `slurm/p3/stage1_remine.sbatch`'s missing `--relaxed-arch-status` must be fixed before P3-15
+itself can consume what that run writes.
+
+**Review round 5 (CodeRabbit CLI, 1 major, real, fixed) — the writer had none of the reader's
+validation.** `load_spare_rule_inputs` refuses a `bool` posterior and an out-of-range one, but
+`build_inputs` — the command that *writes the committed table* — wrote `float(post[cid])` and
+`str(cov[cid])` with no checks at all. `float(True)` is `1.0`, so a `true` in the source column
+would be committed as a number that is not a posterior, clears every threshold in the Stage-2
+band, **spares** the candidate, and is thereafter invisible to the loader because by then the
+column really is a float. The guard ran on the *next* command, after the artifact existed
+([[guard-runs-after-what-it-guards]]). Both rules are now single functions — `checked_status`
+and `checked_posterior` — called by the writer **and** the reader, so the two cannot drift; the
+suggested patch would have added a second copy beside the first. Six tests added (**110**), two
+sabotages (**71**), and the committed table re-derives to the **identical sha256**, so nothing
+in the current artifact was affected.
+
+**Review round 6 (CodeRabbit GitHub app, 2 minor, both real, both fixed).** `locus_of` refused
+*fewer* than four colon-separated fields but accepted **more** — a five-field id would have
+dropped its middle fields and merged into another candidate's locus, shrinking every locus
+denominator with no refusal, which is exactly the failure `control_records` refuses for the
+record grouping. It now demands the shape exactly. And the tie refusal computed its "axes the
+tie-break cannot speak to" with a **symmetric** difference: today every `TIE_BREAK_ORDER` name is
+also a `ParamTuple` field so the two agree, but renaming or adding a non-parameter entry would
+put that name into `undecidable` and raise `KeyError` **inside the guard that exists to stop an
+undecided selection being published**. It is a plain set difference now. The report re-derives
+unchanged. **112 tests, 73 sabotages.**
+
+**Review round 7 (CodeRabbit CLI, 2 minor, both real, both fixed) — a two-shape reader that only
+ever read one shape, and a test whose name promised the branch it did not assert.** (1) Both
+manifest call sites read `manifest.get("candidates", manifest)`, written to accept either an
+object carrying a `candidates` list *or* the rows themselves; the second shape never worked,
+because a top-level JSON list has no `.get`, and `AttributeError` is outside `main`'s
+`(RecommendError, ValueError, TypeError, OSError, KeyError)` — so a shape the code advertised
+ended the CLI in a traceback instead of the `refused:` path. A JSON **object without
+`candidates`** was worse: it fell back to the mapping and iterated its *keys*. One
+`read_manifest_ids` now serves both sites ([[fixed-one-of-two-identical-things]] — two call
+sites, and a fix to one would have left the other), refusing the shape, a non-object row (the
+producer's own reader *drops* one, which here would silently shrink the 941 denominator the
+coverage check and the ceiling are computed against) and a row carrying neither id key —
+`candidate_id_of` raises `ProducerError`, a `RuntimeError`, which escapes the refusal path just
+as the shape errors did. On the real manifest the new reader returns the **identical 941 ids**,
+so no number in this report moves. (2) `floor_sensitivity`'s
+`measured_identically_to_the_chosen_setting` is three-valued, and the test named for its **True**
+branch asserted **False** — the twin it built was strictly more permissive, so it won on the
+metric and the field could not be True. The test is renamed for what it asserts, and the True
+branch now has its own: reached through the bulge floor, the one floor whose parameter is in the
+tie-break vocabulary, where the sentinel twin is inadmissible until the floor is dropped and then
+ties on every measured coordinate. That branch had no test at all — on the shipped grid the field
+takes only `null` and `False` ([[clauses-must-guard-emptiness]]). **124 tests, 81 sabotages, all
+RED against their NAMED test.** Zero new failures vs the matched `main` baseline at `090547f`
+(worktree **13**, main **26**, a strict subset); `ruff` + `black` clean.
+
+**Review round 8 (CodeRabbit CLI, 5 findings — 4 major, 1 minor, all real, all fixed) — and one
+of them closes an item this step had been carrying as *disclosed, not fixed*.** (1) **The
+carried-forward comparison headline is now bound to the supplies.** The payload's
+`arms.comparison_headline_carried_forward` copies a *reading* of the two arms out of the
+control-comparison report, whose
+provenance hash identifies the file and not its subject; both measurement reports were already
+digest-bound here and this one was not, so a comparison of a different pair of arms could be
+quoted beside numbers derived from these two ([[gate-must-bind-to-upstream-evidence]]). The
+report records `arms.fp` / `arms.control` supply digests, and they equal the two measurement
+reports' — `90b2fe1b…` and `0b5afbec…` — so the binding holds on the shipped artifacts. An
+**absent** digest is refused as well as a disagreeing one: a comparison that records none binds
+nothing, and reading that as agreement is the vacuous TRUE this project keeps meeting. (2) **The
+control's status VALUES were never checked.** `control_records` validated the id set only, while
+`control_damage` reads producibility as `status[q] in DECIDED_STATES` — so a typo, a null or a
+number silently removes that query from the 68-record denominator every share and interval on
+this arm is computed against. The FP arm's two columns pass through `checked_status` in both the
+writer and the reader; this arm did not, and the asymmetric guard is the one that gets forgotten.
+(The reachable case was already refused downstream by `assert_supply_is_the_decided_set`, which
+would see the id leave the decided set while its consensus sat on disk — but that guard is about
+the supply and names a different cause.) (3) `assert_supply_is_the_decided_set` compared
+`set(supply_ids)`, so a supply naming one candidate twice merged into an exact-looking equality
+while every per-item loop still saw both rows ([[duplicate-key-merges-instead-of-colliding]]);
+the ids are materialised and the repeat refused. Neither shipped call site can produce one today
+— both derive ids from a slug→id index over unique directories — so this refuses a shape the
+contract forbids rather than one observed. (4) `checked_posterior` called `float(value)`, and a
+JSON integer beyond float range raises **OverflowError**, an `ArithmeticError` outside `main`'s
+except tuple: a traceback where every other malformed posterior gets `refused:`. (`1e400` parses
+to `inf` instead and the range test already caught it — that is the branch's positive control.)
+(5) A dead `if False` operand in the grid-distinctness assertion is removed; it also read a
+`label` key `as_dict()` does not carry, so removing the guard would have raised `KeyError`.
+**135 tests, 88 sabotages, all RED against their NAMED test**, including two positive controls
+(a status guard that refuses everything, and a grid whose points collide in *value* with the
+count preserved). Zero new failures vs the same `main` baseline; `ruff` + `black` clean; no
+committed artifact changes.
+
+**Review round 9 (CodeRabbit CLI, 3 findings — 1 major, 2 minor, all real, all fixed), two of
+them on code round 8 had just written.** (1) **The slug indexes merged a collision instead of
+refusing it.** `slug → candidate_id` was a dict comprehension for both arms, so two ids landing
+on one slug kept only the last: the consensus measured for that slug would be attributed to one
+candidate and the other would leave `arch_by_id` silently, every yield count still reconciling —
+the shape this module refuses for manifest ids and, since round 8, for supply ids. The orphan
+check downstream cannot see it, because it only finds slugs with *no* candidate. ⚠ Two DISTINCT
+ids cannot collide by construction — `covariation_producer.candidate_slug` appends a 12-hex
+digest of the exact id for exactly this reason — so the guard states a contract, and the test
+triggers it the one reachable way, with a repeated id. (2) Round 8's new status-value refusal
+printed the **manifest's** path as the location of a bad **status** value, sending a reader to a
+file whose contents are fine; `control_records` now takes the status path. ⚠ And the sabotage
+that mattered was not the helper's: dropping `status_path=` at the call site left the whole
+suite **green**, because a keyword-only argument with a default is droppable in silence — so the
+test that pins it asserts the refusal names `ctrl_status.json`, from `recommend`, not from the
+helper ([[artifact-pinning-test-cannot-see-the-code]]). (3) A `pytest.raises(Exception, …)` in an
+older test accepted an `AttributeError` or a `KeyError` as readily as the refusal it meant to
+pin; it names `RecommendError`/`CompareError` now. **139 tests, 92 sabotages, all RED against
+their NAMED test.** Zero new failures vs the same `main` baseline; `ruff` + `black` clean; no
+committed artifact changes.
+
+**Round 10 came back clean — and a 4-lens adversarial pass (27 agents, 0 errors) then found
+twenty things it had not, seventeen of them in the SAME two families.** The CodeRabbit CLI
+returned *No new findings* on `b521cdc`, which is the §5.1 gate; the harness was run anyway,
+because rounds 7–9 had each found real defects in code the previous round had just written. Three
+of its twenty-three candidates were refuted by their own verifiers and are not carried.
+
+**Family 1 — the refusal path, five more escapes of the kind round 7 closed for the manifest.**
+`report.get("supply", {}).get(…)`, `comparison.get("headline", {}).get("reading")` and
+`(fp_report.get("helix_arm") or {}).get(…)` all substitute their default **only when the key is
+absent**: a present-but-not-an-object value — a string, a list, a number — sails through and the
+next `.get` raises `AttributeError`, outside `main`'s except tuple. ⚠ The `headline` one is the
+sharpest: round 8 bound the comparison report's `arms` **and left the field that guard exists to
+protect unchecked**, so a comparison whose digests match perfectly and whose headline is a bare
+string killed the CLI in a traceback. `read_json_object` + `object_field` now serve every one of
+them (absent stays permissive — several blocks are genuinely optional — while a wrong *shape* is
+named), and the control status table is shape-checked **before** `index_by_slug` consumes it,
+twelve lines ahead of `control_records`' own refusal ([[guard-runs-after-what-it-guards]]).
+
+**Family 2 — nine published numbers that no sabotage could reach.** Each of these mutations left
+all 139 tests green: `all(` → `any(` on the **record-level (a)∧(b) damage rule** — the rule behind
+the *8 of 68* figure the §7 choice was made against; dropping the `(a)` conjunct from the
+query-level count, which silently republishes the (b)-only count; `len(producible)` → `len(queries)`
+in the query denominator; each share divided by the *other* numerator; the two Wilson intervals
+**swapped**; `frontier`'s per-yield argmin replaced by keep-the-last-seen; `share_failed_of_decided`
+divided by `fp_passed`; the locus collapse in `mined_loci_by_threshold`; and the floors conjunct in
+`dominating_alternatives`. The cause was uniform and is the one this file's own header names: every
+control fixture was **symmetric** — `point()` set `n_records_losing_a_and_b` and `n_records_losing_b`
+to the same value, and every `control_damage` fixture made each record uniform in its per-query
+verdict, so ALL was indistinguishable from ANY and (a)∧(b) from (b) alone. One asymmetric corpus
+now carries six quantities no two of which are equal, `point()`'s two record counts differ by
+default, and the intervals are pinned **by identity** to their own numerators — a containment
+assertion passed with them swapped, because at n = 3 each interval contains the other's point
+estimate ([[symmetric-count-fixture-blind-to-inversion]]). Two guard **call sites** in `recommend`
+— the control decided-set check and the supply/manifest orphan check — were also deletable in
+silence, and are now driven through `recommend` itself. **156 tests, 105 sabotages, all RED against
+their NAMED test.** No published number moves: the committed manifest still reads 941 ids and no
+artifact changed. Zero new failures vs the same `main` baseline; `ruff` + `black` clean.
+
+**Rounds 11 and 12 (CodeRabbit CLI, 1 minor each, both real, both fixed) — both on the tests the
+round above added, and both about a name.** (1) The asymmetric fixture's summary line was corrected
+to *4 decided queries of 5* when its expectation was fixed, while the record-B bullet still read
+*(3) of (4)*; four tests read that docstring as the statement of what they expect. (2) A test named
+for a `null` supply block supplied the string `"cluster"`. The two are not the same input: `null`
+takes `object_field`'s permissive branch, so the **digest** gate refuses it, not the shape gate.
+The scalar case keeps the shape assertion under a name that matches it, and the `null` case is
+added under the guard that actually fires. **157 tests.**
