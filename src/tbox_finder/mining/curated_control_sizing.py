@@ -57,9 +57,9 @@ from pathlib import Path
 from typing import Any
 
 from tbox_finder.mining.architecture_param_measure import (
-    _sha256_of,
     is_inside_repo,
     portable_path,
+    sha256_of,
 )
 from tbox_finder.mining.homolog_msa import (
     HomologMsaError,
@@ -1049,7 +1049,7 @@ def partition_inputs(
         if is_inside_repo(candidate):
             repo_inputs.append(portable_path(candidate))
         else:
-            external[label] = {"name": Path(candidate).name, "sha256": _sha256_of(candidate)}
+            external[label] = {"name": Path(candidate).name, "sha256": sha256_of(candidate)}
     return repo_inputs, external
 
 

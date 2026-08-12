@@ -59,7 +59,7 @@
   },
   "arms": {
     "control": {
-      "ground_truth": "believed positive \u2014 held-out curated T-box records",
+      "ground_truth": "believed_positive",
       "msa_root": "msa_supply_control",
       "n_consensuses": 76,
       "report": "reports/p3/architecture_parameter_measurement_control.json",
@@ -68,7 +68,7 @@
       "supply_origin": "two.amlab:$HOME/tbox-scratch/round_p3_15g_control/msa (SLURM job 1264 array 0-15, main @ c94f935); retrieved by rsync per slurm/p2/mine_round_producer.sbatch"
     },
     "fp": {
-      "ground_truth": "unknown \u2014 round-0 false-positive-manifest candidates",
+      "ground_truth": "unknown",
       "n_consensuses": 278,
       "report": "reports/p3/architecture_parameter_measurement.json",
       "step": "P3-15'-f",
@@ -526,13 +526,13 @@
       },
       "schema_version": "1.0"
     },
-    "generated_at_utc": "2026-08-12T02:03:29.976111+00:00",
-    "git_sha": "3a97aca9d3df6b5fdbebb1e802613eefe7681734",
+    "generated_at_utc": "2026-08-12T02:10:51.990045+00:00",
+    "git_sha": "71660cd333d21fdbd0ea27b33d9174dc0adf935b",
     "inputs": {
       "data/processed/mining/curated_control_manifest_v0.json": "363795fba6cd4d1d85495ec62e6e62cd11f1bf37b0fdf739c48315777c4d2a83",
       "data/processed/mining/curated_control_status_v0.json": "8b5e8f4178cd63eb8664c1e63e519c5810223eb56ca3a1488ce8bfee9dbeb033",
       "reports/p3/architecture_parameter_measurement.json": "86e64af40f76d4291aeb3e8186eb9d48e8fd16191762cab32364ce05435f87ca",
-      "reports/p3/architecture_parameter_measurement_control.json": "440ac9682c766ad528d5ac7ac4ce09350f2283f1369b4125f375a6c2a9df53fc",
+      "reports/p3/architecture_parameter_measurement_control.json": "ebc6a0579730ff8144c2b0ec2d9fe4f397b8957bd3d66928678840b9b1fca05d",
       "reports/p3/curated_control_detect.json": "7e096b0df6c18ef09ec16248434a5a10f3046cfe0cbd04066355b51874707466"
     },
     "outputs": {},

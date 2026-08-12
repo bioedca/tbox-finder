@@ -69,12 +69,13 @@ from typing import Any
 from tbox_finder.mining.architecture_param_measure import (
     ParamTuple,
     SupplyItem,
-    _sha256_of,
+    arm_for_step,
     candidate_state,
     default_tuples,
     is_inside_repo,
     portable_path,
     read_supply,
+    sha256_of,
 )
 from tbox_finder.mining.covariation_producer import candidate_slug
 from tbox_finder.mining.curated_control_sizing import wilson_interval
@@ -122,6 +123,16 @@ def assert_grids_identical(control_report: Mapping[str, Any], fp_report: Mapping
     for name, report in (("control", control_report), ("fp", fp_report)):
         if not isinstance(report.get("joint"), list) or not report["joint"]:
             raise CompareError(f"the {name} report carries no 'joint' rows")
+        # ⚠ The SIBLING of `load_status`'s row-shape guard, and it was missing here.
+        # `c_row.get("label")` on a bare string raises AttributeError, which `main`
+        # does not catch — the same exit-1-with-a-traceback escape, through the same
+        # kind of operator-supplied path ([[fixed-one-of-two-identical-things]]).
+        non_rows = [i for i, row in enumerate(report["joint"]) if not isinstance(row, Mapping)]
+        if non_rows:
+            raise CompareError(
+                f"the {name} report has {len(non_rows)} 'joint' entr(ies) that are not "
+                f"objects, e.g. index {non_rows[:2]}"
+            )
         if not isinstance(report.get("sweep"), Mapping) or not report["sweep"]:
             raise CompareError(f"the {name} report carries no 'sweep' block")
     if control_report["sweep"] != fp_report["sweep"]:
@@ -249,7 +260,24 @@ def load_status(status_path: str | Path) -> tuple[dict[str, str], list[Mapping[s
             f"control status {portable_path(status_path)}: {len(malformed)} row(s) are not "
             f"objects carrying {list(required)}, e.g. index {malformed[:2]}"
         )
-    row_status = {str(r["candidate_id"]): str(r["status"]) for r in rows}
+    # ⚠ Built as a LIST first: a dict comprehension over rows sharing a `candidate_id`
+    # keeps the LAST one, so the map/rows agreement check below could still pass while
+    # a query's real status was overwritten — and every count downstream would still
+    # reconcile ([[duplicate-key-merges-instead-of-colliding]]).
+    seen_rows: dict[str, str] = {}
+    repeated: list[str] = []
+    for r in rows:
+        cid = str(r["candidate_id"])
+        if cid in seen_rows:
+            repeated.append(cid)
+        seen_rows[cid] = str(r["status"])
+    if repeated:
+        raise CompareError(
+            f"control status {portable_path(status_path)}: {len(repeated)} duplicate "
+            f"candidate_id(s) in 'rows', e.g. {sorted(set(repeated))[:2]}; the later row "
+            "would overwrite the earlier one's status"
+        )
+    row_status = seen_rows
     if row_status != {str(k): str(v) for k, v in status.items()}:
         raise CompareError(
             f"control status {portable_path(status_path)}: the 'status' map disagrees "
@@ -543,6 +571,19 @@ def compare(
     if not isinstance(control_report, Mapping) or not isinstance(fp_report, Mapping):
         raise CompareError("a measurement report is not a JSON object")
     assert_grids_identical(control_report, fp_report)
+    # ⚠ Each report's `ground_truth` is READ OFF the arm that wrote it, never restated
+    # here: a second spelling of "is this supply believed positive" is a statement that
+    # can disagree with the report it describes, and `SupplyArm.ground_truth` would
+    # otherwise be a constant nothing reads ([[pinned-constant-that-nothing-reads]]).
+    # It doubles as a binding: a report whose `step` no arm declares is refused.
+    control_arm = arm_for_step(str(control_report.get("step")))
+    fp_arm = arm_for_step(str(fp_report.get("step")))
+    if control_arm.ground_truth == fp_arm.ground_truth:
+        raise CompareError(
+            f"both reports declare ground_truth {control_arm.ground_truth!r} "
+            f"(steps {control_arm.step!r} and {fp_arm.step!r}); this is not a control "
+            "read against a comparator, it is one arm read against itself"
+        )
 
     by_record = load_control_records(control_manifest_path)
     status, rows = load_status(control_status_path)
@@ -683,7 +724,7 @@ def compare(
                 "supply_origin": supply_origin,
                 "supply_digest_sha256": control_report["supply"]["supply_digest_sha256"],
                 "n_consensuses": int(control_report["supply"]["n_consensuses_measured"]),
-                "ground_truth": "believed positive — held-out curated T-box records",
+                "ground_truth": control_arm.ground_truth,
             },
             "fp": {
                 "step": fp_report.get("step"),
@@ -691,7 +732,7 @@ def compare(
                 "supply_origin": fp_report["supply"].get("supply_origin"),
                 "supply_digest_sha256": fp_report["supply"]["supply_digest_sha256"],
                 "n_consensuses": int(fp_report["supply"]["n_consensuses_measured"]),
-                "ground_truth": "unknown — round-0 false-positive-manifest candidates",
+                "ground_truth": fp_arm.ground_truth,
             },
             "grid_identical": True,
             "grid_identical_checked_by": (
@@ -917,7 +958,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         if is_inside_repo(candidate):
             repo_inputs.append(portable_path(candidate))
         else:
-            external[label] = {"name": Path(candidate).name, "sha256": _sha256_of(candidate)}
+            external[label] = {"name": Path(candidate).name, "sha256": sha256_of(candidate)}
     body["provenance"] = build_provenance(
         rule="P3-15'-g-iv matched-control comparison",
         script=portable_path(__file__),

@@ -171,11 +171,33 @@ SUPPLY_ARMS: Mapping[str, SupplyArm] = {
     ),
 }
 
+#: `--out`'s default, and the committed FP report's path.  Named so the CLI can
+#: refuse to overwrite it with another arm's numbers.
+DEFAULT_OUT = "reports/p3/architecture_parameter_measurement.json"
+
 #: The arm whose prose the committed `P3-15'-f` report carries.  ``measure`` and the
 #: CLI both default to it, so the FP report re-derives BYTE-IDENTICALLY across this
 #: seam — the same discipline `covariation_producer.search_shard(query_fasta=None)`
 #: holds to (P3-15'-g-iii).
 DEFAULT_ARM = "round0_fp"
+
+
+def arm_for_step(step: str) -> SupplyArm:
+    """The :class:`SupplyArm` whose ``step`` a measurement report carries.
+
+    The inverse lookup, so a downstream reader can recover *which corpus* a report
+    describes from the report itself instead of restating it.  Without this,
+    ``ground_truth`` would be a constant nothing reads
+    ([[pinned-constant-that-nothing-reads]]) while the comparison emitted its own
+    independent spelling of the same fact — two statements that can disagree.
+    """
+    for candidate in SUPPLY_ARMS.values():
+        if candidate.step == step:
+            return candidate
+    raise MeasureError(
+        f"no supply arm declares step {step!r}; the report was not written by this "
+        f"module's measure(). Known steps: {sorted(a.step for a in SUPPLY_ARMS.values())}"
+    )
 
 
 def resolve_arm(arm: str | SupplyArm | None) -> SupplyArm:
@@ -248,9 +270,17 @@ def portable_path(path: str | Path) -> str:
         return p.name
 
 
-def _sha256_of(path: str | Path) -> str:
-    """sha256 of one file, for an input recorded by name rather than by path."""
+def sha256_of(path: str | Path) -> str:
+    """sha256 of one file, for an input recorded by name rather than by path.
+
+    Public: three modules now record external inputs this way, and a private name
+    imported across module boundaries is a rename away from breaking them silently.
+    """
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+
+#: Retained so existing importers keep working; new call sites use the public name.
+_sha256_of = sha256_of
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -1051,7 +1081,7 @@ def measure(
         covariation_by_slug = {candidate_slug(cid): str(state) for cid, state in cov_status.items()}
         supply["covariation"] = {
             "path": portable_path(covariation_status_path),
-            "sha256": _sha256_of(covariation_status_path),
+            "sha256": sha256_of(covariation_status_path),
             "counts": {k: v for k, v in sorted(Counter(cov_status.values()).items())},
             "n_decided": len(decided),
             # (b) reads the same MSA (a) does (ADR-0006 A4), so the set of candidates
@@ -1191,7 +1221,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     m.add_argument(
         "--out",
-        default="reports/p3/architecture_parameter_measurement.json",
+        default=DEFAULT_OUT,
         help="report path",
     )
     return parser
@@ -1203,6 +1233,18 @@ def main(argv: Sequence[str] | None = None) -> int:
         raise MeasureError(f"unknown command {args.command!r}")
     try:
         supply_arm = resolve_arm(args.arm)
+        # ⚠ `--out` and `--manifest` default to the FP arm's paths and neither follows
+        # `--arm`. `--arm curated_control` with a forgotten `--out` would overwrite the
+        # committed P3-15'-f report with the control's counts AND the control's prose —
+        # internally consistent, so nothing downstream could detect it. The defaults stay
+        # as they are (that is what keeps the FP report byte-identically re-derivable);
+        # the mismatched COMBINATION is refused instead.
+        if supply_arm.key != DEFAULT_ARM and str(args.out) == DEFAULT_OUT:
+            raise MeasureError(
+                f"--arm {supply_arm.key!r} with the default --out {DEFAULT_OUT!r} would "
+                f"overwrite the {SUPPLY_ARMS[DEFAULT_ARM].step} report with "
+                f"{supply_arm.step} numbers; pass an explicit --out"
+            )
         body = measure(
             msa_root=args.msa_root,
             manifest_path=args.manifest,
@@ -1239,7 +1281,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         if is_inside_repo(candidate):
             repo_inputs.append(portable_path(candidate))
         else:
-            external[label] = {"name": Path(candidate).name, "sha256": _sha256_of(candidate)}
+            external[label] = {"name": Path(candidate).name, "sha256": sha256_of(candidate)}
     body["provenance"] = build_provenance(
         rule=supply_arm.provenance_rule,
         script=portable_path(__file__),

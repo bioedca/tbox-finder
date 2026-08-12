@@ -139,11 +139,11 @@ def control_files(tmp_path):
     return manifest, status, root
 
 
-def a_report(labels_params, *, n_manifest, n_measured, counts_by_label) -> dict:
+def a_report(labels_params, *, n_manifest, n_measured, counts_by_label, step) -> dict:
     """A minimal measurement report in the shape ``architecture_param_measure`` writes."""
     return {
         "schema_version": "1.0",
-        "step": "synthetic",
+        "step": step,
         "sweep": {"min_named_helices": [1, 2], "ncca_pairing_nt": [1]},
         "supply": {
             "n_candidates_in_manifest": n_manifest,
@@ -197,12 +197,19 @@ def reports(tmp_path, control_files):
                 n_manifest=len(ALL_QUERIES),
                 n_measured=5,
                 counts_by_label=control_counts,
+                step=apm.SUPPLY_ARMS["curated_control"].step,
             )
         )
     )
     fp.write_text(
         json.dumps(
-            a_report(labels_params, n_manifest=100, n_measured=40, counts_by_label=fp_counts)
+            a_report(
+                labels_params,
+                n_manifest=100,
+                n_measured=40,
+                counts_by_label=fp_counts,
+                step=apm.SUPPLY_ARMS["round0_fp"].step,
+            )
         )
     )
     return control, fp
@@ -685,47 +692,41 @@ def test_main_exits_three_on_a_refusal_rather_than_raising(control_files, report
     assert not out.exists()
 
 
+def absolute_path_leaks(payload) -> list[str]:
+    """Every string in ``payload`` that starts with ``/``, with its JSON path.
+
+    One definition, used by the scan and by its positive control: two copies would
+    let the control keep passing against a scan it no longer resembles.
+    """
+    leaks: list[str] = []
+
+    def walk(node, path=""):
+        if isinstance(node, dict):
+            for k, v in node.items():
+                walk(v, f"{path}/{k}")
+        elif isinstance(node, list):
+            for i, v in enumerate(node):
+                walk(v, f"{path}[{i}]")
+        elif isinstance(node, str) and node.startswith("/"):
+            leaks.append(f"{path}: {node}")
+
+    walk(payload)
+    return leaks
+
+
 def test_main_publishes_no_absolute_path_anywhere_in_the_payload(control_files, reports, tmp_path):
     """The P3-15'-f lesson: a home directory and an account name leaked into a
     PUBLIC report. The whole payload is walked, not the fields I remembered."""
     out = tmp_path / "comparison.json"
     assert cmp.main(cli_args(control_files, reports, out)) == 0
-    payload = json.loads(out.read_text())
-
-    leaks: list[str] = []
-
-    def walk(node, path=""):
-        if isinstance(node, dict):
-            for k, v in node.items():
-                walk(v, f"{path}/{k}")
-        elif isinstance(node, list):
-            for i, v in enumerate(node):
-                walk(v, f"{path}[{i}]")
-        elif isinstance(node, str) and node.startswith("/"):
-            leaks.append(f"{path}: {node}")
-
-    walk(payload)
-    assert leaks == []
+    assert absolute_path_leaks(json.loads(out.read_text())) == []
 
 
-def test_the_absolute_path_scan_can_actually_fail(control_files, reports, tmp_path):
-    """Positive control for the scan above — on P3-15'-f the equivalent control
-    could not fail, because its subject never started with '/'."""
-    payload = {"a": {"b": ["/home/someone/x"]}}
-    leaks: list[str] = []
-
-    def walk(node, path=""):
-        if isinstance(node, dict):
-            for k, v in node.items():
-                walk(v, f"{path}/{k}")
-        elif isinstance(node, list):
-            for i, v in enumerate(node):
-                walk(v, f"{path}[{i}]")
-        elif isinstance(node, str) and node.startswith("/"):
-            leaks.append(f"{path}: {node}")
-
-    walk(payload)
-    assert leaks == ["/a/b[0]: /home/someone/x"]
+def test_the_absolute_path_scan_can_actually_fail():
+    """Positive control for the scan above, running the SAME function — on P3-15'-f
+    the equivalent control could not fail, because its subject never started with
+    '/'."""
+    assert absolute_path_leaks({"a": {"b": ["/home/someone/x"]}}) == ["/a/b[0]: /home/someone/x"]
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -859,3 +860,93 @@ def test_a_malformed_status_row_exits_three_rather_than_tracebacking(
     args[args.index("--control-status") + 1] = str(bad)
     assert cmp.main(args) == 3
     assert not out.exists()
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# CodeRabbit round 2 (GitHub app) — the two guards the CLI round missed
+# ═════════════════════════════════════════════════════════════════════════════
+def test_a_joint_entry_that_is_not_an_object_is_refused(reports):
+    """`c_row.get("label")` on a bare string raises AttributeError, which escapes
+    the exit-3 convention — the SIBLING of `load_status`'s row guard."""
+    control, fp = reports
+    c, f = json.loads(control.read_text()), json.loads(fp.read_text())
+    f["joint"][0] = "not-a-row"
+    with pytest.raises(cmp.CompareError, match="not\n?\\s*objects|are not "):
+        cmp.assert_grids_identical(c, f)
+
+
+def test_the_joint_shape_guard_names_the_arm_it_found_the_defect_in(reports):
+    """Both arms are guarded, not only the one that happened to be checked first."""
+    control, fp = reports
+    c, f = json.loads(control.read_text()), json.loads(fp.read_text())
+    c["joint"][1] = ["also", "not", "a", "row"]
+    with pytest.raises(cmp.CompareError, match="the control report"):
+        cmp.assert_grids_identical(c, f)
+
+
+def test_load_status_refuses_a_duplicate_candidate_id_in_its_rows(tmp_path):
+    """A dict comprehension keeps the LAST row, so a duplicate silently overwrites a
+    query's status while the map/rows agreement check still passes."""
+    path = tmp_path / "s.json"
+    row = {"candidate_id": "x", "status": "passed", "n_homologs": 25, "msa_depth": 26}
+    path.write_text(
+        json.dumps(
+            {
+                "status": {"x": "passed"},
+                "rows": [row, {**row, "status": "failed"}],
+            }
+        )
+    )
+    with pytest.raises(cmp.CompareError, match="duplicate candidate_id"):
+        cmp.load_status(path)
+
+
+def test_the_duplicate_row_guard_lets_distinct_ids_through(tmp_path):
+    """Positive control: a guard that refused every rows list would pass above."""
+    path = tmp_path / "s.json"
+    row = {"candidate_id": "x", "status": "passed", "n_homologs": 25, "msa_depth": 26}
+    path.write_text(
+        json.dumps(
+            {
+                "status": {"x": "passed", "y": "failed"},
+                "rows": [row, {**row, "candidate_id": "y", "status": "failed"}],
+            }
+        )
+    )
+    mapping, rows = cmp.load_status(path)
+    assert mapping == {"x": "passed", "y": "failed"}
+    assert len(rows) == 2
+
+
+def test_each_arms_ground_truth_is_read_off_the_registry_not_restated(control_files, reports):
+    """`SupplyArm.ground_truth` had no production reader while the comparison emitted
+    its own spelling of the same fact — two statements that can disagree."""
+    body = run_compare(control_files, reports)
+    assert body["arms"]["control"]["ground_truth"] == (
+        apm.SUPPLY_ARMS["curated_control"].ground_truth
+    )
+    assert body["arms"]["fp"]["ground_truth"] == apm.SUPPLY_ARMS["round0_fp"].ground_truth
+
+
+def test_compare_refuses_a_report_whose_step_no_arm_declares(control_files, reports, tmp_path):
+    """The binding the ground_truth lookup buys: a report this module did not write."""
+    control, fp = reports
+    stranger = json.loads(control.read_text())
+    stranger["step"] = "some-other-tool"
+    path = tmp_path / "stranger.json"
+    path.write_text(json.dumps(stranger))
+    with pytest.raises(apm.MeasureError, match="no supply arm declares step"):
+        run_compare(control_files, reports, control_report_path=path)
+
+
+def test_compare_refuses_one_arm_read_against_itself(control_files, reports, tmp_path):
+    """Two reports of the same ground_truth are not a control and a comparator."""
+    control, fp = reports
+    twin = json.loads(fp.read_text())
+    twin["step"] = apm.SUPPLY_ARMS["round0_fp"].step
+    counts = json.loads(control.read_text())["joint"]
+    twin["joint"] = counts  # keep the grid identical so THIS refusal is the one that fires
+    path = tmp_path / "twin.json"
+    path.write_text(json.dumps(twin))
+    with pytest.raises(cmp.CompareError, match="one arm read against itself"):
+        run_compare(control_files, reports, control_report_path=path)

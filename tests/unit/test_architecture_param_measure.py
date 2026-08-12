@@ -1230,3 +1230,79 @@ def test_candidate_state_never_returns_unavailable(supply):
     for item in apm.read_supply(root):
         for params in apm.default_tuples():
             assert apm.candidate_state(item, params) in ("passed", "failed")
+
+
+def test_arm_for_step_recovers_the_arm_a_report_declares():
+    for arm in apm.SUPPLY_ARMS.values():
+        assert apm.arm_for_step(arm.step) is arm
+
+
+def test_arm_for_step_refuses_a_step_no_arm_declares():
+    """Positive control above; this is the refusal that makes it a binding."""
+    with pytest.raises(apm.MeasureError, match="no supply arm declares step"):
+        apm.arm_for_step("some-other-tool")
+
+
+def test_a_non_default_arm_with_the_default_out_is_refused(supply, tmp_path, monkeypatch):
+    """`--out` does not follow `--arm`: the control's numbers would overwrite the
+    committed P3-15'-f report, and the result would be internally consistent.
+
+    ⚠ `monkeypatch.chdir` is load-bearing, not tidiness. Without it `DEFAULT_OUT`
+    resolves to the REAL committed report, and the sabotage that proves this test
+    bites — removing the refusal — writes a 4-consensus fixture over it. That is
+    exactly what happened once here: the guard's own test destroyed the artifact the
+    guard exists to protect. A test must never aim a write at a tracked path.
+    """
+    root, ids = supply
+    manifest = manifest_for(tmp_path, ids)
+    monkeypatch.chdir(tmp_path)
+    rc = apm.main(
+        [
+            "measure",
+            "--arm",
+            "curated_control",
+            "--msa-root",
+            str(root),
+            "--manifest",
+            str(manifest),
+            "--positive-control",
+            str(tmp_path / "absent.sto"),
+            "--out",
+            apm.DEFAULT_OUT,
+        ]
+    )
+    assert rc == 3
+    assert not (tmp_path / apm.DEFAULT_OUT).exists()
+
+
+def test_the_default_arm_may_still_write_the_default_out(supply, tmp_path, monkeypatch):
+    """Positive control: the refusal must be about the COMBINATION, not about --out.
+
+    Run in a tmp cwd so the real committed report is never the target.
+    """
+    root, ids = supply
+    manifest = manifest_for(tmp_path, ids)
+    monkeypatch.chdir(tmp_path)
+    rc = apm.main(
+        [
+            "measure",
+            "--arm",
+            "round0_fp",
+            "--msa-root",
+            str(root),
+            "--manifest",
+            str(manifest),
+            "--positive-control",
+            str(tmp_path / "absent.sto"),
+            "--out",
+            apm.DEFAULT_OUT,
+        ]
+    )
+    assert rc == 0
+    assert json.loads((tmp_path / apm.DEFAULT_OUT).read_text())["step"] == apm.STEP
+
+
+def test_sha256_of_is_public_and_the_private_alias_is_the_same_object():
+    """Three modules record external inputs through it; a private cross-module name
+    is a rename away from breaking them silently."""
+    assert apm._sha256_of is apm.sha256_of
