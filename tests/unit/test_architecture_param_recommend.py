@@ -436,8 +436,15 @@ def test_floor_sensitivity_reports_a_floor_that_changes_the_selection():
     assert out["min_helix_pairs >= 2"]["changes_the_selection"] is False
 
 
-def test_floor_sensitivity_marks_a_changed_selection_that_measures_identically():
-    """A floor whose removal moves the pick to a setting measuring exactly the same."""
+def test_floor_sensitivity_does_not_call_a_differently_measuring_selection_identical():
+    """A floor whose removal moves the pick to a setting that measures DIFFERENTLY.
+
+    The twin is strictly more permissive (``fp_failed`` 9 against 10), so it wins on the
+    metric itself and the tie-break is never consulted — and the identity field must then
+    read False, not True. Named for what it asserts: the True branch is the test below,
+    and a name promising one while asserting the other leaves a reader unable to tell
+    which behaviour is pinned.
+    """
     chosen = point(params=CHOSEN, fp_failed=10, mined=3, damage=8)
     twin_below_the_floor = point(
         params=apm.ParamTuple("twin", 1, 1, 2, 2, 50, 2, False),
@@ -448,6 +455,31 @@ def test_floor_sensitivity_marks_a_changed_selection_that_measures_identically()
     entry = rec.floor_sensitivity([chosen, twin_below_the_floor], chosen)["min_named_helices >= 2"]
     assert entry["changes_the_selection"] is True
     assert entry["measured_identically_to_the_chosen_setting"] is False, "fp_failed differs"
+
+
+def test_floor_sensitivity_marks_a_changed_selection_that_measures_identically():
+    """The TRUE branch: the pick moves, and the setting it moves to measures the same.
+
+    Reached through the bulge floor, the one floor whose parameter is in the tie-break
+    vocabulary: the sentinel twin is inadmissible while the floor stands, and once it is
+    dropped it ties on every measured coordinate and wins on ``stem_i_nt_threshold``. The
+    three-valued field was otherwise pinned only at None and False — on the shipped grid
+    it takes those two values alone — so nothing asserted that a genuine identity is
+    reported as one ([[clauses-must-guard-emptiness]]).
+    """
+    chosen = point(
+        params=apm.ParamTuple("chosen", 5, 2, 2, 2, 50, 2, False), fp_failed=10, mined=3, damage=8
+    )
+    sentinel_twin = point(
+        params=apm.ParamTuple("twin", 1, 2, 2, 2, 10_000, 2, False),
+        fp_failed=10,  # a tie, and the twin's smaller stem_i_nt_threshold wins the order
+        mined=3,
+        damage=8,
+    )
+    entry = rec.floor_sensitivity([chosen, sentinel_twin], chosen)["bulge_max_nt is bounded"]
+    assert entry["selection_without_this_floor"]["bulge_max_nt"] == 10_000
+    assert entry["changes_the_selection"] is True
+    assert entry["measured_identically_to_the_chosen_setting"] is True
 
 
 def test_a_floor_whose_removal_leaves_the_rule_undecided_says_so():
@@ -614,6 +646,88 @@ def test_anti_selectivity_is_not_hardwired_to_one_direction():
     out = rec.anti_selectivity(worse_on_the_fp_arm)
     assert out["control_falls_through_more"] is False
     assert out["fp_minus_control_pp"] > 0
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# The manifest's SHAPE — an input, not an invariant (review round 7)
+# ═════════════════════════════════════════════════════════════════════════════
+def write_json(tmp_path, name, payload) -> Path:
+    p = tmp_path / name
+    p.write_text(json.dumps(payload))
+    return p
+
+
+def test_the_manifest_may_be_a_top_level_list_of_rows(tmp_path):
+    """The shape both call sites MEANT to accept and neither did.
+
+    ``manifest.get("candidates", manifest)`` reads as "the object's rows, or the rows
+    themselves" — but a list has no ``.get``, so the second shape raised AttributeError,
+    which is outside ``main``'s except tuple: a traceback where a refusal was intended.
+    """
+    p = write_json(tmp_path, "m.json", [{"candidate_id": "x"}, {"id": "y"}])
+    assert rec.read_manifest_ids(p) == ["x", "y"]
+
+
+def test_the_manifest_may_be_an_object_carrying_its_rows(tmp_path):
+    """Positive control: the shipped shape still reads, so the guard is about SHAPE."""
+    p = write_json(tmp_path, "m.json", {"candidates": [{"candidate_id": "x"}], "n_candidates": 1})
+    assert rec.read_manifest_ids(p) == ["x"]
+
+
+@pytest.mark.parametrize(
+    ("payload", "match"),
+    [
+        pytest.param({"n_candidates": 941}, "no candidate rows", id="object_without_candidates"),
+        pytest.param({"candidates": []}, "no candidate rows", id="empty_candidate_list"),
+        pytest.param(941, "no candidate rows", id="a_bare_scalar"),
+        pytest.param([], "no candidate rows", id="an_empty_list"),
+        pytest.param([{"candidate_id": "x"}, "y"], "not objects", id="a_bare_string_row"),
+        pytest.param([{"score": 0.5}], "candidate_id", id="a_row_with_neither_id_key"),
+    ],
+)
+def test_a_manifest_shape_that_cannot_be_read_is_refused_not_raised(tmp_path, payload, match):
+    """Every one of these escaped as AttributeError, TypeError or ProducerError before.
+
+    ``ProducerError`` is a ``RuntimeError``, so the row-with-no-id case escaped ``main``
+    just as the shape cases did — the refusal has to be re-raised in this module's own
+    error type, not merely delegated.
+    """
+    with pytest.raises(rec.RecommendError, match=match):
+        rec.read_manifest_ids(write_json(tmp_path, "m.json", payload))
+
+
+def test_an_unreadable_manifest_is_refused_with_its_path(tmp_path):
+    with pytest.raises(rec.RecommendError, match="cannot read the manifest"):
+        rec.read_manifest_ids(tmp_path / "absent.json")
+
+
+def test_build_inputs_reads_the_manifest_through_the_shared_reader(tmp_path):
+    """The wiring, not the helper: a list-shaped manifest must reach the join.
+
+    Testing ``read_manifest_ids`` alone would stay green with either call site still
+    holding its own copy of the old expression
+    ([[artifact-pinning-test-cannot-see-the-code]]).
+    """
+    manifest = write_json(tmp_path, "m.json", [{"candidate_id": "x"}])
+    out = rec.build_inputs(
+        covariation_status_path=write_json(tmp_path, "cov.json", {"status": {"x": STATUS_FAILED}}),
+        synteny_status_path=write_json(tmp_path, "syn.json", {"status": {"x": STATUS_PASSED}}),
+        stage2_posteriors_path=write_json(tmp_path, "p.json", {"posteriors": {"x": 0.25}}),
+        fp_manifest_path=manifest,
+    )
+    assert [row["candidate_id"] for row in out["rows"]] == ["x"]
+
+
+def test_recommend_reads_the_manifest_through_the_shared_reader(tiny_corpus, tmp_path):
+    """The second call site, wired the same way — the one a single fix would have missed.
+
+    ([[fixed-one-of-two-identical-things]] — three review rounds running have found a fix
+    landed on one of two identical call sites.)
+    """
+    rows = json.loads(Path(tiny_corpus["fp_manifest_path"]).read_text())["candidates"]
+    as_a_list = write_json(tmp_path, "l.json", rows)
+    body = rec.recommend(**{**tiny_corpus, "fp_manifest_path": as_a_list})
+    assert body["pins_nothing"] is True
 
 
 # ═════════════════════════════════════════════════════════════════════════════

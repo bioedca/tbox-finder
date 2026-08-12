@@ -6152,3 +6152,28 @@ also a `ParamTuple` field so the two agree, but renaming or adding a non-paramet
 put that name into `undecidable` and raise `KeyError` **inside the guard that exists to stop an
 undecided selection being published**. It is a plain set difference now. The report re-derives
 unchanged. **112 tests, 73 sabotages.**
+
+**Review round 7 (CodeRabbit CLI, 2 minor, both real, both fixed) — a two-shape reader that only
+ever read one shape, and a test whose name promised the branch it did not assert.** (1) Both
+manifest call sites read `manifest.get("candidates", manifest)`, written to accept either an
+object carrying a `candidates` list *or* the rows themselves; the second shape never worked,
+because a top-level JSON list has no `.get`, and `AttributeError` is outside `main`'s
+`(RecommendError, ValueError, TypeError, OSError, KeyError)` — so a shape the code advertised
+ended the CLI in a traceback instead of the `refused:` path. A JSON **object without
+`candidates`** was worse: it fell back to the mapping and iterated its *keys*. One
+`read_manifest_ids` now serves both sites ([[fixed-one-of-two-identical-things]] — two call
+sites, and a fix to one would have left the other), refusing the shape, a non-object row (the
+producer's own reader *drops* one, which here would silently shrink the 941 denominator the
+coverage check and the ceiling are computed against) and a row carrying neither id key —
+`candidate_id_of` raises `ProducerError`, a `RuntimeError`, which escapes the refusal path just
+as the shape errors did. On the real manifest the new reader returns the **identical 941 ids**,
+so no number in this report moves. (2) `floor_sensitivity`'s
+`measured_identically_to_the_chosen_setting` is three-valued, and the test named for its **True**
+branch asserted **False** — the twin it built was strictly more permissive, so it won on the
+metric and the field could not be True. The test is renamed for what it asserts, and the True
+branch now has its own: reached through the bulge floor, the one floor whose parameter is in the
+tie-break vocabulary, where the sentinel twin is inadmissible until the floor is dropped and then
+ties on every measured coordinate. That branch had no test at all — on the shipped grid the field
+takes only `null` and `False` ([[clauses-must-guard-emptiness]]). **124 tests, 81 sabotages, all
+RED against their NAMED test.** Zero new failures vs the matched `main` baseline at `090547f`
+(worktree **13**, main **26**, a strict subset); `ruff` + `black` clean.

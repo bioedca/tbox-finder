@@ -84,7 +84,11 @@ from tbox_finder.mining.architecture_param_measure import (
     sha256_of,
     supply_digest,
 )
-from tbox_finder.mining.architecture_producer import candidate_id_of, candidate_msa_path
+from tbox_finder.mining.architecture_producer import (
+    ProducerError,
+    candidate_id_of,
+    candidate_msa_path,
+)
 from tbox_finder.mining.curated_control_sizing import wilson_interval
 from tbox_finder.mining.spare_rule import (
     DISJUNCT_STATUSES,
@@ -429,6 +433,49 @@ def load_spare_rule_inputs(path: str | Path) -> dict[str, Any]:
     payload = dict(payload)
     payload["by_id"] = by_id
     return payload
+
+
+def read_manifest_ids(path: str | Path) -> list[str]:
+    """The FP manifest's candidate ids, with the file's SHAPE refused rather than assumed.
+
+    Both call sites read ``manifest.get("candidates", manifest)``, meaning to accept two
+    shapes: an object carrying a ``candidates`` list, or the rows themselves. The second
+    shape never worked — a top-level JSON list has no ``.get``, so the read raised
+    ``AttributeError``, which is outside ``main``'s ``(RecommendError, ValueError,
+    TypeError, OSError, KeyError)`` and ended the CLI in a traceback instead of the
+    ``refused:`` path this module standardises on. A JSON object *without* ``candidates``
+    was worse: it fell back to the mapping itself and iterated its KEYS.
+
+    One reader for both sites, so a fix to one cannot leave the other behind
+    ([[fixed-one-of-two-identical-things]]); the shape guard is the same one
+    ``architecture_param_measure`` and ``architecture_producer`` already apply, restated
+    here only because their errors (``MeasureError``/``ProducerError``, a ``RuntimeError``)
+    escape this module's refusal path too.
+    """
+    try:
+        payload = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise RecommendError(f"{portable_path(path)}: cannot read the manifest ({exc})") from exc
+    rows = payload.get("candidates") if isinstance(payload, Mapping) else payload
+    if not isinstance(rows, list) or not rows:
+        raise RecommendError(
+            f"{portable_path(path)}: the manifest carries no candidate rows — it must be a "
+            "JSON object with a 'candidates' list, or that list itself"
+        )
+    n_non_rows = sum(1 for row in rows if not isinstance(row, Mapping))
+    if n_non_rows:
+        # ⚠ Refused, not skipped: `architecture_producer.read_manifest` DROPS a non-object
+        # row, which here would silently shrink the 941 denominator that the coverage
+        # check, the ceiling and the yield are all computed against.
+        raise RecommendError(
+            f"{portable_path(path)}: {n_non_rows} manifest row(s) are not objects; a "
+            "candidate row must carry 'candidate_id' or 'id'"
+        )
+    try:
+        return [candidate_id_of(row) for row in rows]
+    except ProducerError as exc:
+        # A RuntimeError, so `main` would not catch it either.
+        raise RecommendError(f"{portable_path(path)}: {exc}") from exc
 
 
 def assert_manifest_ids_distinct(manifest_ids: Sequence[str]) -> None:
@@ -1299,9 +1346,7 @@ def recommend(
                 f"report records {recorded} — this is a different supply"
             )
 
-    manifest = json.loads(Path(fp_manifest_path).read_text(encoding="utf-8"))
-    manifest_rows = manifest.get("candidates", manifest)
-    manifest_ids = [candidate_id_of(r) for r in manifest_rows]
+    manifest_ids = read_manifest_ids(fp_manifest_path)
     inputs = load_spare_rule_inputs(spare_rule_inputs_path)
     by_id: dict[str, Any] = inputs["by_id"]
     assert_covers_manifest(by_id, manifest_ids)
@@ -1563,8 +1608,7 @@ def build_inputs(
     access, so the join is committed — the same reason `P3-15′-g-iv` committed
     ``curated_control_status_v0.json``.
     """
-    manifest = json.loads(Path(fp_manifest_path).read_text(encoding="utf-8"))
-    manifest_ids = [candidate_id_of(r) for r in manifest.get("candidates", manifest)]
+    manifest_ids = read_manifest_ids(fp_manifest_path)
     assert_manifest_ids_distinct(manifest_ids)
     cov = json.loads(Path(covariation_status_path).read_text(encoding="utf-8"))["status"]
     syn = json.loads(Path(synteny_status_path).read_text(encoding="utf-8"))["status"]
