@@ -913,7 +913,7 @@ def test_a_joint_entry_that_is_not_an_object_is_refused(reports):
     control, fp = reports
     c, f = json.loads(control.read_text()), json.loads(fp.read_text())
     f["joint"][0] = "not-a-row"
-    with pytest.raises(cmp.CompareError, match="not\n?\\s*objects|are not "):
+    with pytest.raises(cmp.CompareError, match=r"entr\(ies\) that are not"):
         cmp.assert_grids_identical(c, f)
 
 
@@ -1201,6 +1201,16 @@ def test_distribution_block_drops_counts_and_refuses_a_non_object():
         cmp.distribution_block({"supply": {"alignment_depth": []}}, "control", "alignment_depth")
 
 
+def _supply_block_line_span(lines: list[str]) -> range:
+    """1-based line numbers of ``def supply_block``'s body, from its def to the next."""
+    start = next(i for i, line in enumerate(lines, 1) if line.startswith("def supply_block"))
+    end = next(
+        (i for i, line in enumerate(lines, 1) if i > start and line.startswith("def ")),
+        len(lines) + 1,
+    )
+    return range(start, end)
+
+
 def test_no_supply_access_bypasses_the_validated_readers():
     """The point of the round-6 finding is the CLASS, not the one site it named.
 
@@ -1209,14 +1219,22 @@ def test_no_supply_access_bypasses_the_validated_readers():
     ([[fixed-one-of-two-identical-things]]).
     """
     source = Path(cmp.__file__).read_text()
-    # ⚠ The WHOLE file, both quote styles. The first version of this scan sliced off
-    # everything before `def supply_block`, so an access placed above the reader was
-    # never looked at — a guard-test disarmed by a reorder. `supply_block` itself
-    # reads `report.get("supply")`, which matches neither pattern.
+    # ⚠ The WHOLE file, both quote styles, and BOTH ACCESS FORMS. The first version
+    # sliced off everything before `def supply_block`, so an access above the reader
+    # was never looked at; the second caught only subscripts, so a future
+    # `report.get("supply")` elsewhere would reintroduce the unvalidated path. The one
+    # permitted getter is the reader's own, identified by line span rather than by
+    # pattern — a whitelist keyed on the text would match a copy of it anywhere.
+    lines = source.splitlines()
+    reader_span = _supply_block_line_span(lines)
     offenders = [
         (n, line.strip())
-        for n, line in enumerate(source.splitlines(), 1)
-        if '["supply"]' in line or "['supply']" in line
+        for n, line in enumerate(lines, 1)
+        if (
+            '["supply"]' in line
+            or "['supply']" in line
+            or (('.get("supply")' in line or ".get('supply')" in line) and n not in reader_span)
+        )
     ]
     assert offenders == [], offenders
 
@@ -1332,3 +1350,60 @@ def test_host_qualified_supply_origins_are_still_accepted(control_files, reports
     """Positive control: the real value carries a colon and must not be caught."""
     body = run_compare(control_files, reports, supply_origin=origin)
     assert body["arms"]["control"]["supply_origin"] == origin
+
+
+def test_the_source_scan_catches_a_get_form_outside_the_reader():
+    """Positive control for the second access form, on synthetic sources.
+
+    A `report.get("supply")` placed anywhere but inside `supply_block` reintroduces
+    exactly the unvalidated path the reader exists to close, and the subscript-only
+    scan could not see it.
+    """
+
+    def offenders(source: str) -> list[tuple[int, str]]:
+        lines = source.splitlines()
+        span = _supply_block_line_span(lines)
+        return [
+            (n, line.strip())
+            for n, line in enumerate(lines, 1)
+            if (
+                '["supply"]' in line
+                or "['supply']" in line
+                or (('.get("supply")' in line or ".get('supply')" in line) and n not in span)
+            )
+        ]
+
+    reader = (
+        'def supply_block(report, arm):\n    supply = report.get("supply")\n    return supply\n'
+    )
+    assert offenders(reader) == []
+    leaked = reader + 'def other(report):\n    return report.get("supply")\n'
+    assert offenders(leaked) == [(5, 'return report.get("supply")')]
+    single = reader + "def other(report):\n    return report.get('supply')\n"
+    assert offenders(single) == [(5, "return report.get('supply')")]
+
+
+@pytest.mark.parametrize("dropped", ["failed", "passed", "n"])
+def test_a_stratum_missing_any_count_is_refused_not_defaulted(dropped):
+    """`n` used to be read as `.get("n", 0)` while `failed` was read strictly, so a
+    stratum missing `n` published `share_failed: None` — "measured and found nothing" —
+    where the same defect in `failed` raised ([[clauses-must-guard-emptiness]])."""
+    c_row, f_row = a_stratified_row((1, 10), (6, 10), (4, 10), (3, 10))
+    del c_row["by_covariation_status"]["passed"][dropped]
+    with pytest.raises(cmp.CompareError, match=f"missing \\['{dropped}'\\]"):
+        cmp.stratify_by_criterion_a(c_row, f_row)
+
+
+def test_a_stratum_whose_n_contradicts_its_counts_is_refused():
+    """n is the sum of the two arms; a disagreeing n makes every share below wrong."""
+    c_row, f_row = a_stratified_row((1, 10), (6, 10), (4, 10), (3, 10))
+    c_row["by_covariation_status"]["passed"]["n"] = 99
+    with pytest.raises(cmp.CompareError, match="but failed"):
+        cmp.stratify_by_criterion_a(c_row, f_row)
+
+
+def test_a_consistent_stratum_is_still_accepted():
+    """Positive control: a guard refusing every stratum would satisfy both tests above."""
+    c_row, f_row = a_stratified_row((1, 10), (6, 10), (4, 10), (3, 10))
+    out = cmp.stratify_by_criterion_a(c_row, f_row)
+    assert out["criterion_a_passed"]["control"]["n"] == 10

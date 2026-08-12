@@ -39,7 +39,6 @@ Run (LOCAL, sub-second)::
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import math
 import re
@@ -49,7 +48,7 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-from tbox_finder.mining.architecture_param_measure import portable_path
+from tbox_finder.mining.architecture_param_measure import portable_path, sha256_of
 from tbox_finder.mining.covariation_producer import (
     CandidateSpec,
     ProducerError,
@@ -135,13 +134,9 @@ class RunPlanError(ValueError):
     """The run cannot be planned from the artifacts as given."""
 
 
-def _sha256_of(path: str | Path) -> str:
-    """sha256 of one file, chunked — the query FASTA is small but the helper is not sized to it."""
-    digest = hashlib.sha256()
-    with Path(path).open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1 << 20), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
+#: The shared chunked implementation, bound as a module attribute so a test can
+#: monkeypatch it and so a future rename in its home module breaks loudly here.
+_sha256_of = sha256_of
 
 
 # ═════════════════════════════════════════════════════════════════════════════

@@ -1474,3 +1474,78 @@ def test_main_creates_its_own_output_parent_directory(supply, tmp_path):
     )
     assert rc == 0
     assert out.is_file()
+
+
+def test_sha256_of_is_chunked_and_agrees_with_a_one_shot_digest(tmp_path):
+    """Consolidating three copies must not change the digest, and must stay chunked.
+
+    ⚠ Not "the three modules agree" — they now delegate to this function, so that
+    would be a tautology ([[promote-dont-duplicate-is-a-correctness-rule]]). The
+    checkable properties are that the digest matches an independent one-shot hash, and
+    that the file is read in pieces rather than whole (two modules hash a model
+    checkpoint through this).
+    """
+    import hashlib
+
+    blob = tmp_path / "big.bin"
+    payload = bytes(range(256)) * (apm.SHA256_CHUNK_BYTES // 128)  # > one chunk
+    blob.write_bytes(payload)
+    assert blob.stat().st_size > apm.SHA256_CHUNK_BYTES
+    assert apm.sha256_of(blob) == hashlib.sha256(payload).hexdigest()
+
+    reads: list[int] = []
+    real_open = Path.open
+
+    def counting_open(self, *args, **kwargs):
+        handle = real_open(self, *args, **kwargs)
+        real_read = handle.read
+
+        def read(size=-1):
+            reads.append(size)
+            return real_read(size)
+
+        handle.read = read  # type: ignore[method-assign]
+        return handle
+
+    import unittest.mock
+
+    with unittest.mock.patch.object(Path, "open", counting_open):
+        apm.sha256_of(blob)
+    assert reads and all(size == apm.SHA256_CHUNK_BYTES for size in reads)
+    assert len(reads) > 1
+
+
+def test_every_arm_declares_a_distinct_canonical_output_path():
+    """The guard compares against these, so two arms sharing one would make it vacuous."""
+    paths = [arm.canonical_out for arm in apm.SUPPLY_ARMS.values()]
+    assert len(set(paths)) == len(paths)
+    assert apm.SUPPLY_ARMS[apm.DEFAULT_ARM].canonical_out == apm.DEFAULT_OUT
+
+
+def test_the_default_arm_may_not_overwrite_the_control_arms_report(supply, tmp_path, monkeypatch):
+    """The REVERSE direction, which the one-sided guard let through.
+
+    `--arm round0_fp --out <the control report>` writes FP numbers and FP prose over a
+    committed artifact that is now an input to architecture_param_control_compare.
+    """
+    root, ids = supply
+    manifest = manifest_for(tmp_path, ids)
+    monkeypatch.chdir(tmp_path)
+    control_out = apm.SUPPLY_ARMS["curated_control"].canonical_out
+    rc = apm.main(
+        [
+            "measure",
+            "--arm",
+            "round0_fp",
+            "--msa-root",
+            str(root),
+            "--manifest",
+            str(manifest),
+            "--positive-control",
+            str(tmp_path / "absent.sto"),
+            "--out",
+            control_out,
+        ]
+    )
+    assert rc == 3
+    assert not (tmp_path / control_out).exists()

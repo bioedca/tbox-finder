@@ -75,7 +75,7 @@ from pathlib import Path
 from typing import Any
 
 from tbox_finder.data.window_dataset import WINDOW_NT, deterministic_lead, window_lead_range
-from tbox_finder.mining.architecture_param_measure import portable_path
+from tbox_finder.mining.architecture_param_measure import portable_path, sha256_of
 from tbox_finder.mining.curated_control_sizing import (
     DEFAULT_CONTEXT,
     DEFAULT_CORPUS,
@@ -1142,14 +1142,9 @@ def _matchedness(
     return out
 
 
-def _sha256_of(path: str | Path) -> str:
-    import hashlib
-
-    digest = hashlib.sha256()
-    with Path(path).open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1 << 20), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
+#: The shared chunked implementation, bound as a module attribute so a test can
+#: monkeypatch it and so a future rename in its home module breaks loudly here.
+_sha256_of = sha256_of
 
 
 def _write_report(body: dict[str, Any], out: str | Path) -> Path:

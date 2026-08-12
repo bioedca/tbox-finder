@@ -508,7 +508,24 @@ def stratify_by_criterion_a(
         c_arm, f_arm = c_by.get(stratum), f_by.get(stratum)
         if not isinstance(c_arm, Mapping) or not isinstance(f_arm, Mapping):
             continue
-        c_n, f_n = int(c_arm.get("n", 0)), int(f_arm.get("n", 0))
+        # ⚠ `n` is DERIVED, not defaulted. Reading it as `.get("n", 0)` while reading
+        # `failed` strictly meant a stratum object missing `n` produced
+        # `share_failed: None` — "measured and found nothing" — where the same defect in
+        # `failed` raised. Both keys are now required, and `n` is checked against the
+        # two counts it must be the sum of.
+        for arm_name, node in (("control", c_arm), ("fp", f_arm)):
+            missing = [k for k in ("failed", "passed", "n") if k not in node]
+            if missing:
+                raise CompareError(
+                    f"the {arm_name} arm's '{stratum}' stratum is missing {missing}; a "
+                    "defaulted count would publish a null share as a measurement"
+                )
+            if int(node["n"]) != int(node["failed"]) + int(node["passed"]):
+                raise CompareError(
+                    f"the {arm_name} arm's '{stratum}' stratum has n={node['n']} but "
+                    f"failed+passed={int(node['failed']) + int(node['passed'])}"
+                )
+        c_n, f_n = int(c_arm["n"]), int(f_arm["n"])
         c_share = round(int(c_arm["failed"]) / c_n, 6) if c_n else None
         f_share = round(int(f_arm["failed"]) / f_n, 6) if f_n else None
         out[f"criterion_a_{stratum}"] = {

@@ -110,6 +110,7 @@ class SupplyArm:
     step: str
     provenance_rule: str
     ground_truth: str
+    canonical_out: str
     disclosure: str
     covariation_note: str
     no_positive_control_reason: str
@@ -124,6 +125,7 @@ SUPPLY_ARMS: Mapping[str, SupplyArm] = {
         step=STEP,
         provenance_rule="P3-15'-f parameter measurement",
         ground_truth="unknown",
+        canonical_out="reports/p3/architecture_parameter_measurement.json",
         disclosure=(
             "de-novo A3/A4 mlocarna consensuses of round-0 false-positive-manifest "
             "candidates. This is what the de-novo instrument RESOLVES, not what a "
@@ -146,6 +148,7 @@ SUPPLY_ARMS: Mapping[str, SupplyArm] = {
         step="P3-15'-g-iv",
         provenance_rule="P3-15'-g-iv matched-control parameter measurement",
         ground_truth="believed_positive",
+        canonical_out="reports/p3/architecture_parameter_measurement_control.json",
         disclosure=(
             "de-novo A3/A4 mlocarna consensuses of the MATCHED positive control: "
             "Stage-1 re-detected spans on held-out CURATED T-box records (P3-15'-g-ii, "
@@ -172,15 +175,20 @@ SUPPLY_ARMS: Mapping[str, SupplyArm] = {
     ),
 }
 
-#: `--out`'s default, and the committed FP report's path.  Named so the CLI can
-#: refuse to overwrite it with another arm's numbers.
-DEFAULT_OUT = "reports/p3/architecture_parameter_measurement.json"
-
 #: The arm whose prose the committed `P3-15'-f` report carries.  ``measure`` and the
 #: CLI both default to it, so the FP report re-derives BYTE-IDENTICALLY across this
 #: seam — the same discipline `covariation_producer.search_shard(query_fasta=None)`
 #: holds to (P3-15'-g-iii).
-DEFAULT_ARM = "round0_fp"
+DEFAULT_ARM_KEY = "round0_fp"
+DEFAULT_ARM = DEFAULT_ARM_KEY
+
+#: `--out`'s default: the committed FP report's path, i.e. the default arm's own
+#: canonical output.  Every arm's canonical path is on its :class:`SupplyArm`, and the
+#: CLI refuses to write one arm's numbers to ANOTHER arm's path — in both directions,
+#: because `--arm round0_fp --out <the control report>` destroys a committed artifact
+#: exactly as surely as the reverse, and that artifact is now an input to
+#: `architecture_param_control_compare`.
+DEFAULT_OUT = SUPPLY_ARMS[DEFAULT_ARM_KEY].canonical_out
 
 
 def arm_for_step(step: str) -> SupplyArm:
@@ -295,13 +303,25 @@ def is_local_path_shaped(value: str) -> bool:
     )
 
 
+#: Read size for :func:`sha256_of`.  1 MiB, as the two chunked copies this function
+#: replaced already used.
+SHA256_CHUNK_BYTES = 1 << 20
+
+
 def sha256_of(path: str | Path) -> str:
     """sha256 of one file, for an input recorded by name rather than by path.
 
-    Public: three modules now record external inputs this way, and a private name
-    imported across module boundaries is a rename away from breaking them silently.
+    Public, and CHUNKED. Public because four modules now record external inputs this
+    way and a private name imported across module boundaries is a rename away from
+    breaking them silently. Chunked because two of those modules hash a **model
+    checkpoint** — `read_bytes()` would load it whole, so consolidating on the
+    one-shot form would have traded a duplication for a memory regression.
     """
-    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+    digest = hashlib.sha256()
+    with Path(path).open("rb") as handle:
+        for chunk in iter(lambda: handle.read(SHA256_CHUNK_BYTES), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 #: Retained so existing importers keep working; new call sites use the public name.
@@ -1270,15 +1290,18 @@ def main(argv: Sequence[str] | None = None) -> int:
         # Residual gap, stated rather than papered over: `DEFAULT_OUT` resolves against
         # the CURRENT cwd, so an absolute path aimed at a checkout the process is not
         # standing in is still not caught.
-        if (
-            supply_arm.key != DEFAULT_ARM
-            and Path(args.out).resolve() == Path(DEFAULT_OUT).resolve()
-        ):
-            raise MeasureError(
-                f"--arm {supply_arm.key!r} with the default --out {DEFAULT_OUT!r} would "
-                f"overwrite the {SUPPLY_ARMS[DEFAULT_ARM].step} report with "
-                f"{supply_arm.step} numbers; pass an explicit --out"
-            )
+        out_resolved = Path(args.out).resolve()
+        for other in SUPPLY_ARMS.values():
+            if other.key == supply_arm.key:
+                continue
+            if out_resolved == Path(other.canonical_out).resolve():
+                raise MeasureError(
+                    f"--arm {supply_arm.key!r} writing to {args.out!r} would overwrite "
+                    f"the committed {other.step} report ({other.canonical_out}) with "
+                    f"{supply_arm.step} numbers and {supply_arm.step} prose; the result "
+                    "would be internally consistent and undetectable downstream. Pass "
+                    f"--out {supply_arm.canonical_out} or a scratch path"
+                )
         body = measure(
             msa_root=args.msa_root,
             manifest_path=args.manifest,
