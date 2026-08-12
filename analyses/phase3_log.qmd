@@ -5788,7 +5788,9 @@ sets ANSI-stripped and cross-checked against the summary line. The whole delta i
 13 tests move FAILED → SKIPPED and one moves PASSED → SKIPPED, all 14 on `test_selection_val`,
 `test_coverage_sim` and `test_split_table_schema` for unmaterialised DVC/LFS inputs a fresh
 worktree does not carry (skips 89 → 103), and passes rise by exactly the 54 tests added.
-**44 sabotages, all RED against their NAMED test, plus 2 negative controls that stay green.** Both
+**69 sabotages, all RED against their NAMED test, plus 2 negative controls that stay green** — the
+final count after six review rounds, of which 44 predate the first one. (The round-5 commit
+message says 71; the harness reported 69, and a pushed commit is not amended.) Both
 new reports re-derive byte-identically apart from `generated_at_utc`; the committed FP report
 re-derives byte-identically across the arm seam. `ruff` + `black` clean.
 

@@ -1175,3 +1175,73 @@ def test_compare_wires_the_stratified_block_into_every_computed_row(control_file
         assert c_n == row["control_query_level"]["n_decided"]
         f_failed = sum(strat[f"criterion_a_{s}"]["fp"]["failed"] for s in ("passed", "failed"))
         assert f_failed == row["fp_candidate_level"]["failed"]
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# CodeRabbit round 6 — the THIRD site of one escape class, closed everywhere
+# ═════════════════════════════════════════════════════════════════════════════
+def test_supply_block_returns_the_object_and_refuses_a_non_object():
+    """Positive control first: a guard that refused everything would pass below."""
+    assert cmp.supply_block({"supply": {"a": 1}}, "control") == {"a": 1}
+    for bad in ([], "supply", None, 3):
+        with pytest.raises(cmp.CompareError, match="carries no 'supply' object"):
+            cmp.supply_block({"supply": bad}, "control")
+    with pytest.raises(cmp.CompareError, match="the fp report"):
+        cmp.supply_block({}, "fp")
+
+
+def test_distribution_block_drops_counts_and_refuses_a_non_object():
+    got = cmp.distribution_block(
+        {"supply": {"alignment_depth": {"median": 30, "counts": {"20": 1}}}},
+        "control",
+        "alignment_depth",
+    )
+    assert got == {"median": 30}
+    with pytest.raises(cmp.CompareError, match="'supply.alignment_depth' is not an object"):
+        cmp.distribution_block({"supply": {"alignment_depth": []}}, "control", "alignment_depth")
+
+
+def test_no_supply_access_bypasses_the_validated_readers():
+    """The point of the round-6 finding is the CLASS, not the one site it named.
+
+    Two earlier rounds each closed one site of this escape and left a sibling, so
+    this asserts the property directly against the module's own source
+    ([[fixed-one-of-two-identical-things]]).
+    """
+    source = Path(cmp.__file__).read_text()
+    body = source.split("def supply_block", 1)[1]
+    assert '["supply"]' not in body
+
+
+@pytest.mark.parametrize("arm", ["control", "fp"])
+def test_a_report_with_a_non_object_supply_exits_three(control_files, reports, tmp_path, arm):
+    """Both arms, because the guard is per-report and one of them was unreachable
+    from the other's test."""
+    control, fp = reports
+    src = control if arm == "control" else fp
+    broken = json.loads(src.read_text())
+    broken["supply"] = ["not", "an", "object"]
+    path = tmp_path / f"broken_{arm}.json"
+    path.write_text(json.dumps(broken))
+    out = tmp_path / "comparison.json"
+    args = cli_args(control_files, reports, out)
+    flag = "--control-report" if arm == "control" else "--fp-report"
+    args[args.index(flag) + 1] = str(path)
+    assert cmp.main(args) == 3
+    assert not out.exists()
+
+
+@pytest.mark.parametrize("block", ["alignment_depth", "consensus_width"])
+def test_a_report_with_a_non_object_distribution_exits_three(
+    control_files, reports, tmp_path, block
+):
+    control, fp = reports
+    broken = json.loads(control.read_text())
+    broken["supply"][block] = None
+    path = tmp_path / f"broken_{block}.json"
+    path.write_text(json.dumps(broken))
+    out = tmp_path / "comparison.json"
+    args = cli_args(control_files, reports, out)
+    args[args.index("--control-report") + 1] = str(path)
+    assert cmp.main(args) == 3
+    assert not out.exists()

@@ -166,6 +166,30 @@ def assert_grids_identical(control_report: Mapping[str, Any], fp_report: Mapping
             )
 
 
+def supply_block(report: Mapping[str, Any], arm: str) -> Mapping[str, Any]:
+    """A report's ``supply`` object, refused rather than tracebacked.
+
+    ⚠ THE THIRD SITE OF ONE ESCAPE CLASS. `load_status` guards its rows and
+    `assert_grids_identical` guards its `joint` entries, and both guards were added a
+    review round apart because I fixed the reported site and not its sibling
+    ([[fixed-one-of-two-identical-things]]).  Every `supply` access now goes through
+    here and :func:`distribution_block`, so the class is closed at every site rather
+    than at the one a reviewer happened to name.
+    """
+    supply = report.get("supply")
+    if not isinstance(supply, Mapping):
+        raise CompareError(f"the {arm} report carries no 'supply' object")
+    return supply
+
+
+def distribution_block(report: Mapping[str, Any], arm: str, name: str) -> dict[str, Any]:
+    """One ``supply`` sub-distribution, minus its per-value ``counts`` histogram."""
+    node = supply_block(report, arm).get(name)
+    if not isinstance(node, Mapping):
+        raise CompareError(f"the {arm} report's 'supply.{name}' is not an object")
+    return {k: v for k, v in node.items() if k != "counts"}
+
+
 def record_of(candidate_id: str) -> str:
     """The source **record** a control query belongs to.
 
@@ -376,7 +400,7 @@ def producibility(
     """What share of each arm the instrument could produce a consensus for at all."""
     decided = {cid for cid, s in status.items() if s in DECIDED_STATES}
     producible_records = {acc for acc, cids in by_record.items() if any(c in decided for c in cids)}
-    fp_supply = fp_report["supply"]
+    fp_supply = supply_block(fp_report, "fp")
     n_fp_manifest = int(fp_supply["n_candidates_in_manifest"])
     n_fp_measured = int(fp_supply["n_consensuses_measured"])
     # ⚠ Refused, not divided: an FP report with no candidates is not a comparator, and
@@ -795,16 +819,20 @@ def compare(
                 "report": portable_path(control_report_path),
                 "msa_root": portable_path(control_msa_root),
                 "supply_origin": supply_origin,
-                "supply_digest_sha256": control_report["supply"]["supply_digest_sha256"],
-                "n_consensuses": int(control_report["supply"]["n_consensuses_measured"]),
+                "supply_digest_sha256": supply_block(control_report, "control")[
+                    "supply_digest_sha256"
+                ],
+                "n_consensuses": int(
+                    supply_block(control_report, "control")["n_consensuses_measured"]
+                ),
                 "ground_truth": control_arm.ground_truth,
             },
             "fp": {
                 "step": fp_report.get("step"),
                 "report": portable_path(fp_report_path),
-                "supply_origin": fp_report["supply"].get("supply_origin"),
-                "supply_digest_sha256": fp_report["supply"]["supply_digest_sha256"],
-                "n_consensuses": int(fp_report["supply"]["n_consensuses_measured"]),
+                "supply_origin": supply_block(fp_report, "fp").get("supply_origin"),
+                "supply_digest_sha256": supply_block(fp_report, "fp")["supply_digest_sha256"],
+                "n_consensuses": int(supply_block(fp_report, "fp")["n_consensuses_measured"]),
                 "ground_truth": fp_arm.ground_truth,
             },
             "grid_identical": True,
@@ -815,22 +843,10 @@ def compare(
             "report_binds_to_supply": binding,
         },
         "alignment_comparability": {
-            "control_depth": {
-                k: v
-                for k, v in control_report["supply"]["alignment_depth"].items()
-                if k != "counts"
-            },
-            "fp_depth": {
-                k: v for k, v in fp_report["supply"]["alignment_depth"].items() if k != "counts"
-            },
-            "control_width": {
-                k: v
-                for k, v in control_report["supply"]["consensus_width"].items()
-                if k != "counts"
-            },
-            "fp_width": {
-                k: v for k, v in fp_report["supply"]["consensus_width"].items() if k != "counts"
-            },
+            "control_depth": distribution_block(control_report, "control", "alignment_depth"),
+            "fp_depth": distribution_block(fp_report, "fp", "alignment_depth"),
+            "control_width": distribution_block(control_report, "control", "consensus_width"),
+            "fp_width": distribution_block(fp_report, "fp", "consensus_width"),
             "query_matchedness_from_the_detect_report": (
                 {
                     k: matchedness[k]

@@ -700,8 +700,8 @@
       },
       "schema_version": "1.0"
     },
-    "generated_at_utc": "2026-08-12T02:37:23.431021+00:00",
-    "git_sha": "4d6dd302c937b07e83329cf8221005c13933af57",
+    "generated_at_utc": "2026-08-12T03:36:00.737453+00:00",
+    "git_sha": "023e070f9e152fce41d551e0c51ff0bdf0de0548",
     "inputs": {
       "data/processed/mining/curated_control_manifest_v0.json": "363795fba6cd4d1d85495ec62e6e62cd11f1bf37b0fdf739c48315777c4d2a83",
       "data/processed/mining/curated_control_status_v0.json": "8b5e8f4178cd63eb8664c1e63e519c5810223eb56ca3a1488ce8bfee9dbeb033",
