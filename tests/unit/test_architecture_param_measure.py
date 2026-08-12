@@ -1063,9 +1063,14 @@ def test_the_field_census_sees_every_row_not_only_the_first():
 # ═════════════════════════════════════════════════════════════════════════════
 # The P3-15'-g-iv supply-arm seam
 # ═════════════════════════════════════════════════════════════════════════════
+#: Resolved from ``__file__``, not from the cwd: a cwd-relative path plus a
+#: ``skipif`` turns "the committed report is missing" into a SKIP, and a skip is not
+#: a pass. The artifact tests below therefore always run.
+REPO_ROOT = Path(__file__).resolve().parents[2]
+
 #: The committed FP report, whose four self-descriptions the default arm must
 #: reproduce verbatim — that identity is what makes the seam byte-identical.
-FP_REPORT = Path("reports/p3/architecture_parameter_measurement.json")
+FP_REPORT = REPO_ROOT / "reports/p3/architecture_parameter_measurement.json"
 
 
 def test_resolve_arm_defaults_to_the_fp_arm_and_accepts_both_keys():
@@ -1094,7 +1099,12 @@ def test_the_two_arms_describe_different_corpora():
     assert (fp.ground_truth, control.ground_truth) == ("unknown", "believed_positive")
 
 
-@pytest.mark.skipif(not FP_REPORT.is_file(), reason="run from the repo root")
+def test_the_committed_fp_report_is_present_at_all():
+    """The precondition the artifact test below used to SKIP on."""
+    assert FP_REPORT.is_absolute()
+    assert FP_REPORT.is_file(), FP_REPORT
+
+
 def test_the_default_arms_prose_is_exactly_what_the_committed_fp_report_carries():
     """The seam's whole safety claim, locked against the artifact it must not move.
 

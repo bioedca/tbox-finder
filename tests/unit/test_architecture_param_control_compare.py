@@ -767,12 +767,22 @@ def test_the_absolute_path_scan_can_actually_fail():
 # ═════════════════════════════════════════════════════════════════════════════
 # The committed artifacts — read, not assumed
 # ═════════════════════════════════════════════════════════════════════════════
-COMPARISON = Path("reports/p3/architecture_parameter_control_comparison.json")
-CONTROL_REPORT = Path("reports/p3/architecture_parameter_measurement_control.json")
-FP_REPORT = Path("reports/p3/architecture_parameter_measurement.json")
+#: Resolved from ``__file__``, not from the cwd — see the same note in
+#: tests/unit/test_architecture_param_measure.py. A ``skipif`` on a cwd-relative
+#: path turns a MISSING committed artifact into a skip, and a skip is not a pass.
+REPO_ROOT = Path(__file__).resolve().parents[2]
+COMPARISON = REPO_ROOT / "reports/p3/architecture_parameter_control_comparison.json"
+CONTROL_REPORT = REPO_ROOT / "reports/p3/architecture_parameter_measurement_control.json"
+FP_REPORT = REPO_ROOT / "reports/p3/architecture_parameter_measurement.json"
 
 
-@pytest.mark.skipif(not COMPARISON.is_file(), reason="run from the repo root")
+def test_all_three_committed_reports_are_present_at_all():
+    """The precondition the artifact tests below used to SKIP on."""
+    for path in (COMPARISON, CONTROL_REPORT, FP_REPORT):
+        assert path.is_absolute(), path
+        assert path.is_file(), path
+
+
 def test_the_committed_comparison_is_internally_consistent():
     """Every headline number must be recomputable from the report's own rows.
 
@@ -801,10 +811,6 @@ def test_the_committed_comparison_is_internally_consistent():
         assert q["ci95"] is None
 
 
-@pytest.mark.skipif(
-    not (COMPARISON.is_file() and CONTROL_REPORT.is_file() and FP_REPORT.is_file()),
-    reason="run from the repo root",
-)
 def test_the_committed_reports_really_do_share_a_grid():
     """The claim the whole comparison rests on, checked against the real files."""
     cmp.assert_grids_identical(
@@ -812,7 +818,6 @@ def test_the_committed_reports_really_do_share_a_grid():
     )
 
 
-@pytest.mark.skipif(not COMPARISON.is_file(), reason="run from the repo root")
 def test_the_committed_comparison_states_its_intervals_on_the_record_level_n():
     """The rule the step was given: never a CI on the 317 queries."""
     body = json.loads(COMPARISON.read_text())
@@ -1139,7 +1144,6 @@ def test_an_empty_a_stratum_gives_a_none_share_not_a_zero():
     assert out["criterion_a_passed"]["fp_minus_control"] is None
 
 
-@pytest.mark.skipif(not COMPARISON.is_file(), reason="run from the repo root")
 def test_the_committed_stratified_block_reconciles_with_the_unstratified_counts():
     """Each arm's two strata must sum to that arm's decided total in the same row."""
     body = json.loads(COMPARISON.read_text())
