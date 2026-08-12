@@ -5788,9 +5788,10 @@ sets ANSI-stripped and cross-checked against the summary line. The whole delta i
 13 tests move FAILED → SKIPPED and one moves PASSED → SKIPPED, all 14 on `test_selection_val`,
 `test_coverage_sim` and `test_split_table_schema` for unmaterialised DVC/LFS inputs a fresh
 worktree does not carry (skips 89 → 103), and passes rise by exactly the 54 tests added.
-**69 sabotages, all RED against their NAMED test, plus 2 negative controls that stay green** — the
-final count after six review rounds, of which 44 predate the first one. (The round-5 commit
-message says 71; the harness reported 69, and a pushed commit is not amended.) Both
+**87 sabotages, all RED against their NAMED test, plus 2 negative controls that stay green** — the
+final count, of which 44 predate the first review round. (Two commit messages quote intermediate
+counts that were wrong when written — 71 at round 5, where the harness had reported 69 — and a
+pushed commit is not amended, so the number here is the one to read.) Both
 new reports re-derive byte-identically apart from `generated_at_utc`; the committed FP report
 re-derives byte-identically across the arm seam. `ruff` + `black` clean.
 
@@ -5819,6 +5820,38 @@ and the sabotage harness were running concurrently (that run took 180 s against 
 It passes in isolation on **both** the worktree and `main`, and the diff touches none of the files
 it exercises. Recorded rather than dropped, because "zero new failures" is only worth something if
 the one exception is named.
+
+**Review.** **13 CodeRabbit CLI rounds** (3 / 3 / 1 / 1 / 1 / 2 / 0 / 2 / 2 / 2 / 0 / 0, with six
+rate-limit stalls **all waited out** — no Greptile credit spent, budget still 5/16 used) **and 3
+GitHub-app reviews**, giving **26 findings: 24 real (4 major), 2 refuted**. ⚠ The count went UP
+after a clean round twice — round 8 read *No new findings* and round 9 found two — so the gate was
+closed only on **two consecutive** clean rounds over the same HEAD, with both replayed findings
+re-verified in-tree rather than assumed stale.
+
+**⚠ TWO OF THE THREE APP REVIEWS WERE UNREAD FOR HOURS.** The app reviewed `023e070` and `13638dd`
+while I was working the CLI rounds, and I only looked because the CLI briefly started erroring.
+Five findings were sitting there, all real — including the sharpest of the step: the `--arm`/`--out`
+guard was **one-directional**, so `--arm round0_fp --out <the control report>` would have written FP
+numbers and FP prose over a committed artifact that is now an input to the comparison. Each arm now
+declares its own `canonical_out` and every other arm's path is refused.
+
+**⚠ ONE DEFECT CLASS TOOK FOUR ROUNDS TO CLOSE BECAUSE I KEPT FIXING THE SITE, NOT THE CLASS.**
+Operator-supplied JSON reaching a subscript before its shape was checked: round 1 closed it for
+status rows, round 2 for `joint` entries, round 6 for the four `supply` sub-blocks, and round 12 for
+the `.get()` access form the round-6 scan could not see. Each time the reviewer named one site and I
+fixed exactly that one ([[fixed-one-of-two-identical-things]]). The scan that now enforces the class
+was itself defective twice — first sliced to the text after `def supply_block` (so an access above
+it was invisible), then blind to `.get("supply")`.
+
+**⚠ TWO FINDINGS WERE REFUTED BY MEASUREMENT, NOT BY ARGUMENT.** (1) "The two new reports are
+untracked, so a clean checkout fails" — raised twice; both are on origin (28,719 and 50,053 bytes)
+and a pristine clone of the exact pushed HEAD runs all 180 tests green, so the claim is an artifact
+of diffing against `main`, where files a PR *adds* do not exist yet. (2) "A missing `reports/p3`
+could make the arm/out test pass for the wrong reason" — all four cells measured: `main` calls
+`out.parent.mkdir(parents=True, exist_ok=True)`, so a missing directory is never a refusal. I had
+already applied the suggested `mkdir` before measuring; it was reverted rather than left in place
+with a comment asserting a rationale the code disproves, and the behaviour the refutation rests on
+is now pinned by its own test.
 
 **Decisions.** No parameter is pinned (`pins_nothing: true` in both reports). The ADR-0006 A4
 seven-parameter choice that P3-15′-f deferred to "measure a matched control first" is now
