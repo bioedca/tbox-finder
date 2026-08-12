@@ -109,10 +109,9 @@ def test_grid_is_the_full_cross_product_of_the_shipped_axes():
     )
     points = rec.grid_points()
     assert len(points) == expected
-    assert (
-        len({p.as_dict()["label"] if False else tuple(sorted(p.as_dict().items())) for p in points})
-        == expected
-    )
+    # By VALUE, not by label: two points could carry distinct labels and the same seven
+    # numbers. (`as_dict()` carries the parameters only — the label is not in it.)
+    assert len({tuple(sorted(p.as_dict().items())) for p in points}) == expected
 
 
 def test_grid_labels_are_distinct_so_a_point_cannot_shadow_another():
@@ -268,6 +267,37 @@ def test_control_records_refuses_a_status_table_that_is_a_different_corpus(tmp_p
     manifest = control_manifest(tmp_path, [Q_A1, Q_A2])
     with pytest.raises(rec.RecommendError, match="different corpora"):
         rec.control_records({Q_A1: STATUS_FAILED, Q_B1: STATUS_FAILED}, manifest)
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        pytest.param("faled", id="a_typo"),
+        pytest.param(None, id="a_null"),
+        pytest.param(1, id="a_number"),
+        pytest.param("", id="an_empty_string"),
+    ],
+)
+def test_control_records_refuses_a_status_value_it_cannot_spell(tmp_path, bad):
+    """An unspellable status is not decided, so it silently leaves the 68-record rate.
+
+    ``control_damage`` reads producibility as ``status[q] in DECIDED_STATES``: a typo does
+    not raise, it removes that query from the denominator every share and interval on this
+    arm is computed against. The FP arm's columns go through ``checked_status`` in the
+    writer AND the reader; this arm did not.
+    """
+    status = {Q_A1: STATUS_FAILED, Q_A2: bad}
+    with pytest.raises(rec.RecommendError, match="control status"):
+        rec.control_records(status, control_manifest(tmp_path, [Q_A1, Q_A2]))
+
+
+def test_the_control_status_check_admits_every_shipped_state(tmp_path):
+    """Positive control: `unavailable` is a legitimate value, not a defect to refuse."""
+    status = {Q_A1: STATUS_PASSED, Q_A2: STATUS_UNAVAILABLE, Q_B1: STATUS_FAILED}
+    assert rec.control_records(status, control_manifest(tmp_path, list(status))) == {
+        REC_A: [Q_A1, Q_A2],
+        REC_B: [Q_B1],
+    }
 
 
 def test_control_records_refuses_a_manifest_row_that_contradicts_its_own_id(tmp_path):
@@ -757,6 +787,25 @@ def test_a_duplicated_manifest_id_is_refused_by_the_coverage_check():
         rec.assert_covers_manifest({"a": {}, "b": {}}, ["a", "b", "b"])
 
 
+def test_a_supply_naming_one_candidate_twice_is_refused():
+    """`set(supply_ids)` merged the repeat and the equality then read as exact.
+
+    The same shape `assert_covers_manifest` refuses on the manifest side
+    ([[duplicate-key-merges-instead-of-colliding]]): two consensuses for one candidate
+    would be counted twice by every per-item loop while the set comparison agreed.
+    """
+    status = {"a": STATUS_PASSED, "b": STATUS_FAILED}
+    with pytest.raises(rec.RecommendError, match="more than once"):
+        rec.assert_supply_is_the_decided_set("FP", ["a", "b", "b"], status)
+
+
+def test_the_duplicate_refusal_does_not_fire_on_a_distinct_supply():
+    """Positive control — and the ids arrive as a GENERATOR at one of the two call sites,
+    so materialising them must not consume the supply before the comparison."""
+    status = {"a": STATUS_PASSED, "b": STATUS_FAILED}
+    rec.assert_supply_is_the_decided_set("FP", iter(["a", "b"]), status)
+
+
 def test_distinct_manifest_ids_pass():
     """Positive control for the duplicate refusal."""
     rec.assert_manifest_ids_distinct(["a", "b", "c"])
@@ -826,6 +875,36 @@ def test_a_malformed_spare_rule_input_row_is_refused(tmp_path, row, match):
     p.write_text(json.dumps({"rows": [row]}))
     with pytest.raises(rec.RecommendError, match=match):
         rec.load_spare_rule_inputs(p)
+
+
+def posterior_inputs(tmp_path, literal: str) -> Path:
+    """A one-row inputs file whose posterior is written as a raw JSON literal.
+
+    ``json.dumps`` cannot express these two: an integer beyond float range comes back
+    from ``json.loads`` as a Python ``int``, and ``1e400`` as ``inf``.
+    """
+    p = tmp_path / "inputs.json"
+    p.write_text(
+        '{"rows": [{"candidate_id": "x", "covariation_status": "failed", '
+        f'"synteny_status": "failed", "stage2_posterior": {literal}}}]}}'
+    )
+    return p
+
+
+def test_a_posterior_too_large_for_a_float_is_refused_not_raised(tmp_path):
+    """`float(10**400)` raises OverflowError — an ArithmeticError `main` does not catch.
+
+    JSON bounds no integer, so the column can carry one; the CLI would have ended in a
+    traceback where every other malformed posterior gets `refused:`.
+    """
+    with pytest.raises(rec.RecommendError, match="too large to represent"):
+        rec.load_spare_rule_inputs(posterior_inputs(tmp_path, "9" * 400))
+
+
+def test_a_posterior_that_parses_to_infinity_is_refused_by_the_range_test(tmp_path):
+    """Positive control for the branch above: `1e400` parses to `inf`, not to an int."""
+    with pytest.raises(rec.RecommendError, match=r"outside \[0, 1\]"):
+        rec.load_spare_rule_inputs(posterior_inputs(tmp_path, "1e400"))
 
 
 def test_a_well_formed_spare_rule_input_loads(tmp_path):
@@ -1005,7 +1084,21 @@ def tiny_corpus(tmp_path, monkeypatch):
         )
     )
     comparison = tmp_path / "comparison.json"
-    comparison.write_text(json.dumps({"headline": {"reading": "carried forward"}}))
+    comparison.write_text(
+        json.dumps(
+            {
+                "headline": {"reading": "carried forward"},
+                # The comparison's own statement of WHICH two arms it read, bound to the
+                # supplies here the same way the two measurement reports are.
+                "arms": {
+                    "fp": {"supply_digest_sha256": apm.supply_digest(apm.read_supply(fp_root))},
+                    "control": {
+                        "supply_digest_sha256": apm.supply_digest(apm.read_supply(ctrl_root))
+                    },
+                },
+            }
+        )
+    )
     return {
         "fp_msa_root": fp_root,
         "control_msa_root": ctrl_root,
@@ -1033,6 +1126,29 @@ def test_recommend_refuses_a_supply_the_committed_report_does_not_describe(tiny_
     report = Path(tiny_corpus["fp_report_path"])
     report.write_text(json.dumps({"supply": {"supply_digest_sha256": "0" * 64}}))
     with pytest.raises(rec.RecommendError, match="different supply"):
+        rec.recommend(**tiny_corpus)
+
+
+def test_recommend_refuses_a_comparison_report_about_other_supplies(tiny_corpus):
+    """The headline is a READING of two arms; the file hash identifies only the file.
+
+    Every other number in the payload is bound to the supplies on disk by digest. The
+    carried-forward sentence was not, so a comparison of a different pair of arms could be
+    quoted beside them ([[gate-must-bind-to-upstream-evidence]]).
+    """
+    comparison = json.loads(Path(tiny_corpus["comparison_report_path"]).read_text())
+    comparison["arms"]["control"]["supply_digest_sha256"] = "0" * 64
+    Path(tiny_corpus["comparison_report_path"]).write_text(json.dumps(comparison))
+    with pytest.raises(rec.RecommendError, match="reading of different arms"):
+        rec.recommend(**tiny_corpus)
+
+
+def test_recommend_refuses_a_comparison_report_that_records_no_digest(tiny_corpus):
+    """Absent binds nothing: read as "no disagreement found" it is a vacuous pass."""
+    Path(tiny_corpus["comparison_report_path"]).write_text(
+        json.dumps({"headline": {"reading": "carried forward"}})
+    )
+    with pytest.raises(rec.RecommendError, match="no 'arms' block"):
         rec.recommend(**tiny_corpus)
 
 

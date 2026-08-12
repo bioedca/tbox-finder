@@ -391,12 +391,22 @@ def checked_posterior(where: str, cid: str, value: Any) -> float | None:
         return None
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise RecommendError(f"{where}: {cid} has a non-numeric stage2_posterior")
-    if not 0.0 <= float(value) <= 1.0:
+    try:
+        # ⚠ `float(10**400)` raises OverflowError — an ArithmeticError, outside `main`'s
+        # except tuple, so a JSON integer too large for a float ended the CLI in a
+        # traceback rather than in the refusal this function exists to give. `1e400`
+        # parses to `inf` instead and is caught by the range test below.
+        numeric = float(value)
+    except OverflowError as exc:
+        raise RecommendError(
+            f"{where}: {cid} has a stage2_posterior too large to represent as a float"
+        ) from exc
+    if not 0.0 <= numeric <= 1.0:
         raise RecommendError(
             f"{where}: {cid} has stage2_posterior={value!r} outside [0, 1]; a mis-scaled "
             "column would clear every threshold without a refusal"
         )
-    return float(value)
+    return numeric
 
 
 def load_spare_rule_inputs(path: str | Path) -> dict[str, Any]:
@@ -631,6 +641,19 @@ def control_records(status: Mapping[str, str], manifest_path: str | Path) -> dic
     whose two statements about its own record disagree; this function delegates to it and
     then checks the status table is that same corpus.
     """
+    # ⚠ The VALUES, not only the id set. `control_damage` reads producibility as
+    # `status[q] in DECIDED_STATES`, so an unspellable status — a typo, a null, a JSON
+    # number — silently drops that query out of the 68-record denominator every rate and
+    # interval on this arm is computed against. The FP arm's two status columns go through
+    # `checked_status` in both the writer and the reader; this one did not, and an
+    # asymmetric guard is the one that gets forgotten. (The reachable case is already
+    # refused downstream by `assert_supply_is_the_decided_set`, which would see the id
+    # leave the decided set while its consensus sits on disk — but that is a guard about
+    # the SUPPLY, and it names a different cause.)
+    if not isinstance(status, Mapping):
+        raise RecommendError("the control status table must be a JSON object of id → status")
+    for cid, value in status.items():
+        checked_status(str(manifest_path), str(cid), "control status", value)
     by_record = load_control_records(manifest_path)
     manifest_ids = {cid for ids in by_record.values() for cid in ids}
     if manifest_ids != set(status):
@@ -1205,7 +1228,20 @@ def assert_supply_is_the_decided_set(
     disk, is a producer/retrieval mismatch and is refused rather than defaulted.
     """
     decided = {cid for cid, state in status.items() if state in DECIDED_STATES}
-    have = set(supply_ids)
+    # ⚠ Counted BEFORE the set: `set(...)` would merge a repeated id, and the equality
+    # below would then hold on a supply carrying two consensuses for one candidate while
+    # `n_consensuses` and every per-item loop still saw both rows
+    # ([[duplicate-key-merges-instead-of-colliding]]). Neither shipped call site can
+    # produce one today — both derive their ids from a slug→id index over unique
+    # directories — so this refuses a shape the contract forbids rather than one observed.
+    ids = list(supply_ids)
+    have = set(ids)
+    if len(ids) != len(have):
+        repeated = sorted({cid for cid in have if ids.count(cid) > 1})
+        raise RecommendError(
+            f"the {label} supply names {len(ids) - len(have)} candidate id(s) more than "
+            f"once (e.g. {repeated[:2]}); one candidate cannot have two consensuses"
+        )
     if decided == have:
         return
     missing, extra = sorted(decided - have), sorted(have - decided)
@@ -1214,6 +1250,41 @@ def assert_supply_is_the_decided_set(
         f"with no consensus on disk (e.g. {missing[:2]}), {len(extra)} consensuses whose "
         f"candidate (a) did not decide (e.g. {extra[:2]})"
     )
+
+
+def assert_comparison_describes_these_supplies(
+    comparison: Any,
+    fp_digest: str,
+    control_digest: str,
+) -> None:
+    """The carried-forward headline must be about the supplies this run measured.
+
+    ``arms.comparison_headline_carried_forward`` copies a sentence out of
+    ``architecture_parameter_control_comparison.json`` — a *reading* of the two arms — and
+    the file's provenance hash identifies the file, not its subject. Both measurement
+    reports are already bound to the supplies by digest here; the comparison was not, so a
+    stale one could inject a headline about a different pair of arms into a report whose
+    every other number came from these two ([[gate-must-bind-to-upstream-evidence]]).
+
+    ⚠ Refused when the digests are ABSENT as well as when they disagree: a comparison
+    report that records no digest binds nothing, and reading the field as "no disagreement
+    found" is the vacuous-TRUE this project keeps meeting ([[clauses-must-guard-emptiness]]).
+    """
+    arms = comparison.get("arms") if isinstance(comparison, Mapping) else None
+    if not isinstance(arms, Mapping):
+        raise RecommendError(
+            "the comparison report carries no 'arms' block, so its headline cannot be "
+            "bound to these supplies"
+        )
+    for label, key, digest in (("FP", "fp", fp_digest), ("control", "control", control_digest)):
+        arm = arms.get(key)
+        recorded = arm.get("supply_digest_sha256") if isinstance(arm, Mapping) else None
+        if recorded != digest:
+            raise RecommendError(
+                f"the comparison report's {label} arm records supply digest {recorded} but "
+                f"the supply measured here digests to {digest} — its headline is a reading "
+                "of different arms"
+            )
 
 
 def checked_origin(label: str, origin: Any) -> str | None:
@@ -1345,6 +1416,7 @@ def recommend(
                 f"the {label} supply on disk digests to {digest} but the committed "
                 f"report records {recorded} — this is a different supply"
             )
+    assert_comparison_describes_these_supplies(comparison, fp_digest, control_digest)
 
     manifest_ids = read_manifest_ids(fp_manifest_path)
     inputs = load_spare_rule_inputs(spare_rule_inputs_path)

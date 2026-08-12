@@ -6177,3 +6177,38 @@ ties on every measured coordinate. That branch had no test at all — on the shi
 takes only `null` and `False` ([[clauses-must-guard-emptiness]]). **124 tests, 81 sabotages, all
 RED against their NAMED test.** Zero new failures vs the matched `main` baseline at `090547f`
 (worktree **13**, main **26**, a strict subset); `ruff` + `black` clean.
+
+**Review round 8 (CodeRabbit CLI, 5 findings — 4 major, 1 minor, all real, all fixed) — and one
+of them closes an item this step had been carrying as *disclosed, not fixed*.** (1) **The
+carried-forward comparison headline is now bound to the supplies.** The payload's
+`arms.comparison_headline_carried_forward` copies a *reading* of the two arms out of the
+control-comparison report, whose
+provenance hash identifies the file and not its subject; both measurement reports were already
+digest-bound here and this one was not, so a comparison of a different pair of arms could be
+quoted beside numbers derived from these two ([[gate-must-bind-to-upstream-evidence]]). The
+report records `arms.fp` / `arms.control` supply digests, and they equal the two measurement
+reports' — `90b2fe1b…` and `0b5afbec…` — so the binding holds on the shipped artifacts. An
+**absent** digest is refused as well as a disagreeing one: a comparison that records none binds
+nothing, and reading that as agreement is the vacuous TRUE this project keeps meeting. (2) **The
+control's status VALUES were never checked.** `control_records` validated the id set only, while
+`control_damage` reads producibility as `status[q] in DECIDED_STATES` — so a typo, a null or a
+number silently removes that query from the 68-record denominator every share and interval on
+this arm is computed against. The FP arm's two columns pass through `checked_status` in both the
+writer and the reader; this arm did not, and the asymmetric guard is the one that gets forgotten.
+(The reachable case was already refused downstream by `assert_supply_is_the_decided_set`, which
+would see the id leave the decided set while its consensus sat on disk — but that guard is about
+the supply and names a different cause.) (3) `assert_supply_is_the_decided_set` compared
+`set(supply_ids)`, so a supply naming one candidate twice merged into an exact-looking equality
+while every per-item loop still saw both rows ([[duplicate-key-merges-instead-of-colliding]]);
+the ids are materialised and the repeat refused. Neither shipped call site can produce one today
+— both derive ids from a slug→id index over unique directories — so this refuses a shape the
+contract forbids rather than one observed. (4) `checked_posterior` called `float(value)`, and a
+JSON integer beyond float range raises **OverflowError**, an `ArithmeticError` outside `main`'s
+except tuple: a traceback where every other malformed posterior gets `refused:`. (`1e400` parses
+to `inf` instead and the range test already caught it — that is the branch's positive control.)
+(5) A dead `if False` operand in the grid-distinctness assertion is removed; it also read a
+`label` key `as_dict()` does not carry, so removing the guard would have raised `KeyError`.
+**135 tests, 88 sabotages, all RED against their NAMED test**, including two positive controls
+(a status guard that refuses everything, and a grid whose points collide in *value* with the
+count preserved). Zero new failures vs the same `main` baseline; `ruff` + `black` clean; no
+committed artifact changes.
