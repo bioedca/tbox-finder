@@ -6280,3 +6280,42 @@ for a `null` supply block supplied the string `"cluster"`. The two are not the s
 takes `object_field`'s permissive branch, so the **digest** gate refuses it, not the shape gate.
 The scalar case keeps the shape assertion under a name that matches it, and the `null` case is
 added under the guard that actually fires. **157 tests.**
+
+## Step P3-15′-f RUN — 2026-08-12: the criterion-(b) producer, and a cluster run that reproduces the local sweep exactly
+
+**Inputs.** `data/processed/mining/round0_fp_manifest.json` (941 candidates, git-tracked) and the
+278 promoted de-novo consensuses at `two.amlab:$HOME/tbox-scratch/round_p3_15_supply/msa/<slug>/msa.sto`
+(SLURM jobs 1205 + 1254, digest `90b2fe1b…`). The seven ADR-0006 A4 rule parameters came from the
+§7 decision of 2026-08-12 and were supplied on the submit line, not defaulted anywhere:
+`STEM_I_NT_THRESHOLD=1 · MIN_NAMED_HELICES=2 · MIN_HELIX_PAIRS=2 · BULGE_MIN_NT=2 · BULGE_MAX_NT=50 ·
+NCCA_PAIRING_NT=2 · ALLOW_WOBBLE=0` (`sensitive_core`).
+
+**Process.** `slurm/p3/architecture_producer.sbatch`, `--array=0-1`, partition `gpu` with **no
+`--gres`** (the leg is stdlib Stockholm parsing plus a pair-table walk — a GPU allocation would idle
+an A4000), cpus 2, mem 8G, 20 min wall. §9.3 steps 1–5: the cluster checkout was synced to `0ef2569`,
+`bash -n` passed and `sbatch --test-only` accepted; the seven `${VAR:?}` exports were composed and
+echoed **before** the ack, because `--test-only` validates SLURM headers only and cannot see a missing
+one, and `ROUND_DIR` was passed explicitly — the file's own default is `round_p3_15d`, which is not
+where the supply lives. Submitted on the user's `submit` ack as **job 1288**.
+
+**Outputs.** `$ROUND_DIR/architecture_status.json` — **941 rows, sha256 `9867a6dc…`** — plus both
+per-shard tables and the `markers_1288/` set. **Verification: artifact-based (`sacct` off)** — (a)
+`squeue -j 1288` empty, (b) `shard_000.SHARD_OK`, `shard_001.SHARD_OK` and `MERGE_OK` all present,
+(c) both `.err` zero bytes, (d) the merged table re-read *through the consumer* (`load_status_map`)
+at 941 candidates. Retrieved by `rsync` and confirmed byte-identical by sha256 on both ends.
+
+**Validation.** **The run reproduces the committed recommendation exactly.** At `sensitive_core` the
+producer resolves **52 `failed` / 226 `passed` / 663 `unavailable`**, i.e. a
+`share_failed_of_decided` of **0.18705** over the 278 decided — the same three counts and the same
+share that `reports/p3/architecture_parameter_recommendation.json` records for this tuple, computed
+independently: the report from a local sweep over rsync'd consensuses, the table from the shipped
+producer running on the cluster copy. The 663 `unavailable` are 941 − 278: a candidate with no
+consensus resolves `unavailable` and is **SPARED** (ADR-0005 D14), never mined. Provenance records
+all seven parameters plus `min_sequences = 20`, per A4.
+
+**Decisions.** The table is left on cluster scratch, where the round reads it; it is bound to this
+log by its sha256 rather than committed, and the decision to track it belongs to the step that
+consumes it. ⚠ **That step cannot consume it yet**: `slurm/p3/stage1_remine.sbatch` builds
+`--relaxed-arch-available` into `$PLAN_FLAGS` but never passes `--relaxed-arch-status` (nor
+`--synteny-status`), and `remine.py:512` raises on exactly that pair — an owed off-roadmap fix-up
+before P3-15. **Commit.** see the RESULT PR for this stanza.
