@@ -752,8 +752,10 @@ def test_the_committed_comparison_is_internally_consistent():
     assert h["n_settings_where_control_ci_contains_the_fp_point"] == sum(
         1 for r in rows if r["discrimination"]["control_record_ci_contains_fp_point"]
     )
+    # `or 0`, mirroring the production expression: the difference is None whenever an
+    # arm decided nothing, and `None < 0` is a TypeError, not a False.
     assert h["n_settings_where_control_fails_more_than_fp"] == sum(
-        1 for r in rows if r["discrimination"]["fp_minus_control_query_share_failed"] < 0
+        1 for r in rows if (r["discrimination"]["fp_minus_control_query_share_failed"] or 0) < 0
     )
     for r in rows:
         rec = r["control_record_level"]
@@ -1026,3 +1028,21 @@ def test_a_type_error_from_operator_json_still_exits_three(control_files, report
     args[args.index("--fp-report") + 1] = str(path)
     assert cmp.main(args) == 3
     assert not out.exists()
+
+
+def test_an_fp_row_that_decided_nothing_yields_a_none_difference_not_a_crash():
+    """`share_failed` is None when an arm has no decided candidates, and `None < 0`
+    is a TypeError rather than a False — so the headline's comparison and the
+    committed-artifact test both have to spell it `or 0`."""
+    row = cmp.compare_tuple(
+        params=LOOSE,
+        label=LOOSE.label,
+        states=STATES,
+        by_record=BY_RECORD,
+        fp_row={"counts": {"passed": 0, "failed": 0, "unavailable": 40}},
+    )
+    assert row["fp_candidate_level"]["share_failed"] is None
+    assert row["discrimination"]["fp_minus_control_query_share_failed"] is None
+    assert row["discrimination"]["control_record_ci_contains_fp_point"] is None
+    # The headline's own expression must survive it, and count it as "not below zero".
+    assert ((row["discrimination"]["fp_minus_control_query_share_failed"] or 0) < 0) is False
