@@ -1058,3 +1058,494 @@ def test_the_field_census_sees_every_row_not_only_the_first():
         [{"candidate_id": "a"}, {"candidate_id": "b", "pool": "x", "score": 1}]
     )
     assert out["manifest_row_fields"] == ["candidate_id", "pool", "score"]
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# The P3-15'-g-iv supply-arm seam
+# ═════════════════════════════════════════════════════════════════════════════
+#: Resolved from ``__file__``, not from the cwd: a cwd-relative path plus a
+#: ``skipif`` turns "the committed report is missing" into a SKIP, and a skip is not
+#: a pass. The artifact tests below therefore always run.
+REPO_ROOT = Path(__file__).resolve().parents[2]
+
+#: The committed FP report, whose four self-descriptions the default arm must
+#: reproduce verbatim — that identity is what makes the seam byte-identical.
+FP_REPORT = REPO_ROOT / "reports/p3/architecture_parameter_measurement.json"
+
+
+def test_resolve_arm_defaults_to_the_fp_arm_and_accepts_both_keys():
+    assert apm.resolve_arm(None).key == apm.DEFAULT_ARM == "round0_fp"
+    assert apm.resolve_arm("curated_control").key == "curated_control"
+
+
+def test_resolve_arm_passes_a_supply_arm_through_unchanged():
+    arm = apm.SUPPLY_ARMS["curated_control"]
+    assert apm.resolve_arm(arm) is arm
+
+
+def test_resolve_arm_refuses_an_unknown_arm_rather_than_defaulting():
+    """A silent fallback would publish the FP arm's prose over another supply."""
+    with pytest.raises(apm.MeasureError, match="unknown supply arm"):
+        apm.resolve_arm("some_other_round")
+
+
+def test_the_two_arms_describe_different_corpora():
+    """Positive control for the refusal above: the strings must actually differ."""
+    fp, control = apm.SUPPLY_ARMS["round0_fp"], apm.SUPPLY_ARMS["curated_control"]
+    assert fp.step != control.step
+    assert fp.disclosure != control.disclosure
+    assert fp.covariation_note != control.covariation_note
+    assert fp.provenance_rule != control.provenance_rule
+    assert (fp.ground_truth, control.ground_truth) == ("unknown", "believed_positive")
+
+
+def test_the_committed_fp_report_is_present_at_all():
+    """The precondition the artifact test below used to SKIP on."""
+    assert FP_REPORT.is_absolute()
+    assert FP_REPORT.is_file(), FP_REPORT
+
+
+def test_the_default_arms_prose_is_exactly_what_the_committed_fp_report_carries():
+    """The seam's whole safety claim, locked against the artifact it must not move.
+
+    ⚠ This reads a committed file and so cannot see the code
+    ([[artifact-pinning-test-cannot-see-the-code]]); it is here because the *only*
+    thing that makes adding `--arm` safe is that the default reproduces these four
+    strings, and that is a property of the committed report, not of the module.
+    """
+    fp = apm.SUPPLY_ARMS[apm.DEFAULT_ARM]
+    body = json.loads(FP_REPORT.read_text())
+    assert body["step"] == fp.step
+    assert body["disclosure"] == fp.disclosure
+    assert body["supply"]["covariation"]["control_note"] == fp.covariation_note
+    assert body["provenance"]["rule"] == fp.provenance_rule
+
+
+def test_covariation_stratified_note_is_the_arms_note_and_defaults_to_the_fp_one():
+    assert apm.covariation_stratified_note() == apm.SUPPLY_ARMS["round0_fp"].covariation_note
+    assert (
+        apm.covariation_stratified_note("curated_control")
+        == apm.SUPPLY_ARMS["curated_control"].covariation_note
+    )
+
+
+def test_only_the_self_description_changes_between_the_two_arms(supply, tmp_path):
+    """The matched control is only matched if the arm changes NOTHING measurable.
+
+    Both arms are run over the same supply and the two bodies diffed: the set of
+    differing paths must be exactly the self-description, so a future edit that made
+    an arm touch a count, a sweep axis or a distribution fails here rather than in a
+    report nobody re-derives.
+    """
+    root, ids = supply
+    manifest = manifest_for(tmp_path, ids)
+    # A covariation table is supplied so `supply.covariation.control_note` — the
+    # third arm-specific string — is actually reached; without it the diff below
+    # would be silent about the one field a reader is most likely to quote.
+    cov = tmp_path / "cov.json"
+    cov.write_text(json.dumps({"status": {cid: "passed" for cid in ids}}))
+    kwargs = dict(
+        msa_root=root,
+        manifest_path=manifest,
+        covariation_status_path=cov,
+        positive_control_path=None,
+    )
+    fp_body = apm.measure(**kwargs, arm="round0_fp")
+    control_body = apm.measure(**kwargs, arm="curated_control")
+
+    differing: list[str] = []
+    # ⚠ A sentinel, not `None`: `a.get(k)` returns None for an ABSENT key and for a
+    # key whose value IS None, so an arm that dropped a null-valued field would look
+    # identical to one that kept it, and this test would keep asserting "only four
+    # paths differ" through a real schema change.
+    missing = object()
+
+    def diff(a, b, path=""):
+        if isinstance(a, dict) and isinstance(b, dict):
+            for k in sorted(set(a) | set(b)):
+                diff(a.get(k, missing), b.get(k, missing), f"{path}/{k}")
+        elif isinstance(a, list) and isinstance(b, list) and len(a) == len(b):
+            for i, (x, y) in enumerate(zip(a, b, strict=True)):
+                diff(x, y, f"{path}[{i}]")
+        elif a != b:
+            differing.append(path)
+
+    diff(fp_body, control_body)
+    assert differing == [
+        "/disclosure",
+        "/positive_control/reason",
+        "/step",
+        "/supply/covariation/control_note",
+    ]
+
+
+def test_the_arm_changes_the_provenance_rule_the_cli_records(supply, tmp_path):
+    root, ids = supply
+    out = tmp_path / "control_report.json"
+    rc = apm.main(
+        [
+            "measure",
+            "--arm",
+            "curated_control",
+            "--msa-root",
+            str(root),
+            "--manifest",
+            str(manifest_for(tmp_path, ids)),
+            "--positive-control",
+            str(tmp_path / "absent.sto"),
+            "--out",
+            str(out),
+        ]
+    )
+    assert rc == 0
+    body = json.loads(out.read_text())
+    assert body["step"] == "P3-15'-g-iv"
+    assert body["provenance"]["rule"] == apm.SUPPLY_ARMS["curated_control"].provenance_rule
+    assert "MATCHED positive control" in body["disclosure"]
+
+
+def test_the_cli_refuses_an_arm_that_is_not_in_the_registry(supply, tmp_path):
+    root, ids = supply
+    with pytest.raises(SystemExit) as excinfo:
+        apm.main(
+            [
+                "measure",
+                "--arm",
+                "not_an_arm",
+                "--msa-root",
+                str(root),
+                "--manifest",
+                str(manifest_for(tmp_path, ids)),
+                "--out",
+                str(tmp_path / "r.json"),
+            ]
+        )
+    assert excinfo.value.code == 2
+
+
+def test_candidate_state_answers_for_one_consensus_and_tracks_the_setting(supply):
+    """The extracted per-candidate verdict, tested on its own rather than against
+    ``evaluate_tuple`` — once the latter delegates, agreement is a tautology
+    ([[promote-dont-duplicate-is-a-correctness-rule]])."""
+    root, _ = supply
+    items = {i.slug: i for i in apm.read_supply(root)}
+    from tbox_finder.mining.covariation_producer import candidate_slug
+
+    passing = items[candidate_slug("ACC.1:c1:0:10-20")]
+    loose = apm.ParamTuple("loose", 1, 1, 2, 1, 10_000, 1, False)
+    strict = apm.ParamTuple("strict", 1, 4, 5, 7, 20, 4, False)
+    assert apm.candidate_state(passing, loose) == "passed"
+    assert apm.candidate_state(passing, strict) == "failed"
+
+
+def test_candidate_state_never_returns_unavailable(supply):
+    """Its docstring's claim: a SupplyItem exists, so the missing-consensus arm is
+    the caller's. A drift here would double-count `unavailable` in every row."""
+    root, _ = supply
+    for item in apm.read_supply(root):
+        for params in apm.default_tuples():
+            assert apm.candidate_state(item, params) in ("passed", "failed")
+
+
+def test_arm_for_step_recovers_the_arm_a_report_declares():
+    for arm in apm.SUPPLY_ARMS.values():
+        assert apm.arm_for_step(arm.step) is arm
+
+
+def test_arm_for_step_refuses_a_step_no_arm_declares():
+    """Positive control above; this is the refusal that makes it a binding."""
+    with pytest.raises(apm.MeasureError, match="no supply arm declares step"):
+        apm.arm_for_step("some-other-tool")
+
+
+def test_a_non_default_arm_with_the_default_out_is_refused(supply, tmp_path, monkeypatch):
+    """`--out` does not follow `--arm`: the control's numbers would overwrite the
+    committed P3-15'-f report, and the result would be internally consistent.
+
+    ⚠ `monkeypatch.chdir` is load-bearing, not tidiness. Without it `DEFAULT_OUT`
+    resolves to the REAL committed report, and the sabotage that proves this test
+    bites — removing the refusal — writes a 4-consensus fixture over it. That is
+    exactly what happened once here: the guard's own test destroyed the artifact the
+    guard exists to protect. A test must never aim a write at a tracked path.
+    """
+    root, ids = supply
+    manifest = manifest_for(tmp_path, ids)
+    monkeypatch.chdir(tmp_path)
+    # ⚠ NO mkdir here, deliberately. A review round argued that without one a rc of 3
+    # could come from the write failing into a missing directory, so the test would
+    # pass with the guard removed. Measured: it cannot — `main` creates `out.parent`
+    # itself, so the guard is the only thing that can return 3 on this input. The
+    # behaviour that makes that true is pinned by
+    # `test_main_creates_its_own_output_parent_directory` below.
+    rc = apm.main(
+        [
+            "measure",
+            "--arm",
+            "curated_control",
+            "--msa-root",
+            str(root),
+            "--manifest",
+            str(manifest),
+            "--positive-control",
+            str(tmp_path / "absent.sto"),
+            "--out",
+            apm.DEFAULT_OUT,
+        ]
+    )
+    assert rc == 3
+    assert not (tmp_path / apm.DEFAULT_OUT).exists()
+
+
+def test_the_default_arm_may_still_write_the_default_out(supply, tmp_path, monkeypatch):
+    """Positive control: the refusal must be about the COMBINATION, not about --out.
+
+    Run in a tmp cwd so the real committed report is never the target.
+    """
+    root, ids = supply
+    manifest = manifest_for(tmp_path, ids)
+    monkeypatch.chdir(tmp_path)
+    rc = apm.main(
+        [
+            "measure",
+            "--arm",
+            "round0_fp",
+            "--msa-root",
+            str(root),
+            "--manifest",
+            str(manifest),
+            "--positive-control",
+            str(tmp_path / "absent.sto"),
+            "--out",
+            apm.DEFAULT_OUT,
+        ]
+    )
+    assert rc == 0
+    assert json.loads((tmp_path / apm.DEFAULT_OUT).read_text())["step"] == apm.STEP
+
+
+def test_sha256_of_is_public_and_the_private_alias_is_the_same_object():
+    """Three modules record external inputs through it; a private cross-module name
+    is a rename away from breaking them silently."""
+    assert apm._sha256_of is apm.sha256_of
+
+
+def test_the_default_out_guard_sees_through_a_different_spelling(supply, tmp_path, monkeypatch):
+    """`./reports/p3/...` is the same file; a raw string `==` waves it through, and
+    the write it would allow is the one this guard exists to prevent."""
+    root, ids = supply
+    manifest = manifest_for(tmp_path, ids)
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "reports" / "p3").mkdir(parents=True)
+    rc = apm.main(
+        [
+            "measure",
+            "--arm",
+            "curated_control",
+            "--msa-root",
+            str(root),
+            "--manifest",
+            str(manifest),
+            "--positive-control",
+            str(tmp_path / "absent.sto"),
+            "--out",
+            f"./{apm.DEFAULT_OUT}",
+        ]
+    )
+    assert rc == 3
+    assert not (tmp_path / apm.DEFAULT_OUT).exists()
+
+
+def test_a_genuinely_different_out_path_is_still_allowed(supply, tmp_path, monkeypatch):
+    """Positive control: the guard is about ONE path, not about non-default arms."""
+    root, ids = supply
+    manifest = manifest_for(tmp_path, ids)
+    monkeypatch.chdir(tmp_path)
+    out = tmp_path / "reports" / "p3" / "architecture_parameter_measurement_control.json"
+    rc = apm.main(
+        [
+            "measure",
+            "--arm",
+            "curated_control",
+            "--msa-root",
+            str(root),
+            "--manifest",
+            str(manifest),
+            "--positive-control",
+            str(tmp_path / "absent.sto"),
+            "--out",
+            str(out),
+        ]
+    )
+    assert rc == 0
+    assert json.loads(out.read_text())["step"] == apm.SUPPLY_ARMS["curated_control"].step
+
+
+def test_the_arm_diff_tells_an_absent_key_from_a_null_valued_one():
+    """The sentinel in `test_only_the_self_description_changes_between_the_two_arms`.
+
+    With `a.get(k)` both sides read None and the pair looks identical, so an arm that
+    DROPPED a null-valued field would slip through the "only four paths differ"
+    assertion. Exercised on the same walk the diff test uses.
+    """
+    differing: list[str] = []
+    missing = object()
+
+    def diff(a, b, path=""):
+        if isinstance(a, dict) and isinstance(b, dict):
+            for k in sorted(set(a) | set(b)):
+                diff(a.get(k, missing), b.get(k, missing), f"{path}/{k}")
+        elif a != b:
+            differing.append(path)
+
+    diff({"kept": None}, {})
+    assert differing == ["/kept"]
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "/exports/people/x/msa",
+        "~/msa",
+        "C:\\Users\\x\\msa",
+        # ⚠ A drive letter with FORWARD slashes, and the UNC form with BACKslashes.
+        # Neither is absolute under a POSIX `Path`, and the first matrix used
+        # `//server/share/msa`, which POSIX already calls absolute — so it passed
+        # without ever exercising the Windows arms.
+        "C:/Users/x/msa",
+        "\\\\server\\share\\msa",
+        "//server/share/msa",
+    ],
+)
+def test_is_local_path_shaped_catches_every_local_spelling(value):
+    assert apm.is_local_path_shaped(value) is True
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "two.amlab:$HOME/tbox-scratch/round_p3_15_supply/msa (SLURM jobs 1205 + 1254)",
+        "msa_supply",
+        "cluster scratch",
+    ],
+)
+def test_is_local_path_shaped_passes_a_host_qualified_origin(value):
+    """Positive control: a predicate that returned True for everything would satisfy
+    the refusal tests while making the field unusable."""
+    assert apm.is_local_path_shaped(value) is False
+
+
+def test_the_measure_arm_refuses_a_tilde_supply_origin(supply, tmp_path):
+    """Same guard, same class, the OTHER module — fixed at both sites at once."""
+    root, ids = supply
+    with pytest.raises(apm.MeasureError, match="local absolute path"):
+        apm.measure(
+            msa_root=root,
+            manifest_path=manifest_for(tmp_path, ids),
+            covariation_status_path=None,
+            positive_control_path=None,
+            supply_origin="~/tbox-scratch/msa",
+        )
+
+
+def test_main_creates_its_own_output_parent_directory(supply, tmp_path):
+    """Pinned because a review round's argument turned on the opposite.
+
+    The claim was that `--out` into a non-existent directory returns 3, which would
+    make `test_a_non_default_arm_with_the_default_out_is_refused` pass for the wrong
+    reason. `main` calls `out.parent.mkdir(parents=True, exist_ok=True)`, so a missing
+    directory is not a refusal at all — and if that ever changes, that test starts
+    passing for the wrong reason and this one goes red first.
+    """
+    root, ids = supply
+    out = tmp_path / "does" / "not" / "exist" / "report.json"
+    assert not out.parent.exists()
+    rc = apm.main(
+        [
+            "measure",
+            "--msa-root",
+            str(root),
+            "--manifest",
+            str(manifest_for(tmp_path, ids)),
+            "--positive-control",
+            str(tmp_path / "absent.sto"),
+            "--out",
+            str(out),
+        ]
+    )
+    assert rc == 0
+    assert out.is_file()
+
+
+def test_sha256_of_is_chunked_and_agrees_with_a_one_shot_digest(tmp_path):
+    """Consolidating three copies must not change the digest, and must stay chunked.
+
+    ⚠ Not "the three modules agree" — they now delegate to this function, so that
+    would be a tautology ([[promote-dont-duplicate-is-a-correctness-rule]]). The
+    checkable properties are that the digest matches an independent one-shot hash, and
+    that the file is read in pieces rather than whole (two modules hash a model
+    checkpoint through this).
+    """
+    import hashlib
+
+    blob = tmp_path / "big.bin"
+    payload = bytes(range(256)) * (apm.SHA256_CHUNK_BYTES // 128)  # > one chunk
+    blob.write_bytes(payload)
+    assert blob.stat().st_size > apm.SHA256_CHUNK_BYTES
+    assert apm.sha256_of(blob) == hashlib.sha256(payload).hexdigest()
+
+    reads: list[int] = []
+    real_open = Path.open
+
+    def counting_open(self, *args, **kwargs):
+        handle = real_open(self, *args, **kwargs)
+        real_read = handle.read
+
+        def read(size=-1):
+            reads.append(size)
+            return real_read(size)
+
+        handle.read = read  # type: ignore[method-assign]
+        return handle
+
+    import unittest.mock
+
+    with unittest.mock.patch.object(Path, "open", counting_open):
+        apm.sha256_of(blob)
+    assert reads and all(size == apm.SHA256_CHUNK_BYTES for size in reads)
+    assert len(reads) > 1
+
+
+def test_every_arm_declares_a_distinct_canonical_output_path():
+    """The guard compares against these, so two arms sharing one would make it vacuous."""
+    paths = [arm.canonical_out for arm in apm.SUPPLY_ARMS.values()]
+    assert len(set(paths)) == len(paths)
+    assert apm.SUPPLY_ARMS[apm.DEFAULT_ARM].canonical_out == apm.DEFAULT_OUT
+
+
+def test_the_default_arm_may_not_overwrite_the_control_arms_report(supply, tmp_path, monkeypatch):
+    """The REVERSE direction, which the one-sided guard let through.
+
+    `--arm round0_fp --out <the control report>` writes FP numbers and FP prose over a
+    committed artifact that is now an input to architecture_param_control_compare.
+    """
+    root, ids = supply
+    manifest = manifest_for(tmp_path, ids)
+    monkeypatch.chdir(tmp_path)
+    control_out = apm.SUPPLY_ARMS["curated_control"].canonical_out
+    rc = apm.main(
+        [
+            "measure",
+            "--arm",
+            "round0_fp",
+            "--msa-root",
+            str(root),
+            "--manifest",
+            str(manifest),
+            "--positive-control",
+            str(tmp_path / "absent.sto"),
+            "--out",
+            control_out,
+        ]
+    )
+    assert rc == 3
+    assert not (tmp_path / control_out).exists()
