@@ -1239,7 +1239,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         # internally consistent, so nothing downstream could detect it. The defaults stay
         # as they are (that is what keeps the FP report byte-identically re-derivable);
         # the mismatched COMBINATION is refused instead.
-        if supply_arm.key != DEFAULT_ARM and str(args.out) == DEFAULT_OUT:
+        # ⚠ Resolved, not string-compared: `./reports/p3/...`, `reports/p3/../p3/...`
+        # and an absolute path to the same file are all spellings a raw `==` waves
+        # through, and each one writes the control's numbers over the committed report.
+        # Residual gap, stated rather than papered over: `DEFAULT_OUT` resolves against
+        # the CURRENT cwd, so an absolute path aimed at a checkout the process is not
+        # standing in is still not caught.
+        if (
+            supply_arm.key != DEFAULT_ARM
+            and Path(args.out).resolve() == Path(DEFAULT_OUT).resolve()
+        ):
             raise MeasureError(
                 f"--arm {supply_arm.key!r} with the default --out {DEFAULT_OUT!r} would "
                 f"overwrite the {SUPPLY_ARMS[DEFAULT_ARM].step} report with "

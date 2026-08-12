@@ -260,6 +260,24 @@ def load_status(status_path: str | Path) -> tuple[dict[str, str], list[Mapping[s
             f"control status {portable_path(status_path)}: {len(malformed)} row(s) are not "
             f"objects carrying {list(required)}, e.g. index {malformed[:2]}"
         )
+    # ⚠ The VALUES, not only the keys. `self_hit_floor_caveat` calls `int()` on both
+    # depth fields, and `int(None)` / `int([])` raises TypeError — the same escape the
+    # key check above exists to close, one level down. `bool` is excluded explicitly:
+    # it is an `int` subclass, so `True` would otherwise pass as a homolog count.
+    non_integer = [
+        i
+        for i, r in enumerate(rows)
+        if not all(
+            isinstance(r[k], int) and not isinstance(r[k], bool)
+            for k in ("n_homologs", "msa_depth")
+        )
+    ]
+    if non_integer:
+        raise CompareError(
+            f"control status {portable_path(status_path)}: {len(non_integer)} row(s) carry "
+            f"a non-integer 'n_homologs'/'msa_depth', e.g. index {non_integer[:2]}; the "
+            "depth relation and the flip band cannot be derived from them"
+        )
     # ⚠ Built as a LIST first: a dict comprehension over rows sharing a `candidate_id`
     # keeps the LAST one, so the map/rows agreement check below could still pass while
     # a query's real status was overwritten — and every count downstream would still
@@ -936,7 +954,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
     # Same convention as architecture_param_measure.main: every operator-supplied path
     # refuses with exit 3 rather than exiting 1 with a traceback.
-    except (CompareError, ValueError, OSError, KeyError) as exc:
+    except (CompareError, ValueError, TypeError, OSError, KeyError) as exc:
         print(f"refused: {exc}", file=sys.stderr)
         return 3
     repo_inputs: list[str] = []

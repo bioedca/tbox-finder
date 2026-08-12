@@ -1306,3 +1306,54 @@ def test_sha256_of_is_public_and_the_private_alias_is_the_same_object():
     """Three modules record external inputs through it; a private cross-module name
     is a rename away from breaking them silently."""
     assert apm._sha256_of is apm.sha256_of
+
+
+def test_the_default_out_guard_sees_through_a_different_spelling(supply, tmp_path, monkeypatch):
+    """`./reports/p3/...` is the same file; a raw string `==` waves it through, and
+    the write it would allow is the one this guard exists to prevent."""
+    root, ids = supply
+    manifest = manifest_for(tmp_path, ids)
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "reports" / "p3").mkdir(parents=True)
+    rc = apm.main(
+        [
+            "measure",
+            "--arm",
+            "curated_control",
+            "--msa-root",
+            str(root),
+            "--manifest",
+            str(manifest),
+            "--positive-control",
+            str(tmp_path / "absent.sto"),
+            "--out",
+            f"./{apm.DEFAULT_OUT}",
+        ]
+    )
+    assert rc == 3
+    assert not (tmp_path / apm.DEFAULT_OUT).exists()
+
+
+def test_a_genuinely_different_out_path_is_still_allowed(supply, tmp_path, monkeypatch):
+    """Positive control: the guard is about ONE path, not about non-default arms."""
+    root, ids = supply
+    manifest = manifest_for(tmp_path, ids)
+    monkeypatch.chdir(tmp_path)
+    out = tmp_path / "reports" / "p3" / "architecture_parameter_measurement_control.json"
+    rc = apm.main(
+        [
+            "measure",
+            "--arm",
+            "curated_control",
+            "--msa-root",
+            str(root),
+            "--manifest",
+            str(manifest),
+            "--positive-control",
+            str(tmp_path / "absent.sto"),
+            "--out",
+            str(out),
+        ]
+    )
+    assert rc == 0
+    assert json.loads(out.read_text())["step"] == apm.SUPPLY_ARMS["curated_control"].step

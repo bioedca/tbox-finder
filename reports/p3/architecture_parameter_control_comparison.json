@@ -526,13 +526,13 @@
       },
       "schema_version": "1.0"
     },
-    "generated_at_utc": "2026-08-12T02:10:51.990045+00:00",
-    "git_sha": "71660cd333d21fdbd0ea27b33d9174dc0adf935b",
+    "generated_at_utc": "2026-08-12T02:20:25.353825+00:00",
+    "git_sha": "26eb3958b39fc3306921a83fc42c9008dcaa677e",
     "inputs": {
       "data/processed/mining/curated_control_manifest_v0.json": "363795fba6cd4d1d85495ec62e6e62cd11f1bf37b0fdf739c48315777c4d2a83",
       "data/processed/mining/curated_control_status_v0.json": "8b5e8f4178cd63eb8664c1e63e519c5810223eb56ca3a1488ce8bfee9dbeb033",
       "reports/p3/architecture_parameter_measurement.json": "86e64af40f76d4291aeb3e8186eb9d48e8fd16191762cab32364ce05435f87ca",
-      "reports/p3/architecture_parameter_measurement_control.json": "ebc6a0579730ff8144c2b0ec2d9fe4f397b8957bd3d66928678840b9b1fca05d",
+      "reports/p3/architecture_parameter_measurement_control.json": "c709ab9f906ebd4ffcaf22516888d18eff6ccfed3576fc5c92ecb37ab55798e3",
       "reports/p3/curated_control_detect.json": "7e096b0df6c18ef09ec16248434a5a10f3046cfe0cbd04066355b51874707466"
     },
     "outputs": {},

@@ -950,3 +950,79 @@ def test_compare_refuses_one_arm_read_against_itself(control_files, reports, tmp
     path.write_text(json.dumps(twin))
     with pytest.raises(cmp.CompareError, match="one arm read against itself"):
         run_compare(control_files, reports, control_report_path=path)
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# CodeRabbit round 3 — the value types, and the last traceback escape
+# ═════════════════════════════════════════════════════════════════════════════
+def test_load_status_refuses_a_null_depth_field(tmp_path):
+    """`int(None)` raises TypeError inside `self_hit_floor_caveat` — the same escape
+    the key-presence guard closes, one level down."""
+    path = tmp_path / "s.json"
+    path.write_text(
+        json.dumps(
+            {
+                "status": {"x": "passed"},
+                "rows": [
+                    {"candidate_id": "x", "status": "passed", "n_homologs": None, "msa_depth": 26}
+                ],
+            }
+        )
+    )
+    with pytest.raises(cmp.CompareError, match="non-integer"):
+        cmp.load_status(path)
+
+
+def test_load_status_refuses_a_boolean_homolog_count(tmp_path):
+    """`bool` is an `int` subclass, so `True` would pass a naive isinstance check."""
+    path = tmp_path / "s.json"
+    path.write_text(
+        json.dumps(
+            {
+                "status": {"x": "passed"},
+                "rows": [
+                    {"candidate_id": "x", "status": "passed", "n_homologs": True, "msa_depth": 26}
+                ],
+            }
+        )
+    )
+    with pytest.raises(cmp.CompareError, match="non-integer"):
+        cmp.load_status(path)
+
+
+def test_the_value_type_guard_lets_real_integer_rows_through(tmp_path):
+    """Positive control: a guard refusing every row would satisfy both tests above."""
+    path = tmp_path / "s.json"
+    path.write_text(
+        json.dumps(
+            {
+                "status": {"x": "passed"},
+                "rows": [
+                    {"candidate_id": "x", "status": "passed", "n_homologs": 25, "msa_depth": 26}
+                ],
+            }
+        )
+    )
+    mapping, rows = cmp.load_status(path)
+    assert mapping == {"x": "passed"} and len(rows) == 1
+
+
+def test_a_type_error_from_operator_json_still_exits_three(control_files, reports, tmp_path):
+    """The stated convention, through a path that really does raise TypeError.
+
+    ⚠ The first version of this test fed a null depth field — which the value-type
+    guard above now refuses with CompareError before any ``int()`` runs, so it
+    exercised the guard and not the tuple, and the sabotage that removes TypeError
+    from the tuple stayed GREEN against it. ``int(None)`` on the FP report's
+    ``n_consensuses_measured`` is a live TypeError with no guard in front of it.
+    """
+    out = tmp_path / "comparison.json"
+    control, fp = reports
+    broken = json.loads(fp.read_text())
+    broken["supply"]["n_consensuses_measured"] = None
+    path = tmp_path / "null_measured.json"
+    path.write_text(json.dumps(broken))
+    args = cli_args(control_files, reports, out)
+    args[args.index("--fp-report") + 1] = str(path)
+    assert cmp.main(args) == 3
+    assert not out.exists()
