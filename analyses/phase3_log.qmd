@@ -5650,4 +5650,57 @@ for — so moving the cutoff for the control is what would make it a different i
 ⚠ **Independent observations are the 160 records, not the 317 queries**, and the plan says so
 in the artifact rather than in prose alone. Cross-links ADR-0005 A10, ADR-0006 A2/A3/A4, D17.
 
-**Commit.** `PENDING`
+**Commit.** `c94f935`
+
+**RESULT — SLURM job 1264 (2026-08-11, `--array=0-15`, `ALIGN_TIMEOUT_S=600`, branch
+`p3-15p-g-iii` at `4edf29a`, merged as `c94f935`).** Submitted on the user's §9.3 ack after the
+cluster checkout was re-synced `d013af3` → `4edf29a` (the three intervening commits touched only
+the planner, its tests, the plan JSON and this log — neither the sbatch nor the producer), the
+preflight re-accepted, and the 9.3 GB `target.fm` confirmed to be real bytes rather than the
+git-LFS pointer a `reset --hard` restores. The `sbatch` line was **executed from the committed
+plan's own `submit.sbatch_command` string**, not a retyped equivalent
+([[verify-the-line-you-ship]]). All 16 tasks started with no queue wait and the array completed in
+**11 m 43 s** — 16 tasks × 2 cpus over that span bounds the cost at **≤ 6.25 core-h** against a
+127.04 core-h worst case and a 12 h wall, so the envelope was ~20× conservative. §9.3 step 8, all
+three clauses: (a) `squeue -j 1264` → *"Invalid job id specified"*, the terminal signal
+([[slurm-squeue-terminal-invalid-job-id]]); (b) **16/16 `SHARD_OK`** plus 16 `status_*.json`; (c)
+all 16 `.err` **0 bytes**.
+
+**The seam is proved by the run, not by the plan.** All 16 shards printed `query route:
+query_fasta` — 16/16, no shard silently on the coordinate route. This is the one witness that
+matters: the marker is written on **both** branches including the error path, and it survives to
+the promoted `.out` because `search_shard` also prints it (the per-candidate `search.json` that
+carries `query_route` lives in node-local `$BUILD/work` and dies with the EXIT trap). The
+structural corroboration is that the tasks *ran at all*: on the coordinate route a curated-frame
+accession raises `HomologDbError` within seconds of stage 1 and aborts the whole array task.
+
+**317/317 covered, reconciled three ways.** `status_counts` over the 16 shards: **`passed` 30
+(9.5 %) · `failed` 46 (14.5 %) · `unavailable` 241 (76.0 %)**, summing to **317** — set-equal to
+the committed control manifest. (i) `passed + failed == 76`, equal to the count of promoted `msa.sto` (976 KB under
+`$ROUND_DIR/msa`); (ii) every `unavailable` candidate has no consensus; (iii) the 317 rows map
+onto **160/160** manifest accessions. At the record level — **the denominator the plan pins**, not
+the 317 queries — **68 of 160 records (42.5 %) have ≥1 producible query**, and **30 records carry
+≥1 `passed`**, one apiece. `P3-15′-g-iv` therefore has **76 real matched-control consensuses** to
+run (b)'s grid over, against the FP arm's 278.
+
+**⚠ A PRE-RUN CLAIM OF MINE THAT THIS RUN REFUTES.** Before submitting I wrote that the control's
+downward bias would be *"concentrated precisely where the cut falls"*, reasoning from the FP
+corpus's median depth of **20.0 — exactly ADR-0006 A2's floor**. The control's own distribution
+says otherwise: median `n_homologs` is **6**, and **246 of 317 (77.6 %)** sit below the floor, not
+beside it. The relation is exact and verified rather than inferred — `msa_depth == n_homologs + 1`
+on **all 76** produced rows, so the floor of 20 is applied to depth-*with-query*, i.e.
+`n_homologs ≥ 19`. The missing self-hit (a curated query is absent from the searched DB, so it
+cannot hit itself the way an FP-arm query does) therefore flips the verdict for **exactly 5 of 317
+queries** — the ones now at `n_homologs = 18`, which a self-hit would carry to a depth of 20; had
+the control self-hit, producible would be **81, not 76**. (The `18` and `19` bands each happen to
+hold 5, so the count is the same either way — but the band that *flips* is `18`, and naming `19`
+would have been reasoning about the wrong candidates.) The bias is real and directional but worth **~1.6 pp**, not the dominant term. The original
+inference was drawn from the *other* arm's median before this arm's distribution existed
+([[matched-control-before-certifying]]); it is corrected here rather than quietly dropped, because
+a caveat's *size* is what decides how much weight it can carry in `-g-iv`.
+
+**Retrieval.** Per the round convention the outputs stay on cluster scratch and are consumed in
+place — no prior mining round is materialised locally, and `P3-15′-f` likewise measured against a
+cluster `msa_root`. `$ROUND_DIR = $HOME/tbox-scratch/round_p3_15g_control`; consensuses at
+`msa/<slug>/msa.sto`, per-shard reports at `status/status_<NNN>.json`. Nothing is DVC-tracked by
+this step. Verification: **artifact-based (`sacct` off)**.
