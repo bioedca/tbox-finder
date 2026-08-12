@@ -783,3 +783,79 @@ def test_the_committed_comparison_states_its_intervals_on_the_record_level_n():
         assert r["control_record_level"]["n_records_producible"] == n_records
         assert r["control_record_level"]["share_mined_ci95"] is not None
         assert r["control_query_level"]["ci95"] is None
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# CodeRabbit round 1 — the emitted prose must describe the corpus it measured
+# ═════════════════════════════════════════════════════════════════════════════
+def test_the_pseudo_replication_note_describes_the_corpus_it_was_handed(control_files, reports):
+    """The first draft said "149 of the 160 control records" on a 4-record fixture.
+
+    A report that states a corpus it did not measure is the same defect as a report
+    that names the wrong arm — and neither is visible from inside, because every
+    count still reconciles.  The numbers are asserted against the FIXTURE's sizes.
+    """
+    body = run_compare(control_files, reports)
+    note = body["by_parameter_tuple"][0]["control_query_level"]["why_no_ci"]
+    assert "3 of the 4 control records" in note
+    assert f"({len(ALL_QUERIES)} queries in all)" in note
+    assert "149" not in note and "160" not in note and "317" not in note
+
+
+def test_the_unproducible_note_counts_this_corpus_not_the_job_1264_one(control_files, reports):
+    """4 records, 7 queries, 5 producible ⇒ 2 unproducible queries, 1 whole record."""
+    body = run_compare(control_files, reports)
+    note = body["limitations"]["the_control_measures_the_instrument_not_the_biology"]
+    assert f"({len(ALL_QUERIES) - 5} of {len(ALL_QUERIES)} queries, 1 of 4 records)" in note
+    assert "241" not in note and "92" not in note
+
+
+def test_the_fp_interval_caveat_quotes_no_corpus_size(control_files, reports):
+    """The 76-assemblies figure belongs to another report; it cannot be recomputed
+    here, so it is stated qualitatively rather than as a literal that will go stale."""
+    body = run_compare(control_files, reports)
+    caveat = body["by_parameter_tuple"][0]["fp_candidate_level"]["ci_caveat"]
+    assert "941" not in caveat and "76" not in caveat
+    assert "fewer source assemblies" in caveat
+
+
+def test_compare_refuses_an_fp_report_whose_manifest_is_empty(control_files, reports, tmp_path):
+    """Dividing by it would raise ZeroDivisionError, which `main` does not catch."""
+    control, fp = reports
+    broken = json.loads(fp.read_text())
+    broken["supply"]["n_candidates_in_manifest"] = 0
+    path = tmp_path / "empty_fp.json"
+    path.write_text(json.dumps(broken))
+    with pytest.raises(cmp.CompareError, match="no candidates"):
+        run_compare(control_files, reports, fp_report_path=path)
+
+
+def test_load_status_refuses_a_row_that_is_not_an_object(tmp_path):
+    """A bare string entry raises TypeError, which escapes the exit-3 convention."""
+    path = tmp_path / "s.json"
+    path.write_text(json.dumps({"status": {"x": "passed"}, "rows": ["not-a-row"]}))
+    with pytest.raises(cmp.CompareError, match="are not "):
+        cmp.load_status(path)
+
+
+def test_load_status_refuses_a_row_missing_the_depth_fields(tmp_path):
+    """`self_hit_floor_caveat` reads `n_homologs`/`msa_depth` off these same rows."""
+    path = tmp_path / "s.json"
+    path.write_text(
+        json.dumps({"status": {"x": "passed"}, "rows": [{"candidate_id": "x", "status": "passed"}]})
+    )
+    with pytest.raises(cmp.CompareError, match="msa_depth"):
+        cmp.load_status(path)
+
+
+def test_a_malformed_status_row_exits_three_rather_than_tracebacking(
+    control_files, reports, tmp_path
+):
+    """The convention end-to-end, through the operator-supplied path."""
+    out = tmp_path / "comparison.json"
+    bad = tmp_path / "bad_status.json"
+    bad.write_text(json.dumps({"status": {"x": "passed"}, "rows": ["nope"]}))
+    args = cli_args(control_files, reports, out)
+    args[args.index("--control-status") + 1] = str(bad)
+    assert cmp.main(args) == 3
+    assert not out.exists()

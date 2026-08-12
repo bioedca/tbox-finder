@@ -38,10 +38,12 @@ Three disciplines, each of them load-bearing here
   against the control report is an **artifact-binding** check (does this report
   describe this supply?), not independent validation of the arithmetic; it is
   labelled that way in the output.
-* **Every interval is stated on the RECORD-level n.**  149 of the 160 control
-  records contribute 2 queries and 4 contribute 3, so the 317 queries are
-  pseudo-replicated and a binomial interval on them would be too narrow by
-  construction.  :func:`compare` refuses to emit a query-level CI at all — the
+* **Every interval is stated on the RECORD-level n.**  On the job-1264 supply this
+  module was written for, 149 of the 160 control records contribute 2 queries and 4
+  contribute 3, so the 317 queries are pseudo-replicated and a binomial interval on
+  them would be too narrow by construction.  Those sizes are *this* prose only: the
+  report itself derives every such number from the corpus it was handed.
+  :func:`compare` refuses to emit a query-level CI at all — the
   query-level *share* is reported for the like-for-like point comparison against the
   FP arm's candidate-level share, and the uncertainty is carried by the record-level
   interval alone.
@@ -230,6 +232,23 @@ def load_status(status_path: str | Path) -> tuple[dict[str, str], list[Mapping[s
             f"control status {portable_path(status_path)} carries no 'rows'; the depth "
             "distribution and the self-hit caveat are re-derived from them"
         )
+    # ⚠ The ROW SHAPE too, not just that `rows` is a non-empty list. A bare string or a
+    # row missing a key raises TypeError/KeyError inside the comprehension below and in
+    # `self_hit_floor_caveat`, which reads `msa_depth` and `n_homologs` off the same
+    # rows — and `main` catches neither as a refusal, so an operator-supplied
+    # `--control-status` would exit 1 with a traceback instead of 3. The shape of a file
+    # another process wrote is an input, not an invariant.
+    required = ("candidate_id", "status", "n_homologs", "msa_depth")
+    malformed = [
+        i
+        for i, r in enumerate(rows)
+        if not isinstance(r, Mapping) or any(k not in r for k in required)
+    ]
+    if malformed:
+        raise CompareError(
+            f"control status {portable_path(status_path)}: {len(malformed)} row(s) are not "
+            f"objects carrying {list(required)}, e.g. index {malformed[:2]}"
+        )
     row_status = {str(r["candidate_id"]): str(r["status"]) for r in rows}
     if row_status != {str(k): str(v) for k, v in status.items()}:
         raise CompareError(
@@ -314,6 +333,14 @@ def producibility(
     fp_supply = fp_report["supply"]
     n_fp_manifest = int(fp_supply["n_candidates_in_manifest"])
     n_fp_measured = int(fp_supply["n_consensuses_measured"])
+    # ⚠ Refused, not divided: an FP report with no candidates is not a comparator, and
+    # dividing would raise ZeroDivisionError — which `main` does not catch, so the CLI
+    # would exit 1 with a traceback while every other bad input exits 3 with a refusal.
+    if n_fp_manifest <= 0:
+        raise CompareError(
+            "the FP report's manifest carries no candidates; there is no producible "
+            "share to compare the control against"
+        )
     return {
         "control_query_level": {
             "n_queries": len(status),
@@ -398,6 +425,15 @@ def compare_tuple(
     its own overlapping calls rather than (b)'s sensitivity.  The strict **ALL**
     variant is reported beside it so the choice is visible rather than buried.
     """
+    # ⚠ Derived, never typed. The first draft of this string said "149 of the 160
+    # control records contribute 2 queries and 4 contribute 3" — true of the one supply
+    # this module was first run on and false on every other, including its own test
+    # fixture. A report that states a corpus it did not measure is the same defect as a
+    # report that describes the wrong arm, and nothing internal can see either.
+    n_records_total = len(by_record)
+    n_queries_total = sum(len(cids) for cids in by_record.values())
+    n_multi_query_records = sum(1 for cids in by_record.values() if len(cids) > 1)
+
     q_passed = sum(1 for s in states.values() if s == "passed")
     q_failed = sum(1 for s in states.values() if s == "failed")
     n_decided_q = q_passed + q_failed
@@ -439,9 +475,10 @@ def compare_tuple(
             "share_failed": control_query_fail_share,
             "ci95": None,
             "why_no_ci": (
-                "149 of the 160 control records contribute 2 queries and 4 contribute 3, "
-                "so the queries are pseudo-replicated; a binomial interval on them would "
-                "be narrower than the data support. The interval is on the record level."
+                f"{n_multi_query_records} of the {n_records_total} control records "
+                f"contribute more than one query ({n_queries_total} queries in all), so "
+                "the queries are pseudo-replicated; a binomial interval on them would be "
+                "narrower than the data support. The interval is on the record level."
             ),
         },
         "control_record_level": {
@@ -463,8 +500,9 @@ def compare_tuple(
             "share_failed": fp_fail["share"],
             "ci95": fp_fail["ci95"],
             "ci_caveat": (
-                "the 941 FP candidates were carved from 76 assemblies, so this interval "
-                "is also optimistic; it is shown for scale, not for a test"
+                "the FP arm's candidates are carved from far fewer source assemblies "
+                "than there are candidates (P3-15'-g), so this interval is optimistic "
+                "too; it is shown for scale, not for a test"
             ),
         },
         "discrimination": {
@@ -705,7 +743,7 @@ def compare(
         "producibility": prod,
         "by_parameter_tuple": per_tuple,
         "headline": headline,
-        "limitations": limitations(detect_report_path, detect),
+        "limitations": limitations(detect_report_path, detect, prod),
     }
     return body
 
@@ -726,9 +764,18 @@ def load_detect(detect_report_path: str | Path | None) -> Mapping[str, Any] | No
 
 
 def limitations(
-    detect_report_path: str | Path | None, detect: Mapping[str, Any] | None
+    detect_report_path: str | Path | None,
+    detect: Mapping[str, Any] | None,
+    prod: Mapping[str, Any],
 ) -> dict[str, Any]:
-    """Everything that bounds how far this rate may be carried."""
+    """Everything that bounds how far this rate may be carried.
+
+    ``prod`` is threaded in so the one sentence here that quotes corpus sizes reads
+    them from :func:`producibility`'s own output rather than restating them.
+    """
+    q_level = prod["control_query_level"]
+    r_level = prod["control_record_level"]
+    n_unproducible_records = r_level["n_records"] - r_level["n_records_with_a_producible_query"]
     out: dict[str, Any] = {
         "the_query_is_the_detectors_call": (
             "the record is a known T-box; the query is Stage-1's predicted span on it "
@@ -749,9 +796,11 @@ def limitations(
             "finding about (b). This is the single largest threat to the reading above."
         ),
         "the_control_measures_the_instrument_not_the_biology": (
-            "a control record that resolves no consensus (241 of 317 queries, 92 of 160 "
-            "records) is spared under ADR-0005 D14 and leaves the denominator; the rates "
-            "are conditional on the instrument having produced an alignment at all."
+            "a control record that resolves no consensus "
+            f"({q_level['n_queries'] - q_level['n_producible']} of {q_level['n_queries']} "
+            f"queries, {n_unproducible_records} of {r_level['n_records']} records) is "
+            "spared under ADR-0005 D14 and leaves the denominator; the rates are "
+            "conditional on the instrument having produced an alignment at all."
         ),
     }
     if detect is not None:

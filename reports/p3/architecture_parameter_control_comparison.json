@@ -160,7 +160,7 @@
         "n_decided": 76,
         "passed": 68,
         "share_failed": 0.105263,
-        "why_no_ci": "149 of the 160 control records contribute 2 queries and 4 contribute 3, so the queries are pseudo-replicated; a binomial interval on them would be narrower than the data support. The interval is on the record level."
+        "why_no_ci": "153 of the 160 control records contribute more than one query (317 queries in all), so the queries are pseudo-replicated; a binomial interval on them would be narrower than the data support. The interval is on the record level."
       },
       "control_record_level": {
         "n_mined": 7,
@@ -185,7 +185,7 @@
           0.061654,
           0.129381
         ],
-        "ci_caveat": "the 941 FP candidates were carved from 76 assemblies, so this interval is also optimistic; it is shown for scale, not for a test",
+        "ci_caveat": "the FP arm's candidates are carved from far fewer source assemblies than there are candidates (P3-15'-g), so this interval is optimistic too; it is shown for scale, not for a test",
         "failed": 25,
         "n_decided": 278,
         "passed": 253,
@@ -209,7 +209,7 @@
         "n_decided": 76,
         "passed": 65,
         "share_failed": 0.144737,
-        "why_no_ci": "149 of the 160 control records contribute 2 queries and 4 contribute 3, so the queries are pseudo-replicated; a binomial interval on them would be narrower than the data support. The interval is on the record level."
+        "why_no_ci": "153 of the 160 control records contribute more than one query (317 queries in all), so the queries are pseudo-replicated; a binomial interval on them would be narrower than the data support. The interval is on the record level."
       },
       "control_record_level": {
         "n_mined": 9,
@@ -234,7 +234,7 @@
           0.14559,
           0.237042
         ],
-        "ci_caveat": "the 941 FP candidates were carved from 76 assemblies, so this interval is also optimistic; it is shown for scale, not for a test",
+        "ci_caveat": "the FP arm's candidates are carved from far fewer source assemblies than there are candidates (P3-15'-g), so this interval is optimistic too; it is shown for scale, not for a test",
         "failed": 52,
         "n_decided": 278,
         "passed": 226,
@@ -258,7 +258,7 @@
         "n_decided": 76,
         "passed": 37,
         "share_failed": 0.513158,
-        "why_no_ci": "149 of the 160 control records contribute 2 queries and 4 contribute 3, so the queries are pseudo-replicated; a binomial interval on them would be narrower than the data support. The interval is on the record level."
+        "why_no_ci": "153 of the 160 control records contribute more than one query (317 queries in all), so the queries are pseudo-replicated; a binomial interval on them would be narrower than the data support. The interval is on the record level."
       },
       "control_record_level": {
         "n_mined": 33,
@@ -283,7 +283,7 @@
           0.448728,
           0.565465
         ],
-        "ci_caveat": "the 941 FP candidates were carved from 76 assemblies, so this interval is also optimistic; it is shown for scale, not for a test",
+        "ci_caveat": "the FP arm's candidates are carved from far fewer source assemblies than there are candidates (P3-15'-g), so this interval is optimistic too; it is shown for scale, not for a test",
         "failed": 141,
         "n_decided": 278,
         "passed": 137,
@@ -307,7 +307,7 @@
         "n_decided": 76,
         "passed": 27,
         "share_failed": 0.644737,
-        "why_no_ci": "149 of the 160 control records contribute 2 queries and 4 contribute 3, so the queries are pseudo-replicated; a binomial interval on them would be narrower than the data support. The interval is on the record level."
+        "why_no_ci": "153 of the 160 control records contribute more than one query (317 queries in all), so the queries are pseudo-replicated; a binomial interval on them would be narrower than the data support. The interval is on the record level."
       },
       "control_record_level": {
         "n_mined": 41,
@@ -332,7 +332,7 @@
           0.739791,
           0.835
         ],
-        "ci_caveat": "the 941 FP candidates were carved from 76 assemblies, so this interval is also optimistic; it is shown for scale, not for a test",
+        "ci_caveat": "the FP arm's candidates are carved from far fewer source assemblies than there are candidates (P3-15'-g), so this interval is optimistic too; it is shown for scale, not for a test",
         "failed": 220,
         "n_decided": 278,
         "passed": 58,
@@ -356,7 +356,7 @@
         "n_decided": 76,
         "passed": 4,
         "share_failed": 0.947368,
-        "why_no_ci": "149 of the 160 control records contribute 2 queries and 4 contribute 3, so the queries are pseudo-replicated; a binomial interval on them would be narrower than the data support. The interval is on the record level."
+        "why_no_ci": "153 of the 160 control records contribute more than one query (317 queries in all), so the queries are pseudo-replicated; a binomial interval on them would be narrower than the data support. The interval is on the record level."
       },
       "control_record_level": {
         "n_mined": 64,
@@ -381,7 +381,7 @@
           0.921648,
           0.972471
         ],
-        "ci_caveat": "the 941 FP candidates were carved from 76 assemblies, so this interval is also optimistic; it is shown for scale, not for a test",
+        "ci_caveat": "the FP arm's candidates are carved from far fewer source assemblies than there are candidates (P3-15'-g), so this interval is optimistic too; it is shown for scale, not for a test",
         "failed": 265,
         "n_decided": 278,
         "passed": 13,
@@ -405,7 +405,7 @@
         "n_decided": 76,
         "passed": 1,
         "share_failed": 0.986842,
-        "why_no_ci": "149 of the 160 control records contribute 2 queries and 4 contribute 3, so the queries are pseudo-replicated; a binomial interval on them would be narrower than the data support. The interval is on the record level."
+        "why_no_ci": "153 of the 160 control records contribute more than one query (317 queries in all), so the queries are pseudo-replicated; a binomial interval on them would be narrower than the data support. The interval is on the record level."
       },
       "control_record_level": {
         "n_mined": 67,
@@ -430,7 +430,7 @@
           0.948946,
           0.987751
         ],
-        "ci_caveat": "the 941 FP candidates were carved from 76 assemblies, so this interval is also optimistic; it is shown for scale, not for a test",
+        "ci_caveat": "the FP arm's candidates are carved from far fewer source assemblies than there are candidates (P3-15'-g), so this interval is optimistic too; it is shown for scale, not for a test",
         "failed": 271,
         "n_decided": 278,
         "passed": 7,
@@ -526,8 +526,8 @@
       },
       "schema_version": "1.0"
     },
-    "generated_at_utc": "2026-08-12T01:38:00.517105+00:00",
-    "git_sha": "c1a5b97b253811036b078e4684f645c9b39d71cd",
+    "generated_at_utc": "2026-08-12T02:03:29.976111+00:00",
+    "git_sha": "3a97aca9d3df6b5fdbebb1e802613eefe7681734",
     "inputs": {
       "data/processed/mining/curated_control_manifest_v0.json": "363795fba6cd4d1d85495ec62e6e62cd11f1bf37b0fdf739c48315777c4d2a83",
       "data/processed/mining/curated_control_status_v0.json": "8b5e8f4178cd63eb8664c1e63e519c5810223eb56ca3a1488ce8bfee9dbeb033",
