@@ -6113,3 +6113,18 @@ damage share is conditioned on producibility and so is a rate on the 68 producib
 on the 160 drawn; and the comparison report is carried into the payload as prose without a digest
 binding. None changes a number above; each is a caveat on how a number may be read, and they are
 listed here rather than left in a transcript.
+
+**⛔ THE §7 DECISION, TAKEN 2026-08-12 (user, AskUserQuestion): `min_named_helices` LEVEL 2 ⇒
+`sensitive_core`.** The round will supply `STEM_I_NT_THRESHOLD=1 · MIN_NAMED_HELICES=2 ·
+MIN_HELIX_PAIRS=2 · BULGE_MIN_NT=2 · BULGE_MAX_NT=50 · NCCA_PAIRING_NT=2 · ALLOW_WOBBLE=0`.
+Presented against the canonical-core reading (level 3: 11 mined / 24 of 68 records), level 4
+(13 / 31) and the option of not running the producer at all given the ceiling. The choice takes
+the **plural** reading of D3 and the most permissive non-vacuous setting on the grid, which is
+ADR-0006 A4's own fail-closed direction for a *sparing* disjunct: at a ceiling of ~12 distinct
+loci the yield forgone is a handful of candidates, while the protection kept is on the flagship
+class. **No ADR is amended** — A4 already delegates the value to the round, which records it in
+provenance, and D6/D17's P6 freeze is untouched. The expected round yield is **3 mined** and the
+measured cost is **8 of 68** control records losing both model-independent protections. ⏭ The
+**§9.3 submit-ack** is now the only thing between this step and the `architecture_producer` run,
+and `slurm/p3/stage1_remine.sbatch`'s missing `--relaxed-arch-status` must be fixed before P3-15
+itself can consume what that run writes.
