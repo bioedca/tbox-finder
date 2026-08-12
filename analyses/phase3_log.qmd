@@ -6077,3 +6077,39 @@ refusal in its named test. A dedicated locus test and a retarget fixed both — 
 passes for the wrong reason is worth exactly nothing. Zero new failures vs the matched `main`
 baseline at `090547f` (worktree **13**, main **26**, a strict subset). The report re-derives
 byte-identically apart from `generated_at_utc`. `ruff` + `black` clean.
+
+**Review round 4 — the 5-lens workflow's full return (38 agents, 0 errors), and three more real
+corrections.** Its top confirmed finding was a **coverage** one and it landed on code this step
+had just written: `evaluate_point`'s `fp_with_a` — the entire FP numerator of the
+anti-selectivity reading — was reachable by only one fixture, and that fixture set criterion (a)
+to `failed` on **every** candidate, so dropping the (a) conjunct, or reading `synteny_status`
+instead, left the suite green while the published claim went from "5 of 6" to "1 of 6" or was
+silently *strengthened* to "6 of 6". The locus test now uses an **asymmetric** corpus — a third
+candidate that fails (b) but passes (a) — so all three implementations give different numbers,
+and both mutations are in the sabotage set.
+
+**⚠ THE CEILING IS 15 MANIFEST ROWS BUT 12 DISTINCT LOCI.** The same tiling duplication that
+broke the FP intervals also inflates the ceiling: three of the fifteen rows are second calls on a
+locus already counted. Every yield in the report now carries both units, and the recommendation's
+3 mined rows are 3 distinct loci.
+
+**`build_inputs` was asserting provenance it had not checked.** Its `anchored_by` strings —
+"report X records this digest" — were unconditional constants that would keep asserting the
+anchor after either file changed. `anchor_of` now reads the named report, compares the digest,
+and returns `None` when it does not match; on this run the (a) and (c) columns verify and the
+Stage-2 column stays honestly unanchored. Two more identities are relabelled rather than
+published as measurements: `min_mined_if_b_passed_everywhere` is 0 by the structure of the rule,
+not by measurement, and the report says so.
+
+**Validation (final).** 104 unit tests; **69 sabotages, all RED against their NAMED test**, plus
+2 green negative controls. Zero new failures vs the matched `main` baseline at `090547f`
+(worktree **13**, main **26**, a strict subset). The report re-derives byte-identically apart
+from `generated_at_utc`; `ruff` + `black` clean.
+
+**⚠ WHAT IS STILL OPEN FROM THE REVIEW, DISCLOSED NOT FIXED.** The workflow raised further items
+this step does not close: `frontier` attaches a nominal Wilson interval to a minimum selected
+over up to ~1,000 grid points (a selection effect, not a coverage statement); the control's
+damage share is conditioned on producibility and so is a rate on the 68 producible records, not
+on the 160 drawn; and the comparison report is carried into the payload as prose without a digest
+binding. None changes a number above; each is a caveat on how a number may be read, and they are
+listed here rather than left in a transcript.

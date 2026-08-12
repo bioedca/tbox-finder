@@ -83,6 +83,7 @@ def point(
         fp_loci_decided=fp_loci_decided,
         fp_loci_failing_a_and_b=fp_loci_failing_a_and_b,
         mined_by_threshold={"stage2_not_declared": mined},
+        mined_loci_by_threshold={"stage2_not_declared": mined},
         control={
             "n_records_losing_a_and_b": damage,
             "n_records_losing_b": damage,
@@ -158,8 +159,10 @@ def test_sweep_arm_agrees_with_the_shipped_candidate_state(tmp_path):
 # The spare rule — a CONJUNCTION, broken one member at a time
 # ═════════════════════════════════════════════════════════════════════════════
 def test_all_four_disjuncts_failed_is_the_only_mined_case():
-    by_id = {"x": evidence_row(STATUS_FAILED, STATUS_FAILED, 0.01)}
-    assert rec.mined_ids(by_id, {"x": STATUS_FAILED}, stage2_threshold=0.5) == ["x"]
+    by_id = {"GCA_1.1:c1:0:10-20": evidence_row(STATUS_FAILED, STATUS_FAILED, 0.01)}
+    assert rec.mined_ids(by_id, {"GCA_1.1:c1:0:10-20": STATUS_FAILED}, stage2_threshold=0.5) == [
+        "GCA_1.1:c1:0:10-20"
+    ]
 
 
 @pytest.mark.parametrize(
@@ -177,44 +180,47 @@ def test_all_four_disjuncts_failed_is_the_only_mined_case():
 )
 def test_flipping_exactly_one_member_spares_the_candidate(a, c, arch_state, posterior, why):
     """Each member ALONE — an all-failed fixture cannot see which member is unread."""
-    by_id = {"x": evidence_row(a, c, posterior)}
-    assert rec.mined_ids(by_id, {"x": arch_state}, stage2_threshold=0.5) == [], why
+    by_id = {"GCA_1.1:c1:0:10-20": evidence_row(a, c, posterior)}
+    assert rec.mined_ids(by_id, {"GCA_1.1:c1:0:10-20": arch_state}, stage2_threshold=0.5) == [], why
 
 
 def test_a_candidate_absent_from_the_architecture_column_is_spared_not_mined():
     """The fail-open version of this default mines the whole corpus."""
-    by_id = {"x": evidence_row(STATUS_FAILED, STATUS_FAILED, 0.01)}
+    by_id = {"GCA_1.1:c1:0:10-20": evidence_row(STATUS_FAILED, STATUS_FAILED, 0.01)}
     assert rec.mined_ids(by_id, {}, stage2_threshold=0.5) == []
 
 
 def test_stage2_not_declared_removes_the_disjunct_rather_than_failing_it():
     """threshold None is D14's phase-conditioning, not 'the posterior failed'."""
-    by_id = {"x": evidence_row(STATUS_FAILED, STATUS_FAILED, 0.99)}
-    assert rec.mined_ids(by_id, {"x": STATUS_FAILED}, stage2_threshold=None) == ["x"]
-    assert rec.mined_ids(by_id, {"x": STATUS_FAILED}, stage2_threshold=0.5) == []
+    by_id = {"GCA_1.1:c1:0:10-20": evidence_row(STATUS_FAILED, STATUS_FAILED, 0.99)}
+    assert rec.mined_ids(by_id, {"GCA_1.1:c1:0:10-20": STATUS_FAILED}, stage2_threshold=None) == [
+        "GCA_1.1:c1:0:10-20"
+    ]
+    assert rec.mined_ids(by_id, {"GCA_1.1:c1:0:10-20": STATUS_FAILED}, stage2_threshold=0.5) == []
 
 
 def test_yield_ceiling_counts_the_a_and_c_intersection_not_either_alone():
     by_id = {
-        "both": evidence_row(STATUS_FAILED, STATUS_FAILED),
-        "only_a": evidence_row(STATUS_FAILED, STATUS_PASSED),
-        "only_c": evidence_row(STATUS_PASSED, STATUS_FAILED),
-        "neither": evidence_row(STATUS_PASSED, STATUS_PASSED),
+        "GCA_1.1:c1:0:10-20": evidence_row(STATUS_FAILED, STATUS_FAILED),
+        "GCA_1.1:c1:0:30-40": evidence_row(STATUS_FAILED, STATUS_PASSED),
+        "GCA_1.1:c1:0:50-60": evidence_row(STATUS_PASSED, STATUS_FAILED),
+        "GCA_1.1:c1:0:70-80": evidence_row(STATUS_PASSED, STATUS_PASSED),
     }
     out = rec.yield_ceiling(by_id, ids_with_consensus=list(by_id))
     assert out["n_criterion_a_failed"] == 2
     assert out["n_criterion_c_failed"] == 2
     assert out["n_failing_both_a_and_c"] == 1
-    assert out["candidate_ids_at_the_ceiling"] == ["both"]
+    assert out["candidate_ids_at_the_ceiling"] == ["GCA_1.1:c1:0:10-20"]
     assert out["by_stage2_threshold"]["stage2_not_declared"] == {
         "max_mined_if_b_failed_everywhere": 1,
+        "max_mined_if_b_failed_everywhere_loci": 1,
         "min_mined_if_b_passed_everywhere": 0,
     }
 
 
 def test_the_ceiling_excludes_a_candidate_with_no_consensus():
     """(b) reads 'unavailable' without an msa.sto, and unavailable SPARES."""
-    by_id = {"both": evidence_row(STATUS_FAILED, STATUS_FAILED)}
+    by_id = {"GCA_1.1:c1:0:10-20": evidence_row(STATUS_FAILED, STATUS_FAILED)}
     out = rec.yield_ceiling(by_id, ids_with_consensus=[])
     assert out["n_failing_both_a_and_c"] == 1
     assert out["n_failing_both_a_and_c_with_a_consensus"] == 0
@@ -722,7 +728,7 @@ def test_build_inputs_refuses_a_column_that_does_not_cover_the_manifest(tmp_path
     manifest = tmp_path / "m.json"
     manifest.write_text(json.dumps({"candidates": [{"candidate_id": "x"}, {"candidate_id": "y"}]}))
     cov = tmp_path / "cov.json"
-    cov.write_text(json.dumps({"status": {"x": STATUS_FAILED}}))
+    cov.write_text(json.dumps({"status": {"GCA_1.1:c1:0:10-20": STATUS_FAILED}}))
     syn = tmp_path / "syn.json"
     syn.write_text(json.dumps({"status": {"x": STATUS_FAILED, "y": STATUS_FAILED}}))
     post = tmp_path / "p.json"
@@ -742,7 +748,7 @@ def test_build_inputs_refuses_a_column_carrying_an_id_the_manifest_does_not(tmp_
     cov = tmp_path / "cov.json"
     cov.write_text(json.dumps({"status": {"x": STATUS_FAILED, "ghost": STATUS_FAILED}}))
     syn = tmp_path / "syn.json"
-    syn.write_text(json.dumps({"status": {"x": STATUS_FAILED}}))
+    syn.write_text(json.dumps({"status": {"GCA_1.1:c1:0:10-20": STATUS_FAILED}}))
     post = tmp_path / "p.json"
     post.write_text(json.dumps({"posteriors": {"x": 0.1}}))
     with pytest.raises(rec.RecommendError, match="absent from the manifest"):
@@ -756,13 +762,14 @@ def test_build_inputs_refuses_a_column_carrying_an_id_the_manifest_does_not(tmp_
 
 def test_build_inputs_joins_and_discloses_the_unanchored_column(tmp_path):
     manifest = tmp_path / "m.json"
-    manifest.write_text(json.dumps({"candidates": [{"candidate_id": "x"}]}))
+    cid = "GCA_1.1:c1:0:10-20"
+    manifest.write_text(json.dumps({"candidates": [{"candidate_id": cid}]}))
     cov = tmp_path / "cov.json"
-    cov.write_text(json.dumps({"status": {"x": STATUS_FAILED}}))
+    cov.write_text(json.dumps({"status": {cid: STATUS_FAILED}}))
     syn = tmp_path / "syn.json"
-    syn.write_text(json.dumps({"status": {"x": STATUS_PASSED}}))
+    syn.write_text(json.dumps({"status": {cid: STATUS_PASSED}}))
     post = tmp_path / "p.json"
-    post.write_text(json.dumps({"posteriors": {"x": 0.25}}))
+    post.write_text(json.dumps({"posteriors": {cid: 0.25}}))
     out = rec.build_inputs(
         covariation_status_path=cov,
         synteny_status_path=syn,
@@ -771,13 +778,12 @@ def test_build_inputs_joins_and_discloses_the_unanchored_column(tmp_path):
     )
     assert out["rows"] == [
         {
-            "candidate_id": "x",
+            "candidate_id": cid,
             "covariation_status": STATUS_FAILED,
             "synteny_status": STATUS_PASSED,
             "stage2_posterior": 0.25,
         }
     ]
-    assert out["sources"]["covariation_status"]["anchored_by"]
     assert out["sources"]["stage2_posteriors"]["anchored_by"] is None
     assert "SENSITIVITY" in out["sources"]["stage2_posteriors"]["warning"]
 
@@ -1033,13 +1039,19 @@ def test_evaluate_point_counts_the_fp_arm_by_locus_not_by_manifest_row(tmp_path)
 
     fp_root = tmp_path / "fp"
     twins = ["GCA_9.1:c7:1024:5000-5100", "GCA_9.1:c7:1536:5000-5100"]
-    for cid in twins:
+    elsewhere = "GCA_9.1:c7:2048:9000-9100"
+    for cid in [*twins, elsewhere]:
         write_consensus(
             fp_root, candidate_msa_path(fp_root, cid).parent.name, SS_ONE_HELIX, ROW_ONE_HELIX
         )
     items = apm.read_supply(fp_root)
-    by_slug = {candidate_msa_path(fp_root, c).parent.name: c for c in twins}
+    by_slug = {candidate_msa_path(fp_root, c).parent.name: c for c in [*twins, elsewhere]}
+    # ⚠ ASYMMETRIC ON PURPOSE. `elsewhere` fails (b) but PASSES (a), so a version of
+    # evaluate_point that drops the (a) conjunct — or reads (c) instead — counts 3 where
+    # the correct one counts 2. An all-FAILED fixture cannot tell those three apart
+    # ([[all-true-fixture-cannot-test-a-conjunction]]).
     by_id = {c: evidence_row(STATUS_FAILED, STATUS_FAILED) for c in twins}
+    by_id[elsewhere] = evidence_row(STATUS_PASSED, STATUS_FAILED)
 
     ctrl_root = tmp_path / "ctrl"
     write_consensus(
@@ -1057,7 +1069,62 @@ def test_evaluate_point_counts_the_fp_arm_by_locus_not_by_manifest_row(tmp_path)
         control_status=ctrl_status,
         control_record_index={REC_A: [Q_A1]},
     )
-    assert result.fp_failed + result.fp_passed == 2, "two manifest rows"
-    assert result.fp_loci_decided == 1, "one locus"
-    assert result.fp_failed_with_a_failed == 2
-    assert result.fp_loci_failing_a_and_b == 1
+    assert result.fp_failed + result.fp_passed == 3, "three manifest rows"
+    assert result.fp_loci_decided == 2, "the twins are one locus, `elsewhere` another"
+    assert result.fp_failed == 3, "(b) fails on all three"
+    assert result.fp_failed_with_a_failed == 2, "only the two whose (a) also failed"
+    assert result.fp_loci_failing_a_and_b == 1, "and those two are one locus"
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# Review round 4 — both units, and the anchors that must be checked
+# ═════════════════════════════════════════════════════════════════════════════
+def test_the_ceiling_is_published_in_loci_as_well_as_manifest_rows():
+    """15 rows are 12 loci on the real supply; a row count alone overstates the DNA."""
+    twins = ["GCA_9.1:c7:1024:5000-5100", "GCA_9.1:c7:1536:5000-5100"]
+    by_id = {c: evidence_row(STATUS_FAILED, STATUS_FAILED) for c in twins}
+    out = rec.yield_ceiling(by_id, ids_with_consensus=twins)
+    band = out["by_stage2_threshold"]["stage2_not_declared"]
+    assert band["max_mined_if_b_failed_everywhere"] == 2, "two manifest rows"
+    assert band["max_mined_if_b_failed_everywhere_loci"] == 1, "one locus"
+    assert out["distinct_loci_at_the_ceiling"] == 1
+
+
+def test_an_anchor_is_claimed_only_when_the_digest_actually_matches(tmp_path):
+    target = tmp_path / "table.json"
+    target.write_text('{"status": {}}')
+    report = tmp_path / "report.json"
+    report.write_text(json.dumps({"provenance": {"extra": {"external_inputs": {"x": "deadbeef"}}}}))
+    assert (
+        rec.anchor_of(target, report, ("provenance", "extra", "external_inputs", "x")) is None
+    ), "a digest that does not match must not be reported as anchored"
+
+
+def test_an_anchor_is_claimed_when_the_digest_does_match(tmp_path):
+    """Positive control: anchor_of must be able to say yes, or it is a constant None."""
+    target = tmp_path / "table.json"
+    target.write_text('{"status": {}}')
+    report = tmp_path / "report.json"
+    report.write_text(
+        json.dumps({"provenance": {"extra": {"external_inputs": {"x": rec.sha256_of(target)}}}})
+    )
+    got = rec.anchor_of(target, report, ("provenance", "extra", "external_inputs", "x"))
+    assert got and "records this exact digest" in got
+
+
+def test_a_missing_anchor_report_is_not_treated_as_an_anchor(tmp_path):
+    target = tmp_path / "table.json"
+    target.write_text("{}")
+    assert rec.anchor_of(target, tmp_path / "absent.json", ("anything",)) is None
+
+
+def test_the_manifest_coverage_check_is_not_satisfied_by_a_matching_cardinality():
+    """A len()==len() degradation passes every equal/missing/extra case a naive test tries."""
+    with pytest.raises(rec.RecommendError, match="do not cover|extra"):
+        rec.assert_covers_manifest({"a": {}, "z": {}}, ["a", "b"])
+
+
+def test_intervals_disjoint_can_come_out_false():
+    """The negative control the flag needs: overlapping arms must read False."""
+    overlapping = point(damage=30, producible=68, fp_loci_failing_a_and_b=60, fp_loci_decided=199)
+    assert rec.anti_selectivity(overlapping)["intervals_disjoint"] is False

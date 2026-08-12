@@ -5652,7 +5652,7 @@
   "schema_version": "1.0",
   "sources": {
     "covariation_status": {
-      "anchored_by": "reports/p3/architecture_parameter_measurement.json records this digest as its covariation_status external input",
+      "anchored_by": "reports/p3/architecture_parameter_measurement.json records this exact digest (verified on write)",
       "origin": "two.amlab:$HOME/tbox-scratch/round_p3_15_supply/covariation_status.json",
       "produced_by": "P3-15'-e / -e-ii (SLURM jobs 1205 + 1254)",
       "sha256": "3215f0340b9b85bc49a862b66ecc1b7367485d22650277a83894e2e1ef3d8167"
@@ -5665,7 +5665,7 @@
       "warning": "\u26a0 NO committed report records this digest, and a second scoring of the same 941 candidates exists whose posteriors differ by up to 3.8e-2 (a CUDA forward is not bit-reproducible). The two agree on every candidate at thresholds 0.5 / 0.9 / 0.95 and disagree on 3 at 0.99. This column is therefore carried as a SENSITIVITY only; no headline number rests on it."
     },
     "synteny_status": {
-      "anchored_by": "reports/p3/synteny_exclusion_diagnostic.json records this digest as its synteny_status external input",
+      "anchored_by": "reports/p3/synteny_exclusion_diagnostic.json records this exact digest (verified on write)",
       "origin": "LOCAL \u2014 tbox_finder.mining.synteny_producer (P3-15'-c-ii)",
       "produced_by": "P3-15'-c-ii",
       "sha256": "3c8ac8e31b9e7cde6dee50328ca3efa7ac798b54def17885f92c930b8b04a464"

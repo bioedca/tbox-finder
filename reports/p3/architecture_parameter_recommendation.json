@@ -577,6 +577,13 @@
         "stage2_threshold_0.9": 1,
         "stage2_threshold_0.95": 1,
         "stage2_threshold_0.99": 1
+      },
+      "round_yield_n_mined_loci": {
+        "stage2_not_declared": 1,
+        "stage2_threshold_0.5": 1,
+        "stage2_threshold_0.9": 1,
+        "stage2_threshold_0.95": 1,
+        "stage2_threshold_0.99": 1
       }
     },
     {
@@ -652,6 +659,13 @@
         "stem_i_nt_threshold": 1
       },
       "round_yield_n_mined": {
+        "stage2_not_declared": 3,
+        "stage2_threshold_0.5": 3,
+        "stage2_threshold_0.9": 3,
+        "stage2_threshold_0.95": 3,
+        "stage2_threshold_0.99": 3
+      },
+      "round_yield_n_mined_loci": {
         "stage2_not_declared": 3,
         "stage2_threshold_0.5": 3,
         "stage2_threshold_0.9": 3,
@@ -737,6 +751,13 @@
         "stage2_threshold_0.9": 11,
         "stage2_threshold_0.95": 11,
         "stage2_threshold_0.99": 11
+      },
+      "round_yield_n_mined_loci": {
+        "stage2_not_declared": 9,
+        "stage2_threshold_0.5": 9,
+        "stage2_threshold_0.9": 9,
+        "stage2_threshold_0.95": 9,
+        "stage2_threshold_0.99": 9
       }
     },
     {
@@ -817,6 +838,13 @@
         "stage2_threshold_0.9": 11,
         "stage2_threshold_0.95": 11,
         "stage2_threshold_0.99": 11
+      },
+      "round_yield_n_mined_loci": {
+        "stage2_not_declared": 9,
+        "stage2_threshold_0.5": 9,
+        "stage2_threshold_0.9": 9,
+        "stage2_threshold_0.95": 9,
+        "stage2_threshold_0.99": 9
       }
     },
     {
@@ -897,6 +925,13 @@
         "stage2_threshold_0.9": 13,
         "stage2_threshold_0.95": 13,
         "stage2_threshold_0.99": 13
+      },
+      "round_yield_n_mined_loci": {
+        "stage2_not_declared": 11,
+        "stage2_threshold_0.5": 10,
+        "stage2_threshold_0.9": 11,
+        "stage2_threshold_0.95": 11,
+        "stage2_threshold_0.99": 11
       }
     },
     {
@@ -977,6 +1012,13 @@
         "stage2_threshold_0.9": 13,
         "stage2_threshold_0.95": 13,
         "stage2_threshold_0.99": 13
+      },
+      "round_yield_n_mined_loci": {
+        "stage2_not_declared": 11,
+        "stage2_threshold_0.5": 10,
+        "stage2_threshold_0.9": 11,
+        "stage2_threshold_0.95": 11,
+        "stage2_threshold_0.99": 11
       }
     }
   ],
@@ -994,13 +1036,13 @@
       },
       "schema_version": "1.0"
     },
-    "generated_at_utc": "2026-08-12T18:25:45.729118+00:00",
-    "git_sha": "b34b2df6b8bbeb355263696940905c32d22992ce",
+    "generated_at_utc": "2026-08-12T18:36:31.596213+00:00",
+    "git_sha": "740b6f0c15546f2079ce157b4b8468e92b3ed376",
     "inputs": {
       "data/processed/mining/curated_control_manifest_v0.json": "363795fba6cd4d1d85495ec62e6e62cd11f1bf37b0fdf739c48315777c4d2a83",
       "data/processed/mining/curated_control_status_v0.json": "8b5e8f4178cd63eb8664c1e63e519c5810223eb56ca3a1488ce8bfee9dbeb033",
       "data/processed/mining/round0_fp_manifest.json": "e8aff87d395b3cb70a25c1f1d4ac348daf3da9323baa4c04a32fd3e4060d4b95",
-      "data/processed/mining/round0_fp_spare_rule_inputs_v0.json": "387e38952d95cdd3c8b769cf3bfdd611ffd53cdcbc1bd3d637021933661c7e8a",
+      "data/processed/mining/round0_fp_spare_rule_inputs_v0.json": "65aedc885d96a4266ff02877a9f9ee02313c9f6c8e90013481675f43a59fca35",
       "reports/p3/architecture_parameter_control_comparison.json": "f1ef8504b2464cc2bf93cd8002299269df61373cf7a4a53254f50aa7977b269f",
       "reports/p3/architecture_parameter_measurement.json": "86e64af40f76d4291aeb3e8186eb9d48e8fd16191762cab32364ce05435f87ca",
       "reports/p3/architecture_parameter_measurement_control.json": "c709ab9f906ebd4ffcaf22516888d18eff6ccfed3576fc5c92ecb37ab55798e3"
@@ -1235,6 +1277,13 @@
         "stage2_threshold_0.9": 3,
         "stage2_threshold_0.95": 3,
         "stage2_threshold_0.99": 3
+      },
+      "round_yield_n_mined_loci": {
+        "stage2_not_declared": 3,
+        "stage2_threshold_0.5": 3,
+        "stage2_threshold_0.9": 3,
+        "stage2_threshold_0.95": 3,
+        "stage2_threshold_0.99": 3
       }
     },
     "mined_candidate_ids": [
@@ -1361,22 +1410,27 @@
     "by_stage2_threshold": {
       "stage2_not_declared": {
         "max_mined_if_b_failed_everywhere": 15,
+        "max_mined_if_b_failed_everywhere_loci": 12,
         "min_mined_if_b_passed_everywhere": 0
       },
       "stage2_threshold_0.5": {
         "max_mined_if_b_failed_everywhere": 12,
+        "max_mined_if_b_failed_everywhere_loci": 10,
         "min_mined_if_b_passed_everywhere": 0
       },
       "stage2_threshold_0.9": {
         "max_mined_if_b_failed_everywhere": 13,
+        "max_mined_if_b_failed_everywhere_loci": 11,
         "min_mined_if_b_passed_everywhere": 0
       },
       "stage2_threshold_0.95": {
         "max_mined_if_b_failed_everywhere": 13,
+        "max_mined_if_b_failed_everywhere_loci": 11,
         "min_mined_if_b_passed_everywhere": 0
       },
       "stage2_threshold_0.99": {
         "max_mined_if_b_failed_everywhere": 13,
+        "max_mined_if_b_failed_everywhere_loci": 11,
         "min_mined_if_b_passed_everywhere": 0
       }
     },
@@ -1397,12 +1451,13 @@
       "GCA_040905065.1:c256:4899:5781-5916",
       "GCF_041320495.1:c21:554496:554947-555043"
     ],
+    "distinct_loci_at_the_ceiling": 12,
     "n_candidates": 941,
     "n_criterion_a_failed": 111,
     "n_criterion_c_failed": 96,
     "n_failing_both_a_and_c": 15,
     "n_failing_both_a_and_c_with_a_consensus": 15,
-    "reading": "sparing is a disjunction (ADR-0005 D14), so mining is a conjunction: only a candidate every disjunct scored 'failed' is mined. Criterion (b) can therefore act at all only inside the (a)-failed AND (c)-failed intersection; outside it (b)'s verdict changes no outcome. max_mined_if_b_failed_everywhere is the ceiling the parameter choice is bounded by \u2014 no setting can exceed it \u2014 and min_mined_if_b_passed_everywhere is the floor it cannot go below.",
+    "reading": "sparing is a disjunction (ADR-0005 D14), so mining is a conjunction: only a candidate every disjunct scored 'failed' is mined. Criterion (b) can therefore act at all only inside the (a)-failed AND (c)-failed intersection; outside it (b)'s verdict changes no outcome. max_mined_if_b_failed_everywhere is the ceiling the parameter choice is bounded by \u2014 no setting can exceed it \u2014 and min_mined_if_b_passed_everywhere is 0 by the structure of the rule, not by measurement \u2014 (b) passing everywhere spares everything \u2014 and is emitted only so the band has both ends. \u26a0 Read the LOCUS count beside the candidate count: the manifest tiles overlapping windows, so some of these rows are second calls on one piece of DNA.",
     "stage2_threshold_note": "ADR-0005 D3/D14 freeze the Stage-2 threshold at the \u00a713.1 phase gate; none is pinned here. 'stage2_not_declared' is the P2 accounting (the disjunct is not in play) and is an UPPER bound: declaring Stage-2 at any threshold can only spare more.",
     "status_counts": {
       "criterion_a_covariation": {

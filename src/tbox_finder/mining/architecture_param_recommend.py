@@ -504,10 +504,10 @@ def yield_ceiling(
     band: dict[str, Any] = {}
     for threshold in (None, *STAGE2_THRESHOLD_SENSITIVITY):
         key = "stage2_not_declared" if threshold is None else f"stage2_threshold_{threshold}"
+        maxed = mined_ids(by_id, all_failed, stage2_threshold=threshold)
         band[key] = {
-            "max_mined_if_b_failed_everywhere": len(
-                mined_ids(by_id, all_failed, stage2_threshold=threshold)
-            ),
+            "max_mined_if_b_failed_everywhere": len(maxed),
+            "max_mined_if_b_failed_everywhere_loci": len({locus_of(c) for c in maxed}),
             "min_mined_if_b_passed_everywhere": len(
                 mined_ids(by_id, all_passed, stage2_threshold=threshold)
             ),
@@ -522,6 +522,9 @@ def yield_ceiling(
         # Named, not just counted: 15 ids is small enough to publish, and a ceiling a
         # reader cannot check against the manifest is a number they have to take on trust.
         "candidate_ids_at_the_ceiling": mined_ids(by_id, all_failed, stage2_threshold=None),
+        "distinct_loci_at_the_ceiling": len(
+            {locus_of(c) for c in mined_ids(by_id, all_failed, stage2_threshold=None)}
+        ),
         "by_stage2_threshold": band,
         "reading": (
             "sparing is a disjunction (ADR-0005 D14), so mining is a conjunction: only a "
@@ -529,7 +532,11 @@ def yield_ceiling(
             "act at all only inside the (a)-failed AND (c)-failed intersection; outside it "
             "(b)'s verdict changes no outcome. max_mined_if_b_failed_everywhere is the "
             "ceiling the parameter choice is bounded by — no setting can exceed it — and "
-            "min_mined_if_b_passed_everywhere is the floor it cannot go below."
+            "min_mined_if_b_passed_everywhere is 0 by the structure of the rule, not by "
+            "measurement — (b) passing everywhere spares everything — and is emitted only "
+            "so the band has both ends. ⚠ Read the LOCUS count beside the candidate count: "
+            "the manifest tiles overlapping windows, so some of these rows are second "
+            "calls on one piece of DNA."
         ),
         "stage2_threshold_note": (
             "ADR-0005 D3/D14 freeze the Stage-2 threshold at the §13.1 phase gate; none is "
@@ -659,6 +666,7 @@ class PointResult:
     fp_loci_decided: int
     fp_loci_failing_a_and_b: int
     mined_by_threshold: Mapping[str, int]
+    mined_loci_by_threshold: Mapping[str, int]
     control: Mapping[str, Any]
 
     @property
@@ -687,6 +695,7 @@ class PointResult:
                 ),
             },
             "round_yield_n_mined": dict(self.mined_by_threshold),
+            "round_yield_n_mined_loci": dict(self.mined_loci_by_threshold),
             "control_arm": dict(self.control),
         }
 
@@ -711,12 +720,14 @@ def evaluate_point(
         return control_verdicts
 
     arch_by_id = {fp_id_by_slug[slug]: state for slug, state in fp_verdicts.items()}
-    mined = {
-        ("stage2_not_declared" if t is None else f"stage2_threshold_{t}"): len(
-            mined_ids(by_id, arch_by_id, stage2_threshold=t)
+    mined_by_t = {
+        ("stage2_not_declared" if t is None else f"stage2_threshold_{t}"): mined_ids(
+            by_id, arch_by_id, stage2_threshold=t
         )
         for t in (None, *STAGE2_THRESHOLD_SENSITIVITY)
     }
+    mined = {k: len(v) for k, v in mined_by_t.items()}
+    mined_loci = {k: len({locus_of(c) for c in v}) for k, v in mined_by_t.items()}
     fp_failed = sum(1 for s in fp_verdicts.values() if s == STATUS_FAILED)
     failing_a_and_b = [
         cid
@@ -733,6 +744,7 @@ def evaluate_point(
         fp_loci_decided=len({locus_of(c) for c in arch_by_id}),
         fp_loci_failing_a_and_b=len({locus_of(c) for c in failing_a_and_b}),
         mined_by_threshold=mined,
+        mined_loci_by_threshold=mined_loci,
         control=control_damage(control_status, control_record_index, control_by_query),
     )
 
@@ -1470,6 +1482,46 @@ def recommend(
     }
 
 
+def anchor_of(
+    path: str | Path,
+    report_path: str | Path,
+    keys: Sequence[str],
+    *,
+    list_name: str | None = None,
+) -> str | None:
+    """Say a digest is anchored **only after checking**, and name the miss otherwise.
+
+    These strings are a provenance claim: "some committed report vouches for this file".
+    Written as unconditional constants they would keep asserting it after the file
+    changed, which is the fabricated-provenance failure ADR-work is meant to make
+    impossible ([[a-pinned-constant-nothing-reads]]).
+    """
+    digest = sha256_of(path)
+    try:
+        payload: Any = json.loads(Path(report_path).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    for key in keys:
+        if not isinstance(payload, Mapping) or key not in payload:
+            return None
+        payload = payload[key]
+    if list_name is not None:
+        entries = payload if isinstance(payload, list) else []
+        recorded = next(
+            (
+                e.get("sha256")
+                for e in entries
+                if isinstance(e, Mapping) and e.get("name") == list_name
+            ),
+            None,
+        )
+    else:
+        recorded = payload
+    if recorded != digest:
+        return None
+    return f"{portable_path(report_path)} records this exact digest (verified on write)"
+
+
 def build_inputs(
     *,
     covariation_status_path: str | Path,
@@ -1523,18 +1575,21 @@ def build_inputs(
                 "sha256": sha256_of(covariation_status_path),
                 "origin": "two.amlab:$HOME/tbox-scratch/round_p3_15_supply/covariation_status.json",
                 "produced_by": "P3-15'-e / -e-ii (SLURM jobs 1205 + 1254)",
-                "anchored_by": (
-                    "reports/p3/architecture_parameter_measurement.json records this digest "
-                    "as its covariation_status external input"
+                "anchored_by": anchor_of(
+                    covariation_status_path,
+                    "reports/p3/architecture_parameter_measurement.json",
+                    ("provenance", "extra", "external_inputs", "covariation_status", "sha256"),
                 ),
             },
             "synteny_status": {
                 "sha256": sha256_of(synteny_status_path),
                 "origin": "LOCAL — tbox_finder.mining.synteny_producer (P3-15'-c-ii)",
                 "produced_by": "P3-15'-c-ii",
-                "anchored_by": (
-                    "reports/p3/synteny_exclusion_diagnostic.json records this digest as its "
-                    "synteny_status external input"
+                "anchored_by": anchor_of(
+                    synteny_status_path,
+                    "reports/p3/synteny_exclusion_diagnostic.json",
+                    ("provenance", "extra", "external_inputs"),
+                    list_name="synteny_status.json",
                 ),
             },
             "stage2_posteriors": {
