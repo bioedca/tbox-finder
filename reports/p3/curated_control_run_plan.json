@@ -1,0 +1,184 @@
+{
+  "adr": "ADR-0005 A10 (the per-candidate producer cost centre and its decoupled-array orchestration); ADR-0006 A2 (min_sequences = 20) / A3 (mlocarna) / A4 (criterion (b)'s instrument); D17 (the P6-frozen search cutoffs this run does not touch)",
+  "array": {
+    "array_spec": "0-15",
+    "n_candidates": 317,
+    "n_shards": 16,
+    "requested_shard_size": 20,
+    "shard_sizes": {
+      "max": 20,
+      "min": 19,
+      "total": 317
+    }
+  },
+  "envelope": {
+    "cpus_per_task": 2,
+    "expected_core_h": 3.01,
+    "expected_wall_caveat": "the expected_* columns extrapolate FP-candidate wall onto curated queries, which this report measures to be a different query population, so they inherit that difference; the worst_case_* columns do not \u2014 they are search_max + align_timeout_s + score_max, which bounds a candidate at any homolog depth, so a submit should be sized on those",
+    "expected_wall_h_per_task": 0.094,
+    "gpu_h": 0.0,
+    "what_the_bound_is": "max_shard_size x (search_max + ALIGN_TIMEOUT_S + score_max). Only the ALIGN_TIMEOUT_S term is a bound this run ENFORCES; search_max and score_max are MEASURED MAXIMA from the FP corpus (job 816, K=50) and are therefore extrapolated onto a different query population exactly as the expected column is \u2014 they are 0.4-114.2 s against a 600 s enforced term, so the bound is dominated by the part that cannot be exceeded, but it is not extrapolation-free and is not claimed to be",
+    "worst_case_core_h": 127.04,
+    "worst_case_wall_h_per_task": 3.97
+  },
+  "instrument": {
+    "align_timeout_s": 600.0,
+    "cutoffs": {
+      "engine": "nhmmer",
+      "evalue": 100.0,
+      "max_target_seqs": 500,
+      "min_cov": 0.5,
+      "min_pident": 40.0
+    },
+    "cutoffs_witness": "reports/p2/homolog_msa_search_report.json",
+    "min_cov_reach": {
+      "fp_median_nt": 110.0,
+      "median_difference_nt": 6.0,
+      "min_cov": 0.5,
+      "note": "min_cov is a fraction of QUERY length, so the absolute demand tracks the query population; the two medians differ by median_difference_nt, which is what the P3-15'-g-ii re-detect was for. The cutoff is left at the D17-frozen value: changing it for the control would make it a different instrument from the corpus it calibrates.",
+      "query_median_nt": 104.0,
+      "required_covered_nt_at_fp_median": 55.0,
+      "required_covered_nt_at_query_median": 52.0
+    },
+    "min_sequences_floor_note": "ADR-0006 A2's min_sequences = 20 is unchanged; a curated query does not self-hit the searched DB (P3-15'-g measured 76/76 FP assemblies in it), so at the same true homolog set the control's alignment is ONE SEQUENCE SHALLOWER than the FP arm's. \u26a0 That one sequence is maximally consequential here: the FP corpus's measured median depth is 20.0 \u2014 exactly the floor \u2014 so the control's producible share is biased DOWNWARD relative to the corpus it calibrates, and the bias is concentrated on the candidates nearest the floor. Not corrected for (the floor is a pinned ADR value and correcting it would make this a different instrument); disclosed so the rate is read as a lower bound.",
+    "route": "sequence (QUERY_FASTA) \u2014 only the query differs from the FP supply run",
+    "sbatch": "slurm/p2/mine_round_producer.sbatch"
+  },
+  "pins_nothing": true,
+  "preflight": {
+    "all_pass": true,
+    "clause_schema_version": "1.2",
+    "clauses": {
+      "align_timeout_matches_the_sized_bound": true,
+      "array_width_covers_every_shard": true,
+      "every_manifest_candidate_has_a_query": true,
+      "every_query_length_matches_its_span": true,
+      "manifest_nonempty": true,
+      "query_fasta_export_is_the_staged_copy": true,
+      "query_fasta_nonempty": true,
+      "round_dir_is_not_the_fp_supply": true,
+      "sbatch_carries_the_sequence_route": true,
+      "sbatch_cpus_match_the_sized_envelope": true,
+      "sbatch_cutoffs_match_the_certified_config": true,
+      "shards_partition_the_manifest": true,
+      "shipped_validator_accepts_every_shard": true,
+      "worst_case_task_fits_the_wall_limit": true
+    },
+    "measured": {
+      "n_candidates": 317,
+      "n_query_records": 317,
+      "n_shards": 16,
+      "n_with_a_query": 317,
+      "n_with_matching_length": 317,
+      "supply_error": null,
+      "validator_error": null
+    }
+  },
+  "provenance": {
+    "adr": "ADR-0005 A10 (the per-candidate producer cost centre and its decoupled-array orchestration); ADR-0006 A2 (min_sequences = 20) / A3 (mlocarna) / A4 (criterion (b)'s instrument); D17 (the P6-frozen search cutoffs this run does not touch)",
+    "env_lock_hash": "a4a6715d411d7218432c4c670d35475f6c9aa7dd6397fd5d906ca7e21293dc34",
+    "extra": {
+      "external_inputs": {},
+      "schema_version": "1.0"
+    },
+    "generated_at_utc": "2026-08-11T17:41:51.497832+00:00",
+    "git_sha": "07d466d7dd34ff6d97f9746cd553d5d36401a38d",
+    "inputs": {
+      "data/processed/mining/curated_control_manifest_v0.json": "363795fba6cd4d1d85495ec62e6e62cd11f1bf37b0fdf739c48315777c4d2a83",
+      "data/processed/mining/curated_control_queries_v0.fasta": "08a3d160e35efa36983002dd3776384d2b16feb19a182e0b0d2c2fbb36e6e0c0",
+      "reports/p2/homolog_msa_search_report.json": "778236bd88be8f2d74ebb701714abd0ee181e0ad0b95817eef58dc2db1dd37f6",
+      "reports/p3/curated_control_detect.json": "7e096b0df6c18ef09ec16248434a5a10f3046cfe0cbd04066355b51874707466",
+      "reports/p3/curated_control_sizing.json": "9629b970d19e7692cf96459a3bbbd50bd05ab21c1ed21340bc95d6729f8ccd12",
+      "slurm/p2/mine_round_producer.sbatch": "c2a02ea7c855734d5eea4dbe0b07d86851f9da8fd3afa145479c5c0d13e34a82"
+    },
+    "outputs": {},
+    "rule": "P3-15'-g-iii curated-control producer run plan",
+    "schema_version": "1.0",
+    "script": "src/tbox_finder/mining/curated_control_run.py",
+    "seed": 42
+  },
+  "schema_version": "1.0",
+  "sized_from": {
+    "detect_report": "reports/p3/curated_control_detect.json",
+    "measured_from": "round-0 FP candidates (job 816)",
+    "sizing_report": "reports/p3/curated_control_sizing.json"
+  },
+  "step": "P3-15'-g-iii",
+  "submit": {
+    "make_shards_argv": [
+      "python",
+      "-m",
+      "tbox_finder.mining.covariation_producer",
+      "make-shards",
+      "--manifest",
+      "data/processed/mining/curated_control_manifest_v0.json",
+      "--n-shards",
+      "16",
+      "--out-dir",
+      "$HOME/tbox-scratch/round_p3_15g_control/shards"
+    ],
+    "make_shards_command": "PYTHONHASHSEED=0 PYTHONPATH=src python -m tbox_finder.mining.covariation_producer make-shards --manifest data/processed/mining/curated_control_manifest_v0.json --n-shards 16 --out-dir $HOME/tbox-scratch/round_p3_15g_control/shards",
+    "make_shards_env": {
+      "PYTHONHASHSEED": "0",
+      "PYTHONPATH": "src"
+    },
+    "prep_env": "tbox-homology",
+    "round_dir": "$HOME/tbox-scratch/round_p3_15g_control",
+    "sbatch_argv": [
+      "sbatch",
+      "--array=0-15",
+      "--export=ALL,SHARD_DIR=$HOME/tbox-scratch/round_p3_15g_control/shards,ROUND_DIR=$HOME/tbox-scratch/round_p3_15g_control,ALIGN_TIMEOUT_S=600,QUERY_FASTA=$HOME/tbox-scratch/round_p3_15g_control/curated_control_queries_v0.fasta",
+      "slurm/p2/mine_round_producer.sbatch"
+    ],
+    "sbatch_command": "sbatch --array=0-15 --export=ALL,SHARD_DIR=$HOME/tbox-scratch/round_p3_15g_control/shards,ROUND_DIR=$HOME/tbox-scratch/round_p3_15g_control,ALIGN_TIMEOUT_S=600,QUERY_FASTA=$HOME/tbox-scratch/round_p3_15g_control/curated_control_queries_v0.fasta slurm/p2/mine_round_producer.sbatch",
+    "shard_dir": "$HOME/tbox-scratch/round_p3_15g_control/shards",
+    "staging": {
+      "copy_command": "rsync -avz data/processed/mining/curated_control_queries_v0.fasta two:tbox-scratch/round_p3_15g_control/curated_control_queries_v0.fasta",
+      "mkdir_command": "ssh two 'mkdir -p \"$HOME/tbox-scratch/round_p3_15g_control\"'",
+      "query_fasta_sha256": "08a3d160e35efa36983002dd3776384d2b16feb19a182e0b0d2c2fbb36e6e0c0",
+      "staged_query_fasta": "$HOME/tbox-scratch/round_p3_15g_control/curated_control_queries_v0.fasta",
+      "verify_command": "ssh two 'sha256sum \"$HOME/tbox-scratch/round_p3_15g_control/curated_control_queries_v0.fasta\"'  # must equal query_fasta_sha256 above",
+      "why": "*.fasta is git-LFS-tracked and the cluster has NO git-lfs binary (measured 2026-08-11), so its checkout holds a ~130-byte pointer that passes every non-empty check, and `git reset --hard` restores that pointer on every \u00a79.3 sync. The sequences are staged OUTSIDE the checkout so no later sync reverts them and nothing dirties the repo's git status."
+    },
+    "then": "architecture_param_measure.measure --msa-root <round_dir>/msa over the resulting consensuses, read against P3-15'-f's identical grid; the read side needs no new code and is a separate step",
+    "verification": {
+      "consensus_root": "$HOME/tbox-scratch/round_p3_15g_control/msa/<candidate-slug>/msa.sto",
+      "expect_shard_ok_markers": 16,
+      "expect_zero_byte_err": "reports/p2/mine_round_producer_<jobid>_*.err",
+      "note": "artifact-based (sacct off, CLAUDE.md \u00a79.3 step 8)",
+      "shard_ok_glob": "$HOME/tbox-scratch/round_p3_15g_control/status/shard_*.SHARD_OK",
+      "why_manual": "this is a STANDALONE producer array with no retrain leg (d), and leg (d) is what normally counts the SHARD_OK markers against the shard files and fails loud on a gap \u2014 here that count is the operator's own \u00a79.3 step-8 check"
+    }
+  },
+  "supply": {
+    "fp_length_nt": {
+      "max": 296,
+      "mean": 113.46,
+      "min": 50,
+      "n": 941,
+      "p05": 65,
+      "p25": 83,
+      "p50": 110,
+      "p75": 142,
+      "p95": 166
+    },
+    "independent_observations_note": "the producer's unit is the QUERY, but independent observations are bounded by the RECORDS behind them (one draw per ADR-0004 cluster); any CI from this control is stated on the record-level n, never on the query count (\u00a77 ruling, 2026-08-10)",
+    "manifest": "data/processed/mining/curated_control_manifest_v0.json",
+    "n_queries": 317,
+    "n_records_with_a_query": 160,
+    "n_windows_scanned": 200,
+    "query_fasta": "data/processed/mining/curated_control_queries_v0.fasta",
+    "query_length_nt": {
+      "max": 190,
+      "mean": 108.87,
+      "min": 50,
+      "n": 317,
+      "p05": 65,
+      "p25": 79,
+      "p50": 104,
+      "p75": 137,
+      "p95": 162
+    }
+  },
+  "wall_limit_h": 12.0
+}

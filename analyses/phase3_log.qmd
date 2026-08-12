@@ -5405,7 +5405,7 @@ record-level n, not the query count. The producer leg — `nhmmer` + `mlocarna` 
 via the **sequence route**, under `ALIGN_TIMEOUT_S = 600` — is the next step and still owes a §9.3
 submit-ack. Cross-links ADR-0004 D3/D5, ADR-0005 A7/A9 Pin 3, ADR-0006 A2/A4.
 
-**Commit.** `PENDING`
+**Commit.** `4b4674f`
 
 **Review addendum (P3-15′-g-ii).** The `CodeRabbit` GitHub check read **`pass` with a body of only
 a rate-limit notice** for the whole step — §5.1's trap, **an absence, not a pass**, fifteenth step
@@ -5428,3 +5428,226 @@ Every headline number survived the round unchanged. The duplicate-digest rule wa
 pure function because the local test env has pandas but **no pyarrow**: the rule is tested
 everywhere, its call site is a **CI-only** parquet test, and that call site was additionally
 verified by direct execution in `tbox-finder-data` — a skip is not a pass.
+
+## Step P3-15′-g-iii — 2026-08-11: the control's producer run — the sequence-route seam, the array sizing, and the submit it stops at
+
+**Inputs.** `data/processed/mining/curated_control_manifest_v0.json` (317 queries over 160
+held-out curated records, P3-15′-g-ii) · `curated_control_queries_v0.fasta` (the same 317) ·
+`reports/p3/curated_control_sizing.json` (P3-15′-g's envelope: `worst_case_per_candidate_s`
+714.6, shard 20, cpus 2, `ALIGN_TIMEOUT_S` 600) · `reports/p3/curated_control_detect.json`
+(query median 104 nt against the FP median 110) · `reports/p2/homolog_msa_search_report.json`
+(job 766's certified `nhmmer` config) · `slurm/p2/mine_round_producer.sbatch` (the array that
+ran the full-corpus FP supply, jobs 1205/1254) · ADR-0005 A10; ADR-0006 A2/A3/A4, D17.
+
+**Process.** The producer resolved every query from the A1 genome FASTAs at manifest
+coordinates, unconditionally, so a curated-frame accession raised `HomologDbError` — an
+exception the per-candidate handler deliberately does *not* catch, which would have aborted
+the whole array task. `covariation_producer.search_shard` now takes an optional
+`query_fasta` (`src/tbox_finder/mining/covariation_producer.py`): `None` is the coordinate
+route unchanged, a path is the **sequence route** (the job-766 `homolog_msa` seed/search/align
+path) with the query nucleotides keyed by `candidate_id`. Only the query moves — the homolog
+extraction still reads `--genome-dir`, and the cutoffs, `mlocarna` align, promotion, R-scape
+score and merge are the same code on both routes, which is the whole content of "the control
+ran the same instrument". `resolve_shard_queries` validates the **whole shard up front**,
+before the first candidate's search, and refuses as a shard-level error rather than absorbing
+a mismatch as a per-candidate `unavailable`. The sbatch gains an optional `QUERY_FASTA`
+export (empty ⇒ byte-identical behaviour) guarded beside the cheap `ALIGN_TIMEOUT_S` checks —
+a *sibling* script would have had to duplicate the promotion loop, the marker discipline and
+the D17 cutoffs, and "the same instrument" would then have meant "a copy of it".
+`src/tbox_finder/mining/curated_control_run.py::plan` derives the run: the array width from
+the manifest's own count through the **shipped** `partition_shards`, the worst case from the
+sizing report, the wall limit and cutoffs parsed out of the sbatch's own bytes, and the exact
+token list of the two commands the ack authorizes.
+
+**Outputs.** `covariation_producer.load_query_fasta` / `resolve_shard_queries` / the
+`query_fasta` seam + `--query-fasta` + a `query_route` field in every `search.json` row ·
+`slurm/p2/mine_round_producer.sbatch` (`QUERY_FASTA` route) ·
+`src/tbox_finder/mining/curated_control_run.py` ·
+`reports/p3/curated_control_run_plan.json` (`pins_nothing: true`) ·
+`tests/unit/test_curated_control_run.py` (61 tests) + 15 seam tests in
+`tests/unit/test_covariation_producer.py`. **The run is NOT submitted: the §9.3 ack is the
+open stop.** No DVC object; no ADR amendment.
+
+**⚠⚠ THE PREFLIGHT FOUND WHAT PROSE COULD NOT: THE QUERIES ARE NOT ON THE CLUSTER.**
+`sbatch --test-only` passed (`Job 1258 to start … 2 processors … partition gpu`, both gpu
+nodes up), but the same SSH session showed
+`data/processed/mining/curated_control_queries_v0.fasta` in the cluster checkout beginning
+`version https://git-lfs.github.com/spec/v1`. `*.fasta` is git-LFS-tracked
+(`.gitattributes`) and the cluster has **no git-lfs binary at all** — so §9.3 step 3's
+`git reset --hard` leaves a ~130-byte **pointer** there, permanently, and a pointer is a
+perfectly good non-empty file: it passes `[ -s ]`, survives to the producer through three
+conda activations, and would have failed 16 tasks with a message about FASTA records.
+Handled three ways rather than remembered: `load_query_fasta` and the sbatch each refuse a
+pointer **by name**, and the sequences are **staged outside the checkout** into `$ROUND_DIR`
+(where no later sync can revert them and nothing dirties the `git status` a provenance gate
+reads), bound by sha256 — a stale or truncated staged copy being the one failure the
+sbatch's own guards cannot see. ⚠ The staged copy is in place and **verified**:
+`08a3d160…`, 317 records, digest-identical to the committed artifact.
+
+**⚠ THE COPY COMMAND IN THE PLAN IS THE ONE THAT RAN, AND THE FIRST SPELLING DID NOT.**
+`rsync … two:'$HOME/tbox-scratch/…'` fails — `change_dir … No such file or directory` —
+because an rsync remote path is **not** run through a remote shell; it resolves a *relative*
+remote path against the remote home instead. So `copy_command` carries the relative form
+while the `--export` token and the verify command keep `$HOME`, which their shells do expand.
+Two spellings of one path, each measured ([[verify-the-line-you-ship]]).
+
+**The sizing, re-derived rather than quoted.** 317 queries at shard 20 ⇒ **16 tasks**
+(`--array=0-15`), shards of 20/19 — not `-g`'s 10, which was sized on K = 200 *records*
+before the queries existed. Worst case **3.97 h/task** (20 × (search_max 114.2 s +
+`ALIGN_TIMEOUT_S` 600 s + score_max 0.4 s)) against the 12 h wall, ⇒ **≤ 127.04 core-h**,
+expected ≈ **3.0 core-h**, **0 GPU-h**. The bound contains the align timeout by construction
+and extrapolates nothing; only the expectation carries P3-15′-g's own caveat about FP wall on
+a curated population, and it is carried verbatim rather than paraphrased.
+
+**Validation.** `tests/unit` + `tests/golden` under deterministic ordering against a matched
+`main` baseline at `4b4674f`: **ZERO new failures** — worktree **13** FAILED, main **26**, a
+strict subset; the delta is 13 tests moving from FAILED to **SKIPPED** on DVC/LFS inputs a
+fresh worktree does not materialise (+1 more in `test_split_table_schema` for the same
+reason), with both `^FAILED` sets ANSI-stripped and cross-checked against the summary line,
+and a collection diff proving no existing test was dropped (15 → 27 in the producer's suite,
+45 new at that point). **134 tests added in total; 55 sabotages, all RED against their NAMED
+test, plus 2 negative controls that stay green.** ⚠ One sabotage reported **green while
+running the original module**: `n_windows_scanned` → `n_records_scanned` is the same length,
+and a same-second write with an unchanged size leaves CPython's cached bytecode valid, so the
+harness now clears `__pycache__` and runs with `PYTHONDONTWRITEBYTECODE`
+([[sabotage-restores-masked-by-pycache]]). The report **re-derives byte-identically**
+apart from `provenance.generated_at_utc` and `git_sha`. `ruff` + `black` + `bash -n` clean.
+
+**Review.** **Eleven CodeRabbit CLI rounds — 1 / 1 / 0 / limit / 1 / 1 / 2 / limit / 2 / 1 / 2 findings
+(3 major), all eleven real**, plus an independent five-lens adversarial pass; the round-4 slot was a **Fair-Usage stall that
+was waited out (41 min) rather than escalated**, and it was worth waiting for: round 5,
+after two clean-looking rounds, returned the sharpest finding of the step. ⚠ **No round
+before the last was evidence of convergence** — r3 read *No new findings* and r5 still had
+one. the GitHub app reviewed the first commit automatically and
+returned **the same two findings independently**, then read `pass` with a body of only a
+rate-limit notice for the rest of the step (§5.1's trap, **an absence, not a pass**,
+sixteenth step running) — **no Greptile credit spent**. Round 3's replayed *"1 previous
+finding"* was **verified fixed in-tree by grep plus its own green named test**, not assumed
+stale. ⚠ **Both findings were about a check that could not fail.** r1: `read_sbatch` guarded
+three of the five cutoff constants its return block indexes, so a moved
+`CTRL_MAX_TARGET_SEQS` escaped as a bare `KeyError` naming one key and no artifact — fixed
+with **one** `SBATCH_CUTOFF_KEYS` tuple read by both the guard and the reader, parametrized
+over in the test so a sixth cutoff is covered when it is added. r2, the sharper one:
+`align_timeout_matches_the_sized_bound` compared `sizing["align_timeout_s"]` **against
+itself**, true by construction on every real run — precisely the vacuity this module's own
+docstring claims the clause set avoids. The three run-shape clauses now read their subject
+out of the `--export` token the run actually receives, and a **new** clause requires the
+exported `QUERY_FASTA` to be the staged copy rather than the repo path (clause set 1.0 →
+1.1, so an older report re-validates FALSE instead of skipping the new check). r5 is the one
+**the clause set could not have caught**: `sbatch --export` splits its list on commas and
+each item on its first `=`, so a `round_dir` containing either would reach the array as a
+*truncated* variable list — and `exported_value` parses that same string the same way, so
+every run-shape clause would read back the truncation and **agree with it**. Refused at
+construction, where the un-truncated value still exists. ⚠ Its first sabotage **stayed
+green**, and the sabotage was right: every export value derives from `round_dir`, so
+dropping the guard on one item is still caught by a sibling. The guard is now tested by a
+direct call per character class **with a positive control**, and the sabotage drops the
+whole block. r6 then found the same class one level down: `round_dir_is_not_the_fp_supply`
+compared **raw strings**, so `$HOME/tbox-scratch/./round_p3_15_supply` — the FP supply, spelled
+with a dot — passed it, and the control's consensuses would have landed in exactly the
+directory the module documents as the thing to avoid. Now compared **segment-wise**
+(`PurePosixPath`), with `..` refused rather than resolved (its meaning depends on the
+cluster's filesystem, which this check cannot see) and the round dir required to be
+`$HOME`-rooted at construction, because the comparison is over **unexpanded** paths and two
+spellings of the home directory are two coordinate systems. ⚠ Its first sabotage also stayed
+green — `PurePosixPath` already drops `.`, so the defensive filter beside it was
+**unreachable**; it was deleted rather than kept as decoration, and the test now pins the
+behaviour (a hand-rolled `split("/")` fails it).
+
+**⚠ r7's major is the one a reader should carry: `--export` values are expanded by the
+SUBMITTING shell, not by the job.** The plan publishes `$HOME/…` unexpanded *by design* — it
+is the cluster's home, unknowable here — so the submit line must be run **in a shell**. Hand
+the argv list to something that execs without one and every path resolves against the CWD;
+it fails closed (`shard … missing`) but names the wrong problem, and on the `ROUND_DIR` path
+it would create a scratch tree inside the repo checkout. The sbatch now refuses a surviving
+literal `$` in `SHARD_DIR`/`ROUND_DIR`/`QUERY_FASTA` **by name**, with a positive control
+that expanded paths still pass. r7's minor was a naming defect of the same family: the plan
+published `supply.n_records_scanned` from the detect report's `dropout.n_windows_scanned` —
+a **window** count. They coincide here (the draw emits one window per record) and that is
+exactly why the wrong name would never have been caught by its value; it is now published as
+`n_windows_scanned`, with the record-level `n_records_with_a_query` = 160 left as the number
+any CI must be stated on.
+
+**⚠ AN INDEPENDENT ADVERSARIAL PASS WAS RUN WHILE CODERABBIT WAS RATE-LIMITED, AND ITS BEST
+FINDING WAS THAT THE ACK'S FIRST COMMAND COULD NOT RUN.** Five lenses over the branch diff,
+each finding refuted by a separate agent (25 raised, and the survivors were verified **by
+execution on the cluster**, not by argument). The one that mattered: `make_shards_command`
+was published without `PYTHONPATH=src`, and no env installs this package — in the very env
+the plan names (`tbox-homology`, at the checkout root on `two`) the published string exits 1
+with `ModuleNotFoundError`. **My own earlier cluster run of `make-shards` worked because I
+typed the prefix into the heredoc; the plan published the line I did not run**
+([[verify-the-line-you-ship]], again, and this time against my own artifact). Four more were
+real and are fixed: `array_width_covers_every_shard` compared the layout to itself (the r2
+class, a second instance); `query_fasta_nonempty` was structurally unfalsifiable because the
+loader raised three lines earlier, so the refusal is now a **clause** rather than a
+traceback; `cpus_per_task` — the multiplier on every published core-hour — came from the
+sizing report rather than from the `#SBATCH` header that runs, and now binds them with a new
+clause (set 1.2); and the `.err` glob and the "6 nt apart" difference were typed rather than
+derived. The **whole-body** report comparison replaced a three-block one that left `supply`
+and `instrument` — every scientific number the control publishes — pinned by nothing.
+
+**⚠ THE FLOOR DISCLOSURE IS NOW A NUMBER, AND IT CUTS AGAINST THE CONTROL.** A curated query
+does not self-hit the searched DB, so at the same true homolog set the control's alignment is
+**one sequence shallower** than the FP arm's — and the FP corpus's measured **median depth is
+20.0, exactly ADR-0006 A2's `min_sequences` floor**. The control's producible share is
+therefore biased **downward** relative to the corpus it calibrates, concentrated on the
+candidates nearest the floor. Not corrected (the floor is a pinned ADR value and moving it
+would make this a different instrument) — disclosed, so the rate is read as a lower bound.
+
+⚠ Two review agents **mutated the tree they were reviewing** (one introduced a sabotage, a
+second reverted it with `git checkout --`); the worktree was audited afterwards and is
+byte-identical to the pushed commit ([[review-agents-mutate-code-under-review]]).
+
+**⚠ r9's two, and the second one is a refusal to overclaim.** (1) The sbatch-constant scan
+matched inside **comment lines** — the pattern also anchors after a `;`, and this file is
+mostly prose, so a cutoff restated in a comment ("…; `CTRL_MIN_COV="0.9"`") would be read as
+an assignment and, being later in the file, would **shadow** the live value; comment lines are
+now dropped before the scan. (2) The published `rsync`/`sha256sum` strings embedded their
+paths unquoted, which a pasted command would split on a space — but a space **cannot reach
+there**: the staged name derives from that basename and `_export_item` refuses it first. The
+quoting was added anyway (it costs nothing and survives a future relaxation) and **labelled
+unreachable in the code**, with the test pinning the property that *is* reachable — the
+published string `shlex.split`s back into exactly the argv it names — rather than a scenario
+that cannot occur. Its sabotage was dropped for the same reason: with no space possible, the
+mutation changes nothing observable, and a sabotage that cannot bite is not evidence.
+
+**⚠ r10 caught the same defect one edit further out**, which is why one clean-looking fix is
+not a closed class: the comment filter dropped only **full-line** comments, so
+`CTRL_MIN_COV="0.5"  # rejected; CTRL_MIN_COV="0.9"` still shadowed the live value. The strip
+is now **quote-aware** rather than a `split("#")` — a `#` inside a quoted value is part of the
+value, and truncating there would silently rewrite the very number the parse exists to read.
+
+**⚠⚠ r11's two majors are both the same lesson as the workflow's, and it is the lesson of this
+step: I kept publishing lines I had not run.** (1) The staging `mkdir` and `sha256sum` were
+published as **local** commands — as written they create a directory on the laptop and hash a
+laptop file, reporting agreement about a file the run will never read; my own staging worked
+because I typed `ssh two …` by hand. Both are now remote, and **all three staging commands
+were then executed verbatim from the committed artifact**: the digest came back
+`08a3d160…` from `/exports/people/mondragonlab/ecc1695/…`. (2) The sequence-route markers
+were matched against the **raw** sbatch text, so a comment mentioning `--query-fasta` would
+have certified `sbatch_carries_the_sequence_route` for a script that never passes the
+argument — they now read the comment-stripped source, like the cutoffs.
+CI green (lint · pytest · snakemake).
+
+**Decisions.** ⚠ **The seam defaults off, and that default is the argument.** ADR-0005 A10
+Pin 2 says each `MiningCandidate` "is re-resolved to nucleotides from the A1 genome FASTA
+before search"; with `query_fasta=None` that stays literally true of every mining path, and
+the control is not a mining round — it scores nothing into a hard-negative pool. **No ADR is
+amended**, and the point is flagged here rather than absorbed. ⚠ **A missing or wrong-length
+query is refused loudly, not spared.** The fail-closed convention routes a *record's* defect
+to `unavailable` ⇒ spared; a manifest/FASTA mismatch is a **pairing fault between two
+inputs**, and this control reads its `unavailable` count as the instrument's producible
+share — so absorbing one would publish a plumbing error as a measurement. A sequence of the
+wrong length is the sharper half: it is a *different locus* arriving under this candidate's
+name, plausible at every downstream stage and detectable at none. ⚠ **A new `ROUND_DIR`, and
+a clause that enforces it.** The control's consensuses must not be promoted into
+`round_p3_15_supply`, which the P3-15′-f sweep reads whole; the clause refuses the FP dir, any
+subdirectory of it, and any parent of it, since each would merge the two supplies. ⚠
+**`--min-cov 0.5` is left where D17 froze it, and the re-check is recorded as nucleotides**:
+0.5 × 104 nt = **52 nt** demanded of a hit at the control's median query against **55 nt** at
+the FP median. The two populations are 6 nt apart — which is what the `-g-ii` re-detect was
+for — so moving the cutoff for the control is what would make it a different instrument.
+⚠ **Independent observations are the 160 records, not the 317 queries**, and the plan says so
+in the artifact rather than in prose alone. Cross-links ADR-0005 A10, ADR-0006 A2/A3/A4, D17.
+
+**Commit.** `PENDING`
