@@ -73,6 +73,7 @@ from tbox_finder.mining.architecture_param_measure import (
     candidate_state,
     default_tuples,
     is_inside_repo,
+    is_local_path_shaped,
     portable_path,
     read_supply,
     sha256_of,
@@ -657,7 +658,7 @@ def compare(
     tuples: Sequence[ParamTuple] | None = None,
 ) -> dict[str, Any]:
     """The whole comparison, as the report body (no provenance — ``main`` adds it)."""
-    if supply_origin is not None and str(supply_origin).startswith("/"):
+    if supply_origin is not None and is_local_path_shaped(supply_origin):
         raise CompareError(
             f"supply_origin {supply_origin!r} is a local absolute path; it is recorded "
             "verbatim in a PUBLIC report — name the host and use $HOME"

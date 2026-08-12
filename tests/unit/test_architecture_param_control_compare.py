@@ -1304,3 +1304,31 @@ def test_the_hashing_refusal_has_a_positive_control(control_files, reports, tmp_
     out = tmp_path / "comparison.json"
     assert cmp.main(cli_args(control_files, reports, out)) == 0
     assert out.is_file()
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# CodeRabbit round 10 — the supply_origin guard, at both spellings and both sites
+# ═════════════════════════════════════════════════════════════════════════════
+@pytest.mark.parametrize(
+    "origin",
+    ["/home/someone/scratch/msa", "~/work/round_p3_15g_control", "C:\\Users\\someone\\msa"],
+)
+def test_every_local_path_spelling_of_supply_origin_is_refused(control_files, reports, origin):
+    """A leading `/` was only the most obvious one; `~` expands to the same home
+    directory and the Windows form carries the account name just as plainly."""
+    with pytest.raises(cmp.CompareError, match="local absolute path"):
+        run_compare(control_files, reports, supply_origin=origin)
+
+
+@pytest.mark.parametrize(
+    "origin",
+    [
+        "two.amlab:$HOME/tbox-scratch/round_p3_15g_control/msa (SLURM job 1264)",
+        "two.amlab:$HOME/x",
+        "cluster-scratch, round_p3_15g_control",
+    ],
+)
+def test_host_qualified_supply_origins_are_still_accepted(control_files, reports, origin):
+    """Positive control: the real value carries a colon and must not be caught."""
+    body = run_compare(control_files, reports, supply_origin=origin)
+    assert body["arms"]["control"]["supply_origin"] == origin

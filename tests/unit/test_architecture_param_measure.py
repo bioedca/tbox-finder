@@ -1271,6 +1271,12 @@ def test_a_non_default_arm_with_the_default_out_is_refused(supply, tmp_path, mon
     root, ids = supply
     manifest = manifest_for(tmp_path, ids)
     monkeypatch.chdir(tmp_path)
+    # ⚠ NO mkdir here, deliberately. A review round argued that without one a rc of 3
+    # could come from the write failing into a missing directory, so the test would
+    # pass with the guard removed. Measured: it cannot — `main` creates `out.parent`
+    # itself, so the guard is the only thing that can return 3 on this input. The
+    # behaviour that makes that true is pinned by
+    # `test_main_creates_its_own_output_parent_directory` below.
     rc = apm.main(
         [
             "measure",
@@ -1393,3 +1399,66 @@ def test_the_arm_diff_tells_an_absent_key_from_a_null_valued_one():
 
     diff({"kept": None}, {})
     assert differing == ["/kept"]
+
+
+@pytest.mark.parametrize(
+    "value", ["/exports/people/x/msa", "~/msa", "C:\\Users\\x\\msa", "//server/share/msa"]
+)
+def test_is_local_path_shaped_catches_every_local_spelling(value):
+    assert apm.is_local_path_shaped(value) is True
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "two.amlab:$HOME/tbox-scratch/round_p3_15_supply/msa (SLURM jobs 1205 + 1254)",
+        "msa_supply",
+        "cluster scratch",
+    ],
+)
+def test_is_local_path_shaped_passes_a_host_qualified_origin(value):
+    """Positive control: a predicate that returned True for everything would satisfy
+    the refusal tests while making the field unusable."""
+    assert apm.is_local_path_shaped(value) is False
+
+
+def test_the_measure_arm_refuses_a_tilde_supply_origin(supply, tmp_path):
+    """Same guard, same class, the OTHER module — fixed at both sites at once."""
+    root, ids = supply
+    with pytest.raises(apm.MeasureError, match="local absolute path"):
+        apm.measure(
+            msa_root=root,
+            manifest_path=manifest_for(tmp_path, ids),
+            covariation_status_path=None,
+            positive_control_path=None,
+            supply_origin="~/tbox-scratch/msa",
+        )
+
+
+def test_main_creates_its_own_output_parent_directory(supply, tmp_path):
+    """Pinned because a review round's argument turned on the opposite.
+
+    The claim was that `--out` into a non-existent directory returns 3, which would
+    make `test_a_non_default_arm_with_the_default_out_is_refused` pass for the wrong
+    reason. `main` calls `out.parent.mkdir(parents=True, exist_ok=True)`, so a missing
+    directory is not a refusal at all — and if that ever changes, that test starts
+    passing for the wrong reason and this one goes red first.
+    """
+    root, ids = supply
+    out = tmp_path / "does" / "not" / "exist" / "report.json"
+    assert not out.parent.exists()
+    rc = apm.main(
+        [
+            "measure",
+            "--msa-root",
+            str(root),
+            "--manifest",
+            str(manifest_for(tmp_path, ids)),
+            "--positive-control",
+            str(tmp_path / "absent.sto"),
+            "--out",
+            str(out),
+        ]
+    )
+    assert rc == 0
+    assert out.is_file()

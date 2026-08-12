@@ -270,6 +270,20 @@ def portable_path(path: str | Path) -> str:
         return p.name
 
 
+def is_local_path_shaped(value: str) -> bool:
+    """Does ``value`` look like a LOCAL filesystem path rather than a host-qualified one?
+
+    ``supply_origin`` is the one field recorded verbatim in a PUBLIC report, so it is
+    the one place a home directory and an account name can still reach it. A leading
+    ``/`` is only the most obvious spelling: ``~/work/round`` expands to the same
+    home directory, and ``C:\\Users\\...`` is the Windows form. The legitimate value —
+    ``two.amlab:$HOME/tbox-scratch/<round>/msa`` — is not absolute on POSIX, does not
+    start with ``~``, and carries no drive-letter separator, so it passes.
+    """
+    text = str(value)
+    return Path(text).is_absolute() or text.startswith("~") or ":\\" in text
+
+
 def sha256_of(path: str | Path) -> str:
     """sha256 of one file, for an input recorded by name rather than by path.
 
@@ -936,7 +950,7 @@ def measure(
     # than a path this process discovered. That makes it the one place a local absolute
     # path could still reach a PUBLIC report, so it is refused rather than redacted —
     # redacting would destroy the cluster path that is the whole point of the field.
-    if supply_origin is not None and str(supply_origin).startswith("/"):
+    if supply_origin is not None and is_local_path_shaped(supply_origin):
         raise MeasureError(
             f"supply_origin {supply_origin!r} is a local absolute path; it is recorded "
             "verbatim in a public report — name the host and use $HOME, e.g. "
