@@ -1154,11 +1154,16 @@ def test_only_the_self_description_changes_between_the_two_arms(supply, tmp_path
     control_body = apm.measure(**kwargs, arm="curated_control")
 
     differing: list[str] = []
+    # ⚠ A sentinel, not `None`: `a.get(k)` returns None for an ABSENT key and for a
+    # key whose value IS None, so an arm that dropped a null-valued field would look
+    # identical to one that kept it, and this test would keep asserting "only four
+    # paths differ" through a real schema change.
+    missing = object()
 
     def diff(a, b, path=""):
         if isinstance(a, dict) and isinstance(b, dict):
             for k in sorted(set(a) | set(b)):
-                diff(a.get(k), b.get(k), f"{path}/{k}")
+                diff(a.get(k, missing), b.get(k, missing), f"{path}/{k}")
         elif isinstance(a, list) and isinstance(b, list) and len(a) == len(b):
             for i, (x, y) in enumerate(zip(a, b, strict=True)):
                 diff(x, y, f"{path}[{i}]")
@@ -1367,3 +1372,24 @@ def test_a_genuinely_different_out_path_is_still_allowed(supply, tmp_path, monke
     )
     assert rc == 0
     assert json.loads(out.read_text())["step"] == apm.SUPPLY_ARMS["curated_control"].step
+
+
+def test_the_arm_diff_tells_an_absent_key_from_a_null_valued_one():
+    """The sentinel in `test_only_the_self_description_changes_between_the_two_arms`.
+
+    With `a.get(k)` both sides read None and the pair looks identical, so an arm that
+    DROPPED a null-valued field would slip through the "only four paths differ"
+    assertion. Exercised on the same walk the diff test uses.
+    """
+    differing: list[str] = []
+    missing = object()
+
+    def diff(a, b, path=""):
+        if isinstance(a, dict) and isinstance(b, dict):
+            for k in sorted(set(a) | set(b)):
+                diff(a.get(k, missing), b.get(k, missing), f"{path}/{k}")
+        elif a != b:
+            differing.append(path)
+
+    diff({"kept": None}, {})
+    assert differing == ["/kept"]
