@@ -200,6 +200,35 @@
         "min_named_helices": 1,
         "ncca_pairing_nt": 1,
         "stem_i_nt_threshold": 1
+      },
+      "stratified_by_criterion_a": {
+        "criterion_a_failed": {
+          "control": {
+            "failed": 7,
+            "n": 46,
+            "share_failed": 0.152174
+          },
+          "fp": {
+            "failed": 20,
+            "n": 111,
+            "share_failed": 0.18018
+          },
+          "fp_minus_control": 0.028006
+        },
+        "criterion_a_passed": {
+          "control": {
+            "failed": 1,
+            "n": 30,
+            "share_failed": 0.033333
+          },
+          "fp": {
+            "failed": 5,
+            "n": 167,
+            "share_failed": 0.02994
+          },
+          "fp_minus_control": -0.003393
+        },
+        "reading": "if the arms' (b) failure shares stay close INSIDE each (a) stratum, the overall similarity is not an artifact of the two arms having different (a) compositions. \u26a0 (a) is not ground truth on either arm, and on the control it is a measurement of (a)'s own sensitivity on known T-boxes."
       }
     },
     {
@@ -249,6 +278,35 @@
         "min_named_helices": 2,
         "ncca_pairing_nt": 2,
         "stem_i_nt_threshold": 1
+      },
+      "stratified_by_criterion_a": {
+        "criterion_a_failed": {
+          "control": {
+            "failed": 8,
+            "n": 46,
+            "share_failed": 0.173913
+          },
+          "fp": {
+            "failed": 32,
+            "n": 111,
+            "share_failed": 0.288288
+          },
+          "fp_minus_control": 0.114375
+        },
+        "criterion_a_passed": {
+          "control": {
+            "failed": 3,
+            "n": 30,
+            "share_failed": 0.1
+          },
+          "fp": {
+            "failed": 20,
+            "n": 167,
+            "share_failed": 0.11976
+          },
+          "fp_minus_control": 0.01976
+        },
+        "reading": "if the arms' (b) failure shares stay close INSIDE each (a) stratum, the overall similarity is not an artifact of the two arms having different (a) compositions. \u26a0 (a) is not ground truth on either arm, and on the control it is a measurement of (a)'s own sensitivity on known T-boxes."
       }
     },
     {
@@ -298,6 +356,35 @@
         "min_named_helices": 3,
         "ncca_pairing_nt": 2,
         "stem_i_nt_threshold": 1
+      },
+      "stratified_by_criterion_a": {
+        "criterion_a_failed": {
+          "control": {
+            "failed": 29,
+            "n": 46,
+            "share_failed": 0.630435
+          },
+          "fp": {
+            "failed": 66,
+            "n": 111,
+            "share_failed": 0.594595
+          },
+          "fp_minus_control": -0.03584
+        },
+        "criterion_a_passed": {
+          "control": {
+            "failed": 10,
+            "n": 30,
+            "share_failed": 0.333333
+          },
+          "fp": {
+            "failed": 75,
+            "n": 167,
+            "share_failed": 0.449102
+          },
+          "fp_minus_control": 0.115769
+        },
+        "reading": "if the arms' (b) failure shares stay close INSIDE each (a) stratum, the overall similarity is not an artifact of the two arms having different (a) compositions. \u26a0 (a) is not ground truth on either arm, and on the control it is a measurement of (a)'s own sensitivity on known T-boxes."
       }
     },
     {
@@ -347,6 +434,35 @@
         "min_named_helices": 3,
         "ncca_pairing_nt": 3,
         "stem_i_nt_threshold": 1
+      },
+      "stratified_by_criterion_a": {
+        "criterion_a_failed": {
+          "control": {
+            "failed": 33,
+            "n": 46,
+            "share_failed": 0.717391
+          },
+          "fp": {
+            "failed": 89,
+            "n": 111,
+            "share_failed": 0.801802
+          },
+          "fp_minus_control": 0.084411
+        },
+        "criterion_a_passed": {
+          "control": {
+            "failed": 16,
+            "n": 30,
+            "share_failed": 0.533333
+          },
+          "fp": {
+            "failed": 131,
+            "n": 167,
+            "share_failed": 0.784431
+          },
+          "fp_minus_control": 0.251098
+        },
+        "reading": "if the arms' (b) failure shares stay close INSIDE each (a) stratum, the overall similarity is not an artifact of the two arms having different (a) compositions. \u26a0 (a) is not ground truth on either arm, and on the control it is a measurement of (a)'s own sensitivity on known T-boxes."
       }
     },
     {
@@ -396,6 +512,35 @@
         "min_named_helices": 4,
         "ncca_pairing_nt": 4,
         "stem_i_nt_threshold": 1
+      },
+      "stratified_by_criterion_a": {
+        "criterion_a_failed": {
+          "control": {
+            "failed": 44,
+            "n": 46,
+            "share_failed": 0.956522
+          },
+          "fp": {
+            "failed": 104,
+            "n": 111,
+            "share_failed": 0.936937
+          },
+          "fp_minus_control": -0.019585
+        },
+        "criterion_a_passed": {
+          "control": {
+            "failed": 28,
+            "n": 30,
+            "share_failed": 0.933333
+          },
+          "fp": {
+            "failed": 161,
+            "n": 167,
+            "share_failed": 0.964072
+          },
+          "fp_minus_control": 0.030739
+        },
+        "reading": "if the arms' (b) failure shares stay close INSIDE each (a) stratum, the overall similarity is not an artifact of the two arms having different (a) compositions. \u26a0 (a) is not ground truth on either arm, and on the control it is a measurement of (a)'s own sensitivity on known T-boxes."
       }
     },
     {
@@ -445,6 +590,35 @@
         "min_named_helices": 4,
         "ncca_pairing_nt": 4,
         "stem_i_nt_threshold": 1
+      },
+      "stratified_by_criterion_a": {
+        "criterion_a_failed": {
+          "control": {
+            "failed": 45,
+            "n": 46,
+            "share_failed": 0.978261
+          },
+          "fp": {
+            "failed": 107,
+            "n": 111,
+            "share_failed": 0.963964
+          },
+          "fp_minus_control": -0.014297
+        },
+        "criterion_a_passed": {
+          "control": {
+            "failed": 30,
+            "n": 30,
+            "share_failed": 1.0
+          },
+          "fp": {
+            "failed": 164,
+            "n": 167,
+            "share_failed": 0.982036
+          },
+          "fp_minus_control": -0.017964
+        },
+        "reading": "if the arms' (b) failure shares stay close INSIDE each (a) stratum, the overall similarity is not an artifact of the two arms having different (a) compositions. \u26a0 (a) is not ground truth on either arm, and on the control it is a measurement of (a)'s own sensitivity on known T-boxes."
       }
     }
   ],
@@ -526,8 +700,8 @@
       },
       "schema_version": "1.0"
     },
-    "generated_at_utc": "2026-08-12T02:20:25.353825+00:00",
-    "git_sha": "26eb3958b39fc3306921a83fc42c9008dcaa677e",
+    "generated_at_utc": "2026-08-12T02:37:23.431021+00:00",
+    "git_sha": "4d6dd302c937b07e83329cf8221005c13933af57",
     "inputs": {
       "data/processed/mining/curated_control_manifest_v0.json": "363795fba6cd4d1d85495ec62e6e62cd11f1bf37b0fdf739c48315777c4d2a83",
       "data/processed/mining/curated_control_status_v0.json": "8b5e8f4178cd63eb8664c1e63e519c5810223eb56ca3a1488ce8bfee9dbeb033",

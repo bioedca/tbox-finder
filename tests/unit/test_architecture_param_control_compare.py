@@ -139,6 +139,32 @@ def control_files(tmp_path):
     return manifest, status, root
 
 
+def a_split(counts) -> dict:
+    """Split a row's decided candidates across the two (a) strata, ASYMMETRICALLY.
+
+    All the `failed` go to the (a)-`failed` arm where they fit, so the two strata
+    never carry the same share and a test reading the wrong one gets a different
+    number.
+    """
+    failed, passed = int(counts["failed"]), int(counts["passed"])
+    a_failed_n = max(1, (failed + passed) // 3)
+    in_a_failed = min(failed, a_failed_n)
+    return {
+        "failed": {
+            "failed": in_a_failed,
+            "passed": a_failed_n - in_a_failed,
+            "unavailable": 0,
+            "n": a_failed_n,
+        },
+        "passed": {
+            "failed": failed - in_a_failed,
+            "passed": passed - (a_failed_n - in_a_failed),
+            "unavailable": 0,
+            "n": failed + passed - a_failed_n,
+        },
+    }
+
+
 def a_report(labels_params, *, n_manifest, n_measured, counts_by_label, step) -> dict:
     """A minimal measurement report in the shape ``architecture_param_measure`` writes."""
     return {
@@ -154,7 +180,16 @@ def a_report(labels_params, *, n_manifest, n_measured, counts_by_label, step) ->
             "consensus_width": {"median": 16, "n": n_measured, "counts": {"16": n_measured}},
         },
         "joint": [
-            {"label": label, "params": params.as_dict(), "counts": counts_by_label[label]}
+            {
+                "label": label,
+                "params": params.as_dict(),
+                "counts": counts_by_label[label],
+                # The (a) split, so the stratified block is exercised on a body this
+                # test computes rather than only on the committed artifact — an
+                # artifact test cannot see the code
+                # ([[artifact-pinning-test-cannot-see-the-code]]).
+                "by_covariation_status": a_split(counts_by_label[label]),
+            }
             for label, params in labels_params
         ],
     }
@@ -1046,3 +1081,93 @@ def test_an_fp_row_that_decided_nothing_yields_a_none_difference_not_a_crash():
     assert row["discrimination"]["control_record_ci_contains_fp_point"] is None
     # The headline's own expression must survive it, and count it as "not below zero".
     assert ((row["discrimination"]["fp_minus_control_query_share_failed"] or 0) < 0) is False
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# The (a)-stratified contrast — the composition confound, closed by measurement
+# ═════════════════════════════════════════════════════════════════════════════
+def a_stratified_row(c_pass, c_fail, f_pass, f_fail):
+    """Two `joint` rows carrying only what `stratify_by_criterion_a` reads."""
+
+    def arm(failed, n):
+        return {"failed": failed, "passed": n - failed, "unavailable": 0, "n": n}
+
+    return (
+        {"by_covariation_status": {"passed": arm(*c_pass), "failed": arm(*c_fail)}},
+        {"by_covariation_status": {"passed": arm(*f_pass), "failed": arm(*f_fail)}},
+    )
+
+
+def test_the_stratified_contrast_reports_each_arm_inside_each_a_stratum():
+    """Asymmetric on purpose: 1/10 vs 4/10 in one stratum, 6/10 vs 3/10 in the other,
+    so a test reading the wrong stratum or the wrong arm gets a different number."""
+    c_row, f_row = a_stratified_row((1, 10), (6, 10), (4, 10), (3, 10))
+    out = cmp.stratify_by_criterion_a(c_row, f_row)
+    assert out["criterion_a_passed"]["control"]["share_failed"] == pytest.approx(0.1)
+    assert out["criterion_a_passed"]["fp"]["share_failed"] == pytest.approx(0.4)
+    assert out["criterion_a_passed"]["fp_minus_control"] == pytest.approx(0.3)
+    assert out["criterion_a_failed"]["control"]["share_failed"] == pytest.approx(0.6)
+    assert out["criterion_a_failed"]["fp"]["share_failed"] == pytest.approx(0.3)
+    assert out["criterion_a_failed"]["fp_minus_control"] == pytest.approx(-0.3)
+
+
+def test_the_stratified_contrast_would_expose_a_simpsons_reversal():
+    """The whole point: arms that agree overall can differ inside every stratum.
+
+    Control 5/20 = 0.25 overall (1/10 and 4/10); FP 5/20 = 0.25 overall (4/10 and
+    1/10). Identical unstratified, opposite within each stratum — and the block must
+    say so rather than inheriting the overall agreement.
+    """
+    c_row, f_row = a_stratified_row((1, 10), (4, 10), (4, 10), (1, 10))
+    out = cmp.stratify_by_criterion_a(c_row, f_row)
+    assert out["criterion_a_passed"]["fp_minus_control"] == pytest.approx(0.3)
+    assert out["criterion_a_failed"]["fp_minus_control"] == pytest.approx(-0.3)
+
+
+def test_the_stratified_contrast_is_none_when_a_report_carries_no_a_split():
+    """Absent, not empty: without a covariation status the stratification does not
+    exist, and an empty block would read as "measured and found nothing"."""
+    c_row, f_row = a_stratified_row((1, 10), (6, 10), (4, 10), (3, 10))
+    assert cmp.stratify_by_criterion_a({}, f_row) is None
+    assert cmp.stratify_by_criterion_a(c_row, {}) is None
+
+
+def test_an_empty_a_stratum_gives_a_none_share_not_a_zero():
+    c_row, f_row = a_stratified_row((0, 0), (6, 10), (4, 10), (3, 10))
+    out = cmp.stratify_by_criterion_a(c_row, f_row)
+    assert out["criterion_a_passed"]["control"]["share_failed"] is None
+    assert out["criterion_a_passed"]["fp_minus_control"] is None
+
+
+@pytest.mark.skipif(not COMPARISON.is_file(), reason="run from the repo root")
+def test_the_committed_stratified_block_reconciles_with_the_unstratified_counts():
+    """Each arm's two strata must sum to that arm's decided total in the same row."""
+    body = json.loads(COMPARISON.read_text())
+    for r in body["by_parameter_tuple"]:
+        strat = r["stratified_by_criterion_a"]
+        assert strat is not None
+        c_failed = sum(strat[f"criterion_a_{s}"]["control"]["failed"] for s in ("passed", "failed"))
+        c_n = sum(strat[f"criterion_a_{s}"]["control"]["n"] for s in ("passed", "failed"))
+        assert c_failed == r["control_query_level"]["failed"]
+        assert c_n == r["control_query_level"]["n_decided"]
+        f_failed = sum(strat[f"criterion_a_{s}"]["fp"]["failed"] for s in ("passed", "failed"))
+        f_n = sum(strat[f"criterion_a_{s}"]["fp"]["n"] for s in ("passed", "failed"))
+        assert f_failed == r["fp_candidate_level"]["failed"]
+        assert f_n == r["fp_candidate_level"]["n_decided"]
+
+
+def test_compare_wires_the_stratified_block_into_every_computed_row(control_files, reports):
+    """The wiring, on a body this test computes — not on the committed artifact.
+
+    The committed-artifact version of this check stayed GREEN under a sabotage that
+    removed the call, because the sabotage does not regenerate the report
+    ([[artifact-pinning-test-cannot-see-the-code]]).
+    """
+    body = run_compare(control_files, reports)
+    for row in body["by_parameter_tuple"]:
+        strat = row["stratified_by_criterion_a"]
+        assert strat is not None, row["label"]
+        c_n = sum(strat[f"criterion_a_{s}"]["control"]["n"] for s in ("passed", "failed"))
+        assert c_n == row["control_query_level"]["n_decided"]
+        f_failed = sum(strat[f"criterion_a_{s}"]["fp"]["failed"] for s in ("passed", "failed"))
+        assert f_failed == row["fp_candidate_level"]["failed"]

@@ -454,6 +454,56 @@ def control_states(
     return out
 
 
+def stratify_by_criterion_a(
+    control_row: Mapping[str, Any], fp_row: Mapping[str, Any]
+) -> dict[str, Any] | None:
+    """(b)'s failure share **within each criterion-(a) stratum**, both arms.
+
+    The confound this closes: the two arms do not have the same (a) composition —
+    (a) passes 30/76 of the control against 167/278 of the FP arm — and (a) and (b)
+    read the same alignment, so they are correlated.  An unstratified similarity
+    between the arms could therefore be a composition artifact rather than a
+    statement about (b), and the arms' (b) shares could differ *within* every
+    stratum while agreeing overall (Simpson's paradox).  Reported so the reading
+    does not have to assume otherwise.
+
+    ``None`` when either report was written without a covariation status, because
+    then the stratification does not exist rather than being empty.
+    """
+    # ⚠ Coerced rather than returned on: a non-Mapping here is a type question, and
+    # ONE place decides "absent ⇒ None" — the `if not out` below. An early return
+    # beside it would be a branch no input can reach on its own, i.e. a guard that
+    # cannot be shown to bite ([[pinned-constant-that-nothing-reads]]).
+    c_by = control_row.get("by_covariation_status")
+    f_by = fp_row.get("by_covariation_status")
+    c_by = c_by if isinstance(c_by, Mapping) else {}
+    f_by = f_by if isinstance(f_by, Mapping) else {}
+    out: dict[str, Any] = {}
+    for stratum in DECIDED_STATES:
+        c_arm, f_arm = c_by.get(stratum), f_by.get(stratum)
+        if not isinstance(c_arm, Mapping) or not isinstance(f_arm, Mapping):
+            continue
+        c_n, f_n = int(c_arm.get("n", 0)), int(f_arm.get("n", 0))
+        c_share = round(int(c_arm["failed"]) / c_n, 6) if c_n else None
+        f_share = round(int(f_arm["failed"]) / f_n, 6) if f_n else None
+        out[f"criterion_a_{stratum}"] = {
+            "control": {"failed": int(c_arm["failed"]), "n": c_n, "share_failed": c_share},
+            "fp": {"failed": int(f_arm["failed"]), "n": f_n, "share_failed": f_share},
+            "fp_minus_control": (
+                round(f_share - c_share, 6) if c_share is not None and f_share is not None else None
+            ),
+        }
+    if not out:
+        return None
+    out["reading"] = (
+        "if the arms' (b) failure shares stay close INSIDE each (a) stratum, the "
+        "overall similarity is not an artifact of the two arms having different (a) "
+        "compositions. ⚠ (a) is not ground truth on either arm, and on the control it "
+        "is a measurement of (a)'s own sensitivity on known T-boxes."
+    )
+    return out
+
+
 def compare_tuple(
     *,
     params: ParamTuple,
@@ -461,6 +511,7 @@ def compare_tuple(
     states: Mapping[str, str],
     by_record: Mapping[str, Sequence[str]],
     fp_row: Mapping[str, Any],
+    control_row: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """One named setting, both arms, with the interval on the record-level n.
 
@@ -551,6 +602,9 @@ def compare_tuple(
                 "too; it is shown for scale, not for a test"
             ),
         },
+        "stratified_by_criterion_a": (
+            stratify_by_criterion_a(control_row, fp_row) if control_row is not None else None
+        ),
         "discrimination": {
             "fp_minus_control_query_share_failed": difference,
             "control_record_ci_contains_fp_point": contains,
@@ -661,6 +715,7 @@ def compare(
             states=states,
             by_record=by_record,
             fp_row=f_row,
+            control_row=c_row,
         )
         # Artifact binding, NOT independent validation: `candidate_state` is the very
         # function the control report's counts came from, so agreement is expected. What

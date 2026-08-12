@@ -5801,6 +5801,23 @@ row actually inside the band — not by weakening the sabotages. Same class as
 [[all-true-fixture-cannot-test-a-conjunction]]: the tests named the right relation and exercised
 none of it.
 
+**The composition confound is closed by measurement, not by assumption.** (a) and (b) read the
+same alignment, and the two arms do not have the same (a) composition (30/76 against 167/278), so
+an unstratified similarity could in principle be a composition artifact — or could hide arms that
+differ *inside* every stratum. `stratified_by_criterion_a` reports (b)'s failure share within each
+(a) stratum for both arms. It is not a reversal: at `sensitive_core` the control fails
+**3/30 = 0.100** of its (a)-`passed` against the FP arm's **20/167 = 0.120**, and **8/46 = 0.174**
+of its (a)-`failed` against **32/111 = 0.288**; the largest within-stratum gap anywhere on the grid
+is **0.251** (`canonical_core_3helix_ncca3`, (a)-`passed`), and most are single-digit points. The
+headline survives the stratification.
+
+**⚠ ONE INTERMEDIATE FULL-TIER RUN SHOWED A 14th FAILURE, AND IT WAS NOT MINE.**
+`test_report_write_barrier`'s two-rank gloo race hit its 120 s subprocess timeout while a review
+and the sabotage harness were running concurrently (that run took 180 s against the usual ~60).
+It passes in isolation on **both** the worktree and `main`, and the diff touches none of the files
+it exercises. Recorded rather than dropped, because "zero new failures" is only worth something if
+the one exception is named.
+
 **Decisions.** No parameter is pinned (`pins_nothing: true` in both reports). The ADR-0006 A4
 seven-parameter choice that P3-15′-f deferred to "measure a matched control first" is now
 **informed but still open**, and it is a §7 decision for the user: the control says no setting on
