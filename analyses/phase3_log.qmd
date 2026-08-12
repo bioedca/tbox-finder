@@ -6128,3 +6128,16 @@ measured cost is **8 of 68** control records losing both model-independent prote
 **§9.3 submit-ack** is now the only thing between this step and the `architecture_producer` run,
 and `slurm/p3/stage1_remine.sbatch`'s missing `--relaxed-arch-status` must be fixed before P3-15
 itself can consume what that run writes.
+
+**Review round 5 (CodeRabbit CLI, 1 major, real, fixed) — the writer had none of the reader's
+validation.** `load_spare_rule_inputs` refuses a `bool` posterior and an out-of-range one, but
+`build_inputs` — the command that *writes the committed table* — wrote `float(post[cid])` and
+`str(cov[cid])` with no checks at all. `float(True)` is `1.0`, so a `true` in the source column
+would be committed as a number that is not a posterior, clears every threshold in the Stage-2
+band, **spares** the candidate, and is thereafter invisible to the loader because by then the
+column really is a float. The guard ran on the *next* command, after the artifact existed
+([[guard-runs-after-what-it-guards]]). Both rules are now single functions — `checked_status`
+and `checked_posterior` — called by the writer **and** the reader, so the two cannot drift; the
+suggested patch would have added a second copy beside the first. Six tests added (**110**), two
+sabotages (**71**), and the committed table re-derives to the **identical sha256**, so nothing
+in the current artifact was affected.

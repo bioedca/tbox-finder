@@ -1128,3 +1128,65 @@ def test_intervals_disjoint_can_come_out_false():
     """The negative control the flag needs: overlapping arms must read False."""
     overlapping = point(damage=30, producible=68, fp_loci_failing_a_and_b=60, fp_loci_decided=199)
     assert rec.anti_selectivity(overlapping)["intervals_disjoint"] is False
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# Review round 5 — the WRITER validates too, with the reader's own rules
+# ═════════════════════════════════════════════════════════════════════════════
+@pytest.mark.parametrize(
+    "posterior,match",
+    [
+        (True, "non-numeric"),
+        ("high", "non-numeric"),
+        (12.5, r"outside \[0, 1\]"),
+        (-0.1, r"outside \[0, 1\]"),
+    ],
+)
+def test_build_inputs_refuses_a_bad_posterior_at_the_join(tmp_path, posterior, match):
+    """`float(True)` is 1.0 — commit it and the loader can never see it again."""
+    cid = "GCA_1.1:c1:0:10-20"
+    manifest = tmp_path / "m.json"
+    manifest.write_text(json.dumps({"candidates": [{"candidate_id": cid}]}))
+    cov = tmp_path / "cov.json"
+    cov.write_text(json.dumps({"status": {cid: STATUS_FAILED}}))
+    syn = tmp_path / "syn.json"
+    syn.write_text(json.dumps({"status": {cid: STATUS_FAILED}}))
+    post = tmp_path / "p.json"
+    post.write_text(json.dumps({"posteriors": {cid: posterior}}))
+    with pytest.raises(rec.RecommendError, match=match):
+        rec.build_inputs(
+            covariation_status_path=cov,
+            synteny_status_path=syn,
+            stage2_posteriors_path=post,
+            fp_manifest_path=manifest,
+        )
+
+
+def test_build_inputs_refuses_a_bad_status_at_the_join(tmp_path):
+    cid = "GCA_1.1:c1:0:10-20"
+    manifest = tmp_path / "m.json"
+    manifest.write_text(json.dumps({"candidates": [{"candidate_id": cid}]}))
+    cov = tmp_path / "cov.json"
+    cov.write_text(json.dumps({"status": {cid: "probably"}}))
+    syn = tmp_path / "syn.json"
+    syn.write_text(json.dumps({"status": {cid: STATUS_FAILED}}))
+    post = tmp_path / "p.json"
+    post.write_text(json.dumps({"posteriors": {cid: 0.5}}))
+    with pytest.raises(rec.RecommendError, match="expected one of"):
+        rec.build_inputs(
+            covariation_status_path=cov,
+            synteny_status_path=syn,
+            stage2_posteriors_path=post,
+            fp_manifest_path=manifest,
+        )
+
+
+def test_the_writer_and_the_reader_apply_the_same_functions():
+    """Two copies of the rule is how the writer came to have none of it."""
+    import inspect
+
+    writer = inspect.getsource(rec.build_inputs)
+    reader = inspect.getsource(rec.load_spare_rule_inputs)
+    for fn in ("checked_status", "checked_posterior"):
+        assert fn in writer, f"build_inputs must go through {fn}"
+        assert fn in reader, f"load_spare_rule_inputs must go through {fn}"

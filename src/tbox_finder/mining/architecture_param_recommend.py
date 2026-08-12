@@ -356,6 +356,41 @@ def sweep_arm(
 # ═════════════════════════════════════════════════════════════════════════════
 # The spare-rule inputs (criterion (a), criterion (c), the Stage-2 posterior)
 # ═════════════════════════════════════════════════════════════════════════════
+def checked_status(where: str, cid: str, field: str, value: Any) -> str:
+    """One disjunct status, validated. Shared by the writer and the reader.
+
+    Two copies of this rule is how the committed table came to be written without the
+    check the loader applies: ``build_inputs`` wrote ``str(value)`` and
+    ``load_spare_rule_inputs`` refused a bad one only on the *next* command, after the file
+    existed ([[guard-runs-after-what-it-guards]]).
+    """
+    if value not in DISJUNCT_STATUSES:
+        raise RecommendError(
+            f"{where}: {cid} has {field}={value!r}, expected one of {tuple(DISJUNCT_STATUSES)}"
+        )
+    return str(value)
+
+
+def checked_posterior(where: str, cid: str, value: Any) -> float | None:
+    """One Stage-2 posterior, validated. Shared by the writer and the reader.
+
+    ⚠ ``bool`` subclasses ``int``, so ``float(True)`` is ``1.0`` — a value that is not a
+    posterior at all, which then clears every threshold in
+    :data:`STAGE2_THRESHOLD_SENSITIVITY` and **spares** the candidate.  Committing it would
+    put it beyond the loader's reach, because by then the column really is a float.
+    """
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise RecommendError(f"{where}: {cid} has a non-numeric stage2_posterior")
+    if not 0.0 <= float(value) <= 1.0:
+        raise RecommendError(
+            f"{where}: {cid} has stage2_posterior={value!r} outside [0, 1]; a mis-scaled "
+            "column would clear every threshold without a refusal"
+        )
+    return float(value)
+
+
 def load_spare_rule_inputs(path: str | Path) -> dict[str, Any]:
     """The committed 941-row join, validated rather than trusted.
 
@@ -384,24 +419,8 @@ def load_spare_rule_inputs(path: str | Path) -> dict[str, Any]:
             # count would still reconcile ([[duplicate-key-merges-instead-of-colliding]]).
             raise RecommendError(f"{path}: duplicate candidate_id {cid!r}")
         for field in ("covariation_status", "synteny_status"):
-            if row.get(field) not in DISJUNCT_STATUSES:
-                raise RecommendError(
-                    f"{path}: {cid} has {field}={row.get(field)!r}, "
-                    f"expected one of {tuple(DISJUNCT_STATUSES)}"
-                )
-        posterior = row.get("stage2_posterior")
-        if posterior is not None:
-            # `bool` subclasses `int`, so a bare isinstance check admits `true`, which then
-            # behaves as 1.0 against every threshold in STAGE2_THRESHOLD_SENSITIVITY and
-            # SPARES the candidate — a silent change to the yield, in the fail-open
-            # direction, from a value that is not a posterior at all.
-            if isinstance(posterior, bool) or not isinstance(posterior, (int, float)):
-                raise RecommendError(f"{path}: {cid} has a non-numeric stage2_posterior")
-            if not 0.0 <= float(posterior) <= 1.0:
-                raise RecommendError(
-                    f"{path}: {cid} has stage2_posterior={posterior!r} outside [0, 1]; a "
-                    "mis-scaled column would clear every threshold without a refusal"
-                )
+            checked_status(str(path), cid, field, row.get(field))
+        checked_posterior(str(path), cid, row.get("stage2_posterior"))
         by_id[cid] = dict(row)
     payload = dict(payload)
     payload["by_id"] = by_id
@@ -1558,9 +1577,15 @@ def build_inputs(
     rows = [
         {
             "candidate_id": cid,
-            "covariation_status": str(cov[cid]),
-            "synteny_status": str(syn[cid]),
-            "stage2_posterior": float(post[cid]),
+            "covariation_status": checked_status(
+                portable_path(covariation_status_path), cid, "covariation_status", cov[cid]
+            ),
+            "synteny_status": checked_status(
+                portable_path(synteny_status_path), cid, "synteny_status", syn[cid]
+            ),
+            "stage2_posterior": checked_posterior(
+                portable_path(stage2_posteriors_path), cid, post[cid]
+            ),
         }
         for cid in sorted(manifest_ids)
     ]
