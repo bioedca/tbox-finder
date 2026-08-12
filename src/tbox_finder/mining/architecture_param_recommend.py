@@ -66,7 +66,7 @@ from pathlib import Path
 from typing import Any
 
 from tbox_finder.mining import architecture as arch
-from tbox_finder.mining.architecture_param_control_compare import record_of
+from tbox_finder.mining.architecture_param_control_compare import load_control_records
 from tbox_finder.mining.architecture_param_measure import (
     BULGE_MAX_NT_SWEEP,
     BULGE_MIN_NT_SWEEP,
@@ -110,7 +110,7 @@ ADR = (
 BULGE_MAX_UNBOUNDED = 10_000
 
 #: The two states a consensus can be in once it exists (``unavailable`` is its absence).
-DECIDED_STATES: tuple[str, ...] = ("passed", "failed")
+DECIDED_STATES: tuple[str, ...] = (STATUS_PASSED, STATUS_FAILED)
 
 #: Stage-2 thresholds the yield is reported *across*.  ADR-0005 D3/D14 freeze the real
 #: value at the §13.1 phase gate and this module pins none of them — the list exists so
@@ -120,6 +120,27 @@ STAGE2_THRESHOLD_SENSITIVITY: tuple[float, ...] = (0.5, 0.9, 0.95, 0.99)
 
 class RecommendError(ValueError):
     """The recommendation could not be derived from the inputs as given."""
+
+
+def locus_of(candidate_id: str) -> str:
+    """``accession:contig:start-end`` — the LOCUS an FP candidate id addresses.
+
+    A round-0 candidate id is ``accession:contig:window:start-end``: the window offset is
+    the tiling frame the scanner happened to be in, not part of the locus.  Two candidates
+    from overlapping windows that call the same span are **the same piece of DNA**, and on
+    this supply 79 such pairs sit among the 278 (a)-decided candidates — byte-identical
+    ``msa.sto``, identical (a) and (c) status, identical (b) verdicts at every named
+    setting.  Counting them as two observations makes every FP interval too narrow, which
+    is exactly the pseudo-replication the control arm is refused an interval for; the two
+    arms must be treated alike or the comparison is rigged in the FP arm's favour.
+    """
+    parts = str(candidate_id).split(":")
+    if len(parts) < 4:
+        raise RecommendError(
+            f"candidate_id {candidate_id!r} is not accession:contig:window:start-end, so "
+            "its locus cannot be derived; refusing rather than treating the id as a locus"
+        )
+    return ":".join([*parts[:2], parts[-1]])
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -144,18 +165,49 @@ class DecisionFloor:
         return {"floor": self.key, "rationale": self.rationale, "source": self.source}
 
 
+#: The ``min_named_helices`` levels the rule is run at.  ⚠ This axis is **the §7 choice**,
+#: not a derivation — see :data:`MIN_NAMED_HELICES_READINGS`.
+MIN_NAMED_HELICES_LEVELS: tuple[int, ...] = tuple(MIN_NAMED_HELICES_SWEEP)
+
+#: Why the level is the user's and not this module's.  Two readings of the SAME D3 phrase
+#: are supported by documents in this repo and they disagree materially.
+MIN_NAMED_HELICES_READINGS: Mapping[int, str] = {
+    2: (
+        "the PLURAL reading: D3's pass condition is that 'the expected helices are "
+        "present' — plural — so a setting satisfied by ONE resolved helix is a 'some "
+        "helix is present' predicate. This is the weakest level at which the published "
+        "sentence matches D3's wording."
+    ),
+    3: (
+        "the CANONICAL-CORE reading, and it is stated by this repo's own localizer: "
+        "architecture.named_elements_present's docstring reads D3 as 'the canonical "
+        "class-I core is Stem I + Stem III + antiterminator (with Stem II in many "
+        "lineages)' — three elements. It is at least as well supported as the plural "
+        "reading and it prices very differently."
+    ),
+}
+
+
 DECISION_FLOORS: tuple[DecisionFloor, ...] = (
     DecisionFloor(
         key="min_named_helices >= 2",
         predicate=lambda p: p.min_named_helices >= 2,
         rationale=(
-            "D3's pass condition is that 'the expected helices are present' — plural, over "
-            "the four-element ADR-0004 D1 vocabulary (Stem_I, Stem_II, Stem_III, "
-            "Antiterminator). A setting satisfied by ONE resolved helix of four is a "
-            "'some helix is present' predicate; whatever its measured behaviour, the "
-            "sentence the round would publish about it is not the one D3 licenses."
+            "⚠ THIS FLOOR'S LEVEL IS A §7 READING, NOT A DERIVATION, AND IT DECIDES THE "
+            "HEADLINE. D3 says 'the expected helices are present' and assigns the value to "
+            "the held-out canonical set at P6; it contains no number. Two readings are "
+            "supported: PLURAL (>= 2, this floor) and CANONICAL CORE (>= 3, which "
+            "architecture.named_elements_present's own docstring states). "
+            "recommendation.selection_by_min_named_helices prices every level, and the "
+            "level is put to the project lead rather than settled here. The floor is set "
+            "at 2 only because a sparing disjunct's fail-closed direction is the more "
+            "permissive one (ADR-0006 A4). ⚠ Note also that min_named_helices counts "
+            "RESOLVED helices of sufficient stacking depth, not identified D1 elements — "
+            "the localizer has no element identity to check — so 'the expected helices are "
+            "present' is operationalised as a count throughout."
         ),
-        source="ADR-0006 D3; ADR-0004 D1",
+        source="ADR-0006 D3 (no number; P6-delegated) + A4; the competing reading is in "
+        "src/tbox_finder/mining/architecture.py::named_elements_present",
     ),
     DecisionFloor(
         key="min_helix_pairs >= 2",
@@ -163,10 +215,14 @@ DECISION_FLOORS: tuple[DecisionFloor, ...] = (
         rationale=(
             "min_helix_pairs is the number of stacked pairs at which a run of pairing "
             "counts as a helix at all. At 1 a single isolated base pair is a named "
-            "structural element, which the localizer's own stack-depth distribution shows "
-            "is noise-level on these consensuses."
+            "structural element. ⚠ ADR-0006 D3 contains NO concept of stacked-pair depth, "
+            "so this floor is an ASSUMPTION about what the word 'helix' may denote, not a "
+            "reading of the ADR; it is listed here so it can be rejected. Its empirical "
+            "side is published beside it in helix_stack_depth_evidence, and on this supply "
+            "the settings it excludes measure identically to the chosen one, so it costs "
+            "nothing measurable either way."
         ),
-        source="ADR-0006 D3 (named-element presence)",
+        source="an ASSUMPTION of this module, not an ADR clause — see the rationale",
     ),
     DecisionFloor(
         key="ncca_pairing_nt >= 2",
@@ -232,8 +288,10 @@ DECISION_RULE_STATEMENT = (
     "direction, so an imperfect value errs safe'. (4) Break exact ties by TIE_BREAK_ORDER, "
     "and REFUSE if a tie survives among parameters not proved inert. "
     "⚠ What this rule deliberately does NOT do is maximise yield over the grid: with "
-    "thousands of admissible points and a control of 68 producible records, the argmax is "
-    "a fitted value, and A4 asks the round to supply a chosen one."
+    "thousands of admissible points and a control of a few dozen producible records, the "
+    "argmax is a fitted value, and A4 asks the round to supply a chosen one. Every count "
+    "lives in the derived blocks (grid.n_admissible, control_arm.n_records_producible), "
+    "never in this sentence, so the prose cannot go stale against its own run."
 )
 
 
@@ -485,12 +543,28 @@ def yield_ceiling(
 # ═════════════════════════════════════════════════════════════════════════════
 # The control arm — record-level, because its queries are pseudo-replicated
 # ═════════════════════════════════════════════════════════════════════════════
-def control_records(status: Mapping[str, str]) -> dict[str, list[str]]:
-    """``record -> its query ids``, from the merged control status table."""
-    out: dict[str, list[str]] = {}
-    for cid in sorted(status):
-        out.setdefault(record_of(cid), []).append(cid)
-    return out
+def control_records(status: Mapping[str, str], manifest_path: str | Path) -> dict[str, list[str]]:
+    """``record -> its query ids``, read from the MANIFEST, not parsed out of the ids.
+
+    ``record_of``'s own docstring forbids deriving the grouping from the id string, and
+    for the reason that matters here: a supply whose ids carried a second context field
+    would silently split or merge records, moving ``n_records_producible`` and every
+    interval computed on it while all the query totals still reconciled.  The shipped
+    :func:`load_control_records` reads ``accession`` from the manifest and refuses a row
+    whose two statements about its own record disagree; this function delegates to it and
+    then checks the status table is that same corpus.
+    """
+    by_record = load_control_records(manifest_path)
+    manifest_ids = {cid for ids in by_record.values() for cid in ids}
+    if manifest_ids != set(status):
+        missing = sorted(manifest_ids - set(status))
+        extra = sorted(set(status) - manifest_ids)
+        raise RecommendError(
+            f"the control status table and the control manifest are different corpora: "
+            f"{len(missing)} manifest id(s) unscored (e.g. {missing[:2]}), {len(extra)} "
+            f"scored id(s) absent from the manifest (e.g. {extra[:2]})"
+        )
+    return {rec: sorted(ids) for rec, ids in sorted(by_record.items())}
 
 
 def control_damage(
@@ -581,6 +655,9 @@ class PointResult:
     fp_failed: int
     fp_passed: int
     fp_failed_with_a_failed: int
+    #: The same two counts at the LOCUS level — the FP arm's independent unit.
+    fp_loci_decided: int
+    fp_loci_failing_a_and_b: int
     mined_by_threshold: Mapping[str, int]
     control: Mapping[str, Any]
 
@@ -601,6 +678,13 @@ class PointResult:
                     else None
                 ),
                 "failed_with_criterion_a_failed": self.fp_failed_with_a_failed,
+                "loci_decided": self.fp_loci_decided,
+                "loci_failing_a_and_b": self.fp_loci_failing_a_and_b,
+                "unit_note": (
+                    "the candidate counts are manifest rows; the LOCUS counts collapse "
+                    "candidates addressing the same span from overlapping tiling windows. "
+                    "Every FP interval in this report is on the locus."
+                ),
             },
             "round_yield_n_mined": dict(self.mined_by_threshold),
             "control_arm": dict(self.control),
@@ -634,17 +718,20 @@ def evaluate_point(
         for t in (None, *STAGE2_THRESHOLD_SENSITIVITY)
     }
     fp_failed = sum(1 for s in fp_verdicts.values() if s == STATUS_FAILED)
-    fp_with_a = sum(
-        1
+    failing_a_and_b = [
+        cid
         for cid, state in arch_by_id.items()
         if state == STATUS_FAILED and by_id[cid]["covariation_status"] == STATUS_FAILED
-    )
+    ]
+    fp_with_a = len(failing_a_and_b)
     control_by_query = {control_id_by_slug[s]: v for s, v in control_verdicts.items()}
     return PointResult(
         params=params,
         fp_failed=fp_failed,
         fp_passed=len(fp_verdicts) - fp_failed,
         fp_failed_with_a_failed=fp_with_a,
+        fp_loci_decided=len({locus_of(c) for c in arch_by_id}),
+        fp_loci_failing_a_and_b=len({locus_of(c) for c in failing_a_and_b}),
         mined_by_threshold=mined,
         control=control_damage(control_status, control_record_index, control_by_query),
     )
@@ -833,6 +920,69 @@ def frontier(
     ]
 
 
+def selection_by_min_named_helices(results: Sequence[PointResult]) -> dict[str, Any]:
+    """Run the whole rule at every ``min_named_helices`` level, and price each answer.
+
+    ``min_named_helices`` is the one floor whose LEVEL this module cannot derive: D3
+    contains no number and delegates the value to the held-out canonical set at P6, and
+    two readings of its wording are supported in this repo — plural (>= 2) and the
+    canonical class-I core (>= 3), the latter stated by the shipped localizer's own
+    docstring.  The level therefore belongs to the §7 decision, and presenting only one
+    of them as "the derivation" would be this module choosing it by omission.
+    """
+    out: list[dict[str, Any]] = []
+    for level in MIN_NAMED_HELICES_LEVELS:
+        floors = tuple(
+            (
+                DecisionFloor(
+                    key=f"min_named_helices >= {level}",
+                    predicate=(lambda lvl: lambda p: p.min_named_helices >= lvl)(level),
+                    rationale=f.rationale,
+                    source=f.source,
+                )
+                if f.key.startswith("min_named_helices")
+                else f
+            )
+            for f in DECISION_FLOORS
+        )
+        row: dict[str, Any] = {
+            "min_named_helices": level,
+            "reading": MIN_NAMED_HELICES_READINGS.get(level),
+        }
+        try:
+            picked: PointResult = apply_decision_rule(results, floors=floors)["chosen"]
+        except RecommendError as exc:
+            row["selection"] = None
+            row["the_rule_cannot_decide_at_this_level"] = str(exc)
+            out.append(row)
+            continue
+        row.update(
+            {
+                "selection": picked.params.as_dict(),
+                "matches_named_setting": next(
+                    (t.label for t in default_tuples() if t.as_dict() == picked.params.as_dict()),
+                    None,
+                ),
+                "round_yield_n_mined": picked.mined,
+                "control_records_losing_a_and_b": picked.control["n_records_losing_a_and_b"],
+                "of_n_producible_records": picked.control["n_records_producible"],
+                "fp_arm_failed_of_decided": (
+                    f"{picked.fp_failed}/{picked.fp_failed + picked.fp_passed}"
+                ),
+            }
+        )
+        out.append(row)
+    return {
+        "why_this_block_exists": (
+            "the recommendation below is the level-2 row. ADR-0006 D3 assigns this value to "
+            "the held-out canonical set at P6 and states no number, so choosing the level "
+            "is a CLAUDE.md §7 decision and every level is priced here rather than one "
+            "being presented as derived."
+        ),
+        "levels": out,
+    }
+
+
 def bulge_sentinel_comparison(
     results: Sequence[PointResult],
     chosen: PointResult,
@@ -880,6 +1030,27 @@ def bulge_sentinel_comparison(
     }
 
 
+def tie_break_exercised(results: Sequence[PointResult]) -> dict[str, Any]:
+    """Which TIE_BREAK_ORDER entries can fire on the grid that was actually swept.
+
+    A reader auditing the derivation would otherwise take three entries for three
+    exercised safeguards.  An axis the enumeration holds at one value cannot break
+    anything, and saying so is cheaper than letting the list imply otherwise.
+    """
+    axes = {
+        name: sorted({r.params.as_dict()[name] for r in results}) for name, _ in TIE_BREAK_ORDER
+    }
+    return {
+        "values_present_on_the_swept_grid": axes,
+        "can_fire": {name: len(values) > 1 for name, values in axes.items()},
+        "note": (
+            "an entry over a single-valued axis is inert here by construction, not by "
+            "measurement of the arms; it is kept so a supply that DID vary that axis would "
+            "still be resolved by a stated preference rather than by sort order."
+        ),
+    }
+
+
 def dominating_alternatives(
     results: Sequence[PointResult],
     chosen: PointResult,
@@ -891,9 +1062,9 @@ def dominating_alternatives(
     here rather than left for a reader to find: a recommendation that quietly declines a
     dominating alternative is asking to be trusted instead of checked.
 
-    ⚠ "Dominating" is on **two measured coordinates over 2,880 points against 68
-    records**, and the damage coordinate omits criterion (c) entirely.  A setting that
-    dominates here is a candidate for being *fitted*, not a candidate for being right —
+    ⚠ "Dominating" is on **two measured coordinates over the whole admissible grid
+    against a few dozen control records**, and the damage coordinate omits (c) entirely.
+    A setting that dominates here is a candidate for being *fitted*, not for being right —
     which is the whole reason the rule is stated before the counts are read.
     """
     better = [
@@ -922,9 +1093,10 @@ def dominating_alternatives(
             for n in sorted(by_yield)
         ],
         "why_the_rule_declines_them": (
-            "they are selected BY the two arms, on a control of 68 records, from thousands "
-            "of points; the extra yield is a handful of candidates out of 941 against a "
-            "ceiling of 15; and the damage coordinate they tie on excludes criterion (c), "
+            "they are selected BY the two arms, on a few dozen control records, from "
+            "thousands of grid points (the counts live in grid.n_admissible, yield_ceiling "
+            "and control_arm.n_records_producible, never in this sentence); the extra "
+            "yield is a handful of candidates; and the damage coordinate excludes (c), "
             "which is the only disjunct with measured discrimination. ADR-0006 A4 asks the "
             "round to supply a chosen value and record it — taking one of these would "
             "record a tuned one instead, and nothing downstream would say so."
@@ -958,7 +1130,26 @@ def assert_supply_is_the_decided_set(
     )
 
 
-def anti_selectivity(result: PointResult, *, n_fp_decided: int) -> dict[str, Any]:
+def checked_origin(label: str, origin: Any) -> str | None:
+    """A supply origin copied out of another report clears the same guard as the flag.
+
+    ``--supply-origin`` is refused when it looks like a local absolute path, because this
+    report is public.  The two origins carried forward from the measurement reports reached
+    the payload without that check — a second route to the same leak, because the guard sat
+    on the argument rather than on the field ([[fixed-one-of-two-identical-things]]).
+    """
+    if origin is None:
+        return None
+    text = str(origin)
+    if is_local_path_shaped(text):
+        raise RecommendError(
+            f"the {label} measurement report's supply_origin looks like a local absolute "
+            f"path ({text!r}); this report is public and will not carry it forward"
+        )
+    return text
+
+
+def anti_selectivity(result: PointResult) -> dict[str, Any]:
     """Does the (a)∧(b) conjunction fall through MORE often on known T-boxes?
 
     (b)'s own failure share is what the two measurement reports compare, but the object
@@ -966,19 +1157,31 @@ def anti_selectivity(result: PointResult, *, n_fp_decided: int) -> dict[str, Any
     with (a) failed too.  If the conjunction falls through more often on the control than
     on the FP arm, the composite is selecting *against* the class it exists to protect —
     which the per-criterion comparison cannot show.
+
+    ⚠ **Both arms are stated on their INDEPENDENT unit, and this is a correction.**  An
+    earlier form of this function put a query-level binomial interval on the control — the
+    very interval :func:`control_damage` refuses to publish — against a candidate-level one
+    on the FP arm, and reported the two "disjoint" at the strictest settings.  Neither unit
+    was independent: the control's queries share records, and 79 of the FP arm's 278
+    decided candidates are second calls on a locus already counted.  Restated on records
+    (n = 68) against loci (n = 199), **no setting on the named grid has disjoint
+    intervals**.  The direction survives; the separation does not, and the two are
+    different claims.
     """
-    ctrl_n = result.control["n_queries_decided"]
-    ctrl_k = result.control["n_queries_a_and_b_failed"]
-    fp_k = result.fp_failed_with_a_failed
+    ctrl_k = result.control["n_records_losing_a_and_b"]
+    ctrl_n = result.control["n_records_producible"]
+    fp_k = result.fp_loci_failing_a_and_b
+    fp_n = result.fp_loci_decided
     ctrl_lo, ctrl_hi = wilson_interval(ctrl_k, ctrl_n) if ctrl_n else (None, None)
-    fp_lo, fp_hi = wilson_interval(fp_k, n_fp_decided) if n_fp_decided else (None, None)
+    fp_lo, fp_hi = wilson_interval(fp_k, fp_n) if fp_n else (None, None)
     ctrl_share = ctrl_k / ctrl_n if ctrl_n else None
-    fp_share = fp_k / n_fp_decided if n_fp_decided else None
+    fp_share = fp_k / fp_n if fp_n else None
     return {
-        "control_queries_failing_a_and_b": f"{ctrl_k}/{ctrl_n}",
+        "unit": "control = producible RECORDS; FP arm = decided LOCI",
+        "control_records_failing_a_and_b": f"{ctrl_k}/{ctrl_n}",
         "control_share": None if ctrl_share is None else round(ctrl_share, 6),
         "control_ci95": None if ctrl_lo is None else [round(ctrl_lo, 6), round(ctrl_hi, 6)],
-        "fp_candidates_failing_a_and_b": f"{fp_k}/{n_fp_decided}",
+        "fp_loci_failing_a_and_b": f"{fp_k}/{fp_n}",
         "fp_share": None if fp_share is None else round(fp_share, 6),
         "fp_ci95": None if fp_lo is None else [round(fp_lo, 6), round(fp_hi, 6)],
         "fp_minus_control_pp": (
@@ -992,10 +1195,23 @@ def anti_selectivity(result: PointResult, *, n_fp_decided: int) -> dict[str, Any
         "intervals_disjoint": (
             None if ctrl_lo is None or fp_lo is None else bool(ctrl_lo > fp_hi or fp_lo > ctrl_hi)
         ),
-        "unit_caveat": (
-            "the control's unit is a QUERY (pseudo-replicated across records) and the FP "
-            "arm's is a candidate; the shares are like-for-like as 'share of decided', "
-            "and the record-level interval is carried separately above."
+        "also_at_the_row_level_for_reference": {
+            "control_queries_failing_a_and_b": (
+                f"{result.control['n_queries_a_and_b_failed']}/"
+                f"{result.control['n_queries_decided']}"
+            ),
+            "fp_candidates_failing_a_and_b": (
+                f"{result.fp_failed_with_a_failed}/{result.fp_failed + result.fp_passed}"
+            ),
+            "no_interval_because": (
+                "neither row unit is independent — control queries share records and FP "
+                "candidates share loci — so these are point counts only"
+            ),
+        },
+        "what_disjointness_would_and_would_not_mean": (
+            "non-overlapping Wilson intervals are a CONSERVATIVE indication of a "
+            "difference, not a test of one; overlapping intervals do not establish "
+            "equality either. Read the direction and the size, not the flag."
         ),
     }
 
@@ -1010,6 +1226,7 @@ def recommend(
     fp_manifest_path: str | Path,
     spare_rule_inputs_path: str | Path,
     control_status_path: str | Path,
+    control_manifest_path: str | Path,
     fp_report_path: str | Path,
     control_report_path: str | Path,
     comparison_report_path: str | Path,
@@ -1066,7 +1283,7 @@ def recommend(
                 f"candidate, e.g. {orphans[:2]}; the supply and the manifest disagree"
             )
     ids_with_consensus = [fp_id_by_slug[i.slug] for i in fp_items]
-    control_record_index = control_records(control_status)
+    control_record_index = control_records(control_status, control_manifest_path)
     assert_supply_is_the_decided_set(
         "FP",
         ids_with_consensus,
@@ -1101,7 +1318,6 @@ def recommend(
 
     decision = apply_decision_rule(admissible)
     chosen: PointResult = decision["chosen"]
-    n_fp_decided = chosen.fp_failed + chosen.fp_passed
     by_params = {tuple(sorted(r.params.as_dict().items())): r for r in admissible}
     named: list[dict[str, Any]] = []
     for tup in default_tuples():
@@ -1115,7 +1331,7 @@ def recommend(
                 "clears_every_decision_floor": clears_all_floors(tup),
                 "floors_cleared": list(floors_passed(tup)),
                 **result.as_dict(),
-                "anti_selectivity": anti_selectivity(result, n_fp_decided=n_fp_decided),
+                "anti_selectivity": anti_selectivity(result),
             }
         )
 
@@ -1152,7 +1368,9 @@ def recommend(
                 "step": "P3-15'-f",
                 "n_consensuses": len(fp_items),
                 "supply_digest_sha256": fp_digest,
-                "supply_origin": fp_report.get("supply", {}).get("supply_origin"),
+                "supply_origin": checked_origin(
+                    "fp", fp_report.get("supply", {}).get("supply_origin")
+                ),
                 "ground_truth": (
                     "unknown — a round-0 false-positive MANIFEST, not verified negatives"
                 ),
@@ -1161,7 +1379,9 @@ def recommend(
                 "step": "P3-15'-g-iv",
                 "n_consensuses": len(control_items),
                 "supply_digest_sha256": control_digest,
-                "supply_origin": control_report.get("supply", {}).get("supply_origin"),
+                "supply_origin": checked_origin(
+                    "control", control_report.get("supply", {}).get("supply_origin")
+                ),
                 "ground_truth": (
                     "believed positive — held-out curated TBDB records, Stage-1 re-detected"
                 ),
@@ -1204,13 +1424,25 @@ def recommend(
             "tied_with": decision["tied_with"],
             "floor_sensitivity": floor_sensitivity(admissible, chosen),
             "bulge_sentinel_comparison": bulge_sentinel_comparison(admissible, chosen),
+            "selection_by_min_named_helices": selection_by_min_named_helices(admissible),
+            "tie_break_exercised": tie_break_exercised(admissible),
+            "helix_stack_depth_evidence": {
+                "source": "helix_arm.helix_stack_depth of each arm's measurement report",
+                "fp_arm": (fp_report.get("helix_arm") or {}).get("helix_stack_depth"),
+                "control_arm": (control_report.get("helix_arm") or {}).get("helix_stack_depth"),
+                "why_it_is_here": (
+                    "the min_helix_pairs floor's rationale makes an empirical claim about "
+                    "stack depth; the distribution it appeals to is carried here so the "
+                    "claim is checkable inside the artifact that makes it"
+                ),
+            },
             "dominating_alternatives": dominating_alternatives(admissible, chosen),
             "measured": chosen.as_dict(),
-            "anti_selectivity": anti_selectivity(chosen, n_fp_decided=n_fp_decided),
+            "anti_selectivity": anti_selectivity(chosen),
             "what_it_costs": (
                 "the frontier above shows what a higher-yield setting would buy and what it "
                 "would cost in control records; the rule declines those because selecting "
-                "them is fitting a value to 68 records, not choosing one."
+                "them is fitting a value to a few dozen records, not choosing one."
             ),
         },
         "limitations": {
@@ -1354,6 +1586,9 @@ def build_parser() -> argparse.ArgumentParser:
     r.add_argument(
         "--control-status", default="data/processed/mining/curated_control_status_v0.json"
     )
+    r.add_argument(
+        "--control-manifest", default="data/processed/mining/curated_control_manifest_v0.json"
+    )
     r.add_argument("--fp-report", default="reports/p3/architecture_parameter_measurement.json")
     r.add_argument(
         "--control-report",
@@ -1371,7 +1606,7 @@ def build_parser() -> argparse.ArgumentParser:
 def _write(body: Mapping[str, Any], out_path: str | Path) -> None:
     out = Path(out_path)
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(json.dumps(body, indent=2, sort_keys=True) + "\n")
+    out.write_text(json.dumps(body, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -1393,6 +1628,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             fp_manifest_path=args.fp_manifest,
             spare_rule_inputs_path=args.spare_rule_inputs,
             control_status_path=args.control_status,
+            control_manifest_path=args.control_manifest,
             fp_report_path=args.fp_report,
             control_report_path=args.control_report,
             comparison_report_path=args.comparison_report,
@@ -1414,6 +1650,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             ("fp_manifest", args.fp_manifest),
             ("spare_rule_inputs", args.spare_rule_inputs),
             ("control_status", args.control_status),
+            ("control_manifest", args.control_manifest),
             ("fp_report", args.fp_report),
             ("control_report", args.control_report),
             ("comparison_report", args.comparison_report),

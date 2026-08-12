@@ -6018,3 +6018,62 @@ denominator while the coverage check still reads as exact. Refused now at both s
 **`stage2_posterior` accepted `bool`** — `bool` subclasses `int`, so `true` reads as 1.0 and
 *spares* the candidate at every threshold — **and accepted values outside [0, 1]**, so a
 mis-scaled column would clear every threshold silently. Both refused. Sabotages 44 → **49**.
+
+**⚠⚠ Review round 3 (a 5-lens adversarial workflow + Greptile + a second CodeRabbit pass) BROKE
+TWO OF THIS STEP'S OWN PUBLISHED CLAIMS.** Both are corrected above rather than hedged, and the
+corrections are the most important content of this step.
+
+**(1) The FP arm is pseudo-replicated too, and the report said the opposite.** Of the 278
+(a)-decided FP candidates only **199 are distinct loci**: 79 loci contribute two candidate ids
+differing solely in the tiling-window offset, and those pairs have **byte-identical `msa.sto`**,
+identical (a) status (230/230 concordant), identical (c) status, and identical (b) verdicts at
+every named setting — verified here, not taken on report. The old `unit_caveat` asserted the
+asymmetry backwards ("the control's unit is a QUERY (pseudo-replicated) and the FP arm's is a
+candidate"), so every FP interval was too narrow while the control was refused one for exactly
+the property the FP arm also had. `locus_of` now collapses the window offset and every FP
+interval is on **n = 199 loci**.
+
+**(2) "Disjoint 95 % Wilson intervals at the two strictest" does not survive the correction.**
+That claim was computed from a **query-level** control interval — the interval `control_damage`
+itself refuses to publish — against a candidate-level FP one. Restated on the units the module
+says it uses (control **records**, n = 68; FP **loci**, n = 199): `loosest_nonvacuous` 0.103
+[0.051, 0.198] vs 0.075 [0.046, 0.121] · `sensitive_core` 0.118 vs 0.126 · `canonical_core_3helix`
+0.382 [0.276, 0.501] vs 0.241 [0.187, 0.305] · `…_ncca3` 0.426 vs 0.322 · `curated_freeze_transplant`
+0.559 [0.441, 0.671] vs 0.377 [0.312, 0.446] · `strictest` 0.559 vs 0.392. The control still falls
+through **more** at five of the six settings — the direction is unchanged and it is the reading
+that matters — but **no setting has disjoint intervals**. The separation claim is withdrawn.
+
+**⚠⚠ AND THE LEVEL OF THE FIRST FLOOR WAS NEVER MINE TO SET.** The floor `min_named_helices >= 2`
+was justified as D3's "expected helices" being plural. A second reading is stated **by this
+repo's own localizer** — `architecture.named_elements_present`'s docstring reads D3 as *"the
+canonical class-I core is Stem I + Stem III + antiterminator (with Stem II in many lineages)"*,
+i.e. **three** — and D3 itself contains no number, assigning the value to the held-out canonical
+set at P6. Pricing the levels changes the headline four-fold, so the report now runs the entire
+rule at **every** level and publishes each answer: **≥1** the rule refuses to decide · **≥2** →
+`sensitive_core`, 3 mined / 8 of 68 records · **≥3** → `mnh3 · mhp2 · bulge 2–50 · ncca2`, **11
+mined / 24 of 68** · **≥4** → `mnh4 · mhp2 · bulge 2–20 · ncca2`, **13 mined / 31 of 68**. The
+level is a §7 choice and this step does not take it.
+
+**Three further real findings, fixed.** The `min_helix_pairs` floor cited ADR-0006 D3 for a
+concept D3 does not contain — its `source` now says it is an **assumption of this module**, and
+the stack-depth distribution its rationale appeals to is carried in the report so the claim is
+checkable where it is made. `control_records` derived the record grouping by splitting the
+candidate-id string, which `record_of`'s own docstring forbids; it now reads `accession` from the
+manifest through the shipped `load_control_records` and refuses a status table that is a
+different corpus. And a `supply_origin` copied out of either measurement report reached the
+public payload **without** the `is_local_path_shaped` guard the `--supply-origin` flag gets
+(Greptile P2) — the guard was on the argument, not on the field.
+
+**⚠ WHAT DID NOT CHANGE, AND WHY THAT MATTERS.** The **yield ceiling of 15**, the 1–13 range over
+the grid, the `sensitive_core` selection at level 2, and the whole frontier are **untouched** by
+all six corrections: they are counts of candidates and loci, not intervals, and none of them
+rested on the two broken claims.
+
+**Validation (final).** 98 unit tests; **62 sabotages, all RED against their NAMED test**, plus 2
+green negative controls. ⚠ Two sabotages initially stayed **green** and both were my test
+targeting, not the code: the locus-counting sabotage was pointed at an end-to-end test that
+asserts nothing about loci, and the `control_records` sabotage still tripped a *different*
+refusal in its named test. A dedicated locus test and a retarget fixed both — a sabotage that
+passes for the wrong reason is worth exactly nothing. Zero new failures vs the matched `main`
+baseline at `090547f` (worktree **13**, main **26**, a strict subset). The report re-derives
+byte-identically apart from `generated_at_utc`. `ruff` + `black` clean.

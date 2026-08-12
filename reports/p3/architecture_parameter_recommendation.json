@@ -21,13 +21,13 @@
     "floors": [
       {
         "floor": "min_named_helices >= 2",
-        "rationale": "D3's pass condition is that 'the expected helices are present' \u2014 plural, over the four-element ADR-0004 D1 vocabulary (Stem_I, Stem_II, Stem_III, Antiterminator). A setting satisfied by ONE resolved helix of four is a 'some helix is present' predicate; whatever its measured behaviour, the sentence the round would publish about it is not the one D3 licenses.",
-        "source": "ADR-0006 D3; ADR-0004 D1"
+        "rationale": "\u26a0 THIS FLOOR'S LEVEL IS A \u00a77 READING, NOT A DERIVATION, AND IT DECIDES THE HEADLINE. D3 says 'the expected helices are present' and assigns the value to the held-out canonical set at P6; it contains no number. Two readings are supported: PLURAL (>= 2, this floor) and CANONICAL CORE (>= 3, which architecture.named_elements_present's own docstring states). recommendation.selection_by_min_named_helices prices every level, and the level is put to the project lead rather than settled here. The floor is set at 2 only because a sparing disjunct's fail-closed direction is the more permissive one (ADR-0006 A4). \u26a0 Note also that min_named_helices counts RESOLVED helices of sufficient stacking depth, not identified D1 elements \u2014 the localizer has no element identity to check \u2014 so 'the expected helices are present' is operationalised as a count throughout.",
+        "source": "ADR-0006 D3 (no number; P6-delegated) + A4; the competing reading is in src/tbox_finder/mining/architecture.py::named_elements_present"
       },
       {
         "floor": "min_helix_pairs >= 2",
-        "rationale": "min_helix_pairs is the number of stacked pairs at which a run of pairing counts as a helix at all. At 1 a single isolated base pair is a named structural element, which the localizer's own stack-depth distribution shows is noise-level on these consensuses.",
-        "source": "ADR-0006 D3 (named-element presence)"
+        "rationale": "min_helix_pairs is the number of stacked pairs at which a run of pairing counts as a helix at all. At 1 a single isolated base pair is a named structural element. \u26a0 ADR-0006 D3 contains NO concept of stacked-pair depth, so this floor is an ASSUMPTION about what the word 'helix' may denote, not a reading of the ADR; it is listed here so it can be rejected. Its empirical side is published beside it in helix_stack_depth_evidence, and on this supply the settings it excludes measure identically to the chosen one, so it costs nothing measurable either way.",
+        "source": "an ASSUMPTION of this module, not an ADR clause \u2014 see the rationale"
       },
       {
         "floor": "ncca_pairing_nt >= 2",
@@ -40,7 +40,7 @@
         "source": "ADR-0006 D3; ADR-0006 A4 (the value is recorded and must mean what it says)"
       }
     ],
-    "statement": "Stated before any count was read. (1) Keep only points the SHIPPED localizer accepts on this supply \u2014 admissibility is measured by running it, not by re-encoding its guards. (2) Keep only points that clear every DECISION_FLOORS entry, each of which is a semantic requirement read off ADR-0006 D3's wording, not a tuned threshold. (3) Among the survivors choose the MOST PERMISSIVE as measured \u2014 the smallest number of FP-arm consensuses moved to 'failed'. Permissiveness is the fail-closed direction for a SPARING disjunct, and ADR-0006 A4 makes that argument itself: a relaxation 'only ever makes (b) more likely to pass => more sparing => the fail-closed direction, so an imperfect value errs safe'. (4) Break exact ties by TIE_BREAK_ORDER, and REFUSE if a tie survives among parameters not proved inert. \u26a0 What this rule deliberately does NOT do is maximise yield over the grid: with thousands of admissible points and a control of 68 producible records, the argmax is a fitted value, and A4 asks the round to supply a chosen one.",
+    "statement": "Stated before any count was read. (1) Keep only points the SHIPPED localizer accepts on this supply \u2014 admissibility is measured by running it, not by re-encoding its guards. (2) Keep only points that clear every DECISION_FLOORS entry, each of which is a semantic requirement read off ADR-0006 D3's wording, not a tuned threshold. (3) Among the survivors choose the MOST PERMISSIVE as measured \u2014 the smallest number of FP-arm consensuses moved to 'failed'. Permissiveness is the fail-closed direction for a SPARING disjunct, and ADR-0006 A4 makes that argument itself: a relaxation 'only ever makes (b) more likely to pass => more sparing => the fail-closed direction, so an imperfect value errs safe'. (4) Break exact ties by TIE_BREAK_ORDER, and REFUSE if a tie survives among parameters not proved inert. \u26a0 What this rule deliberately does NOT do is maximise yield over the grid: with thousands of admissible points and a control of a few dozen producible records, the argmax is a fitted value, and A4 asks the round to supply a chosen one. Every count lives in the derived blocks (grid.n_admissible, control_arm.n_records_producible), never in this sentence, so the prose cannot go stale against its own run.",
     "tie_break_order": [
       {
         "parameter": "allow_wobble",
@@ -504,22 +504,28 @@
   "named_settings": [
     {
       "anti_selectivity": {
+        "also_at_the_row_level_for_reference": {
+          "control_queries_failing_a_and_b": "7/76",
+          "fp_candidates_failing_a_and_b": "20/278",
+          "no_interval_because": "neither row unit is independent \u2014 control queries share records and FP candidates share loci \u2014 so these are point counts only"
+        },
         "control_ci95": [
-          0.045333,
-          0.178129
+          0.050765,
+          0.197581
         ],
         "control_falls_through_more": true,
-        "control_queries_failing_a_and_b": "7/76",
-        "control_share": 0.092105,
-        "fp_candidates_failing_a_and_b": "20/278",
+        "control_records_failing_a_and_b": "7/68",
+        "control_share": 0.102941,
         "fp_ci95": [
-          0.047051,
-          0.108503
+          0.046208,
+          0.120629
         ],
-        "fp_minus_control_pp": -2.0163,
-        "fp_share": 0.071942,
+        "fp_loci_failing_a_and_b": "15/199",
+        "fp_minus_control_pp": -2.7564,
+        "fp_share": 0.075377,
         "intervals_disjoint": false,
-        "unit_caveat": "the control's unit is a QUERY (pseudo-replicated across records) and the FP arm's is a candidate; the shares are like-for-like as 'share of decided', and the record-level interval is carried separately above."
+        "unit": "control = producible RECORDS; FP arm = decided LOCI",
+        "what_disjointness_would_and_would_not_mean": "non-overlapping Wilson intervals are a CONSERVATIVE indication of a difference, not a test of one; overlapping intervals do not establish equality either. Read the direction and the size, not the flag."
       },
       "clears_every_decision_floor": false,
       "control_arm": {
@@ -549,8 +555,11 @@
       "fp_arm": {
         "failed": 25,
         "failed_with_criterion_a_failed": 20,
+        "loci_decided": 199,
+        "loci_failing_a_and_b": 15,
         "passed": 253,
-        "share_failed_of_decided": 0.089928
+        "share_failed_of_decided": 0.089928,
+        "unit_note": "the candidate counts are manifest rows; the LOCUS counts collapse candidates addressing the same span from overlapping tiling windows. Every FP interval in this report is on the locus."
       },
       "label": "loosest_nonvacuous",
       "params": {
@@ -572,22 +581,28 @@
     },
     {
       "anti_selectivity": {
+        "also_at_the_row_level_for_reference": {
+          "control_queries_failing_a_and_b": "8/76",
+          "fp_candidates_failing_a_and_b": "32/278",
+          "no_interval_because": "neither row unit is independent \u2014 control queries share records and FP candidates share loci \u2014 so these are point counts only"
+        },
         "control_ci95": [
-          0.054311,
-          0.194201
+          0.060834,
+          0.215351
         ],
         "control_falls_through_more": false,
-        "control_queries_failing_a_and_b": "8/76",
-        "control_share": 0.105263,
-        "fp_candidates_failing_a_and_b": "32/278",
+        "control_records_failing_a_and_b": "8/68",
+        "control_share": 0.117647,
         "fp_ci95": [
-          0.082726,
-          0.157982
+          0.08656,
+          0.178877
         ],
-        "fp_minus_control_pp": 0.9845,
-        "fp_share": 0.115108,
+        "fp_loci_failing_a_and_b": "25/199",
+        "fp_minus_control_pp": 0.7981,
+        "fp_share": 0.125628,
         "intervals_disjoint": false,
-        "unit_caveat": "the control's unit is a QUERY (pseudo-replicated across records) and the FP arm's is a candidate; the shares are like-for-like as 'share of decided', and the record-level interval is carried separately above."
+        "unit": "control = producible RECORDS; FP arm = decided LOCI",
+        "what_disjointness_would_and_would_not_mean": "non-overlapping Wilson intervals are a CONSERVATIVE indication of a difference, not a test of one; overlapping intervals do not establish equality either. Read the direction and the size, not the flag."
       },
       "clears_every_decision_floor": true,
       "control_arm": {
@@ -620,8 +635,11 @@
       "fp_arm": {
         "failed": 52,
         "failed_with_criterion_a_failed": 32,
+        "loci_decided": 199,
+        "loci_failing_a_and_b": 25,
         "passed": 226,
-        "share_failed_of_decided": 0.18705
+        "share_failed_of_decided": 0.18705,
+        "unit_note": "the candidate counts are manifest rows; the LOCUS counts collapse candidates addressing the same span from overlapping tiling windows. Every FP interval in this report is on the locus."
       },
       "label": "sensitive_core",
       "params": {
@@ -643,22 +661,28 @@
     },
     {
       "anti_selectivity": {
+        "also_at_the_row_level_for_reference": {
+          "control_queries_failing_a_and_b": "29/76",
+          "fp_candidates_failing_a_and_b": "66/278",
+          "no_interval_because": "neither row unit is independent \u2014 control queries share records and FP candidates share loci \u2014 so these are point counts only"
+        },
         "control_ci95": [
-          0.280569,
-          0.493985
+          0.276093,
+          0.501195
         ],
         "control_falls_through_more": true,
-        "control_queries_failing_a_and_b": "29/76",
-        "control_share": 0.381579,
-        "fp_candidates_failing_a_and_b": "66/278",
+        "control_records_failing_a_and_b": "26/68",
+        "control_share": 0.382353,
         "fp_ci95": [
-          0.191184,
-          0.290794
+          0.187028,
+          0.305186
         ],
-        "fp_minus_control_pp": -14.4169,
-        "fp_share": 0.23741,
+        "fp_loci_failing_a_and_b": "48/199",
+        "fp_minus_control_pp": -14.1147,
+        "fp_share": 0.241206,
         "intervals_disjoint": false,
-        "unit_caveat": "the control's unit is a QUERY (pseudo-replicated across records) and the FP arm's is a candidate; the shares are like-for-like as 'share of decided', and the record-level interval is carried separately above."
+        "unit": "control = producible RECORDS; FP arm = decided LOCI",
+        "what_disjointness_would_and_would_not_mean": "non-overlapping Wilson intervals are a CONSERVATIVE indication of a difference, not a test of one; overlapping intervals do not establish equality either. Read the direction and the size, not the flag."
       },
       "clears_every_decision_floor": true,
       "control_arm": {
@@ -691,8 +715,11 @@
       "fp_arm": {
         "failed": 141,
         "failed_with_criterion_a_failed": 66,
+        "loci_decided": 199,
+        "loci_failing_a_and_b": 48,
         "passed": 137,
-        "share_failed_of_decided": 0.507194
+        "share_failed_of_decided": 0.507194,
+        "unit_note": "the candidate counts are manifest rows; the LOCUS counts collapse candidates addressing the same span from overlapping tiling windows. Every FP interval in this report is on the locus."
       },
       "label": "canonical_core_3helix",
       "params": {
@@ -714,22 +741,28 @@
     },
     {
       "anti_selectivity": {
+        "also_at_the_row_level_for_reference": {
+          "control_queries_failing_a_and_b": "33/76",
+          "fp_candidates_failing_a_and_b": "89/278",
+          "no_interval_because": "neither row unit is independent \u2014 control queries share records and FP candidates share loci \u2014 so these are point counts only"
+        },
         "control_ci95": [
-          0.328608,
-          0.546144
+          0.315971,
+          0.544834
         ],
         "control_falls_through_more": true,
-        "control_queries_failing_a_and_b": "33/76",
-        "control_share": 0.434211,
-        "fp_candidates_failing_a_and_b": "89/278",
+        "control_records_failing_a_and_b": "29/68",
+        "control_share": 0.426471,
         "fp_ci95": [
-          0.268073,
-          0.377118
+          0.260617,
+          0.389356
         ],
-        "fp_minus_control_pp": -11.4067,
-        "fp_share": 0.320144,
+        "fp_loci_failing_a_and_b": "64/199",
+        "fp_minus_control_pp": -10.4863,
+        "fp_share": 0.321608,
         "intervals_disjoint": false,
-        "unit_caveat": "the control's unit is a QUERY (pseudo-replicated across records) and the FP arm's is a candidate; the shares are like-for-like as 'share of decided', and the record-level interval is carried separately above."
+        "unit": "control = producible RECORDS; FP arm = decided LOCI",
+        "what_disjointness_would_and_would_not_mean": "non-overlapping Wilson intervals are a CONSERVATIVE indication of a difference, not a test of one; overlapping intervals do not establish equality either. Read the direction and the size, not the flag."
       },
       "clears_every_decision_floor": true,
       "control_arm": {
@@ -762,8 +795,11 @@
       "fp_arm": {
         "failed": 220,
         "failed_with_criterion_a_failed": 89,
+        "loci_decided": 199,
+        "loci_failing_a_and_b": 64,
         "passed": 58,
-        "share_failed_of_decided": 0.791367
+        "share_failed_of_decided": 0.791367,
+        "unit_note": "the candidate counts are manifest rows; the LOCUS counts collapse candidates addressing the same span from overlapping tiling windows. Every FP interval in this report is on the locus."
       },
       "label": "canonical_core_3helix_ncca3",
       "params": {
@@ -785,22 +821,28 @@
     },
     {
       "anti_selectivity": {
+        "also_at_the_row_level_for_reference": {
+          "control_queries_failing_a_and_b": "44/76",
+          "fp_candidates_failing_a_and_b": "104/278",
+          "no_interval_because": "neither row unit is independent \u2014 control queries share records and FP candidates share loci \u2014 so these are point counts only"
+        },
         "control_ci95": [
-          0.466782,
-          0.683516
+          0.440817,
+          0.67054
         ],
         "control_falls_through_more": true,
-        "control_queries_failing_a_and_b": "44/76",
-        "control_share": 0.578947,
-        "fp_candidates_failing_a_and_b": "104/278",
+        "control_records_failing_a_and_b": "38/68",
+        "control_share": 0.558824,
         "fp_ci95": [
-          0.319297,
-          0.432337
+          0.312485,
+          0.445948
         ],
-        "fp_minus_control_pp": -20.4847,
-        "fp_share": 0.374101,
-        "intervals_disjoint": true,
-        "unit_caveat": "the control's unit is a QUERY (pseudo-replicated across records) and the FP arm's is a candidate; the shares are like-for-like as 'share of decided', and the record-level interval is carried separately above."
+        "fp_loci_failing_a_and_b": "75/199",
+        "fp_minus_control_pp": -18.1939,
+        "fp_share": 0.376884,
+        "intervals_disjoint": false,
+        "unit": "control = producible RECORDS; FP arm = decided LOCI",
+        "what_disjointness_would_and_would_not_mean": "non-overlapping Wilson intervals are a CONSERVATIVE indication of a difference, not a test of one; overlapping intervals do not establish equality either. Read the direction and the size, not the flag."
       },
       "clears_every_decision_floor": true,
       "control_arm": {
@@ -833,8 +875,11 @@
       "fp_arm": {
         "failed": 265,
         "failed_with_criterion_a_failed": 104,
+        "loci_decided": 199,
+        "loci_failing_a_and_b": 75,
         "passed": 13,
-        "share_failed_of_decided": 0.953237
+        "share_failed_of_decided": 0.953237,
+        "unit_note": "the candidate counts are manifest rows; the LOCUS counts collapse candidates addressing the same span from overlapping tiling windows. Every FP interval in this report is on the locus."
       },
       "label": "curated_freeze_transplant",
       "params": {
@@ -856,22 +901,28 @@
     },
     {
       "anti_selectivity": {
+        "also_at_the_row_level_for_reference": {
+          "control_queries_failing_a_and_b": "45/76",
+          "fp_candidates_failing_a_and_b": "107/278",
+          "no_interval_because": "neither row unit is independent \u2014 control queries share records and FP candidates share loci \u2014 so these are point counts only"
+        },
         "control_ci95": [
-          0.479783,
-          0.695564
+          0.440817,
+          0.67054
         ],
         "control_falls_through_more": true,
-        "control_queries_failing_a_and_b": "45/76",
-        "control_share": 0.592105,
-        "fp_candidates_failing_a_and_b": "107/278",
+        "control_records_failing_a_and_b": "38/68",
+        "control_share": 0.558824,
         "fp_ci95": [
-          0.329633,
-          0.443289
+          0.326791,
+          0.461221
         ],
-        "fp_minus_control_pp": -20.7213,
-        "fp_share": 0.384892,
-        "intervals_disjoint": true,
-        "unit_caveat": "the control's unit is a QUERY (pseudo-replicated across records) and the FP arm's is a candidate; the shares are like-for-like as 'share of decided', and the record-level interval is carried separately above."
+        "fp_loci_failing_a_and_b": "78/199",
+        "fp_minus_control_pp": -16.6864,
+        "fp_share": 0.39196,
+        "intervals_disjoint": false,
+        "unit": "control = producible RECORDS; FP arm = decided LOCI",
+        "what_disjointness_would_and_would_not_mean": "non-overlapping Wilson intervals are a CONSERVATIVE indication of a difference, not a test of one; overlapping intervals do not establish equality either. Read the direction and the size, not the flag."
       },
       "clears_every_decision_floor": true,
       "control_arm": {
@@ -904,8 +955,11 @@
       "fp_arm": {
         "failed": 271,
         "failed_with_criterion_a_failed": 107,
+        "loci_decided": 199,
+        "loci_failing_a_and_b": 78,
         "passed": 7,
-        "share_failed_of_decided": 0.97482
+        "share_failed_of_decided": 0.97482,
+        "unit_note": "the candidate counts are manifest rows; the LOCUS counts collapse candidates addressing the same span from overlapping tiling windows. Every FP interval in this report is on the locus."
       },
       "label": "strictest",
       "params": {
@@ -940,9 +994,10 @@
       },
       "schema_version": "1.0"
     },
-    "generated_at_utc": "2026-08-12T17:57:32.144789+00:00",
-    "git_sha": "b480caf73d70086c9122342fe4dcbc5235271be7",
+    "generated_at_utc": "2026-08-12T18:25:45.729118+00:00",
+    "git_sha": "b34b2df6b8bbeb355263696940905c32d22992ce",
     "inputs": {
+      "data/processed/mining/curated_control_manifest_v0.json": "363795fba6cd4d1d85495ec62e6e62cd11f1bf37b0fdf739c48315777c4d2a83",
       "data/processed/mining/curated_control_status_v0.json": "8b5e8f4178cd63eb8664c1e63e519c5810223eb56ca3a1488ce8bfee9dbeb033",
       "data/processed/mining/round0_fp_manifest.json": "e8aff87d395b3cb70a25c1f1d4ac348daf3da9323baa4c04a32fd3e4060d4b95",
       "data/processed/mining/round0_fp_spare_rule_inputs_v0.json": "387e38952d95cdd3c8b769cf3bfdd611ffd53cdcbc1bd3d637021933661c7e8a",
@@ -958,22 +1013,28 @@
   },
   "recommendation": {
     "anti_selectivity": {
+      "also_at_the_row_level_for_reference": {
+        "control_queries_failing_a_and_b": "8/76",
+        "fp_candidates_failing_a_and_b": "32/278",
+        "no_interval_because": "neither row unit is independent \u2014 control queries share records and FP candidates share loci \u2014 so these are point counts only"
+      },
       "control_ci95": [
-        0.054311,
-        0.194201
+        0.060834,
+        0.215351
       ],
       "control_falls_through_more": false,
-      "control_queries_failing_a_and_b": "8/76",
-      "control_share": 0.105263,
-      "fp_candidates_failing_a_and_b": "32/278",
+      "control_records_failing_a_and_b": "8/68",
+      "control_share": 0.117647,
       "fp_ci95": [
-        0.082726,
-        0.157982
+        0.08656,
+        0.178877
       ],
-      "fp_minus_control_pp": 0.9845,
-      "fp_share": 0.115108,
+      "fp_loci_failing_a_and_b": "25/199",
+      "fp_minus_control_pp": 0.7981,
+      "fp_share": 0.125628,
       "intervals_disjoint": false,
-      "unit_caveat": "the control's unit is a QUERY (pseudo-replicated across records) and the FP arm's is a candidate; the shares are like-for-like as 'share of decided', and the record-level interval is carried separately above."
+      "unit": "control = producible RECORDS; FP arm = decided LOCI",
+      "what_disjointness_would_and_would_not_mean": "non-overlapping Wilson intervals are a CONSERVATIVE indication of a difference, not a test of one; overlapping intervals do not establish equality either. Read the direction and the size, not the flag."
     },
     "bulge_sentinel_comparison": {
       "chosen": {
@@ -1026,7 +1087,7 @@
       ],
       "max_extra_mined": 2,
       "n_settings": 8,
-      "why_the_rule_declines_them": "they are selected BY the two arms, on a control of 68 records, from thousands of points; the extra yield is a handful of candidates out of 941 against a ceiling of 15; and the damage coordinate they tie on excludes criterion (c), which is the only disjunct with measured discrimination. ADR-0006 A4 asks the round to supply a chosen value and record it \u2014 taking one of these would record a tuned one instead, and nothing downstream would say so."
+      "why_the_rule_declines_them": "they are selected BY the two arms, on a few dozen control records, from thousands of grid points (the counts live in grid.n_admissible, yield_ceiling and control_arm.n_records_producible, never in this sentence); the extra yield is a handful of candidates; and the damage coordinate excludes (c), which is the only disjunct with measured discrimination. ADR-0006 A4 asks the round to supply a chosen value and record it \u2014 taking one of these would record a tuned one instead, and nothing downstream would say so."
     },
     "floor_sensitivity": {
       "bulge_max_nt is bounded": {
@@ -1068,6 +1129,65 @@
         }
       }
     },
+    "helix_stack_depth_evidence": {
+      "control_arm": {
+        "counts": {
+          "10": 3,
+          "11": 5,
+          "12": 4,
+          "13": 2,
+          "14": 4,
+          "2": 29,
+          "3": 72,
+          "4": 28,
+          "5": 35,
+          "6": 32,
+          "7": 7,
+          "8": 12,
+          "9": 3
+        },
+        "max": 14,
+        "median": 4.0,
+        "min": 2,
+        "n": 236,
+        "percentiles": {
+          "p50": 4,
+          "p90": 8,
+          "p95": 11,
+          "p99": 14
+        }
+      },
+      "fp_arm": {
+        "counts": {
+          "10": 12,
+          "11": 15,
+          "12": 11,
+          "13": 25,
+          "14": 9,
+          "15": 5,
+          "2": 144,
+          "3": 299,
+          "4": 160,
+          "5": 114,
+          "6": 131,
+          "7": 46,
+          "8": 18,
+          "9": 13
+        },
+        "max": 15,
+        "median": 4.0,
+        "min": 2,
+        "n": 1002,
+        "percentiles": {
+          "p50": 4,
+          "p90": 8,
+          "p95": 11,
+          "p99": 14
+        }
+      },
+      "source": "helix_arm.helix_stack_depth of each arm's measurement report",
+      "why_it_is_here": "the min_helix_pairs floor's rationale makes an empirical claim about stack depth; the distribution it appeals to is carried here so the claim is checkable inside the artifact that makes it"
+    },
     "matches_named_setting": "sensitive_core",
     "measured": {
       "control_arm": {
@@ -1094,8 +1214,11 @@
       "fp_arm": {
         "failed": 52,
         "failed_with_criterion_a_failed": 32,
+        "loci_decided": 199,
+        "loci_failing_a_and_b": 25,
         "passed": 226,
-        "share_failed_of_decided": 0.18705
+        "share_failed_of_decided": 0.18705,
+        "unit_note": "the candidate counts are manifest rows; the LOCUS counts collapse candidates addressing the same span from overlapping tiling windows. Every FP interval in this report is on the locus."
       },
       "params": {
         "allow_wobble": false,
@@ -1131,6 +1254,94 @@
       "ncca_pairing_nt": 2,
       "stem_i_nt_threshold": 1
     },
+    "selection_by_min_named_helices": {
+      "levels": [
+        {
+          "min_named_helices": 1,
+          "reading": null,
+          "selection": null,
+          "the_rule_cannot_decide_at_this_level": "the decision rule left 7 settings tied at the measured minimum that TIE_BREAK_ORDER cannot separate \u2014 they disagree on ['min_helix_pairs', 'min_named_helices']: ['mnh1_mhp2_bulge2-50_ncca2_wob0', 'mnh1_mhp3_bulge2-50_ncca2_wob0', 'mnh1_mhp4_bulge2-50_ncca2_wob0', 'mnh2_mhp2_bulge2-50_ncca2_wob0', 'mnh1_mhp3_bulge2-50_ncca2_wob1', 'mnh1_mhp4_bulge2-50_ncca2_wob1', 'mnh2_mhp2_bulge2-50_ncca2_wob1']"
+        },
+        {
+          "control_records_losing_a_and_b": 8,
+          "fp_arm_failed_of_decided": "52/278",
+          "matches_named_setting": "sensitive_core",
+          "min_named_helices": 2,
+          "of_n_producible_records": 68,
+          "reading": "the PLURAL reading: D3's pass condition is that 'the expected helices are present' \u2014 plural \u2014 so a setting satisfied by ONE resolved helix is a 'some helix is present' predicate. This is the weakest level at which the published sentence matches D3's wording.",
+          "round_yield_n_mined": 3,
+          "selection": {
+            "allow_wobble": false,
+            "bulge_max_nt": 50,
+            "bulge_min_nt": 2,
+            "min_helix_pairs": 2,
+            "min_named_helices": 2,
+            "ncca_pairing_nt": 2,
+            "stem_i_nt_threshold": 1
+          }
+        },
+        {
+          "control_records_losing_a_and_b": 24,
+          "fp_arm_failed_of_decided": "129/278",
+          "matches_named_setting": null,
+          "min_named_helices": 3,
+          "of_n_producible_records": 68,
+          "reading": "the CANONICAL-CORE reading, and it is stated by this repo's own localizer: architecture.named_elements_present's docstring reads D3 as 'the canonical class-I core is Stem I + Stem III + antiterminator (with Stem II in many lineages)' \u2014 three elements. It is at least as well supported as the plural reading and it prices very differently.",
+          "round_yield_n_mined": 11,
+          "selection": {
+            "allow_wobble": false,
+            "bulge_max_nt": 50,
+            "bulge_min_nt": 2,
+            "min_helix_pairs": 2,
+            "min_named_helices": 3,
+            "ncca_pairing_nt": 2,
+            "stem_i_nt_threshold": 1
+          }
+        },
+        {
+          "control_records_losing_a_and_b": 31,
+          "fp_arm_failed_of_decided": "192/278",
+          "matches_named_setting": null,
+          "min_named_helices": 4,
+          "of_n_producible_records": 68,
+          "reading": null,
+          "round_yield_n_mined": 13,
+          "selection": {
+            "allow_wobble": false,
+            "bulge_max_nt": 20,
+            "bulge_min_nt": 2,
+            "min_helix_pairs": 2,
+            "min_named_helices": 4,
+            "ncca_pairing_nt": 2,
+            "stem_i_nt_threshold": 1
+          }
+        }
+      ],
+      "why_this_block_exists": "the recommendation below is the level-2 row. ADR-0006 D3 assigns this value to the held-out canonical set at P6 and states no number, so choosing the level is a CLAUDE.md \u00a77 decision and every level is priced here rather than one being presented as derived."
+    },
+    "tie_break_exercised": {
+      "can_fire": {
+        "allow_wobble": true,
+        "bulge_max_nt": true,
+        "stem_i_nt_threshold": false
+      },
+      "note": "an entry over a single-valued axis is inert here by construction, not by measurement of the arms; it is kept so a supply that DID vary that axis would still be resolved by a stated preference rather than by sort order.",
+      "values_present_on_the_swept_grid": {
+        "allow_wobble": [
+          false,
+          true
+        ],
+        "bulge_max_nt": [
+          10,
+          20,
+          50,
+          10000
+        ],
+        "stem_i_nt_threshold": [
+          1
+        ]
+      }
+    },
     "tied_with": [
       {
         "allow_wobble": true,
@@ -1142,7 +1353,7 @@
         "stem_i_nt_threshold": 1
       }
     ],
-    "what_it_costs": "the frontier above shows what a higher-yield setting would buy and what it would cost in control records; the rule declines those because selecting them is fitting a value to 68 records, not choosing one."
+    "what_it_costs": "the frontier above shows what a higher-yield setting would buy and what it would cost in control records; the rule declines those because selecting them is fitting a value to a few dozen records, not choosing one."
   },
   "schema_version": "1.0",
   "step": "P3-15'-f",

@@ -68,6 +68,8 @@ def point(
     fp_failed: int = 10,
     fp_passed: int = 90,
     fp_failed_with_a: int = 5,
+    fp_loci_decided: int = 90,
+    fp_loci_failing_a_and_b: int = 5,
     mined: int = 3,
     damage: int = 8,
     producible: int = 68,
@@ -78,6 +80,8 @@ def point(
         fp_failed=fp_failed,
         fp_passed=fp_passed,
         fp_failed_with_a_failed=fp_failed_with_a,
+        fp_loci_decided=fp_loci_decided,
+        fp_loci_failing_a_and_b=fp_loci_failing_a_and_b,
         mined_by_threshold={"stage2_not_declared": mined},
         control={
             "n_records_losing_a_and_b": damage,
@@ -228,15 +232,49 @@ Q_B1, Q_B2 = f"{REC_B}:0:10-20", f"{REC_B}:0:30-40"
 Q_C1 = f"{REC_C}:0:10-20"
 
 
-def test_control_records_groups_queries_by_their_record():
+def control_manifest(tmp_path, ids, accession_of=None) -> Path:
+    """A control manifest in the shape ``load_control_records`` reads."""
+    path = tmp_path / "control_manifest.json"
+    path.write_text(
+        json.dumps(
+            {
+                "candidates": [
+                    {
+                        "candidate_id": q,
+                        "accession": (accession_of or (lambda x: ":".join(x.split(":")[:2])))(q),
+                    }
+                    for q in ids
+                ]
+            }
+        )
+    )
+    return path
+
+
+def test_control_records_groups_queries_by_the_manifests_accession(tmp_path):
     status = {Q_A1: STATUS_FAILED, Q_A2: STATUS_PASSED, Q_B1: STATUS_FAILED}
-    assert rec.control_records(status) == {REC_A: [Q_A1, Q_A2], REC_B: [Q_B1]}
+    manifest = control_manifest(tmp_path, list(status))
+    assert rec.control_records(status, manifest) == {REC_A: [Q_A1, Q_A2], REC_B: [Q_B1]}
 
 
-def test_one_surviving_query_spares_the_whole_record():
+def test_control_records_refuses_a_status_table_that_is_a_different_corpus(tmp_path):
+    """The grouping and the scores must describe the same queries, not merely the same n."""
+    manifest = control_manifest(tmp_path, [Q_A1, Q_A2])
+    with pytest.raises(rec.RecommendError, match="different corpora"):
+        rec.control_records({Q_A1: STATUS_FAILED, Q_B1: STATUS_FAILED}, manifest)
+
+
+def test_control_records_refuses_a_manifest_row_that_contradicts_its_own_id(tmp_path):
+    """The shipped loader is the one that owns this refusal; delegating means inheriting it."""
+    manifest = control_manifest(tmp_path, [Q_A1, Q_A2], accession_of=lambda q: "one:record")
+    with pytest.raises(Exception, match="record|accession"):
+        rec.control_records({Q_A1: STATUS_FAILED, Q_A2: STATUS_FAILED}, manifest)
+
+
+def test_one_surviving_query_spares_the_whole_record(tmp_path):
     """The ANY/ALL witness: record A has one failing and one passing query."""
     status = {Q_A1: STATUS_FAILED, Q_A2: STATUS_FAILED, Q_B1: STATUS_FAILED, Q_B2: STATUS_FAILED}
-    records = rec.control_records(status)
+    records = rec.control_records(status, control_manifest(tmp_path, list(status)))
     arch_by_query = {
         Q_A1: STATUS_FAILED,
         Q_A2: STATUS_PASSED,  # <- the survivor
@@ -249,34 +287,42 @@ def test_one_surviving_query_spares_the_whole_record():
     assert out["n_queries_b_failed"] == 3, "the query count sees three; the record rule sees one"
 
 
-def test_the_conjunction_needs_criterion_a_to_have_failed_too():
+def test_the_conjunction_needs_criterion_a_to_have_failed_too(tmp_path):
     """A record whose queries fail (b) but PASS (a) is spared and must not be counted."""
     status = {Q_A1: STATUS_PASSED, Q_A2: STATUS_PASSED, Q_B1: STATUS_FAILED, Q_B2: STATUS_FAILED}
-    records = rec.control_records(status)
+    records = rec.control_records(status, control_manifest(tmp_path, list(status)))
     arch_by_query = dict.fromkeys([Q_A1, Q_A2, Q_B1, Q_B2], STATUS_FAILED)
     out = rec.control_damage(status, records, arch_by_query)
     assert out["n_records_losing_b"] == 2, "(b) alone fails on both records"
     assert out["n_records_losing_a_and_b"] == 1, "only record B also failed (a)"
 
 
-def test_a_record_with_no_producible_query_leaves_the_denominator():
+def test_a_record_with_no_producible_query_leaves_the_denominator(tmp_path):
     status = {Q_A1: STATUS_FAILED, Q_C1: STATUS_UNAVAILABLE}
-    records = rec.control_records(status)
+    records = rec.control_records(status, control_manifest(tmp_path, list(status)))
     out = rec.control_damage(status, records, {Q_A1: STATUS_FAILED})
     assert out["n_records_producible"] == 1
 
 
-def test_a_query_level_ci_is_refused_and_the_reason_travels_with_it():
+def test_a_query_level_ci_is_refused_and_the_reason_travels_with_it(tmp_path):
     status = {Q_A1: STATUS_FAILED}
-    out = rec.control_damage(status, rec.control_records(status), {Q_A1: STATUS_FAILED})
+    out = rec.control_damage(
+        status,
+        rec.control_records(status, control_manifest(tmp_path, list(status))),
+        {Q_A1: STATUS_FAILED},
+    )
     assert out["query_level_ci95"] is None
     assert "pseudo-replicated" in out["why_no_query_ci"]
     assert out["share_records_losing_a_and_b_ci95"][0] < out["share_records_losing_a_and_b_ci95"][1]
 
 
-def test_the_missing_criterion_c_on_the_control_is_disclosed_not_absorbed():
+def test_the_missing_criterion_c_on_the_control_is_disclosed_not_absorbed(tmp_path):
     status = {Q_A1: STATUS_FAILED}
-    out = rec.control_damage(status, rec.control_records(status), {Q_A1: STATUS_FAILED})
+    out = rec.control_damage(
+        status,
+        rec.control_records(status, control_manifest(tmp_path, list(status))),
+        {Q_A1: STATUS_FAILED},
+    )
     assert "UPPER" in out["criterion_c_not_in_this_conjunction"]
 
 
@@ -451,17 +497,23 @@ def test_the_restricted_frontier_drops_points_below_the_floors():
     assert restricted[0]["n_admissible_points_at_this_yield"] == 1
 
 
-def test_an_empty_damage_denominator_is_refused_not_divided_by():
+def test_an_empty_damage_denominator_is_refused_not_divided_by(tmp_path):
     """A control with no producible record must name its cause, not raise an arithmetic error."""
     status = {Q_A1: STATUS_UNAVAILABLE, Q_B1: STATUS_UNAVAILABLE}
     with pytest.raises(rec.RecommendError, match="no decided corpus"):
-        rec.control_damage(status, rec.control_records(status), {})
+        rec.control_damage(
+            status, rec.control_records(status, control_manifest(tmp_path, list(status))), {}
+        )
 
 
-def test_one_producible_record_is_enough_for_a_denominator():
+def test_one_producible_record_is_enough_for_a_denominator(tmp_path):
     """Positive control: the refusal above is about emptiness, not about small n."""
     status = {Q_A1: STATUS_FAILED, Q_B1: STATUS_UNAVAILABLE}
-    out = rec.control_damage(status, rec.control_records(status), {Q_A1: STATUS_FAILED})
+    out = rec.control_damage(
+        status,
+        rec.control_records(status, control_manifest(tmp_path, list(status))),
+        {Q_A1: STATUS_FAILED},
+    )
     assert out["n_records_producible"] == 1
 
 
@@ -527,21 +579,10 @@ def test_dominating_alternatives_does_not_count_a_costlier_point():
 # Anti-selectivity
 # ═════════════════════════════════════════════════════════════════════════════
 def test_anti_selectivity_reports_the_direction_the_control_falls_through():
-    worse_on_the_control = rec.PointResult(
-        params=CHOSEN,
-        fp_failed=10,
-        fp_passed=90,
-        fp_failed_with_a_failed=10,
-        mined_by_threshold={"stage2_not_declared": 3},
-        control={
-            "n_records_losing_a_and_b": 8,
-            "n_records_producible": 68,
-            "n_queries_decided": 100,
-            "n_queries_a_and_b_failed": 50,
-            "share_records_losing_a_and_b_ci95": [0.0, 1.0],
-        },
+    worse_on_the_control = point(
+        damage=34, producible=68, fp_loci_failing_a_and_b=10, fp_loci_decided=100
     )
-    out = rec.anti_selectivity(worse_on_the_control, n_fp_decided=100)
+    out = rec.anti_selectivity(worse_on_the_control)
     assert out["control_share"] == 0.5
     assert out["fp_share"] == 0.1
     assert out["control_falls_through_more"] is True
@@ -549,25 +590,24 @@ def test_anti_selectivity_reports_the_direction_the_control_falls_through():
     assert out["intervals_disjoint"] is True
 
 
+def test_anti_selectivity_is_stated_on_records_and_loci_not_on_rows():
+    """The correction: neither row unit is independent, so neither may carry an interval."""
+    r = point(damage=8, producible=68, fp_loci_failing_a_and_b=25, fp_loci_decided=199)
+    out = rec.anti_selectivity(r)
+    assert out["control_records_failing_a_and_b"] == "8/68"
+    assert out["fp_loci_failing_a_and_b"] == "25/199"
+    assert "RECORDS" in out["unit"] and "LOCI" in out["unit"]
+    assert out["also_at_the_row_level_for_reference"]["no_interval_because"]
+
+
 def test_anti_selectivity_is_not_hardwired_to_one_direction():
     """Positive control for the flag above — swap the arms and it must invert."""
-    worse_on_the_fp_arm = rec.PointResult(
-        params=CHOSEN,
-        fp_failed=10,
-        fp_passed=90,
-        fp_failed_with_a_failed=50,
-        mined_by_threshold={"stage2_not_declared": 3},
-        control={
-            "n_records_losing_a_and_b": 8,
-            "n_records_producible": 68,
-            "n_queries_decided": 100,
-            "n_queries_a_and_b_failed": 10,
-            "share_records_losing_a_and_b_ci95": [0.0, 1.0],
-        },
+    worse_on_the_fp_arm = point(
+        damage=7, producible=68, fp_loci_failing_a_and_b=50, fp_loci_decided=100
     )
-    out = rec.anti_selectivity(worse_on_the_fp_arm, n_fp_decided=100)
+    out = rec.anti_selectivity(worse_on_the_fp_arm)
     assert out["control_falls_through_more"] is False
-    assert out["fp_minus_control_pp"] == pytest.approx(40.0)
+    assert out["fp_minus_control_pp"] > 0
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -755,7 +795,22 @@ def test_every_floor_carries_a_rationale_and_a_source():
     for floor in rec.DECISION_FLOORS:
         body = floor.as_dict()
         assert body["rationale"].strip()
-        assert body["source"].startswith("ADR-")
+        assert body["source"].strip()
+
+
+def test_a_floor_that_is_an_assumption_says_so_rather_than_citing_an_ADR():
+    """min_helix_pairs has no ADR clause behind it; the source must not imply one."""
+    floor = next(f for f in rec.DECISION_FLOORS if f.key == "min_helix_pairs >= 2")
+    assert "ASSUMPTION" in floor.source
+    assert "NO concept of stacked-pair depth" in floor.rationale
+
+
+def test_the_min_named_helices_floor_names_the_competing_reading():
+    """The level is the §7 choice; a rationale that hid the other reading would decide it."""
+    floor = next(f for f in rec.DECISION_FLOORS if f.key.startswith("min_named_helices"))
+    assert "§7" in floor.rationale
+    assert "named_elements_present" in floor.source
+    assert set(rec.MIN_NAMED_HELICES_READINGS) >= {2, 3}
 
 
 def test_the_decision_rule_statement_names_what_it_refuses_to_do():
@@ -805,6 +860,7 @@ def tiny_corpus(tmp_path, monkeypatch):
     )
     ctrl_status = tmp_path / "ctrl_status.json"
     ctrl_status.write_text(json.dumps({"status": dict.fromkeys(ctrl_ids, STATUS_FAILED)}))
+    ctrl_manifest = control_manifest(tmp_path, ctrl_ids)
 
     fp_report = tmp_path / "fp_report.json"
     fp_report.write_text(
@@ -836,6 +892,7 @@ def tiny_corpus(tmp_path, monkeypatch):
         "fp_manifest_path": manifest,
         "spare_rule_inputs_path": inputs,
         "control_status_path": ctrl_status,
+        "control_manifest_path": ctrl_manifest,
         "fp_report_path": fp_report,
         "control_report_path": ctrl_report,
         "comparison_report_path": comparison,
@@ -887,3 +944,120 @@ def test_every_frontier_yield_is_within_the_ceiling(tiny_corpus):
     ]
     for row in body["frontier_all_admissible"]:
         assert row["n_mined"] <= ceiling
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# The locus — the FP arm's independent unit (review round 3)
+# ═════════════════════════════════════════════════════════════════════════════
+def test_two_tiling_windows_calling_the_same_span_are_one_locus():
+    """The defect this exists to fix: 79 of 278 FP 'candidates' were second calls."""
+    a = "GCA_1.1:c106:15360:16034-16111"
+    b = "GCA_1.1:c106:15872:16034-16111"
+    assert rec.locus_of(a) == rec.locus_of(b) == "GCA_1.1:c106:16034-16111"
+
+
+def test_different_spans_on_one_contig_are_different_loci():
+    """Positive control: locus_of must not collapse everything to the contig."""
+    assert rec.locus_of("GCA_1.1:c106:15360:100-200") != rec.locus_of("GCA_1.1:c106:15360:300-400")
+
+
+def test_an_id_that_is_not_locus_shaped_is_refused_not_guessed():
+    with pytest.raises(rec.RecommendError, match="cannot be derived"):
+        rec.locus_of("not:a:locus")
+
+
+def test_the_decided_states_come_from_the_shipped_status_constants():
+    assert rec.DECIDED_STATES == (STATUS_PASSED, STATUS_FAILED)
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# The §7 axis: every min_named_helices level, priced
+# ═════════════════════════════════════════════════════════════════════════════
+def test_every_min_named_helices_level_is_priced():
+    grid = [
+        point(params=apm.ParamTuple(f"m{m}", 1, m, 2, 2, 50, 2, False), fp_failed=10 * m, mined=m)
+        for m in (2, 3, 4)
+    ]
+    out = rec.selection_by_min_named_helices(grid)
+    levels = {r["min_named_helices"]: r for r in out["levels"]}
+    assert set(levels) == set(rec.MIN_NAMED_HELICES_LEVELS)
+    for m in (2, 3, 4):
+        assert levels[m]["selection"]["min_named_helices"] == m
+        assert levels[m]["round_yield_n_mined"] == m
+
+
+def test_a_level_the_rule_cannot_decide_is_reported_not_skipped():
+    tied = [
+        point(params=apm.ParamTuple("a", 1, 2, 2, 2, 50, 2, False), fp_failed=10),
+        point(params=apm.ParamTuple("b", 1, 2, 3, 2, 50, 2, False), fp_failed=10),
+    ]
+    levels = {r["min_named_helices"]: r for r in rec.selection_by_min_named_helices(tied)["levels"]}
+    assert levels[2]["selection"] is None
+    assert levels[2]["the_rule_cannot_decide_at_this_level"]
+
+
+def test_the_two_supported_readings_are_both_carried():
+    assert "plural" in rec.MIN_NAMED_HELICES_READINGS[2].lower()
+    assert "canonical" in rec.MIN_NAMED_HELICES_READINGS[3].lower()
+    assert "named_elements_present" in rec.MIN_NAMED_HELICES_READINGS[3]
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# Tie-break honesty, and the origin guard
+# ═════════════════════════════════════════════════════════════════════════════
+def test_a_single_valued_tie_break_axis_is_reported_as_unable_to_fire():
+    grid = [
+        point(params=apm.ParamTuple("a", 1, 2, 2, 2, 50, 2, False)),
+        point(params=apm.ParamTuple("b", 1, 2, 2, 2, 20, 2, True)),
+    ]
+    out = rec.tie_break_exercised(grid)
+    assert out["can_fire"]["stem_i_nt_threshold"] is False, "one value on the swept grid"
+    assert out["can_fire"]["allow_wobble"] is True
+    assert out["can_fire"]["bulge_max_nt"] is True
+
+
+def test_an_origin_carried_from_another_report_clears_the_same_guard_as_the_flag():
+    with pytest.raises(rec.RecommendError, match="local absolute path"):
+        rec.checked_origin("fp", "/home/someone/tbox-scratch/msa")
+
+
+def test_a_cluster_shaped_origin_is_carried_forward():
+    """Positive control: the guard is about the shape, not about carrying origins at all."""
+    assert rec.checked_origin("fp", "two.amlab:$HOME/tbox-scratch/msa").startswith("two.amlab")
+    assert rec.checked_origin("fp", None) is None
+
+
+def test_evaluate_point_counts_the_fp_arm_by_locus_not_by_manifest_row(tmp_path):
+    """Two candidates from overlapping windows on one span must count once, not twice."""
+    from tbox_finder.mining.architecture_producer import candidate_msa_path
+
+    fp_root = tmp_path / "fp"
+    twins = ["GCA_9.1:c7:1024:5000-5100", "GCA_9.1:c7:1536:5000-5100"]
+    for cid in twins:
+        write_consensus(
+            fp_root, candidate_msa_path(fp_root, cid).parent.name, SS_ONE_HELIX, ROW_ONE_HELIX
+        )
+    items = apm.read_supply(fp_root)
+    by_slug = {candidate_msa_path(fp_root, c).parent.name: c for c in twins}
+    by_id = {c: evidence_row(STATUS_FAILED, STATUS_FAILED) for c in twins}
+
+    ctrl_root = tmp_path / "ctrl"
+    write_consensus(
+        ctrl_root, candidate_msa_path(ctrl_root, Q_A1).parent.name, SS_TWO_HELIX, ROW_WITH_UG
+    )
+    ctrl_items = apm.read_supply(ctrl_root)
+    ctrl_status = {Q_A1: STATUS_FAILED}
+    result = rec.evaluate_point(
+        CHOSEN,
+        fp_items=items,
+        fp_id_by_slug=by_slug,
+        by_id=by_id,
+        control_items=ctrl_items,
+        control_id_by_slug={candidate_msa_path(ctrl_root, Q_A1).parent.name: Q_A1},
+        control_status=ctrl_status,
+        control_record_index={REC_A: [Q_A1]},
+    )
+    assert result.fp_failed + result.fp_passed == 2, "two manifest rows"
+    assert result.fp_loci_decided == 1, "one locus"
+    assert result.fp_failed_with_a_failed == 2
+    assert result.fp_loci_failing_a_and_b == 1
