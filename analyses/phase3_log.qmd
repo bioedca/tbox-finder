@@ -6233,3 +6233,41 @@ older test accepted an `AttributeError` or a `KeyError` as readily as the refusa
 pin; it names `RecommendError`/`CompareError` now. **139 tests, 92 sabotages, all RED against
 their NAMED test.** Zero new failures vs the same `main` baseline; `ruff` + `black` clean; no
 committed artifact changes.
+
+**Round 10 came back clean — and a 4-lens adversarial pass (27 agents, 0 errors) then found
+twenty things it had not, seventeen of them in the SAME two families.** The CodeRabbit CLI
+returned *No new findings* on `b521cdc`, which is the §5.1 gate; the harness was run anyway,
+because rounds 7–9 had each found real defects in code the previous round had just written. Three
+of its twenty-three candidates were refuted by their own verifiers and are not carried.
+
+**Family 1 — the refusal path, five more escapes of the kind round 7 closed for the manifest.**
+`report.get("supply", {}).get(…)`, `comparison.get("headline", {}).get("reading")` and
+`(fp_report.get("helix_arm") or {}).get(…)` all substitute their default **only when the key is
+absent**: a present-but-not-an-object value — a string, a list, a number — sails through and the
+next `.get` raises `AttributeError`, outside `main`'s except tuple. ⚠ The `headline` one is the
+sharpest: round 8 bound the comparison report's `arms` **and left the field that guard exists to
+protect unchecked**, so a comparison whose digests match perfectly and whose headline is a bare
+string killed the CLI in a traceback. `read_json_object` + `object_field` now serve every one of
+them (absent stays permissive — several blocks are genuinely optional — while a wrong *shape* is
+named), and the control status table is shape-checked **before** `index_by_slug` consumes it,
+twelve lines ahead of `control_records`' own refusal ([[guard-runs-after-what-it-guards]]).
+
+**Family 2 — nine published numbers that no sabotage could reach.** Each of these mutations left
+all 139 tests green: `all(` → `any(` on the **record-level (a)∧(b) damage rule** — the rule behind
+the *8 of 68* figure the §7 choice was made against; dropping the `(a)` conjunct from the
+query-level count, which silently republishes the (b)-only count; `len(producible)` → `len(queries)`
+in the query denominator; each share divided by the *other* numerator; the two Wilson intervals
+**swapped**; `frontier`'s per-yield argmin replaced by keep-the-last-seen; `share_failed_of_decided`
+divided by `fp_passed`; the locus collapse in `mined_loci_by_threshold`; and the floors conjunct in
+`dominating_alternatives`. The cause was uniform and is the one this file's own header names: every
+control fixture was **symmetric** — `point()` set `n_records_losing_a_and_b` and `n_records_losing_b`
+to the same value, and every `control_damage` fixture made each record uniform in its per-query
+verdict, so ALL was indistinguishable from ANY and (a)∧(b) from (b) alone. One asymmetric corpus
+now carries six quantities no two of which are equal, `point()`'s two record counts differ by
+default, and the intervals are pinned **by identity** to their own numerators — a containment
+assertion passed with them swapped, because at n = 3 each interval contains the other's point
+estimate ([[symmetric-count-fixture-blind-to-inversion]]). Two guard **call sites** in `recommend`
+— the control decided-set check and the supply/manifest orphan check — were also deletable in
+silence, and are now driven through `recommend` itself. **156 tests, 105 sabotages, all RED against
+their NAMED test.** No published number moves: the committed manifest still reads 941 ids and no
+artifact changed. Zero new failures vs the same `main` baseline; `ruff` + `black` clean.

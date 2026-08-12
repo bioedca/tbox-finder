@@ -27,6 +27,7 @@ import pytest
 from tbox_finder.mining import architecture_param_measure as apm
 from tbox_finder.mining import architecture_param_recommend as rec
 from tbox_finder.mining.architecture_param_control_compare import CompareError
+from tbox_finder.mining.curated_control_sizing import wilson_interval
 from tbox_finder.mining.spare_rule import (
     STATUS_FAILED,
     STATUS_PASSED,
@@ -73,9 +74,14 @@ def point(
     fp_loci_failing_a_and_b: int = 5,
     mined: int = 3,
     damage: int = 8,
+    b_only_extra: int = 2,
     producible: int = 68,
 ) -> rec.PointResult:
-    """A :class:`PointResult` with only the fields a given assertion reads."""
+    """A :class:`PointResult` with only the fields a given assertion reads.
+
+    ``damage`` is the (a)∧(b) record count; ``b_only_extra`` is how many further records
+    lose (b) alone, so the two never arrive equal by default.
+    """
     return rec.PointResult(
         params=params,
         fp_failed=fp_failed,
@@ -86,8 +92,12 @@ def point(
         mined_by_threshold={"stage2_not_declared": mined},
         mined_loci_by_threshold={"stage2_not_declared": mined},
         control={
+            # ⚠ (a)∧(b) and (b)-alone are DIFFERENT by default. Giving both the same
+            # `damage` made every consumer of this helper blind to the two being
+            # interchanged, which is the inversion the file header claims to defend
+            # against ([[symmetric-count-fixture-blind-to-inversion]]).
             "n_records_losing_a_and_b": damage,
-            "n_records_losing_b": damage,
+            "n_records_losing_b": damage + b_only_extra,
             "n_records_producible": producible,
             "n_queries_decided": 76,
             "n_queries_a_and_b_failed": damage,
@@ -351,6 +361,102 @@ def test_the_conjunction_needs_criterion_a_to_have_failed_too(tmp_path):
     assert out["n_records_losing_a_and_b"] == 1, "only record B also failed (a)"
 
 
+def asymmetric_control(tmp_path):
+    """One control corpus in which every counter of `control_damage` takes a DIFFERENT value.
+
+    Built so that no two published quantities coincide — the shape a uniform fixture cannot
+    have, and the reason the sabotages below bite:
+
+    * record A — ``Q_A1`` fails (a) and (b); ``Q_A2`` fails (b) but PASSES (a)
+      ⇒ A loses (b) on every query but is spared under the conjunction, so ANY/ALL and
+        (b)-alone/(a)∧(b) are distinguishable in the same record;
+    * record B — ``Q_B1`` fails both; ``Q_B2`` is UNAVAILABLE ⇒ not producible
+      ⇒ B is damaged on its one decided query, and the query denominator must exclude the
+        other, so ``n_queries_decided`` (3) differs from the query total (4);
+    * record C — ``Q_C1`` fails (a) only, and PASSES (b) ⇒ C is producible and undamaged.
+
+    Expected: 3 producible records · 1 losing (a)∧(b) · 2 losing (b) · 4 decided queries of
+    5 · 3 failing (b) · 2 failing both — six quantities, no two equal by accident.
+    """
+    status = {
+        Q_A1: STATUS_FAILED,
+        Q_A2: STATUS_PASSED,
+        Q_B1: STATUS_FAILED,
+        Q_B2: STATUS_UNAVAILABLE,
+        Q_C1: STATUS_FAILED,
+    }
+    arch = {
+        Q_A1: STATUS_FAILED,
+        Q_A2: STATUS_FAILED,
+        Q_B1: STATUS_FAILED,
+        Q_B2: STATUS_FAILED,
+        Q_C1: STATUS_PASSED,
+    }
+    records = rec.control_records(status, control_manifest(tmp_path, list(status)))
+    return status, records, arch
+
+
+def test_the_record_damage_rule_is_ALL_of_the_producible_queries(tmp_path):
+    """`all(` -> `any(` at the (a)∧(b) record rule left the whole suite green.
+
+    This is the number the §7 choice was made against — "8 of 68 control records lose both
+    protections" — so the quantifier it rests on must be pinned by a fixture that can tell
+    ALL from ANY: record A has one query failing both and one passing (a)
+    ([[all-true-fixture-cannot-test-a-conjunction]]).
+    """
+    status, records, arch = asymmetric_control(tmp_path)
+    out = rec.control_damage(status, records, arch)
+    assert out["n_records_producible"] == 3
+    assert out["n_records_losing_a_and_b"] == 1, "A survives: its second query passes (a)"
+    assert out["n_records_losing_b"] == 2, "A and B lose (b) on every producible query"
+
+
+def test_the_query_damage_count_keeps_its_criterion_a_conjunct(tmp_path):
+    """Dropping `and status[q] == STATUS_FAILED` republished the (b)-only count as (a)∧(b).
+
+    Nothing asserted `n_queries_a_and_b_failed` against real output, so the published
+    query-level count could silently become the larger (b)-only one.
+    """
+    status, records, arch = asymmetric_control(tmp_path)
+    out = rec.control_damage(status, records, arch)
+    assert out["n_queries_b_failed"] == 3
+    assert out["n_queries_a_and_b_failed"] == 2, "Q_A2 fails (b) but passes (a)"
+    assert out["n_queries_a_and_b_failed"] != out["n_queries_b_failed"]
+
+
+def test_the_query_denominator_counts_only_producible_queries(tmp_path):
+    """`n_queries_decided` must exclude an `unavailable` query of a producible record.
+
+    Record B contributes one decided query and one spared one, so the denominator (4) and
+    the raw query total (5) differ — a record-level fixture cannot show this.
+    """
+    status, records, arch = asymmetric_control(tmp_path)
+    out = rec.control_damage(status, records, arch)
+    assert sum(len(q) for q in records.values()) == 5
+    assert out["n_queries_decided"] == 4
+
+
+def test_each_published_share_divides_its_OWN_numerator(tmp_path):
+    """Swapping the two `wilson_interval` calls, or the two numerators, stayed green.
+
+    Both shares were only ever asserted where every count was equal, so nothing bound a
+    share — or its interval — to the count it claims to summarise.
+    """
+    status, records, arch = asymmetric_control(tmp_path)
+    out = rec.control_damage(status, records, arch)
+    assert out["share_records_losing_a_and_b"] == round(1 / 3, 6)
+    assert out["share_records_losing_b"] == round(2 / 3, 6)
+    # ⚠ By IDENTITY against each interval's OWN numerator, not by containment: at n = 3
+    # the two Wilson intervals are wide enough that EACH contains the other's point
+    # estimate, so a containment test passes with the two swapped
+    # ([[symmetric-count-fixture-blind-to-inversion]]).
+    lo_ab, hi_ab = wilson_interval(1, 3)
+    lo_b, hi_b = wilson_interval(2, 3)
+    assert out["share_records_losing_a_and_b_ci95"] == [round(lo_ab, 6), round(hi_ab, 6)]
+    assert out["share_records_losing_b_ci95"] == [round(lo_b, 6), round(hi_b, 6)]
+    assert out["share_records_losing_a_and_b_ci95"] != out["share_records_losing_b_ci95"]
+
+
 def test_a_record_with_no_producible_query_leaves_the_denominator(tmp_path):
     status = {Q_A1: STATUS_FAILED, Q_C1: STATUS_UNAVAILABLE}
     records = rec.control_records(status, control_manifest(tmp_path, list(status)))
@@ -565,6 +671,38 @@ def test_floor_sensitivity_refuses_a_vacuous_identity_when_nothing_moved():
 # ═════════════════════════════════════════════════════════════════════════════
 # The frontier and the self-criticism block
 # ═════════════════════════════════════════════════════════════════════════════
+def test_the_frontier_keeps_the_cheapest_point_WHEREVER_it_sits_in_the_input():
+    """The argmin, not the last-seen: with the cheap point FIRST the loop must keep it.
+
+    Every earlier fixture listed its cheap point last, so replacing the incumbent
+    comparison with "keep whatever came last" left the whole suite green — and the
+    frontier is the block that tells the reader what the rule declined to take.
+    """
+    cheap = point(params=CHOSEN, mined=5, damage=8)
+    dear = point(params=apm.ParamTuple("dear", 1, 3, 2, 4, 50, 2, False), mined=5, damage=40)
+    for order in ([cheap, dear], [dear, cheap]):
+        rows = rec.frontier(order)
+        assert len(rows) == 1
+        assert rows[0]["fewest_control_records_losing_a_and_b"] == 8, "the argmin, either way"
+        assert rows[0]["example_params"] == CHOSEN.as_dict(), "and the row describes THAT point"
+
+
+def test_the_published_fp_share_divides_failed_by_the_decided_total():
+    """`share_failed_of_decided` — the FP arm's headline rate — was asserted nowhere.
+
+    `as_dict` is the sole writer of the published field, and no test called it, so the
+    denominator could become `fp_passed` alone and every report would still render.
+    """
+    body = point(fp_failed=10, fp_passed=90).as_dict()
+    assert body["fp_arm"]["share_failed_of_decided"] == round(10 / 100, 6)
+    assert body["fp_arm"]["share_failed_of_decided"] != round(10 / 90, 6)
+
+
+def test_a_point_that_decided_nothing_reports_no_share_rather_than_dividing_by_zero():
+    """Positive control for the guard beside it: the `else None` arm is reachable."""
+    assert point(fp_failed=0, fp_passed=0).as_dict()["fp_arm"]["share_failed_of_decided"] is None
+
+
 def test_the_frontier_keeps_the_cheapest_point_at_each_yield():
     cheap = point(params=CHOSEN, mined=5, damage=8)
     dear = point(params=apm.ParamTuple("dear", 1, 3, 2, 4, 50, 2, False), mined=5, damage=40)
@@ -650,6 +788,20 @@ def test_dominating_alternatives_finds_a_strictly_better_floor_clearing_point():
     assert out["n_settings"] == 1
     assert out["max_extra_mined"] == 2
     assert out["examples_by_yield"][0]["n_mined"] == 5
+
+
+def test_a_dominating_point_below_a_decision_floor_is_not_counted():
+    """The block enumerates what the RULE declined, so it may only list admissible points.
+
+    Both existing fixtures used a floor-clearing alternative, so `clears_all_floors` in
+    the filter was never exercised: a setting the rule may not choose could be published
+    as a better one it passed over. `mnh=1` is below the min_named_helices floor.
+    """
+    chosen = point(params=CHOSEN, mined=3, damage=8)
+    below = point(params=apm.ParamTuple("loose", 1, 1, 2, 2, 50, 2, False), mined=9, damage=1)
+    out = rec.dominating_alternatives([chosen, below], chosen)
+    assert out["n_settings"] == 0, "it mines more for less, but the rule cannot take it"
+    assert out["max_extra_mined"] == 0
 
 
 def test_dominating_alternatives_does_not_count_a_costlier_point():
@@ -1165,6 +1317,50 @@ def test_recommend_refuses_a_supply_the_committed_report_does_not_describe(tiny_
         rec.recommend(**tiny_corpus)
 
 
+def test_recommend_refuses_a_control_supply_that_is_not_criterion_as_decided_set(tiny_corpus):
+    """The CONTROL call site of the decided-set guard, driven through `recommend`.
+
+    The guard's unit tests only ever pass label "FP", and the fixture makes the FP arm's
+    two id sets identical, so deleting either call site left the suite green. Here the
+    control table calls one query `unavailable` while its consensus sits on disk.
+    """
+    p = Path(tiny_corpus["control_status_path"])
+    status = json.loads(p.read_text())["status"]
+    status[sorted(status)[0]] = STATUS_UNAVAILABLE
+    p.write_text(json.dumps({"status": status}))
+    with pytest.raises(rec.RecommendError, match="control supply is not criterion"):
+        rec.recommend(**tiny_corpus)
+
+
+def test_recommend_refuses_a_consensus_whose_slug_has_no_manifest_candidate(tiny_corpus, tmp_path):
+    """The orphan check, driven through `recommend` — deleting it left the suite green.
+
+    A consensus the manifest does not name means the supply and the manifest describe
+    different corpora; the digests are re-stamped here so the *earlier* binding gate
+    passes and this guard is the one under test.
+    """
+    from tbox_finder.mining.architecture_producer import candidate_msa_path
+
+    ctrl_root = Path(tiny_corpus["control_msa_root"])
+    write_consensus(
+        ctrl_root,
+        candidate_msa_path(ctrl_root, "zzz:c0:0:10-20").parent.name,
+        SS_TWO_HELIX,
+        ROW_WITH_UG,
+    )
+    digest = apm.supply_digest(apm.read_supply(ctrl_root))
+    report = Path(tiny_corpus["control_report_path"])
+    body = json.loads(report.read_text())
+    body["supply"]["supply_digest_sha256"] = digest
+    report.write_text(json.dumps(body))
+    comparison = Path(tiny_corpus["comparison_report_path"])
+    cmp_body = json.loads(comparison.read_text())
+    cmp_body["arms"]["control"]["supply_digest_sha256"] = digest
+    comparison.write_text(json.dumps(cmp_body))
+    with pytest.raises(rec.RecommendError, match="resolve to no manifest"):
+        rec.recommend(**tiny_corpus)
+
+
 def test_recommend_names_the_control_status_file_in_a_status_refusal(tiny_corpus):
     """The WIRING of the path, not the helper: the kwarg is droppable in silence.
 
@@ -1191,6 +1387,60 @@ def test_recommend_refuses_a_comparison_report_about_other_supplies(tiny_corpus)
     comparison["arms"]["control"]["supply_digest_sha256"] = "0" * 64
     Path(tiny_corpus["comparison_report_path"]).write_text(json.dumps(comparison))
     with pytest.raises(rec.RecommendError, match="reading of different arms"):
+        rec.recommend(**tiny_corpus)
+
+
+@pytest.mark.parametrize(
+    "headline",
+    [
+        pytest.param("the FP arm loses more", id="a_string"),
+        pytest.param(["a"], id="a_list"),
+        pytest.param(3, id="a_number"),
+    ],
+)
+def test_recommend_refuses_a_comparison_report_whose_headline_is_not_an_object(
+    tiny_corpus, headline
+):
+    """The round-8 guard bound `arms`; the field it protects was still an unguarded `.get`.
+
+    `comparison.get("headline", {})` substitutes its default only when the key is ABSENT,
+    so a present-but-not-an-object value reached `.get` and raised `AttributeError` —
+    outside `main`'s except tuple, i.e. a traceback where a refusal was intended, the very
+    escape `read_manifest_ids` was written to close.
+    """
+    p = Path(tiny_corpus["comparison_report_path"])
+    body = json.loads(p.read_text())
+    body["headline"] = headline
+    p.write_text(json.dumps(body))
+    with pytest.raises(rec.RecommendError, match="'headline' is"):
+        rec.recommend(**tiny_corpus)
+
+
+def test_a_headline_block_that_is_simply_absent_is_not_an_error(tiny_corpus):
+    """Positive control: ABSENT stays permissive — only a wrong SHAPE is refused."""
+    p = Path(tiny_corpus["comparison_report_path"])
+    body = json.loads(p.read_text())
+    del body["headline"]
+    p.write_text(json.dumps(body))
+    assert rec.recommend(**tiny_corpus)["arms"]["comparison_headline_carried_forward"] is None
+
+
+@pytest.mark.parametrize("key", ["fp_report_path", "control_report_path"])
+def test_recommend_refuses_a_measurement_report_that_is_not_an_object(tiny_corpus, key):
+    """A report file holding a list or a scalar refuses instead of tracebacking.
+
+    The digest binding is the ONLY thing tying a cluster-only supply to a committed public
+    report, so it must fail by name.
+    """
+    Path(tiny_corpus[key]).write_text(json.dumps([{"supply": {}}]))
+    with pytest.raises(rec.RecommendError, match="must be a JSON object"):
+        rec.recommend(**tiny_corpus)
+
+
+def test_recommend_refuses_a_report_whose_supply_block_is_null(tiny_corpus):
+    """`.get("supply", {})` defaulted only for an ABSENT key; `null` reached `.get`."""
+    Path(tiny_corpus["fp_report_path"]).write_text(json.dumps({"supply": "cluster"}))
+    with pytest.raises(rec.RecommendError, match="'supply' is"):
         rec.recommend(**tiny_corpus)
 
 
@@ -1355,6 +1605,12 @@ def test_evaluate_point_counts_the_fp_arm_by_locus_not_by_manifest_row(tmp_path)
     assert result.fp_failed == 3, "(b) fails on all three"
     assert result.fp_failed_with_a_failed == 2, "only the two whose (a) also failed"
     assert result.fp_loci_failing_a_and_b == 1, "and those two are one locus"
+    # ⚠ The THIRD locus-collapse site. `mined_by_threshold` counts manifest rows and
+    # `mined_loci_by_threshold` collapses them; nothing asserted the second, so the
+    # published `round_yield_n_mined_loci` could silently become the row count — the very
+    # overstatement of "how much DNA" this locus unit exists to prevent.
+    assert result.mined_by_threshold["stage2_not_declared"] == 2, "both twins are mined rows"
+    assert result.mined_loci_by_threshold["stage2_not_declared"] == 1, "one piece of DNA"
 
 
 # ═════════════════════════════════════════════════════════════════════════════

@@ -1262,6 +1262,39 @@ def assert_supply_is_the_decided_set(
     )
 
 
+def read_json_object(path: str | Path, what: str) -> dict[str, Any]:
+    """One operator-supplied JSON file, read as an OBJECT or refused.
+
+    Every report path on this CLI is an operator argument, and ``json.loads`` returns
+    whatever the file holds. A bare ``.get`` on a list, a string or ``null`` raises
+    ``AttributeError`` — outside ``main``'s ``(RecommendError, ValueError, TypeError,
+    OSError, KeyError)`` — so the CLI died in a traceback where it should have refused.
+    """
+    try:
+        payload = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise RecommendError(f"{portable_path(path)}: cannot read {what} ({exc})") from exc
+    if not isinstance(payload, Mapping):
+        raise RecommendError(f"{portable_path(path)}: {what} must be a JSON object")
+    return dict(payload)
+
+
+def object_field(payload: Mapping[str, Any], key: str, where: str) -> dict[str, Any]:
+    """``payload[key]`` as a mapping — ABSENT is ``{}``, PRESENT-but-not-an-object refuses.
+
+    ``payload.get(key, {})`` and ``payload.get(key) or {}`` both substitute the default
+    only for an absent (or falsy) value: a *truthy* non-mapping sails through and the next
+    ``.get`` raises ``AttributeError``. Absent stays permissive because several of these
+    blocks are genuinely optional; a wrong *shape* is a malformed file and is named.
+    """
+    value = payload.get(key)
+    if value is None:
+        return {}
+    if not isinstance(value, Mapping):
+        raise RecommendError(f"{where}: '{key}' is {type(value).__name__}, expected an object")
+    return dict(value)
+
+
 def index_by_slug(label: str, msa_root: str | Path, ids: Iterable[str]) -> dict[str, str]:
     """``slug → candidate_id`` for one arm, built so a collision is REFUSED, not merged.
 
@@ -1441,14 +1474,17 @@ def recommend(
     # The supplies are cluster-only, so bind them to the committed reports by digest:
     # a re-run against a different round directory of the same cardinality would
     # otherwise produce a tidy table about the wrong corpus.
-    fp_report = json.loads(Path(fp_report_path).read_text(encoding="utf-8"))
-    control_report = json.loads(Path(control_report_path).read_text(encoding="utf-8"))
-    comparison = json.loads(Path(comparison_report_path).read_text(encoding="utf-8"))
-    for label, report, digest in (
-        ("FP", fp_report, fp_digest),
-        ("control", control_report, control_digest),
+    fp_report_where = portable_path(fp_report_path)
+    control_report_where = portable_path(control_report_path)
+    comparison_where = portable_path(comparison_report_path)
+    fp_report = read_json_object(fp_report_path, "the FP measurement report")
+    control_report = read_json_object(control_report_path, "the control measurement report")
+    comparison = read_json_object(comparison_report_path, "the comparison report")
+    for label, report, digest, where in (
+        ("FP", fp_report, fp_digest, fp_report_where),
+        ("control", control_report, control_digest, control_report_where),
     ):
-        recorded = report.get("supply", {}).get("supply_digest_sha256")
+        recorded = object_field(report, "supply", where).get("supply_digest_sha256")
         if recorded != digest:
             raise RecommendError(
                 f"the {label} supply on disk digests to {digest} but the committed "
@@ -1462,7 +1498,20 @@ def recommend(
     assert_covers_manifest(by_id, manifest_ids)
 
     fp_id_by_slug = index_by_slug("FP", fp_msa_root, manifest_ids)
-    control_status = json.loads(Path(control_status_path).read_text(encoding="utf-8"))["status"]
+    # ⚠ Shape-checked HERE, not in `control_records`: `index_by_slug` consumes this value
+    # twelve lines before that function's own `isinstance(status, Mapping)` refusal can
+    # fire, so a mis-shaped table used to be diagnosed by whatever the slug walk produced
+    # ([[guard-runs-after-what-it-guards]]).
+    control_status = object_field(
+        read_json_object(control_status_path, "the control status table"),
+        "status",
+        portable_path(control_status_path),
+    )
+    if not control_status:
+        raise RecommendError(
+            f"{portable_path(control_status_path)}: the control status table carries no "
+            "'status' map, so no control query is scored"
+        )
     control_id_by_slug = index_by_slug("control", control_msa_root, control_status)
     for label, items, index in (
         ("FP", fp_items, fp_id_by_slug),
@@ -1563,7 +1612,7 @@ def recommend(
                 "n_consensuses": len(fp_items),
                 "supply_digest_sha256": fp_digest,
                 "supply_origin": checked_origin(
-                    "fp", fp_report.get("supply", {}).get("supply_origin")
+                    "fp", object_field(fp_report, "supply", fp_report_where).get("supply_origin")
                 ),
                 "ground_truth": (
                     "unknown — a round-0 false-positive MANIFEST, not verified negatives"
@@ -1574,13 +1623,18 @@ def recommend(
                 "n_consensuses": len(control_items),
                 "supply_digest_sha256": control_digest,
                 "supply_origin": checked_origin(
-                    "control", control_report.get("supply", {}).get("supply_origin")
+                    "control",
+                    object_field(control_report, "supply", control_report_where).get(
+                        "supply_origin"
+                    ),
                 ),
                 "ground_truth": (
                     "believed positive — held-out curated TBDB records, Stage-1 re-detected"
                 ),
             },
-            "comparison_headline_carried_forward": comparison.get("headline", {}).get("reading"),
+            "comparison_headline_carried_forward": object_field(
+                comparison, "headline", comparison_where
+            ).get("reading"),
         },
         "grid": {
             "n_points_enumerated": len(grid_points()),
@@ -1622,8 +1676,12 @@ def recommend(
             "tie_break_exercised": tie_break_exercised(admissible),
             "helix_stack_depth_evidence": {
                 "source": "helix_arm.helix_stack_depth of each arm's measurement report",
-                "fp_arm": (fp_report.get("helix_arm") or {}).get("helix_stack_depth"),
-                "control_arm": (control_report.get("helix_arm") or {}).get("helix_stack_depth"),
+                "fp_arm": object_field(fp_report, "helix_arm", fp_report_where).get(
+                    "helix_stack_depth"
+                ),
+                "control_arm": object_field(control_report, "helix_arm", control_report_where).get(
+                    "helix_stack_depth"
+                ),
                 "why_it_is_here": (
                     "the min_helix_pairs floor's rationale makes an empirical claim about "
                     "stack depth; the distribution it appeals to is carried here so the "
