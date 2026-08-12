@@ -46,6 +46,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 import statistics
 import sys
 from collections import Counter
@@ -281,7 +282,17 @@ def is_local_path_shaped(value: str) -> bool:
     start with ``~``, and carries no drive-letter separator, so it passes.
     """
     text = str(value)
-    return Path(text).is_absolute() or text.startswith("~") or ":\\" in text
+    return bool(
+        Path(text).is_absolute()
+        or text.startswith("~")
+        # ⚠ Each Windows spelling needs saying separately, because none of them is
+        # absolute under a POSIX `Path`: `C:\...` AND `C:/...` (a drive letter with
+        # forward slashes), and the UNC `\\server\share` form. A `":\\" in text`
+        # test caught only the first, and the test matrix hid the gap by using
+        # `//server/share/...`, which POSIX already calls absolute.
+        or re.match(r"^[A-Za-z]:[\\/]", text) is not None
+        or text.startswith("\\\\")
+    )
 
 
 def sha256_of(path: str | Path) -> str:

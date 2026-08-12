@@ -1402,7 +1402,19 @@ def test_the_arm_diff_tells_an_absent_key_from_a_null_valued_one():
 
 
 @pytest.mark.parametrize(
-    "value", ["/exports/people/x/msa", "~/msa", "C:\\Users\\x\\msa", "//server/share/msa"]
+    "value",
+    [
+        "/exports/people/x/msa",
+        "~/msa",
+        "C:\\Users\\x\\msa",
+        # ⚠ A drive letter with FORWARD slashes, and the UNC form with BACKslashes.
+        # Neither is absolute under a POSIX `Path`, and the first matrix used
+        # `//server/share/msa`, which POSIX already calls absolute — so it passed
+        # without ever exercising the Windows arms.
+        "C:/Users/x/msa",
+        "\\\\server\\share\\msa",
+        "//server/share/msa",
+    ],
 )
 def test_is_local_path_shaped_catches_every_local_spelling(value):
     assert apm.is_local_path_shaped(value) is True
