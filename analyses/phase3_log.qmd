@@ -5863,3 +5863,126 @@ largest threat to that reading is stated in the report itself — the FP arm is 
 are not two populations and equal failure shares are the expected result. **Commit.** `PENDING`
 (the SHA is not knowable when this stanza is written; `main` takes no direct commits — corrected in
 the next step's PR, as P3-15′-f corrected P3-15′-e's).
+
+## Step P3-15′-f — 2026-08-12: what criterion (b)'s seven parameters are actually worth, and the choice they present
+
+**Inputs.** Both de-novo supplies, retrieved fresh by `rsync` and bound to the committed
+reports by digest — the FP arm's 278 consensuses (`two.amlab:$HOME/tbox-scratch/round_p3_15_supply/msa`,
+jobs 1205 + 1254, `90b2fe1b…`) and the matched control's 76 (`round_p3_15g_control/msa`, job
+1264, `0b5afbec…`) — plus the three per-candidate spare-rule columns the round's conjunction
+reads: criterion (a) from job 1205's merged status table (`3215f034…`, the digest
+`architecture_parameter_measurement.json` already records), criterion (c) from P3-15′-c-ii
+(`3c8ac8e3…`, the digest `synteny_exclusion_diagnostic.json` records), and P3-15′-b's 941
+Stage-2 posteriors.
+
+**Process.** `P3-15′-f`'s block asked for its recommendation to be **re-derived, not
+re-quoted**, once the control landed. `mining/architecture_param_recommend.py` does that over
+the **whole grid** rather than the six named tuples the two measurement reports carry: 3,840
+enumerated points, of which **2,880 are admissible** — admissibility *measured* by running the
+shipped localizer and catching its refusal, not by re-encoding its guard, and the 960 refusals
+are all one rule (`bulge_min_nt` shorter than `ncca_pairing_nt`). Each point is evaluated on
+both arms through `candidate_state`, and its **round yield** through the shipped
+`spare_rule.is_mining_excluded` — the real four-disjunct conjunction, not a re-derived one. The
+three spare-rule columns are joined into a committed 941-row table so the arithmetic is
+auditable without cluster access, the same reason `-g-iv` committed the control's status table.
+
+**Outputs.** `src/tbox_finder/mining/architecture_param_recommend.py` ·
+`reports/p3/architecture_parameter_recommendation.json` (`pins_nothing: true`) ·
+`data/processed/mining/round0_fp_spare_rule_inputs_v0.json` ·
+`tests/unit/test_architecture_param_recommend.py` (69 tests).
+
+**⚠⚠ The headline is not about (b) at all: the round's yield ceiling is 15 of 941, and it is
+set before (b) is chosen.** Sparing is a disjunction, so mining is a conjunction. Criterion (a)
+fails on **111** of 941 and criterion (c) on **96**; their intersection is **15**, and all 15
+have a consensus, so (b) is decidable on every one of them. Declaring the Stage-2 disjunct
+lowers it further (**12** at threshold 0.5, **13** at 0.9/0.95/0.99). Over the entire admissible
+grid the round mines between **1 and 13** candidates. Criterion (b)'s seven parameters are
+therefore choosing among **single-digit differences in a re-mining round of 941 candidates** —
+a fact no committed report stated, and one that changes what the §7 question is about.
+
+**The decision rule is stated before the counts, and the counts are then allowed to check it.**
+Four floors are read off ADR-0006 D3's own wording and ADR-0004 D1's element vocabulary —
+`min_named_helices ≥ 2` (D3 says "the expected helices", plural, of four named elements),
+`min_helix_pairs ≥ 2` (one base pair is not a helix), `ncca_pairing_nt ≥ 2` (D3 says
+*pairing*), and a bounded `bulge_max_nt` (10,000 is the axis's no-filter sentinel). Among the
+**864** survivors the rule takes the **most permissive as measured**, which is ADR-0006 A4's own
+fail-closed argument for a sparing disjunct. That selects `stem_i_nt_threshold=1`,
+`min_named_helices=2`, `min_helix_pairs=2`, `bulge_min_nt=2`, `bulge_max_nt=50`,
+`ncca_pairing_nt=2`, `allow_wobble=0` — **exactly `sensitive_core`**, tied only with its
+`allow_wobble=1` twin, which is the inertness proof reappearing as a measurement.
+
+**Two of the four floors are load-bearing in the strongest sense.** Dropping
+`min_named_helices ≥ 2` or `min_helix_pairs ≥ 2` alone leaves the rule **unable to decide** (4
+and 2 settings respectively tie at the measured minimum and the tie-break cannot separate them),
+which is reported as a refusal rather than resolved by enumeration order. Dropping
+`ncca_pairing_nt ≥ 2` moves the selection to `ncca=1, bulge_min=1`. Dropping the bounded-bulge
+floor changes nothing — the tie-break already prefers the bounded value, and the two measure
+identically, so that floor is semantic only and the report says so.
+
+**⚠ The composite (a) ∧ (b) is ANTI-selective at the strict end, which the per-criterion
+comparison could not show.** `-g-iv` compared (b)'s own failure share and found no separation.
+The quantity that decides what is mined is the conjunction, and there the control falls through
+**more** often than the FP arm at five of the six named settings: 9.2 % vs 7.2 %
+(`loosest_nonvacuous`), 10.5 % vs 11.5 % (`sensitive_core` — the one setting favouring the FP
+arm), 38.2 % vs 23.7 %, 43.4 % vs 32.0 %, 57.9 % vs 37.4 %, 59.2 % vs 38.5 %. At
+`curated_freeze_transplant` and `strictest` the two 95 % Wilson intervals are **disjoint**. The
+mechanism is that criterion (a) passes 39.5 % of the control against 60.1 % of the FP arm, so
+tightening (b) removes protection from a population (a) was already protecting less.
+
+**The trade, in the units the choice is actually made in.** Round yield vs control records
+losing both (a) and (b), of 68 producible: `sensitive_core` **3 mined / 8 records**;
+`canonical_core_3helix` **11 / 26**; `canonical_core_3helix_ncca3` **11 / 29**;
+`curated_freeze_transplant` and `strictest` **13 / 38**. Buying ten more hard negatives costs
+thirty more known-T-box records their model-independent protection.
+
+**⚠ The report enumerates the settings that beat its own recommendation.** Eight floor-clearing
+points mine more at no greater measured control cost — at most **two** extra candidates (yield 5
+at the same 8/68). They are listed rather than left to be found, and declined for a stated
+reason: they are argmins over 2,880 points against 68 records, the damage coordinate they tie on
+**excludes criterion (c)** entirely (the control's hosts are unannotated), and A4 asks a round to
+supply a *chosen* value, not a tuned one.
+
+**⚠ A committed number in `TODO.md`/`imp.md` was wrong and is corrected here.** Criterion (c)'s
+status table is **546 passed / 96 failed / 299 unavailable**, not the 541/101/299 both files
+record; the committed `synteny_exclusion_diagnostic.json` says `n_candidates_passing: 546` and
+`n_unavailable: 299`. The ceiling of 15 is computed from the shipped table, not from the prose.
+
+**⚠ One column of the join is not anchored to any committed report, and is carried as a
+sensitivity only.** No committed artifact records the Stage-2 posteriors' digest, and a **second
+scoring of the same 941 candidates exists** whose values differ by up to 3.8e-2 — a CUDA forward
+is not bit-reproducible. The two agree on every candidate at thresholds 0.5/0.9/0.95 and
+disagree on 3 at 0.99. No headline number rests on that column: the ceiling of 15 uses (a) and
+(c) alone, both digest-anchored.
+
+**⚠ A defect downstream of this step, verified not inferred.** `slurm/p3/stage1_remine.sbatch`
+builds `--relaxed-arch-available` / `--synteny-available` into `$PLAN_FLAGS` and passes them to
+`apply-spare-rule`, but **never passes `--relaxed-arch-status` or `--synteny-status`** (the
+strings do not occur in the file). `remine.py:512` raises on exactly that pair, so a round
+declaring either backend live dies at leg (1). The producer run this step gates would therefore
+produce a status table with no path into the round until that sbatch is fixed — off this step's
+roadmap, reported not patched.
+
+**Validation.** `tests/unit` + `tests/golden` vs a matched `main` baseline at `090547f`: **zero
+new failures** — worktree **13** FAILED, main **26**, a strict subset. The delta is the
+documented DVC/LFS one: 9 `test_selection_val` + 4 `test_coverage_sim` move FAILED → SKIPPED,
+and one further test (`test_committed_table_hash_link_resolves_to_the_live_corpus`) skips in the
+worktree because `master_clean_v0.parquet` is not materialised there; both `^FAILED` sets are
+ANSI-stripped and cross-checked against the summary line, and the skip-reason diff names the
+extra one rather than absorbing it into a count. **40 sabotages, all RED against their NAMED
+test, plus 2 negative controls that stay green**; the harness rewrites the original bytes (the
+module is untracked, so `git checkout --` would be a silent no-op), clears `__pycache__` around
+every run and re-reads `git status --porcelain` before and after each. Both artifacts re-derive
+byte-identically apart from `generated_at_utc`. `ruff` + `black` clean.
+
+**Decisions.** ⚠ **Two of this step's own defects were caught by its harness, not by review.**
+A sabotage of `clears_all_floors` stayed **green** because `apply_decision_rule` filtered with
+its own inline copy of the same condition — two spellings of "clears every floor" that could
+drift apart while the frontier and the recommendation disagreed
+([[fixed-one-of-two-identical-things]]); the selection now routes through the one function.
+And `floor_sensitivity` reported `measured_identically_to_the_chosen_setting: true` when the
+selection had not moved — comparing the chosen setting with itself, a TRUE that could not be
+FALSE ([[clauses-must-guard-emptiness]]); it is `null` now. The §7 seven-parameter choice
+remains **open and is the user's**; this step pins nothing and amends no ADR (A4 already
+delegates the value to the round). **Commit.** `PENDING` (the SHA is not knowable when this
+stanza is written; `main` takes no direct commits — corrected in the next step's PR, as this
+step corrects P3-15′-g-iv's).
