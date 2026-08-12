@@ -80,6 +80,119 @@ ADR = (
     "D17 (P6 freeze map); ADR-0005 D14 (unavailable spares)"
 )
 
+
+# ═════════════════════════════════════════════════════════════════════════════
+# Which supply is being measured
+# ═════════════════════════════════════════════════════════════════════════════
+@dataclass(frozen=True)
+class SupplyArm:
+    """The four self-descriptions a report makes about the corpus it measured.
+
+    The sweep, the localizer calls and every count are **identical** across arms —
+    that identity is the whole point of a matched control, so nothing here touches
+    them.  What differs is what the report *says it measured*: `P3-15'-f` reads
+    round-0 false-positive-manifest candidates of unknown status, `P3-15'-g-iv`
+    reads Stage-1 spans on held-out **curated** records, which are believed
+    positive.  Shipping the first arm's prose on the second arm's numbers would be
+    a committed public report describing the wrong corpus — the failure mode
+    [[gate-must-bind-to-upstream-evidence]] names, and one no internal check can
+    see, because every count would still reconcile.
+
+    ``ground_truth`` is the field the difference actually turns on, and it is the
+    reason ``covariation_note`` cannot be shared: on the FP arm criterion (a) is
+    the strongest control available *because* nothing in the supply is known
+    positive; on the control arm the supply itself is the positive control and (a)
+    becomes a second measurement rather than the anchor.
+    """
+
+    key: str
+    step: str
+    provenance_rule: str
+    ground_truth: str
+    disclosure: str
+    covariation_note: str
+    no_positive_control_reason: str
+
+
+#: ⚠ Keyed, frozen and exhaustive: an unknown ``--arm`` is refused rather than
+#: defaulted, because the default's prose is *wrong* for every other supply and a
+#: silent fallback would publish it anyway.
+SUPPLY_ARMS: Mapping[str, SupplyArm] = {
+    "round0_fp": SupplyArm(
+        key="round0_fp",
+        step=STEP,
+        provenance_rule="P3-15'-f parameter measurement",
+        ground_truth="unknown",
+        disclosure=(
+            "de-novo A3/A4 mlocarna consensuses of round-0 false-positive-manifest "
+            "candidates. This is what the de-novo instrument RESOLVES, not what a "
+            "curated CM-derived structure shows; reports/p3/architecture_freeze.json "
+            "measures the latter and disclaims itself for this purpose."
+        ),
+        covariation_note=(
+            "criterion (a) R-scape covariation on the same alignment is D3's own "
+            "model-independent structural anchor; the share of (a)-passed candidates that "
+            "(b) fails is the share it stops protecting despite independent covariation "
+            "support. A control, not ground truth: (a) and (b) share their supply."
+        ),
+        no_positive_control_reason=(
+            "no de-novo positive control was supplied or the path did not exist; the "
+            "parameter choice below is bounded by the corpus and by criterion (a) alone"
+        ),
+    ),
+    "curated_control": SupplyArm(
+        key="curated_control",
+        step="P3-15'-g-iv",
+        provenance_rule="P3-15'-g-iv matched-control parameter measurement",
+        ground_truth="believed_positive",
+        disclosure=(
+            "de-novo A3/A4 mlocarna consensuses of the MATCHED positive control: "
+            "Stage-1 re-detected spans on held-out CURATED T-box records (P3-15'-g-ii, "
+            "one record per ADR-0004 cluster, order-stratified), searched and aligned by "
+            "the same instrument as the FP arm (P3-15'-g-iii, SLURM job 1264). The record "
+            "is a known T-box; the query is the DETECTOR'S CALL on it (median 104 nt "
+            "against a curated element median of 279, median best IoU 0.404), so every "
+            "rate here is a rate on a partial element and not on the curated element. "
+            "Read against reports/p3/architecture_parameter_measurement.json, whose grid "
+            "is identical by construction (same module, same sweep)."
+        ),
+        covariation_note=(
+            "criterion (a) R-scape covariation on the same alignment, measured here on a "
+            "supply that is BELIEVED POSITIVE: on this arm the (a) split is (a)'s own "
+            "sensitivity on known T-boxes, not a proxy for ground truth as it is on the "
+            "FP arm. (a) and (b) still share their supply (ADR-0006 A4), so they are "
+            "independent only in what they test on it."
+        ),
+        no_positive_control_reason=(
+            "no de-novo positive control was supplied or the path did not exist; on this "
+            "arm the corpus itself is the positive control, so the n=1 block is "
+            "supplementary rather than load-bearing"
+        ),
+    ),
+}
+
+#: The arm whose prose the committed `P3-15'-f` report carries.  ``measure`` and the
+#: CLI both default to it, so the FP report re-derives BYTE-IDENTICALLY across this
+#: seam — the same discipline `covariation_producer.search_shard(query_fasta=None)`
+#: holds to (P3-15'-g-iii).
+DEFAULT_ARM = "round0_fp"
+
+
+def resolve_arm(arm: str | SupplyArm | None) -> SupplyArm:
+    """The :class:`SupplyArm` for ``arm``; ``None`` is :data:`DEFAULT_ARM`."""
+    if isinstance(arm, SupplyArm):
+        return arm
+    key = DEFAULT_ARM if arm is None else str(arm)
+    try:
+        return SUPPLY_ARMS[key]
+    except KeyError:
+        raise MeasureError(
+            f"unknown supply arm {key!r}; the report's disclosure, its (a) note and its "
+            f"provenance rule all come from it, so it cannot be defaulted. "
+            f"Known arms: {sorted(SUPPLY_ARMS)}"
+        ) from None
+
+
 #: The sweep axes.  These are **not** pins and **not** defaults — they are the
 #: values the report tabulates so a reader can see the whole admissible surface.
 #: ``min_named_helices`` is capped by the module's own
@@ -524,6 +637,46 @@ class ParamTuple:
         }
 
 
+def candidate_state(
+    item: SupplyItem,
+    params: ParamTuple,
+    *,
+    min_sequences: int = MIN_REAL_HOMOLOG_N,
+) -> str:
+    """One consensus's criterion-(b) state at ``params`` — ``passed`` or ``failed``.
+
+    Extracted from :func:`evaluate_tuple`'s loop body so a caller that needs the
+    **per-candidate** verdict (P3-15'-g-iv aggregates the matched control's queries
+    up to their source records) gets it from the same code the counts come from.  A
+    second spelling of "what (b) says about this consensus" is exactly the drift
+    ADR-0006 A4 forbids between the measurement and the producer.
+
+    ⚠ ``unavailable`` is *not* returned here and cannot be: a candidate with no
+    ``msa.sto`` never becomes a :class:`SupplyItem`, and the depth floor is applied
+    inside ``architecture_status``, which returns ``failed`` — not ``unavailable`` —
+    for a shallow alignment it was handed.  The caller owns the missing-consensus
+    arm (:func:`evaluate_tuple` adds ``n_without_consensus``).
+    """
+    localization: Localization = arch.localize(
+        item.slug,
+        item.consensus,
+        row=0,
+        # The manifest supplies neither field; passing them explicitly keeps the
+        # measurement's inputs identical to the producer's on this manifest.
+        stem_i_extent_nt=None,
+        regulatory_mode=None,
+        stem_i_nt_threshold=params.stem_i_nt_threshold,
+        class_ii=False,
+        min_named_helices=params.min_named_helices,
+        min_helix_pairs=params.min_helix_pairs,
+        bulge_size_range=(params.bulge_min_nt, params.bulge_max_nt),
+        ncca_pairing_nt=params.ncca_pairing_nt,
+        allow_wobble=params.allow_wobble,
+    )
+    state, _ = architecture_status(localization, min_sequences=min_sequences)
+    return str(state)
+
+
 def evaluate_tuple(
     items: Sequence[SupplyItem],
     params: ParamTuple,
@@ -551,23 +704,7 @@ def evaluate_tuple(
     counts: Counter[str] = Counter()
     by_cov: dict[str, Counter[str]] = {}
     for item in items:
-        localization: Localization = arch.localize(
-            item.slug,
-            item.consensus,
-            row=0,
-            # The manifest supplies neither field; passing them explicitly keeps the
-            # measurement's inputs identical to the producer's on this manifest.
-            stem_i_extent_nt=None,
-            regulatory_mode=None,
-            stem_i_nt_threshold=params.stem_i_nt_threshold,
-            class_ii=False,
-            min_named_helices=params.min_named_helices,
-            min_helix_pairs=params.min_helix_pairs,
-            bulge_size_range=(params.bulge_min_nt, params.bulge_max_nt),
-            ncca_pairing_nt=params.ncca_pairing_nt,
-            allow_wobble=params.allow_wobble,
-        )
-        state, _ = architecture_status(localization, min_sequences=min_sequences)
+        state = candidate_state(item, params, min_sequences=min_sequences)
         counts[state] += 1
         if covariation_by_slug is not None:
             arm = covariation_by_slug.get(item.slug, "unknown")
@@ -623,8 +760,12 @@ def evaluate_tuple(
     return out
 
 
-def covariation_stratified_note() -> str:
+def covariation_stratified_note(arm: str | SupplyArm | None = None) -> str:
     """Why criterion (a)'s verdict is the strongest control this corpus offers.
+
+    ⚠ On the ``curated_control`` arm it is **not** — the supply is believed
+    positive, so (a) is a second measurement rather than the anchor.  The string
+    comes from :class:`SupplyArm` so the report and this function cannot drift.
 
     Every consensus measured here belongs to a round-0 **false-positive-manifest**
     candidate, so none of them is a known positive and the corpus supplies no
@@ -644,12 +785,7 @@ def covariation_stratified_note() -> str:
     not of T-box identity, and the two criteria read the same MSA (ADR-0006 A4), so
     they are **not** independent in their supply — only in what they test on it.
     """
-    return (
-        "criterion (a) R-scape covariation on the same alignment is D3's own "
-        "model-independent structural anchor; the share of (a)-passed candidates that "
-        "(b) fails is the share it stops protecting despite independent covariation "
-        "support. A control, not ground truth: (a) and (b) share their supply."
-    )
+    return resolve_arm(arm).covariation_note
 
 
 def positive_control(
@@ -755,8 +891,16 @@ def measure(
     positive_control_path: str | Path | None,
     supply_origin: str | None = None,
     tuples: Sequence[ParamTuple] | None = None,
+    arm: str | SupplyArm | None = None,
 ) -> dict[str, Any]:
-    """The whole measurement, as the report body (no provenance — ``main`` adds it)."""
+    """The whole measurement, as the report body (no provenance — ``main`` adds it).
+
+    ``arm`` selects only the report's **self-description** (:class:`SupplyArm`); the
+    sweep and every count are arm-independent, which is what makes the control
+    matched.  ``None`` is :data:`DEFAULT_ARM`, so the committed `P3-15'-f` report
+    re-derives byte-identically across this seam.
+    """
+    supply_arm = resolve_arm(arm)
     # ⚠ `supply_origin` is the one path-shaped field recorded VERBATIM, because it is
     # operator-authored provenance naming the cluster (`two.amlab:$HOME/...`) rather
     # than a path this process discovered. That makes it the one place a local absolute
@@ -914,20 +1058,15 @@ def measure(
             # with a consensus must be exactly (a)'s decided set. If it is not, the two
             # disjuncts are reading different corpora.
             "decided_set_equals_supply": {candidate_slug(c) for c in decided} == slugs_present,
-            "control_note": covariation_stratified_note(),
+            "control_note": covariation_stratified_note(supply_arm),
         }
 
     body: dict[str, Any] = {
         "schema_version": SCHEMA_VERSION,
-        "step": STEP,
+        "step": supply_arm.step,
         "adr": ADR,
         "pins_nothing": True,
-        "disclosure": (
-            "de-novo A3/A4 mlocarna consensuses of round-0 false-positive-manifest "
-            "candidates. This is what the de-novo instrument RESOLVES, not what a "
-            "curated CM-derived structure shows; reports/p3/architecture_freeze.json "
-            "measures the latter and disclaims itself for this purpose."
-        ),
+        "disclosure": supply_arm.disclosure,
         "supply": supply,
         "sweep": {
             "min_helix_pairs": list(MIN_HELIX_PAIRS_SWEEP),
@@ -995,10 +1134,7 @@ def measure(
     else:
         body["positive_control"] = {
             "available": False,
-            "reason": (
-                "no de-novo positive control was supplied or the path did not exist; the "
-                "parameter choice below is bounded by the corpus and by criterion (a) alone"
-            ),
+            "reason": supply_arm.no_positive_control_reason,
             "path": portable_path(positive_control_path) if positive_control_path else None,
         }
     return body
@@ -1043,6 +1179,17 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     m.add_argument(
+        "--arm",
+        choices=sorted(SUPPLY_ARMS),
+        default=DEFAULT_ARM,
+        help=(
+            "which supply this is: 'round0_fp' (P3-15'-f, FP-manifest candidates of "
+            "unknown status) or 'curated_control' (P3-15'-g-iv, Stage-1 spans on "
+            "held-out curated records). Selects the report's disclosure, its (a) note "
+            "and its provenance rule — NOT the sweep, which is identical by construction"
+        ),
+    )
+    m.add_argument(
         "--out",
         default="reports/p3/architecture_parameter_measurement.json",
         help="report path",
@@ -1055,12 +1202,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.command != "measure":  # pragma: no cover - argparse enforces
         raise MeasureError(f"unknown command {args.command!r}")
     try:
+        supply_arm = resolve_arm(args.arm)
         body = measure(
             msa_root=args.msa_root,
             manifest_path=args.manifest,
             covariation_status_path=args.covariation_status,
             positive_control_path=args.positive_control,
             supply_origin=args.supply_origin,
+            arm=supply_arm,
         )
     # ⚠ OSError and JSONDecodeError too: `--manifest` and `--covariation-status` are
     # read directly, so a missing or malformed file otherwise exits 1 with a traceback
@@ -1092,7 +1241,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         else:
             external[label] = {"name": Path(candidate).name, "sha256": _sha256_of(candidate)}
     body["provenance"] = build_provenance(
-        rule="P3-15'-f parameter measurement",
+        rule=supply_arm.provenance_rule,
         script=portable_path(__file__),
         inputs=repo_inputs,
         outputs=[],

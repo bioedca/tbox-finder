@@ -1058,3 +1058,175 @@ def test_the_field_census_sees_every_row_not_only_the_first():
         [{"candidate_id": "a"}, {"candidate_id": "b", "pool": "x", "score": 1}]
     )
     assert out["manifest_row_fields"] == ["candidate_id", "pool", "score"]
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# The P3-15'-g-iv supply-arm seam
+# ═════════════════════════════════════════════════════════════════════════════
+#: The committed FP report, whose four self-descriptions the default arm must
+#: reproduce verbatim — that identity is what makes the seam byte-identical.
+FP_REPORT = Path("reports/p3/architecture_parameter_measurement.json")
+
+
+def test_resolve_arm_defaults_to_the_fp_arm_and_accepts_both_keys():
+    assert apm.resolve_arm(None).key == apm.DEFAULT_ARM == "round0_fp"
+    assert apm.resolve_arm("curated_control").key == "curated_control"
+
+
+def test_resolve_arm_passes_a_supply_arm_through_unchanged():
+    arm = apm.SUPPLY_ARMS["curated_control"]
+    assert apm.resolve_arm(arm) is arm
+
+
+def test_resolve_arm_refuses_an_unknown_arm_rather_than_defaulting():
+    """A silent fallback would publish the FP arm's prose over another supply."""
+    with pytest.raises(apm.MeasureError, match="unknown supply arm"):
+        apm.resolve_arm("some_other_round")
+
+
+def test_the_two_arms_describe_different_corpora():
+    """Positive control for the refusal above: the strings must actually differ."""
+    fp, control = apm.SUPPLY_ARMS["round0_fp"], apm.SUPPLY_ARMS["curated_control"]
+    assert fp.step != control.step
+    assert fp.disclosure != control.disclosure
+    assert fp.covariation_note != control.covariation_note
+    assert fp.provenance_rule != control.provenance_rule
+    assert (fp.ground_truth, control.ground_truth) == ("unknown", "believed_positive")
+
+
+@pytest.mark.skipif(not FP_REPORT.is_file(), reason="run from the repo root")
+def test_the_default_arms_prose_is_exactly_what_the_committed_fp_report_carries():
+    """The seam's whole safety claim, locked against the artifact it must not move.
+
+    ⚠ This reads a committed file and so cannot see the code
+    ([[artifact-pinning-test-cannot-see-the-code]]); it is here because the *only*
+    thing that makes adding `--arm` safe is that the default reproduces these four
+    strings, and that is a property of the committed report, not of the module.
+    """
+    fp = apm.SUPPLY_ARMS[apm.DEFAULT_ARM]
+    body = json.loads(FP_REPORT.read_text())
+    assert body["step"] == fp.step
+    assert body["disclosure"] == fp.disclosure
+    assert body["supply"]["covariation"]["control_note"] == fp.covariation_note
+    assert body["provenance"]["rule"] == fp.provenance_rule
+
+
+def test_covariation_stratified_note_is_the_arms_note_and_defaults_to_the_fp_one():
+    assert apm.covariation_stratified_note() == apm.SUPPLY_ARMS["round0_fp"].covariation_note
+    assert (
+        apm.covariation_stratified_note("curated_control")
+        == apm.SUPPLY_ARMS["curated_control"].covariation_note
+    )
+
+
+def test_only_the_self_description_changes_between_the_two_arms(supply, tmp_path):
+    """The matched control is only matched if the arm changes NOTHING measurable.
+
+    Both arms are run over the same supply and the two bodies diffed: the set of
+    differing paths must be exactly the self-description, so a future edit that made
+    an arm touch a count, a sweep axis or a distribution fails here rather than in a
+    report nobody re-derives.
+    """
+    root, ids = supply
+    manifest = manifest_for(tmp_path, ids)
+    # A covariation table is supplied so `supply.covariation.control_note` — the
+    # third arm-specific string — is actually reached; without it the diff below
+    # would be silent about the one field a reader is most likely to quote.
+    cov = tmp_path / "cov.json"
+    cov.write_text(json.dumps({"status": {cid: "passed" for cid in ids}}))
+    kwargs = dict(
+        msa_root=root,
+        manifest_path=manifest,
+        covariation_status_path=cov,
+        positive_control_path=None,
+    )
+    fp_body = apm.measure(**kwargs, arm="round0_fp")
+    control_body = apm.measure(**kwargs, arm="curated_control")
+
+    differing: list[str] = []
+
+    def diff(a, b, path=""):
+        if isinstance(a, dict) and isinstance(b, dict):
+            for k in sorted(set(a) | set(b)):
+                diff(a.get(k), b.get(k), f"{path}/{k}")
+        elif isinstance(a, list) and isinstance(b, list) and len(a) == len(b):
+            for i, (x, y) in enumerate(zip(a, b, strict=True)):
+                diff(x, y, f"{path}[{i}]")
+        elif a != b:
+            differing.append(path)
+
+    diff(fp_body, control_body)
+    assert differing == [
+        "/disclosure",
+        "/positive_control/reason",
+        "/step",
+        "/supply/covariation/control_note",
+    ]
+
+
+def test_the_arm_changes_the_provenance_rule_the_cli_records(supply, tmp_path):
+    root, ids = supply
+    out = tmp_path / "control_report.json"
+    rc = apm.main(
+        [
+            "measure",
+            "--arm",
+            "curated_control",
+            "--msa-root",
+            str(root),
+            "--manifest",
+            str(manifest_for(tmp_path, ids)),
+            "--positive-control",
+            str(tmp_path / "absent.sto"),
+            "--out",
+            str(out),
+        ]
+    )
+    assert rc == 0
+    body = json.loads(out.read_text())
+    assert body["step"] == "P3-15'-g-iv"
+    assert body["provenance"]["rule"] == apm.SUPPLY_ARMS["curated_control"].provenance_rule
+    assert "MATCHED positive control" in body["disclosure"]
+
+
+def test_the_cli_refuses_an_arm_that_is_not_in_the_registry(supply, tmp_path):
+    root, ids = supply
+    with pytest.raises(SystemExit) as excinfo:
+        apm.main(
+            [
+                "measure",
+                "--arm",
+                "not_an_arm",
+                "--msa-root",
+                str(root),
+                "--manifest",
+                str(manifest_for(tmp_path, ids)),
+                "--out",
+                str(tmp_path / "r.json"),
+            ]
+        )
+    assert excinfo.value.code == 2
+
+
+def test_candidate_state_answers_for_one_consensus_and_tracks_the_setting(supply):
+    """The extracted per-candidate verdict, tested on its own rather than against
+    ``evaluate_tuple`` — once the latter delegates, agreement is a tautology
+    ([[promote-dont-duplicate-is-a-correctness-rule]])."""
+    root, _ = supply
+    items = {i.slug: i for i in apm.read_supply(root)}
+    from tbox_finder.mining.covariation_producer import candidate_slug
+
+    passing = items[candidate_slug("ACC.1:c1:0:10-20")]
+    loose = apm.ParamTuple("loose", 1, 1, 2, 1, 10_000, 1, False)
+    strict = apm.ParamTuple("strict", 1, 4, 5, 7, 20, 4, False)
+    assert apm.candidate_state(passing, loose) == "passed"
+    assert apm.candidate_state(passing, strict) == "failed"
+
+
+def test_candidate_state_never_returns_unavailable(supply):
+    """Its docstring's claim: a SupplyItem exists, so the missing-consensus arm is
+    the caller's. A drift here would double-count `unavailable` in every row."""
+    root, _ = supply
+    for item in apm.read_supply(root):
+        for params in apm.default_tuples():
+            assert apm.candidate_state(item, params) in ("passed", "failed")

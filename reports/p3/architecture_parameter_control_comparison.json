@@ -1,0 +1,546 @@
+{
+  "adr": "ADR-0006 D3 (criterion (b) as a sparing disjunct), A2 (min_sequences floor), A4 (rule parameters supplied per round, no defaults); ADR-0005 D14 (unavailable spares), A9 (the round-0 scanner), A10 (the producer envelope); ADR-0004 D3/D5 (clusters and the nested carve the control is drawn from)",
+  "alignment_comparability": {
+    "control_depth": {
+      "max": 221,
+      "median": 30.0,
+      "min": 20,
+      "n": 76,
+      "percentiles": {
+        "p50": 30,
+        "p90": 61,
+        "p95": 81,
+        "p99": 86
+      }
+    },
+    "control_width": {
+      "max": 195,
+      "median": 99.0,
+      "min": 61,
+      "n": 76,
+      "percentiles": {
+        "p50": 100,
+        "p90": 160,
+        "p95": 161,
+        "p99": 194
+      }
+    },
+    "fp_depth": {
+      "max": 844,
+      "median": 34.0,
+      "min": 20,
+      "n": 278,
+      "percentiles": {
+        "p50": 34,
+        "p90": 59,
+        "p95": 73,
+        "p99": 173
+      }
+    },
+    "fp_width": {
+      "max": 234,
+      "median": 106.0,
+      "min": 58,
+      "n": 278,
+      "percentiles": {
+        "p50": 106,
+        "p90": 165,
+        "p95": 181,
+        "p99": 206
+      }
+    },
+    "note": "P3-15'-g-ii matched the two arms at the QUERY; these are the ALIGNMENTS those queries produced, which is what the localizer actually reads. Matchedness at the query does not guarantee it here, so it is reported rather than assumed \u2014 and it is also the one limitation the detect report left open (whether producibility correlates with span length, so that the produced subset differs from the population entering).",
+    "query_matchedness_from_the_detect_report": {
+      "baseline_raw_curated_ks_d": 0.9647,
+      "ks_d": 0.0842,
+      "median_ratio_curated_over_fp": 0.945,
+      "share_curated_inside_fp_range": 1.0
+    }
+  },
+  "arms": {
+    "control": {
+      "ground_truth": "believed positive \u2014 held-out curated T-box records",
+      "msa_root": "msa_supply_control",
+      "n_consensuses": 76,
+      "report": "reports/p3/architecture_parameter_measurement_control.json",
+      "step": "P3-15'-g-iv",
+      "supply_digest_sha256": "0b5afbec0c8fd9af75a5c789d44f64e0b8db1c19ecce011eac6dd92e3393cb28",
+      "supply_origin": "two.amlab:$HOME/tbox-scratch/round_p3_15g_control/msa (SLURM job 1264 array 0-15, main @ c94f935); retrieved by rsync per slurm/p2/mine_round_producer.sbatch"
+    },
+    "fp": {
+      "ground_truth": "unknown \u2014 round-0 false-positive-manifest candidates",
+      "n_consensuses": 278,
+      "report": "reports/p3/architecture_parameter_measurement.json",
+      "step": "P3-15'-f",
+      "supply_digest_sha256": "90b2fe1b532f2851bbade2884e8498e2ab58a11c418cc00b314840f041c0f862",
+      "supply_origin": "two.amlab:$HOME/tbox-scratch/round_p3_15_supply/msa (SLURM jobs 1205 array 0-47 + 1254 array 16-16, main @ 4d30ea3); retrieved by rsync per slurm/p2/mine_round_producer.sbatch"
+    },
+    "grid_identical": true,
+    "grid_identical_checked_by": "assert_grids_identical: the two reports' 'sweep' blocks, their 'joint' labels in order, and each pair's full seven-parameter dict",
+    "report_binds_to_supply": [
+      {
+        "agrees": true,
+        "label": "loosest_nonvacuous",
+        "recomputed_counts": {
+          "failed": 8,
+          "passed": 68
+        },
+        "report_counts": {
+          "failed": 8,
+          "passed": 68
+        }
+      },
+      {
+        "agrees": true,
+        "label": "sensitive_core",
+        "recomputed_counts": {
+          "failed": 11,
+          "passed": 65
+        },
+        "report_counts": {
+          "failed": 11,
+          "passed": 65
+        }
+      },
+      {
+        "agrees": true,
+        "label": "canonical_core_3helix",
+        "recomputed_counts": {
+          "failed": 39,
+          "passed": 37
+        },
+        "report_counts": {
+          "failed": 39,
+          "passed": 37
+        }
+      },
+      {
+        "agrees": true,
+        "label": "canonical_core_3helix_ncca3",
+        "recomputed_counts": {
+          "failed": 49,
+          "passed": 27
+        },
+        "report_counts": {
+          "failed": 49,
+          "passed": 27
+        }
+      },
+      {
+        "agrees": true,
+        "label": "curated_freeze_transplant",
+        "recomputed_counts": {
+          "failed": 72,
+          "passed": 4
+        },
+        "report_counts": {
+          "failed": 72,
+          "passed": 4
+        }
+      },
+      {
+        "agrees": true,
+        "label": "strictest",
+        "recomputed_counts": {
+          "failed": 75,
+          "passed": 1
+        },
+        "report_counts": {
+          "failed": 75,
+          "passed": 1
+        }
+      }
+    ]
+  },
+  "by_parameter_tuple": [
+    {
+      "control_query_level": {
+        "ci95": null,
+        "failed": 8,
+        "n_decided": 76,
+        "passed": 68,
+        "share_failed": 0.105263,
+        "why_no_ci": "149 of the 160 control records contribute 2 queries and 4 contribute 3, so the queries are pseudo-replicated; a binomial interval on them would be narrower than the data support. The interval is on the record level."
+      },
+      "control_record_level": {
+        "n_mined": 7,
+        "n_records_producible": 68,
+        "n_spared_all": 60,
+        "n_spared_any": 61,
+        "rule": "ANY producible query of the record passes (b) => the record is spared",
+        "share_mined": 0.102941,
+        "share_mined_ci95": [
+          0.050765,
+          0.197581
+        ],
+        "share_spared_all_variant": 0.882353
+      },
+      "discrimination": {
+        "control_record_ci_contains_fp_point": true,
+        "fp_minus_control_query_share_failed": -0.015335,
+        "reading": "(b) is a SPARING disjunct: 'failed' on the control means a known T-box loses (b)'s protection, 'failed' on the FP arm means a candidate becomes minable. A setting separates the two populations only if it fails the FP arm materially more often than the control."
+      },
+      "fp_candidate_level": {
+        "ci95": [
+          0.061654,
+          0.129381
+        ],
+        "ci_caveat": "the 941 FP candidates were carved from 76 assemblies, so this interval is also optimistic; it is shown for scale, not for a test",
+        "failed": 25,
+        "n_decided": 278,
+        "passed": 253,
+        "share_failed": 0.089928
+      },
+      "label": "loosest_nonvacuous",
+      "params": {
+        "allow_wobble": false,
+        "bulge_max_nt": 10000,
+        "bulge_min_nt": 1,
+        "min_helix_pairs": 2,
+        "min_named_helices": 1,
+        "ncca_pairing_nt": 1,
+        "stem_i_nt_threshold": 1
+      }
+    },
+    {
+      "control_query_level": {
+        "ci95": null,
+        "failed": 11,
+        "n_decided": 76,
+        "passed": 65,
+        "share_failed": 0.144737,
+        "why_no_ci": "149 of the 160 control records contribute 2 queries and 4 contribute 3, so the queries are pseudo-replicated; a binomial interval on them would be narrower than the data support. The interval is on the record level."
+      },
+      "control_record_level": {
+        "n_mined": 9,
+        "n_records_producible": 68,
+        "n_spared_all": 57,
+        "n_spared_any": 59,
+        "rule": "ANY producible query of the record passes (b) => the record is spared",
+        "share_mined": 0.132353,
+        "share_mined_ci95": [
+          0.071222,
+          0.232803
+        ],
+        "share_spared_all_variant": 0.838235
+      },
+      "discrimination": {
+        "control_record_ci_contains_fp_point": true,
+        "fp_minus_control_query_share_failed": 0.042313,
+        "reading": "(b) is a SPARING disjunct: 'failed' on the control means a known T-box loses (b)'s protection, 'failed' on the FP arm means a candidate becomes minable. A setting separates the two populations only if it fails the FP arm materially more often than the control."
+      },
+      "fp_candidate_level": {
+        "ci95": [
+          0.14559,
+          0.237042
+        ],
+        "ci_caveat": "the 941 FP candidates were carved from 76 assemblies, so this interval is also optimistic; it is shown for scale, not for a test",
+        "failed": 52,
+        "n_decided": 278,
+        "passed": 226,
+        "share_failed": 0.18705
+      },
+      "label": "sensitive_core",
+      "params": {
+        "allow_wobble": false,
+        "bulge_max_nt": 50,
+        "bulge_min_nt": 2,
+        "min_helix_pairs": 2,
+        "min_named_helices": 2,
+        "ncca_pairing_nt": 2,
+        "stem_i_nt_threshold": 1
+      }
+    },
+    {
+      "control_query_level": {
+        "ci95": null,
+        "failed": 39,
+        "n_decided": 76,
+        "passed": 37,
+        "share_failed": 0.513158,
+        "why_no_ci": "149 of the 160 control records contribute 2 queries and 4 contribute 3, so the queries are pseudo-replicated; a binomial interval on them would be narrower than the data support. The interval is on the record level."
+      },
+      "control_record_level": {
+        "n_mined": 33,
+        "n_records_producible": 68,
+        "n_spared_all": 30,
+        "n_spared_any": 35,
+        "rule": "ANY producible query of the record passes (b) => the record is spared",
+        "share_mined": 0.485294,
+        "share_mined_ci95": [
+          0.370506,
+          0.601655
+        ],
+        "share_spared_all_variant": 0.441176
+      },
+      "discrimination": {
+        "control_record_ci_contains_fp_point": true,
+        "fp_minus_control_query_share_failed": -0.005964,
+        "reading": "(b) is a SPARING disjunct: 'failed' on the control means a known T-box loses (b)'s protection, 'failed' on the FP arm means a candidate becomes minable. A setting separates the two populations only if it fails the FP arm materially more often than the control."
+      },
+      "fp_candidate_level": {
+        "ci95": [
+          0.448728,
+          0.565465
+        ],
+        "ci_caveat": "the 941 FP candidates were carved from 76 assemblies, so this interval is also optimistic; it is shown for scale, not for a test",
+        "failed": 141,
+        "n_decided": 278,
+        "passed": 137,
+        "share_failed": 0.507194
+      },
+      "label": "canonical_core_3helix",
+      "params": {
+        "allow_wobble": false,
+        "bulge_max_nt": 50,
+        "bulge_min_nt": 4,
+        "min_helix_pairs": 2,
+        "min_named_helices": 3,
+        "ncca_pairing_nt": 2,
+        "stem_i_nt_threshold": 1
+      }
+    },
+    {
+      "control_query_level": {
+        "ci95": null,
+        "failed": 49,
+        "n_decided": 76,
+        "passed": 27,
+        "share_failed": 0.644737,
+        "why_no_ci": "149 of the 160 control records contribute 2 queries and 4 contribute 3, so the queries are pseudo-replicated; a binomial interval on them would be narrower than the data support. The interval is on the record level."
+      },
+      "control_record_level": {
+        "n_mined": 41,
+        "n_records_producible": 68,
+        "n_spared_all": 20,
+        "n_spared_any": 27,
+        "rule": "ANY producible query of the record passes (b) => the record is spared",
+        "share_mined": 0.602941,
+        "share_mined_ci95": [
+          0.484158,
+          0.710715
+        ],
+        "share_spared_all_variant": 0.294118
+      },
+      "discrimination": {
+        "control_record_ci_contains_fp_point": false,
+        "fp_minus_control_query_share_failed": 0.14663,
+        "reading": "(b) is a SPARING disjunct: 'failed' on the control means a known T-box loses (b)'s protection, 'failed' on the FP arm means a candidate becomes minable. A setting separates the two populations only if it fails the FP arm materially more often than the control."
+      },
+      "fp_candidate_level": {
+        "ci95": [
+          0.739791,
+          0.835
+        ],
+        "ci_caveat": "the 941 FP candidates were carved from 76 assemblies, so this interval is also optimistic; it is shown for scale, not for a test",
+        "failed": 220,
+        "n_decided": 278,
+        "passed": 58,
+        "share_failed": 0.791367
+      },
+      "label": "canonical_core_3helix_ncca3",
+      "params": {
+        "allow_wobble": false,
+        "bulge_max_nt": 50,
+        "bulge_min_nt": 4,
+        "min_helix_pairs": 2,
+        "min_named_helices": 3,
+        "ncca_pairing_nt": 3,
+        "stem_i_nt_threshold": 1
+      }
+    },
+    {
+      "control_query_level": {
+        "ci95": null,
+        "failed": 72,
+        "n_decided": 76,
+        "passed": 4,
+        "share_failed": 0.947368,
+        "why_no_ci": "149 of the 160 control records contribute 2 queries and 4 contribute 3, so the queries are pseudo-replicated; a binomial interval on them would be narrower than the data support. The interval is on the record level."
+      },
+      "control_record_level": {
+        "n_mined": 64,
+        "n_records_producible": 68,
+        "n_spared_all": 2,
+        "n_spared_any": 4,
+        "rule": "ANY producible query of the record passes (b) => the record is spared",
+        "share_mined": 0.941176,
+        "share_mined_ci95": [
+          0.858281,
+          0.97689
+        ],
+        "share_spared_all_variant": 0.029412
+      },
+      "discrimination": {
+        "control_record_ci_contains_fp_point": true,
+        "fp_minus_control_query_share_failed": 0.005869,
+        "reading": "(b) is a SPARING disjunct: 'failed' on the control means a known T-box loses (b)'s protection, 'failed' on the FP arm means a candidate becomes minable. A setting separates the two populations only if it fails the FP arm materially more often than the control."
+      },
+      "fp_candidate_level": {
+        "ci95": [
+          0.921648,
+          0.972471
+        ],
+        "ci_caveat": "the 941 FP candidates were carved from 76 assemblies, so this interval is also optimistic; it is shown for scale, not for a test",
+        "failed": 265,
+        "n_decided": 278,
+        "passed": 13,
+        "share_failed": 0.953237
+      },
+      "label": "curated_freeze_transplant",
+      "params": {
+        "allow_wobble": false,
+        "bulge_max_nt": 50,
+        "bulge_min_nt": 4,
+        "min_helix_pairs": 3,
+        "min_named_helices": 4,
+        "ncca_pairing_nt": 4,
+        "stem_i_nt_threshold": 1
+      }
+    },
+    {
+      "control_query_level": {
+        "ci95": null,
+        "failed": 75,
+        "n_decided": 76,
+        "passed": 1,
+        "share_failed": 0.986842,
+        "why_no_ci": "149 of the 160 control records contribute 2 queries and 4 contribute 3, so the queries are pseudo-replicated; a binomial interval on them would be narrower than the data support. The interval is on the record level."
+      },
+      "control_record_level": {
+        "n_mined": 67,
+        "n_records_producible": 68,
+        "n_spared_all": 0,
+        "n_spared_any": 1,
+        "rule": "ANY producible query of the record passes (b) => the record is spared",
+        "share_mined": 0.985294,
+        "share_mined_ci95": [
+          0.921288,
+          0.997399
+        ],
+        "share_spared_all_variant": 0.0
+      },
+      "discrimination": {
+        "control_record_ci_contains_fp_point": true,
+        "fp_minus_control_query_share_failed": -0.012022,
+        "reading": "(b) is a SPARING disjunct: 'failed' on the control means a known T-box loses (b)'s protection, 'failed' on the FP arm means a candidate becomes minable. A setting separates the two populations only if it fails the FP arm materially more often than the control."
+      },
+      "fp_candidate_level": {
+        "ci95": [
+          0.948946,
+          0.987751
+        ],
+        "ci_caveat": "the 941 FP candidates were carved from 76 assemblies, so this interval is also optimistic; it is shown for scale, not for a test",
+        "failed": 271,
+        "n_decided": 278,
+        "passed": 7,
+        "share_failed": 0.97482
+      },
+      "label": "strictest",
+      "params": {
+        "allow_wobble": false,
+        "bulge_max_nt": 20,
+        "bulge_min_nt": 7,
+        "min_helix_pairs": 5,
+        "min_named_helices": 4,
+        "ncca_pairing_nt": 4,
+        "stem_i_nt_threshold": 1
+      }
+    }
+  ],
+  "disclosure": "the matched de-novo positive control (P3-15'-g-ii draw, P3-15'-g-iii run, SLURM job 1264) read against the P3-15'-f FP arm at an identical grid. Both arms are measured by architecture_param_measure; this module adds only the record-level aggregation, the intervals and the two-arm contrast. It pins no parameter: the ADR-0006 A4 seven-parameter choice remains the open \u00a77 decision P3-15'-f deferred.",
+  "headline": {
+    "max_abs_fp_minus_control_query_share_failed": 0.14663,
+    "n_settings": 6,
+    "n_settings_where_control_ci_contains_the_fp_point": 5,
+    "n_settings_where_control_fails_more_than_fp": 3,
+    "reading": "criterion (b)'s failure share on KNOWN T-boxes, as the de-novo instrument resolves them, is read against its failure share on round-0 FP-manifest candidates at the identical grid. Where the control's record-level interval contains the FP arm's point estimate, this control detects no separation between the two populations at that setting \u2014 (b) behaves there as a severity knob on both arms rather than as a discriminator."
+  },
+  "limitations": {
+    "fp_arm_status_is_unknown_not_negative": "the FP arm is a round-0 false-positive MANIFEST, not a verified-negative set. If a material share of it is really T-box, the two arms are not two populations and equal failure shares are the expected result rather than a finding about (b). This is the single largest threat to the reading above.",
+    "not_a_two_sample_test": "no p-value is computed. Both arms are pseudo-replicated (the control by record, the FP arm by source assembly), so a nominal two-proportion test would be anticonservative; the report states intervals and lets the reader see the overlap.",
+    "stage1_dropout": {
+      "dropout_share": 0.2,
+      "n_records_dropped": 40,
+      "n_records_with_a_query": 160,
+      "n_windows_scanned": 200,
+      "note": "records where Stage-1 did not fire never entered the run, so the control's record denominator is already conditioned on detection. Read the other way, the same scan is Stage-1's per-locus recall on held-out curated records.",
+      "source": "reports/p3/curated_control_detect.json"
+    },
+    "the_control_measures_the_instrument_not_the_biology": "a control record that resolves no consensus (241 of 317 queries, 92 of 160 records) is spared under ADR-0005 D14 and leaves the denominator; the rates are conditional on the instrument having produced an alignment at all.",
+    "the_query_is_the_detectors_call": "the record is a known T-box; the query is Stage-1's predicted span on it (P3-15'-g-ii). Every rate here is (b)'s verdict on a PARTIAL element \u2014 which is exactly what an FP candidate is, and why the arms are matched \u2014 but it is not a rate on the curated element."
+  },
+  "pins_nothing": true,
+  "producibility": {
+    "control_query_level": {
+      "counts": {
+        "failed": 46,
+        "passed": 30,
+        "unavailable": 241
+      },
+      "n_producible": 76,
+      "n_queries": 317,
+      "share": 0.239748
+    },
+    "control_record_level": {
+      "n_records": 160,
+      "n_records_with_a_producible_query": 68,
+      "queries_per_record": {
+        "1": 7,
+        "2": 149,
+        "3": 4
+      },
+      "share": 0.425
+    },
+    "fp_candidate_level": {
+      "n_candidates": 941,
+      "n_producible": 278,
+      "share": 0.29543
+    },
+    "reading": "the control's query-level producible share is compared with the FP arm's candidate-level share: these are the units the two arms share. The record-level share is the one the intervals below are stated on.",
+    "self_hit_floor_caveat": {
+      "direction": "downward \u2014 the control's producible share is a LOWER bound",
+      "flip_band_n_homologs": 18,
+      "min_sequences_floor": 20,
+      "msa_depth_equals_n_homologs_plus_one": true,
+      "n_homologs_median": 6,
+      "n_queries_that_would_flip": 5,
+      "note": "a curated query is absent from the searched database and so does not self-hit; at the same true homolog set the control's alignment is one sequence shallower than the FP arm's. Not corrected \u2014 the floor is a pinned ADR-0006 A2 value \u2014 and sized here from the control's OWN rows rather than from the FP arm's depth distribution.",
+      "pp_of_all_queries": 1.5773,
+      "share_below_floor_by_n_homologs": 0.776025
+    },
+    "spared_unavailable": {
+      "n_control_queries": 241,
+      "rule": "ADR-0005 D14: a candidate with no consensus resolves 'unavailable' and is SPARED, so it never reaches mining and leaves every (b) denominator"
+    }
+  },
+  "provenance": {
+    "adr": "ADR-0006 D3 (criterion (b) as a sparing disjunct), A2 (min_sequences floor), A4 (rule parameters supplied per round, no defaults); ADR-0005 D14 (unavailable spares), A9 (the round-0 scanner), A10 (the producer envelope); ADR-0004 D3/D5 (clusters and the nested carve the control is drawn from)",
+    "env_lock_hash": null,
+    "extra": {
+      "external_inputs": {
+        "control_msa_root": "msa_supply_control",
+        "control_supply_digest_sha256": "0b5afbec0c8fd9af75a5c789d44f64e0b8db1c19ecce011eac6dd92e3393cb28",
+        "fp_supply_digest_sha256": "90b2fe1b532f2851bbade2884e8498e2ab58a11c418cc00b314840f041c0f862",
+        "supply_origin": "two.amlab:$HOME/tbox-scratch/round_p3_15g_control/msa (SLURM job 1264 array 0-15, main @ c94f935); retrieved by rsync per slurm/p2/mine_round_producer.sbatch"
+      },
+      "schema_version": "1.0"
+    },
+    "generated_at_utc": "2026-08-12T01:38:00.517105+00:00",
+    "git_sha": "c1a5b97b253811036b078e4684f645c9b39d71cd",
+    "inputs": {
+      "data/processed/mining/curated_control_manifest_v0.json": "363795fba6cd4d1d85495ec62e6e62cd11f1bf37b0fdf739c48315777c4d2a83",
+      "data/processed/mining/curated_control_status_v0.json": "8b5e8f4178cd63eb8664c1e63e519c5810223eb56ca3a1488ce8bfee9dbeb033",
+      "reports/p3/architecture_parameter_measurement.json": "86e64af40f76d4291aeb3e8186eb9d48e8fd16191762cab32364ce05435f87ca",
+      "reports/p3/architecture_parameter_measurement_control.json": "440ac9682c766ad528d5ac7ac4ce09350f2283f1369b4125f375a6c2a9df53fc",
+      "reports/p3/curated_control_detect.json": "7e096b0df6c18ef09ec16248434a5a10f3046cfe0cbd04066355b51874707466"
+    },
+    "outputs": {},
+    "rule": "P3-15'-g-iv matched-control comparison",
+    "schema_version": "1.0",
+    "script": "src/tbox_finder/mining/architecture_param_control_compare.py",
+    "seed": 42
+  },
+  "schema_version": "1.0",
+  "step": "P3-15'-g-iv"
+}

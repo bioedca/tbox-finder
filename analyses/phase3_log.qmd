@@ -5704,3 +5704,110 @@ place — no prior mining round is materialised locally, and `P3-15′-f` likewi
 cluster `msa_root`. `$ROUND_DIR = $HOME/tbox-scratch/round_p3_15g_control`; consensuses at
 `msa/<slug>/msa.sto`, per-shard reports at `status/status_<NNN>.json`. Nothing is DVC-tracked by
 this step. Verification: **artifact-based (`sacct` off)**.
+
+## Step P3-15′-g-iv — 2026-08-11: what criterion (b) says about known T-boxes, read against what it says about the FP arm
+
+**Inputs.** The matched control's 76 A3/A4 consensuses (`two.amlab:$HOME/tbox-scratch/round_p3_15g_control/msa`,
+SLURM job 1264), its 16 per-shard status tables merged through the shipped
+`covariation_producer merge`, `data/processed/mining/curated_control_manifest_v0.json` (317 queries
+over 160 records), and `reports/p3/architecture_parameter_measurement.json` — the P3-15′-f FP arm,
+278 consensuses of 941 candidates.
+
+**Process.** `architecture_param_measure` gained one seam and no new behaviour: a frozen
+`SupplyArm` registry (`--arm`) supplying the four strings a report makes about *itself* — its
+`step`, its `disclosure`, criterion (a)'s `control_note`, and the provenance rule. The sweep, the
+localizer calls and every count are arm-independent, which is precisely what makes the control
+matched; `--arm round0_fp` is the default and the committed FP report **re-derives byte-identically
+across the seam** (verified against the retrieved supply: the only differing keys are
+`generated_at_utc`, `git_sha` and `env_lock_hash`). The per-candidate verdict was extracted from
+`evaluate_tuple`'s loop body as `candidate_state`, so the record-level aggregation reads the same
+code the counts come from rather than a second spelling of "what (b) says". A new module,
+`architecture_param_control_compare`, then reads the two arms against each other: it refuses unless
+the two reports really share a grid (`sweep` block, `joint` labels in order, and each pair's full
+seven-parameter dict), unless the control status table and the manifest are the same 317-id corpus,
+unless the supply on disk is exactly criterion (a)'s **decided set** (a set comparison, not a size
+one), and unless the control report's own counts reproduce from the supply it was handed.
+
+**Outputs.** `src/tbox_finder/mining/architecture_param_control_compare.py` ·
+`reports/p3/architecture_parameter_measurement_control.json` (the control arm at P3-15′-f's grid) ·
+`reports/p3/architecture_parameter_control_comparison.json` ·
+`data/processed/mining/curated_control_status_v0.json` (the merged 317-row status table, committed
+so the record-level arithmetic is auditable without cluster access) ·
+`tests/unit/test_architecture_param_control_compare.py` (43 tests) + 11 seam tests in
+`tests/unit/test_architecture_param_measure.py`.
+
+**The headline: (b) fails known T-boxes at essentially the rate it fails FP candidates.** At the
+identical grid, criterion (b)'s share of `failed` among *decided* candidates is:
+
+| setting | control (known T-boxes) | FP arm | FP − control | control record-level, 95 % Wilson (n = 68) | CI contains the FP point |
+|---|---|---|---|---|---|
+| `loosest_nonvacuous` | 8/76 = 0.105 | 25/278 = 0.090 | **−0.015** | 7/68 = 0.103 [0.051, 0.198] | yes |
+| `sensitive_core` | 11/76 = 0.145 | 52/278 = 0.187 | +0.042 | 9/68 = 0.132 [0.071, 0.233] | yes |
+| `canonical_core_3helix` | 39/76 = 0.513 | 141/278 = 0.507 | **−0.006** | 33/68 = 0.485 [0.371, 0.602] | yes |
+| `canonical_core_3helix_ncca3` | 49/76 = 0.645 | 220/278 = 0.791 | +0.147 | 41/68 = 0.603 [0.484, 0.711] | **no** |
+| `curated_freeze_transplant` | 72/76 = 0.947 | 265/278 = 0.953 | +0.006 | 64/68 = 0.941 [0.858, 0.977] | yes |
+| `strictest` | 75/76 = 0.987 | 271/278 = 0.975 | **−0.012** | 67/68 = 0.985 [0.921, 0.997] | yes |
+
+The largest gap anywhere on the named grid is **14.7 pp**, and at **three** of the six settings the
+control fails *more* often than the FP arm. At **5 of 6** the control's record-level interval
+contains the FP arm's point estimate. Read as a sparing disjunct, (b) is behaving here as a
+**severity knob applied to both populations**, not as a discriminator between them — tightening it
+buys FP candidates for mining at close to a one-for-one cost in real T-boxes losing (b)'s
+protection.
+
+**Every interval is on the record level, and the query level is refused one.** 149 of the 160
+records contribute 2 queries and 4 contribute 3, so a binomial interval on the 317 (or on the 76
+decided) would be narrower than the data support. `control_query_level.ci95` is `null` in every row
+with the reason beside it; the CI is `n = 68` producible records throughout, exactly as `imp.md`
+required.
+
+**The instrument produces *less* often for a known T-box than for an FP candidate.** Query-level
+producible share: control **76/317 = 24.0 %** against the FP arm's **278/941 = 29.5 %**; at the
+record level **68/160 = 42.5 %**. The self-hit floor caveat is re-derived from the control's *own*
+rows rather than the comparator's — `msa_depth == n_homologs + 1` holds on all 76 produced rows, so
+the flip band is `n_homologs = 18` and **5 of 317 queries (1.58 pp)** would flip, against a median
+`n_homologs` of **6** with **77.6 %** below the floor. It does not close the 5.5 pp gap.
+
+**Matchedness survived the alignment step.** P3-15′-g-ii matched the arms at the *query* (KS
+*D* = 0.0842 against a raw-curated baseline of 0.9647); the *alignments* those queries produced are
+also comparable — control depth median **30** (min 20, p95 81) against the FP arm's **34** (p95 73),
+control consensus width median **99** against the FP arm's **106**. That closes, by measurement, the limitation the
+detect report left open (whether producibility correlates with span length so that the produced
+subset differs from the population entering).
+
+**Criterion (a) itself is only 30/76 on known T-boxes.** The free by-product of the (a)
+stratification: R-scape covariation `passed` for **39.5 %** of the control's decided consensuses,
+against **167/278 = 60.1 %** on the FP arm. P3-15′-f used (a)-`passed` as its strongest available
+proxy for "a real structured RNA is there"; on a supply that is believed positive, (a) passes *less*
+often than on the unknown-status one. That does not invalidate P3-15′-f's sensitivity curve, but it
+does mean (a)-`passed` cannot be read as an enrichment for T-box identity.
+
+**Validation.** `tests/unit` + `tests/golden` against a matched `main` baseline at `c1a5b97`:
+**zero new failures** — worktree **13** FAILED, main **26**, a strict subset, with both `^FAILED`
+sets ANSI-stripped and cross-checked against the summary line. The whole delta is accounted for:
+13 tests move FAILED → SKIPPED and one moves PASSED → SKIPPED, all 14 on `test_selection_val`,
+`test_coverage_sim` and `test_split_table_schema` for unmaterialised DVC/LFS inputs a fresh
+worktree does not carry (skips 89 → 103), and passes rise by exactly the 54 tests added.
+**44 sabotages, all RED against their NAMED test, plus 2 negative controls that stay green.** Both
+new reports re-derive byte-identically apart from `generated_at_utc`; the committed FP report
+re-derives byte-identically across the arm seam. `ruff` + `black` clean.
+
+**Two sabotages initially stayed GREEN, and both were my fixtures.** A "produced row in the flip
+band must not be counted" test put its produced row at `n_homologs = floor − 1` while the band is
+`floor − 2`, so deleting the status filter changed nothing; and the producible-record fixture had
+every record either wholly producible or wholly not, so `any` and `all` agreed and an inversion was
+invisible. Fixed by rebuilding the fixtures — a fourth, *partially* producible record and a produced
+row actually inside the band — not by weakening the sabotages. Same class as
+[[all-true-fixture-cannot-test-a-conjunction]]: the tests named the right relation and exercised
+none of it.
+
+**Decisions.** No parameter is pinned (`pins_nothing: true` in both reports). The ADR-0006 A4
+seven-parameter choice that P3-15′-f deferred to "measure a matched control first" is now
+**informed but still open**, and it is a §7 decision for the user: the control says no setting on
+the named grid separates the two populations by more than 14.7 pp, so the choice is a pure
+yield-versus-label-noise trade rather than a search for a discriminating threshold. The single
+largest threat to that reading is stated in the report itself — the FP arm is a false-positive
+*manifest*, not a verified-negative set, so if a material share of it is really T-box the two arms
+are not two populations and equal failure shares are the expected result. **Commit.** `PENDING`
+(the SHA is not knowable when this stanza is written; `main` takes no direct commits — corrected in
+the next step's PR, as P3-15′-f corrected P3-15′-e's).
