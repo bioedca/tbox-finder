@@ -110,11 +110,14 @@ import json
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from tbox_finder.labels import CLASS_II_TYPE, CORPUS_PARQUET, ELEMENT_COORDS
 from tbox_finder.power import MIN_REAL_HOMOLOG_N
 from tbox_finder.synth import _common
+
+if TYPE_CHECKING:  # pragma: no cover - eval.tier2n_probe imports this module
+    from tbox_finder.eval.tier2n_probe import ProbeSet
 
 # --------------------------------------------------------------------------- #
 # The canonical architecture (pinned; PMID:31206978, corroborated PMID:32882008)
@@ -651,6 +654,15 @@ def build_report(variants: list[Tier2NVariant], *, seed: int) -> dict[str, Any]:
 #: Default output path for the committed probe-set report.
 REPORT_PATH = Path("reports/p2/tier2n_probe.json")
 
+#: Default output path for the committed probe-set **member ids** — the artifact
+#: :func:`tbox_finder.mining.remine.load_probe_set` reads (P3-15′-i).
+#:
+#: Defaulted rather than opt-in, and written beside the counts report by the same
+#: run: the counts report existed for a phase with no id list beside it, which is
+#: why the round leg that needs the members could not start. A build that emits
+#: counts without members is the state this path exists to make unreachable.
+PROBE_IDS_PATH = Path("reports/p2/tier2n_probe_ids.json")
+
 #: Columns a parent must carry for BOTH families to be applicable.
 REQUIRED_PARENT_COLUMNS: tuple[str, ...] = (
     "FASTA_sequence",
@@ -679,7 +691,39 @@ def _repo_relative(path: str | Path) -> str:
     return _common.repo_relative(path)
 
 
-def build_probe_report(
+@dataclass(frozen=True)
+class Tier2NBuild:
+    """The two artifacts one build run produces, returned together.
+
+    The counts report and the probe-set members are handed back from a single
+    call so a caller cannot pair ids from one run with counts from another: the
+    ids are positional over a seeded ``DataFrame.sample`` and depend on three live
+    ``cmsearch`` arms, so two runs are not guaranteed to agree, and a mismatched
+    pair would be undetectable from either artifact alone.
+    """
+
+    report: dict[str, Any]
+    probe_set: ProbeSet
+
+
+def pair_report_with_probe_set(
+    classified: list[Tier2NVariant], report: dict[str, Any]
+) -> Tier2NBuild:
+    """Pair a run's counts report with the probe set built from the **same** variants.
+
+    Its own function rather than a line inside :func:`build_probe_run` so it is
+    reachable from the bare-CI unit tier: everything around it needs ``pandas``
+    and three live ``cmsearch`` arms, and a ``build_probe_set([])`` slipped in here
+    would empty the probe set while every count in the report stayed correct.
+    """
+    # Deferred for the import cycle the TYPE_CHECKING block documents:
+    # eval.tier2n_probe imports Tier2NVariant from this module.
+    from tbox_finder.eval.tier2n_probe import build_probe_set
+
+    return Tier2NBuild(report=report, probe_set=build_probe_set(classified))
+
+
+def build_probe_run(
     *,
     corpus_parquet: str | Path = CORPUS_PARQUET,
     cm: str | Path | None = None,
@@ -689,8 +733,8 @@ def build_probe_report(
     max_len: int = 600,
     cpu: int = 6,
     workdir: str | Path | None = None,
-) -> dict[str, Any]:
-    """Generate variants + controls, run the three cmsearch arms, build the report.
+) -> Tier2NBuild:
+    """Generate variants + controls, run the three cmsearch arms, build both artifacts.
 
     Heavy imports (``pandas``) and the Infernal shell-out are deferred to here so
     the module stays importable in the bare-CI unit tier.
@@ -749,7 +793,38 @@ def build_probe_report(
     # the model, whereas the digest pins exactly which CM produced these verdicts.
     report["cm"] = _repo_relative(cm_path)
     report["cm_sha256"] = _sha256_file(cm_path)
-    return report
+
+    return pair_report_with_probe_set(classified, report)
+
+
+def build_probe_report(
+    *,
+    corpus_parquet: str | Path = CORPUS_PARQUET,
+    cm: str | Path | None = None,
+    n_parents: int = 300,
+    seed: int = 20260719,
+    min_len: int = 120,
+    max_len: int = 600,
+    cpu: int = 6,
+    workdir: str | Path | None = None,
+) -> dict[str, Any]:
+    """The counts report alone, for callers that do not need the members.
+
+    **Delegates** to :func:`build_probe_run` rather than keeping a second copy of
+    the pipeline (the repo's promote-don't-duplicate rule): a fork here would let
+    the reported counts and the written ids drift apart run-to-run, which is
+    precisely the failure the probe-set artifact exists to prevent.
+    """
+    return build_probe_run(
+        corpus_parquet=corpus_parquet,
+        cm=cm,
+        n_parents=n_parents,
+        seed=seed,
+        min_len=min_len,
+        max_len=max_len,
+        cpu=cpu,
+        workdir=workdir,
+    ).report
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -762,13 +837,36 @@ def _build_parser() -> argparse.ArgumentParser:
     build.add_argument("--seed", type=int, default=20260719)
     build.add_argument("--cpu", type=int, default=6)
     build.add_argument("--out", default=str(REPORT_PATH))
+    build.add_argument(
+        "--probe-ids-out",
+        default=str(PROBE_IDS_PATH),
+        help=(
+            "where to write the probe-set MEMBER IDS that mining.remine "
+            "--probe-set reads; refused (nothing written) if the members "
+            "disagree with the counts report or fall below the ADR-0005 A1 floor"
+        ),
+    )
     build.add_argument("--workdir", default=None)
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
+    from tbox_finder.eval.tier2n_probe import Tier2NProbeError, write_probe_set
+
     args = _build_parser().parse_args(argv)
-    report = build_probe_report(
+    out, ids_out = Path(args.out), Path(args.probe_ids_out)
+    if out.resolve() == ids_out.resolve():
+        # Checked before the build, not after: the three cmsearch arms cost ~14 minutes,
+        # and the failure is silent otherwise — the ids payload would overwrite the very
+        # counts report whose digest it records, leaving one self-referential file, a
+        # `source_report_sha256` naming bytes that exist nowhere, and exit 0.
+        print(
+            f"--out and --probe-ids-out are the same path ({out}); the counts report and "
+            "the probe-set ids are two artifacts and the second would destroy the first",
+            file=sys.stderr,
+        )
+        return 2
+    run = build_probe_run(
         corpus_parquet=args.corpus,
         cm=args.cm,
         n_parents=args.n_parents,
@@ -776,7 +874,7 @@ def main(argv: list[str] | None = None) -> int:
         cpu=args.cpu,
         workdir=args.workdir,
     )
-    out = Path(args.out)
+    report = run.report
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     print(
@@ -784,7 +882,32 @@ def main(argv: list[str] | None = None) -> int:
         f"(min-N {report['tier2n_probe_min_n']}) -> "
         f"{'PASS' if report['probe_set_meets_min_n'] else 'FAIL'}; wrote {out}"
     )
-    return 0 if report["probe_set_meets_min_n"] else 1
+    # The report is written first so the ids can carry its digest. That binding says
+    # *which report bytes this id list was written against* — it does not pin the
+    # members, because the counts report carries no ids; what pins those is the
+    # reconciliation below (cardinality + per-family split) plus the run itself.
+    try:
+        write_probe_set(
+            ids_out,
+            run.probe_set,
+            report,
+            provenance={
+                "source_report": _repo_relative(out),
+                "source_report_sha256": _sha256_file(out),
+                "cm": report["cm"],
+                "cm_sha256": report["cm_sha256"],
+                "seed": report["seed"],
+                "n_parents": report["n_parents"],
+                "tier2n_probe_min_n": report["tier2n_probe_min_n"],
+            },
+        )
+    except Tier2NProbeError as exc:
+        # The single exit-code authority: a build whose probe set is unusable
+        # fails here rather than exiting 0 beside an artifact nobody may consume.
+        print(f"tier2n probe ids REFUSED, nothing written to {ids_out}: {exc}", file=sys.stderr)
+        return 1
+    print(f"tier2n probe ids: {run.probe_set.size} members -> wrote {ids_out}")
+    return 0
 
 
 if __name__ == "__main__":  # pragma: no cover

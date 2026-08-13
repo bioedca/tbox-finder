@@ -39,7 +39,12 @@ Pure stdlib. PRD §9.1, §12; ADR-0005 D14; ADR-0006 D9.
 
 from __future__ import annotations
 
+import json
+import os
+import tempfile
+from collections.abc import Mapping
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from tbox_finder.power import MIN_REAL_HOMOLOG_N
@@ -122,6 +127,225 @@ def build_probe_set(
     """
     synthetic = tuple(sorted(v.variant_id for v in variants if v.is_probe_eligible()))
     return ProbeSet(natural=tuple(sorted(natural_ids)), synthetic=synthetic)
+
+
+# --------------------------------------------------------------------------- #
+# Serialization — the write half of ``mining.remine.load_probe_set`` (P3-15′-i)
+# --------------------------------------------------------------------------- #
+#: Schema version of the serialized probe-set id file.
+#:
+#: :func:`tbox_finder.mining.remine.load_probe_set` shipped as a **reader with no
+#: writer**: it reads ``{"natural": [...], "synthetic": [...]}`` and refuses an
+#: empty set, but nothing in ``src/`` ever serialized a :class:`ProbeSet`, so the
+#: round leg that consumes it could not start at all. These functions are that
+#: missing half.
+PROBE_SET_SCHEMA_VERSION = "1.0"
+
+#: Shape of a synthetic probe id, mirrored from
+#: :func:`tbox_finder.synth.tier2n.generate` (``f"tier2n:{family}:{record_id}"``).
+_SYNTHETIC_ID_PREFIX = "tier2n"
+_SYNTHETIC_ID_FIELDS = 3
+
+
+def synthetic_probe_id_family(probe_id: str) -> str:
+    """The family named by a synthetic probe id (``tier2n:<FAMILY>:<record>``).
+
+    Raises rather than returning a sentinel. The only caller is the per-family
+    reconciliation below; an unparsable id degraded to ``""`` would be counted
+    into a bucket the report does not have, turning a genuine mismatch into an
+    agreement about a family that does not exist.
+    """
+    # Bounded split, so a colon **inside the record id** stays in the record rather
+    # than making the id unparsable. ``generate`` takes the record id from whatever
+    # parent frame it is handed, and this repo's external records are named
+    # ``anchor:``/``blind:``-prefixed (``splits.py``) — the production path mints
+    # ``p{i:05d}``, but a parent set that did not would be refused here and would
+    # block the write entirely.
+    parts = probe_id.split(":", _SYNTHETIC_ID_FIELDS - 1)
+    # Both trailing fields are checked for emptiness, not only the family: an id like
+    # ``tier2n:CLASS_II_PLATFORM_SWAP:`` names no record, so it would reconcile into
+    # its family's count and be written as a member no scanner can ever recover.
+    if (
+        len(parts) != _SYNTHETIC_ID_FIELDS
+        or parts[0] != _SYNTHETIC_ID_PREFIX
+        or not parts[1]
+        or not parts[2]
+    ):
+        raise Tier2NProbeError(
+            f"synthetic probe id is not 'tier2n:<FAMILY>:<record>': {probe_id!r}"
+        )
+    return parts[1]
+
+
+def _expected_int(
+    report: Mapping[str, Any], key: str, problems: list[str], *, where: str = "counts report"
+) -> int | None:
+    """Read an integer count out of the counts report, or record why it could not.
+
+    A missing or non-integer key is a **problem**, never a skipped clause: a
+    reconciliation that quietly drops the comparison it could not make reports
+    agreement it never measured. ``where`` names the block the key was read from,
+    so a per-family failure says which family rather than which key alone.
+    """
+    if key not in report:
+        problems.append(f"{where} has no {key!r} to reconcile the written ids against")
+        return None
+    value = report[key]
+    if isinstance(value, bool) or not isinstance(value, int):
+        problems.append(f"{where} {key!r} is not an integer: {value!r}")
+        return None
+    return value
+
+
+def reconcile_probe_set_with_report(probe_set: ProbeSet, report: Mapping[str, Any]) -> list[str]:
+    """Cross-check probe-set **members** against the counts report of the same run.
+
+    Returns the disagreements; ``[]`` means the two agree.
+
+    This is a real cross-check rather than a restatement: the ids come from
+    :func:`build_probe_set` (which collects ``variant_id``s) and the counts come
+    from :func:`tbox_finder.synth.tier2n.build_report` (which counts
+    ``is_probe_eligible`` variants), so the two are computed by different code
+    over the same variants. It is what turns *"these ids are the members those
+    counts describe"* from a claim into an assertion — and it is checked
+    **before** the file is written, so a mismatch leaves no artifact behind.
+    """
+    problems: list[str] = []
+    if not isinstance(report, Mapping):
+        return [f"counts report is not an object: {type(report).__name__}"]
+
+    for key, observed, what in (
+        ("n_natural", len(probe_set.natural), "natural-arm ids"),
+        ("n_synthetic", len(probe_set.synthetic), "synthetic-arm ids"),
+        ("n_probe_eligible", len(probe_set.synthetic), "probe-eligible ids"),
+        ("probe_set_size", probe_set.size, "probe-set members"),
+    ):
+        expected = _expected_int(report, key, problems)
+        if expected is not None and expected != observed:
+            problems.append(
+                f"counts report {key}={expected} but the probe set has {observed} {what}"
+            )
+
+    per_family = report.get("per_family")
+    if not isinstance(per_family, Mapping) or (not per_family and probe_set.synthetic):
+        # Guarded on the synthetic arm being non-empty: an absent or empty
+        # per-family block beside 45 ids would otherwise make the loop below
+        # vacuous, and a vacuous loop reports agreement from nothing.
+        problems.append(
+            "counts report carries no usable 'per_family' block to reconcile "
+            f"{len(probe_set.synthetic)} synthetic ids against"
+        )
+        return problems
+
+    observed_by_family: dict[str, int] = {}
+    for probe_id in probe_set.synthetic:
+        try:
+            family = synthetic_probe_id_family(probe_id)
+        except Tier2NProbeError as exc:
+            problems.append(str(exc))
+            continue
+        observed_by_family[family] = observed_by_family.get(family, 0) + 1
+
+    for family in sorted(set(per_family) | set(observed_by_family)):
+        observed = observed_by_family.get(family, 0)
+        entry = per_family.get(family)
+        if not isinstance(entry, Mapping):
+            problems.append(
+                f"counts report has no per-family entry for {family!r}, "
+                f"but {observed} written id(s) name it"
+            )
+            continue
+        expected = _expected_int(
+            entry, "probe_eligible", problems, where=f"counts report per_family[{family!r}]"
+        )
+        if expected is not None and expected != observed:
+            problems.append(
+                f"counts report per_family[{family!r}].probe_eligible={expected} "
+                f"but {observed} written id(s) name it"
+            )
+    return problems
+
+
+def probe_set_payload(
+    probe_set: ProbeSet, *, provenance: Mapping[str, Any] | None = None
+) -> dict[str, Any]:
+    """The JSON object :func:`tbox_finder.mining.remine.load_probe_set` reads back.
+
+    Both arms are emitted as lists even when empty — the natural arm is empty by
+    construction here (see the module docstring), and a written ``[]`` says so,
+    whereas an omitted key would leave a reader unable to distinguish *"no
+    natural members"* from *"this writer did not know about the natural arm"*.
+
+    No timestamp and no git SHA: the payload is a pure function of the run, so
+    re-running the build over the same corpus and CM rewrites it byte-identically
+    and a diff means the *members* moved.
+    """
+    payload: dict[str, Any] = {
+        "schema_version": PROBE_SET_SCHEMA_VERSION,
+        "natural": list(probe_set.natural),
+        "synthetic": list(probe_set.synthetic),
+    }
+    if provenance is not None:
+        payload["provenance"] = dict(provenance)
+    return payload
+
+
+def write_probe_set(
+    path: str | Path,
+    probe_set: ProbeSet,
+    report: Mapping[str, Any],
+    *,
+    provenance: Mapping[str, Any] | None = None,
+) -> Path:
+    """Write the probe-set ids, refusing **before** the write rather than after it.
+
+    Two refusals, both fail-closed — nothing is written when either fires:
+
+    * the members disagree with the counts report of the same run
+      (:func:`reconcile_probe_set_with_report`); and
+    * the probe set is below the ADR-0005 Amendment A1 floor
+      (``TIER2N_PROBE_MIN_N`` = 20).
+
+    The min-N refusal is the load-bearing one. ``load_probe_set`` only refuses a
+    *wholly empty* set, so without this a cheap build — ``--n-parents 30``, three
+    eligible variants — would mint a well-formed probe file that a mining round
+    accepts, and the round's per-round halt/rollback decision (ADR-0005 D14) would
+    then rest on an underpowered instrument while every clause read green. The
+    floor belongs at the point the artifact is minted, not only at the point it is
+    read.
+    """
+    problems = reconcile_probe_set_with_report(probe_set, report)
+    if problems:
+        raise Tier2NProbeError(
+            "probe-set ids disagree with the counts report of the same run, so "
+            "nothing was written: " + "; ".join(problems)
+        )
+    if not probe_set.meets_min_n():
+        raise Tier2NProbeError(
+            f"probe set has {probe_set.size} member(s), below the ADR-0005 A1 floor "
+            f"of {TIER2N_PROBE_MIN_N}; nothing was written, because a well-formed "
+            "file with too few members is accepted by load_probe_set and would "
+            "carry an underpowered probe into the round's halt/rollback decision"
+        )
+    out = Path(path)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    payload = probe_set_payload(probe_set, provenance=provenance)
+    text = json.dumps(payload, indent=2, sort_keys=True) + "\n"
+    # Written through a sibling temp file and ``os.replace`` (atomic on POSIX, same
+    # filesystem by construction) rather than straight to ``out``: ``write_text``
+    # truncates the destination first, so an I/O failure partway through would leave a
+    # previously-valid probe set as partial JSON. A mining round reads this file to
+    # decide what it may treat as a hard negative; half a file is not a safe input, and
+    # the failure would surface at the next round rather than at the write.
+    fd, tmp_name = tempfile.mkstemp(dir=out.parent, prefix=f".{out.name}.", suffix=".tmp")
+    tmp = Path(tmp_name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(text)
+        os.replace(tmp, out)
+    finally:
+        tmp.unlink(missing_ok=True)
+    return out
 
 
 def probe_recall(probe_set: ProbeSet, recovered_ids: set[str]) -> float:
