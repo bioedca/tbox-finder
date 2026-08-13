@@ -1,0 +1,287 @@
+{
+  "adr": "ADR-0005 D14/A10/A1; ADR-0006 D11/A2; PRD \u00a79.1, \u00a718.1",
+  "leg": "apply-spare-rule",
+  "may_run": true,
+  "outcome": {
+    "mined_ids": [
+      "GCA_011056645.1:c228:8704:9345-9438",
+      "GCA_015478585.1:c26:4608:5040-5154",
+      "GCA_040905065.1:c256:4899:5781-5916"
+    ],
+    "n_candidates": 941,
+    "n_masked": 0,
+    "n_mined": 3,
+    "n_refused_no_coordinates": 0,
+    "n_spared": 938
+  },
+  "plan_leg": {
+    "availability": {
+      "any_helix_rscape": true,
+      "downstream_aaRS_synteny": true,
+      "high_stage2_posterior": true,
+      "relaxed_architecture": true
+    },
+    "blocking_disjuncts": [],
+    "leg": "plan",
+    "may_run": true,
+    "problems": [],
+    "ready": true,
+    "report_not_committed_because": "the plan leg's report embeds each derivation's absolute repo_root, so the file stays on scratch and only this path-free summary is published; its bytes are pinned by digest in 'supplies'",
+    "supply_derivations": {
+      "msa_supply_derivation": {
+        "available": true,
+        "clauses": {
+          "certification_green": true,
+          "certification_matches_versioned_db": true,
+          "certified_msa_intact": true,
+          "producer_present": true,
+          "producer_status_wired": true,
+          "target_db_versioned": true
+        }
+      },
+      "relaxed_arch_supply_derivation": {
+        "available": true,
+        "clauses": {
+          "freeze_measured_a_nonempty_carve": true,
+          "freeze_provenance_names_its_inputs": true,
+          "freeze_report_present": true,
+          "msa_supply_backs_it": true,
+          "predicate_module_present": true,
+          "producer_module_present": true,
+          "producer_status_wired": true
+        }
+      },
+      "stage2_supply_derivation": {
+        "available": true,
+        "clauses": {
+          "control_green": true,
+          "control_matches_this_calibration": true,
+          "gate2_calibration_wellformed": true,
+          "producer_posterior_wired": true,
+          "producer_present": true,
+          "production_arm_on_record": true
+        }
+      },
+      "synteny_supply_derivation": {
+        "available": true,
+        "clauses": {
+          "acquisition_report_records_a_corpus": true,
+          "exclusion_report_present": true,
+          "false_pass_control_powered": true,
+          "false_pass_report_present": true,
+          "fetch_report_present": true,
+          "gff3_reader_present": true,
+          "predicate_module_present": true,
+          "producer_module_present": true,
+          "supply_report_present": true
+        }
+      }
+    },
+    "yield_producible": true
+  },
+  "probe_exclusion": {
+    "excluded_ids": [],
+    "n_excluded": 0,
+    "n_probe_members": 45,
+    "n_substrate_candidates": 941,
+    "note": "a 0 here is NOT evidence the round left the Tier-2N probe intact under a shared substrate; on this round the two id spaces do not intersect at all, so no member could have been mined and the exclusion is structurally vacuous",
+    "probe_id_namespaces": [
+      "tier2n"
+    ],
+    "reading": "structural_namespace_disjoint",
+    "shared_namespaces": [],
+    "substrate_id_namespaces": [
+      "GCA_001873345.1",
+      "GCA_002391195.1",
+      "GCA_002878375.1",
+      "GCA_003290465.1",
+      "GCA_003314535.1",
+      "GCA_005116895.1",
+      "GCA_011056645.1",
+      "GCA_012517635.1",
+      "GCA_015478585.1",
+      "GCA_017458885.1",
+      "GCA_018714045.1",
+      "GCA_019038705.1",
+      "GCA_019636815.1",
+      "GCA_020434495.1",
+      "GCA_023145315.1",
+      "GCA_023663235.1",
+      "GCA_024642575.1",
+      "GCA_025060475.1",
+      "GCA_027450145.1",
+      "GCA_028276205.1",
+      "GCA_030673965.1",
+      "GCA_030765645.1",
+      "GCA_030834825.1",
+      "GCA_031266695.1",
+      "GCA_031268125.1",
+      "GCA_031275485.1",
+      "GCA_031458695.1",
+      "GCA_031459235.1",
+      "GCA_031459855.1",
+      "GCA_035252115.1",
+      "GCA_035295045.1",
+      "GCA_035378845.1",
+      "GCA_035477455.1",
+      "GCA_035477595.1",
+      "GCA_036675025.1",
+      "GCA_038842485.1",
+      "GCA_039638295.1",
+      "GCA_040062795.1",
+      "GCA_040905065.1",
+      "GCA_041616875.1",
+      "GCA_041656455.1",
+      "GCA_041670175.1",
+      "GCA_045579125.1",
+      "GCA_049718665.1",
+      "GCA_900320995.1",
+      "GCA_934527255.1",
+      "GCA_937860145.1",
+      "GCA_937871925.1",
+      "GCA_938039765.1",
+      "GCA_946403625.1",
+      "GCA_949300325.1",
+      "GCA_949740745.1",
+      "GCA_963813295.1",
+      "GCA_963815215.1",
+      "GCA_963846575.1",
+      "GCA_964236795.1",
+      "GCA_964293175.1",
+      "GCA_964371705.1",
+      "GCA_964396465.1",
+      "GCA_964452225.1",
+      "GCA_964469045.1",
+      "GCA_964472775.1",
+      "GCA_965214405.1",
+      "GCF_000020965.1",
+      "GCF_000021645.1",
+      "GCF_000024405.1",
+      "GCF_000183745.1",
+      "GCF_000212395.1",
+      "GCF_000373205.1",
+      "GCF_000381045.1",
+      "GCF_000744885.1",
+      "GCF_002884445.1",
+      "GCF_003057965.1",
+      "GCF_003574085.1",
+      "GCF_039822205.1",
+      "GCF_041320495.1"
+    ]
+  },
+  "problems": [],
+  "provenance": {
+    "compute": "LOCAL",
+    "plan_leg": "python -m tbox_finder.mining.remine plan",
+    "retrain_leg_run": false,
+    "round_leg": "python -m tbox_finder.mining.remine apply-spare-rule",
+    "rule": "src/tbox_finder/mining/remine_publish.py::main",
+    "sbatch_not_used": "slurm/p3/stage1_remine.sbatch runs leg (2) unconditionally on n_mined > 0 and has no decide-only mode, so the two CLI legs were invoked directly"
+  },
+  "reproduction": {
+    "published": {
+      "mined_ids": [
+        "GCA_011056645.1:c228:8704:9345-9438",
+        "GCA_015478585.1:c26:4608:5040-5154",
+        "GCA_040905065.1:c256:4899:5781-5916"
+      ],
+      "n_candidates": 941,
+      "n_mined": 3,
+      "n_spared": 938,
+      "reasons_sha256": "beef0f0f21920131299092fe8307669532fa39d68ffa9344a994e2880d556056"
+    },
+    "replayed": {
+      "mined_ids": [
+        "GCA_011056645.1:c228:8704:9345-9438",
+        "GCA_015478585.1:c26:4608:5040-5154",
+        "GCA_040905065.1:c256:4899:5781-5916"
+      ],
+      "n_candidates": 941,
+      "n_mined": 3,
+      "n_spared": 938,
+      "reasons_sha256": "beef0f0f21920131299092fe8307669532fa39d68ffa9344a994e2880d556056"
+    },
+    "reproduced": true
+  },
+  "retrain": {
+    "canonical_stage1_checkpoint": "the P2 production checkpoint \u2014 unchanged by this round",
+    "checkpoint_superseded": false,
+    "decision": "CLAUDE.md \u00a77 decision 2026-08-12 (user): DECISION-ONLY ROUND, NO RETRAIN \u2014 run the round's decision legs (0)+(1) and publish the report as the honest answer to ADR-0005 A10's Phase-2 note; the DDP retrain leg (2) is not run and P3-15\u2032-j (the mined-pool builder) is deferred, not scheduled.",
+    "parent_checkpoint_in_round_report": null,
+    "prd_18_1_note": "PRD \u00a718.1 states that stage1_production.ckpt supersedes the P2 checkpoint. This round decided and declined to retrain, so nothing superseded it; P3-16, P4 GATE-1 and the P5 scan continue to consume the P2 checkpoint. Reconciling PRD \u00a718.1 with ADR-0005 is owed and needs user sign-off (CLAUDE.md \u00a77 item 2).",
+    "prd_18_1_supersession_status": "UNMET",
+    "retrain_leg_run": false
+  },
+  "round_report_problems": [],
+  "schema_version": "1.0",
+  "spared_split": {
+    "n_spared": 938,
+    "n_spared_by_a_passing_disjunct": 718,
+    "n_spared_by_stage2_posterior_alone": 79,
+    "n_spared_by_unavailable_backend_only": 220,
+    "passes_per_disjunct": {
+      "any_helix_rscape": 167,
+      "downstream_aaRS_synteny": 546,
+      "high_stage2_posterior": 79,
+      "relaxed_architecture": 226
+    },
+    "unavailable_per_disjunct": {
+      "any_helix_rscape": 213,
+      "downstream_aaRS_synteny": 178,
+      "high_stage2_posterior": 0,
+      "relaxed_architecture": 213
+    }
+  },
+  "stage2_sensitivity": {
+    "grid": {
+      "0.5": {
+        "mined_ids": [
+          "GCA_011056645.1:c228:8704:9345-9438",
+          "GCA_015478585.1:c26:4608:5040-5154",
+          "GCA_040905065.1:c256:4899:5781-5916"
+        ],
+        "n_mined": 3,
+        "n_spared_by_a_passing_disjunct": 724,
+        "n_spared_by_stage2_posterior_alone": 85,
+        "n_spared_by_unavailable_backend_only": 214
+      },
+      "0.9": {
+        "mined_ids": [
+          "GCA_011056645.1:c228:8704:9345-9438",
+          "GCA_015478585.1:c26:4608:5040-5154",
+          "GCA_040905065.1:c256:4899:5781-5916"
+        ],
+        "n_mined": 3,
+        "n_spared_by_a_passing_disjunct": 718,
+        "n_spared_by_stage2_posterior_alone": 79,
+        "n_spared_by_unavailable_backend_only": 220
+      },
+      "0.99": {
+        "mined_ids": [
+          "GCA_011056645.1:c228:8704:9345-9438",
+          "GCA_015478585.1:c26:4608:5040-5154",
+          "GCA_040905065.1:c256:4899:5781-5916"
+        ],
+        "n_mined": 3,
+        "n_spared_by_a_passing_disjunct": 700,
+        "n_spared_by_stage2_posterior_alone": 61,
+        "n_spared_by_unavailable_backend_only": 238
+      }
+    },
+    "mined_set_invariant": true,
+    "reading": "the mined set does not move across the grid, so the unpinned Stage-2 operating point does not decide this round's yield; the SPARING COMPOSITION does move, so the split below is reported with its threshold attached",
+    "spared_split_invariant": false
+  },
+  "stage2_threshold": 0.9,
+  "stage2_threshold_pinned": false,
+  "step": "P3-15'-k",
+  "supplies": {
+    "architecture_status.json": "9867a6dcfc04320be1d3d978db055fced5fd58c73fc66e774705ad2e077d86f5",
+    "covariation_status.json": "3215f0340b9b85bc49a862b66ecc1b7367485d22650277a83894e2e1ef3d8167",
+    "remine_plan.json": "65e5fa5eb8026029dcb455e14ef618dabc08c357a8b86bcff21be48215c0e568",
+    "round0_fp_manifest.json": "e8aff87d395b3cb70a25c1f1d4ac348daf3da9323baa4c04a32fd3e4060d4b95",
+    "stage2_posteriors.json": "54be6e6d0297558f7357d24a10940562c3691036f6e36435b3e6524be498adf8",
+    "synteny_status.json": "3c8ac8e31b9e7cde6dee50328ca3efa7ac798b54def17885f92c930b8b04a464",
+    "tier2n_probe_ids.json": "ea8c3f7ce31940c6cd4fa5beb958e07d43e3353a469df551e493850842f776e3"
+  }
+}

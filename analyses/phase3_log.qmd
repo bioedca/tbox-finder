@@ -6615,3 +6615,102 @@ single-character ids; that is the reader's shape gap, outside this step, and the
 produces it.
 
 **Commit.** See the PR that carries this stanza.
+
+## Step P3-15′-k — 2026-08-13: the round decides, and the report says what its zeroes mean
+
+**Inputs.** The four produced evidence supplies, staged into one `$ROUND_DIR` and digest-checked
+against what the pre-flight recorded: `covariation_status.json` (`3215f034…`, jobs 1205 + 1254),
+`architecture_status.json` (`9867a6dc…`, job 1288 at the §7 `sensitive_core` tuple),
+`synteny_status.json` (`3c8ac8e3…`) and `stage2_posteriors.json` (`54be6e6d…`, job 1163) ·
+`reports/p2/tier2n_probe_ids.json` (`ea8c3f7c…`, 45 members, P3-15′-i) ·
+`data/processed/mining/round0_fp_manifest.json` (941) · the union-prior mask
+(`priors/union_prior.parquet` + `master_clean_v0.parquet`).
+
+**Process.** Legs (0) and (1) were invoked as the two CLI subcommands directly, **not** through
+`slurm/p3/stage1_remine.sbatch`: that file runs leg (2) unconditionally once `n_mined > 0` and has
+no decide-only mode, so under the §7 "decision-only round" call it could only have been used by
+editing it. LOCAL throughout — a JSON join over 941 rows plus one parquet mask, ~2 s per leg — which
+also sidesteps the cluster checkout's missing `union_prior.parquet` / `master_clean_v0.parquet`.
+Leg (1) was then re-run at Stage-2 thresholds **0.5 / 0.9 / 0.99**, and
+`mining/remine_publish.py` composed the published report from those four runs.
+
+⚠ **One environment trap, worth recording because it fails as a data fault.** Putting the whole
+`tbox-finder-rscape` env on `PATH` to make `--rscape-installed` honest also shadows `python`, and
+the round then exits **4** — *"this checkout cannot evidence the Stage-2 posterior supply"* — because
+`derive_stage2_supply_available` could not `import yaml`. A staging problem wearing an evidence-gate
+message. Fixed with a one-symlink shim directory containing `R-scape` alone;
+`covariation.backend_available()` then reads **True** at the pinned build **2.0.4.a**, so the one
+declaration with no derivation (`--rscape-installed`, the gap P3-15′-h disclosed) is evidenced by
+execution on this machine rather than asserted.
+
+**Outputs.** `reports/p3/remine_round_report.json` (sha256 `4808cb88…`) —
+**941 candidates → 3 mined · 0 masked · 938 spared · 0 refused**, mined ids
+`GCA_011056645.1:c228:8704:9345-9438`, `GCA_015478585.1:c26:4608:5040-5154`,
+`GCA_040905065.1:c256:4899:5781-5916`. **Exactly the outcome the P3-15 RUN pre-flight measured
+ahead of the round**, reproduced here by the shipped legs rather than by calling the operators from
+a script. `src/tbox_finder/mining/remine_publish.py` + `tests/unit/test_remine_publish.py` (57
+tests) are the step's code.
+
+⚠ **The plan leg's own report is deliberately NOT committed.** Each of its four supply derivations
+embeds an absolute `repo_root`, so the file stays on scratch; the publication carries a path-free
+`plan_leg` summary of its verdict and pins the withheld bytes by digest. A test asserts the
+published report contains no `/home/` or `/exports/` path.
+
+**Validation.** The step's gate is `n_mined == 3` against the pre-flight prediction, `remine_problems`
+empty, and the report's `leg` stamp reading the round leg — all three hold (`leg:
+"apply-spare-rule"`, `problems: []`), and the publication's own 20-clause self-check is **re-run over
+the committed bytes** by a test rather than read back from the `problems: []` the artifact carries.
+**32 sabotages, every one RED against its named test**, plus a comment-only negative control (green)
+and a positive control: a `publication_problems` that returns a problem for *everything* turns the
+green control RED, so the parametrized clause tests bind to their own clause and not to a
+blanket refuser. ⚠ One sabotage was initially **GREEN** — deleting the publication-level
+"fewer than two grid points" clause changed nothing, because the builder refuses a one-point grid
+first and no test reached the checker with one. That clause could not fail; it now has a test that
+constructs the payload directly. `ruff` 0.15.15 + `black` 25.11.0 clean.
+
+**Decisions.**
+
+⚠ **The Stage-2 operating point is unpinned and the report publishes its whole grid.** ADR-0005 D14
+pins the *rule*; §13.1 pins the *value*, so `stage2_threshold_pinned` stays **false** and 0.9 is an
+arbitrary point inside a measured-invariant range, not a choice. Across **0.5 / 0.9 / 0.99** the
+mined set is the **same three ids** — their posteriors are 5.2e-6 to 2.5e-4, below anything §13.1
+could pick — so no §7 stop arises. ⚠ **But the sparing *composition* is not invariant**, and the
+pre-flight's headline did not say so: *"718 spared by a passing disjunct / 220 by
+`unavailable_backend`"* is a fact **at threshold 0.9**; the same round reads **724 / 214** at 0.5 and
+**700 / 238** at 0.99. The published split now carries its threshold, and the grid is in the report.
+
+⚠⚠ **The real headline is still not the 3.** With all four backends live, **718 of 941 (76.3 %)** of
+the Stage-1 false-positive manifest is spared because an orthogonal criterion **actually passed** —
+`downstream_aaRS_synteny` 546, `relaxed_architecture` 226, `any_helix_rscape` 167 — not because
+evidence was missing. ADR-0005 A10's Phase-2 state (941/941 spared by unavailability) is gone, and
+what replaced it sharpens P3-15′-g-iv's disclosed threat: a "false-positive" set three quarters of
+which satisfies an independent T-box criterion may not be a false-positive set. **And a number this
+step adds: 79 candidates (8.4 %) are spared by `high_stage2_posterior` and nothing else** — the
+project's own model is their only protection. `spare_reason` emits that attribution only when no
+model-independent disjunct passed, so it is exactly the anti-circularity coordinate ADR-0005 D14's
+model-independence accounting needs to be able to subtract. It moves with the threshold (85 / 79 / 61).
+
+⚠ **The probe exclusion's 0 is structural, and the report says which zero it is.** The 45 probe ids
+live in the `tier2n:` namespace; the substrate's 941 ids are genomic coordinates across 76 assembly
+accessions. The two id spaces share **no** namespace token, so no member *could* have been mined —
+a different finding from "the probe set was empty" (which `load_probe_set` refuses upstream) and
+from "the exclusion ran and removed nothing". The report classifies it as
+`structural_namespace_disjoint` from the measured namespaces, and `publication_problems` re-derives
+that label from them rather than trusting the word.
+
+⛔ **The round decided and did not retrain, so PRD §18.1 is UNMET and the report says so.** No
+checkpoint superseded the P2 production one; P3-16, P4 GATE-1 and the P5 scan continue to consume
+it. The publication records `retrain_leg_run: false` / `checkpoint_superseded: false` /
+`prd_18_1_supersession_status: "UNMET"`, evidenced by the round report's own `parent_checkpoint:
+null` — and a publication claiming "no retrain" beside a report that names a parent is refused, not
+published with a caveat. **The PRD §18.1 ↔ ADR-0005 reconciliation is owed and needs sign-off
+(CLAUDE.md §7 item 2).**
+
+⚠ **The supply digests are bound, not captioned.** `remine` records no digest of the four tables it
+reads, so the publisher re-runs the shipped `apply_remine_spare_rule` over the recorded paths and
+refuses unless it reproduces the round's `(n_candidates, n_mined, n_spared, mined_ids, reasons)`
+fingerprint. It does, so the six digests in `supplies` are facts about the bytes these numbers came
+from. ⚠ Disclosed, not fixed: that reproduction needs the two DVC parquets, so it cannot run in CI —
+the committed report records the measurement and CI re-checks everything else.
+
+**Commit.** See the PR that carries this stanza.

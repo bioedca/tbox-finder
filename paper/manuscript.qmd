@@ -350,6 +350,39 @@ two modes and describes neither. The right panel is **not** gated and is not
 comparable to the left panel's ceiling.
 :::
 
+## Three quarters of the Stage-1 false-positive set satisfies an orthogonal T-box criterion, so almost none of it is minable as a hard negative {#sec-remine}
+
+The hard-negative curriculum is protected by a *spare rule*: a Stage-1
+false-positive call is withheld from the negative pool if **any** of four
+independent criteria supports it being a real T-box — helix covariation, a
+relaxed structural architecture, downstream aminoacyl-tRNA-synthetase synteny,
+or a high re-ranker posterior. Sparing is a disjunction, so mining is a
+conjunction: a candidate becomes a hard negative only when every criterion has
+been evaluated and every one has failed. With all four backends producing
+evidence for the first time, the round over the 941-call false-positive manifest
+mines **3** candidates and spares **938** (0 masked by the known-locus prior, 0
+uncoordinated).
+
+The composition of that 938 is the result, not its size. **718 candidates
+(76.3% of the manifest) are spared because a criterion actually passed** —
+synteny for 546, relaxed architecture for 226, helix covariation for 167 — and
+only 220 because some criterion could not be evaluated. A set in which three
+quarters of the calls satisfy an independent structural or genomic criterion is
+poor evidence of false positives, and we therefore report the round as a
+measurement of the manifest rather than as a curriculum step: no re-training was
+performed and the Stage-1 checkpoint is unchanged. Of the 718, **79 (8.4% of the
+manifest) are spared by the re-ranker posterior alone**, with no
+model-independent criterion supporting them; that subset is reported separately
+because it is the only part of the sparing that depends on our own model, and it
+must be subtractable by a reader assessing circularity. The operating point of
+the posterior criterion is not fixed at this stage, and the mined set is
+invariant across the range examined (0.5, 0.9, 0.99 give the same three
+candidates, whose posteriors lie between 5.2 × 10^-6^ and 2.5 × 10^-4^); the
+sparing composition is not invariant (724/214, 718/220, 700/238), so every split
+above is reported at its operating point. Full per-criterion counts, the
+sensitivity grid, and the input digests are in
+`reports/p3/remine_round_report.json`.
+
 *[Placeholder — GATE-1 (Phase 4), the genome-scale scan + FDR (Phase 5), and
 orthogonal validation / GATE-3 (Phase 6) paragraphs are added at each phase-exit
 gate. Phase 1 contributes no Results paragraph and no figure: it validated
