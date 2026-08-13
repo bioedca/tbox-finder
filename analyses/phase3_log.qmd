@@ -6597,6 +6597,12 @@ could not distinguish the two branches it exists to separate — matched on `"ha
 exact confusion sabotaged RED. Review counts across the step: CLI **0 · 3 · 1 · 0**, app **1
 nitpick**, adversarial harness **3 of 20**; **31 sabotages** in total, every one RED against its
 named test, plus the artifact sabotage, one comment-only negative control and one positive control.
+**Round 5** returned one major that is **factually wrong**: *"`reports/p2/tier2n_probe_ids.json`
+exists locally but is untracked, so a clean checkout cannot run the artifact tests."* It is tracked —
+added in the step's first commit, present on the pushed branch, and `git archive` from `origin`
+extracts it at exactly the pinned digest `ea8c3f7c…`, which is also why CI's own clean-checkout pytest
+job passes the three artifact tests. Declined with the evidence, like round 2's duplicate-ids claim.
+Final tally: CLI **0 · 3 · 1 · 0 · 1**, of which **two findings were wrong and refuted by execution**.
 
 **Decisions.** No ADR amendment: enforcing `TIER2N_PROBE_MIN_N` at the point the artifact is minted
 implements ADR-0005 A1's existing floor, it does not pin a new value. `build_probe_report` is kept
