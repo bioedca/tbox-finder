@@ -217,7 +217,9 @@ def test_a_missing_count_is_a_problem_not_a_skipped_clause(key: str) -> None:
     report = _report()
     del report[key]
     problems = reconcile_probe_set_with_report(_probe_set(), report)
-    assert any(key in p and "no" in p for p in problems), problems
+    # "has no", not "no": the latter is a substring of "not an integer", so the
+    # assertion would pass on the wrong-type refusal and stop distinguishing the two.
+    assert any(key in p and "has no" in p for p in problems), problems
 
 
 def test_a_non_integer_count_is_a_problem() -> None:
