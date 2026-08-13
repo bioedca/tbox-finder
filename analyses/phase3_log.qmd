@@ -6486,3 +6486,75 @@ sharpens P3-15′-g-iv's disclosed threat: an FP manifest of which 76.3 % satisf
 independent T-box criterion may not be a false-positive set.
 
 **Commit.** See the PR that carries this stanza; no code changed.
+
+## Step P3-15′-i — 2026-08-12: giving the Tier-2N probe set a writer
+
+**Inputs.** `mining/remine.py:374` `load_probe_set` — the reader that has refused an empty
+`{natural, synthetic}` id file since P3-15's ENCODE and that nothing in `src/` ever wrote to;
+`eval/tier2n_probe.py::build_probe_set`, the typed assembler with **zero callers in `src/`**;
+`synth/tier2n.py::build_probe_report`, which held the classified variants and returned only the
+counts dict. The committed P2-07 counts `reports/p2/tier2n_probe.json` (45 probe-eligible = 21
+`CLASS_II_PLATFORM_SWAP` + 24 `STEM_II_PK_DELETION`, `n_natural` 0, seed 20260719, CM sha256
+`082616ef…`), plus the two supplies a regeneration needs: `data/processed/master_clean_v0.parquet`
+and `data/external/refs/RF00230.cm`, under `cmsearch` 1.1.5 from the pinned infernal env.
+
+**Process.** The gap was a **reader with no writer**, and it blocked leg (1) of the P3 re-mining
+round outright: `--probe-set` is `required=True` and `reports/p2/tier2n_probe.json` carries counts,
+not member ids. The fix keeps one pipeline rather than adding a second. `build_probe_report`'s body
+became `build_probe_run`, which returns a `Tier2NBuild` carrying **both** the counts report and the
+`ProbeSet` built from the same `classified` variants (via `pair_report_with_probe_set`, its own
+function so the bare-CI tier can reach the one line the pandas/`cmsearch` body otherwise hides);
+`build_probe_report` now **delegates** to it and returns `.report`, so the counts and the ids cannot
+drift run-to-run. `eval/tier2n_probe.py` gained the serialization half — `probe_set_payload`,
+`reconcile_probe_set_with_report`, `write_probe_set` — and the `build` CLI gained
+`--probe-ids-out`, **defaulted** to `reports/p2/tier2n_probe_ids.json` beside `--out` rather than
+opt-in, so a build that emits counts without members is unreachable. Two refusals run **before** the
+write, so a rejected build leaves no artifact: the members must reconcile with the counts report of
+the same run (top-level `n_natural` / `n_synthetic` / `n_probe_eligible` / `probe_set_size`, **and**
+per-family `probe_eligible` parsed back out of the `tier2n:<FAMILY>:<record>` ids), and the set must
+clear the ADR-0005 A1 floor of 20. That second refusal is the load-bearing one: `load_probe_set`
+refuses only a *wholly empty* set, so without it a cheap `--n-parents 30` build (3 eligible variants,
+measured) would mint a well-formed probe file that a round accepts, and the D14 halt/rollback
+decision would rest on an underpowered instrument with every clause green.
+
+**Outputs.** `reports/p2/tier2n_probe_ids.json` (sha256 `ea8c3f7c…`, 45 members = 21 + 24,
+`"natural": []`, provenance digest-bound to the report it was written beside);
+`src/tbox_finder/eval/tier2n_probe.py` (+`PROBE_SET_SCHEMA_VERSION`, `synthetic_probe_id_family`,
+`probe_set_payload`, `reconcile_probe_set_with_report`, `write_probe_set`);
+`src/tbox_finder/synth/tier2n.py` (`Tier2NBuild`, `pair_report_with_probe_set`, `build_probe_run`,
+`PROBE_IDS_PATH`, `--probe-ids-out`); `tests/unit/test_tier2n_probe_ids.py` (43 tests).
+
+**Validation.** The regeneration was run in full — 300 parents, 599 variants, 599 controls, three
+live `cmsearch --cut_ga` arms, **831 s LOCAL**, no GPU — and it reproduces the committed P2-07
+measurement **exactly**: arms 219/300 · 200/599 · 127/599, all four discard counts, `per_family`
+21 + 24, `n_probe_eligible` 45. ⚠ The regenerated report differs from the committed one in
+**exactly one field, and it is not a measurement**: `"cm"` moved from the bare basename
+`RF00230.cm` to the repo-relative `data/external/refs/RF00230.cm`, because P2-08 promoted
+`_repo_relative` into `synth/_common.repo_relative` and **fixed** the case where a path degraded to
+its basename. `cm_sha256` is unchanged, so `test_pinned_cm_sha256_matches_committed_cm` still holds
+and the model is provably the same one. The committed report now round-trips through the shipped
+code, which it did not before. So the imp.md §7 stop — *"a stop if the regenerated ids differ from
+the committed measurement"* — **does not fire**; the 45 ids are that measurement's members.
+The written file round-trips through the real `load_probe_set` by **member identity**, its ids are
+unique across both arms, and the exclusion it will produce in the round is measured here rather than
+asserted: intersecting the 45 ids with the committed 941-row FP manifest gives **0**, for a
+**namespace** reason (`tier2n:*` vs `GCA_…:c<contig>:…`), which is a different zero from
+"the probe set was empty" and the round report must say which. **22 sabotages, every one RED against
+its named test**, plus a comment-only negative control that stayed GREEN and a positive control (a
+`write_probe_set` refusing *everything*) that turns the three refusal tests RED — so those
+`pytest.raises` bind to their specific refusal, not to "something raised"; both sources restored
+byte-identically by sha256 with `__pycache__` cleared. Suite vs a **matched `main` baseline worktree
+at `54f70f6`** (same no-DVC-data conditions): **zero new failures** — 13 FAILED both sides, identical
+set, passes **+43** = exactly the tests added. `ruff` 0.15.15 + `black` 25.11.0 clean.
+
+**Decisions.** No ADR amendment: enforcing `TIER2N_PROBE_MIN_N` at the point the artifact is minted
+implements ADR-0005 A1's existing floor, it does not pin a new value. `build_probe_report` is kept
+as the counts-only public entry and delegates, rather than being deleted, per the repo's
+promote-don't-duplicate rule. The one-field `cm` change to a committed P2 artifact is disclosed
+above rather than reverted, because reverting it would leave the ids' `source_report_sha256` bound
+to bytes this run did not write. ⚠ Disclosed, not fixed: `load_probe_set` still coerces elementwise
+with `str(x)`, so a JSON string where a list belongs (`"natural": "abc"`) loads as three
+single-character ids; that is the reader's shape gap, outside this step, and the writer never
+produces it.
+
+**Commit.** See the PR that carries this stanza.

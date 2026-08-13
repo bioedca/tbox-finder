@@ -22,7 +22,7 @@
       "n_submitted": 599
     }
   },
-  "cm": "RF00230.cm",
+  "cm": "data/external/refs/RF00230.cm",
   "cm_sha256": "082616efe0616479dc9b9f565b5bcab7648d7ea1d629430940319f247af52cea",
   "eligibility_rule": "probe-eligible iff parent CM-detected AND variant CM-missed AND length-matched control CM-detected (the triple). The parent leg controls the divergence confound (a substantial fraction of unablated corpus records are already CM-missed); the control leg controls the excision-length confound (random equal-length excision breaks detection MORE often than real element ablation) \u2014 without it the filter measures excision, not architecture. Rates for THIS run are in 'arms'; 'measured_confound_baselines' are the separate reference measurements that motivated the rule and are NOT recomputed here",
   "families_validated": [
