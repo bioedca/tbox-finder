@@ -6573,6 +6573,20 @@ file whose `source_report_sha256` named bytes that existed nowhere. Refused now 
 after `resolve()` so `./x.json` and `x.json` collide, and placed **before** the ~14-minute build
 rather than after it — a test asserts the build was never entered.
 
+**⚠ AND THE CLI'S SECOND ROUND, ON THE FIX COMMIT, RETURNED THREE MAJORS — TWO REAL, ONE WRONG.**
+Judged by execution, not by reading. **Real:** `synthetic_probe_id_family` accepted
+`tier2n:<FAMILY>:` — the family field was guarded for emptiness and the **record field was not** — so
+an id naming no record would have reconciled into its family's count and been written as a member no
+scanner can recover; and `write_probe_set` wrote through `Path.write_text`, which **truncates the
+destination first**, so an I/O failure partway through would leave a previously-valid probe set as
+partial JSON for the next round to discover. It now writes a sibling temp file and `os.replace`s it.
+**Wrong:** *"duplicate natural or synthetic ids can match the report counts and pass the minimum-N
+gate"* — they cannot be constructed at all. `ProbeSet.__post_init__` refuses duplicates across the
+concatenation of both arms, which covers within-arm repeats too; executed for all three shapes
+(`("a","a")` in either arm, and one id in both), every one raises. The suggested reconciliation check
+would have been unreachable code, so it was **declined with the evidence** rather than added
+([[review-finding-right-fix-wrong]]).
+
 **Decisions.** No ADR amendment: enforcing `TIER2N_PROBE_MIN_N` at the point the artifact is minted
 implements ADR-0005 A1's existing floor, it does not pin a new value. `build_probe_report` is kept
 as the counts-only public entry and delegates, rather than being deleted, per the repo's

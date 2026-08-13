@@ -40,6 +40,8 @@ Pure stdlib. PRD §9.1, §12; ADR-0005 D14; ADR-0006 D9.
 from __future__ import annotations
 
 import json
+import os
+import tempfile
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -154,7 +156,15 @@ def synthetic_probe_id_family(probe_id: str) -> str:
     agreement about a family that does not exist.
     """
     parts = probe_id.split(":")
-    if len(parts) != _SYNTHETIC_ID_FIELDS or parts[0] != _SYNTHETIC_ID_PREFIX or not parts[1]:
+    # Both trailing fields are checked for emptiness, not only the family: an id like
+    # ``tier2n:CLASS_II_PLATFORM_SWAP:`` names no record, so it would reconcile into
+    # its family's count and be written as a member no scanner can ever recover.
+    if (
+        len(parts) != _SYNTHETIC_ID_FIELDS
+        or parts[0] != _SYNTHETIC_ID_PREFIX
+        or not parts[1]
+        or not parts[2]
+    ):
         raise Tier2NProbeError(
             f"synthetic probe id is not 'tier2n:<FAMILY>:<record>': {probe_id!r}"
         )
@@ -314,7 +324,21 @@ def write_probe_set(
     out = Path(path)
     out.parent.mkdir(parents=True, exist_ok=True)
     payload = probe_set_payload(probe_set, provenance=provenance)
-    out.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    text = json.dumps(payload, indent=2, sort_keys=True) + "\n"
+    # Written through a sibling temp file and ``os.replace`` (atomic on POSIX, same
+    # filesystem by construction) rather than straight to ``out``: ``write_text``
+    # truncates the destination first, so an I/O failure partway through would leave a
+    # previously-valid probe set as partial JSON. A mining round reads this file to
+    # decide what it may treat as a hard negative; half a file is not a safe input, and
+    # the failure would surface at the next round rather than at the write.
+    fd, tmp_name = tempfile.mkstemp(dir=out.parent, prefix=f".{out.name}.", suffix=".tmp")
+    tmp = Path(tmp_name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(text)
+        os.replace(tmp, out)
+    finally:
+        tmp.unlink(missing_ok=True)
     return out
 
 

@@ -281,7 +281,9 @@ def test_a_report_that_is_not_an_object_is_refused() -> None:
     assert any("not an object" in p for p in problems), problems
 
 
-@pytest.mark.parametrize("bad_id", ["p00001", "tier2n:p00001", "tier2n::p00001", "x:FAM:p1"])
+@pytest.mark.parametrize(
+    "bad_id", ["p00001", "tier2n:p00001", "tier2n::p00001", "x:FAM:p1", "tier2n:FAM:"]
+)
 def test_an_unparsable_synthetic_id_raises_rather_than_bucketing_into_nothing(
     bad_id: str,
 ) -> None:
@@ -318,6 +320,28 @@ def test_a_sub_min_n_probe_set_is_refused_and_writes_no_file(tmp_path: Path) -> 
     with pytest.raises(Tier2NProbeError, match="below the ADR-0005 A1 floor"):
         write_probe_set(path, probe_set, report)
     assert not path.exists()
+
+
+def test_a_failed_write_leaves_the_previous_artifact_intact(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The write is atomic, so a partial file can never reach a mining round.
+
+    A plain ``write_text`` truncates the destination first: an I/O failure partway
+    through would replace a valid probe set with partial JSON, and the round that
+    reads it would be the one to find out.
+    """
+    path = write_probe_set(tmp_path / "ids.json", _probe_set(), _report())
+    good = path.read_bytes()
+
+    def _boom(*_args: object, **_kwargs: object) -> None:
+        raise OSError("disk full")
+
+    monkeypatch.setattr("tbox_finder.eval.tier2n_probe.os.replace", _boom)
+    with pytest.raises(OSError, match="disk full"):
+        write_probe_set(path, _probe_set(), _report())
+    assert path.read_bytes() == good
+    assert [p.name for p in tmp_path.iterdir()] == ["ids.json"], "a temp file was left behind"
 
 
 def test_exactly_min_n_is_accepted(tmp_path: Path) -> None:
