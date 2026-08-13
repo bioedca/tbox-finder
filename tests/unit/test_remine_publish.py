@@ -776,7 +776,13 @@ def test_the_a12_repin_moved_no_measured_value() -> None:
     assert pub["spared_split"]["n_spared_by_unavailable_backend_only"] == 220
     assert pub["spared_split"]["n_spared_by_stage2_posterior_alone"] == 79
     assert pub["probe_exclusion"]["n_excluded"] == 0
+    # The publication carries TWO problem lists with different subjects, and pinning one
+    # leaves the other free to move: ``problems`` is the publication's own self-check,
+    # ``round_report_problems`` is the round leg's. Both must stay empty across a repin.
+    # (Review r1 read the first as a typo for the second; both keys exist and both are
+    # meaningful — the ambiguity was real even though the reported KeyError was not.)
     assert pub["problems"] == []
+    assert pub["round_report_problems"] == []
 
 
 def test_the_published_spared_split_is_recomputed_from_the_grid_point_it_names() -> None:
