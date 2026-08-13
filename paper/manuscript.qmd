@@ -350,7 +350,7 @@ two modes and describes neither. The right panel is **not** gated and is not
 comparable to the left panel's ceiling.
 :::
 
-## Three quarters of the Stage-1 false-positive set satisfies an orthogonal T-box criterion, so almost none of it is minable as a hard negative {#sec-remine}
+## Two thirds of the Stage-1 false-positive set satisfies an orthogonal T-box criterion, so almost none of it is minable as a hard negative {#sec-remine}
 
 The hard-negative curriculum is protected by a *spare rule*: a Stage-1
 false-positive call is withheld from the negative pool if **any** of four
@@ -364,9 +364,12 @@ mines **3** candidates and spares **938** (0 masked by the known-locus prior, 0
 uncoordinated).
 
 The composition of that 938 is the result, not its size. **718 candidates
-(76.3% of the manifest) are spared because a criterion actually passed** —
-synteny for 546, relaxed architecture for 226, helix covariation for 167 — and
-only 220 because some criterion could not be evaluated. A set in which three
+(76.3% of the manifest) are spared because a criterion actually passed** — and
+only 220 because some criterion could not be evaluated. Of those 718, **639
+(67.9% of the manifest) are supported by at least one of the three criteria that
+are independent of our model** — synteny for 546, relaxed architecture for 226,
+helix covariation for 167, counted with overlap — which is the figure the section
+title reports; the remaining 79 are the re-ranker-only subset separated below. A set in which three
 quarters of the calls satisfy an independent structural or genomic criterion is
 poor evidence of false positives, and we therefore report the round as a
 measurement of the manifest rather than as a curriculum step: no re-training was

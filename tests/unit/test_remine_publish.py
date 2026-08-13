@@ -18,6 +18,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import re
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -27,6 +28,7 @@ import pytest
 from tbox_finder.mining.remine_publish import (
     GRID_SUPPLY_PREFIX,
     REQUIRED_SUPPLY_KEYS,
+    SCHEMA_VERSION,
     PublicationError,
     build_publication,
     id_namespaces,
@@ -46,7 +48,12 @@ PUBLICATION_PATH = REPO_ROOT / "reports/p3/remine_round_report.json"
 
 #: The bytes the P3-15′-k round published. Regenerating the round legitimately means
 #: updating this in the same commit — deliberately, as a golden fixture does.
-COMMITTED_PUBLICATION_SHA256 = "c8aa02cfc4ac56160904998d78e80c0394f616e7a27a255905432fe770371999"
+#: Repinned c8aa02cf… → e733744d… by the ADR-0005 A12 reconciliation (schema 1.0 → 1.1):
+#: the ``retrain`` block's two ``prd_18_1_*`` keys were replaced and the canonical
+#: checkpoint named by path + digest. **No measured value moved** — the outcome, the
+#: spared split, the sensitivity grid, the probe diagnosis, the supplies and the
+#: provenance are byte-identical across the repin.
+COMMITTED_PUBLICATION_SHA256 = "e733744dc83b2a854dafe915146854752271e54c67e0556bb9555a328345abd6"
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -367,12 +374,184 @@ def test_id_namespaces_reads_the_prefix_and_is_sorted() -> None:
 # ═════════════════════════════════════════════════════════════════════════════
 # (3) The retrain disposition
 # ═════════════════════════════════════════════════════════════════════════════
-def test_the_disposition_states_the_supersession_is_unmet_and_carries_the_parent_field() -> None:
+def test_the_disposition_retires_the_supersession_claim_and_carries_the_parent_field() -> None:
     disposition = retrain_disposition(make_round())
     assert disposition["retrain_leg_run"] is False
     assert disposition["checkpoint_superseded"] is False
-    assert disposition["prd_18_1_supersession_status"] == "UNMET"
+    assert disposition["supersession_claim_status"] == "RETIRED_BY_ADR_0005_A12"
     assert disposition["parent_checkpoint_in_round_report"] is None
+    # Review r2: asserting only the None case passes for a function that always emits None,
+    # which would blind `publication_problems`' "no retrain beside a named parent" refusal.
+    # The field must PROPAGATE, so a round that names a parent is caught downstream.
+    parent = "data/processed/checkpoints/stage1_production/stage1.pt"
+    assert (
+        retrain_disposition(make_round(parent_checkpoint=parent))[
+            "parent_checkpoint_in_round_report"
+        ]
+        == parent
+    )
+
+
+def test_the_disposition_attributes_the_supersession_claim_to_impmd_not_the_prd() -> None:
+    """ADR-0005 A12 Pin 3 — the claim is an ``imp.md`` row, and PRD.md does not state it.
+
+    Bound to the **function**, not only to the committed artifact: an artifact-tier
+    assertion alone stays green if the writer starts emitting the old citation again for
+    a future round ([[artifact-pinning-test-cannot-see-the-code]]).
+    """
+    source = retrain_disposition(make_round())["supersession_claim_source"]
+    assert source.startswith("imp.md")
+    assert "NOT the PRD" in source
+
+
+#: A field re-attributes the supersession to the PRD if it names the PRD *and* asserts the
+#: supersession in the same value. Matching one fixed sentence is not enough: an adversarial
+#: harness showed that changing a single letter ("supersedes" → "supersede") walked a fully
+#: reinstated misattribution past the earlier substring form of this guard. Matching the verb
+#: family instead means a paraphrase has to stop *claiming* the thing to get through.
+#: ⚠ THREE REVIEW ROUNDS EACH FOUND A DIFFERENT CONJUGATION SLIPPING THROUGH THIS GUARD —
+#: r1 the one-letter "supersede", r2 the passive "was superseded", r3 the active
+#: "P2 supersedes X". Enumerating forms was the wrong shape: each fix closed the instance
+#: and left the class. It now matches the whole ``supersed*`` family (supersede/supersedes/
+#: superseded/superseding) within a clause of ``P2``, in EITHER order, so a paraphrase has
+#: to stop making the claim rather than re-word it. ⚠ The NOUN needs its own stem — the
+#: obvious ``supersed\w*`` misses "super-ses-sion", which is exactly the wording this whole
+#: amendment is titled after; ``superse(?:d|ss)`` covers both. Vectors from all three
+#: rounds, plus both noun orders, are exercised by ``test_the_supersession_guard_catches``.
+_PRD_MENTION = re.compile(r"\bPRD\b", re.IGNORECASE)
+_SUPERSESSION_CLAIM = re.compile(
+    r"superse(?:d|ss)\w*\b[^.]{0,80}\bP2\b|\bP2\b[^.]{0,80}\bsuperse(?:d|ss)\w*",
+    re.IGNORECASE,
+)
+
+#: Every re-attribution wording a review round or the adversarial harness actually
+#: produced, plus the two noun orders. A guard fixed three times by enumeration needs its
+#: vectors committed, or round four re-opens it.
+_REATTRIBUTION_VECTORS = (
+    "PRD §18.1 states that stage1_production.ckpt supersedes the P2 checkpoint.",  # r1
+    "PRD §18.1 requires that stage1_production.ckpt supersede the P2 checkpoint.",  # r1'
+    "Per the PRD, the P2 checkpoint is superseded by the re-mined scanner.",  # harness
+    "Per the PRD, the P2 checkpoint was superseded by the re-mined scanner.",  # r2
+    "Per the PRD, the P2 checkpoint has been superseded.",  # r2'
+    "PRD states P2 supersedes stage1_production.",  # r3
+    "The PRD records the P2 supersession as complete.",  # noun, after
+    "The PRD's supersession of the P2 checkpoint is recorded.",  # noun, before
+)
+
+
+@pytest.mark.parametrize("wording", _REATTRIBUTION_VECTORS)
+def test_the_supersession_guard_catches(wording: str) -> None:
+    """The guard must fire on every wording review has actually produced."""
+    assert _PRD_MENTION.search(wording) and _SUPERSESSION_CLAIM.search(wording), wording
+
+
+def test_the_supersession_guard_does_not_fire_on_the_shipped_denial() -> None:
+    """Positive control: a guard that matched everything would satisfy the test above.
+
+    The shipped ``supersession_note`` legitimately contains "superseded … the P2", because
+    it DENIES the supersession — it must not be flagged, and it is not, because it names no
+    PRD. Without this the parametrized test above passes for a guard hardcoded to True.
+    """
+    note = retrain_disposition(make_round())["supersession_note"]
+    assert _SUPERSESSION_CLAIM.search(note), "fixture drifted; it no longer exercises the stem"
+    assert not _PRD_MENTION.search(note)
+
+
+def test_no_field_of_the_disposition_claims_the_prd_states_the_supersession() -> None:
+    """The defect was a *citation*, so the guard is over every value, not one key.
+
+    Sabotage that must turn this red: reinstating the retired wording under **any** key name
+    and in **any** conjugation — the harness's one-letter rewrite is the motivating case.
+    """
+    disposition = retrain_disposition(make_round())
+    for key, value in disposition.items():
+        if not isinstance(value, str):
+            continue
+        # The one legal mention is the correction itself, which says the PRD does NOT.
+        if key == "supersession_claim_source":
+            continue
+        reattributes = bool(_PRD_MENTION.search(value)) and bool(_SUPERSESSION_CLAIM.search(value))
+        assert not reattributes, f"{key} re-attributes the supersession to the PRD: {value!r}"
+
+
+def test_the_claim_source_denies_the_prd_attribution_rather_than_merely_mentioning_it() -> None:
+    """``supersession_claim_source`` is the one field allowed to say "PRD" and "supersede".
+
+    That exemption is what a paraphrase could hide behind, so the field carries its own
+    guard: it must **deny** the attribution, not restate it. A positive control lives in
+    the sabotage harness (replacing the value with the retired citation turns this red).
+    """
+    source = retrain_disposition(make_round())["supersession_claim_source"]
+    assert "It is NOT the PRD" in source
+    # It must name the real origin, and say what the PRD actually lacks.
+    assert "imp.md" in source
+    assert "no occurrence of" in source
+
+
+def test_the_disposition_names_the_canonical_checkpoint_by_path_and_digest() -> None:
+    """A12 Pin 2 — "the P2 checkpoint" is a role; a downstream phase needs the artifact.
+
+    The digest is the one ``data/processed/checkpoints/stage1_production/provenance.json``
+    records for its own output, verified by recomputation at the reconciliation step.
+    """
+    canonical = retrain_disposition(make_round())["canonical_stage1_checkpoint"]
+    assert "data/processed/checkpoints/stage1_production/stage1.pt" in canonical
+    assert "09931a223c3e670731a39b8ef0b0bb4bcb36a8ff9dcbee889f1715362b380940" in canonical
+    assert ".ckpt" not in canonical  # nothing in the repo produces that path
+    # …and it must say the right thing ABOUT them. Naming the path is not the claim; the
+    # claim is that this file is unchanged and canonical. A sentence naming the same path
+    # while declaring it superseded satisfies every assertion above (harness finding).
+    assert "unchanged by this round" in canonical
+    assert not _SUPERSESSION_CLAIM.search(canonical), canonical
+
+
+def test_the_named_canonical_checkpoint_exists_with_the_digest_the_disposition_publishes() -> None:
+    """The digest is a claim about a file, so check the file — when it is materialized.
+
+    DVC-tracked, so a clean CI checkout has the ``.dvc`` pointer and no payload; there the
+    test asserts the pointer exists and skips the byte check rather than passing vacuously.
+    """
+    canonical = retrain_disposition(make_round())["canonical_stage1_checkpoint"]
+    rel = "data/processed/checkpoints/stage1_production/stage1.pt"
+    assert rel in canonical
+    pointer = REPO_ROOT / "data/processed/checkpoints/stage1_production.dvc"
+    assert pointer.is_file(), "the canonical checkpoint must stay DVC-tracked"
+
+    # Committed cross-check, so this test can never be *wholly* skipped: the model card is
+    # git-tracked and carries the same digest, abbreviated. A skip-only guard would go
+    # vacuously green in exactly the clean checkout CI runs.
+    card = (REPO_ROOT / "docs/model_card.md").read_text(encoding="utf-8")
+    published = re.search(r"\b([0-9a-f]{64})\b", canonical)
+    assert published, "the disposition must publish a full sha256"
+    head, tail = published.group(1)[:8], published.group(1)[-7:]
+    assert (
+        f"`{head}…{tail}`" in card
+    ), "the model card and the disposition name different checkpoints"
+
+    payload = REPO_ROOT / rel
+    if not payload.is_file():
+        pytest.skip("DVC payload not materialized; the committed model-card cross-check ran")
+    digest = hashlib.sha256(payload.read_bytes()).hexdigest()
+    assert digest == published.group(1), f"published digest does not match the file: {digest}"
+
+
+def test_the_disposition_records_the_tier2n_halt_as_vacuous_not_as_passed() -> None:
+    """A12 Pin 2(ii) — D14's halt needs a checkpoint that changed; none did.
+
+    "The probe recall did not drop" would imply a measurement this round never made.
+    """
+    halt = retrain_disposition(make_round())["tier2n_probe_halt"]
+    assert halt.startswith("VACUOUS")
+    assert "none was measured" in halt
+    # A prefix plus a substring both survive appending a fabricated measurement after them,
+    # which is the exact failure this field exists to prevent (harness finding). So the
+    # field must not report a recall figure at all.
+    # Review r2: matching a number only AFTER "recall" lets "0.97 recall" through. Both
+    # orders are refused, so the field cannot carry a recall figure in any phrasing.
+    assert not re.search(
+        r"\brecall\b[^.]{0,40}\b\d|\b\d+(?:\.\d+)?\b[^.]{0,40}\brecall\b", halt
+    ), halt
+    assert "did not drop" not in halt
 
 
 def test_a_round_report_naming_a_parent_checkpoint_fails_the_publication_check() -> None:
@@ -680,7 +859,124 @@ def test_the_published_round_mined_three_of_941_and_retrained_nothing() -> None:
         ],
     }
     assert pub["retrain"]["retrain_leg_run"] is False
-    assert pub["retrain"]["prd_18_1_supersession_status"] == "UNMET"
+    assert pub["retrain"]["supersession_claim_status"] == "RETIRED_BY_ADR_0005_A12"
+
+
+def test_the_committed_artifact_carries_the_a12_reconciliation_not_the_old_citation() -> None:
+    """The published bytes must not tell a reader the PRD says something it does not.
+
+    This is the artifact half of the A12 Pin 3 correction; the function half is
+    ``test_the_disposition_attributes_the_supersession_claim_to_impmd_not_the_prd``.
+    """
+    pub = committed_publication()
+    assert pub["schema_version"] == "1.1"
+    assert "A12" in pub["adr"]
+    assert "prd_18_1_note" not in pub["retrain"]
+    assert "prd_18_1_supersession_status" not in pub["retrain"]
+    assert pub["retrain"]["supersession_claim_source"].startswith("imp.md")
+    assert pub["retrain"]["tier2n_probe_halt"].startswith("VACUOUS")
+    # …and the retired sentence appears nowhere in the whole publication.
+    assert "PRD §18.1 states that stage1_production.ckpt supersedes" not in json.dumps(
+        pub, ensure_ascii=False
+    )
+
+
+def test_the_committed_retrain_block_is_what_the_live_writer_would_emit() -> None:
+    """Bind the committed bytes to the current writer, in the one block A12 rewrote.
+
+    Without this the two tiers drift silently: the writer could re-add ``prd_18_1_note`` or
+    revert ``SCHEMA_VERSION`` to "1.0" and the artifact-tier assertions would stay green,
+    because they only ever read the committed file (harness finding). The round-dependent
+    field is excluded — the fixture round is not the real one — so this compares the
+    *shape and the constants*, which is what A12 changed.
+    """
+    pub = committed_publication()
+    live = retrain_disposition(make_round())
+    assert set(pub["retrain"]) == set(live), "the writer's retrain keys drifted from the artifact"
+    for key in (
+        "canonical_stage1_checkpoint",
+        "supersession_claim_source",
+        "supersession_claim_status",
+        "supersession_note",
+        "tier2n_probe_halt",
+        "decision",
+        "retrain_leg_run",
+        "checkpoint_superseded",
+    ):
+        assert pub["retrain"][key] == live[key], f"{key} differs between artifact and writer"
+    assert pub["schema_version"] == SCHEMA_VERSION
+
+
+def test_the_a12_repin_moved_no_measured_value() -> None:
+    """The regeneration was a citation fix; every number it publishes is the round's.
+
+    Pinned explicitly so a future "just repin it" cannot quietly carry a changed
+    measurement through on the same justification.
+    """
+    pub = committed_publication()
+    assert pub["outcome"]["n_candidates"] == 941
+    assert pub["outcome"]["n_mined"] == 3
+    assert pub["outcome"]["n_spared"] == 938
+    assert pub["spared_split"]["n_spared_by_a_passing_disjunct"] == 718
+    assert pub["spared_split"]["n_spared_by_unavailable_backend_only"] == 220
+    assert pub["spared_split"]["n_spared_by_stage2_posterior_alone"] == 79
+    assert pub["probe_exclusion"]["n_excluded"] == 0
+    # The publication carries TWO problem lists with different subjects, and pinning one
+    # leaves the other free to move: ``problems`` is the publication's own self-check,
+    # ``round_report_problems`` is the round leg's. Both must stay empty across a repin.
+    # (Review r1 read the first as a typo for the second; both keys exist and both are
+    # meaningful — the ambiguity was real even though the reported KeyError was not.)
+    assert pub["problems"] == []
+    assert pub["round_report_problems"] == []
+
+
+#: Every top-level section of the publication that carries a MEASUREMENT rather than the
+#: A12 citation metadata. The repin comment at the top of this file claims these are
+#: byte-identical across `c8aa02cf… -> e733744d…`; review r2 pointed out that enumerating a
+#: handful of scalars does not check that claim, so the claim is pinned by digest instead.
+_MEASUREMENT_SECTIONS = (
+    "outcome",
+    "spared_split",
+    "stage2_sensitivity",
+    "probe_exclusion",
+    "supplies",
+    "reproduction",
+    "provenance",
+    "plan_leg",
+    "stage2_threshold",
+    "stage2_threshold_pinned",
+    "may_run",
+    "leg",
+    "step",
+    "problems",
+    "round_report_problems",
+)
+
+#: sha256 over the canonical JSON of `_MEASUREMENT_SECTIONS` — computed on the artifact as
+#: published by P3-15′-k at `c8aa02cf…`, BEFORE the A12 regeneration, and unchanged after
+#: it. That is the whole content of "no measured value moved": if a future repin touches
+#: any measurement, this constant must be updated deliberately and the change justified.
+#: Computed on BOTH artifacts and verified equal — that equality is the evidence, not the
+#: constant: `git show main:reports/p3/remine_round_report.json` (c8aa02cf…) and the
+#: regenerated file (e733744d…) both hash to this over `_MEASUREMENT_SECTIONS`.
+MEASUREMENT_SURFACE_SHA256 = "454149759e9fc993a08bc425d1b0084295331ea74170729466f1febe516ea4d3"
+
+
+def measurement_surface_digest(pub: dict[str, Any]) -> str:
+    payload = {k: pub[k] for k in _MEASUREMENT_SECTIONS}
+    return hashlib.sha256(
+        json.dumps(payload, sort_keys=True, ensure_ascii=False).encode("utf-8")
+    ).hexdigest()
+
+
+def test_the_a12_repin_left_the_whole_measurement_surface_byte_identical() -> None:
+    """The repin comment's claim, checked rather than asserted in prose.
+
+    Enumerating scalars (the test above) catches the headline numbers; it cannot catch a
+    changed supply digest, a moved grid point, or a rewritten provenance block — all of
+    which the comment says did not move. This pins the lot.
+    """
+    assert measurement_surface_digest(committed_publication()) == MEASUREMENT_SURFACE_SHA256
 
 
 def test_the_published_spared_split_is_recomputed_from_the_grid_point_it_names() -> None:

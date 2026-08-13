@@ -54,7 +54,11 @@ cd "$REPO"
 
 ROUND_DIR="${ROUND_DIR:?set ROUND_DIR via --export}"
 FP_MANIFEST="${FP_MANIFEST:-data/processed/mining/round0_fp_manifest.json}"
-# The P2 production scanner this round re-mines FROM; P3-15's output supersedes it (§10.1).
+# The P2 production scanner this round re-mines FROM. ⚠ It is ALSO the canonical shipped
+# checkpoint: ADR-0005 A12 ratified the decision-only round, so nothing has superseded it and
+# nothing will unless a retrain is separately commissioned. PRD §10.1's map trains both Stage-1
+# checkpoints in P2; the "supersedes the P2 checkpoint" wording this comment used to carry came
+# from imp.md, not from the PRD (A12 Pin 3).
 CKPT="${CKPT:-data/processed/checkpoints/stage1_production/stage1.pt}"
 # No default: ADR-0005 D14 pins the RULE; the §13.1 phase gate pins the Stage-2 operating point.
 # An unset value must stop the job, never silently become one.
@@ -193,7 +197,10 @@ torchrun --standalone --nproc_per_node=8 -m tbox_finder.train.train_stage1 \
 # scan_probe_variants → evaluate_probe_round (round_decision + degenerate guard) grades the re-mined
 # checkpoint against the best round so far; a recall drop is a §7 halt/rollback stop (ADR-0005 D14).
 # GATE-4 is RE-CHECKED on the re-mined scanner (§8.5 after a training-config change) — the P2 grade
-# is not inherited. Only then does this checkpoint become checkpoints/stage1_production.ckpt.
+# is not inherited. Only then would a re-mined checkpoint become the canonical shipped one.
+# ⚠ NOT DONE, AND NOT OWED. The P3 round ran decision-only (ADR-0005 A12, signed 2026-08-13): no
+# retrain, so §8.5's re-grade trigger never fired and the P2 GATE-4 grade stands. This leg is
+# reachable only if a retrain is separately commissioned — it is not the P3 arc's exit condition.
 
 touch "$DONE"
 echo "P3 re-mining round complete — DONE marker written; run the LOCAL Tier-2N gate + GATE-4 re-grade."

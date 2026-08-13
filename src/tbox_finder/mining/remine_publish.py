@@ -23,12 +23,24 @@ instead of asserting it, and refuses the degenerate inputs that would make the z
 uninterpretable.
 
 **3. The round decided and did not retrain.** The §7 decision of 2026-08-12 was
-*decision-only, no retrain* — so no checkpoint superseded the P2 production one and
-PRD §18.1's *"``stage1_production.ckpt`` supersedes the P2 checkpoint"* stays UNMET.
-A round report that carries a mining outcome and nothing about legs (2)/(3) reads as
-though the arc completed. :func:`retrain_disposition` states it, and
-:func:`publication_problems` refuses a publication whose round report carries a
-``parent_checkpoint`` — the field a retraining round would fill.
+*decision-only, no retrain* — so no checkpoint superseded the P2 production one, and
+the P2-trained scanner stays canonical. A round report that carries a mining outcome
+and nothing about legs (2)/(3) reads as though the arc completed.
+:func:`retrain_disposition` states it, and :func:`publication_problems` refuses a
+publication whose round report carries a ``parent_checkpoint`` — the field a
+retraining round would fill.
+
+⚠ **The citation this function used to carry was wrong, and the correction is part of
+the record.** Until ADR-0005 **A12** (signed 2026-08-13) this module attributed
+*"``stage1_production.ckpt`` supersedes the P2 checkpoint"* to **PRD §18.1** and
+published it as ``prd_18_1_supersession_status: "UNMET"``. ``PRD.md`` contains no
+occurrence of ``supersede``, ``stage1_production`` or ``ckpt``: §18.1's P3 row names
+the re-mining round and no checkpoint, and §10.1's map states that *both* Stage-1
+checkpoints are trained in **P2**. The claim originates in ``imp.md`` — a local-only
+roadmap ledger ranked *below* the PRD and ADRs, and invisible to any reader of this
+artifact. A12 retires the claim; :data:`SUPERSESSION_CLAIM_SOURCE` carries where it
+actually came from, so the correction travels with the report rather than only in a
+commit message.
 
 Two further things the publication carries because the round report cannot:
 
@@ -45,7 +57,7 @@ Two further things the publication carries because the round report cannot:
   unless it reproduces the round report's outcome — the publication's supply digests
   are then facts about the bytes that produced these numbers, not a caption.
 
-PRD §9.1, §18.1; ADR-0005 D14/A10/A1; ADR-0006 D11/A2.
+PRD §9.1, §18.1; ADR-0005 D14/A10/A1/A12; ADR-0006 D11/A2.
 """
 
 from __future__ import annotations
@@ -62,7 +74,13 @@ from typing import Any
 from tbox_finder.mining.remine import LEG_ROUND, load_probe_set, probe_member_ids
 from tbox_finder.mining.spare_rule import ALL_DISJUNCTS, STAGE2_DISJUNCT
 
-SCHEMA_VERSION = "1.0"
+#: 1.1 — the ``retrain`` block's two ``prd_18_1_*`` keys are replaced by
+#: ``supersession_claim_source`` / ``supersession_claim_status`` /
+#: ``supersession_note`` (+ ``tier2n_probe_halt``). The old key NAMES asserted the
+#: misattribution ADR-0005 A12 retires, so correcting only their values would have left
+#: the wrong citation in the schema. A reader keying on 1.0 sees a version change, not a
+#: silently different field set.
+SCHEMA_VERSION = "1.1"
 STEP = "P3-15'-k"
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -85,6 +103,37 @@ SEVEN_DECISION = (
     "round's decision legs (0)+(1) and publish the report as the honest answer to "
     "ADR-0005 A10's Phase-2 note; the DDP retrain leg (2) is not run and P3-15′-j (the "
     "mined-pool builder) is deferred, not scheduled."
+)
+
+#: The Stage-1 checkpoint this round left canonical, named by a path and a digest a
+#: reader can check rather than by role — ADR-0005 A12 Pin 2. Nothing in the repo
+#: produces a file named ``checkpoints/stage1_production.ckpt``; that path is an
+#: ``imp.md`` invention and no PRD or ADR text uses it.
+CANONICAL_STAGE1_CHECKPOINT = (
+    "data/processed/checkpoints/stage1_production/stage1.pt (sha256 "
+    "09931a223c3e670731a39b8ef0b0bb4bcb36a8ff9dcbee889f1715362b380940; DVC "
+    "91bd49dd91997b8a94b6ba262afab071.dir), trained at P2-10d′-b — unchanged by this "
+    "round, and the checkpoint P3-16, P4 GATE-1 and the P5 scan consume"
+)
+
+#: Where the "supersedes the P2 checkpoint" claim actually comes from. Published so a
+#: reader of the artifact alone can check the citation — the earlier value of this
+#: report attributed it to the PRD, which does not state it anywhere (ADR-0005 A12 Pin 3).
+SUPERSESSION_CLAIM_SOURCE = (
+    "imp.md — the local-only roadmap ledger (CLAUDE.md §1), which ranks BELOW the PRD "
+    "and the ADRs and is not part of any clone. It is NOT the PRD: PRD.md contains no "
+    "occurrence of 'supersede', 'stage1_production' or 'ckpt'; §18.1's P3 row names the "
+    "re-mining round and no checkpoint, and §10.1's checkpoint map opens 'Two Stage-1 "
+    "checkpoints are trained, both in P2'. An earlier version of this report cited PRD "
+    "§18.1 as the source; that citation was wrong and is retired by ADR-0005 A12."
+)
+
+#: Why D14's per-round Tier-2N halt cannot have been exercised by this round. Stated so
+#: a zero here is never read as a passed measurement (ADR-0005 A12 Pin 2(ii)).
+TIER2N_HALT_DISPOSITION = (
+    "VACUOUS, not passed: D14 halts/rolls back a mining round on a Tier-2N probe recall "
+    "DROP, which presupposes a checkpoint that changed. No retrain ran, so no recall "
+    "could drop, and none was measured or is reported here."
 )
 
 
@@ -455,20 +504,33 @@ def retrain_disposition(report: Mapping[str, Any]) -> dict[str, Any]:
     ``None`` there. A publication claiming "no retrain" beside a report that names a
     parent is refused by :func:`publication_problems` rather than published with a
     caveat.
+
+    Two things this block states that a "no retrain" flag alone does not, both pinned by
+    ADR-0005 A12: **which** checkpoint is therefore canonical (by path + digest, not by
+    role — :data:`CANONICAL_STAGE1_CHECKPOINT`), and that D14's per-round Tier-2N halt is
+    **vacuous** on a round with no retrain rather than a measurement that passed
+    (:data:`TIER2N_HALT_DISPOSITION`). It also carries the *source* of the supersession
+    claim (:data:`SUPERSESSION_CLAIM_SOURCE`), because the version of this report
+    published at ``c8aa02cf…`` cited the PRD for a sentence the PRD does not contain.
     """
     parent = report.get("parent_checkpoint")
     return {
         "retrain_leg_run": False,
         "parent_checkpoint_in_round_report": parent,
         "checkpoint_superseded": False,
-        "canonical_stage1_checkpoint": "the P2 production checkpoint — unchanged by this round",
-        "prd_18_1_supersession_status": "UNMET",
-        "prd_18_1_note": (
-            "PRD §18.1 states that stage1_production.ckpt supersedes the P2 checkpoint. This "
-            "round decided and declined to retrain, so nothing superseded it; P3-16, P4 GATE-1 "
-            "and the P5 scan continue to consume the P2 checkpoint. Reconciling PRD §18.1 with "
-            "ADR-0005 is owed and needs user sign-off (CLAUDE.md §7 item 2)."
+        "canonical_stage1_checkpoint": CANONICAL_STAGE1_CHECKPOINT,
+        "supersession_claim_source": SUPERSESSION_CLAIM_SOURCE,
+        "supersession_claim_status": "RETIRED_BY_ADR_0005_A12",
+        "supersession_note": (
+            "This round decided and declined to retrain, so no checkpoint superseded the P2 "
+            "production one. ADR-0005 A12 (signed 2026-08-13, CLAUDE.md §7 item 2) ratifies "
+            "that: a mining round's D14 obligation is to DECIDE every candidate, not to "
+            "produce a retrained checkpoint, and the shipped Stage-1 checkpoint stays the "
+            "P2-trained production scanner. The competing reading is recorded in A12 Pin 1 "
+            "and was declined on the yield (3 mined windows against a 19,409-item negative "
+            "pool), not refuted by the text."
         ),
+        "tier2n_probe_halt": TIER2N_HALT_DISPOSITION,
         "decision": SEVEN_DECISION,
     }
 
@@ -735,7 +797,7 @@ def build_publication(
     return {
         "schema_version": SCHEMA_VERSION,
         "step": STEP,
-        "adr": "ADR-0005 D14/A10/A1; ADR-0006 D11/A2; PRD §9.1, §18.1",
+        "adr": "ADR-0005 D14/A10/A1/A12; ADR-0006 D11/A2; PRD §9.1, §18.1",
         "leg": round_report.get("leg"),
         "may_run": round_report.get("may_run"),
         "stage2_threshold": float(threshold),
