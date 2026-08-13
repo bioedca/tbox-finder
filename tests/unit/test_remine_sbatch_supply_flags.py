@@ -42,6 +42,7 @@ from tbox_finder.mining import mine_round as mine_round_module
 from tbox_finder.mining.architecture_producer import (
     DEFAULT_STATUS_TABLE as ARCH_STATUS_FILENAME,
 )
+from tbox_finder.mining.mine_round import refuse_status_tables_that_decide_nothing
 from tbox_finder.mining.remine import (
     LEG_PLAN,
     LEG_ROUND,
@@ -757,6 +758,124 @@ def test_a_table_that_decides_none_of_these_candidates_is_refused(
     # ([[raises-test-needs-a-positive-control]]).
     report = _round({"c1": STATUS_FAILED, "another-round-id": STATUS_PASSED})
     assert report["n_mined"] == 1
+
+    # ⚠ AND EVERY OTHER DISJUNCT, because guarding only the two NEW backends is how this
+    # defect survived its first fix: review found the covariation arm — same shape, same
+    # consequence — still unguarded after (b) and (c) were closed. The Stage-2 posterior
+    # map is the same again: empty ⇒ every posterior is None ⇒ `unavailable` ⇒ spared.
+    empty_covariation = tmp_path / "empty_covariation.json"
+    empty_covariation.write_text(json.dumps({"status": {}}), encoding="utf-8")
+    with pytest.raises(RemineError, match="any_helix_rscape"):
+        apply_remine_spare_rule(
+            manifest,
+            empty_covariation,
+            posteriors,
+            stage2_threshold=THRESHOLD,
+            rscape_installed=True,
+            msa_supply_available=True,
+            stage2_supply_available=True,
+            relaxed_arch_available=True,
+            relaxed_arch_status_table=_status_table(tmp_path / "arch.json", {"c1": STATUS_FAILED}),
+            synteny_available=True,
+            synteny_status_table=syn,
+            probe_set=ProbeSet(natural=("not-in-substrate",), synthetic=()),
+        )
+    empty_posteriors = tmp_path / "empty_post.json"
+    empty_posteriors.write_text(json.dumps({"posteriors": {}}), encoding="utf-8")
+    with pytest.raises(RemineError, match="high_stage2_posterior"):
+        apply_remine_spare_rule(
+            manifest,
+            covariation,
+            empty_posteriors,
+            stage2_threshold=THRESHOLD,
+            rscape_installed=True,
+            msa_supply_available=True,
+            stage2_supply_available=True,
+            relaxed_arch_available=True,
+            relaxed_arch_status_table=_status_table(tmp_path / "arch.json", {"c1": STATUS_FAILED}),
+            synteny_available=True,
+            synteny_status_table=syn,
+            probe_set=ProbeSet(natural=("not-in-substrate",), synthetic=()),
+        )
+
+
+def test_the_p2_leg_guards_every_disjunct_it_declares(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The sibling call site, driven — not assumed to agree because it shares a function.
+
+    ``mine_round.apply_spare_rule`` is the other leg carrying the identical guard pair, and
+    "the same helper is imported there" is not evidence that it is *called* with the right
+    map. Fixing one of two identical call sites is the class this project keeps re-finding,
+    so the P2 leg is exercised here rather than reasoned about.
+    """
+    manifest = tmp_path / "p2_fps.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "candidates": [
+                    {
+                        "candidate_id": "c1",
+                        "accession": "GCA_1:c0",
+                        "locus_start": 100,
+                        "locus_end": 150,
+                        "score": 0.9,
+                        "pool": "genomic_window",
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    empty = tmp_path / "p2_empty_covariation.json"
+    empty.write_text(json.dumps({"status": {}}), encoding="utf-8")
+    monkeypatch.setattr(mine_round_module, "load_union_mask", lambda **_kw: EMPTY_MASK)
+
+    with pytest.raises(mine_round_module.MineRoundError, match="any_helix_rscape"):
+        mine_round_module.apply_spare_rule(
+            manifest,
+            empty,
+            rscape_installed=True,
+            msa_supply_available=True,
+        )
+    # Positive control: the same leg on a table that DOES decide this candidate runs.
+    decided = tmp_path / "p2_covariation.json"
+    decided.write_text(json.dumps({"status": {"c1": STATUS_FAILED}}), encoding="utf-8")
+    report = mine_round_module.apply_spare_rule(
+        manifest,
+        decided,
+        rscape_installed=True,
+        msa_supply_available=True,
+    )
+    assert report["n_candidates"] == 1
+
+
+def test_no_declared_disjunct_can_be_exempt_from_the_zero_overlap_refusal() -> None:
+    """The anti-drift half: a fifth backend cannot inherit the hole the first four had.
+
+    The sweep is over the availability map, and a disjunct present there with no evidence
+    entry is refused rather than silently skipped. Without this, adding a backend would
+    reproduce exactly the state review found — a guard that covers the disjuncts somebody
+    remembered ([[fixed-one-of-two-identical-things]]).
+    """
+    with pytest.raises(RemineError, match="no evidence map was offered"):
+        refuse_status_tables_that_decide_nothing(
+            availability={"any_helix_rscape": True, "a_fifth_backend": True},
+            evidence_maps={"any_helix_rscape": {"c1": STATUS_FAILED}},
+            candidate_ids=["c1"],
+            error=RemineError,
+        )
+    # The positive control: the same call with the entry present does NOT raise, so the
+    # guard is not simply refusing everything handed to it.
+    refuse_status_tables_that_decide_nothing(
+        availability={"any_helix_rscape": True, "a_fifth_backend": True},
+        evidence_maps={
+            "any_helix_rscape": {"c1": STATUS_FAILED},
+            "a_fifth_backend": {"c1": STATUS_FAILED},
+        },
+        candidate_ids=["c1"],
+        error=RemineError,
+    )
 
 
 # ═════════════════════════════════════════════════════════════════════════════

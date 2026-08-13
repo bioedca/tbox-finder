@@ -6392,3 +6392,16 @@ never again silent. Ten of the thirteen candidates were **refuted by their own v
 after the verifier reproduced the measurement and rejected the causal story. Validation on the
 follow-up: **21 sabotages, 20 RED against their NAMED test** plus the two controls; zero new
 failures vs the same matched `main` baseline (13 FAILED both sides, passes +16).
+
+**Review round 2 (P3-15′-h).** The CLI's next round returned **1 major**, and it was the same class
+again: the zero-overlap refusal had been applied to the two *new* backends, (b) and (c), and left the
+**covariation** disjunct — whose status map has the identical property — unguarded. The Stage-2
+posterior map is the same shape a third time (empty ⇒ every posterior `None` ⇒ `unavailable` ⇒
+spared). Rather than add two more call sites, the guard became a **sweep over the availability map**
+(`refuse_status_tables_that_decide_nothing`), with a key-set assertion that refuses a declared
+disjunct carrying no evidence entry — so a fifth backend cannot inherit the hole the first four had,
+and the covariation arm's `rscape_installed AND msa_supply_available` declaration is read from
+`build_round_availability`'s own derivation rather than recomputed. Both legs call the sweep, and the
+P2 leg is now **driven** rather than assumed to agree because it imports the same function.
+Validation: **24 sabotages, 23 RED against their NAMED test** plus the two controls; zero new
+failures vs the same matched baseline (13 FAILED both sides, passes +18); `ruff` + `black` clean.

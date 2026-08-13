@@ -74,7 +74,7 @@ from tbox_finder.mining.mine_round import (
     build_round_availability,
     candidate_evidence,
     read_fp_manifest,
-    refuse_status_table_that_decides_nothing,
+    refuse_status_tables_that_decide_nothing,
 )
 from tbox_finder.mining.spare_rule import (
     ALL_DISJUNCTS,
@@ -544,30 +544,30 @@ def apply_remine_spare_rule(
     # Loaded FIRST so a malformed (c) table is refused before any other input is read.
     synteny_status = _load_synteny_status(synteny_status_table)
     relaxed_arch_status = _load_relaxed_arch_status(relaxed_arch_status_table)
+    covariation_status = load_status_map(status_table)
+    stage2_posteriors = load_stage2_posteriors(posteriors)
     candidates = read_remine_manifest(
         fp_manifest,
-        covariation_status=load_status_map(status_table),
-        stage2_posteriors=load_stage2_posteriors(posteriors),
+        covariation_status=covariation_status,
+        stage2_posteriors=stage2_posteriors,
         synteny_status=synteny_status,
         relaxed_arch_status=relaxed_arch_status,
     )
     # One step past the pairing guards above: a table that is present and well-formed but
     # decides none of THESE candidates (empty, or from a different round) spares every one of
-    # them and publishes a zero yield that reads exactly like an honest one. Promoted, not
-    # duplicated — `mine_round`'s leg applies the same function to the same two backends.
-    candidate_ids = [c.candidate_id for c in candidates]
-    refuse_status_table_that_decides_nothing(
-        label="relaxed_architecture",
-        declared=bool(relaxed_arch_available),
-        status_map=relaxed_arch_status,
-        candidate_ids=candidate_ids,
-        error=RemineError,
-    )
-    refuse_status_table_that_decides_nothing(
-        label="downstream_aaRS_synteny",
-        declared=bool(synteny_available),
-        status_map=synteny_status,
-        candidate_ids=candidate_ids,
+    # them and publishes a zero yield that reads exactly like an honest one. Swept over ALL
+    # FOUR disjuncts, including the Stage-2 posterior map — an empty one resolves every
+    # candidate's posterior to `None`, i.e. `unavailable`, i.e. spared, by the same mechanism.
+    # Promoted, not duplicated: `mine_round`'s leg calls the same sweep over its three.
+    refuse_status_tables_that_decide_nothing(
+        availability=availability,
+        evidence_maps={
+            "any_helix_rscape": covariation_status,
+            "relaxed_architecture": relaxed_arch_status,
+            "downstream_aaRS_synteny": synteny_status,
+            STAGE2_DISJUNCT: stage2_posteriors,
+        },
+        candidate_ids=[c.candidate_id for c in candidates],
         error=RemineError,
     )
     candidates, excluded = exclude_probe_members(candidates, probe_set)

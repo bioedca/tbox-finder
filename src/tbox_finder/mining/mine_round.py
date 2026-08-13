@@ -648,11 +648,48 @@ def write_fp_manifest(candidates: Sequence[MiningCandidate], path: str | Path) -
     return Path(path)
 
 
+def refuse_status_tables_that_decide_nothing(
+    *,
+    availability: Mapping[str, bool],
+    evidence_maps: Mapping[str, Mapping[str, object] | None],
+    candidate_ids: Sequence[str],
+    error: type[Exception],
+) -> None:
+    """Apply the zero-overlap refusal to **every** disjunct the round declares.
+
+    Written as a sweep over the availability map rather than as one call per backend
+    because the per-backend form is how this defect kept surviving: P3-15′-h's first fix
+    guarded the two *new* backends, (b) and (c), and left the covariation disjunct — whose
+    status map has the identical property — unguarded, which review then found as a major
+    ([[fixed-one-of-two-identical-things]]). The Stage-2 posterior map is the same shape
+    again: empty ⇒ every candidate's posterior is ``None`` ⇒ ``unavailable`` ⇒ spared.
+
+    The key-set assertion is the anti-drift half: a disjunct added to the availability map
+    without an evidence entry fails here rather than being silently exempt, so a fifth
+    backend cannot inherit the hole the first four had.
+    """
+    missing = sorted(set(availability) - set(evidence_maps))
+    if missing:
+        raise error(
+            f"no evidence map was offered for declared disjunct(s) {missing}; each would be "
+            "exempt from the zero-overlap refusal, which is how this class of fault survived "
+            "its first fix"
+        )
+    for disjunct, status_map in evidence_maps.items():
+        refuse_status_table_that_decides_nothing(
+            label=disjunct,
+            declared=bool(availability.get(disjunct, False)),
+            status_map=status_map,
+            candidate_ids=candidate_ids,
+            error=error,
+        )
+
+
 def refuse_status_table_that_decides_nothing(
     *,
     label: str,
     declared: bool,
-    status_map: Mapping[str, str] | None,
+    status_map: Mapping[str, object] | None,
     candidate_ids: Sequence[str],
     error: type[Exception],
 ) -> None:
@@ -863,30 +900,26 @@ def apply_spare_rule(
         synteny_status=synteny_status_map,
         relaxed_arch_status=relaxed_arch_status_map,
     )
-    # The step past the availability↔table pairing: a table that is present, well-formed, and
-    # decides none of THESE candidates spares all of them silently. Applied here as well as in
-    # `remine` because this leg carries the identical guard pair, and an invariant fixed on one
-    # of two identical call sites is the class this project keeps re-finding.
-    candidate_ids = [c.candidate_id for c in candidates]
-    refuse_status_table_that_decides_nothing(
-        label="relaxed_architecture",
-        declared=bool(relaxed_arch_available),
-        status_map=relaxed_arch_status_map,
-        candidate_ids=candidate_ids,
-        error=MineRoundError,
-    )
-    refuse_status_table_that_decides_nothing(
-        label="downstream_aaRS_synteny",
-        declared=bool(synteny_available),
-        status_map=synteny_status_map,
-        candidate_ids=candidate_ids,
-        error=MineRoundError,
-    )
     availability = build_round_availability(
         rscape_installed=rscape_installed,
         msa_supply_available=msa_supply_available,
         relaxed_arch_available=relaxed_arch_available,
         synteny_available=synteny_available,
+    )
+    # The step past the availability↔table pairing: a table that is present, well-formed, and
+    # decides none of THESE candidates spares all of them silently. Swept over the availability
+    # map so no disjunct is exempt — the declaration for the covariation arm is read from
+    # `build_round_availability`'s own `rscape_installed AND msa_supply_available` derivation
+    # rather than recomputed, which is the one place that conjunction is allowed to live.
+    refuse_status_tables_that_decide_nothing(
+        availability=availability,
+        evidence_maps={
+            "any_helix_rscape": status_map,
+            "relaxed_architecture": relaxed_arch_status_map,
+            "downstream_aaRS_synteny": synteny_status_map,
+        },
+        candidate_ids=[c.candidate_id for c in candidates],
+        error=MineRoundError,
     )
     mask = load_union_mask(union_prior=union_prior, corpus_parquet=corpus_parquet)
     report = run_mine_round(candidates, mask, availability)
