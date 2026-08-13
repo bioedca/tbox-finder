@@ -6615,3 +6615,221 @@ single-character ids; that is the reader's shape gap, outside this step, and the
 produces it.
 
 **Commit.** See the PR that carries this stanza.
+
+## Step P3-15′-k — 2026-08-13: the round decides, and the report says what its zeroes mean
+
+**Inputs.** The four produced evidence supplies, staged into one `$ROUND_DIR` and digest-checked
+against what the pre-flight recorded: `covariation_status.json` (`3215f034…`, jobs 1205 + 1254),
+`architecture_status.json` (`9867a6dc…`, job 1288 at the §7 `sensitive_core` tuple),
+`synteny_status.json` (`3c8ac8e3…`) and `stage2_posteriors.json` (`54be6e6d…`, job 1163) ·
+`reports/p2/tier2n_probe_ids.json` (`ea8c3f7c…`, 45 members, P3-15′-i) ·
+`data/processed/mining/round0_fp_manifest.json` (941) · the union-prior mask
+(`priors/union_prior.parquet` + `master_clean_v0.parquet`).
+
+**Process.** Legs (0) and (1) were invoked as the two CLI subcommands directly, **not** through
+`slurm/p3/stage1_remine.sbatch`: that file runs leg (2) unconditionally once `n_mined > 0` and has
+no decide-only mode, so under the §7 "decision-only round" call it could only have been used by
+editing it. LOCAL throughout — a JSON join over 941 rows plus one parquet mask, ~2 s per leg — which
+also sidesteps the cluster checkout's missing `union_prior.parquet` / `master_clean_v0.parquet`.
+Leg (1) was then re-run at Stage-2 thresholds **0.5 / 0.9 / 0.99**, and
+`mining/remine_publish.py` composed the published report from those four runs.
+
+⚠ **One environment trap, worth recording because it fails as a data fault.** Putting the whole
+`tbox-finder-rscape` env on `PATH` to make `--rscape-installed` honest also shadows `python`, and
+the round then exits **4** — *"this checkout cannot evidence the Stage-2 posterior supply"* — because
+`derive_stage2_supply_available` could not `import yaml`. A staging problem wearing an evidence-gate
+message. Fixed with a one-symlink shim directory containing `R-scape` alone;
+`covariation.backend_available()` then reads **True** at the pinned build **2.0.4.a**, so the one
+declaration with no derivation (`--rscape-installed`, the gap P3-15′-h disclosed) is evidenced by
+execution on this machine rather than asserted.
+
+**Outputs.** `reports/p3/remine_round_report.json` (sha256 `4808cb88…`) —
+**941 candidates → 3 mined · 0 masked · 938 spared · 0 refused**, mined ids
+`GCA_011056645.1:c228:8704:9345-9438`, `GCA_015478585.1:c26:4608:5040-5154`,
+`GCA_040905065.1:c256:4899:5781-5916`. **Exactly the outcome the P3-15 RUN pre-flight measured
+ahead of the round**, reproduced here by the shipped legs rather than by calling the operators from
+a script. `src/tbox_finder/mining/remine_publish.py` + `tests/unit/test_remine_publish.py` (57
+tests) are the step's code.
+
+⚠ **The plan leg's own report is deliberately NOT committed.** Each of its four supply derivations
+embeds an absolute `repo_root`, so the file stays on scratch; the publication carries a path-free
+`plan_leg` summary of its verdict and pins the withheld bytes by digest. A test asserts the
+published report contains no `/home/` or `/exports/` path.
+
+**Validation.** The step's gate is `n_mined == 3` against the pre-flight prediction, `remine_problems`
+empty, and the report's `leg` stamp reading the round leg — all three hold (`leg:
+"apply-spare-rule"`, `problems: []`), and the publication's own 20-clause self-check is **re-run over
+the committed bytes** by a test rather than read back from the `problems: []` the artifact carries.
+**32 sabotages, every one RED against its named test**, plus a comment-only negative control (green)
+and a positive control: a `publication_problems` that returns a problem for *everything* turns the
+green control RED, so the parametrized clause tests bind to their own clause and not to a
+blanket refuser. ⚠ One sabotage was initially **GREEN** — deleting the publication-level
+"fewer than two grid points" clause changed nothing, because the builder refuses a one-point grid
+first and no test reached the checker with one. That clause could not fail; it now has a test that
+constructs the payload directly. `ruff` 0.15.15 + `black` 25.11.0 clean.
+
+**Decisions.**
+
+⚠ **The Stage-2 operating point is unpinned and the report publishes its whole grid.** ADR-0005 D14
+pins the *rule*; §13.1 pins the *value*, so `stage2_threshold_pinned` stays **false** and 0.9 is an
+arbitrary point inside a measured-invariant range, not a choice. Across **0.5 / 0.9 / 0.99** the
+mined set is the **same three ids** — their posteriors are 5.2e-6 to 2.5e-4, below anything §13.1
+could pick — so no §7 stop arises. ⚠ **But the sparing *composition* is not invariant**, and the
+pre-flight's headline did not say so: *"718 spared by a passing disjunct / 220 by
+`unavailable_backend`"* is a fact **at threshold 0.9**; the same round reads **724 / 214** at 0.5 and
+**700 / 238** at 0.99. The published split now carries its threshold, and the grid is in the report.
+
+⚠⚠ **The real headline is still not the 3.** With all four backends live, **718 of 941 (76.3 %)** of
+the Stage-1 false-positive manifest is spared because an orthogonal criterion **actually passed** —
+`downstream_aaRS_synteny` 546, `relaxed_architecture` 226, `any_helix_rscape` 167 — not because
+evidence was missing. ADR-0005 A10's Phase-2 state (941/941 spared by unavailability) is gone, and
+what replaced it sharpens P3-15′-g-iv's disclosed threat: a "false-positive" set three quarters of
+which satisfies an independent T-box criterion may not be a false-positive set. **And a number this
+step adds: 79 candidates (8.4 %) are spared by `high_stage2_posterior` and nothing else** — the
+project's own model is their only protection. `spare_reason` emits that attribution only when no
+model-independent disjunct passed, so it is exactly the anti-circularity coordinate ADR-0005 D14's
+model-independence accounting needs to be able to subtract. It moves with the threshold (85 / 79 / 61).
+
+⚠ **The probe exclusion's 0 is structural, and the report says which zero it is.** The 45 probe ids
+live in the `tier2n:` namespace; the substrate's 941 ids are genomic coordinates across 76 assembly
+accessions. The two id spaces share **no** namespace token, so no member *could* have been mined —
+a different finding from "the probe set was empty" (which `load_probe_set` refuses upstream) and
+from "the exclusion ran and removed nothing". The report classifies it as
+`structural_namespace_disjoint` from the measured namespaces, and `publication_problems` re-derives
+that label from them rather than trusting the word.
+
+⛔ **The round decided and did not retrain, so PRD §18.1 is UNMET and the report says so.** No
+checkpoint superseded the P2 production one; P3-16, P4 GATE-1 and the P5 scan continue to consume
+it. The publication records `retrain_leg_run: false` / `checkpoint_superseded: false` /
+`prd_18_1_supersession_status: "UNMET"`, evidenced by the round report's own `parent_checkpoint:
+null` — and a publication claiming "no retrain" beside a report that names a parent is refused, not
+published with a caveat. **The PRD §18.1 ↔ ADR-0005 reconciliation is owed and needs sign-off
+(CLAUDE.md §7 item 2).**
+
+⚠ **The supply digests are bound, not captioned.** `remine` records no digest of the four tables it
+reads, so the publisher re-runs the shipped `apply_remine_spare_rule` over the recorded paths and
+refuses unless it reproduces the round's `(n_candidates, n_mined, n_spared, mined_ids, reasons)`
+fingerprint. It does, so the six digests in `supplies` are facts about the bytes these numbers came
+from. ⚠ Disclosed, not fixed: that reproduction needs the two DVC parquets, so it cannot run in CI —
+the committed report records the measurement and CI re-checks everything else.
+
+**Commit.** See the PR that carries this stanza.
+
+**Review.** Two rounds so far, counts **1 · 3**. The CodeRabbit **CLI** returned one minor; the
+GitHub app's **automatic** review (§5.1 detection: `gh pr checks` read *"Review queued"* with no
+manual comment sent, so auto-review is ON) returned **two majors and a minor**. All four were
+verified by execution before being applied, and all four were **real**:
+
+1. **A duplicate id in `spared_ids` inflates one half of the split** and its per-disjunct tally,
+   while `n_spared == len(spared_ids)` still holds — the count check cannot see it.
+   `substrate_ids_from_manifest` already refused exactly this shape, so the guarantee was
+   guaranteed on one reader and not the other. ⚠ And the fix was the **class**, not the instance:
+   `mined_ids` had the same hole, and on a 3-candidate round that list *is* the headline. Both
+   guarded, both driven by their own test ([[fixed-one-of-two-identical-things]]).
+2. **⛔ A clause that would have refused any round where the exclusion did anything.**
+   `outcome.n_candidates` is the **post-exclusion** count — `apply_remine_spare_rule` calls
+   `exclude_probe_members` before `mine_round` — so comparing it directly to the manifest size held
+   on *this* round only because 0 members were excluded. Reproduced by construction (substrate 10,
+   decided 9 ⇒ the clause fired on a legitimate publication) before being changed to
+   `substrate == decided + excluded`, with the relaxation's own positive control beside it.
+3. **⛔ The sensitivity grid's labels were a caption, not a binding.** `--grid THRESHOLD=PATH` takes
+   the label from the operator; `--grid 0.5=<a report produced at 0.99>` would have published a
+   sensitivity table no run produced — the exact standard this module applies to `supplies` and
+   fails to apply to itself. Each point is now bound to its report's own `stage2_threshold` (and
+   refused unless it is a round leg's report that ran), the publication records
+   `report_stage2_threshold` per point, and the checker re-derives the agreement.
+4. **`publication_problems` could raise instead of returning problems.** It runs on payloads it did
+   not write — a committed report, a hand-edited one — and `main` calls it to decide whether to
+   write at all, so `float()` on a non-numeric grid key or a `None` threshold escaped as a
+   traceback where a recorded refusal was meant.
+
+The artifact was regenerated after fix 3 (it now carries `report_stage2_threshold` per grid point)
+and its digest pin updated in the same commit: `4808cb88…` → `e15f83d6…`. **No published number
+moved** — 941 / 3 / 0 / 938 / 0, 718 / 220, 79, and the three mined ids are unchanged.
+Sabotages: **39, every one RED against its named test**, controls unchanged.
+
+**Review round 3 (CLI, over the whole branch diff): 12 findings — 8 major, 4 minor — and eleven
+were real.** The GitHub app went **rate-limited** after the first push (`gh pr checks` reads *pass*
+on a *"Review rate limited"* body, which §5.1 treats as an **absence**, not a pass), so this round
+is the CLI's. One claim was **wrong and refuted by execution**: *"`passed:minable,` becomes a valid
+reason"* — `minable` is not in `ALL_DISJUNCTS`, so it is already refused; the *duplicate-token* half
+of that same finding was real and is fixed. The rest, all verified by running them first:
+
+* **Fail-open duck typing, three ways.** `bool("false")` is `True`, so a **string** could authorise
+  the round (`ready`, `yield_producible`, `may_run`, `available`, the availability map);
+  `isinstance(True, int)` is `True` and `int(1.9)` truncates, so counts were coercible; and
+  `float("nan")` satisfies every numeric check while making `abs(a − b) > 1e-12` **False**, so a
+  NaN threshold slipped past the label binding *and* would have round-tripped through `json.dumps`
+  as non-standard `NaN`. `is_json_bool` / `is_count` / `is_finite_number` / `is_sha256` now gate all
+  of it.
+* **⛔ A grid point that mined every candidate was unpublishable.** `spared_split` refused
+  `spared_ids: []`, and `threshold_sensitivity` calls it for **every** point. Zero spared is now a
+  zeroed split; the anti-vacuity intent moved to the (still-required) non-empty `reasons` map.
+* **⛔ The replay fingerprint omitted `n_masked` and `n_refused_no_coordinates`** — a replay could
+  move a candidate between *"masked by the union prior"* and *"refused for want of coordinates"*,
+  two different facts about one locus, and still read `reproduced: true`.
+* **⛔ The per-disjunct detail was unbound.** The self-check validated the two aggregate halves and
+  nothing else, so a hand-edited `passes_per_disjunct` could rewrite **which criterion protected the
+  corpus** and pass everything. The split's canonical digest is now part of the fingerprint.
+* **⛔ `spared_split_invariant` was computed from one of six fields and never checked.** A grid
+  whose per-disjunct composition moved could be published as composition-invariant. Now computed
+  over the whole composition and re-derived by the checker.
+* **⛔ The grid was bound to thresholds but not to a round.** Two self-consistent points over
+  different manifests would have compared two rounds; every point now carries the digest of its own
+  candidate-id set and they must agree.
+* **⛔ The supply binding had three holes**: `union_prior.parquet` and `master_clean_v0.parquet` are
+  read by the replay and were not hashed; `_parse_grid` discarded the grid report paths; and any
+  64-character string counted as a digest. The key set is now exact (`REQUIRED_SUPPLY_KEYS` + one
+  `grid:<label>` per point) and every value must be hex.
+* **The checker could still raise instead of recording** on nested payloads it did not write
+  (`.get` on a `None` derivation or a non-object grid point).
+* **The absolute-path test was an allowlist wearing a general claim** — it checked `/home/` and
+  `/exports/` only, so a leak under `/scratch/` or `/Users/` passed. It now walks the parsed values
+  and fails on any POSIX absolute path.
+
+The artifact was regenerated (it now carries `candidate_id_set_sha256` and the full per-disjunct
+composition per grid point, and twelve supply digests) and repinned in the same commit:
+`e15f83d6…` → `c8aa02cf…`. **No published number moved** — 941 / 3 / 0 / 938 / 0, 718 / 220, 79, the
+three mined ids, and 724/718/700 across the grid are all unchanged. Tests **85** (from 69);
+**49 sabotages, every one RED against its named test**, controls unchanged.
+
+**Review round 4 (CLI, after waiting out the shared Fair-Usage limit): 6 findings — 2 major, 4
+minor — five real, one refuted.** ⚠ Both CodeRabbit paths were rate-limited at once (the app's check
+reads *pass* on a *"Review rate limited"* body; the CLI's own notice said *"wait 24 minutes"*), so
+the round after the r2 fixes had to be waited for rather than escalated to Greptile — a bounded,
+stated delay is availability, not unavailability, and the fallback budget was left intact.
+
+**⛔ REFUTED, NOT APPLIED — and it is the *same wrong finding* a previous step got.** *"Commit
+`reports/p3/remine_round_report.json` — Git does not track it."* It **is** tracked (`git ls-files
+--error-unmatch` exits 0) and `git archive` from `origin` extracts it at exactly the pinned digest,
+which is why CI's own clean-checkout pytest passes the artifact tests. Declined with the evidence,
+and a test now carries the refutation so it is falsifiable rather than asserted
+([[review-findings-can-be-factually-wrong]]).
+
+The five real ones share a shape worth naming: **a guard defeated at its own call site.**
+
+* **⛔ `int()` at the caller made the callee's guard unreachable.** r2 added `is_count` inside
+  `probe_exclusion_diagnosis` *because* `int(1.9)` truncates and `int(True)` is 1 — and
+  `build_publication` then called it as `n_excluded=int(...)`, so the guard never saw the original
+  value and a report carrying `1.9` or `true` was accepted as 1. The same
+  [[fixed-one-of-two-identical-things]] pattern as review r1's, one frame up.
+* **Three bare `isinstance(x, int)` clauses survived the r2 sweep** — the split halves, the four
+  outcome counts, and the substrate/decided/excluded triple. `(True, False)` sums to 1, so a
+  boolean satisfied the very clause that exists to check the arithmetic.
+* **`list()` on a string field splits it into characters.** A string `mined_ids` iterated to
+  character-level ids whose count matched `n_mined`, and a string `blocking_disjuncts` would have
+  been published as two blocking disjuncts; a non-iterable raised `TypeError` out of a module
+  contracted to refuse with `PublicationError`. `json_list` refuses both.
+* **A combined condition reported the wrong cause** — a non-integer `n_mined` produced an error
+  text about distinct ids.
+* **The replay ran before the field it needs was validated.** `round_report["stage2_threshold"]`
+  was subscripted directly, so a report omitting it raised a bare `KeyError` *after*
+  `reproduce_round` had re-read four evidence tables and two parquet files;
+  `build_publication`'s clear refusal ran later still and was unreachable for that case.
+
+**The artifact is byte-unchanged by this round** (`c8aa02cf…`) — these are input-shape guards, not
+computations. Tests **95** (from 85); **54 sabotages, every one RED against its named test**. Zero
+new failures vs the matched `main` baseline: 13 FAILED both sides, identical set; passes
+**5920 → 6015** = exactly the 95 tests added.
+
+**Commit.** See the PR that carries this stanza.
