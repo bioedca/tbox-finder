@@ -46,7 +46,12 @@ PUBLICATION_PATH = REPO_ROOT / "reports/p3/remine_round_report.json"
 
 #: The bytes the P3-15′-k round published. Regenerating the round legitimately means
 #: updating this in the same commit — deliberately, as a golden fixture does.
-COMMITTED_PUBLICATION_SHA256 = "c8aa02cfc4ac56160904998d78e80c0394f616e7a27a255905432fe770371999"
+#: Repinned c8aa02cf… → e733744d… by the ADR-0005 A12 reconciliation (schema 1.0 → 1.1):
+#: the ``retrain`` block's two ``prd_18_1_*`` keys were replaced and the canonical
+#: checkpoint named by path + digest. **No measured value moved** — the outcome, the
+#: spared split, the sensitivity grid, the probe diagnosis, the supplies and the
+#: provenance are byte-identical across the repin.
+COMMITTED_PUBLICATION_SHA256 = "e733744dc83b2a854dafe915146854752271e54c67e0556bb9555a328345abd6"
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -367,12 +372,67 @@ def test_id_namespaces_reads_the_prefix_and_is_sorted() -> None:
 # ═════════════════════════════════════════════════════════════════════════════
 # (3) The retrain disposition
 # ═════════════════════════════════════════════════════════════════════════════
-def test_the_disposition_states_the_supersession_is_unmet_and_carries_the_parent_field() -> None:
+def test_the_disposition_retires_the_supersession_claim_and_carries_the_parent_field() -> None:
     disposition = retrain_disposition(make_round())
     assert disposition["retrain_leg_run"] is False
     assert disposition["checkpoint_superseded"] is False
-    assert disposition["prd_18_1_supersession_status"] == "UNMET"
+    assert disposition["supersession_claim_status"] == "RETIRED_BY_ADR_0005_A12"
     assert disposition["parent_checkpoint_in_round_report"] is None
+
+
+def test_the_disposition_attributes_the_supersession_claim_to_impmd_not_the_prd() -> None:
+    """ADR-0005 A12 Pin 3 — the claim is an ``imp.md`` row, and PRD.md does not state it.
+
+    Bound to the **function**, not only to the committed artifact: an artifact-tier
+    assertion alone stays green if the writer starts emitting the old citation again for
+    a future round ([[artifact-pinning-test-cannot-see-the-code]]).
+    """
+    source = retrain_disposition(make_round())["supersession_claim_source"]
+    assert source.startswith("imp.md")
+    assert "NOT the PRD" in source
+    # The retired citation must not survive anywhere in the block as a live claim.
+    assert "PRD §18.1 states that stage1_production.ckpt supersedes" not in json.dumps(
+        retrain_disposition(make_round()), ensure_ascii=False
+    )
+
+
+def test_no_field_of_the_disposition_claims_the_prd_states_the_supersession() -> None:
+    """The defect was a *citation*, so the guard is over every value, not one key.
+
+    Sabotage that must turn this red: reinstating the old ``prd_18_1_note`` wording under
+    any key name at all.
+    """
+    disposition = retrain_disposition(make_round())
+    for key, value in disposition.items():
+        if not isinstance(value, str):
+            continue
+        claims_prd_says_it = "PRD" in value and "supersedes the P2 checkpoint" in value
+        # The one legal mention is the correction itself, which says the PRD does NOT.
+        if key == "supersession_claim_source":
+            continue
+        assert not claims_prd_says_it, f"{key} re-attributes the supersession to the PRD"
+
+
+def test_the_disposition_names_the_canonical_checkpoint_by_path_and_digest() -> None:
+    """A12 Pin 2 — "the P2 checkpoint" is a role; a downstream phase needs the artifact.
+
+    The digest is the one ``data/processed/checkpoints/stage1_production/provenance.json``
+    records for its own output, verified by recomputation at the reconciliation step.
+    """
+    canonical = retrain_disposition(make_round())["canonical_stage1_checkpoint"]
+    assert "data/processed/checkpoints/stage1_production/stage1.pt" in canonical
+    assert "09931a223c3e670731a39b8ef0b0bb4bcb36a8ff9dcbee889f1715362b380940" in canonical
+    assert ".ckpt" not in canonical  # nothing in the repo produces that path
+
+
+def test_the_disposition_records_the_tier2n_halt_as_vacuous_not_as_passed() -> None:
+    """A12 Pin 2(ii) — D14's halt needs a checkpoint that changed; none did.
+
+    "The probe recall did not drop" would imply a measurement this round never made.
+    """
+    halt = retrain_disposition(make_round())["tier2n_probe_halt"]
+    assert halt.startswith("VACUOUS")
+    assert "none was measured" in halt
 
 
 def test_a_round_report_naming_a_parent_checkpoint_fails_the_publication_check() -> None:
@@ -680,7 +740,43 @@ def test_the_published_round_mined_three_of_941_and_retrained_nothing() -> None:
         ],
     }
     assert pub["retrain"]["retrain_leg_run"] is False
-    assert pub["retrain"]["prd_18_1_supersession_status"] == "UNMET"
+    assert pub["retrain"]["supersession_claim_status"] == "RETIRED_BY_ADR_0005_A12"
+
+
+def test_the_committed_artifact_carries_the_a12_reconciliation_not_the_old_citation() -> None:
+    """The published bytes must not tell a reader the PRD says something it does not.
+
+    This is the artifact half of the A12 Pin 3 correction; the function half is
+    ``test_the_disposition_attributes_the_supersession_claim_to_impmd_not_the_prd``.
+    """
+    pub = committed_publication()
+    assert pub["schema_version"] == "1.1"
+    assert "A12" in pub["adr"]
+    assert "prd_18_1_note" not in pub["retrain"]
+    assert "prd_18_1_supersession_status" not in pub["retrain"]
+    assert pub["retrain"]["supersession_claim_source"].startswith("imp.md")
+    assert pub["retrain"]["tier2n_probe_halt"].startswith("VACUOUS")
+    # …and the retired sentence appears nowhere in the whole publication.
+    assert "PRD §18.1 states that stage1_production.ckpt supersedes" not in json.dumps(
+        pub, ensure_ascii=False
+    )
+
+
+def test_the_a12_repin_moved_no_measured_value() -> None:
+    """The regeneration was a citation fix; every number it publishes is the round's.
+
+    Pinned explicitly so a future "just repin it" cannot quietly carry a changed
+    measurement through on the same justification.
+    """
+    pub = committed_publication()
+    assert pub["outcome"]["n_candidates"] == 941
+    assert pub["outcome"]["n_mined"] == 3
+    assert pub["outcome"]["n_spared"] == 938
+    assert pub["spared_split"]["n_spared_by_a_passing_disjunct"] == 718
+    assert pub["spared_split"]["n_spared_by_unavailable_backend_only"] == 220
+    assert pub["spared_split"]["n_spared_by_stage2_posterior_alone"] == 79
+    assert pub["probe_exclusion"]["n_excluded"] == 0
+    assert pub["problems"] == []
 
 
 def test_the_published_spared_split_is_recomputed_from_the_grid_point_it_names() -> None:

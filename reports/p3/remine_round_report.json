@@ -1,5 +1,5 @@
 {
-  "adr": "ADR-0005 D14/A10/A1; ADR-0006 D11/A2; PRD \u00a79.1, \u00a718.1",
+  "adr": "ADR-0005 D14/A10/A1/A12; ADR-0006 D11/A2; PRD \u00a79.1, \u00a718.1",
   "leg": "apply-spare-rule",
   "may_run": true,
   "outcome": {
@@ -210,16 +210,18 @@
     "reproduced": true
   },
   "retrain": {
-    "canonical_stage1_checkpoint": "the P2 production checkpoint \u2014 unchanged by this round",
+    "canonical_stage1_checkpoint": "data/processed/checkpoints/stage1_production/stage1.pt (sha256 09931a223c3e670731a39b8ef0b0bb4bcb36a8ff9dcbee889f1715362b380940; DVC 91bd49dd91997b8a94b6ba262afab071.dir), trained at P2-10d\u2032-b \u2014 unchanged by this round, and the checkpoint P3-16, P4 GATE-1 and the P5 scan consume",
     "checkpoint_superseded": false,
     "decision": "CLAUDE.md \u00a77 decision 2026-08-12 (user): DECISION-ONLY ROUND, NO RETRAIN \u2014 run the round's decision legs (0)+(1) and publish the report as the honest answer to ADR-0005 A10's Phase-2 note; the DDP retrain leg (2) is not run and P3-15\u2032-j (the mined-pool builder) is deferred, not scheduled.",
     "parent_checkpoint_in_round_report": null,
-    "prd_18_1_note": "PRD \u00a718.1 states that stage1_production.ckpt supersedes the P2 checkpoint. This round decided and declined to retrain, so nothing superseded it; P3-16, P4 GATE-1 and the P5 scan continue to consume the P2 checkpoint. Reconciling PRD \u00a718.1 with ADR-0005 is owed and needs user sign-off (CLAUDE.md \u00a77 item 2).",
-    "prd_18_1_supersession_status": "UNMET",
-    "retrain_leg_run": false
+    "retrain_leg_run": false,
+    "supersession_claim_source": "imp.md \u2014 the local-only roadmap ledger (CLAUDE.md \u00a71), which ranks BELOW the PRD and the ADRs and is not part of any clone. It is NOT the PRD: PRD.md contains no occurrence of 'supersede', 'stage1_production' or 'ckpt'; \u00a718.1's P3 row names the re-mining round and no checkpoint, and \u00a710.1's checkpoint map opens 'Two Stage-1 checkpoints are trained, both in P2'. An earlier version of this report cited PRD \u00a718.1 as the source; that citation was wrong and is retired by ADR-0005 A12.",
+    "supersession_claim_status": "RETIRED_BY_ADR_0005_A12",
+    "supersession_note": "This round decided and declined to retrain, so no checkpoint superseded the P2 production one. ADR-0005 A12 (signed 2026-08-13, CLAUDE.md \u00a77 item 2) ratifies that: a mining round's D14 obligation is to DECIDE every candidate, not to produce a retrained checkpoint, and the shipped Stage-1 checkpoint stays the P2-trained production scanner. The competing reading is recorded in A12 Pin 1 and was declined on the yield (3 mined windows against a 19,409-item negative pool), not refuted by the text.",
+    "tier2n_probe_halt": "VACUOUS, not passed: D14 halts/rolls back a mining round on a Tier-2N probe recall DROP, which presupposes a checkpoint that changed. No retrain ran, so no recall could drop, and none was measured or is reported here."
   },
   "round_report_problems": [],
-  "schema_version": "1.0",
+  "schema_version": "1.1",
   "spared_split": {
     "n_spared": 938,
     "n_spared_by_a_passing_disjunct": 718,

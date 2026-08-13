@@ -6698,13 +6698,21 @@ from "the exclusion ran and removed nothing". The report classifies it as
 `structural_namespace_disjoint` from the measured namespaces, and `publication_problems` re-derives
 that label from them rather than trusting the word.
 
-⛔ **The round decided and did not retrain, so PRD §18.1 is UNMET and the report says so.** No
-checkpoint superseded the P2 production one; P3-16, P4 GATE-1 and the P5 scan continue to consume
-it. The publication records `retrain_leg_run: false` / `checkpoint_superseded: false` /
-`prd_18_1_supersession_status: "UNMET"`, evidenced by the round report's own `parent_checkpoint:
-null` — and a publication claiming "no retrain" beside a report that names a parent is refused, not
-published with a caveat. **The PRD §18.1 ↔ ADR-0005 reconciliation is owed and needs sign-off
+⛔ **The round decided and did not retrain, so no checkpoint superseded the P2 production one**;
+P3-16, P4 GATE-1 and the P5 scan continue to consume it. The publication records
+`retrain_leg_run: false` / `checkpoint_superseded: false`, evidenced by the round report's own
+`parent_checkpoint: null` — and a publication claiming "no retrain" beside a report that names a
+parent is refused, not published with a caveat. **The reconciliation is owed and needs sign-off
 (CLAUDE.md §7 item 2).**
+
+> ⚠ **Corrected 2026-08-13 by the ADR-0005 A12 step.** This paragraph, and the report it
+> describes, said *"PRD §18.1 is UNMET"* and published `prd_18_1_supersession_status: "UNMET"`.
+> **PRD §18.1 never carried that claim** — `PRD.md` contains no occurrence of `supersede`,
+> `stage1_production` or `ckpt`, and §10.1's map trains both Stage-1 checkpoints in P2. The
+> supersession sentence is an `imp.md` row. A12 retires it, the artifact was regenerated
+> (`c8aa02cf…` → `e733744d…`, schema 1.0 → 1.1) with **no measured value moved**, and the
+> corrected fields are `supersession_claim_source` / `supersession_claim_status` /
+> `supersession_note` / `tier2n_probe_halt`. See the A12 stanza below.
 
 ⚠ **The supply digests are bound, not captioned.** `remine` records no digest of the four tables it
 reads, so the publisher re-runs the shipped `apply_remine_spare_rule` over the recorded paths and
@@ -6831,5 +6839,69 @@ The five real ones share a shape worth naming: **a guard defeated at its own cal
 computations. Tests **95** (from 85); **54 sabotages, every one RED against its named test**. Zero
 new failures vs the matched `main` baseline: 13 FAILED both sides, identical set; passes
 **5920 → 6015** = exactly the 95 tests added.
+
+**Commit.** See the PR that carries this stanza.
+
+## Step P3-15′-recon — 2026-08-13: the PRD §18.1 ↔ ADR-0005 reconciliation — and the claim it was measured against turns out not to be a PRD claim
+
+**Inputs.** `reports/p3/remine_round_report.json` (`c8aa02cf…`, the P3-15′-k publication and its
+`retrain` block); the primary text of `PRD.md` §9.1 / §10.1 / §18.1 / §18.3; `docs/decisions/ADR-0005`
+D14 + the A10 Phase-2 §7 deferral; the seven `imp.md` lines carrying the supersession wording; the
+preserved round-dir supplies (9 files, digests re-verified against the publication's `supplies` block).
+
+**Process.** The step P3-15′-k left owed was *"reconcile PRD §18.1 with ADR-0005"*, so the first move
+was to read PRD §18.1 rather than the restatements of it. It does not contain the claim. Nor does any
+other part of the PRD: `supersede`, `stage1_production`, `ckpt`, `re-mined` and `P2 checkpoint` are
+each **0 occurrences** in `PRD.md`, §18.1's P3 row names the re-mining round and no checkpoint, its
+**P2** row is where the §9.1 mining *loop* sits, and §10.1's checkpoint map opens *"Two Stage-1
+checkpoints are trained, **both in P2**"* — already assigning the P2 scanner GATE-4/GATE-2/GATE-1/P5.
+No ADR states it either (all six read in full). The wording lives in `imp.md` (`:166`, `:170-173`,
+`:1584`, `:1897`, `:1909`, `:1968`, `:2166`), whose own gloss cites *"PRD §10.1"* for it. A 28-agent
+adversarial verification (0 errors; 2 independent refuters per claim) left seven of eight claims
+standing; the one refutation sharpened rather than broke the reading, and is recorded in A12 Pin 1 as
+the **pro-retrain** reading (PRD §9.1 does say mining is what *"train[s] the production scanner"*, and
+D14's per-round halt presupposes a model state that changes between rounds).
+
+**Outputs.** **ADR-0005 Amendment A12**, signed 2026-08-13 (§7 item 2): a mining round's D14
+obligation is to **decide** every candidate; the canonical shipped Stage-1 checkpoint is the
+**P2-trained** `data/processed/checkpoints/stage1_production/stage1.pt` (sha256 `09931a22…`, verified
+by recomputation against its own `provenance.json`); the supersession claim is retired at its `imp.md`
+source; **A10's Phase-2 deferral is discharged** (`ADR-0005:185` now says so). `remine_publish.py`
+corrected — the misattribution had propagated from `imp.md` into shipped code (`:27`, `:48`, the
+`retrain_disposition` literals and the `adr` field), and `publication_problems` never read those
+fields, so nothing could have caught it. The artifact was regenerated from the preserved supplies:
+**`c8aa02cf…` → `e733744d…`**, schema **1.0 → 1.1**. The field-by-field diff is exactly 4 added
+(`supersession_claim_source` / `_status` / `_note`, `tier2n_probe_halt`), 2 removed (`prd_18_1_note`,
+`prd_18_1_supersession_status`) and 3 changed (`adr`, `canonical_stage1_checkpoint`,
+`schema_version`) — **no measured value moved**, and a test now pins that.
+
+**Validation.** 6 new tests (101 in the module). **8 sabotages, every one RED against its NAMED
+test** — the claim source reverted to the PRD citation; the retired sentence reinstated under a
+*different key name*; the canonical checkpoint reduced to a role name; its digest altered by one
+character; the vacuous Tier-2N halt reported as `PASSED`; the status flipped back to `UNMET`; the
+**artifact** re-acquiring the citation; and a **measured number moved under cover of the repin**
+(`n_mined` 3 → 4). Plus a GREEN comment-only negative control and a positive control (a
+`retrain_disposition` raising on everything is RED, so the assertions bind to the value and not to
+the call). Sources restored byte-identically by sha256, `__pycache__` cleared between runs. Versus a
+matched `main` baseline worktree at `d826064`: **zero new failures** — 13 FAILED both sides, identical
+set; passes **6015 → 6021** = exactly the 6 tests added.
+
+**Decisions.** Three §7 calls, all recorded in A12. (1) **Ratify** rather than reinstate the retrain:
+3 mined windows against A7's 19,409-item pool is a training perturbation too small to move a graded
+quantity, and the alternative — re-reading D14's `unavailable` as non-protective to raise the ceiling
+by ≈220 — would remove the anti-circularity protection D14 exists for, on a manifest where 76.3 %
+already satisfies an orthogonal criterion. (2) **Correct the artifact at its producer and repin**
+rather than leave a committed report asserting a false citation: the report is cited by name in
+`paper/manuscript.qmd`, so its reader is exactly the audience the misattribution misleads. (3) The
+PRD §18.3-delegated *checkpoint → phase → gate → release map* is **absent from ADR-0006** — that
+vacuum is why `imp.md`'s map became the de-facto authority and drifted; it is **booked as its own
+step**, not closed here.
+
+**Two things A12 deliberately does not close.** D14's per-round Tier-2N halt is recorded as
+**VACUOUS** on this round — no checkpoint changed, so no probe recall could drop and none was
+measured; *"the probe recall did not drop"* would have implied a measurement. And the four Pin-4
+disclosures stand: **79 of 941 (8.4 %)** spared by the model's own posterior alone, the **unpinned**
+0.9 operating point (the mined set is invariant across 0.5/0.9/0.99; the sparing split is not), the
+**220** fail-closed spares, and the open question of whether the 941 are false positives at all.
 
 **Commit.** See the PR that carries this stanza.
