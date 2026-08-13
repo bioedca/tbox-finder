@@ -6405,3 +6405,84 @@ and the covariation arm's `rscape_installed AND msa_supply_available` declaratio
 P2 leg is now **driven** rather than assumed to agree because it imports the same function.
 Validation: **24 sabotages, 23 RED against their NAMED test** plus the two controls; zero new
 failures vs the same matched baseline (13 FAILED both sides, passes +18); `ruff` + `black` clean.
+
+## Step P3-15 RUN — 2026-08-12: the pre-flight that refused the submit, and the round it measured on the way
+
+**Inputs.** `slurm/p3/stage1_remine.sbatch` as shipped at `4a781a3` (the P3-15′-h fix) · the four
+produced evidence supplies: `covariation_status.json` (`3215f034…`, jobs 1205 + 1254),
+`architecture_status.json` (`9867a6dc…`, job 1288, at the §7-chosen `sensitive_core` tuple),
+`synteny_status.json` (`3c8ac8e3…`, P3-15′-c-ii) and `stage2_posteriors.json` (`54be6e6d…`,
+job 1163) · `data/processed/mining/round0_fp_manifest.json` (941) · the union-prior mask
+(`priors/union_prior.parquet` + `master_clean_v0.parquet`).
+
+**Process.** CLAUDE.md §9.3 steps 1–5 for the P3-15 round: verify every input the shipped sbatch
+requires, preflight, then compose the submit line for the one-shot ack. Three of the four supplies
+were located and digest-checked; the fourth, criterion (c)'s status table, was found to exist
+**nowhere** — not on the laptop, not on cluster scratch — and was regenerated locally with
+`mining.synteny_producer run-shard --strand-policy both --max-intervening-orfs 1
+--sub-threshold-orf-nt 150 --window-bp 500` in **24.7 s**, reproducing sha256
+`3c8ac8e31b9e7cde6dee50328ca3efa7ac798b54def17885f92c930b8b04a464` — the exact digest
+`reports/p3/synteny_exclusion_diagnostic.json` pins in its `external_inputs`, and the same digest
+the committed `round0_fp_spare_rule_inputs_v0.json` anchors its `synteny_status` column to. The
+producer writes no provenance block and `sort_keys=True`, so it is bit-reproducible with no
+timestamp caveat. **The submit was not composed**: the pre-flight found two gaps that no amount of
+staging closes, both verified by execution rather than by reading.
+
+**Outputs.** No artifact committed, no SLURM job submitted, no value pinned. The round's outcome
+was *measured* ahead of the run, from the shipped decision code — `mine_round.read_fp_manifest`
+stamped with the three real status maps and the real posteriors, `mine_round.load_union_mask` built
+from the real union prior, `hard_negative.mine_round` called directly:
+
+| quantity | value |
+|---|---|
+| candidates | 941 |
+| **mined** | **3** |
+| masked by the union prior | 0 |
+| spared | 938 — **718 by a disjunct that passed**, 220 by `unavailable_backend` alone |
+| refused (no coordinates) | 0 |
+
+and the yield is **invariant across the whole Stage-2 sensitivity grid** (`stage2_threshold`
+0.5 / 0.9 / 0.99 all give the same three ids), because all three mined candidates carry posteriors
+between 5.2e-6 and 2.5e-4 — far below any operating point the §13.1 gate could choose. That
+settles, by measurement, a question the round was otherwise going to have to guess at: **the
+unpinned Stage-2 threshold does not change this round.**
+
+**Validation.** The pre-flight is the gate, and it **fails** — the round as shipped cannot complete:
+
+1. **`mined_pool.parquet` has no producer anywhere in the repository.** `remine.py` writes only
+   JSON (`write_json`); `hard_negative.mine_round` returns `mined_ids`, not windows; the only
+   parquet builder under `mining/` is `pool.build`, whose CLI takes flank context and has **no
+   candidate-id input at all**. The string `mined_pool` occurs in exactly two places, both
+   consumers (`slurm/p2/mine_round_retrain.sbatch:41`, `slurm/p3/stage1_remine.sbatch:77`), and the
+   P2 file names it as the "A10 Phase-2 wire" — booked and never built. With `n_mined = 0` the
+   sbatch exits 0 honestly; with `n_mined > 0` it exits **2** at `stage1_remine.sbatch:182`. The
+   measurement above makes the non-zero branch the *certain* one, so a submit would hold a whole
+   8×A4000 node and die. This is the same shape as both defects P3-15′-h found: a seam that could
+   not be reached while the thing it gates was structurally a no-op.
+2. **The Tier-2N probe id list has a reader and no writer.** `--probe-set` is `required=True`,
+   `load_probe_set` refuses an empty set by design, and `reports/p2/tier2n_probe.json` carries
+   counts only (`probe_set_size 45`, `n_natural 0`, no id key). Nothing in `src/` serializes a
+   `ProbeSet`; `synth/tier2n.build_probe_report` mints `tier2n:<family>:p<NNNNN>` ids into a
+   `tempfile.mkdtemp` workdir that no committed run preserved. Leg (1) cannot start.
+   ⚠ And a second-order note for whoever builds it: those ids are positional over a
+   `pandas.sample(random_state=20260719)` draw and require a live `cmsearch`, so a re-run is not
+   guaranteed to reproduce the same 45 members the committed counts were measured on.
+
+Two further staging gaps, both closable without new code: `union_prior.parquet` and
+`master_clean_v0.parquet` are **not materialized on the cluster checkout** (leg (1) would traceback,
+exiting 1 — indistinguishable from a clean refusal), and `stage2_posteriors.json` sits in
+`round_p3_15b`, not in the round dir the sbatch reads.
+
+**Decisions.** None taken. The §9.3 submit-ack is **not** composed and the round is **not**
+submitted (CLAUDE.md §7 item 4, §10.3: withhold rather than run a job whose failure is already
+known). Two fix-ups are booked — `P3-15′-i` (the probe-set id writer) and `P3-15′-j` (the mined-pool
+builder) — and the prior question of whether to build them at all is put to the user, because the
+thing they unlock is a DDP retrain on **three** hard negatives followed by a full Tier-2N re-gate
+and a GATE-4 re-grade. ⚠ The most interesting number here is not the 3. It is the **718**: with all
+four backends live, three quarters of the Stage-1 "false-positive" manifest is spared because an
+**orthogonal criterion actually passed**, not because evidence was missing — the state ADR-0005 A10's
+Phase-2 note was written against (941/941 spared by unavailability) is gone, and what replaced it
+sharpens P3-15′-g-iv's disclosed threat: an FP manifest of which 76.3 % satisfies at least one
+independent T-box criterion may not be a false-positive set.
+
+**Commit.** See the PR that carries this stanza; no code changed.
