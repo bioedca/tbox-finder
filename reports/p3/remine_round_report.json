@@ -243,7 +243,8 @@
         "n_mined": 3,
         "n_spared_by_a_passing_disjunct": 724,
         "n_spared_by_stage2_posterior_alone": 85,
-        "n_spared_by_unavailable_backend_only": 214
+        "n_spared_by_unavailable_backend_only": 214,
+        "report_stage2_threshold": 0.5
       },
       "0.9": {
         "mined_ids": [
@@ -254,7 +255,8 @@
         "n_mined": 3,
         "n_spared_by_a_passing_disjunct": 718,
         "n_spared_by_stage2_posterior_alone": 79,
-        "n_spared_by_unavailable_backend_only": 220
+        "n_spared_by_unavailable_backend_only": 220,
+        "report_stage2_threshold": 0.9
       },
       "0.99": {
         "mined_ids": [
@@ -265,7 +267,8 @@
         "n_mined": 3,
         "n_spared_by_a_passing_disjunct": 700,
         "n_spared_by_stage2_posterior_alone": 61,
-        "n_spared_by_unavailable_backend_only": 238
+        "n_spared_by_unavailable_backend_only": 238,
+        "report_stage2_threshold": 0.99
       }
     },
     "mined_set_invariant": true,

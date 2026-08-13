@@ -159,6 +159,16 @@ def spared_split(report: Mapping[str, Any]) -> dict[str, Any]:
     recorded = block.get("n_spared")
     if recorded != len(spared):
         raise PublicationError(f"n_spared={recorded!r} disagrees with {len(spared)} spared_ids")
+    # A repeated id is counted once per occurrence below, so it inflates one half of the
+    # split and its per-disjunct tally while ``n_spared == len(spared)`` still holds —
+    # the count check above cannot see it. ``substrate_ids_from_manifest`` already refuses
+    # the same shape; leaving it guarded on one reader and not the other is the
+    # fixed-one-of-two failure ([[fixed-one-of-two-identical-things]]). Found by review.
+    if len(set(map(str, spared))) != len(spared):
+        raise PublicationError(
+            "spared_ids carries a duplicate candidate id, so the split would count one "
+            "candidate twice and the published halves would not describe 941 distinct calls"
+        )
 
     passed_ids: list[str] = []
     unavailable_ids: list[str] = []
@@ -381,9 +391,32 @@ def threshold_sensitivity(
     mined_sets: list[tuple[str, ...]] = []
     for key, report in sorted(grid.items(), key=lambda kv: float(kv[0])):
         block = _round_block(report)
+        # ⚠ The label is the OPERATOR's (`--grid THRESHOLD=PATH`); the report's own
+        # ``stage2_threshold`` is the value the run that wrote it was given. Binding them
+        # is what stops a mislabelled point publishing a sensitivity no run produced —
+        # the same standard the ``supplies`` digests hold the four evidence tables to.
+        # Found by review (app r1): before this, `--grid 0.5=<a 0.99 report>` published.
+        recorded = report.get("stage2_threshold") if isinstance(report, Mapping) else None
+        if not isinstance(recorded, (int, float)) or isinstance(recorded, bool):
+            raise PublicationError(
+                f"the grid point labelled {key!r} carries no stage2_threshold of its own, so "
+                "its label cannot be bound to the run that produced it"
+            )
+        if abs(float(recorded) - float(key)) > 1e-12:
+            raise PublicationError(
+                f"the grid point labelled {key!r} was produced at stage2_threshold "
+                f"{recorded!r}; a sensitivity table whose labels are not its runs' own "
+                "thresholds measures nothing"
+            )
+        if report.get("leg") != LEG_ROUND or not report.get("may_run"):
+            raise PublicationError(
+                f"the grid point labelled {key!r} is not a round leg's report that ran "
+                f"(leg={report.get('leg')!r}, may_run={report.get('may_run')!r})"
+            )
         mined = tuple(sorted(str(i) for i in block.get("mined_ids", [])))
         split = spared_split(report)
         points[key] = {
+            "report_stage2_threshold": float(recorded),
             "n_mined": block.get("n_mined"),
             "mined_ids": list(mined),
             "n_spared_by_a_passing_disjunct": split["n_spared_by_a_passing_disjunct"],
@@ -638,6 +671,14 @@ def publication_problems(pub: Mapping[str, Any]) -> list[str]:
     mined = outcome.get("mined_ids")
     if not isinstance(mined, list) or len(mined) != outcome.get("n_mined"):
         problems.append("n_mined disagrees with the mined id list")
+    # The mined side of the same duplicate hole review found on ``spared_ids``: a repeated
+    # id keeps ``len(mined) == n_mined`` true while the round mined fewer distinct loci
+    # than the headline claims — and this list IS the headline of a 3-candidate round.
+    elif len({str(i) for i in mined}) != len(mined):
+        problems.append(
+            "mined_ids carries a duplicate candidate id, so n_mined overstates how many "
+            "distinct candidates the round mined"
+        )
 
     exclusion = pub.get("probe_exclusion")
     if not isinstance(exclusion, Mapping):
@@ -645,10 +686,25 @@ def publication_problems(pub: Mapping[str, Any]) -> list[str]:
     else:
         if not exclusion.get("n_probe_members"):
             problems.append("the probe exclusion ran against an empty probe set")
-        if exclusion.get("n_substrate_candidates") != outcome.get("n_candidates"):
+        # ⚠ `outcome.n_candidates` is the POST-exclusion count — `apply_remine_spare_rule`
+        # calls `exclude_probe_members` before `mine_round`, so the round decides
+        # manifest − excluded. Comparing it to the manifest size directly was wrong in the
+        # one direction that matters: it held on THIS round only because 0 were excluded,
+        # and would have refused publication of any round where the exclusion did anything.
+        # Found by review (app r1), reproduced by construction before it was changed.
+        decided = outcome.get("n_candidates")
+        substrate = exclusion.get("n_substrate_candidates")
+        excluded_n = exclusion.get("n_excluded")
+        if not all(isinstance(v, int) for v in (decided, substrate, excluded_n)):
             problems.append(
-                "the probe exclusion was diagnosed against a different substrate than the "
-                "round decided"
+                f"the substrate/decided/excluded counts are not all integers: "
+                f"{substrate!r}/{decided!r}/{excluded_n!r}"
+            )
+        elif substrate != decided + excluded_n:
+            problems.append(
+                f"the probe exclusion was diagnosed against a substrate of {substrate} but the "
+                f"round decided {decided} after excluding {excluded_n} — the two do not "
+                "describe the same manifest"
             )
         # The reading must follow from the namespaces the diagnosis recorded, not from a
         # word written beside them.
@@ -694,11 +750,42 @@ def publication_problems(pub: Mapping[str, Any]) -> list[str]:
         derived_invariant = len({tuple(p.get("mined_ids", [])) for p in grid.values()}) == 1
         if bool(sensitivity.get("mined_set_invariant")) != derived_invariant:
             problems.append("mined_set_invariant disagrees with the grid's own mined id sets")
-        published = [
-            p
-            for k, p in grid.items()
-            if abs(float(k) - float(pub.get("stage2_threshold", "nan"))) < 1e-12
-        ]
+        # ⚠ This function must RETURN problems, never raise them — `main` calls it before
+        # deciding whether to write, and it also runs over payloads it did not produce
+        # (a committed report, a hand-edited one). `float()` on a non-numeric grid key or
+        # on a `None` threshold escaped as an unhandled ValueError/TypeError, i.e. a
+        # traceback where a recorded refusal was meant. Found by review (app r1).
+        threshold = pub.get("stage2_threshold")
+        published: list[Any] = []
+        if not isinstance(threshold, (int, float)) or isinstance(threshold, bool):
+            problems.append(f"the publication's stage2_threshold is {threshold!r}, not a number")
+        else:
+            for key, point in grid.items():
+                try:
+                    label = float(key)
+                except (TypeError, ValueError):
+                    problems.append(f"sensitivity grid key {key!r} is not a threshold")
+                    continue
+                # The grid label must be the threshold the run that produced this point
+                # actually used. `_parse_grid` takes THRESHOLD=PATH from the operator, so
+                # without this the sensitivity table is a caption over arbitrary reports —
+                # the exact standard this module applies to `supplies`. Found by review
+                # (app r1); the builder refuses the mismatch and this re-derives it.
+                recorded = (
+                    point.get("report_stage2_threshold") if isinstance(point, Mapping) else None
+                )
+                if not isinstance(recorded, (int, float)) or isinstance(recorded, bool):
+                    problems.append(
+                        f"sensitivity grid point {key!r} records no threshold of its own, so "
+                        "its label is not bound to the run that produced it"
+                    )
+                elif abs(float(recorded) - label) > 1e-12:
+                    problems.append(
+                        f"sensitivity grid point labelled {key!r} was produced at "
+                        f"{recorded!r} — the label does not describe its own bytes"
+                    )
+                if abs(label - float(threshold)) < 1e-12:
+                    published.append(point)
         if not published:
             problems.append("the published threshold is not one of the sensitivity grid points")
         elif published[0].get("mined_ids") != outcome.get("mined_ids"):

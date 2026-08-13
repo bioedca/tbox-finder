@@ -43,7 +43,7 @@ PUBLICATION_PATH = REPO_ROOT / "reports/p3/remine_round_report.json"
 
 #: The bytes the P3-15′-k round published. Regenerating the round legitimately means
 #: updating this in the same commit — deliberately, as a golden fixture does.
-COMMITTED_PUBLICATION_SHA256 = "4808cb886ad2d736366c8e50b9ccd99a12ecc6518af8e0f0142b006d4fdff11e"
+COMMITTED_PUBLICATION_SHA256 = "e15f83d6f533e7af2cc3ca9fed5412262ca2a724746d3ff920badfb65798dbb7"
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -124,7 +124,9 @@ def make_plan(**overrides: Any) -> dict[str, Any]:
 
 def make_publication(**overrides: Any) -> dict[str, Any]:
     round_report = make_round()
-    grid = {"0.5": make_round(), "0.9": round_report}
+    # Each grid point carries the threshold ITS run was given, so the labels below are
+    # bound to their own bytes rather than asserted by the operator.
+    grid = {"0.5": make_round(stage2_threshold=0.5), "0.9": round_report}
     pub = build_publication(
         round_report=round_report,
         plan_report=make_plan(),
@@ -212,6 +214,30 @@ def test_an_empty_reasons_map_makes_the_split_vacuous_and_is_refused() -> None:
     report["round"]["reasons"] = {}
     with pytest.raises(PublicationError, match="no per-candidate reasons"):
         spared_split(report)
+
+
+def test_a_duplicate_spared_id_inflates_a_half_and_is_refused() -> None:
+    """Found by review (CLI r1). The count check above cannot see it: a repeated id keeps
+    ``n_spared == len(spared_ids)`` true while being counted once per occurrence, so one
+    half of the published split and its per-disjunct tally both inflate
+    ([[duplicate-key-merges-instead-of-colliding]]).
+    """
+    report = make_round()
+    report["round"]["spared_ids"] = [*report["round"]["spared_ids"], "c-arch"]
+    report["round"]["n_spared"] = len(report["round"]["spared_ids"])
+    with pytest.raises(PublicationError, match="duplicate candidate id"):
+        spared_split(report)
+
+
+def test_a_duplicate_mined_id_overstates_the_round_and_is_refused() -> None:
+    """The sibling of the finding above, on the list that IS a 3-candidate round's headline
+    ([[fixed-one-of-two-identical-things]])."""
+    pub = make_publication()
+    pub["outcome"]["mined_ids"] = ["c-mined", "c-mined"]
+    pub["outcome"]["n_mined"] = 2
+    pub["outcome"]["n_candidates"] = 10
+    problems = publication_problems(pub)
+    assert any("mined_ids carries a duplicate" in p for p in problems), problems
 
 
 def test_an_empty_spared_list_is_refused() -> None:
@@ -331,7 +357,39 @@ def test_a_single_point_grid_is_refused_as_a_sensitivity() -> None:
 
 def test_the_published_threshold_must_be_a_grid_point() -> None:
     with pytest.raises(PublicationError, match="not one of the grid points"):
-        threshold_sensitivity({"0.5": make_round(), "0.9": make_round()}, published_threshold=0.99)
+        threshold_sensitivity(
+            {"0.5": make_round(stage2_threshold=0.5), "0.9": make_round()},
+            published_threshold=0.99,
+        )
+
+
+def test_a_mislabelled_grid_point_is_refused_rather_than_published() -> None:
+    """Found by review (app r1). ``--grid THRESHOLD=PATH`` takes the label from the
+    operator, so without binding it to the report's own ``stage2_threshold`` a sensitivity
+    table can be assembled from runs at other operating points — a caption, which is
+    exactly what the ``supplies`` digests exist not to be.
+    """
+    with pytest.raises(PublicationError, match="was produced at stage2_threshold"):
+        threshold_sensitivity(
+            {"0.5": make_round(stage2_threshold=0.99), "0.9": make_round()},
+            published_threshold=0.9,
+        )
+
+
+def test_a_grid_point_carrying_no_threshold_of_its_own_is_refused() -> None:
+    with pytest.raises(PublicationError, match="carries no stage2_threshold of its own"):
+        threshold_sensitivity(
+            {"0.5": make_round(stage2_threshold=None), "0.9": make_round()},
+            published_threshold=0.9,
+        )
+
+
+def test_a_grid_point_from_a_refused_round_is_refused() -> None:
+    with pytest.raises(PublicationError, match="not a round leg's report that ran"):
+        threshold_sensitivity(
+            {"0.5": make_round(stage2_threshold=0.5, may_run=False), "0.9": make_round()},
+            published_threshold=0.9,
+        )
 
 
 def test_a_grid_whose_mined_set_moves_is_reported_as_moving() -> None:
@@ -339,7 +397,7 @@ def test_a_grid_whose_mined_set_moves_is_reported_as_moving() -> None:
     moved = make_round()
     moved["round"]["mined_ids"] = ["c-other"]
     sensitivity = threshold_sensitivity(
-        {"0.5": make_round(), "0.9": moved}, published_threshold=0.9
+        {"0.5": make_round(stage2_threshold=0.5), "0.9": moved}, published_threshold=0.9
     )
     assert sensitivity["mined_set_invariant"] is False
     assert "MOVES ACROSS THE GRID" in sensitivity["reading"]
@@ -349,7 +407,7 @@ def test_an_invariant_mined_set_with_a_moving_split_says_both() -> None:
     moved = make_round()
     moved["round"]["reasons"]["c-stage2"] = "unavailable_backend:high_stage2_posterior"
     sensitivity = threshold_sensitivity(
-        {"0.5": make_round(), "0.9": moved}, published_threshold=0.9
+        {"0.5": make_round(stage2_threshold=0.5), "0.9": moved}, published_threshold=0.9
     )
     assert sensitivity["mined_set_invariant"] is True
     assert sensitivity["spared_split_invariant"] is False
@@ -424,8 +482,15 @@ def test_a_checker_that_flags_everything_would_fail_this_control() -> None:
         (lambda p: p["outcome"].__setitem__("mined_ids", []), "n_mined disagrees"),
         (
             lambda p: p["probe_exclusion"].__setitem__("n_substrate_candidates", 4),
-            "different substrate",
+            "do not describe the same manifest",
         ),
+        (
+            lambda p: p["stage2_sensitivity"]["grid"]["0.5"].__setitem__(
+                "report_stage2_threshold", 0.77
+            ),
+            "the label does not describe its own bytes",
+        ),
+        (lambda p: p.__setitem__("stage2_threshold", None), "not a number"),
         (
             lambda p: p["probe_exclusion"].__setitem__("reading", "members_excluded"),
             "does not follow",
@@ -603,3 +668,63 @@ def test_the_publication_names_no_absolute_path() -> None:
 def test_the_published_report_is_pinned_by_digest() -> None:
     digest = hashlib.sha256(PUBLICATION_PATH.read_bytes()).hexdigest()
     assert digest == COMMITTED_PUBLICATION_SHA256
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# Review-found holes (app r1), each reproduced before it was closed
+# ═════════════════════════════════════════════════════════════════════════════
+def test_a_round_that_actually_excluded_a_probe_member_still_publishes() -> None:
+    """``outcome.n_candidates`` is the POST-exclusion count.
+
+    ``apply_remine_spare_rule`` calls ``exclude_probe_members`` before ``mine_round``, so
+    comparing the manifest size directly to ``n_candidates`` held on this round only
+    because 0 members were excluded — and would have refused every round where the
+    exclusion did anything. Found by review; reproduced by construction.
+    """
+    report = make_round()
+    report["round"]["n_excluded_probe_members"] = 1
+    report["round"]["excluded_probe_member_ids"] = ["tier2n:0"]
+    pub = build_publication(
+        round_report=report,
+        plan_report=make_plan(),
+        substrate_ids={f"sub:{i}" for i in range(9)} | {"tier2n:0"},
+        probe_ids={f"tier2n:{i}" for i in range(3)},
+        grid={"0.5": make_round(stage2_threshold=0.5), "0.9": report},
+        supplies={"covariation_status.json": "f" * 64},
+        reproduction={
+            "reproduced": True,
+            "published": outcome_fingerprint(report),
+            "replayed": outcome_fingerprint(report),
+        },
+        provenance={},
+    )
+    assert pub["probe_exclusion"]["n_excluded"] == 1
+    assert pub["probe_exclusion"]["reading"] == "members_excluded"
+    assert publication_problems(pub) == []
+
+
+def test_a_substrate_that_does_not_account_for_the_exclusion_is_still_caught() -> None:
+    """The positive control for the fix above: relaxing the clause must not delete it."""
+    pub = make_publication()
+    pub["probe_exclusion"]["n_substrate_candidates"] = 20
+    assert any("do not describe the same manifest" in p for p in publication_problems(pub))
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda p: p.__setitem__("stage2_threshold", None),
+        lambda p: p.__setitem__("stage2_threshold", "0.9"),
+        lambda p: p["stage2_sensitivity"]["grid"].__setitem__("not-a-number", {}),
+    ],
+)
+def test_the_checker_records_a_problem_rather_than_raising(mutate: Any) -> None:
+    """``publication_problems`` runs on payloads it did not write — a committed report, a
+    hand-edited one — and ``main`` calls it to decide whether to write at all. A
+    ``float()`` on a non-numeric key or a ``None`` threshold escaped as an unhandled
+    exception, i.e. a traceback where a recorded refusal was meant. Found by review.
+    """
+    pub = make_publication()
+    mutate(pub)
+    problems = publication_problems(pub)  # must not raise
+    assert problems
