@@ -380,6 +380,16 @@ def test_the_disposition_retires_the_supersession_claim_and_carries_the_parent_f
     assert disposition["checkpoint_superseded"] is False
     assert disposition["supersession_claim_status"] == "RETIRED_BY_ADR_0005_A12"
     assert disposition["parent_checkpoint_in_round_report"] is None
+    # Review r2: asserting only the None case passes for a function that always emits None,
+    # which would blind `publication_problems`' "no retrain beside a named parent" refusal.
+    # The field must PROPAGATE, so a round that names a parent is caught downstream.
+    parent = "data/processed/checkpoints/stage1_production/stage1.pt"
+    assert (
+        retrain_disposition(make_round(parent_checkpoint=parent))[
+            "parent_checkpoint_in_round_report"
+        ]
+        == parent
+    )
 
 
 def test_the_disposition_attributes_the_supersession_claim_to_impmd_not_the_prd() -> None:
@@ -399,10 +409,14 @@ def test_the_disposition_attributes_the_supersession_claim_to_impmd_not_the_prd(
 #: harness showed that changing a single letter ("supersedes" → "supersede") walked a fully
 #: reinstated misattribution past the earlier substring form of this guard. Matching the verb
 #: family instead means a paraphrase has to stop *claiming* the thing to get through.
+#: Review r2 found the passive hole this comment's own sabotage had missed: the earlier
+#: form required ``is`` before the participle, so "the P2 checkpoint **was** superseded"
+#: walked through. The auxiliary is now optional entirely — any participle near ``P2``
+#: counts, in either order.
 _PRD_MENTION = re.compile(r"\bPRD\b", re.IGNORECASE)
 _SUPERSESSION_CLAIM = re.compile(
     r"supersed(?:e|es|ed|ing)\b[^.]{0,80}\bP2\b|"  # "supersede[s] … the P2 checkpoint"
-    r"\bP2\b[^.]{0,80}\bis\s+supersed(?:ed|ing)\b",  # "the P2 checkpoint is superseded"
+    r"\bP2\b[^.]{0,80}\bsupersed(?:ed|ing)\b",  # "the P2 checkpoint {is,was,had been} superseded"
     re.IGNORECASE,
 )
 
@@ -496,7 +510,11 @@ def test_the_disposition_records_the_tier2n_halt_as_vacuous_not_as_passed() -> N
     # A prefix plus a substring both survive appending a fabricated measurement after them,
     # which is the exact failure this field exists to prevent (harness finding). So the
     # field must not report a recall figure at all.
-    assert not re.search(r"\brecall\b[^.]{0,40}\b\d", halt), halt
+    # Review r2: matching a number only AFTER "recall" lets "0.97 recall" through. Both
+    # orders are refused, so the field cannot carry a recall figure in any phrasing.
+    assert not re.search(
+        r"\brecall\b[^.]{0,40}\b\d|\b\d+(?:\.\d+)?\b[^.]{0,40}\brecall\b", halt
+    ), halt
     assert "did not drop" not in halt
 
 
@@ -874,6 +892,55 @@ def test_the_a12_repin_moved_no_measured_value() -> None:
     # meaningful — the ambiguity was real even though the reported KeyError was not.)
     assert pub["problems"] == []
     assert pub["round_report_problems"] == []
+
+
+#: Every top-level section of the publication that carries a MEASUREMENT rather than the
+#: A12 citation metadata. The repin comment at the top of this file claims these are
+#: byte-identical across `c8aa02cf… -> e733744d…`; review r2 pointed out that enumerating a
+#: handful of scalars does not check that claim, so the claim is pinned by digest instead.
+_MEASUREMENT_SECTIONS = (
+    "outcome",
+    "spared_split",
+    "stage2_sensitivity",
+    "probe_exclusion",
+    "supplies",
+    "reproduction",
+    "provenance",
+    "plan_leg",
+    "stage2_threshold",
+    "stage2_threshold_pinned",
+    "may_run",
+    "leg",
+    "step",
+    "problems",
+    "round_report_problems",
+)
+
+#: sha256 over the canonical JSON of `_MEASUREMENT_SECTIONS` — computed on the artifact as
+#: published by P3-15′-k at `c8aa02cf…`, BEFORE the A12 regeneration, and unchanged after
+#: it. That is the whole content of "no measured value moved": if a future repin touches
+#: any measurement, this constant must be updated deliberately and the change justified.
+#: Computed on BOTH artifacts and verified equal — that equality is the evidence, not the
+#: constant: `git show main:reports/p3/remine_round_report.json` (c8aa02cf…) and the
+#: regenerated file (e733744d…) both hash to this over `_MEASUREMENT_SECTIONS`.
+MEASUREMENT_SURFACE_SHA256 = "454149759e9fc993a08bc425d1b0084295331ea74170729466f1febe516ea4d3"
+
+
+def measurement_surface_digest(pub: dict[str, Any]) -> str:
+    payload = {k: pub[k] for k in _MEASUREMENT_SECTIONS}
+    return hashlib.sha256(
+        json.dumps(payload, sort_keys=True, ensure_ascii=False).encode("utf-8")
+    ).hexdigest()
+
+
+def test_the_a12_repin_left_the_whole_measurement_surface_byte_identical() -> None:
+    """The repin comment's claim, checked rather than asserted in prose.
+
+    Enumerating scalars (the test above) catches the headline numbers; it cannot catch a
+    changed supply digest, a moved grid point, or a rewritten provenance block — all of
+    which the comment says did not move. This pins the lot.
+    """
+    assert measurement_surface_digest(committed_publication()) == MEASUREMENT_SURFACE_SHA256
 
 
 def test_the_published_spared_split_is_recomputed_from_the_grid_point_it_names() -> None:
