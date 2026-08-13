@@ -6551,7 +6551,7 @@ its named test**, plus a comment-only negative control that stayed GREEN and a p
 `pytest.raises` bind to their specific refusal, not to "something raised"; both sources restored
 byte-identically by sha256 with `__pycache__` cleared. Suite vs a **matched `main` baseline worktree
 at `54f70f6`** (same no-DVC-data conditions): **zero new failures** — 13 FAILED both sides, identical
-set. `ruff` 0.15.15 + `black` 25.11.0 clean.
+set, passes **5869 → 5920**. `ruff` 0.15.15 + `black` 25.11.0 clean.
 
 **⚠ THE CLEAN REVIEW ROUND WAS A FLOOR, AGAIN.** The CodeRabbit CLI reviewed all six files and
 returned *No findings*; a 4-lens adversarial harness run afterwards (**24 agents, 0 errors, 20
@@ -6589,8 +6589,14 @@ would have been unreachable code, so it was **declined with the evidence** rathe
 unbounded, so a **colon inside the record id** made the id unparsable and would have blocked the
 write. The production path mints `p{i:05d}`, but `generate` takes the record id from whatever parent
 frame it is handed and this repo names external records `anchor:`/`blind:`-prefixed (`splits.py`), so
-the split is bounded now and the family/record emptiness guards are unaffected. Review counts across
-the step: CLI **0 · 3 · 1**, harness **3 of 20**.
+the split is bounded now and the family/record emptiness guards are unaffected. **Round 4** returned
+*No new findings*, and the GitHub app's automatic review (its first non-rate-limited round on this
+branch) returned one nitpick that was also right: `"no" in p` is a substring of *"not an integer"*, so
+the missing-key test passed on the **wrong-type** refusal as readily as on the absent-key one and
+could not distinguish the two branches it exists to separate — matched on `"has no"` now, with the
+exact confusion sabotaged RED. Review counts across the step: CLI **0 · 3 · 1 · 0**, app **1
+nitpick**, adversarial harness **3 of 20**; **31 sabotages** in total, every one RED against its
+named test, plus the artifact sabotage, one comment-only negative control and one positive control.
 
 **Decisions.** No ADR amendment: enforcing `TIER2N_PROBE_MIN_N` at the point the artifact is minted
 implements ADR-0005 A1's existing floor, it does not pin a new value. `build_probe_report` is kept
