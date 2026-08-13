@@ -6748,4 +6748,49 @@ and its digest pin updated in the same commit: `4808cb88…` → `e15f83d6…`. 
 moved** — 941 / 3 / 0 / 938 / 0, 718 / 220, 79, and the three mined ids are unchanged.
 Sabotages: **39, every one RED against its named test**, controls unchanged.
 
+**Review round 3 (CLI, over the whole branch diff): 12 findings — 8 major, 4 minor — and eleven
+were real.** The GitHub app went **rate-limited** after the first push (`gh pr checks` reads *pass*
+on a *"Review rate limited"* body, which §5.1 treats as an **absence**, not a pass), so this round
+is the CLI's. One claim was **wrong and refuted by execution**: *"`passed:minable,` becomes a valid
+reason"* — `minable` is not in `ALL_DISJUNCTS`, so it is already refused; the *duplicate-token* half
+of that same finding was real and is fixed. The rest, all verified by running them first:
+
+* **Fail-open duck typing, three ways.** `bool("false")` is `True`, so a **string** could authorise
+  the round (`ready`, `yield_producible`, `may_run`, `available`, the availability map);
+  `isinstance(True, int)` is `True` and `int(1.9)` truncates, so counts were coercible; and
+  `float("nan")` satisfies every numeric check while making `abs(a − b) > 1e-12` **False**, so a
+  NaN threshold slipped past the label binding *and* would have round-tripped through `json.dumps`
+  as non-standard `NaN`. `is_json_bool` / `is_count` / `is_finite_number` / `is_sha256` now gate all
+  of it.
+* **⛔ A grid point that mined every candidate was unpublishable.** `spared_split` refused
+  `spared_ids: []`, and `threshold_sensitivity` calls it for **every** point. Zero spared is now a
+  zeroed split; the anti-vacuity intent moved to the (still-required) non-empty `reasons` map.
+* **⛔ The replay fingerprint omitted `n_masked` and `n_refused_no_coordinates`** — a replay could
+  move a candidate between *"masked by the union prior"* and *"refused for want of coordinates"*,
+  two different facts about one locus, and still read `reproduced: true`.
+* **⛔ The per-disjunct detail was unbound.** The self-check validated the two aggregate halves and
+  nothing else, so a hand-edited `passes_per_disjunct` could rewrite **which criterion protected the
+  corpus** and pass everything. The split's canonical digest is now part of the fingerprint.
+* **⛔ `spared_split_invariant` was computed from one of six fields and never checked.** A grid
+  whose per-disjunct composition moved could be published as composition-invariant. Now computed
+  over the whole composition and re-derived by the checker.
+* **⛔ The grid was bound to thresholds but not to a round.** Two self-consistent points over
+  different manifests would have compared two rounds; every point now carries the digest of its own
+  candidate-id set and they must agree.
+* **⛔ The supply binding had three holes**: `union_prior.parquet` and `master_clean_v0.parquet` are
+  read by the replay and were not hashed; `_parse_grid` discarded the grid report paths; and any
+  64-character string counted as a digest. The key set is now exact (`REQUIRED_SUPPLY_KEYS` + one
+  `grid:<label>` per point) and every value must be hex.
+* **The checker could still raise instead of recording** on nested payloads it did not write
+  (`.get` on a `None` derivation or a non-object grid point).
+* **The absolute-path test was an allowlist wearing a general claim** — it checked `/home/` and
+  `/exports/` only, so a leak under `/scratch/` or `/Users/` passed. It now walks the parsed values
+  and fails on any POSIX absolute path.
+
+The artifact was regenerated (it now carries `candidate_id_set_sha256` and the full per-disjunct
+composition per grid point, and twelve supply digests) and repinned in the same commit:
+`e15f83d6…` → `c8aa02cf…`. **No published number moved** — 941 / 3 / 0 / 938 / 0, 718 / 220, 79, the
+three mined ids, and 724/718/700 across the grid are all unchanged. Tests **85** (from 69);
+**49 sabotages, every one RED against its named test**, controls unchanged.
+
 **Commit.** See the PR that carries this stanza.

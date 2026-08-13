@@ -53,6 +53,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import sys
 from collections.abc import Mapping, Sequence
 from pathlib import Path
@@ -87,8 +88,58 @@ SEVEN_DECISION = (
 )
 
 
+#: The supply entries every publication must name, beyond one ``grid:<label>`` per
+#: sensitivity point. ``union_prior`` and ``master_clean_v0`` are here because
+#: :func:`reproduce_round` passes them to the round leg — an input the replay reads and
+#: the publication does not hash is an input the digests do not cover (review r2).
+REQUIRED_SUPPLY_KEYS = frozenset(
+    {
+        "covariation_status.json",
+        "architecture_status.json",
+        "synteny_status.json",
+        "stage2_posteriors.json",
+        "round0_fp_manifest.json",
+        "tier2n_probe_ids.json",
+        "remine_plan.json",
+        "union_prior.parquet",
+        "master_clean_v0.parquet",
+    }
+)
+GRID_SUPPLY_PREFIX = "grid:"
+_HEX = frozenset("0123456789abcdef")
+
+
 class PublicationError(ValueError):
     """Raised on a round report this module cannot publish without overclaiming."""
+
+
+# ── Strict JSON-shape predicates ────────────────────────────────────────────
+# Python's duck typing is fail-OPEN on every one of these, and each was reachable:
+# ``bool("false")`` is True, ``isinstance(True, int)`` is True, ``int(1.9)`` truncates,
+# and ``float("nan")`` satisfies every numeric check while making ``abs(a - b) > eps``
+# False, so a NaN threshold slips through the label binding AND round-trips through
+# ``json.dumps`` as non-standard ``NaN``. All three found by review (r2).
+def is_json_bool(value: Any) -> bool:
+    """True only for a real JSON boolean — never for a truthy string or number."""
+    return isinstance(value, bool)
+
+
+def is_count(value: Any) -> bool:
+    """True only for a non-negative JSON integer (``True`` is not a count)."""
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 0
+
+
+def is_finite_number(value: Any) -> bool:
+    """True only for a finite real number — rejects ``NaN``/``inf`` and booleans."""
+    return (
+        isinstance(value, (int, float))
+        and not isinstance(value, bool)
+        and math.isfinite(float(value))
+    )
+
+
+def is_sha256(value: Any) -> bool:
+    return isinstance(value, str) and len(value) == 64 and set(value.lower()) <= _HEX
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -124,12 +175,20 @@ def parse_spare_reason(reason: Any) -> tuple[str, tuple[str, ...]]:
             f"({REASON_PASSED_PREFIX!r}…, {REASON_UNAVAILABLE_PREFIX!r}…); a spared "
             "candidate whose cause cannot be read must not be counted into either half"
         )
-    disjuncts = tuple(tok for tok in body.split(",") if tok)
-    if not disjuncts:
-        raise PublicationError(f"spare reason {reason!r} names no disjunct")
+    tokens = body.split(",")
+    if not tokens or any(not tok for tok in tokens):
+        # Silently dropping empty tokens made `passed:,,x` and `passed:x,` legal
+        # spellings of a well-formed reason; the rule emits neither, so accepting them
+        # only widened what this parser will count (review r2).
+        raise PublicationError(f"spare reason {reason!r} carries an empty disjunct token")
+    disjuncts = tuple(tokens)
     unknown = [d for d in disjuncts if d not in ALL_DISJUNCTS]
     if unknown:
         raise PublicationError(f"spare reason {reason!r} names unknown disjunct(s) {unknown}")
+    if len(set(disjuncts)) != len(disjuncts):
+        # A repeated token is counted once per occurrence into ``passes_per_disjunct``,
+        # so `passed:x,x` credits criterion x twice for one candidate (review r2).
+        raise PublicationError(f"spare reason {reason!r} names a disjunct twice")
     return kind, disjuncts
 
 
@@ -152,11 +211,16 @@ def spared_split(report: Mapping[str, Any]) -> dict[str, Any]:
     spared = block.get("spared_ids")
     if not isinstance(reasons, Mapping) or not reasons:
         raise PublicationError("the round carries no per-candidate reasons map to split")
-    if not isinstance(spared, list) or not spared:
-        raise PublicationError(
-            "the round carries no spared_ids, so a split of the spared would be vacuous"
-        )
+    if not isinstance(spared, list):
+        raise PublicationError("the round carries no spared_ids list to split")
     recorded = block.get("n_spared")
+    if not is_count(recorded):
+        raise PublicationError(f"n_spared={recorded!r} is not a non-negative integer")
+    # A round that mined EVERY candidate legitimately spares none, and
+    # ``threshold_sensitivity`` calls this for every grid point — refusing the empty list
+    # outright made such a point unpublishable (review r2). The anti-vacuity intent is
+    # kept by the non-empty ``reasons`` guard above: a round that decided nothing at all
+    # still cannot produce a split.
     if recorded != len(spared):
         raise PublicationError(f"n_spared={recorded!r} disagrees with {len(spared)} spared_ids")
     # A repeated id is counted once per occurrence below, so it inflates one half of the
@@ -239,6 +303,10 @@ def probe_exclusion_diagnosis(
         raise PublicationError(
             "the mining substrate is empty, so a 0 exclusion is a statement about nothing"
         )
+    if not is_count(n_excluded):
+        # ``int(1.9)`` truncates and ``int(True)`` is 1, so coercing here would have let a
+        # malformed count agree with the overlap it is supposed to be checked against.
+        raise PublicationError(f"n_excluded={n_excluded!r} is not a non-negative integer")
     overlap = sorted(probe_ids & substrate_ids)
     if len(overlap) != int(n_excluded):
         raise PublicationError(
@@ -320,13 +388,31 @@ def plan_leg_summary(plan_report: Mapping[str, Any]) -> dict[str, Any]:
         clauses = block.get("clauses")
         if not isinstance(clauses, Mapping) or not clauses:
             raise PublicationError(f"{key} carries no clauses, so its verdict is unauditable")
-        non_bool = sorted(k for k, v in clauses.items() if not isinstance(v, bool))
+        non_bool = sorted(k for k, v in clauses.items() if not is_json_bool(v))
         if non_bool:
             raise PublicationError(f"{key} clauses {non_bool} are not booleans")
+        if not is_json_bool(block.get("available")):
+            raise PublicationError(
+                f"{key}.available is {block.get('available')!r}, not a JSON boolean"
+            )
         derivations[key] = {"available": bool(block.get("available")), "clauses": dict(clauses)}
+    # ⚠ ``bool("false")`` is True, so coercing an authorisation flag rather than requiring
+    # a real JSON boolean let a string authorise the round (review r2). Every flag that
+    # decides whether a round may publish is required to be a boolean, not truthy.
+    availability = plan.get("availability")
+    if not isinstance(availability, Mapping) or not availability:
+        raise PublicationError("the plan block carries no availability map")
+    non_bool_availability = sorted(k for k, v in availability.items() if not is_json_bool(v))
+    if non_bool_availability:
+        raise PublicationError(
+            f"plan availability entries {non_bool_availability} are not JSON booleans"
+        )
+    for gate, field in ((readiness, "ready"), (yield_gate, "yield_producible")):
+        if not is_json_bool(gate.get(field)):
+            raise PublicationError(f"the plan's {field} is {gate.get(field)!r}, not a JSON boolean")
     return {
         "leg": "plan",
-        "availability": dict(plan.get("availability") or {}),
+        "availability": dict(availability),
         "ready": bool(readiness.get("ready")),
         "yield_producible": bool(yield_gate.get("yield_producible")),
         "may_run": bool(readiness.get("ready")) and bool(yield_gate.get("yield_producible")),
@@ -373,6 +459,24 @@ def retrain_disposition(report: Mapping[str, Any]) -> dict[str, Any]:
 # ═════════════════════════════════════════════════════════════════════════════
 # The Stage-2 operating point — unpinned, so its sensitivity is published
 # ═════════════════════════════════════════════════════════════════════════════
+#: The split fields whose agreement makes two grid points "the same composition", and
+#: whose digest binds a published split to the replay. The two aggregate halves alone
+#: left ``passes_per_disjunct`` and the stage2-alone count hand-editable (review r2).
+COMPOSITION_FIELDS = (
+    "n_spared",
+    "n_spared_by_a_passing_disjunct",
+    "n_spared_by_unavailable_backend_only",
+    "n_spared_by_stage2_posterior_alone",
+    "passes_per_disjunct",
+    "unavailable_per_disjunct",
+)
+
+
+def canonical_composition(split: Mapping[str, Any]) -> tuple[str, ...]:
+    """Every published split field, in a hashable, order-independent form."""
+    return tuple(json.dumps(split.get(f), sort_keys=True) for f in COMPOSITION_FIELDS)
+
+
 def threshold_sensitivity(
     grid: Mapping[str, Mapping[str, Any]], *, published_threshold: float
 ) -> dict[str, Any]:
@@ -387,8 +491,22 @@ def threshold_sensitivity(
             f"a sensitivity needs at least two grid points, got {len(grid)}; one point "
             "restates the headline rather than testing it"
         )
+    for key in grid:
+        try:
+            label = float(key)
+        except (TypeError, ValueError) as exc:
+            raise PublicationError(f"grid key {key!r} is not a threshold") from exc
+        # NaN defeats the label binding below silently — ``abs(nan - x) > eps`` is False,
+        # so a NaN label agrees with every report — and ``json.dumps`` writes it as
+        # non-standard ``NaN`` (review r2).
+        if not math.isfinite(label):
+            raise PublicationError(f"grid key {key!r} is not a finite threshold")
+    if not is_finite_number(published_threshold):
+        raise PublicationError(f"the published threshold {published_threshold!r} is not finite")
     points: dict[str, Any] = {}
     mined_sets: list[tuple[str, ...]] = []
+    compositions: list[tuple[Any, ...]] = []
+    substrates: dict[str, str] = {}
     for key, report in sorted(grid.items(), key=lambda kv: float(kv[0])):
         block = _round_block(report)
         # ⚠ The label is the OPERATOR's (`--grid THRESHOLD=PATH`); the report's own
@@ -397,7 +515,7 @@ def threshold_sensitivity(
         # the same standard the ``supplies`` digests hold the four evidence tables to.
         # Found by review (app r1): before this, `--grid 0.5=<a 0.99 report>` published.
         recorded = report.get("stage2_threshold") if isinstance(report, Mapping) else None
-        if not isinstance(recorded, (int, float)) or isinstance(recorded, bool):
+        if not is_finite_number(recorded):
             raise PublicationError(
                 f"the grid point labelled {key!r} carries no stage2_threshold of its own, so "
                 "its label cannot be bound to the run that produced it"
@@ -414,23 +532,54 @@ def threshold_sensitivity(
                 f"(leg={report.get('leg')!r}, may_run={report.get('may_run')!r})"
             )
         mined = tuple(sorted(str(i) for i in block.get("mined_ids", [])))
+        if len(set(mined)) != len(block.get("mined_ids", [])) or not is_count(block.get("n_mined")):
+            raise PublicationError(
+                f"the grid point labelled {key!r} carries {block.get('n_mined')!r} mined and a "
+                "mined id list that is not the same number of distinct ids"
+            )
+        if len(mined) != int(block.get("n_mined")):
+            raise PublicationError(
+                f"the grid point labelled {key!r} records n_mined="
+                f"{block.get('n_mined')!r} beside {len(mined)} mined ids"
+            )
+        # ⚠ Binding the label to its own threshold is not enough: two points computed over
+        # DIFFERENT manifests would still each be self-consistent, and the sensitivity
+        # would compare two rounds rather than one round at two operating points. The
+        # candidate id set is what makes them the same round (review r2).
+        reasons = block.get("reasons")
+        if not isinstance(reasons, Mapping) or not reasons:
+            raise PublicationError(f"the grid point labelled {key!r} carries no reasons map")
+        substrates[key] = hashlib.sha256(
+            json.dumps(sorted(map(str, reasons)), sort_keys=True).encode("utf-8")
+        ).hexdigest()
         split = spared_split(report)
         points[key] = {
             "report_stage2_threshold": float(recorded),
-            "n_mined": block.get("n_mined"),
+            "n_mined": int(block.get("n_mined")),
             "mined_ids": list(mined),
+            "candidate_id_set_sha256": substrates[key],
             "n_spared_by_a_passing_disjunct": split["n_spared_by_a_passing_disjunct"],
             "n_spared_by_unavailable_backend_only": split["n_spared_by_unavailable_backend_only"],
             "n_spared_by_stage2_posterior_alone": split["n_spared_by_stage2_posterior_alone"],
+            "passes_per_disjunct": dict(split["passes_per_disjunct"]),
+            "unavailable_per_disjunct": dict(split["unavailable_per_disjunct"]),
         }
         mined_sets.append(mined)
+        compositions.append(canonical_composition(split))
     if not any(abs(float(k) - float(published_threshold)) < 1e-12 for k in grid):
         raise PublicationError(
             f"the published threshold {published_threshold} is not one of the grid points "
             f"{sorted(grid)}; the headline would sit outside its own sensitivity"
         )
+    if len(set(substrates.values())) != 1:
+        raise PublicationError(
+            "the sensitivity grid's points were computed over different candidate sets, so "
+            f"they compare two rounds rather than one round at {len(grid)} operating points"
+        )
     invariant = len(set(mined_sets)) == 1
-    split_invariant = len({p["n_spared_by_a_passing_disjunct"] for p in points.values()}) == 1
+    # ⚠ Comparing only ``n_spared_by_a_passing_disjunct`` called a grid "invariant" whose
+    # per-disjunct composition and stage2-alone count both moved (review r2).
+    split_invariant = len(set(compositions)) == 1
     return {
         "grid": points,
         "mined_set_invariant": invariant,
@@ -460,15 +609,26 @@ def sha256_file(path: str | Path) -> str:
 
 
 def outcome_fingerprint(report: Mapping[str, Any]) -> dict[str, Any]:
-    """The four fields two runs of the same round must agree on, in a comparable shape."""
+    """Every field two runs of the same round must agree on, in a comparable shape."""
     block = _round_block(report)
     return {
         "n_candidates": block.get("n_candidates"),
         "n_mined": block.get("n_mined"),
         "n_spared": block.get("n_spared"),
+        # ⚠ Omitting these two let a replay move a candidate between "masked by the union
+        # prior" and "refused for want of coordinates" and still be marked reproduced —
+        # two different facts about the same locus (review r2).
+        "n_masked": block.get("n_masked"),
+        "n_refused_no_coordinates": block.get("n_refused_no_coordinates"),
         "mined_ids": sorted(str(i) for i in block.get("mined_ids", [])),
         "reasons_sha256": hashlib.sha256(
             json.dumps(block.get("reasons"), sort_keys=True).encode("utf-8")
+        ).hexdigest(),
+        # The published split is a pure function of the two fields above, so binding its
+        # digest here is what makes a hand-edited `passes_per_disjunct` disagree with the
+        # replay instead of passing every aggregate clause (review r2).
+        "spared_split_sha256": hashlib.sha256(
+            json.dumps(canonical_composition(spared_split(report)), sort_keys=True).encode("utf-8")
         ).hexdigest(),
     }
 
@@ -586,9 +746,17 @@ def publication_problems(pub: Mapping[str, Any]) -> list[str]:
 
     if pub.get("leg") != LEG_ROUND:
         problems.append(f"leg={pub.get('leg')!r} — this is not the round leg's report")
-    if not pub.get("may_run"):
+    # ``bool("false")`` is True, so the authorisation flags are required to be real JSON
+    # booleans rather than merely truthy (review r2).
+    if not is_json_bool(pub.get("may_run")):
+        problems.append(f"may_run is {pub.get('may_run')!r}, not a JSON boolean")
+    elif not pub.get("may_run"):
         problems.append("may_run is false — a refused round has no outcome to publish")
-    if pub.get("stage2_threshold_pinned"):
+    if not is_json_bool(pub.get("stage2_threshold_pinned")):
+        problems.append(
+            f"stage2_threshold_pinned is {pub.get('stage2_threshold_pinned')!r}, not a boolean"
+        )
+    elif pub.get("stage2_threshold_pinned"):
         problems.append("stage2_threshold_pinned is true — §13.1 owns the value, not this round")
     if pub.get("round_report_problems"):
         problems.append(f"the round report self-check failed: {pub['round_report_problems']}")
@@ -602,6 +770,10 @@ def publication_problems(pub: Mapping[str, Any]) -> list[str]:
     else:
         if plan_leg.get("problems"):
             problems.append(f"the plan leg's self-check failed: {plan_leg['problems']}")
+        plan_flags = {f: plan_leg.get(f) for f in ("ready", "yield_producible", "may_run")}
+        non_bool_flags = sorted(k for k, v in plan_flags.items() if not is_json_bool(v))
+        if non_bool_flags:
+            problems.append(f"the plan leg's {non_bool_flags} are not JSON booleans")
         derived_may_run = bool(plan_leg.get("ready")) and bool(plan_leg.get("yield_producible"))
         if bool(plan_leg.get("may_run")) != derived_may_run:
             problems.append("the plan leg's may_run disagrees with its readiness × yield")
@@ -618,6 +790,8 @@ def publication_problems(pub: Mapping[str, Any]) -> list[str]:
                 "the plan leg's availability map does not name every disjunct "
                 f"{list(ALL_DISJUNCTS)}"
             )
+        elif sorted(k for k, v in availability.items() if not is_json_bool(v)):
+            problems.append("the plan leg's availability entries are not all JSON booleans")
         elif not all(bool(v) for v in availability.values()):
             problems.append(
                 "the plan leg ran with an unavailable backend, so every candidate on that "
@@ -626,8 +800,14 @@ def publication_problems(pub: Mapping[str, Any]) -> list[str]:
         derivations = plan_leg.get("supply_derivations")
         if not isinstance(derivations, Mapping) or sorted(derivations) != sorted(_DERIVATION_KEYS):
             problems.append("the plan leg carries no per-supply derivation for every supply")
+        elif sorted(k for k, v in derivations.items() if not isinstance(v, Mapping)):
+            # ``.get`` on a ``None`` or a list raises out of a function documented as
+            # RETURNING problems, i.e. a traceback where a refusal was meant (review r2).
+            problems.append("some supply derivations are not objects, so they cannot be audited")
         else:
-            unevidenced = sorted(k for k, v in derivations.items() if not v.get("available"))
+            unevidenced = sorted(
+                k for k, v in derivations.items() if not is_json_bool(v.get("available"))
+            ) or sorted(k for k, v in derivations.items() if not v.get("available"))
             if unevidenced:
                 problems.append(
                     f"the round declared supplies its own checkout cannot evidence: {unevidenced}"
@@ -747,9 +927,32 @@ def publication_problems(pub: Mapping[str, Any]) -> list[str]:
         grid = sensitivity["grid"]
         if len(grid) < 2:
             problems.append("the Stage-2 sensitivity has fewer than two grid points")
+        if not all(isinstance(point, Mapping) for point in grid.values()):
+            # Every clause below reads a point with ``.get``; a non-object point would
+            # raise out of a function that must RETURN problems (review r2).
+            return problems + ["some Stage-2 sensitivity grid points are not objects"]
         derived_invariant = len({tuple(p.get("mined_ids", [])) for p in grid.values()}) == 1
-        if bool(sensitivity.get("mined_set_invariant")) != derived_invariant:
+        if not is_json_bool(sensitivity.get("mined_set_invariant")):
+            problems.append("mined_set_invariant is not a JSON boolean")
+        elif bool(sensitivity.get("mined_set_invariant")) != derived_invariant:
             problems.append("mined_set_invariant disagrees with the grid's own mined id sets")
+        # ⚠ The composition flag was recorded and never checked, and it was derived from
+        # ONE of the six split fields — so a grid whose per-disjunct tallies moved could be
+        # published as composition-invariant (review r2). Re-derived here over all six.
+        derived_split_invariant = len({canonical_composition(p) for p in grid.values()}) == 1
+        if not is_json_bool(sensitivity.get("spared_split_invariant")):
+            problems.append("spared_split_invariant is not a JSON boolean")
+        elif bool(sensitivity.get("spared_split_invariant")) != derived_split_invariant:
+            problems.append(
+                "spared_split_invariant disagrees with the grid's own sparing compositions"
+            )
+        # ...and every point must describe the same round, not two rounds compared.
+        substrate_digests = {p.get("candidate_id_set_sha256") for p in grid.values()}
+        if len(substrate_digests) != 1 or not all(map(is_sha256, substrate_digests)):
+            problems.append(
+                "the sensitivity grid's points do not all carry the same candidate-id-set "
+                "digest, so they do not describe one round at several operating points"
+            )
         # ⚠ This function must RETURN problems, never raise them — `main` calls it before
         # deciding whether to write, and it also runs over payloads it did not produce
         # (a committed report, a hand-edited one). `float()` on a non-numeric grid key or
@@ -757,7 +960,7 @@ def publication_problems(pub: Mapping[str, Any]) -> list[str]:
         # traceback where a recorded refusal was meant. Found by review (app r1).
         threshold = pub.get("stage2_threshold")
         published: list[Any] = []
-        if not isinstance(threshold, (int, float)) or isinstance(threshold, bool):
+        if not is_finite_number(threshold):
             problems.append(f"the publication's stage2_threshold is {threshold!r}, not a number")
         else:
             for key, point in grid.items():
@@ -771,10 +974,8 @@ def publication_problems(pub: Mapping[str, Any]) -> list[str]:
                 # without this the sensitivity table is a caption over arbitrary reports —
                 # the exact standard this module applies to `supplies`. Found by review
                 # (app r1); the builder refuses the mismatch and this re-derives it.
-                recorded = (
-                    point.get("report_stage2_threshold") if isinstance(point, Mapping) else None
-                )
-                if not isinstance(recorded, (int, float)) or isinstance(recorded, bool):
+                recorded = point.get("report_stage2_threshold")
+                if not is_finite_number(recorded):
                     problems.append(
                         f"sensitivity grid point {key!r} records no threshold of its own, so "
                         "its label is not bound to the run that produced it"
@@ -820,6 +1021,18 @@ def publication_problems(pub: Mapping[str, Any]) -> list[str]:
                     f"the reproduction's published fingerprint disagrees with this "
                     f"publication's outcome on {mismatched}"
                 )
+            # ⚠ The aggregate clauses above never touch ``passes_per_disjunct``,
+            # ``unavailable_per_disjunct`` or the stage2-alone count, so a hand-edited
+            # publication could rewrite WHICH criterion protected the corpus and pass
+            # everything. The replay's split digest is what binds them (review r2).
+            derived_digest = hashlib.sha256(
+                json.dumps(canonical_composition(split), sort_keys=True).encode("utf-8")
+            ).hexdigest()
+            if fingerprint.get("spared_split_sha256") != derived_digest:
+                problems.append(
+                    "the published spared_split does not match the split the replay "
+                    "reproduced — its per-disjunct detail is unbound"
+                )
         else:
             problems.append("the reproduction records no published fingerprint")
 
@@ -827,9 +1040,24 @@ def publication_problems(pub: Mapping[str, Any]) -> list[str]:
     if not isinstance(supplies, Mapping) or not supplies:
         problems.append("publication names no supplies")
     else:
-        bad = sorted(k for k, v in supplies.items() if not (isinstance(v, str) and len(v) == 64))
+        # ⚠ "any 64-character string" accepted a non-hex placeholder, and "any non-empty
+        # key set" accepted a publication naming ONE supply. The replay also reads the
+        # union prior and the corpus, and each grid point is a file — an input the replay
+        # reads and the publication does not hash sits outside the binding (review r2).
+        bad = sorted(k for k, v in supplies.items() if not is_sha256(v))
         if bad:
             problems.append(f"supply entries {bad} carry no sha256 digest")
+        missing = sorted(REQUIRED_SUPPLY_KEYS - set(supplies))
+        if missing:
+            problems.append(f"the publication hashes none of {missing}, which the replay reads")
+        sens = pub.get("stage2_sensitivity")
+        grid_keys = set(sens.get("grid", {})) if isinstance(sens, Mapping) else set()
+        missing_points = sorted(k for k in grid_keys if f"{GRID_SUPPLY_PREFIX}{k}" not in supplies)
+        if missing_points:
+            problems.append(
+                f"sensitivity grid points {missing_points} name no hashed report, so their "
+                "labels are not bound to any bytes"
+            )
     return problems
 
 
@@ -888,23 +1116,37 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _parse_grid(entries: Sequence[str]) -> dict[str, Mapping[str, Any]]:
+def _parse_grid(entries: Sequence[str]) -> tuple[dict[str, Mapping[str, Any]], dict[str, str]]:
+    """``THRESHOLD=PATH`` entries → ``(grid, digests)``.
+
+    The paths are returned as digests rather than discarded: a grid point is a file the
+    publication's numbers depend on, so leaving it unhashed put it outside the ``supplies``
+    binding the rest of the module insists on (review r2).
+    """
     grid: dict[str, Mapping[str, Any]] = {}
+    digests: dict[str, str] = {}
     for entry in entries:
         if "=" not in entry:
             raise PublicationError(f"--grid entry {entry!r} is not THRESHOLD=PATH")
         key, path = entry.split("=", 1)
-        key = str(float(key))
+        try:
+            label = float(key)
+        except ValueError as exc:
+            raise PublicationError(f"--grid label {key!r} is not a threshold") from exc
+        if not math.isfinite(label):
+            raise PublicationError(f"--grid label {key!r} is not a finite threshold")
+        key = str(label)
         if key in grid:
             raise PublicationError(f"--grid names threshold {key} twice")
         grid[key] = read_json(path)
-    return grid
+        digests[f"{GRID_SUPPLY_PREFIX}{key}"] = sha256_file(path)
+    return grid, digests
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     round_report = read_json(args.round_report)
-    grid = _parse_grid(args.grid)
+    grid, grid_digests = _parse_grid(args.grid)
 
     supplies = {
         "covariation_status.json": sha256_file(args.status_table),
@@ -914,6 +1156,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         "round0_fp_manifest.json": sha256_file(args.manifest),
         "tier2n_probe_ids.json": sha256_file(args.probe_set),
         "remine_plan.json": sha256_file(args.plan_report),
+        # The replay reads these two as well; hashing only the JSON tables left the mask
+        # and the corpus outside the binding (review r2).
+        "union_prior.parquet": sha256_file(args.union_prior),
+        "master_clean_v0.parquet": sha256_file(args.corpus),
+        **grid_digests,
     }
 
     reproduction = reproduce_round(

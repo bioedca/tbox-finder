@@ -24,6 +24,8 @@ from typing import Any
 import pytest
 
 from tbox_finder.mining.remine_publish import (
+    GRID_SUPPLY_PREFIX,
+    REQUIRED_SUPPLY_KEYS,
     PublicationError,
     build_publication,
     id_namespaces,
@@ -43,7 +45,7 @@ PUBLICATION_PATH = REPO_ROOT / "reports/p3/remine_round_report.json"
 
 #: The bytes the P3-15′-k round published. Regenerating the round legitimately means
 #: updating this in the same commit — deliberately, as a golden fixture does.
-COMMITTED_PUBLICATION_SHA256 = "e15f83d6f533e7af2cc3ca9fed5412262ca2a724746d3ff920badfb65798dbb7"
+COMMITTED_PUBLICATION_SHA256 = "c8aa02cfc4ac56160904998d78e80c0394f616e7a27a255905432fe770371999"
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -122,18 +124,38 @@ def make_plan(**overrides: Any) -> dict[str, Any]:
     return plan
 
 
+def make_grid_twin(threshold: float) -> dict[str, Any]:
+    """A second grid point over the SAME candidates whose composition differs.
+
+    Deliberately asymmetric: with two identical points the composition flag is invariant
+    whatever the code does, so a test that flips it would be testing nothing
+    ([[symmetric-count-fixture-blind-to-inversion]]). Same id set and same mined ids, so
+    the same-round binding still holds.
+    """
+    twin = make_round(stage2_threshold=threshold)
+    twin["round"]["reasons"]["c-stage2"] = "unavailable_backend:high_stage2_posterior"
+    return twin
+
+
+def make_supplies(grid: dict[str, Any]) -> dict[str, str]:
+    """Every key the binding requires, plus one per grid point."""
+    return {k: "f" * 64 for k in REQUIRED_SUPPLY_KEYS} | {
+        f"{GRID_SUPPLY_PREFIX}{k}": "a" * 64 for k in grid
+    }
+
+
 def make_publication(**overrides: Any) -> dict[str, Any]:
     round_report = make_round()
     # Each grid point carries the threshold ITS run was given, so the labels below are
     # bound to their own bytes rather than asserted by the operator.
-    grid = {"0.5": make_round(stage2_threshold=0.5), "0.9": round_report}
+    grid = {"0.5": make_grid_twin(0.5), "0.9": round_report}
     pub = build_publication(
         round_report=round_report,
         plan_report=make_plan(),
         substrate_ids={f"sub:{i}" for i in range(9)},
         probe_ids={f"tier2n:{i}" for i in range(3)},
         grid=grid,
-        supplies={"covariation_status.json": "f" * 64},
+        supplies=make_supplies(grid),
         reproduction={
             "reproduced": True,
             "published": outcome_fingerprint(round_report),
@@ -240,11 +262,23 @@ def test_a_duplicate_mined_id_overstates_the_round_and_is_refused() -> None:
     assert any("mined_ids carries a duplicate" in p for p in problems), problems
 
 
-def test_an_empty_spared_list_is_refused() -> None:
+def test_a_round_that_spared_nothing_splits_to_zeroes_rather_than_raising() -> None:
+    """Found by review (CLI r2). A grid point may legitimately mine every candidate, and
+    ``threshold_sensitivity`` calls this for every point — refusing the empty list made
+    such a point unpublishable. The anti-vacuity intent stays on ``reasons``: a round that
+    decided nothing at all still cannot produce a split.
+    """
     report = make_round()
     report["round"]["spared_ids"] = []
     report["round"]["n_spared"] = 0
-    with pytest.raises(PublicationError, match="vacuous"):
+    split = spared_split(report)
+    assert split["n_spared"] == 0
+    assert split["n_spared_by_a_passing_disjunct"] == 0
+    assert split["n_spared_by_unavailable_backend_only"] == 0
+    assert set(split["passes_per_disjunct"].values()) == {0}
+
+    report["round"]["reasons"] = {}
+    with pytest.raises(PublicationError, match="no per-candidate reasons"):
         spared_split(report)
 
 
@@ -502,6 +536,25 @@ def test_a_checker_that_flags_everything_would_fail_this_control() -> None:
         ),
         (lambda p: p["reproduction"].__setitem__("replayed", {}), "did not reproduce"),
         (lambda p: p["supplies"].__setitem__("covariation_status.json", "short"), "no sha256"),
+        (lambda p: p["supplies"].__setitem__("covariation_status.json", "z" * 64), "no sha256"),
+        (lambda p: p["supplies"].pop("union_prior.parquet"), "which the replay reads"),
+        (lambda p: p["supplies"].pop(f"{GRID_SUPPLY_PREFIX}0.5"), "name no hashed report"),
+        (
+            lambda p: p["stage2_sensitivity"].__setitem__("spared_split_invariant", True),
+            "disagrees with the grid's own sparing compositions",
+        ),
+        (
+            lambda p: p["stage2_sensitivity"]["grid"]["0.5"].__setitem__(
+                "candidate_id_set_sha256", "b" * 64
+            ),
+            "do not describe one round",
+        ),
+        (
+            lambda p: p["spared_split"].__setitem__("passes_per_disjunct", {"x": 99}),
+            "per-disjunct detail is unbound",
+        ),
+        (lambda p: p.__setitem__("may_run", "true"), "not a JSON boolean"),
+        (lambda p: p["plan_leg"].__setitem__("ready", "true"), "are not JSON booleans"),
         (lambda p: p["plan_leg"].__setitem__("ready", False), "did not authorise"),
         (
             lambda p: p["plan_leg"]["availability"].__setitem__("any_helix_rscape", False),
@@ -659,10 +712,29 @@ def test_the_published_probe_exclusion_zero_is_the_structural_one() -> None:
 
 def test_the_publication_names_no_absolute_path() -> None:
     """The plan leg's report is withheld for exactly this reason; the published one must
-    not reintroduce it."""
-    text = PUBLICATION_PATH.read_text(encoding="utf-8")
-    assert "/home/" not in text
-    assert "/exports/" not in text
+    not reintroduce it.
+
+    ⚠ This checked two prefixes — ``/home/`` and ``/exports/`` — which is an allowlist
+    wearing a general claim: a ``repo_root`` under ``/scratch/``, ``/Users/`` or ``/data/``
+    passed it, and so would the ``/absolute/path/...`` this file's own plan fixture uses.
+    Found by review (CLI r2). Asserted on the parsed values instead, so ANY POSIX absolute
+    path fails; the provenance entries are repo-relative and stay green.
+    """
+
+    def strings(node: Any) -> Any:
+        if isinstance(node, str):
+            yield node
+        elif isinstance(node, dict):
+            for key, value in node.items():
+                yield key
+                yield from strings(value)
+        elif isinstance(node, list):
+            for item in node:
+                yield from strings(item)
+
+    values = list(strings(committed_publication()))
+    assert values, "the publication carries no strings, so this assertion is vacuous"
+    assert [s for s in values if s.startswith("/") and len(s) > 1] == []
 
 
 def test_the_published_report_is_pinned_by_digest() -> None:
@@ -689,8 +761,8 @@ def test_a_round_that_actually_excluded_a_probe_member_still_publishes() -> None
         plan_report=make_plan(),
         substrate_ids={f"sub:{i}" for i in range(9)} | {"tier2n:0"},
         probe_ids={f"tier2n:{i}" for i in range(3)},
-        grid={"0.5": make_round(stage2_threshold=0.5), "0.9": report},
-        supplies={"covariation_status.json": "f" * 64},
+        grid={"0.5": make_grid_twin(0.5), "0.9": report},
+        supplies=make_supplies({"0.5": None, "0.9": None}),
         reproduction={
             "reproduced": True,
             "published": outcome_fingerprint(report),
@@ -728,3 +800,94 @@ def test_the_checker_records_a_problem_rather_than_raising(mutate: Any) -> None:
     mutate(pub)
     problems = publication_problems(pub)  # must not raise
     assert problems
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# Review-found holes (CLI r2) — the fail-open shapes Python's duck typing allows
+# ═════════════════════════════════════════════════════════════════════════════
+def test_a_repeated_disjunct_token_would_double_credit_a_criterion() -> None:
+    """``passed:x,x`` credited criterion x twice for one candidate in
+    ``passes_per_disjunct`` — the tally that says WHICH criterion protected the corpus."""
+    with pytest.raises(PublicationError, match="names a disjunct twice"):
+        parse_spare_reason("passed:relaxed_architecture,relaxed_architecture")
+
+
+def test_an_empty_disjunct_token_is_refused_rather_than_silently_dropped() -> None:
+    with pytest.raises(PublicationError, match="empty disjunct token"):
+        parse_spare_reason("passed:,,relaxed_architecture")
+
+
+def test_a_non_finite_grid_label_is_refused() -> None:
+    """``abs(nan - x) > 1e-12`` is **False**, so a NaN label agreed with every report and
+    slipped past the binding — and ``json.dumps`` would then write non-standard ``NaN``."""
+    with pytest.raises(PublicationError, match="not a finite threshold"):
+        threshold_sensitivity(
+            {"nan": make_round(stage2_threshold=float("nan")), "0.9": make_round()},
+            published_threshold=0.9,
+        )
+
+
+def test_grid_points_over_different_candidate_sets_are_refused() -> None:
+    """Binding a label to its own threshold is not enough: two self-consistent points over
+    DIFFERENT manifests would compare two rounds rather than one round at two thresholds.
+    """
+    other = make_round(stage2_threshold=0.5)
+    other["round"]["reasons"] = {f"other-{k}": v for k, v in other["round"]["reasons"].items()}
+    other["round"]["spared_ids"] = [f"other-{i}" for i in other["round"]["spared_ids"]]
+    other["round"]["mined_ids"] = ["c-mined"]
+    with pytest.raises(PublicationError, match="different candidate sets"):
+        threshold_sensitivity({"0.5": other, "0.9": make_round()}, published_threshold=0.9)
+
+
+def test_a_string_boolean_cannot_authorise_the_plan() -> None:
+    """``bool("false")`` is True, so coercing an authorisation flag let a string authorise
+    a round. Every flag that decides whether the round may publish must be a JSON bool."""
+    plan = make_plan()
+    plan["plan"]["readiness"]["ready"] = "true"
+    with pytest.raises(PublicationError, match="not a JSON boolean"):
+        plan_leg_summary(plan)
+
+    availability = make_plan()
+    availability["plan"]["availability"]["any_helix_rscape"] = "yes"
+    with pytest.raises(PublicationError, match="not JSON booleans"):
+        plan_leg_summary(availability)
+
+
+def test_a_grid_whose_per_disjunct_composition_moves_is_not_invariant() -> None:
+    """``spared_split_invariant`` compared ONE of the six split fields, so a grid whose
+    per-disjunct tallies moved could be published as composition-invariant."""
+    moved = make_round(stage2_threshold=0.5)
+    # Same two aggregate halves, different per-disjunct credit: only the full comparison
+    # sees this.
+    moved["round"]["reasons"]["c-arch"] = "passed:downstream_aaRS_synteny"
+    sensitivity = threshold_sensitivity(
+        {"0.5": moved, "0.9": make_round()}, published_threshold=0.9
+    )
+    assert sensitivity["grid"]["0.5"]["n_spared_by_a_passing_disjunct"] == 5
+    assert sensitivity["grid"]["0.9"]["n_spared_by_a_passing_disjunct"] == 5
+    assert sensitivity["spared_split_invariant"] is False
+
+
+def test_the_fingerprint_covers_every_outcome_category() -> None:
+    """A replay that moved a candidate from ``masked`` to ``refused_no_coordinates`` — two
+    different facts about the same locus — matched the fingerprint and read reproduced."""
+    a = make_round()
+    b = make_round()
+    b["round"]["n_masked"] = 1
+    b["round"]["n_refused_no_coordinates"] = -1 + b["round"]["n_refused_no_coordinates"] + 1
+    b["round"]["n_masked"], b["round"]["n_refused_no_coordinates"] = 1, 0
+    a["round"]["n_masked"], a["round"]["n_refused_no_coordinates"] = 0, 1
+    assert outcome_fingerprint(a) != outcome_fingerprint(b)
+
+
+def test_the_checker_does_not_raise_on_malformed_nested_data() -> None:
+    """``.get`` on a ``None`` derivation or a non-object grid point raised
+    ``AttributeError`` out of a function documented as RETURNING problems."""
+    for mutate in (
+        lambda p: p["plan_leg"]["supply_derivations"].__setitem__("msa_supply_derivation", None),
+        lambda p: p["stage2_sensitivity"]["grid"].__setitem__("0.5", None),
+        lambda p: p["stage2_sensitivity"]["grid"].__setitem__("0.5", ["not", "an", "object"]),
+    ):
+        pub = make_publication()
+        mutate(pub)
+        assert publication_problems(pub)  # must not raise
