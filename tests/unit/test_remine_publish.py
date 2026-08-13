@@ -18,6 +18,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -891,3 +892,103 @@ def test_the_checker_does_not_raise_on_malformed_nested_data() -> None:
         pub = make_publication()
         mutate(pub)
         assert publication_problems(pub)  # must not raise
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# Review-found holes (CLI r3) — guards defeated at their own call sites
+# ═════════════════════════════════════════════════════════════════════════════
+@pytest.mark.parametrize("bad", [1.9, True, "2", None])
+def test_the_exclusion_count_reaches_its_guard_uncoerced(bad: Any) -> None:
+    """``int(1.9)`` is 1 and ``int(True)`` is 1, so coercing at the CALL SITE meant
+    ``probe_exclusion_diagnosis``'s ``is_count`` guard never saw the original value — the
+    hole that guard exists to close, reintroduced one frame up
+    ([[fixed-one-of-two-identical-things]]). Found by review (CLI r3).
+    """
+    report = make_round()
+    report["round"]["n_excluded_probe_members"] = bad
+    with pytest.raises(PublicationError, match="not a non-negative integer"):
+        build_publication(
+            round_report=report,
+            plan_report=make_plan(),
+            substrate_ids={f"sub:{i}" for i in range(9)},
+            probe_ids={f"tier2n:{i}" for i in range(3)},
+            grid={"0.5": make_grid_twin(0.5), "0.9": report},
+            supplies=make_supplies({"0.5": None, "0.9": None}),
+            reproduction={},
+            provenance={},
+        )
+
+
+def test_a_string_mined_id_list_is_refused_rather_than_iterated_per_character() -> None:
+    """``"abc"`` iterates to three single-character ids whose count matches ``n_mined: 3``,
+    so a grid point could publish character-level mined ids."""
+    bad = make_round(stage2_threshold=0.5)
+    bad["round"]["mined_ids"] = "abc"
+    bad["round"]["n_mined"] = 3
+    with pytest.raises(PublicationError, match="not a JSON array"):
+        threshold_sensitivity({"0.5": bad, "0.9": make_round()}, published_threshold=0.9)
+
+
+def test_a_non_integer_n_mined_is_named_as_such() -> None:
+    """The combined condition reported the wrong cause: a non-integer ``n_mined`` produced
+    an error text about distinct ids."""
+    bad = make_round(stage2_threshold=0.5)
+    bad["round"]["n_mined"] = 1.0
+    with pytest.raises(PublicationError, match="not a non-negative integer"):
+        threshold_sensitivity({"0.5": bad, "0.9": make_round()}, published_threshold=0.9)
+
+
+@pytest.mark.parametrize("field", ["problems", "blocking_disjuncts"])
+def test_a_string_plan_list_field_is_refused_not_split_into_characters(field: str) -> None:
+    """``list("ab")`` is ``['a', 'b']``, so a string ``blocking_disjuncts`` would have been
+    reported as two blocking disjuncts; a non-iterable raises ``TypeError`` out of a module
+    contracted to refuse with ``PublicationError``."""
+    plan = make_plan()
+    if field == "problems":
+        plan["problems"] = "boom"
+    else:
+        plan["plan"]["yield"]["blocking_disjuncts"] = "ab"
+    with pytest.raises(PublicationError, match="not a JSON array"):
+        plan_leg_summary(plan)
+
+
+def test_a_boolean_where_a_count_belongs_does_not_satisfy_the_sum_clauses() -> None:
+    """``isinstance(True, int)`` is True and ``(True, False)`` sums to 1, so a boolean in
+    the split or in the four outcome counts satisfied the aggregate clauses."""
+    pub = make_publication()
+    pub["spared_split"]["n_spared_by_a_passing_disjunct"] = True
+    pub["spared_split"]["n_spared_by_unavailable_backend_only"] = False
+    pub["spared_split"]["n_spared"] = 1
+    assert any("not a pair of counts" in p for p in publication_problems(pub))
+
+    other = make_publication()
+    other["outcome"]["n_masked"] = True
+    assert any("not all integers" in p for p in publication_problems(other))
+
+
+def test_the_committed_artifact_is_tracked_by_git_and_extracts_at_its_pin() -> None:
+    """Review (CLI r3) filed *"Commit reports/p3/remine_round_report.json — Git does not
+    track it"* as a major. It is tracked, so the finding was refused rather than applied;
+    this test is what makes that refusal falsifiable instead of an assertion, and it is the
+    same claim a prior step's review got wrong ([[review-findings-can-be-factually-wrong]]).
+    """
+    tracked = subprocess.run(
+        ["git", "ls-files", "--error-unmatch", "reports/p3/remine_round_report.json"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert tracked.returncode == 0, tracked.stderr
+    blob = subprocess.run(
+        ["git", "show", "HEAD:reports/p3/remine_round_report.json"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        check=False,
+    )
+    # Existence and non-emptiness only. Pinning HEAD's digest here would go red in the
+    # window between regenerating the artifact and committing it — a test that fails on a
+    # legitimate working state rather than on a defect
+    # ([[regenerated-report-breaks-shape-lock-test]]). The digest pin lives on the working
+    # tree file, above.
+    assert blob.returncode == 0 and blob.stdout.strip()

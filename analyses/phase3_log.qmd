@@ -6793,4 +6793,43 @@ composition per grid point, and twelve supply digests) and repinned in the same 
 three mined ids, and 724/718/700 across the grid are all unchanged. Tests **85** (from 69);
 **49 sabotages, every one RED against its named test**, controls unchanged.
 
+**Review round 4 (CLI, after waiting out the shared Fair-Usage limit): 6 findings — 2 major, 4
+minor — five real, one refuted.** ⚠ Both CodeRabbit paths were rate-limited at once (the app's check
+reads *pass* on a *"Review rate limited"* body; the CLI's own notice said *"wait 24 minutes"*), so
+the round after the r2 fixes had to be waited for rather than escalated to Greptile — a bounded,
+stated delay is availability, not unavailability, and the fallback budget was left intact.
+
+**⛔ REFUTED, NOT APPLIED — and it is the *same wrong finding* a previous step got.** *"Commit
+`reports/p3/remine_round_report.json` — Git does not track it."* It **is** tracked (`git ls-files
+--error-unmatch` exits 0) and `git archive` from `origin` extracts it at exactly the pinned digest,
+which is why CI's own clean-checkout pytest passes the artifact tests. Declined with the evidence,
+and a test now carries the refutation so it is falsifiable rather than asserted
+([[review-findings-can-be-factually-wrong]]).
+
+The five real ones share a shape worth naming: **a guard defeated at its own call site.**
+
+* **⛔ `int()` at the caller made the callee's guard unreachable.** r2 added `is_count` inside
+  `probe_exclusion_diagnosis` *because* `int(1.9)` truncates and `int(True)` is 1 — and
+  `build_publication` then called it as `n_excluded=int(...)`, so the guard never saw the original
+  value and a report carrying `1.9` or `true` was accepted as 1. The same
+  [[fixed-one-of-two-identical-things]] pattern as review r1's, one frame up.
+* **Three bare `isinstance(x, int)` clauses survived the r2 sweep** — the split halves, the four
+  outcome counts, and the substrate/decided/excluded triple. `(True, False)` sums to 1, so a
+  boolean satisfied the very clause that exists to check the arithmetic.
+* **`list()` on a string field splits it into characters.** A string `mined_ids` iterated to
+  character-level ids whose count matched `n_mined`, and a string `blocking_disjuncts` would have
+  been published as two blocking disjuncts; a non-iterable raised `TypeError` out of a module
+  contracted to refuse with `PublicationError`. `json_list` refuses both.
+* **A combined condition reported the wrong cause** — a non-integer `n_mined` produced an error
+  text about distinct ids.
+* **The replay ran before the field it needs was validated.** `round_report["stage2_threshold"]`
+  was subscripted directly, so a report omitting it raised a bare `KeyError` *after*
+  `reproduce_round` had re-read four evidence tables and two parquet files;
+  `build_publication`'s clear refusal ran later still and was unreachable for that case.
+
+**The artifact is byte-unchanged by this round** (`c8aa02cf…`) — these are input-shape guards, not
+computations. Tests **95** (from 85); **54 sabotages, every one RED against its named test**. Zero
+new failures vs the matched `main` baseline: 13 FAILED both sides, identical set; passes
+**5920 → 6015** = exactly the 95 tests added.
+
 **Commit.** See the PR that carries this stanza.

@@ -142,6 +142,21 @@ def is_sha256(value: Any) -> bool:
     return isinstance(value, str) and len(value) == 64 and set(value.lower()) <= _HEX
 
 
+def json_list(value: Any, field: str) -> list[Any]:
+    """The field as a JSON array, refusing a string or any other non-array.
+
+    ``list("ab")`` is ``['a', 'b']`` and ``list(5)`` raises ``TypeError`` out of a module
+    whose contract is to refuse with :class:`PublicationError` — so a report this module
+    did not write could publish two "blocking disjuncts" that are the letters of a word,
+    or three mined ids that are the characters of one (review r3).
+    """
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise PublicationError(f"{field} is {value!r}, not a JSON array")
+    return list(value)
+
+
 # ═════════════════════════════════════════════════════════════════════════════
 # (1) Why the spared were spared — re-derived from the per-candidate reasons
 # ═════════════════════════════════════════════════════════════════════════════
@@ -416,9 +431,11 @@ def plan_leg_summary(plan_report: Mapping[str, Any]) -> dict[str, Any]:
         "ready": bool(readiness.get("ready")),
         "yield_producible": bool(yield_gate.get("yield_producible")),
         "may_run": bool(readiness.get("ready")) and bool(yield_gate.get("yield_producible")),
-        "blocking_disjuncts": list(yield_gate.get("blocking_disjuncts") or []),
+        "blocking_disjuncts": json_list(
+            yield_gate.get("blocking_disjuncts"), "the plan report's blocking_disjuncts"
+        ),
         "supply_derivations": derivations,
-        "problems": list(plan_report.get("problems", [])),
+        "problems": json_list(plan_report.get("problems"), "the plan report's problems"),
         "report_not_committed_because": (
             "the plan leg's report embeds each derivation's absolute repo_root, so the file "
             "stays on scratch and only this path-free summary is published; its bytes are "
@@ -531,8 +548,21 @@ def threshold_sensitivity(
                 f"the grid point labelled {key!r} is not a round leg's report that ran "
                 f"(leg={report.get('leg')!r}, may_run={report.get('may_run')!r})"
             )
-        mined = tuple(sorted(str(i) for i in block.get("mined_ids", [])))
-        if len(set(mined)) != len(block.get("mined_ids", [])) or not is_count(block.get("n_mined")):
+        # A bare string passes every clause below — `"abc"` iterates to three
+        # single-character ids whose count matches an `n_mined` of 3 — and this module runs
+        # over payloads it did not write, so that shape is inside its threat model. The two
+        # causes are also separated: a non-integer `n_mined` used to produce an error text
+        # about distinct ids (review r3).
+        raw_mined = json_list(
+            block.get("mined_ids", []), f"the grid point labelled {key!r}'s mined_ids"
+        )
+        if not is_count(block.get("n_mined")):
+            raise PublicationError(
+                f"the grid point labelled {key!r} records n_mined={block.get('n_mined')!r}, "
+                "which is not a non-negative integer"
+            )
+        mined = tuple(sorted(str(i) for i in raw_mined))
+        if len(set(mined)) != len(raw_mined):
             raise PublicationError(
                 f"the grid point labelled {key!r} carries {block.get('n_mined')!r} mined and a "
                 "mined id list that is not the same number of distinct ids"
@@ -717,13 +747,19 @@ def build_publication(
             "n_masked": block.get("n_masked"),
             "n_spared": block.get("n_spared"),
             "n_refused_no_coordinates": block.get("n_refused_no_coordinates"),
-            "mined_ids": sorted(str(i) for i in block.get("mined_ids", [])),
+            "mined_ids": sorted(
+                str(i) for i in json_list(block.get("mined_ids", []), "the round's mined_ids")
+            ),
         },
         "spared_split": split,
         "probe_exclusion": probe_exclusion_diagnosis(
             probe_ids=probe_ids,
             substrate_ids=substrate_ids,
-            n_excluded=int(block.get("n_excluded_probe_members", -1)),
+            # NOT ``int(...)``: coercing here means the callee's ``is_count`` guard never
+            # sees the original value, so `1.9` and `true` arrive as 1 — the exact hole
+            # that guard was added to close, reintroduced at its own call site
+            # ([[fixed-one-of-two-identical-things]], review r3).
+            n_excluded=block.get("n_excluded_probe_members", -1),
         ),
         "retrain": retrain_disposition(round_report),
         "stage2_sensitivity": threshold_sensitivity(grid, published_threshold=float(threshold)),
@@ -826,7 +862,7 @@ def publication_problems(pub: Mapping[str, Any]) -> list[str]:
         split.get("n_spared_by_a_passing_disjunct"),
         split.get("n_spared_by_unavailable_backend_only"),
     )
-    if not all(isinstance(h, int) for h in halves):
+    if not all(is_count(h) for h in halves):
         problems.append(f"the spared split is not a pair of counts: {halves!r}")
     elif sum(halves) != split.get("n_spared"):
         problems.append(
@@ -840,7 +876,7 @@ def publication_problems(pub: Mapping[str, Any]) -> list[str]:
     parts = [
         outcome.get(k) for k in ("n_mined", "n_masked", "n_spared", "n_refused_no_coordinates")
     ]
-    if not all(isinstance(p, int) for p in parts):
+    if not all(is_count(p) for p in parts):
         problems.append(f"the outcome's four counts are not all integers: {parts!r}")
     elif sum(parts) != outcome.get("n_candidates"):
         problems.append(
@@ -875,7 +911,7 @@ def publication_problems(pub: Mapping[str, Any]) -> list[str]:
         decided = outcome.get("n_candidates")
         substrate = exclusion.get("n_substrate_candidates")
         excluded_n = exclusion.get("n_excluded")
-        if not all(isinstance(v, int) for v in (decided, substrate, excluded_n)):
+        if not all(is_count(v) for v in (decided, substrate, excluded_n)):
             problems.append(
                 f"the substrate/decided/excluded counts are not all integers: "
                 f"{substrate!r}/{decided!r}/{excluded_n!r}"
@@ -1163,6 +1199,20 @@ def main(argv: Sequence[str] | None = None) -> int:
         **grid_digests,
     }
 
+    # Validated BEFORE the replay: subscripting the field directly raised a bare KeyError
+    # on a report that omits it, and `build_publication`'s own refusal runs only AFTER
+    # `reproduce_round` has re-read four evidence tables and two parquet files — so the
+    # clear message was unreachable and the malformed report paid for a full replay first
+    # (review r3).
+    replay_threshold = (
+        round_report.get("stage2_threshold") if isinstance(round_report, Mapping) else None
+    )
+    if not is_finite_number(replay_threshold):
+        raise PublicationError(
+            f"the round report's stage2_threshold is {replay_threshold!r}, so the replay has "
+            "no operating point to re-run at"
+        )
+
     reproduction = reproduce_round(
         round_report,
         fp_manifest=args.manifest,
@@ -1171,7 +1221,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         relaxed_arch_status_table=args.relaxed_arch_status,
         synteny_status_table=args.synteny_status,
         probe_set_path=args.probe_set,
-        stage2_threshold=float(round_report["stage2_threshold"]),
+        stage2_threshold=float(replay_threshold),
         union_prior=args.union_prior,
         corpus_parquet=args.corpus,
     )
