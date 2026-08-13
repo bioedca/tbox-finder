@@ -26,7 +26,9 @@ Bare-CI tier: pure stdlib, no numpy/pandas/torch.
 
 from __future__ import annotations
 
+import hashlib
 import json
+from itertools import zip_longest
 from pathlib import Path
 from typing import Any
 
@@ -61,6 +63,10 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 N_CLASS_II = 12
 N_STEM_II_PK = 9
 
+#: Byte pin on the committed probe-ids artifact, produced by the 831 s P3-15′-i
+#: regeneration. Update it in the same commit that regenerates the artifact.
+COMMITTED_PROBE_IDS_SHA256 = "ea8c3f7ce31940c6cd4fa5beb958e07d43e3353a469df551e493850842f776e3"
+
 
 def _variant(vid: str, family: str, *, eligible: bool = True) -> Tier2NVariant:
     return Tier2NVariant(
@@ -78,15 +84,27 @@ def _variant(vid: str, family: str, *, eligible: bool = True) -> Tier2NVariant:
 
 
 def _variants() -> list[Tier2NVariant]:
-    out = [
-        _variant(f"tier2n:{FAMILY_CLASS_II}:p{i:05d}", FAMILY_CLASS_II) for i in range(N_CLASS_II)
-    ]
-    out += [
+    """Emitted deliberately **out of sorted order**, and interleaved across families.
+
+    ``generate`` visits parents in a seed-derived ``_stable_key`` hash order, so the
+    real eligible ids never arrive sorted. A fixture that happens to be emitted in
+    ascending order makes ``build_probe_set``'s ``sorted()`` — the only thing that
+    makes the committed artifact byte-stable across regenerations — invisible to
+    every assertion in this file.
+    """
+    stem = [
         _variant(f"tier2n:{FAMILY_STEM_II_PK}:p{i:05d}", FAMILY_STEM_II_PK)
-        for i in range(100, 100 + N_STEM_II_PK)
+        for i in reversed(range(100, 100 + N_STEM_II_PK))
     ]
-    # An ineligible variant of each family: it must reach neither the ids nor the
-    # per-family counts, so the reconciliation is over the *eligible* set.
+    class_ii = [
+        _variant(f"tier2n:{FAMILY_CLASS_II}:p{i:05d}", FAMILY_CLASS_II)
+        for i in reversed(range(N_CLASS_II))
+    ]
+    out: list[Tier2NVariant] = []
+    for pair in zip_longest(stem, class_ii):
+        out += [v for v in pair if v is not None]
+    # An ineligible variant: it must reach neither the ids nor the per-family counts,
+    # so the reconciliation is over the *eligible* set.
     out.append(_variant(f"tier2n:{FAMILY_CLASS_II}:p09999", FAMILY_CLASS_II, eligible=False))
     return out
 
@@ -152,12 +170,24 @@ def test_the_payload_is_a_pure_function_of_the_run(tmp_path: Path) -> None:
     assert first == second
 
 
-def test_the_payload_carries_its_schema_version_and_sorted_arms() -> None:
+def test_the_payload_carries_its_schema_version_as_a_json_list() -> None:
     payload = probe_set_payload(_probe_set())
     assert payload["schema_version"] == PROBE_SET_SCHEMA_VERSION
-    assert payload["synthetic"] == sorted(payload["synthetic"])
     assert isinstance(payload["synthetic"], list)
     assert "provenance" not in payload
+
+
+def test_the_arms_are_sorted_not_merely_emission_ordered() -> None:
+    """``sorted()`` is what makes the artifact byte-stable, so the fixture must be unsorted.
+
+    Asserting ``arm == sorted(arm)`` against an already-ascending fixture holds whether
+    or not the code sorts. The guard below refuses that fixture outright.
+    """
+    variants = _variants()
+    emitted = [v.variant_id for v in variants if v.is_probe_eligible()]
+    assert emitted != sorted(emitted), "fixture is sorted, so the assert below is vacuous"
+    payload = probe_set_payload(build_probe_set(variants))
+    assert payload["synthetic"] == sorted(emitted)
 
 
 def test_provenance_is_carried_verbatim_when_supplied() -> None:
@@ -316,13 +346,18 @@ def test_the_build_subcommand_defaults_the_ids_path_beside_the_report() -> None:
     assert (str(REPORT_PATH), str(PROBE_IDS_PATH)) == (args.out, args.probe_ids_out)
 
 
-def _stub_run(monkeypatch: pytest.MonkeyPatch, variants: list[Tier2NVariant]) -> dict[str, Any]:
-    """Replace the heavy build with a canned one so ``main`` itself is executed."""
+def _stub_build(variants: list[Tier2NVariant]) -> Tier2NBuild:
+    """A canned build result, so ``main`` itself runs without pandas or ``cmsearch``."""
     report = tier2n.build_report(variants, seed=20260719)
     report.update({"n_parents": 300, "cm": "RF00230.cm", "cm_sha256": "0" * 64})
-    build = Tier2NBuild(report=report, probe_set=build_probe_set(variants))
+    return Tier2NBuild(report=report, probe_set=build_probe_set(variants))
+
+
+def _stub_run(monkeypatch: pytest.MonkeyPatch, variants: list[Tier2NVariant]) -> dict[str, Any]:
+    """Replace the heavy build with a canned one so ``main`` itself is executed."""
+    build = _stub_build(variants)
     monkeypatch.setattr(tier2n, "build_probe_run", lambda **_kwargs: build)
-    return report
+    return build.report
 
 
 def test_main_writes_both_artifacts_and_the_ids_load(
@@ -370,6 +405,32 @@ def test_main_exits_nonzero_and_writes_no_ids_for_a_sub_min_n_build(
     assert rc == 1
     assert not ids_path.exists()
     assert (tmp_path / "report.json").exists()  # the counts report is still the record
+
+
+def test_main_refuses_to_write_both_artifacts_to_one_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The ids would destroy the report whose digest they record, and exit 0."""
+    calls: list[int] = []
+    monkeypatch.setattr(
+        tier2n, "build_probe_run", lambda **_k: calls.append(1) or _stub_build(_variants())
+    )
+    both = tmp_path / "same.json"
+    rc = tier2n.main(["build", "--out", str(both), "--probe-ids-out", str(both)])
+    assert rc == 2
+    assert not both.exists()
+    assert calls == [], "the refusal must precede the ~14-minute build, not follow it"
+
+
+def test_the_same_path_refusal_sees_through_a_relative_spelling(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Comparing the raw strings would miss ``./x.json`` against ``x.json``."""
+    monkeypatch.setattr(tier2n, "build_probe_run", lambda **_k: _stub_build(_variants()))
+    monkeypatch.chdir(tmp_path)
+    rc = tier2n.main(["build", "--out", "same.json", "--probe-ids-out", "./same.json"])
+    assert rc == 2
+    assert not (tmp_path / "same.json").exists()
 
 
 def test_main_refuses_when_the_ids_and_the_counts_disagree(
@@ -460,12 +521,30 @@ def test_the_probe_exclusion_will_be_zero_for_a_structural_reason_not_an_empty_s
     assert probe_member_ids(probe_set) & substrate == set()
 
 
-def test_the_committed_probe_ids_are_digest_bound_to_the_committed_counts() -> None:
-    """The two artifacts are provably from one run, not merely consistent by count."""
-    import hashlib
+def test_the_committed_probe_ids_name_the_committed_counts_bytes() -> None:
+    """States exactly what the digest binding proves — and what it does not.
 
+    It proves *which report bytes this id list was written against*. It does **not**
+    prove the members came from that run: the counts report carries no id list, so the
+    reconciliation above is over cardinality and the per-family split only. Rewriting
+    the 45 members while preserving the 21/24 split would satisfy both. That gap is
+    closed by the byte pin below, not by this test.
+    """
     payload = json.loads((REPO_ROOT / PROBE_IDS_PATH).read_text(encoding="utf-8"))
     report_bytes = (REPO_ROOT / REPORT_PATH).read_bytes()
     provenance = payload["provenance"]
     assert provenance["source_report"] == str(REPORT_PATH)
     assert provenance["source_report_sha256"] == hashlib.sha256(report_bytes).hexdigest()
+
+
+def test_the_committed_probe_ids_are_pinned_by_digest() -> None:
+    """A golden byte pin on the artifact, in the repo's ``expected.sha256`` idiom.
+
+    The members are only ever compared to the counts report by *cardinality*, so an
+    edit that swaps all 45 ids for fabricated ones with the same 21/24 split passes
+    every other check here. This pin is what makes such an edit red. Regenerating the
+    probe set legitimately therefore requires updating this constant in the same
+    commit — deliberately, exactly as a golden fixture does.
+    """
+    digest = hashlib.sha256((REPO_ROOT / PROBE_IDS_PATH).read_bytes()).hexdigest()
+    assert digest == COMMITTED_PROBE_IDS_SHA256

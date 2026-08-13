@@ -854,6 +854,18 @@ def main(argv: list[str] | None = None) -> int:
     from tbox_finder.eval.tier2n_probe import Tier2NProbeError, write_probe_set
 
     args = _build_parser().parse_args(argv)
+    out, ids_out = Path(args.out), Path(args.probe_ids_out)
+    if out.resolve() == ids_out.resolve():
+        # Checked before the build, not after: the three cmsearch arms cost ~14 minutes,
+        # and the failure is silent otherwise — the ids payload would overwrite the very
+        # counts report whose digest it records, leaving one self-referential file, a
+        # `source_report_sha256` naming bytes that exist nowhere, and exit 0.
+        print(
+            f"--out and --probe-ids-out are the same path ({out}); the counts report and "
+            "the probe-set ids are two artifacts and the second would destroy the first",
+            file=sys.stderr,
+        )
+        return 2
     run = build_probe_run(
         corpus_parquet=args.corpus,
         cm=args.cm,
@@ -863,7 +875,6 @@ def main(argv: list[str] | None = None) -> int:
         workdir=args.workdir,
     )
     report = run.report
-    out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     print(
@@ -871,9 +882,10 @@ def main(argv: list[str] | None = None) -> int:
         f"(min-N {report['tier2n_probe_min_n']}) -> "
         f"{'PASS' if report['probe_set_meets_min_n'] else 'FAIL'}; wrote {out}"
     )
-    # The report is written first so the ids can carry its digest: that binding is
-    # what lets a later reader prove the two artifacts came from one run.
-    ids_out = Path(args.probe_ids_out)
+    # The report is written first so the ids can carry its digest. That binding says
+    # *which report bytes this id list was written against* — it does not pin the
+    # members, because the counts report carries no ids; what pins those is the
+    # reconciliation below (cardinality + per-family split) plus the run itself.
     try:
         write_probe_set(
             ids_out,

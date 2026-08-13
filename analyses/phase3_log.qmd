@@ -6529,23 +6529,49 @@ live `cmsearch --cut_ga` arms, **831 s LOCAL**, no GPU — and it reproduces the
 measurement **exactly**: arms 219/300 · 200/599 · 127/599, all four discard counts, `per_family`
 21 + 24, `n_probe_eligible` 45. ⚠ The regenerated report differs from the committed one in
 **exactly one field, and it is not a measurement**: `"cm"` moved from the bare basename
-`RF00230.cm` to the repo-relative `data/external/refs/RF00230.cm`, because P2-08 promoted
-`_repo_relative` into `synth/_common.repo_relative` and **fixed** the case where a path degraded to
-its basename. `cm_sha256` is unchanged, so `test_pinned_cm_sha256_matches_committed_cm` still holds
-and the model is provably the same one. The committed report now round-trips through the shipped
-code, which it did not before. So the imp.md §7 stop — *"a stop if the regenerated ids differ from
+`RF00230.cm` to the repo-relative `data/external/refs/RF00230.cm`. ⚠ The cause was **verified by
+execution, and my first statement of it was too coarse**: the P2-07 `_repo_relative` walked **`cwd`'s
+ancestry only** and `break`s at the first `.git`-bearing ancestor that does not contain the path, so
+run on the same absolute CM path it returns `RF00230.cm` from `/tmp` and from a worktree but
+`data/external/refs/RF00230.cm` **from the repo root**. The committed basename can therefore only
+have come from a P2-07 run whose `cwd` was outside the tree holding the CM — it is not, as I first
+wrote, something the old code would have produced anywhere. What P2-08's promotion into
+`synth/_common.repo_relative` changed is that it searches **the path's own ancestry first** (exactly
+the degradation its own comment documents fixing), so today's run records the repo-relative path from
+any `cwd`. `cm_sha256` is unchanged, so `test_pinned_cm_sha256_matches_committed_cm` still holds and
+the model is provably the same one. So the imp.md §7 stop — *"a stop if the regenerated ids differ from
 the committed measurement"* — **does not fire**; the 45 ids are that measurement's members.
 The written file round-trips through the real `load_probe_set` by **member identity**, its ids are
 unique across both arms, and the exclusion it will produce in the round is measured here rather than
 asserted: intersecting the 45 ids with the committed 941-row FP manifest gives **0**, for a
 **namespace** reason (`tier2n:*` vs `GCA_…:c<contig>:…`), which is a different zero from
-"the probe set was empty" and the round report must say which. **22 sabotages, every one RED against
+"the probe set was empty" and the round report must say which. **26 sabotages, every one RED against
 its named test**, plus a comment-only negative control that stayed GREEN and a positive control (a
 `write_probe_set` refusing *everything*) that turns the three refusal tests RED — so those
 `pytest.raises` bind to their specific refusal, not to "something raised"; both sources restored
 byte-identically by sha256 with `__pycache__` cleared. Suite vs a **matched `main` baseline worktree
 at `54f70f6`** (same no-DVC-data conditions): **zero new failures** — 13 FAILED both sides, identical
-set, passes **+43** = exactly the tests added. `ruff` 0.15.15 + `black` 25.11.0 clean.
+set. `ruff` 0.15.15 + `black` 25.11.0 clean.
+
+**⚠ THE CLEAN REVIEW ROUND WAS A FLOOR, AGAIN.** The CodeRabbit CLI reviewed all six files and
+returned *No findings*; a 4-lens adversarial harness run afterwards (**24 agents, 0 errors, 20
+candidates, 17 refuted by their own verifiers**) found **three real defects the clean round did not**,
+all now fixed. **(1)** The sortedness assertion **could not fail**: `_variants()` emitted ids already
+in ascending order, so deleting `sorted()` from `build_probe_set` left the entire suite green — and
+the property is load-bearing, because `generate` visits parents in a seed-derived `_stable_key` hash
+order, so without it a regeneration writes a **byte-different artifact with identical members**, which
+is exactly the diff `probe_set_payload`'s docstring promises means *"the members moved"*. The fixture
+now emits **interleaved and descending**, with a guard that refuses a sorted fixture outright.
+**(2)** *"provably from one run"* was an **overclaim**, in the test docstring and in the shipped
+comment. The counts report carries no id list, so the reconciliation is over **cardinality and the
+per-family split only** — replacing all 45 members with fabricated names preserving 21/24 passed every
+check. The wording now states what the digest binding does and does not prove, and a **byte pin** on
+the committed artifact closes the gap (`COMMITTED_PROBE_IDS_SHA256`); the harness's exact fabrication
+is RED against it, and the artifact was restored byte-identically afterwards. **(3)** `--out` equal to
+`--probe-ids-out` **silently destroyed the counts report and exited 0**, leaving one self-referential
+file whose `source_report_sha256` named bytes that existed nowhere. Refused now with exit 2, compared
+after `resolve()` so `./x.json` and `x.json` collide, and placed **before** the ~14-minute build
+rather than after it — a test asserts the build was never entered.
 
 **Decisions.** No ADR amendment: enforcing `TIER2N_PROBE_MIN_N` at the point the artifact is minted
 implements ADR-0005 A1's existing floor, it does not pin a new value. `build_probe_report` is kept
