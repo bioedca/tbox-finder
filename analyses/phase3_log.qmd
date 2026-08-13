@@ -6319,3 +6319,89 @@ consumes it. ⚠ **That step cannot consume it yet**: `slurm/p3/stage1_remine.sb
 `--relaxed-arch-available` into `$PLAN_FLAGS` but never passes `--relaxed-arch-status` (nor
 `--synteny-status`), and `remine.py:512` raises on exactly that pair — an owed off-roadmap fix-up
 before P3-15. **Commit.** see the RESULT PR for this stanza.
+
+## Step P3-15′-h — 2026-08-12: giving the produced (b)/(c) evidence a path into the round
+
+**Inputs.** `slurm/p3/stage1_remine.sbatch` as shipped since P3-15's ENCODE; `remine.py`'s
+`apply-spare-rule` seam (the paired availability↔status-table guards, the four two-way supply flag
+pairs, `remine_problems`); and the two producer merge outputs the round is supposed to consume,
+`$ROUND_DIR/architecture_status.json` (criterion (b), SLURM job 1288, 941 rows, `9867a6dc…`) and
+`$ROUND_DIR/synteny_status.json` (criterion (c), 941 rows, `3c8ac8e3…`).
+
+**Process.** The booked defect — leg (1) reused `$PLAN_FLAGS` and passed neither
+`--relaxed-arch-status` nor `--synteny-status`, which `apply_remine_spare_rule` requires whenever the
+matching backend is declared — is fixed by resolving both tables from `$ROUND_DIR` under the
+producers' own `DEFAULT_STATUS_TABLE` filenames and composing each `--*-status` argument **in the same
+block that makes the declaration**, so the two cannot drift apart; a declared backend whose table is
+missing refuses with exit 3 before the preflight, let alone the GPU legs. Two further defects were
+found while verifying that fix, both by execution rather than by reading. **(i)** The shipped `plan`
+leg returned **rc = 2**, not 0, the moment the round became able to run: `_cmd_plan` writes
+`round: null` by design and the shared clause set demanded a mining outcome from any report whose
+`may_run` was true. While the (b)/(c) backends were missing, `may_run` was false and that clause never
+ran — the first green plan hit it, and the sbatch reads any non-zero rc as a refusal, so leg (0) killed
+every round it was meant to authorise. The report now carries a `leg` stamp the caller **declares**
+and `remine_problems` checks against the payload in both directions (a `plan` report carrying an
+outcome, and a `round` report carrying none, are each a problem); deriving the stamp from
+`round is None` would have made the clause read its own conclusion. **(ii)** The declaration block
+appended only the *positive* flag, under a comment asserting the opposite. All four flags are two-way
+pairs defaulting to their module constant and all four constants are now `True`, so an unset — or
+explicitly `0` — env var declared the supply **available**. Both halves are emitted now.
+
+**Outputs.** `slurm/p3/stage1_remine.sbatch` (declaration block, status-table pairing, corrected
+header) · `src/tbox_finder/mining/remine.py` (`LEG_PLAN`/`LEG_ROUND`/`REMINE_LEGS`, the `leg`
+argument, the two-directional clause) · `tests/unit/test_remine_sbatch_supply_flags.py` (12 tests).
+No artifact regenerated, no value pinned, no ADR amendment, no DVC object, no SLURM job.
+
+**Validation.** The shipped `plan` leg, executed with the four supplies and `--rscape-installed`:
+**rc 2 → rc 0**, `problems: []`, `leg: "plan"`, `round: null`. **14 sabotages, every one RED against
+its NAMED test**, plus a positive control (a guard raising `RemineError` on everything does **not**
+satisfy the `pytest.raises` test, whose `match` is specific) and a negative control (a comment-only
+edit stays green); each sabotage restored byte-identically by sha256 with `__pycache__` cleared and
+`git status --porcelain` re-read around it. `tests/unit` + `tests/golden` against a matched `main`
+baseline worktree at `96cd077`: **zero new failures**. `ruff` 0.15.15 and `black` 25.11.0 clean.
+
+**Decisions.** The tests **execute the shipped bytes** — the declaration block is sliced out of the
+sbatch and run under `bash`, and both leg invocations are run with a stub `python` on `PATH` that
+echoes its argv — because composing the right tokens and then failing to pass them are two different
+bugs, and the pre-existing `test_the_sbatch_flag_spellings_parse` checks a hand-retyped copy of the
+spellings that would not have caught either. Disclosed and **not** fixed: `--rscape-installed` is the
+one declaration with no derivation and no refusal (the other four are covered by
+`_supply_derivations`/`_refuse_unevidenced`), and it is what flips `may_run` to true — so a round can
+still declare a tool this checkout cannot evidence. **Commit.** see the PR for this stanza.
+
+**Review (P3-15′-h).** Three paths ran on commit `67ee1a4`: the CodeRabbit CLI (**1 minor**), the
+GitHub app's automatic review (**1 nitpick**), and a 4-lens adversarial harness (**17 agents, 0
+errors, 13 candidates, 3 surviving their own refuters**). All five findings were real and all five
+are fixed. The two that matter: **(i)** the sbatch's `[ -s ]` proves only non-zero bytes, so a
+well-formed table deciding **zero** of the round's candidates — an empty `{"status":{},"rows":[]}`,
+which the shipped per-shard `build_status_table([])` writes as 379 valid bytes, or a table from a
+different round — passed every check, resolved `unavailable` for every candidate, spared them all,
+and let the job write its DONE marker on a zero-yield round indistinguishable from an honest one.
+That is the state this whole arc exists to end, one step further in than the pairing guards reach.
+`refuse_status_table_that_decides_nothing` now refuses **zero overlap** with the manifest (a
+*partial* one stays legal — 663 of 941 legitimately resolved `unavailable` at job 1288), applied in
+both `remine` and `mine_round` from one shared function. **(ii)** Two of my own tests were weak in
+ways review named exactly: the leg-invocation tests captured argv and only *searched* it, so a
+dropped `--probe-set` stayed green, and the round leg's own `leg=LEG_ROUND` declaration was pinned
+nowhere — flipping both call sites was invisible. The captured argv is now **re-parsed by the CLI it
+was composed for** and the resolved namespace asserted, and the round leg is driven end-to-end
+through `remine_main`. Also fixed: the status filenames are now bound to the producers'
+`DEFAULT_STATUS_TABLE` constants rather than retyped, and a table staged for an **undeclared**
+backend is reported on stderr — not a refusal (switching a disjunct off is a supported round) but
+never again silent. Ten of the thirteen candidates were **refuted by their own verifiers**, several
+after the verifier reproduced the measurement and rejected the causal story. Validation on the
+follow-up: **21 sabotages, 20 RED against their NAMED test** plus the two controls; zero new
+failures vs the same matched `main` baseline (13 FAILED both sides, passes +16).
+
+**Review round 2 (P3-15′-h).** The CLI's next round returned **1 major**, and it was the same class
+again: the zero-overlap refusal had been applied to the two *new* backends, (b) and (c), and left the
+**covariation** disjunct — whose status map has the identical property — unguarded. The Stage-2
+posterior map is the same shape a third time (empty ⇒ every posterior `None` ⇒ `unavailable` ⇒
+spared). Rather than add two more call sites, the guard became a **sweep over the availability map**
+(`refuse_status_tables_that_decide_nothing`), with a key-set assertion that refuses a declared
+disjunct carrying no evidence entry — so a fifth backend cannot inherit the hole the first four had,
+and the covariation arm's `rscape_installed AND msa_supply_available` declaration is read from
+`build_round_availability`'s own derivation rather than recomputed. Both legs call the sweep, and the
+P2 leg is now **driven** rather than assumed to agree because it imports the same function.
+Validation: **24 sabotages, 23 RED against their NAMED test** plus the two controls; zero new
+failures vs the same matched baseline (13 FAILED both sides, passes +18); `ruff` + `black` clean.

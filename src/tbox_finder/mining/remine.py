@@ -74,6 +74,7 @@ from tbox_finder.mining.mine_round import (
     build_round_availability,
     candidate_evidence,
     read_fp_manifest,
+    refuse_status_tables_that_decide_nothing,
 )
 from tbox_finder.mining.spare_rule import (
     ALL_DISJUNCTS,
@@ -85,6 +86,17 @@ from tbox_finder.mining.spare_rule import (
 
 SCHEMA_VERSION = "1.0"
 STEP = "P3-15"
+
+#: The two legs ``slurm/p3/stage1_remine.sbatch`` runs, and the two report shapes they
+#: write. The distinction is load-bearing, not cosmetic: :func:`build_remine_report` is
+#: shared, and P3-15′-h measured what happens without it — ``_cmd_plan`` passes
+#: ``round_report=None`` by design, so the clause *"a round that may run carries no mining
+#: outcome"* fired on **every** green plan and the leg exited 2. The sbatch reads any
+#: non-zero as a refusal, so the round became unrunnable at leg (0) the moment the
+#: backends made it runnable — the failure hid behind the structural zero until then.
+LEG_PLAN = "plan"
+LEG_ROUND = "apply-spare-rule"
+REMINE_LEGS = (LEG_PLAN, LEG_ROUND)
 
 #: Whether the per-candidate **Stage-2 posterior supply** exists — the leg that
 #: resolves a coordinate-only mining candidate to nucleotides, transcribes it, and
@@ -532,12 +544,31 @@ def apply_remine_spare_rule(
     # Loaded FIRST so a malformed (c) table is refused before any other input is read.
     synteny_status = _load_synteny_status(synteny_status_table)
     relaxed_arch_status = _load_relaxed_arch_status(relaxed_arch_status_table)
+    covariation_status = load_status_map(status_table)
+    stage2_posteriors = load_stage2_posteriors(posteriors)
     candidates = read_remine_manifest(
         fp_manifest,
-        covariation_status=load_status_map(status_table),
-        stage2_posteriors=load_stage2_posteriors(posteriors),
+        covariation_status=covariation_status,
+        stage2_posteriors=stage2_posteriors,
         synteny_status=synteny_status,
         relaxed_arch_status=relaxed_arch_status,
+    )
+    # One step past the pairing guards above: a table that is present and well-formed but
+    # decides none of THESE candidates (empty, or from a different round) spares every one of
+    # them and publishes a zero yield that reads exactly like an honest one. Swept over ALL
+    # FOUR disjuncts, including the Stage-2 posterior map — an empty one resolves every
+    # candidate's posterior to `None`, i.e. `unavailable`, i.e. spared, by the same mechanism.
+    # Promoted, not duplicated: `mine_round`'s leg calls the same sweep over its three.
+    refuse_status_tables_that_decide_nothing(
+        availability=availability,
+        evidence_maps={
+            "any_helix_rscape": covariation_status,
+            "relaxed_architecture": relaxed_arch_status,
+            "downstream_aaRS_synteny": synteny_status,
+            STAGE2_DISJUNCT: stage2_posteriors,
+        },
+        candidate_ids=[c.candidate_id for c in candidates],
+        error=RemineError,
     )
     candidates, excluded = exclude_probe_members(candidates, probe_set)
 
@@ -566,17 +597,29 @@ def build_remine_report(
     excluded_probe_ids: Sequence[str] = (),
     stage2_threshold: float | None,
     parent_checkpoint: str | None = None,
+    leg: str = LEG_ROUND,
 ) -> dict[str, Any]:
     """Assemble the P3 re-mining round report.
 
     ``round_report`` and ``probe_trace`` are ``None`` when the plan refused — a
     refused round has no mined count and no probe recall, and writing ``0``/``0.0``
     for them would be indistinguishable from a round that ran and found nothing.
+
+    ``leg`` is the caller's **declaration** of which leg wrote this report, and
+    :func:`remine_problems` checks it against the payload in both directions — a
+    ``plan`` report carrying a mining outcome and a ``round`` report carrying none are
+    each a problem. It is a declaration rather than a derivation on purpose: deriving it
+    from ``round_report is None`` would make the clause read its own conclusion, and a
+    clause that reads its own conclusion can only catch a value flipped false
+    ([[gate-clauses-need-re-derivation]]). The default is :data:`LEG_ROUND` — the strict
+    half — so a caller that forgets it gets the clause that DEMANDS an outcome rather
+    than the one that excuses its absence.
     """
     return {
         "schema_version": SCHEMA_VERSION,
         "step": STEP,
         "adr": "ADR-0005 D14 (Stage-2 disjunct, P3-phased); ADR-0006 D11/A2",
+        "leg": str(leg),
         "plan": dict(plan),
         "may_run": bool(plan.get("may_run", False)),
         "stage2_threshold": None if stage2_threshold is None else float(stage2_threshold),
@@ -626,11 +669,31 @@ def remine_problems(report: Mapping[str, Any]) -> list[str]:
     if report.get("stage2_threshold_pinned"):
         problems.append("stage2_threshold_pinned is True — P3-15 pins no value (ADR-0005 D3/D14)")
 
+    # Which leg claims to have written this. An unrecognised value is refused rather than
+    # defaulted: the two branches below check OPPOSITE things, so a leg name this function
+    # does not know is a report neither branch can check.
+    leg = report.get("leg")
+    if leg not in REMINE_LEGS:
+        problems.append(f"leg={leg!r} is not one of {REMINE_LEGS}")
+
     if not bool(report.get("may_run")):
         if report.get("round") is not None:
             problems.append("a refused round carries a mining outcome")
         if report.get("tier2n_probe") is not None:
             problems.append("a refused round carries a Tier-2N probe trace")
+        return problems
+
+    # The preflight leg writes a report ABOUT a round it has not run — that is its whole
+    # job — so the mining-outcome clause below does not apply to it, and applying it was
+    # the P3-15′-h defect: every green plan exited 2 and the sbatch read that as a refusal.
+    # The check does not disappear, it INVERTS: a plan-leg report that carries an outcome
+    # is claiming to have mined from the leg that spends no GPU time, so each leg's
+    # declaration is falsifiable by the payload rather than merely recorded beside it.
+    if leg == LEG_PLAN:
+        if report.get("round") is not None:
+            problems.append(f"the {LEG_PLAN} leg carries a mining outcome")
+        if report.get("tier2n_probe") is not None:
+            problems.append(f"the {LEG_PLAN} leg carries a Tier-2N probe trace")
         return problems
 
     # A round that ran must show the Tier-2N exclusion actually ran. Without the
@@ -920,6 +983,7 @@ def _cmd_plan(args: argparse.Namespace) -> int:
         round_report=None,
         probe_trace=None,
         stage2_threshold=float(args.stage2_threshold),
+        leg=LEG_PLAN,
     )
     problems = remine_problems(report)
     report["problems"] = problems
@@ -963,6 +1027,7 @@ def _cmd_apply_spare_rule(args: argparse.Namespace) -> int:
             round_report=None,
             probe_trace=None,
             stage2_threshold=float(args.stage2_threshold),
+            leg=LEG_ROUND,
         )
         report["problems"] = remine_problems(report)
         write_json(args.out, report)
@@ -991,6 +1056,7 @@ def _cmd_apply_spare_rule(args: argparse.Namespace) -> int:
         probe_trace=None,
         excluded_probe_ids=round_report["excluded_probe_member_ids"],
         stage2_threshold=float(args.stage2_threshold),
+        leg=LEG_ROUND,
     )
     problems = remine_problems(report)
     report["problems"] = problems

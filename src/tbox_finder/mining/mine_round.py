@@ -648,6 +648,87 @@ def write_fp_manifest(candidates: Sequence[MiningCandidate], path: str | Path) -
     return Path(path)
 
 
+def refuse_status_tables_that_decide_nothing(
+    *,
+    availability: Mapping[str, bool],
+    evidence_maps: Mapping[str, Mapping[str, object] | None],
+    candidate_ids: Sequence[str],
+    error: type[Exception],
+) -> None:
+    """Apply the zero-overlap refusal to **every** disjunct the round declares.
+
+    Written as a sweep over the availability map rather than as one call per backend
+    because the per-backend form is how this defect kept surviving: P3-15′-h's first fix
+    guarded the two *new* backends, (b) and (c), and left the covariation disjunct — whose
+    status map has the identical property — unguarded, which review then found as a major
+    ([[fixed-one-of-two-identical-things]]). The Stage-2 posterior map is the same shape
+    again: empty ⇒ every candidate's posterior is ``None`` ⇒ ``unavailable`` ⇒ spared.
+
+    The key-set assertion is the anti-drift half: a disjunct added to the availability map
+    without an evidence entry fails here rather than being silently exempt, so a fifth
+    backend cannot inherit the hole the first four had.
+    """
+    missing = sorted(set(availability) - set(evidence_maps))
+    if missing:
+        raise error(
+            f"no evidence map was offered for declared disjunct(s) {missing}; each would be "
+            "exempt from the zero-overlap refusal, which is how this class of fault survived "
+            "its first fix"
+        )
+    for disjunct, status_map in evidence_maps.items():
+        refuse_status_table_that_decides_nothing(
+            label=disjunct,
+            declared=bool(availability.get(disjunct, False)),
+            status_map=status_map,
+            candidate_ids=candidate_ids,
+            error=error,
+        )
+
+
+def refuse_status_table_that_decides_nothing(
+    *,
+    label: str,
+    declared: bool,
+    status_map: Mapping[str, object] | None,
+    candidate_ids: Sequence[str],
+    error: type[Exception],
+) -> None:
+    """Refuse a DECLARED backend whose produced table decides none of this round's candidates.
+
+    The availability↔table guards make "declared with no table" unrepresentable. They do not
+    reach one step further, and P3-15′-h measured what lives there: a table that is
+    **well-formed but decides nothing** — an empty ``{"status": {}, "rows": []}``, or a table
+    from a *different* round whose ids do not intersect this manifest — passes every existing
+    check. ``load_status_map`` returns ``{}`` or a disjoint map, ``candidate_evidence`` resolves
+    every absent id to ``unavailable`` (fail-closed, correctly), and
+    :func:`~tbox_finder.mining.hard_negative.mine_round`'s cross-check never fires because it
+    only refuses evidence PRESENT for an UNAVAILABLE backend — never an AVAILABLE backend whose
+    evidence is absent. So every candidate is spared, ``n_mined`` is 0, the leg exits 0, and the
+    sbatch writes its DONE marker: **a zero-yield round indistinguishable from an honest one**,
+    which is the exact state ADR-0005 A10's Phase-2 §7 note recorded and this arc exists to end.
+
+    Reachable, not contrived: the shipped per-shard ``build_status_table([])`` writes a valid
+    379-byte table with ``n_candidates: 0``. Only the MERGE legs refuse an empty shard, so
+    staging a per-shard output — the operator error the sbatch's own guard text advertises
+    catching — lands exactly here.
+
+    ZERO overlap is the refusal; a PARTIAL one is not. A subset resolving ``unavailable`` is a
+    real measurement (663 of 941 did, for criterion (b) at job 1288) and must keep sparing.
+    """
+    if not declared or status_map is None or not candidate_ids:
+        return
+    decided = sum(1 for cid in candidate_ids if cid in status_map)
+    if decided:
+        return
+    raise error(
+        f"{label} is declared available and its status table has {len(status_map)} entries, "
+        f"but none of them is one of this round's {len(candidate_ids)} candidates. Every "
+        f"candidate's {label} disjunct would read 'unavailable' and be spared, so the round "
+        "would report a clean zero yield that is indistinguishable from an honest one. This "
+        "is a staging fault (an empty or wrong-round table), not a result."
+    )
+
+
 def read_fp_manifest(
     path: str | Path,
     *,
@@ -824,6 +905,21 @@ def apply_spare_rule(
         msa_supply_available=msa_supply_available,
         relaxed_arch_available=relaxed_arch_available,
         synteny_available=synteny_available,
+    )
+    # The step past the availability↔table pairing: a table that is present, well-formed, and
+    # decides none of THESE candidates spares all of them silently. Swept over the availability
+    # map so no disjunct is exempt — the declaration for the covariation arm is read from
+    # `build_round_availability`'s own `rscape_installed AND msa_supply_available` derivation
+    # rather than recomputed, which is the one place that conjunction is allowed to live.
+    refuse_status_tables_that_decide_nothing(
+        availability=availability,
+        evidence_maps={
+            "any_helix_rscape": status_map,
+            "relaxed_architecture": relaxed_arch_status_map,
+            "downstream_aaRS_synteny": synteny_status_map,
+        },
+        candidate_ids=[c.candidate_id for c in candidates],
+        error=MineRoundError,
     )
     mask = load_union_mask(union_prior=union_prior, corpus_parquet=corpus_parquet)
     report = run_mine_round(candidates, mask, availability)
