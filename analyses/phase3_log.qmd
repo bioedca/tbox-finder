@@ -6479,11 +6479,17 @@ known). Two fix-ups are booked — `P3-15′-i` (the probe-set id writer) and `P
 builder) — and the prior question of whether to build them at all is put to the user, because the
 thing they unlock is a DDP retrain on **three** hard negatives followed by a full Tier-2N re-gate
 and a GATE-4 re-grade. ⚠ The most interesting number here is not the 3. It is the **718**: with all
-four backends live, three quarters of the Stage-1 "false-positive" manifest is spared because an
+four backends live, **two thirds** of the Stage-1 "false-positive" manifest is spared because an
 **orthogonal criterion actually passed**, not because evidence was missing — the state ADR-0005 A10's
 Phase-2 note was written against (941/941 spared by unavailability) is gone, and what replaced it
-sharpens P3-15′-g-iv's disclosed threat: an FP manifest of which 76.3 % satisfies at least one
+sharpens P3-15′-g-iv's disclosed threat: an FP manifest of which **67.9 %** satisfies at least one
 independent T-box criterion may not be a false-positive set.
+
+> ⚠ **Corrected 2026-08-13 (ADR-0005 A12 step).** This paragraph originally read *"three quarters …
+> 76.3 %"* about **orthogonal** support. 76.3 % (718) is the share spared by **any of the four**
+> disjuncts and includes the 79 whose only support is the project's own Stage-2 posterior. The
+> orthogonal-only figure is **639 = 67.9 %** (718 − 79), re-derived from the round's per-candidate
+> reason map.
 
 **Commit.** See the PR that carries this stanza; no code changed.
 
@@ -6680,11 +6686,16 @@ pre-flight's headline did not say so: *"718 spared by a passing disjunct / 220 b
 **700 / 238** at 0.99. The published split now carries its threshold, and the grid is in the report.
 
 ⚠⚠ **The real headline is still not the 3.** With all four backends live, **718 of 941 (76.3 %)** of
-the Stage-1 false-positive manifest is spared because an orthogonal criterion **actually passed** —
-`downstream_aaRS_synteny` 546, `relaxed_architecture` 226, `any_helix_rscape` 167 — not because
-evidence was missing. ADR-0005 A10's Phase-2 state (941/941 spared by unavailability) is gone, and
-what replaced it sharpens P3-15′-g-iv's disclosed threat: a "false-positive" set three quarters of
-which satisfies an independent T-box criterion may not be a false-positive set. **And a number this
+the Stage-1 false-positive manifest is spared because **a criterion** actually passed — and **639 of
+941 (67.9 %)** because at least one **orthogonal** criterion did: `downstream_aaRS_synteny` 546,
+`relaxed_architecture` 226, `any_helix_rscape` 167, counted with overlap. Neither is because evidence
+was missing. ADR-0005 A10's Phase-2 state (941/941 spared by unavailability) is gone, and what
+replaced it sharpens P3-15′-g-iv's disclosed threat: a "false-positive" set **two thirds** of which
+satisfies an independent T-box criterion may not be a false-positive set.
+
+> ⚠ **Corrected 2026-08-13 (ADR-0005 A12 step).** This paragraph attributed the full 76.3 % to
+> **orthogonal** criteria. It is the any-of-four share and includes the 79 named in the very next
+> sentence; the orthogonal-only figure is 639 = 67.9 %. **And a number this
 step adds: 79 candidates (8.4 %) are spared by `high_stage2_posterior` and nothing else** — the
 project's own model is their only protection. `spare_reason` emits that attribution only when no
 model-independent disjunct passed, so it is exactly the anti-circularity coordinate ADR-0005 D14's
@@ -6889,8 +6900,9 @@ set; passes **6015 → 6021** = exactly the 6 tests added.
 **Decisions.** Three §7 calls, all recorded in A12. (1) **Ratify** rather than reinstate the retrain:
 3 mined windows against A7's 19,409-item pool is a training perturbation too small to move a graded
 quantity, and the alternative — re-reading D14's `unavailable` as non-protective to raise the ceiling
-by ≈220 — would remove the anti-circularity protection D14 exists for, on a manifest where 76.3 %
-already satisfies an orthogonal criterion. (2) **Correct the artifact at its producer and repin**
+by ≈220 — would remove the anti-circularity protection D14 exists for, on a manifest where **67.9 %
+(639 of 941)** already satisfies an **orthogonal** criterion (76.3 % counts the four-disjunct share,
+which includes the 79 the model alone supports). (2) **Correct the artifact at its producer and repin**
 rather than leave a committed report asserting a false citation: the report is cited by name in
 `paper/manuscript.qmd`, so its reader is exactly the audience the misattribution misleads. (3) The
 PRD §18.3-delegated *checkpoint → phase → gate → release map* is **absent from ADR-0006** — that
