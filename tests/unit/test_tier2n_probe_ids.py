@@ -291,6 +291,29 @@ def test_an_unparsable_synthetic_id_raises_rather_than_bucketing_into_nothing(
         synthetic_probe_id_family(bad_id)
 
 
+def test_a_colon_inside_the_record_id_stays_in_the_record() -> None:
+    """``generate`` takes the record id from its parent frame, and externals carry colons.
+
+    This repo names external records ``anchor:``/``blind:``-prefixed (``splits.py``).
+    The production path mints ``p{i:05d}``, but an unbounded split would refuse such a
+    parent set outright and block the write rather than reconcile it.
+    """
+    assert synthetic_probe_id_family(f"tier2n:{FAMILY_CLASS_II}:anchor:DR_ILES") == FAMILY_CLASS_II
+
+
+def test_a_colon_bearing_record_reconciles_and_round_trips(tmp_path: Path) -> None:
+    variants = [
+        _variant(f"tier2n:{FAMILY_CLASS_II}:anchor:DR_{i:03d}", FAMILY_CLASS_II)
+        for i in range(TIER2N_PROBE_MIN_N)
+    ]
+    path = write_probe_set(
+        tmp_path / "ids.json",
+        build_probe_set(variants),
+        tier2n.build_report(variants, seed=20260719),
+    )
+    assert load_probe_set(path).size == TIER2N_PROBE_MIN_N
+
+
 def test_an_unparsable_id_in_the_probe_set_is_a_reconciliation_problem() -> None:
     probe_set = ProbeSet(natural=(), synthetic=(*_probe_set().synthetic, "not-a-probe-id"))
     problems = reconcile_probe_set_with_report(probe_set, _report())

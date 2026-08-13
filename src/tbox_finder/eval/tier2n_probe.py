@@ -155,7 +155,13 @@ def synthetic_probe_id_family(probe_id: str) -> str:
     into a bucket the report does not have, turning a genuine mismatch into an
     agreement about a family that does not exist.
     """
-    parts = probe_id.split(":")
+    # Bounded split, so a colon **inside the record id** stays in the record rather
+    # than making the id unparsable. ``generate`` takes the record id from whatever
+    # parent frame it is handed, and this repo's external records are named
+    # ``anchor:``/``blind:``-prefixed (``splits.py``) — the production path mints
+    # ``p{i:05d}``, but a parent set that did not would be refused here and would
+    # block the write entirely.
+    parts = probe_id.split(":", _SYNTHETIC_ID_FIELDS - 1)
     # Both trailing fields are checked for emptiness, not only the family: an id like
     # ``tier2n:CLASS_II_PLATFORM_SWAP:`` names no record, so it would reconcile into
     # its family's count and be written as a member no scanner can ever recover.

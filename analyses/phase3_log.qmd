@@ -6585,7 +6585,12 @@ gate"* — they cannot be constructed at all. `ProbeSet.__post_init__` refuses d
 concatenation of both arms, which covers within-arm repeats too; executed for all three shapes
 (`("a","a")` in either arm, and one id in both), every one raises. The suggested reconciliation check
 would have been unreachable code, so it was **declined with the evidence** rather than added
-([[review-finding-right-fix-wrong]]).
+([[review-finding-right-fix-wrong]]). **Round 3** returned one minor, also real: the id split was
+unbounded, so a **colon inside the record id** made the id unparsable and would have blocked the
+write. The production path mints `p{i:05d}`, but `generate` takes the record id from whatever parent
+frame it is handed and this repo names external records `anchor:`/`blind:`-prefixed (`splits.py`), so
+the split is bounded now and the family/record emptiness guards are unaffected. Review counts across
+the step: CLI **0 · 3 · 1**, harness **3 of 20**.
 
 **Decisions.** No ADR amendment: enforcing `TIER2N_PROBE_MIN_N` at the point the artifact is minted
 implements ADR-0005 A1's existing floor, it does not pin a new value. `build_probe_report` is kept
