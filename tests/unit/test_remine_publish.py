@@ -409,16 +409,52 @@ def test_the_disposition_attributes_the_supersession_claim_to_impmd_not_the_prd(
 #: harness showed that changing a single letter ("supersedes" → "supersede") walked a fully
 #: reinstated misattribution past the earlier substring form of this guard. Matching the verb
 #: family instead means a paraphrase has to stop *claiming* the thing to get through.
-#: Review r2 found the passive hole this comment's own sabotage had missed: the earlier
-#: form required ``is`` before the participle, so "the P2 checkpoint **was** superseded"
-#: walked through. The auxiliary is now optional entirely — any participle near ``P2``
-#: counts, in either order.
+#: ⚠ THREE REVIEW ROUNDS EACH FOUND A DIFFERENT CONJUGATION SLIPPING THROUGH THIS GUARD —
+#: r1 the one-letter "supersede", r2 the passive "was superseded", r3 the active
+#: "P2 supersedes X". Enumerating forms was the wrong shape: each fix closed the instance
+#: and left the class. It now matches the whole ``supersed*`` family (supersede/supersedes/
+#: superseded/superseding) within a clause of ``P2``, in EITHER order, so a paraphrase has
+#: to stop making the claim rather than re-word it. ⚠ The NOUN needs its own stem — the
+#: obvious ``supersed\w*`` misses "super-ses-sion", which is exactly the wording this whole
+#: amendment is titled after; ``superse(?:d|ss)`` covers both. Vectors from all three
+#: rounds, plus both noun orders, are exercised by ``test_the_supersession_guard_catches``.
 _PRD_MENTION = re.compile(r"\bPRD\b", re.IGNORECASE)
 _SUPERSESSION_CLAIM = re.compile(
-    r"supersed(?:e|es|ed|ing)\b[^.]{0,80}\bP2\b|"  # "supersede[s] … the P2 checkpoint"
-    r"\bP2\b[^.]{0,80}\bsupersed(?:ed|ing)\b",  # "the P2 checkpoint {is,was,had been} superseded"
+    r"superse(?:d|ss)\w*\b[^.]{0,80}\bP2\b|\bP2\b[^.]{0,80}\bsuperse(?:d|ss)\w*",
     re.IGNORECASE,
 )
+
+#: Every re-attribution wording a review round or the adversarial harness actually
+#: produced, plus the two noun orders. A guard fixed three times by enumeration needs its
+#: vectors committed, or round four re-opens it.
+_REATTRIBUTION_VECTORS = (
+    "PRD §18.1 states that stage1_production.ckpt supersedes the P2 checkpoint.",  # r1
+    "PRD §18.1 requires that stage1_production.ckpt supersede the P2 checkpoint.",  # r1'
+    "Per the PRD, the P2 checkpoint is superseded by the re-mined scanner.",  # harness
+    "Per the PRD, the P2 checkpoint was superseded by the re-mined scanner.",  # r2
+    "Per the PRD, the P2 checkpoint has been superseded.",  # r2'
+    "PRD states P2 supersedes stage1_production.",  # r3
+    "The PRD records the P2 supersession as complete.",  # noun, after
+    "The PRD's supersession of the P2 checkpoint is recorded.",  # noun, before
+)
+
+
+@pytest.mark.parametrize("wording", _REATTRIBUTION_VECTORS)
+def test_the_supersession_guard_catches(wording: str) -> None:
+    """The guard must fire on every wording review has actually produced."""
+    assert _PRD_MENTION.search(wording) and _SUPERSESSION_CLAIM.search(wording), wording
+
+
+def test_the_supersession_guard_does_not_fire_on_the_shipped_denial() -> None:
+    """Positive control: a guard that matched everything would satisfy the test above.
+
+    The shipped ``supersession_note`` legitimately contains "superseded … the P2", because
+    it DENIES the supersession — it must not be flagged, and it is not, because it names no
+    PRD. Without this the parametrized test above passes for a guard hardcoded to True.
+    """
+    note = retrain_disposition(make_round())["supersession_note"]
+    assert _SUPERSESSION_CLAIM.search(note), "fixture drifted; it no longer exercises the stem"
+    assert not _PRD_MENTION.search(note)
 
 
 def test_no_field_of_the_disposition_claims_the_prd_states_the_supersession() -> None:
