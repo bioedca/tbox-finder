@@ -119,7 +119,21 @@ declare_supply synteny-available       "${SYNTENY_AVAILABLE:-0}"
 # at leg (1) so a mis-staged supply costs nothing: this runs before the preflight, let alone the GPUs.
 STATUS_FLAGS=()
 require_status() {  # $1 = env value   $2 = --flag   $3 = path   $4 = which producer writes it
-  [ "${1:-0}" = "1" ] || return 0
+  if [ "${1:-0}" != "1" ]; then
+    # NOT a refusal — an undeclared backend legitimately passes no table, and declaring one
+    # unavailable on purpose is a supported round. But a table sitting here is produced evidence
+    # this round will never read: the disjunct resolves 'unavailable' for every candidate, all of
+    # them are spared, and the round publishes a zero yield that looks exactly like an honest one.
+    # Said out loud, because the only other trace of it is a 0 nobody can interpret.
+    [ -s "$3" ] && echo "WARNING: $3 exists but its backend is declared UNAVAILABLE ($2 will not" \
+      "be passed); this round spares every candidate on that disjunct and reads no produced" \
+      "evidence. Export the matching *_AVAILABLE=1 if that is not what you meant." >&2
+    return 0
+  fi
+  # A cheap early check only — it catches the absent/truncated file before the preflight. It is
+  # NOT the authoritative one: a well-formed table that decides ZERO of this round's candidates
+  # is non-empty and would pass here. `refuse_status_table_that_decides_nothing` in the round
+  # itself is what closes that, because the sbatch cannot know the manifest's ids.
   [ -s "$3" ] || {
     echo "FATAL: this round declares $2 available but its status table $3 is missing/empty." >&2
     echo "Stage it from $4, or declare the backend unavailable — a declared backend with no table" >&2

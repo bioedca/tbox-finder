@@ -648,6 +648,50 @@ def write_fp_manifest(candidates: Sequence[MiningCandidate], path: str | Path) -
     return Path(path)
 
 
+def refuse_status_table_that_decides_nothing(
+    *,
+    label: str,
+    declared: bool,
+    status_map: Mapping[str, str] | None,
+    candidate_ids: Sequence[str],
+    error: type[Exception],
+) -> None:
+    """Refuse a DECLARED backend whose produced table decides none of this round's candidates.
+
+    The availability↔table guards make "declared with no table" unrepresentable. They do not
+    reach one step further, and P3-15′-h measured what lives there: a table that is
+    **well-formed but decides nothing** — an empty ``{"status": {}, "rows": []}``, or a table
+    from a *different* round whose ids do not intersect this manifest — passes every existing
+    check. ``load_status_map`` returns ``{}`` or a disjoint map, ``candidate_evidence`` resolves
+    every absent id to ``unavailable`` (fail-closed, correctly), and
+    :func:`~tbox_finder.mining.hard_negative.mine_round`'s cross-check never fires because it
+    only refuses evidence PRESENT for an UNAVAILABLE backend — never an AVAILABLE backend whose
+    evidence is absent. So every candidate is spared, ``n_mined`` is 0, the leg exits 0, and the
+    sbatch writes its DONE marker: **a zero-yield round indistinguishable from an honest one**,
+    which is the exact state ADR-0005 A10's Phase-2 §7 note recorded and this arc exists to end.
+
+    Reachable, not contrived: the shipped per-shard ``build_status_table([])`` writes a valid
+    379-byte table with ``n_candidates: 0``. Only the MERGE legs refuse an empty shard, so
+    staging a per-shard output — the operator error the sbatch's own guard text advertises
+    catching — lands exactly here.
+
+    ZERO overlap is the refusal; a PARTIAL one is not. A subset resolving ``unavailable`` is a
+    real measurement (663 of 941 did, for criterion (b) at job 1288) and must keep sparing.
+    """
+    if not declared or status_map is None or not candidate_ids:
+        return
+    decided = sum(1 for cid in candidate_ids if cid in status_map)
+    if decided:
+        return
+    raise error(
+        f"{label} is declared available and its status table has {len(status_map)} entries, "
+        f"but none of them is one of this round's {len(candidate_ids)} candidates. Every "
+        f"candidate's {label} disjunct would read 'unavailable' and be spared, so the round "
+        "would report a clean zero yield that is indistinguishable from an honest one. This "
+        "is a staging fault (an empty or wrong-round table), not a result."
+    )
+
+
 def read_fp_manifest(
     path: str | Path,
     *,
@@ -818,6 +862,25 @@ def apply_spare_rule(
         covariation_status=status_map,
         synteny_status=synteny_status_map,
         relaxed_arch_status=relaxed_arch_status_map,
+    )
+    # The step past the availability↔table pairing: a table that is present, well-formed, and
+    # decides none of THESE candidates spares all of them silently. Applied here as well as in
+    # `remine` because this leg carries the identical guard pair, and an invariant fixed on one
+    # of two identical call sites is the class this project keeps re-finding.
+    candidate_ids = [c.candidate_id for c in candidates]
+    refuse_status_table_that_decides_nothing(
+        label="relaxed_architecture",
+        declared=bool(relaxed_arch_available),
+        status_map=relaxed_arch_status_map,
+        candidate_ids=candidate_ids,
+        error=MineRoundError,
+    )
+    refuse_status_table_that_decides_nothing(
+        label="downstream_aaRS_synteny",
+        declared=bool(synteny_available),
+        status_map=synteny_status_map,
+        candidate_ids=candidate_ids,
+        error=MineRoundError,
     )
     availability = build_round_availability(
         rscape_installed=rscape_installed,

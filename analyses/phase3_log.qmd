@@ -6368,3 +6368,27 @@ spellings that would not have caught either. Disclosed and **not** fixed: `--rsc
 one declaration with no derivation and no refusal (the other four are covered by
 `_supply_derivations`/`_refuse_unevidenced`), and it is what flips `may_run` to true — so a round can
 still declare a tool this checkout cannot evidence. **Commit.** see the PR for this stanza.
+
+**Review (P3-15′-h).** Three paths ran on commit `67ee1a4`: the CodeRabbit CLI (**1 minor**), the
+GitHub app's automatic review (**1 nitpick**), and a 4-lens adversarial harness (**17 agents, 0
+errors, 13 candidates, 3 surviving their own refuters**). All five findings were real and all five
+are fixed. The two that matter: **(i)** the sbatch's `[ -s ]` proves only non-zero bytes, so a
+well-formed table deciding **zero** of the round's candidates — an empty `{"status":{},"rows":[]}`,
+which the shipped per-shard `build_status_table([])` writes as 379 valid bytes, or a table from a
+different round — passed every check, resolved `unavailable` for every candidate, spared them all,
+and let the job write its DONE marker on a zero-yield round indistinguishable from an honest one.
+That is the state this whole arc exists to end, one step further in than the pairing guards reach.
+`refuse_status_table_that_decides_nothing` now refuses **zero overlap** with the manifest (a
+*partial* one stays legal — 663 of 941 legitimately resolved `unavailable` at job 1288), applied in
+both `remine` and `mine_round` from one shared function. **(ii)** Two of my own tests were weak in
+ways review named exactly: the leg-invocation tests captured argv and only *searched* it, so a
+dropped `--probe-set` stayed green, and the round leg's own `leg=LEG_ROUND` declaration was pinned
+nowhere — flipping both call sites was invisible. The captured argv is now **re-parsed by the CLI it
+was composed for** and the resolved namespace asserted, and the round leg is driven end-to-end
+through `remine_main`. Also fixed: the status filenames are now bound to the producers'
+`DEFAULT_STATUS_TABLE` constants rather than retyped, and a table staged for an **undeclared**
+backend is reported on stderr — not a refusal (switching a disjunct off is a supported round) but
+never again silent. Ten of the thirteen candidates were **refuted by their own verifiers**, several
+after the verifier reproduced the measurement and rejected the causal story. Validation on the
+follow-up: **21 sabotages, 20 RED against their NAMED test** plus the two controls; zero new
+failures vs the same matched `main` baseline (13 FAILED both sides, passes +16).

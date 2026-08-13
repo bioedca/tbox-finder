@@ -74,6 +74,7 @@ from tbox_finder.mining.mine_round import (
     build_round_availability,
     candidate_evidence,
     read_fp_manifest,
+    refuse_status_table_that_decides_nothing,
 )
 from tbox_finder.mining.spare_rule import (
     ALL_DISJUNCTS,
@@ -549,6 +550,25 @@ def apply_remine_spare_rule(
         stage2_posteriors=load_stage2_posteriors(posteriors),
         synteny_status=synteny_status,
         relaxed_arch_status=relaxed_arch_status,
+    )
+    # One step past the pairing guards above: a table that is present and well-formed but
+    # decides none of THESE candidates (empty, or from a different round) spares every one of
+    # them and publishes a zero yield that reads exactly like an honest one. Promoted, not
+    # duplicated — `mine_round`'s leg applies the same function to the same two backends.
+    candidate_ids = [c.candidate_id for c in candidates]
+    refuse_status_table_that_decides_nothing(
+        label="relaxed_architecture",
+        declared=bool(relaxed_arch_available),
+        status_map=relaxed_arch_status,
+        candidate_ids=candidate_ids,
+        error=RemineError,
+    )
+    refuse_status_table_that_decides_nothing(
+        label="downstream_aaRS_synteny",
+        declared=bool(synteny_available),
+        status_map=synteny_status,
+        candidate_ids=candidate_ids,
+        error=RemineError,
     )
     candidates, excluded = exclude_probe_members(candidates, probe_set)
 

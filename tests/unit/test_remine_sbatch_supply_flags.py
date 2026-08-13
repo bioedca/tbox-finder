@@ -39,6 +39,9 @@ import pytest
 from tbox_finder.eval.tier2n_probe import ProbeSet
 from tbox_finder.masking import LocusIndex
 from tbox_finder.mining import mine_round as mine_round_module
+from tbox_finder.mining.architecture_producer import (
+    DEFAULT_STATUS_TABLE as ARCH_STATUS_FILENAME,
+)
 from tbox_finder.mining.remine import (
     LEG_PLAN,
     LEG_ROUND,
@@ -51,6 +54,9 @@ from tbox_finder.mining.remine import (
 )
 from tbox_finder.mining.remine import main as remine_main
 from tbox_finder.mining.spare_rule import STATUS_FAILED, STATUS_PASSED
+from tbox_finder.mining.synteny_producer import (
+    DEFAULT_STATUS_TABLE as SYNTENY_STATUS_FILENAME,
+)
 
 REPO = Path(__file__).resolve().parents[2]
 SLURM = REPO / "slurm"
@@ -171,8 +177,8 @@ def test_the_declared_backends_come_with_their_produced_tables(tmp_path: Path) -
     ``--relaxed-arch-available`` finds nothing in the shipped file and would pass on a
     script that composes no flags at all.
     """
-    arch = _status_table(tmp_path / "architecture_status.json", {"a": STATUS_PASSED})
-    syn = _status_table(tmp_path / "synteny_status.json", {"a": STATUS_FAILED})
+    arch = _status_table(tmp_path / ARCH_STATUS_FILENAME, {"a": STATUS_PASSED})
+    syn = _status_table(tmp_path / SYNTENY_STATUS_FILENAME, {"a": STATUS_FAILED})
     plan, status = _tokens(_compose(tmp_path, **_all_available()))
 
     assert "--relaxed-arch-available" in plan
@@ -193,15 +199,15 @@ def test_an_undeclared_backend_is_handed_no_table(tmp_path: Path) -> None:
     because that is produced evidence the round said it did not have. So the pairing has
     to be an equivalence, not an implication.
     """
-    _status_table(tmp_path / "architecture_status.json", {"a": STATUS_PASSED})
-    _status_table(tmp_path / "synteny_status.json", {"a": STATUS_FAILED})
+    _status_table(tmp_path / ARCH_STATUS_FILENAME, {"a": STATUS_PASSED})
+    _status_table(tmp_path / SYNTENY_STATUS_FILENAME, {"a": STATUS_FAILED})
     env = {**_all_available(), "RELAXED_ARCH_AVAILABLE": "0"}
     plan, status = _tokens(_compose(tmp_path, **env))
 
     assert "--no-relaxed-arch-available" in plan and "--relaxed-arch-available" not in plan
     assert "--relaxed-arch-status" not in status
     # ...and (c), still declared, still carries its table: the two are independent.
-    assert status == ["--synteny-status", str(tmp_path / "synteny_status.json")]
+    assert status == ["--synteny-status", str(tmp_path / SYNTENY_STATUS_FILENAME)]
 
 
 def test_an_unset_env_var_declares_the_supply_UNAVAILABLE(tmp_path: Path) -> None:
@@ -231,13 +237,42 @@ def test_an_unset_env_var_declares_the_supply_UNAVAILABLE(tmp_path: Path) -> Non
     assert args.synteny_available is False
 
 
+def test_a_staged_table_for_an_undeclared_backend_is_reported(tmp_path: Path) -> None:
+    """The reverse mis-staging, which is silent by construction and cost-free to say.
+
+    An undeclared backend legitimately passes no table, so this is not a refusal — a round
+    that deliberately switches a disjunct off is supported. But a table sitting in
+    ``$ROUND_DIR`` means produced evidence the round will never read, and the consequence
+    is invisible in the outcome: the disjunct resolves ``unavailable`` for every candidate,
+    all are spared, and ``n_mined: 0`` is published with nothing to distinguish it from an
+    honest zero. The job log is the only place that can say so, so it does.
+    """
+    staged = _status_table(tmp_path / ARCH_STATUS_FILENAME, {"a": STATUS_PASSED})
+    _status_table(tmp_path / SYNTENY_STATUS_FILENAME, {"a": STATUS_FAILED})
+    env = {**_all_available(), "RELAXED_ARCH_AVAILABLE": "0"}
+    proc = _compose(tmp_path, **env)
+    plan, status = _tokens(proc)
+
+    assert "WARNING" in proc.stderr and str(staged) in proc.stderr
+    # It is a warning, not a refusal, and it changes nothing about what is composed.
+    assert proc.returncode == 0
+    assert "--no-relaxed-arch-available" in plan
+    assert "--relaxed-arch-status" not in status
+    # ...and it stays quiet when there is nothing staged, so it cannot become noise every
+    # operator learns to ignore.
+    staged.unlink()
+    quiet = _compose(tmp_path, **env)
+    _tokens(quiet)
+    assert "WARNING" not in quiet.stderr
+
+
 def test_a_declared_backend_with_no_table_refuses_before_the_preflight(tmp_path: Path) -> None:
     """A mis-staged supply must cost nothing — not a queue wait, and not GPU legs.
 
     The refusal is the sbatch's own, executed: exit 3, naming the missing path and the
     producer that writes it.
     """
-    _status_table(tmp_path / "synteny_status.json", {"a": STATUS_FAILED})  # (c) staged, (b) not
+    _status_table(tmp_path / SYNTENY_STATUS_FILENAME, {"a": STATUS_FAILED})  # (c) staged, (b) not
     proc = _compose(tmp_path, **_all_available())
     assert proc.returncode == 3, proc.stdout + proc.stderr
     assert "architecture_status.json" in proc.stderr
@@ -251,8 +286,8 @@ def test_the_composed_tokens_are_the_ones_the_shipped_parser_accepts(tmp_path: P
     spellings; that catches a renamed flag only if somebody remembers to retype it here
     too. These tokens come out of the file the cluster runs.
     """
-    _status_table(tmp_path / "architecture_status.json", {"a": STATUS_PASSED})
-    _status_table(tmp_path / "synteny_status.json", {"a": STATUS_FAILED})
+    _status_table(tmp_path / ARCH_STATUS_FILENAME, {"a": STATUS_PASSED})
+    _status_table(tmp_path / SYNTENY_STATUS_FILENAME, {"a": STATUS_FAILED})
     plan, status = _tokens(_compose(tmp_path, **_all_available()))
 
     args = build_parser().parse_args(
@@ -275,8 +310,8 @@ def test_the_composed_tokens_are_the_ones_the_shipped_parser_accepts(tmp_path: P
         ]
     )
     assert args.relaxed_arch_available is True and args.synteny_available is True
-    assert args.relaxed_arch_status == str(tmp_path / "architecture_status.json")
-    assert args.synteny_status == str(tmp_path / "synteny_status.json")
+    assert args.relaxed_arch_status == str(tmp_path / ARCH_STATUS_FILENAME)
+    assert args.synteny_status == str(tmp_path / SYNTENY_STATUS_FILENAME)
     # The plan leg takes the declarations but no tables — the same tokens must parse there.
     build_parser().parse_args(["plan", "--stage2-threshold", "0.9", *plan, "--out", "o.json"])
 
@@ -328,8 +363,8 @@ def test_the_apply_leg_hands_the_cli_both_composed_arrays(tmp_path: Path) -> Non
     ``$PLAN_FLAGS`` alone was what shipped: correct declarations, no tables, and a
     ``RemineError`` at the far end of a queue wait.
     """
-    arch = _status_table(tmp_path / "architecture_status.json", {"a": STATUS_PASSED})
-    syn = _status_table(tmp_path / "synteny_status.json", {"a": STATUS_FAILED})
+    arch = _status_table(tmp_path / ARCH_STATUS_FILENAME, {"a": STATUS_PASSED})
+    syn = _status_table(tmp_path / SYNTENY_STATUS_FILENAME, {"a": STATUS_FAILED})
     argv = _argv_of_leg(
         tmp_path,
         "PYTHONPATH=src python -m tbox_finder.mining.remine apply-spare-rule",
@@ -350,6 +385,23 @@ def test_the_apply_leg_hands_the_cli_both_composed_arrays(tmp_path: Path) -> Non
     # transposed would satisfy a membership-only assertion.
     assert argv[argv.index("--relaxed-arch-status") + 1] == str(arch)
     assert argv[argv.index("--synteny-status") + 1] == str(syn)
+    # ⚠ MEMBERSHIP IS NOT ENOUGH, and adversarial review found this exact gap: capturing
+    # argv and only searching it leaves several ways to break the shipped invocation
+    # invisible — a missing required argument, a subcommand typo, a value that lands on the
+    # wrong option. The captured argv is therefore RE-PARSED by the CLI it was composed for,
+    # and the RESOLVED namespace is asserted, not the token list.
+    args = build_parser().parse_args(argv[2:])
+    assert args.cmd == "apply-spare-rule"
+    assert args.stage2_threshold == pytest.approx(THRESHOLD)
+    assert (args.relaxed_arch_available, args.synteny_available) == (True, True)
+    assert (args.msa_supply_available, args.stage2_supply_available) == (True, True)
+    assert args.rscape_installed is True
+    assert args.relaxed_arch_status == str(arch)
+    assert args.synteny_status == str(syn)
+    # Every required argument the leg is supposed to hand over, resolved — a dropped
+    # `--probe-set` or `--posteriors` would exit argparse on the cluster, after the sync.
+    assert args.manifest and args.status_table and args.posteriors and args.probe_set
+    assert args.out.endswith("round.json")
 
 
 def test_the_plan_leg_hands_the_cli_the_declarations(tmp_path: Path) -> None:
@@ -358,8 +410,8 @@ def test_the_plan_leg_hands_the_cli_the_declarations(tmp_path: Path) -> None:
     Two legs, one ``$PLAN_FLAGS``: a preflight that judged a different availability set
     from the one the mining leg runs with would be a preflight of nothing.
     """
-    _status_table(tmp_path / "architecture_status.json", {"a": STATUS_PASSED})
-    _status_table(tmp_path / "synteny_status.json", {"a": STATUS_FAILED})
+    _status_table(tmp_path / ARCH_STATUS_FILENAME, {"a": STATUS_PASSED})
+    _status_table(tmp_path / SYNTENY_STATUS_FILENAME, {"a": STATUS_FAILED})
     argv = _argv_of_leg(
         tmp_path,
         "PYTHONPATH=src python -m tbox_finder.mining.remine plan",
@@ -371,6 +423,12 @@ def test_the_plan_leg_hands_the_cli_the_declarations(tmp_path: Path) -> None:
     # The plan subcommand takes no status tables; passing one would be an argparse error
     # on the cluster, after the sync.
     assert "--relaxed-arch-status" not in argv and "--synteny-status" not in argv
+    # Re-parsed, not merely searched (see the apply-leg test for why membership is weak).
+    args = build_parser().parse_args(argv[2:])
+    assert args.cmd == "plan"
+    assert args.stage2_threshold == pytest.approx(THRESHOLD)
+    assert (args.relaxed_arch_available, args.synteny_available) == (True, True)
+    assert (args.msa_supply_available, args.stage2_supply_available) == (True, True)
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -388,11 +446,11 @@ def test_the_produced_b_and_c_tables_reach_the_outcome(
     all, which is precisely the state this step found.
     """
     arch = _status_table(
-        tmp_path / "architecture_status.json",
+        tmp_path / ARCH_STATUS_FILENAME,
         {"spared-by-b": STATUS_PASSED, "spared-by-c": STATUS_FAILED},
     )
     syn = _status_table(
-        tmp_path / "synteny_status.json",
+        tmp_path / SYNTENY_STATUS_FILENAME,
         {"spared-by-b": STATUS_FAILED, "spared-by-c": STATUS_PASSED},
     )
     _, status = _tokens(_compose(tmp_path, **_all_available()))
@@ -553,9 +611,181 @@ def test_the_plan_leg_declaration_is_falsifiable(tmp_path: Path) -> None:
     assert inspect.signature(build_remine_report).parameters["leg"].default == LEG_ROUND
 
 
+def test_the_round_leg_stamps_itself_as_the_round_leg(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The OTHER declaration — the one adversarial review found untested.
+
+    ``_cmd_apply_spare_rule`` declares ``leg=LEG_ROUND`` at two call sites, and flipping
+    both to ``LEG_PLAN`` was invisible to every other test here: the plan-leg tests pin
+    the plan side, and the falsifiability test builds its reports by hand. A round leg
+    that called itself ``plan`` would take the excusing branch and stop owing a mining
+    outcome at all — the amnesty this step was careful not to hand out
+    ([[fixed-one-of-two-identical-things]], on the two halves of one declaration).
+    """
+    arch = _status_table(tmp_path / ARCH_STATUS_FILENAME, {"c1": STATUS_FAILED})
+    syn = _status_table(tmp_path / SYNTENY_STATUS_FILENAME, {"c1": STATUS_FAILED})
+    manifest = tmp_path / "fps.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "candidates": [
+                    {
+                        "candidate_id": "c1",
+                        "accession": "GCA_1:c0",
+                        "locus_start": 100,
+                        "locus_end": 150,
+                        "score": 0.9,
+                        "pool": "genomic_window",
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    covariation = tmp_path / "covariation_status.json"
+    covariation.write_text(json.dumps({"status": {"c1": STATUS_FAILED}}), encoding="utf-8")
+    posteriors = tmp_path / "post.json"
+    posteriors.write_text(json.dumps({"posteriors": {"c1": 0.01}}), encoding="utf-8")
+    probe = tmp_path / "probe.json"
+    probe.write_text(
+        json.dumps({"natural": ["not-in-substrate"], "synthetic": []}), encoding="utf-8"
+    )
+    monkeypatch.setattr(mine_round_module, "load_union_mask", lambda **_kw: EMPTY_MASK)
+    out = tmp_path / "round.json"
+
+    rc = remine_main(
+        [
+            "apply-spare-rule",
+            "--stage2-threshold",
+            str(THRESHOLD),
+            "--manifest",
+            str(manifest),
+            "--status-table",
+            str(covariation),
+            "--posteriors",
+            str(posteriors),
+            "--probe-set",
+            str(probe),
+            "--rscape-installed",
+            "--msa-supply-available",
+            "--stage2-supply-available",
+            "--relaxed-arch-available",
+            "--relaxed-arch-status",
+            str(arch),
+            "--synteny-available",
+            "--synteny-status",
+            str(syn),
+            "--out",
+            str(out),
+        ]
+    )
+    written = json.loads(out.read_text(encoding="utf-8"))
+    assert (rc, written["leg"], written["problems"]) == (0, LEG_ROUND, [])
+    # Every disjunct ran and failed, so this candidate is MINED — the round is not a
+    # structural zero any more, which is the whole point of the arc this step closes.
+    assert written["round"]["n_mined"] == 1
+
+
+def test_a_table_that_decides_none_of_these_candidates_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """One step past the pairing guard, and the state adversarial review demonstrated.
+
+    A table that is present and well-formed but decides **zero** of this round's
+    candidates — an empty ``{"status": {}, "rows": []}`` (the shipped per-shard
+    ``build_status_table([])`` writes exactly that, 379 valid bytes), or a table from a
+    different round — passes `[ -s ]`, passes `load_status_map`, and then resolves
+    ``unavailable`` for every candidate. All are spared, ``n_mined`` is 0, the leg exits
+    0 and the sbatch writes its DONE marker: a zero-yield round indistinguishable from an
+    honest one. A PARTIAL overlap is left alone — 663 of 941 candidates legitimately
+    resolved ``unavailable`` for criterion (b) at job 1288.
+    """
+    manifest = tmp_path / "fps.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "candidates": [
+                    {
+                        "candidate_id": "c1",
+                        "accession": "GCA_1:c0",
+                        "locus_start": 100,
+                        "locus_end": 150,
+                        "score": 0.9,
+                        "pool": "genomic_window",
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    covariation = tmp_path / "covariation_status.json"
+    covariation.write_text(json.dumps({"status": {"c1": STATUS_FAILED}}), encoding="utf-8")
+    posteriors = tmp_path / "post.json"
+    posteriors.write_text(json.dumps({"posteriors": {"c1": 0.01}}), encoding="utf-8")
+    monkeypatch.setattr(mine_round_module, "load_union_mask", lambda **_kw: EMPTY_MASK)
+
+    # (c) is held FIXED and healthy across every arm, so the only thing varying is the (b)
+    # table. Without it the control could not mine for a reason that has nothing to do with
+    # the guard under test — an undeclared (c) makes every candidate spared anyway.
+    syn = _status_table(tmp_path / SYNTENY_STATUS_FILENAME, {"c1": STATUS_FAILED})
+
+    def _round(arch_rows: dict[str, str]) -> dict[str, object]:
+        return apply_remine_spare_rule(
+            manifest,
+            covariation,
+            posteriors,
+            stage2_threshold=THRESHOLD,
+            rscape_installed=True,
+            msa_supply_available=True,
+            stage2_supply_available=True,
+            relaxed_arch_available=True,
+            relaxed_arch_status_table=_status_table(tmp_path / "arch.json", arch_rows),
+            synteny_available=True,
+            synteny_status_table=syn,
+            probe_set=ProbeSet(natural=("not-in-substrate",), synthetic=()),
+        )
+
+    # Empty, and wrong-round — the same fault, and neither is a result.
+    with pytest.raises(RemineError, match="none of them is one of this round's"):
+        _round({})
+    with pytest.raises(RemineError, match="none of them is one of this round's"):
+        _round({"some-other-round-id": STATUS_FAILED})
+    # ...and the honest partial case still runs and still spares nobody wrongly: the one
+    # candidate IS decided, so no refusal fires. Without this half the guard could be a
+    # blanket refusal and the two `raises` above would still pass
+    # ([[raises-test-needs-a-positive-control]]).
+    report = _round({"c1": STATUS_FAILED, "another-round-id": STATUS_PASSED})
+    assert report["n_mined"] == 1
+
+
 # ═════════════════════════════════════════════════════════════════════════════
 # 4. The class, not the one file
 # ═════════════════════════════════════════════════════════════════════════════
+def test_the_sbatch_status_paths_are_the_producers_own_filenames(tmp_path: Path) -> None:
+    """Bind the sbatch's defaults to the producers' constants instead of retyping them.
+
+    CodeRabbit's finding: the filenames are repeated in the sbatch and in this file, and
+    nothing tied either to ``architecture_producer.DEFAULT_STATUS_TABLE`` /
+    ``synteny_producer.DEFAULT_STATUS_TABLE``. A rename there leaves the sbatch pointing at
+    a path the producer no longer writes, and the symptom is `exit 3` on a round whose
+    supply WAS staged correctly.
+
+    The tables are staged under the **constants'** names and the composed paths are read
+    out of the shipped file, so this fails on a drift in either direction: rename the
+    constant and the staged filename moves out from under the sbatch (`require_status`
+    exits 3, `_tokens` raises); change the sbatch's literal and the composed path stops
+    matching.
+    """
+    arch = _status_table(tmp_path / ARCH_STATUS_FILENAME, {"a": STATUS_PASSED})
+    syn = _status_table(tmp_path / SYNTENY_STATUS_FILENAME, {"a": STATUS_FAILED})
+    _, status = _tokens(_compose(tmp_path, **_all_available()))
+    assert status == ["--relaxed-arch-status", str(arch), "--synteny-status", str(syn)]
+    # The constants are what the producers' merge legs write, so a stale sbatch is a
+    # staging failure rather than a science one — say which is which.
+    assert arch.name == ARCH_STATUS_FILENAME and syn.name == SYNTENY_STATUS_FILENAME
+
+
 def test_every_apply_spare_rule_sbatch_is_on_one_side_of_the_pairing_rule() -> None:
     """Any round script that CAN declare (b)/(c) must also compose their tables.
 
