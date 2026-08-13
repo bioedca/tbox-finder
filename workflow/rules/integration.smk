@@ -27,6 +27,8 @@ _TWO_STAGE_FIXTURE = "tests/fixtures/two_stage"
 _TWO_STAGE_REPORT = "reports/strand_robustness.json"
 _TWO_STAGE_TABLE = "reports/p3/two_stage_candidates.json"
 _GATE2_REPORT = "reports/gate2_p3_ece.json"
+_PRECISION_ITEMS = "reports/p3/two_stage_precision_items.json"
+_PRECISION_REPORT = "reports/two_stage_precision.json"
 
 
 rule two_stage_eval:
@@ -97,3 +99,48 @@ rule two_stage_eval:
         "--temperature-from {input.gate2:q} "
         "--stage2-operating-point {params.operating_point} "
         "--expect-digest {params.expect_digest:q} >{log} 2>&1"
+
+
+rule precision_comparison:
+    """P3-16 — the P3 exit gate: two-stage vs Stage-1-only precision at matched recall.
+
+    Torch-free and CI-runnable by construction, the same split ``two_stage_eval`` uses. The
+    GPU work — two Stage-1 passes (the GATE-4 eval twin, which is the **gated** arm, and the
+    shipped scanner, reported beside it) and their Stage-2 re-scoring — is hand-run in
+    ``ml-dna`` / ``ml-rna`` and folded down to the committed per-item score table this rule
+    reads. That table is one row per benchmark item per arm; everything the grade depends on
+    is arithmetic over it, so a reviewer can re-derive the published verdict from the repo
+    alone without a GPU.
+
+    ``--stage2-operating-point`` is passed explicitly and has **no module default**:
+    ADR-0005 D3 freezes it at the §13.1 phase gate (P5-01), and the written report carries
+    ``rule.pinned: false``. The value here is the one the harness fixture was minted under,
+    supplied via an overridable ``config.get`` so a fresh clone can reproduce the artifact
+    without a config file — the same reasoning ``two_stage_eval`` documents above.
+
+    The rule **fails** when the gate fails (exit 4) or when the report's own clause set
+    refuses it (exit 3), rather than writing a report that says so quietly.
+    """
+    input:
+        # NOT `items=`: Snakemake reserves that name on the io namespace and rejects the
+        # rule at lint time ("items is reserved for internal use").
+        score_table=_PRECISION_ITEMS,
+    output:
+        report=_PRECISION_REPORT,
+    params:
+        operating_point=config.get("two_stage_operating_point", 0.5),
+        decoy_prevalence=config.get("benchmark_decoy_prevalence", 100),
+        n_boot=config.get("precision_n_boot", 2000),
+        seed=config.get("precision_seed", 42),
+    log:
+        "logs/precision_comparison.log",
+    conda:
+        "../../envs/data.yml"
+    shell:
+        "PYTHONPATH=src python -m tbox_finder.integration.precision report "
+        "--items {input.score_table:q} "
+        "--out {output.report:q} "
+        "--stage2-operating-point {params.operating_point} "
+        "--decoy-prevalence {params.decoy_prevalence} "
+        "--n-boot {params.n_boot} "
+        "--seed {params.seed} >{log} 2>&1"

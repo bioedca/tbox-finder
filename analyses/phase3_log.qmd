@@ -6917,3 +6917,129 @@ disclosures stand: **79 of 941 (8.4 %)** spared by the model's own posterior alo
 **220** fail-closed spares, and the open question of whether the 941 are false positives at all.
 
 **Commit.** See the PR that carries this stanza.
+
+## Step P3-16 — 2026-08-13: the P3 exit gate, and the statistic it turned out it had to be read on
+
+**Inputs.** `data/processed/checkpoints/stage1_gate4_twin/stage1.pt` (`0140a8a3…`, the **gated**
+Stage-1 arm) and `data/processed/checkpoints/stage1_production/stage1.pt` (`09931a22…`, ADR-0005
+A12's canonical shipped scanner, reported beside it) · `data/processed/checkpoints/stage2_rinalmo/aux1.0_lr1e-4`
+(P3-06) · `reports/gate2_p3_ece.json` for P3-10's fitted `T = 1.140627294282911` ·
+`window_dataset.load_gate4_eval_records()` (1,201 records / 1,029 clusters) ·
+`data/processed/negatives/decoys_v0.parquet` (the four §9.1 pools) ·
+`data/processed/negatives/mining_pool_v0.parquet` (host windows) · the P3-14 harness.
+
+**Process.** `scripts/mint_p3_16_benchmark.py` builds 1,893 **1,024-nt scan windows** — 1,201
+gate4_eval loci carved in their real ±context at an honest phase (`window_lead_range` +
+`deterministic_lead`), and 692 §9.1 decoys spliced into real mined host windows by the shipped
+`data/embedding.py::embed_decoy_rows`. Both Stage-1 arms scan the identical item set through the
+P3-14 legs (`stage1` → `payloads` → `stage2` → `run`), `precision fold` reduces the two candidate
+tables to one committed per-item score table, and `precision report` grades it.
+`workflow/rules/integration.smk::precision_comparison` runs that last leg, torch-free.
+
+**Outputs.** `src/tbox_finder/integration/precision.py` · `metrics.precision_at_matched_recall`
++ `metrics.average_precision_reweighted` (with `average_precision` **delegating** to it at unit
+weight) · `reports/p3/two_stage_precision_items.json` (sha256 `0a22a590…`) ·
+`reports/two_stage_precision.json` (sha256 `f4c446ed…`) · `tests/unit/test_precision_gain.py`
+(37) · the eval-gate wiring · **ADR-0005 A13** (signed). LOCAL only: two Stage-1 passes (seconds)
+and 14,220 Stage-2 payloads (~35 min on the laptop 4060, sharded). No SLURM, no DVC object, no
+checkpoint.
+
+**GATE (PRD §18.1, P3 exit) PASSES on the gated arm: AUPRC 0.949592 (two-stage) vs 0.784240
+(Stage-1-only) at ADR-0005 D7's pinned 100:1, +16.535 pp.** 95 % block-bootstrap CI over 1,721
+clusters, B = 2,000: **[−4.998, +35.881]** — the point estimate is positive and **the lower bound
+is not**. GATE-2's P3 half passed at P3-10 (ECE 0.005662), so both halves of the exit gate are now
+graded.
+
+::: {.callout-important}
+## The gate could not be read on the quantity `imp.md` names, and the reason is in ADR-0005 itself
+
+`imp.md` P3-16 asks for *precision at matched recall*. That is a **threshold** quantity: it needs a
+Stage-1 threshold to generate candidates and a Stage-2 operating point to fix the recall it is
+matched at. **D3 freezes both at the §13.1 phase gate — P5-01, two phases after this gate.** Read
+at the values this run used, the gated arm gives **−0.039 pp** at τ = 0.5, **+6.342 pp** at τ = 0.7
+and **+6.177 pp** at τ = 0.9. One system, three answers, none at a pinned point. Picking the
+passing one is the threshold-shopping §8.5 forbids; picking the failing one routes a 4-versus-4 tie
+to the §2.3 method-gate-failure branch. **A13 names the statistic instead: threshold-free AUPRC at
+D7's pinned prevalence, PRD §12's primary imbalance-aware metric.** The matched-recall read is
+retained in full and published **non-gated** — including the −0.039 pp that fails — and a clause
+refuses a report that drops it.
+:::
+
+::: {.callout-important}
+## The real result is the prevalence curve, not the single gated number
+
+The gated arm's AUPRC gain is monotone in decoy prevalence: **+0.138 pp** at the benchmark's own
+composition (0.576 decoys per positive) → **+2.294** at 10:1 → **+16.535** at 100:1 → **+48.762**
+at 10³:1 → **+62.967** at 10⁴:1. That is PRD §6's division of labour arriving as a measurement —
+*"Stage 2 is the calibrated precision filter that makes genome-scale FDR tractable"* — and it says
+where Stage-2's value actually lives: not in distribution, where Stage-1 alone is already ~99.7 %
+precise, but at the prevalence P5 scans at. ⚠ AUPRC is **not** provably prevalence-invariant the
+way matched-recall precision is (two PR curves can cross), so the whole sweep is published rather
+than assumed to agree, and A13 Pin 3 says so.
+:::
+
+::: {.callout-warning}
+## Four false positives against four: the gate has a power floor, and it is stated
+
+Of 692 §9.1 decoys the gated arm's Stage-1 emits a candidate for **6** and retains **4** at the
+matched-recall point; two-stage retains **4** as well, of a partly different composition — Stage-2
+rejects the `leader_decoy` and admits one more `structured_rna`. A four-versus-four comparison
+cannot be significant at the block level, which is exactly what the CIs report. The published
+verdict is a **reference**, not evidence of a significant effect; the headroom Stage-2 exists to
+buy is P5's FDR and P4's held-out-clade recall.
+:::
+
+::: {.callout-warning}
+## The first benchmark had ONE discriminating negative, and the failure is kept in the record
+
+Built item-as-contig — each decoy scanned as its own ~280-nt contig, zero-flanked into one window
+— Stage-1 emitted a candidate for **1 of 692** decoys (6 of 692 for the shipped scanner). Every
+`structured_rna`, `gc_background` and `dinuc_shuffled` decoy produced nothing, so the entire
+measured "gain" was the single `leader_decoy` — the one §9.1 record that is itself T-box-derived,
+with 2 of its 8 exact substrings of training positives. A control that cannot fire reads as a clean
+result ([[control-matchedness-must-be-asserted]]). Rebuilding in **scan geometry** (`embed_decoy_rows`,
+the operator A7 already uses to put decoys into training) raised it to 4–6. It did not manufacture
+headroom that is not there, and the §7 call to rebuild was taken on the measurement, not on a guess.
+:::
+
+::: {.callout-important}
+## No Stage-1 checkpoint in this repo has an in-distribution holdout, so the gated arm is the GATE-4 twin
+
+P2-10d′-b trained on the **whole** `nested_train` fold (8,303 records, `exclude_selection_val=false`),
+so 1,204 of the 2,353 in-distribution test-rung positives are inside its training set and its
+complement is the leave-clade-out holdout — P4's question, not this one. Measured: `test` ∩ Stage-1
+training = **1,304 rows**; `test` ∩ Stage-2 training = **0**. GATE-4 met the same wall and graded a
+twin; §7 (2026-08-13) took the same route here. The **twin** arm is gated (0 of 1,201 positives
+seen) and the **shipped scanner** is scored on the identical items and reported beside it
+(1,201 of 1,201 seen; AUPRC gain +4.671 pp), disclosed as Stage-1-in-sample. `precision_problems`
+re-derives *which arm may be gated* from the measured exposure counts, not from the string `"twin"`.
+:::
+
+::: {.callout-note}
+## Two exposure facts the negatives carry, and one geometry fact the fixture default hid
+
+All four §9.1 pools are in the gated denominator (§7). **All 2,999 `structured_rna` decoys were
+embedded in both Stage-1 trainings** (A7 pin 3), so 283 of the 692 negatives are memorised — the
+per-pool false-positive breakdown is published so that is readable, not trusted. `leader_decoy`
+contributes **one** item. The exposure derivation is bound to reality: the minter refuses to write
+unless it reproduces both committed runs' `n_embedded_by_pool` exactly (702 + 2,999 production;
+602 + 2,999 twin). ⚠ Separately: the P3-14 `stage1` leg defaults to **float16** logits, and on a
+locus-sized contig — **one** covering window, so no log-mean-exp averaging to damp quantisation —
+that flips near-tied positions and the leg's own self-check fires (2 of 439 predictions on the
+first contig). `--dtype float32` reproduces `scan_encoded_windows` exactly (0 mismatches,
+max |Δ log-prob| 0.0), and both arms were minted that way.
+:::
+
+**Validation.** Gate PASSES (above); `precision_problems` returns `[]` on the committed report with
+all 15 clauses re-deriving, `is_science` and `gated` are the conjunction of the completeness clauses
+rather than assertions. 37 `test_precision_gain` + the eval-gate wiring; `average_precision`'s
+committed golden is **bit-unchanged** under the delegation (asserted). ruff 0.15.15 + black 25.11.0
+clean.
+
+**Decisions.** Two §7 calls, both taken on measurements: the **gated arm** (twin, with the shipped
+scanner reported beside it) and the **statistic** (ADR-0005 **A13**, signed 2026-08-13). Path drift,
+recorded not taken silently: `precision_gain` lands in `src/tbox_finder/integration/precision.py`,
+not in `two_stage.py` as `imp.md` names — that module's own docstring says *"Not an evaluation …
+the two-stage-vs-Stage-1-only precision comparison is P3-16"*, and it is already 1,682 lines.
+
+**Commit.** see PR (P3-16).

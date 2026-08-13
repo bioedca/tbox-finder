@@ -119,6 +119,31 @@ def test_recall_at_matched_precision() -> None:
     assert r2["matched"] is False and r2["recall"] == 0.0
 
 
+def test_precision_at_matched_recall_is_wired_and_mirrors_its_twin() -> None:
+    """P3-16's gated quantity (PRD §18.1 P3 exit), in the harness regression tier beside
+    GATE-1's recall@matched-precision — the two are mirrors and are read together."""
+    y = [1, 1, 0, 0]
+    s = [0.9, 0.8, 0.4, 0.3]
+    # every positive outranks every decoy -> full recall at precision 1.0
+    p = M.precision_at_matched_recall(y, s, 1.0)
+    assert p["matched"] is True and p["precision"] == pytest.approx(1.0)
+    # a target recall no threshold reaches -> unmatched, precision 0.0 (fails CLOSED, so an
+    # unmeasurable arm can never win the ``two_stage > stage1_only`` comparison)
+    p2 = M.precision_at_matched_recall(y, s, 1.5)
+    assert p2["matched"] is False and p2["precision"] == 0.0
+    # mirror check: the threshold it selects reproduces the same (precision, recall) pair
+    assert M.precision_recall_at_threshold(y, s, p["threshold"]) == (
+        p["precision"],
+        p["recall"],
+    )
+    # the sweep can be restricted to an arm's reachable operating points, so a sentinel
+    # score for a never-generated candidate cannot become a threshold that calls it
+    restricted = M.precision_at_matched_recall(
+        [1, 1, 0], [0.9, -1.0, 0.8], 0.5, candidates=[0.9, 0.8]
+    )
+    assert restricted["threshold"] == 0.9
+
+
 def test_binned_ece_plugin_and_debias() -> None:
     # perfectly-calibrated 2-bin case -> plug-in ECE 0
     assert M.binned_ece(
