@@ -29,6 +29,11 @@ _TWO_STAGE_TABLE = "reports/p3/two_stage_candidates.json"
 _GATE2_REPORT = "reports/gate2_p3_ece.json"
 _PRECISION_ITEMS = "reports/p3/two_stage_precision_items.json"
 _PRECISION_REPORT = "reports/two_stage_precision.json"
+_PRECISION_TAU = ("0.7", "0.9")
+_PRECISION_SENSITIVITY = {
+    tau: f"reports/p3/two_stage_precision_tau{tau.replace('.', '')}.json"
+    for tau in _PRECISION_TAU
+}
 
 
 rule two_stage_eval:
@@ -125,9 +130,18 @@ rule precision_comparison:
         # NOT `items=`: Snakemake reserves that name on the io namespace and rejects the
         # rule at lint time ("items is reserved for internal use").
         score_table=_PRECISION_ITEMS,
+        # The Stage-1-threshold sensitivity annex. Declared as INPUTS, not left to a
+        # hand-run invocation: `_cmd_report` adds the block only when `--sensitivity` is
+        # passed, and `precision_problems` treats it as optional — so a rule that omitted it
+        # would silently overwrite the committed artifact with a report missing the annex
+        # and still pass (CodeRabbit, PR #133).
+        sensitivity=[_PRECISION_SENSITIVITY[tau] for tau in _PRECISION_TAU],
     output:
         report=_PRECISION_REPORT,
     params:
+        sensitivity=" ".join(
+            f"--sensitivity {tau}={_PRECISION_SENSITIVITY[tau]}" for tau in _PRECISION_TAU
+        ),
         operating_point=config.get("two_stage_operating_point", 0.5),
         decoy_prevalence=config.get("benchmark_decoy_prevalence", 100),
         n_boot=config.get("precision_n_boot", 2000),
@@ -143,4 +157,5 @@ rule precision_comparison:
         "--stage2-operating-point {params.operating_point} "
         "--decoy-prevalence {params.decoy_prevalence} "
         "--n-boot {params.n_boot} "
-        "--seed {params.seed} >{log} 2>&1"
+        "--seed {params.seed} "
+        "{params.sensitivity} >{log} 2>&1"

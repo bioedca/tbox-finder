@@ -97,7 +97,7 @@ data-leakage control, calibration, and orthogonal validation are first-class.
   the pre-registered 100:1 benchmark decoy prevalence — 0.950 vs 0.784, +16.5 pp** — on a
   1,893-window in-distribution benchmark (1,201 held-out T-box loci in real genomic context,
   692 §9.1 decoys spliced into real host windows). ⚠ **The 95% block-bootstrap interval is
-  [−5.0, +35.9] pp: the point estimate is positive and its lower bound is not.** In
+  [−4.9, +35.7] pp: the point estimate is positive and its lower bound is not.** In
   distribution Stage-1 alone is already ~99.7% precise, so only **4 of 692** decoys separate
   the two systems, and no in-distribution benchmark can make that comparison significant.
   *The number that shows where Stage-2 earns its place:* the gain grows monotonically with

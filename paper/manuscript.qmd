@@ -425,7 +425,7 @@ gated on none of it.
 On that statistic the two-stage system reaches **AUPRC 0.950 against
 Stage-1-only's 0.784 at 100:1 decoy prevalence, a gain of 16.5 percentage
 points** (@fig-twostage). The interval around that gain, block-resampled at the
-homology-cluster level, is **[−5.0, +35.9] points** — positive at the point
+homology-cluster level, is **[−4.9, +35.7] points** — positive at the point
 estimate and not bounded away from zero. The reason is visible in the raw
 counts: in distribution the scanner alone is already about 99.7 % precise, it
 emits a candidate for only 6 of 692 decoys, and 4 survive to the matched-recall

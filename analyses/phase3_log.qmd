@@ -6938,15 +6938,15 @@ tables to one committed per-item score table, and `precision report` grades it.
 
 **Outputs.** `src/tbox_finder/integration/precision.py` · `metrics.precision_at_matched_recall`
 + `metrics.average_precision_reweighted` (with `average_precision` **delegating** to it at unit
-weight) · `reports/p3/two_stage_precision_items.json` (sha256 `0a22a590…`) ·
-`reports/two_stage_precision.json` (sha256 `f4c446ed…`) · `tests/unit/test_precision_gain.py`
+weight) · `reports/p3/two_stage_precision_items.json` (sha256 `04b63b0e…`) ·
+`reports/two_stage_precision.json` (sha256 `75bdef24…`) · `tests/unit/test_precision_gain.py`
 (37) · the eval-gate wiring · **ADR-0005 A13** (signed). LOCAL only: two Stage-1 passes (seconds)
 and 14,220 Stage-2 payloads (~35 min on the laptop 4060, sharded). No SLURM, no DVC object, no
 checkpoint.
 
 **GATE (PRD §18.1, P3 exit) PASSES on the gated arm: AUPRC 0.949592 (two-stage) vs 0.784240
-(Stage-1-only) at ADR-0005 D7's pinned 100:1, +16.535 pp.** 95 % block-bootstrap CI over 1,721
-clusters, B = 2,000: **[−4.998, +35.881]** — the point estimate is positive and **the lower bound
+(Stage-1-only) at ADR-0005 D7's pinned 100:1, +16.535 pp.** 95 % block-bootstrap CI over 1,555
+clusters, B = 2,000: **[−4.850, +35.691]** — the point estimate is positive and **the lower bound
 is not**. GATE-2's P3 half passed at P3-10 (ECE 0.005662), so both halves of the exit gate are now
 graded.
 
@@ -7028,6 +7028,41 @@ locus-sized contig — **one** covering window, so no log-mean-exp averaging to 
 that flips near-tied positions and the leg's own self-check fires (2 of 439 predictions on the
 first contig). `--dtype float32` reproduces `scan_encoded_windows` exactly (0 mismatches,
 max |Δ log-prob| 0.0), and both arms were minted that way.
+:::
+
+::: {.callout-warning}
+## Review round 1 (CodeRabbit app, automatic): 4 findings, all four real — and one moved a published CI
+
+⚠ The **CLI path was unavailable** on a new error — *"Review failed: You are not a member of the
+requested organization"*, which carries no wait time and is an **absence**, not a pass (§5.1) — so
+this round is the GitHub app's automatic review of `c0c9750`.
+
+**(major) The documented block scheme was not the implemented one, and the gap narrowed an
+interval.** The minter's docstring said `dinuc_shuffled` decoys inherit their parent locus's
+cluster; `block_id` implemented exactly that and **nothing called it** — every negative keyed on
+its unique host. So a shuffle and the locus it is a permutation *of* were treated as independent
+bootstrap units. Fixed at the producer (`decoy_block_id`, bound to the split table's cluster map):
+blocks **1,721 → 1,555**, and the gated CI widens **[−4.998, +35.881] → [−4.850, +35.691]**. The
+point estimate does not move — blocks affect only the interval — and the direction is the
+conservative one.
+
+**(minor) A disclosure described the benchmark that was REPLACED.** `disclosures()` still read
+*"locus-sized sequences scanned as their own contigs"* while the same report's `scope.geometry`
+said `1024-nt scan windows`. A published artifact contradicting itself; corrected at the producer
+and regenerated.
+
+**(minor) The `is_science` clause fired on an honest incomplete run.** `bool(is_science) ==
+bool(completeness)` demanded truthiness whenever the clause set was non-empty, so a report that
+correctly derived `is_science = False` from a FALSE clause would have been refused as malformed.
+The conjunction check beside it was already the real test; the first conjunct is dropped.
+
+**(minor) The Snakemake rule could not regenerate its own committed artifact.** It omitted
+`--sensitivity`, and `precision_problems` treats the annex as optional — so a rule run would have
+overwritten the published report with one missing the τ sweep **and still passed**. The two
+per-threshold reports are now committed under `reports/p3/` and declared as rule inputs.
+
+Artifacts regenerated: `75bdef24…` (report), `04b63b0e…` (item table). **No published point
+estimate moved**; the gated CI and the block count did, and both are restated above.
 :::
 
 **Validation.** Gate PASSES (above); `precision_problems` returns `[]` on the committed report with

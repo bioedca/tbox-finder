@@ -99,7 +99,7 @@ as scan windows the gated arm's Stage-1 emits a candidate for **6** and retains 
 false positives at the matched-recall point; the two-stage system retains **4** as well, of
 a partly different composition (Stage-2 rejects the ``leader_decoy``, admits one more
 ``structured_rna``). A four-versus-four comparison has essentially no power — the
-matched-recall CI is ±18 pp — and no amount of care in the estimator changes that. The
+matched-recall CI is ±17 pp — and no amount of care in the estimator changes that. The
 precision headroom Stage-2 exists to buy is a **genome-scale** quantity (P5's FDR) and a
 **held-out-clade** quantity (P4's GATE-1); this gate is an in-distribution reference, and it
 is reported as one.
@@ -845,10 +845,12 @@ def disclosures(benchmark: Mapping[str, Any], arms: Mapping[str, Mapping[str, An
             "the whole 10:1 → 10⁴:1 sweep."
         ),
         (
-            "Benchmark items are locus-sized sequences scanned as their own contigs, not "
-            "genomic slabs: the §9.1 decoys are GC- and length-matched to T-box loci, so "
-            "that is the commensurable unit. This is an in-distribution reference, not a "
-            "genome-scale scan simulation (that is P5)."
+            "Benchmark items are 1,024-nt SCAN WINDOWS, the pinned Stage-1 geometry: a "
+            "positive is its gate4_eval locus carved in real ±genomic context, a negative is "
+            "a §9.1 decoy spliced into a real mined host window by the shipped "
+            "embed_decoy_rows. An earlier build presented each item as its own excised "
+            "contig and yielded ONE discriminating negative of 692; this one yields 4-6. "
+            "This is an in-distribution reference, not a genome-scale scan simulation (P5)."
         ),
         (
             "ADR-0005 D3 freezes the Stage-1 threshold, the locus knobs and the Stage-2 "
@@ -1072,9 +1074,12 @@ def precision_problems(report: Mapping[str, Any]) -> list[str]:
 
     completeness = report.get("completeness", {})
     want(bool(completeness), "the report carries no completeness clause set")
+    # Only the conjunction, not "is_science must be truthy". The presence of the clause set
+    # is already checked above, and demanding truthiness here would refuse a report that
+    # correctly derived is_science = False from a FALSE clause — i.e. fire on exactly the
+    # honest incomplete run the field exists to mark (CodeRabbit, PR #133).
     want(
-        bool(report.get("is_science")) == bool(completeness)
-        and bool(report["is_science"]) == all(bool(v) for v in completeness.values()),
+        bool(report.get("is_science")) == all(bool(v) for v in completeness.values()),
         "is_science is not the conjunction of the completeness clauses",
     )
     want(

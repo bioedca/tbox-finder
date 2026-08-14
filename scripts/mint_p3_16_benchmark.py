@@ -74,10 +74,14 @@ into the report as a disclosure instead of a silent bias.
 Blocks (ADR-0005 D5)
 --------------------
 CIs resample at the homology-cluster level. Positives block on ``cluster_id``;
-``dinuc_shuffled`` decoys inherit their parent's cluster (they are permutations of a real
-locus, so they are correlated with it); the parentless pools get an explicit **singleton**
-block id each. A null is never a block id — a NaN cluster collapsing into one shared block
-would silently make thousands of items one exchangeable unit ([[nulls-inflate-block-counts]]).
+``dinuc_shuffled`` decoys inherit their **parent locus's** ``cluster_id`` — they are
+Altschul–Erikson permutations of a corpus positive, so a shuffle and the locus it came from
+are not independent draws; the parentless pools (`gc_background`, `structured_rna`,
+`leader_decoy`) block on their **unique host window**, one per negative. Sharing a block is
+the conservative direction: it reduces the number of independent units and **widens** the
+interval. A null is never a block id — a decoy whose parent is missing from the cluster map
+falls back to its host rather than into a shared `None` bucket
+([[nulls-inflate-block-counts]]).
 
 Usage (from the checkout that holds the DVC data)::
 
@@ -164,12 +168,33 @@ def decoy_embedded(row: pd.Series, fold: set[str]) -> bool:
     return parent == "" or parent in fold
 
 
-def block_id(row: pd.Series) -> str:
-    """The resampling block (ADR-0005 D5). Never derived from a null."""
-    cluster = row["cluster_id"]
-    if cluster is not None and not pd.isna(cluster):
+def decoy_block_id(
+    decoy_row: Mapping[str, Any], host_id: str, parent_cluster: Mapping[str, int]
+) -> str:
+    """The resampling block for one negative (ADR-0005 D5), conservatively.
+
+    A ``dinuc_shuffled`` decoy is an Altschul–Erikson permutation **of a corpus locus**, so
+    it is correlated with that locus and with every other item from the same homology
+    cluster: it inherits its parent's ``cluster_id``, which puts it in the same bootstrap
+    block as the positive it was made from. A parentless decoy (``gc_background``,
+    ``structured_rna``, ``leader_decoy``) has no such relationship and blocks on its
+    **unique** host window instead — one host per negative, so one block per negative.
+
+    Sharing a block is the **conservative** direction: it reduces the number of independent
+    units and widens the interval. An earlier build keyed every negative on its host, which
+    silently treated a shuffle and its parent locus as independent draws and narrowed a
+    published CI (CodeRabbit, PR #133).
+
+    A null is never a block id: a decoy whose parent is absent from the cluster map falls
+    back to its host rather than into a shared ``None`` bucket
+    ([[nulls-inflate-block-counts]]).
+    """
+    parent = decoy_row.get(negatives_mod.SOURCE_RECORD_ID_COL)
+    parent = "" if parent is None or pd.isna(parent) else str(parent).strip()
+    cluster = parent_cluster.get(parent)
+    if parent and cluster is not None:
         return f"cluster:{int(cluster)}"
-    return f"singleton:{row['row_id']}"
+    return f"host:{host_id}"
 
 
 def build_positive_windows(
@@ -260,6 +285,7 @@ def build_negative_windows(
     *,
     seed: int,
     all_corpus_ids: Collection[str],
+    parent_cluster: Mapping[str, int],
     window: int = wd.WINDOW_NT,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, Any]]:
     """One host window per §9.1 decoy, spliced by the **shipped** training operator.
@@ -295,6 +321,7 @@ def build_negative_windows(
         unique_hosts=True,
         training_fold_record_ids=all_corpus_ids,
     )
+    by_id = {str(row[emb.DECOY_ID_COL]): row for row in decoy_rows}
     contigs: list[dict[str, Any]] = []
     items: list[dict[str, Any]] = []
     for entry in embedded:
@@ -316,8 +343,7 @@ def build_negative_windows(
                 "label": 0,
                 "source": "decoy",
                 "pool": entry.insert_pool,
-                # One host per negative (``unique_hosts=True``), so the host IS the block.
-                "block": f"host:{entry.host_id}",
+                "block": decoy_block_id(by_id[entry.insert_id], entry.host_id, parent_cluster),
                 "length": len(entry.sequence),
                 "locus_length": entry.insert_len,
                 "resolved_order": None,
@@ -495,10 +521,20 @@ def main() -> int:
             "unique_hosts=True needs at least one each"
         )
 
-    all_corpus_ids = frozenset(pd.read_parquet(root / args.split_table)["record_id"].astype(str))
+    split = pd.read_parquet(root / args.split_table)
+    all_corpus_ids = frozenset(split["record_id"].astype(str))
+    parent_cluster = {
+        str(record): int(cluster)
+        for record, cluster in zip(split["record_id"], split["cluster_id"], strict=True)
+        if not pd.isna(cluster)
+    }
     positives = build_positive_windows(gate4_records)
     negatives = build_negative_windows(
-        decoy_rows, hosts, seed=args.seed, all_corpus_ids=all_corpus_ids
+        decoy_rows,
+        hosts,
+        seed=args.seed,
+        all_corpus_ids=all_corpus_ids,
+        parent_cluster=parent_cluster,
     )
     contigs, items, scope = build(positives, negatives, decoys, folds, n_nested_train_rows)
     scope["host_pool"] = {

@@ -555,3 +555,49 @@ def test_a_stage2_that_adds_nothing_fails_the_gate_rather_than_erroring():
     # A failing gate is still a *valid* report — it must not be refused as malformed, or a
     # fail would be indistinguishable from a broken run.
     assert P.precision_problems(report) == []
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# The block scheme (ADR-0005 D5) — tested at the PRODUCER, not only on the artifact
+# ──────────────────────────────────────────────────────────────────────────────
+def _minter():
+    """Load the mint script by path — `scripts/` is not a package."""
+    import importlib.util
+
+    path = REPO / "scripts" / "mint_p3_16_benchmark.py"
+    spec = importlib.util.spec_from_file_location("mint_p3_16_benchmark", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_a_parented_decoy_blocks_on_its_parents_cluster_not_its_host():
+    """The regression CodeRabbit caught on PR #133: the documented rule existed as a
+    function that **nothing called**, so every negative keyed on its unique host and a
+    dinuc shuffle was treated as independent of the locus it is a permutation of."""
+    mint = _minter()
+    parented = {mint.negatives_mod.SOURCE_RECORD_ID_COL: "rec-a"}
+    assert mint.decoy_block_id(parented, "host-1", {"rec-a": 77}) == "cluster:77"
+    # a parent the cluster map does not know falls back to the host — never to a shared
+    # `None` bucket ([[nulls-inflate-block-counts]])
+    assert mint.decoy_block_id(parented, "host-1", {}) == "host:host-1"
+    for empty in (None, "", "   "):
+        row = {mint.negatives_mod.SOURCE_RECORD_ID_COL: empty}
+        assert mint.decoy_block_id(row, "host-2", {"rec-a": 77}) == "host:host-2"
+
+
+def test_the_committed_item_table_realises_that_block_scheme():
+    """The artifact half of the pair above: every dinuc decoy must share a cluster block,
+    and the parentless pools must not."""
+    folded = json.loads(ITEMS_PATH.read_text())
+    by_pool: dict[str, set[str]] = {}
+    for item in folded["items"]:
+        by_pool.setdefault(item["pool"], set()).add(item["block"].split(":")[0])
+    assert by_pool["dinuc_shuffled"] == {"cluster"}
+    for pool in ("gc_background", "structured_rna", "leader_decoy"):
+        assert by_pool[pool] == {"host"}, pool
+    # and a dinuc decoy must actually LAND in a block a positive also occupies, or the
+    # inheritance is nominal
+    positive_blocks = {i["block"] for i in folded["items"] if i["label"] == 1}
+    dinuc_blocks = {i["block"] for i in folded["items"] if i["pool"] == "dinuc_shuffled"}
+    assert dinuc_blocks & positive_blocks
