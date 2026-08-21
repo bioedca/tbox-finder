@@ -517,3 +517,45 @@ def test_the_sweep_flag_must_match_the_recorded_usability() -> None:
         "backbone": {**BR.backbone_summary(comp), "requested_key": comp.key},
     }
     assert S.derive_clauses(S.build_report(**payload))["checkpointing_skip_is_earned"] is False
+
+
+def test_run_sizing_does_not_HARDCODE_the_checkpointing_flag() -> None:
+    """The wiring, not just the clause — this is the line that killed SLURM job 1370.
+
+    `test_the_sweep_flag_must_match_the_recorded_usability` builds a payload directly, so it
+    grades `derive_clauses` and cannot see `run_sizing` reverting to a literal `True`. A
+    sabotage that did exactly that stayed GREEN against it: the clause was guarded and the code
+    feeding it was not ([[artifact-pinning-test-cannot-see-the-code]]).
+
+    So this reads the source: every `measure_batch` call must pass `gradient_checkpointing` a
+    NAME, never a constant. Checking the argument's KIND is checking its content here — a
+    literal is precisely the defect, and any name has to come from the resolved port fact
+    because nothing else in scope carries one.
+    """
+    import ast
+
+    source = Path(S.__file__).read_text()
+    tree = ast.parse(source)
+    calls = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "measure_batch"
+    ]
+    # Emptiness guard: a walk that found nothing would make this vacuously green.
+    assert len(calls) >= 2, f"expected the sweep call and the off-comparison call, got {len(calls)}"
+
+    literal_flags = []
+    for call in calls:
+        flag = next((kw.value for kw in call.keywords if kw.arg == "gradient_checkpointing"), None)
+        assert flag is not None, "a measure_batch call passes no gradient_checkpointing at all"
+        if isinstance(flag, ast.Constant):
+            literal_flags.append(ast.unparse(flag))
+    # Exactly ONE literal is legitimate: the off-comparison arm, which is `False` by
+    # definition — it is the "off" half of an on/off measurement.
+    assert literal_flags == ["False"], (
+        f"measure_batch calls pass literal gradient_checkpointing={literal_flags}; the sweep "
+        "must take it from the resolved port fact, or sizing measures a configuration the arm "
+        "cannot run (SLURM job 1370)"
+    )

@@ -59,12 +59,26 @@
 #
 # ── SIZING — MEASURED IN-JOB, NOT EXTRAPOLATED ──────────────────────────────
 # P3-06 sized its first two submits from a report that had measured a different question
-# (`loss_is_placeholder: true`) and lost both to OOM. There is no RNA-FM measurement on this
-# card at all, and inventing one from RiNALMo's would repeat that mistake in the other
-# direction. So leg (1) RUNS `tbox_finder.stage2.sizing --backbone rnafm` on this node, on real
-# rows, through the trainer's own `forward_backward`, and the job REFUSES to train if the
-# configured batch's worst case does not fit. It costs ~2 minutes and it cannot be wrong about
-# the model it measured — `--backbone` is threaded all the way to `Stage2TrainConfig`.
+# (`loss_is_placeholder: true`) and lost both to OOM. So leg (1) RUNS
+# `tbox_finder.stage2.sizing --backbone rnafm` on this node, on real rows, through the
+# trainer's own `forward_backward`, and the job REFUSES to train if the configured batch's
+# worst case does not fit. It costs ~2 minutes and it cannot be wrong about the model it
+# measured — `--backbone` is threaded all the way to `Stage2TrainConfig`.
+#
+# ⚠ AND IT ALREADY EARNED ITS KEEP. The first submit (job 1370) died in this very leg:
+# `run_sizing` hardcoded gradient checkpointing ON, and this port adds its ABSOLUTE position
+# embeddings in place, so checkpointing makes the embedding output a leaf requiring grad and
+# the forward raises. RiNALMo is rotary and never reaches that branch. Fixed at the harness
+# (the sweep flag now comes from the port's recorded usability, and the config refuses the
+# combination at compose time).
+#
+# MEASURED afterwards on a cluster A4000 (rnafm, real rows, real objective, gc off):
+#     batch 8 worst_case  3.3382 GiB    batch 8 typical  2.7522 GiB / 196.5 ms
+#     batch 4 worst_case  1.9849 GiB    batch 4 typical  1.5902 GiB / 147.0 ms
+# So the pinned batch 4 uses ~13 % of the 15.6 GiB card — RiNALMo needed 8.18 GiB for the same
+# batch. That headroom is NOT spent: the batch stays 4 for comparability (see above).
+# 9,059 rows / (8 x 4) = 283 steps/epoch/rank at ~190 ms => ~9 min for 10 epochs, plus the
+# 2,070-row val rung and the two scoring legs. `--time=04:00:00` is far above that.
 # ⚠ `--time=04:00:00`, not P3-06's 02:00:00, and the difference is not padding. P3-06's two
 # hours covered TRAINING ONLY — its scoring ran as separate steps. This job also runs legs (3)
 # and (4), the in-distribution and leave-clade-out scoring passes, and those are SINGLE-PROCESS

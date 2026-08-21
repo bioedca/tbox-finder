@@ -2024,21 +2024,37 @@ def test_half_a_backbone_switch_is_refused(overrides, why) -> None:
 def test_a_comparator_config_aimed_at_the_production_destinations_is_refused() -> None:
     """The shipped checkpoint dir is DVC-tracked and holds the six P3-06 arms; `train_stage2`
     clears and rewrites `checkpoint_dir` ([[two-outputs-one-path-destroys-the-first]])."""
+    # ⚠ `gradient_checkpointing=False` is passed so this test isolates the guard it NAMES.
+    # `Stage2TrainConfig` defaults checkpointing ON, and since the job-1370 fix that is
+    # refused first for this backbone — so without it this test would pass on the wrong
+    # refusal and stop covering destinations at all
+    # ([[sabotage-attribution-names-the-test]]).
+    isolate = dict(backbone=BR.COMPARATOR_BACKBONE, gradient_checkpointing=False)
     with pytest.raises(ValueError, match="PRODUCTION arm's destination"):
-        T.Stage2TrainConfig(backbone=BR.COMPARATOR_BACKBONE)
+        T.Stage2TrainConfig(**isolate)
     with pytest.raises(ValueError, match="PRODUCTION arm's destination"):
         T.Stage2TrainConfig(
-            backbone=BR.COMPARATOR_BACKBONE,
+            **isolate,
             checkpoint_dir=T.default_checkpoint_dir(BR.COMPARATOR_BACKBONE),
             report_path=T.DEFAULT_REPORT,
         )
     # The per-arm pair composes cleanly — the guard refuses the collision, not the arm.
     cfg = T.Stage2TrainConfig(
-        backbone=BR.COMPARATOR_BACKBONE,
+        **isolate,
         checkpoint_dir=T.default_checkpoint_dir(BR.COMPARATOR_BACKBONE),
         report_path=T.default_report_path(BR.COMPARATOR_BACKBONE),
     )
     assert cfg.backbone == BR.COMPARATOR_BACKBONE
+
+    # ...and the two guards are independent: the checkpointing one fires even when the
+    # destinations are correct, so neither is standing in for the other.
+    with pytest.raises(ValueError, match="not usable on backbone"):
+        T.Stage2TrainConfig(
+            backbone=BR.COMPARATOR_BACKBONE,
+            gradient_checkpointing=True,
+            checkpoint_dir=T.default_checkpoint_dir(BR.COMPARATOR_BACKBONE),
+            report_path=T.default_report_path(BR.COMPARATOR_BACKBONE),
+        )
 
 
 def test_the_comparator_records_its_OWN_env_lock_not_the_production_one() -> None:
