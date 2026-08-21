@@ -7526,3 +7526,115 @@ read yet, and this step deliberately produces no number: the swap decision is P3
 §7 stop on top of D17's margin.
 
 **Commit.** see PR (P3-17).
+
+## Step P3-17 RESULT — 2026-08-21: the comparator is trained, calibrated and graded; three submits to get there
+
+**Compute.** SLURM jobs **1370**, **1372**, **1374** on `two` (8× A4000). Only 1374 produced
+artifacts; the first two are recorded below because each failed for a reason worth keeping.
+`verification: artifact-based (sacct off)`.
+
+**✅ THE ARTIFACTS.** Two arms, both gates passing, `failed: []` on each:
+
+| arm | gate | final train loss | elapsed | val (epoch 9) |
+|---|---|---|---|---|
+| `aux1.0_lr1e-4` (shipped config) | PASS | 0.6405 | 752.1 s | 0.6917 |
+| `aux0.0_lr1e-4` (lr-matched control) | PASS | 0.0001 | 731.4 s | 0.0356 |
+
+Both record `backbone: rnafm`, `d_model: 640` **measured off the live module**,
+`loaded_from_registry: true`, `env_lock: envs/ml-rnafm.conda-lock.yml`,
+`attn_implementation: flash_attention_2`, 72 adapter sites, base frozen. Checkpoints DVC-tracked
+at `a48f68c2…` (26,426,216 B, 10 files). ⚠ The two arms' `final train loss` are **not
+comparable** — the aux terms are absent from the aux=0 total by construction.
+
+**✅ THE NUMBER P3-18 EXISTS TO READ.** Post-calibration **leave-clade-out macro ECE**, both
+arms graded by the identical pinned machinery (ADR-0005 D13 `beta_kernel_loo_l1`, A2 min-N 20,
+**30/30 units admissible**, resampled at `cluster_id` within order and macro-averaged across the
+30 held-out orders, `n_boot` 200, `gated: false` by D13):
+
+| backbone | temperature | in-dist ECE (D11 gate 0.05) | **LOO macro ECE** | 95 % CI |
+|---|---|---|---|---|
+| RiNALMo-giga (shipped) | 1.140627 | 0.005662 ✓ | **0.211317** | [0.098374, 0.325012] |
+| RNA-FM (comparator) | 1.317641 | 0.006811 ✓ | **0.188214** | [0.094202, 0.275659] |
+
+Both temperatures are fitted on the **same** `calib` split at the same prevalence 0.788797, so
+both LOO numbers are genuinely *post-calibration*, which is what D17(c) requires.
+**RiNALMo − RNA-FM = +0.023103.**
+
+**⚠⚠ THAT POINT DIFFERENCE EXCEEDS D17(c)'s 0.02 MARGIN, AND THIS STEP DOES NOT ADJUDICATE IT.**
+D17(c) does not read a point estimate: it fires on a difference *"sustained across the held-out-
+order distribution (block-resampled)"*, and **sustainedness is not evaluated here**. The two CIs
+overlap over almost their whole length ([0.098, 0.325] vs [0.094, 0.276]). Reading a swap out of
++0.0231 with those intervals would be exactly the threshold-shopping §8.5 forbids, and firing the
+swap substitutes the shipped Stage-2 backbone and drags the absolute GATE-1/GATE-2 re-clearance
+and the P4→P5 go/no-go with it (PRD §2.3/§10.2). **P3-18 does the reading; a fired swap is a
+CLAUDE.md §7 stop on top of the number.** Recorded here as a measurement, deliberately without a
+verdict.
+
+**Bonus, not asked for and worth having.** The control arm the scorers forced turns P3-17 into an
+RNA-FM **aux ablation** as well: in-distribution with-aux ECE 0.006811 / AUPRC 0.998639 versus
+no-aux 0.003464 / 0.999225. ADR-0005 D16's aux-loss question is now answered for **both**
+backbones rather than one.
+
+**⛔ JOB 1370 — the sizing leg died on a port defect nothing in this repo had ever reached.**
+`multimolecule/models/rnafm/modeling_rnafm.py:728` does `embeddings += position_embeddings` **in
+place**, and gradient checkpointing makes the embedding output a leaf requiring grad. Isolated to
+a 2×2 on a cluster A4000 rather than argued: rnafm×on **RuntimeError**, rnafm×off OK,
+rinalmo×both OK. **RiNALMo is rotary and never reaches that branch.** The *training* leg would
+have been fine — the sbatch passes `gradient_checkpointing=false` — but `run_sizing` hardcoded
+`True` for its sweep. Fixed at the harness: the registry now carries
+`gradient_checkpointing_usable` (rinalmo **runs it as a measured no-op**, 0.9986 saving ratio;
+rnafm **raises**), the config refuses the combination at **compose time on the login node**, and
+the sizing report **states** the unmeasurable comparison with its reason instead of omitting the
+key. New clause `checkpointing_skip_is_earned` binds that skip to the recorded port fact — the
+pre-existing `checkpointing_effect_measured` accepts any non-null reason and would let a run opt
+out by writing a sentence.
+
+**⛔ JOB 1372 — trained cleanly, then BOTH scoring legs refused.**
+`ValueError: expected exactly one aux_weight=0 arm at lr=0.0001, found []`. `stage2.eval` is the
+P3-08 aux-**ablation driver**, not a scorer: it resolves `select_arm_pair` before scoring
+anything, and `calib.gate2 score-loo` calls the *same* selector, so a single-arm checkpoint root
+cannot be scored by either shipped entry point (`--all-arms` does not help — the pair resolves
+first). Resolved by training the lr-matched control in the same job, which lets both legs run
+**completely unchanged** and touches nothing in the P3-08 machinery that produces committed
+artifacts.
+
+**⚠ AND `gate2 grade` COULD NOT BE POINTED AT THE COMPARATOR AT ALL.** `--checkpoint-root` /
+`--sweep-dir` exist on `score-loo` and were missing from `grade`, which hardcoded the production
+constants — so the comparator's scores could be *produced* and never *graded*. The flags resolve
+only which arm NAME to pull out of the scores file; added with `None` defaults so every existing
+invocation is byte-identical.
+
+**Decisions.** ADR-0002 **A15** signed (bioedca, §7 item 2): a ninth environment
+`envs/ml-rnafm.yml` pinning `multimolecule` 0.2.0 rather than bumping `ml-rna`, because 0.1.0
+**cannot load `multimolecule/rnafm` at all** (`vocab_size (28) must be 26`) and no older
+checkpoint revision exists to pin around it. `ml-rna` is untouched, so §8.5 fires nowhere and
+every published RiNALMo number stays bit-frozen. The lock is **hand-merged**, not solved: a fresh
+`conda-lock` moved **55 pins**. ⚠ The disclosure A15 owes and P3-18 must carry: the two arms are
+compared across a one-minor-version library difference. Tokenisation is provably identical
+(byte-identical vocab), so the difference is not in what the models read.
+
+**Validation.** All §9.3 conditions met on 1374: `squeue` empty, DONE marker, both run reports
+self-validating and passing, both checkpoint dirs carrying `lora_adapter/` + `stage2_heads.pt` +
+`provenance.json`, all four report/score artifacts non-empty, no traceback in the `.err`.
+⚠ The `.err` is **expected non-empty** (torchrun rendezvous, HF chatter, W&B-offline notices);
+`imp.md`'s "zero-byte `.err`" wording predates the P2-05/P2-06/P2-09/P3-06 precedent and is wrong
+for a torchrun job — recorded rather than silently ignored. `ruff` + `black` clean, `snakemake
+--lint` clean, `bash -n` clean; zero new failures against a matched `main` baseline at `2e929a3`
+(FAILED **sets** compared, never counts); unit+ml+golden passes 6,660 → 6,684.
+
+**⚠ THE REVIEW AND SABOTAGE RECORD, INCLUDING WHAT ESCAPED.** Four CodeRabbit rounds, **nine
+findings, all nine real** — among them a `.gitkeep`-less log directory that would have cost the
+first submit outright (Slurm opens `--output` before the script runs), a **string** version
+compare rejecting 0.10.0, a loader **defaulting a missing base model to production** in
+contradiction of its own comment, and ⛔ a P1-15 report able to certify *parity-confirmed
+RiNALMo* for a wrap that adapted RNA-FM with `validate_report` silent. Every new guard was
+sabotaged. **Five escaped GREEN and every one was closed:** an assertion that searched a whole
+sbatch and matched the header's prose rather than the launch line (the same trap twice — fixed as
+a class, not an instance); a test that captured the sbatch's version predicate and never
+evaluated it, so it graded its own copy; a clause guarded while the wiring that feeds it was not
+(reverting the exact line that killed job 1370 stayed green); a name check that could not see an
+arm inheriting a verification it does not have; and a two-clause guard where renaming one marker
+left the test satisfied by the survivor. Two sabotages of *detectors* read GREEN by nature and
+are recorded as such rather than counted as passes.
+
+**Commit.** see PR (P3-17).

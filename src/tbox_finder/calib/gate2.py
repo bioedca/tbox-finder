@@ -1550,6 +1550,13 @@ def build_parser() -> Any:
 
     grade = sub.add_parser("grade", help="build reports/gate2_p3_ece.json")
     grade.add_argument("--dataset", default=DEFAULT_DATASET)
+    # ⚠ These two exist on `score-loo` and were missing here, which made `grade` unable to
+    # read any arm root but the production one — so the ADR-0002 D6 comparator's scores could
+    # be PRODUCED and never GRADED. They resolve only WHICH ARM NAME to pull out of the scores
+    # file (`discover_arms` + `select_arm_pair` below); defaulting to the production constants
+    # leaves every existing invocation byte-identical.
+    grade.add_argument("--checkpoint-root", default=None)
+    grade.add_argument("--sweep-dir", default=None)
     grade.add_argument("--scores", default=DEFAULT_SCORES)
     grade.add_argument("--loo-scores", default=DEFAULT_LOO_SCORES)
     grade.add_argument("--report", default=DEFAULT_REPORT)
@@ -1658,7 +1665,10 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     split_rows, dataset_meta = _read_split_table(args.dataset)
     production = E.production_arm_config()
-    arms = E.discover_arms(E.DEFAULT_CKPT_ROOT, sweep_dir=E.DEFAULT_SWEEP_DIR)
+    arms = E.discover_arms(
+        getattr(args, "checkpoint_root", None) or E.DEFAULT_CKPT_ROOT,
+        sweep_dir=getattr(args, "sweep_dir", None) or E.DEFAULT_SWEEP_DIR,
+    )
     arm, _ = E.select_arm_pair(arms, production=production)
 
     in_dist = load_scores(args.scores, arm)

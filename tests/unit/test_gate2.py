@@ -1311,3 +1311,46 @@ def test_the_plug_in_ece_is_reported_beside_the_gated_debiased_one() -> None:
     assert isinstance(report["gate"]["ece_plugin"], float)
     assert report["gate"]["ece_plugin"] >= report["gate"]["ece"] - 1e-12
     assert math.isfinite(report["gate"]["ece_ci"]["point"])
+
+
+# ======================================================================================
+# P3-17 — `grade` must be pointable at a non-production arm root (ADR-0002 D6/A15)
+# ======================================================================================
+def test_grade_accepts_the_same_arm_root_flags_score_loo_already_had() -> None:
+    """A comparator's scores could be PRODUCED and never GRADED.
+
+    `score-loo` has taken `--checkpoint-root`/`--sweep-dir` since it was written; `grade` did
+    not, and hardcoded the production constants. It uses them for one thing — resolving WHICH
+    ARM NAME to pull out of the scores file — so the omission had nothing to do with the
+    science and everything to do with which directory it looked in. It surfaced at P3-17 as
+
+        FileNotFoundError: checkpoint root data/processed/checkpoints/stage2_rinalmo
+        does not exist
+
+    when grading the RNA-FM comparator, whose scores were sitting right there.
+    """
+    parser = G.build_parser()
+    for sub in ("grade", "score-loo"):
+        args = parser.parse_args([sub, "--checkpoint-root", "/tmp/x", "--sweep-dir", "/tmp/y"])
+        assert args.checkpoint_root == "/tmp/x", sub
+        assert args.sweep_dir == "/tmp/y", sub
+    # ...and omitting them must leave every pre-existing invocation byte-identical: the
+    # defaults are None so the call site falls back to the production constants, rather than
+    # baking a second copy of those paths into the parser.
+    defaults = parser.parse_args(["grade"])
+    assert defaults.checkpoint_root is None
+    assert defaults.sweep_dir is None
+
+
+def test_grade_falls_back_to_the_production_root_when_not_told_otherwise() -> None:
+    """The fallback is what keeps P3-10's committed invocation unchanged, so assert it reads
+    the production constants rather than a re-typed literal that could drift."""
+    import inspect
+
+    from tbox_finder.stage2 import eval as E
+
+    source = inspect.getsource(G.main)
+    assert "E.DEFAULT_CKPT_ROOT" in source, "the fallback must be the production constant"
+    assert "E.DEFAULT_SWEEP_DIR" in source
+    # And those constants must still name the production arm, or the fallback silently moved.
+    assert E.DEFAULT_CKPT_ROOT.endswith("stage2_rinalmo"), E.DEFAULT_CKPT_ROOT
