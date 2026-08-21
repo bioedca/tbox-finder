@@ -86,7 +86,8 @@ from typing import Any
 import torch
 from torch import Tensor, nn
 
-from tbox_finder.eval.rinalmo_parity import D_MODEL, REVISION
+from tbox_finder.eval.rinalmo_parity import D_MODEL
+from tbox_finder.models.rna_backbone_registry import PRODUCTION_BACKBONE
 from tbox_finder.models.seg_head import NUM_CLASSES, SegmentationHead
 from tbox_finder.stage2 import tokenizer as tok
 from tbox_finder.stage2.heads import (
@@ -330,6 +331,12 @@ class Stage2Model(nn.Module):
     @staticmethod
     def _resolve_d_model(backbone: nn.Module | None, d_model: int | None) -> int:
         if backbone is None:
+            # No module to measure. An explicit `d_model` wins; otherwise fall back to the
+            # PRODUCTION backbone's width, and say so — since ADR-0002 A15 there are two
+            # widths in the allow-list (1280 vs RNA-FM's 640), so this default is a
+            # *production* assumption, not a universal one. Every real construction goes
+            # through `build_stage2_model`, which always hands over a live backbone and
+            # therefore always measures; this branch is for bare unit fixtures.
             return int(d_model) if d_model is not None else D_MODEL
         measured = _hidden_size(backbone)
         if d_model is not None and int(d_model) != measured:
@@ -490,8 +497,9 @@ class Stage2Model(nn.Module):
 def build_stage2_model(
     spec: Stage2HeadSpec,
     *,
+    backbone: str = PRODUCTION_BACKBONE,
     base_model: nn.Module | None = None,
-    revision: str = REVISION,
+    revision: str | None = None,
     dtype: str | None = None,
     attn_implementation: str | None = None,
     gradient_checkpointing: bool = True,
@@ -501,10 +509,16 @@ def build_stage2_model(
     structure_head: bool = False,
     pairing_proj_dim: int = DEFAULT_PAIRING_PROJ_DIM,
 ) -> tuple[Stage2Model, dict[str, Any]]:
-    """LoRA-wrap the pinned RiNALMo encoder, then attach the heads. Returns ``(model, info)``.
+    """LoRA-wrap a pinned RNA encoder, then attach the heads. Returns ``(model, info)``.
 
-    ``base_model=None`` loads the pinned checkpoint; passing a tiny same-architecture
-    ``RiNALMoModel`` lets a test exercise the composition without the 2.5 GB download.
+    ``backbone`` is an :mod:`~tbox_finder.models.rna_backbone_registry` allow-list key and
+    defaults to the **production** one (``rinalmo-giga``), so every pre-A15 caller is
+    unchanged; ADR-0002 A15 / PRD §10.2's D6 comparator passes ``"rnafm"``. The heads are
+    sized from the backbone's *measured* ``hidden_size`` (1280 vs 640), never from a constant,
+    so swapping the key cannot leave a head built for the other model's width.
+
+    ``base_model=None`` loads the pinned checkpoint; passing a tiny same-architecture model
+    lets a test exercise the composition without the multi-GB download.
 
     ``info`` is ``build_peft_model``'s measured wrap record plus a ``stage2_heads`` block
     that **re-measures** the head/backbone split off the assembled model rather than
@@ -516,6 +530,7 @@ def build_stage2_model(
 
     peft_kwargs: dict[str, Any] = {
         "base_model": base_model,
+        "backbone": backbone,
         "revision": revision,
         "attn_implementation": attn_implementation,
         "gradient_checkpointing": gradient_checkpointing,

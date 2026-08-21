@@ -45,6 +45,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from tbox_finder.models.rna_backbone_registry import PRODUCTION_BACKBONE
 from tbox_finder.stage2 import heads as H
 from tbox_finder.stage2 import losses as L
 from tbox_finder.stage2 import train as T
@@ -118,6 +119,7 @@ def measure_batch(
     loss_config: L.Stage2LossConfig,
     base_model: Any = None,
     device: str | None = None,
+    backbone: str = PRODUCTION_BACKBONE,
 ) -> dict[str, Any]:
     """Peak VRAM + step time for one (batch_size, regime), or a clean ``oom`` record.
 
@@ -128,7 +130,14 @@ def measure_batch(
     import torch
 
     spec = H.load_head_spec()
+    # The per-arm destinations are passed even though sizing writes NEITHER: since ADR-0002
+    # A15 `Stage2TrainConfig.__post_init__` refuses a non-production backbone aimed at the
+    # production checkpoint/report paths, and inheriting those defaults here would make the
+    # comparator's sizing leg unrunnable for a reason that has nothing to do with sizing.
     cfg = T.Stage2TrainConfig(
+        backbone=backbone,
+        checkpoint_dir=T.default_checkpoint_dir(backbone),
+        report_path=T.default_report_path(backbone),
         batch_size=batch_size,
         gradient_checkpointing=gradient_checkpointing,
         loss=loss_config,
@@ -136,6 +145,10 @@ def measure_batch(
         device=device,
     )
     record: dict[str, Any] = {
+        # WHICH model these GiB describe. A sizing number is meaningless without it, and the
+        # two arms differ by 6.5x in parameters — a report that omitted this could be read as
+        # sizing either one ([[size-a-run-from-the-protocols-own-report]]).
+        "backbone": backbone,
         "batch_size": batch_size,
         "measured_batch_size": None,
         "gradient_checkpointing": gradient_checkpointing,
@@ -394,6 +407,7 @@ def run_sizing(
     out_path: str = DEFAULT_OUT,
     base_model: Any = None,
     device: str | None = None,
+    backbone: str = PRODUCTION_BACKBONE,
     log: Any = print,
 ) -> dict[str, Any]:
     """Run the sweep, write the report, return it. Raises if the report fails its own gate."""
@@ -437,6 +451,7 @@ def run_sizing(
                 loss_config=loss_config,
                 base_model=base_model,
                 device=device,
+                backbone=backbone,
             )
             record["regime"] = regime
             record["growth_ratio"] = _growth_ratio(record["peak_vram_gib_per_step"])
@@ -475,6 +490,11 @@ def run_sizing(
             loss_config=loss_config,
             base_model=base_model,
             device=device,
+            # The SECOND call site. Threading the key into only the sweep would have left this
+            # off-comparison measuring the production backbone against an RNA-FM "on" number,
+            # i.e. a saving_ratio computed across two different models
+            # ([[fixed-one-of-two-identical-things]]).
+            backbone=backbone,
         )
         checkpointing["on_peak_gib"] = on.get("peak_vram_gib")
         checkpointing["off_peak_gib"] = off.get("peak_vram_gib")
@@ -523,6 +543,14 @@ def _run(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--steps", type=int, default=DEFAULT_STEPS)
     parser.add_argument("--max-records", type=int, default=DEFAULT_MAX_RECORDS)
     parser.add_argument("--out", default=DEFAULT_OUT)
+    parser.add_argument(
+        "--backbone",
+        default=PRODUCTION_BACKBONE,
+        help=(
+            "rna_backbone_registry allow-list key to size (ADR-0002 A15). The arms differ by "
+            "~6.5x in parameters, so sizing one and training the other measures nothing."
+        ),
+    )
     args = parser.parse_args(argv)
     sweep = tuple(int(b) for b in str(args.batch_sweep).split(",") if b.strip())
     report = run_sizing(
@@ -531,6 +559,7 @@ def _run(argv: Sequence[str] | None = None) -> int:
         steps=args.steps,
         max_records=args.max_records,
         out_path=args.out,
+        backbone=args.backbone,
     )
     largest = report["largest_fitting_batch_worst_case"]
     print(f"SIZING_DONE largest_fitting_worst_case_batch={largest}")

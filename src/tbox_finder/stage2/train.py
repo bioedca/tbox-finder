@@ -77,9 +77,16 @@ from collections.abc import Iterable, Iterator, Mapping, Sequence
 from dataclasses import asdict, dataclass, field, fields
 from datetime import UTC, datetime
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any
 
 from tbox_finder import labels, masking
+from tbox_finder.models.rna_backbone_registry import (
+    COMPARATOR_BACKBONE,
+    PRODUCTION_BACKBONE,
+    backbone_for_repo_id,
+    resolve_backbone,
+)
 from tbox_finder.stage2 import heads as H
 from tbox_finder.stage2 import losses as L
 from tbox_finder.stage2 import tokenizer as tok
@@ -124,16 +131,81 @@ __all__ = [
 #: `steps_ran` for the real reason that those runs carried the scheduler-domain defect.
 #: Excusing that clause on an older schema would hide a genuine defect, which is the one thing
 #: a version bump must not be used for.
-SCHEMA_VERSION = "2"
+#: ⚠ Bumped 2 → **3** at P3-17 for the same reason 1 → 2 was bumped: `derive_clauses` gains
+#: `backbone_pinned`, and a clause set is part of a report's shape. Nothing is invalidated in
+#: practice — the only committed Stage-2 training reports are the six schema-**1** sweep
+#: artifacts described above, and **no schema-2 report was ever committed** — so this bump
+#: excuses nothing and hides nothing ([[new-gate-clause-invalidates-old-reports]]).
+SCHEMA_VERSION = "3"
 STEP = "P3-06"
 ENTRYPOINT = "tbox_finder.stage2.train"
-#: ADR-0002 A4 — Stage-2 is the RNA closure, NOT ml-dna's.
+#: ADR-0002 A4 — Stage-2 is the RNA closure, NOT ml-dna's. This is the **production** arm's
+#: lock; since A15 the comparator arm runs under a different one, so provenance resolves it
+#: from the backbone (:func:`env_lock_for`) instead of stamping this constant.
 ENV_LOCK = "envs/ml-rna.conda-lock.yml"
 CONFIG_PATH = "conf/train/stage2.yaml"
 
 DEFAULT_DATASET = "data/processed/stage2_dataset.parquet"
 DEFAULT_REPORT = "reports/p3/train_stage2.json"
 DEFAULT_CKPT_DIR = "data/processed/checkpoints/stage2_rinalmo"
+
+#: Per-backbone output destinations (ADR-0002 A15). **Not cosmetic:** the production checkpoint
+#: dir is DVC-tracked and holds the six shipped P3-06 arms, so a comparator run that inherited
+#: it would overwrite them — two outputs, one path, and the first destroyed
+#: ([[two-outputs-one-path-destroys-the-first]]). `__post_init__` refuses that combination
+#: outright rather than trusting every launcher to remember to override both paths.
+DEFAULT_CKPT_DIR_BY_BACKBONE: Mapping[str, str] = MappingProxyType(
+    {
+        PRODUCTION_BACKBONE: DEFAULT_CKPT_DIR,
+        COMPARATOR_BACKBONE: "data/processed/checkpoints/stage2_rnafm",
+    }
+)
+DEFAULT_REPORT_BY_BACKBONE: Mapping[str, str] = MappingProxyType(
+    {
+        PRODUCTION_BACKBONE: DEFAULT_REPORT,
+        COMPARATOR_BACKBONE: "reports/p3/train_stage2_rnafm.json",
+    }
+)
+
+
+def default_checkpoint_dir(backbone: str) -> str:
+    """The per-arm checkpoint destination. Raises for an allow-list key with no entry.
+
+    Deliberately **not** ``.get(key, DEFAULT_CKPT_DIR)``: a missing entry falling back to the
+    production path is precisely the accident this mapping exists to prevent, and it would be
+    silent. A test asserts every allow-list key resolves here.
+    """
+    resolve_backbone(backbone)  # closed-allow-list refusal first, so the message is the good one
+    try:
+        return DEFAULT_CKPT_DIR_BY_BACKBONE[backbone]
+    except KeyError:  # pragma: no cover - guarded by test_every_backbone_has_destinations
+        raise ValueError(
+            f"backbone {backbone!r} is in the allow-list but has no checkpoint destination in "
+            "DEFAULT_CKPT_DIR_BY_BACKBONE; add one rather than letting it inherit production's."
+        ) from None
+
+
+def default_report_path(backbone: str) -> str:
+    """The per-arm run-report destination. Raises for an allow-list key with no entry."""
+    resolve_backbone(backbone)
+    try:
+        return DEFAULT_REPORT_BY_BACKBONE[backbone]
+    except KeyError:  # pragma: no cover - guarded by test_every_backbone_has_destinations
+        raise ValueError(
+            f"backbone {backbone!r} is in the allow-list but has no report destination in "
+            "DEFAULT_REPORT_BY_BACKBONE; add one rather than letting it inherit production's."
+        ) from None
+
+
+def env_lock_for(backbone: str) -> str:
+    """The conda lock the arm using ``backbone`` runs under (ADR-0002 A15).
+
+    The two arms genuinely differ — ``ml-rna`` pins ``multimolecule`` 0.1.0 and cannot load
+    RNA-FM at all — so a run that stamped the module constant into its provenance would name an
+    environment it did not use, and the ``env_lock_sha256`` beside it would hash the wrong file.
+    """
+    return resolve_backbone(backbone).env_lock
+
 
 #: File names inside a checkpoint directory. The adapter is PEFT's own layout; the heads
 #: are a plain state-dict because they live OUTSIDE the PEFT wrapper by construction
@@ -393,6 +465,12 @@ class Stage2TrainConfig:
     gradient_accumulation_steps: int = 1
 
     # Model
+    #: The Stage-2 backbone, as an ADR-0002 A15 allow-list key (never a repo id). Defaults to
+    #: the shipped `rinalmo-giga`; P3-17's D6 comparator sets `rnafm`. A **top-level** field
+    #: rather than a `/model` group key on purpose: the `/model` group is a *record* of the
+    #: frozen checkpoint identity (see `_cfg_from_mapping`), so a selector living only there
+    #: would compose cleanly and change nothing — the Stage-1 `label_source` footgun class.
+    backbone: str = PRODUCTION_BACKBONE
     revision: str | None = None
     dtype: str | None = None
     attn_implementation: str | None = None
@@ -473,6 +551,32 @@ class Stage2TrainConfig:
                 continue
             if isinstance(value, bool) or not isinstance(value, int) or value < 1:
                 raise ValueError(f"{name} must be None or an int >= 1, got {value!r}")
+        # Refuse an unknown backbone HERE — at compose time, on the login node, before sbatch
+        # and before any download — rather than deep inside the loader after the queue wait
+        # (the job-669 class). The allow-list is closed, so a typo cannot degrade to "load the
+        # default", which is how a comparator ends up fine-tuning the production model.
+        spec = resolve_backbone(self.backbone)
+        # ...and refuse a non-production arm aimed at the production destinations. The shipped
+        # checkpoint dir is DVC-tracked and holds the six P3-06 arms; `train_stage2` clears and
+        # rewrites `checkpoint_dir`, so inheriting it would destroy them, and a shared
+        # `report_path` would overwrite the shipped record with the comparator's
+        # ([[two-outputs-one-path-destroys-the-first]]). Compared after `resolve()` so a
+        # different spelling of the same directory cannot slip past a string comparison.
+        if spec.key != PRODUCTION_BACKBONE:
+            for field_name, production_default in (
+                ("checkpoint_dir", DEFAULT_CKPT_DIR),
+                ("report_path", DEFAULT_REPORT),
+            ):
+                if Path(getattr(self, field_name)).resolve() == Path(production_default).resolve():
+                    raise ValueError(
+                        f"backbone={self.backbone!r} but {field_name}="
+                        f"{getattr(self, field_name)!r} is the PRODUCTION arm's destination. "
+                        f"A comparator run writing there "
+                        f"would overwrite the shipped {PRODUCTION_BACKBONE} artifact. The "
+                        f"per-arm destinations are "
+                        f"{DEFAULT_CKPT_DIR_BY_BACKBONE.get(spec.key, '<unset>')!r} / "
+                        f"{DEFAULT_REPORT_BY_BACKBONE.get(spec.key, '<unset>')!r}."
+                    )
 
 
 def diagnostics(cfg: Stage2TrainConfig) -> dict[str, Any]:
@@ -669,6 +773,39 @@ def derive_clauses(report: Mapping[str, Any]) -> dict[str, bool]:
         bool(prov.get(key)) for key in ("git_sha", "env_lock_sha256", "config_path", "step")
     ) and isinstance(prov.get("seed"), int)
 
+    # -- WHICH backbone this run actually adapted (ADR-0002 A15) ---------------------- #
+    # A LoRA checkpoint stores adapters and heads and *not* the backbone, so nothing
+    # downstream can recover which base these adapters saw except from what the run wrote
+    # down. Re-derived from the wrap's own recorded block against the closed allow-list, and
+    # cross-checked against `config.backbone` — the requested key — so a run that resolved a
+    # different backbone than the one it was asked for fails here instead of publishing a
+    # comparator number under the production arm's name.
+    #
+    # ⚠ It reads NOTHING from `report["config"]`. The first draft cross-checked the recorded
+    # backbone against `config.backbone` — the *requested* key — and
+    # `test_the_gate_is_not_recorded_from_a_requested_setting` refused it, correctly: a clause
+    # that reads the request restates it. The independent evidence is `stage2_heads.d_model`,
+    # which `build_stage2_model` measures off the LIVE module via `_hidden_size` — so a run
+    # that recorded one backbone's identity while adapting the other's weights fails here on
+    # 1280 vs 640 rather than agreeing with itself.
+    #
+    # Four ways it bites, each a real failure mode: a repo id outside the closed allow-list;
+    # an identity block that disagrees with the allow-list entry it names; a head width that
+    # disagrees with the identity claimed; and `loaded_from_registry` false, which means the
+    # weights under the adapters were a caller's fixture rather than the pinned checkpoint —
+    # a tiny-fixture smoke must never certify a production artifact.
+    recorded_bb = wrap.get("backbone") or {}
+    known_bb = backbone_for_repo_id(str(recorded_bb.get("repo_id") or ""))
+    heads_block = wrap.get("stage2_heads") or {}
+    clauses["backbone_pinned"] = (
+        known_bb is not None
+        and recorded_bb.get("key") == known_bb.key
+        and recorded_bb.get("revision") == known_bb.revision
+        and recorded_bb.get("hidden_size") == known_bb.hidden_size
+        and heads_block.get("d_model") == known_bb.hidden_size
+        and recorded_bb.get("loaded_from_registry") is True
+    )
+
     return {k: bool(v) for k, v in clauses.items()}
 
 
@@ -753,8 +890,12 @@ def build_report(
             "entrypoint": ENTRYPOINT,
             "script": "src/tbox_finder/stage2/train.py",
             "seed": int(cfg.seed),
-            "env_lock": ENV_LOCK,
-            "env_lock_sha256": _env_lock_sha256(),
+            # Resolved from the arm's own backbone, never the module constant: since ADR-0002
+            # A15 the comparator runs under `envs/ml-rnafm.conda-lock.yml`, and stamping
+            # `ENV_LOCK` here would name an environment the run did not use while the hash
+            # beside it digested the wrong file.
+            "env_lock": env_lock_for(cfg.backbone),
+            "env_lock_sha256": _env_lock_sha256(env_lock_for(cfg.backbone)),
             "dataset_parquet": cfg.dataset_parquet,
             **_sanitize(git_snapshot),
         },
@@ -957,6 +1098,7 @@ def build_model(cfg: Stage2TrainConfig, *, base_model: Any = None):
     spec = H.load_head_spec()
     kwargs: dict[str, Any] = {
         "base_model": base_model,
+        "backbone": cfg.backbone,
         "gradient_checkpointing": bool(cfg.gradient_checkpointing),
         "dropout": float(cfg.dropout),
         "boundary_use_crf": False,
@@ -989,6 +1131,20 @@ def build_model(cfg: Stage2TrainConfig, *, base_model: Any = None):
             )
     else:
         n_ckpt = _count_checkpointed_modules(model.backbone)
+
+    # The requested key vs the one the wrap recorded. This is deliberately a REFUSAL here and
+    # not a gate clause: `derive_clauses` may not read `report["config"]` (a clause that reads
+    # the request restates it and can never fail), so the agreement between what the config
+    # asked for and what was built is enforced where both are in scope — at the call, before
+    # any training time is spent. It also fails closed against a future refactor that drops the
+    # `backbone` kwarg on the way down: the parameter would silently revert to the production
+    # default and every downstream artifact would carry the wrong identity.
+    built = (info.get("backbone") or {}).get("key")
+    if built != cfg.backbone:
+        raise RuntimeError(
+            f"config asked for backbone {cfg.backbone!r} but the wrap recorded {built!r}; "
+            "refusing to train an arm whose recorded identity is not the one requested."
+        )
 
     info = {
         **info,
@@ -1569,8 +1725,6 @@ def _cfg_from_mapping(cfg: Mapping[str, Any]) -> Stage2TrainConfig:
     default weighting and self-consistently report the value it was handed, which is the
     exact shape of a sweep that measures nothing.
     """
-    from tbox_finder.eval.rinalmo_parity import REPO_ID, REVISION  # bare-importable
-
     optim = cfg.get("optim") or {}
     tracking = cfg.get("tracking") or {}
     loss_block = cfg.get("loss") or {}
@@ -1581,13 +1735,23 @@ def _cfg_from_mapping(cfg: Mapping[str, Any]) -> Stage2TrainConfig:
     # override that changes nothing — so refuse the drift rather than let the run report a
     # checkpoint it did not load. Overriding the checkpoint is `revision=<x>` at top level,
     # which does reach the loader and is itself gated by lora_harness's pinned-revision check.
-    for key, pinned in (("repo_id", REPO_ID), ("revision", REVISION)):
+    #
+    # ⚠ Since ADR-0002 A15 the pins compared against are the **selected backbone's**, not the
+    # single production pair. Keeping the old form would have made this check *worse* than
+    # useless for the comparator: `conf/model/rnafm_stage2.yaml` records RNA-FM's repo id, so a
+    # correct RNA-FM run would have been refused, and the only way to run one would have been
+    # to stop composing the /model group — silently discarding the very record this refusal
+    # exists to keep honest. The key is read off the same mapping the dataclass will, so the
+    # /model group is checked against the backbone the run will actually load.
+    selected = resolve_backbone(cfg.get("backbone", Stage2TrainConfig.backbone))
+    for key, pinned in (("repo_id", selected.repo_id), ("revision", selected.revision)):
         if key in model_block and masking.row_text(model_block[key]) != pinned:
             raise ValueError(
-                f"conf/model/rinalmo_stage2.yaml records {key}={model_block[key]!r} but the "
-                f"code pins {pinned!r}. The /model group is a record of the frozen checkpoint "
-                "identity, not an input — a value only this file carries would name a "
-                "checkpoint the run never loaded."
+                f"the composed /model group records {key}={model_block[key]!r} but backbone "
+                f"{selected.key!r} pins {pinned!r}. The /model group is a record of the frozen "
+                "checkpoint identity, not an input — a value only that file carries would name "
+                "a checkpoint the run never loaded. Selecting a different backbone is "
+                "`backbone=<key>` (plus its matching `/model` group), never a lone repo_id."
             )
 
     # Unknown keys in the /optim group raise for the same reason /loss ones do: a misspelled

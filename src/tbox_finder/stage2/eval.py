@@ -1355,6 +1355,7 @@ def load_stage2_checkpoint(
     structure_head: bool = False,
     pairing_proj_dim: int | None = None,
     base_model: Any = None,
+    backbone: str | None = None,
 ) -> tuple[Any, dict[str, Any]]:
     """A P3-06 checkpoint → a ready-to-score :class:`Stage2Model`, weights **verified**.
 
@@ -1377,6 +1378,7 @@ def load_stage2_checkpoint(
     from peft import PeftModel  # lazy
     from safetensors.torch import load_file  # lazy
 
+    from tbox_finder.models import rna_backbone_registry as BR
     from tbox_finder.stage2 import heads as H
     from tbox_finder.stage2.model import DEFAULT_PAIRING_PROJ_DIM, Stage2Model
     from tbox_finder.train import lora_harness as LH
@@ -1399,19 +1401,38 @@ def load_stage2_checkpoint(
     # this process loaded. Pointing it at a different backbone is not an error anyone
     # would notice at runtime — the shapes match, the adapter applies cleanly, and the
     # logits are simply somebody else's.
+    # ⚠ Since ADR-0002 A15 there are TWO pinned Stage-2 backbones, so this cannot compare
+    # against a single constant any more. The backbone is **re-derived from the checkpoint's
+    # own evidence** — the base model its adapter_config records — against the closed
+    # allow-list, rather than defaulting a missing axis to "production" on faith
+    # ([[gate-must-bind-to-upstream-evidence]]). A recorded base outside the allow-list still
+    # raises, and so does a `backbone=` argument that contradicts what the checkpoint says:
+    # being *asked* for the wrong base is the same defect as inheriting it.
     recorded_base = adapter_config.get("base_model_name_or_path")
-    if recorded_base and recorded_base != LH.REPO_ID:
+    derived = BR.backbone_for_repo_id(recorded_base) if recorded_base else None
+    if recorded_base and derived is None:
         raise ValueError(
-            f"{adapter_dir} was trained against base model {recorded_base!r}, but this "
-            f"repo pins {LH.REPO_ID!r}; the adapter would be applied to a backbone it "
-            "never saw"
+            f"{adapter_dir} was trained against base model {recorded_base!r}, which is not in "
+            f"the ADR-0002 A15 allow-list {BR.BACKBONE_KEYS}; the adapter would be applied to "
+            "a backbone this repo does not pin"
         )
+    if backbone is not None and derived is not None and backbone != derived.key:
+        raise ValueError(
+            f"{adapter_dir} records base model {recorded_base!r} (backbone {derived.key!r}) "
+            f"but backbone={backbone!r} was requested; the adapter would be applied to a "
+            "backbone it never saw"
+        )
+    resolved_backbone = derived.key if derived is not None else (backbone or BR.PRODUCTION_BACKBONE)
 
     resolved_dtype = dtype or LH.TRAIN_DTYPE
-    resolved_revision = revision or LH.REVISION
+    # The revision that will actually be loaded, resolved from the SAME spec the loader uses
+    # rather than from a module constant — otherwise a comparator checkpoint's record would
+    # report the production checkpoint's revision.
+    resolved_revision = revision or BR.resolve_backbone(resolved_backbone).revision
     if base_model is None:
-        base_model = LH.load_rinalmo_backbone(
-            revision=resolved_revision,
+        base_model = LH.load_rna_backbone(
+            backbone=resolved_backbone,
+            revision=revision,
             dtype=resolved_dtype,
             attn_implementation=attn_implementation,
             device=None,
@@ -1525,6 +1546,11 @@ def load_stage2_checkpoint(
             for key in ("peft_type", "r", "lora_alpha", "lora_dropout", "target_modules", "bias")
         },
         "base_model_name_or_path": adapter_config.get("base_model_name_or_path"),
+        # Which allow-list entry the base was re-derived to be (ADR-0002 A15). Recorded
+        # because `base_model_name_or_path` alone is a repo id, and every consumer that wants
+        # to know "was this the shipped arm or the comparator" would otherwise have to
+        # re-derive it independently and could disagree.
+        "backbone": resolved_backbone,
         "revision": resolved_revision,
         "dtype": resolved_dtype,
         "attn_implementation": attn_implementation,

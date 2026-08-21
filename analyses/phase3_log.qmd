@@ -7398,3 +7398,131 @@ not in `two_stage.py` as `imp.md` names — that module's own docstring says *"N
 the two-stage-vs-Stage-1-only precision comparison is P3-16"*, and it is already 1,682 lines.
 
 **Commit.** see PR (P3-16).
+
+## Step P3-17 — 2026-08-21: the RNA-FM Stage-2 comparator — and the pinned stack could not load it
+
+**Inputs.** `multimolecule/rnafm` at revision `7d6e73ad3b48e042b378f9a788a56ccb4d573a27`;
+`data/processed/stage2_dataset.parquet` (P3-01, unchanged — the comparator trains the *same*
+population as the shipped arm); `src/tbox_finder/stage2/{model,losses,heads,tokenizer}.py`
+(P3-03/04/05); `src/tbox_finder/train/lora_harness.py` (P1-15's pinned §10.3 LoRA contract);
+`conf/{loss,optim,tracking}/*` unchanged.
+
+**Process.** PRD §10.2's condition (c) — *"post-calibration leave-clade-out ECE is worse than
+RNA-FM's by a pre-registered numeric margin"* (ADR-0005 D17: > 0.02 absolute) — has never been
+readable, because no RNA-FM number exists. This step builds the arm that makes it a
+measurement. Three things had to be added and one had to be discovered.
+
+**⛔⛔ THE PINNED STACK CANNOT LOAD THE CHECKPOINT THE ADR NAMES, AND NO REVISION FIXES IT.**
+`multimolecule` **0.1.0** — the ADR-0002 A8 pin `envs/ml-rna.yml` carries, and the pin every
+shipped Stage-2 artifact was produced under — raises before a single weight is read:
+
+```
+ValueError: vocab_size (28) must be 26 when codon=False
+```
+
+Its `models/rnafm/configuration_rnafm.py:136` computes `expected_vocab_size = 131 if codon else
+26`, while the published checkpoint declares `vocab_size: 28` with a 28-line `vocab.txt`. There
+is **no older checkpoint revision to pin around it**: `multimolecule/rnafm` has exactly three
+commits, all 2026-05-31 (`c727416` initial → `b93dc90` upload → `7d6e73a` README), so the whole
+checkpoint was uploaded in the 28-vocab era. `multimolecule` **0.2.0**'s same line reads
+`... else 28`, and A8 had already recorded 0.2.0 as working for the RiNALMo mirror.
+`RiNALMoConfig` carries no such validator at any version, which is why rinalmo-giga — also
+`vocab_size: 28` — loads fine today and why this surfaced only now.
+
+**Decisions.** A §7 stop was raised before any code was written; the user chose **a new env
+over a bump** and signed **ADR-0002 A15**. `envs/ml-rnafm.yml` pins `multimolecule` 0.2.0 with
+every other pin identical to `ml-rna`, which stays at 0.1.0 and is not touched. The reason is
+CLAUDE.md §8.5: bumping in place would oblige re-validating the D5 parity gate, the P1-15/16
+LoRA harness, the six P3-06 arms, P3-07's temperature, P3-08's ablation and P3-10's GATE-2 ECE
+— GPU time spent re-checking published numbers, with a real chance of moving one, in order to
+build a *comparator*. The precedent is A4 (the `ml` → `ml-dna` + `ml-rna` split) and
+A11/A12/A13 (each a whole new env under an amendment). ⚠ **The disclosure it buys, and P3-18
+owes:** the two arms are compared across a one-minor-version library difference.
+
+**⚠ A FRESH `conda-lock` SOLVE WOULD HAVE MADE THAT CLAIM FALSE — 55 PINS MOVED.** Solving
+`ml-rnafm.yml` from scratch succeeds (no repeat of A8's poetry crash) but does **not** produce
+"`ml-rna` with one pin changed": it drifts gcc/gxx 14.3.0 → 14.4.0, libgcc/libstdcxx 15.2.0 →
+16.1.0, binutils 2.45.1 → 2.46.1, mkl 2026.0.0 → 2026.1.0, pandas 3.0.3 → 3.0.5, setuptools
+82.0.1 → 84.0.0 and — most to the point — `multimolecule`'s own `danling` 0.4.2 → 0.4.4 and
+`chanfig` 0.0.116 → 0.0.117, relocates the typer/rich subtree from pip to conda, and drops
+`onemkl-license`. That is a silent ~55-pin bump D8 forbids, and it would have destroyed the
+amendment's own claim. The committed lock is therefore **hand-merged** from `ml-rna`'s via
+conda-lock's own `Lockfile` model, with the eight new/changed entries transplanted verbatim
+from the fresh solve's output and `content_hash` recomputed — a method **first validated by
+reproducing `ml-rna.yml`'s committed `aaaab98c…` exactly** before its `55126293…` was trusted.
+The result differs from `ml-rna`'s in exactly `multimolecule` 0.1.0 → 0.2.0 plus the seven
+matplotlib-subtree packages: 259 → 266, nothing else moved, and a test asserts it.
+
+**⚠ THE REAL BLOCKER WAS NOT THE CONFIG FILE — IT WAS THAT NO BACKBONE SELECTION POINT EXISTED.**
+`imp.md` lists `conf/model/stage2_rnafm.yaml` as the artifact, but `conf/model/rinalmo_stage2.yaml`
+is a **record**, not an input: `lora_harness` hard-coded `RiNALMoModel`, and three validators
+refused any other `repo_id` (one test even used `"multimolecule/rnafm"` as the sabotage proving
+that refusal bites). A config alone would have composed cleanly and changed nothing — the
+P2-11 `label_source` footgun class. So this step adds
+`src/tbox_finder/models/rna_backbone_registry.py`, the RNA-side twin of ADR-0002 A14's Stage-1
+Caduceus allow-list: torch-free (so an unknown key is refused at **compose** time on the login
+node, not after the queue wait), closed, per-key revision enforcement, and a parameter count
+**measured at load** against the recorded expectation. `load_rinalmo_backbone` now *delegates*
+to the general loader rather than carrying its own copy of the load.
+
+**✅ WHAT MAKES THE COMPARISON CLEAN, AND IT WAS MEASURED, NOT ASSUMED.** RNA-FM's `vocab.txt`
+at the pinned revision is **byte-identical** to rinalmo-giga's and to
+`stage2/tokenizer.py::VOCAB` — same 28 tokens, same order, same six specials, same
+`<cls>…<eos>` 2-flanking layout `strip_special_tokens` assumes. Asserted directly
+(`T.VOCAB == RnaTokenizer.from_pretrained(...).get_vocab()` → `True`, and an id-level encode
+comparison on a 280-nt locus). So no second vocabulary was added, `VOCAB_DIGEST` (`ac3cff22…`)
+is unchanged, the P3-01 tokenizer parity test is untouched, and a P3-18 ECE difference cannot
+be blamed on tokenisation. RNA-FM: hidden **640**, 12 layers, 20 heads, absolute positions,
+`max_position_embeddings` 1026 (≥ the mirror's pinned 1024, so the 1022-nt ceiling stays
+conservative), **99,111,680** backbone parameters — PRD §10.2's "~100M" confirmed as a
+measurement rather than quoted as a label.
+
+**Outputs.** `envs/ml-rnafm.yml` + `envs/ml-rnafm.conda-lock.yml` ·
+`src/tbox_finder/models/rna_backbone_registry.py` · `conf/model/rnafm_stage2.yaml` ·
+`slurm/p3/rnafm_stage2_finetune.sbatch` · backbone dispatch in `train/lora_harness.py`,
+`stage2/model.py`, `stage2/train.py`, `stage2/eval.py`, `stage2/sizing.py` ·
+`tests/unit/test_rna_backbone_registry.py` + the `rnafm` arm in
+`tests/ml/test_stage2_train_smoke.py` + two A15 guards in `tests/unit/test_env_manifest.py` ·
+ADR-0002 **A15**. **No checkpoint, no scores and no `dvc add`** — nothing has been trained; the
+§9.3 submit-ack is open.
+
+**⚠ THE GATE CLAUSE SET IS VERSIONED, AND ONE TEST REFUSED MY FIRST DRAFT OF IT.**
+`derive_clauses` gains `backbone_pinned`, so the report schema goes **2 → 3**. The first draft
+cross-checked the recorded backbone against `config.backbone` — the *requested* key — and
+`test_the_gate_is_not_recorded_from_a_requested_setting` correctly refused it: a clause that
+reads the request restates it and can never fail. The shipped clause reads
+`wrap.stage2_heads.d_model`, which `build_stage2_model` **measures off the live module**, so a
+run recording one backbone's identity while adapting the other's weights fails on 1280 vs 640.
+The requested-vs-built agreement is enforced instead as a refusal inside `build_model`, where
+both are in scope. Nothing is invalidated by the bump: the only committed Stage-2 training
+reports are the six schema-**1** sweep artifacts, and no schema-2 report was ever committed.
+Those six gain a **third** entry in `legacy.fails_current_gate_on`, classified in the same
+category as `losses_finite` — *unmeasured, not failed*: schema 1 predates the `wrap.backbone`
+block, so there is nothing for the clause to re-derive from. Verified annotation-only: every
+field outside `legacy` is byte-identical to `HEAD`, and only `fails_current_gate_on` and `note`
+changed inside it.
+
+**Validation.** `ruff@0.15.15` + `black@25.11.0` clean; `snakemake --lint` clean; `snakemake -n`
+resolves; `bash -n` clean on the new sbatch. Vs a matched `main` baseline at `2e929a3`: **zero
+new failures** (the FAILED sets are compared, never the counts — the worktree legitimately
+skips 15 DVC-dependent tests the main checkout runs); unit passes **6,057 → 6,088**.
+`tests/unit/test_sbatch_rm_targets.py` clears the new file; every override token the launch
+line writes composes for real against `conf/train/stage2.yaml`, including the group override.
+**20 sabotages, 18 RED against their NAMED test and 2 GREEN negative controls**, sources
+restored byte-identically by sha256 with `__pycache__` cleared between runs.
+
+**⚠ ONE SABOTAGE READ GREEN, AND IT WAS THE SAME TRAP TWICE.** Deleting `model=rnafm_stage2`
+from the *launch line* left its guard green, because the assertion searched the whole file and
+the header explains the token at length. That is precisely the `--nodelist` trap the production
+sbatch's own test carries a warning about — which had already bitten me once in this step and
+which I fixed as an instance rather than as a class. Every sbatch assertion now reads either
+`_sbatch_code()` (comments stripped) or `_launch_tokens()` (the joined logical command), and
+three re-run sabotages — the token removed from the launch line while the prose keeps it, the
+sizing `--backbone` likewise, and `BACKBONE` reassigned to production — are all RED.
+
+**⏭ NOT DONE — the §9.3 submit-ack is open, and the run has not happened.** No RNA-FM
+checkpoint, no posteriors, no leave-clade-out ECE. P3-18's condition-(c) verdict has nothing to
+read yet, and this step deliberately produces no number: the swap decision is P3-18's and is a
+§7 stop on top of D17's margin.
+
+**Commit.** see PR (P3-17).
