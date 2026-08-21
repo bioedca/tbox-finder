@@ -389,7 +389,22 @@ def host_fold_overlap(
         contig = by_id[item["contig_id"]]
         sequence = contig["sequence"].upper()
         start, end = contig.get("truth_start"), contig.get("truth_end")
-        host = sequence if start is None else sequence[:start] + sequence[end:]
+        if start is None or end is None:
+            # A negative contig carries NO truth bounds — the insert's location lives on the
+            # ITEM, as `splice_phase` + `locus_length`. Falling back to the whole window (as
+            # this did until round 8) counts the decoy's own k-mers as host DNA and makes the
+            # published "spliced insert excluded" claim false. Refuse rather than fall back:
+            # a measurement that silently changes what it measures is the defect, not the
+            # missing field (CodeRabbit, PR #133 round 4, unresolved until round 8).
+            phase, insert = item.get("splice_phase"), item.get("locus_length")
+            if phase is None or insert is None:
+                raise SystemExit(
+                    f"{item['contig_id']}: no splice bounds on contig or item, so the host "
+                    "portion cannot be isolated; measuring the whole window would count the "
+                    "decoy as host DNA"
+                )
+            start, end = int(phase), int(phase) + int(insert)
+        host = sequence[:start] + sequence[end:]
         for offset in range(len(host) - k + 1):
             owners.setdefault(host[offset : offset + k], set()).add(item["contig_id"])
     seen: dict[str, set[str]] = {arm: set() for arm in folds}

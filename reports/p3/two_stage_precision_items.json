@@ -57,13 +57,13 @@
         "n_used": 692,
         "overlap_with_training_folds": {
           "by_arm": {
-            "production": 115,
-            "twin": 97
+            "production": 112,
+            "twin": 96
           },
           "k": 32,
           "method": "verbatim k-mer of the host portion (spliced insert excluded) against the arm's own Stage-1 training-fold context_seq",
           "n_negatives": 692,
-          "n_seen_by_any_arm": 115
+          "n_seen_by_any_arm": 112
         },
         "selection": "parent_nested_train == False \u2014 the mining-pool record's PARENT, not the DNA of the window drawn from it; see overlap_with_training_folds",
         "source": "data/processed/negatives/mining_pool_v0.parquet"

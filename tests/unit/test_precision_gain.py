@@ -1136,3 +1136,48 @@ def test_no_retyped_node_anywhere_can_make_the_checker_raise(report):
             P.precision_problems(broken)  # must not raise
             checked += 1
     assert checked > 4_000, f"only {checked} replacements — the sweep stopped finding nodes"
+
+
+def test_the_host_overlap_excludes_the_spliced_decoy():
+    """A negative contig carries NO ``truth_start``/``truth_end`` — the insert's location is
+    on the ITEM (``splice_phase`` + ``locus_length``). The first implementation fell back to
+    the whole window for exactly that case, so it counted the decoy's own k-mers as host DNA
+    while the published method string said *"spliced insert excluded"*. Corrected 115/97 to
+    112/96 (CodeRabbit, PR #133 round 4 — the thread stayed unresolved until round 8)."""
+    mint = _minter()
+    insert = "GGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGG"  # 36 nt, unique to the decoy
+    flank = "ACGT" * 40
+    contigs = [
+        {
+            "contig_id": "dec:000",
+            "sequence": flank + insert + flank,
+            "truth_start": None,
+            "truth_end": None,
+        }
+    ]
+    items = [
+        {
+            "contig_id": "dec:000",
+            "label": 0,
+            "splice_phase": len(flank),
+            "locus_length": len(insert),
+        }
+    ]
+    # A fold made ONLY of the decoy: with the insert excluded there is no host overlap.
+    seen = mint.host_fold_overlap(contigs, items, {"twin": {"r1"}}, {"r1": insert}, k=32)
+    assert seen["twin"] == set(), "the spliced decoy was counted as host DNA"
+    # …and a fold made of the flank IS host overlap, so the test is not vacuous.
+    seen = mint.host_fold_overlap(contigs, items, {"twin": {"r1"}}, {"r1": flank}, k=32)
+    assert seen["twin"] == {"dec:000"}
+
+
+def test_a_negative_with_no_splice_bounds_anywhere_is_refused_not_measured_whole():
+    """Refusing beats falling back: a silent fall-back is what made the published claim
+    false in the first place."""
+    mint = _minter()
+    contigs = [
+        {"contig_id": "dec:000", "sequence": "ACGT" * 40, "truth_start": None, "truth_end": None}
+    ]
+    items = [{"contig_id": "dec:000", "label": 0}]
+    with pytest.raises(SystemExit, match="no splice bounds"):
+        mint.host_fold_overlap(contigs, items, {"twin": {"r1"}}, {"r1": "ACGT" * 40}, k=32)

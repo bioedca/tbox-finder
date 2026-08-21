@@ -648,13 +648,13 @@
         "n_used": 692,
         "overlap_with_training_folds": {
           "by_arm": {
-            "production": 115,
-            "twin": 97
+            "production": 112,
+            "twin": 96
           },
           "k": 32,
           "method": "verbatim k-mer of the host portion (spliced insert excluded) against the arm's own Stage-1 training-fold context_seq",
           "n_negatives": 692,
-          "n_seen_by_any_arm": 115
+          "n_seen_by_any_arm": 112
         },
         "selection": "parent_nested_train == False \u2014 the mining-pool record's PARENT, not the DNA of the window drawn from it; see overlap_with_training_folds",
         "source": "data/processed/negatives/mining_pool_v0.parquet"
@@ -715,7 +715,7 @@
     "The gated arm is the GATE-4 eval twin, not the shipped scanner. The shipped P2-10d\u2032-b checkpoint trained on 1201 of the 1201 benchmark positives (its training fold is the whole in-distribution fold), so it has no in-distribution held-out population; the twin saw 0. \u00a77 decision 2026-08-13; ADR-0004 A6's two-run split is the same instrument GATE-4 used.",
     "The production arm's numbers are REPORTED, NOT GATED. Its Stage-1 is in-sample on every positive, which flatters the Stage-1-only system, so a pass there is conservative and a fail there is uninterpretable.",
     "All four \u00a79.1 decoy pools are in the gated denominator (\u00a77 decision). 283 of the 692 negatives were embedded in both Stage-1 trainings (ADR-0005 A7 pin 3 embeds every structured_rna decoy), so that pool's contribution partly measures memorisation.",
-    "The negatives' HOST windows are not unseen DNA either. Hosts are mined windows whose mining-pool parent is out of fold, which constrains the PARENT and not the window: 97 of 692 negatives share a verbatim 32-mer of host DNA with the gated arm's own Stage-1 training fold (production 115 for the arms reported beside it). The spliced decoy is excluded from that count; decoy-level exposure is the line above.",
+    "The negatives' HOST windows are not unseen DNA either. Hosts are mined windows whose mining-pool parent is out of fold, which constrains the PARENT and not the window: 96 of 692 negatives share a verbatim 32-mer of host DNA with the gated arm's own Stage-1 training fold (production 112 for the arms reported beside it). The spliced decoy is excluded from that count; decoy-level exposure is the line above.",
     "\u00a79.1's hardest negative class contributes 1 item(s) to THIS benchmark, drawn from an UPSTREAM pool of 8 leader decoys \u2014 a \u00a79.1 pool size, not a count of benchmark items \u2014 all 8 of which are T-box-derived, 2 being exact substrings of training positives (A7 pin 5); re-sourcing is deferred to P2-10b\u2032.",
     "The ADR-0005 D7 100:1 prevalence is reached by REWEIGHTING the sampled negatives, not by materialising them \u2014 this benchmark's own composition is 0.576 decoys per positive. conf/data/decoys.yaml scopes the D7 pin to P4; it is reported here because imp.md's P3-16 block asks for it, and the verdict is invariant across the whole 10:1 \u2192 10\u2074:1 sweep.",
     "Benchmark items are 1024-nt scan windows (ADR-0005 D3 / PRD \u00a76 pinned geometry): a positive is its gate4_eval locus carved in real \u00b1genomic context, a negative is a \u00a79.1 decoy spliced into a real mined host window by the shipped embed_decoy_rows. An earlier build presented each item as its own excised contig and Stage-1 admitted a single decoy across the whole pool; in this geometry the gated arm admits 6 of 692 and retains 4 at matched recall (production 5/4 for the arms reported beside it). This is an in-distribution reference, not a genome-scale scan simulation (P5).",
@@ -764,7 +764,7 @@
   },
   "gated": true,
   "gated_arm": "twin",
-  "generated_at_utc": "2026-08-21T05:21:41+00:00",
+  "generated_at_utc": "2026-08-21T08:17:40+00:00",
   "generated_by": "src/tbox_finder/integration/precision.py",
   "is_science": true,
   "prd": "PRD \u00a72.3, \u00a76, \u00a712, \u00a718.1",
@@ -777,10 +777,10 @@
         "reports/two_stage_precision.json"
       ]
     },
-    "generated_at_utc": "2026-08-21T05:21:41.336967+00:00",
-    "git_sha": "2c28b4956ebec2d077c5bbdf04f25189bb94697f",
+    "generated_at_utc": "2026-08-21T08:17:40.206220+00:00",
+    "git_sha": "6fed48574d201359f1d02ff8eed18252d8a71453",
     "inputs": {
-      "reports/p3/two_stage_precision_items.json": "5e6788e70cb01ad52ac96e3489c9ac1a81921cee537274578417e34d4668b419"
+      "reports/p3/two_stage_precision_items.json": "91ccde8ff2d4378abeff9ade5de46a68d5598e27995756e290482a5e4dd80a44"
     },
     "outputs": {},
     "rule": "workflow/rules/integration.smk :: precision_comparison",
@@ -856,7 +856,7 @@
         },
         "measured_stage1_threshold": 0.7,
         "passes": true,
-        "report_sha256": "956e81a2be7516dd5e139aaa6c68d8d004a718806174e2bc28789936f0a89686"
+        "report_sha256": "af12618c9abac95b865424a1d4279d03dc66e273139018108558caf45ef391de"
       },
       {
         "auprc": {
@@ -885,7 +885,7 @@
         },
         "measured_stage1_threshold": 0.9,
         "passes": true,
-        "report_sha256": "36c1b5bb782c06dc3ee7dccec2721263e97ddd28ec73f064f20b0f00d7f5fdd7"
+        "report_sha256": "7b73b317c26a1ba3cd41d7f3a4f4e677b55fa17a7a5ba9ee1ace81d260527b66"
       }
     ],
     "verdict_invariant": true
