@@ -1027,6 +1027,16 @@ def test_a_host_overlap_count_that_is_not_a_count_of_this_pool_is_refused(report
     assert any("negatives" in p for p in P.precision_problems(broken))
 
 
+def test_a_fractional_negative_count_cannot_serve_as_the_host_overlap_limit(report):
+    """Not exploitable on its own — four other clauses already refuse a fractional
+    ``n_negatives`` — but the bound a count is checked against must itself be a count, so the
+    clause stands on its own rather than on its neighbours."""
+    broken = copy.deepcopy(report)
+    broken["benchmark"]["scope"]["n_negatives"] = 692.5
+    problems = P.precision_problems(broken)
+    assert any("is not a count of this benchmark" in p for p in problems), problems
+
+
 def test_a_host_overlap_measured_over_a_different_corpus_is_refused(report):
     broken = copy.deepcopy(report)
     broken["benchmark"]["scope"]["host_pool"]["overlap_with_training_folds"]["n_negatives"] = 7

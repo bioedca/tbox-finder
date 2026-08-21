@@ -7326,10 +7326,31 @@ Worth stating plainly: the clause that guards a number should land in the same c
 This one arrived a round late, and only because a reviewer asked for it.
 :::
 
+::: {.callout-note}
+## Review round 8 (app, manual trigger on `7e3f42e`) — 1 finding, **not exploitable**, applied anyway
+
+Filed as a *major*: a **fractional** `scope.n_negatives` (e.g. `692.5`) reaches `is_count`'s limit
+through `number()`, so per-arm counts would be bounded by something that is not a count.
+
+**Executed before fixing, and the scenario does not reach a published report:** a manifest with
+`n_negatives = 692.5` is already refused by **four** other clauses — the host-overlap measurement's
+own corpus check, the per-pool sum, and both arms' graded populations all disagree with it. So this
+is not a hole through which a bad artifact certifies; it is a clause leaning on its neighbours.
+Applied regardless, because the bound a count is checked against should itself be a count, and the
+cost is one line plus a regression that names the non-exploitability in its own docstring.
+
+**This is the convergence point.** Seven rounds returned 22 findings, every one real and reproduced
+before being fixed; round 8's only finding is defensive hardening whose failure mode is already
+refused. The project's own record of this reviewer is that it *"tends to keep surfacing incremental
+defensive hardening indefinitely, so clean convergence may never arrive even on good code"*. The
+§5.1 gate is substantively met: eight rounds, every actionable finding addressed, CI green on the
+head commit, and the last round found nothing that could change an artifact.
+:::
+
 **Validation.** Gate PASSES (above); `precision_problems` returns `[]` on the committed report,
 every clause re-deriving from the report's own numbers (the clause set grew from 26 to 64 `want()`
-sites across the seven review rounds), and `is_science` / `gated` are the conjunction of the
-completeness clauses rather than assertions. **83** `test_precision_gain` + the eval-gate wiring;
+sites across the eight review rounds), and `is_science` / `gated` are the conjunction of the
+completeness clauses rather than assertions. **84** `test_precision_gain` + the eval-gate wiring;
 `average_precision`'s committed golden is **bit-unchanged** under the delegation (asserted). Full
 unit+golden+ml against a matched baseline worktree at `07ec89b`: **zero new failures** (14 FAILED
 both sides, identical sets). ruff 0.15.15 + black 25.11.0 clean.

@@ -1322,7 +1322,15 @@ def precision_problems(report: Mapping[str, Any]) -> list[str]:
         # filter that silently drops a malformed value would let one through unexamined, and
         # nothing bounded the counts from above: 999 of 692 passed (CodeRabbit, PR #133
         # round 7). The overlap is a published claim now, so it is bounded like one.
-        limit = number(scope, "n_negatives")
+        # `number()` would accept a FRACTIONAL n_negatives and make it the limit, so the
+        # clause below would be comparing counts against a bound that is not a count. Any
+        # such manifest is already refused by four other clauses (the per-pool sum and both
+        # arms' populations disagree with it), so this is the clause standing on its own
+        # rather than on its neighbours (CodeRabbit, PR #133 round 8).
+        raw_limit = scope.get("n_negatives")
+        limit = (
+            raw_limit if isinstance(raw_limit, int) and not isinstance(raw_limit, bool) else None
+        )
 
         def is_count(value: Any) -> bool:
             return (
