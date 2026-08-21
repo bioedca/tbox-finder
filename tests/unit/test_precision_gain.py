@@ -1181,3 +1181,44 @@ def test_a_negative_with_no_splice_bounds_anywhere_is_refused_not_measured_whole
     items = [{"contig_id": "dec:000", "label": 0}]
     with pytest.raises(SystemExit, match="no splice bounds"):
         mint.host_fold_overlap(contigs, items, {"twin": {"r1"}}, {"r1": "ACGT" * 40}, k=32)
+
+
+@pytest.mark.parametrize(
+    ("phase", "insert"),
+    [(-5, 36), (900, 400), (100, 0), (100, -10), ("x", 36), (None, 36)],
+)
+def test_splice_bounds_outside_the_contig_are_refused_not_clamped(phase, insert):
+    """Python slicing clamps, so a malformed bound would quietly excise the wrong interval
+    and publish an overlap count for a host sequence that never existed."""
+    mint = _minter()
+    contigs = [
+        {"contig_id": "dec:000", "sequence": "ACGT" * 100, "truth_start": None, "truth_end": None}
+    ]
+    items = [{"contig_id": "dec:000", "label": 0, "splice_phase": phase, "locus_length": insert}]
+    with pytest.raises(SystemExit):
+        mint.host_fold_overlap(contigs, items, {"twin": {"r1"}}, {"r1": "ACGT" * 100}, k=32)
+
+
+def test_valid_splice_bounds_are_still_accepted():
+    """The positive control for the refusals above: a well-formed pair does NOT raise."""
+    mint = _minter()
+    flank, insert = "ACGT" * 40, "GGGG" * 9
+    contigs = [
+        {
+            "contig_id": "dec:000",
+            "sequence": flank + insert + flank,
+            "truth_start": None,
+            "truth_end": None,
+        }
+    ]
+    items = [
+        {
+            "contig_id": "dec:000",
+            "label": 0,
+            "splice_phase": len(flank),
+            "locus_length": len(insert),
+        }
+    ]
+    assert mint.host_fold_overlap(contigs, items, {"twin": {"r1"}}, {"r1": flank}, k=32) == {
+        "twin": {"dec:000"}
+    }

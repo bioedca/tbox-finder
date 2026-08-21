@@ -403,7 +403,29 @@ def host_fold_overlap(
                     "portion cannot be isolated; measuring the whole window would count the "
                     "decoy as host DNA"
                 )
-            start, end = int(phase), int(phase) + int(insert)
+            try:
+                start = int(phase)
+                end = start + int(insert)
+            except (TypeError, ValueError) as exc:
+                raise SystemExit(
+                    f"{item['contig_id']}: splice_phase {phase!r} / locus_length {insert!r} "
+                    "are not integers"
+                ) from exc
+        # Python slicing CLAMPS: a negative or overlong bound would quietly excise the wrong
+        # interval and publish an overlap count for a host sequence that does not exist. On
+        # the one function in this file that has already published a wrong number, the bounds
+        # are checked rather than trusted (CodeRabbit, PR #133).
+        try:
+            start, end = int(start), int(end)
+        except (TypeError, ValueError) as exc:
+            raise SystemExit(
+                f"{item['contig_id']}: splice bounds {start!r}..{end!r} are not integers"
+            ) from exc
+        if not 0 <= start < end <= len(sequence):
+            raise SystemExit(
+                f"{item['contig_id']}: splice bounds [{start}, {end}) are outside the "
+                f"{len(sequence)}-nt contig"
+            )
         host = sequence[:start] + sequence[end:]
         for offset in range(len(host) - k + 1):
             owners.setdefault(host[offset : offset + k], set()).add(item["contig_id"])

@@ -7362,6 +7362,13 @@ purely on decoy sequence. Restated in the artifact, the disclosure, the README a
 Two tests pin it, both RED when the fall-back is restored. The item table is **bit-identical**
 across the correction — only `scope.host_pool` moved — and no gate number changed.
 
+The follow-up round on that fix added one more, also real and also cheap: **Python slicing
+clamps**, so a negative or overlong `splice_phase`/`locus_length` would have quietly excised the
+wrong interval and published an overlap count for a host sequence that never existed. Bounds are
+now coerced and required to satisfy `0 <= start < end <= len(sequence)`; six malformed pairs are
+refused and a positive control confirms a well-formed pair still measures. Re-minting under the
+check reproduces **112/96** exactly, so the guard changed nothing but what it forbids.
+
 **This is the convergence point.** Eight rounds returned 24 findings, every one real and reproduced
 before being fixed; round 8's *first* finding is defensive hardening whose failure mode is already
 refused, and its second was a four-round-old thread now closed. The project's own record of this reviewer is that it *"tends to keep surfacing incremental
@@ -7373,7 +7380,7 @@ head commit, and the last round found nothing that could change an artifact.
 **Validation.** Gate PASSES (above); `precision_problems` returns `[]` on the committed report,
 every clause re-deriving from the report's own numbers (the clause set grew from 26 to 64 `want()`
 sites across the eight review rounds), and `is_science` / `gated` are the conjunction of the
-completeness clauses rather than assertions. **86** `test_precision_gain` + the eval-gate wiring;
+completeness clauses rather than assertions. **93** `test_precision_gain` + the eval-gate wiring;
 `average_precision`'s committed golden is **bit-unchanged** under the delegation (asserted). Full
 unit+golden+ml against a matched baseline worktree at `07ec89b`: **zero new failures** (14 FAILED
 both sides, identical sets). ruff 0.15.15 + black 25.11.0 clean.
