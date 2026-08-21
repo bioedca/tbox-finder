@@ -2468,6 +2468,45 @@ def test_the_attention_reason_names_the_backbone_it_is_about() -> None:
         )
         if key != BR.PRODUCTION_BACKBONE:
             assert "NOT separately forward-verified" in reason, reason
+
+        # ⚠ EVERY branch, not the one that happened to be exercised. The first cut named the
+        # arm in two of five reason strings and tested only one of them; the three fallback
+        # branches — the ones an operator reads when it went WRONG — recorded no arm identity
+        # at all ([[fixed-one-of-two-identical-things]]).
+        branches = (
+            dict(
+                sm86_confirmed=False,
+                flash_attn_importable=True,
+                model_supports_flash_attn=True,
+                dtype=LH.TRAIN_DTYPE,
+            ),
+            dict(
+                sm86_confirmed=True,
+                flash_attn_importable=False,
+                model_supports_flash_attn=True,
+                dtype=LH.TRAIN_DTYPE,
+            ),
+            dict(
+                sm86_confirmed=True,
+                flash_attn_importable=True,
+                model_supports_flash_attn=False,
+                dtype=LH.TRAIN_DTYPE,
+            ),
+            dict(
+                sm86_confirmed=True,
+                flash_attn_importable=True,
+                model_supports_flash_attn=True,
+                dtype="float32",
+            ),
+        )
+        seen = set()
+        for kw in branches:
+            backend_b, reason_b = LH.select_attention_backend(backbone=key, **kw)
+            assert backend_b == LH.ATTN_SDPA, kw
+            assert key in reason_b, f"fallback reason omits the arm: {reason_b}"
+            assert other not in reason_b, f"fallback reason names {other}: {reason_b}"
+            seen.add(reason_b)
+        assert len(seen) == len(branches), "two fallback branches share a reason string"
         # ...and the fallback branch too, which is the one an operator reads when it went wrong.
         _, fallback_reason = LH.select_attention_backend(
             model_supports_flash_attn=False, backbone=key, **common

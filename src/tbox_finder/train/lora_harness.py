@@ -351,13 +351,13 @@ def select_attention_backend(
     # recorded reason names the thing an operator would have to fix.
     if not sm86_confirmed:
         return ATTN_SDPA, (
-            "sm_86 not confirmed in the measured kernel-smoke artifact → SDPA fallback "
-            "(PRD §10.3)"
+            f"{backbone}: sm_86 not confirmed in the measured kernel-smoke artifact → SDPA "
+            "fallback (PRD §10.3)"
         )
     if not flash_attn_importable:
         return ATTN_SDPA, (
-            "flash-attn does not import on the sm_86 target → SDPA fallback; pinning "
-            "flash_attention_2 without the wheel raises ImportError (ADR-0002 A2 K1)"
+            f"{backbone}: flash-attn does not import on the sm_86 target → SDPA fallback; "
+            "pinning flash_attention_2 without the wheel raises ImportError (ADR-0002 A2 K1)"
         )
     if not model_supports_flash_attn:
         return ATTN_SDPA, (
@@ -366,7 +366,7 @@ def select_attention_backend(
         )
     if dtype not in FA2_DTYPES:
         return ATTN_SDPA, (
-            f"dtype {dtype!r} is not half-precision; FA-2 kernels accept only "
+            f"{backbone}: dtype {dtype!r} is not half-precision; FA-2 kernels accept only "
             f"{list(FA2_DTYPES)} → SDPA fallback"
         )
     # The forward-verification clause is per-arm because it IS per-arm: ADR-0002 A10 verified
