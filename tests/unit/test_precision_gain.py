@@ -1065,32 +1065,39 @@ def test_the_checker_returns_a_problem_on_a_truncated_payload_and_never_raises(r
     assert checked == len(paths) * 5
 
 
-def test_no_retyped_field_anywhere_can_make_the_checker_raise(report):
-    """The sweep above replaces whole BLOCKS; this one retypes every LEAF.
+def test_no_retyped_node_anywhere_can_make_the_checker_raise(report):
+    """The no-raise contract, swept at full width: EVERY node, not only every leaf.
 
-    Round 4 found the gap between the two: a ``base`` block that is a well-formed mapping but
-    carries a *string* threshold slipped past the block sweep and raised ``TypeError`` inside
-    the ``brackets_base`` comparison. Whether a given leaf is also *caught* is a separate
-    question — many are pure metadata — but none of them may take the validator down.
+    This test was narrowed three times by three review rounds, each finding the gap the
+    previous width left ([[fixed-one-of-two-identical-things]]):
+
+    * round 3 replaced whole top-level BLOCKS — missed a well-formed ``base`` block carrying
+      a *string* threshold;
+    * round 4 retyped every LEAF — but its list branch walked only ``node[:2]``, and an
+      ``int`` with no ``float`` (``10**400``) still passed the ``isinstance`` check;
+    * round 5 widened both — and missed an intermediate ``auprc`` block replaced by a scalar,
+      because a mapping swapped for a string is neither a leaf nor a top-level block.
+
+    So the traversal now yields every path in the payload, interior nodes included, and each
+    is replaced by a scalar, a bool, an unrepresentable int, an empty mapping and an empty
+    list. Whether a given replacement is also *caught* is a separate question — much of the
+    report is metadata no clause reads — but none of them may take the validator down.
     """
 
-    def leaves(node, path=()):
+    def paths(node, path=()):
+        yield path
         if isinstance(node, dict):
             for key, value in node.items():
-                yield from leaves(value, (*path, key))
+                yield from paths(value, (*path, key))
         elif isinstance(node, list):
             for index, value in enumerate(node):
-                yield from leaves(value, (*path, index))
-        else:
-            yield path
+                yield from paths(value, (*path, index))
 
     checked = 0
-    for path in leaves(report):
-        if path[:1] in (("provenance",), ("problems",), ("generated_at_utc",)):
+    for path in paths(report):
+        if not path or path[:1] in (("provenance",), ("problems",), ("generated_at_utc",)):
             continue
-        # 10**400 is an int with no float: `float()` on it raises OverflowError, which the
-        # type check alone does not catch (round 5).
-        for bad in ("x", None, True, -1, 10**400):
+        for bad in ("x", None, True, -1, 10**400, {}, []):
             broken = copy.deepcopy(report)
             node = broken
             for key in path[:-1]:
@@ -1098,4 +1105,4 @@ def test_no_retyped_field_anywhere_can_make_the_checker_raise(report):
             node[path[-1]] = bad
             P.precision_problems(broken)  # must not raise
             checked += 1
-    assert checked > 1_000, f"only {checked} retypings — the sweep stopped finding leaves"
+    assert checked > 4_000, f"only {checked} replacements — the sweep stopped finding nodes"

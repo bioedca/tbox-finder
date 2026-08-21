@@ -7277,9 +7277,34 @@ Both findings are the same lesson one turn apart: a sweep is only as wide as its
 and "it is an int" is not "it is a number". No artifact changed here either.
 :::
 
+::: {.callout-warning}
+## Review round 6 (app, on `93117db`) — 1 finding, and this time the class was closed rather than the instance
+
+⚠ **The automatic review did NOT fire on this commit.** Four consecutive pushes drew one within
+minutes; this one drew none in **30 minutes**, and the green `CodeRabbit` PR check was a *stale
+PR-level status* — `commits/93117db/check-runs` carried **no CodeRabbit run at all**. Judging the
+gate on the check rather than on a review body would have merged this PR unreviewed (§5.1). The
+manual `@coderabbitai review` comment produced a round in ~4 minutes.
+
+**(minor) A prevalence point's `auprc` block replaced by a scalar still raised.** `number()`
+returned `None` correctly, but the diagnostic f-string beside it re-indexed the same block —
+`TypeError: string indices must be integers`. Reproduced for `"x"`, `None`, `[]` and `5`.
+
+Three rounds had now found the same class from three widths, so this time the **sweep** was fixed
+rather than the site. Replacing **every node at every depth** — interior mappings and lists
+included, not only leaves — with `"x"`, `None`, `True`, `-1`, `10**400`, `{}` and `[]` found
+**nine** raising sites, of which round 6 reported one: `arms` not being a mapping of mappings, the
+AUPRC diagnostic above, the prevalence lookup's three unchecked hops, `host_pool`,
+`negatives_by_pool`, the invariance sweep's per-point read, and the annex's `points` list. All
+nine are fixed, and the test now runs the full-width sweep: **5,068 replacements, zero raises**,
+4.5 s. Reverting the one-line round-6 guard turns it RED.
+
+No artifact changed. Gate unchanged.
+:::
+
 **Validation.** Gate PASSES (above); `precision_problems` returns `[]` on the committed report,
 every clause re-deriving from the report's own numbers (the clause set grew from 26 to 62 `want()`
-sites across the five review rounds), and `is_science` / `gated` are the conjunction of the
+sites across the six review rounds), and `is_science` / `gated` are the conjunction of the
 completeness clauses rather than assertions. **78** `test_precision_gain` + the eval-gate wiring;
 `average_precision`'s committed golden is **bit-unchanged** under the delegation (asserted). Full
 unit+golden+ml against a matched baseline worktree at `07ec89b`: **zero new failures** (14 FAILED

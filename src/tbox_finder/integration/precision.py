@@ -1057,7 +1057,7 @@ def precision_problems(report: Mapping[str, Any]) -> list[str]:
             f"the benchmark manifest carries no {key!r}",
         )
     for arm_name, arm in arms.items():
-        if isinstance(arm.get("population"), Mapping):
+        if isinstance(arm, Mapping) and isinstance(arm.get("population"), Mapping):
             for key in ("n_items", "n_positives", "n_negatives", "n_blocks", "ceiling_recall"):
                 want(
                     key in arm["population"],
@@ -1110,8 +1110,7 @@ def precision_problems(report: Mapping[str, Any]) -> list[str]:
             auprc = number(arm.get("auprc"), system)
             want(
                 auprc is not None and (math.isnan(auprc) or 0.0 <= auprc <= 1.0),
-                f"arm {arm_name!r}: {system} AUPRC "
-                f"{(arm.get('auprc') or {}).get(system)!r} is not in [0, 1]",
+                f"arm {arm_name!r}: {system} AUPRC {auprc!r} is not in [0, 1]",
             )
 
         # The per-pool breakdown must account for exactly the false positives the gated
@@ -1137,15 +1136,18 @@ def precision_problems(report: Mapping[str, Any]) -> list[str]:
     # prevalence). Deliberately not from the matched-recall precisions, which are reported.
     key = gated["gated_prevalence_key"]
     # A checker must RETURN a problem on a payload it did not write, never raise: a traceback
-    # from the validator is indistinguishable from a crashed run (the PR #131 finding).
-    if key not in gated.get("prevalence", {}):
+    # from the validator is indistinguishable from a crashed run (the PR #131 finding). Every
+    # hop is shape-checked, not only the last: `prevalence`, the point, and its AUPRC block
+    # can each be a scalar in a payload this function did not produce (round 6).
+    sweep = gated.get("prevalence")
+    if not isinstance(sweep, Mapping) or not isinstance(key, str) or key not in sweep:
         problems.append(
             f"the gated arm names prevalence point {key!r} but carries no such point; the "
             "gated statistic has nowhere to be read from"
         )
         return problems
-    point = gated["prevalence"][key]
-    if "auprc" not in point:
+    point = sweep[key]
+    if not isinstance(point, Mapping) or not isinstance(point.get("auprc"), Mapping):
         problems.append(f"prevalence point {key!r} carries no AUPRC — the gated statistic")
         return problems
     auprc = point["auprc"]
@@ -1159,8 +1161,8 @@ def precision_problems(report: Mapping[str, Any]) -> list[str]:
     )
     want(
         bool(gated["passes"]) == derived,
-        f"the gated arm reports passes={gated['passes']!r}, but its own AUPRCs "
-        f"({auprc['two_stage']!r} vs {auprc['stage1_only']!r}) re-derive to {derived!r}",
+        f"the gated arm reports passes={gated.get('passes')!r}, but its own AUPRCs "
+        f"({two!r} vs {one!r}) re-derive to {derived!r}",
     )
     want(
         report["gate"].get("statistic") == "auprc_at_pinned_prevalence",
@@ -1302,7 +1304,7 @@ def precision_problems(report: Mapping[str, Any]) -> list[str]:
     # A selection RULE is not a measurement of what the drawn windows contain. The host pool
     # published "clean for BOTH Stage-1 checkpoints" for a benchmark in which 115 of 692
     # negatives carry host DNA the production arm trained on (PR #133 round 2).
-    host_pool = scope.get("host_pool", {})
+    host_pool = scope.get("host_pool") if isinstance(scope.get("host_pool"), Mapping) else {}
     overlap = host_pool.get("overlap_with_training_folds")
     want(
         isinstance(overlap, Mapping) and isinstance(overlap.get("by_arm"), Mapping),
@@ -1336,7 +1338,11 @@ def precision_problems(report: Mapping[str, Any]) -> list[str]:
             f"negatives, not this benchmark's {scope['n_negatives']!r}",
         )
 
-    by_pool = scope.get("negatives_by_pool") or {}
+    by_pool = (
+        scope.get("negatives_by_pool")
+        if isinstance(scope.get("negatives_by_pool"), Mapping)
+        else {}
+    )
     pool_total = sum(value for value in by_pool.values() if isinstance(value, (int, float)))
     want(
         pool_total == scope.get("n_negatives"),
@@ -1368,8 +1374,8 @@ def precision_problems(report: Mapping[str, Any]) -> list[str]:
 
     # Prevalence-invariance, re-derived from the sweep rather than asserted in prose.
     verdicts = {
-        name: bool(point["two_stage_beats_stage1_only"])
-        for name, point in gated["prevalence"].items()
+        name: bool(node.get("two_stage_beats_stage1_only")) if isinstance(node, Mapping) else None
+        for name, node in sweep.items()
     }
     want(
         len(set(verdicts.values())) == 1,
@@ -1379,9 +1385,9 @@ def precision_problems(report: Mapping[str, Any]) -> list[str]:
     )
     # AUPRC is NOT provably lambda-invariant (two PR curves can cross), so its sweep is
     # checked for presence and reported, never asserted invariant.
-    for name, node in gated["prevalence"].items():
+    for name, node in sweep.items():
         want(
-            "auprc" in node and "auprc_gain_pp" in node,
+            isinstance(node, Mapping) and "auprc" in node and "auprc_gain_pp" in node,
             f"prevalence point {name!r} carries no AUPRC; the gated statistic must be "
             "readable at every swept prevalence, not only at the pinned one",
         )
@@ -1393,11 +1399,17 @@ def precision_problems(report: Mapping[str, Any]) -> list[str]:
 
     sensitivity = report.get("stage1_threshold_sensitivity")
     if sensitivity is not None and not isinstance(sensitivity, Mapping):
+        # falls through to the refusal below
         problems.append(
             "stage1_threshold_sensitivity is present but is not a block; it cannot be read"
         )
     elif sensitivity is not None:
-        rows = [row for row in (sensitivity.get("points") or []) if isinstance(row, Mapping)]
+        points_block = sensitivity.get("points")
+        rows = (
+            [row for row in points_block if isinstance(row, Mapping)]
+            if isinstance(points_block, list)
+            else []
+        )
         base_node = sensitivity.get("base") if isinstance(sensitivity.get("base"), Mapping) else {}
         want(
             number(sensitivity, "n_points") is not None and sensitivity["n_points"] >= 2,
