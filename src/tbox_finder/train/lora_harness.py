@@ -932,6 +932,20 @@ def validate_report(report: Mapping[str, Any]) -> list[str]:
     if bb.get("revision") != REVISION:
         errs.append("backbone.revision != pinned REVISION (the parity-confirmed checkpoint)")
 
+    # The producer refuses this combination (see `build_report`), but a report is also read
+    # from disk — hand-edited, regenerated, or written by an older producer — and a validator
+    # that trusts its producer is not a validator. Applied to BOTH validators in this module,
+    # because the P1-16 smoke report hardcodes the same backbone block for the same reason
+    # ([[fixed-one-of-two-identical-things]]). Absent `wrap.backbone` is fine: the committed
+    # artifacts predate the block, and "unrecorded" is not "contradicted".
+    wrap_blk = report.get("wrap")
+    wrap_bb = wrap_blk.get("backbone") if isinstance(wrap_blk, Mapping) else None
+    if isinstance(wrap_bb, Mapping) and wrap_bb.get("repo_id") not in (None, REPO_ID):
+        errs.append(
+            "wrap.backbone.repo_id != pinned REPO_ID — the report certifies the production "
+            "checkpoint but the wrap adapted a different backbone (ADR-0002 A15)"
+        )
+
     # --- the PRD §10.3 LoRA contract: the report may not record anything but the pins ---
     lora = report["lora"]
     for key, want in (
@@ -1184,6 +1198,24 @@ def build_report(
         "attention_backend_recorded": bool(attn_backend) and bool(attn_reason),
     }
     gate["overall_pass"] = all(gate.values())
+
+    # ⚠ A P1-15 record is a statement ABOUT RiNALMo: the `backbone` block below is hardcoded
+    # from the module pins, `parity_confirmed: True` included, and `validate_report` asserts
+    # it. Since A15 the wrap can legitimately have adapted a different backbone — and without
+    # this refusal `build_peft_model(backbone="rnafm")` followed by `build_report` produced a
+    # report claiming the parity-confirmed checkpoint while `wrap.backbone.key` said `rnafm`,
+    # with `validate_report` returning no errors. The contradiction was recorded and never
+    # graded: the "advertises what it did not load" class these guards exist against. Refuse
+    # at the producer rather than describe it.
+    wrap_backbone = wrap_info.get("backbone")
+    wrap_key = wrap_backbone.get("key") if isinstance(wrap_backbone, Mapping) else None
+    if wrap_key is not None and wrap_key != PRODUCTION_BACKBONE:
+        raise ValueError(
+            f"this report's backbone block is the production pin ({REPO_ID} @ {REVISION}, "
+            f"parity_confirmed) but the wrap adapted backbone {wrap_key!r}. A P1-15 record "
+            "is a statement about RiNALMo; a comparator wrap needs its own report shape "
+            "(ADR-0002 A15), not this one."
+        )
 
     report = {
         "schema_version": SCHEMA_VERSION,
@@ -1919,6 +1951,19 @@ def build_smoke_report(
     }
     gate["overall_pass"] = all(gate.values())
 
+    # Same binding as `build_report`: this record hardcodes the production backbone block
+    # (parity_confirmed included), so it may not be written for a wrap that adapted another
+    # one. The P1-16 smoke carries the identical shape and therefore the identical hole
+    # ([[fixed-one-of-two-identical-things]]).
+    wrap_backbone = wrap_info.get("backbone")
+    wrap_key = wrap_backbone.get("key") if isinstance(wrap_backbone, Mapping) else None
+    if wrap_key is not None and wrap_key != PRODUCTION_BACKBONE:
+        raise ValueError(
+            f"this P1-16 smoke record's backbone block is the production pin ({REPO_ID} @ "
+            f"{REVISION}, parity_confirmed) but the wrap adapted backbone {wrap_key!r} "
+            "(ADR-0002 A15)."
+        )
+
     report = {
         "schema_version": SMOKE_SCHEMA_VERSION,
         "step": SMOKE_STEP,
@@ -2008,6 +2053,20 @@ def validate_smoke_report(report: Mapping[str, Any]) -> list[str]:
         errs.append("backbone.repo_id != pinned REPO_ID")
     if bb.get("revision") != REVISION:
         errs.append("backbone.revision != pinned REVISION (the parity-confirmed checkpoint)")
+
+    # The producer refuses this combination (see `build_report`), but a report is also read
+    # from disk — hand-edited, regenerated, or written by an older producer — and a validator
+    # that trusts its producer is not a validator. Applied to BOTH validators in this module,
+    # because the P1-16 smoke report hardcodes the same backbone block for the same reason
+    # ([[fixed-one-of-two-identical-things]]). Absent `wrap.backbone` is fine: the committed
+    # artifacts predate the block, and "unrecorded" is not "contradicted".
+    wrap_blk = report.get("wrap")
+    wrap_bb = wrap_blk.get("backbone") if isinstance(wrap_blk, Mapping) else None
+    if isinstance(wrap_bb, Mapping) and wrap_bb.get("repo_id") not in (None, REPO_ID):
+        errs.append(
+            "wrap.backbone.repo_id != pinned REPO_ID — the report certifies the production "
+            "checkpoint but the wrap adapted a different backbone (ADR-0002 A15)"
+        )
 
     # --- the §10.3 contract the VRAM claim is made under -------------------------------- #
     lora = report["lora"]

@@ -75,6 +75,10 @@
 #            rsync -avzP data/processed/stage2_dataset.parquet two:~/tbox-finder/data/processed/
 #          src/tbox_finder/stage2/head_vocab.json is git-tracked and rides the checkout.
 # SUBMIT:  from the repo root so relative --output/--error resolve. SYNC FIRST, SUBMIT SECOND.
+#          ⚠ Slurm opens --output/--error BEFORE this script runs, so `reports/p3/sweep_rnafm/`
+#          must already exist on the node — the `mkdir -p "$OUT_DIR"` below is too late and a
+#          fresh checkout would simply lose the job's own logs. The directory is therefore
+#          COMMITTED (its .gitkeep says so); the mkdir stays as a belt-and-braces no-op.
 #            ssh two 'bash -lc "cd ~/tbox-finder && git fetch origin && \
 #              git checkout p3-17-rnafm-comparator && git reset --hard origin/p3-17-rnafm-comparator"'
 #            ssh two 'bash -lc "cd ~/tbox-finder && sbatch slurm/p3/rnafm_stage2_finetune.sbatch"'
@@ -130,6 +134,7 @@ REPORT="$OUT_DIR/${KEY}.json"
 SIZING_REPORT="reports/p3/stage2_rnafm_sizing.json"
 SCORES="reports/p3/stage2_scores_rnafm.json"
 SCORES_LOO="reports/p3/stage2_scores_loo_rnafm.json"
+EVAL_REPORT="reports/p3/stage2_rnafm_eval.json"
 CKPT_ROOT="data/processed/checkpoints/stage2_rnafm"
 CKPT_DIR="$CKPT_ROOT/${KEY}"
 DONE="$OUT_DIR/rnafm_stage2.DONE"
@@ -213,7 +218,7 @@ import importlib.metadata as md
 import sys
 v = md.version("multimolecule")
 print(f"multimolecule={v}")
-if v.split(".")[:2] < ["0", "2"]:
+if tuple(int(p) for p in v.split(".")[:2]) < (0, 2):
     sys.exit(
         f"multimolecule {v} is the ml-rna pin and CANNOT load multimolecule/rnafm "
         "(configuration_rnafm demands vocab_size==26; the checkpoint declares 28). "
@@ -454,14 +459,16 @@ fi
 echo "── scoring (in-distribution) ──"
 PYTHONPATH=src python -m tbox_finder.stage2.eval \
   --checkpoint-root "$CKPT_ROOT" --sweep-dir "$OUT_DIR" \
-  --scores "$SCORES" --report "reports/p3/stage2_rnafm_eval.json"
+  --scores "$SCORES" --report "$EVAL_REPORT"
 
 # ── LEG (4) leave-clade-out posteriors — the number P3-18's condition (c) reads ──
 echo "── scoring (leave-clade-out) ──"
 PYTHONPATH=src python -m tbox_finder.calib.gate2 score-loo \
   --checkpoint-root "$CKPT_ROOT" --sweep-dir "$OUT_DIR" --out "$SCORES_LOO"
 
-for f in "$SCORES" "$SCORES_LOO"; do
+# Every artifact the §9.3 VERIFY block above promises — including leg (3)'s own report, which
+# an exit-0 run could otherwise fail to write while the marker still went green.
+for f in "$SCORES" "$SCORES_LOO" "$EVAL_REPORT"; do
   [ -s "$f" ] || { echo "RNAFM_SCORE_FAIL: $f was not written." >&2; exit 1; }
 done
 

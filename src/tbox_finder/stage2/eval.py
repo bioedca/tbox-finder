@@ -67,6 +67,7 @@ from tbox_finder import metrics as M
 from tbox_finder import power as PW
 from tbox_finder import provenance as PROV
 from tbox_finder.calib import recalibrate as R
+from tbox_finder.models import rna_backbone_registry as BR
 from tbox_finder.stage2 import train as T
 
 __all__ = [
@@ -1344,6 +1345,66 @@ def _normalise_adapter_key(key: str) -> str:
     return _ADAPTER_NAME_RE.sub(".", key)
 
 
+def resolve_checkpoint_backbone(
+    recorded_base: str | None,
+    *,
+    requested: str | None = None,
+    where: str = "<checkpoint>",
+) -> str:
+    """Which pinned backbone a LoRA checkpoint belongs to — from its OWN evidence.
+
+    A LoRA checkpoint stores adapters and heads and **not the backbone**, so the weights it
+    scores with are half read off disk and half whatever base the process loaded. Pointing it
+    at the wrong one is not an error anyone notices at runtime: the shapes match, the adapter
+    applies cleanly, and the logits are simply somebody else's.
+
+    Since ADR-0002 A15 there are TWO pinned Stage-2 backbones, so this cannot compare against a
+    single constant. The answer is **re-derived from ``base_model_name_or_path``** against the
+    closed allow-list, and every other route raises:
+
+    * a recorded base outside the allow-list — the adapter names a backbone this repo does not
+      pin, so nothing here can vouch for it;
+    * a ``requested`` key contradicting what the checkpoint records — being *asked* for the
+      wrong base is the same defect as inheriting it;
+    * **nothing recorded and nothing requested.** The first cut defaulted to production here,
+      directly contradicting the paragraph above it — which is the tell that it was wrong. Two
+      things follow from such a default: the loader silently picks RiNALMo for a checkpoint
+      that never declared its base, and the record then reports ``rinalmo-giga`` in exactly the
+      shape a genuinely re-derived value has, so no consumer downstream can separate an
+      assumption from evidence. A 640-vs-1280 mismatch would *usually* surface as a shape
+      error, but "usually" is not the contract and the record is wrong either way.
+
+    ``requested`` with nothing recorded is allowed and is the escape hatch for a checkpoint
+    predating the field: a human named the arm, and the record says a human did.
+
+    Pure and torch-free on purpose — this is the decision, and it is unit-testable without a
+    2.5 GB checkpoint or a peft install ([[artifact-pinning-test-cannot-see-the-code]]).
+    """
+    derived = BR.backbone_for_repo_id(recorded_base) if recorded_base else None
+    if recorded_base and derived is None:
+        raise ValueError(
+            f"{where} was trained against base model {recorded_base!r}, which is not in the "
+            f"ADR-0002 A15 allow-list {BR.BACKBONE_KEYS}; the adapter would be applied to a "
+            "backbone this repo does not pin"
+        )
+    if requested is not None and derived is not None and requested != derived.key:
+        raise ValueError(
+            f"{where} records base model {recorded_base!r} (backbone {derived.key!r}) but "
+            f"backbone={requested!r} was requested; the adapter would be applied to a backbone "
+            "it never saw"
+        )
+    if derived is not None:
+        return derived.key
+    if requested is not None:
+        return BR.resolve_backbone(requested).key
+    raise ValueError(
+        f"{where} records no base_model_name_or_path, so which backbone these adapters saw "
+        f"cannot be re-derived from the checkpoint. Pass backbone=<key> explicitly (one of "
+        f"{BR.BACKBONE_KEYS}) rather than letting it default — a guessed base is applied to "
+        "weights it never saw and then reported as if it had been measured."
+    )
+
+
 def load_stage2_checkpoint(
     checkpoint_dir: str | Path,
     *,
@@ -1378,7 +1439,6 @@ def load_stage2_checkpoint(
     from peft import PeftModel  # lazy
     from safetensors.torch import load_file  # lazy
 
-    from tbox_finder.models import rna_backbone_registry as BR
     from tbox_finder.stage2 import heads as H
     from tbox_finder.stage2.model import DEFAULT_PAIRING_PROJ_DIM, Stage2Model
     from tbox_finder.train import lora_harness as LH
@@ -1401,29 +1461,10 @@ def load_stage2_checkpoint(
     # this process loaded. Pointing it at a different backbone is not an error anyone
     # would notice at runtime — the shapes match, the adapter applies cleanly, and the
     # logits are simply somebody else's.
-    # ⚠ Since ADR-0002 A15 there are TWO pinned Stage-2 backbones, so this cannot compare
-    # against a single constant any more. The backbone is **re-derived from the checkpoint's
-    # own evidence** — the base model its adapter_config records — against the closed
-    # allow-list, rather than defaulting a missing axis to "production" on faith
-    # ([[gate-must-bind-to-upstream-evidence]]). A recorded base outside the allow-list still
-    # raises, and so does a `backbone=` argument that contradicts what the checkpoint says:
-    # being *asked* for the wrong base is the same defect as inheriting it.
     recorded_base = adapter_config.get("base_model_name_or_path")
-    derived = BR.backbone_for_repo_id(recorded_base) if recorded_base else None
-    if recorded_base and derived is None:
-        raise ValueError(
-            f"{adapter_dir} was trained against base model {recorded_base!r}, which is not in "
-            f"the ADR-0002 A15 allow-list {BR.BACKBONE_KEYS}; the adapter would be applied to "
-            "a backbone this repo does not pin"
-        )
-    if backbone is not None and derived is not None and backbone != derived.key:
-        raise ValueError(
-            f"{adapter_dir} records base model {recorded_base!r} (backbone {derived.key!r}) "
-            f"but backbone={backbone!r} was requested; the adapter would be applied to a "
-            "backbone it never saw"
-        )
-    resolved_backbone = derived.key if derived is not None else (backbone or BR.PRODUCTION_BACKBONE)
-
+    resolved_backbone = resolve_checkpoint_backbone(
+        recorded_base, requested=backbone, where=str(adapter_dir)
+    )
     resolved_dtype = dtype or LH.TRAIN_DTYPE
     # The revision that will actually be loaded, resolved from the SAME spec the loader uses
     # rather than from a module constant — otherwise a comparator checkpoint's record would
