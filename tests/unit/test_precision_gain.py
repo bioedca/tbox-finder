@@ -1079,7 +1079,7 @@ def test_no_retyped_field_anywhere_can_make_the_checker_raise(report):
             for key, value in node.items():
                 yield from leaves(value, (*path, key))
         elif isinstance(node, list):
-            for index, value in enumerate(node[:2]):
+            for index, value in enumerate(node):
                 yield from leaves(value, (*path, index))
         else:
             yield path
@@ -1088,7 +1088,9 @@ def test_no_retyped_field_anywhere_can_make_the_checker_raise(report):
     for path in leaves(report):
         if path[:1] in (("provenance",), ("problems",), ("generated_at_utc",)):
             continue
-        for bad in ("x", None, True, -1):
+        # 10**400 is an int with no float: `float()` on it raises OverflowError, which the
+        # type check alone does not catch (round 5).
+        for bad in ("x", None, True, -1, 10**400):
             broken = copy.deepcopy(report)
             node = broken
             for key in path[:-1]:

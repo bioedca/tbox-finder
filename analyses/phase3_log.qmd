@@ -7254,14 +7254,32 @@ retyping **every leaf** of the committed report to `"x"`, `None`, `True` and `-1
 raising paths across **six** clause sites, all of them **pre-dating** this PR — `n_positives +
 n_negatives`, `n_blocks > 1`, `ceiling_recall`, `math.isnan(auprc)`, and the two `sum(pool[…])`
 per-pool totals. Every one now reads through `number()`, which returns `None` for a string, a
-bool or a missing key. The sweep is a test: **1,753 retypings, zero raises**, and reverting the
-one-line round-4 fix turns it RED. No artifact changed in this round — the clauses got stricter,
-the report did not move.
+bool or a missing key. The sweep is a test, and reverting the one-line round-4 fix turns it RED.
+No artifact changed in this round — the clauses got stricter, the report did not move.
+:::
+
+::: {.callout-warning}
+## Review round 5 (app, automatic on `543307b`) — 2 findings, both real; the sweep had a hole and a blind spot
+
+**(minor) `float()` on a large enough int raises `OverflowError`.** A Python `int` has no width
+limit, so `10**400` passes the `isinstance(int)` check and then takes `number()` down —
+`OverflowError: int too large to convert to float`. The type check alone was never sufficient.
+`number()` now catches it and returns `None`; `close()` was routed through `number()` so the
+handling lives in one place rather than two.
+
+**(minor) The all-leaf sweep was not all-leaf.** Its list branch iterated `node[:2]`, a speed
+shortcut of mine, so later `recall_grid` entries, later disclosures and later sensitivity rows
+were never retyped — a coverage claim the test's own docstring made and did not keep. `[:2]`
+removed and `10**400` added to the retyping set: **2,880 retypings, zero raises**, at 2.6 s.
+Reverting the overflow guard turns it RED.
+
+Both findings are the same lesson one turn apart: a sweep is only as wide as its own traversal,
+and "it is an int" is not "it is a number". No artifact changed here either.
 :::
 
 **Validation.** Gate PASSES (above); `precision_problems` returns `[]` on the committed report,
 every clause re-deriving from the report's own numbers (the clause set grew from 26 to 62 `want()`
-sites across the four review rounds), and `is_science` / `gated` are the conjunction of the
+sites across the five review rounds), and `is_science` / `gated` are the conjunction of the
 completeness clauses rather than assertions. **78** `test_precision_gain` + the eval-gate wiring;
 `average_precision`'s committed golden is **bit-unchanged** under the delegation (asserted). Full
 unit+golden+ml against a matched baseline worktree at `07ec89b`: **zero new failures** (14 FAILED

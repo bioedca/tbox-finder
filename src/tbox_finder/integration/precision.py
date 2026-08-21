@@ -993,7 +993,13 @@ def precision_problems(report: Mapping[str, Any]) -> list[str]:
             node = node.get(key)
         if isinstance(node, bool) or not isinstance(node, (int, float)):
             return None
-        return float(node)
+        try:
+            return float(node)
+        except OverflowError:
+            # A Python int has no width limit; `float()` on one past 1e308 raises, which
+            # would take the validator down on a value that is simply not a rate or a count
+            # (CodeRabbit, PR #133 round 5).
+            return None
 
     for key in ("schema_version", "step", "generated_by", "adr", "prd", "gate", "arms"):
         want(key in report, f"missing top-level key {key!r}")
@@ -1186,11 +1192,11 @@ def precision_problems(report: Mapping[str, Any]) -> list[str]:
     # clause set would return [] ([[gate-clauses-need-re-derivation]]). A magnitude that no
     # clause recomputes is a fabricated value the report presents as a measured one.
     def close(observed: Any, derived: float | None) -> bool:
-        if derived is None or isinstance(observed, bool):
+        # Through `number`, which is the one place the int-with-no-float case is handled.
+        value = number({"v": observed}, "v")
+        if derived is None or value is None:
             return False
-        if not isinstance(observed, (int, float)):
-            return False
-        return math.isclose(float(observed), derived, rel_tol=1e-9, abs_tol=1e-9)
+        return math.isclose(value, derived, rel_tol=1e-9, abs_tol=1e-9)
 
     def gain_of(node: Any) -> float | None:
         two = number(node, "auprc", "two_stage")
