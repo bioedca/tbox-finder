@@ -2269,6 +2269,13 @@ def test_the_env_guard_compares_versions_as_numbers_not_strings() -> None:
     code = _sbatch_code(_SBATCH_RNAFM)
     predicate = re.search(r"^if (tuple\(int\(p\).+?) < \(0, 2\):$", code, re.MULTILINE)
     assert predicate, "the env guard's version predicate is not the integer-tuple form"
+    # ⚠ Evaluate the SBATCH's OWN captured expression. The first cut re-implemented the
+    # predicate here and never used `predicate.group(1)`, so the loop asserted that this test
+    # file's copy behaves as written — true regardless of what the launcher contains, and the
+    # exact opposite of what the docstring claims. The only real coupling was the regex
+    # spelling, which is a weaker check than the one being advertised
+    # ([[artifact-pinning-test-cannot-see-the-code]]).
+    expr = f"({predicate.group(1)}) < (0, 2)"
     for version, want_reject in (
         ("0.1.0", True),
         ("0.0.9", True),
@@ -2276,8 +2283,8 @@ def test_the_env_guard_compares_versions_as_numbers_not_strings() -> None:
         ("0.10.0", False),
         ("1.0.0", False),
     ):
-        parts = tuple(int(p) for p in version.split(".")[:2])
-        assert (parts < (0, 2)) is want_reject, version
+        # eval of a string this repo's own sbatch supplied, captured two lines above.
+        assert eval(expr, {"v": version}) is want_reject, version  # noqa: S307
 
 
 def test_the_DONE_marker_checks_every_artifact_the_verify_block_promises() -> None:
