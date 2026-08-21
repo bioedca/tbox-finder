@@ -2473,38 +2473,59 @@ def test_the_attention_reason_names_the_backbone_it_is_about() -> None:
         # arm in two of five reason strings and tested only one of them; the three fallback
         # branches — the ones an operator reads when it went WRONG — recorded no arm identity
         # at all ([[fixed-one-of-two-identical-things]]).
+        # Each branch is paired with the fragment its OWN condition must produce. Distinctness
+        # alone catches a COLLAPSE but not a SWAP: four messages can stay unique and correctly
+        # named while pointing an operator at the wrong cause — "flash-attn does not import"
+        # when the real problem is unconfirmed sm_86.
+        # ([[symmetric-count-fixture-blind-to-inversion]])
         branches = (
-            dict(
-                sm86_confirmed=False,
-                flash_attn_importable=True,
-                model_supports_flash_attn=True,
-                dtype=LH.TRAIN_DTYPE,
+            (
+                dict(
+                    sm86_confirmed=False,
+                    flash_attn_importable=True,
+                    model_supports_flash_attn=True,
+                    dtype=LH.TRAIN_DTYPE,
+                ),
+                "sm_86 not confirmed",
             ),
-            dict(
-                sm86_confirmed=True,
-                flash_attn_importable=False,
-                model_supports_flash_attn=True,
-                dtype=LH.TRAIN_DTYPE,
+            (
+                dict(
+                    sm86_confirmed=True,
+                    flash_attn_importable=False,
+                    model_supports_flash_attn=True,
+                    dtype=LH.TRAIN_DTYPE,
+                ),
+                "flash-attn does not import",
             ),
-            dict(
-                sm86_confirmed=True,
-                flash_attn_importable=True,
-                model_supports_flash_attn=False,
-                dtype=LH.TRAIN_DTYPE,
+            (
+                dict(
+                    sm86_confirmed=True,
+                    flash_attn_importable=True,
+                    model_supports_flash_attn=False,
+                    dtype=LH.TRAIN_DTYPE,
+                ),
+                "do not advertise flash-attn support",
             ),
-            dict(
-                sm86_confirmed=True,
-                flash_attn_importable=True,
-                model_supports_flash_attn=True,
-                dtype="float32",
+            (
+                dict(
+                    sm86_confirmed=True,
+                    flash_attn_importable=True,
+                    model_supports_flash_attn=True,
+                    dtype="float32",
+                ),
+                "is not half-precision",
             ),
         )
         seen = set()
-        for kw in branches:
+        for kw, expected_fragment in branches:
             backend_b, reason_b = LH.select_attention_backend(backbone=key, **kw)
             assert backend_b == LH.ATTN_SDPA, kw
             assert key in reason_b, f"fallback reason omits the arm: {reason_b}"
             assert other not in reason_b, f"fallback reason names {other}: {reason_b}"
+            assert expected_fragment in reason_b, (
+                f"branch {kw} produced a reason that does not name its own cause "
+                f"({expected_fragment!r} absent): {reason_b}"
+            )
             seen.add(reason_b)
         assert len(seen) == len(branches), "two fallback branches share a reason string"
         # ...and the fallback branch too, which is the one an operator reads when it went wrong.
