@@ -81,8 +81,10 @@ __all__ = [
     "SPECIFIER_CODON_NT",
     "specifier_exact_codon_detection",
     "average_precision",
+    "average_precision_reweighted",
     "precision_recall_at_threshold",
     "baseline_operating_point",
+    "precision_at_matched_recall",
     "recall_at_matched_precision",
     "recall_gap_pp",
     "gate1_recall_bar",
@@ -374,18 +376,28 @@ def specifier_exact_codon_detection(
 # --------------------------------------------------------------------------- #
 # Detection metrics: AUPRC + recall @ matched precision (GATE-1)
 # --------------------------------------------------------------------------- #
-def average_precision(y_true: Sequence[int], y_score: Sequence[float]) -> float:
-    """Average precision (AUPRC), the **step** estimator ``AP = Σ_n (R_n − R_{n−1}) P_n``
-    — identical to ``sklearn.metrics.average_precision_score`` (verified in
-    ``tests/ml/test_eval_gate.py`` against the pinned scikit-learn 1.9.0). Not
-    trapezoid-interpolated and **not** AUROC (PRD §2; ADR-0005 D17). ``y_true`` is
-    0/1 (1 = positive). NaN when there are no positives.
+def average_precision_reweighted(
+    y_true: Sequence[int], y_score: Sequence[float], *, decoy_weight: float = 1.0
+) -> float:
+    """Average precision with each sampled negative standing for ``decoy_weight``
+    population negatives: ``AP = Σ_n (R_n − R_{n−1}) · tp_n / (tp_n + w·fp_n)``.
 
-    Tied scores are grouped at one threshold (as scikit-learn does), so the point is
-    emitted once per distinct score with cumulative TP/FP through the tie group.
+    ``decoy_weight = 1.0`` is exactly :func:`average_precision` — the arithmetic is
+    identical (``1.0 * fp == fp`` in IEEE 754), which is why that function delegates here
+    rather than keeping a second copy ([[promote-dont-duplicate-is-a-correctness-rule]]).
+
+    **Why a weight at all.** ADR-0005 D7 pins the closed-benchmark decoy prevalence at
+    100 : 1 and asks for a 10 : 1 → 10⁴ : 1 sweep, but no benchmark in this repo physically
+    holds 100 decoys per positive. Reweighting is how a PR curve is read at a prevalence the
+    sample does not have. ⚠ Unlike precision at a *matched recall* — where the sign of a
+    two-system difference is provably weight-invariant — two PR **curves** can cross, so the
+    ordering of two AP values is **not** guaranteed invariant under ``decoy_weight``. It is
+    therefore reported across the sweep and never assumed.
     """
     if len(y_true) != len(y_score):
         raise ValueError("y_true and y_score must be the same length")
+    if decoy_weight <= 0 or math.isnan(decoy_weight):
+        raise ValueError(f"decoy_weight must be positive, got {decoy_weight!r}")
     n_pos = sum(1 for y in y_true if y == 1)
     if n_pos == 0:
         return float("nan")
@@ -406,12 +418,28 @@ def average_precision(y_true: Sequence[int], y_score: Sequence[float]) -> float:
             else:
                 fp += 1
             j += 1
-        precision = tp / (tp + fp)
+        precision = tp / (tp + decoy_weight * fp)
         recall = tp / n_pos
         ap += (recall - prev_recall) * precision
         prev_recall = recall
         i = j
     return ap
+
+
+def average_precision(y_true: Sequence[int], y_score: Sequence[float]) -> float:
+    """Average precision (AUPRC), the **step** estimator ``AP = Σ_n (R_n − R_{n−1}) P_n``
+    — identical to ``sklearn.metrics.average_precision_score`` (verified in
+    ``tests/ml/test_eval_gate.py`` against the pinned scikit-learn 1.9.0). Not
+    trapezoid-interpolated and **not** AUROC (PRD §2; ADR-0005 D17). ``y_true`` is
+    0/1 (1 = positive). NaN when there are no positives.
+
+    Tied scores are grouped at one threshold (as scikit-learn does), so the point is
+    emitted once per distinct score with cumulative TP/FP through the tie group.
+
+    Delegates to :func:`average_precision_reweighted` at unit weight, so there is one
+    implementation to fix; no committed AP moves (``1.0 * fp`` is exactly ``fp``).
+    """
+    return average_precision_reweighted(y_true, y_score, decoy_weight=1.0)
 
 
 def precision_recall_at_threshold(
@@ -462,6 +490,49 @@ def recall_at_matched_precision(
     for t in sorted(set(y_score), reverse=True):
         p, r = precision_recall_at_threshold(y_true, y_score, t)
         if not math.isnan(p) and p >= target_precision and r >= best["recall"]:
+            best = {"threshold": t, "precision": p, "recall": r, "matched": True}
+    return best
+
+
+def precision_at_matched_recall(
+    y_true: Sequence[int],
+    y_score: Sequence[float],
+    target_recall: float,
+    *,
+    candidates: Sequence[float] | None = None,
+) -> dict:
+    """Model precision at **matched recall** — the mirror of
+    :func:`recall_at_matched_precision`, and the P3-exit quantity (PRD §18.1: *"Two-stage
+    beats Stage-1-only precision"*). The maximum precision over all score thresholds whose
+    recall ``>= target_recall``. Returns ``{threshold, precision, recall, matched}``;
+    ``matched`` is False (**precision 0.0**, recall NaN) when no threshold reaches the
+    target recall, so an unreachable arm can never win a ``>`` comparison — the same
+    fail-closed shape as :func:`gate1_recall_bar` (§10.3 withhold-don't-emit).
+
+    ``candidates`` restricts the thresholds swept. Two systems compared at matched recall
+    must be swept over *their own* reachable operating points: an item the shared
+    candidate-generation stage never emitted cannot be called by either re-ranker at any
+    threshold, so its sentinel score must not become a threshold that calls it. Passing the
+    reachable scores explicitly is how that stays a caller's declaration rather than a
+    convention about sentinel values. Default: every distinct score.
+
+    **Prevalence-invariance (why the P3 gate does not depend on the ADR-0005 D7 100:1
+    pin).** Under a reweighting of the negatives by any ``lambda > 0`` the precision of a
+    threshold becomes ``tp / (tp + lambda*fp)``, which is monotone in ``fp/tp`` for every
+    ``lambda`` — so the arg-max threshold this function selects, and the sign of the
+    difference between two arms selected this way, are both independent of ``lambda``.
+    The *magnitude* moves with prevalence; the verdict does not.
+    """
+    best = {
+        "threshold": None,
+        "precision": 0.0,
+        "recall": float("nan"),
+        "matched": False,
+    }
+    pool = y_score if candidates is None else candidates
+    for t in sorted(set(pool), reverse=True):
+        p, r = precision_recall_at_threshold(y_true, y_score, t)
+        if not math.isnan(r) and r >= target_recall and p >= best["precision"]:
             best = {"threshold": t, "precision": p, "recall": r, "matched": True}
     return best
 

@@ -8,8 +8,9 @@ per-nucleotide T-box structural-element annotations with **calibrated**
 confidence. The scientific value is defensible, non-circular discovery, so
 data-leakage control, calibration, and orthogonal validation are first-class.
 
-> **Status:** **Phase 2 — Stage-1 training: complete.** Next: Phase 3 (Stage-2
-> re-ranker + integration). Methodology decisions are pinned in
+> **Status:** **Phase 3 — Stage-2 + integration: complete.** Next: Phase 4
+> (leave-clade-out + synthetic-divergence benchmarking vs `cmsearch`; GATE-1).
+> Methodology decisions are pinned in
 > `docs/decisions/` (ADRs); a Phase-2 model-card draft is at
 > [`docs/model_card.md`](docs/model_card.md), and the released model/dataset
 > cards will document intended use, splits, calibration, and limitations.
@@ -86,6 +87,32 @@ data-leakage control, calibration, and orthogonal validation are first-class.
   results, and not the gated statistic. Phase 2 ships a trained segmenter and one passing
   method gate; it ships no discovery result, no calibrated output, and no evidence about
   novel lineages.*
+
+
+- **Phase 3 — Stage-2 + integration (2026-08-13).** **Both halves of the P3 exit gate
+  pass.** *Calibration:* the RiNALMo re-ranker's in-distribution ECE is **0.005662**
+  against a pre-registered **≤ 0.05** (GATE-2's P3 half), graded on the temperature-scaled
+  posterior before the deployment prior-shift, with a cluster-blocked 95% interval of
+  [0.002700, 0.009410]. *Precision:* the two-stage system beats Stage-1-only on **AUPRC at
+  the pre-registered 100:1 benchmark decoy prevalence — 0.950 vs 0.784, +16.5 pp** — on a
+  1,893-window in-distribution benchmark (1,201 held-out T-box loci in real genomic context,
+  692 §9.1 decoys spliced into real host windows — 96 of which share a verbatim 32-nt
+  stretch of host DNA with the gated arm's own Stage-1 training fold, measured and reported
+  rather than assumed away). ⚠ **The 95% block-bootstrap interval is
+  [−4.8, +35.7] pp: the point estimate is positive and its lower bound is not.** In
+  distribution Stage-1 alone is already ~99.7% precise, so only **4 of 692** decoys separate
+  the two systems, and no in-distribution benchmark can make that comparison significant.
+  *The number that shows where Stage-2 earns its place:* the gain grows monotonically with
+  decoy prevalence — **+0.1 pp** at the benchmark's own composition, **+16.5 pp** at 100:1,
+  **+63.0 pp** at 10⁴:1, the regime the Phase-5 genome scan runs in. Graded, like GATE-4,
+  on an **evaluation twin** rather than the shipped scanner: no Stage-1 checkpoint in this
+  repo has an in-distribution holdout, and the shipped scanner's arm is reported beside the
+  gated one (+4.7 pp), disclosed as in-sample. The **P3 hard-negative re-mining round ran
+  and decided** — 941 candidates → 3 mined, 938 spared — and **declined to retrain**, so the
+  shipped Stage-1 checkpoint is unchanged.
+
+  *Still no discovery result: Phase 3 ships a calibrated two-stage system and its two
+  passing gates; the generalization claim is graded at GATE-1 in Phase 4.*
 
 ## Layout (PRD §16)
 

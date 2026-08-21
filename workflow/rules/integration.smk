@@ -27,6 +27,13 @@ _TWO_STAGE_FIXTURE = "tests/fixtures/two_stage"
 _TWO_STAGE_REPORT = "reports/strand_robustness.json"
 _TWO_STAGE_TABLE = "reports/p3/two_stage_candidates.json"
 _GATE2_REPORT = "reports/gate2_p3_ece.json"
+_PRECISION_ITEMS = "reports/p3/two_stage_precision_items.json"
+_PRECISION_REPORT = "reports/two_stage_precision.json"
+_PRECISION_TAU = ("0.7", "0.9")
+_PRECISION_SENSITIVITY = {
+    tau: f"reports/p3/two_stage_precision_tau{tau.replace('.', '')}.json"
+    for tau in _PRECISION_TAU
+}
 
 
 rule two_stage_eval:
@@ -97,3 +104,65 @@ rule two_stage_eval:
         "--temperature-from {input.gate2:q} "
         "--stage2-operating-point {params.operating_point} "
         "--expect-digest {params.expect_digest:q} >{log} 2>&1"
+
+
+rule precision_comparison:
+    """P3-16 — the P3 exit gate: two-stage vs Stage-1-only precision at matched recall.
+
+    Torch-free and CI-runnable by construction, the same split ``two_stage_eval`` uses. The
+    GPU work — two Stage-1 passes (the GATE-4 eval twin, which is the **gated** arm, and the
+    shipped scanner, reported beside it) and their Stage-2 re-scoring — is hand-run in
+    ``ml-dna`` / ``ml-rna`` and folded down to the committed per-item score table this rule
+    reads. That table is one row per benchmark item per arm; everything the grade depends on
+    is arithmetic over it, so a reviewer can re-derive the published verdict from the repo
+    alone without a GPU.
+
+    ``--stage2-operating-point`` is passed explicitly and has **no module default**:
+    ADR-0005 D3 freezes it at the §13.1 phase gate (P5-01), and the written report carries
+    ``rule.pinned: false``. The value here is the one the harness fixture was minted under,
+    supplied via an overridable ``config.get`` so a fresh clone can reproduce the artifact
+    without a config file — the same reasoning ``two_stage_eval`` documents above.
+
+    The rule **fails** when the gate fails (exit 4), when the report's own clause set refuses
+    it (exit 3), or when the run is incomplete — any completeness clause false, i.e.
+    ``is_science: false`` (exit 3, diverted to ``.invalid.json``) — rather than writing a
+    report that says so quietly.
+    """
+    input:
+        # NOT `items=`: Snakemake reserves that name on the io namespace and rejects the
+        # rule at lint time ("items is reserved for internal use").
+        score_table=_PRECISION_ITEMS,
+        # The Stage-1-threshold sensitivity annex. Declared as INPUTS, not left to a
+        # hand-run invocation: `_cmd_report` adds the block only when `--sensitivity` is
+        # passed, and `precision_problems` treats it as optional — so a rule that omitted it
+        # would silently overwrite the committed artifact with a report missing the annex
+        # and still pass (CodeRabbit, PR #133). ⚠ These two annex reports are HAND-RUN,
+        # COMMITTED artifacts with no producing rule in this workflow: their own item tables
+        # are folded at tau = 0.7 / 0.9 and live under `data/interim/p3_16/`, which is not a
+        # committed input. Snakemake therefore accepts whatever bytes are on disk, and if an
+        # annex is regenerated out of band the parent report's `report_sha256` goes stale
+        # without the DAG noticing — regenerate the parent whenever an annex changes.
+        sensitivity=[_PRECISION_SENSITIVITY[tau] for tau in _PRECISION_TAU],
+    output:
+        report=_PRECISION_REPORT,
+    params:
+        sensitivity=" ".join(
+            f"--sensitivity {tau}={_PRECISION_SENSITIVITY[tau]}" for tau in _PRECISION_TAU
+        ),
+        operating_point=config.get("two_stage_operating_point", 0.5),
+        decoy_prevalence=config.get("benchmark_decoy_prevalence", 100),
+        n_boot=config.get("precision_n_boot", 2000),
+        seed=config.get("precision_seed", 42),
+    log:
+        "logs/precision_comparison.log",
+    conda:
+        "../../envs/data.yml"
+    shell:
+        "PYTHONPATH=src python -m tbox_finder.integration.precision report "
+        "--items {input.score_table:q} "
+        "--out {output.report:q} "
+        "--stage2-operating-point {params.operating_point} "
+        "--decoy-prevalence {params.decoy_prevalence} "
+        "--n-boot {params.n_boot} "
+        "--seed {params.seed} "
+        "{params.sensitivity} >{log} 2>&1"

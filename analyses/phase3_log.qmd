@@ -6917,3 +6917,484 @@ disclosures stand: **79 of 941 (8.4 %)** spared by the model's own posterior alo
 **220** fail-closed spares, and the open question of whether the 941 are false positives at all.
 
 **Commit.** See the PR that carries this stanza.
+
+## Step P3-16 — 2026-08-13: the P3 exit gate, and the statistic it turned out it had to be read on
+
+**Inputs.** `data/processed/checkpoints/stage1_gate4_twin/stage1.pt` (`0140a8a3…`, the **gated**
+Stage-1 arm) and `data/processed/checkpoints/stage1_production/stage1.pt` (`09931a22…`, ADR-0005
+A12's canonical shipped scanner, reported beside it) · `data/processed/checkpoints/stage2_rinalmo/aux1.0_lr1e-4`
+(P3-06) · `reports/gate2_p3_ece.json` for P3-10's fitted `T = 1.140627294282911` ·
+`window_dataset.load_gate4_eval_records()` (1,201 records / 1,029 clusters) ·
+`data/processed/negatives/decoys_v0.parquet` (the four §9.1 pools) ·
+`data/processed/negatives/mining_pool_v0.parquet` (host windows) · the P3-14 harness.
+
+**Process.** `scripts/mint_p3_16_benchmark.py` builds 1,893 **1,024-nt scan windows** — 1,201
+gate4_eval loci carved in their real ±context at an honest phase (`window_lead_range` +
+`deterministic_lead`), and 692 §9.1 decoys spliced into real mined host windows by the shipped
+`data/embedding.py::embed_decoy_rows`. Both Stage-1 arms scan the identical item set through the
+P3-14 legs (`stage1` → `payloads` → `stage2` → `run`), `precision fold` reduces the two candidate
+tables to one committed per-item score table, and `precision report` grades it.
+`workflow/rules/integration.smk::precision_comparison` runs that last leg, torch-free.
+
+**Outputs.** `src/tbox_finder/integration/precision.py` · `metrics.precision_at_matched_recall`
++ `metrics.average_precision_reweighted` (with `average_precision` **delegating** to it at unit
+weight) · `reports/p3/two_stage_precision_items.json` (sha256 `5e6788e7…`) ·
+`reports/two_stage_precision.json` (sha256 `cec294d3…`, schema **1.1**) ·
+`reports/p3/two_stage_precision_tau07.json` (`956e81a2…`) / `_tau09.json` (`36c1b5bb…`) ·
+`scripts/mint_p3_16_benchmark.py::host_fold_overlap` · `tests/unit/test_precision_gain.py`
+(77) · the eval-gate wiring · **ADR-0005 A13** (signed). Digests are the post-review ones: the
+three review rounds below moved them four times and each round records its own. LOCAL only: two Stage-1 passes (seconds)
+and 14,220 Stage-2 payloads (~35 min on the laptop 4060, sharded). No SLURM, no DVC object, no
+checkpoint.
+
+**GATE (PRD §18.1, P3 exit) PASSES on the gated arm: AUPRC 0.949592 (two-stage) vs 0.784240
+(Stage-1-only) at ADR-0005 D7's pinned 100:1, +16.535 pp.** 95 % block-bootstrap CI over 1,555
+resampling blocks — **1,065 homology clusters plus 490 singleton host windows**, one per
+parentless decoy — B = 2,000: **[−4.850, +35.691]** — the point estimate is positive and **the lower bound
+is not**. GATE-2's P3 half passed at P3-10 (ECE 0.005662), so both halves of the exit gate are now
+graded.
+
+::: {.callout-important}
+## The gate could not be read on the quantity `imp.md` names, and the reason is in ADR-0005 itself
+
+`imp.md` P3-16 asks for *precision at matched recall*. That is a **threshold** quantity: it needs a
+Stage-1 threshold to generate candidates and a Stage-2 operating point to fix the recall it is
+matched at. **D3 freezes both at the §13.1 phase gate — P5-01, two phases after this gate.** Read
+at the values this run used, the gated arm gives **−0.039 pp** at τ = 0.5, **+6.342 pp** at τ = 0.7
+and **+6.177 pp** at τ = 0.9. One system, three answers, none at a pinned point. Picking the
+passing one is the threshold-shopping §8.5 forbids; picking the failing one routes a 4-versus-4 tie
+to the §2.3 method-gate-failure branch. **A13 names the statistic instead: threshold-free AUPRC at
+D7's pinned prevalence, PRD §12's primary imbalance-aware metric.** The matched-recall read is
+retained in full and published **non-gated** — including the −0.039 pp that fails — and a clause
+refuses a report that drops it.
+:::
+
+::: {.callout-important}
+## The real result is the prevalence curve, not the single gated number
+
+The gated arm's AUPRC gain is monotone in decoy prevalence: **+0.138 pp** at the benchmark's own
+composition (0.576 decoys per positive) → **+2.294** at 10:1 → **+16.535** at 100:1 → **+48.762**
+at 10³:1 → **+62.967** at 10⁴:1. That is PRD §6's division of labour arriving as a measurement —
+*"Stage 2 is the calibrated precision filter that makes genome-scale FDR tractable"* — and it says
+where Stage-2's value actually lives: not in distribution, where Stage-1 alone is already ~99.7 %
+precise, but at the prevalence P5 scans at. ⚠ AUPRC is **not** provably prevalence-invariant the
+way matched-recall precision is (two PR curves can cross), so the whole sweep is published rather
+than assumed to agree, and A13 Pin 3 says so.
+:::
+
+::: {.callout-warning}
+## Four false positives against four: the gate has a power floor, and it is stated
+
+Of 692 §9.1 decoys the gated arm's Stage-1 emits a candidate for **6** and retains **4** at the
+matched-recall point; two-stage retains **4** as well, of a partly different composition — Stage-2
+rejects the `leader_decoy` and admits one more `structured_rna`. A four-versus-four comparison
+cannot be significant at the block level, which is exactly what the CIs report. The published
+verdict is a **reference**, not evidence of a significant effect; the headroom Stage-2 exists to
+buy is P5's FDR and P4's held-out-clade recall.
+:::
+
+::: {.callout-warning}
+## The first benchmark had ONE discriminating negative, and the failure is kept in the record
+
+Built item-as-contig — each decoy scanned as its own ~280-nt contig, zero-flanked into one window
+— Stage-1 emitted a candidate for **1 of 692** decoys (6 of 692 for the shipped scanner). Every
+`structured_rna`, `gc_background` and `dinuc_shuffled` decoy produced nothing, so the entire
+measured "gain" was the single `leader_decoy` — the one §9.1 record that is itself T-box-derived,
+with 2 of its 8 exact substrings of training positives. A control that cannot fire reads as a clean
+result ([[control-matchedness-must-be-asserted]]). Rebuilding in **scan geometry** (`embed_decoy_rows`,
+the operator A7 already uses to put decoys into training) raised it to 4–6. It did not manufacture
+headroom that is not there, and the §7 call to rebuild was taken on the measurement, not on a guess.
+:::
+
+::: {.callout-important}
+## No Stage-1 checkpoint in this repo has an in-distribution holdout, so the gated arm is the GATE-4 twin
+
+P2-10d′-b trained on the **whole** `nested_train` fold (8,303 records, `exclude_selection_val=false`),
+so 1,204 of the 2,353 in-distribution test-rung positives are inside its training set and its
+complement is the leave-clade-out holdout — P4's question, not this one. Measured: `test` ∩ Stage-1
+training = **1,304 rows**; `test` ∩ Stage-2 training = **0**. GATE-4 met the same wall and graded a
+twin; §7 (2026-08-13) took the same route here. The **twin** arm is gated (0 of 1,201 positives
+seen) and the **shipped scanner** is scored on the identical items and reported beside it
+(1,201 of 1,201 seen; AUPRC gain +4.671 pp), disclosed as Stage-1-in-sample. `precision_problems`
+re-derives *which arm may be gated* from the measured exposure counts, not from the string `"twin"`.
+:::
+
+::: {.callout-note}
+## Two exposure facts the negatives carry, and one geometry fact the fixture default hid
+
+All four §9.1 pools are in the gated denominator (§7). **All 2,999 `structured_rna` decoys were
+embedded in both Stage-1 trainings** (A7 pin 3), so 283 of the 692 negatives are memorised — the
+per-pool false-positive breakdown is published so that is readable, not trusted. `leader_decoy`
+contributes **one** item. The exposure derivation is bound to reality: the minter refuses to write
+unless it reproduces both committed runs' `n_embedded_by_pool` exactly (702 + 2,999 production;
+602 + 2,999 twin). ⚠ Separately: the P3-14 `stage1` leg defaults to **float16** logits, and on a
+locus-sized contig — **one** covering window, so no log-mean-exp averaging to damp quantisation —
+that flips near-tied positions and the leg's own self-check fires (2 of 439 predictions on the
+first contig). `--dtype float32` reproduces `scan_encoded_windows` exactly (0 mismatches,
+max |Δ log-prob| 0.0), and both arms were minted that way.
+:::
+
+::: {.callout-warning}
+## Review round 1 (CodeRabbit app, automatic): 4 findings, all four real — and one moved a published CI
+
+⚠ The **CLI path was unavailable** on a new error — *"Review failed: You are not a member of the
+requested organization"*, which carries no wait time and is an **absence**, not a pass (§5.1) — so
+this round is the GitHub app's automatic review of `c0c9750`.
+
+**(major) The documented block scheme was not the implemented one, and the gap narrowed an
+interval.** The minter's docstring said `dinuc_shuffled` decoys inherit their parent locus's
+cluster; `block_id` implemented exactly that and **nothing called it** — every negative keyed on
+its unique host. So a shuffle and the locus it is a permutation *of* were treated as independent
+bootstrap units. Fixed at the producer (`decoy_block_id`, bound to the split table's cluster map):
+blocks **1,721 → 1,555**, and the gated CI widens **[−4.998, +35.881] → [−4.850, +35.691]**. The
+point estimate does not move — blocks affect only the interval — and the direction is the
+conservative one.
+
+**(minor) A disclosure described the benchmark that was REPLACED.** `disclosures()` still read
+*"locus-sized sequences scanned as their own contigs"* while the same report's `scope.geometry`
+said `1024-nt scan windows`. A published artifact contradicting itself; corrected at the producer
+and regenerated.
+
+**(minor) The `is_science` clause fired on an honest incomplete run.** `bool(is_science) ==
+bool(completeness)` demanded truthiness whenever the clause set was non-empty, so a report that
+correctly derived `is_science = False` from a FALSE clause would have been refused as malformed.
+The conjunction check beside it was already the real test; the first conjunct is dropped.
+
+**(minor) The Snakemake rule could not regenerate its own committed artifact.** It omitted
+`--sensitivity`, and `precision_problems` treats the annex as optional — so a rule run would have
+overwritten the published report with one missing the τ sweep **and still passed**. The two
+per-threshold reports are now committed under `reports/p3/` and declared as rule inputs.
+
+Artifacts regenerated: `75bdef24…` (report), `04b63b0e…` (item table). **No published point
+estimate moved**; the gated CI and the block count did, and both are restated above.
+:::
+
+::: {.callout-warning}
+## Review round 2 (app) + an adversarial harness after it — 10 findings, all real
+
+The GitHub app's round on `305cd51`, once the week-old Fair-Usage limit expired (the **CLI path
+is still dead** on the same *"not a member of the requested organization"* error). Two findings,
+both real, both the round-1 defect one sentence over.
+
+**(minor) The geometry disclosure still carried fixed numerals.** Round 1 corrected that
+sentence's *geometry*; the same sentence went on hardcoding *"ONE discriminating negative of 692;
+this one yields 4-6"*, so a regeneration on different inputs would publish counts it had not
+measured. Every quantity in it is now read off the payload — `scope.geometry`, `scope.n_negatives`,
+and, per arm, `n_candidate_items − n_positive_candidates` admitted and `matched_recall.two_stage.fp`
+retained. It re-renders as *"admits 6 of 692 and retains 4"* — the same numbers, now derived.
+
+**(minor) The Stage-1-threshold annex excluded the threshold the verdict is published at.** Its
+swept points are **other** reports (τ = 0.7, 0.9); the report's own τ = 0.5 appeared nowhere, so
+`verdict_invariant` was true over a set that omitted the operative value. The annex now carries
+`base` — that threshold and this report's own verdict, read from the gate rather than duplicated
+into a second file (a self-referential point would make the read a tautology) — `verdict_invariant`
+spans base + points, and `brackets_base` states plainly that this sweep sits **above** its base
+rather than around it.
+
+An **independent adversarial pass** was then run over the whole diff (six lenses, each finding
+re-checked by a verifier told to refute it by execution) — because a clean review round is a floor,
+not a ceiling. **Eight further findings, none refuted.**
+
+**(major) No clause re-derived any published MAGNITUDE.** The clause set pinned the AUPRC *pair*
+and re-derived the boolean verdict from it; nothing recomputed the numbers a reader actually
+quotes. On the committed report, rewriting `gate.gain_pp` to +99, replacing `gate.gain_ci`,
+changing `scope.n_blocks` back to 1,721 or rewriting the 10⁴:1 sweep endpoint each left
+`problems: []`. Eleven such mutations are now caught, with a cosmetic control that stays silent.
+
+**(major) The graded population was bound to the manifest by `n_items` alone.** So a relabelled
+corpus certified the gate while the report published the manifest's composition. `n_positives`,
+`n_negatives`, `n_blocks` and every `negatives_by_pool` count are now re-derived per arm.
+
+**(major) The annex's own summary fields were self-certified** — `n_points`, `all_labels_match`,
+`verdict_invariant`, `brackets_base` were read as written by the call that wrote them. All four are
+now re-derived from the rows they summarise.
+
+**(major) `is_science: false` still landed on the canonical phase-exit path with exit 0.** The
+field was derived and consumed by nothing, so a half-measured run wrote the graded artifact and
+returned success ([[cost-knobs-can-certify]]). An incomplete run is now diverted to
+`.invalid.json`, the canonical path is removed, and the exit code is 3 — asserted on the *side
+effect*, not just the return code.
+
+**(minor ×2) Two reader-facing numbers were mis-rounded.** README and the manuscript printed the
+CI lower bound as **−4.9** where the artifact carries −4.849986 (−4.8 at one decimal, as the figure
+already rendered it), and the 10⁴:1 sweep endpoint as **62.9** where 62.966831 rounds to **63.0** —
+the only figure in that sentence not rounded like its neighbours. Both corrected to the artifact's
+own values.
+
+The same harness's other four lenses returned six more, verified the same way and fixed here.
+
+**(major) `--n-boot` was an ungated cost knob.** At `B = 1` the published *"95 % interval"* is one
+resample wide and **does not contain its own point estimate** — measured: `[+98.749, +98.749]`
+around a point of `+99.261`, `problems: []`, `is_science: true`. Both published intervals now carry
+two clauses: the interval must contain its point, and the resample count must be able to resolve
+the tails it claims (`n_boot · (1 − ci_level)/2 ≥ 1`, i.e. ≥ 40 for 95 % — re-derived from the
+requested level, not a magic number). Two tests that had used `B = 10`/`20` for speed were raised
+to the floor rather than the floor lowered to them.
+
+**(major) Nothing tied the interval to the statistic it is published beside**, nor re-derived the
+reweighting the gated point was computed at. `gain_ci.point` must now equal `gain_pp`, and the
+gated point's recorded `lambda` is re-derived as `prevalence · n_pos / n_neg` from the arm's own
+composition.
+
+**(minor) A completeness clause was named for a verdict it does not read.**
+`verdict_invariant_across_prevalence` reads `two_stage_beats_stage1_only` — the **matched-recall**
+comparison, whose sign is λ-invariant by construction — while the name claimed the **gated** AUPRC
+verdict, which A13 Pin 3 explicitly declines to assert invariant. Renamed
+`matched_recall_verdict_invariant_across_prevalence`; the check itself is unchanged.
+
+**(minor) Three test patterns could not fail.** `_folded()` gave `production` and `twin`
+**byte-identical** score columns, so swapping the two arms inside `arm_items` left the whole suite
+green; every `prevalence_lambda` assertion used `n_pos == n_neg`, so inverting its numerator and
+denominator was invisible; and the `candidates=` guard was only exercised where the sentinel could
+never win on precision, so deleting the parameter changed nothing. All three now bite, and nothing
+pinned the **bootstrap's resampling unit** at all — keying it on the item id instead of the block
+passed every test. Four sabotages, each RED against its named test: arm swap, block → record key,
+λ inversion, `candidates` ignored.
+
+**(minor) The interval was described as "over 1,555 clusters".** It is over 1,555 **blocks**:
+1,065 homology clusters and **490 singleton host windows**, one per parentless decoy. Corrected in
+the dev-log and the manuscript; the number itself is unchanged.
+
+Artifacts regenerated: `2ad82746…` (report), `abf90501…` / `33a06f35…` (the τ = 0.7 / 0.9 annex
+reports, whose disclosures are produced by the same function). The item table is untouched.
+**No point estimate, interval or block count moved in this round** — the corrections above are to
+prose that disagreed with the artifact it cites, and to clauses that could not fire.
+
+⛔ **One finding from the same harness is NOT fixed here and is an open §7 stop** — see the
+"host-window cleanliness" note below.
+:::
+
+::: {.callout-important}
+## §7 STOP RAISED AND ANSWERED (2026-08-21) — the negatives' host DNA was not "clean for BOTH Stage-1 checkpoints"
+
+The benchmark's negatives are §9.1 decoys spliced into real mined **host windows**, and the
+committed item table publishes `scope.host_pool.selection =` *"parent_nested_train == False (clean
+for BOTH Stage-1 checkpoints)"*, with every item stamped `host_seen_by_any_arm: False` — a
+**hardcoded literal** in `mint_p3_16_benchmark.py` (lines 276 and 351), derived by nothing and read
+by nothing.
+
+Measured, independently of the reviewer that raised it: taking the **host portion only** of each
+negative (the spliced decoy interval excluded) and scanning for verbatim 32-mers against each
+Stage-1 arm's own training-fold `context_seq`, **112 of 692 negatives share host DNA with the
+production fold and 96 of 692 with the twin fold** — the twin being the *gated* arm (these are the
+CORRECTED counts; the first measurement said 115/97 and is the subject of round 8's second finding
+below). Filtering
+hosts on `parent_nested_train == False` constrains the mining-pool record's **parent**; it does not
+make the drawn window's DNA unseen.
+
+The gate verdict is not recomputed here and the direction of the effect is not established — seen
+flanking context could make Stage-1 more or less likely to fire there. What is established is that
+a **published cleanliness claim was unsupported by the artifact that made it**, which is a §10.3
+matter and was raised as a §7 stop.
+
+**Answered (bioedca, 2026-08-21): correct now, book the re-mint.** The minter now *measures* the
+overlap instead of stamping a literal — `host_fold_overlap` scans the host portion of every
+negative against each arm's own training-fold `context_seq` — and the benchmark was re-minted.
+Re-minting is deterministic at seed 42: the contig ids and **sequences are byte-identical** (checked
+against the previous manifest before the code changed), so the existing Stage-1 and Stage-2 arm
+tables stay valid and **no GPU pass was re-run**. Re-folding changed exactly one thing in the item
+table — `benchmark.scope.host_pool` — with `items` bit-identical.
+
+What the artifact now says: `selection` states what the rule constrains (*"the mining-pool record's
+PARENT, not the DNA of the window drawn from it"*), and a new `overlap_with_training_folds` block
+carries `by_arm {production: 112, twin: 96}`, `n_seen_by_any_arm: 112`, `k: 32` and the method.
+`host_seen_by_any_arm` is now derived per negative (112 true of 692) and `None` on positives, which
+have no host window. A new clause **refuses a report whose host pool carries no measurement**, and
+a disclosure puts the gated arm's 97 in front of the reader; the README and the manuscript state it
+too. The report schema moves **1.0 → 1.1** with the rename and the two new blocks.
+
+⏭ **Booked, not done: the screened re-mint** — rebuild the host pool excluding every window that
+overlaps either training fold, re-run both Stage-1 passes and the 14,220 Stage-2 payloads, and
+re-grade. That changes every published number and is its own step.
+:::
+
+::: {.callout-warning}
+## Review round 3 (app, automatic on `2c28b49`) — 5 findings, all real, all fixed
+
+**(minor) The new validation clauses raised instead of returning a problem.** `precision_problems`
+documents that a checker must RETURN on a payload it did not write — *"a traceback from the
+validator is indistinguishable from a crashed run"* (the PR #131 finding) — and round 2's clauses
+indexed nested keys directly. Fixed, and the contract is now **pinned by a test** that empties,
+nulls, list-replaces and scalar-replaces every block a clause reads, at the top level and one level
+down (**75 truncations**), asserting each returns a problem and none raises. Closing it also
+surfaced three payloads that were accepted *silently*: a report with **no disclosures at all**, a
+non-boolean `is_science`, and a non-gated arm whose whole prevalence sweep was emptied. All three
+now refuse.
+
+**(minor) The leader-decoy disclosure mixed a benchmark-item count with unqualified pool counts** —
+*"contributes 1 item(s): all 8 leader decoys are…"*. The 8 is the §9.1 **upstream pool** size and is
+now labelled as one.
+
+**(nit) `SCHEMA_VERSION` did not move** while the published contract did — the completeness clause
+was renamed and two blocks added. Bumped **1.0 → 1.1** and every report regenerated.
+
+**(nit) A test docstring had gone stale under its own fix**: it still described the fixture as
+having "byte-identical arm columns" after round 2 gave the arms different ones — wording that would
+invite a future editor to restore the columns and silently remove the test's bite.
+
+**(nit) The sensitivity annexes have no producing rule.** The Snakemake rule declares
+`two_stage_precision_tau{07,09}.json` as inputs, but nothing in the workflow makes them and their
+item tables live under `data/interim/`, so the DAG accepts whatever bytes are on disk and a
+regenerated annex would leave the parent's `report_sha256` stale unnoticed. Recorded in the rule's
+docstring as a hand-run committed artifact with that consequence named.
+
+Artifacts regenerated: report `cec294d3…`, item table `5e6788e7…`, τ07 `956e81a2…`, τ09 `36c1b5bb…`.
+**No point estimate, interval or block count moved in this round either.**
+:::
+
+::: {.callout-warning}
+## Review round 4 (app, automatic on `5620b77`) — 1 finding, real, and it found the gap in round 3's own fix
+
+**(minor) A non-numeric `base.stage1_threshold` still made the checker raise.** Round 3's
+truncation sweep replaces whole **blocks**, so it never produced a `base` that is a well-formed
+mapping carrying a *string* threshold — and `min(swept) <= base_tau` raises `TypeError` on one.
+Reproduced (`TypeError: '<=' not supported between instances of 'float' and 'str'`), fixed by
+reading the threshold through the same `number()` helper the swept points already use.
+
+Closing it properly meant sweeping the class rather than the instance ([[fixed-one-of-two-identical-things]]):
+retyping **every leaf** of the committed report to `"x"`, `None`, `True` and `-1` found **76**
+raising paths across **six** clause sites, all of them **pre-dating** this PR — `n_positives +
+n_negatives`, `n_blocks > 1`, `ceiling_recall`, `math.isnan(auprc)`, and the two `sum(pool[…])`
+per-pool totals. Every one now reads through `number()`, which returns `None` for a string, a
+bool or a missing key. The sweep is a test, and reverting the one-line round-4 fix turns it RED.
+No artifact changed in this round — the clauses got stricter, the report did not move.
+:::
+
+::: {.callout-warning}
+## Review round 5 (app, automatic on `543307b`) — 2 findings, both real; the sweep had a hole and a blind spot
+
+**(minor) `float()` on a large enough int raises `OverflowError`.** A Python `int` has no width
+limit, so `10**400` passes the `isinstance(int)` check and then takes `number()` down —
+`OverflowError: int too large to convert to float`. The type check alone was never sufficient.
+`number()` now catches it and returns `None`; `close()` was routed through `number()` so the
+handling lives in one place rather than two.
+
+**(minor) The all-leaf sweep was not all-leaf.** Its list branch iterated `node[:2]`, a speed
+shortcut of mine, so later `recall_grid` entries, later disclosures and later sensitivity rows
+were never retyped — a coverage claim the test's own docstring made and did not keep. `[:2]`
+removed and `10**400` added to the retyping set: **2,880 retypings, zero raises**, at 2.6 s.
+Reverting the overflow guard turns it RED.
+
+Both findings are the same lesson one turn apart: a sweep is only as wide as its own traversal,
+and "it is an int" is not "it is a number". No artifact changed here either.
+:::
+
+::: {.callout-warning}
+## Review round 6 (app, on `93117db`) — 1 finding, and this time the class was closed rather than the instance
+
+⚠ **The automatic review did NOT fire on this commit.** Four consecutive pushes drew one within
+minutes; this one drew none in **30 minutes**, and the green `CodeRabbit` PR check was a *stale
+PR-level status* — `commits/93117db/check-runs` carried **no CodeRabbit run at all**. Judging the
+gate on the check rather than on a review body would have merged this PR unreviewed (§5.1). The
+manual `@coderabbitai review` comment produced a round in ~4 minutes.
+
+**(minor) A prevalence point's `auprc` block replaced by a scalar still raised.** `number()`
+returned `None` correctly, but the diagnostic f-string beside it re-indexed the same block —
+`TypeError: string indices must be integers`. Reproduced for `"x"`, `None`, `[]` and `5`.
+
+Three rounds had now found the same class from three widths, so this time the **sweep** was fixed
+rather than the site. Replacing **every node at every depth** — interior mappings and lists
+included, not only leaves — with `"x"`, `None`, `True`, `-1`, `10**400`, `{}` and `[]` found
+**nine** raising sites, of which round 6 reported one: `arms` not being a mapping of mappings, the
+AUPRC diagnostic above, the prevalence lookup's three unchecked hops, `host_pool`,
+`negatives_by_pool`, the invariance sweep's per-point read, and the annex's `points` list. All
+nine are fixed, and the test now runs the full-width sweep: **5,068 replacements, zero raises**,
+4.5 s. Reverting the one-line round-6 guard turns it RED.
+
+No artifact changed. Gate unchanged.
+:::
+
+::: {.callout-warning}
+## Review round 7 (app, manual trigger on `2e7c476`) — 1 **major**, and it was about the number this PR just started publishing
+
+⚠ **The automatic review did not fire on this commit either** — 7 minutes, no check-run on the head
+sha — so the manual trigger is now the working path on this PR, not the exception. It returned a
+round in ~5 min.
+
+**(major) The host-overlap counts were unbounded.** The measurement added in this PR
+(`by_arm {production: 112, twin: 96}` of 692) had only a *relative* clause: the union had to sit
+between the largest arm and the sum. Nothing tied any of them to the pool being counted, so
+`by_arm = {production: 999, twin: 999}, n_seen_by_any_arm: 999` passed on a benchmark with **692**
+negatives — the same "magnitude no clause re-derives" defect this PR spent round 2 removing, in the
+number round 2b *added*. Worse, the count list was built with a silent `isinstance` filter, so a
+malformed value was dropped rather than refused.
+
+Each count is now required to be a non-boolean integer in `[0, scope.n_negatives]`, the union
+likewise, and the relative clause is kept on top. Six perturbations caught (oversized, negative,
+string, bool, empty, out-of-range union) with the cosmetic control still silent; removing the upper
+bound turns three of the new tests RED.
+
+Worth stating plainly: the clause that guards a number should land in the same commit as the number.
+This one arrived a round late, and only because a reviewer asked for it.
+:::
+
+::: {.callout-note}
+## Review round 8 (app, manual trigger on `7e3f42e`) — 1 finding, **not exploitable**, applied anyway
+
+Filed as a *major*: a **fractional** `scope.n_negatives` (e.g. `692.5`) reaches `is_count`'s limit
+through `number()`, so per-arm counts would be bounded by something that is not a count.
+
+**Executed before fixing, and the scenario does not reach a published report:** a manifest with
+`n_negatives = 692.5` is already refused by **four** other clauses — the host-overlap measurement's
+own corpus check, the per-pool sum, and both arms' graded populations all disagree with it. So this
+is not a hole through which a bad artifact certifies; it is a clause leaning on its neighbours.
+Applied regardless, because the bound a count is checked against should itself be a count, and the
+cost is one line plus a regression that names the non-exploitability in its own docstring.
+
+**A SECOND round-8 finding, and it was FOUR ROUNDS OLD.** Before merging, the PR's review
+*threads* were audited (`reviewThreads` via GraphQL) rather than just the round bodies — and one
+thread came back **unresolved and NOT outdated**: a **major** on `mint_p3_16_benchmark.py`, filed
+back in **round 4** on `5620b77`, that every round-by-round read had missed. Reading a round's body
+and its inline comments is not the same as reading its threads
+([[review-round-judged-from-truncated-buffer]]).
+
+It was right, and it was about the number this PR added. `host_fold_overlap` isolated the host
+portion as `sequence[:truth_start] + sequence[truth_end:]` — but **a negative contig carries no
+truth bounds at all** (`truth_start` is `None` on all 692), so it fell back to the *whole window*
+and counted **the spliced decoy's own k-mers as host DNA**, while the artifact's `method` string
+told the reader *"spliced insert excluded"*. The insert's location is on the **item**
+(`splice_phase` + `locus_length`), not the contig.
+
+Corrected — the bounds are taken from the item, and a negative with no bounds anywhere is now
+**refused** rather than measured whole, because the silent fall-back is what made the claim false.
+The published overlap drops from **115/97 to 112/96**: three of the negatives had been flagged
+purely on decoy sequence. Restated in the artifact, the disclosure, the README and the manuscript.
+Two tests pin it, both RED when the fall-back is restored. The item table is **bit-identical**
+across the correction — only `scope.host_pool` moved — and no gate number changed.
+
+The follow-up round on that fix added one more, also real and also cheap: **Python slicing
+clamps**, so a negative or overlong `splice_phase`/`locus_length` would have quietly excised the
+wrong interval and published an overlap count for a host sequence that never existed. Bounds are
+now coerced and required to satisfy `0 <= start < end <= len(sequence)`; six malformed pairs are
+refused and a positive control confirms a well-formed pair still measures. Re-minting under the
+check reproduces **112/96** exactly, so the guard changed nothing but what it forbids.
+
+One more turn of the same screw: the interval check was applied *after* `int()`, which
+**truncates** — `int(100.5)` is `100` — so a **fractional** bound slid past it and excised the
+wrong window rather than being refused ([[int-truncation-changes-a-pinned-value]]). Coordinates
+now go through one helper that rejects a non-number, a bool and a fractional value before any
+conversion. Nine malformed pairs refused, the measurement still **112/96**.
+
+**This is the convergence point.** Eight rounds returned 24 findings, every one real and reproduced
+before being fixed; round 8's *first* finding is defensive hardening whose failure mode is already
+refused, and its second was a four-round-old thread now closed. The project's own record of this reviewer is that it *"tends to keep surfacing incremental
+defensive hardening indefinitely, so clean convergence may never arrive even on good code"*. The
+§5.1 gate is substantively met: eight rounds, every actionable finding addressed, CI green on the
+head commit, and the last round found nothing that could change an artifact.
+:::
+
+**Validation.** Gate PASSES (above); `precision_problems` returns `[]` on the committed report,
+every clause re-deriving from the report's own numbers (the clause set grew from 26 to 64 `want()`
+sites across the eight review rounds), and `is_science` / `gated` are the conjunction of the
+completeness clauses rather than assertions. **96** `test_precision_gain` + the eval-gate wiring;
+`average_precision`'s committed golden is **bit-unchanged** under the delegation (asserted). Full
+unit+golden+ml against a matched baseline worktree at `07ec89b`: **zero new failures** (14 FAILED
+both sides, identical sets). ruff 0.15.15 + black 25.11.0 clean.
+
+**Decisions.** Two §7 calls, both taken on measurements: the **gated arm** (twin, with the shipped
+scanner reported beside it) and the **statistic** (ADR-0005 **A13**, signed 2026-08-13). Path drift,
+recorded not taken silently: `precision_gain` lands in `src/tbox_finder/integration/precision.py`,
+not in `two_stage.py` as `imp.md` names — that module's own docstring says *"Not an evaluation …
+the two-stage-vs-Stage-1-only precision comparison is P3-16"*, and it is already 1,682 lines.
+
+**Commit.** see PR (P3-16).

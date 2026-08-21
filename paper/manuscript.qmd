@@ -393,6 +393,84 @@ backbones and retired transfer risk, and its smoke runs are
 mechanics/expressivity probes — reporting them as results would present a
 learnability measurement as a generalization finding.]*
 
+## The re-ranker's precision gain is small in distribution and grows with decoy prevalence, which is where genome-scale scanning lives {#sec-twostage}
+
+The second half of the Phase-3 exit criterion asks whether the Stage-2 re-ranker
+buys precision over the Stage-1 scanner alone. We answer it on a 1,893-window
+in-distribution benchmark built in the scanner's own geometry: 1,201 held-out
+T-box loci carried in their real genomic context, and 692 decoys drawn from the
+four negative classes and spliced into real mined host windows by the same
+operator that places them into the training stream. Both systems share one
+candidate-generation stage — the same checkpoint, the same locus-construction
+rule, the same emitted loci — and differ only in the score used to rank a
+candidate, so the comparison isolates the re-ranker. The host windows are drawn
+from mined loci whose source record lies outside the training fold, which
+constrains the source record and not the window itself: 96 of the 692 negatives
+share a verbatim 32-nt stretch of host DNA with the training fold of the arm we
+grade (112 for the arm reported beside it), measured over the host portion with
+the spliced decoy excluded. We report that overlap rather than assert its
+absence.
+
+Two constraints shape what can be graded. First, no Stage-1 checkpoint in this
+work has an in-distribution held-out population: the shipped scanner trained on
+the entire in-distribution fold, and the complement of that fold *is* the
+leave-clade-out holdout. We therefore grade the same evaluation twin used for
+the segmentation gate (@sec-gate4) and report the shipped scanner's arm beside
+it, disclosed as in-sample. Second, the pre-registered decision machinery
+freezes the Stage-1 threshold and the Stage-2 operating point at the discovery
+phase, two phases after this gate; a precision-at-matched-recall figure read
+before that freeze moves with the unfrozen values (−0.04, +6.34 and +6.18
+percentage points at Stage-1 thresholds of 0.5, 0.7 and 0.9). The gated
+statistic is therefore the threshold-free one we pre-registered as primary under
+class imbalance, AUPRC — the appropriate summary under skewed class balance
+(DOI:10.1371/journal.pone.0118432; accessed 2026-08-13) — evaluated at the pinned
+benchmark decoy
+prevalence; the matched-recall comparison is reported in full alongside and
+gated on none of it.
+
+On that statistic the two-stage system reaches **AUPRC 0.950 against
+Stage-1-only's 0.784 at 100:1 decoy prevalence, a gain of 16.5 percentage
+points** (@fig-twostage). The interval around that gain, block-resampled over
+1,555 units — 1,065 homology-cluster blocks and 490 singleton host windows, one
+per parentless decoy — is **[−4.8, +35.7] points** — positive at the point
+estimate and not bounded away from zero. The reason is visible in the raw
+counts: in distribution the scanner alone is already about 99.7 % precise, it
+emits a candidate for only 6 of 692 decoys, and 4 survive to the matched-recall
+operating point against the two-stage system's 4. A four-against-four comparison
+cannot be significant, and we report the gate as an in-distribution *reference*
+with that power floor stated rather than as evidence of a significant effect.
+
+The informative quantity is not the single number but its dependence on
+prevalence. Sweeping the decoy:positive ratio across the pre-registered range,
+the AUPRC gain rises monotonically from **0.1 points at the benchmark's own
+composition to 2.3 at 10:1, 16.5 at 100:1, 48.8 at 10³:1 and 63.0 at 10⁴:1** —
+the last being the regime a genome-scale scan actually operates in. This is the
+architecture's stated division of labour appearing as a measurement: a
+high-recall scanner is not the component under pressure at low prevalence, and
+the re-ranker's contribution is a function of how many negatives it is asked to
+reject. It also locates the claim this benchmark cannot make. Whether the
+re-ranker delivers that gain on genuinely novel loci is a leave-clade-out
+question, and whether it controls the false-discovery proportion at scale is a
+genome-scan question; both are addressed later.
+
+::: {#fig-twostage}
+![](figures/integration/two_stage_precision.png)
+
+**The Stage-2 re-ranker's precision gain as a function of decoy prevalence.**
+AUPRC for the two-stage system and for the Stage-1 scanner alone, on the
+in-distribution benchmark (1,201 held-out loci, 692 negatives from the four
+decoy classes), swept across the pre-registered decoy:positive range. The gated
+point is the pinned 100:1 prevalence (0.950 vs 0.784, +16.5 points); the error
+bar there is the cluster-blocked 95 % bootstrap interval on the gain, which
+includes zero, and is drawn only at the prevalence it was resampled at. Both arms share one candidate-generation stage and differ only in the
+ranking score. Grading is on an evaluation twin that withheld every benchmark
+positive; the shipped scanner's arm is shown as a dashed series and is
+in-sample. Only 4 of 692 negatives separate the two systems at the
+matched-recall operating point, which is why the interval is wide and why the
+in-distribution gate is reported as a reference rather than as a significant
+effect.
+:::
+
 # Discussion
 
 *[Placeholder — authored at the preprint gate.]*

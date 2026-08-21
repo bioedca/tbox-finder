@@ -9,3 +9,8 @@
 /production_genomes
 /homolog_db
 /production_annotations
+# P3-16: the benchmark contig set, the two Stage-1 window-logit archives (~56 MB each) and
+# their Stage-2 logits + candidate tables. Large and model-derived; the committed, replayable
+# artifacts are the folded per-item score table (reports/p3/two_stage_precision_items.json)
+# and the graded report (reports/two_stage_precision.json).
+/p3_16
