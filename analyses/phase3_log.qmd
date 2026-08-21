@@ -7369,6 +7369,12 @@ now coerced and required to satisfy `0 <= start < end <= len(sequence)`; six mal
 refused and a positive control confirms a well-formed pair still measures. Re-minting under the
 check reproduces **112/96** exactly, so the guard changed nothing but what it forbids.
 
+One more turn of the same screw: the interval check was applied *after* `int()`, which
+**truncates** — `int(100.5)` is `100` — so a **fractional** bound slid past it and excised the
+wrong window rather than being refused ([[int-truncation-changes-a-pinned-value]]). Coordinates
+now go through one helper that rejects a non-number, a bool and a fractional value before any
+conversion. Nine malformed pairs refused, the measurement still **112/96**.
+
 **This is the convergence point.** Eight rounds returned 24 findings, every one real and reproduced
 before being fixed; round 8's *first* finding is defensive hardening whose failure mode is already
 refused, and its second was a four-round-old thread now closed. The project's own record of this reviewer is that it *"tends to keep surfacing incremental
@@ -7380,7 +7386,7 @@ head commit, and the last round found nothing that could change an artifact.
 **Validation.** Gate PASSES (above); `precision_problems` returns `[]` on the committed report,
 every clause re-deriving from the report's own numbers (the clause set grew from 26 to 64 `want()`
 sites across the eight review rounds), and `is_science` / `gated` are the conjunction of the
-completeness clauses rather than assertions. **93** `test_precision_gain` + the eval-gate wiring;
+completeness clauses rather than assertions. **96** `test_precision_gain` + the eval-gate wiring;
 `average_precision`'s committed golden is **bit-unchanged** under the delegation (asserted). Full
 unit+golden+ml against a matched baseline worktree at `07ec89b`: **zero new failures** (14 FAILED
 both sides, identical sets). ruff 0.15.15 + black 25.11.0 clean.

@@ -1185,7 +1185,18 @@ def test_a_negative_with_no_splice_bounds_anywhere_is_refused_not_measured_whole
 
 @pytest.mark.parametrize(
     ("phase", "insert"),
-    [(-5, 36), (900, 400), (100, 0), (100, -10), ("x", 36), (None, 36)],
+    [
+        (-5, 36),
+        (900, 400),
+        (100, 0),
+        (100, -10),
+        ("x", 36),
+        (None, 36),
+        # int() TRUNCATES: 100.5 would slide past the interval check as 100
+        (100.5, 36),
+        (100, 36.5),
+        (True, 36),  # a bool is not a coordinate
+    ],
 )
 def test_splice_bounds_outside_the_contig_are_refused_not_clamped(phase, insert):
     """Python slicing clamps, so a malformed bound would quietly excise the wrong interval

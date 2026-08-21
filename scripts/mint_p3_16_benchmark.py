@@ -362,6 +362,21 @@ def build_negative_windows(
 HOST_OVERLAP_K = 32
 
 
+def _coordinate(value: Any, name: str, contig_id: str) -> int:
+    """One sequence coordinate, refused unless it *is* one.
+
+    ``int()`` TRUNCATES — ``int(100.5)`` is ``100`` — so a fractional bound would slide past
+    the interval check and excise the wrong window rather than be rejected
+    ([[int-truncation-changes-a-pinned-value]], CodeRabbit PR #133). A coordinate is an
+    integer; a bool is not a coordinate.
+    """
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise SystemExit(f"{contig_id}: {name} {value!r} is not a sequence coordinate")
+    if isinstance(value, float) and not value.is_integer():
+        raise SystemExit(f"{contig_id}: {name} {value!r} is fractional, not a coordinate")
+    return int(value)
+
+
 def host_fold_overlap(
     contigs: Sequence[Mapping[str, Any]],
     items: Sequence[Mapping[str, Any]],
@@ -403,24 +418,14 @@ def host_fold_overlap(
                     "portion cannot be isolated; measuring the whole window would count the "
                     "decoy as host DNA"
                 )
-            try:
-                start = int(phase)
-                end = start + int(insert)
-            except (TypeError, ValueError) as exc:
-                raise SystemExit(
-                    f"{item['contig_id']}: splice_phase {phase!r} / locus_length {insert!r} "
-                    "are not integers"
-                ) from exc
+            start = _coordinate(phase, "splice_phase", item["contig_id"])
+            end = start + _coordinate(insert, "locus_length", item["contig_id"])
         # Python slicing CLAMPS: a negative or overlong bound would quietly excise the wrong
         # interval and publish an overlap count for a host sequence that does not exist. On
         # the one function in this file that has already published a wrong number, the bounds
         # are checked rather than trusted (CodeRabbit, PR #133).
-        try:
-            start, end = int(start), int(end)
-        except (TypeError, ValueError) as exc:
-            raise SystemExit(
-                f"{item['contig_id']}: splice bounds {start!r}..{end!r} are not integers"
-            ) from exc
+        start = _coordinate(start, "start", item["contig_id"])
+        end = _coordinate(end, "end", item["contig_id"])
         if not 0 <= start < end <= len(sequence):
             raise SystemExit(
                 f"{item['contig_id']}: splice bounds [{start}, {end}) are outside the "
