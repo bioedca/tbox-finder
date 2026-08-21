@@ -273,7 +273,9 @@ def build_positive_windows(
                 "locus_length": record.locus_length,
                 "resolved_order": wd.record_order(record),
                 "host_id": None,
-                "host_seen_by_any_arm": False,
+                # A positive has no host window; the field is filled from the measurement
+                # for negatives only (``host_fold_overlap``), never asserted.
+                "host_seen_by_any_arm": None,
             }
         )
     return contigs, items
@@ -348,11 +350,60 @@ def build_negative_windows(
                 "locus_length": entry.insert_len,
                 "resolved_order": None,
                 "host_id": entry.host_id,
-                "host_seen_by_any_arm": False,
+                # Placeholder: overwritten in main() from ``host_fold_overlap``, which needs
+                # the finished contig set. A literal here was the defect (PR #133 round 2).
+                "host_seen_by_any_arm": None,
                 "splice_phase": entry.phase,
             }
         )
     return contigs, items, report
+
+
+HOST_OVERLAP_K = 32
+
+
+def host_fold_overlap(
+    contigs: Sequence[Mapping[str, Any]],
+    items: Sequence[Mapping[str, Any]],
+    folds: Mapping[str, Collection[str]],
+    context_by_id: Mapping[str, str],
+    *,
+    k: int = HOST_OVERLAP_K,
+) -> dict[str, set[str]]:
+    """Per arm, the negatives whose HOST DNA that arm's Stage-1 training fold already carries.
+
+    Selecting hosts on ``parent_nested_train == False`` constrains the mining-pool record's
+    **parent**; it does not make the DNA of the window drawn from it unseen. Measured here
+    rather than asserted: the ``host_seen_by_any_arm: False`` this replaces was a hardcoded
+    literal derived by nothing, and the disclosure beside it told the reader the negatives
+    were "clean for BOTH Stage-1 checkpoints" (PR #133 round 2).
+
+    The host portion **excludes the spliced insert**, so what is measured is the DNA the decoy
+    was embedded into, not the decoy — decoy-level exposure is already ``seen_by_counts``.
+    """
+    by_id = {contig["contig_id"]: contig for contig in contigs}
+    owners: dict[str, set[str]] = {}
+    for item in items:
+        if item["label"] != 0:
+            continue
+        contig = by_id[item["contig_id"]]
+        sequence = contig["sequence"].upper()
+        start, end = contig.get("truth_start"), contig.get("truth_end")
+        host = sequence if start is None else sequence[:start] + sequence[end:]
+        for offset in range(len(host) - k + 1):
+            owners.setdefault(host[offset : offset + k], set()).add(item["contig_id"])
+    seen: dict[str, set[str]] = {arm: set() for arm in folds}
+    for arm, fold in folds.items():
+        for record_id in fold:
+            sequence = context_by_id.get(record_id)
+            if sequence is None:
+                continue
+            sequence = sequence.upper()
+            for offset in range(len(sequence) - k + 1):
+                hit = owners.get(sequence[offset : offset + k])
+                if hit:
+                    seen[arm] |= hit
+    return seen
 
 
 def build(
@@ -537,12 +588,41 @@ def main() -> int:
         parent_cluster=parent_cluster,
     )
     contigs, items, scope = build(positives, negatives, decoys, folds, n_nested_train_rows)
+    corpus_records, _ = wd.load_corpus_records(
+        context_parquet=str(root / args.context),
+        labels_parquet=str(root / args.labels),
+        split_table=str(root / args.split_table),
+        exclude_selection_val=False,
+        exclude_gate4_eval=False,
+    )
+    host_seen = host_fold_overlap(
+        contigs, items, folds, {r.record_id: r.context_seq for r in corpus_records}
+    )
+    seen_any = set().union(*host_seen.values()) if host_seen else set()
+    for item in items:
+        if item["label"] == 0:
+            item["host_seen_by_any_arm"] = item["contig_id"] in seen_any
     scope["host_pool"] = {
         "source": args.mining_pool,
         "n_admitted": host_report["n_records"],
         "n_out_of_fold_available": len(hosts),
         "n_used": len(negatives[1]),
-        "selection": "parent_nested_train == False (clean for BOTH Stage-1 checkpoints)",
+        # What the selection actually constrains, and what it does NOT. The old string said
+        # "clean for BOTH Stage-1 checkpoints", which the measurement below contradicts.
+        "selection": (
+            "parent_nested_train == False — the mining-pool record's PARENT, not the DNA of "
+            "the window drawn from it; see overlap_with_training_folds"
+        ),
+        "overlap_with_training_folds": {
+            "k": HOST_OVERLAP_K,
+            "method": (
+                "verbatim k-mer of the host portion (spliced insert excluded) against the "
+                "arm's own Stage-1 training-fold context_seq"
+            ),
+            "by_arm": {arm: len(ids) for arm, ids in sorted(host_seen.items())},
+            "n_seen_by_any_arm": len(seen_any),
+            "n_negatives": len(negatives[1]),
+        },
     }
     if len(contigs) != len(items):
         raise SystemExit("contig/item lists diverged — they are written as one manifest")

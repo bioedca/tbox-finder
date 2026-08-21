@@ -136,7 +136,12 @@ rule precision_comparison:
         # hand-run invocation: `_cmd_report` adds the block only when `--sensitivity` is
         # passed, and `precision_problems` treats it as optional — so a rule that omitted it
         # would silently overwrite the committed artifact with a report missing the annex
-        # and still pass (CodeRabbit, PR #133).
+        # and still pass (CodeRabbit, PR #133). ⚠ These two annex reports are HAND-RUN,
+        # COMMITTED artifacts with no producing rule in this workflow: their own item tables
+        # are folded at tau = 0.7 / 0.9 and live under `data/interim/p3_16/`, which is not a
+        # committed input. Snakemake therefore accepts whatever bytes are on disk, and if an
+        # annex is regenerated out of band the parent report's `report_sha256` goes stale
+        # without the DAG noticing — regenerate the parent whenever an annex changes.
         sensitivity=[_PRECISION_SENSITIVITY[tau] for tau in _PRECISION_TAU],
     output:
         report=_PRECISION_REPORT,

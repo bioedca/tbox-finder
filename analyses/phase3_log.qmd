@@ -6938,9 +6938,12 @@ tables to one committed per-item score table, and `precision report` grades it.
 
 **Outputs.** `src/tbox_finder/integration/precision.py` · `metrics.precision_at_matched_recall`
 + `metrics.average_precision_reweighted` (with `average_precision` **delegating** to it at unit
-weight) · `reports/p3/two_stage_precision_items.json` (sha256 `04b63b0e…`) ·
-`reports/two_stage_precision.json` (sha256 `75bdef24…`) · `tests/unit/test_precision_gain.py`
-(37) · the eval-gate wiring · **ADR-0005 A13** (signed). LOCAL only: two Stage-1 passes (seconds)
+weight) · `reports/p3/two_stage_precision_items.json` (sha256 `5e6788e7…`) ·
+`reports/two_stage_precision.json` (sha256 `cec294d3…`, schema **1.1**) ·
+`reports/p3/two_stage_precision_tau07.json` (`956e81a2…`) / `_tau09.json` (`36c1b5bb…`) ·
+`scripts/mint_p3_16_benchmark.py::host_fold_overlap` · `tests/unit/test_precision_gain.py`
+(77) · the eval-gate wiring · **ADR-0005 A13** (signed). Digests are the post-review ones: the
+three review rounds below moved them four times and each round records its own. LOCAL only: two Stage-1 passes (seconds)
 and 14,220 Stage-2 payloads (~35 min on the laptop 4060, sharded). No SLURM, no DVC object, no
 checkpoint.
 
@@ -7162,7 +7165,7 @@ prose that disagreed with the artifact it cites, and to clauses that could not f
 :::
 
 ::: {.callout-important}
-## ⛔ OPEN §7 STOP — the negatives' host DNA is not "clean for BOTH Stage-1 checkpoints"
+## §7 STOP RAISED AND ANSWERED (2026-08-21) — the negatives' host DNA was not "clean for BOTH Stage-1 checkpoints"
 
 The benchmark's negatives are §9.1 decoys spliced into real mined **host windows**, and the
 committed item table publishes `scope.host_pool.selection =` *"parent_nested_train == False (clean
@@ -7179,17 +7182,68 @@ make the drawn window's DNA unseen.
 
 The gate verdict is not recomputed here and the direction of the effect is not established — seen
 flanking context could make Stage-1 more or less likely to fire there. What is established is that
-a **published cleanliness claim is unsupported by the artifact that makes it**, which is a §10.3
-matter and a §7 stop: the options (correct the disclosure to the measured overlap; re-mint the host
-pool screened against both folds and re-run the two Stage-1 + Stage-2 passes; or both) differ in
-cost by an order of magnitude and the choice is the user's. **PR #133 is not merged while this is
-open.**
+a **published cleanliness claim was unsupported by the artifact that made it**, which is a §10.3
+matter and was raised as a §7 stop.
+
+**Answered (bioedca, 2026-08-21): correct now, book the re-mint.** The minter now *measures* the
+overlap instead of stamping a literal — `host_fold_overlap` scans the host portion of every
+negative against each arm's own training-fold `context_seq` — and the benchmark was re-minted.
+Re-minting is deterministic at seed 42: the contig ids and **sequences are byte-identical** (checked
+against the previous manifest before the code changed), so the existing Stage-1 and Stage-2 arm
+tables stay valid and **no GPU pass was re-run**. Re-folding changed exactly one thing in the item
+table — `benchmark.scope.host_pool` — with `items` bit-identical.
+
+What the artifact now says: `selection` states what the rule constrains (*"the mining-pool record's
+PARENT, not the DNA of the window drawn from it"*), and a new `overlap_with_training_folds` block
+carries `by_arm {production: 115, twin: 97}`, `n_seen_by_any_arm: 115`, `k: 32` and the method.
+`host_seen_by_any_arm` is now derived per negative (115 true of 692) and `None` on positives, which
+have no host window. A new clause **refuses a report whose host pool carries no measurement**, and
+a disclosure puts the gated arm's 97 in front of the reader; the README and the manuscript state it
+too. The report schema moves **1.0 → 1.1** with the rename and the two new blocks.
+
+⏭ **Booked, not done: the screened re-mint** — rebuild the host pool excluding every window that
+overlaps either training fold, re-run both Stage-1 passes and the 14,220 Stage-2 payloads, and
+re-grade. That changes every published number and is its own step.
+:::
+
+::: {.callout-warning}
+## Review round 3 (app, automatic on `2c28b49`) — 5 findings, all real, all fixed
+
+**(minor) The new validation clauses raised instead of returning a problem.** `precision_problems`
+documents that a checker must RETURN on a payload it did not write — *"a traceback from the
+validator is indistinguishable from a crashed run"* (the PR #131 finding) — and round 2's clauses
+indexed nested keys directly. Fixed, and the contract is now **pinned by a test** that empties,
+nulls, list-replaces and scalar-replaces every block a clause reads, at the top level and one level
+down (**75 truncations**), asserting each returns a problem and none raises. Closing it also
+surfaced three payloads that were accepted *silently*: a report with **no disclosures at all**, a
+non-boolean `is_science`, and a non-gated arm whose whole prevalence sweep was emptied. All three
+now refuse.
+
+**(minor) The leader-decoy disclosure mixed a benchmark-item count with unqualified pool counts** —
+*"contributes 1 item(s): all 8 leader decoys are…"*. The 8 is the §9.1 **upstream pool** size and is
+now labelled as one.
+
+**(nit) `SCHEMA_VERSION` did not move** while the published contract did — the completeness clause
+was renamed and two blocks added. Bumped **1.0 → 1.1** and every report regenerated.
+
+**(nit) A test docstring had gone stale under its own fix**: it still described the fixture as
+having "byte-identical arm columns" after round 2 gave the arms different ones — wording that would
+invite a future editor to restore the columns and silently remove the test's bite.
+
+**(nit) The sensitivity annexes have no producing rule.** The Snakemake rule declares
+`two_stage_precision_tau{07,09}.json` as inputs, but nothing in the workflow makes them and their
+item tables live under `data/interim/`, so the DAG accepts whatever bytes are on disk and a
+regenerated annex would leave the parent's `report_sha256` stale unnoticed. Recorded in the rule's
+docstring as a hand-run committed artifact with that consequence named.
+
+Artifacts regenerated: report `cec294d3…`, item table `5e6788e7…`, τ07 `956e81a2…`, τ09 `36c1b5bb…`.
+**No point estimate, interval or block count moved in this round either.**
 :::
 
 **Validation.** Gate PASSES (above); `precision_problems` returns `[]` on the committed report,
-every clause re-deriving from the report's own numbers (the clause set grew from 26 to 48 `want()`
-sites across the two review rounds), and `is_science` / `gated` are the conjunction of the
-completeness clauses rather than assertions. **70** `test_precision_gain` + the eval-gate wiring;
+every clause re-deriving from the report's own numbers (the clause set grew from 26 to 62 `want()`
+sites across the three review rounds), and `is_science` / `gated` are the conjunction of the
+completeness clauses rather than assertions. **77** `test_precision_gain` + the eval-gate wiring;
 `average_precision`'s committed golden is **bit-unchanged** under the delegation (asserted). Full
 unit+golden+ml against a matched baseline worktree at `07ec89b`: **zero new failures** (14 FAILED
 both sides, identical sets). ruff 0.15.15 + black 25.11.0 clean.

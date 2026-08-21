@@ -138,7 +138,12 @@ from tbox_finder.metrics import (
 from tbox_finder.power import DECOY_PREVALENCE
 from tbox_finder.provenance import build_provenance
 
-SCHEMA_VERSION = "1.0"
+# 1.1 renames the completeness clause `verdict_invariant_across_prevalence` to
+# `matched_recall_verdict_invariant_across_prevalence` and adds
+# `benchmark.scope.host_pool.overlap_with_training_folds` plus
+# `stage1_threshold_sensitivity.base` / `.brackets_base` — a published-contract change, so the
+# version moves with it rather than leaving two incompatible shapes under one number.
+SCHEMA_VERSION = "1.1"
 STEP = "P3-16"
 GENERATED_BY = "src/tbox_finder/integration/precision.py"
 ADR = (
@@ -827,6 +832,12 @@ def disclosures(benchmark: Mapping[str, Any], arms: Mapping[str, Mapping[str, An
     other_arms = ", ".join(
         f"{name} {admitted[name]}/{retained[name]}" for name in sorted(arms) if name != GATED_ARM
     )
+    host_overlap = scope["host_pool"]["overlap_with_training_folds"]
+    host_others = ", ".join(
+        f"{name} {count}"
+        for name, count in sorted(host_overlap["by_arm"].items())
+        if name != GATED_ARM
+    )
     out = [
         (
             f"The gated arm is the GATE-4 eval twin, not the shipped scanner. The shipped "
@@ -848,10 +859,20 @@ def disclosures(benchmark: Mapping[str, Any], arms: Mapping[str, Mapping[str, An
             "structured_rna decoy), so that pool's contribution partly measures memorisation."
         ),
         (
+            f"The negatives' HOST windows are not unseen DNA either. Hosts are mined windows "
+            f"whose mining-pool parent is out of fold, which constrains the PARENT and not "
+            f"the window: {host_overlap['by_arm'].get(GATED_ARM)} of {scope['n_negatives']} "
+            f"negatives share a verbatim {host_overlap['k']}-mer of host DNA with the gated "
+            f"arm's own Stage-1 training fold ({host_others} for the arms reported beside "
+            "it). The spliced decoy is excluded from that count; decoy-level exposure is the "
+            "line above."
+        ),
+        (
             f"§9.1's hardest negative class contributes "
-            f"{scope['negatives_by_pool'].get('leader_decoy', 0)} item(s): all 8 leader "
-            "decoys are T-box-derived and 2 are exact substrings of training positives "
-            "(A7 pin 5); re-sourcing is deferred to P2-10b′."
+            f"{scope['negatives_by_pool'].get('leader_decoy', 0)} item(s) to THIS benchmark, "
+            "drawn from an UPSTREAM pool of 8 leader decoys — a §9.1 pool size, not a count "
+            "of benchmark items — all 8 of which are T-box-derived, 2 being exact substrings "
+            "of training positives (A7 pin 5); re-sourcing is deferred to P2-10b′."
         ),
         (
             "The ADR-0005 D7 100:1 prevalence is reached by REWEIGHTING the sampled "
@@ -966,14 +987,66 @@ def precision_problems(report: Mapping[str, Any]) -> list[str]:
         want(key in report, f"missing top-level key {key!r}")
     if problems:
         return problems
+    # …and the coarse SHAPE of every block read below, so a truncated payload comes back as a
+    # problem rather than a traceback. "A checker must RETURN a problem on a payload it did
+    # not write, never raise: a traceback from the validator is indistinguishable from a
+    # crashed run" (the PR #131 finding, restated on this PR's own new clauses).
+    for key in ("gate", "arms", "completeness"):
+        want(isinstance(report.get(key), Mapping), f"{key!r} is not a block; it cannot be read")
+    want(
+        isinstance(report.get("benchmark"), Mapping)
+        and isinstance(report["benchmark"].get("scope"), Mapping),
+        "benchmark.scope is missing or is not a block; the manifest cannot be read",
+    )
+    if problems:
+        return problems
 
     want(report["step"] == STEP, f"step is {report['step']!r}, expected {STEP!r}")
     arms = report["arms"]
     gated_arm = report.get("gated_arm")
-    want(gated_arm in arms, f"gated_arm {gated_arm!r} has no measured arm")
-    if gated_arm not in arms:
+    want(
+        isinstance(gated_arm, str) and gated_arm in arms,
+        f"gated_arm {gated_arm!r} has no measured arm",
+    )
+    if not isinstance(gated_arm, str) or gated_arm not in arms:
         return problems
     gated = arms[gated_arm]
+    # The nested blocks every clause below indexes. Checked once here so a truncated payload
+    # is a problem, not a traceback — the same reason the top-level keys are (PR #131).
+    for arm_name, arm in arms.items():
+        want(isinstance(arm, Mapping), f"arm {arm_name!r} is not a block; it cannot be read")
+        if not isinstance(arm, Mapping):
+            continue
+        for key in ("population", "prevalence", "per_pool", "matched_recall", "exposure"):
+            want(
+                isinstance(arm.get(key), Mapping) and bool(arm[key]),
+                f"arm {arm_name!r} carries no {key!r} block; it cannot be read",
+            )
+        want(
+            isinstance(arm.get("exposure"), Mapping)
+            and "n_positives_seen_by_arm" in arm["exposure"],
+            f"arm {arm_name!r} exposure carries no n_positives_seen_by_arm",
+        )
+        for system in SYSTEMS:
+            want(
+                isinstance(arm.get("matched_recall"), Mapping)
+                and isinstance(arm["matched_recall"].get(system), Mapping),
+                f"arm {arm_name!r} carries no matched-recall confusion for {system!r}",
+            )
+    for key in ("n_items", "n_positives", "n_negatives"):
+        want(
+            key in report["benchmark"]["scope"],
+            f"the benchmark manifest carries no {key!r}",
+        )
+    for arm_name, arm in arms.items():
+        if isinstance(arm.get("population"), Mapping):
+            for key in ("n_items", "n_positives", "n_negatives", "n_blocks", "ceiling_recall"):
+                want(
+                    key in arm["population"],
+                    f"arm {arm_name!r} population carries no {key!r}",
+                )
+    if problems:
+        return problems
 
     # The grade may only rest on an arm that actually held the graded positives out. This is
     # the clause the whole §7 decision turns on, so it is re-derived from the exposure counts
@@ -1069,13 +1142,14 @@ def precision_problems(report: Mapping[str, Any]) -> list[str]:
     # The matched-recall comparison must still be present and still be marked non-gated:
     # dropping it would hide the read that fails, and promoting it would re-introduce the
     # dependence on operating points D3 does not freeze until P5-01.
-    reported = report["gate"].get("reported_not_gated", {}).get("matched_recall")
+    reported_block = report["gate"].get("reported_not_gated")
+    reported = reported_block.get("matched_recall") if isinstance(reported_block, Mapping) else None
     want(
         isinstance(reported, Mapping) and "gain_pp" in reported,
         "the gate does not carry the matched-recall comparison as a reported, non-gated read",
     )
     want(
-        bool(report["gate"]["passes"]) == bool(gated["passes"]),
+        bool(report["gate"].get("passes")) == bool(gated.get("passes")),
         "gate.passes disagrees with the gated arm's own verdict",
     )
 
@@ -1085,35 +1159,52 @@ def precision_problems(report: Mapping[str, Any]) -> list[str]:
     # the sweep's per-point gains — so each of them could be rewritten in the artifact and the
     # clause set would return [] ([[gate-clauses-need-re-derivation]]). A magnitude that no
     # clause recomputes is a fabricated value the report presents as a measured one.
-    def close(observed: Any, derived: float) -> bool:
-        return (
-            isinstance(observed, (int, float))
-            and not isinstance(observed, bool)
-            and math.isclose(float(observed), derived, rel_tol=1e-9, abs_tol=1e-9)
-        )
+    # Every helper below RETURNS rather than raises on a payload it did not write: a
+    # traceback out of the validator is indistinguishable from a crashed run (the PR #131
+    # finding, restated by CodeRabbit on this PR's own new clauses).
+    def number(node: Any, *path: str) -> float | None:
+        for key in path:
+            if not isinstance(node, Mapping):
+                return None
+            node = node.get(key)
+        if isinstance(node, bool) or not isinstance(node, (int, float)):
+            return None
+        return float(node)
 
-    def gain_of(node: Mapping[str, Any]) -> float:
-        pair = node["auprc"]
-        return (float(pair["two_stage"]) - float(pair["stage1_only"])) * 100.0
+    def close(observed: Any, derived: float | None) -> bool:
+        if derived is None or isinstance(observed, bool):
+            return False
+        if not isinstance(observed, (int, float)):
+            return False
+        return math.isclose(float(observed), derived, rel_tol=1e-9, abs_tol=1e-9)
+
+    def gain_of(node: Any) -> float | None:
+        two = number(node, "auprc", "two_stage")
+        one = number(node, "auprc", "stage1_only")
+        return None if two is None or one is None else (two - one) * 100.0
+
+    gate = report["gate"] if isinstance(report.get("gate"), Mapping) else {}
+    gate_ci = gate.get("gain_ci") if isinstance(gate.get("gain_ci"), Mapping) else {}
+    population = gated.get("population") if isinstance(gated.get("population"), Mapping) else {}
 
     want(
-        close(report["gate"]["gain_pp"], gain_of(report["gate"])),
-        f"gate.gain_pp {report['gate']['gain_pp']!r} is not the difference of the AUPRCs it "
-        f"is published beside ({gain_of(report['gate'])!r})",
+        close(gate.get("gain_pp"), gain_of(gate)),
+        f"gate.gain_pp {gate.get('gain_pp')!r} is not the difference of the AUPRCs it "
+        f"is published beside ({gain_of(gate)!r})",
     )
     want(
-        report["gate"]["gain_ci"] == gated.get("auprc_gain_ci"),
+        bool(gate_ci) and gate_ci == gated.get("auprc_gain_ci"),
         "gate.gain_ci is not the gated arm's own AUPRC-gain interval; the published interval "
         "must be the one the block bootstrap produced for the statistic being graded",
     )
     want(
-        report["gate"]["gain_ci"].get("n_blocks") == gated["population"]["n_blocks"],
-        f"gate.gain_ci resamples {report['gate']['gain_ci'].get('n_blocks')!r} blocks but the "
-        f"gated arm scored {gated['population']['n_blocks']!r}",
+        gate_ci.get("n_blocks") == population.get("n_blocks"),
+        f"gate.gain_ci resamples {gate_ci.get('n_blocks')!r} blocks but the "
+        f"gated arm scored {population.get('n_blocks')!r}",
     )
     want(
-        gated["gated_prevalence_key"] == f"{report['gate']['decoy_prevalence']}:1",
-        f"the gate names prevalence {report['gate']['decoy_prevalence']!r} but the gated arm "
+        gated["gated_prevalence_key"] == f"{gate.get('decoy_prevalence')}:1",
+        f"the gate names prevalence {gate.get('decoy_prevalence')!r} but the gated arm "
         f"reads its statistic from {gated['gated_prevalence_key']!r}",
     )
     # `--n-boot` is a cost knob and no clause read it. At B = 1 the "95 % interval" collapses
@@ -1121,39 +1212,44 @@ def precision_problems(report: Mapping[str, Any]) -> list[str]:
     # certified ([[cost-knobs-can-certify]]). Both published intervals are checked: the gated
     # AUPRC one and the matched-recall one A13 keeps beside it.
     for label, interval in (
-        ("gate.gain_ci", report["gate"]["gain_ci"]),
-        ("the reported matched-recall gain_ci", gated["gain_ci"]),
+        ("gate.gain_ci", gate_ci),
+        ("the reported matched-recall gain_ci", gated.get("gain_ci")),
     ):
+        lower = number(interval, "lower")
+        centre = number(interval, "point")
+        upper = number(interval, "upper")
         want(
-            interval["lower"] <= interval["point"] <= interval["upper"],
-            f"{label} = [{interval['lower']!r}, {interval['upper']!r}] does not contain its "
-            f"own point estimate {interval['point']!r}",
+            None not in (lower, centre, upper) and lower <= centre <= upper,
+            f"{label} = [{lower!r}, {upper!r}] does not contain its own point estimate "
+            f"{centre!r}",
         )
-        tail = (1.0 - float(interval["ci_level"])) / 2.0
+        level = number(interval, "ci_level")
+        budget = number(interval, "n_boot")
+        tail = None if level is None else (1.0 - level) / 2.0
         want(
-            tail > 0.0 and int(interval["n_boot"]) * tail >= 1.0,
-            f"{label}: {interval['n_boot']!r} resamples cannot resolve a "
-            f"{interval['ci_level']!r} interval's {tail:.3%} tails — the percentile would be "
-            "an endpoint of the resample set, not a quantile of it",
+            tail is not None and budget is not None and tail > 0.0 and budget * tail >= 1.0,
+            f"{label}: {budget!r} resamples cannot resolve a {level!r} interval's tails — the "
+            "percentile would be an endpoint of the resample set, not a quantile of it",
         )
     want(
-        close(report["gate"]["gain_ci"]["point"], report["gate"]["gain_pp"]),
-        f"the interval's point estimate {report['gate']['gain_ci']['point']!r} is not the "
-        f"gain {report['gate']['gain_pp']!r} it is published beside; the CI would then be "
+        close(gate_ci.get("point"), number(gate, "gain_pp")),
+        f"the interval's point estimate {gate_ci.get('point')!r} is not the "
+        f"gain {gate.get('gain_pp')!r} it is published beside; the CI would then be "
         "resampled at a different statistic than the one graded",
     )
     # …and the reweighting the gated point was computed at is re-derived, not taken on trust.
+    n_pos = number(population, "n_positives")
+    n_neg = number(population, "n_negatives")
+    prevalence = number(gate, "decoy_prevalence")
+    derived_lambda = (
+        None
+        if None in (n_pos, n_neg, prevalence) or n_neg <= 0 or n_pos <= 0 or prevalence <= 0
+        else prevalence_lambda(int(n_pos), int(n_neg), prevalence)
+    )
     want(
-        close(
-            point.get("lambda"),
-            prevalence_lambda(
-                gated["population"]["n_positives"],
-                gated["population"]["n_negatives"],
-                float(report["gate"]["decoy_prevalence"]),
-            ),
-        ),
+        close(point.get("lambda"), derived_lambda),
         f"the gated prevalence point records lambda {point.get('lambda')!r}, which is not "
-        f"{report['gate']['decoy_prevalence']!r} decoys per positive over this benchmark's "
+        f"{gate.get('decoy_prevalence')!r} decoys per positive over this benchmark's "
         "own composition",
     )
     # `reported` was already checked to be a mapping carrying gain_pp, above.
@@ -1165,13 +1261,13 @@ def precision_problems(report: Mapping[str, Any]) -> list[str]:
             "the failing number could drift from the one that was measured",
         )
     want(
-        close(gated["auprc_gain_pp"], gain_of(point)),
-        f"the gated arm's auprc_gain_pp {gated['auprc_gain_pp']!r} is not the gain at the "
+        close(gated.get("auprc_gain_pp"), gain_of(point)),
+        f"the gated arm's auprc_gain_pp {gated.get('auprc_gain_pp')!r} is not the gain at the "
         f"prevalence point it is graded on ({gain_of(point)!r})",
     )
     for arm_name, arm in arms.items():
-        for name, node in arm["prevalence"].items():
-            if "auprc" not in node or "auprc_gain_pp" not in node:
+        for name, node in (arm.get("prevalence") or {}).items():
+            if not isinstance(node, Mapping) or "auprc" not in node or "auprc_gain_pp" not in node:
                 continue  # a separate clause above already refuses the omission
             want(
                 close(node["auprc_gain_pp"], gain_of(node)),
@@ -1183,29 +1279,71 @@ def precision_problems(report: Mapping[str, Any]) -> list[str]:
     # ── The graded population re-derived against the benchmark manifest ──────────────
     # `n_items` alone let a relabelled corpus certify while the report published the
     # manifest's composition ([[gate-must-bind-to-upstream-evidence]]).
-    by_pool = scope.get("negatives_by_pool", {})
+    # A selection RULE is not a measurement of what the drawn windows contain. The host pool
+    # published "clean for BOTH Stage-1 checkpoints" for a benchmark in which 115 of 692
+    # negatives carry host DNA the production arm trained on (PR #133 round 2).
+    host_pool = scope.get("host_pool", {})
+    overlap = host_pool.get("overlap_with_training_folds")
     want(
-        sum(by_pool.values()) == scope["n_negatives"],
-        f"the benchmark manifest's per-pool negatives sum to {sum(by_pool.values())}, not "
-        f"its own n_negatives {scope['n_negatives']!r}",
+        isinstance(overlap, Mapping) and isinstance(overlap.get("by_arm"), Mapping),
+        "the benchmark's host pool carries no measured overlap with the Stage-1 training "
+        "folds; a selection rule is not a measurement of what the drawn windows contain",
+    )
+    if isinstance(overlap, Mapping) and isinstance(overlap.get("by_arm"), Mapping):
+        by_arm = overlap["by_arm"]
+        want(
+            set(by_arm) == set(arms),
+            f"the host-overlap measurement covers {sorted(by_arm)!r}, not the arms this "
+            f"report grades ({sorted(arms)!r})",
+        )
+        counts = [
+            int(value)
+            for value in by_arm.values()
+            if isinstance(value, int) and not isinstance(value, bool)
+        ] or [0]
+        union = overlap.get("n_seen_by_any_arm")
+        want(
+            isinstance(union, bool) is False
+            and isinstance(union, int)
+            and max(counts) <= union <= sum(counts),
+            f"the host-overlap union {union!r} is not between the largest single arm "
+            f"({max(counts)}) and the sum of the arms ({sum(counts)}); it cannot be the "
+            "union it names",
+        )
+        want(
+            overlap.get("n_negatives") == scope["n_negatives"],
+            f"the host-overlap measurement was taken over {overlap.get('n_negatives')!r} "
+            f"negatives, not this benchmark's {scope['n_negatives']!r}",
+        )
+
+    by_pool = scope.get("negatives_by_pool") or {}
+    pool_total = sum(value for value in by_pool.values() if isinstance(value, (int, float)))
+    want(
+        pool_total == scope.get("n_negatives"),
+        f"the benchmark manifest's per-pool negatives sum to {pool_total}, not "
+        f"its own n_negatives {scope.get('n_negatives')!r}",
     )
     want(
-        scope.get("n_blocks") == gated["population"]["n_blocks"],
+        scope.get("n_blocks") == population.get("n_blocks"),
         f"the manifest records {scope.get('n_blocks')!r} blocks but the gated arm resampled "
-        f"{gated['population']['n_blocks']!r}",
+        f"{population.get('n_blocks')!r}",
     )
     for arm_name, arm in arms.items():
+        arm_population = arm.get("population") if isinstance(arm.get("population"), Mapping) else {}
+        arm_pools = arm.get("per_pool") if isinstance(arm.get("per_pool"), Mapping) else {}
         for field in ("n_positives", "n_negatives"):
             want(
-                arm["population"][field] == scope[field],
-                f"arm {arm_name!r} graded {arm['population'][field]!r} {field[2:]} but the "
-                f"benchmark manifest declares {scope[field]!r}",
+                arm_population.get(field) == scope.get(field),
+                f"arm {arm_name!r} graded {arm_population.get(field)!r} {field[2:]} but the "
+                f"benchmark manifest declares {scope.get(field)!r}",
             )
         for pool, count in by_pool.items():
+            scored = arm_pools.get(pool)
+            scored = scored.get("n") if isinstance(scored, Mapping) else None
             want(
-                arm["per_pool"].get(pool, {}).get("n") == count,
-                f"arm {arm_name!r} scored {arm['per_pool'].get(pool, {}).get('n')!r} items "
-                f"from pool {pool!r}; the manifest declares {count!r}",
+                scored == count,
+                f"arm {arm_name!r} scored {scored!r} items from pool {pool!r}; the manifest "
+                f"declares {count!r}",
             )
 
     # Prevalence-invariance, re-derived from the sweep rather than asserted in prose.
@@ -1234,69 +1372,76 @@ def precision_problems(report: Mapping[str, Any]) -> list[str]:
     )
 
     sensitivity = report.get("stage1_threshold_sensitivity")
-    if sensitivity is not None:
+    if sensitivity is not None and not isinstance(sensitivity, Mapping):
+        problems.append(
+            "stage1_threshold_sensitivity is present but is not a block; it cannot be read"
+        )
+    elif sensitivity is not None:
+        rows = [row for row in (sensitivity.get("points") or []) if isinstance(row, Mapping)]
+        base_node = sensitivity.get("base") if isinstance(sensitivity.get("base"), Mapping) else {}
         want(
-            sensitivity["n_points"] >= 2,
+            number(sensitivity, "n_points") is not None and sensitivity["n_points"] >= 2,
             "the Stage-1 threshold sensitivity has fewer than two points; an invariance "
             "read over one point is vacuous",
         )
         want(
-            bool(sensitivity["all_labels_match"]),
+            bool(sensitivity.get("all_labels_match")),
             "a Stage-1 threshold sensitivity point's label disagrees with the threshold its "
             "own report records — the table would be a caption, not a measurement",
         )
         want(
-            bool(sensitivity["verdict_invariant"]),
+            bool(sensitivity.get("verdict_invariant")),
             "the gate's verdict changes across the Stage-1 threshold sweep; ADR-0005 D3 "
             "leaves that value unpinned until P5-01, so the gate would rest on it",
         )
         # The swept points are other reports. Unless the annex also carries the threshold
         # THIS report was measured at, `verdict_invariant` can be true over a set that
         # excludes the only threshold the verdict is actually published at.
+        sources = report.get("sources") if isinstance(report.get("sources"), Mapping) else {}
         want(
-            sensitivity.get("base", {}).get("stage1_threshold")
-            == report.get("sources", {}).get("stage1_threshold"),
+            base_node.get("stage1_threshold") == sources.get("stage1_threshold"),
             "the Stage-1 threshold sensitivity does not carry the threshold this report was "
-            f"measured at ({report.get('sources', {}).get('stage1_threshold')!r}), so its "
+            f"measured at ({sources.get('stage1_threshold')!r}), so its "
             "invariance read need not cover the point the gate is published at",
         )
         want(
-            bool(sensitivity.get("base", {}).get("passes")) == bool(report["gate"]["passes"]),
+            bool(base_node.get("passes")) == bool(gate.get("passes")),
             "the Stage-1 threshold sensitivity's base verdict disagrees with the gate it is "
             "an annex to",
         )
         # …and the three summary fields above are re-derived from the rows they summarise.
         # Read as written they are self-certifying: the same call that built the table also
         # wrote the verdicts about it ([[gate-clauses-need-re-derivation]]).
-        rows = sensitivity.get("points", [])
-        base_node = sensitivity.get("base", {})
         want(
-            sensitivity["n_points"] == len(rows),
-            f"the sensitivity annex claims {sensitivity['n_points']!r} points and carries "
+            sensitivity.get("n_points") == len(rows),
+            f"the sensitivity annex claims {sensitivity.get('n_points')!r} points and carries "
             f"{len(rows)}",
         )
         want(
             all(
-                bool(row["label_matches_report"])
-                == (row["declared_stage1_threshold"] == row["measured_stage1_threshold"])
+                bool(row.get("label_matches_report"))
+                == (row.get("declared_stage1_threshold") == row.get("measured_stage1_threshold"))
                 for row in rows
             ),
             "a sensitivity point's label_matches_report is not the comparison it names",
         )
         want(
-            bool(sensitivity["all_labels_match"])
-            == all(bool(row["label_matches_report"]) for row in rows),
+            bool(sensitivity.get("all_labels_match"))
+            == all(bool(row.get("label_matches_report")) for row in rows),
             "the annex's all_labels_match is not the conjunction of its own rows",
         )
         want(
-            bool(sensitivity["verdict_invariant"])
-            == (len({*(bool(row["passes"]) for row in rows), bool(base_node.get("passes"))}) <= 1),
+            bool(sensitivity.get("verdict_invariant"))
+            == (
+                len({*(bool(row.get("passes")) for row in rows), bool(base_node.get("passes"))})
+                <= 1
+            ),
             "the annex's verdict_invariant is not re-derivable from its rows and its base",
         )
         swept = [
-            row["measured_stage1_threshold"]
+            row.get("measured_stage1_threshold")
             for row in rows
-            if row["measured_stage1_threshold"] is not None
+            if isinstance(row.get("measured_stage1_threshold"), (int, float))
         ]
         base_tau = base_node.get("stage1_threshold")
         want(
@@ -1312,8 +1457,24 @@ def precision_problems(report: Mapping[str, Any]) -> list[str]:
     # correctly derived is_science = False from a FALSE clause — i.e. fire on exactly the
     # honest incomplete run the field exists to mark (CodeRabbit, PR #133).
     want(
+        isinstance(report.get("is_science"), bool),
+        f"is_science is {report.get('is_science')!r}, not a boolean; a truthy stand-in would "
+        "satisfy the conjunction clause below without being the conjunction",
+    )
+    want(
         bool(report.get("is_science")) == all(bool(v) for v in completeness.values()),
         "is_science is not the conjunction of the completeness clauses",
+    )
+    # A gate artifact with no disclosures is not a publishable one: the arm choice, the
+    # memorised pools, the host overlap and the power floor are all carried there and nothing
+    # else in the report states them.
+    disclosures_block = report.get("disclosures")
+    want(
+        isinstance(disclosures_block, list)
+        and bool(disclosures_block)
+        and all(isinstance(line, str) and line.strip() for line in disclosures_block),
+        "the report carries no disclosures; the arm choice, the memorised pools and the host "
+        "overlap are stated nowhere else",
     )
     want(
         bool(report.get("gated")) == bool(report.get("is_science")),

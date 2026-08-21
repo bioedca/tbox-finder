@@ -403,7 +403,13 @@ four negative classes and spliced into real mined host windows by the same
 operator that places them into the training stream. Both systems share one
 candidate-generation stage — the same checkpoint, the same locus-construction
 rule, the same emitted loci — and differ only in the score used to rank a
-candidate, so the comparison isolates the re-ranker.
+candidate, so the comparison isolates the re-ranker. The host windows are drawn
+from mined loci whose source record lies outside the training fold, which
+constrains the source record and not the window itself: 97 of the 692 negatives
+share a verbatim 32-nt stretch of host DNA with the training fold of the arm we
+grade (115 for the arm reported beside it), measured over the host portion with
+the spliced decoy excluded. We report that overlap rather than assert its
+absence.
 
 Two constraints shape what can be graded. First, no Stage-1 checkpoint in this
 work has an in-distribution held-out population: the shipped scanner trained on

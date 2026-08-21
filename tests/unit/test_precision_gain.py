@@ -120,7 +120,8 @@ def test_the_verdict_is_invariant_under_prevalence_but_the_magnitude_is_not():
 
     Under ``tp/(tp + lambda*fp)`` the *sign* of the difference between two arms is
     lambda-independent while the magnitude is not; if this ever fails, the report's
-    ``verdict_invariant_across_prevalence`` clause is not a tautology and the gate would
+    ``matched_recall_verdict_invariant_across_prevalence`` clause is not a tautology and the
+    gate would
     genuinely depend on an unpinned-for-P3 number."""
     two = {"tp": 90, "fp": 2}
     one = {"tp": 90, "fp": 9}
@@ -526,6 +527,17 @@ def _folded(n_pos: int = 40, n_neg: int = 40) -> dict:
                 # block count is re-derived against the arms' own resampling unit.
                 "geometry": "1024-nt scan windows",
                 "n_blocks": len({item["block"] for item in items}),
+                # Measured by the minter, never asserted: a selection rule on the host's
+                # PARENT does not make the drawn window's DNA unseen (PR #133 round 2).
+                "host_pool": {
+                    "overlap_with_training_folds": {
+                        "k": 32,
+                        "method": "verbatim k-mer of the host portion",
+                        "by_arm": {"production": 3, "twin": 2},
+                        "n_seen_by_any_arm": 3,
+                        "n_negatives": n_neg,
+                    }
+                },
                 "negatives_by_pool": {"gc_background": n_neg // 2, "structured_rna": n_neg // 2},
                 "seen_by_counts": {
                     "twin": {"positives": 0, "negatives": n_neg // 2},
@@ -709,6 +721,14 @@ def _disclosure_inputs(*, admitted: int, retained: int, geometry: str) -> tuple[
             "seen_by_counts": {
                 P.GATED_ARM: {"positives": 0, "negatives": 20},
                 "production": {"positives": 100, "negatives": 60},
+            },
+            "host_pool": {
+                "overlap_with_training_folds": {
+                    "k": 32,
+                    "by_arm": {"production": 9, P.GATED_ARM: 7},
+                    "n_seen_by_any_arm": 9,
+                    "n_negatives": 60,
+                }
             },
         }
     }
@@ -938,8 +958,9 @@ def test_the_bootstrap_resamples_blocks_not_records():
 
 
 def test_the_two_arms_are_graded_on_their_own_columns():
-    """With byte-identical arm columns in the fixture, swapping the two inside ``arm_items``
-    changes nothing observable and the whole suite stays green under the mix-up."""
+    """The fixture gives the two arms DIFFERENT ``stage1_only`` columns on purpose: with
+    byte-identical columns, swapping the two inside ``arm_items`` changes nothing observable
+    and the whole suite stays green under the mix-up."""
     report = P.precision_gain(
         _folded(),
         stage2_operating_point=0.5,
@@ -955,3 +976,90 @@ def test_the_two_arms_are_graded_on_their_own_columns():
     # by a wider margin, so its Stage-1-only AUPRC is the higher of the two. A swapped lookup
     # inverts this comparison.
     assert production > twin
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# The host pool's disclosure must be a measurement, not a selection rule
+# ──────────────────────────────────────────────────────────────────────────────
+def test_a_host_pool_with_no_measured_overlap_is_refused(report):
+    """The published string was "parent_nested_train == False (clean for BOTH Stage-1
+    checkpoints)" for a benchmark in which 115 of 692 negatives carry host DNA the production
+    arm trained on. A rule about the host's PARENT is not a measurement of the window."""
+    broken = copy.deepcopy(report)
+    broken["benchmark"]["scope"]["host_pool"].pop("overlap_with_training_folds")
+    assert any("no measured overlap" in p for p in P.precision_problems(broken))
+
+
+def test_a_host_overlap_that_misses_an_arm_is_refused(report):
+    broken = copy.deepcopy(report)
+    overlap = broken["benchmark"]["scope"]["host_pool"]["overlap_with_training_folds"]
+    overlap["by_arm"].pop(P.GATED_ARM)
+    assert any("not the arms this" in p for p in P.precision_problems(broken))
+
+
+@pytest.mark.parametrize("union", [0, 10_000])
+def test_a_host_overlap_union_outside_its_own_arms_is_refused(report, union):
+    """Below the largest arm it cannot be a union; above their sum it cannot be one either."""
+    broken = copy.deepcopy(report)
+    broken["benchmark"]["scope"]["host_pool"]["overlap_with_training_folds"][
+        "n_seen_by_any_arm"
+    ] = union
+    assert any("is not between the largest" in p for p in P.precision_problems(broken))
+
+
+def test_a_host_overlap_measured_over_a_different_corpus_is_refused(report):
+    broken = copy.deepcopy(report)
+    broken["benchmark"]["scope"]["host_pool"]["overlap_with_training_folds"]["n_negatives"] = 7
+    assert any("negatives, not this benchmark's" in p for p in P.precision_problems(broken))
+
+
+def test_the_committed_report_discloses_the_measured_host_overlap(report):
+    """The artifact half: the number a reader is owed must be IN the disclosure, and it must
+    be the gated arm's own, not the larger production one."""
+    overlap = report["benchmark"]["scope"]["host_pool"]["overlap_with_training_folds"]
+    gated = overlap["by_arm"][P.GATED_ARM]
+    assert gated > 0, "if this ever reaches zero the disclosure below stops being a caveat"
+    line = next(text for text in report["disclosures"] if "HOST windows" in text)
+    assert f"{gated} of {report['benchmark']['scope']['n_negatives']} negatives" in line
+    assert "clean for BOTH" not in json.dumps(report)
+
+
+def test_the_checker_returns_a_problem_on_a_truncated_payload_and_never_raises(report):
+    """The contract the module states in its own docstring: "a traceback from the validator
+    is indistinguishable from a crashed run". Every block a clause reads is emptied, nulled,
+    replaced by a list and by a scalar, at the top level and one level down."""
+    paths = [
+        ("gate",),
+        ("arms",),
+        ("benchmark",),
+        ("completeness",),
+        ("sources",),
+        ("gated_arm",),
+        ("is_science",),
+        ("disclosures",),
+        # `stage1_threshold_sensitivity` itself is legitimately optional (a report produced
+        # without --sensitivity carries none), so only its INNER blocks are swept.
+        ("gate", "gain_ci"),
+        ("gate", "auprc"),
+        ("gate", "reported_not_gated"),
+        ("benchmark", "scope"),
+        ("stage1_threshold_sensitivity", "points"),
+        ("stage1_threshold_sensitivity", "base"),
+        *(
+            ("arms", arm, block)
+            for arm in report["arms"]
+            for block in ("population", "prevalence", "per_pool", "matched_recall", "exposure")
+        ),
+    ]
+    checked = 0
+    for path in paths:
+        for value in (None, {}, [], "x", 0):
+            broken = copy.deepcopy(report)
+            node = broken
+            for key in path[:-1]:
+                node = node[key]
+            node[path[-1]] = value
+            problems = P.precision_problems(broken)  # must not raise
+            assert problems, f"{'/'.join(path)} = {value!r} was accepted silently"
+            checked += 1
+    assert checked == len(paths) * 5
