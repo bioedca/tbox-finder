@@ -65,8 +65,16 @@
 # rows, through the trainer's own `forward_backward`, and the job REFUSES to train if the
 # configured batch's worst case does not fit. It costs ~2 minutes and it cannot be wrong about
 # the model it measured — `--backbone` is threaded all the way to `Stage2TrainConfig`.
-# `--time=02:00:00` is P3-06's envelope for a 6.5x LARGER model on the same corpus, so it bounds
-# this arm generously; the real wall time is whatever the sizing report's step times imply.
+# ⚠ `--time=04:00:00`, not P3-06's 02:00:00, and the difference is not padding. P3-06's two
+# hours covered TRAINING ONLY — its scoring ran as separate steps. This job also runs legs (3)
+# and (4), the in-distribution and leave-clade-out scoring passes, and those are SINGLE-PROCESS
+# inference over the corpus while all 8 GPUs sit allocated. Disclosed rather than hidden: the
+# arm's artifacts are kept together in one job deliberately (one submit-ack, one provenance
+# chain, and the scores are produced by the same process state that trained the weights), and
+# the cost is idle GPUs during the scoring tail. Sizing the wall clock to the training half
+# alone is how a job dies at the limit with a trained checkpoint it never got to write out.
+# imp.md's own Compute line says est-wall ~4h; this agrees with it. The real number is whatever
+# the sizing report's step times imply, and it is measured in-job before training starts.
 #
 # WHERE:   cluster `gpu` partition, EIGHT RTX A4000 (sm_86). env **tbox-ml-rnafm** (ADR-0002
 #          A15 — NOT ml-rna, which cannot load this checkpoint). No --nodelist (never pin).
@@ -104,7 +112,7 @@
 #SBATCH --gres=gpu:a4000:8
 #SBATCH --cpus-per-task=32
 #SBATCH --mem=96G
-#SBATCH --time=02:00:00
+#SBATCH --time=04:00:00
 #SBATCH --output=reports/p3/sweep_rnafm/slurm_%j.out
 #SBATCH --error=reports/p3/sweep_rnafm/slurm_%j.err
 # No --account / --qos (accounting disabled), no --nodelist (never pin; `one` is often down and
