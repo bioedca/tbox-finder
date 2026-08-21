@@ -556,6 +556,20 @@ class Stage2TrainConfig:
         # (the job-669 class). The allow-list is closed, so a typo cannot degrade to "load the
         # default", which is how a comparator ends up fine-tuning the production model.
         spec = resolve_backbone(self.backbone)
+        # Refuse checkpointing on a port that cannot run it — HERE, at compose time on the
+        # login node, not after the queue wait. SLURM job 1370 died in its sizing leg on
+        # exactly this: multimolecule's RNA-FM adds its ABSOLUTE position embeddings in place
+        # (`modeling_rnafm.py:728`) while checkpointing makes the embedding output a leaf that
+        # requires grad. RiNALMo is rotary and never reaches that branch, which is why the
+        # combination had never been exercised. The flag is a knob a sweep line can set, so
+        # the guard belongs where the config is built rather than in one launcher's defaults.
+        if self.gradient_checkpointing and not spec.gradient_checkpointing_usable:
+            raise ValueError(
+                f"gradient_checkpointing=True is not usable on backbone {spec.key!r}: "
+                f"{spec.gradient_checkpointing_note}. Run this arm with "
+                "gradient_checkpointing=false — it is not a tuning preference here, the "
+                "forward raises."
+            )
         # ...and refuse a non-production arm aimed at the production destinations. The shipped
         # checkpoint dir is DVC-tracked and holds the six P3-06 arms; `train_stage2` clears and
         # rewrites `checkpoint_dir`, so inheriting it would destroy them, and a shared

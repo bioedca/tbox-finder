@@ -19,6 +19,7 @@ from typing import Any
 
 import pytest
 
+from tbox_finder.models import rna_backbone_registry as BR
 from tbox_finder.stage2 import losses as L
 from tbox_finder.stage2 import sizing as S
 from tbox_finder.stage2 import train as T
@@ -84,6 +85,10 @@ def _measurements(**over: Any) -> list[dict[str, Any]]:
             "peak_vram_gib_per_step": [3.0, 3.0, 3.0],
             "step_ms": [100.0],
             "padded_tokens": 552,
+            # The flag each point actually ran under. `checkpointing_skip_is_earned`
+            # cross-checks it against the port's recorded usability, so a sweep cannot
+            # measure one configuration while the report claims another.
+            "gradient_checkpointing": True,
         }
         for b in (4, 2)
         for r in ("worst_case", "typical")
@@ -98,8 +103,19 @@ def _report(**over: Any) -> dict[str, Any]:
         "measurements": _measurements(),
         "population": {"n_rows": 200, "n_tokens_max": 552},
         "device": {"is_cuda": True, "name": "NVIDIA RTX A4000", "total_memory_gib": 15.6},
-        "checkpointing": {"on_peak_gib": 3.0, "off_peak_gib": 9.0, "saving_ratio": 3.0},
+        "checkpointing": {
+            "on_peak_gib": 3.0,
+            "off_peak_gib": 9.0,
+            "saving_ratio": 3.0,
+            # The production port CAN run checkpointing (it is merely a no-op there), so the
+            # fixture's sweep points carry the flag ON and the comparison is measurable.
+            "usable_on_this_backbone": True,
+        },
         "config": {"batch_sweep": [4, 2], "steps": 6},
+        "backbone": {
+            **BR.backbone_summary(BR.resolve_backbone(BR.PRODUCTION_BACKBONE)),
+            "requested_key": BR.PRODUCTION_BACKBONE,
+        },
     }
     payload.update(over)
     return S.build_report(**payload)
@@ -153,8 +169,16 @@ def test_each_clause_bites_on_its_own_evidence(mutate: Any, clause: str) -> None
         "measurements": _measurements(),
         "population": {"n_rows": 200},
         "device": {"is_cuda": True, "name": "A4000"},
-        "checkpointing": {"on_peak_gib": 3.0, "off_peak_gib": 9.0},
+        "checkpointing": {
+            "on_peak_gib": 3.0,
+            "off_peak_gib": 9.0,
+            "usable_on_this_backbone": True,
+        },
         "config": {},
+        "backbone": {
+            **BR.backbone_summary(BR.resolve_backbone(BR.PRODUCTION_BACKBONE)),
+            "requested_key": BR.PRODUCTION_BACKBONE,
+        },
     }
     mutate(payload)
     assert S.derive_clauses(S.build_report(**payload))[clause] is False
@@ -345,8 +369,16 @@ def test_a_point_that_measured_fewer_rows_than_it_requested_is_refused() -> None
         "measurements": [dict(m, measured_batch_size=3) for m in _measurements()],
         "population": {"n_rows": 200},
         "device": {"is_cuda": True, "name": "A4000", "total_memory_gib": 15.6},
-        "checkpointing": {"on_peak_gib": 3.0, "off_peak_gib": 9.0},
+        "checkpointing": {
+            "on_peak_gib": 3.0,
+            "off_peak_gib": 9.0,
+            "usable_on_this_backbone": True,
+        },
         "config": {},
+        "backbone": {
+            **BR.backbone_summary(BR.resolve_backbone(BR.PRODUCTION_BACKBONE)),
+            "requested_key": BR.PRODUCTION_BACKBONE,
+        },
     }
     assert S.derive_clauses(S.build_report(**payload))["measured_the_requested_batch"] is False
     # Positive control: the honest fixture passes.
@@ -364,3 +396,124 @@ def test_a_stale_recommendation_is_caught_by_the_validator() -> None:
     report["recommendation"] = {"batch_size": 8, "basis": "fits with headroom"}
     problems = S.validate_report(report)
     assert any("recommendation" in p for p in problems), problems
+
+
+# ======================================================================================
+# P3-17 — checkpointing is a property of the PORT, not a preference (ADR-0002 A15)
+# ======================================================================================
+def test_gradient_checkpointing_usability_is_recorded_per_backbone() -> None:
+    """The two arms genuinely differ, and neither answer is "it helps".
+
+    On the rotary production backbone checkpointing RUNS and is a measured no-op; on the
+    RNA-FM port it RAISES, because that port adds its absolute position embeddings in place
+    while checkpointing makes the embedding output a leaf requiring grad. SLURM job 1370 died
+    on exactly that, in the sizing leg, before any training.
+    """
+    prod = BR.resolve_backbone(BR.PRODUCTION_BACKBONE)
+    comp = BR.resolve_backbone(BR.COMPARATOR_BACKBONE)
+    assert prod.gradient_checkpointing_usable is True
+    assert comp.gradient_checkpointing_usable is False
+    # The note must say WHY, or an absent measurement downstream is unexplainable.
+    assert "in place" in comp.gradient_checkpointing_note.lower()
+    assert "no-op" in prod.gradient_checkpointing_note.lower()
+
+
+def test_a_config_that_enables_checkpointing_on_a_port_that_cannot_run_it_is_refused() -> None:
+    """Refused at COMPOSE time on the login node — job 1370 discovered it after the queue."""
+    kw = dict(
+        checkpoint_dir=T.default_checkpoint_dir(BR.COMPARATOR_BACKBONE),
+        report_path=T.default_report_path(BR.COMPARATOR_BACKBONE),
+    )
+    with pytest.raises(ValueError, match="not usable on backbone"):
+        T.Stage2TrainConfig(backbone=BR.COMPARATOR_BACKBONE, gradient_checkpointing=True, **kw)
+    # Positive controls, both directions: the comparator runs with it off, and the production
+    # arm is unaffected — so the refusal is not firing on everything
+    # ([[raises-test-needs-a-positive-control]]).
+    assert (
+        T.Stage2TrainConfig(
+            backbone=BR.COMPARATOR_BACKBONE, gradient_checkpointing=False, **kw
+        ).gradient_checkpointing
+        is False
+    )
+    assert T.Stage2TrainConfig(gradient_checkpointing=True).gradient_checkpointing is True
+
+
+def test_an_unmeasurable_checkpointing_comparison_is_STATED_not_omitted() -> None:
+    """An absent measurement must be a recorded fact, not a missing key.
+
+    The two arms' sizing reports are asymmetric — the comparator's carries one measurement
+    fewer — and that asymmetry has to be visible to a reader rather than inferred.
+    """
+    comp = BR.resolve_backbone(BR.COMPARATOR_BACKBONE)
+    payload = {
+        "measurements": _measurements(gradient_checkpointing=False),
+        "population": {"n_rows": 200, "n_tokens_max": 552},
+        "device": {"is_cuda": True, "name": "NVIDIA RTX A4000", "total_memory_gib": 15.6},
+        "checkpointing": {
+            "batch_size": 2,
+            "on_peak_gib": None,
+            "off_peak_gib": None,
+            "usable_on_this_backbone": False,
+            "usability_note": comp.gradient_checkpointing_note,
+            "comparison_skipped_reason": (
+                f"gradient checkpointing is not usable on backbone {comp.key!r}, so there is "
+                f"no 'on' arm to compare against: {comp.gradient_checkpointing_note}"
+            ),
+        },
+        "config": {"batch_sweep": [4, 2], "steps": 6, "gradient_checkpointing": False},
+        "backbone": {**BR.backbone_summary(comp), "requested_key": comp.key},
+    }
+    report = S.build_report(**payload)
+    assert report["gate"]["overall_pass"] is True, report["gate"]["failed"]
+    assert S.validate_report(report) == []
+    ckpt = report["gradient_checkpointing"]
+    assert ckpt["usable_on_this_backbone"] is False
+    assert ckpt["comparison_skipped_reason"]
+    assert report["backbone"]["requested_key"] == comp.key
+
+
+def test_a_skip_reason_cannot_be_asserted_on_a_port_that_CAN_run_it() -> None:
+    """`checkpointing_effect_measured` accepts any non-null reason, so on its own it lets a run
+    opt out of the comparison by writing a sentence. `checkpointing_skip_is_earned` binds the
+    skip to the report's own recorded evidence."""
+    payload = {
+        "measurements": _measurements(),
+        "population": {"n_rows": 200, "n_tokens_max": 552},
+        "device": {"is_cuda": True, "name": "A4000", "total_memory_gib": 15.6},
+        "checkpointing": {
+            "on_peak_gib": None,
+            "off_peak_gib": None,
+            "usable_on_this_backbone": True,  # it CAN run it...
+            "comparison_skipped_reason": "we did not feel like measuring it",  # ...but didn't
+        },
+        "config": {},
+        "backbone": {
+            **BR.backbone_summary(BR.resolve_backbone(BR.PRODUCTION_BACKBONE)),
+            "requested_key": BR.PRODUCTION_BACKBONE,
+        },
+    }
+    clauses = S.derive_clauses(S.build_report(**payload))
+    assert clauses["checkpointing_effect_measured"] is True, "the weaker clause is satisfied"
+    assert clauses["checkpointing_skip_is_earned"] is False, "the binding clause must refuse"
+
+
+def test_the_sweep_flag_must_match_the_recorded_usability() -> None:
+    """A report claiming one configuration while its points measured another is refused —
+    sizing a setting the arm cannot run measures a configuration that never trains."""
+    comp = BR.resolve_backbone(BR.COMPARATOR_BACKBONE)
+    payload = {
+        # Points say they ran WITH checkpointing...
+        "measurements": _measurements(gradient_checkpointing=True),
+        "population": {"n_rows": 200, "n_tokens_max": 552},
+        "device": {"is_cuda": True, "name": "A4000", "total_memory_gib": 15.6},
+        # ...while the report says the port cannot run it.
+        "checkpointing": {
+            "on_peak_gib": None,
+            "off_peak_gib": None,
+            "usable_on_this_backbone": False,
+            "comparison_skipped_reason": "not usable",
+        },
+        "config": {},
+        "backbone": {**BR.backbone_summary(comp), "requested_key": comp.key},
+    }
+    assert S.derive_clauses(S.build_report(**payload))["checkpointing_skip_is_earned"] is False

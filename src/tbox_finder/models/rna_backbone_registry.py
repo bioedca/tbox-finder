@@ -114,6 +114,20 @@ class RnaBackbone:
     expected_param_count: int
     #: The conda lock an arm using this backbone runs under (ADR-0002 A15). The two differ.
     env_lock: str
+    #: Whether the training path can RUN with gradient checkpointing enabled — a property of
+    #: the port, measured, not a preference.
+    #:
+    #: ⚠ This is not "does it help". On ``rinalmo-giga`` checkpointing runs and is a measured
+    #: **no-op** (saving ratio 0.9986 across 36 flagged modules, P3-06); on ``rnafm`` it
+    #: **raises**, because that port adds its ABSOLUTE position embeddings in place
+    #: (``modeling_rnafm.py:728``, ``embeddings += position_embeddings``) while checkpointing
+    #: forces the embedding output to be a leaf that requires grad. RiNALMo is rotary, so it
+    #: never reaches that branch — which is why nothing in this repo hit it until P3-17's
+    #: SLURM job 1370 died in its sizing leg. Isolated to a 2x2 on a cluster A4000
+    #: (2026-08-21): rnafm x on -> RuntimeError, rnafm x off -> OK, rinalmo x both -> OK.
+    gradient_checkpointing_usable: bool
+    #: Why, in one line, for the report that has to explain an absent measurement.
+    gradient_checkpointing_note: str
     role: str
     #: Size as PRD §10.2 words it, for a human-readable table column. A label, not a count.
     prd_label: str
@@ -140,6 +154,12 @@ BACKBONES: Mapping[str, RnaBackbone] = MappingProxyType(
             vocab_size=28,
             expected_param_count=649_239_051,
             env_lock="envs/ml-rna.conda-lock.yml",
+            gradient_checkpointing_usable=True,
+            gradient_checkpointing_note=(
+                "runs, but is a measured NO-OP on this port: the encoder loop never calls "
+                "_gradient_checkpointing_func, so 36 modules carry a flag nothing reads "
+                "(peak 3.1640 vs 3.1595 GiB, saving ratio 0.9986; P3-06 sizing, job 1051)"
+            ),
             role="production",
             prd_label="650M",
         ),
@@ -156,6 +176,14 @@ BACKBONES: Mapping[str, RnaBackbone] = MappingProxyType(
             vocab_size=28,
             expected_param_count=99_111_680,
             env_lock="envs/ml-rnafm.conda-lock.yml",
+            gradient_checkpointing_usable=False,
+            gradient_checkpointing_note=(
+                "RAISES: this port adds its absolute position embeddings IN PLACE "
+                "(modeling_rnafm.py:728) and checkpointing makes the embedding output a leaf "
+                "requiring grad -> 'a leaf Variable that requires grad is being used in an "
+                "in-place operation'. Measured on a cluster A4000 2026-08-21 (SLURM job 1370, "
+                "then isolated to a 2x2 against rotary rinalmo-giga, which is unaffected)"
+            ),
             role="comparator",
             prd_label="~100M",
         ),
@@ -234,6 +262,8 @@ def backbone_summary(spec: RnaBackbone) -> dict[str, object]:
         "vocab_size": int(spec.vocab_size),
         "expected_param_count": int(spec.expected_param_count),
         "env_lock": spec.env_lock,
+        "gradient_checkpointing_usable": bool(spec.gradient_checkpointing_usable),
+        "gradient_checkpointing_note": spec.gradient_checkpointing_note,
         "role": spec.role,
         "prd_label": spec.prd_label,
     }

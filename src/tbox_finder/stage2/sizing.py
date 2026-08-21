@@ -45,7 +45,11 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from tbox_finder.models.rna_backbone_registry import PRODUCTION_BACKBONE
+from tbox_finder.models.rna_backbone_registry import (
+    PRODUCTION_BACKBONE,
+    backbone_summary,
+    resolve_backbone,
+)
 from tbox_finder.stage2 import heads as H
 from tbox_finder.stage2 import losses as L
 from tbox_finder.stage2 import train as T
@@ -66,7 +70,11 @@ __all__ = [
 #: and `recommendation` became validator-re-derived. Job 1051's committed report is schema 1;
 #: its numbers stand, but it does not carry the schema-2 clause and its recommendation predates
 #: the computed-headroom shape.
-SCHEMA_VERSION = "2"
+#: Bumped 2 -> 3 at P3-17: the report gains a `backbone` block and the clause set gains
+#: `checkpointing_skip_is_earned`, and a clause set is part of a report's shape
+#: ([[new-gate-clause-invalidates-old-reports]]). Job 1051's committed report is schema 2; its
+#: numbers stand and it is not regenerated.
+SCHEMA_VERSION = "3"
 STEP = "P3-06-sizing"
 DEFAULT_OUT = "reports/p3/stage2_sizing.json"
 
@@ -281,6 +289,21 @@ def derive_clauses(report: Mapping[str, Any]) -> dict[str, bool]:
             ckpt.get("on_peak_gib") is not None and ckpt.get("off_peak_gib") is not None
         )
         or ckpt.get("comparison_skipped_reason") is not None,
+        # ...and a SKIP has to be earned. The clause above accepts any non-null reason, so on
+        # its own it lets a run opt out of the comparison by writing a sentence. This binds
+        # the skip to the report's own recorded evidence: either the comparison ran, or the
+        # port genuinely cannot run the 'on' arm, or the 'on' arm OOM'd — and the sweep's
+        # measurements must agree with the usability flag rather than merely accompany it.
+        "checkpointing_skip_is_earned": (
+            (ckpt.get("on_peak_gib") is not None and ckpt.get("off_peak_gib") is not None)
+            or ckpt.get("usable_on_this_backbone") is False
+            or "did not fit" in str(ckpt.get("comparison_skipped_reason") or "")
+        )
+        and all(
+            bool(m.get("gradient_checkpointing")) is bool(ckpt.get("usable_on_this_backbone"))
+            for m in meas
+            if m.get("gradient_checkpointing") is not None and not m.get("off_comparison")
+        ),
     }
     return {k: bool(v) for k, v in clauses.items()}
 
@@ -365,6 +388,7 @@ def build_report(
     device: Mapping[str, Any],
     checkpointing: Mapping[str, Any],
     config: Mapping[str, Any],
+    backbone: Mapping[str, Any],
 ) -> dict[str, Any]:
     fitting = [m for m in measurements if not m.get("oom") and m.get("regime") == "worst_case"]
     largest = max((m["batch_size"] for m in fitting), default=None)
@@ -381,6 +405,7 @@ def build_report(
         "step_function": "tbox_finder.stage2.train.forward_backward",
         "supersedes_for_stage2_sizing": "reports/p1/lora_vram_smoke.json (P1-16)",
         "config": dict(config),
+        "backbone": dict(backbone),
         "population": dict(population),
         "device": dict(device),
         "gradient_checkpointing": dict(checkpointing),
@@ -438,6 +463,15 @@ def run_sizing(
     }
     loss_config = L.Stage2LossConfig()
 
+    # ⚠ Whether the sweep may enable checkpointing is a property of the PORT, not a choice.
+    # This harness used to hardcode True, which is correct for the rotary production backbone
+    # and fatal for RNA-FM: SLURM job 1370 died here, in the first measurement, because that
+    # port adds its absolute position embeddings in place while checkpointing makes the
+    # embedding output a leaf requiring grad. Sizing with a setting the arm cannot run would
+    # measure a configuration that never trains.
+    spec = resolve_backbone(backbone)
+    checkpointing_usable = bool(spec.gradient_checkpointing_usable)
+
     measurements: list[dict[str, Any]] = []
     for batch_size in batch_sweep:
         for regime, picker in (("worst_case", _worst_case_rows), ("typical", _typical_rows)):
@@ -447,7 +481,7 @@ def run_sizing(
                 chosen,
                 batch_size=batch_size,
                 steps=steps,
-                gradient_checkpointing=True,
+                gradient_checkpointing=checkpointing_usable,
                 loss_config=loss_config,
                 base_model=base_model,
                 device=device,
@@ -465,7 +499,21 @@ def run_sizing(
 
     # Checkpointing effectiveness, at the smallest batch so both regimes have a chance to fit.
     smallest = min(batch_sweep)
-    checkpointing: dict[str, Any] = {"batch_size": smallest, "comparison_skipped_reason": None}
+    checkpointing: dict[str, Any] = {
+        "batch_size": smallest,
+        "comparison_skipped_reason": None,
+        # Recorded so an absent comparison is a STATED fact rather than a missing key. The
+        # asymmetry between the two arms' sizing reports is real and has to be visible.
+        "usable_on_this_backbone": checkpointing_usable,
+        "usability_note": spec.gradient_checkpointing_note,
+    }
+    if not checkpointing_usable:
+        checkpointing["comparison_skipped_reason"] = (
+            f"gradient checkpointing is not usable on backbone {spec.key!r}, so there is no "
+            f"'on' arm to compare against: {spec.gradient_checkpointing_note}"
+        )
+        checkpointing["on_peak_gib"] = None
+        checkpointing["off_peak_gib"] = None
     on = next(
         (
             m
@@ -474,7 +522,9 @@ def run_sizing(
         ),
         None,
     )
-    if on is None:
+    if not checkpointing_usable:
+        pass  # already recorded above; there is no 'on' arm to measure on this port
+    elif on is None:
         checkpointing["comparison_skipped_reason"] = (
             f"the batch-{smallest} worst case did not fit even WITH checkpointing, so an "
             "off-comparison would only OOM harder and measure nothing"
@@ -517,6 +567,13 @@ def run_sizing(
             "world_size": 1,
             "optimizer": "AdamW",
             "dtype": "bfloat16 (lora_harness.TRAIN_DTYPE)",
+            "gradient_checkpointing": checkpointing_usable,
+        },
+        backbone={
+            **backbone_summary(spec),
+            # The measurement's own subject, so a reader never has to infer which model these
+            # GiB describe — the two arms differ by ~6.5x in parameters.
+            "requested_key": backbone,
         },
     )
     out = Path(out_path)
