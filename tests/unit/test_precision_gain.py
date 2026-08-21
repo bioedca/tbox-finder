@@ -1063,3 +1063,37 @@ def test_the_checker_returns_a_problem_on_a_truncated_payload_and_never_raises(r
             assert problems, f"{'/'.join(path)} = {value!r} was accepted silently"
             checked += 1
     assert checked == len(paths) * 5
+
+
+def test_no_retyped_field_anywhere_can_make_the_checker_raise(report):
+    """The sweep above replaces whole BLOCKS; this one retypes every LEAF.
+
+    Round 4 found the gap between the two: a ``base`` block that is a well-formed mapping but
+    carries a *string* threshold slipped past the block sweep and raised ``TypeError`` inside
+    the ``brackets_base`` comparison. Whether a given leaf is also *caught* is a separate
+    question — many are pure metadata — but none of them may take the validator down.
+    """
+
+    def leaves(node, path=()):
+        if isinstance(node, dict):
+            for key, value in node.items():
+                yield from leaves(value, (*path, key))
+        elif isinstance(node, list):
+            for index, value in enumerate(node[:2]):
+                yield from leaves(value, (*path, index))
+        else:
+            yield path
+
+    checked = 0
+    for path in leaves(report):
+        if path[:1] in (("provenance",), ("problems",), ("generated_at_utc",)):
+            continue
+        for bad in ("x", None, True, -1):
+            broken = copy.deepcopy(report)
+            node = broken
+            for key in path[:-1]:
+                node = node[key]
+            node[path[-1]] = bad
+            P.precision_problems(broken)  # must not raise
+            checked += 1
+    assert checked > 1_000, f"only {checked} retypings — the sweep stopped finding leaves"

@@ -983,6 +983,18 @@ def precision_problems(report: Mapping[str, Any]) -> list[str]:
         if not condition:
             problems.append(message)
 
+    # Every helper below RETURNS rather than raises on a payload it did not write: a
+    # traceback out of the validator is indistinguishable from a crashed run (the PR #131
+    # finding, restated by CodeRabbit on this PR's own new clauses).
+    def number(node: Any, *path: str) -> float | None:
+        for key in path:
+            if not isinstance(node, Mapping):
+                return None
+            node = node.get(key)
+        if isinstance(node, bool) or not isinstance(node, (int, float)):
+            return None
+        return float(node)
+
     for key in ("schema_version", "step", "generated_by", "adr", "prd", "gate", "arms"):
         want(key in report, f"missing top-level key {key!r}")
     if problems:
@@ -1071,36 +1083,47 @@ def precision_problems(report: Mapping[str, Any]) -> list[str]:
             f"arm {arm_name!r} scored {population['n_items']} of the benchmark's "
             f"{scope['n_items']} items — a truncated run cannot certify the gate",
         )
+        counted = (number(population, "n_positives"), number(population, "n_negatives"))
         want(
-            population["n_positives"] + population["n_negatives"] == population["n_items"],
+            None not in counted and sum(counted) == number(population, "n_items"),
             f"arm {arm_name!r}: positives + negatives != items",
         )
+        blocks = number(population, "n_blocks")
         want(
-            population["n_blocks"] > 1,
-            f"arm {arm_name!r} has {population['n_blocks']} resampling block(s); a "
+            blocks is not None and blocks > 1,
+            f"arm {arm_name!r} has {population.get('n_blocks')!r} resampling block(s); a "
             "block-level CI needs at least two (ADR-0005 D5/A1)",
         )
+        ceiling = number(population, "ceiling_recall")
         want(
-            0.0 <= population["ceiling_recall"] <= 1.0,
-            f"arm {arm_name!r}: ceiling_recall {population['ceiling_recall']!r} is not a rate",
+            ceiling is not None and 0.0 <= ceiling <= 1.0,
+            f"arm {arm_name!r}: ceiling_recall {population.get('ceiling_recall')!r} is not a "
+            "rate",
         )
         for system in SYSTEMS:
-            auprc = arm["auprc"][system]
+            auprc = number(arm.get("auprc"), system)
             want(
-                math.isnan(auprc) or 0.0 <= auprc <= 1.0,
-                f"arm {arm_name!r}: {system} AUPRC {auprc!r} is not in [0, 1]",
+                auprc is not None and (math.isnan(auprc) or 0.0 <= auprc <= 1.0),
+                f"arm {arm_name!r}: {system} AUPRC "
+                f"{(arm.get('auprc') or {}).get(system)!r} is not in [0, 1]",
             )
+
         # The per-pool breakdown must account for exactly the false positives the gated
         # thresholds produced — otherwise the disclosure about memorised pools is decorative.
+        def pool_total(field: str, pools: Mapping[str, Any] = arm["per_pool"]) -> float | None:
+            values = [number(pool, field) for pool in pools.values()]
+            return None if None in values else sum(values)
+
         for system in SYSTEMS:
-            total = sum(pool[f"fp_{system}"] for pool in arm["per_pool"].values())
+            total = pool_total(f"fp_{system}")
+            recorded = number(arm.get("matched_recall", {}).get(system), "fp")
             want(
-                total == arm["matched_recall"][system]["fp"],
+                total is not None and total == recorded,
                 f"arm {arm_name!r}: per-pool {system} false positives sum to {total}, but "
-                f"the matched-recall confusion records {arm['matched_recall'][system]['fp']}",
+                f"the matched-recall confusion records {recorded!r}",
             )
         want(
-            sum(pool["n"] for pool in arm["per_pool"].values()) == population["n_negatives"],
+            pool_total("n") is not None and pool_total("n") == number(population, "n_negatives"),
             f"arm {arm_name!r}: the per-pool negative counts do not sum to n_negatives",
         )
 
@@ -1120,10 +1143,13 @@ def precision_problems(report: Mapping[str, Any]) -> list[str]:
         problems.append(f"prevalence point {key!r} carries no AUPRC — the gated statistic")
         return problems
     auprc = point["auprc"]
+    two, one = number(auprc, "two_stage"), number(auprc, "stage1_only")
     derived = bool(
-        not math.isnan(auprc["two_stage"])
-        and not math.isnan(auprc["stage1_only"])
-        and auprc["two_stage"] > auprc["stage1_only"]
+        two is not None
+        and one is not None
+        and not math.isnan(two)
+        and not math.isnan(one)
+        and two > one
     )
     want(
         bool(gated["passes"]) == derived,
@@ -1159,18 +1185,6 @@ def precision_problems(report: Mapping[str, Any]) -> list[str]:
     # the sweep's per-point gains — so each of them could be rewritten in the artifact and the
     # clause set would return [] ([[gate-clauses-need-re-derivation]]). A magnitude that no
     # clause recomputes is a fabricated value the report presents as a measured one.
-    # Every helper below RETURNS rather than raises on a payload it did not write: a
-    # traceback out of the validator is indistinguishable from a crashed run (the PR #131
-    # finding, restated by CodeRabbit on this PR's own new clauses).
-    def number(node: Any, *path: str) -> float | None:
-        for key in path:
-            if not isinstance(node, Mapping):
-                return None
-            node = node.get(key)
-        if isinstance(node, bool) or not isinstance(node, (int, float)):
-            return None
-        return float(node)
-
     def close(observed: Any, derived: float | None) -> bool:
         if derived is None or isinstance(observed, bool):
             return False
@@ -1443,7 +1457,10 @@ def precision_problems(report: Mapping[str, Any]) -> list[str]:
             for row in rows
             if isinstance(row.get("measured_stage1_threshold"), (int, float))
         ]
-        base_tau = base_node.get("stage1_threshold")
+        # Through `number`, not straight off the block: a non-numeric threshold inside an
+        # otherwise well-formed `base` made the comparison below raise, which the
+        # block-replacement sweep could not reach (CodeRabbit, PR #133 round 4).
+        base_tau = number(base_node, "stage1_threshold")
         want(
             bool(sensitivity.get("brackets_base"))
             == bool(swept and base_tau is not None and min(swept) <= base_tau <= max(swept)),

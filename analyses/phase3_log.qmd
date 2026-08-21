@@ -7240,10 +7240,29 @@ Artifacts regenerated: report `cec294d3…`, item table `5e6788e7…`, τ07 `956
 **No point estimate, interval or block count moved in this round either.**
 :::
 
+::: {.callout-warning}
+## Review round 4 (app, automatic on `5620b77`) — 1 finding, real, and it found the gap in round 3's own fix
+
+**(minor) A non-numeric `base.stage1_threshold` still made the checker raise.** Round 3's
+truncation sweep replaces whole **blocks**, so it never produced a `base` that is a well-formed
+mapping carrying a *string* threshold — and `min(swept) <= base_tau` raises `TypeError` on one.
+Reproduced (`TypeError: '<=' not supported between instances of 'float' and 'str'`), fixed by
+reading the threshold through the same `number()` helper the swept points already use.
+
+Closing it properly meant sweeping the class rather than the instance ([[fixed-one-of-two-identical-things]]):
+retyping **every leaf** of the committed report to `"x"`, `None`, `True` and `-1` found **76**
+raising paths across **six** clause sites, all of them **pre-dating** this PR — `n_positives +
+n_negatives`, `n_blocks > 1`, `ceiling_recall`, `math.isnan(auprc)`, and the two `sum(pool[…])`
+per-pool totals. Every one now reads through `number()`, which returns `None` for a string, a
+bool or a missing key. The sweep is a test: **1,753 retypings, zero raises**, and reverting the
+one-line round-4 fix turns it RED. No artifact changed in this round — the clauses got stricter,
+the report did not move.
+:::
+
 **Validation.** Gate PASSES (above); `precision_problems` returns `[]` on the committed report,
 every clause re-deriving from the report's own numbers (the clause set grew from 26 to 62 `want()`
-sites across the three review rounds), and `is_science` / `gated` are the conjunction of the
-completeness clauses rather than assertions. **77** `test_precision_gain` + the eval-gate wiring;
+sites across the four review rounds), and `is_science` / `gated` are the conjunction of the
+completeness clauses rather than assertions. **78** `test_precision_gain` + the eval-gate wiring;
 `average_precision`'s committed golden is **bit-unchanged** under the delegation (asserted). Full
 unit+golden+ml against a matched baseline worktree at `07ec89b`: **zero new failures** (14 FAILED
 both sides, identical sets). ruff 0.15.15 + black 25.11.0 clean.
