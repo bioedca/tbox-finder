@@ -1938,7 +1938,12 @@ def test_the_comparator_trains_the_PRODUCTION_configuration() -> None:
     aux = re.search(r"^aux_weight:\s*(\S+)", loss_yaml, re.MULTILINE).group(1)
     lr = re.search(r"^lr:\s*(\S+)", optim_yaml, re.MULTILINE).group(1)
     assert float(aux) == 1.0 and float(lr) == pytest.approx(1e-4)
-    assert f'AUX_WEIGHT="{float(aux):.1f}"' in code, "comparator aux_weight != production"
+    # The comparator trains a PAIR: the production point plus its lr-matched aux=0 control,
+    # which is what `select_arm_pair` requires and what job 1372 discovered was missing after a
+    # full training run. Both must be present, and the production one must match conf/.
+    assert (
+        f"AUX_WEIGHTS=({float(aux):.1f} 0.0)" in code
+    ), "the comparator must train the production aux_weight AND an lr-matched aux=0 control"
     assert 'LR="1e-4"' in code and float("1e-4") == pytest.approx(float(lr))
     # The production arm's measured batch geometry, carried over unchanged. Changing it would
     # make an ECE difference attributable to batch size as well as backbone.
@@ -2554,3 +2559,42 @@ def test_the_attention_reason_names_the_backbone_it_is_about() -> None:
     # unchanged — this must not silently rewrite the committed P1-15/P1-16 reason strings.
     _, default_reason = LH.select_attention_backend(model_supports_flash_attn=True, **common)
     assert BR.PRODUCTION_BACKBONE in default_reason
+
+
+def test_the_comparator_trains_the_lr_MATCHED_AUX_ZERO_CONTROL_the_scorers_require() -> None:
+    """Job 1372 trained the production point cleanly and then BOTH scoring legs refused:
+
+        ValueError: expected exactly one aux_weight=0 arm at lr=0.0001, found [];
+        the ablation needs a learning-rate-matched control
+
+    `stage2.eval` resolves `select_arm_pair` before it scores anything, and `gate2 score-loo`
+    calls the same selector — so a single-arm checkpoint root cannot be scored by either shipped
+    entry point. The control is the enabling condition for the posteriors this step owes, not a
+    nice-to-have, and nothing else in the suite would notice its removal until a 4-hour job had
+    already trained.
+    """
+    code = _sbatch_code(_SBATCH_RNAFM)
+    grid = re.search(r"^AUX_WEIGHTS=\((.+?)\)$", code, re.MULTILINE)
+    assert grid, "the comparator sbatch declares no AUX_WEIGHTS grid"
+    weights = [float(w) for w in grid.group(1).split()]
+    assert len(weights) == 2, weights
+    assert 0.0 in weights, "no aux=0 control — both scoring legs will refuse this root"
+    # The production point must be in the pair too, and it is the one read out of conf/.
+    aux = float(
+        re.search(
+            r"^aux_weight:\s*(\S+)", (_CONF / "loss" / "stage2.yaml").read_text(), re.MULTILINE
+        ).group(1)
+    )
+    assert aux in weights, f"the shipped aux_weight {aux} is not one of the trained points"
+    # Both points share ONE lr, or they are not a matched pair.
+    assert re.search(r'^LR="1e-4"$', code, re.MULTILINE), "the pair must share a single lr"
+    # ...and the job refuses to score a half-trained pair rather than grading one arm.
+    # ⚠ BOTH clauses, asserted separately. The guard checks the run report AND the checkpoint
+    # for each point, and a first cut of this assertion only required the marker to appear
+    # somewhere — so renaming one of the two occurrences left it GREEN, satisfied by the
+    # survivor ([[sabotage-attribution-names-the-test]] / compound disjuncts bite separately).
+    assert code.count("RNAFM_PAIR_INCOMPLETE") >= 2, "the pair guard lost one of its clauses"
+    guard = code[code.index("RNAFM_PAIR_INCOMPLETE") : code.index("-m tbox_finder.stage2.eval")]
+    assert "${KEY}.json" in guard, "the pair guard no longer checks each point's run report"
+    assert "stage2_heads.pt" in guard, "the pair guard no longer checks each point's checkpoint"
+    assert code.index("RNAFM_PAIR_INCOMPLETE") < code.index("-m tbox_finder.stage2.eval")

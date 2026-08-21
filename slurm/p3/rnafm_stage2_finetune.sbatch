@@ -13,15 +13,36 @@
 # backbone and drags the whole absolute GATE-1/GATE-2 re-clearance and the P4→P5 go/no-go with
 # it (PRD §2.3/§10.2, ADR-0002 D6), which is a CLAUDE.md §7 decision on top of the number.
 #
-# ── ONE POINT, NOT A SWEEP — AND THE POINT IS THE SHIPPED CONFIGURATION ─────
+# ── TWO POINTS, AND THE SECOND ONE IS NOT OPTIONAL ──────────────────────────
 # imp.md asks for "the identical heads/losses/calibration stack so the ECE comparison is
 # apples-to-apples". So this trains EXACTLY the production arm's configuration and changes
 # exactly one thing: the backbone. `aux_weight=1.0, lr=1e-4` are conf/{loss,optim}/stage2.yaml's
 # shipped defaults — the `aux1.0_lr1e-4` point — and `batch_size=4, gradient_accumulation_steps=2`
 # are carried over unchanged rather than re-tuned. ⚠ THAT IS DELIBERATE EVEN THOUGH RNA-FM WOULD
-# FIT A LARGER BATCH: batch size changes the optimisation, and an arm that differed from the
-# production one on batch AND backbone could not attribute an ECE difference to either. The
-# sizing leg below therefore VERIFIES batch 4 fits; it does not go shopping for a bigger one.
+# FIT A LARGER BATCH (measured: 1.98 of 15.6 GiB at batch 4, vs RiNALMo's 8.18): batch size
+# changes the optimisation, and an arm that differed from the production one on batch AND
+# backbone could not attribute an ECE difference to either. The sizing leg below therefore
+# VERIFIES batch 4 fits; it does not go shopping for a bigger one.
+#
+# ⚠ AND IT ALSO TRAINS THE aux_weight=0 CONTROL, BECAUSE THE SCORERS REQUIRE IT. Job 1372
+# trained the production point cleanly and then BOTH scoring legs refused:
+#
+#   ValueError: expected exactly one aux_weight=0 arm at lr=0.0001, found [];
+#   the ablation needs a learning-rate-matched control
+#
+# `stage2.eval` is the P3-08 aux-ablation driver — it resolves `select_arm_pair` before it
+# scores anything and builds an ablation report afterwards — and `calib.gate2 score-loo` calls
+# the SAME selector. A single-arm checkpoint root cannot be scored by either shipped entry
+# point. Training the lr-matched control is therefore the enabling condition for the posteriors
+# this step owes, not a side quest: it lets both legs run COMPLETELY UNCHANGED, so "reuses the
+# identical harness" is literally true rather than nearly true, and it touches nothing in the
+# P3-08 machinery that produces committed artifacts. It costs one more ~13-minute run, and it
+# answers ADR-0005 D16's aux-loss question for BOTH backbones instead of one.
+#
+# The two points run SEQUENTIALLY in one job rather than as a `--array`: they share this node,
+# the scoring legs need both to exist, and one job means one provenance chain and one ack. The
+# P3-06 array exists because six whole-node points cannot share a node; two 13-minute points on
+# one node can.
 #
 # The arm is laid out to be structurally identical to a production sweep point —
 #   checkpoint  data/processed/checkpoints/stage2_rnafm/<KEY>/
@@ -108,8 +129,8 @@
 # VERIFY (artifact-based; sacct off, §9.3): (a) `squeue -j <jobid>` empty, (b)
 #          reports/p3/sweep_rnafm/rnafm_stage2.DONE present, (c) the run report validates and
 #          passes its own gate (train.py raises on a failed gate, so rc≠0 ⇒ no DONE), (d) the
-#          checkpoint dir carries lora_adapter/ + stage2_heads.pt + provenance.json, (e) both
-#          score files exist.
+#          BOTH point dirs (aux1.0_lr1e-4 and aux0.0_lr1e-4) carry lora_adapter/ +
+#          stage2_heads.pt + provenance.json, (e) both score files AND the eval report exist.
 #          ⚠️ the `.err` is EXPECTED NON-EMPTY on success (torchrun rendezvous, HF download
 #          chatter, W&B-offline notices) — scan for real tracebacks, DO NOT gate on zero bytes.
 #          imp.md's Validation line says "zero-byte .err"; that wording predates the
@@ -138,27 +159,24 @@ export NVCC_PREPEND_FLAGS="${NVCC_PREPEND_FLAGS:-}"
 REPO="${SLURM_SUBMIT_DIR:-$HOME/tbox-finder}"
 cd "$REPO"
 
-# ── The one point, written out rather than computed ──────────────────────────
-# These four values ARE conf/{loss,optim}/stage2.yaml's shipped defaults. They are restated
-# here (and asserted against the composed config by tests/ml/test_stage2_train_smoke.py) so the
-# arm this file trains is readable in this file, and so a drift in the shipped defaults shows up
-# as a test failure rather than as a comparator that quietly stopped matching production.
+# ── The two points, written out rather than computed ─────────────────────────
 BACKBONE="rnafm"
-AUX_WEIGHT="1.0"
 LR="1e-4"
-KEY="aux${AUX_WEIGHT}_lr${LR}"
+# The production point FIRST, then its lr-matched aux=0 control. Written out rather than
+# computed so the two arms this file trains are readable in this file; a drift from the shipped
+# defaults shows up as a test failure (tests/ml/test_stage2_train_smoke.py reads them out of
+# conf/) rather than as a comparator that quietly stopped matching production.
+AUX_WEIGHTS=(1.0 0.0)
 BATCH_SIZE=4
 GRAD_ACCUM=2
 EPOCHS=10
 
 OUT_DIR="reports/p3/sweep_rnafm"
-REPORT="$OUT_DIR/${KEY}.json"
 SIZING_REPORT="reports/p3/stage2_rnafm_sizing.json"
 SCORES="reports/p3/stage2_scores_rnafm.json"
 SCORES_LOO="reports/p3/stage2_scores_loo_rnafm.json"
 EVAL_REPORT="reports/p3/stage2_rnafm_eval.json"
 CKPT_ROOT="data/processed/checkpoints/stage2_rnafm"
-CKPT_DIR="$CKPT_ROOT/${KEY}"
 DONE="$OUT_DIR/rnafm_stage2.DONE"
 mkdir -p "$OUT_DIR"
 
@@ -166,15 +184,19 @@ mkdir -p "$OUT_DIR"
 # tests/unit/test_sbatch_rm_targets.py cannot resolve the `:?` form, scores the target as a bare
 # wildcard and fails CLOSED against every tracked path. An explicit emptiness check is the same
 # protection in a form the gate can read (the P3-06 ruling).
-if [ -z "$KEY" ] || [ -z "$BACKBONE" ]; then
-  echo "FATAL: KEY/BACKBONE resolved empty; refusing to touch $CKPT_DIR." >&2
+if [ -z "$BACKBONE" ] || [ -z "$LR" ] || [ "${#AUX_WEIGHTS[@]}" -ne 2 ]; then
+  echo "FATAL: the point grid resolved empty or is not the two-point pair the scorers need;" >&2
+  echo "  refusing to touch anything under $CKPT_ROOT." >&2
   exit 2
 fi
 
-# ── Singleton lock ───────────────────────────────────────────────────────────
-exec 9>"$OUT_DIR/.${KEY}.lock"
+# ── Singleton lock, for the whole ARM ────────────────────────────────────────
+# One lock rather than P3-06's per-point locks: its six points were concurrent array tasks with
+# disjoint outputs, whereas these two run sequentially in ONE job and the scoring legs read both
+# of them. What must not happen is two jobs sharing this arm's root.
+exec 9>"$OUT_DIR/.rnafm.lock"
 if ! flock -n 9; then
-  echo "RNAFM_SKIP $KEY: another job holds this arm's lock — refusing to share outputs." >&2
+  echo "RNAFM_SKIP: another job holds this arm's lock — refusing to share outputs." >&2
   exit 1
 fi
 
@@ -217,7 +239,7 @@ fi
 # this run's own provenance against it (the P2-09/P3-06 ruling). Freshness is therefore proved
 # by fingerprint, not by absence. Absent file -> empty string, which no md5 can equal, so "was
 # missing" and "was replaced" both read as fresh and only "unchanged bytes" reads as stale.
-REPORT_BEFORE="$(md5sum "$REPORT" 2>/dev/null | awk '{print $1}' || true)"
+# (taken per point, inside the training loop below — each point has its own report.)
 
 CONDA_SH=/exports/people/mondragonlab/ecc1695/miniconda3/etc/profile.d/conda.sh
 source "$CONDA_SH"
@@ -357,65 +379,86 @@ step_ms = point["step_ms"]
 print(f"SIZING_OK backbone={key} batch={want} worst_case_peak_gib={peak} step_ms={step_ms}")
 '
 
-# ── LEG (2) train the comparator (DDP×8) ────────────────────────────────────
-# Every token after `-m` is a literal key in conf/train/stage2.yaml (or its /loss and /optim
-# groups) or a config-GROUP selection — tests/unit/test_sbatch_overrides.py composes them for
-# real, because job 669 died after a 14 h queue wait on an override the config lacked.
-# `backbone=rnafm` AND `model=rnafm_stage2` are BOTH required and neither is sufficient:
-# `_cfg_from_mapping` refuses each half alone, so the run cannot record one backbone's identity
-# while loading the other's weights.
-SCRATCH_CKPT="$JOB_SCRATCH/checkpoint"
-echo "── training $KEY on $BACKBONE (aux_weight=$AUX_WEIGHT lr=$LR, DDP×8, bf16 LoRA) ──"
-set +e
-PYTHONHASHSEED=0 PYTHONPATH=src torchrun --standalone --nproc_per_node=8 \
-  -m tbox_finder.stage2.train \
-  backbone="$BACKBONE" model=rnafm_stage2 \
-  loss.aux_weight="$AUX_WEIGHT" optim.lr="$LR" \
-  epochs="$EPOCHS" batch_size="$BATCH_SIZE" gradient_accumulation_steps="$GRAD_ACCUM" \
-  gradient_checkpointing=false \
-  eval_val=true save_checkpoint=true \
-  report_path="$REPORT" checkpoint_dir="$SCRATCH_CKPT" \
-  tracking.mode=offline
-rc=$?
-set -e
+# ── LEG (2) train BOTH points (DDP×8, sequentially on this node) ────────────
+# The production point first, then its lr-matched aux=0 control. A point that fails ends the
+# job: `set -e` plus the explicit exits below, so a half-trained pair can never reach the
+# scoring legs and be graded as if it were whole.
+for AUX_WEIGHT in "${AUX_WEIGHTS[@]}"; do
+  KEY="aux${AUX_WEIGHT}_lr${LR}"
+  REPORT="$OUT_DIR/${KEY}.json"
+  CKPT_DIR="$CKPT_ROOT/${KEY}"
+  SCRATCH_CKPT="$JOB_SCRATCH/checkpoint-${KEY}"
 
-if [ "$rc" -ne 0 ] || [ ! -s "$REPORT" ]; then
-  echo "RNAFM_TRAIN_FAIL rc=$rc (report not written or the run failed its own gate — §9.3 sees the missing DONE)" >&2
-  [ "$rc" -ne 0 ] || rc=1
-  exit "$rc"
-fi
+  # Guard the interpolation used as a deletion target explicitly rather than with `${VAR:?}`:
+  # tests/unit/test_sbatch_rm_targets.py cannot resolve the `:?` form, scores the target as a
+  # bare wildcard and fails CLOSED against every tracked path (the P3-06 ruling).
+  if [ -z "$KEY" ]; then
+    echo "FATAL: the point KEY resolved empty; refusing to touch $CKPT_ROOT." >&2
+    exit 2
+  fi
 
-# "A report exists" does not imply "THIS run wrote it" — a stale committed one satisfies `[ -s ]`.
-# Assert it CHANGED. Both failure directions are explicit: an UNCOMPUTABLE fingerprint must not
-# pass by being unequal to the old one, and an UNCHANGED one must not pass at all.
-REPORT_AFTER="$(md5sum "$REPORT" 2>/dev/null | awk '{print $1}' || true)"
-if [ -z "$REPORT_AFTER" ]; then
-  echo "RNAFM_TRAIN_FAIL: could not fingerprint $REPORT after the run (missing or unreadable)." >&2
-  exit 1
-fi
-if [ "$REPORT_BEFORE" = "$REPORT_AFTER" ]; then
-  echo "RNAFM_TRAIN_FAIL: $REPORT is byte-identical to the one that was there before this run" >&2
-  echo "  (md5 $REPORT_AFTER) — this run did not write it, so it describes some OTHER run." >&2
-  exit 1
-fi
+  # Freshness fingerprint, taken PER POINT and BEFORE its run — see the note above on why this
+  # is a fingerprint rather than an `rm`. Absent file -> empty string, which no md5 can equal,
+  # so "was missing" and "was replaced" both read as fresh and only "unchanged" reads as stale.
+  REPORT_BEFORE="$(md5sum "$REPORT" 2>/dev/null | awk '{print $1}' || true)"
 
-if [ ! -d "$SCRATCH_CKPT/lora_adapter" ] || [ ! -s "$SCRATCH_CKPT/stage2_heads.pt" ]; then
-  echo "RNAFM_TRAIN_FAIL $KEY: report passed its gate but no checkpoint was written at $SCRATCH_CKPT." >&2
-  exit 1
-fi
+    # Every token after `-m` is a literal key in conf/train/stage2.yaml (or its /loss and /optim
+  # groups) or a config-GROUP selection — tests/unit/test_sbatch_overrides.py composes them for
+  # real, because job 669 died after a 14 h queue wait on an override the config lacked.
+  # `backbone=rnafm` AND `model=rnafm_stage2` are BOTH required and neither is sufficient:
+  # `_cfg_from_mapping` refuses each half alone, so the run cannot record one backbone's identity
+  # while loading the other's weights.
+  echo "── training $KEY on $BACKBONE (aux_weight=$AUX_WEIGHT lr=$LR, DDP×8, bf16 LoRA) ──"
+  set +e
+  PYTHONHASHSEED=0 PYTHONPATH=src torchrun --standalone --nproc_per_node=8 \
+    -m tbox_finder.stage2.train \
+    backbone="$BACKBONE" model=rnafm_stage2 \
+    loss.aux_weight="$AUX_WEIGHT" optim.lr="$LR" \
+    epochs="$EPOCHS" batch_size="$BATCH_SIZE" gradient_accumulation_steps="$GRAD_ACCUM" \
+    gradient_checkpointing=false \
+    eval_val=true save_checkpoint=true \
+    report_path="$REPORT" checkpoint_dir="$SCRATCH_CKPT" \
+    tracking.mode=offline
+  rc=$?
+  set -e
 
-# ── Move the checkpoint to the repo path + write its provenance sidecar ──────
-# Cleared immediately before the copy that REPLACES it, never earlier: an OOM, a NaN gate or a
-# failed freshness check must not end the run with no checkpoint AND the previous good one
-# already deleted (the P2-09 ruling). Every path here is untracked (DVC/scratch), so no deletion
-# can dirty a git-tracked path.
-rm -rf "$CKPT_DIR"
-mkdir -p "$CKPT_DIR"
-cp -r "$SCRATCH_CKPT/lora_adapter" "$CKPT_DIR/lora_adapter"
-cp "$SCRATCH_CKPT/stage2_heads.pt" "$CKPT_DIR/stage2_heads.pt"
+  if [ "$rc" -ne 0 ] || [ ! -s "$REPORT" ]; then
+    echo "RNAFM_TRAIN_FAIL rc=$rc (report not written or the run failed its own gate — §9.3 sees the missing DONE)" >&2
+    [ "$rc" -ne 0 ] || rc=1
+    exit "$rc"
+  fi
 
-PYTHONPATH=src KEY="$KEY" BACKBONE="$BACKBONE" AUX_WEIGHT="$AUX_WEIGHT" LR="$LR" \
-CKPT_DIR="$CKPT_DIR" REPORT="$REPORT" python - <<'PY'
+  # "A report exists" does not imply "THIS run wrote it" — a stale committed one satisfies `[ -s ]`.
+  # Assert it CHANGED. Both failure directions are explicit: an UNCOMPUTABLE fingerprint must not
+  # pass by being unequal to the old one, and an UNCHANGED one must not pass at all.
+  REPORT_AFTER="$(md5sum "$REPORT" 2>/dev/null | awk '{print $1}' || true)"
+  if [ -z "$REPORT_AFTER" ]; then
+    echo "RNAFM_TRAIN_FAIL: could not fingerprint $REPORT after the run (missing or unreadable)." >&2
+    exit 1
+  fi
+  if [ "$REPORT_BEFORE" = "$REPORT_AFTER" ]; then
+    echo "RNAFM_TRAIN_FAIL: $REPORT is byte-identical to the one that was there before this run" >&2
+    echo "  (md5 $REPORT_AFTER) — this run did not write it, so it describes some OTHER run." >&2
+    exit 1
+  fi
+
+  if [ ! -d "$SCRATCH_CKPT/lora_adapter" ] || [ ! -s "$SCRATCH_CKPT/stage2_heads.pt" ]; then
+    echo "RNAFM_TRAIN_FAIL $KEY: report passed its gate but no checkpoint was written at $SCRATCH_CKPT." >&2
+    exit 1
+  fi
+
+  # ── Move the checkpoint to the repo path + write its provenance sidecar ──────
+  # Cleared immediately before the copy that REPLACES it, never earlier: an OOM, a NaN gate or a
+  # failed freshness check must not end the run with no checkpoint AND the previous good one
+  # already deleted (the P2-09 ruling). Every path here is untracked (DVC/scratch), so no deletion
+  # can dirty a git-tracked path.
+  rm -rf "$CKPT_DIR"
+  mkdir -p "$CKPT_DIR"
+  cp -r "$SCRATCH_CKPT/lora_adapter" "$CKPT_DIR/lora_adapter"
+  cp "$SCRATCH_CKPT/stage2_heads.pt" "$CKPT_DIR/stage2_heads.pt"
+
+  PYTHONPATH=src KEY="$KEY" BACKBONE="$BACKBONE" AUX_WEIGHT="$AUX_WEIGHT" LR="$LR" \
+  CKPT_DIR="$CKPT_DIR" REPORT="$REPORT" python - <<'PY'
 import os
 
 from tbox_finder.models.rna_backbone_registry import backbone_summary, resolve_backbone
@@ -470,10 +513,26 @@ write_provenance(
 print(f"wrote {ckpt_dir}/provenance.json")
 PY
 
-if [ ! -s "$CKPT_DIR/provenance.json" ]; then
-  echo "RNAFM_TRAIN_FAIL $KEY: checkpoint copied but provenance.json was not written." >&2
-  exit 1
-fi
+  if [ ! -s "$CKPT_DIR/provenance.json" ]; then
+    echo "RNAFM_TRAIN_FAIL $KEY: checkpoint copied but provenance.json was not written." >&2
+    exit 1
+  fi
+done
+
+# ── The pair is complete BEFORE anything grades it ──────────────────────────
+# `set -e` plus the per-point exits already end the job on a failed point, so this cannot fire
+# in practice — which is exactly why it is here. The scorers resolve an ablation PAIR, and a
+# root holding one arm is the state that produced job 1372's refusal AFTER a full training run.
+# Asserting the pair costs nothing and names the condition the next reader will care about.
+for AUX_WEIGHT in "${AUX_WEIGHTS[@]}"; do
+  KEY="aux${AUX_WEIGHT}_lr${LR}"
+  [ -s "$OUT_DIR/${KEY}.json" ] || {
+    echo "RNAFM_PAIR_INCOMPLETE: $OUT_DIR/${KEY}.json missing — refusing to score a partial arm." >&2
+    exit 1; }
+  [ -s "$CKPT_ROOT/${KEY}/stage2_heads.pt" ] || {
+    echo "RNAFM_PAIR_INCOMPLETE: $CKPT_ROOT/${KEY} has no heads — refusing to score." >&2
+    exit 1; }
+done
 
 # ── LEG (3) in-distribution posteriors ──────────────────────────────────────
 # The same `stage2.eval` the production arm is scored by, pointed at this arm's root. It
@@ -496,5 +555,7 @@ for f in "$SCORES" "$SCORES_LOO" "$EVAL_REPORT"; do
 done
 
 touch "$DONE"
-echo "RNAFM_OK $KEY report=$REPORT checkpoint=$CKPT_DIR scores=$SCORES loo=$SCORES_LOO"
+# Report the ARM, not whichever point the loop variable happens to hold last.
+echo "RNAFM_OK backbone=$BACKBONE arms=${AUX_WEIGHTS[*]} (lr=$LR) root=$CKPT_ROOT reports=$OUT_DIR"
+echo "RNAFM_OK scores=$SCORES loo=$SCORES_LOO eval=$EVAL_REPORT sizing=$SIZING_REPORT"
 echo "NEXT (LOCAL): grade the leave-clade-out ECE and hand it to P3-18 — the swap decision is NOT this job's."
