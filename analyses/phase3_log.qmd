@@ -7302,10 +7302,34 @@ nine are fixed, and the test now runs the full-width sweep: **5,068 replacements
 No artifact changed. Gate unchanged.
 :::
 
+::: {.callout-warning}
+## Review round 7 (app, manual trigger on `2e7c476`) — 1 **major**, and it was about the number this PR just started publishing
+
+⚠ **The automatic review did not fire on this commit either** — 7 minutes, no check-run on the head
+sha — so the manual trigger is now the working path on this PR, not the exception. It returned a
+round in ~5 min.
+
+**(major) The host-overlap counts were unbounded.** The measurement added in this PR
+(`by_arm {production: 115, twin: 97}` of 692) had only a *relative* clause: the union had to sit
+between the largest arm and the sum. Nothing tied any of them to the pool being counted, so
+`by_arm = {production: 999, twin: 999}, n_seen_by_any_arm: 999` passed on a benchmark with **692**
+negatives — the same "magnitude no clause re-derives" defect this PR spent round 2 removing, in the
+number round 2b *added*. Worse, the count list was built with a silent `isinstance` filter, so a
+malformed value was dropped rather than refused.
+
+Each count is now required to be a non-boolean integer in `[0, scope.n_negatives]`, the union
+likewise, and the relative clause is kept on top. Six perturbations caught (oversized, negative,
+string, bool, empty, out-of-range union) with the cosmetic control still silent; removing the upper
+bound turns three of the new tests RED.
+
+Worth stating plainly: the clause that guards a number should land in the same commit as the number.
+This one arrived a round late, and only because a reviewer asked for it.
+:::
+
 **Validation.** Gate PASSES (above); `precision_problems` returns `[]` on the committed report,
-every clause re-deriving from the report's own numbers (the clause set grew from 26 to 62 `want()`
-sites across the six review rounds), and `is_science` / `gated` are the conjunction of the
-completeness clauses rather than assertions. **78** `test_precision_gain` + the eval-gate wiring;
+every clause re-deriving from the report's own numbers (the clause set grew from 26 to 64 `want()`
+sites across the seven review rounds), and `is_science` / `gated` are the conjunction of the
+completeness clauses rather than assertions. **83** `test_precision_gain` + the eval-gate wiring;
 `average_precision`'s committed golden is **bit-unchanged** under the delegation (asserted). Full
 unit+golden+ml against a matched baseline worktree at `07ec89b`: **zero new failures** (14 FAILED
 both sides, identical sets). ruff 0.15.15 + black 25.11.0 clean.

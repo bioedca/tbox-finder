@@ -1004,7 +1004,27 @@ def test_a_host_overlap_union_outside_its_own_arms_is_refused(report, union):
     broken["benchmark"]["scope"]["host_pool"]["overlap_with_training_folds"][
         "n_seen_by_any_arm"
     ] = union
-    assert any("is not between the largest" in p for p in P.precision_problems(broken))
+    assert P.precision_problems(broken), f"union {union!r} was accepted"
+
+
+@pytest.mark.parametrize(
+    "by_arm",
+    [
+        {"production": 999, "twin": 999},  # more negatives than the benchmark has
+        {"production": -5, "twin": -5},  # a count cannot be negative
+        {"production": "lots", "twin": 97},  # not a number at all
+        {"production": True, "twin": 97},  # a bool is not a count
+        {},  # no arm measured
+    ],
+)
+def test_a_host_overlap_count_that_is_not_a_count_of_this_pool_is_refused(report, by_arm):
+    """The overlap is a published claim, so it is bounded like one: each count is a number of
+    NEGATIVES and cannot exceed the pool it counts. 999 of 692 passed until round 7, and a
+    filter that silently dropped a malformed value let one through unexamined."""
+    broken = copy.deepcopy(report)
+    overlap = broken["benchmark"]["scope"]["host_pool"]["overlap_with_training_folds"]
+    overlap["by_arm"] = by_arm
+    assert any("negatives" in p for p in P.precision_problems(broken))
 
 
 def test_a_host_overlap_measured_over_a_different_corpus_is_refused(report):

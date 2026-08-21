@@ -1318,16 +1318,34 @@ def precision_problems(report: Mapping[str, Any]) -> list[str]:
             f"the host-overlap measurement covers {sorted(by_arm)!r}, not the arms this "
             f"report grades ({sorted(arms)!r})",
         )
-        counts = [
-            int(value)
-            for value in by_arm.values()
-            if isinstance(value, int) and not isinstance(value, bool)
-        ] or [0]
+        # Each count is a number of NEGATIVES, so it is bounded by the pool it counts. A
+        # filter that silently drops a malformed value would let one through unexamined, and
+        # nothing bounded the counts from above: 999 of 692 passed (CodeRabbit, PR #133
+        # round 7). The overlap is a published claim now, so it is bounded like one.
+        limit = number(scope, "n_negatives")
+
+        def is_count(value: Any) -> bool:
+            return (
+                not isinstance(value, bool)
+                and isinstance(value, int)
+                and limit is not None
+                and 0 <= value <= limit
+            )
+
+        want(
+            bool(by_arm) and all(is_count(value) for value in by_arm.values()),
+            f"a host-overlap arm count is not a count of this benchmark's "
+            f"{scope.get('n_negatives')!r} negatives: {by_arm!r}",
+        )
         union = overlap.get("n_seen_by_any_arm")
         want(
-            isinstance(union, bool) is False
-            and isinstance(union, int)
-            and max(counts) <= union <= sum(counts),
+            is_count(union),
+            f"the host-overlap union {union!r} is not a count of this benchmark's "
+            f"{scope.get('n_negatives')!r} negatives",
+        )
+        counts = [value for value in by_arm.values() if is_count(value)] or [0]
+        want(
+            is_count(union) and max(counts) <= union <= sum(counts),
             f"the host-overlap union {union!r} is not between the largest single arm "
             f"({max(counts)}) and the sum of the arms ({sum(counts)}); it cannot be the "
             "union it names",
