@@ -313,6 +313,7 @@ def select_attention_backend(
     sm86_confirmed: bool,
     model_supports_flash_attn: bool,
     dtype: str,
+    backbone: str = PRODUCTION_BACKBONE,
 ) -> tuple[str, str]:
     """Choose the attention implementation, PRD §10.3: FA-2 iff confirmed, else SDPA.
 
@@ -325,6 +326,14 @@ def select_attention_backend(
     SDPA — not eager — is the fallback: ADR-0002 D3 names SDPA the RiNALMo fallback path,
     and it is an *exact-softmax* kernel swap (the same swap P1-13 proved parity-faithful
     under, A9), so falling back costs speed and not numerics.
+
+    ``backbone`` names the arm in the recorded reason. It changes no decision — the decision
+    already comes from `model_supports_flash_attn(key)`, which the caller measures per class —
+    but the reason is written verbatim into a job log and a report, and the pre-ack run of the
+    P3-17 sbatch's own bytes printed *"the pinned RiNALMo classes advertise flash-attn"* for an
+    **RNA-FM** job. A correct decision explained by a sentence about a different model is the
+    "names what it did not use" defect P1-15 wrote its read-back guard against; it is only
+    prose, and prose in a provenance record is still a claim.
     """
     if not isinstance(dtype, str):
         raise TypeError(f"dtype must be a str, got {type(dtype).__name__}")
@@ -352,7 +361,7 @@ def select_attention_backend(
         )
     if not model_supports_flash_attn:
         return ATTN_SDPA, (
-            "the pinned RiNALMo classes do not advertise flash-attn support → SDPA "
+            f"the pinned {backbone} classes do not advertise flash-attn support → SDPA "
             "fallback (ADR-0002 A2 K1)"
         )
     if dtype not in FA2_DTYPES:
@@ -360,11 +369,23 @@ def select_attention_backend(
             f"dtype {dtype!r} is not half-precision; FA-2 kernels accept only "
             f"{list(FA2_DTYPES)} → SDPA fallback"
         )
+    # The forward-verification clause is per-arm because it IS per-arm: ADR-0002 A10 verified
+    # the FA-2 forward on sm_86 for the production backbone and for nothing else. Saying so for
+    # a comparator would inherit a verification it does not have; naming the production arm in
+    # a comparator's reason would put the wrong model in the comparator's provenance.
+    verified = (
+        "The FA-2 forward through it is VERIFIED on sm_86 (ADR-0002 A10, P1-16 GPU smoke)."
+        if backbone == PRODUCTION_BACKBONE
+        else (
+            "The FA-2 forward through it is NOT separately forward-verified — A10's sm_86 "
+            "verification covers the production backbone only; this arm is selected on the "
+            "same measured wheel/sm_86 evidence and its own class advertisement."
+        )
+    )
     return ATTN_FLASH2, (
         "FA-2 selected: the flash-attn wheel imports on a MEASURED sm_86 A4000 "
-        "(ADR-0002 A5), the pinned RiNALMo classes advertise flash-attn, and the pinned "
-        f"dtype {dtype} is FA-2-eligible. The FA-2 forward through RiNALMo is NOT verified "
-        "here (LOCAL step, sm_89 laptop) — deferred to the P1-16 GPU smoke."
+        f"(ADR-0002 A5), the pinned {backbone} classes advertise flash-attn, and the pinned "
+        f"dtype {dtype} is FA-2-eligible. {verified}"
     )
 
 
@@ -780,6 +801,7 @@ def build_peft_model(
             sm86_confirmed=evidence["is_sm86"],
             model_supports_flash_attn=model_supports_flash_attn(backbone),
             dtype=dtype,
+            backbone=backbone,
         )
 
     if base_model is None:

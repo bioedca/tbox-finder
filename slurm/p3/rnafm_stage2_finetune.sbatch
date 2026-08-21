@@ -287,6 +287,7 @@ selected, reason = LH.select_attention_backend(
     sm86_confirmed=evidence["is_sm86"],
     model_supports_flash_attn=LH.model_supports_flash_attn(key),
     dtype=LH.TRAIN_DTYPE,
+    backbone=key,
 )
 print(f"hf cache warm {spec.repo_id} {spec.revision} torch={torch.__version__}")
 print(f"params={n_params} expected={spec.expected_param_count} hidden={spec.hidden_size}")

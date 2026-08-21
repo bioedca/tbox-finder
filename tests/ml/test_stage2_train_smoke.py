@@ -686,19 +686,46 @@ def test_every_inline_python_block_in_every_sbatch_actually_compiles() -> None:
     """
     import re
 
+    # ⚠ WIDENED at P3-17. The original pattern anchored on `^PYTHONPATH=… python -c '` at line
+    # start and required a closing line of exactly `'`, so it silently skipped every block
+    # written as `if ! PYTHONPATH=src python -c '…'; then` — the guard-style invocation. Both
+    # of P3-17's env/CUDA assertions use that form, and so does P3-06's own node health check,
+    # which means this "repo-wide" gate had been covering less than it claimed since it was
+    # written. Its emptiness guard could not notice: other blocks matched, so it stayed green.
+    # Any leading command prefix is allowed now, and the terminator is a line that STARTS with
+    # the closing quote.
+    patterns = (
+        r"^[^\n]*?\bpython -c '\n(.*?)\n'(?:;|\s|$)",
+        # The ONE-LINER form, `python -c 'import x; print(y)'` — a third shape, found by the
+        # coverage guard below the moment it was added (slurm/p2/backbone_throughput.sbatch's
+        # selective_scan_cuda probe). Its body has no newline, so neither multi-line pattern
+        # reaches it, and it had never been parsed by this gate either.
+        r"python -c '([^'\n]+)'",
+        # Heredoc form too — `python - <<'PY' … PY`. The provenance writer lives in one
+        # of these, and an unparsed heredoc is exactly as dead as an unparsed -c block.
+        r"python - <<'PY'\n(.*?)\nPY$",
+    )
+    sbatches = sorted((_REPO / "slurm").rglob("*.sbatch"))
     blocks = [
         (path, match.group(1))
-        for path in sorted((_REPO / "slurm").rglob("*.sbatch"))
-        for pattern in (
-            r"^PYTHONPATH=\S* python -c '\n(.*?)\n'$",
-            # Heredoc form too — `python - <<'PY' … PY`. The provenance writer lives in one
-            # of these, and an unparsed heredoc is exactly as dead as an unparsed -c block.
-            r"python - <<'PY'\n(.*?)\nPY$",
-        )
+        for path in sbatches
+        for pattern in patterns
         for match in re.finditer(pattern, path.read_text(), re.S | re.M)
     ]
     # Emptiness guard: a regex that matched nothing would make this vacuously green.
     assert blocks, "no inline `python -c` blocks discovered in any sbatch at all"
+    # COVERAGE guard, which the emptiness guard alone does not give: every sbatch that
+    # contains an inline python invocation must yield at least one block. This is what would
+    # have caught the narrow pattern above, and it is the same shape as
+    # `test_no_sbatch_launch_is_silently_dropped` in the override gate.
+    covered = {path for path, _ in blocks}
+    expected = {
+        p for p in sbatches if "python -c '" in p.read_text() or "python - <<'PY'" in p.read_text()
+    }
+    uncovered = {p.relative_to(_REPO) for p in expected - covered}
+    assert (
+        not uncovered
+    ), f"sbatch files carry inline python that this gate never parses: {uncovered}"
     broken = []
     for path, body in blocks:
         try:
@@ -2401,3 +2428,46 @@ def test_the_P1_16_SMOKE_report_carries_the_same_binding() -> None:
     legacy = json.loads(json.dumps(report))
     legacy["wrap"].pop("backbone")
     assert not any("wrap.backbone.repo_id" in p for p in LH.validate_smoke_report(legacy))
+
+
+def test_the_attention_reason_names_the_backbone_it_is_about() -> None:
+    """A correct decision explained by a sentence about a different model is still a wrong
+    record. The pre-ack run of this step's sbatch on the cluster printed *"the pinned RiNALMo
+    classes advertise flash-attn"* for an RNA-FM job — the decision was right (it comes from
+    `model_supports_flash_attn(key)`, measured per class) and the prose was not. That prose is
+    written verbatim into a job log and into a report's `attention.reason`, and prose in a
+    provenance record is a claim.
+    """
+    from tbox_finder.train import lora_harness as LH
+
+    common = dict(flash_attn_importable=True, sm86_confirmed=True, dtype=LH.TRAIN_DTYPE)
+    for key in BR.BACKBONE_KEYS:
+        backend, reason = LH.select_attention_backend(
+            model_supports_flash_attn=True, backbone=key, **common
+        )
+        assert backend == LH.ATTN_FLASH2
+        assert key in reason, reason
+        other = next(k for k in BR.BACKBONE_KEYS if k != key)
+        assert other not in reason, f"the {key} reason names {other}: {reason}"
+        # ⚠ And the CLAIM, not just the name. A sabotage that made every arm assert A10's
+        # sm_86 forward verification stayed GREEN against the name check alone, because the
+        # verified sentence names no backbone at all. Inheriting a verification the arm does
+        # not have is the whole defect — ADR-0002 A10 verified the FA-2 forward for the
+        # production backbone and for nothing else.
+        claims_verified = "VERIFIED on sm_86" in reason
+        assert claims_verified is (key == BR.PRODUCTION_BACKBONE), (
+            f"{key} claims_verified={claims_verified}; only {BR.PRODUCTION_BACKBONE} may "
+            f"claim A10's sm_86 forward verification. reason: {reason}"
+        )
+        if key != BR.PRODUCTION_BACKBONE:
+            assert "NOT separately forward-verified" in reason, reason
+        # ...and the fallback branch too, which is the one an operator reads when it went wrong.
+        _, fallback_reason = LH.select_attention_backend(
+            model_supports_flash_attn=False, backbone=key, **common
+        )
+        assert key in fallback_reason and other not in fallback_reason, fallback_reason
+
+    # The default stays the production arm, so every pre-A15 caller's recorded prose is
+    # unchanged — this must not silently rewrite the committed P1-15/P1-16 reason strings.
+    _, default_reason = LH.select_attention_backend(model_supports_flash_attn=True, **common)
+    assert BR.PRODUCTION_BACKBONE in default_reason
