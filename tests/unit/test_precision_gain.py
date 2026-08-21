@@ -9,6 +9,7 @@ it says so and pairs with a constructed twin that exercises the same function.
 
 from __future__ import annotations
 
+import argparse
 import copy
 import json
 import math
@@ -69,6 +70,11 @@ def test_candidates_restriction_keeps_an_uncalled_item_uncallable():
     # recall 1.0 becomes attainable. If this ever stops being true the restriction is moot.
     assert unrestricted["matched"] is True
     assert unrestricted["threshold"] == P.UNCALLED_SCORE
+    # …and the half that makes ``candidates`` load-bearing. The sentinel is the LOWEST score,
+    # so it can never win on precision — the restriction only bites where the target recall is
+    # unreachable without it. Deleting the parameter turns this False into True.
+    restricted_ceiling = precision_at_matched_recall(y, s, 1.0, candidates=[0.9, 0.8])
+    assert restricted_ceiling["matched"] is False
 
 
 def test_the_kernel_is_the_mirror_of_recall_at_matched_precision():
@@ -86,6 +92,11 @@ def test_the_kernel_is_the_mirror_of_recall_at_matched_precision():
 def test_reweighted_precision_hand_computed():
     # 100:1 over a benchmark that sampled 1 decoy per positive => lambda = 100.
     assert P.prevalence_lambda(10, 10, 100) == pytest.approx(100.0)
+    # Asymmetric on purpose: with n_pos == n_neg the numerator and denominator can be
+    # swapped and every assertion in this file still passes, while every published AUPRC
+    # moves. These are the committed benchmark's own counts.
+    assert P.prevalence_lambda(1201, 692, 100) == pytest.approx(100.0 * 1201 / 692)
+    assert P.prevalence_lambda(692, 1201, 100) == pytest.approx(100.0 * 692 / 1201)
     assert P.reweighted_precision(tp=8, fp=1, lam=100.0) == pytest.approx(8 / 108)
     # A threshold that calls nothing has undefined precision, not 0.
     assert math.isnan(P.reweighted_precision(tp=0, fp=0, lam=3.0))
@@ -469,9 +480,17 @@ def _folded(n_pos: int = 40, n_neg: int = 40) -> dict:
                 "pool": "corpus",
                 "block": f"cluster:{index // 4}",
                 "seen_by": {"twin": False, "production": True},
+                # The two arms are deliberately NOT given the same scores: with identical
+                # columns an arm mix-up inside ``arm_items`` is unobservable and every test
+                # here stays green under one. ``production`` is the in-sample arm, so it
+                # ranks the corpus higher, exactly as the real tables do.
                 "arms": {
-                    arm: {"n_rows": 1, "stage1_only": 0.60 + index / 500, "two_stage": 0.95}
-                    for arm in ("production", "twin")
+                    "production": {
+                        "n_rows": 1,
+                        "stage1_only": 0.70 + index / 500,
+                        "two_stage": 0.95,
+                    },
+                    "twin": {"n_rows": 1, "stage1_only": 0.60 + index / 500, "two_stage": 0.95},
                 },
             }
         )
@@ -484,8 +503,12 @@ def _folded(n_pos: int = 40, n_neg: int = 40) -> dict:
                 "block": f"singleton:dec{index}",
                 "seen_by": {"twin": index % 2 == 0, "production": True},
                 "arms": {
-                    arm: {"n_rows": 1, "stage1_only": 0.61 + index / 500, "two_stage": 0.05}
-                    for arm in ("production", "twin")
+                    "production": {
+                        "n_rows": 1,
+                        "stage1_only": 0.59 + index / 500,
+                        "two_stage": 0.05,
+                    },
+                    "twin": {"n_rows": 1, "stage1_only": 0.61 + index / 500, "two_stage": 0.05},
                 },
             }
         )
@@ -498,6 +521,11 @@ def _folded(n_pos: int = 40, n_neg: int = 40) -> dict:
                 "n_items": n_pos + n_neg,
                 "n_positives": n_pos,
                 "n_negatives": n_neg,
+                # What the minter writes; the geometry disclosure is read from it rather
+                # than spelled out in the sentence (CodeRabbit, PR #133 round 2), and the
+                # block count is re-derived against the arms' own resampling unit.
+                "geometry": "1024-nt scan windows",
+                "n_blocks": len({item["block"] for item in items}),
                 "negatives_by_pool": {"gc_background": n_neg // 2, "structured_rna": n_neg // 2},
                 "seen_by_counts": {
                     "twin": {"positives": 0, "negatives": n_neg // 2},
@@ -546,7 +574,7 @@ def test_a_stage2_that_adds_nothing_fails_the_gate_rather_than_erroring():
         decoy_prevalence=100,
         prevalence_sweep=P.PREVALENCE_SWEEP,
         recall_grid=P.RECALL_GRID,
-        n_boot=20,
+        n_boot=40,
         seed=42,
         generated_at_utc="2026-08-13T00:00:00+00:00",
     )
@@ -601,3 +629,329 @@ def test_the_committed_item_table_realises_that_block_scheme():
     positive_blocks = {i["block"] for i in folded["items"] if i["label"] == 1}
     dinuc_blocks = {i["block"] for i in folded["items"] if i["pool"] == "dinuc_shuffled"}
     assert dinuc_blocks & positive_blocks
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# The Stage-1-threshold sensitivity annex, and the disclosures it sits beside
+# (CodeRabbit, PR #133 round 2)
+# ──────────────────────────────────────────────────────────────────────────────
+def _swept_point(threshold: float, *, passes: bool = True) -> dict:
+    """One swept point shaped like the sub-report ``--sensitivity`` reads off disk."""
+    return {
+        "declared": threshold,
+        "sha256": f"{int(threshold * 100):064d}",
+        "report": {
+            "sources": {"stage1_threshold": threshold},
+            "gate": {
+                "auprc": {"stage1_only": 0.78, "two_stage": 0.95},
+                "gain_pp": 16.5,
+                "passes": passes,
+                "reported_not_gated": {"matched_recall": {"gain_pp": 6.3}},
+            },
+        },
+    }
+
+
+def test_the_annex_carries_the_threshold_this_report_was_measured_at():
+    block = P.stage1_threshold_sensitivity(
+        [_swept_point(0.7), _swept_point(0.9)], base_threshold=0.5, base_passes=True
+    )
+    assert block["base"]["stage1_threshold"] == 0.5
+    assert block["base"]["source"] == "this report"
+
+
+def test_the_invariance_read_spans_the_base_verdict_not_only_the_swept_points():
+    """The bite. Swept points that agree with each other but not with the report they annex
+    must not read as invariant: that shape published ``verdict_invariant: true`` over a set
+    excluding the only threshold the verdict is actually graded at."""
+    agreeing = [_swept_point(0.7), _swept_point(0.9)]
+    assert P.stage1_threshold_sensitivity(agreeing, base_threshold=0.5, base_passes=True)[
+        "verdict_invariant"
+    ]
+    assert not P.stage1_threshold_sensitivity(agreeing, base_threshold=0.5, base_passes=False)[
+        "verdict_invariant"
+    ]
+
+
+def test_brackets_base_says_whether_the_sweep_encloses_the_base_threshold():
+    """Stated rather than implied: this run's sweep sits entirely ABOVE its base."""
+    one_side = P.stage1_threshold_sensitivity(
+        [_swept_point(0.7), _swept_point(0.9)], base_threshold=0.5, base_passes=True
+    )
+    assert one_side["brackets_base"] is False
+    enclosing = P.stage1_threshold_sensitivity(
+        [_swept_point(0.3), _swept_point(0.9)], base_threshold=0.5, base_passes=True
+    )
+    assert enclosing["brackets_base"] is True
+
+
+def test_an_annex_whose_base_is_not_this_reports_threshold_is_refused(report):
+    broken = copy.deepcopy(report)
+    broken["stage1_threshold_sensitivity"]["base"]["stage1_threshold"] = 0.9
+    assert any("measured at" in problem for problem in P.precision_problems(broken))
+
+
+def test_an_annex_whose_base_verdict_contradicts_the_gate_is_refused(report):
+    broken = copy.deepcopy(report)
+    base = broken["stage1_threshold_sensitivity"]["base"]
+    base["passes"] = not broken["gate"]["passes"]
+    assert any("base verdict disagrees" in problem for problem in P.precision_problems(broken))
+
+
+def _disclosure_inputs(*, admitted: int, retained: int, geometry: str) -> tuple[dict, dict]:
+    """The smallest ``benchmark``/``arms`` pair ``disclosures`` reads."""
+    benchmark = {
+        "scope": {
+            "geometry": geometry,
+            "n_positives": 100,
+            "n_negatives": 60,
+            "negatives_by_pool": {"leader_decoy": 1},
+            "seen_by_counts": {
+                P.GATED_ARM: {"positives": 0, "negatives": 20},
+                "production": {"positives": 100, "negatives": 60},
+            },
+        }
+    }
+    arm = {
+        "population": {
+            "observed_decoy_ratio": 0.6,
+            "n_candidate_items": 100 + admitted,
+            "n_positive_candidates": 100,
+        },
+        "matched_recall": {"two_stage": {"fp": retained}},
+    }
+    return benchmark, {P.GATED_ARM: arm, "production": copy.deepcopy(arm)}
+
+
+def test_the_geometry_disclosure_is_read_from_the_benchmark_not_spelled_out():
+    benchmark, arms = _disclosure_inputs(
+        admitted=6, retained=4, geometry="4096-nt scan windows (a different pin)"
+    )
+    line = next(text for text in P.disclosures(benchmark, arms) if "Benchmark items are" in text)
+    assert "4096-nt scan windows (a different pin)" in line
+    assert "1,024-nt" not in line and "1024-nt" not in line
+
+
+def test_the_disclosed_admitted_and_retained_counts_track_the_measured_arms():
+    """A fixed numeral would publish the same sentence for both of these payloads — which is
+    exactly what a regeneration on different inputs would do."""
+    benchmark, arms = _disclosure_inputs(admitted=6, retained=4, geometry="1024-nt windows")
+    line = next(text for text in P.disclosures(benchmark, arms) if "Benchmark items are" in text)
+    assert "admits 6 of 60" in line and "retains 4 at matched recall" in line
+
+    other_benchmark, other_arms = _disclosure_inputs(
+        admitted=11, retained=9, geometry="1024-nt windows"
+    )
+    other = next(
+        text for text in P.disclosures(other_benchmark, other_arms) if "Benchmark items are" in text
+    )
+    assert "admits 11 of 60" in other and "retains 9 at matched recall" in other
+    assert other != line
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Every published MAGNITUDE re-derived — not only the boolean verdict
+# ──────────────────────────────────────────────────────────────────────────────
+def test_a_rewritten_headline_gain_is_refused(report):
+    """The gain is what a reader quotes. Before this clause it could be rewritten to any
+    value at all and the clause set returned []."""
+    broken = copy.deepcopy(report)
+    broken["gate"]["gain_pp"] = 99.0
+    assert any("is not the difference of the AUPRCs" in p for p in P.precision_problems(broken))
+
+
+def test_the_published_interval_must_be_the_gated_arms_own(report):
+    broken = copy.deepcopy(report)
+    broken["gate"]["gain_ci"] = {**broken["gate"]["gain_ci"], "lower": 9.9, "upper": 99.0}
+    problems = P.precision_problems(broken)
+    assert any("not the gated arm's own AUPRC-gain interval" in p for p in problems)
+
+
+def test_an_interval_resampled_over_a_different_block_count_is_refused(report):
+    """The round-1 major moved this number (1,721 → 1,555); nothing re-derived it."""
+    broken = copy.deepcopy(report)
+    broken["gate"]["gain_ci"]["n_blocks"] = 3
+    assert any("blocks but the gated arm scored" in p for p in P.precision_problems(broken))
+
+
+def test_a_sweep_point_whose_gain_contradicts_its_own_auprcs_is_refused(report):
+    """The prevalence curve is the result this step reports; only its PRESENCE was checked."""
+    broken = copy.deepcopy(report)
+    broken["arms"][P.GATED_ARM]["prevalence"]["10000:1"]["auprc_gain_pp"] = 99.0
+    assert any("is not the difference of its own AUPRCs" in p for p in P.precision_problems(broken))
+
+
+def test_the_gated_arms_headline_gain_must_be_read_at_the_prevalence_it_is_graded_on(report):
+    broken = copy.deepcopy(report)
+    broken["arms"][P.GATED_ARM]["auprc_gain_pp"] = 99.0
+    assert any("is not the gain at the prevalence point" in p for p in P.precision_problems(broken))
+
+
+def test_a_gate_naming_one_prevalence_and_reading_another_is_refused(report):
+    broken = copy.deepcopy(report)
+    broken["gate"]["decoy_prevalence"] = 10
+    assert any("reads its statistic from" in p for p in P.precision_problems(broken))
+
+
+def test_the_reported_matched_recall_read_must_be_the_gated_arms_own(report):
+    """A13 keeps the failing −0.039 pp published; a second, drifting copy of it would let the
+    published read disagree with the arm it was measured on."""
+    broken = copy.deepcopy(report)
+    broken["gate"]["reported_not_gated"]["matched_recall"]["gain_pp"] = 9.0
+    assert any("not the gated arm's own" in p for p in P.precision_problems(broken))
+
+
+@pytest.mark.parametrize(
+    ("path", "value", "needle"),
+    [
+        (("n_positives",), 60, "but the benchmark manifest declares"),
+        (("n_negatives",), 60, "but the benchmark manifest declares"),
+        (("n_blocks",), 7, "blocks but the gated arm resampled"),
+    ],
+)
+def test_a_manifest_that_does_not_describe_what_was_graded_is_refused(report, path, value, needle):
+    """``n_items`` alone bound the graded population to the manifest, so a relabelled corpus
+    could certify the gate while the report published the manifest's composition."""
+    broken = copy.deepcopy(report)
+    broken["benchmark"]["scope"][path[0]] = value
+    assert any(needle in p for p in P.precision_problems(broken))
+
+
+def test_a_manifest_pool_count_that_no_arm_scored_is_refused(report):
+    broken = copy.deepcopy(report)
+    pool = next(iter(broken["benchmark"]["scope"]["negatives_by_pool"]))
+    broken["benchmark"]["scope"]["negatives_by_pool"][pool] += 3
+    problems = P.precision_problems(broken)
+    assert any("per-pool negatives sum to" in p for p in problems)
+    assert any("the manifest declares" in p for p in problems)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# The annex's summary fields, and the refusal an incomplete run now gets
+# ──────────────────────────────────────────────────────────────────────────────
+@pytest.mark.parametrize(
+    ("field", "value", "needle"),
+    [
+        ("n_points", 5, "points and carries"),
+        ("all_labels_match", False, "not the conjunction of its own rows"),
+        ("verdict_invariant", False, "not re-derivable from its rows and its base"),
+        ("brackets_base", True, "brackets_base is not the comparison it names"),
+    ],
+)
+def test_the_annex_summary_fields_are_re_derived_from_its_rows(report, field, value, needle):
+    """They were read as written: the same call that built the table also wrote the verdicts
+    about it, so a wrong summary was indistinguishable from a right one."""
+    broken = copy.deepcopy(report)
+    broken["stage1_threshold_sensitivity"][field] = value
+    assert any(needle in p for p in P.precision_problems(broken))
+
+
+def test_a_sensitivity_rows_label_verdict_must_be_the_comparison_it_names(report):
+    broken = copy.deepcopy(report)
+    broken["stage1_threshold_sensitivity"]["points"][0]["label_matches_report"] = False
+    assert any("is not the comparison it names" in p for p in P.precision_problems(broken))
+
+
+def test_an_incomplete_run_does_not_land_on_the_canonical_path(monkeypatch):
+    """``is_science`` was derived and then consumed by nothing: a run with a false
+    completeness clause wrote the graded artifact to the phase-exit path and exited 0
+    ([[cost-knobs-can-certify]]). Asserts the SIDE EFFECT — which path was written — not just
+    the return code ([[guard-runs-after-what-it-guards]])."""
+    written: dict[str, dict] = {}
+    monkeypatch.setattr(
+        P, "write_json", lambda path, payload: written.__setitem__(str(path), payload)
+    )
+    canonical = "reports/p3/_incomplete_run_never_written.json"
+    args = argparse.Namespace(
+        # Repo-relative, exactly as the Snakemake rule invokes it: an absolute path would be
+        # refused by a different clause and the test would pass for the wrong reason.
+        items=str(ITEMS_PATH.relative_to(REPO)),
+        out=canonical,
+        stage2_operating_point=1.5,  # unreachable ⇒ target_recall_is_positive is False
+        decoy_prevalence=100,
+        n_boot=40,
+        seed=42,
+        sensitivity=None,
+    )
+    assert P._cmd_report(args) == 3
+    assert canonical not in written, "an is_science=False report reached the canonical path"
+    assert list(written) == ["reports/p3/_incomplete_run_never_written.invalid.json"]
+    diverted = written["reports/p3/_incomplete_run_never_written.invalid.json"]
+    assert diverted["is_science"] is False
+    assert diverted["problems"] == [], "the clause set is clean — it is is_science that refuses"
+    assert not Path(canonical).exists()
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# The interval's own budget, its reweighting, and the unit it resamples
+# ──────────────────────────────────────────────────────────────────────────────
+def test_an_interval_that_excludes_its_own_point_estimate_is_refused(report):
+    broken = copy.deepcopy(report)
+    broken["gate"]["gain_ci"] = {**broken["gate"]["gain_ci"], "lower": 20.0, "upper": 30.0}
+    assert any("does not contain its" in p for p in P.precision_problems(broken))
+
+
+@pytest.mark.parametrize("where", ["gate", "arm"])
+def test_a_resample_budget_too_small_for_the_requested_tails_is_refused(report, where):
+    """``--n-boot`` is a cost knob and nothing read it: at B = 1 the "95 % interval" is one
+    resample wide and need not contain its own estimate ([[cost-knobs-can-certify]]). The
+    floor is re-derived from the requested ci_level, not a magic number."""
+    broken = copy.deepcopy(report)
+    node = broken["gate"]["gain_ci"] if where == "gate" else broken["arms"][P.GATED_ARM]["gain_ci"]
+    node["n_boot"] = 5
+    assert any("cannot resolve a" in p for p in P.precision_problems(broken))
+
+
+def test_the_intervals_point_must_be_the_gain_it_is_published_beside(report):
+    """Otherwise the CI can be resampled at one prevalence and the point estimate read at
+    another, with both in the same object."""
+    broken = copy.deepcopy(report)
+    broken["gate"]["gain_ci"]["point"] = 1.0
+    assert any("is not the gain" in p for p in P.precision_problems(broken))
+
+
+def test_the_gated_points_reweighting_is_re_derived_from_the_composition(report):
+    broken = copy.deepcopy(report)
+    key = broken["arms"][P.GATED_ARM]["gated_prevalence_key"]
+    broken["arms"][P.GATED_ARM]["prevalence"][key]["lambda"] *= 10
+    assert any("decoys per positive over this benchmark" in p for p in P.precision_problems(broken))
+
+
+def test_the_bootstrap_resamples_blocks_not_records():
+    """ADR-0005 D5's resampling unit. Keyed on the item id instead, the reported ``n_blocks``
+    silently becomes the record count and the interval narrows — a change no artifact-reading
+    test can see."""
+    folded = _folded(n_pos=16, n_neg=16)
+    distinct = len({item["block"] for item in folded["items"]})
+    assert distinct < len(folded["items"]), "the fixture must SHARE blocks or this is vacuous"
+    report = P.precision_gain(
+        folded,
+        stage2_operating_point=0.5,
+        decoy_prevalence=100,
+        prevalence_sweep=P.PREVALENCE_SWEEP,
+        recall_grid=P.RECALL_GRID,
+        n_boot=40,
+        seed=42,
+    )
+    for name, arm in report["arms"].items():
+        assert arm["population"]["n_blocks"] == distinct, name
+
+
+def test_the_two_arms_are_graded_on_their_own_columns():
+    """With byte-identical arm columns in the fixture, swapping the two inside ``arm_items``
+    changes nothing observable and the whole suite stays green under the mix-up."""
+    report = P.precision_gain(
+        _folded(),
+        stage2_operating_point=0.5,
+        decoy_prevalence=100,
+        prevalence_sweep=P.PREVALENCE_SWEEP,
+        recall_grid=P.RECALL_GRID,
+        n_boot=40,
+        seed=42,
+    )
+    production = report["arms"]["production"]["auprc"]["stage1_only"]
+    twin = report["arms"]["twin"]["auprc"]["stage1_only"]
+    # The fixture gives `production` the in-sample separation: it ranks corpus above decoys
+    # by a wider margin, so its Stage-1-only AUPRC is the higher of the two. A swapped lookup
+    # inverts this comparison.
+    assert production > twin

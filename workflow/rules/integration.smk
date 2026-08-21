@@ -123,8 +123,10 @@ rule precision_comparison:
     supplied via an overridable ``config.get`` so a fresh clone can reproduce the artifact
     without a config file — the same reasoning ``two_stage_eval`` documents above.
 
-    The rule **fails** when the gate fails (exit 4) or when the report's own clause set
-    refuses it (exit 3), rather than writing a report that says so quietly.
+    The rule **fails** when the gate fails (exit 4), when the report's own clause set refuses
+    it (exit 3), or when the run is incomplete — any completeness clause false, i.e.
+    ``is_science: false`` (exit 3, diverted to ``.invalid.json``) — rather than writing a
+    report that says so quietly.
     """
     input:
         # NOT `items=`: Snakemake reserves that name on the io namespace and rejects the

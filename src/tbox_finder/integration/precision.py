@@ -727,7 +727,12 @@ def precision_gain(
         "candidate_stage_emitted_positives": (
             arms[GATED_ARM]["population"]["n_positive_candidates"] > 0
         ),
-        "verdict_invariant_across_prevalence": len(
+        # Named for the verdict it READS. `two_stage_beats_stage1_only` is the matched-recall
+        # comparison, whose sign is λ-invariant by construction (every sweep point reweights
+        # one fixed confusion), so this is a consistency check on the sweep — NOT a statement
+        # about the gated AUPRC verdict, which ADR-0005 A13 Pin 3 declines to assert
+        # invariant because two PR curves can cross. The old name claimed the second thing.
+        "matched_recall_verdict_invariant_across_prevalence": len(
             {
                 point["two_stage_beats_stage1_only"]
                 for point in arms[GATED_ARM]["prevalence"].values()
@@ -810,6 +815,18 @@ def disclosures(benchmark: Mapping[str, Any], arms: Mapping[str, Mapping[str, An
     """What a reader must be told, phrased against measured values rather than adjectives."""
     scope = benchmark["scope"]
     seen = scope["seen_by_counts"]
+    # Every quantity a disclosure states is read off the payload it is describing. A fixed
+    # numeral here would survive a regeneration on different inputs and publish a false count
+    # — the same defect, one sentence over, that round 1 caught in the geometry clause
+    # (CodeRabbit, PR #133 round 2).
+    admitted = {
+        name: arm["population"]["n_candidate_items"] - arm["population"]["n_positive_candidates"]
+        for name, arm in arms.items()
+    }
+    retained = {name: arm["matched_recall"]["two_stage"]["fp"] for name, arm in arms.items()}
+    other_arms = ", ".join(
+        f"{name} {admitted[name]}/{retained[name]}" for name in sorted(arms) if name != GATED_ARM
+    )
     out = [
         (
             f"The gated arm is the GATE-4 eval twin, not the shipped scanner. The shipped "
@@ -845,12 +862,15 @@ def disclosures(benchmark: Mapping[str, Any], arms: Mapping[str, Mapping[str, An
             "the whole 10:1 → 10⁴:1 sweep."
         ),
         (
-            "Benchmark items are 1,024-nt SCAN WINDOWS, the pinned Stage-1 geometry: a "
+            f"Benchmark items are {scope['geometry']}: a "
             "positive is its gate4_eval locus carved in real ±genomic context, a negative is "
             "a §9.1 decoy spliced into a real mined host window by the shipped "
             "embed_decoy_rows. An earlier build presented each item as its own excised "
-            "contig and yielded ONE discriminating negative of 692; this one yields 4-6. "
-            "This is an in-distribution reference, not a genome-scale scan simulation (P5)."
+            "contig and Stage-1 admitted a single decoy across the whole pool; in this "
+            f"geometry the gated arm admits {admitted[GATED_ARM]} of {scope['n_negatives']} "
+            f"and retains {retained[GATED_ARM]} at matched recall ({other_arms} for the "
+            "arms reported beside it). This is an in-distribution reference, not a "
+            "genome-scale scan simulation (P5)."
         ),
         (
             "ADR-0005 D3 freezes the Stage-1 threshold, the locus knobs and the Stage-2 "
@@ -861,7 +881,12 @@ def disclosures(benchmark: Mapping[str, Any], arms: Mapping[str, Mapping[str, An
     return out
 
 
-def stage1_threshold_sensitivity(points: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+def stage1_threshold_sensitivity(
+    points: Sequence[Mapping[str, Any]],
+    *,
+    base_threshold: float | None,
+    base_passes: bool,
+) -> dict[str, Any]:
     """Bind each swept Stage-1 threshold to the report that measured it.
 
     ADR-0005 D3 leaves the Stage-1 threshold unpinned until the §13.1 phase gate, so the
@@ -870,6 +895,14 @@ def stage1_threshold_sensitivity(points: Sequence[Mapping[str, Any]]) -> dict[st
     command line: a caption would let ``--sensitivity 0.5=<a 0.9 report>`` publish a table no
     run produced (the PR #131 finding, in its own words). A point whose declared label and
     measured threshold disagree is recorded as a mismatch and makes the block refuse.
+
+    The swept points are **other** reports, so the threshold *this* report was measured at
+    would otherwise be the one value the invariance read excluded — the annex could show a
+    verdict invariant across 0.7 and 0.9 while the verdict is published at 0.5 (CodeRabbit,
+    PR #133 round 2). It is carried here as ``base``, read from the caller's own gate rather
+    than duplicated into a second file (a self-referential point would make the invariance
+    read a tautology), ``verdict_invariant`` spans base + points, and ``brackets_base``
+    states plainly whether the sweep encloses the base value or only sits to one side of it.
     """
     rows = []
     for point in points:
@@ -890,11 +923,28 @@ def stage1_threshold_sensitivity(points: Sequence[Mapping[str, Any]]) -> dict[st
             }
         )
     rows.sort(key=lambda row: row["measured_stage1_threshold"] or -1.0)
+    measured = [
+        row["measured_stage1_threshold"]
+        for row in rows
+        if row["measured_stage1_threshold"] is not None
+    ]
     return {
         "points": rows,
         "n_points": len(rows),
+        "base": {
+            # The threshold the enclosing report was measured at, and that report's own
+            # verdict. Source is named so a reader never mistakes it for a swept file.
+            "stage1_threshold": base_threshold,
+            "passes": bool(base_passes),
+            "source": "this report",
+        },
+        "brackets_base": bool(
+            measured
+            and base_threshold is not None
+            and min(measured) <= base_threshold <= max(measured)
+        ),
         "all_labels_match": all(row["label_matches_report"] for row in rows),
-        "verdict_invariant": len({row["passes"] for row in rows}) <= 1,
+        "verdict_invariant": len({*(row["passes"] for row in rows), bool(base_passes)}) <= 1,
     }
 
 
@@ -1029,6 +1079,135 @@ def precision_problems(report: Mapping[str, Any]) -> list[str]:
         "gate.passes disagrees with the gated arm's own verdict",
     )
 
+    # ── Every published MAGNITUDE re-derived, not only the boolean verdict ────────────
+    # The clauses above pin the AUPRC pair and re-derive `passes` from it. Nothing re-derived
+    # the numbers a reader actually quotes — the headline gain, its interval, the block count,
+    # the sweep's per-point gains — so each of them could be rewritten in the artifact and the
+    # clause set would return [] ([[gate-clauses-need-re-derivation]]). A magnitude that no
+    # clause recomputes is a fabricated value the report presents as a measured one.
+    def close(observed: Any, derived: float) -> bool:
+        return (
+            isinstance(observed, (int, float))
+            and not isinstance(observed, bool)
+            and math.isclose(float(observed), derived, rel_tol=1e-9, abs_tol=1e-9)
+        )
+
+    def gain_of(node: Mapping[str, Any]) -> float:
+        pair = node["auprc"]
+        return (float(pair["two_stage"]) - float(pair["stage1_only"])) * 100.0
+
+    want(
+        close(report["gate"]["gain_pp"], gain_of(report["gate"])),
+        f"gate.gain_pp {report['gate']['gain_pp']!r} is not the difference of the AUPRCs it "
+        f"is published beside ({gain_of(report['gate'])!r})",
+    )
+    want(
+        report["gate"]["gain_ci"] == gated.get("auprc_gain_ci"),
+        "gate.gain_ci is not the gated arm's own AUPRC-gain interval; the published interval "
+        "must be the one the block bootstrap produced for the statistic being graded",
+    )
+    want(
+        report["gate"]["gain_ci"].get("n_blocks") == gated["population"]["n_blocks"],
+        f"gate.gain_ci resamples {report['gate']['gain_ci'].get('n_blocks')!r} blocks but the "
+        f"gated arm scored {gated['population']['n_blocks']!r}",
+    )
+    want(
+        gated["gated_prevalence_key"] == f"{report['gate']['decoy_prevalence']}:1",
+        f"the gate names prevalence {report['gate']['decoy_prevalence']!r} but the gated arm "
+        f"reads its statistic from {gated['gated_prevalence_key']!r}",
+    )
+    # `--n-boot` is a cost knob and no clause read it. At B = 1 the "95 % interval" collapses
+    # to one resample and need not contain its own point estimate, and the report still
+    # certified ([[cost-knobs-can-certify]]). Both published intervals are checked: the gated
+    # AUPRC one and the matched-recall one A13 keeps beside it.
+    for label, interval in (
+        ("gate.gain_ci", report["gate"]["gain_ci"]),
+        ("the reported matched-recall gain_ci", gated["gain_ci"]),
+    ):
+        want(
+            interval["lower"] <= interval["point"] <= interval["upper"],
+            f"{label} = [{interval['lower']!r}, {interval['upper']!r}] does not contain its "
+            f"own point estimate {interval['point']!r}",
+        )
+        tail = (1.0 - float(interval["ci_level"])) / 2.0
+        want(
+            tail > 0.0 and int(interval["n_boot"]) * tail >= 1.0,
+            f"{label}: {interval['n_boot']!r} resamples cannot resolve a "
+            f"{interval['ci_level']!r} interval's {tail:.3%} tails — the percentile would be "
+            "an endpoint of the resample set, not a quantile of it",
+        )
+    want(
+        close(report["gate"]["gain_ci"]["point"], report["gate"]["gain_pp"]),
+        f"the interval's point estimate {report['gate']['gain_ci']['point']!r} is not the "
+        f"gain {report['gate']['gain_pp']!r} it is published beside; the CI would then be "
+        "resampled at a different statistic than the one graded",
+    )
+    # …and the reweighting the gated point was computed at is re-derived, not taken on trust.
+    want(
+        close(
+            point.get("lambda"),
+            prevalence_lambda(
+                gated["population"]["n_positives"],
+                gated["population"]["n_negatives"],
+                float(report["gate"]["decoy_prevalence"]),
+            ),
+        ),
+        f"the gated prevalence point records lambda {point.get('lambda')!r}, which is not "
+        f"{report['gate']['decoy_prevalence']!r} decoys per positive over this benchmark's "
+        "own composition",
+    )
+    # `reported` was already checked to be a mapping carrying gain_pp, above.
+    if isinstance(reported, Mapping):
+        want(
+            reported.get("gain_pp") == gated["gain_pp"]
+            and reported.get("gain_ci") == gated["gain_ci"],
+            "the reported matched-recall read is not the gated arm's own; a second copy of "
+            "the failing number could drift from the one that was measured",
+        )
+    want(
+        close(gated["auprc_gain_pp"], gain_of(point)),
+        f"the gated arm's auprc_gain_pp {gated['auprc_gain_pp']!r} is not the gain at the "
+        f"prevalence point it is graded on ({gain_of(point)!r})",
+    )
+    for arm_name, arm in arms.items():
+        for name, node in arm["prevalence"].items():
+            if "auprc" not in node or "auprc_gain_pp" not in node:
+                continue  # a separate clause above already refuses the omission
+            want(
+                close(node["auprc_gain_pp"], gain_of(node)),
+                f"arm {arm_name!r} prevalence point {name!r}: auprc_gain_pp "
+                f"{node['auprc_gain_pp']!r} is not the difference of its own AUPRCs "
+                f"({gain_of(node)!r})",
+            )
+
+    # ── The graded population re-derived against the benchmark manifest ──────────────
+    # `n_items` alone let a relabelled corpus certify while the report published the
+    # manifest's composition ([[gate-must-bind-to-upstream-evidence]]).
+    by_pool = scope.get("negatives_by_pool", {})
+    want(
+        sum(by_pool.values()) == scope["n_negatives"],
+        f"the benchmark manifest's per-pool negatives sum to {sum(by_pool.values())}, not "
+        f"its own n_negatives {scope['n_negatives']!r}",
+    )
+    want(
+        scope.get("n_blocks") == gated["population"]["n_blocks"],
+        f"the manifest records {scope.get('n_blocks')!r} blocks but the gated arm resampled "
+        f"{gated['population']['n_blocks']!r}",
+    )
+    for arm_name, arm in arms.items():
+        for field in ("n_positives", "n_negatives"):
+            want(
+                arm["population"][field] == scope[field],
+                f"arm {arm_name!r} graded {arm['population'][field]!r} {field[2:]} but the "
+                f"benchmark manifest declares {scope[field]!r}",
+            )
+        for pool, count in by_pool.items():
+            want(
+                arm["per_pool"].get(pool, {}).get("n") == count,
+                f"arm {arm_name!r} scored {arm['per_pool'].get(pool, {}).get('n')!r} items "
+                f"from pool {pool!r}; the manifest declares {count!r}",
+            )
+
     # Prevalence-invariance, re-derived from the sweep rather than asserted in prose.
     verdicts = {
         name: bool(point["two_stage_beats_stage1_only"])
@@ -1070,6 +1249,60 @@ def precision_problems(report: Mapping[str, Any]) -> list[str]:
             bool(sensitivity["verdict_invariant"]),
             "the gate's verdict changes across the Stage-1 threshold sweep; ADR-0005 D3 "
             "leaves that value unpinned until P5-01, so the gate would rest on it",
+        )
+        # The swept points are other reports. Unless the annex also carries the threshold
+        # THIS report was measured at, `verdict_invariant` can be true over a set that
+        # excludes the only threshold the verdict is actually published at.
+        want(
+            sensitivity.get("base", {}).get("stage1_threshold")
+            == report.get("sources", {}).get("stage1_threshold"),
+            "the Stage-1 threshold sensitivity does not carry the threshold this report was "
+            f"measured at ({report.get('sources', {}).get('stage1_threshold')!r}), so its "
+            "invariance read need not cover the point the gate is published at",
+        )
+        want(
+            bool(sensitivity.get("base", {}).get("passes")) == bool(report["gate"]["passes"]),
+            "the Stage-1 threshold sensitivity's base verdict disagrees with the gate it is "
+            "an annex to",
+        )
+        # …and the three summary fields above are re-derived from the rows they summarise.
+        # Read as written they are self-certifying: the same call that built the table also
+        # wrote the verdicts about it ([[gate-clauses-need-re-derivation]]).
+        rows = sensitivity.get("points", [])
+        base_node = sensitivity.get("base", {})
+        want(
+            sensitivity["n_points"] == len(rows),
+            f"the sensitivity annex claims {sensitivity['n_points']!r} points and carries "
+            f"{len(rows)}",
+        )
+        want(
+            all(
+                bool(row["label_matches_report"])
+                == (row["declared_stage1_threshold"] == row["measured_stage1_threshold"])
+                for row in rows
+            ),
+            "a sensitivity point's label_matches_report is not the comparison it names",
+        )
+        want(
+            bool(sensitivity["all_labels_match"])
+            == all(bool(row["label_matches_report"]) for row in rows),
+            "the annex's all_labels_match is not the conjunction of its own rows",
+        )
+        want(
+            bool(sensitivity["verdict_invariant"])
+            == (len({*(bool(row["passes"]) for row in rows), bool(base_node.get("passes"))}) <= 1),
+            "the annex's verdict_invariant is not re-derivable from its rows and its base",
+        )
+        swept = [
+            row["measured_stage1_threshold"]
+            for row in rows
+            if row["measured_stage1_threshold"] is not None
+        ]
+        base_tau = base_node.get("stage1_threshold")
+        want(
+            bool(sensitivity.get("brackets_base"))
+            == bool(swept and base_tau is not None and min(swept) <= base_tau <= max(swept)),
+            "the annex's brackets_base is not the comparison it names",
         )
 
     completeness = report.get("completeness", {})
@@ -1176,7 +1409,13 @@ def _cmd_report(args: argparse.Namespace) -> int:
                     "report": json.loads(raw.decode("utf-8")),
                 }
             )
-        report["stage1_threshold_sensitivity"] = json_safe(stage1_threshold_sensitivity(points))
+        report["stage1_threshold_sensitivity"] = json_safe(
+            stage1_threshold_sensitivity(
+                points,
+                base_threshold=sources.get("stage1_threshold"),
+                base_passes=bool(report["gate"]["passes"]),
+            )
+        )
     report["provenance"] = build_provenance(
         rule="workflow/rules/integration.smk :: precision_comparison",
         script=GENERATED_BY,
@@ -1192,15 +1431,26 @@ def _cmd_report(args: argparse.Namespace) -> int:
     problems = precision_problems(report)
     report["problems"] = problems
     out = Path(args.out)
-    if problems:
+    # `is_science` is DERIVED from the completeness clauses, but until now nothing consumed
+    # it: a truncated or half-measured run wrote the graded artifact to the phase-exit path
+    # and exited 0, marked ``is_science: false`` in a field no gate read
+    # ([[cost-knobs-can-certify]]). The report is still written — to ``.invalid.json``, where
+    # a reader cannot mistake it for the accepted one.
+    incomplete = sorted(name for name, ok in report.get("completeness", {}).items() if not ok)
+    if problems or incomplete:
         # Divert AND remove the canonical path, so its absence is the signal — a stale
         # accepted report sitting beside a fresh .invalid.json reads as current (P3-10 r1).
         invalid = out.with_suffix(".invalid.json")
         write_json(invalid, report)
         out.unlink(missing_ok=True)
-        print(f"REFUSED: {len(problems)} problem(s); wrote {invalid}")
-        for problem in problems:
-            print(f"  - {problem}")
+        if problems:
+            print(f"REFUSED: {len(problems)} problem(s); wrote {invalid}")
+            for problem in problems:
+                print(f"  - {problem}")
+        if incomplete:
+            print(f"REFUSED: is_science is false; wrote {invalid}")
+            for name in incomplete:
+                print(f"  - completeness clause FALSE: {name}")
         return 3
     write_json(out, report)
     gate = report["gate"]

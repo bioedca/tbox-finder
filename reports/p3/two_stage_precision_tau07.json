@@ -698,8 +698,8 @@
     "candidate_stage_emitted_positives": true,
     "gated_arm_held_out_every_positive": true,
     "gated_arm_present": true,
-    "target_recall_is_positive": true,
-    "verdict_invariant_across_prevalence": true
+    "matched_recall_verdict_invariant_across_prevalence": true,
+    "target_recall_is_positive": true
   },
   "disclosures": [
     "The gated arm is the GATE-4 eval twin, not the shipped scanner. The shipped P2-10d\u2032-b checkpoint trained on 1201 of the 1201 benchmark positives (its training fold is the whole in-distribution fold), so it has no in-distribution held-out population; the twin saw 0. \u00a77 decision 2026-08-13; ADR-0004 A6's two-run split is the same instrument GATE-4 used.",
@@ -707,7 +707,7 @@
     "All four \u00a79.1 decoy pools are in the gated denominator (\u00a77 decision). 283 of the 692 negatives were embedded in both Stage-1 trainings (ADR-0005 A7 pin 3 embeds every structured_rna decoy), so that pool's contribution partly measures memorisation.",
     "\u00a79.1's hardest negative class contributes 1 item(s): all 8 leader decoys are T-box-derived and 2 are exact substrings of training positives (A7 pin 5); re-sourcing is deferred to P2-10b\u2032.",
     "The ADR-0005 D7 100:1 prevalence is reached by REWEIGHTING the sampled negatives, not by materialising them \u2014 this benchmark's own composition is 0.576 decoys per positive. conf/data/decoys.yaml scopes the D7 pin to P4; it is reported here because imp.md's P3-16 block asks for it, and the verdict is invariant across the whole 10:1 \u2192 10\u2074:1 sweep.",
-    "Benchmark items are 1,024-nt SCAN WINDOWS, the pinned Stage-1 geometry: a positive is its gate4_eval locus carved in real \u00b1genomic context, a negative is a \u00a79.1 decoy spliced into a real mined host window by the shipped embed_decoy_rows. An earlier build presented each item as its own excised contig and yielded ONE discriminating negative of 692; this one yields 4-6. This is an in-distribution reference, not a genome-scale scan simulation (P5).",
+    "Benchmark items are 1024-nt scan windows (ADR-0005 D3 / PRD \u00a76 pinned geometry): a positive is its gate4_eval locus carved in real \u00b1genomic context, a negative is a \u00a79.1 decoy spliced into a real mined host window by the shipped embed_decoy_rows. An earlier build presented each item as its own excised contig and Stage-1 admitted a single decoy across the whole pool; in this geometry the gated arm admits 5 of 692 and retains 3 at matched recall (production 5/4 for the arms reported beside it). This is an in-distribution reference, not a genome-scale scan simulation (P5).",
     "ADR-0005 D3 freezes the Stage-1 threshold, the locus knobs and the Stage-2 operating point at the \u00a713.1 phase gate (P5-01). Nothing here pins any of them; the Stage-1 threshold is swept and the sweep is reported beside the gate."
   ],
   "env_lock": "envs/data.conda-lock.yml",
@@ -753,7 +753,7 @@
   },
   "gated": true,
   "gated_arm": "twin",
-  "generated_at_utc": "2026-08-13T23:58:59+00:00",
+  "generated_at_utc": "2026-08-21T04:54:05+00:00",
   "generated_by": "src/tbox_finder/integration/precision.py",
   "is_science": true,
   "prd": "PRD \u00a72.3, \u00a76, \u00a712, \u00a718.1",
@@ -766,8 +766,8 @@
         "reports/p3/two_stage_precision_tau07.json"
       ]
     },
-    "generated_at_utc": "2026-08-13T23:58:59.263467+00:00",
-    "git_sha": "c0c97501a319ecad6d8e826579131479281acd27",
+    "generated_at_utc": "2026-08-21T04:54:05.810447+00:00",
+    "git_sha": "305cd515321a9c98db8cacea443408c4119be6af",
     "inputs": {
       "data/interim/p3_16/v1_items_t0.7.json": "167f089ba5a65c1f1b4970fdf8036ee8fc77ce5527c65d263eb06f9fad069fa0"
     },

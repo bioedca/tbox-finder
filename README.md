@@ -97,12 +97,12 @@ data-leakage control, calibration, and orthogonal validation are first-class.
   the pre-registered 100:1 benchmark decoy prevalence — 0.950 vs 0.784, +16.5 pp** — on a
   1,893-window in-distribution benchmark (1,201 held-out T-box loci in real genomic context,
   692 §9.1 decoys spliced into real host windows). ⚠ **The 95% block-bootstrap interval is
-  [−4.9, +35.7] pp: the point estimate is positive and its lower bound is not.** In
+  [−4.8, +35.7] pp: the point estimate is positive and its lower bound is not.** In
   distribution Stage-1 alone is already ~99.7% precise, so only **4 of 692** decoys separate
   the two systems, and no in-distribution benchmark can make that comparison significant.
   *The number that shows where Stage-2 earns its place:* the gain grows monotonically with
   decoy prevalence — **+0.1 pp** at the benchmark's own composition, **+16.5 pp** at 100:1,
-  **+62.9 pp** at 10⁴:1, the regime the Phase-5 genome scan runs in. Graded, like GATE-4,
+  **+63.0 pp** at 10⁴:1, the regime the Phase-5 genome scan runs in. Graded, like GATE-4,
   on an **evaluation twin** rather than the shipped scanner: no Stage-1 checkpoint in this
   repo has an in-distribution holdout, and the shipped scanner's arm is reported beside the
   gated one (+4.7 pp), disclosed as in-sample. The **P3 hard-negative re-mining round ran

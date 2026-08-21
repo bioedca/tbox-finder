@@ -424,8 +424,9 @@ gated on none of it.
 
 On that statistic the two-stage system reaches **AUPRC 0.950 against
 Stage-1-only's 0.784 at 100:1 decoy prevalence, a gain of 16.5 percentage
-points** (@fig-twostage). The interval around that gain, block-resampled at the
-homology-cluster level, is **[−4.9, +35.7] points** — positive at the point
+points** (@fig-twostage). The interval around that gain, block-resampled over
+1,555 units — 1,065 homology-cluster blocks and 490 singleton host windows, one
+per parentless decoy — is **[−4.8, +35.7] points** — positive at the point
 estimate and not bounded away from zero. The reason is visible in the raw
 counts: in distribution the scanner alone is already about 99.7 % precise, it
 emits a candidate for only 6 of 692 decoys, and 4 survive to the matched-recall
@@ -436,7 +437,7 @@ with that power floor stated rather than as evidence of a significant effect.
 The informative quantity is not the single number but its dependence on
 prevalence. Sweeping the decoy:positive ratio across the pre-registered range,
 the AUPRC gain rises monotonically from **0.1 points at the benchmark's own
-composition to 2.3 at 10:1, 16.5 at 100:1, 48.8 at 10³:1 and 62.9 at 10⁴:1** —
+composition to 2.3 at 10:1, 16.5 at 100:1, 48.8 at 10³:1 and 63.0 at 10⁴:1** —
 the last being the regime a genome-scale scan actually operates in. This is the
 architecture's stated division of labour appearing as a measurement: a
 high-recall scanner is not the component under pressure at low prevalence, and
