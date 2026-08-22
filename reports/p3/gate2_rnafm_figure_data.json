@@ -1,0 +1,820 @@
+{
+  "gate": 0.05,
+  "generated_at_utc": "2026-08-21T23:30:14+00:00",
+  "generated_by": "src/tbox_finder/calib/gate2.py",
+  "in_distribution": {
+    "bin_concentration": {
+      "gated": false,
+      "n_bins": 15,
+      "n_bins_with_saturated_accuracy": 10,
+      "n_bins_with_zero_debiased_gap": 7,
+      "note": "descriptive only \u2014 no threshold is pinned on bin concentration anywhere; it states how much of the reported ECE rests on how few bins",
+      "top_bin_contribution": 0.005414108622813487,
+      "top_bin_index": 2,
+      "top_bin_share_of_ece": 0.7949250501887594,
+      "widest_bin_index": 3,
+      "widest_bin_span": 0.9209025381059636
+    },
+    "ece": 0.006810841627808656,
+    "ece_ci": {
+      "ci_level": 0.95,
+      "lower": 0.004067991759099783,
+      "n_blocks": 2275,
+      "n_boot": 2000,
+      "point": 0.006810841627808656,
+      "upper": 0.012859950706182722
+    },
+    "ece_plugin": 0.01132246565841689,
+    "n": 3045,
+    "passes": true,
+    "prevalence": 0.7727422003284072,
+    "temperature": 1.3176412710688241
+  },
+  "ood_by_phylum": {
+    "Actinobacteria": {
+      "max_ood_ece": 0.7252086137923988,
+      "mean_ood_ece": 0.5724908740714014,
+      "median_ood_ece": 0.5824635121142191,
+      "min_ood_ece": 0.39489035247327486,
+      "n_positives": 1156,
+      "n_records": 1252,
+      "n_units": 9,
+      "units": [
+        "Actinomycetales",
+        "Bifidobacteriales",
+        "Corynebacteriales",
+        "Micrococcales",
+        "Micromonosporales",
+        "Propionibacteriales",
+        "Pseudonocardiales",
+        "Streptomycetales",
+        "Streptosporangiales"
+      ]
+    },
+    "Chloroflexi": {
+      "max_ood_ece": 0.01889048487486837,
+      "mean_ood_ece": 0.00978016447300834,
+      "median_ood_ece": 0.007991193269878582,
+      "min_ood_ece": 0.004247786477407826,
+      "n_positives": 117,
+      "n_records": 125,
+      "n_units": 4,
+      "units": [
+        "Anaerolineales",
+        "Chloroflexales",
+        "Dehalococcoidales",
+        "Ktedonobacterales"
+      ]
+    },
+    "Deinococcus-Thermus": {
+      "max_ood_ece": 0.1906376727313617,
+      "mean_ood_ece": 0.1906376727313617,
+      "median_ood_ece": 0.1906376727313617,
+      "min_ood_ece": 0.1906376727313617,
+      "n_positives": 28,
+      "n_records": 28,
+      "n_units": 1,
+      "units": [
+        "Deinococcales"
+      ]
+    },
+    "Firmicutes": {
+      "max_ood_ece": 0.01715048428272326,
+      "mean_ood_ece": 0.010949157458039734,
+      "median_ood_ece": 0.012087207871249948,
+      "min_ood_ece": 0.0037568136990320565,
+      "n_positives": 7080,
+      "n_records": 7652,
+      "n_units": 9,
+      "units": [
+        "Acidaminococcales",
+        "Erysipelotrichales",
+        "Halanaerobiales",
+        "Lactobacillales",
+        "Natranaerobiales",
+        "Selenomonadales",
+        "Thermoanaerobacterales",
+        "Tissierellales",
+        "Veillonellales"
+      ]
+    },
+    "Proteobacteria": {
+      "max_ood_ece": 0.003283090702713465,
+      "mean_ood_ece": 0.003283090702713465,
+      "median_ood_ece": 0.003283090702713465,
+      "min_ood_ece": 0.003283090702713465,
+      "n_positives": 31,
+      "n_records": 33,
+      "n_units": 1,
+      "units": [
+        "Desulfuromonadales"
+      ]
+    },
+    "Synergistetes": {
+      "max_ood_ece": 0.05493064450671008,
+      "mean_ood_ece": 0.05493064450671008,
+      "median_ood_ece": 0.05493064450671008,
+      "min_ood_ece": 0.05493064450671008,
+      "n_positives": 27,
+      "n_records": 31,
+      "n_units": 1,
+      "units": [
+        "Synergistales"
+      ]
+    },
+    "Tenericutes": {
+      "max_ood_ece": 0.032391977869649154,
+      "mean_ood_ece": 0.021499863389069496,
+      "median_ood_ece": 0.02589725081422168,
+      "min_ood_ece": 0.006265903092932821,
+      "n_positives": 202,
+      "n_records": 224,
+      "n_units": 5,
+      "units": [
+        "Acholeplasmatales",
+        "Candidatus Izemoplasmatales",
+        "Entomoplasmatales",
+        "Haloplasmatales",
+        "Mycoplasmatales"
+      ]
+    }
+  },
+  "ood_by_phylum_is": "the admissible units' OOD ECEs grouped by the phylum of the held-out order \u2014 PRD \u00a712's ECE-vs-phylogenetic-distance read, REPORTED and not gated. Descriptive only: these are the same per-unit numbers regrouped, not a separate estimate, and no phylum-level bound is pinned anywhere",
+  "ood_gated": false,
+  "ood_macro_average": {
+    "ci_level": 0.95,
+    "lower": 0.09420234761134379,
+    "n_blocks": 30,
+    "n_boot": 200,
+    "point": 0.1882143888847712,
+    "upper": 0.27565916143883124
+  },
+  "ood_macro_average_is": "unweighted mean of the admissible units' OOD ECEs, block-resampled with the held-out order as the block (PRD \u00a712 macro-average, not micro)",
+  "ood_min_n": 20,
+  "ood_units": [
+    {
+      "admissible": true,
+      "ci": {
+        "ci_level": 0.95,
+        "lower": 0.007234544549450229,
+        "n_blocks": 47,
+        "n_boot": 200,
+        "point": 0.015360982717632744,
+        "upper": 0.03356838031270092
+      },
+      "inadmissible_point": null,
+      "n_positives": 52,
+      "n_records": 58,
+      "ood_ece": 0.015360982717632744,
+      "phylum": "Tenericutes",
+      "unit": "Acholeplasmatales"
+    },
+    {
+      "admissible": true,
+      "ci": {
+        "ci_level": 0.95,
+        "lower": 0.004180291937302908,
+        "n_blocks": 47,
+        "n_boot": 200,
+        "point": 0.012087207871249948,
+        "upper": 0.024393320116685317
+      },
+      "inadmissible_point": null,
+      "n_positives": 52,
+      "n_records": 56,
+      "ood_ece": 0.012087207871249948,
+      "phylum": "Firmicutes",
+      "unit": "Acidaminococcales"
+    },
+    {
+      "admissible": true,
+      "ci": {
+        "ci_level": 0.95,
+        "lower": 0.6973276207409171,
+        "n_blocks": 6,
+        "n_boot": 200,
+        "point": 0.7252086137923988,
+        "upper": 0.9359905206623866
+      },
+      "inadmissible_point": null,
+      "n_positives": 42,
+      "n_records": 44,
+      "ood_ece": 0.7252086137923988,
+      "phylum": "Actinobacteria",
+      "unit": "Actinomycetales"
+    },
+    {
+      "admissible": true,
+      "ci": {
+        "ci_level": 0.95,
+        "lower": 0.00406958966890608,
+        "n_blocks": 30,
+        "n_boot": 200,
+        "point": 0.005852478988528959,
+        "upper": 0.008428324070273501
+      },
+      "inadmissible_point": null,
+      "n_positives": 41,
+      "n_records": 43,
+      "ood_ece": 0.005852478988528959,
+      "phylum": "Chloroflexi",
+      "unit": "Anaerolineales"
+    },
+    {
+      "admissible": true,
+      "ci": {
+        "ci_level": 0.95,
+        "lower": 0.42692448053542204,
+        "n_blocks": 5,
+        "n_boot": 200,
+        "point": 0.5529493187493048,
+        "upper": 0.6067872969433398
+      },
+      "inadmissible_point": null,
+      "n_positives": 69,
+      "n_records": 77,
+      "ood_ece": 0.5529493187493048,
+      "phylum": "Actinobacteria",
+      "unit": "Bifidobacteriales"
+    },
+    {
+      "admissible": true,
+      "ci": {
+        "ci_level": 0.95,
+        "lower": 0.004257674316035072,
+        "n_blocks": 19,
+        "n_boot": 200,
+        "point": 0.032391977869649154,
+        "upper": 0.06694982785344986
+      },
+      "inadmissible_point": null,
+      "n_positives": 24,
+      "n_records": 28,
+      "ood_ece": 0.032391977869649154,
+      "phylum": "Tenericutes",
+      "unit": "Candidatus Izemoplasmatales"
+    },
+    {
+      "admissible": true,
+      "ci": {
+        "ci_level": 0.95,
+        "lower": 0.009244508561524263,
+        "n_blocks": 16,
+        "n_boot": 200,
+        "point": 0.01889048487486837,
+        "upper": 0.03165337836275525
+      },
+      "inadmissible_point": null,
+      "n_positives": 20,
+      "n_records": 22,
+      "ood_ece": 0.01889048487486837,
+      "phylum": "Chloroflexi",
+      "unit": "Chloroflexales"
+    },
+    {
+      "admissible": true,
+      "ci": {
+        "ci_level": 0.95,
+        "lower": 0.1925337627336906,
+        "n_blocks": 18,
+        "n_boot": 200,
+        "point": 0.4637620080649852,
+        "upper": 0.47345644739577136
+      },
+      "inadmissible_point": null,
+      "n_positives": 370,
+      "n_records": 394,
+      "ood_ece": 0.4637620080649852,
+      "phylum": "Actinobacteria",
+      "unit": "Corynebacteriales"
+    },
+    {
+      "admissible": true,
+      "ci": {
+        "ci_level": 0.95,
+        "lower": 0.004545622356943125,
+        "n_blocks": 22,
+        "n_boot": 200,
+        "point": 0.010129907551228206,
+        "upper": 0.020031959584407438
+      },
+      "inadmissible_point": null,
+      "n_positives": 34,
+      "n_records": 38,
+      "ood_ece": 0.010129907551228206,
+      "phylum": "Chloroflexi",
+      "unit": "Dehalococcoidales"
+    },
+    {
+      "admissible": true,
+      "ci": {
+        "ci_level": 0.95,
+        "lower": 0.10811614765488914,
+        "n_blocks": 25,
+        "n_boot": 200,
+        "point": 0.1906376727313617,
+        "upper": 0.3055368489366853
+      },
+      "inadmissible_point": null,
+      "n_positives": 28,
+      "n_records": 28,
+      "ood_ece": 0.1906376727313617,
+      "phylum": "Deinococcus-Thermus",
+      "unit": "Deinococcales"
+    },
+    {
+      "admissible": true,
+      "ci": {
+        "ci_level": 0.95,
+        "lower": 0.0031671811672010866,
+        "n_blocks": 3,
+        "n_boot": 181,
+        "point": 0.003283090702713465,
+        "upper": 0.0038737598579815145
+      },
+      "inadmissible_point": null,
+      "n_positives": 31,
+      "n_records": 33,
+      "ood_ece": 0.003283090702713465,
+      "phylum": "Proteobacteria",
+      "unit": "Desulfuromonadales"
+    },
+    {
+      "admissible": true,
+      "ci": {
+        "ci_level": 0.95,
+        "lower": 0.014164077426907458,
+        "n_blocks": 49,
+        "n_boot": 200,
+        "point": 0.02589725081422168,
+        "upper": 0.06320254705213149
+      },
+      "inadmissible_point": null,
+      "n_positives": 68,
+      "n_records": 72,
+      "ood_ece": 0.02589725081422168,
+      "phylum": "Tenericutes",
+      "unit": "Entomoplasmatales"
+    },
+    {
+      "admissible": true,
+      "ci": {
+        "ci_level": 0.95,
+        "lower": 0.009950600342812982,
+        "n_blocks": 272,
+        "n_boot": 200,
+        "point": 0.015318804012093809,
+        "upper": 0.027935645219378077
+      },
+      "inadmissible_point": null,
+      "n_positives": 445,
+      "n_records": 487,
+      "ood_ece": 0.015318804012093809,
+      "phylum": "Firmicutes",
+      "unit": "Erysipelotrichales"
+    },
+    {
+      "admissible": true,
+      "ci": {
+        "ci_level": 0.95,
+        "lower": 0.005394422520830123,
+        "n_blocks": 58,
+        "n_boot": 200,
+        "point": 0.015472467390705312,
+        "upper": 0.0315298827539318
+      },
+      "inadmissible_point": null,
+      "n_positives": 99,
+      "n_records": 111,
+      "ood_ece": 0.015472467390705312,
+      "phylum": "Firmicutes",
+      "unit": "Halanaerobiales"
+    },
+    {
+      "admissible": true,
+      "ci": {
+        "ci_level": 0.95,
+        "lower": 0.0030752244703123447,
+        "n_blocks": 21,
+        "n_boot": 200,
+        "point": 0.006265903092932821,
+        "upper": 0.011342940300161803
+      },
+      "inadmissible_point": null,
+      "n_positives": 22,
+      "n_records": 26,
+      "ood_ece": 0.006265903092932821,
+      "phylum": "Tenericutes",
+      "unit": "Haloplasmatales"
+    },
+    {
+      "admissible": true,
+      "ci": {
+        "ci_level": 0.95,
+        "lower": 0.0033598438112113797,
+        "n_blocks": 13,
+        "n_boot": 200,
+        "point": 0.004247786477407826,
+        "upper": 0.005760454242258707
+      },
+      "inadmissible_point": null,
+      "n_positives": 22,
+      "n_records": 22,
+      "ood_ece": 0.004247786477407826,
+      "phylum": "Chloroflexi",
+      "unit": "Ktedonobacterales"
+    },
+    {
+      "admissible": true,
+      "ci": {
+        "ci_level": 0.95,
+        "lower": 0.014538396536374813,
+        "n_blocks": 2948,
+        "n_boot": 200,
+        "point": 0.01715048428272326,
+        "upper": 0.02271574081498457
+      },
+      "inadmissible_point": null,
+      "n_positives": 5323,
+      "n_records": 5763,
+      "ood_ece": 0.01715048428272326,
+      "phylum": "Firmicutes",
+      "unit": "Lactobacillales"
+    },
+    {
+      "admissible": true,
+      "ci": {
+        "ci_level": 0.95,
+        "lower": 0.31725111669564365,
+        "n_blocks": 10,
+        "n_boot": 200,
+        "point": 0.6529010945028759,
+        "upper": 0.6650729285960338
+      },
+      "inadmissible_point": null,
+      "n_positives": 275,
+      "n_records": 291,
+      "ood_ece": 0.6529010945028759,
+      "phylum": "Actinobacteria",
+      "unit": "Micrococcales"
+    },
+    {
+      "admissible": true,
+      "ci": {
+        "ci_level": 0.95,
+        "lower": 0.5697811038725525,
+        "n_blocks": 14,
+        "n_boot": 200,
+        "point": 0.6378638468962138,
+        "upper": 0.7423322286498891
+      },
+      "inadmissible_point": null,
+      "n_positives": 65,
+      "n_records": 73,
+      "ood_ece": 0.6378638468962138,
+      "phylum": "Actinobacteria",
+      "unit": "Micromonosporales"
+    },
+    {
+      "admissible": true,
+      "ci": {
+        "ci_level": 0.95,
+        "lower": 0.005201793179730723,
+        "n_blocks": 23,
+        "n_boot": 200,
+        "point": 0.02758320245091108,
+        "upper": 0.08695512997327426
+      },
+      "inadmissible_point": null,
+      "n_positives": 36,
+      "n_records": 40,
+      "ood_ece": 0.02758320245091108,
+      "phylum": "Tenericutes",
+      "unit": "Mycoplasmatales"
+    },
+    {
+      "admissible": true,
+      "ci": {
+        "ci_level": 0.95,
+        "lower": 0.0027668161480621472,
+        "n_blocks": 23,
+        "n_boot": 200,
+        "point": 0.0037568136990320565,
+        "upper": 0.00493269658424989
+      },
+      "inadmissible_point": null,
+      "n_positives": 23,
+      "n_records": 25,
+      "ood_ece": 0.0037568136990320565,
+      "phylum": "Firmicutes",
+      "unit": "Natranaerobiales"
+    },
+    {
+      "admissible": true,
+      "ci": {
+        "ci_level": 0.95,
+        "lower": 0.3412368642125337,
+        "n_blocks": 12,
+        "n_boot": 200,
+        "point": 0.5824635121142191,
+        "upper": 0.8607840650783468
+      },
+      "inadmissible_point": null,
+      "n_positives": 66,
+      "n_records": 74,
+      "ood_ece": 0.5824635121142191,
+      "phylum": "Actinobacteria",
+      "unit": "Propionibacteriales"
+    },
+    {
+      "admissible": true,
+      "ci": {
+        "ci_level": 0.95,
+        "lower": 0.46828329688549336,
+        "n_blocks": 3,
+        "n_boot": 193,
+        "point": 0.5477683237578677,
+        "upper": 0.702077309935969
+      },
+      "inadmissible_point": null,
+      "n_positives": 48,
+      "n_records": 52,
+      "ood_ece": 0.5477683237578677,
+      "phylum": "Actinobacteria",
+      "unit": "Pseudonocardiales"
+    },
+    {
+      "admissible": true,
+      "ci": {
+        "ci_level": 0.95,
+        "lower": 0.0026488797769218865,
+        "n_blocks": 120,
+        "n_boot": 200,
+        "point": 0.006625346999911365,
+        "upper": 0.018283320320807508
+      },
+      "inadmissible_point": null,
+      "n_positives": 224,
+      "n_records": 236,
+      "ood_ece": 0.006625346999911365,
+      "phylum": "Firmicutes",
+      "unit": "Selenomonadales"
+    },
+    {
+      "admissible": true,
+      "ci": {
+        "ci_level": 0.95,
+        "lower": 0.36831956990819004,
+        "n_blocks": 33,
+        "n_boot": 200,
+        "point": 0.39489035247327486,
+        "upper": 0.5740252185553277
+      },
+      "inadmissible_point": null,
+      "n_positives": 197,
+      "n_records": 223,
+      "ood_ece": 0.39489035247327486,
+      "phylum": "Actinobacteria",
+      "unit": "Streptomycetales"
+    },
+    {
+      "admissible": true,
+      "ci": {
+        "ci_level": 0.95,
+        "lower": 0.47879392109054764,
+        "n_blocks": 12,
+        "n_boot": 200,
+        "point": 0.5946107962914725,
+        "upper": 0.7740489931444567
+      },
+      "inadmissible_point": null,
+      "n_positives": 24,
+      "n_records": 24,
+      "ood_ece": 0.5946107962914725,
+      "phylum": "Actinobacteria",
+      "unit": "Streptosporangiales"
+    },
+    {
+      "admissible": true,
+      "ci": {
+        "ci_level": 0.95,
+        "lower": 0.003784859762760985,
+        "n_blocks": 24,
+        "n_boot": 200,
+        "point": 0.05493064450671008,
+        "upper": 0.166934229766566
+      },
+      "inadmissible_point": null,
+      "n_positives": 27,
+      "n_records": 31,
+      "ood_ece": 0.05493064450671008,
+      "phylum": "Synergistetes",
+      "unit": "Synergistales"
+    },
+    {
+      "admissible": true,
+      "ci": {
+        "ci_level": 0.95,
+        "lower": 0.005300201014896262,
+        "n_blocks": 150,
+        "n_boot": 200,
+        "point": 0.013095900327022679,
+        "upper": 0.02965368606056321
+      },
+      "inadmissible_point": null,
+      "n_positives": 271,
+      "n_records": 293,
+      "ood_ece": 0.013095900327022679,
+      "phylum": "Firmicutes",
+      "unit": "Thermoanaerobacterales"
+    },
+    {
+      "admissible": true,
+      "ci": {
+        "ci_level": 0.95,
+        "lower": 0.005130355724512524,
+        "n_blocks": 228,
+        "n_boot": 200,
+        "point": 0.008560269016111177,
+        "upper": 0.013676665353905788
+      },
+      "inadmissible_point": null,
+      "n_positives": 420,
+      "n_records": 442,
+      "ood_ece": 0.008560269016111177,
+      "phylum": "Firmicutes",
+      "unit": "Tissierellales"
+    },
+    {
+      "admissible": true,
+      "ci": {
+        "ci_level": 0.95,
+        "lower": 0.004198109858189599,
+        "n_blocks": 140,
+        "n_boot": 200,
+        "point": 0.006475123523507992,
+        "upper": 0.009988841347584258
+      },
+      "inadmissible_point": null,
+      "n_positives": 223,
+      "n_records": 239,
+      "ood_ece": 0.006475123523507992,
+      "phylum": "Firmicutes",
+      "unit": "Veillonellales"
+    }
+  ],
+  "ood_why_not_gated": "ADR-0005 D13: an OOD / leave-clade-out ECE <= 0.05 is likely infeasible under clade shift, so it is reported and adjudicated by the drift decision rule, never gated. GATE-2 grades the D11 in-distribution number only.",
+  "reliability": [
+    {
+      "acc": 0.0,
+      "conf": 0.0010404693208835116,
+      "debiased_gap": 0.0,
+      "gap": 0.0010404693208835116,
+      "n": 203,
+      "p_max": 0.0011423609148681743,
+      "p_min": 0.0009734614855372294,
+      "weight": 0.06666666666666667
+    },
+    {
+      "acc": 0.019704433497536946,
+      "conf": 0.0024029743750604684,
+      "debiased_gap": 0.014559606008595107,
+      "gap": 0.01730145912247648,
+      "n": 203,
+      "p_max": 0.0037078851058965938,
+      "p_min": 0.0011434251256965192,
+      "weight": 0.06666666666666667
+    },
+    {
+      "acc": 0.09852216748768473,
+      "conf": 0.011372571995370994,
+      "debiased_gap": 0.08121162934220232,
+      "gap": 0.08714959549231374,
+      "n": 203,
+      "p_max": 0.03381150483590487,
+      "p_min": 0.003711485673016903,
+      "weight": 0.06666666666666667
+    },
+    {
+      "acc": 0.5024630541871922,
+      "conf": 0.47201206839559995,
+      "debiased_gap": 0.0024946278830638574,
+      "gap": 0.030450985791592222,
+      "n": 203,
+      "p_max": 0.9553767892834308,
+      "p_min": 0.03447425117746732,
+      "weight": 0.06666666666666667
+    },
+    {
+      "acc": 0.9802955665024631,
+      "conf": 0.9807927000335498,
+      "debiased_gap": 0.0,
+      "gap": 0.0004971335310867131,
+      "n": 203,
+      "p_max": 0.9889724482329544,
+      "p_min": 0.9555580245258982,
+      "weight": 0.06666666666666667
+    },
+    {
+      "acc": 0.9901477832512315,
+      "conf": 0.9912187491642825,
+      "debiased_gap": 0.0,
+      "gap": 0.001070965913051003,
+      "n": 203,
+      "p_max": 0.9928095703501941,
+      "p_min": 0.9889999111521487,
+      "weight": 0.06666666666666667
+    },
+    {
+      "acc": 1.0,
+      "conf": 0.993764030697849,
+      "debiased_gap": 0.0018275218998937632,
+      "gap": 0.006235969302150979,
+      "n": 203,
+      "p_max": 0.9944904437397151,
+      "p_min": 0.9928225068451134,
+      "weight": 0.06666666666666667
+    },
+    {
+      "acc": 1.0,
+      "conf": 0.9949604621479975,
+      "debiased_gap": 0.0010741076515870859,
+      "gap": 0.005039537852002507,
+      "n": 203,
+      "p_max": 0.9953599375949086,
+      "p_min": 0.9944938274331059,
+      "weight": 0.06666666666666667
+    },
+    {
+      "acc": 1.0,
+      "conf": 0.995718290788599,
+      "debiased_gap": 0.0006251814958514439,
+      "gap": 0.00428170921140103,
+      "n": 203,
+      "p_max": 0.9960243641153694,
+      "p_min": 0.9953614750168827,
+      "weight": 0.06666666666666667
+    },
+    {
+      "acc": 1.0,
+      "conf": 0.9963176003884392,
+      "debiased_gap": 0.00029039525200443136,
+      "gap": 0.003682399611560805,
+      "n": 203,
+      "p_max": 0.9965334925810597,
+      "p_min": 0.9960252639447157,
+      "weight": 0.06666666666666667
+    },
+    {
+      "acc": 1.0,
+      "conf": 0.9967170555806024,
+      "debiased_gap": 7.955488393186294e-05,
+      "gap": 0.003282944419397582,
+      "n": 203,
+      "p_max": 0.9968955370824467,
+      "p_min": 0.9965349349378099,
+      "weight": 0.06666666666666667
+    },
+    {
+      "acc": 1.0,
+      "conf": 0.9970781286085527,
+      "debiased_gap": 0.0,
+      "gap": 0.002921871391447284,
+      "n": 203,
+      "p_max": 0.9972389083190439,
+      "p_min": 0.9968978310696018,
+      "weight": 0.06666666666666667
+    },
+    {
+      "acc": 1.0,
+      "conf": 0.9973812123583803,
+      "debiased_gap": 0.0,
+      "gap": 0.002618787641619713,
+      "n": 203,
+      "p_max": 0.9975323693181406,
+      "p_min": 0.9972389521622377,
+      "weight": 0.06666666666666667
+    },
+    {
+      "acc": 1.0,
+      "conf": 0.9976883166813918,
+      "debiased_gap": 0.0,
+      "gap": 0.002311683318608204,
+      "n": 203,
+      "p_max": 0.9978558996416433,
+      "p_min": 0.9975327737081456,
+      "weight": 0.06666666666666667
+    },
+    {
+      "acc": 1.0,
+      "conf": 0.9980485270433385,
+      "debiased_gap": 0.0,
+      "gap": 0.0019514729566615374,
+      "n": 203,
+      "p_max": 0.9984893893027429,
+      "p_min": 0.9978563703390952,
+      "weight": 0.06666666666666667
+    }
+  ],
+  "step": "P3-10"
+}

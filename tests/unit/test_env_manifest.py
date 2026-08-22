@@ -21,9 +21,10 @@ RULES_DIR = REPO_ROOT / "workflow" / "rules"
 # env was split into `ml-dna` + `ml-rna` at P0-06c (ADR-0002 A4): transformers 4.57.5
 # (Caduceus trust_remote_code ceiling) is mutually exclusive with `multimolecule` 0.0.9,
 # which at import needs transformers 5.x. `rscape` was added at P2-10c (A11),
-# `homology` at P2-10c′-e (A12: hmmer+blast, no infernal co-pin), and `locarna` at
-# P2-10e-msa (A13: locarna 2.0.1 / mlocarna, the D7 CM-free comparative-consensus aligner)
-# — nine envs total.
+# `homology` at P2-10c′-e (A12: hmmer+blast, no infernal co-pin), `locarna` at
+# P2-10e-msa (A13: locarna 2.0.1 / mlocarna, the D7 CM-free comparative-consensus aligner),
+# and `ml-rnafm` at P3-17 (A15: `multimolecule` 0.2.0 for the D6 RNA-FM comparator, because
+# ml-rna's 0.1.0 cannot load that checkpoint at all) — ten envs total.
 EXPECTED_ENVS = [
     "data",
     "infernal",
@@ -34,11 +35,14 @@ EXPECTED_ENVS = [
     "rscape",
     "homology",
     "locarna",
+    "ml-rnafm",
 ]
 
 # The two GPU envs (ADR-0002 D2/D3/A4); the torch-URL / no-`--extra-index-url` guard
-# applies to both, since both carry the same cu128 URL-pinned closure.
-ML_ENVS = ["ml-dna", "ml-rna"]
+# applies to all three, since they carry the same cu128 URL-pinned closure. `ml-rnafm` is
+# `ml-rna` with ONE pin changed (ADR-0002 A15), so it inherits the invariant unchanged — and
+# omitting it here would leave the comparator's env the only GPU spec nothing checks.
+ML_ENVS = ["ml-dna", "ml-rna", "ml-rnafm"]
 
 REQUIRED_YAML_KEYS = ("channels:", "dependencies:")
 
@@ -70,13 +74,14 @@ def test_env_specs_are_well_formed():
 
 
 def test_all_env_lockfiles_exist():
-    """All nine envs are locked: four CPU envs at P0-05, both GPU envs at P0-06c (A4),
+    """All ten envs are locked: four CPU envs at P0-05, both GPU envs at P0-06c (A4),
     `rscape` at P2-10c (A11 — a separate env so the GATE-1-load-bearing `infernal`
     lock is not re-solved by `rscape`'s gnuplot/Qt closure), `homology` at
     P2-10c′-e (A12 — hmmer/blast with NO infernal co-pin, so `envs/infernal.conda-lock.yml`
     is likewise never re-solved and the `esl-*` two-provider clobber is out of reach), and
     `locarna` at P2-10e-msa (A13 — locarna 2.0.1/mlocarna, again a separate env so the
-    infernal lock stays byte-frozen).
+    infernal lock stays byte-frozen), and `ml-rnafm` at P3-17 (A15 — `multimolecule` 0.2.0
+    for the D6 RNA-FM comparator, hand-merged from `ml-rna`'s lock so nothing else moved).
 
     ml-dna / ml-rna are lockable on the laptop only via a full URL-pinned cu128 closure
     (see `test_ml_envs_pin_torch_by_url_not_index`); conda-lock 4.0.2 cannot use an index.
@@ -130,6 +135,122 @@ def test_ml_rna_pins_multimolecule_0_1_0():
     assert re.search(
         r"^- name: multimolecule\n\s+version: 0\.1\.0\s*$", lock, re.MULTILINE
     ), "ml-rna.conda-lock.yml must lock multimolecule 0.1.0 (re-solve after the A8 spec bump)"
+
+
+def _pip_pins(env: str) -> list[str]:
+    """The `- name==version` pip lines of a spec, comments stripped."""
+    text = (ENVS_DIR / f"{env}.yml").read_text()
+    code = "\n".join(line.split("#", 1)[0] for line in text.splitlines())
+    return [m.group(1).strip() for m in re.finditer(r"^\s*-\s*(\S+==\S+)\s*$", code, re.MULTILINE)]
+
+
+def test_ml_rnafm_pins_multimolecule_0_2_0_and_ml_rna_does_not_move():
+    """Lock ADR-0002 A15 in **both** directions — that is the whole point of the split.
+
+    A15 added `envs/ml-rnafm.yml` (`multimolecule` 0.2.0) rather than bumping `ml-rna`,
+    because 0.1.0 cannot load `multimolecule/rnafm` at all (`configuration_rnafm` demands
+    `vocab_size == 26`; the published checkpoint declares 28) and bumping in place would fire
+    CLAUDE.md §8.5 across every published RiNALMo Stage-2 number.
+
+    So this asserts the comparator env moved AND that the shipped one did **not**. A guard on
+    the new env alone would stay green through exactly the change A15 declined to make.
+    """
+    code = "\n".join(
+        line.split("#", 1)[0] for line in (ENVS_DIR / "ml-rnafm.yml").read_text().splitlines()
+    )
+    assert re.search(
+        r"^\s*-\s*multimolecule==0\.2\.0\s*$", code, re.MULTILINE
+    ), "ml-rnafm.yml must pin `multimolecule==0.2.0` (ADR-0002 A15 — the RNA-FM comparator)"
+    assert not re.search(
+        r"^\s*-\s*multimolecule==0\.1\.0\s*$", code, re.MULTILINE
+    ), "ml-rnafm.yml must NOT pin 0.1.0 — it cannot load multimolecule/rnafm"
+
+    lock = (ENVS_DIR / "ml-rnafm.conda-lock.yml").read_text()
+    assert re.search(
+        r"^- name: multimolecule\n\s+version: 0\.2\.0\s*$", lock, re.MULTILINE
+    ), "ml-rnafm.conda-lock.yml must lock multimolecule 0.2.0 (spec ↔ lock consistency)"
+
+    # ...and the shipped env is UNMOVED. `test_ml_rna_pins_multimolecule_0_1_0` asserts the
+    # same thing from A8's side; restated here so the A15 split's own invariant is complete in
+    # one place rather than resting on a neighbour that could be edited for another reason.
+    rna = "\n".join(
+        line.split("#", 1)[0] for line in (ENVS_DIR / "ml-rna.yml").read_text().splitlines()
+    )
+    assert re.search(
+        r"^\s*-\s*multimolecule==0\.1\.0\s*$", rna, re.MULTILINE
+    ), "ml-rna.yml must STILL pin multimolecule==0.1.0 — A15 split precisely to avoid bumping it"
+
+
+def test_ml_rnafm_differs_from_ml_rna_in_exactly_one_dependency():
+    """A15's minimize-divergence design, asserted rather than described.
+
+    The comparator's value rests on differing from the shipped arm in the backbone alone. If
+    `ml-rnafm` drifted on torch, the kernel wheels or transformers, a P3-18 ECE difference
+    would no longer be attributable to the backbone — and the drift would be invisible, since
+    both envs would still install and both would still train something.
+
+    ⚠ This is exactly the failure a *fresh* `conda-lock` re-solve produced while A15 was being
+    authored: solving `ml-rnafm.yml` from scratch moved 55 packages (gcc 14.3→14.4,
+    libstdcxx 15.2→16.1, mkl, pandas, setuptools, and multimolecule's own danling/chanfig).
+    The committed lock is hand-merged from `ml-rna`'s for that reason, and this test is what
+    keeps a future re-solve from quietly undoing it.
+    """
+    rna = _pip_pins("ml-rna")
+    fm = _pip_pins("ml-rnafm")
+    assert rna, "ml-rna.yml yielded no `name==version` pip pins — the extractor is broken"
+    only_rna = sorted(set(rna) - set(fm))
+    only_fm = sorted(set(fm) - set(rna))
+    assert only_rna == ["multimolecule==0.1.0"], only_rna
+    assert only_fm == ["multimolecule==0.2.0"], only_fm
+
+    # The URL-pinned lines (torch + its cu128 closure + the three sm_86 kernel wheels) must be
+    # byte-identical: those are the pins ADR-0002 D8 calls load-bearing.
+    def urls(env: str) -> list[str]:
+        text = (ENVS_DIR / f"{env}.yml").read_text()
+        code = "\n".join(line.split("#", 1)[0] for line in text.splitlines())
+        return sorted(
+            m.group(1).strip()
+            for m in re.finditer(r"^\s*-\s*(\S+\s*@\s*https://\S+)\s*$", code, re.MULTILINE)
+        )
+
+    assert urls("ml-rna"), "ml-rna.yml yielded no URL-pinned wheels — the extractor is broken"
+    assert urls("ml-rnafm") == urls("ml-rna"), (
+        "ml-rnafm.yml's URL-pinned wheel closure differs from ml-rna's; ADR-0002 A15 pins them "
+        "identical so a P3-18 ECE difference is attributable to the backbone alone"
+    )
+
+
+def test_the_two_ml_rna_locks_differ_only_by_multimolecule_and_matplotlib():
+    """The lockfile half of the same invariant (ADR-0002 A15).
+
+    The spec-level test above cannot see a lock that drifted on its own — and a lock IS what
+    gets installed. 0.2.0 adds `matplotlib` (and its subtree) over 0.1.0's dependencies; every
+    other locked package must be identical in name AND version.
+    """
+    pat = re.compile(r"^- name: (\S+)\n  version: (\S+)", re.MULTILINE)
+
+    def locked(env: str) -> dict[str, str]:
+        text = (ENVS_DIR / f"{env}.conda-lock.yml").read_text()
+        return {m.group(1): m.group(2) for m in pat.finditer(text)}
+
+    a, b = locked("ml-rna"), locked("ml-rnafm")
+    assert len(a) > 100, f"ml-rna lock parsed only {len(a)} packages — the extractor is broken"
+    added = sorted(set(b) - set(a))
+    removed = sorted(set(a) - set(b))
+    changed = sorted(k for k in set(a) & set(b) if a[k] != b[k])
+    assert removed == [], f"ml-rnafm's lock DROPPED packages ml-rna has: {removed}"
+    assert changed == [
+        "multimolecule"
+    ], f"ml-rnafm's lock changed versions beyond the pin: {changed}"
+    assert added == [
+        "contourpy",
+        "cycler",
+        "fonttools",
+        "kiwisolver",
+        "matplotlib",
+        "pillow",
+        "pyparsing",
+    ], f"ml-rnafm's lock added packages beyond multimolecule 0.2.0's matplotlib subtree: {added}"
 
 
 def test_snakemake_conda_directives_resolve():

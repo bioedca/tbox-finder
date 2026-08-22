@@ -74,9 +74,11 @@ from tbox_finder import coverage as COV
 from tbox_finder import metrics as M
 from tbox_finder import power as PW
 from tbox_finder import provenance as PROV
+from tbox_finder import report_schema as RSCH
 from tbox_finder.calib import ece as ECE
 from tbox_finder.calib import recalibrate as R
 from tbox_finder.eval import resample as RS
+from tbox_finder.models import rna_backbone_registry as BR
 
 __all__ = [
     "ADR",
@@ -98,10 +100,15 @@ __all__ = [
     "OOD_UNIT_KEY",
     "PRD",
     "RESCORE_AGREEMENT_TOL",
+    "CLAUSES_FIRST_REQUIRED_AT",
+    "KNOWN_SCHEMAS",
+    "SIDECAR_IDENTITY_FIELDS",
     "SCHEMA_VERSION",
     "STEP",
     "build_parser",
     "build_report",
+    "clauses_not_required_at",
+    "sidecar_identity_mismatches",
     "derive_clauses",
     "figure_data",
     "grade_in_distribution",
@@ -117,7 +124,87 @@ __all__ = [
     "write_outputs",
 ]
 
-SCHEMA_VERSION = "1"
+#: Bumped 1 -> 2 at P3-17 review round 5: `env_lock` stopped being the module constant and
+#: became the GRADED ARM's lock, graded by the new `env_lock_is_the_graded_arms` clause. A
+#: clause set is part of a report's shape ([[new-gate-clause-invalidates-old-reports]]), and the
+#: committed schema-1 reports (`reports/gate2_p3_ece.json`, `reports/p3/gate2_rnafm_ece.json`)
+#: are NOT regenerated — see the dev-log disclosure — so they are graded against the schema-1
+#: set by `clauses_not_required_at`.
+SCHEMA_VERSION = "2"
+
+#: Every schema this validator knows, oldest first — listed, never string-compared.
+KNOWN_SCHEMAS: tuple[str, ...] = ("1", "2")
+
+#: The clauses a report FIRST carries at each schema.
+CLAUSES_FIRST_REQUIRED_AT: dict[str, frozenset[str]] = {
+    "2": frozenset({"env_lock_is_the_graded_arms"}),
+}
+
+
+def clauses_not_required_at(schema: str) -> frozenset[str]:
+    """Clauses introduced AFTER ``schema``, which a report at that schema cannot carry."""
+    return RSCH.clauses_not_required_at(
+        schema, known=KNOWN_SCHEMAS, first_required_at=CLAUSES_FIRST_REQUIRED_AT
+    )
+
+
+RSCH.check_schema_tables(
+    known=KNOWN_SCHEMAS,
+    first_required_at=CLAUSES_FIRST_REQUIRED_AT,
+    current=SCHEMA_VERSION,
+    module=__name__,
+)
+
+
+#: The fields that say WHICH weights a score sidecar describes. `env_lock_for_scored_arms`
+#: compares `backbone` alone, which is the coarsest of them: two sidecars could name the same
+#: backbone while one was scored from a different checkpoint, a different adapter, or a
+#: different base revision, and the grade would silently join an in-distribution ECE from one
+#: set of weights to a leave-clade-out ECE from another. Only fields BOTH sidecars record are
+#: compared — an older sidecar that predates a field is not refused for lacking it.
+SIDECAR_IDENTITY_FIELDS: tuple[str, ...] = (
+    "backbone",
+    "base_model_name_or_path",
+    "revision",
+    "checkpoint_dir",
+    "adapter_sha256",
+    "heads_sha256",
+)
+
+
+def sidecar_identity_mismatches(
+    a: Mapping[str, Any] | None, b: Mapping[str, Any] | None
+) -> list[str]:
+    """Identity fields on which two score sidecars' load records disagree.
+
+    Only fields present in BOTH are compared: absence is an age difference (the pre-A15
+    sidecars record almost none of these), while a *disagreement* is two different sets of
+    weights being graded as one.
+    """
+    left, right = a or {}, b or {}
+    return [
+        field
+        for field in SIDECAR_IDENTITY_FIELDS
+        if field in left and field in right and left[field] != right[field]
+    ]
+
+
+def env_lock_for_graded_arm(load: Mapping[str, Any] | None) -> str | None:
+    """The conda lock the GRADED weights required, from the score sidecar's own load record.
+
+    Torch-free on purpose: this is called from :func:`derive_clauses`, which grades in bare CI.
+    Returns ``None`` when the record names no backbone or names one this repo does not pin — a
+    clause is a verdict, not a crash site.
+    """
+    key = (load or {}).get("backbone")
+    if not key:
+        return None
+    try:
+        return BR.resolve_backbone(str(key)).env_lock
+    except (KeyError, ValueError):
+        return None
+
+
 STEP = "P3-10"
 GENERATED_BY = "src/tbox_finder/calib/gate2.py"
 PRD = "PRD §2.3 (GATE-2), §12, §18.1, §9.2"
@@ -944,6 +1031,8 @@ def derive_clauses(report: Mapping[str, Any]) -> dict[str, bool]:
             and scope["rescore_n_overlap"] > 0
             and float(scope["rescore_max_abs_delta"]) <= RESCORE_AGREEMENT_TOL
         ),
+        # ── the report names the environment the GRADED weights required ──
+        "env_lock_is_the_graded_arms": _env_lock_clause(report),
     }
 
 
@@ -972,6 +1061,17 @@ def _drift_bound_unadjudicated(ood: Mapping[str, Any]) -> bool:
     )
 
 
+def _env_lock_clause(report: Mapping[str, Any]) -> bool:
+    """`env_lock` must be the lock of the backbone the graded arm was loaded as.
+
+    Nothing graded this field, which is how the RNA-FM comparator's report — the artifact
+    P3-18's condition (c) reads — came to name the production environment and hash it
+    ([[gate-must-bind-to-upstream-evidence]]).
+    """
+    expected = env_lock_for_graded_arm((report.get("scoring") or {}).get("load"))
+    return bool(expected) and report.get("env_lock") == expected
+
+
 def validate_report(report: Mapping[str, Any]) -> list[str]:
     """Problems with ``report``; ``[]`` when clean. An honestly-failing gate is not a problem.
 
@@ -981,8 +1081,11 @@ def validate_report(report: Mapping[str, Any]) -> list[str]:
     """
     problems: list[str] = []
 
+    # The RAW value, never `str(...)` — see the note in `sizing.validate_report`.
+    schema = report.get("schema_version")
+    if not isinstance(schema, str) or schema not in KNOWN_SCHEMAS:
+        problems.append(f"schema_version: {schema!r} is not one of {KNOWN_SCHEMAS!r}")
     for key, want in (
-        ("schema_version", SCHEMA_VERSION),
         ("step", STEP),
         ("generated_by", GENERATED_BY),
         ("adr", ADR),
@@ -1045,7 +1148,13 @@ def validate_report(report: Mapping[str, Any]) -> list[str]:
             problems.append(f"ood.gated = {ood.get('gated')!r}, must be False (ADR-0005 D13)")
 
     written = report.get("clauses")
-    recomputed = derive_clauses(report)
+    # A report is graded against the clause set of ITS OWN schema. At the current schema this
+    # excuses nothing; an unknown schema excuses nothing either and is flagged above.
+    recomputed = {
+        name: value
+        for name, value in derive_clauses(report).items()
+        if name not in clauses_not_required_at(schema)
+    }
     if not isinstance(written, Mapping):
         problems.append("clauses: block missing — nothing pins what the gate checked")
     else:
@@ -1082,6 +1191,7 @@ def build_report(
     scope: Mapping[str, Any],
     scoring: Mapping[str, Any],
     provenance: Mapping[str, Any],
+    env_lock: str,
     written_at: str | None = None,
 ) -> dict[str, Any]:
     """Assemble the GATE-2 report; every number is passed in already measured."""
@@ -1097,7 +1207,12 @@ def build_report(
         "generated_by": GENERATED_BY,
         "prd": PRD,
         "adr": ADR,
-        "env_lock": ENV_LOCK,
+        # NOT `ENV_LOCK`. That constant names the PRODUCTION lock, so grading the RNA-FM
+        # comparator stamped — and hashed — an environment whose `multimolecule` pin cannot
+        # load the weights whose posteriors were being graded. This is the THIRD producer with
+        # the same defect; `sizing.py` and `eval.py` were fixed in the same round and this one
+        # was missed ([[fixed-one-of-two-identical-things]]).
+        "env_lock": env_lock,
         "generated_at_utc": written_at or datetime.now(UTC).isoformat(timespec="seconds"),
         "gated": True,
         "gate": dict(gate),
@@ -1132,11 +1247,23 @@ def disclosures(*, gate: Mapping[str, Any], ood: Mapping[str, Any]) -> list[str]
         "(ADR-0005 D12, FDP CI-upper-bound <= 10%) is graded at P5 and is absent here.",
         _UNPINNED_DEPLOYMENT_PRIOR,
         _UNPINNED_DRIFT_BOUND,
-        "INHERITED FROM P3-08: the production arm's temperature is fittable only because "
-        "ONE calib row of 1,089 is misclassified at the decision boundary; that row is the "
-        "entire signal for beta. The no-aux control's calib carve is perfectly separated and "
-        "has no temperature at all. ADR-0005 D11 has no degenerate-limit rule, and drafting "
-        "one is a P3-exit item.",
+        # ⚠ Every sentence here is about the P3-08 RiNALMo run, and each one says so. The
+        # earlier wording ("the production arm's ... The no-aux control's calib carve is
+        # perfectly separated") reads as a claim about whichever arm the report grades, and it
+        # is emitted unconditionally — so the RNA-FM comparator's report asserted a perfectly
+        # separated no-aux control while its own eval report recorded
+        # `is_perfectly_separated: false`, `converged: true` and a finite T of 1.39. This
+        # producer cannot re-derive the graded arm's separation (the gate block carries no
+        # separation record), so the fix is to make the SUBJECT explicit rather than to
+        # pretend to measure it here.
+        "INHERITED FROM P3-08 (these two facts are about the P3-08 RiNALMo run, not "
+        "necessarily about the arm graded here): P3-08's production RiNALMo arm has a "
+        "temperature that is fittable only because ONE calib row of 1,089 is misclassified at "
+        "the decision boundary; that row is the entire signal for beta. P3-08's no-aux RiNALMo "
+        "control has a perfectly separated calib carve and no temperature at all. The arm "
+        "graded HERE is described by its own temperature disclosure below, and this report "
+        "records no separation measurement for it. ADR-0005 D11 has no degenerate-limit rule, "
+        "and drafting one is a P3-exit item.",
         "INHERITED FROM P3-09: the D11 debiasing term was measured to SATURATE at ~0.060 "
         "against a known truth of 0.123 on genuinely miscalibrated data at n in {20, 50, 200} "
         "— i.e. it can under-state a real calibration error at small n. The plug-in ECE is "
@@ -1470,8 +1597,11 @@ def score_loo_holdout(
     ([[promote-dont-duplicate-is-a-correctness-rule]]).
     Only the *row set* differs, and it is the one thing this function decides.
     """
-    import torch
-
+    # `eval` imports torch lazily, so importing it costs nothing in bare CI. `torch` itself is
+    # imported at its FIRST USE, below the arm-resolution refusals: everything down to
+    # `discover_arms` is pure path and census work, and a run that dies there — a bad root, a
+    # holdout that overlaps training — should say so in an environment that has no torch, and
+    # be testable in one. The CI unit tier installs no torch.
     from tbox_finder.stage2 import eval as E
 
     rows, census = loo_holdout_rows(dataset, with_sequences=True)
@@ -1483,8 +1613,13 @@ def score_loo_holdout(
             "number labelled OOD"
         )
 
+    # `x if x is None else` and NOT `x or` — an explicitly-passed empty string is a caller
+    # error, and `or` would silently answer it with the PRODUCTION root, grading the shipped
+    # arm while the caller believed it had pointed the run somewhere else. Only an omitted
+    # option falls back.
     arms = E.discover_arms(
-        checkpoint_root or E.DEFAULT_CKPT_ROOT, sweep_dir=sweep_dir or E.DEFAULT_SWEEP_DIR
+        E.DEFAULT_CKPT_ROOT if checkpoint_root is None else checkpoint_root,
+        sweep_dir=E.DEFAULT_SWEEP_DIR if sweep_dir is None else sweep_dir,
     )
     production = E.production_arm_config()
     arm, _ = E.select_arm_pair(arms, production=production)
@@ -1495,6 +1630,8 @@ def score_loo_holdout(
             f"arm {arm}'s run report records no attention backend, so scoring cannot reproduce "
             "the numerics it trained under"
         )
+    import torch  # lazy — first use; see the note at the top of this function
+
     target = device or ("cuda" if torch.cuda.is_available() else "cpu")
     model, record = E.load_stage2_checkpoint(
         arms[arm]["checkpoint_path"], attn_implementation=backend, device=target
@@ -1550,9 +1687,24 @@ def build_parser() -> Any:
 
     grade = sub.add_parser("grade", help="build reports/gate2_p3_ece.json")
     grade.add_argument("--dataset", default=DEFAULT_DATASET)
+    # ⚠ These two exist on `score-loo` and were missing here, which made `grade` unable to
+    # read any arm root but the production one — so the ADR-0002 D6 comparator's scores could
+    # be PRODUCED and never GRADED. They resolve only WHICH ARM NAME to pull out of the scores
+    # file (`discover_arms` + `select_arm_pair` below); defaulting to the production constants
+    # leaves every existing invocation byte-identical.
+    grade.add_argument("--checkpoint-root", default=None)
+    grade.add_argument("--sweep-dir", default=None)
     grade.add_argument("--scores", default=DEFAULT_SCORES)
     grade.add_argument("--loo-scores", default=DEFAULT_LOO_SCORES)
     grade.add_argument("--report", default=DEFAULT_REPORT)
+    grade.add_argument(
+        "--scored-backbone",
+        default=None,
+        help=(
+            "which pinned backbone produced the score sidecars, for a PRE-A15 sidecar that "
+            "records none. Never overrides a recorded backbone; a disagreement is refused."
+        ),
+    )
     grade.add_argument("--figure-data", default=DEFAULT_FIGURE_DATA)
     grade.add_argument("--n-boot", type=int, default=DEFAULT_N_BOOT)
     grade.add_argument("--ood-n-boot", type=int, default=DEFAULT_OOD_N_BOOT)
@@ -1658,7 +1810,14 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     split_rows, dataset_meta = _read_split_table(args.dataset)
     production = E.production_arm_config()
-    arms = E.discover_arms(E.DEFAULT_CKPT_ROOT, sweep_dir=E.DEFAULT_SWEEP_DIR)
+    # The SECOND site. `or` here would answer an explicitly-passed empty `--checkpoint-root`
+    # with the production root ([[fixed-one-of-two-identical-things]]).
+    _root = getattr(args, "checkpoint_root", None)
+    _sweep = getattr(args, "sweep_dir", None)
+    arms = E.discover_arms(
+        E.DEFAULT_CKPT_ROOT if _root is None else _root,
+        sweep_dir=E.DEFAULT_SWEEP_DIR if _sweep is None else _sweep,
+    )
     arm, _ = E.select_arm_pair(arms, production=production)
 
     in_dist = load_scores(args.scores, arm)
@@ -1731,6 +1890,30 @@ def main(argv: Sequence[str] | None = None) -> int:
         "bootstrap_seed": int(args.seed),
         "load": loo["load"],
     }
+    # The environment the GRADED weights required, from the score sidecars' own load records —
+    # each of which carries the backbone the loader derived from that adapter's recorded base
+    # model. Both sidecars are handed in and must agree: the in-distribution and leave-clade-out
+    # passes score the same weights, so a disagreement means one of the two files is about a
+    # different arm and no single lock describes the run.
+    # The in-distribution and leave-clade-out passes must have scored the SAME weights: the
+    # gate joins an ECE from one to an OOD ECE from the other and reports them as one arm.
+    mismatched = sidecar_identity_mismatches(in_dist.get("load"), loo.get("load"))
+    if mismatched:
+        raise RuntimeError(
+            f"the two score sidecars disagree on {mismatched!r} for arm {arm!r}: "
+            f"{_recorded_path(args.scores)} and {_recorded_path(args.loo_scores)} were produced "
+            "from different weights, so one grade cannot describe both"
+        )
+    scored_env_lock = E.env_lock_for_scored_arms(
+        {
+            f"{arm}@in_distribution": in_dist.get("load") or {},
+            f"{arm}@leave_clade_out": loo.get("load") or {},
+        },
+        # The committed P3-10 sidecars predate ADR-0002 A15 and record no backbone at all, so
+        # re-grading the production arm from them needs the caller to say which model made
+        # them. It fills a gap and never overrides a record.
+        declared_backbone=getattr(args, "scored_backbone", None),
+    )
     # `outputs` is deliberately EMPTY. `build_provenance` *hashes* every path it is given,
     # and neither output exists yet — the report is what this call is being embedded into,
     # so hashing it here is both impossible and self-referential. The declared paths go in
@@ -1740,7 +1923,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         script=GENERATED_BY,
         seed=int(args.seed),
         inputs=[args.dataset, args.scores, args.loo_scores],
-        env_lock=ENV_LOCK,
+        env_lock=scored_env_lock,
         adr=ADR,
         extra={"declared_outputs": [_recorded_path(args.report), _recorded_path(args.figure_data)]},
     )
@@ -1751,7 +1934,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     prov["inputs"] = {_recorded_path(k): v for k, v in prov["inputs"].items()}
 
     report = build_report(
-        gate=gate, prior_shift=shift, ood=ood, scope=scope, scoring=scoring, provenance=prov
+        gate=gate,
+        prior_shift=shift,
+        ood=ood,
+        scope=scope,
+        scoring=scoring,
+        provenance=prov,
+        env_lock=scored_env_lock,
     )
     problems = validate_report(report)
     out, _ = write_outputs(

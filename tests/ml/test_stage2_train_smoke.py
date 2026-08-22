@@ -22,11 +22,13 @@ from __future__ import annotations
 import json
 import math
 import os
+import re
 from pathlib import Path
 from typing import Any
 
 import pytest
 
+from tbox_finder.models import rna_backbone_registry as BR
 from tbox_finder.stage2 import losses as L
 from tbox_finder.stage2 import train as T
 
@@ -35,6 +37,8 @@ _CONF = _REPO / "conf"
 _TRAIN_CONF = _CONF / "train" / "stage2.yaml"
 _OPTIM_CONF = _CONF / "optim" / "stage2.yaml"
 _SBATCH = _REPO / "slurm" / "p3" / "stage2_lora_finetune.sbatch"
+#: The P3-17 comparator arm's launcher (ADR-0002 A15 / D6).
+_SBATCH_RNAFM = _REPO / "slurm" / "p3" / "rnafm_stage2_finetune.sbatch"
 _DATASET = _REPO / T.DEFAULT_DATASET
 
 
@@ -420,6 +424,14 @@ def _passing_report() -> dict[str, Any]:
             "elapsed_seconds": 2100.0,
         },
         wrap={
+            # Built from the registry rather than hand-typed, so the fixture cannot drift from
+            # the pins the clause re-derives against — a hand-copied revision that went stale
+            # would make `backbone_pinned` fail here for a reason that is not a defect, and
+            # tempt the next reader to weaken the clause instead of the fixture.
+            "backbone": {
+                **BR.backbone_summary(BR.resolve_backbone(BR.PRODUCTION_BACKBONE)),
+                "loaded_from_registry": True,
+            },
             "base_frozen": True,
             "n_base_trainable_params": 0,
             "n_adapter_sites": 231,
@@ -433,6 +445,9 @@ def _passing_report() -> dict[str, Any]:
                 "all_linear_fully_covered": True,
             },
             "stage2_heads": {
+                # MEASURED off the live module by `build_stage2_model` — the independent
+                # evidence `backbone_pinned` cross-checks the recorded identity against.
+                "d_model": BR.resolve_backbone(BR.PRODUCTION_BACKBONE).hidden_size,
                 "heads_outside_peft_wrapper": True,
                 "all_heads_trainable": True,
                 "n_head_parameters": 199836,
@@ -671,19 +686,46 @@ def test_every_inline_python_block_in_every_sbatch_actually_compiles() -> None:
     """
     import re
 
+    # ⚠ WIDENED at P3-17. The original pattern anchored on `^PYTHONPATH=… python -c '` at line
+    # start and required a closing line of exactly `'`, so it silently skipped every block
+    # written as `if ! PYTHONPATH=src python -c '…'; then` — the guard-style invocation. Both
+    # of P3-17's env/CUDA assertions use that form, and so does P3-06's own node health check,
+    # which means this "repo-wide" gate had been covering less than it claimed since it was
+    # written. Its emptiness guard could not notice: other blocks matched, so it stayed green.
+    # Any leading command prefix is allowed now, and the terminator is a line that STARTS with
+    # the closing quote.
+    patterns = (
+        r"^[^\n]*?\bpython -c '\n(.*?)\n'(?:;|\s|$)",
+        # The ONE-LINER form, `python -c 'import x; print(y)'` — a third shape, found by the
+        # coverage guard below the moment it was added (slurm/p2/backbone_throughput.sbatch's
+        # selective_scan_cuda probe). Its body has no newline, so neither multi-line pattern
+        # reaches it, and it had never been parsed by this gate either.
+        r"python -c '([^'\n]+)'",
+        # Heredoc form too — `python - <<'PY' … PY`. The provenance writer lives in one
+        # of these, and an unparsed heredoc is exactly as dead as an unparsed -c block.
+        r"python - <<'PY'\n(.*?)\nPY$",
+    )
+    sbatches = sorted((_REPO / "slurm").rglob("*.sbatch"))
     blocks = [
         (path, match.group(1))
-        for path in sorted((_REPO / "slurm").rglob("*.sbatch"))
-        for pattern in (
-            r"^PYTHONPATH=\S* python -c '\n(.*?)\n'$",
-            # Heredoc form too — `python - <<'PY' … PY`. The provenance writer lives in one
-            # of these, and an unparsed heredoc is exactly as dead as an unparsed -c block.
-            r"python - <<'PY'\n(.*?)\nPY$",
-        )
+        for path in sbatches
+        for pattern in patterns
         for match in re.finditer(pattern, path.read_text(), re.S | re.M)
     ]
     # Emptiness guard: a regex that matched nothing would make this vacuously green.
     assert blocks, "no inline `python -c` blocks discovered in any sbatch at all"
+    # COVERAGE guard, which the emptiness guard alone does not give: every sbatch that
+    # contains an inline python invocation must yield at least one block. This is what would
+    # have caught the narrow pattern above, and it is the same shape as
+    # `test_no_sbatch_launch_is_silently_dropped` in the override gate.
+    covered = {path for path, _ in blocks}
+    expected = {
+        p for p in sbatches if "python -c '" in p.read_text() or "python - <<'PY'" in p.read_text()
+    }
+    uncovered = {p.relative_to(_REPO) for p in expected - covered}
+    assert (
+        not uncovered
+    ), f"sbatch files carry inline python that this gate never parses: {uncovered}"
     broken = []
     for path, body in blocks:
         try:
@@ -1463,7 +1505,7 @@ def test_the_committed_reports_FAIL_the_corrected_gate_on_the_scheduler_defect()
         clauses = T.derive_clauses(report)
         failing = sorted(k for k, v in clauses.items() if not v)
 
-        # EXACTLY two, for two DIFFERENT reasons that must not be conflated:
+        # EXACTLY three, for reasons in TWO different categories that must not be conflated:
         #
         #  • `steps_ran` — a REAL defect. Those runs sized the cosine in micro-batches, so the
         #    optimiser advanced half the scheduled steps. Schema 2 refuses them correctly, and
@@ -1474,15 +1516,23 @@ def test_the_committed_reports_FAIL_the_corrected_gate_on_the_scheduler_defect()
         #    "passed" and it is not "failed" either; the clause cannot be satisfied by a report
         #    that lacks its evidence, and excusing it into TRUE would assert those runs had
         #    finite gradients when nobody looked. It stays False, and it stays documented here.
-        assert failing == ["losses_finite", "steps_ran"], (
-            f"{path.name} fails {failing}; expected exactly the scheduler defect plus the "
-            "unmeasured gradient check. A new entry means a second defect surfaced; a missing "
-            "one means a clause stopped biting or the report was regenerated"
+        #
+        #  • `backbone_pinned` — added at P3-17 (schema 3), and in the SAME category as
+        #    `losses_finite`. Schema 1 predates the `wrap.backbone` identity block that
+        #    ADR-0002 A15's allow-list writes, so there is no evidence here to re-derive from.
+        #    These runs did adapt the pinned rinalmo-giga — they never recorded it, which is
+        #    the gap the clause exists to close. Excused into TRUE it would assert an identity
+        #    nobody wrote down, so it stays False and stays documented.
+        assert failing == ["backbone_pinned", "losses_finite", "steps_ran"], (
+            f"{path.name} fails {failing}; expected exactly the scheduler defect plus the two "
+            "unmeasured-evidence clauses. A new entry means a second defect surfaced; a "
+            "missing one means a clause stopped biting or the report was regenerated"
         )
         # And the distinction is checked, not just asserted: one has its evidence and fails on
-        # it, the other has no evidence at all.
+        # it, the other two have no evidence at all.
         assert report["steps"]["n_optimizer_steps"] != report["steps"]["n_steps"]
         assert "n_nonfinite_grad_steps" not in report["losses"]
+        assert "backbone" not in report.get("wrap", {})
         assert report["losses"]["n_nonfinite_steps"] == 0  # what schema 1 DID measure: clean
 
 
@@ -1504,8 +1554,12 @@ def test_the_recorded_step_counts_show_exactly_the_defect_that_was_diagnosed() -
 def _tiny_run(tmp: Path, **over: Any):
     """Run `train_stage2` on CPU through a tiny backbone; return (report, raised).
 
-    The gate fails on `full_population` by construction (a truncated run), so the caller gets
-    the written report rather than an exception it has to unpick.
+    The gate fails on **two** clauses by construction, and both are the point:
+    `full_population` because the run is truncated, and — since ADR-0002 A15 —
+    `backbone_pinned`, because the weights under the adapters are this fixture rather than a
+    pinned checkpoint (`loaded_from_registry` is False). A tiny smoke must never be able to
+    certify a production artifact. The caller gets the written report rather than an exception
+    it has to unpick; `test_the_tiny_run_is_refused_for_BOTH_reasons` asserts the pair.
     """
     from multimolecule import RiNALMoConfig, RiNALMoModel
 
@@ -1696,7 +1750,11 @@ def test_every_committed_report_carries_its_legacy_annotation() -> None:
             legacy["best_val_total_observed_during_training"]
         )
         assert report["schema_version"] == "1" == legacy["schema_version_of_this_file"]
-        assert legacy["fails_current_gate_on"] == ["losses_finite", "steps_ran"]
+        assert legacy["fails_current_gate_on"] == [
+            "backbone_pinned",
+            "losses_finite",
+            "steps_ran",
+        ]
         # The flag is DERIVED from the epochs, not asserted. A first version hardcoded it True
         # on all six while two arms have best == saved — the annotation contradicting the very
         # test below that counts four differing arms.
@@ -1731,3 +1789,916 @@ def test_the_annotation_names_a_gap_that_is_real_in_four_of_six_arms() -> None:
             assert saved > best, f"{path.name}: best epoch should beat the saved epoch"
             gaps += 1
     assert gaps == 4, f"expected 4 arms whose best epoch precedes epoch 9, found {gaps}"
+
+
+# ======================================================================================
+# P3-17 — the RNA-FM COMPARATOR arm (ADR-0002 D6 + A15)
+# ======================================================================================
+# The comparator's value is entirely in *differing from the production arm in one place*.
+# So these tests are mostly about sameness: same corpus, same objective, same batch geometry,
+# same harness — and one backbone. A comparator that drifted on any other axis would still
+# train, still score, still produce an ECE, and P3-18 would attribute the difference to the
+# backbone anyway. That is the failure this section exists to make loud.
+
+
+def _sbatch_code(path: Path) -> str:
+    """An sbatch's executable lines, with comments and prose stripped.
+
+    ⚠ EVERY assertion about what an sbatch *does* must read this, not the raw text. These
+    headers are long and explain, at length, the flags they deliberately do not use and the
+    tokens they deliberately do pass — so a whole-file substring search reads the explanation
+    as the thing. It bit twice while this file was being written: once on `--nodelist` (caught
+    by the production sbatch's own warning) and once on `model=rnafm_stage2`, where deleting
+    the token from the launch line left the guard GREEN because the header still mentioned it.
+    Fixing only the second instance would have left the class.
+    """
+    out = []
+    for line in path.read_text().splitlines():
+        stripped = line.lstrip()
+        if stripped.startswith("#") and not stripped.startswith("#SBATCH"):
+            continue
+        out.append(line)
+    return "\n".join(out)
+
+
+def _launch_tokens(path: Path, module: str) -> list[str]:
+    """The tokens of the logical `-m <module>` launch line — the command, not the commentary.
+
+    Backslash continuations are joined, exactly as `tests/unit/test_sbatch_overrides.py` does,
+    so a multi-line torchrun invocation is read as one command.
+    """
+    lines = path.read_text().splitlines()
+    joined, i = [], 0
+    while i < len(lines):
+        chunk = []
+        while i < len(lines):
+            chunk.append(lines[i].rstrip())
+            if not lines[i].rstrip().endswith("\\"):
+                break
+            i += 1
+        text = " ".join(c.rstrip("\\") for c in chunk if not c.lstrip().startswith("#"))
+        if text.strip():
+            joined.append(text)
+        i += 1
+    marker = f"-m {module}"
+    hits = [t for t in joined if marker in t]
+    assert len(hits) == 1, f"expected exactly one `{marker}` launch in {path.name}, got {len(hits)}"
+    return hits[0].split()
+
+
+def _require_rnafm_stack():
+    """The `ml-rnafm` stack (multimolecule >= 0.2.0 + torch + peft), or skip loudly.
+
+    Separate from `_require_stack` on purpose: `ml-rna`'s multimolecule 0.1.0 satisfies that
+    one and **cannot load RNA-FM at all**, so reusing it would let this tier skip for the wrong
+    reason in one env and fail confusingly in the other.
+    """
+    if os.environ.get("CUDA_HOME") is None:
+        _fail_or_skip("TBOX_REQUIRE_RNAFM", "CUDA_HOME unset — multimolecule won't import")
+    try:
+        import importlib.metadata as md
+
+        import peft  # noqa: F401
+        import torch
+
+        version = md.version("multimolecule")
+    except Exception as exc:  # pragma: no cover - env-dependent
+        _fail_or_skip("TBOX_REQUIRE_RNAFM", f"ml-rnafm stack unavailable ({exc})")
+    if tuple(int(p) for p in version.split(".")[:2]) < (0, 2):
+        _fail_or_skip(
+            "TBOX_REQUIRE_RNAFM",
+            f"multimolecule {version} is the ml-rna pin and cannot load multimolecule/rnafm "
+            "(ADR-0002 A15) — activate tbox-ml-rnafm",
+        )
+    return torch
+
+
+# -- the launcher ---------------------------------------------------------------------
+def test_the_comparator_sbatch_exists_and_asks_for_a_whole_node_without_pinning_one() -> None:
+    text = _SBATCH_RNAFM.read_text()
+    assert "#SBATCH --partition=gpu" in text
+    assert "#SBATCH --gres=gpu:a4000:8" in text
+    # Scan the DIRECTIVES, not the prose — the header explains at length why `--nodelist` is
+    # never used, and a whole-file substring search reads that explanation as the flag. (It
+    # did, on the first cut of this test; the production sbatch's equivalent already carried
+    # the warning.)
+    directives = [ln for ln in text.splitlines() if ln.startswith("#SBATCH ")]
+    assert directives
+    for forbidden in ("--nodelist", "--account", "--qos", "--partition=compute"):
+        assert not any(forbidden in ln for ln in directives), forbidden
+    # One arm, so no --array: this is the production POINT, not a sweep.
+    assert not any("--array" in ln for ln in directives)
+    # The health check must run BEFORE the download, or a bad node costs minutes instead of
+    # seconds (job 1036 lost three points that way).
+    assert text.index("RNAFM_NODE_UNHEALTHY") < text.index("hf cache warm")
+
+
+def test_the_comparator_sbatch_activates_the_RNAFM_env_not_ml_rna() -> None:
+    """The ADR-0002 A15 trap: `conda activate tbox-ml-rna` here is a one-word mistake whose
+    failure mode is a ValueError about vocab sizes, thrown after the queue wait."""
+    code = _sbatch_code(_SBATCH_RNAFM)
+    assert "conda activate tbox-ml-rnafm" in code
+    assert "conda activate tbox-ml-rna\n" not in code
+    assert "conda activate tbox-ml-dna" not in code
+    # ...and it says so before spending GPU time, rather than discovering it in the loader.
+    assert 'md.version("multimolecule")' in code, "no in-job env assertion"
+
+
+def test_the_comparator_sbatch_scratch_var_is_not_named_BUILD() -> None:
+    """`conda activate` exports BUILD=x86_64-conda-linux-gnu and clobbers it (job 789)."""
+    code = _sbatch_code(_SBATCH_RNAFM)
+    assert "JOB_SCRATCH=" in code
+    assert not re.search(r"^BUILD=", code, re.MULTILINE)
+
+
+def test_the_comparator_sbatch_selects_BOTH_halves_of_the_backbone_switch() -> None:
+    """Neither half is sufficient, and the launcher must carry both.
+
+    `backbone=` reaches the loader; `model=` selects the /model group that RECORDS the
+    checkpoint identity. `_cfg_from_mapping` refuses either alone (asserted below), so a
+    launcher carrying only one would die at compose time after the queue wait.
+    """
+    tokens = _launch_tokens(_SBATCH_RNAFM, "tbox_finder.stage2.train")
+    assert 'backbone="$BACKBONE"' in tokens, tokens
+    assert "model=rnafm_stage2" in tokens, tokens
+    # ...and $BACKBONE resolves to the comparator, not to whatever was last assigned.
+    code = _sbatch_code(_SBATCH_RNAFM)
+    assert f'BACKBONE="{BR.COMPARATOR_BACKBONE}"' in code
+
+
+def test_the_comparator_trains_the_PRODUCTION_configuration() -> None:
+    """Same point, same batch geometry — the arm differs in the backbone and nothing else.
+
+    Read out of the shipped configs rather than hard-coded here, so a drift in the production
+    defaults surfaces as a failure instead of silently making the comparator non-comparable.
+    """
+    code = _sbatch_code(_SBATCH_RNAFM)
+    loss_yaml = (_CONF / "loss" / "stage2.yaml").read_text()
+    optim_yaml = _OPTIM_CONF.read_text()
+    aux = re.search(r"^aux_weight:\s*(\S+)", loss_yaml, re.MULTILINE).group(1)
+    lr = re.search(r"^lr:\s*(\S+)", optim_yaml, re.MULTILINE).group(1)
+    assert float(aux) == 1.0 and float(lr) == pytest.approx(1e-4)
+    # The comparator trains a PAIR: the production point plus its lr-matched aux=0 control,
+    # which is what `select_arm_pair` requires and what job 1372 discovered was missing after a
+    # full training run. Both must be present, and the production one must match conf/.
+    assert (
+        f"AUX_WEIGHTS=({float(aux):.1f} 0.0)" in code
+    ), "the comparator must train the production aux_weight AND an lr-matched aux=0 control"
+    assert 'LR="1e-4"' in code and float("1e-4") == pytest.approx(float(lr))
+    # The production arm's measured batch geometry, carried over unchanged. Changing it would
+    # make an ECE difference attributable to batch size as well as backbone.
+    train_yaml = _TRAIN_CONF.read_text()
+    assert re.search(r"^batch_size:\s*4\s*$", train_yaml, re.MULTILINE)
+    assert re.search(r"^gradient_accumulation_steps:\s*2\s*$", train_yaml, re.MULTILINE)
+    assert "BATCH_SIZE=4" in code and "GRAD_ACCUM=2" in code
+
+
+def test_the_comparator_sbatch_sizes_the_backbone_it_trains() -> None:
+    """A sizing leg that measured the *other* model would be worse than none: it would license
+    a batch size on evidence from a 6.5x larger network and read as diligence.
+    """
+    tokens = _launch_tokens(_SBATCH_RNAFM, "tbox_finder.stage2.sizing")
+    assert "--backbone" in tokens, tokens
+    assert tokens[tokens.index("--backbone") + 1] == '"$BACKBONE"', tokens
+    # ...and the report is checked to be ABOUT this backbone before it licenses anything.
+    assert 'm.get("backbone")' in _sbatch_code(_SBATCH_RNAFM)
+
+
+def test_the_comparator_sbatch_never_writes_the_production_destinations() -> None:
+    prod_ckpt = T.DEFAULT_CKPT_DIR
+    code = _sbatch_code(_SBATCH_RNAFM)
+    assert prod_ckpt not in code, f"comparator sbatch names the production checkpoint {prod_ckpt}"
+    assert "reports/p3/sweep/" not in code, "comparator sbatch writes into the production sweep dir"
+    assert T.default_checkpoint_dir(BR.COMPARATOR_BACKBONE) in code
+    assert T.DEFAULT_REPORT not in code
+
+
+# -- the config wiring -----------------------------------------------------------------
+def test_the_comparator_model_group_exists_and_records_the_pinned_checkpoint() -> None:
+    text = (_CONF / "model" / "rnafm_stage2.yaml").read_text()
+    spec = BR.resolve_backbone(BR.COMPARATOR_BACKBONE)
+    assert f"repo_id: {spec.repo_id}" in text
+    assert f"revision: {spec.revision}" in text
+    assert f"hidden_dim: {spec.hidden_size}" in text
+    assert f"expected_param_count: {spec.expected_param_count}" in text
+    assert f"env_lock: {spec.env_lock}" in text
+
+
+def test_the_primary_config_carries_the_backbone_key_as_a_literal() -> None:
+    """Struct mode: a dataclass field with no YAML key is the job-669 class."""
+    text = _TRAIN_CONF.read_text()
+    assert re.search(rf"^backbone:\s*{re.escape(BR.PRODUCTION_BACKBONE)}\s*$", text, re.MULTILINE)
+    assert "backbone" in T.Stage2TrainConfig.__dataclass_fields__
+
+
+def test_hydra_composes_the_comparator_arm() -> None:
+    compose, initialize_config_dir = _require_hydra()
+    with initialize_config_dir(version_base=None, config_dir=str(_CONF)):
+        cfg = compose(
+            config_name="train/stage2",
+            overrides=["backbone=rnafm", "model=rnafm_stage2"],
+        )
+    assert cfg.backbone == "rnafm"
+    assert cfg.model.repo_id == "multimolecule/rnafm"
+    # Everything else is the production arm's, untouched.
+    assert cfg.loss.aux_weight == pytest.approx(1.0)
+    assert cfg.optim.lr == pytest.approx(1e-4)
+    assert cfg.batch_size == 4
+    assert cfg.gradient_accumulation_steps == 2
+
+
+@pytest.mark.parametrize(
+    ("overrides", "why"),
+    [
+        (["backbone=rnafm"], "backbone switched, /model group left on RiNALMo"),
+        (["model=rnafm_stage2"], "/model group switched, backbone left on production"),
+    ],
+)
+def test_half_a_backbone_switch_is_refused(overrides, why) -> None:
+    """Both directions. Refusing only one would leave the other as a silent way to record one
+    checkpoint's identity while loading the other's weights."""
+    compose, initialize_config_dir = _require_hydra()
+    from omegaconf import OmegaConf
+
+    with initialize_config_dir(version_base=None, config_dir=str(_CONF)):
+        cfg = compose(config_name="train/stage2", overrides=overrides)
+    with pytest.raises(ValueError, match="checkpoint identity"):
+        T._cfg_from_mapping(OmegaConf.to_container(cfg, resolve=True))
+
+
+def test_a_comparator_config_aimed_at_the_production_destinations_is_refused() -> None:
+    """The shipped checkpoint dir is DVC-tracked and holds the six P3-06 arms; `train_stage2`
+    clears and rewrites `checkpoint_dir` ([[two-outputs-one-path-destroys-the-first]])."""
+    # ⚠ `gradient_checkpointing=False` is passed so this test isolates the guard it NAMES.
+    # `Stage2TrainConfig` defaults checkpointing ON, and since the job-1370 fix that is
+    # refused first for this backbone — so without it this test would pass on the wrong
+    # refusal and stop covering destinations at all
+    # ([[sabotage-attribution-names-the-test]]).
+    isolate = dict(backbone=BR.COMPARATOR_BACKBONE, gradient_checkpointing=False)
+    with pytest.raises(ValueError, match="PRODUCTION arm's destination"):
+        T.Stage2TrainConfig(**isolate)
+    with pytest.raises(ValueError, match="PRODUCTION arm's destination"):
+        T.Stage2TrainConfig(
+            **isolate,
+            checkpoint_dir=T.default_checkpoint_dir(BR.COMPARATOR_BACKBONE),
+            report_path=T.DEFAULT_REPORT,
+        )
+    # The per-arm pair composes cleanly — the guard refuses the collision, not the arm.
+    cfg = T.Stage2TrainConfig(
+        **isolate,
+        checkpoint_dir=T.default_checkpoint_dir(BR.COMPARATOR_BACKBONE),
+        report_path=T.default_report_path(BR.COMPARATOR_BACKBONE),
+    )
+    assert cfg.backbone == BR.COMPARATOR_BACKBONE
+
+    # ...and the two guards are independent: the checkpointing one fires even when the
+    # destinations are correct, so neither is standing in for the other.
+    with pytest.raises(ValueError, match="not usable on backbone"):
+        T.Stage2TrainConfig(
+            backbone=BR.COMPARATOR_BACKBONE,
+            gradient_checkpointing=True,
+            checkpoint_dir=T.default_checkpoint_dir(BR.COMPARATOR_BACKBONE),
+            report_path=T.default_report_path(BR.COMPARATOR_BACKBONE),
+        )
+
+
+def test_the_comparator_records_its_OWN_env_lock_not_the_production_one() -> None:
+    """ADR-0002 A15: the arms run under different locks, so a run that stamped the module
+    constant would name an environment it did not use and hash the wrong file."""
+    assert T.env_lock_for(BR.COMPARATOR_BACKBONE) != T.ENV_LOCK
+    assert T.env_lock_for(BR.PRODUCTION_BACKBONE) == T.ENV_LOCK
+
+
+# -- the gate clause -------------------------------------------------------------------
+def _rnafm_report() -> dict[str, Any]:
+    """A passing report for the comparator arm — the production fixture with the backbone
+    swapped, which is exactly what the run itself is."""
+    spec = BR.resolve_backbone(BR.COMPARATOR_BACKBONE)
+    report = _passing_report()
+    report["config"]["backbone"] = spec.key
+    report["wrap"]["backbone"] = {
+        **BR.backbone_summary(spec),
+        "loaded_from_registry": True,
+    }
+    report["wrap"]["stage2_heads"]["d_model"] = spec.hidden_size
+    return report
+
+
+def test_the_comparator_report_passes_the_same_gate_the_production_arm_does() -> None:
+    report = _rnafm_report()
+    report["gate"]["clauses"] = T.derive_clauses(report)
+    report["gate"]["overall_pass"] = all(report["gate"]["clauses"].values())
+    report["gate"]["failed"] = [k for k, v in report["gate"]["clauses"].items() if not v]
+    assert T.validate_report(report) == []
+    assert report["gate"]["overall_pass"] is True
+
+
+def test_the_backbone_clause_catches_an_identity_that_contradicts_the_measured_width() -> None:
+    """THE failure this clause exists for: a report claiming one backbone while the heads were
+    built on the other's hidden state. 640 vs 1280 is the discriminator, and it is *measured*
+    off the live module rather than restated from the config.
+    """
+    report = _rnafm_report()
+    # Claim RNA-FM, but the heads were sized for RiNALMo — i.e. RiNALMo was what loaded.
+    report["wrap"]["stage2_heads"]["d_model"] = BR.resolve_backbone(
+        BR.PRODUCTION_BACKBONE
+    ).hidden_size
+    assert T.derive_clauses(report)["backbone_pinned"] is False
+
+
+@pytest.mark.parametrize(
+    ("mutate", "why"),
+    [
+        (
+            lambda bb: bb.__setitem__("repo_id", "multimolecule/rnafm-ss"),
+            "repo outside the allow-list",
+        ),
+        (lambda bb: bb.__setitem__("revision", "main"), "a branch, not the pinned commit"),
+        (lambda bb: bb.__setitem__("key", "rinalmo-giga"), "key disagrees with its repo_id"),
+        (
+            lambda bb: bb.__setitem__("loaded_from_registry", False),
+            "a caller's fixture, not the pin",
+        ),
+        (lambda bb: bb.pop("hidden_size"), "identity block missing its width"),
+    ],
+    ids=lambda v: v if isinstance(v, str) else "",
+)
+def test_each_way_the_backbone_clause_bites(mutate, why) -> None:
+    report = _rnafm_report()
+    assert T.derive_clauses(report)["backbone_pinned"] is True, "control must start TRUE"
+    mutate(report["wrap"]["backbone"])
+    assert T.derive_clauses(report)["backbone_pinned"] is False, why
+
+
+def test_the_backbone_clause_reads_no_requested_setting() -> None:
+    """A clause sourced from `report["config"]` restates the request and can never fail. The
+    first draft of `backbone_pinned` did exactly that and this invariant caught it."""
+    report = _rnafm_report()
+    before = T.derive_clauses(report)
+    report["config"] = {}
+    assert T.derive_clauses(report) == before
+
+
+# -- the torch tier: a real RNA-FM wrap ------------------------------------------------
+def test_a_tiny_rnafm_wraps_and_takes_one_step(tmp_path) -> None:
+    """The composition end-to-end on a tiny same-architecture RNA-FM — no multi-GB download.
+
+    Mirrors `_tiny_backbone`'s RiNALMo equivalent so the two arms are exercised the same way.
+    Skips loudly unless the `ml-rnafm` stack is present, because `ml-rna`'s 0.1.0 cannot build
+    an `RnaFmConfig` at all.
+    """
+    _require_rnafm_stack()
+    from multimolecule import RnaFmConfig, RnaFmModel
+
+    spec = BR.resolve_backbone(BR.COMPARATOR_BACKBONE)
+    cfg = RnaFmConfig(
+        hidden_size=64,
+        num_hidden_layers=2,
+        num_attention_heads=2,
+        intermediate_size=128,
+        vocab_size=spec.vocab_size,
+    )
+    cfg._attn_implementation = "sdpa"  # CPU tier; FA-2 needs a GPU
+    base = RnaFmModel(cfg, add_pooling_layer=False)
+
+    train_cfg = T.Stage2TrainConfig(
+        backbone=BR.COMPARATOR_BACKBONE,
+        checkpoint_dir=str(tmp_path / "ckpt"),
+        report_path=str(tmp_path / "report.json"),
+        batch_size=2,
+        gradient_checkpointing=False,
+    )
+    model, wrap = T.build_model(train_cfg, base_model=base)
+    # The identity travelled with the model, and the heads were sized off the LIVE width.
+    assert wrap["backbone"]["key"] == BR.COMPARATOR_BACKBONE
+    assert wrap["backbone"]["loaded_from_registry"] is False, "a fixture must say it is one"
+    assert wrap["stage2_heads"]["d_model"] == 64, "heads must follow the tiny fixture's width"
+    assert model.d_model == 64
+
+
+def test_build_model_refuses_a_wrap_whose_identity_is_not_the_one_requested(monkeypatch) -> None:
+    """The refactor-drops-the-kwarg failure, made loud.
+
+    `derive_clauses` may not read `report["config"]`, so the agreement between the REQUESTED
+    backbone and the one actually built cannot be a gate clause. It is enforced at the call
+    instead — and this is what pins that. The stub stands in for a `build_stage2_model` that
+    stopped forwarding `backbone=`: the parameter silently reverts to the production default
+    and every downstream artifact then carries the wrong identity while training the wrong
+    model. Nothing else in the suite would notice, because every individual piece is
+    self-consistent.
+    """
+    torch = _require_torch()
+
+    class _FakeBackbone(torch.nn.Module):
+        def gradient_checkpointing_enable(self, **_kwargs):  # pragma: no cover - not reached
+            raise AssertionError("gradient checkpointing is off in this fixture")
+
+    class _FakeModel:
+        backbone = _FakeBackbone()
+
+    def _fake_build(spec, **kwargs):
+        # Reports the PRODUCTION key regardless of what was asked for.
+        return _FakeModel(), {
+            "backbone": {
+                **BR.backbone_summary(BR.resolve_backbone(BR.PRODUCTION_BACKBONE)),
+                "loaded_from_registry": True,
+            }
+        }
+
+    import tbox_finder.stage2.model as M
+
+    monkeypatch.setattr(M, "build_stage2_model", _fake_build)
+
+    cfg = T.Stage2TrainConfig(
+        backbone=BR.COMPARATOR_BACKBONE,
+        checkpoint_dir=T.default_checkpoint_dir(BR.COMPARATOR_BACKBONE),
+        report_path=T.default_report_path(BR.COMPARATOR_BACKBONE),
+        gradient_checkpointing=False,
+    )
+    with pytest.raises(RuntimeError, match="not the one requested"):
+        T.build_model(cfg)
+
+    # Positive control: the same stub reporting the REQUESTED key must NOT raise, so the test
+    # cannot pass by way of a refusal that fires on everything
+    # ([[raises-test-needs-a-positive-control]]).
+    def _honest_build(spec, **kwargs):
+        return _FakeModel(), {
+            "backbone": {
+                **BR.backbone_summary(BR.resolve_backbone(BR.COMPARATOR_BACKBONE)),
+                "loaded_from_registry": True,
+            }
+        }
+
+    monkeypatch.setattr(M, "build_stage2_model", _honest_build)
+    model, info = T.build_model(cfg)
+    assert info["backbone"]["key"] == BR.COMPARATOR_BACKBONE
+
+
+@pytest.mark.skipif(
+    os.environ.get("TBOX_REQUIRE_STAGE2_DATA") != "1",
+    reason="runs the real trainer over the DVC-tracked dataset; local/cluster only",
+)
+def test_the_tiny_run_is_refused_for_BOTH_reasons_and_the_refusal_names_them(tmp_path) -> None:
+    """A fixture-backed smoke must fail `backbone_pinned` as well as `full_population`.
+
+    The other `_tiny_run` callers discard `raised` or check a single clause, so without this
+    the new clause's behaviour on the full loop would be unasserted — and an unasserted clause
+    is one that can silently stop biting. Both reasons are real and neither substitutes for
+    the other: `full_population` says the run was truncated, `backbone_pinned` says the weights
+    were a fixture. A smoke that lost the second could hand a toy model's numbers to a gate.
+    """
+    report, raised = _tiny_run(tmp_path)
+    clauses = report["gate"]["clauses"]
+    assert clauses["full_population"] is False
+    assert clauses["backbone_pinned"] is False
+    assert report["wrap"]["backbone"]["loaded_from_registry"] is False
+    # ...and the run refused rather than exiting 0 with a failed gate.
+    assert raised is not None
+    assert "backbone_pinned" in str(raised) and "full_population" in str(raised)
+    # Positive control on the OTHER half: the identity itself is well-formed, so the clause is
+    # failing on the fixture provenance rather than on a malformed block.
+    assert report["wrap"]["backbone"]["key"] == BR.PRODUCTION_BACKBONE
+    assert (
+        report["wrap"]["backbone"]["revision"]
+        == BR.resolve_backbone(BR.PRODUCTION_BACKBONE).revision
+    )
+
+
+# ======================================================================================
+# Review round 1 (CodeRabbit, PR #134) — every fix gets the guard it was missing
+# ======================================================================================
+def test_the_slurm_log_directory_is_committed_because_slurm_opens_it_first() -> None:
+    """Slurm opens `--output`/`--error` BEFORE the script runs, so `mkdir -p` in the body is
+    too late and a fresh cluster checkout loses the job's own logs — the hardest failure to
+    diagnose, because the evidence is the thing that is missing. Verified absent on the cluster
+    before the fix; the directory is committed now, so this asserts it stays that way.
+    """
+    text = _SBATCH_RNAFM.read_text()
+    out_dirs = set(re.findall(r"^#SBATCH --(?:output|error)=(.+)/[^/]+$", text, re.MULTILINE))
+    assert out_dirs, "no #SBATCH --output/--error directives found"
+    for d in out_dirs:
+        assert (_REPO / d).is_dir(), f"{d} must exist in a fresh checkout"
+        keep = _REPO / d / ".gitkeep"
+        assert keep.is_file(), f"{d} needs a committed .gitkeep or it will not survive a clone"
+
+
+def test_the_env_guard_compares_versions_as_numbers_not_strings() -> None:
+    """`["0", "10"] < ["0", "2"]` is True, so a string compare rejects multimolecule 0.10.0 with
+    a message naming the wrong cause. The guard must compare integers — and this asserts the
+    property, not the spelling, by exercising the predicate the sbatch actually contains.
+    """
+    code = _sbatch_code(_SBATCH_RNAFM)
+    predicate = re.search(r"^if (tuple\(int\(p\).+?) < \(0, 2\):$", code, re.MULTILINE)
+    assert predicate, "the env guard's version predicate is not the integer-tuple form"
+    # ⚠ Evaluate the SBATCH's OWN captured expression. The first cut re-implemented the
+    # predicate here and never used `predicate.group(1)`, so the loop asserted that this test
+    # file's copy behaves as written — true regardless of what the launcher contains, and the
+    # exact opposite of what the docstring claims. The only real coupling was the regex
+    # spelling, which is a weaker check than the one being advertised
+    # ([[artifact-pinning-test-cannot-see-the-code]]).
+    expr = f"({predicate.group(1)}) < (0, 2)"
+    for version, want_reject in (
+        ("0.1.0", True),
+        ("0.0.9", True),
+        ("0.2.0", False),
+        ("0.10.0", False),
+        ("1.0.0", False),
+    ):
+        # eval of a string this repo's own sbatch supplied, captured two lines above.
+        assert eval(expr, {"v": version}) is want_reject, version  # noqa: S307
+
+
+def test_the_DONE_marker_checks_every_artifact_the_verify_block_promises() -> None:
+    """A leg that exits 0 without writing its report must not publish a green marker."""
+    code = _sbatch_code(_SBATCH_RNAFM)
+    loop = re.search(r"^for f in (.+); do$", code, re.MULTILINE)
+    assert loop, "no artifact-check loop before the DONE marker"
+    checked = set(loop.group(1).split())
+    assert {'"$SCORES"', '"$SCORES_LOO"', '"$EVAL_REPORT"'} <= checked, checked
+    # ...and the loop runs BEFORE the marker, or it grades nothing.
+    assert code.index("for f in ") < code.index('touch "$DONE"')
+
+
+@pytest.mark.parametrize(
+    ("recorded", "requested", "expect"),
+    [
+        ("multimolecule/rinalmo-giga", None, "rinalmo-giga"),
+        ("multimolecule/rnafm", None, "rnafm"),
+        ("multimolecule/rnafm", "rnafm", "rnafm"),
+        (None, "rnafm", "rnafm"),  # the escape hatch for a checkpoint predating the field
+    ],
+)
+def test_a_checkpoints_backbone_is_re_derived_from_its_own_evidence(recorded, requested, expect):
+    from tbox_finder.stage2.eval import resolve_checkpoint_backbone
+
+    assert resolve_checkpoint_backbone(recorded, requested=requested) == expect
+
+
+@pytest.mark.parametrize(
+    ("recorded", "requested", "why"),
+    [
+        (None, None, "nothing recorded and nothing requested must RAISE, never default"),
+        ("", None, "an empty recorded base is not evidence either"),
+        ("multimolecule/rnafm-ss", None, "a base outside the closed allow-list"),
+        ("multimolecule/rnafm", "rinalmo-giga", "asked for a base the checkpoint contradicts"),
+        ("multimolecule/rinalmo-giga", "rnafm", "the same, the other way round"),
+    ],
+)
+def test_a_checkpoint_whose_backbone_cannot_be_re_derived_is_refused(recorded, requested, why):
+    """⚠ The first cut DEFAULTED the last case to production, contradicting its own comment.
+    A guessed base is applied to weights it never saw and then recorded in exactly the shape a
+    measured value has, so nothing downstream can tell the two apart."""
+    from tbox_finder.stage2.eval import resolve_checkpoint_backbone
+
+    with pytest.raises(ValueError):
+        resolve_checkpoint_backbone(recorded, requested=requested)
+
+
+def test_a_P1_15_report_cannot_certify_rinalmo_for_a_wrap_that_adapted_another_backbone():
+    """The report's `backbone` block is hardcoded from the production pins, `parity_confirmed`
+    included. Before this guard, `build_peft_model(backbone="rnafm")` + `build_report` produced
+    a report claiming the parity-confirmed checkpoint while `wrap.backbone.key` said `rnafm` —
+    and `validate_report` returned no errors. The contradiction was recorded and never graded.
+    """
+    from tbox_finder.train import lora_harness as LH
+
+    def wrap(key: str) -> dict[str, Any]:
+        return {
+            "backbone": {
+                **BR.backbone_summary(BR.resolve_backbone(key)),
+                "loaded_from_registry": True,
+            },
+            "n_adapter_sites": 4,
+            "applied_lora": {
+                "r": LH.LORA_R,
+                "lora_alpha": LH.LORA_ALPHA,
+                "lora_dropout": LH.LORA_DROPOUT,
+                "target_modules": LH.LORA_TARGET_MODULES,
+            },
+            "gradient_checkpointing": True,
+        }
+
+    kwargs = dict(
+        attn_backend=LH.ATTN_SDPA,
+        attn_reason="fixture",
+        evidence={"flash_attn_importable": False, "is_sm86": False},
+        supports_fa=False,
+        fallback_validated=True,
+    )
+    # The producer refuses the contradiction outright...
+    with pytest.raises(ValueError, match="statement about RiNALMo"):
+        LH.build_report(wrap_info=wrap(BR.COMPARATOR_BACKBONE), **kwargs)
+    # ...and the PRODUCTION wrap is accepted, so the refusal is not firing on everything
+    # ([[raises-test-needs-a-positive-control]]).
+    report = LH.build_report(wrap_info=wrap(BR.PRODUCTION_BACKBONE), **kwargs)
+    assert report["wrap"]["backbone"]["key"] == BR.PRODUCTION_BACKBONE
+
+    # ...and the VALIDATOR catches the same contradiction in a report read off disk, which is
+    # the half a producer-side refusal cannot cover.
+    tampered = json.loads(json.dumps(report))
+    tampered["wrap"]["backbone"]["repo_id"] = BR.resolve_backbone(BR.COMPARATOR_BACKBONE).repo_id
+    problems = LH.validate_report(tampered)
+    assert any("wrap.backbone.repo_id" in p for p in problems), problems
+    # A report with no wrap.backbone at all is NOT contradicted — the committed P1-15 artifact
+    # predates the block, and "unrecorded" must not be graded as "wrong".
+    legacy = json.loads(json.dumps(report))
+    legacy["wrap"].pop("backbone")
+    assert not any("wrap.backbone.repo_id" in p for p in LH.validate_report(legacy))
+
+
+def test_the_P1_16_SMOKE_report_carries_the_same_binding() -> None:
+    """The smoke record hardcodes the identical production backbone block, so it had the
+    identical hole. Guarding only the P1-15 pair would have been fixing one of two identical
+    things ([[fixed-one-of-two-identical-things]]) — and the smoke report is the one that
+    carries the §10.2 condition-(b) VRAM verdict, so a wrong backbone there is a wrong budget.
+    """
+    from tbox_finder.train import lora_harness as LH
+
+    def wrap(key: str) -> dict[str, Any]:
+        return {
+            "backbone": {
+                **BR.backbone_summary(BR.resolve_backbone(key)),
+                "loaded_from_registry": True,
+            },
+            "n_adapter_sites": 4,
+            "applied_lora": {
+                "r": LH.LORA_R,
+                "lora_alpha": LH.LORA_ALPHA,
+                "lora_dropout": LH.LORA_DROPOUT,
+                "target_modules": LH.LORA_TARGET_MODULES,
+            },
+            "gradient_checkpointing": True,
+            "n_trainable_params": 10,
+            "n_total_params": 100,
+        }
+
+    kwargs = dict(
+        measured_smoke={"peak_vram_gib": 2.0, "steps": 5, "oom": False},
+        attn_selected=LH.ATTN_SDPA,
+        attn_used=LH.ATTN_SDPA,
+        attn_reason="fixture",
+        forward_verified=True,
+        forward_error=None,
+        evidence={"flash_attn_importable": False, "is_sm86": True},
+        supports_fa=False,
+        hardware={"name": "NVIDIA RTX A4000", "capability": [8, 6]},
+    )
+    with pytest.raises(ValueError, match="P1-16 smoke record"):
+        LH.build_smoke_report(wrap_info=wrap(BR.COMPARATOR_BACKBONE), **kwargs)
+    # Positive control: the production wrap is accepted.
+    report = LH.build_smoke_report(wrap_info=wrap(BR.PRODUCTION_BACKBONE), **kwargs)
+    assert report["wrap"]["backbone"]["key"] == BR.PRODUCTION_BACKBONE
+
+    # ...and the smoke VALIDATOR catches the contradiction in a report read off disk.
+    tampered = json.loads(json.dumps(report))
+    tampered["wrap"]["backbone"]["repo_id"] = BR.resolve_backbone(BR.COMPARATOR_BACKBONE).repo_id
+    assert any("wrap.backbone.repo_id" in p for p in LH.validate_smoke_report(tampered))
+    legacy = json.loads(json.dumps(report))
+    legacy["wrap"].pop("backbone")
+    assert not any("wrap.backbone.repo_id" in p for p in LH.validate_smoke_report(legacy))
+
+
+def test_the_attention_reason_names_the_backbone_it_is_about() -> None:
+    """A correct decision explained by a sentence about a different model is still a wrong
+    record. The pre-ack run of this step's sbatch on the cluster printed *"the pinned RiNALMo
+    classes advertise flash-attn"* for an RNA-FM job — the decision was right (it comes from
+    `model_supports_flash_attn(key)`, measured per class) and the prose was not. That prose is
+    written verbatim into a job log and into a report's `attention.reason`, and prose in a
+    provenance record is a claim.
+    """
+    from tbox_finder.train import lora_harness as LH
+
+    common = dict(flash_attn_importable=True, sm86_confirmed=True, dtype=LH.TRAIN_DTYPE)
+    for key in BR.BACKBONE_KEYS:
+        backend, reason = LH.select_attention_backend(
+            model_supports_flash_attn=True, backbone=key, **common
+        )
+        assert backend == LH.ATTN_FLASH2
+        assert key in reason, reason
+        other = next(k for k in BR.BACKBONE_KEYS if k != key)
+        assert other not in reason, f"the {key} reason names {other}: {reason}"
+        # ⚠ And the CLAIM, not just the name. A sabotage that made every arm assert A10's
+        # sm_86 forward verification stayed GREEN against the name check alone, because the
+        # verified sentence names no backbone at all. Inheriting a verification the arm does
+        # not have is the whole defect — ADR-0002 A10 verified the FA-2 forward for the
+        # production backbone and for nothing else.
+        claims_verified = "VERIFIED on sm_86" in reason
+        assert claims_verified is (key == BR.PRODUCTION_BACKBONE), (
+            f"{key} claims_verified={claims_verified}; only {BR.PRODUCTION_BACKBONE} may "
+            f"claim A10's sm_86 forward verification. reason: {reason}"
+        )
+        if key != BR.PRODUCTION_BACKBONE:
+            assert "NOT separately forward-verified" in reason, reason
+
+        # ⚠ EVERY branch, not the one that happened to be exercised. The first cut named the
+        # arm in two of five reason strings and tested only one of them; the three fallback
+        # branches — the ones an operator reads when it went WRONG — recorded no arm identity
+        # at all ([[fixed-one-of-two-identical-things]]).
+        # Each branch is paired with the fragment its OWN condition must produce. Distinctness
+        # alone catches a COLLAPSE but not a SWAP: four messages can stay unique and correctly
+        # named while pointing an operator at the wrong cause — "flash-attn does not import"
+        # when the real problem is unconfirmed sm_86.
+        # ([[symmetric-count-fixture-blind-to-inversion]])
+        branches = (
+            (
+                dict(
+                    sm86_confirmed=False,
+                    flash_attn_importable=True,
+                    model_supports_flash_attn=True,
+                    dtype=LH.TRAIN_DTYPE,
+                ),
+                "sm_86 not confirmed",
+            ),
+            (
+                dict(
+                    sm86_confirmed=True,
+                    flash_attn_importable=False,
+                    model_supports_flash_attn=True,
+                    dtype=LH.TRAIN_DTYPE,
+                ),
+                "flash-attn does not import",
+            ),
+            (
+                dict(
+                    sm86_confirmed=True,
+                    flash_attn_importable=True,
+                    model_supports_flash_attn=False,
+                    dtype=LH.TRAIN_DTYPE,
+                ),
+                "do not advertise flash-attn support",
+            ),
+            (
+                dict(
+                    sm86_confirmed=True,
+                    flash_attn_importable=True,
+                    model_supports_flash_attn=True,
+                    dtype="float32",
+                ),
+                "is not half-precision",
+            ),
+        )
+        seen = set()
+        for kw, expected_fragment in branches:
+            backend_b, reason_b = LH.select_attention_backend(backbone=key, **kw)
+            assert backend_b == LH.ATTN_SDPA, kw
+            assert key in reason_b, f"fallback reason omits the arm: {reason_b}"
+            assert other not in reason_b, f"fallback reason names {other}: {reason_b}"
+            assert expected_fragment in reason_b, (
+                f"branch {kw} produced a reason that does not name its own cause "
+                f"({expected_fragment!r} absent): {reason_b}"
+            )
+            seen.add(reason_b)
+        assert len(seen) == len(branches), "two fallback branches share a reason string"
+        # ...and the fallback branch too, which is the one an operator reads when it went wrong.
+        _, fallback_reason = LH.select_attention_backend(
+            model_supports_flash_attn=False, backbone=key, **common
+        )
+        assert key in fallback_reason and other not in fallback_reason, fallback_reason
+
+    # The default stays the production arm, so every pre-A15 caller's recorded prose is
+    # unchanged — this must not silently rewrite the committed P1-15/P1-16 reason strings.
+    _, default_reason = LH.select_attention_backend(model_supports_flash_attn=True, **common)
+    assert BR.PRODUCTION_BACKBONE in default_reason
+
+
+def test_the_comparator_trains_the_lr_MATCHED_AUX_ZERO_CONTROL_the_scorers_require() -> None:
+    """Job 1372 trained the production point cleanly and then BOTH scoring legs refused:
+
+        ValueError: expected exactly one aux_weight=0 arm at lr=0.0001, found [];
+        the ablation needs a learning-rate-matched control
+
+    `stage2.eval` resolves `select_arm_pair` before it scores anything, and `gate2 score-loo`
+    calls the same selector — so a single-arm checkpoint root cannot be scored by either shipped
+    entry point. The control is the enabling condition for the posteriors this step owes, not a
+    nice-to-have, and nothing else in the suite would notice its removal until a 4-hour job had
+    already trained.
+    """
+    code = _sbatch_code(_SBATCH_RNAFM)
+    grid = re.search(r"^AUX_WEIGHTS=\((.+?)\)$", code, re.MULTILINE)
+    assert grid, "the comparator sbatch declares no AUX_WEIGHTS grid"
+    weights = [float(w) for w in grid.group(1).split()]
+    assert len(weights) == 2, weights
+    assert 0.0 in weights, "no aux=0 control — both scoring legs will refuse this root"
+    # The production point must be in the pair too, and it is the one read out of conf/.
+    aux = float(
+        re.search(
+            r"^aux_weight:\s*(\S+)", (_CONF / "loss" / "stage2.yaml").read_text(), re.MULTILINE
+        ).group(1)
+    )
+    assert aux in weights, f"the shipped aux_weight {aux} is not one of the trained points"
+    # Both points share ONE lr, or they are not a matched pair.
+    assert re.search(r'^LR="1e-4"$', code, re.MULTILINE), "the pair must share a single lr"
+    # ...and the job refuses to score a half-trained pair rather than grading one arm.
+    # ⚠ BOTH clauses, asserted separately. The guard checks the run report AND the checkpoint
+    # for each point, and a first cut of this assertion only required the marker to appear
+    # somewhere — so renaming one of the two occurrences left it GREEN, satisfied by the
+    # survivor ([[sabotage-attribution-names-the-test]] / compound disjuncts bite separately).
+    assert code.count("RNAFM_PAIR_INCOMPLETE") >= 2, "the pair guard lost one of its clauses"
+    guard = code[code.index("RNAFM_PAIR_INCOMPLETE") : code.index("-m tbox_finder.stage2.eval")]
+    assert "${KEY}.json" in guard, "the pair guard no longer checks each point's run report"
+    assert "stage2_heads.pt" in guard, "the pair guard no longer checks each point's checkpoint"
+    assert code.index("RNAFM_PAIR_INCOMPLETE") < code.index("-m tbox_finder.stage2.eval")
+
+
+# --------------------------------------------------------------------------------------
+# P3-17 review round 5 — the pair the scorers require, pinned ON THE LAUNCH LINE
+# --------------------------------------------------------------------------------------
+def test_the_launch_line_takes_aux_weight_from_the_LOOP_not_a_literal() -> None:
+    """Job 1372 died because a single-arm root cannot be scored: `stage2.eval` and
+    `gate2 score-loo` both call `select_arm_pair`, which needs an aux=0 control at the same lr.
+
+    The fix trains both points in one job — but nothing pinned the launch line to the loop
+    variable. Hardcoding `loss.aux_weight=1.0` there trains two identical arms, leaves the
+    whole comparator suite GREEN, and burns ~25 GPU-minutes before the scorers refuse exactly
+    as they did on 1372.
+    """
+    tokens = _launch_tokens(_SBATCH_RNAFM, "tbox_finder.stage2.train")
+    assert 'loss.aux_weight="$AUX_WEIGHT"' in tokens, tokens
+    assert 'optim.lr="$LR"' in tokens, tokens
+    # No literal aux weight may appear on the launch line at all — a second, hardcoded
+    # override would win or shadow depending on order.
+    literals = [t for t in tokens if t.startswith("loss.aux_weight=") and "$AUX_WEIGHT" not in t]
+    assert literals == [], literals
+
+
+def test_the_grid_the_loop_iterates_actually_contains_the_pair_the_scorers_need() -> None:
+    """The launch line reading `$AUX_WEIGHT` is worth nothing if the grid holds one value.
+
+    `AUX_WEIGHTS=(1.0)` would satisfy every launch-line assertion and still produce the
+    single-arm root that killed 1372.
+    """
+    code = _sbatch_code(_SBATCH_RNAFM)
+    grid = re.search(r"^AUX_WEIGHTS=\(([^)]*)\)", code, flags=re.MULTILINE)
+    assert grid is not None, "the comparator sbatch must declare an AUX_WEIGHTS grid"
+    values = {float(v) for v in grid.group(1).split()}
+    assert values == {1.0, 0.0}, values
+    # ...and EVERY loop over the points must iterate THAT array, binding the name the launch
+    # line reads. There are two — the training loop and the freshness/verification loop — and
+    # an `in` check is satisfied by either one alone: a sabotage that rewrote the training
+    # loop's header to a literal list stayed green because the second loop still matched
+    # ([[fixed-one-of-two-identical-things]]).
+    loops = code.count('for AUX_WEIGHT in "${AUX_WEIGHTS[@]}"; do')
+    assert loops == 2, (
+        f"expected both point loops to iterate the declared grid, found {loops}; a loop over a "
+        "literal list makes the grid a declaration nothing binds to"
+    )
+    # Both points must land in DISTINCT arm directories, or the second overwrites the first
+    # and the pair collapses to one ([[symmetric-count-fixture-blind-to-inversion]]).
+    assert 'KEY="aux${AUX_WEIGHT}_lr${LR}"' in code
+    assert 'CKPT_DIR="$CKPT_ROOT/${KEY}"' in code
+    assert 'REPORT="$OUT_DIR/${KEY}.json"' in code
+
+
+def test_the_launchers_MEASURED_figures_are_the_committed_sizing_reports() -> None:
+    """The header presents four VRAM figures and two step-times as "MEASURED ... on a cluster
+    A4000". Prose in a provenance record is a claim, and this file argues that elsewhere.
+
+    This test exists because the fix for that claim was written, verified, and then **lost
+    before it reached a commit** — the reviewer's thread stayed open against a defect I had
+    reported as fixed, and only re-reading the pushed bytes found it
+    ([[verify-the-line-you-ship]]). A number checked against its artifact cannot go stale
+    quietly, and cannot silently vanish either.
+    """
+    report = json.loads(
+        (_REPO / "reports" / "p3" / "stage2_rnafm_sizing.json").read_text(encoding="utf-8")
+    )
+    measured = {
+        (m["batch_size"], m["regime"]): m
+        for m in report["measurements"]
+        if not m.get("oom") and m.get("peak_vram_gib")
+    }
+    assert measured, "the committed sizing report carries no usable measurement"
+
+    header = _SBATCH_RNAFM.read_text()
+    block = re.search(
+        r"^# MEASURED afterwards.*?(?=^# So the pinned)", header, re.MULTILINE | re.DOTALL
+    )
+    assert block is not None, "the launcher's MEASURED block has moved or been removed"
+    quoted = {
+        (int(batch), regime): (float(gib), float(ms) if ms else None)
+        for batch, regime, gib, ms in re.findall(
+            r"batch (\d+) (worst_case|typical)\s+([\d.]+) GiB(?:\s*/\s*([\d.]+) ms)?",
+            block.group(0),
+        )
+    }
+    assert len(quoted) == 4, f"expected four quoted figures, parsed {sorted(quoted)}"
+
+    for key, (gib, ms) in sorted(quoted.items()):
+        assert key in measured, f"the header quotes {key} and the report does not measure it"
+        assert gib == pytest.approx(measured[key]["peak_vram_gib"], abs=5e-5), (
+            f"header says {key} peaked at {gib} GiB; the committed report says "
+            f"{measured[key]['peak_vram_gib']}"
+        )
+        if ms is not None:
+            steps = measured[key]["step_ms"][1:]  # step 0 is warm-up, as the header says
+            assert ms == pytest.approx(sum(steps) / len(steps), abs=0.05), (
+                f"header says {key} ran at {ms} ms; the report's steady-state mean is "
+                f"{sum(steps) / len(steps):.1f}"
+            )
+
+    # ...and the headroom sentence quotes the same batch-4 worst case to 2 decimals.
+    headroom = re.search(r"measured: ([\d.]+) of 15\.6 GiB at batch 4", header)
+    assert headroom is not None, "the batch-4 headroom claim has moved"
+    assert float(headroom.group(1)) == pytest.approx(
+        measured[(4, "worst_case")]["peak_vram_gib"], abs=5e-3
+    )

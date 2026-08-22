@@ -34,6 +34,7 @@ from tbox_finder.calib import ece as ECE
 from tbox_finder.calib import gate2 as G
 from tbox_finder.calib import recalibrate as R
 from tbox_finder.eval import resample as RS
+from tbox_finder.models import rna_backbone_registry as BR
 
 # No `pytest.importorskip("numpy")` here: the `tbox_finder` imports above already pull
 # numpy, so collection would fail in that block and a guard below it could never run.
@@ -174,7 +175,7 @@ def _blocks_for(scores: dict) -> dict[str, str]:
     return {rid: f"cluster:{i // 2}" for i, rid in enumerate(scores["row_ids"])}
 
 
-def _report() -> dict:
+def _report(backbone: str | None = None) -> dict:
     """A complete, honest, passing GATE-2 report built through the shipped assembler."""
     scores = _in_distribution_scores()
     gate = G.grade_in_distribution(
@@ -197,13 +198,17 @@ def _report() -> dict:
         "rescore_n_overlap": 3,
         "rescore_max_abs_delta": 1e-4,
     }
+    key = backbone or BR.PRODUCTION_BACKBONE
     return G.build_report(
         gate=gate,
         prior_shift=shift,
         ood=ood,
         scope=scope,
-        scoring={"arm": "aux1.0_lr1e-4"},
+        # `scoring.load` carries the backbone the loader derived from the adapter's own
+        # recorded base model — the evidence `env_lock_is_the_graded_arms` grades.
+        scoring={"arm": "aux1.0_lr1e-4", "load": {"backbone": key}},
         provenance={"git_sha": "deadbeef"},
+        env_lock=BR.resolve_backbone(key).env_lock,
         written_at="2026-08-04T00:00:00+00:00",
     )
 
@@ -280,6 +285,7 @@ def _report_kwargs() -> dict:
         "scope": report["scope"],
         "scoring": report["scoring"],
         "provenance": report["provenance"],
+        "env_lock": report["env_lock"],
         "written_at": report["generated_at_utc"],
     }
 
@@ -290,6 +296,7 @@ def test_clause_key_set_is_stable_and_named() -> None:
         "d13_drift_bound_left_unadjudicated",
         "deployment_prior_is_a_band_not_a_pin",
         "ece_estimator_matches_adr_d11",
+        "env_lock_is_the_graded_arms",
         "gate_threshold_is_the_pinned_default",
         "graded_every_loo_holdout_unit",
         "graded_object_is_pre_prior_shift",
@@ -933,6 +940,13 @@ def test_the_disclosures_carry_the_two_inherited_caveats() -> None:
     assert len(p3_08) == 1 and len(p3_09) == 1
     assert "ONE calib row" in p3_08[0], "the P3-08 single-row caveat must travel with the number"
     assert "degenerate-limit rule" in p3_08[0]
+    # ...and every fact in it must name P3-08's RiNALMo arms as its subject. Emitted
+    # unconditionally into EVERY gate2 report, the earlier wording made the RNA-FM
+    # comparator's report assert a perfectly separated no-aux control that its own eval
+    # report recorded as `is_perfectly_separated: false` with a finite temperature.
+    assert p3_08[0].count("RiNALMo") >= 2, p3_08[0]
+    assert "not necessarily about the arm graded here" in p3_08[0]
+    assert "records no separation measurement for it" in p3_08[0]
     assert "SATURATE" in p3_09[0], "the P3-09 debias-saturation caveat must travel with it too"
     assert "0.123" in p3_09[0], "the measured truth the estimator saturated against"
     assert "P5" in joined, "the FDR half of GATE-2 is not represented here and must say so"
@@ -1311,3 +1325,331 @@ def test_the_plug_in_ece_is_reported_beside_the_gated_debiased_one() -> None:
     assert isinstance(report["gate"]["ece_plugin"], float)
     assert report["gate"]["ece_plugin"] >= report["gate"]["ece"] - 1e-12
     assert math.isfinite(report["gate"]["ece_ci"]["point"])
+
+
+# ======================================================================================
+# P3-17 — `grade` must be pointable at a non-production arm root (ADR-0002 D6/A15)
+# ======================================================================================
+def test_grade_accepts_the_same_arm_root_flags_score_loo_already_had() -> None:
+    """A comparator's scores could be PRODUCED and never GRADED.
+
+    `score-loo` has taken `--checkpoint-root`/`--sweep-dir` since it was written; `grade` did
+    not, and hardcoded the production constants. It uses them for one thing — resolving WHICH
+    ARM NAME to pull out of the scores file — so the omission had nothing to do with the
+    science and everything to do with which directory it looked in. It surfaced at P3-17 as
+
+        FileNotFoundError: checkpoint root data/processed/checkpoints/stage2_rinalmo
+        does not exist
+
+    when grading the RNA-FM comparator, whose scores were sitting right there.
+    """
+    parser = G.build_parser()
+    for sub in ("grade", "score-loo"):
+        args = parser.parse_args([sub, "--checkpoint-root", "/tmp/x", "--sweep-dir", "/tmp/y"])
+        assert args.checkpoint_root == "/tmp/x", sub
+        assert args.sweep_dir == "/tmp/y", sub
+    # ...and omitting them must leave every pre-existing invocation byte-identical: the
+    # defaults are None so the call site falls back to the production constants, rather than
+    # baking a second copy of those paths into the parser.
+    defaults = parser.parse_args(["grade"])
+    assert defaults.checkpoint_root is None
+    assert defaults.sweep_dir is None
+
+
+class _ArmRootReached(Exception):
+    """Raised by the stub the moment `discover_arms` is called, so the test stops there."""
+
+
+def _capture_arm_root(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
+    """Stand in front of `discover_arms` and record the roots `grade` hands it.
+
+    An earlier version of this test read `inspect.getsource(G.main)` for the two identifier
+    names. That passes whenever the names appear ANYWHERE in the function — in a comment, in a
+    dead branch, in a docstring — and it cannot see whether the value reaches `discover_arms`
+    at all ([[artifact-pinning-test-cannot-see-the-code]]). This captures the argument.
+    """
+    from tbox_finder.stage2 import eval as E
+
+    seen: dict[str, object] = {}
+
+    def _stub(checkpoint_root: object, *, sweep_dir: object = None) -> dict[str, object]:
+        seen["checkpoint_root"] = checkpoint_root
+        seen["sweep_dir"] = sweep_dir
+        raise _ArmRootReached
+
+    monkeypatch.setattr(E, "discover_arms", _stub)
+    monkeypatch.setattr(E, "production_arm_config", lambda *a, **k: {})
+    monkeypatch.setattr(G, "_read_split_table", lambda *a, **k: ([], {}))
+    return seen
+
+
+def test_grade_falls_back_to_the_production_root_when_not_told_otherwise(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The fallback is what keeps P3-10's committed invocation unchanged, so assert the value
+    `discover_arms` RECEIVES, not that the constant's name occurs in the source."""
+    from tbox_finder.stage2 import eval as E
+
+    seen = _capture_arm_root(monkeypatch)
+    with pytest.raises(_ArmRootReached):
+        G.main(["grade"])
+    assert seen["checkpoint_root"] == E.DEFAULT_CKPT_ROOT
+    assert seen["sweep_dir"] == E.DEFAULT_SWEEP_DIR
+    # And those constants must still name the production arm, or the fallback silently moved.
+    assert E.DEFAULT_CKPT_ROOT.endswith("stage2_rinalmo"), E.DEFAULT_CKPT_ROOT
+
+
+def test_grade_uses_the_root_it_is_given_rather_than_the_production_one(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The other half of the identity: a parser that accepted the flags and then ignored them
+    would still satisfy the fallback test above. Assert the override actually arrives."""
+    from tbox_finder.stage2 import eval as E
+
+    seen = _capture_arm_root(monkeypatch)
+    with pytest.raises(_ArmRootReached):
+        G.main(["grade", "--checkpoint-root", "/tmp/comparator", "--sweep-dir", "/tmp/sweep"])
+    assert seen["checkpoint_root"] == "/tmp/comparator"
+    assert seen["sweep_dir"] == "/tmp/sweep"
+    assert seen["checkpoint_root"] != E.DEFAULT_CKPT_ROOT
+
+
+def test_an_explicitly_empty_root_is_not_answered_with_the_production_one(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`args.checkpoint_root or E.DEFAULT_CKPT_ROOT` treats `--checkpoint-root ""` as absent.
+
+    A caller who passed an empty string would silently grade the SHIPPED arm while believing
+    it had pointed the run elsewhere — the same silent-production-fallback class as the loader
+    that defaulted a missing base model to production. Only an OMITTED option falls back.
+    """
+    from tbox_finder.stage2 import eval as E
+
+    seen = _capture_arm_root(monkeypatch)
+    with pytest.raises(_ArmRootReached):
+        G.main(["grade", "--checkpoint-root", "", "--sweep-dir", ""])
+    assert seen["checkpoint_root"] == ""
+    assert seen["sweep_dir"] == ""
+    assert seen["checkpoint_root"] != E.DEFAULT_CKPT_ROOT
+
+
+# ======================================================================================
+# P3-17 review round 6 — the THIRD producer that stamped the production lock
+# ======================================================================================
+def test_the_report_names_the_environment_the_GRADED_arm_required() -> None:
+    """`sizing.py` and `eval.py` were fixed in round 5 and this one was missed.
+
+    `gate2.py` carries its own `ENV_LOCK = "envs/ml-rna.conda-lock.yml"` and stamped it into
+    both the report body and `build_provenance` — so grading the RNA-FM comparator recorded,
+    and HASHED, an environment whose `multimolecule` pin cannot load the weights whose
+    posteriors were being graded. This is the artifact P3-18's condition (c) reads
+    ([[fixed-one-of-two-identical-things]]).
+    """
+    comparator = BR.resolve_backbone(BR.COMPARATOR_BACKBONE)
+    report = _report(backbone=comparator.key)
+    assert report["env_lock"] == comparator.env_lock
+    assert report["env_lock"] != G.ENV_LOCK, "the comparator must not name the production lock"
+    assert report["clauses"]["env_lock_is_the_graded_arms"] is True
+    # Positive control: the production arm still names the production lock.
+    production = _report()
+    assert production["env_lock"] == G.ENV_LOCK
+    assert production["clauses"]["env_lock_is_the_graded_arms"] is True
+
+
+@pytest.mark.parametrize(
+    "tamper",
+    [
+        pytest.param(
+            lambda r: r.__setitem__("env_lock", "envs/ml-rna.conda-lock.yml"),
+            id="stamped-the-production-constant-over-a-comparator-grade",
+        ),
+        pytest.param(lambda r: r.__setitem__("env_lock", None), id="stamped-nothing"),
+        pytest.param(
+            lambda r: r["scoring"].__setitem__("load", {}),
+            id="the-scored-arm-records-no-backbone",
+        ),
+        pytest.param(
+            lambda r: r["scoring"]["load"].__setitem__(
+                "backbone", "a-model-this-repo-does-not-pin"
+            ),
+            id="a-backbone-outside-the-allow-list",
+        ),
+    ],
+)
+def test_the_env_lock_clause_bites(tamper) -> None:
+    report = _report(backbone=BR.COMPARATOR_BACKBONE)
+    assert G.derive_clauses(report)["env_lock_is_the_graded_arms"] is True
+    tamper(report)
+    assert G.derive_clauses(report)["env_lock_is_the_graded_arms"] is False
+
+
+def test_main_stamps_the_derived_lock_into_BOTH_the_report_and_the_provenance() -> None:
+    """The clause guards the reader; this guards the wiring.
+
+    Every test above builds its report through `build_report` with an explicit `env_lock=`, so
+    a `main` that went back to `ENV_LOCK` for either the report body or `build_provenance`
+    would leave all of them green ([[artifact-pinning-test-cannot-see-the-code]]).
+    """
+    import ast
+
+    tree = ast.parse(Path(G.__file__).read_text(encoding="utf-8"))
+    main_fn = next(n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == "main")
+    stamped = [
+        kw.value
+        for call in ast.walk(main_fn)
+        if isinstance(call, ast.Call)
+        for kw in call.keywords
+        if kw.arg == "env_lock"
+    ]
+    assert len(stamped) == 2, f"expected build_provenance and build_report, got {len(stamped)}"
+    for value in stamped:
+        assert isinstance(value, ast.Name), ast.dump(value)
+        assert value.id == "scored_env_lock", value.id
+
+
+def test_a_schema_1_report_is_graded_against_the_schema_1_clause_set() -> None:
+    """`reports/gate2_p3_ece.json` and `reports/p3/gate2_rnafm_ece.json` are schema 1 and are
+    not regenerated — no local environment carries `torch` and `pyarrow` together
+    ([[new-gate-clause-invalidates-old-reports]])."""
+    assert G.clauses_not_required_at("1") == G.CLAUSES_FIRST_REQUIRED_AT["2"]
+    assert G.clauses_not_required_at(G.SCHEMA_VERSION) == frozenset()
+    assert G.clauses_not_required_at("99") == frozenset()
+    legacy = _report()
+    legacy["schema_version"] = "1"
+    del legacy["clauses"]["env_lock_is_the_graded_arms"]
+    legacy["overall_pass"] = all(legacy["clauses"].values())
+    assert [p for p in G.validate_report(legacy) if "clauses" in p] == []
+    # ...and claiming schema 1 while RECORDING the schema-2 clause is still refused.
+    forged = _report()
+    forged["schema_version"] = "1"
+    assert any("key set drifted" in p for p in G.validate_report(forged))
+
+
+def test_the_schema_table_names_clauses_that_actually_exist() -> None:
+    """A misspelled clause name in `CLAUSES_FIRST_REQUIRED_AT` excuses nothing, silently."""
+    named = frozenset().union(*G.CLAUSES_FIRST_REQUIRED_AT.values(), frozenset())
+    derived = set(G.derive_clauses(_report()))
+    assert named <= derived, sorted(named - derived)
+    assert set(G.CLAUSES_FIRST_REQUIRED_AT) <= set(G.KNOWN_SCHEMAS)
+    assert G.SCHEMA_VERSION in G.KNOWN_SCHEMAS
+
+
+def test_score_loo_holdout_also_refuses_to_answer_an_empty_root_with_production(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`score_loo_holdout` carries the SECOND copy of the same fallback.
+
+    A regression that restored `checkpoint_root or E.DEFAULT_CKPT_ROOT` there stays green
+    against every test above, which only exercises `grade`
+    ([[fixed-one-of-two-identical-things]]).
+    """
+    from tbox_finder.stage2 import eval as E
+
+    seen: dict[str, object] = {}
+
+    def _stub(checkpoint_root: object, *, sweep_dir: object = None) -> dict[str, object]:
+        seen["checkpoint_root"] = checkpoint_root
+        seen["sweep_dir"] = sweep_dir
+        raise _ArmRootReached
+
+    monkeypatch.setattr(E, "discover_arms", _stub)
+    monkeypatch.setattr(E, "production_arm_config", lambda *a, **k: {})
+    monkeypatch.setattr(
+        G,
+        "loo_holdout_rows",
+        lambda *a, **k: (
+            [],
+            {"n_row_overlap": 0, "n_order_overlap": 0, "overlapping_orders": []},
+        ),
+    )
+
+    with pytest.raises(_ArmRootReached):
+        G.score_loo_holdout(checkpoint_root="", sweep_dir="")
+    assert seen["checkpoint_root"] == ""
+    assert seen["sweep_dir"] == ""
+    assert seen["checkpoint_root"] != E.DEFAULT_CKPT_ROOT
+
+
+def test_the_workflow_rule_declares_which_model_made_the_pre_a15_sidecars() -> None:
+    """`gate2 grade` refuses to guess a backbone for a sidecar that records none, so the rule
+    that grades the PRODUCTION arm from the pre-A15 sidecars must say which model made them —
+    otherwise `snakemake gate2_ece` raises before writing the report.
+
+    The key is retyped in the `.smk` because importing `tbox_finder` at Snakefile-parse time
+    would make `snakemake --lint` depend on `src` being importable. This pins the copy.
+    """
+    smk = (
+        Path(__file__).resolve().parents[2] / "workflow" / "rules" / "calibration.smk"
+    ).read_text(encoding="utf-8")
+    assert (
+        f'_SCORED_BACKBONE = "{BR.PRODUCTION_BACKBONE}"' in smk
+    ), "the rule's retyped backbone key has drifted from rna_backbone_registry"
+    # ...and the rule must actually PASS it: a constant nothing reads is a fabricated value.
+    assert "--scored-backbone {params.scored_backbone:q}" in smk
+    assert "scored_backbone=_SCORED_BACKBONE," in smk
+
+
+# ======================================================================================
+# P3-17 review round 8 — the two sidecars must be about the SAME weights
+# ======================================================================================
+def test_two_sidecars_from_different_weights_are_refused_not_joined() -> None:
+    """The grade joins an in-distribution ECE from one sidecar to a leave-clade-out ECE from
+    the other and reports them as one arm. `env_lock_for_scored_arms` compares `backbone`
+    alone — the coarsest field — so two sidecars could name the same backbone while one was
+    scored from a different checkpoint, adapter, or base revision.
+    """
+    base = {
+        "backbone": "rnafm",
+        "base_model_name_or_path": "multimolecule/rnafm",
+        "revision": "7d6e73a",
+        "checkpoint_dir": "data/processed/checkpoints/stage2_rnafm/aux1.0_lr1e-4",
+        "adapter_sha256": "c22296b8",
+        "heads_sha256": "dc0f204a",
+    }
+    assert G.sidecar_identity_mismatches(base, dict(base)) == []
+    for field in G.SIDECAR_IDENTITY_FIELDS:
+        assert G.sidecar_identity_mismatches(base, dict(base, **{field: "other"})) == [field]
+
+
+def test_a_field_ONE_sidecar_predates_is_an_age_difference_not_a_mismatch() -> None:
+    """The pre-A15 sidecars record almost none of these. Refusing them for *lacking* a field
+    would make the compatibility path in `env_lock_for_scored_arms` unreachable."""
+    rich = {"backbone": "rnafm", "adapter_sha256": "c22296b8"}
+    assert G.sidecar_identity_mismatches(rich, {}) == []
+    assert G.sidecar_identity_mismatches({}, rich) == []
+    assert G.sidecar_identity_mismatches({}, {}) == []
+    # ...but a field BOTH record and disagree on is still a mismatch.
+    assert G.sidecar_identity_mismatches(rich, {"adapter_sha256": "deadbeef"}) == ["adapter_sha256"]
+
+
+def test_the_committed_sidecar_pairs_agree_on_every_identity_field_they_share() -> None:
+    """Not a hypothetical: the artifacts this repo ships must pass their own guard."""
+    root = Path(__file__).resolve().parents[2]
+    pairs = [
+        ("reports/p3/stage2_scores.json", "reports/p3/stage2_scores_loo.json"),
+        ("reports/p3/stage2_scores_rnafm.json", "reports/p3/stage2_scores_loo_rnafm.json"),
+    ]
+    for in_dist_path, loo_path in pairs:
+        in_dist = json.loads((root / in_dist_path).read_text(encoding="utf-8"))["arms"]
+        loo = json.loads((root / loo_path).read_text(encoding="utf-8"))["arms"]
+        shared = set(in_dist) & set(loo)
+        assert shared, (in_dist_path, loo_path)
+        for arm in sorted(shared):
+            assert (
+                G.sidecar_identity_mismatches(in_dist[arm].get("load"), loo[arm].get("load")) == []
+            ), (in_dist_path, loo_path, arm)
+
+
+def test_a_numeric_schema_version_is_not_the_string_one(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`str(report["schema_version"])` made the JSON number `1` equivalent to schema `"1"`, so
+    a numeric version collected schema-1's clause exemptions while only its *type* was flagged.
+    """
+    assert G.clauses_not_required_at("1") == G.CLAUSES_FIRST_REQUIRED_AT["2"]
+    assert G.clauses_not_required_at(1) == frozenset()  # type: ignore[arg-type]
+    report = _report()
+    report["schema_version"] = 1
+    del report["clauses"]["env_lock_is_the_graded_arms"]
+    problems = G.validate_report(report)
+    assert any("is not one of" in p for p in problems), problems
+    # ...and it does NOT get the schema-1 excuse: the missing clause is still reported.
+    assert any("key set drifted" in p for p in problems), problems

@@ -11,6 +11,13 @@ _GATE2_FIGURE_DATA = "reports/p3/gate2_figure_data.json"
 _STAGE2_SCORES = "reports/p3/stage2_scores.json"
 _STAGE2_LOO_SCORES = "reports/p3/stage2_scores_loo.json"
 _STAGE2_DATASET = "data/processed/stage2_dataset.parquet"
+# Which model produced `_STAGE2_SCORES` / `_STAGE2_LOO_SCORES`. Those sidecars were written
+# BEFORE ADR-0002 A15 — when this repo pinned exactly one Stage-2 backbone — so they record no
+# `load.backbone`, and `grade` refuses to guess one rather than defaulting to production. The
+# value is retyped here because importing `tbox_finder` at Snakefile-parse time would make
+# `snakemake --lint` depend on `src` being importable; `tests/unit/test_gate2.py` pins it
+# against `rna_backbone_registry.PRODUCTION_BACKBONE` so the copy cannot drift.
+_SCORED_BACKBONE = "rinalmo-giga"
 _GATE2_FIGURES = [
     "figures/calib/gate2_reliability.png",
     "figures/calib/gate2_ood_by_order.png",
@@ -81,6 +88,8 @@ rule gate2_ece:
     output:
         report=_GATE2_REPORT,
         figure_data=_GATE2_FIGURE_DATA,
+    params:
+        scored_backbone=_SCORED_BACKBONE,
     log:
         "logs/gate2_ece.log",
     conda:
@@ -91,7 +100,8 @@ rule gate2_ece:
         "--scores {input.scores:q} "
         "--loo-scores {input.loo_scores:q} "
         "--report {output.report:q} "
-        "--figure-data {output.figure_data:q} >{log} 2>&1"
+        "--figure-data {output.figure_data:q} "
+        "--scored-backbone {params.scored_backbone:q} >{log} 2>&1"
 
 
 rule plot_gate2_figures:
