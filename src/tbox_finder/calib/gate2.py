@@ -74,9 +74,11 @@ from tbox_finder import coverage as COV
 from tbox_finder import metrics as M
 from tbox_finder import power as PW
 from tbox_finder import provenance as PROV
+from tbox_finder import report_schema as RSCH
 from tbox_finder.calib import ece as ECE
 from tbox_finder.calib import recalibrate as R
 from tbox_finder.eval import resample as RS
+from tbox_finder.models import rna_backbone_registry as BR
 
 __all__ = [
     "ADR",
@@ -117,7 +119,54 @@ __all__ = [
     "write_outputs",
 ]
 
-SCHEMA_VERSION = "1"
+#: Bumped 1 -> 2 at P3-17 review round 5: `env_lock` stopped being the module constant and
+#: became the GRADED ARM's lock, graded by the new `env_lock_is_the_graded_arms` clause. A
+#: clause set is part of a report's shape ([[new-gate-clause-invalidates-old-reports]]), and the
+#: committed schema-1 reports (`reports/gate2_p3_ece.json`, `reports/p3/gate2_rnafm_ece.json`)
+#: are NOT regenerated — see the dev-log disclosure — so they are graded against the schema-1
+#: set by `clauses_not_required_at`.
+SCHEMA_VERSION = "2"
+
+#: Every schema this validator knows, oldest first — listed, never string-compared.
+KNOWN_SCHEMAS: tuple[str, ...] = ("1", "2")
+
+#: The clauses a report FIRST carries at each schema.
+CLAUSES_FIRST_REQUIRED_AT: dict[str, frozenset[str]] = {
+    "2": frozenset({"env_lock_is_the_graded_arms"}),
+}
+
+
+def clauses_not_required_at(schema: str) -> frozenset[str]:
+    """Clauses introduced AFTER ``schema``, which a report at that schema cannot carry."""
+    return RSCH.clauses_not_required_at(
+        schema, known=KNOWN_SCHEMAS, first_required_at=CLAUSES_FIRST_REQUIRED_AT
+    )
+
+
+RSCH.check_schema_tables(
+    known=KNOWN_SCHEMAS,
+    first_required_at=CLAUSES_FIRST_REQUIRED_AT,
+    current=SCHEMA_VERSION,
+    module=__name__,
+)
+
+
+def env_lock_for_graded_arm(load: Mapping[str, Any] | None) -> str | None:
+    """The conda lock the GRADED weights required, from the score sidecar's own load record.
+
+    Torch-free on purpose: this is called from :func:`derive_clauses`, which grades in bare CI.
+    Returns ``None`` when the record names no backbone or names one this repo does not pin — a
+    clause is a verdict, not a crash site.
+    """
+    key = (load or {}).get("backbone")
+    if not key:
+        return None
+    try:
+        return BR.resolve_backbone(str(key)).env_lock
+    except (KeyError, ValueError):
+        return None
+
+
 STEP = "P3-10"
 GENERATED_BY = "src/tbox_finder/calib/gate2.py"
 PRD = "PRD §2.3 (GATE-2), §12, §18.1, §9.2"
@@ -944,6 +993,8 @@ def derive_clauses(report: Mapping[str, Any]) -> dict[str, bool]:
             and scope["rescore_n_overlap"] > 0
             and float(scope["rescore_max_abs_delta"]) <= RESCORE_AGREEMENT_TOL
         ),
+        # ── the report names the environment the GRADED weights required ──
+        "env_lock_is_the_graded_arms": _env_lock_clause(report),
     }
 
 
@@ -972,6 +1023,17 @@ def _drift_bound_unadjudicated(ood: Mapping[str, Any]) -> bool:
     )
 
 
+def _env_lock_clause(report: Mapping[str, Any]) -> bool:
+    """`env_lock` must be the lock of the backbone the graded arm was loaded as.
+
+    Nothing graded this field, which is how the RNA-FM comparator's report — the artifact
+    P3-18's condition (c) reads — came to name the production environment and hash it
+    ([[gate-must-bind-to-upstream-evidence]]).
+    """
+    expected = env_lock_for_graded_arm((report.get("scoring") or {}).get("load"))
+    return bool(expected) and report.get("env_lock") == expected
+
+
 def validate_report(report: Mapping[str, Any]) -> list[str]:
     """Problems with ``report``; ``[]`` when clean. An honestly-failing gate is not a problem.
 
@@ -981,8 +1043,12 @@ def validate_report(report: Mapping[str, Any]) -> list[str]:
     """
     problems: list[str] = []
 
+    schema = str(report.get("schema_version"))
+    if schema not in KNOWN_SCHEMAS:
+        problems.append(
+            f"schema_version: {report.get('schema_version')!r} is not one of {KNOWN_SCHEMAS!r}"
+        )
     for key, want in (
-        ("schema_version", SCHEMA_VERSION),
         ("step", STEP),
         ("generated_by", GENERATED_BY),
         ("adr", ADR),
@@ -1045,7 +1111,13 @@ def validate_report(report: Mapping[str, Any]) -> list[str]:
             problems.append(f"ood.gated = {ood.get('gated')!r}, must be False (ADR-0005 D13)")
 
     written = report.get("clauses")
-    recomputed = derive_clauses(report)
+    # A report is graded against the clause set of ITS OWN schema. At the current schema this
+    # excuses nothing; an unknown schema excuses nothing either and is flagged above.
+    recomputed = {
+        name: value
+        for name, value in derive_clauses(report).items()
+        if name not in clauses_not_required_at(schema)
+    }
     if not isinstance(written, Mapping):
         problems.append("clauses: block missing — nothing pins what the gate checked")
     else:
@@ -1082,6 +1154,7 @@ def build_report(
     scope: Mapping[str, Any],
     scoring: Mapping[str, Any],
     provenance: Mapping[str, Any],
+    env_lock: str,
     written_at: str | None = None,
 ) -> dict[str, Any]:
     """Assemble the GATE-2 report; every number is passed in already measured."""
@@ -1097,7 +1170,12 @@ def build_report(
         "generated_by": GENERATED_BY,
         "prd": PRD,
         "adr": ADR,
-        "env_lock": ENV_LOCK,
+        # NOT `ENV_LOCK`. That constant names the PRODUCTION lock, so grading the RNA-FM
+        # comparator stamped — and hashed — an environment whose `multimolecule` pin cannot
+        # load the weights whose posteriors were being graded. This is the THIRD producer with
+        # the same defect; `sizing.py` and `eval.py` were fixed in the same round and this one
+        # was missed ([[fixed-one-of-two-identical-things]]).
+        "env_lock": env_lock,
         "generated_at_utc": written_at or datetime.now(UTC).isoformat(timespec="seconds"),
         "gated": True,
         "gate": dict(gate),
@@ -1577,6 +1655,14 @@ def build_parser() -> Any:
     grade.add_argument("--scores", default=DEFAULT_SCORES)
     grade.add_argument("--loo-scores", default=DEFAULT_LOO_SCORES)
     grade.add_argument("--report", default=DEFAULT_REPORT)
+    grade.add_argument(
+        "--scored-backbone",
+        default=None,
+        help=(
+            "which pinned backbone produced the score sidecars, for a PRE-A15 sidecar that "
+            "records none. Never overrides a recorded backbone; a disagreement is refused."
+        ),
+    )
     grade.add_argument("--figure-data", default=DEFAULT_FIGURE_DATA)
     grade.add_argument("--n-boot", type=int, default=DEFAULT_N_BOOT)
     grade.add_argument("--ood-n-boot", type=int, default=DEFAULT_OOD_N_BOOT)
@@ -1762,6 +1848,21 @@ def main(argv: Sequence[str] | None = None) -> int:
         "bootstrap_seed": int(args.seed),
         "load": loo["load"],
     }
+    # The environment the GRADED weights required, from the score sidecars' own load records —
+    # each of which carries the backbone the loader derived from that adapter's recorded base
+    # model. Both sidecars are handed in and must agree: the in-distribution and leave-clade-out
+    # passes score the same weights, so a disagreement means one of the two files is about a
+    # different arm and no single lock describes the run.
+    scored_env_lock = E.env_lock_for_scored_arms(
+        {
+            f"{arm}@in_distribution": in_dist.get("load") or {},
+            f"{arm}@leave_clade_out": loo.get("load") or {},
+        },
+        # The committed P3-10 sidecars predate ADR-0002 A15 and record no backbone at all, so
+        # re-grading the production arm from them needs the caller to say which model made
+        # them. It fills a gap and never overrides a record.
+        declared_backbone=getattr(args, "scored_backbone", None),
+    )
     # `outputs` is deliberately EMPTY. `build_provenance` *hashes* every path it is given,
     # and neither output exists yet — the report is what this call is being embedded into,
     # so hashing it here is both impossible and self-referential. The declared paths go in
@@ -1771,7 +1872,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         script=GENERATED_BY,
         seed=int(args.seed),
         inputs=[args.dataset, args.scores, args.loo_scores],
-        env_lock=ENV_LOCK,
+        env_lock=scored_env_lock,
         adr=ADR,
         extra={"declared_outputs": [_recorded_path(args.report), _recorded_path(args.figure_data)]},
     )
@@ -1782,7 +1883,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     prov["inputs"] = {_recorded_path(k): v for k, v in prov["inputs"].items()}
 
     report = build_report(
-        gate=gate, prior_shift=shift, ood=ood, scope=scope, scoring=scoring, provenance=prov
+        gate=gate,
+        prior_shift=shift,
+        ood=ood,
+        scope=scope,
+        scoring=scoring,
+        provenance=prov,
+        env_lock=scored_env_lock,
     )
     problems = validate_report(report)
     out, _ = write_outputs(

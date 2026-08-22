@@ -1387,13 +1387,18 @@ def test_main_stamps_the_derived_lock_and_not_the_module_constant() -> None:
 
     tree = ast.parse(Path(E.__file__).read_text(encoding="utf-8"))
     main_fn = next(n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == "main")
-    provenance = next(
+    candidates = [
         kw.value
         for call in ast.walk(main_fn)
         if isinstance(call, ast.Call)
         for kw in call.keywords
         if kw.arg == "provenance" and isinstance(kw.value, ast.Dict)
-    )
+    ]
+    # `next(...)` would take the first in walk order. If `main` ever gains a second call
+    # carrying a `provenance=` dict, that grades the wrong one and stays green while the
+    # report-building call regresses.
+    assert len(candidates) == 1, f"expected one provenance= dict in main, got {len(candidates)}"
+    (provenance,) = candidates
     stamped = {
         key.value: value
         for key, value in zip(provenance.keys, provenance.values, strict=True)
@@ -1502,3 +1507,83 @@ def test_the_correcting_legacy_annotation_wins_over_the_checkpoint_block(tmp_pat
     arm = E.discover_arms(str(root), sweep_dir=str(sweep))["aux1.0_lr1e-4"]
     assert arm["saved_val_total"] == 0.04
     assert arm["saved_from_epoch"] == 9
+
+
+# --------------------------------------------------------------------------- #
+# P3-17 review round 6 — the PRE-A15 sidecars that record no backbone at all
+# --------------------------------------------------------------------------- #
+def test_a_pre_a15_sidecar_is_refused_rather_than_defaulted_to_production() -> None:
+    """`reports/p3/stage2_scores.json` and `…_loo.json` were written before `backbone` was a
+    field — when this repo pinned exactly ONE Stage-2 backbone — so they name none.
+
+    Guessing production for them is the identical defect to the loader that defaulted a
+    missing base model to production, which this branch already fixed once.
+    """
+    silent = {"a@in_distribution": {}, "a@leave_clade_out": {"backbone": None}}
+    with pytest.raises(RuntimeError, match="--scored-backbone"):
+        E.env_lock_for_scored_arms(silent)
+    named = E.env_lock_for_scored_arms(silent, declared_backbone=BR.PRODUCTION_BACKBONE)
+    assert named == BR.resolve_backbone(BR.PRODUCTION_BACKBONE).env_lock
+
+
+def test_a_declaration_fills_a_gap_and_never_overrides_a_record() -> None:
+    """Otherwise `--scored-backbone` becomes a way to relabel an artifact's environment."""
+    recorded = {"a": {"backbone": BR.COMPARATOR_BACKBONE}}
+    assert (
+        E.env_lock_for_scored_arms(recorded) == BR.resolve_backbone(BR.COMPARATOR_BACKBONE).env_lock
+    )
+    # A declaration that agrees is harmless...
+    assert (
+        E.env_lock_for_scored_arms(recorded, declared_backbone=BR.COMPARATOR_BACKBONE)
+        == BR.resolve_backbone(BR.COMPARATOR_BACKBONE).env_lock
+    )
+    # ...and one that disagrees is refused, not obeyed.
+    with pytest.raises(RuntimeError, match="recorded evidence wins"):
+        E.env_lock_for_scored_arms(recorded, declared_backbone=BR.PRODUCTION_BACKBONE)
+
+
+def test_arms_that_spoke_must_not_answer_for_arms_that_did_not() -> None:
+    """A mixed sidecar means one arm is unattributed; letting the other speak makes a partner
+    scored under an unknown model invisible."""
+    with pytest.raises(RuntimeError, match="must not answer for"):
+        E.env_lock_for_scored_arms({"named": {"backbone": BR.COMPARATOR_BACKBONE}, "silent": {}})
+    # ...and a declaration does not rescue the mixed case either.
+    with pytest.raises(RuntimeError, match="must not answer for"):
+        E.env_lock_for_scored_arms(
+            {"named": {"backbone": BR.COMPARATOR_BACKBONE}, "silent": {}},
+            declared_backbone=BR.COMPARATOR_BACKBONE,
+        )
+
+
+def test_the_committed_pre_a15_sidecars_really_are_the_case_this_handles(tmp_path: Any) -> None:
+    """Not a hypothetical: read the tracked artifacts and assert the shape this guards.
+
+    If a later step regenerates them with a backbone recorded, this test says so instead of
+    leaving a compatibility path nothing needs.
+    """
+    root = Path(__file__).resolve().parents[2]
+    pre_a15 = [root / "reports/p3/stage2_scores.json", root / "reports/p3/stage2_scores_loo.json"]
+    post_a15 = [
+        root / "reports/p3/stage2_scores_rnafm.json",
+        root / "reports/p3/stage2_scores_loo_rnafm.json",
+    ]
+    for path in pre_a15:
+        arms = json.loads(path.read_text(encoding="utf-8"))["arms"]
+        assert arms, path
+        assert all(not (a.get("load") or {}).get("backbone") for a in arms.values()), path
+    for path in post_a15:
+        arms = json.loads(path.read_text(encoding="utf-8"))["arms"]
+        assert arms, path
+        assert all(
+            (a.get("load") or {}).get("backbone") == BR.COMPARATOR_BACKBONE for a in arms.values()
+        ), path
+
+
+def test_the_schema_table_names_clauses_that_actually_exist() -> None:
+    """`CLAUSES_FIRST_REQUIRED_AT` is free text. A misspelled clause name excuses nothing and
+    is silent — it surfaces only as a legacy artifact that suddenly fails validation."""
+    named = frozenset().union(*E.CLAUSES_FIRST_REQUIRED_AT.values(), frozenset())
+    derived = set(E.derive_clauses(_report()))
+    assert named <= derived, sorted(named - derived)
+    assert set(E.CLAUSES_FIRST_REQUIRED_AT) <= set(E.KNOWN_SCHEMAS)
+    assert E.SCHEMA_VERSION in E.KNOWN_SCHEMAS

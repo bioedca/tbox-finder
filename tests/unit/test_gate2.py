@@ -34,6 +34,7 @@ from tbox_finder.calib import ece as ECE
 from tbox_finder.calib import gate2 as G
 from tbox_finder.calib import recalibrate as R
 from tbox_finder.eval import resample as RS
+from tbox_finder.models import rna_backbone_registry as BR
 
 # No `pytest.importorskip("numpy")` here: the `tbox_finder` imports above already pull
 # numpy, so collection would fail in that block and a guard below it could never run.
@@ -174,7 +175,7 @@ def _blocks_for(scores: dict) -> dict[str, str]:
     return {rid: f"cluster:{i // 2}" for i, rid in enumerate(scores["row_ids"])}
 
 
-def _report() -> dict:
+def _report(backbone: str | None = None) -> dict:
     """A complete, honest, passing GATE-2 report built through the shipped assembler."""
     scores = _in_distribution_scores()
     gate = G.grade_in_distribution(
@@ -197,13 +198,17 @@ def _report() -> dict:
         "rescore_n_overlap": 3,
         "rescore_max_abs_delta": 1e-4,
     }
+    key = backbone or BR.PRODUCTION_BACKBONE
     return G.build_report(
         gate=gate,
         prior_shift=shift,
         ood=ood,
         scope=scope,
-        scoring={"arm": "aux1.0_lr1e-4"},
+        # `scoring.load` carries the backbone the loader derived from the adapter's own
+        # recorded base model — the evidence `env_lock_is_the_graded_arms` grades.
+        scoring={"arm": "aux1.0_lr1e-4", "load": {"backbone": key}},
         provenance={"git_sha": "deadbeef"},
+        env_lock=BR.resolve_backbone(key).env_lock,
         written_at="2026-08-04T00:00:00+00:00",
     )
 
@@ -280,6 +285,7 @@ def _report_kwargs() -> dict:
         "scope": report["scope"],
         "scoring": report["scoring"],
         "provenance": report["provenance"],
+        "env_lock": report["env_lock"],
         "written_at": report["generated_at_utc"],
     }
 
@@ -290,6 +296,7 @@ def test_clause_key_set_is_stable_and_named() -> None:
         "d13_drift_bound_left_unadjudicated",
         "deployment_prior_is_a_band_not_a_pin",
         "ece_estimator_matches_adr_d11",
+        "env_lock_is_the_graded_arms",
         "gate_threshold_is_the_pinned_default",
         "graded_every_loo_holdout_unit",
         "graded_object_is_pre_prior_shift",
@@ -1421,6 +1428,143 @@ def test_an_explicitly_empty_root_is_not_answered_with_the_production_one(
     seen = _capture_arm_root(monkeypatch)
     with pytest.raises(_ArmRootReached):
         G.main(["grade", "--checkpoint-root", "", "--sweep-dir", ""])
+    assert seen["checkpoint_root"] == ""
+    assert seen["sweep_dir"] == ""
+    assert seen["checkpoint_root"] != E.DEFAULT_CKPT_ROOT
+
+
+# ======================================================================================
+# P3-17 review round 6 — the THIRD producer that stamped the production lock
+# ======================================================================================
+def test_the_report_names_the_environment_the_GRADED_arm_required() -> None:
+    """`sizing.py` and `eval.py` were fixed in round 5 and this one was missed.
+
+    `gate2.py` carries its own `ENV_LOCK = "envs/ml-rna.conda-lock.yml"` and stamped it into
+    both the report body and `build_provenance` — so grading the RNA-FM comparator recorded,
+    and HASHED, an environment whose `multimolecule` pin cannot load the weights whose
+    posteriors were being graded. This is the artifact P3-18's condition (c) reads
+    ([[fixed-one-of-two-identical-things]]).
+    """
+    comparator = BR.resolve_backbone(BR.COMPARATOR_BACKBONE)
+    report = _report(backbone=comparator.key)
+    assert report["env_lock"] == comparator.env_lock
+    assert report["env_lock"] != G.ENV_LOCK, "the comparator must not name the production lock"
+    assert report["clauses"]["env_lock_is_the_graded_arms"] is True
+    # Positive control: the production arm still names the production lock.
+    production = _report()
+    assert production["env_lock"] == G.ENV_LOCK
+    assert production["clauses"]["env_lock_is_the_graded_arms"] is True
+
+
+@pytest.mark.parametrize(
+    "tamper",
+    [
+        pytest.param(
+            lambda r: r.__setitem__("env_lock", "envs/ml-rna.conda-lock.yml"),
+            id="stamped-the-production-constant-over-a-comparator-grade",
+        ),
+        pytest.param(lambda r: r.__setitem__("env_lock", None), id="stamped-nothing"),
+        pytest.param(
+            lambda r: r["scoring"].__setitem__("load", {}),
+            id="the-scored-arm-records-no-backbone",
+        ),
+        pytest.param(
+            lambda r: r["scoring"]["load"].__setitem__(
+                "backbone", "a-model-this-repo-does-not-pin"
+            ),
+            id="a-backbone-outside-the-allow-list",
+        ),
+    ],
+)
+def test_the_env_lock_clause_bites(tamper) -> None:
+    report = _report(backbone=BR.COMPARATOR_BACKBONE)
+    assert G.derive_clauses(report)["env_lock_is_the_graded_arms"] is True
+    tamper(report)
+    assert G.derive_clauses(report)["env_lock_is_the_graded_arms"] is False
+
+
+def test_main_stamps_the_derived_lock_into_BOTH_the_report_and_the_provenance() -> None:
+    """The clause guards the reader; this guards the wiring.
+
+    Every test above builds its report through `build_report` with an explicit `env_lock=`, so
+    a `main` that went back to `ENV_LOCK` for either the report body or `build_provenance`
+    would leave all of them green ([[artifact-pinning-test-cannot-see-the-code]]).
+    """
+    import ast
+
+    tree = ast.parse(Path(G.__file__).read_text(encoding="utf-8"))
+    main_fn = next(n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == "main")
+    stamped = [
+        kw.value
+        for call in ast.walk(main_fn)
+        if isinstance(call, ast.Call)
+        for kw in call.keywords
+        if kw.arg == "env_lock"
+    ]
+    assert len(stamped) == 2, f"expected build_provenance and build_report, got {len(stamped)}"
+    for value in stamped:
+        assert isinstance(value, ast.Name), ast.dump(value)
+        assert value.id == "scored_env_lock", value.id
+
+
+def test_a_schema_1_report_is_graded_against_the_schema_1_clause_set() -> None:
+    """`reports/gate2_p3_ece.json` and `reports/p3/gate2_rnafm_ece.json` are schema 1 and are
+    not regenerated — no local environment carries `torch` and `pyarrow` together
+    ([[new-gate-clause-invalidates-old-reports]])."""
+    assert G.clauses_not_required_at("1") == G.CLAUSES_FIRST_REQUIRED_AT["2"]
+    assert G.clauses_not_required_at(G.SCHEMA_VERSION) == frozenset()
+    assert G.clauses_not_required_at("99") == frozenset()
+    legacy = _report()
+    legacy["schema_version"] = "1"
+    del legacy["clauses"]["env_lock_is_the_graded_arms"]
+    legacy["overall_pass"] = all(legacy["clauses"].values())
+    assert [p for p in G.validate_report(legacy) if "clauses" in p] == []
+    # ...and claiming schema 1 while RECORDING the schema-2 clause is still refused.
+    forged = _report()
+    forged["schema_version"] = "1"
+    assert any("key set drifted" in p for p in G.validate_report(forged))
+
+
+def test_the_schema_table_names_clauses_that_actually_exist() -> None:
+    """A misspelled clause name in `CLAUSES_FIRST_REQUIRED_AT` excuses nothing, silently."""
+    named = frozenset().union(*G.CLAUSES_FIRST_REQUIRED_AT.values(), frozenset())
+    derived = set(G.derive_clauses(_report()))
+    assert named <= derived, sorted(named - derived)
+    assert set(G.CLAUSES_FIRST_REQUIRED_AT) <= set(G.KNOWN_SCHEMAS)
+    assert G.SCHEMA_VERSION in G.KNOWN_SCHEMAS
+
+
+def test_score_loo_holdout_also_refuses_to_answer_an_empty_root_with_production(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`score_loo_holdout` carries the SECOND copy of the same fallback.
+
+    A regression that restored `checkpoint_root or E.DEFAULT_CKPT_ROOT` there stays green
+    against every test above, which only exercises `grade`
+    ([[fixed-one-of-two-identical-things]]).
+    """
+    from tbox_finder.stage2 import eval as E
+
+    seen: dict[str, object] = {}
+
+    def _stub(checkpoint_root: object, *, sweep_dir: object = None) -> dict[str, object]:
+        seen["checkpoint_root"] = checkpoint_root
+        seen["sweep_dir"] = sweep_dir
+        raise _ArmRootReached
+
+    monkeypatch.setattr(E, "discover_arms", _stub)
+    monkeypatch.setattr(E, "production_arm_config", lambda *a, **k: {})
+    monkeypatch.setattr(
+        G,
+        "loo_holdout_rows",
+        lambda *a, **k: (
+            [],
+            {"n_row_overlap": 0, "n_order_overlap": 0, "overlapping_orders": []},
+        ),
+    )
+
+    with pytest.raises(_ArmRootReached):
+        G.score_loo_holdout(checkpoint_root="", sweep_dir="")
     assert seen["checkpoint_root"] == ""
     assert seen["sweep_dir"] == ""
     assert seen["checkpoint_root"] != E.DEFAULT_CKPT_ROOT

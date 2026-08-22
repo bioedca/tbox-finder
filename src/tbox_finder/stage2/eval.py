@@ -66,6 +66,7 @@ import numpy as np
 from tbox_finder import metrics as M
 from tbox_finder import power as PW
 from tbox_finder import provenance as PROV
+from tbox_finder import report_schema as RSCH
 from tbox_finder.calib import recalibrate as R
 from tbox_finder.models import rna_backbone_registry as BR
 from tbox_finder.stage2 import train as T
@@ -1203,18 +1204,18 @@ def derive_clauses(report: Mapping[str, Any]) -> dict[str, bool]:
 
 
 def clauses_not_required_at(schema: str) -> frozenset[str]:
-    """Clauses introduced AFTER ``schema``, which a report at that schema cannot carry.
-
-    An unknown schema excuses nothing: a report this validator does not recognise is graded
-    against the whole current clause set, and separately flagged for the version itself.
-    """
-    if schema not in KNOWN_SCHEMAS:
-        return frozenset()
-    age = KNOWN_SCHEMAS.index(schema)
-    return frozenset().union(
-        *(CLAUSES_FIRST_REQUIRED_AT.get(newer, frozenset()) for newer in KNOWN_SCHEMAS[age + 1 :]),
-        frozenset(),
+    """Clauses introduced AFTER ``schema``, which a report at that schema cannot carry."""
+    return RSCH.clauses_not_required_at(
+        schema, known=KNOWN_SCHEMAS, first_required_at=CLAUSES_FIRST_REQUIRED_AT
     )
+
+
+RSCH.check_schema_tables(
+    known=KNOWN_SCHEMAS,
+    first_required_at=CLAUSES_FIRST_REQUIRED_AT,
+    current=SCHEMA_VERSION,
+    module=__name__,
+)
 
 
 def validate_report(report: Mapping[str, Any]) -> list[str]:
@@ -1368,7 +1369,9 @@ def _saved_field(legacy: Mapping[str, Any], checkpoint: Mapping[str, Any], key: 
     return checkpoint.get(key)
 
 
-def env_lock_for_scored_arms(load_records: Mapping[str, Mapping[str, Any]]) -> str:
+def env_lock_for_scored_arms(
+    load_records: Mapping[str, Mapping[str, Any]], *, declared_backbone: str | None = None
+) -> str:
     """The conda lock the SCORED weights required, from the arms' own load records.
 
     Not :data:`ENV_LOCK`. That constant names the production lock, and stamping it made job
@@ -1378,23 +1381,48 @@ def env_lock_for_scored_arms(load_records: Mapping[str, Mapping[str, Any]]) -> s
     model, so this is re-derived evidence rather than a read-back setting.
 
     Arms that disagree are refused rather than averaged: one report cannot name the environment
-    for two models. Arms that record nothing are refused too — dropping them would let one arm
-    speak for a partner scored under an unknown model.
+    for two models. Arms where SOME record a backbone and some do not are refused too — letting
+    the ones that spoke answer for the ones that did not is how a partner scored under an
+    unknown model becomes invisible.
+
+    ``declared_backbone`` fills exactly one gap and creates no default. The committed
+    **pre-A15** score sidecars (`reports/p3/stage2_scores.json`,
+    `reports/p3/stage2_scores_loo.json`) were written before `backbone` was a field at all —
+    when this repo pinned exactly one Stage-2 backbone — so they name none, and regenerating
+    them costs the GPU pass that produced them. A caller re-grading one may state the backbone
+    explicitly; it is used ONLY when the records are silent, and a declaration that contradicts
+    a record is refused rather than allowed to win.
     """
     if not load_records:
         raise RuntimeError("no arms were scored, so no environment can be named for them")
-    backbones = sorted({str(record.get("backbone")) for record in load_records.values()})
-    if backbones == ["None"] or "None" in backbones:
+    recorded = sorted({str(r["backbone"]) for r in load_records.values() if r.get("backbone")})
+    silent = [name for name, r in load_records.items() if not r.get("backbone")]
+    if recorded and silent:
         raise RuntimeError(
-            f"the scored arms record backbones {backbones!r}; an arm that records none cannot "
-            "have its environment named, and the report must not name one for it"
+            f"arms {sorted(silent)!r} record no backbone while {recorded!r} do; the ones that "
+            "spoke must not answer for the ones that did not"
         )
-    if len(backbones) != 1:
+    if len(recorded) > 1:
         raise RuntimeError(
-            f"the scored arms record backbones {backbones!r}; a single report cannot name the "
+            f"the scored arms record backbones {recorded!r}; a single report cannot name the "
             "environment for more than one of them"
         )
-    return T.env_lock_for(backbones[0])
+    if recorded:
+        if declared_backbone is not None and str(declared_backbone) != recorded[0]:
+            raise RuntimeError(
+                f"backbone {declared_backbone!r} was declared but the scored arms record "
+                f"{recorded[0]!r}; the recorded evidence wins and the disagreement is refused"
+            )
+        return T.env_lock_for(recorded[0])
+    if declared_backbone is None:
+        raise RuntimeError(
+            "no scored arm records a backbone, so the environment cannot be re-derived. This "
+            "is what a score sidecar written before ADR-0002 A15 looks like; pass "
+            "--scored-backbone <key> to state which model produced it, or regenerate the "
+            "sidecar. It is NOT defaulted to production — that guess is exactly the defect "
+            "this function exists to stop."
+        )
+    return T.env_lock_for(str(declared_backbone))
 
 
 def _gate_note(report: Mapping[str, Any]) -> str:
@@ -1954,6 +1982,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--batch-size", type=int, default=4)
     parser.add_argument("--device", default=None)
     parser.add_argument("--attn-implementation", default=None)
+    parser.add_argument(
+        "--scored-backbone",
+        default=None,
+        help=(
+            "which pinned backbone produced the scores, for a PRE-A15 sidecar that records "
+            "none. Never overrides a recorded backbone; a disagreement is refused."
+        ),
+    )
     parser.add_argument("--n-boot", type=int, default=DEFAULT_N_BOOT)
     parser.add_argument(
         "--all-arms",
@@ -2067,7 +2103,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     # sabotage that put `ENV_LOCK` back stayed GREEN because every unit test built its report
     # through `aux_ablation_check` and never through this wiring
     # ([[artifact-pinning-test-cannot-see-the-code]]).
-    scored_env_lock = env_lock_for_scored_arms(load_records)
+    scored_env_lock = env_lock_for_scored_arms(load_records, declared_backbone=args.scored_backbone)
 
     report = aux_ablation_check(
         arm_scores,

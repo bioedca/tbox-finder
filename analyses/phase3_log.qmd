@@ -7754,3 +7754,66 @@ downgraded. The two schema bumps and the versioned clause sets are shape changes
 repo owns, not methodology changes.
 
 **Commit.** see PR (P3-17, review round 5).
+
+## Step P3-17 (review round 6) — 2026-08-22: the third producer, and the sidecars that predate the field
+
+**Inputs.** `890f93a`, the round-5 fix commit, plus the adversarial harness's completed run over
+`d8b9f629..30a68405` (66 agents, **0 errors**, 20 findings raised, **19 surviving** three
+refutation lenses each). Every one of the 20 is closed by round 5 or by this round; #10 and #12
+are closed in substance by the launch-line and port-fact guards rather than by an edit of their
+own, and that is said here rather than counted as a separate fix.
+
+**Process.** ⛔ **The round-5 commit fixed two of THREE producers.** `calib/gate2.py` carries its
+own `ENV_LOCK = "envs/ml-rna.conda-lock.yml"` and stamped it into both the report body and
+`build_provenance` — so grading the RNA-FM comparator recorded, **and hashed**, an environment
+whose `multimolecule` pin cannot load the weights whose posteriors were being graded. This is
+the artifact **P3-18's condition (c) reads**. Fixed exactly as the other two: the lock is derived
+from the graded arm's own load records (both sidecars, required to agree), a new clause
+`env_lock_is_the_graded_arms` grades it, and an AST pin requires `main` to pass the derived name
+to **both** stamping sites — a sabotage of either alone was green against every behavioural test,
+because they all build the report through `build_report` with an explicit `env_lock=`.
+
+⚠ **And that fix would have broken the production grade.** The committed
+`reports/p3/stage2_scores.json` and `…_loo.json` were written **before ADR-0002 A15**, when this
+repo pinned exactly one Stage-2 backbone, so they record no `load.backbone` at all — re-grading
+the RiNALMo arm from them would have raised. Defaulting them to production is the identical
+defect this branch already fixed once in the loader. So `env_lock_for_scored_arms` grew an
+explicit `declared_backbone` that fills **exactly that gap**: it is used only when every record
+is silent, a declaration that contradicts a record is **refused** rather than obeyed, and a
+sidecar where some arms speak and others do not is refused outright — letting the ones that
+spoke answer for the ones that did not is how a partner scored under an unknown model becomes
+invisible. `grade` and `stage2.eval` both expose it as `--scored-backbone`. A test reads the four
+tracked sidecars and asserts the pre-/post-A15 shapes, so if a later step regenerates them the
+compatibility path is reported as unneeded instead of quietly kept.
+
+**Also this round.** The schema-age arithmetic had been copied into three modules in one commit;
+it is promoted to `tbox_finder/report_schema.py` with the per-module tables left where they
+belong, plus an import-time `check_schema_tables` that refuses a table naming a schema
+`KNOWN_SCHEMAS` does not list (silently ignored otherwise) and unit tests binding
+`CLAUSES_FIRST_REQUIRED_AT`'s clause **names** to what `derive_clauses` actually emits. The
+`score_loo_holdout` call site got the same `is None` fallback and its own test — the round-5 test
+covered `grade` alone, so restoring `or DEFAULT` in the sibling stayed green. And the AST
+provenance pin now asserts there is **exactly one** `provenance=` dict in `main`, because
+`next(...)` would silently grade the wrong call if a second appeared.
+
+**Outputs.** `src/tbox_finder/report_schema.py` (new), `src/tbox_finder/calib/gate2.py`
+(schema **1 → 2**), `src/tbox_finder/stage2/eval.py`, `src/tbox_finder/stage2/sizing.py`,
+and 16 further tests.
+
+**Validation.** `ruff` + `black` clean; **zero new failures** against the matched `main` baseline
+at `2e929a3` (FAILED sets, `comm -13`); unit+ml+golden **6,717 → 6,731**. Every fix sabotaged;
+both gate2 stamping sites and the `score_loo_holdout` fallback each went RED against a named
+test.
+
+**⚠ THE DISCLOSURE GROWS BY ONE.** `reports/gate2_p3_ece.json` and
+`reports/p3/gate2_rnafm_ece.json` also carry `env_lock: "envs/ml-rna.conda-lock.yml"` and a
+matching `provenance.env_lock_hash`. For the RNA-FM report **that value is wrong** — the graded
+weights are RNA-FM's, and `reports/p3/stage2_scores_loo_rnafm.json` records `backbone: rnafm`.
+Both reports are schema 1 and are graded against the schema-1 clause set; neither is regenerated
+and **neither is hand-corrected**. As with round 5: no graded number depends on it — the ECE, the
+temperature, the CIs and every clause are untouched — and the repair is a regeneration this
+environment cannot perform (no env carries `torch` and `pyarrow` together, §3.1).
+
+**Decisions.** Still no ADR amendment: no threshold, pinned value or analysis tier moved.
+
+**Commit.** see PR (P3-17, review round 6).

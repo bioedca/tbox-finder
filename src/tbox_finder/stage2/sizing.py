@@ -45,6 +45,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from tbox_finder import report_schema as RSCH
 from tbox_finder.models.rna_backbone_registry import (
     PRODUCTION_BACKBONE,
     backbone_summary,
@@ -124,18 +125,18 @@ CLAUSES_FIRST_REQUIRED_AT: dict[str, frozenset[str]] = {
 
 
 def clauses_not_required_at(schema: str) -> frozenset[str]:
-    """Clauses introduced AFTER ``schema``, which a report at that schema cannot carry.
-
-    An unknown schema excuses nothing — it is graded against the whole current set and flagged
-    separately for the version itself.
-    """
-    if schema not in KNOWN_SCHEMAS:
-        return frozenset()
-    age = KNOWN_SCHEMAS.index(schema)
-    return frozenset().union(
-        *(CLAUSES_FIRST_REQUIRED_AT.get(newer, frozenset()) for newer in KNOWN_SCHEMAS[age + 1 :]),
-        frozenset(),
+    """Clauses introduced AFTER ``schema``, which a report at that schema cannot carry."""
+    return RSCH.clauses_not_required_at(
+        schema, known=KNOWN_SCHEMAS, first_required_at=CLAUSES_FIRST_REQUIRED_AT
     )
+
+
+RSCH.check_schema_tables(
+    known=KNOWN_SCHEMAS,
+    first_required_at=CLAUSES_FIRST_REQUIRED_AT,
+    current=SCHEMA_VERSION,
+    module=__name__,
+)
 
 
 #: Descending, so the sweep learns the ceiling before spending time under it. 8 is what job
