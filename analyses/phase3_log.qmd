@@ -7966,7 +7966,7 @@ counting to 28.
 
 **Outputs.** `src/tbox_finder/calib/gate2.py` (+`backbone_key_from_load`, four clauses,
 schema 3), `src/tbox_finder/stage2/{eval,sizing,train}.py`,
-`src/tbox_finder/train/lora_harness.py`, `slurm/p3/rnafm_stage2_finetune.sbatch`,
+`slurm/p3/rnafm_stage2_finetune.sbatch`,
 `workflow/rules/calibration.smk`, `docs/decisions/ADR-0002-*.md` (A15 disclosure amendment +
 sign-off), `tests/unit/test_round10_producer_wiring.py` (new), `tests/unit/test_gate2.py`,
 `tests/unit/test_rna_backbone_registry.py`. Artifacts touched in exactly the fields listed
@@ -7993,3 +7993,71 @@ to the backbone — a reason to withhold a swap, not to fire one. No retrain is 
 a separate, unbooked experiment. No pin, threshold, lockfile or measured value changed.
 
 **Commit.** see PR (P3-17, review round 10).
+
+## Step P3-17 (review round 11) — 2026-08-22: the round-10 clauses were themselves re-derived from derived fields
+
+**Inputs.** Commit `e330460` (round 10) with a CodeRabbit round triggered on it. A second
+independent six-lens / 28-agent adversarial pass (0 agents errored) was run against that
+commit specifically, on the same principle that produced round 10. It filed 22 and **confirmed
+17 (5 major) — in my own round-10 work**. Four were re-executed by hand before any change.
+
+**Process.** The headline is that round 10's central fix was itself the defect it was fixing.
+
+*A re-derivation that reads a derived field is not a re-derivation.*
+`_ece_matches_reliability` computed the gated ECE as `sum(weight × debiased_gap)` — but
+`debiased_gap` is itself derived, in closed form, from `acc`, `conf` and `n` sitting in the
+same row. So a **two-number edit** still fabricated a pass: zeroing one bin's `debiased_gap`
+and re-summing `gate.ece` took the RNA-FM report from an honest 0.006811 to 0.001397 with
+`validate_report` returning zero problems, while `ece_plugin` stayed 8× larger — arithmetically
+impossible, since the debiasing term can only subtract `sigma·sqrt(2/pi)`. The gap is now
+recomputed from `acc`/`conf`/`n` and each row's stored `gap`/`debiased_gap` must equal it.
+
+*The clause on the D17(c) statistic skipped the D17(c) statistic's own interval.*
+`_bootstrap_not_cost_knobbed` iterated the in-distribution interval and the per-unit ones and
+never `ood.macro_average` — so setting its `upper` to 0.0001, below its own point, validated
+clean. It is now included.
+
+*And the same clause fired on an honest state.* ADR-0005 **A1** sanctions
+`lower = upper = NaN, n_boot = 0` for a unit with fewer than 2 blocks — an admissible order
+whose rows all fall in one homology cluster. Round 10 read that as a cost-knobbed bootstrap,
+which would have made `gate2_ece` overwrite a passing report with a failing one and exit 0:
+the *same failure shape* round 10 had just fixed for `env_lock`. The A1 state is now recognised
+from its recorded `n_blocks`/`n_boot` — never from the NaN alone, so a genuine collapse cannot
+claim the exemption.
+
+*The carve-out I condemned was still in force for two of the four artifacts I corrected.*
+Round 10 promoted the two GATE-2 reports on the stated principle that a branch must not
+inherit an exemption meant for older reports — and left `stage2_rnafm_eval.json` at schema 1
+and `stage2_rnafm_sizing.json` at schema 3, each still excused the very env-lock clause whose
+value that commit had hand-corrected in those files. Both are promoted here; every clause
+derives TRUE and no measured number moves.
+
+*The eval side had the same two defects gate2 had.* `env_lock_for_scored_arms`' **recorded**
+branch trusted `backbone` without consulting `base_model_name_or_path`, so a record saying
+`backbone: rinalmo-giga` beside `base_model: multimolecule/rnafm` named, hashed and
+self-certified the production lock for RNA-FM weights; and the eval clause still read
+`backbone` alone, leaving it unsatisfiable from the pre-A15 sidecars `--scored-backbone` exists
+to regrade. Both fixed. ⚠ Round 10's `--scored-backbone` cross-check shipped with **no test at
+all** — `return None` at the top of its helper left the entire unit tier green.
+
+**Outputs.** `src/tbox_finder/calib/gate2.py`, `src/tbox_finder/stage2/{eval,sizing}.py`,
+`docs/decisions/ADR-0002-*.md` (the sign-off bullet moved so it no longer re-parents A15's own
+"Not triggered / unchanged" and "Cross-reference impact" paragraphs), `tests/unit/test_gate2.py`,
+`tests/unit/test_round10_producer_wiring.py`, `reports/p3/stage2_rnafm_{eval,sizing}.json`.
+The round-10 stanza's Outputs list is corrected: it named `train/lora_harness.py`, which that
+commit does not touch (it is a *subject* of an AST pin, not a modified file).
+
+**Validation.** Every round-10 tamper still caught, plus the four new ones (the two-number
+`debiased_gap` forge, the macro interval, a 1-row reliability table, a detached `ece_ci.point`)
+— while the honest A1 NaN interval is accepted and a NaN *without* the A1 signature is still
+refused. The two hardened AST pins now catch a **second** writer (a `_second_sidecar_writer`
+returning the module constant left round 10's version green); four sabotages of the eval-side
+guards each RED against their named test; all restores byte-identical by sha256. ⚠ Two of my
+own patches in this round silently failed to apply (a stale quote anchor after `black`
+reformatting) and were caught only because the sabotage came back GREEN — the
+[[green-sabotage-may-never-have-applied]] trap, hit twice in one session.
+
+**Decisions.** None. No ADR value, threshold, pin or measured number changed in this round; the
+only ADR edit is structural (bullet placement).
+
+**Commit.** see PR (P3-17, review round 11).

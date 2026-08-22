@@ -1875,3 +1875,187 @@ def test_the_committed_pre_a15_sidecars_still_evidence_their_backbone() -> None:
                 "has gone vacuous; re-point it or delete it"
             )
             assert G.backbone_key_from_load(load) == "rinalmo-giga", (rel, arm)
+
+
+# ======================================================================================
+# P3-17 review round 11 — the eval-side backbone evidence, which round 10 shipped untested
+#
+# Round 10 added env_lock_for_scored_arms' base-model cross-check and _backbone_key_for_repo_id
+# and covered neither: inserting `return None` at the top of the helper made both new refusals
+# unreachable and left the entire unit tier green. These tests are behavioural, not AST, so
+# they bite on the logic rather than on its spelling.
+# ======================================================================================
+def _eval_mod():
+    return pytest.importorskip("tbox_finder.stage2.eval", reason="needs the eval module")
+
+
+RINALMO_REPO = "multimolecule/rinalmo-giga"
+RNAFM_REPO = "multimolecule/rnafm"
+
+
+def test_a_declared_backbone_contradicting_the_recorded_base_model_is_refused() -> None:
+    """The pre-A15 sidecars record no `backbone`, so before round 10 EVERY declaration was
+    accepted for them — including one whose env cannot load the weights being graded."""
+    E = _eval_mod()
+    silent = {"a": {"base_model_name_or_path": RINALMO_REPO}}
+    assert E.env_lock_for_scored_arms(silent, declared_backbone="rinalmo-giga") == (
+        "envs/ml-rna.conda-lock.yml"
+    )
+    with pytest.raises(RuntimeError, match="recorded base model resolves to"):
+        E.env_lock_for_scored_arms(silent, declared_backbone="rnafm")
+
+
+def test_a_record_whose_backbone_contradicts_its_own_base_model_is_refused() -> None:
+    """Round 11: the RECORDED branch trusted `backbone` alone, so a sidecar saying
+    `backbone: rinalmo-giga` beside `base_model: multimolecule/rnafm` named, hashed and
+    self-certified the production lock for RNA-FM weights."""
+    E = _eval_mod()
+    contradictory = {"a": {"backbone": "rinalmo-giga", "base_model_name_or_path": RNAFM_REPO}}
+    with pytest.raises(RuntimeError, match="contradicts itself"):
+        E.env_lock_for_scored_arms(contradictory)
+    agreeing = {"a": {"backbone": "rnafm", "base_model_name_or_path": RNAFM_REPO}}
+    assert E.env_lock_for_scored_arms(agreeing) == "envs/ml-rnafm.conda-lock.yml"
+
+
+def test_an_unpinned_base_model_is_no_evidence_rather_than_a_refusal() -> None:
+    """A repo id this ADR does not pin carries no information about the backbone; a check with
+    no evidence must not manufacture a verdict ([[clauses-must-guard-emptiness]])."""
+    E = _eval_mod()
+    assert E._backbone_key_for_repo_id("some/unpinned-model") is None
+    assert E._backbone_key_for_repo_id(None) is None
+    assert E._backbone_key_for_repo_id(RNAFM_REPO) == "rnafm"
+    unknown = {"a": {"backbone": "rnafm", "base_model_name_or_path": "some/unpinned-model"}}
+    assert E.env_lock_for_scored_arms(unknown) == "envs/ml-rnafm.conda-lock.yml"
+
+
+def test_the_eval_side_clause_is_satisfiable_from_a_pre_a15_sidecar() -> None:
+    """The regression round 10 fixed in gate2 and left standing here: reading `backbone` alone
+    made the clause unsatisfiable from the very sidecars `--scored-backbone` exists to regrade,
+    so a CORRECT report published `overall_pass: false` for a plumbing reason."""
+    E = _eval_mod()
+    assert E._backbone_key_from_load({"base_model_name_or_path": RINALMO_REPO}) == "rinalmo-giga"
+    assert E._backbone_key_from_load({"backbone": "rnafm"}) == "rnafm"
+    assert (
+        E._backbone_key_from_load({"backbone": "rnafm", "base_model_name_or_path": RNAFM_REPO})
+        == "rnafm"
+    )
+    # a self-contradicting record evidences nothing
+    assert (
+        E._backbone_key_from_load({"backbone": "rnafm", "base_model_name_or_path": RINALMO_REPO})
+        is None
+    )
+    assert E._backbone_key_from_load({}) is None
+    # ...and the committed pre-A15 sidecars really do resolve
+    root = Path(__file__).resolve().parents[2]
+    for rel in ("reports/p3/stage2_scores.json", "reports/p3/stage2_scores_loo.json"):
+        arms = json.loads((root / rel).read_text(encoding="utf-8"))["arms"]
+        for arm, payload in arms.items():
+            assert E._backbone_key_from_load(payload["load"]) == "rinalmo-giga", (rel, arm)
+
+
+# ======================================================================================
+# P3-17 review round 11 — the round-10 clauses, re-attacked
+# ======================================================================================
+@pytest.mark.parametrize("name", COMMITTED_GATE2_REPORTS)
+def test_the_gated_ece_is_rederived_from_acc_conf_n_not_from_debiased_gap(name: str) -> None:
+    """Round 10 summed the rows' own `debiased_gap`, which is itself derived from acc/conf/n
+    in the same row — so a TWO-number edit still fabricated a pass: zero one bin's gap and
+    re-sum `gate.ece`, and `validate_report` returned zero problems while `ece_plugin` stayed
+    8x larger, which the debiasing term can never explain."""
+    report = _committed(name)
+    tampered = _committed(name)
+    bins = tampered["gate"]["reliability"]
+    victim = max(range(len(bins)), key=lambda i: bins[i]["weight"] * bins[i]["debiased_gap"])
+    tampered["gate"]["ece"] = sum(
+        b["weight"] * b["debiased_gap"] for i, b in enumerate(bins) if i != victim
+    )
+    bins[victim]["debiased_gap"] = 0.0
+    assert tampered["gate"]["ece"] < report["gate"]["ece"], "the tamper did not lower the ECE"
+    clauses = G.derive_clauses(tampered)
+    assert clauses["in_distribution_ece_is_its_own_reliability_tables_mean"] is False
+    assert G.validate_report(tampered) != []
+    # ...and a row whose stored gap simply disagrees with its own acc/conf/n is refused
+    tampered = _committed(name)
+    tampered["gate"]["reliability"][0]["gap"] = 0.999
+    assert (
+        G.derive_clauses(tampered)["in_distribution_ece_is_its_own_reliability_tables_mean"]
+        is False
+    )
+
+
+@pytest.mark.parametrize("name", COMMITTED_GATE2_REPORTS)
+def test_the_reliability_table_shape_is_bound_to_the_pinned_bin_count(name: str) -> None:
+    """A 15-bin claim beside a 1-row table certified `ece = 0` with every clause true."""
+    tampered = _committed(name)
+    tampered["gate"]["reliability"] = [
+        {
+            "acc": 0.5,
+            "conf": 0.5,
+            "gap": 0.0,
+            "debiased_gap": 0.0,
+            "n": tampered["gate"]["n"],
+            "weight": 1.0,
+            "p_min": 0.0,
+            "p_max": 1.0,
+        }
+    ]
+    tampered["gate"]["ece"] = 0.0
+    tampered["gate"]["ece_plugin"] = 0.0
+    assert (
+        G.derive_clauses(tampered)["in_distribution_ece_is_its_own_reliability_tables_mean"]
+        is False
+    )
+
+
+@pytest.mark.parametrize("name", COMMITTED_GATE2_REPORTS)
+def test_the_macro_averages_own_interval_is_checked(name: str) -> None:
+    """Round 10's bootstrap clause walked the in-distribution and per-unit intervals and
+    skipped `ood.macro_average` — the interval on the statistic D17(c) reads."""
+    tampered = _committed(name)
+    tampered["ood"]["macro_average"]["upper"] = 0.0001
+    assert G.derive_clauses(tampered)["bootstrap_replicates_are_not_a_cost_knob"] is False
+    assert G.validate_report(tampered) != []
+
+
+@pytest.mark.parametrize("name", COMMITTED_GATE2_REPORTS)
+def test_each_units_replicate_ledger_must_close(name: str) -> None:
+    """`ood.n_boot` is the header; each unit records its own request, survivors and drops.
+    Checking only the header let one unit certify an interval on a single replicate."""
+    for mutate in (
+        lambda u: u["ci"].__setitem__("n_boot", 1),
+        lambda u: u.__setitem__("n_boot_requested", 1),
+        lambda u: u.__setitem__("n_boot_dropped", -5),
+        lambda u: u["ci"].__setitem__("n_boot", u["ci"]["n_boot"] - 1),  # ledger no longer closes
+    ):
+        tampered = _committed(name)
+        mutate(next(iter(tampered["ood"]["units"].values())))
+        assert G.derive_clauses(tampered)["bootstrap_replicates_are_not_a_cost_knob"] is False
+
+
+@pytest.mark.parametrize("name", COMMITTED_GATE2_REPORTS)
+def test_the_adr_a1_non_resamplable_unit_is_honest_not_cost_knobbed(name: str) -> None:
+    """ADR-0005 A1 sanctions `lower = upper = NaN, n_boot = 0` for a unit with < 2 blocks.
+    Round 10 read that as a cost-knobbed bootstrap, which would have made `gate2_ece`
+    overwrite a passing report with a failing one and exit 0 — the same shape as the env_lock
+    regression it had just fixed. It must be accepted; a NaN WITHOUT the A1 signature must not.
+    """
+    tampered = _committed(name)
+    unit = next(iter(tampered["ood"]["units"].values()))
+    budget = tampered["ood"]["n_boot"]
+    unit["ci"] = {
+        "ci_level": 0.95,
+        "lower": float("nan"),
+        "upper": float("nan"),
+        "point": unit["ci"]["point"],
+        "n_boot": 0,
+        "n_blocks": 1,
+    }
+    unit["n_boot_requested"] = budget
+    unit["n_boot_dropped"] = budget
+    assert G.derive_clauses(tampered)["bootstrap_replicates_are_not_a_cost_knob"] is True
+
+    # the exemption is EARNED by the recorded n_blocks/n_boot, never by the NaN alone
+    forged = _committed(name)
+    unit = next(iter(forged["ood"]["units"].values()))
+    unit["ci"] = dict(unit["ci"], lower=float("nan"), upper=float("nan"))
+    assert G.derive_clauses(forged)["bootstrap_replicates_are_not_a_cost_knob"] is False

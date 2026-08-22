@@ -47,6 +47,7 @@ from typing import Any
 
 from tbox_finder import report_schema as RSCH
 from tbox_finder.models.rna_backbone_registry import (
+    COMPARATOR_BACKBONE,
     PRODUCTION_BACKBONE,
     backbone_summary,
     resolve_backbone,
@@ -85,13 +86,26 @@ __all__ = [
 #: Bumped 3 -> 4 at P3-17 review round 5: `provenance.env_lock` stopped being the production
 #: constant and became the SUBJECT's lock, and the clause set gained
 #: `provenance_env_lock_is_the_backbones` and a machine-readable
-#: `gradient_checkpointing.comparison_skipped_code`. Job 1374's committed RNA-FM report is
-#: schema 3: its GiB stand, but it carries the stale `provenance.env_lock` this bump exists to
-#: stop, and it is NOT regenerated here (re-measuring VRAM needs an A4000 — see the dev-log
-#: disclosure) ([[new-gate-clause-invalidates-old-reports]]).
+#: `gradient_checkpointing.comparison_skipped_code`. ⚠ CORRECTED at review round 11: job
+#: 1374's committed RNA-FM report was left at schema 3 carrying the stale `provenance.env_lock`
+#: this bump exists to stop — i.e. it inherited the carve-out meant for reports written before
+#: the clause, while being the very artifact the clause was written about. Re-measuring its
+#: GiB needs an A4000, but the env-lock field and the clause block are pure CPU, so the value
+#: is corrected and the report PROMOTED to 4 rather than excused; every measured number is
+#: untouched ([[new-gate-clause-invalidates-old-reports]]).
 SCHEMA_VERSION = "4"
 STEP = "P3-06-sizing"
 DEFAULT_OUT = "reports/p3/stage2_sizing.json"
+
+#: Which backbone OWNS each committed sizing artifact. A VRAM/step-time measurement is about
+#: one network, and these two differ ~6.5x in parameters, so writing one backbone's numbers
+#: into the other's file destroys the measurement a config cites. `_run` refuses any
+#: `--backbone` / `--out` pair that would do that, comparing RESOLVED paths so an equivalent
+#: spelling of the same file cannot slip past ([[two-outputs-one-path-destroys-the-first]]).
+SIZING_ARTIFACT_OWNERS: dict[str, str] = {
+    PRODUCTION_BACKBONE: DEFAULT_OUT,
+    COMPARATOR_BACKBONE: "reports/p3/stage2_rnafm_sizing.json",
+}
 
 #: Why the checkpointing on/off comparison was skipped, as a VALUE rather than as a sentence.
 #: `checkpointing_skip_is_earned` used to accept the skip by looking for the substring "did not
@@ -738,13 +752,24 @@ def _run(argv: Sequence[str] | None = None) -> int:
     # numbers ~4x smaller, silently, after the GPU work was already spent. Refuse the
     # combination up front rather than at the write ([[two-outputs-one-path-destroys-the-first]]);
     # an explicit `--out` is always honoured, so this constrains nothing a caller meant to do.
-    if str(args.backbone) != PRODUCTION_BACKBONE and args.out == DEFAULT_OUT:
-        parser.error(
-            f"--backbone {args.backbone!r} would write the production backbone's artifact "
-            f"({DEFAULT_OUT!r}, which is {PRODUCTION_BACKBONE!r}'s and is cited by "
-            "conf/train/stage2.yaml). Pass an explicit --out for a non-production backbone, "
-            "e.g. --out reports/p3/stage2_rnafm_sizing.json."
-        )
+    # ⚠ Round 11 hardened this twice over. (a) The comparison was a raw string `==`, so
+    # `--out ./reports/p3/stage2_sizing.json` or an absolute path to the same file walked
+    # straight past it; paths are compared after `resolve()`, the fix this repo already made
+    # once in a sibling module ([[two-outputs-one-path-destroys-the-first]]). (b) It guarded
+    # only the production artifact, so `--backbone rinalmo-giga --out <the RNA-FM report>`
+    # was free to overwrite the comparator's. Every committed sizing artifact is owned by the
+    # backbone that produced it, and only that backbone may write it.
+    requested_out = Path(args.out).resolve()
+    for owner, owned in SIZING_ARTIFACT_OWNERS.items():
+        if requested_out != Path(owned).resolve():
+            continue
+        if str(args.backbone) != owner:
+            parser.error(
+                f"--backbone {args.backbone!r} would write {owned!r}, which is "
+                f"{owner!r}'s committed sizing artifact. Pass an --out of its own; the two "
+                "backbones differ ~6.5x in parameters, so one's VRAM measurement licenses "
+                "nothing about the other."
+            )
     sweep = tuple(int(b) for b in str(args.batch_sweep).split(",") if b.strip())
     report = run_sizing(
         dataset_parquet=args.dataset,

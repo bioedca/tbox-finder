@@ -1123,6 +1123,16 @@ def _ece_matches_reliability(ind: Mapping[str, Any]) -> bool:
     validated clean while the report's own reliability table said otherwise. Proved by tamper:
     ``gate.ece -> 0.04`` (5.9x the measured value) gave zero problems and no false clause
     ([[gate-clauses-need-re-derivation]]).
+
+    ⚠ ROUND 11: the first version of this clause summed the rows' own ``debiased_gap``, which
+    is itself a DERIVED field — so the gated number was re-derived from another number in the
+    same row rather than from evidence, and a **two-number edit** still fabricated a pass:
+    zeroing one bin's ``debiased_gap`` and re-summing ``gate.ece`` took a report from an honest
+    0.0068 to 0.0014 with ``validate_report`` returning zero problems, while ``ece_plugin``
+    stayed 8x larger — physically impossible, since the debiasing term can only ever subtract
+    ``sigma * sqrt(2/pi)``. ``acc``, ``conf`` and ``n`` are the primary evidence and sit in the
+    same row, so the gap is recomputed here in closed form from them
+    ([[gate-clauses-need-re-derivation]]).
     """
     bins = ind.get("reliability")
     if not isinstance(bins, list) or not bins:
@@ -1130,18 +1140,48 @@ def _ece_matches_reliability(ind: Mapping[str, Any]) -> bool:
     if not all(isinstance(b, Mapping) for b in bins):
         return False
     try:
-        debiased = sum(float(b["weight"]) * float(b["debiased_gap"]) for b in bins)
-        plugin = sum(float(b["weight"]) * abs(float(b["acc"]) - float(b["conf"])) for b in bins)
+        debiased = 0.0
+        plugin = 0.0
+        for b in bins:
+            acc, conf, m, w = float(b["acc"]), float(b["conf"]), int(b["n"]), float(b["weight"])
+            if m <= 0:
+                return False
+            gap = abs(acc - conf)
+            # `metrics.reliability_bins`' own definition, recomputed rather than read back.
+            sigma = math.sqrt(max(conf * (1.0 - conf), 0.0) / m)
+            recomputed = max(0.0, gap - sigma * math.sqrt(2.0 / math.pi))
+            # ...and the row's stored value must BE that, or the table is internally forged.
+            if not _close(b.get("debiased_gap"), recomputed):
+                return False
+            if not _close(b.get("gap"), gap):
+                return False
+            debiased += w * recomputed
+            plugin += w * gap
         n_binned = sum(int(b["n"]) for b in bins)
         weight = sum(float(b["weight"]) for b in bins)
     except (KeyError, TypeError, ValueError):
+        return False
+    # The table's SHAPE is part of the estimator D11 pins: `ece_n_bins` is asserted as a field
+    # by `ece_estimator_matches_adr_d11`, but nothing tied it to the table actually shipped, so
+    # a 15-bin claim could be published beside a 1-row table.
+    n_bins = ind.get("ece_n_bins")
+    if not isinstance(n_bins, int) or isinstance(n_bins, bool):
+        return False
+    n_rows = ind.get("n")
+    if not isinstance(n_rows, int) or isinstance(n_rows, bool):
+        return False
+    if len(bins) != min(n_rows, n_bins):
+        return False
+    concentration = ind.get("bin_concentration")
+    if isinstance(concentration, Mapping) and concentration.get("n_bins") != len(bins):
         return False
     return (
         _close(ind.get("ece"), debiased)
         and _close(ind.get("ece_plugin"), plugin)
         and _close(weight, 1.0, tol=1e-9)
-        and isinstance(ind.get("n"), int)
-        and n_binned == ind["n"]
+        and n_binned == n_rows
+        # the reported interval must be an interval ABOUT the reported point
+        and _close((ind.get("ece_ci") or {}).get("point"), ind.get("ece"))
     )
 
 
@@ -1202,11 +1242,25 @@ def _bootstrap_not_cost_knobbed(
     ([[cost-knobs-can-certify]]): at ``B = 1`` every interval collapses onto a single replicate
     and can exclude its own point estimate while every other clause stays true. Each interval
     is also required to contain its own point, which is what the collapse actually breaks.
+
+    ⚠ ROUND 11 fixed two holes in the round-10 version. (1) It iterated the per-unit intervals
+    and the in-distribution one but **skipped ``ood.macro_average``** — the interval on the
+    very statistic D17(c) reads — so setting its ``upper`` below its own point validated clean.
+    (2) It treated the ADR-0005 **A1** "fewer than 2 blocks -> not block-resamplable" state
+    (``lower = upper = NaN, n_boot = 0``) as a failure. That is a *sanctioned honest* outcome,
+    not a cost knob: an admissible unit whose rows all fall in one homology cluster produces
+    it. Reporting it as cost-knobbed would have made ``gate2_ece`` overwrite a passing report
+    with a failing one and exit 0 — the same shape as the ``env_lock`` regression round 10
+    fixed. It is now recognised and skipped, and the skip is *earned* by the recorded
+    ``n_blocks``/``n_boot`` rather than by the NaN alone.
     """
     ci = ind.get("ece_ci")
     if not isinstance(ci, Mapping):
         return False
-    intervals: list[Mapping[str, Any]] = [ci]
+    macro = ood.get("macro_average")
+    if not isinstance(macro, Mapping):
+        return False
+    intervals: list[Mapping[str, Any]] = [ci, macro]
     if not units:
         return False
     for unit in units.values():
@@ -1217,19 +1271,75 @@ def _bootstrap_not_cost_knobbed(
             continue  # an inadmissible unit legitimately has no interval
         if not isinstance(unit_ci, Mapping):
             return False
+        # ⚠ Round 11 (CodeRabbit): the top-level `ood.n_boot` says what was ASKED for; each
+        # unit records what it asked for and what survived. Checking only the top-level count
+        # let one unit's surviving replicates be set to 1 while the header still read 200 —
+        # an interval certified on evidence the report itself says it does not have. The
+        # accounting must close: requested == the pinned budget, and survived + dropped ==
+        # requested. (`block_bootstrap` drops replicates whose statistic was non-finite, so
+        # `n_boot_dropped` is a real quantity, not slack.)
+        if not _unit_replicates_account(unit, unit_ci, ood.get("n_boot")):
+            return False
         intervals.append(unit_ci)
     if not isinstance(ci.get("n_boot"), int) or ci["n_boot"] < DEFAULT_N_BOOT:
         return False
     if not isinstance(ood.get("n_boot"), int) or ood["n_boot"] < DEFAULT_OOD_N_BOOT:
         return False
     for interval in intervals:
+        if _is_not_block_resamplable(interval):
+            continue
         bounds = (interval.get("lower"), interval.get("point"), interval.get("upper"))
         if not all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in bounds):
             return False
         lo, point, hi = bounds
+        if any(not math.isfinite(float(v)) for v in bounds):
+            return False
         if not float(lo) <= float(point) <= float(hi):
             return False
     return True
+
+
+def _unit_replicates_account(
+    unit: Mapping[str, Any], unit_ci: Mapping[str, Any], budget: Any
+) -> bool:
+    """A unit's replicate ledger closes against the pinned budget.
+
+    ``n_boot_requested`` must BE the budget (a per-unit knob is still a knob), and the
+    surviving count plus the dropped count must equal it — so replicates cannot go missing
+    without being accounted for. The ADR-0005 A1 non-resamplable unit is exempt from the
+    *surviving* count only: it legitimately survives zero, and its ledger still has to close.
+    """
+    requested = unit.get("n_boot_requested")
+    survived = unit_ci.get("n_boot")
+    dropped = unit.get("n_boot_dropped")
+    ints = (requested, survived, dropped)
+    if not all(isinstance(v, int) and not isinstance(v, bool) and v >= 0 for v in ints):
+        return False
+    if requested != budget:
+        return False
+    return survived + dropped == requested
+
+
+def _is_not_block_resamplable(interval: Mapping[str, Any]) -> bool:
+    """The ADR-0005 A1 state: too few blocks to resample, so the bounds are NaN by design.
+
+    Recognised from the RECORDED reason — ``n_blocks < 2`` with ``n_boot == 0`` — and not from
+    the NaN itself, so a genuinely collapsed interval cannot claim the exemption by being
+    unparseable ([[clauses-must-guard-emptiness]]). The point estimate must still be finite:
+    A1 makes the *interval* unavailable, never the statistic.
+    """
+    n_blocks, n_boot = interval.get("n_blocks"), interval.get("n_boot")
+    if not isinstance(n_blocks, int) or isinstance(n_blocks, bool) or n_blocks >= 2:
+        return False
+    if n_boot != 0:
+        return False
+    point = interval.get("point")
+    if not isinstance(point, (int, float)) or isinstance(point, bool):
+        return False
+    if not math.isfinite(float(point)):
+        return False
+    lo, hi = interval.get("lower"), interval.get("upper")
+    return all(isinstance(v, float) and math.isnan(v) for v in (lo, hi))
 
 
 def _drift_bound_unadjudicated(ood: Mapping[str, Any]) -> bool:

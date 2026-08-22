@@ -1174,7 +1174,12 @@ def derive_clauses(report: Mapping[str, Any]) -> dict[str, bool]:
     # EVERY arm must record one, and they must agree. Discarding the arms that recorded
     # nothing would let a single arm carry the clause while its partner was scored under an
     # unknown model — the clause would pass on a subset of the evidence it claims to grade.
-    arm_backbones = {(a.get("load") or {}).get("backbone") for a in arm_blocks}
+    # ⚠ Round 11: read the backbone the record EVIDENCES, by either route. Reading `backbone`
+    # alone left this clause unsatisfiable from the pre-A15 sidecars that `--scored-backbone`
+    # exists to re-grade — so a correct report published `overall_pass: false` for a
+    # provenance-plumbing reason. That is the same regression round 10 fixed on the gate2 side
+    # and left standing here.
+    arm_backbones = {_backbone_key_from_load(a.get("load")) for a in arm_blocks}
     try:
         expected_lock = (
             T.env_lock_for(str(next(iter(arm_backbones))))
@@ -1412,6 +1417,26 @@ def env_lock_for_scored_arms(
                 f"backbone {declared_backbone!r} was declared but the scored arms record "
                 f"{recorded[0]!r}; the recorded evidence wins and the disagreement is refused"
             )
+        # ⚠ Round 11: `backbone` is a WRITTEN key and `base_model_name_or_path` is the repo id
+        # the weights were actually adapted from. Trusting the first without checking the
+        # second made the stamp and the clause that grades it circular — a sidecar recording
+        # `backbone: rinalmo-giga` beside `base_model: multimolecule/rnafm` named, hashed and
+        # self-certified the production lock for RNA-FM weights, which is the exact defect A15
+        # exists to stop ([[gate-must-bind-to-upstream-evidence]]).
+        contradicted = sorted(
+            {
+                key
+                for r in load_records.values()
+                if (key := _backbone_key_for_repo_id(r.get("base_model_name_or_path"))) is not None
+                and key != recorded[0]
+            }
+        )
+        if contradicted:
+            raise RuntimeError(
+                f"the scored arms record backbone {recorded[0]!r} but their own "
+                f"base_model_name_or_path resolves to {contradicted!r}; a load record that "
+                "contradicts itself is not evidence and is refused"
+            )
         return T.env_lock_for(recorded[0])
     if declared_backbone is None:
         raise RuntimeError(
@@ -1448,6 +1473,22 @@ def env_lock_for_scored_arms(
             "is refused"
         )
     return T.env_lock_for(declared)
+
+
+def _backbone_key_from_load(load: Mapping[str, Any] | None) -> str | None:
+    """The backbone a load record evidences: its written key, else its own base model.
+
+    The eval-side twin of :func:`tbox_finder.calib.gate2.backbone_key_from_load`, with the
+    same contract — a record whose two fields disagree evidences nothing, because a
+    contradiction is not a vote.
+    """
+    rec = load or {}
+    declared = rec.get("backbone")
+    from_repo = _backbone_key_for_repo_id(rec.get("base_model_name_or_path"))
+    if declared and from_repo and str(declared) != from_repo:
+        return None
+    key = declared or from_repo
+    return str(key) if key else None
 
 
 def _backbone_key_for_repo_id(repo_id: Any) -> str | None:

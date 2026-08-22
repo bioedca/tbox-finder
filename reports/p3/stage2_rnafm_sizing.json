@@ -46,9 +46,11 @@
     "clauses": {
       "checkpointing_effect_measured": true,
       "checkpointing_skip_is_earned": true,
+      "checkpointing_usability_agrees_with_the_port": true,
       "enough_steps_for_optimizer_state": true,
       "measured_on_cuda": true,
       "measured_the_requested_batch": true,
+      "provenance_env_lock_is_the_backbones": true,
       "real_objective": true,
       "swept": true,
       "worst_case_measured": true
@@ -329,7 +331,7 @@
     "headroom_gib": 12.2567,
     "worst_case_peak_gib": 3.345
   },
-  "schema_version": "3",
+  "schema_version": "4",
   "step": "P3-06-sizing",
   "step_function": "tbox_finder.stage2.train.forward_backward",
   "supersedes_for_stage2_sizing": "reports/p1/lora_vram_smoke.json (P1-16)",

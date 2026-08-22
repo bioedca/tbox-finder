@@ -1188,6 +1188,7 @@
    "graded_rung_is_the_gate2_split": true,
    "head_weights_verified_against_file": true,
    "in_distribution_ece_is_computable": true,
+   "provenance_env_lock_is_the_arms_backbones": true,
    "scored_every_row_of_every_scored_rung": true,
    "scored_under_the_training_attention_backend": true,
    "temperature_fitted_on_calib_only": true,
@@ -1208,7 +1209,7 @@
   "env_lock_hash": "616a12544937b122b04d83a4085b2a4ad8764279b12b6a67e4cbd068c2944bac",
   "git_sha": "59b61c90f3f48dd76d2aad1f5dc2e2097b3fd06a"
  },
- "schema_version": "1",
+ "schema_version": "2",
  "scoring": {
   "arms_scored": [
    "aux1.0_lr1e-4",

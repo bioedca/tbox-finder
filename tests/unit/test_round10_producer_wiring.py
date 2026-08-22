@@ -17,6 +17,7 @@ the named test must fail.
 from __future__ import annotations
 
 import ast
+import sys
 from pathlib import Path
 
 import pytest
@@ -77,15 +78,15 @@ def test_the_sidecars_backbone_is_the_RESOLVED_one_not_a_constant() -> None:
     """
     tree = _tree("stage2/eval.py")
     values = _dict_value(tree, "backbone")
-    names = {v.id for v in values if isinstance(v, ast.Name)}
-    assert "resolved_backbone" in names, (
-        'no dict in stage2/eval.py writes `"backbone": resolved_backbone`; the sidecar field '
-        "every re-derivation clause rests on is no longer the resolver's output"
-    )
+    assert values, "stage2/eval.py writes no `backbone` dict entry at all"
+    # ⚠ Round 11: assert EVERY writer, not that at least one is right. The first version
+    # required only that SOME dict said `resolved_backbone` and then merely rejected
+    # `ast.Constant` — but `BR.PRODUCTION_BACKBONE` is an ast.Attribute, so a SECOND write
+    # path stamping the module constant passed ([[fixed-one-of-two-identical-things]]).
     for value in values:
-        assert not isinstance(value, ast.Constant), (
-            "a `backbone` dict entry is a hardcoded literal: "
-            f"{ast.unparse(value)!r} at line {value.lineno}"
+        assert isinstance(value, ast.Name) and value.id == "resolved_backbone", (
+            f"the `backbone` dict entry at line {value.lineno} is not the resolver's "
+            f"output: {ast.unparse(value)!r}"
         )
 
 
@@ -116,13 +117,15 @@ def test_the_training_report_stamps_the_BACKBONES_lock_not_the_module_constant()
     tree = _tree("stage2/train.py")
     values = _dict_value(tree, "env_lock")
     assert values, "stage2/train.py writes no `env_lock` key at all"
-    calls = [v for v in values if isinstance(v, ast.Call)]
-    assert calls, (
-        "every `env_lock` value in stage2/train.py is a bare name or literal — the module "
-        f"constant is back: {[ast.unparse(v) for v in values]}"
-    )
-    for call in calls:
-        assert ast.unparse(call) == "env_lock_for(cfg.backbone)", ast.unparse(call)
+    # ⚠ Round 11: EVERY `env_lock` value, not just the ones that happen to be calls. The
+    # first version asserted `calls` was non-empty and then inspected only those, so a second
+    # writer using the bare `ENV_LOCK` constant survived untouched.
+    for value in values:
+        assert isinstance(value, ast.Call), (
+            f"the `env_lock` value at line {value.lineno} is not derived from the config — "
+            f"the module constant is back: {ast.unparse(value)!r}"
+        )
+        assert ast.unparse(value) == "env_lock_for(cfg.backbone)", ast.unparse(value)
     # ...and the digest must hash THAT file, not the constant.
     digests = _dict_value(tree, "env_lock_sha256")
     assert digests, "no `env_lock_sha256` is written"
@@ -235,34 +238,80 @@ def test_gate2_main_raises_on_a_sidecar_identity_mismatch() -> None:
 
 
 # --------------------------------------------------------------------------------------- #
-# The negative control: these pins must be capable of failing.
+# The negative control — it must exercise the REAL pins, not a copy of them.
+#
+# ⚠ Round 11 replaced the first version, which parsed a synthetic string and re-ran a
+# hand-copied version of each predicate. That certified a copy: deleting the assertion from
+# the pin above left the "control" green, so it read as evidence the pin bites while being
+# incapable of noticing that it had stopped ([[artifact-pinning-test-cannot-see-the-code]]).
+# This version writes the sabotaged source to a temp tree and calls the pin functions
+# themselves against it, so a pin that stops biting turns the control red.
 # --------------------------------------------------------------------------------------- #
 @pytest.mark.parametrize(
-    ("source", "expected_substring"),
+    ("rel", "old", "new", "pin"),
     [
-        ('d = {"backbone": BR.PRODUCTION_BACKBONE}', "resolved_backbone"),
-        ("backbone_loaded_from_registry = True", "no longer derived"),
+        (
+            "stage2/eval.py",
+            '"backbone": resolved_backbone,',
+            '"backbone": BR.PRODUCTION_BACKBONE,',
+            "test_the_sidecars_backbone_is_the_RESOLVED_one_not_a_constant",
+        ),
+        (
+            "stage2/train.py",
+            '"env_lock": env_lock_for(cfg.backbone),',
+            '"env_lock": ENV_LOCK,',
+            "test_the_training_report_stamps_the_BACKBONES_lock_not_the_module_constant",
+        ),
+        (
+            "train/lora_harness.py",
+            "backbone_loaded_from_registry = base_model is None",
+            "backbone_loaded_from_registry = True",
+            "test_loaded_from_registry_is_derived_from_the_injected_base_model",
+        ),
+        (
+            "calib/gate2.py",
+            "if mismatched:",
+            "if False:",
+            "test_gate2_main_raises_on_a_sidecar_identity_mismatch",
+        ),
+        (
+            "stage2/sizing.py",
+            "backbone=backbone,",
+            "backbone=PRODUCTION_BACKBONE,",
+            "test_every_measure_batch_call_site_sizes_the_requested_backbone",
+        ),
     ],
 )
-def test_the_ast_pins_fail_on_the_sabotaged_form(source: str, expected_substring: str) -> None:
-    """A pin that cannot go red is not a pin ([[raises-test-needs-a-positive-control]])."""
-    tree = ast.parse(source)
-    if "backbone_loaded_from_registry" in source:
-        assigns = [
-            n
-            for n in ast.walk(tree)
-            if isinstance(n, ast.Assign)
-            and any(
-                isinstance(t, ast.Name) and t.id == "backbone_loaded_from_registry"
-                for t in n.targets
-            )
-        ]
-        assert assigns
-        assert ast.unparse(assigns[0].value) != "base_model is None"
-    else:
-        values = _dict_value(tree, "backbone")
-        assert values
-        assert not any(isinstance(v, ast.Name) and v.id == "resolved_backbone" for v in values)
+def test_each_pin_goes_red_on_its_own_sabotage(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, rel: str, old: str, new: str, pin: str
+) -> None:
+    """Apply the sabotage to a COPY of src/, point the pins at it, and require the named one
+    to fail. A pin that cannot go red is not a pin ([[raises-test-needs-a-positive-control]]).
+    """
+    import shutil
+
+    sandbox = tmp_path / "tbox_finder"
+    shutil.copytree(SRC, sandbox)
+    target = sandbox / rel
+    source = target.read_text(encoding="utf-8")
+    assert old in source, f"the sabotage anchor is gone from {rel}: {old!r}"
+    target.write_text(source.replace(old, new), encoding="utf-8")
+    assert target.read_text(encoding="utf-8") != source, "the sabotage never applied"
+
+    monkeypatch.setattr(sys.modules[__name__], "SRC", sandbox)
+    with pytest.raises(AssertionError):
+        globals()[pin]()
+
+
+def test_every_pin_passes_on_the_real_tree() -> None:
+    """...and the same pins must PASS unmodified, or the control above proves nothing."""
+    for name, fn in sorted(globals().items()):
+        if name.startswith("test_the_") or name.startswith("test_every_measure"):
+            if name in {"test_every_pin_passes_on_the_real_tree"}:
+                continue
+            if fn.__code__.co_argcount:
+                continue
+            fn()
 
 
 # --------------------------------------------------------------------------------------- #
@@ -302,12 +351,18 @@ def test_no_validator_coerces_schema_version_to_a_string(rel: str) -> None:
 
 
 @pytest.mark.parametrize(
-    ("module", "attr"),
-    [("tbox_finder.calib.gate2", None), ("tbox_finder.stage2.eval", None)],
+    "module",
+    [
+        "tbox_finder.calib.gate2",
+        "tbox_finder.stage2.eval",
+        # ⚠ Round 11: sizing was named by the AST half above and omitted here, so the third
+        # round-8 coercion fix had no behavioural cover. Its validator is torch-free and runs
+        # in CI's stack, so there was never a reason to skip it. A dead second parametrize
+        # element (`attr`, always None, never referenced) is dropped with it.
+        "tbox_finder.stage2.sizing",
+    ],
 )
-def test_a_numeric_schema_version_is_refused_by_each_validator(
-    module: str, attr: str | None
-) -> None:
+def test_a_numeric_schema_version_is_refused_by_each_validator(module: str) -> None:
     """The behavioural half: a numeric version is refused, and gets no exemption."""
     import importlib
 
