@@ -7817,3 +7817,26 @@ environment cannot perform (no env carries `torch` and `pyarrow` together, §3.1
 **Decisions.** Still no ADR amendment: no threshold, pinned value or analysis tier moved.
 
 **Commit.** see PR (P3-17, review round 6).
+
+## Step P3-17 (review round 7) — 2026-08-22: a regression test that would have been red in CI
+
+**Inputs.** `21243f1` and one actionable finding plus two nitpicks against it.
+
+**Process.** ⚠ **Round 6's `score_loo_holdout` regression test would have FAILED in CI, not
+passed.** `score_loo_holdout` opened with `import torch`, above every path-and-census refusal it
+performs, and **the CI unit tier installs no torch** — so a test that drives the function to its
+arm-resolution refusal cannot run there at all. It passed locally only because `labvault` happens
+to carry torch. `torch` now loads at its **first use**, below the refusals; everything down to
+`discover_arms` is pure path and census work, and a run that dies there — a bad root, a holdout
+that overlaps training — should be able to say so in an environment with no torch, and be
+testable in one. Verified by running the two affected unit files under a genuinely torch-free
+interpreter (192 passed), and by putting the import back, which turns the named test RED there.
+Also: `gate2`'s `__all__` now exports the same three-name schema surface `stage2/eval.py` and
+`stage2/sizing.py` do, and the pre-A15 sidecar-shape test drops an unused fixture and reuses the
+module's `REPO_ROOT`.
+
+**Validation.** `ruff` + `black` clean; full local tier 14 failed / **6,731 passed**, unchanged
+and still **zero new** against the matched `main` baseline; the affected unit files green under a
+torch-free interpreter.
+
+**Commit.** see PR (P3-17, review round 7).

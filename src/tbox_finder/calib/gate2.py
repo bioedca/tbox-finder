@@ -100,10 +100,13 @@ __all__ = [
     "OOD_UNIT_KEY",
     "PRD",
     "RESCORE_AGREEMENT_TOL",
+    "CLAUSES_FIRST_REQUIRED_AT",
+    "KNOWN_SCHEMAS",
     "SCHEMA_VERSION",
     "STEP",
     "build_parser",
     "build_report",
+    "clauses_not_required_at",
     "derive_clauses",
     "figure_data",
     "grade_in_distribution",
@@ -1560,8 +1563,11 @@ def score_loo_holdout(
     ([[promote-dont-duplicate-is-a-correctness-rule]]).
     Only the *row set* differs, and it is the one thing this function decides.
     """
-    import torch
-
+    # `eval` imports torch lazily, so importing it costs nothing in bare CI. `torch` itself is
+    # imported at its FIRST USE, below the arm-resolution refusals: everything down to
+    # `discover_arms` is pure path and census work, and a run that dies there — a bad root, a
+    # holdout that overlaps training — should say so in an environment that has no torch, and
+    # be testable in one. The CI unit tier installs no torch.
     from tbox_finder.stage2 import eval as E
 
     rows, census = loo_holdout_rows(dataset, with_sequences=True)
@@ -1590,6 +1596,8 @@ def score_loo_holdout(
             f"arm {arm}'s run report records no attention backend, so scoring cannot reproduce "
             "the numerics it trained under"
         )
+    import torch  # lazy — first use; see the note at the top of this function
+
     target = device or ("cuda" if torch.cuda.is_available() else "cpu")
     model, record = E.load_stage2_checkpoint(
         arms[arm]["checkpoint_path"], attn_implementation=backend, device=target

@@ -1555,17 +1555,19 @@ def test_arms_that_spoke_must_not_answer_for_arms_that_did_not() -> None:
         )
 
 
-def test_the_committed_pre_a15_sidecars_really_are_the_case_this_handles(tmp_path: Any) -> None:
+def test_the_committed_pre_a15_sidecars_really_are_the_case_this_handles() -> None:
     """Not a hypothetical: read the tracked artifacts and assert the shape this guards.
 
     If a later step regenerates them with a backbone recorded, this test says so instead of
     leaving a compatibility path nothing needs.
     """
-    root = Path(__file__).resolve().parents[2]
-    pre_a15 = [root / "reports/p3/stage2_scores.json", root / "reports/p3/stage2_scores_loo.json"]
+    pre_a15 = [
+        REPO_ROOT / "reports/p3/stage2_scores.json",
+        REPO_ROOT / "reports/p3/stage2_scores_loo.json",
+    ]
     post_a15 = [
-        root / "reports/p3/stage2_scores_rnafm.json",
-        root / "reports/p3/stage2_scores_loo_rnafm.json",
+        REPO_ROOT / "reports/p3/stage2_scores_rnafm.json",
+        REPO_ROOT / "reports/p3/stage2_scores_loo_rnafm.json",
     ]
     for path in pre_a15:
         arms = json.loads(path.read_text(encoding="utf-8"))["arms"]
