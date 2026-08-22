@@ -102,11 +102,13 @@ __all__ = [
     "RESCORE_AGREEMENT_TOL",
     "CLAUSES_FIRST_REQUIRED_AT",
     "KNOWN_SCHEMAS",
+    "SIDECAR_IDENTITY_FIELDS",
     "SCHEMA_VERSION",
     "STEP",
     "build_parser",
     "build_report",
     "clauses_not_required_at",
+    "sidecar_identity_mismatches",
     "derive_clauses",
     "figure_data",
     "grade_in_distribution",
@@ -152,6 +154,39 @@ RSCH.check_schema_tables(
     current=SCHEMA_VERSION,
     module=__name__,
 )
+
+
+#: The fields that say WHICH weights a score sidecar describes. `env_lock_for_scored_arms`
+#: compares `backbone` alone, which is the coarsest of them: two sidecars could name the same
+#: backbone while one was scored from a different checkpoint, a different adapter, or a
+#: different base revision, and the grade would silently join an in-distribution ECE from one
+#: set of weights to a leave-clade-out ECE from another. Only fields BOTH sidecars record are
+#: compared — an older sidecar that predates a field is not refused for lacking it.
+SIDECAR_IDENTITY_FIELDS: tuple[str, ...] = (
+    "backbone",
+    "base_model_name_or_path",
+    "revision",
+    "checkpoint_dir",
+    "adapter_sha256",
+    "heads_sha256",
+)
+
+
+def sidecar_identity_mismatches(
+    a: Mapping[str, Any] | None, b: Mapping[str, Any] | None
+) -> list[str]:
+    """Identity fields on which two score sidecars' load records disagree.
+
+    Only fields present in BOTH are compared: absence is an age difference (the pre-A15
+    sidecars record almost none of these), while a *disagreement* is two different sets of
+    weights being graded as one.
+    """
+    left, right = a or {}, b or {}
+    return [
+        field
+        for field in SIDECAR_IDENTITY_FIELDS
+        if field in left and field in right and left[field] != right[field]
+    ]
 
 
 def env_lock_for_graded_arm(load: Mapping[str, Any] | None) -> str | None:
@@ -1046,11 +1081,10 @@ def validate_report(report: Mapping[str, Any]) -> list[str]:
     """
     problems: list[str] = []
 
-    schema = str(report.get("schema_version"))
-    if schema not in KNOWN_SCHEMAS:
-        problems.append(
-            f"schema_version: {report.get('schema_version')!r} is not one of {KNOWN_SCHEMAS!r}"
-        )
+    # The RAW value, never `str(...)` — see the note in `sizing.validate_report`.
+    schema = report.get("schema_version")
+    if not isinstance(schema, str) or schema not in KNOWN_SCHEMAS:
+        problems.append(f"schema_version: {schema!r} is not one of {KNOWN_SCHEMAS!r}")
     for key, want in (
         ("step", STEP),
         ("generated_by", GENERATED_BY),
@@ -1861,6 +1895,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     # model. Both sidecars are handed in and must agree: the in-distribution and leave-clade-out
     # passes score the same weights, so a disagreement means one of the two files is about a
     # different arm and no single lock describes the run.
+    # The in-distribution and leave-clade-out passes must have scored the SAME weights: the
+    # gate joins an ECE from one to an OOD ECE from the other and reports them as one arm.
+    mismatched = sidecar_identity_mismatches(in_dist.get("load"), loo.get("load"))
+    if mismatched:
+        raise RuntimeError(
+            f"the two score sidecars disagree on {mismatched!r} for arm {arm!r}: "
+            f"{_recorded_path(args.scores)} and {_recorded_path(args.loo_scores)} were produced "
+            "from different weights, so one grade cannot describe both"
+        )
     scored_env_lock = E.env_lock_for_scored_arms(
         {
             f"{arm}@in_distribution": in_dist.get("load") or {},

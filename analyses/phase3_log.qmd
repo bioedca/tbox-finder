@@ -7840,3 +7840,41 @@ and still **zero new** against the matched `main` baseline; the affected unit fi
 torch-free interpreter.
 
 **Commit.** see PR (P3-17, review round 7).
+
+## Step P3-17 (review round 8) — 2026-08-22: the flag the workflow never passed
+
+**Inputs.** `2b43a1b` and three findings, all outside the diff range and all real.
+
+**Process.** ⛔ **The `--scored-backbone` gap-filler round 6 added was never wired into the rule
+that needs it.** `workflow/rules/calibration.smk::gate2_ece` grades the PRODUCTION arm from
+`reports/p3/stage2_scores.json` / `…_loo.json` — the pre-A15 sidecars that record no
+`load.backbone` — so `snakemake gate2_ece` would have raised before writing the report. Round 6
+built the compatibility path and left the one caller that requires it unchanged. The rule now
+passes it, from a `_SCORED_BACKBONE` constant retyped in the `.smk` (importing `tbox_finder` at
+Snakefile-parse time would make `snakemake --lint` depend on `src` being importable) and pinned
+by a unit test against `rna_backbone_registry.PRODUCTION_BACKBONE`, plus a second assertion that
+the rule actually *passes* it — a constant nothing reads is a fabricated value.
+
+⚠ **`str(report["schema_version"])` made the JSON number `1` into schema `"1"`.** A numeric
+version therefore collected schema-1's clause exemptions — omission of a graded clause included
+— while only its *type* was flagged. All three validators and the shared helper now check the
+**raw** value, and an unrecognised one excuses nothing whatever it looks like once stringified.
+
+⚠ **And the two score sidecars were compared on `backbone` alone.** The grade joins an
+in-distribution ECE from one to a leave-clade-out ECE from the other and reports them as one
+arm, so two sidecars naming the same backbone while one was scored from a different checkpoint,
+adapter or base revision would be silently joined. `sidecar_identity_mismatches` now compares
+`backbone`, `base_model_name_or_path`, `revision`, `checkpoint_dir`, `adapter_sha256` and
+`heads_sha256` — only where **both** record the field, so a pre-A15 sidecar is not refused for
+its age — and `grade` refuses on any disagreement. A test asserts both committed sidecar pairs
+pass their own guard.
+
+**Validation.** `ruff` + `black` clean; `snakemake --lint` **clean** on the modified rule; full
+local tier 14 failed / **6,736 passed**, still **zero new** against the matched `main` baseline;
+the two affected unit files green under a torch-free interpreter. All three fixes sabotaged, all
+three RED against a named test. ⚠ One restore in this round used `git checkout --` on a tracked
+file and reverted the round's own uncommitted edit to it
+([[sabotage-restore-reverts-uncommitted-work]]); caught by re-reading the file, and the edit was
+re-applied and re-verified before commit.
+
+**Commit.** see PR (P3-17, review round 8).

@@ -29,12 +29,18 @@ def clauses_not_required_at(
 
     ``known`` is oldest-first and is *indexed*, never compared: ``"3" < "4"`` holds only while
     both are one character, which is the string-version-compare trap this repo has already been
-    bitten by once.
+    bitten by once. ``schema`` must be an actual ``str``: a JSON number ``1`` is not schema
+    ``"1"``, and coercing it would hand a report an exemption its recorded version never
+    claimed.
 
     An **unknown** schema excuses nothing — a report this validator does not recognise is
     graded against the whole current clause set, and its version is flagged separately.
     """
-    if schema not in known:
+    # `schema is not a str` is checked, not coerced. `str(1)` == `"1"`, so a JSON *number*
+    # would otherwise collect the schema-1 exemptions — omission of a clause included — while
+    # the version check flagged only the type. A value this validator cannot recognise excuses
+    # nothing, whatever it looks like once stringified.
+    if not isinstance(schema, str) or schema not in known:
         return frozenset()
     age = list(known).index(schema)
     return frozenset().union(

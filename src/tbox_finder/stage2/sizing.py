@@ -365,7 +365,7 @@ def derive_clauses(report: Mapping[str, Any]) -> dict[str, bool]:
             or ckpt.get("usable_on_this_backbone") is False
             or ckpt.get("comparison_skipped_code") == SKIP_ON_ARM_DID_NOT_FIT
             or (
-                str(report.get("schema_version")) in LEGACY_SCHEMAS_WITHOUT_SKIP_CODE
+                report.get("schema_version") in LEGACY_SCHEMAS_WITHOUT_SKIP_CODE
                 and "did not fit" in str(ckpt.get("comparison_skipped_reason") or "")
             )
         )
@@ -409,11 +409,11 @@ def derive_clauses(report: Mapping[str, Any]) -> dict[str, bool]:
 
 def validate_report(report: Mapping[str, Any]) -> list[str]:
     problems: list[str] = []
-    schema = str(report.get("schema_version"))
-    if schema not in KNOWN_SCHEMAS:
-        problems.append(
-            f"schema_version {report.get('schema_version')!r} is not one of {KNOWN_SCHEMAS!r}"
-        )
+    # The RAW value, never `str(...)`: coercion makes the JSON number `1` indistinguishable
+    # from schema `"1"` and hands it that schema's clause exemptions.
+    schema = report.get("schema_version")
+    if not isinstance(schema, str) or schema not in KNOWN_SCHEMAS:
+        problems.append(f"schema_version {schema!r} is not one of {KNOWN_SCHEMAS!r}")
     if report.get("step") != STEP:
         problems.append(f"step {report.get('step')!r} != {STEP!r}")
     gate = report.get("gate")

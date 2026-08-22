@@ -1568,3 +1568,88 @@ def test_score_loo_holdout_also_refuses_to_answer_an_empty_root_with_production(
     assert seen["checkpoint_root"] == ""
     assert seen["sweep_dir"] == ""
     assert seen["checkpoint_root"] != E.DEFAULT_CKPT_ROOT
+
+
+def test_the_workflow_rule_declares_which_model_made_the_pre_a15_sidecars() -> None:
+    """`gate2 grade` refuses to guess a backbone for a sidecar that records none, so the rule
+    that grades the PRODUCTION arm from the pre-A15 sidecars must say which model made them —
+    otherwise `snakemake gate2_ece` raises before writing the report.
+
+    The key is retyped in the `.smk` because importing `tbox_finder` at Snakefile-parse time
+    would make `snakemake --lint` depend on `src` being importable. This pins the copy.
+    """
+    smk = (
+        Path(__file__).resolve().parents[2] / "workflow" / "rules" / "calibration.smk"
+    ).read_text(encoding="utf-8")
+    assert (
+        f'_SCORED_BACKBONE = "{BR.PRODUCTION_BACKBONE}"' in smk
+    ), "the rule's retyped backbone key has drifted from rna_backbone_registry"
+    # ...and the rule must actually PASS it: a constant nothing reads is a fabricated value.
+    assert "--scored-backbone {params.scored_backbone:q}" in smk
+    assert "scored_backbone=_SCORED_BACKBONE," in smk
+
+
+# ======================================================================================
+# P3-17 review round 8 — the two sidecars must be about the SAME weights
+# ======================================================================================
+def test_two_sidecars_from_different_weights_are_refused_not_joined() -> None:
+    """The grade joins an in-distribution ECE from one sidecar to a leave-clade-out ECE from
+    the other and reports them as one arm. `env_lock_for_scored_arms` compares `backbone`
+    alone — the coarsest field — so two sidecars could name the same backbone while one was
+    scored from a different checkpoint, adapter, or base revision.
+    """
+    base = {
+        "backbone": "rnafm",
+        "base_model_name_or_path": "multimolecule/rnafm",
+        "revision": "7d6e73a",
+        "checkpoint_dir": "data/processed/checkpoints/stage2_rnafm/aux1.0_lr1e-4",
+        "adapter_sha256": "c22296b8",
+        "heads_sha256": "dc0f204a",
+    }
+    assert G.sidecar_identity_mismatches(base, dict(base)) == []
+    for field in G.SIDECAR_IDENTITY_FIELDS:
+        assert G.sidecar_identity_mismatches(base, dict(base, **{field: "other"})) == [field]
+
+
+def test_a_field_ONE_sidecar_predates_is_an_age_difference_not_a_mismatch() -> None:
+    """The pre-A15 sidecars record almost none of these. Refusing them for *lacking* a field
+    would make the compatibility path in `env_lock_for_scored_arms` unreachable."""
+    rich = {"backbone": "rnafm", "adapter_sha256": "c22296b8"}
+    assert G.sidecar_identity_mismatches(rich, {}) == []
+    assert G.sidecar_identity_mismatches({}, rich) == []
+    assert G.sidecar_identity_mismatches({}, {}) == []
+    # ...but a field BOTH record and disagree on is still a mismatch.
+    assert G.sidecar_identity_mismatches(rich, {"adapter_sha256": "deadbeef"}) == ["adapter_sha256"]
+
+
+def test_the_committed_sidecar_pairs_agree_on_every_identity_field_they_share() -> None:
+    """Not a hypothetical: the artifacts this repo ships must pass their own guard."""
+    root = Path(__file__).resolve().parents[2]
+    pairs = [
+        ("reports/p3/stage2_scores.json", "reports/p3/stage2_scores_loo.json"),
+        ("reports/p3/stage2_scores_rnafm.json", "reports/p3/stage2_scores_loo_rnafm.json"),
+    ]
+    for in_dist_path, loo_path in pairs:
+        in_dist = json.loads((root / in_dist_path).read_text(encoding="utf-8"))["arms"]
+        loo = json.loads((root / loo_path).read_text(encoding="utf-8"))["arms"]
+        shared = set(in_dist) & set(loo)
+        assert shared, (in_dist_path, loo_path)
+        for arm in sorted(shared):
+            assert (
+                G.sidecar_identity_mismatches(in_dist[arm].get("load"), loo[arm].get("load")) == []
+            ), (in_dist_path, loo_path, arm)
+
+
+def test_a_numeric_schema_version_is_not_the_string_one(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`str(report["schema_version"])` made the JSON number `1` equivalent to schema `"1"`, so
+    a numeric version collected schema-1's clause exemptions while only its *type* was flagged.
+    """
+    assert G.clauses_not_required_at("1") == G.CLAUSES_FIRST_REQUIRED_AT["2"]
+    assert G.clauses_not_required_at(1) == frozenset()  # type: ignore[arg-type]
+    report = _report()
+    report["schema_version"] = 1
+    del report["clauses"]["env_lock_is_the_graded_arms"]
+    problems = G.validate_report(report)
+    assert any("is not one of" in p for p in problems), problems
+    # ...and it does NOT get the schema-1 excuse: the missing clause is still reported.
+    assert any("key set drifted" in p for p in problems), problems

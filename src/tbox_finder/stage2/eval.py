@@ -1228,11 +1228,10 @@ def validate_report(report: Mapping[str, Any]) -> list[str]:
     malformed and invite someone to "fix" it.
     """
     problems: list[str] = []
-    schema = str(report.get("schema_version"))
-    if schema not in KNOWN_SCHEMAS:
-        problems.append(
-            f"schema_version {report.get('schema_version')!r} is not one of {KNOWN_SCHEMAS!r}"
-        )
+    # The RAW value, never `str(...)` — see the note in `sizing.validate_report`.
+    schema = report.get("schema_version")
+    if not isinstance(schema, str) or schema not in KNOWN_SCHEMAS:
+        problems.append(f"schema_version {schema!r} is not one of {KNOWN_SCHEMAS!r}")
     if report.get("step") != STEP:
         problems.append(f"step {report.get('step')!r} != {STEP!r}")
     for block in ("dataset", "arms", "ablation", "provenance", "gate"):
