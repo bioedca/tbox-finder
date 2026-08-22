@@ -19,7 +19,7 @@
 # exactly one thing: the backbone. `aux_weight=1.0, lr=1e-4` are conf/{loss,optim}/stage2.yaml's
 # shipped defaults — the `aux1.0_lr1e-4` point — and `batch_size=4, gradient_accumulation_steps=2`
 # are carried over unchanged rather than re-tuned. ⚠ THAT IS DELIBERATE EVEN THOUGH RNA-FM WOULD
-# FIT A LARGER BATCH (measured: 1.98 of 15.6 GiB at batch 4, vs RiNALMo's 8.18): batch size
+# FIT A LARGER BATCH (measured: 2.02 of 15.6 GiB at batch 4, vs RiNALMo's 8.18): batch size
 # changes the optimisation, and an arm that differed from the production one on batch AND
 # backbone could not attribute an ECE difference to either. The sizing leg below therefore
 # VERIFIES batch 4 fits; it does not go shopping for a bigger one.
@@ -93,13 +93,20 @@
 # (the sweep flag now comes from the port's recorded usability, and the config refuses the
 # combination at compose time).
 #
-# MEASURED afterwards on a cluster A4000 (rnafm, real rows, real objective, gc off):
-#     batch 8 worst_case  3.3382 GiB    batch 8 typical  2.7522 GiB / 196.5 ms
-#     batch 4 worst_case  1.9849 GiB    batch 4 typical  1.5902 GiB / 147.0 ms
+# MEASURED afterwards on a cluster A4000 (rnafm, real rows, real objective, gc off). Every
+# figure below is READ OUT of the committed `reports/p3/stage2_rnafm_sizing.json`, not retyped
+# from an earlier sweep — an earlier revision of this header quoted a superseded run
+# (3.3382 / 2.7522 / 1.9849 / 1.5902 GiB) and disagreed with the artifact beside it:
+#     batch 8 worst_case  3.3450 GiB    batch 8 typical  2.8133 GiB / 177.0 ms
+#     batch 4 worst_case  2.0206 GiB    batch 4 typical  1.6263 GiB / 122.6 ms
+# (`step_ms` is the mean of steps 1..5; step 0 carries warm-up — 2162 ms at batch 8 worst case.)
 # So the pinned batch 4 uses ~13 % of the 15.6 GiB card — RiNALMo needed 8.18 GiB for the same
 # batch. That headroom is NOT spent: the batch stays 4 for comparability (see above).
-# 9,059 rows / (8 x 4) = 283 steps/epoch/rank at ~190 ms => ~9 min for 10 epochs, plus the
-# 2,070-row val rung and the two scoring legs. `--time=04:00:00` is far above that.
+# 9,059 rows / (8 x 4) = 283 steps/epoch/rank at ~123 ms => ~6 min for 10 epochs, plus the
+# 2,070-row val rung and the two scoring legs. ⚠ That estimate is the FLOOR and the run
+# overran it: `steps.elapsed_seconds` came in at 752.1 s (aux=1.0) and 731.4 s (aux=0.0), i.e.
+# ~12.5 min per arm, because the estimate counts neither the val rung nor DDP synchronisation.
+# `--time=04:00:00` is far above both.
 # ⚠ `--time=04:00:00`, not P3-06's 02:00:00, and the difference is not padding. P3-06's two
 # hours covered TRAINING ONLY — its scoring ran as separate steps. This job also runs legs (3)
 # and (4), the in-distribution and leave-clade-out scoring passes, and those are SINGLE-PROCESS

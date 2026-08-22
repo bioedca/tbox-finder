@@ -7878,3 +7878,33 @@ file and reverted the round's own uncommitted edit to it
 re-applied and re-verified before commit.
 
 **Commit.** see PR (P3-17, review round 8).
+
+## Step P3-17 (review round 9) — 2026-08-22: a fix I reported as landed had never reached a commit
+
+**Inputs.** `d49c1dc`. CodeRabbit's round on it returned **"Review finished"** with no findings —
+the first clean round of the five. CI green: lint, pytest and snakemake all pass.
+
+**⛔ AND THE ONE STILL-OPEN REVIEW THREAD WAS RIGHT.** `reviewThreads` showed exactly one entry
+`isResolved: false, isOutdated: false` — round 5's *"Align the quoted sizing figures"* against
+`slurm/p3/rnafm_stage2_finetune.sbatch:100`. I had reported that finding as fixed. Reading the
+**pushed bytes** shows the header still quoting the superseded run (3.3382 / 2.7522 / 1.9849 /
+1.5902 GiB, ~190 ms): the edit was written, `bash -n`-checked, and then lost before it reached a
+commit — every `/tmp` snapshot taken during that round's sabotage cycle already lacks it, so it
+was gone before the first snapshot. The commit that claimed it still says "9 files changed", and
+the sbatch *was* in it — carrying only the banner fix
+([[verify-the-line-you-ship]], [[review-threads-not-round-bodies]]).
+
+**Process.** An audit re-derived **all 25 fix signatures of rounds 5–8 against the pushed head**,
+not against the working tree. Exactly one was genuinely absent (this); one more read as absent
+and was a false negative from grepping a string that black had split across two source lines,
+which is its own lesson about auditing by substring. The figures are re-applied — and are now
+**pinned by a test** that parses the header's own MEASURED block and compares every figure
+against `reports/p3/stage2_rnafm_sizing.json`, VRAM to 5e-5 GiB and step-times against the
+steady-state mean of steps 1..5. Reverting any single figure to the superseded run turns that
+named test RED. A number checked against its artifact cannot go stale quietly — and cannot
+vanish quietly either.
+
+**Validation.** `ruff` + `black` clean; `bash -n` clean; full local tier 14 failed / **6,737
+passed**, still **zero new** against the matched `main` baseline at `2e929a3`.
+
+**Commit.** see PR (P3-17, review round 9).

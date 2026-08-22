@@ -2647,3 +2647,58 @@ def test_the_grid_the_loop_iterates_actually_contains_the_pair_the_scorers_need(
     assert 'KEY="aux${AUX_WEIGHT}_lr${LR}"' in code
     assert 'CKPT_DIR="$CKPT_ROOT/${KEY}"' in code
     assert 'REPORT="$OUT_DIR/${KEY}.json"' in code
+
+
+def test_the_launchers_MEASURED_figures_are_the_committed_sizing_reports() -> None:
+    """The header presents four VRAM figures and two step-times as "MEASURED ... on a cluster
+    A4000". Prose in a provenance record is a claim, and this file argues that elsewhere.
+
+    This test exists because the fix for that claim was written, verified, and then **lost
+    before it reached a commit** — the reviewer's thread stayed open against a defect I had
+    reported as fixed, and only re-reading the pushed bytes found it
+    ([[verify-the-line-you-ship]]). A number checked against its artifact cannot go stale
+    quietly, and cannot silently vanish either.
+    """
+    report = json.loads(
+        (_REPO / "reports" / "p3" / "stage2_rnafm_sizing.json").read_text(encoding="utf-8")
+    )
+    measured = {
+        (m["batch_size"], m["regime"]): m
+        for m in report["measurements"]
+        if not m.get("oom") and m.get("peak_vram_gib")
+    }
+    assert measured, "the committed sizing report carries no usable measurement"
+
+    header = _SBATCH_RNAFM.read_text()
+    block = re.search(
+        r"^# MEASURED afterwards.*?(?=^# So the pinned)", header, re.MULTILINE | re.DOTALL
+    )
+    assert block is not None, "the launcher's MEASURED block has moved or been removed"
+    quoted = {
+        (int(batch), regime): (float(gib), float(ms) if ms else None)
+        for batch, regime, gib, ms in re.findall(
+            r"batch (\d+) (worst_case|typical)\s+([\d.]+) GiB(?:\s*/\s*([\d.]+) ms)?",
+            block.group(0),
+        )
+    }
+    assert len(quoted) == 4, f"expected four quoted figures, parsed {sorted(quoted)}"
+
+    for key, (gib, ms) in sorted(quoted.items()):
+        assert key in measured, f"the header quotes {key} and the report does not measure it"
+        assert gib == pytest.approx(measured[key]["peak_vram_gib"], abs=5e-5), (
+            f"header says {key} peaked at {gib} GiB; the committed report says "
+            f"{measured[key]['peak_vram_gib']}"
+        )
+        if ms is not None:
+            steps = measured[key]["step_ms"][1:]  # step 0 is warm-up, as the header says
+            assert ms == pytest.approx(sum(steps) / len(steps), abs=0.05), (
+                f"header says {key} ran at {ms} ms; the report's steady-state mean is "
+                f"{sum(steps) / len(steps):.1f}"
+            )
+
+    # ...and the headroom sentence quotes the same batch-4 worst case to 2 decimals.
+    headroom = re.search(r"measured: ([\d.]+) of 15\.6 GiB at batch 4", header)
+    assert headroom is not None, "the batch-4 headroom claim has moved"
+    assert float(headroom.group(1)) == pytest.approx(
+        measured[(4, "worst_case")]["peak_vram_gib"], abs=5e-3
+    )
