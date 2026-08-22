@@ -732,6 +732,19 @@ def _run(argv: Sequence[str] | None = None) -> int:
         ),
     )
     args = parser.parse_args(argv)
+    # ⚠ Round 10: `--out` defaults to the PRODUCTION sizing artifact, and `--backbone` does not
+    # move it. `sizing --backbone rnafm` therefore overwrote `reports/p3/stage2_sizing.json` —
+    # the RiNALMo measurement `conf/train/stage2.yaml` cites for `batch_size: 4` — with RNA-FM
+    # numbers ~4x smaller, silently, after the GPU work was already spent. Refuse the
+    # combination up front rather than at the write ([[two-outputs-one-path-destroys-the-first]]);
+    # an explicit `--out` is always honoured, so this constrains nothing a caller meant to do.
+    if str(args.backbone) != PRODUCTION_BACKBONE and args.out == DEFAULT_OUT:
+        parser.error(
+            f"--backbone {args.backbone!r} would write the production backbone's artifact "
+            f"({DEFAULT_OUT!r}, which is {PRODUCTION_BACKBONE!r}'s and is cited by "
+            "conf/train/stage2.yaml). Pass an explicit --out for a non-production backbone, "
+            "e.g. --out reports/p3/stage2_rnafm_sizing.json."
+        )
     sweep = tuple(int(b) for b in str(args.batch_sweep).split(",") if b.strip())
     report = run_sizing(
         dataset_parquet=args.dataset,

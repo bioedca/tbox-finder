@@ -1421,7 +1421,47 @@ def env_lock_for_scored_arms(
             "sidecar. It is NOT defaulted to production — that guess is exactly the defect "
             "this function exists to stop."
         )
-    return T.env_lock_for(str(declared_backbone))
+    # ⚠ Round 10: the "a declaration that contradicts a record is refused" contract above was
+    # VACUOUS for exactly the sidecars this parameter exists for. It compared `declared` only
+    # against `backbone`, the one field the pre-A15 sidecars do not carry — so on those files
+    # every declaration was accepted, including one naming a backbone whose env cannot load the
+    # weights being graded. Those sidecars DO carry `base_model_name_or_path`, which the
+    # ADR-0002 allow-list maps to exactly one key, so the contradiction is checkable after all.
+    # Being *asked* for the wrong base is the same defect as inheriting it.
+    declared = str(declared_backbone)
+    from_repo = sorted(
+        {
+            key
+            for r in load_records.values()
+            if (key := _backbone_key_for_repo_id(r.get("base_model_name_or_path"))) is not None
+        }
+    )
+    if len(from_repo) > 1:
+        raise RuntimeError(
+            f"the scored arms' base models resolve to backbones {from_repo!r}; a single report "
+            "cannot name the environment for more than one of them"
+        )
+    if from_repo and declared != from_repo[0]:
+        raise RuntimeError(
+            f"backbone {declared!r} was declared but the scored arms' recorded base model "
+            f"resolves to {from_repo[0]!r}; the recorded evidence wins and the disagreement "
+            "is refused"
+        )
+    return T.env_lock_for(declared)
+
+
+def _backbone_key_for_repo_id(repo_id: Any) -> str | None:
+    """The allow-list key for a recorded ``base_model_name_or_path``, or ``None`` if unresolvable.
+
+    Unresolvable is not a refusal: a sidecar naming a repo id this ADR does not pin carries no
+    evidence about the backbone, and a check with no evidence must not manufacture a verdict.
+    """
+    if not repo_id:
+        return None
+    try:
+        return BR.backbone_for_repo_id(str(repo_id)).key
+    except (KeyError, ValueError, AttributeError):
+        return None
 
 
 def _gate_note(report: Mapping[str, Any]) -> str:

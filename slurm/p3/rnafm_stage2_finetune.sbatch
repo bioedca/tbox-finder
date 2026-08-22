@@ -64,9 +64,15 @@
 # rather than bumping `ml-rna` and firing CLAUDE.md §8.5 across every published RiNALMo number.
 # So this file activates **tbox-ml-rnafm**, and asserts the version before spending GPU time —
 # activating the wrong env is a one-word mistake with a very confusing failure mode.
-# ⚠ The disclosure that buys: the two arms are compared across a one-minor-version library
-# difference. P3-18's report must say so (A15); tokenisation is provably identical (below), so
-# the difference is not in what the models read.
+# ⚠ The disclosures that buys — TWO of them, and A15 was amended at review round 10 to name
+# both (user sign-off 2026-08-22). (i) The two arms are compared across a one-minor-version
+# library difference; tokenisation is provably identical (below), so that difference is not in
+# what the models read. (ii) The two arms' WEIGHTS were produced under different realized LR
+# schedules: the graded RiNALMo arm sized its cosine in micro-batches and took 1,415 of 2,830
+# scheduled steps, ending at LR multiplier 0.5501 with warmup at 12.0% of steps taken, while
+# this job runs the corrected fixed schedule to completion (1,420/1,420, ~0, 6.0%). Annealing
+# and warmup are not calibration-neutral, so the D17(c) ECE margin carries BOTH confounds.
+# P3-18's report must say so; neither is closed by this job.
 #
 # ── WHAT MAKES THE COMPARISON CLEAN, MEASURED RATHER THAN ASSUMED ───────────
 # RNA-FM's vocab.txt at the pinned revision is BYTE-IDENTICAL to rinalmo-giga's and to
@@ -186,6 +192,15 @@ EVAL_REPORT="reports/p3/stage2_rnafm_eval.json"
 CKPT_ROOT="data/processed/checkpoints/stage2_rnafm"
 DONE="$OUT_DIR/rnafm_stage2.DONE"
 mkdir -p "$OUT_DIR"
+
+# ⚠ CLEAR THE MARKER BEFORE DOING ANY WORK (review round 10). §9.3 step 8 verifies a job
+# artifact-based — `squeue` empty AND the DONE marker present — because `sacct` is off here.
+# The marker was only ever created (line ~567, success path) and never removed, so a SECOND
+# run that failed at any point left the FIRST run's marker in place and the verification
+# passed on it: an empty `squeue` plus a stale marker is indistinguishable from success, and
+# the operator would then `rsync` artifacts the failed run never wrote. Removing it here makes
+# the marker mean "THIS invocation reached the end", which is the only thing §9.3 can check.
+rm -f "$DONE"
 
 # Guard every interpolation used as a deletion target explicitly rather than with `${VAR:?}`:
 # tests/unit/test_sbatch_rm_targets.py cannot resolve the `:?` form, scores the target as a bare

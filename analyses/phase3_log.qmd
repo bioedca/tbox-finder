@@ -7908,3 +7908,88 @@ vanish quietly either.
 passed**, still **zero new** against the matched `main` baseline at `2e929a3`.
 
 **Commit.** see PR (P3-17, review round 9).
+
+## Step P3-17 (review round 10) — 2026-08-22: the disclosure A15 owed, and the statistic P3-18 reads was self-certified
+
+**Inputs.** Branch head `2784417` with every formal gate green: CodeRabbit had reviewed that
+exact commit and returned no findings (a re-trigger answers *"Already reviewed the last
+commit"*), **zero** unresolved-and-not-outdated `reviewThreads` of 16, CI 4/4, and zero new
+local failures against a matched `main` baseline worktree at `2e929a3`. An independent
+nine-lens / 39-agent adversarial pass (0 agents errored) was run anyway, on the principle that
+a clean review round is a floor and not a ceiling. It filed 30, **confirmed 26 (12 major)**,
+refuted 4. Four were re-executed by hand before anything was changed.
+
+**Process.** The two that mattered most were about numbers rather than code.
+
+*The statistic ADR-0005 D17(c) reads at P3-18 was self-certified.* `ood.macro_average.point`
+is bit-exactly the mean of the admissible units carried in the same report — re-derived
+`0.1882143888847712` against a recorded `0.1882143888847712`, 30/30 admissible — and **no
+clause did that arithmetic**. Executed against `reports/p3/gate2_rnafm_ece.json`, setting the
+macro to `0.001` gave `validate_report` **zero problems**; so did `n_units_admissible → 3`;
+so did `gate.ece → 0.04`, which is 5.9× the measured value and still under the 0.05 bar. The
+measured swap margin is `0.211317 − 0.188214 = 0.023103` against D17's pinned `0.02`, so
+`macro → 0.1920` *reverses the backbone-swap verdict* — and that too validated clean.
+`derive_clauses` gains four re-derivations (schema **2 → 3**): the gated ECE against its own
+reliability table (`sum(weight × debiased_gap)`, plus `ece_plugin` and the bin census against
+`gate.n`), the leave-clade-out macro against its own admissible units, each unit's
+`admissible` flag against A2's pinned min-N, and every interval against its replicate count
+and against containing its own point. All ten tampers are now caught.
+
+*Three committed RNA-FM artifacts named and hashed the wrong environment, and two asserted
+something their own run measured false.* `gate2_rnafm_ece.json`, `stage2_rnafm_eval.json` and
+`stage2_rnafm_sizing.json` all recorded `envs/ml-rna.conda-lock.yml` — the **production
+RiNALMo** lock — for a run made under `ml-rnafm`, digesting that wrong file into
+`env_lock_hash`. That is the defect A15 exists to prevent, in the artifacts A15 provisions,
+and the schema-2 clause written at round 5 to catch it was **excused for exactly those files**
+by the carve-out for older schemas. Separately, `stage2_rnafm_eval.json`'s `gate.note` said
+*"on this run it means the no-aux CONTROL is uncalibratable (its calib carve is perfectly
+separated)"* while the same file recorded `aux0.0_lr1e-4` as `is_perfectly_separated: false`,
+`n_misclassified_at_zero: 6`, `converged: true`, `T = 1.3900776702410877`, with
+`overall_pass: true` — a sentence explaining a failure that never happened. Both producers had
+been fixed at round 5; only the artifacts were stale. All four artifacts are corrected and the
+two GATE-2 reports are **promoted to schema 3 rather than excused**, which is the general
+lesson: a carve-out that legitimately exempts *old* reports from a *new* clause must not be
+inherited by the artifacts the same branch adds.
+
+The remaining fixes: `env_lock_for_graded_arm` now re-derives the backbone from
+`base_model_name_or_path` when no `backbone` key was written, so the shipped `gate2_ece` rule
+can regenerate its own artifact again (it had begun overwriting a passing GATE-2 report with
+an `overall_pass: false` one, for a provenance-plumbing reason, exiting 0); `--scored-backbone`
+is checked against that same recorded base model, closing a contract that was vacuous for
+precisely the pre-A15 sidecars it exists for; the sbatch clears its `.DONE` marker at startup,
+so a failed re-run can no longer pass §9.3 artifact-based verification on the previous run's
+marker; `sizing --backbone <non-production>` refuses the default `--out` rather than
+overwriting the production sizing artifact `conf/train/stage2.yaml` cites; `_SCORED_BACKBONE`
+is pinned against what the sidecars themselves record instead of the mutable
+`PRODUCTION_BACKBONE`; and the tokenizer-comparability guard pins `VOCAB_DIGEST` instead of
+counting to 28.
+
+**Outputs.** `src/tbox_finder/calib/gate2.py` (+`backbone_key_from_load`, four clauses,
+schema 3), `src/tbox_finder/stage2/{eval,sizing,train}.py`,
+`src/tbox_finder/train/lora_harness.py`, `slurm/p3/rnafm_stage2_finetune.sbatch`,
+`workflow/rules/calibration.smk`, `docs/decisions/ADR-0002-*.md` (A15 disclosure amendment +
+sign-off), `tests/unit/test_round10_producer_wiring.py` (new), `tests/unit/test_gate2.py`,
+`tests/unit/test_rna_backbone_registry.py`. Artifacts touched in exactly the fields listed
+above and **no other**: verified leaf-by-leaf, no measured value moved.
+
+**Validation.** Ten tamper probes on the committed GATE-2 report, all previously clean, all
+now caught. Eight producer sabotages (`"backbone": resolved_backbone` → a constant;
+`env_lock_for(cfg.backbone)` → `ENV_LOCK`; `backbone=backbone` → `PRODUCTION_BACKBONE` and
+deleted at the second call site; `base_model is None` → `True`; `if mismatched:` → `if False:`;
+`schema = report.get(...)` → `str(...)` at both previously-untested sites) each RED against
+their **named** test, each restore byte-identical by sha256. `ruff` + `black` CI-exact clean.
+
+**Decisions.** ADR-0002 **A15's disclosure paragraph amended under §7 sign-off** (bioedca,
+2026-08-22, *"amend it to name both confounds"*) to name the second confound beside the
+library minor version: the two compared arms' **weights were produced under different realized
+LR schedules**. Measured from each arm's own sweep report — RiNALMo `aux1.0_lr1e-4` took
+**1,415 of 2,830** scheduled optimizer steps (the P3-06-era micro-batch cosine defect),
+finishing at LR multiplier **0.5501** with warmup at **12.0 %** of steps taken; RNA-FM took
+**1,420 of 1,420**, annealing to **~0** with warmup at **6.0 %**, on otherwise identical
+requested configs. Annealing and warmup are not calibration-neutral, so the D17(c) margin
+carries both confounds. ⚠ Direction matters: the confound leaves the **shipped** arm
+under-annealed, so the comparator's apparent ECE advantage is *not* established as attributable
+to the backbone — a reason to withhold a swap, not to fire one. No retrain is implied; that is
+a separate, unbooked experiment. No pin, threshold, lockfile or measured value changed.
+
+**Commit.** see PR (P3-17, review round 10).

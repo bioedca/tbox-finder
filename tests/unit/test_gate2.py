@@ -178,8 +178,13 @@ def _blocks_for(scores: dict) -> dict[str, str]:
 def _report(backbone: str | None = None) -> dict:
     """A complete, honest, passing GATE-2 report built through the shipped assembler."""
     scores = _in_distribution_scores()
+    # ⚠ The PINNED default, not a cheap 40. This fixture's docstring calls it "a complete,
+    # honest, passing report", and round 10 added a clause saying a cost-knobbed bootstrap
+    # cannot certify — so a fixture that quietly under-resamples is not the thing it claims to
+    # be, and would have forced the clause to be loosened to accommodate it. Measured at 0.37 s
+    # on this fixture's row count, so completeness costs nothing here.
     gate = G.grade_in_distribution(
-        scores=scores, blocks_by_row=_blocks_for(scores), n_boot=40, seed=7
+        scores=scores, blocks_by_row=_blocks_for(scores), n_boot=G.DEFAULT_N_BOOT, seed=7
     )
     shift = G.prior_shift_band_sweep(
         scores=scores,
@@ -249,8 +254,9 @@ def _ood_block(*, n_units: int) -> dict:
         for i in range(n_units)
     ]
     scores, rows_by_id = _phylum_scores(plan)
+    # Pinned default for the same reason as `_report`'s in-distribution leg (0.22 s here).
     return G.grade_ood_units(
-        scores=scores, rows_by_id=rows_by_id, temperature=1.0, n_boot=8, seed=3
+        scores=scores, rows_by_id=rows_by_id, temperature=1.0, n_boot=G.DEFAULT_OOD_N_BOOT, seed=3
     )
 
 
@@ -293,10 +299,14 @@ def _report_kwargs() -> dict:
 def test_clause_key_set_is_stable_and_named() -> None:
     """The clause names are the report's public contract; drift must be a visible diff."""
     assert set(G.derive_clauses({})) == {
+        "bootstrap_replicates_are_not_a_cost_knob",
         "d13_drift_bound_left_unadjudicated",
         "deployment_prior_is_a_band_not_a_pin",
         "ece_estimator_matches_adr_d11",
         "env_lock_is_the_graded_arms",
+        "in_distribution_ece_is_its_own_reliability_tables_mean",
+        "ood_admissibility_is_the_pinned_min_n_rule",
+        "ood_macro_average_is_the_admissible_units_mean",
         "gate_threshold_is_the_pinned_default",
         "graded_every_loo_holdout_unit",
         "graded_object_is_pre_prior_shift",
@@ -1508,18 +1518,28 @@ def test_main_stamps_the_derived_lock_into_BOTH_the_report_and_the_provenance() 
 
 
 def test_a_schema_1_report_is_graded_against_the_schema_1_clause_set() -> None:
-    """`reports/gate2_p3_ece.json` and `reports/p3/gate2_rnafm_ece.json` are schema 1 and are
-    not regenerated — no local environment carries `torch` and `pyarrow` together
-    ([[new-gate-clause-invalidates-old-reports]])."""
-    assert G.clauses_not_required_at("1") == G.CLAUSES_FIRST_REQUIRED_AT["2"]
+    """The carve-out still exists for genuinely older reports.
+
+    ⚠ Round 10: it is no longer claimed by either committed GATE-2 report. Both were promoted
+    to the current schema in the same commit that added the schema-3 clauses, because every
+    one of those clauses is a pure function of fields they already carried — and inheriting
+    the carve-out is exactly how `gate2_rnafm_ece.json` kept naming the production conda lock
+    while the schema-2 clause written to catch that was excused for it
+    ([[new-gate-clause-invalidates-old-reports]]). The exemption machinery is still tested,
+    on a synthetic legacy report rather than on a shipped artifact.
+    """
+    excused_after_1 = G.CLAUSES_FIRST_REQUIRED_AT["2"] | G.CLAUSES_FIRST_REQUIRED_AT["3"]
+    assert G.clauses_not_required_at("1") == excused_after_1
+    assert G.clauses_not_required_at("2") == G.CLAUSES_FIRST_REQUIRED_AT["3"]
     assert G.clauses_not_required_at(G.SCHEMA_VERSION) == frozenset()
     assert G.clauses_not_required_at("99") == frozenset()
     legacy = _report()
     legacy["schema_version"] = "1"
-    del legacy["clauses"]["env_lock_is_the_graded_arms"]
+    for name in excused_after_1:
+        del legacy["clauses"][name]
     legacy["overall_pass"] = all(legacy["clauses"].values())
     assert [p for p in G.validate_report(legacy) if "clauses" in p] == []
-    # ...and claiming schema 1 while RECORDING the schema-2 clause is still refused.
+    # ...and claiming schema 1 while RECORDING a later clause is still refused.
     forged = _report()
     forged["schema_version"] = "1"
     assert any("key set drifted" in p for p in G.validate_report(forged))
@@ -1577,13 +1597,31 @@ def test_the_workflow_rule_declares_which_model_made_the_pre_a15_sidecars() -> N
 
     The key is retyped in the `.smk` because importing `tbox_finder` at Snakefile-parse time
     would make `snakemake --lint` depend on `src` being importable. This pins the copy.
+
+    ⚠ Round 10: it is pinned against the SIDECARS' OWN recorded base model, not against
+    `PRODUCTION_BACKBONE`. `_SCORED_BACKBONE` states a historical fact — which model wrote
+    those two files — and that fact does not move when the production backbone does. Binding
+    it to the mutable constant meant that firing the ADR-0002 D6 swap at P3-18 would turn this
+    test red and then drive the `.smk` to declare `rnafm` for RiNALMo-scored sidecars.
     """
     smk = (
         Path(__file__).resolve().parents[2] / "workflow" / "rules" / "calibration.smk"
     ).read_text(encoding="utf-8")
+    scores = json.loads(
+        (Path(__file__).resolve().parents[2] / "reports" / "p3" / "stage2_scores.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    repo_ids = {
+        arm["load"]["base_model_name_or_path"]
+        for arm in scores["arms"].values()
+        if arm.get("load", {}).get("base_model_name_or_path")
+    }
+    assert len(repo_ids) == 1, f"the sidecar's arms name several base models: {sorted(repo_ids)!r}"
+    evidenced = BR.backbone_for_repo_id(next(iter(repo_ids))).key
     assert (
-        f'_SCORED_BACKBONE = "{BR.PRODUCTION_BACKBONE}"' in smk
-    ), "the rule's retyped backbone key has drifted from rna_backbone_registry"
+        f'_SCORED_BACKBONE = "{evidenced}"' in smk
+    ), "the rule's retyped backbone key disagrees with what the sidecars themselves record"
     # ...and the rule must actually PASS it: a constant nothing reads is a fabricated value.
     assert "--scored-backbone {params.scored_backbone:q}" in smk
     assert "scored_backbone=_SCORED_BACKBONE," in smk
@@ -1644,7 +1682,9 @@ def test_a_numeric_schema_version_is_not_the_string_one(monkeypatch: pytest.Monk
     """`str(report["schema_version"])` made the JSON number `1` equivalent to schema `"1"`, so
     a numeric version collected schema-1's clause exemptions while only its *type* was flagged.
     """
-    assert G.clauses_not_required_at("1") == G.CLAUSES_FIRST_REQUIRED_AT["2"]
+    assert G.clauses_not_required_at("1") == (
+        G.CLAUSES_FIRST_REQUIRED_AT["2"] | G.CLAUSES_FIRST_REQUIRED_AT["3"]
+    ), "a schema-1 report is excused every clause introduced at 2 AND at 3"
     assert G.clauses_not_required_at(1) == frozenset()  # type: ignore[arg-type]
     report = _report()
     report["schema_version"] = 1
@@ -1653,3 +1693,185 @@ def test_a_numeric_schema_version_is_not_the_string_one(monkeypatch: pytest.Monk
     assert any("is not one of" in p for p in problems), problems
     # ...and it does NOT get the schema-1 excuse: the missing clause is still reported.
     assert any("key set drifted" in p for p in problems), problems
+
+
+# ======================================================================================
+# P3-17 review round 10 — the published statistics must be RE-DERIVED, not read back
+#
+# Every test below is written as a *mutation* of the shipped committed artifact and asserts
+# the named clause goes FALSE. That direction matters: a clause that is TRUE on the honest
+# report proves nothing on its own — `in_distribution_ece_within_gate` was TRUE on every
+# honest report for months while accepting any value in [0, 0.05]
+# ([[gate-clauses-need-re-derivation]], [[raises-test-needs-a-positive-control]]).
+# ======================================================================================
+def _committed(name: str) -> dict:
+    path = Path(__file__).resolve().parents[2] / "reports" / name
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+COMMITTED_GATE2_REPORTS = ("gate2_p3_ece.json", "p3/gate2_rnafm_ece.json")
+
+
+@pytest.mark.parametrize("name", COMMITTED_GATE2_REPORTS)
+def test_the_committed_reports_pass_every_rederivation_clause(name: str) -> None:
+    """The positive control. If these were false, every mutation test below would be vacuous."""
+    report = _committed(name)
+    clauses = G.derive_clauses(report)
+    for clause in sorted(G.CLAUSES_FIRST_REQUIRED_AT["3"]):
+        assert clauses[clause] is True, f"{name}: {clause} is false on the shipped artifact"
+    assert G.validate_report(report) == [], name
+    assert report["schema_version"] == G.SCHEMA_VERSION, (
+        f"{name} is not at the current schema, so it is EXCUSED the clauses above by "
+        "clauses_not_required_at — which is the hole round 10 closed"
+    )
+
+
+@pytest.mark.parametrize("name", COMMITTED_GATE2_REPORTS)
+def test_the_gated_ece_is_rederived_from_its_own_reliability_table(name: str) -> None:
+    """`gate.ece -> 0.04` was 5.9x the measured value, under the 0.05 bar, and validated clean."""
+    report = _committed(name)
+    bins = report["gate"]["reliability"]
+    assert math.isclose(
+        sum(b["weight"] * b["debiased_gap"] for b in bins),
+        report["gate"]["ece"],
+        rel_tol=1e-12,
+        abs_tol=1e-12,
+    ), "the shipped ECE is not its own bins' weighted mean, so the clause cannot be checking it"
+    for field, value in (("ece", 0.04), ("ece_plugin", 0.5), ("n", 7)):
+        tampered = _committed(name)
+        tampered["gate"][field] = value
+        assert (
+            G.derive_clauses(tampered)["in_distribution_ece_is_its_own_reliability_tables_mean"]
+            is False
+        ), field
+        assert G.validate_report(tampered) != [], field
+
+
+@pytest.mark.parametrize("name", COMMITTED_GATE2_REPORTS)
+def test_the_loo_macro_ece_is_rederived_from_its_own_admissible_units(name: str) -> None:
+    """**The statistic ADR-0005 D17(c) reads at P3-18.**
+
+    The measured margin is +0.023103 against a pinned 0.02, so 0.1920 is the value that
+    silently reverses the backbone-swap verdict. It is included here by construction.
+    """
+    report = _committed(name)
+    for value in (0.001, 0.1920, report["ood"]["macro_average"]["point"] + 1e-6):
+        tampered = _committed(name)
+        tampered["ood"]["macro_average"]["point"] = value
+        assert (
+            G.derive_clauses(tampered)["ood_macro_average_is_the_admissible_units_mean"] is False
+        ), value
+        assert G.validate_report(tampered) != [], value
+    # zeroing the per-unit evidence must not be absorbed by the recorded mean either
+    tampered = _committed(name)
+    for unit in tampered["ood"]["units"].values():
+        unit["ood_ece"] = 0.0
+    assert G.derive_clauses(tampered)["ood_macro_average_is_the_admissible_units_mean"] is False
+
+
+@pytest.mark.parametrize("name", COMMITTED_GATE2_REPORTS)
+def test_admissibility_is_the_pinned_min_n_rule_not_a_field(name: str) -> None:
+    report = _committed(name)
+    tampered = _committed(name)
+    tampered["ood"]["n_units_admissible"] = 3
+    assert G.derive_clauses(tampered)["ood_admissibility_is_the_pinned_min_n_rule"] is False
+    # A flag flipped against its own count is caught. ⚠ Only the ->False direction can be
+    # tested on these artifacts: both are 30/30 admissible, so setting `admissible = True`
+    # everywhere is a no-op and asserting it goes red would be asserting a tautology
+    # ([[symmetric-count-fixture-blind-to-inversion]]). The ->True direction is exercised
+    # below on a unit whose own count makes it inadmissible.
+    tampered = _committed(name)
+    assert all(
+        u["admissible"] for u in tampered["ood"]["units"].values()
+    ), f"{name} now has an inadmissible unit — the no-op note above is stale, widen this test"
+    for unit in tampered["ood"]["units"].values():
+        unit["admissible"] = False
+    assert G.derive_clauses(tampered)["ood_admissibility_is_the_pinned_min_n_rule"] is False
+    # ...and a unit promoted ABOVE the floor it does not clear is caught too
+    tampered = _committed(name)
+    name_, unit = next(iter(tampered["ood"]["units"].items()))
+    unit["n_positives"] = COV.OOD_ECE_MIN_N - 1
+    assert unit["admissible"] is True, name_
+    assert G.derive_clauses(tampered)["ood_admissibility_is_the_pinned_min_n_rule"] is False
+    # ...and loosening the floor itself is refused
+    tampered = _committed(name)
+    tampered["ood"]["min_n"] = 1
+    assert G.derive_clauses(tampered)["ood_admissibility_is_the_pinned_min_n_rule"] is False
+    assert report["ood"]["min_n"] == COV.OOD_ECE_MIN_N
+
+
+@pytest.mark.parametrize("name", COMMITTED_GATE2_REPORTS)
+def test_a_cost_knobbed_bootstrap_cannot_certify(name: str) -> None:
+    """B=1 collapses every interval onto one replicate; the interval can then exclude its own
+    point estimate while every other clause stays true ([[cost-knobs-can-certify]])."""
+    for path, value in (
+        (("gate", "ece_ci", "n_boot"), 1),
+        (("ood", "n_boot"), 1),
+    ):
+        tampered = _committed(name)
+        node = tampered
+        for key in path[:-1]:
+            node = node[key]
+        node[path[-1]] = value
+        assert G.derive_clauses(tampered)["bootstrap_replicates_are_not_a_cost_knob"] is False, path
+    # an interval that does not contain its own point is the actual pathology
+    tampered = _committed(name)
+    tampered["gate"]["ece_ci"]["upper"] = 0.0001
+    assert G.derive_clauses(tampered)["bootstrap_replicates_are_not_a_cost_knob"] is False
+
+
+@pytest.mark.parametrize("name", COMMITTED_GATE2_REPORTS)
+def test_the_report_names_the_lock_of_the_backbone_it_actually_graded(name: str) -> None:
+    """The shipped RNA-FM report named `envs/ml-rna.conda-lock.yml` — the PRODUCTION lock — for
+    a run made under `ml-rnafm`, and hashed that file into provenance."""
+    report = _committed(name)
+    load = report["scoring"]["load"]
+    expected = G.env_lock_for_graded_arm(load)
+    assert expected is not None, f"{name}: the load record evidences no backbone at all"
+    assert report["env_lock"] == expected, name
+    for other in ("envs/ml-rna.conda-lock.yml", "envs/ml-rnafm.conda-lock.yml"):
+        if other == expected:
+            continue
+        tampered = _committed(name)
+        tampered["env_lock"] = other
+        assert G.derive_clauses(tampered)["env_lock_is_the_graded_arms"] is False, other
+
+
+def test_the_backbone_is_evidenced_by_the_base_model_when_no_key_was_written() -> None:
+    """The pre-A15 sidecars record no `backbone`, so reading only that field made the clause
+    unsatisfiable from the artifacts the shipped `gate2_ece` rule reads — and re-running the
+    rule replaced a passing GATE-2 report with a failing one for a plumbing reason."""
+    assert G.backbone_key_from_load({"base_model_name_or_path": "multimolecule/rinalmo-giga"}) == (
+        "rinalmo-giga"
+    )
+    assert G.backbone_key_from_load({"backbone": "rnafm"}) == "rnafm"
+    # both present and AGREEING is fine; both present and disagreeing is not evidence
+    assert (
+        G.backbone_key_from_load(
+            {"backbone": "rnafm", "base_model_name_or_path": "multimolecule/rnafm"}
+        )
+        == "rnafm"
+    )
+    assert (
+        G.backbone_key_from_load(
+            {"backbone": "rnafm", "base_model_name_or_path": "multimolecule/rinalmo-giga"}
+        )
+        is None
+    )
+    assert G.backbone_key_from_load({}) is None
+    assert G.backbone_key_from_load({"base_model_name_or_path": "some/unpinned-model"}) is None
+
+
+def test_the_committed_pre_a15_sidecars_still_evidence_their_backbone() -> None:
+    """The end-to-end fact the fix exists for: `snakemake gate2_ece` reads THESE files, and the
+    clause must be satisfiable from them without regenerating a GPU pass."""
+    root = Path(__file__).resolve().parents[2]
+    for rel in ("reports/p3/stage2_scores.json", "reports/p3/stage2_scores_loo.json"):
+        arms = json.loads((root / rel).read_text(encoding="utf-8"))["arms"]
+        for arm, payload in arms.items():
+            load = payload["load"]
+            assert load.get("backbone") is None, (
+                f"{rel}:{arm} now records a backbone — this test is about the PRE-A15 shape and "
+                "has gone vacuous; re-point it or delete it"
+            )
+            assert G.backbone_key_from_load(load) == "rinalmo-giga", (rel, arm)

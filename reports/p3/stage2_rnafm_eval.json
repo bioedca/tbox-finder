@@ -1193,7 +1193,7 @@
    "temperature_fitted_on_calib_only": true,
    "temperature_positive_and_converged": true
   },
-  "note": "these clauses grade the MACHINERY \u2014 that the trained weights really loaded, that T was fitted on calib alone, that the graded object is the pre-prior-shift named posterior, and that nothing was truncated. The ablation VERDICT is separate and lives in `ablation.verdict`: it is derived from the governing (absolute) reading of ADR-0005 D16, which asks only whether the with-aux arm still holds the D11 grade. A false overall_pass here therefore does NOT mean the aux heads degraded anything \u2014 on this run it means the no-aux CONTROL is uncalibratable (its calib carve is perfectly separated), an accepted and recorded outcome (user sign-off, 2026-08-03), with the degenerate-limit rule to be pinned in ADR-0005 D11 at the P3-exit gate.",
+  "note": "these clauses grade the MACHINERY \u2014 that the trained weights really loaded, that T was fitted on calib alone, that the graded object is the pre-prior-shift named posterior, and that nothing was truncated. The ablation VERDICT is separate and lives in `ablation.verdict`: it is derived from the governing (absolute) reading of ADR-0005 D16, which asks only whether the with-aux arm still holds the D11 grade. A false overall_pass here therefore does NOT by itself mean the aux heads degraded anything.",
   "overall_pass": true
  },
  "generated_by": "tbox_finder.stage2.eval::aux_ablation_check",
@@ -1204,8 +1204,8 @@
  ],
  "provenance": {
   "entrypoint": "tbox_finder.stage2.eval",
-  "env_lock": "envs/ml-rna.conda-lock.yml",
-  "env_lock_hash": "60f966a8f009abfa3900357ffd0ac7c685d8b55b713da4498306480720bcf3b3",
+  "env_lock": "envs/ml-rnafm.conda-lock.yml",
+  "env_lock_hash": "616a12544937b122b04d83a4085b2a4ad8764279b12b6a67e4cbd068c2944bac",
   "git_sha": "59b61c90f3f48dd76d2aad1f5dc2e2097b3fd06a"
  },
  "schema_version": "1",

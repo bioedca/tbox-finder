@@ -320,7 +320,7 @@
   "prd": "PRD \u00a710.3 (the 16 GB A4000 budget)",
   "provenance": {
     "entrypoint": "tbox_finder.stage2.sizing",
-    "env_lock": "envs/ml-rna.conda-lock.yml"
+    "env_lock": "envs/ml-rnafm.conda-lock.yml"
   },
   "recommendation": {
     "basis": "largest worst-case batch observed to run without OOM; headroom is measured and EXCLUDES DDP gradient buckets and NCCL buffers, which a single-GPU measurement does not exercise",

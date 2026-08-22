@@ -790,10 +790,11 @@ def derive_clauses(report: Mapping[str, Any]) -> dict[str, bool]:
     # -- WHICH backbone this run actually adapted (ADR-0002 A15) ---------------------- #
     # A LoRA checkpoint stores adapters and heads and *not* the backbone, so nothing
     # downstream can recover which base these adapters saw except from what the run wrote
-    # down. Re-derived from the wrap's own recorded block against the closed allow-list, and
-    # cross-checked against `config.backbone` — the requested key — so a run that resolved a
-    # different backbone than the one it was asked for fails here instead of publishing a
-    # comparator number under the production arm's name.
+    # down. Re-derived from the wrap's own recorded block against the closed allow-list, so a
+    # run that resolved a different backbone than the one it was asked for fails here instead
+    # of publishing a comparator number under the production arm's name.
+    # (⚠ Round 10 corrected this sentence: it used to say the clause was "cross-checked against
+    # `config.backbone`", which the very next paragraph and the code both contradict.)
     #
     # ⚠ It reads NOTHING from `report["config"]`. The first draft cross-checked the recorded
     # backbone against `config.backbone` — the *requested* key — and

@@ -1,17 +1,22 @@
 {
   "adr": "ADR-0005 D11 (named posterior = temperature-scaled PRE prior-shift; 15 equal-mass debiased bins; in-distribution ECE <= 0.05, blinded-frozen, gated at P3 exit) + D13 & Amendment A2 (distinct small-N-robust OOD estimator, bootstrap CIs, OOD_ECE_MIN_N=20); ADR-0004 D5 (nested leave-one-order-out fold) + A7 (test rung is the GATE-2 split)",
   "clauses": {
+    "bootstrap_replicates_are_not_a_cost_knob": true,
     "d13_drift_bound_left_unadjudicated": true,
     "deployment_prior_is_a_band_not_a_pin": true,
     "ece_estimator_matches_adr_d11": true,
+    "env_lock_is_the_graded_arms": true,
     "gate_threshold_is_the_pinned_default": true,
     "graded_every_loo_holdout_unit": true,
     "graded_object_is_pre_prior_shift": true,
     "graded_rung_is_the_gate2_split": true,
+    "in_distribution_ece_is_its_own_reliability_tables_mean": true,
     "in_distribution_ece_within_gate": true,
     "loo_holdout_orders_disjoint_from_training_orders": true,
     "loo_holdout_rows_disjoint_from_training_rows": true,
+    "ood_admissibility_is_the_pinned_min_n_rule": true,
     "ood_estimator_distinct_from_the_in_distribution_one": true,
+    "ood_macro_average_is_the_admissible_units_mean": true,
     "ood_min_n_floor_is_the_pinned_constant": true,
     "ood_reported_never_gated": true,
     "ood_resampled_at_block_granularity": true,
@@ -2075,7 +2080,7 @@
     "script": "src/tbox_finder/calib/gate2.py",
     "seed": 20260804
   },
-  "schema_version": "1",
+  "schema_version": "3",
   "schema_version_scope": "`schema_version` versions THIS REPORT'S BODY; `provenance.schema_version` versions the provenance-record envelope (tbox_finder.provenance.SCHEMA_VERSION = '1.0') and moves independently. They are different schemas and are not expected to match.",
   "scope": {
     "dataset": {

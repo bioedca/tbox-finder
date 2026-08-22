@@ -155,6 +155,27 @@ def test_both_backbones_share_the_tokenizer_the_repo_pins():
         # MAX_NUCLEOTIDE_TOKENS ceiling would over-run one model's position table.
         assert spec.max_position_embeddings >= tok.MAX_POSITION_EMBEDDINGS, key
 
+    # ⚠ Round 10: the loop above is a CARDINALITY check. Two 28-token vocabularies in a
+    # different ORDER agree on `len` and disagree on every token id, which is exactly the
+    # confound A15 claims is absent — so `vocab_size` alone cannot be the evidence for
+    # "tokenisation is provably identical". The identity claim is the shared mirror itself:
+    # both arms encode through `stage2.tokenizer.VOCAB`, and A15 records that RNA-FM's
+    # published `vocab.txt` is byte-identical to it. Pin the digest that claim names, so a
+    # silent edit to the mirror (or a second table appearing for one arm) is a red test rather
+    # than a comparison quietly made across two encodings
+    # ([[symmetric-count-fixture-blind-to-inversion]]).
+    assert tok.VOCAB_DIGEST == (
+        "ac3cff22ff7eee31923e5b921470be247314794f3d283b3bc01f26049d3902b4"
+    ), (
+        "the shared tokenizer mirror changed. ADR-0002 A15 rests on RNA-FM's vocab.txt being "
+        "byte-identical to this table; re-measure both hub vocabularies before moving it, or "
+        "the D17(c) ECE comparison is confounded by tokenisation."
+    )
+    # ...and there really is only ONE table — a per-backbone vocabulary would break the claim.
+    assert not any(
+        getattr(R.resolve_backbone(key), "vocab", None) for key in R.BACKBONE_KEYS
+    ), "a backbone grew its own vocabulary; the single-mirror premise of A15 no longer holds"
+
 
 def test_the_two_entries_have_DIFFERENT_widths_so_the_gate_clause_can_discriminate():
     """`train.derive_clauses`'s `backbone_pinned` cross-checks the recorded identity against

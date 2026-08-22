@@ -16,7 +16,11 @@ _STAGE2_DATASET = "data/processed/stage2_dataset.parquet"
 # `load.backbone`, and `grade` refuses to guess one rather than defaulting to production. The
 # value is retyped here because importing `tbox_finder` at Snakefile-parse time would make
 # `snakemake --lint` depend on `src` being importable; `tests/unit/test_gate2.py` pins it
-# against `rna_backbone_registry.PRODUCTION_BACKBONE` so the copy cannot drift.
+# against the backbone THE SIDECARS THEMSELVES RECORD (their `base_model_name_or_path`, via
+# the ADR-0002 allow-list) so the copy cannot drift. ⚠ Round 10: NOT against
+# `PRODUCTION_BACKBONE` — this states which model wrote those two files, a historical fact
+# that does not move when the shipped backbone does. `grade` now also refuses a declaration
+# that contradicts the recorded base model, so a wrong value here fails closed.
 _SCORED_BACKBONE = "rinalmo-giga"
 _GATE2_FIGURES = [
     "figures/calib/gate2_reliability.png",

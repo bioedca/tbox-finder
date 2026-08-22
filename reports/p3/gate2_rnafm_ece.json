@@ -1,17 +1,22 @@
 {
   "adr": "ADR-0005 D11 (named posterior = temperature-scaled PRE prior-shift; 15 equal-mass debiased bins; in-distribution ECE <= 0.05, blinded-frozen, gated at P3 exit) + D13 & Amendment A2 (distinct small-N-robust OOD estimator, bootstrap CIs, OOD_ECE_MIN_N=20); ADR-0004 D5 (nested leave-one-order-out fold) + A7 (test rung is the GATE-2 split)",
   "clauses": {
+    "bootstrap_replicates_are_not_a_cost_knob": true,
     "d13_drift_bound_left_unadjudicated": true,
     "deployment_prior_is_a_band_not_a_pin": true,
     "ece_estimator_matches_adr_d11": true,
+    "env_lock_is_the_graded_arms": true,
     "gate_threshold_is_the_pinned_default": true,
     "graded_every_loo_holdout_unit": true,
     "graded_object_is_pre_prior_shift": true,
     "graded_rung_is_the_gate2_split": true,
+    "in_distribution_ece_is_its_own_reliability_tables_mean": true,
     "in_distribution_ece_within_gate": true,
     "loo_holdout_orders_disjoint_from_training_orders": true,
     "loo_holdout_rows_disjoint_from_training_rows": true,
+    "ood_admissibility_is_the_pinned_min_n_rule": true,
     "ood_estimator_distinct_from_the_in_distribution_one": true,
+    "ood_macro_average_is_the_admissible_units_mean": true,
     "ood_min_n_floor_is_the_pinned_constant": true,
     "ood_reported_never_gated": true,
     "ood_resampled_at_block_granularity": true,
@@ -25,14 +30,14 @@
     "GATE-2's P3 half grades the PRE-prior-shift named posterior only; the FDR half (ADR-0005 D12, FDP CI-upper-bound <= 10%) is graded at P5 and is absent here.",
     "The genome-scale deployment prevalence is prose only \u2014 '~10^3-10^4 : 1' at PRD.md \u00a711 and ADR-0005 D7's contrast line \u2014 and nothing in src/, conf/ or any ADR encodes a scalar. The prior-shifted ECE is therefore reported across the band's endpoints and no single target prior is pinned; pinning one would be a new blinded-frozen default (CLAUDE.md \u00a77 item 2).",
     "ADR-0005 D13 condition (i) compares the leave-clade-out ECE to a *pinned drift bound*. No such value exists: D18's delegation map assigns only the min-N floor (pinned by Amendment A2), and no number of that shape appears in PRD.md, ADR-0005, ADR-0006, conf/ or src/. Pinning one is a new blinded-frozen default requiring ADR-0005 sign-off (CLAUDE.md \u00a77 item 2), so condition (i) is left unadjudicated and no calibrated-negative PASS is derived from the two conditions that do have values.",
-    "INHERITED FROM P3-08: the production arm's temperature is fittable only because ONE calib row of 1,089 is misclassified at the decision boundary; that row is the entire signal for beta. The no-aux control's calib carve is perfectly separated and has no temperature at all. ADR-0005 D11 has no degenerate-limit rule, and drafting one is a P3-exit item.",
+    "INHERITED FROM P3-08 (these two facts are about the P3-08 RiNALMo run, not necessarily about the arm graded here): P3-08's production RiNALMo arm has a temperature that is fittable only because ONE calib row of 1,089 is misclassified at the decision boundary; that row is the entire signal for beta. P3-08's no-aux RiNALMo control has a perfectly separated calib carve and no temperature at all. The arm graded HERE is described by its own temperature disclosure below, and this report records no separation measurement for it. ADR-0005 D11 has no degenerate-limit rule, and drafting one is a P3-exit item.",
     "INHERITED FROM P3-09: the D11 debiasing term was measured to SATURATE at ~0.060 against a known truth of 0.123 on genuinely miscalibrated data at n in {20, 50, 200} \u2014 i.e. it can under-state a real calibration error at small n. The plug-in ECE is reported beside the gated value for exactly this reason; certifying the debias term is a P3-exit / ADR concern flagged in `metrics.binned_ece`'s own docstring.",
     "The leave-clade-out units are ~92% positive (their negatives are the dinucleotide-shuffled decoys carved from the same held-out records), so each unit's OOD ECE is dominated by the positive arm and is not a deployment-prevalence read.",
     "THE GATED MARGIN IS BIN-CONCENTRATED: 79.5% of the reported ECE comes from ONE of 15 equal-mass bins, and 10 bins have accuracy exactly 0 or 1 because the posterior is near-separated (the widest bin spans 0.9209 of the probability axis, i.e. it absorbs the whole transition region). The pass is honest, and its evidence base is narrow \u2014 the same shape as the single misclassified calib row above.",
     "The graded posterior is sigma(z / T) with T = 1.317641, fitted on 1089 calib rows and applied unchanged to both the in-distribution and the leave-clade-out populations.",
     "The leave-clade-out macro-average OOD ECE is 0.1882 over 30 admissible held-out orders \u2014 REPORTED, not gated, and not comparable to the 0.05 in-distribution gate."
   ],
-  "env_lock": "envs/ml-rna.conda-lock.yml",
+  "env_lock": "envs/ml-rnafm.conda-lock.yml",
   "gate": {
     "bin_concentration": {
       "gated": false,
@@ -2055,7 +2060,7 @@
   },
   "provenance": {
     "adr": "ADR-0005 D11 (named posterior = temperature-scaled PRE prior-shift; 15 equal-mass debiased bins; in-distribution ECE <= 0.05, blinded-frozen, gated at P3 exit) + D13 & Amendment A2 (distinct small-N-robust OOD estimator, bootstrap CIs, OOD_ECE_MIN_N=20); ADR-0004 D5 (nested leave-one-order-out fold) + A7 (test rung is the GATE-2 split)",
-    "env_lock_hash": "60f966a8f009abfa3900357ffd0ac7c685d8b55b713da4498306480720bcf3b3",
+    "env_lock_hash": "616a12544937b122b04d83a4085b2a4ad8764279b12b6a67e4cbd068c2944bac",
     "extra": {
       "declared_outputs": [
         "reports/p3/gate2_rnafm_ece.json",
@@ -2075,7 +2080,7 @@
     "script": "src/tbox_finder/calib/gate2.py",
     "seed": 20260804
   },
-  "schema_version": "1",
+  "schema_version": "3",
   "schema_version_scope": "`schema_version` versions THIS REPORT'S BODY; `provenance.schema_version` versions the provenance-record envelope (tbox_finder.provenance.SCHEMA_VERSION = '1.0') and moves independently. They are different schemas and are not expected to match.",
   "scope": {
     "dataset": {
