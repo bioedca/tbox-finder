@@ -933,6 +933,13 @@ def test_the_disclosures_carry_the_two_inherited_caveats() -> None:
     assert len(p3_08) == 1 and len(p3_09) == 1
     assert "ONE calib row" in p3_08[0], "the P3-08 single-row caveat must travel with the number"
     assert "degenerate-limit rule" in p3_08[0]
+    # ...and every fact in it must name P3-08's RiNALMo arms as its subject. Emitted
+    # unconditionally into EVERY gate2 report, the earlier wording made the RNA-FM
+    # comparator's report assert a perfectly separated no-aux control that its own eval
+    # report recorded as `is_perfectly_separated: false` with a finite temperature.
+    assert p3_08[0].count("RiNALMo") >= 2, p3_08[0]
+    assert "not necessarily about the arm graded here" in p3_08[0]
+    assert "records no separation measurement for it" in p3_08[0]
     assert "SATURATE" in p3_09[0], "the P3-09 debias-saturation caveat must travel with it too"
     assert "0.123" in p3_09[0], "the measured truth the estimator saturated against"
     assert "P5" in joined, "the FDR half of GATE-2 is not represented here and must say so"
@@ -1342,15 +1349,78 @@ def test_grade_accepts_the_same_arm_root_flags_score_loo_already_had() -> None:
     assert defaults.sweep_dir is None
 
 
-def test_grade_falls_back_to_the_production_root_when_not_told_otherwise() -> None:
-    """The fallback is what keeps P3-10's committed invocation unchanged, so assert it reads
-    the production constants rather than a re-typed literal that could drift."""
-    import inspect
+class _ArmRootReached(Exception):
+    """Raised by the stub the moment `discover_arms` is called, so the test stops there."""
 
+
+def _capture_arm_root(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
+    """Stand in front of `discover_arms` and record the roots `grade` hands it.
+
+    An earlier version of this test read `inspect.getsource(G.main)` for the two identifier
+    names. That passes whenever the names appear ANYWHERE in the function — in a comment, in a
+    dead branch, in a docstring — and it cannot see whether the value reaches `discover_arms`
+    at all ([[artifact-pinning-test-cannot-see-the-code]]). This captures the argument.
+    """
     from tbox_finder.stage2 import eval as E
 
-    source = inspect.getsource(G.main)
-    assert "E.DEFAULT_CKPT_ROOT" in source, "the fallback must be the production constant"
-    assert "E.DEFAULT_SWEEP_DIR" in source
+    seen: dict[str, object] = {}
+
+    def _stub(checkpoint_root: object, *, sweep_dir: object = None) -> dict[str, object]:
+        seen["checkpoint_root"] = checkpoint_root
+        seen["sweep_dir"] = sweep_dir
+        raise _ArmRootReached
+
+    monkeypatch.setattr(E, "discover_arms", _stub)
+    monkeypatch.setattr(E, "production_arm_config", lambda *a, **k: {})
+    monkeypatch.setattr(G, "_read_split_table", lambda *a, **k: ([], {}))
+    return seen
+
+
+def test_grade_falls_back_to_the_production_root_when_not_told_otherwise(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The fallback is what keeps P3-10's committed invocation unchanged, so assert the value
+    `discover_arms` RECEIVES, not that the constant's name occurs in the source."""
+    from tbox_finder.stage2 import eval as E
+
+    seen = _capture_arm_root(monkeypatch)
+    with pytest.raises(_ArmRootReached):
+        G.main(["grade"])
+    assert seen["checkpoint_root"] == E.DEFAULT_CKPT_ROOT
+    assert seen["sweep_dir"] == E.DEFAULT_SWEEP_DIR
     # And those constants must still name the production arm, or the fallback silently moved.
     assert E.DEFAULT_CKPT_ROOT.endswith("stage2_rinalmo"), E.DEFAULT_CKPT_ROOT
+
+
+def test_grade_uses_the_root_it_is_given_rather_than_the_production_one(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The other half of the identity: a parser that accepted the flags and then ignored them
+    would still satisfy the fallback test above. Assert the override actually arrives."""
+    from tbox_finder.stage2 import eval as E
+
+    seen = _capture_arm_root(monkeypatch)
+    with pytest.raises(_ArmRootReached):
+        G.main(["grade", "--checkpoint-root", "/tmp/comparator", "--sweep-dir", "/tmp/sweep"])
+    assert seen["checkpoint_root"] == "/tmp/comparator"
+    assert seen["sweep_dir"] == "/tmp/sweep"
+    assert seen["checkpoint_root"] != E.DEFAULT_CKPT_ROOT
+
+
+def test_an_explicitly_empty_root_is_not_answered_with_the_production_one(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`args.checkpoint_root or E.DEFAULT_CKPT_ROOT` treats `--checkpoint-root ""` as absent.
+
+    A caller who passed an empty string would silently grade the SHIPPED arm while believing
+    it had pointed the run elsewhere — the same silent-production-fallback class as the loader
+    that defaulted a missing base model to production. Only an OMITTED option falls back.
+    """
+    from tbox_finder.stage2 import eval as E
+
+    seen = _capture_arm_root(monkeypatch)
+    with pytest.raises(_ArmRootReached):
+        G.main(["grade", "--checkpoint-root", "", "--sweep-dir", ""])
+    assert seen["checkpoint_root"] == ""
+    assert seen["sweep_dir"] == ""
+    assert seen["checkpoint_root"] != E.DEFAULT_CKPT_ROOT

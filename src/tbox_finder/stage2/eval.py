@@ -85,13 +85,38 @@ __all__ = [
     "ranking_preserved",
     "reconcile_cached_scores",
     "verdict_from_absolute_reading",
+    "CLAUSES_FIRST_REQUIRED_AT",
+    "KNOWN_SCHEMAS",
+    "clauses_not_required_at",
+    "env_lock_for_scored_arms",
     "rungs_for_rows",
     "score_rows",
     "select_arm_pair",
     "validate_report",
 ]
 
-SCHEMA_VERSION = "1"
+#: Bumped 1 -> 2 at P3-17 review round 5. Two shape changes, both of which a schema-1 report
+#: cannot satisfy: `provenance.env_lock` became the SUBJECT's lock instead of the production
+#: constant (graded by the new `provenance_env_lock_is_the_arms_backbones` clause), and
+#: `gate.note` stopped asserting a degenerate control unconditionally. Job 1374's committed
+#: RNA-FM report is schema 1 — its grades stand, and it is not regenerated here (see the
+#: dev-log disclosure) ([[new-gate-clause-invalidates-old-reports]]).
+SCHEMA_VERSION = "2"
+
+#: Every schema this validator knows, oldest first. Listed rather than compared: `"1"` and
+#: `"2"` order correctly as strings only while both are one character, which is the
+#: string-version-compare trap this branch already fixed once.
+KNOWN_SCHEMAS: tuple[str, ...] = ("1", "2")
+
+#: The clauses a report FIRST carries at each schema. A report written before a clause existed
+#: cannot have recorded it, so :func:`validate_report` does not demand it of that report — the
+#: clause set is part of a report's shape, and versioning it is the alternative to regenerating
+#: every committed artifact on a GPU that the fix never touched
+#: ([[new-gate-clause-invalidates-old-reports]]). The shipped RiNALMo P3-08 report is schema 1.
+CLAUSES_FIRST_REQUIRED_AT: dict[str, frozenset[str]] = {
+    "2": frozenset({"provenance_env_lock_is_the_arms_backbones"}),
+}
+
 STEP = "P3-08"
 ENTRYPOINT = "tbox_finder.stage2.eval"
 RULE = f"{ENTRYPOINT}::aux_ablation_check"
@@ -932,7 +957,9 @@ def discover_arms(
         config = report.get("config") or {}
         loss = config.get("loss") or {}
         legacy = report.get("legacy") or {}
+        checkpoint = report.get("checkpoint") or {}
         wrap = report.get("wrap") or {}
+
         arms[arm_dir.name] = {
             "arm": arm_dir.name,
             # Two fields, because they have two jobs. `checkpoint_path` is what gets
@@ -956,8 +983,8 @@ def discover_arms(
             # P3-06 saved final-epoch weights, not best-epoch: `best_val_total`
             # describes weights that were discarded. The comparable number is the
             # one that belongs to the checkpoint on disk.
-            "saved_val_total": legacy.get("saved_val_total"),
-            "saved_from_epoch": legacy.get("saved_from_epoch"),
+            "saved_val_total": _saved_field(legacy, checkpoint, "saved_val_total"),
+            "saved_from_epoch": _saved_field(legacy, checkpoint, "saved_from_epoch"),
         }
     if not arms:
         raise FileNotFoundError(f"no arm directories under {root}")
@@ -1034,6 +1061,7 @@ def derive_clauses(report: Mapping[str, Any]) -> dict[str, bool]:
     arms = report.get("arms") or {}
     ablation = report.get("ablation") or {}
     dataset = report.get("dataset") or {}
+    prov = report.get("provenance") or {}
     clauses: dict[str, bool] = {}
 
     arm_blocks = [a for a in arms.values() if isinstance(a, Mapping)]
@@ -1135,6 +1163,33 @@ def derive_clauses(report: Mapping[str, Any]) -> dict[str, bool]:
         and ablation.get("with_aux_arm") != ablation.get("no_aux_arm")
     )
     clauses["ablation_arms_are_lr_matched"] = ablation.get("matched_lr") is True
+
+    # -- the report names the environment the SCORED weights actually needed --------- #
+    # Nothing graded `provenance.env_lock` before, so the RNA-FM run recorded the production
+    # lock — an environment whose `multimolecule` pin cannot even load the checkpoint it was
+    # scoring — and passed. The arms carry the backbone they were loaded as, measured off the
+    # adapter's own recorded base model, so the lock is re-derivable from evidence rather than
+    # read back from a constant ([[gate-must-bind-to-upstream-evidence]]).
+    # EVERY arm must record one, and they must agree. Discarding the arms that recorded
+    # nothing would let a single arm carry the clause while its partner was scored under an
+    # unknown model — the clause would pass on a subset of the evidence it claims to grade.
+    arm_backbones = {(a.get("load") or {}).get("backbone") for a in arm_blocks}
+    try:
+        expected_lock = (
+            T.env_lock_for(str(next(iter(arm_backbones))))
+            if len(arm_backbones) == 1 and None not in arm_backbones
+            else None
+        )
+    except (KeyError, ValueError):
+        # An arm naming a backbone this repo does not pin cannot resolve to a lock, and a
+        # clause is a verdict, not a crash site.
+        expected_lock = None
+    clauses["provenance_env_lock_is_the_arms_backbones"] = (
+        bool(arm_blocks)
+        and expected_lock is not None
+        and bool(prov.get("env_lock"))
+        and prov.get("env_lock") == expected_lock
+    )
     with_aux_block = arms.get(str(ablation.get("with_aux_arm")), {}) or {}
     no_aux_block = arms.get(str(ablation.get("no_aux_arm")), {}) or {}
     clauses["ablation_contrast_is_aux_weight"] = bool(
@@ -1147,6 +1202,21 @@ def derive_clauses(report: Mapping[str, Any]) -> dict[str, bool]:
     return clauses
 
 
+def clauses_not_required_at(schema: str) -> frozenset[str]:
+    """Clauses introduced AFTER ``schema``, which a report at that schema cannot carry.
+
+    An unknown schema excuses nothing: a report this validator does not recognise is graded
+    against the whole current clause set, and separately flagged for the version itself.
+    """
+    if schema not in KNOWN_SCHEMAS:
+        return frozenset()
+    age = KNOWN_SCHEMAS.index(schema)
+    return frozenset().union(
+        *(CLAUSES_FIRST_REQUIRED_AT.get(newer, frozenset()) for newer in KNOWN_SCHEMAS[age + 1 :]),
+        frozenset(),
+    )
+
+
 def validate_report(report: Mapping[str, Any]) -> list[str]:
     """Structural problems with ``report``; empty means well-formed and **self-consistent**.
 
@@ -1157,8 +1227,11 @@ def validate_report(report: Mapping[str, Any]) -> list[str]:
     malformed and invite someone to "fix" it.
     """
     problems: list[str] = []
-    if report.get("schema_version") != SCHEMA_VERSION:
-        problems.append(f"schema_version {report.get('schema_version')!r} != {SCHEMA_VERSION!r}")
+    schema = str(report.get("schema_version"))
+    if schema not in KNOWN_SCHEMAS:
+        problems.append(
+            f"schema_version {report.get('schema_version')!r} is not one of {KNOWN_SCHEMAS!r}"
+        )
     if report.get("step") != STEP:
         problems.append(f"step {report.get('step')!r} != {STEP!r}")
     for block in ("dataset", "arms", "ablation", "provenance", "gate"):
@@ -1193,17 +1266,25 @@ def validate_report(report: Mapping[str, Any]) -> list[str]:
     if not isinstance(recorded, Mapping):
         problems.append("gate.clauses is missing")
         return problems
-    if set(recorded) != set(recomputed):
-        problems.append(f"gate.clauses keys {sorted(recorded)} != re-derived {sorted(recomputed)}")
-    for name, value in recomputed.items():
+    # A report is graded against the clause set of ITS OWN schema. For a report at the current
+    # schema this excuses nothing and the check is unchanged; for an older one it is the
+    # difference between "this artifact predates the clause" and "this artifact is malformed".
+    expected = {
+        name: value
+        for name, value in recomputed.items()
+        if name not in clauses_not_required_at(schema)
+    }
+    if set(recorded) != set(expected):
+        problems.append(f"gate.clauses keys {sorted(recorded)} != re-derived {sorted(expected)}")
+    for name, value in expected.items():
         if bool(recorded.get(name)) != value:
             problems.append(
                 f"gate.clauses[{name!r}]={recorded.get(name)!r} but re-derivation says {value}"
             )
-    if bool(gate.get("overall_pass")) != all(recomputed.values()):
+    if bool(gate.get("overall_pass")) != all(expected.values()):
         problems.append(
             f"gate.overall_pass={gate.get('overall_pass')!r} but the re-derived clauses give "
-            f"{all(recomputed.values())}"
+            f"{all(expected.values())}"
         )
     return problems
 
@@ -1246,20 +1327,96 @@ def build_report(
     report["gate"] = {
         "clauses": clauses,
         "overall_pass": all(clauses.values()),
-        "note": (
-            "these clauses grade the MACHINERY — that the trained weights really loaded, "
-            "that T was fitted on calib alone, that the graded object is the pre-prior-shift "
-            "named posterior, and that nothing was truncated. The ablation VERDICT is "
-            "separate and lives in `ablation.verdict`: it is derived from the governing "
-            "(absolute) reading of ADR-0005 D16, which asks only whether the with-aux arm "
-            "still holds the D11 grade. A false overall_pass here therefore does NOT mean "
-            "the aux heads degraded anything — on this run it means the no-aux CONTROL is "
-            "uncalibratable (its calib carve is perfectly separated), an accepted and "
-            "recorded outcome (user sign-off, 2026-08-03), with the degenerate-limit rule "
-            "to be pinned in ADR-0005 D11 at the P3-exit gate."
-        ),
+        "note": _gate_note(report),
     }
     return report
+
+
+def _degenerate_calibration_arms(report: Mapping[str, Any]) -> list[str]:
+    """Arms whose calib carve could not produce a temperature ON THIS RUN.
+
+    Read back from the arms' own recorded calibration, never assumed: the note this feeds used
+    to state "on this run it means the no-aux CONTROL is uncalibratable (its calib carve is
+    perfectly separated)" unconditionally, so the RNA-FM report asserted it while recording
+    ``is_perfectly_separated: false``, ``converged: true``, a finite T and ``overall_pass:
+    true`` — prose describing a state the run never reached ([[gate-clauses-need-re-derivation]]).
+    """
+    degenerate: list[str] = []
+    for name, block in (report.get("arms") or {}).items():
+        if not isinstance(block, Mapping):
+            continue
+        calib = block.get("calibration") or {}
+        separation = calib.get("calib_separation") or {}
+        if separation.get("is_perfectly_separated") is True or calib.get("converged") is False:
+            degenerate.append(str(name))
+    return sorted(degenerate)
+
+
+def _saved_field(legacy: Mapping[str, Any], checkpoint: Mapping[str, Any], key: str) -> Any:
+    """The saved checkpoint's own val number, from whichever block of a run report records it.
+
+    P3-06's reports carry it under ``legacy`` — a correcting annotation added because that run
+    saved FINAL-epoch weights while ``val.best_total`` describes weights it discarded. P3-17's
+    comparator reports carry the same two field names under ``checkpoint`` and have no
+    ``legacy`` block at all, so reading only ``legacy`` published ``null`` for both RNA-FM arms
+    while the number sat one key away, in the artifact the backbone comparison reads.
+
+    ``legacy`` wins where both exist: it is the corrected reading of the run it annotates.
+    """
+    if key in legacy:
+        return legacy.get(key)
+    return checkpoint.get(key)
+
+
+def env_lock_for_scored_arms(load_records: Mapping[str, Mapping[str, Any]]) -> str:
+    """The conda lock the SCORED weights required, from the arms' own load records.
+
+    Not :data:`ENV_LOCK`. That constant names the production lock, and stamping it made job
+    1374's RNA-FM report claim an environment whose ``multimolecule`` pin cannot load the
+    checkpoint the run had just scored, with ``env_lock_hash`` then digesting the wrong file.
+    The backbone comes from the loader, which derives it from each adapter's own recorded base
+    model, so this is re-derived evidence rather than a read-back setting.
+
+    Arms that disagree are refused rather than averaged: one report cannot name the environment
+    for two models. Arms that record nothing are refused too — dropping them would let one arm
+    speak for a partner scored under an unknown model.
+    """
+    if not load_records:
+        raise RuntimeError("no arms were scored, so no environment can be named for them")
+    backbones = sorted({str(record.get("backbone")) for record in load_records.values()})
+    if backbones == ["None"] or "None" in backbones:
+        raise RuntimeError(
+            f"the scored arms record backbones {backbones!r}; an arm that records none cannot "
+            "have its environment named, and the report must not name one for it"
+        )
+    if len(backbones) != 1:
+        raise RuntimeError(
+            f"the scored arms record backbones {backbones!r}; a single report cannot name the "
+            "environment for more than one of them"
+        )
+    return T.env_lock_for(backbones[0])
+
+
+def _gate_note(report: Mapping[str, Any]) -> str:
+    """The always-true half, plus the degenerate-control half only when it is true."""
+    note = (
+        "these clauses grade the MACHINERY — that the trained weights really loaded, "
+        "that T was fitted on calib alone, that the graded object is the pre-prior-shift "
+        "named posterior, and that nothing was truncated. The ablation VERDICT is "
+        "separate and lives in `ablation.verdict`: it is derived from the governing "
+        "(absolute) reading of ADR-0005 D16, which asks only whether the with-aux arm "
+        "still holds the D11 grade. A false overall_pass here therefore does NOT by itself "
+        "mean the aux heads degraded anything."
+    )
+    degenerate = _degenerate_calibration_arms(report)
+    if degenerate:
+        note += (
+            f" On THIS run the calib carve of {', '.join(degenerate)} is degenerate "
+            "(perfectly separated, or the temperature fit did not converge), so it is "
+            "uncalibratable — an accepted and recorded outcome (user sign-off, 2026-08-03), "
+            "with the degenerate-limit rule to be pinned in ADR-0005 D11 at the P3-exit gate."
+        )
+    return note
 
 
 def aux_ablation_check(
@@ -1905,6 +2062,13 @@ def main(argv: Sequence[str] | None = None) -> int:
             handle.write("\n")
         print(f"wrote {scores_out}")
 
+    # Which environment the scored weights required — see `env_lock_for_scored_arms`. Kept as
+    # a call rather than inlined so a test can reach it: an earlier version lived here, and a
+    # sabotage that put `ENV_LOCK` back stayed GREEN because every unit test built its report
+    # through `aux_ablation_check` and never through this wiring
+    # ([[artifact-pinning-test-cannot-see-the-code]]).
+    scored_env_lock = env_lock_for_scored_arms(load_records)
+
     report = aux_ablation_check(
         arm_scores,
         arm_configs=arms,
@@ -1925,8 +2089,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         },
         provenance={
             "git_sha": PROV.git_sha(),
-            "env_lock": ENV_LOCK,
-            "env_lock_hash": PROV.env_lock_hash(ENV_LOCK),
+            # NOT `ENV_LOCK`. That constant names the PRODUCTION lock, and stamping it made
+            # job 1374's RNA-FM report claim an environment whose `multimolecule` pin cannot
+            # load the checkpoint the run had just scored — with `env_lock_hash` then digesting
+            # the wrong file. The backbone comes from the load records, which read it off each
+            # adapter's own recorded base model.
+            "env_lock": scored_env_lock,
+            "env_lock_hash": PROV.env_lock_hash(scored_env_lock),
             "entrypoint": ENTRYPOINT,
         },
         written_at=_dt.datetime.now(_dt.UTC).isoformat(timespec="seconds"),

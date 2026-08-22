@@ -2598,3 +2598,52 @@ def test_the_comparator_trains_the_lr_MATCHED_AUX_ZERO_CONTROL_the_scorers_requi
     assert "${KEY}.json" in guard, "the pair guard no longer checks each point's run report"
     assert "stage2_heads.pt" in guard, "the pair guard no longer checks each point's checkpoint"
     assert code.index("RNAFM_PAIR_INCOMPLETE") < code.index("-m tbox_finder.stage2.eval")
+
+
+# --------------------------------------------------------------------------------------
+# P3-17 review round 5 — the pair the scorers require, pinned ON THE LAUNCH LINE
+# --------------------------------------------------------------------------------------
+def test_the_launch_line_takes_aux_weight_from_the_LOOP_not_a_literal() -> None:
+    """Job 1372 died because a single-arm root cannot be scored: `stage2.eval` and
+    `gate2 score-loo` both call `select_arm_pair`, which needs an aux=0 control at the same lr.
+
+    The fix trains both points in one job — but nothing pinned the launch line to the loop
+    variable. Hardcoding `loss.aux_weight=1.0` there trains two identical arms, leaves the
+    whole comparator suite GREEN, and burns ~25 GPU-minutes before the scorers refuse exactly
+    as they did on 1372.
+    """
+    tokens = _launch_tokens(_SBATCH_RNAFM, "tbox_finder.stage2.train")
+    assert 'loss.aux_weight="$AUX_WEIGHT"' in tokens, tokens
+    assert 'optim.lr="$LR"' in tokens, tokens
+    # No literal aux weight may appear on the launch line at all — a second, hardcoded
+    # override would win or shadow depending on order.
+    literals = [t for t in tokens if t.startswith("loss.aux_weight=") and "$AUX_WEIGHT" not in t]
+    assert literals == [], literals
+
+
+def test_the_grid_the_loop_iterates_actually_contains_the_pair_the_scorers_need() -> None:
+    """The launch line reading `$AUX_WEIGHT` is worth nothing if the grid holds one value.
+
+    `AUX_WEIGHTS=(1.0)` would satisfy every launch-line assertion and still produce the
+    single-arm root that killed 1372.
+    """
+    code = _sbatch_code(_SBATCH_RNAFM)
+    grid = re.search(r"^AUX_WEIGHTS=\(([^)]*)\)", code, flags=re.MULTILINE)
+    assert grid is not None, "the comparator sbatch must declare an AUX_WEIGHTS grid"
+    values = {float(v) for v in grid.group(1).split()}
+    assert values == {1.0, 0.0}, values
+    # ...and EVERY loop over the points must iterate THAT array, binding the name the launch
+    # line reads. There are two — the training loop and the freshness/verification loop — and
+    # an `in` check is satisfied by either one alone: a sabotage that rewrote the training
+    # loop's header to a literal list stayed green because the second loop still matched
+    # ([[fixed-one-of-two-identical-things]]).
+    loops = code.count('for AUX_WEIGHT in "${AUX_WEIGHTS[@]}"; do')
+    assert loops == 2, (
+        f"expected both point loops to iterate the declared grid, found {loops}; a loop over a "
+        "literal list makes the grid a declaration nothing binds to"
+    )
+    # Both points must land in DISTINCT arm directories, or the second overwrites the first
+    # and the pair collapses to one ([[symmetric-count-fixture-blind-to-inversion]]).
+    assert 'KEY="aux${AUX_WEIGHT}_lr${LR}"' in code
+    assert 'CKPT_DIR="$CKPT_ROOT/${KEY}"' in code
+    assert 'REPORT="$OUT_DIR/${KEY}.json"' in code

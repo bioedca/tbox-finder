@@ -57,9 +57,15 @@ from tbox_finder.stage2 import train as T
 __all__ = [
     "DEFAULT_BATCH_SWEEP",
     "DEFAULT_OUT",
+    "CLAUSES_FIRST_REQUIRED_AT",
+    "KNOWN_SCHEMAS",
+    "LEGACY_SCHEMAS_WITHOUT_SKIP_CODE",
     "SCHEMA_VERSION",
+    "SKIP_ON_ARM_DID_NOT_FIT",
+    "SKIP_PORT_CANNOT_CHECKPOINT",
     "STEP",
     "build_report",
+    "clauses_not_required_at",
     "derive_clauses",
     "measure_batch",
     "run_sizing",
@@ -72,11 +78,65 @@ __all__ = [
 #: the computed-headroom shape.
 #: Bumped 2 -> 3 at P3-17: the report gains a `backbone` block and the clause set gains
 #: `checkpointing_skip_is_earned`, and a clause set is part of a report's shape
-#: ([[new-gate-clause-invalidates-old-reports]]). Job 1051's committed report is schema 2; its
+#: ([[new-gate-clause-invalidates-old-reports]]). Job 1051's committed report is schema **1**
+#: — this note used to say schema 2, which `reports/p3/stage2_sizing.json` disproves; its
 #: numbers stand and it is not regenerated.
-SCHEMA_VERSION = "3"
+#: Bumped 3 -> 4 at P3-17 review round 5: `provenance.env_lock` stopped being the production
+#: constant and became the SUBJECT's lock, and the clause set gained
+#: `provenance_env_lock_is_the_backbones` and a machine-readable
+#: `gradient_checkpointing.comparison_skipped_code`. Job 1374's committed RNA-FM report is
+#: schema 3: its GiB stand, but it carries the stale `provenance.env_lock` this bump exists to
+#: stop, and it is NOT regenerated here (re-measuring VRAM needs an A4000 — see the dev-log
+#: disclosure) ([[new-gate-clause-invalidates-old-reports]]).
+SCHEMA_VERSION = "4"
 STEP = "P3-06-sizing"
 DEFAULT_OUT = "reports/p3/stage2_sizing.json"
+
+#: Why the checkpointing on/off comparison was skipped, as a VALUE rather than as a sentence.
+#: `checkpointing_skip_is_earned` used to accept the skip by looking for the substring "did not
+#: fit" inside `comparison_skipped_reason`, which coupled a gate clause to the wording of a
+#: human-facing message: rewording the sentence silently flipped the clause. The sentence stays
+#: for the reader; the clause grades these.
+SKIP_PORT_CANNOT_CHECKPOINT = "port_cannot_run_checkpointing"
+SKIP_ON_ARM_DID_NOT_FIT = "on_arm_did_not_fit"
+
+#: The schemas written BEFORE `comparison_skipped_code` existed, listed rather than compared.
+#: `schema_version` is a string, and `"3" < "4"` only happens to work while both are one digit
+#: — the same string-compare trap this branch already fixed once in the library-version check.
+LEGACY_SCHEMAS_WITHOUT_SKIP_CODE = frozenset({"1", "2", "3"})
+
+#: Every schema this validator knows, oldest first — listed, never string-compared.
+KNOWN_SCHEMAS: tuple[str, ...] = ("1", "2", "3", "4")
+
+#: The clauses a report FIRST carries at each schema. A report written before a clause existed
+#: cannot have recorded it, and re-grading it under today's set reports a failure that is
+#: really an age difference: `reports/p3/stage2_sizing.json` (schema 1, job 1051) grades
+#: `checkpointing_skip_is_earned` FALSE under the schema-3 set purely because
+#: `usable_on_this_backbone` did not exist when it was written
+#: ([[new-gate-clause-invalidates-old-reports]]).
+CLAUSES_FIRST_REQUIRED_AT: dict[str, frozenset[str]] = {
+    "2": frozenset({"measured_the_requested_batch"}),
+    "3": frozenset({"checkpointing_skip_is_earned"}),
+    "4": frozenset(
+        {"provenance_env_lock_is_the_backbones", "checkpointing_usability_agrees_with_the_port"}
+    ),
+}
+
+
+def clauses_not_required_at(schema: str) -> frozenset[str]:
+    """Clauses introduced AFTER ``schema``, which a report at that schema cannot carry.
+
+    An unknown schema excuses nothing — it is graded against the whole current set and flagged
+    separately for the version itself.
+    """
+    if schema not in KNOWN_SCHEMAS:
+        return frozenset()
+    age = KNOWN_SCHEMAS.index(schema)
+    return frozenset().union(
+        *(CLAUSES_FIRST_REQUIRED_AT.get(newer, frozenset()) for newer in KNOWN_SCHEMAS[age + 1 :]),
+        frozenset(),
+    )
+
 
 #: Descending, so the sweep learns the ceiling before spending time under it. 8 is what job
 #: 1044 tried and lost; 1 is the floor below which the arm is not viable on this card.
@@ -255,6 +315,7 @@ def derive_clauses(report: Mapping[str, Any]) -> dict[str, bool]:
     device = report.get("device") or {}
     population = report.get("population") or {}
     ckpt = report.get("gradient_checkpointing") or {}
+    prov = report.get("provenance") or {}
 
     with_numbers = [m for m in meas if not m.get("oom") and m.get("peak_vram_gib")]
     clauses = {
@@ -294,15 +355,52 @@ def derive_clauses(report: Mapping[str, Any]) -> dict[str, bool]:
         # the skip to the report's own recorded evidence: either the comparison ran, or the
         # port genuinely cannot run the 'on' arm, or the 'on' arm OOM'd — and the sweep's
         # measurements must agree with the usability flag rather than merely accompany it.
+        # ⚠ The OOM disjunct grades `comparison_skipped_code`, NOT the wording of
+        # `comparison_skipped_reason`. Grading the sentence made this clause turn on prose:
+        # rewording the message flipped a gate. Schema-3 reports carry no code, so the legacy
+        # substring is still accepted for them ALONE — never for a report this code writes.
         "checkpointing_skip_is_earned": (
             (ckpt.get("on_peak_gib") is not None and ckpt.get("off_peak_gib") is not None)
             or ckpt.get("usable_on_this_backbone") is False
-            or "did not fit" in str(ckpt.get("comparison_skipped_reason") or "")
+            or ckpt.get("comparison_skipped_code") == SKIP_ON_ARM_DID_NOT_FIT
+            or (
+                str(report.get("schema_version")) in LEGACY_SCHEMAS_WITHOUT_SKIP_CODE
+                and "did not fit" in str(ckpt.get("comparison_skipped_reason") or "")
+            )
         )
+        # ⚠ EVERY measurement must record the flag, and every one must agree with the
+        # usability fact. The `for ... if m.get(...) is not None` form this replaces went
+        # vacuously TRUE the moment `measure_batch` stopped recording the key — the sole
+        # writer, unpinned, and an `all()` over an empty sequence is True
+        # ([[clauses-must-guard-emptiness]]). The old `and not m.get("off_comparison")`
+        # exclusion is gone with it: nothing in this repo ever wrote that key (the
+        # off-comparison record is never appended to `measurements`), so it excluded nothing
+        # while reading like a considered carve-out.
+        and bool(meas)
+        and all(m.get("gradient_checkpointing") is not None for m in meas)
         and all(
             bool(m.get("gradient_checkpointing")) is bool(ckpt.get("usable_on_this_backbone"))
             for m in meas
-            if m.get("gradient_checkpointing") is not None and not m.get("off_comparison")
+        ),
+        # The clause that was missing when job 1374's report stamped the PRODUCTION lock over
+        # an RNA-FM measurement. `provenance.env_lock` is resolved from the REQUESTED key and
+        # `backbone.env_lock` from the RESOLVED spec, so a producer that goes back to stamping
+        # a module constant makes the two disagree and flips this FALSE. Nothing graded either
+        # field before, which is exactly why the wrong one survived a passing gate.
+        # The skip clause above accepts `usable_on_this_backbone: False` as earning a skip, and
+        # nothing checked that flag against the PORT FACT the same report carries three keys
+        # away in `backbone.gradient_checkpointing_usable`. A report that disagreed with itself
+        # — claiming the port cannot checkpoint while recording that it can — earned its skip
+        # clean ([[gate-must-bind-to-upstream-evidence]]).
+        "checkpointing_usability_agrees_with_the_port": (
+            ckpt.get("usable_on_this_backbone") is not None
+            and (report.get("backbone") or {}).get("gradient_checkpointing_usable") is not None
+            and bool(ckpt.get("usable_on_this_backbone"))
+            is bool((report.get("backbone") or {}).get("gradient_checkpointing_usable"))
+        ),
+        "provenance_env_lock_is_the_backbones": (
+            bool(prov.get("env_lock"))
+            and prov.get("env_lock") == (report.get("backbone") or {}).get("env_lock")
         ),
     }
     return {k: bool(v) for k, v in clauses.items()}
@@ -310,8 +408,11 @@ def derive_clauses(report: Mapping[str, Any]) -> dict[str, bool]:
 
 def validate_report(report: Mapping[str, Any]) -> list[str]:
     problems: list[str] = []
-    if report.get("schema_version") != SCHEMA_VERSION:
-        problems.append(f"schema_version {report.get('schema_version')!r} != {SCHEMA_VERSION!r}")
+    schema = str(report.get("schema_version"))
+    if schema not in KNOWN_SCHEMAS:
+        problems.append(
+            f"schema_version {report.get('schema_version')!r} is not one of {KNOWN_SCHEMAS!r}"
+        )
     if report.get("step") != STEP:
         problems.append(f"step {report.get('step')!r} != {STEP!r}")
     gate = report.get("gate")
@@ -323,12 +424,21 @@ def validate_report(report: Mapping[str, Any]) -> list[str]:
     if not isinstance(recorded, Mapping):
         problems.append("gate.clauses is missing")
         return problems
-    if set(recorded) != set(recomputed):
-        problems.append(f"gate.clauses keys {sorted(recorded)} != re-derived {sorted(recomputed)}")
-    for name, value in recomputed.items():
+    # A report is graded against the clause set of ITS OWN schema. At the current schema this
+    # excuses nothing and the check is unchanged.
+    expected_clauses = {
+        name: value
+        for name, value in recomputed.items()
+        if name not in clauses_not_required_at(schema)
+    }
+    if set(recorded) != set(expected_clauses):
+        problems.append(
+            f"gate.clauses keys {sorted(recorded)} != re-derived {sorted(expected_clauses)}"
+        )
+    for name, value in expected_clauses.items():
         if bool(recorded.get(name)) != value:
             problems.append(f"gate.clauses[{name!r}] disagrees with re-derivation ({value})")
-    if bool(gate.get("overall_pass")) != all(recomputed.values()):
+    if bool(gate.get("overall_pass")) != all(expected_clauses.values()):
         problems.append("gate.overall_pass disagrees with the re-derived clauses")
     # ⚠ Re-derive the RECOMMENDATION too, not just the clauses. It is the one field a reader
     # acts on — it chose batch_size=4 for the production sweep — and nothing checked that it
@@ -412,7 +522,16 @@ def build_report(
         "measurements": [dict(m) for m in measurements],
         "largest_fitting_batch_worst_case": largest,
         "recommendation": _recommend(fitting, largest, device),
-        "provenance": {"env_lock": T.ENV_LOCK, "entrypoint": "tbox_finder.stage2.sizing"},
+        "provenance": {
+            # NOT `T.ENV_LOCK`. That constant names the PRODUCTION lock, so stamping it made
+            # job 1374's RNA-FM sizing report claim an environment the run did not use, while
+            # the `backbone` block in the same artifact recorded the right one. Resolve it from
+            # the subject, and let `provenance_env_lock_is_the_backbones` grade the agreement.
+            # `requested_key` is required, not defaulted: a missing subject must raise, not
+            # silently fall back to production.
+            "env_lock": T.env_lock_for(str(backbone["requested_key"])),
+            "entrypoint": "tbox_finder.stage2.sizing",
+        },
     }
     clauses = derive_clauses(report)
     report["gate"] = {
@@ -502,6 +621,7 @@ def run_sizing(
     checkpointing: dict[str, Any] = {
         "batch_size": smallest,
         "comparison_skipped_reason": None,
+        "comparison_skipped_code": None,
         # Recorded so an absent comparison is a STATED fact rather than a missing key. The
         # asymmetry between the two arms' sizing reports is real and has to be visible.
         "usable_on_this_backbone": checkpointing_usable,
@@ -512,6 +632,7 @@ def run_sizing(
             f"gradient checkpointing is not usable on backbone {spec.key!r}, so there is no "
             f"'on' arm to compare against: {spec.gradient_checkpointing_note}"
         )
+        checkpointing["comparison_skipped_code"] = SKIP_PORT_CANNOT_CHECKPOINT
         checkpointing["on_peak_gib"] = None
         checkpointing["off_peak_gib"] = None
     on = next(
@@ -529,6 +650,7 @@ def run_sizing(
             f"the batch-{smallest} worst case did not fit even WITH checkpointing, so an "
             "off-comparison would only OOM harder and measure nothing"
         )
+        checkpointing["comparison_skipped_code"] = SKIP_ON_ARM_DID_NOT_FIT
         checkpointing["on_peak_gib"] = None
         checkpointing["off_peak_gib"] = None
     else:

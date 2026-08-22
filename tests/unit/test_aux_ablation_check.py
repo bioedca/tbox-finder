@@ -30,7 +30,9 @@ import pytest
 
 from tbox_finder import metrics as M
 from tbox_finder.calib import temperature as TEMP
+from tbox_finder.models import rna_backbone_registry as BR
 from tbox_finder.stage2 import eval as E
+from tbox_finder.stage2 import train as TRAIN
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -83,6 +85,8 @@ def _report(
     *,
     with_aux_ece_scale: float = 3.0,
     no_aux_ece_scale: float = 3.0,
+    backbone: str | None = None,
+    env_lock: str | None = None,
 ) -> dict[str, Any]:
     """A complete, passing report — the object the clause tests sabotage."""
     with_aux = _arm(name="aux1.0_lr1e-4", calib_scale=with_aux_ece_scale, seed=11)
@@ -105,6 +109,10 @@ def _report(
             "attn_implementation": "flash_attention_2",
             "attn_implementation_trained_under": "flash_attention_2",
             "attn_implementation_matches_training": True,
+            # Which backbone the loader derived from THIS adapter's recorded base model. The
+            # report's `provenance.env_lock` is graded against it, so a fixture that omitted
+            # it would leave the clause unreachable.
+            "backbone": backbone or BR.PRODUCTION_BACKBONE,
         }
         for name in configs
     }
@@ -118,6 +126,7 @@ def _report(
             "rung_census": {"calib": N_CALIB, "val": N_VAL, "test": N_TEST},
         },
         load_records=loads,
+        provenance={"env_lock": env_lock or TRAIN.env_lock_for(backbone or BR.PRODUCTION_BACKBONE)},
         n_boot=20,
     )
 
@@ -1239,3 +1248,257 @@ def test_a_cache_carrying_a_nan_logit_is_refused() -> None:
     cache["arms"]["a"]["logits"][2] = float("nan")
     with pytest.raises(ValueError, match="not finite"):
         E.reconcile_cached_scores(cache, rows=rows, dataset_meta=meta, wanted=["a"])
+
+
+# --------------------------------------------------------------------------- #
+# P3-17 review round 5 — the environment nothing graded, and a note that asserted
+# a state the run never reached
+# --------------------------------------------------------------------------- #
+def test_provenance_env_lock_is_the_SCORED_backbones_lock() -> None:
+    """Job 1374's committed RNA-FM eval report stamps `envs/ml-rna.conda-lock.yml`.
+
+    That is the production lock, whose `multimolecule` pin cannot load the RNA-FM checkpoint
+    the run had just scored — and `env_lock_hash` beside it therefore digested the wrong file.
+    The producer stamped a module constant and no clause graded the field.
+    """
+    comparator = BR.resolve_backbone(BR.COMPARATOR_BACKBONE)
+    report = _report(backbone=comparator.key)
+    assert report["provenance"]["env_lock"] == comparator.env_lock
+    assert report["provenance"]["env_lock"] != TRAIN.ENV_LOCK
+    assert report["gate"]["clauses"]["provenance_env_lock_is_the_arms_backbones"] is True
+
+
+def test_the_production_run_still_names_the_production_lock() -> None:
+    """Positive control: a clause that refused every lock would satisfy the test above."""
+    report = _report()
+    assert report["provenance"]["env_lock"] == TRAIN.ENV_LOCK
+    assert report["gate"]["clauses"]["provenance_env_lock_is_the_arms_backbones"] is True
+
+
+@pytest.mark.parametrize(
+    "tamper",
+    [
+        pytest.param(
+            lambda r: r["provenance"].__setitem__("env_lock", "envs/ml-rna.conda-lock.yml"),
+            id="stamped-the-production-constant-over-a-comparator-run",
+        ),
+        pytest.param(
+            lambda r: r["provenance"].__setitem__("env_lock", None),
+            id="stamped-nothing",
+        ),
+        pytest.param(
+            lambda r: r["arms"]["aux0.0_lr1e-4"]["load"].__setitem__("backbone", None),
+            id="an-arm-records-no-backbone",
+        ),
+        pytest.param(
+            lambda r: r["arms"]["aux0.0_lr1e-4"]["load"].__setitem__("backbone", "rinalmo_giga"),
+            id="the-two-arms-were-loaded-as-different-models",
+        ),
+    ],
+)
+def test_the_env_lock_clause_bites(tamper: Any) -> None:
+    report = _report(backbone=BR.COMPARATOR_BACKBONE)
+    assert E.derive_clauses(report)["provenance_env_lock_is_the_arms_backbones"] is True
+    tamper(report)
+    assert E.derive_clauses(report)["provenance_env_lock_is_the_arms_backbones"] is False
+
+
+def test_the_gate_note_does_not_claim_a_degenerate_control_this_run_did_not_have() -> None:
+    """The note used to end with "on this run it means the no-aux CONTROL is uncalibratable
+    (its calib carve is perfectly separated)" unconditionally.
+
+    Job 1374's RNA-FM report emitted exactly that while recording
+    `is_perfectly_separated: false` on both arms, `converged: true`, a finite temperature and
+    `overall_pass: true` — a sentence about a run that never happened, carried over from the
+    RiNALMo P3-08 run.
+    """
+    report = _report()
+    assert report["arms"]["aux0.0_lr1e-4"]["calibration"]["converged"] is True
+    note = report["gate"]["note"]
+    assert "uncalibratable" not in note, note
+    assert "perfectly separated" not in note
+    # The half that is always true stays.
+    assert "grade the MACHINERY" in note
+    assert "`ablation.verdict`" in note
+
+
+def test_the_gate_note_NAMES_the_degenerate_arm_when_there_is_one() -> None:
+    """The other half of the identity: a note that simply dropped the sentence for good would
+    also pass the test above, and a genuinely uncalibratable control has to stay visible."""
+    report = _report()
+    report["arms"]["aux0.0_lr1e-4"]["calibration"]["calib_separation"] = {
+        "is_perfectly_separated": True
+    }
+    assert E._degenerate_calibration_arms(report) == ["aux0.0_lr1e-4"]
+    note = E._gate_note(report)
+    assert "aux0.0_lr1e-4" in note
+    assert "uncalibratable" in note
+    # ...and a fit that simply failed to converge counts too, on the arm it happened to.
+    other = _report()
+    other["arms"]["aux1.0_lr1e-4"]["calibration"]["converged"] = False
+    assert E._degenerate_calibration_arms(other) == ["aux1.0_lr1e-4"]
+    assert "aux1.0_lr1e-4" in E._gate_note(other)
+    assert "aux0.0_lr1e-4" not in E._gate_note(other)
+
+
+def test_the_scored_arms_own_backbone_picks_the_lock() -> None:
+    """The WIRING, not just the clause. Every test above builds its report through
+    `aux_ablation_check` with an explicit `provenance=`, so a sabotage putting the production
+    constant back into `main` stayed GREEN against all of them."""
+    comparator = BR.resolve_backbone(BR.COMPARATOR_BACKBONE)
+    production = BR.resolve_backbone(BR.PRODUCTION_BACKBONE)
+    assert (
+        E.env_lock_for_scored_arms(
+            {"a": {"backbone": comparator.key}, "b": {"backbone": comparator.key}}
+        )
+        == comparator.env_lock
+    )
+    assert E.env_lock_for_scored_arms({"a": {"backbone": production.key}}) == production.env_lock
+    assert comparator.env_lock != production.env_lock, "the two locks must actually differ"
+
+
+@pytest.mark.parametrize(
+    "records",
+    [
+        pytest.param({}, id="nothing-was-scored"),
+        pytest.param({"a": {}}, id="an-arm-records-no-backbone"),
+        pytest.param(
+            {"a": {"backbone": "rinalmo_giga"}, "b": {}},
+            id="one-arm-records-none-so-the-other-must-not-speak-for-it",
+        ),
+        pytest.param(
+            {"a": {"backbone": "rinalmo_giga"}, "b": {"backbone": "rnafm"}},
+            id="the-arms-were-loaded-as-different-models",
+        ),
+    ],
+)
+def test_an_environment_that_cannot_be_named_is_refused_not_guessed(records: Any) -> None:
+    with pytest.raises(RuntimeError):
+        E.env_lock_for_scored_arms(records)
+
+
+def test_main_stamps_the_derived_lock_and_not_the_module_constant() -> None:
+    """A positive control for the two above: they pass whatever `main` does with the result.
+
+    Read the AST of `main` and require the value assigned to `provenance["env_lock"]` — and the
+    argument its hash digests — to be the derived name, never `ENV_LOCK`.
+    """
+    import ast
+
+    tree = ast.parse(Path(E.__file__).read_text(encoding="utf-8"))
+    main_fn = next(n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == "main")
+    provenance = next(
+        kw.value
+        for call in ast.walk(main_fn)
+        if isinstance(call, ast.Call)
+        for kw in call.keywords
+        if kw.arg == "provenance" and isinstance(kw.value, ast.Dict)
+    )
+    stamped = {
+        key.value: value
+        for key, value in zip(provenance.keys, provenance.values, strict=True)
+        if isinstance(key, ast.Constant)
+    }
+    lock = stamped["env_lock"]
+    assert isinstance(lock, ast.Name) and lock.id == "scored_env_lock", ast.dump(lock)
+    digested = stamped["env_lock_hash"]
+    assert isinstance(digested, ast.Call)
+    assert [a.id for a in digested.args if isinstance(a, ast.Name)] == [
+        "scored_env_lock"
+    ], "the hash must digest the lock the report names, not a different file"
+    assert "ENV_LOCK" not in {n.id for n in ast.walk(lock) if isinstance(n, ast.Name)}
+
+
+def test_a_report_is_graded_against_the_clause_set_of_ITS_OWN_schema() -> None:
+    """Adding a clause invalidated every committed report, and the shipped P3-08 one cannot be
+    regenerated without the GPU pass that produced it ([[new-gate-clause-invalidates-old-reports]]).
+
+    So the excuse is versioned and narrow: a schema-1 report is not asked for a schema-2
+    clause. Nothing else about it is excused.
+    """
+    assert E.clauses_not_required_at("1") == E.CLAUSES_FIRST_REQUIRED_AT["2"]
+    assert E.clauses_not_required_at(E.SCHEMA_VERSION) == frozenset()
+    # An unrecognised version excuses NOTHING — it is not a licence to skip the clause set.
+    assert E.clauses_not_required_at("99") == frozenset()
+
+
+def test_claiming_an_old_schema_does_not_buy_out_of_a_clause_you_recorded() -> None:
+    """The excuse is for artifacts that predate the clause, not for new ones opting out."""
+    report = _report()
+    report["schema_version"] = "1"
+    problems = E.validate_report(report)
+    assert any("gate.clauses keys" in p for p in problems), problems
+
+
+def test_a_current_schema_report_missing_the_new_clause_is_refused() -> None:
+    """The other direction: the excuse must not leak forward onto the current schema."""
+    report = _report()
+    assert report["schema_version"] == E.SCHEMA_VERSION
+    del report["gate"]["clauses"]["provenance_env_lock_is_the_arms_backbones"]
+    problems = E.validate_report(report)
+    assert any("gate.clauses keys" in p for p in problems), problems
+
+
+def test_an_unknown_schema_is_still_refused() -> None:
+    report = _report()
+    report["schema_version"] = "99"
+    assert any("is not one of" in p for p in E.validate_report(report))
+
+
+def test_the_saved_checkpoints_val_number_is_read_from_EITHER_report_shape(
+    tmp_path: Any,
+) -> None:
+    """`discover_arms` read `report["legacy"]` only.
+
+    P3-06's reports carry the correcting `legacy` annotation; P3-17's comparator reports carry
+    the same two field names under `checkpoint` and no `legacy` block — so both RNA-FM arms
+    published `saved_val_total: null` and `saved_from_epoch: null` while the numbers sat one
+    key away, in the very artifact the backbone comparison reads.
+    """
+    shapes = {
+        "aux1.0_lr1e-4": {"legacy": {"saved_val_total": 0.25, "saved_from_epoch": 7}},
+        "aux0.0_lr1e-4": {"checkpoint": {"saved_val_total": 0.5, "saved_from_epoch": 9}},
+    }
+    root = tmp_path / "ckpts"
+    sweep = tmp_path / "sweep"
+    sweep.mkdir()
+    for name, extra in shapes.items():
+        (root / name).mkdir(parents=True)
+        (sweep / f"{name}.json").write_text(
+            json.dumps(
+                {
+                    "config": {"lr": 1e-4, "loss": {"aux_weight": float(name[3:6])}},
+                    "wrap": {"attn_implementation": "flash_attention_2"},
+                    **extra,
+                }
+            ),
+            encoding="utf-8",
+        )
+    arms = E.discover_arms(str(root), sweep_dir=str(sweep))
+    assert arms["aux1.0_lr1e-4"]["saved_val_total"] == 0.25
+    assert arms["aux1.0_lr1e-4"]["saved_from_epoch"] == 7
+    assert arms["aux0.0_lr1e-4"]["saved_val_total"] == 0.5
+    assert arms["aux0.0_lr1e-4"]["saved_from_epoch"] == 9
+
+
+def test_the_correcting_legacy_annotation_wins_over_the_checkpoint_block(tmp_path: Any) -> None:
+    """P3-06 records `saved_from_epoch` in BOTH blocks. `legacy` is the corrected reading of a
+    run that saved final-epoch weights, so it must not be silently overridden."""
+    root = tmp_path / "ckpts"
+    sweep = tmp_path / "sweep"
+    sweep.mkdir()
+    (root / "aux1.0_lr1e-4").mkdir(parents=True)
+    (sweep / "aux1.0_lr1e-4.json").write_text(
+        json.dumps(
+            {
+                "config": {"lr": 1e-4, "loss": {"aux_weight": 1.0}},
+                "wrap": {"attn_implementation": "flash_attention_2"},
+                "legacy": {"saved_val_total": 0.04, "saved_from_epoch": 9},
+                "checkpoint": {"saved_val_total": 0.99, "saved_from_epoch": 1},
+            }
+        ),
+        encoding="utf-8",
+    )
+    arm = E.discover_arms(str(root), sweep_dir=str(sweep))["aux1.0_lr1e-4"]
+    assert arm["saved_val_total"] == 0.04
+    assert arm["saved_from_epoch"] == 9

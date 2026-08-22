@@ -528,9 +528,12 @@ def test_run_sizing_does_not_HARDCODE_the_checkpointing_flag() -> None:
     feeding it was not ([[artifact-pinning-test-cannot-see-the-code]]).
 
     So this reads the source: every `measure_batch` call must pass `gradient_checkpointing` a
-    NAME, never a constant. Checking the argument's KIND is checking its content here — a
-    literal is precisely the defect, and any name has to come from the resolved port fact
-    because nothing else in scope carries one.
+    NAME, never a constant — AND the name it passes must itself be bound to the resolved port
+    fact. An earlier version of this test asserted only the first half, on the stated reasoning
+    that "any name has to come from the resolved port fact because nothing else in scope
+    carries one". That reasoning was wrong and self-certifying: `checkpointing_usable = True`
+    is a name bound to a literal, it reinstates job 1370 exactly, and the whole file stayed
+    GREEN against it ([[ast-pin-must-check-contents-not-shape]]).
     """
     import ast
 
@@ -559,3 +562,248 @@ def test_run_sizing_does_not_HARDCODE_the_checkpointing_flag() -> None:
         "must take it from the resolved port fact, or sizing measures a configuration the arm "
         "cannot run (SLURM job 1370)"
     )
+
+    # ...and the NAME the sweep passes must be bound to the port fact, not to a constant.
+    run_sizing = next(
+        n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == "run_sizing"
+    )
+    bindings = [
+        node
+        for node in ast.walk(run_sizing)
+        if isinstance(node, ast.Assign)
+        and any(isinstance(t, ast.Name) and t.id == "checkpointing_usable" for t in node.targets)
+    ]
+    assert len(bindings) == 1, (
+        f"expected exactly one binding of `checkpointing_usable` in run_sizing, got "
+        f"{len(bindings)} — a second one could shadow the port fact"
+    )
+    (bound,) = bindings
+    attributes = {node.attr for node in ast.walk(bound.value) if isinstance(node, ast.Attribute)}
+    assert "gradient_checkpointing_usable" in attributes, (
+        "`checkpointing_usable` must be read off the resolved backbone spec; it is bound to "
+        f"{ast.unparse(bound.value)!r}, which is how SLURM job 1370 died"
+    )
+    assert not isinstance(bound.value, ast.Constant), ast.unparse(bound.value)
+
+
+# --------------------------------------------------------------------------------------
+# P3-17 review round 5 — the provenance the gate never graded, and a clause that read prose
+# --------------------------------------------------------------------------------------
+def test_provenance_env_lock_is_the_SUBJECTS_lock_not_the_production_constant() -> None:
+    """Job 1374's committed RNA-FM sizing report says `envs/ml-rna.conda-lock.yml`.
+
+    That is the PRODUCTION lock, whose `multimolecule` pin cannot load the RNA-FM checkpoint
+    the run was sizing — and the same artifact recorded the right lock three keys up under
+    `backbone.env_lock`. The producer stamped a module constant; nothing graded the field, so
+    the run passed with two disagreeing answers inside one file.
+    """
+    comp = BR.resolve_backbone(BR.COMPARATOR_BACKBONE)
+    report = _report(backbone={**BR.backbone_summary(comp), "requested_key": comp.key})
+    assert report["provenance"]["env_lock"] == comp.env_lock
+    assert (
+        report["provenance"]["env_lock"] != T.ENV_LOCK
+    ), "the comparator's report must not name the production lock"
+    assert S.derive_clauses(report)["provenance_env_lock_is_the_backbones"] is True
+
+
+def test_the_env_lock_clause_refuses_a_report_that_names_the_wrong_environment() -> None:
+    """The clause has to BITE, not merely accompany the fix: tamper the stamped value and it
+    must flip FALSE, or a producer regressing to `T.ENV_LOCK` would pass again."""
+    comp = BR.resolve_backbone(BR.COMPARATOR_BACKBONE)
+    report = _report(backbone={**BR.backbone_summary(comp), "requested_key": comp.key})
+    report["provenance"]["env_lock"] = T.ENV_LOCK
+    assert S.derive_clauses(report)["provenance_env_lock_is_the_backbones"] is False
+    report["provenance"]["env_lock"] = None
+    assert S.derive_clauses(report)["provenance_env_lock_is_the_backbones"] is False
+
+
+def test_the_production_report_still_names_the_production_lock() -> None:
+    """The positive control for the test above: a guard that refused EVERY lock would also
+    satisfy it ([[raises-test-needs-a-positive-control]])."""
+    report = _report()
+    assert report["provenance"]["env_lock"] == T.ENV_LOCK
+    assert S.derive_clauses(report)["provenance_env_lock_is_the_backbones"] is True
+
+
+def test_an_oom_skip_is_earned_by_a_CODE_and_not_by_the_wording_of_a_sentence() -> None:
+    """`checkpointing_skip_is_earned` used to accept the skip if the reason string contained
+    the substring "did not fit", so a gate clause turned on the wording of a human-facing
+    message. It now grades `comparison_skipped_code`."""
+    base = {
+        "measurements": _measurements(),
+        "population": {"n_rows": 200, "n_tokens_max": 552},
+        "device": {"is_cuda": True, "name": "A4000", "total_memory_gib": 15.6},
+        "config": {},
+        "backbone": {
+            **BR.backbone_summary(BR.resolve_backbone(BR.PRODUCTION_BACKBONE)),
+            "requested_key": BR.PRODUCTION_BACKBONE,
+        },
+    }
+    skipped = {
+        "on_peak_gib": None,
+        "off_peak_gib": None,
+        "usable_on_this_backbone": True,
+        "comparison_skipped_reason": "the batch-1 worst case did not fit even WITH checkpointing",
+    }
+    # The sentence alone no longer earns it on a report THIS code writes...
+    no_code = S.build_report(**base, checkpointing=dict(skipped))
+    assert no_code["schema_version"] == S.SCHEMA_VERSION
+    assert S.derive_clauses(no_code)["checkpointing_skip_is_earned"] is False
+    # ...the recorded code does...
+    with_code = S.build_report(
+        **base,
+        checkpointing=dict(skipped, comparison_skipped_code=S.SKIP_ON_ARM_DID_NOT_FIT),
+    )
+    assert S.derive_clauses(with_code)["checkpointing_skip_is_earned"] is True
+    # ...and rewording the sentence no longer touches the clause.
+    reworded = S.build_report(
+        **base,
+        checkpointing=dict(
+            skipped,
+            comparison_skipped_code=S.SKIP_ON_ARM_DID_NOT_FIT,
+            comparison_skipped_reason="the smallest batch would not fit with checkpointing on",
+        ),
+    )
+    assert S.derive_clauses(reworded)["checkpointing_skip_is_earned"] is True
+
+
+def test_the_legacy_substring_is_accepted_ONLY_for_the_schemas_that_predate_the_code() -> None:
+    """Job 1374's report is schema 3 and carries no code; it must still grade the way it did
+    when it was written ([[new-gate-clause-invalidates-old-reports]]). Every schema the current
+    code writes must not get that excuse."""
+    legacy = {
+        "measurements": _measurements(),
+        "device": {"is_cuda": True, "name": "A4000"},
+        "population": {"n_rows": 200},
+        "gradient_checkpointing": {
+            "on_peak_gib": None,
+            "off_peak_gib": None,
+            "usable_on_this_backbone": True,
+            "comparison_skipped_reason": "the batch-1 worst case did not fit even WITH it",
+        },
+        "provenance": {"env_lock": "envs/ml-rna.conda-lock.yml"},
+        "backbone": {"env_lock": "envs/ml-rna.conda-lock.yml"},
+        "data_is_synthetic": False,
+        "loss_is_placeholder": False,
+        "step_function": "tbox_finder.stage2.train.forward_backward",
+    }
+    for version in sorted(S.LEGACY_SCHEMAS_WITHOUT_SKIP_CODE):
+        graded = S.derive_clauses(dict(legacy, schema_version=version))
+        assert graded["checkpointing_skip_is_earned"] is True, version
+    assert S.SCHEMA_VERSION not in S.LEGACY_SCHEMAS_WITHOUT_SKIP_CODE
+    current = S.derive_clauses(dict(legacy, schema_version=S.SCHEMA_VERSION))
+    assert current["checkpointing_skip_is_earned"] is False
+
+
+def test_a_measurement_that_records_no_checkpointing_flag_is_refused() -> None:
+    """The agreement conjunct used to read `for m in meas if m.get(...) is not None`.
+
+    That is an `all()` over a filtered sequence, so the moment no measurement carried the key
+    the conjunct went vacuously TRUE and a report could claim any usability it liked
+    ([[clauses-must-guard-emptiness]]).
+    """
+    stripped = [
+        {k: v for k, v in m.items() if k != "gradient_checkpointing"} for m in _measurements()
+    ]
+    payload = {
+        "measurements": stripped,
+        "population": {"n_rows": 200, "n_tokens_max": 552},
+        "device": {"is_cuda": True, "name": "A4000", "total_memory_gib": 15.6},
+        "checkpointing": {
+            "on_peak_gib": 3.0,
+            "off_peak_gib": 9.0,
+            "usable_on_this_backbone": True,
+        },
+        "config": {},
+        "backbone": {
+            **BR.backbone_summary(BR.resolve_backbone(BR.PRODUCTION_BACKBONE)),
+            "requested_key": BR.PRODUCTION_BACKBONE,
+        },
+    }
+    assert S.derive_clauses(S.build_report(**payload))["checkpointing_skip_is_earned"] is False
+    # Positive control: the same payload WITH the flag passes, so the clause is not simply
+    # refusing everything ([[raises-test-needs-a-positive-control]]).
+    payload["measurements"] = _measurements()
+    assert S.derive_clauses(S.build_report(**payload))["checkpointing_skip_is_earned"] is True
+
+
+def test_measure_batch_RECORDS_the_flag_the_clause_grades() -> None:
+    """The clause above guards the reader; this guards the sole WRITER.
+
+    Deleting `"gradient_checkpointing": gradient_checkpointing` from `measure_batch`'s record
+    leaves every payload-built test green — they supply the key themselves — while every real
+    report silently loses the field the agreement conjunct grades.
+    """
+    import ast
+
+    tree = ast.parse(Path(S.__file__).read_text())
+    measure = next(
+        n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == "measure_batch"
+    )
+    written = {
+        ast.unparse(value)
+        for node in ast.walk(measure)
+        if isinstance(node, ast.Dict)
+        for key, value in zip(node.keys, node.values, strict=True)
+        if isinstance(key, ast.Constant) and key.value == "gradient_checkpointing"
+    }
+    assert written == {"gradient_checkpointing"}, (
+        "measure_batch must record the flag it was given under 'gradient_checkpointing'; it "
+        f"records {written!r}, so the agreement conjunct would grade a field nothing writes"
+    )
+
+
+def test_a_report_that_disagrees_with_its_OWN_port_fact_is_refused() -> None:
+    """`checkpointing_skip_is_earned` accepts `usable_on_this_backbone: False` as earning the
+    skip, and nothing bound that flag to the port fact recorded in the same report.
+
+    So a report claiming the port cannot checkpoint, while its `backbone` block records that it
+    can, earned its skip clean.
+    """
+    comp = BR.resolve_backbone(BR.COMPARATOR_BACKBONE)
+    prod = BR.resolve_backbone(BR.PRODUCTION_BACKBONE)
+    assert comp.gradient_checkpointing_usable is False
+    assert prod.gradient_checkpointing_usable is True, "the fixture needs the two to differ"
+
+    def _payload(**over: Any) -> dict[str, Any]:
+        base = {
+            "measurements": _measurements(gradient_checkpointing=False),
+            "population": {"n_rows": 200, "n_tokens_max": 552},
+            "device": {"is_cuda": True, "name": "A4000", "total_memory_gib": 15.6},
+            "checkpointing": {
+                "on_peak_gib": None,
+                "off_peak_gib": None,
+                "usable_on_this_backbone": False,
+                "comparison_skipped_code": S.SKIP_PORT_CANNOT_CHECKPOINT,
+            },
+            "config": {},
+            "backbone": {**BR.backbone_summary(comp), "requested_key": comp.key},
+        }
+        base.update(over)
+        return base
+
+    honest = S.derive_clauses(S.build_report(**_payload()))
+    assert honest["checkpointing_usability_agrees_with_the_port"] is True
+    assert honest["checkpointing_skip_is_earned"] is True
+
+    # The same skip, claimed for a port that CAN checkpoint.
+    lying = S.derive_clauses(
+        S.build_report(
+            **_payload(backbone={**BR.backbone_summary(prod), "requested_key": prod.key})
+        )
+    )
+    assert lying["checkpointing_usability_agrees_with_the_port"] is False
+
+
+def test_the_port_agreement_clause_refuses_a_report_that_records_no_port_fact() -> None:
+    """A missing field must not read as agreement ([[clauses-must-guard-emptiness]])."""
+    prod = BR.resolve_backbone(BR.PRODUCTION_BACKBONE)
+    # `_report()`'s checkpointing block records `usable_on_this_backbone: True`, which is the
+    # production port's fact — so the default fixture is the agreeing case.
+    report = _report()
+    assert S.derive_clauses(report)["checkpointing_usability_agrees_with_the_port"] is True
+    del report["backbone"]["gradient_checkpointing_usable"]
+    assert S.derive_clauses(report)["checkpointing_usability_agrees_with_the_port"] is False
+    report["backbone"]["gradient_checkpointing_usable"] = prod.gradient_checkpointing_usable
+    del report["gradient_checkpointing"]["usable_on_this_backbone"]
+    assert S.derive_clauses(report)["checkpointing_usability_agrees_with_the_port"] is False

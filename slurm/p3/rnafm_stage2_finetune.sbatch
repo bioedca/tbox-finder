@@ -251,7 +251,10 @@ export PYTHONHASHSEED=0                    # determinism (§8.3); train.py VERIF
 export TOKENIZERS_PARALLELISM=false
 export OMP_NUM_THREADS=4                   # 32 cpus / 8 ranks; torchrun warns and defaults to 1.
 
-echo "host=$(hostname) job=${SLURM_JOB_ID:-none} key=$KEY backbone=$BACKBONE sha=$(git rev-parse --short HEAD 2>/dev/null || echo NA)"
+# `arms=`, not `key=`: KEY is a per-point name assigned inside the training loop 130 lines
+# below, so this banner printed `key=` empty on every run (`set -u` is deliberately off, so it
+# expanded to nothing rather than failing). The grid is what exists at this point in the job.
+echo "host=$(hostname) job=${SLURM_JOB_ID:-none} arms=${AUX_WEIGHTS[*]} lr=$LR backbone=$BACKBONE sha=$(git rev-parse --short HEAD 2>/dev/null || echo NA)"
 
 # ── LEG (0) the ENV assertion — the ADR-0002 A15 trap, caught in seconds ─────
 # Activating `tbox-ml-rna` here instead is a one-word mistake, and its failure mode is a

@@ -1132,11 +1132,23 @@ def disclosures(*, gate: Mapping[str, Any], ood: Mapping[str, Any]) -> list[str]
         "(ADR-0005 D12, FDP CI-upper-bound <= 10%) is graded at P5 and is absent here.",
         _UNPINNED_DEPLOYMENT_PRIOR,
         _UNPINNED_DRIFT_BOUND,
-        "INHERITED FROM P3-08: the production arm's temperature is fittable only because "
-        "ONE calib row of 1,089 is misclassified at the decision boundary; that row is the "
-        "entire signal for beta. The no-aux control's calib carve is perfectly separated and "
-        "has no temperature at all. ADR-0005 D11 has no degenerate-limit rule, and drafting "
-        "one is a P3-exit item.",
+        # ⚠ Every sentence here is about the P3-08 RiNALMo run, and each one says so. The
+        # earlier wording ("the production arm's ... The no-aux control's calib carve is
+        # perfectly separated") reads as a claim about whichever arm the report grades, and it
+        # is emitted unconditionally — so the RNA-FM comparator's report asserted a perfectly
+        # separated no-aux control while its own eval report recorded
+        # `is_perfectly_separated: false`, `converged: true` and a finite T of 1.39. This
+        # producer cannot re-derive the graded arm's separation (the gate block carries no
+        # separation record), so the fix is to make the SUBJECT explicit rather than to
+        # pretend to measure it here.
+        "INHERITED FROM P3-08 (these two facts are about the P3-08 RiNALMo run, not "
+        "necessarily about the arm graded here): P3-08's production RiNALMo arm has a "
+        "temperature that is fittable only because ONE calib row of 1,089 is misclassified at "
+        "the decision boundary; that row is the entire signal for beta. P3-08's no-aux RiNALMo "
+        "control has a perfectly separated calib carve and no temperature at all. The arm "
+        "graded HERE is described by its own temperature disclosure below, and this report "
+        "records no separation measurement for it. ADR-0005 D11 has no degenerate-limit rule, "
+        "and drafting one is a P3-exit item.",
         "INHERITED FROM P3-09: the D11 debiasing term was measured to SATURATE at ~0.060 "
         "against a known truth of 0.123 on genuinely miscalibrated data at n in {20, 50, 200} "
         "— i.e. it can under-state a real calibration error at small n. The plug-in ECE is "
@@ -1483,8 +1495,13 @@ def score_loo_holdout(
             "number labelled OOD"
         )
 
+    # `x if x is None else` and NOT `x or` — an explicitly-passed empty string is a caller
+    # error, and `or` would silently answer it with the PRODUCTION root, grading the shipped
+    # arm while the caller believed it had pointed the run somewhere else. Only an omitted
+    # option falls back.
     arms = E.discover_arms(
-        checkpoint_root or E.DEFAULT_CKPT_ROOT, sweep_dir=sweep_dir or E.DEFAULT_SWEEP_DIR
+        E.DEFAULT_CKPT_ROOT if checkpoint_root is None else checkpoint_root,
+        sweep_dir=E.DEFAULT_SWEEP_DIR if sweep_dir is None else sweep_dir,
     )
     production = E.production_arm_config()
     arm, _ = E.select_arm_pair(arms, production=production)
@@ -1665,9 +1682,13 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     split_rows, dataset_meta = _read_split_table(args.dataset)
     production = E.production_arm_config()
+    # The SECOND site. `or` here would answer an explicitly-passed empty `--checkpoint-root`
+    # with the production root ([[fixed-one-of-two-identical-things]]).
+    _root = getattr(args, "checkpoint_root", None)
+    _sweep = getattr(args, "sweep_dir", None)
     arms = E.discover_arms(
-        getattr(args, "checkpoint_root", None) or E.DEFAULT_CKPT_ROOT,
-        sweep_dir=getattr(args, "sweep_dir", None) or E.DEFAULT_SWEEP_DIR,
+        E.DEFAULT_CKPT_ROOT if _root is None else _root,
+        sweep_dir=E.DEFAULT_SWEEP_DIR if _sweep is None else _sweep,
     )
     arm, _ = E.select_arm_pair(arms, production=production)
 
