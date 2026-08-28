@@ -286,3 +286,15 @@ Thumbs.db
 # cluster checkout commits a job's console output.
 /reports/p3/stage2_producer_*.out
 /reports/p3/stage2_producer_*.err
+
+# P3-17's RNA-FM comparator (ADR-0002 D6/A15). Same split as everywhere else: the per-arm run
+# REPORTS are committed evidence and the job's own transient state is not. The SLURM logs are
+# expected non-empty on success (torchrun rendezvous, HF chatter, W&B-offline notices), the
+# `.DONE` marker is a §9.3 verification artifact consumed at retrieval time, and the flock file
+# is process state. `reports/p3/sweep_rnafm/.gitkeep` is committed on purpose — Slurm opens
+# --output/--error BEFORE the script runs, so the directory has to exist in a fresh clone.
+/reports/p3/sweep_rnafm/slurm_*.out
+/reports/p3/sweep_rnafm/slurm_*.err
+/reports/p3/sweep_rnafm/*.DONE
+/reports/p3/sweep_rnafm/.*.lock
+/reports/p3/sweep_rnafm/.rnafm.lock

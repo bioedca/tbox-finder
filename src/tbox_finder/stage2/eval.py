@@ -66,7 +66,9 @@ import numpy as np
 from tbox_finder import metrics as M
 from tbox_finder import power as PW
 from tbox_finder import provenance as PROV
+from tbox_finder import report_schema as RSCH
 from tbox_finder.calib import recalibrate as R
+from tbox_finder.models import rna_backbone_registry as BR
 from tbox_finder.stage2 import train as T
 
 __all__ = [
@@ -84,13 +86,38 @@ __all__ = [
     "ranking_preserved",
     "reconcile_cached_scores",
     "verdict_from_absolute_reading",
+    "CLAUSES_FIRST_REQUIRED_AT",
+    "KNOWN_SCHEMAS",
+    "clauses_not_required_at",
+    "env_lock_for_scored_arms",
     "rungs_for_rows",
     "score_rows",
     "select_arm_pair",
     "validate_report",
 ]
 
-SCHEMA_VERSION = "1"
+#: Bumped 1 -> 2 at P3-17 review round 5. Two shape changes, both of which a schema-1 report
+#: cannot satisfy: `provenance.env_lock` became the SUBJECT's lock instead of the production
+#: constant (graded by the new `provenance_env_lock_is_the_arms_backbones` clause), and
+#: `gate.note` stopped asserting a degenerate control unconditionally. Job 1374's committed
+#: RNA-FM report is schema 1 — its grades stand, and it is not regenerated here (see the
+#: dev-log disclosure) ([[new-gate-clause-invalidates-old-reports]]).
+SCHEMA_VERSION = "2"
+
+#: Every schema this validator knows, oldest first. Listed rather than compared: `"1"` and
+#: `"2"` order correctly as strings only while both are one character, which is the
+#: string-version-compare trap this branch already fixed once.
+KNOWN_SCHEMAS: tuple[str, ...] = ("1", "2")
+
+#: The clauses a report FIRST carries at each schema. A report written before a clause existed
+#: cannot have recorded it, so :func:`validate_report` does not demand it of that report — the
+#: clause set is part of a report's shape, and versioning it is the alternative to regenerating
+#: every committed artifact on a GPU that the fix never touched
+#: ([[new-gate-clause-invalidates-old-reports]]). The shipped RiNALMo P3-08 report is schema 1.
+CLAUSES_FIRST_REQUIRED_AT: dict[str, frozenset[str]] = {
+    "2": frozenset({"provenance_env_lock_is_the_arms_backbones"}),
+}
+
 STEP = "P3-08"
 ENTRYPOINT = "tbox_finder.stage2.eval"
 RULE = f"{ENTRYPOINT}::aux_ablation_check"
@@ -931,7 +958,9 @@ def discover_arms(
         config = report.get("config") or {}
         loss = config.get("loss") or {}
         legacy = report.get("legacy") or {}
+        checkpoint = report.get("checkpoint") or {}
         wrap = report.get("wrap") or {}
+
         arms[arm_dir.name] = {
             "arm": arm_dir.name,
             # Two fields, because they have two jobs. `checkpoint_path` is what gets
@@ -955,8 +984,8 @@ def discover_arms(
             # P3-06 saved final-epoch weights, not best-epoch: `best_val_total`
             # describes weights that were discarded. The comparable number is the
             # one that belongs to the checkpoint on disk.
-            "saved_val_total": legacy.get("saved_val_total"),
-            "saved_from_epoch": legacy.get("saved_from_epoch"),
+            "saved_val_total": _saved_field(legacy, checkpoint, "saved_val_total"),
+            "saved_from_epoch": _saved_field(legacy, checkpoint, "saved_from_epoch"),
         }
     if not arms:
         raise FileNotFoundError(f"no arm directories under {root}")
@@ -1033,6 +1062,7 @@ def derive_clauses(report: Mapping[str, Any]) -> dict[str, bool]:
     arms = report.get("arms") or {}
     ablation = report.get("ablation") or {}
     dataset = report.get("dataset") or {}
+    prov = report.get("provenance") or {}
     clauses: dict[str, bool] = {}
 
     arm_blocks = [a for a in arms.values() if isinstance(a, Mapping)]
@@ -1134,6 +1164,38 @@ def derive_clauses(report: Mapping[str, Any]) -> dict[str, bool]:
         and ablation.get("with_aux_arm") != ablation.get("no_aux_arm")
     )
     clauses["ablation_arms_are_lr_matched"] = ablation.get("matched_lr") is True
+
+    # -- the report names the environment the SCORED weights actually needed --------- #
+    # Nothing graded `provenance.env_lock` before, so the RNA-FM run recorded the production
+    # lock — an environment whose `multimolecule` pin cannot even load the checkpoint it was
+    # scoring — and passed. The arms carry the backbone they were loaded as, measured off the
+    # adapter's own recorded base model, so the lock is re-derivable from evidence rather than
+    # read back from a constant ([[gate-must-bind-to-upstream-evidence]]).
+    # EVERY arm must record one, and they must agree. Discarding the arms that recorded
+    # nothing would let a single arm carry the clause while its partner was scored under an
+    # unknown model — the clause would pass on a subset of the evidence it claims to grade.
+    # ⚠ Round 11: read the backbone the record EVIDENCES, by either route. Reading `backbone`
+    # alone left this clause unsatisfiable from the pre-A15 sidecars that `--scored-backbone`
+    # exists to re-grade — so a correct report published `overall_pass: false` for a
+    # provenance-plumbing reason. That is the same regression round 10 fixed on the gate2 side
+    # and left standing here.
+    arm_backbones = {_backbone_key_from_load(a.get("load")) for a in arm_blocks}
+    try:
+        expected_lock = (
+            T.env_lock_for(str(next(iter(arm_backbones))))
+            if len(arm_backbones) == 1 and None not in arm_backbones
+            else None
+        )
+    except (KeyError, ValueError):
+        # An arm naming a backbone this repo does not pin cannot resolve to a lock, and a
+        # clause is a verdict, not a crash site.
+        expected_lock = None
+    clauses["provenance_env_lock_is_the_arms_backbones"] = (
+        bool(arm_blocks)
+        and expected_lock is not None
+        and bool(prov.get("env_lock"))
+        and prov.get("env_lock") == expected_lock
+    )
     with_aux_block = arms.get(str(ablation.get("with_aux_arm")), {}) or {}
     no_aux_block = arms.get(str(ablation.get("no_aux_arm")), {}) or {}
     clauses["ablation_contrast_is_aux_weight"] = bool(
@@ -1146,6 +1208,21 @@ def derive_clauses(report: Mapping[str, Any]) -> dict[str, bool]:
     return clauses
 
 
+def clauses_not_required_at(schema: str) -> frozenset[str]:
+    """Clauses introduced AFTER ``schema``, which a report at that schema cannot carry."""
+    return RSCH.clauses_not_required_at(
+        schema, known=KNOWN_SCHEMAS, first_required_at=CLAUSES_FIRST_REQUIRED_AT
+    )
+
+
+RSCH.check_schema_tables(
+    known=KNOWN_SCHEMAS,
+    first_required_at=CLAUSES_FIRST_REQUIRED_AT,
+    current=SCHEMA_VERSION,
+    module=__name__,
+)
+
+
 def validate_report(report: Mapping[str, Any]) -> list[str]:
     """Structural problems with ``report``; empty means well-formed and **self-consistent**.
 
@@ -1156,8 +1233,10 @@ def validate_report(report: Mapping[str, Any]) -> list[str]:
     malformed and invite someone to "fix" it.
     """
     problems: list[str] = []
-    if report.get("schema_version") != SCHEMA_VERSION:
-        problems.append(f"schema_version {report.get('schema_version')!r} != {SCHEMA_VERSION!r}")
+    # The RAW value, never `str(...)` — see the note in `sizing.validate_report`.
+    schema = report.get("schema_version")
+    if not isinstance(schema, str) or schema not in KNOWN_SCHEMAS:
+        problems.append(f"schema_version {schema!r} is not one of {KNOWN_SCHEMAS!r}")
     if report.get("step") != STEP:
         problems.append(f"step {report.get('step')!r} != {STEP!r}")
     for block in ("dataset", "arms", "ablation", "provenance", "gate"):
@@ -1192,17 +1271,25 @@ def validate_report(report: Mapping[str, Any]) -> list[str]:
     if not isinstance(recorded, Mapping):
         problems.append("gate.clauses is missing")
         return problems
-    if set(recorded) != set(recomputed):
-        problems.append(f"gate.clauses keys {sorted(recorded)} != re-derived {sorted(recomputed)}")
-    for name, value in recomputed.items():
+    # A report is graded against the clause set of ITS OWN schema. For a report at the current
+    # schema this excuses nothing and the check is unchanged; for an older one it is the
+    # difference between "this artifact predates the clause" and "this artifact is malformed".
+    expected = {
+        name: value
+        for name, value in recomputed.items()
+        if name not in clauses_not_required_at(schema)
+    }
+    if set(recorded) != set(expected):
+        problems.append(f"gate.clauses keys {sorted(recorded)} != re-derived {sorted(expected)}")
+    for name, value in expected.items():
         if bool(recorded.get(name)) != value:
             problems.append(
                 f"gate.clauses[{name!r}]={recorded.get(name)!r} but re-derivation says {value}"
             )
-    if bool(gate.get("overall_pass")) != all(recomputed.values()):
+    if bool(gate.get("overall_pass")) != all(expected.values()):
         problems.append(
             f"gate.overall_pass={gate.get('overall_pass')!r} but the re-derived clauses give "
-            f"{all(recomputed.values())}"
+            f"{all(expected.values())}"
         )
     return problems
 
@@ -1245,20 +1332,199 @@ def build_report(
     report["gate"] = {
         "clauses": clauses,
         "overall_pass": all(clauses.values()),
-        "note": (
-            "these clauses grade the MACHINERY — that the trained weights really loaded, "
-            "that T was fitted on calib alone, that the graded object is the pre-prior-shift "
-            "named posterior, and that nothing was truncated. The ablation VERDICT is "
-            "separate and lives in `ablation.verdict`: it is derived from the governing "
-            "(absolute) reading of ADR-0005 D16, which asks only whether the with-aux arm "
-            "still holds the D11 grade. A false overall_pass here therefore does NOT mean "
-            "the aux heads degraded anything — on this run it means the no-aux CONTROL is "
-            "uncalibratable (its calib carve is perfectly separated), an accepted and "
-            "recorded outcome (user sign-off, 2026-08-03), with the degenerate-limit rule "
-            "to be pinned in ADR-0005 D11 at the P3-exit gate."
-        ),
+        "note": _gate_note(report),
     }
     return report
+
+
+def _degenerate_calibration_arms(report: Mapping[str, Any]) -> list[str]:
+    """Arms whose calib carve could not produce a temperature ON THIS RUN.
+
+    Read back from the arms' own recorded calibration, never assumed: the note this feeds used
+    to state "on this run it means the no-aux CONTROL is uncalibratable (its calib carve is
+    perfectly separated)" unconditionally, so the RNA-FM report asserted it while recording
+    ``is_perfectly_separated: false``, ``converged: true``, a finite T and ``overall_pass:
+    true`` — prose describing a state the run never reached ([[gate-clauses-need-re-derivation]]).
+    """
+    degenerate: list[str] = []
+    for name, block in (report.get("arms") or {}).items():
+        if not isinstance(block, Mapping):
+            continue
+        calib = block.get("calibration") or {}
+        separation = calib.get("calib_separation") or {}
+        if separation.get("is_perfectly_separated") is True or calib.get("converged") is False:
+            degenerate.append(str(name))
+    return sorted(degenerate)
+
+
+def _saved_field(legacy: Mapping[str, Any], checkpoint: Mapping[str, Any], key: str) -> Any:
+    """The saved checkpoint's own val number, from whichever block of a run report records it.
+
+    P3-06's reports carry it under ``legacy`` — a correcting annotation added because that run
+    saved FINAL-epoch weights while ``val.best_total`` describes weights it discarded. P3-17's
+    comparator reports carry the same two field names under ``checkpoint`` and have no
+    ``legacy`` block at all, so reading only ``legacy`` published ``null`` for both RNA-FM arms
+    while the number sat one key away, in the artifact the backbone comparison reads.
+
+    ``legacy`` wins where both exist: it is the corrected reading of the run it annotates.
+    """
+    if key in legacy:
+        return legacy.get(key)
+    return checkpoint.get(key)
+
+
+def env_lock_for_scored_arms(
+    load_records: Mapping[str, Mapping[str, Any]], *, declared_backbone: str | None = None
+) -> str:
+    """The conda lock the SCORED weights required, from the arms' own load records.
+
+    Not :data:`ENV_LOCK`. That constant names the production lock, and stamping it made job
+    1374's RNA-FM report claim an environment whose ``multimolecule`` pin cannot load the
+    checkpoint the run had just scored, with ``env_lock_hash`` then digesting the wrong file.
+    The backbone comes from the loader, which derives it from each adapter's own recorded base
+    model, so this is re-derived evidence rather than a read-back setting.
+
+    Arms that disagree are refused rather than averaged: one report cannot name the environment
+    for two models. Arms where SOME record a backbone and some do not are refused too — letting
+    the ones that spoke answer for the ones that did not is how a partner scored under an
+    unknown model becomes invisible.
+
+    ``declared_backbone`` fills exactly one gap and creates no default. The committed
+    **pre-A15** score sidecars (`reports/p3/stage2_scores.json`,
+    `reports/p3/stage2_scores_loo.json`) were written before `backbone` was a field at all —
+    when this repo pinned exactly one Stage-2 backbone — so they name none, and regenerating
+    them costs the GPU pass that produced them. A caller re-grading one may state the backbone
+    explicitly; it is used ONLY when the records are silent, and a declaration that contradicts
+    a record is refused rather than allowed to win.
+    """
+    if not load_records:
+        raise RuntimeError("no arms were scored, so no environment can be named for them")
+    recorded = sorted({str(r["backbone"]) for r in load_records.values() if r.get("backbone")})
+    silent = [name for name, r in load_records.items() if not r.get("backbone")]
+    if recorded and silent:
+        raise RuntimeError(
+            f"arms {sorted(silent)!r} record no backbone while {recorded!r} do; the ones that "
+            "spoke must not answer for the ones that did not"
+        )
+    if len(recorded) > 1:
+        raise RuntimeError(
+            f"the scored arms record backbones {recorded!r}; a single report cannot name the "
+            "environment for more than one of them"
+        )
+    if recorded:
+        if declared_backbone is not None and str(declared_backbone) != recorded[0]:
+            raise RuntimeError(
+                f"backbone {declared_backbone!r} was declared but the scored arms record "
+                f"{recorded[0]!r}; the recorded evidence wins and the disagreement is refused"
+            )
+        # ⚠ Round 11: `backbone` is a WRITTEN key and `base_model_name_or_path` is the repo id
+        # the weights were actually adapted from. Trusting the first without checking the
+        # second made the stamp and the clause that grades it circular — a sidecar recording
+        # `backbone: rinalmo-giga` beside `base_model: multimolecule/rnafm` named, hashed and
+        # self-certified the production lock for RNA-FM weights, which is the exact defect A15
+        # exists to stop ([[gate-must-bind-to-upstream-evidence]]).
+        contradicted = sorted(
+            {
+                key
+                for r in load_records.values()
+                if (key := _backbone_key_for_repo_id(r.get("base_model_name_or_path"))) is not None
+                and key != recorded[0]
+            }
+        )
+        if contradicted:
+            raise RuntimeError(
+                f"the scored arms record backbone {recorded[0]!r} but their own "
+                f"base_model_name_or_path resolves to {contradicted!r}; a load record that "
+                "contradicts itself is not evidence and is refused"
+            )
+        return T.env_lock_for(recorded[0])
+    if declared_backbone is None:
+        raise RuntimeError(
+            "no scored arm records a backbone, so the environment cannot be re-derived. This "
+            "is what a score sidecar written before ADR-0002 A15 looks like; pass "
+            "--scored-backbone <key> to state which model produced it, or regenerate the "
+            "sidecar. It is NOT defaulted to production — that guess is exactly the defect "
+            "this function exists to stop."
+        )
+    # ⚠ Round 10: the "a declaration that contradicts a record is refused" contract above was
+    # VACUOUS for exactly the sidecars this parameter exists for. It compared `declared` only
+    # against `backbone`, the one field the pre-A15 sidecars do not carry — so on those files
+    # every declaration was accepted, including one naming a backbone whose env cannot load the
+    # weights being graded. Those sidecars DO carry `base_model_name_or_path`, which the
+    # ADR-0002 allow-list maps to exactly one key, so the contradiction is checkable after all.
+    # Being *asked* for the wrong base is the same defect as inheriting it.
+    declared = str(declared_backbone)
+    from_repo = sorted(
+        {
+            key
+            for r in load_records.values()
+            if (key := _backbone_key_for_repo_id(r.get("base_model_name_or_path"))) is not None
+        }
+    )
+    if len(from_repo) > 1:
+        raise RuntimeError(
+            f"the scored arms' base models resolve to backbones {from_repo!r}; a single report "
+            "cannot name the environment for more than one of them"
+        )
+    if from_repo and declared != from_repo[0]:
+        raise RuntimeError(
+            f"backbone {declared!r} was declared but the scored arms' recorded base model "
+            f"resolves to {from_repo[0]!r}; the recorded evidence wins and the disagreement "
+            "is refused"
+        )
+    return T.env_lock_for(declared)
+
+
+def _backbone_key_from_load(load: Mapping[str, Any] | None) -> str | None:
+    """The backbone a load record evidences: its written key, else its own base model.
+
+    The eval-side twin of :func:`tbox_finder.calib.gate2.backbone_key_from_load`, with the
+    same contract — a record whose two fields disagree evidences nothing, because a
+    contradiction is not a vote.
+    """
+    rec = load or {}
+    declared = rec.get("backbone")
+    from_repo = _backbone_key_for_repo_id(rec.get("base_model_name_or_path"))
+    if declared and from_repo and str(declared) != from_repo:
+        return None
+    key = declared or from_repo
+    return str(key) if key else None
+
+
+def _backbone_key_for_repo_id(repo_id: Any) -> str | None:
+    """The allow-list key for a recorded ``base_model_name_or_path``, or ``None`` if unresolvable.
+
+    Unresolvable is not a refusal: a sidecar naming a repo id this ADR does not pin carries no
+    evidence about the backbone, and a check with no evidence must not manufacture a verdict.
+    """
+    if not repo_id:
+        return None
+    try:
+        return BR.backbone_for_repo_id(str(repo_id)).key
+    except (KeyError, ValueError, AttributeError):
+        return None
+
+
+def _gate_note(report: Mapping[str, Any]) -> str:
+    """The always-true half, plus the degenerate-control half only when it is true."""
+    note = (
+        "these clauses grade the MACHINERY — that the trained weights really loaded, "
+        "that T was fitted on calib alone, that the graded object is the pre-prior-shift "
+        "named posterior, and that nothing was truncated. The ablation VERDICT is "
+        "separate and lives in `ablation.verdict`: it is derived from the governing "
+        "(absolute) reading of ADR-0005 D16, which asks only whether the with-aux arm "
+        "still holds the D11 grade. A false overall_pass here therefore does NOT by itself "
+        "mean the aux heads degraded anything."
+    )
+    degenerate = _degenerate_calibration_arms(report)
+    if degenerate:
+        note += (
+            f" On THIS run the calib carve of {', '.join(degenerate)} is degenerate "
+            "(perfectly separated, or the temperature fit did not converge), so it is "
+            "uncalibratable — an accepted and recorded outcome (user sign-off, 2026-08-03), "
+            "with the degenerate-limit rule to be pinned in ADR-0005 D11 at the P3-exit gate."
+        )
+    return note
 
 
 def aux_ablation_check(
@@ -1344,6 +1610,66 @@ def _normalise_adapter_key(key: str) -> str:
     return _ADAPTER_NAME_RE.sub(".", key)
 
 
+def resolve_checkpoint_backbone(
+    recorded_base: str | None,
+    *,
+    requested: str | None = None,
+    where: str = "<checkpoint>",
+) -> str:
+    """Which pinned backbone a LoRA checkpoint belongs to — from its OWN evidence.
+
+    A LoRA checkpoint stores adapters and heads and **not the backbone**, so the weights it
+    scores with are half read off disk and half whatever base the process loaded. Pointing it
+    at the wrong one is not an error anyone notices at runtime: the shapes match, the adapter
+    applies cleanly, and the logits are simply somebody else's.
+
+    Since ADR-0002 A15 there are TWO pinned Stage-2 backbones, so this cannot compare against a
+    single constant. The answer is **re-derived from ``base_model_name_or_path``** against the
+    closed allow-list, and every other route raises:
+
+    * a recorded base outside the allow-list — the adapter names a backbone this repo does not
+      pin, so nothing here can vouch for it;
+    * a ``requested`` key contradicting what the checkpoint records — being *asked* for the
+      wrong base is the same defect as inheriting it;
+    * **nothing recorded and nothing requested.** The first cut defaulted to production here,
+      directly contradicting the paragraph above it — which is the tell that it was wrong. Two
+      things follow from such a default: the loader silently picks RiNALMo for a checkpoint
+      that never declared its base, and the record then reports ``rinalmo-giga`` in exactly the
+      shape a genuinely re-derived value has, so no consumer downstream can separate an
+      assumption from evidence. A 640-vs-1280 mismatch would *usually* surface as a shape
+      error, but "usually" is not the contract and the record is wrong either way.
+
+    ``requested`` with nothing recorded is allowed and is the escape hatch for a checkpoint
+    predating the field: a human named the arm, and the record says a human did.
+
+    Pure and torch-free on purpose — this is the decision, and it is unit-testable without a
+    2.5 GB checkpoint or a peft install ([[artifact-pinning-test-cannot-see-the-code]]).
+    """
+    derived = BR.backbone_for_repo_id(recorded_base) if recorded_base else None
+    if recorded_base and derived is None:
+        raise ValueError(
+            f"{where} was trained against base model {recorded_base!r}, which is not in the "
+            f"ADR-0002 A15 allow-list {BR.BACKBONE_KEYS}; the adapter would be applied to a "
+            "backbone this repo does not pin"
+        )
+    if requested is not None and derived is not None and requested != derived.key:
+        raise ValueError(
+            f"{where} records base model {recorded_base!r} (backbone {derived.key!r}) but "
+            f"backbone={requested!r} was requested; the adapter would be applied to a backbone "
+            "it never saw"
+        )
+    if derived is not None:
+        return derived.key
+    if requested is not None:
+        return BR.resolve_backbone(requested).key
+    raise ValueError(
+        f"{where} records no base_model_name_or_path, so which backbone these adapters saw "
+        f"cannot be re-derived from the checkpoint. Pass backbone=<key> explicitly (one of "
+        f"{BR.BACKBONE_KEYS}) rather than letting it default — a guessed base is applied to "
+        "weights it never saw and then reported as if it had been measured."
+    )
+
+
 def load_stage2_checkpoint(
     checkpoint_dir: str | Path,
     *,
@@ -1355,6 +1681,7 @@ def load_stage2_checkpoint(
     structure_head: bool = False,
     pairing_proj_dim: int | None = None,
     base_model: Any = None,
+    backbone: str | None = None,
 ) -> tuple[Any, dict[str, Any]]:
     """A P3-06 checkpoint → a ready-to-score :class:`Stage2Model`, weights **verified**.
 
@@ -1400,18 +1727,18 @@ def load_stage2_checkpoint(
     # would notice at runtime — the shapes match, the adapter applies cleanly, and the
     # logits are simply somebody else's.
     recorded_base = adapter_config.get("base_model_name_or_path")
-    if recorded_base and recorded_base != LH.REPO_ID:
-        raise ValueError(
-            f"{adapter_dir} was trained against base model {recorded_base!r}, but this "
-            f"repo pins {LH.REPO_ID!r}; the adapter would be applied to a backbone it "
-            "never saw"
-        )
-
+    resolved_backbone = resolve_checkpoint_backbone(
+        recorded_base, requested=backbone, where=str(adapter_dir)
+    )
     resolved_dtype = dtype or LH.TRAIN_DTYPE
-    resolved_revision = revision or LH.REVISION
+    # The revision that will actually be loaded, resolved from the SAME spec the loader uses
+    # rather than from a module constant — otherwise a comparator checkpoint's record would
+    # report the production checkpoint's revision.
+    resolved_revision = revision or BR.resolve_backbone(resolved_backbone).revision
     if base_model is None:
-        base_model = LH.load_rinalmo_backbone(
-            revision=resolved_revision,
+        base_model = LH.load_rna_backbone(
+            backbone=resolved_backbone,
+            revision=revision,
             dtype=resolved_dtype,
             attn_implementation=attn_implementation,
             device=None,
@@ -1525,6 +1852,11 @@ def load_stage2_checkpoint(
             for key in ("peft_type", "r", "lora_alpha", "lora_dropout", "target_modules", "bias")
         },
         "base_model_name_or_path": adapter_config.get("base_model_name_or_path"),
+        # Which allow-list entry the base was re-derived to be (ADR-0002 A15). Recorded
+        # because `base_model_name_or_path` alone is a repo id, and every consumer that wants
+        # to know "was this the shipped arm or the comparator" would otherwise have to
+        # re-derive it independently and could disagree.
+        "backbone": resolved_backbone,
         "revision": resolved_revision,
         "dtype": resolved_dtype,
         "attn_implementation": attn_implementation,
@@ -1730,6 +2062,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--batch-size", type=int, default=4)
     parser.add_argument("--device", default=None)
     parser.add_argument("--attn-implementation", default=None)
+    parser.add_argument(
+        "--scored-backbone",
+        default=None,
+        help=(
+            "which pinned backbone produced the scores, for a PRE-A15 sidecar that records "
+            "none. Never overrides a recorded backbone; a disagreement is refused."
+        ),
+    )
     parser.add_argument("--n-boot", type=int, default=DEFAULT_N_BOOT)
     parser.add_argument(
         "--all-arms",
@@ -1838,6 +2178,13 @@ def main(argv: Sequence[str] | None = None) -> int:
             handle.write("\n")
         print(f"wrote {scores_out}")
 
+    # Which environment the scored weights required — see `env_lock_for_scored_arms`. Kept as
+    # a call rather than inlined so a test can reach it: an earlier version lived here, and a
+    # sabotage that put `ENV_LOCK` back stayed GREEN because every unit test built its report
+    # through `aux_ablation_check` and never through this wiring
+    # ([[artifact-pinning-test-cannot-see-the-code]]).
+    scored_env_lock = env_lock_for_scored_arms(load_records, declared_backbone=args.scored_backbone)
+
     report = aux_ablation_check(
         arm_scores,
         arm_configs=arms,
@@ -1858,8 +2205,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         },
         provenance={
             "git_sha": PROV.git_sha(),
-            "env_lock": ENV_LOCK,
-            "env_lock_hash": PROV.env_lock_hash(ENV_LOCK),
+            # NOT `ENV_LOCK`. That constant names the PRODUCTION lock, and stamping it made
+            # job 1374's RNA-FM report claim an environment whose `multimolecule` pin cannot
+            # load the checkpoint the run had just scored — with `env_lock_hash` then digesting
+            # the wrong file. The backbone comes from the load records, which read it off each
+            # adapter's own recorded base model.
+            "env_lock": scored_env_lock,
+            "env_lock_hash": PROV.env_lock_hash(scored_env_lock),
             "entrypoint": ENTRYPOINT,
         },
         written_at=_dt.datetime.now(_dt.UTC).isoformat(timespec="seconds"),

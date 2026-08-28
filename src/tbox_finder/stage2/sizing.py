@@ -45,6 +45,13 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from tbox_finder import report_schema as RSCH
+from tbox_finder.models.rna_backbone_registry import (
+    COMPARATOR_BACKBONE,
+    PRODUCTION_BACKBONE,
+    backbone_summary,
+    resolve_backbone,
+)
 from tbox_finder.stage2 import heads as H
 from tbox_finder.stage2 import losses as L
 from tbox_finder.stage2 import train as T
@@ -52,9 +59,15 @@ from tbox_finder.stage2 import train as T
 __all__ = [
     "DEFAULT_BATCH_SWEEP",
     "DEFAULT_OUT",
+    "CLAUSES_FIRST_REQUIRED_AT",
+    "KNOWN_SCHEMAS",
+    "LEGACY_SCHEMAS_WITHOUT_SKIP_CODE",
     "SCHEMA_VERSION",
+    "SKIP_ON_ARM_DID_NOT_FIT",
+    "SKIP_PORT_CANNOT_CHECKPOINT",
     "STEP",
     "build_report",
+    "clauses_not_required_at",
     "derive_clauses",
     "measure_batch",
     "run_sizing",
@@ -65,9 +78,80 @@ __all__ = [
 #: and `recommendation` became validator-re-derived. Job 1051's committed report is schema 1;
 #: its numbers stand, but it does not carry the schema-2 clause and its recommendation predates
 #: the computed-headroom shape.
-SCHEMA_VERSION = "2"
+#: Bumped 2 -> 3 at P3-17: the report gains a `backbone` block and the clause set gains
+#: `checkpointing_skip_is_earned`, and a clause set is part of a report's shape
+#: ([[new-gate-clause-invalidates-old-reports]]). Job 1051's committed report is schema **1**
+#: — this note used to say schema 2, which `reports/p3/stage2_sizing.json` disproves; its
+#: numbers stand and it is not regenerated.
+#: Bumped 3 -> 4 at P3-17 review round 5: `provenance.env_lock` stopped being the production
+#: constant and became the SUBJECT's lock, and the clause set gained
+#: `provenance_env_lock_is_the_backbones` and a machine-readable
+#: `gradient_checkpointing.comparison_skipped_code`. ⚠ CORRECTED at review round 11: job
+#: 1374's committed RNA-FM report was left at schema 3 carrying the stale `provenance.env_lock`
+#: this bump exists to stop — i.e. it inherited the carve-out meant for reports written before
+#: the clause, while being the very artifact the clause was written about. Re-measuring its
+#: GiB needs an A4000, but the env-lock field and the clause block are pure CPU, so the value
+#: is corrected and the report PROMOTED to 4 rather than excused; every measured number is
+#: untouched ([[new-gate-clause-invalidates-old-reports]]).
+SCHEMA_VERSION = "4"
 STEP = "P3-06-sizing"
 DEFAULT_OUT = "reports/p3/stage2_sizing.json"
+
+#: Which backbone OWNS each committed sizing artifact. A VRAM/step-time measurement is about
+#: one network, and these two differ ~6.5x in parameters, so writing one backbone's numbers
+#: into the other's file destroys the measurement a config cites. `_run` refuses any
+#: `--backbone` / `--out` pair that would do that, comparing RESOLVED paths so an equivalent
+#: spelling of the same file cannot slip past ([[two-outputs-one-path-destroys-the-first]]).
+SIZING_ARTIFACT_OWNERS: dict[str, str] = {
+    PRODUCTION_BACKBONE: DEFAULT_OUT,
+    COMPARATOR_BACKBONE: "reports/p3/stage2_rnafm_sizing.json",
+}
+
+#: Why the checkpointing on/off comparison was skipped, as a VALUE rather than as a sentence.
+#: `checkpointing_skip_is_earned` used to accept the skip by looking for the substring "did not
+#: fit" inside `comparison_skipped_reason`, which coupled a gate clause to the wording of a
+#: human-facing message: rewording the sentence silently flipped the clause. The sentence stays
+#: for the reader; the clause grades these.
+SKIP_PORT_CANNOT_CHECKPOINT = "port_cannot_run_checkpointing"
+SKIP_ON_ARM_DID_NOT_FIT = "on_arm_did_not_fit"
+
+#: The schemas written BEFORE `comparison_skipped_code` existed, listed rather than compared.
+#: `schema_version` is a string, and `"3" < "4"` only happens to work while both are one digit
+#: — the same string-compare trap this branch already fixed once in the library-version check.
+LEGACY_SCHEMAS_WITHOUT_SKIP_CODE = frozenset({"1", "2", "3"})
+
+#: Every schema this validator knows, oldest first — listed, never string-compared.
+KNOWN_SCHEMAS: tuple[str, ...] = ("1", "2", "3", "4")
+
+#: The clauses a report FIRST carries at each schema. A report written before a clause existed
+#: cannot have recorded it, and re-grading it under today's set reports a failure that is
+#: really an age difference: `reports/p3/stage2_sizing.json` (schema 1, job 1051) grades
+#: `checkpointing_skip_is_earned` FALSE under the schema-3 set purely because
+#: `usable_on_this_backbone` did not exist when it was written
+#: ([[new-gate-clause-invalidates-old-reports]]).
+CLAUSES_FIRST_REQUIRED_AT: dict[str, frozenset[str]] = {
+    "2": frozenset({"measured_the_requested_batch"}),
+    "3": frozenset({"checkpointing_skip_is_earned"}),
+    "4": frozenset(
+        {"provenance_env_lock_is_the_backbones", "checkpointing_usability_agrees_with_the_port"}
+    ),
+}
+
+
+def clauses_not_required_at(schema: str) -> frozenset[str]:
+    """Clauses introduced AFTER ``schema``, which a report at that schema cannot carry."""
+    return RSCH.clauses_not_required_at(
+        schema, known=KNOWN_SCHEMAS, first_required_at=CLAUSES_FIRST_REQUIRED_AT
+    )
+
+
+RSCH.check_schema_tables(
+    known=KNOWN_SCHEMAS,
+    first_required_at=CLAUSES_FIRST_REQUIRED_AT,
+    current=SCHEMA_VERSION,
+    module=__name__,
+)
+
 
 #: Descending, so the sweep learns the ceiling before spending time under it. 8 is what job
 #: 1044 tried and lost; 1 is the floor below which the arm is not viable on this card.
@@ -118,6 +202,7 @@ def measure_batch(
     loss_config: L.Stage2LossConfig,
     base_model: Any = None,
     device: str | None = None,
+    backbone: str = PRODUCTION_BACKBONE,
 ) -> dict[str, Any]:
     """Peak VRAM + step time for one (batch_size, regime), or a clean ``oom`` record.
 
@@ -128,7 +213,14 @@ def measure_batch(
     import torch
 
     spec = H.load_head_spec()
+    # The per-arm destinations are passed even though sizing writes NEITHER: since ADR-0002
+    # A15 `Stage2TrainConfig.__post_init__` refuses a non-production backbone aimed at the
+    # production checkpoint/report paths, and inheriting those defaults here would make the
+    # comparator's sizing leg unrunnable for a reason that has nothing to do with sizing.
     cfg = T.Stage2TrainConfig(
+        backbone=backbone,
+        checkpoint_dir=T.default_checkpoint_dir(backbone),
+        report_path=T.default_report_path(backbone),
         batch_size=batch_size,
         gradient_checkpointing=gradient_checkpointing,
         loss=loss_config,
@@ -136,6 +228,10 @@ def measure_batch(
         device=device,
     )
     record: dict[str, Any] = {
+        # WHICH model these GiB describe. A sizing number is meaningless without it, and the
+        # two arms differ by 6.5x in parameters — a report that omitted this could be read as
+        # sizing either one ([[size-a-run-from-the-protocols-own-report]]).
+        "backbone": backbone,
         "batch_size": batch_size,
         "measured_batch_size": None,
         "gradient_checkpointing": gradient_checkpointing,
@@ -234,6 +330,7 @@ def derive_clauses(report: Mapping[str, Any]) -> dict[str, bool]:
     device = report.get("device") or {}
     population = report.get("population") or {}
     ckpt = report.get("gradient_checkpointing") or {}
+    prov = report.get("provenance") or {}
 
     with_numbers = [m for m in meas if not m.get("oom") and m.get("peak_vram_gib")]
     clauses = {
@@ -268,14 +365,69 @@ def derive_clauses(report: Mapping[str, Any]) -> dict[str, bool]:
             ckpt.get("on_peak_gib") is not None and ckpt.get("off_peak_gib") is not None
         )
         or ckpt.get("comparison_skipped_reason") is not None,
+        # ...and a SKIP has to be earned. The clause above accepts any non-null reason, so on
+        # its own it lets a run opt out of the comparison by writing a sentence. This binds
+        # the skip to the report's own recorded evidence: either the comparison ran, or the
+        # port genuinely cannot run the 'on' arm, or the 'on' arm OOM'd — and the sweep's
+        # measurements must agree with the usability flag rather than merely accompany it.
+        # ⚠ The OOM disjunct grades `comparison_skipped_code`, NOT the wording of
+        # `comparison_skipped_reason`. Grading the sentence made this clause turn on prose:
+        # rewording the message flipped a gate. Schema-3 reports carry no code, so the legacy
+        # substring is still accepted for them ALONE — never for a report this code writes.
+        "checkpointing_skip_is_earned": (
+            (ckpt.get("on_peak_gib") is not None and ckpt.get("off_peak_gib") is not None)
+            or ckpt.get("usable_on_this_backbone") is False
+            or ckpt.get("comparison_skipped_code") == SKIP_ON_ARM_DID_NOT_FIT
+            or (
+                report.get("schema_version") in LEGACY_SCHEMAS_WITHOUT_SKIP_CODE
+                and "did not fit" in str(ckpt.get("comparison_skipped_reason") or "")
+            )
+        )
+        # ⚠ EVERY measurement must record the flag, and every one must agree with the
+        # usability fact. The `for ... if m.get(...) is not None` form this replaces went
+        # vacuously TRUE the moment `measure_batch` stopped recording the key — the sole
+        # writer, unpinned, and an `all()` over an empty sequence is True
+        # ([[clauses-must-guard-emptiness]]). The old `and not m.get("off_comparison")`
+        # exclusion is gone with it: nothing in this repo ever wrote that key (the
+        # off-comparison record is never appended to `measurements`), so it excluded nothing
+        # while reading like a considered carve-out.
+        and bool(meas)
+        and all(m.get("gradient_checkpointing") is not None for m in meas)
+        and all(
+            bool(m.get("gradient_checkpointing")) is bool(ckpt.get("usable_on_this_backbone"))
+            for m in meas
+        ),
+        # The clause that was missing when job 1374's report stamped the PRODUCTION lock over
+        # an RNA-FM measurement. `provenance.env_lock` is resolved from the REQUESTED key and
+        # `backbone.env_lock` from the RESOLVED spec, so a producer that goes back to stamping
+        # a module constant makes the two disagree and flips this FALSE. Nothing graded either
+        # field before, which is exactly why the wrong one survived a passing gate.
+        # The skip clause above accepts `usable_on_this_backbone: False` as earning a skip, and
+        # nothing checked that flag against the PORT FACT the same report carries three keys
+        # away in `backbone.gradient_checkpointing_usable`. A report that disagreed with itself
+        # — claiming the port cannot checkpoint while recording that it can — earned its skip
+        # clean ([[gate-must-bind-to-upstream-evidence]]).
+        "checkpointing_usability_agrees_with_the_port": (
+            ckpt.get("usable_on_this_backbone") is not None
+            and (report.get("backbone") or {}).get("gradient_checkpointing_usable") is not None
+            and bool(ckpt.get("usable_on_this_backbone"))
+            is bool((report.get("backbone") or {}).get("gradient_checkpointing_usable"))
+        ),
+        "provenance_env_lock_is_the_backbones": (
+            bool(prov.get("env_lock"))
+            and prov.get("env_lock") == (report.get("backbone") or {}).get("env_lock")
+        ),
     }
     return {k: bool(v) for k, v in clauses.items()}
 
 
 def validate_report(report: Mapping[str, Any]) -> list[str]:
     problems: list[str] = []
-    if report.get("schema_version") != SCHEMA_VERSION:
-        problems.append(f"schema_version {report.get('schema_version')!r} != {SCHEMA_VERSION!r}")
+    # The RAW value, never `str(...)`: coercion makes the JSON number `1` indistinguishable
+    # from schema `"1"` and hands it that schema's clause exemptions.
+    schema = report.get("schema_version")
+    if not isinstance(schema, str) or schema not in KNOWN_SCHEMAS:
+        problems.append(f"schema_version {schema!r} is not one of {KNOWN_SCHEMAS!r}")
     if report.get("step") != STEP:
         problems.append(f"step {report.get('step')!r} != {STEP!r}")
     gate = report.get("gate")
@@ -287,12 +439,21 @@ def validate_report(report: Mapping[str, Any]) -> list[str]:
     if not isinstance(recorded, Mapping):
         problems.append("gate.clauses is missing")
         return problems
-    if set(recorded) != set(recomputed):
-        problems.append(f"gate.clauses keys {sorted(recorded)} != re-derived {sorted(recomputed)}")
-    for name, value in recomputed.items():
+    # A report is graded against the clause set of ITS OWN schema. At the current schema this
+    # excuses nothing and the check is unchanged.
+    expected_clauses = {
+        name: value
+        for name, value in recomputed.items()
+        if name not in clauses_not_required_at(schema)
+    }
+    if set(recorded) != set(expected_clauses):
+        problems.append(
+            f"gate.clauses keys {sorted(recorded)} != re-derived {sorted(expected_clauses)}"
+        )
+    for name, value in expected_clauses.items():
         if bool(recorded.get(name)) != value:
             problems.append(f"gate.clauses[{name!r}] disagrees with re-derivation ({value})")
-    if bool(gate.get("overall_pass")) != all(recomputed.values()):
+    if bool(gate.get("overall_pass")) != all(expected_clauses.values()):
         problems.append("gate.overall_pass disagrees with the re-derived clauses")
     # ⚠ Re-derive the RECOMMENDATION too, not just the clauses. It is the one field a reader
     # acts on — it chose batch_size=4 for the production sweep — and nothing checked that it
@@ -352,6 +513,7 @@ def build_report(
     device: Mapping[str, Any],
     checkpointing: Mapping[str, Any],
     config: Mapping[str, Any],
+    backbone: Mapping[str, Any],
 ) -> dict[str, Any]:
     fitting = [m for m in measurements if not m.get("oom") and m.get("regime") == "worst_case"]
     largest = max((m["batch_size"] for m in fitting), default=None)
@@ -368,13 +530,23 @@ def build_report(
         "step_function": "tbox_finder.stage2.train.forward_backward",
         "supersedes_for_stage2_sizing": "reports/p1/lora_vram_smoke.json (P1-16)",
         "config": dict(config),
+        "backbone": dict(backbone),
         "population": dict(population),
         "device": dict(device),
         "gradient_checkpointing": dict(checkpointing),
         "measurements": [dict(m) for m in measurements],
         "largest_fitting_batch_worst_case": largest,
         "recommendation": _recommend(fitting, largest, device),
-        "provenance": {"env_lock": T.ENV_LOCK, "entrypoint": "tbox_finder.stage2.sizing"},
+        "provenance": {
+            # NOT `T.ENV_LOCK`. That constant names the PRODUCTION lock, so stamping it made
+            # job 1374's RNA-FM sizing report claim an environment the run did not use, while
+            # the `backbone` block in the same artifact recorded the right one. Resolve it from
+            # the subject, and let `provenance_env_lock_is_the_backbones` grade the agreement.
+            # `requested_key` is required, not defaulted: a missing subject must raise, not
+            # silently fall back to production.
+            "env_lock": T.env_lock_for(str(backbone["requested_key"])),
+            "entrypoint": "tbox_finder.stage2.sizing",
+        },
     }
     clauses = derive_clauses(report)
     report["gate"] = {
@@ -394,6 +566,7 @@ def run_sizing(
     out_path: str = DEFAULT_OUT,
     base_model: Any = None,
     device: str | None = None,
+    backbone: str = PRODUCTION_BACKBONE,
     log: Any = print,
 ) -> dict[str, Any]:
     """Run the sweep, write the report, return it. Raises if the report fails its own gate."""
@@ -424,6 +597,15 @@ def run_sizing(
     }
     loss_config = L.Stage2LossConfig()
 
+    # ⚠ Whether the sweep may enable checkpointing is a property of the PORT, not a choice.
+    # This harness used to hardcode True, which is correct for the rotary production backbone
+    # and fatal for RNA-FM: SLURM job 1370 died here, in the first measurement, because that
+    # port adds its absolute position embeddings in place while checkpointing makes the
+    # embedding output a leaf requiring grad. Sizing with a setting the arm cannot run would
+    # measure a configuration that never trains.
+    spec = resolve_backbone(backbone)
+    checkpointing_usable = bool(spec.gradient_checkpointing_usable)
+
     measurements: list[dict[str, Any]] = []
     for batch_size in batch_sweep:
         for regime, picker in (("worst_case", _worst_case_rows), ("typical", _typical_rows)):
@@ -433,10 +615,11 @@ def run_sizing(
                 chosen,
                 batch_size=batch_size,
                 steps=steps,
-                gradient_checkpointing=True,
+                gradient_checkpointing=checkpointing_usable,
                 loss_config=loss_config,
                 base_model=base_model,
                 device=device,
+                backbone=backbone,
             )
             record["regime"] = regime
             record["growth_ratio"] = _growth_ratio(record["peak_vram_gib_per_step"])
@@ -450,7 +633,23 @@ def run_sizing(
 
     # Checkpointing effectiveness, at the smallest batch so both regimes have a chance to fit.
     smallest = min(batch_sweep)
-    checkpointing: dict[str, Any] = {"batch_size": smallest, "comparison_skipped_reason": None}
+    checkpointing: dict[str, Any] = {
+        "batch_size": smallest,
+        "comparison_skipped_reason": None,
+        "comparison_skipped_code": None,
+        # Recorded so an absent comparison is a STATED fact rather than a missing key. The
+        # asymmetry between the two arms' sizing reports is real and has to be visible.
+        "usable_on_this_backbone": checkpointing_usable,
+        "usability_note": spec.gradient_checkpointing_note,
+    }
+    if not checkpointing_usable:
+        checkpointing["comparison_skipped_reason"] = (
+            f"gradient checkpointing is not usable on backbone {spec.key!r}, so there is no "
+            f"'on' arm to compare against: {spec.gradient_checkpointing_note}"
+        )
+        checkpointing["comparison_skipped_code"] = SKIP_PORT_CANNOT_CHECKPOINT
+        checkpointing["on_peak_gib"] = None
+        checkpointing["off_peak_gib"] = None
     on = next(
         (
             m
@@ -459,11 +658,14 @@ def run_sizing(
         ),
         None,
     )
-    if on is None:
+    if not checkpointing_usable:
+        pass  # already recorded above; there is no 'on' arm to measure on this port
+    elif on is None:
         checkpointing["comparison_skipped_reason"] = (
             f"the batch-{smallest} worst case did not fit even WITH checkpointing, so an "
             "off-comparison would only OOM harder and measure nothing"
         )
+        checkpointing["comparison_skipped_code"] = SKIP_ON_ARM_DID_NOT_FIT
         checkpointing["on_peak_gib"] = None
         checkpointing["off_peak_gib"] = None
     else:
@@ -475,6 +677,11 @@ def run_sizing(
             loss_config=loss_config,
             base_model=base_model,
             device=device,
+            # The SECOND call site. Threading the key into only the sweep would have left this
+            # off-comparison measuring the production backbone against an RNA-FM "on" number,
+            # i.e. a saving_ratio computed across two different models
+            # ([[fixed-one-of-two-identical-things]]).
+            backbone=backbone,
         )
         checkpointing["on_peak_gib"] = on.get("peak_vram_gib")
         checkpointing["off_peak_gib"] = off.get("peak_vram_gib")
@@ -497,6 +704,13 @@ def run_sizing(
             "world_size": 1,
             "optimizer": "AdamW",
             "dtype": "bfloat16 (lora_harness.TRAIN_DTYPE)",
+            "gradient_checkpointing": checkpointing_usable,
+        },
+        backbone={
+            **backbone_summary(spec),
+            # The measurement's own subject, so a reader never has to infer which model these
+            # GiB describe — the two arms differ by ~6.5x in parameters.
+            "requested_key": backbone,
         },
     )
     out = Path(out_path)
@@ -523,7 +737,39 @@ def _run(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--steps", type=int, default=DEFAULT_STEPS)
     parser.add_argument("--max-records", type=int, default=DEFAULT_MAX_RECORDS)
     parser.add_argument("--out", default=DEFAULT_OUT)
+    parser.add_argument(
+        "--backbone",
+        default=PRODUCTION_BACKBONE,
+        help=(
+            "rna_backbone_registry allow-list key to size (ADR-0002 A15). The arms differ by "
+            "~6.5x in parameters, so sizing one and training the other measures nothing."
+        ),
+    )
     args = parser.parse_args(argv)
+    # ⚠ Round 10: `--out` defaults to the PRODUCTION sizing artifact, and `--backbone` does not
+    # move it. `sizing --backbone rnafm` therefore overwrote `reports/p3/stage2_sizing.json` —
+    # the RiNALMo measurement `conf/train/stage2.yaml` cites for `batch_size: 4` — with RNA-FM
+    # numbers ~4x smaller, silently, after the GPU work was already spent. Refuse the
+    # combination up front rather than at the write ([[two-outputs-one-path-destroys-the-first]]);
+    # an explicit `--out` is always honoured, so this constrains nothing a caller meant to do.
+    # ⚠ Round 11 hardened this twice over. (a) The comparison was a raw string `==`, so
+    # `--out ./reports/p3/stage2_sizing.json` or an absolute path to the same file walked
+    # straight past it; paths are compared after `resolve()`, the fix this repo already made
+    # once in a sibling module ([[two-outputs-one-path-destroys-the-first]]). (b) It guarded
+    # only the production artifact, so `--backbone rinalmo-giga --out <the RNA-FM report>`
+    # was free to overwrite the comparator's. Every committed sizing artifact is owned by the
+    # backbone that produced it, and only that backbone may write it.
+    requested_out = Path(args.out).resolve()
+    for owner, owned in SIZING_ARTIFACT_OWNERS.items():
+        if requested_out != Path(owned).resolve():
+            continue
+        if str(args.backbone) != owner:
+            parser.error(
+                f"--backbone {args.backbone!r} would write {owned!r}, which is "
+                f"{owner!r}'s committed sizing artifact. Pass an --out of its own; the two "
+                "backbones differ ~6.5x in parameters, so one's VRAM measurement licenses "
+                "nothing about the other."
+            )
     sweep = tuple(int(b) for b in str(args.batch_sweep).split(",") if b.strip())
     report = run_sizing(
         dataset_parquet=args.dataset,
@@ -531,6 +777,7 @@ def _run(argv: Sequence[str] | None = None) -> int:
         steps=args.steps,
         max_records=args.max_records,
         out_path=args.out,
+        backbone=args.backbone,
     )
     largest = report["largest_fitting_batch_worst_case"]
     print(f"SIZING_DONE largest_fitting_worst_case_batch={largest}")

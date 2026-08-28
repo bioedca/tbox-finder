@@ -1,0 +1,339 @@
+{
+  "backbone": {
+    "env_lock": "envs/ml-rnafm.conda-lock.yml",
+    "expected_param_count": 99111680,
+    "gradient_checkpointing_note": "RAISES: this port adds its absolute position embeddings IN PLACE (modeling_rnafm.py:728) and checkpointing makes the embedding output a leaf requiring grad -> 'a leaf Variable that requires grad is being used in an in-place operation'. Measured on a cluster A4000 2026-08-21 (SLURM job 1370, then isolated to a 2x2 against rotary rinalmo-giga, which is unaffected)",
+    "gradient_checkpointing_usable": false,
+    "hidden_size": 640,
+    "key": "rnafm",
+    "max_position_embeddings": 1026,
+    "model_class": "RnaFmModel",
+    "n_heads": 20,
+    "n_layer": 12,
+    "position_embedding_type": "absolute",
+    "prd_label": "~100M",
+    "repo_id": "multimolecule/rnafm",
+    "requested_key": "rnafm",
+    "revision": "7d6e73ad3b48e042b378f9a788a56ccb4d573a27",
+    "role": "comparator",
+    "vocab_size": 28
+  },
+  "config": {
+    "batch_sweep": [
+      8,
+      4,
+      2,
+      1
+    ],
+    "dtype": "bfloat16 (lora_harness.TRAIN_DTYPE)",
+    "gradient_checkpointing": false,
+    "max_records": 200,
+    "optimizer": "AdamW",
+    "steps": 6,
+    "world_size": 1
+  },
+  "data_is_synthetic": false,
+  "device": {
+    "capability": [
+      8,
+      6
+    ],
+    "is_cuda": true,
+    "name": "NVIDIA RTX A4000",
+    "total_memory_gib": 15.6017
+  },
+  "gate": {
+    "clauses": {
+      "checkpointing_effect_measured": true,
+      "checkpointing_skip_is_earned": true,
+      "checkpointing_usability_agrees_with_the_port": true,
+      "enough_steps_for_optimizer_state": true,
+      "measured_on_cuda": true,
+      "measured_the_requested_batch": true,
+      "provenance_env_lock_is_the_backbones": true,
+      "real_objective": true,
+      "swept": true,
+      "worst_case_measured": true
+    },
+    "failed": [],
+    "overall_pass": true
+  },
+  "gradient_checkpointing": {
+    "batch_size": 1,
+    "comparison_skipped_reason": "gradient checkpointing is not usable on backbone 'rnafm', so there is no 'on' arm to compare against: RAISES: this port adds its absolute position embeddings IN PLACE (modeling_rnafm.py:728) and checkpointing makes the embedding output a leaf requiring grad -> 'a leaf Variable that requires grad is being used in an in-place operation'. Measured on a cluster A4000 2026-08-21 (SLURM job 1370, then isolated to a 2x2 against rotary rinalmo-giga, which is unaffected)",
+    "off_peak_gib": null,
+    "on_peak_gib": null,
+    "usability_note": "RAISES: this port adds its absolute position embeddings IN PLACE (modeling_rnafm.py:728) and checkpointing makes the embedding output a leaf requiring grad -> 'a leaf Variable that requires grad is being used in an in-place operation'. Measured on a cluster A4000 2026-08-21 (SLURM job 1370, then isolated to a 2x2 against rotary rinalmo-giga, which is unaffected)",
+    "usable_on_this_backbone": false
+  },
+  "largest_fitting_batch_worst_case": 8,
+  "loss_is_placeholder": false,
+  "measurements": [
+    {
+      "backbone": "rnafm",
+      "batch_size": 8,
+      "error": null,
+      "gradient_checkpointing": false,
+      "growth_ratio": 1.0098,
+      "measured_batch_size": 8,
+      "n_modules_with_checkpointing": 0,
+      "n_steps": 6,
+      "oom": false,
+      "padded_tokens": 551,
+      "peak_vram_gib": 3.345,
+      "peak_vram_gib_per_step": [
+        3.3125,
+        3.345,
+        3.345,
+        3.345,
+        3.345,
+        3.345
+      ],
+      "regime": "worst_case",
+      "step_ms": [
+        2162.18,
+        210.49,
+        208.94,
+        209.24,
+        210.5,
+        206.88
+      ]
+    },
+    {
+      "backbone": "rnafm",
+      "batch_size": 8,
+      "error": null,
+      "gradient_checkpointing": false,
+      "growth_ratio": 1.0092,
+      "measured_batch_size": 8,
+      "n_modules_with_checkpointing": 0,
+      "n_steps": 6,
+      "oom": false,
+      "padded_tokens": 417,
+      "peak_vram_gib": 2.8133,
+      "peak_vram_gib_per_step": [
+        2.7876,
+        2.8133,
+        2.8133,
+        2.8133,
+        2.8133,
+        2.8133
+      ],
+      "regime": "typical",
+      "step_ms": [
+        197.82,
+        174.04,
+        176.48,
+        178.87,
+        179.56,
+        175.86
+      ]
+    },
+    {
+      "backbone": "rnafm",
+      "batch_size": 4,
+      "error": null,
+      "gradient_checkpointing": false,
+      "growth_ratio": 1.0128,
+      "measured_batch_size": 4,
+      "n_modules_with_checkpointing": 0,
+      "n_steps": 6,
+      "oom": false,
+      "padded_tokens": 551,
+      "peak_vram_gib": 2.0206,
+      "peak_vram_gib_per_step": [
+        1.9951,
+        2.0206,
+        2.0206,
+        2.0206,
+        2.0206,
+        2.0206
+      ],
+      "regime": "worst_case",
+      "step_ms": [
+        157.5,
+        133.66,
+        136.59,
+        134.04,
+        138.38,
+        137.59
+      ]
+    },
+    {
+      "backbone": "rnafm",
+      "batch_size": 4,
+      "error": null,
+      "gradient_checkpointing": false,
+      "growth_ratio": 1.0153,
+      "measured_batch_size": 4,
+      "n_modules_with_checkpointing": 0,
+      "n_steps": 6,
+      "oom": false,
+      "padded_tokens": 410,
+      "peak_vram_gib": 1.6263,
+      "peak_vram_gib_per_step": [
+        1.6018,
+        1.6263,
+        1.6263,
+        1.6263,
+        1.6263,
+        1.6263
+      ],
+      "regime": "typical",
+      "step_ms": [
+        148.66,
+        120.62,
+        121.32,
+        120.44,
+        126.24,
+        124.3
+      ]
+    },
+    {
+      "backbone": "rnafm",
+      "batch_size": 2,
+      "error": null,
+      "gradient_checkpointing": false,
+      "growth_ratio": 1.0204,
+      "measured_batch_size": 2,
+      "n_modules_with_checkpointing": 0,
+      "n_steps": 6,
+      "oom": false,
+      "padded_tokens": 551,
+      "peak_vram_gib": 1.2278,
+      "peak_vram_gib_per_step": [
+        1.2033,
+        1.2278,
+        1.2278,
+        1.2278,
+        1.2278,
+        1.2278
+      ],
+      "regime": "worst_case",
+      "step_ms": [
+        140.76,
+        117.1,
+        110.95,
+        112.87,
+        113.48,
+        115.06
+      ]
+    },
+    {
+      "backbone": "rnafm",
+      "batch_size": 2,
+      "error": null,
+      "gradient_checkpointing": false,
+      "growth_ratio": 1.0248,
+      "measured_batch_size": 2,
+      "n_modules_with_checkpointing": 0,
+      "n_steps": 6,
+      "oom": false,
+      "padded_tokens": 409,
+      "peak_vram_gib": 1.0129,
+      "peak_vram_gib_per_step": [
+        0.9884,
+        1.0129,
+        1.0129,
+        1.0129,
+        1.0129,
+        1.0129
+      ],
+      "regime": "typical",
+      "step_ms": [
+        132.43,
+        99.98,
+        98.82,
+        97.27,
+        96.28,
+        100.51
+      ]
+    },
+    {
+      "backbone": "rnafm",
+      "batch_size": 1,
+      "error": null,
+      "gradient_checkpointing": false,
+      "growth_ratio": 1.0306,
+      "measured_batch_size": 1,
+      "n_modules_with_checkpointing": 0,
+      "n_steps": 6,
+      "oom": false,
+      "padded_tokens": 551,
+      "peak_vram_gib": 0.8246,
+      "peak_vram_gib_per_step": [
+        0.8001,
+        0.8246,
+        0.8246,
+        0.8246,
+        0.8246,
+        0.8246
+      ],
+      "regime": "worst_case",
+      "step_ms": [
+        138.32,
+        99.23,
+        96.59,
+        94.46,
+        97.52,
+        95.0
+      ]
+    },
+    {
+      "backbone": "rnafm",
+      "batch_size": 1,
+      "error": null,
+      "gradient_checkpointing": false,
+      "growth_ratio": 1.0352,
+      "measured_batch_size": 1,
+      "n_modules_with_checkpointing": 0,
+      "n_steps": 6,
+      "oom": false,
+      "padded_tokens": 409,
+      "peak_vram_gib": 0.7244,
+      "peak_vram_gib_per_step": [
+        0.6998,
+        0.7244,
+        0.7244,
+        0.7244,
+        0.7244,
+        0.7244
+      ],
+      "regime": "typical",
+      "step_ms": [
+        130.01,
+        100.61,
+        101.08,
+        97.82,
+        100.58,
+        99.02
+      ]
+    }
+  ],
+  "population": {
+    "dataset_parquet": "data/processed/stage2_dataset.parquet",
+    "n_admitted_total": 9059,
+    "n_rows": 200,
+    "n_tokens_max": 551,
+    "n_tokens_median": 409,
+    "n_tokens_min": 247,
+    "rung": "train"
+  },
+  "prd": "PRD \u00a710.3 (the 16 GB A4000 budget)",
+  "provenance": {
+    "entrypoint": "tbox_finder.stage2.sizing",
+    "env_lock": "envs/ml-rnafm.conda-lock.yml"
+  },
+  "recommendation": {
+    "basis": "largest worst-case batch observed to run without OOM; headroom is measured and EXCLUDES DDP gradient buckets and NCCL buffers, which a single-GPU measurement does not exercise",
+    "batch_size": 8,
+    "device_total_gib": 15.6017,
+    "headroom_gib": 12.2567,
+    "worst_case_peak_gib": 3.345
+  },
+  "schema_version": "4",
+  "step": "P3-06-sizing",
+  "step_function": "tbox_finder.stage2.train.forward_backward",
+  "supersedes_for_stage2_sizing": "reports/p1/lora_vram_smoke.json (P1-16)",
+  "written_at": "2026-08-21T22:21:07.107108+00:00"
+}

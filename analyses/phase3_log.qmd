@@ -7398,3 +7398,666 @@ not in `two_stage.py` as `imp.md` names — that module's own docstring says *"N
 the two-stage-vs-Stage-1-only precision comparison is P3-16"*, and it is already 1,682 lines.
 
 **Commit.** see PR (P3-16).
+
+## Step P3-17 — 2026-08-21: the RNA-FM Stage-2 comparator — and the pinned stack could not load it
+
+**Inputs.** `multimolecule/rnafm` at revision `7d6e73ad3b48e042b378f9a788a56ccb4d573a27`;
+`data/processed/stage2_dataset.parquet` (P3-01, unchanged — the comparator trains the *same*
+population as the shipped arm); `src/tbox_finder/stage2/{model,losses,heads,tokenizer}.py`
+(P3-03/04/05); `src/tbox_finder/train/lora_harness.py` (P1-15's pinned §10.3 LoRA contract);
+`conf/{loss,optim,tracking}/*` unchanged.
+
+**Process.** PRD §10.2's condition (c) — *"post-calibration leave-clade-out ECE is worse than
+RNA-FM's by a pre-registered numeric margin"* (ADR-0005 D17: > 0.02 absolute) — has never been
+readable, because no RNA-FM number exists. This step builds the arm that makes it a
+measurement. Three things had to be added and one had to be discovered.
+
+**⛔⛔ THE PINNED STACK CANNOT LOAD THE CHECKPOINT THE ADR NAMES, AND NO REVISION FIXES IT.**
+`multimolecule` **0.1.0** — the ADR-0002 A8 pin `envs/ml-rna.yml` carries, and the pin every
+shipped Stage-2 artifact was produced under — raises before a single weight is read:
+
+```
+ValueError: vocab_size (28) must be 26 when codon=False
+```
+
+Its `models/rnafm/configuration_rnafm.py:136` computes `expected_vocab_size = 131 if codon else
+26`, while the published checkpoint declares `vocab_size: 28` with a 28-line `vocab.txt`. There
+is **no older checkpoint revision to pin around it**: `multimolecule/rnafm` has exactly three
+commits, all 2026-05-31 (`c727416` initial → `b93dc90` upload → `7d6e73a` README), so the whole
+checkpoint was uploaded in the 28-vocab era. `multimolecule` **0.2.0**'s same line reads
+`... else 28`, and A8 had already recorded 0.2.0 as working for the RiNALMo mirror.
+`RiNALMoConfig` carries no such validator at any version, which is why rinalmo-giga — also
+`vocab_size: 28` — loads fine today and why this surfaced only now.
+
+**Decisions.** A §7 stop was raised before any code was written; the user chose **a new env
+over a bump** and signed **ADR-0002 A15**. `envs/ml-rnafm.yml` pins `multimolecule` 0.2.0 with
+every other pin identical to `ml-rna`, which stays at 0.1.0 and is not touched. The reason is
+CLAUDE.md §8.5: bumping in place would oblige re-validating the D5 parity gate, the P1-15/16
+LoRA harness, the six P3-06 arms, P3-07's temperature, P3-08's ablation and P3-10's GATE-2 ECE
+— GPU time spent re-checking published numbers, with a real chance of moving one, in order to
+build a *comparator*. The precedent is A4 (the `ml` → `ml-dna` + `ml-rna` split) and
+A11/A12/A13 (each a whole new env under an amendment). ⚠ **The disclosure it buys, and P3-18
+owes:** the two arms are compared across a one-minor-version library difference.
+
+**⚠ A FRESH `conda-lock` SOLVE WOULD HAVE MADE THAT CLAIM FALSE — 55 PINS MOVED.** Solving
+`ml-rnafm.yml` from scratch succeeds (no repeat of A8's poetry crash) but does **not** produce
+"`ml-rna` with one pin changed": it drifts gcc/gxx 14.3.0 → 14.4.0, libgcc/libstdcxx 15.2.0 →
+16.1.0, binutils 2.45.1 → 2.46.1, mkl 2026.0.0 → 2026.1.0, pandas 3.0.3 → 3.0.5, setuptools
+82.0.1 → 84.0.0 and — most to the point — `multimolecule`'s own `danling` 0.4.2 → 0.4.4 and
+`chanfig` 0.0.116 → 0.0.117, relocates the typer/rich subtree from pip to conda, and drops
+`onemkl-license`. That is a silent ~55-pin bump D8 forbids, and it would have destroyed the
+amendment's own claim. The committed lock is therefore **hand-merged** from `ml-rna`'s via
+conda-lock's own `Lockfile` model, with the eight new/changed entries transplanted verbatim
+from the fresh solve's output and `content_hash` recomputed — a method **first validated by
+reproducing `ml-rna.yml`'s committed `aaaab98c…` exactly** before its `55126293…` was trusted.
+The result differs from `ml-rna`'s in exactly `multimolecule` 0.1.0 → 0.2.0 plus the seven
+matplotlib-subtree packages: 259 → 266, nothing else moved, and a test asserts it.
+
+**⚠ THE REAL BLOCKER WAS NOT THE CONFIG FILE — IT WAS THAT NO BACKBONE SELECTION POINT EXISTED.**
+`imp.md` lists `conf/model/stage2_rnafm.yaml` as the artifact, but `conf/model/rinalmo_stage2.yaml`
+is a **record**, not an input: `lora_harness` hard-coded `RiNALMoModel`, and three validators
+refused any other `repo_id` (one test even used `"multimolecule/rnafm"` as the sabotage proving
+that refusal bites). A config alone would have composed cleanly and changed nothing — the
+P2-11 `label_source` footgun class. So this step adds
+`src/tbox_finder/models/rna_backbone_registry.py`, the RNA-side twin of ADR-0002 A14's Stage-1
+Caduceus allow-list: torch-free (so an unknown key is refused at **compose** time on the login
+node, not after the queue wait), closed, per-key revision enforcement, and a parameter count
+**measured at load** against the recorded expectation. `load_rinalmo_backbone` now *delegates*
+to the general loader rather than carrying its own copy of the load.
+
+**✅ WHAT MAKES THE COMPARISON CLEAN, AND IT WAS MEASURED, NOT ASSUMED.** RNA-FM's `vocab.txt`
+at the pinned revision is **byte-identical** to rinalmo-giga's and to
+`stage2/tokenizer.py::VOCAB` — same 28 tokens, same order, same six specials, same
+`<cls>…<eos>` 2-flanking layout `strip_special_tokens` assumes. Asserted directly
+(`T.VOCAB == RnaTokenizer.from_pretrained(...).get_vocab()` → `True`, and an id-level encode
+comparison on a 280-nt locus). So no second vocabulary was added, `VOCAB_DIGEST` (`ac3cff22…`)
+is unchanged, the P3-01 tokenizer parity test is untouched, and a P3-18 ECE difference cannot
+be blamed on tokenisation. RNA-FM: hidden **640**, 12 layers, 20 heads, absolute positions,
+`max_position_embeddings` 1026 (≥ the mirror's pinned 1024, so the 1022-nt ceiling stays
+conservative), **99,111,680** backbone parameters — PRD §10.2's "~100M" confirmed as a
+measurement rather than quoted as a label.
+
+**Outputs.** `envs/ml-rnafm.yml` + `envs/ml-rnafm.conda-lock.yml` ·
+`src/tbox_finder/models/rna_backbone_registry.py` · `conf/model/rnafm_stage2.yaml` ·
+`slurm/p3/rnafm_stage2_finetune.sbatch` · backbone dispatch in `train/lora_harness.py`,
+`stage2/model.py`, `stage2/train.py`, `stage2/eval.py`, `stage2/sizing.py` ·
+`tests/unit/test_rna_backbone_registry.py` + the `rnafm` arm in
+`tests/ml/test_stage2_train_smoke.py` + two A15 guards in `tests/unit/test_env_manifest.py` ·
+ADR-0002 **A15**. **No checkpoint, no scores and no `dvc add`** — nothing has been trained; the
+§9.3 submit-ack is open.
+
+**⚠ THE GATE CLAUSE SET IS VERSIONED, AND ONE TEST REFUSED MY FIRST DRAFT OF IT.**
+`derive_clauses` gains `backbone_pinned`, so the report schema goes **2 → 3**. The first draft
+cross-checked the recorded backbone against `config.backbone` — the *requested* key — and
+`test_the_gate_is_not_recorded_from_a_requested_setting` correctly refused it: a clause that
+reads the request restates it and can never fail. The shipped clause reads
+`wrap.stage2_heads.d_model`, which `build_stage2_model` **measures off the live module**, so a
+run recording one backbone's identity while adapting the other's weights fails on 1280 vs 640.
+The requested-vs-built agreement is enforced instead as a refusal inside `build_model`, where
+both are in scope. Nothing is invalidated by the bump: the only committed Stage-2 training
+reports are the six schema-**1** sweep artifacts, and no schema-2 report was ever committed.
+Those six gain a **third** entry in `legacy.fails_current_gate_on`, classified in the same
+category as `losses_finite` — *unmeasured, not failed*: schema 1 predates the `wrap.backbone`
+block, so there is nothing for the clause to re-derive from. Verified annotation-only: every
+field outside `legacy` is byte-identical to `HEAD`, and only `fails_current_gate_on` and `note`
+changed inside it.
+
+**Validation.** `ruff@0.15.15` + `black@25.11.0` clean; `snakemake --lint` clean; `snakemake -n`
+resolves; `bash -n` clean on the new sbatch. Vs a matched `main` baseline at `2e929a3`: **zero
+new failures** (the FAILED sets are compared, never the counts — the worktree legitimately
+skips 15 DVC-dependent tests the main checkout runs); unit passes **6,057 → 6,088**.
+`tests/unit/test_sbatch_rm_targets.py` clears the new file; every override token the launch
+line writes composes for real against `conf/train/stage2.yaml`, including the group override.
+**20 sabotages, 18 RED against their NAMED test and 2 GREEN negative controls**, sources
+restored byte-identically by sha256 with `__pycache__` cleared between runs.
+
+**⚠ ONE SABOTAGE READ GREEN, AND IT WAS THE SAME TRAP TWICE.** Deleting `model=rnafm_stage2`
+from the *launch line* left its guard green, because the assertion searched the whole file and
+the header explains the token at length. That is precisely the `--nodelist` trap the production
+sbatch's own test carries a warning about — which had already bitten me once in this step and
+which I fixed as an instance rather than as a class. Every sbatch assertion now reads either
+`_sbatch_code()` (comments stripped) or `_launch_tokens()` (the joined logical command), and
+three re-run sabotages — the token removed from the launch line while the prose keeps it, the
+sizing `--backbone` likewise, and `BACKBONE` reassigned to production — are all RED.
+
+**⏭ NOT DONE — the §9.3 submit-ack is open, and the run has not happened.** No RNA-FM
+checkpoint, no posteriors, no leave-clade-out ECE. P3-18's condition-(c) verdict has nothing to
+read yet, and this step deliberately produces no number: the swap decision is P3-18's and is a
+§7 stop on top of D17's margin.
+
+**Commit.** see PR (P3-17).
+
+## Step P3-17 RESULT — 2026-08-21: the comparator is trained, calibrated and graded; three submits to get there
+
+**Compute.** SLURM jobs **1370**, **1372**, **1374** on `two` (8× A4000). Only 1374 produced
+artifacts; the first two are recorded below because each failed for a reason worth keeping.
+`verification: artifact-based (sacct off)`.
+
+**✅ THE ARTIFACTS.** Two arms, both gates passing, `failed: []` on each:
+
+| arm | gate | final train loss | elapsed | val (epoch 9) |
+|---|---|---|---|---|
+| `aux1.0_lr1e-4` (shipped config) | PASS | 0.6405 | 752.1 s | 0.6917 |
+| `aux0.0_lr1e-4` (lr-matched control) | PASS | 0.0001 | 731.4 s | 0.0356 |
+
+Both record `backbone: rnafm`, `d_model: 640` **measured off the live module**,
+`loaded_from_registry: true`, `env_lock: envs/ml-rnafm.conda-lock.yml`,
+`attn_implementation: flash_attention_2`, 72 adapter sites, base frozen. Checkpoints DVC-tracked
+at `a48f68c2…` (26,426,216 B, 10 files). ⚠ The two arms' `final train loss` are **not
+comparable** — the aux terms are absent from the aux=0 total by construction.
+
+**✅ THE NUMBER P3-18 EXISTS TO READ.** Post-calibration **leave-clade-out macro ECE**, both
+arms graded by the identical pinned machinery (ADR-0005 D13 `beta_kernel_loo_l1`, A2 min-N 20,
+**30/30 units admissible**, resampled at `cluster_id` within order and macro-averaged across the
+30 held-out orders, `n_boot` 200, `gated: false` by D13):
+
+| backbone | temperature | in-dist ECE (D11 gate 0.05) | **LOO macro ECE** | 95 % CI |
+|---|---|---|---|---|
+| RiNALMo-giga (shipped) | 1.140627 | 0.005662 ✓ | **0.211317** | [0.098374, 0.325012] |
+| RNA-FM (comparator) | 1.317641 | 0.006811 ✓ | **0.188214** | [0.094202, 0.275659] |
+
+Both temperatures are fitted on the **same** `calib` split at the same prevalence 0.788797, so
+both LOO numbers are genuinely *post-calibration*, which is what D17(c) requires.
+**RiNALMo − RNA-FM = +0.023103.**
+
+**⚠⚠ THAT POINT DIFFERENCE EXCEEDS D17(c)'s 0.02 MARGIN, AND THIS STEP DOES NOT ADJUDICATE IT.**
+D17(c) does not read a point estimate: it fires on a difference *"sustained across the held-out-
+order distribution (block-resampled)"*, and **sustainedness is not evaluated here**. The two CIs
+overlap over almost their whole length ([0.098, 0.325] vs [0.094, 0.276]). Reading a swap out of
++0.0231 with those intervals would be exactly the threshold-shopping §8.5 forbids, and firing the
+swap substitutes the shipped Stage-2 backbone and drags the absolute GATE-1/GATE-2 re-clearance
+and the P4→P5 go/no-go with it (PRD §2.3/§10.2). **P3-18 does the reading; a fired swap is a
+CLAUDE.md §7 stop on top of the number.** Recorded here as a measurement, deliberately without a
+verdict.
+
+**Bonus, not asked for and worth having.** The control arm the scorers forced turns P3-17 into an
+RNA-FM **aux ablation** as well: in-distribution with-aux ECE 0.006811 / AUPRC 0.998639 versus
+no-aux 0.003464 / 0.999225. ADR-0005 D16's aux-loss question is now answered for **both**
+backbones rather than one.
+
+**⛔ JOB 1370 — the sizing leg died on a port defect nothing in this repo had ever reached.**
+`multimolecule/models/rnafm/modeling_rnafm.py:728` does `embeddings += position_embeddings` **in
+place**, and gradient checkpointing makes the embedding output a leaf requiring grad. Isolated to
+a 2×2 on a cluster A4000 rather than argued: rnafm×on **RuntimeError**, rnafm×off OK,
+rinalmo×both OK. **RiNALMo is rotary and never reaches that branch.** The *training* leg would
+have been fine — the sbatch passes `gradient_checkpointing=false` — but `run_sizing` hardcoded
+`True` for its sweep. Fixed at the harness: the registry now carries
+`gradient_checkpointing_usable` (rinalmo **runs it as a measured no-op**, 0.9986 saving ratio;
+rnafm **raises**), the config refuses the combination at **compose time on the login node**, and
+the sizing report **states** the unmeasurable comparison with its reason instead of omitting the
+key. New clause `checkpointing_skip_is_earned` binds that skip to the recorded port fact — the
+pre-existing `checkpointing_effect_measured` accepts any non-null reason and would let a run opt
+out by writing a sentence.
+
+**⛔ JOB 1372 — trained cleanly, then BOTH scoring legs refused.**
+`ValueError: expected exactly one aux_weight=0 arm at lr=0.0001, found []`. `stage2.eval` is the
+P3-08 aux-**ablation driver**, not a scorer: it resolves `select_arm_pair` before scoring
+anything, and `calib.gate2 score-loo` calls the *same* selector, so a single-arm checkpoint root
+cannot be scored by either shipped entry point (`--all-arms` does not help — the pair resolves
+first). Resolved by training the lr-matched control in the same job, which lets both legs run
+**completely unchanged** and touches nothing in the P3-08 machinery that produces committed
+artifacts.
+
+**⚠ AND `gate2 grade` COULD NOT BE POINTED AT THE COMPARATOR AT ALL.** `--checkpoint-root` /
+`--sweep-dir` exist on `score-loo` and were missing from `grade`, which hardcoded the production
+constants — so the comparator's scores could be *produced* and never *graded*. The flags resolve
+only which arm NAME to pull out of the scores file; added with `None` defaults so every existing
+invocation is byte-identical.
+
+**Decisions.** ADR-0002 **A15** signed (bioedca, §7 item 2): a ninth environment
+`envs/ml-rnafm.yml` pinning `multimolecule` 0.2.0 rather than bumping `ml-rna`, because 0.1.0
+**cannot load `multimolecule/rnafm` at all** (`vocab_size (28) must be 26`) and no older
+checkpoint revision exists to pin around it. `ml-rna` is untouched, so §8.5 fires nowhere and
+every published RiNALMo number stays bit-frozen. The lock is **hand-merged**, not solved: a fresh
+`conda-lock` moved **55 pins**. ⚠ The disclosure A15 owes and P3-18 must carry: the two arms are
+compared across a one-minor-version library difference. Tokenisation is provably identical
+(byte-identical vocab), so the difference is not in what the models read.
+
+**Validation.** All §9.3 conditions met on 1374: `squeue` empty, DONE marker, both run reports
+self-validating and passing, both checkpoint dirs carrying `lora_adapter/` + `stage2_heads.pt` +
+`provenance.json`, all four report/score artifacts non-empty, no traceback in the `.err`.
+⚠ The `.err` is **expected non-empty** (torchrun rendezvous, HF chatter, W&B-offline notices);
+`imp.md`'s "zero-byte `.err`" wording predates the P2-05/P2-06/P2-09/P3-06 precedent and is wrong
+for a torchrun job — recorded rather than silently ignored. `ruff` + `black` clean, `snakemake
+--lint` clean, `bash -n` clean; zero new failures against a matched `main` baseline at `2e929a3`
+(FAILED **sets** compared, never counts); unit+ml+golden passes 6,660 → 6,684.
+
+**⚠ THE REVIEW AND SABOTAGE RECORD, INCLUDING WHAT ESCAPED.** Four CodeRabbit rounds, **nine
+findings, all nine real** — among them a `.gitkeep`-less log directory that would have cost the
+first submit outright (Slurm opens `--output` before the script runs), a **string** version
+compare rejecting 0.10.0, a loader **defaulting a missing base model to production** in
+contradiction of its own comment, and ⛔ a P1-15 report able to certify *parity-confirmed
+RiNALMo* for a wrap that adapted RNA-FM with `validate_report` silent. Every new guard was
+sabotaged. **Five escaped GREEN and every one was closed:** an assertion that searched a whole
+sbatch and matched the header's prose rather than the launch line (the same trap twice — fixed as
+a class, not an instance); a test that captured the sbatch's version predicate and never
+evaluated it, so it graded its own copy; a clause guarded while the wiring that feeds it was not
+(reverting the exact line that killed job 1370 stayed green); a name check that could not see an
+arm inheriting a verification it does not have; and a two-clause guard where renaming one marker
+left the test satisfied by the survivor. Two sabotages of *detectors* read GREEN by nature and
+are recorded as such rather than counted as passes.
+
+**Commit.** see PR (P3-17).
+
+## Step P3-17 (review round 5) — 2026-08-22: the merge gate on the six commits nobody had reviewed
+
+**Inputs.** PR #134 at `30a68405`, whose last reviewed commit was `d8b9f629` — the six commits
+after it (`5c27d303`, `d5488e38`, `d00e1725`, `d95aaa3f`, `59b61c90`, `30a68405`) had drawn no
+review in the ~30 h since the push. Two independent paths were run against exactly that range:
+the CodeRabbit GitHub app (manual trigger; the CLI path returned *"not a member of the requested
+organization"*, the third outcome that cannot be waited out) and a six-dimension adversarial
+harness whose every finding was put through three refutation lenses.
+
+**Process.** **Five app findings and eight harness findings, all thirteen verified real by
+execution before any fix**, and every fix was then sabotaged to prove a *named* test bites.
+
+*The published artifacts described the wrong run.* `sizing.py` and `eval.py` stamped
+`provenance.env_lock = envs/ml-rna.conda-lock.yml` — the **production** lock, whose
+`multimolecule` pin cannot load the RNA-FM checkpoint either run was working on — and `eval.py`'s
+`env_lock_hash` therefore digested the wrong file. `train.py` had already been fixed for exactly
+this at `env_lock_for(cfg.backbone)`; the other two producers never were, and the sizing artifact
+disagreed with **itself** (`backbone.env_lock` three keys up recorded the right lock). **No gate
+clause graded the field**, which is why both runs passed with the wrong value recorded. Both
+producers now resolve the lock from their subject — sizing from the requested key, eval from
+`env_lock_for_scored_arms(load_records)`, which reads the backbone the loader derived from each
+adapter's own recorded base model and **refuses** rather than averages when the arms disagree or
+one records nothing — and two new clauses grade the agreement.
+
+*A gate note asserted a state the run never reached.* `stage2_rnafm_eval.json`'s `.gate.note`
+said *"on this run it means the no-aux CONTROL is uncalibratable (its calib carve is perfectly
+separated)"* while the same file recorded `is_perfectly_separated: false` on both arms,
+`converged: true`, a finite `T = 1.3900776702410877` and `overall_pass: true`. The sentence was
+emitted unconditionally, carried over from the RiNALMo P3-08 run. It is now derived per-run by
+`_degenerate_calibration_arms` and **names the arm** when there is one. The same species of
+defect in `gate2.py`'s `INHERITED FROM P3-08` disclosure — *"The no-aux control's calib carve is
+perfectly separated"*, emitted into **every** gate2 report including the comparator's — is fixed
+by making the subject explicit; that producer cannot re-derive the graded arm's separation (the
+gate block carries no separation record) and says so rather than pretending to measure it.
+
+*Clauses that could not fail.* `checkpointing_skip_is_earned` accepted a skip by finding the
+substring `"did not fit"` inside a **human-facing sentence**, so rewording the message flipped a
+gate; it now grades a machine-readable `comparison_skipped_code`, with the legacy substring
+accepted only for the schemas listed in `LEGACY_SCHEMAS_WITHOUT_SKIP_CODE` — listed, not
+string-compared, because `"3" < "4"` only works while both are one character. Its sweep-flag
+conjunct was written `all(... for m in meas if m.get("gradient_checkpointing") is not None)`,
+which went **vacuously TRUE** the moment `measure_batch` stopped recording the key — the sole
+writer, unpinned — and its `and not m.get("off_comparison")` filter excluded nothing, because
+nothing in this repo has ever written that key. And the clause accepted
+`usable_on_this_backbone: False` as earning a skip without ever binding it to the **port fact**
+recorded three keys away in `backbone.gradient_checkpointing_usable`, so a report that
+contradicted itself earned its skip clean.
+
+*Tests that could not fail.* `test_grade_falls_back_to_the_production_root…` grepped
+`inspect.getsource(G.main)` for two identifier names — satisfied by a comment or a dead branch,
+blind to whether the value reaches `discover_arms`; it now captures the argument, in **both**
+directions. The anti-hardcode AST guard checked the argument's **kind** and not its **binding**,
+on the stated reasoning that *"any name has to come from the resolved port fact because nothing
+else in scope carries one"* — self-certifying and false: `checkpointing_usable = True` is a name
+bound to a literal, it reinstates job 1370 exactly, and the file stayed green against it.
+Worst of the set: **nothing pinned `loss.aux_weight="$AUX_WEIGHT"` on the torchrun launch line**,
+so hardcoding it left 339 tests green while training two identical arms — the single-arm root
+that killed job 1372, at ~25 GPU-minutes a repeat.
+
+*Two smaller ones.* `discover_arms` read `saved_val_total` / `saved_from_epoch` from
+`report["legacy"]` only, a block P3-06's reports carry and P3-17's do not, so **both RNA-FM arms
+published `null`** while the numbers sat one key away under `checkpoint`. And
+`args.checkpoint_root or E.DEFAULT_CKPT_ROOT` — at **both** call sites — answered an explicitly
+passed empty `--checkpoint-root` with the production root; only an *omitted* option falls back
+now. The launcher's identity banner printed `key=` empty (`KEY` is assigned 135 lines later,
+inside the loop) and now prints the grid that exists at that point.
+
+**Outputs.** `src/tbox_finder/stage2/sizing.py` (schema **3 → 4**),
+`src/tbox_finder/stage2/eval.py` (schema **1 → 2**), `src/tbox_finder/calib/gate2.py`,
+`slurm/p3/rnafm_stage2_finetune.sbatch`, and 24 new tests across
+`tests/ml/test_stage2_sizing.py`, `tests/ml/test_stage2_train_smoke.py`,
+`tests/unit/test_aux_ablation_check.py`, `tests/unit/test_gate2.py`.
+
+**⚠ THE SCHEMA BUMPS, AND WHAT THEY LEAVE STANDING.** A clause set is part of a report's shape,
+so adding one invalidates every committed report ([[new-gate-clause-invalidates-old-reports]]) —
+and the committed reports here **cannot be regenerated**: the sizing artifact needs an A4000 to
+re-measure VRAM, and no local environment carries `torch` **and** `pyarrow` together (the
+documented `ml` / `data` split), so even the CPU-only regrade paths are out of reach without an
+env bump, which is a §3.1 approval. So the clause sets are **versioned** instead: both modules
+now grade a report against the clause set of **its own** schema, via
+`CLAUSES_FIRST_REQUIRED_AT` / `clauses_not_required_at`. At the current schema this excuses
+nothing; an *unknown* schema excuses nothing either and is flagged separately; and a report that
+claims an old schema while recording a new clause is still refused.
+
+**⚠ DISCLOSED, NOT FIXED — three committed artifacts predate the producers above.**
+`reports/p3/stage2_rnafm_sizing.json` (schema 3) and `reports/p3/stage2_rnafm_eval.json`
+(schema 1) record `provenance.env_lock = "envs/ml-rna.conda-lock.yml"`. **That value is wrong.**
+Both runs loaded `RnaFmModel` and ran under `envs/ml-rnafm.conda-lock.yml`, as
+`backbone.env_lock` inside the sizing artifact itself records; `stage2_rnafm_eval.json`'s
+`env_lock_hash` (`60f966a8…`) is therefore the digest of the production lock, not of the lock the
+run used. `stage2_rnafm_eval.json` additionally carries the pre-fix `.gate.note`, and
+`reports/p3/gate2_rnafm_ece.json` + `reports/gate2_p3_ece.json` carry the pre-fix
+`INHERITED FROM P3-08` disclosure. **No graded number depends on any of it** — every affected
+field is provenance metadata or prose, and the leave-clade-out ECE, the temperature, the CIs and
+every clause are untouched. The values are hand-corrected **nowhere**: an artifact says what its
+run emitted, and the honest repair is a regeneration this environment cannot perform (§10.3).
+Booked: regenerate all four on the next cluster pass that has the pinned stack.
+
+**Validation.** `ruff` + `black` clean; `bash -n` clean on the launcher; **zero new failures**
+against a matched `main` baseline at `2e929a3` (FAILED **sets** compared with `comm -13`, never
+counts — the baseline itself carries 31 pre-existing failures and 6 collection errors, all of
+them environment-shaped and all present before this branch). Every fix was sabotaged and every
+sabotage went RED against a **named** test; **three sabotages escaped GREEN first and each one
+is what the final guard was written from** — the eval env-lock producer (guarded at the clause,
+unguarded at the wiring in `main`, so the derivation was extracted into
+`env_lock_for_scored_arms` and pinned with an AST check on `main`); the `measure_batch` writer
+(every payload-built test supplies the key itself); and the point-loop header, where the
+`for AUX_WEIGHT in "${AUX_WEIGHTS[@]}"` line occurs **twice** and an `in` check was satisfied by
+the surviving one ([[fixed-one-of-two-identical-things]]).
+
+**Decisions.** No ADR amendment: no threshold moved, no pinned value changed, no analysis tier
+downgraded. The two schema bumps and the versioned clause sets are shape changes to reports this
+repo owns, not methodology changes.
+
+**Commit.** see PR (P3-17, review round 5).
+
+## Step P3-17 (review round 6) — 2026-08-22: the third producer, and the sidecars that predate the field
+
+**Inputs.** `890f93a`, the round-5 fix commit, plus the adversarial harness's completed run over
+`d8b9f629..30a68405` (66 agents, **0 errors**, 20 findings raised, **19 surviving** three
+refutation lenses each). Every one of the 20 is closed by round 5 or by this round; #10 and #12
+are closed in substance by the launch-line and port-fact guards rather than by an edit of their
+own, and that is said here rather than counted as a separate fix.
+
+**Process.** ⛔ **The round-5 commit fixed two of THREE producers.** `calib/gate2.py` carries its
+own `ENV_LOCK = "envs/ml-rna.conda-lock.yml"` and stamped it into both the report body and
+`build_provenance` — so grading the RNA-FM comparator recorded, **and hashed**, an environment
+whose `multimolecule` pin cannot load the weights whose posteriors were being graded. This is
+the artifact **P3-18's condition (c) reads**. Fixed exactly as the other two: the lock is derived
+from the graded arm's own load records (both sidecars, required to agree), a new clause
+`env_lock_is_the_graded_arms` grades it, and an AST pin requires `main` to pass the derived name
+to **both** stamping sites — a sabotage of either alone was green against every behavioural test,
+because they all build the report through `build_report` with an explicit `env_lock=`.
+
+⚠ **And that fix would have broken the production grade.** The committed
+`reports/p3/stage2_scores.json` and `…_loo.json` were written **before ADR-0002 A15**, when this
+repo pinned exactly one Stage-2 backbone, so they record no `load.backbone` at all — re-grading
+the RiNALMo arm from them would have raised. Defaulting them to production is the identical
+defect this branch already fixed once in the loader. So `env_lock_for_scored_arms` grew an
+explicit `declared_backbone` that fills **exactly that gap**: it is used only when every record
+is silent, a declaration that contradicts a record is **refused** rather than obeyed, and a
+sidecar where some arms speak and others do not is refused outright — letting the ones that
+spoke answer for the ones that did not is how a partner scored under an unknown model becomes
+invisible. `grade` and `stage2.eval` both expose it as `--scored-backbone`. A test reads the four
+tracked sidecars and asserts the pre-/post-A15 shapes, so if a later step regenerates them the
+compatibility path is reported as unneeded instead of quietly kept.
+
+**Also this round.** The schema-age arithmetic had been copied into three modules in one commit;
+it is promoted to `tbox_finder/report_schema.py` with the per-module tables left where they
+belong, plus an import-time `check_schema_tables` that refuses a table naming a schema
+`KNOWN_SCHEMAS` does not list (silently ignored otherwise) and unit tests binding
+`CLAUSES_FIRST_REQUIRED_AT`'s clause **names** to what `derive_clauses` actually emits. The
+`score_loo_holdout` call site got the same `is None` fallback and its own test — the round-5 test
+covered `grade` alone, so restoring `or DEFAULT` in the sibling stayed green. And the AST
+provenance pin now asserts there is **exactly one** `provenance=` dict in `main`, because
+`next(...)` would silently grade the wrong call if a second appeared.
+
+**Outputs.** `src/tbox_finder/report_schema.py` (new), `src/tbox_finder/calib/gate2.py`
+(schema **1 → 2**), `src/tbox_finder/stage2/eval.py`, `src/tbox_finder/stage2/sizing.py`,
+and 16 further tests.
+
+**Validation.** `ruff` + `black` clean; **zero new failures** against the matched `main` baseline
+at `2e929a3` (FAILED sets, `comm -13`); unit+ml+golden **6,717 → 6,731**. Every fix sabotaged;
+both gate2 stamping sites and the `score_loo_holdout` fallback each went RED against a named
+test.
+
+**⚠ THE DISCLOSURE GROWS BY ONE.** `reports/gate2_p3_ece.json` and
+`reports/p3/gate2_rnafm_ece.json` also carry `env_lock: "envs/ml-rna.conda-lock.yml"` and a
+matching `provenance.env_lock_hash`. For the RNA-FM report **that value is wrong** — the graded
+weights are RNA-FM's, and `reports/p3/stage2_scores_loo_rnafm.json` records `backbone: rnafm`.
+Both reports are schema 1 and are graded against the schema-1 clause set; neither is regenerated
+and **neither is hand-corrected**. As with round 5: no graded number depends on it — the ECE, the
+temperature, the CIs and every clause are untouched — and the repair is a regeneration this
+environment cannot perform (no env carries `torch` and `pyarrow` together, §3.1).
+
+**Decisions.** Still no ADR amendment: no threshold, pinned value or analysis tier moved.
+
+**Commit.** see PR (P3-17, review round 6).
+
+## Step P3-17 (review round 7) — 2026-08-22: a regression test that would have been red in CI
+
+**Inputs.** `21243f1` and one actionable finding plus two nitpicks against it.
+
+**Process.** ⚠ **Round 6's `score_loo_holdout` regression test would have FAILED in CI, not
+passed.** `score_loo_holdout` opened with `import torch`, above every path-and-census refusal it
+performs, and **the CI unit tier installs no torch** — so a test that drives the function to its
+arm-resolution refusal cannot run there at all. It passed locally only because `labvault` happens
+to carry torch. `torch` now loads at its **first use**, below the refusals; everything down to
+`discover_arms` is pure path and census work, and a run that dies there — a bad root, a holdout
+that overlaps training — should be able to say so in an environment with no torch, and be
+testable in one. Verified by running the two affected unit files under a genuinely torch-free
+interpreter (192 passed), and by putting the import back, which turns the named test RED there.
+Also: `gate2`'s `__all__` now exports the same three-name schema surface `stage2/eval.py` and
+`stage2/sizing.py` do, and the pre-A15 sidecar-shape test drops an unused fixture and reuses the
+module's `REPO_ROOT`.
+
+**Validation.** `ruff` + `black` clean; full local tier 14 failed / **6,731 passed**, unchanged
+and still **zero new** against the matched `main` baseline; the affected unit files green under a
+torch-free interpreter.
+
+**Commit.** see PR (P3-17, review round 7).
+
+## Step P3-17 (review round 8) — 2026-08-22: the flag the workflow never passed
+
+**Inputs.** `2b43a1b` and three findings, all outside the diff range and all real.
+
+**Process.** ⛔ **The `--scored-backbone` gap-filler round 6 added was never wired into the rule
+that needs it.** `workflow/rules/calibration.smk::gate2_ece` grades the PRODUCTION arm from
+`reports/p3/stage2_scores.json` / `…_loo.json` — the pre-A15 sidecars that record no
+`load.backbone` — so `snakemake gate2_ece` would have raised before writing the report. Round 6
+built the compatibility path and left the one caller that requires it unchanged. The rule now
+passes it, from a `_SCORED_BACKBONE` constant retyped in the `.smk` (importing `tbox_finder` at
+Snakefile-parse time would make `snakemake --lint` depend on `src` being importable) and pinned
+by a unit test against `rna_backbone_registry.PRODUCTION_BACKBONE`, plus a second assertion that
+the rule actually *passes* it — a constant nothing reads is a fabricated value.
+
+⚠ **`str(report["schema_version"])` made the JSON number `1` into schema `"1"`.** A numeric
+version therefore collected schema-1's clause exemptions — omission of a graded clause included
+— while only its *type* was flagged. All three validators and the shared helper now check the
+**raw** value, and an unrecognised one excuses nothing whatever it looks like once stringified.
+
+⚠ **And the two score sidecars were compared on `backbone` alone.** The grade joins an
+in-distribution ECE from one to a leave-clade-out ECE from the other and reports them as one
+arm, so two sidecars naming the same backbone while one was scored from a different checkpoint,
+adapter or base revision would be silently joined. `sidecar_identity_mismatches` now compares
+`backbone`, `base_model_name_or_path`, `revision`, `checkpoint_dir`, `adapter_sha256` and
+`heads_sha256` — only where **both** record the field, so a pre-A15 sidecar is not refused for
+its age — and `grade` refuses on any disagreement. A test asserts both committed sidecar pairs
+pass their own guard.
+
+**Validation.** `ruff` + `black` clean; `snakemake --lint` **clean** on the modified rule; full
+local tier 14 failed / **6,736 passed**, still **zero new** against the matched `main` baseline;
+the two affected unit files green under a torch-free interpreter. All three fixes sabotaged, all
+three RED against a named test. ⚠ One restore in this round used `git checkout --` on a tracked
+file and reverted the round's own uncommitted edit to it
+([[sabotage-restore-reverts-uncommitted-work]]); caught by re-reading the file, and the edit was
+re-applied and re-verified before commit.
+
+**Commit.** see PR (P3-17, review round 8).
+
+## Step P3-17 (review round 9) — 2026-08-22: a fix I reported as landed had never reached a commit
+
+**Inputs.** `d49c1dc`. CodeRabbit's round on it returned **"Review finished"** with no findings —
+the first clean round of the five. CI green: lint, pytest and snakemake all pass.
+
+**⛔ AND THE ONE STILL-OPEN REVIEW THREAD WAS RIGHT.** `reviewThreads` showed exactly one entry
+`isResolved: false, isOutdated: false` — round 5's *"Align the quoted sizing figures"* against
+`slurm/p3/rnafm_stage2_finetune.sbatch:100`. I had reported that finding as fixed. Reading the
+**pushed bytes** shows the header still quoting the superseded run (3.3382 / 2.7522 / 1.9849 /
+1.5902 GiB, ~190 ms): the edit was written, `bash -n`-checked, and then lost before it reached a
+commit — every `/tmp` snapshot taken during that round's sabotage cycle already lacks it, so it
+was gone before the first snapshot. The commit that claimed it still says "9 files changed", and
+the sbatch *was* in it — carrying only the banner fix
+([[verify-the-line-you-ship]], [[review-threads-not-round-bodies]]).
+
+**Process.** An audit re-derived **all 25 fix signatures of rounds 5–8 against the pushed head**,
+not against the working tree. Exactly one was genuinely absent (this); one more read as absent
+and was a false negative from grepping a string that black had split across two source lines,
+which is its own lesson about auditing by substring. The figures are re-applied — and are now
+**pinned by a test** that parses the header's own MEASURED block and compares every figure
+against `reports/p3/stage2_rnafm_sizing.json`, VRAM to 5e-5 GiB and step-times against the
+steady-state mean of steps 1..5. Reverting any single figure to the superseded run turns that
+named test RED. A number checked against its artifact cannot go stale quietly — and cannot
+vanish quietly either.
+
+**Validation.** `ruff` + `black` clean; `bash -n` clean; full local tier 14 failed / **6,737
+passed**, still **zero new** against the matched `main` baseline at `2e929a3`.
+
+**Commit.** see PR (P3-17, review round 9).
+
+## Step P3-17 (review round 10) — 2026-08-22: the disclosure A15 owed, and the statistic P3-18 reads was self-certified
+
+**Inputs.** Branch head `2784417` with every formal gate green: CodeRabbit had reviewed that
+exact commit and returned no findings (a re-trigger answers *"Already reviewed the last
+commit"*), **zero** unresolved-and-not-outdated `reviewThreads` of 16, CI 4/4, and zero new
+local failures against a matched `main` baseline worktree at `2e929a3`. An independent
+nine-lens / 39-agent adversarial pass (0 agents errored) was run anyway, on the principle that
+a clean review round is a floor and not a ceiling. It filed 30, **confirmed 26 (12 major)**,
+refuted 4. Four were re-executed by hand before anything was changed.
+
+**Process.** The two that mattered most were about numbers rather than code.
+
+*The statistic ADR-0005 D17(c) reads at P3-18 was self-certified.* `ood.macro_average.point`
+is bit-exactly the mean of the admissible units carried in the same report — re-derived
+`0.1882143888847712` against a recorded `0.1882143888847712`, 30/30 admissible — and **no
+clause did that arithmetic**. Executed against `reports/p3/gate2_rnafm_ece.json`, setting the
+macro to `0.001` gave `validate_report` **zero problems**; so did `n_units_admissible → 3`;
+so did `gate.ece → 0.04`, which is 5.9× the measured value and still under the 0.05 bar. The
+measured swap margin is `0.211317 − 0.188214 = 0.023103` against D17's pinned `0.02`, so
+`macro → 0.1920` *reverses the backbone-swap verdict* — and that too validated clean.
+`derive_clauses` gains four re-derivations (schema **2 → 3**): the gated ECE against its own
+reliability table (`sum(weight × debiased_gap)`, plus `ece_plugin` and the bin census against
+`gate.n`), the leave-clade-out macro against its own admissible units, each unit's
+`admissible` flag against A2's pinned min-N, and every interval against its replicate count
+and against containing its own point. All ten tampers are now caught.
+
+*Three committed RNA-FM artifacts named and hashed the wrong environment, and two asserted
+something their own run measured false.* `gate2_rnafm_ece.json`, `stage2_rnafm_eval.json` and
+`stage2_rnafm_sizing.json` all recorded `envs/ml-rna.conda-lock.yml` — the **production
+RiNALMo** lock — for a run made under `ml-rnafm`, digesting that wrong file into
+`env_lock_hash`. That is the defect A15 exists to prevent, in the artifacts A15 provisions,
+and the schema-2 clause written at round 5 to catch it was **excused for exactly those files**
+by the carve-out for older schemas. Separately, `stage2_rnafm_eval.json`'s `gate.note` said
+*"on this run it means the no-aux CONTROL is uncalibratable (its calib carve is perfectly
+separated)"* while the same file recorded `aux0.0_lr1e-4` as `is_perfectly_separated: false`,
+`n_misclassified_at_zero: 6`, `converged: true`, `T = 1.3900776702410877`, with
+`overall_pass: true` — a sentence explaining a failure that never happened. Both producers had
+been fixed at round 5; only the artifacts were stale. All four artifacts are corrected and the
+two GATE-2 reports are **promoted to schema 3 rather than excused**, which is the general
+lesson: a carve-out that legitimately exempts *old* reports from a *new* clause must not be
+inherited by the artifacts the same branch adds.
+
+The remaining fixes: `env_lock_for_graded_arm` now re-derives the backbone from
+`base_model_name_or_path` when no `backbone` key was written, so the shipped `gate2_ece` rule
+can regenerate its own artifact again (it had begun overwriting a passing GATE-2 report with
+an `overall_pass: false` one, for a provenance-plumbing reason, exiting 0); `--scored-backbone`
+is checked against that same recorded base model, closing a contract that was vacuous for
+precisely the pre-A15 sidecars it exists for; the sbatch clears its `.DONE` marker at startup,
+so a failed re-run can no longer pass §9.3 artifact-based verification on the previous run's
+marker; `sizing --backbone <non-production>` refuses the default `--out` rather than
+overwriting the production sizing artifact `conf/train/stage2.yaml` cites; `_SCORED_BACKBONE`
+is pinned against what the sidecars themselves record instead of the mutable
+`PRODUCTION_BACKBONE`; and the tokenizer-comparability guard pins `VOCAB_DIGEST` instead of
+counting to 28.
+
+**Outputs.** `src/tbox_finder/calib/gate2.py` (+`backbone_key_from_load`, four clauses,
+schema 3), `src/tbox_finder/stage2/{eval,sizing,train}.py`,
+`slurm/p3/rnafm_stage2_finetune.sbatch`,
+`workflow/rules/calibration.smk`, `docs/decisions/ADR-0002-*.md` (A15 disclosure amendment +
+sign-off), `tests/unit/test_round10_producer_wiring.py` (new), `tests/unit/test_gate2.py`,
+`tests/unit/test_rna_backbone_registry.py`. Artifacts touched in exactly the fields listed
+above and **no other**: verified leaf-by-leaf, no measured value moved.
+
+**Validation.** Ten tamper probes on the committed GATE-2 report, all previously clean, all
+now caught. Eight producer sabotages (`"backbone": resolved_backbone` → a constant;
+`env_lock_for(cfg.backbone)` → `ENV_LOCK`; `backbone=backbone` → `PRODUCTION_BACKBONE` and
+deleted at the second call site; `base_model is None` → `True`; `if mismatched:` → `if False:`;
+`schema = report.get(...)` → `str(...)` at both previously-untested sites) each RED against
+their **named** test, each restore byte-identical by sha256. `ruff` + `black` CI-exact clean.
+
+**Decisions.** ADR-0002 **A15's disclosure paragraph amended under §7 sign-off** (bioedca,
+2026-08-22, *"amend it to name both confounds"*) to name the second confound beside the
+library minor version: the two compared arms' **weights were produced under different realized
+LR schedules**. Measured from each arm's own sweep report — RiNALMo `aux1.0_lr1e-4` took
+**1,415 of 2,830** scheduled optimizer steps (the P3-06-era micro-batch cosine defect),
+finishing at LR multiplier **0.5501** with warmup at **12.0 %** of steps taken; RNA-FM took
+**1,420 of 1,420**, annealing to **~0** with warmup at **6.0 %**, on otherwise identical
+requested configs. Annealing and warmup are not calibration-neutral, so the D17(c) margin
+carries both confounds. ⚠ Direction matters: the confound leaves the **shipped** arm
+under-annealed, so the comparator's apparent ECE advantage is *not* established as attributable
+to the backbone — a reason to withhold a swap, not to fire one. No retrain is implied; that is
+a separate, unbooked experiment. No pin, threshold, lockfile or measured value changed.
+
+**Commit.** see PR (P3-17, review round 10).
+
+## Step P3-17 (review round 11) — 2026-08-22: the round-10 clauses were themselves re-derived from derived fields
+
+**Inputs.** Commit `e330460` (round 10) with a CodeRabbit round triggered on it. A second
+independent six-lens / 28-agent adversarial pass (0 agents errored) was run against that
+commit specifically, on the same principle that produced round 10. It filed 22 and **confirmed
+17 (5 major) — in my own round-10 work**. Four were re-executed by hand before any change.
+
+**Process.** The headline is that round 10's central fix was itself the defect it was fixing.
+
+*A re-derivation that reads a derived field is not a re-derivation.*
+`_ece_matches_reliability` computed the gated ECE as `sum(weight × debiased_gap)` — but
+`debiased_gap` is itself derived, in closed form, from `acc`, `conf` and `n` sitting in the
+same row. So a **two-number edit** still fabricated a pass: zeroing one bin's `debiased_gap`
+and re-summing `gate.ece` took the RNA-FM report from an honest 0.006811 to 0.001397 with
+`validate_report` returning zero problems, while `ece_plugin` stayed 8× larger — arithmetically
+impossible, since the debiasing term can only subtract `sigma·sqrt(2/pi)`. The gap is now
+recomputed from `acc`/`conf`/`n` and each row's stored `gap`/`debiased_gap` must equal it.
+
+*The clause on the D17(c) statistic skipped the D17(c) statistic's own interval.*
+`_bootstrap_not_cost_knobbed` iterated the in-distribution interval and the per-unit ones and
+never `ood.macro_average` — so setting its `upper` to 0.0001, below its own point, validated
+clean. It is now included.
+
+*And the same clause fired on an honest state.* ADR-0005 **A1** sanctions
+`lower = upper = NaN, n_boot = 0` for a unit with fewer than 2 blocks — an admissible order
+whose rows all fall in one homology cluster. Round 10 read that as a cost-knobbed bootstrap,
+which would have made `gate2_ece` overwrite a passing report with a failing one and exit 0:
+the *same failure shape* round 10 had just fixed for `env_lock`. The A1 state is now recognised
+from its recorded `n_blocks`/`n_boot` — never from the NaN alone, so a genuine collapse cannot
+claim the exemption.
+
+*The carve-out I condemned was still in force for two of the four artifacts I corrected.*
+Round 10 promoted the two GATE-2 reports on the stated principle that a branch must not
+inherit an exemption meant for older reports — and left `stage2_rnafm_eval.json` at schema 1
+and `stage2_rnafm_sizing.json` at schema 3, each still excused the very env-lock clause whose
+value that commit had hand-corrected in those files. Both are promoted here; every clause
+derives TRUE and no measured number moves.
+
+*The eval side had the same two defects gate2 had.* `env_lock_for_scored_arms`' **recorded**
+branch trusted `backbone` without consulting `base_model_name_or_path`, so a record saying
+`backbone: rinalmo-giga` beside `base_model: multimolecule/rnafm` named, hashed and
+self-certified the production lock for RNA-FM weights; and the eval clause still read
+`backbone` alone, leaving it unsatisfiable from the pre-A15 sidecars `--scored-backbone` exists
+to regrade. Both fixed. ⚠ Round 10's `--scored-backbone` cross-check shipped with **no test at
+all** — `return None` at the top of its helper left the entire unit tier green.
+
+**Outputs.** `src/tbox_finder/calib/gate2.py`, `src/tbox_finder/stage2/{eval,sizing}.py`,
+`docs/decisions/ADR-0002-*.md` (the sign-off bullet moved so it no longer re-parents A15's own
+"Not triggered / unchanged" and "Cross-reference impact" paragraphs), `tests/unit/test_gate2.py`,
+`tests/unit/test_round10_producer_wiring.py`, `reports/p3/stage2_rnafm_{eval,sizing}.json`.
+The round-10 stanza's Outputs list is corrected: it named `train/lora_harness.py`, which that
+commit does not touch (it is a *subject* of an AST pin, not a modified file).
+
+**Validation.** Every round-10 tamper still caught, plus the four new ones (the two-number
+`debiased_gap` forge, the macro interval, a 1-row reliability table, a detached `ece_ci.point`)
+— while the honest A1 NaN interval is accepted and a NaN *without* the A1 signature is still
+refused. The two hardened AST pins now catch a **second** writer (a `_second_sidecar_writer`
+returning the module constant left round 10's version green); four sabotages of the eval-side
+guards each RED against their named test; all restores byte-identical by sha256. ⚠ Two of my
+own patches in this round silently failed to apply (a stale quote anchor after `black`
+reformatting) and were caught only because the sabotage came back GREEN — the
+[[green-sabotage-may-never-have-applied]] trap, hit twice in one session.
+
+**Decisions.** None. No ADR value, threshold, pin or measured number changed in this round; the
+only ADR edit is structural (bullet placement).
+
+**Commit.** see PR (P3-17, review round 11).
