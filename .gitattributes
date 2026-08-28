@@ -10,13 +10,24 @@ tests/golden/**   -text
 
 # ─── git-LFS-tracked medium binaries (CLAUDE.md §5.2) ───────────────────────
 # Large FASTAs / genomes live under the gitignored data/raw|external and go to
-# DVC — only small committed benchmark FASTAs, covariance models, figures, and
-# the per-record split-assignment table (git-LFS carve-out, PRD §9.2) are LFS.
+# DVC — only small committed benchmark FASTAs, covariance models and figures are
+# LFS. The split-assignment table is deliberately NOT (see its stanza below).
 figures/** filter=lfs diff=lfs merge=lfs -text
 *.cm filter=lfs diff=lfs merge=lfs -text
 *.fa filter=lfs diff=lfs merge=lfs -text
 *.fasta filter=lfs diff=lfs merge=lfs -text
-data/processed/splits/split_assignments.parquet filter=lfs diff=lfs merge=lfs -text
+# The split-assignment table LEFT git-LFS (was the PRD §9.2 carve-out). It is the
+# ONE committed binary that CI must read as real bytes — the §8.2 no-leakage gate
+# reads the real partition — so under LFS every `test` job spent bandwidth on it,
+# and the blanket `lfs: true` it forced dragged all 31 objects (19.7 MB/run,
+# ~11 GB/month) until the account's LFS budget was exhausted on 2026-08-24 and CI
+# stopped being able to fetch anything at all. At 5.1 MB with 4 revisions in the
+# repo's whole history it sits well inside plain git (GitHub warns at 50 MB), so
+# as an ordinary blob it costs zero metered bandwidth, forever. Bonus: the amlab
+# cluster has no git-lfs binary, so this file used to arrive there as a 132-byte
+# pointer — the thing slurm/p2/*.sbatch carry explicit guards against.
+# `-text` is load-bearing: `* text=auto eol=lf` above must never touch a parquet.
+data/processed/splits/split_assignments.parquet -text
 # Rendered per-phase dev-log PDFs (CLAUDE.md §6.2/§11) accumulate one ~1 MB
 # binary per phase — LFS keeps the git packfile lean, like figures above.
 docs/dev-log/*.pdf filter=lfs diff=lfs merge=lfs -text
