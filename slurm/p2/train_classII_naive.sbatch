@@ -148,28 +148,66 @@ assert_dvc_artifact() {
 # smudging), so its `oid sha256` is a committed checksum for the real file — the LFS analogue
 # of the .dvc md5. ⚠ FAIL CLOSED on an unreadable / non-pointer object.
 assert_lfs_artifact() {
-  local data_path="$1" ptr want_oid want_size got_oid got_size
+  local data_path="$1" ptr want_oid want_size got_oid got_size want_blob got_blob
   assert_parquet_magic "$data_path"
-  if ! ptr="$(git show "HEAD:$data_path" 2>/dev/null)"; then
-    echo "FATAL: could not read the committed object for $data_path (git show failed)." >&2
+  # ⚠ FAIL CLOSED on an unverifiable object. An earlier version returned "staged-ok" whenever
+  # the pointer could not be read, leaving PAR1 magic as the only check — and PAR1 magic passes
+  # ANY parquet, including a stale or wrong-fold one. A staged-input guard that degrades to
+  # "it's a parquet" is precisely the shape that burns a submit-ack: the job starts, trains on
+  # the wrong table, and reports a self-consistent result.
+  #
+  # Which representation is committed? Ask git's ATTRIBUTES rather than reading the object.
+  # Since PR #135 this table is an ordinary git blob, so `git show` on it would pour 5 MB of
+  # binary through a command substitution — which bash truncates at the first null byte, with
+  # a warning in every job log.
+  if git check-attr filter -- "$data_path" 2>/dev/null | grep -q 'filter: lfs$'; then
+    # git-LFS-tracked: the committed object is a ~130-byte pointer whose `oid sha256` IS the
+    # content hash (git-lfs spec), so it is a committed checksum for the real file.
+    if ! ptr="$(git show "HEAD:$data_path" 2>/dev/null)"; then
+      echo "FATAL: could not read the committed LFS pointer for $data_path (git show failed)." >&2
+      exit 2
+    fi
+    want_oid="$(printf '%s\n' "$ptr" | awk -F'sha256:' '/^oid sha256:/ {print $2; exit}')"
+    want_size="$(printf '%s\n' "$ptr" | awk '/^size / {print $2; exit}')"
+    if [ -z "$want_oid" ] || [ -z "$want_size" ]; then
+      echo "FATAL: $data_path is git-LFS-tracked but its committed object is not a readable" >&2
+      echo "  pointer, so there is no committed checksum to verify the staged file against." >&2
+      exit 2
+    fi
+    got_oid="$(sha256sum "$data_path" | awk '{print $1}')"
+    got_size="$(stat -c %s "$data_path")"
+    if [ "$want_oid" != "$got_oid" ] || [ "$want_size" != "$got_size" ]; then
+      echo "FATAL: $data_path does not match its committed LFS pointer." >&2
+      echo "  want oid=$want_oid size=$want_size" >&2
+      echo "  got  oid=$got_oid size=$got_size" >&2
+      exit 2
+    fi
+    echo "staged-ok $data_path sha256=$got_oid"
+    return 0
+  fi
+  # An ordinary git blob — the NORMAL case for this table since PR #135, which moved it out of
+  # git-LFS so CI stops paying metered LFS bandwidth. That also means this cluster (which has
+  # no git-lfs binary) now receives the real bytes from a plain checkout instead of a 132-byte
+  # pointer. Verify content-addressed against the commit: a git blob id hashes the exact bytes,
+  # the same strength the pointer's `oid sha256` gave. Until this branch existed the clause
+  # above exited 2 here, so every one of these jobs died on submit once the table left LFS.
+  # --verify --quiet: a bare `git rev-parse HEAD:<path>` ECHOES the unresolvable argument to
+  # stdout instead of failing, which would set want_blob to the literal "HEAD:<path>" and
+  # report a bogus mismatch rather than the honest "nothing to verify against" below.
+  want_blob="$(git rev-parse --verify --quiet "HEAD:$data_path" 2>/dev/null || true)"
+  got_blob="$(git hash-object -- "$data_path" 2>/dev/null || true)"
+  if [ -z "$want_blob" ] || [ -z "$got_blob" ]; then
+    echo "FATAL: $data_path is neither git-LFS-tracked nor a resolvable git blob, so there is" >&2
+    echo "  no committed checksum to verify the staged file against." >&2
     exit 2
   fi
-  want_oid="$(printf '%s\n' "$ptr" | awk -F'sha256:' '/^oid sha256:/ {print $2; exit}')"
-  want_size="$(printf '%s\n' "$ptr" | awk '/^size / {print $2; exit}')"
-  if [ -z "$want_oid" ] || [ -z "$want_size" ]; then
-    echo "FATAL: the committed object for $data_path is not a readable git-LFS pointer," >&2
-    echo "  so there is no committed checksum to verify the staged file against." >&2
+  if [ "$want_blob" != "$got_blob" ]; then
+    echo "FATAL: $data_path does not match its committed git blob." >&2
+    echo "  want blob=$want_blob" >&2
+    echo "  got  blob=$got_blob" >&2
     exit 2
   fi
-  got_oid="$(sha256sum "$data_path" | awk '{print $1}')"
-  got_size="$(stat -c %s "$data_path")"
-  if [ "$want_oid" != "$got_oid" ] || [ "$want_size" != "$got_size" ]; then
-    echo "FATAL: $data_path does not match its committed LFS pointer." >&2
-    echo "  want oid=$want_oid size=$want_size" >&2
-    echo "  got  oid=$got_oid size=$got_size" >&2
-    exit 2
-  fi
-  echo "staged-ok $data_path sha256=$got_oid"
+  echo "staged-ok $data_path blob=$got_blob"
 }
 
 assert_dvc_artifact data/interim/flank_context/context_v0.parquet \
