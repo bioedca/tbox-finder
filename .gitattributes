@@ -16,6 +16,14 @@ figures/** filter=lfs diff=lfs merge=lfs -text
 *.cm filter=lfs diff=lfs merge=lfs -text
 *.fa filter=lfs diff=lfs merge=lfs -text
 *.fasta filter=lfs diff=lfs merge=lfs -text
+# The curated-control query FASTA LEFT git-LFS for the same reason as the split
+# table below: tests/unit/test_curated_control_run.py reads it as REAL sequences
+# through mining/curated_control_run.py, whose producer refuses a pointer outright
+# ("is a git-LFS POINTER, not sequences"), so a pointer checkout turns 5 tests red.
+# 61 KB / 317 records is far below what LFS is for. The explicit -filter/-diff/-merge
+# are required to override the `*.fasta` rule immediately above; `-text` keeps the
+# bytes byte-identical so the committed staging digest still matches.
+data/processed/mining/curated_control_queries_v0.fasta -filter -diff -merge -text
 # The split-assignment table LEFT git-LFS (was the PRD §9.2 carve-out). It is the
 # ONE committed binary that CI must read as real bytes — the §8.2 no-leakage gate
 # reads the real partition — so under LFS every `test` job spent bandwidth on it,
