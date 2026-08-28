@@ -35,7 +35,13 @@ on:
   workflow_dispatch: {} # manual trigger (e.g. to validate the `docker` build)
 
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
+  # Keyed on the branch TIP sha, NOT github.ref. A push to a feature branch and the
+  # pull_request run for that same commit otherwise land in different groups
+  # (refs/heads/<branch> vs refs/pull/N/merge), so BOTH run and every commit is tested
+  # twice — 266 push + 253 PR runs in 2026-08 alone. For one tip,
+  # `pull_request.head.sha` == the push event's `github.sha`, so the two now share a
+  # group and the later run supersedes the earlier one.
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.head.sha || github.sha }}
   cancel-in-progress: true
 
 permissions:
@@ -92,8 +98,28 @@ jobs:
       - uses: actions/checkout@v5
         with:
           persist-credentials: false # no job pushes via git; drop the token
-          lfs: true # smudge the committed split-assignment table so the P0-24
-          #          no-leakage gate reads the REAL partition, not an LFS pointer
+          # Deliberately NOT `lfs: true`. That smudges ALL 31 LFS objects in the tree
+          # (~19.7 MB/run) when this job needs exactly one (~5.1 MB): docs/dev-log/*.pdf
+          # and figures/** are read by NO test, and the data/external/refs/* .fa/.cm are
+          # checked by tests/unit/test_refs_staging.py through the POINTER-AWARE
+          # refs.content_sha256 (see test_content_sha256_reads_lfs_pointer) — it hashes
+          # the oid out of the 132-byte pointer, so those 9.4 MB never needed real bytes.
+          # At ~560 runs/month the blanket fetch burned ~11 GB of LFS bandwidth against a
+          # 1 GB allowance. Targeted pull below. NOTE: that pull runs AFTER checkout has
+          # dropped the token, which is fine only because this repo is PUBLIC (anonymous
+          # LFS reads). If it ever goes private, this step needs credentials back.
+      - name: Restore the split-table LFS object from cache
+        # Pre-smudge the tracked path IS the 132-byte pointer, so hashFiles() over it is a
+        # key that changes only when the oid changes. The table has 4 revisions in the
+        # repo's entire history, so this hits ~always and the pull below costs ~0 bytes.
+        uses: actions/cache@v4
+        with:
+          path: .git/lfs/objects
+          key: lfs-split-${{ hashFiles('data/processed/splits/split_assignments.parquet') }}
+      - name: Smudge ONLY the split-assignment table
+        # The P0-24 / §8.2 no-leakage gate must read the REAL partition, not an LFS
+        # pointer. Every other LFS path stays a pointer on purpose (see above).
+        run: git lfs pull --include="data/processed/splits/split_assignments.parquet"
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
