@@ -1,0 +1,64 @@
+# RNA-FM Stage-2 COMPARATOR backbone — the pinned checkpoint record (P3-17).
+# Drives: src/tbox_finder/stage2/train.py::main, selected with `backbone=rnafm model=rnafm_stage2`.
+# ROLE: the ADR-0002 **D6** / PRD §10.2 ablation comparator, built so PRD §10.2's condition
+#   (c) — "post-calibration leave-clade-out ECE is worse than RNA-FM's by a pre-registered
+#   margin" — can be *measured* at P3-18 against ADR-0005 D17's 0.02. It is NOT the shipped
+#   Stage-2: that stays `rinalmo_stage2` (ADR-0002 D5/A9), and swapping is a separate §7
+#   decision on top of D17's margin, never a consequence of this file existing.
+# ADR pins: ADR-0002 — D6 (the RNA-FM drop-in), D2 (immutable revision, never `main`),
+#   **A15** (the `envs/ml-rnafm.yml` / `multimolecule` 0.2.0 env this arm runs under).
+#
+# ⚠ THIS FILE IS A RECORD, NOT A SWITCH — and the switch is a different key.
+# Every load-bearing scalar below is FROZEN IN CODE, in the closed allow-list
+# `src/tbox_finder/models/rna_backbone_registry.py::BACKBONES["rnafm"]`, and
+# `stage2/train.py::_cfg_from_mapping` REFUSES this file if it drifts from those pins. What
+# actually selects the backbone is the top-level `backbone: rnafm` key; setting `repo_id` here
+# alone would name a checkpoint the run never loaded, which is the failure mode the refusal
+# exists to catch. Composing this group against `backbone: rinalmo-giga` is likewise refused.
+#
+# ⚠ THIS ARM DOES NOT RUN IN `tbox-ml-rna`. `multimolecule` 0.1.0 — the pin every shipped
+# Stage-2 artifact was produced under — CANNOT LOAD this checkpoint at all: its
+# `configuration_rnafm.py` demands `vocab_size == 26` for the nucleotide variant while the
+# published checkpoint declares 28, and no older checkpoint revision exists to pin around it
+# (the repo has three commits, all 2026-05-31). ADR-0002 A15 therefore added
+# `envs/ml-rnafm.yml` (`multimolecule` 0.2.0) rather than bumping `ml-rna` and firing
+# CLAUDE.md §8.5 across every published RiNALMo number. The consequence P3-18 must disclose:
+# the two arms are compared across a one-minor-version library difference.
+
+seed: 42
+
+# --- pinned checkpoint (loaded via multimolecule; transformers-native) ---
+repo_id: multimolecule/rnafm
+revision: 7d6e73ad3b48e042b378f9a788a56ccb4d573a27   # immutable commit — never `main` (ADR-0002 D2)
+trust_remote_code: false                              # multimolecule is transformers-native (ADR-0002 A2 K1)
+hub_url: https://huggingface.co/multimolecule/rnafm
+
+# --- checkpoint config facts (from config.json; asserted in code, echoed here) ---
+# Measured 2026-08-21 on a CPU load under multimolecule 0.2.0. `hidden_dim` is the one that
+# bites: the seven Stage-2 heads are nn.Linear(d_model, …), and 640 ≠ RiNALMo's 1280 — which
+# is why `stage2/model.py` MEASURES the width off the live backbone rather than reading a
+# constant, and why this value is an expectation to check against, never a value to report.
+hidden_dim: 640
+n_layer: 12
+n_heads: 20
+intermediate_size: 5120
+position_embedding: absolute                          # RiNALMo is rotary; this one is not
+max_position_embeddings: 1026
+vocab_size: 28
+# Backbone parameters only — the `model.*` tensors, excluding the lm_head/ss_head a Stage-2
+# arm drops (the checkpoint totals 99,523,469). PRD §10.2's "~100M" is confirmed, not copied.
+expected_param_count: 99111680
+
+# --- what makes the two arms comparable, recorded because it was measured, not assumed ---
+# RNA-FM's vocab.txt at this revision is BYTE-IDENTICAL to multimolecule/rinalmo-giga's and to
+# `src/tbox_finder/stage2/tokenizer.py::VOCAB` — same 28 tokens, same order, same six
+# specials, same <cls>…<eos> 2-flanking layout. So the shared tokenizer mirror needs no second
+# table, `VOCAB_DIGEST` is unchanged, and the ECE comparison is not confounded by tokenisation.
+# 1026 absolute positions exceed the mirror's pinned 1024 cap, so the existing 1022-nt ceiling
+# stays conservative here too (T-box loci are ~150–350 nt, far below either).
+tokenizer_vocab_identical_to_rinalmo: true
+
+# --- the environment this arm runs under (ADR-0002 A15) ---
+env: envs/ml-rnafm.yml
+env_lock: envs/ml-rnafm.conda-lock.yml
+multimolecule: 0.2.0                                  # NOT ml-rna's 0.1.0 — see the header

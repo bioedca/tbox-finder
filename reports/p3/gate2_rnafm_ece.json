@@ -30,30 +30,30 @@
     "GATE-2's P3 half grades the PRE-prior-shift named posterior only; the FDR half (ADR-0005 D12, FDP CI-upper-bound <= 10%) is graded at P5 and is absent here.",
     "The genome-scale deployment prevalence is prose only \u2014 '~10^3-10^4 : 1' at PRD.md \u00a711 and ADR-0005 D7's contrast line \u2014 and nothing in src/, conf/ or any ADR encodes a scalar. The prior-shifted ECE is therefore reported across the band's endpoints and no single target prior is pinned; pinning one would be a new blinded-frozen default (CLAUDE.md \u00a77 item 2).",
     "ADR-0005 D13 condition (i) compares the leave-clade-out ECE to a *pinned drift bound*. No such value exists: D18's delegation map assigns only the min-N floor (pinned by Amendment A2), and no number of that shape appears in PRD.md, ADR-0005, ADR-0006, conf/ or src/. Pinning one is a new blinded-frozen default requiring ADR-0005 sign-off (CLAUDE.md \u00a77 item 2), so condition (i) is left unadjudicated and no calibrated-negative PASS is derived from the two conditions that do have values.",
-    "INHERITED FROM P3-08: the production arm's temperature is fittable only because ONE calib row of 1,089 is misclassified at the decision boundary; that row is the entire signal for beta. The no-aux control's calib carve is perfectly separated and has no temperature at all. ADR-0005 D11 has no degenerate-limit rule, and drafting one is a P3-exit item.",
+    "INHERITED FROM P3-08 (these two facts are about the P3-08 RiNALMo run, not necessarily about the arm graded here): P3-08's production RiNALMo arm has a temperature that is fittable only because ONE calib row of 1,089 is misclassified at the decision boundary; that row is the entire signal for beta. P3-08's no-aux RiNALMo control has a perfectly separated calib carve and no temperature at all. The arm graded HERE is described by its own temperature disclosure below, and this report records no separation measurement for it. ADR-0005 D11 has no degenerate-limit rule, and drafting one is a P3-exit item.",
     "INHERITED FROM P3-09: the D11 debiasing term was measured to SATURATE at ~0.060 against a known truth of 0.123 on genuinely miscalibrated data at n in {20, 50, 200} \u2014 i.e. it can under-state a real calibration error at small n. The plug-in ECE is reported beside the gated value for exactly this reason; certifying the debias term is a P3-exit / ADR concern flagged in `metrics.binned_ece`'s own docstring.",
     "The leave-clade-out units are ~92% positive (their negatives are the dinucleotide-shuffled decoys carved from the same held-out records), so each unit's OOD ECE is dominated by the positive arm and is not a deployment-prevalence read.",
-    "THE GATED MARGIN IS BIN-CONCENTRATED: 83.1% of the reported ECE comes from ONE of 15 equal-mass bins, and 12 bins have accuracy exactly 0 or 1 because the posterior is near-separated (the widest bin spans 0.9956 of the probability axis, i.e. it absorbs the whole transition region). The pass is honest, and its evidence base is narrow \u2014 the same shape as the single misclassified calib row above.",
-    "The graded posterior is sigma(z / T) with T = 1.140627, fitted on 1089 calib rows and applied unchanged to both the in-distribution and the leave-clade-out populations.",
-    "The leave-clade-out macro-average OOD ECE is 0.2113 over 30 admissible held-out orders \u2014 REPORTED, not gated, and not comparable to the 0.05 in-distribution gate."
+    "THE GATED MARGIN IS BIN-CONCENTRATED: 79.5% of the reported ECE comes from ONE of 15 equal-mass bins, and 10 bins have accuracy exactly 0 or 1 because the posterior is near-separated (the widest bin spans 0.9209 of the probability axis, i.e. it absorbs the whole transition region). The pass is honest, and its evidence base is narrow \u2014 the same shape as the single misclassified calib row above.",
+    "The graded posterior is sigma(z / T) with T = 1.317641, fitted on 1089 calib rows and applied unchanged to both the in-distribution and the leave-clade-out populations.",
+    "The leave-clade-out macro-average OOD ECE is 0.1882 over 30 admissible held-out orders \u2014 REPORTED, not gated, and not comparable to the 0.05 in-distribution gate."
   ],
-  "env_lock": "envs/ml-rna.conda-lock.yml",
+  "env_lock": "envs/ml-rnafm.conda-lock.yml",
   "gate": {
     "bin_concentration": {
       "gated": false,
       "n_bins": 15,
-      "n_bins_with_saturated_accuracy": 12,
-      "n_bins_with_zero_debiased_gap": 12,
+      "n_bins_with_saturated_accuracy": 10,
+      "n_bins_with_zero_debiased_gap": 7,
       "note": "descriptive only \u2014 no threshold is pinned on bin concentration anywhere; it states how much of the reported ECE rests on how few bins",
-      "top_bin_contribution": 0.004704351122429398,
-      "top_bin_index": 3,
-      "top_bin_share_of_ece": 0.8309142749584918,
+      "top_bin_contribution": 0.005414108622813487,
+      "top_bin_index": 2,
+      "top_bin_share_of_ece": 0.7949250501887594,
       "widest_bin_index": 3,
-      "widest_bin_span": 0.9955932455891393
+      "widest_bin_span": 0.9209025381059636
     },
     "bootstrap_seed": 20260804,
     "calibration": {
-      "beta": 0.876710565328598,
+      "beta": 0.7589319050312042,
       "calib_prevalence": 0.7887970615243343,
       "converged": true,
       "fitted_on": "calib",
@@ -67,23 +67,23 @@
       "n_fitted": 1089,
       "n_iterations": 22,
       "n_total": 7201,
-      "nll_per_position_final": 0.007131142492645936,
-      "nll_per_position_initial": 0.007428616986386666,
-      "temperature": 1.140627294282911
+      "nll_per_position_final": 0.043342221279283916,
+      "nll_per_position_initial": 0.04738374426409068,
+      "temperature": 1.3176412710688241
     },
-    "ece": 0.005661656399710311,
+    "ece": 0.006810841627808656,
     "ece_binning": "equal_mass",
     "ece_ci": {
       "ci_level": 0.95,
-      "lower": 0.002700068009055061,
+      "lower": 0.004067991759099783,
       "n_blocks": 2275,
       "n_boot": 2000,
-      "point": 0.005661656399710311,
-      "upper": 0.0094096617713777
+      "point": 0.006810841627808656,
+      "upper": 0.012859950706182722
     },
     "ece_debiased": true,
     "ece_n_bins": 15,
-    "ece_plugin": 0.008378386471764655,
+    "ece_plugin": 0.01132246565841689,
     "estimator": "tbox_finder.metrics.binned_ece",
     "gate": 0.05,
     "graded_object": "named_posterior (temperature-scaled, PRE prior-shift) \u2014 ADR-0005 D11",
@@ -99,153 +99,153 @@
     "prior_shift_applied": false,
     "reliability": [
       {
-        "acc": 0.0049261083743842365,
-        "conf": 3.852771408572489e-06,
-        "debiased_gap": 0.004812335322700019,
-        "gap": 0.004922255602975664,
-        "n": 203,
-        "p_max": 4.371982354851603e-06,
-        "p_min": 3.3597804308706118e-06,
-        "weight": 0.06666666666666667
-      },
-      {
         "acc": 0.0,
-        "conf": 8.286428611844853e-06,
+        "conf": 0.0010404693208835116,
         "debiased_gap": 0.0,
-        "gap": 8.286428611844853e-06,
+        "gap": 0.0010404693208835116,
         "n": 203,
-        "p_max": 1.4205834106203602e-05,
-        "p_min": 4.3754563477170354e-06,
+        "p_max": 0.0011423609148681743,
+        "p_min": 0.0009734614855372294,
         "weight": 0.06666666666666667
       },
       {
-        "acc": 0.009852216748768473,
-        "conf": 2.499603388602123e-05,
-        "debiased_gap": 0.009547243836513671,
-        "gap": 0.009827220714882451,
+        "acc": 0.019704433497536946,
+        "conf": 0.0024029743750604684,
+        "debiased_gap": 0.014559606008595107,
+        "gap": 0.01730145912247648,
         "n": 203,
-        "p_max": 4.5296529712926e-05,
-        "p_min": 1.4288000272820953e-05,
+        "p_max": 0.0037078851058965938,
+        "p_min": 0.0011434251256965192,
         "weight": 0.06666666666666667
       },
       {
-        "acc": 0.5763546798029556,
-        "conf": 0.47781672537399006,
-        "debiased_gap": 0.07056526683644097,
-        "gap": 0.09853795442896557,
+        "acc": 0.09852216748768473,
+        "conf": 0.011372571995370994,
+        "debiased_gap": 0.08121162934220232,
+        "gap": 0.08714959549231374,
         "n": 203,
-        "p_max": 0.9956386183026448,
-        "p_min": 4.537271350542189e-05,
+        "p_max": 0.03381150483590487,
+        "p_min": 0.003711485673016903,
+        "weight": 0.06666666666666667
+      },
+      {
+        "acc": 0.5024630541871922,
+        "conf": 0.47201206839559995,
+        "debiased_gap": 0.0024946278830638574,
+        "gap": 0.030450985791592222,
+        "n": 203,
+        "p_max": 0.9553767892834308,
+        "p_min": 0.03447425117746732,
+        "weight": 0.06666666666666667
+      },
+      {
+        "acc": 0.9802955665024631,
+        "conf": 0.9807927000335498,
+        "debiased_gap": 0.0,
+        "gap": 0.0004971335310867131,
+        "n": 203,
+        "p_max": 0.9889724482329544,
+        "p_min": 0.9555580245258982,
+        "weight": 0.06666666666666667
+      },
+      {
+        "acc": 0.9901477832512315,
+        "conf": 0.9912187491642825,
+        "debiased_gap": 0.0,
+        "gap": 0.001070965913051003,
+        "n": 203,
+        "p_max": 0.9928095703501941,
+        "p_min": 0.9889999111521487,
         "weight": 0.06666666666666667
       },
       {
         "acc": 1.0,
-        "conf": 0.9969511672622108,
-        "debiased_gap": 0.0,
-        "gap": 0.00304883273778922,
+        "conf": 0.993764030697849,
+        "debiased_gap": 0.0018275218998937632,
+        "gap": 0.006235969302150979,
         "n": 203,
-        "p_max": 0.997592489869701,
-        "p_min": 0.995653404452284,
+        "p_max": 0.9944904437397151,
+        "p_min": 0.9928225068451134,
         "weight": 0.06666666666666667
       },
       {
         "acc": 1.0,
-        "conf": 0.9979021099509503,
-        "debiased_gap": 0.0,
-        "gap": 0.0020978900490497,
+        "conf": 0.9949604621479975,
+        "debiased_gap": 0.0010741076515870859,
+        "gap": 0.005039537852002507,
         "n": 203,
-        "p_max": 0.9981669069239754,
-        "p_min": 0.9975934696061682,
+        "p_max": 0.9953599375949086,
+        "p_min": 0.9944938274331059,
         "weight": 0.06666666666666667
       },
       {
         "acc": 1.0,
-        "conf": 0.9984131802887426,
-        "debiased_gap": 0.0,
-        "gap": 0.0015868197112574034,
+        "conf": 0.995718290788599,
+        "debiased_gap": 0.0006251814958514439,
+        "gap": 0.00428170921140103,
         "n": 203,
-        "p_max": 0.9986086226364166,
-        "p_min": 0.9981682404539105,
+        "p_max": 0.9960243641153694,
+        "p_min": 0.9953614750168827,
         "weight": 0.06666666666666667
       },
       {
         "acc": 1.0,
-        "conf": 0.9987408467954311,
-        "debiased_gap": 0.0,
-        "gap": 0.0012591532045689302,
+        "conf": 0.9963176003884392,
+        "debiased_gap": 0.00029039525200443136,
+        "gap": 0.003682399611560805,
         "n": 203,
-        "p_max": 0.9988566162039738,
-        "p_min": 0.9986120008440802,
+        "p_max": 0.9965334925810597,
+        "p_min": 0.9960252639447157,
         "weight": 0.06666666666666667
       },
       {
         "acc": 1.0,
-        "conf": 0.9989405523547429,
-        "debiased_gap": 0.0,
-        "gap": 0.0010594476452571167,
+        "conf": 0.9967170555806024,
+        "debiased_gap": 7.955488393186294e-05,
+        "gap": 0.003282944419397582,
         "n": 203,
-        "p_max": 0.9990200115216221,
-        "p_min": 0.998858168272835,
+        "p_max": 0.9968955370824467,
+        "p_min": 0.9965349349378099,
         "weight": 0.06666666666666667
       },
       {
         "acc": 1.0,
-        "conf": 0.999087059461222,
+        "conf": 0.9970781286085527,
         "debiased_gap": 0.0,
-        "gap": 0.0009129405387779954,
+        "gap": 0.002921871391447284,
         "n": 203,
-        "p_max": 0.9991555663651904,
-        "p_min": 0.9990200733210929,
+        "p_max": 0.9972389083190439,
+        "p_min": 0.9968978310696018,
         "weight": 0.06666666666666667
       },
       {
         "acc": 1.0,
-        "conf": 0.999226764895876,
+        "conf": 0.9973812123583803,
         "debiased_gap": 0.0,
-        "gap": 0.0007732351041239705,
+        "gap": 0.002618787641619713,
         "n": 203,
-        "p_max": 0.9992997350284065,
-        "p_min": 0.9991556975652991,
+        "p_max": 0.9975323693181406,
+        "p_min": 0.9972389521622377,
         "weight": 0.06666666666666667
       },
       {
         "acc": 1.0,
-        "conf": 0.9993849258643162,
+        "conf": 0.9976883166813918,
         "debiased_gap": 0.0,
-        "gap": 0.0006150741356838463,
+        "gap": 0.002311683318608204,
         "n": 203,
-        "p_max": 0.9994597645008666,
-        "p_min": 0.9993010087565225,
+        "p_max": 0.9978558996416433,
+        "p_min": 0.9975327737081456,
         "weight": 0.06666666666666667
       },
       {
         "acc": 1.0,
-        "conf": 0.9995494697529089,
+        "conf": 0.9980485270433385,
         "debiased_gap": 0.0,
-        "gap": 0.00045053024709107437,
+        "gap": 0.0019514729566615374,
         "n": 203,
-        "p_max": 0.9996190841632199,
-        "p_min": 0.9994598353730707,
-        "weight": 0.06666666666666667
-      },
-      {
-        "acc": 1.0,
-        "conf": 0.9996724587188975,
-        "debiased_gap": 0.0,
-        "gap": 0.0003275412811024614,
-        "n": 203,
-        "p_max": 0.999715030846799,
-        "p_min": 0.9996203643661314,
-        "weight": 0.06666666666666667
-      },
-      {
-        "acc": 1.0,
-        "conf": 0.9997513847536674,
-        "debiased_gap": 0.0,
-        "gap": 0.00024861524633257304,
-        "n": 203,
-        "p_max": 0.999896285200178,
-        "p_min": 0.9997157340787053,
+        "p_max": 0.9984893893027429,
+        "p_min": 0.9978563703390952,
         "weight": 0.06666666666666667
       }
     ],
@@ -260,7 +260,7 @@
     ]
   },
   "gated": true,
-  "generated_at_utc": "2026-08-04T23:59:07+00:00",
+  "generated_at_utc": "2026-08-21T23:30:14+00:00",
   "generated_by": "src/tbox_finder/calib/gate2.py",
   "is_science": true,
   "note": "`gate.passes` is GATE-2's P3 half: the ADR-0005 D11 in-distribution ECE of the named posterior against the blinded-frozen 0.05 default. `overall_pass` is stricter \u2014 it is `gate.passes` AND every machinery, completeness and non-gated-ness clause. The FDR half of GATE-2 is graded at P5 (D12) and is not represented here.",
@@ -270,10 +270,10 @@
     "bootstrap_seed": 20260804,
     "by_phylum": {
       "Actinobacteria": {
-        "max_ood_ece": 0.7990641385174938,
-        "mean_ood_ece": 0.6795685708523113,
-        "median_ood_ece": 0.6803731699966598,
-        "min_ood_ece": 0.5922916291383591,
+        "max_ood_ece": 0.7252086137923988,
+        "mean_ood_ece": 0.5724908740714014,
+        "median_ood_ece": 0.5824635121142191,
+        "min_ood_ece": 0.39489035247327486,
         "n_positives": 1156,
         "n_records": 1252,
         "n_units": 9,
@@ -290,10 +290,10 @@
         ]
       },
       "Chloroflexi": {
-        "max_ood_ece": 0.053458797666076065,
-        "mean_ood_ece": 0.014148624634832027,
-        "median_ood_ece": 0.001236522212233182,
-        "min_ood_ece": 0.0006626564487856818,
+        "max_ood_ece": 0.01889048487486837,
+        "mean_ood_ece": 0.00978016447300834,
+        "median_ood_ece": 0.007991193269878582,
+        "min_ood_ece": 0.004247786477407826,
         "n_positives": 117,
         "n_records": 125,
         "n_units": 4,
@@ -305,10 +305,10 @@
         ]
       },
       "Deinococcus-Thermus": {
-        "max_ood_ece": 0.11514814263817981,
-        "mean_ood_ece": 0.11514814263817981,
-        "median_ood_ece": 0.11514814263817981,
-        "min_ood_ece": 0.11514814263817981,
+        "max_ood_ece": 0.1906376727313617,
+        "mean_ood_ece": 0.1906376727313617,
+        "median_ood_ece": 0.1906376727313617,
+        "min_ood_ece": 0.1906376727313617,
         "n_positives": 28,
         "n_records": 28,
         "n_units": 1,
@@ -317,10 +317,10 @@
         ]
       },
       "Firmicutes": {
-        "max_ood_ece": 0.01556758642796701,
-        "mean_ood_ece": 0.0033016322062790135,
-        "median_ood_ece": 0.0012145636185482464,
-        "min_ood_ece": 0.0007259244892567599,
+        "max_ood_ece": 0.01715048428272326,
+        "mean_ood_ece": 0.010949157458039734,
+        "median_ood_ece": 0.012087207871249948,
+        "min_ood_ece": 0.0037568136990320565,
         "n_positives": 7080,
         "n_records": 7652,
         "n_units": 9,
@@ -337,10 +337,10 @@
         ]
       },
       "Proteobacteria": {
-        "max_ood_ece": 0.0011627824769701387,
-        "mean_ood_ece": 0.0011627824769701387,
-        "median_ood_ece": 0.0011627824769701387,
-        "min_ood_ece": 0.0011627824769701387,
+        "max_ood_ece": 0.003283090702713465,
+        "mean_ood_ece": 0.003283090702713465,
+        "median_ood_ece": 0.003283090702713465,
+        "min_ood_ece": 0.003283090702713465,
         "n_positives": 31,
         "n_records": 33,
         "n_units": 1,
@@ -349,10 +349,10 @@
         ]
       },
       "Synergistetes": {
-        "max_ood_ece": 0.0018739284494558018,
-        "mean_ood_ece": 0.0018739284494558018,
-        "median_ood_ece": 0.0018739284494558018,
-        "min_ood_ece": 0.0018739284494558018,
+        "max_ood_ece": 0.05493064450671008,
+        "mean_ood_ece": 0.05493064450671008,
+        "median_ood_ece": 0.05493064450671008,
+        "min_ood_ece": 0.05493064450671008,
         "n_positives": 27,
         "n_records": 31,
         "n_units": 1,
@@ -361,10 +361,10 @@
         ]
       },
       "Tenericutes": {
-        "max_ood_ece": 0.015166204896622848,
-        "mean_ood_ece": 0.0037802540766580022,
-        "median_ood_ece": 0.0010505697738485355,
-        "min_ood_ece": 0.0006885729636174692,
+        "max_ood_ece": 0.032391977869649154,
+        "mean_ood_ece": 0.021499863389069496,
+        "median_ood_ece": 0.02589725081422168,
+        "min_ood_ece": 0.006265903092932821,
         "n_positives": 202,
         "n_records": 224,
         "n_units": 5,
@@ -435,11 +435,11 @@
     "gated": false,
     "macro_average": {
       "ci_level": 0.95,
-      "lower": 0.09837384969040015,
+      "lower": 0.09420234761134379,
       "n_blocks": 30,
       "n_boot": 200,
-      "point": 0.21131708166715119,
-      "upper": 0.32501193734362815
+      "point": 0.1882143888847712,
+      "upper": 0.27565916143883124
     },
     "macro_average_is": "unweighted mean of the admissible units' OOD ECEs, block-resampled with the held-out order as the block (PRD \u00a712 macro-average, not micro)",
     "min_n": 20,
@@ -454,7 +454,7 @@
         "admissibility_class": "adjudicable",
         "admissible": true,
         "adr": "ADR-0005 D11 (in-distribution binned estimator, GATE-2) + D13 & Amendment A2 (distinct small-N-robust OOD estimator, bootstrap CIs, OOD_ECE_MIN_N=20); PRD \u00a712",
-        "bandwidth": 0.002,
+        "bandwidth": 0.2,
         "bandwidth_criterion": "loo_bernoulli_log_likelihood",
         "bandwidth_grid": [
           0.002,
@@ -467,22 +467,22 @@
           0.5,
           1.0
         ],
-        "bandwidth_loo_log_likelihood": -5.7998716940261904e-11,
+        "bandwidth_loo_log_likelihood": -1.3759928090742928,
         "bandwidth_selected": true,
         "block_key": "cluster_id",
         "brier_decomposition": {
-          "brier": 1.6158525064153699e-06,
-          "calibration": 1.6158525064153699e-06,
-          "refinement": 0.0,
-          "residual": 0.0
+          "brier": 0.0046973060324893125,
+          "calibration": 0.0015300403289054086,
+          "refinement": 0.004259112317704935,
+          "residual": -0.0010918466141210314
         },
         "ci": {
           "ci_level": 0.95,
-          "lower": 0.0008903585093639058,
+          "lower": 0.007234544549450229,
           "n_blocks": 47,
           "n_boot": 200,
-          "point": 0.0010505697738485355,
-          "upper": 0.0012434596976014865
+          "point": 0.015360982717632744,
+          "upper": 0.03356838031270092
         },
         "distinct_from": "tbox_finder.metrics.binned_ece",
         "estimator": "beta_kernel_loo_l1",
@@ -497,7 +497,7 @@
         "n_boot_requested": 200,
         "n_positives": 52,
         "n_records": 58,
-        "ood_ece": 0.0010505697738485355,
+        "ood_ece": 0.015360982717632744,
         "phylum": "Tenericutes",
         "unit": "Acholeplasmatales",
         "unit_key": "loo_order_unit"
@@ -523,18 +523,18 @@
         "bandwidth_selected": true,
         "block_key": "cluster_id",
         "brier_decomposition": {
-          "brier": 2.7334502890684247e-06,
-          "calibration": 2.7334502890684247e-06,
+          "brier": 0.001378819769613953,
+          "calibration": 0.001378819769613953,
           "refinement": 0.0,
           "residual": 0.0
         },
         "ci": {
           "ci_level": 0.95,
-          "lower": 0.0009444596810547464,
+          "lower": 0.004180291937302908,
           "n_blocks": 47,
           "n_boot": 200,
-          "point": 0.0012145636185482464,
-          "upper": 0.0014386839640254854
+          "point": 0.012087207871249948,
+          "upper": 0.024393320116685317
         },
         "distinct_from": "tbox_finder.metrics.binned_ece",
         "estimator": "beta_kernel_loo_l1",
@@ -549,7 +549,7 @@
         "n_boot_requested": 200,
         "n_positives": 52,
         "n_records": 56,
-        "ood_ece": 0.0012145636185482464,
+        "ood_ece": 0.012087207871249948,
         "phylum": "Firmicutes",
         "unit": "Acidaminococcales",
         "unit_key": "loo_order_unit"
@@ -558,7 +558,7 @@
         "admissibility_class": "adjudicable",
         "admissible": true,
         "adr": "ADR-0005 D11 (in-distribution binned estimator, GATE-2) + D13 & Amendment A2 (distinct small-N-robust OOD estimator, bootstrap CIs, OOD_ECE_MIN_N=20); PRD \u00a712",
-        "bandwidth": 0.002,
+        "bandwidth": 0.5,
         "bandwidth_criterion": "loo_bernoulli_log_likelihood",
         "bandwidth_grid": [
           0.002,
@@ -571,22 +571,22 @@
           0.5,
           1.0
         ],
-        "bandwidth_loo_log_likelihood": -5.964241173510071,
+        "bandwidth_loo_log_likelihood": -8.992679310453813,
         "bandwidth_selected": true,
         "block_key": "cluster_id",
         "brier_decomposition": {
-          "brier": 0.49441700143254363,
-          "calibration": 0.46776188163886273,
-          "refinement": 0.03227324613920297,
-          "residual": -0.0056181263455220565
+          "brier": 0.6412743268159509,
+          "calibration": 0.6035234456768142,
+          "refinement": 0.04237200073970107,
+          "residual": -0.004621119600564327
         },
         "ci": {
           "ci_level": 0.95,
-          "lower": 0.30632798364266406,
+          "lower": 0.6973276207409171,
           "n_blocks": 6,
           "n_boot": 200,
-          "point": 0.5943379829134204,
-          "upper": 0.6454129634159091
+          "point": 0.7252086137923988,
+          "upper": 0.9359905206623866
         },
         "distinct_from": "tbox_finder.metrics.binned_ece",
         "estimator": "beta_kernel_loo_l1",
@@ -601,7 +601,7 @@
         "n_boot_requested": 200,
         "n_positives": 42,
         "n_records": 44,
-        "ood_ece": 0.5943379829134204,
+        "ood_ece": 0.7252086137923988,
         "phylum": "Actinobacteria",
         "unit": "Actinomycetales",
         "unit_key": "loo_order_unit"
@@ -627,18 +627,18 @@
         "bandwidth_selected": true,
         "block_key": "cluster_id",
         "brier_decomposition": {
-          "brier": 1.7991792239594643e-06,
-          "calibration": 1.7991792239594643e-06,
+          "brier": 7.746204814809273e-05,
+          "calibration": 7.746204814809273e-05,
           "refinement": 0.0,
           "residual": 0.0
         },
         "ci": {
           "ci_level": 0.95,
-          "lower": 0.0004718357398627435,
+          "lower": 0.00406958966890608,
           "n_blocks": 30,
           "n_boot": 200,
-          "point": 0.0007657728179079442,
-          "upper": 0.0012696851498836363
+          "point": 0.005852478988528959,
+          "upper": 0.008428324070273501
         },
         "distinct_from": "tbox_finder.metrics.binned_ece",
         "estimator": "beta_kernel_loo_l1",
@@ -653,7 +653,7 @@
         "n_boot_requested": 200,
         "n_positives": 41,
         "n_records": 43,
-        "ood_ece": 0.0007657728179079442,
+        "ood_ece": 0.005852478988528959,
         "phylum": "Chloroflexi",
         "unit": "Anaerolineales",
         "unit_key": "loo_order_unit"
@@ -662,7 +662,7 @@
         "admissibility_class": "adjudicable",
         "admissible": true,
         "adr": "ADR-0005 D11 (in-distribution binned estimator, GATE-2) + D13 & Amendment A2 (distinct small-N-robust OOD estimator, bootstrap CIs, OOD_ECE_MIN_N=20); PRD \u00a712",
-        "bandwidth": 0.002,
+        "bandwidth": 0.02,
         "bandwidth_criterion": "loo_bernoulli_log_likelihood",
         "bandwidth_grid": [
           0.002,
@@ -675,22 +675,22 @@
           0.5,
           1.0
         ],
-        "bandwidth_loo_log_likelihood": -6.562581258359441,
+        "bandwidth_loo_log_likelihood": -21.645377518798174,
         "bandwidth_selected": true,
         "block_key": "cluster_id",
         "brier_decomposition": {
-          "brier": 0.5008055798628233,
-          "calibration": 0.4759692756320119,
-          "refinement": 0.03524998110699521,
-          "residual": -0.010413676876183886
+          "brier": 0.44952026964457026,
+          "calibration": 0.3797128961839331,
+          "refinement": 0.07375453053709055,
+          "residual": -0.003947157076453434
         },
         "ci": {
           "ci_level": 0.95,
-          "lower": 0.016039225139513946,
+          "lower": 0.42692448053542204,
           "n_blocks": 5,
           "n_boot": 200,
-          "point": 0.5933038780086356,
-          "upper": 0.6582615219452383
+          "point": 0.5529493187493048,
+          "upper": 0.6067872969433398
         },
         "distinct_from": "tbox_finder.metrics.binned_ece",
         "estimator": "beta_kernel_loo_l1",
@@ -705,7 +705,7 @@
         "n_boot_requested": 200,
         "n_positives": 69,
         "n_records": 77,
-        "ood_ece": 0.5933038780086356,
+        "ood_ece": 0.5529493187493048,
         "phylum": "Actinobacteria",
         "unit": "Bifidobacteriales",
         "unit_key": "loo_order_unit"
@@ -731,18 +731,18 @@
         "bandwidth_selected": true,
         "block_key": "cluster_id",
         "brier_decomposition": {
-          "brier": 8.73815184403236e-07,
-          "calibration": 8.73815184403236e-07,
-          "refinement": 0.0,
+          "brier": 0.012153906583455994,
+          "calibration": 0.012153906583455994,
+          "refinement": 5.105369771005844e-98,
           "residual": 0.0
         },
         "ci": {
           "ci_level": 0.95,
-          "lower": 0.0006019555491575567,
+          "lower": 0.004257674316035072,
           "n_blocks": 19,
           "n_boot": 200,
-          "point": 0.0008032469334509984,
-          "upper": 0.0010359766378640104
+          "point": 0.032391977869649154,
+          "upper": 0.06694982785344986
         },
         "distinct_from": "tbox_finder.metrics.binned_ece",
         "estimator": "beta_kernel_loo_l1",
@@ -757,64 +757,12 @@
         "n_boot_requested": 200,
         "n_positives": 24,
         "n_records": 28,
-        "ood_ece": 0.0008032469334509984,
+        "ood_ece": 0.032391977869649154,
         "phylum": "Tenericutes",
         "unit": "Candidatus Izemoplasmatales",
         "unit_key": "loo_order_unit"
       },
       "Chloroflexales": {
-        "admissibility_class": "adjudicable",
-        "admissible": true,
-        "adr": "ADR-0005 D11 (in-distribution binned estimator, GATE-2) + D13 & Amendment A2 (distinct small-N-robust OOD estimator, bootstrap CIs, OOD_ECE_MIN_N=20); PRD \u00a712",
-        "bandwidth": 1.0,
-        "bandwidth_criterion": "loo_bernoulli_log_likelihood",
-        "bandwidth_grid": [
-          0.002,
-          0.005,
-          0.01,
-          0.02,
-          0.05,
-          0.1,
-          0.2,
-          0.5,
-          1.0
-        ],
-        "bandwidth_loo_log_likelihood": -4.617860844294929,
-        "bandwidth_selected": true,
-        "block_key": "cluster_id",
-        "brier_decomposition": {
-          "brier": 0.045575578902850286,
-          "calibration": 0.024938107340042783,
-          "refinement": 0.024564179190005073,
-          "residual": -0.003926707627197573
-        },
-        "ci": {
-          "ci_level": 0.95,
-          "lower": 0.0031618651879625785,
-          "n_blocks": 16,
-          "n_boot": 200,
-          "point": 0.053458797666076065,
-          "upper": 0.1397591917159899
-        },
-        "distinct_from": "tbox_finder.metrics.binned_ece",
-        "estimator": "beta_kernel_loo_l1",
-        "gated": false,
-        "inadmissible_point": null,
-        "inadmissible_reason": null,
-        "min_n": 20,
-        "n_blocks": 16,
-        "n_blocks_of_size_one": 12,
-        "n_boot_drop_reason": "replicates whose leave-one-out statistic was non-finite were dropped by eval.resample.block_bootstrap: the kernel leaves out by row, so a replicate drawn entirely from a one-row block leaves no row with a distinct-uid neighbour. See n_blocks_of_size_one \u2014 NOT the scores file's block_census.n_singleton_blocks, which counts rows with no cluster at all. Rejected resamples, not a truncated bootstrap.",
-        "n_boot_dropped": 0,
-        "n_boot_requested": 200,
-        "n_positives": 20,
-        "n_records": 22,
-        "ood_ece": 0.053458797666076065,
-        "phylum": "Chloroflexi",
-        "unit": "Chloroflexales",
-        "unit_key": "loo_order_unit"
-      },
-      "Corynebacteriales": {
         "admissibility_class": "adjudicable",
         "admissible": true,
         "adr": "ADR-0005 D11 (in-distribution binned estimator, GATE-2) + D13 & Amendment A2 (distinct small-N-robust OOD estimator, bootstrap CIs, OOD_ECE_MIN_N=20); PRD \u00a712",
@@ -831,22 +779,74 @@
           0.5,
           1.0
         ],
-        "bandwidth_loo_log_likelihood": -29.170090464598868,
+        "bandwidth_loo_log_likelihood": -2.199951332216834e-11,
         "bandwidth_selected": true,
         "block_key": "cluster_id",
         "brier_decomposition": {
-          "brier": 0.507099882528599,
-          "calibration": 0.4995951642382836,
-          "refinement": 0.02701035351961429,
-          "residual": -0.019505635229298823
+          "brier": 0.0011582663804468095,
+          "calibration": 0.0011582663804468095,
+          "refinement": 0.0,
+          "residual": 0.0
         },
         "ci": {
           "ci_level": 0.95,
-          "lower": 0.15581365266037533,
+          "lower": 0.009244508561524263,
+          "n_blocks": 16,
+          "n_boot": 200,
+          "point": 0.01889048487486837,
+          "upper": 0.03165337836275525
+        },
+        "distinct_from": "tbox_finder.metrics.binned_ece",
+        "estimator": "beta_kernel_loo_l1",
+        "gated": false,
+        "inadmissible_point": null,
+        "inadmissible_reason": null,
+        "min_n": 20,
+        "n_blocks": 16,
+        "n_blocks_of_size_one": 12,
+        "n_boot_drop_reason": "replicates whose leave-one-out statistic was non-finite were dropped by eval.resample.block_bootstrap: the kernel leaves out by row, so a replicate drawn entirely from a one-row block leaves no row with a distinct-uid neighbour. See n_blocks_of_size_one \u2014 NOT the scores file's block_census.n_singleton_blocks, which counts rows with no cluster at all. Rejected resamples, not a truncated bootstrap.",
+        "n_boot_dropped": 0,
+        "n_boot_requested": 200,
+        "n_positives": 20,
+        "n_records": 22,
+        "ood_ece": 0.01889048487486837,
+        "phylum": "Chloroflexi",
+        "unit": "Chloroflexales",
+        "unit_key": "loo_order_unit"
+      },
+      "Corynebacteriales": {
+        "admissibility_class": "adjudicable",
+        "admissible": true,
+        "adr": "ADR-0005 D11 (in-distribution binned estimator, GATE-2) + D13 & Amendment A2 (distinct small-N-robust OOD estimator, bootstrap CIs, OOD_ECE_MIN_N=20); PRD \u00a712",
+        "bandwidth": 0.02,
+        "bandwidth_criterion": "loo_bernoulli_log_likelihood",
+        "bandwidth_grid": [
+          0.002,
+          0.005,
+          0.01,
+          0.02,
+          0.05,
+          0.1,
+          0.2,
+          0.5,
+          1.0
+        ],
+        "bandwidth_loo_log_likelihood": -69.77836390934371,
+        "bandwidth_selected": true,
+        "block_key": "cluster_id",
+        "brier_decomposition": {
+          "brier": 0.39496481783599546,
+          "calibration": 0.3476559969088299,
+          "refinement": 0.04990888432556742,
+          "residual": -0.0026000633984019084
+        },
+        "ci": {
+          "ci_level": 0.95,
+          "lower": 0.1925337627336906,
           "n_blocks": 18,
           "n_boot": 200,
-          "point": 0.5922916291383591,
-          "upper": 0.6088303939914943
+          "point": 0.4637620080649852,
+          "upper": 0.47345644739577136
         },
         "distinct_from": "tbox_finder.metrics.binned_ece",
         "estimator": "beta_kernel_loo_l1",
@@ -861,7 +861,7 @@
         "n_boot_requested": 200,
         "n_positives": 370,
         "n_records": 394,
-        "ood_ece": 0.5922916291383591,
+        "ood_ece": 0.4637620080649852,
         "phylum": "Actinobacteria",
         "unit": "Corynebacteriales",
         "unit_key": "loo_order_unit"
@@ -887,18 +887,18 @@
         "bandwidth_selected": true,
         "block_key": "cluster_id",
         "brier_decomposition": {
-          "brier": 6.278246772339682e-07,
-          "calibration": 6.278246772339682e-07,
+          "brier": 0.000763165312697543,
+          "calibration": 0.000763165312697543,
           "refinement": 0.0,
           "residual": 0.0
         },
         "ci": {
           "ci_level": 0.95,
-          "lower": 0.0004306652386920126,
+          "lower": 0.004545622356943125,
           "n_blocks": 22,
           "n_boot": 200,
-          "point": 0.0006626564487856818,
-          "upper": 0.0008776293505922201
+          "point": 0.010129907551228206,
+          "upper": 0.020031959584407438
         },
         "distinct_from": "tbox_finder.metrics.binned_ece",
         "estimator": "beta_kernel_loo_l1",
@@ -913,7 +913,7 @@
         "n_boot_requested": 200,
         "n_positives": 34,
         "n_records": 38,
-        "ood_ece": 0.0006626564487856818,
+        "ood_ece": 0.010129907551228206,
         "phylum": "Chloroflexi",
         "unit": "Dehalococcoidales",
         "unit_key": "loo_order_unit"
@@ -939,18 +939,18 @@
         "bandwidth_selected": true,
         "block_key": "cluster_id",
         "brier_decomposition": {
-          "brier": 0.07721019152469055,
-          "calibration": 0.07721019152469055,
+          "brier": 0.09060308416057464,
+          "calibration": 0.09060308416057464,
           "refinement": 0.0,
           "residual": 0.0
         },
         "ci": {
           "ci_level": 0.95,
-          "lower": 0.03749592560531496,
+          "lower": 0.10811614765488914,
           "n_blocks": 25,
           "n_boot": 200,
-          "point": 0.11514814263817981,
-          "upper": 0.20236117430796274
+          "point": 0.1906376727313617,
+          "upper": 0.3055368489366853
         },
         "distinct_from": "tbox_finder.metrics.binned_ece",
         "estimator": "beta_kernel_loo_l1",
@@ -965,7 +965,7 @@
         "n_boot_requested": 200,
         "n_positives": 28,
         "n_records": 28,
-        "ood_ece": 0.11514814263817981,
+        "ood_ece": 0.1906376727313617,
         "phylum": "Deinococcus-Thermus",
         "unit": "Deinococcales",
         "unit_key": "loo_order_unit"
@@ -991,18 +991,18 @@
         "bandwidth_selected": true,
         "block_key": "cluster_id",
         "brier_decomposition": {
-          "brier": 1.5624741594430675e-06,
-          "calibration": 1.5624741594430675e-06,
+          "brier": 1.3234609053167941e-05,
+          "calibration": 1.3234609053167941e-05,
           "refinement": 0.0,
           "residual": 0.0
         },
         "ci": {
           "ci_level": 0.95,
-          "lower": 0.0011324641178946993,
+          "lower": 0.0031671811672010866,
           "n_blocks": 3,
           "n_boot": 181,
-          "point": 0.0011627824769701387,
-          "upper": 0.001752445316667628
+          "point": 0.003283090702713465,
+          "upper": 0.0038737598579815145
         },
         "distinct_from": "tbox_finder.metrics.binned_ece",
         "estimator": "beta_kernel_loo_l1",
@@ -1017,7 +1017,7 @@
         "n_boot_requested": 200,
         "n_positives": 31,
         "n_records": 33,
-        "ood_ece": 0.0011627824769701387,
+        "ood_ece": 0.003283090702713465,
         "phylum": "Proteobacteria",
         "unit": "Desulfuromonadales",
         "unit_key": "loo_order_unit"
@@ -1026,7 +1026,7 @@
         "admissibility_class": "adjudicable",
         "admissible": true,
         "adr": "ADR-0005 D11 (in-distribution binned estimator, GATE-2) + D13 & Amendment A2 (distinct small-N-robust OOD estimator, bootstrap CIs, OOD_ECE_MIN_N=20); PRD \u00a712",
-        "bandwidth": 1.0,
+        "bandwidth": 0.5,
         "bandwidth_criterion": "loo_bernoulli_log_likelihood",
         "bandwidth_grid": [
           0.002,
@@ -1039,22 +1039,22 @@
           0.5,
           1.0
         ],
-        "bandwidth_loo_log_likelihood": -5.587197800752071,
+        "bandwidth_loo_log_likelihood": -8.958295772668473,
         "bandwidth_selected": true,
         "block_key": "cluster_id",
         "brier_decomposition": {
-          "brier": 0.013853508041975049,
-          "calibration": 0.003716763130089929,
-          "refinement": 0.010884298757573354,
-          "residual": -0.0007475538456882327
+          "brier": 0.020369097584287402,
+          "calibration": 0.0035585791319821605,
+          "refinement": 0.029022761660937455,
+          "residual": -0.012212243208632217
         },
         "ci": {
           "ci_level": 0.95,
-          "lower": 0.0007192985168845179,
+          "lower": 0.014164077426907458,
           "n_blocks": 49,
           "n_boot": 200,
-          "point": 0.015166204896622848,
-          "upper": 0.03758603318762374
+          "point": 0.02589725081422168,
+          "upper": 0.06320254705213149
         },
         "distinct_from": "tbox_finder.metrics.binned_ece",
         "estimator": "beta_kernel_loo_l1",
@@ -1069,12 +1069,64 @@
         "n_boot_requested": 200,
         "n_positives": 68,
         "n_records": 72,
-        "ood_ece": 0.015166204896622848,
+        "ood_ece": 0.02589725081422168,
         "phylum": "Tenericutes",
         "unit": "Entomoplasmatales",
         "unit_key": "loo_order_unit"
       },
       "Erysipelotrichales": {
+        "admissibility_class": "adjudicable",
+        "admissible": true,
+        "adr": "ADR-0005 D11 (in-distribution binned estimator, GATE-2) + D13 & Amendment A2 (distinct small-N-robust OOD estimator, bootstrap CIs, OOD_ECE_MIN_N=20); PRD \u00a712",
+        "bandwidth": 0.05,
+        "bandwidth_criterion": "loo_bernoulli_log_likelihood",
+        "bandwidth_grid": [
+          0.002,
+          0.005,
+          0.01,
+          0.02,
+          0.05,
+          0.1,
+          0.2,
+          0.5,
+          1.0
+        ],
+        "bandwidth_loo_log_likelihood": -26.44213687209321,
+        "bandwidth_selected": true,
+        "block_key": "cluster_id",
+        "brier_decomposition": {
+          "brier": 0.01906295210477119,
+          "calibration": 0.004246103410398916,
+          "refinement": 0.01251280406705863,
+          "residual": 0.0023040446273136436
+        },
+        "ci": {
+          "ci_level": 0.95,
+          "lower": 0.009950600342812982,
+          "n_blocks": 272,
+          "n_boot": 200,
+          "point": 0.015318804012093809,
+          "upper": 0.027935645219378077
+        },
+        "distinct_from": "tbox_finder.metrics.binned_ece",
+        "estimator": "beta_kernel_loo_l1",
+        "gated": false,
+        "inadmissible_point": null,
+        "inadmissible_reason": null,
+        "min_n": 20,
+        "n_blocks": 272,
+        "n_blocks_of_size_one": 204,
+        "n_boot_drop_reason": "replicates whose leave-one-out statistic was non-finite were dropped by eval.resample.block_bootstrap: the kernel leaves out by row, so a replicate drawn entirely from a one-row block leaves no row with a distinct-uid neighbour. See n_blocks_of_size_one \u2014 NOT the scores file's block_census.n_singleton_blocks, which counts rows with no cluster at all. Rejected resamples, not a truncated bootstrap.",
+        "n_boot_dropped": 0,
+        "n_boot_requested": 200,
+        "n_positives": 445,
+        "n_records": 487,
+        "ood_ece": 0.015318804012093809,
+        "phylum": "Firmicutes",
+        "unit": "Erysipelotrichales",
+        "unit_key": "loo_order_unit"
+      },
+      "Halanaerobiales": {
         "admissibility_class": "adjudicable",
         "admissible": true,
         "adr": "ADR-0005 D11 (in-distribution binned estimator, GATE-2) + D13 & Amendment A2 (distinct small-N-robust OOD estimator, bootstrap CIs, OOD_ECE_MIN_N=20); PRD \u00a712",
@@ -1091,74 +1143,22 @@
           0.5,
           1.0
         ],
-        "bandwidth_loo_log_likelihood": -4.869892267225477e-10,
+        "bandwidth_loo_log_likelihood": -1.1099754448912218e-10,
         "bandwidth_selected": true,
         "block_key": "cluster_id",
         "brier_decomposition": {
-          "brier": 2.2200314753330418e-06,
-          "calibration": 2.2200314753330418e-06,
-          "refinement": 0.0,
+          "brier": 0.004394912189008742,
+          "calibration": 0.004394912189008742,
+          "refinement": 7.844837757919476e-123,
           "residual": 0.0
         },
         "ci": {
           "ci_level": 0.95,
-          "lower": 0.0010193365444110165,
-          "n_blocks": 272,
-          "n_boot": 200,
-          "point": 0.0011228352790645087,
-          "upper": 0.0012112303727189707
-        },
-        "distinct_from": "tbox_finder.metrics.binned_ece",
-        "estimator": "beta_kernel_loo_l1",
-        "gated": false,
-        "inadmissible_point": null,
-        "inadmissible_reason": null,
-        "min_n": 20,
-        "n_blocks": 272,
-        "n_blocks_of_size_one": 204,
-        "n_boot_drop_reason": "replicates whose leave-one-out statistic was non-finite were dropped by eval.resample.block_bootstrap: the kernel leaves out by row, so a replicate drawn entirely from a one-row block leaves no row with a distinct-uid neighbour. See n_blocks_of_size_one \u2014 NOT the scores file's block_census.n_singleton_blocks, which counts rows with no cluster at all. Rejected resamples, not a truncated bootstrap.",
-        "n_boot_dropped": 0,
-        "n_boot_requested": 200,
-        "n_positives": 445,
-        "n_records": 487,
-        "ood_ece": 0.0011228352790645087,
-        "phylum": "Firmicutes",
-        "unit": "Erysipelotrichales",
-        "unit_key": "loo_order_unit"
-      },
-      "Halanaerobiales": {
-        "admissibility_class": "adjudicable",
-        "admissible": true,
-        "adr": "ADR-0005 D11 (in-distribution binned estimator, GATE-2) + D13 & Amendment A2 (distinct small-N-robust OOD estimator, bootstrap CIs, OOD_ECE_MIN_N=20); PRD \u00a712",
-        "bandwidth": 1.0,
-        "bandwidth_criterion": "loo_bernoulli_log_likelihood",
-        "bandwidth_grid": [
-          0.002,
-          0.005,
-          0.01,
-          0.02,
-          0.05,
-          0.1,
-          0.2,
-          0.5,
-          1.0
-        ],
-        "bandwidth_loo_log_likelihood": -12.913091890669806,
-        "bandwidth_selected": true,
-        "block_key": "cluster_id",
-        "brier_decomposition": {
-          "brier": 0.010008233749069244,
-          "calibration": 0.0012834847934144183,
-          "refinement": 0.013139308359937858,
-          "residual": -0.004414559404283033
-        },
-        "ci": {
-          "ci_level": 0.95,
-          "lower": 0.001477963639467751,
+          "lower": 0.005394422520830123,
           "n_blocks": 58,
           "n_boot": 200,
-          "point": 0.01556758642796701,
-          "upper": 0.03838070424689765
+          "point": 0.015472467390705312,
+          "upper": 0.0315298827539318
         },
         "distinct_from": "tbox_finder.metrics.binned_ece",
         "estimator": "beta_kernel_loo_l1",
@@ -1173,7 +1173,7 @@
         "n_boot_requested": 200,
         "n_positives": 99,
         "n_records": 111,
-        "ood_ece": 0.01556758642796701,
+        "ood_ece": 0.015472467390705312,
         "phylum": "Firmicutes",
         "unit": "Halanaerobiales",
         "unit_key": "loo_order_unit"
@@ -1199,18 +1199,18 @@
         "bandwidth_selected": true,
         "block_key": "cluster_id",
         "brier_decomposition": {
-          "brier": 4.460881396588205e-06,
-          "calibration": 4.460881396588205e-06,
+          "brier": 0.00019961753232723597,
+          "calibration": 0.00019961753232723597,
           "refinement": 0.0,
           "residual": 0.0
         },
         "ci": {
           "ci_level": 0.95,
-          "lower": 0.0006836698047862368,
+          "lower": 0.0030752244703123447,
           "n_blocks": 21,
           "n_boot": 200,
-          "point": 0.0011926758157501606,
-          "upper": 0.0020425498713524995
+          "point": 0.006265903092932821,
+          "upper": 0.011342940300161803
         },
         "distinct_from": "tbox_finder.metrics.binned_ece",
         "estimator": "beta_kernel_loo_l1",
@@ -1225,7 +1225,7 @@
         "n_boot_requested": 200,
         "n_positives": 22,
         "n_records": 26,
-        "ood_ece": 0.0011926758157501606,
+        "ood_ece": 0.006265903092932821,
         "phylum": "Tenericutes",
         "unit": "Haloplasmatales",
         "unit_key": "loo_order_unit"
@@ -1251,18 +1251,18 @@
         "bandwidth_selected": true,
         "block_key": "cluster_id",
         "brier_decomposition": {
-          "brier": 3.921068088099528e-06,
-          "calibration": 3.921068088099528e-06,
+          "brier": 2.267084422233459e-05,
+          "calibration": 2.267084422233459e-05,
           "refinement": 0.0,
           "residual": 0.0
         },
         "ci": {
           "ci_level": 0.95,
-          "lower": 0.0009338316928803708,
+          "lower": 0.0033598438112113797,
           "n_blocks": 13,
           "n_boot": 200,
-          "point": 0.0017072716065584198,
-          "upper": 0.0021040774350384586
+          "point": 0.004247786477407826,
+          "upper": 0.005760454242258707
         },
         "distinct_from": "tbox_finder.metrics.binned_ece",
         "estimator": "beta_kernel_loo_l1",
@@ -1277,7 +1277,7 @@
         "n_boot_requested": 200,
         "n_positives": 22,
         "n_records": 22,
-        "ood_ece": 0.0017072716065584198,
+        "ood_ece": 0.004247786477407826,
         "phylum": "Chloroflexi",
         "unit": "Ktedonobacterales",
         "unit_key": "loo_order_unit"
@@ -1286,7 +1286,7 @@
         "admissibility_class": "adjudicable",
         "admissible": true,
         "adr": "ADR-0005 D11 (in-distribution binned estimator, GATE-2) + D13 & Amendment A2 (distinct small-N-robust OOD estimator, bootstrap CIs, OOD_ECE_MIN_N=20); PRD \u00a712",
-        "bandwidth": 0.1,
+        "bandwidth": 0.005,
         "bandwidth_criterion": "loo_bernoulli_log_likelihood",
         "bandwidth_grid": [
           0.002,
@@ -1299,22 +1299,22 @@
           0.5,
           1.0
         ],
-        "bandwidth_loo_log_likelihood": -73.49583489702177,
+        "bandwidth_loo_log_likelihood": -397.17368563063945,
         "bandwidth_selected": true,
         "block_key": "cluster_id",
         "brier_decomposition": {
-          "brier": 0.0024674032739898954,
-          "calibration": 0.00016726897839811305,
-          "refinement": 0.002217729220214087,
-          "residual": 8.240507537769564e-05
+          "brier": 0.020940706866383774,
+          "calibration": 0.0018230258288165684,
+          "refinement": 0.01896441318589606,
+          "residual": 0.0001532678516711454
         },
         "ci": {
           "ci_level": 0.95,
-          "lower": 0.0024942432632073905,
+          "lower": 0.014538396536374813,
           "n_blocks": 2948,
           "n_boot": 200,
-          "point": 0.0034218679125606203,
-          "upper": 0.004776612931413111
+          "point": 0.01715048428272326,
+          "upper": 0.02271574081498457
         },
         "distinct_from": "tbox_finder.metrics.binned_ece",
         "estimator": "beta_kernel_loo_l1",
@@ -1329,7 +1329,7 @@
         "n_boot_requested": 200,
         "n_positives": 5323,
         "n_records": 5763,
-        "ood_ece": 0.0034218679125606203,
+        "ood_ece": 0.01715048428272326,
         "phylum": "Firmicutes",
         "unit": "Lactobacillales",
         "unit_key": "loo_order_unit"
@@ -1338,7 +1338,7 @@
         "admissibility_class": "adjudicable",
         "admissible": true,
         "adr": "ADR-0005 D11 (in-distribution binned estimator, GATE-2) + D13 & Amendment A2 (distinct small-N-robust OOD estimator, bootstrap CIs, OOD_ECE_MIN_N=20); PRD \u00a712",
-        "bandwidth": 0.002,
+        "bandwidth": 1.0,
         "bandwidth_criterion": "loo_bernoulli_log_likelihood",
         "bandwidth_grid": [
           0.002,
@@ -1351,22 +1351,22 @@
           0.5,
           1.0
         ],
-        "bandwidth_loo_log_likelihood": -31.848509601866926,
+        "bandwidth_loo_log_likelihood": -58.04010457543534,
         "bandwidth_selected": true,
         "block_key": "cluster_id",
         "brier_decomposition": {
-          "brier": 0.6480912386066798,
-          "calibration": 0.6320645595093999,
-          "refinement": 0.0313539898368522,
-          "residual": -0.015327310739572275
+          "brier": 0.5662006457044642,
+          "calibration": 0.5343550036161417,
+          "refinement": 0.04458035079503047,
+          "residual": -0.012734708706708009
         },
         "ci": {
           "ci_level": 0.95,
-          "lower": 0.18250299595794284,
+          "lower": 0.31725111669564365,
           "n_blocks": 10,
           "n_boot": 200,
-          "point": 0.7326591184136481,
-          "upper": 0.7572596593580251
+          "point": 0.6529010945028759,
+          "upper": 0.6650729285960338
         },
         "distinct_from": "tbox_finder.metrics.binned_ece",
         "estimator": "beta_kernel_loo_l1",
@@ -1381,7 +1381,7 @@
         "n_boot_requested": 200,
         "n_positives": 275,
         "n_records": 291,
-        "ood_ece": 0.7326591184136481,
+        "ood_ece": 0.6529010945028759,
         "phylum": "Actinobacteria",
         "unit": "Micrococcales",
         "unit_key": "loo_order_unit"
@@ -1390,7 +1390,7 @@
         "admissibility_class": "adjudicable",
         "admissible": true,
         "adr": "ADR-0005 D11 (in-distribution binned estimator, GATE-2) + D13 & Amendment A2 (distinct small-N-robust OOD estimator, bootstrap CIs, OOD_ECE_MIN_N=20); PRD \u00a712",
-        "bandwidth": 0.002,
+        "bandwidth": 1.0,
         "bandwidth_criterion": "loo_bernoulli_log_likelihood",
         "bandwidth_grid": [
           0.002,
@@ -1403,22 +1403,22 @@
           0.5,
           1.0
         ],
-        "bandwidth_loo_log_likelihood": -19.42628886031311,
+        "bandwidth_loo_log_likelihood": -26.09700292698246,
         "bandwidth_selected": true,
         "block_key": "cluster_id",
         "brier_decomposition": {
-          "brier": 0.7065469298006216,
-          "calibration": 0.6536178982853912,
-          "refinement": 0.07415675929956929,
-          "residual": -0.0212277277843389
+          "brier": 0.5666991795922205,
+          "calibration": 0.4860970137080232,
+          "refinement": 0.09580903302555069,
+          "residual": -0.015206867141353442
         },
         "ci": {
           "ci_level": 0.95,
-          "lower": 0.19359987228355863,
+          "lower": 0.5697811038725525,
           "n_blocks": 14,
           "n_boot": 200,
-          "point": 0.740555528180703,
-          "upper": 0.8184418029414243
+          "point": 0.6378638468962138,
+          "upper": 0.7423322286498891
         },
         "distinct_from": "tbox_finder.metrics.binned_ece",
         "estimator": "beta_kernel_loo_l1",
@@ -1433,7 +1433,7 @@
         "n_boot_requested": 200,
         "n_positives": 65,
         "n_records": 73,
-        "ood_ece": 0.740555528180703,
+        "ood_ece": 0.6378638468962138,
         "phylum": "Actinobacteria",
         "unit": "Micromonosporales",
         "unit_key": "loo_order_unit"
@@ -1442,7 +1442,7 @@
         "admissibility_class": "adjudicable",
         "admissible": true,
         "adr": "ADR-0005 D11 (in-distribution binned estimator, GATE-2) + D13 & Amendment A2 (distinct small-N-robust OOD estimator, bootstrap CIs, OOD_ECE_MIN_N=20); PRD \u00a712",
-        "bandwidth": 0.002,
+        "bandwidth": 1.0,
         "bandwidth_criterion": "loo_bernoulli_log_likelihood",
         "bandwidth_grid": [
           0.002,
@@ -1455,22 +1455,22 @@
           0.5,
           1.0
         ],
-        "bandwidth_loo_log_likelihood": -3.9999115131215134e-11,
+        "bandwidth_loo_log_likelihood": -6.067702609425541,
         "bandwidth_selected": true,
         "block_key": "cluster_id",
         "brier_decomposition": {
-          "brier": 6.924787984199567e-07,
-          "calibration": 6.924787984199567e-07,
-          "refinement": 0.0,
-          "residual": 0.0
+          "brier": 0.015660296782690097,
+          "calibration": 0.0018759730914226533,
+          "refinement": 0.02770636926449351,
+          "residual": -0.013922045573226065
         },
         "ci": {
           "ci_level": 0.95,
-          "lower": 0.0004788757275817005,
+          "lower": 0.005201793179730723,
           "n_blocks": 23,
           "n_boot": 200,
-          "point": 0.0006885729636174692,
-          "upper": 0.0010356771825618103
+          "point": 0.02758320245091108,
+          "upper": 0.08695512997327426
         },
         "distinct_from": "tbox_finder.metrics.binned_ece",
         "estimator": "beta_kernel_loo_l1",
@@ -1485,7 +1485,7 @@
         "n_boot_requested": 200,
         "n_positives": 36,
         "n_records": 40,
-        "ood_ece": 0.0006885729636174692,
+        "ood_ece": 0.02758320245091108,
         "phylum": "Tenericutes",
         "unit": "Mycoplasmatales",
         "unit_key": "loo_order_unit"
@@ -1511,18 +1511,18 @@
         "bandwidth_selected": true,
         "block_key": "cluster_id",
         "brier_decomposition": {
-          "brier": 1.6893381332003474e-06,
-          "calibration": 1.6893381332003474e-06,
+          "brier": 2.000044200745481e-05,
+          "calibration": 2.000044200745481e-05,
           "refinement": 0.0,
           "residual": 0.0
         },
         "ci": {
           "ci_level": 0.95,
-          "lower": 0.000671245608071146,
+          "lower": 0.0027668161480621472,
           "n_blocks": 23,
           "n_boot": 200,
-          "point": 0.000990297388573834,
-          "upper": 0.0014657948612069158
+          "point": 0.0037568136990320565,
+          "upper": 0.00493269658424989
         },
         "distinct_from": "tbox_finder.metrics.binned_ece",
         "estimator": "beta_kernel_loo_l1",
@@ -1537,7 +1537,7 @@
         "n_boot_requested": 200,
         "n_positives": 23,
         "n_records": 25,
-        "ood_ece": 0.000990297388573834,
+        "ood_ece": 0.0037568136990320565,
         "phylum": "Firmicutes",
         "unit": "Natranaerobiales",
         "unit_key": "loo_order_unit"
@@ -1546,7 +1546,7 @@
         "admissibility_class": "adjudicable",
         "admissible": true,
         "adr": "ADR-0005 D11 (in-distribution binned estimator, GATE-2) + D13 & Amendment A2 (distinct small-N-robust OOD estimator, bootstrap CIs, OOD_ECE_MIN_N=20); PRD \u00a712",
-        "bandwidth": 0.002,
+        "bandwidth": 0.5,
         "bandwidth_criterion": "loo_bernoulli_log_likelihood",
         "bandwidth_grid": [
           0.002,
@@ -1559,22 +1559,22 @@
           0.5,
           1.0
         ],
-        "bandwidth_loo_log_likelihood": -11.325944832219006,
+        "bandwidth_loo_log_likelihood": -23.773917019557373,
         "bandwidth_selected": true,
         "block_key": "cluster_id",
         "brier_decomposition": {
-          "brier": 0.6961652504647147,
-          "calibration": 0.683659087369612,
-          "refinement": 0.05019739128271138,
-          "residual": -0.03769122818760873
+          "brier": 0.5449098460996961,
+          "calibration": 0.4590235176300344,
+          "refinement": 0.0908701103918281,
+          "residual": -0.004983781922166419
         },
         "ci": {
           "ci_level": 0.95,
-          "lower": 0.6074952727794829,
+          "lower": 0.3412368642125337,
           "n_blocks": 12,
           "n_boot": 200,
-          "point": 0.7882353844187098,
-          "upper": 0.8674370507167146
+          "point": 0.5824635121142191,
+          "upper": 0.8607840650783468
         },
         "distinct_from": "tbox_finder.metrics.binned_ece",
         "estimator": "beta_kernel_loo_l1",
@@ -1589,7 +1589,7 @@
         "n_boot_requested": 200,
         "n_positives": 66,
         "n_records": 74,
-        "ood_ece": 0.7882353844187098,
+        "ood_ece": 0.5824635121142191,
         "phylum": "Actinobacteria",
         "unit": "Propionibacteriales",
         "unit_key": "loo_order_unit"
@@ -1598,7 +1598,7 @@
         "admissibility_class": "adjudicable",
         "admissible": true,
         "adr": "ADR-0005 D11 (in-distribution binned estimator, GATE-2) + D13 & Amendment A2 (distinct small-N-robust OOD estimator, bootstrap CIs, OOD_ECE_MIN_N=20); PRD \u00a712",
-        "bandwidth": 0.002,
+        "bandwidth": 1.0,
         "bandwidth_criterion": "loo_bernoulli_log_likelihood",
         "bandwidth_grid": [
           0.002,
@@ -1611,22 +1611,22 @@
           0.5,
           1.0
         ],
-        "bandwidth_loo_log_likelihood": -3.7309878502226246,
+        "bandwidth_loo_log_likelihood": -18.299157854742646,
         "bandwidth_selected": true,
         "block_key": "cluster_id",
         "brier_decomposition": {
-          "brier": 0.7119356262809109,
-          "calibration": 0.7078035074174536,
-          "refinement": 0.028762173028913797,
-          "residual": -0.024630054165456494
+          "brier": 0.5100417819046199,
+          "calibration": 0.4509398397987435,
+          "refinement": 0.06632831252438712,
+          "residual": -0.007226370418510708
         },
         "ci": {
           "ci_level": 0.95,
-          "lower": 0.2522016554658453,
+          "lower": 0.46828329688549336,
           "n_blocks": 3,
           "n_boot": 193,
-          "point": 0.7990641385174938,
-          "upper": 0.826425656992155
+          "point": 0.5477683237578677,
+          "upper": 0.702077309935969
         },
         "distinct_from": "tbox_finder.metrics.binned_ece",
         "estimator": "beta_kernel_loo_l1",
@@ -1641,7 +1641,7 @@
         "n_boot_requested": 200,
         "n_positives": 48,
         "n_records": 52,
-        "ood_ece": 0.7990641385174938,
+        "ood_ece": 0.5477683237578677,
         "phylum": "Actinobacteria",
         "unit": "Pseudonocardiales",
         "unit_key": "loo_order_unit"
@@ -1650,7 +1650,7 @@
         "admissibility_class": "adjudicable",
         "admissible": true,
         "adr": "ADR-0005 D11 (in-distribution binned estimator, GATE-2) + D13 & Amendment A2 (distinct small-N-robust OOD estimator, bootstrap CIs, OOD_ECE_MIN_N=20); PRD \u00a712",
-        "bandwidth": 0.002,
+        "bandwidth": 0.5,
         "bandwidth_criterion": "loo_bernoulli_log_likelihood",
         "bandwidth_grid": [
           0.002,
@@ -1663,22 +1663,22 @@
           0.5,
           1.0
         ],
-        "bandwidth_loo_log_likelihood": -2.3599477927416853e-10,
+        "bandwidth_loo_log_likelihood": -8.652157478093732,
         "bandwidth_selected": true,
         "block_key": "cluster_id",
         "brier_decomposition": {
-          "brier": 8.128429087613797e-07,
-          "calibration": 8.128429087613797e-07,
-          "refinement": 0.0,
-          "residual": 0.0
+          "brier": 0.005950770747808067,
+          "calibration": 0.0007452487170468315,
+          "refinement": 0.008501160515319189,
+          "residual": -0.0032956384845579537
         },
         "ci": {
           "ci_level": 0.95,
-          "lower": 0.0006154959345750676,
+          "lower": 0.0026488797769218865,
           "n_blocks": 120,
           "n_boot": 200,
-          "point": 0.0007259244892567599,
-          "upper": 0.0008357676811238415
+          "point": 0.006625346999911365,
+          "upper": 0.018283320320807508
         },
         "distinct_from": "tbox_finder.metrics.binned_ece",
         "estimator": "beta_kernel_loo_l1",
@@ -1693,7 +1693,7 @@
         "n_boot_requested": 200,
         "n_positives": 224,
         "n_records": 236,
-        "ood_ece": 0.0007259244892567599,
+        "ood_ece": 0.006625346999911365,
         "phylum": "Firmicutes",
         "unit": "Selenomonadales",
         "unit_key": "loo_order_unit"
@@ -1702,7 +1702,7 @@
         "admissibility_class": "adjudicable",
         "admissible": true,
         "adr": "ADR-0005 D11 (in-distribution binned estimator, GATE-2) + D13 & Amendment A2 (distinct small-N-robust OOD estimator, bootstrap CIs, OOD_ECE_MIN_N=20); PRD \u00a712",
-        "bandwidth": 0.002,
+        "bandwidth": 0.1,
         "bandwidth_criterion": "loo_bernoulli_log_likelihood",
         "bandwidth_grid": [
           0.002,
@@ -1715,22 +1715,22 @@
           0.5,
           1.0
         ],
-        "bandwidth_loo_log_likelihood": -16.168005474905595,
+        "bandwidth_loo_log_likelihood": -52.24317457656709,
         "bandwidth_selected": true,
         "block_key": "cluster_id",
         "brier_decomposition": {
-          "brier": 0.5785734634054343,
-          "calibration": 0.5576231236840862,
-          "refinement": 0.036174592032493506,
-          "residual": -0.015224252311145436
+          "brier": 0.2842657094343711,
+          "calibration": 0.22727058245280302,
+          "refinement": 0.07143455718652278,
+          "residual": -0.01443943020495464
         },
         "ci": {
           "ci_level": 0.95,
-          "lower": 0.40776286985865645,
+          "lower": 0.36831956990819004,
           "n_blocks": 33,
           "n_boot": 200,
-          "point": 0.6803731699966598,
-          "upper": 0.7124685138550081
+          "point": 0.39489035247327486,
+          "upper": 0.5740252185553277
         },
         "distinct_from": "tbox_finder.metrics.binned_ece",
         "estimator": "beta_kernel_loo_l1",
@@ -1745,7 +1745,7 @@
         "n_boot_requested": 200,
         "n_positives": 197,
         "n_records": 223,
-        "ood_ece": 0.6803731699966598,
+        "ood_ece": 0.39489035247327486,
         "phylum": "Actinobacteria",
         "unit": "Streptomycetales",
         "unit_key": "loo_order_unit"
@@ -1771,18 +1771,18 @@
         "bandwidth_selected": true,
         "block_key": "cluster_id",
         "brier_decomposition": {
-          "brier": 0.5449103613446639,
-          "calibration": 0.5449103613446639,
+          "brier": 0.49540442707060994,
+          "calibration": 0.49540442707060994,
           "refinement": 0.0,
           "residual": 0.0
         },
         "ci": {
           "ci_level": 0.95,
-          "lower": 0.35763955165967115,
+          "lower": 0.47879392109054764,
           "n_blocks": 12,
           "n_boot": 200,
-          "point": 0.5952963080831716,
-          "upper": 0.8226568071431187
+          "point": 0.5946107962914725,
+          "upper": 0.7740489931444567
         },
         "distinct_from": "tbox_finder.metrics.binned_ece",
         "estimator": "beta_kernel_loo_l1",
@@ -1797,7 +1797,7 @@
         "n_boot_requested": 200,
         "n_positives": 24,
         "n_records": 24,
-        "ood_ece": 0.5952963080831716,
+        "ood_ece": 0.5946107962914725,
         "phylum": "Actinobacteria",
         "unit": "Streptosporangiales",
         "unit_key": "loo_order_unit"
@@ -1806,7 +1806,7 @@
         "admissibility_class": "adjudicable",
         "admissible": true,
         "adr": "ADR-0005 D11 (in-distribution binned estimator, GATE-2) + D13 & Amendment A2 (distinct small-N-robust OOD estimator, bootstrap CIs, OOD_ECE_MIN_N=20); PRD \u00a712",
-        "bandwidth": 0.002,
+        "bandwidth": 0.1,
         "bandwidth_criterion": "loo_bernoulli_log_likelihood",
         "bandwidth_grid": [
           0.002,
@@ -1819,22 +1819,22 @@
           0.5,
           1.0
         ],
-        "bandwidth_loo_log_likelihood": -3.099931422669175e-11,
+        "bandwidth_loo_log_likelihood": -7.071798827504784,
         "bandwidth_selected": true,
         "block_key": "cluster_id",
         "brier_decomposition": {
-          "brier": 8.320718286211322e-06,
-          "calibration": 8.320718286211322e-06,
-          "refinement": 0.0,
-          "residual": 0.0
+          "brier": 0.057237850812742325,
+          "calibration": 0.00905310885097905,
+          "refinement": 0.050366109734696816,
+          "residual": -0.00218136777293354
         },
         "ci": {
           "ci_level": 0.95,
-          "lower": 0.0011845248390012228,
+          "lower": 0.003784859762760985,
           "n_blocks": 24,
           "n_boot": 200,
-          "point": 0.0018739284494558018,
-          "upper": 0.0025839583667365907
+          "point": 0.05493064450671008,
+          "upper": 0.166934229766566
         },
         "distinct_from": "tbox_finder.metrics.binned_ece",
         "estimator": "beta_kernel_loo_l1",
@@ -1849,7 +1849,7 @@
         "n_boot_requested": 200,
         "n_positives": 27,
         "n_records": 31,
-        "ood_ece": 0.0018739284494558018,
+        "ood_ece": 0.05493064450671008,
         "phylum": "Synergistetes",
         "unit": "Synergistales",
         "unit_key": "loo_order_unit"
@@ -1858,7 +1858,7 @@
         "admissibility_class": "adjudicable",
         "admissible": true,
         "adr": "ADR-0005 D11 (in-distribution binned estimator, GATE-2) + D13 & Amendment A2 (distinct small-N-robust OOD estimator, bootstrap CIs, OOD_ECE_MIN_N=20); PRD \u00a712",
-        "bandwidth": 0.002,
+        "bandwidth": 0.1,
         "bandwidth_criterion": "loo_bernoulli_log_likelihood",
         "bandwidth_grid": [
           0.002,
@@ -1871,22 +1871,22 @@
           0.5,
           1.0
         ],
-        "bandwidth_loo_log_likelihood": -2.9299351833615107e-10,
+        "bandwidth_loo_log_likelihood": -9.360227920227,
         "bandwidth_selected": true,
         "block_key": "cluster_id",
         "brier_decomposition": {
-          "brier": 2.1093205895423516e-05,
-          "calibration": 2.1093205895423516e-05,
-          "refinement": 0.0,
-          "residual": 0.0
+          "brier": 0.010929467233238491,
+          "calibration": 0.004640534189846635,
+          "refinement": 0.005158746326095075,
+          "residual": 0.001130186717296781
         },
         "ci": {
           "ci_level": 0.95,
-          "lower": 0.0009469190873041436,
+          "lower": 0.005300201014896262,
           "n_blocks": 150,
           "n_boot": 200,
-          "point": 0.0013362734988075665,
-          "upper": 0.001991665314428906
+          "point": 0.013095900327022679,
+          "upper": 0.02965368606056321
         },
         "distinct_from": "tbox_finder.metrics.binned_ece",
         "estimator": "beta_kernel_loo_l1",
@@ -1901,12 +1901,64 @@
         "n_boot_requested": 200,
         "n_positives": 271,
         "n_records": 293,
-        "ood_ece": 0.0013362734988075665,
+        "ood_ece": 0.013095900327022679,
         "phylum": "Firmicutes",
         "unit": "Thermoanaerobacterales",
         "unit_key": "loo_order_unit"
       },
       "Tissierellales": {
+        "admissibility_class": "adjudicable",
+        "admissible": true,
+        "adr": "ADR-0005 D11 (in-distribution binned estimator, GATE-2) + D13 & Amendment A2 (distinct small-N-robust OOD estimator, bootstrap CIs, OOD_ECE_MIN_N=20); PRD \u00a712",
+        "bandwidth": 0.05,
+        "bandwidth_criterion": "loo_bernoulli_log_likelihood",
+        "bandwidth_grid": [
+          0.002,
+          0.005,
+          0.01,
+          0.02,
+          0.05,
+          0.1,
+          0.2,
+          0.5,
+          1.0
+        ],
+        "bandwidth_loo_log_likelihood": -3.871676376367498,
+        "bandwidth_selected": true,
+        "block_key": "cluster_id",
+        "brier_decomposition": {
+          "brier": 0.003567341136744383,
+          "calibration": 0.0016999111364057321,
+          "refinement": 0.00047783869618809113,
+          "residual": 0.0013895913041505597
+        },
+        "ci": {
+          "ci_level": 0.95,
+          "lower": 0.005130355724512524,
+          "n_blocks": 228,
+          "n_boot": 200,
+          "point": 0.008560269016111177,
+          "upper": 0.013676665353905788
+        },
+        "distinct_from": "tbox_finder.metrics.binned_ece",
+        "estimator": "beta_kernel_loo_l1",
+        "gated": false,
+        "inadmissible_point": null,
+        "inadmissible_reason": null,
+        "min_n": 20,
+        "n_blocks": 228,
+        "n_blocks_of_size_one": 165,
+        "n_boot_drop_reason": "replicates whose leave-one-out statistic was non-finite were dropped by eval.resample.block_bootstrap: the kernel leaves out by row, so a replicate drawn entirely from a one-row block leaves no row with a distinct-uid neighbour. See n_blocks_of_size_one \u2014 NOT the scores file's block_census.n_singleton_blocks, which counts rows with no cluster at all. Rejected resamples, not a truncated bootstrap.",
+        "n_boot_dropped": 0,
+        "n_boot_requested": 200,
+        "n_positives": 420,
+        "n_records": 442,
+        "ood_ece": 0.008560269016111177,
+        "phylum": "Firmicutes",
+        "unit": "Tissierellales",
+        "unit_key": "loo_order_unit"
+      },
+      "Veillonellales": {
         "admissibility_class": "adjudicable",
         "admissible": true,
         "adr": "ADR-0005 D11 (in-distribution binned estimator, GATE-2) + D13 & Amendment A2 (distinct small-N-robust OOD estimator, bootstrap CIs, OOD_ECE_MIN_N=20); PRD \u00a712",
@@ -1923,74 +1975,22 @@
           0.5,
           1.0
         ],
-        "bandwidth_loo_log_likelihood": -4.4199022219993e-10,
+        "bandwidth_loo_log_likelihood": -2.389947129090097e-10,
         "bandwidth_selected": true,
         "block_key": "cluster_id",
         "brier_decomposition": {
-          "brier": 1.83220202812184e-06,
-          "calibration": 1.83220202812184e-06,
+          "brier": 0.00040766237108333045,
+          "calibration": 0.00040766237108333045,
           "refinement": 0.0,
           "residual": 0.0
         },
         "ci": {
           "ci_level": 0.95,
-          "lower": 0.0009508570346317296,
-          "n_blocks": 228,
-          "n_boot": 200,
-          "point": 0.0010763988845976416,
-          "upper": 0.0012003036700676797
-        },
-        "distinct_from": "tbox_finder.metrics.binned_ece",
-        "estimator": "beta_kernel_loo_l1",
-        "gated": false,
-        "inadmissible_point": null,
-        "inadmissible_reason": null,
-        "min_n": 20,
-        "n_blocks": 228,
-        "n_blocks_of_size_one": 165,
-        "n_boot_drop_reason": "replicates whose leave-one-out statistic was non-finite were dropped by eval.resample.block_bootstrap: the kernel leaves out by row, so a replicate drawn entirely from a one-row block leaves no row with a distinct-uid neighbour. See n_blocks_of_size_one \u2014 NOT the scores file's block_census.n_singleton_blocks, which counts rows with no cluster at all. Rejected resamples, not a truncated bootstrap.",
-        "n_boot_dropped": 0,
-        "n_boot_requested": 200,
-        "n_positives": 420,
-        "n_records": 442,
-        "ood_ece": 0.0010763988845976416,
-        "phylum": "Firmicutes",
-        "unit": "Tissierellales",
-        "unit_key": "loo_order_unit"
-      },
-      "Veillonellales": {
-        "admissibility_class": "adjudicable",
-        "admissible": true,
-        "adr": "ADR-0005 D11 (in-distribution binned estimator, GATE-2) + D13 & Amendment A2 (distinct small-N-robust OOD estimator, bootstrap CIs, OOD_ECE_MIN_N=20); PRD \u00a712",
-        "bandwidth": 1.0,
-        "bandwidth_criterion": "loo_bernoulli_log_likelihood",
-        "bandwidth_grid": [
-          0.002,
-          0.005,
-          0.01,
-          0.02,
-          0.05,
-          0.1,
-          0.2,
-          0.5,
-          1.0
-        ],
-        "bandwidth_loo_log_likelihood": -11.684473064998693,
-        "bandwidth_selected": true,
-        "block_key": "cluster_id",
-        "brier_decomposition": {
-          "brier": 0.0038374650455122753,
-          "calibration": 3.4203057668462824e-05,
-          "refinement": 0.005023430960026733,
-          "residual": -0.0012201689721829207
-        },
-        "ci": {
-          "ci_level": 0.95,
-          "lower": 0.0014560387899203392,
+          "lower": 0.004198109858189599,
           "n_blocks": 140,
           "n_boot": 200,
-          "point": 0.004258942357134934,
-          "upper": 0.014458354892338031
+          "point": 0.006475123523507992,
+          "upper": 0.009988841347584258
         },
         "distinct_from": "tbox_finder.metrics.binned_ece",
         "estimator": "beta_kernel_loo_l1",
@@ -2005,7 +2005,7 @@
         "n_boot_requested": 200,
         "n_positives": 223,
         "n_records": 239,
-        "ood_ece": 0.004258942357134934,
+        "ood_ece": 0.006475123523507992,
         "phylum": "Firmicutes",
         "unit": "Veillonellales",
         "unit_key": "loo_order_unit"
@@ -2026,8 +2026,8 @@
     "pinned_target_prior": null,
     "points": [
       {
-        "ece": 0.5641796763752512,
-        "ece_plugin": 0.5815398866396051,
+        "ece": 0.7133371156727102,
+        "ece_plugin": 0.7233878293221861,
         "is_band_endpoint": true,
         "log_odds_shift": -8.225444892043196,
         "negatives_per_positive": 1000.0,
@@ -2035,8 +2035,8 @@
         "target_prior_in_prd_band": true
       },
       {
-        "ece": 0.6814023498574859,
-        "ece_plugin": 0.6935961766674267,
+        "ece": 0.7502547818441412,
+        "ece_plugin": 0.7562093042928872,
         "is_band_endpoint": false,
         "log_odds_shift": -9.37673743854022,
         "negatives_per_positive": 3162.2776601683795,
@@ -2044,8 +2044,8 @@
         "target_prior_in_prd_band": true
       },
       {
-        "ece": 0.7371779950716495,
-        "ece_plugin": 0.7446976124371449,
+        "ece": 0.7640062334390023,
+        "ece_plugin": 0.7674131097558894,
         "is_band_endpoint": true,
         "log_odds_shift": -10.528029985037241,
         "negatives_per_positive": 10000.0,
@@ -2060,19 +2060,19 @@
   },
   "provenance": {
     "adr": "ADR-0005 D11 (named posterior = temperature-scaled PRE prior-shift; 15 equal-mass debiased bins; in-distribution ECE <= 0.05, blinded-frozen, gated at P3 exit) + D13 & Amendment A2 (distinct small-N-robust OOD estimator, bootstrap CIs, OOD_ECE_MIN_N=20); ADR-0004 D5 (nested leave-one-order-out fold) + A7 (test rung is the GATE-2 split)",
-    "env_lock_hash": "60f966a8f009abfa3900357ffd0ac7c685d8b55b713da4498306480720bcf3b3",
+    "env_lock_hash": "616a12544937b122b04d83a4085b2a4ad8764279b12b6a67e4cbd068c2944bac",
     "extra": {
       "declared_outputs": [
-        "reports/gate2_p3_ece.json",
-        "reports/p3/gate2_figure_data.json"
+        "reports/p3/gate2_rnafm_ece.json",
+        "reports/p3/gate2_rnafm_figure_data.json"
       ]
     },
-    "generated_at_utc": "2026-08-04T23:59:07.435602+00:00",
-    "git_sha": "8301e0c4b00d407cb732905c3a9fc736c209ef84",
+    "generated_at_utc": "2026-08-21T23:30:14.609610+00:00",
+    "git_sha": "59b61c90f3f48dd76d2aad1f5dc2e2097b3fd06a",
     "inputs": {
       "data/processed/stage2_dataset.parquet": "376ad12bd6462686cc7467a5c3e34e63977ccca0c06465e24ec8345224a45f65",
-      "reports/p3/stage2_scores.json": "a8d9bb413afb14b153430d5bfc70e570b50b1f85f3e599102ecc9b906e9f5575",
-      "reports/p3/stage2_scores_loo.json": "ecb16fb4c5bca9df383598ced00fa00ae8d336e980db286fcbcc9e7d907f08cb"
+      "reports/p3/stage2_scores_loo_rnafm.json": "05a6ecec5a6ba769f69bb42859ce75f75377ceb671870a11a9ab7d1fe106a0b2",
+      "reports/p3/stage2_scores_rnafm.json": "c48d93a2b231659cfadd2909f93f10db91bc1f7e9d70bc58d72b8be90155b7ad"
     },
     "outputs": {},
     "rule": "workflow/rules/calibration.smk :: gate2_ece",
@@ -2100,8 +2100,8 @@
     "n_training_orders": 19,
     "n_training_rows": 9059,
     "overlapping_orders": [],
-    "rescore_max_abs_delta": 0.03761100769042969,
-    "rescore_mean_abs_delta": 0.00011101073047768548,
+    "rescore_max_abs_delta": 0.03706645965576172,
+    "rescore_mean_abs_delta": 6.314425992008646e-05,
     "rescore_n_overlap": 1694,
     "rescore_note": "the same rows scored in two different row sets: bf16 + flash-attention reductions depend on batch composition, so this is an agreement bound, not an equality",
     "rescore_tolerance": 0.05
@@ -2111,7 +2111,7 @@
     "batch_size": 4,
     "bootstrap_seed": 20260804,
     "in_distribution_device": "cuda",
-    "in_distribution_scores": "reports/p3/stage2_scores.json",
+    "in_distribution_scores": "reports/p3/stage2_scores_rnafm.json",
     "load": {
       "adapter_config": {
         "bias": "none",
@@ -2121,43 +2121,42 @@
         "r": 16,
         "target_modules": [
           "key",
-          "query",
-          "linear",
           "dense",
-          "value",
-          "linear_gate"
+          "query",
+          "value"
         ]
       },
-      "adapter_dir": "data/processed/checkpoints/stage2_rinalmo/aux1.0_lr1e-4/lora_adapter",
+      "adapter_dir": "data/processed/checkpoints/stage2_rnafm/aux1.0_lr1e-4/lora_adapter",
       "adapter_keys_absent_from_file": [],
       "adapter_mismatched_keys": [],
       "adapter_missing_keys": [],
-      "adapter_sha256": "b629704d52582288efc1f433055bff72bf029f329379113553927e815a3ed995",
+      "adapter_sha256": "c22296b8b950a49b7ba86a47109d9a07ff20b6252d459e0cf0f8cf983c3d0d31",
       "attn_implementation": "flash_attention_2",
       "attn_implementation_matches_training": true,
       "attn_implementation_trained_under": "flash_attention_2",
-      "base_model_name_or_path": "multimolecule/rinalmo-giga",
-      "checkpoint_dir": "data/processed/checkpoints/stage2_rinalmo/aux1.0_lr1e-4",
+      "backbone": "rnafm",
+      "base_model_name_or_path": "multimolecule/rnafm",
+      "checkpoint_dir": "data/processed/checkpoints/stage2_rnafm/aux1.0_lr1e-4",
       "dtype": "bfloat16",
       "head_mismatched_keys": [],
-      "heads_path": "data/processed/checkpoints/stage2_rinalmo/aux1.0_lr1e-4/stage2_heads.pt",
-      "heads_sha256": "12294f08ab51ec378b24fcb7efdd562ae20d3eafa23abdc6547dae0c27195207",
-      "n_adapter_tensors_in_file": 462,
-      "n_adapter_tensors_matched": 462,
+      "heads_path": "data/processed/checkpoints/stage2_rnafm/aux1.0_lr1e-4/stage2_heads.pt",
+      "heads_sha256": "dc0f204a51265e0916c6a7948a6e2616b1c081ec7160dce154534c7516e014a9",
+      "n_adapter_tensors_in_file": 144,
+      "n_adapter_tensors_matched": 144,
       "n_adapter_tensors_mismatched": 0,
       "n_adapter_tensors_missing_from_module": 0,
       "n_head_tensors_in_file": 12,
       "n_head_tensors_matched": 12,
-      "n_lora_b_nonzero": 231,
-      "n_lora_b_tensors": 231,
-      "n_module_adapter_tensors": 462,
+      "n_lora_b_nonzero": 72,
+      "n_lora_b_tensors": 72,
+      "n_module_adapter_tensors": 144,
       "n_module_adapter_tensors_absent_from_file": 0,
       "pairing_proj_dim": 64,
-      "revision": "2a71f6f98fb41dd2e6542a5e131d3778111d1468",
+      "revision": "7d6e73ad3b48e042b378f9a788a56ccb4d573a27",
       "structure_head": false
     },
     "loo_device": "cuda",
-    "loo_scores": "reports/p3/stage2_scores_loo.json",
+    "loo_scores": "reports/p3/stage2_scores_loo_rnafm.json",
     "n_boot": 2000,
     "ood_n_boot": 200
   },

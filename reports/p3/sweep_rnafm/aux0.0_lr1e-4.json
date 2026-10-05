@@ -1,21 +1,24 @@
 {
   "adr": "ADR-0002 (D2/D3/D5 backbone+kernels+LoRA); ADR-0004 D5 (fold); ADR-0005 D16",
   "checkpoint": {
-    "adapter_bytes": 51432083,
-    "adapter_dir": "/tmp/ecc1695-1064-5/checkpoint/lora_adapter",
-    "best_val_epoch": 9,
-    "best_val_total": 0.03838914214053206,
-    "heads_bytes": 803929,
-    "heads_path": "/tmp/ecc1695-1064-5/checkpoint/stage2_heads.pt",
-    "n_saved_parameters": 13040268,
-    "saved_from_epoch": 9
+    "adapter_bytes": 12805231,
+    "adapter_dir": "/tmp/ecc1695-1374/checkpoint-aux0.0_lr1e-4/lora_adapter",
+    "best_val_epoch_observed_during_training": 4,
+    "best_val_total_observed_during_training": 0.02945784533890342,
+    "heads_bytes": 404569,
+    "heads_path": "/tmp/ecc1695-1374/checkpoint-aux0.0_lr1e-4/stage2_heads.pt",
+    "n_saved_parameters": 3294876,
+    "note": "the saved weights are the FINAL epoch's; best_val_* describe an epoch that was observed and NOT restored. Compare arms on saved_val_total.",
+    "saved_from_epoch": 9,
+    "saved_val_total": 0.035558429269718354
   },
   "config": {
     "admit_parentless_decoys": true,
     "attn_implementation": null,
+    "backbone": "rnafm",
     "batch_size": 4,
     "boundary_use_crf": false,
-    "checkpoint_dir": "/tmp/ecc1695-1064-5/checkpoint",
+    "checkpoint_dir": "/tmp/ecc1695-1374/checkpoint-aux0.0_lr1e-4",
     "dataset_parquet": "data/processed/stage2_dataset.parquet",
     "device": null,
     "dropout": 0.1,
@@ -45,7 +48,7 @@
         "trna_family",
         "structure"
       ],
-      "aux_weight": 1.0,
+      "aux_weight": 0.0,
       "base_weights": {
         "binary": 1.0,
         "boundary": 0.3,
@@ -65,22 +68,22 @@
         "trna_family": 0.0
       },
       "dominance": {
-        "aux_max": 0.3,
-        "aux_total": 0.7,
+        "aux_max": 0.0,
+        "aux_total": 0.0,
         "binary": 1.0,
         "holds": true,
-        "max_margin": 0.7,
+        "max_margin": 1.0,
         "rule": "binary_weight >= sum(effective aux weights)",
-        "sum_margin": 0.30000000000000004
+        "sum_margin": 1.0
       },
       "effective_weights": {
         "binary": 1.0,
-        "boundary": 0.3,
-        "cognate_aa": 0.1,
-        "regulatory_mode": 0.1,
-        "specifier_codon": 0.1,
+        "boundary": 0.0,
+        "cognate_aa": 0.0,
+        "regulatory_mode": 0.0,
+        "specifier_codon": 0.0,
         "structure": 0.0,
-        "trna_family": 0.1
+        "trna_family": 0.0
       },
       "gamma": {
         "binary": 0.0,
@@ -120,13 +123,12 @@
         "uncertainty"
       ]
     },
-    "lr": 0.0003,
+    "lr": 0.0001,
     "max_records": null,
-    "num_workers": 2,
     "pairing_proj_dim": 64,
     "pooling": "masked_mean",
     "pythonhashseed": 0,
-    "report_path": "reports/p3/sweep/aux1.0_lr3e-4.json",
+    "report_path": "reports/p3/sweep_rnafm/aux0.0_lr1e-4.json",
     "revision": null,
     "save_checkpoint": true,
     "seed": 42,
@@ -208,11 +210,12 @@
   "eval_val": true,
   "gate": {
     "clauses": {
+      "backbone_pinned": true,
       "both_admit_routes_fired": true,
       "calib_refused": true,
       "checkpoint_written": true,
       "full_population": true,
-      "gradient_checkpointing_verified": true,
+      "gradient_checkpointing_flag_consistent": true,
       "heads_outside_wrapper": true,
       "lora_contract_held": true,
       "losses_finite": true,
@@ -225,31 +228,17 @@
     "failed": [],
     "overall_pass": true
   },
-  "legacy": {
-    "annotation_only": "no measured value in this file was changed",
-    "best_val_epoch_observed_during_training": 9,
-    "best_val_total_is_NOT_the_saved_weights": false,
-    "best_val_total_observed_during_training": 0.03838914214053206,
-    "fails_current_gate_on": [
-      "backbone_pinned",
-      "losses_finite",
-      "steps_ran"
-    ],
-    "note": "LEGACY ANNOTATION added 2026-08-03 by the P3-06 review round; NO measured value in this file was altered. (1) This trainer has no best-checkpoint restore: the saved weights are `checkpoint.saved_from_epoch`'s, and the score they actually achieve is `legacy.saved_val_total`, derived from this file's own `val.history`. For THIS arm the best epoch IS the saved epoch, so `checkpoint.best_val_total` and `saved_val_total` agree and neither is misleading. The flag below is false for that reason, not because the distinction stopped mattering \u2014 four of the six arms do differ. (2) This report is schema_version 1 and FAILS the current (schema 2) gate on two clauses: `steps_ran`, because this run sized the LR cosine in micro-batches so the optimiser advanced half the scheduled steps; and `losses_finite`, because schema 1 predates `n_nonfinite_grad_steps` and the post-all-reduce gradient check was never measured \u2014 unmeasured, not failed. Both are pinned by tests/ml/test_stage2_train_smoke.py. (3) Added 2026-08-21 by P3-17: this report is also refused by schema 3's `backbone_pinned`, and for the SAME reason as `losses_finite` \u2014 unmeasured, not failed. Schema 1 predates the `wrap.backbone` identity block (ADR-0002 A15 added the Stage-2 backbone allow-list), so there is nothing here for the clause to re-derive from. These runs did adapt the pinned `multimolecule/rinalmo-giga`; they simply never wrote it down, which is precisely the gap the clause now closes. No measured value in this file was altered by this addendum.",
-    "saved_from_epoch": 9,
-    "saved_val_total": 0.03838914214053206,
-    "schema_version_of_this_file": "1"
-  },
   "losses": {
-    "final_train_total": 0.0023189058993011713,
+    "final_train_total": 0.00010889148688875139,
+    "n_nonfinite_grad_steps": 0,
     "n_nonfinite_steps": 0,
     "per_term_final": {
-      "binary": 3.912891406798735e-05,
-      "boundary": 0.005966931115835905,
-      "cognate_aa": 0.0012949199881404638,
-      "regulatory_mode": 9.894306458591018e-06,
-      "specifier_codon": 0.00143234443385154,
-      "trna_family": 0.0021598152816295624
+      "binary": 0.00010889148688875139,
+      "boundary": 1.507290244102478,
+      "cognate_aa": 3.000152587890625,
+      "regulatory_mode": 0.5595031976699829,
+      "specifier_codon": 4.402129173278809,
+      "trna_family": 4.242301940917969
     }
   },
   "objective": {
@@ -262,31 +251,26 @@
       "trna_family"
     ],
     "dominance": {
-      "aux_max": 0.3,
-      "aux_total": 0.7,
+      "aux_max": 0.0,
+      "aux_total": 0.0,
       "binary": 1.0,
       "holds": true,
-      "max_margin": 0.7,
+      "max_margin": 1.0,
       "rule": "binary_weight >= sum(effective aux weights)",
-      "sum_margin": 0.30000000000000004
+      "sum_margin": 1.0
     },
     "effective_weights": {
       "binary": 1.0,
-      "boundary": 0.3,
-      "cognate_aa": 0.1,
-      "regulatory_mode": 0.1,
-      "specifier_codon": 0.1,
+      "boundary": 0.0,
+      "cognate_aa": 0.0,
+      "regulatory_mode": 0.0,
+      "specifier_codon": 0.0,
       "structure": 0.0,
-      "trna_family": 0.1
+      "trna_family": 0.0
     },
     "max_aux_weight": 1.4285714285714286,
     "terms_seen": [
-      "binary",
-      "boundary",
-      "regulatory_mode",
-      "specifier_codon",
-      "cognate_aa",
-      "trna_family"
+      "binary"
     ],
     "weighting": "fixed"
   },
@@ -295,182 +279,185 @@
     "config_path": "conf/train/stage2.yaml",
     "dataset_parquet": "data/processed/stage2_dataset.parquet",
     "entrypoint": "tbox_finder.stage2.train",
-    "env_lock": "envs/ml-rna.conda-lock.yml",
-    "env_lock_sha256": "60f966a8f009abfa3900357ffd0ac7c685d8b55b713da4498306480720bcf3b3",
-    "git_branch": "p3-06-stage2-lora",
+    "env_lock": "envs/ml-rnafm.conda-lock.yml",
+    "env_lock_sha256": "616a12544937b122b04d83a4085b2a4ad8764279b12b6a67e4cbd068c2944bac",
+    "git_branch": "p3-17-rnafm-comparator",
     "git_dirty": false,
     "git_dirty_paths": [],
-    "git_sha": "5a215d765a96dcdc4fe6673eb0a713b6d127295a",
+    "git_sha": "59b61c90f3f48dd76d2aad1f5dc2e2097b3fd06a",
     "script": "src/tbox_finder/stage2/train.py",
     "seed": 42,
     "step": "P3-06"
   },
   "save_checkpoint": true,
-  "schema_version": "1",
+  "schema_version": "3",
   "step": "P3-06",
   "steps": {
     "batches_per_epoch_per_rank": 283,
-    "elapsed_seconds": 2977.456,
+    "elapsed_seconds": 731.393,
+    "expected_n_optimizer_steps": 1420,
     "expected_n_steps": 2830,
-    "n_optimizer_steps": 1415,
+    "gradient_accumulation_steps": 2,
+    "n_optimizer_steps": 1420,
     "n_steps": 2830,
-    "total_scheduled_steps": 2830,
-    "warmup_steps": 170,
+    "optimizer_steps_per_epoch_per_rank": 142,
+    "total_scheduled_optimizer_steps": 1420,
+    "warmup_steps": 85,
     "world_size": 8
   },
   "val": {
-    "best_epoch": 9,
-    "best_total": 0.03838914214053206,
+    "best_epoch": 4,
+    "best_total": 0.02945784533890342,
     "history": [
       {
-        "binary_accuracy": 0.9966183574879227,
+        "binary_accuracy": 0.9468599033816425,
         "epoch": 0,
         "n_batches": 259,
         "n_records": 2070,
         "per_term": {
-          "binary": 0.01867992099082708,
-          "boundary": 0.07844609346608883,
-          "cognate_aa": 1.1931260276485134,
-          "regulatory_mode": 0.011846004934931124,
-          "specifier_codon": 1.6067682122631883,
-          "trna_family": 1.551707711228993
+          "binary": 0.1259383570908975,
+          "boundary": 1.4831982664620094,
+          "cognate_aa": 2.1071929646274756,
+          "regulatory_mode": 0.45359647665244734,
+          "specifier_codon": 2.9440004429761966,
+          "trna_family": 2.897965888719301
         },
-        "total": 0.47855855104871703
+        "total": 0.1259383570908975
       },
       {
-        "binary_accuracy": 0.9971014492753624,
+        "binary_accuracy": 0.9734299516908212,
         "epoch": 1,
         "n_batches": 259,
         "n_records": 2070,
         "per_term": {
-          "binary": 0.009682395316707712,
-          "boundary": 0.05256007925433821,
-          "cognate_aa": 0.1355133228449863,
-          "regulatory_mode": 0.0052666749515746895,
-          "specifier_codon": 0.25950869160585655,
-          "trna_family": 0.1988281176306854
+          "binary": 0.07382651442281171,
+          "boundary": 1.4868941670679217,
+          "cognate_aa": 2.118277291073302,
+          "regulatory_mode": 0.44988849195274144,
+          "specifier_codon": 2.9527338213902183,
+          "trna_family": 2.8937174804422385
         },
-        "total": 0.08536210156466335
+        "total": 0.07382651442281171
       },
       {
-        "binary_accuracy": 0.996135265700483,
+        "binary_accuracy": 0.9903381642512077,
         "epoch": 2,
         "n_batches": 259,
         "n_records": 2070,
         "per_term": {
-          "binary": 0.019503135264850376,
-          "boundary": 0.04521501288920094,
-          "cognate_aa": 0.12122813023583655,
-          "regulatory_mode": 0.007908703652111647,
-          "specifier_codon": 0.16407667341710402,
-          "trna_family": 0.14225354740525592
+          "binary": 0.034030167547523846,
+          "boundary": 1.4805347132406639,
+          "cognate_aa": 2.1101002757613725,
+          "regulatory_mode": 0.4601220861364976,
+          "specifier_codon": 2.945584574261227,
+          "trna_family": 2.8936988129118695
         },
-        "total": 0.07661434626274082
+        "total": 0.034030167547523846
       },
       {
-        "binary_accuracy": 0.9980676328502416,
+        "binary_accuracy": 0.991304347826087,
         "epoch": 3,
         "n_batches": 259,
         "n_records": 2070,
         "per_term": {
-          "binary": 0.005060084715368385,
-          "boundary": 0.038937657701522264,
-          "cognate_aa": 0.10193551281461687,
-          "regulatory_mode": 0.004854606454054785,
-          "specifier_codon": 0.12447435492703612,
-          "trna_family": 0.12773826218508616
+          "binary": 0.03569350249301323,
+          "boundary": 1.4798475973394387,
+          "cognate_aa": 2.109672624632198,
+          "regulatory_mode": 0.45813556688632745,
+          "specifier_codon": 2.9493844389455197,
+          "trna_family": 2.8909814118418455
         },
-        "total": 0.05264165693682776
+        "total": 0.03569350249301323
       },
       {
-        "binary_accuracy": 0.9990338164251208,
+        "binary_accuracy": 0.9927536231884058,
         "epoch": 4,
         "n_batches": 259,
         "n_records": 2070,
         "per_term": {
-          "binary": 0.002099696771266109,
-          "boundary": 0.041362545859441886,
-          "cognate_aa": 0.09002656747162716,
-          "regulatory_mode": 0.0050593900356511855,
-          "specifier_codon": 0.11157666217458424,
-          "trna_family": 0.12053687421651738
+          "binary": 0.02945784533890342,
+          "boundary": 1.4852005063797056,
+          "cognate_aa": 2.108483891689639,
+          "regulatory_mode": 0.45107898633912724,
+          "specifier_codon": 2.9457440937808124,
+          "trna_family": 2.8937718039774065
         },
-        "total": 0.04722841111543668
+        "total": 0.02945784533890342
       },
       {
-        "binary_accuracy": 1.0,
+        "binary_accuracy": 0.9927536231884058,
         "epoch": 5,
         "n_batches": 259,
         "n_records": 2070,
         "per_term": {
-          "binary": 0.0006781428040692803,
-          "boundary": 0.029085324891457837,
-          "cognate_aa": 0.09630280918249336,
-          "regulatory_mode": 0.0064428050272030985,
-          "specifier_codon": 0.11753683801269353,
-          "trna_family": 0.11922542967394886
+          "binary": 0.03529632022010134,
+          "boundary": 1.4974887863549486,
+          "cognate_aa": 2.1092109523684823,
+          "regulatory_mode": 0.44865685931504,
+          "specifier_codon": 2.943371364048549,
+          "trna_family": 2.8978569102563454
         },
-        "total": 0.04335452941171481
+        "total": 0.03529632022010134
       },
       {
-        "binary_accuracy": 1.0,
+        "binary_accuracy": 0.9932367149758454,
         "epoch": 6,
         "n_batches": 259,
         "n_records": 2070,
         "per_term": {
-          "binary": 0.00018886134485181062,
-          "boundary": 0.026659837580043397,
-          "cognate_aa": 0.0875051544107673,
-          "regulatory_mode": 0.005897247122409252,
-          "specifier_codon": 0.10970874170819478,
-          "trna_family": 0.11006819854830266
+          "binary": 0.029979652250059753,
+          "boundary": 1.4951589093705402,
+          "cognate_aa": 2.1085244688748395,
+          "regulatory_mode": 0.4444822871546948,
+          "specifier_codon": 2.9423935459387347,
+          "trna_family": 2.896167420052193
         },
-        "total": 0.03950474777626449
+        "total": 0.029979652250059753
       },
       {
-        "binary_accuracy": 1.0,
+        "binary_accuracy": 0.9917874396135266,
         "epoch": 7,
         "n_batches": 259,
         "n_records": 2070,
         "per_term": {
-          "binary": 0.00021015122469362953,
-          "boundary": 0.025730479088408482,
-          "cognate_aa": 0.08987011041687298,
-          "regulatory_mode": 0.004932105329520653,
-          "specifier_codon": 0.1028552269333844,
-          "trna_family": 0.11044330464322731
+          "binary": 0.03512180441474492,
+          "boundary": 1.5033203262159722,
+          "cognate_aa": 2.1094936753792193,
+          "regulatory_mode": 0.4419965297559053,
+          "specifier_codon": 2.941786155737505,
+          "trna_family": 2.896523410288984
         },
-        "total": 0.038739370818258234
+        "total": 0.03512180441474492
       },
       {
-        "binary_accuracy": 0.9975845410628019,
+        "binary_accuracy": 0.9927536231884058,
         "epoch": 8,
         "n_batches": 259,
         "n_records": 2070,
         "per_term": {
-          "binary": 0.004902810751806315,
-          "boundary": 0.027131986423969058,
-          "cognate_aa": 0.09687529256174963,
-          "regulatory_mode": 0.006942573397587609,
-          "specifier_codon": 0.10521478395127874,
-          "trna_family": 0.11473833268704288
+          "binary": 0.03454762972672434,
+          "boundary": 1.5029214615987534,
+          "cognate_aa": 2.109281029020037,
+          "regulatory_mode": 0.4407291364025425,
+          "specifier_codon": 2.941649985589576,
+          "trna_family": 2.896543603145938
         },
-        "total": 0.045419505600583374
+        "total": 0.03454762972672434
       },
       {
-        "binary_accuracy": 0.9995169082125603,
+        "binary_accuracy": 0.9927536231884058,
         "epoch": 9,
         "n_batches": 259,
         "n_records": 2070,
         "per_term": {
-          "binary": 0.0007535701100134017,
-          "boundary": 0.02313886793423098,
-          "cognate_aa": 0.08895095263170232,
-          "regulatory_mode": 0.00652699953766264,
-          "specifier_codon": 0.10107275327370038,
-          "trna_family": 0.11038840162798377
+          "binary": 0.035558429269718354,
+          "boundary": 1.5039530845222326,
+          "cognate_aa": 2.109402237711726,
+          "regulatory_mode": 0.44065515645222314,
+          "specifier_codon": 2.9416000106620053,
+          "trna_family": 2.8965334975121104
         },
-        "total": 0.03838914214053206
+        "total": 0.035558429269718354
       }
     ]
   },
@@ -479,14 +466,12 @@
       "all_linear_fully_covered": true,
       "lora_alpha": 32,
       "lora_dropout": 0.05,
-      "n_eligible_linear_modules": 231,
-      "n_modules_adapted": 231,
+      "n_eligible_linear_modules": 72,
+      "n_modules_adapted": 72,
       "r": 16,
       "target_modules_after_injection": [
         "dense",
         "key",
-        "linear",
-        "linear_gate",
         "query",
         "value"
       ],
@@ -496,16 +481,35 @@
     },
     "attn_implementation": "flash_attention_2",
     "attn_implementation_requested": "flash_attention_2",
+    "backbone": {
+      "env_lock": "envs/ml-rnafm.conda-lock.yml",
+      "expected_param_count": 99111680,
+      "gradient_checkpointing_note": "RAISES: this port adds its absolute position embeddings IN PLACE (modeling_rnafm.py:728) and checkpointing makes the embedding output a leaf requiring grad -> 'a leaf Variable that requires grad is being used in an in-place operation'. Measured on a cluster A4000 2026-08-21 (SLURM job 1370, then isolated to a 2x2 against rotary rinalmo-giga, which is unaffected)",
+      "gradient_checkpointing_usable": false,
+      "hidden_size": 640,
+      "key": "rnafm",
+      "loaded_from_registry": true,
+      "max_position_embeddings": 1026,
+      "model_class": "RnaFmModel",
+      "n_heads": 20,
+      "n_layer": 12,
+      "position_embedding_type": "absolute",
+      "prd_label": "~100M",
+      "repo_id": "multimolecule/rnafm",
+      "revision": "7d6e73ad3b48e042b378f9a788a56ccb4d573a27",
+      "role": "comparator",
+      "vocab_size": 28
+    },
     "base_frozen": true,
     "checkpoint_use_reentrant": null,
     "dtype": "bfloat16",
     "gradient_checkpointing": false,
-    "n_adapter_sites": 231,
+    "n_adapter_sites": 72,
     "n_base_trainable_params": 0,
     "n_modules_with_checkpointing": 0,
     "stage2_heads": {
       "all_heads_trainable": true,
-      "d_model": 1280,
+      "d_model": 640,
       "head_sizes": {
         "cognate_aa": 20,
         "label_string": 8,
@@ -517,7 +521,7 @@
       "heads_lora_adapted": [],
       "heads_outside_peft_wrapper": true,
       "n_head_modules": 6,
-      "n_head_parameters": 199836,
+      "n_head_parameters": 99996,
       "output_keys": [
         "tbox_logit",
         "boundary_logits",
@@ -532,14 +536,12 @@
     "targeted_module_leaf_names": [
       "dense",
       "key",
-      "linear",
-      "linear_gate",
       "query",
       "value"
     ],
-    "total_params": 662079483,
-    "trainable_params": 12840432,
-    "trainable_pct": 1.9394
+    "total_params": 102306560,
+    "trainable_params": 3194880,
+    "trainable_pct": 3.1228
   },
-  "written_at": "2026-08-03T17:44:09.804493+00:00"
+  "written_at": "2026-08-21T22:47:20.599690+00:00"
 }

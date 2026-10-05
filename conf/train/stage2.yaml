@@ -88,6 +88,23 @@ eval_batch_size: 8
 # Keeps the effective batch at the 8 the previous config used, without the VRAM of 8 at once.
 gradient_accumulation_steps: 2
 
+# ── Backbone selection (ADR-0002 D5/D6 + A15) ────────────────────────────────────────────
+# An allow-list key from src/tbox_finder/models/rna_backbone_registry.py, never a repo id.
+# `rinalmo-giga` is the shipped Stage-2 (D5/A9); `rnafm` is the D6 / PRD §10.2 comparator
+# P3-17 builds so P3-18 can read condition (c) against ADR-0005 D17's 0.02 ECE margin.
+#
+# ⚠ THIS KEY, NOT THE /model GROUP, IS THE SWITCH. The /model group is a *record* of the
+# frozen checkpoint identity (see below), so `model.repo_id=…` alone would name a checkpoint
+# the run never loaded. Selecting the comparator is BOTH tokens together —
+# `backbone=rnafm model=rnafm_stage2` — and `_cfg_from_mapping` refuses the mismatch either
+# way round, so neither half can be forgotten silently.
+#
+# ⚠ AND IT IS NOT A FREE CHOICE OF ENVIRONMENT. The two arms run under different conda locks
+# (`envs/ml-rna` vs `envs/ml-rnafm`, ADR-0002 A15): `multimolecule` 0.1.0 cannot load RNA-FM
+# at all. Launching `backbone=rnafm` inside `tbox-ml-rna` raises a named ImportError from
+# `lora_harness._backbone_class` rather than loading something else.
+backbone: rinalmo-giga
+
 # ── Model (PRD §10.3) ────────────────────────────────────────────────────────────────────
 # revision / dtype / attn_implementation are null = "use the pinned defaults": the immutable
 # checkpoint revision from eval/rinalmo_parity.py, bfloat16 from lora_harness.TRAIN_DTYPE,

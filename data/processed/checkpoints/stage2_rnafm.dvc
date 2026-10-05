@@ -1,0 +1,6 @@
+outs:
+- md5: a48f68c2910d7d9652bbecf9e2565054.dir
+  size: 26426216
+  nfiles: 10
+  hash: md5
+  path: stage2_rnafm

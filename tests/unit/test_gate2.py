@@ -34,6 +34,7 @@ from tbox_finder.calib import ece as ECE
 from tbox_finder.calib import gate2 as G
 from tbox_finder.calib import recalibrate as R
 from tbox_finder.eval import resample as RS
+from tbox_finder.models import rna_backbone_registry as BR
 
 # No `pytest.importorskip("numpy")` here: the `tbox_finder` imports above already pull
 # numpy, so collection would fail in that block and a guard below it could never run.
@@ -174,11 +175,16 @@ def _blocks_for(scores: dict) -> dict[str, str]:
     return {rid: f"cluster:{i // 2}" for i, rid in enumerate(scores["row_ids"])}
 
 
-def _report() -> dict:
+def _report(backbone: str | None = None) -> dict:
     """A complete, honest, passing GATE-2 report built through the shipped assembler."""
     scores = _in_distribution_scores()
+    # ⚠ The PINNED default, not a cheap 40. This fixture's docstring calls it "a complete,
+    # honest, passing report", and round 10 added a clause saying a cost-knobbed bootstrap
+    # cannot certify — so a fixture that quietly under-resamples is not the thing it claims to
+    # be, and would have forced the clause to be loosened to accommodate it. Measured at 0.37 s
+    # on this fixture's row count, so completeness costs nothing here.
     gate = G.grade_in_distribution(
-        scores=scores, blocks_by_row=_blocks_for(scores), n_boot=40, seed=7
+        scores=scores, blocks_by_row=_blocks_for(scores), n_boot=G.DEFAULT_N_BOOT, seed=7
     )
     shift = G.prior_shift_band_sweep(
         scores=scores,
@@ -186,24 +192,33 @@ def _report() -> dict:
         temperature=float(gate["calibration"]["temperature"]),
     )
     ood = _ood_block(n_units=2)
+    # ⚠ Round 12: these read a hard-coded 7 while the OOD block below them scored 87 rows — a
+    # scope that contradicted the very units it summarises, invisible until a clause checked
+    # that the units' row counts add up to the rows the report says it scored. `main` sets
+    # this from `len(loo["row_ids"])`; the fixture now does the equivalent.
+    n_loo_rows = sum(int(u["n_records"]) for u in ood["units"].values())
     scope = {
         "gate_rung": G.GATE_RUNG,
         "n_gate_rung_rows_in_split_table": gate["n"],
-        "n_loo_holdout_rows_in_split_table": 7,
-        "n_loo_holdout_rows_scored": 7,
+        "n_loo_holdout_rows_in_split_table": n_loo_rows,
+        "n_loo_holdout_rows_scored": n_loo_rows,
         "n_loo_holdout_units_in_split_table": 2,
         "n_row_overlap": 0,
         "n_order_overlap": 0,
         "rescore_n_overlap": 3,
         "rescore_max_abs_delta": 1e-4,
     }
+    key = backbone or BR.PRODUCTION_BACKBONE
     return G.build_report(
         gate=gate,
         prior_shift=shift,
         ood=ood,
         scope=scope,
-        scoring={"arm": "aux1.0_lr1e-4"},
+        # `scoring.load` carries the backbone the loader derived from the adapter's own
+        # recorded base model — the evidence `env_lock_is_the_graded_arms` grades.
+        scoring={"arm": "aux1.0_lr1e-4", "load": {"backbone": key}},
         provenance={"git_sha": "deadbeef"},
+        env_lock=BR.resolve_backbone(key).env_lock,
         written_at="2026-08-04T00:00:00+00:00",
     )
 
@@ -244,8 +259,9 @@ def _ood_block(*, n_units: int) -> dict:
         for i in range(n_units)
     ]
     scores, rows_by_id = _phylum_scores(plan)
+    # Pinned default for the same reason as `_report`'s in-distribution leg (0.22 s here).
     return G.grade_ood_units(
-        scores=scores, rows_by_id=rows_by_id, temperature=1.0, n_boot=8, seed=3
+        scores=scores, rows_by_id=rows_by_id, temperature=1.0, n_boot=G.DEFAULT_OOD_N_BOOT, seed=3
     )
 
 
@@ -280,6 +296,7 @@ def _report_kwargs() -> dict:
         "scope": report["scope"],
         "scoring": report["scoring"],
         "provenance": report["provenance"],
+        "env_lock": report["env_lock"],
         "written_at": report["generated_at_utc"],
     }
 
@@ -287,9 +304,14 @@ def _report_kwargs() -> dict:
 def test_clause_key_set_is_stable_and_named() -> None:
     """The clause names are the report's public contract; drift must be a visible diff."""
     assert set(G.derive_clauses({})) == {
+        "bootstrap_replicates_are_not_a_cost_knob",
         "d13_drift_bound_left_unadjudicated",
         "deployment_prior_is_a_band_not_a_pin",
         "ece_estimator_matches_adr_d11",
+        "env_lock_is_the_graded_arms",
+        "in_distribution_ece_is_its_own_reliability_tables_mean",
+        "ood_admissibility_is_the_pinned_min_n_rule",
+        "ood_macro_average_is_the_admissible_units_mean",
         "gate_threshold_is_the_pinned_default",
         "graded_every_loo_holdout_unit",
         "graded_object_is_pre_prior_shift",
@@ -933,6 +955,13 @@ def test_the_disclosures_carry_the_two_inherited_caveats() -> None:
     assert len(p3_08) == 1 and len(p3_09) == 1
     assert "ONE calib row" in p3_08[0], "the P3-08 single-row caveat must travel with the number"
     assert "degenerate-limit rule" in p3_08[0]
+    # ...and every fact in it must name P3-08's RiNALMo arms as its subject. Emitted
+    # unconditionally into EVERY gate2 report, the earlier wording made the RNA-FM
+    # comparator's report assert a perfectly separated no-aux control that its own eval
+    # report recorded as `is_perfectly_separated: false` with a finite temperature.
+    assert p3_08[0].count("RiNALMo") >= 2, p3_08[0]
+    assert "not necessarily about the arm graded here" in p3_08[0]
+    assert "records no separation measurement for it" in p3_08[0]
     assert "SATURATE" in p3_09[0], "the P3-09 debias-saturation caveat must travel with it too"
     assert "0.123" in p3_09[0], "the measured truth the estimator saturated against"
     assert "P5" in joined, "the FDR half of GATE-2 is not represented here and must say so"
@@ -1311,3 +1340,1295 @@ def test_the_plug_in_ece_is_reported_beside_the_gated_debiased_one() -> None:
     assert isinstance(report["gate"]["ece_plugin"], float)
     assert report["gate"]["ece_plugin"] >= report["gate"]["ece"] - 1e-12
     assert math.isfinite(report["gate"]["ece_ci"]["point"])
+
+
+# ======================================================================================
+# P3-17 — `grade` must be pointable at a non-production arm root (ADR-0002 D6/A15)
+# ======================================================================================
+def test_grade_accepts_the_same_arm_root_flags_score_loo_already_had() -> None:
+    """A comparator's scores could be PRODUCED and never GRADED.
+
+    `score-loo` has taken `--checkpoint-root`/`--sweep-dir` since it was written; `grade` did
+    not, and hardcoded the production constants. It uses them for one thing — resolving WHICH
+    ARM NAME to pull out of the scores file — so the omission had nothing to do with the
+    science and everything to do with which directory it looked in. It surfaced at P3-17 as
+
+        FileNotFoundError: checkpoint root data/processed/checkpoints/stage2_rinalmo
+        does not exist
+
+    when grading the RNA-FM comparator, whose scores were sitting right there.
+    """
+    parser = G.build_parser()
+    for sub in ("grade", "score-loo"):
+        args = parser.parse_args([sub, "--checkpoint-root", "/tmp/x", "--sweep-dir", "/tmp/y"])
+        assert args.checkpoint_root == "/tmp/x", sub
+        assert args.sweep_dir == "/tmp/y", sub
+    # ...and omitting them must leave every pre-existing invocation byte-identical: the
+    # defaults are None so the call site falls back to the production constants, rather than
+    # baking a second copy of those paths into the parser.
+    defaults = parser.parse_args(["grade"])
+    assert defaults.checkpoint_root is None
+    assert defaults.sweep_dir is None
+
+
+class _ArmRootReached(Exception):
+    """Raised by the stub the moment `discover_arms` is called, so the test stops there."""
+
+
+def _capture_arm_root(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
+    """Stand in front of `discover_arms` and record the roots `grade` hands it.
+
+    An earlier version of this test read `inspect.getsource(G.main)` for the two identifier
+    names. That passes whenever the names appear ANYWHERE in the function — in a comment, in a
+    dead branch, in a docstring — and it cannot see whether the value reaches `discover_arms`
+    at all ([[artifact-pinning-test-cannot-see-the-code]]). This captures the argument.
+    """
+    from tbox_finder.stage2 import eval as E
+
+    seen: dict[str, object] = {}
+
+    def _stub(checkpoint_root: object, *, sweep_dir: object = None) -> dict[str, object]:
+        seen["checkpoint_root"] = checkpoint_root
+        seen["sweep_dir"] = sweep_dir
+        raise _ArmRootReached
+
+    monkeypatch.setattr(E, "discover_arms", _stub)
+    monkeypatch.setattr(E, "production_arm_config", lambda *a, **k: {})
+    monkeypatch.setattr(G, "_read_split_table", lambda *a, **k: ([], {}))
+    return seen
+
+
+def test_grade_falls_back_to_the_production_root_when_not_told_otherwise(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The fallback is what keeps P3-10's committed invocation unchanged, so assert the value
+    `discover_arms` RECEIVES, not that the constant's name occurs in the source."""
+    from tbox_finder.stage2 import eval as E
+
+    seen = _capture_arm_root(monkeypatch)
+    with pytest.raises(_ArmRootReached):
+        G.main(["grade"])
+    assert seen["checkpoint_root"] == E.DEFAULT_CKPT_ROOT
+    assert seen["sweep_dir"] == E.DEFAULT_SWEEP_DIR
+    # And those constants must still name the production arm, or the fallback silently moved.
+    assert E.DEFAULT_CKPT_ROOT.endswith("stage2_rinalmo"), E.DEFAULT_CKPT_ROOT
+
+
+def test_grade_uses_the_root_it_is_given_rather_than_the_production_one(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The other half of the identity: a parser that accepted the flags and then ignored them
+    would still satisfy the fallback test above. Assert the override actually arrives."""
+    from tbox_finder.stage2 import eval as E
+
+    seen = _capture_arm_root(monkeypatch)
+    with pytest.raises(_ArmRootReached):
+        G.main(["grade", "--checkpoint-root", "/tmp/comparator", "--sweep-dir", "/tmp/sweep"])
+    assert seen["checkpoint_root"] == "/tmp/comparator"
+    assert seen["sweep_dir"] == "/tmp/sweep"
+    assert seen["checkpoint_root"] != E.DEFAULT_CKPT_ROOT
+
+
+def test_an_explicitly_empty_root_is_not_answered_with_the_production_one(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`args.checkpoint_root or E.DEFAULT_CKPT_ROOT` treats `--checkpoint-root ""` as absent.
+
+    A caller who passed an empty string would silently grade the SHIPPED arm while believing
+    it had pointed the run elsewhere — the same silent-production-fallback class as the loader
+    that defaulted a missing base model to production. Only an OMITTED option falls back.
+    """
+    from tbox_finder.stage2 import eval as E
+
+    seen = _capture_arm_root(monkeypatch)
+    with pytest.raises(_ArmRootReached):
+        G.main(["grade", "--checkpoint-root", "", "--sweep-dir", ""])
+    assert seen["checkpoint_root"] == ""
+    assert seen["sweep_dir"] == ""
+    assert seen["checkpoint_root"] != E.DEFAULT_CKPT_ROOT
+
+
+# ======================================================================================
+# P3-17 review round 6 — the THIRD producer that stamped the production lock
+# ======================================================================================
+def test_the_report_names_the_environment_the_GRADED_arm_required() -> None:
+    """`sizing.py` and `eval.py` were fixed in round 5 and this one was missed.
+
+    `gate2.py` carries its own `ENV_LOCK = "envs/ml-rna.conda-lock.yml"` and stamped it into
+    both the report body and `build_provenance` — so grading the RNA-FM comparator recorded,
+    and HASHED, an environment whose `multimolecule` pin cannot load the weights whose
+    posteriors were being graded. This is the artifact P3-18's condition (c) reads
+    ([[fixed-one-of-two-identical-things]]).
+    """
+    comparator = BR.resolve_backbone(BR.COMPARATOR_BACKBONE)
+    report = _report(backbone=comparator.key)
+    assert report["env_lock"] == comparator.env_lock
+    assert report["env_lock"] != G.ENV_LOCK, "the comparator must not name the production lock"
+    assert report["clauses"]["env_lock_is_the_graded_arms"] is True
+    # Positive control: the production arm still names the production lock.
+    production = _report()
+    assert production["env_lock"] == G.ENV_LOCK
+    assert production["clauses"]["env_lock_is_the_graded_arms"] is True
+
+
+@pytest.mark.parametrize(
+    "tamper",
+    [
+        pytest.param(
+            lambda r: r.__setitem__("env_lock", "envs/ml-rna.conda-lock.yml"),
+            id="stamped-the-production-constant-over-a-comparator-grade",
+        ),
+        pytest.param(lambda r: r.__setitem__("env_lock", None), id="stamped-nothing"),
+        pytest.param(
+            lambda r: r["scoring"].__setitem__("load", {}),
+            id="the-scored-arm-records-no-backbone",
+        ),
+        pytest.param(
+            lambda r: r["scoring"]["load"].__setitem__(
+                "backbone", "a-model-this-repo-does-not-pin"
+            ),
+            id="a-backbone-outside-the-allow-list",
+        ),
+    ],
+)
+def test_the_env_lock_clause_bites(tamper) -> None:
+    report = _report(backbone=BR.COMPARATOR_BACKBONE)
+    assert G.derive_clauses(report)["env_lock_is_the_graded_arms"] is True
+    tamper(report)
+    assert G.derive_clauses(report)["env_lock_is_the_graded_arms"] is False
+
+
+def test_main_stamps_the_derived_lock_into_BOTH_the_report_and_the_provenance() -> None:
+    """The clause guards the reader; this guards the wiring.
+
+    Every test above builds its report through `build_report` with an explicit `env_lock=`, so
+    a `main` that went back to `ENV_LOCK` for either the report body or `build_provenance`
+    would leave all of them green ([[artifact-pinning-test-cannot-see-the-code]]).
+    """
+    import ast
+
+    tree = ast.parse(Path(G.__file__).read_text(encoding="utf-8"))
+    main_fn = next(n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == "main")
+    stamped = [
+        kw.value
+        for call in ast.walk(main_fn)
+        if isinstance(call, ast.Call)
+        for kw in call.keywords
+        if kw.arg == "env_lock"
+    ]
+    assert len(stamped) == 2, f"expected build_provenance and build_report, got {len(stamped)}"
+    for value in stamped:
+        assert isinstance(value, ast.Name), ast.dump(value)
+        assert value.id == "scored_env_lock", value.id
+
+
+def test_a_schema_1_report_is_graded_against_the_schema_1_clause_set() -> None:
+    """The carve-out still exists for genuinely older reports.
+
+    ⚠ Round 10: it is no longer claimed by either committed GATE-2 report. Both were promoted
+    to the current schema in the same commit that added the schema-3 clauses, because every
+    one of those clauses is a pure function of fields they already carried — and inheriting
+    the carve-out is exactly how `gate2_rnafm_ece.json` kept naming the production conda lock
+    while the schema-2 clause written to catch that was excused for it
+    ([[new-gate-clause-invalidates-old-reports]]). The exemption machinery is still tested,
+    on a synthetic legacy report rather than on a shipped artifact.
+    """
+    excused_after_1 = G.CLAUSES_FIRST_REQUIRED_AT["2"] | G.CLAUSES_FIRST_REQUIRED_AT["3"]
+    assert G.clauses_not_required_at("1") == excused_after_1
+    assert G.clauses_not_required_at("2") == G.CLAUSES_FIRST_REQUIRED_AT["3"]
+    assert G.clauses_not_required_at(G.SCHEMA_VERSION) == frozenset()
+    assert G.clauses_not_required_at("99") == frozenset()
+    legacy = _report()
+    legacy["schema_version"] = "1"
+    for name in excused_after_1:
+        del legacy["clauses"][name]
+    legacy["overall_pass"] = all(legacy["clauses"].values())
+    assert [p for p in G.validate_report(legacy) if "clauses" in p] == []
+    # ...and claiming schema 1 while RECORDING a later clause is still refused.
+    forged = _report()
+    forged["schema_version"] = "1"
+    assert any("key set drifted" in p for p in G.validate_report(forged))
+
+
+def test_the_schema_table_names_clauses_that_actually_exist() -> None:
+    """A misspelled clause name in `CLAUSES_FIRST_REQUIRED_AT` excuses nothing, silently."""
+    named = frozenset().union(*G.CLAUSES_FIRST_REQUIRED_AT.values(), frozenset())
+    derived = set(G.derive_clauses(_report()))
+    assert named <= derived, sorted(named - derived)
+    assert set(G.CLAUSES_FIRST_REQUIRED_AT) <= set(G.KNOWN_SCHEMAS)
+    assert G.SCHEMA_VERSION in G.KNOWN_SCHEMAS
+
+
+def test_score_loo_holdout_also_refuses_to_answer_an_empty_root_with_production(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`score_loo_holdout` carries the SECOND copy of the same fallback.
+
+    A regression that restored `checkpoint_root or E.DEFAULT_CKPT_ROOT` there stays green
+    against every test above, which only exercises `grade`
+    ([[fixed-one-of-two-identical-things]]).
+    """
+    from tbox_finder.stage2 import eval as E
+
+    seen: dict[str, object] = {}
+
+    def _stub(checkpoint_root: object, *, sweep_dir: object = None) -> dict[str, object]:
+        seen["checkpoint_root"] = checkpoint_root
+        seen["sweep_dir"] = sweep_dir
+        raise _ArmRootReached
+
+    monkeypatch.setattr(E, "discover_arms", _stub)
+    monkeypatch.setattr(E, "production_arm_config", lambda *a, **k: {})
+    monkeypatch.setattr(
+        G,
+        "loo_holdout_rows",
+        lambda *a, **k: (
+            [],
+            {"n_row_overlap": 0, "n_order_overlap": 0, "overlapping_orders": []},
+        ),
+    )
+
+    with pytest.raises(_ArmRootReached):
+        G.score_loo_holdout(checkpoint_root="", sweep_dir="")
+    assert seen["checkpoint_root"] == ""
+    assert seen["sweep_dir"] == ""
+    assert seen["checkpoint_root"] != E.DEFAULT_CKPT_ROOT
+
+
+def test_the_workflow_rule_declares_which_model_made_the_pre_a15_sidecars() -> None:
+    """`gate2 grade` refuses to guess a backbone for a sidecar that records none, so the rule
+    that grades the PRODUCTION arm from the pre-A15 sidecars must say which model made them —
+    otherwise `snakemake gate2_ece` raises before writing the report.
+
+    The key is retyped in the `.smk` because importing `tbox_finder` at Snakefile-parse time
+    would make `snakemake --lint` depend on `src` being importable. This pins the copy.
+
+    ⚠ Round 10: it is pinned against the SIDECARS' OWN recorded base model, not against
+    `PRODUCTION_BACKBONE`. `_SCORED_BACKBONE` states a historical fact — which model wrote
+    those two files — and that fact does not move when the production backbone does. Binding
+    it to the mutable constant meant that firing the ADR-0002 D6 swap at P3-18 would turn this
+    test red and then drive the `.smk` to declare `rnafm` for RiNALMo-scored sidecars.
+    """
+    smk = (
+        Path(__file__).resolve().parents[2] / "workflow" / "rules" / "calibration.smk"
+    ).read_text(encoding="utf-8")
+    scores = json.loads(
+        (Path(__file__).resolve().parents[2] / "reports" / "p3" / "stage2_scores.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    repo_ids = {
+        arm["load"]["base_model_name_or_path"]
+        for arm in scores["arms"].values()
+        if arm.get("load", {}).get("base_model_name_or_path")
+    }
+    assert len(repo_ids) == 1, f"the sidecar's arms name several base models: {sorted(repo_ids)!r}"
+    evidenced = BR.backbone_for_repo_id(next(iter(repo_ids))).key
+    assert (
+        f'_SCORED_BACKBONE = "{evidenced}"' in smk
+    ), "the rule's retyped backbone key disagrees with what the sidecars themselves record"
+    # ...and the rule must actually PASS it: a constant nothing reads is a fabricated value.
+    assert "--scored-backbone {params.scored_backbone:q}" in smk
+    assert "scored_backbone=_SCORED_BACKBONE," in smk
+
+
+# ======================================================================================
+# P3-17 review round 8 — the two sidecars must be about the SAME weights
+# ======================================================================================
+def test_two_sidecars_from_different_weights_are_refused_not_joined() -> None:
+    """The grade joins an in-distribution ECE from one sidecar to a leave-clade-out ECE from
+    the other and reports them as one arm. `env_lock_for_scored_arms` compares `backbone`
+    alone — the coarsest field — so two sidecars could name the same backbone while one was
+    scored from a different checkpoint, adapter, or base revision.
+    """
+    base = {
+        "backbone": "rnafm",
+        "base_model_name_or_path": "multimolecule/rnafm",
+        "revision": "7d6e73a",
+        "checkpoint_dir": "data/processed/checkpoints/stage2_rnafm/aux1.0_lr1e-4",
+        "adapter_sha256": "c22296b8",
+        "heads_sha256": "dc0f204a",
+    }
+    assert G.sidecar_identity_mismatches(base, dict(base)) == []
+    for field in G.SIDECAR_IDENTITY_FIELDS:
+        assert G.sidecar_identity_mismatches(base, dict(base, **{field: "other"})) == [field]
+
+
+def test_a_field_ONE_sidecar_predates_is_an_age_difference_not_a_mismatch() -> None:
+    """The pre-A15 sidecars record almost none of these. Refusing them for *lacking* a field
+    would make the compatibility path in `env_lock_for_scored_arms` unreachable."""
+    rich = {"backbone": "rnafm", "adapter_sha256": "c22296b8"}
+    assert G.sidecar_identity_mismatches(rich, {}) == []
+    assert G.sidecar_identity_mismatches({}, rich) == []
+    assert G.sidecar_identity_mismatches({}, {}) == []
+    # ...but a field BOTH record and disagree on is still a mismatch.
+    assert G.sidecar_identity_mismatches(rich, {"adapter_sha256": "deadbeef"}) == ["adapter_sha256"]
+
+
+def test_the_committed_sidecar_pairs_agree_on_every_identity_field_they_share() -> None:
+    """Not a hypothetical: the artifacts this repo ships must pass their own guard."""
+    root = Path(__file__).resolve().parents[2]
+    pairs = [
+        ("reports/p3/stage2_scores.json", "reports/p3/stage2_scores_loo.json"),
+        ("reports/p3/stage2_scores_rnafm.json", "reports/p3/stage2_scores_loo_rnafm.json"),
+    ]
+    for in_dist_path, loo_path in pairs:
+        in_dist = json.loads((root / in_dist_path).read_text(encoding="utf-8"))["arms"]
+        loo = json.loads((root / loo_path).read_text(encoding="utf-8"))["arms"]
+        shared = set(in_dist) & set(loo)
+        assert shared, (in_dist_path, loo_path)
+        for arm in sorted(shared):
+            assert (
+                G.sidecar_identity_mismatches(in_dist[arm].get("load"), loo[arm].get("load")) == []
+            ), (in_dist_path, loo_path, arm)
+
+
+def test_a_numeric_schema_version_is_not_the_string_one(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`str(report["schema_version"])` made the JSON number `1` equivalent to schema `"1"`, so
+    a numeric version collected schema-1's clause exemptions while only its *type* was flagged.
+    """
+    assert G.clauses_not_required_at("1") == (
+        G.CLAUSES_FIRST_REQUIRED_AT["2"] | G.CLAUSES_FIRST_REQUIRED_AT["3"]
+    ), "a schema-1 report is excused every clause introduced at 2 AND at 3"
+    assert G.clauses_not_required_at(1) == frozenset()  # type: ignore[arg-type]
+    report = _report()
+    report["schema_version"] = 1
+    del report["clauses"]["env_lock_is_the_graded_arms"]
+    problems = G.validate_report(report)
+    assert any("is not one of" in p for p in problems), problems
+    # ...and it does NOT get the schema-1 excuse: the missing clause is still reported.
+    assert any("key set drifted" in p for p in problems), problems
+
+
+# ======================================================================================
+# P3-17 review round 10 — the published statistics must be RE-DERIVED, not read back
+#
+# Every test below is written as a *mutation* of the shipped committed artifact and asserts
+# the named clause goes FALSE. That direction matters: a clause that is TRUE on the honest
+# report proves nothing on its own — `in_distribution_ece_within_gate` was TRUE on every
+# honest report for months while accepting any value in [0, 0.05]
+# ([[gate-clauses-need-re-derivation]], [[raises-test-needs-a-positive-control]]).
+# ======================================================================================
+def _committed(name: str) -> dict:
+    path = Path(__file__).resolve().parents[2] / "reports" / name
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+COMMITTED_GATE2_REPORTS = ("gate2_p3_ece.json", "p3/gate2_rnafm_ece.json")
+
+
+@pytest.mark.parametrize("name", COMMITTED_GATE2_REPORTS)
+def test_the_committed_reports_pass_every_rederivation_clause(name: str) -> None:
+    """The positive control. If these were false, every mutation test below would be vacuous."""
+    report = _committed(name)
+    clauses = G.derive_clauses(report)
+    for clause in sorted(G.CLAUSES_FIRST_REQUIRED_AT["3"]):
+        assert clauses[clause] is True, f"{name}: {clause} is false on the shipped artifact"
+    assert G.validate_report(report) == [], name
+    assert report["schema_version"] == G.SCHEMA_VERSION, (
+        f"{name} is not at the current schema, so it is EXCUSED the clauses above by "
+        "clauses_not_required_at — which is the hole round 10 closed"
+    )
+
+
+@pytest.mark.parametrize("name", COMMITTED_GATE2_REPORTS)
+def test_the_gated_ece_is_rederived_from_its_own_reliability_table(name: str) -> None:
+    """`gate.ece -> 0.04` was 5.9x the measured value, under the 0.05 bar, and validated clean."""
+    report = _committed(name)
+    bins = report["gate"]["reliability"]
+    assert math.isclose(
+        sum(b["weight"] * b["debiased_gap"] for b in bins),
+        report["gate"]["ece"],
+        rel_tol=1e-12,
+        abs_tol=1e-12,
+    ), "the shipped ECE is not its own bins' weighted mean, so the clause cannot be checking it"
+    for field, value in (("ece", 0.04), ("ece_plugin", 0.5), ("n", 7)):
+        tampered = _committed(name)
+        tampered["gate"][field] = value
+        assert (
+            G.derive_clauses(tampered)["in_distribution_ece_is_its_own_reliability_tables_mean"]
+            is False
+        ), field
+        assert G.validate_report(tampered) != [], field
+
+
+@pytest.mark.parametrize("name", COMMITTED_GATE2_REPORTS)
+def test_the_loo_macro_ece_is_rederived_from_its_own_admissible_units(name: str) -> None:
+    """**The statistic ADR-0005 D17(c) reads at P3-18.**
+
+    The measured margin is +0.023103 against a pinned 0.02, so 0.1920 is the value that
+    silently reverses the backbone-swap verdict. It is included here by construction.
+    """
+    report = _committed(name)
+    for value in (0.001, 0.1920, report["ood"]["macro_average"]["point"] + 1e-6):
+        tampered = _committed(name)
+        tampered["ood"]["macro_average"]["point"] = value
+        assert (
+            G.derive_clauses(tampered)["ood_macro_average_is_the_admissible_units_mean"] is False
+        ), value
+        assert G.validate_report(tampered) != [], value
+    # zeroing the per-unit evidence must not be absorbed by the recorded mean either
+    tampered = _committed(name)
+    for unit in tampered["ood"]["units"].values():
+        unit["ood_ece"] = 0.0
+    assert G.derive_clauses(tampered)["ood_macro_average_is_the_admissible_units_mean"] is False
+
+
+@pytest.mark.parametrize("name", COMMITTED_GATE2_REPORTS)
+def test_admissibility_is_the_pinned_min_n_rule_not_a_field(name: str) -> None:
+    report = _committed(name)
+    tampered = _committed(name)
+    tampered["ood"]["n_units_admissible"] = 3
+    assert G.derive_clauses(tampered)["ood_admissibility_is_the_pinned_min_n_rule"] is False
+    # A flag flipped against its own count is caught. ⚠ Only the ->False direction can be
+    # tested on these artifacts: both are 30/30 admissible, so setting `admissible = True`
+    # everywhere is a no-op and asserting it goes red would be asserting a tautology
+    # ([[symmetric-count-fixture-blind-to-inversion]]). The ->True direction is exercised
+    # below on a unit whose own count makes it inadmissible.
+    tampered = _committed(name)
+    assert all(
+        u["admissible"] for u in tampered["ood"]["units"].values()
+    ), f"{name} now has an inadmissible unit — the no-op note above is stale, widen this test"
+    for unit in tampered["ood"]["units"].values():
+        unit["admissible"] = False
+    assert G.derive_clauses(tampered)["ood_admissibility_is_the_pinned_min_n_rule"] is False
+    # ...and a unit promoted ABOVE the floor it does not clear is caught too
+    tampered = _committed(name)
+    name_, unit = next(iter(tampered["ood"]["units"].items()))
+    unit["n_positives"] = COV.OOD_ECE_MIN_N - 1
+    assert unit["admissible"] is True, name_
+    assert G.derive_clauses(tampered)["ood_admissibility_is_the_pinned_min_n_rule"] is False
+    # ...and loosening the floor itself is refused
+    tampered = _committed(name)
+    tampered["ood"]["min_n"] = 1
+    assert G.derive_clauses(tampered)["ood_admissibility_is_the_pinned_min_n_rule"] is False
+    assert report["ood"]["min_n"] == COV.OOD_ECE_MIN_N
+
+
+@pytest.mark.parametrize("name", COMMITTED_GATE2_REPORTS)
+def test_a_cost_knobbed_bootstrap_cannot_certify(name: str) -> None:
+    """B=1 collapses every interval onto one replicate; the interval can then exclude its own
+    point estimate while every other clause stays true ([[cost-knobs-can-certify]])."""
+    for path, value in (
+        (("gate", "ece_ci", "n_boot"), 1),
+        (("ood", "n_boot"), 1),
+    ):
+        tampered = _committed(name)
+        node = tampered
+        for key in path[:-1]:
+            node = node[key]
+        node[path[-1]] = value
+        assert G.derive_clauses(tampered)["bootstrap_replicates_are_not_a_cost_knob"] is False, path
+    # an interval that does not contain its own point is the actual pathology
+    tampered = _committed(name)
+    tampered["gate"]["ece_ci"]["upper"] = 0.0001
+    assert G.derive_clauses(tampered)["bootstrap_replicates_are_not_a_cost_knob"] is False
+
+
+@pytest.mark.parametrize("name", COMMITTED_GATE2_REPORTS)
+def test_the_report_names_the_lock_of_the_backbone_it_actually_graded(name: str) -> None:
+    """The shipped RNA-FM report named `envs/ml-rna.conda-lock.yml` — the PRODUCTION lock — for
+    a run made under `ml-rnafm`, and hashed that file into provenance."""
+    report = _committed(name)
+    load = report["scoring"]["load"]
+    expected = G.env_lock_for_graded_arm(load)
+    assert expected is not None, f"{name}: the load record evidences no backbone at all"
+    assert report["env_lock"] == expected, name
+    for other in ("envs/ml-rna.conda-lock.yml", "envs/ml-rnafm.conda-lock.yml"):
+        if other == expected:
+            continue
+        tampered = _committed(name)
+        tampered["env_lock"] = other
+        assert G.derive_clauses(tampered)["env_lock_is_the_graded_arms"] is False, other
+
+
+def test_the_backbone_is_evidenced_by_the_base_model_when_no_key_was_written() -> None:
+    """The pre-A15 sidecars record no `backbone`, so reading only that field made the clause
+    unsatisfiable from the artifacts the shipped `gate2_ece` rule reads — and re-running the
+    rule replaced a passing GATE-2 report with a failing one for a plumbing reason."""
+    assert G.backbone_key_from_load({"base_model_name_or_path": "multimolecule/rinalmo-giga"}) == (
+        "rinalmo-giga"
+    )
+    assert G.backbone_key_from_load({"backbone": "rnafm"}) == "rnafm"
+    # both present and AGREEING is fine; both present and disagreeing is not evidence
+    assert (
+        G.backbone_key_from_load(
+            {"backbone": "rnafm", "base_model_name_or_path": "multimolecule/rnafm"}
+        )
+        == "rnafm"
+    )
+    assert (
+        G.backbone_key_from_load(
+            {"backbone": "rnafm", "base_model_name_or_path": "multimolecule/rinalmo-giga"}
+        )
+        is None
+    )
+    assert G.backbone_key_from_load({}) is None
+    assert G.backbone_key_from_load({"base_model_name_or_path": "some/unpinned-model"}) is None
+
+
+def test_the_committed_pre_a15_sidecars_still_evidence_their_backbone() -> None:
+    """The end-to-end fact the fix exists for: `snakemake gate2_ece` reads THESE files, and the
+    clause must be satisfiable from them without regenerating a GPU pass."""
+    root = Path(__file__).resolve().parents[2]
+    for rel in ("reports/p3/stage2_scores.json", "reports/p3/stage2_scores_loo.json"):
+        arms = json.loads((root / rel).read_text(encoding="utf-8"))["arms"]
+        for arm, payload in arms.items():
+            load = payload["load"]
+            assert load.get("backbone") is None, (
+                f"{rel}:{arm} now records a backbone — this test is about the PRE-A15 shape and "
+                "has gone vacuous; re-point it or delete it"
+            )
+            assert G.backbone_key_from_load(load) == "rinalmo-giga", (rel, arm)
+
+
+# ======================================================================================
+# P3-17 review round 11 — the eval-side backbone evidence, which round 10 shipped untested
+#
+# Round 10 added env_lock_for_scored_arms' base-model cross-check and _backbone_key_for_repo_id
+# and covered neither: inserting `return None` at the top of the helper made both new refusals
+# unreachable and left the entire unit tier green. These tests are behavioural, not AST, so
+# they bite on the logic rather than on its spelling.
+# ======================================================================================
+def _eval_mod():
+    return pytest.importorskip("tbox_finder.stage2.eval", reason="needs the eval module")
+
+
+RINALMO_REPO = "multimolecule/rinalmo-giga"
+RNAFM_REPO = "multimolecule/rnafm"
+
+
+def test_a_declared_backbone_contradicting_the_recorded_base_model_is_refused() -> None:
+    """The pre-A15 sidecars record no `backbone`, so before round 10 EVERY declaration was
+    accepted for them — including one whose env cannot load the weights being graded."""
+    E = _eval_mod()
+    silent = {"a": {"base_model_name_or_path": RINALMO_REPO}}
+    assert E.env_lock_for_scored_arms(silent, declared_backbone="rinalmo-giga") == (
+        "envs/ml-rna.conda-lock.yml"
+    )
+    with pytest.raises(RuntimeError, match="recorded evidence resolves to 'rinalmo-giga'"):
+        E.env_lock_for_scored_arms(silent, declared_backbone="rnafm")
+
+
+def test_a_record_whose_backbone_contradicts_its_own_base_model_is_refused() -> None:
+    """Round 11: the RECORDED branch trusted `backbone` alone, so a sidecar saying
+    `backbone: rinalmo-giga` beside `base_model: multimolecule/rnafm` named, hashed and
+    self-certified the production lock for RNA-FM weights."""
+    E = _eval_mod()
+    contradictory = {"a": {"backbone": "rinalmo-giga", "base_model_name_or_path": RNAFM_REPO}}
+    with pytest.raises(RuntimeError, match="contradicts itself"):
+        E.env_lock_for_scored_arms(contradictory)
+    agreeing = {"a": {"backbone": "rnafm", "base_model_name_or_path": RNAFM_REPO}}
+    assert E.env_lock_for_scored_arms(agreeing) == "envs/ml-rnafm.conda-lock.yml"
+
+
+def test_an_unpinned_base_model_is_no_evidence_rather_than_a_refusal() -> None:
+    """A repo id this ADR does not pin carries no information about the backbone; a check with
+    no evidence must not manufacture a verdict ([[clauses-must-guard-emptiness]])."""
+    E = _eval_mod()
+    assert E._backbone_key_for_repo_id("some/unpinned-model") is None
+    assert E._backbone_key_for_repo_id(None) is None
+    assert E._backbone_key_for_repo_id(RNAFM_REPO) == "rnafm"
+    unknown = {"a": {"backbone": "rnafm", "base_model_name_or_path": "some/unpinned-model"}}
+    assert E.env_lock_for_scored_arms(unknown) == "envs/ml-rnafm.conda-lock.yml"
+
+
+def test_the_eval_side_clause_is_satisfiable_from_a_pre_a15_sidecar() -> None:
+    """The regression round 10 fixed in gate2 and left standing here: reading `backbone` alone
+    made the clause unsatisfiable from the very sidecars `--scored-backbone` exists to regrade,
+    so a CORRECT report published `overall_pass: false` for a plumbing reason."""
+    E = _eval_mod()
+    assert E._backbone_key_from_load({"base_model_name_or_path": RINALMO_REPO}) == "rinalmo-giga"
+    assert E._backbone_key_from_load({"backbone": "rnafm"}) == "rnafm"
+    assert (
+        E._backbone_key_from_load({"backbone": "rnafm", "base_model_name_or_path": RNAFM_REPO})
+        == "rnafm"
+    )
+    # a self-contradicting record evidences nothing
+    assert (
+        E._backbone_key_from_load({"backbone": "rnafm", "base_model_name_or_path": RINALMO_REPO})
+        is None
+    )
+    assert E._backbone_key_from_load({}) is None
+    # ...and the committed pre-A15 sidecars really do resolve
+    root = Path(__file__).resolve().parents[2]
+    for rel in ("reports/p3/stage2_scores.json", "reports/p3/stage2_scores_loo.json"):
+        arms = json.loads((root / rel).read_text(encoding="utf-8"))["arms"]
+        for arm, payload in arms.items():
+            assert E._backbone_key_from_load(payload["load"]) == "rinalmo-giga", (rel, arm)
+
+
+# ======================================================================================
+# P3-17 review round 11 — the round-10 clauses, re-attacked
+# ======================================================================================
+@pytest.mark.parametrize("name", COMMITTED_GATE2_REPORTS)
+def test_the_gated_ece_is_rederived_from_acc_conf_n_not_from_debiased_gap(name: str) -> None:
+    """Round 10 summed the rows' own `debiased_gap`, which is itself derived from acc/conf/n
+    in the same row — so a TWO-number edit still fabricated a pass: zero one bin's gap and
+    re-sum `gate.ece`, and `validate_report` returned zero problems while `ece_plugin` stayed
+    8x larger, which the debiasing term can never explain."""
+    report = _committed(name)
+    tampered = _committed(name)
+    bins = tampered["gate"]["reliability"]
+    victim = max(range(len(bins)), key=lambda i: bins[i]["weight"] * bins[i]["debiased_gap"])
+    tampered["gate"]["ece"] = sum(
+        b["weight"] * b["debiased_gap"] for i, b in enumerate(bins) if i != victim
+    )
+    bins[victim]["debiased_gap"] = 0.0
+    # ⚠ Round 12: the forge must keep its interval ATTACHED. Leaving `ece_ci.point` at the
+    # honest value meant the `ece_ci.point == ece` check caught this on its own, so reverting
+    # the clause to round 10's sum-the-stored-gaps logic stayed GREEN — the two checks hid each
+    # other. A three-number forge isolates the per-row recomputation.
+    ci = tampered["gate"]["ece_ci"]
+    ci["point"] = tampered["gate"]["ece"]
+    ci["lower"] = min(ci["lower"], ci["point"])
+    assert tampered["gate"]["ece"] < report["gate"]["ece"], "the tamper did not lower the ECE"
+    clauses = G.derive_clauses(tampered)
+    assert clauses["in_distribution_ece_is_its_own_reliability_tables_mean"] is False
+    assert G.validate_report(tampered) != []
+    # ...and a row whose stored gaps simply disagree with its own acc/conf/n are refused —
+    # each ALONE, since the gated sum re-derives from acc/conf/n and so cannot see a stored
+    # value that is wrong only in the published table
+    tampered = _committed(name)
+    tampered["gate"]["reliability"][0]["debiased_gap"] += 0.5
+    assert (
+        G.derive_clauses(tampered)["in_distribution_ece_is_its_own_reliability_tables_mean"]
+        is False
+    )
+    tampered = _committed(name)
+    tampered["gate"]["reliability"][0]["gap"] = 0.999
+    assert (
+        G.derive_clauses(tampered)["in_distribution_ece_is_its_own_reliability_tables_mean"]
+        is False
+    )
+
+
+@pytest.mark.parametrize("name", COMMITTED_GATE2_REPORTS)
+def test_the_reliability_table_shape_is_bound_to_the_pinned_bin_count(name: str) -> None:
+    """A 15-bin claim beside a 1-row table certified `ece = 0` with every clause true."""
+    tampered = _committed(name)
+    tampered["gate"]["reliability"] = [
+        {
+            "acc": 0.5,
+            "conf": 0.5,
+            "gap": 0.0,
+            "debiased_gap": 0.0,
+            "n": tampered["gate"]["n"],
+            "weight": 1.0,
+            "p_min": 0.0,
+            "p_max": 1.0,
+        }
+    ]
+    tampered["gate"]["ece"] = 0.0
+    tampered["gate"]["ece_plugin"] = 0.0
+    assert (
+        G.derive_clauses(tampered)["in_distribution_ece_is_its_own_reliability_tables_mean"]
+        is False
+    )
+
+
+@pytest.mark.parametrize("name", COMMITTED_GATE2_REPORTS)
+def test_the_macro_averages_own_interval_is_checked(name: str) -> None:
+    """Round 10's bootstrap clause walked the in-distribution and per-unit intervals and
+    skipped `ood.macro_average` — the interval on the statistic D17(c) reads."""
+    tampered = _committed(name)
+    tampered["ood"]["macro_average"]["upper"] = 0.0001
+    assert G.derive_clauses(tampered)["bootstrap_replicates_are_not_a_cost_knob"] is False
+    assert G.validate_report(tampered) != []
+
+
+@pytest.mark.parametrize("name", COMMITTED_GATE2_REPORTS)
+def test_each_units_replicate_ledger_must_close(name: str) -> None:
+    """`ood.n_boot` is the header; each unit records its own request, survivors and drops.
+    Checking only the header let one unit certify an interval on a single replicate."""
+    for mutate in (
+        lambda u: u["ci"].__setitem__("n_boot", 1),
+        lambda u: u.__setitem__("n_boot_requested", 1),
+        lambda u: u.__setitem__("n_boot_dropped", -5),
+        lambda u: u["ci"].__setitem__("n_boot", u["ci"]["n_boot"] - 1),  # ledger no longer closes
+    ):
+        tampered = _committed(name)
+        mutate(next(iter(tampered["ood"]["units"].values())))
+        assert G.derive_clauses(tampered)["bootstrap_replicates_are_not_a_cost_knob"] is False
+
+
+@pytest.mark.parametrize("name", COMMITTED_GATE2_REPORTS)
+def test_the_adr_a1_non_resamplable_unit_is_honest_not_cost_knobbed(name: str) -> None:
+    """ADR-0005 A1 sanctions `lower = upper = NaN, n_boot = 0` for a unit with < 2 blocks.
+    Round 10 read that as a cost-knobbed bootstrap, which would have made `gate2_ece`
+    overwrite a passing report with a failing one and exit 0 — the same shape as the env_lock
+    regression it had just fixed. It must be accepted; a NaN WITHOUT the A1 signature must not.
+    """
+    tampered = _committed(name)
+    unit = next(iter(tampered["ood"]["units"].values()))
+    budget = tampered["ood"]["n_boot"]
+    # ⚠ Round 12: the unit must REALLY have one block. This test used to hand a 47-block unit
+    # a 1-block interval — which is precisely the forge round 12 found accepted (the A1
+    # exemption read counts the interval reports about itself, so any unit could claim it).
+    unit["n_blocks"] = 1
+    unit["n_blocks_of_size_one"] = 0
+    unit["ci"] = {
+        "ci_level": 0.95,
+        "lower": float("nan"),
+        "upper": float("nan"),
+        "point": unit["ci"]["point"],
+        "n_boot": 0,
+        "n_blocks": 1,
+    }
+    unit["n_boot_requested"] = budget
+    unit["n_boot_dropped"] = budget
+    assert G.derive_clauses(tampered)["bootstrap_replicates_are_not_a_cost_knob"] is True
+
+    # the exemption is EARNED by the recorded n_blocks/n_boot, never by the NaN alone
+    forged = _committed(name)
+    unit = next(iter(forged["ood"]["units"].values()))
+    unit["ci"] = dict(unit["ci"], lower=float("nan"), upper=float("nan"))
+    assert G.derive_clauses(forged)["bootstrap_replicates_are_not_a_cost_knob"] is False
+
+
+# ======================================================================================
+# P3-17 review round 12 — the in-report clauses stop where the report stops; the sidecars
+# do not
+#
+# A third adversarial pass, aimed at round 11's commit, forged the D17(c) statistic twice
+# more with validate_report silent: one unit's `ood_ece` + the macro (0.188214 -> 0.191714,
+# under the 0.02 margin), and a unit demoted below the min-N floor with every summary of the
+# census updated to match (0.188 -> 0.170). The second is INTERNALLY CONSISTENT, so no clause
+# that reads only the report can see it. What can is the committed evidence the report was
+# computed from: `rederive_against_sidecars` re-runs the shipped estimators on the score
+# sidecars the report hashes into `provenance.inputs`.
+# ======================================================================================
+_REPO = Path(__file__).resolve().parents[2]
+
+
+@pytest.fixture(scope="module")
+def rederived() -> dict:
+    """One sidecar re-derivation per committed report (~35 s each), shared by the tests below.
+
+    The expensive half is computed once; every tamper is then graded by the cheap half, so the
+    tamper tests cost nothing extra while still running against the REAL estimator output.
+    """
+    return {name: G.rederive_from_sidecars(_committed(name)) for name in COMMITTED_GATE2_REPORTS}
+
+
+@pytest.mark.parametrize("name", COMMITTED_GATE2_REPORTS)
+def test_the_committed_reports_rederive_from_their_committed_sidecars(
+    name: str, rederived: dict
+) -> None:
+    """The positive control, and the binding itself: every published number — T, the gated
+    ECE and its reliability table, each order's census, bandwidth, log-likelihood and OOD ECE,
+    and the D17(c) macro — re-derives from the bytes `provenance.inputs` names."""
+    report = _committed(name)
+    assert G.sidecar_binding_problems(report) == []
+    assert rederived[name]["problems"] == []
+    assert len(rederived[name]["units"]) == report["ood"]["n_units"] == 30
+    assert G.rederivation_problems(report, rederived[name]) == []
+
+
+@pytest.mark.parametrize("name", COMMITTED_GATE2_REPORTS)
+def test_a_consistent_per_unit_forge_is_caught_by_the_sidecars(name: str, rederived: dict) -> None:
+    """Reviewer A, round 12, finding 1 — taken all the way: the unit's point, its interval
+    and the macro moved together, and `by_phylum` re-grouped, so the report agrees with
+    itself everywhere."""
+    forged = _committed(name)
+    unit = forged["ood"]["units"]["Acholeplasmatales"]
+    for key in ("lower", "point", "upper"):
+        unit["ci"][key] += 0.105
+    unit["ood_ece"] += 0.105
+    forged["ood"]["macro_average"]["point"] += 0.105 / 30
+    forged["ood"]["by_phylum"] = G._stratify_by_phylum(forged["ood"]["units"])
+    problems = G.rederivation_problems(forged, rederived[name])
+    assert any("units['Acholeplasmatales'].ood_ece" in p for p in problems), problems
+    assert any("macro_average.point" in p for p in problems), problems
+
+
+@pytest.mark.parametrize("name", COMMITTED_GATE2_REPORTS)
+def test_a_thorough_demotion_below_the_floor_is_caught_by_the_sidecars(
+    name: str, rederived: dict
+) -> None:
+    """Reviewer A, round 12, finding 2, with EVERY in-report summary of the census updated —
+    the variant `validate_report` cannot see, asserted here so that limit stays on record."""
+    forged = _committed(name)
+    ood = forged["ood"]
+    unit = ood["units"]["Acholeplasmatales"]
+    unit.update(
+        n_positives=COV.OOD_ECE_MIN_N - 1,
+        admissible=False,
+        inadmissible_point=unit["ood_ece"],
+        ood_ece=None,
+        ci=None,
+        admissibility_class=COV.classify_order(COV.OOD_ECE_MIN_N - 1),
+    )
+    ood["d13_adjudication"]["condition_ii_min_n"]["per_unit"]["Acholeplasmatales"] = unit[
+        "admissibility_class"
+    ]
+    admissible = [u for u in ood["units"].values() if u["admissible"]]
+    ood["n_units_admissible"] = len(admissible)
+    ood["n_units_sub_min_n"] = len(ood["units"]) - len(admissible)
+    ood["adjudicable_fraction"] = len(admissible) / len(ood["units"])
+    ood["macro_average"]["n_blocks"] = len(admissible)
+    ood["macro_average"]["point"] = math.fsum(u["ood_ece"] for u in admissible) / len(admissible)
+    ood["by_phylum"] = G._stratify_by_phylum(ood["units"])
+    assert G.validate_report(forged) == [], "the in-report limit this binding exists for"
+    problems = G.rederivation_problems(forged, rederived[name])
+    assert any("units['Acholeplasmatales'].n_positives" in p for p in problems), problems
+    assert any("macro_average.point" in p for p in problems), problems
+
+
+@pytest.mark.parametrize("name", COMMITTED_GATE2_REPORTS)
+def test_the_gated_read_is_bound_to_the_in_distribution_sidecar(name: str, rederived: dict) -> None:
+    for key, mutate in (
+        ("temperature", lambda r: r["gate"]["calibration"].__setitem__("temperature", 1.5)),
+        ("gate.ece", lambda r: r["gate"].__setitem__("ece", r["gate"]["ece"] / 2)),
+        ("gate.n_positive", lambda r: r["gate"].__setitem__("n_positive", 1)),
+    ):
+        forged = _committed(name)
+        mutate(forged)
+        problems = G.rederivation_problems(forged, rederived[name])
+        assert any(key in p for p in problems), (key, problems)
+
+
+def _staged_repo(tmp_path: Path, name: str) -> Path:
+    """The report's sidecars and env lock copied, byte-identical, under a scratch root."""
+    report = _committed(name)
+    for rel in (
+        report["scoring"]["in_distribution_scores"],
+        report["scoring"]["loo_scores"],
+        report["env_lock"],
+    ):
+        (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / rel).write_bytes((_REPO / rel).read_bytes())
+    return tmp_path
+
+
+@pytest.mark.parametrize("name", COMMITTED_GATE2_REPORTS)
+def test_a_report_is_bound_to_the_exact_bytes_of_its_evidence(name: str, tmp_path: Path) -> None:
+    """The cheap half (hashing) runs first and alone: a swapped sidecar or a forged env-lock
+    hash is refused before any estimator runs. Reviewer B, round 12: `env_lock_hash` was
+    checked by nothing, and was accepted as the production lock's digest and as 64 zeros."""
+    report = _committed(name)
+    root = _staged_repo(tmp_path, name)
+    assert G.sidecar_binding_problems(report, repo_root=root) == []
+
+    loo = root / report["scoring"]["loo_scores"]
+    payload = json.loads(loo.read_text(encoding="utf-8"))
+    arm = report["scoring"]["arm"]
+    payload["arms"][arm]["logits"][0] += 1.0
+    loo.write_text(json.dumps(payload), encoding="utf-8")
+    problems = G.sidecar_binding_problems(report, repo_root=root)
+    assert any("does not hash to provenance.inputs" in p for p in problems), problems
+
+    forged = _committed(name)
+    forged["provenance"]["env_lock_hash"] = "0" * 64
+    problems = G.sidecar_binding_problems(forged, repo_root=_REPO)
+    assert any("env_lock_hash" in p for p in problems), problems
+    # ...and the composed entry point stops at the binding rather than grading other bytes
+    assert G.rederive_against_sidecars(forged) == problems
+
+
+def test_a_missing_sidecar_is_a_problem_not_a_crash(tmp_path: Path) -> None:
+    report = _committed(COMMITTED_GATE2_REPORTS[0])
+    problems = G.rederive_against_sidecars(report, repo_root=tmp_path)
+    assert problems and all("is not a file" in p for p in problems), problems
+    assert G.rederive_against_sidecars({}) == ["the report lacks scoring / provenance blocks"]
+
+
+# --- the in-report clauses round 12 strengthened (cheap, and they hold for ANY report) ---
+def _clause(report: dict, name: str) -> bool:
+    return G.derive_clauses(report)[name]
+
+
+@pytest.mark.parametrize("name", COMMITTED_GATE2_REPORTS)
+def test_a_units_point_is_its_own_intervals_point(name: str) -> None:
+    forged = _committed(name)
+    unit = forged["ood"]["units"]["Acholeplasmatales"]
+    unit["ood_ece"] += 0.105
+    forged["ood"]["macro_average"]["point"] += 0.105 / 30
+    forged["ood"]["by_phylum"] = G._stratify_by_phylum(forged["ood"]["units"])
+    assert _clause(forged, "ood_macro_average_is_the_admissible_units_mean") is False
+    for impossible in (-0.1748, 1.699):
+        forged = _committed(name)
+        unit = forged["ood"]["units"]["Acholeplasmatales"]
+        delta = impossible - unit["ood_ece"]
+        unit["ood_ece"] = unit["ci"]["point"] = impossible
+        forged["ood"]["macro_average"]["point"] += delta / 30
+        assert _clause(forged, "ood_macro_average_is_the_admissible_units_mean") is False
+
+
+def _census_breakers() -> list:
+    """Each member of the census conjunction, broken ALONE on an otherwise honest report."""
+    first = "Acholeplasmatales"
+    return [
+        ("n_units", lambda r: r["ood"].__setitem__("n_units", 29)),
+        ("n_units_sub_min_n", lambda r: r["ood"].__setitem__("n_units_sub_min_n", 1)),
+        ("adjudicable_fraction", lambda r: r["ood"].__setitem__("adjudicable_fraction", 0.9)),
+        ("by_phylum", lambda r: r["ood"]["by_phylum"].popitem()),
+        ("rows_scored", lambda r: r["scope"].__setitem__("n_loo_holdout_rows_scored", 9301)),
+        (
+            "d13_per_unit",
+            lambda r: r["ood"]["d13_adjudication"]["condition_ii_min_n"]["per_unit"].__setitem__(
+                first, "sub_min_n_inconclusive"
+            ),
+        ),
+        (
+            # the class AND the D13 per-unit table moved together, so only the
+            # class-is-the-pinned-rule check can object (alone it was masked by the table)
+            "admissibility_class",
+            lambda r: (
+                r["ood"]["units"][first].__setitem__(
+                    "admissibility_class", "sub_min_n_inconclusive"
+                ),
+                r["ood"]["d13_adjudication"]["condition_ii_min_n"]["per_unit"].__setitem__(
+                    first, "sub_min_n_inconclusive"
+                ),
+            ),
+        ),
+        ("unit_name", lambda r: r["ood"]["units"][first].__setitem__("unit", "Other")),
+        ("n_records", lambda r: r["ood"]["units"][first].__setitem__("n_records", 1)),
+        (
+            # fewer rows than positives, with the scope total moved to match — so only the
+            # `n_positives <= n_records` bound can object
+            "n_records_below_positives",
+            lambda r: (
+                r["scope"].__setitem__(
+                    "n_loo_holdout_rows_scored",
+                    r["scope"]["n_loo_holdout_rows_scored"]
+                    - r["ood"]["units"][first]["n_records"]
+                    + r["ood"]["units"][first]["n_positives"]
+                    - 1,
+                ),
+                r["ood"]["units"][first].__setitem__(
+                    "n_records", r["ood"]["units"][first]["n_positives"] - 1
+                ),
+                # `by_phylum` sums n_records too and masked this bound until re-grouped
+                r["ood"].__setitem__("by_phylum", G._stratify_by_phylum(r["ood"]["units"])),
+            ),
+        ),
+    ]
+
+
+@pytest.mark.parametrize("name", COMMITTED_GATE2_REPORTS)
+@pytest.mark.parametrize(
+    "member, breaker", _census_breakers(), ids=[b[0] for b in _census_breakers()]
+)
+def test_every_summary_of_the_census_must_agree_with_the_units(
+    name: str, member: str, breaker
+) -> None:
+    report = _committed(name)
+    assert _clause(report, "ood_admissibility_is_the_pinned_min_n_rule") is True
+    breaker(report)
+    assert _clause(report, "ood_admissibility_is_the_pinned_min_n_rule") is False, member
+
+
+@pytest.mark.parametrize("name", COMMITTED_GATE2_REPORTS)
+def test_reliability_weights_and_counts_are_primary_evidence_too(name: str) -> None:
+    """Reviewer A, round 12, finding 3: a weight shuffle forged the gated ECE (0.006811 ->
+    0.004149) with every row's `n` intact, and an `acc` edit left Σ acc·n short of
+    `n_positive`. Both forges are CONSISTENT everywhere else — ece, ece_plugin and the
+    interval re-summed, the edited row's gaps recomputed — so only the check under test can
+    object (a first version left `ece` stale and the sum check caught it instead, which is
+    how a deleted guard stays green)."""
+    clause = "in_distribution_ece_is_its_own_reliability_tables_mean"
+
+    def _resum(gate: dict) -> None:
+        bins = gate["reliability"]
+        gate["ece"] = math.fsum(b["weight"] * b["debiased_gap"] for b in bins)
+        gate["ece_plugin"] = math.fsum(b["weight"] * b["gap"] for b in bins)
+        gate["ece_ci"]["point"] = gate["ece"]
+        gate["ece_ci"]["lower"] = min(gate["ece_ci"]["lower"], gate["ece"])
+
+    forged = _committed(name)
+    bins = forged["gate"]["reliability"]
+    bins[2]["weight"] -= 0.0328
+    bins[0]["weight"] += 0.0328
+    _resum(forged["gate"])
+    assert _clause(forged, clause) is False
+
+    forged = _committed(name)
+    row = forged["gate"]["reliability"][2]
+    row["acc"] = (round(row["acc"] * row["n"]) - 7) / row["n"]
+    row["gap"] = abs(row["acc"] - row["conf"])
+    sigma = math.sqrt(max(row["conf"] * (1.0 - row["conf"]), 0.0) / row["n"])
+    row["debiased_gap"] = max(0.0, row["gap"] - sigma * math.sqrt(2.0 / math.pi))
+    _resum(forged["gate"])
+    assert _clause(forged, clause) is False
+
+
+@pytest.mark.parametrize("name", COMMITTED_GATE2_REPORTS)
+def test_a_unit_cannot_claim_a1_or_drops_its_own_census_rules_out(name: str) -> None:
+    """Reviewer A, round 12, finding 4: the A1 exemption and the replicate ledger read counts
+    the interval reports about itself."""
+    clause = "bootstrap_replicates_are_not_a_cost_knob"
+    budget = _committed(name)["ood"]["n_boot"]
+    forged = _committed(name)
+    unit = forged["ood"]["units"]["Acholeplasmatales"]
+    assert unit["n_blocks"] == 47
+    unit["ci"] = {
+        "ci_level": 0.95,
+        "lower": float("nan"),
+        "upper": float("nan"),
+        "point": unit["ood_ece"],
+        "n_boot": 0,
+        "n_blocks": 1,
+    }
+    unit["n_boot_dropped"] = budget
+    assert _clause(forged, clause) is False
+    forged = _committed(name)
+    unit = forged["ood"]["units"]["Acholeplasmatales"]
+    unit["ci"].update(n_boot=1, lower=unit["ci"]["point"], upper=unit["ci"]["point"])
+    unit["n_boot_dropped"] = budget - 1
+    assert _clause(forged, clause) is False
+    # ...while the units whose drops the census DOES explain (B = 3) stay accepted
+    report = _committed(name)
+    explained = {k: u for k, u in report["ood"]["units"].items() if u["n_boot_dropped"]}
+    assert set(explained) == {"Desulfuromonadales", "Pseudonocardiales"}
+    assert _clause(report, clause) is True
+
+
+def test_drop_plausibility_is_the_singleton_census() -> None:
+    assert G._drops_are_plausible(7, 200, 3, 1) is True  # Pseudonocardiales: 7.4 expected
+    assert G._drops_are_plausible(199, 200, 47, 40) is False  # ~1e-76 expected
+    assert G._drops_are_plausible(1, 200, 3, 0) is False  # no singleton, no possible drop
+    assert G._drops_are_plausible(1, 200, 1, 1) is False  # < 2 blocks is A1, not a drop
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        pytest.param(lambda r: r["gate"].__setitem__("ece_ci", "x"), id="ece_ci-a-string"),
+        pytest.param(lambda r: r["gate"].__setitem__("ece_ci", [1]), id="ece_ci-a-list"),
+        pytest.param(
+            lambda r: r["ood"]["macro_average"].__setitem__("lower", 10**400), id="huge-int-bound"
+        ),
+        pytest.param(
+            lambda r: r["gate"]["reliability"][0].__setitem__("acc", 10**400), id="huge-int-acc"
+        ),
+        pytest.param(lambda r: r["scoring"].__setitem__("load", [1]), id="load-a-list"),
+        pytest.param(
+            lambda r: r["ood"]["units"]["Acholeplasmatales"].__setitem__("ood_ece", 10**400),
+            id="huge-int-unit-point",
+        ),
+        pytest.param(lambda r: r["ood"]["units"].__setitem__("X", [1]), id="a-unit-a-list"),
+        pytest.param(
+            lambda r: r["gate"]["reliability"][0].__setitem__("n", math.inf), id="n-infinity"
+        ),
+    ],
+)
+def test_round12_inputs_are_verdicts_not_crash_sites(mutate) -> None:
+    """Rounds 10-11 added sites that RAISED where the contract is a problem list."""
+    report = _committed(COMMITTED_GATE2_REPORTS[1])
+    mutate(report)
+    problems = G.validate_report(report)
+    assert problems, "a malformed report must not validate clean"
+    assert G.backbone_key_from_load([1]) is None  # type: ignore[arg-type]
+
+
+# --- round 12, reviewer C: guards a NEIGHBOURING check was masking, each broken ALONE ---
+@pytest.mark.parametrize("name", COMMITTED_GATE2_REPORTS)
+def test_the_ood_budget_floor_bites_on_a_consistently_cost_knobbed_report(name: str) -> None:
+    """Every unit's ledger closes at B = 1 and the header says 1: only the floor can object."""
+    tampered = _committed(name)
+    tampered["ood"]["n_boot"] = 1
+    for unit in tampered["ood"]["units"].values():
+        unit["n_boot_requested"] = 1
+        unit["ci"]["n_boot"] = 1
+        unit["n_boot_dropped"] = 0
+    assert G.derive_clauses(tampered)["bootstrap_replicates_are_not_a_cost_knob"] is False
+
+
+@pytest.mark.parametrize("name", COMMITTED_GATE2_REPORTS)
+def test_a_units_request_must_be_the_budget_even_when_its_ledger_closes(name: str) -> None:
+    tampered = _committed(name)
+    unit = tampered["ood"]["units"]["Acholeplasmatales"]
+    unit["n_boot_requested"], unit["ci"]["n_boot"], unit["n_boot_dropped"] = 1, 1, 0
+    assert G.derive_clauses(tampered)["bootstrap_replicates_are_not_a_cost_knob"] is False
+
+
+@pytest.mark.parametrize("name", COMMITTED_GATE2_REPORTS)
+def test_a_negative_drop_cannot_balance_the_ledger(name: str) -> None:
+    """On a unit whose census makes drops PLAUSIBLE (B = 3), so only `>= 0` can object."""
+    tampered = _committed(name)
+    unit = tampered["ood"]["units"]["Pseudonocardiales"]
+    unit["ci"]["n_boot"], unit["n_boot_dropped"] = unit["n_boot_requested"] + 1, -1
+    assert G.derive_clauses(tampered)["bootstrap_replicates_are_not_a_cost_knob"] is False
+
+
+def _a1_macro(**over) -> dict:
+    """The macro interval, which no per-unit ledger guards — so the A1 recogniser alone
+    decides whether it is exempt."""
+    base = {"ci_level": 0.95, "n_blocks": 1, "n_boot": 0, "lower": math.nan, "upper": math.nan}
+    return {**base, **over}
+
+
+@pytest.mark.parametrize("name", COMMITTED_GATE2_REPORTS)
+@pytest.mark.parametrize(
+    "member, over",
+    [
+        ("n_boot must be 0", {"n_boot": 200}),
+        ("n_blocks must be < 2", {"n_blocks": 2}),
+        ("the point must be finite", {"point": math.nan}),
+        ("the bounds must be NaN", {"lower": 0.5, "upper": 0.6}),
+    ],
+)
+def test_each_condition_of_the_a1_signature_is_required(name: str, member: str, over) -> None:
+    tampered = _committed(name)
+    macro = tampered["ood"]["macro_average"]
+    tampered["ood"]["macro_average"] = {**_a1_macro(point=macro["point"]), **over}
+    assert G.derive_clauses(tampered)["bootstrap_replicates_are_not_a_cost_knob"] is False, member
+
+
+@pytest.mark.parametrize("name", COMMITTED_GATE2_REPORTS)
+def test_an_interval_must_contain_its_point_from_BELOW_too(name: str) -> None:
+    """Only `upper` was ever tampered, so `lo <= point` could be deleted green."""
+    tampered = _committed(name)
+    macro = tampered["ood"]["macro_average"]
+    macro["lower"] = macro["point"] + 0.01
+    assert macro["lower"] <= macro["upper"]
+    assert G.derive_clauses(tampered)["bootstrap_replicates_are_not_a_cost_knob"] is False
+
+
+@pytest.mark.parametrize("name", COMMITTED_GATE2_REPORTS)
+def test_the_table_shape_and_the_concentration_block_are_each_bound(name: str) -> None:
+    clause = "in_distribution_ece_is_its_own_reliability_tables_mean"
+    tampered = _committed(name)
+    tampered["gate"]["ece_n_bins"] = len(tampered["gate"]["reliability"]) - 1
+    assert G.derive_clauses(tampered)[clause] is False
+    tampered = _committed(name)
+    tampered["gate"]["bin_concentration"]["n_bins"] = len(tampered["gate"]["reliability"]) - 1
+    assert G.derive_clauses(tampered)[clause] is False
+
+
+@pytest.mark.parametrize("name", COMMITTED_GATE2_REPORTS)
+def test_the_bins_must_cover_the_gated_n(name: str) -> None:
+    """A consistent re-weighting against a forged N: every row's weight is n / N', the gated
+    ECE and its interval re-summed — only the row coverage can object."""
+    clause = "in_distribution_ece_is_its_own_reliability_tables_mean"
+    tampered = _committed(name)
+    gate = tampered["gate"]
+    gate["n"] += 1
+    for b in gate["reliability"]:
+        b["weight"] = b["n"] / gate["n"]
+    gate["ece"] = math.fsum(b["weight"] * b["debiased_gap"] for b in gate["reliability"])
+    gate["ece_plugin"] = math.fsum(b["weight"] * b["gap"] for b in gate["reliability"])
+    gate["ece_ci"]["point"] = gate["ece"]
+    assert G.derive_clauses(tampered)[clause] is False
+
+
+@pytest.mark.parametrize("name", COMMITTED_GATE2_REPORTS)
+def test_the_macro_counts_exactly_the_admissible_units(name: str) -> None:
+    tampered = _committed(name)
+    tampered["ood"]["macro_average"]["n_blocks"] -= 1
+    assert G.derive_clauses(tampered)["ood_macro_average_is_the_admissible_units_mean"] is False
+
+
+# --- round 12, reviewers B + C: the eval side, through the PRODUCER and the CLAUSE ---
+def test_mixed_pre_and_post_a15_sidecars_resolve_through_the_base_model() -> None:
+    """Reviewer B, round 12: re-running `score-loo` writes `backbone`; the untouched pre-A15
+    in-distribution sidecar does not. Both resolve to the same model through their base model,
+    yet the producer refused the pair as "spoke vs did not", so the shipped `gate2_ece` DAG
+    could not regenerate its own report. Built from the REAL committed loads."""
+    E = _eval_mod()
+    pre = json.loads((_REPO / "reports/p3/stage2_scores.json").read_text(encoding="utf-8"))
+    post = json.loads((_REPO / "reports/p3/stage2_scores_loo.json").read_text(encoding="utf-8"))
+    arm = "aux1.0_lr1e-4"
+    in_dist = dict(pre["arms"][arm]["load"])
+    loo = dict(post["arms"][arm]["load"], backbone="rinalmo-giga")
+    assert "backbone" not in in_dist, "the committed in-distribution sidecar is pre-A15"
+    records = {f"{arm}@in_distribution": in_dist, f"{arm}@leave_clade_out": loo}
+    production = BR.resolve_backbone(BR.PRODUCTION_BACKBONE).env_lock
+    assert E.env_lock_for_scored_arms(records) == production
+    assert E.env_lock_for_scored_arms(records, declared_backbone="rinalmo-giga") == production
+    with pytest.raises(RuntimeError, match="recorded evidence wins"):
+        E.env_lock_for_scored_arms(records, declared_backbone="rnafm")
+
+
+def test_arms_whose_base_models_name_two_backbones_are_refused() -> None:
+    E = _eval_mod()
+    records = {
+        "a": {"base_model_name_or_path": RINALMO_REPO},
+        "b": {"base_model_name_or_path": RNAFM_REPO},
+    }
+    with pytest.raises(RuntimeError, match="more than one"):
+        E.env_lock_for_scored_arms(records)
+    with pytest.raises(RuntimeError, match="more than one"):
+        E.env_lock_for_scored_arms(records, declared_backbone="rnafm")
+
+
+def test_a_non_mapping_load_record_is_silent_not_a_crash() -> None:
+    E = _eval_mod()
+    assert E._backbone_key_from_load([1]) is None  # type: ignore[arg-type]
+    assert E._load_contradicts_itself("x") is False
+    with pytest.raises(RuntimeError, match="--scored-backbone"):
+        E.env_lock_for_scored_arms({"a": [1]})  # type: ignore[dict-item]
+
+
+def test_the_eval_clause_itself_is_satisfied_by_base_model_only_loads() -> None:
+    """Reviewer C, round 12: the round-11 fix to the eval CLAUSE was tested only through its
+    helper, so reverting `arm_backbones` to read `backbone` alone stayed GREEN everywhere."""
+    E = _eval_mod()
+    clause = "provenance_env_lock_is_the_arms_backbones"
+    report = json.loads((_REPO / "reports/p3/stage2_rnafm_eval.json").read_text(encoding="utf-8"))
+    assert E.derive_clauses(report)[clause] is True
+    for block in report["arms"].values():
+        assert block["load"].pop("backbone") == "rnafm"
+        assert block["load"]["base_model_name_or_path"] == RNAFM_REPO
+    assert E.derive_clauses(report)[clause] is True, "a base-model-only load must resolve"
+    # ...and the base model is evidence, not decoration: point it at the other backbone
+    for block in report["arms"].values():
+        block["load"]["base_model_name_or_path"] = RINALMO_REPO
+    assert E.derive_clauses(report)[clause] is False
+
+
+def _small_sidecars(tmp_path: Path, name: str, *, separate_calib: bool, solo_unit: bool) -> dict:
+    """A report pointing at SMALL copies of its real sidecars under ``tmp_path``: one
+    held-out order (Micrococcales, 291 rows) so the estimator runs in well under a second,
+    optionally made degenerate in exactly one way."""
+    report = _committed(name)
+    arm = report["scoring"]["arm"]
+    in_dist = json.loads((_REPO / report["scoring"]["in_distribution_scores"]).read_text())
+    if separate_calib:  # every calib row already its own arg-max: no temperature exists
+        logits = in_dist["arms"][arm]["logits"]
+        for i, label in enumerate(in_dist["labels"]):
+            logits[i] = 10.0 if label else -10.0
+    loo = json.loads((_REPO / report["scoring"]["loo_scores"]).read_text())
+    keep = [i for i, unit in enumerate(loo["units"]) if unit == "Micrococcales"]
+    if solo_unit:
+        keep.append(next(i for i, unit in enumerate(loo["units"]) if unit != "Micrococcales"))
+    for key in ("row_ids", "labels", "units", "blocks"):
+        loo[key] = [loo[key][i] for i in keep]
+    loo["arms"] = {
+        arm: dict(loo["arms"][arm], logits=[loo["arms"][arm]["logits"][i] for i in keep])
+    }
+    if solo_unit:
+        loo["units"][-1] = "Solo"
+        report["ood"]["units"]["Solo"] = {"bandwidth": 0.2}
+    for rel, payload in (
+        (report["scoring"]["in_distribution_scores"], in_dist),
+        (report["scoring"]["loo_scores"], loo),
+    ):
+        (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / rel).write_text(json.dumps(payload), encoding="utf-8")
+    return report
+
+
+def test_an_unfittable_calib_carve_is_a_problem_not_a_raise(tmp_path: Path) -> None:
+    """CodeRabbit, round 12: `temperature_scale` RAISES on a perfectly separated carve (the
+    P3-08 no-aux case), and a sidecar can be hash-bound and still be one."""
+    report = _small_sidecars(
+        tmp_path, COMMITTED_GATE2_REPORTS[1], separate_calib=True, solo_unit=False
+    )
+    derived = G.rederive_from_sidecars(report, repo_root=tmp_path)
+    assert any("no temperature re-fits" in p for p in derived["problems"]), derived["problems"]
+    assert G.rederivation_problems(report, derived)
+
+
+def test_a_unit_with_no_leave_one_out_estimate_is_named_not_raised(tmp_path: Path) -> None:
+    report = _small_sidecars(
+        tmp_path, COMMITTED_GATE2_REPORTS[1], separate_calib=False, solo_unit=True
+    )
+    derived = G.rederive_from_sidecars(report, repo_root=tmp_path)
+    assert [p for p in derived["problems"] if "Solo" in p], derived["problems"]
+    # ...and the unit that CAN be estimated still is, from the same small sidecar
+    assert derived["units"]["Micrococcales"]["ood_ece"] == (
+        report["ood"]["units"]["Micrococcales"]["ood_ece"]
+    )

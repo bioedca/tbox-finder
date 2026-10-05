@@ -129,6 +129,18 @@ from typing import Any
 from tbox_finder import provenance
 from tbox_finder.eval.rinalmo_parity import D_MODEL, N_LAYERS, REPO_ID, REVISION
 
+# The Stage-2 backbone allow-list (ADR-0002 A15). Torch-free, so the bare-CI tier still
+# imports this module cleanly. `REPO_ID`/`REVISION` above stay the PRODUCTION pin and remain
+# what `validate_report` asserts — a P1-15 report is a record about RiNALMo, and widening it
+# to "whatever the registry allows" would let an RNA-FM run certify the P1-15 artifact.
+from tbox_finder.models.rna_backbone_registry import (
+    PRODUCTION_BACKBONE,
+    resolve_backbone,
+)
+from tbox_finder.models.rna_backbone_registry import (
+    require_pinned_revision as _require_pinned_backbone_revision,
+)
+
 SCHEMA_VERSION = "1"
 STEP = "P1-15"
 
@@ -301,6 +313,7 @@ def select_attention_backend(
     sm86_confirmed: bool,
     model_supports_flash_attn: bool,
     dtype: str,
+    backbone: str = PRODUCTION_BACKBONE,
 ) -> tuple[str, str]:
     """Choose the attention implementation, PRD §10.3: FA-2 iff confirmed, else SDPA.
 
@@ -313,6 +326,14 @@ def select_attention_backend(
     SDPA — not eager — is the fallback: ADR-0002 D3 names SDPA the RiNALMo fallback path,
     and it is an *exact-softmax* kernel swap (the same swap P1-13 proved parity-faithful
     under, A9), so falling back costs speed and not numerics.
+
+    ``backbone`` names the arm in the recorded reason. It changes no decision — the decision
+    already comes from `model_supports_flash_attn(key)`, which the caller measures per class —
+    but the reason is written verbatim into a job log and a report, and the pre-ack run of the
+    P3-17 sbatch's own bytes printed *"the pinned RiNALMo classes advertise flash-attn"* for an
+    **RNA-FM** job. A correct decision explained by a sentence about a different model is the
+    "names what it did not use" defect P1-15 wrote its read-back guard against; it is only
+    prose, and prose in a provenance record is still a claim.
     """
     if not isinstance(dtype, str):
         raise TypeError(f"dtype must be a str, got {type(dtype).__name__}")
@@ -330,29 +351,41 @@ def select_attention_backend(
     # recorded reason names the thing an operator would have to fix.
     if not sm86_confirmed:
         return ATTN_SDPA, (
-            "sm_86 not confirmed in the measured kernel-smoke artifact → SDPA fallback "
-            "(PRD §10.3)"
+            f"{backbone}: sm_86 not confirmed in the measured kernel-smoke artifact → SDPA "
+            "fallback (PRD §10.3)"
         )
     if not flash_attn_importable:
         return ATTN_SDPA, (
-            "flash-attn does not import on the sm_86 target → SDPA fallback; pinning "
-            "flash_attention_2 without the wheel raises ImportError (ADR-0002 A2 K1)"
+            f"{backbone}: flash-attn does not import on the sm_86 target → SDPA fallback; "
+            "pinning flash_attention_2 without the wheel raises ImportError (ADR-0002 A2 K1)"
         )
     if not model_supports_flash_attn:
         return ATTN_SDPA, (
-            "the pinned RiNALMo classes do not advertise flash-attn support → SDPA "
+            f"the pinned {backbone} classes do not advertise flash-attn support → SDPA "
             "fallback (ADR-0002 A2 K1)"
         )
     if dtype not in FA2_DTYPES:
         return ATTN_SDPA, (
-            f"dtype {dtype!r} is not half-precision; FA-2 kernels accept only "
+            f"{backbone}: dtype {dtype!r} is not half-precision; FA-2 kernels accept only "
             f"{list(FA2_DTYPES)} → SDPA fallback"
         )
+    # The forward-verification clause is per-arm because it IS per-arm: ADR-0002 A10 verified
+    # the FA-2 forward on sm_86 for the production backbone and for nothing else. Saying so for
+    # a comparator would inherit a verification it does not have; naming the production arm in
+    # a comparator's reason would put the wrong model in the comparator's provenance.
+    verified = (
+        "The FA-2 forward through it is VERIFIED on sm_86 (ADR-0002 A10, P1-16 GPU smoke)."
+        if backbone == PRODUCTION_BACKBONE
+        else (
+            "The FA-2 forward through it is NOT separately forward-verified — A10's sm_86 "
+            "verification covers the production backbone only; this arm is selected on the "
+            "same measured wheel/sm_86 evidence and its own class advertisement."
+        )
+    )
     return ATTN_FLASH2, (
         "FA-2 selected: the flash-attn wheel imports on a MEASURED sm_86 A4000 "
-        "(ADR-0002 A5), the pinned RiNALMo classes advertise flash-attn, and the pinned "
-        f"dtype {dtype} is FA-2-eligible. The FA-2 forward through RiNALMo is NOT verified "
-        "here (LOCAL step, sm_89 laptop) — deferred to the P1-16 GPU smoke."
+        f"(ADR-0002 A5), the pinned {backbone} classes advertise flash-attn, and the pinned "
+        f"dtype {dtype} is FA-2-eligible. {verified}"
     )
 
 
@@ -541,28 +574,73 @@ def _require_pinned_revision(revision: str) -> None:
 
     P1-13 proved *this* revision faithful (A9); a different one inherits no such proof, so
     re-pinning is a code change + re-sign-off, never a runtime argument.
+
+    Kept as the **production**-key spelling of the registry rule, and delegating to it rather
+    than re-implementing the comparison, so the two cannot disagree about what "pinned" means
+    ([[promote-dont-duplicate-is-a-correctness-rule]]).
+
+    The registry decides *whether* to raise; this restates *why* for the production arm. The
+    generic message cannot say "parity-confirmed" — that is an ADR-0002 A9 fact about this one
+    revision, not a property of being pinned — and losing it would strip the guard of the
+    reason it exists at the only call sites that carry it.
     """
-    if revision != REVISION:
+    try:
+        _require_pinned_backbone_revision(PRODUCTION_BACKBONE, revision)
+    except ValueError as exc:
         raise ValueError(
             f"revision {revision!r} != the pinned parity-confirmed {REVISION!r} "
             "(ADR-0002 D5/A9). Re-pinning needs a code change + ADR sign-off."
+        ) from exc
+
+
+def _backbone_class(backbone: str):
+    """Resolve an allow-list key → the live ``multimolecule`` model class (lazy import).
+
+    The registry carries the class **name**, not the class, so it stays torch-free and the
+    compose-time refusal works on a login node with no ``multimolecule``. This is the one place
+    that turns the string into a class, and it raises rather than falling back if the installed
+    ``multimolecule`` does not export it — which is precisely the ADR-0002 A15 situation for
+    ``RnaFmModel`` under 0.1.0, and it must surface as a named refusal naming the right env
+    rather than a bare ``AttributeError`` deep inside a loader.
+    """
+    import multimolecule  # lazy
+
+    spec = resolve_backbone(backbone)
+    cls = getattr(multimolecule, spec.model_class, None)
+    if cls is None:
+        import importlib.metadata as md
+
+        try:
+            installed = md.version("multimolecule")
+        except Exception:  # noqa: BLE001
+            installed = "<unknown>"
+        raise ImportError(
+            f"the installed multimolecule {installed} does not export {spec.model_class!r}, "
+            f"which backbone {spec.key!r} needs. That arm runs under {spec.env_lock} "
+            "(ADR-0002 A15) — activate the matching env rather than loosening the pin."
         )
+    return cls
 
 
-def model_supports_flash_attn() -> bool:
-    """Introspect the **pinned** RiNALMo classes for flash-attn support (measured).
+def model_supports_flash_attn(backbone: str = PRODUCTION_BACKBONE) -> bool:
+    """Introspect the **pinned** backbone class for flash-attn support (measured).
 
     ADR-0002 A2 K1 established this on ``multimolecule`` 0.0.9; A8 moved the env to 0.1.0 +
     transformers 5.13.0, so it is re-checked against what is actually installed rather than
     inherited from the amendment. transformers 5 renamed the attribute
     ``_supports_flash_attn_2`` → ``_supports_flash_attn``; both are probed so the check does
     not silently read False on a rename.
+
+    Asked **per backbone** since A15: the answer is a property of the class, so reading
+    RiNALMo's advertisement and applying it to an RNA-FM run would be the "names a backend the
+    model never used" defect P1-15 wrote its own read-back guard against. (Both entries
+    advertise ``True`` as measured on 2026-08-21 — which is why it is checked, not why it
+    could be assumed.)
     """
-    from multimolecule import RiNALMoModel  # lazy
+    cls = _backbone_class(backbone)
 
     return bool(
-        getattr(RiNALMoModel, "_supports_flash_attn", False)
-        or getattr(RiNALMoModel, "_supports_flash_attn_2", False)
+        getattr(cls, "_supports_flash_attn", False) or getattr(cls, "_supports_flash_attn_2", False)
     )
 
 
@@ -583,6 +661,65 @@ def flash_attn_importable() -> bool:
         return False
 
 
+def load_rna_backbone(
+    *,
+    backbone: str = PRODUCTION_BACKBONE,
+    revision: str | None = None,
+    dtype: str = TRAIN_DTYPE,
+    attn_implementation: str | None = None,
+    device: str | None = None,
+    check_param_count: bool = True,
+):
+    """Load a **pinned** Stage-2 RNA encoder by allow-list key, ready for LoRA wrapping.
+
+    The generalisation of :func:`load_rinalmo_backbone` added by ADR-0002 A15 so the D6
+    comparator is reachable. ``backbone`` is an
+    :mod:`~tbox_finder.models.rna_backbone_registry` key, never a repo id — an unknown key
+    raises rather than degrading to the production default, which is how a "comparator" ends
+    up fine-tuning the shipped model and reporting a green gate.
+
+    ``revision=None`` means the key's pinned revision; any other value raises (D2/D5/A9/A15).
+
+    ``add_pooling_layer=False``: neither checkpoint carries a pooler, so the default would
+    freshly-initialise one (a MISSING-weights warning) and hand LoRA a randomly-initialised
+    module to adapt. Stage-2 consumes per-position encoder states, so the pooler is unwanted
+    weight — dropping it makes the load report clean, which is what lets a real MISSING warning
+    mean something later.
+
+    ``check_param_count`` compares the **loaded** parameter count against the registry's
+    recorded expectation and raises on a mismatch. It is a measurement checked against a pin,
+    not a pin reported in place of a measurement (the A14 contract) — it is the clause that
+    would catch a hub re-upload silently changing the weights under a revision, or a config
+    override quietly building a differently-shaped model. Tests that wrap a *tiny*
+    same-architecture fixture pass ``False``, because for them the mismatch is the point.
+    """
+    import torch  # lazy
+
+    spec = _require_pinned_backbone_revision(backbone, revision)
+    cls = _backbone_class(backbone)
+    torch_dtype = getattr(torch, dtype)
+    kwargs: dict[str, Any] = {
+        "revision": spec.revision,
+        "dtype": torch_dtype,
+        "add_pooling_layer": False,
+    }
+    if attn_implementation is not None:
+        kwargs["attn_implementation"] = attn_implementation
+    model = cls.from_pretrained(spec.repo_id, **kwargs)
+    if check_param_count:
+        measured = sum(p.numel() for p in model.parameters())
+        if measured != spec.expected_param_count:
+            raise ValueError(
+                f"backbone {spec.key!r} ({spec.repo_id} @ {spec.revision}) loaded "
+                f"{measured:,} parameters but the ADR-0002 A15 registry records "
+                f"{spec.expected_param_count:,}. Refusing rather than fine-tuning a "
+                "checkpoint that is not the pinned one."
+            )
+    if device is not None:
+        model = model.to(device)
+    return model
+
+
 def load_rinalmo_backbone(
     *,
     revision: str = REVISION,
@@ -591,6 +728,13 @@ def load_rinalmo_backbone(
     device: str | None = None,
 ):
     """Load the parity-confirmed RiNALMo-giga encoder, ready for LoRA wrapping.
+
+    Since ADR-0002 A15 this **delegates** to :func:`load_rna_backbone` at the production key
+    rather than carrying its own copy of the load — the shipped path and the comparator path
+    must not be able to drift apart on dtype, pooler handling or revision enforcement
+    ([[promote-dont-duplicate-is-a-correctness-rule]]). Kept as the named entry point because
+    it is what P1-15/P1-16 and the P3-06 sbatch call, and because "load the shipped backbone"
+    deserves a name that cannot be given a key.
 
     ``add_pooling_layer=False``: the checkpoint carries no pooler, so the default would
     freshly-initialise one (a MISSING-weights warning) and hand LoRA a randomly-initialised
@@ -602,35 +746,31 @@ def load_rinalmo_backbone(
     resolves it via :func:`select_attention_backend`) — ADR-0002 A2 K1: pin ``sdpa``/
     ``eager``, or ``flash_attention_2`` only when the wheel is present.
     """
-    import torch  # lazy
-    from multimolecule import RiNALMoModel  # lazy
-
-    _require_pinned_revision(revision)
-    torch_dtype = getattr(torch, dtype)
-    kwargs: dict[str, Any] = {
-        "revision": revision,
-        "dtype": torch_dtype,
-        "add_pooling_layer": False,
-    }
-    if attn_implementation is not None:
-        kwargs["attn_implementation"] = attn_implementation
-    model = RiNALMoModel.from_pretrained(REPO_ID, **kwargs)
-    if device is not None:
-        model = model.to(device)
-    return model
+    return load_rna_backbone(
+        backbone=PRODUCTION_BACKBONE,
+        revision=revision,
+        dtype=dtype,
+        attn_implementation=attn_implementation,
+        device=device,
+    )
 
 
 def build_peft_model(
     base_model=None,
     *,
-    revision: str = REVISION,
+    backbone: str = PRODUCTION_BACKBONE,
+    revision: str | None = None,
     dtype: str = TRAIN_DTYPE,
     attn_implementation: str | None = None,
     gradient_checkpointing: bool = True,
     qlora: bool = False,
     device: str | None = None,
 ):
-    """**The P1-15 entry (imp.md ``Rule/Entry``).** Wrap RiNALMo in the §10.3 LoRA config.
+    """**The P1-15 entry (imp.md ``Rule/Entry``).** Wrap the backbone in the §10.3 LoRA config.
+
+    ``backbone`` is an :mod:`~tbox_finder.models.rna_backbone_registry` key and defaults to the
+    **production** one, so every pre-A15 caller keeps its exact behaviour; P3-17's comparator
+    passes the ``rnafm`` key. ``revision=None`` means the key's pinned revision.
 
     Returns ``(peft_model, info)`` where ``info`` records the *measured* wrap facts
     (trainable/total params, adapter-site count, resolved attention backend) that
@@ -646,17 +786,27 @@ def build_peft_model(
 
     qlora_config(enabled=qlora)  # raises when qlora=True — the flag cannot silently pass
 
+    # Whether the weights under the adapters will be the REGISTRY's or the caller's. Captured
+    # HERE, before the load below rebinds `base_model` — read afterwards it would be `False`
+    # unconditionally, a flag that can never fire ([[guard-runs-after-what-it-guards]]).
+    # `base_model` is how a test wraps a tiny same-architecture fixture, and a `backbone` block
+    # reading like a 650M pinned checkpoint while a 2-layer toy was wrapped is exactly the
+    # "advertises what it did not load" defect P1-15 guards against elsewhere.
+    backbone_loaded_from_registry = base_model is None
+
     if attn_implementation is None:
         evidence = read_sm86_flash_attn_evidence()
         attn_implementation, _reason = select_attention_backend(
             flash_attn_importable=evidence["flash_attn_importable"],
             sm86_confirmed=evidence["is_sm86"],
-            model_supports_flash_attn=model_supports_flash_attn(),
+            model_supports_flash_attn=model_supports_flash_attn(backbone),
             dtype=dtype,
+            backbone=backbone,
         )
 
     if base_model is None:
-        base_model = load_rinalmo_backbone(
+        base_model = load_rna_backbone(
+            backbone=backbone,
             revision=revision,
             dtype=dtype,
             attn_implementation=attn_implementation,
@@ -711,7 +861,17 @@ def build_peft_model(
     # otherwise the report names a backend the model never used.
     applied_attn = getattr(getattr(base_model, "config", None), "_attn_implementation", None)
 
+    # WHICH backbone this wrap adapted, recorded as the resolved registry entry rather than a
+    # bare key. A LoRA checkpoint stores adapters and heads and *not* the backbone, so "which
+    # base did these adapters see" is not recoverable from the weights — if the run does not
+    # write it down, nothing downstream can re-derive it (ADR-0002 A15).
+    from tbox_finder.models.rna_backbone_registry import backbone_summary  # local: cheap, pure
+
     info = {
+        "backbone": {
+            **backbone_summary(resolve_backbone(backbone)),
+            "loaded_from_registry": bool(backbone_loaded_from_registry),
+        },
         "attn_implementation": applied_attn or attn_implementation,
         "attn_implementation_requested": attn_implementation,
         "dtype": dtype,
@@ -793,6 +953,20 @@ def validate_report(report: Mapping[str, Any]) -> list[str]:
         errs.append("backbone.repo_id != pinned REPO_ID")
     if bb.get("revision") != REVISION:
         errs.append("backbone.revision != pinned REVISION (the parity-confirmed checkpoint)")
+
+    # The producer refuses this combination (see `build_report`), but a report is also read
+    # from disk — hand-edited, regenerated, or written by an older producer — and a validator
+    # that trusts its producer is not a validator. Applied to BOTH validators in this module,
+    # because the P1-16 smoke report hardcodes the same backbone block for the same reason
+    # ([[fixed-one-of-two-identical-things]]). Absent `wrap.backbone` is fine: the committed
+    # artifacts predate the block, and "unrecorded" is not "contradicted".
+    wrap_blk = report.get("wrap")
+    wrap_bb = wrap_blk.get("backbone") if isinstance(wrap_blk, Mapping) else None
+    if isinstance(wrap_bb, Mapping) and wrap_bb.get("repo_id") not in (None, REPO_ID):
+        errs.append(
+            "wrap.backbone.repo_id != pinned REPO_ID — the report certifies the production "
+            "checkpoint but the wrap adapted a different backbone (ADR-0002 A15)"
+        )
 
     # --- the PRD §10.3 LoRA contract: the report may not record anything but the pins ---
     lora = report["lora"]
@@ -1046,6 +1220,24 @@ def build_report(
         "attention_backend_recorded": bool(attn_backend) and bool(attn_reason),
     }
     gate["overall_pass"] = all(gate.values())
+
+    # ⚠ A P1-15 record is a statement ABOUT RiNALMo: the `backbone` block below is hardcoded
+    # from the module pins, `parity_confirmed: True` included, and `validate_report` asserts
+    # it. Since A15 the wrap can legitimately have adapted a different backbone — and without
+    # this refusal `build_peft_model(backbone="rnafm")` followed by `build_report` produced a
+    # report claiming the parity-confirmed checkpoint while `wrap.backbone.key` said `rnafm`,
+    # with `validate_report` returning no errors. The contradiction was recorded and never
+    # graded: the "advertises what it did not load" class these guards exist against. Refuse
+    # at the producer rather than describe it.
+    wrap_backbone = wrap_info.get("backbone")
+    wrap_key = wrap_backbone.get("key") if isinstance(wrap_backbone, Mapping) else None
+    if wrap_key is not None and wrap_key != PRODUCTION_BACKBONE:
+        raise ValueError(
+            f"this report's backbone block is the production pin ({REPO_ID} @ {REVISION}, "
+            f"parity_confirmed) but the wrap adapted backbone {wrap_key!r}. A P1-15 record "
+            "is a statement about RiNALMo; a comparator wrap needs its own report shape "
+            "(ADR-0002 A15), not this one."
+        )
 
     report = {
         "schema_version": SCHEMA_VERSION,
@@ -1781,6 +1973,19 @@ def build_smoke_report(
     }
     gate["overall_pass"] = all(gate.values())
 
+    # Same binding as `build_report`: this record hardcodes the production backbone block
+    # (parity_confirmed included), so it may not be written for a wrap that adapted another
+    # one. The P1-16 smoke carries the identical shape and therefore the identical hole
+    # ([[fixed-one-of-two-identical-things]]).
+    wrap_backbone = wrap_info.get("backbone")
+    wrap_key = wrap_backbone.get("key") if isinstance(wrap_backbone, Mapping) else None
+    if wrap_key is not None and wrap_key != PRODUCTION_BACKBONE:
+        raise ValueError(
+            f"this P1-16 smoke record's backbone block is the production pin ({REPO_ID} @ "
+            f"{REVISION}, parity_confirmed) but the wrap adapted backbone {wrap_key!r} "
+            "(ADR-0002 A15)."
+        )
+
     report = {
         "schema_version": SMOKE_SCHEMA_VERSION,
         "step": SMOKE_STEP,
@@ -1870,6 +2075,20 @@ def validate_smoke_report(report: Mapping[str, Any]) -> list[str]:
         errs.append("backbone.repo_id != pinned REPO_ID")
     if bb.get("revision") != REVISION:
         errs.append("backbone.revision != pinned REVISION (the parity-confirmed checkpoint)")
+
+    # The producer refuses this combination (see `build_report`), but a report is also read
+    # from disk — hand-edited, regenerated, or written by an older producer — and a validator
+    # that trusts its producer is not a validator. Applied to BOTH validators in this module,
+    # because the P1-16 smoke report hardcodes the same backbone block for the same reason
+    # ([[fixed-one-of-two-identical-things]]). Absent `wrap.backbone` is fine: the committed
+    # artifacts predate the block, and "unrecorded" is not "contradicted".
+    wrap_blk = report.get("wrap")
+    wrap_bb = wrap_blk.get("backbone") if isinstance(wrap_blk, Mapping) else None
+    if isinstance(wrap_bb, Mapping) and wrap_bb.get("repo_id") not in (None, REPO_ID):
+        errs.append(
+            "wrap.backbone.repo_id != pinned REPO_ID — the report certifies the production "
+            "checkpoint but the wrap adapted a different backbone (ADR-0002 A15)"
+        )
 
     # --- the §10.3 contract the VRAM claim is made under -------------------------------- #
     lora = report["lora"]

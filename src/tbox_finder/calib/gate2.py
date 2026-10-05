@@ -74,9 +74,11 @@ from tbox_finder import coverage as COV
 from tbox_finder import metrics as M
 from tbox_finder import power as PW
 from tbox_finder import provenance as PROV
+from tbox_finder import report_schema as RSCH
 from tbox_finder.calib import ece as ECE
 from tbox_finder.calib import recalibrate as R
 from tbox_finder.eval import resample as RS
+from tbox_finder.models import rna_backbone_registry as BR
 
 __all__ = [
     "ADR",
@@ -98,10 +100,17 @@ __all__ = [
     "OOD_UNIT_KEY",
     "PRD",
     "RESCORE_AGREEMENT_TOL",
+    "CLAUSES_FIRST_REQUIRED_AT",
+    "KNOWN_SCHEMAS",
+    "SIDECAR_IDENTITY_FIELDS",
     "SCHEMA_VERSION",
     "STEP",
+    "backbone_key_from_load",
     "build_parser",
     "build_report",
+    "clauses_not_required_at",
+    "env_lock_for_graded_arm",
+    "sidecar_identity_mismatches",
     "derive_clauses",
     "figure_data",
     "grade_in_distribution",
@@ -117,7 +126,141 @@ __all__ = [
     "write_outputs",
 ]
 
-SCHEMA_VERSION = "1"
+#: Bumped 1 -> 2 at P3-17 review round 5: `env_lock` stopped being the module constant and
+#: became the GRADED ARM's lock, graded by the new `env_lock_is_the_graded_arms` clause. A
+#: clause set is part of a report's shape ([[new-gate-clause-invalidates-old-reports]]).
+#: ⚠ CORRECTED at round 10: that carve-out was the wrong call for these two files. It let
+#: `reports/p3/gate2_rnafm_ece.json` — written by THIS branch, under `envs/ml-rnafm` — keep
+#: naming `envs/ml-rna.conda-lock.yml` while the clause added to catch exactly that was
+#: excused for it. Both reports are now corrected and promoted, not excused; they are graded
+#: against the CURRENT clause set. Older reports are still graded against the schema-1
+#: set by `clauses_not_required_at`.
+#: Bumped 2 -> 3 at P3-17 review round 10: the clause set gains four RE-DERIVATIONS of numbers
+#: it previously only read back out of the report it was validating — the gated in-distribution
+#: ECE against its own reliability table, the leave-clade-out macro ECE (**the statistic
+#: ADR-0005 D17(c) reads at P3-18**) against its own admissible units, each unit's admissibility
+#: against A2's pinned min-N, and every interval against its replicate count and its own point.
+#: ⚠ The two committed reports are **promoted to 3 in the same commit rather than excused**:
+#: schema carve-outs exist for reports written before a clause existed, and inheriting one for
+#: the artifacts a branch adds is how round 10's env-lock defect survived round 5's clause
+#: ([[new-gate-clause-invalidates-old-reports]]). Every new clause is a pure function of fields
+#: both reports already carry, so the promotion is verified, not asserted.
+SCHEMA_VERSION = "3"
+
+#: Every schema this validator knows, oldest first — listed, never string-compared.
+KNOWN_SCHEMAS: tuple[str, ...] = ("1", "2", "3")
+
+#: The clauses a report FIRST carries at each schema.
+CLAUSES_FIRST_REQUIRED_AT: dict[str, frozenset[str]] = {
+    "2": frozenset({"env_lock_is_the_graded_arms"}),
+    "3": frozenset(
+        {
+            "in_distribution_ece_is_its_own_reliability_tables_mean",
+            "ood_macro_average_is_the_admissible_units_mean",
+            "ood_admissibility_is_the_pinned_min_n_rule",
+            "bootstrap_replicates_are_not_a_cost_knob",
+        }
+    ),
+}
+
+
+def clauses_not_required_at(schema: str) -> frozenset[str]:
+    """Clauses introduced AFTER ``schema``, which a report at that schema cannot carry."""
+    return RSCH.clauses_not_required_at(
+        schema, known=KNOWN_SCHEMAS, first_required_at=CLAUSES_FIRST_REQUIRED_AT
+    )
+
+
+RSCH.check_schema_tables(
+    known=KNOWN_SCHEMAS,
+    first_required_at=CLAUSES_FIRST_REQUIRED_AT,
+    current=SCHEMA_VERSION,
+    module=__name__,
+)
+
+
+#: The fields that say WHICH weights a score sidecar describes. `env_lock_for_scored_arms`
+#: compares `backbone` alone, which is the coarsest of them: two sidecars could name the same
+#: backbone while one was scored from a different checkpoint, a different adapter, or a
+#: different base revision, and the grade would silently join an in-distribution ECE from one
+#: set of weights to a leave-clade-out ECE from another. Only fields BOTH sidecars record are
+#: compared — an older sidecar that predates a field is not refused for lacking it.
+SIDECAR_IDENTITY_FIELDS: tuple[str, ...] = (
+    "backbone",
+    "base_model_name_or_path",
+    "revision",
+    "checkpoint_dir",
+    "adapter_sha256",
+    "heads_sha256",
+)
+
+
+def sidecar_identity_mismatches(
+    a: Mapping[str, Any] | None, b: Mapping[str, Any] | None
+) -> list[str]:
+    """Identity fields on which two score sidecars' load records disagree.
+
+    Only fields present in BOTH are compared: absence is an age difference (the pre-A15
+    sidecars record almost none of these), while a *disagreement* is two different sets of
+    weights being graded as one.
+    """
+    left, right = a or {}, b or {}
+    return [
+        field
+        for field in SIDECAR_IDENTITY_FIELDS
+        if field in left and field in right and left[field] != right[field]
+    ]
+
+
+def backbone_key_from_load(load: Mapping[str, Any] | None) -> str | None:
+    """The backbone key a score sidecar's load record *evidences*, by either of two routes.
+
+    ``backbone`` is the explicit route and post-dates A15. ``base_model_name_or_path`` is the
+    route every sidecar has always had, and it is primary evidence of the same fact: it is the
+    repo id the weights were adapted from, which the ADR-0002 allow-list maps to exactly one
+    key. Reading only the explicit field made
+    :func:`env_lock_for_graded_arm` return ``None`` on every **pre-A15** sidecar — so the
+    clause built on it could not be satisfied by the artifacts the shipped ``gate2_ece`` rule
+    actually reads, and re-running that rule replaced a passing GATE-2 report with a failing
+    one for a provenance-plumbing reason (P3-17 review round 10).
+
+    Returns ``None`` only when neither field is present or neither resolves — a clause is a
+    verdict, not a crash site. When BOTH are present they must agree: a record naming one
+    backbone and the base model of another is not evidence, it is a contradiction
+    ([[gate-must-bind-to-upstream-evidence]]).
+    """
+    rec = load if isinstance(load, Mapping) else {}
+    declared = rec.get("backbone")
+    from_repo: str | None = None
+    repo_id = rec.get("base_model_name_or_path")
+    if repo_id:
+        try:
+            # `backbone_for_repo_id` returns the RnaBackbone record, not its key — taking the
+            # object here silently made every comparison below a type mismatch.
+            from_repo = BR.backbone_for_repo_id(str(repo_id)).key
+        except (KeyError, ValueError, AttributeError):
+            from_repo = None
+    if declared and from_repo and str(declared) != from_repo:
+        return None
+    key = declared or from_repo
+    return str(key) if key else None
+
+
+def env_lock_for_graded_arm(load: Mapping[str, Any] | None) -> str | None:
+    """The conda lock the GRADED weights required, from the score sidecar's own load record.
+
+    Torch-free on purpose: this is called from :func:`derive_clauses`, which grades in bare CI.
+    Returns ``None`` when the record evidences no backbone or names one this repo does not pin.
+    """
+    key = backbone_key_from_load(load)
+    if not key:
+        return None
+    try:
+        return BR.resolve_backbone(key).env_lock
+    except (KeyError, ValueError):
+        return None
+
+
 STEP = "P3-10"
 GENERATED_BY = "src/tbox_finder/calib/gate2.py"
 PRD = "PRD §2.3 (GATE-2), §12, §18.1, §9.2"
@@ -917,16 +1060,18 @@ def derive_clauses(report: Mapping[str, Any]) -> dict[str, bool]:
         "ood_min_n_floor_is_the_pinned_constant": (
             ood.get("min_n") == COV.OOD_ECE_MIN_N
             and bool(units)
-            and all(u.get("min_n") == COV.OOD_ECE_MIN_N for u in units.values())
+            and all(_unit_field(u, "min_n") == COV.OOD_ECE_MIN_N for u in units.values())
         ),
         "ood_reported_never_gated": (
             ood.get("gated") is False
             and bool(units)
-            and all(u.get("gated") is False for u in units.values())
+            and all(_unit_field(u, "gated") is False for u in units.values())
         ),
         "ood_resampled_at_block_granularity": (
             bool(units)
-            and all(u.get("block_key") in RS.BLOCK_GRANULARITY_COLUMNS for u in units.values())
+            and all(
+                _unit_field(u, "block_key") in RS.BLOCK_GRANULARITY_COLUMNS for u in units.values()
+            )
             and ood.get("unit_key") in RS.BLOCK_GRANULARITY_COLUMNS
         ),
         # ── nothing unpinned was quietly pinned ──
@@ -944,7 +1089,405 @@ def derive_clauses(report: Mapping[str, Any]) -> dict[str, bool]:
             and scope["rescore_n_overlap"] > 0
             and float(scope["rescore_max_abs_delta"]) <= RESCORE_AGREEMENT_TOL
         ),
+        # ── the report names the environment the GRADED weights required ──
+        "env_lock_is_the_graded_arms": _env_lock_clause(report),
+        # ── the published statistics are RE-DERIVED, not read back out ──
+        "in_distribution_ece_is_its_own_reliability_tables_mean": _ece_matches_reliability(ind),
+        "ood_macro_average_is_the_admissible_units_mean": _macro_matches_units(ood, units),
+        "ood_admissibility_is_the_pinned_min_n_rule": _admissibility_matches_min_n(
+            ood, units, scope
+        ),
+        "bootstrap_replicates_are_not_a_cost_knob": _bootstrap_not_cost_knobbed(ind, ood, units),
     }
+
+
+def _unit_field(unit: Any, key: str) -> Any:
+    """``unit[key]`` for a mapping, else ``None`` — a malformed unit is a verdict, not a raise
+    (reviewer A, round 12: a non-mapping unit raised ``AttributeError`` out of three clauses).
+    """
+    return unit.get(key) if isinstance(unit, Mapping) else None
+
+
+#: Re-derivations compare floats that were summed in a different order from the producer's,
+#: so they are compared to within a few ULP rather than bit-for-bit. Wide enough to survive
+#: reassociation, far tighter than any edit worth catching: the smallest tamper proved at
+#: round 10 moved the OOD macro by 1.9e-2, nine orders of magnitude above this.
+REDERIVATION_TOL = 1e-12
+
+
+def _finite_real(value: Any) -> float | None:
+    """``value`` as a finite float, or ``None`` — never an exception.
+
+    ⚠ Round 12: `math.isfinite(10**400)` and `float(10**400)` RAISE ``OverflowError``, so a
+    JSON integer too large for a double turned several clauses into crash sites; the
+    validator's contract is a verdict, never a raise.
+    """
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    try:
+        out = float(value)
+    except OverflowError:
+        return None
+    return out if math.isfinite(out) else None
+
+
+def _close(a: Any, b: Any, tol: float = REDERIVATION_TOL) -> bool:
+    """``a`` and ``b`` are both real, finite, and equal to within ``tol`` (absolute or relative)."""
+    fa, fb = _finite_real(a), _finite_real(b)
+    if fa is None or fb is None:
+        return False
+    return math.isclose(fa, fb, rel_tol=tol, abs_tol=tol)
+
+
+def _ece_matches_reliability(ind: Mapping[str, Any]) -> bool:
+    """The gated ECE is the weighted mean of the report's OWN bins, and the bins cover its n.
+
+    Until round 10 the only check on ``gate.ece`` was the 0.05 threshold — i.e. the number was
+    compared against the bar and never against any evidence, so any value in ``[0, 0.05]``
+    validated clean while the report's own reliability table said otherwise. Proved by tamper:
+    ``gate.ece -> 0.04`` (5.9x the measured value) gave zero problems and no false clause
+    ([[gate-clauses-need-re-derivation]]).
+
+    ⚠ ROUND 11: the first version of this clause summed the rows' own ``debiased_gap``, which
+    is itself a DERIVED field — so the gated number was re-derived from another number in the
+    same row rather than from evidence, and a **two-number edit** still fabricated a pass:
+    zeroing one bin's ``debiased_gap`` and re-summing ``gate.ece`` took a report from an honest
+    0.0068 to 0.0014 with ``validate_report`` returning zero problems, while ``ece_plugin``
+    stayed 8x larger — physically impossible, since the debiasing term can only ever subtract
+    ``sigma * sqrt(2/pi)``. ``acc``, ``conf`` and ``n`` are the primary evidence and sit in the
+    same row, so the gap is recomputed here in closed form from them
+    ([[gate-clauses-need-re-derivation]]).
+    """
+    bins = ind.get("reliability")
+    if not isinstance(bins, list) or not bins:
+        return False
+    if not all(isinstance(b, Mapping) for b in bins):
+        return False
+    n_rows = ind.get("n")
+    if not isinstance(n_rows, int) or isinstance(n_rows, bool) or n_rows <= 0:
+        return False
+    try:
+        debiased = 0.0
+        plugin = 0.0
+        positives = 0
+        for b in bins:
+            acc, conf, m, w = float(b["acc"]), float(b["conf"]), int(b["n"]), float(b["weight"])
+            if m <= 0 or not all(math.isfinite(v) for v in (acc, conf, w)):
+                return False
+            # ⚠ Round 12: `weight` is DERIVED (n / N) and was only checked to sum to 1, so
+            # moving weight between bins and re-summing `ece` forged a lower gated number
+            # (0.006811 -> 0.004149) with every row's own `n` untouched. And `acc` is a count
+            # over `n`, so `acc * n` must be a whole number of positives and the rows' counts
+            # must add up to the gated rung's own `n_positive`.
+            if not _close(w, m / n_rows):
+                return False
+            k = acc * m
+            if abs(k - round(k)) > 1e-6:
+                return False
+            positives += round(k)
+            gap = abs(acc - conf)
+            # `metrics.reliability_bins`' own definition, recomputed rather than read back.
+            sigma = math.sqrt(max(conf * (1.0 - conf), 0.0) / m)
+            recomputed = max(0.0, gap - sigma * math.sqrt(2.0 / math.pi))
+            # ...and the row's stored value must BE that, or the table is internally forged.
+            if not _close(b.get("debiased_gap"), recomputed):
+                return False
+            if not _close(b.get("gap"), gap):
+                return False
+            debiased += w * recomputed
+            plugin += w * gap
+        n_binned = sum(int(b["n"]) for b in bins)
+    except (KeyError, TypeError, ValueError, OverflowError):
+        return False
+    if positives != ind.get("n_positive"):
+        return False
+    # The table's SHAPE is part of the estimator D11 pins: `ece_n_bins` is asserted as a field
+    # by `ece_estimator_matches_adr_d11`, but nothing tied it to the table actually shipped, so
+    # a 15-bin claim could be published beside a 1-row table.
+    n_bins = ind.get("ece_n_bins")
+    if not isinstance(n_bins, int) or isinstance(n_bins, bool):
+        return False
+    if len(bins) != min(n_rows, n_bins):
+        return False
+    concentration = ind.get("bin_concentration")
+    if isinstance(concentration, Mapping) and concentration.get("n_bins") != len(bins):
+        return False
+    # ⚠ Round 12: `(ind.get("ece_ci") or {}).get(...)` RAISED on a list or a string.
+    ece_ci = ind.get("ece_ci")
+    if not isinstance(ece_ci, Mapping):
+        return False
+    return (
+        _close(ind.get("ece"), debiased)
+        and _close(ind.get("ece_plugin"), plugin)
+        # (Round 12 dropped the separate "weights sum to 1" check: with every row's weight
+        # bound to n / N above, the sum is 1 exactly when the rows cover N — which is this.)
+        and n_binned == n_rows
+        # the reported interval must be an interval ABOUT the reported point
+        and _close(ece_ci.get("point"), ind.get("ece"))
+    )
+
+
+def _admissible_units(units: Mapping[str, Any]) -> list[Mapping[str, Any]]:
+    return [u for u in units.values() if isinstance(u, Mapping) and u.get("admissible") is True]
+
+
+def _macro_matches_units(ood: Mapping[str, Any], units: Mapping[str, Any]) -> bool:
+    """The leave-clade-out macro ECE is the mean of the admissible units in the same report.
+
+    **This is the number ADR-0005 D17(c) reads at P3-18**, and until round 10 nothing graded
+    it. The margin it is read against is 0.02, and the measured gap was 0.0231 — so a drift of
+    0.4 pp reverses a backbone-swap decision. Proved by tamper: ``macro_average.point -> 0.001``
+    and ``-> 0.1920`` (the value that flips the verdict) each validated with zero problems.
+    """
+    macro = ood.get("macro_average")
+    if not isinstance(macro, Mapping) or not units:
+        return False
+    adm = _admissible_units(units)
+    if not adm:
+        return False
+    points: list[float] = []
+    for unit in adm:
+        # ⚠ Round 12: the macro was re-derived from the units' `ood_ece`, and nothing tied
+        # `ood_ece` to anything — so editing one unit's value and the macro consistently
+        # moved the D17(c) statistic 0.188214 -> 0.191714 (under the 0.02 margin) with zero
+        # problems. The producer computes `ood_ece` and `ci.point` as the SAME number by
+        # construction (`calib.ece.ood_ece`), and an L1 calibration error lives in [0, 1].
+        # A consistent forge of BOTH is out of reach of any in-report check; that is what
+        # `rederive_against_sidecars` binds against the committed score sidecars.
+        value = _finite_real(unit.get("ood_ece"))
+        unit_ci = unit.get("ci")
+        if value is None or not 0.0 <= value <= 1.0 or not isinstance(unit_ci, Mapping):
+            return False
+        if not _close(unit_ci.get("point"), value):
+            return False
+        points.append(value)
+    mean = math.fsum(points) / len(points)
+    return _close(macro.get("point"), mean) and macro.get("n_blocks") == len(adm)
+
+
+def _admissibility_matches_min_n(
+    ood: Mapping[str, Any], units: Mapping[str, Any], scope: Mapping[str, Any]
+) -> bool:
+    """Each unit's ``admissible`` flag is the pinned min-N rule applied to its own count.
+
+    ``n_units_admissible`` gates which units enter the macro average, so a hand-set flag (or a
+    hand-set count) silently changes the published statistic without changing any per-unit
+    number. ADR-0005 A2 pins the floor; the flag must be that floor's verdict, not a field.
+
+    ⚠ Round 12: the flag was checked against ``n_positives`` — itself a field — and nothing
+    checked the census around it. Lowering one unit's ``n_positives`` below the floor,
+    clearing its point and decrementing the two counts moved the D17(c) macro 0.188 -> 0.170
+    with zero problems, while ``n_units_sub_min_n``, ``adjudicable_fraction``, the D13
+    per-unit class and ``by_phylum`` all still described the honest report. Every summary
+    the report carries of the same census must now agree with the units, and the units' row
+    counts must add up to the rows the report says it scored. (The per-unit counts themselves
+    are bound to the committed score sidecars by ``rederive_against_sidecars``.)
+    """
+    if not units:
+        return False
+    floor = ood.get("min_n")
+    if floor != COV.OOD_ECE_MIN_N:
+        return False
+    n_records_total = 0
+    for name, unit in units.items():
+        if not isinstance(unit, Mapping):
+            return False
+        n_pos, n_rec = unit.get("n_positives"), unit.get("n_records")
+        if not all(isinstance(v, int) and not isinstance(v, bool) for v in (n_pos, n_rec)):
+            return False
+        if not 0 <= n_pos <= n_rec:
+            return False
+        if unit.get("admissible") is not (n_pos >= COV.OOD_ECE_MIN_N):
+            return False
+        if unit.get("admissibility_class") != COV.classify_order(n_pos):
+            return False
+        if unit.get("unit") != name:
+            return False
+        n_records_total += n_rec
+    n_adm = len(_admissible_units(units))
+    d13 = ood.get("d13_adjudication")
+    cond_ii = d13.get("condition_ii_min_n") if isinstance(d13, Mapping) else None
+    per_unit = cond_ii.get("per_unit") if isinstance(cond_ii, Mapping) else None
+    if per_unit != {name: unit.get("admissibility_class") for name, unit in units.items()}:
+        return False
+    try:
+        by_phylum = _stratify_by_phylum(units)
+    except (KeyError, TypeError, ValueError, OverflowError):
+        return False
+    return (
+        ood.get("n_units") == len(units)
+        and ood.get("n_units_admissible") == n_adm
+        and ood.get("n_units_sub_min_n") == len(units) - n_adm
+        and _close(ood.get("adjudicable_fraction"), n_adm / len(units))
+        and _same_summary(ood.get("by_phylum"), by_phylum)
+        and scope.get("n_loo_holdout_rows_scored") == n_records_total
+    )
+
+
+def _same_summary(recorded: Any, derived: Any) -> bool:
+    """Structural equality, with floats compared to :data:`REDERIVATION_TOL`.
+
+    The committed RNA-FM report's Firmicutes mean differs from a recomputation by one ULP
+    (…732 vs …734): same values, different summation order. Exact ``==`` on a float re-derived
+    in another order is the clause that fires on an honest report.
+    """
+    if isinstance(derived, Mapping):
+        return (
+            isinstance(recorded, Mapping)
+            and set(recorded) == set(derived)
+            and all(_same_summary(recorded[k], derived[k]) for k in derived)
+        )
+    if isinstance(derived, list):
+        return (
+            isinstance(recorded, list)
+            and len(recorded) == len(derived)
+            and all(_same_summary(a, b) for a, b in zip(recorded, derived, strict=True))
+        )
+    if isinstance(derived, float):
+        return _close(recorded, derived)
+    return type(recorded) is type(derived) and recorded == derived
+
+
+def _bootstrap_not_cost_knobbed(
+    ind: Mapping[str, Any], ood: Mapping[str, Any], units: Mapping[str, Any]
+) -> bool:
+    """No interval was produced from fewer replicates than its pinned default.
+
+    ``--n-boot`` / ``--ood-n-boot`` are cost knobs, and a cost knob must not be able to certify
+    ([[cost-knobs-can-certify]]): at ``B = 1`` every interval collapses onto a single replicate
+    and can exclude its own point estimate while every other clause stays true. Each interval
+    is also required to contain its own point, which is what the collapse actually breaks.
+
+    ⚠ ROUND 11 fixed two holes in the round-10 version. (1) It iterated the per-unit intervals
+    and the in-distribution one but **skipped ``ood.macro_average``** — the interval on the
+    very statistic D17(c) reads — so setting its ``upper`` below its own point validated clean.
+    (2) It treated the ADR-0005 **A1** "fewer than 2 blocks -> not block-resamplable" state
+    (``lower = upper = NaN, n_boot = 0``) as a failure. That is a *sanctioned honest* outcome,
+    not a cost knob: an admissible unit whose rows all fall in one homology cluster produces
+    it. Reporting it as cost-knobbed would have made ``gate2_ece`` overwrite a passing report
+    with a failing one and exit 0 — the same shape as the ``env_lock`` regression round 10
+    fixed. It is now recognised and skipped, and the skip is *earned* by the recorded
+    ``n_blocks``/``n_boot`` rather than by the NaN alone.
+    """
+    ci = ind.get("ece_ci")
+    if not isinstance(ci, Mapping):
+        return False
+    macro = ood.get("macro_average")
+    if not isinstance(macro, Mapping):
+        return False
+    intervals: list[Mapping[str, Any]] = [ci, macro]
+    if not units:
+        return False
+    for unit in units.values():
+        if not isinstance(unit, Mapping):
+            return False
+        unit_ci = unit.get("ci")
+        if unit_ci is None and unit.get("admissible") is False:
+            continue  # an inadmissible unit legitimately has no interval
+        if not isinstance(unit_ci, Mapping):
+            return False
+        # ⚠ Round 11 (CodeRabbit): the top-level `ood.n_boot` says what was ASKED for; each
+        # unit records what it asked for and what survived. Checking only the top-level count
+        # let one unit's surviving replicates be set to 1 while the header still read 200 —
+        # an interval certified on evidence the report itself says it does not have. The
+        # accounting must close: requested == the pinned budget, and survived + dropped ==
+        # requested. (`block_bootstrap` drops replicates whose statistic was non-finite, so
+        # `n_boot_dropped` is a real quantity, not slack.)
+        if not _unit_replicates_account(unit, unit_ci, ood.get("n_boot")):
+            return False
+        intervals.append(unit_ci)
+    if not isinstance(ci.get("n_boot"), int) or ci["n_boot"] < DEFAULT_N_BOOT:
+        return False
+    if not isinstance(ood.get("n_boot"), int) or ood["n_boot"] < DEFAULT_OOD_N_BOOT:
+        return False
+    for interval in intervals:
+        if _is_not_block_resamplable(interval):
+            continue
+        lo, point, hi = (_finite_real(interval.get(k)) for k in ("lower", "point", "upper"))
+        if lo is None or point is None or hi is None:
+            return False
+        if not lo <= point <= hi:
+            return False
+    return True
+
+
+def _unit_replicates_account(
+    unit: Mapping[str, Any], unit_ci: Mapping[str, Any], budget: Any
+) -> bool:
+    """A unit's replicate ledger closes against the pinned budget.
+
+    ``n_boot_requested`` must BE the budget (a per-unit knob is still a knob), and the
+    surviving count plus the dropped count must equal it — so replicates cannot go missing
+    without being accounted for. The ADR-0005 A1 non-resamplable unit is exempt from the
+    *surviving* count only: it legitimately survives zero, and its ledger still has to close.
+    """
+    requested = unit.get("n_boot_requested")
+    survived = unit_ci.get("n_boot")
+    dropped = unit.get("n_boot_dropped")
+    n_blocks, n_singletons = unit.get("n_blocks"), unit.get("n_blocks_of_size_one")
+    ints = (requested, survived, dropped, n_blocks, n_singletons)
+    if not all(isinstance(v, int) and not isinstance(v, bool) and v >= 0 for v in ints):
+        return False
+    if requested != budget:
+        return False
+    # ⚠ Round 12: the interval's own `n_blocks` must be the unit's. The A1 exemption and the
+    # ledger both read counts the INTERVAL reports about itself, so a 47-block unit could
+    # claim `{n_blocks: 1, n_boot: 0, NaN, NaN}` and be excused its interval entirely.
+    if unit_ci.get("n_blocks") != n_blocks or n_singletons > n_blocks:
+        return False
+    if survived + dropped != requested:
+        return False
+    if _is_not_block_resamplable(unit_ci):
+        # A1: nothing was drawn (its signature is `n_boot == 0`), so the whole budget is
+        # "dropped" by `grade_ood_units`' accounting — honest only on a unit that really has
+        # < 2 blocks, which the binding above has just established. Exempt from the
+        # drop-plausibility bound, which describes replicates that WERE drawn.
+        return True
+    return dropped == 0 or _drops_are_plausible(dropped, requested, n_blocks, n_singletons)
+
+
+#: Below this expected count of dropped replicates, any drop at all is a contradiction.
+_NEGLIGIBLE_EXPECTED_DROPS = 1e-6
+
+
+def _drops_are_plausible(dropped: int, requested: int, n_blocks: int, n_singletons: int) -> bool:
+    """A dropped replicate is possible only on the census `grade_ood_units` itself explains.
+
+    ``block_bootstrap`` draws ``n_blocks`` blocks with replacement per replicate, and the
+    leave-one-out kernel excludes by ROW uid — so a replicate is non-finite exactly when every
+    draw lands on the same ONE-ROW block: probability ``s * B**-B`` for ``s`` singleton
+    blocks of ``B``. The committed reports agree (B=3, s=1: 7 dropped vs 7.4 expected; B=3,
+    s=2: 19 vs 14.8). ⚠ Round 12: the ledger closed on any split, so a 47-block unit could
+    report one surviving replicate and 199 "dropped" and certify an interval collapsed onto its
+    point — the "single replicate" case round 11 claimed to stop. Where the expected number of
+    drops is negligible, a reported drop is refused.
+    """
+    if n_singletons == 0 or n_blocks < 2:
+        return False
+    try:
+        expected = requested * n_singletons * float(n_blocks) ** (-n_blocks)
+    except OverflowError:
+        return False
+    return expected >= _NEGLIGIBLE_EXPECTED_DROPS
+
+
+def _is_not_block_resamplable(interval: Mapping[str, Any]) -> bool:
+    """The ADR-0005 A1 state: too few blocks to resample, so the bounds are NaN by design.
+
+    Recognised from the RECORDED reason — ``n_blocks < 2`` with ``n_boot == 0`` — and not from
+    the NaN itself, so a genuinely collapsed interval cannot claim the exemption by being
+    unparseable ([[clauses-must-guard-emptiness]]). The point estimate must still be finite:
+    A1 makes the *interval* unavailable, never the statistic.
+    """
+    n_blocks, n_boot = interval.get("n_blocks"), interval.get("n_boot")
+    if not isinstance(n_blocks, int) or isinstance(n_blocks, bool) or n_blocks >= 2:
+        return False
+    if n_boot != 0 or isinstance(n_boot, bool):
+        return False
+    if _finite_real(interval.get("point")) is None:
+        return False
+    lo, hi = interval.get("lower"), interval.get("upper")
+    return all(isinstance(v, float) and math.isnan(v) for v in (lo, hi))
 
 
 def _drift_bound_unadjudicated(ood: Mapping[str, Any]) -> bool:
@@ -972,6 +1515,269 @@ def _drift_bound_unadjudicated(ood: Mapping[str, Any]) -> bool:
     )
 
 
+def _env_lock_clause(report: Mapping[str, Any]) -> bool:
+    """`env_lock` must be the lock of the backbone the graded arm was loaded as.
+
+    Nothing graded this field, which is how the RNA-FM comparator's report — the artifact
+    P3-18's condition (c) reads — came to name the production environment and hash it
+    ([[gate-must-bind-to-upstream-evidence]]).
+    """
+    expected = env_lock_for_graded_arm((report.get("scoring") or {}).get("load"))
+    return bool(expected) and report.get("env_lock") == expected
+
+
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+
+
+def rederive_against_sidecars(
+    report: Mapping[str, Any],
+    *,
+    repo_root: str | Path = _REPO_ROOT,
+    select_bandwidth: bool = False,
+) -> list[str]:
+    """Re-derive a GATE-2 report's published numbers from the score sidecars it names.
+
+    :func:`validate_report` can only check a report against ITSELF, and P3-17 review round 12
+    proved where that stops: editing one unit's ``ood_ece`` together with its own
+    ``ci.point`` and the macro is internally consistent, so no in-report clause can see it —
+    yet it moves the ADR-0005 D17(c) statistic across its 0.02 margin. The evidence those
+    numbers were computed from is committed: ``scoring.in_distribution_scores`` and
+    ``scoring.loo_scores`` (per-row logits, labels, rungs, units and blocks), each hashed into
+    ``provenance.inputs``. This binds the report to those exact bytes
+    (:func:`sidecar_binding_problems`), re-runs the shipped estimators on them
+    (:func:`rederive_from_sidecars`) and returns every disagreement
+    (:func:`rederivation_problems`) ([[gate-must-bind-to-upstream-evidence]]).
+
+    ``select_bandwidth=False`` re-uses each unit's RECORDED kernel bandwidth (~35 s per report,
+    almost all of it the 5,763-row Lactobacillales unit) and checks the recorded
+    log-likelihood at it. ``True`` also re-runs the bandwidth selection (~2.5 min more), which
+    proves the recorded bandwidth is the selector's choice — what a consumer of the D17(c)
+    margin (P3-18) should run before reading it. Intervals are not re-derived: the
+    200-replicate kernel bootstrap is the expensive half, and :func:`derive_clauses` already
+    binds each interval to its point, its replicate ledger and its unit's census.
+
+    Returns problems; never raises on a malformed report.
+    """
+    problems = sidecar_binding_problems(report, repo_root=repo_root)
+    if problems:
+        return problems
+    derived = rederive_from_sidecars(report, repo_root=repo_root, select_bandwidth=select_bandwidth)
+    return rederivation_problems(report, derived)
+
+
+def sidecar_binding_problems(
+    report: Mapping[str, Any], *, repo_root: str | Path = _REPO_ROOT
+) -> list[str]:
+    """The sidecars and the env lock a report names exist, and hash to what it recorded."""
+    root = Path(repo_root)
+    scoring, prov = report.get("scoring"), report.get("provenance")
+    if not isinstance(scoring, Mapping) or not isinstance(prov, Mapping):
+        return ["the report lacks scoring / provenance blocks"]
+    inputs = prov.get("inputs") if isinstance(prov.get("inputs"), Mapping) else {}
+    problems: list[str] = []
+    for role, rel in _sidecar_paths(scoring).items():
+        if not isinstance(rel, str) or not (root / rel).is_file():
+            problems.append(f"{role} score sidecar {rel!r} is not a file under {root}")
+        elif inputs.get(rel) != PROV.sha256_file(root / rel):
+            problems.append(
+                f"{role} score sidecar {rel!r} does not hash to provenance.inputs[{rel!r}] — "
+                "the report is not about this evidence"
+            )
+    lock = report.get("env_lock")
+    if not isinstance(lock, str) or not (root / lock).is_file():
+        problems.append(f"env_lock {lock!r} is not a file under {root}")
+    elif prov.get("env_lock_hash") != PROV.env_lock_hash(root / lock):
+        problems.append(f"provenance.env_lock_hash is not the sha256 of {lock!r}")
+    return problems
+
+
+def _sidecar_paths(scoring: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        "in_distribution": scoring.get("in_distribution_scores"),
+        "leave_clade_out": scoring.get("loo_scores"),
+    }
+
+
+def rederive_from_sidecars(
+    report: Mapping[str, Any],
+    *,
+    repo_root: str | Path = _REPO_ROOT,
+    select_bandwidth: bool = False,
+) -> dict[str, Any]:
+    """The expensive half: the shipped estimators re-run on the sidecars the report names.
+
+    Reads from the report only WHICH sidecars and arm to use and — when
+    ``select_bandwidth`` is False — each unit's recorded bandwidth; every number returned is
+    recomputed. A sidecar that cannot be read is reported under ``"problems"``, not raised.
+    """
+    root = Path(repo_root)
+    scoring = report.get("scoring") if isinstance(report.get("scoring"), Mapping) else {}
+    ood = report.get("ood") if isinstance(report.get("ood"), Mapping) else {}
+    recorded_units = ood.get("units") if isinstance(ood.get("units"), Mapping) else {}
+    gate = report.get("gate") if isinstance(report.get("gate"), Mapping) else {}
+    arm = scoring.get("arm")
+    paths = _sidecar_paths(scoring)
+    derived: dict[str, Any] = {
+        "problems": [],
+        "gate": None,
+        "units": {},
+        "select": select_bandwidth,
+    }
+    try:
+        in_dist = load_scores(root / str(paths["in_distribution"]), str(arm))
+        loo = load_scores(root / str(paths["leave_clade_out"]), str(arm))
+    except (OSError, KeyError, TypeError, ValueError) as exc:
+        derived["problems"].append(f"a score sidecar could not be read for arm {arm!r}: {exc}")
+        return derived
+
+    # ── the gated in-distribution read (D11) ──
+    rungs = in_dist["rungs"]
+    if rungs is None:
+        derived["problems"].append("the in-distribution sidecar carries no rungs, so T has no fit")
+        return derived
+    # ⚠ Round 12 (CodeRabbit): the fit REFUSES a degenerate calib carve — single-class,
+    # empty, or perfectly separated (`TemperatureFitError`, the P3-08 no-aux case) — and a
+    # non-finite logit; a sidecar can be hash-bound and still be one of those. That is a
+    # problem to report, not an exception to hand the caller.
+    try:
+        fit = R.temperature_scale(in_dist["logits"], in_dist["labels"], rung=rungs)
+        temperature = float(fit.temperature)
+        posterior = R.calibrated_posterior(in_dist["logits"], temperature=temperature)
+    except (R.TemperatureFitError, ValueError) as exc:
+        derived["problems"].append(
+            f"no temperature re-fits on the in-distribution sidecar's calib rows for arm "
+            f"{arm!r}: {exc}"
+        )
+        return derived
+    p_all = [float(v) for v in posterior[R.NAMED_POSTERIOR_KEY]]
+    idx = [i for i, rung in enumerate(rungs) if rung == GATE_RUNG]
+    y = [int(in_dist["labels"][i]) for i in idx]
+    p = [p_all[i] for i in idx]
+    n_bins = gate.get("ece_n_bins")
+    if not isinstance(n_bins, int) or isinstance(n_bins, bool) or n_bins <= 0:
+        n_bins = ECE_N_BINS
+    derived["temperature"] = temperature
+    derived["gate"] = {
+        "n": len(idx),
+        "n_positive": int(sum(y)),
+        "ece": M.binned_ece(y, p, n_bins, debias=True),
+        "ece_plugin": M.binned_ece(y, p, n_bins, debias=False),
+        "reliability": M.reliability_bins(y, p, n_bins),
+    }
+
+    # ── the leave-clade-out read (D13) ──
+    meta = loo["meta"]
+    unit_of, block_of = meta.get("units"), meta.get("blocks")
+    if not (
+        isinstance(unit_of, list)
+        and isinstance(block_of, list)
+        and len(unit_of) == len(block_of) == len(loo["row_ids"])
+    ):
+        derived["problems"].append("the leave-clade-out sidecar carries no per-row units / blocks")
+        return derived
+    try:
+        loo_post = R.calibrated_posterior(loo["logits"], temperature=temperature)
+    except ValueError as exc:
+        derived["problems"].append(f"the leave-clade-out logits cannot be calibrated: {exc}")
+        return derived
+    loo_p = [float(v) for v in loo_post[R.NAMED_POSTERIOR_KEY]]
+    buckets: dict[str, dict[str, list]] = {}
+    for i, name in enumerate(unit_of):
+        bucket = buckets.setdefault(str(name), {"y": [], "p": [], "b": []})
+        bucket["y"].append(int(loo["labels"][i]))
+        bucket["p"].append(loo_p[i])
+        bucket["b"].append(block_of[i])
+    for name in sorted(buckets):
+        bandwidth: float | None = None
+        if not select_bandwidth:
+            unit = recorded_units.get(name)
+            bandwidth = _finite_real(unit.get("bandwidth")) if isinstance(unit, Mapping) else None
+            if bandwidth is None or bandwidth <= 0.0:
+                derived["problems"].append(
+                    f"ood.units[{name!r}] records no usable bandwidth to re-derive at"
+                )
+                continue
+        bucket = buckets[name]
+        try:
+            derived["units"][name] = ECE.ood_ece(
+                bucket["y"],
+                bucket["p"],
+                bucket["b"],
+                block_key=OOD_BLOCK_KEY,
+                bandwidth=bandwidth,
+                n_boot=1,
+                seed=BOOTSTRAP_SEED,
+            )
+        except ValueError as exc:
+            # e.g. a unit with < 2 rows, which has no leave-one-out estimate at all
+            derived["problems"].append(f"ood.units[{name!r}] does not re-derive: {exc}")
+    return derived
+
+
+#: The per-unit fields :func:`rederivation_problems` compares. The interval is excluded on
+#: purpose (see :func:`rederive_against_sidecars`); ``bandwidth`` is included because in
+#: selection mode it is itself re-derived.
+_REDERIVED_UNIT_FIELDS = (
+    "n_records",
+    "n_positives",
+    "n_blocks",
+    "admissible",
+    "ood_ece",
+    "inadmissible_point",
+    "bandwidth",
+    "bandwidth_loo_log_likelihood",
+)
+
+
+def rederivation_problems(report: Mapping[str, Any], derived: Mapping[str, Any]) -> list[str]:
+    """The cheap half: every published number against its re-derivation. Never raises."""
+    problems = list(derived.get("problems") or [])
+    gate = report.get("gate") if isinstance(report.get("gate"), Mapping) else {}
+    ood = report.get("ood") if isinstance(report.get("ood"), Mapping) else {}
+    cal = gate.get("calibration") if isinstance(gate.get("calibration"), Mapping) else {}
+    if derived.get("gate") is None:
+        return problems or ["nothing was re-derived"]
+    if not _close(cal.get("temperature"), derived.get("temperature"), tol=1e-9):
+        problems.append(
+            f"gate.calibration.temperature {cal.get('temperature')!r} != "
+            f"{derived.get('temperature')!r} re-fitted on the sidecar's calib rows"
+        )
+    for key, value in derived["gate"].items():
+        if not _same_summary(gate.get(key), value):
+            problems.append(f"gate.{key} does not re-derive from the in-distribution sidecar")
+    units = ood.get("units") if isinstance(ood.get("units"), Mapping) else {}
+    rederived = derived.get("units") or {}
+    if set(units) != set(rederived) and not derived.get("problems"):
+        problems.append(
+            f"ood.units names {len(units)} orders but the sidecar re-derives "
+            f"{len(rederived)}: missing {sorted(set(rederived) - set(units))!r}, "
+            f"extra {sorted(set(units) - set(rederived))!r}"
+        )
+    points: list[float] = []
+    for name in sorted(rederived):
+        out = rederived[name]
+        unit = units.get(name)
+        if not isinstance(unit, Mapping):
+            continue
+        for key in _REDERIVED_UNIT_FIELDS:
+            if not _same_summary(unit.get(key), out.get(key)):
+                problems.append(
+                    f"ood.units[{name!r}].{key} = {unit.get(key)!r} does not re-derive from "
+                    f"the leave-clade-out sidecar ({out.get(key)!r})"
+                )
+        if out.get("admissible") is True:
+            points.append(float(out["ood_ece"]))
+    macro = ood.get("macro_average") if isinstance(ood.get("macro_average"), Mapping) else {}
+    if not points:
+        problems.append("no admissible unit re-derives, so the macro average has no support")
+    elif not _close(macro.get("point"), math.fsum(points) / len(points)):
+        problems.append(
+            f"ood.macro_average.point {macro.get('point')!r} != "
+            f"{math.fsum(points) / len(points)!r} re-derived from the leave-clade-out sidecar"
+        )
+    return problems
+
+
 def validate_report(report: Mapping[str, Any]) -> list[str]:
     """Problems with ``report``; ``[]`` when clean. An honestly-failing gate is not a problem.
 
@@ -981,8 +1787,11 @@ def validate_report(report: Mapping[str, Any]) -> list[str]:
     """
     problems: list[str] = []
 
+    # The RAW value, never `str(...)` — see the note in `sizing.validate_report`.
+    schema = report.get("schema_version")
+    if not isinstance(schema, str) or schema not in KNOWN_SCHEMAS:
+        problems.append(f"schema_version: {schema!r} is not one of {KNOWN_SCHEMAS!r}")
     for key, want in (
-        ("schema_version", SCHEMA_VERSION),
         ("step", STEP),
         ("generated_by", GENERATED_BY),
         ("adr", ADR),
@@ -1045,7 +1854,13 @@ def validate_report(report: Mapping[str, Any]) -> list[str]:
             problems.append(f"ood.gated = {ood.get('gated')!r}, must be False (ADR-0005 D13)")
 
     written = report.get("clauses")
-    recomputed = derive_clauses(report)
+    # A report is graded against the clause set of ITS OWN schema. At the current schema this
+    # excuses nothing; an unknown schema excuses nothing either and is flagged above.
+    recomputed = {
+        name: value
+        for name, value in derive_clauses(report).items()
+        if name not in clauses_not_required_at(schema)
+    }
     if not isinstance(written, Mapping):
         problems.append("clauses: block missing — nothing pins what the gate checked")
     else:
@@ -1082,6 +1897,7 @@ def build_report(
     scope: Mapping[str, Any],
     scoring: Mapping[str, Any],
     provenance: Mapping[str, Any],
+    env_lock: str,
     written_at: str | None = None,
 ) -> dict[str, Any]:
     """Assemble the GATE-2 report; every number is passed in already measured."""
@@ -1097,7 +1913,12 @@ def build_report(
         "generated_by": GENERATED_BY,
         "prd": PRD,
         "adr": ADR,
-        "env_lock": ENV_LOCK,
+        # NOT `ENV_LOCK`. That constant names the PRODUCTION lock, so grading the RNA-FM
+        # comparator stamped — and hashed — an environment whose `multimolecule` pin cannot
+        # load the weights whose posteriors were being graded. This is the THIRD producer with
+        # the same defect; `sizing.py` and `eval.py` were fixed in the same round and this one
+        # was missed ([[fixed-one-of-two-identical-things]]).
+        "env_lock": env_lock,
         "generated_at_utc": written_at or datetime.now(UTC).isoformat(timespec="seconds"),
         "gated": True,
         "gate": dict(gate),
@@ -1132,11 +1953,23 @@ def disclosures(*, gate: Mapping[str, Any], ood: Mapping[str, Any]) -> list[str]
         "(ADR-0005 D12, FDP CI-upper-bound <= 10%) is graded at P5 and is absent here.",
         _UNPINNED_DEPLOYMENT_PRIOR,
         _UNPINNED_DRIFT_BOUND,
-        "INHERITED FROM P3-08: the production arm's temperature is fittable only because "
-        "ONE calib row of 1,089 is misclassified at the decision boundary; that row is the "
-        "entire signal for beta. The no-aux control's calib carve is perfectly separated and "
-        "has no temperature at all. ADR-0005 D11 has no degenerate-limit rule, and drafting "
-        "one is a P3-exit item.",
+        # ⚠ Every sentence here is about the P3-08 RiNALMo run, and each one says so. The
+        # earlier wording ("the production arm's ... The no-aux control's calib carve is
+        # perfectly separated") reads as a claim about whichever arm the report grades, and it
+        # is emitted unconditionally — so the RNA-FM comparator's report asserted a perfectly
+        # separated no-aux control while its own eval report recorded
+        # `is_perfectly_separated: false`, `converged: true` and a finite T of 1.39. This
+        # producer cannot re-derive the graded arm's separation (the gate block carries no
+        # separation record), so the fix is to make the SUBJECT explicit rather than to
+        # pretend to measure it here.
+        "INHERITED FROM P3-08 (these two facts are about the P3-08 RiNALMo run, not "
+        "necessarily about the arm graded here): P3-08's production RiNALMo arm has a "
+        "temperature that is fittable only because ONE calib row of 1,089 is misclassified at "
+        "the decision boundary; that row is the entire signal for beta. P3-08's no-aux RiNALMo "
+        "control has a perfectly separated calib carve and no temperature at all. The arm "
+        "graded HERE is described by its own temperature disclosure below, and this report "
+        "records no separation measurement for it. ADR-0005 D11 has no degenerate-limit rule, "
+        "and drafting one is a P3-exit item.",
         "INHERITED FROM P3-09: the D11 debiasing term was measured to SATURATE at ~0.060 "
         "against a known truth of 0.123 on genuinely miscalibrated data at n in {20, 50, 200} "
         "— i.e. it can under-state a real calibration error at small n. The plug-in ECE is "
@@ -1470,8 +2303,11 @@ def score_loo_holdout(
     ([[promote-dont-duplicate-is-a-correctness-rule]]).
     Only the *row set* differs, and it is the one thing this function decides.
     """
-    import torch
-
+    # `eval` imports torch lazily, so importing it costs nothing in bare CI. `torch` itself is
+    # imported at its FIRST USE, below the arm-resolution refusals: everything down to
+    # `discover_arms` is pure path and census work, and a run that dies there — a bad root, a
+    # holdout that overlaps training — should say so in an environment that has no torch, and
+    # be testable in one. The CI unit tier installs no torch.
     from tbox_finder.stage2 import eval as E
 
     rows, census = loo_holdout_rows(dataset, with_sequences=True)
@@ -1483,8 +2319,13 @@ def score_loo_holdout(
             "number labelled OOD"
         )
 
+    # `x if x is None else` and NOT `x or` — an explicitly-passed empty string is a caller
+    # error, and `or` would silently answer it with the PRODUCTION root, grading the shipped
+    # arm while the caller believed it had pointed the run somewhere else. Only an omitted
+    # option falls back.
     arms = E.discover_arms(
-        checkpoint_root or E.DEFAULT_CKPT_ROOT, sweep_dir=sweep_dir or E.DEFAULT_SWEEP_DIR
+        E.DEFAULT_CKPT_ROOT if checkpoint_root is None else checkpoint_root,
+        sweep_dir=E.DEFAULT_SWEEP_DIR if sweep_dir is None else sweep_dir,
     )
     production = E.production_arm_config()
     arm, _ = E.select_arm_pair(arms, production=production)
@@ -1495,6 +2336,8 @@ def score_loo_holdout(
             f"arm {arm}'s run report records no attention backend, so scoring cannot reproduce "
             "the numerics it trained under"
         )
+    import torch  # lazy — first use; see the note at the top of this function
+
     target = device or ("cuda" if torch.cuda.is_available() else "cpu")
     model, record = E.load_stage2_checkpoint(
         arms[arm]["checkpoint_path"], attn_implementation=backend, device=target
@@ -1550,9 +2393,24 @@ def build_parser() -> Any:
 
     grade = sub.add_parser("grade", help="build reports/gate2_p3_ece.json")
     grade.add_argument("--dataset", default=DEFAULT_DATASET)
+    # ⚠ These two exist on `score-loo` and were missing here, which made `grade` unable to
+    # read any arm root but the production one — so the ADR-0002 D6 comparator's scores could
+    # be PRODUCED and never GRADED. They resolve only WHICH ARM NAME to pull out of the scores
+    # file (`discover_arms` + `select_arm_pair` below); defaulting to the production constants
+    # leaves every existing invocation byte-identical.
+    grade.add_argument("--checkpoint-root", default=None)
+    grade.add_argument("--sweep-dir", default=None)
     grade.add_argument("--scores", default=DEFAULT_SCORES)
     grade.add_argument("--loo-scores", default=DEFAULT_LOO_SCORES)
     grade.add_argument("--report", default=DEFAULT_REPORT)
+    grade.add_argument(
+        "--scored-backbone",
+        default=None,
+        help=(
+            "which pinned backbone produced the score sidecars, for a PRE-A15 sidecar that "
+            "records none. Never overrides a recorded backbone; a disagreement is refused."
+        ),
+    )
     grade.add_argument("--figure-data", default=DEFAULT_FIGURE_DATA)
     grade.add_argument("--n-boot", type=int, default=DEFAULT_N_BOOT)
     grade.add_argument("--ood-n-boot", type=int, default=DEFAULT_OOD_N_BOOT)
@@ -1658,7 +2516,14 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     split_rows, dataset_meta = _read_split_table(args.dataset)
     production = E.production_arm_config()
-    arms = E.discover_arms(E.DEFAULT_CKPT_ROOT, sweep_dir=E.DEFAULT_SWEEP_DIR)
+    # The SECOND site. `or` here would answer an explicitly-passed empty `--checkpoint-root`
+    # with the production root ([[fixed-one-of-two-identical-things]]).
+    _root = getattr(args, "checkpoint_root", None)
+    _sweep = getattr(args, "sweep_dir", None)
+    arms = E.discover_arms(
+        E.DEFAULT_CKPT_ROOT if _root is None else _root,
+        sweep_dir=E.DEFAULT_SWEEP_DIR if _sweep is None else _sweep,
+    )
     arm, _ = E.select_arm_pair(arms, production=production)
 
     in_dist = load_scores(args.scores, arm)
@@ -1731,6 +2596,30 @@ def main(argv: Sequence[str] | None = None) -> int:
         "bootstrap_seed": int(args.seed),
         "load": loo["load"],
     }
+    # The environment the GRADED weights required, from the score sidecars' own load records —
+    # each of which carries the backbone the loader derived from that adapter's recorded base
+    # model. Both sidecars are handed in and must agree: the in-distribution and leave-clade-out
+    # passes score the same weights, so a disagreement means one of the two files is about a
+    # different arm and no single lock describes the run.
+    # The in-distribution and leave-clade-out passes must have scored the SAME weights: the
+    # gate joins an ECE from one to an OOD ECE from the other and reports them as one arm.
+    mismatched = sidecar_identity_mismatches(in_dist.get("load"), loo.get("load"))
+    if mismatched:
+        raise RuntimeError(
+            f"the two score sidecars disagree on {mismatched!r} for arm {arm!r}: "
+            f"{_recorded_path(args.scores)} and {_recorded_path(args.loo_scores)} were produced "
+            "from different weights, so one grade cannot describe both"
+        )
+    scored_env_lock = E.env_lock_for_scored_arms(
+        {
+            f"{arm}@in_distribution": in_dist.get("load") or {},
+            f"{arm}@leave_clade_out": loo.get("load") or {},
+        },
+        # The committed P3-10 sidecars predate ADR-0002 A15 and record no backbone at all, so
+        # re-grading the production arm from them needs the caller to say which model made
+        # them. It fills a gap and never overrides a record.
+        declared_backbone=getattr(args, "scored_backbone", None),
+    )
     # `outputs` is deliberately EMPTY. `build_provenance` *hashes* every path it is given,
     # and neither output exists yet — the report is what this call is being embedded into,
     # so hashing it here is both impossible and self-referential. The declared paths go in
@@ -1740,7 +2629,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         script=GENERATED_BY,
         seed=int(args.seed),
         inputs=[args.dataset, args.scores, args.loo_scores],
-        env_lock=ENV_LOCK,
+        env_lock=scored_env_lock,
         adr=ADR,
         extra={"declared_outputs": [_recorded_path(args.report), _recorded_path(args.figure_data)]},
     )
@@ -1751,7 +2640,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     prov["inputs"] = {_recorded_path(k): v for k, v in prov["inputs"].items()}
 
     report = build_report(
-        gate=gate, prior_shift=shift, ood=ood, scope=scope, scoring=scoring, provenance=prov
+        gate=gate,
+        prior_shift=shift,
+        ood=ood,
+        scope=scope,
+        scoring=scoring,
+        provenance=prov,
+        env_lock=scored_env_lock,
     )
     problems = validate_report(report)
     out, _ = write_outputs(

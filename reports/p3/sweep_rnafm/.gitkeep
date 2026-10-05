@@ -1,0 +1,5 @@
+Slurm opens --output/--error BEFORE the job script runs, so this directory has to exist in a
+fresh checkout. `mkdir -p "$OUT_DIR"` inside slurm/p3/rnafm_stage2_finetune.sbatch is too late:
+by then the job has already failed to open its own log files. Committing the directory is the
+robust half of the fix — a submit-side `mkdir` works too but can be forgotten, and the failure
+it produces (no logs at all) is the hardest kind to diagnose. Found by CodeRabbit on PR #134.
