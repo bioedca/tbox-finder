@@ -8155,3 +8155,29 @@ expensive half and the in-report clauses already bind each interval to its point
 census).
 
 **Commit.** see PR (P3-17, review round 12).
+
+## Step P3-17 (review round 13) — 2026-10-05: the re-derivation's own "never raises" contract
+
+**Inputs.** Commit `9e93a8e` (round 12) and the CodeRabbit app round on it (manual trigger; the
+walkthrough reads *Reviews paused*): **1 actionable, minor** — `rederive_from_sidecars` documents
+that a malformed report becomes a problem, but the temperature fit and the per-unit estimator sat
+outside any guard.
+
+**Process.** The finding's *concrete* trigger was refuted by execution: pointing `scoring.arm` at
+the no-aux arm fails at the LOO sidecar load (that sidecar carries only `aux1.0_lr1e-4`), which is
+already reported as a problem. The *class* is real: `temperature_scale` raises
+`TemperatureFitError` on a perfectly separated calib carve (the P3-08 no-aux condition) and
+`ValueError` on a single-class or empty one, `calibrated_posterior` raises on a non-finite logit,
+and `ood_ece` raises on a unit with < 2 rows — and a sidecar can be hash-bound and still be any of
+those. Each is now a recorded problem (a failed unit is named and the rest still re-derive).
+
+**Outputs.** `src/tbox_finder/calib/gate2.py`, `tests/unit/test_gate2.py` (2 tests over small,
+genuinely degenerate copies of the real sidecars — a separated calib carve, a one-row order).
+
+**Validation.** Both guards sabotaged (`except` narrowed to `KeyboardInterrupt`) → RED against
+their named test; restores byte-identical. 320 passed across the three affected suites; ruff +
+black CI-exact clean.
+
+**Decisions.** None.
+
+**Commit.** see PR (P3-17, review round 13).

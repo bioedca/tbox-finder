@@ -1635,9 +1635,20 @@ def rederive_from_sidecars(
     if rungs is None:
         derived["problems"].append("the in-distribution sidecar carries no rungs, so T has no fit")
         return derived
-    fit = R.temperature_scale(in_dist["logits"], in_dist["labels"], rung=rungs)
-    temperature = float(fit.temperature)
-    posterior = R.calibrated_posterior(in_dist["logits"], temperature=temperature)
+    # ⚠ Round 12 (CodeRabbit): the fit REFUSES a degenerate calib carve — single-class,
+    # empty, or perfectly separated (`TemperatureFitError`, the P3-08 no-aux case) — and a
+    # non-finite logit; a sidecar can be hash-bound and still be one of those. That is a
+    # problem to report, not an exception to hand the caller.
+    try:
+        fit = R.temperature_scale(in_dist["logits"], in_dist["labels"], rung=rungs)
+        temperature = float(fit.temperature)
+        posterior = R.calibrated_posterior(in_dist["logits"], temperature=temperature)
+    except (R.TemperatureFitError, ValueError) as exc:
+        derived["problems"].append(
+            f"no temperature re-fits on the in-distribution sidecar's calib rows for arm "
+            f"{arm!r}: {exc}"
+        )
+        return derived
     p_all = [float(v) for v in posterior[R.NAMED_POSTERIOR_KEY]]
     idx = [i for i, rung in enumerate(rungs) if rung == GATE_RUNG]
     y = [int(in_dist["labels"][i]) for i in idx]
@@ -1664,7 +1675,11 @@ def rederive_from_sidecars(
     ):
         derived["problems"].append("the leave-clade-out sidecar carries no per-row units / blocks")
         return derived
-    loo_post = R.calibrated_posterior(loo["logits"], temperature=temperature)
+    try:
+        loo_post = R.calibrated_posterior(loo["logits"], temperature=temperature)
+    except ValueError as exc:
+        derived["problems"].append(f"the leave-clade-out logits cannot be calibrated: {exc}")
+        return derived
     loo_p = [float(v) for v in loo_post[R.NAMED_POSTERIOR_KEY]]
     buckets: dict[str, dict[str, list]] = {}
     for i, name in enumerate(unit_of):
@@ -1683,15 +1698,19 @@ def rederive_from_sidecars(
                 )
                 continue
         bucket = buckets[name]
-        derived["units"][name] = ECE.ood_ece(
-            bucket["y"],
-            bucket["p"],
-            bucket["b"],
-            block_key=OOD_BLOCK_KEY,
-            bandwidth=bandwidth,
-            n_boot=1,
-            seed=BOOTSTRAP_SEED,
-        )
+        try:
+            derived["units"][name] = ECE.ood_ece(
+                bucket["y"],
+                bucket["p"],
+                bucket["b"],
+                block_key=OOD_BLOCK_KEY,
+                bandwidth=bandwidth,
+                n_boot=1,
+                seed=BOOTSTRAP_SEED,
+            )
+        except ValueError as exc:
+            # e.g. a unit with < 2 rows, which has no leave-one-out estimate at all
+            derived["problems"].append(f"ood.units[{name!r}] does not re-derive: {exc}")
     return derived
 
 

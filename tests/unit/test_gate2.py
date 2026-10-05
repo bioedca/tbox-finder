@@ -2577,3 +2577,58 @@ def test_the_eval_clause_itself_is_satisfied_by_base_model_only_loads() -> None:
     for block in report["arms"].values():
         block["load"]["base_model_name_or_path"] = RINALMO_REPO
     assert E.derive_clauses(report)[clause] is False
+
+
+def _small_sidecars(tmp_path: Path, name: str, *, separate_calib: bool, solo_unit: bool) -> dict:
+    """A report pointing at SMALL copies of its real sidecars under ``tmp_path``: one
+    held-out order (Micrococcales, 291 rows) so the estimator runs in well under a second,
+    optionally made degenerate in exactly one way."""
+    report = _committed(name)
+    arm = report["scoring"]["arm"]
+    in_dist = json.loads((_REPO / report["scoring"]["in_distribution_scores"]).read_text())
+    if separate_calib:  # every calib row already its own arg-max: no temperature exists
+        logits = in_dist["arms"][arm]["logits"]
+        for i, label in enumerate(in_dist["labels"]):
+            logits[i] = 10.0 if label else -10.0
+    loo = json.loads((_REPO / report["scoring"]["loo_scores"]).read_text())
+    keep = [i for i, unit in enumerate(loo["units"]) if unit == "Micrococcales"]
+    if solo_unit:
+        keep.append(next(i for i, unit in enumerate(loo["units"]) if unit != "Micrococcales"))
+    for key in ("row_ids", "labels", "units", "blocks"):
+        loo[key] = [loo[key][i] for i in keep]
+    loo["arms"] = {
+        arm: dict(loo["arms"][arm], logits=[loo["arms"][arm]["logits"][i] for i in keep])
+    }
+    if solo_unit:
+        loo["units"][-1] = "Solo"
+        report["ood"]["units"]["Solo"] = {"bandwidth": 0.2}
+    for rel, payload in (
+        (report["scoring"]["in_distribution_scores"], in_dist),
+        (report["scoring"]["loo_scores"], loo),
+    ):
+        (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / rel).write_text(json.dumps(payload), encoding="utf-8")
+    return report
+
+
+def test_an_unfittable_calib_carve_is_a_problem_not_a_raise(tmp_path: Path) -> None:
+    """CodeRabbit, round 12: `temperature_scale` RAISES on a perfectly separated carve (the
+    P3-08 no-aux case), and a sidecar can be hash-bound and still be one."""
+    report = _small_sidecars(
+        tmp_path, COMMITTED_GATE2_REPORTS[1], separate_calib=True, solo_unit=False
+    )
+    derived = G.rederive_from_sidecars(report, repo_root=tmp_path)
+    assert any("no temperature re-fits" in p for p in derived["problems"]), derived["problems"]
+    assert G.rederivation_problems(report, derived)
+
+
+def test_a_unit_with_no_leave_one_out_estimate_is_named_not_raised(tmp_path: Path) -> None:
+    report = _small_sidecars(
+        tmp_path, COMMITTED_GATE2_REPORTS[1], separate_calib=False, solo_unit=True
+    )
+    derived = G.rederive_from_sidecars(report, repo_root=tmp_path)
+    assert [p for p in derived["problems"] if "Solo" in p], derived["problems"]
+    # ...and the unit that CAN be estimated still is, from the same small sidecar
+    assert derived["units"]["Micrococcales"]["ood_ece"] == (
+        report["ood"]["units"]["Micrococcales"]["ood_ece"]
+    )
