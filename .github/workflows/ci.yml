@@ -35,7 +35,13 @@ on:
   workflow_dispatch: {} # manual trigger (e.g. to validate the `docker` build)
 
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
+  # Keyed on the branch TIP sha, NOT github.ref. A push to a feature branch and the
+  # pull_request run for that same commit otherwise land in different groups
+  # (refs/heads/<branch> vs refs/pull/N/merge), so BOTH run and every commit is tested
+  # twice — 266 push + 253 PR runs in 2026-08 alone. For one tip,
+  # `pull_request.head.sha` == the push event's `github.sha`, so the two now share a
+  # group and the later run supersedes the earlier one.
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.head.sha || github.sha }}
   cancel-in-progress: true
 
 permissions:
@@ -92,8 +98,16 @@ jobs:
       - uses: actions/checkout@v5
         with:
           persist-credentials: false # no job pushes via git; drop the token
-          lfs: true # smudge the committed split-assignment table so the P0-24
-          #          no-leakage gate reads the REAL partition, not an LFS pointer
+          # NO `lfs: true`, and no LFS step at all. This job's one committed binary —
+          # data/processed/splits/split_assignments.parquet, which the P0-24 / §8.2
+          # no-leakage gate must read as REAL bytes — LEFT git-LFS (see .gitattributes)
+          # and now arrives with the ordinary checkout. Everything still in LFS is read
+          # by NO test: docs/dev-log/*.pdf and figures/** are never opened, and the
+          # data/external/refs/*.{fa,cm} are checked through the pointer-aware
+          # refs.content_sha256. CI's metered LFS bandwidth is therefore exactly ZERO.
+          # It had been ~19.7 MB/run x ~560 runs/month ≈ 11 GB against a 1 GB allowance,
+          # which exhausted the account's LFS budget on 2026-08-24 and left every `test`
+          # job unable to fetch anything at all.
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
