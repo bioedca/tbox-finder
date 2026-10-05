@@ -13,6 +13,7 @@ Tiers, each with its own env var (folding them was the P1-16 landmine):
 
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 from typing import Any
@@ -110,6 +111,9 @@ def _report(**over: Any) -> dict[str, Any]:
             # The production port CAN run checkpointing (it is merely a no-op there), so the
             # fixture's sweep points carry the flag ON and the comparison is measurable.
             "usable_on_this_backbone": True,
+            # ⚠ Round 12: `run_sizing` always writes this key (None when both arms were
+            # measured); a fixture standing in for the producer must too.
+            "comparison_skipped_code": None,
         },
         "config": {"batch_sweep": [4, 2], "steps": 6},
         "backbone": {
@@ -173,6 +177,7 @@ def test_each_clause_bites_on_its_own_evidence(mutate: Any, clause: str) -> None
             "on_peak_gib": 3.0,
             "off_peak_gib": 9.0,
             "usable_on_this_backbone": True,
+            "comparison_skipped_code": None,
         },
         "config": {},
         "backbone": {
@@ -373,6 +378,7 @@ def test_a_point_that_measured_fewer_rows_than_it_requested_is_refused() -> None
             "on_peak_gib": 3.0,
             "off_peak_gib": 9.0,
             "usable_on_this_backbone": True,
+            "comparison_skipped_code": None,
         },
         "config": {},
         "backbone": {
@@ -459,6 +465,9 @@ def test_an_unmeasurable_checkpointing_comparison_is_STATED_not_omitted() -> Non
                 f"gradient checkpointing is not usable on backbone {comp.key!r}, so there is "
                 f"no 'on' arm to compare against: {comp.gradient_checkpointing_note}"
             ),
+            # ⚠ Round 12: this fixture reproduced the committed RNA-FM artifact's defect — a
+            # schema-4 report without the code schema 4 introduced — and asserted it passed.
+            "comparison_skipped_code": S.SKIP_PORT_CANNOT_CHECKPOINT,
         },
         "config": {"batch_sweep": [4, 2], "steps": 6, "gradient_checkpointing": False},
         "backbone": {**BR.backbone_summary(comp), "requested_key": comp.key},
@@ -713,6 +722,7 @@ def test_a_measurement_that_records_no_checkpointing_flag_is_refused() -> None:
             "on_peak_gib": 3.0,
             "off_peak_gib": 9.0,
             "usable_on_this_backbone": True,
+            "comparison_skipped_code": None,
         },
         "config": {},
         "backbone": {
@@ -807,3 +817,95 @@ def test_the_port_agreement_clause_refuses_a_report_that_records_no_port_fact() 
     report["backbone"]["gradient_checkpointing_usable"] = prod.gradient_checkpointing_usable
     del report["gradient_checkpointing"]["usable_on_this_backbone"]
     assert S.derive_clauses(report)["checkpointing_usability_agrees_with_the_port"] is False
+
+
+# --------------------------------------------------------------------------------------
+# P3-17 review round 12 — the env-lock clause compared two WRITTEN fields; the skip code a
+# schema-4 report could omit; and an ownership guard resolved against the wrong directory
+# --------------------------------------------------------------------------------------
+def _comparator_report() -> dict[str, Any]:
+    comp = BR.resolve_backbone(BR.COMPARATOR_BACKBONE)
+    return _report(backbone={**BR.backbone_summary(comp), "requested_key": comp.key})
+
+
+def test_the_env_lock_clause_resolves_the_backbone_through_the_allow_list() -> None:
+    """Reviewer B, round 12: setting `provenance.env_lock` AND `backbone.env_lock` to the
+    production lock on the RNA-FM report — key and repo id left as `rnafm` — validated clean,
+    because the clause compared the two written fields with each other."""
+    clause = "provenance_env_lock_is_the_backbones"
+    report = _comparator_report()
+    assert S.derive_clauses(report)[clause] is True
+    report["provenance"]["env_lock"] = report["backbone"]["env_lock"] = T.ENV_LOCK
+    assert S.derive_clauses(report)[clause] is False
+    report = _comparator_report()
+    report["backbone"]["repo_id"] = BR.resolve_backbone(BR.PRODUCTION_BACKBONE).repo_id
+    assert S.derive_clauses(report)[clause] is False
+    report = _comparator_report()
+    report["backbone"]["key"] = "not-a-pinned-backbone"
+    assert S.derive_clauses(report)[clause] is False
+
+
+def test_a_schema_4_report_must_carry_the_skip_code_its_producer_writes() -> None:
+    """Reviewer B, round 12: the hand-promoted RNA-FM sizing artifact read schema 4 and had no
+    `comparison_skipped_code`, and still passed through the usability disjunct."""
+    clause = "checkpointing_skip_is_earned"
+    committed = json.loads(
+        (_REPO / "reports" / "p3" / "stage2_rnafm_sizing.json").read_text(encoding="utf-8")
+    )
+    assert committed["schema_version"] == "4"
+    assert S.validate_report(committed) == []
+    for mutate in (
+        lambda r: r["gradient_checkpointing"].pop("comparison_skipped_code"),
+        lambda r: r["gradient_checkpointing"].__setitem__(
+            "comparison_skipped_code", S.SKIP_ON_ARM_DID_NOT_FIT
+        ),
+        lambda r: r["gradient_checkpointing"].__setitem__("comparison_skipped_code", None),
+    ):
+        forged = json.loads(json.dumps(committed))
+        mutate(forged)
+        assert S.derive_clauses(forged)[clause] is False
+    # a legacy schema predates the field and is excused it — and only it
+    legacy = json.loads(json.dumps(committed))
+    legacy["gradient_checkpointing"].pop("comparison_skipped_code")
+    legacy["schema_version"] = "3"
+    assert S.derive_clauses(legacy)[clause] is True
+
+
+def test_the_ownership_guard_does_not_depend_on_the_working_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Reviewer B, round 12: the owned paths were resolved against the CWD, so from any other
+    directory an absolute `--out` naming the committed production artifact reached
+    `run_sizing` with `--backbone rnafm`."""
+    reached: list[Any] = []
+    monkeypatch.setattr(S, "run_sizing", lambda **kw: reached.append(kw) or {})
+    monkeypatch.chdir(tmp_path)
+    for backbone, owned_by_other in (
+        (BR.COMPARATOR_BACKBONE, S.SIZING_ARTIFACT_OWNERS[BR.PRODUCTION_BACKBONE]),
+        (BR.PRODUCTION_BACKBONE, S.SIZING_ARTIFACT_OWNERS[BR.COMPARATOR_BACKBONE]),
+    ):
+        # ...under the plain spelling AND a non-normalised one, which only `resolve()` equates
+        # (reviewer C, round 12: dropping `resolve()` stayed green against every test).
+        detour = Path(owned_by_other).parent / ".." / Path(owned_by_other).parent.name
+        for spelling in (
+            str(_REPO / owned_by_other),
+            str(_REPO / detour / Path(owned_by_other).name),
+        ):
+            with pytest.raises(SystemExit):
+                S._run(["--backbone", backbone, "--out", spelling])
+    assert reached == [], "a cross-owner --out reached the producer"
+
+    # Positive control: the OWNER may still write its own artifact from any directory, so the
+    # guard is not simply refusing every absolute path ([[raises-test-needs-a-positive-control]]).
+    class _Reached(Exception):
+        pass
+
+    def _stop(**kw: Any) -> Any:
+        reached.append(kw)
+        raise _Reached
+
+    monkeypatch.setattr(S, "run_sizing", _stop)
+    own = str(_REPO / S.SIZING_ARTIFACT_OWNERS[BR.COMPARATOR_BACKBONE])
+    with pytest.raises(_Reached):
+        S._run(["--backbone", BR.COMPARATOR_BACKBONE, "--out", own])
+    assert len(reached) == 1

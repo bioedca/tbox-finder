@@ -229,7 +229,7 @@ def backbone_key_from_load(load: Mapping[str, Any] | None) -> str | None:
     backbone and the base model of another is not evidence, it is a contradiction
     ([[gate-must-bind-to-upstream-evidence]]).
     """
-    rec = load or {}
+    rec = load if isinstance(load, Mapping) else {}
     declared = rec.get("backbone")
     from_repo: str | None = None
     repo_id = rec.get("base_model_name_or_path")
@@ -1060,16 +1060,18 @@ def derive_clauses(report: Mapping[str, Any]) -> dict[str, bool]:
         "ood_min_n_floor_is_the_pinned_constant": (
             ood.get("min_n") == COV.OOD_ECE_MIN_N
             and bool(units)
-            and all(u.get("min_n") == COV.OOD_ECE_MIN_N for u in units.values())
+            and all(_unit_field(u, "min_n") == COV.OOD_ECE_MIN_N for u in units.values())
         ),
         "ood_reported_never_gated": (
             ood.get("gated") is False
             and bool(units)
-            and all(u.get("gated") is False for u in units.values())
+            and all(_unit_field(u, "gated") is False for u in units.values())
         ),
         "ood_resampled_at_block_granularity": (
             bool(units)
-            and all(u.get("block_key") in RS.BLOCK_GRANULARITY_COLUMNS for u in units.values())
+            and all(
+                _unit_field(u, "block_key") in RS.BLOCK_GRANULARITY_COLUMNS for u in units.values()
+            )
             and ood.get("unit_key") in RS.BLOCK_GRANULARITY_COLUMNS
         ),
         # ── nothing unpinned was quietly pinned ──
@@ -1092,9 +1094,18 @@ def derive_clauses(report: Mapping[str, Any]) -> dict[str, bool]:
         # ── the published statistics are RE-DERIVED, not read back out ──
         "in_distribution_ece_is_its_own_reliability_tables_mean": _ece_matches_reliability(ind),
         "ood_macro_average_is_the_admissible_units_mean": _macro_matches_units(ood, units),
-        "ood_admissibility_is_the_pinned_min_n_rule": _admissibility_matches_min_n(ood, units),
+        "ood_admissibility_is_the_pinned_min_n_rule": _admissibility_matches_min_n(
+            ood, units, scope
+        ),
         "bootstrap_replicates_are_not_a_cost_knob": _bootstrap_not_cost_knobbed(ind, ood, units),
     }
+
+
+def _unit_field(unit: Any, key: str) -> Any:
+    """``unit[key]`` for a mapping, else ``None`` — a malformed unit is a verdict, not a raise
+    (reviewer A, round 12: a non-mapping unit raised ``AttributeError`` out of three clauses).
+    """
+    return unit.get(key) if isinstance(unit, Mapping) else None
 
 
 #: Re-derivations compare floats that were summed in a different order from the producer's,
@@ -1104,15 +1115,28 @@ def derive_clauses(report: Mapping[str, Any]) -> dict[str, bool]:
 REDERIVATION_TOL = 1e-12
 
 
+def _finite_real(value: Any) -> float | None:
+    """``value`` as a finite float, or ``None`` — never an exception.
+
+    ⚠ Round 12: `math.isfinite(10**400)` and `float(10**400)` RAISE ``OverflowError``, so a
+    JSON integer too large for a double turned several clauses into crash sites; the
+    validator's contract is a verdict, never a raise.
+    """
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    try:
+        out = float(value)
+    except OverflowError:
+        return None
+    return out if math.isfinite(out) else None
+
+
 def _close(a: Any, b: Any, tol: float = REDERIVATION_TOL) -> bool:
     """``a`` and ``b`` are both real, finite, and equal to within ``tol`` (absolute or relative)."""
-    if isinstance(a, bool) or isinstance(b, bool):
+    fa, fb = _finite_real(a), _finite_real(b)
+    if fa is None or fb is None:
         return False
-    if not isinstance(a, (int, float)) or not isinstance(b, (int, float)):
-        return False
-    if not (math.isfinite(a) and math.isfinite(b)):
-        return False
-    return math.isclose(float(a), float(b), rel_tol=tol, abs_tol=tol)
+    return math.isclose(fa, fb, rel_tol=tol, abs_tol=tol)
 
 
 def _ece_matches_reliability(ind: Mapping[str, Any]) -> bool:
@@ -1139,13 +1163,28 @@ def _ece_matches_reliability(ind: Mapping[str, Any]) -> bool:
         return False
     if not all(isinstance(b, Mapping) for b in bins):
         return False
+    n_rows = ind.get("n")
+    if not isinstance(n_rows, int) or isinstance(n_rows, bool) or n_rows <= 0:
+        return False
     try:
         debiased = 0.0
         plugin = 0.0
+        positives = 0
         for b in bins:
             acc, conf, m, w = float(b["acc"]), float(b["conf"]), int(b["n"]), float(b["weight"])
-            if m <= 0:
+            if m <= 0 or not all(math.isfinite(v) for v in (acc, conf, w)):
                 return False
+            # ⚠ Round 12: `weight` is DERIVED (n / N) and was only checked to sum to 1, so
+            # moving weight between bins and re-summing `ece` forged a lower gated number
+            # (0.006811 -> 0.004149) with every row's own `n` untouched. And `acc` is a count
+            # over `n`, so `acc * n` must be a whole number of positives and the rows' counts
+            # must add up to the gated rung's own `n_positive`.
+            if not _close(w, m / n_rows):
+                return False
+            k = acc * m
+            if abs(k - round(k)) > 1e-6:
+                return False
+            positives += round(k)
             gap = abs(acc - conf)
             # `metrics.reliability_bins`' own definition, recomputed rather than read back.
             sigma = math.sqrt(max(conf * (1.0 - conf), 0.0) / m)
@@ -1158,8 +1197,9 @@ def _ece_matches_reliability(ind: Mapping[str, Any]) -> bool:
             debiased += w * recomputed
             plugin += w * gap
         n_binned = sum(int(b["n"]) for b in bins)
-        weight = sum(float(b["weight"]) for b in bins)
-    except (KeyError, TypeError, ValueError):
+    except (KeyError, TypeError, ValueError, OverflowError):
+        return False
+    if positives != ind.get("n_positive"):
         return False
     # The table's SHAPE is part of the estimator D11 pins: `ece_n_bins` is asserted as a field
     # by `ece_estimator_matches_adr_d11`, but nothing tied it to the table actually shipped, so
@@ -1167,21 +1207,23 @@ def _ece_matches_reliability(ind: Mapping[str, Any]) -> bool:
     n_bins = ind.get("ece_n_bins")
     if not isinstance(n_bins, int) or isinstance(n_bins, bool):
         return False
-    n_rows = ind.get("n")
-    if not isinstance(n_rows, int) or isinstance(n_rows, bool):
-        return False
     if len(bins) != min(n_rows, n_bins):
         return False
     concentration = ind.get("bin_concentration")
     if isinstance(concentration, Mapping) and concentration.get("n_bins") != len(bins):
         return False
+    # ⚠ Round 12: `(ind.get("ece_ci") or {}).get(...)` RAISED on a list or a string.
+    ece_ci = ind.get("ece_ci")
+    if not isinstance(ece_ci, Mapping):
+        return False
     return (
         _close(ind.get("ece"), debiased)
         and _close(ind.get("ece_plugin"), plugin)
-        and _close(weight, 1.0, tol=1e-9)
+        # (Round 12 dropped the separate "weights sum to 1" check: with every row's weight
+        # bound to n / N above, the sum is 1 exactly when the rows cover N — which is this.)
         and n_binned == n_rows
         # the reported interval must be an interval ABOUT the reported point
-        and _close((ind.get("ece_ci") or {}).get("point"), ind.get("ece"))
+        and _close(ece_ci.get("point"), ind.get("ece"))
     )
 
 
@@ -1203,34 +1245,107 @@ def _macro_matches_units(ood: Mapping[str, Any], units: Mapping[str, Any]) -> bo
     adm = _admissible_units(units)
     if not adm:
         return False
-    try:
-        mean = math.fsum(float(u["ood_ece"]) for u in adm) / len(adm)
-    except (KeyError, TypeError, ValueError):
-        return False
+    points: list[float] = []
+    for unit in adm:
+        # ⚠ Round 12: the macro was re-derived from the units' `ood_ece`, and nothing tied
+        # `ood_ece` to anything — so editing one unit's value and the macro consistently
+        # moved the D17(c) statistic 0.188214 -> 0.191714 (under the 0.02 margin) with zero
+        # problems. The producer computes `ood_ece` and `ci.point` as the SAME number by
+        # construction (`calib.ece.ood_ece`), and an L1 calibration error lives in [0, 1].
+        # A consistent forge of BOTH is out of reach of any in-report check; that is what
+        # `rederive_against_sidecars` binds against the committed score sidecars.
+        value = _finite_real(unit.get("ood_ece"))
+        unit_ci = unit.get("ci")
+        if value is None or not 0.0 <= value <= 1.0 or not isinstance(unit_ci, Mapping):
+            return False
+        if not _close(unit_ci.get("point"), value):
+            return False
+        points.append(value)
+    mean = math.fsum(points) / len(points)
     return _close(macro.get("point"), mean) and macro.get("n_blocks") == len(adm)
 
 
-def _admissibility_matches_min_n(ood: Mapping[str, Any], units: Mapping[str, Any]) -> bool:
+def _admissibility_matches_min_n(
+    ood: Mapping[str, Any], units: Mapping[str, Any], scope: Mapping[str, Any]
+) -> bool:
     """Each unit's ``admissible`` flag is the pinned min-N rule applied to its own count.
 
     ``n_units_admissible`` gates which units enter the macro average, so a hand-set flag (or a
     hand-set count) silently changes the published statistic without changing any per-unit
     number. ADR-0005 A2 pins the floor; the flag must be that floor's verdict, not a field.
+
+    ⚠ Round 12: the flag was checked against ``n_positives`` — itself a field — and nothing
+    checked the census around it. Lowering one unit's ``n_positives`` below the floor,
+    clearing its point and decrementing the two counts moved the D17(c) macro 0.188 -> 0.170
+    with zero problems, while ``n_units_sub_min_n``, ``adjudicable_fraction``, the D13
+    per-unit class and ``by_phylum`` all still described the honest report. Every summary
+    the report carries of the same census must now agree with the units, and the units' row
+    counts must add up to the rows the report says it scored. (The per-unit counts themselves
+    are bound to the committed score sidecars by ``rederive_against_sidecars``.)
     """
     if not units:
         return False
     floor = ood.get("min_n")
     if floor != COV.OOD_ECE_MIN_N:
         return False
-    for unit in units.values():
+    n_records_total = 0
+    for name, unit in units.items():
         if not isinstance(unit, Mapping):
             return False
-        n_pos = unit.get("n_positives")
-        if not isinstance(n_pos, int) or isinstance(n_pos, bool):
+        n_pos, n_rec = unit.get("n_positives"), unit.get("n_records")
+        if not all(isinstance(v, int) and not isinstance(v, bool) for v in (n_pos, n_rec)):
+            return False
+        if not 0 <= n_pos <= n_rec:
             return False
         if unit.get("admissible") is not (n_pos >= COV.OOD_ECE_MIN_N):
             return False
-    return ood.get("n_units_admissible") == len(_admissible_units(units))
+        if unit.get("admissibility_class") != COV.classify_order(n_pos):
+            return False
+        if unit.get("unit") != name:
+            return False
+        n_records_total += n_rec
+    n_adm = len(_admissible_units(units))
+    d13 = ood.get("d13_adjudication")
+    cond_ii = d13.get("condition_ii_min_n") if isinstance(d13, Mapping) else None
+    per_unit = cond_ii.get("per_unit") if isinstance(cond_ii, Mapping) else None
+    if per_unit != {name: unit.get("admissibility_class") for name, unit in units.items()}:
+        return False
+    try:
+        by_phylum = _stratify_by_phylum(units)
+    except (KeyError, TypeError, ValueError, OverflowError):
+        return False
+    return (
+        ood.get("n_units") == len(units)
+        and ood.get("n_units_admissible") == n_adm
+        and ood.get("n_units_sub_min_n") == len(units) - n_adm
+        and _close(ood.get("adjudicable_fraction"), n_adm / len(units))
+        and _same_summary(ood.get("by_phylum"), by_phylum)
+        and scope.get("n_loo_holdout_rows_scored") == n_records_total
+    )
+
+
+def _same_summary(recorded: Any, derived: Any) -> bool:
+    """Structural equality, with floats compared to :data:`REDERIVATION_TOL`.
+
+    The committed RNA-FM report's Firmicutes mean differs from a recomputation by one ULP
+    (…732 vs …734): same values, different summation order. Exact ``==`` on a float re-derived
+    in another order is the clause that fires on an honest report.
+    """
+    if isinstance(derived, Mapping):
+        return (
+            isinstance(recorded, Mapping)
+            and set(recorded) == set(derived)
+            and all(_same_summary(recorded[k], derived[k]) for k in derived)
+        )
+    if isinstance(derived, list):
+        return (
+            isinstance(recorded, list)
+            and len(recorded) == len(derived)
+            and all(_same_summary(a, b) for a, b in zip(recorded, derived, strict=True))
+        )
+    if isinstance(derived, float):
+        return _close(recorded, derived)
+    return type(recorded) is type(derived) and recorded == derived
 
 
 def _bootstrap_not_cost_knobbed(
@@ -1288,13 +1403,10 @@ def _bootstrap_not_cost_knobbed(
     for interval in intervals:
         if _is_not_block_resamplable(interval):
             continue
-        bounds = (interval.get("lower"), interval.get("point"), interval.get("upper"))
-        if not all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in bounds):
+        lo, point, hi = (_finite_real(interval.get(k)) for k in ("lower", "point", "upper"))
+        if lo is None or point is None or hi is None:
             return False
-        lo, point, hi = bounds
-        if any(not math.isfinite(float(v)) for v in bounds):
-            return False
-        if not float(lo) <= float(point) <= float(hi):
+        if not lo <= point <= hi:
             return False
     return True
 
@@ -1312,12 +1424,51 @@ def _unit_replicates_account(
     requested = unit.get("n_boot_requested")
     survived = unit_ci.get("n_boot")
     dropped = unit.get("n_boot_dropped")
-    ints = (requested, survived, dropped)
+    n_blocks, n_singletons = unit.get("n_blocks"), unit.get("n_blocks_of_size_one")
+    ints = (requested, survived, dropped, n_blocks, n_singletons)
     if not all(isinstance(v, int) and not isinstance(v, bool) and v >= 0 for v in ints):
         return False
     if requested != budget:
         return False
-    return survived + dropped == requested
+    # ⚠ Round 12: the interval's own `n_blocks` must be the unit's. The A1 exemption and the
+    # ledger both read counts the INTERVAL reports about itself, so a 47-block unit could
+    # claim `{n_blocks: 1, n_boot: 0, NaN, NaN}` and be excused its interval entirely.
+    if unit_ci.get("n_blocks") != n_blocks or n_singletons > n_blocks:
+        return False
+    if survived + dropped != requested:
+        return False
+    if _is_not_block_resamplable(unit_ci):
+        # A1: nothing was drawn (its signature is `n_boot == 0`), so the whole budget is
+        # "dropped" by `grade_ood_units`' accounting — honest only on a unit that really has
+        # < 2 blocks, which the binding above has just established. Exempt from the
+        # drop-plausibility bound, which describes replicates that WERE drawn.
+        return True
+    return dropped == 0 or _drops_are_plausible(dropped, requested, n_blocks, n_singletons)
+
+
+#: Below this expected count of dropped replicates, any drop at all is a contradiction.
+_NEGLIGIBLE_EXPECTED_DROPS = 1e-6
+
+
+def _drops_are_plausible(dropped: int, requested: int, n_blocks: int, n_singletons: int) -> bool:
+    """A dropped replicate is possible only on the census `grade_ood_units` itself explains.
+
+    ``block_bootstrap`` draws ``n_blocks`` blocks with replacement per replicate, and the
+    leave-one-out kernel excludes by ROW uid — so a replicate is non-finite exactly when every
+    draw lands on the same ONE-ROW block: probability ``s * B**-B`` for ``s`` singleton
+    blocks of ``B``. The committed reports agree (B=3, s=1: 7 dropped vs 7.4 expected; B=3,
+    s=2: 19 vs 14.8). ⚠ Round 12: the ledger closed on any split, so a 47-block unit could
+    report one surviving replicate and 199 "dropped" and certify an interval collapsed onto its
+    point — the "single replicate" case round 11 claimed to stop. Where the expected number of
+    drops is negligible, a reported drop is refused.
+    """
+    if n_singletons == 0 or n_blocks < 2:
+        return False
+    try:
+        expected = requested * n_singletons * float(n_blocks) ** (-n_blocks)
+    except OverflowError:
+        return False
+    return expected >= _NEGLIGIBLE_EXPECTED_DROPS
 
 
 def _is_not_block_resamplable(interval: Mapping[str, Any]) -> bool:
@@ -1331,12 +1482,9 @@ def _is_not_block_resamplable(interval: Mapping[str, Any]) -> bool:
     n_blocks, n_boot = interval.get("n_blocks"), interval.get("n_boot")
     if not isinstance(n_blocks, int) or isinstance(n_blocks, bool) or n_blocks >= 2:
         return False
-    if n_boot != 0:
+    if n_boot != 0 or isinstance(n_boot, bool):
         return False
-    point = interval.get("point")
-    if not isinstance(point, (int, float)) or isinstance(point, bool):
-        return False
-    if not math.isfinite(float(point)):
+    if _finite_real(interval.get("point")) is None:
         return False
     lo, hi = interval.get("lower"), interval.get("upper")
     return all(isinstance(v, float) and math.isnan(v) for v in (lo, hi))
@@ -1376,6 +1524,239 @@ def _env_lock_clause(report: Mapping[str, Any]) -> bool:
     """
     expected = env_lock_for_graded_arm((report.get("scoring") or {}).get("load"))
     return bool(expected) and report.get("env_lock") == expected
+
+
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+
+
+def rederive_against_sidecars(
+    report: Mapping[str, Any],
+    *,
+    repo_root: str | Path = _REPO_ROOT,
+    select_bandwidth: bool = False,
+) -> list[str]:
+    """Re-derive a GATE-2 report's published numbers from the score sidecars it names.
+
+    :func:`validate_report` can only check a report against ITSELF, and P3-17 review round 12
+    proved where that stops: editing one unit's ``ood_ece`` together with its own
+    ``ci.point`` and the macro is internally consistent, so no in-report clause can see it —
+    yet it moves the ADR-0005 D17(c) statistic across its 0.02 margin. The evidence those
+    numbers were computed from is committed: ``scoring.in_distribution_scores`` and
+    ``scoring.loo_scores`` (per-row logits, labels, rungs, units and blocks), each hashed into
+    ``provenance.inputs``. This binds the report to those exact bytes
+    (:func:`sidecar_binding_problems`), re-runs the shipped estimators on them
+    (:func:`rederive_from_sidecars`) and returns every disagreement
+    (:func:`rederivation_problems`) ([[gate-must-bind-to-upstream-evidence]]).
+
+    ``select_bandwidth=False`` re-uses each unit's RECORDED kernel bandwidth (~35 s per report,
+    almost all of it the 5,763-row Lactobacillales unit) and checks the recorded
+    log-likelihood at it. ``True`` also re-runs the bandwidth selection (~2.5 min more), which
+    proves the recorded bandwidth is the selector's choice — what a consumer of the D17(c)
+    margin (P3-18) should run before reading it. Intervals are not re-derived: the
+    200-replicate kernel bootstrap is the expensive half, and :func:`derive_clauses` already
+    binds each interval to its point, its replicate ledger and its unit's census.
+
+    Returns problems; never raises on a malformed report.
+    """
+    problems = sidecar_binding_problems(report, repo_root=repo_root)
+    if problems:
+        return problems
+    derived = rederive_from_sidecars(report, repo_root=repo_root, select_bandwidth=select_bandwidth)
+    return rederivation_problems(report, derived)
+
+
+def sidecar_binding_problems(
+    report: Mapping[str, Any], *, repo_root: str | Path = _REPO_ROOT
+) -> list[str]:
+    """The sidecars and the env lock a report names exist, and hash to what it recorded."""
+    root = Path(repo_root)
+    scoring, prov = report.get("scoring"), report.get("provenance")
+    if not isinstance(scoring, Mapping) or not isinstance(prov, Mapping):
+        return ["the report lacks scoring / provenance blocks"]
+    inputs = prov.get("inputs") if isinstance(prov.get("inputs"), Mapping) else {}
+    problems: list[str] = []
+    for role, rel in _sidecar_paths(scoring).items():
+        if not isinstance(rel, str) or not (root / rel).is_file():
+            problems.append(f"{role} score sidecar {rel!r} is not a file under {root}")
+        elif inputs.get(rel) != PROV.sha256_file(root / rel):
+            problems.append(
+                f"{role} score sidecar {rel!r} does not hash to provenance.inputs[{rel!r}] — "
+                "the report is not about this evidence"
+            )
+    lock = report.get("env_lock")
+    if not isinstance(lock, str) or not (root / lock).is_file():
+        problems.append(f"env_lock {lock!r} is not a file under {root}")
+    elif prov.get("env_lock_hash") != PROV.env_lock_hash(root / lock):
+        problems.append(f"provenance.env_lock_hash is not the sha256 of {lock!r}")
+    return problems
+
+
+def _sidecar_paths(scoring: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        "in_distribution": scoring.get("in_distribution_scores"),
+        "leave_clade_out": scoring.get("loo_scores"),
+    }
+
+
+def rederive_from_sidecars(
+    report: Mapping[str, Any],
+    *,
+    repo_root: str | Path = _REPO_ROOT,
+    select_bandwidth: bool = False,
+) -> dict[str, Any]:
+    """The expensive half: the shipped estimators re-run on the sidecars the report names.
+
+    Reads from the report only WHICH sidecars and arm to use and — when
+    ``select_bandwidth`` is False — each unit's recorded bandwidth; every number returned is
+    recomputed. A sidecar that cannot be read is reported under ``"problems"``, not raised.
+    """
+    root = Path(repo_root)
+    scoring = report.get("scoring") if isinstance(report.get("scoring"), Mapping) else {}
+    ood = report.get("ood") if isinstance(report.get("ood"), Mapping) else {}
+    recorded_units = ood.get("units") if isinstance(ood.get("units"), Mapping) else {}
+    gate = report.get("gate") if isinstance(report.get("gate"), Mapping) else {}
+    arm = scoring.get("arm")
+    paths = _sidecar_paths(scoring)
+    derived: dict[str, Any] = {
+        "problems": [],
+        "gate": None,
+        "units": {},
+        "select": select_bandwidth,
+    }
+    try:
+        in_dist = load_scores(root / str(paths["in_distribution"]), str(arm))
+        loo = load_scores(root / str(paths["leave_clade_out"]), str(arm))
+    except (OSError, KeyError, TypeError, ValueError) as exc:
+        derived["problems"].append(f"a score sidecar could not be read for arm {arm!r}: {exc}")
+        return derived
+
+    # ── the gated in-distribution read (D11) ──
+    rungs = in_dist["rungs"]
+    if rungs is None:
+        derived["problems"].append("the in-distribution sidecar carries no rungs, so T has no fit")
+        return derived
+    fit = R.temperature_scale(in_dist["logits"], in_dist["labels"], rung=rungs)
+    temperature = float(fit.temperature)
+    posterior = R.calibrated_posterior(in_dist["logits"], temperature=temperature)
+    p_all = [float(v) for v in posterior[R.NAMED_POSTERIOR_KEY]]
+    idx = [i for i, rung in enumerate(rungs) if rung == GATE_RUNG]
+    y = [int(in_dist["labels"][i]) for i in idx]
+    p = [p_all[i] for i in idx]
+    n_bins = gate.get("ece_n_bins")
+    if not isinstance(n_bins, int) or isinstance(n_bins, bool) or n_bins <= 0:
+        n_bins = ECE_N_BINS
+    derived["temperature"] = temperature
+    derived["gate"] = {
+        "n": len(idx),
+        "n_positive": int(sum(y)),
+        "ece": M.binned_ece(y, p, n_bins, debias=True),
+        "ece_plugin": M.binned_ece(y, p, n_bins, debias=False),
+        "reliability": M.reliability_bins(y, p, n_bins),
+    }
+
+    # ── the leave-clade-out read (D13) ──
+    meta = loo["meta"]
+    unit_of, block_of = meta.get("units"), meta.get("blocks")
+    if not (
+        isinstance(unit_of, list)
+        and isinstance(block_of, list)
+        and len(unit_of) == len(block_of) == len(loo["row_ids"])
+    ):
+        derived["problems"].append("the leave-clade-out sidecar carries no per-row units / blocks")
+        return derived
+    loo_post = R.calibrated_posterior(loo["logits"], temperature=temperature)
+    loo_p = [float(v) for v in loo_post[R.NAMED_POSTERIOR_KEY]]
+    buckets: dict[str, dict[str, list]] = {}
+    for i, name in enumerate(unit_of):
+        bucket = buckets.setdefault(str(name), {"y": [], "p": [], "b": []})
+        bucket["y"].append(int(loo["labels"][i]))
+        bucket["p"].append(loo_p[i])
+        bucket["b"].append(block_of[i])
+    for name in sorted(buckets):
+        bandwidth: float | None = None
+        if not select_bandwidth:
+            unit = recorded_units.get(name)
+            bandwidth = _finite_real(unit.get("bandwidth")) if isinstance(unit, Mapping) else None
+            if bandwidth is None or bandwidth <= 0.0:
+                derived["problems"].append(
+                    f"ood.units[{name!r}] records no usable bandwidth to re-derive at"
+                )
+                continue
+        bucket = buckets[name]
+        derived["units"][name] = ECE.ood_ece(
+            bucket["y"],
+            bucket["p"],
+            bucket["b"],
+            block_key=OOD_BLOCK_KEY,
+            bandwidth=bandwidth,
+            n_boot=1,
+            seed=BOOTSTRAP_SEED,
+        )
+    return derived
+
+
+#: The per-unit fields :func:`rederivation_problems` compares. The interval is excluded on
+#: purpose (see :func:`rederive_against_sidecars`); ``bandwidth`` is included because in
+#: selection mode it is itself re-derived.
+_REDERIVED_UNIT_FIELDS = (
+    "n_records",
+    "n_positives",
+    "n_blocks",
+    "admissible",
+    "ood_ece",
+    "inadmissible_point",
+    "bandwidth",
+    "bandwidth_loo_log_likelihood",
+)
+
+
+def rederivation_problems(report: Mapping[str, Any], derived: Mapping[str, Any]) -> list[str]:
+    """The cheap half: every published number against its re-derivation. Never raises."""
+    problems = list(derived.get("problems") or [])
+    gate = report.get("gate") if isinstance(report.get("gate"), Mapping) else {}
+    ood = report.get("ood") if isinstance(report.get("ood"), Mapping) else {}
+    cal = gate.get("calibration") if isinstance(gate.get("calibration"), Mapping) else {}
+    if derived.get("gate") is None:
+        return problems or ["nothing was re-derived"]
+    if not _close(cal.get("temperature"), derived.get("temperature"), tol=1e-9):
+        problems.append(
+            f"gate.calibration.temperature {cal.get('temperature')!r} != "
+            f"{derived.get('temperature')!r} re-fitted on the sidecar's calib rows"
+        )
+    for key, value in derived["gate"].items():
+        if not _same_summary(gate.get(key), value):
+            problems.append(f"gate.{key} does not re-derive from the in-distribution sidecar")
+    units = ood.get("units") if isinstance(ood.get("units"), Mapping) else {}
+    rederived = derived.get("units") or {}
+    if set(units) != set(rederived) and not derived.get("problems"):
+        problems.append(
+            f"ood.units names {len(units)} orders but the sidecar re-derives "
+            f"{len(rederived)}: missing {sorted(set(rederived) - set(units))!r}, "
+            f"extra {sorted(set(units) - set(rederived))!r}"
+        )
+    points: list[float] = []
+    for name in sorted(rederived):
+        out = rederived[name]
+        unit = units.get(name)
+        if not isinstance(unit, Mapping):
+            continue
+        for key in _REDERIVED_UNIT_FIELDS:
+            if not _same_summary(unit.get(key), out.get(key)):
+                problems.append(
+                    f"ood.units[{name!r}].{key} = {unit.get(key)!r} does not re-derive from "
+                    f"the leave-clade-out sidecar ({out.get(key)!r})"
+                )
+        if out.get("admissible") is True:
+            points.append(float(out["ood_ece"]))
+    macro = ood.get("macro_average") if isinstance(ood.get("macro_average"), Mapping) else {}
+    if not points:
+        problems.append("no admissible unit re-derives, so the macro average has no support")
+    elif not _close(macro.get("point"), math.fsum(points) / len(points)):
+        problems.append(
+            f"ood.macro_average.point {macro.get('point')!r} != "
+            f"{math.fsum(points) / len(points)!r} re-derived from the leave-clade-out sidecar"
+        )
+    return problems
 
 
 def validate_report(report: Mapping[str, Any]) -> list[str]:

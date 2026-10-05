@@ -1399,45 +1399,49 @@ def env_lock_for_scored_arms(
     """
     if not load_records:
         raise RuntimeError("no arms were scored, so no environment can be named for them")
-    recorded = sorted({str(r["backbone"]) for r in load_records.values() if r.get("backbone")})
-    silent = [name for name, r in load_records.items() if not r.get("backbone")]
-    if recorded and silent:
+    # ⚠ Round 11: `backbone` is a WRITTEN key and `base_model_name_or_path` is the repo id
+    # the weights were actually adapted from. Trusting the first without checking the
+    # second made the stamp and the clause that grades it circular — a sidecar recording
+    # `backbone: rinalmo-giga` beside `base_model: multimolecule/rnafm` named, hashed and
+    # self-certified the production lock for RNA-FM weights, which is the exact defect A15
+    # exists to stop ([[gate-must-bind-to-upstream-evidence]]).
+    contradicted = sorted(name for name, r in load_records.items() if _load_contradicts_itself(r))
+    if contradicted:
         raise RuntimeError(
-            f"arms {sorted(silent)!r} record no backbone while {recorded!r} do; the ones that "
-            "spoke must not answer for the ones that did not"
+            f"arms {contradicted!r} record a backbone that their own base_model_name_or_path "
+            "contradicts; a load record that contradicts itself is not evidence and is refused"
         )
-    if len(recorded) > 1:
+    # ⚠ Round 12: each arm is resolved through BOTH routes — its written key, else its own
+    # base model — exactly as `_backbone_key_from_load` and gate2's validator resolve it.
+    # Reading the written key alone made a record carrying only its base model count as
+    # *silent*, so the shipped `gate2_ece` DAG could not regenerate its own report: re-running
+    # `score-loo` writes `backbone`, the untouched pre-A15 in-distribution sidecar does not,
+    # and the pair was refused as "spoke vs did not" although both resolve to the same model.
+    resolved = {name: _backbone_key_from_load(r) for name, r in load_records.items()}
+    keys = sorted({k for k in resolved.values() if k})
+    silent = sorted(name for name, k in resolved.items() if not k)
+    if len(keys) > 1:
         raise RuntimeError(
-            f"the scored arms record backbones {recorded!r}; a single report cannot name the "
+            f"the scored arms resolve to backbones {keys!r}; a single report cannot name the "
             "environment for more than one of them"
         )
-    if recorded:
-        if declared_backbone is not None and str(declared_backbone) != recorded[0]:
-            raise RuntimeError(
-                f"backbone {declared_backbone!r} was declared but the scored arms record "
-                f"{recorded[0]!r}; the recorded evidence wins and the disagreement is refused"
-            )
-        # ⚠ Round 11: `backbone` is a WRITTEN key and `base_model_name_or_path` is the repo id
-        # the weights were actually adapted from. Trusting the first without checking the
-        # second made the stamp and the clause that grades it circular — a sidecar recording
-        # `backbone: rinalmo-giga` beside `base_model: multimolecule/rnafm` named, hashed and
-        # self-certified the production lock for RNA-FM weights, which is the exact defect A15
-        # exists to stop ([[gate-must-bind-to-upstream-evidence]]).
-        contradicted = sorted(
-            {
-                key
-                for r in load_records.values()
-                if (key := _backbone_key_for_repo_id(r.get("base_model_name_or_path"))) is not None
-                and key != recorded[0]
-            }
+    if keys and silent:
+        raise RuntimeError(
+            f"arms {silent!r} evidence no backbone while the others resolve to {keys!r}; the "
+            "ones that spoke must not answer for the ones that did not"
         )
-        if contradicted:
+    if keys:
+        # ⚠ Round 10: a declaration is checked against the RESOLVED evidence, which includes
+        # the base model — comparing it only against `backbone`, the one field the pre-A15
+        # sidecars lack, made the "a contradicting declaration is refused" contract vacuous
+        # for exactly the sidecars `--scored-backbone` exists for.
+        if declared_backbone is not None and str(declared_backbone) != keys[0]:
             raise RuntimeError(
-                f"the scored arms record backbone {recorded[0]!r} but their own "
-                f"base_model_name_or_path resolves to {contradicted!r}; a load record that "
-                "contradicts itself is not evidence and is refused"
+                f"backbone {declared_backbone!r} was declared but the scored arms' recorded "
+                f"evidence resolves to {keys[0]!r}; the recorded evidence wins and the "
+                "disagreement is refused"
             )
-        return T.env_lock_for(recorded[0])
+        return T.env_lock_for(keys[0])
     if declared_backbone is None:
         raise RuntimeError(
             "no scored arm records a backbone, so the environment cannot be re-derived. This "
@@ -1446,33 +1450,7 @@ def env_lock_for_scored_arms(
             "sidecar. It is NOT defaulted to production — that guess is exactly the defect "
             "this function exists to stop."
         )
-    # ⚠ Round 10: the "a declaration that contradicts a record is refused" contract above was
-    # VACUOUS for exactly the sidecars this parameter exists for. It compared `declared` only
-    # against `backbone`, the one field the pre-A15 sidecars do not carry — so on those files
-    # every declaration was accepted, including one naming a backbone whose env cannot load the
-    # weights being graded. Those sidecars DO carry `base_model_name_or_path`, which the
-    # ADR-0002 allow-list maps to exactly one key, so the contradiction is checkable after all.
-    # Being *asked* for the wrong base is the same defect as inheriting it.
-    declared = str(declared_backbone)
-    from_repo = sorted(
-        {
-            key
-            for r in load_records.values()
-            if (key := _backbone_key_for_repo_id(r.get("base_model_name_or_path"))) is not None
-        }
-    )
-    if len(from_repo) > 1:
-        raise RuntimeError(
-            f"the scored arms' base models resolve to backbones {from_repo!r}; a single report "
-            "cannot name the environment for more than one of them"
-        )
-    if from_repo and declared != from_repo[0]:
-        raise RuntimeError(
-            f"backbone {declared!r} was declared but the scored arms' recorded base model "
-            f"resolves to {from_repo[0]!r}; the recorded evidence wins and the disagreement "
-            "is refused"
-        )
-    return T.env_lock_for(declared)
+    return T.env_lock_for(str(declared_backbone))
 
 
 def _backbone_key_from_load(load: Mapping[str, Any] | None) -> str | None:
@@ -1482,13 +1460,23 @@ def _backbone_key_from_load(load: Mapping[str, Any] | None) -> str | None:
     same contract — a record whose two fields disagree evidences nothing, because a
     contradiction is not a vote.
     """
-    rec = load or {}
-    declared = rec.get("backbone")
-    from_repo = _backbone_key_for_repo_id(rec.get("base_model_name_or_path"))
-    if declared and from_repo and str(declared) != from_repo:
+    if _load_contradicts_itself(load):
         return None
-    key = declared or from_repo
+    rec = load if isinstance(load, Mapping) else {}
+    key = rec.get("backbone") or _backbone_key_for_repo_id(rec.get("base_model_name_or_path"))
     return str(key) if key else None
+
+
+def _load_contradicts_itself(load: Any) -> bool:
+    """The record names one backbone and was adapted from another's base model.
+
+    A non-mapping record is *silent*, not contradictory — a verdict, never a crash site.
+    """
+    if not isinstance(load, Mapping):
+        return False
+    declared = load.get("backbone")
+    from_repo = _backbone_key_for_repo_id(load.get("base_model_name_or_path"))
+    return bool(declared and from_repo and str(declared) != from_repo)
 
 
 def _backbone_key_for_repo_id(repo_id: Any) -> str | None:

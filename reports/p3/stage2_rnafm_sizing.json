@@ -60,6 +60,7 @@
   },
   "gradient_checkpointing": {
     "batch_size": 1,
+    "comparison_skipped_code": "port_cannot_run_checkpointing",
     "comparison_skipped_reason": "gradient checkpointing is not usable on backbone 'rnafm', so there is no 'on' arm to compare against: RAISES: this port adds its absolute position embeddings IN PLACE (modeling_rnafm.py:728) and checkpointing makes the embedding output a leaf requiring grad -> 'a leaf Variable that requires grad is being used in an in-place operation'. Measured on a cluster A4000 2026-08-21 (SLURM job 1370, then isolated to a 2x2 against rotary rinalmo-giga, which is unaffected)",
     "off_peak_gib": null,
     "on_peak_gib": null,

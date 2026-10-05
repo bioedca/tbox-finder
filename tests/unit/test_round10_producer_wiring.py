@@ -100,9 +100,16 @@ def test_the_resolver_is_actually_called_before_the_sidecar_is_written() -> None
         and any(isinstance(t, ast.Name) and t.id == "resolved_backbone" for t in n.targets)
     ]
     assert assigned, "`resolved_backbone` is never assigned"
-    assert any(
-        _calls(a.value, "resolve_checkpoint_backbone") for a in assigned
-    ), "`resolved_backbone` is assigned from something other than `resolve_checkpoint_backbone`"
+    # ⚠ Round 12: `any(_calls(...))` searched the value for the call ANYWHERE, so
+    # `resolve_checkpoint_backbone(...) and BR.PRODUCTION_BACKBONE` passed while every sidecar
+    # recorded rinalmo-giga. EVERY assignment's whole value must BE the call, with the
+    # checkpoint's own recorded base model as its evidence
+    # ([[ast-pin-must-check-contents-not-shape]]).
+    for a in assigned:
+        assert ast.unparse(a.value) == (
+            "resolve_checkpoint_backbone(recorded_base, requested=backbone, "
+            "where=str(adapter_dir))"
+        ), f"line {a.lineno}: `resolved_backbone` = {ast.unparse(a.value)!r}"
 
 
 # --------------------------------------------------------------------------------------- #
@@ -130,7 +137,11 @@ def test_the_training_report_stamps_the_BACKBONES_lock_not_the_module_constant()
     digests = _dict_value(tree, "env_lock_sha256")
     assert digests, "no `env_lock_sha256` is written"
     for digest in digests:
-        assert "env_lock_for(cfg.backbone)" in ast.unparse(digest), ast.unparse(digest)
+        # ⚠ Round 12: a SUBSTRING check, so `_env_lock_sha256(env_lock_for(cfg.backbone) and
+        # ENV_LOCK)` — which hashes the production lock — passed. Equality, like the pin above.
+        assert ast.unparse(digest) == "_env_lock_sha256(env_lock_for(cfg.backbone))", ast.unparse(
+            digest
+        )
 
 
 # --------------------------------------------------------------------------------------- #
@@ -201,6 +212,15 @@ def test_loaded_from_registry_is_derived_from_the_injected_base_model() -> None:
             "the registry flag is no longer derived from whether a base model was injected: "
             f"{rendered!r}"
         )
+    # ⚠ Round 12: only the ASSIGNMENT was pinned, so the writer
+    # `"loaded_from_registry": bool(backbone_loaded_from_registry or True)` stayed green — the
+    # docstring's "nothing guarded the writer" was still true. Every writer is pinned too.
+    writers = _dict_value(tree, "loaded_from_registry")
+    assert writers, "lora_harness.py writes no `loaded_from_registry` key"
+    for value in writers:
+        assert (
+            ast.unparse(value) == "bool(backbone_loaded_from_registry)"
+        ), f"line {value.lineno}: `loaded_from_registry` = {ast.unparse(value)!r}"
 
 
 # --------------------------------------------------------------------------------------- #
@@ -222,9 +242,12 @@ def test_gate2_main_raises_on_a_sidecar_identity_mismatch() -> None:
         and any(isinstance(t, ast.Name) and t.id == "mismatched" for t in n.targets)
     ]
     assert assigned, "`main` no longer computes `mismatched`"
-    assert any(
-        _calls(a.value, "sidecar_identity_mismatches") for a in assigned
-    ), "`mismatched` is computed from something other than `sidecar_identity_mismatches`"
+    # ⚠ Round 12: the pin checked the callee's NAME, so comparing `in_dist` with ITSELF —
+    # which can never mismatch — passed. The two arguments must be the two sidecars' loads.
+    for a in assigned:
+        assert ast.unparse(a.value) == (
+            "sidecar_identity_mismatches(in_dist.get('load'), loo.get('load'))"
+        ), f"line {a.lineno}: `mismatched` = {ast.unparse(a.value)!r}"
     guards = [
         n
         for n in ast.walk(main[0])

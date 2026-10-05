@@ -49,6 +49,7 @@ from tbox_finder import report_schema as RSCH
 from tbox_finder.models.rna_backbone_registry import (
     COMPARATOR_BACKBONE,
     PRODUCTION_BACKBONE,
+    backbone_for_repo_id,
     backbone_summary,
     resolve_backbone,
 )
@@ -106,6 +107,12 @@ SIZING_ARTIFACT_OWNERS: dict[str, str] = {
     PRODUCTION_BACKBONE: DEFAULT_OUT,
     COMPARATOR_BACKBONE: "reports/p3/stage2_rnafm_sizing.json",
 }
+
+#: The repo the owned artifacts above are relative TO. ⚠ Round 12: `Path(owned).resolve()`
+#: resolved them against the CURRENT DIRECTORY, so the ownership guard compared the requested
+#: `--out` with a path that does not exist whenever the producer ran from anywhere but the repo
+#: root — and an absolute `--out` naming the real committed artifact walked straight past it.
+_REPO_ROOT = Path(__file__).resolve().parents[3]
 
 #: Why the checkpointing on/off comparison was skipped, as a VALUE rather than as a sentence.
 #: `checkpointing_skip_is_earned` used to accept the skip by looking for the substring "did not
@@ -383,6 +390,12 @@ def derive_clauses(report: Mapping[str, Any]) -> dict[str, bool]:
                 and "did not fit" in str(ckpt.get("comparison_skipped_reason") or "")
             )
         )
+        # ⚠ Round 12: the code is a FIELD the schema-4 producer always writes, and it must be
+        # the code that producer would have written for the report's own evidence. Without
+        # this, a schema-4 report with no `comparison_skipped_code` at all earned its skip via
+        # the usability disjunct — which is how the hand-promoted RNA-FM sizing artifact came
+        # to read schema 4 while lacking the field schema 4 introduced.
+        and _skip_code_is_the_producers(report, ckpt)
         # ⚠ EVERY measurement must record the flag, and every one must agree with the
         # usability fact. The `for ... if m.get(...) is not None` form this replaces went
         # vacuously TRUE the moment `measure_batch` stopped recording the key — the sole
@@ -413,12 +426,53 @@ def derive_clauses(report: Mapping[str, Any]) -> dict[str, bool]:
             and bool(ckpt.get("usable_on_this_backbone"))
             is bool((report.get("backbone") or {}).get("gradient_checkpointing_usable"))
         ),
-        "provenance_env_lock_is_the_backbones": (
-            bool(prov.get("env_lock"))
-            and prov.get("env_lock") == (report.get("backbone") or {}).get("env_lock")
-        ),
+        "provenance_env_lock_is_the_backbones": _env_lock_is_the_backbones(report, prov),
     }
     return {k: bool(v) for k, v in clauses.items()}
+
+
+def _skip_code_is_the_producers(report: Mapping[str, Any], ckpt: Mapping[str, Any]) -> bool:
+    """A schema-4+ report carries `comparison_skipped_code`, and it is the one `run_sizing`
+    writes for the report's own evidence: the port-cannot-checkpoint code when the port cannot,
+    no code when both arms were measured, the did-not-fit code otherwise. Legacy schemas
+    predate the field and are excused it — and only it."""
+    if report.get("schema_version") in LEGACY_SCHEMAS_WITHOUT_SKIP_CODE:
+        return True
+    if "comparison_skipped_code" not in ckpt:
+        return False
+    if ckpt.get("usable_on_this_backbone") is False:
+        expected = SKIP_PORT_CANNOT_CHECKPOINT
+    elif ckpt.get("on_peak_gib") is not None and ckpt.get("off_peak_gib") is not None:
+        expected = None
+    else:
+        expected = SKIP_ON_ARM_DID_NOT_FIT
+    return ckpt.get("comparison_skipped_code") == expected
+
+
+def _env_lock_is_the_backbones(report: Mapping[str, Any], prov: Mapping[str, Any]) -> bool:
+    """`provenance.env_lock` is the lock the ALLOW-LIST pins for the sized backbone.
+
+    ⚠ Round 12: the first version compared `provenance.env_lock` with `backbone.env_lock` —
+    two WRITTEN fields in the same report — so setting both to the production lock on the
+    RNA-FM artifact (key and repo id left as `rnafm`) validated clean. That is the round-11
+    lesson again: a re-derivation that reads a derived field is not a re-derivation. The lock
+    is now resolved from `backbone.key` through the registry, and `backbone.repo_id` must
+    resolve to that same key ([[gate-must-bind-to-upstream-evidence]]).
+    """
+    block = report.get("backbone")
+    if not isinstance(block, Mapping):
+        return False
+    key, repo_id = block.get("key"), block.get("repo_id")
+    if not isinstance(key, str) or not isinstance(repo_id, str):
+        return False
+    try:
+        spec = resolve_backbone(key)
+    except (KeyError, ValueError):
+        return False
+    from_repo = backbone_for_repo_id(repo_id)
+    if from_repo is None or from_repo.key != spec.key:
+        return False
+    return prov.get("env_lock") == spec.env_lock and block.get("env_lock") == spec.env_lock
 
 
 def validate_report(report: Mapping[str, Any]) -> list[str]:
@@ -761,7 +815,7 @@ def _run(argv: Sequence[str] | None = None) -> int:
     # backbone that produced it, and only that backbone may write it.
     requested_out = Path(args.out).resolve()
     for owner, owned in SIZING_ARTIFACT_OWNERS.items():
-        if requested_out != Path(owned).resolve():
+        if requested_out != (_REPO_ROOT / owned).resolve():
             continue
         if str(args.backbone) != owner:
             parser.error(

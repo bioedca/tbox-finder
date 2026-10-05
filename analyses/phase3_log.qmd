@@ -8061,3 +8061,97 @@ reformatting) and were caught only because the sabotage came back GREEN — the
 only ADR edit is structural (bullet placement).
 
 **Commit.** see PR (P3-17, review round 11).
+
+## Step P3-17 (review round 12) — 2026-10-05: a report can be checked against itself only so far; the sidecars it names are the rest
+
+**Inputs.** Branch head `bbf029b` (round 11), brought up to date by merging `origin/main`
+(`4bcf40b`: #135/#136, LFS + `ci.yml` + P2 sbatch only, no file overlap; CI green on the merge
+result). The CodeRabbit app had reviewed `e330460..bbf029b` with *"No actionable comments"*; the
+CodeRabbit CLI is dead on *"You are not a member of the requested organization"* (no wait time,
+cannot be waited out). On the round-10/11 precedent — a clean round is a floor — three
+independent read-only adversarial reviewers were aimed at round 11's own commit: **A** (the
+gate2 clause set) 5 findings, 2 major; **B** (the eval/sizing env-lock path) 6 findings,
+2 major; **C** (test vacuity) **41 sabotages, 20 GREEN**. The two majors on the D17(c)
+statistic were re-executed by hand before any change.
+
+**Process.** *The number P3-18 reads was still forgeable, and no in-report clause can close it.*
+Editing one unit's `ood_ece` together with the macro moved the RNA-FM D17(c) macro
+0.188214 → 0.191714 — the RiNALMo − RNA-FM gap 0.023103 → 0.019603, **under** the 0.02 margin —
+with `validate_report` silent. Demoting a unit below the A2 floor and updating the census to
+match moved it 0.188 → 0.170. The cheap holes are closed in-report (a unit's `ood_ece` must be
+its own `ci.point` and lie in [0, 1]; every summary of the census — `n_units_sub_min_n`,
+`adjudicable_fraction`, the D13 per-unit table, each unit's class, `by_phylum`, and Σ `n_records`
+against the rows scored — must agree with the units). But a demotion with *every* summary
+updated is internally consistent, so `validate_report` returns zero problems on it — asserted
+in a test, so that limit stays on the record. What closes it is the evidence:
+`gate2.rederive_against_sidecars` binds a report to the sha256 of the two score sidecars and the
+env lock it names, then re-runs the shipped estimators on those bytes (T re-fitted on `calib`,
+D11's binned ECE and reliability table on `test`, `calib.ece.ood_ece` per held-out order) and
+compares every published number. Both committed GATE-2 reports re-derive with **zero problems**,
+the macro bit-exactly (0.1882143888847712 and 0.21131708166715119) — at each unit's recorded
+bandwidth (~35 s/report, now in CI) **and** with the bandwidth selection re-run
+(`select_bandwidth=True`, ~100 s/report, run locally here), so every recorded bandwidth is the
+selector's own choice. ⏭ P3-18 should run the selection mode before reading the margin.
+
+*The rest of A.* Row `weight` was derived (n/N) and only summed to 1, so a weight shuffle forged
+the gated ECE 0.006811 → 0.004149; each weight is now n/N and Σ acc·n must equal `n_positive`.
+The A1 exemption and the replicate ledger read counts the *interval* reports about itself, so a
+47-block unit could claim `{n_blocks: 1, n_boot: 0, NaN}`, or report 1 survivor + 199 drops; the
+interval's `n_blocks` is now bound to its unit's, and a drop is refused where the unit's own
+census makes one implausible (a replicate is non-finite only when all `B` draws hit one
+singleton block, p = s·B^−B: 7 dropped vs 7.4 expected and 19 vs 14.8 on the two B = 3 units).
+Four inputs that RAISED now return problems (`ece_ci` a string/list, a 10^400 integer, a
+non-mapping `load`, a non-mapping unit).
+
+*B.* `env_lock_for_scored_arms` resolved arms by the written `backbone` only, so the shipped
+`gate2_ece` DAG could not regenerate its report: a re-run `score-loo` writes `backbone`, the
+untouched pre-A15 in-distribution sidecar does not, and the pair was refused as "spoke vs did
+not" although both resolve to RiNALMo through their base model. Each arm now resolves by both
+routes, exactly as the validators do. The sizing env-lock clause compared two *written* fields
+(both set to the production lock on the RNA-FM report validated clean); it now resolves
+`backbone.key` through the allow-list and requires `repo_id` to agree. The ownership guard
+resolved its owned paths against the CWD; it now resolves them against the repo root. And the
+hand-promoted RNA-FM sizing artifact read schema 4 without the `comparison_skipped_code` schema 4
+introduced — the field is added (`port_cannot_run_checkpointing`, what `run_sizing` writes for a
+port that cannot checkpoint; no measured value touched) and a schema-4 report must carry the
+code its producer would write.
+
+*C.* Twenty sabotages of rounds 10–11 stayed green, almost all for one of two reasons: a
+**neighbouring check masked the one under test** (a forge that left `ece_ci.point` detached was
+caught by that check, so reverting the clause to round 10's logic stayed green), or an **AST pin
+checked shape, not contents** (`resolve_checkpoint_backbone(...) and BR.PRODUCTION_BACKBONE`,
+`bool(x or True)`, `_env_lock_sha256(... and ENV_LOCK)`, and `sidecar_identity_mismatches(in_dist,
+in_dist)` all passed). Every masked guard now has a forge consistent everywhere else, so only it
+can object; the four pins assert the exact expression. The eval clause is now exercised through
+`derive_clauses`, not its helper. Two fixtures were degenerate: the synthetic GATE-2 report's
+scope claimed 7 LOO rows beside an OOD block that scored 87, and the honest-A1 control handed a
+47-block unit a 1-block interval — the very forge A found accepted. The redundant weight-sum
+check is dropped (with each weight bound to n/N it can no longer fail on its own).
+
+**Outputs.** `src/tbox_finder/calib/gate2.py` (`rederive_against_sidecars`,
+`sidecar_binding_problems`, `rederive_from_sidecars`, `rederivation_problems`, `_finite_real`,
+`_same_summary`, `_drops_are_plausible`, `_unit_field`; four clauses strengthened, no clause
+added or renamed, so no schema bump), `src/tbox_finder/stage2/{eval,sizing}.py`,
+`reports/p3/stage2_rnafm_sizing.json` (+1 field), `tests/unit/test_gate2.py`,
+`tests/unit/test_round10_producer_wiring.py`, `tests/ml/test_stage2_sizing.py` (27 new tests,
+several parametrized).
+
+**Validation.** Both honest committed GATE-2 reports `validate_report → []` and
+`rederive_against_sidecars → []` in both modes; the RNA-FM eval and sizing artifacts validate
+clean. Every reviewer-A and -B tamper replayed and caught. **44 sabotages, all RED against their
+named test**, each restore byte-identical by sha256 with `__pycache__` purged — after five came
+back GREEN on the first pass, every one a test whose forge a neighbouring check caught first, and
+each fixed by making the forge consistent (the [[sabotage-attribution-names-the-test]] lesson,
+again). ruff + black CI-exact clean. Full local tier **14 failed / 6,854 passed** — FAILED set
+identical to a matched baseline worktree at `645ebde` (14 ↔ 14, `comm` empty both directions;
+extracted counts checked against the summary lines). ⚠ Not fixed, booked: reviewer B's
+pre-existing validator crash sites in `stage2/eval.py` (18) and `stage2/sizing.py` (9), and the
+production `reports/p3/stage2_sizing.json` failing its own validator on its recommendation-basis
+string — both reproduce on `main`, neither was introduced by this branch.
+
+**Decisions.** None. No ADR value, threshold, pin or measured number changed. The sidecar binding
+deliberately re-derives points, not intervals (the 200-replicate kernel bootstrap is the
+expensive half and the in-report clauses already bind each interval to its point, ledger and
+census).
+
+**Commit.** see PR (P3-17, review round 12).
