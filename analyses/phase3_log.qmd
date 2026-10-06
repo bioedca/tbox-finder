@@ -8562,3 +8562,26 @@ and both were valid.
 **Decisions.** None. No number, threshold or calibration changed.
 
 **Commit.** see PR (P3-17a, review round 5).
+
+## Step P3-17a (review round 6) — 2026-10-06: path containment is checked on the resolved path
+
+**Inputs.** Commit `3917e9e`. CI was green on it. CodeRabbit had **auto-paused** its reviews
+because of the run of commits: the status read *success — Review paused* and no review ran.
+A manual `@coderabbitai review` (CLAUDE.md §5.1) produced one valid minor finding. The CLI
+produced one **major** finding, which was declined as factually wrong.
+
+**Process.**
+1. **App (valid).** `recorded_path` checked containment lexically, so a relative path that
+   climbs out (`../x`) came back unchanged and passed. It now resolves the path before
+   relativising, and the test adds a relative path that leaves the repository. Every path the
+   rule and the fixture pass still records identically, so no artifact changes.
+2. **CLI (declined, factually wrong).** The CLI said `reports/p3/cm_confirmer_items.json` ends
+   its root object with `},`. Every JSON file in the PR parses with `json.load`, and the named
+   file ends `]}\n`. CI loads it in several tests. It is a single 520 KB line, which the CLI most
+   likely saw truncated ([[review-findings-can-be-factually-wrong]]).
+
+**Validation.** 63 tests pass. One new sabotage is RED; **36 in total**.
+
+**Decisions.** None.
+
+**Commit.** see PR (P3-17a, review round 6).

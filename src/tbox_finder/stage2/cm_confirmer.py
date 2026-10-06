@@ -144,7 +144,9 @@ def recorded_path(path: str | Path) -> str:
     """
     from tbox_finder.stage2 import eval as E
 
-    recorded = E.repo_relative(path)
+    # Resolve first: a relative path that climbs out (``../x``) would otherwise come back as
+    # the same relative string and pass a lexical check.
+    recorded = E.repo_relative(Path(path).resolve())
     if Path(recorded).is_absolute():
         raise ConfirmerError(f"refusing to record an absolute path outside the repository: {path}")
     return recorded

@@ -11,6 +11,7 @@ import copy
 import hashlib
 import json
 import math
+import os
 import shutil
 from pathlib import Path
 
@@ -107,6 +108,10 @@ def test_an_absolute_path_is_recorded_repo_relative(tmp_path):
     outside.write_text("{}", encoding="utf-8")
     with pytest.raises(C.ConfirmerError, match="outside the repository"):
         C.recorded_path(outside)
+    climbing = os.path.relpath(outside, Path.cwd())  # a RELATIVE path that leaves the repo
+    assert not Path(climbing).is_absolute()
+    with pytest.raises(C.ConfirmerError, match="outside the repository"):
+        C.recorded_path(climbing)
 
 
 def test_search_flags_score_every_query_on_the_given_strand():
