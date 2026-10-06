@@ -8508,3 +8508,24 @@ summary.
 **Decisions.** None.
 
 **Commit.** see PR (P3-17a, review round 3).
+
+## Step P3-17a (review round 4) — 2026-10-06: recorded paths are repo-relative by construction
+
+**Inputs.** Commit `738f2db`. CI was green on it, and the app's incremental review reported *No
+actionable comments*. The CLI raised one minor hygiene finding: `build_queries`, `search` and the
+ablation's CM records serialised paths with `str(path)`. An absolute argument would therefore
+write this machine's checkout path into a manifest, `DONE.json` or the report, all of which can
+be committed or published.
+
+**Process.** All three sites now record `recorded_path(path)`, which delegates to
+`stage2.eval.repo_relative` and also imports in the infernal env. A new test passes an absolute
+worktree path and asserts that the repo root appears nowhere in the written manifest. Every
+committed artifact already recorded relative paths: the regenerated fixture is byte-identical,
+and the report needs no regeneration.
+
+**Validation.** 63 tests pass, and the new one goes RED with `str(path)` restored. **34 sabotages
+in total, all RED.**
+
+**Decisions.** None.
+
+**Commit.** see PR (P3-17a, review round 4).

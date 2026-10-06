@@ -87,6 +87,17 @@ def test_write_query_shards_refuses_a_query_that_is_not_its_own_address(tmp_path
     C.write_query_shards({C.query_id("ACGU"): "ACGU"}, tmp_path, n_shards=1, sources={})
 
 
+def test_an_absolute_path_is_recorded_repo_relative(tmp_path):
+    """A committed manifest or DONE.json must never carry this machine's checkout path."""
+    absolute = (_REPO / "data/external/refs/RF00230.cm").resolve()
+    assert C.recorded_path(absolute) == "data/external/refs/RF00230.cm"
+    seq = _spec()["records"][0]["rna_sequence"]
+    manifest = C.write_query_shards(
+        {C.query_id(seq): seq}, tmp_path, n_shards=1, sources={"x": C.recorded_path(absolute)}
+    )
+    assert str(_REPO) not in json.dumps(manifest)
+
+
 def test_search_flags_score_every_query_on_the_given_strand():
     flags = C.search_flags()
     assert "--toponly" in flags and "--max" in flags

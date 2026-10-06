@@ -38,7 +38,7 @@ def main() -> int:
         queries,
         out / "queries",
         n_shards=N_SHARDS,
-        sources={"queries": str(FIXTURE / "queries.json")},
+        sources={"queries": C.recorded_path(FIXTURE / "queries.json")},
     )
     C.search(query_dir=out / "queries", out_dir=out / "tblout", jobs=4)
     for tbl in sorted((out / "tblout").glob("*/*.tblout")):

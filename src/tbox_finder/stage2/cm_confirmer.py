@@ -135,6 +135,18 @@ def query_id(sequence: str) -> str:
     return hashlib.sha256(normalise_rna(sequence).encode("ascii")).hexdigest()
 
 
+def recorded_path(path: str | Path) -> str:
+    """A path as the repository sees it, for a committed or published artifact.
+
+    Delegates to :func:`stage2.eval.repo_relative`, so an absolute path under either checkout
+    root never publishes this machine's home directory or layout. A path outside the repo
+    is returned unchanged.
+    """
+    from tbox_finder.stage2 import eval as E
+
+    return E.repo_relative(path)
+
+
 def collect_queries(sequences: Sequence[str]) -> dict[str, str]:
     """``{query_id: rna}`` over ``sequences``, deduplicated by content, sorted by id."""
     out: dict[str, str] = {}
@@ -219,8 +231,8 @@ def build_queries(
         out_dir,
         n_shards=n_shards,
         sources={
-            "dataset": {"path": str(dataset), "sha256": PROV.sha256_file(dataset)},
-            "payloads": {"path": str(payloads), "sha256": PROV.sha256_file(payloads)},
+            "dataset": {"path": recorded_path(dataset), "sha256": PROV.sha256_file(dataset)},
+            "payloads": {"path": recorded_path(payloads), "sha256": PROV.sha256_file(payloads)},
         },
     )
 
@@ -279,7 +291,9 @@ def search(
         "flags": search_flags(),
         # Content digests, not just paths: the tblouts are about THESE models, and a CM that
         # changed after the search must not be paired with bit scores from its predecessor.
-        "cms": {name: {"path": str(cm), "sha256": refs.content_sha256(cm)} for name, cm in cms},
+        "cms": {
+            name: {"path": recorded_path(cm), "sha256": refs.content_sha256(cm)} for name, cm in cms
+        },
         # Per (model, shard): the hit count and a digest of the DATA rows. Header comments
         # carry paths and a timestamp and are sanitised out of committed fixtures, so they are
         # deliberately outside the digest; a dropped or edited hit row is not.
@@ -1558,7 +1572,8 @@ def run_ablation(
     train_ids = [row[G2._ROW_ID] for row in split_rows if G2.training_admission(row)]
 
     cm_records = {
-        name: {"path": str(cm), "sha256": PROV.sha256_file(cm)} for name, cm in CONFIRMER_CMS
+        name: {"path": recorded_path(cm), "sha256": PROV.sha256_file(cm)}
+        for name, cm in CONFIRMER_CMS
     }
     load = {
         "confirmer": "cm_bit_score_platt",
