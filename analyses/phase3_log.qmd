@@ -8698,3 +8698,53 @@ ADR-0002 A15.
   carries no step.
 
 **Commit.** see PR (P3-15′-recon-b).
+
+## Step P3-15′-recon-b (review round 1) — 2026-10-06: Ships is derived, and completeness covers every pointer and weight file
+
+**Inputs.** Commit `0a68394`. CodeRabbit's app (*no actionable comments*) and CLI (*No
+findings*) were both clean, and CI was green. An independent read-only adversarial pass, run
+anyway, found **2 majors and 5 minors**, all reproduced:
+- **Major — the release set could be rewritten.** Flipping the shipped Stage-2 and
+  `stage1_production` to `no`, and a sweep point and the P1 smoke to `yes`, left
+  `validate_map` at `[]`. The "not shipped" guard only bit on the 4 rows whose provenance
+  speaks about shipping.
+- **Major — completeness missed a checkpoint with no sidecar.** A committed pointer whose
+  manifest held only `stage1.pt`, and an extra sweep weight with no sidecar, both validated
+  `[]`. That is job 1064's lost-sidecar failure mode.
+- **Minors:**
+  - a declared-future row could sit over a pointer outside the checkpoint roots;
+  - a weight the pointer does not track passed at manifest depth;
+  - 13 mutations survived the whole test file;
+  - four factual statements in A5 were wrong.
+
+**Process.**
+1. **Ships is derived in both directions** (`ShippedRule`, `default_shipped_rule`):
+   - Stage-1 ships iff it is `infer.scan.DEFAULT_CHECKPOINT`'s directory.
+   - Stage-2 ships iff it sits under `stage2.eval.DEFAULT_CKPT_ROOT` and its own provenance
+     `loss_aux_weight`/`optim_lr` equal `production_arm_config()`.
+   - Exactly one row of each stage must ship.
+2. **Completeness** now requires every committed pointer to be owned by a row, and every
+   weight file (`.pt/.pth/.ckpt/.bin/.safetensors`) and every `provenance.json` it tracks to be
+   named.
+3. **Rows must lie under the checkpoint roots.** Weight membership is checked at both depths.
+   Two pointers owning one checkpoint is reported as a problem rather than raised.
+4. **A5 prose corrected:**
+   - disclosure 3's report list: five committed reports carry `b629704d…`, not one;
+   - the RNA-FM row: `gated: true`;
+   - the no-aux row: uncalibratable control;
+   - **a new disclosure**: PRD §10.1 lists *"GATE-2 (P3 ECE)"* against the production
+     scanner, but P3-10 graded the Stage-2 posterior with no Stage-1 in the path. This
+     difference is not signed anywhere, so it is flagged, not resolved.
+
+**Validation.**
+- Tests: 63 passed with the real cache; 62 passed and 1 skipped without it.
+- Manifest depth `[]`; weights depth `[]` with 20/20 re-hashed.
+- **38 sabotages, each RED against the test named for it.** The set includes every mutation
+  the reviewer reported as surviving.
+- No row's Step, digest, Ships value or gate attribution changed.
+
+**Decisions.** The A5 text was edited after sign-off. The edits are a stronger mechanism and
+factual corrections, with no attribution changed, and they are recorded in A5's sign-off line.
+The new PRD §10.1 difference is reported to the user.
+
+**Commit.** see PR (P3-15′-recon-b, review round 1).

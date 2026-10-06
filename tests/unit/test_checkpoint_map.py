@@ -3,9 +3,9 @@
 The committed ADR table is validated against each checkpoint's own ``provenance.json``,
 reached through the committed ``.dvc`` pointers and the md5-addressed mini-cache under
 ``tests/fixtures/checkpoint_map``. Every check in ``validate_map`` is then broken alone, with
-the table consistent everywhere else, and must name its own problem. Weights depth (re-hashing
-the weight blobs) is exercised on a synthetic repo here and on the real cache by the
-existence-guarded test at the bottom.
+the table consistent everywhere else, and must name its own problem. Weights depth
+(re-hashing the weight blobs) is exercised on a synthetic repo here and on the real cache by
+the existence-guarded test at the bottom.
 """
 
 from __future__ import annotations
@@ -29,6 +29,8 @@ _TRACKED = M.git_tracked(_REPO)
 _PROD = "data/processed/checkpoints/stage1_production"
 _TWIN = "data/processed/checkpoints/stage1_gate4_twin"
 _SHIPPED_S2 = "data/processed/checkpoints/stage2_rinalmo/aux1.0_lr1e-4"
+#: Synthetic repos ship nothing; the committed map is always checked under the real rule.
+_NOSHIP = M.ShippedRule(stage1=None, stage2_root=None, aux_weight=1.0, lr=1e-4)
 
 
 def _validate(adr_text: str = _ADR, cache: Path = _FIXTURE, tracked=None, **kw) -> list[str]:
@@ -120,9 +122,15 @@ def test_a_wrong_weight_digest_is_refused():
 def test_an_omitted_weight_is_refused():
     line = _row_line(_ADR, _SHIPPED_S2)
     cell = M._split_row(line)[3]
-    bad = _edit_cell(_ADR, _SHIPPED_S2, 3, cell.split("<br>")[0])
+    kept, dropped = cell.split("<br>")
+    bad = _edit_cell(_ADR, _SHIPPED_S2, 3, kept)
     problems = _validate(bad)
-    assert len(problems) == 1 and problems[0].startswith(f"{_SHIPPED_S2}: Weights")
+    name = dropped.split("`")[1]
+    assert len(problems) == 2 and problems[0].startswith(f"{_SHIPPED_S2}: Weights")
+    assert problems[1] == (
+        f"{_SHIPPED_S2}/{name}: a weight file in "
+        "data/processed/checkpoints/stage2_rinalmo.dvc that no row names"
+    )
 
 
 def test_a_wrong_step_is_refused():
@@ -138,27 +146,38 @@ def test_a_wrong_dvc_md5_is_refused():
 
 def test_ships_yes_on_a_checkpoint_provenance_says_is_not_shipped():
     bad = _edit_cell(_ADR, _TWIN, 5, "yes")
-    assert _validate(bad) == [f"{_TWIN}: Ships 'yes' but its provenance records it as not shipped"]
+    assert _validate(bad) == [
+        f"{_TWIN}: Ships 'yes', but the shipped rule derives 'no'",
+        f"{_TWIN}: Ships 'yes' but its provenance records it as not shipped",
+    ]
 
 
 def test_a_comparator_cannot_be_marked_shipped():
     rnafm = "data/processed/checkpoints/stage2_rnafm/aux1.0_lr1e-4"
     assert _validate(_edit_cell(_ADR, rnafm, 5, "yes")) == [
-        f"{rnafm}: Ships 'yes' but its provenance records it as not shipped"
+        f"{rnafm}: Ships 'yes', but the shipped rule derives 'no'",
+        f"{rnafm}: Ships 'yes' but its provenance records it as not shipped",
     ]
 
 
 def test_a_missing_row_fails_completeness():
     bad = _ADR.replace(_row_line(_ADR, _TWIN) + "\n", "")
-    assert _validate(bad) == [f"{_TWIN}: has a provenance.json in {_TWIN}.dvc but no row"]
+    assert _validate(bad) == [f"{_TWIN}.dvc: committed checkpoint pointer named by no row"]
 
 
 def test_a_missing_sweep_point_row_fails_completeness():
     point = "data/processed/checkpoints/stage2_rinalmo/aux0.5_lr3e-4"
+    ptr = f"{Path(point).parent.as_posix()}.dvc"
     bad = _ADR.replace(_row_line(_ADR, point) + "\n", "")
-    assert _validate(bad) == [
-        f"{point}: has a provenance.json in {Path(point).parent.as_posix()}.dvc but no row"
-    ]
+    assert sorted(_validate(bad)) == sorted(
+        [
+            f"{point}/{w}: a weight file in {ptr} that no row names"
+            for w in ("lora_adapter/adapter_model.safetensors", "stage2_heads.pt")
+        ]
+        + [
+            f"{point}: has a provenance.json in {ptr} but no row",
+        ]
+    )
 
 
 def test_a_missing_single_file_pointer_row_fails_completeness():
@@ -235,6 +254,17 @@ def test_an_absent_cache_fails_closed(tmp_path):
         (lambda t: _edit_cell(t, _TWIN, 2, "`7869eec1`"), "32 hex"),
         (lambda t: _edit_cell(t, _TWIN, 3, "`stage1.pt` = `0140a8a3`"), "weight item"),
         (lambda t: _edit_cell(t, _TWIN, 0, _TWIN), "Checkpoint cell"),
+        (
+            lambda t: t.replace("|---|---|---|---|---|---|", "| a | b | c | d | e | f |"),
+            "delimiter",
+        ),
+        (lambda t: t.split(M.MAP_BEGIN)[0] + M.MAP_BEGIN + "\n| x |\n" + M.MAP_END, "no rows"),
+        (
+            lambda t: _edit_cell(
+                t, _TWIN, 3, f"`stage1.pt` = `{'a' * 64}`<br>`stage1.pt` = `{'b' * 64}`"
+            ),
+            "named twice",
+        ),
     ],
 )
 def test_malformed_tables_are_refused_while_parsing(mutate, match):
@@ -262,13 +292,15 @@ def _put(cache: Path, data: bytes, suffix: str = "") -> str:
     return h
 
 
-def _synthetic(tmp_path: Path, *, claimed_sha: str | None = None):
+def _synthetic(tmp_path: Path, *, claimed_sha: str | None = None, extra: dict | None = None):
     """A repo with one directory pointer holding ``ck/{stage1.pt, provenance.json}``."""
     root, cache = tmp_path / "repo", tmp_path / "cache"
     ck = "data/processed/checkpoints/toy"
     weights = b"toy-weights" * 1000
     sha = claimed_sha or hashlib.sha256(weights).hexdigest()
-    prov = json.dumps({"extra": {"step": "P9-01"}, "outputs": {f"{ck}/stage1.pt": sha}}).encode()
+    prov = json.dumps(
+        {"extra": extra or {"step": "P9-01"}, "outputs": {f"{ck}/stage1.pt": sha}}
+    ).encode()
     manifest = [
         {"md5": _put(cache, prov), "relpath": "provenance.json"},
         {"md5": _put(cache, weights), "relpath": "stage1.pt"},
@@ -293,7 +325,9 @@ def test_weights_depth_rehashes_every_blob(tmp_path):
     root, cache, adr, tracked, _ = _synthetic(tmp_path)
     stats: dict[str, int] = {}
     assert (
-        M.validate_map(M.parse_map(adr), root, cache, tracked, verify_weights=True, stats=stats)
+        M.validate_map(
+            M.parse_map(adr), root, cache, tracked, rule=_NOSHIP, verify_weights=True, stats=stats
+        )
         == []
     )
     assert stats == {"rehashed": 1}
@@ -303,10 +337,10 @@ def test_weights_depth_refuses_a_false_provenance_claim(tmp_path):
     lie = "f" * 64
     root, cache, adr, tracked, weights = _synthetic(tmp_path, claimed_sha=lie)
     # Manifest depth cannot see the lie: the row agrees with provenance.
-    assert M.validate_map(M.parse_map(adr), root, cache, tracked) == []
+    assert M.validate_map(M.parse_map(adr), root, cache, tracked, rule=_NOSHIP) == []
     stats: dict[str, int] = {}
     problems = M.validate_map(
-        M.parse_map(adr), root, cache, tracked, verify_weights=True, stats=stats
+        M.parse_map(adr), root, cache, tracked, rule=_NOSHIP, verify_weights=True, stats=stats
     )
     real = hashlib.sha256(weights).hexdigest()
     assert problems == [
@@ -329,8 +363,9 @@ def test_a_row_without_weights_on_a_weightless_provenance_is_refused(tmp_path):
     cells = M._split_row(line)
     cells[2], cells[3] = f"`{new_dir}`", "—"
     adr = adr.replace(line, "| " + " | ".join(cells) + " |")
-    assert M.validate_map(M.parse_map(adr), root, cache, tracked) == [
-        f"{ck}: provenance names no weight output under the checkpoint"
+    assert M.validate_map(M.parse_map(adr), root, cache, tracked, rule=_NOSHIP) == [
+        f"{ck}: provenance names no weight output under the checkpoint",
+        f"{ck}/stage1.pt: a weight file in {ck}.dvc that no row names",
     ]
 
 
@@ -338,7 +373,9 @@ def test_weights_depth_refuses_a_missing_weight_blob(tmp_path):
     root, cache, adr, tracked, weights = _synthetic(tmp_path)
     h = _md5(weights)
     (cache / "files/md5" / h[:2] / h[2:]).unlink()
-    problems = M.validate_map(M.parse_map(adr), root, cache, tracked, verify_weights=True)
+    problems = M.validate_map(
+        M.parse_map(adr), root, cache, tracked, rule=_NOSHIP, verify_weights=True
+    )
     assert len(problems) == 1 and "stage1.pt unreadable from the cache" in problems[0]
 
 
@@ -364,14 +401,16 @@ def test_single_file_pointer_needs_a_tracked_provenance(tmp_path):
     )
     rows = M.parse_map(adr)
     tracked = [f"{ck}/toy.pt.dvc", f"{ck}/provenance.json"]
-    assert M.validate_map(rows, root, tmp_path / "cache", tracked) == []
-    assert M.validate_map(rows, root, tmp_path / "cache", tracked[:1]) == [
+    assert M.validate_map(rows, root, tmp_path / "cache", tracked, rule=_NOSHIP) == []
+    assert M.validate_map(rows, root, tmp_path / "cache", tracked[:1], rule=_NOSHIP) == [
         f"{ck}: single-file pointer without a git-tracked provenance.json"
     ]
     _put(tmp_path / "cache", weights)
     stats: dict[str, int] = {}
     assert (
-        M.validate_map(rows, root, tmp_path / "cache", tracked, verify_weights=True, stats=stats)
+        M.validate_map(
+            rows, root, tmp_path / "cache", tracked, rule=_NOSHIP, verify_weights=True, stats=stats
+        )
         == []
     )
     assert stats == {"rehashed": 1}
@@ -383,6 +422,222 @@ def test_read_pointer_refuses_a_multi_output_file(tmp_path):
     )
     with pytest.raises(M.MapError, match="expected one md5 and one path"):
         M.read_pointer(tmp_path, "x.dvc")
+
+
+# --------------------------------------------- review round 1: derived Ships + scope
+
+
+@pytest.mark.parametrize(
+    "checkpoint, flip",
+    [
+        (_PROD, "no"),
+        (_SHIPPED_S2, "no"),
+        ("data/processed/checkpoints/stage2_rinalmo/aux0.0_lr3e-4", "yes"),
+        ("checkpoints/p1/seg_smoke", "yes"),
+    ],
+)
+def test_the_release_set_cannot_be_rewritten(checkpoint, flip):
+    """Ships is derived in both directions, on rows whose provenance says nothing about it."""
+    problems = _validate(_edit_cell(_ADR, checkpoint, 5, flip))
+    want = "no" if flip == "yes" else "yes"
+    assert f"{checkpoint}: Ships {flip!r}, but the shipped rule derives {want!r}" in problems
+
+
+def test_the_default_rule_is_the_code_s_and_names_the_two_shipped_rows():
+    rule = M.default_shipped_rule(_REPO)
+    assert rule.stage1 == _PROD
+    assert rule.stage2_root == "data/processed/checkpoints/stage2_rinalmo"
+    yes = {r.checkpoint for r in M.parse_map(_ADR) if r.ships == "yes"}
+    assert yes == {_PROD, _SHIPPED_S2}
+
+
+def test_a_shipped_config_that_matches_no_row_is_refused():
+    rule = M.default_shipped_rule(_REPO)
+    off = M.ShippedRule(rule.stage1, rule.stage2_root, rule.aux_weight, 3e-4 * 7)
+    problems = _validate(rule=off)
+    assert f"{_SHIPPED_S2}: Ships 'yes', but the shipped rule derives 'no'" in problems
+    assert any("0 rows match the shipped Stage-2 config" in p for p in problems)
+
+
+def test_a_shipped_stage1_with_no_row_is_refused():
+    rule = M.default_shipped_rule(_REPO)
+    gone = M.ShippedRule("data/processed/checkpoints/stage1_gone", rule.stage2_root, 1.0, 1e-4)
+    problems = _validate(rule=gone)
+    assert "data/processed/checkpoints/stage1_gone: the shipped Stage-1 is named by 0 rows" in (
+        problems
+    )
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [
+        {"step": "P9-01", "shipped": "NO. graded, not shipped"},
+        {"step": "P9-01", "role": "comparator"},
+    ],
+)
+def test_provenance_that_says_not_shipped_overrides_the_rule(tmp_path, extra):
+    """Isolates the provenance clause: the rule says yes, the sidecar says no."""
+    root, cache, adr, tracked, _ = _synthetic(tmp_path, extra=extra)
+    ck = "data/processed/checkpoints/toy"
+    adr = adr.replace("| toy gate | no |", "| toy gate | yes |")
+    rule = M.ShippedRule(stage1=ck, stage2_root=None, aux_weight=1.0, lr=1e-4)
+    assert M.validate_map(M.parse_map(adr), root, cache, tracked, rule=rule) == [
+        f"{ck}: Ships 'yes' but its provenance records it as not shipped"
+    ]
+
+
+def test_an_orphan_pointer_without_provenance_fails_completeness(tmp_path):
+    """Job 1064's failure mode: a checkpoint whose sidecar was lost has no provenance.json."""
+    root, cache, adr, tracked, _ = _synthetic(tmp_path)
+    orphan = "data/processed/checkpoints/orphan"
+    manifest = [{"md5": _put(cache, b"orphan-weights"), "relpath": "stage1.pt"}]
+    h = _put(cache, json.dumps(manifest).encode(), ".dir")
+    (root / f"{orphan}.dvc").write_text(f"outs:\n- md5: {h}.dir\n  nfiles: 1\n  path: orphan\n")
+    problems = M.validate_map(
+        M.parse_map(adr), root, cache, tracked + [f"{orphan}.dvc"], rule=_NOSHIP
+    )
+    assert problems == [f"{orphan}.dvc: committed checkpoint pointer named by no row"]
+
+
+def test_a_sidecarless_member_of_a_named_pointer_fails_completeness(tmp_path):
+    root, cache, adr, tracked, _ = _synthetic(tmp_path)
+    ck = "data/processed/checkpoints/toy"
+    pointer = M.read_pointer(root, f"{ck}.dvc")
+    entries = json.loads(M.read_blob(cache, pointer.md5, suffix=".dir"))
+    entries.append({"md5": _put(cache, b"extra"), "relpath": "aux2.0/stage2_heads.pt"})
+    h = _put(cache, json.dumps(entries).encode(), ".dir")
+    (root / f"{ck}.dvc").write_text(f"outs:\n- md5: {h}.dir\n  nfiles: 3\n  path: toy\n")
+    adr = adr.replace(pointer.md5, h)
+    assert M.validate_map(M.parse_map(adr), root, cache, tracked, rule=_NOSHIP) == [
+        f"{ck}/aux2.0/stage2_heads.pt: a weight file in {ck}.dvc that no row names"
+    ]
+
+
+@pytest.mark.parametrize("suffix", [".bin", ".ckpt", ".pth"])
+def test_other_weight_suffixes_count_for_completeness(tmp_path, suffix):
+    root, cache, adr, tracked, _ = _synthetic(tmp_path)
+    ck = "data/processed/checkpoints/toy"
+    pointer = M.read_pointer(root, f"{ck}.dvc")
+    entries = json.loads(M.read_blob(cache, pointer.md5, suffix=".dir"))
+    entries.append({"md5": _put(cache, b"w2"), "relpath": f"model{suffix}"})
+    h = _put(cache, json.dumps(entries).encode(), ".dir")
+    (root / f"{ck}.dvc").write_text(f"outs:\n- md5: {h}.dir\n  nfiles: 3\n  path: toy\n")
+    adr = adr.replace(pointer.md5, h)
+    assert M.validate_map(M.parse_map(adr), root, cache, tracked, rule=_NOSHIP) == [
+        f"{ck}/model{suffix}: a weight file in {ck}.dvc that no row names"
+    ]
+
+
+def test_a_row_outside_the_checkpoint_roots_is_refused():
+    row = f"| `models/stage1_gtdb_cpt` | P9-99 | `{M.DECLARED_FUTURE}` | — | nothing yet | no |"
+    bad = _ADR.replace(M.MAP_END, row + "\n" + M.MAP_END)
+    assert _validate(bad) == [
+        f"models/stage1_gtdb_cpt: outside the checkpoint roots {M.CHECKPOINT_ROOTS}"
+    ]
+
+
+@pytest.mark.parametrize(
+    "path", ["/abs/data/processed/checkpoints/x", "data/processed/checkpoints/../x"]
+)
+def test_non_relative_paths_are_refused(path):
+    row = f"| `{path}` | P9-99 | `{M.DECLARED_FUTURE}` | — | nothing yet | no |"
+    bad = _ADR.replace(M.MAP_END, row + "\n" + M.MAP_END)
+    assert _validate(bad) == [f"{path}: checkpoint path must be repo-relative"]
+
+
+def test_declared_future_over_an_existing_unpointed_path_is_refused(tmp_path):
+    root, cache, adr, tracked, _ = _synthetic(tmp_path)
+    fut = "data/processed/checkpoints/half_landed"
+    (root / fut).mkdir(parents=True)
+    row = f"| `{fut}` | P9-99 | `{M.DECLARED_FUTURE}` | — | nothing yet | no |"
+    adr = adr.replace(M.MAP_END, row + "\n" + M.MAP_END)
+    assert M.validate_map(M.parse_map(adr), root, cache, tracked, rule=_NOSHIP) == [
+        f"{fut}: declared-future, but the artifact or a pointer exists"
+    ]
+
+
+def test_declared_future_rows_carry_no_digests():
+    fut = "data/processed/checkpoints/stage1_future_example"
+    row = f"| `{fut}` | P9-99 | `{M.DECLARED_FUTURE}` | `x.pt` = `{'a' * 64}` | n | no |"
+    bad = _ADR.replace(M.MAP_END, row + "\n" + M.MAP_END)
+    assert _validate(bad) == [f"{fut}: declared-future rows carry no weight digests"]
+
+
+def test_two_pointers_owning_one_checkpoint_is_a_problem_not_a_crash(tmp_path):
+    root, cache, adr, tracked, _ = _synthetic(tmp_path)
+    ck = "data/processed/checkpoints/toy"
+    pointer = M.read_pointer(root, f"{ck}.dvc")
+    (root / ck).mkdir(parents=True)
+    (root / ck / "stage1.pt.dvc").write_text(f"outs:\n- md5: {'c' * 32}\n  path: stage1.pt\n")
+    problems = M.validate_map(
+        M.parse_map(adr), root, cache, tracked + [f"{ck}/stage1.pt.dvc"], rule=_NOSHIP
+    )
+    assert f"{ck}: owned by more than one pointer: [{pointer.dvc_file!r}, " in problems[0]
+
+
+def test_weight_membership_runs_at_manifest_depth(tmp_path):
+    """A provenance weight the pointer does not track is refused without re-hashing."""
+    root = tmp_path / "repo"
+    ck = "checkpoints/p9/toy"
+    (root / ck).mkdir(parents=True)
+    weights = b"w" * 10
+    other = "ab" * 32
+    (root / ck / "toy.pt.dvc").write_text(f"outs:\n- md5: {_md5(weights)}\n  path: toy.pt\n")
+    (root / ck / "provenance.json").write_text(
+        json.dumps({"extra": {"step": "P9-02"}, "outputs": {f"{ck}/toy_v2.pt": other}})
+    )
+    row = f"| `{ck}` | P9-02 | `{_md5(weights)}` | `toy_v2.pt` = `{other}` | toy | no |"
+    adr = "\n".join(
+        [
+            M.MAP_BEGIN,
+            "| " + " | ".join(M.COLUMNS) + " |",
+            "|---|---|---|---|---|---|",
+            row,
+            M.MAP_END,
+        ]
+    )
+    tracked = [f"{ck}/toy.pt.dvc", f"{ck}/provenance.json"]
+    assert M.validate_map(M.parse_map(adr), root, tmp_path / "cache", tracked, rule=_NOSHIP) == [
+        f"{ck}: toy_v2.pt is not in the pointer's manifest",
+        f"{ck}/toy.pt: a weight file in {ck}/toy.pt.dvc that no row names",
+    ]
+
+
+def test_a_manifest_repeating_a_relpath_is_refused(tmp_path):
+    root, cache, adr, tracked, _ = _synthetic(tmp_path)
+    ck = "data/processed/checkpoints/toy"
+    pointer = M.read_pointer(root, f"{ck}.dvc")
+    entries = json.loads(M.read_blob(cache, pointer.md5, suffix=".dir"))
+    h = _put(cache, json.dumps(entries + entries[:1]).encode(), ".dir")
+    (root / f"{ck}.dvc").write_text(f"outs:\n- md5: {h}.dir\n  nfiles: 3\n  path: toy\n")
+    problems = M.validate_map(
+        M.parse_map(adr.replace(pointer.md5, h)), root, cache, tracked, rule=_NOSHIP
+    )
+    assert problems and all("repeats a relpath" in p for p in problems)
+
+
+def test_export_fixture_reproduces_the_committed_fixture(tmp_path):
+    written = M.export_fixture(M.parse_map(_ADR), _REPO, _FIXTURE, tmp_path)
+    committed = sorted(
+        p.relative_to(_FIXTURE).as_posix() for p in _FIXTURE.rglob("*") if p.is_file()
+    )
+    assert written == committed
+    assert all((tmp_path / r).read_bytes() == (_FIXTURE / r).read_bytes() for r in written)
+
+
+def test_cli_exit_code_and_counts(monkeypatch, tmp_path, capsys):
+    assert M.main(["--repo-root", str(_REPO)]) == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["problems"] == [] and out["weights_rehashed"] == 0
+    # Weights depth against the fixture: the weight blobs are absent, so it must fail and
+    # must not claim a re-hash it never did.
+    assert M.main(["--repo-root", str(_REPO), "--verify-weights"]) == 1
+    out = json.loads(capsys.readouterr().out)
+    assert out["weights_rehashed"] == 0 and out["problems"]
+    bad = tmp_path / "adr.md"
+    bad.write_text(_edit_cell(_ADR, _TWIN, 1, "P2-99"), encoding="utf-8")
+    monkeypatch.setattr(M, "ADR_PATH", str(bad))
+    assert M.main(["--repo-root", str(_REPO)]) == 1
 
 
 # ------------------------------------------------- weights depth on the real DVC cache
@@ -397,6 +652,7 @@ _REQUIRE = os.environ.get("TBOX_REQUIRE_DVC_CACHE") == "1"
     reason="real DVC cache absent (CI does no dvc pull); TBOX_REQUIRE_DVC_CACHE=1 makes this fail",
 )
 def test_committed_map_weights_rehash_on_the_real_cache():
+    """Weights depth needs the weight blobs, which only the real cache has."""
     stats: dict[str, int] = {}
     assert _validate(cache=_REAL_CACHE, verify_weights=True, stats=stats) == []
     assert stats["rehashed"] == sum(len(r.weights) for r in M.parse_map(_ADR))

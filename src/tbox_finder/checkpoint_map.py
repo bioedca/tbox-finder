@@ -48,13 +48,14 @@ MAP_END = "<!-- checkpoint-map:end -->"
 #: The table's columns, in order. Parsing refuses any other header.
 COLUMNS = ("Checkpoint", "Step", "DVC md5", "Weights (sha256)", "Graded by", "Ships")
 
-#: Where trained checkpoints live. A committed ``.dvc`` pointer under any of these roots
-#: must be named by a row.
+#: Where trained checkpoints live. Every row must name a path under one of these roots, and
+#: every committed ``.dvc`` pointer under them must be named by a row.
 CHECKPOINT_ROOTS = ("data/processed/checkpoints", "checkpoints")
 
 #: File suffixes that count as weights. Every provenance output with one of these suffixes
-#: under a row's checkpoint must be named in that row's Weights cell.
-WEIGHT_SUFFIXES = (".pt", ".safetensors")
+#: under a row's checkpoint must be named in that row's Weights cell, and every tracked file
+#: with one must be named by some row.
+WEIGHT_SUFFIXES = (".pt", ".pth", ".ckpt", ".bin", ".safetensors")
 
 #: The Step/DVC-md5 cell value of a row whose artifact does not exist yet.
 DECLARED_FUTURE = "declared-future"
@@ -276,6 +277,64 @@ def _provenance_says_not_shipped(prov: dict) -> bool:
     return shipped.startswith("no") or extra.get("role") == "comparator"
 
 
+@dataclass(frozen=True)
+class ShippedRule:
+    """Which checkpoints ship, derived from the code that uses them rather than typed.
+
+    ``stage1`` is the canonical Stage-1 checkpoint directory (ADR-0005 A12), the one the
+    scanner loads by default. A Stage-2 row ships when it lives under ``stage2_root`` and its
+    own provenance records the ``(aux_weight, lr)`` the repo's ``conf/`` ships. ``None`` for
+    a stage means nothing of that stage ships (synthetic repos in tests); the production rule
+    sets both, and then exactly one row of each stage must ship.
+    """
+
+    stage1: str | None
+    stage2_root: str | None
+    aux_weight: float
+    lr: float
+
+    def is_stage2(self, checkpoint: str) -> bool:
+        return self.stage2_root is not None and checkpoint.startswith(self.stage2_root + "/")
+
+    def ships(self, checkpoint: str, prov: dict) -> bool:
+        if checkpoint == self.stage1:
+            return True
+        if self.is_stage2(checkpoint):
+            extra = prov.get("extra", {})
+            return (
+                extra.get("loss_aux_weight") == self.aux_weight and extra.get("optim_lr") == self.lr
+            )
+        return False
+
+
+def default_shipped_rule(repo_root: Path) -> ShippedRule:
+    """The rule as the shipped code defines it: ``infer.scan.DEFAULT_CHECKPOINT`` and
+    ``stage2.eval.production_arm_config()``. Imported lazily, because both modules pull in
+    numpy and this module is otherwise stdlib-only."""
+    from tbox_finder.infer.scan import DEFAULT_CHECKPOINT
+    from tbox_finder.stage2.eval import (
+        DEFAULT_CKPT_ROOT,
+        LOSS_CONF,
+        OPTIM_CONF,
+        production_arm_config,
+    )
+
+    cfg = production_arm_config(loss_conf=repo_root / LOSS_CONF, optim_conf=repo_root / OPTIM_CONF)
+    return ShippedRule(
+        stage1=Path(DEFAULT_CHECKPOINT).parent.as_posix(),
+        stage2_root=Path(DEFAULT_CKPT_ROOT).as_posix(),
+        aux_weight=cfg["aux_weight"],
+        lr=cfg["lr"],
+    )
+
+
+def _members(cache_dir: Path, pointer: Pointer) -> list[str]:
+    """Repo-relative paths of every file a pointer tracks."""
+    if not pointer.is_dir:
+        return [pointer.out_path]
+    return [f"{pointer.out_path}/{rel}" for rel in dir_manifest(cache_dir, pointer)]
+
+
 # ------------------------------------------------------------------------ validation
 
 
@@ -287,25 +346,40 @@ def validate_map(
     *,
     verify_weights: bool = False,
     stats: dict[str, int] | None = None,
+    rule: ShippedRule | None = None,
 ) -> list[str]:
     """Return every problem with ``rows``; ``[]`` means each row re-derives.
 
     ``tracked`` is the list of git-tracked paths (``git ls-files``). The pointer set is taken
-    from it, so an untracked ``.dvc`` file can neither satisfy nor escape the map. When
-    ``stats`` is given, ``stats["rehashed"]`` counts the weight blobs whose sha256 matched.
+    from it, so an untracked ``.dvc`` file can neither satisfy nor escape the map. ``rule``
+    defaults to :func:`default_shipped_rule`. When ``stats`` is given, ``stats["rehashed"]``
+    counts the weight blobs whose sha256 matched.
     """
     if stats is not None:
         stats["rehashed"] = 0
+    rule = rule or default_shipped_rule(repo_root)
+    roots = tuple(r.rstrip("/") + "/" for r in CHECKPOINT_ROOTS)
     problems: list[str] = []
     pointers = committed_pointers(repo_root, tracked)
     tracked_set = set(tracked)
     covered: set[str] = set()
+    named_weights: set[str] = set()
+    owned: set[str] = set()
+    shipped_stage1 = shipped_stage2 = 0
+    stage2_unread = False
     for row in rows:
         ck = row.checkpoint
         if Path(ck).is_absolute() or ".." in Path(ck).parts:
             problems.append(f"{ck}: checkpoint path must be repo-relative")
             continue
-        pointer = owning_pointer(ck, pointers)
+        if not ck.startswith(roots):
+            problems.append(f"{ck}: outside the checkpoint roots {CHECKPOINT_ROOTS}")
+            continue
+        try:
+            pointer = owning_pointer(ck, pointers)
+        except MapError as exc:
+            problems.append(str(exc))
+            continue
         if row.declared_future:
             # A declared-future row must be genuinely absent. Once a pointer or file exists,
             # the row has to be promoted, so the map cannot hide a real artifact.
@@ -320,6 +394,8 @@ def validate_map(
             problems.append(f"{ck}: no committed .dvc pointer tracks this path")
             continue
         covered.add(ck)
+        owned.add(pointer.dvc_file)
+        named_weights.update(f"{ck}/{w}" for w in row.weights)
         if row.dvc_md5 != pointer.md5:
             problems.append(f"{ck}: DVC md5 {row.dvc_md5} != {pointer.dvc_file}'s {pointer.md5}")
             continue
@@ -330,6 +406,7 @@ def validate_map(
             prov, blobs = load_provenance(repo_root, cache_dir, ck, pointer)
         except (OSError, MapError, ValueError, KeyError) as exc:
             problems.append(f"{ck}: provenance unreadable: {exc}")
+            stage2_unread |= rule.is_stage2(ck)
             continue
         step = prov.get("extra", {}).get("step")
         if row.step != step:
@@ -339,40 +416,59 @@ def validate_map(
             problems.append(f"{ck}: provenance names no weight output under the checkpoint")
         if row.weights != derived:
             problems.append(f"{ck}: Weights {row.weights} != provenance outputs {derived}")
+        # Ships is derived, in both directions: the yes-set is exactly what the rule says.
+        ships = rule.ships(ck, prov)
+        shipped_stage1 += ships and ck == rule.stage1
+        shipped_stage2 += ships and rule.is_stage2(ck)
+        if (row.ships == "yes") != ships:
+            want = "yes" if ships else "no"
+            problems.append(f"{ck}: Ships {row.ships!r}, but the shipped rule derives {want!r}")
         if row.ships == "yes" and _provenance_says_not_shipped(prov):
             problems.append(f"{ck}: Ships 'yes' but its provenance records it as not shipped")
-        if verify_weights:
-            for name, digest in derived.items():
-                md5 = blobs.get(f"{ck}/{name}")
-                if md5 is None:
-                    problems.append(f"{ck}: {name} is not in the pointer's manifest")
-                    continue
-                try:
-                    got = hashlib.sha256(read_blob(cache_dir, md5)).hexdigest()
-                except (OSError, MapError) as exc:
-                    problems.append(f"{ck}: {name} unreadable from the cache: {exc}")
-                    continue
-                if got != digest:
-                    problems.append(f"{ck}: {name} hashes to {got}, provenance says {digest}")
-                elif stats is not None:
-                    stats["rehashed"] += 1
+        for name, digest in derived.items():
+            # Membership needs only the manifest, so it runs at both depths.
+            md5 = blobs.get(f"{ck}/{name}")
+            if md5 is None:
+                problems.append(f"{ck}: {name} is not in the pointer's manifest")
+                continue
+            if not verify_weights:
+                continue
+            try:
+                got = hashlib.sha256(read_blob(cache_dir, md5)).hexdigest()
+            except (OSError, MapError) as exc:
+                problems.append(f"{ck}: {name} unreadable from the cache: {exc}")
+                continue
+            if got != digest:
+                problems.append(f"{ck}: {name} hashes to {got}, provenance says {digest}")
+            elif stats is not None:
+                stats["rehashed"] += 1
 
-    # Completeness: every committed checkpoint pointer, and every provenance.json inside a
-    # directory pointer, must be named by a non-future row.
+    stage1_bad = not any(p.startswith(f"{rule.stage1}:") for p in problems)
+    if rule.stage1 is not None and shipped_stage1 != 1 and stage1_bad:
+        problems.append(f"{rule.stage1}: the shipped Stage-1 is named by {shipped_stage1} rows")
+    if rule.stage2_root is not None and shipped_stage2 != 1 and not stage2_unread:
+        problems.append(
+            f"{rule.stage2_root}: {shipped_stage2} rows match the shipped Stage-2 config "
+            f"(aux_weight={rule.aux_weight}, lr={rule.lr}); exactly one must"
+        )
+
+    # Completeness: every committed checkpoint pointer must be named by a non-future row, and
+    # so must every weight file and every provenance.json it tracks. A checkpoint whose
+    # sidecar was lost (job 1064's failure mode) is caught by its weights, not its sidecar.
     for p in pointers:
-        if not p.is_dir:
-            if Path(p.out_path).parent.as_posix() not in covered and p.out_path not in covered:
-                problems.append(f"{p.dvc_file}: committed checkpoint pointer named by no row")
+        if p.dvc_file not in owned:
+            problems.append(f"{p.dvc_file}: committed checkpoint pointer named by no row")
             continue
         try:
-            manifest = dir_manifest(cache_dir, p)
+            members = _members(cache_dir, p)
         except (OSError, MapError, ValueError, KeyError) as exc:
             problems.append(f"{p.dvc_file}: manifest unreadable: {exc}")
             continue
-        for rel in manifest:
-            if rel == "provenance.json" or rel.endswith("/provenance.json"):
-                member = rel[: -len("/provenance.json")] if "/" in rel else ""
-                ck = f"{p.out_path}/{member}" if member else p.out_path
+        for path in members:
+            if path.endswith(WEIGHT_SUFFIXES) and path not in named_weights:
+                problems.append(f"{path}: a weight file in {p.dvc_file} that no row names")
+            if path.endswith("/provenance.json") and p.is_dir:
+                ck = path[: -len("/provenance.json")]
                 if ck not in covered:
                     problems.append(f"{ck}: has a provenance.json in {p.dvc_file} but no row")
     return problems
