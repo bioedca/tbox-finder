@@ -459,6 +459,8 @@ def test_tree_close_tolerates_float_noise_and_nothing_else():
         {"a": [1.0, 2, "x", False], "b": {"c": 0.1}},  # a bool is exact
         {"a": [1.0, 2, "x", True], "b": {"c": 0.1, "d": 1}},  # keys are exact
         {"a": [1.0, 2, "x"], "b": {"c": 0.1}},  # lengths are exact
+        {"a": [1.0, 2.0000000001, "x", True], "b": {"c": 0.1}},  # a count stays an int
+        {"a": [1, 2, "x", True], "b": {"c": 0.1}},  # a float stays a float
     ):
         assert not C._tree_close(base, bad), bad
 

@@ -1055,9 +1055,10 @@ def _tree_close(a: Any, b: Any) -> bool:
         return set(a) == set(b) and all(_tree_close(a[k], b[k]) for k in a)
     if isinstance(a, list) and isinstance(b, list):
         return len(a) == len(b) and all(_tree_close(x, y) for x, y in zip(a, b, strict=True))
-    if isinstance(a, float) or isinstance(b, float):
-        numeric = all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in (a, b))
-        return numeric and (_close(a, b) or (math.isnan(a) and math.isnan(b)))
+    if isinstance(a, float) and isinstance(b, float):
+        return _close(a, b) or (math.isnan(a) and math.isnan(b))
+    # Anything else — an int (a count), a mixed int/float pair, a bool, a string — is exact,
+    # type included, so no tolerance can admit a fractional count.
     return type(a) is type(b) and a == b
 
 

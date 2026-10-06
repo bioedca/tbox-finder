@@ -8486,3 +8486,25 @@ fix holding in CI. Two findings remained, one from each CodeRabbit route; both w
 **Decisions.** None.
 
 **Commit.** see PR (P3-17a, review round 2).
+
+## Step P3-17a (review round 3) — 2026-10-06: a count is never compared with a tolerance
+
+**Inputs.** Commit `15ea29d`. CI was green on it. The app raised one valid minor finding:
+`_tree_close` would accept an integer leaf against a nearby float, for example a count `1000`
+against `1000.0000001`. The CLI raised one minor finding, which was **declined**: skip the
+committed-artifact tests when a committed sidecar is absent. The sidecars are committed with the
+report, so a report present without them is a broken commit. Skipping would turn a missing
+committed artifact into a green test, and the validator already treats an absent committed input
+as a problem.
+
+**Process.** The tolerance now applies only when **both** leaves are floats. Every other leaf
+(an int, a mixed int/float pair, a bool, a string) is compared exactly, type included. Two new
+test cases cover a count against a nearby float and an int against an equal float.
+
+**Validation.** 62 tests pass, and the committed report validates under the stricter comparison.
+One new sabotage is RED; **33 in total**. The final full local re-derivation is in the post-step
+summary.
+
+**Decisions.** None.
+
+**Commit.** see PR (P3-17a, review round 3).
