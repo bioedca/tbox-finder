@@ -8275,3 +8275,104 @@ ruff, black 25.11.0 and `snakemake --lint` are clean.
 **Decisions.** None. No threshold, margin or measured value changed.
 
 **Commit.** see PR (P3-18, review round 1).
+
+## Step P3-17a — 2026-10-06: the CM + learned-calibration confirmer ablation (PRD §6 ablation (ii))
+
+**Inputs.** The two ADR-0005 D2 models `data/external/refs/RF00230.cm` and `TBDB001.cm`, both
+ECM-calibrated, so no `cmcalibrate` was needed and the SLURM fallback was not taken. Also
+`data/processed/stage2_dataset.parquet` (DVC, sha256 `376ad12b…`), RiNALMo's GATE-2 report and
+its two score sidecars (`reports/gate2_p3_ece.json`, `reports/p3/stage2_scores{,_loo}.json`), and
+P3-16's gated `twin` arm: the committed items plus the local-only replay files
+`data/interim/p3_16/{benchmark_v1, v1_stage1_twin, v1_stage2_twin, v1_payloads_twin_t0.5}`.
+
+**Process.** `src/tbox_finder/stage2/cm_confirmer.py` runs in three Snakemake rules in
+`workflow/rules/stage2.smk`, because no env holds both cmsearch and pandas:
+`cm_confirmer_queries` (data env), `cm_confirmer_search` (infernal env) and
+`cm_confirmer_ablation` (data env).
+- **Queries.** Every Stage-2 input RNA plus every P3-16 twin payload, deduplicated by content
+  (sha256 of the RNA): **35,010 queries, 9.74 Mb**. Only `rna_sequence` is read, and a test
+  relabels every row and asserts byte-identical shards.
+- **Search.** Infernal 1.1.5 `cmsearch --toponly --max -T -1000 -Z 1` over 22 shards × 2 models.
+  It took **52 min wall-clock locally (≈19 CPU-h)**, about twice the smoke extrapolation, because
+  22 processes contended for the cores. Every query was scored by both models (833,243 +
+  1,042,952 hits; 0 unscored), so no floor score was ever invented.
+- **Why `--max`.** On a 200-row smoke, the default filtered pipeline scored 1 of 100 decoys even
+  at `-T -1000`; filters off scores every query. Bit scores with filters off are shard-invariant:
+  1 and 3 shards reproduce the committed real-output fixture exactly, under real cmsearch.
+- **Replay binding.** The P3-16 replay is bound twice. The replayed RiNALMo items equal P3-16's
+  committed items exactly (0 of 1,893 differ, AUPRC bit-identical). Each candidate's payload RNA
+  hashes to the `rna_sha256` its row handed to Stage 2.
+
+**The stop, and A14.** As first built, a Platt map fitted on the 9,059 training-admission rows fed
+P3-07's `temperature_scale`. It refused: on `calib` the CM logit misclassifies **no** row (lowest
+positive 30.9 bits, highest decoy 4.3 bits), so D11's temperature has no minimiser. That is
+PRD §5's circularity, measured. RiNALMo's own T exists because one `calib` row is wrong
+([[perfect-separation-makes-temperature-unfittable]]). No fallback was pre-registered, and `T = 1`
+would publish a fabricated `named_posterior` ECE, so this was a §7 stop. The user signed off
+**ADR-0005 A14**:
+- Platt scaling (smoothed targets; DOI:10.1007/s10994-007-5018-6, accessed 2026-10-06), fitted
+  on the `calib` rung.
+- `calib` shares 0 rows with the graded rows (`test` and the leave-clade-out holdout) and 0
+  orders with the 30 holdout orders.
+- The posterior is labelled `cm_platt_posterior`, graded with D11's and D13's estimators at
+  RiNALMo's `n_boot` and seed, and never gated.
+- Fit: slope **0.1512 /bit**, intercept **−4.398** (p = 0.5 at 29.1 bits), converged in 11 Newton
+  steps.
+
+**Outputs.** `reports/cm_confirmer_ablation.json` (14 clauses, all TRUE; `is_science: true`;
+`gated: false`), `reports/p3/cm_confirmer_scores{,_loo}.json` (RiNALMo's populations row-for-row),
+`reports/p3/cm_confirmer_items.json`, and `data/processed/cm_confirmer/` (per-query bit scores,
+calibrator and provenance; DVC `72ceaa47…`).
+- **In-distribution ECE** (test, n = 3,045): CM **0.00753** [0.00594, 0.00978] vs RiNALMo 0.00566
+  [0.00270, 0.00941].
+- **Leave-clade-out macro ECE** (30/30 admissible): CM **0.0236** [0.0092, 0.0428] vs RiNALMo
+  0.211. The paired difference (RiNALMo − CM) is **+0.188**, order-blocked CI [0.082, 0.299].
+  - All of it comes from the 9 Actinobacteria orders, where the CM is better in 9 of 9 (mean Δ
+    +0.641).
+  - Across the other 21 orders the mean Δ is −0.006, and the CM is better in only 5.
+- **Precision, P3-16 twin arm:**
+  - AUPRC at 100:1 is RiNALMo 0.9496 vs CM 0.6426, so RiNALMo − CM = **+30.7 pp**, CI [+0.7, +47.7].
+  - The sweep: +0.3 at the benchmark's own composition, +5.1 at 10:1, +65.4 at 10³:1, +73.6 at 10⁴:1.
+  - Precision at P3-16's R* (0.9908) is 0.633 vs 0.579, +5.3 pp, CI [−0.06, +19.4]. At matched
+    recall there are 4 false positives vs 5.
+
+**Validation.** The step's gate is met: CM posteriors were produced on both the in-distribution
+and the leave-clade-out rows, and the report was emitted. No number was fabricated or loosened.
+- **Tests.** 44 tests in `tests/unit/test_cm_confirmer.py`. They cover the parse on a committed
+  real-output fixture, Platt optimality and monotonicity, RNA-only input, replay refusals, and
+  the committed report's validation and tamper paths.
+- **Sabotage.** **15 sabotages, all RED against their named test.** The first pass left 2 GREEN,
+  both test defects and both fixed. One expected value was read back from the function under
+  mutation. One test skipped for lack of pyarrow and was re-run under the data env.
+- **Wiring self-check.** Fed RiNALMo's own logits, the in-distribution path reproduces its
+  committed ECE exactly (0.005661656399710311), and the benchmark path gives a gain of 0.0 with
+  CI [0, 0].
+- **Tooling.** `infernal.run_cmsearch` gained four keyword options that default to the old
+  command line; its callers' tests still pass, including the real-cmsearch prescan control (8/8).
+  ruff 0.15.15, black 25.11.0, `snakemake --lint` and `-n` are clean.
+
+**Decisions.**
+1. **The CM's leave-clade-out advantage is not CM generalization.** RF00230 and TBDB001 were not
+   built order-held-out; only the calibrator is. RiNALMo's Actinobacteria drift (P3-10) is real,
+   and a CM that defines the truth does not drift on it. This is disclosed and enforced by a
+   clause.
+2. **What the AUPRC gap is made of.** This is a post-hoc read from the committed items file and is
+   not in the report. Two decoy items score as strong T-boxes under the CM:
+   - a `structured_rna` purine-riboswitch decoy in a *Paenibacillus* host window, at **96.4 bits
+     on RF00230, above Rfam's 93-bit GA cutoff**;
+   - `gcbg_000417`, at 68.5 bits.
+
+   RiNALMo scores both at 0.998. In the first, the hit spans 205 nt of the candidate locus while
+   the spliced insert is 100 nt, so at least 105 nt of the hit is **host** sequence. Without these
+   two items the AUPRC gap is **+2.1 pp** (0.9888 vs 0.9679), and RiNALMo's own AUPRC rises by
+   3.9 pp. ⚠ **Booked: a P3-16 benchmark host-window label-noise audit.** The hosts are mined
+   genomic windows (`mining_pool_v0`), which can carry an unlabelled real T-box.
+3. **Snakemake config keys.** The replay uses its own `cm_confirmer_replay_*` keys. P3-16 ran at
+   Stage-1 τ = 0.5, while `integration.smk`'s fixture default is 0.9. Each value is bound by exact
+   reproduction plus a check against P3-16's recorded `stage1_threshold`.
+4. **Fixture shards.** `*.fa` routes to git-LFS and CI has no LFS, so the fixture shards get a
+   `.gitattributes` carve-out (the `curated_control_queries_v0.fasta` precedent).
+
+§6.4: ADR-0005 A14, a README P3 line, and a manuscript paragraph in the two-stage results section.
+
+**Commit.** see PR (P3-17a).

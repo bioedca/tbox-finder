@@ -118,7 +118,14 @@ data-leakage control, calibration, and orthogonal validation are first-class.
   the worse-calibrated backbone in 19 of the other 21 orders. Two disclosed confounds (a
   one-minor-version library difference, and a shipped arm trained on an under-annealed LR
   schedule) mean the comparison is not a clean backbone contrast. RiNALMo stays the shipped
-  Stage-2.
+  Stage-2. *CM-confirmer ablation (2026-10-06):* replacing the re-ranker with the Rfam/TBDB
+  covariance models plus a learned (Platt) calibration loses **30.7 pp of AUPRC at 100:1**
+  (0.643 vs 0.950; CI [+0.7, +47.7]). Two decoy windows the CM scores as strong T-boxes account
+  for 28.6 pp of that; both are booked for a benchmark label audit. The CM is well calibrated in
+  distribution (ECE 0.0075). It cannot be temperature-scaled at all, because it separates the
+  calibration split perfectly (ADR-0005 A14). Its far lower leave-clade-out ECE (0.024 vs 0.211)
+  is **circular, not a generalization result**: the models that define the positives also do the
+  scoring. The CM stays an orthogonal cross-validator, never the Stage-2.
 
   *Still no discovery result: Phase 3 ships a calibrated two-stage system and its two
   passing gates; the generalization claim is graded at GATE-1 in Phase 4.*

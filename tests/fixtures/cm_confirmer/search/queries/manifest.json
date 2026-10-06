@@ -1,0 +1,15 @@
+{
+  "schema_version": "1",
+  "step": "P3-17a",
+  "n_queries": 8,
+  "n_residues": 1680,
+  "n_shards": 2,
+  "shards": [
+    "shard_000.fa",
+    "shard_001.fa"
+  ],
+  "query_ids_sha256": "c816686ea2fe8faac71eb21e5c4158a1967c2c408dccd2965cb808d13ced1e3b",
+  "sources": {
+    "queries": "tests/fixtures/cm_confirmer/queries.json"
+  }
+}

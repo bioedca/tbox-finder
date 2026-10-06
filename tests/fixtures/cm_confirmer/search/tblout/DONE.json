@@ -1,0 +1,29 @@
+{
+  "step": "P3-17a",
+  "query_manifest_sha256": "e457838d7dde9c192705d7eb9c05c96fdf08072a1456199be18f386f92a89459",
+  "flags": [
+    "--noali",
+    "--cpu",
+    "0",
+    "--toponly",
+    "--max",
+    "-T",
+    "-1000.0",
+    "-Z",
+    "1.0"
+  ],
+  "cms": {
+    "RF00230": "data/external/refs/RF00230.cm",
+    "TBDB001": "data/external/refs/TBDB001.cm"
+  },
+  "hit_counts": {
+    "RF00230": {
+      "shard_000.fa": 78,
+      "shard_001.fa": 102
+    },
+    "TBDB001": {
+      "shard_000.fa": 88,
+      "shard_001.fa": 74
+    }
+  }
+}

@@ -149,13 +149,27 @@ def run_cmsearch(
     cut_ga: bool = True,
     cpu: int = 4,
     timeout_s: float = DEFAULT_CMSEARCH_TIMEOUT_S,
+    toponly: bool = False,
+    no_filters: bool = False,
+    score_threshold: float | None = None,
+    search_space_mb: float | None = None,
 ) -> list[CmsearchHit]:
     """Run ``cmsearch`` and return its parsed hits.
+
+    The four trailing options default to the original P2-07 command line, so the
+    detection callers are unchanged. They exist for the P3-17a CM confirmer, which needs
+    a *score* for every query rather than a detection verdict: ``toponly`` →
+    ``--toponly`` (the query is already oriented RNA), ``no_filters`` → ``--max`` (every
+    query reaches the CM stage, so a decoy is scored rather than filtered out),
+    ``score_threshold`` → ``-T`` in bits, ``search_space_mb`` → ``-Z``. ``-T`` and
+    ``--cut_ga`` both set the reporting threshold, so passing both raises.
 
     Raises :class:`InfernalNotAvailableError` if the binary is absent and
     ``RuntimeError`` on a non-zero exit — never an empty hit list, which a caller
     could not distinguish from a genuine no-hit result.
     """
+    if cut_ga and score_threshold is not None:
+        raise ValueError("cut_ga and score_threshold both set the reporting threshold")
     if not cmsearch_available():
         raise InfernalNotAvailableError(
             "cmsearch is not on PATH; run inside the pinned tbox-infernal env "
@@ -170,6 +184,14 @@ def run_cmsearch(
     cmd = ["cmsearch", "--noali", "--cpu", str(cpu), "--tblout", str(tbl_path)]
     if cut_ga:
         cmd.append("--cut_ga")
+    if toponly:
+        cmd.append("--toponly")
+    if no_filters:
+        cmd.append("--max")
+    if score_threshold is not None:
+        cmd += ["-T", repr(float(score_threshold))]
+    if search_space_mb is not None:
+        cmd += ["-Z", repr(float(search_space_mb))]
     cmd += [str(cm_path), str(fasta_path)]
 
     try:

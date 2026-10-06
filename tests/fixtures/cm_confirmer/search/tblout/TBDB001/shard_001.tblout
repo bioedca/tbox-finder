@@ -1,0 +1,82 @@
+#target name                                                     accession query name           accession mdl mdl from   mdl to seq from   seq to strand trunc pass   gc  bias  score   E-value inc description of target
+#--------------------------------------------------------------- --------- -------------------- --------- --- -------- -------- -------- -------- ------ ----- ---- ---- ----- ------ --------- --- ---------------------
+6a58f9efc1c409d204036fc1033e253600f3598f09b51807fa2711e64729650e -         seed_ILE             -          cm        1      233        1      214      +    no    1 0.69  13.1  120.4   6.7e-33 !   -
+ebe2ef159b494f91f1781de37d8bee376d6d0e8cda48d7c6d052d0c113bc57cf -         seed_ILE             -          cm      108      194      138      197      +    no    1 0.38   0.0   30.1     9e-07 !   -
+35e92e339ce551f29a7fb692b9c78b7742f480007897c6e91d3a7306052a4d26 -         seed_ILE             -          cm      159      188      199      220      +    no    1 0.50   0.0   -4.1     7e+03 ?   -
+35e92e339ce551f29a7fb692b9c78b7742f480007897c6e91d3a7306052a4d26 -         seed_ILE             -          cm       20       24      175      179      +    no    1 0.20   0.0   -4.5   9.2e+03 ?   -
+ebe2ef159b494f91f1781de37d8bee376d6d0e8cda48d7c6d052d0c113bc57cf -         seed_ILE             -          cm       21       24      100      103      +    no    1 0.25   0.0   -4.5   9.3e+03 ?   -
+35e92e339ce551f29a7fb692b9c78b7742f480007897c6e91d3a7306052a4d26 -         seed_ILE             -          cm       18       25       50       57      +    no    1 0.62   0.0   -4.8   1.2e+04 ?   -
+35e92e339ce551f29a7fb692b9c78b7742f480007897c6e91d3a7306052a4d26 -         seed_ILE             -          cm        1      233        5       44      +    no    1 0.30   0.0   -5.2   1.5e+04 ?   -
+ebe2ef159b494f91f1781de37d8bee376d6d0e8cda48d7c6d052d0c113bc57cf -         seed_ILE             -          cm        1      233       11       53      +    no    1 0.28   0.0   -5.3   1.6e+04 ?   -
+5245529d9c65d3831a5858434cf3558608b6eae7fa032a8fa9fed11ea943b857 -         seed_ILE             -          cm        1      233      130      175      +    no    1 0.22   0.1   -5.3   1.6e+04 ?   -
+5245529d9c65d3831a5858434cf3558608b6eae7fa032a8fa9fed11ea943b857 -         seed_ILE             -          cm        1      233       20       52      +    no    1 0.33   0.0   -5.5   1.8e+04 ?   -
+5245529d9c65d3831a5858434cf3558608b6eae7fa032a8fa9fed11ea943b857 -         seed_ILE             -          cm       85       92      200      207      +    no    1 0.62   0.0   -5.6   1.9e+04 ?   -
+35e92e339ce551f29a7fb692b9c78b7742f480007897c6e91d3a7306052a4d26 -         seed_ILE             -          cm        1      233       58       93      +    no    1 0.39   0.0   -5.6   1.9e+04 ?   -
+5245529d9c65d3831a5858434cf3558608b6eae7fa032a8fa9fed11ea943b857 -         seed_ILE             -          cm       46       71       77       91      +    no    1 0.53   0.0   -5.8   2.2e+04 ?   -
+35e92e339ce551f29a7fb692b9c78b7742f480007897c6e91d3a7306052a4d26 -         seed_ILE             -          cm        1      233      222      249      +    no    1 0.29   0.0   -5.9   2.3e+04 ?   -
+35e92e339ce551f29a7fb692b9c78b7742f480007897c6e91d3a7306052a4d26 -         seed_ILE             -          cm        1      233       98      143      +    no    1 0.28   0.0   -6.1   2.8e+04 ?   -
+ebe2ef159b494f91f1781de37d8bee376d6d0e8cda48d7c6d052d0c113bc57cf -         seed_ILE             -          cm        1      233       59       87      +    no    1 0.31   0.0   -6.2   2.9e+04 ?   -
+35e92e339ce551f29a7fb692b9c78b7742f480007897c6e91d3a7306052a4d26 -         seed_ILE             -          cm        1      233      146      171      +    no    1 0.23   0.0   -6.3   3.2e+04 ?   -
+5245529d9c65d3831a5858434cf3558608b6eae7fa032a8fa9fed11ea943b857 -         seed_ILE             -          cm       22       24      124      126      +    no    1 0.33   0.0   -6.4   3.2e+04 ?   -
+5245529d9c65d3831a5858434cf3558608b6eae7fa032a8fa9fed11ea943b857 -         seed_ILE             -          cm      118      140      176      198      +    no    1 0.22   0.0   -6.8   4.4e+04 ?   -
+5245529d9c65d3831a5858434cf3558608b6eae7fa032a8fa9fed11ea943b857 -         seed_ILE             -          cm        1      233      100      119      +    no    1 0.20   0.0   -7.0   5.1e+04 ?   -
+ebe2ef159b494f91f1781de37d8bee376d6d0e8cda48d7c6d052d0c113bc57cf -         seed_ILE             -          cm       87       90       54       57      +    no    1 0.75   0.0   -7.1   5.5e+04 ?   -
+ebe2ef159b494f91f1781de37d8bee376d6d0e8cda48d7c6d052d0c113bc57cf -         seed_ILE             -          cm      166      182      106      122      +    no    1 0.41   0.0   -7.6   7.2e+04 ?   -
+5245529d9c65d3831a5858434cf3558608b6eae7fa032a8fa9fed11ea943b857 -         seed_ILE             -          cm        1      233      218      229      +    no    1 0.17   0.0   -7.7   7.7e+04 ?   -
+5245529d9c65d3831a5858434cf3558608b6eae7fa032a8fa9fed11ea943b857 -         seed_ILE             -          cm        1      233        2       19      +    no    1 0.33   0.0   -7.7   7.8e+04 ?   -
+5245529d9c65d3831a5858434cf3558608b6eae7fa032a8fa9fed11ea943b857 -         seed_ILE             -          cm       87       90       72       75      +    no    1 0.50   0.0   -7.8   8.4e+04 ?   -
+ebe2ef159b494f91f1781de37d8bee376d6d0e8cda48d7c6d052d0c113bc57cf -         seed_ILE             -          cm       87       90      199      202      +    no    1 0.50   0.0   -7.8   8.4e+04 ?   -
+ebe2ef159b494f91f1781de37d8bee376d6d0e8cda48d7c6d052d0c113bc57cf -         seed_ILE             -          cm       86       91       91       96      +    no    1 0.33   0.0   -7.9   9.1e+04 ?   -
+5245529d9c65d3831a5858434cf3558608b6eae7fa032a8fa9fed11ea943b857 -         seed_ILE             -          cm       85       92       92       99      +    no    1 0.50   0.0   -8.0   9.8e+04 ?   -
+35e92e339ce551f29a7fb692b9c78b7742f480007897c6e91d3a7306052a4d26 -         seed_ILE             -          cm      167      182      180      195      +    no    1 0.31   0.0   -8.1   1.1e+05 ?   -
+5245529d9c65d3831a5858434cf3558608b6eae7fa032a8fa9fed11ea943b857 -         seed_ILE             -          cm       23       24       53       54      +    no    1 0.50   0.0   -8.2   1.1e+05 ?   -
+6a58f9efc1c409d204036fc1033e253600f3598f09b51807fa2711e64729650e -         seed_ILE             -          cm       23       24      216      217      +    no    1 0.50   0.0   -8.2   1.1e+05 ?   -
+ebe2ef159b494f91f1781de37d8bee376d6d0e8cda48d7c6d052d0c113bc57cf -         seed_ILE             -          cm       23       24       88       89      +    no    1 0.50   0.0   -8.2   1.1e+05 ?   -
+ebe2ef159b494f91f1781de37d8bee376d6d0e8cda48d7c6d052d0c113bc57cf -         seed_ILE             -          cm       85       92      130      137      +    no    1 0.50   0.0   -8.3   1.2e+05 ?   -
+5245529d9c65d3831a5858434cf3558608b6eae7fa032a8fa9fed11ea943b857 -         seed_ILE             -          cm        1      233       63       71      +    no    1 0.33   0.0   -8.4   1.2e+05 ?   -
+ebe2ef159b494f91f1781de37d8bee376d6d0e8cda48d7c6d052d0c113bc57cf -         seed_ILE             -          cm        1      233        2        9      +    no    1 0.25   0.0   -8.4   1.3e+05 ?   -
+35e92e339ce551f29a7fb692b9c78b7742f480007897c6e91d3a7306052a4d26 -         seed_ILE             -          cm       89       90       94       95      +    no    1 1.00   0.0   -8.9   1.7e+05 ?   -
+35e92e339ce551f29a7fb692b9c78b7742f480007897c6e91d3a7306052a4d26 -         seed_ILE             -          cm       89       90      172      173      +    no    1 1.00   0.0   -8.9   1.7e+05 ?   -
+ebe2ef159b494f91f1781de37d8bee376d6d0e8cda48d7c6d052d0c113bc57cf -         seed_ILE             -          cm       89       90       97       98      +    no    1 1.00   0.0   -8.9   1.7e+05 ?   -
+ebe2ef159b494f91f1781de37d8bee376d6d0e8cda48d7c6d052d0c113bc57cf -         seed_ILE             -          cm       89       90      124      125      +    no    1 1.00   0.0   -8.9   1.7e+05 ?   -
+ebe2ef159b494f91f1781de37d8bee376d6d0e8cda48d7c6d052d0c113bc57cf -         seed_ILE             -          cm        1      233      203      212      +    no    1 0.30   0.0   -9.1   2.1e+05 ?   -
+5245529d9c65d3831a5858434cf3558608b6eae7fa032a8fa9fed11ea943b857 -         seed_ILE             -          cm        1      233       56       62      +    no    1 0.43   0.0   -9.3   2.4e+05 ?   -
+5245529d9c65d3831a5858434cf3558608b6eae7fa032a8fa9fed11ea943b857 -         seed_ILE             -          cm        1      233      210      217      +    no    1 0.75   0.0   -9.4   2.4e+05 ?   -
+35e92e339ce551f29a7fb692b9c78b7742f480007897c6e91d3a7306052a4d26 -         seed_ILE             -          cm        1      233        1        4      +    no    1 0.00   0.0   -9.6   2.9e+05 ?   -
+35e92e339ce551f29a7fb692b9c78b7742f480007897c6e91d3a7306052a4d26 -         seed_ILE             -          cm        1      233       45       49      +    no    1 0.20   0.0   -9.8   3.1e+05 ?   -
+ebe2ef159b494f91f1781de37d8bee376d6d0e8cda48d7c6d052d0c113bc57cf -         seed_ILE             -          cm        1      233      126      129      +    no    1 0.50   0.0  -10.0   3.6e+05 ?   -
+35e92e339ce551f29a7fb692b9c78b7742f480007897c6e91d3a7306052a4d26 -         seed_ILE             -          cm       24       24      174      174      +    no    1 0.00   0.0  -10.0   3.7e+05 ?   -
+35e92e339ce551f29a7fb692b9c78b7742f480007897c6e91d3a7306052a4d26 -         seed_ILE             -          cm       24       24      250      250      +    no    1 0.00   0.0  -10.0   3.7e+05 ?   -
+5245529d9c65d3831a5858434cf3558608b6eae7fa032a8fa9fed11ea943b857 -         seed_ILE             -          cm       24       24        1        1      +    no    1 0.00   0.0  -10.0   3.7e+05 ?   -
+5245529d9c65d3831a5858434cf3558608b6eae7fa032a8fa9fed11ea943b857 -         seed_ILE             -          cm       24       24       76       76      +    no    1 0.00   0.0  -10.0   3.7e+05 ?   -
+5245529d9c65d3831a5858434cf3558608b6eae7fa032a8fa9fed11ea943b857 -         seed_ILE             -          cm       24       24      121      121      +    no    1 0.00   0.0  -10.0   3.7e+05 ?   -
+5245529d9c65d3831a5858434cf3558608b6eae7fa032a8fa9fed11ea943b857 -         seed_ILE             -          cm       24       24      209      209      +    no    1 0.00   0.0  -10.0   3.7e+05 ?   -
+ebe2ef159b494f91f1781de37d8bee376d6d0e8cda48d7c6d052d0c113bc57cf -         seed_ILE             -          cm       24       24        1        1      +    no    1 0.00   0.0  -10.0   3.7e+05 ?   -
+ebe2ef159b494f91f1781de37d8bee376d6d0e8cda48d7c6d052d0c113bc57cf -         seed_ILE             -          cm       24       24       99       99      +    no    1 0.00   0.0  -10.0   3.7e+05 ?   -
+ebe2ef159b494f91f1781de37d8bee376d6d0e8cda48d7c6d052d0c113bc57cf -         seed_ILE             -          cm       24       24      104      104      +    no    1 0.00   0.0  -10.0   3.7e+05 ?   -
+ebe2ef159b494f91f1781de37d8bee376d6d0e8cda48d7c6d052d0c113bc57cf -         seed_ILE             -          cm       24       24      198      198      +    no    1 0.00   0.0  -10.0   3.7e+05 ?   -
+35e92e339ce551f29a7fb692b9c78b7742f480007897c6e91d3a7306052a4d26 -         seed_ILE             -          cm       90       90      198      198      +    no    1 1.00   0.0  -10.4   3.7e+05 ?   -
+5245529d9c65d3831a5858434cf3558608b6eae7fa032a8fa9fed11ea943b857 -         seed_ILE             -          cm       90       90      120      120      +    no    1 1.00   0.0  -10.4   3.7e+05 ?   -
+5245529d9c65d3831a5858434cf3558608b6eae7fa032a8fa9fed11ea943b857 -         seed_ILE             -          cm       90       90      123      123      +    no    1 1.00   0.0  -10.4   3.7e+05 ?   -
+6a58f9efc1c409d204036fc1033e253600f3598f09b51807fa2711e64729650e -         seed_ILE             -          cm       90       90      215      215      +    no    1 1.00   0.0  -10.4   3.7e+05 ?   -
+ebe2ef159b494f91f1781de37d8bee376d6d0e8cda48d7c6d052d0c113bc57cf -         seed_ILE             -          cm       90       90       10       10      +    no    1 1.00   0.0  -10.4   3.7e+05 ?   -
+ebe2ef159b494f91f1781de37d8bee376d6d0e8cda48d7c6d052d0c113bc57cf -         seed_ILE             -          cm       90       90      105      105      +    no    1 1.00   0.0  -10.4   3.7e+05 ?   -
+35e92e339ce551f29a7fb692b9c78b7742f480007897c6e91d3a7306052a4d26 -         seed_ILE             -          cm        1      233      144      145      +    no    1 0.00   0.0  -10.9   3.7e+05 ?   -
+35e92e339ce551f29a7fb692b9c78b7742f480007897c6e91d3a7306052a4d26 -         seed_ILE             -          cm        1      233      196      197      +    no    1 0.00   0.0  -10.9   3.7e+05 ?   -
+5245529d9c65d3831a5858434cf3558608b6eae7fa032a8fa9fed11ea943b857 -         seed_ILE             -          cm        1      233      128      129      +    no    1 0.00   0.0  -10.9   3.7e+05 ?   -
+35e92e339ce551f29a7fb692b9c78b7742f480007897c6e91d3a7306052a4d26 -         seed_ILE             -          cm       64       65       96       97      +    no    1 0.50   0.0  -11.3   3.7e+05 ?   -
+35e92e339ce551f29a7fb692b9c78b7742f480007897c6e91d3a7306052a4d26 -         seed_ILE             -          cm      182      182      221      221      +    no    1 0.00   0.0  -11.7   3.7e+05 ?   -
+5245529d9c65d3831a5858434cf3558608b6eae7fa032a8fa9fed11ea943b857 -         seed_ILE             -          cm      182      182       55       55      +    no    1 0.00   0.0  -11.7   3.7e+05 ?   -
+5245529d9c65d3831a5858434cf3558608b6eae7fa032a8fa9fed11ea943b857 -         seed_ILE             -          cm      182      182      122      122      +    no    1 0.00   0.0  -11.7   3.7e+05 ?   -
+5245529d9c65d3831a5858434cf3558608b6eae7fa032a8fa9fed11ea943b857 -         seed_ILE             -          cm      182      182      199      199      +    no    1 0.00   0.0  -11.7   3.7e+05 ?   -
+5245529d9c65d3831a5858434cf3558608b6eae7fa032a8fa9fed11ea943b857 -         seed_ILE             -          cm      182      182      208      208      +    no    1 0.00   0.0  -11.7   3.7e+05 ?   -
+ebe2ef159b494f91f1781de37d8bee376d6d0e8cda48d7c6d052d0c113bc57cf -         seed_ILE             -          cm      182      182       58       58      +    no    1 0.00   0.0  -11.7   3.7e+05 ?   -
+ebe2ef159b494f91f1781de37d8bee376d6d0e8cda48d7c6d052d0c113bc57cf -         seed_ILE             -          cm      182      182      123      123      +    no    1 0.00   0.0  -11.7   3.7e+05 ?   -
+5245529d9c65d3831a5858434cf3558608b6eae7fa032a8fa9fed11ea943b857 -         seed_ILE             -          cm        1      233      127      127      +    no    1 1.00   0.0  -12.2   3.7e+05 ?   -
+ebe2ef159b494f91f1781de37d8bee376d6d0e8cda48d7c6d052d0c113bc57cf -         seed_ILE             -          cm        1      233       90       90      +    no    1 1.00   0.0  -12.2   3.7e+05 ?   -
+#
+# Program:         cmsearch
+# Version:         1.1.5 (Sep 2023)
+# Pipeline mode:   SEARCH
+# Query file:      data/external/refs/TBDB001.cm
+# [ok]

@@ -1,0 +1,86 @@
+#target name                                                     accession query name           accession mdl mdl from   mdl to seq from   seq to strand trunc pass   gc  bias  score   E-value inc description of target
+#--------------------------------------------------------------- --------- -------------------- --------- --- -------- -------- -------- -------- ------ ----- ---- ---- ----- ------ --------- --- ---------------------
+d79dbc904231ef59425be10dfa59c6b26c4248bb1fbc5ac11749df9a88b5d717 -         T-box                RF00230    cm        1      224        1      220      +    no    1 0.37   3.2  100.1   9.6e-24 !   -
+9a13fa46356644800454b98aa5b00fb875fd7c55f4683e1b761f6970269fab3d -         T-box                RF00230    cm        1      224        1      218      +    no    1 0.44   0.0   99.6   1.3e-23 !   -
+7acac3b2e3abf8604959201c56077a3bf3c4b54997ba21e5245cb481315956df -         T-box                RF00230    cm       58       66      111      119      +    no    1 0.44   0.0    0.0   7.3e+02 !   -
+ab7d7b066502953d09fb166aec89eb0e0a52a86cfbb86fdccc75e620bb318363 -         T-box                RF00230    cm       58       66       82       90      +    no    1 0.33   0.0   -0.4   9.2e+02 ?   -
+7acac3b2e3abf8604959201c56077a3bf3c4b54997ba21e5245cb481315956df -         T-box                RF00230    cm       60       66       18       24      +    no    1 0.43   0.0   -2.3   2.9e+03 ?   -
+ab7d7b066502953d09fb166aec89eb0e0a52a86cfbb86fdccc75e620bb318363 -         T-box                RF00230    cm      133      145      102      115      +    no    1 0.50   0.0   -2.6   3.5e+03 ?   -
+7acac3b2e3abf8604959201c56077a3bf3c4b54997ba21e5245cb481315956df -         T-box                RF00230    cm       55       67       51       63      +    no    1 0.54   0.0   -3.4   5.4e+03 ?   -
+ab7d7b066502953d09fb166aec89eb0e0a52a86cfbb86fdccc75e620bb318363 -         T-box                RF00230    cm       60       66       18       24      +    no    1 0.57   0.0   -3.4   5.5e+03 ?   -
+7acac3b2e3abf8604959201c56077a3bf3c4b54997ba21e5245cb481315956df -         T-box                RF00230    cm      133      145      131      144      +    no    1 0.50   0.0   -3.4   5.7e+03 ?   -
+7acac3b2e3abf8604959201c56077a3bf3c4b54997ba21e5245cb481315956df -         T-box                RF00230    cm       60       66      145      151      +    no    1 0.29   0.0   -4.3   9.4e+03 ?   -
+ab7d7b066502953d09fb166aec89eb0e0a52a86cfbb86fdccc75e620bb318363 -         T-box                RF00230    cm       60       66      116      122      +    no    1 0.29   0.0   -4.3   9.4e+03 ?   -
+ab7d7b066502953d09fb166aec89eb0e0a52a86cfbb86fdccc75e620bb318363 -         T-box                RF00230    cm      166      185       41       57      +    no    1 0.35   0.0   -4.6   1.1e+04 ?   -
+7acac3b2e3abf8604959201c56077a3bf3c4b54997ba21e5245cb481315956df -         T-box                RF00230    cm      135      144       38       47      +    no    1 0.50   0.0   -6.2     3e+04 ?   -
+9a13fa46356644800454b98aa5b00fb875fd7c55f4683e1b761f6970269fab3d -         T-box                RF00230    cm        1      224      235      243      +    no    1 0.00   0.2   -6.6   3.6e+04 ?   -
+ab7d7b066502953d09fb166aec89eb0e0a52a86cfbb86fdccc75e620bb318363 -         T-box                RF00230    cm       63       66      123      126      +    no    1 0.25   0.0   -6.8   4.2e+04 ?   -
+ab7d7b066502953d09fb166aec89eb0e0a52a86cfbb86fdccc75e620bb318363 -         T-box                RF00230    cm        1      224        2        9      +    no    1 0.25   0.0   -6.9   4.4e+04 ?   -
+7acac3b2e3abf8604959201c56077a3bf3c4b54997ba21e5245cb481315956df -         T-box                RF00230    cm        1      224        2       11      +    no    1 0.20   0.0   -6.9   4.5e+04 ?   -
+7acac3b2e3abf8604959201c56077a3bf3c4b54997ba21e5245cb481315956df -         T-box                RF00230    cm      135      144      152      161      +    no    1 0.50   0.0   -7.4   5.9e+04 ?   -
+7acac3b2e3abf8604959201c56077a3bf3c4b54997ba21e5245cb481315956df -         T-box                RF00230    cm       63       66       76       79      +    no    1 0.75   0.0   -7.5   6.3e+04 ?   -
+ab7d7b066502953d09fb166aec89eb0e0a52a86cfbb86fdccc75e620bb318363 -         T-box                RF00230    cm       63       66       63       66      +    no    1 0.75   0.0   -7.5   6.3e+04 ?   -
+9a13fa46356644800454b98aa5b00fb875fd7c55f4683e1b761f6970269fab3d -         T-box                RF00230    cm       63       66      222      225      +    no    1 0.75   0.0   -7.5   6.5e+04 ?   -
+7acac3b2e3abf8604959201c56077a3bf3c4b54997ba21e5245cb481315956df -         T-box                RF00230    cm      165      186       83      100      +    no    1 0.61   0.0   -7.7     7e+04 ?   -
+ab7d7b066502953d09fb166aec89eb0e0a52a86cfbb86fdccc75e620bb318363 -         T-box                RF00230    cm      204      215       67       77      +    no    1 0.64   0.0   -8.2   9.5e+04 ?   -
+ab7d7b066502953d09fb166aec89eb0e0a52a86cfbb86fdccc75e620bb318363 -         T-box                RF00230    cm      123      125       38       40      +    no    1 0.33   0.0   -8.2   9.6e+04 ?   -
+ab7d7b066502953d09fb166aec89eb0e0a52a86cfbb86fdccc75e620bb318363 -         T-box                RF00230    cm      122      125      129      132      +    no    1 0.50   0.0   -8.4   1.1e+05 ?   -
+7acac3b2e3abf8604959201c56077a3bf3c4b54997ba21e5245cb481315956df -         T-box                RF00230    cm       64       66      107      109      +    no    1 0.33   0.0   -8.4   1.1e+05 ?   -
+7acac3b2e3abf8604959201c56077a3bf3c4b54997ba21e5245cb481315956df -         T-box                RF00230    cm      135      144      120      129      +    no    1 0.80   0.0   -8.5   1.2e+05 ?   -
+7acac3b2e3abf8604959201c56077a3bf3c4b54997ba21e5245cb481315956df -         T-box                RF00230    cm       64       66       66       68      +    no    1 0.33   0.0   -8.7   1.3e+05 ?   -
+ab7d7b066502953d09fb166aec89eb0e0a52a86cfbb86fdccc75e620bb318363 -         T-box                RF00230    cm       64       66       78       80      +    no    1 0.33   0.0   -8.7   1.3e+05 ?   -
+7acac3b2e3abf8604959201c56077a3bf3c4b54997ba21e5245cb481315956df -         T-box                RF00230    cm       65       66       70       71      +    no    1 0.50   0.0   -8.9   1.4e+05 ?   -
+ab7d7b066502953d09fb166aec89eb0e0a52a86cfbb86fdccc75e620bb318363 -         T-box                RF00230    cm        1      224       91      101      +    no    1 0.55   0.0   -9.0   1.6e+05 ?   -
+9a13fa46356644800454b98aa5b00fb875fd7c55f4683e1b761f6970269fab3d -         T-box                RF00230    cm      123      125      219      221      +    no    1 0.00   0.0   -9.1   1.7e+05 ?   -
+7acac3b2e3abf8604959201c56077a3bf3c4b54997ba21e5245cb481315956df -         T-box                RF00230    cm       65       66       48       49      +    no    1 0.00   0.0   -9.3   1.8e+05 ?   -
+d79dbc904231ef59425be10dfa59c6b26c4248bb1fbc5ac11749df9a88b5d717 -         T-box                RF00230    cm       65       66      221      222      +    no    1 0.00   0.0   -9.3   1.8e+05 ?   -
+d79dbc904231ef59425be10dfa59c6b26c4248bb1fbc5ac11749df9a88b5d717 -         T-box                RF00230    cm      137      142      231      236      +    no    1 0.00   0.1   -9.3   1.9e+05 ?   -
+ab7d7b066502953d09fb166aec89eb0e0a52a86cfbb86fdccc75e620bb318363 -         T-box                RF00230    cm        1      224       25       29      +    no    1 0.60   0.0   -9.3   1.9e+05 ?   -
+7acac3b2e3abf8604959201c56077a3bf3c4b54997ba21e5245cb481315956df -         T-box                RF00230    cm        1      224      101      106      +    no    1 0.67   0.0   -9.5     2e+05 ?   -
+9a13fa46356644800454b98aa5b00fb875fd7c55f4683e1b761f6970269fab3d -         T-box                RF00230    cm      177      179      232      234      +    no    1 0.00   0.0   -9.8   2.5e+05 ?   -
+7acac3b2e3abf8604959201c56077a3bf3c4b54997ba21e5245cb481315956df -         T-box                RF00230    cm       66       66       31       31      +    no    1 0.00   0.0   -9.9   2.5e+05 ?   -
+7acac3b2e3abf8604959201c56077a3bf3c4b54997ba21e5245cb481315956df -         T-box                RF00230    cm       66       66       64       64      +    no    1 0.00   0.0   -9.9   2.5e+05 ?   -
+ab7d7b066502953d09fb166aec89eb0e0a52a86cfbb86fdccc75e620bb318363 -         T-box                RF00230    cm       66       66       11       11      +    no    1 0.00   0.0   -9.9   2.5e+05 ?   -
+ab7d7b066502953d09fb166aec89eb0e0a52a86cfbb86fdccc75e620bb318363 -         T-box                RF00230    cm       66       66       31       31      +    no    1 0.00   0.0   -9.9   2.5e+05 ?   -
+ab7d7b066502953d09fb166aec89eb0e0a52a86cfbb86fdccc75e620bb318363 -         T-box                RF00230    cm       66       66       58       58      +    no    1 0.00   0.0   -9.9   2.5e+05 ?   -
+7acac3b2e3abf8604959201c56077a3bf3c4b54997ba21e5245cb481315956df -         T-box                RF00230    cm      138      142       25       29      +    no    1 0.60   0.0   -9.9   2.5e+05 ?   -
+ab7d7b066502953d09fb166aec89eb0e0a52a86cfbb86fdccc75e620bb318363 -         T-box                RF00230    cm      212      212       33       33      +    no    1 0.00   0.0  -10.7   2.5e+05 ?   -
+7acac3b2e3abf8604959201c56077a3bf3c4b54997ba21e5245cb481315956df -         T-box                RF00230    cm        1      224       14       17      +    no    1 1.00   0.0  -11.3   2.5e+05 ?   -
+ab7d7b066502953d09fb166aec89eb0e0a52a86cfbb86fdccc75e620bb318363 -         T-box                RF00230    cm        1      224       14       17      +    no    1 1.00   0.0  -11.3   2.5e+05 ?   -
+d79dbc904231ef59425be10dfa59c6b26c4248bb1fbc5ac11749df9a88b5d717 -         T-box                RF00230    cm        1      224      225      228      +    no    1 1.00   0.0  -11.3   2.5e+05 ?   -
+7acac3b2e3abf8604959201c56077a3bf3c4b54997ba21e5245cb481315956df -         T-box                RF00230    cm      139      142       72       75      +    no    1 1.00   0.0  -11.3   2.5e+05 ?   -
+ab7d7b066502953d09fb166aec89eb0e0a52a86cfbb86fdccc75e620bb318363 -         T-box                RF00230    cm      139      142       59       62      +    no    1 1.00   0.0  -11.3   2.5e+05 ?   -
+7acac3b2e3abf8604959201c56077a3bf3c4b54997ba21e5245cb481315956df -         T-box                RF00230    cm        1      224       35       37      +    no    1 1.00   0.0  -11.3   2.5e+05 ?   -
+7acac3b2e3abf8604959201c56077a3bf3c4b54997ba21e5245cb481315956df -         T-box                RF00230    cm        1      224       80       82      +    no    1 1.00   0.0  -11.3   2.5e+05 ?   -
+ab7d7b066502953d09fb166aec89eb0e0a52a86cfbb86fdccc75e620bb318363 -         T-box                RF00230    cm        1      224       35       37      +    no    1 1.00   0.0  -11.3   2.5e+05 ?   -
+9a13fa46356644800454b98aa5b00fb875fd7c55f4683e1b761f6970269fab3d -         T-box                RF00230    cm      141      142      230      231      +    no    1 1.00   0.0  -11.3   2.5e+05 ?   -
+9a13fa46356644800454b98aa5b00fb875fd7c55f4683e1b761f6970269fab3d -         T-box                RF00230    cm        1      224      226      228      +    no    1 1.00   0.0  -11.4   2.5e+05 ?   -
+7acac3b2e3abf8604959201c56077a3bf3c4b54997ba21e5245cb481315956df -         T-box                RF00230    cm      142      142        1        1      +    no    1 1.00   0.0  -11.5   2.5e+05 ?   -
+7acac3b2e3abf8604959201c56077a3bf3c4b54997ba21e5245cb481315956df -         T-box                RF00230    cm      142      142       30       30      +    no    1 1.00   0.0  -11.5   2.5e+05 ?   -
+7acac3b2e3abf8604959201c56077a3bf3c4b54997ba21e5245cb481315956df -         T-box                RF00230    cm      142      142       32       32      +    no    1 1.00   0.0  -11.5   2.5e+05 ?   -
+7acac3b2e3abf8604959201c56077a3bf3c4b54997ba21e5245cb481315956df -         T-box                RF00230    cm      142      142       33       33      +    no    1 1.00   0.0  -11.5   2.5e+05 ?   -
+7acac3b2e3abf8604959201c56077a3bf3c4b54997ba21e5245cb481315956df -         T-box                RF00230    cm      142      142       65       65      +    no    1 1.00   0.0  -11.5   2.5e+05 ?   -
+7acac3b2e3abf8604959201c56077a3bf3c4b54997ba21e5245cb481315956df -         T-box                RF00230    cm      142      142       69       69      +    no    1 1.00   0.0  -11.5   2.5e+05 ?   -
+7acac3b2e3abf8604959201c56077a3bf3c4b54997ba21e5245cb481315956df -         T-box                RF00230    cm      142      142      110      110      +    no    1 1.00   0.0  -11.5   2.5e+05 ?   -
+ab7d7b066502953d09fb166aec89eb0e0a52a86cfbb86fdccc75e620bb318363 -         T-box                RF00230    cm      142      142        1        1      +    no    1 1.00   0.0  -11.5   2.5e+05 ?   -
+ab7d7b066502953d09fb166aec89eb0e0a52a86cfbb86fdccc75e620bb318363 -         T-box                RF00230    cm      142      142       10       10      +    no    1 1.00   0.0  -11.5   2.5e+05 ?   -
+ab7d7b066502953d09fb166aec89eb0e0a52a86cfbb86fdccc75e620bb318363 -         T-box                RF00230    cm      142      142       30       30      +    no    1 1.00   0.0  -11.5   2.5e+05 ?   -
+ab7d7b066502953d09fb166aec89eb0e0a52a86cfbb86fdccc75e620bb318363 -         T-box                RF00230    cm      142      142       32       32      +    no    1 1.00   0.0  -11.5   2.5e+05 ?   -
+ab7d7b066502953d09fb166aec89eb0e0a52a86cfbb86fdccc75e620bb318363 -         T-box                RF00230    cm      142      142       81       81      +    no    1 1.00   0.0  -11.5   2.5e+05 ?   -
+ab7d7b066502953d09fb166aec89eb0e0a52a86cfbb86fdccc75e620bb318363 -         T-box                RF00230    cm      142      142      127      127      +    no    1 1.00   0.0  -11.5   2.5e+05 ?   -
+7acac3b2e3abf8604959201c56077a3bf3c4b54997ba21e5245cb481315956df -         T-box                RF00230    cm        1      224       12       13      +    no    1 1.00   0.0  -11.6   2.5e+05 ?   -
+ab7d7b066502953d09fb166aec89eb0e0a52a86cfbb86fdccc75e620bb318363 -         T-box                RF00230    cm        1      224       12       13      +    no    1 1.00   0.0  -11.6   2.5e+05 ?   -
+d79dbc904231ef59425be10dfa59c6b26c4248bb1fbc5ac11749df9a88b5d717 -         T-box                RF00230    cm        1      224      223      224      +    no    1 1.00   0.0  -11.6   2.5e+05 ?   -
+d79dbc904231ef59425be10dfa59c6b26c4248bb1fbc5ac11749df9a88b5d717 -         T-box                RF00230    cm        1      224      229      230      +    no    1 1.00   0.0  -11.6   2.5e+05 ?   -
+7acac3b2e3abf8604959201c56077a3bf3c4b54997ba21e5245cb481315956df -         T-box                RF00230    cm      179      179       34       34      +    no    1 1.00   0.0  -11.9   2.5e+05 ?   -
+7acac3b2e3abf8604959201c56077a3bf3c4b54997ba21e5245cb481315956df -         T-box                RF00230    cm      179      179       50       50      +    no    1 1.00   0.0  -11.9   2.5e+05 ?   -
+7acac3b2e3abf8604959201c56077a3bf3c4b54997ba21e5245cb481315956df -         T-box                RF00230    cm      179      179      130      130      +    no    1 1.00   0.0  -11.9   2.5e+05 ?   -
+9a13fa46356644800454b98aa5b00fb875fd7c55f4683e1b761f6970269fab3d -         T-box                RF00230    cm      179      179      229      229      +    no    1 1.00   0.0  -11.9   2.5e+05 ?   -
+ab7d7b066502953d09fb166aec89eb0e0a52a86cfbb86fdccc75e620bb318363 -         T-box                RF00230    cm      179      179       34       34      +    no    1 1.00   0.0  -11.9   2.5e+05 ?   -
+ab7d7b066502953d09fb166aec89eb0e0a52a86cfbb86fdccc75e620bb318363 -         T-box                RF00230    cm      179      179      128      128      +    no    1 1.00   0.0  -11.9   2.5e+05 ?   -
+#
+# Program:         cmsearch
+# Version:         1.1.5 (Sep 2023)
+# Pipeline mode:   SEARCH
+# Query file:      data/external/refs/RF00230.cm
+# [ok]
