@@ -8458,3 +8458,31 @@ calibrator did not.
 **Decisions.** None. No calibration, threshold or published number changed.
 
 **Commit.** see PR (P3-17a, review round 1).
+
+## Step P3-17a (review round 2) — 2026-10-06: no path the report supplies steers its own re-derivation
+
+**Inputs.** Commit `e6d16f3`. CI was green on it: pytest, lint and snakemake, with the LFS-pointer
+fix holding in CI. Two findings remained, one from each CodeRabbit route; both were reproduced.
+
+**Process.**
+1. **App (minor).** The precision re-derivation read `precision.items`, and the local check read
+   `confirmer.artifact_dir`. Both are paths the report supplies, so a forged report could point
+   its own re-derivation at a file built to agree with it.
+   - Both are now pinned to `CANONICAL_SOURCES`, and the re-derivation reads the pinned file.
+   - The local check verifies `query_scores.parquet` against the output digest recorded in the
+     hash-bound DVC `provenance.json` before using it.
+2. **CLI (minor).** The precision and per-order checks compared float trees exactly, while the
+   module declares `REDERIVE_REL_TOL` precisely because Python 3.12 changed float `sum()`
+   ([[py312-sum-breaks-bit-exact-rederivation]]). `_tree_close` now compares float leaves at that
+   tolerance; keys, lengths, strings, ints and booleans stay exact. The item replay stays exact.
+
+**Validation.**
+- **Tests.** 62 tests, including two new ones (`_tree_close`, path pinning).
+- **Python 3.11.** The 3.12-generated report validates, precision re-derivation included.
+- **Sabotage.** 4 new sabotages, all RED; **32 in total**.
+- **No regeneration needed.** The report is unchanged, because only the validator changed. The
+  score table's hash matches its recorded DVC output.
+
+**Decisions.** None.
+
+**Commit.** see PR (P3-17a, review round 2).

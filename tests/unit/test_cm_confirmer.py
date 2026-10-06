@@ -449,6 +449,20 @@ def test_benchmark_items_refuses_a_replay_that_does_not_reproduce_p3_16():
         C.benchmark_items(committed=committed, rows=rows, cm_posterior_by_row={"r1": 0}, arm="twin")
 
 
+def test_tree_close_tolerates_float_noise_and_nothing_else():
+    base = {"a": [1.0, 2, "x", True], "b": {"c": 0.1}}
+    assert C._tree_close(base, {"a": [1.0 + 1e-13, 2, "x", True], "b": {"c": 0.1}})
+    for bad in (
+        {"a": [1.001, 2, "x", True], "b": {"c": 0.1}},  # beyond the tolerance
+        {"a": [1.0, 3, "x", True], "b": {"c": 0.1}},  # an int is exact
+        {"a": [1.0, 2, "y", True], "b": {"c": 0.1}},  # a string is exact
+        {"a": [1.0, 2, "x", False], "b": {"c": 0.1}},  # a bool is exact
+        {"a": [1.0, 2, "x", True], "b": {"c": 0.1, "d": 1}},  # keys are exact
+        {"a": [1.0, 2, "x"], "b": {"c": 0.1}},  # lengths are exact
+    ):
+        assert not C._tree_close(base, bad), bad
+
+
 def test_relabel_refuses_a_key_collision():
     """Two source keys that rename to one target must not silently overwrite each other."""
     C._relabel({"fp_two_stage": 1, "fp_x": 2})  # positive control: distinct targets
@@ -726,3 +740,19 @@ def test_a_committed_input_may_not_go_missing_even_in_ci_mode(report, tmp_path):
     bad = copy.deepcopy(report)
     bad["sources"] = {**bad["sources"], "rinalmo_report": "reports/elsewhere.json"}
     assert any("CANONICAL_SOURCES" in p for p in C.validate_report(bad, repo_root=root, **_CI))
+
+
+@_committed
+def test_a_report_cannot_steer_its_rederivation_to_another_file(report, tmp_path):
+    """precision.items and confirmer.artifact_dir are pinned, not read off the report."""
+    root = _repo_copy(tmp_path)
+    forged_items = root / "reports/p3/forged_items.json"
+    shutil.copy2(root / C.CANONICAL_SOURCES["out_items"], forged_items)
+    kw = {"repo_root": root, "require_all_inputs": False}
+    assert C.validate_report(report, **kw) == []  # positive control, precision re-derived
+    bad = copy.deepcopy(report)
+    bad["precision"]["items"] = "reports/p3/forged_items.json"
+    assert any("precision.items" in p for p in C.validate_report(bad, **kw))
+    bad = copy.deepcopy(report)
+    bad["confirmer"]["artifact_dir"] = "data/processed/elsewhere"
+    assert any("artifact_dir" in p for p in C.validate_report(bad, **kw))

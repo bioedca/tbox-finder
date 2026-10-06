@@ -914,6 +914,8 @@ CANONICAL_SOURCES: dict[str, str] = {
     "confirmer_provenance": "data/processed/cm_confirmer/provenance.json",
     **{f"cm_{name}": str(path) for name, path in CONFIRMER_CMS},
 }
+#: The DVC-tracked confirmer directory: the score table, the calibrator and their provenance.
+_ARTIFACT_DIR = str(Path(CANONICAL_SOURCES["confirmer_provenance"]).parent)
 #: Inputs committed to git (or git-LFS), so present in every checkout including CI. These are
 #: always re-hashed; ``require_all_inputs=False`` only excuses the DVC and local-only ones.
 COMMITTED_PREFIXES = ("reports/", "data/external/refs/")
@@ -1041,6 +1043,22 @@ def _close(a: Any, b: Any) -> bool:
         return math.isclose(float(a), float(b), rel_tol=REDERIVE_REL_TOL, abs_tol=1e-15)
     except (TypeError, ValueError):
         return False
+
+
+def _tree_close(a: Any, b: Any) -> bool:
+    """Structural equality with float leaves compared at :data:`REDERIVE_REL_TOL`.
+
+    Keys, lengths, strings, ints and booleans must match exactly; only a float may differ, and
+    only within the tolerance, so a report re-derived on another Python still validates.
+    """
+    if isinstance(a, Mapping) and isinstance(b, Mapping):
+        return set(a) == set(b) and all(_tree_close(a[k], b[k]) for k in a)
+    if isinstance(a, list) and isinstance(b, list):
+        return len(a) == len(b) and all(_tree_close(x, y) for x, y in zip(a, b, strict=True))
+    if isinstance(a, float) or isinstance(b, float):
+        numeric = all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in (a, b))
+        return numeric and (_close(a, b) or (math.isnan(a) and math.isnan(b)))
+    return type(a) is type(b) and a == b
 
 
 def _ci_close(a: Any, b: Any) -> bool:
@@ -1345,15 +1363,21 @@ def validate_report(
             )
 
     prec = report["precision"]
+    # Paths the report could otherwise steer: each must be the pinned source, so a forged report
+    # cannot point a re-derivation at an uncommitted file built to agree with it.
+    if prec.get("items") != CANONICAL_SOURCES["out_items"]:
+        return [*problems, "precision.items is not the pinned out_items source"]
+    if report["confirmer"].get("artifact_dir") != _ARTIFACT_DIR:
+        return [*problems, "confirmer.artifact_dir is not the pinned DVC artifact directory"]
     if rederive_precision:
-        payload = json.loads((root / prec["items"]).read_text(encoding="utf-8"))
+        payload = json.loads((root / CANONICAL_SOURCES["out_items"]).read_text(encoding="utf-8"))
         again = benchmark_metrics(
             payload["items"],
             operating_point=float(prec["operating_point"]),
             n_boot=int(prec["n_boot"]),
             seed=int(prec["seed"]),
         )
-        if _canonical(again) != _canonical(prec["metrics"]):
+        if not _tree_close(_canonical(again), _canonical(prec["metrics"])):
             problems.append("the precision block does not re-derive from its items file")
     if rederive_local:
         problems += _local_rederivation_problems(report, root)
@@ -1370,7 +1394,12 @@ def _local_rederivation_problems(report: Mapping[str, Any], root: Path) -> list[
     problems: list[str] = []
     src = {k: root / v for k, v in CANONICAL_SOURCES.items()}
     fit = report["confirmer"]["calibrator"]
-    frame = pd.read_parquet(root / report["confirmer"]["artifact_dir"] / "query_scores.parquet")
+    # The score table is bound through the hash-bound DVC provenance's own output digest.
+    scores_rel = f"{_ARTIFACT_DIR}/query_scores.parquet"
+    dvc_prov = json.loads(src["confirmer_provenance"].read_text(encoding="utf-8"))
+    if dvc_prov.get("outputs", {}).get(scores_rel) != refs.content_sha256(root / scores_rel):
+        return [f"{scores_rel} does not hash to the output its provenance.json records"]
+    frame = pd.read_parquet(root / scores_rel)
     best = dict(zip(frame["query_id"], frame["best_bits"], strict=True))
     rows, _ = replay_benchmark(
         benchmark=src["benchmark"],
@@ -1411,7 +1440,7 @@ def _local_rederivation_problems(report: Mapping[str, Any], root: Path) -> list[
         seed=int(rin["bootstrap_seed"]),
     )
     recorded = report["calibration"]["leave_clade_out"][ARM]
-    if _canonical(ood["units"]) != _canonical(recorded["units"]):
+    if not _tree_close(_canonical(ood["units"]), _canonical(recorded["units"])):
         problems.append("the per-order CM OOD ECEs do not re-derive from the committed sidecar")
     return problems
 
