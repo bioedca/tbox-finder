@@ -8639,3 +8639,62 @@ No artifact changed.
 **Decisions.** None.
 
 **Commit.** see PR (P3-17a, review round 8).
+
+## Step P3-15′-recon-b — 2026-10-06: the checkpoint → phase → gate → release map is written into ADR-0006, and every row re-derives from its own provenance
+
+**Inputs.** PRD §18.3 delegates *"anti-mimicry checkpoints + checkpoint → phase → gate →
+release map"* to ADR-0006, which had never contained the word *checkpoint*. The rows come from
+the committed `.dvc` pointers under `data/processed/checkpoints/` and `checkpoints/`, and from
+each checkpoint's own `provenance.json`, read out of the DVC cache. The naive Stage-1 checkpoint
+is not materialised locally, so its provenance came out of the cache by md5. The attributions
+come from the committed grading reports and from ADR-0004 A6, ADR-0005 A12/A13/A14 and
+ADR-0002 A15.
+
+**Process.**
+1. **ADR-0006 Amendment A5** carries a 12-row table between two HTML-comment markers. For each
+   trained checkpoint it gives the producing step, the DVC pointer md5, the sha256 of every
+   weight file, the gates that grade it, and whether it ships. D17, *Amended by* and the impact
+   list now point to it.
+2. `src/tbox_finder/checkpoint_map.py::validate_map` parses that table and re-derives every row
+   through one hash chain: the committed `.dvc` md5, then the `.dir` manifest, then the
+   `provenance.json` blob, then the `outputs` sha256. Every blob is checked against the md5
+   that addresses it. It also checks completeness: every committed checkpoint pointer, and every
+   `provenance.json` inside a directory pointer, needs a row.
+3. CI runs at manifest depth against `tests/fixtures/checkpoint_map/dvc_cache`: 16 blobs,
+   144 KB, only the `.dir` manifests and `provenance.json` files, byte-identical to the real
+   cache. CI therefore re-derives the map rather than skipping it.
+4. The local gate (`--verify-weights`) also re-hashes every weight blob.
+5. Stdlib only. The existing `mine_round.read_dvc_dir_pointer` accepts directory pointers only,
+   and the P1 smoke checkpoint uses a single-file pointer, so it was not reused.
+
+**Outputs.**
+- The 12 rows: P1 smoke; Stage-1 production (**ships**), twin and naive; six RiNALMo sweep
+  points, of which `aux1.0_lr1e-4` **ships**; two RNA-FM arms.
+- 0 rows are declared-future.
+- `tests/unit/test_checkpoint_map.py`: 36 tests.
+
+**Validation.**
+- Manifest depth: `problems: []`.
+- Weights depth on the real cache: `problems: []`, **20/20 weight blobs re-hashed** to their
+  provenance sha256.
+- Tests: 36 passed with the real cache; 35 passed and 1 skipped without it, as in CI.
+- **19 sabotages, each RED against the test named for it**, one per check. Two came back GREEN
+  against the test I first named: basename keying (14 other tests caught it) and the
+  "no weight output" clause (nothing exercised it). Both got their own test.
+- The weights-depth gate caught a real bug on its first run, which manifest depth cannot see.
+  Stage-2 adapters live under `lora_adapter/`, and I had keyed weights by basename. Weights are
+  now keyed by the path inside the checkpoint.
+
+**Decisions.**
+- **ADR-0006 A5 signed** (bioedca, 2026-10-06, *"accept as drafted"*).
+- A5 records four disclosures:
+  1. PRD §10.1's *"GATE-4 (P2)"* for the production scanner was superseded by ADR-0004 A6.
+  2. **ADR-0005 A12 Pin 2 says P3-16 consumes the production scanner, but P3-16 gated the
+     twin** (`gated_arm: twin`). This is recorded in A5 and booked, not edited.
+  3. **P3-16's committed report does not record which Stage-2 checkpoint it scored.** Only the
+     gitignored interim score files do (`aux1.0_lr1e-4`, adapter `b629704d…`).
+  4. The RiNALMo provenance files were reconstructed after job 1064 lost them.
+- The CM confirmer (A14) is out of scope: it is not a trained checkpoint, and its provenance
+  carries no step.
+
+**Commit.** see PR (P3-15′-recon-b).

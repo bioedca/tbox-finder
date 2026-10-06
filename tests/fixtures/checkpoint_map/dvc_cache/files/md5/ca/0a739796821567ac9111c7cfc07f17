@@ -1,0 +1,34 @@
+{
+  "adr": "ADR-0004 A6 (graded population + eval twin); ADR-0002 (backbone + precision)",
+  "env_lock_hash": "70b66801eeafe1fdec4c19e667de1590e4471143bca36248fe40f16e53bb5003",
+  "extra": {
+    "batch_size": 8,
+    "config": "P2-06 winner g0.5_lr3e-4_a0.5 (gamma=0.5, optim.lr=3e-4, class_weight_alpha=0.5)",
+    "differs_from_production_by": "exclude_gate4_eval=true \u2014 one override, nothing else",
+    "epochs": 10,
+    "eval_val": false,
+    "fold": "gate4_twin_train \u2014 the full ADR-0004 D5 nested_train fold MINUS the whole clusters of the GATE-4 graded population (scheme-A test inside nested_train): 8,303 -> 7,099 records, 1,031 clusters withheld",
+    "graded_by": "GATE-4 (ADR-0004 D6) via src/tbox_finder/eval/gate4.py on window_dataset.load_gate4_eval_records \u2014 1,201 records / 1,029 clusters",
+    "precision": "fp32 (ADR-0002 A7: TF32/cudnn autotune off; NO bf16)",
+    "report": "reports/p2/train_stage1_gate4_twin.json",
+    "shipped": "NO. This checkpoint exists to be GRADED, not shipped: the shipped production scanner stays the full-fold P2-10d'-b artifact (user decision 2026-07-30), which trained on 1,204 more records and is therefore NOT gradeable on this population. PRD \u00a710.1's two-run split disclosure.",
+    "step": "P2-14",
+    "world_size": 8
+  },
+  "generated_at_utc": "2026-07-31T09:04:17.270329+00:00",
+  "git_sha": "112897409ebf0c75abf169a09b8dd323e6f6feef",
+  "inputs": {
+    "data/interim/flank_context/context_v0.parquet": "f35f25cda0f7ddc5714baeeece12146aa9e50f943ba9f4a121dbe3fdb3297742",
+    "data/processed/labels/labels_v0.parquet": "6caf46eae0735dd9361dc69b448e5518eb6aaf92784b4949baf937110aa447e4",
+    "data/processed/negatives/decoys_v0.parquet": "e19da2a959bcf597be0760310e04f3b4b44984c5a86bb1c946afc55b99d09636",
+    "data/processed/negatives/mining_pool_v0.parquet": "e57181e1b321c457e4e1b156645e9d668ef6ada4ea1a419f1cc1b6062e4dc84f",
+    "data/processed/splits/split_assignments.parquet": "6388ba19328811fa81d2d5b84a58643674934b4286581d8eff9df2e2cefba029"
+  },
+  "outputs": {
+    "data/processed/checkpoints/stage1_gate4_twin/stage1.pt": "0140a8a32f82f49fec9ddf047de6590a130cd51cd5feab01086ed89032944a29"
+  },
+  "rule": "slurm/p2/train_gate4_twin.sbatch :: train_stage1 (P2-14 GATE-4 eval twin)",
+  "schema_version": "1.0",
+  "script": "src/tbox_finder/train/train_stage1.py",
+  "seed": 42
+}

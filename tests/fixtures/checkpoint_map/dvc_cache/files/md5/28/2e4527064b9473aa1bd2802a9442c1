@@ -1,0 +1,37 @@
+{
+  "adr": "ADR-0004",
+  "env_lock_hash": "70b66801eeafe1fdec4c19e667de1590e4471143bca36248fe40f16e53bb5003",
+  "extra": {
+    "ablation": "class-II-CM-naive: IDENTICAL to the production scanner (data/processed/checkpoints/stage1_production, P2-10d'-b) EXCEPT label_source=naive \u2014 every class-II (TBDB001.cm-derived) record's per-nt target is all-background, class-I records unchanged (ADR-0004 D5; the two checkpoints share one leakage-controlled partition). Withheld class-II records: 1200 (labels provenance class_ii_cm_naive_withheld_records).",
+    "batch_size": 8,
+    "config": "P2-06 winner g0.5_lr3e-4_a0.5 (gamma=0.5, optim.lr=3e-4, class_weight_alpha=0.5)",
+    "epochs": 10,
+    "eval_val": false,
+    "fold": "full ADR-0004 D5 nested_train (exclude_selection_val=false, ~8,303 records)",
+    "label_source": "naive",
+    "negative_mix": "SAME \u00a79.1 seed curriculum as the production twin: negative_fraction=10/11 stream share over the mined pool + embedded dinuc_shuffled/structured_rna decoys (ADR-0005 A7 pins 1/3/4-5/6a). Shared for a clean ablation. Realized counts are in the run's own report.",
+    "precision": "fp32 (ADR-0002 A7: TF32/cudnn autotune off; NO bf16)",
+    "report": "reports/p2/train_stage1_classII_naive.json",
+    "round": "0 \u2014 COLD start (init_from_checkpoint=null).",
+    "scored": "GATE-1 anti-mimicry sub-arm at P4, Stage-1-only \u2014 NEVER routed through the class-II-trained production Stage-2 (ADR-0005 D9). NOT GATE-4-graded (P2-14 grades only the production scanner).",
+    "shipped": "no \u2014 retained for reproducibility (PRD \u00a710.1 checkpoint map).",
+    "step": "P2-11",
+    "world_size": 8
+  },
+  "generated_at_utc": "2026-07-29T05:31:37.400316+00:00",
+  "git_sha": "655c76cf1b55290093d9df60982a913549bcd2d5",
+  "inputs": {
+    "data/interim/flank_context/context_v0.parquet": "f35f25cda0f7ddc5714baeeece12146aa9e50f943ba9f4a121dbe3fdb3297742",
+    "data/processed/labels/labels_v0.parquet": "6caf46eae0735dd9361dc69b448e5518eb6aaf92784b4949baf937110aa447e4",
+    "data/processed/negatives/decoys_v0.parquet": "e19da2a959bcf597be0760310e04f3b4b44984c5a86bb1c946afc55b99d09636",
+    "data/processed/negatives/mining_pool_v0.parquet": "e57181e1b321c457e4e1b156645e9d668ef6ada4ea1a419f1cc1b6062e4dc84f",
+    "data/processed/splits/split_assignments.parquet": "6388ba19328811fa81d2d5b84a58643674934b4286581d8eff9df2e2cefba029"
+  },
+  "outputs": {
+    "data/processed/checkpoints/stage1_classII_naive/stage1.pt": "42fc479e9655ceba5305a861d17f21f6283290d2ae57ec9083ef2cecc0674240"
+  },
+  "rule": "slurm/p2/train_classII_naive.sbatch :: train_stage1 (P2-11 class-II-CM-naive Stage-1 ablation, label_source=naive)",
+  "schema_version": "1.0",
+  "script": "src/tbox_finder/train/train_stage1.py",
+  "seed": 42
+}

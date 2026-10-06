@@ -1,0 +1,50 @@
+{
+  "adr": "ADR-0002 D6 + A15; ADR-0004 D5; ADR-0005 D16/D17",
+  "env_lock_hash": "616a12544937b122b04d83a4085b2a4ad8764279b12b6a67e4cbd068c2944bac",
+  "extra": {
+    "backbone": {
+      "env_lock": "envs/ml-rnafm.conda-lock.yml",
+      "expected_param_count": 99111680,
+      "gradient_checkpointing_note": "RAISES: this port adds its absolute position embeddings IN PLACE (modeling_rnafm.py:728) and checkpointing makes the embedding output a leaf requiring grad -> 'a leaf Variable that requires grad is being used in an in-place operation'. Measured on a cluster A4000 2026-08-21 (SLURM job 1370, then isolated to a 2x2 against rotary rinalmo-giga, which is unaffected)",
+      "gradient_checkpointing_usable": false,
+      "hidden_size": 640,
+      "key": "rnafm",
+      "max_position_embeddings": 1026,
+      "model_class": "RnaFmModel",
+      "n_heads": 20,
+      "n_layer": 12,
+      "position_embedding_type": "absolute",
+      "prd_label": "~100M",
+      "repo_id": "multimolecule/rnafm",
+      "revision": "7d6e73ad3b48e042b378f9a788a56ccb4d573a27",
+      "role": "comparator",
+      "vocab_size": 28
+    },
+    "comparability_note": "This arm differs from the shipped rinalmo-giga arm in the BACKBONE ONLY: same corpus, same eligibility rule, same heads/losses, same batch/accumulation/epochs, same calibration stack. It runs under multimolecule 0.2.0 rather than 0.1.0 because 0.1.0 cannot load this checkpoint at all (ADR-0002 A15) \u2014 a one-minor-version library difference P3-18 must disclose beside the D17 margin.",
+    "loss.aux_weight": "0.0",
+    "optim.lr": "1e-4",
+    "point": "aux0.0_lr1e-4",
+    "population": "IDENTICAL to the production arm: the ADR-0004 D5 nested_train fold INTERSECTED with the scheme-A train rung, minus the P3-02 calib split, plus the parentless decoys. The realised counts are in this run's own report, not restated here.",
+    "precision": "bfloat16 LoRA (PRD \u00a710.3; r=16, alpha=32, dropout=0.05, all-linear)",
+    "report": "reports/p3/sweep_rnafm/aux0.0_lr1e-4.json",
+    "role": "comparator",
+    "step": "P3-17",
+    "world_size": 8
+  },
+  "generated_at_utc": "2026-08-21T22:47:25.834961+00:00",
+  "git_sha": "59b61c90f3f48dd76d2aad1f5dc2e2097b3fd06a",
+  "inputs": {
+    "data/processed/stage2_dataset.parquet": "376ad12bd6462686cc7467a5c3e34e63977ccca0c06465e24ec8345224a45f65",
+    "src/tbox_finder/stage2/head_vocab.json": "1ef7df699baabca3b8852b506a3f3a0c541d6ad7dcd3e5ac34e9204c9870e242"
+  },
+  "outputs": {
+    "data/processed/checkpoints/stage2_rnafm/aux0.0_lr1e-4/lora_adapter/README.md": "1f59875915b7a4ffcbfc301063c53b7918e3dfa03098fb5aa641874101e78c61",
+    "data/processed/checkpoints/stage2_rnafm/aux0.0_lr1e-4/lora_adapter/adapter_config.json": "31ecf3cf2ce322c11ae58f86a7723d2cae8f01827daffc6abe1b254cf5efbd9c",
+    "data/processed/checkpoints/stage2_rnafm/aux0.0_lr1e-4/lora_adapter/adapter_model.safetensors": "8ebb851d6dfda2b6e3379c7732b88d449ef675f5bb3ef3ddf2e7a17fcc985f6d",
+    "data/processed/checkpoints/stage2_rnafm/aux0.0_lr1e-4/stage2_heads.pt": "540b57e4908475d68e7a5cc7ce93c0a65ce71316457fcef2e8d97902e06f0543"
+  },
+  "rule": "slurm/p3/rnafm_stage2_finetune.sbatch :: tbox_finder.stage2.train (P3-17 comparator aux0.0_lr1e-4)",
+  "schema_version": "1.0",
+  "script": "src/tbox_finder/stage2/train.py",
+  "seed": 42
+}
