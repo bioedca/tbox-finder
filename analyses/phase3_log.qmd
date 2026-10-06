@@ -8607,3 +8607,35 @@ No artifact changed.
 **Decisions.** None.
 
 **Commit.** see PR (P3-17a, review round 7).
+
+## Step P3-17a (review round 8) — 2026-10-06: the first failure is detected in completion order
+
+**Inputs.** Commit `a63778b`. CI was green on it.
+- **App, major (valid).** Results were collected in task order, so a later search that failed
+  while an early search ran on for hours did not reach `shutdown` until the early one finished.
+  Queued searches kept starting in that window.
+- **App and CLI, minor (valid, the same point).** The cancellation test depended on thread
+  scheduling: a stub that fails instantly can let one worker drain the whole queue before the
+  main thread runs.
+
+**Process.**
+1. `search` now waits with `futures.wait(..., return_when=FIRST_EXCEPTION)`. On any failure it
+   re-raises, and the `except` path shuts the pool down with `cancel_futures=True`. Only after
+   every search succeeds are results collected, in task order. A done-callback prints progress
+   lines as searches finish.
+2. **The test is deterministic.** It runs two workers over the four fixture tasks. Task 1 holds
+   a worker for 3 s, and every other task fails after 0.5 s. Under task-order collection, the
+   second worker ran tasks 2, 3 and 4 inside task 1's 3 s. Under the fix, task 4 can never
+   start.
+
+**Validation.**
+- The test passed 5 runs out of 5.
+- It goes RED with `return_when=ALL_COMPLETED`, which is equivalent to task-order waiting, and
+  RED with `cancel_futures` dropped.
+- All 64 tests pass in one run, including real-cmsearch shard invariance.
+- **38 sabotages in total, all RED.** One sabotage was first silently skipped because its name
+  contained the runner's list separator; it was renamed and re-run.
+
+**Decisions.** None.
+
+**Commit.** see PR (P3-17a, review round 8).

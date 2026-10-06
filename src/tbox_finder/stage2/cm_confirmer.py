@@ -285,17 +285,29 @@ def search(
         return name, fasta.name, len(hits)
 
     tblouts: dict[str, dict[str, dict[str, Any]]] = {name: {} for name, _ in cms}
-    # Explicit futures, so the first failure cancels every search still queued: with
-    # `pool.map` the remaining (model, shard) searches would each run to completion — hours —
-    # before the error surfaced. Results are collected in task order, as before.
+
+    # Wait for the FIRST failure in completion order, not task order: blocking on an early
+    # long search while a later one has already failed would let queued searches keep
+    # starting. On a failure every search not yet started is cancelled; only after all succeed
+    # are results collected, in task order. Progress lines print as searches finish.
+    def _progress(fut: futures.Future) -> None:
+        if not fut.cancelled() and fut.exception() is None:
+            name, shard, n_hits = fut.result()
+            print(f"{name} {shard}: {n_hits} hits", flush=True)
+
     pool = futures.ThreadPoolExecutor(max_workers=jobs)
     try:
         pending = [pool.submit(_one, task) for task in tasks]
         for fut in pending:
+            fut.add_done_callback(_progress)
+        done, _ = futures.wait(pending, return_when=futures.FIRST_EXCEPTION)
+        failed = next((f for f in pending if f in done and f.exception() is not None), None)
+        if failed is not None:
+            raise failed.exception()
+        for fut in pending:
             name, shard, n_hits = fut.result()
             text = (out / name / f"{Path(shard).stem}.tblout").read_text(encoding="utf-8")
             tblouts[name][shard] = {"n_hits": n_hits, "data_sha256": tblout_digest(text)}
-            print(f"{name} {shard}: {n_hits} hits", flush=True)
     except BaseException:
         pool.shutdown(wait=True, cancel_futures=True)
         raise

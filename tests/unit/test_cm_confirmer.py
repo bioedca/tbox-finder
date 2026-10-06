@@ -240,20 +240,34 @@ def test_read_search_refuses_tblouts_from_another_covariance_model(tmp_path):
 
 
 def test_a_failed_search_cancels_the_searches_still_queued(tmp_path, monkeypatch):
-    """One failure must not leave every queued (model, shard) search to run for hours."""
-    calls = []
+    """A LATER search failing while an EARLY one still runs must cancel what is queued.
 
-    def failing(*args, **kwargs):
-        calls.append(args)
+    Two workers, four (model, shard) tasks. Task 1 holds a worker for 3 s; every other task
+    fails after 0.5 s. Waiting on task 1 in task order would let the second worker run tasks
+    2, 3 and 4 before the failure surfaced. Waiting for the first failure cancels task 4 (and
+    task 3, unless the second worker already took it).
+    """
+    import threading
+    import time
+
+    lock = threading.Lock()
+    started: list[str] = []
+
+    def stub(cm, fasta, tblout, **kwargs):
+        key = f"{Path(tblout).parent.name}/{Path(tblout).stem}"
+        with lock:
+            started.append(key)
+        if key == "RF00230/shard_000":
+            time.sleep(3.0)
+            return []
+        time.sleep(0.5)
         raise RuntimeError("cmsearch failed")
 
-    monkeypatch.setattr(infernal, "run_cmsearch", failing)
-    n_tasks = 2 * len(json.loads((_SEARCH / "queries/manifest.json").read_text())["shards"])
+    monkeypatch.setattr(infernal, "run_cmsearch", stub)
     with pytest.raises(RuntimeError, match="cmsearch failed"):
-        C.search(query_dir=_SEARCH / "queries", out_dir=tmp_path / "tblout", jobs=1)
-    # The one worker may already hold the next task when the failure lands; the rest are
-    # cancelled. With pool.map every task would run.
-    assert len(calls) < n_tasks == 4
+        C.search(query_dir=_SEARCH / "queries", out_dir=tmp_path / "tblout", jobs=2)
+    assert "TBDB001/shard_001" not in started, started
+    assert len(started) <= 3
     assert not (tmp_path / "tblout" / "DONE.json").exists()
 
 
