@@ -8748,3 +8748,31 @@ factual corrections, with no attribution changed, and they are recorded in A5's 
 The new PRD §10.1 difference is reported to the user.
 
 **Commit.** see PR (P3-15′-recon-b, review round 1).
+
+## Step P3-15′-recon-b (review round 2) — 2026-10-06: the shipped-config comparison refuses bools
+
+**Inputs.** Commit `699ec33`. CI was green, and the CodeRabbit CLI returned *No findings*. The
+CodeRabbit app made **1 minor**: compare the provenance's `loss_aux_weight`/`optim_lr` with
+`float()` so that a string-typed value is not "silently" missed.
+
+**Process.**
+1. **The premise was refuted by execution.** A string `optim_lr` fails closed and loud, with two
+   problems: the shipped row's `yes` is refused, and 0 rows match the shipped config. All six
+   RiNALMo sidecars store real floats.
+2. **The suggested coercion was declined.** `float()` would accept a string, and it would also
+   accept `True` as `1.0`.
+3. **Writing the pinning test found a real hole next to it.** A bare `==` already accepts
+   `True == 1.0`, so a bool `loss_aux_weight` matched the shipped config. Config values must now
+   be JSON numbers (`_is_number`: `int`/`float`, never `bool`), compared without coercion.
+
+**Validation.**
+- Tests: 66 passed with the real cache.
+- Weights depth `[]` with 20/20 re-hashed.
+- **39 sabotages, each RED against its named test.** The new bool-guard mutation is caught by
+  the new test. A float-coercion mutation turns the string and bool cases RED.
+
+**Decisions.** CodeRabbit's suggested patch was declined and the thread answered with the
+evidence. Its class of concern, the comparison's type strictness, was the real issue, and it is
+fixed in the opposite direction: stricter, not coerced.
+
+**Commit.** see PR (P3-15′-recon-b, review round 2).

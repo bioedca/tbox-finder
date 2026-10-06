@@ -486,6 +486,29 @@ def test_provenance_that_says_not_shipped_overrides_the_rule(tmp_path, extra):
     ]
 
 
+@pytest.mark.parametrize(
+    "override", [{"optim_lr": "1e-4"}, {"loss_aux_weight": True}, {"optim_lr": None}]
+)
+def test_a_non_float_shipped_config_in_provenance_fails_closed(tmp_path, override):
+    """The config is compared as the JSON numbers the trainer writes, never coerced.
+
+    CodeRabbit r2 asked for ``float()`` coercion; declined, because it would accept a string
+    and ``True`` as ``1.0``. Writing this test showed a bare ``==`` already accepted
+    ``True == 1.0``, so bools are now refused explicitly. A provenance whose config is not a
+    real number derives *no*, and the shipped row's ``yes`` is then refused loudly.
+    """
+    extra = {"step": "P9-01", "loss_aux_weight": 1.0, "optim_lr": 1e-4, **override}
+    root, cache, adr, tracked, _ = _synthetic(tmp_path, extra=extra)
+    ck = "data/processed/checkpoints/toy"
+    adr = adr.replace("| toy gate | no |", "| toy gate | yes |")
+    rule = M.ShippedRule(None, "data/processed/checkpoints", aux_weight=1.0, lr=1e-4)
+    problems = M.validate_map(M.parse_map(adr), root, cache, tracked, rule=rule)
+    assert f"{ck}: Ships 'yes', but the shipped rule derives 'no'" in problems
+    good = _synthetic(tmp_path / "ok", extra={**extra, "loss_aux_weight": 1.0, "optim_lr": 1e-4})
+    good_adr = good[2].replace("| toy gate | no |", "| toy gate | yes |")
+    assert M.validate_map(M.parse_map(good_adr), good[0], good[1], good[3], rule=rule) == []
+
+
 def test_an_orphan_pointer_without_provenance_fails_completeness(tmp_path):
     """Job 1064's failure mode: a checkpoint whose sidecar was lost has no provenance.json."""
     root, cache, adr, tracked, _ = _synthetic(tmp_path)

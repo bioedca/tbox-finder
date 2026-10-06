@@ -277,6 +277,11 @@ def _provenance_says_not_shipped(prov: dict) -> bool:
     return shipped.startswith("no") or extra.get("role") == "comparator"
 
 
+def _is_number(value: object) -> bool:
+    """A JSON number: ``int`` or ``float``, and never ``bool`` (a subclass of ``int``)."""
+    return isinstance(value, int | float) and not isinstance(value, bool)
+
+
 @dataclass(frozen=True)
 class ShippedRule:
     """Which checkpoints ship, derived from the code that uses them rather than typed.
@@ -301,9 +306,10 @@ class ShippedRule:
             return True
         if self.is_stage2(checkpoint):
             extra = prov.get("extra", {})
-            return (
-                extra.get("loss_aux_weight") == self.aux_weight and extra.get("optim_lr") == self.lr
-            )
+            got = (extra.get("loss_aux_weight"), extra.get("optim_lr"))
+            # Compared as the JSON numbers the trainer writes, never coerced: ``float("1e-4")``
+            # would accept a string, and a bare ``==`` already accepts ``True`` as ``1.0``.
+            return all(_is_number(v) for v in got) and got == (self.aux_weight, self.lr)
         return False
 
 
