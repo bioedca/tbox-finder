@@ -42,7 +42,7 @@
     "a15_confounds_disclosed": true,
     "arms_are_the_shipped_backbone_and_the_d6_comparator": true,
     "arms_graded_on_one_population": true,
-    "bootstrap_replicates_are_not_a_cost_knob": true,
+    "bootstrap_is_the_pinned_scheme": true,
     "both_gate2_reports_bound_to_their_sidecars": true,
     "both_gate2_reports_validate": true,
     "ci_is_order_block_resampled": true,
@@ -367,7 +367,7 @@
     "comparator": [],
     "shipped": []
   },
-  "generated_at_utc": "2026-10-06T00:43:51.039052+00:00",
+  "generated_at_utc": "2026-10-06T01:13:21.912413+00:00",
   "generated_by": "src/tbox_finder/calib/swap_check.py",
   "is_science": true,
   "margin": {
@@ -421,8 +421,8 @@
   "provenance": {
     "adr": "ADR-0005",
     "env_lock_hash": "60f966a8f009abfa3900357ffd0ac7c685d8b55b713da4498306480720bcf3b3",
-    "generated_at_utc": "2026-10-06T00:43:51.046975+00:00",
-    "git_sha": "f6920550338e0bc1f581fad6cba7817d470a0323",
+    "generated_at_utc": "2026-10-06T01:13:21.920234+00:00",
+    "git_sha": "9443bf97d702373bc6527667aa6fe1c50805c9d5",
     "inputs": {
       "reports/gate2_p3_ece.json": "deaa86cddbe0cd0abc4bf5180a1336624939685cb92c58a5a6af3c5ff50ec647",
       "reports/p3/gate2_rnafm_ece.json": "72786ed94573683dd4524ae075256226ff55fb0917ecf9cfd84ddbf9cd7974b0",

@@ -227,12 +227,168 @@ def test_refuses_a_different_ood_estimator_setting(shipped, comparator):
 
 
 def _sidecar_root(tmp_path: Path, shipped: dict, comparator: dict) -> Path:
+    """A repo-shaped copy of every file a swap report reads: reports, sidecars, env locks."""
+    rels = [SC.DEFAULT_SHIPPED_REPORT, SC.DEFAULT_COMPARATOR_REPORT, SC.DEFAULT_REPORT, SC.ENV_LOCK]
     for rep in (shipped, comparator):
-        for key in ("loo_scores", "in_distribution_scores"):
-            rel = rep["scoring"][key]
-            (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)
-            shutil.copyfile(_REPO / rel, tmp_path / rel)
+        rels += [rep["scoring"]["loo_scores"], rep["scoring"]["in_distribution_scores"]]
+        rels.append(rep["env_lock"])
+    for rel in rels:
+        (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(_REPO / rel, tmp_path / rel)
     return tmp_path
+
+
+def _rewrite(path: Path, edit) -> None:
+    payload = _load(path)
+    edit(payload)
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+
+def _first_differing(values: list) -> int:
+    return next(i for i, v in enumerate(values) if v != values[0])
+
+
+_LOO_EDITS = {
+    "row_ids": lambda d: d["row_ids"].__setitem__(0, d["row_ids"][1]) or None,
+    "labels": lambda d: d["labels"].__setitem__(0, 1 - int(d["labels"][0])),
+    "units": lambda d: d["units"].__setitem__(0, d["units"][_first_differing(d["units"])]),
+    "blocks": lambda d: d["blocks"].__setitem__(0, d["blocks"][_first_differing(d["blocks"])]),
+    "dataset_sha256": lambda d: d.__setitem__("dataset_sha256", "0" * 64),
+}
+_IN_DIST_EDITS = {
+    "row_ids": lambda d: d["row_ids"].__setitem__(0, d["row_ids"][1]),
+    "labels": lambda d: d["labels"].__setitem__(0, 1 - int(d["labels"][0])),
+    "rungs": lambda d: d["rungs"].__setitem__(0, d["rungs"][_first_differing(d["rungs"])]),
+    "dataset_sha256": lambda d: d.__setitem__("dataset_sha256", "0" * 64),
+}
+
+
+@pytest.mark.parametrize("field", sorted(_LOO_EDITS))
+def test_every_loo_population_field_is_compared(tmp_path, shipped, comparator, field):
+    assert sorted(_LOO_EDITS) == sorted(SC._LOO_POPULATION_FIELDS)
+    root = _sidecar_root(tmp_path, shipped, comparator)
+    _rewrite(root / comparator["scoring"]["loo_scores"], _LOO_EDITS[field])
+    assert SC.pairing_problems(shipped, comparator, repo_root=root) == [
+        f"the leave-clade-out sidecars disagree on {field!r} — not one population"
+    ]
+
+
+@pytest.mark.parametrize("field", sorted(_IN_DIST_EDITS))
+def test_every_in_distribution_population_field_is_compared(tmp_path, shipped, comparator, field):
+    assert sorted(_IN_DIST_EDITS) == sorted(SC._IN_DIST_POPULATION_FIELDS)
+    root = _sidecar_root(tmp_path, shipped, comparator)
+    _rewrite(root / comparator["scoring"]["in_distribution_scores"], _IN_DIST_EDITS[field])
+    assert SC.pairing_problems(shipped, comparator, repo_root=root) == [
+        f"the in-distribution sidecars disagree on {field!r} — not one population"
+    ]
+
+
+# Literals, not the module's tuples: parametrizing over `SC._SHARED_UNIT_CENSUS` would shrink
+# the test along with the tuple it is meant to guard.
+_CENSUS = ("n_records", "n_positives", "n_blocks", "admissible", "phylum")
+_OOD_SETTINGS = ("estimator", "unit_key", "block_key", "min_n", "n_boot", "bootstrap_seed")
+
+
+def test_the_pairing_tuples_are_the_documented_ones():
+    assert SC._SHARED_UNIT_CENSUS == _CENSUS
+    assert SC._SHARED_OOD_SETTINGS == _OOD_SETTINGS
+
+
+@pytest.mark.parametrize("key", _CENSUS)
+def test_every_census_field_is_compared(shipped, comparator, key):
+    forged = copy.deepcopy(comparator)
+    unit = forged["ood"]["units"][sorted(forged["ood"]["units"])[0]]
+    value = unit[key]
+    unit[key] = (
+        (not value)
+        if isinstance(value, bool)
+        else (value + 1 if isinstance(value, int) else "Forged")
+    )
+    with pytest.raises(SC.PairingError, match=f"\\.{key} differs"):
+        SC.rnafm_swap_condition_c(shipped, forged)
+
+
+@pytest.mark.parametrize("key", _OOD_SETTINGS)
+def test_every_shared_ood_setting_is_compared(shipped, comparator, key):
+    forged = copy.deepcopy(comparator)
+    value = forged["ood"][key]
+    forged["ood"][key] = value + 1 if isinstance(value, int) else f"{value}_forged"
+    with pytest.raises(SC.PairingError, match=f"ood\\.{key} differs"):
+        SC.rnafm_swap_condition_c(shipped, forged)
+
+
+def test_a_truncated_unit_list_is_refused(shipped, comparator):
+    forged = copy.deepcopy(comparator)
+    forged["ood"]["truncated_to_n_units"] = 29
+    with pytest.raises(SC.PairingError, match="truncated"):
+        SC.rnafm_swap_condition_c(shipped, forged)
+
+
+def test_inadmissible_orders_are_left_out_of_the_difference(shipped, comparator):
+    pair = [copy.deepcopy(shipped), copy.deepcopy(comparator)]
+    name = sorted(shipped["ood"]["units"])[0]
+    for rep in pair:
+        rep["ood"]["units"][name]["admissible"] = False
+    out = SC.rnafm_swap_condition_c(*pair)
+    assert name not in out["descriptive"]["per_unit"]
+    assert out["pairing"]["n_units_admissible"] == len(shipped["ood"]["units"]) - 1
+    assert out["resampling"]["ci"]["n_blocks"] == len(shipped["ood"]["units"]) - 1
+
+
+def test_a_gate2_report_failing_its_own_validator_fails_one_clause(shipped, comparator):
+    forged = copy.deepcopy(shipped)
+    first = sorted(forged["clauses"])[0]
+    forged["clauses"][first] = not forged["clauses"][first]
+    out = SC.rnafm_swap_condition_c(forged, comparator)
+    assert {k for k, v in out["clauses"].items() if not v} == {
+        "both_gate2_reports_validate",
+        "inputs_rederive_from_their_sidecars",
+    }
+
+
+def test_a_sidecar_not_matching_its_gate2_report_fails_one_clause(tmp_path, shipped, comparator):
+    """Logits are per-arm, so pairing holds; only the binding to the GATE-2 report breaks."""
+    root = _sidecar_root(tmp_path, shipped, comparator)
+    arm = comparator["scoring"]["arm"]
+    _rewrite(
+        root / comparator["scoring"]["loo_scores"],
+        lambda d: d["arms"][arm]["logits"].__setitem__(0, d["arms"][arm]["logits"][0] * 5),
+    )
+    out = SC.rnafm_swap_condition_c(shipped, comparator, repo_root=root)
+    assert {k for k, v in out["clauses"].items() if not v} == {
+        "both_gate2_reports_bound_to_their_sidecars",
+        "inputs_rederive_from_their_sidecars",
+    }
+
+
+@pytest.mark.parametrize(
+    ("path", "value"),
+    [
+        (("pairing", "problems"), ["forged"]),
+        (("pairing", "n_units_admissible"), 29),
+    ],
+)
+def test_the_population_clause_reads_each_member(committed, path, value):
+    forged = copy.deepcopy(committed)
+    forged[path[0]][path[1]] = value
+    assert SC.derive_clauses(forged)["arms_graded_on_one_population"] is False
+
+
+@pytest.mark.parametrize(
+    ("path", "value"),
+    [
+        (("resampling", "block_key"), "cluster_id"),
+        (("resampling", "ci", "n_blocks"), 29),
+        (("resampling", "ci", "upper"), -1.0),
+    ],
+)
+def test_the_block_clause_reads_each_member(committed, path, value):
+    forged = copy.deepcopy(committed)
+    target = forged
+    for key in path[:-1]:
+        target = target[key]
+    target[path[-1]] = value
+    assert SC.derive_clauses(forged)["ci_is_order_block_resampled"] is False
 
 
 def test_pairing_reads_the_sidecar_bytes_not_the_census(tmp_path, shipped, comparator):
@@ -288,9 +444,7 @@ def test_a_consistent_forged_interval_is_caught_only_by_the_rerun(committed):
     _fire(forged)
     assert all(SC.derive_clauses(forged).values())  # internally consistent …
     problems = SC.validate_report(forged)
-    assert (
-        "resampling.ci does not re-derive from the named GATE-2 reports" in problems
-    )  # … not true
+    assert "resampling does not re-derive from the named GATE-2 reports" in problems  # … not true
     assert "verdict does not re-derive from the named GATE-2 reports" in problems
 
 
@@ -308,7 +462,7 @@ def test_a_consistent_forged_order_is_caught(committed):
     row["shipped"] += 0.5
     row["delta"] += 0.5
     assert SC.derive_clauses(forged)["point_is_the_difference_of_the_published_macros"] is False
-    assert "descriptive.per_unit does not re-derive from the named GATE-2 reports" in (
+    assert "descriptive does not re-derive from the named GATE-2 reports" in (
         SC.validate_report(forged)
     )
 
@@ -326,17 +480,58 @@ def test_a_moved_margin_is_refused(committed):
     assert SC.derive_clauses(forged)["margin_is_the_pinned_d17c_value"] is False
 
 
-def test_a_cheap_bootstrap_is_refused(committed):
+@pytest.mark.parametrize(
+    ("path", "value"),
+    [
+        (("resampling", "n_boot_requested"), 200),  # a cheap bootstrap
+        (("resampling", "n_boot_requested"), 2001),  # pinned, not floored
+        (("resampling", "seed"), 390),  # a shopped seed
+        (("resampling", "seed"), float(SC.SEED)),  # same value, not an int
+        (("resampling", "ci", "n_boot"), 1999),  # replicates dropped
+        (("resampling", "ci", "ci_level"), 0.9),
+    ],
+)
+def test_the_bootstrap_scheme_is_pinned(committed, path, value):
     forged = copy.deepcopy(committed)
-    forged["resampling"]["n_boot_requested"] = 200
-    forged["resampling"]["ci"]["n_boot"] = 200
-    assert SC.derive_clauses(forged)["bootstrap_replicates_are_not_a_cost_knob"] is False
+    target = forged
+    for key in path[:-1]:
+        target = target[key]
+    target[path[-1]] = value
+    assert SC.derive_clauses(forged)["bootstrap_is_the_pinned_scheme"] is False
 
 
-def test_recorded_bandwidths_do_not_certify(committed):
+@pytest.mark.parametrize(
+    ("key", "value"),
+    [
+        ("select_bandwidth", False),  # recorded bandwidths do not certify
+        ("ran", False),
+        ("problems", {"shipped": [], "comparator": ["forged"]}),
+        ("problems", {"shipped": []}),
+    ],
+)
+def test_the_rederivation_clause_reads_each_member(committed, key, value):
     forged = copy.deepcopy(committed)
-    forged["rederivation"]["select_bandwidth"] = False
+    forged["rederivation"][key] = value
     assert SC.derive_clauses(forged)["inputs_rederive_from_their_sidecars"] is False
+
+
+def test_a_forged_rederivation_record_is_caught_when_rerun(
+    tmp_path, shipped, comparator, committed
+):
+    """The record says the sidecars re-derive cleanly; on these bytes they do not.
+
+    Both arms' LOO sidecars are edited and re-bound in the swap report's provenance, so layers
+    (1)-(2) are satisfied by construction; each sidecar now fails its own GATE-2 binding, which
+    is also what keeps the re-derivation fast (it stops at the binding check).
+    """
+    root = _sidecar_root(tmp_path, shipped, comparator)
+    forged = copy.deepcopy(committed)
+    for rep in (shipped, comparator):
+        rel, arm = rep["scoring"]["loo_scores"], rep["scoring"]["arm"]
+        _rewrite(root / rel, lambda d, arm=arm: d["arms"][arm]["logits"].__setitem__(0, 9.0))
+        forged["provenance"]["inputs"][rel] = SC.PROV.sha256_file(root / rel)
+    problems = SC.validate_report(forged, repo_root=root, rederive_sidecars=True)
+    assert any(p.startswith("rederivation does not reproduce") for p in problems)
 
 
 def test_a_rebound_input_is_refused(committed):
@@ -344,3 +539,118 @@ def test_a_rebound_input_is_refused(committed):
     forged["provenance"]["inputs"][SC.DEFAULT_COMPARATOR_REPORT] = "0" * 64
     problems = SC.validate_report(forged)
     assert any("does not hash to provenance.inputs" in p for p in problems)
+
+
+def test_a_stale_sidecar_under_an_unchanged_report_is_refused(
+    tmp_path, shipped, comparator, committed
+):
+    """Every RNA-FM LOO logit x5; both GATE-2 reports and the swap report left untouched."""
+    root = _sidecar_root(tmp_path, shipped, comparator)
+    assert SC.validate_report(committed, repo_root=root) == []  # positive control
+    rel = comparator["scoring"]["loo_scores"]
+    arm = comparator["scoring"]["arm"]
+    _rewrite(
+        root / rel,
+        lambda d: d["arms"][arm].__setitem__("logits", [v * 5 for v in d["arms"][arm]["logits"]]),
+    )
+    problems = SC.validate_report(committed, repo_root=root)
+    assert (
+        f"input {rel!r} does not hash to provenance.inputs — the verdict is not about these bytes"
+        in problems
+    )
+
+
+def test_a_rebound_env_lock_is_refused(committed):
+    forged = copy.deepcopy(committed)
+    forged["provenance"]["env_lock_hash"] = "0" * 64
+    assert f"provenance.env_lock_hash is not the sha256 of {SC.ENV_LOCK!r}" in SC.validate_report(
+        forged
+    )
+
+
+def test_a_dropped_input_is_refused(committed):
+    forged = copy.deepcopy(committed)
+    forged["provenance"]["inputs"].pop(sorted(forged["provenance"]["inputs"])[-1])
+    assert any(p.startswith("provenance.inputs names") for p in SC.validate_report(forged))
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        ("arms", "comparator", "loo_macro_ece", "point"),
+        ("descriptive", "n_units_delta_above_margin"),
+        ("descriptive", "n_units_comparator_worse"),
+        ("descriptive", "by_phylum", "Actinobacteria", "contribution_to_macro_delta"),
+        ("descriptive", "marginal_macro_cis", "shipped", "lower"),
+        ("pairing", "n_units"),
+        ("pairing", "shared_ood_settings", "min_n"),
+        ("readings", "ci_lower_above_margin", "definition"),
+        ("margin", "source"),
+        ("rationale",),
+        ("disclosures", 1),
+        ("gate2_validation", "shipped"),
+    ],
+)
+def test_every_published_field_is_rerun(committed, path):
+    forged = copy.deepcopy(committed)
+    target = forged
+    for key in path[:-1]:
+        target = target[key]
+    old = target[path[-1]]
+    target[path[-1]] = (
+        old + 1
+        if isinstance(old, (int, float)) and not isinstance(old, bool)
+        else (["forged"] if isinstance(old, list) else f"{old} (forged)")
+    )
+    assert f"{path[0]} does not re-derive from the named GATE-2 reports" in SC.validate_report(
+        forged
+    )
+
+
+def test_negating_an_a15_confound_keeps_the_marker_but_is_caught(committed):
+    forged = copy.deepcopy(committed)
+    i = next(i for i, d in enumerate(forged["disclosures"]) if "realised LR schedule" in d)
+    forged["disclosures"][i] = "The realised LR schedule was IDENTICAL in both arms; no confound."
+    assert SC.derive_clauses(forged)["a15_confounds_disclosed"] is True  # the marker survives …
+    assert "disclosures does not re-derive from the named GATE-2 reports" in SC.validate_report(
+        forged
+    )
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        ("resampling", "n_boot_requested"),
+        ("resampling", "seed"),
+        ("statistic", "point"),
+        ("margin", "value"),
+        ("resampling", "ci", "lower"),
+    ],
+)
+@pytest.mark.parametrize("value", [float("inf"), 10**400])
+def test_validate_never_raises_on_overflow(committed, path, value):
+    forged = copy.deepcopy(committed)
+    target = forged
+    for key in path[:-1]:
+        target = target[key]
+    target[path[-1]] = value
+    problems = SC.validate_report(forged)
+    assert problems and all(isinstance(p, str) for p in problems)
+
+
+def test_finite_absorbs_an_overflowing_integer():
+    # tested alone: validate_report's ArithmeticError catch would otherwise mask its removal
+    assert SC._finite(10**400) is None
+    assert SC._finite(float("inf")) is None
+    assert SC._finite(0.25) == 0.25
+
+
+def test_validate_reports_an_arithmetic_error_instead_of_raising(committed, monkeypatch):
+    # tested alone: `_finite`'s own guard would otherwise mask the catch's removal
+    def overflow(_report):
+        raise OverflowError("forced")
+
+    monkeypatch.setattr(SC, "derive_clauses", overflow)
+    assert SC.validate_report(committed) == [
+        "the report could not be validated: OverflowError: forced"
+    ]

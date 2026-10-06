@@ -335,10 +335,13 @@ both arms. That difference is **+0.023**, with a 95% interval of **[−0.007,
 +0.055]**. Its point estimate exceeds the margin, but the interval does not
 exclude zero, let alone the margin. The excess is therefore not sustained under
 either coherent reading of the rule, and **the swap does not fire**. The
-per-order picture shows why. All of the difference comes from the nine
-Actinobacteria orders, where both backbones are miscalibrated (RiNALMo
-0.59–0.80, RNA-FM 0.39–0.73); there, RNA-FM is the less-wrong of two failing
-models. In 19 of the other 21 orders RiNALMo is the better-calibrated backbone.
+per-order picture shows why. The nine Actinobacteria orders contribute +0.032
+to the difference and the other 21 orders contribute −0.009. In the
+Actinobacteria orders both backbones are miscalibrated (RiNALMo 0.59–0.80,
+RNA-FM 0.39–0.73). RNA-FM is the less-wrong of two failing models in seven of
+them by more than the margin. *Streptosporangiales* is a tie, and in
+*Actinomycetales* RNA-FM is worse by 0.13. In 19 of the other 21 orders RiNALMo
+is the better-calibrated backbone.
 The comparison also carries two disclosed confounds, so it is not a clean
 contrast of backbones. The comparator ran under a library one minor version
 newer, and the shipped RiNALMo arm was trained on a learning-rate schedule that

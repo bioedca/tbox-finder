@@ -125,7 +125,7 @@ _CLAUSES: tuple[str, ...] = (
     "arms_graded_on_one_population",
     "point_is_the_difference_of_the_published_macros",
     "ci_is_order_block_resampled",
-    "bootstrap_replicates_are_not_a_cost_knob",
+    "bootstrap_is_the_pinned_scheme",
     "verdict_follows_every_reading",
     "a15_confounds_disclosed",
 )
@@ -353,11 +353,12 @@ def rnafm_swap_condition_c(
     shipped_path: str = DEFAULT_SHIPPED_REPORT,
     comparator_path: str = DEFAULT_COMPARATOR_REPORT,
     repo_root: str | Path = G2._REPO_ROOT,
-    n_boot: int = N_BOOT,
-    seed: int = SEED,
     rederivation: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Evaluate D17(c) on the two GATE-2 reports and return the swap-check report body.
+
+    The margin, replicate count, seed and CI level are module constants with no argument to
+    override them: a caller cannot shop for a seed whose interval clears the margin.
 
     Raises :class:`PairingError` when the two reports are not one paired comparison — a
     difference between two populations is not a measurement of either backbone.
@@ -367,7 +368,7 @@ def rnafm_swap_condition_c(
     if problems:
         raise PairingError("; ".join(problems))
     sv, cv = _admissible_values(shipped), _admissible_values(comparator)
-    paired = paired_difference(sv, cv, n_boot=n_boot, seed=seed)
+    paired = paired_difference(sv, cv, n_boot=N_BOOT, seed=SEED, ci_level=CI_LEVEL)
     ci = paired["ci"]
     point, lower = float(ci["point"]), float(ci["lower"])
     readings = readings_for(point, lower, margin)
@@ -440,8 +441,8 @@ def rnafm_swap_condition_c(
             "block_key": UNIT_KEY,
             "method": "eval.resample.block_bootstrap — seeded percentile, orders drawn with "
             "replacement, one draw applied to both arms",
-            "n_boot_requested": int(n_boot),
-            "seed": int(seed),
+            "n_boot_requested": N_BOOT,
+            "seed": SEED,
             "ci": ci,
         },
         "readings": {
@@ -515,7 +516,10 @@ def _rationale(
 def _finite(value: Any) -> float | None:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return None
-    out = float(value)
+    try:
+        out = float(value)  # a 400-digit JSON integer overflows here
+    except OverflowError:
+        return None
     return out if math.isfinite(out) else None
 
 
@@ -608,11 +612,16 @@ def derive_clauses(report: Mapping[str, Any]) -> dict[str, bool]:
             and point is not None
             and lower <= point <= upper
         ),
-        "bootstrap_replicates_are_not_a_cost_knob": (
+        # Pinned, not floored: a recorded seed is otherwise whatever produced the interval the
+        # author wanted, and the re-run would faithfully reproduce it.
+        "bootstrap_is_the_pinned_scheme": (
             isinstance(n_boot_requested, int)
             and not isinstance(n_boot_requested, bool)
-            and n_boot_requested >= N_BOOT
+            and n_boot_requested == N_BOOT
             and survived == n_boot_requested
+            and type(res.get("seed")) is int
+            and res.get("seed") == SEED
+            and ci.get("ci_level") == CI_LEVEL
         ),
         "verdict_follows_every_reading": (
             readings_ok
@@ -637,16 +646,26 @@ def _all_empty(block: Any, n: int) -> bool:
 
 
 def validate_report(
-    report: Mapping[str, Any], *, repo_root: str | Path = G2._REPO_ROOT
+    report: Mapping[str, Any],
+    *,
+    repo_root: str | Path = G2._REPO_ROOT,
+    rederive_sidecars: bool = False,
 ) -> list[str]:
     """Problems with a swap-check report; never raises on a malformed one.
 
-    Two layers. (1) Every clause is re-derived from the recorded numbers and compared with the
-    recorded clause. (2) The report is re-derived from the two GATE-2 reports it names — which
-    must still hash to what its provenance recorded — and every published number and the verdict
-    must match; an internally consistent forgery cannot survive a re-run against its inputs
-    ([[gate-must-bind-to-upstream-evidence]]). The expensive sidecar re-derivation is not re-run
-    here; its recorded outcome is a clause.
+    Three layers. (1) Every clause is re-derived from the recorded numbers and compared with the
+    recorded clause. (2) Every file in ``provenance.inputs`` — both GATE-2 reports AND the four
+    score sidecars they name — and the env lock must still hash to what was recorded. (3) The
+    whole report body is re-run from those inputs and must match field for field (only the
+    timestamp and the provenance block are exempt), so an internally consistent forgery of any
+    published number, count, rationale or disclosure cannot survive
+    ([[gate-must-bind-to-upstream-evidence]]).
+
+    The one recorded thing the re-run cannot reproduce cheaply is ``rederivation`` — the
+    ~100 s/report sidecar re-derivation the CLI ran before writing. Layer (2) binds the sidecars
+    it ran on, and ``tests/unit/test_gate2.py`` re-derives the committed GATE-2 reports from
+    those same sidecars in CI. ``rederive_sidecars=True`` re-runs it here as well, at the
+    recorded ``select_bandwidth``, and compares the outcome with the record.
     """
     problems: list[str] = []
     try:
@@ -666,62 +685,92 @@ def validate_report(
                 problems.append(f"clause {name} is FALSE")
         if report.get("is_science") is not all(clauses.values()):
             problems.append("is_science does not equal the conjunction of the re-derived clauses")
-        problems.extend(_rederivation_problems(report, repo_root=repo_root))
-    except (KeyError, TypeError, ValueError, AttributeError, OSError) as exc:
+        problems.extend(
+            _rederivation_problems(report, repo_root=repo_root, rederive_sidecars=rederive_sidecars)
+        )
+    except (KeyError, TypeError, ValueError, AttributeError, OSError, ArithmeticError) as exc:
         problems.append(f"the report could not be validated: {type(exc).__name__}: {exc}")
     return problems
 
 
-#: Fields compared between the recorded report and its re-run against the named inputs.
-_RERUN_FIELDS: tuple[tuple[str, ...], ...] = (
-    ("statistic", "point"),
-    ("statistic", "difference_of_published_macros"),
-    ("resampling", "ci"),
-    ("resampling", "n_boot_requested"),
-    ("resampling", "seed"),
-    ("descriptive", "per_unit"),
-    ("arms",),
-    ("readings",),
-    ("verdict",),
-    ("margin",),
-)
+#: Top-level fields exempt from the re-run comparison: when it ran, and what it was run on
+#: (the latter is checked separately, by hash).
+_RERUN_EXEMPT = frozenset({"generated_at_utc", "provenance"})
 
 
-def _rederivation_problems(report: Mapping[str, Any], *, repo_root: str | Path) -> list[str]:
+def expected_inputs(
+    shipped: Mapping[str, Any], comparator: Mapping[str, Any], paths: Mapping[str, str]
+) -> list[str]:
+    """The six files a swap report is computed from: two GATE-2 reports + their four sidecars."""
+    return [
+        paths["shipped"],
+        paths["comparator"],
+        shipped["scoring"]["loo_scores"],
+        comparator["scoring"]["loo_scores"],
+        shipped["scoring"]["in_distribution_scores"],
+        comparator["scoring"]["in_distribution_scores"],
+    ]
+
+
+def _rederivation_problems(
+    report: Mapping[str, Any], *, repo_root: str | Path, rederive_sidecars: bool = False
+) -> list[str]:
     root = Path(repo_root)
     arms = report["arms"]
-    paths = {role: arms[role]["gate2_report"] for role in ("shipped", "comparator")}
-    inputs = report.get("provenance", {}).get("inputs", {})
-    problems: list[str] = []
+    paths = {role: str(arms[role]["gate2_report"]) for role in ("shipped", "comparator")}
+    prov = report.get("provenance")
+    if not isinstance(prov, Mapping) or not isinstance(prov.get("inputs"), Mapping):
+        return ["the report carries no provenance.inputs to bind it to its evidence"]
+    inputs = prov["inputs"]
     for role, rel in paths.items():
-        target = root / str(rel)
-        if not target.is_file():
+        if not (root / rel).is_file():
             return [f"the {role} GATE-2 report {rel!r} is not a file — nothing to re-derive from"]
-        if inputs.get(rel) != PROV.sha256_file(target):
+    shipped, comparator = _load_json(root / paths["shipped"]), _load_json(
+        root / paths["comparator"]
+    )
+    problems: list[str] = []
+    wanted = expected_inputs(shipped, comparator, paths)
+    if sorted(inputs) != sorted(wanted):
+        problems.append(
+            f"provenance.inputs names {sorted(inputs)}, not the six inputs {sorted(wanted)}"
+        )
+    for rel in wanted:
+        target = root / rel
+        if not target.is_file():
+            problems.append(f"input {rel!r} is not a file")
+        elif inputs.get(rel) != PROV.sha256_file(target):
             problems.append(
-                f"the {role} GATE-2 report {rel!r} does not hash to provenance.inputs — the "
-                "verdict is not about these reports"
+                f"input {rel!r} does not hash to provenance.inputs — the verdict is not about "
+                "these bytes"
             )
+    lock = root / ENV_LOCK
+    if not lock.is_file() or prov.get("env_lock_hash") != PROV.env_lock_hash(lock):
+        problems.append(f"provenance.env_lock_hash is not the sha256 of {ENV_LOCK!r}")
     if problems:
         return problems
     rerun = rnafm_swap_condition_c(
-        _load_json(root / paths["shipped"]),
-        _load_json(root / paths["comparator"]),
+        shipped,
+        comparator,
         shipped_path=paths["shipped"],
         comparator_path=paths["comparator"],
         repo_root=root,
-        n_boot=int(report["resampling"]["n_boot_requested"]),
-        seed=int(report["resampling"]["seed"]),
         rederivation=report.get("rederivation"),
     )
-    for path in _RERUN_FIELDS:
-        got: Any = report
-        want: Any = rerun
-        for key in path:
-            got = got.get(key) if isinstance(got, Mapping) else None
-            want = want.get(key) if isinstance(want, Mapping) else None
-        if got != want:
-            problems.append(f"{'.'.join(path)} does not re-derive from the named GATE-2 reports")
+    for key in sorted((set(report) | set(rerun)) - _RERUN_EXEMPT):
+        if report.get(key) != rerun.get(key):
+            problems.append(f"{key} does not re-derive from the named GATE-2 reports")
+    if rederive_sidecars:
+        rd = report.get("rederivation") if isinstance(report.get("rederivation"), Mapping) else {}
+        select = rd.get("select_bandwidth") is True
+        observed = {
+            role: G2.rederive_against_sidecars(rep, repo_root=root, select_bandwidth=select)
+            for role, rep in (("shipped", shipped), ("comparator", comparator))
+        }
+        if rd.get("ran") is not True or rd.get("problems") != observed:
+            problems.append(
+                "rederivation does not reproduce: the sidecar re-derivation run now gives "
+                f"{observed}, the report records {rd.get('problems')!r}"
+            )
     return problems
 
 
@@ -782,14 +831,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         rule=RULE,
         script=GENERATED_BY,
         seed=SEED,
-        inputs=[
-            args.shipped_report,
-            args.comparator_report,
-            shipped["scoring"]["loo_scores"],
-            comparator["scoring"]["loo_scores"],
-            shipped["scoring"]["in_distribution_scores"],
-            comparator["scoring"]["in_distribution_scores"],
-        ],
+        inputs=expected_inputs(
+            shipped,
+            comparator,
+            {"shipped": args.shipped_report, "comparator": args.comparator_report},
+        ),
         env_lock=ENV_LOCK,
         adr="ADR-0005",
         repo_root=root,
