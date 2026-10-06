@@ -147,6 +147,14 @@ def test_read_search_refuses_a_hit_for_a_query_it_did_not_search(tmp_path):
     rows = [ln for ln in tbl.read_text(encoding="utf-8").splitlines() if not ln.startswith("#")]
     forged = "f" * 64 + rows[0][rows[0].index(" ") :]
     tbl.write_text(tbl.read_text(encoding="utf-8") + forged + "\n", encoding="utf-8")
+    # A CONSISTENT forge: DONE.json re-stamped, so the digest and count checks pass and the
+    # per-shard query binding is what has to refuse.
+    done_path = dst / "tblout/DONE.json"
+    done = json.loads(done_path.read_text(encoding="utf-8"))
+    rec = done["tblouts"]["RF00230"]["shard_000.fa"]
+    rec["n_hits"] += 1
+    rec["data_sha256"] = C.tblout_digest(tbl.read_text(encoding="utf-8"))
+    done_path.write_text(json.dumps(done), encoding="utf-8")
     with pytest.raises(C.ConfirmerError, match="not a query"):
         C.read_search(query_dir=dst / "queries", tblout_dir=dst / "tblout")
 
@@ -165,6 +173,42 @@ def test_read_search_refuses_tblouts_from_other_flags_or_another_manifest(tmp_pa
         C.read_search(query_dir=dst / "queries", tblout_dir=dst / "tblout")
     done_path.unlink()
     with pytest.raises(C.ConfirmerError, match="did not finish"):
+        C.read_search(query_dir=dst / "queries", tblout_dir=dst / "tblout")
+
+
+def test_calibration_fit_ids_are_exactly_the_calib_rung():
+    sidecar = {"row_ids": ["a", "b", "c", "d"], "rungs": ["calib", "test", "calib", "val"]}
+    assert C.calibration_fit_ids(sidecar) == ["a", "c"]
+
+
+@pytest.mark.parametrize("edit", ["drop", "rescore"])
+def test_read_search_refuses_a_dropped_or_edited_hit_row(tmp_path, edit):
+    """A dropped row can turn a T-box's best hit from 100 bits into a decoy-like score."""
+    dst = _copy_search(tmp_path)
+    tbl = dst / "tblout/RF00230/shard_000.tblout"
+    lines = tbl.read_text(encoding="utf-8").splitlines()
+    first = next(i for i, ln in enumerate(lines) if ln and not ln.startswith("#"))
+    if edit == "drop":
+        del lines[first]
+    else:
+        fields = lines[first].split()
+        lines[first] = lines[first].replace(f" {fields[14]} ", " 999.9 ", 1)
+        assert lines[first].split()[14] == "999.9"
+    tbl.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    with pytest.raises(C.ConfirmerError, match="hits parsed|data rows differ"):
+        C.read_search(query_dir=dst / "queries", tblout_dir=dst / "tblout")
+
+
+def test_read_search_refuses_tblouts_from_another_covariance_model(tmp_path):
+    """DONE.json carries each model's content digest; a model changed since the search refuses."""
+    dst = _copy_search(tmp_path)
+    done_path = dst / "tblout/DONE.json"
+    done = json.loads(done_path.read_text(encoding="utf-8"))
+    assert set(done["cms"]) == {name for name, _ in C.CONFIRMER_CMS}
+    C.read_search(query_dir=dst / "queries", tblout_dir=dst / "tblout")  # positive control
+    done["cms"]["TBDB001"]["sha256"] = "0" * 64
+    done_path.write_text(json.dumps(done), encoding="utf-8")
+    with pytest.raises(C.ConfirmerError, match="different covariance models"):
         C.read_search(query_dir=dst / "queries", tblout_dir=dst / "tblout")
 
 
@@ -405,6 +449,13 @@ def test_benchmark_items_refuses_a_replay_that_does_not_reproduce_p3_16():
         C.benchmark_items(committed=committed, rows=rows, cm_posterior_by_row={"r1": 0}, arm="twin")
 
 
+def test_relabel_refuses_a_key_collision():
+    """Two source keys that rename to one target must not silently overwrite each other."""
+    C._relabel({"fp_two_stage": 1, "fp_x": 2})  # positive control: distinct targets
+    with pytest.raises(C.ConfirmerError, match="collides"):
+        C._relabel({"fp_two_stage": 1, "fp_rinalmo": 2})
+
+
 def test_relabel_names_the_cm_confirmer_in_the_stage1_slot():
     assert C._relabel({"fp_two_stage": 1, "x": [{"stage1_only": 2}]}) == {
         "fp_rinalmo": 1,
@@ -513,12 +564,7 @@ def test_an_edited_precision_number_does_not_re_derive(report):
 
 @_committed
 def test_an_edited_sidecar_breaks_the_hash_binding(report, tmp_path):
-    root = tmp_path / "repo"
-    for rel in report["provenance"]["inputs"]:
-        src = _REPO / rel
-        if rel.startswith("reports/") and src.exists():
-            (root / rel).parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(src, root / rel)
+    root = _repo_copy(tmp_path)
     assert (
         C.validate_report(
             report, repo_root=root, require_all_inputs=False, rederive_precision=False
@@ -533,3 +579,150 @@ def test_an_edited_sidecar_breaks_the_hash_binding(report, tmp_path):
         report, repo_root=root, require_all_inputs=False, rederive_precision=False
     )
     assert any("cm_confirmer_scores.json" in p for p in problems)
+
+
+@_committed
+def test_an_lfs_pointer_is_checked_through_its_oid(report, tmp_path):
+    """CI has no git-LFS: a committed CM is a pointer there, and its oid IS the content hash."""
+    root = tmp_path / "repo"
+    inputs = report["provenance"]["inputs"]
+    for rel in inputs:
+        if rel.startswith("reports/") and (_REPO / rel).exists():
+            (root / rel).parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(_REPO / rel, root / rel)
+    cms = [rel for rel in inputs if rel.endswith(".cm")]
+    assert len(cms) == 2
+
+    def pointer(oid: str) -> str:
+        return f"version https://git-lfs.github.com/spec/v1\noid sha256:{oid}\nsize 1\n"
+
+    for rel in cms:
+        (root / rel).parent.mkdir(parents=True, exist_ok=True)
+        (root / rel).write_text(pointer(inputs[rel]), encoding="utf-8")
+    kw = {"repo_root": root, "require_all_inputs": False, "rederive_precision": False}
+    assert C.validate_report(report, **kw) == []
+    (root / cms[0]).write_text(pointer("0" * 64), encoding="utf-8")
+    assert any(cms[0] in p for p in C.validate_report(report, **kw))
+
+
+def _repo_copy(tmp_path: Path) -> Path:
+    """The committed upstream files a CI checkout carries, copied under a scratch root."""
+    root = tmp_path / "repo"
+    for rel in C.CANONICAL_SOURCES.values():
+        if rel.startswith(C.COMMITTED_PREFIXES) and (_REPO / rel).exists():
+            (root / rel).parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(_REPO / rel, root / rel)
+    return root
+
+
+_CI = {"require_all_inputs": False, "rederive_precision": False}
+
+
+@_committed
+@pytest.mark.parametrize(
+    ("where", "clause"),
+    [
+        (("calibration", "in_distribution", C.ARM, "ece"), "cm_in_distribution_ece_rederives"),
+        (
+            ("calibration", "in_distribution", "rinalmo", "ece"),
+            "rinalmo_values_are_its_committed_report",
+        ),
+        (
+            ("calibration", "leave_clade_out", "paired", "ci", "point"),
+            "cm_macro_and_paired_difference_rederive",
+        ),
+        (
+            ("calibration", "leave_clade_out", C.ARM, "macro_average", "point"),
+            "cm_macro_and_paired_difference_rederive",
+        ),
+        (("confirmer", "calibrator", "intercept"), "calibrator_refits_from_the_committed_sidecar"),
+        (
+            ("precision", "p3_16_reference", "target_recall"),
+            "rinalmo_benchmark_reproduces_p3_16_report",
+        ),
+    ],
+)
+def test_a_forged_number_with_its_clauses_left_true_is_caught(report, tmp_path, where, clause):
+    """The reviewer's forge: edit a published number, keep every recorded clause TRUE."""
+    root = _repo_copy(tmp_path)
+    assert C.validate_report(report, repo_root=root, **_CI) == []  # positive control
+    bad = copy.deepcopy(report)
+    node = bad
+    for key in where[:-1]:
+        node = node[key]
+    node[where[-1]] = float(node[where[-1]]) * 0.5 + 1e-3
+    problems = C.validate_report(bad, repo_root=root, **_CI)
+    assert any(clause in p for p in problems), problems
+
+
+@_committed
+def test_a_forged_rinalmo_item_score_is_caught_even_with_its_hash_restamped(report, tmp_path):
+    from tbox_finder import refs
+
+    root = _repo_copy(tmp_path)
+    items_path = root / C.CANONICAL_SOURCES["out_items"]
+    payload = json.loads(items_path.read_text(encoding="utf-8"))
+    for item in payload["items"]:
+        if item["label"] == 0 and item["rinalmo"] > 0.9:
+            item["rinalmo"] = 0.0
+    items_path.write_text(json.dumps(payload), encoding="utf-8")
+    bad = copy.deepcopy(report)
+    bad["provenance"]["inputs"][C.CANONICAL_SOURCES["out_items"]] = refs.content_sha256(items_path)
+    problems = C.validate_report(bad, repo_root=root, **_CI)
+    assert any("replay_reproduces_p3_16_items" in p for p in problems), problems
+
+
+@_committed
+def test_a_rinalmo_sidecar_other_than_the_graded_one_is_caught(report, tmp_path):
+    from tbox_finder import refs
+
+    root = _repo_copy(tmp_path)
+    side_path = root / C.CANONICAL_SOURCES["rinalmo_scores"]
+    side = json.loads(side_path.read_text(encoding="utf-8"))
+    side["generated_by"] = "a different producer"
+    side_path.write_text(json.dumps(side), encoding="utf-8")
+    bad = copy.deepcopy(report)
+    key = C.CANONICAL_SOURCES["rinalmo_scores"]
+    bad["provenance"]["inputs"][key] = refs.content_sha256(side_path)
+    problems = C.validate_report(bad, repo_root=root, **_CI)
+    assert any("rinalmo_sidecars_are_the_graded_ones" in p for p in problems), problems
+
+
+@_committed
+def test_a_calibrator_fitted_on_the_test_rung_is_caught(report, tmp_path):
+    """The mutant the reviewer ran: Platt fitted on the graded rows instead of calib."""
+    from tbox_finder import refs
+
+    root = _repo_copy(tmp_path)
+    side_path = root / C.CANONICAL_SOURCES["out_scores"]
+    side = json.loads(side_path.read_text(encoding="utf-8"))
+    arm = side["arms"][C.ARM]
+    test = [i for i, g in enumerate(side["rungs"]) if g == "test"]
+    wrong = C.fit_platt([arm["bit_scores"][i] for i in test], [side["labels"][i] for i in test])
+    arm["logits"] = C.platt_logit(arm["bit_scores"], wrong)
+    side_path.write_text(json.dumps(side), encoding="utf-8")
+    # Forge the LOO sidecar consistently too, so `a*bits + b` holds everywhere and ONLY the
+    # re-fit on the calib rows can tell ([[all-true-fixture-cannot-test-a-conjunction]]).
+    loo_path = root / C.CANONICAL_SOURCES["out_loo_scores"]
+    loo = json.loads(loo_path.read_text(encoding="utf-8"))
+    loo["arms"][C.ARM]["logits"] = C.platt_logit(loo["arms"][C.ARM]["bit_scores"], wrong)
+    loo_path.write_text(json.dumps(loo), encoding="utf-8")
+    bad = copy.deepcopy(report)
+    bad["confirmer"]["calibrator"].update(slope=wrong.slope, intercept=wrong.intercept)
+    for key, path in (("out_scores", side_path), ("out_loo_scores", loo_path)):
+        bad["provenance"]["inputs"][C.CANONICAL_SOURCES[key]] = refs.content_sha256(path)
+    problems = C.validate_report(bad, repo_root=root, **_CI)
+    assert any("calibrator_refits_from_the_committed_sidecar" in p for p in problems), problems
+
+
+@_committed
+def test_a_committed_input_may_not_go_missing_even_in_ci_mode(report, tmp_path):
+    root = _repo_copy(tmp_path)
+    (root / C.CANONICAL_SOURCES["out_scores"]).unlink()
+    assert any("is absent" in p for p in C.validate_report(report, repo_root=root, **_CI))
+    bad = copy.deepcopy(report)
+    bad["provenance"]["inputs"] = {"nowhere/at_all.json": "0" * 64}
+    assert any("canonical sources" in p for p in C.validate_report(bad, repo_root=root, **_CI))
+    bad = copy.deepcopy(report)
+    bad["sources"] = {**bad["sources"], "rinalmo_report": "reports/elsewhere.json"}
+    assert any("CANONICAL_SOURCES" in p for p in C.validate_report(bad, repo_root=root, **_CI))

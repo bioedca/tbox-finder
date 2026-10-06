@@ -72,7 +72,7 @@ from typing import Any
 
 import numpy as np
 
-from tbox_finder import infernal
+from tbox_finder import infernal, refs
 
 SCHEMA_VERSION = "1"
 STEP = "P3-17a"
@@ -267,20 +267,32 @@ def search(
         )
         return name, fasta.name, len(hits)
 
-    counts: dict[str, dict[str, int]] = {name: {} for name, _ in cms}
+    tblouts: dict[str, dict[str, dict[str, Any]]] = {name: {} for name, _ in cms}
     with futures.ThreadPoolExecutor(max_workers=jobs) as pool:
         for name, shard, n_hits in pool.map(_one, tasks):
-            counts[name][shard] = n_hits
+            text = (out / name / f"{Path(shard).stem}.tblout").read_text(encoding="utf-8")
+            tblouts[name][shard] = {"n_hits": n_hits, "data_sha256": tblout_digest(text)}
             print(f"{name} {shard}: {n_hits} hits", flush=True)
     done = {
         "step": STEP,
         "query_manifest_sha256": hashlib.sha256((qdir / "manifest.json").read_bytes()).hexdigest(),
         "flags": search_flags(),
-        "cms": {name: str(cm) for name, cm in cms},
-        "hit_counts": counts,
+        # Content digests, not just paths: the tblouts are about THESE models, and a CM that
+        # changed after the search must not be paired with bit scores from its predecessor.
+        "cms": {name: {"path": str(cm), "sha256": refs.content_sha256(cm)} for name, cm in cms},
+        # Per (model, shard): the hit count and a digest of the DATA rows. Header comments
+        # carry paths and a timestamp and are sanitised out of committed fixtures, so they are
+        # deliberately outside the digest; a dropped or edited hit row is not.
+        "tblouts": tblouts,
     }
     (out / "DONE.json").write_text(json.dumps(done, indent=2) + "\n", encoding="utf-8")
     return done
+
+
+def tblout_digest(text: str) -> str:
+    """sha256 of a tblout's data rows (every non-blank line not starting with ``#``)."""
+    rows = [ln for ln in text.splitlines() if ln.strip() and not ln.startswith("#")]
+    return hashlib.sha256("\n".join(rows).encode("utf-8")).hexdigest()
 
 
 def search_flags() -> list[str]:
@@ -340,6 +352,16 @@ def read_search(
         raise ConfirmerError("the tblouts were searched from a different query manifest")
     if done.get("flags") != search_flags():
         raise ConfirmerError(f"the tblouts ran with {done.get('flags')!r}, not {search_flags()!r}")
+    recorded = {
+        name: rec.get("sha256") if isinstance(rec, Mapping) else None
+        for name, rec in (done.get("cms") or {}).items()
+    }
+    current = {name: refs.content_sha256(cm) for name, cm in cms}
+    if recorded != current:
+        raise ConfirmerError(
+            "the tblouts were searched with different covariance models than the ones passed "
+            f"in (recorded {recorded!r}, current {current!r})"
+        )
 
     queries: dict[str, str] = {}
     by_shard: dict[str, set[str]] = {}
@@ -355,7 +377,16 @@ def read_search(
     for name, _ in cms:
         for shard in manifest["shards"]:
             path = tdir / name / f"{Path(shard).stem}.tblout"
-            for hit in infernal.parse_tblout(path.read_text(encoding="utf-8")):
+            text = path.read_text(encoding="utf-8")
+            hits = infernal.parse_tblout(text)
+            record = ((done.get("tblouts") or {}).get(name) or {}).get(shard) or {}
+            if record.get("data_sha256") != tblout_digest(text):
+                raise ConfirmerError(f"{path}: data rows differ from what the search recorded")
+            if record.get("n_hits") != len(hits):
+                raise ConfirmerError(
+                    f"{path}: {len(hits)} hits parsed, the search recorded {record.get('n_hits')!r}"
+                )
+            for hit in hits:
                 if hit.target not in by_shard[shard]:
                     raise ConfirmerError(f"{path}: hit for {hit.target!r}, not a query of {shard}")
                 previous = best[name].get(hit.target)
@@ -510,10 +541,15 @@ def fit_platt(
     )
 
 
-def platt_logit(scores: Sequence[float], fit: PlattFit) -> list[float]:
-    """The confirmer's log-odds for each bit score — the logit the P3-07 stack scales."""
+def affine_logit(scores: Sequence[float], slope: float, intercept: float) -> list[float]:
+    """``slope · s + intercept`` per bit score, in float64."""
     s = np.asarray(scores, dtype=np.float64)
-    return [float(v) for v in fit.slope * s + fit.intercept]
+    return [float(v) for v in slope * s + intercept]
+
+
+def platt_logit(scores: Sequence[float], fit: PlattFit) -> list[float]:
+    """The confirmer's log-odds for each bit score."""
+    return affine_logit(scores, fit.slope, fit.intercept)
 
 
 # ══════════════════════════════════════════════════════════════════════════════════════
@@ -808,6 +844,8 @@ def _relabel(node: Any) -> Any:
             new = str(key)
             for old, repl in _RELABEL:
                 new = new.replace(old, repl)
+            if new in out:
+                raise ConfirmerError(f"relabelling {key!r} collides with an existing {new!r}")
             out[new] = _relabel(value)
         return out
     if isinstance(node, list):
@@ -854,24 +892,64 @@ def benchmark_metrics(
 # ══════════════════════════════════════════════════════════════════════════════════════
 # The report
 # ══════════════════════════════════════════════════════════════════════════════════════
-#: The clause set. ``is_science`` is their AND, and :func:`validate_report` re-derives each
-#: from the body rather than trusting the recorded booleans.
-CLAUSES = (
+#: Every input the report is computed from, at the paths ``stage2.smk`` pins. The report records
+#: them under ``sources``, and :func:`validate_report` refuses any other map, so a validator
+#: can never be pointed at a different set of upstream files than the rule reads.
+CANONICAL_SOURCES: dict[str, str] = {
+    "dataset": "data/processed/stage2_dataset.parquet",
+    "rinalmo_scores": "reports/p3/stage2_scores.json",
+    "rinalmo_loo_scores": "reports/p3/stage2_scores_loo.json",
+    "rinalmo_report": "reports/gate2_p3_ece.json",
+    "precision_items": "reports/p3/two_stage_precision_items.json",
+    "precision_report": "reports/two_stage_precision.json",
+    "benchmark": "data/interim/p3_16/benchmark_v1.json",
+    "stage1": "data/interim/p3_16/v1_stage1_twin.npz",
+    "stage2": "data/interim/p3_16/v1_stage2_twin.json",
+    "payloads": "data/interim/p3_16/v1_payloads_twin_t0.5.json",
+    "query_manifest": "data/interim/p3_17a/queries/manifest.json",
+    "search_done": "data/interim/p3_17a/tblout/DONE.json",
+    "out_scores": "reports/p3/cm_confirmer_scores.json",
+    "out_loo_scores": "reports/p3/cm_confirmer_scores_loo.json",
+    "out_items": "reports/p3/cm_confirmer_items.json",
+    "confirmer_provenance": "data/processed/cm_confirmer/provenance.json",
+    **{f"cm_{name}": str(path) for name, path in CONFIRMER_CMS},
+}
+#: Inputs committed to git (or git-LFS), so present in every checkout including CI. These are
+#: always re-hashed; ``require_all_inputs=False`` only excuses the DVC and local-only ones.
+COMMITTED_PREFIXES = ("reports/", "data/external/refs/")
+
+#: Clauses read off the report body alone.
+BODY_CLAUSES = (
     "every_query_scored",
     "calibrator_monotone",
     "calibrator_converged",
-    "calibrator_fit_disjoint_from_every_graded_row",
-    "calibrator_fit_on_the_whole_calib_rung",
     "graded_object_is_the_a14_posterior",
-    "in_distribution_population_is_rinalmos",
-    "leave_clade_out_population_is_rinalmos",
-    "ood_settings_are_rinalmos",
-    "replay_reproduces_p3_16_items",
-    "rinalmo_benchmark_reproduces_p3_16_report",
-    "every_benchmark_item_scored",
     "circularity_disclosed",
     "never_the_shipped_stage2",
 )
+#: Clauses re-derived from the COMMITTED upstream files, not from the report: a report that
+#: agrees with itself but not with the evidence it names fails these.
+EVIDENCE_CLAUSES = (
+    "rinalmo_sidecars_are_the_graded_ones",
+    "in_distribution_population_is_rinalmos",
+    "leave_clade_out_population_is_rinalmos",
+    "calibrator_fit_on_the_whole_calib_rung",
+    "calibrator_refits_from_the_committed_sidecar",
+    "calibrator_fit_disjoint_from_every_graded_row",
+    "cm_in_distribution_ece_rederives",
+    "cm_macro_and_paired_difference_rederive",
+    "ood_settings_are_rinalmos",
+    "rinalmo_values_are_its_committed_report",
+    "replay_reproduces_p3_16_items",
+    "every_benchmark_item_scored",
+    "rinalmo_benchmark_reproduces_p3_16_report",
+)
+CLAUSES = BODY_CLAUSES + EVIDENCE_CLAUSES
+
+#: Float re-derivations compare to this relative tolerance, not bit-exactly: a committed report
+#: must validate on every Python CI runs, and 3.12 changed float ``sum()`` (the estimator code
+#: this re-uses calls it). Every bound here is many orders of magnitude below any reported digit.
+REDERIVE_REL_TOL = 1e-9
 
 #: Disclosures a report must carry; the ``circularity_disclosed`` clause checks every id.
 REQUIRED_DISCLOSURES = (
@@ -944,45 +1022,216 @@ def disclosures() -> list[dict[str, str]]:
 
 
 def _population_matches(ours: Mapping[str, Any], theirs: Mapping[str, Any], fields) -> bool:
-    return all(ours.get(f) == theirs.get(f) for f in fields)
+    return all(ours.get(f) is not None and ours.get(f) == theirs.get(f) for f in fields)
+
+
+def calibration_fit_ids(sidecar: Mapping[str, Any]) -> list[str]:
+    """The rows ADR-0005 A14 fits the Platt map on: every ``calib`` row of a score sidecar."""
+    from tbox_finder.calib import recalibrate as R
+
+    return [
+        r
+        for r, rung in zip(sidecar["row_ids"], sidecar["rungs"], strict=True)
+        if rung == R.CALIB_RUNG
+    ]
+
+
+def _close(a: Any, b: Any) -> bool:
+    try:
+        return math.isclose(float(a), float(b), rel_tol=REDERIVE_REL_TOL, abs_tol=1e-15)
+    except (TypeError, ValueError):
+        return False
+
+
+def _ci_close(a: Any, b: Any) -> bool:
+    if not isinstance(a, Mapping) or not isinstance(b, Mapping):
+        return False
+    return all(_close(a.get(k), b.get(k)) for k in ("point", "lower", "upper")) and all(
+        a.get(k) == b.get(k) for k in ("n_boot", "n_blocks", "ci_level")
+    )
+
+
+def _load_source(root: Path, key: str) -> Any:
+    return json.loads((root / CANONICAL_SOURCES[key]).read_text(encoding="utf-8"))
 
 
 def derive_clauses(report: Mapping[str, Any]) -> dict[str, bool]:
-    """Every clause, recomputed from the report body."""
+    """The clauses that read the report body alone."""
     conf = report["confirmer"]
     cal = report["calibration"]
-    prec = report["precision"]
     fit = conf["calibrator"]
     graded = cal["in_distribution"][ARM]
-    settings = cal["leave_clade_out"]["ood_settings"]
     ids = {d.get("id") for d in report.get("disclosures", []) if str(d.get("text") or "").strip()}
-    rin_ref = prec["p3_16_reference"]
-    rin_now = prec["metrics"]["prevalence"][prec["metrics"]["gated_prevalence_key"]]["auprc"]
     return {
         "every_query_scored": conf["n_queries_unscored"] == 0 and conf["n_queries"] > 0,
         "calibrator_monotone": float(fit["slope"]) > 0.0,
-        "calibrator_converged": bool(fit["converged"]),
-        "calibrator_fit_disjoint_from_every_graded_row": conf["n_fit_rows_also_graded"] == 0
-        and conf["n_fit_rows"] > 0,
-        "calibrator_fit_on_the_whole_calib_rung": fit.get("fitted_on") == "calib"
-        and conf["n_fit_rows"] == conf["n_calib_rows_in_sidecar"],
+        "calibrator_converged": fit.get("converged") is True,
         "graded_object_is_the_a14_posterior": graded.get("graded_posterior_key") == POSTERIOR_KEY
         and cal.get("posterior_key") == POSTERIOR_KEY
         and graded.get("temperature_stage") == "not_applied"
         and graded.get("gated") is False,
-        "in_distribution_population_is_rinalmos": bool(conf["population_match"]["in_distribution"]),
-        "leave_clade_out_population_is_rinalmos": bool(conf["population_match"]["leave_clade_out"]),
-        "ood_settings_are_rinalmos": bool(settings)
-        and all(v.get(ARM) == v.get("rinalmo") for v in settings.values()),
-        "replay_reproduces_p3_16_items": prec["binding"]["n_items_mismatched_vs_committed"] == 0,
-        "rinalmo_benchmark_reproduces_p3_16_report": rin_now.get("rinalmo")
-        == rin_ref["auprc_at_pinned_prevalence"]
-        and prec["metrics"]["operating_point"]["target_recall"] == rin_ref["target_recall"],
-        "every_benchmark_item_scored": prec["binding"]["n_items"] == prec["n_items_expected"],
         "circularity_disclosed": set(REQUIRED_DISCLOSURES) <= ids,
         "never_the_shipped_stage2": report.get("gated") is False
         and report.get("role") == "ablation",
     }
+
+
+def evidence_clauses(report: Mapping[str, Any], *, repo_root: str | Path = ".") -> dict[str, bool]:
+    """The clauses re-derived from the committed upstream files the report names.
+
+    Every file read here is in git, so this runs in CI. It binds the published numbers to their
+    evidence rather than to each other: the RiNALMo sidecars to the GATE-2 report that graded
+    them, the CM sidecars to RiNALMo's populations, the calibrator to a re-fit on the sidecar's
+    own ``calib`` rows, the in-distribution ECE and the leave-clade-out macro + paired
+    difference to recomputations, RiNALMo's quoted values to its own report, and the benchmark
+    items to P3-16's committed items and report. The per-order CM OOD ECEs themselves need the
+    DVC dataset; :func:`validate_report`'s ``rederive_local`` re-runs them.
+    """
+    from tbox_finder import metrics as M
+    from tbox_finder.calib import gate2 as G2
+    from tbox_finder.calib import swap_check as SC
+    from tbox_finder.eval import resample as RS
+    from tbox_finder.integration import precision as P
+
+    root = Path(repo_root)
+    rin_in, rin_loo = _load_source(root, "rinalmo_scores"), _load_source(root, "rinalmo_loo_scores")
+    cm_in, cm_loo = _load_source(root, "out_scores"), _load_source(root, "out_loo_scores")
+    g2 = _load_source(root, "rinalmo_report")
+    p16_items, p16 = _load_source(root, "precision_items"), _load_source(root, "precision_report")
+    items = _load_source(root, "out_items")["items"]
+    conf, cal, prec = report["confirmer"], report["calibration"], report["precision"]
+    fit = conf["calibrator"]
+    out: dict[str, bool] = {}
+
+    g2_inputs = g2["provenance"]["inputs"]
+    out["rinalmo_sidecars_are_the_graded_ones"] = all(
+        g2_inputs.get(CANONICAL_SOURCES[k]) == refs.content_sha256(root / CANONICAL_SOURCES[k])
+        for k in ("rinalmo_scores", "rinalmo_loo_scores")
+    )
+    out["in_distribution_population_is_rinalmos"] = _population_matches(
+        cm_in, rin_in, SC._IN_DIST_POPULATION_FIELDS
+    )
+    out["leave_clade_out_population_is_rinalmos"] = _population_matches(
+        cm_loo, rin_loo, SC._LOO_POPULATION_FIELDS
+    )
+
+    fit_ids = calibration_fit_ids(cm_in)
+    out["calibrator_fit_on_the_whole_calib_rung"] = (
+        fit.get("fitted_on") == "calib"
+        and len(fit_ids) > 0
+        and conf["n_fit_rows"] == len(fit_ids) == int(g2["gate"]["calibration"]["n_fitted"])
+    )
+    arm_in, arm_loo = cm_in["arms"][ARM], cm_loo["arms"][ARM]
+    at = {r: i for i, r in enumerate(cm_in["row_ids"])}
+    try:
+        refit = fit_platt(
+            [arm_in["bit_scores"][at[r]] for r in fit_ids],
+            [cm_in["labels"][at[r]] for r in fit_ids],
+        )
+        refit_ok = _close(refit.slope, fit["slope"]) and _close(refit.intercept, fit["intercept"])
+    except ConfirmerError:
+        refit_ok = False
+    slope, intercept = float(fit["slope"]), float(fit["intercept"])
+    out["calibrator_refits_from_the_committed_sidecar"] = refit_ok and all(
+        arm["logits"] == affine_logit(arm["bit_scores"], slope, intercept)
+        for arm in (arm_in, arm_loo)
+    )
+    graded_rows = {
+        r for r, g in zip(cm_in["row_ids"], cm_in["rungs"], strict=True) if g == G2.GATE_RUNG
+    } | set(cm_loo["row_ids"])
+    out["calibrator_fit_disjoint_from_every_graded_row"] = (
+        not (set(fit_ids) & graded_rows) and conf["n_fit_rows_also_graded"] == 0
+    )
+
+    graded = cal["in_distribution"][ARM]
+    idx = [i for i, g in enumerate(cm_in["rungs"]) if g == G2.GATE_RUNG]
+    p = platt_posterior(arm_in["logits"])
+    ece = M.binned_ece(
+        [cm_in["labels"][i] for i in idx], [p[i] for i in idx], G2.ECE_N_BINS, debias=True
+    )
+    out["cm_in_distribution_ece_rederives"] = _close(ece, graded["ece"]) and graded["n"] == len(idx)
+
+    ood = cal["leave_clade_out"][ARM]
+    units = ood["units"]
+    adm = [(n, float(u["ood_ece"])) for n, u in units.items() if u.get("admissible") is True]
+    units_ok = len(adm) == ood["n_units_admissible"] > 0 and all(
+        _close(u["ood_ece"], u["ci"]["point"])
+        for u in units.values()
+        if u.get("admissible") is True
+    )
+    macro = RS.block_bootstrap(
+        RS.blocks_by_key(adm, [n for n, _ in adm], key_name=G2.OOD_UNIT_KEY),
+        lambda sample: sum(v for _, v in sample) / len(sample) if sample else float("nan"),
+        n_boot=int(ood["n_boot"]),
+        seed=int(ood["bootstrap_seed"]),
+    )
+    paired = SC.paired_difference(SC._admissible_values(g2), SC._admissible_values({"ood": ood}))
+    rec = cal["leave_clade_out"]["paired"]
+    out["cm_macro_and_paired_difference_rederive"] = (
+        units_ok
+        and _ci_close(macro, ood["macro_average"])
+        and _ci_close(paired["ci"], rec.get("ci"))
+        and set(paired["per_unit"]) == set(rec.get("per_unit") or {})
+        and all(_close(v, rec["per_unit"][k]) for k, v in paired["per_unit"].items())
+    )
+    settings = cal["leave_clade_out"]["ood_settings"]
+    out["ood_settings_are_rinalmos"] = all(
+        ood.get(k) is not None
+        and ood.get(k) == g2["ood"].get(k)
+        and (settings.get(k) or {}).get(ARM) == ood.get(k)
+        and (settings.get(k) or {}).get("rinalmo") == g2["ood"].get(k)
+        for k in SC._SHARED_OOD_SETTINGS
+    )
+    rin = cal["in_distribution"]["rinalmo"]
+    out["rinalmo_values_are_its_committed_report"] = (
+        rin.get("ece") == g2["gate"]["ece"]
+        and rin.get("ece_ci") == g2["gate"]["ece_ci"]
+        and rin.get("temperature") == g2["gate"]["calibration"]["temperature"]
+        and rin.get("n") == g2["gate"]["n"]
+        and rin.get("graded_posterior_key") == g2["gate"]["graded_posterior_key"]
+        and cal["leave_clade_out"]["rinalmo"].get("macro_average") == g2["ood"]["macro_average"]
+        and _close(
+            cal["in_distribution"]["rinalmo_minus_cm_confirmer"],
+            float(g2["gate"]["ece"]) - float(graded["ece"]),
+        )
+    )
+
+    ref = {it["contig_id"]: it for it in P.arm_items(p16_items, P.GATED_ARM)}
+    mine = {it["contig_id"]: it for it in items}
+    out["replay_reproduces_p3_16_items"] = (
+        len(mine) == len(items)
+        and set(mine) == set(ref)
+        and prec["binding"]["n_items_mismatched_vs_committed"] == 0
+        and all(
+            (m["label"], m["pool"], m["block"], int(m["n_rows"]), float(m["rinalmo"]))
+            == (r["label"], r["pool"], r["block"], int(r["n_rows"]), float(r["two_stage"]))
+            for k, m in mine.items()
+            for r in (ref[k],)
+        )
+    )
+    out["every_benchmark_item_scored"] = len(items) == len(ref) == prec["n_items_expected"] and all(
+        (int(it["n_rows"]) == 0 and float(it[ARM]) == P.UNCALLED_SCORE)
+        or (int(it["n_rows"]) > 0 and 0.0 <= float(it[ARM]) <= 1.0)
+        for it in items
+    )
+    twin = p16["arms"][P.GATED_ARM]
+    gkey = twin["gated_prevalence_key"]
+    metrics_ = prec["metrics"]
+    out["rinalmo_benchmark_reproduces_p3_16_report"] = (
+        metrics_["gated_prevalence_key"] == gkey
+        and metrics_["prevalence"][gkey]["auprc"].get("rinalmo")
+        == twin["prevalence"][gkey]["auprc"]["two_stage"]
+        and metrics_["operating_point"]["target_recall"] == twin["operating_point"]["target_recall"]
+        and prec["operating_point"] == twin["operating_point"]["stage2_operating_point"]
+        and prec["n_boot"] == p16["rule"]["n_boot"]
+        and prec["seed"] == p16["provenance"]["seed"]
+        and prec["p3_16_reference"]
+        == {
+            "auprc_at_pinned_prevalence": twin["prevalence"][gkey]["auprc"]["two_stage"],
+            "target_recall": twin["operating_point"]["target_recall"],
+        }
+    )
+    return out
 
 
 def build_report(
@@ -990,7 +1239,9 @@ def build_report(
     confirmer: Mapping[str, Any],
     calibration: Mapping[str, Any],
     precision: Mapping[str, Any],
+    sources: Mapping[str, str],
     provenance: Mapping[str, Any],
+    repo_root: str | Path = ".",
     generated_at_utc: str | None = None,
 ) -> dict[str, Any]:
     from datetime import UTC, datetime
@@ -1005,14 +1256,15 @@ def build_report(
         "role": "ablation",
         "gated": False,
         "generated_at_utc": generated_at_utc or datetime.now(UTC).isoformat(),
+        "sources": dict(sources),
         "confirmer": dict(confirmer),
         "calibration": dict(calibration),
         "precision": dict(precision),
         "disclosures": disclosures(),
         "provenance": dict(provenance),
     }
-    clauses = derive_clauses(report)
-    report["clauses"] = clauses
+    clauses = {**derive_clauses(report), **evidence_clauses(report, repo_root=repo_root)}
+    report["clauses"] = {name: clauses[name] for name in CLAUSES}
     report["is_science"] = all(clauses.values())
     return report
 
@@ -1027,15 +1279,21 @@ def validate_report(
     repo_root: str | Path = ".",
     require_all_inputs: bool = True,
     rederive_precision: bool = True,
+    rederive_local: bool = False,
 ) -> list[str]:
     """Problems with a confirmer report; ``[]`` means it is internally and externally sound.
 
-    * the header, the clause set, and ``is_science`` as their AND;
-    * every clause re-derived from the body;
-    * every recorded input re-hashed. ``require_all_inputs=False`` skips inputs absent from
-      this checkout, which in CI are the DVC dataset and the local-only P3-16 replay files.
-      The git-committed inputs are always checked;
-    * the precision block re-derived from the committed items file (``rederive_precision``).
+    * the header, the pinned ``sources`` map, the clause set, and ``is_science`` as their AND;
+    * every clause re-derived: :func:`derive_clauses` from the body, :func:`evidence_clauses`
+      from the committed upstream files;
+    * the recorded input set is exactly :data:`CANONICAL_SOURCES`, and each is re-hashed. A
+      committed input (:data:`COMMITTED_PREFIXES`) must always be present.
+      ``require_all_inputs=False`` excuses only an absent DVC or local-only one, which is
+      what a CI checkout lacks;
+    * the precision block re-derived from the committed items file (``rederive_precision``);
+    * ``rederive_local`` (needs the DVC dataset, the DVC score table and the P3-16 replay
+      files): every CM item score re-derived through the replay, and every per-order CM OOD
+      ECE re-graded from the committed sidecar (~35 min, single-threaded).
     """
     problems: list[str] = []
     for key, want in (
@@ -1045,52 +1303,116 @@ def validate_report(
     ):
         if report.get(key) != want:
             problems.append(f"{key} is {report.get(key)!r}, expected {want!r}")
+    if report.get("sources") != CANONICAL_SOURCES:
+        problems.append("sources is not the pinned CANONICAL_SOURCES map")
+        return problems
     clauses = report.get("clauses")
     if not isinstance(clauses, Mapping) or tuple(sorted(clauses)) != tuple(sorted(CLAUSES)):
         problems.append(f"clause set {sorted(clauses or {})} != {sorted(CLAUSES)}")
         return problems
     if report.get("is_science") is not all(clauses.values()):
         problems.append("is_science is not the AND of the clauses")
+
+    root = Path(repo_root)
+    inputs = (report.get("provenance") or {}).get("inputs") or {}
+    if set(inputs) != set(CANONICAL_SOURCES.values()):
+        problems.append(
+            "provenance inputs are not exactly the canonical sources: "
+            f"missing {sorted(set(CANONICAL_SOURCES.values()) - set(inputs))}, "
+            f"extra {sorted(set(inputs) - set(CANONICAL_SOURCES.values()))}"
+        )
+    for rel, digest in inputs.items():
+        path = root / rel
+        if not path.exists():
+            if require_all_inputs or rel.startswith(COMMITTED_PREFIXES):
+                problems.append(f"input {rel} is absent")
+            continue
+        # Content hash, so a git-LFS pointer (a CI checkout without LFS) is checked through
+        # its own ``oid sha256``, which IS the content digest, rather than refused or skipped.
+        if refs.content_sha256(path) != digest:
+            problems.append(f"input {rel} no longer hashes to the recorded {str(digest)[:12]}…")
+    if problems:
+        return problems
+
     try:
-        derived = derive_clauses(report)
-    except (KeyError, TypeError, ValueError) as exc:
+        derived = {**derive_clauses(report), **evidence_clauses(report, repo_root=root)}
+    except (KeyError, TypeError, ValueError, FileNotFoundError, ConfirmerError) as exc:
         return [*problems, f"clauses cannot be re-derived: {exc!r}"]
     for name in CLAUSES:
         if derived[name] != clauses[name]:
             problems.append(
-                f"clause {name} records {clauses[name]} but the body gives {derived[name]}"
+                f"clause {name} records {clauses[name]} but the evidence gives {derived[name]}"
             )
 
-    from tbox_finder import provenance as PROV
-
-    root = Path(repo_root)
-    inputs = (report.get("provenance") or {}).get("inputs") or {}
-    if not inputs:
-        problems.append("provenance records no inputs")
-    for rel, digest in inputs.items():
-        path = root / rel
-        if not path.exists():
-            if require_all_inputs:
-                problems.append(f"input {rel} is absent")
-            continue
-        if PROV.sha256_file(path) != digest:
-            problems.append(f"input {rel} no longer hashes to the recorded {digest[:12]}…")
-
+    prec = report["precision"]
     if rederive_precision:
-        prec = report["precision"]
-        items_path = root / prec["items"]
-        if not items_path.exists():
-            problems.append(f"items file {prec['items']} is absent")
-        else:
-            payload = json.loads(items_path.read_text(encoding="utf-8"))
-            again = benchmark_metrics(
-                payload["items"],
-                operating_point=float(prec["operating_point"]),
-                n_boot=int(prec["n_boot"]),
-                seed=int(prec["seed"]),
-            )
-            if _canonical(again) != _canonical(prec["metrics"]):
-                problems.append("the precision block does not re-derive from its items file")
+        payload = json.loads((root / prec["items"]).read_text(encoding="utf-8"))
+        again = benchmark_metrics(
+            payload["items"],
+            operating_point=float(prec["operating_point"]),
+            n_boot=int(prec["n_boot"]),
+            seed=int(prec["seed"]),
+        )
+        if _canonical(again) != _canonical(prec["metrics"]):
+            problems.append("the precision block does not re-derive from its items file")
+    if rederive_local:
+        problems += _local_rederivation_problems(report, root)
+    return problems
+
+
+def _local_rederivation_problems(report: Mapping[str, Any], root: Path) -> list[str]:
+    """Re-derive what CI cannot: the CM item scores and the per-order CM OOD ECEs."""
+    import pandas as pd
+
+    from tbox_finder.calib import gate2 as G2
+    from tbox_finder.integration import precision as P
+
+    problems: list[str] = []
+    src = {k: root / v for k, v in CANONICAL_SOURCES.items()}
+    fit = report["confirmer"]["calibrator"]
+    frame = pd.read_parquet(root / report["confirmer"]["artifact_dir"] / "query_scores.parquet")
+    best = dict(zip(frame["query_id"], frame["best_bits"], strict=True))
+    rows, _ = replay_benchmark(
+        benchmark=src["benchmark"],
+        stage1=src["stage1"],
+        stage2=src["stage2"],
+        rinalmo_report=src["rinalmo_report"],
+        operating_point=float(report["precision"]["operating_point"]),
+        knobs=report["provenance"]["extra"]["replay_knobs"],
+    )
+    payload_rna = {
+        str(e["row_id"]): str(e["rna_sequence"])
+        for e in json.loads(src["payloads"].read_text(encoding="utf-8"))["payloads"]
+    }
+    keys = sorted({row["payload_key"] for row in rows})
+    logits = affine_logit(
+        [float(best[query_id(payload_rna[k])]) for k in keys],
+        float(fit["slope"]),
+        float(fit["intercept"]),
+    )
+    posterior = dict(zip(keys, platt_posterior(logits), strict=True))
+    items, _ = benchmark_items(
+        committed=json.loads(src["precision_items"].read_text(encoding="utf-8")),
+        rows=rows,
+        cm_posterior_by_row=posterior,
+        arm=P.GATED_ARM,
+    )
+    committed = json.loads(src["out_items"].read_text(encoding="utf-8"))["items"]
+    if _canonical(items) != _canonical(committed):
+        problems.append("the CM item scores do not re-derive through the P3-16 replay")
+
+    holdout, _ = G2.loo_holdout_rows(src["dataset"])
+    rin = json.loads(src["rinalmo_report"].read_text(encoding="utf-8"))["scoring"]
+    ood = G2.grade_ood_units(
+        scores=G2.load_scores(src["out_loo_scores"], ARM),
+        rows_by_id={row[G2._ROW_ID]: row for row in holdout},
+        temperature=IDENTITY_TEMPERATURE,
+        n_boot=int(rin["ood_n_boot"]),
+        seed=int(rin["bootstrap_seed"]),
+    )
+    recorded = report["calibration"]["leave_clade_out"][ARM]
+    if _canonical(ood["units"]) != _canonical(recorded["units"]):
+        problems.append("the per-order CM OOD ECEs do not re-derive from the committed sidecar")
     return problems
 
 
@@ -1175,6 +1497,7 @@ def run_ablation(
             raise ConfirmerError(f"row {row[G2._ROW_ID]!r} was never searched")
         bits_by_row[row[G2._ROW_ID]] = float(table[qid]["best"])
         label_by_row[row[G2._ROW_ID]] = int(bool(row[G2._LABEL]))
+    order_by_row = {row[G2._ROW_ID]: row.get(G2._RESOLVED_ORDER) for row in split_rows}
 
     dataset_sha = PROV.sha256_file(dataset)
     rin_in = json.loads(Path(rinalmo_scores).read_text(encoding="utf-8"))
@@ -1193,11 +1516,7 @@ def run_ablation(
             )
 
     # ── the learned calibration: Platt on the D11 calib rung (ADR-0005 A14) ─────────────
-    fit_ids = [
-        r
-        for r, rung in zip(rin_in["row_ids"], rin_in["rungs"], strict=True)
-        if rung == R.CALIB_RUNG
-    ]
+    fit_ids = calibration_fit_ids(rin_in)
     graded_ids = {
         r
         for r, rung in zip(rin_in["row_ids"], rin_in["rungs"], strict=True)
@@ -1254,7 +1573,9 @@ def run_ablation(
             f"{p3_16['sources']['stage1_threshold']!r}"
         )
     operating_point = float(twin["operating_point"]["stage2_operating_point"])
-    n_boot = int(twin["gain_ci"]["n_boot"])
+    # The REQUESTED replicate count. `gain_ci.n_boot` is block_bootstrap's count of finite
+    # replicates, which equals the request only while none is dropped.
+    n_boot = int(p3_16["rule"]["n_boot"])
     seed = int(p3_16["provenance"]["seed"])
     rows, t_rin = replay_benchmark(
         benchmark=benchmark,
@@ -1372,10 +1693,9 @@ def run_ablation(
                 if (z > 0) != (y == 1)
             ),
         },
-        "population_match": {
-            "in_distribution": _population_matches(in_side, rin_in, SC._IN_DIST_POPULATION_FIELDS),
-            "leave_clade_out": _population_matches(loo_side, rin_loo, SC._LOO_POPULATION_FIELDS),
-        },
+        "n_fit_row_orders_in_loo_holdout": len(
+            {order_by_row.get(r) for r in fit_ids} & set(rin_loo["units"]) - {None}
+        ),
         "artifact_dir": rel(cdir),
     }
     precision = {
@@ -1435,11 +1755,32 @@ def run_ablation(
         },
     )
     prov["inputs"] = {rel(k): v for k, v in prov["inputs"].items()}
+    sources = {
+        "dataset": rel(dataset),
+        "rinalmo_scores": rel(rinalmo_scores),
+        "rinalmo_loo_scores": rel(rinalmo_loo_scores),
+        "rinalmo_report": rel(rinalmo_report),
+        "precision_items": rel(precision_items),
+        "precision_report": rel(precision_report),
+        "benchmark": rel(benchmark),
+        "stage1": rel(stage1),
+        "stage2": rel(stage2),
+        "payloads": rel(payloads),
+        "query_manifest": rel(Path(query_dir) / "manifest.json"),
+        "search_done": rel(Path(tblout_dir) / "DONE.json"),
+        "out_scores": rel(out_scores),
+        "out_loo_scores": rel(out_loo_scores),
+        "out_items": rel(out_items),
+        "confirmer_provenance": rel(cdir / "provenance.json"),
+        **{f"cm_{name}": rel(cm) for name, cm in CONFIRMER_CMS},
+    }
     report = build_report(
         confirmer=confirmer,
         calibration=calibration,
         precision=precision,
+        sources=sources,
         provenance=prov,
+        repo_root=".",
         generated_at_utc=generated_at_utc,
     )
     problems = validate_report(report, repo_root=".")

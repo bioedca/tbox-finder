@@ -8316,8 +8316,8 @@ would publish a fabricated `named_posterior` ECE, so this was a §7 stop. The us
   orders with the 30 holdout orders.
 - The posterior is labelled `cm_platt_posterior`, graded with D11's and D13's estimators at
   RiNALMo's `n_boot` and seed, and never gated.
-- Fit: slope **0.1512 /bit**, intercept **−4.398** (p = 0.5 at 29.1 bits), converged in 11 Newton
-  steps.
+- Fit: slope **0.1512 /bit**, intercept **−4.398** (p = 0.5 at 29.1 bits), converged after 11
+  gradient evaluations (10 Newton steps).
 
 **Outputs.** `reports/cm_confirmer_ablation.json` (14 clauses, all TRUE; `is_science: true`;
 `gated: false`), `reports/p3/cm_confirmer_scores{,_loo}.json` (RiNALMo's populations row-for-row),
@@ -8376,3 +8376,85 @@ and the leave-clade-out rows, and the report was emitted. No number was fabricat
 §6.4: ADR-0005 A14, a README P3 line, and a manuscript paragraph in the two-stage results section.
 
 **Commit.** see PR (P3-17a).
+
+## Step P3-17a (review round 1) — 2026-10-06: every published number bound to the evidence it names
+
+**Inputs.** Commit `d038737` drew three reviews.
+- The CodeRabbit CLI and the app's automatic review each raised the same minor finding: the CM
+  files were recorded by path, not hash. The app added one low-value nitpick.
+- An independent read-only adversarial pass found 4 majors, 3 minors and 3 nits.
+- CI failed on the git-LFS pointer trap: CI has no LFS, so the two `.cm` inputs are pointers
+  there and their hashes differ.
+
+Every finding was reproduced by execution before it was fixed.
+
+**Process.**
+1. **The search is bound to its models and its rows.** `DONE.json` now records each CM's content
+   sha256 and, per (model, shard), the hit count and a digest of the tblout **data rows**. Header
+   comments are excluded, which keeps the sanitised committed fixture valid. `read_search` refuses
+   a different model, a dropped row or an edited row: the reviewer showed a single dropped row
+   turning a T-box's best hit from 100.1 to −9.3 bits. `cm_confirmer_search` also declares the
+   two CMs as inputs.
+2. **LFS pointers.** Inputs are checked with `refs.content_sha256`, which reads a pointer's own
+   `oid sha256`. That oid **is** the content digest, so CI verifies the CMs instead of failing or
+   skipping them.
+3. **The numbers are bound to evidence, not to each other (major).** The reviewer forged a report
+   (CM ECE 0.0001, RiNALMo ECE 0.04, LOO macro 0.001, a paired point of 0.899, RiNALMo's decoy
+   scores zeroed) with every clause re-derived TRUE, and it validated. There are now 13
+   **evidence clauses** (`evidence_clauses`). Each re-reads the committed upstream files, so all
+   of them run in CI:
+   - the RiNALMo sidecars must hash to the GATE-2 report's own provenance;
+   - the CM sidecars must carry RiNALMo's populations;
+   - the calibrator must re-fit from the sidecar's `calib` rows to the recorded slope and
+     intercept, the sidecar logits must equal `a·bits + b`, and the fit count must equal
+     GATE-2's `n_fitted`;
+   - the in-distribution ECE is recomputed from the sidecar;
+   - the LOO macro and the paired difference are recomputed from the per-order values and
+     RiNALMo's report;
+   - RiNALMo's quoted values must equal its committed report;
+   - the items must equal P3-16's committed twin items, and the reference values must equal
+     P3-16's report.
+4. **Five tautological clauses are gone.** Each compared a copy with its own source. Their
+   replacements compare file against independent file.
+5. **Inputs.** `sources` must equal the pinned `CANONICAL_SOURCES` map, and the input set must
+   be exactly that map. A committed input (`reports/`, `data/external/refs/`) must be present even
+   with `require_all_inputs=False`.
+6. **What CI cannot reach.** `rederive_local` re-derives every CM item score through the P3-16
+   replay and re-grades all 30 per-order OOD ECEs from the committed sidecar.
+7. **Fit-set selection.** It is now a tested function (`calibration_fit_ids`). The reviewer's
+   mutant (Platt fitted on the test rung) is caught by `calibrator_refits_from_the_committed_sidecar`.
+8. **`n_boot`.** It is read from P3-16's `rule.n_boot`, the requested count, not from
+   `gain_ci.n_boot`, which counts surviving replicates.
+9. **Nits.** `_relabel` refuses a key collision. `ood_settings_are_rinalmos` refuses `None ==
+   None`. The dev-log now says "11 gradient evaluations (10 Newton steps)".
+
+**Declined.** The app's nitpick to declare the query directory as a `directory()` output.
+`read_search` reads only the shards the hash-bound manifest lists, so a stale extra shard cannot
+enter the search.
+
+**Outputs.** The search re-ran (52 min). **All 44 tblouts reproduce run 1's data rows byte for
+byte** (833,243 + 1,042,952 hits). The report was regenerated with **19 clauses, all TRUE**, and
+**no published number moved**.
+The DVC object is now `93d4ddf6…`. Its `provenance.json` changed with the re-run; the scores and
+calibrator did not.
+
+**Validation.**
+- **CI tier.** `validate_report(require_all_inputs=False)`, the CI mode, returns `[]`, including
+  through LFS-pointer CMs.
+- **Local.** `validate_report(require_all_inputs=True, rederive_local=True)` returns `[]` in
+  1,944 s. Every CM item score re-derives through the P3-16 replay, and all 30 per-order OOD ECEs
+  re-grade identically from the committed sidecar.
+- **Tests.** 60 tests: 59 pass in the data env, and the shard test passes under real cmsearch.
+  Seven new tests replay the reviewer's forges (CM ECE, RiNALMo ECE, LOO macro, paired point,
+  calibrator intercept, P3-16 reference, item scores with the hash re-stamped). Each first
+  asserts a clean `[]`, then asserts the forge is caught by its named clause.
+- **Sabotage.** **13 new sabotages, all RED against their named test; 28 in total.** One went
+  GREEN first. The test-rung-calibrator forge was caught by the LOO sidecar's logits, which the
+  test had not re-forged, so the re-fit check was masked
+  ([[all-true-fixture-cannot-test-a-conjunction]]). The test now forges both sidecars
+  consistently, and only the re-fit catches it.
+- **Tooling.** ruff, black 25.11.0, `snakemake --lint` and `-n` are clean.
+
+**Decisions.** None. No calibration, threshold or published number changed.
+
+**Commit.** see PR (P3-17a, review round 1).

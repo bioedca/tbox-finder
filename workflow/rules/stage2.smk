@@ -98,6 +98,10 @@ rule cm_confirmer_search:
     """cmsearch --toponly --max -T -1000 of every shard against RF00230 + TBDB001."""
     input:
         manifest=rules.cm_confirmer_queries.output.manifest,
+        # The models are inputs: a changed CM must re-run the search (DONE.json also records
+        # their content digests, and the ablation refuses tblouts from any other model).
+        rf00230="data/external/refs/RF00230.cm",
+        tbdb001="data/external/refs/TBDB001.cm",
     output:
         done=f"{_CM_CONFIRMER_INTERIM}/tblout/DONE.json",
     params:

@@ -13,17 +13,35 @@
     "1.0"
   ],
   "cms": {
-    "RF00230": "data/external/refs/RF00230.cm",
-    "TBDB001": "data/external/refs/TBDB001.cm"
-  },
-  "hit_counts": {
     "RF00230": {
-      "shard_000.fa": 78,
-      "shard_001.fa": 102
+      "path": "data/external/refs/RF00230.cm",
+      "sha256": "082616efe0616479dc9b9f565b5bcab7648d7ea1d629430940319f247af52cea"
     },
     "TBDB001": {
-      "shard_000.fa": 88,
-      "shard_001.fa": 74
+      "path": "data/external/refs/TBDB001.cm",
+      "sha256": "00a821f23bfaf96c1e454022bc0a8fcbe2a9150abadd00bca6abb9298d9a0d1c"
+    }
+  },
+  "tblouts": {
+    "RF00230": {
+      "shard_000.fa": {
+        "n_hits": 78,
+        "data_sha256": "e5dcb3b98d5a24363c20d6b20a7e082d24500b738efb64f0ce15d920384ac1d7"
+      },
+      "shard_001.fa": {
+        "n_hits": 102,
+        "data_sha256": "aadd4fec5d1c25db5a07c9bf5446004f4cdfae9e70180613e1e047c265b2837a"
+      }
+    },
+    "TBDB001": {
+      "shard_000.fa": {
+        "n_hits": 88,
+        "data_sha256": "f108461318b7481f71926936f83911bd2282418a11d8fd3d27953a719e3bf7ba"
+      },
+      "shard_001.fa": {
+        "n_hits": 74,
+        "data_sha256": "b7c22f9c3ee9f79ad39f496167459a40fe3f394d5352e6f2183c4882c55a0ddd"
+      }
     }
   }
 }
