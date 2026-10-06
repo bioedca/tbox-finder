@@ -1,0 +1,2565 @@
+{
+  "adr": "ADR-0001:36; ADR-0005 D2, D5, D7, D11, D13, A13",
+  "calibration": {
+    "in_distribution": {
+      "cm_confirmer": {
+        "bootstrap_seed": 20260804,
+        "ece": 0.007531806091773583,
+        "ece_binning": "equal_mass",
+        "ece_ci": {
+          "ci_level": 0.95,
+          "lower": 0.005941326582993049,
+          "n_blocks": 2275,
+          "n_boot": 2000,
+          "point": 0.007531806091773583,
+          "upper": 0.009782595532733515
+        },
+        "ece_debiased": true,
+        "ece_n_bins": 15,
+        "ece_plugin": 0.011305167326192522,
+        "estimator": "tbox_finder.metrics.binned_ece",
+        "gated": false,
+        "graded_object": "cm_platt_posterior: sigma(a*bits + b), Platt fitted on calib (ADR-0005 A14); NOT D11's named_posterior, and no temperature stage",
+        "graded_posterior_key": "cm_platt_posterior",
+        "graded_rung": "test",
+        "n": 3045,
+        "n_blocks": 2275,
+        "n_boot": 2000,
+        "n_negative": 692,
+        "n_positive": 2353,
+        "prevalence": 0.7727422003284072,
+        "reliability": [
+          {
+            "acc": 0.0,
+            "conf": 0.007561038265465906,
+            "debiased_gap": 0.002710000413536611,
+            "gap": 0.007561038265465906,
+            "n": 203,
+            "p_max": 0.008482624704863877,
+            "p_min": 0.005325779801431737,
+            "weight": 0.06666666666666667
+          },
+          {
+            "acc": 0.0,
+            "conf": 0.009444351146889525,
+            "debiased_gap": 0.004027866143666184,
+            "gap": 0.009444351146889525,
+            "n": 203,
+            "p_max": 0.01061878121382815,
+            "p_min": 0.008482624704863877,
+            "weight": 0.06666666666666667
+          },
+          {
+            "acc": 0.0,
+            "conf": 0.012454265847497814,
+            "debiased_gap": 0.006243720787020359,
+            "gap": 0.012454265847497814,
+            "n": 203,
+            "p_max": 0.015420447182557882,
+            "p_min": 0.01061878121382815,
+            "weight": 0.06666666666666667
+          },
+          {
+            "acc": 0.5960591133004927,
+            "conf": 0.47795654524896136,
+            "debiased_gap": 0.0901295338251838,
+            "gap": 0.1181025680515313,
+            "n": 203,
+            "p_max": 0.9347119602916412,
+            "p_min": 0.01565165892324308,
+            "weight": 0.06666666666666667
+          },
+          {
+            "acc": 0.9950738916256158,
+            "conf": 0.9767728964916801,
+            "debiased_gap": 0.0098659702071968,
+            "gap": 0.018300995133935682,
+            "n": 203,
+            "p_max": 0.9931347411547735,
+            "p_min": 0.9356284672186537,
+            "weight": 0.06666666666666667
+          },
+          {
+            "acc": 1.0,
+            "conf": 0.9969015156772792,
+            "debiased_gap": 0.0,
+            "gap": 0.0030984843227207515,
+            "n": 203,
+            "p_max": 0.9990176086333828,
+            "p_min": 0.9931347411547735,
+            "weight": 0.06666666666666667
+          },
+          {
+            "acc": 1.0,
+            "conf": 0.9995575773623284,
+            "debiased_gap": 0.0,
+            "gap": 0.0004424226376715801,
+            "n": 203,
+            "p_max": 0.9998245396768456,
+            "p_min": 0.9990323338867907,
+            "weight": 0.06666666666666667
+          },
+          {
+            "acc": 1.0,
+            "conf": 0.9999056715760044,
+            "debiased_gap": 0.0,
+            "gap": 9.432842399559327e-05,
+            "n": 203,
+            "p_max": 0.9999460327805572,
+            "p_min": 0.9998245396768456,
+            "weight": 0.06666666666666667
+          },
+          {
+            "acc": 1.0,
+            "conf": 0.9999605646330814,
+            "debiased_gap": 0.0,
+            "gap": 3.943536691863869e-05,
+            "n": 203,
+            "p_max": 0.9999713981571966,
+            "p_min": 0.9999460327805572,
+            "weight": 0.06666666666666667
+          },
+          {
+            "acc": 1.0,
+            "conf": 0.9999793357959582,
+            "debiased_gap": 0.0,
+            "gap": 2.0664204041787038e-05,
+            "n": 203,
+            "p_max": 0.9999852930642573,
+            "p_min": 0.9999718272788954,
+            "weight": 0.06666666666666667
+          },
+          {
+            "acc": 1.0,
+            "conf": 0.999989213752243,
+            "debiased_gap": 0.0,
+            "gap": 1.078624775696646e-05,
+            "n": 203,
+            "p_max": 0.9999922056814088,
+            "p_min": 0.9999852930642573,
+            "weight": 0.06666666666666667
+          },
+          {
+            "acc": 1.0,
+            "conf": 0.9999947284640439,
+            "debiased_gap": 0.0,
+            "gap": 5.271535956086204e-06,
+            "n": 203,
+            "p_max": 0.9999968532964937,
+            "p_min": 0.9999924378124738,
+            "weight": 0.06666666666666667
+          },
+          {
+            "acc": 1.0,
+            "conf": 0.999997909652624,
+            "debiased_gap": 0.0,
+            "gap": 2.0903473759714686e-06,
+            "n": 203,
+            "p_max": 0.9999988221084609,
+            "p_min": 0.9999968532964937,
+            "weight": 0.06666666666666667
+          },
+          {
+            "acc": 1.0,
+            "conf": 0.9999993333778991,
+            "debiased_gap": 0.0,
+            "gap": 6.666221008533313e-07,
+            "n": 203,
+            "p_max": 0.9999996641255358,
+            "p_min": 0.9999988221084609,
+            "weight": 0.06666666666666667
+          },
+          {
+            "acc": 1.0,
+            "conf": 0.9999998582609706,
+            "debiased_gap": 0.0,
+            "gap": 1.41739029402288e-07,
+            "n": 203,
+            "p_max": 0.999999996759608,
+            "p_min": 0.9999996641255358,
+            "weight": 0.06666666666666667
+          }
+        ],
+        "temperature_stage": "not_applied"
+      },
+      "note": "both ECEs are D11's debiased 15-bin equal-mass estimator on the same test rows, each arm calibrated on calib (RiNALMo: T; CM: a two-parameter Platt map, A14); the two CIs are marginal, not paired",
+      "rinalmo": {
+        "ece": 0.005661656399710311,
+        "ece_ci": {
+          "ci_level": 0.95,
+          "lower": 0.002700068009055061,
+          "n_blocks": 2275,
+          "n_boot": 2000,
+          "point": 0.005661656399710311,
+          "upper": 0.0094096617713777
+        },
+        "graded_posterior_key": "named_posterior",
+        "n": 3045,
+        "temperature": 1.140627294282911
+      },
+      "rinalmo_minus_cm_confirmer": -0.001870149692063272
+    },
+    "leave_clade_out": {
+      "census": {
+        "block_census": {
+          "n_blocks": 4332,
+          "n_blocks_from_clusters": 4332,
+          "n_rows": 9345,
+          "n_rows_with_cluster": 9345,
+          "n_rows_without_cluster": 0,
+          "n_singleton_blocks": 0
+        },
+        "dataset": {
+          "n_rows": 30542,
+          "path": "data/processed/stage2_dataset.parquet",
+          "sha256": "376ad12bd6462686cc7467a5c3e34e63977ccca0c06465e24ec8345224a45f65"
+        },
+        "n_holdout_orders": 30,
+        "n_holdout_rows": 9345,
+        "n_order_overlap": 0,
+        "n_row_overlap": 0,
+        "n_training_orders": 19,
+        "n_training_rows": 9059,
+        "n_units": 30,
+        "overlapping_orders": []
+      },
+      "cm_confirmer": {
+        "adjudicable_fraction": 1.0,
+        "block_key": "cluster_id",
+        "bootstrap_seed": 20260804,
+        "by_phylum": {
+          "Actinobacteria": {
+            "max_ood_ece": 0.17042767607979936,
+            "mean_ood_ece": 0.03884714306468889,
+            "median_ood_ece": 0.005202467416246576,
+            "min_ood_ece": 0.0007074099985536294,
+            "n_positives": 1156,
+            "n_records": 1252,
+            "n_units": 9,
+            "units": [
+              "Actinomycetales",
+              "Bifidobacteriales",
+              "Corynebacteriales",
+              "Micrococcales",
+              "Micromonosporales",
+              "Propionibacteriales",
+              "Pseudonocardiales",
+              "Streptomycetales",
+              "Streptosporangiales"
+            ]
+          },
+          "Chloroflexi": {
+            "max_ood_ece": 0.022279223388889293,
+            "mean_ood_ece": 0.006548320035886279,
+            "median_ood_ece": 0.0017211357335472962,
+            "min_ood_ece": 0.0004717852875612297,
+            "n_positives": 117,
+            "n_records": 125,
+            "n_units": 4,
+            "units": [
+              "Anaerolineales",
+              "Chloroflexales",
+              "Dehalococcoidales",
+              "Ktedonobacterales"
+            ]
+          },
+          "Deinococcus-Thermus": {
+            "max_ood_ece": 0.1644790885909939,
+            "mean_ood_ece": 0.1644790885909939,
+            "median_ood_ece": 0.1644790885909939,
+            "min_ood_ece": 0.1644790885909939,
+            "n_positives": 28,
+            "n_records": 28,
+            "n_units": 1,
+            "units": [
+              "Deinococcales"
+            ]
+          },
+          "Firmicutes": {
+            "max_ood_ece": 0.021361461269267405,
+            "mean_ood_ece": 0.004844238458883174,
+            "median_ood_ece": 0.0029952029105264127,
+            "min_ood_ece": 0.0011762660984826925,
+            "n_positives": 7080,
+            "n_records": 7652,
+            "n_units": 9,
+            "units": [
+              "Acidaminococcales",
+              "Erysipelotrichales",
+              "Halanaerobiales",
+              "Lactobacillales",
+              "Natranaerobiales",
+              "Selenomonadales",
+              "Thermoanaerobacterales",
+              "Tissierellales",
+              "Veillonellales"
+            ]
+          },
+          "Proteobacteria": {
+            "max_ood_ece": 0.0008122295533272085,
+            "mean_ood_ece": 0.0008122295533272085,
+            "median_ood_ece": 0.0008122295533272085,
+            "min_ood_ece": 0.0008122295533272085,
+            "n_positives": 31,
+            "n_records": 33,
+            "n_units": 1,
+            "units": [
+              "Desulfuromonadales"
+            ]
+          },
+          "Synergistetes": {
+            "max_ood_ece": 0.02788648313150152,
+            "mean_ood_ece": 0.02788648313150152,
+            "median_ood_ece": 0.02788648313150152,
+            "min_ood_ece": 0.02788648313150152,
+            "n_positives": 27,
+            "n_records": 31,
+            "n_units": 1,
+            "units": [
+              "Synergistales"
+            ]
+          },
+          "Tenericutes": {
+            "max_ood_ece": 0.08486667668173566,
+            "mean_ood_ece": 0.019010601175197497,
+            "median_ood_ece": 0.003221662893442865,
+            "min_ood_ece": 0.0016444197005528712,
+            "n_positives": 202,
+            "n_records": 224,
+            "n_units": 5,
+            "units": [
+              "Acholeplasmatales",
+              "Candidatus Izemoplasmatales",
+              "Entomoplasmatales",
+              "Haloplasmatales",
+              "Mycoplasmatales"
+            ]
+          }
+        },
+        "by_phylum_is": "the admissible units' OOD ECEs grouped by the phylum of the held-out order \u2014 PRD \u00a712's ECE-vs-phylogenetic-distance read, REPORTED and not gated. Descriptive only: these are the same per-unit numbers regrouped, not a separate estimate, and no phylum-level bound is pinned anywhere",
+        "d13_adjudication": {
+          "calibrated_negative_pass": null,
+          "calibrated_negative_pass_reason": "D13 makes a corpus a calibrated-negative PASS only under (i) AND (ii) AND (iii). Only (ii) has a pinned value, so no verdict is derived here: a PASS computed from two of three conditions would be indistinguishable from one computed from three.",
+          "condition_i_drift_bound": {
+            "bound": null,
+            "pinned": false,
+            "reason": "ADR-0005 D13 condition (i) compares the leave-clade-out ECE to a *pinned drift bound*. No such value exists: D18's delegation map assigns only the min-N floor (pinned by Amendment A2), and no number of that shape appears in PRD.md, ADR-0005, ADR-0006, conf/ or src/. Pinning one is a new blinded-frozen default requiring ADR-0005 sign-off (CLAUDE.md \u00a77 item 2), so condition (i) is left unadjudicated and no calibrated-negative PASS is derived from the two conditions that do have values.",
+            "verdict": null
+          },
+          "condition_ii_min_n": {
+            "floor": 20,
+            "per_unit": {
+              "Acholeplasmatales": "adjudicable",
+              "Acidaminococcales": "adjudicable",
+              "Actinomycetales": "adjudicable",
+              "Anaerolineales": "adjudicable",
+              "Bifidobacteriales": "adjudicable",
+              "Candidatus Izemoplasmatales": "adjudicable",
+              "Chloroflexales": "adjudicable",
+              "Corynebacteriales": "adjudicable",
+              "Dehalococcoidales": "adjudicable",
+              "Deinococcales": "adjudicable",
+              "Desulfuromonadales": "adjudicable",
+              "Entomoplasmatales": "adjudicable",
+              "Erysipelotrichales": "adjudicable",
+              "Halanaerobiales": "adjudicable",
+              "Haloplasmatales": "adjudicable",
+              "Ktedonobacterales": "adjudicable",
+              "Lactobacillales": "adjudicable",
+              "Micrococcales": "adjudicable",
+              "Micromonosporales": "adjudicable",
+              "Mycoplasmatales": "adjudicable",
+              "Natranaerobiales": "adjudicable",
+              "Propionibacteriales": "adjudicable",
+              "Pseudonocardiales": "adjudicable",
+              "Selenomonadales": "adjudicable",
+              "Streptomycetales": "adjudicable",
+              "Streptosporangiales": "adjudicable",
+              "Synergistales": "adjudicable",
+              "Thermoanaerobacterales": "adjudicable",
+              "Tissierellales": "adjudicable",
+              "Veillonellales": "adjudicable"
+            },
+            "pinned": true,
+            "source": "ADR-0005 Amendment A2; tbox_finder.coverage.OOD_ECE_MIN_N"
+          },
+          "condition_iii_detection_power_floor": {
+            "pinned": false,
+            "reason": "the corpus-specific detection-power floor is an extrapolated recall@matched-precision / synthetic-Tier-2N recovery quantity (PRD \u00a712), produced at P4 \u2014 it is not computable from a calibration report",
+            "verdict": null
+          }
+        },
+        "distinct_from": "tbox_finder.metrics.binned_ece",
+        "estimator": "beta_kernel_loo_l1",
+        "gated": false,
+        "macro_average": {
+          "ci_level": 0.95,
+          "lower": 0.009155632750708725,
+          "n_blocks": 30,
+          "n_boot": 200,
+          "point": 0.023588217366916794,
+          "upper": 0.04277848881393739
+        },
+        "macro_average_is": "unweighted mean of the admissible units' OOD ECEs, block-resampled with the held-out order as the block (PRD \u00a712 macro-average, not micro)",
+        "min_n": 20,
+        "n_boot": 200,
+        "n_units": 30,
+        "n_units_admissible": 30,
+        "n_units_sub_min_n": 0,
+        "truncated_to_n_units": null,
+        "unit_key": "loo_order_unit",
+        "units": {
+          "Acholeplasmatales": {
+            "admissibility_class": "adjudicable",
+            "admissible": true,
+            "adr": "ADR-0005 D11 (in-distribution binned estimator, GATE-2) + D13 & Amendment A2 (distinct small-N-robust OOD estimator, bootstrap CIs, OOD_ECE_MIN_N=20); PRD \u00a712",
+            "bandwidth": 0.002,
+            "bandwidth_criterion": "loo_bernoulli_log_likelihood",
+            "bandwidth_grid": [
+              0.002,
+              0.005,
+              0.01,
+              0.02,
+              0.05,
+              0.1,
+              0.2,
+              0.5,
+              1.0
+            ],
+            "bandwidth_loo_log_likelihood": -5.7998716940261904e-11,
+            "bandwidth_selected": true,
+            "block_key": "cluster_id",
+            "brier_decomposition": {
+              "brier": 8.383574628876653e-05,
+              "calibration": 8.383574628876653e-05,
+              "refinement": 0.0,
+              "residual": 0.0
+            },
+            "ci": {
+              "ci_level": 0.95,
+              "lower": 0.0013594261102767768,
+              "n_blocks": 47,
+              "n_boot": 200,
+              "point": 0.0034101444210044066,
+              "upper": 0.005851245273212622
+            },
+            "distinct_from": "tbox_finder.metrics.binned_ece",
+            "estimator": "beta_kernel_loo_l1",
+            "gated": false,
+            "inadmissible_point": null,
+            "inadmissible_reason": null,
+            "min_n": 20,
+            "n_blocks": 47,
+            "n_blocks_of_size_one": 40,
+            "n_boot_drop_reason": "replicates whose leave-one-out statistic was non-finite were dropped by eval.resample.block_bootstrap: the kernel leaves out by row, so a replicate drawn entirely from a one-row block leaves no row with a distinct-uid neighbour. See n_blocks_of_size_one \u2014 NOT the scores file's block_census.n_singleton_blocks, which counts rows with no cluster at all. Rejected resamples, not a truncated bootstrap.",
+            "n_boot_dropped": 0,
+            "n_boot_requested": 200,
+            "n_positives": 52,
+            "n_records": 58,
+            "ood_ece": 0.0034101444210044066,
+            "phylum": "Tenericutes",
+            "unit": "Acholeplasmatales",
+            "unit_key": "loo_order_unit"
+          },
+          "Acidaminococcales": {
+            "admissibility_class": "adjudicable",
+            "admissible": true,
+            "adr": "ADR-0005 D11 (in-distribution binned estimator, GATE-2) + D13 & Amendment A2 (distinct small-N-robust OOD estimator, bootstrap CIs, OOD_ECE_MIN_N=20); PRD \u00a712",
+            "bandwidth": 0.002,
+            "bandwidth_criterion": "loo_bernoulli_log_likelihood",
+            "bandwidth_grid": [
+              0.002,
+              0.005,
+              0.01,
+              0.02,
+              0.05,
+              0.1,
+              0.2,
+              0.5,
+              1.0
+            ],
+            "bandwidth_loo_log_likelihood": -5.599876118370115e-11,
+            "bandwidth_selected": true,
+            "block_key": "cluster_id",
+            "brier_decomposition": {
+              "brier": 0.0002330579451877616,
+              "calibration": 0.0002330579451877616,
+              "refinement": 0.0,
+              "residual": 0.0
+            },
+            "ci": {
+              "ci_level": 0.95,
+              "lower": 0.0004276766725767341,
+              "n_blocks": 47,
+              "n_boot": 200,
+              "point": 0.0031342507210534915,
+              "upper": 0.007221388572879562
+            },
+            "distinct_from": "tbox_finder.metrics.binned_ece",
+            "estimator": "beta_kernel_loo_l1",
+            "gated": false,
+            "inadmissible_point": null,
+            "inadmissible_reason": null,
+            "min_n": 20,
+            "n_blocks": 47,
+            "n_blocks_of_size_one": 41,
+            "n_boot_drop_reason": "replicates whose leave-one-out statistic was non-finite were dropped by eval.resample.block_bootstrap: the kernel leaves out by row, so a replicate drawn entirely from a one-row block leaves no row with a distinct-uid neighbour. See n_blocks_of_size_one \u2014 NOT the scores file's block_census.n_singleton_blocks, which counts rows with no cluster at all. Rejected resamples, not a truncated bootstrap.",
+            "n_boot_dropped": 0,
+            "n_boot_requested": 200,
+            "n_positives": 52,
+            "n_records": 56,
+            "ood_ece": 0.0031342507210534915,
+            "phylum": "Firmicutes",
+            "unit": "Acidaminococcales",
+            "unit_key": "loo_order_unit"
+          },
+          "Actinomycetales": {
+            "admissibility_class": "adjudicable",
+            "admissible": true,
+            "adr": "ADR-0005 D11 (in-distribution binned estimator, GATE-2) + D13 & Amendment A2 (distinct small-N-robust OOD estimator, bootstrap CIs, OOD_ECE_MIN_N=20); PRD \u00a712",
+            "bandwidth": 0.002,
+            "bandwidth_criterion": "loo_bernoulli_log_likelihood",
+            "bandwidth_grid": [
+              0.002,
+              0.005,
+              0.01,
+              0.02,
+              0.05,
+              0.1,
+              0.2,
+              0.5,
+              1.0
+            ],
+            "bandwidth_loo_log_likelihood": -4.399902664433664e-11,
+            "bandwidth_selected": true,
+            "block_key": "cluster_id",
+            "brier_decomposition": {
+              "brier": 0.002928816604271894,
+              "calibration": 0.002928816604271894,
+              "refinement": 6.841873761125574e-209,
+              "residual": 0.0
+            },
+            "ci": {
+              "ci_level": 0.95,
+              "lower": 5.2565695695871775e-06,
+              "n_blocks": 6,
+              "n_boot": 200,
+              "point": 0.010629459034466247,
+              "upper": 0.012521002021988095
+            },
+            "distinct_from": "tbox_finder.metrics.binned_ece",
+            "estimator": "beta_kernel_loo_l1",
+            "gated": false,
+            "inadmissible_point": null,
+            "inadmissible_reason": null,
+            "min_n": 20,
+            "n_blocks": 6,
+            "n_blocks_of_size_one": 2,
+            "n_boot_drop_reason": "replicates whose leave-one-out statistic was non-finite were dropped by eval.resample.block_bootstrap: the kernel leaves out by row, so a replicate drawn entirely from a one-row block leaves no row with a distinct-uid neighbour. See n_blocks_of_size_one \u2014 NOT the scores file's block_census.n_singleton_blocks, which counts rows with no cluster at all. Rejected resamples, not a truncated bootstrap.",
+            "n_boot_dropped": 0,
+            "n_boot_requested": 200,
+            "n_positives": 42,
+            "n_records": 44,
+            "ood_ece": 0.010629459034466247,
+            "phylum": "Actinobacteria",
+            "unit": "Actinomycetales",
+            "unit_key": "loo_order_unit"
+          },
+          "Anaerolineales": {
+            "admissibility_class": "adjudicable",
+            "admissible": true,
+            "adr": "ADR-0005 D11 (in-distribution binned estimator, GATE-2) + D13 & Amendment A2 (distinct small-N-robust OOD estimator, bootstrap CIs, OOD_ECE_MIN_N=20); PRD \u00a712",
+            "bandwidth": 0.002,
+            "bandwidth_criterion": "loo_bernoulli_log_likelihood",
+            "bandwidth_grid": [
+              0.002,
+              0.005,
+              0.01,
+              0.02,
+              0.05,
+              0.1,
+              0.2,
+              0.5,
+              1.0
+            ],
+            "bandwidth_loo_log_likelihood": -4.299904876605626e-11,
+            "bandwidth_selected": true,
+            "block_key": "cluster_id",
+            "brier_decomposition": {
+              "brier": 3.43717371782166e-05,
+              "calibration": 3.43717371782166e-05,
+              "refinement": 0.0,
+              "residual": 0.0
+            },
+            "ci": {
+              "ci_level": 0.95,
+              "lower": 0.0001937432951766189,
+              "n_blocks": 30,
+              "n_boot": 200,
+              "point": 0.001656613493547551,
+              "upper": 0.00336872900230847
+            },
+            "distinct_from": "tbox_finder.metrics.binned_ece",
+            "estimator": "beta_kernel_loo_l1",
+            "gated": false,
+            "inadmissible_point": null,
+            "inadmissible_reason": null,
+            "min_n": 20,
+            "n_blocks": 30,
+            "n_blocks_of_size_one": 27,
+            "n_boot_drop_reason": "replicates whose leave-one-out statistic was non-finite were dropped by eval.resample.block_bootstrap: the kernel leaves out by row, so a replicate drawn entirely from a one-row block leaves no row with a distinct-uid neighbour. See n_blocks_of_size_one \u2014 NOT the scores file's block_census.n_singleton_blocks, which counts rows with no cluster at all. Rejected resamples, not a truncated bootstrap.",
+            "n_boot_dropped": 0,
+            "n_boot_requested": 200,
+            "n_positives": 41,
+            "n_records": 43,
+            "ood_ece": 0.001656613493547551,
+            "phylum": "Chloroflexi",
+            "unit": "Anaerolineales",
+            "unit_key": "loo_order_unit"
+          },
+          "Bifidobacteriales": {
+            "admissibility_class": "adjudicable",
+            "admissible": true,
+            "adr": "ADR-0005 D11 (in-distribution binned estimator, GATE-2) + D13 & Amendment A2 (distinct small-N-robust OOD estimator, bootstrap CIs, OOD_ECE_MIN_N=20); PRD \u00a712",
+            "bandwidth": 0.002,
+            "bandwidth_criterion": "loo_bernoulli_log_likelihood",
+            "bandwidth_grid": [
+              0.002,
+              0.005,
+              0.01,
+              0.02,
+              0.05,
+              0.1,
+              0.2,
+              0.5,
+              1.0
+            ],
+            "bandwidth_loo_log_likelihood": -7.699829662758917e-11,
+            "bandwidth_selected": true,
+            "block_key": "cluster_id",
+            "brier_decomposition": {
+              "brier": 1.819247818092583e-05,
+              "calibration": 1.819247818092583e-05,
+              "refinement": 0.0,
+              "residual": 0.0
+            },
+            "ci": {
+              "ci_level": 0.95,
+              "lower": 1.4883385271536375e-06,
+              "n_blocks": 5,
+              "n_boot": 200,
+              "point": 0.001314751672726031,
+              "upper": 0.0014959388766111151
+            },
+            "distinct_from": "tbox_finder.metrics.binned_ece",
+            "estimator": "beta_kernel_loo_l1",
+            "gated": false,
+            "inadmissible_point": null,
+            "inadmissible_reason": null,
+            "min_n": 20,
+            "n_blocks": 5,
+            "n_blocks_of_size_one": 2,
+            "n_boot_drop_reason": "replicates whose leave-one-out statistic was non-finite were dropped by eval.resample.block_bootstrap: the kernel leaves out by row, so a replicate drawn entirely from a one-row block leaves no row with a distinct-uid neighbour. See n_blocks_of_size_one \u2014 NOT the scores file's block_census.n_singleton_blocks, which counts rows with no cluster at all. Rejected resamples, not a truncated bootstrap.",
+            "n_boot_dropped": 0,
+            "n_boot_requested": 200,
+            "n_positives": 69,
+            "n_records": 77,
+            "ood_ece": 0.001314751672726031,
+            "phylum": "Actinobacteria",
+            "unit": "Bifidobacteriales",
+            "unit_key": "loo_order_unit"
+          },
+          "Candidatus Izemoplasmatales": {
+            "admissibility_class": "adjudicable",
+            "admissible": true,
+            "adr": "ADR-0005 D11 (in-distribution binned estimator, GATE-2) + D13 & Amendment A2 (distinct small-N-robust OOD estimator, bootstrap CIs, OOD_ECE_MIN_N=20); PRD \u00a712",
+            "bandwidth": 0.002,
+            "bandwidth_criterion": "loo_bernoulli_log_likelihood",
+            "bandwidth_grid": [
+              0.002,
+              0.005,
+              0.01,
+              0.02,
+              0.05,
+              0.1,
+              0.2,
+              0.5,
+              1.0
+            ],
+            "bandwidth_loo_log_likelihood": -2.7999380591850615e-11,
+            "bandwidth_selected": true,
+            "block_key": "cluster_id",
+            "brier_decomposition": {
+              "brier": 2.600866800545819e-05,
+              "calibration": 2.600866800545819e-05,
+              "refinement": 0.0,
+              "residual": 0.0
+            },
+            "ci": {
+              "ci_level": 0.95,
+              "lower": 3.809321063573951e-06,
+              "n_blocks": 19,
+              "n_boot": 200,
+              "point": 0.0019101021792516874,
+              "upper": 0.004176578637528917
+            },
+            "distinct_from": "tbox_finder.metrics.binned_ece",
+            "estimator": "beta_kernel_loo_l1",
+            "gated": false,
+            "inadmissible_point": null,
+            "inadmissible_reason": null,
+            "min_n": 20,
+            "n_blocks": 19,
+            "n_blocks_of_size_one": 13,
+            "n_boot_drop_reason": "replicates whose leave-one-out statistic was non-finite were dropped by eval.resample.block_bootstrap: the kernel leaves out by row, so a replicate drawn entirely from a one-row block leaves no row with a distinct-uid neighbour. See n_blocks_of_size_one \u2014 NOT the scores file's block_census.n_singleton_blocks, which counts rows with no cluster at all. Rejected resamples, not a truncated bootstrap.",
+            "n_boot_dropped": 0,
+            "n_boot_requested": 200,
+            "n_positives": 24,
+            "n_records": 28,
+            "ood_ece": 0.0019101021792516874,
+            "phylum": "Tenericutes",
+            "unit": "Candidatus Izemoplasmatales",
+            "unit_key": "loo_order_unit"
+          },
+          "Chloroflexales": {
+            "admissibility_class": "adjudicable",
+            "admissible": true,
+            "adr": "ADR-0005 D11 (in-distribution binned estimator, GATE-2) + D13 & Amendment A2 (distinct small-N-robust OOD estimator, bootstrap CIs, OOD_ECE_MIN_N=20); PRD \u00a712",
+            "bandwidth": 0.002,
+            "bandwidth_criterion": "loo_bernoulli_log_likelihood",
+            "bandwidth_grid": [
+              0.002,
+              0.005,
+              0.01,
+              0.02,
+              0.05,
+              0.1,
+              0.2,
+              0.5,
+              1.0
+            ],
+            "bandwidth_loo_log_likelihood": -2.199951332216834e-11,
+            "bandwidth_selected": true,
+            "block_key": "cluster_id",
+            "brier_decomposition": {
+              "brier": 0.002854515331107407,
+              "calibration": 0.002854515331107407,
+              "refinement": 3.45627244e-316,
+              "residual": 0.0
+            },
+            "ci": {
+              "ci_level": 0.95,
+              "lower": 0.0065949790553487785,
+              "n_blocks": 16,
+              "n_boot": 200,
+              "point": 0.022279223388889293,
+              "upper": 0.043545466477522714
+            },
+            "distinct_from": "tbox_finder.metrics.binned_ece",
+            "estimator": "beta_kernel_loo_l1",
+            "gated": false,
+            "inadmissible_point": null,
+            "inadmissible_reason": null,
+            "min_n": 20,
+            "n_blocks": 16,
+            "n_blocks_of_size_one": 12,
+            "n_boot_drop_reason": "replicates whose leave-one-out statistic was non-finite were dropped by eval.resample.block_bootstrap: the kernel leaves out by row, so a replicate drawn entirely from a one-row block leaves no row with a distinct-uid neighbour. See n_blocks_of_size_one \u2014 NOT the scores file's block_census.n_singleton_blocks, which counts rows with no cluster at all. Rejected resamples, not a truncated bootstrap.",
+            "n_boot_dropped": 0,
+            "n_boot_requested": 200,
+            "n_positives": 20,
+            "n_records": 22,
+            "ood_ece": 0.022279223388889293,
+            "phylum": "Chloroflexi",
+            "unit": "Chloroflexales",
+            "unit_key": "loo_order_unit"
+          },
+          "Corynebacteriales": {
+            "admissibility_class": "adjudicable",
+            "admissible": true,
+            "adr": "ADR-0005 D11 (in-distribution binned estimator, GATE-2) + D13 & Amendment A2 (distinct small-N-robust OOD estimator, bootstrap CIs, OOD_ECE_MIN_N=20); PRD \u00a712",
+            "bandwidth": 0.002,
+            "bandwidth_criterion": "loo_bernoulli_log_likelihood",
+            "bandwidth_grid": [
+              0.002,
+              0.005,
+              0.01,
+              0.02,
+              0.05,
+              0.1,
+              0.2,
+              0.5,
+              1.0
+            ],
+            "bandwidth_loo_log_likelihood": -3.93991284042471e-10,
+            "bandwidth_selected": true,
+            "block_key": "cluster_id",
+            "brier_decomposition": {
+              "brier": 2.8161376054225147e-05,
+              "calibration": 2.8161376054225147e-05,
+              "refinement": 0.0,
+              "residual": 0.0
+            },
+            "ci": {
+              "ci_level": 0.95,
+              "lower": 2.2084666435826708e-05,
+              "n_blocks": 18,
+              "n_boot": 200,
+              "point": 0.0008785699976166266,
+              "upper": 0.008304160347371851
+            },
+            "distinct_from": "tbox_finder.metrics.binned_ece",
+            "estimator": "beta_kernel_loo_l1",
+            "gated": false,
+            "inadmissible_point": null,
+            "inadmissible_reason": null,
+            "min_n": 20,
+            "n_blocks": 18,
+            "n_blocks_of_size_one": 12,
+            "n_boot_drop_reason": "replicates whose leave-one-out statistic was non-finite were dropped by eval.resample.block_bootstrap: the kernel leaves out by row, so a replicate drawn entirely from a one-row block leaves no row with a distinct-uid neighbour. See n_blocks_of_size_one \u2014 NOT the scores file's block_census.n_singleton_blocks, which counts rows with no cluster at all. Rejected resamples, not a truncated bootstrap.",
+            "n_boot_dropped": 0,
+            "n_boot_requested": 200,
+            "n_positives": 370,
+            "n_records": 394,
+            "ood_ece": 0.0008785699976166266,
+            "phylum": "Actinobacteria",
+            "unit": "Corynebacteriales",
+            "unit_key": "loo_order_unit"
+          },
+          "Dehalococcoidales": {
+            "admissibility_class": "adjudicable",
+            "admissible": true,
+            "adr": "ADR-0005 D11 (in-distribution binned estimator, GATE-2) + D13 & Amendment A2 (distinct small-N-robust OOD estimator, bootstrap CIs, OOD_ECE_MIN_N=20); PRD \u00a712",
+            "bandwidth": 0.002,
+            "bandwidth_criterion": "loo_bernoulli_log_likelihood",
+            "bandwidth_grid": [
+              0.002,
+              0.005,
+              0.01,
+              0.02,
+              0.05,
+              0.1,
+              0.2,
+              0.5,
+              1.0
+            ],
+            "bandwidth_loo_log_likelihood": -3.799915937465438e-11,
+            "bandwidth_selected": true,
+            "block_key": "cluster_id",
+            "brier_decomposition": {
+              "brier": 1.7549835519067592e-05,
+              "calibration": 1.7549835519067592e-05,
+              "refinement": 0.0,
+              "residual": 0.0
+            },
+            "ci": {
+              "ci_level": 0.95,
+              "lower": 0.00020802565604487652,
+              "n_blocks": 22,
+              "n_boot": 200,
+              "point": 0.0017856579735470413,
+              "upper": 0.003367092326381435
+            },
+            "distinct_from": "tbox_finder.metrics.binned_ece",
+            "estimator": "beta_kernel_loo_l1",
+            "gated": false,
+            "inadmissible_point": null,
+            "inadmissible_reason": null,
+            "min_n": 20,
+            "n_blocks": 22,
+            "n_blocks_of_size_one": 17,
+            "n_boot_drop_reason": "replicates whose leave-one-out statistic was non-finite were dropped by eval.resample.block_bootstrap: the kernel leaves out by row, so a replicate drawn entirely from a one-row block leaves no row with a distinct-uid neighbour. See n_blocks_of_size_one \u2014 NOT the scores file's block_census.n_singleton_blocks, which counts rows with no cluster at all. Rejected resamples, not a truncated bootstrap.",
+            "n_boot_dropped": 0,
+            "n_boot_requested": 200,
+            "n_positives": 34,
+            "n_records": 38,
+            "ood_ece": 0.0017856579735470413,
+            "phylum": "Chloroflexi",
+            "unit": "Dehalococcoidales",
+            "unit_key": "loo_order_unit"
+          },
+          "Deinococcales": {
+            "admissibility_class": "adjudicable",
+            "admissible": true,
+            "adr": "ADR-0005 D11 (in-distribution binned estimator, GATE-2) + D13 & Amendment A2 (distinct small-N-robust OOD estimator, bootstrap CIs, OOD_ECE_MIN_N=20); PRD \u00a712",
+            "bandwidth": 0.002,
+            "bandwidth_criterion": "loo_bernoulli_log_likelihood",
+            "bandwidth_grid": [
+              0.002,
+              0.005,
+              0.01,
+              0.02,
+              0.05,
+              0.1,
+              0.2,
+              0.5,
+              1.0
+            ],
+            "bandwidth_loo_log_likelihood": -2.7999380591850615e-11,
+            "bandwidth_selected": true,
+            "block_key": "cluster_id",
+            "brier_decomposition": {
+              "brier": 0.06454318564163603,
+              "calibration": 0.06454318564163603,
+              "refinement": 0.0,
+              "residual": 0.0
+            },
+            "ci": {
+              "ci_level": 0.95,
+              "lower": 0.09567324628796307,
+              "n_blocks": 25,
+              "n_boot": 200,
+              "point": 0.1644790885909939,
+              "upper": 0.24475116915112374
+            },
+            "distinct_from": "tbox_finder.metrics.binned_ece",
+            "estimator": "beta_kernel_loo_l1",
+            "gated": false,
+            "inadmissible_point": null,
+            "inadmissible_reason": null,
+            "min_n": 20,
+            "n_blocks": 25,
+            "n_blocks_of_size_one": 22,
+            "n_boot_drop_reason": "replicates whose leave-one-out statistic was non-finite were dropped by eval.resample.block_bootstrap: the kernel leaves out by row, so a replicate drawn entirely from a one-row block leaves no row with a distinct-uid neighbour. See n_blocks_of_size_one \u2014 NOT the scores file's block_census.n_singleton_blocks, which counts rows with no cluster at all. Rejected resamples, not a truncated bootstrap.",
+            "n_boot_dropped": 0,
+            "n_boot_requested": 200,
+            "n_positives": 28,
+            "n_records": 28,
+            "ood_ece": 0.1644790885909939,
+            "phylum": "Deinococcus-Thermus",
+            "unit": "Deinococcales",
+            "unit_key": "loo_order_unit"
+          },
+          "Desulfuromonadales": {
+            "admissibility_class": "adjudicable",
+            "admissible": true,
+            "adr": "ADR-0005 D11 (in-distribution binned estimator, GATE-2) + D13 & Amendment A2 (distinct small-N-robust OOD estimator, bootstrap CIs, OOD_ECE_MIN_N=20); PRD \u00a712",
+            "bandwidth": 0.002,
+            "bandwidth_criterion": "loo_bernoulli_log_likelihood",
+            "bandwidth_grid": [
+              0.002,
+              0.005,
+              0.01,
+              0.02,
+              0.05,
+              0.1,
+              0.2,
+              0.5,
+              1.0
+            ],
+            "bandwidth_loo_log_likelihood": -3.29992699832525e-11,
+            "bandwidth_selected": true,
+            "block_key": "cluster_id",
+            "brier_decomposition": {
+              "brier": 1.0859479783511872e-05,
+              "calibration": 1.0859479783511872e-05,
+              "refinement": 0.0,
+              "residual": 0.0
+            },
+            "ci": {
+              "ci_level": 0.95,
+              "lower": 6.923200595772746e-07,
+              "n_blocks": 3,
+              "n_boot": 181,
+              "point": 0.0008122295533272085,
+              "upper": 0.0008645837055107461
+            },
+            "distinct_from": "tbox_finder.metrics.binned_ece",
+            "estimator": "beta_kernel_loo_l1",
+            "gated": false,
+            "inadmissible_point": null,
+            "inadmissible_reason": null,
+            "min_n": 20,
+            "n_blocks": 3,
+            "n_blocks_of_size_one": 2,
+            "n_boot_drop_reason": "replicates whose leave-one-out statistic was non-finite were dropped by eval.resample.block_bootstrap: the kernel leaves out by row, so a replicate drawn entirely from a one-row block leaves no row with a distinct-uid neighbour. See n_blocks_of_size_one \u2014 NOT the scores file's block_census.n_singleton_blocks, which counts rows with no cluster at all. Rejected resamples, not a truncated bootstrap.",
+            "n_boot_dropped": 19,
+            "n_boot_requested": 200,
+            "n_positives": 31,
+            "n_records": 33,
+            "ood_ece": 0.0008122295533272085,
+            "phylum": "Proteobacteria",
+            "unit": "Desulfuromonadales",
+            "unit_key": "loo_order_unit"
+          },
+          "Entomoplasmatales": {
+            "admissibility_class": "adjudicable",
+            "admissible": true,
+            "adr": "ADR-0005 D11 (in-distribution binned estimator, GATE-2) + D13 & Amendment A2 (distinct small-N-robust OOD estimator, bootstrap CIs, OOD_ECE_MIN_N=20); PRD \u00a712",
+            "bandwidth": 0.002,
+            "bandwidth_criterion": "loo_bernoulli_log_likelihood",
+            "bandwidth_grid": [
+              0.002,
+              0.005,
+              0.01,
+              0.02,
+              0.05,
+              0.1,
+              0.2,
+              0.5,
+              1.0
+            ],
+            "bandwidth_loo_log_likelihood": -7.199840723618726e-11,
+            "bandwidth_selected": true,
+            "block_key": "cluster_id",
+            "brier_decomposition": {
+              "brier": 0.026292051815451176,
+              "calibration": 0.026292051815451176,
+              "refinement": 4.3077368292731953e-69,
+              "residual": 0.0
+            },
+            "ci": {
+              "ci_level": 0.95,
+              "lower": 0.05204946714264215,
+              "n_blocks": 49,
+              "n_boot": 200,
+              "point": 0.08486667668173566,
+              "upper": 0.12389338134739539
+            },
+            "distinct_from": "tbox_finder.metrics.binned_ece",
+            "estimator": "beta_kernel_loo_l1",
+            "gated": false,
+            "inadmissible_point": null,
+            "inadmissible_reason": null,
+            "min_n": 20,
+            "n_blocks": 49,
+            "n_blocks_of_size_one": 39,
+            "n_boot_drop_reason": "replicates whose leave-one-out statistic was non-finite were dropped by eval.resample.block_bootstrap: the kernel leaves out by row, so a replicate drawn entirely from a one-row block leaves no row with a distinct-uid neighbour. See n_blocks_of_size_one \u2014 NOT the scores file's block_census.n_singleton_blocks, which counts rows with no cluster at all. Rejected resamples, not a truncated bootstrap.",
+            "n_boot_dropped": 0,
+            "n_boot_requested": 200,
+            "n_positives": 68,
+            "n_records": 72,
+            "ood_ece": 0.08486667668173566,
+            "phylum": "Tenericutes",
+            "unit": "Entomoplasmatales",
+            "unit_key": "loo_order_unit"
+          },
+          "Erysipelotrichales": {
+            "admissibility_class": "adjudicable",
+            "admissible": true,
+            "adr": "ADR-0005 D11 (in-distribution binned estimator, GATE-2) + D13 & Amendment A2 (distinct small-N-robust OOD estimator, bootstrap CIs, OOD_ECE_MIN_N=20); PRD \u00a712",
+            "bandwidth": 0.002,
+            "bandwidth_criterion": "loo_bernoulli_log_likelihood",
+            "bandwidth_grid": [
+              0.002,
+              0.005,
+              0.01,
+              0.02,
+              0.05,
+              0.1,
+              0.2,
+              0.5,
+              1.0
+            ],
+            "bandwidth_loo_log_likelihood": -4.869892267225477e-10,
+            "bandwidth_selected": true,
+            "block_key": "cluster_id",
+            "brier_decomposition": {
+              "brier": 0.0004268341526099807,
+              "calibration": 0.0004268341526099807,
+              "refinement": 8.920343313617449e-124,
+              "residual": 0.0
+            },
+            "ci": {
+              "ci_level": 0.95,
+              "lower": 0.0013934345472202028,
+              "n_blocks": 272,
+              "n_boot": 200,
+              "point": 0.0028470757426299733,
+              "upper": 0.004936801932392471
+            },
+            "distinct_from": "tbox_finder.metrics.binned_ece",
+            "estimator": "beta_kernel_loo_l1",
+            "gated": false,
+            "inadmissible_point": null,
+            "inadmissible_reason": null,
+            "min_n": 20,
+            "n_blocks": 272,
+            "n_blocks_of_size_one": 204,
+            "n_boot_drop_reason": "replicates whose leave-one-out statistic was non-finite were dropped by eval.resample.block_bootstrap: the kernel leaves out by row, so a replicate drawn entirely from a one-row block leaves no row with a distinct-uid neighbour. See n_blocks_of_size_one \u2014 NOT the scores file's block_census.n_singleton_blocks, which counts rows with no cluster at all. Rejected resamples, not a truncated bootstrap.",
+            "n_boot_dropped": 0,
+            "n_boot_requested": 200,
+            "n_positives": 445,
+            "n_records": 487,
+            "ood_ece": 0.0028470757426299733,
+            "phylum": "Firmicutes",
+            "unit": "Erysipelotrichales",
+            "unit_key": "loo_order_unit"
+          },
+          "Halanaerobiales": {
+            "admissibility_class": "adjudicable",
+            "admissible": true,
+            "adr": "ADR-0005 D11 (in-distribution binned estimator, GATE-2) + D13 & Amendment A2 (distinct small-N-robust OOD estimator, bootstrap CIs, OOD_ECE_MIN_N=20); PRD \u00a712",
+            "bandwidth": 0.002,
+            "bandwidth_criterion": "loo_bernoulli_log_likelihood",
+            "bandwidth_grid": [
+              0.002,
+              0.005,
+              0.01,
+              0.02,
+              0.05,
+              0.1,
+              0.2,
+              0.5,
+              1.0
+            ],
+            "bandwidth_loo_log_likelihood": -1.1099754448912218e-10,
+            "bandwidth_selected": true,
+            "block_key": "cluster_id",
+            "brier_decomposition": {
+              "brier": 0.0010836392536208391,
+              "calibration": 0.0010836392536208391,
+              "refinement": 2.017641114117844e-208,
+              "residual": 0.0
+            },
+            "ci": {
+              "ci_level": 0.95,
+              "lower": 0.0008037647340991603,
+              "n_blocks": 58,
+              "n_boot": 200,
+              "point": 0.004685191070033741,
+              "upper": 0.018246493733279513
+            },
+            "distinct_from": "tbox_finder.metrics.binned_ece",
+            "estimator": "beta_kernel_loo_l1",
+            "gated": false,
+            "inadmissible_point": null,
+            "inadmissible_reason": null,
+            "min_n": 20,
+            "n_blocks": 58,
+            "n_blocks_of_size_one": 38,
+            "n_boot_drop_reason": "replicates whose leave-one-out statistic was non-finite were dropped by eval.resample.block_bootstrap: the kernel leaves out by row, so a replicate drawn entirely from a one-row block leaves no row with a distinct-uid neighbour. See n_blocks_of_size_one \u2014 NOT the scores file's block_census.n_singleton_blocks, which counts rows with no cluster at all. Rejected resamples, not a truncated bootstrap.",
+            "n_boot_dropped": 0,
+            "n_boot_requested": 200,
+            "n_positives": 99,
+            "n_records": 111,
+            "ood_ece": 0.004685191070033741,
+            "phylum": "Firmicutes",
+            "unit": "Halanaerobiales",
+            "unit_key": "loo_order_unit"
+          },
+          "Haloplasmatales": {
+            "admissibility_class": "adjudicable",
+            "admissible": true,
+            "adr": "ADR-0005 D11 (in-distribution binned estimator, GATE-2) + D13 & Amendment A2 (distinct small-N-robust OOD estimator, bootstrap CIs, OOD_ECE_MIN_N=20); PRD \u00a712",
+            "bandwidth": 0.002,
+            "bandwidth_criterion": "loo_bernoulli_log_likelihood",
+            "bandwidth_grid": [
+              0.002,
+              0.005,
+              0.01,
+              0.02,
+              0.05,
+              0.1,
+              0.2,
+              0.5,
+              1.0
+            ],
+            "bandwidth_loo_log_likelihood": -2.5999424835289856e-11,
+            "bandwidth_selected": true,
+            "block_key": "cluster_id",
+            "brier_decomposition": {
+              "brier": 1.5602297284997662e-05,
+              "calibration": 1.5602297284997662e-05,
+              "refinement": 0.0,
+              "residual": 0.0
+            },
+            "ci": {
+              "ci_level": 0.95,
+              "lower": 6.764697611449995e-05,
+              "n_blocks": 21,
+              "n_boot": 200,
+              "point": 0.0016444197005528712,
+              "upper": 0.003363098429736945
+            },
+            "distinct_from": "tbox_finder.metrics.binned_ece",
+            "estimator": "beta_kernel_loo_l1",
+            "gated": false,
+            "inadmissible_point": null,
+            "inadmissible_reason": null,
+            "min_n": 20,
+            "n_blocks": 21,
+            "n_blocks_of_size_one": 18,
+            "n_boot_drop_reason": "replicates whose leave-one-out statistic was non-finite were dropped by eval.resample.block_bootstrap: the kernel leaves out by row, so a replicate drawn entirely from a one-row block leaves no row with a distinct-uid neighbour. See n_blocks_of_size_one \u2014 NOT the scores file's block_census.n_singleton_blocks, which counts rows with no cluster at all. Rejected resamples, not a truncated bootstrap.",
+            "n_boot_dropped": 0,
+            "n_boot_requested": 200,
+            "n_positives": 22,
+            "n_records": 26,
+            "ood_ece": 0.0016444197005528712,
+            "phylum": "Tenericutes",
+            "unit": "Haloplasmatales",
+            "unit_key": "loo_order_unit"
+          },
+          "Ktedonobacterales": {
+            "admissibility_class": "adjudicable",
+            "admissible": true,
+            "adr": "ADR-0005 D11 (in-distribution binned estimator, GATE-2) + D13 & Amendment A2 (distinct small-N-robust OOD estimator, bootstrap CIs, OOD_ECE_MIN_N=20); PRD \u00a712",
+            "bandwidth": 0.002,
+            "bandwidth_criterion": "loo_bernoulli_log_likelihood",
+            "bandwidth_grid": [
+              0.002,
+              0.005,
+              0.01,
+              0.02,
+              0.05,
+              0.1,
+              0.2,
+              0.5,
+              1.0
+            ],
+            "bandwidth_loo_log_likelihood": -2.199951332216834e-11,
+            "bandwidth_selected": true,
+            "block_key": "cluster_id",
+            "brier_decomposition": {
+              "brier": 4.400570400922799e-06,
+              "calibration": 4.400570400922799e-06,
+              "refinement": 0.0,
+              "residual": 0.0
+            },
+            "ci": {
+              "ci_level": 0.95,
+              "lower": 2.0315756816024165e-05,
+              "n_blocks": 13,
+              "n_boot": 200,
+              "point": 0.0004717852875612297,
+              "upper": 0.001762613232342663
+            },
+            "distinct_from": "tbox_finder.metrics.binned_ece",
+            "estimator": "beta_kernel_loo_l1",
+            "gated": false,
+            "inadmissible_point": null,
+            "inadmissible_reason": null,
+            "min_n": 20,
+            "n_blocks": 13,
+            "n_blocks_of_size_one": 10,
+            "n_boot_drop_reason": "replicates whose leave-one-out statistic was non-finite were dropped by eval.resample.block_bootstrap: the kernel leaves out by row, so a replicate drawn entirely from a one-row block leaves no row with a distinct-uid neighbour. See n_blocks_of_size_one \u2014 NOT the scores file's block_census.n_singleton_blocks, which counts rows with no cluster at all. Rejected resamples, not a truncated bootstrap.",
+            "n_boot_dropped": 0,
+            "n_boot_requested": 200,
+            "n_positives": 22,
+            "n_records": 22,
+            "ood_ece": 0.0004717852875612297,
+            "phylum": "Chloroflexi",
+            "unit": "Ktedonobacterales",
+            "unit_key": "loo_order_unit"
+          },
+          "Lactobacillales": {
+            "admissibility_class": "adjudicable",
+            "admissible": true,
+            "adr": "ADR-0005 D11 (in-distribution binned estimator, GATE-2) + D13 & Amendment A2 (distinct small-N-robust OOD estimator, bootstrap CIs, OOD_ECE_MIN_N=20); PRD \u00a712",
+            "bandwidth": 0.005,
+            "bandwidth_criterion": "loo_bernoulli_log_likelihood",
+            "bandwidth_grid": [
+              0.002,
+              0.005,
+              0.01,
+              0.02,
+              0.05,
+              0.1,
+              0.2,
+              0.5,
+              1.0
+            ],
+            "bandwidth_loo_log_likelihood": -1.6690901818738109,
+            "bandwidth_selected": true,
+            "block_key": "cluster_id",
+            "brier_decomposition": {
+              "brier": 0.005952141267419861,
+              "calibration": 0.005808067916392595,
+              "refinement": 8.240057362287463e-05,
+              "residual": 6.167277740439132e-05
+            },
+            "ci": {
+              "ci_level": 0.95,
+              "lower": 0.018584485971678753,
+              "n_blocks": 2948,
+              "n_boot": 200,
+              "point": 0.021361461269267405,
+              "upper": 0.0246635804072945
+            },
+            "distinct_from": "tbox_finder.metrics.binned_ece",
+            "estimator": "beta_kernel_loo_l1",
+            "gated": false,
+            "inadmissible_point": null,
+            "inadmissible_reason": null,
+            "min_n": 20,
+            "n_blocks": 2948,
+            "n_blocks_of_size_one": 2366,
+            "n_boot_drop_reason": "replicates whose leave-one-out statistic was non-finite were dropped by eval.resample.block_bootstrap: the kernel leaves out by row, so a replicate drawn entirely from a one-row block leaves no row with a distinct-uid neighbour. See n_blocks_of_size_one \u2014 NOT the scores file's block_census.n_singleton_blocks, which counts rows with no cluster at all. Rejected resamples, not a truncated bootstrap.",
+            "n_boot_dropped": 0,
+            "n_boot_requested": 200,
+            "n_positives": 5323,
+            "n_records": 5763,
+            "ood_ece": 0.021361461269267405,
+            "phylum": "Firmicutes",
+            "unit": "Lactobacillales",
+            "unit_key": "loo_order_unit"
+          },
+          "Micrococcales": {
+            "admissibility_class": "adjudicable",
+            "admissible": true,
+            "adr": "ADR-0005 D11 (in-distribution binned estimator, GATE-2) + D13 & Amendment A2 (distinct small-N-robust OOD estimator, bootstrap CIs, OOD_ECE_MIN_N=20); PRD \u00a712",
+            "bandwidth": 0.002,
+            "bandwidth_criterion": "loo_bernoulli_log_likelihood",
+            "bandwidth_grid": [
+              0.002,
+              0.005,
+              0.01,
+              0.02,
+              0.05,
+              0.1,
+              0.2,
+              0.5,
+              1.0
+            ],
+            "bandwidth_loo_log_likelihood": -2.909935625795903e-10,
+            "bandwidth_selected": true,
+            "block_key": "cluster_id",
+            "brier_decomposition": {
+              "brier": 1.1824257647297474e-05,
+              "calibration": 1.1824257647297474e-05,
+              "refinement": 0.0,
+              "residual": 0.0
+            },
+            "ci": {
+              "ci_level": 0.95,
+              "lower": 5.011192433819826e-07,
+              "n_blocks": 10,
+              "n_boot": 200,
+              "point": 0.0007074099985536294,
+              "upper": 0.0007419834122356774
+            },
+            "distinct_from": "tbox_finder.metrics.binned_ece",
+            "estimator": "beta_kernel_loo_l1",
+            "gated": false,
+            "inadmissible_point": null,
+            "inadmissible_reason": null,
+            "min_n": 20,
+            "n_blocks": 10,
+            "n_blocks_of_size_one": 5,
+            "n_boot_drop_reason": "replicates whose leave-one-out statistic was non-finite were dropped by eval.resample.block_bootstrap: the kernel leaves out by row, so a replicate drawn entirely from a one-row block leaves no row with a distinct-uid neighbour. See n_blocks_of_size_one \u2014 NOT the scores file's block_census.n_singleton_blocks, which counts rows with no cluster at all. Rejected resamples, not a truncated bootstrap.",
+            "n_boot_dropped": 0,
+            "n_boot_requested": 200,
+            "n_positives": 275,
+            "n_records": 291,
+            "ood_ece": 0.0007074099985536294,
+            "phylum": "Actinobacteria",
+            "unit": "Micrococcales",
+            "unit_key": "loo_order_unit"
+          },
+          "Micromonosporales": {
+            "admissibility_class": "adjudicable",
+            "admissible": true,
+            "adr": "ADR-0005 D11 (in-distribution binned estimator, GATE-2) + D13 & Amendment A2 (distinct small-N-robust OOD estimator, bootstrap CIs, OOD_ECE_MIN_N=20); PRD \u00a712",
+            "bandwidth": 0.002,
+            "bandwidth_criterion": "loo_bernoulli_log_likelihood",
+            "bandwidth_grid": [
+              0.002,
+              0.005,
+              0.01,
+              0.02,
+              0.05,
+              0.1,
+              0.2,
+              0.5,
+              1.0
+            ],
+            "bandwidth_loo_log_likelihood": -7.299838511446764e-11,
+            "bandwidth_selected": true,
+            "block_key": "cluster_id",
+            "brier_decomposition": {
+              "brier": 0.10096772027733268,
+              "calibration": 0.10096772027733268,
+              "refinement": 1.517319901843125e-40,
+              "residual": 0.0
+            },
+            "ci": {
+              "ci_level": 0.95,
+              "lower": 0.009229245557977524,
+              "n_blocks": 14,
+              "n_boot": 200,
+              "point": 0.17042767607979936,
+              "upper": 0.44796902170816355
+            },
+            "distinct_from": "tbox_finder.metrics.binned_ece",
+            "estimator": "beta_kernel_loo_l1",
+            "gated": false,
+            "inadmissible_point": null,
+            "inadmissible_reason": null,
+            "min_n": 20,
+            "n_blocks": 14,
+            "n_blocks_of_size_one": 11,
+            "n_boot_drop_reason": "replicates whose leave-one-out statistic was non-finite were dropped by eval.resample.block_bootstrap: the kernel leaves out by row, so a replicate drawn entirely from a one-row block leaves no row with a distinct-uid neighbour. See n_blocks_of_size_one \u2014 NOT the scores file's block_census.n_singleton_blocks, which counts rows with no cluster at all. Rejected resamples, not a truncated bootstrap.",
+            "n_boot_dropped": 0,
+            "n_boot_requested": 200,
+            "n_positives": 65,
+            "n_records": 73,
+            "ood_ece": 0.17042767607979936,
+            "phylum": "Actinobacteria",
+            "unit": "Micromonosporales",
+            "unit_key": "loo_order_unit"
+          },
+          "Mycoplasmatales": {
+            "admissibility_class": "adjudicable",
+            "admissible": true,
+            "adr": "ADR-0005 D11 (in-distribution binned estimator, GATE-2) + D13 & Amendment A2 (distinct small-N-robust OOD estimator, bootstrap CIs, OOD_ECE_MIN_N=20); PRD \u00a712",
+            "bandwidth": 0.002,
+            "bandwidth_criterion": "loo_bernoulli_log_likelihood",
+            "bandwidth_grid": [
+              0.002,
+              0.005,
+              0.01,
+              0.02,
+              0.05,
+              0.1,
+              0.2,
+              0.5,
+              1.0
+            ],
+            "bandwidth_loo_log_likelihood": -3.9999115131215134e-11,
+            "bandwidth_selected": true,
+            "block_key": "cluster_id",
+            "brier_decomposition": {
+              "brier": 3.170216878207515e-05,
+              "calibration": 3.170216878207515e-05,
+              "refinement": 0.0,
+              "residual": 0.0
+            },
+            "ci": {
+              "ci_level": 0.95,
+              "lower": 0.0019034067266222483,
+              "n_blocks": 23,
+              "n_boot": 200,
+              "point": 0.003221662893442865,
+              "upper": 0.005204360934743417
+            },
+            "distinct_from": "tbox_finder.metrics.binned_ece",
+            "estimator": "beta_kernel_loo_l1",
+            "gated": false,
+            "inadmissible_point": null,
+            "inadmissible_reason": null,
+            "min_n": 20,
+            "n_blocks": 23,
+            "n_blocks_of_size_one": 20,
+            "n_boot_drop_reason": "replicates whose leave-one-out statistic was non-finite were dropped by eval.resample.block_bootstrap: the kernel leaves out by row, so a replicate drawn entirely from a one-row block leaves no row with a distinct-uid neighbour. See n_blocks_of_size_one \u2014 NOT the scores file's block_census.n_singleton_blocks, which counts rows with no cluster at all. Rejected resamples, not a truncated bootstrap.",
+            "n_boot_dropped": 0,
+            "n_boot_requested": 200,
+            "n_positives": 36,
+            "n_records": 40,
+            "ood_ece": 0.003221662893442865,
+            "phylum": "Tenericutes",
+            "unit": "Mycoplasmatales",
+            "unit_key": "loo_order_unit"
+          },
+          "Natranaerobiales": {
+            "admissibility_class": "adjudicable",
+            "admissible": true,
+            "adr": "ADR-0005 D11 (in-distribution binned estimator, GATE-2) + D13 & Amendment A2 (distinct small-N-robust OOD estimator, bootstrap CIs, OOD_ECE_MIN_N=20); PRD \u00a712",
+            "bandwidth": 0.002,
+            "bandwidth_criterion": "loo_bernoulli_log_likelihood",
+            "bandwidth_grid": [
+              0.002,
+              0.005,
+              0.01,
+              0.02,
+              0.05,
+              0.1,
+              0.2,
+              0.5,
+              1.0
+            ],
+            "bandwidth_loo_log_likelihood": -2.4999446957009477e-11,
+            "bandwidth_selected": true,
+            "block_key": "cluster_id",
+            "brier_decomposition": {
+              "brier": 1.2307158449966112e-05,
+              "calibration": 1.2307158449966112e-05,
+              "refinement": 0.0,
+              "residual": 0.0
+            },
+            "ci": {
+              "ci_level": 0.95,
+              "lower": 1.8158091604754704e-05,
+              "n_blocks": 23,
+              "n_boot": 200,
+              "point": 0.0011762660984826925,
+              "upper": 0.0028451265222577816
+            },
+            "distinct_from": "tbox_finder.metrics.binned_ece",
+            "estimator": "beta_kernel_loo_l1",
+            "gated": false,
+            "inadmissible_point": null,
+            "inadmissible_reason": null,
+            "min_n": 20,
+            "n_blocks": 23,
+            "n_blocks_of_size_one": 22,
+            "n_boot_drop_reason": "replicates whose leave-one-out statistic was non-finite were dropped by eval.resample.block_bootstrap: the kernel leaves out by row, so a replicate drawn entirely from a one-row block leaves no row with a distinct-uid neighbour. See n_blocks_of_size_one \u2014 NOT the scores file's block_census.n_singleton_blocks, which counts rows with no cluster at all. Rejected resamples, not a truncated bootstrap.",
+            "n_boot_dropped": 0,
+            "n_boot_requested": 200,
+            "n_positives": 23,
+            "n_records": 25,
+            "ood_ece": 0.0011762660984826925,
+            "phylum": "Firmicutes",
+            "unit": "Natranaerobiales",
+            "unit_key": "loo_order_unit"
+          },
+          "Propionibacteriales": {
+            "admissibility_class": "adjudicable",
+            "admissible": true,
+            "adr": "ADR-0005 D11 (in-distribution binned estimator, GATE-2) + D13 & Amendment A2 (distinct small-N-robust OOD estimator, bootstrap CIs, OOD_ECE_MIN_N=20); PRD \u00a712",
+            "bandwidth": 0.002,
+            "bandwidth_criterion": "loo_bernoulli_log_likelihood",
+            "bandwidth_grid": [
+              0.002,
+              0.005,
+              0.01,
+              0.02,
+              0.05,
+              0.1,
+              0.2,
+              0.5,
+              1.0
+            ],
+            "bandwidth_loo_log_likelihood": -7.399836299274803e-11,
+            "bandwidth_selected": true,
+            "block_key": "cluster_id",
+            "brier_decomposition": {
+              "brier": 0.00013458734704735405,
+              "calibration": 0.00013458734704735405,
+              "refinement": 0.0,
+              "residual": 0.0
+            },
+            "ci": {
+              "ci_level": 0.95,
+              "lower": 0.0009255628395885906,
+              "n_blocks": 12,
+              "n_boot": 200,
+              "point": 0.0031272295553832533,
+              "upper": 0.012751616614681365
+            },
+            "distinct_from": "tbox_finder.metrics.binned_ece",
+            "estimator": "beta_kernel_loo_l1",
+            "gated": false,
+            "inadmissible_point": null,
+            "inadmissible_reason": null,
+            "min_n": 20,
+            "n_blocks": 12,
+            "n_blocks_of_size_one": 5,
+            "n_boot_drop_reason": "replicates whose leave-one-out statistic was non-finite were dropped by eval.resample.block_bootstrap: the kernel leaves out by row, so a replicate drawn entirely from a one-row block leaves no row with a distinct-uid neighbour. See n_blocks_of_size_one \u2014 NOT the scores file's block_census.n_singleton_blocks, which counts rows with no cluster at all. Rejected resamples, not a truncated bootstrap.",
+            "n_boot_dropped": 0,
+            "n_boot_requested": 200,
+            "n_positives": 66,
+            "n_records": 74,
+            "ood_ece": 0.0031272295553832533,
+            "phylum": "Actinobacteria",
+            "unit": "Propionibacteriales",
+            "unit_key": "loo_order_unit"
+          },
+          "Pseudonocardiales": {
+            "admissibility_class": "adjudicable",
+            "admissible": true,
+            "adr": "ADR-0005 D11 (in-distribution binned estimator, GATE-2) + D13 & Amendment A2 (distinct small-N-robust OOD estimator, bootstrap CIs, OOD_ECE_MIN_N=20); PRD \u00a712",
+            "bandwidth": 0.002,
+            "bandwidth_criterion": "loo_bernoulli_log_likelihood",
+            "bandwidth_grid": [
+              0.002,
+              0.005,
+              0.01,
+              0.02,
+              0.05,
+              0.1,
+              0.2,
+              0.5,
+              1.0
+            ],
+            "bandwidth_loo_log_likelihood": -5.199884967057965e-11,
+            "bandwidth_selected": true,
+            "block_key": "cluster_id",
+            "brier_decomposition": {
+              "brier": 0.0008356749272119378,
+              "calibration": 0.0008356749272119378,
+              "refinement": 6.67e-322,
+              "residual": 0.0
+            },
+            "ci": {
+              "ci_level": 0.95,
+              "lower": 0.0009697335391975394,
+              "n_blocks": 3,
+              "n_boot": 193,
+              "point": 0.005202467416246576,
+              "upper": 0.10414340497146563
+            },
+            "distinct_from": "tbox_finder.metrics.binned_ece",
+            "estimator": "beta_kernel_loo_l1",
+            "gated": false,
+            "inadmissible_point": null,
+            "inadmissible_reason": null,
+            "min_n": 20,
+            "n_blocks": 3,
+            "n_blocks_of_size_one": 1,
+            "n_boot_drop_reason": "replicates whose leave-one-out statistic was non-finite were dropped by eval.resample.block_bootstrap: the kernel leaves out by row, so a replicate drawn entirely from a one-row block leaves no row with a distinct-uid neighbour. See n_blocks_of_size_one \u2014 NOT the scores file's block_census.n_singleton_blocks, which counts rows with no cluster at all. Rejected resamples, not a truncated bootstrap.",
+            "n_boot_dropped": 7,
+            "n_boot_requested": 200,
+            "n_positives": 48,
+            "n_records": 52,
+            "ood_ece": 0.005202467416246576,
+            "phylum": "Actinobacteria",
+            "unit": "Pseudonocardiales",
+            "unit_key": "loo_order_unit"
+          },
+          "Selenomonadales": {
+            "admissibility_class": "adjudicable",
+            "admissible": true,
+            "adr": "ADR-0005 D11 (in-distribution binned estimator, GATE-2) + D13 & Amendment A2 (distinct small-N-robust OOD estimator, bootstrap CIs, OOD_ECE_MIN_N=20); PRD \u00a712",
+            "bandwidth": 0.002,
+            "bandwidth_criterion": "loo_bernoulli_log_likelihood",
+            "bandwidth_grid": [
+              0.002,
+              0.005,
+              0.01,
+              0.02,
+              0.05,
+              0.1,
+              0.2,
+              0.5,
+              1.0
+            ],
+            "bandwidth_loo_log_likelihood": -2.3599477927416853e-10,
+            "bandwidth_selected": true,
+            "block_key": "cluster_id",
+            "brier_decomposition": {
+              "brier": 0.000339712591872213,
+              "calibration": 0.000339712591872213,
+              "refinement": 5.561987564633601e-253,
+              "residual": 0.0
+            },
+            "ci": {
+              "ci_level": 0.95,
+              "lower": 0.0005409409787230194,
+              "n_blocks": 120,
+              "n_boot": 200,
+              "point": 0.0019767663705662886,
+              "upper": 0.004616978955880458
+            },
+            "distinct_from": "tbox_finder.metrics.binned_ece",
+            "estimator": "beta_kernel_loo_l1",
+            "gated": false,
+            "inadmissible_point": null,
+            "inadmissible_reason": null,
+            "min_n": 20,
+            "n_blocks": 120,
+            "n_blocks_of_size_one": 90,
+            "n_boot_drop_reason": "replicates whose leave-one-out statistic was non-finite were dropped by eval.resample.block_bootstrap: the kernel leaves out by row, so a replicate drawn entirely from a one-row block leaves no row with a distinct-uid neighbour. See n_blocks_of_size_one \u2014 NOT the scores file's block_census.n_singleton_blocks, which counts rows with no cluster at all. Rejected resamples, not a truncated bootstrap.",
+            "n_boot_dropped": 0,
+            "n_boot_requested": 200,
+            "n_positives": 224,
+            "n_records": 236,
+            "ood_ece": 0.0019767663705662886,
+            "phylum": "Firmicutes",
+            "unit": "Selenomonadales",
+            "unit_key": "loo_order_unit"
+          },
+          "Streptomycetales": {
+            "admissibility_class": "adjudicable",
+            "admissible": true,
+            "adr": "ADR-0005 D11 (in-distribution binned estimator, GATE-2) + D13 & Amendment A2 (distinct small-N-robust OOD estimator, bootstrap CIs, OOD_ECE_MIN_N=20); PRD \u00a712",
+            "bandwidth": 0.002,
+            "bandwidth_criterion": "loo_bernoulli_log_likelihood",
+            "bandwidth_grid": [
+              0.002,
+              0.005,
+              0.01,
+              0.02,
+              0.05,
+              0.1,
+              0.2,
+              0.5,
+              1.0
+            ],
+            "bandwidth_loo_log_likelihood": -2.2299506685652364e-10,
+            "bandwidth_selected": true,
+            "block_key": "cluster_id",
+            "brier_decomposition": {
+              "brier": 0.012279701336469795,
+              "calibration": 0.012279701336469795,
+              "refinement": 5.647285099726736e-63,
+              "residual": 0.0
+            },
+            "ci": {
+              "ci_level": 0.95,
+              "lower": 0.04919658535220667,
+              "n_blocks": 33,
+              "n_boot": 200,
+              "point": 0.06491554668777315,
+              "upper": 0.16754108953929253
+            },
+            "distinct_from": "tbox_finder.metrics.binned_ece",
+            "estimator": "beta_kernel_loo_l1",
+            "gated": false,
+            "inadmissible_point": null,
+            "inadmissible_reason": null,
+            "min_n": 20,
+            "n_blocks": 33,
+            "n_blocks_of_size_one": 28,
+            "n_boot_drop_reason": "replicates whose leave-one-out statistic was non-finite were dropped by eval.resample.block_bootstrap: the kernel leaves out by row, so a replicate drawn entirely from a one-row block leaves no row with a distinct-uid neighbour. See n_blocks_of_size_one \u2014 NOT the scores file's block_census.n_singleton_blocks, which counts rows with no cluster at all. Rejected resamples, not a truncated bootstrap.",
+            "n_boot_dropped": 0,
+            "n_boot_requested": 200,
+            "n_positives": 197,
+            "n_records": 223,
+            "ood_ece": 0.06491554668777315,
+            "phylum": "Actinobacteria",
+            "unit": "Streptomycetales",
+            "unit_key": "loo_order_unit"
+          },
+          "Streptosporangiales": {
+            "admissibility_class": "adjudicable",
+            "admissible": true,
+            "adr": "ADR-0005 D11 (in-distribution binned estimator, GATE-2) + D13 & Amendment A2 (distinct small-N-robust OOD estimator, bootstrap CIs, OOD_ECE_MIN_N=20); PRD \u00a712",
+            "bandwidth": 0.002,
+            "bandwidth_criterion": "loo_bernoulli_log_likelihood",
+            "bandwidth_grid": [
+              0.002,
+              0.005,
+              0.01,
+              0.02,
+              0.05,
+              0.1,
+              0.2,
+              0.5,
+              1.0
+            ],
+            "bandwidth_loo_log_likelihood": -2.3999469078729097e-11,
+            "bandwidth_selected": true,
+            "block_key": "cluster_id",
+            "brier_decomposition": {
+              "brier": 0.05836953992100095,
+              "calibration": 0.05836953992100095,
+              "refinement": 0.0,
+              "residual": 0.0
+            },
+            "ci": {
+              "ci_level": 0.95,
+              "lower": 0.008496534161451758,
+              "n_blocks": 12,
+              "n_boot": 200,
+              "point": 0.09242117713963512,
+              "upper": 0.23422843907277813
+            },
+            "distinct_from": "tbox_finder.metrics.binned_ece",
+            "estimator": "beta_kernel_loo_l1",
+            "gated": false,
+            "inadmissible_point": null,
+            "inadmissible_reason": null,
+            "min_n": 20,
+            "n_blocks": 12,
+            "n_blocks_of_size_one": 7,
+            "n_boot_drop_reason": "replicates whose leave-one-out statistic was non-finite were dropped by eval.resample.block_bootstrap: the kernel leaves out by row, so a replicate drawn entirely from a one-row block leaves no row with a distinct-uid neighbour. See n_blocks_of_size_one \u2014 NOT the scores file's block_census.n_singleton_blocks, which counts rows with no cluster at all. Rejected resamples, not a truncated bootstrap.",
+            "n_boot_dropped": 0,
+            "n_boot_requested": 200,
+            "n_positives": 24,
+            "n_records": 24,
+            "ood_ece": 0.09242117713963512,
+            "phylum": "Actinobacteria",
+            "unit": "Streptosporangiales",
+            "unit_key": "loo_order_unit"
+          },
+          "Synergistales": {
+            "admissibility_class": "adjudicable",
+            "admissible": true,
+            "adr": "ADR-0005 D11 (in-distribution binned estimator, GATE-2) + D13 & Amendment A2 (distinct small-N-robust OOD estimator, bootstrap CIs, OOD_ECE_MIN_N=20); PRD \u00a712",
+            "bandwidth": 0.002,
+            "bandwidth_criterion": "loo_bernoulli_log_likelihood",
+            "bandwidth_grid": [
+              0.002,
+              0.005,
+              0.01,
+              0.02,
+              0.05,
+              0.1,
+              0.2,
+              0.5,
+              1.0
+            ],
+            "bandwidth_loo_log_likelihood": -3.099931422669175e-11,
+            "bandwidth_selected": true,
+            "block_key": "cluster_id",
+            "brier_decomposition": {
+              "brier": 0.008453253180179487,
+              "calibration": 0.008453253180179487,
+              "refinement": 1.832376736063425e-168,
+              "residual": 0.0
+            },
+            "ci": {
+              "ci_level": 0.95,
+              "lower": 0.0037112927108947733,
+              "n_blocks": 24,
+              "n_boot": 200,
+              "point": 0.02788648313150152,
+              "upper": 0.058557477660371615
+            },
+            "distinct_from": "tbox_finder.metrics.binned_ece",
+            "estimator": "beta_kernel_loo_l1",
+            "gated": false,
+            "inadmissible_point": null,
+            "inadmissible_reason": null,
+            "min_n": 20,
+            "n_blocks": 24,
+            "n_blocks_of_size_one": 20,
+            "n_boot_drop_reason": "replicates whose leave-one-out statistic was non-finite were dropped by eval.resample.block_bootstrap: the kernel leaves out by row, so a replicate drawn entirely from a one-row block leaves no row with a distinct-uid neighbour. See n_blocks_of_size_one \u2014 NOT the scores file's block_census.n_singleton_blocks, which counts rows with no cluster at all. Rejected resamples, not a truncated bootstrap.",
+            "n_boot_dropped": 0,
+            "n_boot_requested": 200,
+            "n_positives": 27,
+            "n_records": 31,
+            "ood_ece": 0.02788648313150152,
+            "phylum": "Synergistetes",
+            "unit": "Synergistales",
+            "unit_key": "loo_order_unit"
+          },
+          "Thermoanaerobacterales": {
+            "admissibility_class": "adjudicable",
+            "admissible": true,
+            "adr": "ADR-0005 D11 (in-distribution binned estimator, GATE-2) + D13 & Amendment A2 (distinct small-N-robust OOD estimator, bootstrap CIs, OOD_ECE_MIN_N=20); PRD \u00a712",
+            "bandwidth": 0.002,
+            "bandwidth_criterion": "loo_bernoulli_log_likelihood",
+            "bandwidth_grid": [
+              0.002,
+              0.005,
+              0.01,
+              0.02,
+              0.05,
+              0.1,
+              0.2,
+              0.5,
+              1.0
+            ],
+            "bandwidth_loo_log_likelihood": -2.9299351833615107e-10,
+            "bandwidth_selected": true,
+            "block_key": "cluster_id",
+            "brier_decomposition": {
+              "brier": 0.0007983841524740189,
+              "calibration": 0.0007983841524740189,
+              "refinement": 1.944978350160357e-143,
+              "residual": 0.0
+            },
+            "ci": {
+              "ci_level": 0.95,
+              "lower": 0.001253287039783933,
+              "n_blocks": 150,
+              "n_boot": 200,
+              "point": 0.003450795447425366,
+              "upper": 0.00840058385614831
+            },
+            "distinct_from": "tbox_finder.metrics.binned_ece",
+            "estimator": "beta_kernel_loo_l1",
+            "gated": false,
+            "inadmissible_point": null,
+            "inadmissible_reason": null,
+            "min_n": 20,
+            "n_blocks": 150,
+            "n_blocks_of_size_one": 105,
+            "n_boot_drop_reason": "replicates whose leave-one-out statistic was non-finite were dropped by eval.resample.block_bootstrap: the kernel leaves out by row, so a replicate drawn entirely from a one-row block leaves no row with a distinct-uid neighbour. See n_blocks_of_size_one \u2014 NOT the scores file's block_census.n_singleton_blocks, which counts rows with no cluster at all. Rejected resamples, not a truncated bootstrap.",
+            "n_boot_dropped": 0,
+            "n_boot_requested": 200,
+            "n_positives": 271,
+            "n_records": 293,
+            "ood_ece": 0.003450795447425366,
+            "phylum": "Firmicutes",
+            "unit": "Thermoanaerobacterales",
+            "unit_key": "loo_order_unit"
+          },
+          "Tissierellales": {
+            "admissibility_class": "adjudicable",
+            "admissible": true,
+            "adr": "ADR-0005 D11 (in-distribution binned estimator, GATE-2) + D13 & Amendment A2 (distinct small-N-robust OOD estimator, bootstrap CIs, OOD_ECE_MIN_N=20); PRD \u00a712",
+            "bandwidth": 0.002,
+            "bandwidth_criterion": "loo_bernoulli_log_likelihood",
+            "bandwidth_grid": [
+              0.002,
+              0.005,
+              0.01,
+              0.02,
+              0.05,
+              0.1,
+              0.2,
+              0.5,
+              1.0
+            ],
+            "bandwidth_loo_log_likelihood": -4.4199022219993e-10,
+            "bandwidth_selected": true,
+            "block_key": "cluster_id",
+            "brier_decomposition": {
+              "brier": 0.00061246626475361,
+              "calibration": 0.00061246626475361,
+              "refinement": 2.3876685949676076e-160,
+              "residual": 0.0
+            },
+            "ci": {
+              "ci_level": 0.95,
+              "lower": 0.001128971554121835,
+              "n_blocks": 228,
+              "n_boot": 200,
+              "point": 0.0029952029105264127,
+              "upper": 0.005578971679716064
+            },
+            "distinct_from": "tbox_finder.metrics.binned_ece",
+            "estimator": "beta_kernel_loo_l1",
+            "gated": false,
+            "inadmissible_point": null,
+            "inadmissible_reason": null,
+            "min_n": 20,
+            "n_blocks": 228,
+            "n_blocks_of_size_one": 165,
+            "n_boot_drop_reason": "replicates whose leave-one-out statistic was non-finite were dropped by eval.resample.block_bootstrap: the kernel leaves out by row, so a replicate drawn entirely from a one-row block leaves no row with a distinct-uid neighbour. See n_blocks_of_size_one \u2014 NOT the scores file's block_census.n_singleton_blocks, which counts rows with no cluster at all. Rejected resamples, not a truncated bootstrap.",
+            "n_boot_dropped": 0,
+            "n_boot_requested": 200,
+            "n_positives": 420,
+            "n_records": 442,
+            "ood_ece": 0.0029952029105264127,
+            "phylum": "Firmicutes",
+            "unit": "Tissierellales",
+            "unit_key": "loo_order_unit"
+          },
+          "Veillonellales": {
+            "admissibility_class": "adjudicable",
+            "admissible": true,
+            "adr": "ADR-0005 D11 (in-distribution binned estimator, GATE-2) + D13 & Amendment A2 (distinct small-N-robust OOD estimator, bootstrap CIs, OOD_ECE_MIN_N=20); PRD \u00a712",
+            "bandwidth": 0.002,
+            "bandwidth_criterion": "loo_bernoulli_log_likelihood",
+            "bandwidth_grid": [
+              0.002,
+              0.005,
+              0.01,
+              0.02,
+              0.05,
+              0.1,
+              0.2,
+              0.5,
+              1.0
+            ],
+            "bandwidth_loo_log_likelihood": -2.389947129090097e-10,
+            "bandwidth_selected": true,
+            "block_key": "cluster_id",
+            "brier_decomposition": {
+              "brier": 7.730619467561095e-05,
+              "calibration": 7.730619467561095e-05,
+              "refinement": 0.0,
+              "residual": 0.0
+            },
+            "ci": {
+              "ci_level": 0.95,
+              "lower": 0.0010299132757988,
+              "n_blocks": 140,
+              "n_boot": 200,
+              "point": 0.0019711364999632002,
+              "upper": 0.0034206245194446524
+            },
+            "distinct_from": "tbox_finder.metrics.binned_ece",
+            "estimator": "beta_kernel_loo_l1",
+            "gated": false,
+            "inadmissible_point": null,
+            "inadmissible_reason": null,
+            "min_n": 20,
+            "n_blocks": 140,
+            "n_blocks_of_size_one": 116,
+            "n_boot_drop_reason": "replicates whose leave-one-out statistic was non-finite were dropped by eval.resample.block_bootstrap: the kernel leaves out by row, so a replicate drawn entirely from a one-row block leaves no row with a distinct-uid neighbour. See n_blocks_of_size_one \u2014 NOT the scores file's block_census.n_singleton_blocks, which counts rows with no cluster at all. Rejected resamples, not a truncated bootstrap.",
+            "n_boot_dropped": 0,
+            "n_boot_requested": 200,
+            "n_positives": 223,
+            "n_records": 239,
+            "ood_ece": 0.0019711364999632002,
+            "phylum": "Firmicutes",
+            "unit": "Veillonellales",
+            "unit_key": "loo_order_unit"
+          }
+        },
+        "why_not_gated": "ADR-0005 D13: an OOD / leave-clade-out ECE <= 0.05 is likely infeasible under clade shift, so it is reported and adjudicated by the drift decision rule, never gated. GATE-2 grades the D11 in-distribution number only."
+      },
+      "ood_settings": {
+        "block_key": {
+          "cm_confirmer": "cluster_id",
+          "rinalmo": "cluster_id"
+        },
+        "bootstrap_seed": {
+          "cm_confirmer": 20260804,
+          "rinalmo": 20260804
+        },
+        "estimator": {
+          "cm_confirmer": "beta_kernel_loo_l1",
+          "rinalmo": "beta_kernel_loo_l1"
+        },
+        "min_n": {
+          "cm_confirmer": 20,
+          "rinalmo": 20
+        },
+        "n_boot": {
+          "cm_confirmer": 200,
+          "rinalmo": 200
+        },
+        "unit_key": {
+          "cm_confirmer": "loo_order_unit",
+          "rinalmo": "loo_order_unit"
+        }
+      },
+      "paired": {
+        "ci": {
+          "ci_level": 0.95,
+          "lower": 0.08169299982461764,
+          "n_blocks": 30,
+          "n_boot": 2000,
+          "point": 0.18772886430023442,
+          "upper": 0.2987516213355392
+        },
+        "definition": "per held-out order, RiNALMo OOD ECE minus CM-confirmer OOD ECE; positive = the CM confirmer is better calibrated on that order. P3-18's order-blocked bootstrap (swap_check.paired_difference), one draw of orders for both arms",
+        "per_unit": {
+          "Acholeplasmatales": -0.002359574647155871,
+          "Acidaminococcales": -0.0019196871025052452,
+          "Actinomycetales": 0.5837085238789542,
+          "Anaerolineales": -0.0008908406756396068,
+          "Bifidobacteriales": 0.5919891263359096,
+          "Candidatus Izemoplasmatales": -0.001106855245800689,
+          "Chloroflexales": 0.03117957427718677,
+          "Corynebacteriales": 0.5914130591407425,
+          "Dehalococcoidales": -0.0011230015247613596,
+          "Deinococcales": -0.04933094595281408,
+          "Desulfuromonadales": 0.0003505529236429302,
+          "Entomoplasmatales": -0.06970047178511281,
+          "Erysipelotrichales": -0.0017242404635654646,
+          "Halanaerobiales": 0.01088239535793327,
+          "Haloplasmatales": -0.0004517438848027106,
+          "Ktedonobacterales": 0.00123548631899719,
+          "Lactobacillales": -0.017939593356706786,
+          "Micrococcales": 0.7319517084150944,
+          "Micromonosporales": 0.5701278521009037,
+          "Mycoplasmatales": -0.002533089929825396,
+          "Natranaerobiales": -0.0001859687099088586,
+          "Propionibacteriales": 0.7851081548633265,
+          "Pseudonocardiales": 0.7938616711012473,
+          "Selenomonadales": -0.0012508418813095288,
+          "Streptomycetales": 0.6154576233088866,
+          "Streptosporangiales": 0.5028751309435364,
+          "Synergistales": -0.02601255468204572,
+          "Thermoanaerobacterales": -0.002114521948617799,
+          "Tissierellales": -0.0019188040259287711,
+          "Veillonellales": 0.002287805857171734
+        }
+      },
+      "rinalmo": {
+        "macro_average": {
+          "ci_level": 0.95,
+          "lower": 0.09837384969040015,
+          "n_blocks": 30,
+          "n_boot": 200,
+          "point": 0.21131708166715119,
+          "upper": 0.32501193734362815
+        }
+      }
+    },
+    "posterior_key": "cm_platt_posterior",
+    "temperature_stage": "not applied (ADR-0005 A14): on calib the CM logit misclassifies no row, so D11's temperature has no minimiser; grade_ood_units is handed the identity T = 1.0 on Platt's log-odds, which is not a fitted temperature"
+  },
+  "clauses": {
+    "calibrator_converged": true,
+    "calibrator_fit_disjoint_from_every_graded_row": true,
+    "calibrator_fit_on_the_whole_calib_rung": true,
+    "calibrator_monotone": true,
+    "calibrator_refits_from_the_committed_sidecar": true,
+    "circularity_disclosed": true,
+    "cm_in_distribution_ece_rederives": true,
+    "cm_macro_and_paired_difference_rederive": true,
+    "every_benchmark_item_scored": true,
+    "every_query_scored": true,
+    "graded_object_is_the_a14_posterior": true,
+    "in_distribution_population_is_rinalmos": true,
+    "leave_clade_out_population_is_rinalmos": true,
+    "never_the_shipped_stage2": true,
+    "ood_settings_are_rinalmos": true,
+    "replay_reproduces_p3_16_items": true,
+    "rinalmo_benchmark_reproduces_p3_16_report": true,
+    "rinalmo_sidecars_are_the_graded_ones": true,
+    "rinalmo_values_are_its_committed_report": true
+  },
+  "confirmer": {
+    "artifact_dir": "data/processed/cm_confirmer",
+    "calibrator": {
+      "citation": "Platt 1999; Lin, Lin & Weng 2007, DOI:10.1007/s10994-007-5018-6",
+      "converged": true,
+      "fitted_on": "calib",
+      "intercept": -4.398398820564691,
+      "method": "platt_smoothed_targets",
+      "n_iterations": 11,
+      "n_negative": 230,
+      "n_positive": 859,
+      "slope": 0.15117405520691593,
+      "target_negative": 0.004310344827586207,
+      "target_positive": 0.9988385598141696
+    },
+    "cms": {
+      "RF00230": {
+        "path": "data/external/refs/RF00230.cm",
+        "sha256": "082616efe0616479dc9b9f565b5bcab7648d7ea1d629430940319f247af52cea"
+      },
+      "TBDB001": {
+        "path": "data/external/refs/TBDB001.cm",
+        "sha256": "00a821f23bfaf96c1e454022bc0a8fcbe2a9150abadd00bca6abb9298d9a0d1c"
+      }
+    },
+    "n_calib_rows_in_sidecar": 1089,
+    "n_fit_row_orders_in_loo_holdout": 0,
+    "n_fit_rows": 1089,
+    "n_fit_rows_also_graded": 0,
+    "n_fit_rows_in_training_admission": 0,
+    "n_queries": 35010,
+    "n_queries_unscored": 0,
+    "n_residues": 9743018,
+    "query_manifest_sha256": "811e6a4bab0702ec149352f8efe8745d0021fe3d9e0c2eeb91f5f7e64e55e2ae",
+    "score_definition": "per query, the best hit bit score over RF00230 and TBDB001 from cmsearch --toponly --max -T -1000 (Infernal 1.1.5)",
+    "search_flags": [
+      "--noali",
+      "--cpu",
+      "0",
+      "--toponly",
+      "--max",
+      "-T",
+      "-1000.0",
+      "-Z",
+      "1.0"
+    ],
+    "separation": {
+      "calib_rows": {
+        "max_negative_bits": 4.3,
+        "min_positive_bits": 30.9,
+        "n_negative": 230,
+        "n_negatives_at_or_above_min_positive": 0,
+        "n_positive": 859,
+        "n_positives_at_or_below_max_negative": 0,
+        "perfectly_separated": true
+      },
+      "misclassified_at_zero_on_calib": 0,
+      "training_admission_rows": {
+        "max_negative_bits": 63.5,
+        "min_positive_bits": 9.8,
+        "n_negative": 4264,
+        "n_negatives_at_or_above_min_positive": 6,
+        "n_positive": 4795,
+        "n_positives_at_or_below_max_negative": 317,
+        "perfectly_separated": false
+      }
+    }
+  },
+  "disclosures": [
+    {
+      "id": "cm_derived_positives",
+      "text": "PRD \u00a75: the positives are CM-derived (TBDB / Rfam), so a CM scored against them measures agreement with the models that built the truth. Its discrimination here is a ceiling by construction, not evidence of generalization, and a RiNALMo-minus-CM gap below zero does not mean the CM finds what RiNALMo misses."
+    },
+    {
+      "id": "cm_not_order_held_out",
+      "text": "RF00230.cm and TBDB001.cm were built from seed alignments that are not order-held-out. On the leave-clade-out rows only the CALIBRATOR is held out (fit on the calib rung, which shares no row and no order with the 30 holdout orders); the scorer is not. The CM's leave-clade-out ECE is therefore not a leave-clade-out test of the CM."
+    },
+    {
+      "id": "orthogonal_cross_validator_only",
+      "text": "PRD \u00a710.2: the CM stays an orthogonal cross-validator and is never the sole Stage-2. This is the pre-registered ablation (ii) of PRD \u00a76. It carries no gate and cannot swap the shipped backbone."
+    },
+    {
+      "id": "score_is_not_d2_detection",
+      "text": "The confirmer score is the best bit score from cmsearch --toponly --max -T -1000 (filters off, every query scored). It is not ADR-0005 D2's canonical detection operating point (RF00230 GA 93 bits, default filtered pipeline), which stays GATE-1's baseline at P4."
+    },
+    {
+      "id": "gated_arm_only",
+      "text": "The precision comparison replays P3-16's gated twin arm only. The production arm's Stage-1 candidates are not re-ranked here."
+    },
+    {
+      "id": "a14_two_parameter_calibrator",
+      "text": "ADR-0005 A14: on calib the CM logit misclassifies no row (a 26.6-bit gap at the time of signing), so D11's temperature has no minimiser. The CM arm is calibrated by a two-parameter Platt map (scale and offset) fitted on the same calib rows D11 fits RiNALMo's one-parameter T on. Its posterior is cm_platt_posterior, not D11's named_posterior. No temperature is fitted or substituted for D11's: the in-distribution grade applies none, and grade_ood_units is handed the identity T = 1.0 on Platt's log-odds, a no-op."
+    }
+  ],
+  "gated": false,
+  "generated_at_utc": "2026-10-06T16:47:42.423449+00:00",
+  "generated_by": "src/tbox_finder/stage2/cm_confirmer.py",
+  "is_science": true,
+  "prd": "\u00a76 ablation (ii); \u00a710.2; \u00a712; \u00a75",
+  "precision": {
+    "arm": "twin",
+    "binding": {
+      "arm": "twin",
+      "n_candidate_rows": 2414,
+      "n_items": 1893,
+      "n_items_mismatched_vs_committed": 0
+    },
+    "items": "reports/p3/cm_confirmer_items.json",
+    "metrics": {
+      "arm": "twin",
+      "auprc": {
+        "cm_confirmer": 0.995497423040546,
+        "rinalmo": 0.9987109688589324
+      },
+      "auprc_candidates_only": {
+        "cm_confirmer": 0.99640156679548,
+        "rinalmo": 0.9996231598905381
+      },
+      "auprc_gain_ci": {
+        "ci_level": 0.95,
+        "lower": 0.689496638044696,
+        "n_blocks": 1555,
+        "n_boot": 2000,
+        "point": 30.69877657694938,
+        "upper": 47.69043745690191
+      },
+      "auprc_gain_pp": 30.69877657694936,
+      "exposure": {
+        "n_negatives_seen_by_arm": 283,
+        "n_positives_seen_by_arm": 0
+      },
+      "gain_ci": {
+        "ci_level": 0.95,
+        "lower": -0.05803988811816813,
+        "n_blocks": 1555,
+        "n_boot": 2000,
+        "point": 5.321947615185207,
+        "upper": 19.387234024162645
+      },
+      "gain_pp": 5.321947615185207,
+      "gated_prevalence_key": "100:1",
+      "matched_recall": {
+        "cm_confirmer": {
+          "fn": 6,
+          "fp": 5,
+          "matched": true,
+          "precision": 0.9958333333333333,
+          "recall": 0.9950041631973355,
+          "threshold": 0.23534154201957988,
+          "tp": 1195
+        },
+        "rinalmo": {
+          "fn": 6,
+          "fp": 4,
+          "matched": true,
+          "precision": 0.9966638865721434,
+          "recall": 0.9950041631973355,
+          "threshold": 0.00024117630155820146,
+          "tp": 1195
+        }
+      },
+      "operating_point": {
+        "rinalmo_precision": 0.9966499162479062,
+        "rinalmo_recall": 0.9908409658617818,
+        "stage2_operating_point": 0.5,
+        "target_recall": 0.9908409658617818
+      },
+      "per_pool": {
+        "dinuc_shuffled": {
+          "fp_cm_confirmer": 0,
+          "fp_rinalmo": 0,
+          "n": 202,
+          "n_seen_by_arm": 0
+        },
+        "gc_background": {
+          "fp_cm_confirmer": 2,
+          "fp_rinalmo": 2,
+          "n": 206,
+          "n_seen_by_arm": 0
+        },
+        "leader_decoy": {
+          "fp_cm_confirmer": 1,
+          "fp_rinalmo": 0,
+          "n": 1,
+          "n_seen_by_arm": 0
+        },
+        "structured_rna": {
+          "fp_cm_confirmer": 2,
+          "fp_rinalmo": 2,
+          "n": 283,
+          "n_seen_by_arm": 283
+        }
+      },
+      "population": {
+        "ceiling_recall": 0.9975020815986678,
+        "n_blocks": 1555,
+        "n_candidate_items": 1204,
+        "n_items": 1893,
+        "n_negatives": 692,
+        "n_positive_candidates": 1198,
+        "n_positives": 1201,
+        "observed_decoy_ratio": 0.5761865112406328
+      },
+      "prevalence": {
+        "10000:1": {
+          "auprc": {
+            "cm_confirmer": 0.06299110362968588,
+            "rinalmo": 0.7985039715937328
+          },
+          "auprc_gain_pp": 73.5512867964047,
+          "decoy_ratio": 10000.0,
+          "gain_pp": 0.3338482069227589,
+          "lambda": 17355.49132947977,
+          "precision": {
+            "cm_confirmer": 0.013583797083099116,
+            "rinalmo": 0.016922279152326705
+          },
+          "rinalmo_auprc_beats_cm_confirmer": true,
+          "rinalmo_beats_cm_confirmer": true
+        },
+        "1000:1": {
+          "auprc": {
+            "cm_confirmer": 0.19164489218484274,
+            "rinalmo": 0.8459368562407357
+          },
+          "auprc_gain_pp": 65.4291964055893,
+          "decoy_ratio": 1000.0,
+          "gain_pp": 2.5816184951348395,
+          "lambda": 1735.549132947977,
+          "precision": {
+            "cm_confirmer": 0.12104029016648273,
+            "rinalmo": 0.14685647511783112
+          },
+          "rinalmo_auprc_beats_cm_confirmer": true,
+          "rinalmo_beats_cm_confirmer": true
+        },
+        "100:1": {
+          "auprc": {
+            "cm_confirmer": 0.6426040298159925,
+            "rinalmo": 0.9495917955854861
+          },
+          "auprc_gain_pp": 30.69877657694936,
+          "decoy_ratio": 100.0,
+          "gain_pp": 5.321947615185207,
+          "lambda": 173.5549132947977,
+          "precision": {
+            "cm_confirmer": 0.5793168189205851,
+            "rinalmo": 0.6325362950724371
+          },
+          "rinalmo_auprc_beats_cm_confirmer": true,
+          "rinalmo_beats_cm_confirmer": true
+        },
+        "10:1": {
+          "auprc": {
+            "cm_confirmer": 0.9401728615652949,
+            "rinalmo": 0.9914301660720043
+          },
+          "auprc_gain_pp": 5.12573045067094,
+          "decoy_ratio": 10.0,
+          "gain_pp": 1.2796763902356512,
+          "lambda": 17.35549132947977,
+          "precision": {
+            "cm_confirmer": 0.9322991240036528,
+            "rinalmo": 0.9450958879060093
+          },
+          "rinalmo_auprc_beats_cm_confirmer": true,
+          "rinalmo_beats_cm_confirmer": true
+        },
+        "observed": {
+          "auprc": {
+            "cm_confirmer": 0.995497423040546,
+            "rinalmo": 0.9987109688589324
+          },
+          "auprc_gain_pp": 0.32135458183863985,
+          "decoy_ratio": 0.5761865112406328,
+          "gain_pp": 0.08305532388100945,
+          "lambda": 1.0,
+          "precision": {
+            "cm_confirmer": 0.9958333333333333,
+            "rinalmo": 0.9966638865721434
+          },
+          "rinalmo_auprc_beats_cm_confirmer": true,
+          "rinalmo_beats_cm_confirmer": true
+        }
+      },
+      "recall_grid": [
+        {
+          "cm_confirmer": {
+            "matched": true,
+            "precision_at_pin": 0.7508381464515701,
+            "precision_observed": 0.9980916030534351,
+            "recall": 0.8709408825978351,
+            "threshold": 0.8562664099607696
+          },
+          "reachable": true,
+          "rinalmo": {
+            "matched": true,
+            "precision_at_pin": 1.0,
+            "precision_observed": 1.0,
+            "recall": 0.791007493755204,
+            "threshold": 0.9984829339178971
+          },
+          "rinalmo_beats_cm_confirmer": true,
+          "target_recall": 0.5
+        },
+        {
+          "cm_confirmer": {
+            "matched": true,
+            "precision_at_pin": 0.7508381464515701,
+            "precision_observed": 0.9980916030534351,
+            "recall": 0.8709408825978351,
+            "threshold": 0.8562664099607696
+          },
+          "reachable": true,
+          "rinalmo": {
+            "matched": true,
+            "precision_at_pin": 1.0,
+            "precision_observed": 1.0,
+            "recall": 0.791007493755204,
+            "threshold": 0.9984829339178971
+          },
+          "rinalmo_beats_cm_confirmer": true,
+          "target_recall": 0.6
+        },
+        {
+          "cm_confirmer": {
+            "matched": true,
+            "precision_at_pin": 0.7508381464515701,
+            "precision_observed": 0.9980916030534351,
+            "recall": 0.8709408825978351,
+            "threshold": 0.8562664099607696
+          },
+          "reachable": true,
+          "rinalmo": {
+            "matched": true,
+            "precision_at_pin": 1.0,
+            "precision_observed": 1.0,
+            "recall": 0.791007493755204,
+            "threshold": 0.9984829339178971
+          },
+          "rinalmo_beats_cm_confirmer": true,
+          "target_recall": 0.7
+        },
+        {
+          "cm_confirmer": {
+            "matched": true,
+            "precision_at_pin": 0.7508381464515701,
+            "precision_observed": 0.9980916030534351,
+            "recall": 0.8709408825978351,
+            "threshold": 0.8562664099607696
+          },
+          "reachable": true,
+          "rinalmo": {
+            "matched": true,
+            "precision_at_pin": 0.8567502707551086,
+            "precision_observed": 0.9990375360923965,
+            "recall": 0.8642797668609492,
+            "threshold": 0.9976191978375735
+          },
+          "rinalmo_beats_cm_confirmer": true,
+          "target_recall": 0.8
+        },
+        {
+          "cm_confirmer": {
+            "matched": true,
+            "precision_at_pin": 0.678931947474229,
+            "precision_observed": 0.9972826086956522,
+            "recall": 0.9167360532889259,
+            "threshold": 0.7649341055039086
+          },
+          "reachable": true,
+          "rinalmo": {
+            "matched": true,
+            "precision_at_pin": 0.7672137756723859,
+            "precision_observed": 0.9982547993019197,
+            "recall": 0.9525395503746877,
+            "threshold": 0.9921463395867062
+          },
+          "rinalmo_beats_cm_confirmer": true,
+          "target_recall": 0.9
+        },
+        {
+          "cm_confirmer": {
+            "matched": true,
+            "precision_at_pin": 0.5793168189205851,
+            "precision_observed": 0.9958333333333333,
+            "recall": 0.9950041631973355,
+            "threshold": 0.23534154201957988
+          },
+          "reachable": true,
+          "rinalmo": {
+            "matched": true,
+            "precision_at_pin": 0.7672137756723859,
+            "precision_observed": 0.9982547993019197,
+            "recall": 0.9525395503746877,
+            "threshold": 0.9921463395867062
+          },
+          "rinalmo_beats_cm_confirmer": true,
+          "target_recall": 0.95
+        }
+      ]
+    },
+    "n_boot": 2000,
+    "n_items_expected": 1893,
+    "operating_point": 0.5,
+    "p3_16_reference": {
+      "auprc_at_pinned_prevalence": 0.9495917955854861,
+      "target_recall": 0.9908409658617818
+    },
+    "posteriors": {
+      "cm_confirmer": "cm_platt_posterior (Platt on calib, no temperature; ADR-0005 A14)",
+      "rinalmo": "named_posterior at T = 1.140627294282911 (P3-16's two-stage replay)"
+    },
+    "reading": "P3-16's precision.arm_metrics with RiNALMo in its two_stage slot and the CM confirmer in its stage1_only slot, keys renamed after: every *gain* field is RiNALMo minus CM confirmer (pp). R* is RiNALMo's recall at P3-16's operating point. ADR-0005 A13's statistic is AUPRC at the D7 100:1 prevalence. Nothing here is gated.",
+    "seed": 42
+  },
+  "provenance": {
+    "adr": "ADR-0001:36; ADR-0005 D2, D5, D7, D11, D13, A13",
+    "env_lock_hash": "a4a6715d411d7218432c4c670d35475f6c9aa7dd6397fd5d906ca7e21293dc34",
+    "extra": {
+      "declared_outputs": [
+        "reports/cm_confirmer_ablation.json"
+      ],
+      "infernal_env_lock_sha256": "b3fa697cae88dab680c5501d5e9e9496180baf8aa754821d958d131803211d3b",
+      "replay_knobs": {
+        "flank": 50,
+        "gap_merge": 10,
+        "min_distinct_elements": 2,
+        "min_order_margin": 1,
+        "min_span": 50,
+        "threshold": 0.5,
+        "threshold_scope": "global"
+      }
+    },
+    "generated_at_utc": "2026-10-06T16:47:42.363393+00:00",
+    "git_sha": "f0f766fc19e8e89df5d79e1ec3ab1acd30cefe01",
+    "inputs": {
+      "data/external/refs/RF00230.cm": "082616efe0616479dc9b9f565b5bcab7648d7ea1d629430940319f247af52cea",
+      "data/external/refs/TBDB001.cm": "00a821f23bfaf96c1e454022bc0a8fcbe2a9150abadd00bca6abb9298d9a0d1c",
+      "data/interim/p3_16/benchmark_v1.json": "055c0165c476e506593af6292a5a93e875e0fc79323d6c997a0ad7367dfef59c",
+      "data/interim/p3_16/v1_payloads_twin_t0.5.json": "8ccb0d9df35bafd3f6c8f01adc18e86d32b89a5b99e3cf9dfede03e9f0a85861",
+      "data/interim/p3_16/v1_stage1_twin.npz": "c0e630da1e97a83405a1528d835f2385242a06606fe5bc419f59adf7b292744c",
+      "data/interim/p3_16/v1_stage2_twin.json": "043ababc6c6fa81aa6a56b369cb96d03e75bd1ddc546162d9e63941fd88e53e0",
+      "data/interim/p3_17a/queries/manifest.json": "811e6a4bab0702ec149352f8efe8745d0021fe3d9e0c2eeb91f5f7e64e55e2ae",
+      "data/interim/p3_17a/tblout/DONE.json": "b50570c4b255f20561e3d89133c671c71e8ce38907fc5c12d8d4a15588ad5bb1",
+      "data/processed/cm_confirmer/provenance.json": "8dd88c775831293f0f1c063b66320aa8f5d1171f9cc778a93865bc6f0906742e",
+      "data/processed/stage2_dataset.parquet": "376ad12bd6462686cc7467a5c3e34e63977ccca0c06465e24ec8345224a45f65",
+      "reports/gate2_p3_ece.json": "deaa86cddbe0cd0abc4bf5180a1336624939685cb92c58a5a6af3c5ff50ec647",
+      "reports/p3/cm_confirmer_items.json": "676f7204053d8fee1b2c71e3f7ccaf188be6939968e15436760101bae88e6dff",
+      "reports/p3/cm_confirmer_scores.json": "caf9bd280c58b8c6237e963f42391a4ee1a8f19ea7289ac1e9dd8c566567476c",
+      "reports/p3/cm_confirmer_scores_loo.json": "d515c1183d1e1f451e15e2228ccc20845a17ad4c8b31c0d9959eb8dae6226d70",
+      "reports/p3/stage2_scores.json": "a8d9bb413afb14b153430d5bfc70e570b50b1f85f3e599102ecc9b906e9f5575",
+      "reports/p3/stage2_scores_loo.json": "ecb16fb4c5bca9df383598ced00fa00ae8d336e980db286fcbcc9e7d907f08cb",
+      "reports/p3/two_stage_precision_items.json": "91ccde8ff2d4378abeff9ade5de46a68d5598e27995756e290482a5e4dd80a44",
+      "reports/two_stage_precision.json": "d4383952921755df713d0786cc66ef99e492a45c30deadeca1f4ef94a17757e7"
+    },
+    "outputs": {},
+    "rule": "workflow/rules/stage2.smk :: cm_confirmer_ablation",
+    "schema_version": "1.0",
+    "script": "src/tbox_finder/stage2/cm_confirmer.py",
+    "seed": 42
+  },
+  "role": "ablation",
+  "rule": "workflow/rules/stage2.smk :: cm_confirmer_ablation",
+  "schema_version": "1",
+  "sources": {
+    "benchmark": "data/interim/p3_16/benchmark_v1.json",
+    "cm_RF00230": "data/external/refs/RF00230.cm",
+    "cm_TBDB001": "data/external/refs/TBDB001.cm",
+    "confirmer_provenance": "data/processed/cm_confirmer/provenance.json",
+    "dataset": "data/processed/stage2_dataset.parquet",
+    "out_items": "reports/p3/cm_confirmer_items.json",
+    "out_loo_scores": "reports/p3/cm_confirmer_scores_loo.json",
+    "out_scores": "reports/p3/cm_confirmer_scores.json",
+    "payloads": "data/interim/p3_16/v1_payloads_twin_t0.5.json",
+    "precision_items": "reports/p3/two_stage_precision_items.json",
+    "precision_report": "reports/two_stage_precision.json",
+    "query_manifest": "data/interim/p3_17a/queries/manifest.json",
+    "rinalmo_loo_scores": "reports/p3/stage2_scores_loo.json",
+    "rinalmo_report": "reports/gate2_p3_ece.json",
+    "rinalmo_scores": "reports/p3/stage2_scores.json",
+    "search_done": "data/interim/p3_17a/tblout/DONE.json",
+    "stage1": "data/interim/p3_16/v1_stage1_twin.npz",
+    "stage2": "data/interim/p3_16/v1_stage2_twin.json"
+  },
+  "step": "P3-17a"
+}

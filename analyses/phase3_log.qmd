@@ -8275,3 +8275,367 @@ ruff, black 25.11.0 and `snakemake --lint` are clean.
 **Decisions.** None. No threshold, margin or measured value changed.
 
 **Commit.** see PR (P3-18, review round 1).
+
+## Step P3-17a — 2026-10-06: the CM + learned-calibration confirmer ablation (PRD §6 ablation (ii))
+
+**Inputs.** The two ADR-0005 D2 models `data/external/refs/RF00230.cm` and `TBDB001.cm`, both
+ECM-calibrated, so no `cmcalibrate` was needed and the SLURM fallback was not taken. Also
+`data/processed/stage2_dataset.parquet` (DVC, sha256 `376ad12b…`), RiNALMo's GATE-2 report and
+its two score sidecars (`reports/gate2_p3_ece.json`, `reports/p3/stage2_scores{,_loo}.json`), and
+P3-16's gated `twin` arm: the committed items plus the local-only replay files
+`data/interim/p3_16/{benchmark_v1, v1_stage1_twin, v1_stage2_twin, v1_payloads_twin_t0.5}`.
+
+**Process.** `src/tbox_finder/stage2/cm_confirmer.py` runs in three Snakemake rules in
+`workflow/rules/stage2.smk`, because no env holds both cmsearch and pandas:
+`cm_confirmer_queries` (data env), `cm_confirmer_search` (infernal env) and
+`cm_confirmer_ablation` (data env).
+- **Queries.** Every Stage-2 input RNA plus every P3-16 twin payload, deduplicated by content
+  (sha256 of the RNA): **35,010 queries, 9.74 Mb**. Only `rna_sequence` is read, and a test
+  relabels every row and asserts byte-identical shards.
+- **Search.** Infernal 1.1.5 `cmsearch --toponly --max -T -1000 -Z 1` over 22 shards × 2 models.
+  It took **52 min wall-clock locally (≈19 CPU-h)**, about twice the smoke extrapolation, because
+  22 processes contended for the cores. Every query was scored by both models (833,243 +
+  1,042,952 hits; 0 unscored), so no floor score was ever invented.
+- **Why `--max`.** On a 200-row smoke, the default filtered pipeline scored 1 of 100 decoys even
+  at `-T -1000`; filters off scores every query. Bit scores with filters off are shard-invariant:
+  1 and 3 shards reproduce the committed real-output fixture exactly, under real cmsearch.
+- **Replay binding.** The P3-16 replay is bound twice. The replayed RiNALMo items equal P3-16's
+  committed items exactly (0 of 1,893 differ, AUPRC bit-identical). Each candidate's payload RNA
+  hashes to the `rna_sha256` its row handed to Stage 2.
+
+**The stop, and A14.** As first built, a Platt map fitted on the 9,059 training-admission rows fed
+P3-07's `temperature_scale`. It refused: on `calib` the CM logit misclassifies **no** row (lowest
+positive 30.9 bits, highest decoy 4.3 bits), so D11's temperature has no minimiser. That is
+PRD §5's circularity, measured. RiNALMo's own T exists because one `calib` row is wrong
+([[perfect-separation-makes-temperature-unfittable]]). No fallback was pre-registered, and `T = 1`
+would publish a fabricated `named_posterior` ECE, so this was a §7 stop. The user signed off
+**ADR-0005 A14**:
+- Platt scaling (smoothed targets; DOI:10.1007/s10994-007-5018-6, accessed 2026-10-06), fitted
+  on the `calib` rung.
+- `calib` shares 0 rows with the graded rows (`test` and the leave-clade-out holdout) and 0
+  orders with the 30 holdout orders.
+- The posterior is labelled `cm_platt_posterior`, graded with D11's and D13's estimators at
+  RiNALMo's `n_boot` and seed, and never gated.
+- Fit: slope **0.1512 /bit**, intercept **−4.398** (p = 0.5 at 29.1 bits), converged after 11
+  gradient evaluations (10 Newton steps).
+
+**Outputs.** `reports/cm_confirmer_ablation.json` (14 clauses, all TRUE; `is_science: true`;
+`gated: false`), `reports/p3/cm_confirmer_scores{,_loo}.json` (RiNALMo's populations row-for-row),
+`reports/p3/cm_confirmer_items.json`, and `data/processed/cm_confirmer/` (per-query bit scores,
+calibrator and provenance; DVC `72ceaa47…`).
+- **In-distribution ECE** (test, n = 3,045): CM **0.00753** [0.00594, 0.00978] vs RiNALMo 0.00566
+  [0.00270, 0.00941].
+- **Leave-clade-out macro ECE** (30/30 admissible): CM **0.0236** [0.0092, 0.0428] vs RiNALMo
+  0.211. The paired difference (RiNALMo − CM) is **+0.188**, order-blocked CI [0.082, 0.299].
+  - All of it comes from the 9 Actinobacteria orders, where the CM is better in 9 of 9 (mean Δ
+    +0.641).
+  - Across the other 21 orders the mean Δ is −0.006, and the CM is better in only 5.
+- **Precision, P3-16 twin arm:**
+  - AUPRC at 100:1 is RiNALMo 0.9496 vs CM 0.6426, so RiNALMo − CM = **+30.7 pp**, CI [+0.7, +47.7].
+  - The sweep: +0.3 at the benchmark's own composition, +5.1 at 10:1, +65.4 at 10³:1, +73.6 at 10⁴:1.
+  - Precision at P3-16's R* (0.9908) is 0.633 vs 0.579, +5.3 pp, CI [−0.06, +19.4]. At matched
+    recall there are 4 false positives vs 5.
+
+**Validation.** The step's gate is met: CM posteriors were produced on both the in-distribution
+and the leave-clade-out rows, and the report was emitted. No number was fabricated or loosened.
+- **Tests.** 44 tests in `tests/unit/test_cm_confirmer.py`. They cover the parse on a committed
+  real-output fixture, Platt optimality and monotonicity, RNA-only input, replay refusals, and
+  the committed report's validation and tamper paths.
+- **Sabotage.** **15 sabotages, all RED against their named test.** The first pass left 2 GREEN,
+  both test defects and both fixed. One expected value was read back from the function under
+  mutation. One test skipped for lack of pyarrow and was re-run under the data env.
+- **Wiring self-check.** Fed RiNALMo's own logits, the in-distribution path reproduces its
+  committed ECE exactly (0.005661656399710311), and the benchmark path gives a gain of 0.0 with
+  CI [0, 0].
+- **Tooling.** `infernal.run_cmsearch` gained four keyword options that default to the old
+  command line; its callers' tests still pass, including the real-cmsearch prescan control (8/8).
+  ruff 0.15.15, black 25.11.0, `snakemake --lint` and `-n` are clean.
+
+**Decisions.**
+1. **The CM's leave-clade-out advantage is not CM generalization.** RF00230 and TBDB001 were not
+   built order-held-out; only the calibrator is. RiNALMo's Actinobacteria drift (P3-10) is real,
+   and a CM that defines the truth does not drift on it. This is disclosed and enforced by a
+   clause.
+2. **What the AUPRC gap is made of.** This is a post-hoc read from the committed items file and is
+   not in the report. Two decoy items score as strong T-boxes under the CM:
+   - a `structured_rna` purine-riboswitch decoy in a *Paenibacillus* host window, at **96.4 bits
+     on RF00230, above Rfam's 93-bit GA cutoff**;
+   - `gcbg_000417`, at 68.5 bits.
+
+   RiNALMo scores both at 0.998. In the first, the hit spans 205 nt of the candidate locus while
+   the spliced insert is 100 nt, so at least 105 nt of the hit is **host** sequence. Without these
+   two items the AUPRC gap is **+2.1 pp** (0.9888 vs 0.9679), and RiNALMo's own AUPRC rises by
+   3.9 pp. ⚠ **Booked: a P3-16 benchmark host-window label-noise audit.** The hosts are mined
+   genomic windows (`mining_pool_v0`), which can carry an unlabelled real T-box.
+3. **Snakemake config keys.** The replay uses its own `cm_confirmer_replay_*` keys. P3-16 ran at
+   Stage-1 τ = 0.5, while `integration.smk`'s fixture default is 0.9. Each value is bound by exact
+   reproduction plus a check against P3-16's recorded `stage1_threshold`.
+4. **Fixture shards.** `*.fa` routes to git-LFS and CI has no LFS, so the fixture shards get a
+   `.gitattributes` carve-out (the `curated_control_queries_v0.fasta` precedent).
+
+§6.4: ADR-0005 A14, a README P3 line, and a manuscript paragraph in the two-stage results section.
+
+**Commit.** see PR (P3-17a).
+
+## Step P3-17a (review round 1) — 2026-10-06: every published number bound to the evidence it names
+
+**Inputs.** Commit `d038737` drew three reviews.
+- The CodeRabbit CLI and the app's automatic review each raised the same minor finding: the CM
+  files were recorded by path, not hash. The app added one low-value nitpick.
+- An independent read-only adversarial pass found 4 majors, 3 minors and 3 nits.
+- CI failed on the git-LFS pointer trap: CI has no LFS, so the two `.cm` inputs are pointers
+  there and their hashes differ.
+
+Every finding was reproduced by execution before it was fixed.
+
+**Process.**
+1. **The search is bound to its models and its rows.** `DONE.json` now records each CM's content
+   sha256 and, per (model, shard), the hit count and a digest of the tblout **data rows**. Header
+   comments are excluded, which keeps the sanitised committed fixture valid. `read_search` refuses
+   a different model, a dropped row or an edited row: the reviewer showed a single dropped row
+   turning a T-box's best hit from 100.1 to −9.3 bits. `cm_confirmer_search` also declares the
+   two CMs as inputs.
+2. **LFS pointers.** Inputs are checked with `refs.content_sha256`, which reads a pointer's own
+   `oid sha256`. That oid **is** the content digest, so CI verifies the CMs instead of failing or
+   skipping them.
+3. **The numbers are bound to evidence, not to each other (major).** The reviewer forged a report
+   (CM ECE 0.0001, RiNALMo ECE 0.04, LOO macro 0.001, a paired point of 0.899, RiNALMo's decoy
+   scores zeroed) with every clause re-derived TRUE, and it validated. There are now 13
+   **evidence clauses** (`evidence_clauses`). Each re-reads the committed upstream files, so all
+   of them run in CI:
+   - the RiNALMo sidecars must hash to the GATE-2 report's own provenance;
+   - the CM sidecars must carry RiNALMo's populations;
+   - the calibrator must re-fit from the sidecar's `calib` rows to the recorded slope and
+     intercept, the sidecar logits must equal `a·bits + b`, and the fit count must equal
+     GATE-2's `n_fitted`;
+   - the in-distribution ECE is recomputed from the sidecar;
+   - the LOO macro and the paired difference are recomputed from the per-order values and
+     RiNALMo's report;
+   - RiNALMo's quoted values must equal its committed report;
+   - the items must equal P3-16's committed twin items, and the reference values must equal
+     P3-16's report.
+4. **Five tautological clauses are gone.** Each compared a copy with its own source. Their
+   replacements compare file against independent file.
+5. **Inputs.** `sources` must equal the pinned `CANONICAL_SOURCES` map, and the input set must
+   be exactly that map. A committed input (`reports/`, `data/external/refs/`) must be present even
+   with `require_all_inputs=False`.
+6. **What CI cannot reach.** `rederive_local` re-derives every CM item score through the P3-16
+   replay and re-grades all 30 per-order OOD ECEs from the committed sidecar.
+7. **Fit-set selection.** It is now a tested function (`calibration_fit_ids`). The reviewer's
+   mutant (Platt fitted on the test rung) is caught by `calibrator_refits_from_the_committed_sidecar`.
+8. **`n_boot`.** It is read from P3-16's `rule.n_boot`, the requested count, not from
+   `gain_ci.n_boot`, which counts surviving replicates.
+9. **Nits.** `_relabel` refuses a key collision. `ood_settings_are_rinalmos` refuses `None ==
+   None`. The dev-log now says "11 gradient evaluations (10 Newton steps)".
+
+**Declined.** The app's nitpick to declare the query directory as a `directory()` output.
+`read_search` reads only the shards the hash-bound manifest lists, so a stale extra shard cannot
+enter the search.
+
+**Outputs.** The search re-ran (52 min). **All 44 tblouts reproduce run 1's data rows byte for
+byte** (833,243 + 1,042,952 hits). The report was regenerated with **19 clauses, all TRUE**, and
+**no published number moved**.
+The DVC object is now `93d4ddf6…`. Its `provenance.json` changed with the re-run; the scores and
+calibrator did not.
+
+**Validation.**
+- **CI tier.** `validate_report(require_all_inputs=False)`, the CI mode, returns `[]`, including
+  through LFS-pointer CMs.
+- **Local.** `validate_report(require_all_inputs=True, rederive_local=True)` returns `[]` in
+  1,944 s. Every CM item score re-derives through the P3-16 replay, and all 30 per-order OOD ECEs
+  re-grade identically from the committed sidecar.
+- **Tests.** 60 tests: 59 pass in the data env, and the shard test passes under real cmsearch.
+  Seven new tests replay the reviewer's forges (CM ECE, RiNALMo ECE, LOO macro, paired point,
+  calibrator intercept, P3-16 reference, item scores with the hash re-stamped). Each first
+  asserts a clean `[]`, then asserts the forge is caught by its named clause.
+- **Sabotage.** **13 new sabotages, all RED against their named test; 28 in total.** One went
+  GREEN first. The test-rung-calibrator forge was caught by the LOO sidecar's logits, which the
+  test had not re-forged, so the re-fit check was masked
+  ([[all-true-fixture-cannot-test-a-conjunction]]). The test now forges both sidecars
+  consistently, and only the re-fit catches it.
+- **Tooling.** ruff, black 25.11.0, `snakemake --lint` and `-n` are clean.
+
+**Decisions.** None. No calibration, threshold or published number changed.
+
+**Commit.** see PR (P3-17a, review round 1).
+
+## Step P3-17a (review round 2) — 2026-10-06: no path the report supplies steers its own re-derivation
+
+**Inputs.** Commit `e6d16f3`. CI was green on it: pytest, lint and snakemake, with the LFS-pointer
+fix holding in CI. Two findings remained, one from each CodeRabbit route; both were reproduced.
+
+**Process.**
+1. **App (minor).** The precision re-derivation read `precision.items`, and the local check read
+   `confirmer.artifact_dir`. Both are paths the report supplies, so a forged report could point
+   its own re-derivation at a file built to agree with it.
+   - Both are now pinned to `CANONICAL_SOURCES`, and the re-derivation reads the pinned file.
+   - The local check verifies `query_scores.parquet` against the output digest recorded in the
+     hash-bound DVC `provenance.json` before using it.
+2. **CLI (minor).** The precision and per-order checks compared float trees exactly, while the
+   module declares `REDERIVE_REL_TOL` precisely because Python 3.12 changed float `sum()`
+   ([[py312-sum-breaks-bit-exact-rederivation]]). `_tree_close` now compares float leaves at that
+   tolerance; keys, lengths, strings, ints and booleans stay exact. The item replay stays exact.
+
+**Validation.**
+- **Tests.** 62 tests, including two new ones (`_tree_close`, path pinning).
+- **Python 3.11.** The 3.12-generated report validates, precision re-derivation included.
+- **Sabotage.** 4 new sabotages, all RED; **32 in total**.
+- **No regeneration needed.** The report is unchanged, because only the validator changed. The
+  score table's hash matches its recorded DVC output.
+
+**Decisions.** None.
+
+**Commit.** see PR (P3-17a, review round 2).
+
+## Step P3-17a (review round 3) — 2026-10-06: a count is never compared with a tolerance
+
+**Inputs.** Commit `15ea29d`. CI was green on it. The app raised one valid minor finding:
+`_tree_close` would accept an integer leaf against a nearby float, for example a count `1000`
+against `1000.0000001`. The CLI raised one minor finding, which was **declined**: skip the
+committed-artifact tests when a committed sidecar is absent. The sidecars are committed with the
+report, so a report present without them is a broken commit. Skipping would turn a missing
+committed artifact into a green test, and the validator already treats an absent committed input
+as a problem.
+
+**Process.** The tolerance now applies only when **both** leaves are floats. Every other leaf
+(an int, a mixed int/float pair, a bool, a string) is compared exactly, type included. Two new
+test cases cover a count against a nearby float and an int against an equal float.
+
+**Validation.** 62 tests pass, and the committed report validates under the stricter comparison.
+One new sabotage is RED; **33 in total**. The final full local re-derivation is in the post-step
+summary.
+
+**Decisions.** None.
+
+**Commit.** see PR (P3-17a, review round 3).
+
+## Step P3-17a (review round 4) — 2026-10-06: recorded paths are repo-relative by construction
+
+**Inputs.** Commit `738f2db`. CI was green on it, and the app's incremental review reported *No
+actionable comments*. The CLI raised one minor hygiene finding: `build_queries`, `search` and the
+ablation's CM records serialised paths with `str(path)`. An absolute argument would therefore
+write this machine's checkout path into a manifest, `DONE.json` or the report, all of which can
+be committed or published.
+
+**Process.** All three sites now record `recorded_path(path)`, which delegates to
+`stage2.eval.repo_relative` and also imports in the infernal env. A new test passes an absolute
+worktree path and asserts that the repo root appears nowhere in the written manifest. Every
+committed artifact already recorded relative paths: the regenerated fixture is byte-identical,
+and the report needs no regeneration.
+
+**Validation.** 63 tests pass, and the new one goes RED with `str(path)` restored. **34 sabotages
+in total, all RED.**
+
+**Decisions.** None.
+
+**Commit.** see PR (P3-17a, review round 4).
+
+## Step P3-17a (review round 5) — 2026-10-06: an outside path is refused, and the A14 disclosure names its scope
+
+**Inputs.** Commit `f0f766f`. CI was green on it. Each CodeRabbit route raised one minor finding,
+and both were valid.
+
+**Process.**
+1. **App.** `repo_relative` returns a path outside the repository unchanged, so `recorded_path`
+   could still publish one. It now raises instead. The test asserts that a `tmp_path` file is
+   refused.
+2. **CLI.** The `a14_two_parameter_calibrator` disclosure said "no T = 1 is substituted", while
+   the OOD grader is handed the identity T = 1.0 on Platt's log-odds. The disclosure now names its
+   scope: no temperature is fitted or substituted for D11's; the in-distribution grade applies
+   none; `grade_ood_units` receives the identity, a no-op. The report was regenerated so the
+   artifact carries the generator's text. ADR-0005 A14's signed sentence ("No `T = 1`
+   substitution is made anywhere") was left unchanged. It concerns substitution for D11's
+   temperature, which remains true, and editing signed text needs sign-off.
+
+**Validation.**
+- **Final local re-derivation.** At `738f2db`, `validate_report(require_all_inputs=True,
+  rederive_local=True)` returned `[]` (1,940 s). Rounds 4 and 5 did not touch the validator's
+  checks.
+- **Tests and sabotage.** 63 tests pass. One new sabotage is RED; **35 in total**.
+- **A test the new refusal broke.** `test_build_queries_reads_the_rna_and_nothing_else` built
+  its inputs under `tmp_path`, outside the repository, and would have gone RED in CI, which has
+  pyarrow. It now exercises the RNA-only property through `build_queries`' own composition
+  (`read_dataset_sequences`, `read_payload_sequences`, `write_query_shards`), and asserts that
+  `build_queries` refuses the outside path. The label-leak sabotage is still RED against it.
+- **DVC.** The object is now `7e55488b…`; only its `provenance.json` changed.
+
+**Decisions.** None. No number, threshold or calibration changed.
+
+**Commit.** see PR (P3-17a, review round 5).
+
+## Step P3-17a (review round 6) — 2026-10-06: path containment is checked on the resolved path
+
+**Inputs.** Commit `3917e9e`. CI was green on it. CodeRabbit had **auto-paused** its reviews
+because of the run of commits: the status read *success — Review paused* and no review ran.
+A manual `@coderabbitai review` (CLAUDE.md §5.1) produced one valid minor finding. The CLI
+produced one **major** finding, which was declined as factually wrong.
+
+**Process.**
+1. **App (valid).** `recorded_path` checked containment lexically, so a relative path that
+   climbs out (`../x`) came back unchanged and passed. It now resolves the path before
+   relativising, and the test adds a relative path that leaves the repository. Every path the
+   rule and the fixture pass still records identically, so no artifact changes.
+2. **CLI (declined, factually wrong).** The CLI said `reports/p3/cm_confirmer_items.json` ends
+   its root object with `},`. Every JSON file in the PR parses with `json.load`, and the named
+   file ends `]}\n`. CI loads it in several tests. It is a single 520 KB line, which the CLI most
+   likely saw truncated ([[review-findings-can-be-factually-wrong]]).
+
+**Validation.** 63 tests pass. One new sabotage is RED; **36 in total**.
+
+**Decisions.** None.
+
+**Commit.** see PR (P3-17a, review round 6).
+
+## Step P3-17a (review round 7) — 2026-10-06: a failed search no longer runs every queued search to completion
+
+**Inputs.** Commit `bda31ee`. CI was green on it. The app's manual round reported *No actionable
+comments*, and all 5 review threads are resolved. The CLI raised one operational minor finding:
+`search` used `pool.map`, so after one cmsearch failure every queued (model, shard) search still
+ran to completion before the error surfaced. That is up to 4 h each. No result could be lost,
+because `DONE.json` is written only after every search succeeds.
+
+**Process.** The futures are now submitted explicitly. On the first failure the pool shuts down
+with `cancel_futures=True` and the error re-raises. Results are still collected in task order.
+A new test replaces only the subprocess wrapper with one that fails, and asserts that fewer than
+all 4 fixture tasks ran and that no `DONE.json` was written.
+
+**Validation.** All 64 tests pass in one run, including the shard-invariance test against real
+cmsearch, so the refactored loop still reproduces the committed fixture. The new test is stable
+over 3 runs, and it goes RED with `cancel_futures` dropped. **37 sabotages in total, all RED.**
+No artifact changed.
+
+**Decisions.** None.
+
+**Commit.** see PR (P3-17a, review round 7).
+
+## Step P3-17a (review round 8) — 2026-10-06: the first failure is detected in completion order
+
+**Inputs.** Commit `a63778b`. CI was green on it.
+- **App, major (valid).** Results were collected in task order, so a later search that failed
+  while an early search ran on for hours did not reach `shutdown` until the early one finished.
+  Queued searches kept starting in that window.
+- **App and CLI, minor (valid, the same point).** The cancellation test depended on thread
+  scheduling: a stub that fails instantly can let one worker drain the whole queue before the
+  main thread runs.
+
+**Process.**
+1. `search` now waits with `futures.wait(..., return_when=FIRST_EXCEPTION)`. On any failure it
+   re-raises, and the `except` path shuts the pool down with `cancel_futures=True`. Only after
+   every search succeeds are results collected, in task order. A done-callback prints progress
+   lines as searches finish.
+2. **The test is deterministic.** It runs two workers over the four fixture tasks. Task 1 holds
+   a worker for 3 s, and every other task fails after 0.5 s. Under task-order collection, the
+   second worker ran tasks 2, 3 and 4 inside task 1's 3 s. Under the fix, task 4 can never
+   start.
+
+**Validation.**
+- The test passed 5 runs out of 5.
+- It goes RED with `return_when=ALL_COMPLETED`, which is equivalent to task-order waiting, and
+  RED with `cancel_futures` dropped.
+- All 64 tests pass in one run, including real-cmsearch shard invariance.
+- **38 sabotages in total, all RED.** One sabotage was first silently skipped because its name
+  contained the runner's list separator; it was renamed and re-run.
+
+**Decisions.** None.
+
+**Commit.** see PR (P3-17a, review round 8).

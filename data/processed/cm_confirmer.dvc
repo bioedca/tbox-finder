@@ -1,0 +1,6 @@
+outs:
+- md5: 7e55488b62e147f38d8d40ddd18de9c4.dir
+  size: 2419866
+  nfiles: 4
+  hash: md5
+  path: cm_confirmer

@@ -14,3 +14,6 @@
 # artifacts are the folded per-item score table (reports/p3/two_stage_precision_items.json)
 # and the graded report (reports/two_stage_precision.json).
 /p3_16
+# P3-17a: the CM-confirmer query shards + raw cmsearch tblouts (derived, ~10 Mb of RNA).
+# The DVC-tracked per-query score table is data/processed/cm_confirmer/.
+/p3_17a

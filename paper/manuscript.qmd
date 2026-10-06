@@ -499,6 +499,33 @@ in-distribution gate is reported as a reference rather than as a significant
 effect.
 :::
 
+The design pre-registers a second Stage-2 alternative: a covariance-model
+confirmer with a learned calibration, the approach the existing T-box pipelines
+rely on. We built it as an ablation, never as a candidate replacement, because
+the covariance models must stay independent of the shipped system to serve as
+cross-validators later. It scores each candidate RNA with the Rfam class-I and
+TBDB class-II models, filters off and every input scored, and maps the best bit
+score to a probability by Platt scaling (DOI:10.1007/s10994-007-5018-6;
+accessed 2026-10-06). The calibration could not be the re-ranker's temperature
+scaling, and the reason is itself the circularity this design guards against.
+On the calibration split the covariance models separate T-boxes from decoys
+perfectly: the weakest positive scores 30.9 bits and the strongest decoy 4.3.
+No temperature exists for such a set. We therefore fitted the two-parameter
+Platt map on the same split and graded it with the same estimators. In
+distribution the confirmer is well calibrated (ECE 0.0075, against the
+re-ranker's 0.0057). Across held-out orders its macro error is far lower, 0.024
+against 0.211, but that is not a generalization result. The models that score
+the positives also defined them, and they were not built with any order held
+out, so the comparison measures agreement with the labelling, not transfer. As
+a re-ranker on the precision benchmark it is weaker: AUPRC at 100:1 is 0.643
+against 0.950, a deficit of 30.7 points (cluster-blocked 95 % CI [0.7, 47.7]).
+Most of that deficit rests on two decoy windows. The covariance models score
+both as strong T-boxes, one at 96.4 bits, above the Rfam gathering threshold,
+and the re-ranker gives both a posterior of 0.998. In the first, the hit extends
+well past the spliced decoy into host sequence. With the two windows set aside,
+the deficit is 2.1 points. We flag both host windows for audit as possible
+unlabelled T-boxes rather than read them as false positives of either system.
+
 # Discussion
 
 *[Placeholder — authored at the preprint gate.]*
