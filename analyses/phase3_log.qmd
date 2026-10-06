@@ -8585,3 +8585,25 @@ produced one **major** finding, which was declined as factually wrong.
 **Decisions.** None.
 
 **Commit.** see PR (P3-17a, review round 6).
+
+## Step P3-17a (review round 7) — 2026-10-06: a failed search no longer runs every queued search to completion
+
+**Inputs.** Commit `bda31ee`. CI was green on it. The app's manual round reported *No actionable
+comments*, and all 5 review threads are resolved. The CLI raised one operational minor finding:
+`search` used `pool.map`, so after one cmsearch failure every queued (model, shard) search still
+ran to completion before the error surfaced. That is up to 4 h each. No result could be lost,
+because `DONE.json` is written only after every search succeeds.
+
+**Process.** The futures are now submitted explicitly. On the first failure the pool shuts down
+with `cancel_futures=True` and the error re-raises. Results are still collected in task order.
+A new test replaces only the subprocess wrapper with one that fails, and asserts that fewer than
+all 4 fixture tasks ran and that no `DONE.json` was written.
+
+**Validation.** All 64 tests pass in one run, including the shard-invariance test against real
+cmsearch, so the refactored loop still reproduces the committed fixture. The new test is stable
+over 3 runs, and it goes RED with `cancel_futures` dropped. **37 sabotages in total, all RED.**
+No artifact changed.
+
+**Decisions.** None.
+
+**Commit.** see PR (P3-17a, review round 7).

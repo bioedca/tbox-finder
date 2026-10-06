@@ -285,11 +285,21 @@ def search(
         return name, fasta.name, len(hits)
 
     tblouts: dict[str, dict[str, dict[str, Any]]] = {name: {} for name, _ in cms}
-    with futures.ThreadPoolExecutor(max_workers=jobs) as pool:
-        for name, shard, n_hits in pool.map(_one, tasks):
+    # Explicit futures, so the first failure cancels every search still queued: with
+    # `pool.map` the remaining (model, shard) searches would each run to completion — hours —
+    # before the error surfaced. Results are collected in task order, as before.
+    pool = futures.ThreadPoolExecutor(max_workers=jobs)
+    try:
+        pending = [pool.submit(_one, task) for task in tasks]
+        for fut in pending:
+            name, shard, n_hits = fut.result()
             text = (out / name / f"{Path(shard).stem}.tblout").read_text(encoding="utf-8")
             tblouts[name][shard] = {"n_hits": n_hits, "data_sha256": tblout_digest(text)}
             print(f"{name} {shard}: {n_hits} hits", flush=True)
+    except BaseException:
+        pool.shutdown(wait=True, cancel_futures=True)
+        raise
+    pool.shutdown(wait=True)
     done = {
         "step": STEP,
         "query_manifest_sha256": hashlib.sha256((qdir / "manifest.json").read_bytes()).hexdigest(),

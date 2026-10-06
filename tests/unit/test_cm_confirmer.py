@@ -239,6 +239,24 @@ def test_read_search_refuses_tblouts_from_another_covariance_model(tmp_path):
         C.read_search(query_dir=dst / "queries", tblout_dir=dst / "tblout")
 
 
+def test_a_failed_search_cancels_the_searches_still_queued(tmp_path, monkeypatch):
+    """One failure must not leave every queued (model, shard) search to run for hours."""
+    calls = []
+
+    def failing(*args, **kwargs):
+        calls.append(args)
+        raise RuntimeError("cmsearch failed")
+
+    monkeypatch.setattr(infernal, "run_cmsearch", failing)
+    n_tasks = 2 * len(json.loads((_SEARCH / "queries/manifest.json").read_text())["shards"])
+    with pytest.raises(RuntimeError, match="cmsearch failed"):
+        C.search(query_dir=_SEARCH / "queries", out_dir=tmp_path / "tblout", jobs=1)
+    # The one worker may already hold the next task when the failure lands; the rest are
+    # cancelled. With pool.map every task would run.
+    assert len(calls) < n_tasks == 4
+    assert not (tmp_path / "tblout" / "DONE.json").exists()
+
+
 @pytest.mark.skipif(not infernal.cmsearch_available(), reason="cmsearch (infernal env) not on PATH")
 def test_search_reproduces_the_fixture_and_is_shard_invariant(tmp_path):
     """Re-run the pinned search: same best scores, whether the queries sit in 1 or 3 shards."""
