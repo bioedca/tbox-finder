@@ -8529,3 +8529,36 @@ in total, all RED.**
 **Decisions.** None.
 
 **Commit.** see PR (P3-17a, review round 4).
+
+## Step P3-17a (review round 5) — 2026-10-06: an outside path is refused, and the A14 disclosure names its scope
+
+**Inputs.** Commit `f0f766f`. CI was green on it. Each CodeRabbit route raised one minor finding,
+and both were valid.
+
+**Process.**
+1. **App.** `repo_relative` returns a path outside the repository unchanged, so `recorded_path`
+   could still publish one. It now raises instead. The test asserts that a `tmp_path` file is
+   refused.
+2. **CLI.** The `a14_two_parameter_calibrator` disclosure said "no T = 1 is substituted", while
+   the OOD grader is handed the identity T = 1.0 on Platt's log-odds. The disclosure now names its
+   scope: no temperature is fitted or substituted for D11's; the in-distribution grade applies
+   none; `grade_ood_units` receives the identity, a no-op. The report was regenerated so the
+   artifact carries the generator's text. ADR-0005 A14's signed sentence ("No `T = 1`
+   substitution is made anywhere") was left unchanged. It concerns substitution for D11's
+   temperature, which remains true, and editing signed text needs sign-off.
+
+**Validation.**
+- **Final local re-derivation.** At `738f2db`, `validate_report(require_all_inputs=True,
+  rederive_local=True)` returned `[]` (1,940 s). Rounds 4 and 5 did not touch the validator's
+  checks.
+- **Tests and sabotage.** 63 tests pass. One new sabotage is RED; **35 in total**.
+- **A test the new refusal broke.** `test_build_queries_reads_the_rna_and_nothing_else` built
+  its inputs under `tmp_path`, outside the repository, and would have gone RED in CI, which has
+  pyarrow. It now exercises the RNA-only property through `build_queries`' own composition
+  (`read_dataset_sequences`, `read_payload_sequences`, `write_query_shards`), and asserts that
+  `build_queries` refuses the outside path. The label-leak sabotage is still RED against it.
+- **DVC.** The object is now `7e55488b…`; only its `provenance.json` changed.
+
+**Decisions.** None. No number, threshold or calibration changed.
+
+**Commit.** see PR (P3-17a, review round 5).

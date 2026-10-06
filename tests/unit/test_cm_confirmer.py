@@ -74,10 +74,17 @@ def test_build_queries_reads_the_rna_and_nothing_else(tmp_path):
         dataset = tmp_path / f"d{int(flip)}.parquet"
         frame.to_parquet(dataset, index=False)
         out = tmp_path / f"q{int(flip)}"
-        manifest = C.build_queries(dataset=dataset, payloads=payloads, out_dir=out, n_shards=2)
+        # build_queries' own composition, minus the path record: tmp_path lies outside the
+        # repository, and recorded_path rightly refuses to publish such a path.
+        queries = C.collect_queries(
+            [*C.read_dataset_sequences(dataset), *C.read_payload_sequences(payloads)]
+        )
+        manifest = C.write_query_shards(queries, out, n_shards=2, sources={})
         assert manifest["n_queries"] == len({r["rna_sequence"] for r in recs})
         shards.append([(out / s).read_bytes() for s in manifest["shards"]])
     assert shards[0] == shards[1]
+    with pytest.raises(C.ConfirmerError, match="outside the repository"):
+        C.build_queries(dataset=dataset, payloads=payloads, out_dir=tmp_path / "q", n_shards=2)
 
 
 def test_write_query_shards_refuses_a_query_that_is_not_its_own_address(tmp_path):
@@ -96,6 +103,10 @@ def test_an_absolute_path_is_recorded_repo_relative(tmp_path):
         {C.query_id(seq): seq}, tmp_path, n_shards=1, sources={"x": C.recorded_path(absolute)}
     )
     assert str(_REPO) not in json.dumps(manifest)
+    outside = tmp_path / "outside.json"  # tmp_path is not under the repository
+    outside.write_text("{}", encoding="utf-8")
+    with pytest.raises(C.ConfirmerError, match="outside the repository"):
+        C.recorded_path(outside)
 
 
 def test_search_flags_score_every_query_on_the_given_strand():

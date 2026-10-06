@@ -2167,11 +2167,11 @@
     },
     {
       "id": "a14_two_parameter_calibrator",
-      "text": "ADR-0005 A14: on calib the CM logit misclassifies no row (a 26.6-bit gap at the time of signing), so D11's temperature has no minimiser. The CM arm is calibrated by a two-parameter Platt map (scale and offset) fitted on the same calib rows D11 fits RiNALMo's one-parameter T on. Its posterior is cm_platt_posterior, not D11's named_posterior, and no T = 1 is substituted."
+      "text": "ADR-0005 A14: on calib the CM logit misclassifies no row (a 26.6-bit gap at the time of signing), so D11's temperature has no minimiser. The CM arm is calibrated by a two-parameter Platt map (scale and offset) fitted on the same calib rows D11 fits RiNALMo's one-parameter T on. Its posterior is cm_platt_posterior, not D11's named_posterior. No temperature is fitted or substituted for D11's: the in-distribution grade applies none, and grade_ood_units is handed the identity T = 1.0 on Platt's log-odds, a no-op."
     }
   ],
   "gated": false,
-  "generated_at_utc": "2026-10-06T14:47:37.855539+00:00",
+  "generated_at_utc": "2026-10-06T16:47:42.423449+00:00",
   "generated_by": "src/tbox_finder/stage2/cm_confirmer.py",
   "is_science": true,
   "prd": "\u00a76 ablation (ii); \u00a710.2; \u00a712; \u00a75",
@@ -2510,8 +2510,8 @@
         "threshold_scope": "global"
       }
     },
-    "generated_at_utc": "2026-10-06T14:47:37.740141+00:00",
-    "git_sha": "d038737ee157e97b5697cc4d1cca586653c3d7aa",
+    "generated_at_utc": "2026-10-06T16:47:42.363393+00:00",
+    "git_sha": "f0f766fc19e8e89df5d79e1ec3ab1acd30cefe01",
     "inputs": {
       "data/external/refs/RF00230.cm": "082616efe0616479dc9b9f565b5bcab7648d7ea1d629430940319f247af52cea",
       "data/external/refs/TBDB001.cm": "00a821f23bfaf96c1e454022bc0a8fcbe2a9150abadd00bca6abb9298d9a0d1c",
@@ -2521,7 +2521,7 @@
       "data/interim/p3_16/v1_stage2_twin.json": "043ababc6c6fa81aa6a56b369cb96d03e75bd1ddc546162d9e63941fd88e53e0",
       "data/interim/p3_17a/queries/manifest.json": "811e6a4bab0702ec149352f8efe8745d0021fe3d9e0c2eeb91f5f7e64e55e2ae",
       "data/interim/p3_17a/tblout/DONE.json": "b50570c4b255f20561e3d89133c671c71e8ce38907fc5c12d8d4a15588ad5bb1",
-      "data/processed/cm_confirmer/provenance.json": "a405fa0bc203202574cea72c479f3543b8a5632b3838667bd3b8c15763df6eb4",
+      "data/processed/cm_confirmer/provenance.json": "8dd88c775831293f0f1c063b66320aa8f5d1171f9cc778a93865bc6f0906742e",
       "data/processed/stage2_dataset.parquet": "376ad12bd6462686cc7467a5c3e34e63977ccca0c06465e24ec8345224a45f65",
       "reports/gate2_p3_ece.json": "deaa86cddbe0cd0abc4bf5180a1336624939685cb92c58a5a6af3c5ff50ec647",
       "reports/p3/cm_confirmer_items.json": "676f7204053d8fee1b2c71e3f7ccaf188be6939968e15436760101bae88e6dff",

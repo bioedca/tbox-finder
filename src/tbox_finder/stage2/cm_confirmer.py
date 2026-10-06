@@ -140,11 +140,14 @@ def recorded_path(path: str | Path) -> str:
 
     Delegates to :func:`stage2.eval.repo_relative`, so an absolute path under either checkout
     root never publishes this machine's home directory or layout. A path outside the repo
-    is returned unchanged.
+    has no repository form, so it is refused rather than published as it stands.
     """
     from tbox_finder.stage2 import eval as E
 
-    return E.repo_relative(path)
+    recorded = E.repo_relative(path)
+    if Path(recorded).is_absolute():
+        raise ConfirmerError(f"refusing to record an absolute path outside the repository: {path}")
+    return recorded
 
 
 def collect_queries(sequences: Sequence[str]) -> dict[str, str]:
@@ -1031,7 +1034,9 @@ def disclosures() -> list[dict[str, str]]:
                 "time of signing), so D11's temperature has no minimiser. The CM arm is "
                 "calibrated by a two-parameter Platt map (scale and offset) fitted on the same "
                 "calib rows D11 fits RiNALMo's one-parameter T on. Its posterior is "
-                "cm_platt_posterior, not D11's named_posterior, and no T = 1 is substituted."
+                "cm_platt_posterior, not D11's named_posterior. No temperature is fitted or "
+                "substituted for D11's: the in-distribution grade applies none, and "
+                "grade_ood_units is handed the identity T = 1.0 on Platt's log-odds, a no-op."
             ),
         },
     ]
