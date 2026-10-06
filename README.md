@@ -109,7 +109,16 @@ data-leakage control, calibration, and orthogonal validation are first-class.
   repo has an in-distribution holdout, and the shipped scanner's arm is reported beside the
   gated one (+4.7 pp), disclosed as in-sample. The **P3 hard-negative re-mining round ran
   and decided** — 941 candidates → 3 mined, 938 spared — and **declined to retrain**, so the
-  shipped Stage-1 checkpoint is unchanged.
+  shipped Stage-1 checkpoint is unchanged. *Backbone comparator (2026-10-05):* an **RNA-FM**
+  Stage-2 trained on the same data and calibration stack is also calibrated in distribution
+  (ECE 0.006811), and its leave-clade-out macro ECE (0.188) is lower than RiNALMo's (0.211).
+  The pre-registered **swap condition (c) does not fire**. The paired per-order difference,
+  +0.023, has an order-blocked 95% interval of [−0.007, +0.055], and all of it comes from the
+  nine Actinobacteria orders, where both backbones are badly calibrated (0.39–0.80); RNA-FM is
+  the worse-calibrated backbone in 19 of the other 21 orders. Two disclosed confounds (a
+  one-minor-version library difference, and a shipped arm trained on an under-annealed LR
+  schedule) mean the comparison is not a clean backbone contrast. RiNALMo stays the shipped
+  Stage-2.
 
   *Still no discovery result: Phase 3 ships a calibrated two-stage system and its two
   passing gates; the generalization claim is graded at GATE-1 in Phase 4.*
