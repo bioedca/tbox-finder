@@ -321,6 +321,31 @@ negatives per positive, its calibration error is 0.56–0.74 — miscalibrated b
 construction at benchmark prevalence, which is precisely why the gate is placed
 on the pre-shift object.
 
+The calibration drift is not specific to the re-ranker's backbone, and it does not
+justify replacing that backbone. The design pre-registers a fallback: swap
+RiNALMo for the smaller RNA-FM if RiNALMo's post-calibration leave-clade-out
+error exceeds RNA-FM's by more than **0.02**, sustained across held-out orders.
+An RNA-FM re-ranker trained on the same data, heads, losses and calibration
+stack is also calibrated in distribution (debiased ECE 0.0068, $T = 1.3176$, on
+the same calibration split). Its leave-one-order-out macro-average, 0.188 (95%
+CI [0.094, 0.276]), is lower than RiNALMo's 0.211. Both backbones were graded on
+the same 9,345 loci of the same 30 orders, so the right comparison is the
+*paired* one: the mean per-order difference, with orders resampled jointly for
+both arms. That difference is **+0.023**, with a 95% interval of **[−0.007,
++0.055]**. Its point estimate exceeds the margin, but the interval does not
+exclude zero, let alone the margin. The excess is therefore not sustained under
+either coherent reading of the rule, and **the swap does not fire**. The
+per-order picture shows why. All of the difference comes from the nine
+Actinobacteria orders, where both backbones are miscalibrated (RiNALMo
+0.59–0.80, RNA-FM 0.39–0.73); there, RNA-FM is the less-wrong of two failing
+models. In 19 of the other 21 orders RiNALMo is the better-calibrated backbone.
+The comparison also carries two disclosed confounds, so it is not a clean
+contrast of backbones. The comparator ran under a library one minor version
+newer, and the shipped RiNALMo arm was trained on a learning-rate schedule that
+stopped at 55% of peak rather than annealing to zero. The library difference has
+no known direction. The schedule difference leaves the shipped arm
+under-annealed, which weakens the case for a swap rather than strengthening it.
+
 ::: {#fig-gate2}
 *[Figure — GATE-2 calibration. Placeholder image inserted at render time.]*
 

@@ -8181,3 +8181,57 @@ black CI-exact clean.
 **Decisions.** None.
 
 **Commit.** see PR (P3-17, review round 13).
+
+## Step P3-18 — 2026-10-05: RNA-FM swap condition (c) — the ECE margin, read paired and not fired
+
+**Inputs.** The two committed GATE-2 reports — `reports/gate2_p3_ece.json` (shipped RiNALMo-giga,
+P3-10) and `reports/p3/gate2_rnafm_ece.json` (RNA-FM comparator, P3-17) — their four score
+sidecars, and the ADR-0005 D17(c) margin `power.SWAP_ECE_MARGIN = 0.02` (blinded-frozen).
+
+**Process.** First, as P3-17 booked, `gate2.rederive_against_sidecars(select_bandwidth=True)` on
+both reports: **zero problems on each** (94 s / 95 s), so the two macros D17(c) reads are the
+shipped estimators' output on the committed bytes. `src/tbox_finder/calib/swap_check.py` then
+(i) refuses unless the two arms are one paired population — the LOO sidecars agree row-for-row on
+`row_ids`/`labels`/`units`/`blocks`/`dataset_sha256` (9,345 rows, 30 orders) and the
+in-distribution ones on `row_ids`/`labels`/`rungs`, so both temperatures were fitted on the same
+`calib` rows; (ii) takes the **paired** statistic Δ = mean over orders of (ECE_RiNALMo − ECE_RNA-FM),
+which equals the difference of the published macros, and resamples orders with one draw applied
+to both arms (`eval.resample.block_bootstrap`, 2,000 replicates, the GATE-2 seed); (iii) evaluates
+D17(c). Rule `workflow/rules/calibration.smk :: rnafm_swap_condition_c`.
+
+**Outputs.** `reports/rnafm_swap_condition_c.json` (11 clauses, all TRUE; `is_science: true`).
+**Δ = +0.023103, order-blocked 95 % CI [−0.007465, +0.055351].** Readings: CI-floor-above-margin
+→ does not fire; point-above-margin-and-CI-excludes-zero → does not fire. **Verdict: `not_fired`.**
+The shipped Stage-2 stays RiNALMo-giga; no §7 swap stop is raised.
+
+**Validation.** The decision follows D17(c)'s pinned margin with strict `>`; the margin is read
+from `power` at call time and takes no argument, so no override path exists. The CI is
+block-resampled at the held-out-order level (imp.md gate). The validator re-derives every clause
+from the recorded numbers **and** re-runs the comparison against the hash-bound GATE-2 reports, so
+a consistently forged interval (lower 0.0201, readings and verdict flipped to `fired`, every
+in-report clause TRUE) is caught by the re-run. It validates bit-exactly on Python 3.11, 3.12
+and 3.13. 33 tests; **15 sabotages, all RED against their named test**. The first pass left one
+GREEN: reversing both arms broke both halves of the role conjunction at once
+([[all-true-fixture-cannot-test-a-conjunction]]). A per-role test now breaks each half alone.
+
+**Decisions.** (1) **"Sustained" has no pinned operator.** D17(c) says *sustained across the
+held-out-order distribution (block-resampled)* and pins no CI rule. Two readings honour both words,
+and the module evaluates both. It takes a verdict only when they agree; a disagreement returns
+`unadjudicated`, which is a §7 stop. Here they agree, so the reading did not decide the outcome.
+Point-above-margin alone (TRUE here) is recorded but is not a reading, because it drops
+"sustained". ⚠ D17(d) at P4 uses the same word, and pinning one operator before P4 unblinds is
+recommended (ADR sign-off). (2) **Where the gap comes from.** The Actinobacteria orders contribute
++0.0321 of the +0.0231; the other 21 orders contribute −0.0090. RiNALMo is worse by more than the
+margin in 8 of 30 orders (7 Actinobacteria + Chloroflexales). RNA-FM is the worse-calibrated
+backbone in 19 of the 21 non-Actinobacteria orders. On the Actinobacteria orders both backbones fail
+(RiNALMo 0.59–0.80, RNA-FM 0.39–0.73). (3) **Both ADR-0002 A15 confounds ride with the verdict**,
+and a clause refuses a report that drops either: the `multimolecule` 0.1.0 → 0.2.0 minor version
+(no known direction) and the shipped arm's under-annealed LR schedule (1,415 of 2,830 steps,
+ending at 0.5501 of peak LR), which disadvantages the shipped arm. (4) `math.fsum` rather than
+`sum`: Python 3.12 made float `sum()` compensated, so the same mean differed in its last bits
+between the 3.11 test interpreter and the 3.12 generating env, and the bit-exact re-run refused
+the committed report. (5) imp.md names `calibration/swap_check.py`; the package is `calib/`.
+§6.4: the README P3 line and a manuscript paragraph in the GATE-2 results section now carry the
+comparator and the verdict. P3-17 had owed both.
+
+**Commit.** see PR (P3-18).

@@ -1,0 +1,488 @@
+{
+  "adr": "ADR-0005 D17(c) (0.02 ECE swap margin, blinded-frozen) + A-rationale item 6; ADR-0005 D13/A2 (the OOD ECE estimator and min-N the compared numbers come from); ADR-0002 D6 + A15 (the comparator and the two confounds it carries)",
+  "arms": {
+    "comparator": {
+      "arm": "aux1.0_lr1e-4",
+      "backbone": "rnafm",
+      "env_lock": "envs/ml-rnafm.conda-lock.yml",
+      "gate2_report": "reports/p3/gate2_rnafm_ece.json",
+      "in_distribution_ece": 0.006810841627808656,
+      "loo_macro_ece": {
+        "ci_level": 0.95,
+        "lower": 0.09420234761134379,
+        "n_blocks": 30,
+        "n_boot": 200,
+        "point": 0.1882143888847712,
+        "upper": 0.27565916143883124
+      },
+      "n_units": 30,
+      "n_units_admissible": 30,
+      "temperature": 1.3176412710688241
+    },
+    "shipped": {
+      "arm": "aux1.0_lr1e-4",
+      "backbone": "rinalmo-giga",
+      "env_lock": "envs/ml-rna.conda-lock.yml",
+      "gate2_report": "reports/gate2_p3_ece.json",
+      "in_distribution_ece": 0.005661656399710311,
+      "loo_macro_ece": {
+        "ci_level": 0.95,
+        "lower": 0.09837384969040015,
+        "n_blocks": 30,
+        "n_boot": 200,
+        "point": 0.21131708166715119,
+        "upper": 0.32501193734362815
+      },
+      "n_units": 30,
+      "n_units_admissible": 30,
+      "temperature": 1.140627294282911
+    }
+  },
+  "clauses": {
+    "a15_confounds_disclosed": true,
+    "arms_are_the_shipped_backbone_and_the_d6_comparator": true,
+    "arms_graded_on_one_population": true,
+    "bootstrap_replicates_are_not_a_cost_knob": true,
+    "both_gate2_reports_bound_to_their_sidecars": true,
+    "both_gate2_reports_validate": true,
+    "ci_is_order_block_resampled": true,
+    "inputs_rederive_from_their_sidecars": true,
+    "margin_is_the_pinned_d17c_value": true,
+    "point_is_the_difference_of_the_published_macros": true,
+    "verdict_follows_every_reading": true
+  },
+  "condition": "c",
+  "descriptive": {
+    "by_phylum": {
+      "Actinobacteria": {
+        "contribution_to_macro_delta": 0.032123309034272955,
+        "mean_delta": 0.10707769678090985,
+        "n_units": 9
+      },
+      "Chloroflexi": {
+        "contribution_to_macro_delta": 0.000582461354909825,
+        "mean_delta": 0.0043684601618236875,
+        "n_units": 4
+      },
+      "Deinococcus-Thermus": {
+        "contribution_to_macro_delta": -0.0025163176697727296,
+        "mean_delta": -0.07548953009318189,
+        "n_units": 1
+      },
+      "Firmicutes": {
+        "contribution_to_macro_delta": -0.002294257575528216,
+        "mean_delta": -0.0076475252517607195,
+        "n_units": 9
+      },
+      "Proteobacteria": {
+        "contribution_to_macro_delta": -7.067694085811087e-05,
+        "mean_delta": -0.0021203082257433264,
+        "n_units": 1
+      },
+      "Synergistetes": {
+        "contribution_to_macro_delta": -0.0017685572019084759,
+        "mean_delta": -0.053056716057254275,
+        "n_units": 1
+      },
+      "Tenericutes": {
+        "contribution_to_macro_delta": -0.002953268218735249,
+        "mean_delta": -0.017719609312411493,
+        "n_units": 5
+      }
+    },
+    "is": "per-order context for the verdict; no field here is a decision input",
+    "marginal_macro_cis": {
+      "comparator": {
+        "ci_level": 0.95,
+        "lower": 0.09420234761134379,
+        "n_blocks": 30,
+        "n_boot": 200,
+        "point": 0.1882143888847712,
+        "upper": 0.27565916143883124
+      },
+      "shipped": {
+        "ci_level": 0.95,
+        "lower": 0.09837384969040015,
+        "n_blocks": 30,
+        "n_boot": 200,
+        "point": 0.21131708166715119,
+        "upper": 0.32501193734362815
+      }
+    },
+    "n_units_comparator_worse": 20,
+    "n_units_delta_above_margin": 8,
+    "n_units_delta_positive": 10,
+    "per_unit": {
+      "Acholeplasmatales": {
+        "comparator": 0.015360982717632744,
+        "delta": -0.014310412943784209,
+        "n_positives": 52,
+        "n_records": 58,
+        "phylum": "Tenericutes",
+        "shipped": 0.0010505697738485355
+      },
+      "Acidaminococcales": {
+        "comparator": 0.012087207871249948,
+        "delta": -0.010872644252701702,
+        "n_positives": 52,
+        "n_records": 56,
+        "phylum": "Firmicutes",
+        "shipped": 0.0012145636185482464
+      },
+      "Actinomycetales": {
+        "comparator": 0.7252086137923988,
+        "delta": -0.13087063087897832,
+        "n_positives": 42,
+        "n_records": 44,
+        "phylum": "Actinobacteria",
+        "shipped": 0.5943379829134204
+      },
+      "Anaerolineales": {
+        "comparator": 0.005852478988528959,
+        "delta": -0.005086706170621015,
+        "n_positives": 41,
+        "n_records": 43,
+        "phylum": "Chloroflexi",
+        "shipped": 0.0007657728179079442
+      },
+      "Bifidobacteriales": {
+        "comparator": 0.5529493187493048,
+        "delta": 0.04035455925933085,
+        "n_positives": 69,
+        "n_records": 77,
+        "phylum": "Actinobacteria",
+        "shipped": 0.5933038780086356
+      },
+      "Candidatus Izemoplasmatales": {
+        "comparator": 0.032391977869649154,
+        "delta": -0.031588730936198156,
+        "n_positives": 24,
+        "n_records": 28,
+        "phylum": "Tenericutes",
+        "shipped": 0.0008032469334509984
+      },
+      "Chloroflexales": {
+        "comparator": 0.01889048487486837,
+        "delta": 0.03456831279120769,
+        "n_positives": 20,
+        "n_records": 22,
+        "phylum": "Chloroflexi",
+        "shipped": 0.053458797666076065
+      },
+      "Corynebacteriales": {
+        "comparator": 0.4637620080649852,
+        "delta": 0.1285296210733739,
+        "n_positives": 370,
+        "n_records": 394,
+        "phylum": "Actinobacteria",
+        "shipped": 0.5922916291383591
+      },
+      "Dehalococcoidales": {
+        "comparator": 0.010129907551228206,
+        "delta": -0.009467251102442524,
+        "n_positives": 34,
+        "n_records": 38,
+        "phylum": "Chloroflexi",
+        "shipped": 0.0006626564487856818
+      },
+      "Deinococcales": {
+        "comparator": 0.1906376727313617,
+        "delta": -0.07548953009318189,
+        "n_positives": 28,
+        "n_records": 28,
+        "phylum": "Deinococcus-Thermus",
+        "shipped": 0.11514814263817981
+      },
+      "Desulfuromonadales": {
+        "comparator": 0.003283090702713465,
+        "delta": -0.0021203082257433264,
+        "n_positives": 31,
+        "n_records": 33,
+        "phylum": "Proteobacteria",
+        "shipped": 0.0011627824769701387
+      },
+      "Entomoplasmatales": {
+        "comparator": 0.02589725081422168,
+        "delta": -0.010731045917598832,
+        "n_positives": 68,
+        "n_records": 72,
+        "phylum": "Tenericutes",
+        "shipped": 0.015166204896622848
+      },
+      "Erysipelotrichales": {
+        "comparator": 0.015318804012093809,
+        "delta": -0.0141959687330293,
+        "n_positives": 445,
+        "n_records": 487,
+        "phylum": "Firmicutes",
+        "shipped": 0.0011228352790645087
+      },
+      "Halanaerobiales": {
+        "comparator": 0.015472467390705312,
+        "delta": 9.511903726169835e-05,
+        "n_positives": 99,
+        "n_records": 111,
+        "phylum": "Firmicutes",
+        "shipped": 0.01556758642796701
+      },
+      "Haloplasmatales": {
+        "comparator": 0.006265903092932821,
+        "delta": -0.00507322727718266,
+        "n_positives": 22,
+        "n_records": 26,
+        "phylum": "Tenericutes",
+        "shipped": 0.0011926758157501606
+      },
+      "Ktedonobacterales": {
+        "comparator": 0.004247786477407826,
+        "delta": -0.0025405148708494063,
+        "n_positives": 22,
+        "n_records": 22,
+        "phylum": "Chloroflexi",
+        "shipped": 0.0017072716065584198
+      },
+      "Lactobacillales": {
+        "comparator": 0.01715048428272326,
+        "delta": -0.01372861637016264,
+        "n_positives": 5323,
+        "n_records": 5763,
+        "phylum": "Firmicutes",
+        "shipped": 0.0034218679125606203
+      },
+      "Micrococcales": {
+        "comparator": 0.6529010945028759,
+        "delta": 0.07975802391077214,
+        "n_positives": 275,
+        "n_records": 291,
+        "phylum": "Actinobacteria",
+        "shipped": 0.7326591184136481
+      },
+      "Micromonosporales": {
+        "comparator": 0.6378638468962138,
+        "delta": 0.10269168128448924,
+        "n_positives": 65,
+        "n_records": 73,
+        "phylum": "Actinobacteria",
+        "shipped": 0.740555528180703
+      },
+      "Mycoplasmatales": {
+        "comparator": 0.02758320245091108,
+        "delta": -0.02689462948729361,
+        "n_positives": 36,
+        "n_records": 40,
+        "phylum": "Tenericutes",
+        "shipped": 0.0006885729636174692
+      },
+      "Natranaerobiales": {
+        "comparator": 0.0037568136990320565,
+        "delta": -0.0027665163104582226,
+        "n_positives": 23,
+        "n_records": 25,
+        "phylum": "Firmicutes",
+        "shipped": 0.000990297388573834
+      },
+      "Propionibacteriales": {
+        "comparator": 0.5824635121142191,
+        "delta": 0.20577187230449068,
+        "n_positives": 66,
+        "n_records": 74,
+        "phylum": "Actinobacteria",
+        "shipped": 0.7882353844187098
+      },
+      "Pseudonocardiales": {
+        "comparator": 0.5477683237578677,
+        "delta": 0.25129581475962615,
+        "n_positives": 48,
+        "n_records": 52,
+        "phylum": "Actinobacteria",
+        "shipped": 0.7990641385174938
+      },
+      "Selenomonadales": {
+        "comparator": 0.006625346999911365,
+        "delta": -0.005899422510654605,
+        "n_positives": 224,
+        "n_records": 236,
+        "phylum": "Firmicutes",
+        "shipped": 0.0007259244892567599
+      },
+      "Streptomycetales": {
+        "comparator": 0.39489035247327486,
+        "delta": 0.2854828175233849,
+        "n_positives": 197,
+        "n_records": 223,
+        "phylum": "Actinobacteria",
+        "shipped": 0.6803731699966598
+      },
+      "Streptosporangiales": {
+        "comparator": 0.5946107962914725,
+        "delta": 0.0006855117916990672,
+        "n_positives": 24,
+        "n_records": 24,
+        "phylum": "Actinobacteria",
+        "shipped": 0.5952963080831716
+      },
+      "Synergistales": {
+        "comparator": 0.05493064450671008,
+        "delta": -0.053056716057254275,
+        "n_positives": 27,
+        "n_records": 31,
+        "phylum": "Synergistetes",
+        "shipped": 0.0018739284494558018
+      },
+      "Thermoanaerobacterales": {
+        "comparator": 0.013095900327022679,
+        "delta": -0.011759626828215112,
+        "n_positives": 271,
+        "n_records": 293,
+        "phylum": "Firmicutes",
+        "shipped": 0.0013362734988075665
+      },
+      "Tissierellales": {
+        "comparator": 0.008560269016111177,
+        "delta": -0.007483870131513535,
+        "n_positives": 420,
+        "n_records": 442,
+        "phylum": "Firmicutes",
+        "shipped": 0.0010763988845976416
+      },
+      "Veillonellales": {
+        "comparator": 0.006475123523507992,
+        "delta": -0.002216181166373058,
+        "n_positives": 223,
+        "n_records": 239,
+        "phylum": "Firmicutes",
+        "shipped": 0.004258942357134934
+      }
+    }
+  },
+  "disclosures": [
+    "ADR-0002 A15 confound (i): the comparator ran under multimolecule 0.2.0 while the shipped RiNALMo Stage-2 ran under multimolecule 0.1.0 \u2014 one minor version; every other conda pin and the tokenisation are identical.",
+    "ADR-0002 A15 confound (ii): the two arms' weights were produced under different realised LR schedules \u2014 the shipped RiNALMo arm took 1,415 of 2,830 scheduled steps and stopped at 0.5501 of peak LR (the P3-06 micro-batch cosine defect), the RNA-FM arm ran 1,420 of 1,420 to ~0. Annealing is not calibration-neutral, so the difference measured here is NOT an apples-to-apples backbone comparison; the confound leaves the SHIPPED arm under-annealed, which is a reason to withhold a swap rather than to fire one.",
+    "D17(c)'s 'sustained across the held-out-order distribution (block-resampled)' pins no CI rule. Every coherent reading is evaluated and the verdict is taken only when they agree; here they read {'ci_lower_above_margin': False, 'point_above_margin_and_ci_lower_above_zero': False} -> not_fired. A disagreement would be a CLAUDE.md \u00a77 stop, not a pick.",
+    "The paired CI resamples held-out orders with each order's ECE held at its point \u2014 the same scheme as both GATE-2 macro CIs it is compared with. Within-order (cluster-level) uncertainty is not propagated into it.",
+    "Condition (c) only. Condition (d) \u2014 leave-clade-out recall@matched-precision / AUPRC \u2014 is P4's, and nothing here adjudicates it; conditions (a)/(b) were resolved not-fired at P1."
+  ],
+  "env_lock": "envs/ml-rna.conda-lock.yml",
+  "gate2_validation": {
+    "comparator": [],
+    "shipped": []
+  },
+  "generated_at_utc": "2026-10-06T00:43:51.039052+00:00",
+  "generated_by": "src/tbox_finder/calib/swap_check.py",
+  "is_science": true,
+  "margin": {
+    "blinded_frozen": true,
+    "inequality": "strict >",
+    "source": "ADR-0005 D17(c); tbox_finder.power.SWAP_ECE_MARGIN",
+    "unit": "absolute ECE",
+    "value": 0.02
+  },
+  "pairing": {
+    "n_units": 30,
+    "n_units_admissible": 30,
+    "population_checked_against": {
+      "fields": {
+        "in_distribution": [
+          "row_ids",
+          "labels",
+          "rungs",
+          "dataset_sha256"
+        ],
+        "leave_clade_out": [
+          "row_ids",
+          "labels",
+          "units",
+          "blocks",
+          "dataset_sha256"
+        ]
+      },
+      "in_distribution_sidecars": [
+        "reports/p3/stage2_scores.json",
+        "reports/p3/stage2_scores_rnafm.json"
+      ],
+      "leave_clade_out_sidecars": [
+        "reports/p3/stage2_scores_loo.json",
+        "reports/p3/stage2_scores_loo_rnafm.json"
+      ]
+    },
+    "problems": [],
+    "shared_ood_settings": {
+      "block_key": "cluster_id",
+      "bootstrap_seed": 20260804,
+      "estimator": "beta_kernel_loo_l1",
+      "min_n": 20,
+      "n_boot": 200,
+      "unit_key": "loo_order_unit"
+    }
+  },
+  "point_exceeds_margin": true,
+  "point_exceeds_margin_is": "recorded, NOT a reading: a point above the margin with no resampling requirement drops D17(c)'s 'sustained', the clause A-rationale item 6 says guards against a single-order fluctuation",
+  "prd": "PRD \u00a72.3, \u00a710.2 (condition (c) [P3])",
+  "provenance": {
+    "adr": "ADR-0005",
+    "env_lock_hash": "60f966a8f009abfa3900357ffd0ac7c685d8b55b713da4498306480720bcf3b3",
+    "generated_at_utc": "2026-10-06T00:43:51.046975+00:00",
+    "git_sha": "f6920550338e0bc1f581fad6cba7817d470a0323",
+    "inputs": {
+      "reports/gate2_p3_ece.json": "deaa86cddbe0cd0abc4bf5180a1336624939685cb92c58a5a6af3c5ff50ec647",
+      "reports/p3/gate2_rnafm_ece.json": "72786ed94573683dd4524ae075256226ff55fb0917ecf9cfd84ddbf9cd7974b0",
+      "reports/p3/stage2_scores.json": "a8d9bb413afb14b153430d5bfc70e570b50b1f85f3e599102ecc9b906e9f5575",
+      "reports/p3/stage2_scores_loo.json": "ecb16fb4c5bca9df383598ced00fa00ae8d336e980db286fcbcc9e7d907f08cb",
+      "reports/p3/stage2_scores_loo_rnafm.json": "05a6ecec5a6ba769f69bb42859ce75f75377ceb671870a11a9ab7d1fe106a0b2",
+      "reports/p3/stage2_scores_rnafm.json": "c48d93a2b231659cfadd2909f93f10db91bc1f7e9d70bc58d72b8be90155b7ad"
+    },
+    "outputs": {},
+    "rule": "workflow/rules/calibration.smk :: rnafm_swap_condition_c",
+    "schema_version": "1.0",
+    "script": "src/tbox_finder/calib/swap_check.py",
+    "seed": 20260804
+  },
+  "rationale": "Paired macro \u0394 = +0.023103 against the D17(c) margin 0.02 (strict >); its order-blocked 0.95 CI is [-0.007465, +0.055351] over 30 held-out orders (2000 replicates). The shipped arm is worse by more than the margin in 8 of 30 orders. Readings: ci_lower_above_margin=does not fire, point_above_margin_and_ci_lower_above_zero=does not fire -> not_fired.",
+  "readings": {
+    "ci_lower_above_margin": {
+      "definition": "the order-blocked CI of the paired difference lies wholly above the margin \u2014 the excess itself survives resampling of held-out orders (a minimum-effect test against the D18 SESOI, which is how ADR-0005 A-rationale item 6 frames 0.02)",
+      "fires": false
+    },
+    "point_above_margin_and_ci_lower_above_zero": {
+      "definition": "the point paired difference exceeds the margin AND its order-blocked CI excludes zero \u2014 the direction is sustained under resampling, the magnitude is the point",
+      "fires": false
+    }
+  },
+  "rederivation": {
+    "problems": {
+      "comparator": [],
+      "shipped": []
+    },
+    "ran": true,
+    "select_bandwidth": true
+  },
+  "requires_user_decision": false,
+  "resampling": {
+    "block_key": "loo_order_unit",
+    "ci": {
+      "ci_level": 0.95,
+      "lower": -0.007465359409052475,
+      "n_blocks": 30,
+      "n_boot": 2000,
+      "point": 0.023102692782379995,
+      "upper": 0.05535106475314916
+    },
+    "method": "eval.resample.block_bootstrap \u2014 seeded percentile, orders drawn with replacement, one draw applied to both arms",
+    "n_boot_requested": 2000,
+    "seed": 20260804
+  },
+  "schema_version": "1",
+  "sidecar_binding": {
+    "comparator": [],
+    "shipped": []
+  },
+  "statistic": {
+    "definition": "mean over the admissible held-out orders u of (ECE_shipped(u) \u2212 ECE_comparator(u)); equal to the difference of the two published macros",
+    "difference_of_published_macros": 0.023102692782379974,
+    "name": "paired macro leave-clade-out ECE difference (shipped \u2212 comparator)",
+    "point": 0.023102692782379995
+  },
+  "step": "P3-18",
+  "swap_fired": false,
+  "verdict": "not_fired"
+}

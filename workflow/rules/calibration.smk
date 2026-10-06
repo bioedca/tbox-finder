@@ -26,6 +26,12 @@ _GATE2_FIGURES = [
     "figures/calib/gate2_reliability.png",
     "figures/calib/gate2_ood_by_order.png",
 ]
+# The RNA-FM comparator's GATE-2 report and its two score sidecars (P3-17, SLURM job 1374 —
+# produced on the cluster, so no rule here writes them) and the P3-18 swap-check report.
+_RNAFM_GATE2_REPORT = "reports/p3/gate2_rnafm_ece.json"
+_RNAFM_STAGE2_SCORES = "reports/p3/stage2_scores_rnafm.json"
+_RNAFM_STAGE2_LOO_SCORES = "reports/p3/stage2_scores_loo_rnafm.json"
+_SWAP_C_REPORT = "reports/rnafm_swap_condition_c.json"
 
 
 rule stage2_scores_loo:
@@ -129,3 +135,39 @@ rule plot_gate2_figures:
         "PYTHONPATH=src python -m tbox_finder.calib.gate2 plot-figures "
         "--figure-data {input.figure_data:q} "
         "--figures-dir figures/calib >{log} 2>&1"
+
+
+rule rnafm_swap_condition_c:
+    """ADR-0005 D17(c): does RiNALMo's post-calibration leave-clade-out ECE exceed RNA-FM's by
+    > 0.02, sustained across the held-out-order distribution (P3-18)?
+
+    Reads the two committed GATE-2 reports, refuses unless they describe one paired population
+    (row-for-row identical sidecars), re-derives both from their score sidecars with bandwidth
+    selection re-run, and evaluates the paired per-order difference with an order-blocked
+    bootstrap CI against the pinned margin. "Sustained" pins no CI rule, so every coherent reading
+    is evaluated and the verdict is taken only when they agree; a fired or unadjudicated verdict
+    is a CLAUDE.md §7 stop recorded in the report, never acted on here.
+
+    LOCAL (CLAUDE.md §9.1): the comparison is seconds; the sidecar re-derivation is ~95 s per
+    report, almost all of it the 5,763-row Lactobacillales unit.
+
+        snakemake --cores 1 --use-conda rnafm_swap_condition_c
+    """
+    input:
+        shipped=_GATE2_REPORT,
+        comparator=_RNAFM_GATE2_REPORT,
+        scores=_STAGE2_SCORES,
+        loo_scores=_STAGE2_LOO_SCORES,
+        rnafm_scores=_RNAFM_STAGE2_SCORES,
+        rnafm_loo_scores=_RNAFM_STAGE2_LOO_SCORES,
+    output:
+        report=_SWAP_C_REPORT,
+    log:
+        "logs/rnafm_swap_condition_c.log",
+    conda:
+        "../../envs/ml-rna.yml"
+    shell:
+        "PYTHONPATH=src python -m tbox_finder.calib.swap_check "
+        "--shipped-report {input.shipped:q} "
+        "--comparator-report {input.comparator:q} "
+        "--report {output.report:q} >{log} 2>&1"
