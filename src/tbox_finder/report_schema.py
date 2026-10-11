@@ -181,7 +181,8 @@ def shape_problems(
     legacy schemas legitimately lack fields the current producer writes. ``None`` IS one,
     unless the rule wraps its predicate in :func:`nullable` — a null count is not "no count",
     and reading it as one is how a validator that stopped raising would start passing. A path
-    whose parent is malformed is not descended into; the parent is reported at its own rule.
+    whose parent is malformed is not descended into: the parent is the caller's to report, by
+    its own rule or by the validator's check of its top-level blocks.
     """
     problems: list[str] = []
     for path, ok, kind in rules:

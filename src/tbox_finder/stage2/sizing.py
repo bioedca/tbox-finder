@@ -39,6 +39,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import time
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
@@ -132,14 +133,15 @@ LEGACY_SCHEMAS_WITHOUT_SKIP_CODE = frozenset({"1", "2", "3"})
 #: The schemas whose `recommendation` predates the computed-headroom shape. The validator began
 #: re-deriving the field at schema 2 (CodeRabbit r2 on P3-06), and grading a schema-1 report
 #: against today's shape failed `reports/p3/stage2_sizing.json` — the artifact
-#: `conf/train/stage2.yaml` cites for `batch_size: 4` — on its basis STRING while its batch size
-#: re-derives exactly. Listed, never compared, like the set above.
+#: `conf/train/stage2.yaml` cites for `batch_size: 4` — on its SHAPE (the three computed-headroom
+#: keys absent, and a different basis) while its batch size re-derives exactly. Listed, never
+#: compared, like the set above.
 LEGACY_SCHEMAS_WITH_ASSERTED_HEADROOM = frozenset({"1"})
 
 #: The basis the schema-1 producer wrote, verbatim (`git show a1b5395:src/tbox_finder/stage2/
-#: sizing.py`). It asserts headroom the producer never computed; the report's own numbers do
-#: bear it out (worst-case batch 4 peaks at 8.1827 of 15.6017 GiB), but that is today's
-#: arithmetic, not the artifact's claim.
+#: sizing.py`). It asserts headroom the producer never computed, so the validator holds the
+#: assertion to the report's own numbers (`_legacy_headroom_problems`): the production report's
+#: worst-case batch 4 peaks at 8.1827 of 15.6017 GiB, which bears it out.
 LEGACY_RECOMMENDATION_BASIS = "largest worst-case batch that fits with headroom on this card"
 
 #: Every schema this validator knows, oldest first — listed, never string-compared.
@@ -348,7 +350,8 @@ def _growth_ratio(series: Sequence[float]) -> float | None:
 #: from becoming "silently passes".
 _SHAPE_RULES: tuple[tuple[tuple[str, ...], Any, str], ...] = (
     # A null block reads as an empty one (the old `x or {}` read it that way too); a null POINT
-    # or a null COUNT is malformed — an OOM point records `n_steps: 1`, never null.
+    # or a null COUNT is malformed — `measure_batch` starts `n_steps` at 0 and counts the steps
+    # it completed, so even a point that OOM'd on its first step records an integer.
     *(
         ((block,), RSCH.nullable(RSCH.is_mapping), "a mapping")
         for block in ("device", "population", "gradient_checkpointing", "provenance", "backbone")
@@ -361,18 +364,24 @@ _SHAPE_RULES: tuple[tuple[tuple[str, ...], Any, str], ...] = (
     (
         ("measurements", RSCH.EACH, "peak_vram_gib"),
         RSCH.nullable(RSCH.is_real),
-        "a number",
+        "a number a float can hold",
     ),
-    (("device", "total_memory_gib"), RSCH.nullable(RSCH.is_real), "a number"),
+    (
+        ("device", "total_memory_gib"),
+        RSCH.nullable(RSCH.is_real),
+        "a number a float can hold",
+    ),
 )
 
 
 def _measurements(report: Mapping[str, Any]) -> list[Mapping[str, Any]]:
     """The recorded sweep points, each as a mapping; anything but a list reads as no points.
 
-    A non-mapping point reads as an EMPTY record, which every ``all()``-quantified clause
-    fails on — it neither ran steps nor OOM'd — so it is never silently dropped from the
-    evidence. :data:`_SHAPE_RULES` reports it as malformed in its own right.
+    A non-mapping point reads as an EMPTY record — it neither ran steps nor OOM'd — so the
+    clauses quantified over EVERY point (``swept``, ``checkpointing_skip_is_earned``) fail on
+    it rather than passing over evidence that silently shrank. (The clauses quantified over the
+    points that produced numbers never see it.) :data:`_SHAPE_RULES` reports it as malformed in
+    its own right.
     """
     raw = report.get("measurements")
     return [RSCH.as_mapping(m) for m in raw] if RSCH.is_list(raw) else []
@@ -560,10 +569,11 @@ def _env_lock_is_the_backbones(report: Mapping[str, Any], prov: Mapping[str, Any
 def validate_report(report: Mapping[str, Any]) -> list[str]:
     """Problems with ``report``; empty means well-formed and self-consistent. Never raises.
 
-    ⚠ P3-17′-validators: this used to raise on a malformed report — 11 distinct lines across
-    ``derive_clauses``, ``_recommend`` and here (a non-mapping report included), found by
-    mutating every field of both committed sizing reports — and a crash is not a verdict. Each
-    of those inputs now returns at least one problem: the clause machinery reads a malformed
+    ⚠ P3-17′-validators: this used to raise on a malformed report — on 11 distinct lines
+    across ``derive_clauses``, ``_recommend`` and here when every field of both committed sizing
+    reports was mutated one at a time (a non-mapping report included), and on at least 2 more,
+    with the same causes, when several were mutated together. A crash is not a verdict. Each of
+    those inputs now returns at least one problem: the clause machinery reads a malformed
     value as absent (no clause moves on any input it did not raise on), and
     :data:`_SHAPE_RULES` names the malformed field itself, so a report whose recorded clauses
     happen to agree with "absent" still fails.
@@ -597,7 +607,8 @@ def validate_report(report: Mapping[str, Any]) -> list[str]:
     }
     if set(recorded) != set(expected_clauses):
         problems.append(
-            f"gate.clauses keys {sorted(recorded)} != re-derived {sorted(expected_clauses)}"
+            f"gate.clauses keys {sorted(recorded, key=str)} != re-derived "
+            f"{sorted(expected_clauses)}"
         )
     for name, value in expected_clauses.items():
         if bool(recorded.get(name)) != value:
@@ -619,22 +630,57 @@ def validate_report(report: Mapping[str, Any]) -> list[str]:
             "so the recommendation cannot be re-derived from the measurements"
         )
         return problems
+    # The published largest batch is the same `max()` every producer computed — the schema-1
+    # producer included (`a1b5395`) — and nothing re-derived it. A bool is refused, not
+    # equated with 1 ([[bool-equals-one-passes-config-gates]]).
+    published = report.get("largest_fitting_batch_worst_case")
+    if published != largest or isinstance(published, bool):
+        problems.append(
+            f"largest_fitting_batch_worst_case {published!r} does not follow from the "
+            f"measurements; re-derivation gives {largest!r}"
+        )
     # Re-derived in the shape of the report's OWN schema, like its clauses. Before this, the
-    # schema-1 production artifact failed here on a basis string its producer wrote two
-    # schemas before the computed-headroom shape existed — an age difference, not a defect.
-    # The batch size, the one field a reader acts on, is re-derived from the measurements at
-    # every schema; an unknown schema is graded against the current shape.
-    expected = (
-        _recommend_legacy(largest)
-        if _schema_in(report, LEGACY_SCHEMAS_WITH_ASSERTED_HEADROOM)
-        else _recommend(fitting, largest, RSCH.as_mapping(report.get("device")))
-    )
+    # schema-1 production artifact failed here on a shape its producer wrote one schema before
+    # the computed-headroom shape existed — an age difference, not a defect. The batch size,
+    # the one field a reader acts on, is re-derived from the measurements at every schema; an
+    # unknown schema is graded against the current shape.
+    device = RSCH.as_mapping(report.get("device"))
+    if _schema_in(report, LEGACY_SCHEMAS_WITH_ASSERTED_HEADROOM):
+        expected = _recommend_legacy(largest)
+        problems.extend(_legacy_headroom_problems(fitting, largest, device))
+    else:
+        expected = _recommend(fitting, largest, device)
     if report.get("recommendation") != expected:
         problems.append(
             f"recommendation {report.get('recommendation')!r} does not follow from the "
             f"measurements; re-derivation gives {expected!r}"
         )
     return problems
+
+
+def _legacy_headroom_problems(
+    fitting: Sequence[Mapping[str, Any]], largest: Any, device: Mapping[str, Any]
+) -> list[str]:
+    """Hold the schema-1 basis to the report's own numbers.
+
+    The legacy basis ASSERTS that the recommended batch "fits with headroom on this card", and
+    its producer never computed any. Accepting the legacy shape without this would let a
+    schema-1 report whose own peak exceeds its own card validate clean — the exemption is for
+    the basis string's AGE, never for the claim it makes. Headroom means the recommended batch's
+    worst-case peak and the card's total are both finite numbers and the peak is the smaller.
+    """
+    if largest is None:
+        return []
+    peak = next((m.get("peak_vram_gib") for m in fitting if m.get("batch_size") == largest), None)
+    total = device.get("total_memory_gib")
+    finite = all(RSCH.is_real(v) and math.isfinite(v) for v in (peak, total))
+    if finite and peak < total:
+        return []
+    return [
+        f"the schema-1 recommendation asserts batch {largest!r} fits with headroom, but the "
+        f"report's own worst-case peak ({peak!r} GiB) and card total ({total!r} GiB) do not "
+        "bear it out"
+    ]
 
 
 def _recommend_legacy(largest: Any) -> dict[str, Any] | None:

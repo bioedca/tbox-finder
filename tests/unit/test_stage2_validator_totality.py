@@ -3,8 +3,9 @@
 Booked at P3-17 review round 12 and fixed here. A mutation census on ``main`` @ ``9507912`` —
 every JSON path of the four committed reports, replaced by each of 19 wrong-typed values or
 deleted — found the two validators raising on **11** (sizing) and **21** (eval) distinct lines,
-each counted with the top-level non-mapping guard. A raise is not a verdict, so each one now
-returns problems.
+each counted with the top-level non-mapping guard. These are lower bounds: the round-1
+adversarial pass mutated several fields at once and found at least 2 and 3 more lines, all
+with the same causes. A raise is not a verdict, so each one now returns problems.
 
 Two things make "no longer raises" safe rather than a quieter failure mode:
 
@@ -122,6 +123,14 @@ FORMERLY_RAISING: tuple[tuple[str, str, str, Any], ...] = (
     ("sizing", SIZING_PROD, "measurements/2/batch_size", None),  # sizing.py:520
     ("sizing", SIZING_RNAFM, "device/total_memory_gib", 10**400),  # sizing.py:546
     ("sizing", SIZING_PROD, "device/total_memory_gib", 10**400),  # sizing.py:546
+    # Round 1: two cases the first list missed, each of which survived a sabotage of the one
+    # mechanism that then objected. A deleted batch size is not a shape problem (absence never
+    # is) and `measured_the_requested_batch` is excused at schema 1, so only the `max()`
+    # branch's own problem objects. An over-large peak was caught only by its shape rule; the
+    # round-1 headroom check now objects too, and the rule's naming of the field is pinned in
+    # `test_the_malformed_field_itself_is_named`.
+    ("sizing", SIZING_PROD, "measurements/2/batch_size", _DELETE),  # sizing.py:520 (KeyError)
+    ("sizing", SIZING_PROD, "measurements/2/peak_vram_gib", 10**400),  # sizing.py:546
 )
 
 
@@ -207,12 +216,17 @@ def test_every_formerly_raising_input_is_reported_never_passed(
 @pytest.mark.parametrize(
     ("suite", "rel", "path", "value"),
     [
-        # A recorded clause that is already FALSE agrees with "absent", so only the shape rule
-        # can object. These are the exact cases where dropping it would fail open.
+        # The first is a true fail-open guard: `main` raised, and the recorded clause agrees
+        # with "absent", so without the shape rule the report would validate clean. In the
+        # second and third the shape rule is likewise the SOLE objection; `main` raised on the
+        # second and stayed silent on the third, which is new strictness. In the last two
+        # something else also objects (a clause; the round-1 headroom check), and the case pins
+        # that the malformed field itself is still named.
         ("sizing", SIZING_PROD, "measurements/0/n_steps", None),
         ("eval", EVAL_PROD, "ablation/reading_delta", "x"),
         ("eval", EVAL_PROD, "arms/aux0.0_lr1e-4/stack/stack_applied", -1),
         ("eval", EVAL_PROD, "ablation/with_aux_arm", ["x"]),
+        ("sizing", SIZING_PROD, "measurements/2/peak_vram_gib", 10**400),
     ],
 )
 def test_the_malformed_field_itself_is_named(suite: str, rel: str, path: str, value: Any) -> None:
@@ -276,6 +290,42 @@ def test_a_non_mapping_point_is_an_empty_record_not_a_dropped_one() -> None:
         assert S.derive_clauses(_mutated(base, "measurements/0", junk))["swept"] is False, junk
 
 
+def test_a_non_iterable_stack_never_fabricates_the_pre_prior_shift_clause() -> None:
+    """``_listed`` must fail CLOSED: ``build_report`` writes ``derive_clauses`` straight into
+    the gate, so a helper that answered a ``TypeError`` with the expected list would publish a
+    TRUE the evidence does not support — and only the validator's shape rule would object."""
+    base = _load(EVAL_RNAFM)
+    assert E.derive_clauses(base)["graded_object_is_pre_prior_shift"] is True
+    for junk in (-1, 1.5, True):
+        mutated = _mutated(base, "arms/aux0.0_lr1e-4/stack/stack_applied", junk)
+        assert E.derive_clauses(mutated)["graded_object_is_pre_prior_shift"] is False, junk
+
+
+@pytest.mark.parametrize(
+    ("suite", "rel", "path"),
+    [
+        ("eval", EVAL_RNAFM, "arms/aux0.0_lr1e-4"),
+        ("sizing", SIZING_RNAFM, "measurements/0"),
+        ("sizing", SIZING_RNAFM, "measurements/0/batch_size"),
+        ("sizing", SIZING_RNAFM, "measurements/0/n_steps"),
+    ],
+)
+def test_a_null_arm_point_or_count_is_malformed_not_absent(suite: str, rel: str, path: str) -> None:
+    """The rules that are deliberately NOT ``nullable``: a null where the producer always writes
+    a value is a malformed report, and it is named as one."""
+    problems = VALIDATORS[suite](_mutated(_load(rel), path, None))
+    assert f"{RSCH.MALFORMED} {path} is NoneType" in " | ".join(problems), problems
+
+
+@pytest.mark.parametrize("suite", sorted(VALIDATORS))
+def test_a_non_string_clause_key_is_a_problem_not_a_raise(suite: str) -> None:
+    """Outside what JSON can produce, but the contract is unqualified: ``sorted()`` over a dict
+    with an int key and str keys raised ``TypeError``."""
+    report = _load(SIZING_RNAFM if suite == "sizing" else EVAL_RNAFM)
+    report["gate"]["clauses"][1] = True
+    assert any("gate.clauses keys" in p for p in VALIDATORS[suite](report))
+
+
 def test_an_unhashable_arm_name_names_no_arm() -> None:
     base = _load(EVAL_RNAFM)
     assert E.derive_clauses(base)["both_ablation_arms_present"] is True
@@ -324,6 +374,69 @@ def test_a_schema_1_basis_is_matched_verbatim(basis: str) -> None:
     assert any("recommendation" in p for p in S.validate_report(report))
 
 
+@pytest.mark.parametrize(
+    "edit",
+    [
+        ("measurements", 2, "peak_vram_gib", 20.0),  # above its own 15.6017 GiB card
+        ("measurements", 2, "peak_vram_gib", 15.6017),  # no headroom at all
+        ("measurements", 2, "peak_vram_gib", None),  # the chosen point measured no peak
+        ("measurements", 2, "peak_vram_gib", math.nan),
+        ("measurements", 2, "peak_vram_gib", math.inf),
+        ("measurements", 2, "peak_vram_gib", 1e308),
+        ("measurements", 2, "peak_vram_gib", -math.inf),  # "below" any card, and not a peak
+        ("device", "total_memory_gib", 4.0),
+        ("device", "total_memory_gib", None),
+    ],
+)
+def test_the_schema_1_headroom_claim_is_held_to_the_reports_own_numbers(edit: tuple) -> None:
+    """Round 1: the legacy basis ASSERTS headroom. Accepting its shape without checking the
+    claim let a schema-1 report whose own peak exceeds its own card validate clean."""
+    report = _load(SIZING_PROD)
+    *parents, leaf, value = edit
+    node: Any = report
+    for step in parents:
+        node = node[step]
+    node[leaf] = value
+    assert any("asserts batch 4 fits with headroom" in p for p in S.validate_report(report))
+
+
+def test_the_production_reports_headroom_is_real() -> None:
+    """The positive control for the test above: the claim holds on the committed report."""
+    report = _load(SIZING_PROD)
+    point = next(
+        m
+        for m in report["measurements"]
+        if m["batch_size"] == 4 and not m["oom"] and m["regime"] == "worst_case"
+    )
+    assert point["peak_vram_gib"] < report["device"]["total_memory_gib"]
+    assert not any("headroom" in p for p in S.validate_report(report))
+
+
+@pytest.mark.parametrize("rel", [SIZING_PROD, SIZING_RNAFM])
+@pytest.mark.parametrize("published", [99, 2, None, True, "4", 4.5])
+def test_the_published_largest_batch_is_re_derived_at_every_schema(
+    rel: str, published: Any
+) -> None:
+    """Round 1: the published largest batch was never re-derived; a bool is refused, not 1."""
+    report = _load(rel)
+    assert published != report["largest_fitting_batch_worst_case"] or isinstance(published, bool)
+    report["largest_fitting_batch_worst_case"] = published
+    assert any(p.startswith("largest_fitting_batch_worst_case") for p in S.validate_report(report))
+
+
+def test_a_bool_largest_batch_is_refused_even_where_it_equals_1() -> None:
+    """Make batch 1 the largest worst-case point that ran: ``True == 1``, so only the explicit
+    bool refusal objects ([[bool-equals-one-passes-config-gates]])."""
+    report = _load(SIZING_RNAFM)
+    for m in report["measurements"]:
+        if m["regime"] == "worst_case" and m["batch_size"] > 1:
+            m["oom"] = True
+    report["largest_fitting_batch_worst_case"] = 1
+    assert not any(p.startswith("largest_fitting") for p in S.validate_report(report))
+    report["largest_fitting_batch_worst_case"] = True
+    assert any(p.startswith("largest_fitting") for p in S.validate_report(report))
+
+
 def test_a_current_shape_recommendation_on_a_schema_1_report_is_refused() -> None:
     """Schema 1's producer could not have written it: a hand-edit, not an age difference."""
     report = _load(SIZING_PROD)
@@ -332,7 +445,7 @@ def test_a_current_shape_recommendation_on_a_schema_1_report_is_refused() -> Non
     assert any("recommendation" in p for p in S.validate_report(report))
 
 
-@pytest.mark.parametrize("schema", ["4", "2", "9", 1, ["1"]])
+@pytest.mark.parametrize("schema", ["4", "3", "2", "9", 1, ["1"]])
 def test_the_legacy_shape_is_excused_only_at_schema_1(schema: Any) -> None:
     """Relabel the production report: at any other schema — current, intermediate, unknown, a
     JSON number, an unhashable list — the legacy recommendation is graded as current."""
@@ -387,5 +500,6 @@ def test_shape_problems_absence_none_nullable_and_each() -> None:
     assert RSCH.shape_problems({"m": {"k": 3}}, rules) == [
         f"{RSCH.MALFORMED} m/k is int, not a mapping"
     ]
-    # A malformed parent is not descended into: it is reported at its own rule, once.
+    # A malformed parent is not descended into. `xs` has no rule of its own here, so nothing
+    # reports it — in the validators the caller's block check or a parent rule does.
     assert RSCH.shape_problems({"xs": "abc"}, rules) == []

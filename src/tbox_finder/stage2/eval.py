@@ -1272,8 +1272,12 @@ _SHAPE_RULES: tuple[tuple[tuple[str, ...], Any, str], ...] = (
         )
     ),
     ((*_ARM, "stack", "stack_applied"), RSCH.nullable(RSCH.is_list), "a list"),
-    ((*_ARM, "aux_weight"), RSCH.nullable(RSCH.is_real), "a number"),
-    ((*_ARM, "calibration", "temperature"), RSCH.nullable(RSCH.is_real), "a number"),
+    ((*_ARM, "aux_weight"), RSCH.nullable(RSCH.is_real), "a number a float can hold"),
+    (
+        (*_ARM, "calibration", "temperature"),
+        RSCH.nullable(RSCH.is_real),
+        "a number a float can hold",
+    ),
     (("dataset", "rung_census"), RSCH.nullable(RSCH.is_mapping), "a mapping"),
     (("ablation", "reading_delta"), RSCH.nullable(RSCH.is_mapping), "a mapping"),
     (("ablation", "reading_absolute"), RSCH.nullable(RSCH.is_mapping), "a mapping"),
@@ -1293,9 +1297,10 @@ def validate_report(report: Mapping[str, Any]) -> list[str]:
     — is fully valid. Conflating the two would make a truthful failing report look
     malformed and invite someone to "fix" it.
 
-    **Never raises.** ⚠ P3-17′-validators: it used to, on 21 distinct lines (a non-mapping
-    report included), found by mutating every field of both committed P3-08 reports — and a
-    crash is not a verdict. Each of those inputs now returns at least one problem: the clause
+    **Never raises.** ⚠ P3-17′-validators: it used to — on 21 distinct lines when every field
+    of both committed P3-08 reports was mutated one at a time (a non-mapping report included),
+    and on at least 3 more, with the same causes, when several were mutated together. A crash
+    is not a verdict. Each of those inputs now returns at least one problem: the clause
     machinery reads a malformed value as absent (no clause moves on any input it did not raise
     on), and :data:`_SHAPE_RULES` names the malformed field itself, so a report whose recorded
     clauses happen to agree with "absent" — the shipped gate is honestly ``false`` — still
@@ -1352,7 +1357,9 @@ def validate_report(report: Mapping[str, Any]) -> list[str]:
         if name not in clauses_not_required_at(schema)
     }
     if set(recorded) != set(expected):
-        problems.append(f"gate.clauses keys {sorted(recorded)} != re-derived {sorted(expected)}")
+        problems.append(
+            f"gate.clauses keys {sorted(recorded, key=str)} != re-derived {sorted(expected)}"
+        )
     for name, value in expected.items():
         if bool(recorded.get(name)) != value:
             problems.append(
