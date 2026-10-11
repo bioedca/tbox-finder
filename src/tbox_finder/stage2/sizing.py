@@ -62,6 +62,8 @@ __all__ = [
     "DEFAULT_OUT",
     "CLAUSES_FIRST_REQUIRED_AT",
     "KNOWN_SCHEMAS",
+    "LEGACY_RECOMMENDATION_BASIS",
+    "LEGACY_SCHEMAS_WITH_ASSERTED_HEADROOM",
     "LEGACY_SCHEMAS_WITHOUT_SKIP_CODE",
     "SCHEMA_VERSION",
     "SKIP_ON_ARM_DID_NOT_FIT",
@@ -126,6 +128,19 @@ SKIP_ON_ARM_DID_NOT_FIT = "on_arm_did_not_fit"
 #: `schema_version` is a string, and `"3" < "4"` only happens to work while both are one digit
 #: — the same string-compare trap this branch already fixed once in the library-version check.
 LEGACY_SCHEMAS_WITHOUT_SKIP_CODE = frozenset({"1", "2", "3"})
+
+#: The schemas whose `recommendation` predates the computed-headroom shape. The validator began
+#: re-deriving the field at schema 2 (CodeRabbit r2 on P3-06), and grading a schema-1 report
+#: against today's shape failed `reports/p3/stage2_sizing.json` — the artifact
+#: `conf/train/stage2.yaml` cites for `batch_size: 4` — on its basis STRING while its batch size
+#: re-derives exactly. Listed, never compared, like the set above.
+LEGACY_SCHEMAS_WITH_ASSERTED_HEADROOM = frozenset({"1"})
+
+#: The basis the schema-1 producer wrote, verbatim (`git show a1b5395:src/tbox_finder/stage2/
+#: sizing.py`). It asserts headroom the producer never computed; the report's own numbers do
+#: bear it out (worst-case batch 4 peaks at 8.1827 of 15.6017 GiB), but that is today's
+#: arithmetic, not the artifact's claim.
+LEGACY_RECOMMENDATION_BASIS = "largest worst-case batch that fits with headroom on this card"
 
 #: Every schema this validator knows, oldest first — listed, never string-compared.
 KNOWN_SCHEMAS: tuple[str, ...] = ("1", "2", "3", "4")
@@ -327,17 +342,82 @@ def _growth_ratio(series: Sequence[float]) -> float | None:
     return round(usable[-1] / usable[0], 4)
 
 
+#: The fields the validator reads, and the JSON kind each must be when present. Every entry is
+#: one a malformed report used to turn into a raise (a block read with `.get`, a count compared
+#: with `>`, a size `max()`-ed or subtracted); naming it here is what keeps "no longer raises"
+#: from becoming "silently passes".
+_SHAPE_RULES: tuple[tuple[tuple[str, ...], Any, str], ...] = (
+    # A null block reads as an empty one (the old `x or {}` read it that way too); a null POINT
+    # or a null COUNT is malformed — an OOM point records `n_steps: 1`, never null.
+    *(
+        ((block,), RSCH.nullable(RSCH.is_mapping), "a mapping")
+        for block in ("device", "population", "gradient_checkpointing", "provenance", "backbone")
+    ),
+    (("measurements",), RSCH.nullable(RSCH.is_list), "a list"),
+    (("measurements", RSCH.EACH), RSCH.is_mapping, "a mapping"),
+    (("measurements", RSCH.EACH, "batch_size"), RSCH.is_count, "a count"),
+    (("measurements", RSCH.EACH, "n_steps"), RSCH.is_count, "a count"),
+    # Null on an OOM point, which measured no peak.
+    (
+        ("measurements", RSCH.EACH, "peak_vram_gib"),
+        RSCH.nullable(RSCH.is_real),
+        "a number",
+    ),
+    (("device", "total_memory_gib"), RSCH.nullable(RSCH.is_real), "a number"),
+)
+
+
+def _measurements(report: Mapping[str, Any]) -> list[Mapping[str, Any]]:
+    """The recorded sweep points, each as a mapping; anything but a list reads as no points.
+
+    A non-mapping point reads as an EMPTY record, which every ``all()``-quantified clause
+    fails on — it neither ran steps nor OOM'd — so it is never silently dropped from the
+    evidence. :data:`_SHAPE_RULES` reports it as malformed in its own right.
+    """
+    raw = report.get("measurements")
+    return [RSCH.as_mapping(m) for m in raw] if RSCH.is_list(raw) else []
+
+
+def _exceeds(value: Any, bound: int) -> bool:
+    """``value > bound``, or ``False`` when the two do not compare (``None``, a string, a
+    list) — a verdict, never a ``TypeError``."""
+    try:
+        return bool(value > bound)
+    except TypeError:
+        return False
+
+
+def _at_least(value: Any, bound: int) -> bool:
+    """``value >= bound``, or ``False`` when the two do not compare."""
+    try:
+        return bool(value >= bound)
+    except TypeError:
+        return False
+
+
+def _schema_in(report: Mapping[str, Any], schemas: frozenset[str]) -> bool:
+    """The report's RAW schema is one of ``schemas``. An unhashable value (a JSON list) made
+    the bare ``in`` raise; it is not any schema, so it is in none of them."""
+    schema = report.get("schema_version")
+    return isinstance(schema, str) and schema in schemas
+
+
 def derive_clauses(report: Mapping[str, Any]) -> dict[str, bool]:
     """Re-derive the gate from recorded evidence.
 
     The gate asks whether the MEASUREMENT is sound — not whether the answer is convenient.
     "Batch 8 does not fit" is a successful sizing run.
     """
-    meas = report.get("measurements") or []
-    device = report.get("device") or {}
-    population = report.get("population") or {}
-    ckpt = report.get("gradient_checkpointing") or {}
-    prov = report.get("provenance") or {}
+    # ⚠ Every block is read through `RSCH.as_mapping`, never `x or {}`: the idiom raises at the
+    # next `.get` on a truthy non-mapping, which made this function — and the validator that
+    # calls it — a crash site on exactly the malformed reports a verdict is for. On every value
+    # the idiom did not raise on the two agree, so no clause moves.
+    meas = _measurements(report)
+    device = RSCH.as_mapping(report.get("device"))
+    population = RSCH.as_mapping(report.get("population"))
+    ckpt = RSCH.as_mapping(report.get("gradient_checkpointing"))
+    prov = RSCH.as_mapping(report.get("provenance"))
+    backbone = RSCH.as_mapping(report.get("backbone"))
 
     with_numbers = [m for m in meas if not m.get("oom") and m.get("peak_vram_gib")]
     clauses = {
@@ -357,9 +437,11 @@ def derive_clauses(report: Mapping[str, Any]) -> dict[str, bool]:
         # success would push the harness toward a convenient number. What it does refuse is a
         # point that neither ran nor failed — a measurement that silently did nothing.
         "swept": len(meas) >= 2
-        and all(m.get("n_steps", 0) > 0 or m.get("oom") is True for m in meas),
+        and all(_exceeds(m.get("n_steps", 0), 0) or m.get("oom") is True for m in meas),
         # Enough steps that AdamW state is allocated and a trend is visible.
-        "enough_steps_for_optimizer_state": all(m.get("n_steps", 0) >= 3 for m in with_numbers),
+        "enough_steps_for_optimizer_state": all(
+            _at_least(m.get("n_steps", 0), 3) for m in with_numbers
+        ),
         # A fitting point must have MEASURED the batch size it reports, or "batch 8 fits" can
         # mean "3 rows fit" — the request standing in for the measurement once again.
         "measured_the_requested_batch": all(
@@ -386,7 +468,7 @@ def derive_clauses(report: Mapping[str, Any]) -> dict[str, bool]:
             or ckpt.get("usable_on_this_backbone") is False
             or ckpt.get("comparison_skipped_code") == SKIP_ON_ARM_DID_NOT_FIT
             or (
-                report.get("schema_version") in LEGACY_SCHEMAS_WITHOUT_SKIP_CODE
+                _schema_in(report, LEGACY_SCHEMAS_WITHOUT_SKIP_CODE)
                 and "did not fit" in str(ckpt.get("comparison_skipped_reason") or "")
             )
         )
@@ -422,9 +504,9 @@ def derive_clauses(report: Mapping[str, Any]) -> dict[str, bool]:
         # clean ([[gate-must-bind-to-upstream-evidence]]).
         "checkpointing_usability_agrees_with_the_port": (
             ckpt.get("usable_on_this_backbone") is not None
-            and (report.get("backbone") or {}).get("gradient_checkpointing_usable") is not None
+            and backbone.get("gradient_checkpointing_usable") is not None
             and bool(ckpt.get("usable_on_this_backbone"))
-            is bool((report.get("backbone") or {}).get("gradient_checkpointing_usable"))
+            is bool(backbone.get("gradient_checkpointing_usable"))
         ),
         "provenance_env_lock_is_the_backbones": _env_lock_is_the_backbones(report, prov),
     }
@@ -436,7 +518,7 @@ def _skip_code_is_the_producers(report: Mapping[str, Any], ckpt: Mapping[str, An
     writes for the report's own evidence: the port-cannot-checkpoint code when the port cannot,
     no code when both arms were measured, the did-not-fit code otherwise. Legacy schemas
     predate the field and are excused it — and only it."""
-    if report.get("schema_version") in LEGACY_SCHEMAS_WITHOUT_SKIP_CODE:
+    if _schema_in(report, LEGACY_SCHEMAS_WITHOUT_SKIP_CODE):
         return True
     if "comparison_skipped_code" not in ckpt:
         return False
@@ -476,6 +558,18 @@ def _env_lock_is_the_backbones(report: Mapping[str, Any], prov: Mapping[str, Any
 
 
 def validate_report(report: Mapping[str, Any]) -> list[str]:
+    """Problems with ``report``; empty means well-formed and self-consistent. Never raises.
+
+    ⚠ P3-17′-validators: this used to raise on a malformed report — 11 distinct lines across
+    ``derive_clauses``, ``_recommend`` and here (a non-mapping report included), found by
+    mutating every field of both committed sizing reports — and a crash is not a verdict. Each
+    of those inputs now returns at least one problem: the clause machinery reads a malformed
+    value as absent (no clause moves on any input it did not raise on), and
+    :data:`_SHAPE_RULES` names the malformed field itself, so a report whose recorded clauses
+    happen to agree with "absent" still fails.
+    """
+    if not isinstance(report, Mapping):
+        return [f"{RSCH.MALFORMED} the report is {type(report).__name__}, not a mapping"]
     problems: list[str] = []
     # The RAW value, never `str(...)`: coercion makes the JSON number `1` indistinguishable
     # from schema `"1"` and hands it that schema's clause exemptions.
@@ -484,6 +578,7 @@ def validate_report(report: Mapping[str, Any]) -> list[str]:
         problems.append(f"schema_version {schema!r} is not one of {KNOWN_SCHEMAS!r}")
     if report.get("step") != STEP:
         problems.append(f"step {report.get('step')!r} != {STEP!r}")
+    problems.extend(RSCH.shape_problems(report, _SHAPE_RULES))
     gate = report.get("gate")
     if not isinstance(gate, Mapping):
         problems.append("missing gate block")
@@ -513,12 +608,26 @@ def validate_report(report: Mapping[str, Any]) -> list[str]:
     # acts on — it chose batch_size=4 for the production sweep — and nothing checked that it
     # followed from `measurements`. A report edited by hand, or written by an older shape,
     # would ship a stale recommendation past a green gate.
-    meas = report.get("measurements") or []
-    fitting = [m for m in meas if not m.get("oom") and m.get("regime") == "worst_case"]
-    expected = _recommend(
-        fitting,
-        max((m["batch_size"] for m in fitting), default=None),
-        report.get("device") or {},
+    fitting = [
+        m for m in _measurements(report) if not m.get("oom") and m.get("regime") == "worst_case"
+    ]
+    try:
+        largest = max((m["batch_size"] for m in fitting), default=None)
+    except (KeyError, TypeError):
+        problems.append(
+            "a worst-case point that ran has no batch_size, or batch sizes that do not compare, "
+            "so the recommendation cannot be re-derived from the measurements"
+        )
+        return problems
+    # Re-derived in the shape of the report's OWN schema, like its clauses. Before this, the
+    # schema-1 production artifact failed here on a basis string its producer wrote two
+    # schemas before the computed-headroom shape existed — an age difference, not a defect.
+    # The batch size, the one field a reader acts on, is re-derived from the measurements at
+    # every schema; an unknown schema is graded against the current shape.
+    expected = (
+        _recommend_legacy(largest)
+        if _schema_in(report, LEGACY_SCHEMAS_WITH_ASSERTED_HEADROOM)
+        else _recommend(fitting, largest, RSCH.as_mapping(report.get("device")))
     )
     if report.get("recommendation") != expected:
         problems.append(
@@ -526,6 +635,14 @@ def validate_report(report: Mapping[str, Any]) -> list[str]:
             f"measurements; re-derivation gives {expected!r}"
         )
     return problems
+
+
+def _recommend_legacy(largest: Any) -> dict[str, Any] | None:
+    """What the schema-1 producer wrote (job 1051): the batch size and a basis that asserts
+    headroom it never computed. Graded as written; never produced again."""
+    if largest is None:
+        return None
+    return {"batch_size": largest, "basis": LEGACY_RECOMMENDATION_BASIS}
 
 
 def _recommend(
@@ -542,11 +659,14 @@ def _recommend(
         return None
     peak = next((m.get("peak_vram_gib") for m in fitting if m.get("batch_size") == largest), None)
     total = device.get("total_memory_gib")
-    headroom = (
-        round(float(total) - float(peak), 4)
-        if isinstance(peak, (int, float)) and isinstance(total, (int, float))
-        else None
-    )
+    headroom = None
+    if isinstance(peak, (int, float)) and isinstance(total, (int, float)):
+        try:
+            headroom = round(float(total) - float(peak), 4)
+        except OverflowError:
+            # A JSON integer past a double's range: no headroom is computable from it, and the
+            # validator names the field itself as malformed (`_SHAPE_RULES`).
+            headroom = None
     return {
         "batch_size": largest,
         "worst_case_peak_gib": peak,

@@ -8776,3 +8776,91 @@ evidence. Its class of concern, the comparison's type strictness, was the real i
 fixed in the opposite direction: stricter, not coerced.
 
 **Commit.** see PR (P3-15′-recon-b, review round 2).
+
+## Step P3-17′-validators — 2026-10-10: the eval and sizing validators return problems instead of raising, and the production sizing report validates against its own schema
+
+**Inputs.** `main` at `9507912`. Both items were booked at P3-17 review round 12, and both
+reproduce on `main`:
+
+1. `stage2/eval.py` and `stage2/sizing.py` `validate_report` raise on malformed reports instead
+   of returning problems. The booking counted 18 + 9 sites.
+2. `reports/p3/stage2_sizing.json` fails its own validator. This is the schema-1 report from job
+   1051, and `conf/train/stage2.yaml` cites it for `batch_size: 4`.
+
+The step was chosen at a §1 stop: TODO's next-up item, the P3-16′-remint, has no `imp.md` block,
+and the user picked this one.
+
+**Process.**
+1. **Census first.** No list of round 12's sites was kept, so they were re-derived. Every JSON
+   path of the four committed reports (two eval, two sizing) was replaced with each of 19
+   wrong-typed values (null, strings, negative and fractional numbers, bools, empty and
+   unhashable containers, `10**400`) or deleted. That is 48,784 cases. `main` raised on
+   **21 distinct lines in eval and 11 in sizing**; both counts include the top-level guard for a
+   report that is not a mapping. The causes were:
+   - `(x or {}).get` on a truthy non-mapping;
+   - `None > 0` on a count;
+   - an unhashable `schema_version` or arm name inside an `in`;
+   - `max()` over missing or mixed batch sizes;
+   - `math.isfinite` / `float` overflow on `10**400`.
+2. **No clause moves.** `derive_clauses` now reads a malformed value as absent:
+   - `report_schema.as_mapping` replaces `x or {}`, and agrees with it on every value the idiom
+     did not raise on;
+   - a count that does not compare compares `False`;
+   - an unhashable key names no arm;
+   - a non-mapping sweep point becomes an *empty* record rather than a dropped one, so `swept`
+     fails instead of shrinking its evidence.
+3. **No fail-open.** "Absent" is what a clause fails on, but a recorded clause that is already
+   FALSE agrees with it, and the shipped P3-08 gate is honestly `false`. So `validate_report`
+   also emits a `malformed:` problem for the field itself: `report_schema.shape_problems` plus a
+   per-module `_SHAPE_RULES`. The first differential found one case of exactly this. On an OOM
+   point, `n_steps: null` returned `[]`, because the rule treated `None` as absent. `None` is
+   now a shape problem unless a rule opts in with `nullable()`, as the OOM point's
+   `peak_vram_gib` does. `is_real` refuses only what a float cannot hold. A NaN temperature from
+   a diverged fit is an honest failure, which the producer can write, not a malformed report.
+4. **The schema-1 recommendation is graded in its own schema's shape.** The validator began
+   re-deriving `recommendation` at schema 2, in the computed-headroom shape. The schema-1
+   producer (`a1b5395`) wrote `{batch_size, basis}`, with a basis asserting headroom it never
+   computed. For schema 1 the expected value is now that shape, with the verbatim basis
+   (`LEGACY_SCHEMAS_WITH_ASSERTED_HEADROOM`). `largest` is still re-derived from the
+   measurements exactly as that producer computed it. Any other schema, including an unknown or
+   unhashable one, is graded against the current shape.
+
+**Outputs.** `src/tbox_finder/report_schema.py` (`as_mapping`, `shape_problems`, `nullable`,
+`is_count`, `is_real`, `EACH`, `MALFORMED`); `src/tbox_finder/stage2/{eval,sizing}.py`;
+`tests/unit/test_stage2_validator_totality.py` (130 tests). No report was regenerated, no
+measured number changed, and there is no DVC object.
+
+**Validation.**
+- **Census on the branch: 0 raising sites** (was 21 + 11).
+- **Differential vs `main` over all 48,784 cases:**
+  - every case `main` raised on (564 eval, 682 sizing) now returns a non-empty list;
+  - wherever `main` returned, the output is identical, or identical plus `malformed:` problems
+    only (356 eval, 283 sizing);
+  - the one exception is the intended schema-1 recommendation change. In 4,530 cases it now
+    passes, and in 115 it is re-flagged in the legacy shape. No mutation *of* the recommendation
+    validates;
+  - every `derive_clauses` verdict `main` returned is identical.
+- **All four committed reports `validate_report → []`**, the production sizing report for the
+  first time.
+- The new test file, run against `main`'s behaviour with only the new names stubbed, fails
+  106 of 130. That includes all 55 census representatives, the never-raises sweep for all four
+  reports, and the production-report check.
+- **20 sabotages, each RED against the test named for it**; each restore was byte-identical by
+  sha256, with `__pycache__` purged.
+- ruff 0.15.15 and black 25.11.0 are clean.
+- **Local tier** (`labvault`, unit + golden + ml): **16 failed / 7,215 passed**. The FAILED set
+  is identical to a matched baseline worktree at `9507912` (16 ↔ 16, `comm` empty in both
+  directions; the extracted counts were checked against the summary lines). Passes rose by
+  exactly the 130 new tests.
+
+**Decisions.**
+- Grading the schema-1 recommendation by its own schema's shape is the repo's existing rule:
+  *a report is graded against the clause set of its own schema*
+  ([[new-gate-clause-invalidates-old-reports]]). The artifact could not honestly be promoted to
+  schema 4, because it lacks fields only an A4000 re-run could measure (`backbone`,
+  `usable_on_this_backbone`, `comparison_skipped_code`).
+- Two gaps were noticed and not fixed, to keep the step atomic:
+  - `largest_fitting_batch_worst_case` is published but never re-derived;
+  - `ablation.reading_absolute.passes` is read by truthiness without a type rule.
+
+**Commit.** see PR (P3-17′-validators).
