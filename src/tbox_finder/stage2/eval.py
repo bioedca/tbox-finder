@@ -1042,7 +1042,32 @@ def _pos_int(value: Any) -> bool:
 
 
 def _finite(value: Any) -> bool:
-    return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
+    # `RSCH.is_real` first: `math.isfinite(10**400)` RAISES `OverflowError`, which made every
+    # clause reading a number a crash site on an over-large JSON integer.
+    return RSCH.is_real(value) and math.isfinite(value)
+
+
+def _grade(arm: Mapping[str, Any]) -> Mapping[str, Any]:
+    """The arm's grades on the GATE-2 rung, or an empty mapping — never a crash site."""
+    return RSCH.as_mapping(RSCH.as_mapping(arm.get("grades")).get(GRADE_RUNG))
+
+
+def _listed(value: Any) -> list[Any] | None:
+    """``list(value or [])``, or ``None`` when ``value`` is not iterable (a number) — which
+    compares unequal to every list a clause asks for, as a verdict rather than a raise."""
+    try:
+        return list(value or [])
+    except TypeError:
+        return None
+
+
+def _has_key(mapping: Mapping[str, Any], key: Any) -> bool:
+    """``key in mapping``, or ``False`` for an unhashable key (a JSON list), which the bare
+    ``in`` raised on and which names no arm."""
+    try:
+        return key in mapping
+    except TypeError:
+        return False
 
 
 def derive_clauses(report: Mapping[str, Any]) -> dict[str, bool]:
@@ -1059,16 +1084,19 @@ def derive_clauses(report: Mapping[str, Any]) -> dict[str, bool]:
     pre-registered, so a clause asserting it would be asserting a number this repo
     does not have.
     """
-    arms = report.get("arms") or {}
-    ablation = report.get("ablation") or {}
-    dataset = report.get("dataset") or {}
-    prov = report.get("provenance") or {}
+    # ⚠ Every block is read through `RSCH.as_mapping`, never `x or {}`: the idiom raises at the
+    # next `.get` on a truthy non-mapping, so a malformed report crashed the validator instead
+    # of failing it. On every value the idiom did not raise on the two agree — no clause moves.
+    arms = RSCH.as_mapping(report.get("arms"))
+    ablation = RSCH.as_mapping(report.get("ablation"))
+    dataset = RSCH.as_mapping(report.get("dataset"))
+    prov = RSCH.as_mapping(report.get("provenance"))
     clauses: dict[str, bool] = {}
 
     arm_blocks = [a for a in arms.values() if isinstance(a, Mapping)]
 
     # -- the score producer actually produced scores from the trained weights ------- #
-    loads = [(a.get("load") or {}) for a in arm_blocks]
+    loads = [RSCH.as_mapping(a.get("load")) for a in arm_blocks]
     clauses["adapter_weights_verified_against_file"] = bool(loads) and all(
         _pos_int(ld.get("n_adapter_tensors_in_file"))
         and ld.get("n_adapter_tensors_matched") == ld.get("n_adapter_tensors_in_file")
@@ -1098,13 +1126,13 @@ def derive_clauses(report: Mapping[str, Any]) -> dict[str, bool]:
     )
 
     # -- the calibration stack ------------------------------------------------------ #
-    calibs = [(a.get("calibration") or {}) for a in arm_blocks]
-    stacks = [(a.get("stack") or {}) for a in arm_blocks]
-    graded_for_ece = [((a.get("grades") or {}).get(GRADE_RUNG) or {}) for a in arm_blocks]
+    calibs = [RSCH.as_mapping(a.get("calibration")) for a in arm_blocks]
+    stacks = [RSCH.as_mapping(a.get("stack")) for a in arm_blocks]
+    graded_for_ece = [_grade(a) for a in arm_blocks]
     clauses["temperature_fitted_on_calib_only"] = bool(calibs) and all(
         c.get("fitted_on") == CALIB_RUNG
         and _pos_int(c.get("n_fitted"))
-        and c.get("n_fitted") == (c.get("n_by_rung") or {}).get(CALIB_RUNG)
+        and c.get("n_fitted") == RSCH.as_mapping(c.get("n_by_rung")).get(CALIB_RUNG)
         for c in calibs
     )
     clauses["temperature_positive_and_converged"] = bool(calibs) and all(
@@ -1124,12 +1152,12 @@ def derive_clauses(report: Mapping[str, Any]) -> dict[str, bool]:
         s.get("gated_posterior_key") == R.NAMED_POSTERIOR_KEY
         and s.get("prior_shift_applied") is False
         and s.get("named_posterior_exists") is True
-        and list(s.get("stack_applied") or []) == ["train", "temperature_scale"]
+        and _listed(s.get("stack_applied")) == ["train", "temperature_scale"]
         for s in stacks
     )
 
     # -- the grades ----------------------------------------------------------------- #
-    graded = [((a.get("grades") or {}).get(GRADE_RUNG) or {}) for a in arm_blocks]
+    graded = [_grade(a) for a in arm_blocks]
     clauses["ece_estimator_matches_adr_d11"] = bool(graded) and all(
         g.get("ece_n_bins") == ECE_N_BINS
         and g.get("ece_binning") == "equal_mass"
@@ -1146,21 +1174,21 @@ def derive_clauses(report: Mapping[str, Any]) -> dict[str, bool]:
     )
 
     # -- completeness (the clauses a truncated run would otherwise satisfy) --------- #
-    expected = dataset.get("rung_census") or {}
+    expected = RSCH.as_mapping(dataset.get("rung_census"))
     clauses["scored_every_row_of_every_scored_rung"] = (
         bool(arm_blocks)
         and bool(expected)
         and all(
             all(
-                (a.get("scored_census") or {}).get(rung) == expected.get(rung)
+                RSCH.as_mapping(a.get("scored_census")).get(rung) == expected.get(rung)
                 for rung in SCORED_RUNGS
             )
             for a in arm_blocks
         )
     )
     clauses["both_ablation_arms_present"] = (
-        ablation.get("with_aux_arm") in arms
-        and ablation.get("no_aux_arm") in arms
+        _has_key(arms, ablation.get("with_aux_arm"))
+        and _has_key(arms, ablation.get("no_aux_arm"))
         and ablation.get("with_aux_arm") != ablation.get("no_aux_arm")
     )
     clauses["ablation_arms_are_lr_matched"] = ablation.get("matched_lr") is True
@@ -1196,8 +1224,8 @@ def derive_clauses(report: Mapping[str, Any]) -> dict[str, bool]:
         and bool(prov.get("env_lock"))
         and prov.get("env_lock") == expected_lock
     )
-    with_aux_block = arms.get(str(ablation.get("with_aux_arm")), {}) or {}
-    no_aux_block = arms.get(str(ablation.get("no_aux_arm")), {}) or {}
+    with_aux_block = RSCH.as_mapping(arms.get(str(ablation.get("with_aux_arm"))))
+    no_aux_block = RSCH.as_mapping(arms.get(str(ablation.get("no_aux_arm"))))
     clauses["ablation_contrast_is_aux_weight"] = bool(
         _finite(with_aux_block.get("aux_weight"))
         and _finite(no_aux_block.get("aux_weight"))
@@ -1223,6 +1251,39 @@ RSCH.check_schema_tables(
 )
 
 
+#: The fields the validator reads below the top-level blocks (those five are checked by name in
+#: :func:`validate_report`), and the JSON kind each must be when present. Every entry is one a
+#: malformed report used to turn into a raise; naming it here is what keeps "no longer raises"
+#: from becoming "silently passes". A null block reads as an empty one, as `x or {}` read it; a
+#: null ARM is malformed.
+_ARM = ("arms", RSCH.EACH)
+_SHAPE_RULES: tuple[tuple[tuple[str, ...], Any, str], ...] = (
+    (_ARM, RSCH.is_mapping, "a mapping"),
+    *(
+        ((*_ARM, *sub), RSCH.nullable(RSCH.is_mapping), "a mapping")
+        for sub in (
+            ("load",),
+            ("calibration",),
+            ("calibration", "n_by_rung"),
+            ("stack",),
+            ("grades",),
+            ("grades", GRADE_RUNG),
+            ("scored_census",),
+        )
+    ),
+    ((*_ARM, "stack", "stack_applied"), RSCH.nullable(RSCH.is_list), "a list"),
+    ((*_ARM, "aux_weight"), RSCH.nullable(RSCH.is_real), "a number"),
+    ((*_ARM, "calibration", "temperature"), RSCH.nullable(RSCH.is_real), "a number"),
+    (("dataset", "rung_census"), RSCH.nullable(RSCH.is_mapping), "a mapping"),
+    (("ablation", "reading_delta"), RSCH.nullable(RSCH.is_mapping), "a mapping"),
+    (("ablation", "reading_absolute"), RSCH.nullable(RSCH.is_mapping), "a mapping"),
+    *(
+        (("ablation", role), RSCH.nullable(lambda v: isinstance(v, str)), "an arm name")
+        for role in ("with_aux_arm", "no_aux_arm")
+    ),
+)
+
+
 def validate_report(report: Mapping[str, Any]) -> list[str]:
     """Structural problems with ``report``; empty means well-formed and **self-consistent**.
 
@@ -1231,7 +1292,17 @@ def validate_report(report: Mapping[str, Any]) -> list[str]:
     agrees with them. A report whose gate is honestly ``false`` — as the shipped one is
     — is fully valid. Conflating the two would make a truthful failing report look
     malformed and invite someone to "fix" it.
+
+    **Never raises.** ⚠ P3-17′-validators: it used to, on 21 distinct lines (a non-mapping
+    report included), found by mutating every field of both committed P3-08 reports — and a
+    crash is not a verdict. Each of those inputs now returns at least one problem: the clause
+    machinery reads a malformed value as absent (no clause moves on any input it did not raise
+    on), and :data:`_SHAPE_RULES` names the malformed field itself, so a report whose recorded
+    clauses happen to agree with "absent" — the shipped gate is honestly ``false`` — still
+    fails.
     """
+    if not isinstance(report, Mapping):
+        return [f"{RSCH.MALFORMED} the report is {type(report).__name__}, not a mapping"]
     problems: list[str] = []
     # The RAW value, never `str(...)` — see the note in `sizing.validate_report`.
     schema = report.get("schema_version")
@@ -1242,15 +1313,16 @@ def validate_report(report: Mapping[str, Any]) -> list[str]:
     for block in ("dataset", "arms", "ablation", "provenance", "gate"):
         if not isinstance(report.get(block), Mapping):
             problems.append(f"missing or non-mapping block {block!r}")
+    problems.extend(RSCH.shape_problems(report, _SHAPE_RULES))
     ablation = report.get("ablation")
     if isinstance(ablation, Mapping):
-        if (ablation.get("reading_delta") or {}).get("tolerance") is not None:
+        if RSCH.as_mapping(ablation.get("reading_delta")).get("tolerance") is not None:
             problems.append(
                 "ablation.reading_delta.tolerance is set, but no tolerance is pre-registered "
                 "in PRD.md, any ADR, conf/ or src/ — pinning one needs CLAUDE.md §7 sign-off"
             )
         expected = verdict_from_absolute_reading(
-            (ablation.get("reading_absolute") or {}).get("passes")
+            RSCH.as_mapping(ablation.get("reading_absolute")).get("passes")
         )
         if ablation.get("verdict") != expected:
             problems.append(
