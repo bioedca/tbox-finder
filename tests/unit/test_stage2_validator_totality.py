@@ -232,6 +232,10 @@ def test_every_formerly_raising_input_is_reported_never_passed(
         ("sizing", SIZING_RNAFM, "measurements/1/peak_vram_gib", -1),
         ("sizing", SIZING_PROD, "measurements/3/peak_vram_gib", -1),
         ("sizing", SIZING_RNAFM, "device/total_memory_gib", -1),
+        # Review r4: non-finite sizes, likewise on a point nothing else reads.
+        ("sizing", SIZING_RNAFM, "measurements/1/peak_vram_gib", math.inf),
+        ("sizing", SIZING_PROD, "measurements/3/peak_vram_gib", math.nan),
+        ("sizing", SIZING_RNAFM, "device/total_memory_gib", math.inf),
     ],
 )
 def test_the_malformed_field_itself_is_named(suite: str, rel: str, path: str, value: Any) -> None:

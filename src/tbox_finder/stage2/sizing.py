@@ -345,13 +345,15 @@ def _growth_ratio(series: Sequence[float]) -> float | None:
 
 
 def _is_gib(value: Any) -> bool:
-    """A memory size in GiB: a number a float can hold, and not negative.
+    """A memory size in GiB: a finite, non-negative number.
 
     Review r3: a peak of ``-1`` passed ``is_real``, stayed truthy in ``derive_clauses`` and sat
-    "below" every card, so it validated at every schema. The producer records a CUDA maximum
-    that starts from zero, so a negative size is not a measurement.
+    "below" every card, so it validated at every schema. Review r4: so did ``inf`` and NaN on a
+    point no recommendation reads. The producer records a CUDA maximum that starts from zero,
+    so neither a negative nor a non-finite size is a measurement. (``is_real`` alone stays
+    permissive for fields where NaN can be an honest outcome, such as a diverged temperature.)
     """
-    return RSCH.is_real(value) and not value < 0
+    return RSCH.is_real(value) and math.isfinite(value) and value >= 0
 
 
 #: The fields the validator reads, and the JSON kind each must be when present. Every entry is
@@ -374,12 +376,12 @@ _SHAPE_RULES: tuple[tuple[tuple[str, ...], Any, str], ...] = (
     (
         ("measurements", RSCH.EACH, "peak_vram_gib"),
         RSCH.nullable(_is_gib),
-        "a non-negative number a float can hold",
+        "a finite, non-negative number",
     ),
     (
         ("device", "total_memory_gib"),
         RSCH.nullable(_is_gib),
-        "a non-negative number a float can hold",
+        "a finite, non-negative number",
     ),
     # Review r2: both published batch sizes are compared with `==`/`!=`, under which `4.0`,
     # and `True` for 1, equal the re-derived int — so the TYPE is graded here, at every schema.

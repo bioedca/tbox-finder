@@ -9025,3 +9025,36 @@ at schema 1 *and* schema 4, because the shape rule accepted any real number.
 round 2.
 
 **Commit.** see PR (P3-17′-validators, review round 3).
+
+## Step P3-17′-validators (review round 4) — 2026-10-10: a memory size must also be finite
+
+**Inputs.** Commit `0b6b879`. CI was green, and CodeRabbit resolved the round-3 thread. Its
+automatic review made **1 minor, which is real and was reproduced first**. `_is_gib` built on
+`is_real`, which admits ±inf and NaN, so an infinite or NaN peak on a point no recommendation
+reads validated `[]` at schema 1 and schema 4. `main` did not raise on these inputs, so this is
+not a regression. It is the same "memory size" rule round 3 tightened.
+
+**Process.** `_is_gib` now requires a finite, non-negative number. `is_real` itself stays
+permissive, because NaN can be an honest outcome for a field like a diverged temperature fit. A
+CUDA maximum is never non-finite. Three test cases name the field: an infinite peak, a NaN peak
+and an infinite card total, each placed where nothing else objects.
+
+**Outputs.** `src/tbox_finder/stage2/sizing.py`, `tests/unit/test_stage2_validator_totality.py`
+(181 tests).
+
+**Validation.**
+- **41 sabotages, each RED against its named test**, including the new
+  finiteness-dropped edit.
+- **Census differential vs `main`:**
+  - 0 raises;
+  - all 1,246 formerly-raising cases are non-empty;
+  - 47,674 clause verdicts are identical;
+  - the other changes are the schema-1 recommendation change (4,645) and new strictness only
+    (768).
+- All four committed reports `validate_report → []`.
+- **Local tier: 16 failed / 7,266 passed**, with a FAILED set identical to the `9507912`
+  baseline.
+
+**Decisions.** None.
+
+**Commit.** see PR (P3-17′-validators, review round 4).
