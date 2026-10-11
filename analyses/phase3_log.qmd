@@ -8987,3 +8987,41 @@ made **2 findings, both real, both reproduced first**:
 one the finding named, because the `==` hole is the same everywhere.
 
 **Commit.** see PR (P3-17′-validators, review round 2).
+
+## Step P3-17′-validators (review round 3) — 2026-10-10: a memory size cannot be negative
+
+**Inputs.** Commit `138787f`. CI was green, and CodeRabbit resolved both round-2 threads. Its
+automatic review made **1 minor, which is real and was reproduced first**:
+`peak_vram_gib: -1` is finite, truthy and "below" the card, so the schema-1 headroom check
+accepted it. It reproduces wider than the finding: a `-1` peak on a typical point validated `[]`
+at schema 1 *and* schema 4, because the shape rule accepted any real number.
+
+**Process.**
+- The peak and card-total shape rules now use `_is_gib`, which requires a non-negative number a
+  float can hold. They apply at every schema. The producer records a CUDA maximum that starts
+  from zero, so a negative size is not a measurement.
+- The headroom check requires `0 <= peak < total`, so it does not lean on the shape rule.
+- **A test gap this round's sabotage surfaced.** Dropping `math.isfinite` from the headroom
+  check went GREEN, because `0 <= peak` now rejects NaN and ±inf peaks on its own. The guard's
+  only remaining job is an *infinite card total*, and no test had one. That case is added.
+
+**Outputs.** `src/tbox_finder/stage2/sizing.py`, `tests/unit/test_stage2_validator_totality.py`
+(178 tests).
+
+**Validation.**
+- **40 sabotages, each RED against its named test**: the 38 earlier ones, four of them
+  retargeted at the new predicate and comparison, plus 2 new ones.
+- **Census differential vs `main`:**
+  - 0 raises;
+  - all 1,246 formerly-raising cases are non-empty;
+  - 47,674 clause verdicts are identical;
+  - the other changes are the schema-1 recommendation change (4,645) and new strictness only
+    (750).
+- All four committed reports `validate_report → []`.
+- **Local tier: 16 failed / 7,263 passed**, with a FAILED set identical to the `9507912`
+  baseline.
+
+**Decisions.** None beyond the fix, which is applied at every schema for the same reason as in
+round 2.
+
+**Commit.** see PR (P3-17′-validators, review round 3).

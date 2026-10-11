@@ -344,6 +344,16 @@ def _growth_ratio(series: Sequence[float]) -> float | None:
     return round(usable[-1] / usable[0], 4)
 
 
+def _is_gib(value: Any) -> bool:
+    """A memory size in GiB: a number a float can hold, and not negative.
+
+    Review r3: a peak of ``-1`` passed ``is_real``, stayed truthy in ``derive_clauses`` and sat
+    "below" every card, so it validated at every schema. The producer records a CUDA maximum
+    that starts from zero, so a negative size is not a measurement.
+    """
+    return RSCH.is_real(value) and not value < 0
+
+
 #: The fields the validator reads, and the JSON kind each must be when present. Every entry is
 #: one a malformed report used to turn into a raise (a block read with `.get`, a count compared
 #: with `>`, a size `max()`-ed or subtracted); naming it here is what keeps "no longer raises"
@@ -363,13 +373,13 @@ _SHAPE_RULES: tuple[tuple[tuple[str, ...], Any, str], ...] = (
     # Null on an OOM point, which measured no peak.
     (
         ("measurements", RSCH.EACH, "peak_vram_gib"),
-        RSCH.nullable(RSCH.is_real),
-        "a number a float can hold",
+        RSCH.nullable(_is_gib),
+        "a non-negative number a float can hold",
     ),
     (
         ("device", "total_memory_gib"),
-        RSCH.nullable(RSCH.is_real),
-        "a number a float can hold",
+        RSCH.nullable(_is_gib),
+        "a non-negative number a float can hold",
     ),
     # Review r2: both published batch sizes are compared with `==`/`!=`, under which `4.0`,
     # and `True` for 1, equal the re-derived int — so the TYPE is graded here, at every schema.
@@ -673,7 +683,8 @@ def _legacy_headroom_problems(
     its producer never computed any. Accepting the legacy shape without this would let a
     schema-1 report whose own peak exceeds its own card validate clean — the exemption is for
     the basis string's AGE, never for the claim it makes. Headroom means the recommended batch's
-    worst-case peak and the card's total are both finite numbers and the peak is the smaller —
+    worst-case peak and the card's total are both finite, the peak is not negative (r3) and it
+    is the smaller —
     for EVERY worst-case point that ran at that batch (review r2: checking only the first, as
     `next()` did, let a second point with no headroom stand behind a claim the first satisfied).
     """
@@ -682,7 +693,7 @@ def _legacy_headroom_problems(
     peaks = [m.get("peak_vram_gib") for m in fitting if m.get("batch_size") == largest]
     total = device.get("total_memory_gib")
     finite = all(RSCH.is_real(v) and math.isfinite(v) for v in (*peaks, total))
-    if peaks and finite and all(peak < total for peak in peaks):
+    if peaks and finite and all(0 <= peak < total for peak in peaks):
         return []
     return [
         f"the schema-1 recommendation asserts batch {largest!r} fits with headroom, but the "

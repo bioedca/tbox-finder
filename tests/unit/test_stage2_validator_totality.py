@@ -227,6 +227,11 @@ def test_every_formerly_raising_input_is_reported_never_passed(
         ("eval", EVAL_PROD, "arms/aux0.0_lr1e-4/stack/stack_applied", -1),
         ("eval", EVAL_PROD, "ablation/with_aux_arm", ["x"]),
         ("sizing", SIZING_PROD, "measurements/2/peak_vram_gib", 10**400),
+        # Review r3: a negative size, where nothing else objects (a typical point is read by no
+        # recommendation) and where the re-derived headroom also moves (the card total).
+        ("sizing", SIZING_RNAFM, "measurements/1/peak_vram_gib", -1),
+        ("sizing", SIZING_PROD, "measurements/3/peak_vram_gib", -1),
+        ("sizing", SIZING_RNAFM, "device/total_memory_gib", -1),
     ],
 )
 def test_the_malformed_field_itself_is_named(suite: str, rel: str, path: str, value: Any) -> None:
@@ -384,8 +389,10 @@ def test_a_schema_1_basis_is_matched_verbatim(basis: str) -> None:
         ("measurements", 2, "peak_vram_gib", math.inf),
         ("measurements", 2, "peak_vram_gib", 1e308),
         ("measurements", 2, "peak_vram_gib", -math.inf),  # "below" any card, and not a peak
+        ("measurements", 2, "peak_vram_gib", -1),  # r3: finite and "below" the card
         ("device", "total_memory_gib", 4.0),
         ("device", "total_memory_gib", None),
+        ("device", "total_memory_gib", math.inf),  # every peak is "below" an infinite card
     ],
 )
 def test_the_schema_1_headroom_claim_is_held_to_the_reports_own_numbers(edit: tuple) -> None:
