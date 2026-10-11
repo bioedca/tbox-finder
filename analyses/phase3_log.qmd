@@ -8776,3 +8776,285 @@ evidence. Its class of concern, the comparison's type strictness, was the real i
 fixed in the opposite direction: stricter, not coerced.
 
 **Commit.** see PR (P3-15′-recon-b, review round 2).
+
+## Step P3-17′-validators — 2026-10-10: the eval and sizing validators return problems instead of raising, and the production sizing report validates against its own schema
+
+**Inputs.** `main` at `9507912`. Both items were booked at P3-17 review round 12, and both
+reproduce on `main`:
+
+1. `stage2/eval.py` and `stage2/sizing.py` `validate_report` raise on malformed reports instead
+   of returning problems. The booking counted 18 + 9 sites.
+2. `reports/p3/stage2_sizing.json` fails its own validator. This is the schema-1 report from job
+   1051, and `conf/train/stage2.yaml` cites it for `batch_size: 4`.
+
+The step was chosen at a §1 stop: TODO's next-up item, the P3-16′-remint, has no `imp.md` block,
+and the user picked this one.
+
+**Process.**
+1. **Census first.** No list of round 12's sites was kept, so they were re-derived. Every JSON
+   path of the four committed reports (two eval, two sizing) was replaced with each of 19
+   wrong-typed values (null, strings, negative and fractional numbers, bools, empty and
+   unhashable containers, `10**400`) or deleted. That is 48,784 cases. `main` raised on
+   **21 distinct lines in eval and 11 in sizing**; both counts include the top-level guard for a
+   report that is not a mapping. The causes were:
+   - `(x or {}).get` on a truthy non-mapping;
+   - `None > 0` on a count;
+   - an unhashable `schema_version` or arm name inside an `in`;
+   - `max()` over missing or mixed batch sizes;
+   - `math.isfinite` / `float` overflow on `10**400`.
+2. **No clause moves.** `derive_clauses` now reads a malformed value as absent:
+   - `report_schema.as_mapping` replaces `x or {}`, and agrees with it on every value the idiom
+     did not raise on;
+   - a count that does not compare compares `False`;
+   - an unhashable key names no arm;
+   - a non-mapping sweep point becomes an *empty* record rather than a dropped one, so `swept`
+     fails instead of shrinking its evidence.
+3. **No fail-open.** "Absent" is what a clause fails on, but a recorded clause that is already
+   FALSE agrees with it, and the shipped P3-08 gate is honestly `false`. So `validate_report`
+   also emits a `malformed:` problem for the field itself: `report_schema.shape_problems` plus a
+   per-module `_SHAPE_RULES`. The first differential found one case of exactly this. On an OOM
+   point, `n_steps: null` returned `[]`, because the rule treated `None` as absent. `None` is
+   now a shape problem unless a rule opts in with `nullable()`, as the OOM point's
+   `peak_vram_gib` does. `is_real` refuses only what a float cannot hold. A NaN temperature from
+   a diverged fit is an honest failure, which the producer can write, not a malformed report.
+4. **The schema-1 recommendation is graded in its own schema's shape.** The validator began
+   re-deriving `recommendation` at schema 2, in the computed-headroom shape. The schema-1
+   producer (`a1b5395`) wrote `{batch_size, basis}`, with a basis asserting headroom it never
+   computed. For schema 1 the expected value is now that shape, with the verbatim basis
+   (`LEGACY_SCHEMAS_WITH_ASSERTED_HEADROOM`). `largest` is still re-derived from the
+   measurements exactly as that producer computed it. Any other schema, including an unknown or
+   unhashable one, is graded against the current shape.
+
+**Outputs.** `src/tbox_finder/report_schema.py` (`as_mapping`, `shape_problems`, `nullable`,
+`is_count`, `is_real`, `EACH`, `MALFORMED`); `src/tbox_finder/stage2/{eval,sizing}.py`;
+`tests/unit/test_stage2_validator_totality.py` (130 tests). No report was regenerated, no
+measured number changed, and there is no DVC object.
+
+**Validation.**
+- **Census on the branch: 0 raising sites** (was 21 + 11).
+- **Differential vs `main` over all 48,784 cases:**
+  - every case `main` raised on (564 eval, 682 sizing) now returns a non-empty list;
+  - wherever `main` returned, the output is identical, or identical plus `malformed:` problems
+    only (356 eval, 283 sizing);
+  - the one exception is the intended schema-1 recommendation change. In 4,530 cases it now
+    passes, and in 115 it is re-flagged in the legacy shape. No mutation *of* the recommendation
+    validates;
+  - every `derive_clauses` verdict `main` returned is identical.
+- **All four committed reports `validate_report → []`**, the production sizing report for the
+  first time.
+- The new test file, run against `main`'s behaviour with only the new names stubbed, fails
+  106 of 130. That includes all 55 census representatives, the never-raises sweep for all four
+  reports, and the production-report check.
+- **20 sabotages, each RED against the test named for it**; each restore was byte-identical by
+  sha256, with `__pycache__` purged.
+- ruff 0.15.15 and black 25.11.0 are clean.
+- **Local tier** (`labvault`, unit + golden + ml): **16 failed / 7,215 passed**. The FAILED set
+  is identical to a matched baseline worktree at `9507912` (16 ↔ 16, `comm` empty in both
+  directions; the extracted counts were checked against the summary lines). Passes rose by
+  exactly the 130 new tests.
+
+**Decisions.**
+- Grading the schema-1 recommendation by its own schema's shape is the repo's existing rule:
+  *a report is graded against the clause set of its own schema*
+  ([[new-gate-clause-invalidates-old-reports]]). The artifact could not honestly be promoted to
+  schema 4, because it lacks fields only an A4000 re-run could measure (`backbone`,
+  `usable_on_this_backbone`, `comparison_skipped_code`).
+- Two gaps were noticed and not fixed, to keep the step atomic:
+  - `largest_fitting_batch_worst_case` is published but never re-derived (fixed in review
+    round 1, below);
+  - `ablation.reading_absolute.passes` is read by truthiness without a type rule.
+
+**Commit.** see PR (P3-17′-validators).
+
+## Step P3-17′-validators (review round 1) — 2026-10-10: the schema-1 headroom claim is held to its own numbers, and the mechanisms that were the sole objection are pinned
+
+**Inputs.** Commit `a98aa16`. CI was green, and the CodeRabbit app's automatic review over
+`9507912..a98aa16` reported *No actionable comments*. The CodeRabbit CLI could not reach its
+stored sign-in from this environment, so it did not run. An independent read-only adversarial
+pass ran anyway ([[clean-review-round-is-a-floor]]):
+- a single-field census of 75,578 cases (31 values);
+- 120,000 random 2–4-field mutations;
+- 46 sabotages.
+
+It found **0 fail-opens, 0 clause moves and 0 raises**, plus 3 minors and 5 nits. Each was
+reproduced before it was fixed:
+
+1. **The schema-1 basis asserts headroom, and nothing checked it.** Several inputs validated
+   `[]`: a peak of 20 GiB on the 15.6 GiB card, a 4 GiB card total, a deleted peak, and a NaN or
+   infinite peak. Accepting the legacy *shape* had quietly accepted its *claim*.
+2. **`largest_fitting_batch_worst_case` was published but never re-derived.** Setting it to 8
+   validated. The first stanza had booked this as a gap; the loosening made it reachable.
+3. **Two mechanisms were the sole objection and untested.** The `max()` branch's own problem
+   (a deleted batch size) and the `peak_vram_gib` rule (`10**400`) each survived their sabotage.
+4. **Other sabotages also survived:**
+   - widening the legacy set to `{"1","3"}`;
+   - a `_listed` that answered `TypeError` with the expected list, so `derive_clauses`, which
+     `build_report` publishes, fabricated TRUE;
+   - making an arm, point or batch size nullable.
+5. **Comment and count inaccuracies.** The 21/11 line counts are lower bounds: multi-field
+   mutation found at least 3 and 2 more lines, with the same causes. "Two schemas" should be
+   one. An OOM point records 0 or more completed steps, not 1. An empty point fails only the
+   clauses quantified over every point. Overflow messages now read "a number a float can hold".
+   Also, `sorted()` raised on a non-string clause key. JSON cannot produce one, but the contract
+   is unqualified.
+
+**Process.**
+- `_legacy_headroom_problems` holds the schema-1 basis to the report's own numbers: the
+  recommended batch's worst-case peak and the card total must both be finite, and the peak must
+  be the smaller.
+- The validator re-derives `largest_fitting_batch_worst_case` at every schema. The schema-1
+  producer computed the same `max()`. Bools are refused rather than equated with 1.
+- `sorted(..., key=str)` in both validators.
+- Tests added:
+  - two census representatives (a deleted batch size; an over-large peak);
+  - the headroom cases plus a positive control;
+  - the published largest at both schemas, plus a crafted largest-is-1 report so the bool
+    refusal can bite;
+  - `"3"` in the relabel list;
+  - the `_listed` fail-closed clause;
+  - the three non-nullable rules;
+  - the non-string clause key.
+- The comments listed above are corrected.
+
+**Outputs.** `src/tbox_finder/stage2/{sizing,eval}.py`, `src/tbox_finder/report_schema.py`,
+`tests/unit/test_stage2_validator_totality.py` (164 tests).
+
+**Validation.**
+- **34 sabotages, each RED against its named test**: the first 20, plus 14 new ones that
+  include every survivor the reviewer reported. One of the 14 was GREEN on first run: the
+  removed `peak_vram_gib` rule. It was no longer the sole objection, because the new headroom
+  check also objects. Its field-naming is now pinned, and it is RED. Every restore was
+  byte-identical by sha256.
+- **Census differential vs `main`:**
+  - 0 raises;
+  - all 1,246 formerly-raising cases are non-empty;
+  - 47,674 clause verdicts are identical;
+  - every other output change is the schema-1 recommendation change (4,645) or new strictness
+    only (708: `malformed:`, largest-batch and headroom problems);
+  - 0 mutations *of* the recommendation validate.
+- All four committed reports `validate_report → []`. The production report's headroom holds:
+  8.1827 < 15.6017 GiB.
+- **Local tier: 16 failed / 7,249 passed.** The FAILED set is identical to the `9507912`
+  baseline (`comm` empty both ways). Passes are up by exactly the 164 tests now in the file.
+
+**Decisions.** One reviewer suggestion is **not taken**. A schema-4 report relabelled `"1"`, with
+a legacy recommendation and schema-1 clause keys, validates. Refusing it would mean refusing
+schema 1 whenever later-schema fields are present. It is no worse than `main`, where a
+relabelled report keeping the current shape already passed, and it requires a deliberate forgery
+of three fields. It stays recorded here, not fixed.
+
+**Commit.** see PR (P3-17′-validators, review round 1).
+
+## Step P3-17′-validators (review round 2) — 2026-10-10: every worst-case point at the recommended batch needs headroom, and the published batch sizes must be counts
+
+**Inputs.** Commit `8e187fb`. CI was green. The CodeRabbit app's automatic review of that commit
+made **2 findings, both real, both reproduced first**:
+
+1. **(major) The headroom check read only the first point.** `_legacy_headroom_problems` used
+   `next()`, so a *second* worst-case point at batch 4 was never checked. A peak equal to the
+   card total, a 20 GiB peak, a null peak or a NaN peak all validated `[]`.
+2. **(minor) `4.0` passed as a batch size.** `recommendation.batch_size: 4.0` validated `[]`,
+   because `4.0 == 4`. The finding named schema 1; it reproduces wider. `8.0` passes at
+   schema 4, and `largest_fitting_batch_worst_case: 4.0` passes the round-1 re-derivation.
+
+**Process.**
+- The headroom check now covers every worst-case point that ran at the recommended batch: all
+  peaks and the card total must be finite, and every peak must be below the total.
+- `_SHAPE_RULES` gains three rules, graded at every schema rather than only the legacy one the
+  finding named:
+  - `largest_fitting_batch_worst_case` must be a count, or null when nothing ran;
+  - `recommendation` must be a mapping;
+  - `recommendation.batch_size` must be a count.
+
+**Outputs.** `src/tbox_finder/stage2/sizing.py`, `tests/unit/test_stage2_validator_totality.py`
+(173 tests).
+
+**Validation.**
+- **38 sabotages, each RED against its named test**: the 34 earlier ones, two with search
+  strings updated for the rewritten headroom code, plus 4 new ones (each new rule removed;
+  first-point-only; `any()` in place of `all()`).
+- **Census differential vs `main`:**
+  - 0 raises;
+  - all 1,246 formerly-raising cases are non-empty;
+  - 47,674 clause verdicts are identical;
+  - the other changes are the schema-1 recommendation change (4,645) and new strictness only
+    (741).
+- All four committed reports `validate_report → []`.
+- **Local tier: 16 failed / 7,258 passed**, with a FAILED set identical to the `9507912`
+  baseline.
+
+**Decisions.** None beyond the fixes. Both type rules apply at every schema, not just the legacy
+one the finding named, because the `==` hole is the same everywhere.
+
+**Commit.** see PR (P3-17′-validators, review round 2).
+
+## Step P3-17′-validators (review round 3) — 2026-10-10: a memory size cannot be negative
+
+**Inputs.** Commit `138787f`. CI was green, and CodeRabbit resolved both round-2 threads. Its
+automatic review made **1 minor, which is real and was reproduced first**:
+`peak_vram_gib: -1` is finite, truthy and "below" the card, so the schema-1 headroom check
+accepted it. It reproduces wider than the finding: a `-1` peak on a typical point validated `[]`
+at schema 1 *and* schema 4, because the shape rule accepted any real number.
+
+**Process.**
+- The peak and card-total shape rules now use `_is_gib`, which requires a non-negative number a
+  float can hold. They apply at every schema. The producer records a CUDA maximum that starts
+  from zero, so a negative size is not a measurement.
+- The headroom check requires `0 <= peak < total`, so it does not lean on the shape rule.
+- **A test gap this round's sabotage surfaced.** Dropping `math.isfinite` from the headroom
+  check went GREEN, because `0 <= peak` now rejects NaN and ±inf peaks on its own. The guard's
+  only remaining job is an *infinite card total*, and no test had one. That case is added.
+
+**Outputs.** `src/tbox_finder/stage2/sizing.py`, `tests/unit/test_stage2_validator_totality.py`
+(178 tests).
+
+**Validation.**
+- **40 sabotages, each RED against its named test**: the 38 earlier ones, four of them
+  retargeted at the new predicate and comparison, plus 2 new ones.
+- **Census differential vs `main`:**
+  - 0 raises;
+  - all 1,246 formerly-raising cases are non-empty;
+  - 47,674 clause verdicts are identical;
+  - the other changes are the schema-1 recommendation change (4,645) and new strictness only
+    (750).
+- All four committed reports `validate_report → []`.
+- **Local tier: 16 failed / 7,263 passed**, with a FAILED set identical to the `9507912`
+  baseline.
+
+**Decisions.** None beyond the fix, which is applied at every schema for the same reason as in
+round 2.
+
+**Commit.** see PR (P3-17′-validators, review round 3).
+
+## Step P3-17′-validators (review round 4) — 2026-10-10: a memory size must also be finite
+
+**Inputs.** Commit `0b6b879`. CI was green, and CodeRabbit resolved the round-3 thread. Its
+automatic review made **1 minor, which is real and was reproduced first**. `_is_gib` built on
+`is_real`, which admits ±inf and NaN, so an infinite or NaN peak on a point no recommendation
+reads validated `[]` at schema 1 and schema 4. `main` did not raise on these inputs, so this is
+not a regression. It is the same "memory size" rule round 3 tightened.
+
+**Process.** `_is_gib` now requires a finite, non-negative number. `is_real` itself stays
+permissive, because NaN can be an honest outcome for a field like a diverged temperature fit. A
+CUDA maximum is never non-finite. Three test cases name the field: an infinite peak, a NaN peak
+and an infinite card total, each placed where nothing else objects.
+
+**Outputs.** `src/tbox_finder/stage2/sizing.py`, `tests/unit/test_stage2_validator_totality.py`
+(181 tests).
+
+**Validation.**
+- **41 sabotages, each RED against its named test**, including the new
+  finiteness-dropped edit.
+- **Census differential vs `main`:**
+  - 0 raises;
+  - all 1,246 formerly-raising cases are non-empty;
+  - 47,674 clause verdicts are identical;
+  - the other changes are the schema-1 recommendation change (4,645) and new strictness only
+    (768).
+- All four committed reports `validate_report → []`.
+- **Local tier: 16 failed / 7,266 passed**, with a FAILED set identical to the `9507912`
+  baseline.
+
+**Decisions.** None.
+
+**Commit.** see PR (P3-17′-validators, review round 4).
