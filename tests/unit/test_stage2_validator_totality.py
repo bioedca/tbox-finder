@@ -400,6 +400,37 @@ def test_the_schema_1_headroom_claim_is_held_to_the_reports_own_numbers(edit: tu
     assert any("asserts batch 4 fits with headroom" in p for p in S.validate_report(report))
 
 
+@pytest.mark.parametrize("second_peak", [15.6017, 20.0, None, math.nan])
+def test_every_worst_case_point_at_the_recommended_batch_needs_headroom(second_peak: Any) -> None:
+    """Review r2: a SECOND worst-case point at batch 4 with no headroom stood behind the claim
+    the first point satisfied, because only the first was checked."""
+    report = _load(SIZING_PROD)
+    duplicate = copy.deepcopy(report["measurements"][2])
+    assert duplicate["batch_size"] == 4 and duplicate["regime"] == "worst_case"
+    duplicate["peak_vram_gib"] = second_peak
+    report["measurements"].append(duplicate)
+    assert any("asserts batch 4 fits with headroom" in p for p in S.validate_report(report))
+
+
+@pytest.mark.parametrize(
+    ("rel", "path", "value"),
+    [
+        (SIZING_PROD, "recommendation/batch_size", 4.0),
+        (SIZING_PROD, "recommendation/batch_size", True),
+        (SIZING_RNAFM, "recommendation/batch_size", 8.0),
+        (SIZING_PROD, "largest_fitting_batch_worst_case", 4.0),
+        (SIZING_RNAFM, "largest_fitting_batch_worst_case", 8.0),
+    ],
+)
+def test_a_published_batch_size_that_merely_equals_the_count_is_malformed(
+    rel: str, path: str, value: Any
+) -> None:
+    """Review r2: ``4.0 == 4`` (and ``True == 1``), so ``==`` alone accepted a float or bool
+    batch size at every schema; the shape rule grades the type."""
+    problems = S.validate_report(_mutated(_load(rel), path, value))
+    assert f"{RSCH.MALFORMED} {path} is" in " | ".join(problems), problems
+
+
 def test_the_production_reports_headroom_is_real() -> None:
     """The positive control for the test above: the claim holds on the committed report."""
     report = _load(SIZING_PROD)

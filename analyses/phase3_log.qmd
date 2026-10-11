@@ -8944,3 +8944,46 @@ relabelled report keeping the current shape already passed, and it requires a de
 of three fields. It stays recorded here, not fixed.
 
 **Commit.** see PR (P3-17′-validators, review round 1).
+
+## Step P3-17′-validators (review round 2) — 2026-10-10: every worst-case point at the recommended batch needs headroom, and the published batch sizes must be counts
+
+**Inputs.** Commit `8e187fb`. CI was green. The CodeRabbit app's automatic review of that commit
+made **2 findings, both real, both reproduced first**:
+
+1. **(major) The headroom check read only the first point.** `_legacy_headroom_problems` used
+   `next()`, so a *second* worst-case point at batch 4 was never checked. A peak equal to the
+   card total, a 20 GiB peak, a null peak or a NaN peak all validated `[]`.
+2. **(minor) `4.0` passed as a batch size.** `recommendation.batch_size: 4.0` validated `[]`,
+   because `4.0 == 4`. The finding named schema 1; it reproduces wider. `8.0` passes at
+   schema 4, and `largest_fitting_batch_worst_case: 4.0` passes the round-1 re-derivation.
+
+**Process.**
+- The headroom check now covers every worst-case point that ran at the recommended batch: all
+  peaks and the card total must be finite, and every peak must be below the total.
+- `_SHAPE_RULES` gains three rules, graded at every schema rather than only the legacy one the
+  finding named:
+  - `largest_fitting_batch_worst_case` must be a count, or null when nothing ran;
+  - `recommendation` must be a mapping;
+  - `recommendation.batch_size` must be a count.
+
+**Outputs.** `src/tbox_finder/stage2/sizing.py`, `tests/unit/test_stage2_validator_totality.py`
+(173 tests).
+
+**Validation.**
+- **38 sabotages, each RED against its named test**: the 34 earlier ones, two with search
+  strings updated for the rewritten headroom code, plus 4 new ones (each new rule removed;
+  first-point-only; `any()` in place of `all()`).
+- **Census differential vs `main`:**
+  - 0 raises;
+  - all 1,246 formerly-raising cases are non-empty;
+  - 47,674 clause verdicts are identical;
+  - the other changes are the schema-1 recommendation change (4,645) and new strictness only
+    (741).
+- All four committed reports `validate_report → []`.
+- **Local tier: 16 failed / 7,258 passed**, with a FAILED set identical to the `9507912`
+  baseline.
+
+**Decisions.** None beyond the fixes. Both type rules apply at every schema, not just the legacy
+one the finding named, because the `==` hole is the same everywhere.
+
+**Commit.** see PR (P3-17′-validators, review round 2).

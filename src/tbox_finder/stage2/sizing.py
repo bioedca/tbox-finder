@@ -371,6 +371,12 @@ _SHAPE_RULES: tuple[tuple[tuple[str, ...], Any, str], ...] = (
         RSCH.nullable(RSCH.is_real),
         "a number a float can hold",
     ),
+    # Review r2: both published batch sizes are compared with `==`/`!=`, under which `4.0`,
+    # and `True` for 1, equal the re-derived int — so the TYPE is graded here, at every schema.
+    # Null when no worst-case point ran.
+    (("largest_fitting_batch_worst_case",), RSCH.nullable(RSCH.is_count), "a count"),
+    (("recommendation",), RSCH.nullable(RSCH.is_mapping), "a mapping"),
+    (("recommendation", "batch_size"), RSCH.is_count, "a count"),
 )
 
 
@@ -667,18 +673,20 @@ def _legacy_headroom_problems(
     its producer never computed any. Accepting the legacy shape without this would let a
     schema-1 report whose own peak exceeds its own card validate clean — the exemption is for
     the basis string's AGE, never for the claim it makes. Headroom means the recommended batch's
-    worst-case peak and the card's total are both finite numbers and the peak is the smaller.
+    worst-case peak and the card's total are both finite numbers and the peak is the smaller —
+    for EVERY worst-case point that ran at that batch (review r2: checking only the first, as
+    `next()` did, let a second point with no headroom stand behind a claim the first satisfied).
     """
     if largest is None:
         return []
-    peak = next((m.get("peak_vram_gib") for m in fitting if m.get("batch_size") == largest), None)
+    peaks = [m.get("peak_vram_gib") for m in fitting if m.get("batch_size") == largest]
     total = device.get("total_memory_gib")
-    finite = all(RSCH.is_real(v) and math.isfinite(v) for v in (peak, total))
-    if finite and peak < total:
+    finite = all(RSCH.is_real(v) and math.isfinite(v) for v in (*peaks, total))
+    if peaks and finite and all(peak < total for peak in peaks):
         return []
     return [
         f"the schema-1 recommendation asserts batch {largest!r} fits with headroom, but the "
-        f"report's own worst-case peak ({peak!r} GiB) and card total ({total!r} GiB) do not "
+        f"report's own worst-case peak(s) {peaks!r} GiB and card total ({total!r} GiB) do not "
         "bear it out"
     ]
 
