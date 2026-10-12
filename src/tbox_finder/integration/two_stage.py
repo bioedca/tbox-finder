@@ -83,7 +83,25 @@ fixture: ``is_science: false``, ``gated: false``. The two-stage-vs-Stage-1-only 
 comparison is P3-16 and the genome-scale scan is P5; no number produced here is a performance
 claim, and the report says so in ``disclosures``.
 
-PRD §6, §12, §13.1; ADR-0005 D3 + A3 + D15.
+Stage-2 identity and the shard record (P3-16′-remint, ADR-0005 A15 Pin 6)
+-------------------------------------------------------------------------
+A Stage-2 logit is a function of more than its payload. It also depends on the checkpoint,
+which is ``checkpoint_root`` plus ``arm``: P3-17 added an RNA-FM arm under the same name,
+``aux1.0_lr1e-4``, so the arm name alone does not identify it. It depends on the backbone and
+its revision, the dtype, the adapter **and** head weights, and the attention backend. It even
+depends on the **batch** the payload was scored in: A15 records 147 of 4,148 payloads shared
+by both v1 arms receiving different logits. So the ``stage2`` leg writes a schema-``1.1``
+artifact that names every one of those. Its ``env_lock`` is derived from the backbone through
+the ADR-0002 A15 allow-list rather than stamped as a constant, because the comparator runs
+under a different lock.
+
+``--shard I/N`` scores one contiguous slice of the row-id-sorted manifest and records which
+slice. The torch-free ``merge-stage2`` leg reassembles the slices, and refuses unless every
+shard is the same measurement, the indices are exactly ``0..N-1``, and each shard holds exactly
+the rows its index assigns. A merged artifact records its ``shard_layout``: a slice is batched
+differently from the whole manifest, so its logits can differ from an unsharded run's.
+
+PRD §6, §12, §13.1; ADR-0005 D3 + A3 + D15 + A15.
 """
 
 from __future__ import annotations
@@ -91,10 +109,11 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-from collections.abc import Mapping, Sequence
+import re
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 import numpy as np
@@ -110,6 +129,9 @@ from tbox_finder.infer.strand import resolve_strands as _resolve_strands
 from tbox_finder.ingest import record_hash, records_digest
 from tbox_finder.labels import CLASS_ORDER
 
+# Torch-free by its own contract: the registry carries the multimolecule class as a string.
+from tbox_finder.models import rna_backbone_registry as BR
+
 SCHEMA_VERSION = "1.0"
 STEP = "P3-14"
 GENERATED_BY = "src/tbox_finder/integration/two_stage.py"
@@ -117,9 +139,67 @@ ADR = "ADR-0005 D3 (+A3 reconciliation operator), D15 (strand resolver + robustn
 PRD = "PRD §6, §12, §13.1"
 
 #: The env the **replay** leg runs in — the only leg CI executes and the one that writes the
-#: committed report. The two model legs run in ``envs/ml-dna.yml`` (Stage-1) and
-#: ``envs/ml-rna.yml`` (Stage-2) and record their own lock in the artifact they write.
+#: committed report. The Stage-1 leg runs in ``envs/ml-dna.yml``. The Stage-2 leg runs under
+#: the lock of the backbone it scores with, which :func:`stage2_env_lock` derives and the
+#: artifact records.
 ENV_LOCK = "envs/data.conda-lock.yml"
+
+#: Schema of what the ``stage2`` and ``merge-stage2`` legs write. It is kept apart from
+#: :data:`SCHEMA_VERSION` on purpose. The harness report, the candidate table and the payload
+#: manifest did not change shape, and bumping their version would move the committed golden
+#: for a change it does not contain. ``1.0`` Stage-2 files carry none of the identity fields
+#: below; that covers P3-14's fixture and P3-16's v1 interim scores. :func:`read_stage2` still
+#: reads them, but they cannot be merged.
+STAGE2_SCHEMA_VERSION = "1.1"
+
+#: What makes two Stage-2 scorings **the same measurement** (ADR-0005 A15 Pin 6). Each one
+#: moves the logits on its own. ``checkpoint_root`` is listed beside ``arm`` because P3-17's
+#: RNA-FM arm shares the name ``aux1.0_lr1e-4``. ``batch_size`` is listed because scores
+#: depend on batch composition. ``payloads_sha256`` is listed because a shard is defined
+#: relative to one manifest. :func:`merge_stage2_shards` refuses any disagreement, and refuses
+#: a ``None`` in any of these fields: equality over all-missing values certifies nothing.
+STAGE2_IDENTITY_FIELDS: tuple[str, ...] = (
+    "arm",
+    "checkpoint_root",
+    "checkpoint_dir",
+    "backbone",
+    "revision",
+    "dtype",
+    "adapter_sha256",
+    "heads_sha256",
+    "attn_implementation",
+    "batch_size",
+    "payloads_sha256",
+    "env_lock",
+)
+
+#: Run-record fields every shard must also agree on before a merge. They are not identity in
+#: the A15 sense, but a merge mixing two of them would be one artifact describing two runs.
+#: ``device`` belongs here because the kernels, and so the last bits of a logit, are the
+#: device's.
+STAGE2_RUN_FIELDS: tuple[str, ...] = (
+    "schema_version",
+    "step",
+    "arm_selected_by",
+    "base_model_name_or_path",
+    "n_lora_b_nonzero",
+    "attn_implementation_matches_training",
+    "device",
+)
+
+#: Every key of a schema-``1.1`` Stage-2 artifact, whether it is unsharded, one shard, or
+#: merged. ``shard`` is ``None`` unless the file is a single shard. ``shard_layout`` is
+#: ``None`` unless the file is a merge. So a merged file has the same keys as an unsharded
+#: one.
+STAGE2_ARTIFACT_KEYS: tuple[str, ...] = (
+    *STAGE2_IDENTITY_FIELDS,
+    *STAGE2_RUN_FIELDS,
+    "shard",
+    "shard_layout",
+    "n_payloads",
+    "logits",
+    "n_tokens",
+)
 
 #: Every keyword-only knob on :func:`run_two_stage`. All of them are frozen elsewhere — the six
 #: locus knobs and the Stage-2 operating point by ADR-0005 D3 at the §13.1 phase gate,
@@ -1223,10 +1303,32 @@ def read_stage1(path: str | Path) -> dict[str, dict[str, Any]]:
 
 
 def read_stage2(path: str | Path) -> dict[str, float]:
-    """Read committed Stage-2 binary logits, keyed by :func:`payload_key`."""
+    """Read committed Stage-2 binary logits, keyed by :func:`payload_key`.
+
+    Reads a schema-``1.0`` file (no identity fields), an unsharded ``1.1`` file and a merged
+    ``1.1`` file alike: all three keep the logits under ``logits``. It **refuses** a single
+    shard, meaning any file whose ``shard`` is not ``None``. A shard covers only the rows its
+    index was assigned. A replay would still fail on the first missing key, but the message
+    would name a payload rather than the actual cause, which is that the shards were never
+    merged.
+    """
     with open(path, encoding="utf-8") as handle:
         payload = json.load(handle)
-    logits = payload["logits"] if isinstance(payload, Mapping) and "logits" in payload else payload
+    if isinstance(payload, Mapping) and "logits" in payload:
+        shard = payload.get("shard")
+        if shard is not None:
+            where = (
+                f"shard {shard.get('index')!r} of {shard.get('count')!r}"
+                if isinstance(shard, Mapping)
+                else f"a shard ({shard!r})"
+            )
+            raise TwoStageError(
+                f"{path} is {where} of a sharded Stage-2 scoring, not a complete one; "
+                "reassemble the shards with `two_stage merge-stage2` and read the merged file"
+            )
+        logits = payload["logits"]
+    else:
+        logits = payload
     return {str(key): float(value) for key, value in logits.items()}
 
 
@@ -1268,6 +1370,522 @@ def write_json(path: str | Path, payload: Any) -> None:
         encoding="utf-8",
     )
     tmp.replace(out)
+
+
+# ══════════════════════════════════════════════════════════════════════════════════════
+# Stage-2 artifact identity and the shard record (P3-16′-remint; ADR-0005 A15 Pin 6)
+# ══════════════════════════════════════════════════════════════════════════════════════
+_SHA256_HEX = re.compile(r"[0-9a-f]{64}")
+_SHARD_SPEC = re.compile(r"\s*(\d+)\s*/\s*(\d+)\s*")
+
+
+def _is_count(value: Any) -> bool:
+    """An ``int`` that is not a ``bool``: ``True == 1`` passes every equality a count meets."""
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _finite_logit(value: Any, *, what: str) -> float:
+    """A real, finite, non-``bool`` number, or a refusal.
+
+    ``float(True)`` is ``1.0``, which is a plausible logit
+    ([[bool-equals-one-passes-config-gates]]). A ``NaN`` is turned into ``null`` by
+    :func:`write_json`, and ``float(None)`` then fails at replay, far from the cause.
+    """
+    if isinstance(value, bool) or not isinstance(value, int | float | np.integer | np.floating):
+        raise TwoStageError(f"{what} is not a number ({value!r})")
+    number = float(value)
+    if not np.isfinite(number):
+        raise TwoStageError(f"{what} is not finite ({number!r})")
+    return number
+
+
+def require_repo_relative(text: Any, *, what: str) -> str:
+    """Refuse a recorded path that is absolute, home-relative, or climbs out with ``..``.
+
+    The Stage-2 identity fields are copied verbatim into reports that live in a public repo. An
+    absolute path leaks this machine's layout, and a ``..`` path does not resolve from the
+    repository root. Both are refused rather than rewritten, because rewriting would record a
+    path nobody passed. The check is lexical (no filesystem access) so it holds for a path
+    produced on another machine.
+    """
+    if not isinstance(text, str) or not text:
+        raise TwoStageError(f"{what} must be a non-empty repo-relative path, got {text!r}")
+    pure = PurePosixPath(text)
+    if pure.is_absolute() or text.startswith("~") or ".." in pure.parts:
+        raise TwoStageError(
+            f"{what} is {text!r}; a committed Stage-2 artifact records repo-relative paths, "
+            "never an absolute, home-relative or '..' one"
+        )
+    return text
+
+
+def manifest_row_ids(manifest: Sequence[Mapping[str, Any]]) -> list[str]:
+    """Every ``row_id`` of a payload manifest, in manifest order, after validation.
+
+    Each id must be a non-empty string with no newline (:func:`row_ids_sha256` frames ids by
+    newline), and ids must be **unique**. A duplicate id does not fail by itself: it collapses
+    two payloads into one logit, and a shard boundary falling between the two copies would
+    assign one id to two shards ([[duplicate-key-merges-instead-of-colliding]]).
+    """
+    ids: list[str] = []
+    seen: set[str] = set()
+    for position, entry in enumerate(manifest):
+        if not isinstance(entry, Mapping):
+            raise TwoStageError(f"payload manifest entry {position} is not an object")
+        row_id = entry.get("row_id")
+        if not isinstance(row_id, str) or not row_id or "\n" in row_id:
+            raise TwoStageError(
+                f"payload manifest entry {position} carries no usable row_id ({row_id!r}); it "
+                "must be a non-empty string with no newline"
+            )
+        if row_id in seen:
+            raise TwoStageError(
+                f"row_id {row_id!r} appears more than once in the payload manifest; a "
+                "duplicate collapses two payloads into one logit and can straddle a shard "
+                "boundary"
+            )
+        seen.add(row_id)
+        ids.append(row_id)
+    return ids
+
+
+def row_ids_sha256(row_ids: Iterable[str]) -> str:
+    """sha256 of ``"\\n".join(sorted(row_ids)) + "\\n"``: order-free, framed by newline."""
+    return hashlib.sha256(("\n".join(sorted(row_ids)) + "\n").encode("utf-8")).hexdigest()
+
+
+def shard_bounds(n_rows: int, index: int, count: int) -> tuple[int, int]:
+    """``[start, stop)`` of shard ``index`` of ``count`` over ``n_rows`` sorted rows.
+
+    The chunks are contiguous, and their sizes differ by at most one. The first
+    ``n_rows % count`` chunks hold the extra row. Together the ``count`` chunks partition
+    ``[0, n_rows)``, so if every index is present and each shard holds exactly its own chunk,
+    the union is the whole manifest.
+    """
+    if not _is_count(count) or count < 1:
+        raise TwoStageError(f"shard count must be an integer >= 1, got {count!r}")
+    if not _is_count(index) or not 0 <= index < count:
+        raise TwoStageError(f"shard index must be an integer in [0, {count}), got {index!r}")
+    if not _is_count(n_rows) or n_rows < 0:
+        raise TwoStageError(f"n_rows must be a non-negative integer, got {n_rows!r}")
+    base, extra = divmod(n_rows, count)
+    start = index * base + min(index, extra)
+    return start, start + base + (1 if index < extra else 0)
+
+
+def shard_manifest(
+    manifest: Sequence[Mapping[str, Any]], index: int, count: int
+) -> list[dict[str, Any]]:
+    """Shard ``index`` of ``count``: a contiguous slice of the manifest sorted by ``row_id``.
+
+    The slice depends on the **set** of rows and on nothing else. Input order does not matter,
+    because the manifest is sorted by ``row_id`` here rather than trusted to arrive sorted. The
+    merge re-derives every shard's assignment through this same function, so a shard holding
+    rows its index was not assigned is refused.
+    """
+    start, stop = shard_bounds(len(manifest), index, count)
+    manifest_row_ids(manifest)
+    ordered = sorted(manifest, key=lambda entry: entry["row_id"])
+    return [dict(entry) for entry in ordered[start:stop]]
+
+
+def parse_shard(text: str) -> tuple[int, int]:
+    """``--shard I/N`` → ``(I, N)``, refusing anything but ``0 <= I < N``, ``N >= 1``."""
+    match = _SHARD_SPEC.fullmatch(text)
+    if match is None:
+        raise argparse.ArgumentTypeError(f"--shard must read I/N (e.g. 0/4), got {text!r}")
+    index, count = int(match.group(1)), int(match.group(2))
+    if count < 1 or index >= count:
+        raise argparse.ArgumentTypeError(f"--shard {text!r}: need N >= 1 and 0 <= I < N")
+    return index, count
+
+
+def stage2_env_lock(backbone: Any) -> str:
+    """The conda lock a Stage-2 arm on ``backbone`` runs under, derived from the allow-list.
+
+    ``backbone`` may be the allow-list key the loader records (``rinalmo-giga`` / ``rnafm``) or
+    the Hugging Face repo id (``multimolecule/rinalmo-giga`` / ``multimolecule/rnafm``). The
+    two namespaces cannot collide. The mapping is :attr:`RnaBackbone.env_lock` (ADR-0002 A15),
+    the same field ``stage2.train.env_lock_for`` stamps into a training run's provenance, so
+    the scoring artifact and the run that trained the weights cannot name different
+    environments. Before A15 this leg wrote ``envs/ml-rna.conda-lock.yml`` for every arm.
+    That would have named the wrong environment for the RNA-FM comparator, which the
+    ``ml-rna`` lock cannot even load. An unknown backbone is refused, not defaulted.
+    """
+    spec = None
+    if isinstance(backbone, str):
+        spec = BR.BACKBONES.get(backbone) or BR.backbone_for_repo_id(backbone)
+    if spec is None:
+        raise TwoStageError(
+            f"backbone {backbone!r} is not in the ADR-0002 A15 allow-list (keys "
+            f"{BR.BACKBONE_KEYS}, repo ids {tuple(b.repo_id for b in BR.BACKBONES.values())}); "
+            "its env lock cannot be derived, and a defaulted one would name an environment "
+            "the run did not use"
+        )
+    return spec.env_lock
+
+
+def parse_payload_manifest(raw: bytes, *, where: str) -> list[dict[str, Any]]:
+    """A payload-manifest file's **bytes** → its validated ``payloads`` list.
+
+    The function takes bytes, not a parsed object, so that the ``payloads_sha256`` beside a
+    scoring is computed over the same bytes the rows were parsed from.
+    """
+    try:
+        payload = json.loads(raw)
+    except (json.JSONDecodeError, UnicodeDecodeError) as error:
+        raise TwoStageError(f"{where} is not a JSON payload manifest: {error}") from error
+    if not isinstance(payload, Mapping) or not isinstance(payload.get("payloads"), list):
+        raise TwoStageError(f"{where} carries no 'payloads' list; it is not a payload manifest")
+    manifest = payload["payloads"]
+    manifest_row_ids(manifest)
+    return manifest
+
+
+def stage2_identity(
+    *,
+    arm: str,
+    arm_selected_by: str,
+    checkpoint_root: str,
+    checkpoint_dir: str,
+    record: Mapping[str, Any],
+    trained_under: str,
+    device: str,
+    batch_size: int,
+    payloads_sha256: str,
+) -> dict[str, Any]:
+    """The identity and run block of a Stage-2 artifact (ADR-0005 A15 Pin 6).
+
+    ``record`` is what ``stage2.eval.load_stage2_checkpoint`` returned. ``backbone``,
+    ``revision``, ``dtype``, ``adapter_sha256`` and ``heads_sha256`` are copied from it, and
+    are therefore measured off the loaded checkpoint, not taken from the command line.
+    Torch-free and pure, so the leg can call it **after the load and before scoring**: a run
+    whose identity cannot be stated fails before it spends the GPU time.
+
+    Refusals:
+
+    * any identity field ``None`` or empty: an artifact with a missing identity field cannot be
+      told apart from another run;
+    * any of the three digests not a sha256 hexdigest;
+    * ``batch_size`` not an integer ``>= 1``;
+    * a recorded path that is absolute or contains ``..``;
+    * ``checkpoint_dir`` not equal to ``checkpoint_root/arm``. Those three fields are recorded
+      separately, and this check stops them from describing three different things;
+    * a recorded ``base_model_name_or_path`` that resolves to a backbone other than
+      ``backbone``. The loader enforces the same rule; this repeats it on the artifact
+      itself.
+    """
+    backbone = record.get("backbone")
+    identity: dict[str, Any] = {
+        "schema_version": STAGE2_SCHEMA_VERSION,
+        "step": STEP,
+        "arm": arm,
+        "arm_selected_by": arm_selected_by,
+        "checkpoint_root": require_repo_relative(checkpoint_root, what="checkpoint_root"),
+        "checkpoint_dir": require_repo_relative(checkpoint_dir, what="checkpoint_dir"),
+        "backbone": backbone,
+        "base_model_name_or_path": record.get("base_model_name_or_path"),
+        "revision": record.get("revision"),
+        "dtype": record.get("dtype"),
+        "adapter_sha256": record.get("adapter_sha256"),
+        "heads_sha256": record.get("heads_sha256"),
+        "n_lora_b_nonzero": record.get("n_lora_b_nonzero"),
+        "attn_implementation": trained_under,
+        "attn_implementation_matches_training": record.get("attn_implementation") == trained_under,
+        "device": str(device),
+        "env_lock": stage2_env_lock(backbone),
+        "batch_size": batch_size,
+        "payloads_sha256": payloads_sha256,
+    }
+    for field in STAGE2_IDENTITY_FIELDS:
+        value = identity[field]
+        if value is None or (isinstance(value, str) and not value):
+            raise TwoStageError(
+                f"Stage-2 identity field {field!r} is {value!r}; ADR-0005 A15 Pin 6 requires "
+                "every identity field to be recorded, and a missing one cannot tell this run "
+                "apart from another"
+            )
+    for field in ("adapter_sha256", "heads_sha256", "payloads_sha256"):
+        if not isinstance(identity[field], str) or not _SHA256_HEX.fullmatch(identity[field]):
+            raise TwoStageError(f"{field} is not a sha256 hexdigest ({identity[field]!r})")
+    if not _is_count(batch_size) or batch_size < 1:
+        raise TwoStageError(f"batch_size must be an integer >= 1, got {batch_size!r}")
+    expected_dir = PurePosixPath(identity["checkpoint_root"]) / str(arm)
+    if PurePosixPath(identity["checkpoint_dir"]) != expected_dir:
+        raise TwoStageError(
+            f"checkpoint_dir {identity['checkpoint_dir']!r} is not checkpoint_root/arm "
+            f"({str(expected_dir)!r}); the three identity fields would name different "
+            "checkpoints"
+        )
+    base = identity["base_model_name_or_path"]
+    if base is not None:
+        derived = BR.backbone_for_repo_id(base)
+        if derived is None or derived.key != backbone:
+            raise TwoStageError(
+                f"the checkpoint records base model {base!r}, which is not backbone "
+                f"{backbone!r}; the adapter and the recorded identity disagree"
+            )
+    return identity
+
+
+def stage2_artifact(
+    identity: Mapping[str, Any],
+    *,
+    payloads: Sequence[Mapping[str, Any]],
+    scored: Sequence[Mapping[str, Any]],
+    shard: tuple[int, int] | None,
+) -> dict[str, Any]:
+    """Assemble the schema-``1.1`` artifact the ``stage2`` leg writes.
+
+    ``payloads`` is the work list actually scored: the whole manifest, or one
+    :func:`shard_manifest` slice. ``scored`` is ``stage2.eval.score_rows``' output. The scored
+    row ids must be exactly the work list's, so an artifact cannot state a ``shard`` record or
+    ``n_payloads`` that its logits do not match. ``shard_layout`` is ``None`` here, because a
+    layout belongs only to a merge.
+    """
+    ids = manifest_row_ids(payloads)
+    logits: dict[str, float] = {}
+    n_tokens: dict[str, int] = {}
+    for row in scored:
+        row_id = str(row.get("row_id"))
+        if row_id in logits:
+            raise TwoStageError(f"the scorer returned row {row_id!r} twice")
+        logits[row_id] = _finite_logit(row.get("tbox_logit"), what=f"logit of row {row_id!r}")
+        tokens = row.get("n_tokens")
+        if not _is_count(tokens) or tokens < 1:
+            raise TwoStageError(f"row {row_id!r} has no positive integer n_tokens ({tokens!r})")
+        n_tokens[row_id] = tokens
+    if set(logits) != set(ids):
+        raise TwoStageError(
+            f"the scorer returned {len(logits)} rows for a work list of {len(ids)}: "
+            f"{len(set(ids) - set(logits))} unscored, {len(set(logits) - set(ids))} foreign"
+        )
+    shard_record = None
+    if shard is not None:
+        index, count = shard
+        shard_bounds(len(ids), index, count)  # validates the (index, count) pair itself
+        shard_record = {
+            "index": index,
+            "count": count,
+            "n_payloads": len(ids),
+            "row_ids_sha256": row_ids_sha256(ids),
+        }
+    artifact = {
+        **{key: identity[key] for key in (*STAGE2_IDENTITY_FIELDS, *STAGE2_RUN_FIELDS)},
+        "shard": shard_record,
+        "shard_layout": None,
+        "n_payloads": len(ids),
+        "logits": logits,
+        "n_tokens": n_tokens,
+    }
+    return artifact
+
+
+def merge_stage2_shards(manifest_raw: bytes, shard_files: Sequence[bytes]) -> dict[str, Any]:
+    """Reassemble ``--shard I/N`` artifacts into one Stage-2 artifact, or refuse.
+
+    Takes the payload manifest's **bytes** and each shard file's **bytes**. Every digest it
+    checks or records is then computed from the same bytes it parsed. Refuses unless:
+
+    * every shard is a schema-``1.1`` *shard* (``shard`` set, ``shard_layout`` ``None``) that
+      carries every :data:`STAGE2_ARTIFACT_KEYS` field and no ``None`` identity field;
+    * every shard's ``payloads_sha256`` equals the sha256 of the given manifest, so each shard
+      was cut from **this** manifest;
+    * every :data:`STAGE2_IDENTITY_FIELDS` and :data:`STAGE2_RUN_FIELDS` value is identical
+      across shards. The comparison is by JSON text, so ``1`` vs ``1.0`` vs ``true`` disagree;
+    * every shard states the same ``count``, and the indices are exactly ``{0..count-1}``, with
+      none missing and none twice;
+    * each shard's ``logits`` and ``n_tokens`` keys equal the rows :func:`shard_manifest`
+      assigns its index, and its ``n_payloads`` and ``row_ids_sha256`` re-derive from them.
+
+    No separate "union == manifest" clause is needed, because it cannot fail once the checks
+    above pass: :func:`shard_bounds` partitions the sorted ids, every index is present, and
+    each shard holds exactly its own chunk. ``test_shards_partition_the_manifest`` pins that
+    partition directly.
+
+    The result has the keys of an unsharded artifact (:data:`STAGE2_ARTIFACT_KEYS`), with
+    ``shard: None`` and a ``shard_layout`` recording ``{index, n_payloads, row_ids_sha256,
+    file_sha256}`` for every shard. The layout is kept because a slice is batched differently
+    from the whole manifest, so the merged logits need not equal an unsharded run's.
+    """
+    manifest = parse_payload_manifest(manifest_raw, where="the payload manifest")
+    manifest_sha = hashlib.sha256(manifest_raw).hexdigest()
+    if not shard_files:
+        raise TwoStageError("no shard files were given to merge")
+
+    shards: list[tuple[Mapping[str, Any], str]] = []
+    for position, raw in enumerate(shard_files):
+        where = f"shard file #{position}"
+        try:
+            payload = json.loads(raw)
+        except (json.JSONDecodeError, UnicodeDecodeError) as error:
+            raise TwoStageError(f"{where} is not JSON: {error}") from error
+        if not isinstance(payload, Mapping):
+            raise TwoStageError(f"{where} is not a JSON object")
+        if payload.get("schema_version") != STAGE2_SCHEMA_VERSION:
+            raise TwoStageError(
+                f"{where} is schema {payload.get('schema_version')!r}, not "
+                f"{STAGE2_SCHEMA_VERSION!r}; only a shard written by the 1.1 `stage2 --shard` "
+                "leg records the identity a merge must check"
+            )
+        missing = [key for key in STAGE2_ARTIFACT_KEYS if key not in payload]
+        if missing:
+            raise TwoStageError(f"{where} is missing {missing}")
+        for field in STAGE2_IDENTITY_FIELDS:
+            if payload[field] is None:
+                raise TwoStageError(
+                    f"{where} records identity field {field!r} as null; a merge cannot "
+                    "certify shards as one measurement on a field none of them states"
+                )
+        record = payload["shard"]
+        if not isinstance(record, Mapping):
+            raise TwoStageError(
+                f"{where} has shard={record!r}; it is not one shard of a sharded scoring"
+            )
+        if payload["shard_layout"] is not None:
+            raise TwoStageError(f"{where} is already a merged artifact, not a shard")
+        for key in ("index", "count", "n_payloads"):
+            if not _is_count(record.get(key)):
+                raise TwoStageError(f"{where} shard.{key} is not an integer ({record.get(key)!r})")
+        if payload["payloads_sha256"] != manifest_sha:
+            raise TwoStageError(
+                f"{where} (shard {record['index']}) was scored from payload manifest "
+                f"{payload['payloads_sha256']}, not from the given one ({manifest_sha}); its "
+                "rows were cut from a different work list"
+            )
+        shards.append((payload, hashlib.sha256(raw).hexdigest()))
+
+    reference = shards[0][0]
+    for field in (*STAGE2_IDENTITY_FIELDS, *STAGE2_RUN_FIELDS):
+        seen = {json.dumps(payload[field], sort_keys=True) for payload, _ in shards}
+        if len(seen) > 1:
+            raise TwoStageError(
+                f"the shards disagree on {field!r} ({sorted(seen)}); they are not one "
+                "measurement, and merging them would publish one artifact describing several "
+                "runs (ADR-0005 A15 Pin 6)"
+            )
+
+    counts = {payload["shard"]["count"] for payload, _ in shards}
+    if len(counts) != 1:
+        raise TwoStageError(f"the shards state different shard counts {sorted(counts)}")
+    count = counts.pop()
+    indices = [payload["shard"]["index"] for payload, _ in shards]
+    duplicated = sorted({index for index in indices if indices.count(index) > 1})
+    if duplicated:
+        raise TwoStageError(f"shard index(es) {duplicated} were given more than once")
+    absent = sorted(set(range(count)) - set(indices))
+    if absent:
+        raise TwoStageError(f"shard index(es) {absent} of {count} are missing")
+    stray = sorted(set(indices) - set(range(count)))
+    if stray:
+        raise TwoStageError(f"shard index(es) {stray} lie outside [0, {count})")
+
+    logits: dict[str, float] = {}
+    n_tokens: dict[str, int] = {}
+    layout: list[dict[str, Any]] = []
+    for payload, file_sha in sorted(shards, key=lambda item: item[0]["shard"]["index"]):
+        record = payload["shard"]
+        index = record["index"]
+        expected = [entry["row_id"] for entry in shard_manifest(manifest, index, count)]
+        for name in ("logits", "n_tokens"):
+            got = payload[name]
+            if not isinstance(got, Mapping) or set(got) != set(expected):
+                held = set(got) if isinstance(got, Mapping) else set()
+                raise TwoStageError(
+                    f"shard {index} of {count}: its {name} keys are not the rows its index "
+                    f"assigns ({len(set(expected) - held)} assigned rows absent, "
+                    f"{len(held - set(expected))} rows not assigned to it)"
+                )
+        if record["n_payloads"] != len(expected) or payload["n_payloads"] != len(expected):
+            raise TwoStageError(
+                f"shard {index} of {count} states n_payloads {record['n_payloads']!r} / "
+                f"{payload['n_payloads']!r}, but its index assigns {len(expected)} rows"
+            )
+        digest = row_ids_sha256(expected)
+        if record.get("row_ids_sha256") != digest:
+            raise TwoStageError(
+                f"shard {index} of {count} states row_ids_sha256 "
+                f"{record.get('row_ids_sha256')!r}, which does not re-derive ({digest})"
+            )
+        for row_id in expected:
+            logits[row_id] = _finite_logit(
+                payload["logits"][row_id], what=f"shard {index} logit of row {row_id!r}"
+            )
+            tokens = payload["n_tokens"][row_id]
+            if not _is_count(tokens) or tokens < 1:
+                raise TwoStageError(f"shard {index} row {row_id!r} n_tokens is {tokens!r}")
+            n_tokens[row_id] = tokens
+        layout.append(
+            {
+                "index": index,
+                "n_payloads": len(expected),
+                "row_ids_sha256": digest,
+                "file_sha256": file_sha,
+            }
+        )
+
+    return {
+        **{key: reference[key] for key in (*STAGE2_IDENTITY_FIELDS, *STAGE2_RUN_FIELDS)},
+        "shard": None,
+        "shard_layout": {"count": count, "shards": layout},
+        "n_payloads": len(logits),
+        "logits": logits,
+        "n_tokens": n_tokens,
+    }
+
+
+def union_payload_manifests(manifests: Sequence[Sequence[Mapping[str, Any]]]) -> list[dict]:
+    """The deduplicated union of several payload manifests over one benchmark, by ``row_id``.
+
+    A τ sweep's work lists share most rows, and a row's id is its content address
+    (:func:`payload_key`), so scoring the union once gives every τ's replay each logit it needs.
+    P3-16's v1 union was assembled by hand; this is that step, made a leg. A ``row_id`` carried
+    with two different payloads is refused: one logit would then stand for two inputs. Rows come
+    back sorted by ``row_id``, so the union does not depend on the order of its inputs.
+    """
+    union: dict[str, dict] = {}
+    for manifest in manifests:
+        manifest_row_ids(manifest)
+        for row in manifest:
+            row_id = row["row_id"]
+            if row_id in union and union[row_id] != dict(row):
+                raise TwoStageError(
+                    f"row_id {row_id!r} is carried with two different payloads; the manifests "
+                    "were not cut from one benchmark under one transcriber"
+                )
+            union.setdefault(row_id, dict(row))
+    if not union:
+        raise TwoStageError("the union of the given manifests is empty; there is nothing to score")
+    return [union[row_id] for row_id in sorted(union)]
+
+
+def refuse_v1_output(path: str | Path) -> None:
+    """Refuse to write over a v1 artifact (ADR-0005 A15 Pin 5: v1 stays byte-unchanged).
+
+    A15 Pin 5 states that "no v2 artifact is written to a v1 path". The fixed paths P3-17a
+    hash-binds are ``stage2.cm_confirmer.CANONICAL_SOURCES``, read from there rather than
+    re-typed here ([[promote-dont-duplicate-is-a-correctness-rule]]). Any
+    ``data/interim/p3_16/v1_*`` file is also refused, which covers the production arm and the
+    other τ reads P3-17a does not bind. Paths are compared by their trailing components after
+    ``resolve()``, so the guard holds from the main checkout, from a worktree, and on the
+    cluster.
+    """
+    from tbox_finder.stage2.cm_confirmer import CANONICAL_SOURCES  # lazy: torch-free, light
+
+    resolved = Path(path).resolve()
+    for key, value in CANONICAL_SOURCES.items():
+        tail = PurePosixPath(value).parts
+        if resolved.parts[-len(tail) :] == tail:
+            raise TwoStageError(
+                f"refusing to write {path}: it is the v1 artifact P3-17a binds as {key!r} "
+                f"({value}); ADR-0005 A15 Pin 5 keeps every v1 byte unchanged and writes v2 to "
+                "v2 paths"
+            )
+    if resolved.name.startswith("v1_") and resolved.parent.name == "p3_16":
+        raise TwoStageError(
+            f"refusing to write {path}: data/interim/p3_16/v1_* is the withdrawn v1 benchmark's "
+            "record (ADR-0005 A15 Pin 5); write v2 artifacts to v2_* paths"
+        )
 
 
 # ══════════════════════════════════════════════════════════════════════════════════════
@@ -1334,6 +1952,8 @@ def _cmd_stage1(args: argparse.Namespace) -> int:
     posterior cannot be, and saying so would have been an unmeasured claim in the one place that
     exists to check one.
     """
+    refuse_v1_output(args.out)  # before the checkpoint load, not after the scan (A15 Pin 5)
+
     import torch  # lazy: this leg only
 
     from tbox_finder.infer import scan
@@ -1391,6 +2011,7 @@ def _cmd_stage1(args: argparse.Namespace) -> int:
 
 def _cmd_payloads(args: argparse.Namespace) -> int:
     """LEG 2 (torch-free): contigs + Stage-1 logits + the rule → the Stage-2 work list."""
+    refuse_v1_output(args.out)
     contigs = read_contigs(args.contigs)
     stage1 = read_stage1(args.stage1)
     runs = []
@@ -1431,13 +2052,31 @@ def _cmd_stage2(args: argparse.Namespace) -> int:
     it raises deep inside the forward. The leg refuses **before** loading 2.5 GB of weights, and
     refuses rather than silently falling back to ``eager``: a fallback would score the fixture
     under a backend the checkpoint was not trained under and mint that into a committed golden.
+
+    **Identity and shards (P3-16′-remint, ADR-0005 A15 Pin 6).** The artifact is schema
+    ``1.1``. It records the identity :func:`stage2_identity` builds from the loader's own
+    record, the batch size, the sha256 of the payload-manifest **bytes**, and an ``env_lock``
+    derived from the backbone. ``--shard I/N`` scores only the :func:`shard_manifest` slice
+    ``I`` and records ``shard: {index, count, n_payloads, row_ids_sha256}``. ``merge-stage2``
+    reassembles the slices. Every check that does not need the model runs **before** the
+    2.5 GB load: the v1-path guard, the out-vs-payloads collision, the batch size, the manifest
+    and its shard, and the recorded paths. The identity check runs after the load and before
+    scoring.
     """
+    refuse_v1_output(args.out)
+    if Path(args.out).resolve() == Path(args.payloads).resolve():
+        raise TwoStageError("--out is the payload manifest itself; the scores would overwrite it")
+    if not _is_count(args.batch_size) or args.batch_size < 1:
+        raise TwoStageError(f"--batch-size must be an integer >= 1, got {args.batch_size!r}")
+
     import torch  # lazy: this leg only
 
     from tbox_finder.stage2 import eval as stage2_eval
 
-    with open(args.payloads, encoding="utf-8") as handle:
-        manifest = json.load(handle)["payloads"]
+    raw = Path(args.payloads).read_bytes()
+    payloads_sha256 = hashlib.sha256(raw).hexdigest()
+    manifest = parse_payload_manifest(raw, where=str(args.payloads))
+    work = manifest if args.shard is None else shard_manifest(manifest, *args.shard)
     arms = stage2_eval.discover_arms(checkpoint_root=args.checkpoint_root, sweep_dir=args.sweep_dir)
     production = stage2_eval.production_arm_config()
     matching = [
@@ -1454,6 +2093,12 @@ def _cmd_stage2(args: argparse.Namespace) -> int:
             else f"--arm {args.arm!r} is not among the discovered arms {sorted(arms)}"
         )
     spec = arms[arm_name]
+    # Relativised by the same function that relativised `checkpoint_dir`, so the two agree,
+    # then refused if that left anything a public repo cannot carry.
+    checkpoint_root = require_repo_relative(
+        stage2_eval.repo_relative(args.checkpoint_root), what="--checkpoint-root"
+    )
+    require_repo_relative(spec["checkpoint_dir"], what=f"arm {arm_name} checkpoint_dir")
     trained_under = spec.get("attn_implementation")
     if trained_under is None:
         raise TwoStageError(
@@ -1470,29 +2115,77 @@ def _cmd_stage2(args: argparse.Namespace) -> int:
     model, record = stage2_eval.load_stage2_checkpoint(
         spec["checkpoint_path"], attn_implementation=trained_under, device=device
     )
-    scored = stage2_eval.score_rows(model, manifest, batch_size=args.batch_size)
+    identity = stage2_identity(
+        arm=arm_name,
+        arm_selected_by="stage2.eval.production_arm_config()" if args.arm is None else "cli",
+        checkpoint_root=checkpoint_root,
+        checkpoint_dir=spec["checkpoint_dir"],
+        record=record,
+        trained_under=trained_under,
+        device=str(device),
+        batch_size=args.batch_size,
+        payloads_sha256=payloads_sha256,
+    )
+    scored = stage2_eval.score_rows(model, work, batch_size=args.batch_size)
+    write_json(args.out, stage2_artifact(identity, payloads=work, scored=scored, shard=args.shard))
+    where = "" if args.shard is None else f" (shard {args.shard[0]}/{args.shard[1]})"
+    print(
+        f"wrote {args.out}: {len(scored)} of {len(manifest)} payloads{where} scored by arm "
+        f"{arm_name} ({identity['backbone']}, env {identity['env_lock']})"
+    )
+    return 0
+
+
+def _cmd_merge_stage2(args: argparse.Namespace) -> int:
+    """LEG 3b (torch-free): ``--shard I/N`` artifacts → one Stage-2 artifact, or a refusal.
+
+    Every refusal is :func:`merge_stage2_shards`'. This leg also refuses an ``--out`` that is
+    one of its own inputs, and checks that **before** reading anything
+    ([[two-outputs-one-path-destroys-the-first]]). It also refuses a v1 path (A15 Pin 5).
+    """
+    out = Path(args.out).resolve()
+    inputs = [Path(args.payloads).resolve(), *(Path(path).resolve() for path in args.shards)]
+    if out in inputs:
+        raise TwoStageError(f"--out {args.out} is one of the merge's own inputs")
+    refuse_v1_output(args.out)
+    merged = merge_stage2_shards(
+        Path(args.payloads).read_bytes(), [Path(path).read_bytes() for path in args.shards]
+    )
+    write_json(args.out, merged)
+    print(
+        f"wrote {args.out}: {merged['n_payloads']} payloads merged from "
+        f"{merged['shard_layout']['count']} shards (arm {merged['arm']}, {merged['backbone']})"
+    )
+    return 0
+
+
+def _cmd_payloads_union(args: argparse.Namespace) -> int:
+    """LEG 2b (torch-free): several ``payloads`` manifests → the one work list Stage-2 scores.
+
+    Refuses an ``--out`` that is one of its inputs before reading anything, and a v1 path
+    (A15 Pin 5). Each input is recorded, as passed, with the sha256 of the bytes it was parsed
+    from; an absolute or ``..`` input path is refused rather than recorded.
+    """
+    for path in args.manifests:
+        require_repo_relative(path, what="--manifests entry")
+    out = Path(args.out).resolve()
+    if out in {Path(path).resolve() for path in args.manifests}:
+        raise TwoStageError(f"--out {args.out} is one of the union's own inputs")
+    refuse_v1_output(args.out)
+    raws = [(path, Path(path).read_bytes()) for path in args.manifests]
+    union = union_payload_manifests([parse_payload_manifest(raw, where=path) for path, raw in raws])
     write_json(
         args.out,
         {
             "schema_version": SCHEMA_VERSION,
             "step": STEP,
-            "arm": arm_name,
-            "arm_selected_by": "stage2.eval.production_arm_config()" if args.arm is None else "cli",
-            "checkpoint_dir": spec["checkpoint_dir"],
-            "adapter_sha256": record.get("adapter_sha256"),
-            "n_lora_b_nonzero": record.get("n_lora_b_nonzero"),
-            "attn_implementation": trained_under,
-            "attn_implementation_matches_training": (
-                record.get("attn_implementation") == trained_under
-            ),
-            "device": str(device),
-            "env_lock": "envs/ml-rna.conda-lock.yml",
-            "n_payloads": len(manifest),
-            "logits": {row["row_id"]: float(row["tbox_logit"]) for row in scored},
-            "n_tokens": {row["row_id"]: int(row["n_tokens"]) for row in scored},
+            "union_of": [
+                {"path": path, "sha256": hashlib.sha256(raw).hexdigest()} for path, raw in raws
+            ],
+            "payloads": union,
         },
     )
-    print(f"wrote {args.out}: {len(scored)} payloads scored by arm {arm_name}")
+    print(f"wrote {args.out}: {len(union)} payloads, the union of {len(raws)} manifests")
     return 0
 
 
@@ -1605,7 +2298,31 @@ def build_parser() -> argparse.ArgumentParser:
     three.add_argument("--arm", default=None)
     three.add_argument("--device", default=None)
     three.add_argument("--batch-size", type=int, default=4)
+    three.add_argument(
+        "--shard",
+        type=parse_shard,
+        default=None,
+        help=(
+            "I/N: score only slice I of N of the row-id-sorted manifest and record which; "
+            "reassemble with merge-stage2"
+        ),
+    )
     three.set_defaults(func=_cmd_stage2)
+
+    merge = sub.add_parser(
+        "merge-stage2", help="torch-free: stage2 --shard artifacts -> one stage2 artifact"
+    )
+    merge.add_argument("--payloads", required=True, help="the manifest every shard was cut from")
+    merge.add_argument("--shards", nargs="+", required=True)
+    merge.add_argument("--out", required=True)
+    merge.set_defaults(func=_cmd_merge_stage2)
+
+    union = sub.add_parser(
+        "payloads-union", help="torch-free: several payload manifests -> one Stage-2 work list"
+    )
+    union.add_argument("--manifests", nargs="+", required=True)
+    union.add_argument("--out", required=True)
+    union.set_defaults(func=_cmd_payloads_union)
 
     four = sub.add_parser("run", help="torch-free: replay both -> candidate table + diagnostic")
     four.add_argument("--contigs", required=True)
@@ -1650,6 +2367,10 @@ __all__ = [
     "PRD",
     "RULE_PARAMETERS",
     "SCHEMA_VERSION",
+    "STAGE2_ARTIFACT_KEYS",
+    "STAGE2_IDENTITY_FIELDS",
+    "STAGE2_RUN_FIELDS",
+    "STAGE2_SCHEMA_VERSION",
     "STEP",
     "ContigRun",
     "TwoStageError",
@@ -1661,9 +2382,14 @@ __all__ = [
     "duplicate_rna_agreement",
     "lookup_logit",
     "main",
+    "manifest_row_ids",
+    "merge_stage2_shards",
+    "union_payload_manifests",
     "no_rule_parameter_has_a_default",
     "normalise_contig",
     "normalise_contigs",
+    "parse_payload_manifest",
+    "parse_shard",
     "parse_threshold",
     "payload_key",
     "payload_manifest",
@@ -1672,10 +2398,18 @@ __all__ = [
     "read_stage1",
     "read_stage2",
     "read_temperature",
+    "refuse_v1_output",
     "repo_relative",
     "reconcile_contig",
+    "require_repo_relative",
+    "row_ids_sha256",
     "run_contig",
     "run_two_stage",
+    "shard_bounds",
+    "shard_manifest",
+    "stage2_artifact",
+    "stage2_env_lock",
+    "stage2_identity",
     "strand_robustness",
     "strand_robustness_problems",
     "write_json",

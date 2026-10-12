@@ -1,0 +1,14 @@
+#target name         accession query name           accession mdl mdl from   mdl to seq from   seq to strand trunc pass   gc  bias  score   E-value inc description of target
+#------------------- --------- -------------------- --------- --- -------- -------- -------- -------- ------ ----- ---- ---- ----- ------ --------- --- ---------------------
+w000001              -         T-box                RF00230    cm        1      224        1      242      +    no    1 0.36   3.8  115.1   1.3e-27 !   -
+w000002              -         T-box                RF00230    cm        1      224        1      214      +    no    1 0.44   0.0  102.0   3.2e-24 !   -
+#
+# Program:         cmsearch
+# Version:         1.1.5 (Sep 2023)
+# Pipeline mode:   SEARCH
+# Query file:      data/external/refs/RF00230.cm
+# Target file:     panel.fa
+# Option settings: cmsearch -Z 1.0 --tblout RF00230.tblout --noali -T 10.0 --cpu 2 data/external/refs/RF00230.cm panel.fa 
+# Current dir:     tests/fixtures/host_screen
+# Date:            (sanitised: committed fixture)
+# [ok]

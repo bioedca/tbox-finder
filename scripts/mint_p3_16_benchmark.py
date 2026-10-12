@@ -67,9 +67,31 @@ disclosures rest on.
 
 Measured on the committed tables: ``gc_background`` (206 items) and ``leader_decoy`` (1) were
 kept out of **both** Stage-1 runs by A7 pins 4–5; all 2,999 ``structured_rna`` decoys were
-embedded in **both**; ``dinuc_shuffled`` splits by parent fold. Per the §7 decision all four
-pools stay in the gated denominator, so the per-item exposure flags are what carries that
-into the report as a disclosure instead of a silent bias.
+embedded in **both**; ``dinuc_shuffled`` splits by parent fold. The per-item exposure flags are
+what carries that into the report as a disclosure instead of a silent bias.
+
+The gated subset (ADR-0005 A15 Pin 4, schema 1.1)
+-------------------------------------------------
+All four §9.1 pools are **minted and scored**, but ``leader_decoy`` is reported **beside** the
+gate, not in it: all 8 of its records are T-box-derived, which A7 Pin 5 calls "a direct label
+contradiction". This supersedes the 2026-08-13 §7 four-pool call. The manifest declares the
+subset rather than leaving every consumer to re-derive it: a per-item ``gated`` flag (False iff
+``pool == "leader_decoy"``) and ``scope.n_items_gated`` / ``n_negatives_gated`` /
+``negatives_by_pool_gated`` / ``n_blocks_gated``. The leader stays in the decoy list, the draw
+and the mint at its ``decoy_id``-sorted position: ``unique_hosts=True`` assigns hosts by
+position in a seeded permutation, so removing it would re-index every later host.
+
+The host screen (ADR-0005 A15 Pins 1–3, ``--host-screen``)
+---------------------------------------------------------
+v1's only host filter was ``parent_nested_train == False``, a rule about the mining-pool
+record's *parent*. It says nothing about the DNA of the window itself, and v1's pass was
+carried by hosts that held RF00230-detectable sequence (A15's trigger). ``--host-screen``
+takes the committed ``reports/p3/host_screen.json`` (``integration/host_screen.py``) and
+restricts the out-of-fold pool to the windows it admitted **before** the seeded permutation,
+so the draw runs over the screened pool and all 692 hosts are redrawn. The minter refuses a
+screen whose controls did not all fire, whose problems list is non-empty, whose threshold is
+not 10.0 bits, or whose pool digest or admitted-list digest does not match the bytes on disk.
+Without the flag the script reproduces v1's items and contigs (the new schema fields aside).
 
 Blocks (ADR-0005 D5)
 --------------------
@@ -88,7 +110,10 @@ Usage (from the checkout that holds the DVC data)::
     python scripts/mint_p3_16_benchmark.py \\
         --dataset data/processed/stage2_dataset.parquet \\
         --decoys data/processed/negatives/decoys_v0.parquet \\
-        --out data/interim/p3_16/benchmark_v0.json
+        --host-screen reports/p3/host_screen.json \\
+        --out data/interim/p3_16/benchmark_v2.json
+
+``--out`` is refused if it names a v1 artifact (A15 Pin 5: v1 stays byte-unchanged).
 """
 
 from __future__ import annotations
@@ -96,7 +121,8 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-from collections.abc import Collection, Mapping, Sequence
+import re
+from collections.abc import Collection, Iterator, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -105,6 +131,9 @@ import pandas as pd
 from tbox_finder.data import embedding as emb
 from tbox_finder.data import negatives as negatives_mod
 from tbox_finder.data import window_dataset as wd
+from tbox_finder.integration.stage1_folds import ARM_EXCLUDE_GATE4_EVAL, training_fold_ids
+from tbox_finder.masking import is_missing, row_text
+from tbox_finder.stage2.cm_confirmer import CANONICAL_SOURCES
 
 #: The rung the benchmark is drawn from. Stage-2 (P3-06) admits only ``fold_random ==
 #: "train"``, so every ``test`` row is out of Stage-2's training set — measured 0 overlap.
@@ -117,13 +146,14 @@ EXPECTED_EMBEDDED: dict[str, dict[str, int]] = {
     "twin": {"dinuc_shuffled": 602, "structured_rna": 2999},
 }
 
-#: ``exclude_gate4_eval`` per arm — the *one* override that separates the twin from the
-#: shipped scanner (`checkpoints/stage1_gate4_twin/provenance.json`: "one override, nothing
-#: else").
-ARM_EXCLUDE_GATE4_EVAL: dict[str, bool] = {"production": False, "twin": True}
+# ``ARM_EXCLUDE_GATE4_EVAL`` and ``training_fold_ids`` are imported above from
+# ``integration/stage1_folds.py`` (promoted at P3-16′-remint, ADR-0005 A15 Pin 1) so the minter
+# and the host screen read ONE fold definition; they stay importable from this module.
 
-#: All four §9.1 classes enter the BENCHMARK denominator (PRD §2.3; §7 decision 2026-08-13),
-#: unlike `embedding.TRAINING_DECOY_POOLS`, which is A7's two-pool *training* mix.
+#: All four §9.1 classes are MINTED and scored (PRD §2.3), unlike
+#: `embedding.TRAINING_DECOY_POOLS`, which is A7's two-pool *training* mix. Which of them enter
+#: the GATED denominator is :data:`NON_GATED_POOLS`' business, not this tuple's: dropping a pool
+#: here would remove it from the draw and re-index every later host.
 BENCHMARK_DECOY_POOLS: tuple[str, ...] = (
     "gc_background",
     "structured_rna",
@@ -131,26 +161,58 @@ BENCHMARK_DECOY_POOLS: tuple[str, ...] = (
     "leader_decoy",
 )
 
-SCHEMA_VERSION = "1.0"
+#: Pools minted and scored but reported BESIDE the gate (ADR-0005 A15 Pin 4): all 8
+#: ``leader_decoy`` records are T-box-derived (A7 Pin 5: "a direct label contradiction").
+NON_GATED_POOLS: tuple[str, ...] = ("leader_decoy",)
+GATED_RULE = "ADR-0005 A15 Pin 4 — leader_decoy minted and scored, reported beside the gate"
+
+#: 1.1 adds the per-item ``gated`` flag, the ``scope.*_gated`` counts, ``scope.host_pool``'s
+#: ``screen`` / ``composition`` / ``n_available_to_draw``, the N-free host-overlap rule and
+#: ``source.mining_pool_sha256`` / ``source.host_screen*`` and ``scope.insert_exposure``
+#: (ADR-0005 A15).
+SCHEMA_VERSION = "1.1"
 STEP = "P3-16"
+
+#: What a ``--host-screen`` report must carry for the minter to draw from its admitted list
+#: (ADR-0005 A15 Pin 2's pinned value, never a default the report may restate differently).
+HOST_SCREEN_THRESHOLD_BITS = 10.0
+HOST_SCREEN_ADR = "ADR-0005 A15"
+
+#: ``scope.host_pool.selection`` per mode. The unscreened string is v1's (post PR #133); the
+#: screened one must name the screen, and neither may say the hosts are "clean" for any arm —
+#: a selection RULE is not a measurement of what the drawn windows contain.
+UNSCREENED_SELECTION = (
+    "parent_nested_train == False — the mining-pool record's PARENT, not the DNA of "
+    "the window drawn from it; see overlap_with_training_folds"
+)
+SCREENED_SELECTION = (
+    "parent_nested_train == False, then admitted by the ADR-0005 A15 host screen: Pin 1 "
+    "fold screen (whole pre-splice window, canonical N-free 32-mers on either strand against "
+    "the union of every Stage-1/Stage-2 training sequence plus every decoys_v0 insert, or a "
+    "same-accession training-interval overlap) and Pin 2 content screen (RF00230/TBDB001 "
+    "cmsearch >= 10.0 bits, or the GGTGGNACCGCG motif), applied BEFORE the seeded draw; "
+    "see screen and overlap_with_training_folds"
+)
+
+#: A15 Pin 5: v1 stays byte-unchanged, so no v2 artifact may be written to a v1 path.
+V1_OUT_SUFFIX = "benchmark_v1.json"
+
+#: The rows the shipped Stage-2 trained on: ``stage2/train.py::select_rows`` at its train rung,
+#: equal to the checkpoint provenance's ``extra.population.n_admitted`` and to the host screen's
+#: Pin 1 (iv) pin. A15 Pin 7(c)'s third count compares the test inserts against its decoys.
+STAGE2_TRAINING_ROWS = 9059
+INSERT_EXPOSURE_RULE = (
+    "ADR-0005 A15 Pin 7(c) — a gated negative's decoys_v0 insert (U->T, upper-cased) equal in "
+    "sequence to the rna_sequence of a decoy row in the shipped Stage-2 training population "
+    "(stage2.train.select_rows at the train rung). By SEQUENCE, never by id: every test-rung "
+    "decoy is out of that population by id, so an id comparison is 0 by construction."
+)
 
 
 def transcribe_to_dna(rna: str) -> str:
     """RNA → DNA. Stage 1 is a DNA model; the item table stores RNA (PRD §6 handoff, run
     backwards). Uppercased first so a lower-case ``u`` cannot survive as an ``u``."""
     return rna.upper().replace("U", "T")
-
-
-def training_fold_ids(*, arm: str, split_table: str, context: str, labels: str) -> set[str]:
-    """The corpus record ids one Stage-1 arm trained on, from the shipped loader."""
-    records, _ = wd.load_corpus_records(
-        context_parquet=context,
-        labels_parquet=labels,
-        split_table=split_table,
-        exclude_selection_val=False,
-        exclude_gate4_eval=ARM_EXCLUDE_GATE4_EVAL[arm],
-    )
-    return {record.record_id for record in records}
 
 
 def decoy_embedded(row: pd.Series, fold: set[str]) -> bool:
@@ -311,8 +373,11 @@ def build_negative_windows(
        set is passed, which makes that admission vacuous **by construction and on purpose**.
        The count it would have refused under the training fold is recorded in the report.
 
-    Hosts are supplied by the caller already filtered to ``parent_nested_train == False``, so
-    the DNA every negative is made of is DNA **neither** Stage-1 checkpoint trained on.
+    Hosts are supplied by the caller already filtered to ``parent_nested_train == False`` (and,
+    under ``--host-screen``, to the ADR-0005 A15 screen's admitted windows — see
+    :func:`mint_negative_windows`). The parent rule constrains the mining-pool record's PARENT,
+    not the DNA of the window: v1 hosts were measured to share 32-mers with training DNA
+    (:func:`host_fold_overlap`), which is why A15 screens the window itself.
     """
     embedded, report = emb.embed_decoy_rows(
         decoy_rows,
@@ -361,6 +426,31 @@ def build_negative_windows(
 
 HOST_OVERLAP_K = 32
 
+#: What ``scope.host_pool.overlap_with_training_folds`` measures, stated in the manifest.
+HOST_OVERLAP_METHOD = (
+    "verbatim forward-strand k-mers of the host portion (spliced insert excluded; the flanks "
+    "either side of it are read separately, so no k-mer spans the excision) against the arm's "
+    "own Stage-1 training-fold context_seq; any k-mer containing a non-ACGT character is "
+    "skipped on both sides (ADR-0005 A15 Pin 1 alphabet rule: an N-run is not shared DNA)"
+)
+
+#: A maximal run of characters that cannot belong to a countable k-mer.
+_NON_ACGT_RUN = re.compile(r"[^ACGT]+")
+
+
+def acgt_kmers(sequence: str, k: int = HOST_OVERLAP_K) -> Iterator[str]:
+    """Every ``k``-mer of ``sequence`` made only of A/C/G/T, in order.
+
+    ADR-0005 A15 Pin 1's alphabet rule: a k-mer containing any non-ACGT character is skipped.
+    Two windows that share a 32-nt run of ``N`` share an assembly gap, not DNA — counting it
+    (as the shipped measure did) inflates the overlap with sequence nobody trained on. The
+    caller must upper-case first: a lower-case base would be skipped as non-ACGT and the
+    overlap under-counted, and both callers in this file upper-case before calling.
+    """
+    for run in _NON_ACGT_RUN.split(sequence):
+        for offset in range(len(run) - k + 1):
+            yield run[offset : offset + k]
+
 
 def _coordinate(value: Any, name: str, contig_id: str) -> int:
     """One sequence coordinate, refused unless it *is* one.
@@ -394,7 +484,16 @@ def host_fold_overlap(
     were "clean for BOTH Stage-1 checkpoints" (PR #133 round 2).
 
     The host portion **excludes the spliced insert**, so what is measured is the DNA the decoy
-    was embedded into, not the decoy — decoy-level exposure is already ``seen_by_counts``.
+    was embedded into, not the decoy — decoy-level exposure is already ``seen_by_counts``. The
+    two flanks are read separately: concatenating them (as the shipped measure did) manufactures
+    junction k-mers that exist in neither the genome nor the contig.
+
+    P3-16′-remint (ADR-0005 A15 Pin 1): k-mers containing a non-ACGT character are skipped
+    (:func:`acgt_kmers`). Measured on the v1 reproduction this moves the shipped 112 / 96
+    (production / twin) to 110 / 94; reading the flanks separately changes neither number. The
+    semantics are otherwise the shipped ones (forward strand, host portion, each arm against its
+    own fold) — this is the manifest's disclosure measure, not A15's both-strand whole-window
+    screen, which lives in ``integration/host_screen.py``.
     """
     by_id = {contig["contig_id"]: contig for contig in contigs}
     owners: dict[str, set[str]] = {}
@@ -431,21 +530,53 @@ def host_fold_overlap(
                 f"{item['contig_id']}: splice bounds [{start}, {end}) are outside the "
                 f"{len(sequence)}-nt contig"
             )
-        host = sequence[:start] + sequence[end:]
-        for offset in range(len(host) - k + 1):
-            owners.setdefault(host[offset : offset + k], set()).add(item["contig_id"])
+        for flank in (sequence[:start], sequence[end:]):
+            for kmer in acgt_kmers(flank, k):
+                owners.setdefault(kmer, set()).add(item["contig_id"])
     seen: dict[str, set[str]] = {arm: set() for arm in folds}
     for arm, fold in folds.items():
         for record_id in fold:
             sequence = context_by_id.get(record_id)
             if sequence is None:
                 continue
-            sequence = sequence.upper()
-            for offset in range(len(sequence) - k + 1):
-                hit = owners.get(sequence[offset : offset + k])
+            # Skipped on this side too: an owner key never contains a non-ACGT character, so
+            # this changes no count — it states the rule where a reader looks for it.
+            for kmer in acgt_kmers(sequence.upper(), k):
+                hit = owners.get(kmer)
                 if hit:
                     seen[arm] |= hit
     return seen
+
+
+def item_gated(item: Mapping[str, Any]) -> bool:
+    """Whether one benchmark item enters the GATED denominator (ADR-0005 A15 Pin 4).
+
+    False iff its pool is in :data:`NON_GATED_POOLS` (``leader_decoy``); True for every other
+    item, positives included. A strict bool, never a truthy stand-in: a consumer filters on it.
+    """
+    return str(item["pool"]) not in NON_GATED_POOLS
+
+
+def gated_scope(items: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    """The gated subset's counts, derived from the items' own ``gated`` flags.
+
+    Declared in the manifest so the precision report's completeness clauses compare against a
+    number the MINT wrote, not one each consumer re-derives (A15 Pin 4). Counted from the flags
+    rather than from the pool names, so a flag that disagrees with this rule cannot hide behind
+    a scope computed some other way.
+    """
+    gated = [item for item in items if item["gated"] is True]
+    negatives = [item for item in gated if item["label"] == 0]
+    return {
+        "n_items_gated": len(gated),
+        "n_negatives_gated": len(negatives),
+        "negatives_by_pool_gated": {
+            pool: sum(1 for item in negatives if item["pool"] == pool)
+            for pool in sorted({item["pool"] for item in negatives})
+        },
+        "n_blocks_gated": len({item["block"] for item in gated}),
+        "gated_rule": GATED_RULE,
+    }
 
 
 def build(
@@ -454,6 +585,8 @@ def build(
     decoys: pd.DataFrame,
     folds: dict[str, set[str]],
     n_nested_train_rows: int,
+    *,
+    screened: bool = False,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, Any]]:
     decoy_meta = decoys.set_index("decoy_id")
     pos_contigs, pos_items = positives
@@ -465,23 +598,31 @@ def build(
     for item in neg_items:
         decoy_row = decoy_meta.loc[item["contig_id"].removeprefix("dec:")]
         # `seen_by` is about the INSERT — whether that decoy went into the arm's training
-        # stream. The host DNA is separately clean for both arms by construction (hosts are
-        # drawn `parent_nested_train == False`), which `host_seen_by_any_arm` records so the
-        # two exposures are never conflated.
+        # stream. Host-DNA exposure is a separate MEASUREMENT (`host_fold_overlap` ->
+        # `host_seen_by_any_arm`), never a by-construction claim: `parent_nested_train ==
+        # False` constrains the host's parent, not its DNA. Kept apart so the two exposures
+        # are never conflated.
         item["seen_by"] = {
             arm: decoy_embedded(decoy_row, fold) for arm, fold in sorted(folds.items())
         }
 
     contigs = pos_contigs + neg_contigs
     items = pos_items + neg_items
+    # Set AFTER the draw and the mint, on the finished items: gating is a property of the
+    # denominator, never of the draw, so the leader keeps its host slot (A15 Pin 3/4).
+    for item in items:
+        item["gated"] = item_gated(item)
+    construction = (
+        "data/embedding.py::embed_decoy_rows — the shipped ADR-0005 A7 splice, all four "
+        "§9.1 pools, unique hosts, hosts drawn parent_nested_train == False"
+    )
+    if screened:
+        construction += " and admitted by the ADR-0005 A15 host screen before the draw"
     scope = {
         "rung": RUNG,
         "geometry": f"{wd.WINDOW_NT}-nt scan windows (ADR-0005 D3 / PRD §6 pinned geometry)",
         "positive_population": "gate4_eval (window_dataset.load_gate4_eval_records)",
-        "negative_construction": (
-            "data/embedding.py::embed_decoy_rows — the shipped ADR-0005 A7 splice, all four "
-            "§9.1 pools, unique hosts, hosts drawn parent_nested_train == False"
-        ),
+        "negative_construction": construction,
         "n_positives": len(pos_items),
         "n_negatives": len(neg_items),
         "n_items": len(items),
@@ -510,6 +651,7 @@ def build(
             }
             for arm in sorted(folds)
         },
+        **gated_scope(items),
     }
     return contigs, items, scope
 
@@ -534,6 +676,466 @@ def check_embedding_derivation(decoys: pd.DataFrame, folds: dict[str, set[str]])
     return measured
 
 
+def sha256_file(path: Path) -> str:
+    """Hex sha256 of a file's bytes."""
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def select_decoy_rows(decoys: pd.DataFrame, wanted_ids: Collection[str]) -> list[dict[str, Any]]:
+    """The test-rung decoy rows — ALL four pools — in ``decoy_id`` order.
+
+    The order IS the draw: under ``unique_hosts=True`` the i-th admitted decoy takes host
+    ``permutation[i]``. So the ``leader_decoy`` row stays here at its sorted position even
+    though it is reported beside the gate (ADR-0005 A15 Pins 3–4); filtering it out would
+    re-index every host after it, and v2 would silently stop being "v1's construction, screened".
+    """
+    wanted = {str(value) for value in wanted_ids}
+    rows = [
+        {key: row[key] for key in decoys.columns}
+        for _, row in decoys[decoys["decoy_id"].astype(str).isin(wanted)]
+        .sort_values("decoy_id", kind="mergesort")
+        .iterrows()
+    ]
+    if len(rows) != len(wanted):
+        raise SystemExit(f"{len(wanted)} test-rung decoys but {len(rows)} matched in decoys_v0")
+    return rows
+
+
+def _repo_relative_problem(name: str, value: Any) -> str | None:
+    """Why ``value`` is not a repo-relative path, or ``None`` if it is."""
+    if not isinstance(value, str) or not value.strip():
+        return f"{name} {value!r} is not a path"
+    path = Path(value)
+    if path.is_absolute() or ".." in path.parts:
+        return f"{name} must be repo-relative (got {value!r})"
+    return None
+
+
+def _is_count(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 0
+
+
+def host_screen_refusals(
+    report: Any,
+    *,
+    mining_pool_sha256: str,
+    n_candidates: int,
+    admitted_list_sha256: str | None,
+) -> list[str]:
+    """Why a ``--host-screen`` report may NOT be drawn from; ``[]`` means it may.
+
+    Pure and total: it returns problems and never raises on a payload this script did not
+    write. A malformed field is a refusal, never an absence ([[total-validator-can-fail-open]]).
+    Each clause binds the screen to THIS mint's subject rather than to itself
+    ([[gate-must-bind-to-upstream-evidence]]):
+
+    * ``problems == []`` and ``controls_all_fired is True`` — and the control list is
+      re-derived: non-empty, with every entry ``fired is True``. A flag can be written TRUE by
+      a report whose controls say otherwise ([[gate-clauses-need-re-derivation]]), and
+      ``all()`` over no controls is vacuously true ([[clauses-must-guard-emptiness]]);
+    * ``content_screen.threshold_bits == 10.0`` (A15 Pin 2), a number and not a bool
+      (``True == 1.0`` passes an equality test, [[bool-equals-one-passes-config-gates]]);
+    * ``pool.sha256`` is the digest of the ``--mining-pool`` bytes, and ``pool.n_candidates``
+      is the out-of-fold pool this mint built, so the screen ran over the pool being drawn from;
+    * ``admitted.sha256`` is the digest of the admitted-list bytes on disk.
+    """
+    if not isinstance(report, Mapping):
+        return [f"the host-screen report is a {type(report).__name__}, not a JSON object"]
+    problems: list[str] = []
+    listed = report.get("problems")
+    if not (isinstance(listed, list) and not listed):
+        problems.append(f"the host-screen report's problems are {listed!r}, not []")
+    controls = report.get("controls")
+    if not isinstance(controls, list) or not controls:
+        problems.append(
+            "the host-screen report lists no must-fire controls; an empty control set "
+            "certifies nothing"
+        )
+    else:
+        unfired = [
+            (control.get("name") if isinstance(control, Mapping) else repr(control))
+            for control in controls
+            if not (isinstance(control, Mapping) and control.get("fired") is True)
+        ]
+        if unfired:
+            problems.append(f"must-fire control(s) did not fire: {unfired!r}")
+    if report.get("controls_all_fired") is not True:
+        problems.append(
+            f"controls_all_fired is {report.get('controls_all_fired')!r}, not True "
+            "(ADR-0005 A15 Pin 1)"
+        )
+    content = report.get("content_screen")
+    threshold = content.get("threshold_bits") if isinstance(content, Mapping) else None
+    if (
+        isinstance(threshold, bool)
+        or not isinstance(threshold, (int, float))
+        or threshold != HOST_SCREEN_THRESHOLD_BITS
+    ):
+        problems.append(
+            f"content_screen.threshold_bits is {threshold!r}, not the pinned "
+            f"{HOST_SCREEN_THRESHOLD_BITS} bits (ADR-0005 A15 Pin 2)"
+        )
+    pool = report.get("pool") if isinstance(report.get("pool"), Mapping) else {}
+    if pool.get("sha256") != mining_pool_sha256:
+        problems.append(
+            f"the screen ran over a pool with sha256 {pool.get('sha256')!r}, not this "
+            f"--mining-pool ({mining_pool_sha256})"
+        )
+    if not _is_count(pool.get("n_candidates")) or pool.get("n_candidates") != n_candidates:
+        problems.append(
+            f"the screen's candidate pool holds {pool.get('n_candidates')!r} windows, not the "
+            f"{n_candidates} out-of-fold windows this mint draws from"
+        )
+    admitted = report.get("admitted") if isinstance(report.get("admitted"), Mapping) else {}
+    path_problem = _repo_relative_problem("admitted.list", admitted.get("list"))
+    if path_problem:
+        problems.append(path_problem)
+    if admitted_list_sha256 is None:
+        problems.append(f"the admitted list {admitted.get('list')!r} could not be read")
+    elif admitted.get("sha256") != admitted_list_sha256:
+        problems.append(
+            f"the admitted list's bytes hash to {admitted_list_sha256}, but the screen "
+            f"report records {admitted.get('sha256')!r}"
+        )
+    if not _is_count(admitted.get("n")):
+        problems.append(f"admitted.n is {admitted.get('n')!r}, not a count")
+    return problems
+
+
+def parse_admitted_list(text: str, *, expected_n: Any) -> tuple[list[str], list[str]]:
+    """``(ids, problems)`` for the screen's admitted list: sorted ids, one per line, final LF.
+
+    Strict on purpose. A duplicated, blank, padded or unsorted line means the file is not the
+    one the screen wrote, and a count that disagrees with ``admitted.n`` means the report and
+    the list describe different screens.
+    """
+    problems: list[str] = []
+    if not text.endswith("\n"):
+        problems.append("the admitted list does not end with a newline")
+    ids = text.split("\n")
+    if ids and ids[-1] == "":
+        ids = ids[:-1]
+    if any(not line.strip() for line in ids):
+        problems.append("the admitted list has a blank line")
+    if any(line != line.strip() for line in ids):
+        problems.append("the admitted list has an id with surrounding whitespace")
+    if len(set(ids)) != len(ids):
+        problems.append(f"the admitted list repeats {len(ids) - len(set(ids))} id(s)")
+    if ids != sorted(ids):
+        problems.append("the admitted list is not sorted")
+    if not _is_count(expected_n) or len(ids) != expected_n:
+        problems.append(f"the admitted list holds {len(ids)} ids, the report says {expected_n!r}")
+    return ids, problems
+
+
+def read_host_screen(
+    screen: str,
+    *,
+    reports_root: Path,
+    mining_pool_sha256: str,
+    n_candidates: int,
+) -> tuple[list[str], dict[str, Any]]:
+    """Load ``--host-screen`` and its admitted list; refuse unless every clause holds.
+
+    Returns ``(admitted_ids, record)``; ``record`` becomes ``scope.host_pool.screen``. Both
+    files are committed (``reports/``), so they resolve against ``reports_root`` — this
+    checkout by default, not ``--data-root``, which holds the DVC data.
+    """
+    problem = _repo_relative_problem("--host-screen", screen)
+    if problem:
+        raise SystemExit(problem)
+    try:
+        raw = (reports_root / screen).read_bytes()
+    except OSError as exc:
+        raise SystemExit(f"--host-screen {screen!r} could not be read: {exc}") from exc
+    try:
+        report = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise SystemExit(f"--host-screen {screen!r} is not a JSON report: {exc}") from exc
+    admitted = report.get("admitted") if isinstance(report, Mapping) else None
+    admitted = admitted if isinstance(admitted, Mapping) else {}
+    list_path = admitted.get("list")
+    list_bytes: bytes | None = None
+    if _repo_relative_problem("admitted.list", list_path) is None:
+        try:
+            list_bytes = (reports_root / list_path).read_bytes()
+        except OSError:
+            list_bytes = None
+    list_sha = None if list_bytes is None else hashlib.sha256(list_bytes).hexdigest()
+    problems = host_screen_refusals(
+        report,
+        mining_pool_sha256=mining_pool_sha256,
+        n_candidates=n_candidates,
+        admitted_list_sha256=list_sha,
+    )
+    ids: list[str] = []
+    if list_bytes is not None:
+        try:
+            text = list_bytes.decode("utf-8")
+        except UnicodeDecodeError:
+            problems.append("the admitted list is not UTF-8 text")
+        else:
+            ids, list_problems = parse_admitted_list(text, expected_n=admitted.get("n"))
+            problems.extend(list_problems)
+    if problems:
+        raise SystemExit(f"refusing --host-screen {screen}: " + "; ".join(problems))
+    record = {
+        "report": screen,
+        "sha256": hashlib.sha256(raw).hexdigest(),
+        "admitted_list": list_path,
+        "admitted_sha256": list_sha,
+        "n_admitted": len(ids),
+        "threshold_bits": float(report["content_screen"]["threshold_bits"]),
+        "adr": HOST_SCREEN_ADR,
+    }
+    return ids, record
+
+
+def apply_host_screen(
+    hosts: Sequence[Mapping[str, Any]], admitted_ids: Collection[str]
+) -> list[Mapping[str, Any]]:
+    """Restrict the out-of-fold hosts to the screen's admitted windows, in POOL order.
+
+    Pool (file) order, not the admitted list's sorted order: the seeded permutation indexes
+    this list, so its order is part of the draw, and pool order is what v1 drew over. An
+    admitted id the out-of-fold pool does not carry is refused, not skipped: it means the
+    screen ran over a different pool than this mint draws from.
+    """
+    pool_ids = {str(row["candidate_id"]) for row in hosts}
+    keep = {str(value) for value in admitted_ids}
+    outside = sorted(keep - pool_ids)
+    if outside:
+        raise SystemExit(
+            f"{len(outside)} admitted host id(s) are not in the out-of-fold candidate pool "
+            f"(e.g. {outside[:3]!r}); the screen did not run over the pool this mint draws from"
+        )
+    return [row for row in hosts if str(row["candidate_id"]) in keep]
+
+
+def mint_negative_windows(
+    decoy_rows: Sequence[Mapping[str, Any]],
+    hosts: Sequence[Mapping[str, Any]],
+    *,
+    admitted_ids: Collection[str] | None,
+    seed: int,
+    all_corpus_ids: Collection[str],
+    parent_cluster: Mapping[str, int],
+    window: int = wd.WINDOW_NT,
+) -> tuple[
+    tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, Any]],
+    list[Mapping[str, Any]],
+]:
+    """The draw: the A15 screen filter FIRST, then the shipped splice over what survived.
+
+    ``admitted_ids=None`` is v1's construction (the whole out-of-fold pool). Otherwise the pool
+    is filtered BEFORE :func:`build_negative_windows`, so the seeded permutation runs over the
+    screened pool. Filtering the finished items instead would drop negatives after the draw,
+    which A15 Pin 3 forbids. A changed permutation length redraws all 692 hosts; that is
+    expected, not a defect.
+
+    Returns ``(negatives, drawable_hosts)``.
+    """
+    drawable = list(hosts) if admitted_ids is None else apply_host_screen(hosts, admitted_ids)
+    if len(drawable) < len(decoy_rows):
+        raise SystemExit(
+            f"{len(drawable)} drawable host windows for {len(decoy_rows)} decoys; "
+            "unique_hosts=True needs at least one each"
+        )
+    negatives = build_negative_windows(
+        decoy_rows,
+        drawable,
+        seed=seed,
+        all_corpus_ids=all_corpus_ids,
+        parent_cluster=parent_cluster,
+        window=window,
+    )
+    return negatives, drawable
+
+
+#: The parent attributes ``host_composition`` tabulates (A15 Pin 7(e)).
+COMPOSITION_PARENT_FIELDS: tuple[str, ...] = (
+    "nested_role",
+    "is_designated_loo_holdout",
+    "resolved_order",
+)
+ABSENT_PARENT = "absent_from_split_table"
+
+
+def _composition_label(value: Any) -> str:
+    """A JSON-key label for one attribute value; a null is ``"null"``, never a dropped row."""
+    if is_missing(value):
+        return "null"
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    return str(value)
+
+
+def host_composition(
+    items: Sequence[Mapping[str, Any]],
+    host_by_id: Mapping[str, Mapping[str, Any]],
+    parent_meta: Mapping[str, Mapping[str, Any]],
+) -> dict[str, Any]:
+    """Composition of the DRAWN hosts — one per negative — for A15 Pin 7(e).
+
+    ``side`` (lead / trail) from the host row; from the split table, via each host's
+    ``source_record_id``: the parent's ``nested_role``, whether it is a designated
+    leave-clade-out holdout, and its ``resolved_order``. A parent missing from the split table
+    is counted as ``absent_from_split_table``, never dropped, so every block sums to the number
+    of negatives ([[nulls-inflate-block-counts]] — a null is a labelled bucket, not a gap).
+    """
+    side: dict[str, int] = {}
+    parents: dict[str, dict[str, int]] = {field: {} for field in COMPOSITION_PARENT_FIELDS}
+    n_hosts = 0
+    for item in items:
+        if item["label"] != 0:
+            continue
+        host = host_by_id.get(str(item["host_id"]))
+        if host is None:
+            raise SystemExit(
+                f"{item['contig_id']}: drawn host {item['host_id']!r} is not in the drawable pool"
+            )
+        n_hosts += 1
+        label = _composition_label(host.get("side"))
+        side[label] = side.get(label, 0) + 1
+        meta = parent_meta.get(row_text(host.get("source_record_id")).strip())
+        for field in COMPOSITION_PARENT_FIELDS:
+            label = ABSENT_PARENT if meta is None else _composition_label(meta.get(field))
+            parents[field][label] = parents[field].get(label, 0) + 1
+    return {
+        "n_hosts": n_hosts,
+        "side": dict(sorted(side.items())),
+        **{f"parent_{field}": dict(sorted(parents[field].items())) for field in parents},
+    }
+
+
+def host_pool_scope(
+    *,
+    mining_pool: str,
+    n_admitted: int,
+    n_out_of_fold: int,
+    n_drawable: int,
+    n_used: int,
+    screen: Mapping[str, Any] | None,
+    composition: Mapping[str, Any],
+    host_seen: Mapping[str, Collection[str]],
+    n_negatives: int,
+) -> dict[str, Any]:
+    """``scope.host_pool``: what the selection constrains, and what was measured.
+
+    ``selection`` names the A15 screen only when one was applied; neither string calls the
+    hosts "clean" for any arm, because a selection rule is not a measurement of what the drawn
+    windows contain (PR #133 round 2). ``screen`` is ``None`` for an unscreened (v1) mint —
+    stated, not omitted ([[clauses-must-guard-emptiness]]).
+    """
+    seen_any = set().union(*host_seen.values()) if host_seen else set()
+    return {
+        "source": mining_pool,
+        "n_admitted": n_admitted,
+        "n_out_of_fold_available": n_out_of_fold,
+        # The permutation's length: the out-of-fold pool, or what the screen admitted from it.
+        "n_available_to_draw": n_drawable,
+        "n_used": n_used,
+        "selection": UNSCREENED_SELECTION if screen is None else SCREENED_SELECTION,
+        "screen": None if screen is None else dict(screen),
+        "composition": dict(composition),
+        "overlap_with_training_folds": {
+            "k": HOST_OVERLAP_K,
+            "method": HOST_OVERLAP_METHOD,
+            "by_arm": {arm: len(ids) for arm, ids in sorted(host_seen.items())},
+            "n_seen_by_any_arm": len(seen_any),
+            "n_negatives": n_negatives,
+        },
+    }
+
+
+def normalise_insert(sequence: Any) -> str:
+    """An insert's sequence as DNA text — the one form both sides of the duplicate test share."""
+    return str(sequence).strip().upper().replace("U", "T")
+
+
+def insert_exposure(
+    items: Sequence[Mapping[str, Any]],
+    decoy_sequences: Mapping[str, Any],
+    stage2_training_decoys: Collection[Any],
+) -> dict[str, Any]:
+    """A15 Pin 7(c)'s third count: test inserts that duplicate a Stage-2 training decoy.
+
+    The other two Pin 7(c) counts are the per-arm ``seen_by`` flags already in ``scope``. This
+    one is measured by sequence: a duplicate is a test decoy whose insert the shipped Stage-2
+    saw verbatim under another id. The headline counts the GATED negatives; the non-gated leader
+    is recorded beside it, as everything about the leader is (Pin 4).
+    """
+    training = {normalise_insert(sequence) for sequence in stage2_training_decoys}
+    if not training:
+        raise SystemExit(
+            "no Stage-2 training decoys to compare against: the duplicate count would be a "
+            "vacuous 0, not a measurement"
+        )
+    by_pool: dict[str, dict[str, int]] = {}
+    non_gated: dict[str, bool] = {}
+    n_gated = n_duplicating = 0
+    for item in items:
+        if item["label"] != 0:
+            continue
+        decoy_id = str(item["contig_id"]).removeprefix("dec:")
+        if decoy_id not in decoy_sequences:
+            raise SystemExit(f"{item['contig_id']}: its insert {decoy_id!r} is not in decoys_v0")
+        duplicate = normalise_insert(decoy_sequences[decoy_id]) in training
+        if not item_gated(item):
+            non_gated[str(item["contig_id"])] = duplicate
+            continue
+        n_gated += 1
+        n_duplicating += duplicate
+        counts = by_pool.setdefault(str(item["pool"]), {"n": 0, "n_duplicating": 0})
+        counts["n"] += 1
+        counts["n_duplicating"] += duplicate
+    return {
+        "rule": INSERT_EXPOSURE_RULE,
+        "n_stage2_training_decoy_sequences": len(training),
+        "n_gated_negatives": n_gated,
+        "n_test_inserts_duplicating_stage2_training_decoys": n_duplicating,
+        "by_pool_gated": dict(sorted(by_pool.items())),
+        "non_gated": dict(sorted(non_gated.items())),
+    }
+
+
+def stage2_training_decoys(dataset: pd.DataFrame) -> list[str]:
+    """The decoy sequences of the shipped Stage-2 training population, through its own selector."""
+    from tbox_finder.stage2 import train as stage2_train  # lazy: torch-free, but heavy
+
+    rows = dataset.to_dict("records")
+    admitted, _ = stage2_train.select_rows(rows, rung=stage2_train.TRAIN_RUNG)
+    if len(admitted) != STAGE2_TRAINING_ROWS:
+        raise SystemExit(
+            f"Stage-2 training population is {len(admitted)} rows, not the {STAGE2_TRAINING_ROWS} "
+            "the shipped checkpoint trained on; refusing to count insert duplicates against it"
+        )
+    return [rows[i]["rna_sequence"] for i in admitted if rows[i]["source"] == "decoy"]
+
+
+def v1_out_violation(out: Path) -> str | None:
+    """Why ``--out`` names a v1 artifact, or ``None`` (ADR-0005 A15 Pin 5).
+
+    v1 stays byte-unchanged as the record of the withdrawn grade, and P3-17a hash-binds its
+    files BY FIXED PATH (``cm_confirmer.CANONICAL_SOURCES``), so overwriting one would make a
+    committed report silently describe v2 bytes. Matched on the resolved path's trailing
+    components, so a canonical path is refused under any checkout root, and on the
+    ``benchmark_v1.json`` suffix.
+    """
+    resolved = out.resolve()
+    if str(resolved).endswith(V1_OUT_SUFFIX):
+        return f"--out {out} ends with {V1_OUT_SUFFIX!r}; no v2 artifact is written to a v1 path"
+    for key, relative in sorted(CANONICAL_SOURCES.items()):
+        parts = Path(relative).parts
+        if resolved.parts[-len(parts) :] == parts:
+            return (
+                f"--out {out} resolves to {relative}, a fixed-path input of the committed "
+                f"P3-17a report (cm_confirmer.CANONICAL_SOURCES[{key!r}]); ADR-0005 A15 Pin 5 "
+                "keeps it byte-unchanged"
+            )
+    return None
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--dataset", required=True, help="repo-relative path")
@@ -542,6 +1144,14 @@ def main() -> int:
     parser.add_argument("--context", default="data/interim/flank_context/context_v0.parquet")
     parser.add_argument("--labels", default="data/processed/labels/labels_v0.parquet")
     parser.add_argument("--mining-pool", default="data/processed/negatives/mining_pool_v0.parquet")
+    parser.add_argument(
+        "--host-screen",
+        default=None,
+        help=(
+            "repo-relative ADR-0005 A15 screen report (reports/p3/host_screen.json). The draw "
+            "then runs over the windows it admitted; omitted, the mint is v1's construction"
+        ),
+    )
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--out", required=True)
     parser.add_argument(
@@ -553,18 +1163,38 @@ def main() -> int:
             "checkout while the recorded provenance stays repo-relative"
         ),
     )
+    parser.add_argument(
+        "--reports-root",
+        default=None,
+        help=(
+            "checkout holding the committed --host-screen report and its admitted list; "
+            "defaults to this script's own repo root (committed reports live with the code, "
+            "not with the DVC data --data-root points at)"
+        ),
+    )
     args = parser.parse_args()
+
+    # Before any input is read: refusing after a long build is how an output guard loses its
+    # point ([[two-outputs-one-path-destroys-the-first]]).
+    violation = v1_out_violation(Path(args.out))
+    if violation:
+        raise SystemExit(violation)
 
     # Repo-relative BY CONTRACT: these strings land in a provenance block, and an absolute
     # path there leaks this machine's layout into a public repo (the P3-10 review finding).
-    for name in ("dataset", "decoys", "split_table", "context", "labels", "mining_pool"):
+    names = ["dataset", "decoys", "split_table", "context", "labels", "mining_pool"]
+    if args.host_screen is not None:
+        names.append("host_screen")
+    for name in names:
         value = Path(getattr(args, name))
         if value.is_absolute() or ".." in value.parts:
             raise SystemExit(
                 f"--{name.replace('_', '-')} must be repo-relative (got {getattr(args, name)!r}); "
                 "use --data-root to point at the checkout that holds the data."
             )
-    root = Path(args.data_root) if args.data_root else Path(__file__).resolve().parents[1]
+    code_root = Path(__file__).resolve().parents[1]
+    root = Path(args.data_root) if args.data_root else code_root
+    reports_root = Path(args.reports_root) if args.reports_root else code_root
 
     dataset = pd.read_parquet(root / args.dataset)
     decoys = pd.read_parquet(root / args.decoys)
@@ -589,29 +1219,26 @@ def main() -> int:
         ((rung["source"] == "corpus") & rung["nested_train"].astype("boolean").fillna(False)).sum()
     )
     wanted = set(rung.loc[rung["source"] == "decoy", "row_id"].astype(str))
-    decoy_rows = [
-        {key: row[key] for key in decoys.columns}
-        for _, row in decoys[decoys["decoy_id"].astype(str).isin(wanted)]
-        .sort_values("decoy_id", kind="mergesort")
-        .iterrows()
-    ]
-    if len(decoy_rows) != len(wanted):
-        raise SystemExit(
-            f"{len(wanted)} test-rung decoys but {len(decoy_rows)} matched in decoys_v0"
-        )
+    decoy_rows = select_decoy_rows(decoys, wanted)
 
     # Hosts: mined genomic windows that cleared the shipped P2-10d′-a admission, then
-    # restricted to `parent_nested_train == False` — DNA NEITHER Stage-1 checkpoint trained
-    # on. The loader's own flag only offers "require in-fold"/"no requirement", so the
-    # out-of-fold selection is made here and counted, not hidden.
+    # restricted to `parent_nested_train == False`. That constrains each window's PARENT, not
+    # its DNA (see host_fold_overlap); under --host-screen the A15 screen then admits windows
+    # on their own DNA. The loader's own flag only offers "require in-fold"/"no requirement",
+    # so the out-of-fold selection is made here and counted, not hidden.
+    mining_pool_sha256 = sha256_file(root / args.mining_pool)
     admitted, host_report = negatives_mod.load_admitted_pool_rows(
         str(root / args.mining_pool), require_parent_nested_train=False
     )
     hosts = [row for row in admitted if not row.get("parent_nested_train")]
-    if len(hosts) < len(decoy_rows):
-        raise SystemExit(
-            f"{len(hosts)} out-of-fold host windows for {len(decoy_rows)} decoys; "
-            "unique_hosts=True needs at least one each"
+    screen_record: dict[str, Any] | None = None
+    admitted_ids: list[str] | None = None
+    if args.host_screen is not None:
+        admitted_ids, screen_record = read_host_screen(
+            args.host_screen,
+            reports_root=reports_root,
+            mining_pool_sha256=mining_pool_sha256,
+            n_candidates=len(hosts),
         )
 
     split = pd.read_parquet(root / args.split_table)
@@ -622,14 +1249,17 @@ def main() -> int:
         if not pd.isna(cluster)
     }
     positives = build_positive_windows(gate4_records)
-    negatives = build_negative_windows(
+    negatives, drawable = mint_negative_windows(
         decoy_rows,
         hosts,
+        admitted_ids=admitted_ids,
         seed=args.seed,
         all_corpus_ids=all_corpus_ids,
         parent_cluster=parent_cluster,
     )
-    contigs, items, scope = build(positives, negatives, decoys, folds, n_nested_train_rows)
+    contigs, items, scope = build(
+        positives, negatives, decoys, folds, n_nested_train_rows, screened=screen_record is not None
+    )
     corpus_records, _ = wd.load_corpus_records(
         context_parquet=str(root / args.context),
         labels_parquet=str(root / args.labels),
@@ -644,28 +1274,38 @@ def main() -> int:
     for item in items:
         if item["label"] == 0:
             item["host_seen_by_any_arm"] = item["contig_id"] in seen_any
-    scope["host_pool"] = {
-        "source": args.mining_pool,
-        "n_admitted": host_report["n_records"],
-        "n_out_of_fold_available": len(hosts),
-        "n_used": len(negatives[1]),
-        # What the selection actually constrains, and what it does NOT. The old string said
-        # "clean for BOTH Stage-1 checkpoints", which the measurement below contradicts.
-        "selection": (
-            "parent_nested_train == False — the mining-pool record's PARENT, not the DNA of "
-            "the window drawn from it; see overlap_with_training_folds"
-        ),
-        "overlap_with_training_folds": {
-            "k": HOST_OVERLAP_K,
-            "method": (
-                "verbatim k-mer of the host portion (spliced insert excluded) against the "
-                "arm's own Stage-1 training-fold context_seq"
+    parent_meta = {
+        str(row["record_id"]): {
+            "nested_role": None if is_missing(row["nested_role"]) else str(row["nested_role"]),
+            "is_designated_loo_holdout": (
+                None
+                if is_missing(row["is_designated_loo_holdout"])
+                else bool(row["is_designated_loo_holdout"])
             ),
-            "by_arm": {arm: len(ids) for arm, ids in sorted(host_seen.items())},
-            "n_seen_by_any_arm": len(seen_any),
-            "n_negatives": len(negatives[1]),
-        },
+            "resolved_order": (
+                None if is_missing(row["resolved_order"]) else str(row["resolved_order"])
+            ),
+        }
+        for row in split[["record_id", *COMPOSITION_PARENT_FIELDS]].to_dict("records")
     }
+    scope["host_pool"] = host_pool_scope(
+        mining_pool=args.mining_pool,
+        n_admitted=host_report["n_records"],
+        n_out_of_fold=len(hosts),
+        n_drawable=len(drawable),
+        n_used=len(negatives[1]),
+        screen=screen_record,
+        composition=host_composition(
+            items, {str(row["candidate_id"]): row for row in drawable}, parent_meta
+        ),
+        host_seen=host_seen,
+        n_negatives=len(negatives[1]),
+    )
+    scope["insert_exposure"] = insert_exposure(
+        items,
+        dict(zip(decoys["decoy_id"].astype(str), decoys["sequence"], strict=True)),
+        stage2_training_decoys(dataset),
+    )
     if len(contigs) != len(items):
         raise SystemExit("contig/item lists diverged — they are written as one manifest")
     ids = [contig["contig_id"] for contig in contigs]
@@ -682,8 +1322,12 @@ def main() -> int:
             "split_table": args.split_table,
             "context": args.context,
             "labels": args.labels,
+            "mining_pool": args.mining_pool,
             "dataset_sha256": hashlib.sha256((root / args.dataset).read_bytes()).hexdigest(),
             "decoys_sha256": hashlib.sha256((root / args.decoys).read_bytes()).hexdigest(),
+            "mining_pool_sha256": mining_pool_sha256,
+            "host_screen": args.host_screen,
+            "host_screen_sha256": None if screen_record is None else screen_record["sha256"],
             "gate4_eval_cluster_digest": gate4_meta["carve"]["cluster_digest"],
             "gate4_eval_n_records": gate4_meta["n_records"],
             "embedded_by_pool": embedded,
@@ -698,7 +1342,10 @@ def main() -> int:
     print(
         f"wrote {out}: {scope['n_items']} items "
         f"({scope['n_positives']} pos / {scope['n_negatives']} neg) over "
-        f"{scope['n_blocks']} blocks; seen_by={scope['seen_by_counts']}"
+        f"{scope['n_blocks']} blocks; gated {scope['n_items_gated']} items "
+        f"({scope['n_negatives_gated']} neg) over {scope['n_blocks_gated']} blocks; "
+        f"host overlap {scope['host_pool']['overlap_with_training_folds']['by_arm']}; "
+        f"seen_by={scope['seen_by_counts']}"
     )
     return 0
 
