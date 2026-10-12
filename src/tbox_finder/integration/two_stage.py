@@ -2212,6 +2212,10 @@ def repo_relative(path: str | Path) -> str:
 
 def _cmd_run(args: argparse.Namespace) -> int:
     """LEG 4 (torch-free — the leg CI runs): replay both artifacts → table + report + digest."""
+    # Both outputs, before the replay: A15 Pin 5 keeps every v1 artifact byte-unchanged, and
+    # this leg writes two paths rather than one ([[two-outputs-one-path-destroys-the-first]]).
+    refuse_v1_output(args.report)
+    refuse_v1_output(args.table)
     temperature = (
         read_temperature(args.temperature_from)
         if args.temperature_from is not None

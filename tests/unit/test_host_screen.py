@@ -1342,12 +1342,19 @@ def _postmint_inputs(score: float, span: tuple[int, int], *, pool: str = "leader
             "motif": True,
         },
     }
+    # The FULL coverage A15 Pin 3 requires — every D2 model over every FASTA each arm covers.
+    # This fixture used to build RF00230 alone, which is exactly the gap the coverage clause now
+    # closes: with TBDB001 absent the suite could not tell a two-model assertion from a
+    # one-model one, and a report with every TBDB001 search deleted validated clean.
     searches = [
-        _postmint_search("screen", "RF00230", H.FASTA_POSTMINT_ALL),
-        _postmint_search("filter_off", "RF00230", H.FASTA_POSTMINT_LABEL0),
+        _postmint_search(arm, model, fasta)
+        for arm, fastas in sorted(H.REQUIRED_POSTMINT_SEARCHES.items())
+        for fasta in fastas
+        for model, _cm in H.SCREEN_CMS
     ]
+    hit = f"screen/RF00230/{Path(H.FASTA_POSTMINT_ALL).stem}.tblout"
     text = "\n".join([_tblout_row("v000001", "RF00230", span[0], span[1], score)]) + "\n"
-    tblouts = {searches[0]["tblout"]: text, searches[1]["tblout"]: ""}
+    tblouts = {entry["tblout"]: (text if entry["tblout"] == hit else "") for entry in searches}
     for entry in searches:
         entry["data_sha256"] = H.tblout_digest(tblouts[entry["tblout"]])
     return contigs, searches, tblouts
@@ -1858,6 +1865,21 @@ def test_the_amendment_prose_states_the_values_the_code_pins():
         (lambda r: r.__setitem__("n_exempt", 7), "n_exempt != len(exempt)"),
         (lambda r: r["arms"].pop("filter_off"), "no filter-off"),
         (lambda r: r["arms"].pop("screen"), "no screen arm"),
+        # Coverage: the per-search clauses iterate what is PRESENT, so they cannot see a search
+        # that was removed. Each of these validated CLEAN before the coverage clause existed.
+        (
+            lambda r: [
+                b["argv"].pop(k)
+                for b in r["arms"].values()
+                for k in [x for x in list(b["argv"]) if "TBDB001" in x]
+            ],
+            "required search(es)",
+        ),
+        (lambda r: r["arms"]["filter_off"].__setitem__("argv", {}), "required search(es)"),
+        (
+            lambda r: r["arms"]["screen"]["argv"].pop(f"{H.FASTA_POSTMINT_ALL}:RF00230"),
+            "required search(es)",
+        ),
         (lambda r: r["scope"].__setitem__("n_label0", 0), "n_label0 is not positive"),
         (
             lambda r: r["arms"]["filter_off"]["argv"].__setitem__(

@@ -721,6 +721,7 @@ def host_screen_refusals(
     mining_pool_sha256: str,
     n_candidates: int,
     admitted_list_sha256: str | None,
+    screened_dna_sha256: Mapping[str, str] | None = None,
 ) -> list[str]:
     """Why a ``--host-screen`` report may NOT be drawn from; ``[]`` means it may.
 
@@ -737,7 +738,12 @@ def host_screen_refusals(
       (``True == 1.0`` passes an equality test, [[bool-equals-one-passes-config-gates]]);
     * ``pool.sha256`` is the digest of the ``--mining-pool`` bytes, and ``pool.n_candidates``
       is the out-of-fold pool this mint built, so the screen ran over the pool being drawn from;
-    * ``admitted.sha256`` is the digest of the admitted-list bytes on disk.
+    * ``admitted.sha256`` is the digest of the admitted-list bytes on disk;
+    * every ``screened_dna.sources`` digest the screen recorded is the digest of the file THIS
+      mint was given. The pool digest and the candidate count alone do not cover the screened
+      DNA: a changed ``decoys_v0`` or ``stage2_dataset`` leaves both unchanged while altering
+      which windows Pin 1 refuses, so the admitted list would be certified against a different
+      screened-DNA union than the one it was built from.
     """
     if not isinstance(report, Mapping):
         return [f"the host-screen report is a {type(report).__name__}, not a JSON object"]
@@ -799,6 +805,29 @@ def host_screen_refusals(
         )
     if not _is_count(admitted.get("n")):
         problems.append(f"admitted.n is {admitted.get('n')!r}, not a count")
+    # Bind every screened-DNA digest the screen recorded to the file THIS mint was handed.
+    # The pool digest and the candidate count do NOT cover the screened DNA: changing
+    # decoys_v0 or stage2_dataset leaves both intact while altering which windows Pin 1
+    # refuses, so the admitted list would be certified against a different union than the one
+    # that produced it ([[gate-must-bind-to-upstream-evidence]]). A digest the screen recorded
+    # but this mint cannot supply is a refusal, not a skip.
+    sources = report.get("screened_dna")
+    sources = sources.get("sources") if isinstance(sources, Mapping) else None
+    sources = sources if isinstance(sources, Mapping) else {}
+    for source, field, actual in sorted(screened_dna_sha256 or ()):
+        block = sources.get(source)
+        recorded = block.get(field) if isinstance(block, Mapping) else None
+        if not isinstance(recorded, str):
+            problems.append(
+                f"the host-screen report records no screened_dna.sources.{source}.{field}, "
+                "so the screened DNA it ran over cannot be bound to this mint's inputs"
+            )
+        elif recorded != actual:
+            problems.append(
+                f"screened_dna.sources.{source}.{field} is {recorded[:12]}…, but this mint's "
+                f"file hashes {actual[:12]}… — the screen ran over different screened DNA"
+            )
+
     return problems
 
 
@@ -834,6 +863,7 @@ def read_host_screen(
     reports_root: Path,
     mining_pool_sha256: str,
     n_candidates: int,
+    screened_dna_sha256: Mapping[str, str] | None = None,
 ) -> tuple[list[str], dict[str, Any]]:
     """Load ``--host-screen`` and its admitted list; refuse unless every clause holds.
 
@@ -867,6 +897,7 @@ def read_host_screen(
         mining_pool_sha256=mining_pool_sha256,
         n_candidates=n_candidates,
         admitted_list_sha256=list_sha,
+        screened_dna_sha256=screened_dna_sha256,
     )
     ids: list[str] = []
     if list_bytes is not None:
@@ -1239,6 +1270,17 @@ def main() -> int:
             reports_root=reports_root,
             mining_pool_sha256=mining_pool_sha256,
             n_candidates=len(hosts),
+            # (source block, digest field, the digest of the file THIS mint was given). Only
+            # the two sources whose digest the screen records as a FILE hash are bindable;
+            # fold_contexts and mined_windows record counts and intervals, not a file digest.
+            screened_dna_sha256={
+                ("decoy_inserts", "sha256", sha256_file(root / args.decoys)),
+                (
+                    "stage2_population",
+                    "stage2_dataset_sha256",
+                    sha256_file(root / args.dataset),
+                ),
+            },
         )
 
     split = pd.read_parquet(root / args.split_table)

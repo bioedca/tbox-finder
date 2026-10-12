@@ -261,6 +261,7 @@ DEFAULT_POSTMINT_REPORT = "reports/p3/benchmark_v2_postmint_screen.json"
 #: Where ``noise_floor.py`` writes the calibration ``POSTMINT_THRESHOLD_BITS`` is signed against.
 DEFAULT_NOISE_FLOOR_REPORT = "reports/p3/postmint_noise_floor.json"
 
+
 #: FASTA basenames the three legs agree on, and the ``-T`` each is searched at.
 FASTA_SURVIVORS = "survivors.fa"
 FASTA_CONTROLS = "controls.fa"
@@ -275,6 +276,16 @@ FASTA_THRESHOLDS: dict[str, float] = {
 }
 FASTA_POSTMINT_ALL = "postmint_all.fa"
 FASTA_POSTMINT_LABEL0 = "postmint_label0.fa"
+#: The searches A15 Pin 3's assertion REQUIRES, per arm: every D2 model over every FASTA that arm
+#: covers. Pinned as a set because the clause set otherwise validates only the searches that
+#: happen to be present — a report with every TBDB001 search deleted, or with an empty
+#: ``filter_off`` block, passed every arm clause and reported ``n_violations == 0``
+#: ([[clauses-must-guard-emptiness]]). The ``--max`` arm is scoped to the label-0 contigs, the
+#: only ones the assertion reads.
+REQUIRED_POSTMINT_SEARCHES: dict[str, tuple[str, ...]] = {
+    "screen": (FASTA_POSTMINT_ALL, FASTA_POSTMINT_LABEL0),
+    "filter_off": (FASTA_POSTMINT_LABEL0,),
+}
 
 #: The fixed phase every control splice uses — a constant, so a control's refusal cannot be an
 #: artefact of where its segment landed.
@@ -2766,6 +2777,7 @@ def postmint_findings(
     tblouts: Mapping[str, str],
     *,
     thresholds: Mapping[str, float] | None = None,
+    fasta_digests: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
     """A15 Pin 3's assertion, as a pure function over the parsed tblouts.
 
@@ -2790,6 +2802,19 @@ def postmint_findings(
         text = tblouts[entry["tblout"]]
         if tblout_digest(text) != entry["data_sha256"]:
             raise HostScreenError(f"{entry['tblout']}: data rows differ from the search record")
+        if fasta_digests is not None:
+            # The sibling guard `read_searches` already applies on the screen path; without it
+            # here, a prep that rewrote the contigs while old tblouts survived would pair one
+            # run's windows with another run's hits. The surrogate ids are POSITIONAL, so they
+            # collide silently rather than surfacing as unknown targets, and an unsearched
+            # contig reads as "no hits" — the fail-open direction, which passes the assertion.
+            expected = fasta_digests.get(entry["fasta"])
+            if expected is None or entry.get("fasta_sha256") != expected:
+                raise HostScreenError(
+                    f"{entry['fasta']}: the search ran on a FASTA with sha256 "
+                    f"{entry.get('fasta_sha256')!r}, the prep leg wrote {expected!r}. Refusing "
+                    "to grade one run's contigs against another run's tblouts."
+                )
         block = arms.setdefault(arm, {"argv": {}, "option_settings": {}, "n_hits": 0})
         key = f"{entry['fasta']}:{entry['model']}"
         block["argv"][key] = entry["argv"]
@@ -2936,7 +2961,15 @@ def _cmd_postmint_report(args: argparse.Namespace) -> int:
         entry["tblout"]: (tblout_root / entry["tblout"]).read_text(encoding="utf-8")
         for entry in search["searches"]
     }
-    findings = postmint_findings(idmap["contigs"], search["searches"], tblouts)
+    findings = postmint_findings(
+        idmap["contigs"],
+        search["searches"],
+        tblouts,
+        fasta_digests={
+            name: provenance.sha256_file(out_dir / name)
+            for name in sorted({str(entry["fasta"]) for entry in search["searches"]})
+        },
+    )
     report: dict[str, Any] = {
         "schema_version": POSTMINT_SCHEMA_VERSION,
         "step": STEP,
@@ -3638,6 +3671,21 @@ def _postmint_problems(report: Mapping[str, Any]) -> list[str]:
         "filter_off" in arms,
         "no filter-off (--max) arm in the post-mint report — A15 Pin 3 requires it",
     )
+    # Coverage, before the per-search clauses. Those iterate the searches that are PRESENT, so
+    # they cannot see one that is absent: a report with every TBDB001 search deleted, or with an
+    # empty filter_off block, satisfied every one of them and still reported n_violations == 0
+    # ([[clauses-must-guard-emptiness]]). Both D2 models over both arms is what Pin 3 requires,
+    # and an assertion is only as strong as the searches it actually ran.
+    for arm, fastas in sorted(REQUIRED_POSTMINT_SEARCHES.items()):
+        block = _mapping(arms, arm)
+        present = set(_mapping(block, "argv"))
+        required = {f"{fasta}:{model}" for fasta in fastas for model, _cm in SCREEN_CMS}
+        absent = sorted(required - present)
+        want(
+            not absent,
+            f"arms.{arm} is missing {len(absent)} required search(es): {absent}; A15 Pin 3 "
+            f"asserts over every D2 model in both arms",
+        )
     for arm, block in sorted(arms.items()):
         for key, argv in sorted(_mapping(block, "argv").items()):
             flags = option_settings_options(" ".join(str(token) for token in argv))

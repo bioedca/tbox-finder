@@ -1080,8 +1080,20 @@ def _cmd_report(args: argparse.Namespace) -> int:
     drawn = {str(item["host_id"]) for item in benchmark["items"] if int(item.get("label", 1)) == 0}
     checks = matchedness(items, minted, records, prep["idmap"], drawn)
 
+    # The tblout digest binds a tblout to its own recorded rows; it says nothing about WHICH
+    # FASTA produced them. `_cmd_search` checks the FASTA against prep before searching, but the
+    # report is a separate run: a prep re-run between them would leave the old tblouts in place,
+    # and the ids are positional, so the cells would be computed from one run's hits over another
+    # run's sequences while the matchedness block below was re-derived on the NEW bytes.
+    current = {arm: provenance.sha256_file(out_dir / f"{arm}.fa") for arm in ARMS}
     cells: dict[str, dict[str, dict[str, Any]]] = {}
     for entry in search["searches"]:
+        recorded, now = entry.get("fasta_sha256"), current.get(str(entry["null_arm"]))
+        if recorded != now:
+            raise NoiseFloorError(
+                f"{entry['null_arm']}.fa has sha256 {now!r}; the search ran on {recorded!r}. "
+                "Refusing to measure a floor from one run's tblouts over another run's nulls."
+            )
         text = (tblout_root / entry["tblout"]).read_text(encoding="utf-8")
         if hs.tblout_digest(text) != entry["data_sha256"]:
             raise NoiseFloorError(f"{entry['tblout']}: data rows differ from the search record")

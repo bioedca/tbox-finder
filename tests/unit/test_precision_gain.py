@@ -2153,6 +2153,62 @@ def test_the_screen_threshold_is_the_signed_ten_bits(v2, bits):
     _fires(broken, "not ADR-0005 A15 Pin 2's")
 
 
+def test_a_table_ranked_by_another_stage2_run_is_refused():
+    """Row-ID coverage and input hashing both PASS when the table and the Stage-2 file are
+    different runs, so the report would publish one run's scoring identity beside another
+    run's scores ([[gate-must-bind-to-upstream-evidence]])."""
+    rows = [
+        {"payload_key": "aaa", "stage2_logit": 1.25},
+        {"payload_key": "bbb", "stage2_logit": -3.5},
+    ]
+    stage2 = {"logits": {"aaa": 1.25, "bbb": -3.5}}
+    # Positive control first: the matching pair must be accepted, or a guard that refused
+    # everything would satisfy both cases below ([[raises-test-needs-a-positive-control]]).
+    P.refuse_table_scored_by_another_run(rows, stage2, arm="twin", path="s2.json")
+    with pytest.raises(P.PrecisionError, match="different Stage-2 run"):
+        P.refuse_table_scored_by_another_run(
+            rows, {"logits": {"aaa": 1.25, "bbb": -3.4999}}, arm="twin", path="s2.json"
+        )
+    with pytest.raises(P.PrecisionError, match="does not"):
+        P.refuse_table_scored_by_another_run(
+            rows, {"logits": {"aaa": 1.25}}, arm="twin", path="s2.json"
+        )
+    # An absent logits block must refuse too, not read as "nothing to check".
+    with pytest.raises(P.PrecisionError):
+        P.refuse_table_scored_by_another_run(rows, {}, arm="twin", path="s2.json")
+
+
+@pytest.mark.parametrize(
+    "relative",
+    [
+        "reports/two_stage_precision.json",
+        "reports/p3/two_stage_precision_items.json",
+        "data/interim/p3_16/v1_stage2_twin.json",
+    ],
+)
+@pytest.mark.parametrize("leg", ["fold", "report"])
+def test_a_v2_leg_refuses_to_write_over_a_v1_artifact(tmp_path, leg, relative):
+    """A15 Pin 5: "no v2 artifact is written to a v1 path".
+
+    The guard already protected five two_stage entrypoints and not these two, so
+    ``precision report --out reports/two_stage_precision.json`` would have overwritten the
+    withdrawn v1 grade that Pin 5 keeps byte-unchanged as the record of it
+    ([[fixed-one-of-two-identical-things]]). It fires at entry, before the fold reads or the
+    bootstrap runs ([[guard-runs-after-what-it-guards]]).
+    """
+    from types import SimpleNamespace
+
+    from tbox_finder.integration.two_stage import TwoStageError
+
+    command = P._cmd_fold if leg == "fold" else P._cmd_report
+    with pytest.raises(TwoStageError, match="refusing to write"):
+        command(SimpleNamespace(out=str(tmp_path / relative)))
+    # Positive control: a v2 destination must get PAST the guard (and then fail on the
+    # arguments this stub does not carry), or a guard that refused everything would pass.
+    with pytest.raises(AttributeError):
+        command(SimpleNamespace(out=str(tmp_path / "reports/two_stage_precision_v2.json")))
+
+
 @pytest.mark.parametrize(
     ("field", "value", "needle"),
     [

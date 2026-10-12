@@ -20,6 +20,7 @@ import hashlib
 import json
 from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -1859,6 +1860,35 @@ def test_a_v1_path_is_refused(tmp_path: Path, relative) -> None:
 def test_a_v2_path_is_not_refused(tmp_path: Path) -> None:
     for relative in ("data/interim/p3_16/v2_stage2_twin.json", "data/interim/p3_16/x.json"):
         T.refuse_v1_output(tmp_path / relative)
+
+
+@pytest.mark.parametrize(
+    "relative",
+    [
+        "reports/two_stage_precision.json",
+        "reports/p3/two_stage_precision_items.json",
+        "data/interim/p3_16/v1_stage2_twin.json",
+    ],
+)
+def test_the_replay_leg_refuses_a_v1_destination_for_EITHER_of_its_two_outputs(
+    tmp_path: Path, relative
+) -> None:
+    """A15 Pin 5 at the entrypoint, not at the write.
+
+    ``run`` writes two paths, so guarding one leaves the other open
+    ([[two-outputs-one-path-destroys-the-first]]). The guard also has to fire BEFORE the replay:
+    the five sibling entrypoints already check at entry, and these were the unguarded ones
+    ([[fixed-one-of-two-identical-things]]).
+    """
+    safe = str(tmp_path / "reports/v2_ok.json")
+    for report, table in ((str(tmp_path / relative), safe), (safe, str(tmp_path / relative))):
+        with pytest.raises(T.TwoStageError, match="refusing to write"):
+            T._cmd_run(SimpleNamespace(report=report, table=table))
+    # Positive control: with both outputs on v2 paths the guard must let the leg through, or
+    # a guard that refused everything would satisfy the cases above
+    # ([[raises-test-needs-a-positive-control]]).
+    with pytest.raises(AttributeError):
+        T._cmd_run(SimpleNamespace(report=safe, table=safe))
 
 
 # ── the merge-stage2 CLI ──────────────────────────────────────────────────────────────────

@@ -210,15 +210,27 @@ _STAGE1_CHECKPOINTS = {
 # These are the ONLY names those legs may write; `refuse_v1_output` enforces the v1 side.
 _STAGE1_V2 = {arm: f"{_P3_16}/v2_stage1_{arm}.npz" for arm in _STAGE1_CHECKPOINTS}
 _STAGE2_V2 = {arm: f"{_P3_16}/v2_stage2_{arm}.json" for arm in _STAGE1_CHECKPOINTS}
-#: The D3 locus knobs every v2 table was built under, recorded in the folded table (A15 Pin 6).
-_V2_RULE_KNOBS = (
-    "threshold=0.5,min_span=50,gap_merge=10,min_distinct_elements=2,flank=50,min_order_margin=1"
-)
 _PRECISION_FIGURE_V2 = "figures/integration/two_stage_precision_v2.png"
 _PRECISION_ITEMS_V2 = "reports/p3/two_stage_precision_items_v2.json"
 _PRECISION_REPORT_V2 = "reports/two_stage_precision_v2.json"
 _PRECISION_TAU_V2 = ("0.5", "0.7", "0.9")
 _GRADED_TAU_V2 = "0.5"
+
+#: The D3 locus knobs every v2 table was built under, recorded in the folded table (A15 Pin 6).
+#: Built from the SAME config values the table and payload rules read, not from a literal: with
+#: a literal, `--config two_stage_flank=20` would build the tables at flank=20 while the folded
+#: provenance recorded flank=50, so the artifact would describe a rule that did not run.
+_V2_RULE_KNOBS = ",".join(
+    f"{name}={value}"
+    for name, value in (
+        ("threshold", _GRADED_TAU_V2),
+        ("min_span", config.get("two_stage_min_span", 50)),
+        ("gap_merge", config.get("two_stage_gap_merge", 10)),
+        ("min_distinct_elements", config.get("two_stage_min_distinct_elements", 2)),
+        ("flank", config.get("two_stage_flank", 50)),
+        ("min_order_margin", config.get("two_stage_min_order_margin", 1)),
+    )
+)
 #: The annex τ, keyed by the tag that appears in a file name: a Snakemake output cannot be a
 #: function of its wildcards, so the τ a rule grades is derived from the tag it matched.
 _ANNEX_TAU_V2 = {tau.replace(".", ""): tau for tau in _PRECISION_TAU_V2 if tau != _GRADED_TAU_V2}
@@ -499,6 +511,12 @@ rule benchmark_v2_postmint_report:
     input:
         idmap=f"{_POSTMINT_DIR}/postmint_idmap.json",
         search=f"{_POSTMINT_TBLOUT}/search.json",
+        # Declared, not left to the CLI default: the thresholds this leg asserts with are
+        # signed against this artifact, so it is a real DAG edge. Without it a clean rebuild
+        # could grade the assertion before the calibration exists, and re-measuring the floor
+        # would leave the report stale rather than re-triggering it — a flag added to the CLI
+        # but never passed by the rule runs at its default, silently.
+        noise_floor=_NOISE_FLOOR_REPORT,
     output:
         report=_POSTMINT_REPORT,
     params:
@@ -511,6 +529,7 @@ rule benchmark_v2_postmint_report:
     shell:
         "PYTHONPATH=src python -m tbox_finder.integration.host_screen postmint-report "
         "--out-dir {params.out_dir:q} --tblout-dir {params.tblout_dir:q} "
+        "--noise-floor {input.noise_floor:q} "
         "--out {output.report:q} >{log} 2>&1"
 
 
@@ -761,11 +780,19 @@ rule precision_sensitivity_v2:
     conda:
         "../../envs/data.yml"
     shell:
+        # Exit 4 is "the gate failed", and for an ANNEX that is a result, not an error: A15
+        # Pin 5 pre-registers an underpowered tie, which every τ returns. Snakemake treats a
+        # non-zero status as a job failure, so without this the annex rules fail and
+        # `precision_comparison_v2` — which requires them as inputs — can never assemble the
+        # primary report. Exit 3 (a REFUSED report, written only to `.invalid.json`) and every
+        # other status still fail the job, and the final comparison rule keeps its own
+        # gate-failure behaviour: the grade must be able to fail the build.
         "PYTHONPATH=src python -m tbox_finder.integration.precision report "
         "--items {input.score_table:q} --out {output.report:q} "
         "--stage2-operating-point {params.operating_point} "
         "--decoy-prevalence {params.decoy_prevalence} "
-        "--n-boot {params.n_boot} --seed {params.seed} >{log} 2>&1"
+        "--n-boot {params.n_boot} --seed {params.seed} >{log} 2>&1 "
+        "|| [ $? -eq 4 ]"
 
 
 rule precision_comparison_v2:

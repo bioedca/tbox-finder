@@ -160,6 +160,51 @@ def _built(mint, slabs, decoy_frame, hosts, corpus):
 # ──────────────────────────────────────────────────────────────────────────────
 # Promote, don't duplicate (A15 Pin 1)
 # ──────────────────────────────────────────────────────────────────────────────
+def test_a_screen_over_different_screened_dna_is_refused(mint):
+    """The pool digest and the candidate count do not cover the screened DNA.
+
+    Changing ``decoys_v0`` or ``stage2_dataset`` leaves both intact while altering which
+    windows Pin 1 refuses, so the admitted list would be certified against a different union
+    than the one that produced it ([[gate-must-bind-to-upstream-evidence]]).
+    """
+    report = {
+        "problems": [],
+        "controls_all_fired": True,
+        "controls": [{"name": "c", "fired": True}],
+        "content_screen": {"threshold_bits": 10.0},
+        "pool": {"sha256": "p" * 64, "n_candidates": 7},
+        "admitted": {"sha256": "a" * 64, "list": "reports/p3/host_screen_admitted.txt", "n": 5},
+        "screened_dna": {
+            "sources": {
+                "decoy_inserts": {"sha256": "d" * 64},
+                "stage2_population": {"stage2_dataset_sha256": "s" * 64},
+            }
+        },
+    }
+    base = dict(mining_pool_sha256="p" * 64, n_candidates=7, admitted_list_sha256="a" * 64)
+    matching = {
+        ("decoy_inserts", "sha256", "d" * 64),
+        ("stage2_population", "stage2_dataset_sha256", "s" * 64),
+    }
+    # Positive control: the matching set must be accepted.
+    assert mint.host_screen_refusals(report, **base, screened_dna_sha256=matching) == []
+    for label, supplied in (
+        ("a changed decoys_v0", {("decoy_inserts", "sha256", "0" * 64)}),
+        (
+            "a changed stage2_dataset",
+            {("stage2_population", "stage2_dataset_sha256", "0" * 64)},
+        ),
+    ):
+        problems = mint.host_screen_refusals(report, **base, screened_dna_sha256=supplied)
+        assert any("different screened DNA" in p for p in problems), (label, problems)
+    # A digest the screen never recorded is a refusal, not a skip: the absent case is the one
+    # that reads as agreement ([[clauses-must-guard-emptiness]]).
+    problems = mint.host_screen_refusals(
+        report, **base, screened_dna_sha256={("fold_contexts", "sha256", "0" * 64)}
+    )
+    assert any("records no screened_dna.sources" in p for p in problems), problems
+
+
 def test_the_fold_definition_is_the_promoted_one_not_a_local_copy(mint):
     """The screen and the mint must read ONE fold definition. A local copy that agrees today
     makes "the screen ran on the mint's folds" a coincidence

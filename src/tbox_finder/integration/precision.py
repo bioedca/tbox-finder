@@ -159,7 +159,12 @@ import numpy as np
 from tbox_finder import refs
 from tbox_finder.eval.gate4 import json_safe
 from tbox_finder.eval.resample import DEFAULT_N_BOOT, block_bootstrap
-from tbox_finder.integration.two_stage import read_temperature, repo_relative, write_json
+from tbox_finder.integration.two_stage import (
+    read_temperature,
+    refuse_v1_output,
+    repo_relative,
+    write_json,
+)
 from tbox_finder.metrics import (
     average_precision,
     average_precision_reweighted,
@@ -3249,6 +3254,37 @@ V2_FOLD_ARGS: tuple[str, ...] = (
 )
 
 
+def refuse_table_scored_by_another_run(
+    rows: Sequence[Mapping[str, Any]], stage2: Mapping[str, Any], *, arm: str, path: str
+) -> None:
+    """Refuse when a candidate table's ``stage2_logit`` is not what ``stage2`` holds for its key.
+
+    Compared exactly, not within a tolerance: both numbers are the same float round-tripped
+    through the same JSON writer, so any difference means a different scoring run rather than
+    arithmetic drift. A row whose ``payload_key`` the Stage-2 file does not carry is also a
+    refusal — the fail-open reading would be to skip it.
+    """
+    logits = stage2.get("logits")
+    logits = logits if isinstance(logits, Mapping) else {}
+    for row in rows or ():
+        if not isinstance(row, Mapping):
+            continue
+        key, recorded = row.get("payload_key"), row.get("stage2_logit")
+        if key is None or recorded is None:
+            continue
+        if key not in logits:
+            raise PrecisionError(
+                f"the {arm} candidate table has payload {str(key)[:12]}… that {path} does not "
+                "score; its rows were produced by a different Stage-2 run"
+            )
+        if logits[key] != recorded:
+            raise PrecisionError(
+                f"the {arm} candidate table scores payload {str(key)[:12]}… at {recorded!r}, "
+                f"but {path} holds {logits[key]!r}: the table was ranked by a different "
+                "Stage-2 run than the one this report records as its scoring identity"
+            )
+
+
 def attach_v2_inputs(folded: dict[str, Any], args: argparse.Namespace) -> None:
     """Record every v2 input on the folded table with its repo-relative path and sha256.
 
@@ -3279,8 +3315,18 @@ def attach_v2_inputs(folded: dict[str, Any], args: argparse.Namespace) -> None:
         attach_payload_counts(folded, arm, work_list)
         rel, digest = bind(getattr(args, f"{arm}_stage2"))
         source[f"{arm}_stage2"] = rel
+        stage2 = read_json(getattr(args, f"{arm}_stage2"))
         folded["stage2"][arm] = stage2_identity_record(
-            read_json(getattr(args, f"{arm}_stage2")), path=rel, sha256=digest, work_list=work_list
+            stage2, path=rel, sha256=digest, work_list=work_list
+        )
+        # The candidate table carries the Stage-2 logit each row was ranked on; this file is
+        # the Stage-2 run being recorded as the scoring identity. Row-ID coverage and input
+        # hashing both pass when they are DIFFERENT runs — a work list can be re-scored while
+        # its table stays on disk — and the report would then publish one run's identity beside
+        # another run's scores. Re-derived per row rather than assumed
+        # ([[gate-must-bind-to-upstream-evidence]]).
+        refuse_table_scored_by_another_run(
+            read_table(getattr(args, f"{arm}_table")), stage2, arm=arm, path=rel
         )
     rel, digest = bind(args.temperature_source)
     source["temperature_source"] = temperature_source_record(
@@ -3320,6 +3366,11 @@ def attach_v2_inputs(folded: dict[str, Any], args: argparse.Namespace) -> None:
 
 def _cmd_fold(args: argparse.Namespace) -> int:
     """LEG 1 (torch-free, but reads GPU-derived tables): candidate tables → the item table."""
+    # A15 Pin 5: no v2 artifact is written to a v1 path. Checked HERE, before the fold reads
+    # anything, not at the write: a guard that fires after the work is done has already paid
+    # for the overwrite it is meant to prevent ([[guard-runs-after-what-it-guards]]). The same
+    # guard already protects five two_stage entrypoints; these were its unguarded siblings.
+    refuse_v1_output(args.out)
     folded = fold_arms(
         read_json(args.benchmark),
         {"twin": read_table(args.twin_table), "production": read_table(args.production_table)},
@@ -3410,6 +3461,7 @@ def route_report(
 
 def _cmd_report(args: argparse.Namespace) -> int:
     """LEG 2 (torch-free, CI-runnable): the item table → the graded report."""
+    refuse_v1_output(args.out)  # A15 Pin 5, before the bootstrap, not at the write
     folded = read_json(args.items)
     sources = {**folded.get("source", {}), "items": repo_relative(args.items)}
     report = precision_gain(
