@@ -1,0 +1,486 @@
+{
+ "schema_version": "1.0",
+ "step": "P3-16′-remint",
+ "kind": "postmint_noise_floor",
+ "generated_by": "src/tbox_finder/integration/noise_floor.py",
+ "adr": "ADR-0005 A15",
+ "purpose": "the matched-null floor A15 Pin 3's per-model assertion thresholds are signed against; host_screen.POSTMINT_THRESHOLD_BITS must clear null_max_bits",
+ "seed": 42,
+ "search_threshold_bits": 0.0,
+ "rate_at_bits": 10.0,
+ "search_space_mb": 1.0,
+ "infernal_version": "INFERNAL 1.1.5 (Sep 2023)",
+ "env_lock": "envs/infernal.conda-lock.yml",
+ "env_lock_sha256": "b3fa697cae88dab680c5501d5e9e9496180baf8aa754821d958d131803211d3b",
+ "models": {
+  "RF00230": {
+   "path": "data/external/refs/RF00230.cm",
+   "sha256": "082616efe0616479dc9b9f565b5bcab7648d7ea1d629430940319f247af52cea"
+  },
+  "TBDB001": {
+   "path": "data/external/refs/TBDB001.cm",
+   "sha256": "00a821f23bfaf96c1e454022bc0a8fcbe2a9150abadd00bca6abb9298d9a0d1c"
+  }
+ },
+ "benchmark": {
+  "path": "data/interim/p3_16/benchmark_v2.json",
+  "sha256": "c12f9e24834b1d1ff79136b41ae60ed4d53536cdb570178067990571d6edd1c3",
+  "schema_version": "1.1"
+ },
+ "arms": {
+  "n1_inserts": {
+   "sha256": "ed10430e3a34ef863883979380664f27453d137781a85ab6d5b417ad51a49ce7",
+   "n": 691,
+   "nt_min": 71,
+   "nt_max": 535,
+   "construction": "the decoys_v0 inserts actually spliced into the gated negatives, searched alone — the insert channel, which no per-host pre-draw screen covers"
+  },
+  "n2_scramble1": {
+   "sha256": "a5eeea234b2b95c1a7940e12ea03706610029e1202b2cb3d6288fb578337040b",
+   "n": 691,
+   "nt_min": 1024,
+   "nt_max": 1024,
+   "construction": "the same hosts re-spliced with the same inserts at a phase moved ≥ 50 nt (draw 1) — the junction channel, and the arm matched to the minted contigs in every respect but where the junction falls"
+  },
+  "n2_scramble2": {
+   "sha256": "d0531e839bf04b9f7741630e71a1e0c5dd0569dffb4870549026806565856d05",
+   "n": 691,
+   "nt_min": 1024,
+   "nt_max": 1024,
+   "construction": "as n2_scramble1, an independent second phase draw"
+  },
+  "n3_pool": {
+   "sha256": "6e70039114c2e9abdfac6de16d637887aac75440193d6e1aecefd03ac6bba05b",
+   "n": 1000,
+   "nt_min": 1024,
+   "nt_max": 1024,
+   "construction": "1000 screen-admitted windows the seeded draw did not take, pre-splice — the host channel, i.e. what Pin 2 admission leaves behind"
+  }
+ },
+ "matchedness": [
+  {
+   "name": "n1_covers_the_gated_negatives",
+   "mechanism": "the insert arm is one record per gated negative, in benchmark order",
+   "expected": [
+    691,
+    true
+   ],
+   "observed": [
+    691,
+    true
+   ],
+   "fired": true
+  },
+  {
+   "name": "n2_length_matches_the_minted_contig",
+   "mechanism": "a scramble is the same length as the contig it is a null for",
+   "expected": 1382,
+   "observed": 1382,
+   "fired": true
+  },
+  {
+   "name": "n2_carries_its_insert_exactly_once",
+   "mechanism": "the same insert, one copy — a second copy would make the arm a positive",
+   "expected": 1382,
+   "observed": 1382,
+   "fired": true
+  },
+  {
+   "name": "n2_insert_is_the_minted_insert",
+   "mechanism": "the scramble re-splices the SAME insert, not a different decoy",
+   "expected": 1382,
+   "observed": 1382,
+   "fired": true
+  },
+  {
+   "name": "n2_agrees_outside_both_insert_windows",
+   "mechanism": "same host: the only difference is where the junction falls",
+   "expected": 1382,
+   "observed": 1382,
+   "fired": true,
+   "note": "the property an equal-length OVERWRITE implies; excising the insert from both and comparing remainders is the wrong test and fails on every item"
+  },
+  {
+   "name": "n2_reproduces_no_minted_contig",
+   "mechanism": "no scramble equals any minted contig",
+   "expected": 0,
+   "observed": 0,
+   "fired": true
+  },
+  {
+   "name": "n2_phase_moved_far_enough",
+   "mechanism": "every junction moved ≥ 50 nt",
+   "expected": true,
+   "observed": true,
+   "fired": true,
+   "note": "min observed shift 50 nt"
+  },
+  {
+   "name": "n3_is_disjoint_from_the_drawn_hosts",
+   "mechanism": "the host arm shares no window with the benchmark it calibrates",
+   "expected": 0,
+   "observed": 0,
+   "fired": true
+  },
+  {
+   "name": "n3_is_the_requested_size",
+   "mechanism": "the host arm was not silently truncated",
+   "expected": 1000,
+   "observed": 1000,
+   "fired": true
+  }
+ ],
+ "motif": {
+  "motif": "GGTGGNACCGCG",
+  "per_arm": {
+   "n1_inserts": {
+    "n": 691,
+    "n_motif": 0
+   },
+   "n2_scramble1": {
+    "n": 691,
+    "n_motif": 0
+   },
+   "n2_scramble2": {
+    "n": 691,
+    "n_motif": 0
+   },
+   "n3_pool": {
+    "n": 1000,
+    "n_motif": 0
+   }
+  },
+  "n": 3073,
+  "n_motif": 0,
+  "rate": 0.0,
+  "positive_controls": [
+   {
+    "name": "motif_scan_detects_a_planted_motif_forward",
+    "mechanism": "the motif scan is live on the forward strand",
+    "expected": [
+     true,
+     true
+    ],
+    "observed": [
+     true,
+     true
+    ],
+    "fired": true,
+    "note": "both-strand verdict, then a forward-only scan of the same bytes"
+   },
+   {
+    "name": "motif_scan_finds_a_reverse_only_motif_the_forward_scan_misses",
+    "mechanism": "the motif scan is live on the reverse strand, which a forward-only scan cannot be",
+    "expected": [
+     true,
+     false
+    ],
+    "observed": [
+     true,
+     false
+    ],
+    "fired": true,
+    "note": "the asymmetry IS the control: motif_present is both-strand, so a subject that merely reverse-complements the forward control fires identically with the reverse leg dead. Requiring the forward-only scan to MISS it does not."
+   }
+  ]
+ },
+ "cells": {
+  "RF00230": {
+   "n1_inserts": {
+    "default": {
+     "n": 691,
+     "n_with_hit": 2,
+     "n_ge_10": 0,
+     "rate_ge_10": 0.0,
+     "max_bits": 3.6,
+     "p99_bits": 0.0,
+     "p95_bits": 0.0,
+     "median_bits": 0.0,
+     "scores_ge_10": []
+    },
+    "max": {
+     "n": 691,
+     "n_with_hit": 164,
+     "n_ge_10": 1,
+     "rate_ge_10": 0.001447178002894356,
+     "max_bits": 10.1,
+     "p99_bits": 4.7,
+     "p95_bits": 2.3,
+     "median_bits": 0.0,
+     "scores_ge_10": [
+      10.1
+     ]
+    }
+   },
+   "n2_scramble1": {
+    "default": {
+     "n": 691,
+     "n_with_hit": 5,
+     "n_ge_10": 0,
+     "rate_ge_10": 0.0,
+     "max_bits": 6.2,
+     "p99_bits": 0.0,
+     "p95_bits": 0.0,
+     "median_bits": 0.0,
+     "scores_ge_10": []
+    },
+    "max": {
+     "n": 691,
+     "n_with_hit": 594,
+     "n_ge_10": 5,
+     "rate_ge_10": 0.00723589001447178,
+     "max_bits": 15.1,
+     "p99_bits": 9.1,
+     "p95_bits": 6.6,
+     "median_bits": 1.7,
+     "scores_ge_10": [
+      15.1,
+      11.3,
+      10.9,
+      10.2,
+      10.1
+     ]
+    }
+   },
+   "n2_scramble2": {
+    "default": {
+     "n": 691,
+     "n_with_hit": 7,
+     "n_ge_10": 0,
+     "rate_ge_10": 0.0,
+     "max_bits": 8.3,
+     "p99_bits": 0.1,
+     "p95_bits": 0.0,
+     "median_bits": 0.0,
+     "scores_ge_10": []
+    },
+    "max": {
+     "n": 691,
+     "n_with_hit": 578,
+     "n_ge_10": 7,
+     "rate_ge_10": 0.010130246020260492,
+     "max_bits": 13.0,
+     "p99_bits": 10.0,
+     "p95_bits": 6.4,
+     "median_bits": 1.6,
+     "scores_ge_10": [
+      13.0,
+      12.5,
+      11.3,
+      10.6,
+      10.1,
+      10.1,
+      10.0
+     ]
+    }
+   },
+   "n3_pool": {
+    "default": {
+     "n": 1000,
+     "n_with_hit": 26,
+     "n_ge_10": 0,
+     "rate_ge_10": 0.0,
+     "max_bits": 8.9,
+     "p99_bits": 4.8,
+     "p95_bits": 0.0,
+     "median_bits": 0.0,
+     "scores_ge_10": []
+    },
+    "max": {
+     "n": 1000,
+     "n_with_hit": 799,
+     "n_ge_10": 3,
+     "rate_ge_10": 0.003,
+     "max_bits": 14.1,
+     "p99_bits": 8.8,
+     "p95_bits": 6.5,
+     "median_bits": 1.5,
+     "scores_ge_10": [
+      14.1,
+      12.6,
+      11.8
+     ]
+    }
+   }
+  },
+  "TBDB001": {
+   "n1_inserts": {
+    "default": {
+     "n": 691,
+     "n_with_hit": 3,
+     "n_ge_10": 0,
+     "rate_ge_10": 0.0,
+     "max_bits": 3.8,
+     "p99_bits": 0.0,
+     "p95_bits": 0.0,
+     "median_bits": 0.0,
+     "scores_ge_10": []
+    },
+    "max": {
+     "n": 691,
+     "n_with_hit": 111,
+     "n_ge_10": 0,
+     "rate_ge_10": 0.0,
+     "max_bits": 8.0,
+     "p99_bits": 4.6,
+     "p95_bits": 2.3,
+     "median_bits": 0.0,
+     "scores_ge_10": []
+    }
+   },
+   "n2_scramble1": {
+    "default": {
+     "n": 691,
+     "n_with_hit": 4,
+     "n_ge_10": 0,
+     "rate_ge_10": 0.0,
+     "max_bits": 9.1,
+     "p99_bits": 0.0,
+     "p95_bits": 0.0,
+     "median_bits": 0.0,
+     "scores_ge_10": []
+    },
+    "max": {
+     "n": 691,
+     "n_with_hit": 345,
+     "n_ge_10": 0,
+     "rate_ge_10": 0.0,
+     "max_bits": 9.1,
+     "p99_bits": 6.8,
+     "p95_bits": 4.3,
+     "median_bits": 0.0,
+     "scores_ge_10": []
+    }
+   },
+   "n2_scramble2": {
+    "default": {
+     "n": 691,
+     "n_with_hit": 1,
+     "n_ge_10": 0,
+     "rate_ge_10": 0.0,
+     "max_bits": 0.9,
+     "p99_bits": 0.0,
+     "p95_bits": 0.0,
+     "median_bits": 0.0,
+     "scores_ge_10": []
+    },
+    "max": {
+     "n": 691,
+     "n_with_hit": 341,
+     "n_ge_10": 0,
+     "rate_ge_10": 0.0,
+     "max_bits": 9.9,
+     "p99_bits": 6.7,
+     "p95_bits": 4.0,
+     "median_bits": 0.0,
+     "scores_ge_10": []
+    }
+   },
+   "n3_pool": {
+    "default": {
+     "n": 1000,
+     "n_with_hit": 2,
+     "n_ge_10": 0,
+     "rate_ge_10": 0.0,
+     "max_bits": 6.6,
+     "p99_bits": 0.0,
+     "p95_bits": 0.0,
+     "median_bits": 0.0,
+     "scores_ge_10": []
+    },
+    "max": {
+     "n": 1000,
+     "n_with_hit": 485,
+     "n_ge_10": 1,
+     "rate_ge_10": 0.001,
+     "max_bits": 11.9,
+     "p99_bits": 6.6,
+     "p95_bits": 4.4,
+     "median_bits": 0.0,
+     "scores_ge_10": [
+      11.9
+     ]
+    }
+   }
+  }
+ },
+ "null_max_bits": {
+  "RF00230": 15.1,
+  "TBDB001": 11.9
+ },
+ "n_null_sequences": {
+  "RF00230": 3073,
+  "TBDB001": 3073
+ },
+ "pooled": {
+  "RF00230": {
+   "default": {
+    "n": 3073,
+    "n_ge_10": 0,
+    "rate_ge_10": 0.0,
+    "wilson95": [
+     0.0,
+     0.001248507235068004
+    ],
+    "max_bits": 8.9
+   },
+   "max": {
+    "n": 3073,
+    "n_ge_10": 16,
+    "rate_ge_10": 0.005206638464041653,
+    "wilson95": [
+     0.0032074661102521715,
+     0.00844131700131366
+    ],
+    "max_bits": 15.1
+   }
+  },
+  "TBDB001": {
+   "default": {
+    "n": 3073,
+    "n_ge_10": 0,
+    "rate_ge_10": 0.0,
+    "wilson95": [
+     0.0,
+     0.001248507235068004
+    ],
+    "max_bits": 9.1
+   },
+   "max": {
+    "n": 3073,
+    "n_ge_10": 1,
+    "rate_ge_10": 0.0003254149040026033,
+    "wilson95": [
+     5.7446030857632915e-05,
+     0.0018410784464914852
+    ],
+    "max_bits": 11.9
+   }
+  }
+ },
+ "limitations": [
+  "n3_pool is conditioned on having PASSED the Pin 2 screen, so it measures the residual admission leaves and cannot estimate Pin 2's own false-refusal rate.",
+  "n2 carries the same host and the same insert as the contig it is a null for, so it cannot separate noise from genuine homology present in BOTH; n3, which carries no insert at all, is what bounds the host channel.",
+  "A null maximum is an extreme-value statistic: it rises with the number of sequences searched, so it is reported beside n_null_sequences and never as a fixed property."
+ ],
+ "wall_s": 0.33,
+ "provenance": {
+  "schema_version": "1.0",
+  "rule": "workflow/rules/integration.smk :: p3_16_host_screen",
+  "script": "src/tbox_finder/integration/host_screen.py",
+  "git_sha": "15e45b47e02cee26ac2c79d47261f6ecb9a42fe5",
+  "env_lock_hash": "a4a6715d411d7218432c4c670d35475f6c9aa7dd6397fd5d906ca7e21293dc34",
+  "seed": 42,
+  "inputs": {
+   "data/interim/p3_16/noise_floor/prep.json": "a3b7a86227a86faef332fb080ac814c425935fe5f9c55f93434dcbbcc7b4f30a",
+   "data/interim/p3_16/noise_floor/tblout/search.json": "8eabe18b5b7286f0540345c6c70bd43df97296d3cde2828d4c86a1c82c0c6908"
+  },
+  "outputs": {},
+  "adr": "ADR-0005 A15",
+  "generated_at_utc": "2026-10-12T00:53:12.230545+00:00",
+  "extra": {
+   "leg": "noise-floor-report"
+  }
+ },
+ "problems": []
+}

@@ -89,25 +89,35 @@ data-leakage control, calibration, and orthogonal validation are first-class.
   novel lineages.*
 
 
-- **Phase 3 — Stage-2 + integration (2026-08-13).** **Both halves of the P3 exit gate
-  pass.** *Calibration:* the RiNALMo re-ranker's in-distribution ECE is **0.005662**
-  against a pre-registered **≤ 0.05** (GATE-2's P3 half), graded on the temperature-scaled
-  posterior before the deployment prior-shift, with a cluster-blocked 95% interval of
-  [0.002700, 0.009410]. *Precision:* the two-stage system beats Stage-1-only on **AUPRC at
-  the pre-registered 100:1 benchmark decoy prevalence — 0.950 vs 0.784, +16.5 pp** — on a
-  1,893-window in-distribution benchmark (1,201 held-out T-box loci in real genomic context,
-  692 §9.1 decoys spliced into real host windows — 96 of which share a verbatim 32-nt
-  stretch of host DNA with the gated arm's own Stage-1 training fold, measured and reported
-  rather than assumed away). ⚠ **The 95% block-bootstrap interval is
-  [−4.8, +35.7] pp: the point estimate is positive and its lower bound is not.** In
-  distribution Stage-1 alone is already ~99.7% precise, so only **4 of 692** decoys separate
-  the two systems, and no in-distribution benchmark can make that comparison significant.
-  *The number that shows where Stage-2 earns its place:* the gain grows monotonically with
-  decoy prevalence — **+0.1 pp** at the benchmark's own composition, **+16.5 pp** at 100:1,
-  **+63.0 pp** at 10⁴:1, the regime the Phase-5 genome scan runs in. Graded, like GATE-4,
-  on an **evaluation twin** rather than the shipped scanner: no Stage-1 checkpoint in this
-  repo has an in-distribution holdout, and the shipped scanner's arm is reported beside the
-  gated one (+4.7 pp), disclosed as in-sample. The **P3 hard-negative re-mining round ran
+- **Phase 3 — Stage-2 + integration (2026-08-13; the precision half re-graded 2026-10-11).**
+  **GATE-2 passes. The two-stage precision gate does not: it is `underpowered`, and the
+  benchmark it was first measured on has been withdrawn.** *Calibration:* the RiNALMo
+  re-ranker's in-distribution ECE is **0.005662** against a pre-registered **≤ 0.05**
+  (GATE-2's P3 half), graded on the temperature-scaled posterior before the deployment
+  prior-shift, with a cluster-blocked 95% interval of [0.002700, 0.009410]. *Precision:* the
+  first benchmark spliced its 692 decoys into host windows carved from the **flanks of
+  catalogued T-boxes**, screened only by a ±50-nt coordinate mask. A score-blind content audit
+  found that mask fails open — 110 of the 692 host windows (94 for the graded arm) shared a
+  verbatim 32-nt stretch with that arm's own Stage-1 training DNA, and 11 carried an RF00230
+  hit above the screen's threshold, three above the Rfam gathering threshold. Every decoy that
+  drew a Stage-1 candidate was one of them. A gated negative containing T-box sequence is a
+  label error in the direction that *manufactures* a precision gain, so the benchmark was
+  **re-minted** with every host pre-screened for training DNA and for T-box sequence before the
+  draw (ADR-0005 A15), and the v1 grade is **withdrawn**. On the re-minted benchmark the gate
+  reads: two-stage AUPRC **0.997527** against Stage-1-only **0.997527** at the pre-registered
+  100:1 prevalence — a gain of **+0.0000 pp**, CI **[−1.1e-14, +1.1e-14]** — because **0 of 691
+  screened negatives draw a Stage-1 candidate at all**, so the two systems score an identical
+  item set and there is nothing for the re-ranker to reject. ⚠ **The v1 prevalence curve was the
+  leak.** It rose monotonically to **+63.0 pp** at 10⁴:1 and was quoted as the architecture's
+  division of labour arriving as a measurement; on the screened benchmark the gain is **0.0 pp at
+  every prevalence**. What Stage-2 buys over Stage-1 is therefore **not yet measured** — an
+  in-distribution benchmark whose negatives are clean has no power to measure it, which is a
+  property of the benchmark and not a result about the re-ranker. The question moves to the
+  held-out-clade gate (GATE-1, Phase 4) and the genome-scale FDR (Phase 5). Graded, like GATE-4,
+  on an **evaluation twin** rather than the shipped scanner, because no Stage-1 checkpoint in
+  this repo has an in-distribution holdout; the shipped scanner's arm is reported beside it and
+  is in-sample, where a baseline that merely counts 32-mers shared with training DNA also reaches
+  AUPRC 1.000 — the familiarity confound the re-mint made measurable. The **P3 hard-negative re-mining round ran
   and decided** — 941 candidates → 3 mined, 938 spared — and **declined to retrain**, so the
   shipped Stage-1 checkpoint is unchanged. *Backbone comparator (2026-10-05):* an **RNA-FM**
   Stage-2 trained on the same data and calibration stack is also calibrated in distribution
@@ -118,17 +128,18 @@ data-leakage control, calibration, and orthogonal validation are first-class.
   the worse-calibrated backbone in 19 of the other 21 orders. Two disclosed confounds (a
   one-minor-version library difference, and a shipped arm trained on an under-annealed LR
   schedule) mean the comparison is not a clean backbone contrast. RiNALMo stays the shipped
-  Stage-2. *CM-confirmer ablation (2026-10-06):* replacing the re-ranker with the Rfam/TBDB
-  covariance models plus a learned (Platt) calibration loses **30.7 pp of AUPRC at 100:1**
-  (0.643 vs 0.950; CI [+0.7, +47.7]). Two decoy windows the CM scores as strong T-boxes account
+  Stage-2. *CM-confirmer ablation (2026-10-06, ⚠ measured on the withdrawn v1 benchmark; re-issue
+  booked):* replacing the re-ranker with the Rfam/TBDB covariance models plus a learned (Platt)
+  calibration loses **30.7 pp of AUPRC at 100:1** (0.643 vs 0.950; CI [+0.7, +47.7]). Two decoy windows the CM scores as strong T-boxes account
   for 28.6 pp of that; both are booked for a benchmark label audit. The CM is well calibrated in
   distribution (ECE 0.0075). It cannot be temperature-scaled at all, because it separates the
   calibration split perfectly (ADR-0005 A14). Its far lower leave-clade-out ECE (0.024 vs 0.211)
   is **circular, not a generalization result**: the models that define the positives also do the
   scoring. The CM stays an orthogonal cross-validator, never the Stage-2.
 
-  *Still no discovery result: Phase 3 ships a calibrated two-stage system and its two
-  passing gates; the generalization claim is graded at GATE-1 in Phase 4.*
+  *Still no discovery result: Phase 3 ships a calibrated two-stage system, a passing
+  calibration gate, and an in-distribution precision gate with **no power to test the component
+  it was built to test**. The generalization claim is graded at GATE-1 in Phase 4.*
 
 ## Layout (PRD §16)
 

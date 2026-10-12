@@ -9058,3 +9058,187 @@ and an infinite card total, each placed where nothing else objects.
 **Decisions.** None.
 
 **Commit.** see PR (P3-17′-validators, review round 4).
+
+## Step P3-16′-remint — 2026-10-11: the screened re-mint, its failed assertion, and the measured floor that re-signed it
+
+**Inputs.** `data/processed/negatives/mining_pool_v0.parquet` (45,988 rows → 43,649 admitted →
+27,941 out-of-fold candidates) · the union of every Stage-1/Stage-2 training sequence and every
+`decoys_v0` insert · `data/external/refs/{RF00230,TBDB001}.cm` (INFERNAL 1.1.5) · both Stage-1
+checkpoints · `stage2_rinalmo/aux1.0_lr1e-4` · `reports/gate2_p3_ece.json`
+(`T` = 1.140627294282911) · ADR-0005 **A15**, signed 2026-10-11 with two same-day corrections.
+
+**Process.** A15 Pin 1's fold screen (canonical N-free 32-mers, both strands, whole pre-splice
+window, against the union prior, or a same-accession interval overlap) and Pin 2's content screen
+(`cmsearch -T 10 -Z 1`, default pipeline, both strands, RF00230 + TBDB001, plus the CM-free motif)
+ran over the out-of-fold pool before the draw; all 692 hosts were redrawn at seed 42; the spliced
+contigs were re-searched by Pin 3's assertion with the Pin 2 config plus a filters-off `--max`
+arm. **The assertion failed twice before it passed, and neither failure was a screen defect.**
+Correction 1 widened the leader exception from *wholly inside* to **overlapping** its insert
+interval, after the leader's own RF00230 alignment ran 162 nt past the splice point — `motif_spans`
+localises the motif on both strands so it gets the same interval test, and a `leader_decoy` hit
+*disjoint* from its own insert is still a violation. That left 7 rows over 5 gated contigs, all
+RF00230, at 10.1–14.5 bits, from three independent channels. Rather than widen the screen
+(~118 CPU-h) or tolerate the residue, the floor was **measured**:
+`src/tbox_finder/integration/noise_floor.py`, three legs, 16 searches at `-T 0`, three matched
+nulls containing no T-box by construction. Correction 2 then re-signed Pin 3's threshold **per
+model** against that measurement, leaving Pin 2's screen untouched.
+
+**Outputs.** `reports/p3/host_screen.json` + its refused-window annex + `host_screen_admitted.txt` ·
+`data/interim/p3_16/benchmark_v2.json` (sha `c12f9e24…`, 1,893 items) ·
+`reports/p3/postmint_noise_floor.json` (new) · `reports/p3/benchmark_v2_postmint_screen.json`
+(schema **1.1**, per-model `threshold_bits`) · `reports/two_stage_precision_v2.json` +
+`reports/p3/two_stage_precision_items_v2.json` + the two τ annexes ·
+`figures/integration/two_stage_precision_v2.png` ·
+`src/tbox_finder/integration/{host_screen,noise_floor,two_stage,precision}.py` ·
+`workflow/rules/integration.smk` (14 v2 rules + 3 calibration rules) ·
+`tests/unit/test_{host_screen,noise_floor,mint_p3_16,two_stage,precision_gain}.py`.
+
+**The screen.** 27,941 candidates → Pin 1 refuses 4,722 (4,721 k-mer, 83 coordinate; 4,639
+k-mer-only, **1 coordinate-only**) → 23,219 survivors → Pin 2 refuses 305 (CM either 303: RF00230
+294, TBDB001 170, marginal_RF00230 133, marginal_TBDB001 9; motif 120, 2 motif-only) → **22,914
+admitted**. `problems: []`; 12/12 must-fire controls re-derived `observed == expected`. A15's prose
+says 23,220 survivors, which is the k-mer-rule-only count; the coordinate rule refuses exactly one
+further window, and that window is A15's own named coordinate-only control (`4ef2d573…:lead`,
+CP003056.1) — both counts are in the report rather than reconciled away. Sensitivity panel over
+1,201 positives: RF00230 recall 1.000, TBDB001 0.8651, motif 0.4538. v1 audit at `-T 0`: **11 of
+the 692 v1 hosts ≥ 10 bits, 8 ≥ 20, 3 ≥ 93** (143.7, 139.5, 113.0), 139 of 692 refused overall —
+reproducing every figure A15 quotes. Composition (Pin 7(e)): trail windows refused **3.01×** as
+often as lead.
+
+**The re-mint.** 1,893 items (1,201 positives / 692 negatives) over 1,555 blocks; positives
+byte-identical to v1; all 692 hosts redrawn (16 coincide with a v1 host by chance);
+**`overlap_with_training_folds.by_arm = {production 0, twin 0}`** against v1's 110 / 94.
+Composition lead 400 / trail 292 (v1: 344 / 348). Pin 7(c), measured for the first time: **16 of
+283 gated `structured_rna` inserts are sequence-identical to a shipped Stage-2 training decoy** —
+counted by sequence, because every test-rung decoy is out of that population by id and an id
+comparison is 0 by construction.
+
+**The matched-null measurement (A15 Pin 3 Correction 2).** Three nulls — N1 the 691 spliced
+inserts alone; N2 the *same* 691 hosts re-spliced with the *same* inserts at a phase moved ≥ 50 nt,
+twice; N3 1,000 admitted-but-undrawn windows — each searched with both models and both pipelines at
+`-T 0`. Matchedness is asserted on the bytes searched, not on the builder: N2 is byte-identical to
+its minted contig **outside both insert windows** on 1382/1382, carries its insert exactly once at
+the new phase, reproduces no minted contig, and N3 ∩ the drawn hosts is 0. The naive
+"excise-and-compare" check fails on every item here and was discarded — the mint is an equal-length
+**overwrite**, so the property it implies is agreement outside both windows.
+
+| model | arm | null ≥ 10 bits | null max | observed | obs max | Fisher p |
+|---|---|---|---|---|---|---|
+| RF00230 | default | 1 / 2382 | 10.5 | 1 / 691 | 11.8 | 0.3992 |
+| RF00230 | `--max` | 14 / 3073 | **16.8** | 5 / 692 | 14.5 | 0.3725 |
+| TBDB001 | `--max` | 0 / 1382 | 9.9 | 0 / 692 | — | 1.0000 |
+| motif | both strands | 0 / 3073 | — | 0 / 692 | — | 1.0000 |
+
+Against the arm matched by construction, the observed rate **equals** the null: 5/692 = 0.00723 vs
+N2's 10/1382 = 0.00724, Fisher exact **p = 1.0000**. Each channel is predicted by its own null to
+within one contig — N3 → 2.08 expected / 2 observed (host-only), N1 → 1.00 / 1 (insert-only),
+N2 → 5.01 / 5 overall. Real T-boxes under RF00230 start at **31.9** bits (median 100.1, max 155.4,
+none below 20), so the band between the worst null sequence and the weakest genuine element is
+empty. Under TBDB001 the picture inverts: its null never reaches 10.0 while real hits start at
+10.0, and 389 of 1,039 are below 20 — so TBDB001 stays at 10.0 and must.
+
+**Validation.**
+- **A15 Pin 3 (post-mint assertion): PASS** at the re-signed thresholds — 0 violations, 7 exempt
+  (the leader, unchanged), **7 residue rows over 5 contigs** published as `noise_residue`.
+- **A13 Pin 1 (the P3 exit gate's two-stage half): FAILS, `verdict_class: underpowered`.** On the
+  gated twin arm at D7's pinned 100:1, two-stage AUPRC is **0.9975268134640275** and Stage-1-only
+  is **0.9975268134640275** — identical to every digit the statistic carries. The gain is
+  **+0.0000 pp** with a 95 % block-bootstrap CI of **[−1.11e-14, +1.11e-14]** over 1,554 blocks
+  and 2,000 resamples, i.e. numerically zero. A13 Pin 1's `>` is strict, so a tie fails, and
+  A15 Pin 5 pre-registered exactly this outcome and its class.
+- **Why it ties, measured score-blind:** **0 of 691 gated negatives draw a Stage-1 candidate** on
+  either arm, and **0 reach Stage-2**. The two arms are therefore scoring an identical item set —
+  there is nothing for Stage-2 to reject — so the statistic is equal *by construction* rather than
+  by measurement. The report's own sentence: *"no gated negative reached Stage-2; the benchmark
+  has no power to test Stage-2."*
+- **The prevalence curve is gone, and that is the headline.** On v1 the AUPRC gain rose monotonically
+  +0.138 → +2.294 → +16.535 → +48.762 → **+62.967 pp** from the benchmark's own composition to
+  10⁴:1, and that curve was quoted as PRD §6's division of labour arriving as a measurement. On
+  v2 the gain is **0.0 pp at every prevalence** — observed, 10:1, 100:1, 10³:1 and 10⁴:1 alike.
+  The entire v1 curve was produced by the 110/94 host windows that shared training DNA; it was
+  never a property of the architecture. This is the clearest single statement of what the leak
+  was worth.
+- **Familiarity confound (Pin 7(b)), measured and now consequential.** On the **non-gated
+  production** arm a baseline that merely counts an item's 32-mers shared with that arm's own
+  Stage-1 training DNA reaches **AUPRC 1.0000**, exactly matching both Stage-1-only and two-stage
+  — `rivals_stage1: true`. On the gated twin arm it reaches **0.9967** against Stage-1's
+  **0.9975**, i.e. **−0.081 pp**, so `rivals_stage1: false` by a margin of eight hundredths of a
+  point. A15 said that if the baseline rivals Stage-1 the report must state the gate is confounded
+  by construction; on the arm that is graded it does not rival it, and the margin is small enough
+  that the sentence is worth saying anyway.
+- **Matched recall (reported, gated on nothing — D3 freezes both operating points at P5-01):**
+  at a target recall of 0.9908, precision is **1.000 vs 1.000**, +0.000 pp. The τ annexes agree:
+  0.997527 vs 0.997527 at τ = 0.7 and 0.989283 vs 0.989283 at τ = 0.9, both `underpowered`, and
+  `verdict_invariant: true` across the three.
+- **Familiarity confound (Pin 7(b)) is maximal, as predicted:** twin median 0.5831 for positives
+  vs **0.0000** for negatives (production 1.0000 vs 0.0458). The screen makes every gated host
+  32-mer-disjoint by construction.
+- Stage-1 replay, both arms, `--dtype float32`: max |Δ log-prob| vs `scan_encoded_windows`
+  **0.000e+00**, 0 prediction mismatches.
+- `snakemake --lint` clean; the calibration DAG resolves (`-n postmint_noise_floor_report`);
+  ruff + black clean over 302 files.
+- **All six committed reports `validate_report → []`**, both as recorded and independently
+  re-derived: the screen, the refused annex's parent, the noise floor, the post-mint assertion,
+  the graded v2 report and its two τ annexes.
+- **Local tier: 14 failed / 7,945 passed / 211 skipped / 8 xfailed**, with the `^FAILED` set
+  **identical** to the `15e45b4` baseline — `comm` empty in both directions, both sets non-empty
+  at 14, and `grep -c '^FAILED'` cross-checked against the summary line so the comparison cannot
+  be vacuous. Passing count rose 7,725 → 7,945 (+220 tests this step).
+  ⚠ A first run of this tier reported two *new* failures,
+  `test_import_is_stdlib_only` and `test_classII_import_is_stdlib_only`. They were an artifact of
+  the harness, not a regression: both spawn a subprocess that inherits the parent's environment,
+  and that run was launched without `PYTHONPATH=src` while the baseline had it. Re-run under
+  matched conditions, both pass. Recorded because a tier comparison between two differently
+  configured runs is worthless, and this one nearly read as a regression.
+- **Sabotage.** The nine validator clauses added after the adversarial audit are each RED against
+  a named test. The eleven gate-defeating defects in the three `noise_floor` CLI legs are each
+  RED, including `_cmd_report` replacing `validate_report(report)` with `[]` — the fail-open that
+  would publish `problems: []` with nothing checked and let `host_screen` sign its thresholds
+  against it. Two adversarial audits ran: the first found **27** sabotages that stayed green, of
+  which the material ones are fixed (a tautological "both-strand" motif control, eight of nine
+  matchedness controls vacuous on an empty corpus, six missing validator clauses); the second
+  confirmed 11/11 afterwards and that the module was left byte-identical.
+
+**Decisions.**
+- **A15 Pin 3 Correction 1** (*"Drafting defect — widen to 'overlapping'"*): the leader exception
+  is an **overlap** test. It stays an interval test and never pool membership.
+- **A15 Pin 3 Correction 2** (*"Go for A"*): the assertion threshold is **per model** — RF00230
+  ≥ 20.0, TBDB001 ≥ 10.0 unchanged, motif unchanged — re-signed against the measured floor. The
+  user chose to **measure the noise floor before re-signing anything**, which is the order the two
+  corrections were taken in. **Pin 2's screen is untouched at 10.0**, so this is not the whole-text
+  20-bit content threshold the Sign-off records as declined: a screen should err strict (a false
+  refusal costs one window of ~23k) while an assertion should sit at its measured floor (a false
+  violation blocks the benchmark). The two are asymmetric on purpose.
+- **The re-sign is score-blind but not pre-mint**, and A15 now says so rather than inheriting the
+  amendment's "before any v2 score exists" clause: the v2 Stage-1/Stage-2 score files predate it in
+  wall-clock terms. No Stage-1 output, Stage-2 output, familiarity score or value of the A13
+  statistic was computed from, consulted for, or an input to either threshold.
+- **Correction 2 adds an evidence branch to Pin 3's remedy clause.** A violation still mandates a
+  §7 stop; what follows is decided by evidence — a draw that admitted T-box content is re-minted at
+  seed 42, while an assertion whose threshold a matched null shows to be mis-specified is re-signed
+  and re-run with **no re-mint**. The branch is available only on a measurement published as a
+  committed artifact, because a threshold re-signed with no measured floor beside it is a loosened
+  gate (§8.5).
+- **The threshold cannot drift from its evidence.** `host_screen.postmint_threshold` refuses an
+  unpinned model and any value below Pin 2's; the post-mint clause set refuses any threshold that
+  does not strictly clear its own model's measured `null_max_bits`; and `precision.postmint_record`
+  now folds the thresholds and the calibration digest forward, because `n_violations == 0` reads
+  identically at the signed thresholds, at a forgotten 10.0 and at an absurd 1000.0.
+- The post-mint report is versioned **separately** (`POSTMINT_SCHEMA_VERSION = "1.1"`) from the
+  screen report's `SCHEMA_VERSION`, so a clause set that changed for one kind does not stale the
+  other's committed bytes.
+
+**The TBDB001 second correction, in sequence.** The first floor measurement ran TBDB001 over two
+of the four arms (1,382 sequences) and returned a maximum of 9.9, so A15 was signed with TBDB001
+left at 10.0. Making the measurement reproducible meant searching **all four arms under both
+pipelines** (3,073 sequences per model), and that found a null sequence at **11.9 bits** — one
+admitted-but-undrawn pool window under `--max`. 10.0 was therefore inside its own floor, and the
+post-mint leg **refused its own report** with exactly that message rather than a human noticing.
+The user signed **TBDB001 ≥ 12.0** (*"Go for A1"*), which is back-check-identical to the first
+signature: the same 9 of 11 v1 hosts refused, the same two released. Two things are worth keeping:
+the clause that caught it is the one binding each threshold to its own measured floor, and the
+margin it now has is **0.1 bits** against a statistic that rises with the number of null sequences
+searched — so TBDB001's clause is not robust to a larger null, and the artifact records
+`n_null_sequences` beside every maximum for that reason.
+
+**Commit.** see PR (P3-16′-remint).

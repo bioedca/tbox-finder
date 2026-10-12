@@ -1,0 +1,13 @@
+#target name         accession query name           accession mdl mdl from   mdl to seq from   seq to strand trunc pass   gc  bias  score   E-value inc description of target
+#------------------- --------- -------------------- --------- --- -------- -------- -------- -------- ------ ----- ---- ---- ----- ------ --------- --- ---------------------
+w000002              -         seed_ILE             -          cm      112      194      151      213      +    no    1 0.48   0.0   25.9   1.5e-05 !   -
+#
+# Program:         cmsearch
+# Version:         1.1.5 (Sep 2023)
+# Pipeline mode:   SEARCH
+# Query file:      data/external/refs/TBDB001.cm
+# Target file:     panel.fa
+# Option settings: cmsearch -Z 1.0 --tblout TBDB001.tblout --noali -T 10.0 --cpu 2 data/external/refs/TBDB001.cm panel.fa 
+# Current dir:     tests/fixtures/host_screen
+# Date:            (sanitised: committed fixture)
+# [ok]
