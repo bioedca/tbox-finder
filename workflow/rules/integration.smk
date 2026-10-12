@@ -503,10 +503,14 @@ rule postmint_noise_floor_report:
 
 
 rule benchmark_v2_postmint_report:
-    """P3-16′-remint — A15 Pin 3: no gated contig carries a ≥ 10-bit hit or the motif.
+    """P3-16′-remint — A15 Pin 3: no gated contig carries a hit at or above its model's own
+    threshold (RF00230 ≥ 20.0, TBDB001 ≥ 12.0 since Correction 2) or the motif.
 
-    Exit 4 when the assertion fails. The only remedy A15 allows is a re-signed screen and a full
-    re-mint; nothing downstream may run on a benchmark that failed it.
+    Exit 4 when the assertion fails; nothing downstream may run on a benchmark that failed it.
+    What follows a failure is decided by evidence, not preference: a draw that admitted T-box
+    content is re-minted at seed 42, while a threshold a matched null shows to be mis-specified
+    is re-signed against that measurement and the assertion re-run, with no re-mint. The second
+    branch is available only on a published measurement — hence `noise_floor` as an input.
     """
     input:
         idmap=f"{_POSTMINT_DIR}/postmint_idmap.json",
