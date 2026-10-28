@@ -332,9 +332,11 @@ CI [0.094, 0.276]), is lower than RiNALMo's 0.211. Both backbones were graded on
 the same 9,345 loci of the same 30 orders, so the right comparison is the
 *paired* one: the mean per-order difference, with orders resampled jointly for
 both arms. That difference is **+0.023**, with a 95% interval of **[−0.007,
-+0.055]**. Its point estimate exceeds the margin, but the interval does not
-exclude zero, let alone the margin. The excess is therefore not sustained under
-either coherent reading of the rule, and **the swap does not fire**. The
++0.055]**. "Sustained" requires the point to exceed the margin and the
+interval's lower bound to exceed half of it. That operator was pinned after this
+comparison was read, and every reading considered gives the same verdict here. The
+point estimate exceeds the margin, but the interval does not exclude zero, so the
+excess is not sustained and **the swap does not fire**. The
 per-order picture shows why. The nine Actinobacteria orders contribute +0.032
 to the difference and the other 21 orders contribute −0.009. In the
 Actinobacteria orders both backbones are miscalibrated (RiNALMo 0.59–0.80,

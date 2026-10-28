@@ -148,6 +148,7 @@ The RiNALMo Stage-2 is swapped for RNA-FM only under the PRD §10.2 conditions; 
 
 - **(c) [P3–P4] calibration margin:** swap if RiNALMo's **post-calibration leave-clade-out ECE exceeds RNA-FM's by > 0.02 (absolute ECE)**, sustained across the held-out-order distribution (block-resampled).
 - **(d) [P4] discovery-metric margin:** swap if RiNALMo transfers worse on the primary discovery metric — **leave-clade-out recall@matched-precision by > 3 pp, or AUPRC by > 0.03** — even if ECE matches.
+- ⚠ **Operator pinned by A16 Pin 1 (2026-10-28):** a difference is *sustained* beyond its margin m iff the point exceeds m **and** the paired two-sided 95 % block-bootstrap CI lower bound exceeds m/2. That applies to (c) and to each disjunct of (d); the margins are unchanged.
 
 The pre-P3 RiNALMo forward-throughput probe (condition (b)) is **advisory-only**; the binding latency decision is frozen at the P5 sizing gate (ADR-0003), and a crude "clearly-hopeless" pre-P3 reading is a §7 stop-and-ask, not an auto-switch. **On a swap, the substituted RNA-FM Stage-2 must clear the *absolute* GATE-1 (+10 pp point / +5 pp CI-floor, D4) and GATE-2 (in-distribution ECE ≤ 0.05, D11) thresholds and re-pass the P4→P5 go/no-go on its own P3/P4 numbers before entering the GATE-3 scan** (PRD §2.3/§10.2) — the shipped backbone's gates are never inherited from RiNALMo. The 0.02 / 3 pp / 0.03 margins are **blinded-frozen defaults** (recalibration → ADR re-sign-off).
 
@@ -648,7 +649,7 @@ D14 pins three things: the union-prior mask, the spare rule with its named disju
 A round that evaluates every disjunct for every candidate, publishes the per-candidate decision, and declines the retrain on a recorded §7 call **satisfies D14 under the adopted reading**. The P3-15′-k round did that: `problems: []`, every disjunct backed, the outcome reproducible from the recorded supplies by the publisher's own replay check.
 
 **Pin 2 — The canonical shipped Stage-1 checkpoint is the P2-trained production scanner, unchanged by the P3 round.**
-Named concretely, so no future step has to infer it: **`data/processed/checkpoints/stage1_production/stage1.pt`**, sha256 `09931a22…b380940`, DVC-tracked at `data/processed/checkpoints/stage1_production.dvc` (`md5 91bd49dd…dir`), produced by **P2-10d′-b** (`slurm/p2/train_production.sbatch :: train_stage1`, git SHA `5e29197e`, seed 42) — the artifact `docs/model_card.md` already lists as *the shipped scanner*. A file literally named `checkpoints/stage1_production.ckpt` **does not exist, is produced by nothing in the repo, and is not owed**; the `.ckpt` path is an imp.md invention (`imp.md:166`) that no PRD or ADR text uses. **P3-16, P4 GATE-1 and the P5 scan consume the P2-trained production scanner**, and every recall@matched-precision / precision-at-matched-recall / FDR / ECE figure downstream is a figure on that checkpoint. Three consequences are pinned with it:
+Named concretely, so no future step has to infer it: **`data/processed/checkpoints/stage1_production/stage1.pt`**, sha256 `09931a22…b380940`, DVC-tracked at `data/processed/checkpoints/stage1_production.dvc` (`md5 91bd49dd…dir`), produced by **P2-10d′-b** (`slurm/p2/train_production.sbatch :: train_stage1`, git SHA `5e29197e`, seed 42) — the artifact `docs/model_card.md` already lists as *the shipped scanner*. A file literally named `checkpoints/stage1_production.ckpt` **does not exist, is produced by nothing in the repo, and is not owed**; the `.ckpt` path is an imp.md invention (`imp.md:166`) that no PRD or ADR text uses. **P3-16, P4 GATE-1 and the P5 scan consume the P2-trained production scanner** *(⚠ erratum, A16 Pin 3: wrong for P3-16, which gates the GATE-4 twin and reports production beside it, non-gated)*, and every recall@matched-precision / precision-at-matched-recall / FDR / ECE figure downstream is a figure on that checkpoint. Three consequences are pinned with it:
 
 - **(i) GATE-4's P2 grade stands and is not re-graded.** CLAUDE.md §8.5's re-grade trigger is "after any training-config change"; there was none. No re-grade is claimed and none is owed. imp.md P3-15's "re-mined production scanner **re-holds GATE-4**" gate is **not applicable**, not skipped.
 - **(ii) D14's per-round Tier-2N halt/rollback is *vacuously* satisfied, and is recorded as vacuous.** No checkpoint changed, so no probe recall could drop; the round measured no probe recall and none is reported. Separately, the round's probe **exclusion** is `n_excluded = 0` for a **structural namespace** reason (the 45 probe ids are `tier2n:*`; the 941 substrate ids are `GCA_…`/`GCF_…:c<contig>:…` across 76 accessions (63 `GCA_` + 13 `GCF_`, re-counted from the artifact) ⇒ no shared namespace token), recorded in the report as `reading: "structural_namespace_disjoint"` and re-derived by its checker — a different zero from "the probe set was empty" and from "the exclusion ran and removed nothing".
@@ -659,7 +660,7 @@ Re-derived from the primary text (not from any restatement):
 
 - **PRD.md contains none of the substrings "supersede", "stage1_production", "ckpt", "re-mined", or "P2 checkpoint", anywhere** (case-insensitive, whole file) — the roadmap claim has no PRD sentence behind it.
 - **PRD §18.1's P3 row** lists the goal as *"RiNALMo re-ranker + aux heads; end-to-end two-stage; calibration; **P3 hard-negative re-mining round** (§9.1)"* and the exit gate as *"Two-stage beats Stage-1-only precision; **in-distribution ECE ≤ 0.05** gated on the pre-prior-shift posterior (§12)"*. Neither half mentions a checkpoint.
-- **PRD §10.1's checkpoint → phase → gate → release map** opens *"Two Stage-1 checkpoints are trained, **both in P2**"* and already assigns the P2-trained production scanner every downstream role: *"graded by **GATE-4** (P2), **GATE-2** (P3 ECE / P5 FDR), **GATE-1 arms a–c** (P4), and used for the **P5 scan / GATE-3**" — "Shipped? **yes**"*. The PRD's own map is therefore **already consistent** with Pin 2; it is imp.md that departed from it.
+- **PRD §10.1's checkpoint → phase → gate → release map** opens *"Two Stage-1 checkpoints are trained, **both in P2**"* and already assigns the P2-trained production scanner every downstream role: *"graded by **GATE-4** (P2), **GATE-2** (P3 ECE / P5 FDR), **GATE-1 arms a–c** (P4), and used for the **P5 scan / GATE-3**" — "Shipped? **yes**"*. The PRD's own map is therefore **already consistent** with Pin 2; it is imp.md that departed from it. *(⚠ erratum, A16 Pin 4: two of the quoted cells, GATE-4 (P2) and GATE-2's P3 ECE, did not describe what ran; PRD §10.1 was edited 2026-10-28.)*
 - **PRD §9.1** requires the mining curriculum and phase-conditions the Stage-2 disjunct on the P3 round; it names no checkpoint and states no supersession.
 - The "final; **supersedes the P2 checkpoint**" wording lives **only in `imp.md`** — `:166` (the checkpoint map row), `:170-173` (the "reconciler sequencing fix #1" note), `:1584`, `:1897`, `:1909`, `:1968`, `:2166` — and `:172` / `:1968` attribute it to *"PRD §10.1"*, which says the opposite.
 
@@ -899,3 +900,100 @@ The host-overlap invariant becomes a conjunction, not a bare `== 0`: `by_arm[gat
 
 ## Sign-off
 ☑ recorded 2026-10-11 (bioedca), CLAUDE.md §7 items 2 + 4 — *"Sign as drafted"*, with **two corrections signed the same day** after the first real run. **Correction 1:** Pin 3's leader exception is an **overlap** test, not *wholly inside* (the leader's own CM alignment runs 162 nt past its insert, so the drafted wording made the assertion unsatisfiable). **Correction 2** (*"Go for A"*, chosen over widening the screen at ~118 CPU-h and over disclosing the residue at the drafted threshold): Pin 3's post-mint assertion threshold becomes **per model**, re-signed against a measured matched-null floor published as `reports/p3/postmint_noise_floor.json` (16 of 3,073 T-box-free sequences reach ≥ 10 bits on RF00230 under `--max`, max **15.1**, against a weakest genuine T-box of 31.9). **Amended the same day** by *"Go for A1"* after the reproducible run searched all four null arms rather than the two the first measurement used: TBDB001's floor is **11.9**, not the 9.9 that subset gave, so the signed 10.0 sat inside its own floor and the gate's own clause set refused the report. The pinned table is **RF00230 ≥ 20.0, TBDB001 ≥ 12.0**, motif unchanged; the v1 back-check is unchanged by that move (the same 9 of 11 v1 hosts refused, the same two released). Pin 2's screen is **untouched at 10.0 bits**, so this is not the whole-text 20-bit content threshold recorded below as declined; the draw is unchanged and nothing is re-minted, under the evidence branch Correction 2 adds to Pin 3's remedy clause. The user first asked to be interviewed on the failed assertion and chose to **measure the noise floor before re-signing anything**, which is the order the two corrections were taken in. The P3 two-stage benchmark is re-minted at seed 42 with decoy hosts refused at admission by a whole-window, both-strand, N-free 32-mer screen against the union of every Stage-1/Stage-2 training sequence (plus every `decoys_v0` insert) or a same-accession training-interval overlap, and by a content screen (RF00230/TBDB001 `cmsearch -T 10 -Z 1`, default pipeline, both strands; or the T box core `GGTGGNACCGCG`); the `leader_decoy` is reported beside the gate; v1 is withdrawn and kept byte-unchanged; a gated arm with no negative reaching Stage-2 is recorded `underpowered`. Presented with the alternative of the same text at a 20-bit content threshold, and against revising first. The four design choices behind it were taken earlier the same day against: redesigning the negatives first, withdrawing without a re-mint; the shipped one-strand host-portion measure and a ≥10 % thresholded variant; RF00230 at GA only and re-sourcing hosts away from T-box neighbourhoods; and keeping the leader in the gated set.
+
+## Amendment A16 — D17's *"sustained … (block-resampled)"* is pinned as **point beyond the margin AND a block-bootstrap CI floor above half of it**; errata to A12 Pin 2 (P3-16 gates the GATE-4 twin) and A12 Pin 3 (PRD §10.1's GATE-4 and GATE-2-P3 attributions, now edited in the PRD); and the A13 Pin 1 fallback chosen (P3-exit-a, 2026-10-28)
+
+- **Status:** **Accepted (user sign-off 2026-10-28; CLAUDE.md §7 items 1, 2 + 4, bioedca), "Sign as drafted".** The decisions it records were taken 2026-10-28 by bioedca, via AskUserQuestion:
+  - A13 Pin 1 fallback: *"Hard-neg amendment first"*;
+  - D17 operator: *"Point>m & CI-lower>m/2"* (re-asked after a correction, Pin 1);
+  - code scope: *"Implement at P4"*;
+  - A12: *"ADR-0005 erratum"*;
+  - PRD §10.1: *"Edit PRD §10.1"*, and *"Fix it too"* for the GATE-4 cell.
+- **What it amends:**
+  - **D17 (c) and (d)**, the operator only;
+  - **A12 Pin 2**'s consumer list;
+  - **A12 Pin 3**'s PRD §10.1 sentence.
+- **What it does not amend:**
+  - D17's margins **0.02 ECE / 3 pp / 0.03 AUPRC** (PRD-delegated, blinded-frozen, unchanged);
+  - A3 item 6's rationale text, D4, D5;
+  - A12 Pin 1, and Pin 2's checkpoint identity;
+  - A13's statistic and pass condition, and A15;
+  - P3-18's verdict.
+- **Precedence:** the margins are PRD-delegated values (PRD §2.3 carve-out) and do not move. The operator and its m/2 floor are new ADR construction rules. They fill an operator D17 left unpinned, supplement PRD §10.2's swap conditions, and override no PRD text.
+- **Timing:** pinned **before P4 unblinds**, so D17(d) is pinned blind. D17(c) was already read at P3-18 (`reports/rnafm_swap_condition_c.json`, sha256 `5ea24fd4…`). Pin 2 gives its verdict under this pin, and the verdict does not change.
+
+**Pin 1 — the operator.** Let Δ be a D17 paired difference, oriented so that Δ > 0 means the shipped RiNALMo Stage-2 is worse: ECE shipped − comparator; recall@matched-precision and AUPRC comparator − shipped. Let m be its D17 margin. Δ is **sustained beyond m** iff
+
+> **point Δ > m  AND  the lower bound of the two-sided 95 % block-bootstrap percentile CI of Δ > m / 2**,
+
+with strict inequalities throughout.
+- **The CI.** It is paired: one draw of blocks is applied to both arms. It is resampled at D5's held-out-order / homology-cluster block level by `eval/resample.py::block_bootstrap` at `DEFAULT_N_BOOT` (2,000) replicates with a recorded seed.
+- **The floors.** **(c)** 0.01 ECE. **(d)** 1.5 pp recall@matched-precision and 0.015 AUPRC. Each D17(d) disjunct is read with this operator, and the swap fires if either is sustained, as D17(d) already says.
+- **Why this form.** It is D4's **primary** bar with D17's margin in place of +10 pp: a point at the SESOI plus a positive CI floor at half of it (D4's +5 / +10). Both readings P3-18 evaluated are declined.
+  - *CI-lower > m* is the minimum-effect test against the SESOI, which is how `calib/swap_check.py`'s docstring reads A3 item 6. At P3-18's interval width (0.063 ECE) it has too little power for the swap it guards to fire.
+  - *point > m AND CI-lower > 0* has the shape of D4's weaker clause. D4 admits that clause *"only as an explicit, disclosed min-N-conditioned fallback … never as a convenience loosening"*.
+- **A correction is recorded with the choice.** The first question put to the user recommended the CI-lower > 0 form as "mirroring D4's two-part bar". That framing was wrong, because D4's primary floor is positive and the CI-lower > 0 form is D4's fallback. The user re-decided after the correction.
+- **The m/2 floor is derived, not a new magnitude.** It is fixed by rule from D4's 5/10 ratio and carries D17's blinded freeze: changing it needs ADR re-sign-off, as the margins do.
+
+**Pin 2 — what the pin does to P3-18, and to the code.** P3-18 recorded point **+0.023103** and an order-blocked 95 % CI of **[−0.007465, +0.055351]** (30 orders, 2,000 replicates, seed 20260804) against m = 0.02. Under Pin 1, point > 0.02 holds and CI-lower > 0.01 fails, so Δ is **not sustained** and the **swap is NOT FIRED**. That is the verdict P3-18 recorded. No report is regenerated.
+- **`calib/swap_check.py` stays the historical P3-18 record**, by the user's choice of 2026-10-28. It computes the two declined readings, decides only when they agree, and returns `unadjudicated` (a §7 stop) on a split. It cannot contradict Pin 1:
+  - its `fired` requires CI-lower > m, which implies CI-lower > m/2, and point > m, so Pin 1 fires too;
+  - its `not_fired` requires *point > m AND CI-lower > 0* to be false, which makes Pin 1 false too;
+  - so its one split state goes to a human, and this pin decides it.
+- **The P4 D17(d) evaluator implements Pin 1 from the start** (booked in `imp.md`). Any later re-read of (c) adds Pin 1 as the deciding reading under a bumped report schema, and keeps the schema-1 clause set for the committed P3-18 bytes.
+
+**Pin 3 — erratum to A12 Pin 2.** A12 Pin 2's sentence *"P3-16, P4 GATE-1 and the P5 scan consume the P2-trained production scanner"* is **wrong for P3-16**.
+- P3-16, and its v2 re-mint, **gate the GATE-4 eval twin**: `gated_arm: twin` in both `reports/two_stage_precision.json` and `reports/two_stage_precision_v2.json`.
+- The production scanner is scored and reported beside the twin with `gated: false`, because it trained on the graded population (ADR-0004 A6; the §7 call of 2026-08-13 recorded in A13).
+- Read Pin 2 as: *P3-16 gates the GATE-4 twin and reports the production scanner beside it, non-gated; P4 GATE-1 and the P5 scan consume the P2-trained production scanner.*
+- Pin 2's checkpoint identity (`stage1_production/stage1.pt`, `09931a22…`) and its consequences (i)–(iii) are unchanged.
+- This resolves ADR-0006 A5 disclosure 2.
+
+**Pin 4 — erratum to A12 Pin 3, and the PRD §10.1 edit.** A12 Pin 3 says PRD §10.1's map *"already assigns the P2-trained production scanner every downstream role"* and is *"already consistent with Pin 2"*. Two of the cells it quotes did not describe what ran:
+- **GATE-4 (P2)** is graded on the eval twin, not on the production scanner (ADR-0004 A6, signed 2026-07-30).
+- **GATE-2's P3 half (in-distribution ECE)** is graded on the shipped **Stage-2** re-ranker's temperature-scaled posterior over the Stage-2 dataset, with no Stage-1 checkpoint in the path (P3-10; `reports/gate2_p3_ece.json` names none; ADR-0006 A5).
+
+The PRD outranks this ADR, so on the user's decision of 2026-10-28 the fix lands in **PRD §10.1** rather than as a reading recorded here. The PRD is local-only (CLAUDE.md §1), so this ADR is the cross-machine record of the new text:
+
+> Opening sentence: "Two Stage-1 checkpoints are trained, both in **P2**, plus the production scanner's **GATE-4 eval twin** (ADR-0004 A6), which is graded and not shipped:"
+>
+> Production row, *Graded by*: "**GATE-4** (P2) **via its eval twin** (ADR-0004 A6 — the shipped checkpoint trained on the graded population, so it is reported, non-gated, beside the twin), **GATE-2** (P5 FDR, as the scan's Stage-1), **GATE-1 arms a–c** (P4), and used for the **P5 scan / GATE-3**"
+>
+> After the table: "**GATE-2's P3 half** (in-distribution ECE) grades the **shipped Stage-2 re-ranker's** temperature-scaled posterior on the Stage-2 dataset, with no Stage-1 checkpoint in the path (§10.2, §11 Calibration). Per-checkpoint attribution for both stages is recorded in ADR-0006 A5."
+
+This resolves the "flagged, not resolved" paragraph of ADR-0006 A5 disclosure 1.
+
+**Pin 5 — the A13 Pin 1 fallback chosen (CLAUDE.md §7 item 4).** A13 Pin 1 **fails on v2**, `verdict_class: underpowered`: 0 of 691 gated negatives draw a Stage-1 candidate on either arm (A15 Pin 5). Of A15 Pin 5's two pre-registered options, the user chose the **hard-negative benchmark amendment, built before P3 exits**.
+- It is its own amendment, pinned **blind** before any of its scores exist.
+- It is reported **beside** v2 and **never replaces v2's verdict**. The P3 exit record keeps *"A13 Pin 1: FAIL, underpowered, on v2"* whatever it shows.
+- Its design must say how its negatives are selected. Any pool selected on Stage-1 output tilts a two-stage-vs-Stage-1-only comparison by construction, so the selection rule and its disclosure are pinned with it.
+- Re-tuning the Stage-2 operating point and PRD §2.3's method-gate-failure branch remain **not** fallbacks (A15 Pin 5).
+
+**Not amended.**
+- D17's margins and blinded freeze; D4; D5; D11; D12;
+- A3 (including item 6's text);
+- A12 Pins 1 and 4, and Pin 2's checkpoint identity;
+- A13's statistic, strict pass condition and reported reads;
+- A15 in full, including its *"A12 Pin 2's … wording stays wrong, and its erratum stays booked"* line, which was true when signed and is discharged here;
+- ADR-0004 A6; ADR-0006 A5's map table;
+- every committed report.
+
+**Cross-reference impact.**
+- **ADR-0005:** D17 gets an inline pointer to Pin 1. A12 Pin 2 and Pin 3 get inline ⚠ erratum pointers to Pins 3 and 4.
+- **ADR-0006 A5:** disclosure 1's second paragraph and disclosure 2 get ☑ pointers to Pins 4 and 3. The map table is untouched, and `checkpoint_map.validate_map` re-runs to `[]`.
+- **PRD §10.1:** edited as quoted in Pin 4 (local-only).
+- **`imp.md`** (local-only):
+  - the P3 exit checklist's first item records Pin 5;
+  - a new block books the hard-negative benchmark amendment;
+  - the P4 D17(d) step books Pin 1's implementation.
+- **Code and reports:** none changed and none regenerated.
+- **`analyses/phase3_log.qmd`:** the P3-exit-a stanza.
+
+**Scope guard (§10.3).**
+- It pins no margin, moves no gate threshold, re-grades nothing, changes no verdict (P3-18 stays NOT FIRED, A13 Pin 1 stays FAIL / underpowered), and changes no code.
+- Its one new value, the m/2 floor, is derived by rule from D4 and blinded-frozen with D17.
+
+**§10.1 evidence gate:** N/A. This is a decision-rule and governance amendment over in-repo text and recorded numbers, and it asserts no biological fact. Its statistical content (a paired percentile block-bootstrap CI read against a margin) is the methodology D4/D5 already pin.
+
+## Sign-off
+☑ recorded 2026-10-28 (bioedca), CLAUDE.md §7 items 1, 2 + 4 — *"Sign as drafted"*. D17's *sustained* is pinned as point > m AND a paired two-sided 95 % block-bootstrap CI lower bound > m/2, for (c) and for each disjunct of (d); the margins are unchanged, and P3-18 stays NOT FIRED under the pin. A12 Pin 2's P3-16 consumer is corrected to the GATE-4 twin. A12 Pin 3's PRD §10.1 consistency claim is corrected, and PRD §10.1 is edited (GATE-4 via the eval twin; GATE-2's P3 half on the shipped Stage-2). The A13 Pin 1 fallback is a blind-pinned hard-negative benchmark amendment, built before P3 exits and reported beside v2. The operator was chosen over CI-lower > m (low power at P3-18's interval width) and over point > m AND CI-lower > 0 (D4's min-N-only fallback form). That choice was re-asked after the first recommendation's "mirrors D4" framing was found to be wrong. Keeping `calib/swap_check.py` unchanged was chosen over a schema-2 change now.
