@@ -80,7 +80,10 @@ jobs:
       - name: Set up Miniforge (base)
         uses: conda-incubator/setup-miniconda@v4
         with:
-          miniforge-version: latest
+          # Pinned to docker/Dockerfile's MINIFORGE_VERSION, never `latest`:
+          # from 2026-10-12 `latest` shipped mamba >= 2.9 in base, which
+          # conda-lock 4.0.2 (mamba <2.9.0a0) cannot be installed beside.
+          miniforge-version: 25.3.1-0
           channel-priority: strict
       - name: Install conda-lock (pinned) into base
         run: conda install -n base -y -c conda-forge conda-lock=4.0.2
