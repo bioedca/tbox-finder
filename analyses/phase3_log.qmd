@@ -9242,3 +9242,51 @@ searched — so TBDB001's clause is not robust to a larger null, and the artifac
 `n_null_sequences` beside every maximum for that reason.
 
 **Commit.** see PR (P3-16′-remint).
+
+## Step P3-exit-a — 2026-10-28: the four §7 decisions that open the P3 exit gate (ADR-0005 A16)
+
+**Inputs.** `reports/rnafm_swap_condition_c.json` (sha256 `5ea24fd4…`, P3-18);
+`reports/two_stage_precision.json` and `reports/two_stage_precision_v2.json` (both `gated_arm: twin`;
+v2 `passes: false`, `verdict_class: underpowered`, 0 of 691 gated negatives with a Stage-1 candidate on
+either arm); `reports/gate2_p3_ece.json`; the text of ADR-0005 D4, D5, D17, A3, A12, A13, A15 and
+ADR-0006 A5. **Process.** The P3 exit checklist opens with four booked §7 items. Each one was put to the
+user with a drafted recommendation, and **ADR-0005 A16** records the answers. A16 was signed as drafted.
+No code changed and no report was regenerated. **Outputs.** ADR-0005 A16, plus inline pointers in D17,
+A12 Pin 2 and A12 Pin 3. Two ☑ pointers in ADR-0006 A5 (disclosures 1 and 2); the A5 map table is
+untouched. PRD §10.1 edited (local-only; A16 Pin 4 quotes the new text verbatim, as the cross-machine record).
+
+**The four decisions.**
+
+- **A13 Pin 1 fallback** — *a hard-negative benchmark amendment first* (A16 Pin 5). It is pinned blind
+  as its own amendment, built before P3 exits (`imp.md` P3-16″-hardneg), and reported beside v2. It
+  never replaces v2's FAIL / underpowered verdict.
+- **D17's "sustained"** — point Δ > m **and** paired two-sided 95 % block-bootstrap CI lower bound > m/2
+  (A16 Pin 1). The floors are 0.01 ECE, 1.5 pp recall and 0.015 AUPRC. It is D4's primary bar, with
+  D17's margins in place of +10 pp.
+- **A12 Pin 2** — an erratum. P3-16 gates the GATE-4 twin and reports production beside it, non-gated
+  (A16 Pin 3).
+- **PRD §10.1** — edited, not re-read. GATE-4 is attributed via the eval twin, and GATE-2's P3 half
+  to the shipped Stage-2 (A16 Pin 4). The user also chose to fix the GATE-4 cell.
+
+**Validation.** Every file of tests that reads the ADR text passes: `test_aux_ablation_check`,
+`test_sbatch_producer_envelope`, `test_host_screen` and `test_checkpoint_map`, 409 passed and 1 skipped
+(the skip needs the DVC cache). `python -m tbox_finder.checkpoint_map` against the real cache gives 12 rows
+and `problems: []`. P3-18 under the new operator: point +0.023103 > 0.02, but CI lower −0.007465 is not
+> 0.01, so the swap is **NOT FIRED**, unchanged.
+
+**Decisions.**
+
+- **A recommendation was corrected before sign-off.** The first D17 question recommended
+  *point > m AND CI-lower > 0* as "mirroring D4's two-part bar". Re-reading D4 showed that this is the
+  form D4 admits only as a disclosed min-N fallback, "never as a convenience loosening"; D4's primary
+  floor is positive (+5 pp under a +10 pp point). The question was re-asked with the correction, and the
+  user chose the m/2 floor. A16 Pin 1 records both the error and the re-decision.
+- **`calib/swap_check.py` is left unchanged** (user: *"Implement at P4"*). Its committed report re-runs
+  field-for-field, so changing the verdict logic would need a schema-2 bump. Its both-readings-agree
+  verdict cannot contradict the pin: `fired` implies the pin fires, `not_fired` implies it doesn't, and
+  its one split state is a §7 stop. The P4 D17(d) evaluator (`imp.md` P4-16) implements the pin from the
+  start, with a CI-lower-in-(0, m/2] non-firing test.
+- **ADR-0006 A5's map table was not edited**, because `checkpoint_map.py` parses it; only its prose
+  disclosures took pointers, and the parser re-validates clean.
+
+**Commit.** See the PR (P3-exit-a).
