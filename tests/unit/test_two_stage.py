@@ -1993,3 +1993,155 @@ def test_the_union_leg_records_its_inputs_and_refuses_unsafe_paths(tmp_path, mon
     with pytest.raises(T.TwoStageError, match="repo-relative"):
         absolute.func(absolute)
     assert not Path("u2.json").exists()
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# stage1 --shard / merge-stage1 (P3-16″-hardneg: the A17 census's ~820k contigs per arm)
+# ──────────────────────────────────────────────────────────────────────────────
+def _fixture_contigs_unsorted() -> list[dict]:
+    contigs = T.read_contigs(_FIXTURE / "contigs.json")
+    shuffled = contigs[1::2][::-1] + contigs[0::2]
+    ids = [contig["contig_id"] for contig in shuffled]
+    assert ids != sorted(ids)  # the fixture arrives sorted; an unsorted input proves the sort
+    return shuffled
+
+
+def _write_stage1_shards(tmp_path: Path, count: int) -> list[Path]:
+    contigs = T.read_contigs(_FIXTURE / "contigs.json")
+    stage1 = T.read_stage1(_FIXTURE / "stage1_window_logits.npz")
+    paths = []
+    for index in range(count):
+        arrays = {}
+        for contig in T.shard_contigs(contigs, index, count):
+            for field in ("logits", "starts"):
+                arrays[f"{contig['contig_id']}/{field}"] = stage1[contig["contig_id"]][field]
+        path = tmp_path / f"hardneg_census_stage1_twin.shard{index}of{count}.npz"
+        np.savez_compressed(path, **arrays)
+        paths.append(path)
+    return paths
+
+
+@pytest.mark.parametrize("count", [1, 2, 3, 7, 20, 21])
+def test_stage1_shards_partition_the_contigs_by_sorted_id(count: int) -> None:
+    contigs = _fixture_contigs_unsorted()
+    ids = sorted(contig["contig_id"] for contig in contigs)
+    slices = [[c["contig_id"] for c in T.shard_contigs(contigs, i, count)] for i in range(count)]
+    assert [cid for chunk in slices for cid in chunk] == ids  # contiguous, in order, once each
+    sizes = [len(chunk) for chunk in slices]
+    assert max(sizes) - min(sizes) <= 1
+    assert slices == [
+        [c["contig_id"] for c in T.shard_contigs(contigs[::-1], i, count)] for i in range(count)
+    ]
+
+
+def test_stage1_shard_refuses_a_duplicate_contig_id() -> None:
+    contigs = T.read_contigs(_FIXTURE / "contigs.json")
+    with pytest.raises(T.TwoStageError, match="more than once"):
+        T.shard_contigs(contigs + contigs[:1], 0, 2)
+
+
+def test_stage1_parser_takes_a_shard_and_the_merge_leg() -> None:
+    parser = T.build_parser()
+    one = parser.parse_args(
+        [
+            "stage1",
+            "--contigs",
+            "c.json",
+            "--checkpoint",
+            "k.pt",
+            "--out",
+            "o.npz",
+            "--shard",
+            "2/8",
+        ]
+    )
+    assert one.shard == (2, 8) and one.func is T._cmd_stage1
+    assert (
+        parser.parse_args(["stage1", "--contigs", "c", "--checkpoint", "k", "--out", "o"]).shard
+        is None
+    )
+    merge = parser.parse_args(
+        ["merge-stage1", "--contigs", "c.json", "--shards", "a.npz", "b.npz", "--out", "m.npz"]
+    )
+    assert merge.shards == ["a.npz", "b.npz"] and merge.func is T._cmd_merge_stage1
+    with pytest.raises(SystemExit):
+        parser.parse_args(
+            ["stage1", "--contigs", "c", "--checkpoint", "k", "--out", "o", "--shard", "8/8"]
+        )
+
+
+def test_the_stage1_merge_reassembles_the_fixture_archive(tmp_path: Path) -> None:
+    shards = _write_stage1_shards(tmp_path, 3)
+    out = tmp_path / "hardneg_census_stage1_twin.npz"
+    argv = ["merge-stage1", "--contigs", str(_FIXTURE / "contigs.json"), "--out", str(out)]
+    assert T.main(argv + ["--shards", *map(str, shards)]) == 0
+    merged = T.read_stage1(out)
+    reference = T.read_stage1(_FIXTURE / "stage1_window_logits.npz")
+    assert sorted(merged) == sorted(reference)
+    for contig_id, entry in reference.items():
+        for field in ("logits", "starts"):
+            assert merged[contig_id][field].dtype == entry[field].dtype
+            assert np.array_equal(merged[contig_id][field], entry[field])
+
+
+def test_the_stage1_merge_refuses_shards_out_of_index_order(tmp_path: Path) -> None:
+    shards = _write_stage1_shards(tmp_path, 3)
+    out = tmp_path / "hardneg_census_stage1_twin.npz"
+    argv = ["merge-stage1", "--contigs", str(_FIXTURE / "contigs.json"), "--out", str(out)]
+    with pytest.raises(T.TwoStageError, match="do not reassemble"):
+        T.main(argv + ["--shards", *map(str, shards[::-1])])
+    assert not out.exists()
+
+
+def test_the_stage1_merge_refuses_a_shard_cut_at_another_count(tmp_path: Path) -> None:
+    shards = _write_stage1_shards(tmp_path, 3)
+    held = [T.stage1_npz_contigs(path) for path in shards]
+    # The first two of three shards are a disjoint subset, so a union-only check would need the
+    # count to catch them; the per-index re-derivation names the shard that does not fit.
+    problems = T.merge_stage1_problems(T.read_contigs(_FIXTURE / "contigs.json"), held[:2])
+    assert problems and all("/2 holds" in problem for problem in problems)
+    whole = [sorted(cid for chunk in held for cid in chunk)]
+    assert T.merge_stage1_problems(T.read_contigs(_FIXTURE / "contigs.json"), whole) == []
+
+
+def test_the_stage1_merge_refuses_a_missing_or_doubled_contig() -> None:
+    contigs = T.read_contigs(_FIXTURE / "contigs.json")
+    held = [[c["contig_id"] for c in T.shard_contigs(contigs, i, 2)] for i in range(2)]
+    assert T.merge_stage1_problems(contigs, held) == []
+    missing = [held[0], held[1][:-1]]
+    assert [
+        "shard 1/2" in p and "1 missing" in p for p in T.merge_stage1_problems(contigs, missing)
+    ] == [True]
+    doubled = [held[0], held[1] + held[0][:1]]
+    assert [
+        "shard 1/2" in p and "1 unassigned" in p for p in T.merge_stage1_problems(contigs, doubled)
+    ] == [True]
+    assert T.merge_stage1_problems(contigs, []) == ["no Stage-1 shard was given"]
+
+
+def test_the_stage1_merge_refuses_to_overwrite_a_shard_or_a_v1_path(tmp_path: Path) -> None:
+    shards = _write_stage1_shards(tmp_path, 2)
+    before = shards[0].read_bytes()
+    argv = ["merge-stage1", "--contigs", str(_FIXTURE / "contigs.json"), "--shards"]
+    with pytest.raises(T.TwoStageError, match="one of the --shards"):
+        T.main(argv + [*map(str, shards), "--out", str(shards[0])])
+    assert shards[0].read_bytes() == before
+    v1 = tmp_path / "data" / "interim" / "p3_16" / "v1_stage1_twin.npz"
+    with pytest.raises(T.TwoStageError, match="refusing to write"):
+        T.main(argv + [*map(str, shards), "--out", str(v1)])
+    assert not v1.exists()
+
+
+def test_stage1_npz_contigs_refuses_a_torn_entry(tmp_path: Path) -> None:
+    torn = tmp_path / "hardneg_torn.npz"
+    np.savez_compressed(
+        torn, **{"a/logits": np.zeros((1, 2, 3)), "a/starts": np.zeros(1), "b/logits": np.zeros(1)}
+    )
+    with pytest.raises(T.TwoStageError, match="lack logits or starts"):
+        T.stage1_npz_contigs(torn)
+    stray = tmp_path / "hardneg_stray.npz"
+    np.savez_compressed(
+        stray, **{"a/logits": np.zeros(1), "a/starts": np.zeros(1), "a/other": np.zeros(1)}
+    )
+    with pytest.raises(T.TwoStageError, match="unexpected array"):
+        T.stage1_npz_contigs(stray)

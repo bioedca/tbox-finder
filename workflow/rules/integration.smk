@@ -846,3 +846,555 @@ rule precision_figure_v2:
     shell:
         "PYTHONPATH=src python scripts/plot_two_stage_precision.py "
         "--report {input.report:q} --out {output.figure:q} >{log} 2>&1"
+
+
+# ══════════════════════════════════════════════════════════════════════════════════════
+# P3-16″-hardneg — ADR-0005 A17's §9.1 class-4 leader pool (score-blind; no model runs here)
+# ══════════════════════════════════════════════════════════════════════════════════════
+_HARDNEG_DIR = f"{_P3_16}/hardneg_pool"
+_HARDNEG_REPORT = "reports/p3/hardneg_pool.json"
+_HARDNEG_IDS = "reports/p3/hardneg_pool_ids.tsv"
+
+
+rule hardneg_pool_prep:
+    """P3-16″-hardneg — A17 Pin 1's population + seed-42 draw, then the gap and A15 fold screens.
+
+    Every CDS/tRNA on the 339 annotated admissible a2 hosts → one native 1,024-nt window per
+    feature (δ ~ U{0..256}) → 100,000 drawn. Score-blind: no Stage-1/Stage-2 output is an input.
+    """
+    input:
+        supply="reports/p3/annotation_supply.json",
+        annotations="data/interim/production_annotations",
+        genomes="data/interim/production_genomes",
+        mining_pool="data/processed/negatives/mining_pool_v0.parquet",
+        decoys="data/processed/negatives/decoys_v0.parquet",
+        dataset="data/processed/stage2_dataset.parquet",
+        context="data/interim/flank_context/context_v0.parquet",
+        labels="data/processed/labels/labels_v0.parquet",
+        split_table="data/processed/splits/split_assignments.parquet",
+        rf00230_master="data/external/refs/RF00230_master.fa",
+        stage2_provenance="data/processed/checkpoints/stage2_rinalmo/aux1.0_lr1e-4/provenance.json",
+    output:
+        prep=f"{_HARDNEG_DIR}/prep.json",
+    params:
+        out_dir=lambda wildcards, output: os.path.dirname(output.prep),
+    log:
+        "logs/hardneg_pool_prep.log",
+    conda:
+        "../../envs/data.yml"
+    shell:
+        "PYTHONPATH=src python -m tbox_finder.integration.hardneg_pool prep "
+        "--out-dir {params.out_dir:q} --supply {input.supply:q} "
+        "--annotations {input.annotations:q} --genomes {input.genomes:q} "
+        "--mining-pool {input.mining_pool:q} --decoys {input.decoys:q} "
+        "--dataset {input.dataset:q} --context {input.context:q} --labels {input.labels:q} "
+        "--split-table {input.split_table:q} --rf00230-master {input.rf00230_master:q} "
+        "--stage2-provenance {input.stage2_provenance:q} >{log} 2>&1"
+
+
+rule hardneg_pool_search:
+    """P3-16″-hardneg — A15 Pin 2's cmsearch, unchanged, over the survivor shards + controls."""
+    input:
+        prep=f"{_HARDNEG_DIR}/prep.json",
+    output:
+        search=f"{_HARDNEG_DIR}/tblout/search.json",
+    threads: 24
+    params:
+        out_dir=lambda wildcards, input: os.path.dirname(input.prep),
+        jobs=8,
+    log:
+        "logs/hardneg_pool_search.log",
+    conda:
+        "../../envs/infernal.yml"
+    shell:
+        "PYTHONPATH=src python -m tbox_finder.integration.hardneg_pool search "
+        "--out-dir {params.out_dir:q} --jobs {params.jobs} "
+        "--cpu $(( {threads} / {params.jobs} > 0 ? {threads} / {params.jobs} : 1 )) >{log} 2>&1"
+
+
+rule hardneg_pool_report:
+    """P3-16″-hardneg — content refusals, the content controls, the D4 partition, the audit FASTA."""
+    input:
+        prep=f"{_HARDNEG_DIR}/prep.json",
+        search=f"{_HARDNEG_DIR}/tblout/search.json",
+        clades="data/processed/mining/production_genomes_v0.parquet",
+    output:
+        interim=f"{_HARDNEG_DIR}/pool.json",
+        graded=f"{_HARDNEG_DIR}/graded.json",
+        beside=f"{_HARDNEG_DIR}/beside.json",
+        audit=f"{_HARDNEG_DIR}/audit.fa",
+    params:
+        out_dir=lambda wildcards, input: os.path.dirname(input.prep),
+    log:
+        "logs/hardneg_pool_report.log",
+    conda:
+        "../../envs/data.yml"
+    shell:
+        "PYTHONPATH=src python -m tbox_finder.integration.hardneg_pool report "
+        "--out-dir {params.out_dir:q} --clades {input.clades:q} >{log} 2>&1"
+
+
+rule hardneg_pool_audit_search:
+    """P3-16″-hardneg — A17 Pin 2's score-blind audit: 1,000 graded windows at --max -T 0."""
+    input:
+        audit=f"{_HARDNEG_DIR}/audit.fa",
+    output:
+        search=f"{_HARDNEG_DIR}/audit_tblout/search.json",
+    threads: 24
+    params:
+        out_dir=lambda wildcards, input: os.path.dirname(input.audit),
+    log:
+        "logs/hardneg_pool_audit_search.log",
+    conda:
+        "../../envs/infernal.yml"
+    shell:
+        "PYTHONPATH=src python -m tbox_finder.integration.hardneg_pool audit-search "
+        "--out-dir {params.out_dir:q} --jobs 2 --cpu $(( {threads} / 2 )) >{log} 2>&1"
+
+
+rule hardneg_pool_audit_report:
+    """P3-16″-hardneg — the committed pool report; exit 3 + `.invalid.json` if it refuses itself."""
+    input:
+        interim=f"{_HARDNEG_DIR}/pool.json",
+        search=f"{_HARDNEG_DIR}/audit_tblout/search.json",
+        noise_floor=_NOISE_FLOOR_REPORT,
+    output:
+        report=_HARDNEG_REPORT,
+        ids=_HARDNEG_IDS,
+    params:
+        out_dir=lambda wildcards, input: os.path.dirname(input.interim),
+    log:
+        "logs/hardneg_pool_audit_report.log",
+    conda:
+        "../../envs/data.yml"
+    shell:
+        "PYTHONPATH=src python -m tbox_finder.integration.hardneg_pool audit-report "
+        "--out-dir {params.out_dir:q} --noise-floor {input.noise_floor:q} "
+        "--out {output.report:q} --ids-out {output.ids:q} >{log} 2>&1"
+
+
+# ══════════════════════════════════════════════════════════════════════════════════════
+# P3-16″-hardneg — ADR-0005 A17's scoring side: mint → payloads → POWER GATE → fold → report
+# ══════════════════════════════════════════════════════════════════════════════════════
+#
+# Append AFTER the `hardneg_pool_*` rules (it reads `_HARDNEG_DIR` / `_HARDNEG_REPORT` from
+# there, and `_P3_16`, `_BENCHMARK_V2`, `_STAGE1_CHECKPOINTS`, `_GATE2_REPORT`,
+# `_PRECISION_ITEMS_V2`, `_V2_RULE_KNOBS`, `_GRADED_TAU_V2`, `_PRECISION_TAU_V2`, `_ANNEX_TAU_V2`
+# from the v2 block above). Every path is an A17 Pin 5 path; none is a v1 or v2 path, and each
+# leg refuses one itself (`precision.refuse_hardneg_output`, `mint ... hardneg_out_violation`).
+#
+# The two GPU legs stay hand-run, as at v2: `two_stage stage1` (env `ml-dna`, `--dtype float32`)
+# writes `hardneg_stage1_{arm}.npz`; `two_stage stage2 --shard I/N` + `merge-stage2` (env
+# `ml-rna`) write `hardneg_stage2_{arm}.json` from the union work list.
+#
+# A17 Pin 4's ORDER is enforced by the DAG, not by convention:
+#   * the payload rules read Stage-1 only;
+#   * `hardneg_power` counts P from the twin's τ 0.5 work list alone and writes its record even
+#     on `extend_census` (exit 5 is masked there, so Snakemake does not delete the record);
+#   * `hardneg_power_gate` re-validates the record and FAILS with exit 5 on `extend_census`, and
+#     its sentinel is an input of every candidate-table rule and of the fold. Nothing downstream
+#     of Stage-2 can be built before the census decision. The hand-run Stage-2 leg must not be
+#     started until `hardneg_power_gate.json` exists.
+#
+# The census extension (P < 20 on the draw) is NOT wired here: it needs its own §9.3 ack, a
+# census-mode pool (`hardneg_pool prep --mode census`), and then the same legs on
+# `hardneg_census_*` paths with `precision power --stage census --draw-power hardneg_power.json`
+# and `precision fold --hardneg-pool-census … --hardneg-power-draw hardneg_power.json`.
+#
+#   snakemake -s workflow/Snakefile --use-conda precision_comparison_hardneg
+
+_HN_BENCHMARK = f"{_P3_16}/hardneg_benchmark.json"
+_HN_STAGE1 = {arm: f"{_P3_16}/hardneg_stage1_{arm}.npz" for arm in _STAGE1_CHECKPOINTS}
+_HN_STAGE2 = {arm: f"{_P3_16}/hardneg_stage2_{arm}.json" for arm in _STAGE1_CHECKPOINTS}
+_HN_POWER = f"{_P3_16}/hardneg_power.json"
+_HN_POWER_GATE = f"{_P3_16}/hardneg_power_gate.json"
+_HN_FAMILIARITY = f"{_P3_16}/hardneg_familiarity.json"
+_HN_ITEMS = "reports/p3/two_stage_precision_items_hardneg.json"
+_HN_REPORT = "reports/two_stage_precision_hardneg.json"
+_HN_FIGURE = "figures/integration/two_stage_precision_hardneg.png"
+_HN_ANNEX_ITEMS = f"{_P3_16}/hardneg_items_t{{tau}}.json"
+_HN_SENSITIVITY = {
+    tau: f"reports/p3/two_stage_precision_hardneg_tau{tag}.json"
+    for tag, tau in _ANNEX_TAU_V2.items()
+}
+_HN_ROUND0 = "data/processed/mining/round0_fp_manifest.json"
+_HN_ROUND0_SPARE = "data/processed/mining/round0_fp_spare_rule_inputs_v0.json"
+_HN_GENOMES = "data/interim/production_genomes"
+_HN_HOST_ORDERS = "data/processed/mining/production_host_orders_v0.parquet"
+
+
+rule hardneg_benchmark_mint:
+    """P3-16″-hardneg — the A17 manifest: v2's graded positives + the pool's native windows.
+
+    Positives are `benchmark_v2.json`'s, contigs byte-identical; negatives are the pool's graded
+    and beside windows as one-window contigs, their bytes asserted against the pool's per-item
+    sha256. Same contig/item schema as v2, so the `two_stage` legs consume it unchanged.
+    """
+    input:
+        pool=_HARDNEG_REPORT,
+        graded=f"{_HARDNEG_DIR}/graded.json",
+        beside=f"{_HARDNEG_DIR}/beside.json",
+        positives=_BENCHMARK_V2,
+        split_table="data/processed/splits/split_assignments.parquet",
+        context="data/interim/flank_context/context_v0.parquet",
+        labels="data/processed/labels/labels_v0.parquet",
+        host_orders=_HN_HOST_ORDERS,
+    output:
+        benchmark=_HN_BENCHMARK,
+    log:
+        "logs/hardneg_benchmark_mint.log",
+    conda:
+        "../../envs/data.yml"
+    shell:
+        "PYTHONPATH=src python scripts/mint_p3_16_benchmark.py "
+        "--hardneg {input.pool:q} --hardneg-items {input.graded:q} {input.beside:q} "
+        "--hardneg-positives {input.positives:q} --split-table {input.split_table:q} "
+        "--context {input.context:q} --labels {input.labels:q} "
+        "--host-orders {input.host_orders:q} --out {output.benchmark:q} >{log} 2>&1"
+
+
+rule two_stage_payloads_hardneg:
+    """P3-16″-hardneg — one arm's Stage-2 work list at one Stage-1 τ, from Stage-1 alone."""
+    input:
+        benchmark=_HN_BENCHMARK,
+        stage1=lambda wildcards: _HN_STAGE1[wildcards.arm],
+    output:
+        payloads=f"{_P3_16}/hardneg_payloads_{{arm}}_t{{tau}}.json",
+    wildcard_constraints:
+        arm="|".join(_HN_STAGE1),
+        tau="|".join(_PRECISION_TAU_V2),
+    params:
+        threshold_scope=config.get("two_stage_threshold_scope", "global"),
+        min_span=config.get("two_stage_min_span", 50),
+        gap_merge=config.get("two_stage_gap_merge", 10),
+        min_distinct_elements=config.get("two_stage_min_distinct_elements", 2),
+        flank=config.get("two_stage_flank", 50),
+        min_order_margin=config.get("two_stage_min_order_margin", 1),
+    log:
+        "logs/two_stage_payloads_hardneg_{arm}_t{tau}.log",
+    conda:
+        "../../envs/data.yml"
+    shell:
+        "PYTHONPATH=src python -m tbox_finder.integration.two_stage payloads "
+        "--contigs {input.benchmark:q} --stage1 {input.stage1:q} "
+        "--out {output.payloads:q} "
+        "--threshold-scope {params.threshold_scope:q} --threshold {wildcards.tau} "
+        "--min-span {params.min_span} --gap-merge {params.gap_merge} "
+        "--min-distinct-elements {params.min_distinct_elements} "
+        "--flank {params.flank} --min-order-margin {params.min_order_margin} >{log} 2>&1"
+
+
+rule two_stage_payloads_union_hardneg:
+    """P3-16″-hardneg — the τ sweep's three work lists → the one list the hand-run Stage-2 scores.
+
+    Gated on the power decision: the union exists only so Stage-2 can run, and A17 Pin 4 runs no
+    Stage-2 before the census decision.
+    """
+    input:
+        payloads=lambda wildcards: [
+            f"{_P3_16}/hardneg_payloads_{wildcards.arm}_t{tau}.json" for tau in _PRECISION_TAU_V2
+        ],
+        power_gate=_HN_POWER_GATE,
+    output:
+        union=f"{_P3_16}/hardneg_payloads_{{arm}}_union.json",
+    wildcard_constraints:
+        arm="|".join(_HN_STAGE1),
+    log:
+        "logs/two_stage_payloads_union_hardneg_{arm}.log",
+    conda:
+        "../../envs/data.yml"
+    shell:
+        "PYTHONPATH=src python -m tbox_finder.integration.two_stage payloads-union "
+        "--manifests {input.payloads:q} --out {output.union:q} >{log} 2>&1"
+
+
+rule hardneg_power:
+    """P3-16″-hardneg — A17 Pin 4: P from the twin's τ 0.5 payloads, N_min = 20, the decision.
+
+    Exit 5 (`extend_census`) is a DECISION, not an error, and the record must survive it (a
+    failed job's outputs are deleted), so it is masked here; `hardneg_power_gate` is what stops.
+    """
+    input:
+        benchmark=_HN_BENCHMARK,
+        payloads=f"{_P3_16}/hardneg_payloads_twin_t{_GRADED_TAU_V2}.json",
+    output:
+        power=_HN_POWER,
+    params:
+        stage1_threshold=_GRADED_TAU_V2,
+    log:
+        "logs/hardneg_power.log",
+    conda:
+        "../../envs/data.yml"
+    shell:
+        "PYTHONPATH=src python -m tbox_finder.integration.precision power "
+        "--benchmark {input.benchmark:q} --twin-payloads {input.payloads:q} "
+        "--stage1-threshold {params.stage1_threshold} --stage draw "
+        "--out {output.power:q} >{log} 2>&1 || [ $? -eq 5 ]"
+
+
+rule hardneg_power_gate:
+    """P3-16″-hardneg — the DAG's stop: exit 5 on extend_census, so no Stage-2-dependent target
+    can be built before the census; exit 3 on a record that does not re-validate."""
+    input:
+        power=_HN_POWER,
+    output:
+        gate=_HN_POWER_GATE,
+    log:
+        "logs/hardneg_power_gate.log",
+    conda:
+        "../../envs/data.yml"
+    shell:
+        "PYTHONPATH=src python -m tbox_finder.integration.precision power-gate "
+        "--power {input.power:q} --out {output.gate:q} >{log} 2>&1"
+
+
+rule hardneg_familiarity:
+    """P3-16″-hardneg — A15 Pin 7(b)'s familiarity score on the A17 contigs (A17 Pin 3)."""
+    input:
+        benchmark=_HN_BENCHMARK,
+        mining_pool="data/processed/negatives/mining_pool_v0.parquet",
+        decoys="data/processed/negatives/decoys_v0.parquet",
+        context="data/interim/flank_context/context_v0.parquet",
+        labels="data/processed/labels/labels_v0.parquet",
+        split_table="data/processed/splits/split_assignments.parquet",
+    output:
+        familiarity=_HN_FAMILIARITY,
+    log:
+        "logs/hardneg_familiarity.log",
+    conda:
+        "../../envs/data.yml"
+    shell:
+        "PYTHONPATH=src python -m tbox_finder.integration.host_screen familiarity "
+        "--benchmark {input.benchmark:q} --out {output.familiarity:q} "
+        "--mining-pool {input.mining_pool:q} --decoys {input.decoys:q} "
+        "--context {input.context:q} --labels {input.labels:q} "
+        "--split-table {input.split_table:q} >{log} 2>&1"
+
+
+rule two_stage_table_hardneg:
+    """P3-16″-hardneg — replay one arm at one τ into its candidate table (torch-free).
+
+    Reads the hand-run Stage-1 and merged Stage-2 logits; the power-gate sentinel is an input so
+    no table exists before the census decision.
+    """
+    input:
+        benchmark=_HN_BENCHMARK,
+        stage1=lambda wildcards: _HN_STAGE1[wildcards.arm],
+        stage2=lambda wildcards: _HN_STAGE2[wildcards.arm],
+        gate2=_GATE2_REPORT,
+        power_gate=_HN_POWER_GATE,
+    output:
+        table=f"{_P3_16}/hardneg_table_{{arm}}_t{{tau}}.json",
+        report=f"{_P3_16}/hardneg_strand_robustness_{{arm}}_t{{tau}}.json",
+    wildcard_constraints:
+        arm="|".join(_HN_STAGE1),
+        tau="|".join(_PRECISION_TAU_V2),
+    params:
+        threshold_scope=config.get("two_stage_threshold_scope", "global"),
+        min_span=config.get("two_stage_min_span", 50),
+        gap_merge=config.get("two_stage_gap_merge", 10),
+        min_distinct_elements=config.get("two_stage_min_distinct_elements", 2),
+        flank=config.get("two_stage_flank", 50),
+        min_order_margin=config.get("two_stage_min_order_margin", 1),
+        operating_point=config.get("two_stage_operating_point", 0.5),
+    log:
+        "logs/two_stage_table_hardneg_{arm}_t{tau}.log",
+    conda:
+        "../../envs/data.yml"
+    shell:
+        "PYTHONPATH=src python -m tbox_finder.integration.two_stage run "
+        "--contigs {input.benchmark:q} --stage1 {input.stage1:q} --stage2 {input.stage2:q} "
+        "--report {output.report:q} --table {output.table:q} "
+        "--threshold-scope {params.threshold_scope:q} --threshold {wildcards.tau} "
+        "--min-span {params.min_span} --gap-merge {params.gap_merge} "
+        "--min-distinct-elements {params.min_distinct_elements} "
+        "--flank {params.flank} --min-order-margin {params.min_order_margin} "
+        "--temperature-from {input.gate2:q} "
+        "--stage2-operating-point {params.operating_point} >{log} 2>&1"
+
+
+rule precision_fold_hardneg:
+    """P3-16″-hardneg — the two A17 candidate tables → the replayable item table (schema 1.3).
+
+    Binds every A17 input by sha256: the model inputs as v2 did, the pool report (clean under its
+    own validator), the power record (counted on this benchmark's twin τ 0.5 work list, not an
+    extend_census), the committed v2 item table (per-positive delta), the round-0 manifest + its
+    spare-rule inputs + the FASTA record ids of every host carrying a round-0 candidate.
+    """
+    input:
+        benchmark=_HN_BENCHMARK,
+        twin_table=f"{_P3_16}/hardneg_table_twin_t{_GRADED_TAU_V2}.json",
+        production_table=f"{_P3_16}/hardneg_table_production_t{_GRADED_TAU_V2}.json",
+        twin_stage1=_HN_STAGE1["twin"],
+        production_stage1=_HN_STAGE1["production"],
+        twin_stage2=_HN_STAGE2["twin"],
+        production_stage2=_HN_STAGE2["production"],
+        twin_payloads=f"{_P3_16}/hardneg_payloads_twin_t{_GRADED_TAU_V2}.json",
+        production_payloads=f"{_P3_16}/hardneg_payloads_production_t{_GRADED_TAU_V2}.json",
+        twin_checkpoint=_STAGE1_CHECKPOINTS["twin"],
+        production_checkpoint=_STAGE1_CHECKPOINTS["production"],
+        gate2=_GATE2_REPORT,
+        pool=_HARDNEG_REPORT,
+        power=_HN_POWER,
+        power_gate=_HN_POWER_GATE,
+        v2_items=_PRECISION_ITEMS_V2,
+        round0=_HN_ROUND0,
+        round0_spare=_HN_ROUND0_SPARE,
+        genomes=_HN_GENOMES,
+        familiarity=_HN_FAMILIARITY,
+    output:
+        score_table=_HN_ITEMS,
+    params:
+        stage1_threshold=_GRADED_TAU_V2,
+        rule_knobs=_V2_RULE_KNOBS,
+    log:
+        "logs/precision_fold_hardneg.log",
+    conda:
+        "../../envs/data.yml"
+    shell:
+        "PYTHONPATH=src python -m tbox_finder.integration.precision fold "
+        "--benchmark {input.benchmark:q} "
+        "--twin-table {input.twin_table:q} --production-table {input.production_table:q} "
+        "--twin-checkpoint {input.twin_checkpoint:q} "
+        "--production-checkpoint {input.production_checkpoint:q} "
+        "--stage1-threshold {params.stage1_threshold} "
+        "--twin-stage1 {input.twin_stage1:q} --production-stage1 {input.production_stage1:q} "
+        "--twin-stage2 {input.twin_stage2:q} --production-stage2 {input.production_stage2:q} "
+        "--twin-payloads {input.twin_payloads:q} "
+        "--production-payloads {input.production_payloads:q} "
+        "--temperature-source {input.gate2:q} --rule-knobs {params.rule_knobs:q} "
+        "--hardneg-pool {input.pool:q} --hardneg-power {input.power:q} "
+        "--v2-items {input.v2_items:q} --round0-manifest {input.round0:q} "
+        "--round0-spare-inputs {input.round0_spare:q} --genome-dir {input.genomes:q} "
+        "--familiarity {input.familiarity:q} --out {output.score_table:q} >{log} 2>&1"
+
+
+rule precision_fold_hardneg_sensitivity:
+    """P3-16″-hardneg — the τ 0.7 / 0.9 annex's own folded item table (A13 Pin 2, reported).
+
+    P stays the τ 0.5 count (A17 Pin 3/4); the annex records its own payload count beside it.
+    """
+    input:
+        benchmark=_HN_BENCHMARK,
+        twin_table=f"{_P3_16}/hardneg_table_twin_t{{tau}}.json",
+        production_table=f"{_P3_16}/hardneg_table_production_t{{tau}}.json",
+        twin_stage1=_HN_STAGE1["twin"],
+        production_stage1=_HN_STAGE1["production"],
+        twin_stage2=_HN_STAGE2["twin"],
+        production_stage2=_HN_STAGE2["production"],
+        twin_payloads=f"{_P3_16}/hardneg_payloads_twin_t{{tau}}.json",
+        production_payloads=f"{_P3_16}/hardneg_payloads_production_t{{tau}}.json",
+        twin_checkpoint=_STAGE1_CHECKPOINTS["twin"],
+        production_checkpoint=_STAGE1_CHECKPOINTS["production"],
+        gate2=_GATE2_REPORT,
+        pool=_HARDNEG_REPORT,
+        power=_HN_POWER,
+        power_gate=_HN_POWER_GATE,
+        v2_items=_PRECISION_ITEMS_V2,
+        round0=_HN_ROUND0,
+        round0_spare=_HN_ROUND0_SPARE,
+        genomes=_HN_GENOMES,
+        familiarity=_HN_FAMILIARITY,
+    output:
+        score_table=_HN_ANNEX_ITEMS,
+    wildcard_constraints:
+        tau="|".join(_ANNEX_TAU_V2.values()),
+    params:
+        rule_knobs=lambda wildcards: _V2_RULE_KNOBS.replace(
+            f"threshold={_GRADED_TAU_V2}", f"threshold={wildcards.tau}"
+        ),
+    log:
+        "logs/precision_fold_hardneg_sensitivity_t{tau}.log",
+    conda:
+        "../../envs/data.yml"
+    shell:
+        "PYTHONPATH=src python -m tbox_finder.integration.precision fold "
+        "--benchmark {input.benchmark:q} "
+        "--twin-table {input.twin_table:q} --production-table {input.production_table:q} "
+        "--twin-checkpoint {input.twin_checkpoint:q} "
+        "--production-checkpoint {input.production_checkpoint:q} "
+        "--stage1-threshold {wildcards.tau} "
+        "--twin-stage1 {input.twin_stage1:q} --production-stage1 {input.production_stage1:q} "
+        "--twin-stage2 {input.twin_stage2:q} --production-stage2 {input.production_stage2:q} "
+        "--twin-payloads {input.twin_payloads:q} "
+        "--production-payloads {input.production_payloads:q} "
+        "--temperature-source {input.gate2:q} --rule-knobs {params.rule_knobs:q} "
+        "--hardneg-pool {input.pool:q} --hardneg-power {input.power:q} "
+        "--v2-items {input.v2_items:q} --round0-manifest {input.round0:q} "
+        "--round0-spare-inputs {input.round0_spare:q} --genome-dir {input.genomes:q} "
+        "--familiarity {input.familiarity:q} --out {output.score_table:q} >{log} 2>&1"
+
+
+rule precision_sensitivity_hardneg:
+    """P3-16″-hardneg — the τ 0.7 / 0.9 annexes, each a schema-1.3 report on this benchmark."""
+    input:
+        score_table=lambda wildcards: _HN_ANNEX_ITEMS.format(tau=_ANNEX_TAU_V2[wildcards.tau_tag]),
+    output:
+        report="reports/p3/two_stage_precision_hardneg_tau{tau_tag}.json",
+    wildcard_constraints:
+        tau_tag="|".join(_ANNEX_TAU_V2),
+    params:
+        operating_point=config.get("two_stage_operating_point", 0.5),
+        decoy_prevalence=config.get("benchmark_decoy_prevalence", 100),
+        n_boot=config.get("precision_n_boot", 2000),
+        seed=config.get("precision_seed", 42),
+    log:
+        "logs/precision_sensitivity_hardneg_tau{tau_tag}.log",
+    conda:
+        "../../envs/data.yml"
+    shell:
+        # Exit 4 ("the gate failed") is a result for an ANNEX, as at v2; exit 3 still fails.
+        "PYTHONPATH=src python -m tbox_finder.integration.precision report "
+        "--items {input.score_table:q} --out {output.report:q} "
+        "--stage2-operating-point {params.operating_point} "
+        "--decoy-prevalence {params.decoy_prevalence} "
+        "--n-boot {params.n_boot} --seed {params.seed} >{log} 2>&1 "
+        "|| [ $? -eq 4 ]"
+
+
+rule precision_comparison_hardneg:
+    """P3-16″-hardneg — A13 Pin 1 on the A17 benchmark, reported BESIDE v2 (A16 Pin 5).
+
+    Fails on a failing gate (exit 4), a refused report (exit 3) or an incomplete run. An
+    underpowered census (P < 20) is a VALID report: the A13 verdict is computed unchanged and
+    A17 Pin 4's sentence is recorded beside it.
+    """
+    input:
+        score_table=_HN_ITEMS,
+        sensitivity=[_HN_SENSITIVITY[tau] for tau in _HN_SENSITIVITY],
+    output:
+        report=_HN_REPORT,
+    params:
+        sensitivity=" ".join(
+            f"--sensitivity {tau}={path}" for tau, path in sorted(_HN_SENSITIVITY.items())
+        ),
+        operating_point=config.get("two_stage_operating_point", 0.5),
+        decoy_prevalence=config.get("benchmark_decoy_prevalence", 100),
+        n_boot=config.get("precision_n_boot", 2000),
+        seed=config.get("precision_seed", 42),
+    log:
+        "logs/precision_comparison_hardneg.log",
+    conda:
+        "../../envs/data.yml"
+    shell:
+        "PYTHONPATH=src python -m tbox_finder.integration.precision report "
+        "--items {input.score_table:q} --out {output.report:q} "
+        "--stage2-operating-point {params.operating_point} "
+        "--decoy-prevalence {params.decoy_prevalence} "
+        "--n-boot {params.n_boot} --seed {params.seed} "
+        "{params.sensitivity} >{log} 2>&1"
+
+
+rule precision_figure_hardneg:
+    """P3-16″-hardneg — the A17 PR figure: graded pair, the beside-gate read, the power line."""
+    input:
+        report=_HN_REPORT,
+    output:
+        figure=_HN_FIGURE,
+    log:
+        "logs/precision_figure_hardneg.log",
+    conda:
+        "../../envs/viz.yml"
+    shell:
+        "PYTHONPATH=src python scripts/plot_two_stage_precision.py "
+        "--report {input.report:q} --out {output.figure:q} >{log} 2>&1"

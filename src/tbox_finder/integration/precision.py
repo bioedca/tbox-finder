@@ -139,7 +139,28 @@ declares A15 Pin 4's gated subset (manifest schema ≥ 1.1, per-item ``gated``) 
   and published beside both systems. If it rivals Stage-1, the report says the gate is
   confounded by construction.
 
-PRD §2.3, §6, §12, §18.1; ADR-0005 D3, D5, D7, A7, A11 Pin 4, A12, **A13**, **A15**;
+The hard-negative grade — schema 1.3 (ADR-0005 A17, P3-16″-hardneg)
+--------------------------------------------------------------------
+v2 has no power: 0 of 691 graded negatives drew a Stage-1 candidate. A17 grades A13 Pin 1's
+statistic, unchanged, on genuine §9.1 class-4 leaders — native CDS- and tRNA-upstream windows on
+the annotated a2 hosts — and is reported **beside** v2, never replacing it (A16 Pin 5). A manifest
+of schema 1.2 with ``kind: "hardneg_benchmark"`` is graded under **schema 1.3**:
+
+* **Graded vs beside.** D4-context windows are minted ``gated: False`` and filtered at the same
+  call site as A15's leader, so the statistic is over the positives and the GRADED negatives
+  only, ``λ = 100 · n_pos / n_graded_neg``. They are reported in ``beside_gate``, with a
+  non-graded AUPRC read that adds them to the denominator.
+* **The power clause (A17 Pin 4).** ``precision power`` counts P — graded negatives with ≥ 1
+  Stage-2 payload on the twin at τ 0.5 — from the payload manifest alone, before any Stage-2
+  score exists, and decides ``grade`` / ``extend_census`` (exit 5) / ``underpowered``. The fold
+  refuses an ``extend_census`` record. ``verdict_class`` is ``"underpowered"`` iff the final
+  P < :data:`N_MIN`; the A13 verdict is computed either way.
+* **What it binds.** The pool report(s) by digest and under their own validator; the power
+  record(s); the committed v2 item table (each positive's score delta); the round-0 manifest
+  and its spare-rule inputs (the Pin 5(b) cross-tab). A17 Pin 5's disclosures (a)–(f) are each
+  required exactly once.
+
+PRD §2.3, §6, §12, §18.1; ADR-0005 D3, D5, D7, A7, A11 Pin 4, A12, **A13**, **A15**, **A17**;
 ADR-0004 A6.
 """
 
@@ -314,6 +335,83 @@ COMMITTED_PREFIXES: tuple[str, ...] = ("reports/",)
 #: time so a test can point it at a staged tree.
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
+# ── ADR-0005 A17 (schema 1.3): the hard-negative benchmark, reported BESIDE v2 ───────────
+#: The report schema of an A17 grade. Every 1.3 clause is gated on ``schema_version >= 1.3``,
+#: so the committed 1.1 (v1) and 1.2 (v2) bytes keep validating under the sets they were
+#: published under (A17 Pin 5).
+HARDNEG_SCHEMA_VERSION = "1.3"
+HARDNEG_REPORT_SCHEMA: tuple[int, ...] = (1, 3)
+#: The minter's A17 manifest: schema 1.2 AND ``kind == HARDNEG_MANIFEST_KIND``. Both are read,
+#: so neither a version bump nor a stray kind alone can route a manifest to the 1.3 clause set.
+HARDNEG_MANIFEST_SCHEMA: tuple[int, ...] = (1, 2)
+HARDNEG_MANIFEST_KIND = "hardneg_benchmark"
+#: The ``kind`` discriminator of ``reports/p3/hardneg_pool.json`` (``integration/hardneg_pool``).
+HARDNEG_POOL_KIND = "hardneg_pool"
+#: The ``kind`` of the A17 Pin 4 power record this module writes.
+HARDNEG_POWER_KIND = "hardneg_power"
+HARDNEG_SUBSTEP = "P3-16″-hardneg"
+ADR_HARDNEG = (
+    f"{ADR}; ADR-0005 A13 (the statistic, unchanged), A15 Pins 1–2 (the screens, unchanged), "
+    "A16 Pin 5 (reported beside v2, never replacing it); ADR-0005 A17 (native §9.1 class-4 "
+    "leaders on the annotated a2 hosts, the D4-context partition beside the graded "
+    "denominator, the N_min power clause with one census extension)"
+)
+#: ADR-0005 A17 Pin 4: N_min = 20, taken by analogy to A1's ``MIN_REAL_HOMOLOG_N = 20`` in its
+#: primary sense (below it a cell is reported-not-gated). A NEW A17 value, not a PRD-delegated
+#: one, pinned before any A17 score existed; changing it is a §7 item 2 stop.
+N_MIN = 20
+#: A17 Pin 4's sentence, verbatim. Written iff the FINAL power count is below :data:`N_MIN`.
+HARDNEG_UNDERPOWERED_STATEMENT = (
+    "fewer than 20 graded negatives reached Stage-2; the hard-negative benchmark lacks power to "
+    "test Stage-2"
+)
+#: A17 Pin 3: the graded arm reads Stage-1 at τ = 0.5. P (Pin 4) is counted at this τ only.
+HARDNEG_GRADED_THRESHOLD = 0.5
+#: A17 Pin 4's two population stages, and the three decisions the power record can carry.
+POWER_STAGES: tuple[str, ...] = ("draw", "census")
+POWER_GRADE = "grade"
+POWER_EXTEND = "extend_census"
+POWER_UNDERPOWERED = "underpowered"
+#: ``precision power`` / ``power-gate`` exit status for ``extend_census``: distinct from 3 (a
+#: refused artifact) and 4 (a valid gate that fails), so the DAG stops at the decision and at
+#: nothing else.
+EXIT_EXTEND_CENSUS = 5
+#: A17 Pin 1's two native leader sub-classes; each is the ``pool`` of its benchmark items.
+HARDNEG_SUB_CLASSES: tuple[str, ...] = ("cds_upstream", "trna_upstream")
+#: A hard-negative manifest's selection string must name the amendment it was drawn under.
+HARDNEG_SELECTION_TAG = "ADR-0005 A17"
+#: A17 Pin 5's disclosures (a)–(f). Each is one line beginning with its own tag.
+HARDNEG_DISCLOSURE_TAGS: tuple[str, ...] = tuple(
+    f"ADR-0005 A17 Pin 5 ({letter})" for letter in "abcdef"
+)
+#: The A12 Pin 4(e) orthogonal T-box criteria, in the spare-rule input's column names. The
+#: third has no committed per-candidate source (the P3-15′ ``architecture_status.json`` supply
+#: lives on cluster scratch; ``reports/p3/remine_round_report.json`` records only its digest),
+#: so it is carried as unrecorded and the per-item status is three-valued, never guessed.
+ROUND0_CRITERIA: dict[str, str | None] = {
+    "downstream_aaRS_synteny": "synteny_status",
+    "any_helix_rscape": "covariation_status",
+    "relaxed_architecture": None,
+}
+ROUND0_STATUSES: tuple[str, ...] = ("passed", "failed", "unavailable")
+#: The ``sources`` keys whose files a 1.3 report must record in ``interim_sha256``.
+HARDNEG_SOURCE_FILES: tuple[str, ...] = (
+    "benchmark",
+    "twin_table",
+    "production_table",
+    "twin_stage1",
+    "production_stage1",
+    "twin_stage2",
+    "production_stage2",
+    "twin_payloads",
+    "production_payloads",
+    "hardneg_pool",
+    "hardneg_power",
+    "v2_items",
+    "round0_manifest",
+    "round0_spare_inputs",
+)
+
 
 class PrecisionError(ValueError):
     """A malformed input or an impossible composition — never a silently degraded number."""
@@ -357,6 +455,66 @@ def folded_declares_gated_subset(folded: Mapping[str, Any]) -> bool:
 def item_is_gated(item: Mapping[str, Any]) -> bool:
     """A15 Pin 4's per-item flag. An item from a manifest that predates it defaults to True."""
     return bool(item.get("gated", True))
+
+
+def manifest_is_hardneg(benchmark: Mapping[str, Any]) -> bool:
+    """Whether a benchmark MANIFEST is ADR-0005 A17's hard-negative mint (schema ≥ 1.2 + kind).
+
+    Refuses the two half-states rather than routing them: a ≥ 1.2 manifest without the kind, or
+    the kind on an older schema. Either would let one field decide which clause set grades it.
+    """
+    version = schema_tuple(benchmark.get("schema_version"))
+    at_schema = version is not None and version >= HARDNEG_MANIFEST_SCHEMA
+    kind = benchmark.get("kind") == HARDNEG_MANIFEST_KIND
+    if at_schema != kind:
+        raise PrecisionError(
+            f"benchmark schema {benchmark.get('schema_version')!r} with kind "
+            f"{benchmark.get('kind')!r}: an ADR-0005 A17 manifest carries schema >= 1.2 AND "
+            f"kind {HARDNEG_MANIFEST_KIND!r}, and no other manifest carries either"
+        )
+    return at_schema and kind
+
+
+def folded_is_hardneg(folded: Mapping[str, Any]) -> bool:
+    """Whether a folded table was built from an A17 manifest — read off what the fold copied."""
+    block = folded.get("benchmark")
+    if not isinstance(block, Mapping):
+        return False
+    version = schema_tuple(block.get("manifest_schema_version"))
+    return (
+        version is not None
+        and version >= HARDNEG_MANIFEST_SCHEMA
+        and block.get("manifest_kind") == HARDNEG_MANIFEST_KIND
+    )
+
+
+def refuse_hardneg_output(path: str | Path) -> None:
+    """Refuse an A17 output that is a v1 or a v2 path, or that does not name ``hardneg``.
+
+    A17 Pin 5: *"Paths, none of them a v1 or v2 path."* v1 is refused by
+    :func:`~tbox_finder.integration.two_stage.refuse_v1_output` (one guard, not two copies).
+    v2's paths are the ``v2_*`` interim files, ``benchmark_v2.json`` and the
+    ``two_stage_precision{,_items}_v2*`` reports. Requiring ``hardneg`` in the file name is the
+    positive half: every A17 path Pin 5 lists carries it, so a typo cannot land an A17 artifact
+    on an unrelated name.
+    """
+    refuse_v1_output(path)
+    name = Path(path).resolve().name
+    if (
+        name.startswith("v2_")
+        or name.startswith("benchmark_v2")
+        or name.startswith("two_stage_precision_v2")
+        or name.startswith("two_stage_precision_items_v2")
+    ):
+        raise PrecisionError(
+            f"refusing to write {path}: it is a v2 artifact name; ADR-0005 A17 Pin 5 writes the "
+            "hard-negative benchmark beside v2, never over it"
+        )
+    if "hardneg" not in name:
+        raise PrecisionError(
+            f"refusing to write {path}: every ADR-0005 A17 Pin 5 path names 'hardneg', and this "
+            "one does not"
+        )
 
 
 # ══════════════════════════════════════════════════════════════════════════════════════
@@ -431,9 +589,35 @@ def fold_arms(
     gated by default. That keeps a v1 re-fold byte-identical to the committed items. An
     older manifest that nevertheless carries ``gated`` is refused. Its schema does not
     define the flag, so grading it under either clause set would be a guess.
+
+    **The A17 manifest (ADR-0005 A17, schema 1.2 + kind).** The gated subset is the GRADED
+    negatives plus the positives; the D4-context negatives are minted with ``gated: False`` and
+    a strict-bool ``beside: True``. Both flags, and each negative's ``hardneg`` metadata block
+    (assembly, seqid, coordinates, sub-class, window digest), are carried onto the folded item,
+    and the table is labelled 1.3. A flag pair that disagrees (a negative both graded and
+    beside, or a positive beside the gate) is refused.
     """
     items = benchmark["items"]
     declares = manifest_declares_gated_subset(benchmark)
+    hardneg = manifest_is_hardneg(benchmark)
+    if hardneg:
+        for item in items:
+            beside, gated = item.get("beside"), item.get("gated")
+            label = item.get("label")
+            if not isinstance(beside, bool) or not isinstance(gated, bool) or beside == gated:
+                raise PrecisionError(
+                    f"item {item.get('contig_id')!r} carries gated={gated!r}, beside={beside!r}; "
+                    "an ADR-0005 A17 item is exactly one of graded and beside, as strict bools"
+                )
+            if label == 1 and beside:
+                raise PrecisionError(
+                    f"positive {item.get('contig_id')!r} is marked beside the gate; A17 reports "
+                    "only D4-context NEGATIVES beside the graded denominator"
+                )
+            if label == 0 and not isinstance(item.get("hardneg"), Mapping):
+                raise PrecisionError(
+                    f"negative {item.get('contig_id')!r} carries no hardneg metadata block"
+                )
     gated_flags: dict[str, bool] = {}
     for item in items:
         if declares:
@@ -454,6 +638,7 @@ def fold_arms(
     per_arm = {arm: item_scores(items, rows) for arm, rows in sorted(tables.items())}
     order = [item["contig_id"] for item in items]
     by_arm_id = {arm: {row["contig_id"]: row for row in scored} for arm, scored in per_arm.items()}
+    by_item = {item["contig_id"]: item for item in items}
     folded = []
     for contig_id in sorted(order):
         first = next(iter(by_arm_id))
@@ -474,9 +659,17 @@ def fold_arms(
         }
         if declares:
             entry["gated"] = gated_flags[contig_id]
+        if hardneg:
+            entry["beside"] = bool(by_item[contig_id]["beside"])
+            if base["label"] == 0:
+                entry["hardneg"] = dict(by_item[contig_id]["hardneg"])
         folded.append(entry)
+    if hardneg:
+        schema = HARDNEG_SCHEMA_VERSION
+    else:
+        schema = SCHEMA_VERSION if declares else V1_SCHEMA_VERSION
     out = {
-        "schema_version": SCHEMA_VERSION if declares else V1_SCHEMA_VERSION,
+        "schema_version": schema,
         "step": STEP,
         "generated_by": GENERATED_BY,
         "benchmark": {
@@ -493,6 +686,8 @@ def fold_arms(
     }
     if declares:
         out["benchmark"]["manifest_schema_version"] = benchmark["schema_version"]
+    if hardneg:
+        out["benchmark"]["manifest_kind"] = benchmark["kind"]
     return out
 
 
@@ -806,6 +1001,429 @@ def reachable_scores(scored: Sequence[Mapping[str, Any]], system: str) -> list[f
     candidate stage emitted something for. An uncalled item's sentinel is excluded, so it
     can never become a threshold at which the item is called."""
     return sorted({float(item[system]) for item in scored if item["n_rows"] > 0})
+
+
+# ══════════════════════════════════════════════════════════════════════════════════════
+# The A17 fold inputs (ADR-0005 A17 Pins 4–5): the pool, the power record, round 0, v2
+# ══════════════════════════════════════════════════════════════════════════════════════
+def pool_validator_problems(pool: Any) -> list[str]:
+    """The pool report's OWN validator, run on it; ``[]`` only when it ran and found nothing.
+
+    ``hardneg_pool.validate_report`` is imported lazily, so this module stays importable where
+    the pool module is not. An import failure, or a validator that raises, is a PROBLEM: a report
+    that cannot be validated is not a valid one ([[total-validator-can-fail-open]]).
+    """
+    if not isinstance(pool, Mapping):
+        return [f"the hard-negative pool report is a {type(pool).__name__}, not a JSON object"]
+    if pool.get("kind") != HARDNEG_POOL_KIND:
+        return [f"the pool report's kind is {pool.get('kind')!r}, not {HARDNEG_POOL_KIND!r}"]
+    try:
+        from tbox_finder.integration import hardneg_pool
+    except ImportError as error:  # pragma: no cover - exercised only where the module is absent
+        return [f"the pool report cannot be validated: hardneg_pool is not importable ({error})"]
+    try:
+        found = hardneg_pool.validate_report(pool)
+    except Exception as error:  # a validator that raises has validated nothing
+        return [f"the pool report's own validator raised {error!r}"]
+    if not isinstance(found, list):
+        return [f"the pool report's own validator returned {type(found).__name__}, not a list"]
+    return [f"the pool report fails its own validator: {problem}" for problem in found]
+
+
+#: ``hardneg_pool``'s partition names (its ``partition_counts`` keys), read here only.
+POOL_PARTITIONS: dict[str, str] = {
+    "assembly_gap": "refused_assembly_gap",
+    "fold": "refused_fold",
+    "content": "refused_content",
+    "graded": "graded",
+    "beside": "beside_d4_context",
+}
+
+
+def pool_population_record(
+    pool: Mapping[str, Any], *, path: str, sha256: str, n_problems: int | None
+) -> dict:
+    """``reports/p3/hardneg_pool.json`` → the counts the 1.3 report binds (A17 Pin 5).
+
+    Copies and never re-derives: the pool validates itself (:func:`pool_validator_problems`,
+    whose problem count the fold passes in as ``n_problems``), and this report binds to it by
+    digest. Every key below is THIS module's normalised name; ``hardneg_pool``'s field names are
+    read here and nowhere else, so this function is the one place the two schemas meet. A
+    missing field is ``None``, which the clause set refuses rather than reading as zero.
+    """
+
+    def block(*keys: str) -> Mapping[str, Any]:
+        node: Any = pool
+        for key in keys:
+            node = node.get(key) if isinstance(node, Mapping) else None
+        return node if isinstance(node, Mapping) else {}
+
+    def total(name: str) -> Any:
+        return block("partition_counts", POOL_PARTITIONS[name]).get("total")
+
+    def by_sub_class(name: str) -> dict[str, Any]:
+        node = block("partition_counts", POOL_PARTITIONS[name])
+        return {key: value for key, value in sorted(node.items()) if key != "total"}
+
+    config, population = block("config"), block("population")
+    fold_rules, audit = block("fold_refused_by_rule"), block("audit")
+    controls = pool.get("controls")
+    thresholds = {
+        entry.get("threshold_bits")
+        for entry in block("fasta").values()
+        if isinstance(entry, Mapping)
+    }
+    rule_counts = [fold_rules.get(key) for key in ("kmer_and_coord", "kmer_only", "coord_only")]
+    kmer_and_coord, kmer_only, coord_only = (c if _is_count(c) else 0 for c in rule_counts)
+    refused = [total(name) for name in ("assembly_gap", "fold", "content")]
+    selected = population.get("n_selected")
+    residue = audit.get("noise_residue")
+    return {
+        "path": path,
+        "sha256": sha256,
+        "kind": pool.get("kind"),
+        "schema_version": pool.get("schema_version"),
+        "step": pool.get("step"),
+        "n_problems": n_problems,
+        "stage": config.get("mode"),
+        "seed": config.get("seed"),
+        "draw_size": config.get("draw_size"),
+        "pinned_draw": config.get("pinned_draw"),
+        "delta_max": config.get("delta_max"),
+        "n_hosts": population.get("n_hosts"),
+        "n_features": population.get("n_features"),
+        "n_features_by_type": population.get("n_features_by_type"),
+        "n_eligible": population.get("n_eligible"),
+        "eligible_sha256": block("files", "eligible.tsv").get("sha256"),
+        "features_sha256": block("files", "features.tsv").get("sha256"),
+        "selected_sha256": block("files", "drawn.txt").get("sha256"),
+        "n_selected": selected,
+        "refusals": {name: total(name) for name in ("assembly_gap", "fold", "content")},
+        "refusals_by_sub_class": {
+            name: by_sub_class(name) for name in ("assembly_gap", "fold", "content")
+        },
+        "refusal_share": (
+            sum(refused) / selected
+            if all(_is_count(count) for count in refused) and _is_count(selected) and selected
+            else None
+        ),
+        "fold_refused_by_rule": dict(fold_rules) or None,
+        "content_refused_by_rule": dict(block("content_refused_by_rule")) or None,
+        "n_refused_kmer": kmer_and_coord + kmer_only if fold_rules else None,
+        "n_refused_coord": kmer_and_coord + coord_only if fold_rules else None,
+        "content_threshold_bits": next(iter(thresholds)) if len(thresholds) == 1 else None,
+        "controls_all_fired": pool.get("controls_all_fired"),
+        "n_controls": len(controls) if isinstance(controls, list) else None,
+        "n_controls_fired": (
+            sum(1 for c in controls if isinstance(c, Mapping) and c.get("fired") is True)
+            if isinstance(controls, list)
+            else None
+        ),
+        "n_graded": total("graded"),
+        "n_beside": total("beside"),
+        "graded_by_sub_class": by_sub_class("graded"),
+        "beside_by_sub_class": by_sub_class("beside"),
+        "item_files": dict(block("item_files")) or None,
+        "audit": {
+            "n_sampled": audit.get("n_audited"),
+            "n_violations": audit.get("n_violations"),
+            "n_noise_residue": len(residue) if isinstance(residue, list) else None,
+            "passes": audit.get("passes"),
+            "threshold_bits": audit.get("threshold_bits"),
+        },
+        "selection": pool.get("selection"),
+    }
+
+
+def population_block(records: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    """The draw record, and on a census the census record beside it (A17 Pin 4).
+
+    ``hardneg_pool --census`` selects every eligible window the draw did NOT take, and the
+    decision "changes only the population's scale, never which drawn items are kept", so the
+    census benchmark is the draw's windows plus the census's: the graded and beside totals are
+    the sums of the two records.
+    """
+    draw = records[0] if records else {}
+    census = records[1] if len(records) > 1 else None
+
+    def summed(key: str) -> int | None:
+        values = [record.get(key) for record in records]
+        return sum(values) if values and all(_is_count(v) for v in values) else None
+
+    return {
+        "stage": "census" if census is not None else "draw",
+        "draw": dict(draw) if draw else None,
+        "census": None if census is None else dict(census),
+        "n_graded": summed("n_graded"),
+        "n_beside": summed("n_beside"),
+    }
+
+
+def hardneg_power(
+    benchmark: Mapping[str, Any],
+    payloads: Sequence[Mapping[str, Any]],
+    *,
+    stage: str,
+    stage1_threshold: float,
+    benchmark_record: Mapping[str, Any],
+    payloads_record: Mapping[str, Any],
+    draw_power: Mapping[str, Any] | None = None,
+    draw_record: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """A17 Pin 4's power gate, from the twin's τ = 0.5 payload manifest ALONE.
+
+    ``P`` is the number of GRADED negatives (``gated: True``; the D4-context windows are
+    excluded) with at least one Stage-2 payload. It reads no Stage-2 score, no Stage-1 score and
+    no AUPRC: payloads are built from Stage-1 candidates alone, so the decision is score-blind
+    with respect to Stage-2 by construction. The decision is:
+
+    * ``grade`` when ``P >= N_MIN``;
+    * ``extend_census`` when ``P < N_MIN`` on the DRAW — the one pre-registered extension;
+    * ``underpowered`` when ``P < N_MIN`` on the CENSUS — there is no second extension.
+
+    A census record must name the draw record that sent it there (``draw_power``), and that
+    record must itself have decided ``extend_census``: the census is entered on P alone.
+    """
+    if not manifest_is_hardneg(benchmark):
+        raise PrecisionError("the power gate reads an ADR-0005 A17 manifest; this is not one")
+    if stage not in POWER_STAGES:
+        raise PrecisionError(f"--stage must be one of {POWER_STAGES}, got {stage!r}")
+    if stage1_threshold != HARDNEG_GRADED_THRESHOLD:
+        raise PrecisionError(
+            f"P is counted at Stage-1 τ = {HARDNEG_GRADED_THRESHOLD} (A17 Pin 3), not "
+            f"{stage1_threshold!r}"
+        )
+    items = benchmark["items"]
+    known = {str(item["contig_id"]) for item in items}
+    hit = {str(payload["contig_id"]) for payload in payloads}
+    stray = sorted(hit - known)
+    if stray:
+        raise PrecisionError(
+            f"the payload manifest names {len(stray)} contig(s) the benchmark does not hold "
+            f"(e.g. {stray[:3]}); the manifest and the benchmark are not from one run"
+        )
+    graded = [item for item in items if item["label"] == 0 and item.get("gated") is True]
+    beside = [item for item in items if item["label"] == 0 and item.get("gated") is False]
+    reached = sorted(str(item["contig_id"]) for item in graded if str(item["contig_id"]) in hit)
+    p_count = len(reached)
+    if stage == "draw":
+        if draw_power is not None:
+            raise PrecisionError("a draw-stage power record takes no --draw-power")
+        decision = POWER_GRADE if p_count >= N_MIN else POWER_EXTEND
+        extension = {
+            "triggered": decision == POWER_EXTEND,
+            "P_draw": p_count,
+            "P_final": None if decision == POWER_EXTEND else p_count,
+        }
+    else:
+        if not isinstance(draw_power, Mapping) or draw_record is None:
+            raise PrecisionError(
+                "a census power record needs --draw-power: the census is entered only on the "
+                "draw's own extend_census decision (A17 Pin 4)"
+            )
+        found = power_problems(draw_power)
+        if found:
+            raise PrecisionError(f"the draw power record is not valid: {found}")
+        if draw_power.get("stage") != "draw" or draw_power.get("decision") != POWER_EXTEND:
+            raise PrecisionError(
+                f"the draw record decided {draw_power.get('decision')!r} at stage "
+                f"{draw_power.get('stage')!r}; only a draw that decided extend_census opens the "
+                "census, and there is no second extension"
+            )
+        decision = POWER_GRADE if p_count >= N_MIN else POWER_UNDERPOWERED
+        extension = {"triggered": True, "P_draw": draw_power.get("P"), "P_final": p_count}
+    return {
+        "schema_version": "1.0",
+        "kind": HARDNEG_POWER_KIND,
+        "step": HARDNEG_SUBSTEP,
+        "generated_by": GENERATED_BY,
+        "adr": "ADR-0005 A17 Pin 4",
+        "rule": (
+            f"P = graded negatives (D4-context excluded) with >= 1 Stage-2 payload on the "
+            f"{GATED_ARM} arm at Stage-1 τ = {HARDNEG_GRADED_THRESHOLD}, from the payload "
+            f"manifest alone; grade iff P >= N_min = {N_MIN}; else one census extension from the "
+            "draw, and underpowered on the census"
+        ),
+        "arm": GATED_ARM,
+        "stage1_threshold": stage1_threshold,
+        "stage": stage,
+        "n_min": N_MIN,
+        "P": p_count,
+        "decision": decision,
+        "extension": extension,
+        "n_graded_negatives": len(graded),
+        "n_beside": len(beside),
+        "n_beside_with_payload": sum(1 for item in beside if str(item["contig_id"]) in hit),
+        "graded_with_payload": reached,
+        "benchmark": dict(benchmark_record),
+        "payloads": {**dict(payloads_record), "n_payloads": len(payloads)},
+        "draw": None if draw_record is None else dict(draw_record),
+    }
+
+
+def power_problems(power: Any) -> list[str]:
+    """Re-derive an A17 power record's decision from its own counts; ``[]`` when it holds.
+
+    Never raises. ``P`` must be the length of its own list, the decision must be the one ``P``,
+    ``n_min`` and the stage re-derive, and the extension record must say what the stage implies.
+    """
+    if not isinstance(power, Mapping):
+        return [f"the power record is a {type(power).__name__}, not a JSON object"]
+    problems: list[str] = []
+
+    def want(condition: bool, message: str) -> None:
+        if not condition:
+            problems.append(message)
+
+    want(power.get("kind") == HARDNEG_POWER_KIND, f"kind is {power.get('kind')!r}")
+    want(power.get("arm") == GATED_ARM, f"P is counted on arm {power.get('arm')!r}")
+    want(
+        power.get("stage1_threshold") == HARDNEG_GRADED_THRESHOLD,
+        f"P is counted at τ = {power.get('stage1_threshold')!r}, not {HARDNEG_GRADED_THRESHOLD}",
+    )
+    want(
+        power.get("n_min") == N_MIN and not isinstance(power.get("n_min"), bool),
+        f"n_min is {power.get('n_min')!r}, not {N_MIN}",
+    )
+    reached = power.get("graded_with_payload")
+    p_count, stage = power.get("P"), power.get("stage")
+    want(
+        isinstance(reached, list)
+        and len(set(map(str, reached))) == len(reached)
+        and _is_count(p_count)
+        and p_count == len(reached)
+        and _is_count(power.get("n_graded_negatives"))
+        and p_count <= power.get("n_graded_negatives"),
+        f"P {p_count!r} is not the number of distinct graded negatives it lists",
+    )
+    want(stage in POWER_STAGES, f"stage is {stage!r}, not one of {POWER_STAGES}")
+    if _is_count(p_count) and stage in POWER_STAGES:
+        expected = (
+            POWER_GRADE
+            if p_count >= N_MIN
+            else (POWER_EXTEND if stage == "draw" else POWER_UNDERPOWERED)
+        )
+        want(
+            power.get("decision") == expected,
+            f"decision is {power.get('decision')!r}; P = {p_count} at stage {stage!r} re-derives "
+            f"{expected!r}",
+        )
+    extension = power.get("extension")
+    extension = extension if isinstance(extension, Mapping) else {}
+    if stage == "draw":
+        extend = power.get("decision") == POWER_EXTEND
+        want(
+            extension.get("triggered") is extend
+            and extension.get("P_draw") == p_count
+            and extension.get("P_final") == (None if extend else p_count)
+            and power.get("draw") is None,
+            f"the draw-stage extension record {dict(extension)!r} is not what its decision implies",
+        )
+    elif stage == "census":
+        p_draw = extension.get("P_draw")
+        draw = power.get("draw")
+        want(
+            extension.get("triggered") is True
+            and extension.get("P_final") == p_count
+            and _is_count(p_draw)
+            and p_draw < N_MIN
+            and isinstance(draw, Mapping)
+            and _present(draw.get("sha256")),
+            f"the census extension record {dict(extension)!r} does not name a draw that decided "
+            "extend_census",
+        )
+    for key in ("benchmark", "payloads"):
+        node = power.get(key)
+        want(
+            isinstance(node, Mapping) and _present(node.get("sha256")),
+            f"the power record's {key} is not bound by sha256",
+        )
+    return problems
+
+
+def round0_overlaps(
+    negatives: Sequence[Mapping[str, Any]],
+    manifest: Mapping[str, Any],
+    spare_rows: Sequence[Mapping[str, Any]],
+    contig_ids: Mapping[str, Sequence[str]],
+) -> dict[str, list[dict[str, Any]]]:
+    """Per benchmark negative, the round-0 candidates whose locus its window overlaps.
+
+    A round-0 candidate's ``accession`` is ``<assembly>:c<contig_index>`` and its locus is
+    0-based half-open on that contig. The contig index is bridged to a seqid by the genome
+    FASTA's own record order (``mining.synteny.contig_seqid``: by identity, because 23 of 48
+    candidate-carrying hosts order their GFF seqids differently). ``contig_ids`` holds each
+    needed assembly's FASTA record ids; an assembly a negative and a candidate share but that is
+    absent from it is refused, never skipped. Statuses come from the spare-rule inputs, by
+    candidate id; a candidate missing there is refused.
+    """
+    from tbox_finder.mining import synteny  # lazy: torch-free, light
+
+    status_by_id = {str(row["candidate_id"]): row for row in spare_rows}
+    hosts = {str(_hardneg_field(item, "assembly")) for item in negatives}
+    by_locus: dict[tuple[str, str], list[tuple[int, int, dict[str, Any]]]] = {}
+    for candidate in manifest["candidates"]:
+        assembly, _, token = str(candidate["accession"]).partition(":c")
+        if assembly not in hosts:
+            continue
+        if assembly not in contig_ids:
+            raise PrecisionError(
+                f"round-0 candidate {candidate['candidate_id']!r} sits on {assembly}, a benchmark "
+                "host whose FASTA record ids were not supplied; its seqid cannot be resolved"
+            )
+        if not token.isdigit():
+            raise PrecisionError(f"{candidate['accession']!r} is not '<assembly>:c<index>'")
+        seqid = synteny.contig_seqid(contig_ids[assembly], int(token))
+        status = status_by_id.get(str(candidate["candidate_id"]))
+        if status is None:
+            raise PrecisionError(
+                f"round-0 candidate {candidate['candidate_id']!r} has no spare-rule input row"
+            )
+        row = {"candidate_id": str(candidate["candidate_id"])}
+        for name, column in ROUND0_CRITERIA.items():
+            row[name] = None if column is None else status.get(column)
+        start, end = int(candidate["locus_start"]), int(candidate["locus_end"])
+        by_locus.setdefault((assembly, seqid), []).append((start, end, row))
+    out: dict[str, list[dict[str, Any]]] = {}
+    for item in negatives:
+        key = (str(_hardneg_field(item, "assembly")), str(_hardneg_field(item, "seqid")))
+        start, end = int(_hardneg_field(item, "start")), int(_hardneg_field(item, "end"))
+        rows = [
+            row for c_start, c_end, row in by_locus.get(key, ()) if c_start < end and start < c_end
+        ]
+        out[str(item["contig_id"])] = sorted(rows, key=lambda row: row["candidate_id"])
+    return out
+
+
+def attach_v2_delta(folded: dict[str, Any], v2_items: Mapping[str, Any]) -> int:
+    """Set ``v2_delta`` on every positive: this run's score minus v2's, per arm and system.
+
+    Refuses unless the two tables hold the SAME positives on the same arms: A17 Pin 3's
+    positives are v2's graded positive windows, so a positive v2 did not score (or one this run
+    did not) means the two runs did not grade one population. Returns the count compared.
+    """
+    v2_pos = {str(item["contig_id"]): item for item in v2_items["items"] if int(item["label"]) == 1}
+    here = {str(item["contig_id"]): item for item in folded["items"] if int(item["label"]) == 1}
+    if set(v2_pos) != set(here):
+        raise PrecisionError(
+            f"the v2 item table scores {len(set(v2_pos) - set(here))} positive(s) this benchmark "
+            f"does not hold and misses {len(set(here) - set(v2_pos))}; A17 Pin 3's positives are "
+            "v2's graded positives"
+        )
+    if sorted(v2_items.get("arms", [])) != sorted(folded["arms"]):
+        raise PrecisionError(
+            f"the v2 item table grades arms {v2_items.get('arms')!r}, this one {folded['arms']!r}"
+        )
+    for contig_id, item in here.items():
+        item["v2_delta"] = {
+            arm: {
+                system: float(item["arms"][arm][system])
+                - float(v2_pos[contig_id]["arms"][arm][system])
+                for system in SYSTEMS
+            }
+            for arm in sorted(folded["arms"])
+        }
+    return len(here)
 
 
 # ══════════════════════════════════════════════════════════════════════════════════════
@@ -1179,6 +1797,13 @@ def precision_gain(
     is graded exactly as before, under 1.1. A table that carries gated-subset content without
     declaring it is refused, so a stripped version label cannot downgrade a v2 benchmark to
     the 1.1 clause set.
+
+    **Schema 1.3 (ADR-0005 A17)** applies to a table folded from the A17 manifest
+    (:func:`folded_is_hardneg`). The same call-site filter removes the D4-context negatives
+    (``gated: False``), so the graded statistic is A13 Pin 1's over the positives and the GRADED
+    negatives only, with ``λ = 100 · n_pos / n_graded_neg``. The beside-gate read, the A17
+    Pin 4 power block, the population, the round-0 cross-tab and the per-positive delta from
+    v2 are added by :func:`hardneg_schema_blocks`; none of them touches ``gate.passes``.
     """
     benchmark = folded["benchmark"]
     if GATED_ARM not in folded["arms"]:
@@ -1186,6 +1811,7 @@ def precision_gain(
             f"the folded score table carries no arm {GATED_ARM!r}; the P3 exit gate is graded "
             f"on it (§7 decision 2026-08-13), so a report without it has no verdict to make"
         )
+    hardneg_schema = folded_is_hardneg(folded)
     gated_schema = folded_declares_gated_subset(folded)
     graded = folded
     if gated_schema:
@@ -1256,11 +1882,16 @@ def precision_gain(
         )
         == 1,
     }
+    if hardneg_schema:
+        schema, adr = HARDNEG_SCHEMA_VERSION, ADR_HARDNEG
+    else:
+        schema = SCHEMA_VERSION if gated_schema else V1_SCHEMA_VERSION
+        adr = ADR_V2 if gated_schema else ADR
     report: dict[str, Any] = {
-        "schema_version": SCHEMA_VERSION if gated_schema else V1_SCHEMA_VERSION,
+        "schema_version": schema,
         "step": STEP,
         "generated_by": GENERATED_BY,
-        "adr": ADR_V2 if gated_schema else ADR,
+        "adr": adr,
         "prd": PRD,
         "env_lock": ENV_LOCK,
         "generated_at_utc": generated_at_utc
@@ -1320,7 +1951,16 @@ def precision_gain(
             ),
         },
     }
-    if gated_schema:
+    if hardneg_schema:
+        report.update(
+            hardneg_schema_blocks(folded, arms, decoy_prevalence=decoy_prevalence, scope=scope)
+        )
+        # A17 Pin 4: the class is RECORDED beside the verdict and never substitutes for it.
+        report["gate"]["verdict_class"] = report["power"]["verdict_class"]
+        if report["power"]["verdict_class"] == "underpowered":
+            report["gate"]["underpowered_statement"] = HARDNEG_UNDERPOWERED_STATEMENT
+        report["disclosures"] = disclosures_hardneg(benchmark, arms, report)
+    elif gated_schema:
         report.update(
             gated_schema_blocks(folded, arms, decoy_prevalence=decoy_prevalence, scope=scope)
         )
@@ -1821,6 +2461,535 @@ def disclosures_v2(
             f"{admitted[GATED_ARM]} of {n_neg_gated} gated negatives and retains "
             f"{retained[GATED_ARM]} at matched recall ({other_arms} for the arms reported beside "
             "it). This is an in-distribution reference, not a genome-scale scan simulation (P5)."
+        ),
+        (
+            "ADR-0005 D3 freezes the Stage-1 threshold, the locus knobs and the Stage-2 "
+            "operating point at the §13.1 phase gate (P5-01). Nothing here pins any of them; "
+            "the knobs this run used are recorded under sources.rule_knobs."
+        ),
+    ]
+
+
+# ══════════════════════════════════════════════════════════════════════════════════════
+# The schema-1.3 blocks (ADR-0005 A17): the hard-negative benchmark, reported beside v2
+# ══════════════════════════════════════════════════════════════════════════════════════
+def _distribution(values: Sequence[float]) -> dict[str, Any]:
+    """``{n, min, median, max}`` of a score list; the statistics are ``None`` on an empty one."""
+    if not values:
+        return {"n": 0, "min": None, "median": None, "max": None}
+    ordered = sorted(float(value) for value in values)
+    return {
+        "n": len(ordered),
+        "min": ordered[0],
+        "median": float(np.median(ordered)),
+        "max": ordered[-1],
+    }
+
+
+def _hardneg_field(item: Mapping[str, Any], key: str) -> Any:
+    block = item.get("hardneg")
+    return block.get(key) if isinstance(block, Mapping) else None
+
+
+def beside_block(folded: Mapping[str, Any], *, decoy_prevalence: int) -> dict[str, Any]:
+    """A17 Pin 2's D4-context negatives, scored and reported BESIDE the graded denominator.
+
+    A D4-context window flanks a CDS that ADR-0006 D4 classifies as a T-box target class, so a
+    hit there may be a real, CM-invisible T-box: it is minted and scored, never graded. Per arm
+    this records how many draw a Stage-1 candidate and a Stage-2 payload, both systems' score
+    distributions over the called ones, each called row, and one **non-graded** AUPRC read with
+    them ADDED to the denominator (λ recomputed over graded + beside). Uncalled rows carry the
+    sentinel and are summarised by count: at A17's scale a per-row list would be most of the
+    report and say nothing the count does not.
+    """
+    graded = [item for item in folded["items"] if item_is_gated(item)]
+    beside = [item for item in folded["items"] if not item_is_gated(item)]
+    everything = [*graded, *beside]
+    labels = [int(item["label"]) for item in everything]
+    n_pos = sum(labels)
+    lam = prevalence_lambda(n_pos, len(labels) - n_pos, float(int(decoy_prevalence)))
+    by_arm: dict[str, dict[str, Any]] = {}
+    for arm in sorted(folded["arms"]):
+        called = [item for item in beside if int(item["arms"][arm]["n_rows"]) > 0]
+        counts = [item["arms"][arm].get("n_payloads") for item in beside]
+        attached = all(_is_count(count) for count in counts)
+        auprc = {
+            system: average_precision_reweighted(
+                labels, [float(item["arms"][arm][system]) for item in everything], decoy_weight=lam
+            )
+            for system in SYSTEMS
+        }
+        by_arm[arm] = {
+            "n": len(beside),
+            "n_with_stage1_candidate": len(called),
+            "n_with_stage2_payload": sum(1 for c in counts if c > 0) if attached else None,
+            "called": [
+                {
+                    "contig_id": item["contig_id"],
+                    "assembly": _hardneg_field(item, "assembly"),
+                    "sub_class": str(item["pool"]),
+                    "n_rows": int(item["arms"][arm]["n_rows"]),
+                    "n_payloads": item["arms"][arm].get("n_payloads"),
+                    **{system: float(item["arms"][arm][system]) for system in SYSTEMS},
+                }
+                for item in called
+            ],
+            "distribution": {
+                system: _distribution([float(item["arms"][arm][system]) for item in called])
+                for system in SYSTEMS
+            },
+            "with_beside_in_denominator": {
+                "graded": False,
+                "n_items": len(everything),
+                "n_positives": n_pos,
+                "n_negatives": len(labels) - n_pos,
+                "decoy_prevalence": int(decoy_prevalence),
+                "lambda": lam,
+                "auprc": auprc,
+                "gain_pp": (auprc["two_stage"] - auprc["stage1_only"]) * 100.0,
+            },
+        }
+    return {
+        "rule": (
+            "ADR-0005 A17 Pin 2 — a surviving window is D4-context if any CDS on the same seqid, "
+            "either strand, overlapping [start - 500, end + 500) names a D4 class; such windows "
+            "are minted, scored and reported beside the graded denominator, never inside it"
+        ),
+        "graded": False,
+        "n_beside": len(beside),
+        "by_arm": by_arm,
+    }
+
+
+def hardneg_power_block(folded: Mapping[str, Any], *, gated_arm: str = GATED_ARM) -> dict:
+    """A17 Pin 4's power block: P, N_min and the extension record, beside the per-arm counts.
+
+    ``by_arm`` is :func:`power_block`'s, unchanged: the gated negatives here are the GRADED ones
+    (the D4-context windows are ``gated: False``). ``P`` and the extension record are COPIED from
+    the power artifact the fold bound by digest (``folded["power"]``), which is what the DAG
+    decided on before any Stage-2 score existed; the clause set re-derives ``P`` from the
+    payload counts on the graded fold. ``verdict_class`` is ``"underpowered"`` iff the FINAL P is
+    a count below :data:`N_MIN`, and ``None`` when no count was bound, which the clause set
+    refuses rather than reading as powered.
+    """
+    base = power_block(folded, gated_arm=gated_arm)
+    record = folded.get("power") if isinstance(folded.get("power"), Mapping) else {}
+    extension = record.get("extension") if isinstance(record.get("extension"), Mapping) else {}
+    p_final = record.get("P")
+    if _is_count(p_final):
+        verdict_class: str | None = "underpowered" if p_final < N_MIN else "powered"
+    else:
+        verdict_class = None
+    n_graded = base["by_arm"][gated_arm]["n_gated_negatives"]
+    return {
+        "rule": (
+            f"ADR-0005 A17 Pin 4 — P = graded negatives (D4-context excluded) with >= 1 Stage-2 "
+            f"payload on the {gated_arm} arm at Stage-1 τ = {HARDNEG_GRADED_THRESHOLD}, counted "
+            f"from the payloads alone; underpowered iff the final P < N_min = {N_MIN}; one "
+            "census extension when the draw's P < N_min, decided on P alone"
+        ),
+        "gated_arm": gated_arm,
+        "by_arm": base["by_arm"],
+        "n_min": N_MIN,
+        "P": p_final,
+        "stage": record.get("stage"),
+        "decision": record.get("decision"),
+        "extension": {
+            "triggered": extension.get("triggered"),
+            "P_draw": extension.get("P_draw"),
+            "P_final": extension.get("P_final"),
+        },
+        # P is defined at τ = 0.5 (Pin 3). A τ-annex report carries ITS OWN payload count here
+        # and the graded P above, so neither can be read as the other.
+        "this_threshold_payload_count": base["by_arm"][gated_arm][
+            "n_gated_negatives_with_stage2_payload"
+        ],
+        "verdict_class": verdict_class,
+        "sentence": (
+            HARDNEG_UNDERPOWERED_STATEMENT
+            if verdict_class == "underpowered"
+            else (
+                f"{p_final} of {n_graded} graded negatives reached Stage-2 on the gated arm "
+                f"({gated_arm}), at least N_min = {N_MIN}; the hard-negative benchmark can test "
+                "Stage-2 on them"
+            )
+        ),
+        "source": (
+            {"path": record.get("path"), "sha256": record.get("sha256")} if record else None
+        ),
+        "draw_source": record.get("draw"),
+    }
+
+
+def _orthogonal_status(rows: Sequence[Mapping[str, Any]]) -> str:
+    """A12 Pin 4(e) for one graded window, over every round-0 candidate it overlaps.
+
+    ``orthogonal_pass`` when any overlapped candidate passes any orthogonal criterion;
+    ``no_orthogonal_pass`` only when every criterion of every overlapped candidate is RECORDED
+    and none passed; ``undetermined`` otherwise. An unrecorded criterion is never read as a fail.
+    """
+    if any(row.get(name) == "passed" for row in rows for name in ROUND0_CRITERIA):
+        return "orthogonal_pass"
+    if all(row.get(name) in ROUND0_STATUSES for row in rows for name in ROUND0_CRITERIA):
+        return "no_orthogonal_pass"
+    return "undetermined"
+
+
+def round0_crosstab(folded: Mapping[str, Any], *, gated_arm: str = GATED_ARM) -> dict[str, Any]:
+    """A17 Pin 5(b): the graded negatives that overlap a round-0 Stage-1 false candidate.
+
+    Production Stage-1 at τ = 0.9 scanned every admissible a2 host in round 0 and the shipped
+    Stage-2 scored every round-0 candidate. A17's rule reads neither, and **nothing is dropped
+    on this**: it is a disclosure. Counted per graded window from ``round0_overlap``, which the
+    fold attached by coordinate (same assembly and seqid, intersecting 0-based half-open spans,
+    strand-agnostic because the round-0 manifest records no strand).
+    """
+    negatives = [item for item in folded["items"] if int(item["label"]) == 0]
+    graded = [item for item in negatives if item_is_gated(item)]
+    beside = [item for item in negatives if not item_is_gated(item)]
+    hits = [item for item in graded if item.get("round0_overlap")]
+    statuses = {"orthogonal_pass": 0, "no_orthogonal_pass": 0, "undetermined": 0}
+    candidates: dict[str, Mapping[str, Any]] = {}
+    for item in hits:
+        statuses[_orthogonal_status(item["round0_overlap"])] += 1
+        for row in item["round0_overlap"]:
+            candidates[str(row.get("candidate_id"))] = row
+    per_criterion = {
+        name: {
+            status: sum(1 for row in candidates.values() if row.get(name) == status)
+            for status in ROUND0_STATUSES
+        }
+        for name in ROUND0_CRITERIA
+    }
+    for counts in per_criterion.values():
+        counts["not_recorded"] = len(candidates) - sum(counts.values())
+    payloads = [item["arms"][gated_arm].get("n_payloads") for item in hits]
+    return {
+        "rule": (
+            "ADR-0005 A17 Pin 5(b) — a graded window overlaps a round-0 candidate when both lie on "
+            "the same assembly and seqid and [start, end) intersects the candidate's 0-based "
+            "half-open locus; strand-agnostic (the round-0 manifest records no strand); nothing "
+            "is dropped on it"
+        ),
+        "gated_arm": gated_arm,
+        "n_graded_negatives": len(graded),
+        "n_overlapping": len(hits),
+        "n_overlapping_with_twin_candidate": sum(
+            1 for item in hits if int(item["arms"][gated_arm]["n_rows"]) > 0
+        ),
+        "n_overlapping_with_twin_payload": (
+            sum(1 for count in payloads if count > 0)
+            if all(_is_count(count) for count in payloads)
+            else None
+        ),
+        "orthogonal_status": statuses,
+        "n_round0_candidates_overlapped": len(candidates),
+        "per_criterion_over_overlapped_candidates": per_criterion,
+        "n_beside_overlapping": sum(1 for item in beside if item.get("round0_overlap")),
+        "source": folded.get("round0"),
+    }
+
+
+def v2_delta_summary(folded: Mapping[str, Any]) -> dict[str, Any]:
+    """A17 Pin 3: every positive is re-scored in A17's own run; the delta from v2 is published.
+
+    Stage-2 logits depend on batch composition (A15 Pin 6), so v2's positive scores are not
+    reused. Each positive's per-arm, per-system ``hardneg − v2`` delta is on its folded item
+    (``v2_delta``, attached by the fold against the committed v2 item table); this is the
+    summary. ``n_compared`` is a count of positives, so it is bound to the population.
+    """
+    positives = [item for item in folded["items"] if int(item["label"]) == 1]
+    by_arm: dict[str, dict[str, Any]] = {}
+    for arm in sorted(folded["arms"]):
+        by_arm[arm] = {}
+        for system in SYSTEMS:
+            deltas = [
+                item["v2_delta"][arm][system]
+                for item in positives
+                if isinstance(item.get("v2_delta"), Mapping)
+                and isinstance(item["v2_delta"].get(arm), Mapping)
+                and isinstance(item["v2_delta"][arm].get(system), (int, float))
+            ]
+            by_arm[arm][system] = {
+                "n_compared": len(deltas),
+                "n_identical": sum(1 for delta in deltas if delta == 0.0),
+                "n_changed": sum(1 for delta in deltas if delta != 0.0),
+                "max_abs_delta": max((abs(delta) for delta in deltas), default=None),
+                "mean_delta": (sum(deltas) / len(deltas)) if deltas else None,
+            }
+    return {
+        "rule": (
+            "ADR-0005 A17 Pin 3 — positives re-scored in this run (Stage-2 logits depend on batch "
+            "composition, A15 Pin 6); delta = this run's item score minus v2's, per arm and system"
+        ),
+        "n_positives": len(positives),
+        "by_arm": by_arm,
+        "source": folded.get("v2_items"),
+    }
+
+
+def _tally(values: Sequence[Any]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for value in values:
+        label = "null" if value is None else str(value)
+        counts[label] = counts.get(label, 0) + 1
+    return dict(sorted(counts.items()))
+
+
+def hardneg_composition(folded: Mapping[str, Any]) -> dict[str, Any]:
+    """A17 Pin 5(d): what the graded and beside negatives are made of, from the items alone.
+
+    Per host and clade (the host's ``resolved_order``, minted onto each item; a null is its own
+    bucket), CDS- versus tRNA-upstream, and the D4 share. The refusal share lives in the
+    population block, which carries the pool's own per-rule counts.
+    """
+    negatives = [item for item in folded["items"] if int(item["label"]) == 0]
+    out: dict[str, Any] = {}
+    for name, group in (
+        ("graded", [item for item in negatives if item_is_gated(item)]),
+        ("beside", [item for item in negatives if not item_is_gated(item)]),
+    ):
+        assemblies = _tally([_hardneg_field(item, "assembly") for item in group])
+        out[name] = {
+            "n": len(group),
+            "by_sub_class": _tally([item["pool"] for item in group]),
+            "n_assemblies": len(assemblies),
+            "by_assembly": assemblies,
+            "by_clade": _tally([_hardneg_field(item, "resolved_order") for item in group]),
+        }
+    n_negatives = len(negatives)
+    out["d4_share"] = out["beside"]["n"] / n_negatives if n_negatives else None
+    out["d4_share_by_sub_class"] = {
+        sub: (
+            out["beside"]["by_sub_class"].get(sub, 0)
+            / (
+                out["graded"]["by_sub_class"].get(sub, 0)
+                + out["beside"]["by_sub_class"].get(sub, 0)
+            )
+            if out["graded"]["by_sub_class"].get(sub, 0) + out["beside"]["by_sub_class"].get(sub, 0)
+            else None
+        )
+        for sub in HARDNEG_SUB_CLASSES
+    }
+    return out
+
+
+def block_scheme(folded: Mapping[str, Any]) -> dict[str, Any]:
+    """A17 Pin 3's resampling units over the GRADED items: positive cluster, negative assembly.
+
+    Adjacent leaders share DNA, so two windows from one assembly are not independent draws; the
+    minter blocks every negative on its assembly. Counted here so the bootstrap's block count is
+    re-derivable from the scheme, and so a block mixing a positive and a negative is visible.
+    """
+    graded = [item for item in folded["items"] if item_is_gated(item)]
+    positive = {str(item["block"]) for item in graded if int(item["label"]) == 1}
+    negative = {str(item["block"]) for item in graded if int(item["label"]) == 0}
+    return {
+        "rule": "ADR-0005 A17 Pin 3 — positive cluster and negative assembly are the blocks",
+        "n_positive_blocks": len(positive),
+        "n_negative_blocks": len(negative),
+        "n_blocks": len(positive | negative),
+        "n_shared": len(positive & negative),
+        "positive_blocks_are_clusters": all(block.startswith("cluster:") for block in positive),
+        "negative_blocks_are_assemblies": all(block.startswith("assembly:") for block in negative),
+    }
+
+
+def hardneg_schema_blocks(
+    folded: Mapping[str, Any],
+    arms: Mapping[str, Mapping[str, Any]],
+    *,
+    decoy_prevalence: int,
+    scope: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Every block a 1.3 report adds, each copied or computed from the folded table.
+
+    Blocks the fold did not attach (population, power, Stage-2 identity) are written as
+    ``None``-bearing records, never synthesised: :func:`precision_problems` refuses the absence.
+    The familiarity baseline is A17 Pin 3's "if the inputs are supplied" read, so its absence is
+    recorded as ``familiarity_status: "not_supplied"`` rather than refused.
+    """
+    supplied = isinstance(folded.get("familiarity"), Mapping)
+    return {
+        "population": folded.get("population"),
+        "power": hardneg_power_block(folded),
+        "beside_gate": beside_block(folded, decoy_prevalence=decoy_prevalence),
+        "reported_not_gated": {
+            "rule": (
+                "ADR-0005 A17 Pin 3 — reported, not graded: the production arm (arms.production); "
+                "A13 Pin 2's matched-recall grid (arms.*.recall_grid) and the τ 0.7 / 0.9 reads "
+                "(stage1_threshold_sensitivity); A13 Pin 3's 10:1 -> 10^4:1 sweep "
+                "(arms.*.prevalence); the A15 Pin 7(b) familiarity baseline when supplied; and the "
+                "block-bootstrap CIs (positive cluster + negative assembly). Per A13 Pin 4 no CI "
+                "bar applies"
+            ),
+            "beside_gate": (
+                "beside_gate (A17 Pin 2: D4-context negatives, never in the denominator)"
+            ),
+        },
+        "familiarity_status": "supplied" if supplied else "not_supplied",
+        "familiarity_baseline": (
+            familiarity_baseline(folded, arms, decoy_prevalence=decoy_prevalence)
+            if supplied
+            else None
+        ),
+        "round0_crosstab": round0_crosstab(folded),
+        "v2_positive_delta": v2_delta_summary(folded),
+        "composition": hardneg_composition(folded),
+        "blocks": block_scheme(folded),
+        "stage2_identity": folded.get("stage2"),
+        "selection": _block(scope, "host_pool").get("selection"),
+    }
+
+
+def disclosures_hardneg(
+    benchmark: Mapping[str, Any],
+    arms: Mapping[str, Mapping[str, Any]],
+    report: Mapping[str, Any],
+) -> list[str]:
+    """The 1.3 report's disclosures: A17 Pin 5 (a)–(f), the power line and the beside-v2 line.
+
+    As :func:`disclosures_v2`: every quantity is read off the payload it describes, and a block
+    the run did not attach reads "not recorded" rather than raising, because the clause set is
+    what refuses the absence.
+    """
+    scope = benchmark["scope"]
+    gated = arms[GATED_ARM]
+    population = report.get("population") if isinstance(report.get("population"), Mapping) else {}
+    pool_records = [
+        record
+        for record in (population.get("draw"), population.get("census"))
+        if isinstance(record, Mapping)
+    ]
+    power = report["power"]
+    beside = report["beside_gate"]
+    cross = report["round0_crosstab"]
+    composition = report["composition"]
+    delta = report["v2_positive_delta"]["by_arm"].get(GATED_ARM, {}).get("two_stage", {})
+    n_graded = gated["population"]["n_negatives"]
+    seen = scope.get("seen_by_counts") if isinstance(scope.get("seen_by_counts"), Mapping) else {}
+    beside_twin = beside["by_arm"].get(GATED_ARM, {})
+    with_beside = beside_twin.get("with_beside_in_denominator", {})
+    source = cross.get("source") if isinstance(cross.get("source"), Mapping) else {}
+    n_round0 = _block(source, "manifest").get("n_candidates", "an unrecorded number of")
+    fam = report.get("familiarity_baseline")
+    fam_twin = _block(_block(fam, "by_arm"), GATED_ARM)
+    if isinstance(fam_twin.get("auprc"), (int, float)) and not isinstance(
+        fam_twin.get("auprc"), bool
+    ):
+        familiar = (
+            f"measured here: the graded arm's familiarity baseline reaches AUPRC "
+            f"{fam_twin['auprc']:.6f} against Stage-1-only {fam_twin['stage1_only_auprc']:.6f} "
+            f"({fam_twin['minus_stage1_pp']:+.3f} pp)"
+            + (
+                f", so {CONFOUNDED_STATEMENT}; a fix needs a twin retrain"
+                if fam_twin.get("rivals_stage1")
+                else ", and it does not rival Stage-1"
+            )
+        )
+    else:
+        familiar = "the familiarity baseline was not supplied for this run (A17 Pin 3: if supplied)"
+    if power.get("verdict_class") == "underpowered":
+        power_line = (
+            f"{HARDNEG_UNDERPOWERED_STATEMENT}: P = {power.get('P')!r} of {n_graded} graded "
+            f"negatives reach a Stage-2 payload on the gated arm (N_min = {N_MIN}); census "
+            f"extension triggered {power.get('extension', {}).get('triggered')!r} (P on the draw "
+            f"{power.get('extension', {}).get('P_draw')!r}). The A13 verdict is computed exactly "
+            "as A13 does and recorded unchanged; README and the manuscript say so in A15 Pin 5's "
+            "words."
+        )
+    else:
+        power_line = (
+            f"{power.get('sentence')}. Census extension triggered "
+            f"{power.get('extension', {}).get('triggered')!r} (P on the draw "
+            f"{power.get('extension', {}).get('P_draw')!r}); no item was dropped or relabelled "
+            "after any score."
+        )
+    return [
+        (
+            "Reported BESIDE v2 (reports/two_stage_precision_v2.json), never replacing it "
+            "(ADR-0005 A16 Pin 5): the P3 exit record keeps 'A13 Pin 1: FAIL, underpowered, on "
+            "v2' whatever this report shows."
+        ),
+        (
+            f"The gated arm is the GATE-4 eval twin, not the shipped scanner; the twin saw "
+            f"{seen.get(GATED_ARM, {}).get('positives')} of the {scope.get('n_positives')} "
+            "positives, which are v2's graded positive windows, byte-identical. The production "
+            "arm's numbers are REPORTED, NOT GATED: its Stage-1 is in-sample on every positive."
+        ),
+        (
+            f"ADR-0005 A17 Pin 5 (a) — CM circularity, as A15 Pin 7(a): a graded negative MEANS "
+            f"below {SCREEN_THRESHOLD_BITS} bits on RF00230/TBDB001 and free of the GGTGGNACCGCG "
+            "motif on either strand (A15 Pin 2, unchanged), so a CM contestant is favoured by "
+            "construction, and a learned model that finds a real but CM-invisible T-box in a "
+            "graded window is scored as a false positive. This benchmark grades Stage-1-vs-"
+            "two-stage integration; it is never evidence about novel-element recall, FDR or "
+            "held-out-clade generalization."
+        ),
+        (
+            f"ADR-0005 A17 Pin 5 (b) — prior scores exist on this substrate: production Stage-1 "
+            f"at τ = 0.9 scanned every admissible a2 host in round 0 and the shipped Stage-2 "
+            f"scored all {n_round0} round-0 candidates. The selection rule reads neither. "
+            f"{cross['n_overlapping']} of {cross['n_graded_negatives']} graded negatives overlap "
+            f"a round-0 candidate locus ({cross['n_round0_candidates_overlapped']} distinct "
+            f"candidates); {cross['n_overlapping_with_twin_candidate']} of them draw a twin "
+            "Stage-1 candidate. Their A12 Pin 4(e) orthogonal-criterion status: "
+            f"{_fmt_counts(cross['orthogonal_status'])} (relaxed_architecture has no committed "
+            "per-candidate source, so a window whose candidates pass neither other criterion is "
+            "undetermined, not failed). Nothing is dropped on it, and the twin never scanned "
+            "these genomes."
+        ),
+        (
+            "ADR-0005 A17 Pin 5 (c) — label-noise direction: a graded negative that is a real "
+            "CM-invisible T-box penalises whichever system ranks it higher, so if Stage-2 "
+            "detects such loci better than Stage-1 the bias runs AGAINST two-stage (conservative "
+            f"for the two-stage claim). The D4 partition moves {beside['n_beside']} windows beside "
+            "the gate and reduces this risk without removing it; the extension's P-conditioned "
+            "acceptance of the draw is a second-order tilt, which the census bounds."
+        ),
+        (
+            "ADR-0005 A17 Pin 5 (d) — a different benchmark from v2: the negatives are native "
+            "windows on off-catalogue genomes in training orders, the positives catalogue "
+            f"records. Graded composition: {_fmt_counts(composition['graded']['by_sub_class'])} "
+            f"over {composition['graded']['n_assemblies']} assemblies; top clades "
+            f"{_fmt_counts(composition['graded']['by_clade'])}; D4 share "
+            f"{composition['d4_share']!r}; the pool's per-rule refusals are "
+            + "; ".join(
+                f"{record.get('stage')}: {_fmt_counts(record.get('refusals'))} (refusal share "
+                f"{record.get('refusal_share')!r})"
+                for record in pool_records
+            )
+            + ". The fold screen shifts the draw toward genomes distant from training, as A15 "
+            "Pin 7(e) did."
+        ),
+        (
+            "ADR-0005 A17 Pin 5 (e) — the union mask is fail-open on a2 (A8) and no substrate "
+            "pre-scan exists: the content screen is the only T-box screen, and its refusal count "
+            "lower-bounds T-box content in the draw; a passing screen is NOT a claim the windows "
+            "are clean."
+        ),
+        (
+            "ADR-0005 A17 Pin 5 (f) — A15 Pin 7(b)'s flank familiarity and Pin 7(d)'s six leader "
+            f"records in Stage-2 training carry over unchanged; {familiar}."
+        ),
+        power_line,
+        (
+            f"Beside the gate (A17 Pin 2): {beside_twin.get('n_with_stage1_candidate')!r} of "
+            f"{beside['n_beside']} D4-context windows draw a twin Stage-1 candidate and "
+            f"{beside_twin.get('n_with_stage2_payload')!r} a Stage-2 payload; with them ADDED to "
+            f"the denominator (not graded) the twin's AUPRC gain reads "
+            f"{with_beside.get('gain_pp')!r} pp."
+        ),
+        (
+            "The ADR-0005 D7 100:1 prevalence is reached by REWEIGHTING the graded negatives "
+            f"(λ = 100 · n_pos / n_graded_neg); the graded population's own composition is "
+            f"{gated['population']['observed_decoy_ratio']:.3f} negatives per positive."
+        ),
+        (
+            f"Every positive is re-scored in this run (A15 Pin 6: Stage-2 logits depend on batch "
+            f"composition); on the gated arm {delta.get('n_changed')!r} of "
+            f"{delta.get('n_compared')!r} positives' two-stage scores differ from v2's (max |Δ| "
+            f"{delta.get('max_abs_delta')!r})."
         ),
         (
             "ADR-0005 D3 freezes the Stage-1 threshold, the locus knobs and the Stage-2 "
@@ -2519,7 +3688,12 @@ def precision_problems(report: Mapping[str, Any]) -> list[str]:
         bool(report.get("gated")) == bool(report.get("is_science")),
         "gated and is_science disagree",
     )
-    if gated_schema:
+    # A17 (schema >= 1.3) grades the hard-negative benchmark under its own clause set, which
+    # shares A15's identity, familiarity and annex clauses rather than copying them; 1.2 keeps
+    # exactly the set the v2 bytes were published under.
+    if version is not None and version >= HARDNEG_REPORT_SCHEMA:
+        problems.extend(_hardneg_schema_problems(report, raw_scope))
+    elif gated_schema:
         problems.extend(_gated_schema_problems(report, raw_scope))
 
     # A committed public artifact never carries this machine's layout. Not an allowlist of
@@ -2599,6 +3773,251 @@ def _graded_scope(raw: Mapping[str, Any]) -> tuple[list[str], dict[str, Any]]:
                 "subset the manifest declares (ADR-0005 A15 Pin 4), and none is declared"
             )
     return problems, view
+
+
+def _close(observed: Any, derived: float | None) -> bool:
+    """``observed`` equals ``derived`` within 1e-9; ``False`` for a non-number, a NaN or a None."""
+    value = _real({"v": observed}, "v")
+    if value is None or derived is None or math.isnan(value) or math.isnan(derived):
+        return False
+    return math.isclose(value, derived, rel_tol=1e-9, abs_tol=1e-9)
+
+
+def _identity_records(report: Mapping[str, Any]) -> dict[str, Mapping[str, Any]]:
+    """The per-arm Stage-2 identity records that are blocks (the rest is a separate refusal)."""
+    identity = report.get("stage2_identity")
+    return (
+        {name: rec for name, rec in identity.items() if isinstance(rec, Mapping)}
+        if isinstance(identity, Mapping)
+        else {}
+    )
+
+
+def _power_by_arm_problems(
+    by_arm_power: Mapping[str, Any], arms: Mapping[str, Mapping[str, Any]]
+) -> list[str]:
+    """A15 Pin 5's per-arm power counts against each arm's own gated population (1.2 and 1.3)."""
+    problems: list[str] = []
+
+    def want(condition: bool, message: str) -> None:
+        if not condition:
+            problems.append(message)
+
+    want(
+        set(by_arm_power) == set(arms),
+        f"the power block covers {sorted(by_arm_power)!r}, not the graded arms {sorted(arms)!r}",
+    )
+    for arm_name, arm in arms.items():
+        entry = _block(by_arm_power, arm_name)
+        population = _block(arm, "population")
+        neg = population.get("n_negatives")
+        cand = (
+            population.get("n_candidate_items") - population.get("n_positive_candidates")
+            if _is_count(population.get("n_candidate_items"))
+            and _is_count(population.get("n_positive_candidates"))
+            else None
+        )
+        n_gated, with_one, with_two = (
+            entry.get("n_gated_negatives"),
+            entry.get("n_gated_negatives_with_stage1_candidate"),
+            entry.get("n_gated_negatives_with_stage2_payload"),
+        )
+        want(
+            _is_count(n_gated) and n_gated == neg,
+            f"arm {arm_name!r}: the power block counts {n_gated!r} gated negatives but the arm "
+            f"graded {neg!r}",
+        )
+        want(
+            _is_count(with_one) and with_one == cand,
+            f"arm {arm_name!r}: the power block counts {with_one!r} gated negatives with a "
+            f"Stage-1 candidate, but the arm's own population re-derives {cand!r}",
+        )
+        want(
+            _is_count(with_two)
+            and _is_count(with_one)
+            and _is_count(n_gated)
+            and with_one <= with_two <= n_gated,
+            f"arm {arm_name!r}: {with_two!r} gated negatives reached Stage-2 as a payload, which "
+            f"is not between the {with_one!r} with a candidate (every emitted locus is a payload) "
+            f"and the {n_gated!r} gated negatives",
+        )
+    return problems
+
+
+def _stage2_identity_problems(
+    report: Mapping[str, Any], arms: Mapping[str, Any], sources: Mapping[str, Any]
+) -> list[str]:
+    """A15 Pin 6's Stage-2 identity: present, identical across arms, the T source's arm."""
+    problems: list[str] = []
+
+    def want(condition: bool, message: str) -> None:
+        if not condition:
+            problems.append(message)
+
+    identity = report.get("stage2_identity")
+    temperature = _block(sources, "temperature_source")
+    want(
+        isinstance(identity, Mapping) and set(identity) == set(arms),
+        "stage2_identity does not cover every graded arm; the Stage-2 checkpoint each arm was "
+        "re-ranked by must be recorded (ADR-0005 A15 Pin 6)",
+    )
+    records = (
+        {name: rec for name, rec in identity.items() if isinstance(rec, Mapping)}
+        if isinstance(identity, Mapping)
+        else {}
+    )
+    for arm_name, rec in records.items():
+        absent = [field for field in STAGE2_IDENTITY_FIELDS if not _present(rec.get(field))]
+        want(not absent, f"arm {arm_name!r}: stage2_identity records no {absent}")
+        want(
+            rec.get("shard") is None,
+            f"arm {arm_name!r}: the Stage-2 file is shard {rec.get('shard')!r}, one slice of the "
+            "work list, not a whole pass (merge the shards first)",
+        )
+        want(
+            _present(rec.get("payloads_sha256")),
+            f"arm {arm_name!r}: stage2_identity records no payloads_sha256; the manifest the "
+            "Stage-2 pass scored is unnamed",
+        )
+        coverage = _block(rec, "work_list_coverage")
+        n_rows, n_scored = coverage.get("n_rows"), coverage.get("n_scored")
+        want(
+            _is_count(n_rows) and n_rows > 0 and n_scored == n_rows,
+            f"arm {arm_name!r}: the Stage-2 logits score {n_scored!r} of the {n_rows!r} payloads "
+            "in the graded work list; every payload the candidate tables were built from must "
+            "have been scored",
+        )
+    first = next(iter(records.values()), None)
+    want(
+        first is not None
+        and all(
+            rec.get(field) == first.get(field)
+            for rec in records.values()
+            for field in STAGE2_IDENTITY_FIELDS
+        ),
+        "the arms were re-ranked by different Stage-2 identities; both arms must share one "
+        "checkpoint, backbone, revision, dtype, adapter, heads and batch size",
+    )
+    want(
+        first is not None
+        and all(
+            _present(temperature.get(field)) and first.get(field) == temperature.get(field)
+            for field in TEMPERATURE_BINDING_FIELDS
+        ),
+        "the Stage-2 identity is not the arm the temperature source graded "
+        f"({ {field: temperature.get(field) for field in TEMPERATURE_BINDING_FIELDS} }); the T "
+        "applied would belong to a different checkpoint",
+    )
+    t_value = _real(temperature, "temperature")
+    want(
+        t_value is not None and math.isfinite(t_value) and t_value > 0.0,
+        f"the temperature source records T = {temperature.get('temperature')!r}, not a "
+        "positive finite temperature",
+    )
+    return problems
+
+
+def _familiarity_problems(
+    report: Mapping[str, Any],
+    arms: Mapping[str, Mapping[str, Any]],
+    gated_arm: str,
+    lines: Sequence[str],
+) -> list[str]:
+    """A15 Pin 7(b)'s familiarity baseline, re-derived against each arm (1.2; 1.3 when supplied)."""
+    problems: list[str] = []
+
+    def want(condition: bool, message: str) -> None:
+        if not condition:
+            problems.append(message)
+
+    baseline = _block(report, "familiarity_baseline")
+    by_arm_fam = _block(baseline, "by_arm")
+    want(
+        set(by_arm_fam) == set(arms),
+        f"the familiarity baseline covers {sorted(by_arm_fam)!r}, not {sorted(arms)!r}",
+    )
+    for arm_name, arm in arms.items():
+        entry = _block(by_arm_fam, arm_name)
+        key = arm.get("gated_prevalence_key")
+        point = _block(_block(arm, "prevalence"), key) if isinstance(key, str) else {}
+        auprc, stage1 = _real(entry, "auprc"), _real(entry, "stage1_only_auprc")
+        want(
+            auprc is not None and 0.0 <= auprc <= 1.0,
+            f"arm {arm_name!r}: familiarity AUPRC {entry.get('auprc')!r} is not in [0, 1]",
+        )
+        want(
+            stage1 is not None
+            and stage1 == _real(point, "auprc", "stage1_only")
+            and _real(entry, "two_stage_auprc") == _real(point, "auprc", "two_stage"),
+            f"arm {arm_name!r}: the familiarity baseline is published beside AUPRCs that are not "
+            "the arm's own at the pinned prevalence",
+        )
+        want(
+            _close(entry.get("lambda"), _real(point, "lambda"))
+            and entry.get("n_items") == _block(arm, "population").get("n_items"),
+            f"arm {arm_name!r}: the familiarity baseline was not graded over the arm's own "
+            "gated population at the pinned reweighting",
+        )
+        want(
+            auprc is not None
+            and stage1 is not None
+            and _close(entry.get("minus_stage1_pp"), (auprc - stage1) * 100.0),
+            f"arm {arm_name!r}: familiarity minus_stage1_pp {entry.get('minus_stage1_pp')!r} is "
+            "not the difference of the AUPRCs it is published beside",
+        )
+        want(
+            isinstance(entry.get("rivals_stage1"), bool)
+            and auprc is not None
+            and stage1 is not None
+            and entry.get("rivals_stage1") == (auprc >= stage1),
+            f"arm {arm_name!r}: rivals_stage1 {entry.get('rivals_stage1')!r} is not the "
+            "comparison it names",
+        )
+    rivals = _block(by_arm_fam, gated_arm).get("rivals_stage1")
+    want(
+        baseline.get("gated_arm_rivals_stage1") is rivals and isinstance(rivals, bool),
+        "familiarity_baseline.gated_arm_rivals_stage1 is not the gated arm's own comparison",
+    )
+    want(
+        any(CONFOUNDED_STATEMENT in line for line in lines) == bool(rivals),
+        (
+            f"the gated arm's familiarity baseline rivals Stage-1 but no disclosure says "
+            f"{CONFOUNDED_STATEMENT!r} (A15 Pin 7(b))"
+            if rivals
+            else f"a disclosure claims {CONFOUNDED_STATEMENT!r} but the baseline does not rival "
+            "Stage-1"
+        ),
+    )
+    return problems
+
+
+def _sensitivity_rebind_problems(
+    report: Mapping[str, Any], gate: Mapping[str, Any], sources: Mapping[str, Any]
+) -> list[str]:
+    """A13 Pin 2's failing-read clause, rebound to this benchmark's own τ reads (A15 Pin 5)."""
+    problems: list[str] = []
+
+    def want(condition: bool, message: str) -> None:
+        if not condition:
+            problems.append(message)
+
+    sensitivity = report.get("stage1_threshold_sensitivity")
+    if isinstance(sensitivity, Mapping):
+        bench = sources.get("benchmark_sha256")
+        rows = sensitivity.get("points")
+        rows = [row for row in rows if isinstance(row, Mapping)] if isinstance(rows, list) else []
+        want(
+            _present(bench) and all(row.get("benchmark_sha256") == bench for row in rows),
+            "a Stage-1 threshold sensitivity point was graded on a different benchmark than this "
+            "report; A15 Pin 5 rebinds the τ reads to v2's own, whatever their sign",
+        )
+        reported = _block(gate, "reported_not_gated").get("matched_recall")
+        want(
+            isinstance(reported, Mapping)
+            and _block(sensitivity, "base").get("matched_recall") == reported,
+            "the sensitivity annex's base does not carry this report's own matched-recall read",
+        )
+    return problems
 
 
 def _gated_schema_problems(report: Mapping[str, Any], scope: Mapping[str, Any]) -> list[str]:
@@ -2710,44 +4129,7 @@ def _gated_schema_problems(report: Mapping[str, Any], scope: Mapping[str, Any]) 
     # ── (2) Power (A15 Pin 5), re-derived from each arm's own gated population ─────────
     power = _block(report, "power")
     by_arm_power = _block(power, "by_arm")
-    want(
-        set(by_arm_power) == set(arms),
-        f"the power block covers {sorted(by_arm_power)!r}, not the graded arms {sorted(arms)!r}",
-    )
-    for arm_name, arm in arms.items():
-        entry = _block(by_arm_power, arm_name)
-        population = _block(arm, "population")
-        neg = population.get("n_negatives")
-        cand = (
-            population.get("n_candidate_items") - population.get("n_positive_candidates")
-            if _is_count(population.get("n_candidate_items"))
-            and _is_count(population.get("n_positive_candidates"))
-            else None
-        )
-        n_gated, with_one, with_two = (
-            entry.get("n_gated_negatives"),
-            entry.get("n_gated_negatives_with_stage1_candidate"),
-            entry.get("n_gated_negatives_with_stage2_payload"),
-        )
-        want(
-            _is_count(n_gated) and n_gated == neg,
-            f"arm {arm_name!r}: the power block counts {n_gated!r} gated negatives but the arm "
-            f"graded {neg!r}",
-        )
-        want(
-            _is_count(with_one) and with_one == cand,
-            f"arm {arm_name!r}: the power block counts {with_one!r} gated negatives with a "
-            f"Stage-1 candidate, but the arm's own population re-derives {cand!r}",
-        )
-        want(
-            _is_count(with_two)
-            and _is_count(with_one)
-            and _is_count(n_gated)
-            and with_one <= with_two <= n_gated,
-            f"arm {arm_name!r}: {with_two!r} gated negatives reached Stage-2 as a payload, which "
-            f"is not between the {with_one!r} with a candidate (every emitted locus is a payload) "
-            f"and the {n_gated!r} gated negatives",
-        )
+    problems.extend(_power_by_arm_problems(by_arm_power, arms))
     reached = _block(by_arm_power, gated_arm).get("n_gated_negatives_with_stage1_candidate")
     expected_class = (
         None if not _is_count(reached) else ("underpowered" if reached == 0 else "powered")
@@ -2778,66 +4160,8 @@ def _gated_schema_problems(report: Mapping[str, Any], scope: Mapping[str, Any]) 
         )
 
     # ── (3) Stage-2 identity (A15 Pin 6): present, identical across arms, = the T source ─
-    identity = report.get("stage2_identity")
-    temperature = _block(sources, "temperature_source")
-    want(
-        isinstance(identity, Mapping) and set(identity) == set(arms),
-        "stage2_identity does not cover every graded arm; the Stage-2 checkpoint each arm was "
-        "re-ranked by must be recorded (ADR-0005 A15 Pin 6)",
-    )
-    records = (
-        {name: rec for name, rec in identity.items() if isinstance(rec, Mapping)}
-        if isinstance(identity, Mapping)
-        else {}
-    )
-    for arm_name, rec in records.items():
-        absent = [field for field in STAGE2_IDENTITY_FIELDS if not _present(rec.get(field))]
-        want(not absent, f"arm {arm_name!r}: stage2_identity records no {absent}")
-        want(
-            rec.get("shard") is None,
-            f"arm {arm_name!r}: the Stage-2 file is shard {rec.get('shard')!r}, one slice of the "
-            "work list, not a whole pass (merge the shards first)",
-        )
-        want(
-            _present(rec.get("payloads_sha256")),
-            f"arm {arm_name!r}: stage2_identity records no payloads_sha256; the manifest the "
-            "Stage-2 pass scored is unnamed",
-        )
-        coverage = _block(rec, "work_list_coverage")
-        n_rows, n_scored = coverage.get("n_rows"), coverage.get("n_scored")
-        want(
-            _is_count(n_rows) and n_rows > 0 and n_scored == n_rows,
-            f"arm {arm_name!r}: the Stage-2 logits score {n_scored!r} of the {n_rows!r} payloads "
-            "in the graded work list; every payload the candidate tables were built from must "
-            "have been scored",
-        )
-    first = next(iter(records.values()), None)
-    want(
-        first is not None
-        and all(
-            rec.get(field) == first.get(field)
-            for rec in records.values()
-            for field in STAGE2_IDENTITY_FIELDS
-        ),
-        "the arms were re-ranked by different Stage-2 identities; both arms must share one "
-        "checkpoint, backbone, revision, dtype, adapter, heads and batch size",
-    )
-    want(
-        first is not None
-        and all(
-            _present(temperature.get(field)) and first.get(field) == temperature.get(field)
-            for field in TEMPERATURE_BINDING_FIELDS
-        ),
-        "the Stage-2 identity is not the arm the temperature source graded "
-        f"({ {field: temperature.get(field) for field in TEMPERATURE_BINDING_FIELDS} }); the T "
-        "applied would belong to a different checkpoint",
-    )
-    t_value = _real(temperature, "temperature")
-    want(
-        t_value is not None and math.isfinite(t_value) and t_value > 0.0,
-        f"the temperature source records T = {temperature.get('temperature')!r}, not a "
-        "positive finite temperature",
-    )
+    problems.extend(_stage2_identity_problems(report, arms, sources))
+    records = _identity_records(report)
 
     # ── (4) Every v2 input recorded with its sha256, and each block bound to its entry ──
     for key in V2_SOURCE_FILES:
@@ -2981,82 +4305,10 @@ def _gated_schema_problems(report: Mapping[str, Any], scope: Mapping[str, Any]) 
             )
 
     # ── (7) The familiarity baseline (A15 Pin 7(b)), re-derived against each arm ────────
-    baseline = _block(report, "familiarity_baseline")
-    by_arm_fam = _block(baseline, "by_arm")
-    want(
-        set(by_arm_fam) == set(arms),
-        f"the familiarity baseline covers {sorted(by_arm_fam)!r}, not {sorted(arms)!r}",
-    )
-    for arm_name, arm in arms.items():
-        entry = _block(by_arm_fam, arm_name)
-        key = arm.get("gated_prevalence_key")
-        point = _block(_block(arm, "prevalence"), key) if isinstance(key, str) else {}
-        auprc, stage1 = _real(entry, "auprc"), _real(entry, "stage1_only_auprc")
-        want(
-            auprc is not None and 0.0 <= auprc <= 1.0,
-            f"arm {arm_name!r}: familiarity AUPRC {entry.get('auprc')!r} is not in [0, 1]",
-        )
-        want(
-            stage1 is not None
-            and stage1 == _real(point, "auprc", "stage1_only")
-            and _real(entry, "two_stage_auprc") == _real(point, "auprc", "two_stage"),
-            f"arm {arm_name!r}: the familiarity baseline is published beside AUPRCs that are not "
-            "the arm's own at the pinned prevalence",
-        )
-        want(
-            close(entry.get("lambda"), _real(point, "lambda"))
-            and entry.get("n_items") == _block(arm, "population").get("n_items"),
-            f"arm {arm_name!r}: the familiarity baseline was not graded over the arm's own "
-            "gated population at the pinned reweighting",
-        )
-        want(
-            auprc is not None
-            and stage1 is not None
-            and close(entry.get("minus_stage1_pp"), (auprc - stage1) * 100.0),
-            f"arm {arm_name!r}: familiarity minus_stage1_pp {entry.get('minus_stage1_pp')!r} is "
-            "not the difference of the AUPRCs it is published beside",
-        )
-        want(
-            isinstance(entry.get("rivals_stage1"), bool)
-            and auprc is not None
-            and stage1 is not None
-            and entry.get("rivals_stage1") == (auprc >= stage1),
-            f"arm {arm_name!r}: rivals_stage1 {entry.get('rivals_stage1')!r} is not the "
-            "comparison it names",
-        )
-    rivals = _block(by_arm_fam, gated_arm).get("rivals_stage1")
-    want(
-        baseline.get("gated_arm_rivals_stage1") is rivals and isinstance(rivals, bool),
-        "familiarity_baseline.gated_arm_rivals_stage1 is not the gated arm's own comparison",
-    )
-    want(
-        any(CONFOUNDED_STATEMENT in line for line in lines) == bool(rivals),
-        (
-            f"the gated arm's familiarity baseline rivals Stage-1 but no disclosure says "
-            f"{CONFOUNDED_STATEMENT!r} (A15 Pin 7(b))"
-            if rivals
-            else f"a disclosure claims {CONFOUNDED_STATEMENT!r} but the baseline does not rival "
-            "Stage-1"
-        ),
-    )
+    problems.extend(_familiarity_problems(report, arms, gated_arm, lines))
 
     # ── (8) A13 Pin 2's failing-read clause, rebound to v2's own τ reads (A15 Pin 5) ────
-    sensitivity = report.get("stage1_threshold_sensitivity")
-    if isinstance(sensitivity, Mapping):
-        bench = sources.get("benchmark_sha256")
-        rows = sensitivity.get("points")
-        rows = [row for row in rows if isinstance(row, Mapping)] if isinstance(rows, list) else []
-        want(
-            _present(bench) and all(row.get("benchmark_sha256") == bench for row in rows),
-            "a Stage-1 threshold sensitivity point was graded on a different benchmark than this "
-            "report; A15 Pin 5 rebinds the τ reads to v2's own, whatever their sign",
-        )
-        reported = _block(gate, "reported_not_gated").get("matched_recall")
-        want(
-            isinstance(reported, Mapping)
-            and _block(sensitivity, "base").get("matched_recall") == reported,
-            "the sensitivity annex's base does not carry this report's own matched-recall read",
-        )
+    problems.extend(_sensitivity_rebind_problems(report, gate, sources))
 
     # ── (9) Composition (A15 Pin 7(e)) is the minted one beside the screen's v1 audit ───
     composition = _block(report, "composition")
@@ -3072,6 +4324,590 @@ def _gated_schema_problems(report: Mapping[str, Any], scope: Mapping[str, Any]) 
         and bool(v1_hosts)
         and v1_hosts == screen.get("v1_composition"),
         "composition.v1_hosts is not the screen report's v1_audit composition",
+    )
+    return problems
+
+
+def _counts_sum(node: Any) -> int | None:
+    """The sum of a ``{label: count}`` block, or ``None`` if it is not one."""
+    if not isinstance(node, Mapping) or not all(_is_count(value) for value in node.values()):
+        return None
+    return sum(node.values())
+
+
+def _ratio(numerator: Any, denominator: Any) -> float | None:
+    """``numerator / denominator`` for two counts, ``None`` when it is not representable.
+
+    An int has no width limit, so a retyped count can make true division (or the reweighting)
+    overflow; a validator that raised there would not be total.
+    """
+    if not (_is_count(numerator) and _is_count(denominator)) or denominator == 0:
+        return None
+    try:
+        return numerator / denominator
+    except OverflowError:
+        return None
+
+
+def _hardneg_schema_problems(report: Mapping[str, Any], scope: Mapping[str, Any]) -> list[str]:
+    """ADR-0005 A17's clauses (schema ≥ 1.3), each re-derived from the report's own numbers.
+
+    ``scope`` is the RAW manifest scope. As in :func:`_gated_schema_problems`, each clause is
+    breakable alone with every other field consistent, and the tests break each one in isolation
+    ([[all-true-fixture-cannot-test-a-conjunction]]). The Stage-2 identity, the familiarity
+    baseline and the τ-annex rebinding are A15's clauses, shared rather than copied.
+    """
+    problems: list[str] = []
+
+    def want(condition: bool, message: str) -> None:
+        if not condition:
+            problems.append(message)
+
+    arms = {name: arm for name, arm in report["arms"].items() if isinstance(arm, Mapping)}
+    gated_arm = report["gated_arm"]
+    gate = _block(report, "gate")
+    sources = _block(report, "sources")
+    interim = _block(sources, "interim_sha256")
+    host_pool = _block(scope, "host_pool")
+    population_g = _block(_block(arms, gated_arm), "population")
+    prevalence = _real(gate, "decoy_prevalence")
+    disclosures_block = report.get("disclosures")
+    lines = (
+        [line for line in disclosures_block if isinstance(line, str)]
+        if isinstance(disclosures_block, list)
+        else []
+    )
+
+    # ── (1) The non-graded set is EXACTLY the D4-context negatives; no decoy pool is minted ──
+    full_pools, gated_pools = scope.get("negatives_by_pool"), scope.get("negatives_by_pool_gated")
+    beside_pools, n_beside = scope.get("beside_by_pool"), scope.get("n_beside")
+    want(
+        all(
+            isinstance(node, Mapping) and set(node) <= set(HARDNEG_SUB_CLASSES)
+            for node in (full_pools, gated_pools, beside_pools)
+        ),
+        f"the manifest's negative pools ({full_pools!r}) are not A17 Pin 1's "
+        f"{list(HARDNEG_SUB_CLASSES)}; A17 mints native leaders only, no leader or §9.1 decoy",
+    )
+    want(
+        isinstance(full_pools, Mapping)
+        and isinstance(gated_pools, Mapping)
+        and isinstance(beside_pools, Mapping)
+        and all(
+            _is_count(full_pools.get(pool, 0))
+            and full_pools.get(pool, 0) == gated_pools.get(pool, 0) + beside_pools.get(pool, 0)
+            for pool in HARDNEG_SUB_CLASSES
+        ),
+        "the manifest's pools are not its graded pools plus its beside pools, per sub-class",
+    )
+    counts = {key: scope.get(key) for key in ("n_items", "n_negatives", "n_positives")}
+    gated_counts = {key: scope.get(f"{key}_gated") for key in ("n_items", "n_negatives")}
+    want(
+        all(_is_count(v) for v in (*counts.values(), *gated_counts.values(), n_beside))
+        and counts["n_items"] - n_beside == gated_counts["n_items"]
+        and counts["n_negatives"] - n_beside == gated_counts["n_negatives"]
+        and gated_counts["n_items"] - gated_counts["n_negatives"] == counts["n_positives"],
+        f"the manifest's graded counts {gated_counts!r} are not its full counts {counts!r} less "
+        f"its {n_beside!r} D4-context negatives (every positive is graded)",
+    )
+
+    # ── (2) The beside-gate block (A17 Pin 2), re-derived against the scope and each arm ──
+    beside = _block(report, "beside_gate")
+    by_arm_beside = _block(beside, "by_arm")
+    want(
+        beside.get("graded") is False and beside.get("n_beside") == n_beside,
+        f"beside_gate counts {beside.get('n_beside')!r} D4-context windows (graded="
+        f"{beside.get('graded')!r}); the manifest mints {n_beside!r}, never graded",
+    )
+    want(
+        set(by_arm_beside) == set(arms),
+        f"beside_gate covers {sorted(by_arm_beside)!r}, not the arms {sorted(arms)!r}",
+    )
+    for arm_name, arm in arms.items():
+        entry = _block(by_arm_beside, arm_name)
+        population = _block(arm, "population")
+        called = entry.get("called")
+        n_one, n_two = entry.get("n_with_stage1_candidate"), entry.get("n_with_stage2_payload")
+        want(
+            entry.get("n") == n_beside
+            and isinstance(called, list)
+            and _is_count(n_one)
+            and len(called) == n_one,
+            f"arm {arm_name!r}: beside_gate lists "
+            f"{len(called) if isinstance(called, list) else None!r} called rows for {n_one!r} "
+            f"windows with a candidate, over {entry.get('n')!r} of the {n_beside!r} D4-context "
+            "windows",
+        )
+        want(
+            _is_count(n_two)
+            and _is_count(n_one)
+            and _is_count(n_beside)
+            and n_one <= n_two <= n_beside,
+            f"arm {arm_name!r}: {n_two!r} D4-context windows reached a Stage-2 payload, which is "
+            f"not between the {n_one!r} with a candidate and the {n_beside!r} minted",
+        )
+        rows_ok = isinstance(called, list) and all(
+            isinstance(row, Mapping)
+            and _is_count(row.get("n_rows"))
+            and row["n_rows"] > 0
+            and row.get("sub_class") in HARDNEG_SUB_CLASSES
+            and all(
+                _real(row, system) is not None and 0.0 <= _real(row, system) <= 1.0
+                for system in SYSTEMS
+            )
+            for row in called
+        )
+        want(rows_ok, f"arm {arm_name!r}: a called D4-context row does not carry both scores")
+        distribution = _block(entry, "distribution")
+        want(
+            all(_block(distribution, system).get("n") == n_one for system in SYSTEMS),
+            f"arm {arm_name!r}: the beside score distribution is not over the called windows",
+        )
+        denom = _block(entry, "with_beside_in_denominator")
+        n_pos, n_neg = population.get("n_positives"), population.get("n_negatives")
+        share = (
+            _ratio(n_pos, n_neg + n_beside)
+            if _is_count(n_neg) and _is_count(n_beside) and n_pos != 0
+            else None
+        )
+        derived = (
+            prevalence * share
+            if share is not None
+            and prevalence is not None
+            and math.isfinite(prevalence)
+            and prevalence > 0
+            else None
+        )
+        want(
+            denom.get("graded") is False
+            and _is_count(n_pos)
+            and _is_count(n_neg)
+            and _is_count(n_beside)
+            and denom.get("n_items") == n_pos + n_neg + n_beside
+            and denom.get("n_negatives") == n_neg + n_beside
+            and _close(denom.get("lambda"), derived),
+            f"arm {arm_name!r}: the with-beside AUPRC read is not over the graded population plus "
+            "the D4-context windows at the pinned reweighting (or claims to be graded)",
+        )
+        two, one = _real(denom, "auprc", "two_stage"), _real(denom, "auprc", "stage1_only")
+        want(
+            two is not None
+            and one is not None
+            and 0.0 <= two <= 1.0
+            and 0.0 <= one <= 1.0
+            and _close(denom.get("gain_pp"), (two - one) * 100.0),
+            f"arm {arm_name!r}: the with-beside AUPRCs ({two!r}, {one!r}) or their gain "
+            f"{denom.get('gain_pp')!r} are not a measured pair",
+        )
+
+    # ── (3) Power (A17 Pin 4): P, N_min, the extension, the class, re-derived ──────────
+    power = _block(report, "power")
+    by_arm_power = _block(power, "by_arm")
+    problems.extend(_power_by_arm_problems(by_arm_power, arms))
+    p_final = power.get("P")
+    extension = _block(power, "extension")
+    stage = power.get("stage")
+    triggered = extension.get("triggered")
+    counted = _block(by_arm_power, gated_arm).get("n_gated_negatives_with_stage2_payload")
+    want(
+        power.get("n_min") == N_MIN and not isinstance(power.get("n_min"), bool),
+        f"power.n_min is {power.get('n_min')!r}, not ADR-0005 A17 Pin 4's {N_MIN}",
+    )
+    want(
+        power.get("gated_arm") == gated_arm,
+        f"the power block names gated arm {power.get('gated_arm')!r}, not {gated_arm!r}",
+    )
+    n_graded_power = _block(by_arm_power, gated_arm).get("n_gated_negatives")
+    want(
+        _is_count(p_final)
+        and _is_count(counted)
+        and _is_count(n_graded_power)
+        and p_final <= n_graded_power,
+        f"power.P is {p_final!r}, not a count of the gated arm's graded negatives",
+    )
+    want(
+        power.get("this_threshold_payload_count") == counted,
+        "power.this_threshold_payload_count is not the gated arm's own payload count",
+    )
+    if sources.get("stage1_threshold") == HARDNEG_GRADED_THRESHOLD:
+        want(
+            p_final == counted,
+            f"power.P ({p_final!r}) is not the graded fold's own count of graded negatives with a "
+            f"Stage-2 payload on the gated arm ({counted!r}); the DAG decided on another work list",
+        )
+    want(
+        stage in POWER_STAGES
+        and isinstance(triggered, bool)
+        and triggered == (stage == "census")
+        and extension.get("P_final") == p_final,
+        f"the extension record (stage {stage!r}, triggered {triggered!r}, P_final "
+        f"{extension.get('P_final')!r}) is not the final count {p_final!r} at a pinned stage",
+    )
+    p_draw = extension.get("P_draw")
+    if triggered is True:
+        want(
+            _is_count(p_draw) and p_draw < N_MIN,
+            f"the census was entered on a draw P of {p_draw!r}; A17 Pin 4 extends only when the "
+            f"draw's P < {N_MIN}",
+        )
+    else:
+        want(
+            p_draw == p_final,
+            f"no extension was triggered, so P on the draw ({p_draw!r}) must be the final P",
+        )
+    if _is_count(p_final):
+        expected_decision = (
+            POWER_GRADE
+            if p_final >= N_MIN
+            else (POWER_UNDERPOWERED if stage == "census" else POWER_EXTEND)
+        )
+    else:
+        expected_decision = None
+    want(
+        expected_decision is not None
+        and expected_decision != POWER_EXTEND
+        and power.get("decision") == expected_decision,
+        f"power.decision is {power.get('decision')!r}, P {p_final!r} at stage {stage!r} re-derives "
+        f"{expected_decision!r}; no report is graded past an extend_census decision",
+    )
+    expected_class = (
+        None if not _is_count(p_final) else ("underpowered" if p_final < N_MIN else "powered")
+    )
+    want(
+        expected_class is not None and power.get("verdict_class") == expected_class,
+        f"power.verdict_class is {power.get('verdict_class')!r}, but P = {p_final!r} against "
+        f"N_min = {N_MIN} re-derives {expected_class!r}",
+    )
+    want(
+        gate.get("verdict_class") == power.get("verdict_class"),
+        "gate.verdict_class does not mirror the power block's",
+    )
+    if expected_class == "underpowered":
+        want(
+            gate.get("underpowered_statement") == HARDNEG_UNDERPOWERED_STATEMENT
+            and power.get("sentence") == HARDNEG_UNDERPOWERED_STATEMENT,
+            "an underpowered A17 gate does not carry A17 Pin 4's sentence verbatim",
+        )
+    else:
+        want(
+            gate.get("underpowered_statement") is None,
+            "a powered gate carries the underpowered statement",
+        )
+
+    # ── (4) Stage-2 identity (A15 Pin 6, shared) ─────────────────────────────────────────
+    problems.extend(_stage2_identity_problems(report, arms, sources))
+    records = _identity_records(report)
+
+    # ── (5) Every A17 input recorded with its sha256, and each block bound to its entry ──
+    supplied = report.get("familiarity_status") == "supplied"
+    population = _block(report, "population")
+    census = population.get("stage") == "census"
+    keys = [*HARDNEG_SOURCE_FILES, *(["familiarity"] if supplied else [])]
+    keys += ["hardneg_power_draw"] if triggered is True else []
+    keys += ["hardneg_pool_census"] if census else []
+    for key in keys:
+        rel = sources.get(key)
+        want(
+            isinstance(rel, str) and isinstance(interim.get(rel), str) and bool(interim.get(rel)),
+            f"sources.{key} ({rel!r}) is not recorded in sources.interim_sha256",
+        )
+    cross = _block(report, "round0_crosstab")
+    cross_source = _block(cross, "source")
+    file_blocks: list[tuple[str, Any, Any]] = [
+        (f"stage2_identity[{name!r}]", records.get(name), sources.get(f"{name}_stage2"))
+        for name in sorted(arms)
+    ]
+    file_blocks += [
+        ("population.draw", population.get("draw"), sources.get("hardneg_pool")),
+        ("power.source", power.get("source"), sources.get("hardneg_power")),
+        (
+            "v2_positive_delta.source",
+            _block(report, "v2_positive_delta").get("source"),
+            sources.get("v2_items"),
+        ),
+        (
+            "round0_crosstab.source.manifest",
+            cross_source.get("manifest"),
+            sources.get("round0_manifest"),
+        ),
+        (
+            "round0_crosstab.source.spare_inputs",
+            cross_source.get("spare_inputs"),
+            sources.get("round0_spare_inputs"),
+        ),
+        ("sources.temperature_source", sources.get("temperature_source"), None),
+    ]
+    if supplied:
+        file_blocks.append(
+            (
+                "familiarity_baseline.source",
+                _block(report, "familiarity_baseline").get("source"),
+                sources.get("familiarity"),
+            )
+        )
+    if triggered is True:
+        file_blocks.append(
+            ("power.draw_source", power.get("draw_source"), sources.get("hardneg_power_draw"))
+        )
+    if census:
+        file_blocks.append(
+            ("population.census", population.get("census"), sources.get("hardneg_pool_census"))
+        )
+    for label, node, expected_path in file_blocks:
+        path = node.get("path") if isinstance(node, Mapping) else None
+        want(
+            isinstance(path, str)
+            and (expected_path is None or path == expected_path)
+            and _present(interim.get(path))
+            and node.get("sha256") == interim.get(path),
+            f"{label} is not bound to a hash-recorded input (path {path!r}); a block that "
+            "names no digest could describe any file",
+        )
+    want(
+        _present(sources.get("benchmark_sha256"))
+        and isinstance(sources.get("benchmark"), str)
+        and sources.get("benchmark_sha256") == interim.get(sources.get("benchmark")),
+        "sources.benchmark_sha256 is not the recorded digest of sources.benchmark",
+    )
+
+    # ── (6) The population is the pool(s) the benchmark was minted from (A17 Pins 1–2) ──
+    minted = _block(_block(report, "benchmark"), "source").get("hardneg_pools")
+    pop_stage = population.get("stage")
+    records = [population.get("draw"), *([population.get("census")] if census else [])]
+    want(
+        pop_stage in POWER_STAGES
+        and pop_stage == stage
+        and (population.get("census") is None) == (pop_stage == "draw"),
+        f"the population stage {pop_stage!r} (census record present: "
+        f"{population.get('census') is not None}) is not the stage P was counted at ({stage!r})",
+    )
+    want(
+        isinstance(minted, list)
+        and len(minted) == len(records)
+        and all(
+            isinstance(record, Mapping)
+            and isinstance(entry, Mapping)
+            and _present(record.get("sha256"))
+            and record.get("sha256") == entry.get("sha256")
+            for record, entry in zip(records, minted, strict=False)
+        ),
+        "the population block does not read the pool report(s) the benchmark was minted from",
+    )
+    per_pool = [
+        (record.get("n_graded"), record.get("n_beside")) if isinstance(record, Mapping) else None
+        for record in records
+    ]
+    want(
+        population.get("n_graded") == gated_counts["n_negatives"]
+        and population.get("n_beside") == n_beside
+        and all(pair is not None and _is_count(pair[0]) and _is_count(pair[1]) for pair in per_pool)
+        and sum(pair[0] for pair in per_pool) == population.get("n_graded")
+        and sum(pair[1] for pair in per_pool) == population.get("n_beside"),
+        f"the pool(s) record {population.get('n_graded')!r} graded / "
+        f"{population.get('n_beside')!r} beside windows; the manifest minted "
+        f"{gated_counts['n_negatives']!r} / {n_beside!r}",
+    )
+
+    # ── (7) Each pool's screens held: the fold-overlap conjunction, the content screen and
+    # the score-blind audit (A15 Pins 1–2 and Pin 6's conjunction, on A17's substrate) ────
+    overlap = _block(host_pool, "overlap_with_training_folds")
+    gated_overlap = _block(overlap, "by_arm").get(gated_arm)
+    want(
+        _is_count(gated_overlap) and gated_overlap == 0,
+        f"conjunct 1/4: the gated arm's measured fold overlap is {gated_overlap!r}, not 0",
+    )
+    for mode, raw in zip(POWER_STAGES, records, strict=False):
+        record = raw if isinstance(raw, Mapping) else {}
+        want(
+            record.get("kind") == HARDNEG_POOL_KIND
+            and record.get("n_problems") == 0
+            and record.get("stage") == mode,
+            f"the {mode} pool record is a {record.get('kind')!r} {record.get('stage')!r}-mode "
+            f"report carrying {record.get('n_problems')!r} problem(s), not a clean "
+            f"{HARDNEG_POOL_KIND!r} of mode {mode!r}",
+        )
+        want(
+            _is_count(record.get("n_refused_kmer")) and record.get("n_refused_kmer") > 0,
+            f"conjunct 2/4 ({mode}): the fold screen refused {record.get('n_refused_kmer')!r} "
+            "windows on the k-mer rule; a screen that refuses nothing cannot be told from one "
+            "that never ran",
+        )
+        n_controls, n_fired = record.get("n_controls"), record.get("n_controls_fired")
+        want(
+            record.get("controls_all_fired") is True
+            and _is_count(n_controls)
+            and n_controls > 0
+            and n_fired == n_controls,
+            f"conjunct 3/4 ({mode}): the pool's must-fire controls did not all fire "
+            f"(controls_all_fired={record.get('controls_all_fired')!r}, {n_fired!r} of "
+            f"{n_controls!r})",
+        )
+        threshold = record.get("content_threshold_bits")
+        want(
+            isinstance(threshold, (int, float))
+            and not isinstance(threshold, bool)
+            and threshold == SCREEN_THRESHOLD_BITS,
+            f"the {mode} pool's content screen ran at {threshold!r} bits, not A15 Pin 2's "
+            f"{SCREEN_THRESHOLD_BITS} (A17 Pin 2: unchanged)",
+        )
+        audit = _block(record, "audit")
+        want(
+            _is_count(audit.get("n_sampled"))
+            and audit.get("n_sampled") > 0
+            and audit.get("n_violations") == 0
+            and not isinstance(audit.get("n_violations"), bool)
+            and audit.get("passes") is True,
+            f"the {mode} pool's score-blind audit sampled {audit.get('n_sampled')!r} graded "
+            f"windows with {audit.get('n_violations')!r} violation(s) (passes "
+            f"{audit.get('passes')!r}); A17 Pin 2's only remedy is A15 Pin 3's §7 stop",
+        )
+    selection = host_pool.get("selection")
+    want(
+        isinstance(selection, str)
+        and HARDNEG_SELECTION_TAG in selection
+        and report.get("selection") == selection,
+        f"conjunct 4/4: the selection {selection!r} does not name {HARDNEG_SELECTION_TAG}, or the "
+        "report does not carry the minted one",
+    )
+
+    # ── (8) The familiarity baseline (A17 Pin 3: reported when the inputs are supplied) ──
+    if supplied:
+        problems.extend(_familiarity_problems(report, arms, gated_arm, lines))
+    else:
+        want(
+            report.get("familiarity_status") == "not_supplied"
+            and report.get("familiarity_baseline") is None
+            and not any(CONFOUNDED_STATEMENT in line for line in lines),
+            f"familiarity_status is {report.get('familiarity_status')!r}: a baseline is either "
+            "supplied and graded, or recorded as not supplied with no confound claimed",
+        )
+
+    # ── (9) A13 Pin 2's failing-read clause, rebound to THIS benchmark's τ reads (shared) ─
+    problems.extend(_sensitivity_rebind_problems(report, gate, sources))
+
+    # ── (10) The disclosures A17 Pin 5 requires, each present exactly once ──────────────
+    for tag in HARDNEG_DISCLOSURE_TAGS:
+        want(
+            sum(1 for line in lines if line.startswith(tag)) == 1,
+            f"the report does not carry {tag} exactly once",
+        )
+    want(
+        any(
+            "never replacing it" in line and "two_stage_precision_v2.json" in line for line in lines
+        ),
+        "the report does not say it is reported beside v2, never replacing it (A16 Pin 5)",
+    )
+    want(
+        any(HARDNEG_UNDERPOWERED_STATEMENT in line for line in lines)
+        == (expected_class == "underpowered"),
+        "the disclosures' underpowered sentence does not match the power class",
+    )
+
+    # ── (11) The round-0 cross-tab (A17 Pin 5(b)) is internally a cross-tab ─────────────
+    n_over = cross.get("n_overlapping")
+    n_cand = cross.get("n_overlapping_with_twin_candidate")
+    n_pay = cross.get("n_overlapping_with_twin_payload")
+    want(
+        _is_count(cross.get("n_graded_negatives"))
+        and cross.get("n_graded_negatives") == population_g.get("n_negatives")
+        and _is_count(n_over)
+        and _is_count(n_cand)
+        and _is_count(n_pay)
+        and n_cand <= n_pay <= n_over <= cross.get("n_graded_negatives"),
+        f"the round-0 cross-tab ({n_cand!r} with a twin candidate, {n_pay!r} with a payload, of "
+        f"{n_over!r} overlapping, of {cross.get('n_graded_negatives')!r}) is not nested in the "
+        "graded negatives",
+    )
+    statuses = _block(cross, "orthogonal_status")
+    want(
+        set(statuses) == {"orthogonal_pass", "no_orthogonal_pass", "undetermined"}
+        and _counts_sum(statuses) == n_over,
+        f"the orthogonal-status split {statuses!r} does not partition the {n_over!r} overlapping "
+        "graded negatives",
+    )
+    per_criterion = _block(cross, "per_criterion_over_overlapped_candidates")
+    n_overlapped = cross.get("n_round0_candidates_overlapped")
+    want(
+        set(per_criterion) == set(ROUND0_CRITERIA)
+        and _is_count(n_overlapped)
+        and all(_counts_sum(per_criterion.get(name)) == n_overlapped for name in ROUND0_CRITERIA)
+        and _is_count(n_over)
+        and (n_overlapped > 0) == (n_over > 0),
+        "the per-criterion status counts do not each cover the overlapped round-0 candidates",
+    )
+
+    # ── (12) The per-positive delta from v2 covers every positive, per arm and system ────
+    delta = _block(report, "v2_positive_delta")
+    n_positives = population_g.get("n_positives")
+    want(
+        delta.get("n_positives") == n_positives
+        and set(_block(delta, "by_arm")) == set(arms)
+        and all(
+            _block(_block(_block(delta, "by_arm"), arm), system).get("n_compared") == n_positives
+            and _counts_sum(
+                {
+                    k: _block(_block(_block(delta, "by_arm"), arm), system).get(k)
+                    for k in ("n_identical", "n_changed")
+                }
+            )
+            == n_positives
+            for arm in arms
+            for system in SYSTEMS
+        ),
+        "the per-positive delta from v2 does not compare every graded positive on every arm",
+    )
+
+    # ── (13) Composition (A17 Pin 5(d)) partitions the minted negatives ─────────────────
+    composition = _block(report, "composition")
+    graded_c, beside_c = _block(composition, "graded"), _block(composition, "beside")
+    want(
+        graded_c.get("n") == gated_counts["n_negatives"]
+        and beside_c.get("n") == n_beside
+        and all(
+            _counts_sum(block.get(key)) == block.get("n")
+            for block in (graded_c, beside_c)
+            for key in ("by_sub_class", "by_assembly", "by_clade")
+        ),
+        "the composition tables do not partition the graded and the beside negatives",
+    )
+    want(
+        _is_count(n_beside)
+        and _is_count(counts["n_negatives"])
+        and counts["n_negatives"] > 0
+        and _close(composition.get("d4_share"), _ratio(n_beside, counts["n_negatives"])),
+        f"composition.d4_share {composition.get('d4_share')!r} is not the D4-context share of the "
+        "minted negatives",
+    )
+
+    # ── (14) A17 Pin 3's pins: seed 42, D7's 100:1, and v2's recorded locus knobs ───────
+    knobs = _block(sources, "rule_knobs")
+    v2_knobs = _block(_block(report, "v2_positive_delta").get("source"), "rule_knobs")
+    rule = _block(report, "rule")
+    want(
+        rule.get("seed") == 42
+        and not isinstance(rule.get("seed"), bool)
+        and gate.get("decoy_prevalence") == DECOY_PREVALENCE
+        and not isinstance(gate.get("decoy_prevalence"), bool),
+        f"the A17 grade ran at seed {rule.get('seed')!r} and {gate.get('decoy_prevalence')!r}:1; "
+        f"A17 Pin 3 pins seed 42 at D7's {DECOY_PREVALENCE}:1",
+    )
+    want(
+        bool(knobs)
+        and bool(v2_knobs)
+        and {k: v for k, v in knobs.items() if k != "threshold"}
+        == {k: v for k, v in v2_knobs.items() if k != "threshold"},
+        f"the locus knobs {dict(knobs)!r} are not v2's recorded {dict(v2_knobs)!r} (A17 Pin 3)",
+    )
+
+    # ── (15) The block scheme (A17 Pin 3: positive cluster, negative assembly) ──────────
+    blocks = _block(report, "blocks")
+    want(
+        blocks.get("n_blocks") == population_g.get("n_blocks")
+        and blocks.get("n_shared") == 0
+        and blocks.get("positive_blocks_are_clusters") is True
+        and blocks.get("negative_blocks_are_assemblies") is True,
+        f"the resampling blocks ({blocks!r}) are not positive clusters and negative assemblies "
+        f"over the gated arm's {population_g.get('n_blocks')!r} blocks",
     )
     return problems
 
@@ -3110,7 +4946,10 @@ def precision_input_problems(
       recorded for it;
     * the power counts, the familiarity baseline and the non-gated scores are re-derived
       from that item table with the same functions the producer used. ``items`` passes the
-      table in memory, and is otherwise read from ``sources.items``.
+      table in memory, and is otherwise read from ``sources.items``;
+    * at schema ≥ 1.3 (ADR-0005 A17) the committed pool report is held to its OWN validator,
+      the interim power record to :func:`power_problems`, and every A17 block (beside gate,
+      round-0 cross-tab, v2 delta, composition, block scheme) is re-derived from the items.
 
     A pre-1.2 report records no interim digests, so this returns ``[]`` for it. v1's
     bindings are its committed items file and P3-17a's fixed-path ``CANONICAL_SOURCES``.
@@ -3174,6 +5013,8 @@ def precision_input_problems(
                 f"arm {arm!r}: the recorded Stage-2 work-list coverage does not re-derive from "
                 f"{stage2_rel} and {payload_rel} ({derived!r})"
             )
+    if version >= HARDNEG_REPORT_SCHEMA:
+        problems.extend(_hardneg_file_problems(report, root, present))
 
     items_rel = sources.get("items")
     provenance_inputs = _block(report, "provenance").get("inputs")
@@ -3192,6 +5033,9 @@ def precision_input_problems(
                 return [*problems, f"the item table {items_rel} cannot be read: {error!r}"]
     if items is None:
         return problems
+
+    if version >= HARDNEG_REPORT_SCHEMA:
+        return [*problems, *_hardneg_item_problems(report, items)]
 
     # Re-derived from the item table with the producer's own functions. Re-running the
     # bootstrap is not needed: `precision_problems` already re-derives every published
@@ -3218,6 +5062,72 @@ def precision_input_problems(
                 f"arm {arm!r}: the familiarity AUPRC {observed!r} does not re-derive from the "
                 f"item table ({entry['auprc']!r})"
             )
+    return problems
+
+
+def _hardneg_file_problems(
+    report: Mapping[str, Any], root: Path, present: Mapping[str, bool]
+) -> list[str]:
+    """The two A17 files a 1.3 report rests on, each held to its OWN validator.
+
+    The pool report is committed, so it is checked wherever the report is (CI included), and
+    one that fails ``hardneg_pool.validate_report`` refuses the grade built on it. The power
+    record is interim, so it is re-read only where it is on disk and still hashes as recorded.
+    """
+    problems: list[str] = []
+    sources = _block(report, "sources")
+    for key in ("hardneg_pool", "hardneg_pool_census"):
+        pool_rel = sources.get(key)
+        if not present.get(str(pool_rel)):
+            continue
+        try:
+            pool = read_json(root / pool_rel)
+        except (OSError, ValueError) as error:
+            problems.append(f"the pool report {pool_rel} cannot be read: {error!r}")
+        else:
+            problems.extend(pool_validator_problems(pool))
+    for key in ("hardneg_power", "hardneg_power_draw"):
+        rel = sources.get(key)
+        if not present.get(str(rel)):
+            continue
+        try:
+            power = read_json(root / rel)
+        except (OSError, ValueError) as error:
+            problems.append(f"the power record {rel} cannot be read: {error!r}")
+            continue
+        problems.extend(f"the power record {rel}: {problem}" for problem in power_problems(power))
+        if key == "hardneg_power" and (
+            not isinstance(power, Mapping) or power.get("P") != _block(report, "power").get("P")
+        ):
+            problems.append(f"power.P is not the P the power record {rel} decided on")
+    return problems
+
+
+def _hardneg_item_problems(report: Mapping[str, Any], items: Mapping[str, Any]) -> list[str]:
+    """Every 1.3 block the report cannot re-derive alone, re-derived from the item table."""
+    problems: list[str] = []
+    try:
+        prevalence = int(report["gate"]["decoy_prevalence"])
+        derived = {
+            "power.by_arm": power_block(items)["by_arm"],
+            "beside_gate": beside_block(items, decoy_prevalence=prevalence),
+            "round0_crosstab": round0_crosstab(items),
+            "v2_positive_delta": v2_delta_summary(items),
+            "composition": hardneg_composition(items),
+            "blocks": block_scheme(items),
+        }
+        if report.get("familiarity_status") == "supplied":
+            derived["familiarity_baseline.by_arm"] = familiarity_baseline(
+                items, report["arms"], decoy_prevalence=prevalence
+            )["by_arm"]
+    except (KeyError, TypeError, ValueError, AttributeError) as error:
+        return [f"the item table cannot be re-derived: {error!r}"]
+    for path, block in derived.items():
+        node: Any = report
+        for key in path.split("."):
+            node = node.get(key) if isinstance(node, Mapping) else None
+        if json_safe(block) != node:
+            problems.append(f"{path} does not re-derive from the item table")
     return problems
 
 
@@ -3252,6 +5162,30 @@ V2_FOLD_ARGS: tuple[str, ...] = (
     "familiarity",
     "rule_knobs",
 )
+#: ``fold`` arguments only an ADR-0005 A17 manifest takes; each is refused for any other.
+HARDNEG_ONLY_FOLD_ARGS: tuple[str, ...] = (
+    "hardneg_pool",
+    "hardneg_pool_census",
+    "hardneg_power",
+    "hardneg_power_draw",
+    "v2_items",
+    "round0_manifest",
+    "round0_spare_inputs",
+    "genome_dir",
+)
+#: What an A17 fold requires. The A15 screen and post-mint reports are NOT among them and are
+#: refused: A17's screens live in the pool report, and a native window has no junction or
+#: insert for a post-mint assertion to police (A17 Pin 2). The familiarity scores are optional
+#: (A17 Pin 3: "if the inputs are supplied"); ``--hardneg-power-draw`` is required for a census
+#: record only, which :func:`attach_hardneg_inputs` checks.
+HARDNEG_REQUIRED_FOLD_ARGS: tuple[str, ...] = (
+    *(name for name in V2_FOLD_ARGS if name not in ("host_screen", "postmint", "familiarity")),
+    *(
+        name
+        for name in HARDNEG_ONLY_FOLD_ARGS
+        if name not in ("hardneg_power_draw", "hardneg_pool_census")
+    ),
+)
 
 
 def refuse_table_scored_by_another_run(
@@ -3285,23 +5219,22 @@ def refuse_table_scored_by_another_run(
             )
 
 
-def attach_v2_inputs(folded: dict[str, Any], args: argparse.Namespace) -> None:
-    """Record every v2 input on the folded table with its repo-relative path and sha256.
+def _binder(digests: dict[str, str]) -> Any:
+    """``bind(path) -> (repo-relative path, sha256)``, recording each digest in ``digests``."""
 
-    It reads, copies and hashes, and never re-types a value (ADR-0005 A15 Pin 6). The files
-    are: both arms' Stage-1 logits (hashed only), Stage-2 logits (identity + shard layout)
-    and payload manifests (per-item payload counts → power); the GATE-2 temperature source;
-    the host-screen and post-mint reports; the familiarity scores; and the D3 locus knobs.
-    Cross-file refusals (each a different run's file standing in) are raised here, before
-    anything is written.
-    """
-    digests: dict[str, str] = {}
-
-    def bind(path: str) -> tuple[str, str]:
+    def bind(path: str | Path) -> tuple[str, str]:
         rel = repo_relative(path)
         digests[rel] = refs.content_sha256(path)
         return rel, digests[rel]
 
+    return bind
+
+
+def _bind_model_inputs(folded: dict[str, Any], args: argparse.Namespace, bind: Any) -> str:
+    """The inputs every gated-subset fold binds (A15 Pin 6, reused by A17): returns the
+    benchmark digest. Both arms' tables, Stage-1 logits, payload manifests (→ per-item payload
+    counts) and Stage-2 logits (→ identity, and the per-row same-run refusal), then the GATE-2
+    temperature source."""
     source = folded["source"]
     _, bench_sha = bind(args.benchmark)
     bind(args.twin_table)
@@ -3335,6 +5268,46 @@ def attach_v2_inputs(folded: dict[str, Any], args: argparse.Namespace) -> None:
         sha256=digest,
         temperature=read_temperature(args.temperature_source),
     )
+    return bench_sha
+
+
+def _bind_rule_knobs(folded: dict[str, Any], args: argparse.Namespace) -> dict[str, float | int]:
+    knobs = parse_rule_knobs(args.rule_knobs)
+    if knobs["threshold"] != args.stage1_threshold:
+        raise PrecisionError(
+            f"--rule-knobs threshold={knobs['threshold']!r} but --stage1-threshold is "
+            f"{args.stage1_threshold!r}; the candidate tables were built under one of them"
+        )
+    folded["source"]["rule_knobs"] = knobs
+    return knobs
+
+
+def _bind_familiarity(
+    folded: dict[str, Any], args: argparse.Namespace, bind: Any, bench_sha: str
+) -> None:
+    rel, digest = bind(args.familiarity)
+    folded["source"]["familiarity"] = rel
+    folded["familiarity"] = {
+        "path": rel,
+        "sha256": digest,
+        **attach_familiarity(folded, read_json(args.familiarity), benchmark_sha256=bench_sha),
+    }
+
+
+def attach_v2_inputs(folded: dict[str, Any], args: argparse.Namespace) -> None:
+    """Record every v2 input on the folded table with its repo-relative path and sha256.
+
+    It reads, copies and hashes, and never re-types a value (ADR-0005 A15 Pin 6). The files
+    are: both arms' Stage-1 logits (hashed only), Stage-2 logits (identity + shard layout)
+    and payload manifests (per-item payload counts → power); the GATE-2 temperature source;
+    the host-screen and post-mint reports; the familiarity scores; and the D3 locus knobs.
+    Cross-file refusals (each a different run's file standing in) are raised here, before
+    anything is written.
+    """
+    digests: dict[str, str] = {}
+    bind = _binder(digests)
+    source = folded["source"]
+    bench_sha = _bind_model_inputs(folded, args, bind)
     rel, digest = bind(args.host_screen)
     source["host_screen"] = rel
     folded["screen"] = screen_record(read_json(args.host_screen), path=rel, sha256=digest)
@@ -3346,20 +5319,190 @@ def attach_v2_inputs(folded: dict[str, Any], args: argparse.Namespace) -> None:
         raise PrecisionError(
             f"the post-mint screen asserts on benchmark {recorded!r}, not this one ({bench_sha!r})"
         )
-    rel, digest = bind(args.familiarity)
-    source["familiarity"] = rel
-    folded["familiarity"] = {
+    _bind_familiarity(folded, args, bind, bench_sha)
+    _bind_rule_knobs(folded, args)
+    source["benchmark_sha256"] = bench_sha
+    source["interim_sha256"] = dict(sorted(digests.items()))
+
+
+def attach_hardneg_inputs(folded: dict[str, Any], args: argparse.Namespace) -> None:
+    """Record every A17 input on the folded table with its repo-relative path and sha256.
+
+    The model inputs and the temperature source are bound exactly as for v2. A17 then adds,
+    each refused rather than absorbed when it does not bind to THIS benchmark:
+
+    * the pool report — the digest the benchmark was minted from, and clean under the pool's
+      OWN validator (→ the population block);
+    * the A17 Pin 4 power record — counted on this benchmark, valid under
+      :func:`power_problems`, NOT an ``extend_census`` decision (the DAG stops there), and, on
+      the graded τ, counted on this fold's own twin payload manifest. A census record also binds
+      the draw record that opened the census (``--hardneg-power-draw``);
+    * the committed v2 item table → each positive's score delta (A17 Pin 3);
+    * the round-0 manifest, its spare-rule inputs and the FASTA record ids of every benchmark
+      host that carries a round-0 candidate → each negative's round-0 overlaps (Pin 5(b));
+    * the familiarity scores, when supplied (Pin 3: "if the inputs are supplied").
+    """
+    from tbox_finder.mining import synteny  # lazy: torch-free, light
+
+    digests: dict[str, str] = {}
+    bind = _binder(digests)
+    source = folded["source"]
+    bench_sha = _bind_model_inputs(folded, args, bind)
+    knobs = _bind_rule_knobs(folded, args)
+    minted = folded["benchmark"]["source"]
+
+    pools = [("hardneg_pool", args.hardneg_pool)]
+    if args.hardneg_pool_census:
+        pools.append(("hardneg_pool_census", args.hardneg_pool_census))
+    minted_pools = minted.get("hardneg_pools")
+    if not isinstance(minted_pools, list) or len(minted_pools) != len(pools):
+        raise PrecisionError(
+            f"{len(pools)} pool report(s) given, but the benchmark was minted from "
+            f"{len(minted_pools) if isinstance(minted_pools, list) else 'no'} pool(s)"
+        )
+    records = []
+    for (key, path), entry, mode in zip(pools, minted_pools, POWER_STAGES, strict=False):
+        rel, digest = bind(path)
+        if not isinstance(entry, Mapping) or digest != entry.get("sha256"):
+            raise PrecisionError(
+                f"--{key.replace('_', '-')} hashes {digest[:12]}…, but the benchmark was minted "
+                f"from {entry.get('sha256') if isinstance(entry, Mapping) else None!r}"
+            )
+        pool = read_json(path)
+        found = pool_validator_problems(pool)
+        if found:
+            raise PrecisionError(f"the pool report {rel} fails its own validator: {found}")
+        if _block(pool, "config").get("mode") != mode:
+            raise PrecisionError(f"--{key.replace('_', '-')} is not a {mode}-mode pool report")
+        source[key] = rel
+        records.append(pool_population_record(pool, path=rel, sha256=digest, n_problems=0))
+    folded["population"] = population_block(records)
+
+    rel, digest = bind(args.hardneg_power)
+    power = read_json(args.hardneg_power)
+    found = power_problems(power)
+    if found:
+        raise PrecisionError(f"the power record {rel} is not valid: {found}")
+    if power["benchmark"]["sha256"] != bench_sha:
+        raise PrecisionError(
+            f"the power record counted P on benchmark {power['benchmark']['sha256'][:12]}…, not "
+            f"this one ({bench_sha[:12]}…)"
+        )
+    if power["decision"] == POWER_EXTEND:
+        raise PrecisionError(
+            f"the power record decided {POWER_EXTEND} (P = {power['P']} < N_min = {N_MIN}); A17 "
+            "Pin 4 computes no Stage-2 score and no AUPRC before the census"
+        )
+    if knobs["threshold"] == HARDNEG_GRADED_THRESHOLD and (
+        power["payloads"]["sha256"] != digests.get(source["twin_payloads"])
+    ):
+        raise PrecisionError(
+            "the power record counted P on a different payload manifest than this fold's twin "
+            f"τ = {HARDNEG_GRADED_THRESHOLD} work list"
+        )
+    if power["stage"] != folded["population"]["stage"]:
+        raise PrecisionError(
+            f"the power record was counted at stage {power['stage']!r}, but the pools given make "
+            f"this a {folded['population']['stage']!r} benchmark"
+        )
+    source["hardneg_power"] = rel
+    folded["power"] = {
         "path": rel,
         "sha256": digest,
-        **attach_familiarity(folded, read_json(args.familiarity), benchmark_sha256=bench_sha),
+        **{
+            key: power.get(key)
+            for key in ("P", "stage", "decision", "extension", "n_min", "n_graded_negatives")
+        },
+        "draw": None,
     }
-    knobs = parse_rule_knobs(args.rule_knobs)
-    if knobs["threshold"] != args.stage1_threshold:
+    if power["stage"] == "census":
+        if not args.hardneg_power_draw:
+            raise PrecisionError(
+                "a census power record needs --hardneg-power-draw, the draw record that opened it"
+            )
+        draw_rel, draw_digest = bind(args.hardneg_power_draw)
+        draw = read_json(args.hardneg_power_draw)
+        found = power_problems(draw)
+        if found or draw.get("decision") != POWER_EXTEND:
+            raise PrecisionError(
+                f"the draw record {draw_rel} did not validly decide {POWER_EXTEND}: {found}"
+            )
+        if _block(power, "draw").get("sha256") != draw_digest:
+            raise PrecisionError(
+                f"the census record names draw {_block(power, 'draw').get('sha256')!r}, not "
+                f"{draw_rel} ({draw_digest[:12]}…)"
+            )
+        source["hardneg_power_draw"] = draw_rel
+        folded["power"]["draw"] = {"path": draw_rel, "sha256": draw_digest}
+    elif args.hardneg_power_draw:
+        raise PrecisionError("--hardneg-power-draw is given, but the power record is a draw's")
+
+    rel, digest = bind(args.v2_items)
+    v2_items = read_json(args.v2_items)
+    n_positives = attach_v2_delta(folded, v2_items)
+    # A17 Pin 3: "the locus knobs are v2's recorded values". Read from the committed v2 item
+    # table that recorded them, not restated; τ is the one knob each fold sets for itself.
+    v2_knobs = _block(_block(v2_items, "source"), "rule_knobs")
+    if not v2_knobs or {k: v for k, v in knobs.items() if k != "threshold"} != {
+        k: v for k, v in v2_knobs.items() if k != "threshold"
+    }:
         raise PrecisionError(
-            f"--rule-knobs threshold={knobs['threshold']!r} but --stage1-threshold is "
-            f"{args.stage1_threshold!r}; the candidate tables were built under one of them"
+            f"the locus knobs {dict(knobs)!r} are not v2's recorded {dict(v2_knobs)!r} "
+            "(ADR-0005 A17 Pin 3)"
         )
-    source["rule_knobs"] = knobs
+    source["v2_items"] = rel
+    folded["v2_items"] = {
+        "path": rel,
+        "sha256": digest,
+        "n_positives": n_positives,
+        "rule_knobs": dict(v2_knobs),
+    }
+
+    m_rel, m_digest = bind(args.round0_manifest)
+    s_rel, s_digest = bind(args.round0_spare_inputs)
+    manifest = read_json(args.round0_manifest)
+    spare = read_json(args.round0_spare_inputs)
+    ids = sorted(str(row["candidate_id"]) for row in manifest["candidates"])
+    if ids != sorted(str(row["candidate_id"]) for row in spare["rows"]):
+        raise PrecisionError(
+            "the round-0 spare-rule inputs do not cover exactly the round-0 manifest's candidates"
+        )
+    negatives = [item for item in folded["items"] if int(item["label"]) == 0]
+    hosts = {str(_hardneg_field(item, "assembly")) for item in negatives}
+    carrying = sorted(
+        hosts & {str(row["accession"]).partition(":c")[0] for row in manifest["candidates"]}
+    )
+    contig_ids: dict[str, list[str]] = {}
+    genomes: dict[str, dict[str, Any]] = {}
+    for assembly in carrying:
+        fasta = Path(args.genome_dir) / f"{assembly}.fna"
+        g_rel, g_digest = bind(fasta)
+        contig_ids[assembly] = synteny.load_contig_ids(str(fasta))
+        genomes[assembly] = {
+            "path": g_rel,
+            "sha256": g_digest,
+            "n_contigs": len(contig_ids[assembly]),
+        }
+    overlaps = round0_overlaps(negatives, manifest, spare["rows"], contig_ids)
+    for item in negatives:
+        item["round0_overlap"] = overlaps[str(item["contig_id"])]
+    source["round0_manifest"] = m_rel
+    source["round0_spare_inputs"] = s_rel
+    folded["round0"] = {
+        "manifest": {"path": m_rel, "sha256": m_digest, "n_candidates": len(ids)},
+        "spare_inputs": {"path": s_rel, "sha256": s_digest, "n_rows": len(spare["rows"])},
+        "n_benchmark_hosts_carrying_a_candidate": len(carrying),
+        "n_candidates_on_benchmark_hosts": sum(
+            1 for row in manifest["candidates"] if str(row["accession"]).partition(":c")[0] in hosts
+        ),
+        "genomes": genomes,
+        "relaxed_architecture": (
+            "no committed per-candidate source: the P3-15′ architecture_status.json supply lives "
+            "on cluster scratch and reports/p3/remine_round_report.json records only its digest"
+        ),
+    }
+    if args.familiarity:
+        _bind_familiarity(folded, args, bind, bench_sha)
     source["benchmark_sha256"] = bench_sha
     source["interim_sha256"] = dict(sorted(digests.items()))
 
@@ -3371,8 +5514,12 @@ def _cmd_fold(args: argparse.Namespace) -> int:
     # for the overwrite it is meant to prevent ([[guard-runs-after-what-it-guards]]). The same
     # guard already protects five two_stage entrypoints; these were its unguarded siblings.
     refuse_v1_output(args.out)
+    benchmark = read_json(args.benchmark)
+    hardneg = manifest_is_hardneg(benchmark)
+    if hardneg:
+        refuse_hardneg_output(args.out)  # A17 Pin 5: no v1 OR v2 path, before any work
     folded = fold_arms(
-        read_json(args.benchmark),
+        benchmark,
         {"twin": read_table(args.twin_table), "production": read_table(args.production_table)},
     )
     folded["source"] = {
@@ -3384,7 +5531,34 @@ def _cmd_fold(args: argparse.Namespace) -> int:
         "stage1_threshold": args.stage1_threshold,
     }
     given = {name: getattr(args, name, None) for name in V2_FOLD_ARGS}
-    if folded_declares_gated_subset(folded):
+    given_hardneg = {name: getattr(args, name, None) for name in HARDNEG_ONLY_FOLD_ARGS}
+    if hardneg:
+        everything = {**given, **given_hardneg}
+        missing = sorted(
+            f"--{name.replace('_', '-')}"
+            for name in HARDNEG_REQUIRED_FOLD_ARGS
+            if not everything.get(name)
+        )
+        if missing:
+            raise PrecisionError(
+                f"the manifest is ADR-0005 A17's hard-negative benchmark, so the fold needs "
+                f"{missing}; a 1.3 report binds every one of them"
+            )
+        forbidden = sorted(
+            f"--{name.replace('_', '-')}" for name in ("host_screen", "postmint") if given[name]
+        )
+        if forbidden:
+            raise PrecisionError(
+                f"{forbidden} are A15's v2 inputs; an A17 fold binds the pool report instead "
+                "(its screens) and has no post-mint assertion to bind (A17 Pin 2)"
+            )
+        attach_hardneg_inputs(folded, args)
+    elif any(given_hardneg.values()):
+        raise PrecisionError(
+            f"A17 inputs {sorted(name for name, value in given_hardneg.items() if value)} were "
+            "given for a manifest that is not ADR-0005 A17's hard-negative benchmark"
+        )
+    elif folded_declares_gated_subset(folded):
         missing = sorted(
             f"--{name.replace('_', '-')}" for name, value in given.items() if not value
         )
@@ -3463,6 +5637,9 @@ def _cmd_report(args: argparse.Namespace) -> int:
     """LEG 2 (torch-free, CI-runnable): the item table → the graded report."""
     refuse_v1_output(args.out)  # A15 Pin 5, before the bootstrap, not at the write
     folded = read_json(args.items)
+    hardneg = folded_is_hardneg(folded)
+    if hardneg:
+        refuse_hardneg_output(args.out)  # A17 Pin 5: no v1 OR v2 path, before the bootstrap
     sources = {**folded.get("source", {}), "items": repo_relative(args.items)}
     report = precision_gain(
         folded,
@@ -3474,7 +5651,7 @@ def _cmd_report(args: argparse.Namespace) -> int:
         seed=args.seed,
         sources=sources,
     )
-    gated_schema = report["schema_version"] == SCHEMA_VERSION
+    gated_schema = report["schema_version"] in (SCHEMA_VERSION, HARDNEG_SCHEMA_VERSION)
     if args.sensitivity:
         points = []
         for spec in args.sensitivity:
@@ -3509,7 +5686,10 @@ def _cmd_report(args: argparse.Namespace) -> int:
             )
         )
     report["provenance"] = build_provenance(
-        rule="workflow/rules/integration.smk :: precision_comparison",
+        rule=(
+            "workflow/rules/integration.smk :: precision_comparison"
+            + ("_hardneg" if hardneg else "")
+        ),
         script=GENERATED_BY,
         inputs=[args.items],
         env_lock=ENV_LOCK,
@@ -3524,6 +5704,95 @@ def _cmd_report(args: argparse.Namespace) -> int:
     # (interim files are absent from a CI checkout, so this is the run that can see them).
     extra = precision_input_problems(report, items=folded) if gated_schema else []
     return route_report(report, args.out, extra_problems=extra)
+
+
+def _cmd_power(args: argparse.Namespace) -> int:
+    """LEG 0 (torch-free): A17 Pin 4's power gate, from the twin's τ = 0.5 payloads alone.
+
+    Runs after Stage-1 and the payload leg and BEFORE any Stage-2 score exists. Exit 0 for
+    ``grade`` and ``underpowered`` (the census's verdict is still computed, as A13 does),
+    :data:`EXIT_EXTEND_CENSUS` for ``extend_census``, 3 when the record would not validate.
+    """
+    refuse_hardneg_output(args.out)  # before anything is read
+    if args.stage == "census" and not args.draw_power:
+        raise PrecisionError("--stage census needs --draw-power, the draw record that opened it")
+    draw = read_json(args.draw_power) if args.draw_power else None
+    record = hardneg_power(
+        read_json(args.benchmark),
+        read_json(args.twin_payloads)["payloads"],
+        stage=args.stage,
+        stage1_threshold=args.stage1_threshold,
+        benchmark_record={
+            "path": repo_relative(args.benchmark),
+            "sha256": refs.content_sha256(args.benchmark),
+        },
+        payloads_record={
+            "path": repo_relative(args.twin_payloads),
+            "sha256": refs.content_sha256(args.twin_payloads),
+        },
+        draw_power=draw,
+        draw_record=(
+            None
+            if draw is None
+            else {
+                "path": repo_relative(args.draw_power),
+                "sha256": refs.content_sha256(args.draw_power),
+            }
+        ),
+    )
+    problems = power_problems(record)
+    if problems:
+        print(f"REFUSED: {len(problems)} problem(s); nothing written")
+        for problem in problems:
+            print(f"  - {problem}")
+        return 3
+    write_json(args.out, record)
+    print(
+        f"wrote {args.out}: P = {record['P']} of {record['n_graded_negatives']} graded negatives "
+        f"reach a Stage-2 payload on the {GATED_ARM} arm (N_min {N_MIN}, stage {record['stage']}; "
+        f"{record['n_beside_with_payload']} of {record['n_beside']} beside): {record['decision']}"
+    )
+    return EXIT_EXTEND_CENSUS if record["decision"] == POWER_EXTEND else 0
+
+
+def _cmd_power_gate(args: argparse.Namespace) -> int:
+    """The DAG's stop: re-validate a power record and exit on its decision.
+
+    A separate leg so the power record itself survives an ``extend_census`` (Snakemake deletes
+    a failed job's outputs): the record is written by :func:`_cmd_power` under a masked exit,
+    and THIS leg is the one that fails. Its sentinel is written only for a decision that lets
+    the DAG proceed.
+    """
+    power = read_json(args.power)
+    problems = power_problems(power)
+    if problems:
+        print(f"REFUSED: {len(problems)} problem(s) in {args.power}")
+        for problem in problems:
+            print(f"  - {problem}")
+        return 3
+    print(
+        f"power gate: P = {power['P']} (N_min {N_MIN}) at stage {power['stage']}: "
+        f"{power['decision']}"
+    )
+    if power["decision"] == POWER_EXTEND:
+        print("STOP: A17 Pin 4 computes no Stage-2 score and no AUPRC before the census extension")
+        return EXIT_EXTEND_CENSUS
+    if args.out:
+        refuse_hardneg_output(args.out)
+        write_json(
+            args.out,
+            {
+                "kind": "hardneg_power_gate",
+                "power": {
+                    "path": repo_relative(args.power),
+                    "sha256": refs.content_sha256(args.power),
+                },
+                "P": power["P"],
+                "stage": power["stage"],
+                "decision": power["decision"],
+            },
+        )
+    return 0
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -3555,7 +5824,43 @@ def build_parser() -> argparse.ArgumentParser:
         "threshold=0.5,min_span=50,gap_merge=10,min_distinct_elements=2,flank=50,"
         "min_order_margin=1",
     )
+    # ADR-0005 A17 — the hard-negative inputs. Required together for an A17 manifest (with the
+    # model inputs above, minus the A15 screen and post-mint) and refused for any other.
+    hn = fold.add_argument_group("A17 inputs (ADR-0005 A17; hard-negative manifests only)")
+    hn.add_argument("--hardneg-pool", help="reports/p3/hardneg_pool.json (bound by sha256)")
+    hn.add_argument(
+        "--hardneg-pool-census", help="census only: the census-mode pool report beside the draw's"
+    )
+    hn.add_argument("--hardneg-power", help="the A17 Pin 4 power record (precision power)")
+    hn.add_argument("--hardneg-power-draw", help="census only: the draw record that opened it")
+    hn.add_argument("--v2-items", help="reports/p3/two_stage_precision_items_v2.json")
+    hn.add_argument("--round0-manifest", help="data/processed/mining/round0_fp_manifest.json")
+    hn.add_argument(
+        "--round0-spare-inputs",
+        help="data/processed/mining/round0_fp_spare_rule_inputs_v0.json (per-candidate status)",
+    )
+    hn.add_argument(
+        "--genome-dir", help="data/interim/production_genomes (FASTA record ids, round-0 bridge)"
+    )
     fold.set_defaults(func=_cmd_fold)
+
+    power = sub.add_parser(
+        "power", help="A17 Pin 4: the twin's τ 0.5 payloads -> P, N_min and the census decision"
+    )
+    power.add_argument("--benchmark", required=True)
+    power.add_argument("--twin-payloads", required=True)
+    power.add_argument("--stage1-threshold", type=float, required=True)
+    power.add_argument("--stage", required=True, choices=list(POWER_STAGES))
+    power.add_argument("--draw-power", default=None, help="census only: the draw's record")
+    power.add_argument("--out", required=True)
+    power.set_defaults(func=_cmd_power)
+
+    gate = sub.add_parser(
+        "power-gate", help="re-validate a power record; exit 5 on extend_census so the DAG stops"
+    )
+    gate.add_argument("--power", required=True)
+    gate.add_argument("--out", default=None, help="a sentinel, written only when the DAG proceeds")
+    gate.set_defaults(func=_cmd_power_gate)
 
     report = sub.add_parser("report", help="the item score table -> the graded P3-16 report")
     report.add_argument("--items", required=True)

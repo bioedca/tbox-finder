@@ -968,6 +968,7 @@ This resolves the "flagged, not resolved" paragraph of ADR-0006 A5 disclosure 1.
 - It is reported **beside** v2 and **never replaces v2's verdict**. The P3 exit record keeps *"A13 Pin 1: FAIL, underpowered, on v2"* whatever it shows.
 - Its design must say how its negatives are selected. Any pool selected on Stage-1 output tilts a two-stage-vs-Stage-1-only comparison by construction, so the selection rule and its disclosure are pinned with it.
 - Re-tuning the Stage-2 operating point and PRD §2.3's method-gate-failure branch remain **not** fallbacks (A15 Pin 5).
+- → **Pinned as A17** (P3-16″-hardneg, signed 2026-10-28): native §9.1 class-4 leaders on the 339 annotated admissible a2 hosts, drawn score-blind, with an N_min = 20 power floor and one pre-registered census extension.
 
 **Not amended.**
 - D17's margins and blinded freeze; D4; D5; D11; D12;
@@ -997,3 +998,113 @@ This resolves the "flagged, not resolved" paragraph of ADR-0006 A5 disclosure 1.
 
 ## Sign-off
 ☑ recorded 2026-10-28 (bioedca), CLAUDE.md §7 items 1, 2 + 4 — *"Sign as drafted"*. D17's *sustained* is pinned as point > m AND a paired two-sided 95 % block-bootstrap CI lower bound > m/2, for (c) and for each disjunct of (d); the margins are unchanged, and P3-18 stays NOT FIRED under the pin. A12 Pin 2's P3-16 consumer is corrected to the GATE-4 twin. A12 Pin 3's PRD §10.1 consistency claim is corrected, and PRD §10.1 is edited (GATE-4 via the eval twin; GATE-2's P3 half on the shipped Stage-2). The A13 Pin 1 fallback is a blind-pinned hard-negative benchmark amendment, built before P3 exits and reported beside v2. The operator was chosen over CI-lower > m (low power at P3-18's interval width) and over point > m AND CI-lower > 0 (D4's min-N-only fallback form). That choice was re-asked after the first recommendation's "mirrors D4" framing was found to be wrong. Keeping `calib/swap_check.py` unchanged was chosen over a schema-2 change now.
+
+## Amendment A17 — The A13 Pin 1 hard-negative amendment: genuine §9.1 class-4 leaders (5′UTR and tRNA-upstream windows) in native genomic context on the 339 annotated admissible hosts, drawn score-blind, screened as A15, with a pre-registered power floor and one pre-registered census extension; reported beside v2, never replacing it (P3-16″-hardneg, 2026-10-28)
+
+- **Status:** **Accepted (user sign-off 2026-10-28; CLAUDE.md §7 items 1 + 2, bioedca), "Sign as drafted".** The four design choices were taken on 2026-10-28 by bioedca, via AskUserQuestion, **before any A17 score existed**:
+  - source: *"Class-4 leaders, native"*;
+  - scale/power: *"100k draw + 1 census extension"*;
+  - D4-context leaders: *"Beside the gate"*;
+  - construction: *"Native genomic window"*.
+- **What it amends:** nothing already graded. It is the benchmark amendment A16 Pin 5 commissions. Its verdict is reported **beside** v2 (`reports/two_stage_precision_v2.json`), and the P3 exit record keeps *"A13 Pin 1: FAIL, underpowered, on v2"* whatever A17 shows.
+- **What it does not amend:** A13's statistic, its strict `>` and its "no CI bar" clause; A15's screens, thresholds and v2 artifacts; D7 (P4 GATE-1's benchmark; nothing here binds P4).
+- **Precedence:** its new values are the 100,000 draw, δ ∈ {0..256}, and N_min = 20 (taken by analogy to A1). None is PRD-delegated, so the PRD §2.3 carve-out is not invoked.
+
+**Context — why v2 has no power, and what a hard negative has to be.** On v2, 0 of 691 graded negatives drew a Stage-1 candidate on either arm (A15 Pin 5). Each of them is a screened flank window with a decoy insert spliced in. The leaks v1 carried were all RF00230-detectable host DNA, and v2's screen removed them, so what remains is background the scanner never confuses. PRD §9.1 names class 4 (5′UTR and tRNA-adjacent leader decoys) as *"the hardest false-positive context for a tRNA-sensing finder"*, and v2 has **no genuine class-4 record** (A15 Pin 4's disclosure). The synteny producer (P3-15′-c-ii) re-instantiated class 4 inside the annotated production corpus, but only on the 48 hosts where round-0 Stage-1 fired, at lengths matched to the Stage-1 candidates. **That draw is conditioned on Stage-1 output, so A17 does not reuse it.**
+
+**Pin 1 — the population and the selection rule.**
+
+- **Hosts.** The **339** NCBI-annotated admissible a2 hosts are the `annotated` rows of `reports/p3/annotation_supply.json` (`73390dc5…`). Their annotations are `data/interim/production_annotations/` (DVC `8fe38268….dir`, md5-verified against NCBI's published values), and their genomes are `data/interim/production_genomes/`. A host is in the set because NCBI publishes an annotation for it. That is a property of the assembly, not of any score.
+- **Features.** Every GFF3 `CDS` and `tRNA` feature, read through `gff3.iter_gff3_features`:
+  - one feature per (seqid, `ID`), at its 5′-most coordinate on its own strand;
+  - features marked `pseudo=true` are excluded.
+- **The item (native window).** The 1,024 nt on the feature's own strand, ending at the feature's first base + δ. Concretely, on `+` the window is `[s₀ − 1024 + δ, s₀ + δ)`; on `−` it is the mirror image, reverse-complemented to the feature's sense.
+  - δ ~ U{0, …, 256} is drawn per feature at seed 42, so at least 768 nt of upstream leader sit in real genomic context, including the start.
+  - A window that runs off its contig is ineligible.
+  - Identical (seqid, start, end, strand) windows are de-duplicated, keeping the first in sorted feature order.
+- **The draw.** From the sorted, de-duplicated eligible list (its length and sha256 are recorded), **100,000** windows are drawn uniformly without replacement at seed 42. The code pins the RNG call order: δ first, in sorted feature order, then the draw.
+- **The selection conditions on neither system's score.** Host membership comes from annotation availability, item placement from annotation coordinates plus a seeded δ, and admission from the score-blind screens of Pin 2. **Direction-of-bias disclosure (A16 Pin 5):** the rule has no construction tilt between Stage-1-only and two-stage. The residual tilts are disclosed as Pin 5 (b) and (c).
+
+**Pin 2 — the screens (A15 Pins 1–2, unchanged, plus one label partition), applied to the drawn windows in this order.**
+
+1. **Assembly-gap refusal:** a window containing any non-ACGT character, after upper-casing and U → T, is refused.
+2. **Fold screen = A15 Pin 1, unchanged.** It applies:
+   - the 32-mer rule on either strand against the four-source screened DNA union, including the `n_admitted = 9,059` reconstruction check;
+   - the coordinate rule on `masking.normalize_accession`.
+   A15's must-fire controls are re-run through the same invocation and must all fire. On these off-catalogue accessions the coordinate rule is expected to be near-vacuous; its count is published, not assumed.
+3. **Content screen = A15 Pin 2, unchanged.** It runs `infernal.run_cmsearch(cut_ga=False, score_threshold=10.0, search_space_mb=1.0, toponly=False, no_filters=False)` with RF00230 + TBDB001, refusing any hit ≥ 10.0 bits, plus the `GGTGGNACCGCG` motif on either strand.
+4. **D4-context partition (a label rule, not a refusal).** A surviving window is **D4-context** if any CDS on the same seqid, on either strand, overlapping `[start − 500, end + 500)` names a D4 class. "Names a D4 class" means `synteny.classify_gene_identity(…) ∈ synteny.PASSING_CLASSES`, with the 500 bp taken from ADR-0006 D4's window. The rationale is that most T-box-regulated genes are aaRS, with amino-acid biosynthesis genes and transporters the other main groups [Vitreschak et al. 2008, PMID:18359782, DOI:10.1261/rna.819308; Gutiérrez-Preciado et al. 2009, PMID:19258532, DOI:10.1128/MMBR.00026-08 (accessed 2026-10-28)]. A positive hit in a D4-context window may therefore be a real, CM-invisible T-box. D4-context windows are **minted, scored and reported beside the graded denominator, never inside it**, as A15 Pin 4 did for the leader decoy.
+
+   The **graded negatives** are the drawn windows that pass steps 1–3 and are not D4-context. Every refusal is counted per rule and per sub-class (CDS-upstream versus tRNA-upstream).
+- **The post-mint assertion (A15 Pin 3) has no junction or insert to police here.** A native window's screened bytes **are** its scored bytes, and that equality is asserted by sha256 per item. The filter-off sensitivity gap D2 names is covered by a **score-blind seeded audit**: 1,000 graded windows (seed 42) searched at `--max -T 0`, read against `host_screen.POSTMINT_THRESHOLD_BITS` (RF00230 ≥ 20.0, TBDB001 ≥ 12.0) and the N3 matched-null floor (`reports/p3/postmint_noise_floor.json`). A hit at or above threshold is a label-validity defect found score-blind, and **A15 Pin 3's §7 stop is its only remedy**. Sub-threshold hits are published as `noise_residue`.
+
+**Pin 3 — the statistic and arms (A13 Pin 1, unchanged).**
+
+- **Graded statistic:** `metrics.average_precision_reweighted` at D7's **100:1**, with λ = 100 · n_pos / n_graded_neg. Two-stage AUPRC must be **strictly** greater than Stage-1-only AUPRC, both defined.
+- **Arm, seed and Stage-1 τ:** the graded arm is the **twin** (`stage1_gate4_twin`) at seed 42. Stage-1 τ = **0.5** and the locus knobs are v2's recorded values. Stage-2 is `stage2_rinalmo/aux1.0_lr1e-4`, with A15 Pin 6's identity fields.
+- **Positives:** v2's **1,201** graded positive windows (`benchmark_v2.json`).
+- **Everything is re-scored in A17's own run**, with its shard layout recorded, because Stage-2 logits depend on batch composition (A15 Pin 6). v2's positive scores are not reused, and the per-positive score delta from v2 is published.
+- **Reported, not graded:** the production arm; A13 Pin 2's matched-recall grid and the τ 0.7 / 0.9 reads; A13 Pin 3's 10:1 → 10⁴:1 sweep; the A15 Pin 7(b) familiarity baseline; and block-bootstrap CIs, with positive cluster and negative assembly as the blocks (adjacent leaders share DNA, so items are not independent). Per A13 Pin 4, **no CI bar** applies.
+
+**Pin 4 — the power clause and the one extension.**
+
+- **P** = the number of graded negatives with ≥ 1 **Stage-2 payload** on the twin arm. It is score-blind with respect to Stage-2: payloads are built from Stage-1 candidates alone.
+- **N_min = 20**, taken by analogy to A1's `MIN_REAL_HOMOLOG_N = 20` in its primary sense (below it, a cell is reported-not-gated). It is a new A17 value, not a delegated one.
+- **Order, enforced by the DAG:** Stage-1 runs on the draw first, and P is computed. **No Stage-2 score and no AUPRC is computed before the extension decision.**
+  - If **P ≥ 20**: Stage-2 runs and the report is graded.
+  - If **P < 20**: **one** extension to the **census** follows: every remaining eligible window, through the same Pins 1–3. It runs on SLURM `gpu` after a §9.3 ack (content screen ≈ 100 CPU-h; twin Stage-1 ≈ 3.3 GPU-h at 67.68 win/s/GPU, A9). The decision reads P alone and changes only the population's scale, never which drawn items are kept. P is recomputed on the census.
+  - If the census still gives **P < 20**: the verdict is computed exactly as A13 does, and the report adds `verdict_class: "underpowered"` with the sentence *"fewer than 20 graded negatives reached Stage-2; the hard-negative benchmark lacks power to test Stage-2"*. README and the manuscript then say so, in A15 Pin 5's words.
+  - There is **no second extension**, and no item is dropped or relabelled after any score is seen (A15 Pin 5).
+- **Sizing basis (an existing published number, not an A17 score):** round 0 found 941 production Stage-1 false candidates in 3,630,683 a2 windows (A10, τ = 0.9), ≈ 2.6 × 10⁻⁴ per window, so roughly 26 per 100,000 before screens. The twin at τ = 0.5 and the leader context may run higher or lower. The power clause exists because this is not known.
+
+**Pin 5 — what A17 records and discloses.**
+
+- **Records.** The report is schema **1.3**, and its new clauses are gated on `schema_version ≥ 1.3`, so v1 (1.1) and v2 (1.2) keep passing byte-unchanged. It records:
+  - the population block: host count and digests, feature counts, the eligible-list length and sha256, the draw, δ;
+  - the per-rule refusals and the must-fire controls;
+  - the D4 partition, the audit and its noise residue;
+  - the power block: P, N_min, and an extension record of `{triggered, P_draw, P_final}`;
+  - every interim input's sha256 and the selection string.
+- **Paths, none of them a v1 or v2 path:**
+  - `reports/p3/hardneg_pool.json`;
+  - `data/interim/p3_16/hardneg_{benchmark.json, stage1_{arm}.npz, payloads_{arm}_*.json, stage2_{arm}.json}`;
+  - `reports/two_stage_precision_hardneg.json`, plus `reports/p3/two_stage_precision_items_hardneg.json` and the τ annexes;
+  - `figures/integration/two_stage_precision_hardneg.png`.
+- **Disclosures, not fixes:**
+  - **(a) CM circularity,** as A15 Pin 7(a). A graded negative means "below 10 bits on the D2 models and motif-free", so a CM contestant is favoured by construction.
+  - **(b) Prior scores exist on this substrate.** Production Stage-1 at τ = 0.9 scanned all 660 a2 hosts in round 0, and the shipped Stage-2 scored all 941 round-0 candidates (655 on the 339 hosts). The rule reads neither. The report cross-tabulates the graded negatives that overlap a round-0 candidate: how many there are, how many draw a twin candidate, and their A12 Pin 4(e) orthogonal-criterion status. **Nothing is dropped on it.** The twin never scanned these genomes.
+  - **(c) Label-noise direction.** A graded negative that is a real CM-invisible T-box penalises whichever system ranks it higher. If Stage-2 detects such loci better than Stage-1, the bias runs **against two-stage** (conservative for the two-stage claim). The D4 partition reduces this risk but does not remove it. The extension's P-conditioned acceptance of the draw is a second-order tilt, and the census bounds it.
+  - **(d) A different benchmark from v2.** The negatives come from off-catalogue genomes in training orders, while the positives are catalogue records. The report tabulates composition: per host and clade, CDS versus tRNA, D4 share, refusal share. The fold screen shifts the draw toward genomes distant from training, as A15 Pin 7(e) did.
+  - **(e)** The union mask is fail-open on a2 (A8), and no substrate pre-scan exists. The content screen is the only T-box screen, and it lower-bounds contamination.
+  - **(f)** A15 Pin 7(b)'s flank familiarity and Pin 7(d)'s six leader records in Stage-2 training carry over unchanged.
+
+**Not amended.**
+- A13's statistic, pass condition and "no CI bar" clause;
+- A15's screens, thresholds, v1/v2 artifacts and v2's verdict;
+- A16 Pin 5's "beside, never replacing";
+- D3's freeze, D7, D11, D12 and D14;
+- ADR-0006 D4's rule (only its classifier and its 500 bp are reused);
+- ADR-0004 A6.
+
+**Cross-reference impact.**
+- **New:** `src/tbox_finder/integration/hardneg_pool.py` (enumeration, δ, draw, partition, audit sample), with a data-env leg and an infernal-env leg, following `host_screen`'s split; `tests/unit/test_hardneg_pool.py`.
+- **Changed:**
+  - `host_screen.py`: its fold/content screen is callable on a native-window FASTA, with behaviour unchanged;
+  - `scripts/mint_p3_16_benchmark.py`: `--hardneg`;
+  - `precision.py`: schema 1.3, the graded/beside partition, and the N_min power clause with its extension record, plus tests;
+  - `workflow/rules/integration.smk`: hardneg targets;
+  - `scripts/plot_two_stage_precision.py`.
+- **Prose:** README's P3 line and `paper/manuscript.qmd` §sec-twostage carry the A17 read beside v2's. The PRD needs no change (A17 instantiates §9.1 class 4).
+- **Local-only:** the `imp.md` P3 exit checklist's first item ticks as *"FAIL/underpowered on v2 recorded + A17 reported (verdict: …)"*; `analyses/phase3_log.qmd`; `TODO.md`.
+
+**Scope guard (§10.3).** A17:
+- moves no gate and changes no threshold, checkpoint or training set;
+- re-grades nothing and replaces no verdict;
+- authorises no submit (the census extension needs its own §9.3 ack);
+- drops or relabels no item after a score.
+Its three new values (100,000, δ ≤ 256, N_min = 20) are pinned here, before any A17 score exists.
+
+**§10.1 evidence gate.** The one biological claim is the D4-partition rationale: T-box-regulated genes are predominantly aaRS, with amino-acid biosynthesis genes and transporters as the other main groups. Two independent sources agree (Vitreschak 2008; Gutiérrez-Preciado 2009, cited in Pin 2). Class 4 being the hardest context is PRD §9.1's own statement. Its statistics (a uniform draw without replacement and A13's reweighted AUPRC) assert no empirical claim.
+
+## Sign-off
+☑ recorded 2026-10-28 (bioedca), CLAUDE.md §7 items 1 + 2 — *"Sign as drafted"*. The A13 Pin 1 hard-negative amendment is pinned **before any A17 score exists**: native §9.1 class-4 leaders (CDS-upstream and tRNA-upstream 1,024-nt windows, δ ~ U{0..256}) on the 339 annotated admissible a2 hosts; a 100,000-window seed-42 uniform draw; A15 Pins 1–2 screens unchanged; D4-context windows reported beside the graded denominator; A13 Pin 1's statistic on the twin at 100:1; a power floor of N_min = 20 graded negatives reaching Stage-2, with one pre-registered census extension decided on that count alone before any Stage-2 score; reported beside v2, never replacing v2's FAIL/underpowered verdict. Chosen over re-using the undrawn screened flank pool (expected underpowered) and over the round-0 Stage-1 false candidates (selected on Stage-1 output, already scored, label-ambiguous).
