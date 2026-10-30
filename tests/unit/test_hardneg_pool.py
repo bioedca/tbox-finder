@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import copy
 import hashlib
+import json
 import random
 
 import pytest
@@ -310,6 +311,29 @@ def test_malformed_audit_row_is_a_problem():
     assert any("malformed" in p for p in _sabotage(mutate))
 
 
+@pytest.mark.parametrize("bad", [[15.1], "15.1", 15.1])
+@pytest.mark.parametrize("where", ["calibration", "null_max_bits"])
+def test_a_non_mapping_calibration_is_a_problem_and_never_raises(where, bad):
+    def mutate(report):
+        if where == "calibration":
+            report["audit"]["calibration"] = bad
+        else:
+            report["audit"]["calibration"]["null_max_bits"] = bad
+
+    assert any("does not clear" in p for p in _sabotage(mutate))
+
+
+def test_a_bool_floor_does_not_clear_its_threshold():
+    """``True`` is an int to ``isinstance`` and ``20.0 > True`` holds, so a bool floor would
+    read as measured and cleared ([[bool-equals-one-passes-config-gates]])."""
+
+    def mutate(report):
+        calibration = {"null_max_bits": {"RF00230": True, "TBDB001": 11.9}}
+        report["audit"] = hp.audit_block([], hp.AUDIT_SIZE, calibration)
+
+    assert any("does not clear" in p for p in _sabotage(mutate))
+
+
 # ── re-derivation against the data root ─────────────────────────────────────────────────
 def _write_population(root, n_features=100_050):
     eligible = _eligible(n_features)
@@ -357,6 +381,62 @@ def _rooted_report(root):
 def test_rederivation_passes_on_a_consistent_population(tmp_path):
     report, _base = _rooted_report(tmp_path)
     assert hp.validate_report(report, root=tmp_path) == []
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda r: r.update(partition_counts=[1]),
+        lambda r: r["partition_counts"].update({hp.P_GRADED: "80000"}),
+        lambda r: r["partition_counts"].update({hp.P_BESIDE: [4_000]}),
+    ],
+    ids=["counts-not-a-mapping", "graded-block-a-string", "beside-block-a-list"],
+)
+def test_rederivation_on_non_mapping_partition_counts_is_a_problem_and_never_raises(
+    tmp_path, mutate
+):
+    report, _base = _rooted_report(tmp_path)
+    mutate(report)
+    assert any("annex disagree" in p for p in hp.validate_report(report, root=tmp_path))
+
+
+# ── publish_report: an annex is only ever replaced by one whose report validated ─────────
+def _staged_case(root):
+    """A rooted report whose annex sits at the STAGED path, beside an earlier accepted pair."""
+    report, _base = _rooted_report(root)
+    p3 = root / "reports/p3"
+    annex, out = p3 / "hardneg_pool_ids.tsv", p3 / "hardneg_pool.json"
+    staged = annex.with_suffix(".staged.tsv")
+    annex.replace(staged)
+    report["ids_annex"]["path"] = "reports/p3/hardneg_pool_ids.staged.tsv"
+    annex.write_text("an earlier accepted annex\n")
+    out.write_text('{"an": "earlier accepted report"}\n')
+    return report, annex, out, staged
+
+
+def test_an_accepted_report_publishes_its_annex_and_records_the_final_path(tmp_path):
+    report, annex, out, staged = _staged_case(tmp_path)
+    fresh = staged.read_bytes()
+    assert hp.publish_report(report, out=out, annex=annex, staged=staged, root=tmp_path) == 0
+    assert annex.read_bytes() == fresh and not staged.exists()
+    written = json.loads(out.read_text())
+    assert written["ids_annex"]["path"] == "reports/p3/hardneg_pool_ids.tsv"
+    assert hp.validate_report(written, root=tmp_path) == []
+    assert not out.with_suffix(".invalid.json").exists()
+
+
+def test_a_refused_report_leaves_the_accepted_annex_and_removes_the_stale_report(tmp_path):
+    report, annex, out, staged = _staged_case(tmp_path)
+    fresh, earlier = staged.read_bytes(), annex.read_bytes()
+    report["config"]["seed"] = 43  # a real clause refuses it
+    assert hp.publish_report(report, out=out, annex=annex, staged=staged, root=tmp_path) == 3
+    assert annex.read_bytes() == earlier, "a refused run overwrote the accepted annex"
+    assert not out.exists(), "a stale accepted report would sit beside the fresh .invalid.json"
+    rejected = annex.with_suffix(".invalid.tsv")
+    assert rejected.read_bytes() == fresh and not staged.exists()
+    invalid = json.loads(out.with_suffix(".invalid.json").read_text())
+    assert invalid["ids_annex"]["path"] == "reports/p3/hardneg_pool_ids.invalid.tsv"
+    assert any("config.seed" in p for p in invalid["problems"])
 
 
 def test_a_tampered_delta_fails_the_replay(tmp_path):

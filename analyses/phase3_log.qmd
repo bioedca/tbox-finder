@@ -9378,3 +9378,37 @@ and `problems: []`. P3-18 under the new operator: point +0.023103 > 0.02, but CI
   `sha256sum -c` before any worktree removal.
 
 **Commit.** See the PR (P3-16″-hardneg); the census code is `1c9efb9`.
+
+## Step P3-16″-hardneg (review round 1) — 2026-10-30: a refused pool report must not overwrite the accepted annex
+
+Round 1 had two sources: the GitHub app's automatic review of `e9fc610` (2 minor) and the CLI
+(`coderabbit review --committed --base main`, 3 minor). One finding was common to both. Every
+finding was confirmed by execution before it was fixed. **No committed artifact changes**: these
+paths only run when a pool report is regenerated.
+
+- **(minor, app + CLI) `audit-report` wrote `--ids-out` before validating.** A refused run therefore
+  overwrote the annex an accepted report is bound to, and left a stale accepted report beside the
+  fresh `.invalid.json` ([[guard-runs-after-what-it-guards]]).
+  - The annex is now written to a `.staged.tsv` sibling and validated there, because the
+    re-derivation re-reads it.
+  - Routing moves into `hardneg_pool.publish_report`. An accepted report moves the staged file onto
+    `--ids-out` and records that path. A refused one turns the staged file into `.invalid.tsv`,
+    writes `.invalid.json` and unlinks the canonical report, as `precision.route_report` does.
+  - Two tests run against the real validator. Sabotages: publishing onto the annex on refusal, and
+    dropping the unlink. Each fails only the refusal test.
+- **(minor, app) `validate_report` raised on malformed input** despite its "never raises" contract.
+  Execution showed `AttributeError` for a non-mapping `audit.calibration` or `null_max_bits` (shallow
+  and rooted), and for a non-mapping `partition_counts` or partition block (rooted). All of them now
+  read as problems; 9 parametrized cases were added, and three separate sabotages fail exactly their
+  own cases.
+- **(found while fixing, same expression) A bool floor counted as measured.** `isinstance(True, int)`
+  holds and `20.0 > True` holds, so a bool `null_max_bits` cleared its threshold in both the producer
+  (`audit_block`) and the validator ([[bool-equals-one-passes-config-gates]],
+  [[fixed-one-of-two-identical-things]]). The two now share `_clears_floor`. A test was added, and
+  sabotaging the bool guard fails it. `host_screen` already routes floors through `_as_bits`.
+- **(minor ×2, CLI) `hardneg_pool_audit_search` passed `--cpu $(( threads / 2 ))`**, which is 0 under
+  `--cores 1`. It now uses the four sibling search rules' `> 0 ? … : 1` guard with `params.jobs`.
+  `snakemake --lint` is clean and `-n` resolves.
+
+**Validation.** `test_hardneg_pool` + `test_precision_hardneg`: 197 passed. ruff and black are clean.
+CI on `e9fc610` was green (the duplicate `push` run was cancelled). **Commit.** See the PR.

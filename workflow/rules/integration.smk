@@ -943,13 +943,15 @@ rule hardneg_pool_audit_search:
     threads: 24
     params:
         out_dir=lambda wildcards, input: os.path.dirname(input.audit),
+        jobs=2,
     log:
         "logs/hardneg_pool_audit_search.log",
     conda:
         "../../envs/infernal.yml"
     shell:
         "PYTHONPATH=src python -m tbox_finder.integration.hardneg_pool audit-search "
-        "--out-dir {params.out_dir:q} --jobs 2 --cpu $(( {threads} / 2 )) >{log} 2>&1"
+        "--out-dir {params.out_dir:q} --jobs {params.jobs} "
+        "--cpu $(( {threads} / {params.jobs} > 0 ? {threads} / {params.jobs} : 1 )) >{log} 2>&1"
 
 
 rule hardneg_pool_audit_report:

@@ -924,14 +924,22 @@ def audit_rows(
     return rows
 
 
+def _clears_floor(threshold: float, floor: Any) -> bool:
+    """A threshold clears its measured null floor only if the floor is a real number below it.
+
+    A bool is an ``int`` to ``isinstance`` and ``20.0 > True`` holds, so a bool floor is refused
+    as unmeasured ([[bool-equals-one-passes-config-gates]]).
+    """
+    measured = isinstance(floor, (int, float)) and not isinstance(floor, bool)
+    return measured and threshold > floor
+
+
 def audit_block(rows: Sequence[Mapping[str, Any]], n_audited: int, calibration: Mapping) -> dict:
     thresholds = dict(hs.POSTMINT_THRESHOLD_BITS)
     violations = [r for r in rows if float(r["bits"]) >= thresholds[str(r["model"])]]
-    floors = calibration.get("null_max_bits") or {}
-    clears = {
-        model: isinstance(floors.get(model), (int, float)) and thresholds[model] > floors[model]
-        for model in thresholds
-    }
+    floors = calibration.get("null_max_bits") if isinstance(calibration, Mapping) else None
+    floors = floors if isinstance(floors, Mapping) else {}
+    clears = {model: _clears_floor(thresholds[model], floors.get(model)) for model in thresholds}
     return {
         "n_audited": int(n_audited),
         "search_threshold_bits": AUDIT_SEARCH_BITS,
@@ -969,8 +977,12 @@ def _cmd_audit_report(args: argparse.Namespace) -> int:
     }
     partitions = interim["item_partitions"]
     annex = Path(args.ids_out)
+    # Written to a staged sibling, validated there (the re-derivation re-reads it), and moved
+    # onto --ids-out only once the report validates: a refused run must not overwrite the annex
+    # an earlier accepted report is bound to ([[guard-runs-after-what-it-guards]]).
+    staged = annex.with_suffix(".staged.tsv")
     annex_sha = _write_lines(
-        annex,
+        staged,
         (
             f"{cid}\t{part}"
             for cid, part in sorted(partitions.items())
@@ -998,7 +1010,7 @@ def _cmd_audit_report(args: argparse.Namespace) -> int:
         "controls": interim["controls"],
         "controls_all_fired": interim["controls_all_fired"],
         "item_files": interim["item_files"],
-        "ids_annex": {"path": hs.recorded_path(annex, root), "sha256": annex_sha},
+        "ids_annex": {"path": hs.recorded_path(staged, root), "sha256": annex_sha},
         "audit_ids": interim["audit_ids"],
         "audit": audit,
         "selection": (
@@ -1013,15 +1025,37 @@ def _cmd_audit_report(args: argparse.Namespace) -> int:
             env_lock=hs.ENV_LOCK_DATA,
         ),
     }
+    code = publish_report(report, out=Path(args.out), annex=annex, staged=staged, root=root)
+    if code == 0:
+        print(f"audit-report: {audit['n_audited']} audited, {audit['n_violations']} violations")
+    return code
+
+
+def publish_report(
+    report: dict[str, Any], *, out: Path, annex: Path, staged: Path, root: Path
+) -> int:
+    """Validate ``report`` against its STAGED ids annex, then route both files; returns the exit.
+
+    Accepted (0): the staged annex moves onto ``annex`` and the report, now recording that path,
+    is written to ``out``. Refused (3): the staged annex becomes ``<annex>.invalid.tsv``, the
+    report goes to ``<out>.invalid.json``, and ``out`` is removed — as
+    :func:`precision.route_report` does, because a stale accepted report beside a fresh
+    ``.invalid.json`` reads as current. Either way ``annex`` is only ever overwritten by an
+    annex whose report validated.
+    """
     problems = validate_report(report, root=root)
     if problems:
-        invalid = Path(args.out).with_suffix(".invalid.json")
-        write_json(invalid, {**report, "problems": problems})
+        rejected = annex.with_suffix(".invalid.tsv")
+        staged.replace(rejected)
+        report["ids_annex"]["path"] = hs.recorded_path(rejected, root)
+        write_json(out.with_suffix(".invalid.json"), {**report, "problems": problems})
+        out.unlink(missing_ok=True)
         for problem in problems:
             print(f"REFUSED: {problem}")
         return 3
-    write_json(Path(args.out), report)
-    print(f"audit-report: {audit['n_audited']} audited, {audit['n_violations']} violations")
+    staged.replace(annex)
+    report["ids_annex"]["path"] = hs.recorded_path(annex, root)
+    write_json(out, report)
     return 0
 
 
@@ -1134,10 +1168,10 @@ def _audit_problems(report: Mapping[str, Any], counts: Any) -> list[str]:
         return [*problems, "an audit row is malformed"]
     if audit.get("n_violations") != violations:
         problems.append(f"audit.n_violations disagrees with its rows ({violations})")
-    floors = (audit.get("calibration") or {}).get("null_max_bits") or {}
-    clears = all(
-        isinstance(floors.get(m), (int, float)) and thresholds[m] > floors[m] for m in thresholds
-    )
+    calibration = audit.get("calibration")
+    floors = calibration.get("null_max_bits") if isinstance(calibration, Mapping) else None
+    floors = floors if isinstance(floors, Mapping) else {}
+    clears = all(_clears_floor(thresholds[m], floors.get(m)) for m in thresholds)
     derived = violations == 0 and clears
     if audit.get("passes") is not derived:
         problems.append("audit.passes disagrees with its rows and calibration")
@@ -1217,11 +1251,12 @@ def _rederive_problems(report: Mapping[str, Any], root: Path) -> list[str]:
         return [*problems, f"cannot read the ids annex: {exc!r}"]
     if provenance.sha256_file(annex_path) != annex.get("sha256"):
         problems.append("the ids annex differs from its recorded sha256")
-    counts = report.get("partition_counts") or {}
-    if len(graded) != (counts.get(P_GRADED) or {}).get("total"):
-        problems.append("graded ids in the annex disagree with partition_counts")
-    if len(beside) != (counts.get(P_BESIDE) or {}).get("total"):
-        problems.append("beside ids in the annex disagree with partition_counts")
+    counts = report.get("partition_counts")
+    counts = counts if isinstance(counts, Mapping) else {}
+    for part, ids, word in ((P_GRADED, graded, "graded"), (P_BESIDE, beside, "beside")):
+        block = counts.get(part) if isinstance(counts.get(part), Mapping) else {}
+        if len(ids) != block.get("total"):
+            problems.append(f"{word} ids in the annex disagree with partition_counts")
     if not set(map(str, report.get("audit_ids") or [])) <= graded:
         problems.append("an audited id is not a graded id")
     if not (graded | beside) <= set(drawn):
