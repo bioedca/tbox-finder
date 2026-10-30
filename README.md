@@ -117,7 +117,20 @@ data-leakage control, calibration, and orthogonal validation are first-class.
   on an **evaluation twin** rather than the shipped scanner, because no Stage-1 checkpoint in
   this repo has an in-distribution holdout; the shipped scanner's arm is reported beside it and
   is in-sample, where a baseline that merely counts 32-mers shared with training DNA also reaches
-  AUPRC 1.000 — the familiarity confound the re-mint made measurable. The **P3 hard-negative re-mining round ran
+  AUPRC 1.000 — the familiarity confound the re-mint made measurable. *Hard-negative benchmark
+  (ADR-0005 A17, 2026-10-30; reported beside v2, never replacing it):* the negatives are
+  **750,875** native CDS- and tRNA-upstream leader windows (§9.1 class 4) on the 339 annotated
+  admissible hosts. They were drawn score-blind and screened as v2: the pre-registered
+  100,000-window draw, then its one census extension. A further 70,416 windows lie near an aaRS,
+  amino-acid-biosynthesis, transport or transamidation gene and are reported beside the gate.
+  **Fewer than 20 graded negatives reached Stage-2; the hard-negative benchmark lacks power to
+  test Stage-2.** P = **6** against a floor of 20 (0 on the draw alone), and the six windows are
+  four loci. The report is **refused, not graded**. Two-stage leads Stage-1-only by
+  **+0.000146 pp** of AUPRC at Stage-1 τ = 0.5 (CI [−0.0000876, +0.000602]) and by +0.0002 pp at
+  0.7, and ties exactly at 0.9. So the verdict would rest on a threshold that is not frozen
+  until Phase 5, and the report's own clause refuses it. A flank-familiarity baseline (AUPRC
+  0.9975268) outranks both systems. A17 therefore yields no verdict, and the P3 exit record stays
+  *FAIL, underpowered, on v2*. The **P3 hard-negative re-mining round ran
   and decided** — 941 candidates → 3 mined, 938 spared — and **declined to retrain**, so the
   shipped Stage-1 checkpoint is unchanged. *Backbone comparator (2026-10-05):* an **RNA-FM**
   Stage-2 trained on the same data and calibration stack is also calibrated in distribution

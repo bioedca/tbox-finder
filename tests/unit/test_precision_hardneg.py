@@ -1,14 +1,16 @@
 """P3-16″-hardneg — the ADR-0005 A17 scoring side: the hard-negative mint, the Pin 4 power
 gate, and the schema-1.3 precision report.
 
-No A17 artifact exists yet, so every case below is built through the REAL producers on a tmp
-tree: ``scripts/mint_p3_16_benchmark.py``'s ``--hardneg`` functions mint the manifest from a
-pool report that passes ``hardneg_pool.validate_report`` (the pool's own validator, not a stub),
-``precision power`` counts P from the payload manifest, ``precision fold`` binds every input, and
-``precision_gain`` grades it. Window DNA is cut from ``tests/fixtures/two_stage/contigs.json``
-(20 real 1,536-nt ``context_v0`` slabs); the per-window metadata and the scores are synthetic,
-because what is under test is the bookkeeping, not the models. The GATE-2 temperature source is
-the committed report, so the Stage-2 identity binds to real digests.
+The committed A17 artifacts (the refused census report, its τ annexes and the two pool reports)
+are run through the validators in their own section. Every other case is built through the REAL
+producers on a tmp tree: ``scripts/mint_p3_16_benchmark.py``'s ``--hardneg`` functions mint the
+manifest from a pool report that passes ``hardneg_pool.validate_report`` (the pool's own
+validator, not a stub), ``precision power`` counts P from the payload manifest, ``precision fold``
+binds every input, and ``precision_gain`` grades it. Window DNA is cut from
+``tests/fixtures/two_stage/contigs.json`` (20 real 1,536-nt ``context_v0`` slabs); the per-window
+metadata and the scores are synthetic, because what is under test is the bookkeeping, not the
+models. The GATE-2 temperature source is the committed report, so the Stage-2 identity binds to
+real digests.
 
 Each 1.3 clause is broken ALONE on a deep copy with every other field consistent
 ([[all-true-fixture-cannot-test-a-conjunction]]), and the committed v1 / v2 reports are run
@@ -646,6 +648,67 @@ def test_n_min_and_the_sentence_are_a17_pin_4s():
         "fewer than 20 graded negatives reached Stage-2; the hard-negative benchmark lacks power "
         "to test Stage-2"
     )
+
+
+# ══════════════════════════════════════════════════════════════════════════════════════
+# The committed A17 result: the census report is REFUSED, and on one clause alone
+# ══════════════════════════════════════════════════════════════════════════════════════
+REFUSED_REL = "reports/two_stage_precision_hardneg.invalid.json"
+ANNEX_RELS = (
+    "reports/p3/two_stage_precision_hardneg_tau07.json",
+    "reports/p3/two_stage_precision_hardneg_tau09.json",
+)
+TAU_VARIANT = (
+    "the gate's verdict changes across the Stage-1 threshold sweep; ADR-0005 D3 leaves that "
+    "value unpinned until P5-01, so the gate would rest on it"
+)
+
+
+def test_the_committed_a17_report_is_refused_on_tau_invariance_alone():
+    """The census run's report was diverted to ``.invalid.json`` (exit 3), and the canonical
+    path was never written. Today's validators re-derive exactly one problem from its bytes:
+    τ 0.5 and 0.7 pass A13's strict ``>`` while τ 0.9 ties, so the verdict rests on a value D3
+    leaves unfrozen. The verdict is re-derived here, not read from the report's own ``problems``
+    field. Both are asserted present, never skipped: they are plain JSON under ``reports/``.
+
+    The item table this report binds is DVC-tracked (1.05 GB), so its input binding
+    (``precision_input_problems``) is checked where it is pulled, not here."""
+    assert not (REPO / OUT_REL).exists(), "a refused run must leave the canonical path absent"
+    report = json.loads((REPO / REFUSED_REL).read_bytes())
+    assert report["schema_version"] == "1.3" and report["is_science"] is True
+    assert P.precision_problems(report) == [TAU_VARIANT]
+    sensitivity = report["stage1_threshold_sensitivity"]
+    verdicts = {sensitivity["base"]["stage1_threshold"]: sensitivity["base"]["passes"]}
+    verdicts |= {row["measured_stage1_threshold"]: row["passes"] for row in sensitivity["points"]}
+    assert verdicts == {0.5: True, 0.7: True, 0.9: False}
+    power = report["power"]
+    assert power["P"] == 6 < P.N_MIN and power["decision"] == "underpowered"
+    assert power["extension"] == {"P_draw": 0, "P_final": 6, "triggered": True}
+    assert report["gate"]["verdict_class"] == "underpowered"
+    assert (REPO / f"{ITEMS_REL}.dvc").is_file(), "the replayable item table must be DVC-tracked"
+
+
+@pytest.mark.parametrize("rel", ANNEX_RELS)
+def test_the_committed_a17_tau_annexes_validate_to_nothing(rel):
+    """Each annex is a report in its own right: no sweep of its own, so it validates clean. Its
+    verdict (τ 0.7 passes, τ 0.9 ties) is what makes the τ 0.5 report τ-variant."""
+    report = json.loads((REPO / rel).read_bytes())
+    assert report["schema_version"] == "1.3"
+    assert P.precision_problems(report) == []
+    assert report["gate"]["verdict_class"] == "underpowered"
+
+
+@pytest.mark.parametrize("rel", [POOL_REL, POOL_CENSUS_REL])
+def test_the_committed_pool_reports_validate_and_bind_their_ids_annex(rel):
+    """The committed draw and census pool reports pass their own validator. The draw replay
+    needs the interim eligible list, which CI does not have, so ``root`` is left unset. The
+    committed ids annex is re-hashed against the digest the report records."""
+    from tbox_finder.integration import hardneg_pool
+
+    report = json.loads((REPO / rel).read_bytes())
+    assert hardneg_pool.validate_report(report) == []
+    annex = report["ids_annex"]
+    assert hashlib.sha256((REPO / annex["path"]).read_bytes()).hexdigest() == annex["sha256"]
 
 
 # ══════════════════════════════════════════════════════════════════════════════════════

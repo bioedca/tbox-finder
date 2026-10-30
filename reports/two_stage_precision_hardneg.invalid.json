@@ -1,0 +1,2719 @@
+{
+  "adr": "ADR-0005 D3 (locus rule + Stage-2 operating point), D5 (block-level CI), D7 (benchmark decoy prevalence + sweep), A7 (which decoy pools were trained on), A11 Pin 4 (Stage-1 read on the uncalibrated posterior), A12 (the P2 checkpoint is canonical); ADR-0004 A6 (eval twin / two-run split); ADR-0005 A13 (the statistic, unchanged), A15 Pins 1\u20132 (the screens, unchanged), A16 Pin 5 (reported beside v2, never replacing it); ADR-0005 A17 (native \u00a79.1 class-4 leaders on the annotated a2 hosts, the D4-context partition beside the graded denominator, the N_min power clause with one census extension)",
+  "arms": {
+    "production": {
+      "arm": "production",
+      "auprc": {
+        "stage1_only": 0.9997389474398254,
+        "two_stage": 0.9999239405156117
+      },
+      "auprc_candidates_only": {
+        "stage1_only": 0.9997389474398254,
+        "two_stage": 0.9999239405156117
+      },
+      "auprc_gain_ci": {
+        "ci_level": 0.95,
+        "lower": -0.0007196744746651408,
+        "n_blocks": 1368,
+        "n_boot": 2000,
+        "point": 0.002968610095244184,
+        "upper": 0.007571012172187529
+      },
+      "auprc_gain_pp": 0.0029686100952552863,
+      "exposure": {
+        "n_negatives_seen_by_arm": 0,
+        "n_positives_seen_by_arm": 1201
+      },
+      "gain_ci": {
+        "ci_level": 0.95,
+        "lower": 0.012826495838008658,
+        "n_blocks": 1368,
+        "n_boot": 2000,
+        "point": 0.07993244362550778,
+        "upper": 0.1597340569384086
+      },
+      "gain_pp": 0.07993244362550778,
+      "gated": false,
+      "gated_prevalence_key": "100:1",
+      "matched_recall": {
+        "stage1_only": {
+          "fn": 2,
+          "fp": 7,
+          "matched": true,
+          "precision": 0.9941956882255389,
+          "recall": 0.9983347210657785,
+          "threshold": 0.9833474994943672,
+          "tp": 1199
+        },
+        "two_stage": {
+          "fn": 4,
+          "fp": 1,
+          "matched": true,
+          "precision": 0.9991652754590985,
+          "recall": 0.9966694421315571,
+          "threshold": 0.01723619385998149,
+          "tp": 1197
+        }
+      },
+      "operating_point": {
+        "stage2_operating_point": 0.5,
+        "target_recall": 0.9925062447960034,
+        "two_stage_precision": 0.9991617770326907,
+        "two_stage_recall": 0.9925062447960034
+      },
+      "passes": true,
+      "per_pool": {
+        "cds_upstream": {
+          "fp_stage1_only": 7,
+          "fp_two_stage": 1,
+          "n": 740587,
+          "n_seen_by_arm": 0
+        },
+        "trna_upstream": {
+          "fp_stage1_only": 0,
+          "fp_two_stage": 0,
+          "n": 10288,
+          "n_seen_by_arm": 0
+        }
+      },
+      "population": {
+        "ceiling_recall": 1.0,
+        "n_blocks": 1368,
+        "n_candidate_items": 1225,
+        "n_items": 752076,
+        "n_negatives": 750875,
+        "n_positive_candidates": 1201,
+        "n_positives": 1201,
+        "observed_decoy_ratio": 625.2081598667777
+      },
+      "prevalence": {
+        "10000:1": {
+          "auprc": {
+            "stage1_only": 0.9960590483585704,
+            "two_stage": 0.9988517602363942
+          },
+          "auprc_gain_pp": 0.2792711877823817,
+          "decoy_ratio": 10000.0,
+          "gain_pp": 7.221885100909208,
+          "lambda": 15.994672881638088,
+          "precision": {
+            "stage1_only": 0.9145950458370989,
+            "two_stage": 0.986813896846191
+          },
+          "two_stage_auprc_beats_stage1_only": true,
+          "two_stage_beats_stage1_only": true
+        },
+        "1000:1": {
+          "auprc": {
+            "stage1_only": 0.999583456328268,
+            "two_stage": 0.9998786564346018
+          },
+          "auprc_gain_pp": 0.02952001063338816,
+          "decoy_ratio": 1000.0,
+          "gain_pp": 0.7917169008196501,
+          "lambda": 1.5994672881638088,
+          "precision": {
+            "stage1_only": 0.9907483841379411,
+            "two_stage": 0.9986655531461376
+          },
+          "two_stage_auprc_beats_stage1_only": true,
+          "two_stage_beats_stage1_only": true
+        },
+        "100:1": {
+          "auprc": {
+            "stage1_only": 0.9999581042044071,
+            "two_stage": 0.9999877903053597
+          },
+          "auprc_gain_pp": 0.0029686100952552863,
+          "decoy_ratio": 100.0,
+          "gain_pp": 0.07993244362550778,
+          "lambda": 0.1599467288163809,
+          "precision": {
+            "stage1_only": 0.9990670704182893,
+            "two_stage": 0.9998663948545444
+          },
+          "two_stage_auprc_beats_stage1_only": true,
+          "two_stage_beats_stage1_only": true
+        },
+        "10:1": {
+          "auprc": {
+            "stage1_only": 0.9999958079878001,
+            "two_stage": 0.9999987782650493
+          },
+          "auprc_gain_pp": 0.00029702772492701257,
+          "decoy_ratio": 10.0,
+          "gain_pp": 0.008000923491247036,
+          "lambda": 0.01599467288163809,
+          "precision": {
+            "stage1_only": 0.9999066286438187,
+            "two_stage": 0.9999866378787312
+          },
+          "two_stage_auprc_beats_stage1_only": true,
+          "two_stage_beats_stage1_only": true
+        },
+        "observed": {
+          "auprc": {
+            "stage1_only": 0.9997389474398254,
+            "two_stage": 0.9999239405156117
+          },
+          "auprc_gain_pp": 0.018499307578634383,
+          "decoy_ratio": 625.2081598667777,
+          "gain_pp": 0.4969587233559558,
+          "lambda": 1.0,
+          "precision": {
+            "stage1_only": 0.9941956882255389,
+            "two_stage": 0.9991652754590985
+          },
+          "two_stage_auprc_beats_stage1_only": true,
+          "two_stage_beats_stage1_only": true
+        }
+      },
+      "recall_grid": [
+        {
+          "reachable": true,
+          "stage1_only": {
+            "matched": true,
+            "precision_at_pin": 1.0,
+            "precision_observed": 1.0,
+            "recall": 0.9075770191507078,
+            "threshold": 0.9987415303401735
+          },
+          "target_recall": 0.5,
+          "two_stage": {
+            "matched": true,
+            "precision_at_pin": 1.0,
+            "precision_observed": 1.0,
+            "recall": 0.9408825978351374,
+            "threshold": 0.99438016006735
+          },
+          "two_stage_beats_stage1_only": false
+        },
+        {
+          "reachable": true,
+          "stage1_only": {
+            "matched": true,
+            "precision_at_pin": 1.0,
+            "precision_observed": 1.0,
+            "recall": 0.9075770191507078,
+            "threshold": 0.9987415303401735
+          },
+          "target_recall": 0.6,
+          "two_stage": {
+            "matched": true,
+            "precision_at_pin": 1.0,
+            "precision_observed": 1.0,
+            "recall": 0.9408825978351374,
+            "threshold": 0.99438016006735
+          },
+          "two_stage_beats_stage1_only": false
+        },
+        {
+          "reachable": true,
+          "stage1_only": {
+            "matched": true,
+            "precision_at_pin": 1.0,
+            "precision_observed": 1.0,
+            "recall": 0.9075770191507078,
+            "threshold": 0.9987415303401735
+          },
+          "target_recall": 0.7,
+          "two_stage": {
+            "matched": true,
+            "precision_at_pin": 1.0,
+            "precision_observed": 1.0,
+            "recall": 0.9408825978351374,
+            "threshold": 0.99438016006735
+          },
+          "two_stage_beats_stage1_only": false
+        },
+        {
+          "reachable": true,
+          "stage1_only": {
+            "matched": true,
+            "precision_at_pin": 1.0,
+            "precision_observed": 1.0,
+            "recall": 0.9075770191507078,
+            "threshold": 0.9987415303401735
+          },
+          "target_recall": 0.8,
+          "two_stage": {
+            "matched": true,
+            "precision_at_pin": 1.0,
+            "precision_observed": 1.0,
+            "recall": 0.9408825978351374,
+            "threshold": 0.99438016006735
+          },
+          "two_stage_beats_stage1_only": false
+        },
+        {
+          "reachable": true,
+          "stage1_only": {
+            "matched": true,
+            "precision_at_pin": 1.0,
+            "precision_observed": 1.0,
+            "recall": 0.9075770191507078,
+            "threshold": 0.9987415303401735
+          },
+          "target_recall": 0.9,
+          "two_stage": {
+            "matched": true,
+            "precision_at_pin": 1.0,
+            "precision_observed": 1.0,
+            "recall": 0.9408825978351374,
+            "threshold": 0.99438016006735
+          },
+          "two_stage_beats_stage1_only": false
+        },
+        {
+          "reachable": true,
+          "stage1_only": {
+            "matched": true,
+            "precision_at_pin": 0.9997197162167535,
+            "precision_observed": 0.9982502187226596,
+            "recall": 0.9500416319733556,
+            "threshold": 0.9966025524587641
+          },
+          "target_recall": 0.95,
+          "two_stage": {
+            "matched": true,
+            "precision_at_pin": 0.9998663948545444,
+            "precision_observed": 0.9991652754590985,
+            "recall": 0.9966694421315571,
+            "threshold": 0.01723619385998149
+          },
+          "two_stage_beats_stage1_only": true
+        }
+      ]
+    },
+    "twin": {
+      "arm": "twin",
+      "auprc": {
+        "stage1_only": 0.997491401775398,
+        "two_stage": 0.9975005109294641
+      },
+      "auprc_candidates_only": {
+        "stage1_only": 0.9999852944849907,
+        "two_stage": 0.9999944264499603
+      },
+      "auprc_gain_ci": {
+        "ci_level": 0.95,
+        "lower": -8.764032996239067e-05,
+        "n_blocks": 1368,
+        "n_boot": 2000,
+        "point": 0.0001458164879841739,
+        "upper": 0.000601569293990911
+      },
+      "auprc_gain_pp": 0.00014581648796196944,
+      "exposure": {
+        "n_negatives_seen_by_arm": 0,
+        "n_positives_seen_by_arm": 0
+      },
+      "gain_ci": {
+        "ci_level": 0.95,
+        "lower": -0.00010409245744413813,
+        "n_blocks": 1368,
+        "n_boot": 2000,
+        "point": 0.013371684050589305,
+        "upper": 0.04149234181288153
+      },
+      "gain_pp": 0.013371684050589305,
+      "gated": true,
+      "gated_prevalence_key": "100:1",
+      "matched_recall": {
+        "stage1_only": {
+          "fn": 5,
+          "fp": 1,
+          "matched": true,
+          "precision": 0.9991645781119465,
+          "recall": 0.9958368026644463,
+          "threshold": 0.9591666567149961,
+          "tp": 1196
+        },
+        "two_stage": {
+          "fn": 8,
+          "fp": 0,
+          "matched": true,
+          "precision": 1.0,
+          "recall": 0.9933388842631141,
+          "threshold": 0.015957822056358813,
+          "tp": 1193
+        }
+      },
+      "operating_point": {
+        "stage2_operating_point": 0.5,
+        "target_recall": 0.9908409658617818,
+        "two_stage_precision": 1.0,
+        "two_stage_recall": 0.9908409658617818
+      },
+      "passes": true,
+      "per_pool": {
+        "cds_upstream": {
+          "fp_stage1_only": 1,
+          "fp_two_stage": 0,
+          "n": 740587,
+          "n_seen_by_arm": 0
+        },
+        "trna_upstream": {
+          "fp_stage1_only": 0,
+          "fp_two_stage": 0,
+          "n": 10288,
+          "n_seen_by_arm": 0
+        }
+      },
+      "population": {
+        "ceiling_recall": 0.9975020815986678,
+        "n_blocks": 1368,
+        "n_candidate_items": 1204,
+        "n_items": 752076,
+        "n_negatives": 750875,
+        "n_positive_candidates": 1198,
+        "n_positives": 1201,
+        "observed_decoy_ratio": 625.2081598667777
+      },
+      "prevalence": {
+        "10000:1": {
+          "auprc": {
+            "stage1_only": 0.9972716822908331,
+            "two_stage": 0.9974153091612783
+          },
+          "auprc_gain_pp": 0.014362687044522371,
+          "decoy_ratio": 10000.0,
+          "gain_pp": 1.3196982824692727,
+          "lambda": 15.994672881638088,
+          "precision": {
+            "stage1_only": 0.9868030171753073,
+            "two_stage": 1.0
+          },
+          "two_stage_auprc_beats_stage1_only": true,
+          "two_stage_beats_stage1_only": true
+        },
+        "1000:1": {
+          "auprc": {
+            "stage1_only": 0.9974811310018812,
+            "two_stage": 0.9974956923529745
+          },
+          "auprc_gain_pp": 0.001456135109334511,
+          "decoy_ratio": 1000.0,
+          "gain_pp": 0.13355611219381114,
+          "lambda": 1.5994672881638088,
+          "precision": {
+            "stage1_only": 0.9986644388780619,
+            "two_stage": 1.0
+          },
+          "two_stage_auprc_beats_stage1_only": true,
+          "two_stage_beats_stage1_only": true
+        },
+        "100:1": {
+          "auprc": {
+            "stage1_only": 0.9975244649630346,
+            "two_stage": 0.9975259231279142
+          },
+          "auprc_gain_pp": 0.00014581648796196944,
+          "decoy_ratio": 100.0,
+          "gain_pp": 0.013371684050589305,
+          "lambda": 0.1599467288163809,
+          "precision": {
+            "stage1_only": 0.9998662831594941,
+            "two_stage": 1.0
+          },
+          "two_stage_auprc_beats_stage1_only": true,
+          "two_stage_beats_stage1_only": true
+        },
+        "10:1": {
+          "auprc": {
+            "stage1_only": 0.9977289302005181,
+            "two_stage": 0.9977290760373483
+          },
+          "auprc_gain_pp": 1.4583683016766713e-05,
+          "decoy_ratio": 10.0,
+          "gain_pp": 0.0013373293461627078,
+          "lambda": 0.01599467288163809,
+          "precision": {
+            "stage1_only": 0.9999866267065384,
+            "two_stage": 1.0
+          },
+          "two_stage_auprc_beats_stage1_only": true,
+          "two_stage_beats_stage1_only": true
+        },
+        "observed": {
+          "auprc": {
+            "stage1_only": 0.997491401775398,
+            "two_stage": 0.9975005109294641
+          },
+          "auprc_gain_pp": 0.0009109154066155867,
+          "decoy_ratio": 625.2081598667777,
+          "gain_pp": 0.08354218880535225,
+          "lambda": 1.0,
+          "precision": {
+            "stage1_only": 0.9991645781119465,
+            "two_stage": 1.0
+          },
+          "two_stage_auprc_beats_stage1_only": true,
+          "two_stage_beats_stage1_only": true
+        }
+      },
+      "recall_grid": [
+        {
+          "reachable": true,
+          "stage1_only": {
+            "matched": true,
+            "precision_at_pin": 1.0,
+            "precision_observed": 1.0,
+            "recall": 0.9825145711906744,
+            "threshold": 0.9826278418080429
+          },
+          "target_recall": 0.5,
+          "two_stage": {
+            "matched": true,
+            "precision_at_pin": 1.0,
+            "precision_observed": 1.0,
+            "recall": 0.9933388842631141,
+            "threshold": 0.015957822056358813
+          },
+          "two_stage_beats_stage1_only": false
+        },
+        {
+          "reachable": true,
+          "stage1_only": {
+            "matched": true,
+            "precision_at_pin": 1.0,
+            "precision_observed": 1.0,
+            "recall": 0.9825145711906744,
+            "threshold": 0.9826278418080429
+          },
+          "target_recall": 0.6,
+          "two_stage": {
+            "matched": true,
+            "precision_at_pin": 1.0,
+            "precision_observed": 1.0,
+            "recall": 0.9933388842631141,
+            "threshold": 0.015957822056358813
+          },
+          "two_stage_beats_stage1_only": false
+        },
+        {
+          "reachable": true,
+          "stage1_only": {
+            "matched": true,
+            "precision_at_pin": 1.0,
+            "precision_observed": 1.0,
+            "recall": 0.9825145711906744,
+            "threshold": 0.9826278418080429
+          },
+          "target_recall": 0.7,
+          "two_stage": {
+            "matched": true,
+            "precision_at_pin": 1.0,
+            "precision_observed": 1.0,
+            "recall": 0.9933388842631141,
+            "threshold": 0.015957822056358813
+          },
+          "two_stage_beats_stage1_only": false
+        },
+        {
+          "reachable": true,
+          "stage1_only": {
+            "matched": true,
+            "precision_at_pin": 1.0,
+            "precision_observed": 1.0,
+            "recall": 0.9825145711906744,
+            "threshold": 0.9826278418080429
+          },
+          "target_recall": 0.8,
+          "two_stage": {
+            "matched": true,
+            "precision_at_pin": 1.0,
+            "precision_observed": 1.0,
+            "recall": 0.9933388842631141,
+            "threshold": 0.015957822056358813
+          },
+          "two_stage_beats_stage1_only": false
+        },
+        {
+          "reachable": true,
+          "stage1_only": {
+            "matched": true,
+            "precision_at_pin": 1.0,
+            "precision_observed": 1.0,
+            "recall": 0.9825145711906744,
+            "threshold": 0.9826278418080429
+          },
+          "target_recall": 0.9,
+          "two_stage": {
+            "matched": true,
+            "precision_at_pin": 1.0,
+            "precision_observed": 1.0,
+            "recall": 0.9933388842631141,
+            "threshold": 0.015957822056358813
+          },
+          "two_stage_beats_stage1_only": false
+        },
+        {
+          "reachable": true,
+          "stage1_only": {
+            "matched": true,
+            "precision_at_pin": 1.0,
+            "precision_observed": 1.0,
+            "recall": 0.9825145711906744,
+            "threshold": 0.9826278418080429
+          },
+          "target_recall": 0.95,
+          "two_stage": {
+            "matched": true,
+            "precision_at_pin": 1.0,
+            "precision_observed": 1.0,
+            "recall": 0.9933388842631141,
+            "threshold": 0.015957822056358813
+          },
+          "two_stage_beats_stage1_only": false
+        }
+      ]
+    }
+  },
+  "benchmark": {
+    "embedded_by_pool": null,
+    "scope": {
+      "beside_by_pool": {
+        "cds_upstream": 69271,
+        "trna_upstream": 1145
+      },
+      "gated_rule": "ADR-0005 A17 Pin 2 \u2014 D4-context windows minted and scored, reported beside the graded denominator; every positive and every non-D4-context window is graded",
+      "geometry": "1024-nt scan windows (ADR-0005 D3 / PRD \u00a76 pinned geometry)",
+      "host_pool": {
+        "n_hosts": 339,
+        "overlap_with_training_folds": {
+          "by_arm": {
+            "production": 0,
+            "twin": 0
+          },
+          "k": 32,
+          "method": "canonical N-free 32-mers on either strand of the WHOLE native window (no insert to exclude) against the arm's own Stage-1 training-fold context_seq (host_screen.canonical_kmers / sorted_unique_kmers / kmer_hits)",
+          "n_negatives": 821291,
+          "n_seen_by_any_arm": 0
+        },
+        "selection": "ADR-0005 A17 \u2014 genuine \u00a79.1 class-4 leaders: native 1,024-nt CDS- and tRNA-upstream windows on their feature's own strand (\u03b4 ~ U{0..256}, seed 42) on the 339 NCBI-annotated admissible a2 hosts, a 100,000-window seed-42 uniform draw (plus, on the one pre-registered extension, every remaining eligible window), screened by A15 Pins 1\u20132 unchanged; D4-context windows minted beside the graded denominator; no leader decoy, no \u00a79.1 decoy pool; the selection reads no score",
+        "source": [
+          "reports/p3/hardneg_pool.json",
+          "reports/p3/hardneg_pool_census.json"
+        ],
+        "stage": "census"
+      },
+      "kind": "hardneg",
+      "n_beside": 70416,
+      "n_blocks": 1368,
+      "n_blocks_gated": 1368,
+      "n_items": 822492,
+      "n_items_gated": 752076,
+      "n_negative_blocks": 339,
+      "n_negatives": 821291,
+      "n_negatives_gated": 750875,
+      "n_positive_blocks": 1029,
+      "n_positives": 1201,
+      "negative_construction": "ADR-0005 A17 Pins 1\u20132: native 1,024-nt windows from reports/p3/hardneg_pool.json's graded and beside lists, the bytes the pool screened (sha256 asserted per item)",
+      "negatives_by_pool": {
+        "cds_upstream": 809858,
+        "trna_upstream": 11433
+      },
+      "negatives_by_pool_gated": {
+        "cds_upstream": 740587,
+        "trna_upstream": 10288
+      },
+      "positive_population": "benchmark_v2.json's graded positives (gate4_eval), contigs byte-identical (ADR-0005 A17 Pin 3)",
+      "rung": "test",
+      "seen_by_counts": {
+        "production": {
+          "negatives": 0,
+          "positives": 1201
+        },
+        "twin": {
+          "negatives": 0,
+          "positives": 0
+        }
+      },
+      "seen_by_rule": "seen_by[arm] on a native window is the MEASURED fold overlap (any shared canonical 32-mer with the arm's training-fold context_seq), never a by-construction claim",
+      "training_fold_sizes": {
+        "production": 8303,
+        "twin": 7099
+      }
+    },
+    "source": {
+      "benchmark_v2": "data/interim/p3_16/benchmark_v2.json",
+      "benchmark_v2_sha256": "c12f9e24834b1d1ff79136b41ae60ed4d53536cdb570178067990571d6edd1c3",
+      "context": "data/interim/flank_context/context_v0.parquet",
+      "hardneg_pools": [
+        {
+          "item_files": {
+            "beside": {
+              "n": 8382,
+              "path": "data/interim/p3_16/hardneg_pool/beside.json",
+              "sha256": "09460bf76e861c8c0a7689d0506ebe0f7b903ccbff6a7a3f940f400a083f9cc7"
+            },
+            "graded": {
+              "n": 90243,
+              "path": "data/interim/p3_16/hardneg_pool/graded.json",
+              "sha256": "21e7d89b97a20e2142eeec31c6b4d07275b82831026cdc00c7ed54250c55bd1c"
+            }
+          },
+          "mode": "draw",
+          "path": "reports/p3/hardneg_pool.json",
+          "sha256": "4fc1d664a0509d5bd77e8e4bca7fc79d007388c82a497fab5b290bd536833a6e"
+        },
+        {
+          "item_files": {
+            "beside": {
+              "n": 62034,
+              "path": "data/interim/p3_16/hardneg_pool_census/beside.json",
+              "sha256": "4d81cf2fb1853bdd404e8708bfe3e6f098a00ef7b7751e0f18bf507a4e058999"
+            },
+            "graded": {
+              "n": 660632,
+              "path": "data/interim/p3_16/hardneg_pool_census/graded.json",
+              "sha256": "2706d50eee728ff89169de38cbc707e43abd2818acd13a0ec11bb194d042cf6e"
+            }
+          },
+          "mode": "census",
+          "path": "reports/p3/hardneg_pool_census.json",
+          "sha256": "cca924575c6698c6173b59dd84e8bc49465f620c18aacf98cd37c76c9b709645"
+        }
+      ],
+      "host_orders": "data/processed/mining/production_host_orders_v0.parquet",
+      "host_orders_sha256": "a543b3478041faaaa8fb7deb6a5967de0c87e532a658908417c6057ec5865889",
+      "labels": "data/processed/labels/labels_v0.parquet",
+      "n_positives": 1201,
+      "positives_sha256": "b863f51a9d80fd00ec6544c618872919e946cb1a1d15387a69433c00ca080e39",
+      "split_table": "data/processed/splits/split_assignments.parquet"
+    }
+  },
+  "beside_gate": {
+    "by_arm": {
+      "production": {
+        "called": [
+          {
+            "assembly": "GCA_041665305.1",
+            "contig_id": "hn:GCA_041665305.1:JBAYJD010000055.1:13377-14401:-",
+            "n_payloads": 4,
+            "n_rows": 2,
+            "stage1_only": 0.9985306956738473,
+            "sub_class": "cds_upstream",
+            "two_stage": 7.546084068377222e-06
+          }
+        ],
+        "distribution": {
+          "stage1_only": {
+            "max": 0.9985306956738473,
+            "median": 0.9985306956738473,
+            "min": 0.9985306956738473,
+            "n": 1
+          },
+          "two_stage": {
+            "max": 7.546084068377222e-06,
+            "median": 7.546084068377222e-06,
+            "min": 7.546084068377222e-06,
+            "n": 1
+          }
+        },
+        "n": 70416,
+        "n_with_stage1_candidate": 1,
+        "n_with_stage2_payload": 1,
+        "with_beside_in_denominator": {
+          "auprc": {
+            "stage1_only": 0.9999511241411413,
+            "two_stage": 0.99998883647659
+          },
+          "decoy_prevalence": 100,
+          "gain_pp": 0.0037712335448691903,
+          "graded": false,
+          "lambda": 0.1462331865319357,
+          "n_items": 822492,
+          "n_negatives": 821291,
+          "n_positives": 1201
+        }
+      },
+      "twin": {
+        "called": [],
+        "distribution": {
+          "stage1_only": {
+            "max": null,
+            "median": null,
+            "min": null,
+            "n": 0
+          },
+          "two_stage": {
+            "max": null,
+            "median": null,
+            "min": null,
+            "n": 0
+          }
+        },
+        "n": 70416,
+        "n_with_stage1_candidate": 0,
+        "n_with_stage2_payload": 0,
+        "with_beside_in_denominator": {
+          "auprc": {
+            "stage1_only": 0.9975246662852164,
+            "two_stage": 0.9975259994473997
+          },
+          "decoy_prevalence": 100,
+          "gain_pp": 0.00013331621833145846,
+          "graded": false,
+          "lambda": 0.1462331865319357,
+          "n_items": 822492,
+          "n_negatives": 821291,
+          "n_positives": 1201
+        }
+      }
+    },
+    "graded": false,
+    "n_beside": 70416,
+    "rule": "ADR-0005 A17 Pin 2 \u2014 a surviving window is D4-context if any CDS on the same seqid, either strand, overlapping [start - 500, end + 500) names a D4 class; such windows are minted, scored and reported beside the graded denominator, never inside it"
+  },
+  "blocks": {
+    "n_blocks": 1368,
+    "n_negative_blocks": 339,
+    "n_positive_blocks": 1029,
+    "n_shared": 0,
+    "negative_blocks_are_assemblies": true,
+    "positive_blocks_are_clusters": true,
+    "rule": "ADR-0005 A17 Pin 3 \u2014 positive cluster and negative assembly are the blocks"
+  },
+  "completeness": {
+    "all_benchmark_items_scored": true,
+    "both_systems_reached_the_target_recall": true,
+    "candidate_stage_emitted_positives": true,
+    "gated_arm_held_out_every_positive": true,
+    "gated_arm_present": true,
+    "matched_recall_verdict_invariant_across_prevalence": true,
+    "target_recall_is_positive": true
+  },
+  "composition": {
+    "beside": {
+      "by_assembly": {
+        "GCA_000296795.1": 191,
+        "GCA_000522425.1": 226,
+        "GCA_000739515.1": 336,
+        "GCA_000739535.1": 350,
+        "GCA_000828075.3": 439,
+        "GCA_001587635.1": 154,
+        "GCA_001799365.1": 298,
+        "GCA_001873345.1": 123,
+        "GCA_002050035.1": 60,
+        "GCA_002254405.1": 164,
+        "GCA_002254565.1": 235,
+        "GCA_002368195.1": 337,
+        "GCA_002690645.1": 76,
+        "GCA_002720865.1": 210,
+        "GCA_002790315.1": 67,
+        "GCA_002839705.1": 234,
+        "GCA_002869185.1": 286,
+        "GCA_002878375.1": 210,
+        "GCA_003020965.1": 302,
+        "GCA_003290465.1": 299,
+        "GCA_003476705.1": 73,
+        "GCA_003602635.1": 86,
+        "GCA_003641555.1": 101,
+        "GCA_003663115.1": 178,
+        "GCA_003978675.1": 176,
+        "GCA_003978805.1": 177,
+        "GCA_004195035.1": 188,
+        "GCA_004357365.1": 180,
+        "GCA_005116895.1": 231,
+        "GCA_008086245.1": 108,
+        "GCA_009776495.1": 68,
+        "GCA_009788135.1": 166,
+        "GCA_011050175.1": 69,
+        "GCA_011056645.1": 164,
+        "GCA_011380095.1": 173,
+        "GCA_012517325.1": 181,
+        "GCA_012517635.1": 167,
+        "GCA_012523595.1": 231,
+        "GCA_012842545.1": 55,
+        "GCA_012961055.1": 143,
+        "GCA_013114715.1": 201,
+        "GCA_013178255.1": 103,
+        "GCA_013178285.1": 215,
+        "GCA_013215525.1": 89,
+        "GCA_013822585.1": 189,
+        "GCA_013824755.1": 152,
+        "GCA_014189675.1": 87,
+        "GCA_014189685.1": 84,
+        "GCA_014324045.1": 304,
+        "GCA_014727915.1": 280,
+        "GCA_014730185.1": 171,
+        "GCA_015200025.1": 173,
+        "GCA_015478585.1": 289,
+        "GCA_015661585.1": 105,
+        "GCA_015662355.1": 205,
+        "GCA_015663075.1": 161,
+        "GCA_016000045.1": 139,
+        "GCA_016719945.1": 269,
+        "GCA_016867655.1": 169,
+        "GCA_016932835.1": 231,
+        "GCA_016934255.1": 216,
+        "GCA_016939415.1": 70,
+        "GCA_017458885.1": 80,
+        "GCA_017475405.1": 117,
+        "GCA_017959225.1": 254,
+        "GCA_017965445.1": 179,
+        "GCA_017994915.1": 211,
+        "GCA_017998195.1": 194,
+        "GCA_018060625.1": 113,
+        "GCA_018065615.1": 166,
+        "GCA_018653085.1": 270,
+        "GCA_018669005.1": 317,
+        "GCA_018714045.1": 154,
+        "GCA_019038705.1": 145,
+        "GCA_019186945.1": 235,
+        "GCA_019359155.1": 357,
+        "GCA_019561565.1": 109,
+        "GCA_019561615.1": 206,
+        "GCA_019636815.1": 246,
+        "GCA_019752555.1": 142,
+        "GCA_019912425.1": 215,
+        "GCA_020217115.1": 213,
+        "GCA_020247005.1": 165,
+        "GCA_020354155.1": 198,
+        "GCA_020430445.1": 212,
+        "GCA_020434345.1": 119,
+        "GCA_020434365.1": 99,
+        "GCA_020434375.1": 85,
+        "GCA_020434495.1": 135,
+        "GCA_020434645.1": 89,
+        "GCA_020632975.1": 122,
+        "GCA_020633195.1": 287,
+        "GCA_020833055.1": 176,
+        "GCA_020833645.1": 256,
+        "GCA_021161465.1": 92,
+        "GCA_021161495.1": 111,
+        "GCA_021162285.1": 111,
+        "GCA_021162685.1": 97,
+        "GCA_021166685.1": 289,
+        "GCA_022646745.1": 137,
+        "GCA_022759145.1": 139,
+        "GCA_023128455.1": 175,
+        "GCA_023129115.1": 103,
+        "GCA_023136155.1": 189,
+        "GCA_023145315.1": 80,
+        "GCA_023663235.1": 81,
+        "GCA_023954415.1": 253,
+        "GCA_025057455.1": 288,
+        "GCA_025060475.1": 197,
+        "GCA_025997275.1": 113,
+        "GCA_026394605.1": 198,
+        "GCA_026397035.1": 66,
+        "GCA_026413945.1": 77,
+        "GCA_026419195.1": 171,
+        "GCA_026713835.1": 124,
+        "GCA_026786155.1": 119,
+        "GCA_028684695.1": 197,
+        "GCA_028715605.1": 215,
+        "GCA_029986255.1": 76,
+        "GCA_030266405.1": 143,
+        "GCA_030656015.1": 231,
+        "GCA_030673965.1": 304,
+        "GCA_030749075.1": 103,
+        "GCA_030753015.1": 234,
+        "GCA_030765365.1": 202,
+        "GCA_030765525.1": 183,
+        "GCA_030765605.1": 199,
+        "GCA_030765645.1": 275,
+        "GCA_031258305.1": 237,
+        "GCA_031266695.1": 116,
+        "GCA_031268125.1": 134,
+        "GCA_031275485.1": 148,
+        "GCA_031279815.1": 176,
+        "GCA_031281085.1": 115,
+        "GCA_031282625.1": 186,
+        "GCA_031285415.1": 218,
+        "GCA_031458695.1": 278,
+        "GCA_031459235.1": 245,
+        "GCA_031459855.1": 329,
+        "GCA_032249275.1": 164,
+        "GCA_034114085.1": 253,
+        "GCA_034408855.1": 258,
+        "GCA_035252115.1": 248,
+        "GCA_035258025.1": 148,
+        "GCA_035260805.1": 214,
+        "GCA_035262825.1": 174,
+        "GCA_035273405.1": 128,
+        "GCA_035283265.1": 226,
+        "GCA_035286165.1": 197,
+        "GCA_035295045.1": 198,
+        "GCA_035378845.1": 187,
+        "GCA_035477455.1": 220,
+        "GCA_035477595.1": 249,
+        "GCA_035493815.1": 275,
+        "GCA_035494575.1": 153,
+        "GCA_035507275.1": 244,
+        "GCA_035533335.1": 271,
+        "GCA_035559535.1": 372,
+        "GCA_035559715.1": 204,
+        "GCA_035635835.1": 176,
+        "GCA_035939295.1": 279,
+        "GCA_036000645.1": 275,
+        "GCA_036262535.1": 155,
+        "GCA_036264835.1": 302,
+        "GCA_036399155.1": 230,
+        "GCA_036444275.1": 191,
+        "GCA_036446635.1": 171,
+        "GCA_036499725.1": 292,
+        "GCA_036511215.1": 93,
+        "GCA_036625595.1": 255,
+        "GCA_037134455.1": 313,
+        "GCA_037147435.1": 116,
+        "GCA_038736355.1": 177,
+        "GCA_038741495.1": 127,
+        "GCA_038823825.1": 177,
+        "GCA_038842485.1": 192,
+        "GCA_039638295.1": 166,
+        "GCA_039680605.1": 280,
+        "GCA_039833665.1": 147,
+        "GCA_039930685.1": 180,
+        "GCA_040062795.1": 259,
+        "GCA_040755695.1": 106,
+        "GCA_040905065.1": 148,
+        "GCA_041654875.1": 121,
+        "GCA_041656455.1": 140,
+        "GCA_041665305.1": 144,
+        "GCA_041670175.1": 200,
+        "GCA_041671045.1": 173,
+        "GCA_041821525.1": 124,
+        "GCA_043809265.1": 94,
+        "GCA_044326545.1": 151,
+        "GCA_044451405.1": 91,
+        "GCA_045106415.1": 152,
+        "GCA_045802735.1": 231,
+        "GCA_046262215.1": 178,
+        "GCA_046262675.1": 178,
+        "GCA_046292245.1": 223,
+        "GCA_046483005.1": 94,
+        "GCA_046496215.1": 315,
+        "GCA_046540055.1": 249,
+        "GCA_046719655.1": 216,
+        "GCA_046759365.1": 167,
+        "GCA_046761145.1": 202,
+        "GCA_047602415.1": 240,
+        "GCA_047617785.1": 103,
+        "GCA_049423385.1": 198,
+        "GCA_049615065.1": 195,
+        "GCA_049692855.1": 74,
+        "GCA_049696515.1": 164,
+        "GCA_049718665.1": 189,
+        "GCA_049800655.1": 169,
+        "GCA_049852185.1": 231,
+        "GCA_050010375.1": 287,
+        "GCA_050010735.1": 253,
+        "GCA_050249195.1": 174,
+        "GCA_050251875.1": 285,
+        "GCA_050253075.1": 289,
+        "GCA_050253135.1": 195,
+        "GCA_050731075.1": 161,
+        "GCA_050749505.1": 122,
+        "GCA_051656905.1": 213,
+        "GCA_051874735.1": 131,
+        "GCA_052361145.1": 159,
+        "GCA_902384585.1": 137,
+        "GCF_000007185.1": 254,
+        "GCF_000007205.1": 124,
+        "GCF_000017545.1": 142,
+        "GCF_000018365.1": 168,
+        "GCF_000020325.1": 274,
+        "GCF_000020945.1": 108,
+        "GCF_000020965.1": 202,
+        "GCF_000021645.1": 190,
+        "GCF_000023985.1": 244,
+        "GCF_000024405.1": 323,
+        "GCF_000091665.1": 243,
+        "GCF_000092305.1": 255,
+        "GCF_000146065.2": 104,
+        "GCF_000158195.2": 248,
+        "GCF_000163935.1": 227,
+        "GCF_000177635.2": 284,
+        "GCF_000183745.1": 281,
+        "GCF_000212395.1": 259,
+        "GCF_000237205.1": 170,
+        "GCF_000317225.1": 328,
+        "GCF_000371805.1": 250,
+        "GCF_000373205.1": 307,
+        "GCF_000378005.1": 127,
+        "GCF_000381045.1": 258,
+        "GCF_000469505.1": 233,
+        "GCF_000469585.1": 275,
+        "GCF_000526195.1": 265,
+        "GCF_000686905.1": 299,
+        "GCF_000702425.1": 281,
+        "GCF_000731985.1": 312,
+        "GCF_000739065.1": 253,
+        "GCF_000739615.1": 307,
+        "GCF_000744885.1": 255,
+        "GCF_000765475.1": 274,
+        "GCF_000799075.1": 272,
+        "GCF_000816105.1": 102,
+        "GCF_000970085.1": 267,
+        "GCF_001484685.1": 175,
+        "GCF_001547735.1": 256,
+        "GCF_001548275.1": 249,
+        "GCF_002119425.1": 275,
+        "GCF_002201895.1": 249,
+        "GCF_002214505.1": 143,
+        "GCF_002752635.1": 209,
+        "GCF_002884445.1": 287,
+        "GCF_002895085.1": 112,
+        "GCF_002945325.1": 237,
+        "GCF_003057965.1": 264,
+        "GCF_003265365.1": 200,
+        "GCF_003290185.1": 270,
+        "GCF_003351105.1": 136,
+        "GCF_003574085.1": 301,
+        "GCF_003612165.1": 274,
+        "GCF_003664005.1": 314,
+        "GCF_004135675.1": 155,
+        "GCF_004310395.1": 213,
+        "GCF_005771535.1": 416,
+        "GCF_006636215.1": 292,
+        "GCF_007997015.1": 187,
+        "GCF_008362905.1": 286,
+        "GCF_009662475.1": 271,
+        "GCF_009909105.1": 308,
+        "GCF_012027325.1": 206,
+        "GCF_012027395.1": 165,
+        "GCF_012027645.1": 140,
+        "GCF_013402815.2": 316,
+        "GCF_013760955.1": 242,
+        "GCF_014203025.1": 252,
+        "GCF_014281055.1": 249,
+        "GCF_016593235.1": 315,
+        "GCF_017302985.1": 289,
+        "GCF_017642335.1": 268,
+        "GCF_017873335.1": 163,
+        "GCF_018141185.1": 254,
+        "GCF_021647265.1": 209,
+        "GCF_022430525.1": 298,
+        "GCF_022662305.1": 306,
+        "GCF_023546765.1": 425,
+        "GCF_024022995.1": 153,
+        "GCF_024707485.1": 161,
+        "GCF_025147325.1": 251,
+        "GCF_027052235.1": 138,
+        "GCF_029848115.1": 253,
+        "GCF_029873255.1": 211,
+        "GCF_030295325.1": 244,
+        "GCF_030296055.1": 347,
+        "GCF_030528405.1": 157,
+        "GCF_032594355.1": 196,
+        "GCF_036919895.1": 374,
+        "GCF_037190085.1": 258,
+        "GCF_038069655.2": 360,
+        "GCF_038871235.1": 209,
+        "GCF_039822205.1": 267,
+        "GCF_040783535.2": 331,
+        "GCF_041320495.1": 291,
+        "GCF_042666235.1": 358,
+        "GCF_044784365.2": 304,
+        "GCF_045112255.1": 300,
+        "GCF_045120835.1": 230,
+        "GCF_045126245.1": 218,
+        "GCF_045603845.1": 253,
+        "GCF_047947025.1": 579,
+        "GCF_048541835.1": 217,
+        "GCF_048571185.1": 353,
+        "GCF_051668705.1": 318,
+        "GCF_900079095.1": 237,
+        "GCF_900104395.1": 205,
+        "GCF_900116205.1": 334,
+        "GCF_900478295.1": 202,
+        "GCF_902770715.1": 257,
+        "GCF_902779965.1": 281,
+        "GCF_902827225.1": 246,
+        "GCF_905120475.1": 311,
+        "GCF_905200055.1": 186,
+        "GCF_945952365.1": 249
+      },
+      "by_clade": {
+        "Acidithiobacillales": 271,
+        "Alteromonadales": 103,
+        "Aquificales": 1812,
+        "Atribacterales": 387,
+        "Bacillales": 837,
+        "Bacteriovoracales": 447,
+        "Bacteroidales": 417,
+        "Bdellovibrionales": 701,
+        "Blastocatellales": 630,
+        "Bradymonadales": 187,
+        "Bryobacterales": 180,
+        "Caldisericales": 250,
+        "Calditrichales": 171,
+        "Campylobacterales": 1918,
+        "Candidatus Acidiferrales": 392,
+        "Candidatus Acidulidesulfobacterales": 405,
+        "Candidatus Altarchaeales": 1199,
+        "Candidatus Aminicenantales": 124,
+        "Candidatus Anstonellales": 137,
+        "Candidatus Babeliales": 165,
+        "Candidatus Brocadiales": 191,
+        "Candidatus Cloacimonadales": 225,
+        "Candidatus Entotheonellales": 463,
+        "Candidatus Fermentibacterales": 111,
+        "Candidatus Fibrimonadales": 166,
+        "Candidatus Hadarchaeales": 755,
+        "Candidatus Hinthialibacterales": 275,
+        "Candidatus Huberarchaeales": 67,
+        "Candidatus Hydrothermarchaeales": 731,
+        "Candidatus Iainarchaeales": 705,
+        "Candidatus Korarchaeales": 176,
+        "Candidatus Krumholzibacteriales": 93,
+        "Candidatus Lernaellales": 382,
+        "Candidatus Limnocylindrales": 372,
+        "Candidatus Mcinerneyibacteriales": 108,
+        "Candidatus Methanofastidiosales": 369,
+        "Candidatus Methylomirabilales": 490,
+        "Candidatus Moduliflexales": 336,
+        "Candidatus Naiadarchaeales": 84,
+        "Candidatus Pheonicimicrobiales": 453,
+        "Candidatus Poseidoniales": 189,
+        "Candidatus Sumerlaeales": 299,
+        "Candidatus Sysuimicrobiales": 852,
+        "Candidatus Theseobacterales": 202,
+        "Candidatus Undinarchaeales": 415,
+        "Candidatus Vecturitrichales": 350,
+        "Candidatus Xenobiales": 131,
+        "Cellvibrionales": 195,
+        "Chlamydiales": 351,
+        "Christensenellales": 154,
+        "Chrysiogenales": 811,
+        "Chthoniobacterales": 178,
+        "Chthonomonadales": 447,
+        "Clostridiales": 309,
+        "Coprothermobacterales": 466,
+        "Deferribacterales": 1690,
+        "Desulfobacterales": 613,
+        "Desulfobulbales": 194,
+        "Desulfovibrionales": 215,
+        "Desulfurellales": 910,
+        "Desulfurobacteriales": 177,
+        "Desulfurococcales": 164,
+        "Dictyoglomales": 1175,
+        "Elusimicrobiales": 261,
+        "Endomicrobiales": 186,
+        "Fibrobacterales": 1513,
+        "Fimbriimonadales": 216,
+        "Flavobacteriales": 479,
+        "Fusobacteriales": 3543,
+        "Gemmatimonadales": 1354,
+        "Haliangiales": 292,
+        "Halobacteriales": 1519,
+        "Hyphomicrobiales": 425,
+        "Kosmotogales": 209,
+        "Methanobacteriales": 2141,
+        "Methanococcales": 3347,
+        "Methanomicrobiales": 485,
+        "Methanopyrales": 503,
+        "Methanosarcinales": 1282,
+        "Myxococcales": 2290,
+        "Nanoarchaeales": 89,
+        "Nautiliales": 315,
+        "Nitrososphaerales": 549,
+        "Nitrospinales": 1122,
+        "Nitrospirales": 1084,
+        "Nostocales": 1478,
+        "Oceanospirillales": 299,
+        "Oculatellales": 357,
+        "Oligoflexales": 152,
+        "Opitutales": 464,
+        "Parachlamydiales": 752,
+        "Petrotogales": 355,
+        "Phycisphaerales": 173,
+        "Pirellulales": 258,
+        "Planctomycetales": 477,
+        "Polyangiales": 556,
+        "Pseudomonadales": 579,
+        "Rhodobacterales": 1049,
+        "Rhodospirillales": 304,
+        "Rickettsiales": 76,
+        "Sedimentisphaerales": 447,
+        "Silvanigrellales": 823,
+        "Sphingomonadales": 624,
+        "Spirochaetales": 987,
+        "Synechococcales": 510,
+        "Terriglobales": 253,
+        "Thermales": 1691,
+        "Thermococcales": 1783,
+        "Thermodesulfobacteriales": 249,
+        "Thermodesulfobiales": 790,
+        "Thermofilales": 127,
+        "Thermosulfidibacterales": 256,
+        "Thermotogales": 550,
+        "Treponematales": 663,
+        "Trueperales": 401,
+        "Verrucomicrobiales": 307,
+        "Vulcanimicrobiales": 1650
+      },
+      "by_sub_class": {
+        "cds_upstream": 69271,
+        "trna_upstream": 1145
+      },
+      "n": 70416,
+      "n_assemblies": 339
+    },
+    "d4_share": 0.08573818536913226,
+    "d4_share_by_sub_class": {
+      "cds_upstream": 0.08553474806694507,
+      "trna_upstream": 0.10014869238170208
+    },
+    "graded": {
+      "by_assembly": {
+        "GCA_000296795.1": 3426,
+        "GCA_000522425.1": 5921,
+        "GCA_000739515.1": 5074,
+        "GCA_000739535.1": 6398,
+        "GCA_000828075.3": 6872,
+        "GCA_001587635.1": 1047,
+        "GCA_001799365.1": 3021,
+        "GCA_001873345.1": 1082,
+        "GCA_002050035.1": 1223,
+        "GCA_002254405.1": 735,
+        "GCA_002254565.1": 1176,
+        "GCA_002368195.1": 7617,
+        "GCA_002690645.1": 607,
+        "GCA_002720865.1": 4539,
+        "GCA_002790315.1": 213,
+        "GCA_002839705.1": 2177,
+        "GCA_002869185.1": 2270,
+        "GCA_002878375.1": 1581,
+        "GCA_003020965.1": 2403,
+        "GCA_003290465.1": 2582,
+        "GCA_003476705.1": 856,
+        "GCA_003602635.1": 1141,
+        "GCA_003641555.1": 1127,
+        "GCA_003663115.1": 838,
+        "GCA_003978675.1": 964,
+        "GCA_003978805.1": 634,
+        "GCA_004195035.1": 1611,
+        "GCA_004357365.1": 1531,
+        "GCA_005116895.1": 2762,
+        "GCA_008086245.1": 1675,
+        "GCA_009776495.1": 799,
+        "GCA_009788135.1": 1328,
+        "GCA_011050175.1": 992,
+        "GCA_011056645.1": 1537,
+        "GCA_011380095.1": 751,
+        "GCA_012517325.1": 3877,
+        "GCA_012517635.1": 1657,
+        "GCA_012523595.1": 2894,
+        "GCA_012842545.1": 671,
+        "GCA_012961055.1": 877,
+        "GCA_013114715.1": 1582,
+        "GCA_013178255.1": 1169,
+        "GCA_013178285.1": 1978,
+        "GCA_013215525.1": 1518,
+        "GCA_013822585.1": 1683,
+        "GCA_013824755.1": 1779,
+        "GCA_014189675.1": 605,
+        "GCA_014189685.1": 973,
+        "GCA_014324045.1": 2100,
+        "GCA_014727915.1": 1597,
+        "GCA_014730185.1": 2802,
+        "GCA_015200025.1": 2859,
+        "GCA_015478585.1": 3193,
+        "GCA_015661585.1": 727,
+        "GCA_015662355.1": 820,
+        "GCA_015663075.1": 747,
+        "GCA_016000045.1": 1122,
+        "GCA_016719945.1": 7263,
+        "GCA_016867655.1": 779,
+        "GCA_016932835.1": 2776,
+        "GCA_016934255.1": 4043,
+        "GCA_016939415.1": 815,
+        "GCA_017458885.1": 658,
+        "GCA_017475405.1": 1502,
+        "GCA_017959225.1": 1735,
+        "GCA_017965445.1": 1979,
+        "GCA_017994915.1": 1834,
+        "GCA_017998195.1": 1763,
+        "GCA_018060625.1": 2687,
+        "GCA_018065615.1": 1556,
+        "GCA_018653085.1": 2602,
+        "GCA_018669005.1": 3252,
+        "GCA_018714045.1": 1173,
+        "GCA_019038705.1": 1569,
+        "GCA_019186945.1": 2994,
+        "GCA_019359155.1": 4516,
+        "GCA_019561565.1": 550,
+        "GCA_019561615.1": 811,
+        "GCA_019636815.1": 3389,
+        "GCA_019752555.1": 1607,
+        "GCA_019912425.1": 2099,
+        "GCA_020217115.1": 1367,
+        "GCA_020247005.1": 3127,
+        "GCA_020354155.1": 1821,
+        "GCA_020430445.1": 2534,
+        "GCA_020434345.1": 1453,
+        "GCA_020434365.1": 1620,
+        "GCA_020434375.1": 1375,
+        "GCA_020434495.1": 2633,
+        "GCA_020434645.1": 1627,
+        "GCA_020632975.1": 3413,
+        "GCA_020633195.1": 7163,
+        "GCA_020833055.1": 1312,
+        "GCA_020833645.1": 1108,
+        "GCA_021161465.1": 956,
+        "GCA_021161495.1": 1072,
+        "GCA_021162285.1": 2049,
+        "GCA_021162685.1": 1138,
+        "GCA_021166685.1": 1464,
+        "GCA_022646745.1": 3151,
+        "GCA_022759145.1": 1239,
+        "GCA_023128455.1": 834,
+        "GCA_023129115.1": 1270,
+        "GCA_023136155.1": 1204,
+        "GCA_023145315.1": 1047,
+        "GCA_023663235.1": 1292,
+        "GCA_023954415.1": 2524,
+        "GCA_025057455.1": 1237,
+        "GCA_025060475.1": 1404,
+        "GCA_025997275.1": 1014,
+        "GCA_026394605.1": 1496,
+        "GCA_026397035.1": 994,
+        "GCA_026413945.1": 893,
+        "GCA_026419195.1": 1649,
+        "GCA_026713835.1": 1851,
+        "GCA_026786155.1": 2459,
+        "GCA_028684695.1": 1382,
+        "GCA_028715605.1": 2165,
+        "GCA_029986255.1": 846,
+        "GCA_030266405.1": 843,
+        "GCA_030656015.1": 2051,
+        "GCA_030673965.1": 1755,
+        "GCA_030749075.1": 1051,
+        "GCA_030753015.1": 3063,
+        "GCA_030765365.1": 1891,
+        "GCA_030765525.1": 4077,
+        "GCA_030765605.1": 3304,
+        "GCA_030765645.1": 3732,
+        "GCA_031258305.1": 1693,
+        "GCA_031266695.1": 1112,
+        "GCA_031268125.1": 1458,
+        "GCA_031275485.1": 1275,
+        "GCA_031279815.1": 2001,
+        "GCA_031281085.1": 956,
+        "GCA_031282625.1": 979,
+        "GCA_031285415.1": 1184,
+        "GCA_031458695.1": 2183,
+        "GCA_031459235.1": 2347,
+        "GCA_031459855.1": 2547,
+        "GCA_032249275.1": 1290,
+        "GCA_034114085.1": 2704,
+        "GCA_034408855.1": 4959,
+        "GCA_035252115.1": 3519,
+        "GCA_035258025.1": 2069,
+        "GCA_035260805.1": 2086,
+        "GCA_035262825.1": 2864,
+        "GCA_035273405.1": 1616,
+        "GCA_035283265.1": 1583,
+        "GCA_035286165.1": 1123,
+        "GCA_035295045.1": 3583,
+        "GCA_035378845.1": 1347,
+        "GCA_035477455.1": 1616,
+        "GCA_035477595.1": 2752,
+        "GCA_035493815.1": 2405,
+        "GCA_035494575.1": 2325,
+        "GCA_035507275.1": 2449,
+        "GCA_035533335.1": 2351,
+        "GCA_035559535.1": 4106,
+        "GCA_035559715.1": 2781,
+        "GCA_035635835.1": 2059,
+        "GCA_035939295.1": 3271,
+        "GCA_036000645.1": 2099,
+        "GCA_036262535.1": 2396,
+        "GCA_036264835.1": 3456,
+        "GCA_036399155.1": 4361,
+        "GCA_036444275.1": 1400,
+        "GCA_036446635.1": 1122,
+        "GCA_036499725.1": 7767,
+        "GCA_036511215.1": 1423,
+        "GCA_036625595.1": 2634,
+        "GCA_037134455.1": 2366,
+        "GCA_037147435.1": 1467,
+        "GCA_038736355.1": 1181,
+        "GCA_038741495.1": 1656,
+        "GCA_038823825.1": 912,
+        "GCA_038842485.1": 847,
+        "GCA_039638295.1": 1209,
+        "GCA_039680605.1": 3949,
+        "GCA_039833665.1": 858,
+        "GCA_039930685.1": 3077,
+        "GCA_040062795.1": 2298,
+        "GCA_040755695.1": 1320,
+        "GCA_040905065.1": 1554,
+        "GCA_041654875.1": 1662,
+        "GCA_041656455.1": 1053,
+        "GCA_041665305.1": 2226,
+        "GCA_041670175.1": 1880,
+        "GCA_041671045.1": 2275,
+        "GCA_041821525.1": 1816,
+        "GCA_043809265.1": 1027,
+        "GCA_044326545.1": 1766,
+        "GCA_044451405.1": 851,
+        "GCA_045106415.1": 2358,
+        "GCA_045802735.1": 2893,
+        "GCA_046262215.1": 2340,
+        "GCA_046262675.1": 2255,
+        "GCA_046292245.1": 1140,
+        "GCA_046483005.1": 709,
+        "GCA_046496215.1": 3060,
+        "GCA_046540055.1": 2303,
+        "GCA_046719655.1": 1970,
+        "GCA_046759365.1": 1202,
+        "GCA_046761145.1": 1520,
+        "GCA_047602415.1": 7804,
+        "GCA_047617785.1": 748,
+        "GCA_049423385.1": 2548,
+        "GCA_049615065.1": 908,
+        "GCA_049692855.1": 531,
+        "GCA_049696515.1": 2624,
+        "GCA_049718665.1": 1444,
+        "GCA_049800655.1": 3074,
+        "GCA_049852185.1": 1321,
+        "GCA_050010375.1": 2733,
+        "GCA_050010735.1": 3450,
+        "GCA_050249195.1": 4427,
+        "GCA_050251875.1": 2261,
+        "GCA_050253075.1": 2524,
+        "GCA_050253135.1": 1175,
+        "GCA_050731075.1": 1404,
+        "GCA_050749505.1": 1579,
+        "GCA_051656905.1": 1963,
+        "GCA_051874735.1": 1701,
+        "GCA_052361145.1": 1331,
+        "GCA_902384585.1": 1200,
+        "GCF_000007185.1": 1550,
+        "GCF_000007205.1": 951,
+        "GCF_000017545.1": 1691,
+        "GCF_000018365.1": 1857,
+        "GCF_000020325.1": 1540,
+        "GCF_000020945.1": 1339,
+        "GCF_000020965.1": 1673,
+        "GCF_000021645.1": 1614,
+        "GCF_000023985.1": 1380,
+        "GCF_000024405.1": 3855,
+        "GCF_000091665.1": 1574,
+        "GCF_000092305.1": 1214,
+        "GCF_000146065.2": 1661,
+        "GCF_000158195.2": 2292,
+        "GCF_000163935.1": 1992,
+        "GCF_000177635.2": 2323,
+        "GCF_000183745.1": 2145,
+        "GCF_000212395.1": 1614,
+        "GCF_000237205.1": 2133,
+        "GCF_000317225.1": 4037,
+        "GCF_000371805.1": 1138,
+        "GCF_000373205.1": 2774,
+        "GCF_000378005.1": 1314,
+        "GCF_000381045.1": 1737,
+        "GCF_000469505.1": 1811,
+        "GCF_000469585.1": 2195,
+        "GCF_000526195.1": 1493,
+        "GCF_000686905.1": 2374,
+        "GCF_000702425.1": 1143,
+        "GCF_000731985.1": 3396,
+        "GCF_000739065.1": 1433,
+        "GCF_000739615.1": 5917,
+        "GCF_000744885.1": 1917,
+        "GCF_000765475.1": 2195,
+        "GCF_000799075.1": 2163,
+        "GCF_000816105.1": 2026,
+        "GCF_000970085.1": 3890,
+        "GCF_001484685.1": 1957,
+        "GCF_001547735.1": 1587,
+        "GCF_001548275.1": 1529,
+        "GCF_002119425.1": 1770,
+        "GCF_002201895.1": 1274,
+        "GCF_002214505.1": 2028,
+        "GCF_002752635.1": 2423,
+        "GCF_002884445.1": 5167,
+        "GCF_002895085.1": 872,
+        "GCF_002945325.1": 1603,
+        "GCF_003057965.1": 1494,
+        "GCF_003265365.1": 1658,
+        "GCF_003290185.1": 4122,
+        "GCF_003351105.1": 1784,
+        "GCF_003574085.1": 2284,
+        "GCF_003612165.1": 6913,
+        "GCF_003664005.1": 1606,
+        "GCF_004135675.1": 2525,
+        "GCF_004310395.1": 1048,
+        "GCF_005771535.1": 2689,
+        "GCF_006636215.1": 8541,
+        "GCF_007997015.1": 3905,
+        "GCF_008362905.1": 2185,
+        "GCF_009662475.1": 3251,
+        "GCF_009909105.1": 7959,
+        "GCF_012027325.1": 2222,
+        "GCF_012027395.1": 2020,
+        "GCF_012027645.1": 1989,
+        "GCF_013402815.2": 4209,
+        "GCF_013760955.1": 1604,
+        "GCF_014203025.1": 1907,
+        "GCF_014281055.1": 2892,
+        "GCF_016593235.1": 1533,
+        "GCF_017302985.1": 7492,
+        "GCF_017642335.1": 2837,
+        "GCF_017873335.1": 2091,
+        "GCF_018141185.1": 1917,
+        "GCF_021647265.1": 2105,
+        "GCF_022430525.1": 2399,
+        "GCF_022662305.1": 4008,
+        "GCF_023546765.1": 5709,
+        "GCF_024022995.1": 1893,
+        "GCF_024707485.1": 2159,
+        "GCF_025147325.1": 3035,
+        "GCF_027052235.1": 1829,
+        "GCF_029848115.1": 2092,
+        "GCF_029873255.1": 2884,
+        "GCF_030295325.1": 2018,
+        "GCF_030296055.1": 2015,
+        "GCF_030528405.1": 1285,
+        "GCF_032594355.1": 1438,
+        "GCF_036919895.1": 4758,
+        "GCF_037190085.1": 3422,
+        "GCF_038069655.2": 3588,
+        "GCF_038871235.1": 1086,
+        "GCF_039822205.1": 1598,
+        "GCF_040783535.2": 3287,
+        "GCF_041320495.1": 2962,
+        "GCF_042666235.1": 3550,
+        "GCF_044784365.2": 2605,
+        "GCF_045112255.1": 3070,
+        "GCF_045120835.1": 1612,
+        "GCF_045126245.1": 1442,
+        "GCF_045603845.1": 1841,
+        "GCF_047947025.1": 5655,
+        "GCF_048541835.1": 1421,
+        "GCF_048571185.1": 2266,
+        "GCF_051668705.1": 2317,
+        "GCF_900079095.1": 5317,
+        "GCF_900104395.1": 1953,
+        "GCF_900116205.1": 3608,
+        "GCF_900478295.1": 1307,
+        "GCF_902770715.1": 1756,
+        "GCF_902779965.1": 2974,
+        "GCF_902827225.1": 1335,
+        "GCF_905120475.1": 1448,
+        "GCF_905200055.1": 1977,
+        "GCF_945952365.1": 1970
+      },
+      "by_clade": {
+        "Acidithiobacillales": 3251,
+        "Alteromonadales": 748,
+        "Aquificales": 8738,
+        "Atribacterales": 3273,
+        "Bacillales": 10427,
+        "Bacteriovoracales": 9077,
+        "Bacteroidales": 4591,
+        "Bdellovibrionales": 13135,
+        "Blastocatellales": 10761,
+        "Bradymonadales": 3905,
+        "Bryobacterales": 3077,
+        "Caldisericales": 2311,
+        "Calditrichales": 2802,
+        "Campylobacterales": 11189,
+        "Candidatus Acidiferrales": 4518,
+        "Candidatus Acidulidesulfobacterales": 3032,
+        "Candidatus Altarchaeales": 5876,
+        "Candidatus Aminicenantales": 1816,
+        "Candidatus Anstonellales": 1200,
+        "Candidatus Babeliales": 1382,
+        "Candidatus Brocadiales": 3426,
+        "Candidatus Cloacimonadales": 3323,
+        "Candidatus Entotheonellales": 11238,
+        "Candidatus Fermentibacterales": 2049,
+        "Candidatus Fibrimonadales": 1328,
+        "Candidatus Hadarchaeales": 4026,
+        "Candidatus Hinthialibacterales": 3732,
+        "Candidatus Huberarchaeales": 213,
+        "Candidatus Hydrothermarchaeales": 5244,
+        "Candidatus Iainarchaeales": 8413,
+        "Candidatus Korarchaeales": 1312,
+        "Candidatus Krumholzibacteriales": 1423,
+        "Candidatus Lernaellales": 7381,
+        "Candidatus Limnocylindrales": 4106,
+        "Candidatus Mcinerneyibacteriales": 1675,
+        "Candidatus Methanofastidiosales": 3025,
+        "Candidatus Methylomirabilales": 4198,
+        "Candidatus Moduliflexales": 5074,
+        "Candidatus Naiadarchaeales": 973,
+        "Candidatus Pheonicimicrobiales": 3828,
+        "Candidatus Poseidoniales": 2192,
+        "Candidatus Sumerlaeales": 2582,
+        "Candidatus Sysuimicrobiales": 7077,
+        "Candidatus Theseobacterales": 1891,
+        "Candidatus Undinarchaeales": 4377,
+        "Candidatus Vecturitrichales": 6398,
+        "Candidatus Xenobiales": 1701,
+        "Cellvibrionales": 908,
+        "Chlamydiales": 2779,
+        "Christensenellales": 1173,
+        "Chrysiogenales": 6425,
+        "Chthoniobacterales": 2340,
+        "Chthonomonadales": 6335,
+        "Clostridiales": 3225,
+        "Coprothermobacterales": 5349,
+        "Deferribacterales": 12805,
+        "Desulfobacterales": 6081,
+        "Desulfobulbales": 1763,
+        "Desulfovibrionales": 2165,
+        "Desulfurellales": 5272,
+        "Desulfurobacteriales": 634,
+        "Desulfurococcales": 1290,
+        "Dictyoglomales": 9063,
+        "Elusimicrobiales": 3728,
+        "Endomicrobiales": 979,
+        "Fibrobacterales": 15489,
+        "Fimbriimonadales": 1970,
+        "Flavobacteriales": 6227,
+        "Fusobacteriales": 31085,
+        "Gemmatimonadales": 18295,
+        "Haliangiales": 7767,
+        "Halobacteriales": 16250,
+        "Hyphomicrobiales": 5709,
+        "Kosmotogales": 2423,
+        "Methanobacteriales": 16530,
+        "Methanococcales": 18163,
+        "Methanomicrobiales": 4176,
+        "Methanopyrales": 2824,
+        "Methanosarcinales": 11440,
+        "Myxococcales": 52100,
+        "Nanoarchaeales": 1518,
+        "Nautiliales": 1533,
+        "Nitrososphaerales": 4744,
+        "Nitrospinales": 10796,
+        "Nitrospirales": 12895,
+        "Nostocales": 23284,
+        "Oceanospirillales": 2374,
+        "Oculatellales": 4516,
+        "Oligoflexales": 2358,
+        "Opitutales": 4088,
+        "Parachlamydiales": 9248,
+        "Petrotogales": 4183,
+        "Phycisphaerales": 2859,
+        "Pirellulales": 4959,
+        "Planctomycetales": 8323,
+        "Polyangiales": 14426,
+        "Pseudomonadales": 5655,
+        "Rhodobacterales": 10425,
+        "Rhodospirillales": 2100,
+        "Rickettsiales": 607,
+        "Sedimentisphaerales": 6819,
+        "Silvanigrellales": 11451,
+        "Sphingomonadales": 6325,
+        "Spirochaetales": 9509,
+        "Synechococcales": 3489,
+        "Terriglobales": 3450,
+        "Thermales": 14050,
+        "Thermococcales": 23063,
+        "Thermodesulfobacteriales": 1529,
+        "Thermodesulfobiales": 4706,
+        "Thermofilales": 1656,
+        "Thermosulfidibacterales": 1587,
+        "Thermotogales": 6251,
+        "Treponematales": 6264,
+        "Trueperales": 4078,
+        "Verrucomicrobiales": 5917,
+        "Vulcanimicrobiales": 19764
+      },
+      "by_sub_class": {
+        "cds_upstream": 740587,
+        "trna_upstream": 10288
+      },
+      "n": 750875,
+      "n_assemblies": 339
+    }
+  },
+  "disclosures": [
+    "Reported BESIDE v2 (reports/two_stage_precision_v2.json), never replacing it (ADR-0005 A16 Pin 5): the P3 exit record keeps 'A13 Pin 1: FAIL, underpowered, on v2' whatever this report shows.",
+    "The gated arm is the GATE-4 eval twin, not the shipped scanner; the twin saw 0 of the 1201 positives, which are v2's graded positive windows, byte-identical. The production arm's numbers are REPORTED, NOT GATED: its Stage-1 is in-sample on every positive.",
+    "ADR-0005 A17 Pin 5 (a) \u2014 CM circularity, as A15 Pin 7(a): a graded negative MEANS below 10.0 bits on RF00230/TBDB001 and free of the GGTGGNACCGCG motif on either strand (A15 Pin 2, unchanged), so a CM contestant is favoured by construction, and a learned model that finds a real but CM-invisible T-box in a graded window is scored as a false positive. This benchmark grades Stage-1-vs-two-stage integration; it is never evidence about novel-element recall, FDR or held-out-clade generalization.",
+    "ADR-0005 A17 Pin 5 (b) \u2014 prior scores exist on this substrate: production Stage-1 at \u03c4 = 0.9 scanned every admissible a2 host in round 0 and the shipped Stage-2 scored all 941 round-0 candidates. The selection rule reads neither. 3 of 750875 graded negatives overlap a round-0 candidate locus (2 distinct candidates); 1 of them draw a twin Stage-1 candidate. Their A12 Pin 4(e) orthogonal-criterion status: undetermined 3, no_orthogonal_pass 0, orthogonal_pass 0 (relaxed_architecture has no committed per-candidate source, so a window whose candidates pass neither other criterion is undetermined, not failed). Nothing is dropped on it, and the twin never scanned these genomes.",
+    "ADR-0005 A17 Pin 5 (c) \u2014 label-noise direction: a graded negative that is a real CM-invisible T-box penalises whichever system ranks it higher, so if Stage-2 detects such loci better than Stage-1 the bias runs AGAINST two-stage (conservative for the two-stage claim). The D4 partition moves 70416 windows beside the gate and reduces this risk without removing it; the extension's P-conditioned acceptance of the draw is a second-order tilt, which the census bounds.",
+    "ADR-0005 A17 Pin 5 (d) \u2014 a different benchmark from v2: the negatives are native windows on off-catalogue genomes in training orders, the positives catalogue records. Graded composition: cds_upstream 740587, trna_upstream 10288 over 339 assemblies; top clades Myxococcales 52100, Fusobacteriales 31085, Nostocales 23284, Thermococcales 23063, Vulcanimicrobiales 19764, Gemmatimonadales 18295, \u2026 (+111 more); D4 share 0.08573818536913226; the pool's per-rule refusals are draw: assembly_gap 777, fold 308, content 290 (refusal share 0.01375); census: assembly_gap 5403, fold 2123, content 2004 (refusal share 0.013015640620817377). The fold screen shifts the draw toward genomes distant from training, as A15 Pin 7(e) did.",
+    "ADR-0005 A17 Pin 5 (e) \u2014 the union mask is fail-open on a2 (A8) and no substrate pre-scan exists: the content screen is the only T-box screen, and its refusal count lower-bounds T-box content in the draw; a passing screen is NOT a claim the windows are clean.",
+    "ADR-0005 A17 Pin 5 (f) \u2014 A15 Pin 7(b)'s flank familiarity and Pin 7(d)'s six leader records in Stage-2 training carry over unchanged; measured here: the graded arm's familiarity baseline reaches AUPRC 0.997527 against Stage-1-only 0.997524 (+0.000 pp), so the gate is confounded by construction; a fix needs a twin retrain.",
+    "fewer than 20 graded negatives reached Stage-2; the hard-negative benchmark lacks power to test Stage-2: P = 6 of 750875 graded negatives reach a Stage-2 payload on the gated arm (N_min = 20); census extension triggered True (P on the draw 0). The A13 verdict is computed exactly as A13 does and recorded unchanged; README and the manuscript say so in A15 Pin 5's words.",
+    "Beside the gate (A17 Pin 2): 0 of 70416 D4-context windows draw a twin Stage-1 candidate and 0 a Stage-2 payload; with them ADDED to the denominator (not graded) the twin's AUPRC gain reads 0.00013331621833145846 pp.",
+    "The ADR-0005 D7 100:1 prevalence is reached by REWEIGHTING the graded negatives (\u03bb = 100 \u00b7 n_pos / n_graded_neg); the graded population's own composition is 625.208 negatives per positive.",
+    "Every positive is re-scored in this run (A15 Pin 6: Stage-2 logits depend on batch composition); on the gated arm 1198 of 1201 positives' two-stage scores differ from v2's (max |\u0394| 0.009360606443569286).",
+    "ADR-0005 D3 freezes the Stage-1 threshold, the locus knobs and the Stage-2 operating point at the \u00a713.1 phase gate (P5-01). Nothing here pins any of them; the knobs this run used are recorded under sources.rule_knobs."
+  ],
+  "env_lock": "envs/data.conda-lock.yml",
+  "familiarity_baseline": {
+    "by_arm": {
+      "production": {
+        "auprc": 1.0,
+        "lambda": 0.1599467288163809,
+        "minus_stage1_pp": 0.004189579559288337,
+        "n_items": 752076,
+        "rivals_stage1": true,
+        "stage1_only_auprc": 0.9999581042044071,
+        "two_stage_auprc": 0.9999877903053597
+      },
+      "twin": {
+        "auprc": 0.9975268134640275,
+        "lambda": 0.1599467288163809,
+        "minus_stage1_pp": 0.0002348500992899183,
+        "n_items": 752076,
+        "rivals_stage1": true,
+        "stage1_only_auprc": 0.9975244649630346,
+        "two_stage_auprc": 0.9975259231279142
+      }
+    },
+    "decoy_prevalence": 100,
+    "gated_arm": "twin",
+    "gated_arm_rivals_stage1": true,
+    "score": "fraction of the item contig's canonical 32-mers present in the arm's own Stage-1 training DNA (fold context_seq, the admitted mined windows, the embedded decoy inserts) \u2014 ADR-0005 A15 Pin 7(b)",
+    "source": {
+      "arms": {
+        "production": {
+          "n_fold_records": 8303,
+          "n_inserts": 3701,
+          "n_inserts_by_pool": {
+            "dinuc_shuffled": 702,
+            "structured_rna": 2999
+          },
+          "n_kmers": 17331539,
+          "n_mined": 15708
+        },
+        "twin": {
+          "n_fold_records": 7099,
+          "n_inserts": 3601,
+          "n_inserts_by_pool": {
+            "dinuc_shuffled": 602,
+            "structured_rna": 2999
+          },
+          "n_kmers": 16849324,
+          "n_mined": 15708
+        }
+      },
+      "benchmark_sha256": "38e7f3342799ed65128c19ec712a4b6ef05b3a8727cffa79b35397b07b066b8c",
+      "k": 32,
+      "path": "data/interim/p3_16/hardneg_census_familiarity.json",
+      "schema_version": "1.0",
+      "sha256": "e4e99354824029181ca418218d23493842a8098df56efe6d6a4e6df34078e180",
+      "step": "P3-16\u2032-remint"
+    },
+    "statistic": "auprc_at_pinned_prevalence"
+  },
+  "familiarity_status": "supplied",
+  "gate": {
+    "arm": "twin",
+    "auprc": {
+      "stage1_only": 0.9975244649630346,
+      "two_stage": 0.9975259231279142
+    },
+    "decoy_prevalence": 100,
+    "definition": "PRD \u00a718.1 P3 exit \u2014 two-stage beats Stage-1-only precision on the in-distribution benchmark, graded (ADR-0005 A13) on the THRESHOLD-FREE statistic: AUPRC at the D7 pinned decoy prevalence, PRD \u00a712's primary imbalance-aware metric",
+    "gain_ci": {
+      "ci_level": 0.95,
+      "lower": -8.764032996239067e-05,
+      "n_blocks": 1368,
+      "n_boot": 2000,
+      "point": 0.0001458164879841739,
+      "upper": 0.000601569293990911
+    },
+    "gain_pp": 0.00014581648796196944,
+    "passes": true,
+    "reported_not_gated": {
+      "matched_recall": {
+        "gain_ci": {
+          "ci_level": 0.95,
+          "lower": -0.00010409245744413813,
+          "n_blocks": 1368,
+          "n_boot": 2000,
+          "point": 0.013371684050589305,
+          "upper": 0.04149234181288153
+        },
+        "gain_pp": 0.013371684050589305,
+        "precision": {
+          "stage1_only": 0.9998662831594941,
+          "two_stage": 1.0
+        },
+        "target_recall": 0.9908409658617818,
+        "two_stage_beats_stage1_only": true
+      },
+      "why": "ADR-0005 D3 freezes the Stage-1 threshold and the Stage-2 operating point at P5-01, two phases after this gate; the matched-recall read is therefore reported at the values this run used and gated on neither"
+    },
+    "statistic": "auprc_at_pinned_prevalence",
+    "underpowered_statement": "fewer than 20 graded negatives reached Stage-2; the hard-negative benchmark lacks power to test Stage-2",
+    "verdict_class": "underpowered"
+  },
+  "gated": true,
+  "gated_arm": "twin",
+  "generated_at_utc": "2026-10-30T14:17:58+00:00",
+  "generated_by": "src/tbox_finder/integration/precision.py",
+  "is_science": true,
+  "population": {
+    "census": {
+      "audit": {
+        "n_noise_residue": 2,
+        "n_sampled": 1000,
+        "n_violations": 0,
+        "passes": true,
+        "threshold_bits": {
+          "RF00230": 20.0,
+          "TBDB001": 12.0
+        }
+      },
+      "beside_by_sub_class": {
+        "cds_upstream": 61041,
+        "trna_upstream": 993
+      },
+      "content_refused_by_rule": {
+        "cm": 1470,
+        "motif": 534
+      },
+      "content_threshold_bits": 10.0,
+      "controls_all_fired": true,
+      "delta_max": 256,
+      "draw_size": 100000,
+      "eligible_sha256": "c767505faa16ef2719e4a3fdc851ebdbf2cc5a02dfbc262e9a1c50e1e6ee48b7",
+      "features_sha256": "b3689adbf8d88c376e5ab2c012d316f722ccf57f39a257b15c0100236505b24e",
+      "fold_refused_by_rule": {
+        "kmer_and_coord": 2,
+        "kmer_only": 2121
+      },
+      "graded_by_sub_class": {
+        "cds_upstream": 651585,
+        "trna_upstream": 9047
+      },
+      "item_files": {
+        "beside": {
+          "n": 62034,
+          "path": "data/interim/p3_16/hardneg_pool_census/beside.json",
+          "sha256": "4d81cf2fb1853bdd404e8708bfe3e6f098a00ef7b7751e0f18bf507a4e058999"
+        },
+        "graded": {
+          "n": 660632,
+          "path": "data/interim/p3_16/hardneg_pool_census/graded.json",
+          "sha256": "2706d50eee728ff89169de38cbc707e43abd2818acd13a0ec11bb194d042cf6e"
+        }
+      },
+      "kind": "hardneg_pool",
+      "n_beside": 62034,
+      "n_controls": 12,
+      "n_controls_fired": 12,
+      "n_eligible": 832196,
+      "n_features": 899299,
+      "n_features_by_type": {
+        "CDS": 885425,
+        "tRNA": 13874
+      },
+      "n_graded": 660632,
+      "n_hosts": 339,
+      "n_problems": 0,
+      "n_refused_coord": 2,
+      "n_refused_kmer": 2123,
+      "n_selected": 732196,
+      "path": "reports/p3/hardneg_pool_census.json",
+      "pinned_draw": true,
+      "refusal_share": 0.013015640620817377,
+      "refusals": {
+        "assembly_gap": 5403,
+        "content": 2004,
+        "fold": 2123
+      },
+      "refusals_by_sub_class": {
+        "assembly_gap": {
+          "cds_upstream": 5270,
+          "trna_upstream": 133
+        },
+        "content": {
+          "cds_upstream": 1977,
+          "trna_upstream": 27
+        },
+        "fold": {
+          "cds_upstream": 1126,
+          "trna_upstream": 997
+        }
+      },
+      "schema_version": "1.0",
+      "seed": 42,
+      "selected_sha256": "b9c926e916281712a36d7ac904334ecc6a89aa13b2db6cc8f7ddf340f48a6508",
+      "selection": "ADR-0005 A17: native \u00a79.1 class-4 leaders (CDS-upstream + tRNA-upstream 1,024-nt windows, \u03b4 ~ U{0..256}) on the 339 annotated admissible a2 hosts; seed-42 uniform draw; A15 Pin 1 + Pin 2 screens unchanged; D4-context windows beside the graded set",
+      "sha256": "cca924575c6698c6173b59dd84e8bc49465f620c18aacf98cd37c76c9b709645",
+      "stage": "census",
+      "step": "P3-16\u2033-hardneg"
+    },
+    "draw": {
+      "audit": {
+        "n_noise_residue": 8,
+        "n_sampled": 1000,
+        "n_violations": 0,
+        "passes": true,
+        "threshold_bits": {
+          "RF00230": 20.0,
+          "TBDB001": 12.0
+        }
+      },
+      "beside_by_sub_class": {
+        "cds_upstream": 8230,
+        "trna_upstream": 152
+      },
+      "content_refused_by_rule": {
+        "cm": 205,
+        "motif": 85
+      },
+      "content_threshold_bits": 10.0,
+      "controls_all_fired": true,
+      "delta_max": 256,
+      "draw_size": 100000,
+      "eligible_sha256": "c767505faa16ef2719e4a3fdc851ebdbf2cc5a02dfbc262e9a1c50e1e6ee48b7",
+      "features_sha256": "b3689adbf8d88c376e5ab2c012d316f722ccf57f39a257b15c0100236505b24e",
+      "fold_refused_by_rule": {
+        "kmer_only": 308
+      },
+      "graded_by_sub_class": {
+        "cds_upstream": 89002,
+        "trna_upstream": 1241
+      },
+      "item_files": {
+        "beside": {
+          "n": 8382,
+          "path": "data/interim/p3_16/hardneg_pool/beside.json",
+          "sha256": "09460bf76e861c8c0a7689d0506ebe0f7b903ccbff6a7a3f940f400a083f9cc7"
+        },
+        "graded": {
+          "n": 90243,
+          "path": "data/interim/p3_16/hardneg_pool/graded.json",
+          "sha256": "21e7d89b97a20e2142eeec31c6b4d07275b82831026cdc00c7ed54250c55bd1c"
+        }
+      },
+      "kind": "hardneg_pool",
+      "n_beside": 8382,
+      "n_controls": 12,
+      "n_controls_fired": 12,
+      "n_eligible": 832196,
+      "n_features": 899299,
+      "n_features_by_type": {
+        "CDS": 885425,
+        "tRNA": 13874
+      },
+      "n_graded": 90243,
+      "n_hosts": 339,
+      "n_problems": 0,
+      "n_refused_coord": 0,
+      "n_refused_kmer": 308,
+      "n_selected": 100000,
+      "path": "reports/p3/hardneg_pool.json",
+      "pinned_draw": true,
+      "refusal_share": 0.01375,
+      "refusals": {
+        "assembly_gap": 777,
+        "content": 290,
+        "fold": 308
+      },
+      "refusals_by_sub_class": {
+        "assembly_gap": {
+          "cds_upstream": 755,
+          "trna_upstream": 22
+        },
+        "content": {
+          "cds_upstream": 286,
+          "trna_upstream": 4
+        },
+        "fold": {
+          "cds_upstream": 150,
+          "trna_upstream": 158
+        }
+      },
+      "schema_version": "1.0",
+      "seed": 42,
+      "selected_sha256": "9a9e27131db8a31ee45ed9478bd2c4cb2e0ccb4e52981034bd191c04d6a26d2a",
+      "selection": "ADR-0005 A17: native \u00a79.1 class-4 leaders (CDS-upstream + tRNA-upstream 1,024-nt windows, \u03b4 ~ U{0..256}) on the 339 annotated admissible a2 hosts; seed-42 uniform draw; A15 Pin 1 + Pin 2 screens unchanged; D4-context windows beside the graded set",
+      "sha256": "4fc1d664a0509d5bd77e8e4bca7fc79d007388c82a497fab5b290bd536833a6e",
+      "stage": "draw",
+      "step": "P3-16\u2033-hardneg"
+    },
+    "n_beside": 70416,
+    "n_graded": 750875,
+    "stage": "census"
+  },
+  "power": {
+    "P": 6,
+    "by_arm": {
+      "production": {
+        "n_gated_negatives": 750875,
+        "n_gated_negatives_with_stage1_candidate": 24,
+        "n_gated_negatives_with_stage2_payload": 24
+      },
+      "twin": {
+        "n_gated_negatives": 750875,
+        "n_gated_negatives_with_stage1_candidate": 6,
+        "n_gated_negatives_with_stage2_payload": 6
+      }
+    },
+    "decision": "underpowered",
+    "draw_source": {
+      "path": "data/interim/p3_16/hardneg_power.json",
+      "sha256": "afcf846bb88d8f2c355649ebb7076bc33e60e1fd80203777cf6e089304733188"
+    },
+    "extension": {
+      "P_draw": 0,
+      "P_final": 6,
+      "triggered": true
+    },
+    "gated_arm": "twin",
+    "n_min": 20,
+    "rule": "ADR-0005 A17 Pin 4 \u2014 P = graded negatives (D4-context excluded) with >= 1 Stage-2 payload on the twin arm at Stage-1 \u03c4 = 0.5, counted from the payloads alone; underpowered iff the final P < N_min = 20; one census extension when the draw's P < N_min, decided on P alone",
+    "sentence": "fewer than 20 graded negatives reached Stage-2; the hard-negative benchmark lacks power to test Stage-2",
+    "source": {
+      "path": "data/interim/p3_16/hardneg_census_power.json",
+      "sha256": "058a29a6fc5989843fb41fba30619adeabec66d4189f4ba525ba462a73ca2f92"
+    },
+    "stage": "census",
+    "this_threshold_payload_count": 6,
+    "verdict_class": "underpowered"
+  },
+  "prd": "PRD \u00a72.3, \u00a76, \u00a712, \u00a718.1",
+  "problems": [
+    "the gate's verdict changes across the Stage-1 threshold sweep; ADR-0005 D3 leaves that value unpinned until P5-01, so the gate would rest on it"
+  ],
+  "provenance": {
+    "adr": "ADR-0005",
+    "env_lock_hash": "a4a6715d411d7218432c4c670d35475f6c9aa7dd6397fd5d906ca7e21293dc34",
+    "extra": {
+      "declared_outputs": [
+        "reports/two_stage_precision_hardneg.json"
+      ]
+    },
+    "generated_at_utc": "2026-10-30T14:18:11.856523+00:00",
+    "git_sha": "1c9efb918eb2f94b351df86f1d328243178d434e",
+    "inputs": {
+      "reports/p3/two_stage_precision_items_hardneg.json": "71e3c0ee71ec5298dc52872050e3a59487def4fbfb3ee0a4eb77ceb40df3c5c5"
+    },
+    "outputs": {},
+    "rule": "workflow/rules/integration.smk :: precision_comparison_hardneg",
+    "schema_version": "1.0",
+    "script": "src/tbox_finder/integration/precision.py",
+    "seed": 42
+  },
+  "reported_not_gated": {
+    "beside_gate": "beside_gate (A17 Pin 2: D4-context negatives, never in the denominator)",
+    "rule": "ADR-0005 A17 Pin 3 \u2014 reported, not graded: the production arm (arms.production); A13 Pin 2's matched-recall grid (arms.*.recall_grid) and the \u03c4 0.7 / 0.9 reads (stage1_threshold_sensitivity); A13 Pin 3's 10:1 -> 10^4:1 sweep (arms.*.prevalence); the A15 Pin 7(b) familiarity baseline when supplied; and the block-bootstrap CIs (positive cluster + negative assembly). Per A13 Pin 4 no CI bar applies"
+  },
+  "round0_crosstab": {
+    "gated_arm": "twin",
+    "n_beside_overlapping": 4,
+    "n_graded_negatives": 750875,
+    "n_overlapping": 3,
+    "n_overlapping_with_twin_candidate": 1,
+    "n_overlapping_with_twin_payload": 1,
+    "n_round0_candidates_overlapped": 2,
+    "orthogonal_status": {
+      "no_orthogonal_pass": 0,
+      "orthogonal_pass": 0,
+      "undetermined": 3
+    },
+    "per_criterion_over_overlapped_candidates": {
+      "any_helix_rscape": {
+        "failed": 0,
+        "not_recorded": 0,
+        "passed": 0,
+        "unavailable": 2
+      },
+      "downstream_aaRS_synteny": {
+        "failed": 2,
+        "not_recorded": 0,
+        "passed": 0,
+        "unavailable": 0
+      },
+      "relaxed_architecture": {
+        "failed": 0,
+        "not_recorded": 2,
+        "passed": 0,
+        "unavailable": 0
+      }
+    },
+    "rule": "ADR-0005 A17 Pin 5(b) \u2014 a graded window overlaps a round-0 candidate when both lie on the same assembly and seqid and [start, end) intersects the candidate's 0-based half-open locus; strand-agnostic (the round-0 manifest records no strand); nothing is dropped on it",
+    "source": {
+      "genomes": {
+        "GCA_001873345.1": {
+          "n_contigs": 152,
+          "path": "data/interim/production_genomes/GCA_001873345.1.fna",
+          "sha256": "9ec915f56eec3d5cba2002a18878cba65d3837ade13e8ef410b3753cd12fa4f8"
+        },
+        "GCA_002878375.1": {
+          "n_contigs": 34,
+          "path": "data/interim/production_genomes/GCA_002878375.1.fna",
+          "sha256": "f1bd3fcfc65ac67a31844b6ac9ac233ba337e05810b2b86e16fa2feb7669cb37"
+        },
+        "GCA_003290465.1": {
+          "n_contigs": 1,
+          "path": "data/interim/production_genomes/GCA_003290465.1.fna",
+          "sha256": "ec306eeafcf2b929a96eeb930ae8d984443101accd2b9830a6dd8cf6ede6d5b4"
+        },
+        "GCA_005116895.1": {
+          "n_contigs": 35,
+          "path": "data/interim/production_genomes/GCA_005116895.1.fna",
+          "sha256": "dfc7ba0e6a9ea0be0026729aeeb27a060f88df992c90fbb00e4ded52dc521b68"
+        },
+        "GCA_011056645.1": {
+          "n_contigs": 231,
+          "path": "data/interim/production_genomes/GCA_011056645.1.fna",
+          "sha256": "52ee84a29a78180fd5008d4f222d2d96e099f1bcd7148ee108a328fbe57b385e"
+        },
+        "GCA_012517635.1": {
+          "n_contigs": 488,
+          "path": "data/interim/production_genomes/GCA_012517635.1.fna",
+          "sha256": "decf264fffd111380ed7b9398ced7168037b926a695cae10c0370e50e130b357"
+        },
+        "GCA_015478585.1": {
+          "n_contigs": 241,
+          "path": "data/interim/production_genomes/GCA_015478585.1.fna",
+          "sha256": "7c677e3ba0873e557a4bb0085a527723eca6c3dcd21224251dcb7f455f7f7983"
+        },
+        "GCA_017458885.1": {
+          "n_contigs": 154,
+          "path": "data/interim/production_genomes/GCA_017458885.1.fna",
+          "sha256": "71b591844c5e0c9b489aec091081e6ba573299e8e0347cfd9e4a9a867637c9c8"
+        },
+        "GCA_018714045.1": {
+          "n_contigs": 122,
+          "path": "data/interim/production_genomes/GCA_018714045.1.fna",
+          "sha256": "4eb995318377d3a08551d1ff0e9ab035a8a997063a4b364d77e762c42c44bda2"
+        },
+        "GCA_019038705.1": {
+          "n_contigs": 231,
+          "path": "data/interim/production_genomes/GCA_019038705.1.fna",
+          "sha256": "5d5d8cc2a67656edf1aac63f431a030a442b999c422c9ac66b730427ffb037ea"
+        },
+        "GCA_019636815.1": {
+          "n_contigs": 143,
+          "path": "data/interim/production_genomes/GCA_019636815.1.fna",
+          "sha256": "cea8b48c90e982d26c459f104199c3e1b2cea7b7977efba4cc3138f91dd267a6"
+        },
+        "GCA_020434495.1": {
+          "n_contigs": 746,
+          "path": "data/interim/production_genomes/GCA_020434495.1.fna",
+          "sha256": "00e3c7a8b2b070c0c98fcca177be0c4d63633a40e3032bc3c75b948e58465f5c"
+        },
+        "GCA_023145315.1": {
+          "n_contigs": 282,
+          "path": "data/interim/production_genomes/GCA_023145315.1.fna",
+          "sha256": "88bb4a28d33bb80da644dc18fbd3fa41e6ae8865914a25813ddfb60749ed1024"
+        },
+        "GCA_023663235.1": {
+          "n_contigs": 53,
+          "path": "data/interim/production_genomes/GCA_023663235.1.fna",
+          "sha256": "1c84dee423321b34da2dff0a764bc02d449c51f0dc0933d1114286c3d99eb0a6"
+        },
+        "GCA_025060475.1": {
+          "n_contigs": 81,
+          "path": "data/interim/production_genomes/GCA_025060475.1.fna",
+          "sha256": "7c3d5bb6ad3ca08c20abb0783a0d160121e453f773d4c9843180200986331d18"
+        },
+        "GCA_030673965.1": {
+          "n_contigs": 22,
+          "path": "data/interim/production_genomes/GCA_030673965.1.fna",
+          "sha256": "8f4d94799bbd8ff64f2fe01eea6b2a91c6eec8aede972e54ac64529af5020664"
+        },
+        "GCA_030765645.1": {
+          "n_contigs": 78,
+          "path": "data/interim/production_genomes/GCA_030765645.1.fna",
+          "sha256": "c599445f4aee272bd321ddffdf59ff01093d2303ac8d05094f18cad5e8ed1283"
+        },
+        "GCA_031266695.1": {
+          "n_contigs": 369,
+          "path": "data/interim/production_genomes/GCA_031266695.1.fna",
+          "sha256": "7e3a1615511639f9c084032e7bae75bb1881f03e9afd77dee42db86d3e234339"
+        },
+        "GCA_031268125.1": {
+          "n_contigs": 282,
+          "path": "data/interim/production_genomes/GCA_031268125.1.fna",
+          "sha256": "760faf380b84cd1a17bbacec716cd6c112f9c8a54b0f9cdee15e0641007d82db"
+        },
+        "GCA_031275485.1": {
+          "n_contigs": 92,
+          "path": "data/interim/production_genomes/GCA_031275485.1.fna",
+          "sha256": "a0729cc3e511fb4bc53449db5e7bf7b065c44ed3b4fc4880b0cd72e80a30c7f0"
+        },
+        "GCA_031458695.1": {
+          "n_contigs": 56,
+          "path": "data/interim/production_genomes/GCA_031458695.1.fna",
+          "sha256": "e5f553ef021b610297aeff1052f7788c32ef08ca671a464418eb9c900402260b"
+        },
+        "GCA_031459235.1": {
+          "n_contigs": 109,
+          "path": "data/interim/production_genomes/GCA_031459235.1.fna",
+          "sha256": "d95983b4790ee976959ac2d761ac720b4d3ab952ebc1ba7b8dba718dc36d4bef"
+        },
+        "GCA_031459855.1": {
+          "n_contigs": 4,
+          "path": "data/interim/production_genomes/GCA_031459855.1.fna",
+          "sha256": "c7f0781f3af57a09986445ba934767e3f9066d9680d9e6d86543e9eadb905016"
+        },
+        "GCA_035252115.1": {
+          "n_contigs": 242,
+          "path": "data/interim/production_genomes/GCA_035252115.1.fna",
+          "sha256": "905e9f9c5b1021a40f6b3df8445df4c6c71557471d68e92d1f99ae30814b5b6e"
+        },
+        "GCA_035295045.1": {
+          "n_contigs": 664,
+          "path": "data/interim/production_genomes/GCA_035295045.1.fna",
+          "sha256": "0337d61b260120a1a0cda9083c8c62490eb3c558e75eb9982d27c45cf94746f0"
+        },
+        "GCA_035378845.1": {
+          "n_contigs": 68,
+          "path": "data/interim/production_genomes/GCA_035378845.1.fna",
+          "sha256": "2e8fc5c92083d9734ff9910b9e3190619217043bc0fab19892097e12bad8c642"
+        },
+        "GCA_035477455.1": {
+          "n_contigs": 174,
+          "path": "data/interim/production_genomes/GCA_035477455.1.fna",
+          "sha256": "ad09a2eb215ddc8e491d11c4c00e7ca44661ccd9b39e1bb31ae3429f6c4814c2"
+        },
+        "GCA_035477595.1": {
+          "n_contigs": 202,
+          "path": "data/interim/production_genomes/GCA_035477595.1.fna",
+          "sha256": "044b8568049d80ff11a9d88c07f3d9dea3011ae7b78120b9cdfe166985c6b062"
+        },
+        "GCA_038842485.1": {
+          "n_contigs": 27,
+          "path": "data/interim/production_genomes/GCA_038842485.1.fna",
+          "sha256": "5d5c9a7e4167165729962f9df3f256319899e2304b14f83ffa2737bc799a2af8"
+        },
+        "GCA_039638295.1": {
+          "n_contigs": 83,
+          "path": "data/interim/production_genomes/GCA_039638295.1.fna",
+          "sha256": "739c2176cb83d9e67eb67924b698efc621386df8409c8d6299428ab451af07c6"
+        },
+        "GCA_040062795.1": {
+          "n_contigs": 93,
+          "path": "data/interim/production_genomes/GCA_040062795.1.fna",
+          "sha256": "9b8d084846cc0680de7d4907e8b9a56431c1babef9b287e16f9f7099e2ffcbf9"
+        },
+        "GCA_040905065.1": {
+          "n_contigs": 459,
+          "path": "data/interim/production_genomes/GCA_040905065.1.fna",
+          "sha256": "4d685009efffca6a91c1c4cddc7f73c6dee249c1daa746e173d79f6580ca7bb9"
+        },
+        "GCA_041656455.1": {
+          "n_contigs": 240,
+          "path": "data/interim/production_genomes/GCA_041656455.1.fna",
+          "sha256": "a8940ff2a26cc69a5139e4a47b5e2621a6b99d8b75ec9be6018f79170dce4667"
+        },
+        "GCA_041670175.1": {
+          "n_contigs": 357,
+          "path": "data/interim/production_genomes/GCA_041670175.1.fna",
+          "sha256": "d9a81915baacd1c36807f8fdeaeed1c096e00980f9114807ea41f12c59062de8"
+        },
+        "GCA_049718665.1": {
+          "n_contigs": 64,
+          "path": "data/interim/production_genomes/GCA_049718665.1.fna",
+          "sha256": "6537e435ee03bd1176c1ceb8409559ce08be356cee18f65fcb840dbfe09db44f"
+        },
+        "GCF_000020965.1": {
+          "n_contigs": 1,
+          "path": "data/interim/production_genomes/GCF_000020965.1.fna",
+          "sha256": "e02a272401104161b7c747dd5521651dc70385284d442587003eb63514f7bd68"
+        },
+        "GCF_000021645.1": {
+          "n_contigs": 1,
+          "path": "data/interim/production_genomes/GCF_000021645.1.fna",
+          "sha256": "5b97d41ccfc1f4c3a0239983aae6bc7b8b7e04dead397d34f8ff3e36810549a3"
+        },
+        "GCF_000024405.1": {
+          "n_contigs": 3,
+          "path": "data/interim/production_genomes/GCF_000024405.1.fna",
+          "sha256": "46df8dd8f4eca68e60d56cde0570ce4304a1669fe92abc81e487fd7e4d5000fb"
+        },
+        "GCF_000183745.1": {
+          "n_contigs": 2,
+          "path": "data/interim/production_genomes/GCF_000183745.1.fna",
+          "sha256": "858ae07f1420ca334b13ab8c3dc07c26c7870fd7e715b6db1fba94e415eaf39f"
+        },
+        "GCF_000212395.1": {
+          "n_contigs": 1,
+          "path": "data/interim/production_genomes/GCF_000212395.1.fna",
+          "sha256": "df984f779e2e92e32a2926b5cd4e71fe0e4026891b237f6b44b8d2132a726b7a"
+        },
+        "GCF_000373205.1": {
+          "n_contigs": 17,
+          "path": "data/interim/production_genomes/GCF_000373205.1.fna",
+          "sha256": "45599ff5a0df5fb2a66681f62a8a45a4da8da69c286c9b6598de3e055d57bbd3"
+        },
+        "GCF_000381045.1": {
+          "n_contigs": 84,
+          "path": "data/interim/production_genomes/GCF_000381045.1.fna",
+          "sha256": "0b85343c125a2da80e95ac7519519c782f0119e4610eeac95b52903ff343cb85"
+        },
+        "GCF_000744885.1": {
+          "n_contigs": 6,
+          "path": "data/interim/production_genomes/GCF_000744885.1.fna",
+          "sha256": "af1ee6cbb356f5aec1b89a533fd2adffb74ecbd4af4651c2d8d47d6cabe56f5c"
+        },
+        "GCF_002884445.1": {
+          "n_contigs": 4,
+          "path": "data/interim/production_genomes/GCF_002884445.1.fna",
+          "sha256": "9a554a25ebacb249338962130e0886b461e7ca62edd68afe8581aeb6df31c7e9"
+        },
+        "GCF_003057965.1": {
+          "n_contigs": 1,
+          "path": "data/interim/production_genomes/GCF_003057965.1.fna",
+          "sha256": "65c2e30c4a4d9debd069ec14e5367e02e9c0a0452979eac22d888e0592c150ee"
+        },
+        "GCF_003574085.1": {
+          "n_contigs": 224,
+          "path": "data/interim/production_genomes/GCF_003574085.1.fna",
+          "sha256": "52793e14ca4ccb776cadcb1bb98a8ac24d2faa4b2e7337d3cf3498472b879a5e"
+        },
+        "GCF_039822205.1": {
+          "n_contigs": 70,
+          "path": "data/interim/production_genomes/GCF_039822205.1.fna",
+          "sha256": "43151dd428a1d31cd5eb856c9125ec50e64cc8db77ec9743aa0afec18f8cda8a"
+        },
+        "GCF_041320495.1": {
+          "n_contigs": 23,
+          "path": "data/interim/production_genomes/GCF_041320495.1.fna",
+          "sha256": "30acff03c98591eed0e84b4f8143a86618a8783eb2b8b41762f07d6e4182277d"
+        }
+      },
+      "manifest": {
+        "n_candidates": 941,
+        "path": "data/processed/mining/round0_fp_manifest.json",
+        "sha256": "e8aff87d395b3cb70a25c1f1d4ac348daf3da9323baa4c04a32fd3e4060d4b95"
+      },
+      "n_benchmark_hosts_carrying_a_candidate": 48,
+      "n_candidates_on_benchmark_hosts": 655,
+      "relaxed_architecture": "no committed per-candidate source: the P3-15\u2032 architecture_status.json supply lives on cluster scratch and reports/p3/remine_round_report.json records only its digest",
+      "spare_inputs": {
+        "n_rows": 941,
+        "path": "data/processed/mining/round0_fp_spare_rule_inputs_v0.json",
+        "sha256": "65aedc885d96a4266ff02877a9f9ee02313c9f6c8e90013481675f43a59fca35"
+      }
+    }
+  },
+  "rule": {
+    "decoy_prevalence": 100,
+    "n_boot": 2000,
+    "pinned": false,
+    "prevalence_sweep": [
+      10,
+      100,
+      1000,
+      10000
+    ],
+    "recall_grid": [
+      0.5,
+      0.6,
+      0.7,
+      0.8,
+      0.9,
+      0.95
+    ],
+    "seed": 42,
+    "stage2_operating_point": 0.5
+  },
+  "schema_version": "1.3",
+  "selection": "ADR-0005 A17 \u2014 genuine \u00a79.1 class-4 leaders: native 1,024-nt CDS- and tRNA-upstream windows on their feature's own strand (\u03b4 ~ U{0..256}, seed 42) on the 339 NCBI-annotated admissible a2 hosts, a 100,000-window seed-42 uniform draw (plus, on the one pre-registered extension, every remaining eligible window), screened by A15 Pins 1\u20132 unchanged; D4-context windows minted beside the graded denominator; no leader decoy, no \u00a79.1 decoy pool; the selection reads no score",
+  "sources": {
+    "benchmark": "data/interim/p3_16/hardneg_census_benchmark.json",
+    "benchmark_sha256": "38e7f3342799ed65128c19ec712a4b6ef05b3a8727cffa79b35397b07b066b8c",
+    "familiarity": "data/interim/p3_16/hardneg_census_familiarity.json",
+    "hardneg_pool": "reports/p3/hardneg_pool.json",
+    "hardneg_pool_census": "reports/p3/hardneg_pool_census.json",
+    "hardneg_power": "data/interim/p3_16/hardneg_census_power.json",
+    "hardneg_power_draw": "data/interim/p3_16/hardneg_power.json",
+    "interim_sha256": {
+      "data/interim/p3_16/hardneg_census_benchmark.json": "38e7f3342799ed65128c19ec712a4b6ef05b3a8727cffa79b35397b07b066b8c",
+      "data/interim/p3_16/hardneg_census_familiarity.json": "e4e99354824029181ca418218d23493842a8098df56efe6d6a4e6df34078e180",
+      "data/interim/p3_16/hardneg_census_payloads_production_t0.5.json": "40f9030c7176f2bc24d9685d8acdd00930cc6942f122c982af937a134428505a",
+      "data/interim/p3_16/hardneg_census_payloads_twin_t0.5.json": "3fd129251ba37da137c8921c68dc0f62855d05f457b6551c251e50b86dc6519d",
+      "data/interim/p3_16/hardneg_census_power.json": "058a29a6fc5989843fb41fba30619adeabec66d4189f4ba525ba462a73ca2f92",
+      "data/interim/p3_16/hardneg_census_stage1_production.npz": "cae6dfb67b654b598dd9906858e21fabf08b6496ba11ff5c0f826721bb94a62f",
+      "data/interim/p3_16/hardneg_census_stage1_twin.npz": "a7aef8e17ee423403276013e693713ce4c6834ff7566cf277a7d3e20cde1f0a6",
+      "data/interim/p3_16/hardneg_census_stage2_production.json": "e29d0bef8d53cf0801be03523bba1e9d2e85c0176a31f9a759531ab0748c0edd",
+      "data/interim/p3_16/hardneg_census_stage2_twin.json": "1aaa1f9e2a2e498568755ffa588ba33c2377bf5d7ed077371fb82c26b39145d9",
+      "data/interim/p3_16/hardneg_census_table_production_t0.5.json": "bf4fe59c2c569d3a85f1ca9cbea76929324810d81d20250cc57d590c4f02b33c",
+      "data/interim/p3_16/hardneg_census_table_twin_t0.5.json": "bbda41798ec03cc73ca86a92c30333f2e661785a97bcc1a21b13d8fde891d80c",
+      "data/interim/p3_16/hardneg_power.json": "afcf846bb88d8f2c355649ebb7076bc33e60e1fd80203777cf6e089304733188",
+      "data/interim/production_genomes/GCA_001873345.1.fna": "9ec915f56eec3d5cba2002a18878cba65d3837ade13e8ef410b3753cd12fa4f8",
+      "data/interim/production_genomes/GCA_002878375.1.fna": "f1bd3fcfc65ac67a31844b6ac9ac233ba337e05810b2b86e16fa2feb7669cb37",
+      "data/interim/production_genomes/GCA_003290465.1.fna": "ec306eeafcf2b929a96eeb930ae8d984443101accd2b9830a6dd8cf6ede6d5b4",
+      "data/interim/production_genomes/GCA_005116895.1.fna": "dfc7ba0e6a9ea0be0026729aeeb27a060f88df992c90fbb00e4ded52dc521b68",
+      "data/interim/production_genomes/GCA_011056645.1.fna": "52ee84a29a78180fd5008d4f222d2d96e099f1bcd7148ee108a328fbe57b385e",
+      "data/interim/production_genomes/GCA_012517635.1.fna": "decf264fffd111380ed7b9398ced7168037b926a695cae10c0370e50e130b357",
+      "data/interim/production_genomes/GCA_015478585.1.fna": "7c677e3ba0873e557a4bb0085a527723eca6c3dcd21224251dcb7f455f7f7983",
+      "data/interim/production_genomes/GCA_017458885.1.fna": "71b591844c5e0c9b489aec091081e6ba573299e8e0347cfd9e4a9a867637c9c8",
+      "data/interim/production_genomes/GCA_018714045.1.fna": "4eb995318377d3a08551d1ff0e9ab035a8a997063a4b364d77e762c42c44bda2",
+      "data/interim/production_genomes/GCA_019038705.1.fna": "5d5d8cc2a67656edf1aac63f431a030a442b999c422c9ac66b730427ffb037ea",
+      "data/interim/production_genomes/GCA_019636815.1.fna": "cea8b48c90e982d26c459f104199c3e1b2cea7b7977efba4cc3138f91dd267a6",
+      "data/interim/production_genomes/GCA_020434495.1.fna": "00e3c7a8b2b070c0c98fcca177be0c4d63633a40e3032bc3c75b948e58465f5c",
+      "data/interim/production_genomes/GCA_023145315.1.fna": "88bb4a28d33bb80da644dc18fbd3fa41e6ae8865914a25813ddfb60749ed1024",
+      "data/interim/production_genomes/GCA_023663235.1.fna": "1c84dee423321b34da2dff0a764bc02d449c51f0dc0933d1114286c3d99eb0a6",
+      "data/interim/production_genomes/GCA_025060475.1.fna": "7c3d5bb6ad3ca08c20abb0783a0d160121e453f773d4c9843180200986331d18",
+      "data/interim/production_genomes/GCA_030673965.1.fna": "8f4d94799bbd8ff64f2fe01eea6b2a91c6eec8aede972e54ac64529af5020664",
+      "data/interim/production_genomes/GCA_030765645.1.fna": "c599445f4aee272bd321ddffdf59ff01093d2303ac8d05094f18cad5e8ed1283",
+      "data/interim/production_genomes/GCA_031266695.1.fna": "7e3a1615511639f9c084032e7bae75bb1881f03e9afd77dee42db86d3e234339",
+      "data/interim/production_genomes/GCA_031268125.1.fna": "760faf380b84cd1a17bbacec716cd6c112f9c8a54b0f9cdee15e0641007d82db",
+      "data/interim/production_genomes/GCA_031275485.1.fna": "a0729cc3e511fb4bc53449db5e7bf7b065c44ed3b4fc4880b0cd72e80a30c7f0",
+      "data/interim/production_genomes/GCA_031458695.1.fna": "e5f553ef021b610297aeff1052f7788c32ef08ca671a464418eb9c900402260b",
+      "data/interim/production_genomes/GCA_031459235.1.fna": "d95983b4790ee976959ac2d761ac720b4d3ab952ebc1ba7b8dba718dc36d4bef",
+      "data/interim/production_genomes/GCA_031459855.1.fna": "c7f0781f3af57a09986445ba934767e3f9066d9680d9e6d86543e9eadb905016",
+      "data/interim/production_genomes/GCA_035252115.1.fna": "905e9f9c5b1021a40f6b3df8445df4c6c71557471d68e92d1f99ae30814b5b6e",
+      "data/interim/production_genomes/GCA_035295045.1.fna": "0337d61b260120a1a0cda9083c8c62490eb3c558e75eb9982d27c45cf94746f0",
+      "data/interim/production_genomes/GCA_035378845.1.fna": "2e8fc5c92083d9734ff9910b9e3190619217043bc0fab19892097e12bad8c642",
+      "data/interim/production_genomes/GCA_035477455.1.fna": "ad09a2eb215ddc8e491d11c4c00e7ca44661ccd9b39e1bb31ae3429f6c4814c2",
+      "data/interim/production_genomes/GCA_035477595.1.fna": "044b8568049d80ff11a9d88c07f3d9dea3011ae7b78120b9cdfe166985c6b062",
+      "data/interim/production_genomes/GCA_038842485.1.fna": "5d5c9a7e4167165729962f9df3f256319899e2304b14f83ffa2737bc799a2af8",
+      "data/interim/production_genomes/GCA_039638295.1.fna": "739c2176cb83d9e67eb67924b698efc621386df8409c8d6299428ab451af07c6",
+      "data/interim/production_genomes/GCA_040062795.1.fna": "9b8d084846cc0680de7d4907e8b9a56431c1babef9b287e16f9f7099e2ffcbf9",
+      "data/interim/production_genomes/GCA_040905065.1.fna": "4d685009efffca6a91c1c4cddc7f73c6dee249c1daa746e173d79f6580ca7bb9",
+      "data/interim/production_genomes/GCA_041656455.1.fna": "a8940ff2a26cc69a5139e4a47b5e2621a6b99d8b75ec9be6018f79170dce4667",
+      "data/interim/production_genomes/GCA_041670175.1.fna": "d9a81915baacd1c36807f8fdeaeed1c096e00980f9114807ea41f12c59062de8",
+      "data/interim/production_genomes/GCA_049718665.1.fna": "6537e435ee03bd1176c1ceb8409559ce08be356cee18f65fcb840dbfe09db44f",
+      "data/interim/production_genomes/GCF_000020965.1.fna": "e02a272401104161b7c747dd5521651dc70385284d442587003eb63514f7bd68",
+      "data/interim/production_genomes/GCF_000021645.1.fna": "5b97d41ccfc1f4c3a0239983aae6bc7b8b7e04dead397d34f8ff3e36810549a3",
+      "data/interim/production_genomes/GCF_000024405.1.fna": "46df8dd8f4eca68e60d56cde0570ce4304a1669fe92abc81e487fd7e4d5000fb",
+      "data/interim/production_genomes/GCF_000183745.1.fna": "858ae07f1420ca334b13ab8c3dc07c26c7870fd7e715b6db1fba94e415eaf39f",
+      "data/interim/production_genomes/GCF_000212395.1.fna": "df984f779e2e92e32a2926b5cd4e71fe0e4026891b237f6b44b8d2132a726b7a",
+      "data/interim/production_genomes/GCF_000373205.1.fna": "45599ff5a0df5fb2a66681f62a8a45a4da8da69c286c9b6598de3e055d57bbd3",
+      "data/interim/production_genomes/GCF_000381045.1.fna": "0b85343c125a2da80e95ac7519519c782f0119e4610eeac95b52903ff343cb85",
+      "data/interim/production_genomes/GCF_000744885.1.fna": "af1ee6cbb356f5aec1b89a533fd2adffb74ecbd4af4651c2d8d47d6cabe56f5c",
+      "data/interim/production_genomes/GCF_002884445.1.fna": "9a554a25ebacb249338962130e0886b461e7ca62edd68afe8581aeb6df31c7e9",
+      "data/interim/production_genomes/GCF_003057965.1.fna": "65c2e30c4a4d9debd069ec14e5367e02e9c0a0452979eac22d888e0592c150ee",
+      "data/interim/production_genomes/GCF_003574085.1.fna": "52793e14ca4ccb776cadcb1bb98a8ac24d2faa4b2e7337d3cf3498472b879a5e",
+      "data/interim/production_genomes/GCF_039822205.1.fna": "43151dd428a1d31cd5eb856c9125ec50e64cc8db77ec9743aa0afec18f8cda8a",
+      "data/interim/production_genomes/GCF_041320495.1.fna": "30acff03c98591eed0e84b4f8143a86618a8783eb2b8b41762f07d6e4182277d",
+      "data/processed/mining/round0_fp_manifest.json": "e8aff87d395b3cb70a25c1f1d4ac348daf3da9323baa4c04a32fd3e4060d4b95",
+      "data/processed/mining/round0_fp_spare_rule_inputs_v0.json": "65aedc885d96a4266ff02877a9f9ee02313c9f6c8e90013481675f43a59fca35",
+      "reports/gate2_p3_ece.json": "deaa86cddbe0cd0abc4bf5180a1336624939685cb92c58a5a6af3c5ff50ec647",
+      "reports/p3/hardneg_pool.json": "4fc1d664a0509d5bd77e8e4bca7fc79d007388c82a497fab5b290bd536833a6e",
+      "reports/p3/hardneg_pool_census.json": "cca924575c6698c6173b59dd84e8bc49465f620c18aacf98cd37c76c9b709645",
+      "reports/p3/two_stage_precision_items_v2.json": "68d060c49c54dc37270e7f7f1163897cb9bca4ce3ecf3614fe1d5644b231875a"
+    },
+    "items": "reports/p3/two_stage_precision_items_hardneg.json",
+    "production_checkpoint": "data/processed/checkpoints/stage1_production/stage1.pt",
+    "production_payloads": "data/interim/p3_16/hardneg_census_payloads_production_t0.5.json",
+    "production_stage1": "data/interim/p3_16/hardneg_census_stage1_production.npz",
+    "production_stage2": "data/interim/p3_16/hardneg_census_stage2_production.json",
+    "production_table": "data/interim/p3_16/hardneg_census_table_production_t0.5.json",
+    "round0_manifest": "data/processed/mining/round0_fp_manifest.json",
+    "round0_spare_inputs": "data/processed/mining/round0_fp_spare_rule_inputs_v0.json",
+    "rule_knobs": {
+      "flank": 50,
+      "gap_merge": 10,
+      "min_distinct_elements": 2,
+      "min_order_margin": 1,
+      "min_span": 50,
+      "threshold": 0.5
+    },
+    "stage1_threshold": 0.5,
+    "temperature_source": {
+      "adapter_sha256": "b629704d52582288efc1f433055bff72bf029f329379113553927e815a3ed995",
+      "arm": "aux1.0_lr1e-4",
+      "checkpoint_dir": "data/processed/checkpoints/stage2_rinalmo/aux1.0_lr1e-4",
+      "heads_sha256": "12294f08ab51ec378b24fcb7efdd562ae20d3eafa23abdc6547dae0c27195207",
+      "path": "reports/gate2_p3_ece.json",
+      "revision": "2a71f6f98fb41dd2e6542a5e131d3778111d1468",
+      "sha256": "deaa86cddbe0cd0abc4bf5180a1336624939685cb92c58a5a6af3c5ff50ec647",
+      "temperature": 1.140627294282911
+    },
+    "twin_checkpoint": "data/processed/checkpoints/stage1_gate4_twin/stage1.pt",
+    "twin_payloads": "data/interim/p3_16/hardneg_census_payloads_twin_t0.5.json",
+    "twin_stage1": "data/interim/p3_16/hardneg_census_stage1_twin.npz",
+    "twin_stage2": "data/interim/p3_16/hardneg_census_stage2_twin.json",
+    "twin_table": "data/interim/p3_16/hardneg_census_table_twin_t0.5.json",
+    "v2_items": "reports/p3/two_stage_precision_items_v2.json"
+  },
+  "stage1_threshold_sensitivity": {
+    "all_labels_match": true,
+    "base": {
+      "benchmark_sha256": "38e7f3342799ed65128c19ec712a4b6ef05b3a8727cffa79b35397b07b066b8c",
+      "matched_recall": {
+        "gain_ci": {
+          "ci_level": 0.95,
+          "lower": -0.00010409245744413813,
+          "n_blocks": 1368,
+          "n_boot": 2000,
+          "point": 0.013371684050589305,
+          "upper": 0.04149234181288153
+        },
+        "gain_pp": 0.013371684050589305,
+        "precision": {
+          "stage1_only": 0.9998662831594941,
+          "two_stage": 1.0
+        },
+        "target_recall": 0.9908409658617818,
+        "two_stage_beats_stage1_only": true
+      },
+      "passes": true,
+      "source": "this report",
+      "stage1_threshold": 0.5
+    },
+    "brackets_base": false,
+    "n_points": 2,
+    "points": [
+      {
+        "auprc": {
+          "stage1_only": 0.9975244649630346,
+          "two_stage": 0.9975264797291209
+        },
+        "auprc_gain_pp": 0.0002014766086300135,
+        "benchmark_sha256": "38e7f3342799ed65128c19ec712a4b6ef05b3a8727cffa79b35397b07b066b8c",
+        "declared_stage1_threshold": 0.7,
+        "label_matches_report": true,
+        "matched_recall": {
+          "gain_ci": {
+            "ci_level": 0.95,
+            "lower": 0.0,
+            "n_blocks": 1368,
+            "n_boot": 2000,
+            "point": 0.013371684050589305,
+            "upper": 0.04160025850425241
+          },
+          "gain_pp": 0.013371684050589305,
+          "precision": {
+            "stage1_only": 0.9998662831594941,
+            "two_stage": 1.0
+          },
+          "target_recall": 0.9900083263946711,
+          "two_stage_beats_stage1_only": true
+        },
+        "measured_stage1_threshold": 0.7,
+        "passes": true,
+        "report_sha256": "185ec33e2e3fe5abef20f99254bc5d56bf192a42dd71051d53a96beb6099135e"
+      },
+      {
+        "auprc": {
+          "stage1_only": 0.9892828583441192,
+          "two_stage": 0.9892828583441192
+        },
+        "auprc_gain_pp": 0.0,
+        "benchmark_sha256": "38e7f3342799ed65128c19ec712a4b6ef05b3a8727cffa79b35397b07b066b8c",
+        "declared_stage1_threshold": 0.9,
+        "label_matches_report": true,
+        "matched_recall": {
+          "gain_ci": {
+            "ci_level": 0.95,
+            "lower": 0.0,
+            "n_blocks": 1368,
+            "n_boot": 2000,
+            "point": 0.0,
+            "upper": 0.0
+          },
+          "gain_pp": 0.0,
+          "precision": {
+            "stage1_only": 1.0,
+            "two_stage": 1.0
+          },
+          "target_recall": 0.9733555370524563,
+          "two_stage_beats_stage1_only": false
+        },
+        "measured_stage1_threshold": 0.9,
+        "passes": false,
+        "report_sha256": "0688fdd0f27eea306d3ea571c6f4eed6f42fcd4ee6c5c4fa3212f4af0b6bbb30"
+      }
+    ],
+    "verdict_invariant": false
+  },
+  "stage2_identity": {
+    "production": {
+      "adapter_sha256": "b629704d52582288efc1f433055bff72bf029f329379113553927e815a3ed995",
+      "arm": "aux1.0_lr1e-4",
+      "attn_implementation": "flash_attention_2",
+      "backbone": "rinalmo-giga",
+      "batch_size": 4,
+      "checkpoint_dir": "data/processed/checkpoints/stage2_rinalmo/aux1.0_lr1e-4",
+      "checkpoint_root": "data/processed/checkpoints/stage2_rinalmo",
+      "dtype": "bfloat16",
+      "env_lock": "envs/ml-rna.conda-lock.yml",
+      "heads_sha256": "12294f08ab51ec378b24fcb7efdd562ae20d3eafa23abdc6547dae0c27195207",
+      "n_payloads": 6818,
+      "path": "data/interim/p3_16/hardneg_census_stage2_production.json",
+      "payloads_sha256": "2eab7298687c366dfbfe8b24e491e3946629923aa37377defa6bb90bdf00cb62",
+      "revision": "2a71f6f98fb41dd2e6542a5e131d3778111d1468",
+      "schema_version": "1.1",
+      "sha256": "e29d0bef8d53cf0801be03523bba1e9d2e85c0176a31f9a759531ab0748c0edd",
+      "shard": null,
+      "shard_layout": null,
+      "work_list_coverage": {
+        "n_rows": 4948,
+        "n_scored": 4948
+      }
+    },
+    "twin": {
+      "adapter_sha256": "b629704d52582288efc1f433055bff72bf029f329379113553927e815a3ed995",
+      "arm": "aux1.0_lr1e-4",
+      "attn_implementation": "flash_attention_2",
+      "backbone": "rinalmo-giga",
+      "batch_size": 4,
+      "checkpoint_dir": "data/processed/checkpoints/stage2_rinalmo/aux1.0_lr1e-4",
+      "checkpoint_root": "data/processed/checkpoints/stage2_rinalmo",
+      "dtype": "bfloat16",
+      "env_lock": "envs/ml-rna.conda-lock.yml",
+      "heads_sha256": "12294f08ab51ec378b24fcb7efdd562ae20d3eafa23abdc6547dae0c27195207",
+      "n_payloads": 7428,
+      "path": "data/interim/p3_16/hardneg_census_stage2_twin.json",
+      "payloads_sha256": "6558c69e8e867a2e13ed30e52bd85911b987c74479d8c2ce81124302dd5d29fa",
+      "revision": "2a71f6f98fb41dd2e6542a5e131d3778111d1468",
+      "schema_version": "1.1",
+      "sha256": "1aaa1f9e2a2e498568755ffa588ba33c2377bf5d7ed077371fb82c26b39145d9",
+      "shard": null,
+      "shard_layout": null,
+      "work_list_coverage": {
+        "n_rows": 4822,
+        "n_scored": 4822
+      }
+    }
+  },
+  "step": "P3-16",
+  "v2_positive_delta": {
+    "by_arm": {
+      "production": {
+        "stage1_only": {
+          "max_abs_delta": 2.587364378303647e-08,
+          "mean_delta": 5.337980090327911e-11,
+          "n_changed": 1201,
+          "n_compared": 1201,
+          "n_identical": 0
+        },
+        "two_stage": {
+          "max_abs_delta": 0.015691454895906953,
+          "mean_delta": 2.2856159866449193e-05,
+          "n_changed": 1201,
+          "n_compared": 1201,
+          "n_identical": 0
+        }
+      },
+      "twin": {
+        "stage1_only": {
+          "max_abs_delta": 1.5851713452974536e-07,
+          "mean_delta": 1.574278973441466e-10,
+          "n_changed": 1198,
+          "n_compared": 1201,
+          "n_identical": 3
+        },
+        "two_stage": {
+          "max_abs_delta": 0.009360606443569286,
+          "mean_delta": 1.3644149017560775e-05,
+          "n_changed": 1198,
+          "n_compared": 1201,
+          "n_identical": 3
+        }
+      }
+    },
+    "n_positives": 1201,
+    "rule": "ADR-0005 A17 Pin 3 \u2014 positives re-scored in this run (Stage-2 logits depend on batch composition, A15 Pin 6); delta = this run's item score minus v2's, per arm and system",
+    "source": {
+      "n_positives": 1201,
+      "path": "reports/p3/two_stage_precision_items_v2.json",
+      "rule_knobs": {
+        "flank": 50,
+        "gap_merge": 10,
+        "min_distinct_elements": 2,
+        "min_order_margin": 1,
+        "min_span": 50,
+        "threshold": 0.5
+      },
+      "sha256": "68d060c49c54dc37270e7f7f1163897cb9bca4ce3ecf3614fe1d5644b231875a"
+    }
+  }
+}
