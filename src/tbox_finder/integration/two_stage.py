@@ -1489,6 +1489,63 @@ def shard_manifest(
     return [dict(entry) for entry in ordered[start:stop]]
 
 
+def shard_contigs(
+    contigs: Sequence[Mapping[str, Any]], index: int, count: int
+) -> list[dict[str, Any]]:
+    """Stage-1 shard ``index`` of ``count``: a contiguous slice of the contigs sorted by id.
+
+    The Stage-1 twin of :func:`shard_manifest` (P3-16″-hardneg, the A17 census: ~820k one-window
+    contigs are ~20 GPU-h per arm on one card). The slice depends on the **set** of contig ids
+    alone, and :func:`merge_stage1_shards` re-derives every shard's assignment through this same
+    function, so a shard file holding contigs its index was not assigned is refused.
+    """
+    start, stop = shard_bounds(len(contigs), index, count)
+    ordered = sorted(normalise_contigs(contigs), key=lambda contig: contig["contig_id"])
+    return [dict(contig) for contig in ordered[start:stop]]
+
+
+def stage1_npz_contigs(path: str | Path) -> list[str]:
+    """The contig ids a Stage-1 ``.npz`` holds, read off its member names without loading them."""
+    with np.load(path) as archive:
+        names = list(archive.files)
+    by_contig: dict[str, set[str]] = {}
+    for name in names:
+        contig_id, _, field = name.rpartition("/")
+        if field not in ("logits", "starts") or not contig_id:
+            raise TwoStageError(f"unexpected array {name!r} in {path}")
+        by_contig.setdefault(contig_id, set()).add(field)
+    torn = sorted(cid for cid, fields in by_contig.items() if fields != {"logits", "starts"})
+    if torn:
+        raise TwoStageError(f"{path}: contig(s) {torn[:3]} lack logits or starts")
+    return sorted(by_contig)
+
+
+def merge_stage1_problems(
+    contigs: Sequence[Mapping[str, Any]], shard_contig_ids: Sequence[Sequence[str]]
+) -> list[str]:
+    """Why ``shard_contig_ids`` (shard files in index order) do not reassemble ``contigs``.
+
+    Shard ``i`` of ``N = len(shard_contig_ids)`` must hold exactly :func:`shard_contigs`'s slice
+    ``i`` — not merely some disjoint part of the set. Checking only the union would pass a
+    shard re-run against a different contig file or cut at a different ``N``.
+    """
+    count = len(shard_contig_ids)
+    if count < 1:
+        return ["no Stage-1 shard was given"]
+    problems: list[str] = []
+    for index, held in enumerate(shard_contig_ids):
+        want = [contig["contig_id"] for contig in shard_contigs(contigs, index, count)]
+        if sorted(held) != want:
+            extra = sorted(set(held) - set(want))
+            missing = sorted(set(want) - set(held))
+            problems.append(
+                f"shard {index}/{count} holds {len(held)} contig(s), not its assigned "
+                f"{len(want)}: {len(extra)} unassigned (e.g. {extra[:3]}), {len(missing)} "
+                f"missing (e.g. {missing[:3]})"
+            )
+    return problems
+
+
 def parse_shard(text: str) -> tuple[int, int]:
     """``--shard I/N`` → ``(I, N)``, refusing anything but ``0 <= I < N``, ``N >= 1``."""
     match = _SHARD_SPEC.fullmatch(text)
@@ -1959,6 +2016,8 @@ def _cmd_stage1(args: argparse.Namespace) -> int:
     from tbox_finder.infer import scan
 
     contigs = read_contigs(args.contigs)
+    if args.shard is not None:
+        contigs = shard_contigs(contigs, *args.shard)
     device = args.device or ("cuda" if torch.cuda.is_available() else "cpu")
     model = scan.load_stage1_checkpoint(args.checkpoint, device=device)
     arrays: dict[str, np.ndarray] = {}
@@ -2006,6 +2065,36 @@ def _cmd_stage1(args: argparse.Namespace) -> int:
         f"max |delta log-prob| vs scan_encoded_windows = {worst_delta:.3e} "
         f"(tolerance {args.max_log_prob_delta}), prediction mismatches = 0"
     )
+    return 0
+
+
+def _cmd_merge_stage1(args: argparse.Namespace) -> int:
+    """LEG 1b (torch-free): ``stage1 --shard I/N`` archives → one Stage-1 ``.npz``, or a refusal.
+
+    Every check runs before an array is loaded: each shard must hold exactly its
+    :func:`shard_contigs` slice of ``--contigs`` (given in index order), so the merged archive
+    covers the contig set once each. The merged archive has the unsharded leg's layout, so
+    ``payloads`` and ``run`` read it unchanged.
+    """
+    refuse_v1_output(args.out)
+    out = Path(args.out).resolve()
+    if any(Path(shard).resolve() == out for shard in args.shards):
+        raise TwoStageError("--out is one of the --shards; the merge would overwrite its input")
+    contigs = read_contigs(args.contigs)
+    held = [stage1_npz_contigs(shard) for shard in args.shards]
+    problems = merge_stage1_problems(contigs, held)
+    if problems:
+        raise TwoStageError(
+            "the Stage-1 shards do not reassemble --contigs: " + "; ".join(problems)
+        )
+    arrays: dict[str, np.ndarray] = {}
+    for shard in args.shards:
+        with np.load(shard) as archive:
+            for name in archive.files:
+                arrays[name] = archive[name]
+    out.parent.mkdir(parents=True, exist_ok=True)
+    np.savez_compressed(out, **arrays)
+    print(f"wrote {args.out}: {len(contigs)} contigs from {len(args.shards)} Stage-1 shard(s)")
     return 0
 
 
@@ -2285,7 +2374,21 @@ def build_parser() -> argparse.ArgumentParser:
     one.add_argument("--batch-size", type=int, default=8)
     one.add_argument("--dtype", default="float16", choices=["float16", "float32"])
     one.add_argument("--max-log-prob-delta", type=float, default=MAX_MINT_LOG_PROB_DELTA)
+    one.add_argument(
+        "--shard",
+        type=parse_shard,
+        default=None,
+        help="I/N: score only slice I of N of the id-sorted contigs; reassemble with merge-stage1",
+    )
     one.set_defaults(func=_cmd_stage1)
+
+    one_b = sub.add_parser(
+        "merge-stage1", help="torch-free: stage1 --shard archives -> one Stage-1 archive"
+    )
+    one_b.add_argument("--contigs", required=True, help="the contig file every shard was cut from")
+    one_b.add_argument("--shards", nargs="+", required=True, help="the shard archives, I = 0..N-1")
+    one_b.add_argument("--out", required=True)
+    one_b.set_defaults(func=_cmd_merge_stage1)
 
     two = sub.add_parser("payloads", help="torch-free: contigs + logits -> Stage-2 work list")
     two.add_argument("--contigs", required=True)

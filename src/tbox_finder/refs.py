@@ -209,17 +209,22 @@ def content_sha256(path: str | Path) -> str:
     ``lfs: false``). A v1 pointer's ``oid sha256:<hex>`` **is** the content hash
     (git-lfs spec), so either representation yields the same digest — letting the
     staging test verify checksums in both places.
+
+    A real file is hashed **streamed**, never read whole: only its first
+    ``len(_LFS_POINTER_MAGIC)`` bytes decide which representation it is. P3-16″'s census
+    Stage-1 archives are 23 GB each, and reading one whole raised ``MemoryError`` in the fold
+    on a 13 GB laptop. A pointer is a few hundred bytes, so it is still parsed whole.
     """
     p = Path(path)
-    data = p.read_bytes()
-    if data.startswith(_LFS_POINTER_MAGIC):
+    with p.open("rb") as fh:
+        head = fh.read(len(_LFS_POINTER_MAGIC))
+    if head == _LFS_POINTER_MAGIC:
+        data = p.read_bytes()
         for line in data.decode("utf-8").splitlines():
             if line.startswith("oid sha256:"):
                 return line.split("oid sha256:", 1)[1].strip()
         raise ValueError(f"Git LFS pointer without an 'oid sha256:' line: {p}")
-    h = hashlib.sha256()
-    h.update(data)
-    return h.hexdigest()
+    return _sha256_streamed(p)
 
 
 def _sha256_streamed(path: Path) -> str:

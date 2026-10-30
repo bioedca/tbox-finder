@@ -114,6 +114,26 @@ Usage (from the checkout that holds the DVC data)::
         --out data/interim/p3_16/benchmark_v2.json
 
 ``--out`` is refused if it names a v1 artifact (A15 Pin 5: v1 stays byte-unchanged).
+
+The hard-negative benchmark (ADR-0005 A17, ``--hardneg``)
+--------------------------------------------------------
+``--hardneg`` mints ``hardneg_benchmark.json`` in v2's contig/item schema, so every
+``integration.two_stage`` leg consumes it unchanged. The positives are v2's graded positives with
+their contigs byte-identical (each copy re-hashed against v2's, and a digest over all of them
+recorded). The negatives are ``integration/hardneg_pool``'s graded and D4-context ("beside")
+native windows as one-window contigs: their bytes are asserted against the pool's per-item sha256
+(A17 Pin 2: the screened bytes ARE the scored bytes), each is blocked on its ASSEMBLY (A17 Pin 3),
+graded iff it is not D4-context, and tagged with its pool metadata. There is no leader decoy and
+no §9.1 decoy pool. The pool report must pass its own validator and name the item files given; on
+the one census extension the census pool is minted BESIDE the draw's (the census selects only what
+the draw left). ``seen_by`` on a native window is the measured fold overlap, never a claim::
+
+    python scripts/mint_p3_16_benchmark.py --hardneg reports/p3/hardneg_pool.json \\
+        --hardneg-items data/interim/p3_16/hardneg_pool/graded.json \\
+                        data/interim/p3_16/hardneg_pool/beside.json \\
+        --out data/interim/p3_16/hardneg_benchmark.json
+
+A v1 or v2 ``--out``, or one that does not name ``hardneg``, is refused (A17 Pin 5).
 """
 
 from __future__ import annotations
@@ -1167,10 +1187,556 @@ def v1_out_violation(out: Path) -> str | None:
     return None
 
 
+# ══════════════════════════════════════════════════════════════════════════════════════
+# P3-16″-hardneg — ADR-0005 A17's hard-negative benchmark (``--hardneg``)
+# ══════════════════════════════════════════════════════════════════════════════════════
+#: The A17 manifest: schema 1.2 AND this kind. ``precision.manifest_is_hardneg`` reads both and
+#: refuses either alone, so the 1.3 clause set is reached by this mint and by nothing else.
+HARDNEG_SCHEMA_VERSION = "1.2"
+HARDNEG_KIND = "hardneg_benchmark"
+HARDNEG_STEP = "P3-16″-hardneg"
+HARDNEG_POOL_KIND = "hardneg_pool"
+#: ``hardneg_pool``'s two selection modes, and the item-file roles each pool writes.
+HARDNEG_POOL_MODES: tuple[str, ...] = ("draw", "census")
+HARDNEG_ROLES: tuple[str, ...] = ("graded", "beside")
+#: Every field a pool item carries (``hardneg_pool._cmd_report``'s ``keep``).
+HARDNEG_ITEM_KEYS: tuple[str, ...] = (
+    "item_id",
+    "assembly",
+    "seqid",
+    "start",
+    "end",
+    "strand",
+    "feature_type",
+    "feature_id",
+    "delta",
+    "sub_class",
+    "d4_context",
+    "sha256",
+    "sequence",
+)
+HARDNEG_SUB_CLASS = {"CDS": "cds_upstream", "tRNA": "trna_upstream"}
+HARDNEG_DELTA_MAX = 256
+HARDNEG_SELECTION = (
+    "ADR-0005 A17 — genuine §9.1 class-4 leaders: native 1,024-nt CDS- and tRNA-upstream "
+    "windows on their feature's own strand (δ ~ U{0..256}, seed 42) on the 339 NCBI-annotated "
+    "admissible a2 hosts, a 100,000-window seed-42 uniform draw (plus, on the one pre-registered "
+    "extension, every remaining eligible window), screened by A15 Pins 1–2 unchanged; "
+    "D4-context windows minted beside the graded denominator; no leader decoy, no §9.1 decoy "
+    "pool; the selection reads no score"
+)
+HARDNEG_GATED_RULE = (
+    "ADR-0005 A17 Pin 2 — D4-context windows minted and scored, reported beside the graded "
+    "denominator; every positive and every non-D4-context window is graded"
+)
+HARDNEG_OVERLAP_METHOD = (
+    "canonical N-free 32-mers on either strand of the WHOLE native window (no insert to "
+    "exclude) against the arm's own Stage-1 training-fold context_seq "
+    "(host_screen.canonical_kmers / sorted_unique_kmers / kmer_hits)"
+)
+HARDNEG_SEEN_BY_RULE = (
+    "seen_by[arm] on a native window is the MEASURED fold overlap (any shared canonical 32-mer "
+    "with the arm's training-fold context_seq), never a by-construction claim"
+)
+
+
+def hardneg_out_violation(out: Path) -> str | None:
+    """Why ``--out`` may not hold the A17 manifest, or ``None`` (A17 Pin 5: no v1 or v2 path).
+
+    v1 is refused by :func:`v1_out_violation`; v2's name (``benchmark_v2.json``, ``v2_*``) is
+    refused here; and every A17 Pin 5 path names ``hardneg``, so one that does not is refused.
+    """
+    violation = v1_out_violation(out)
+    if violation:
+        return violation
+    name = out.resolve().name
+    if name.startswith("benchmark_v2") or name.startswith("v2_"):
+        return f"--out {out} is a v2 artifact name; A17 writes beside v2, never over it"
+    if "hardneg" not in name:
+        return f"--out {out} does not name 'hardneg'; every A17 Pin 5 path does"
+    return None
+
+
+def _sha256_text(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def hardneg_item_problems(item: Any, *, role: str) -> list[str]:
+    """Why one pool item cannot be minted as written, or ``[]``. Total: never raises.
+
+    The window's bytes must hash to the pool's recorded ``sha256`` — A17 Pin 2: "a native
+    window's screened bytes ARE its scored bytes". They must also be upper-case ``ACGT`` only:
+    the Stage-1 encoder maps any other character (a soft-masked ``a`` included) to ``N``, so a
+    lower-case window would be scored as a different sequence from the one that was screened.
+    """
+    if not isinstance(item, Mapping):
+        return [f"a {role} item is a {type(item).__name__}, not an object"]
+    where = f"{role} item {item.get('item_id')!r}"
+    problems: list[str] = []
+    missing = [key for key in HARDNEG_ITEM_KEYS if key not in item]
+    if missing:
+        return [f"{where} carries no {missing}"]
+    for key in ("item_id", "assembly", "seqid", "feature_id", "sha256", "sequence"):
+        if not isinstance(item[key], str) or not item[key]:
+            problems.append(f"{where}: {key} {item[key]!r} is not a non-empty string")
+    coords = {key: item[key] for key in ("start", "end", "delta")}
+    if not all(_is_count(value) for value in coords.values()):
+        return [*problems, f"{where}: {coords!r} are not non-negative integer coordinates"]
+    if item["end"] - item["start"] != wd.WINDOW_NT:
+        problems.append(f"{where}: [{item['start']}, {item['end']}) is not {wd.WINDOW_NT} nt")
+    if item["delta"] > HARDNEG_DELTA_MAX:
+        problems.append(f"{where}: delta {item['delta']} is outside U{{0..{HARDNEG_DELTA_MAX}}}")
+    if item["strand"] not in ("+", "-"):
+        problems.append(f"{where}: strand {item['strand']!r} is not '+' or '-'")
+    if HARDNEG_SUB_CLASS.get(item["feature_type"]) != item["sub_class"]:
+        problems.append(
+            f"{where}: feature_type {item['feature_type']!r} with sub_class "
+            f"{item['sub_class']!r} is not one of A17 Pin 1's two leader sub-classes"
+        )
+    if item["d4_context"] is not (role == "beside"):
+        problems.append(
+            f"{where}: d4_context={item['d4_context']!r} in the {role} list; D4-context is "
+            "exactly the beside partition (A17 Pin 2)"
+        )
+    if problems:
+        return problems
+    expected_id = (
+        f"{item['assembly']}:{item['seqid']}:{item['start']}-{item['end']}:{item['strand']}"
+    )
+    if item["item_id"] != expected_id:
+        problems.append(f"{where}: item_id is not its window's key {expected_id!r}")
+    sequence = item["sequence"]
+    if len(sequence) != wd.WINDOW_NT:
+        problems.append(f"{where}: carries {len(sequence)} nt, not {wd.WINDOW_NT}")
+    if set(sequence) - set("ACGT"):
+        problems.append(
+            f"{where}: carries {sorted(set(sequence) - set('ACGT'))!r}; the Stage-1 encoder reads "
+            "any character but upper-case ACGT as N, so it would score a sequence that was "
+            "never screened"
+        )
+    if _sha256_text(sequence) != item["sha256"]:
+        problems.append(f"{where}: its bytes do not hash to the pool's sha256 {item['sha256']!r}")
+    return problems
+
+
+def read_hardneg_items(raw: bytes, *, role: str, where: str) -> list[dict[str, Any]]:
+    """One pool item file (``{"partition": role, "items": [...]}``), refused unless every item
+    passes :func:`hardneg_item_problems`."""
+    try:
+        payload = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise SystemExit(f"{where} is not a JSON item list: {exc}") from exc
+    if not isinstance(payload, Mapping) or payload.get("partition") != role:
+        raise SystemExit(f"{where} is not the pool's {role!r} item list")
+    items = payload.get("items")
+    if not isinstance(items, list):
+        raise SystemExit(f"{where} carries no items list")
+    problems = [problem for item in items for problem in hardneg_item_problems(item, role=role)]
+    if problems:
+        raise SystemExit(f"refusing {where}: " + "; ".join(problems[:10]))
+    return [dict(item) for item in items]
+
+
+def hardneg_pool_refusals(
+    report: Any, *, mode: str, item_digests: Mapping[str, tuple[str, int]], validate: Any
+) -> list[str]:
+    """Why a pool report may NOT be minted from; ``[]`` means it may. Total: never raises.
+
+    ``validate`` is the pool's OWN validator (``hardneg_pool.validate_report``): a pool it
+    refuses is refused here. Beyond it, the report must be of ``mode`` and must name, by sha256
+    and count, exactly the item files this mint was handed (``item_digests``: role ->
+    ``(sha256, n)``), so the windows minted are the windows the pool partitioned.
+    """
+    if not isinstance(report, Mapping):
+        return [f"the pool report is a {type(report).__name__}, not a JSON object"]
+    if report.get("kind") != HARDNEG_POOL_KIND:
+        return [f"the pool report's kind is {report.get('kind')!r}, not {HARDNEG_POOL_KIND!r}"]
+    try:
+        problems = [f"its own validator: {problem}" for problem in validate(report)]
+    except Exception as exc:  # a validator that raises has validated nothing
+        problems = [f"its own validator raised {exc!r}"]
+    config = report.get("config") if isinstance(report.get("config"), Mapping) else {}
+    if config.get("mode") != mode:
+        problems.append(f"the pool's mode is {config.get('mode')!r}, not {mode!r}")
+    files = report.get("item_files") if isinstance(report.get("item_files"), Mapping) else {}
+    for role in HARDNEG_ROLES:
+        entry = files.get(role) if isinstance(files.get(role), Mapping) else {}
+        digest, count = item_digests.get(role, (None, None))
+        if entry.get("sha256") != digest or entry.get("n") != count:
+            problems.append(
+                f"the pool records its {role} list as {entry.get('sha256')!r} ({entry.get('n')!r} "
+                f"items); the file given hashes {digest!r} ({count!r} items)"
+            )
+    return problems
+
+
+def native_fold_overlap(
+    contigs: Sequence[Mapping[str, Any]],
+    items: Sequence[Mapping[str, Any]],
+    folds: Mapping[str, Collection[str]],
+    context_by_id: Mapping[str, str],
+) -> dict[str, set[str]]:
+    """Per arm, the native negatives sharing a canonical 32-mer with that arm's training fold.
+
+    The v2 measure (:func:`host_fold_overlap`) excises a spliced insert; a native window has
+    none, so the WHOLE window is host DNA, read on both strands with ``host_screen``'s own
+    vectorised k-mer index. The pool's fold screen refused every window sharing a 32-mer with the
+    four-source training union, so this is expected to be 0 — measured, not assumed.
+    """
+    from tbox_finder.integration import host_screen as hs  # lazy: numpy only
+
+    by_id = {str(contig["contig_id"]): str(contig["sequence"]) for contig in contigs}
+    negatives = [str(item["contig_id"]) for item in items if item["label"] == 0]
+    seen: dict[str, set[str]] = {}
+    for arm, fold in sorted(folds.items()):
+        index = hs.sorted_unique_kmers(
+            [context_by_id[record] for record in sorted(fold) if record in context_by_id]
+        )
+        seen[arm] = {
+            contig_id
+            for contig_id in negatives
+            if hs.kmer_hits(hs.canonical_kmers(by_id[contig_id]), index) > 0
+        }
+    return seen
+
+
+def hardneg_negatives(
+    pools: Sequence[tuple[str, Mapping[str, Sequence[Mapping[str, Any]]]]],
+    *,
+    resolved_order: Mapping[str, Any],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """The pool items → one-window native contigs + benchmark items, in contig-id order.
+
+    ``pools`` is ``[(mode, {"graded": [...], "beside": [...]})]`` — the draw, and on a census the
+    census beside it (the census selects only what the draw left, so the census benchmark is
+    both). Each negative blocks on its ASSEMBLY (A17 Pin 3: adjacent leaders share DNA), is
+    graded iff it is not D4-context, and carries its pool metadata. A window minted twice — within
+    a list, across the two lists, or across the draw and the census — is refused.
+    """
+    contigs: list[dict[str, Any]] = []
+    items: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for mode, lists in pools:
+        for role in HARDNEG_ROLES:
+            for record in lists[role]:
+                contig_id = f"hn:{record['item_id']}"
+                if contig_id in seen:
+                    raise SystemExit(f"{record['item_id']} is minted twice; a window is one item")
+                seen.add(contig_id)
+                beside = role == "beside"
+                meta = {key: record[key] for key in HARDNEG_ITEM_KEYS if key != "sequence"}
+                order = resolved_order.get(str(record["assembly"]))
+                meta.update(
+                    {"pool_mode": mode, "resolved_order": None if is_missing(order) else str(order)}
+                )
+                contigs.append(
+                    {
+                        "contig_id": contig_id,
+                        "sequence": record["sequence"],
+                        "truth_start": None,
+                        "truth_end": None,
+                        "truth_strand": None,
+                        "truth_source_record_id": None,
+                        "truth_transform": "native_leader_window",
+                    }
+                )
+                items.append(
+                    {
+                        "contig_id": contig_id,
+                        "label": 0,
+                        "source": "native_window",
+                        "pool": str(record["sub_class"]),
+                        "block": f"assembly:{record['assembly']}",
+                        "length": len(record["sequence"]),
+                        "locus_length": None,
+                        "resolved_order": meta["resolved_order"],
+                        "host_id": None,
+                        "host_seen_by_any_arm": None,  # the measurement, set by the caller
+                        "gated": not beside,
+                        "beside": beside,
+                        "hardneg": meta,
+                    }
+                )
+    order = sorted(range(len(items)), key=lambda index: items[index]["contig_id"])
+    return [contigs[i] for i in order], [items[i] for i in order]
+
+
+def hardneg_positives(
+    v2: Mapping[str, Any],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], str]:
+    """v2's graded positives, contigs byte-identical, and a digest over their sequences.
+
+    A17 Pin 3's positives are v2's 1,201 graded positive windows. The contigs are copied, then
+    each copy's sequence is hashed against the v2 contig's own, so the identity claim is checked
+    on the bytes written rather than on the copy operation. Each positive item gains
+    ``beside: False`` (every positive is graded) and nothing else.
+    """
+    if v2.get("schema_version") != SCHEMA_VERSION or "n_items_gated" not in v2.get("scope", {}):
+        raise SystemExit(
+            f"--hardneg-positives is schema {v2.get('schema_version')!r}; A17's positives are the "
+            "graded positives of the v2 (schema 1.1, gated-subset) benchmark"
+        )
+    contig_by_id = {str(c["contig_id"]): c for c in v2["contigs"]}
+    items = [dict(item) for item in v2["items"] if item["label"] == 1]
+    if any(item.get("gated") is not True for item in items):
+        raise SystemExit("a v2 positive is not in v2's gated subset")
+    if len(items) != v2["scope"]["n_positives"]:
+        raise SystemExit(f"{len(items)} positives, v2 declares {v2['scope']['n_positives']}")
+    contigs = []
+    lines = []
+    for item in items:
+        source = contig_by_id[str(item["contig_id"])]
+        contig = json.loads(json.dumps(source))
+        if _sha256_text(contig["sequence"]) != _sha256_text(source["sequence"]):
+            raise SystemExit(f"positive {item['contig_id']} is not byte-identical to v2's")
+        item["beside"] = False
+        contigs.append(contig)
+        lines.append(f"{item['contig_id']}\t{_sha256_text(contig['sequence'])}\n")
+    return contigs, items, _sha256_text("".join(sorted(lines)))
+
+
+def build_hardneg(
+    *,
+    v2: Mapping[str, Any],
+    pools: Sequence[tuple[str, Mapping[str, Sequence[Mapping[str, Any]]]]],
+    resolved_order: Mapping[str, Any],
+    folds: Mapping[str, Collection[str]],
+    context_by_id: Mapping[str, str],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, Any], str]:
+    """The A17 contig/item lists and scope, in exactly v2's contig and item schema.
+
+    Returns ``(contigs, items, scope, positives_sha256)``. ``integration.two_stage`` reads only
+    ``contig_id`` / ``sequence`` / ``truth_*`` from a contig, so its legs consume this manifest
+    unchanged; ``precision fold`` reads the items' ``label`` / ``pool`` / ``block`` /
+    ``seen_by`` / ``gated``, plus A17's ``beside`` and ``hardneg``.
+    """
+    pos_contigs, pos_items, positives_sha = hardneg_positives(v2)
+    neg_contigs, neg_items = hardneg_negatives(pools, resolved_order=resolved_order)
+    clash = {c["contig_id"] for c in pos_contigs} & {c["contig_id"] for c in neg_contigs}
+    if clash:
+        raise SystemExit(f"contig ids collide between positives and negatives: {sorted(clash)[:3]}")
+    contigs, items = pos_contigs + neg_contigs, pos_items + neg_items
+    seen = native_fold_overlap(contigs, items, folds, context_by_id)
+    for item in neg_items:
+        item["seen_by"] = {arm: item["contig_id"] in ids for arm, ids in sorted(seen.items())}
+        item["host_seen_by_any_arm"] = any(item["seen_by"].values())
+    seen_any = set().union(*seen.values()) if seen else set()
+    graded = [item for item in neg_items if item["gated"]]
+    beside = [item for item in neg_items if not item["gated"]]
+
+    def by_pool(group: Sequence[Mapping[str, Any]]) -> dict[str, int]:
+        return {
+            pool: sum(1 for item in group if item["pool"] == pool)
+            for pool in sorted({item["pool"] for item in group})
+        }
+
+    scope = {
+        "kind": "hardneg",
+        "rung": v2["scope"]["rung"],
+        "geometry": v2["scope"]["geometry"],
+        "positive_population": (
+            "benchmark_v2.json's graded positives (gate4_eval), contigs byte-identical "
+            "(ADR-0005 A17 Pin 3)"
+        ),
+        "negative_construction": (
+            "ADR-0005 A17 Pins 1–2: native 1,024-nt windows from reports/p3/hardneg_pool.json's "
+            "graded and beside lists, the bytes the pool screened (sha256 asserted per item)"
+        ),
+        "n_positives": len(pos_items),
+        "n_negatives": len(neg_items),
+        "n_items": len(items),
+        "n_blocks": len({item["block"] for item in items}),
+        "n_positive_blocks": len({item["block"] for item in pos_items}),
+        "n_negative_blocks": len({item["block"] for item in neg_items}),
+        "negatives_by_pool": by_pool(neg_items),
+        "n_beside": len(beside),
+        "beside_by_pool": by_pool(beside),
+        "training_fold_sizes": {arm: len(fold) for arm, fold in sorted(folds.items())},
+        "seen_by_counts": {
+            arm: {
+                "positives": sum(1 for i in pos_items if i["seen_by"][arm]),
+                "negatives": sum(1 for i in neg_items if i["seen_by"][arm]),
+            }
+            for arm in sorted(folds)
+        },
+        "seen_by_rule": HARDNEG_SEEN_BY_RULE,
+        "host_pool": {
+            "source": [mode for mode, _ in pools],
+            "stage": "census" if len(pools) > 1 else "draw",
+            "selection": HARDNEG_SELECTION,
+            "n_hosts": len({item["hardneg"]["assembly"] for item in neg_items}),
+            "overlap_with_training_folds": {
+                "k": 32,
+                "method": HARDNEG_OVERLAP_METHOD,
+                "by_arm": {arm: len(ids) for arm, ids in sorted(seen.items())},
+                "n_seen_by_any_arm": len(seen_any),
+                "n_negatives": len(neg_items),
+            },
+        },
+        **gated_scope(items),
+        "gated_rule": HARDNEG_GATED_RULE,
+    }
+    if not graded:
+        raise SystemExit("no graded negative: the A17 benchmark would have no denominator")
+    return contigs, items, scope, positives_sha
+
+
+def hardneg_manifest(
+    *,
+    contigs: Sequence[Mapping[str, Any]],
+    items: Sequence[Mapping[str, Any]],
+    scope: dict[str, Any],
+    positives_sha256: str,
+    pool_records: Sequence[Mapping[str, Any]],
+    v2_path: str,
+    v2_sha256: str,
+    inputs: Mapping[str, Any],
+) -> dict[str, Any]:
+    """The A17 manifest: v2's contig/item schema plus ``kind`` and the pool bindings.
+
+    ``source.hardneg_pools`` lists each pool report's path, sha256, mode and item files, in
+    draw-then-census order; ``precision fold`` refuses a pool report whose digest is not the one
+    listed here. The v2 benchmark's digest and the digest over the positives' sequences are
+    recorded beside it, so the "byte-identical positives" claim is checkable from the manifest.
+    """
+    ids = [str(contig["contig_id"]) for contig in contigs]
+    if len(set(ids)) != len(ids) or len(contigs) != len(items):
+        raise SystemExit("contig/item lists diverged or repeat an id")
+    scope = {**scope, "host_pool": {**scope["host_pool"]}}
+    scope["host_pool"]["source"] = [str(record["path"]) for record in pool_records]
+    return {
+        "schema_version": HARDNEG_SCHEMA_VERSION,
+        "kind": HARDNEG_KIND,
+        "step": HARDNEG_STEP,
+        "generated_by": "scripts/mint_p3_16_benchmark.py --hardneg",
+        "adr": "ADR-0005 A17",
+        "source": {
+            "hardneg_pools": [dict(record) for record in pool_records],
+            "benchmark_v2": v2_path,
+            "benchmark_v2_sha256": v2_sha256,
+            "positives_sha256": positives_sha256,
+            "n_positives": scope["n_positives"],
+            **dict(inputs),
+            "embedded_by_pool": None,
+        },
+        "scope": scope,
+        "items": [dict(item) for item in items],
+        "contigs": [dict(contig) for contig in contigs],
+    }
+
+
+def main_hardneg(args: argparse.Namespace) -> int:
+    """``--hardneg``: mint ``hardneg_benchmark.json`` from the pool(s) and v2's positives."""
+    out = Path(args.out)
+    violation = hardneg_out_violation(out)  # before any input is read
+    if violation:
+        raise SystemExit(violation)
+    pools_in = [("draw", args.hardneg, args.hardneg_items)]
+    if args.hardneg_census:
+        if not args.hardneg_census_items:
+            raise SystemExit("--hardneg-census needs --hardneg-census-items GRADED BESIDE")
+        pools_in.append(("census", args.hardneg_census, args.hardneg_census_items))
+    elif args.hardneg_census_items:
+        raise SystemExit("--hardneg-census-items is given without --hardneg-census")
+    if not args.hardneg_items or len(args.hardneg_items) != 2:
+        raise SystemExit("--hardneg needs --hardneg-items GRADED BESIDE")
+    names = ["split_table", "context", "labels", "host_orders", "hardneg_positives", "hardneg"]
+    paths = [getattr(args, name) for name in names] + [
+        path for _, report, files in pools_in for path in (report, *files)
+    ]
+    for value in paths:
+        problem = _repo_relative_problem("an input path", value)
+        if problem:
+            raise SystemExit(f"{problem}; use --data-root / --reports-root to point at a checkout")
+    code_root = Path(__file__).resolve().parents[1]
+    root = Path(args.data_root) if args.data_root else code_root
+    reports_root = Path(args.reports_root) if args.reports_root else code_root
+
+    from tbox_finder.integration import hardneg_pool  # lazy: the pool's own validator
+
+    def validate(report: Mapping[str, Any]) -> list[str]:
+        return hardneg_pool.validate_report(report, root=root)
+
+    pools: list[tuple[str, dict[str, list[dict[str, Any]]]]] = []
+    pool_records: list[dict[str, Any]] = []
+    for mode, report_path, (graded_path, beside_path) in pools_in:
+        raw = (reports_root / report_path).read_bytes()
+        report = json.loads(raw.decode("utf-8"))
+        lists: dict[str, list[dict[str, Any]]] = {}
+        digests: dict[str, tuple[str, int]] = {}
+        files: dict[str, dict[str, Any]] = {}
+        for role, rel in (("graded", graded_path), ("beside", beside_path)):
+            item_raw = (root / rel).read_bytes()
+            lists[role] = read_hardneg_items(item_raw, role=role, where=rel)
+            digests[role] = (hashlib.sha256(item_raw).hexdigest(), len(lists[role]))
+            files[role] = {"path": rel, "sha256": digests[role][0], "n": digests[role][1]}
+        problems = hardneg_pool_refusals(report, mode=mode, item_digests=digests, validate=validate)
+        if problems:
+            raise SystemExit(f"refusing --hardneg {report_path}: " + "; ".join(problems))
+        pools.append((mode, lists))
+        pool_records.append(
+            {
+                "path": report_path,
+                "sha256": hashlib.sha256(raw).hexdigest(),
+                "mode": mode,
+                "item_files": files,
+            }
+        )
+
+    v2_raw = (root / args.hardneg_positives).read_bytes()
+    v2 = json.loads(v2_raw.decode("utf-8"))
+    orders = pd.read_parquet(
+        root / args.host_orders, columns=["assembly_accession", "resolved_order"]
+    )
+    resolved_order = dict(
+        zip(orders["assembly_accession"].astype(str), orders["resolved_order"], strict=True)
+    )
+    folds = {
+        arm: training_fold_ids(
+            arm=arm,
+            split_table=str(root / args.split_table),
+            context=str(root / args.context),
+            labels=str(root / args.labels),
+        )
+        for arm in ARM_EXCLUDE_GATE4_EVAL
+    }
+    context = pd.read_parquet(root / args.context, columns=["record_id", "context_seq"])
+    context_by_id = dict(
+        zip(context["record_id"].astype(str), context["context_seq"].astype(str), strict=True)
+    )
+    contigs, items, scope, positives_sha = build_hardneg(
+        v2=v2, pools=pools, resolved_order=resolved_order, folds=folds, context_by_id=context_by_id
+    )
+    payload = hardneg_manifest(
+        contigs=contigs,
+        items=items,
+        scope=scope,
+        positives_sha256=positives_sha,
+        pool_records=pool_records,
+        v2_path=args.hardneg_positives,
+        v2_sha256=hashlib.sha256(v2_raw).hexdigest(),
+        inputs={
+            **{name: getattr(args, name) for name in ("split_table", "context", "labels")},
+            "host_orders": args.host_orders,
+            "host_orders_sha256": sha256_file(root / args.host_orders),
+        },
+    )
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    print(
+        f"wrote {out}: {scope['n_items']} items ({scope['n_positives']} pos / "
+        f"{scope['n_negatives']} neg, {scope['n_beside']} beside) over {scope['n_blocks']} "
+        f"blocks; graded {scope['n_items_gated']} items ({scope['n_negatives_gated']} neg) over "
+        f"{scope['n_blocks_gated']} blocks; fold overlap "
+        f"{scope['host_pool']['overlap_with_training_folds']['by_arm']}"
+    )
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--dataset", required=True, help="repo-relative path")
-    parser.add_argument("--decoys", required=True, help="repo-relative path")
+    parser.add_argument("--dataset", default=None, help="repo-relative path (v1/v2 mint)")
+    parser.add_argument("--decoys", default=None, help="repo-relative path (v1/v2 mint)")
     parser.add_argument("--split-table", default="data/processed/splits/split_assignments.parquet")
     parser.add_argument("--context", default="data/interim/flank_context/context_v0.parquet")
     parser.add_argument("--labels", default="data/processed/labels/labels_v0.parquet")
@@ -1203,7 +1769,30 @@ def main() -> int:
             "not with the DVC data --data-root points at)"
         ),
     )
+    hardneg = parser.add_argument_group("ADR-0005 A17 hard-negative mint (--hardneg)")
+    hardneg.add_argument(
+        "--hardneg",
+        default=None,
+        help="repo-relative draw-mode pool report (reports/p3/hardneg_pool.json, --reports-root)",
+    )
+    hardneg.add_argument(
+        "--hardneg-items",
+        nargs=2,
+        metavar=("GRADED", "BESIDE"),
+        default=None,
+        help="the draw pool's graded and beside item lists (--data-root)",
+    )
+    hardneg.add_argument("--hardneg-census", default=None, help="census-mode pool report")
+    hardneg.add_argument("--hardneg-census-items", nargs=2, metavar=("GRADED", "BESIDE"))
+    hardneg.add_argument("--hardneg-positives", default="data/interim/p3_16/benchmark_v2.json")
+    hardneg.add_argument(
+        "--host-orders", default="data/processed/mining/production_host_orders_v0.parquet"
+    )
     args = parser.parse_args()
+    if args.hardneg is not None:
+        return main_hardneg(args)
+    if args.dataset is None or args.decoys is None:
+        parser.error("--dataset and --decoys are required (unless --hardneg)")
 
     # Before any input is read: refusing after a long build is how an output guard loses its
     # point ([[two-outputs-one-path-destroys-the-first]]).

@@ -14,11 +14,22 @@ when ``gate.verdict_class`` is ``"underpowered"``, A15 Pin 5's sentence as an an
 the figure cannot be read as "two-stage did not beat Stage-1-only". A 1.1 report (the
 withdrawn v1 grade) draws exactly as before.
 
+A schema-1.3 report (the ADR-0005 A17 hard-negative benchmark, reported beside v2) adds two
+reads, again from its own fields: the gated arm's NON-graded AUPRC pair with the D4-context
+windows added to the denominator (A17 Pin 2), drawn as hollow markers at the pinned prevalence
+only; and the A17 Pin 4 power line (P, N_min, whether the census extension ran), so the panel
+states the power the verdict was computed at. The underpowered annotation reads A17's sentence
+from ``gate.underpowered_statement`` exactly as it reads A15's.
+
 Usage::
 
     python scripts/plot_two_stage_precision.py \\
         --report reports/two_stage_precision.json \\
         --out figures/integration/two_stage_precision.png
+
+    python scripts/plot_two_stage_precision.py \\
+        --report reports/two_stage_precision_hardneg.json \\
+        --out figures/integration/two_stage_precision_hardneg.png
 """
 
 from __future__ import annotations
@@ -65,6 +76,37 @@ def familiarity_point(report: dict) -> tuple[float, float] | None:
     if not isinstance(auprc, (int, float)) or isinstance(auprc, bool):
         return None
     return float(report["gate"]["decoy_prevalence"]), float(auprc)
+
+
+def beside_point(report: dict) -> tuple[float, dict] | None:
+    """``(pinned prevalence, gated arm's with-beside AUPRC pair)`` for a 1.3 report, else ``None``.
+
+    The pair is A17 Pin 2's reported, NON-graded read with the D4-context windows added to the
+    denominator; the figure draws it beside the graded pair, never instead of it.
+    """
+    block = report.get("beside_gate")
+    if not isinstance(block, dict):
+        return None
+    entry = (block.get("by_arm") or {}).get(report["gated_arm"]) or {}
+    denom = entry.get("with_beside_in_denominator") or {}
+    auprc = denom.get("auprc")
+    if not isinstance(auprc, dict):
+        return None
+    return float(report["gate"]["decoy_prevalence"]), auprc
+
+
+def power_note(report: dict) -> str | None:
+    """A17 Pin 4's power line for a 1.3 report — P, N_min and the extension — else ``None``."""
+    power = report.get("power")
+    if not isinstance(power, dict) or "n_min" not in power:
+        return None
+    extension = power.get("extension") or {}
+    graded = (power.get("by_arm") or {}).get(report["gated_arm"], {}).get("n_gated_negatives")
+    return (
+        f"P = {power.get('P')} of {graded} graded negatives reached Stage-2 "
+        f"(N_min {power['n_min']}); census extension "
+        f"{'ran' if extension.get('triggered') else 'not triggered'}"
+    )
 
 
 def main() -> int:
@@ -151,6 +193,20 @@ def main() -> int:
             color="#6D28D9",
             label=f"flank-familiarity baseline ({gated_arm}, {familiar[0]:g}:1)",
         )
+    beside = beside_point(report)
+    if beside is not None:
+        # A17 Pin 2: reported beside the graded pair, NOT graded — hollow, at the pin only.
+        for system, colour in (("stage1_only", "#B45309"), ("two_stage", "#1D4ED8")):
+            left.plot(
+                [beside[0]],
+                [beside[1][system]],
+                linestyle="none",
+                marker="s",
+                markersize=6,
+                markerfacecolor="none",
+                color=colour,
+                label=f"{SYSTEM_LABEL[system]} + D4-context ({gated_arm}, not graded)",
+            )
     left.legend(fontsize=7, loc="lower left")
     right.legend(fontsize=7, loc="upper left")
     note = underpowered_note(report)
@@ -166,6 +222,19 @@ def main() -> int:
             wrap=True,
             zorder=10,
             bbox=dict(boxstyle="round", facecolor="#FEF3C7", edgecolor="#B45309"),
+        )
+
+    power = power_note(report)
+    if power is not None:
+        right.text(
+            0.5,
+            0.06,
+            power,
+            transform=right.transAxes,
+            ha="center",
+            va="bottom",
+            fontsize=7,
+            zorder=10,
         )
 
     out = Path(args.out)

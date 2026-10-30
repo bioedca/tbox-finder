@@ -1,0 +1,5 @@
+outs:
+- md5: 7cc4308eb0ceb2fc55887a69c50ab51f
+  size: 1050364460
+  hash: md5
+  path: two_stage_precision_items_hardneg.json

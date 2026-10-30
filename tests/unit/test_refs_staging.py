@@ -123,6 +123,45 @@ def test_content_sha256_hashes_real_file(tmp_path: Path):
     assert content_sha256(real) == hashlib.sha256(payload).hexdigest()
 
 
+def test_content_sha256_streams_a_real_file_instead_of_reading_it_whole(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """A real file is hashed in chunks: ``read_bytes`` on a 23 GB census archive is a MemoryError.
+
+    The payload spans several ``_CHUNK`` reads with a ragged tail and no repeating period, so a
+    chunking bug (a dropped or doubled block) changes the digest. ``read_bytes`` is made to
+    raise, so a whole-file read cannot pass. The pointer branch keeps reading whole, because a
+    pointer is tiny; the existing pointer test covers it with ``read_bytes`` intact.
+    """
+    import hashlib
+
+    payload = bytes((31 * index + index // 7) % 256 for index in range(3 * refs._CHUNK + 11))
+    real = tmp_path / "archive.npz"
+    real.write_bytes(payload)
+    expected = hashlib.sha256(payload).hexdigest()
+
+    def refuse_whole_read(self: Path) -> bytes:
+        raise MemoryError(f"read_bytes({self.name}) — a whole-file read of a real file")
+
+    monkeypatch.setattr(Path, "read_bytes", refuse_whole_read)
+    assert content_sha256(real) == expected
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [b"", b"ver", b"version https://git-lfs.github.com/spec/v2\noid sha256:" + b"1" * 64],
+    ids=["empty", "shorter-than-the-magic", "a-near-miss-of-the-magic"],
+)
+def test_content_sha256_hashes_bytes_that_are_not_a_pointer(tmp_path: Path, payload: bytes):
+    """Only the exact pointer magic selects the pointer branch; a short or near-miss head is
+    content, and is hashed as content (the prefix read must not misclassify it)."""
+    import hashlib
+
+    real = tmp_path / "real.bin"
+    real.write_bytes(payload)
+    assert content_sha256(real) == hashlib.sha256(payload).hexdigest()
+
+
 def test_refs_module_constants():
     """Module contract: canonical staging dir + pinned accessed date."""
     assert refs.REFS_DIR.as_posix() == "data/external/refs"

@@ -78,7 +78,7 @@ import json
 import math
 import re
 import time
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -857,6 +857,9 @@ def provenance_record(
     root: Path,
     env_lock: str | Path | None = None,
     extra: Mapping[str, Any] | None = None,
+    rule: str = RULE,
+    script: str = GENERATED_BY,
+    adr: str = ADR,
 ) -> dict[str, Any]:
     """A CLAUDE.md §11 provenance record whose input keys are **repo-relative**.
 
@@ -865,14 +868,19 @@ def provenance_record(
     machine's directory layout in a committed artifact (the PR #103 finding). The hashes are the
     identity evidence and the strings only locators, so the keys are re-written here — the same
     post-hoc re-key ``stage2/cm_confirmer.py`` applies to its own record.
+
+    ``rule`` / ``script`` / ``adr`` default to this module's own identity. They exist so a
+    sibling module that runs these screens on another population (``hardneg_pool.py``, ADR-0005
+    A17) records *itself* as the producer through the same re-keying code, rather than carrying
+    a copy of it.
     """
     record = provenance.build_provenance(
-        rule=RULE,
-        script=GENERATED_BY,
+        rule=rule,
+        script=script,
         seed=provenance.DEFAULT_SEED,
         inputs=list(inputs),
         env_lock=env_lock,
-        adr=ADR,
+        adr=adr,
         repo_root=Path(__file__).resolve().parents[3],
         extra={"leg": leg, **dict(extra or {})},
     )
@@ -1878,6 +1886,58 @@ def _search_one(
     }
 
 
+def search_line(entry: Mapping[str, Any]) -> str:
+    """One search's progress line, as the search leg prints it."""
+    suffix = " (--max)" if entry["no_filters"] else ""
+    return (
+        f"  {entry['fasta']} x {entry['model']}{suffix}: "
+        f"{entry['n_hits']} hits, {entry['wall_s']}s"
+    )
+
+
+def run_search_tasks(
+    tasks: Sequence[Mapping[str, Any]],
+    *,
+    jobs: int,
+    line: Callable[[Mapping[str, Any]], str] = search_line,
+) -> list[dict[str, Any]]:
+    """Run :func:`_search_one` over ``tasks``, ``jobs`` at a time; results in **task** order.
+
+    One process per (FASTA, model), ``jobs`` at a time — the ``stage2/cm_confirmer.py::search``
+    shape. Results are collected in **task order**, so ``search.json`` does not depend on which
+    search happened to finish first, while the progress lines print in COMPLETION order: a
+    multi-hour run that said nothing until the end would be indistinguishable from a hung one.
+    The whole run is abandoned on the first failure rather than letting queued searches start.
+
+    Extracted from this module's own search leg, unchanged, so ``hardneg_pool.py`` (ADR-0005
+    A17) runs A15 Pin 2's invocation through the very executor A15's screen used rather than a
+    copy of it.
+    """
+    if jobs > 1:
+        import concurrent.futures as futures
+
+        def _progress(future: Any) -> None:
+            if not future.cancelled() and future.exception() is None:
+                print(line(future.result()), flush=True)
+
+        with futures.ThreadPoolExecutor(max_workers=jobs) as pool:
+            pending = [pool.submit(lambda task=task: _search_one(**task)) for task in tasks]
+            for future in pending:
+                future.add_done_callback(_progress)
+            done, _ = futures.wait(pending, return_when=futures.FIRST_EXCEPTION)
+            failed = next((f for f in pending if f in done and f.exception() is not None), None)
+            if failed is not None:
+                for future in pending:
+                    future.cancel()
+                raise failed.exception()
+            return [future.result() for future in pending]
+    searches: list[dict[str, Any]] = []
+    for task in tasks:
+        searches.append(_search_one(**task))
+        print(line(searches[-1]), flush=True)
+    return searches
+
+
 def _cmd_search(args: argparse.Namespace) -> int:
     """LEG 2 (infernal env): every FASTA × every D2 model, at the threshold its purpose needs."""
     root = Path(args.data_root).resolve() if args.data_root else Path(__file__).resolve().parents[3]
@@ -1915,42 +1975,7 @@ def _cmd_search(args: argparse.Namespace) -> int:
                     }
                 )
     started = time.monotonic()
-
-    def _line(entry: Mapping[str, Any]) -> str:
-        suffix = " (--max)" if entry["no_filters"] else ""
-        return (
-            f"  {entry['fasta']} x {entry['model']}{suffix}: "
-            f"{entry['n_hits']} hits, {entry['wall_s']}s"
-        )
-
-    # One process per (FASTA, model), ``jobs`` at a time — the ``stage2/cm_confirmer.py::search``
-    # shape. Results are collected in **task order**, so ``search.json`` does not depend on which
-    # search happened to finish first, while the progress lines print in COMPLETION order: a
-    # multi-hour run that said nothing until the end would be indistinguishable from a hung one.
-    # The whole run is abandoned on the first failure rather than letting queued searches start.
-    if args.jobs > 1:
-        import concurrent.futures as futures
-
-        def _progress(future: Any) -> None:
-            if not future.cancelled() and future.exception() is None:
-                print(_line(future.result()), flush=True)
-
-        with futures.ThreadPoolExecutor(max_workers=args.jobs) as pool:
-            pending = [pool.submit(lambda task=task: _search_one(**task)) for task in tasks]
-            for future in pending:
-                future.add_done_callback(_progress)
-            done, _ = futures.wait(pending, return_when=futures.FIRST_EXCEPTION)
-            failed = next((f for f in pending if f in done and f.exception() is not None), None)
-            if failed is not None:
-                for future in pending:
-                    future.cancel()
-                raise failed.exception()
-            searches = [future.result() for future in pending]
-    else:
-        searches = []
-        for task in tasks:
-            searches.append(_search_one(**task))
-            print(_line(searches[-1]), flush=True)
+    searches = run_search_tasks(tasks, jobs=int(args.jobs))
     payload = {
         "schema_version": SCHEMA_VERSION,
         "step": STEP,
@@ -3904,8 +3929,10 @@ __all__ = [
     "read_searches",
     "recorded_path",
     "require_repo_relative",
+    "run_search_tasks",
     "screen_window",
     "search_argv",
+    "search_line",
     "sorted_unique_kmers",
     "surrogate",
     "truncate_window",

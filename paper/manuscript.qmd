@@ -526,6 +526,31 @@ points. The screened benchmark is thus clean in the respect that invalidated the
 first one and confounded in another, which is why it grades a tie rather than
 supporting any ranking of the two systems.
 
+A benchmark with power needs negatives the scanner finds hard. We therefore built a
+second one beside the first, pinned before any of its scores existed. Its negatives come
+from the context the design names as hardest for a tRNA-sensing finder: native 1,024-nt
+leader windows upstream of annotated coding and tRNA genes, on the 339 admissible genomes
+that carry an NCBI annotation. They were drawn score-blind and screened exactly as above.
+Some windows lie within 500 bp of a gene in the classes T-boxes predominantly regulate:
+aminoacyl-tRNA synthetases, amino-acid biosynthesis genes and transporters
+(PMID:18359782; PMID:19258532; accessed 2026-10-28). Such a window may hold a real T-box the
+covariance models cannot see, so these are scored and reported beside the graded
+denominator, never inside it. A pre-registered power floor requires at least 20 graded
+negatives to reach Stage-2 before the comparison is graded. If a 100,000-window draw fell
+short, one extension to the full census of eligible windows was allowed. The draw delivered
+none. The census delivered 6 of 750,875 graded negatives, and those six are only four loci:
+three of them are overlapping windows on one contig. **Fewer than 20 graded negatives reached
+Stage-2; the hard-negative benchmark lacks power to test Stage-2.** Nor does its verdict hold
+across the threshold the design leaves unfrozen. At the Stage-1 threshold used throughout,
+two-stage AUPRC exceeds Stage-1-only by 0.000146 percentage points (95 % block-bootstrap
+interval [−0.0000876, +0.000602] over 1,368 blocks). At 0.7 the lead is 0.0002 points. At
+0.9 the two tie exactly, because no graded negative reaches Stage-2. Our pre-registered
+report refuses to publish a verdict that changes with a threshold left unfrozen until the
+discovery phase, and we record it as refused rather than choose the threshold at which it
+passes. A flank-familiarity baseline (AUPRC 0.9975268) again outranks both systems. The
+hard-negative benchmark therefore adds no verdict, and the two-stage half of the Phase-3
+criterion stands as recorded on the screened benchmark: failing, and underpowered.
+
 ::: {#fig-twostage}
 ![](figures/integration/two_stage_precision_v2.png)
 
