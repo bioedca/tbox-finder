@@ -268,9 +268,16 @@ the fitted temperature is $T = 1.1406$ and the expected calibration error, over
 (homology-cluster-blocked bootstrap 95% CI [0.0027, 0.0094], 2,000 resamples)
 against a blinded-frozen ceiling of **0.05**. **GATE-2's Phase-3 half passes**, by
 a factor of 8.8, with the interval's upper bound also a factor of five clear. The
-undebiased plug-in estimator reads 0.0084 on the same rows; since the debiasing
-correction can only lower the estimate and both readings sit an order of
-magnitude below the ceiling, the verdict does not depend on which is taken.
+undebiased plug-in estimator reads 0.0084 on the same rows. Since the debiasing
+correction can only lower the estimate, the gate now requires **both** readings to
+clear the ceiling (ADR-0005 A18). That rule was pinned at the phase-exit gate,
+after this grade was recorded; it only makes the gate stricter, so it cannot have
+produced the pass. Both readings sit an order of magnitude below the ceiling, so
+the verdict is unchanged. In a seeded simulation at this split's size, the
+two-reading rule passed a calibrated model in 200 of 200 replicates. It cut the
+debiased-only false-pass rate from 1.000 to 0.285 for a model whose true error
+was 0.052, and from 0.165 to 0 at 0.070. The price is conservatism at small
+samples: at 420 rows it passed a calibrated model only 30% of the time.
 
 Three caveats travel in the artifact rather than in a footnote, and together they
 say that the pass is honest but its evidence base is narrow. The temperature
@@ -278,6 +285,8 @@ exists only because **one** of the 1,089 calibration rows is misclassified at th
 decision boundary: the Stage-2 discrimination against the pre-registered decoy
 mix is near-saturated, and a perfectly separated calibration split has no finite
 temperature at all — exactly the state of the no-auxiliary-loss ablation control.
+Such a split is now pinned as **ungradeable**: a stop for a decision, never a
+substituted temperature.
 That same near-separation shapes the gated statistic itself. Under equal-mass
 binning, **12 of the 15 bins carry accuracy exactly 0 or 1** — they contain only
 rows the model places at $p < 10^{-4}$ or $p > 0.995$, where there is nothing to

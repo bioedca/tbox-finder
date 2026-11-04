@@ -259,9 +259,9 @@ def test_temperature_is_fitted_on_calib_and_the_swap_yields_the_test_arms_own_T(
     )
 
 
-def _separated_arm(*, flip_one_calib_row: bool) -> E.ArmScores:
-    n = 30
-    rungs = ["calib"] * 12 + ["val"] * 6 + ["test"] * 12
+def _separated_arm(*, flip_one_calib_row: bool, n_calib: int = 12) -> E.ArmScores:
+    rungs = ["calib"] * n_calib + ["val"] * 6 + ["test"] * 12
+    n = len(rungs)
     labels = np.asarray([i % 2 for i in range(n)], dtype=np.int64)
     logits = np.where(labels == 1, 8.0, -8.0).astype(np.float64)
     if flip_one_calib_row:
@@ -729,6 +729,67 @@ def test_the_validator_refuses_a_verdict_the_evidence_does_not_support() -> None
     assert any("governing_reading" in p for p in E.validate_report(report))
 
 
+def test_the_validator_rederives_every_d11_grade_from_both_readings() -> None:
+    """CodeRabbit, PR #144 r1 (major): ``ece_gate_pass`` is derived from the debiased AND the
+    plug-in ECE (ADR-0005 A18 Pin 2), so a report whose plug-in was edited past the gate must
+    not keep its recorded pass — nor the absolute reading and verdict that rest on it.
+
+    Each forge below sets the readings explicitly rather than nudging the fixture's own, so
+    the test does not depend on which side of the gate the 31-row synthetic arm lands.
+    """
+    report = _report()
+    assert E.validate_report(report) == [], "positive control failed"
+    assert E.d11_grade_problems(report) == []
+    rung = report["ablation"]["graded_on_rung"]
+    block = report["arms"]["aux1.0_lr1e-4"]["grades"][rung]
+    # The reviewer's case: a recorded PASS whose debiased value clears the gate while the
+    # plug-in does not — a debiased-only re-derivation would accept it.
+    block["ece"], block["ece_plugin"], block["ece_gate_pass"] = 0.02, M.ECE_GATE + 0.03, True
+    problems = E.d11_grade_problems(report)
+    assert any(
+        "aux1.0_lr1e-4" in p and "ece_gate_pass = True" in p and "assigned, not derived" in p
+        for p in problems
+    ), problems
+    assert set(problems) <= set(E.validate_report(report)), "the validator must carry them"
+    # Its positive control: the same forged pass with BOTH readings under the gate is clean.
+    block["ece_plugin"] = 0.04
+    assert not any("aux1.0_lr1e-4" in p and "assigned" in p for p in E.d11_grade_problems(report))
+    # ...and the opposite direction: a recorded FAIL whose readings both clear the gate.
+    block["ece_gate_pass"] = False
+    assert any("ece_gate_pass = False" in p for p in E.d11_grade_problems(report))
+
+
+def test_the_absolute_reading_is_anchored_to_the_with_aux_grade() -> None:
+    report = _report()
+    assert E.d11_grade_problems(report) == []
+    flipped = not report["ablation"]["reading_absolute"]["passes"]
+    report["ablation"]["reading_absolute"]["passes"] = flipped
+    # Keep the verdict consistent with the forged reading, so ONLY the new anchor can catch it
+    # ([[all-true-fixture-cannot-test-a-conjunction]]).
+    report["ablation"]["verdict"] = E.verdict_from_absolute_reading(flipped)
+    problems = E.validate_report(report)
+    assert any("the absolute reading IS that grade" in p for p in problems), problems
+    assert not any("derived, not assignable" in p for p in problems), problems
+
+
+def test_an_arm_with_no_ece_may_not_record_a_grade() -> None:
+    report = _report()
+    block = report["arms"]["aux0.0_lr1e-4"]["grades"]["test"]
+    block["ece"] = None
+    block["ece_gate_pass"] = None
+    assert not any("aux0.0_lr1e-4" in p for p in E.d11_grade_problems(report))
+    block["ece_gate_pass"] = False
+    assert any("UNGRADEABLE" in p and "aux0.0_lr1e-4" in p for p in E.d11_grade_problems(report))
+
+
+def test_an_over_large_or_non_finite_reading_is_a_problem_not_a_raise() -> None:
+    for bad in (10**400, float("inf"), float("nan"), "0.01", True):
+        report = _report()
+        report["arms"]["aux1.0_lr1e-4"]["grades"]["test"]["ece_plugin"] = bad
+        problems = E.d11_grade_problems(report)  # must not raise
+        assert any("not both finite numbers" in p for p in problems), (bad, problems)
+
+
 def test_the_verdict_tracks_the_absolute_reading_in_both_directions() -> None:
     """Sabotage-shaped: a one-sided check would pass for a function that always holds."""
     assert E.verdict_from_absolute_reading(True) == E.VERDICT_HOLDS
@@ -1075,7 +1136,11 @@ def test_the_absolute_reading_answers_when_only_the_CONTROL_lacks_an_ece() -> No
     Sabotaging the fix left the suite green until this test existed, because every
     other unfittable-arm case put the missing ECE on the with-aux side.
     """
-    with_aux = E.grade_arm(_separated_arm(flip_one_calib_row=True), n_boot=10)
+    # n_calib=40, not the shared default 12: ADR-0005 A18 Pin 2 grades D11 on the plug-in ECE
+    # too, and with 1 wrong calib row of 12 the fitted T leaves the 12-row test rung at
+    # plug-in 0.083 (debiased 0.0) — an honest FAIL on binning noise that would make this
+    # test's `is True` assert the conjunct away. One wrong row of 40 gives plug-in 0.025.
+    with_aux = E.grade_arm(_separated_arm(flip_one_calib_row=True, n_calib=40), n_boot=10)
     no_aux = E.grade_arm(_separated_arm(flip_one_calib_row=False), n_boot=10)
     with_aux["arm"], no_aux["arm"] = "aux1.0_lr1e-4", "aux0.0_lr1e-4"
     out = E.compare_arms(with_aux, no_aux)
@@ -1087,6 +1152,29 @@ def test_the_absolute_reading_answers_when_only_the_CONTROL_lacks_an_ece() -> No
     assert out["reading_absolute"]["observed_ece"] == with_aux["grades"]["test"]["ece"]
     assert out["reading_absolute"]["unavailable_reason"] is None
     assert out["reading_absolute"]["depends_only_on_the_with_aux_arm"] is True
+
+
+def test_the_d11_grade_the_absolute_reading_holds_is_read_on_the_plug_in_too() -> None:
+    """ADR-0005 A18 Pin 2, at the producer: ``grade_arm`` must grade the D11 bar on the
+    debiased AND the plug-in ECE, so D16's absolute reading inherits GATE-2's conjunct.
+
+    The 12-calib-row miniature is the discriminating case: its test rung reads debiased
+    **0.0** and plug-in **0.083**, so a producer that graded the debiased value alone would
+    pass it. The 40-row variant is the positive control — same shape, both readings clear.
+    """
+    small = E.grade_arm(_separated_arm(flip_one_calib_row=True, n_calib=12), n_boot=10)
+    block = small["grades"]["test"]
+    # Guard the fixture first: it must sit in the regime the conjunct exists for.
+    assert block["ece"] <= M.ECE_GATE < block["ece_plugin"], block
+    assert block["ece_gate_pass"] is False
+    big = E.grade_arm(_separated_arm(flip_one_calib_row=True, n_calib=40), n_boot=10)
+    assert big["grades"]["test"]["ece_plugin"] <= M.ECE_GATE
+    assert big["grades"]["test"]["ece_gate_pass"] is True
+
+    with_aux, no_aux = small, E.grade_arm(_separated_arm(flip_one_calib_row=False), n_boot=10)
+    with_aux["arm"], no_aux["arm"] = "aux1.0_lr1e-4", "aux0.0_lr1e-4"
+    # A definite False, not None: the reading has an answer and the answer is the conjunct's.
+    assert E.compare_arms(with_aux, no_aux)["reading_absolute"]["passes"] is False
 
 
 # --------------------------------------------------------------------------- #
@@ -1333,6 +1421,9 @@ def test_the_gate_note_NAMES_the_degenerate_arm_when_there_is_one() -> None:
     note = E._gate_note(report)
     assert "aux0.0_lr1e-4" in note
     assert "uncalibratable" in note
+    # ...and it points at the rule that now governs it, not at a rule still to be drafted.
+    assert "A18 Pin 1" in note and "UNGRADEABLE" in note
+    assert "to be pinned" not in note
     # ...and a fit that simply failed to converge counts too, on the arm it happened to.
     other = _report()
     other["arms"]["aux1.0_lr1e-4"]["calibration"]["converged"] = False

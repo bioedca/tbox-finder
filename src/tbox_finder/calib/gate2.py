@@ -326,10 +326,11 @@ _UNPINNED_DRIFT_BOUND = (
     "ADR-0005 D13 condition (i) compares the leave-clade-out ECE to a *pinned drift "
     "bound*. No such value exists: D18's delegation map assigns only the min-N floor "
     "(pinned by Amendment A2), and no number of that shape appears in PRD.md, ADR-0005, "
-    "ADR-0006, conf/ or src/. Pinning one is a new blinded-frozen default requiring "
-    "ADR-0005 sign-off (CLAUDE.md §7 item 2), so condition (i) is left unadjudicated "
-    "and no calibrated-negative PASS is derived from the two conditions that do have "
-    "values."
+    "ADR-0006, conf/ or src/. ADR-0005 A18 Pin 3 (P3-exit-b) DEFERS the pin to its own "
+    "amendment at P5-01, before any P5 per-corpus result exists, and records that the P3 "
+    "leave-clade-out ECEs were already known when it is pinned. Until then condition (i) "
+    "is left unadjudicated and no calibrated-negative PASS is derived from the two "
+    "conditions that do have values."
 )
 _UNPINNED_DEPLOYMENT_PRIOR = (
     "The genome-scale deployment prevalence is prose only — '~10^3-10^4 : 1' at PRD.md "
@@ -615,7 +616,8 @@ def grade_in_distribution(
         "ece_debiased": True,
         "estimator": ECE.IN_DISTRIBUTION_ESTIMATOR,
         "gate": ECE_GATE,
-        "passes": bool(M.gate2_ece_pass(ece)),
+        # ADR-0005 A18 Pin 2: the debiased value AND the plug-in must each clear the gate.
+        "passes": bool(M.gate2_ece_pass(ece, ece_plugin=ece_plugin)),
         "n_blocks": len(set(keys)),
         "n_boot": int(n_boot),
         "bootstrap_seed": int(seed),
@@ -999,12 +1001,22 @@ def derive_clauses(report: Mapping[str, Any]) -> dict[str, bool]:
     cal = ind.get("calibration") if isinstance(ind.get("calibration"), Mapping) else {}
     units = ood.get("units") if isinstance(ood.get("units"), Mapping) else {}
 
-    ece = ind.get("ece")
-    has_ece = isinstance(ece, (int, float)) and not isinstance(ece, bool) and math.isfinite(ece)
+    # `_finite_real`, never a bare `math.isfinite`: a JSON integer too large for a double makes
+    # `math.isfinite` RAISE `OverflowError`, so the clause would crash instead of reading FALSE
+    # (CodeRabbit, PR #144 r1 — the `ece` read had the same defect as the new `ece_plugin` one).
+    ece = _finite_real(ind.get("ece"))
+    has_ece = ece is not None
+    plugin = _finite_real(ind.get("ece_plugin"))
+    has_plugin = plugin is not None
 
     return {
         # ── the gated statistic ──
-        "in_distribution_ece_within_gate": bool(has_ece and M.gate2_ece_pass(float(ece))),
+        # ADR-0005 A18 Pin 2 (P3-exit-b): BOTH readings must clear the gate. The clause name is
+        # unchanged and the clause set is unchanged, so no schema bump: the stricter definition
+        # re-derives identically on both committed reports (plug-in 0.008378 and 0.011322).
+        "in_distribution_ece_within_gate": bool(
+            has_ece and has_plugin and M.gate2_ece_pass(ece, ece_plugin=plugin)
+        ),
         "gate_threshold_is_the_pinned_default": ind.get("gate") == ECE_GATE,
         "ece_estimator_matches_adr_d11": (
             ind.get("ece_n_bins") == ECE_N_BINS
@@ -1804,16 +1816,28 @@ def validate_report(report: Mapping[str, Any]) -> list[str]:
     if not isinstance(gate, Mapping) or not gate:
         problems.append("gate: block missing — there is no gated statistic to check")
     else:
-        ece = gate.get("ece")
-        if not isinstance(ece, (int, float)) or isinstance(ece, bool) or not math.isfinite(ece):
-            problems.append(f"gate.ece: {ece!r} is not a finite number, so nothing was graded")
+        # `_finite_real` on both reads: a bare `math.isfinite` raises on an over-large JSON
+        # integer, and this validator's contract is a problem list, never a raise (PR #144 r1).
+        ece = _finite_real(gate.get("ece"))
+        plugin = _finite_real(gate.get("ece_plugin"))
+        if ece is None:
+            problems.append(
+                f"gate.ece: {gate.get('ece')!r} is not a finite number, so nothing was graded"
+            )
         else:
-            recomputed = bool(M.gate2_ece_pass(float(ece)))
-            if gate.get("passes") != recomputed:
+            if plugin is None:
                 problems.append(
-                    f"gate.passes = {gate.get('passes')!r} but gate2_ece_pass({ece!r}) = "
-                    f"{recomputed!r} — the verdict was assigned, not derived"
+                    f"gate.ece_plugin: {gate.get('ece_plugin')!r} is not a finite number, and "
+                    "ADR-0005 A18 Pin 2 grades GATE-2 on the debiased AND the plug-in ECE"
                 )
+            else:
+                recomputed = bool(M.gate2_ece_pass(ece, ece_plugin=plugin))
+                if gate.get("passes") != recomputed:
+                    problems.append(
+                        f"gate.passes = {gate.get('passes')!r} but gate2_ece_pass({ece!r}, "
+                        f"ece_plugin={plugin!r}) = {recomputed!r} — the verdict was assigned, "
+                        "not derived"
+                    )
         if gate.get("gate") != ECE_GATE:
             problems.append(
                 f"gate.gate = {gate.get('gate')!r}, must be the blinded-frozen ADR-0005 D11 "
@@ -1939,7 +1963,8 @@ def build_report(
     report["is_science"] = all(clauses[name] for name in COMPLETENESS_CLAUSES)
     report["note"] = (
         "`gate.passes` is GATE-2's P3 half: the ADR-0005 D11 in-distribution ECE of the named "
-        "posterior against the blinded-frozen 0.05 default. `overall_pass` is stricter — it is "
+        "posterior against the blinded-frozen 0.05 default, read on the debiased AND the "
+        "plug-in estimate (A18 Pin 2). `overall_pass` is stricter — it is "
         "`gate.passes` AND every machinery, completeness and non-gated-ness clause. The FDR half "
         "of GATE-2 is graded at P5 (D12) and is not represented here."
     )
@@ -1968,13 +1993,18 @@ def disclosures(*, gate: Mapping[str, Any], ood: Mapping[str, Any]) -> list[str]
         "the decision boundary; that row is the entire signal for beta. P3-08's no-aux RiNALMo "
         "control has a perfectly separated calib carve and no temperature at all. The arm "
         "graded HERE is described by its own temperature disclosure below, and this report "
-        "records no separation measurement for it. ADR-0005 D11 has no degenerate-limit rule, "
-        "and drafting one is a P3-exit item.",
+        "records no separation measurement for it. ADR-0005 A18 Pin 1 (P3-exit-b) pins D11's "
+        "degenerate-limit rule: a calib carve with no finite temperature (perfectly separated, "
+        "worse than uniform, or not converged) yields no T and no ECE, the grade is UNGRADEABLE "
+        "rather than a pass or a fail, and a gated arm in that state is a CLAUDE.md §7 item-4 "
+        "stop.",
         "INHERITED FROM P3-09: the D11 debiasing term was measured to SATURATE at ~0.060 "
         "against a known truth of 0.123 on genuinely miscalibrated data at n in {20, 50, 200} "
         "— i.e. it can under-state a real calibration error at small n. The plug-in ECE is "
-        "reported beside the gated value for exactly this reason; certifying the debias term "
-        "is a P3-exit / ADR concern flagged in `metrics.binned_ece`'s own docstring.",
+        "reported beside the gated value for exactly this reason, and ADR-0005 A18 Pin 2 "
+        "(P3-exit-b) makes it a second pass condition: GATE-2 passes only if the debiased AND "
+        "the plug-in ECE each clear 0.05. Neither reading bounds the true calibration error "
+        "from above.",
         "The leave-clade-out units are ~92% positive (their negatives are the dinucleotide-"
         "shuffled decoys carved from the same held-out records), so each unit's OOD ECE is "
         "dominated by the positive arm and is not a deployment-prevalence read.",

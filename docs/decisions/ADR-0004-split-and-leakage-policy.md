@@ -90,6 +90,7 @@ Records lacking a clade label at the holdout rank are handled by a pre-registere
 - **Re-derive each full lineage from its TaxId** against the frozen governing-release taxonomy (the pinned NCBI taxdump, P0-15 — *not* GTDB, since the corpus lineage columns are NCBI-named at a pre-2021 vintage and GTDB cannot resolve the environmental/metagenome/CPR TaxIds that dominate the residue); recovery rate reported per rank (P0-15: phylum +7.06%, class +8.44%, order +6.36%).
 - **Still-incomplete residue is pre-registered as dropped from clade-holdout** (`dropped_from_clade_holdout`), kept **only** in the random (genus-stratified) split, reported per rank. The invariant `resolved_order` NULL ⟺ `dropped_from_clade_holdout` holds, so **a no-clade record can never silently enter a clade fold**.
 - This is the D7 no-leakage test's **defined behaviour on records lacking a clade label**: such a record must be in the dropped/random-only bucket or the test **fails** (it cannot silently pass at the holdout rank).
+- ⚠ **Extended by A8 (P3-exit-b, 2026-11-04)** to Stage-2 decoys with no corpus parent: random split only, null clade columns, never in a leave-clade-out unit. The clade exposure of the Rfam and leader decoys among them is disclosed as unmeasured.
 
 ### D5. Nested most-restrictive training-fold construction — one checkpoint, every holdout (locked; operationalised P0-22)
 
@@ -586,3 +587,40 @@ disjoint from the graded one — is already cited by D11 (arXiv:1706.04599, Guo 
 and is restated, not re-derived. The genus-stratification choice is justified by a
 **measurement in this document** (6 orders vs 23), not by an appeal to literature. Every
 count above is reproducible from the two committed artifacts by the pinned algorithm.
+
+### A8 — the **parentless-decoy fold convention**: D4's random-split-only rule extended to Stage-2 negatives with no corpus parent, ratified as built; the clade exposure of the sourced decoys is disclosed as unmeasured (P3-exit-b; user sign-off 2026-11-04)
+
+- **Status:** **Accepted (user sign-off 2026-11-04, bioedca; CLAUDE.md §7 item 2 — "Sign as drafted").** Decision taken 2026-11-04 by bioedca, via AskUserQuestion: *"Ratify + disclose"*, chosen over measuring the exposure first (mapping 3,007 source accessions to orders) and over an A5-style host-order exclusion (a Stage-2 retrain that re-opens P3).
+- **Extends D4** to a class D4 does not name. **Moves nothing:** no row changes fold, `stage2_dataset.parquet` is not re-run (digest `03263354…` unchanged), and no checkpoint, report or verdict changes.
+
+**Trigger.** P3-01 (PR #93, 2026-07-31) built this convention and booked its sign-off for the P3 exit gate. P3-06's §7 decision (2026-08-03) admitted these decoys to Stage-2 training through its `fold_basis == decoy_pool_random` disjunct. A7.4 pinned their `calib` rate but, in its own words, *"does **not** resolve"* the convention. No ADR text ratified it until now.
+
+**The convention, as built (`src/tbox_finder/stage2/dataset.py`).**
+1. **Scope.** Stage-2 dataset rows with `fold_basis = decoy_pool_random`, i.e. decoys with **no corpus parent**: **5,007** rows = 2,000 GC-matched generated background + 2,999 Rfam structured RNAs + 8 tboxevo leader decoys (`data/processed/audits/stage2_dataset_report.json` → `pool_counts`, `fold_basis_counts`). Derived decoys (`parent_record`, the dinucleotide shuffles) are untouched: they inherit their parent's fold across every scheme under D7.
+2. **Random split only.** `fold_random` is a deterministic keyed hash on the decoy id: `DECOY_FOLD_SEED = 20260731`, mass 0.80 / 0.10 / 0.10. Realised: 4,028 train and 979 val + test.
+3. **No clade.** Every clade-scheme column is null and `clade_holdout_eligible` is False, so **no parentless decoy is in any leave-clade-out unit**. That is D4's *"kept only in the random split"*, for the same reason: a record with no clade label must never silently enter a clade fold.
+4. **`nested_train` stays null.** Training admission is P3-06's rule: *admit iff `fold_random == train` AND NOT `calib` AND (`nested_train is True` OR `fold_basis == decoy_pool_random`)*. That admits 3,860 of the 9,059 Stage-2 training rows.
+5. **`calib`** membership is A7.4's keyed draw at `DECOY_CALIB_RATE`, unchanged.
+
+**Why extend D4 rather than assign a clade.** A parentless decoy has no corpus lineage by construction; the generated background has no organism at all. Minting a clade label for it to place it in a clade fold would fabricate the one field the leakage test reads (§10.3). D4's rule already says what a no-clade record does.
+
+**Disclosed: the clade exposure of the 3,007 sourced decoys is unmeasured.**
+- The 2,999 Rfam decoys and 8 leader decoys are excerpts of real source sequences: each Rfam id locates `<accession>/<start>-<end>` (`decoys.py::parse_structured_rna_locus`). Nothing in the Stage-2 path maps those source organisms to the corpus's `resolved_order`.
+- So whether any of them comes from a D5 held-out clade (a leave-one-order-out order, or Actinobacteria) is not known. A5's host-order admission rule governs Stage-1's whole-genome background windows; Stage-2 has no counterpart.
+- **What bounds the effect.**
+  - Such a decoy is a **negative**. It can teach the model what a held-out clade's non-T-box RNA looks like, not what that clade's T-boxes look like.
+  - No parentless decoy sits in any leave-clade-out unit. Each unit's negatives are dinucleotide shuffles of the unit's own records (P3-10).
+- Every leave-clade-out read taken through Stage-2 carries this disclosure, P3-10's OOD ECE included.
+
+**Not amended.** D4 for positives; D5; D7; A4; A5 (Stage-1's host-order rule); A7 (the `calib` carve, its rate and its prevalence match); P3-06's admission rule (ratified, not changed); the committed split table (it carries no negative rows, A7.4); ADR-0005 in full.
+
+**Cross-reference impact.**
+- **D4** gets an inline pointer to this amendment.
+- **`imp.md`** (local-only): P3-01's *"Owed at the P3-exit gate"* is discharged.
+- **Dataset card (P7 release):** owes the unmeasured-exposure disclosure.
+- **`paper/manuscript.qmd`:** the methods' negative-set description owes it at the P3-exit sweep.
+
+**§10.1 evidence gate.** No biological or statistical fact is asserted. Every count is read from the committed `stage2_dataset_report.json` and from `imp.md`'s P3-06 record, and the convention is described from the shipped code.
+
+#### A8 sign-off
+☑ recorded 2026-11-04 (bioedca), CLAUDE.md §7 item 2 — *"Sign as drafted"*. The parentless-decoy convention is ratified as built (random split only, null clade columns, `nested_train` null, P3-06's admission disjunct). The unmeasured clade exposure of the 3,007 sourced decoys is disclosed, not measured and not excluded.

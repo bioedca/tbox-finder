@@ -9412,3 +9412,105 @@ paths only run when a pool report is regenerated.
 
 **Validation.** `test_hardneg_pool` + `test_precision_hardneg`: 197 passed. ruff and black are clean.
 CI on `e9fc610` was green (the duplicate `push` run was cancelled). **Commit.** See the PR.
+
+## Step P3-exit-b — 2026-11-04: the last §7 decisions owed at the P3 exit gate (ADR-0005 A18, ADR-0004 A8)
+
+**Inputs.**
+- `reports/gate2_p3_ece.json`: debiased 0.005662, plug-in 0.008378, T 1.140627, on 1,089 calib rows.
+- `reports/p3/gate2_rnafm_ece.json`: 0.006811 / 0.011322.
+- `reports/stage2_aux_ablation.json`.
+- `data/processed/audits/stage2_dataset_report.json`: 5,007 parentless decoys = 2,000 GC background + 2,999 Rfam + 8 leader.
+- The P3-08, P3-09 and P3-10 carries, and the text of ADR-0005 D11/D13 and ADR-0004 D4/A7.
+
+**Process.** Four items were booked for this gate. Each was put to the user with a drafted recommendation, and all four recommendations were taken. One was re-asked (Decisions). They are recorded as ADR-0005 **A18** and ADR-0004 **A8**, both signed as drafted.
+
+Only the debias decision needed code. `metrics.gate2_ece_pass(ece, *, ece_plugin)` now requires the plug-in, with no default, at all four call sites:
+- `calib/gate2.py`: the producer, the `in_distribution_ece_within_gate` clause and `validate_report`;
+- `stage2/eval.py::grade_arm`.
+
+The disclosure and note strings now name the rules that govern them.
+
+**Outputs.**
+- ADR-0005 A18, with pointers in D11 and D13.
+- ADR-0004 A8, with a pointer in D4.
+- `scripts/measure_gate2_ece_conjunct.py` → `reports/p3/gate2_ece_conjunct_sim.json`.
+- `tests/unit/test_gate2_conjunct_sim.py`, plus extensions to `test_gate2.py`, `test_aux_ablation_check.py` and `tests/ml/test_eval_gate.py`.
+- The manuscript calibration paragraph.
+
+No report was regenerated, and `gate2.SCHEMA_VERSION` stays "3": the clause key set is unchanged, and the stricter clause re-derives identically on both committed reports.
+
+**The four decisions.**
+
+- **D11's degenerate limit (A18 Pin 1).** If `fit_temperature` certifies no finite T, the result is no T, no ECE and an **UNGRADEABLE** grade. For a gated arm that is a §7 item-4 stop; for a control arm it is recorded as measured. A T = 1 fallback, a bracket endpoint, a post-hoc regularised fit and re-carving `calib` are all forbidden.
+- **D11's debias term (A18 Pin 2).** The shipped per-bin `max(0, |acc−conf| − σ√(2/π))` is pinned. GATE-2 passes only if the debiased **and** the plug-in ECE each clear 0.05.
+- **D13's drift bound (A18 Pin 3).** Deferred to its own amendment at P5-01. That amendment must disclose that the P3 leave-clade-out values (macro 0.2113; Actinobacteria 0.59–0.80) were already known.
+- **The parentless-decoy convention (A8).** Ratified as built: random split only, null clade columns, `nested_train` null, and P3-06's admission disjunct. The clade exposure of the 2,999 Rfam and 8 leader decoys is disclosed as unmeasured. It is bounded: they are negatives, and no parentless decoy is in any leave-clade-out unit.
+
+**Validation.**
+- Every recorded verdict re-derives unchanged: GATE-2 P3 PASS, the RNA-FM comparator PASS, and D16's absolute verdict. The committed reports also validate under the new predicate.
+- The ADR-reading test files (`test_host_screen`, `test_sbatch_producer_envelope`, `test_layout`, `test_aux_ablation_check`, `test_checkpoint_map`): 412 passed and 1 skipped. That skip is the DVC-cache test, which passes when pointed at the real cache.
+- Full unit + golden + ml tiers against a baseline worktree at `main` (`f318c56`): **0 new failures**.
+  - The branch had 15 failures to `main`'s 14. The extra one was a `copytree` race: I was clearing `__pycache__` in the same tree mid-run, and the test passed alone (18/18).
+- ruff 0.15.15 and black 25.11.0 are clean.
+- **Nine sabotages over ten runs**, each RED against its named test, each restore byte-verified. They cover:
+  - the predicate, the producer, the clause, the clause's presence guard (re-run after black reflowed it), the validator and the aux producer;
+  - the T = 1 fallback;
+  - both A18 pointers.
+- The simulation test also passes under CI's Python 3.12 + numpy 2.5.1.
+
+**Decisions.**
+
+- **A recommendation was corrected before sign-off.** The first debias question costed the conjunct as "a small gate2.py clause + tests" and did not say that it fails *calibrated* arms at small n. That cost surfaced when `test_gate2`'s own 420-row "honest, passing" fixture failed under it (debiased 0.0349, plug-in 0.0765). The question was re-asked with a measured table, and the user kept the conjunct. A18 Pin 2 records both the error and the re-decision. The committed simulation (200 seeded replicates per cell, a deliberately spread posterior) gives:
+
+  | rows | true ECE | pass rate, debiased only | pass rate, A18 |
+  |---|---|---|---|
+  | 3,045 (GATE-2's test rung) | 0 | 1.000 | 1.000 |
+  | 3,045 | 0.052 | 1.000 | 0.285 |
+  | 3,045 | 0.070 | 0.165 | 0.000 |
+  | 420 | 0 | 1.000 | 0.300 |
+
+- **The honest fixture moved to the gate's own size, not to an easier shape.** `_in_distribution_scores` now defaults to the 3,045-row test rung, at plug-in 0.0214, matching the simulation's 0.021. Its grade is cached and deep-copied per test (~2.4 s once), not cut to a cheap bootstrap. The aux test's 12-row variant became the discriminating case for the producer instead of being loosened.
+- **Neither ECE reading bounds the true error from above.** Binned estimates are biased in both directions (Roelofs et al. 2022, PMLR 151, arXiv:2012.08668; accessed 2026-11-04). P3-10's bin concentration stays a disclosure.
+- **Not done here** (the closing sweep, P3-exit-c): the checklist ticks, the dev-log SHA sweep, the Phase-3 ADR impact bullets, README, render, `dvc push`, `/ultrareview` and the tag.
+
+**Commit.** This stanza is written on branch `p3-exit-b-decisions` and cannot know its squash SHA. The P3-exit gate derives it from `main` (header rule).
+
+## Step P3-exit-b (review round 1) — 2026-11-04: the D11 grade is re-derived wherever it is recorded, and the predicate is total
+
+**Inputs.** CodeRabbit's automatic review of `c65b78d` on PR #144: 3 actionable findings, all reproduced by execution before any fix. The CodeRabbit CLI could not authenticate (*"Run `coderabbit auth login`"*), so the app path carried the round.
+
+**Process.**
+
+- **(major)** `stage2/eval.py::validate_report` never re-derived `ece_gate_pass`. A committed aux-ablation report whose with-aux `ece_plugin` was edited from 0.0084 to 0.08 still validated with `[]`, and so did its absolute reading and verdict. The new `d11_grade_problems` does three things:
+  - re-derives every `arms[*].grades[*].ece_gate_pass` from `gate2_ece_pass(ece, ece_plugin=…)`;
+  - refuses a boolean grade on an arm with no ECE, since an unfittable arm is UNGRADEABLE (A18 Pin 1);
+  - anchors `ablation.reading_absolute.passes` to the with-aux arm's grade on the graded rung.
+
+  Its keys are read only when they are strings, so a mutated key cannot make the validator raise.
+- **(minor)** `gate2_ece_pass(-inf, ece_plugin=0.01)` returned True. The predicate now requires each reading to be a real, finite, non-negative number. It refuses a bool (`False <= 0.05` holds) and an over-large integer, and it never raises.
+- **(minor)** `math.isfinite(10**400)` raises `OverflowError`. The new plug-in reads in `derive_clauses` and `validate_report` used it, and so did the **pre-existing** `ece` reads beside them. All four now go through `gate2._finite_real`, so the existing `ece` path was fixed along with the new one.
+
+**Outputs.**
+
+- `src/tbox_finder/{metrics.py, calib/gate2.py, stage2/eval.py}`.
+- Seven new tests across `test_aux_ablation_check.py`, `test_gate2.py` and `tests/ml/test_eval_gate.py`.
+- A18 Pin 2's enforcement list now names `d11_grade_problems` and the predicate's totality. This is a factual update to the code list; the signed decision is unchanged.
+
+**Validation.**
+
+- All three committed reports still validate with `[]`: `gate2_p3_ece.json`, `gate2_rnafm_ece.json` and `stage2_aux_ablation.json`.
+- `test_stage2_validator_totality.py` passes: no single-field mutation of the committed report makes the validator raise.
+- Affected suites: 325 passed.
+- **Seven sabotages**, each RED against its named test, each restore byte-verified:
+  - the predicate's finite/non-negative guard;
+  - a bare `isfinite` in the clause;
+  - the validator not calling the re-derivation;
+  - the absolute anchor;
+  - the re-derivation reading `ece` as the plug-in;
+  - a no-ECE arm recording a grade;
+  - a non-finite plug-in slipping through.
+- ruff and black are clean.
+
+**Decisions.** The aux re-derivation test sets each reading explicitly rather than nudging the fixture's own values. The 31-row synthetic with-aux arm fails the conjunct on noise (debiased 0.0728, plug-in 0.301), so a test written for "a pass whose plug-in moves past the gate" had to forge that pass. Leaning on the fixture would have tested nothing.
+
+**Commit.** This stanza is written on branch `p3-exit-b-decisions`. The P3-exit gate derives its `main` mapping (header rule).

@@ -162,10 +162,18 @@ def test_gate_predicates_both_directions() -> None:
     assert M.gate4_pass(0.81) is True
     assert M.gate4_pass(0.79) is False
     assert M.gate4_pass(float("nan")) is False
-    # GATE-2 ECE
-    assert M.gate2_ece_pass(0.049) is True
-    assert M.gate2_ece_pass(0.051) is False
-    assert M.gate2_ece_pass(float("nan")) is False
+    # GATE-2 ECE — the debiased value AND the plug-in must each clear 0.05 (ADR-0005 A18 Pin 2)
+    assert M.gate2_ece_pass(0.049, ece_plugin=0.049) is True
+    assert M.gate2_ece_pass(0.051, ece_plugin=0.049) is False
+    assert M.gate2_ece_pass(0.049, ece_plugin=0.051) is False  # the conjunct A18 added
+    assert M.gate2_ece_pass(float("nan"), ece_plugin=0.01) is False
+    assert M.gate2_ece_pass(0.01, ece_plugin=float("nan")) is False
+    # Total and fail-closed (PR #144 r1): -inf, a negative, a bool, an over-large JSON integer
+    # and a string are malformed readings, never passes — and never a raise.
+    for bad in (float("-inf"), float("inf"), -0.01, False, 10**400, "0.01", None):
+        assert M.gate2_ece_pass(bad, ece_plugin=0.01) is False, bad
+        assert M.gate2_ece_pass(0.01, ece_plugin=bad) is False, bad
+    assert M.gate2_ece_pass(0, ece_plugin=0) is True  # an exact-zero int is a real reading
     # GATE-1 two-part bar (strong) + min-N fallback (weak)
     assert M.gate1_recall_bar(12.0, 6.0) is True  # point>=10 AND ci>5
     assert M.gate1_recall_bar(9.0, 6.0) is False  # point<10
@@ -260,9 +268,11 @@ def test_gate2_predicate_still_grades_only_the_binned_in_distribution_ece() -> N
 
     assert not hasattr(ece, "gate2_ood_pass")
     assert "ECE_GATE" not in ece.__all__
-    # The gate predicate is unchanged and still keyed to the D11 pin.
-    assert M.gate2_ece_pass(M.ECE_GATE - 1e-9) is True
-    assert M.gate2_ece_pass(M.ECE_GATE + 1e-9) is False
+    # The gate predicate is still keyed to the D11 pin, on both readings (A18 Pin 2).
+    below, above = M.ECE_GATE - 1e-9, M.ECE_GATE + 1e-9
+    assert M.gate2_ece_pass(below, ece_plugin=below) is True
+    assert M.gate2_ece_pass(above, ece_plugin=below) is False
+    assert M.gate2_ece_pass(below, ece_plugin=above) is False
 
 
 # ========================================================================== #
@@ -643,7 +653,7 @@ def test_the_ood_golden_is_blocked_by_a_real_taxon_and_not_by_record() -> None:
     # 4. GATE-2's predicate belongs to the D11 in-distribution estimator ONLY. This OOD
     #    value would FAIL it, and nothing may apply it — D13 reports, never gates.
     assert got["gated"] is False
-    assert M.gate2_ece_pass(got["ood_ece"]) is False, (
+    assert M.gate2_ece_pass(got["ood_ece"], ece_plugin=got["ood_ece"]) is False, (
         "the OOD value happens to sit above 0.05; if a future fixture moved it below, this "
         "assertion would stop demonstrating that the two estimators are not interchangeable"
     )
