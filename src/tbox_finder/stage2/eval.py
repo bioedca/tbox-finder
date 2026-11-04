@@ -678,7 +678,9 @@ def grade_arm(
             "ece_binning": "equal_mass",
             "ece_debiased": True,
             "ece_gate": ECE_GATE,
-            "ece_gate_pass": bool(M.gate2_ece_pass(ece)),
+            # ADR-0005 A18 Pin 2: the D11 grade D16's absolute reading asks the with-aux arm
+            # to HOLD is read on the debiased AND the plug-in ECE, as GATE-2 is.
+            "ece_gate_pass": bool(M.gate2_ece_pass(ece, ece_plugin=ece_plugin)),
             "ece_ci": ece_ci,
             "auprc": auprc,
             "auprc_scaled_logits": auprc_scaled,
@@ -1588,8 +1590,9 @@ def _gate_note(report: Mapping[str, Any]) -> str:
         note += (
             f" On THIS run the calib carve of {', '.join(degenerate)} is degenerate "
             "(perfectly separated, or the temperature fit did not converge), so it is "
-            "uncalibratable — an accepted and recorded outcome (user sign-off, 2026-08-03), "
-            "with the degenerate-limit rule to be pinned in ADR-0005 D11 at the P3-exit gate."
+            "uncalibratable — an accepted and recorded outcome (user sign-off, 2026-08-03). "
+            "ADR-0005 A18 Pin 1 (P3-exit-b) pins D11's degenerate-limit rule: no finite T means "
+            "no ECE and an UNGRADEABLE arm, which for a gated arm is a CLAUDE.md §7 item-4 stop."
         )
     return note
 

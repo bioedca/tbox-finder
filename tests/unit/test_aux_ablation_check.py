@@ -259,9 +259,9 @@ def test_temperature_is_fitted_on_calib_and_the_swap_yields_the_test_arms_own_T(
     )
 
 
-def _separated_arm(*, flip_one_calib_row: bool) -> E.ArmScores:
-    n = 30
-    rungs = ["calib"] * 12 + ["val"] * 6 + ["test"] * 12
+def _separated_arm(*, flip_one_calib_row: bool, n_calib: int = 12) -> E.ArmScores:
+    rungs = ["calib"] * n_calib + ["val"] * 6 + ["test"] * 12
+    n = len(rungs)
     labels = np.asarray([i % 2 for i in range(n)], dtype=np.int64)
     logits = np.where(labels == 1, 8.0, -8.0).astype(np.float64)
     if flip_one_calib_row:
@@ -1075,7 +1075,11 @@ def test_the_absolute_reading_answers_when_only_the_CONTROL_lacks_an_ece() -> No
     Sabotaging the fix left the suite green until this test existed, because every
     other unfittable-arm case put the missing ECE on the with-aux side.
     """
-    with_aux = E.grade_arm(_separated_arm(flip_one_calib_row=True), n_boot=10)
+    # n_calib=40, not the shared default 12: ADR-0005 A18 Pin 2 grades D11 on the plug-in ECE
+    # too, and with 1 wrong calib row of 12 the fitted T leaves the 12-row test rung at
+    # plug-in 0.083 (debiased 0.0) — an honest FAIL on binning noise that would make this
+    # test's `is True` assert the conjunct away. One wrong row of 40 gives plug-in 0.025.
+    with_aux = E.grade_arm(_separated_arm(flip_one_calib_row=True, n_calib=40), n_boot=10)
     no_aux = E.grade_arm(_separated_arm(flip_one_calib_row=False), n_boot=10)
     with_aux["arm"], no_aux["arm"] = "aux1.0_lr1e-4", "aux0.0_lr1e-4"
     out = E.compare_arms(with_aux, no_aux)
@@ -1087,6 +1091,29 @@ def test_the_absolute_reading_answers_when_only_the_CONTROL_lacks_an_ece() -> No
     assert out["reading_absolute"]["observed_ece"] == with_aux["grades"]["test"]["ece"]
     assert out["reading_absolute"]["unavailable_reason"] is None
     assert out["reading_absolute"]["depends_only_on_the_with_aux_arm"] is True
+
+
+def test_the_d11_grade_the_absolute_reading_holds_is_read_on_the_plug_in_too() -> None:
+    """ADR-0005 A18 Pin 2, at the producer: ``grade_arm`` must grade the D11 bar on the
+    debiased AND the plug-in ECE, so D16's absolute reading inherits GATE-2's conjunct.
+
+    The 12-calib-row miniature is the discriminating case: its test rung reads debiased
+    **0.0** and plug-in **0.083**, so a producer that graded the debiased value alone would
+    pass it. The 40-row variant is the positive control — same shape, both readings clear.
+    """
+    small = E.grade_arm(_separated_arm(flip_one_calib_row=True, n_calib=12), n_boot=10)
+    block = small["grades"]["test"]
+    # Guard the fixture first: it must sit in the regime the conjunct exists for.
+    assert block["ece"] <= M.ECE_GATE < block["ece_plugin"], block
+    assert block["ece_gate_pass"] is False
+    big = E.grade_arm(_separated_arm(flip_one_calib_row=True, n_calib=40), n_boot=10)
+    assert big["grades"]["test"]["ece_plugin"] <= M.ECE_GATE
+    assert big["grades"]["test"]["ece_gate_pass"] is True
+
+    with_aux, no_aux = small, E.grade_arm(_separated_arm(flip_one_calib_row=False), n_boot=10)
+    with_aux["arm"], no_aux["arm"] = "aux1.0_lr1e-4", "aux0.0_lr1e-4"
+    # A definite False, not None: the reading has an answer and the answer is the conjunct's.
+    assert E.compare_arms(with_aux, no_aux)["reading_absolute"]["passes"] is False
 
 
 # --------------------------------------------------------------------------- #
@@ -1333,6 +1360,9 @@ def test_the_gate_note_NAMES_the_degenerate_arm_when_there_is_one() -> None:
     note = E._gate_note(report)
     assert "aux0.0_lr1e-4" in note
     assert "uncalibratable" in note
+    # ...and it points at the rule that now governs it, not at a rule still to be drafted.
+    assert "A18 Pin 1" in note and "UNGRADEABLE" in note
+    assert "to be pinned" not in note
     # ...and a fit that simply failed to converge counts too, on the arm it happened to.
     other = _report()
     other["arms"]["aux1.0_lr1e-4"]["calibration"]["converged"] = False

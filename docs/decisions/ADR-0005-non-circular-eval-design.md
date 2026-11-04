@@ -110,6 +110,8 @@ The **recalibration stack order is pinned**: **train → temperature-scale on a 
 
 **Binned-ECE estimator (pinned):** **equal-mass (equal-frequency) bins, default 15**, with a **debiasing correction**, on the positive-class posterior. Equal-mass over equal-width because equal-width bins are unstable in the sparse high-confidence region. The 0.05 default is **blinded-frozen** with its P0-28 magnitude rationale.
 
+> ⚠ **Amended by A18 (P3-exit-b, 2026-11-04).** Pin 2 writes down the debias formula and makes the **plug-in** ECE a second pass condition: GATE-2 passes only if the debiased **and** the plug-in ECE each clear 0.05. Pin 1 adds the degenerate limit: a calib carve with no finite temperature is **UNGRADEABLE**, a CLAUDE.md §7 item-4 stop, never a T = 1 fallback.
+
 ### D12. GATE-2 genome-scale FDR — FDP CI-upper-bound ≤ 10 % on the consensus null (locked rule; default value; gated at P5)
 
 Genome-scale FDR uses **three nulls** (distinct from §9.1's four training-negative classes): a **structured-RNA-retaining target-decoy run as the PRIMARY estimator** [PMID:17327847]; a **dinucleotide-shuffle null as a validated optimistic lower bound** (must first reproduce `cmsearch` decoy hit-rates); and a **reversed-sequence** null (reverse, **not** reverse-complement — RC is useless against an RC-equivariant scanner) as a composition-exact control.
@@ -125,6 +127,8 @@ A leave-clade-out / OOD ECE ≤ 0.05 is likely infeasible under clade shift, so 
 - Estimated with a **small-N-robust OOD estimator** — a proper-scoring-rule decomposition or a smoothed/kernel calibration estimator, with bootstrap CIs — **distinct from the D11 in-distribution binned estimator** — subject to a **pinned min-N admissibility floor (value at P0-27)**.
 - A per-corpus result is a **"calibrated-negative PASS" only if (i)** its nearest-relative leave-clade-out ECE (with CIs) meets a **pinned drift bound**, **(ii)** it clears **min-N**, **and (iii)** it clears a **corpus-specific *detection-power floor*** — an extrapolated recall@matched-precision at the corpus's phylogenetic distance and/or a **synthetic-Tier-2N spike-in recovery** test — so a well-calibrated-but-*blind* model cannot earn a bounded-distribution claim. Otherwise **"sensitivity-bounded / inconclusive negative *by rule*."**
 - A **sub-min-N or zero-positive corpus** (e.g. Archaea/DPANN, where no OOD ECE is computable) is inconclusive **unless** stated **nearest-relative extrapolations** (an ECE-vs-phylogenetic-distance *and* a recall/power-vs-phylogenetic-distance regression, both with **prediction intervals**) clear **both** the drift bound **and** the detection-power floor. Near-zero-prior corpora carry their **own deployment prior + per-corpus FDR null** (PRD §7.2). Per-corpus verdicts roll up to one GATE-3 outcome per the PRD §2.3 project-level rollup (pinned in ADR-0006).
+
+> ⚠ **A18 Pin 3 (P3-exit-b, 2026-11-04):** condition (i)'s drift bound is pinned in its own amendment at **P5-01**, before any P5 per-corpus result exists. Until then `calibrated_negative_pass` stays null. The P3 leave-clade-out ECEs were known before the bound is pinned, and that amendment must say so.
 
 ### D14. Hard-negative mining spare-rule + Tier-2N probe (locked; phase-conditioned)
 
@@ -1108,3 +1112,78 @@ Its three new values (100,000, δ ≤ 256, N_min = 20) are pinned here, before a
 
 ## Sign-off
 ☑ recorded 2026-10-28 (bioedca), CLAUDE.md §7 items 1 + 2 — *"Sign as drafted"*. The A13 Pin 1 hard-negative amendment is pinned **before any A17 score exists**: native §9.1 class-4 leaders (CDS-upstream and tRNA-upstream 1,024-nt windows, δ ~ U{0..256}) on the 339 annotated admissible a2 hosts; a 100,000-window seed-42 uniform draw; A15 Pins 1–2 screens unchanged; D4-context windows reported beside the graded denominator; A13 Pin 1's statistic on the twin at 100:1; a power floor of N_min = 20 graded negatives reaching Stage-2, with one pre-registered census extension decided on that count alone before any Stage-2 score; reported beside v2, never replacing v2's FAIL/underpowered verdict. Chosen over re-using the undrawn screened flank pool (expected underpowered) and over the round-0 Stage-1 false candidates (selected on Stage-1 output, already scored, label-ambiguous).
+
+## Amendment A18 — D11's degenerate-limit rule (no finite temperature ⇒ **UNGRADEABLE**, a §7 stop); D11's debias formula pinned **and the plug-in ECE made a second pass condition**; D13's drift bound **deferred to P5-01** (P3-exit-b, 2026-11-04)
+
+- **Status:** **Accepted (user sign-off 2026-11-04; CLAUDE.md §7 items 1 + 2, bioedca), "Sign as drafted".** The decisions it records were taken 2026-11-04 by bioedca, via AskUserQuestion:
+  - D11 degenerate limit: *"Ungradeable → §7 stop"*;
+  - D11 debias: *"Pin + plug-in must pass"*, then — re-asked with a measured cost the first question had omitted — *"Keep conjunct + disclose"*;
+  - D13 drift bound: *"Defer to P5-01"*.
+- **What it amends:** D11 (two construction rules it left open: the degenerate limit and the debias formula, plus the second pass condition); D13 (records when condition (i)'s bound is pinned).
+- **What it does not amend:** D11's gated object (the pre-prior-shift named posterior at the split's own prevalence), its threshold **ECE ≤ 0.05** (PRD-delegated, blinded-frozen, A3), its 15 equal-mass bins, its stack order and its P3-exit grading point; D13's rule structure and A2's `OOD_ECE_MIN_N = 20`; D12; D16; D17 and A16; A11; A14; every committed report.
+- **Precedence:** no PRD-delegated value moves. The plug-in condition uses D11's own 0.05; the degenerate-limit rule and the debias formula are construction rules D11 named but did not write down.
+- **Timing:** after GATE-2's P3 half was graded (P3-10, 2026-08-05). Neither rule can move that verdict (Pin 4), and both bind every later GATE-2 grade: the D17 RNA-FM re-clear (A16) and D16's absolute reading.
+
+**Trigger.** Three items were carried to this gate and never resolved: P3-08's §7 decision 2 (2026-08-03, *"pin the degenerate-limit rule in ADR-0005 D11 at the P3-EXIT GATE"*); P3-09's measurement that the debias term saturates at **~0.060 against a known truth of 0.123** on miscalibrated data at small n, flagged in `metrics.binned_ece`'s docstring as *"a P3-exit / ADR concern"*; and P3-10's finding that **no D13 drift bound exists** anywhere in the PRD, the ADRs, `conf/` or `src/`.
+
+**Pin 1 — the degenerate limit.** A calib carve on which `calib/temperature.py::fit_temperature` certifies **no finite temperature** yields **no T, no named posterior and no ECE**, and its GATE-2 grade is **UNGRADEABLE**: neither a pass nor a fail. The fitter refuses five ways, each by name:
+- every calib position is already its own arg-max (perfect separation; β → ∞, T → 0);
+- the NLL is already increasing at the bracket's low end (worse than uniform; T → ∞);
+- the NLL is still decreasing at the bracket's high end;
+- the bisection does not converge, or its bracket collapses before the stationarity residual is met;
+- a "converged" fit scores worse than β = 1.
+
+What follows:
+- **For a gated arm** (the shipped Stage-2 at GATE-2, or a swapped RNA-FM Stage-2 re-clearing D11 under D17), UNGRADEABLE is a **CLAUDE.md §7 item-4 stop**. It is not a FAIL, so it does not by itself enter PRD §2.3's method-gate-failure branch, and it is never a pass.
+- **For a control arm** (P3-08's no-aux arm), it is recorded as measured, as P3-08 did.
+- **Forbidden responses:** substituting T = 1; substituting a bracket endpoint; switching to a regularised or target-smoothed fit after the fact; and re-carving or re-stratifying `calib` until a misclassified row appears (rejected 2026-08-03 as choosing the measurement to obtain the answer).
+- **Enforced in code, not prose:** `fit_temperature` raises `TemperatureFitError` → `calib/recalibrate.py::temperature_scale` → `calib/gate2.py::grade_in_distribution` raises and no report is written; `stage2/eval.py::grade_arm` records the refusal and leaves `ece` and `ece_gate_pass` `None`. Tests: `test_a_calib_carve_with_no_finite_temperature_is_ungradeable_not_graded` (new), P3-08's `test_a_perfectly_separated_calib_split_yields_no_ece_rather_than_a_default_T`, and the re-derivation's `test_an_unfittable_calib_carve_is_a_problem_not_a_raise`.
+- **Near-degeneracy is disclosed, not gated.** The shipped arm's T (1.140627) is fittable only because **one** calib row of 1,089 is misclassified (P3-08). A18 adds no minimum count of misclassified rows: that would be a new number chosen after seeing the answer 1, and it would fail the P3 grade.
+
+**Pin 2 — the debias formula, and the plug-in as a second pass condition.**
+- **The formula D11 named "debiased".** Per equal-mass bin *b* of *n_b* rows, with confidence *conf_b* and accuracy *acc_b*: σ_b = √(conf_b·(1 − conf_b)/n_b); debiased gap_b = max(0, |acc_b − conf_b| − σ_b·√(2/π)), the mean of a half-normal (the leading-order E|acc_b − conf_b| under a calibrated null); ECE = Σ_b (n_b/N)·gap_b over 15 bins. This is exactly `metrics.reliability_bins` / `metrics.binned_ece(debias=True)` as shipped since P0-31. The **plug-in** ECE is the same sum without the subtraction.
+- **The pass condition.** GATE-2's in-distribution half passes iff **debiased ECE ≤ 0.05 AND plug-in ECE ≤ 0.05**. Bin by bin the plug-in gap is never below the debiased one, so the binding condition is the plug-in. Both readings are reported.
+- **Why.** The correction subtracts the expected noise floor, and on genuinely miscalibrated data it subtracts real error with it (P3-09). A debiased-only gate then passes arms whose true calibration error exceeds 0.05.
+- **The measurement it was signed on.** `scripts/measure_gate2_ece_conjunct.py` → `reports/p3/gate2_ece_conjunct_sim.json`: 200 seeded replicates per cell, z ~ U[−3.2, 3.2], y ~ Bernoulli(σ(z)), reported posterior σ(scale·z), graded by the shipped estimator and predicate. Pass rates:
+
+  | rows | true ECE | debiased only | **A18 (both)** |
+  |---|---|---|---|
+  | **3,045** (GATE-2's test rung) | 0 (calibrated) | 1.000 | **1.000** |
+  | 3,045 | 0.0519 | 1.000 | **0.285** |
+  | 3,045 | 0.0699 | 0.165 | **0.000** |
+  | 1,089 | 0 | 1.000 | 0.990 |
+  | 420 | 0 | 1.000 | **0.300** |
+
+- **The cost, disclosed.** Below about 1,000 rows the conjunct fails *calibrated* arms on binning noise (420 rows: 0.300). Every planned GATE-2 grade (P3, the D17 re-clear, D16's absolute reading) is on the 3,045-row test rung, where it costs nothing on a calibrated arm. A GATE-2 grade on a materially smaller rung must report this cost beside its verdict.
+- **Scope of the simulation.** It uses a deliberately spread posterior, the hardest shape for binning noise. The shipped posterior is near-separated (P3-10: 12 of 15 bins at accuracy exactly 0 or 1), so the table is conservative about noise and is not a model of the shipped arm.
+- **Neither reading bounds the true calibration error from above.** A binned estimate can be biased in either direction, depending on the miscalibration, the evaluation-set size and the bin count (Roelofs et al. 2022, AISTATS, PMLR 151:4036–4054, arXiv:2012.08668; accessed 2026-11-04). In particular, within-bin cancellation is untouched by Pin 2. P3-10's widest bin spans p = 4.5e-5 to 0.9956 and supplies 83.1 % of the reported ECE; that concentration stays a disclosure.
+- **Enforced in code.** `metrics.gate2_ece_pass(ece, *, ece_plugin)` takes the plug-in as a keyword-only argument with **no default**, so no caller can grade on the debiased number alone by omitting it. Its four call sites are `gate2.grade_in_distribution`, `gate2.derive_clauses` (clause `in_distribution_ece_within_gate`), `gate2.validate_report`, and `stage2/eval.py::grade_arm`. The clause key set is unchanged and the stricter clause re-derives identically on both committed GATE-2 reports, so `gate2.SCHEMA_VERSION` stays "3". Nine sabotages, each RED against its named test.
+- **A correction is recorded with the choice.** The first question put to the user described the conjunct's cost as "a small gate2.py clause + tests" and did not say that it fails calibrated arms at small n. That cost surfaced when `test_gate2`'s own 420-row "honest, passing" fixture failed under it (debiased 0.0349, plug-in 0.0765). The question was re-asked with the measured table, and the user kept the conjunct.
+
+**Pin 3 — D13's drift bound is deferred to P5-01.** Condition (i)'s bound is pinned in **its own amendment at P5-01** (the step where D3's Stage-1 threshold, locus knobs and Stage-2 operating point freeze, A13), before any P5 per-corpus result exists, with an A3-style magnitude rationale.
+- **Not blind to P3, and it will say so.** The P3 leave-clade-out ECEs were known before the bound is pinned: macro **0.2113** (95 % CI [0.0984, 0.3250]); the 9 Actinobacteria orders **0.5923–0.7991**; the other 21 orders **0.0007–0.1151** (P3-10). The P5-01 amendment must state that, and it will be blind only to P5/P6 corpus results.
+- **Until then:** `calibrated_negative_pass` stays `null`; `gate2.validate_report` keeps refusing any report that pins a bound; nothing before P6 GATE-3 consumes it.
+
+**Pin 4 — every recorded verdict, re-derived under Pins 1–2.**
+- P3-10 GATE-2 (`reports/gate2_p3_ece.json`): debiased 0.005662, plug-in 0.008378, T = 1.140627 converged → **PASS, unchanged**.
+- P3-17's RNA-FM comparator (`reports/p3/gate2_rnafm_ece.json`): 0.006811 / 0.011322 → **PASS, unchanged**.
+- P3-08 (`reports/stage2_aux_ablation.json`): with-aux 0.005662 / 0.008378, `ece_gate_pass` true → D16's absolute verdict *aux_does_not_degrade_the_gate2_grade* **unchanged**; the no-aux control stays uncalibratable (Pin 1, control arm).
+- No report is regenerated; each validates under the new predicate (`test_the_committed_reports_pass_every_rederivation_clause`, `test_the_committed_reports_rederive_from_their_committed_sidecars`).
+
+**Cross-reference impact.**
+- **ADR-0005:** D11 and D13 get inline pointers to this amendment.
+- **ADR-0004 A8** (the same step): the parentless-decoy fold convention.
+- **Code:** `src/tbox_finder/metrics.py` (`gate2_ece_pass`, `binned_ece` docstring); `src/tbox_finder/calib/gate2.py` (producer, clause, validator, disclosures, report note); `src/tbox_finder/stage2/eval.py` (`grade_arm`, the gate note). New: `scripts/measure_gate2_ece_conjunct.py`, `reports/p3/gate2_ece_conjunct_sim.json`, `tests/unit/test_gate2_conjunct_sim.py`. Tests extended: `test_gate2.py` (whose honest fixture moves to the 3,045-row rung, cached), `test_aux_ablation_check.py`, `tests/ml/test_eval_gate.py`.
+- **`imp.md`** (local-only): the P3 exit checklist's GATE-2 line; P3-08 decision 2, P3-09's carry and P3-10's three items discharged (Pin 3 defers one); P5-01 books the drift-bound pin.
+- **`paper/manuscript.qmd`:** the calibration paragraph states the two-reading pass.
+- **`analyses/phase3_log.qmd`:** the P3-exit-b stanza.
+
+**Scope guard (§10.3).** A18 loosens nothing: Pin 2 makes GATE-2 strictly harder to pass, and Pin 1 turns a crash into a named stop. It re-grades nothing, regenerates no report and changes no verdict. It adds no new threshold: the plug-in condition reuses D11's 0.05, and the n-dependence of its cost is a disclosure, not a pinned floor.
+
+**§10.1 evidence gate.** Statistical content only, no biological claim:
+- The binned estimator's bias in both directions: one authoritative source, Roelofs et al. 2022 (PMLR 151; arXiv:2012.08668), found by a Consensus search and confirmed against the proceedings record. This is low-stakes methodology.
+- The half-normal mean σ√(2/π), and the absence of a finite maximum-likelihood temperature on separated data: settled textbook mathematics (the second is already enforced and tested in `calib/temperature.py`).
+- Every rate quoted in Pin 2 is re-derived by `tests/unit/test_gate2_conjunct_sim.py` from the shipped estimator.
+
+## Sign-off
+☑ recorded 2026-11-04 (bioedca), CLAUDE.md §7 items 1 + 2 — *"Sign as drafted"*. D11's degenerate limit: a calib carve with no finite temperature is UNGRADEABLE, a §7 item-4 stop for a gated arm, never a substituted T. D11's debias formula is the shipped per-bin half-normal subtraction, and GATE-2 passes only if the debiased AND the plug-in ECE each clear 0.05. That was kept after a re-ask that disclosed its small-n cost (a calibrated arm passes 0.300 at 420 rows) beside its benefit at the 3,045-row rung. D13's drift bound is pinned in its own amendment at P5-01. Every recorded verdict is unchanged and no report is regenerated. Chosen over a T = 1 fallback and a regularised fit (Pin 1), over the debiased value alone and a plug-in condition above an n floor (Pin 2), and over pinning the bound now at 0.05 or on a new rationale (Pin 3).

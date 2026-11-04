@@ -21,6 +21,8 @@ What this file is trying to catch, in order of how badly it would hurt:
 
 from __future__ import annotations
 
+import copy
+import functools
 import json
 import math
 from pathlib import Path
@@ -33,6 +35,7 @@ from tbox_finder import power as PW
 from tbox_finder.calib import ece as ECE
 from tbox_finder.calib import gate2 as G
 from tbox_finder.calib import recalibrate as R
+from tbox_finder.calib import temperature as TEMP
 from tbox_finder.eval import resample as RS
 from tbox_finder.models import rna_backbone_registry as BR
 
@@ -127,8 +130,15 @@ def _split_rows() -> list[dict]:
     return rows
 
 
-def _in_distribution_scores(n_calib: int = 260, n_test: int = 420, n_val: int = 95) -> dict:
+def _in_distribution_scores(n_calib: int = 260, n_test: int = 3045, n_val: int = 95) -> dict:
     """Three unequal rungs whose logits are calibrated **by construction**.
+
+    ``n_test`` defaults to **3,045**, the real GATE-2 rung's own size. It was 420 until
+    ADR-0005 A18 Pin 2 (P3-exit-b) made the plug-in ECE a second pass condition. At 420 rows
+    this calibrated-by-construction fixture reads plug-in **0.0765** (debiased 0.0349), so its
+    "honest, passing" report FAILED on binning noise alone: the conjunct is conservative at
+    small n, which A18 discloses. At 3,045 it reads plug-in 0.0214, so it passes for the
+    reason it claims to, at the size the gate is actually graded at.
 
     Labels are drawn ``y ~ Bernoulli(sigma(z))``, so ``sigma(z)`` is the true conditional
     mean and the honest reading is a small ECE with ``T`` near 1. Two properties follow that
@@ -175,17 +185,28 @@ def _blocks_for(scores: dict) -> dict[str, str]:
     return {rid: f"cluster:{i // 2}" for i, rid in enumerate(scores["row_ids"])}
 
 
+@functools.lru_cache(maxsize=1)
+def _honest_gate() -> dict:
+    """The in-distribution leg of :func:`_report`, graded ONCE per session.
+
+    ⚠ The PINNED default, not a cheap 40. :func:`_report`'s docstring calls it "a complete,
+    honest, passing report", and round 10 added a clause saying a cost-knobbed bootstrap
+    cannot certify — so a fixture that quietly under-resamples is not the thing it claims to
+    be, and would have forced the clause to be loosened to accommodate it. At the 3,045-row
+    rung (A18 Pin 2, see :func:`_in_distribution_scores`) it costs ~2.4 s, so it is cached
+    rather than cut: the grade is seeded and deterministic, and every caller gets a deep copy,
+    so a test that mutates its report cannot leak into the next one.
+    """
+    scores = _in_distribution_scores()
+    return G.grade_in_distribution(
+        scores=scores, blocks_by_row=_blocks_for(scores), n_boot=G.DEFAULT_N_BOOT, seed=7
+    )
+
+
 def _report(backbone: str | None = None) -> dict:
     """A complete, honest, passing GATE-2 report built through the shipped assembler."""
     scores = _in_distribution_scores()
-    # ⚠ The PINNED default, not a cheap 40. This fixture's docstring calls it "a complete,
-    # honest, passing report", and round 10 added a clause saying a cost-knobbed bootstrap
-    # cannot certify — so a fixture that quietly under-resamples is not the thing it claims to
-    # be, and would have forced the clause to be loosened to accommodate it. Measured at 0.37 s
-    # on this fixture's row count, so completeness costs nothing here.
-    gate = G.grade_in_distribution(
-        scores=scores, blocks_by_row=_blocks_for(scores), n_boot=G.DEFAULT_N_BOOT, seed=7
-    )
+    gate = copy.deepcopy(_honest_gate())
     shift = G.prior_shift_band_sweep(
         scores=scores,
         source_prior=float(gate["calibration"]["calib_prevalence"]),
@@ -365,6 +386,63 @@ def test_a_verdict_that_was_assigned_rather_than_derived_is_caught() -> None:
     report["gate"]["passes"] = not report["gate"]["passes"]
     problems = G.validate_report(report)
     assert any("assigned, not derived" in p for p in problems), problems
+
+
+# --------------------------------------------------------------------------- #
+# ADR-0005 A18 (P3-exit-b) — the plug-in conjunct and the degenerate-limit rule
+# --------------------------------------------------------------------------- #
+def test_the_producer_fails_a_debiased_pass_whose_plug_in_misses_the_gate() -> None:
+    """A18 Pin 2 at the PRODUCER: ``passes`` needs the debiased AND the plug-in ECE <= 0.05.
+
+    The 420-row rung (this fixture's pre-A18 default) is the discriminating case — debiased
+    0.0349 but plug-in 0.0765 — so a producer grading the debiased value alone would pass it.
+    The honest 3,045-row report is the positive control ([[raises-test-needs-a-positive-control]]).
+    """
+    scores = _in_distribution_scores(n_test=420)
+    gate = G.grade_in_distribution(
+        scores=scores, blocks_by_row=_blocks_for(scores), n_boot=20, seed=7
+    )
+    # Guard the fixture first: it must sit in the regime the conjunct exists for.
+    assert gate["ece"] <= G.ECE_GATE < gate["ece_plugin"], (gate["ece"], gate["ece_plugin"])
+    assert gate["passes"] is False
+    honest = _report()["gate"]
+    assert honest["ece_plugin"] <= G.ECE_GATE and honest["passes"] is True
+
+
+def test_the_gated_clause_reads_the_plug_in_and_a_debiased_only_pass_is_caught() -> None:
+    report = _report()
+    assert G.validate_report(report) == [], "positive control failed"
+    assert G.derive_clauses(report)["in_distribution_ece_within_gate"] is True
+    # The debiased value still clears the gate; only the plug-in now misses it.
+    assert report["gate"]["ece"] <= G.ECE_GATE
+    report["gate"]["ece_plugin"] = G.ECE_GATE + 0.01
+    assert G.derive_clauses(report)["in_distribution_ece_within_gate"] is False
+    problems = G.validate_report(report)
+    assert any("assigned, not derived" in p and "ece_plugin=" in p for p in problems), problems
+
+
+def test_a_gate_block_without_a_plug_in_ece_cannot_validate() -> None:
+    report = _report()
+    del report["gate"]["ece_plugin"]
+    assert G.derive_clauses(report)["in_distribution_ece_within_gate"] is False
+    problems = G.validate_report(report)
+    assert any("gate.ece_plugin" in p and "A18 Pin 2" in p for p in problems), problems
+
+
+def test_a_calib_carve_with_no_finite_temperature_is_ungradeable_not_graded() -> None:
+    """A18 Pin 1: a perfectly separated calib carve yields no T, so the producer RAISES and
+    no grade exists — never a T = 1 fallback, never a bracket endpoint. The same rows with
+    their calib overlap intact grade normally (the positive control)."""
+    scores = _in_distribution_scores(n_test=60)
+    fine = G.grade_in_distribution(
+        scores=scores, blocks_by_row=_blocks_for(scores), n_boot=5, seed=7
+    )
+    assert fine["calibration"]["converged"] is True
+    for i, rung in enumerate(scores["rungs"]):
+        if rung == R.CALIB_RUNG:
+            scores["logits"][i] = 10.0 if scores["labels"][i] else -10.0
+    with pytest.raises(TEMP.TemperatureFitError, match="already its own arg-max"):
+        G.grade_in_distribution(scores=scores, blocks_by_row=_blocks_for(scores), n_boot=5)
 
 
 def test_the_graded_object_is_the_pre_prior_shift_named_posterior() -> None:
@@ -964,6 +1042,11 @@ def test_the_disclosures_carry_the_two_inherited_caveats() -> None:
     assert "records no separation measurement for it" in p3_08[0]
     assert "SATURATE" in p3_09[0], "the P3-09 debias-saturation caveat must travel with it too"
     assert "0.123" in p3_09[0], "the measured truth the estimator saturated against"
+    # ADR-0005 A18 (P3-exit-b) settled both: each caveat now names the rule that governs it.
+    assert "A18 Pin 1" in p3_08[0] and "UNGRADEABLE" in p3_08[0]
+    assert "A18 Pin 2" in p3_09[0] and "plug-in" in p3_09[0]
+    assert "P3-exit item" not in joined and "P3-exit / ADR concern" not in joined
+    assert "A18 Pin 3" in joined and "P5-01" in joined, "the drift-bound deferral must be stated"
     assert "P5" in joined, "the FDR half of GATE-2 is not represented here and must say so"
 
 

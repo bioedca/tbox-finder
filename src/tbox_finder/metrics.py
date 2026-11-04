@@ -12,7 +12,8 @@ This module is the **metric kernel library** behind the acceptance gates (PRD §
   plus AUPRC (Area Under the Precision-Recall curve, not AUROC [DOI:10.1371/journal.pone.0118432]).
   Pass bar: point ≥ +10 pp **AND** block-resampled CI lower > +5 pp (D4).
 - **GATE-2 (ADR-0005 D11 → P3):** in-distribution **binned-ECE** on the positive-class
-  posterior — **15 equal-mass bins, debiased** — gated ``≤ ECE_GATE = 0.05``.
+  posterior — **15 equal-mass bins, debiased** — gated ``≤ ECE_GATE = 0.05``, and the
+  plug-in (non-debiased) ECE must clear the same bar (ADR-0005 A18 Pin 2).
 - **D5 aggregation:** GATE-1 / per-order ECE CIs are resampled at the homology-cluster /
   held-out-order **block** level (never per-record) and **macro-averaged across held-out
   orders** (not micro, which the ~90 %-Firmicutes corpus would dominate).
@@ -632,15 +633,21 @@ def binned_ece(
     equal-width because equal-width bins are unstable in the sparse high-confidence region
     (D11).
 
-    **Debiasing (``debias=True``, the D11 default) — implementer choice, NOT an
-    ADR-pinned formula.** D11 pins *equal-mass / 15 / debiased* but leaves the exact
-    correction open (refs Guo 2017 [arXiv:1706.04599], Naeini 2015 [PMID:25927013]).
-    Plug-in ECE is biased upward in finite samples: even a perfectly-calibrated bin shows
-    a nonzero ``|acc_b − conf_b|`` from sampling noise. This module subtracts, per bin,
+    **Debiasing (``debias=True``, the D11 default) — the formula ADR-0005 A18 Pin 2
+    pins.** D11 named *equal-mass / 15 / debiased* and left the exact correction open
+    (refs Guo 2017 [arXiv:1706.04599], Naeini 2015 [PMID:25927013]); A18 Pin 2 (P3-exit-b,
+    2026-11-04) pins the one implemented here. Even a perfectly-calibrated bin shows a
+    nonzero ``|acc_b − conf_b|`` from sampling noise, so this module subtracts, per bin,
     that expected noise floor — ``σ_b·√(2/π)`` with ``σ_b = √(conf_b(1−conf_b)/n_b)`` (the
     mean of a half-normal, the leading-order ``E|acc_b − conf_b|`` under the calibrated
-    null) — flooring each debiased gap at 0. Final certification of the debiasing term is
-    a P3-exit / ADR concern (CLAUDE.md §7); ``debias=False`` gives the raw plug-in ECE.
+    null) — flooring each debiased gap at 0. ``debias=False`` gives the raw plug-in ECE.
+
+    ⚠ **The correction can subtract real miscalibration with the noise.** P3-09 measured
+    it reading ~0.060 against a known truth of 0.123 at small n, which is why A18 Pin 2
+    also requires the plug-in ECE to clear the gate (:func:`gate2_ece_pass`). Neither
+    reading is an upper bound on the true calibration error: a binned estimate can be
+    biased either way (Roelofs et al. 2022, AISTATS, arXiv:2012.08668; accessed
+    2026-11-04).
 
     Computed as the weighted sum over :func:`reliability_bins` — the one place the binning
     lives, so the reliability diagram P2-13 plots and this number are the same arithmetic.
@@ -655,10 +662,21 @@ def binned_ece(
     return ece
 
 
-def gate2_ece_pass(ece: float) -> bool:
-    """GATE-2 in-distribution calibration predicate: ``ece ≤ ECE_GATE`` (=0.05, ADR-0005
-    D11). NaN → False."""
-    return (not math.isnan(ece)) and ece <= ECE_GATE
+def gate2_ece_pass(ece: float, *, ece_plugin: float) -> bool:
+    """GATE-2 in-distribution calibration predicate (ADR-0005 D11 + A18 Pin 2): the
+    debiased ``ece`` **and** the plug-in ``ece_plugin`` must each be ``≤ ECE_GATE`` (=0.05).
+    NaN in either → False.
+
+    The plug-in is never below the debiased value (each bin's debiased gap is
+    ``max(0, gap − σ·√(2/π)) ≤ gap``), so in effect a pass needs ``ece_plugin ≤ 0.05``. The
+    conjunct exists because the debias term can subtract real miscalibration along with the
+    noise (P3-09: ~0.060 read against a truth of 0.123), and a debiased-only gate would then
+    pass an arm whose own raw gap exceeds the bar.
+
+    ``ece_plugin`` is keyword-only with **no default**, so a caller cannot grade on the
+    debiased number alone by omitting it ([[int-truncation-changes-a-pinned-value]]).
+    """
+    return all((not math.isnan(v)) and v <= ECE_GATE for v in (ece, ece_plugin))
 
 
 # --------------------------------------------------------------------------- #
