@@ -729,6 +729,67 @@ def test_the_validator_refuses_a_verdict_the_evidence_does_not_support() -> None
     assert any("governing_reading" in p for p in E.validate_report(report))
 
 
+def test_the_validator_rederives_every_d11_grade_from_both_readings() -> None:
+    """CodeRabbit, PR #144 r1 (major): ``ece_gate_pass`` is derived from the debiased AND the
+    plug-in ECE (ADR-0005 A18 Pin 2), so a report whose plug-in was edited past the gate must
+    not keep its recorded pass — nor the absolute reading and verdict that rest on it.
+
+    Each forge below sets the readings explicitly rather than nudging the fixture's own, so
+    the test does not depend on which side of the gate the 31-row synthetic arm lands.
+    """
+    report = _report()
+    assert E.validate_report(report) == [], "positive control failed"
+    assert E.d11_grade_problems(report) == []
+    rung = report["ablation"]["graded_on_rung"]
+    block = report["arms"]["aux1.0_lr1e-4"]["grades"][rung]
+    # The reviewer's case: a recorded PASS whose debiased value clears the gate while the
+    # plug-in does not — a debiased-only re-derivation would accept it.
+    block["ece"], block["ece_plugin"], block["ece_gate_pass"] = 0.02, M.ECE_GATE + 0.03, True
+    problems = E.d11_grade_problems(report)
+    assert any(
+        "aux1.0_lr1e-4" in p and "ece_gate_pass = True" in p and "assigned, not derived" in p
+        for p in problems
+    ), problems
+    assert set(problems) <= set(E.validate_report(report)), "the validator must carry them"
+    # Its positive control: the same forged pass with BOTH readings under the gate is clean.
+    block["ece_plugin"] = 0.04
+    assert not any("aux1.0_lr1e-4" in p and "assigned" in p for p in E.d11_grade_problems(report))
+    # ...and the opposite direction: a recorded FAIL whose readings both clear the gate.
+    block["ece_gate_pass"] = False
+    assert any("ece_gate_pass = False" in p for p in E.d11_grade_problems(report))
+
+
+def test_the_absolute_reading_is_anchored_to_the_with_aux_grade() -> None:
+    report = _report()
+    assert E.d11_grade_problems(report) == []
+    flipped = not report["ablation"]["reading_absolute"]["passes"]
+    report["ablation"]["reading_absolute"]["passes"] = flipped
+    # Keep the verdict consistent with the forged reading, so ONLY the new anchor can catch it
+    # ([[all-true-fixture-cannot-test-a-conjunction]]).
+    report["ablation"]["verdict"] = E.verdict_from_absolute_reading(flipped)
+    problems = E.validate_report(report)
+    assert any("the absolute reading IS that grade" in p for p in problems), problems
+    assert not any("derived, not assignable" in p for p in problems), problems
+
+
+def test_an_arm_with_no_ece_may_not_record_a_grade() -> None:
+    report = _report()
+    block = report["arms"]["aux0.0_lr1e-4"]["grades"]["test"]
+    block["ece"] = None
+    block["ece_gate_pass"] = None
+    assert not any("aux0.0_lr1e-4" in p for p in E.d11_grade_problems(report))
+    block["ece_gate_pass"] = False
+    assert any("UNGRADEABLE" in p and "aux0.0_lr1e-4" in p for p in E.d11_grade_problems(report))
+
+
+def test_an_over_large_or_non_finite_reading_is_a_problem_not_a_raise() -> None:
+    for bad in (10**400, float("inf"), float("nan"), "0.01", True):
+        report = _report()
+        report["arms"]["aux1.0_lr1e-4"]["grades"]["test"]["ece_plugin"] = bad
+        problems = E.d11_grade_problems(report)  # must not raise
+        assert any("not both finite numbers" in p for p in problems), (bad, problems)
+
+
 def test_the_verdict_tracks_the_absolute_reading_in_both_directions() -> None:
     """Sabotage-shaped: a one-sided check would pass for a function that always holds."""
     assert E.verdict_from_absolute_reading(True) == E.VERDICT_HOLDS

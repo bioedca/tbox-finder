@@ -9474,3 +9474,43 @@ No report was regenerated, and `gate2.SCHEMA_VERSION` stays "3": the clause key 
 - **Not done here** (the closing sweep, P3-exit-c): the checklist ticks, the dev-log SHA sweep, the Phase-3 ADR impact bullets, README, render, `dvc push`, `/ultrareview` and the tag.
 
 **Commit.** This stanza is written on branch `p3-exit-b-decisions` and cannot know its squash SHA. The P3-exit gate derives it from `main` (header rule).
+
+## Step P3-exit-b (review round 1) — 2026-11-04: the D11 grade is re-derived wherever it is recorded, and the predicate is total
+
+**Inputs.** CodeRabbit's automatic review of `c65b78d` on PR #144: 3 actionable findings, all reproduced by execution before any fix. The CodeRabbit CLI could not authenticate (*"Run `coderabbit auth login`"*), so the app path carried the round.
+
+**Process.**
+
+- **(major)** `stage2/eval.py::validate_report` never re-derived `ece_gate_pass`. A committed aux-ablation report whose with-aux `ece_plugin` was edited from 0.0084 to 0.08 still validated with `[]`, and so did its absolute reading and verdict. The new `d11_grade_problems` does three things:
+  - re-derives every `arms[*].grades[*].ece_gate_pass` from `gate2_ece_pass(ece, ece_plugin=…)`;
+  - refuses a boolean grade on an arm with no ECE, since an unfittable arm is UNGRADEABLE (A18 Pin 1);
+  - anchors `ablation.reading_absolute.passes` to the with-aux arm's grade on the graded rung.
+
+  Its keys are read only when they are strings, so a mutated key cannot make the validator raise.
+- **(minor)** `gate2_ece_pass(-inf, ece_plugin=0.01)` returned True. The predicate now requires each reading to be a real, finite, non-negative number. It refuses a bool (`False <= 0.05` holds) and an over-large integer, and it never raises.
+- **(minor)** `math.isfinite(10**400)` raises `OverflowError`. The new plug-in reads in `derive_clauses` and `validate_report` used it, and so did the **pre-existing** `ece` reads beside them. All four now go through `gate2._finite_real`, so the existing `ece` path was fixed along with the new one.
+
+**Outputs.**
+
+- `src/tbox_finder/{metrics.py, calib/gate2.py, stage2/eval.py}`.
+- Seven new tests across `test_aux_ablation_check.py`, `test_gate2.py` and `tests/ml/test_eval_gate.py`.
+- A18 Pin 2's enforcement list now names `d11_grade_problems` and the predicate's totality. This is a factual update to the code list; the signed decision is unchanged.
+
+**Validation.**
+
+- All three committed reports still validate with `[]`: `gate2_p3_ece.json`, `gate2_rnafm_ece.json` and `stage2_aux_ablation.json`.
+- `test_stage2_validator_totality.py` passes: no single-field mutation of the committed report makes the validator raise.
+- Affected suites: 325 passed.
+- **Seven sabotages**, each RED against its named test, each restore byte-verified:
+  - the predicate's finite/non-negative guard;
+  - a bare `isfinite` in the clause;
+  - the validator not calling the re-derivation;
+  - the absolute anchor;
+  - the re-derivation reading `ece` as the plug-in;
+  - a no-ECE arm recording a grade;
+  - a non-finite plug-in slipping through.
+- ruff and black are clean.
+
+**Decisions.** The aux re-derivation test sets each reading explicitly rather than nudging the fixture's own values. The 31-row synthetic with-aux arm fails the conjunct on noise (debiased 0.0728, plug-in 0.301), so a test written for "a pass whose plug-in moves past the gate" had to forge that pass. Leaning on the fixture would have tested nothing.
+
+**Commit.** This stanza is written on branch `p3-exit-b-decisions`. The P3-exit gate derives its `main` mapping (header rule).

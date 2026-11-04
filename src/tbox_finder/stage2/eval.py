@@ -801,7 +801,10 @@ def compare_arms(
         "delta_ece": delta_ece,
         "delta_auprc": delta_auprc,
         "reading_absolute": {
-            "rule": "with-aux still holds the D11 GATE-2 grade: in-distribution ECE <= gate",
+            "rule": (
+                "with-aux still holds the D11 GATE-2 grade: debiased AND plug-in "
+                "in-distribution ECE <= gate (ADR-0005 A18 Pin 2)"
+            ),
             "source": "ADR-0005 D16 read against D11; needs no new number",
             "observed_ece": w.get("ece"),
             "gate": ECE_GATE,
@@ -1342,6 +1345,7 @@ def validate_report(report: Mapping[str, Any]) -> list[str]:
                 f"ablation.governing_reading {ablation.get('governing_reading')!r} != "
                 f"{GOVERNING_READING!r} (ADR-0005 D16, user sign-off 2026-08-03)"
             )
+    problems.extend(d11_grade_problems(report))
     gate = report.get("gate")
     if not isinstance(gate, Mapping):
         return problems
@@ -1371,6 +1375,65 @@ def validate_report(report: Mapping[str, Any]) -> list[str]:
         problems.append(
             f"gate.overall_pass={gate.get('overall_pass')!r} but the re-derived clauses give "
             f"{all(expected.values())}"
+        )
+    return problems
+
+
+def d11_grade_problems(report: Mapping[str, Any]) -> list[str]:
+    """Re-derive every recorded D11 grade from its own two ECE readings (ADR-0005 A18 Pin 2).
+
+    CodeRabbit, PR #144 r1 (major): ``grade_arm`` derives ``ece_gate_pass`` from the debiased
+    AND the plug-in ECE, but nothing re-derived it, so a report whose with-aux ``ece_plugin``
+    was edited past the gate kept its recorded pass, and with it the absolute reading and
+    the ablation verdict. Two checks, both total:
+
+    1. each ``arms[*].grades[*]`` block's ``ece_gate_pass`` equals
+       ``gate2_ece_pass(ece, ece_plugin=...)``; an absent ECE (an unfittable arm) must record
+       ``None``, never a boolean;
+    2. ``ablation.reading_absolute.passes`` equals the with-aux arm's pass on the graded rung,
+       so the verdict that is derived from it is anchored to evidence, not to a stored bool.
+    """
+    problems: list[str] = []
+    arms = RSCH.as_mapping(report.get("arms"))
+    for arm_name, arm in arms.items():
+        grades = RSCH.as_mapping(RSCH.as_mapping(arm).get("grades"))
+        for rung, block in grades.items():
+            block = RSCH.as_mapping(block)
+            where = f"arms[{arm_name!r}].grades[{rung!r}]"
+            recorded = block.get("ece_gate_pass")
+            if block.get("ece") is None:
+                if recorded is not None:
+                    problems.append(
+                        f"{where}.ece_gate_pass = {recorded!r} but the arm has no ECE — an "
+                        "unfittable arm is UNGRADEABLE (ADR-0005 A18 Pin 1), not graded"
+                    )
+                continue
+            if not (_finite(block.get("ece")) and _finite(block.get("ece_plugin"))):
+                problems.append(
+                    f"{where}: ece {block.get('ece')!r} / ece_plugin {block.get('ece_plugin')!r} "
+                    "are not both finite numbers, and the D11 grade reads both (A18 Pin 2)"
+                )
+                continue
+            expected = M.gate2_ece_pass(block["ece"], ece_plugin=block["ece_plugin"])
+            if recorded is not expected:
+                problems.append(
+                    f"{where}.ece_gate_pass = {recorded!r} but gate2_ece_pass(ece, ece_plugin) "
+                    f"= {expected!r} — the grade was assigned, not derived"
+                )
+    ablation = RSCH.as_mapping(report.get("ablation"))
+    absolute = RSCH.as_mapping(ablation.get("reading_absolute"))
+    # Keys are read only when they are strings: a mutated list/dict here is unhashable and
+    # would make `.get` RAISE, and this validator's contract is a problem list, never a raise.
+    arm_key, rung_key = ablation.get("with_aux_arm"), ablation.get("graded_on_rung")
+    with_aux = RSCH.as_mapping(arms.get(arm_key) if isinstance(arm_key, str) else None)
+    rung_block = RSCH.as_mapping(
+        RSCH.as_mapping(with_aux.get("grades")).get(rung_key) if isinstance(rung_key, str) else None
+    )
+    if absolute and absolute.get("passes") is not rung_block.get("ece_gate_pass"):
+        problems.append(
+            f"ablation.reading_absolute.passes = {absolute.get('passes')!r} but the with-aux "
+            f"arm's {ablation.get('graded_on_rung')!r} grade records ece_gate_pass = "
+            f"{rung_block.get('ece_gate_pass')!r}; the absolute reading IS that grade"
         )
     return problems
 

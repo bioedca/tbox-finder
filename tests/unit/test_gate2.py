@@ -429,6 +429,18 @@ def test_a_gate_block_without_a_plug_in_ece_cannot_validate() -> None:
     assert any("gate.ece_plugin" in p and "A18 Pin 2" in p for p in problems), problems
 
 
+def test_an_over_large_ece_reading_is_a_problem_not_a_raise() -> None:
+    """CodeRabbit, PR #144 r1: ``math.isfinite(10**400)`` RAISES, and both the new plug-in read
+    and the existing ``ece`` read used it. The validator's contract is a problem list."""
+    for field, marker in (("ece_plugin", "gate.ece_plugin"), ("ece", "gate.ece:")):
+        report = _report()
+        assert G.validate_report(report) == [], "positive control failed"
+        report["gate"][field] = 10**400
+        assert G.derive_clauses(report)["in_distribution_ece_within_gate"] is False
+        problems = G.validate_report(report)
+        assert any(marker in p and "not a finite number" in p for p in problems), problems
+
+
 def test_a_calib_carve_with_no_finite_temperature_is_ungradeable_not_graded() -> None:
     """A18 Pin 1: a perfectly separated calib carve yields no T, so the producer RAISES and
     no grade exists — never a T = 1 fallback, never a bracket endpoint. The same rows with

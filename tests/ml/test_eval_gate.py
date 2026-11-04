@@ -168,6 +168,12 @@ def test_gate_predicates_both_directions() -> None:
     assert M.gate2_ece_pass(0.049, ece_plugin=0.051) is False  # the conjunct A18 added
     assert M.gate2_ece_pass(float("nan"), ece_plugin=0.01) is False
     assert M.gate2_ece_pass(0.01, ece_plugin=float("nan")) is False
+    # Total and fail-closed (PR #144 r1): -inf, a negative, a bool, an over-large JSON integer
+    # and a string are malformed readings, never passes — and never a raise.
+    for bad in (float("-inf"), float("inf"), -0.01, False, 10**400, "0.01", None):
+        assert M.gate2_ece_pass(bad, ece_plugin=0.01) is False, bad
+        assert M.gate2_ece_pass(0.01, ece_plugin=bad) is False, bad
+    assert M.gate2_ece_pass(0, ece_plugin=0) is True  # an exact-zero int is a real reading
     # GATE-1 two-part bar (strong) + min-N fallback (weak)
     assert M.gate1_recall_bar(12.0, 6.0) is True  # point>=10 AND ci>5
     assert M.gate1_recall_bar(9.0, 6.0) is False  # point<10

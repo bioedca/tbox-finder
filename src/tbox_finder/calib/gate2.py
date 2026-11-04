@@ -1001,12 +1001,13 @@ def derive_clauses(report: Mapping[str, Any]) -> dict[str, bool]:
     cal = ind.get("calibration") if isinstance(ind.get("calibration"), Mapping) else {}
     units = ood.get("units") if isinstance(ood.get("units"), Mapping) else {}
 
-    ece = ind.get("ece")
-    has_ece = isinstance(ece, (int, float)) and not isinstance(ece, bool) and math.isfinite(ece)
-    plugin = ind.get("ece_plugin")
-    has_plugin = (
-        isinstance(plugin, (int, float)) and not isinstance(plugin, bool) and math.isfinite(plugin)
-    )
+    # `_finite_real`, never a bare `math.isfinite`: a JSON integer too large for a double makes
+    # `math.isfinite` RAISE `OverflowError`, so the clause would crash instead of reading FALSE
+    # (CodeRabbit, PR #144 r1 — the `ece` read had the same defect as the new `ece_plugin` one).
+    ece = _finite_real(ind.get("ece"))
+    has_ece = ece is not None
+    plugin = _finite_real(ind.get("ece_plugin"))
+    has_plugin = plugin is not None
 
     return {
         # ── the gated statistic ──
@@ -1014,7 +1015,7 @@ def derive_clauses(report: Mapping[str, Any]) -> dict[str, bool]:
         # unchanged and the clause set is unchanged, so no schema bump: the stricter definition
         # re-derives identically on both committed reports (plug-in 0.008378 and 0.011322).
         "in_distribution_ece_within_gate": bool(
-            has_ece and has_plugin and M.gate2_ece_pass(float(ece), ece_plugin=float(plugin))
+            has_ece and has_plugin and M.gate2_ece_pass(ece, ece_plugin=plugin)
         ),
         "gate_threshold_is_the_pinned_default": ind.get("gate") == ECE_GATE,
         "ece_estimator_matches_adr_d11": (
@@ -1815,22 +1816,22 @@ def validate_report(report: Mapping[str, Any]) -> list[str]:
     if not isinstance(gate, Mapping) or not gate:
         problems.append("gate: block missing — there is no gated statistic to check")
     else:
-        ece = gate.get("ece")
-        if not isinstance(ece, (int, float)) or isinstance(ece, bool) or not math.isfinite(ece):
-            problems.append(f"gate.ece: {ece!r} is not a finite number, so nothing was graded")
+        # `_finite_real` on both reads: a bare `math.isfinite` raises on an over-large JSON
+        # integer, and this validator's contract is a problem list, never a raise (PR #144 r1).
+        ece = _finite_real(gate.get("ece"))
+        plugin = _finite_real(gate.get("ece_plugin"))
+        if ece is None:
+            problems.append(
+                f"gate.ece: {gate.get('ece')!r} is not a finite number, so nothing was graded"
+            )
         else:
-            plugin = gate.get("ece_plugin")
-            if (
-                not isinstance(plugin, (int, float))
-                or isinstance(plugin, bool)
-                or not math.isfinite(plugin)
-            ):
+            if plugin is None:
                 problems.append(
-                    f"gate.ece_plugin: {plugin!r} is not a finite number, and ADR-0005 A18 Pin 2 "
-                    "grades GATE-2 on the debiased AND the plug-in ECE"
+                    f"gate.ece_plugin: {gate.get('ece_plugin')!r} is not a finite number, and "
+                    "ADR-0005 A18 Pin 2 grades GATE-2 on the debiased AND the plug-in ECE"
                 )
             else:
-                recomputed = bool(M.gate2_ece_pass(float(ece), ece_plugin=float(plugin)))
+                recomputed = bool(M.gate2_ece_pass(ece, ece_plugin=plugin))
                 if gate.get("passes") != recomputed:
                     problems.append(
                         f"gate.passes = {gate.get('passes')!r} but gate2_ece_pass({ece!r}, "

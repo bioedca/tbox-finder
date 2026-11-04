@@ -45,6 +45,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Callable, Sequence
+from typing import Any
 
 from tbox_finder.eval.resample import DEFAULT_N_BOOT, block_bootstrap
 from tbox_finder.labels import CLASS_INDEX, CLASS_ORDER, CORE_ELEMENTS
@@ -662,7 +663,7 @@ def binned_ece(
     return ece
 
 
-def gate2_ece_pass(ece: float, *, ece_plugin: float) -> bool:
+def gate2_ece_pass(ece: Any, *, ece_plugin: Any) -> bool:
     """GATE-2 in-distribution calibration predicate (ADR-0005 D11 + A18 Pin 2): the
     debiased ``ece`` **and** the plug-in ``ece_plugin`` must each be ``≤ ECE_GATE`` (=0.05).
     NaN in either → False.
@@ -675,8 +676,25 @@ def gate2_ece_pass(ece: float, *, ece_plugin: float) -> bool:
 
     ``ece_plugin`` is keyword-only with **no default**, so a caller cannot grade on the
     debiased number alone by omitting it ([[int-truncation-changes-a-pinned-value]]).
+
+    **Total and fail-closed** (CodeRabbit, PR #144 r1): each reading must be a real, finite,
+    non-negative number. ``-inf`` used to pass (``not isnan(-inf)`` and ``-inf <= 0.05``), and an
+    ECE is a weighted sum of absolute gaps, so a negative or non-numeric reading is malformed
+    evidence, never a pass. A ``bool`` is refused too: ``False <= 0.05`` holds
+    ([[bool-equals-one-passes-config-gates]]).
     """
-    return all((not math.isnan(v)) and v <= ECE_GATE for v in (ece, ece_plugin))
+    return all(_gate2_reading_clears(v) for v in (ece, ece_plugin))
+
+
+def _gate2_reading_clears(value: Any) -> bool:
+    """``0 <= value <= ECE_GATE`` for a real finite ``value``; False otherwise, never a raise."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    try:
+        v = float(value)
+    except OverflowError:  # a JSON integer too large for a double
+        return False
+    return math.isfinite(v) and 0.0 <= v <= ECE_GATE
 
 
 # --------------------------------------------------------------------------- #
