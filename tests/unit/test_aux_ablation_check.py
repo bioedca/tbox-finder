@@ -790,6 +790,107 @@ def test_an_over_large_or_non_finite_reading_is_a_problem_not_a_raise() -> None:
         assert any("not both finite numbers" in p for p in problems), (bad, problems)
 
 
+_NOT_THE_TABLES = "are not the weighted means of the grade's own reliability table"
+
+
+def _forge_consistently(report: dict[str, Any], *, ece: float, ece_plugin: float) -> None:
+    """Edit the with-aux grade's readings AND everything derived from them, consistently.
+
+    Grade, absolute reading and verdict all agree with the forged readings, so the pass
+    re-derivation, the anchor and the verdict check are all satisfied and only the binding
+    to the reliability table is left to catch it ([[all-true-fixture-cannot-test-a-conjunction]]).
+    """
+    rung = report["ablation"]["graded_on_rung"]
+    block = report["arms"]["aux1.0_lr1e-4"]["grades"][rung]
+    block["ece"], block["ece_plugin"] = ece, ece_plugin
+    block["ece_ci"]["point"] = ece  # keep the interval "about" the forged point too
+    passes = M.gate2_ece_pass(ece, ece_plugin=ece_plugin)
+    block["ece_gate_pass"] = passes
+    report["ablation"]["reading_absolute"]["passes"] = passes
+    report["ablation"]["verdict"] = E.verdict_from_absolute_reading(passes)
+
+
+def test_each_d11_grade_is_bound_to_its_own_reliability_table() -> None:
+    """CodeRabbit CLI, PR #144 (major): both readings must BE the grade's own table.
+
+    Reproduced on the committed ``reports/stage2_aux_ablation.json`` before the fix: lowering
+    the with-aux plug-in and re-writing the grade, the absolute reading and the verdict to
+    agree validated with zero problems, while the reliability table beside them still
+    recorded the original gaps.
+    """
+    report = _report()
+    assert E.validate_report(report) == [], "positive control failed"
+    rung = report["ablation"]["graded_on_rung"]
+    honest = dict(report["arms"]["aux1.0_lr1e-4"]["grades"][rung])
+
+    # The reviewer's case: both readings lowered under the gate, a pass fabricated.
+    _forge_consistently(report, ece=0.01, ece_plugin=0.02)
+    problems = E.validate_report(report)
+    assert any("aux1.0_lr1e-4" in p and _NOT_THE_TABLES in p for p in problems), problems
+    # ...and nothing else caught it, so the binding is what does the work.
+    assert not any("assigned, not derived" in p for p in problems), problems
+    assert not any("IS that grade" in p or "derived, not assignable" in p for p in problems)
+
+    # Each reading separately: a plug-in-only and a debiased-only edit are each caught.
+    for field in ("ece_plugin", "ece"):
+        report = _report()
+        edited = {"ece": honest["ece"], "ece_plugin": honest["ece_plugin"]}
+        edited[field] = edited[field] * 0.5
+        _forge_consistently(report, **edited)
+        problems = E.d11_grade_problems(report)
+        assert any("aux1.0_lr1e-4" in p and _NOT_THE_TABLES in p for p in problems), (
+            field,
+            problems,
+        )
+
+
+def test_both_committed_p3_08_reports_are_their_own_tables() -> None:
+    """The binding is a property both shipped reports already have, so neither is invalidated
+    ([[new-gate-clause-invalidates-old-reports]]) — and each is a live positive control."""
+    for path in ("reports/stage2_aux_ablation.json", "reports/p3/stage2_rnafm_eval.json"):
+        report = json.loads((REPO_ROOT / path).read_text(encoding="utf-8"))
+        assert E.d11_grade_problems(report) == [], path
+        assert E.validate_report(report) == [], path
+
+
+@pytest.mark.parametrize("blank", [{}, None])
+def test_a_blanked_absolute_reading_cannot_carry_an_undecidable_verdict(blank: Any) -> None:
+    """CodeRabbit CLI, PR #144 (major): an empty or null ``reading_absolute`` skipped the
+    anchor, so the "undecidable" verdict validated clean beside a definite with-aux grade."""
+    report = _report()
+    rung = report["ablation"]["graded_on_rung"]
+    assert isinstance(report["arms"]["aux1.0_lr1e-4"]["grades"][rung]["ece_gate_pass"], bool)
+    report["ablation"]["reading_absolute"] = blank
+    report["ablation"]["verdict"] = E.verdict_from_absolute_reading(None)
+    problems = E.validate_report(report)
+    assert any("reading_absolute is missing or empty" in p for p in problems), problems
+    # ...and the anchor itself now runs on the blanked reading, too.
+    assert any("the absolute reading IS that grade" in p for p in problems), problems
+
+
+def test_the_with_aux_arm_must_carry_a_grade_on_the_graded_rung() -> None:
+    report = _report()
+    rung = report["ablation"]["graded_on_rung"]
+    del report["arms"]["aux1.0_lr1e-4"]["grades"][rung]
+    report["ablation"]["reading_absolute"]["passes"] = None
+    report["ablation"]["verdict"] = E.verdict_from_absolute_reading(None)
+    problems = E.d11_grade_problems(report)
+    assert any("has no grade on the graded rung" in p for p in problems), problems
+
+
+def test_an_unfittable_with_aux_arm_is_anchored_to_its_none_grade() -> None:
+    """Positive control for the two checks above: the honest unfittable shape — a grade block
+    whose ``ece`` and pass are ``None``, an absolute reading that records ``None`` and the
+    undecidable verdict — raises neither."""
+    report = _report()
+    rung = report["ablation"]["graded_on_rung"]
+    unfittable = E.grade_arm(_separated_arm(flip_one_calib_row=False), n_boot=10)
+    report["arms"]["aux1.0_lr1e-4"]["grades"][rung] = unfittable["grades"]["test"]
+    report["ablation"]["reading_absolute"]["passes"] = None
+    report["ablation"]["verdict"] = E.verdict_from_absolute_reading(None)
+    assert E.d11_grade_problems(report) == []
+
+
 def test_the_verdict_tracks_the_absolute_reading_in_both_directions() -> None:
     """Sabotage-shaped: a one-sided check would pass for a function that always holds."""
     assert E.verdict_from_absolute_reading(True) == E.VERDICT_HOLDS

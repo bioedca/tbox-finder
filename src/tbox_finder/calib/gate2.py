@@ -1104,7 +1104,7 @@ def derive_clauses(report: Mapping[str, Any]) -> dict[str, bool]:
         # ── the report names the environment the GRADED weights required ──
         "env_lock_is_the_graded_arms": _env_lock_clause(report),
         # ── the published statistics are RE-DERIVED, not read back out ──
-        "in_distribution_ece_is_its_own_reliability_tables_mean": _ece_matches_reliability(ind),
+        "in_distribution_ece_is_its_own_reliability_tables_mean": ece_matches_reliability(ind),
         "ood_macro_average_is_the_admissible_units_mean": _macro_matches_units(ood, units),
         "ood_admissibility_is_the_pinned_min_n_rule": _admissibility_matches_min_n(
             ood, units, scope
@@ -1151,7 +1151,7 @@ def _close(a: Any, b: Any, tol: float = REDERIVATION_TOL) -> bool:
     return math.isclose(fa, fb, rel_tol=tol, abs_tol=tol)
 
 
-def _ece_matches_reliability(ind: Mapping[str, Any]) -> bool:
+def ece_matches_reliability(ind: Mapping[str, Any]) -> bool:
     """The gated ECE is the weighted mean of the report's OWN bins, and the bins cover its n.
 
     Until round 10 the only check on ``gate.ece`` was the 0.05 threshold — i.e. the number was
@@ -1169,6 +1169,13 @@ def _ece_matches_reliability(ind: Mapping[str, Any]) -> bool:
     ``sigma * sqrt(2/pi)``. ``acc``, ``conf`` and ``n`` are the primary evidence and sit in the
     same row, so the gap is recomputed here in closed form from them
     ([[gate-clauses-need-re-derivation]]).
+
+    Public since the PR #144 CodeRabbit CLI review (2026-11-05): the D11 grade that
+    ``stage2.eval.d11_grade_problems`` re-derives carries the same fields and the same table,
+    and that validator had re-derived the pass from ``ece``/``ece_plugin`` without binding
+    either reading to the table, so a consistent edit of the plug-in, the grade, the absolute
+    reading and the verdict validated clean. One implementation serves both reports
+    ([[promote-dont-duplicate-is-a-correctness-rule]]).
     """
     bins = ind.get("reliability")
     if not isinstance(bins, list) or not bins:

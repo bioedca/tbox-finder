@@ -1392,7 +1392,25 @@ def d11_grade_problems(report: Mapping[str, Any]) -> list[str]:
        ``None``, never a boolean;
     2. ``ablation.reading_absolute.passes`` equals the with-aux arm's pass on the graded rung,
        so the verdict that is derived from it is anchored to evidence, not to a stored bool.
+
+    CodeRabbit CLI, PR #144 (2026-11-05, two majors), both reproduced on the committed
+    ``reports/stage2_aux_ablation.json`` before the fix:
+
+    3. check 1 re-derived the pass from ``ece``/``ece_plugin`` but trusted both numbers, so
+       editing the plug-in, the grade, the absolute reading and the verdict together validated
+       clean while the grade's own reliability table still recorded the original gaps. Each
+       fitted grade's two readings are now recomputed from that table's ``n``/``acc``/``conf``
+       by :func:`tbox_finder.calib.gate2.ece_matches_reliability`, the check GATE-2's own
+       report already passes;
+    4. check 2 was skipped when ``reading_absolute`` was empty or null, so blanking it and
+       writing the "undecidable" verdict validated clean beside a definite with-aux grade. The
+       reading must now be present, and the with-aux arm must carry a grade on the graded rung
+       (``grade_arm`` writes one for every graded rung, fitted or not).
     """
+    # Lazy, as gate2's own imports of this module are: gate2 imports `stage2.eval` inside
+    # functions, so a module-level import here would make the pair order-dependent.
+    from tbox_finder.calib import gate2 as G2
+
     problems: list[str] = []
     arms = RSCH.as_mapping(report.get("arms"))
     for arm_name, arm in arms.items():
@@ -1414,6 +1432,13 @@ def d11_grade_problems(report: Mapping[str, Any]) -> list[str]:
                     "are not both finite numbers, and the D11 grade reads both (A18 Pin 2)"
                 )
                 continue
+            if not G2.ece_matches_reliability(block):
+                problems.append(
+                    f"{where}: ece {block.get('ece')!r} / ece_plugin {block.get('ece_plugin')!r} "
+                    "are not the weighted means of the grade's own reliability table (each "
+                    "bin's gap recomputed from its n, acc and conf) — the D11 grade reads both "
+                    "readings (A18 Pin 2), so both must be the table's"
+                )
             expected = M.gate2_ece_pass(block["ece"], ece_plugin=block["ece_plugin"])
             if recorded is not expected:
                 problems.append(
@@ -1429,7 +1454,19 @@ def d11_grade_problems(report: Mapping[str, Any]) -> list[str]:
     rung_block = RSCH.as_mapping(
         RSCH.as_mapping(with_aux.get("grades")).get(rung_key) if isinstance(rung_key, str) else None
     )
-    if absolute and absolute.get("passes") is not rung_block.get("ece_gate_pass"):
+    if not absolute:
+        problems.append(
+            "ablation.reading_absolute is missing or empty — it is the governing reading "
+            f"(ADR-0005 D16) and the verdict is derived from it ({ablation.get('verdict')!r} "
+            "cannot stand on an absent reading)"
+        )
+    if not rung_block:
+        problems.append(
+            f"the with-aux arm {arm_key!r} has no grade on the graded rung {rung_key!r}, so "
+            "the absolute reading has no evidence to be anchored to; grade_arm writes one for "
+            "every graded rung, fitted or not"
+        )
+    elif absolute.get("passes") is not rung_block.get("ece_gate_pass"):
         problems.append(
             f"ablation.reading_absolute.passes = {absolute.get('passes')!r} but the with-aux "
             f"arm's {ablation.get('graded_on_rung')!r} grade records ece_gate_pass = "
