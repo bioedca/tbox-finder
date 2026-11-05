@@ -29,6 +29,7 @@ import numpy as np
 import pytest
 
 from tbox_finder import metrics as M
+from tbox_finder.calib import gate2 as G2
 from tbox_finder.calib import temperature as TEMP
 from tbox_finder.models import rna_backbone_registry as BR
 from tbox_finder.stage2 import eval as E
@@ -915,6 +916,35 @@ def test_an_unfittable_with_aux_arm_is_anchored_to_its_none_grade() -> None:
     report = _report()
     _make_with_aux_unfittable(report)
     assert E.d11_grade_problems(report) == []
+
+
+def test_an_honest_grade_with_tied_posteriors_is_its_own_table() -> None:
+    """End to end (CodeRabbit CLI, PR #145): ties straddling equal-mass boundaries, rows whose
+    block order differs from their row order, and a FITTED arm. ``ece_ci.point`` is computed on
+    the block-reordered sample, so before the label tie-break it could miss the grade's own
+    ``ece`` and the table binding failed an honest grade."""
+    rng = np.random.default_rng(20261105)
+    rungs = ["calib"] * 60 + ["val"] * 6 + ["test"] * 60
+    n = len(rungs)
+    labels = rng.integers(0, 2, size=n).astype(np.int64)
+    # Four logit levels only, label-correlated but noisy: the fit is admissible (rows on the
+    # wrong side of zero) and every level is a tie group with both labels in it.
+    levels = np.asarray([-2.0, -0.5, 0.5, 2.0])
+    pick = np.where(labels == 1, rng.integers(1, 4, size=n), rng.integers(0, 3, size=n))
+    arm = E.ArmScores(
+        arm="tied",
+        row_ids=tuple(f"r{i}" for i in range(n)),
+        logits=levels[pick].astype(np.float64),
+        labels=labels,
+        rungs=tuple(rungs),
+        blocks=tuple(f"cluster:{i % 7}" for i in range(n)),  # interleaved: block != row order
+    )
+    graded = E.grade_arm(arm, n_boot=10)
+    assert graded["calibration"]["fitted"] is True
+    for rung in ("val", "test"):
+        block = graded["grades"][rung]
+        assert block["ece_ci"]["point"] == block["ece"], rung
+        assert G2.ece_matches_reliability(block), rung
 
 
 def test_a_fitted_arm_may_not_drop_its_ece() -> None:
