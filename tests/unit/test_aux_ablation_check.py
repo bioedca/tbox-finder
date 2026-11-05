@@ -774,9 +774,12 @@ def test_the_absolute_reading_is_anchored_to_the_with_aux_grade() -> None:
 
 def test_an_arm_with_no_ece_may_not_record_a_grade() -> None:
     report = _report()
+    # A null ECE is honest only on an arm whose fit was refused (PR #145), so the clean half
+    # of this test carries that arm's real calibration shape, not a fitted one.
+    report["arms"]["aux0.0_lr1e-4"]["calibration"].update(fitted=False, temperature=None)
+    for other in report["arms"]["aux0.0_lr1e-4"]["grades"].values():  # every rung, as grade_arm
+        other["ece"], other["ece_gate_pass"] = None, None
     block = report["arms"]["aux0.0_lr1e-4"]["grades"]["test"]
-    block["ece"] = None
-    block["ece_gate_pass"] = None
     assert not any("aux0.0_lr1e-4" in p for p in E.d11_grade_problems(report))
     block["ece_gate_pass"] = False
     assert any("UNGRADEABLE" in p and "aux0.0_lr1e-4" in p for p in E.d11_grade_problems(report))
@@ -868,16 +871,26 @@ def test_a_blanked_absolute_reading_cannot_carry_an_undecidable_verdict(blank: A
     assert any("the absolute reading IS that grade" in p for p in problems), problems
 
 
+def _make_with_aux_unfittable(report: dict[str, Any]) -> None:
+    """Swap in the with-aux arm's honest unfittable shape: the refused calibration AND the
+    null grade ``grade_arm`` writes beside it, the reading's ``None`` and the verdict."""
+    rung = report["ablation"]["graded_on_rung"]
+    unfittable = E.grade_arm(_separated_arm(flip_one_calib_row=False), n_boot=10)
+    report["arms"]["aux1.0_lr1e-4"]["calibration"] = unfittable["calibration"]
+    report["arms"]["aux1.0_lr1e-4"]["grades"] = {
+        r: unfittable["grades"]["test"] for r in report["arms"]["aux1.0_lr1e-4"]["grades"]
+    }
+    assert rung in report["arms"]["aux1.0_lr1e-4"]["grades"]
+    report["ablation"]["reading_absolute"]["passes"] = None
+    report["ablation"]["verdict"] = E.verdict_from_absolute_reading(None)
+
+
 def test_an_absolute_reading_without_passes_is_refused_even_when_the_grade_is_none() -> None:
     """CodeRabbit CLI, PR #145 (minor): with an unfittable with-aux arm the grade is ``None``,
     so a reading that DROPPED ``passes`` compared equal to it through ``.get`` and validated.
     The producer always records the key, so its absence is the forgery."""
     report = _report()
-    rung = report["ablation"]["graded_on_rung"]
-    unfittable = E.grade_arm(_separated_arm(flip_one_calib_row=False), n_boot=10)
-    report["arms"]["aux1.0_lr1e-4"]["grades"][rung] = unfittable["grades"]["test"]
-    report["ablation"]["reading_absolute"]["passes"] = None
-    report["ablation"]["verdict"] = E.verdict_from_absolute_reading(None)
+    _make_with_aux_unfittable(report)
     assert E.d11_grade_problems(report) == [], "positive control: the key present as None"
     del report["ablation"]["reading_absolute"]["passes"]
     assert report["ablation"]["reading_absolute"], "the reading is non-empty; only the key is gone"
@@ -900,12 +913,42 @@ def test_an_unfittable_with_aux_arm_is_anchored_to_its_none_grade() -> None:
     whose ``ece`` and pass are ``None``, an absolute reading that records ``None`` and the
     undecidable verdict — raises neither."""
     report = _report()
+    _make_with_aux_unfittable(report)
+    assert E.d11_grade_problems(report) == []
+
+
+def test_a_fitted_arm_may_not_drop_its_ece() -> None:
+    """CodeRabbit app, PR #145 (major): nulling a FITTED arm's ece and pass, with the reading,
+    the verdict and the re-derived gate made to agree, turned a definite grade into
+    "undecidable" with zero problems on both committed P3-08 reports."""
+    report = _report()
     rung = report["ablation"]["graded_on_rung"]
-    unfittable = E.grade_arm(_separated_arm(flip_one_calib_row=False), n_boot=10)
-    report["arms"]["aux1.0_lr1e-4"]["grades"][rung] = unfittable["grades"]["test"]
+    assert report["arms"]["aux1.0_lr1e-4"]["calibration"]["fitted"] is True
+    block = report["arms"]["aux1.0_lr1e-4"]["grades"][rung]
+    block["ece"], block["ece_gate_pass"] = None, None
     report["ablation"]["reading_absolute"]["passes"] = None
     report["ablation"]["verdict"] = E.verdict_from_absolute_reading(None)
-    assert E.d11_grade_problems(report) == []
+    recomputed = E.derive_clauses(report)
+    report["gate"]["clauses"] = {k: recomputed[k] for k in report["gate"]["clauses"]}
+    report["gate"]["overall_pass"] = all(report["gate"]["clauses"].values())
+    problems = E.validate_report(report)
+    assert any(
+        "aux1.0_lr1e-4" in p and "ece is None" in p and "fitted=True" in p for p in problems
+    ), problems
+    # Nothing ELSE caught it: the anchor, the verdict and the gate were all made consistent.
+    assert not any("IS that grade" in p or "derived, not assignable" in p for p in problems)
+    assert not any("gate.clauses" in p or "overall_pass" in p for p in problems), problems
+
+
+def test_an_unfitted_arm_may_not_carry_a_gated_ece() -> None:
+    """The converse: an ECE beside a refused fit is a substituted number (§10.3) — the T = 1
+    default the P3-08 refusal exists to prevent."""
+    report = _report()
+    report["arms"]["aux0.0_lr1e-4"]["calibration"].update(fitted=False, temperature=None)
+    problems = E.d11_grade_problems(report)
+    assert any(
+        "aux0.0_lr1e-4" in p and "a gated ECE needs a fitted temperature" in p for p in problems
+    ), problems
 
 
 def test_the_verdict_tracks_the_absolute_reading_in_both_directions() -> None:

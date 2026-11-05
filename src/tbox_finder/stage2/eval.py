@@ -1415,18 +1415,40 @@ def d11_grade_problems(report: Mapping[str, Any]) -> list[str]:
     problems: list[str] = []
     arms = RSCH.as_mapping(report.get("arms"))
     for arm_name, arm in arms.items():
+        # An ECE exists exactly when a temperature does: `grade_arm` writes `fitted: False`
+        # with a null temperature for a refused fit, and a finite ECE on every graded rung
+        # otherwise. Without this, nulling a FITTED arm's ece and pass (plus the reading and
+        # verdict) turned a definite grade into "undecidable" with zero problems
+        # (CodeRabbit app, PR #145, major).
+        calibration = RSCH.as_mapping(RSCH.as_mapping(arm).get("calibration"))
+        unfitted = calibration.get("fitted") is False and calibration.get("temperature") is None
+        fitted = calibration.get("fitted") is True and _finite(calibration.get("temperature"))
         grades = RSCH.as_mapping(RSCH.as_mapping(arm).get("grades"))
         for rung, block in grades.items():
             block = RSCH.as_mapping(block)
             where = f"arms[{arm_name!r}].grades[{rung!r}]"
             recorded = block.get("ece_gate_pass")
             if block.get("ece") is None:
+                if not unfitted:
+                    problems.append(
+                        f"{where}.ece is None but the arm's calibration records fitted="
+                        f"{calibration.get('fitted')!r}, temperature="
+                        f"{calibration.get('temperature')!r} — only an arm whose temperature "
+                        "fit was refused has no ECE (ADR-0005 A18 Pin 1)"
+                    )
                 if recorded is not None:
                     problems.append(
                         f"{where}.ece_gate_pass = {recorded!r} but the arm has no ECE — an "
                         "unfittable arm is UNGRADEABLE (ADR-0005 A18 Pin 1), not graded"
                     )
                 continue
+            if not fitted:
+                problems.append(
+                    f"{where}.ece = {block.get('ece')!r} but the arm's calibration records "
+                    f"fitted={calibration.get('fitted')!r}, temperature="
+                    f"{calibration.get('temperature')!r} — a gated ECE needs a fitted "
+                    "temperature, and one without it is a substituted number (§10.3)"
+                )
             if not (_finite(block.get("ece")) and _finite(block.get("ece_plugin"))):
                 problems.append(
                     f"{where}: ece {block.get('ece')!r} / ece_plugin {block.get('ece_plugin')!r} "
