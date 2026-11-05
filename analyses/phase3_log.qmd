@@ -9514,3 +9514,46 @@ No report was regenerated, and `gate2.SCHEMA_VERSION` stays "3": the clause key 
 **Decisions.** The aux re-derivation test sets each reading explicitly rather than nudging the fixture's own values. The 31-row synthetic with-aux arm fails the conjunct on noise (debiased 0.0728, plug-in 0.301), so a test written for "a pass whose plug-in moves past the gate" had to forge that pass. Leaning on the fixture would have tested nothing.
 
 **Commit.** This stanza is written on branch `p3-exit-b-decisions`. The P3-exit gate derives its `main` mapping (header rule).
+
+## Step P3-exit-b (CodeRabbit CLI round) — 2026-11-05: the D11 grade is bound to its own reliability table, and a blanked absolute reading is refused
+
+**Inputs.** The CodeRabbit CLI review of the merged P3-exit-b squash, run once the CLI's authentication was restored (`coderabbit review --committed --base-commit f318c56`, CLI 0.9.2). Round 1 of PR #144 had been reviewed by the GitHub app only. The CLI returned **two majors**, both in `stage2/eval.py::d11_grade_problems`, the validator added at round 1.
+
+**Process.** Each finding was reproduced on the committed `reports/stage2_aux_ablation.json` before anything was changed, and each forgery validated with **zero problems**:
+
+- **(major) The readings were trusted.** Check 1 re-derived `ece_gate_pass` from `ece` and `ece_plugin` but never checked either number against the evidence. Lowering the with-aux plug-in and rewriting the grade, the absolute reading and the verdict to agree validated clean, while the grade's own reliability table still recorded the original gaps. GATE-2's report has had exactly this binding since P3-17 round 10 (`in_distribution_ece_is_its_own_reliability_tables_mean`). The fix reuses it rather than copying it: `gate2._ece_matches_reliability` is now the public `ece_matches_reliability`, and `d11_grade_problems` applies it to every fitted grade, recomputing both readings in closed form from each bin's `n`, `acc` and `conf`.
+- **(major) The anchor was skipped on an absent reading.** The condition `if absolute and …` skipped the anchor whenever `reading_absolute` was `{}` or null. Blanking it and writing the "undecidable" verdict therefore validated beside a definite with-aux grade. The reading must now be present. The with-aux arm must also carry a grade on the graded rung, since `grade_arm` writes one for every graded rung, fitted or not. With both in place, the anchor runs unconditionally.
+
+**Outputs.**
+
+- `src/tbox_finder/{calib/gate2.py, stage2/eval.py}`.
+- Five new tests in `tests/unit/test_aux_ablation_check.py`. The blanked-reading test is parametrized over `{}` and null, so it collects six cases.
+- No report is regenerated and no verdict moves.
+
+**Validation.**
+
+- Both committed P3-08 reports (`stage2_aux_ablation.json`, `p3/stage2_rnafm_eval.json`) still validate with `[]`. Each of the CLI's forgeries now returns at least one problem.
+- Affected suites: 515 passed, 4 skipped. The skips are sklearn, which is not in this env.
+- **Seven sabotages**, each RED against its named test, each restore byte-verified:
+  - four remove a guard: the table binding, the presence check, the missing-grade check, and the reinstated `absolute and` skip;
+  - three make a guard fire on everything: the table binding, the presence check and the missing-grade check, each caught by the committed-report and unfittable-arm positive controls.
+- ruff and black (CI-pinned) are clean.
+
+**Decisions.** The new presence checks are safe for an unfittable with-aux arm: its grade block exists with `ece` and the pass both `None`, and its reading records `None`. A positive-control test pins that shape, so an arm with no temperature stays UNGRADEABLE (A18 Pin 1) rather than becoming a validation failure. The table check is shared with GATE-2 rather than reimplemented, so the two reports cannot drift apart ([[promote-dont-duplicate-is-a-correctness-rule]]).
+
+**Commit.** This stanza is written on branch `p3-exit-b-cli-r1`. The P3-exit gate derives its `main` mapping (header rule).
+
+**CLI round on PR #145 (minor, fixed).** The CLI's review of `3ff277d` found that the presence check tested the mapping's truthiness, not its key. A non-empty `reading_absolute` that dropped `passes` read as `None` through `.get` and compared equal to an unfittable arm's `None` grade, so it validated. The check now requires the `passes` key itself; the producer always records it, even as `None`. One new test pins this. It has a positive control (the key present as `None` is clean), and it goes RED when the truthiness check is reinstated, while the blanked-reading tests correctly stay green. The affected suites pass (500), both committed reports still validate `[]`, and ruff and black are clean.
+
+**App round on PR #145 (major, fixed).** The GitHub app's review of `3ff277d` repeated the `passes` minor, already fixed in `157cccc`. It also raised a major outside the diff: a null `ece` skipped every check, because only a boolean pass beside it was refused. Nulling a *fitted* with-aux arm's `ece` and pass, then making the reading, the verdict and the re-derived gate clauses agree, turned its definite grade into "undecidable" with **zero problems** on both committed P3-08 reports (reproduced before the fix). `d11_grade_problems` now binds the ECE to the arm's calibration in both directions: a null ECE is accepted only beside `fitted: False` with a null temperature, which is exactly the shape `grade_arm` writes for a refused fit, and a numeric ECE requires a fitted, finite temperature. That second direction refuses the substituted-`T` number §10.3 forbids.
+
+- **Tests:** two new tests. Three existing tests that nulled a fitted arm's ECE now carry the arm's real refused-fit calibration through a shared `_make_with_aux_unfittable` helper, so they assert the honest shape rather than an impossible one.
+- **Sabotages:** five, each RED and each restore verified: the two removals, a loosened unfitted predicate, and two over-fires caught by the positive controls.
+- **Checks:** affected suites 515 passed and 4 skipped; both committed reports validate `[]`; ruff and black are clean. The CLI's round on `157cccc` returned **0 findings**.
+
+**CLI round on `a2fa8e7` (minor, fixed in the shared kernel).**
+
+- **The finding:** `metrics.reliability_bins` sorted on the posterior alone, so tied rows stayed in input order. Both producers evaluate `ece_ci`'s point on the *block-reordered* sample (`eval/resample.py::block_bootstrap` flattens the blocks), so tied posteriors with different labels straddling an equal-mass boundary could make `ece_ci.point` disagree with the grade's own `ece`. The table binding would then have failed an honest grade. That would have been a false failure, not a false pass. The exposure predates this PR: GATE-2's binding has compared `ece_ci.point` to `ece` since P3-17 round 10.
+- **The fix:** ties are now broken by label, so the bins, and with them both readings and the diagram, are a function of the `(p, y)` multiset and not of row order.
+- **Measured first:** no ECE moves on any committed score file. Across 576 cells (four score files × arms × the four recorded temperatures × rungs or leave-clade-out units × both readings), every value is bit-identical; the largest tie group in the real data is 3. No committed number changes, and D11's estimator (equal-mass / 15 / debiased) and A18 Pin 2's formula are untouched. Only the previously unspecified order among tied rows is now fixed.
+- **Tests:** a kernel test on the reviewer's own example (hand-computed plug-in 0.325, where input order alone gave 0.175) plus a heavy-tie permutation check, and an end-to-end test that an honest *fitted* grade with tied posteriors and interleaved blocks is its own table. Both go RED under the old kernel.

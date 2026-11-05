@@ -574,7 +574,8 @@ def reliability_bins(
     n_bins: int = ECE_N_BINS,
 ) -> list[dict]:
     """The per-bin reliability table underlying :func:`binned_ece` — one row per non-empty
-    **equal-mass** bin, in ascending-confidence order (ADR-0005 D11).
+    **equal-mass** bin, in ascending-confidence order (ADR-0005 D11). Invariant to row order:
+    tied posteriors are ordered by label (negatives first) before slicing.
 
     Each row carries ``{n, weight, p_min, p_max, conf, acc, gap, debiased_gap}``: ``conf``
     is the mean posterior in the bin, ``acc`` the observed positive rate, ``gap``
@@ -594,7 +595,14 @@ def reliability_bins(
     n = len(p_pos)
     if n == 0:
         return []
-    order = sorted(range(n), key=lambda k: p_pos[k])
+    # Ties are broken by LABEL, so the bins are a function of the (p, y) multiset and never
+    # of row order (CodeRabbit CLI, PR #145). Sorting on `p` alone left tied rows in input
+    # order, so tied posteriors with different labels straddling a bin boundary binned
+    # differently under the block-reordered sample `block_bootstrap_ci` evaluates its point
+    # on, and a grade's `ece_ci.point` could disagree with its own `ece`. Measured before the
+    # change: no ECE moves on any committed score file (576 arm × temperature × rung × reading
+    # cells, largest tie group 3), so no committed number is affected.
+    order = sorted(range(n), key=lambda k: (p_pos[k], y_true[k]))
     rows: list[dict] = []
     for b in _array_split(order, n_bins):
         if not b:

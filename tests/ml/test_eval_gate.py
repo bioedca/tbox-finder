@@ -157,6 +157,36 @@ def test_binned_ece_plugin_and_debias() -> None:
     assert 0.0 <= deb <= plug
 
 
+def test_the_binning_is_invariant_to_row_order_when_posteriors_tie() -> None:
+    """CodeRabbit CLI, PR #145: tied posteriors with different labels straddling an equal-mass
+    boundary were binned in INPUT order, so ``block_bootstrap_ci``'s point — computed on the
+    block-reordered rows — could disagree with the grade's own ``ece``."""
+    # The reviewer's case, (p, y, block) = (0.2,0,A) (0.5,1,B) (0.5,0,A) (0.9,1,B), n_bins = 2.
+    y, p = [0, 1, 0, 1], [0.2, 0.5, 0.5, 0.9]
+    blockwise = [0, 2, 1, 3]  # block A's rows, then block B's
+    y_b, p_b = [y[i] for i in blockwise], [p[i] for i in blockwise]
+    assert M.reliability_bins(y, p, 2) == M.reliability_bins(y_b, p_b, 2)
+    for debias in (True, False):
+        assert M.binned_ece(y, p, 2, debias=debias) == M.binned_ece(y_b, p_b, 2, debias=debias)
+    # Hand-computed, independent of the kernel: bins {(0.2,0),(0.5,0)} and {(0.5,1),(0.9,1)},
+    # gaps |0 - 0.35| and |1 - 0.7| at weight 1/2 each -> plug-in 0.325. (Input order alone
+    # gave bins {(0.2,0),(0.5,1)} and {(0.5,0),(0.9,1)} -> 0.175.)
+    assert M.binned_ece(y, p, 2, debias=False) == pytest.approx(0.325)
+    # Heavy ties: every permutation gives the identical table and both readings, exactly.
+    rng = random.Random(20261105)
+    y = [rng.randint(0, 1) for _ in range(300)]
+    p = [rng.choice((0.1, 0.4, 0.4, 0.7, 1.0)) for _ in range(300)]
+
+    def readings(yy: list[int], pp: list[float]) -> tuple:
+        return M.reliability_bins(yy, pp), M.binned_ece(yy, pp), M.binned_ece(yy, pp, debias=False)
+
+    reference = readings(y, p)
+    for _ in range(20):
+        perm = list(range(300))
+        rng.shuffle(perm)
+        assert readings([y[i] for i in perm], [p[i] for i in perm]) == reference
+
+
 def test_gate_predicates_both_directions() -> None:
     # GATE-4
     assert M.gate4_pass(0.81) is True
