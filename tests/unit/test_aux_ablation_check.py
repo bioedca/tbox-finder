@@ -868,6 +868,23 @@ def test_a_blanked_absolute_reading_cannot_carry_an_undecidable_verdict(blank: A
     assert any("the absolute reading IS that grade" in p for p in problems), problems
 
 
+def test_an_absolute_reading_without_passes_is_refused_even_when_the_grade_is_none() -> None:
+    """CodeRabbit CLI, PR #145 (minor): with an unfittable with-aux arm the grade is ``None``,
+    so a reading that DROPPED ``passes`` compared equal to it through ``.get`` and validated.
+    The producer always records the key, so its absence is the forgery."""
+    report = _report()
+    rung = report["ablation"]["graded_on_rung"]
+    unfittable = E.grade_arm(_separated_arm(flip_one_calib_row=False), n_boot=10)
+    report["arms"]["aux1.0_lr1e-4"]["grades"][rung] = unfittable["grades"]["test"]
+    report["ablation"]["reading_absolute"]["passes"] = None
+    report["ablation"]["verdict"] = E.verdict_from_absolute_reading(None)
+    assert E.d11_grade_problems(report) == [], "positive control: the key present as None"
+    del report["ablation"]["reading_absolute"]["passes"]
+    assert report["ablation"]["reading_absolute"], "the reading is non-empty; only the key is gone"
+    problems = E.d11_grade_problems(report)
+    assert any("records no `passes`" in p for p in problems), problems
+
+
 def test_the_with_aux_arm_must_carry_a_grade_on_the_graded_rung() -> None:
     report = _report()
     rung = report["ablation"]["graded_on_rung"]

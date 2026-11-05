@@ -1404,7 +1404,8 @@ def d11_grade_problems(report: Mapping[str, Any]) -> list[str]:
        report already passes;
     4. check 2 was skipped when ``reading_absolute`` was empty or null, so blanking it and
        writing the "undecidable" verdict validated clean beside a definite with-aux grade. The
-       reading must now be present, and the with-aux arm must carry a grade on the graded rung
+       reading must now be present and record ``passes`` (the key itself, PR #145 CLI: a
+       dropped key reads as ``None``), and the with-aux arm must carry a grade on the graded rung
        (``grade_arm`` writes one for every graded rung, fitted or not).
     """
     # Lazy, as gate2's own imports of this module are: gate2 imports `stage2.eval` inside
@@ -1454,9 +1455,13 @@ def d11_grade_problems(report: Mapping[str, Any]) -> list[str]:
     rung_block = RSCH.as_mapping(
         RSCH.as_mapping(with_aux.get("grades")).get(rung_key) if isinstance(rung_key, str) else None
     )
-    if not absolute:
+    # The KEY, not truthiness: the producer records `passes` even when it is None (an
+    # unfittable with-aux arm), and `.get` would read a dropped key as that same None
+    # (CodeRabbit CLI, PR #145).
+    if "passes" not in absolute:
         problems.append(
-            "ablation.reading_absolute is missing or empty — it is the governing reading "
+            "ablation.reading_absolute is missing or empty, or records no `passes` — it is "
+            "the governing reading "
             f"(ADR-0005 D16) and the verdict is derived from it ({ablation.get('verdict')!r} "
             "cannot stand on an absent reading)"
         )
